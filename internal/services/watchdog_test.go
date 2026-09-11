@@ -225,7 +225,7 @@ COMMIT
 `
 	saveBin, delBin, logPath := installFakeIptables(t, saveOutput)
 
-	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
+	removed, ok, _ := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -262,7 +262,7 @@ COMMIT
 `
 	saveBin, delBin, logPath := installFakeIptables(t, saveOutput)
 
-	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
+	removed, ok, _ := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -294,7 +294,7 @@ COMMIT
 `
 	saveBin, delBin, logPath := installFakeIptables(t, saveOutput)
 
-	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
+	removed, ok, _ := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -317,7 +317,7 @@ COMMIT
 `
 	saveBin, delBin, logPath := installFakeIptables(t, saveOutput)
 
-	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
+	removed, ok, _ := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -334,7 +334,7 @@ COMMIT
 // so the circuit breaker can retry on a later qualifying health check
 // instead of silently giving up after one transient failure.
 func TestWatchdogService_EmergencyDisarmTProxy_FailureDoesNotLatch(t *testing.T) {
-	removed, ok := disarmTProxyFamily(context.Background(), "nonexistent-iptables-save", "iptables", []string{"-w", "5"})
+	removed, ok, _ := disarmTProxyFamily(context.Background(), "nonexistent-iptables-save", "iptables", []string{"-w", "5"})
 	if removed != 0 {
 		t.Fatalf("expected 0 rules removed when iptables-save is unavailable, got %d", removed)
 	}
@@ -350,7 +350,7 @@ func TestWatchdogService_EmergencyDisarmTProxy_FailureDoesNotLatch(t *testing.T)
 	if err := os.WriteFile(failingSave, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	_, ok = disarmTProxyFamily(context.Background(), failingSave, "iptables", []string{"-w", "5"})
+	_, ok, _ = disarmTProxyFamily(context.Background(), failingSave, "iptables", []string{"-w", "5"})
 	if ok {
 		t.Fatalf("expected ok=false when %s exits non-zero", failingSave)
 	}
@@ -544,7 +544,7 @@ COMMIT
 `
 	saveBin, delBin, logPath := installFakeIptables(t, saveOutput)
 
-	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
+	removed, ok, _ := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -799,7 +799,7 @@ COMMIT
 		Dialect:     dialectWaitSeconds,
 	})
 
-	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
+	removed, ok, _ := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
 	if !ok {
 		t.Fatal("expected ok=true after second pass cleared the rule")
 	}
@@ -851,7 +851,7 @@ func TestDisarmTProxyFamily_ThreePhysicalDuplicatesFullyCleared(t *testing.T) {
 		Dialect:     dialectWaitSeconds,
 	})
 
-	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
+	removed, ok, _ := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
 	if !ok {
 		t.Fatal("expected ok=true once all 3 physical duplicates are cleared across passes")
 	}
@@ -879,7 +879,7 @@ func TestDisarmTProxyFamily_MissingIP6Tables(t *testing.T) {
 	missingSave := filepath.Join(tmpDir, "nonexistent-ip6tables-save")
 	missingDel := filepath.Join(tmpDir, "nonexistent-ip6tables")
 
-	removed, ok := disarmTProxyFamily(context.Background(), missingSave, missingDel, []string{"-w", "5"})
+	removed, ok, _ := disarmTProxyFamily(context.Background(), missingSave, missingDel, []string{"-w", "5"})
 	if removed != 0 {
 		t.Fatalf("expected removed=0 for missing binary, got %d", removed)
 	}
@@ -1266,4 +1266,208 @@ func TestWatchdogService_CheckHealth_EpochDiscardsStaleInFlightDisarm(t *testing
 	}
 
 	w.Stop()
+}
+
+func waitDisarmSettled(t *testing.T, w *WatchdogService) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		w.mu.Lock()
+		inFlight := w.disarmInFlight
+		w.mu.Unlock()
+		if !inFlight {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for in-flight disarm to settle")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestWatchdogService_GracePeriod(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+
+	// Test 1: Service created without Start() (startedAt is zero).
+	// 3 consecutive failures immediately trigger disarm attempt (existing behavior preserved).
+	w1 := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	saveBin, delBin, _ := installFakeIptables(t, "*mangle\nCOMMIT\n")
+	w1.iptablesSaveBin = saveBin
+	w1.iptablesBin = delBin
+	w1.ip6tablesSaveBin = saveBin
+	w1.ip6tablesBin = delBin
+
+	for i := 0; i < watchdogMaxFailures; i++ {
+		w1.CheckHealth()
+	}
+	waitDisarmSettled(t, w1)
+	if w1.Snapshot().State != WatchdogStateDisarmed {
+		t.Fatalf("expected unstarted watchdog to trigger disarm immediately upon 3 failures, got state %q", w1.Snapshot().State)
+	}
+
+	// Test 2: Service started via Start(). Simulated clock starts at t0.
+	w2 := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w2.iptablesSaveBin = saveBin
+	w2.iptablesBin = delBin
+	w2.ip6tablesSaveBin = saveBin
+	w2.ip6tablesBin = delBin
+
+	simTime := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	w2.now = func() time.Time { return simTime }
+
+	w2.Start()
+	defer w2.Stop()
+
+	// Wait for the immediate first check from Start()
+	deadline := time.Now().Add(1 * time.Second)
+	for w2.ConsecutiveFailures() < 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for initial health check")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Health check failures within 90s (e.g. at t0 + 10s and t0 + 20s)
+	simTime = simTime.Add(10 * time.Second)
+	w2.CheckHealth()
+	simTime = simTime.Add(10 * time.Second)
+	w2.CheckHealth()
+
+	if got := w2.ConsecutiveFailures(); got != 3 {
+		t.Fatalf("expected 3 consecutive failures during grace period, got %d", got)
+	}
+	waitDisarmSettled(t, w2)
+	if w2.Snapshot().State != WatchdogStateArmed {
+		t.Fatalf("expected state to remain armed during grace period, got %q", w2.Snapshot().State)
+	}
+	w2.mu.Lock()
+	inFlight := w2.disarmInFlight
+	disarmed := w2.disarmed
+	w2.mu.Unlock()
+	if inFlight || disarmed {
+		t.Fatalf("expected no disarm attempt triggered within grace period (inFlight=%v, disarmed=%v)", inFlight, disarmed)
+	}
+
+	// Test 3: Advance clock past grace period (> 90s, e.g. t0 + 95s).
+	// Next failed check should trigger disarm!
+	simTime = simTime.Add(75 * time.Second) // total t0 + 95s
+	w2.CheckHealth()
+	waitDisarmSettled(t, w2)
+	if w2.Snapshot().State != WatchdogStateDisarmed {
+		t.Fatalf("expected state to become disarmed after grace period expires, got %q", w2.Snapshot().State)
+	}
+}
+
+func TestWatchdogService_BackoffGrid(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+
+	saveOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	// Config with DeleteFailure so disarm always fails (returns DisarmFailed)
+	saveBin, delBin, _ := installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs:   []string{saveOutput},
+		Dialect:       dialectWaitSeconds,
+		DeleteFailure: "failed to delete rule",
+	})
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	t0 := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	currTime := t0
+	w.now = func() time.Time { return currTime }
+
+	// Trip circuit breaker with 3 failures
+	for i := 0; i < watchdogMaxFailures; i++ {
+		w.CheckHealth()
+	}
+	waitDisarmSettled(t, w)
+
+	// Attempt 1 happened at t0
+	snap := w.Snapshot()
+	if snap.DisarmAttempts != 1 {
+		t.Fatalf("expected 1 disarm attempt, got %d", snap.DisarmAttempts)
+	}
+	expectedNext1 := t0.Add(30 * time.Second)
+	if !snap.NextAttemptAt.Equal(expectedNext1) {
+		t.Fatalf("expected next attempt at %v, got %v", expectedNext1, snap.NextAttemptAt)
+	}
+
+	// Test 4: check before 30s (e.g. +10s) -> should NOT trigger attempt
+	currTime = t0.Add(10 * time.Second)
+	w.CheckHealth()
+	waitDisarmSettled(t, w)
+	if w.Snapshot().DisarmAttempts != 1 {
+		t.Fatalf("check before backoff interval must not trigger attempt, got %d attempts", w.Snapshot().DisarmAttempts)
+	}
+
+	// Test 4 cont: check after 30s (at +30s) -> should trigger Attempt 2
+	currTime = t0.Add(30 * time.Second)
+	w.CheckHealth()
+	waitDisarmSettled(t, w)
+	snap = w.Snapshot()
+	if snap.DisarmAttempts != 2 {
+		t.Fatalf("expected 2 disarm attempts at +30s, got %d", snap.DisarmAttempts)
+	}
+	expectedNext2 := currTime.Add(time.Minute) // t0 + 30s + 1m = t0 + 1m30s
+	if !snap.NextAttemptAt.Equal(expectedNext2) {
+		t.Fatalf("expected next attempt at %v, got %v", expectedNext2, snap.NextAttemptAt)
+	}
+
+	// Attempt 3: at +1m30s (t0 + 90s)
+	currTime = expectedNext2
+	w.CheckHealth()
+	waitDisarmSettled(t, w)
+	snap = w.Snapshot()
+	if snap.DisarmAttempts != 3 {
+		t.Fatalf("expected 3 disarm attempts, got %d", snap.DisarmAttempts)
+	}
+	expectedNext3 := currTime.Add(2 * time.Minute) // t0 + 1m30s + 2m = t0 + 3m30s
+	if !snap.NextAttemptAt.Equal(expectedNext3) {
+		t.Fatalf("expected next attempt at %v, got %v", expectedNext3, snap.NextAttemptAt)
+	}
+
+	// Attempt 4: at +3m30s (t0 + 210s)
+	currTime = expectedNext3
+	w.CheckHealth()
+	waitDisarmSettled(t, w)
+	snap = w.Snapshot()
+	if snap.DisarmAttempts != 4 {
+		t.Fatalf("expected 4 disarm attempts, got %d", snap.DisarmAttempts)
+	}
+	expectedNext4 := currTime.Add(5 * time.Minute) // t0 + 3m30s + 5m = t0 + 8m30s
+	if !snap.NextAttemptAt.Equal(expectedNext4) {
+		t.Fatalf("expected next attempt at %v, got %v", expectedNext4, snap.NextAttemptAt)
+	}
+
+	// Test 6: IPv4 succeeds, IPv6 fails -> lastDisarmError contains "IPv4 disarmed" and "IPv6 failed"
+	cleanSave, cleanDel, _ := installFakeIptables(t, "*mangle\nCOMMIT\n")
+	w.iptablesSaveBin = cleanSave
+	w.iptablesBin = cleanDel
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	outcome := w.EmergencyDisarmTProxy()
+	if outcome != DisarmFailed {
+		t.Fatalf("expected DisarmFailed when IPv6 fails, got %v", outcome)
+	}
+	lastErr := w.Snapshot().LastDisarmError
+	if !strings.Contains(lastErr, "IPv4 disarmed") || !strings.Contains(lastErr, "IPv6 failed") {
+		t.Fatalf("expected LastDisarmError to contain 'IPv4 disarmed' and 'IPv6 failed', got: %q", lastErr)
+	}
 }

@@ -38,6 +38,28 @@ const disarmedRecheckInterval = 5
 // watchdogResetCooldown is the minimum interval between manual watchdog resets.
 const watchdogResetCooldown = 5 * time.Second
 
+// watchdogBackoffGrid defines the retry backoff sequence after failed disarm attempts (D-10, D-35).
+var watchdogBackoffGrid = []time.Duration{
+	30 * time.Second,
+	time.Minute,
+	2 * time.Minute,
+	5 * time.Minute,
+	15 * time.Minute,
+}
+
+const (
+	// watchdogMaxDisarmAttempts is the maximum number of consecutive failed
+	// disarm attempts before entering degraded state (D-11).
+	watchdogMaxDisarmAttempts = 5
+
+	// watchdogStartGracePeriod is the window after Start() during which
+	// emergency disarm is suppressed to allow cold boot / deployment (D-05, D-40).
+	watchdogStartGracePeriod = 90 * time.Second
+
+	// watchdogDisarmTimeout is the overall context timeout for an EmergencyDisarmTProxy operation (D-14).
+	watchdogDisarmTimeout = 20 * time.Second
+)
+
 // Sentinel errors returned by TryReset.
 var (
 	ErrWatchdogResetInFlight = errors.New("watchdog disarm in flight")
@@ -79,6 +101,9 @@ type WatchdogService struct {
 	stopOnce sync.Once
 	wg       sync.WaitGroup
 
+	now       func() time.Time
+	startedAt time.Time
+
 	mu                     sync.Mutex
 	consecutiveFailures    int
 	disarmed               bool
@@ -110,11 +135,26 @@ func NewWatchdogService(xkeenSvc *XKeenService, mihomoDir, xrayDir string) *Watc
 		mihomoDir: mihomoDir,
 		xrayDir:   xrayDir,
 		stopCh:    make(chan struct{}),
+		now:       time.Now,
 	}
+}
+
+// inGraceLocked reports whether the service is within its start grace period.
+// Returns false if startedAt is zero (service not started via Start()).
+// Must be called with w.mu held.
+func (w *WatchdogService) inGraceLocked() bool {
+	if w.startedAt.IsZero() {
+		return false
+	}
+	return w.now().Sub(w.startedAt) < watchdogStartGracePeriod
 }
 
 // Start launches the background health-check loop.
 func (w *WatchdogService) Start() {
+	w.mu.Lock()
+	w.startedAt = w.now()
+	w.mu.Unlock()
+
 	w.wg.Add(1)
 	go w.loop()
 }
@@ -249,7 +289,14 @@ func (w *WatchdogService) CheckHealth() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if w.consecutiveFailures >= watchdogMaxFailures && !w.disarmed && !w.disarmInFlight {
+	canDisarm := w.consecutiveFailures >= watchdogMaxFailures &&
+		!w.disarmed &&
+		!w.disarmInFlight &&
+		w.degradedAt.IsZero() &&
+		!w.inGraceLocked() &&
+		!w.now().Before(w.nextDisarmAttempt)
+
+	if canDisarm {
 		w.disarmInFlight = true
 		epoch := w.disarmEpoch
 		log.Printf("Watchdog: %d consecutive kernel failures — triggering emergency TPROXY disarm", w.consecutiveFailures)
@@ -266,10 +313,28 @@ func (w *WatchdogService) CheckHealth() {
 			// If the kernel recovered and subsequently failed again, this previous attempt's
 			// outcome is stale and must not block the new failure cycle from disarming (CR-01).
 			if epoch == w.disarmEpoch {
-				w.disarmed = (outcome != DisarmFailed)
-				w.interceptionActive = (outcome == DisarmFailed)
 				if outcome != DisarmFailed {
+					w.disarmed = true
+					w.interceptionActive = false
 					w.interceptionFamily = ""
+					w.disarmAttempts = 0
+					w.nextDisarmAttempt = time.Time{}
+					w.lastDisarmError = ""
+				} else {
+					w.disarmed = false
+					w.interceptionActive = true
+					w.disarmAttempts++
+					if w.disarmAttempts < watchdogMaxDisarmAttempts {
+						w.nextDisarmAttempt = w.now().Add(watchdogBackoffGrid[w.disarmAttempts-1])
+						log.Printf("Watchdog: EmergencyDisarmTProxy failed (attempt %d/%d) — next attempt in %v at %s",
+							w.disarmAttempts, watchdogMaxDisarmAttempts, watchdogBackoffGrid[w.disarmAttempts-1], w.nextDisarmAttempt.Format(time.RFC3339))
+					} else {
+						gridIdx := w.disarmAttempts - 1
+						if gridIdx >= len(watchdogBackoffGrid) {
+							gridIdx = len(watchdogBackoffGrid) - 1
+						}
+						w.nextDisarmAttempt = w.now().Add(watchdogBackoffGrid[gridIdx])
+					}
 				}
 			} else {
 				log.Printf("Watchdog: EmergencyDisarmTProxy outcome %v discarded — health recovered and re-failed while attempt was in flight", outcome)
@@ -330,12 +395,12 @@ func (w *WatchdogService) TryReset() (WatchdogSnapshot, error) {
 		return WatchdogSnapshot{}, ErrWatchdogResetInFlight
 	}
 
-	if !w.lastResetAt.IsZero() && time.Since(w.lastResetAt) < watchdogResetCooldown {
+	if !w.lastResetAt.IsZero() && w.now().Sub(w.lastResetAt) < watchdogResetCooldown {
 		w.mu.Unlock()
 		return WatchdogSnapshot{}, ErrWatchdogResetCooldown
 	}
 
-	w.lastResetAt = time.Now()
+	w.lastResetAt = w.now()
 	w.consecutiveFailures = 0
 	w.disarmAttempts = 0
 	w.disarmedRecheckCounter = 0
@@ -433,15 +498,32 @@ func (o DisarmOutcome) String() string {
 // was confirmed via re-reading the mangle table; DisarmAlreadyClean if no rules
 // were found; or DisarmFailed if execution or verification failed.
 func (w *WatchdogService) EmergencyDisarmTProxy() DisarmOutcome {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), watchdogDisarmTimeout)
+	defer cancel()
 
 	saveV4, delV4, saveV6, delV6 := w.resolveXtablesBins()
 
 	waitArgsV4 := xtables.WaitArgsFor(ctx, delV4)
 	waitArgsV6 := xtables.WaitArgsFor(ctx, delV6)
 
-	removedV4, okV4 := disarmTProxyFamily(ctx, saveV4, delV4, waitArgsV4)
-	removedV6, okV6 := disarmTProxyFamily(ctx, saveV6, delV6, waitArgsV6)
+	removedV4, okV4, failV4 := disarmTProxyFamily(ctx, saveV4, delV4, waitArgsV4)
+	removedV6, okV6, failV6 := disarmTProxyFamily(ctx, saveV6, delV6, waitArgsV6)
+
+	var lastErr string
+	switch {
+	case !okV4 && !okV6:
+		lastErr = fmt.Sprintf("IPv4 failed: %s, IPv6 failed: %s", failV4, failV6)
+	case !okV4 && okV6:
+		lastErr = fmt.Sprintf("IPv6 disarmed, IPv4 failed: %s", failV4)
+	case okV4 && !okV6:
+		lastErr = fmt.Sprintf("IPv4 disarmed, IPv6 failed: %s", failV6)
+	default:
+		lastErr = ""
+	}
+
+	w.mu.Lock()
+	w.lastDisarmError = lastErr
+	w.mu.Unlock()
 
 	if !okV4 || !okV6 {
 		log.Printf("Watchdog: EmergencyDisarmTProxy incomplete (ipv4 ok=%v removed=%d, ipv6 ok=%v removed=%d) — TPROXY interception may still be active",
@@ -653,23 +735,24 @@ func selectTproxyRules(lines []string) map[string]bool {
 // attempt). ok is false only on a genuine execution failure such as xtables
 // lock contention or a permission error, where we can't tell whether the
 // interception rule is actually gone.
-func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []string) (removed int, ok bool) {
+func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []string) (removed int, ok bool, failReason string) {
 	lines, err := listMangleRules(ctx, saveBin)
 	if err != nil {
 		if xtables.IsCommandNotFound(err) {
 			// This iptables family isn't present on this system — nothing to
 			// disarm here, not a failure.
-			return 0, true
+			return 0, true, ""
 		}
 		log.Printf("Watchdog: EmergencyDisarmTProxy: failed to list mangle table via %s: %v", saveBin, err)
-		return 0, false
+		return 0, false, fmt.Sprintf("list mangle table via %s: %v", saveBin, err)
 	}
 
 	toDelete := selectTproxyRules(lines)
 	if len(toDelete) == 0 {
-		return 0, true
+		return 0, true, ""
 	}
 
+	var lastDelErr error
 	deleteRules := func(rules map[string]bool) (deleted int, hasErr bool) {
 		for line := range rules {
 			args := splitIptablesRule(line)
@@ -687,6 +770,7 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 				log.Printf("Watchdog: EmergencyDisarmTProxy: failed to remove rule via %s (%q): %v — %s",
 					delBin, line, delErr, strings.TrimSpace(string(delOut)))
 				hasErr = true
+				lastDelErr = fmt.Errorf("%v (%s)", delErr, strings.TrimSpace(string(delOut)))
 				continue
 			}
 
@@ -717,7 +801,7 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 		lines, err := listMangleRules(ctx, saveBin)
 		if err != nil {
 			log.Printf("Watchdog: EmergencyDisarmTProxy: failed to re-read mangle table via %s after pass %d: %v", saveBin, pass, err)
-			return removed, false
+			return removed, false, fmt.Sprintf("re-read mangle table via %s: %v", saveBin, err)
 		}
 		remaining := selectTproxyRules(lines)
 		if len(remaining) == 0 {
@@ -726,13 +810,17 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 			} else if pass == 1 && delCount == 0 {
 				log.Printf("Watchdog: EmergencyDisarmTProxy: TPROXY rules disappeared from mangle table before deletion via %s (cleared concurrently)", delBin)
 			}
-			return removed, true
+			return removed, true, ""
 		}
 
 		if pass >= maxDisarmPasses {
 			log.Printf("Watchdog: EmergencyDisarmTProxy: %d interception rule(s) still remain after %d passes via %s",
 				len(remaining), pass, delBin)
-			return removed, false
+			reason := fmt.Sprintf("%d rule(s) remain after %d passes", len(remaining), pass)
+			if lastDelErr != nil {
+				reason += fmt.Sprintf(" (%v)", lastDelErr)
+			}
+			return removed, false, reason
 		}
 
 		log.Printf("Watchdog: EmergencyDisarmTProxy: %d interception rule(s) remain after pass %d — retrying via %s",
