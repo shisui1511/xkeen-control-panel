@@ -956,3 +956,18 @@ func TestWatchdogService_CheckHealth_AlreadyCleanLatchesDisarmed(t *testing.T) {
 	}
 }
 
+// TestWatchdogService_Stop_Idempotent verifies IN-05:
+// Calling Stop() multiple times must not panic on closing stopCh.
+func TestWatchdogService_Stop_Idempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	xkeenSvc := NewXKeenService(filepath.Join(tmpDir, "xkeen"), tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.Start()
+
+	// Calling Stop() multiple times must not panic
+	w.Stop()
+	w.Stop()
+	w.Stop()
+}
+
+

@@ -34,8 +34,9 @@ type WatchdogService struct {
 	mihomoDir string
 	xrayDir   string
 
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 
 	mu                  sync.Mutex
 	consecutiveFailures int
@@ -68,9 +69,11 @@ func (w *WatchdogService) Start() {
 	go w.loop()
 }
 
-// Stop signals the loop to exit and waits for it to finish.
+// Stop signals the loop to exit and waits for it to finish. Safe to call multiple times.
 func (w *WatchdogService) Stop() {
-	close(w.stopCh)
+	w.stopOnce.Do(func() {
+		close(w.stopCh)
+	})
 	w.wg.Wait()
 }
 
