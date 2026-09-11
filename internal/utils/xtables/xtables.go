@@ -33,18 +33,6 @@ var candidateWaitArgs = [][]string{
 	{},
 }
 
-// argParseFailureMarkers are output substrings that indicate the CLI rejected
-// the wait flag arguments (unsupported dialect), allowing fallback to the next candidate.
-var argParseFailureMarkers = []string{
-	"Bad argument",
-	"unknown option",
-	"unrecognized option",
-	"Try `iptables -h'",
-	"Try `iptables --help'",
-	"Try 'iptables -h'",
-	"Try 'iptables --help'",
-}
-
 const (
 	probeTimeout = 5 * time.Second
 )
@@ -128,16 +116,6 @@ func WaitArgsFor(ctx context.Context, probeBinary string) []string {
 func isLockBusy(output string) bool {
 	lower := strings.ToLower(output)
 	return strings.Contains(lower, "xtables lock") || strings.Contains(lower, "holding the xtables lock")
-}
-
-// isArgParseFailure checks if the command output indicates an argument parsing failure.
-func isArgParseFailure(output string) bool {
-	for _, m := range argParseFailureMarkers {
-		if strings.Contains(output, m) {
-			return true
-		}
-	}
-	return false
 }
 
 // IsCommandNotFound reports whether err comes from exec failing to locate
