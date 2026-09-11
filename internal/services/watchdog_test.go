@@ -1722,3 +1722,91 @@ func TestWatchdogService_StableFailureLine(t *testing.T) {
 			len(uniqueAt4), len(uniqueAt40), uniqueAt40)
 	}
 }
+
+func TestWatchdogService_SteadyStateLogLines(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+
+	saveOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, _ := installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs:   []string{saveOutput},
+		Dialect:       dialectWaitSeconds,
+		DeleteFailure: "failed to delete rule",
+	})
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	currTime := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	w.now = func() time.Time { return currTime }
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() {
+		log.SetOutput(os.Stderr)
+	})
+
+	stripTimestamp := func(line string) string {
+		if len(line) > 20 && line[4] == '/' && line[7] == '/' && line[10] == ' ' && line[13] == ':' {
+			return line[20:]
+		}
+		return line
+	}
+
+	linesCountAtIteration1880 := 0
+	const totalIterations = 2880 // 24 hours * (60m / 0.5m) = 2880 checks at 30s interval
+
+	for i := 1; i <= totalIterations; i++ {
+		w.CheckHealth()
+		waitDisarmSettled(t, w)
+		currTime = currTime.Add(watchdogCheckInterval)
+
+		if i == totalIterations-1000 {
+			linesCountAtIteration1880 = len(strings.Split(strings.TrimSpace(logBuf.String()), "\n"))
+		}
+	}
+
+	allLines := strings.Split(strings.TrimSpace(logBuf.String()), "\n")
+	totalLines := len(allLines)
+
+	// Assertion 1: Total lines <= 40
+	if totalLines > 40 {
+		t.Fatalf("expected at most 40 log lines over 24h simulation, got %d:\n%s", totalLines, logBuf.String())
+	}
+
+	// Assertion 2: 0 lines added during the last 1000 iterations
+	if totalLines != linesCountAtIteration1880 {
+		t.Fatalf("expected 0 log lines added during the last 1000 iterations, but grew from %d to %d",
+			linesCountAtIteration1880, totalLines)
+	}
+
+	// Assertion 3: Unique lines check — no growing counter generating unique lines
+	uniqueNormalized := make(map[string]bool)
+	for _, l := range allLines {
+		norm := stripTimestamp(l)
+		uniqueNormalized[norm] = true
+	}
+	if len(uniqueNormalized) > 15 {
+		t.Fatalf("too many unique lines (%d), possible growing counter leak: %v",
+			len(uniqueNormalized), uniqueNormalized)
+	}
+
+	// Assertion 4: Snapshot state is degraded and DisarmAttempts is 5
+	snap := w.Snapshot()
+	if snap.State != WatchdogStateDegraded {
+		t.Fatalf("expected final state %q, got %q", WatchdogStateDegraded, snap.State)
+	}
+	if snap.DisarmAttempts != 5 {
+		t.Fatalf("expected 5 disarm attempts, got %d", snap.DisarmAttempts)
+	}
+}

@@ -780,8 +780,6 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 			delOut, delErr := exec.CommandContext(delCtx, delBin, delArgs...).CombinedOutput()
 			delCancel()
 			if delErr != nil {
-				log.Printf("Watchdog: EmergencyDisarmTProxy: failed to remove rule via %s (%q): %v — %s",
-					delBin, line, delErr, strings.TrimSpace(string(delOut)))
 				hasErr = true
 				lastDelErr = fmt.Errorf("%v (%s)", delErr, strings.TrimSpace(string(delOut)))
 				continue
@@ -810,6 +808,14 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 		delCount, hasErr := deleteRules(toDelete)
 		removed += delCount
 		hasErrAny = hasErrAny || hasErr
+
+		if delCount == 0 && hasErr {
+			reason := fmt.Sprintf("deletion failed via %s", delBin)
+			if lastDelErr != nil {
+				reason += fmt.Sprintf(": %v", lastDelErr)
+			}
+			return removed, false, reason
+		}
 
 		lines, err := listMangleRules(ctx, saveBin)
 		if err != nil {
