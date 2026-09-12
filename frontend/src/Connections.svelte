@@ -5,8 +5,14 @@
   import { apiFetch } from './lib/api';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import PageHeader from './PageHeader.svelte';
+  import Select from './components/Select.svelte';
+  import SegmentedControl from './components/SegmentedControl.svelte';
+  import LiveIndicator from './components/LiveIndicator.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
+
+  let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
   interface Connection {
     id: string;
@@ -520,80 +526,69 @@
 <svelte:window onkeydown={handleWindowKeyDown} />
 
 <div class="container">
-  <!-- page-head -->
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_observability')} <span class="crumb-sep">›</span>
-        {$t('conn.title')}
-      </div>
-      <h1>
-        {$t('conn.title')}
-        {#if wsConnected && !paused}
-          <span class="live-badge running">
-            <span class="live-dot success"></span>{$t('traffic.live_badge')}
-          </span>
-        {:else if wsConnected && paused}
-          <span class="live-badge paused">
-            <span class="live-dot warning"></span>{$t('traffic.paused_badge')}
-          </span>
-        {:else if wsReconnecting}
-          <span class="live-badge warning">
-            <span class="live-dot warning"></span>{$t('conn.ws_reconnecting')}
-          </span>
-        {:else}
-          <span class="live-badge stopped">
-            <span class="live-dot error"></span>{$t('conn.ws_offline')}
-          </span>
-        {/if}
-      </h1>
-      <p class="sub">{$t('conn.h1_sub')}</p>
-    </div>
-    <div class="ph-actions">
-      <button
-        class="btn btn-secondary"
-        onclick={() => (paused = !paused)}
-        title={paused ? $t('conn.resume') : $t('conn.pause')}
-      >
-        {#if paused}
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-            ><polygon points="5 3 19 12 5 21 5 3" /></svg
-          >
-          <span>{$t('conn.resume')}</span>
-        {:else}
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-            ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
-              x="14"
-              y="5"
-              width="4"
-              height="14"
-              rx="1"
+  <PageHeader
+    title={$t('conn.title')}
+    subtitle={$t('conn.h1_sub')}
+    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('conn.title') }]}
+    {onSwitchTab}
+  >
+    {#snippet actions()}
+      <LiveIndicator
+        live={wsConnected && !paused}
+        label={wsConnected && !paused
+          ? $t('traffic.live_badge')
+          : wsConnected && paused
+            ? $t('traffic.paused_badge')
+            : wsReconnecting
+              ? $t('conn.ws_reconnecting')
+              : $t('conn.ws_offline')}
+      />
+      <div class="ph-actions">
+        <button
+          class="btn btn-secondary"
+          onclick={() => (paused = !paused)}
+          title={paused ? $t('conn.resume') : $t('conn.pause')}
+        >
+          {#if paused}
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
+              ><polygon points="5 3 19 12 5 21 5 3" /></svg
+            >
+            <span>{$t('conn.resume')}</span>
+          {:else}
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
+              ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
+                x="14"
+                y="5"
+                width="4"
+                height="14"
+                rx="1"
+              /></svg
+            >
+            <span>{$t('conn.pause')}</span>
+          {/if}
+        </button>
+        <button
+          class="btn btn-danger-soft"
+          onclick={closeAllConnections}
+          disabled={connections.length === 0}
+          title={$t('conn.close_all')}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            ><polyline points="3 6 5 6 21 6" /><path
+              d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
             /></svg
           >
-          <span>{$t('conn.pause')}</span>
-        {/if}
-      </button>
-      <button
-        class="btn btn-danger-soft"
-        onclick={closeAllConnections}
-        disabled={connections.length === 0}
-        title={$t('conn.close_all')}
-      >
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          ><polyline points="3 6 5 6 21 6" /><path
-            d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
-          /></svg
-        >
-        <span>{$t('conn.close_all')}</span>
-      </button>
-    </div>
-  </div>
+          <span>{$t('conn.close_all')}</span>
+        </button>
+      </div>
+    {/snippet}
+  </PageHeader>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
     <EmptyState
@@ -656,49 +651,26 @@
 
       <!-- Quick Filter Chips -->
       <div class="filter-chips">
-        <button
-          type="button"
-          class="f-chip"
-          class:active={quickFilter === 'all'}
-          onclick={() => (quickFilter = 'all')}
-        >
-          {$t('conn.filter_all')}
-        </button>
-        <button
-          type="button"
-          class="f-chip"
-          class:active={quickFilter === 'proxy'}
-          onclick={() => (quickFilter = 'proxy')}
-        >
-          {$t('conn.filter_proxy')}
-        </button>
-        <button
-          type="button"
-          class="f-chip"
-          class:active={quickFilter === 'direct'}
-          onclick={() => (quickFilter = 'direct')}
-        >
-          {$t('conn.filter_direct')}
-        </button>
-        <button
-          type="button"
-          class="f-chip"
-          class:active={quickFilter === 'active'}
-          onclick={() => (quickFilter = 'active')}
-        >
-          {$t('conn.filter_active')}
-        </button>
+        <SegmentedControl
+          bind:value={quickFilter}
+          items={[
+            { value: 'all', label: $t('conn.filter_all') },
+            { value: 'proxy', label: $t('conn.filter_proxy') },
+            { value: 'direct', label: $t('conn.filter_direct') },
+            { value: 'active', label: $t('conn.filter_active') }
+          ]}
+        />
       </div>
 
       <!-- Grouping Selector -->
       <div class="grouping-control">
         <span class="group-lbl">{$t('conn.group_by')}</span>
-        <select bind:value={groupingMode} class="group-select">
+        <Select bind:value={groupingMode} class="group-select">
           <option value="none">{$t('conn.group_none')}</option>
           <option value="client">{$t('conn.group_client')}</option>
           <option value="host">{$t('conn.group_host')}</option>
           <option value="route">{$t('conn.group_route')}</option>
-        </select>
+        </Select>
       </div>
 
       <!-- Live Totals Summary -->
@@ -1233,87 +1205,10 @@
 {/if}
 
 <style>
-  .page-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 20px;
-    gap: 16px;
-  }
-
-  .page-head h1 {
-    margin: 4px 0 6px;
-    font-size: 22px;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .page-head .sub {
-    margin: 0;
-    color: var(--fg-secondary);
-    font-size: 13px;
-  }
-
-  .crumbs {
-    font-size: 12px;
-    color: var(--fg-dim);
-    margin-bottom: 2px;
-  }
-
-  .crumb-sep {
-    color: var(--fg-faint);
-    margin: 0 6px;
-  }
-
   .ph-actions {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding-top: 6px;
-  }
-
-  .live-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-  }
-
-  .live-badge.running {
-    color: var(--success);
-    border-color: color-mix(in srgb, var(--success) 30%, transparent);
-  }
-
-  .live-badge.paused {
-    color: var(--warning);
-    border-color: color-mix(in srgb, var(--warning) 30%, transparent);
-  }
-
-  .live-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-  }
-
-  .live-dot.success {
-    background: var(--success);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--success) 60%, transparent);
-  }
-
-  .live-dot.warning {
-    background: var(--warning);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 60%, transparent);
-  }
-
-  .live-dot.error {
-    background: var(--danger);
   }
 
   /* Monolithic Smart Toolbar (CONN-02) */
@@ -1399,34 +1294,15 @@
     padding: 1px;
   }
 
-  .f-chip {
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--fg-dim);
-    background: transparent;
-    border: none;
-    border-radius: 3px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .f-chip:hover:not(.active) {
-    color: var(--fg-primary);
-    background: var(--bg-hover);
-  }
-
-  .f-chip.active {
-    background: var(--accent);
-    color: var(--btn-primary-text);
-    font-weight: 700;
-  }
-
   /* Grouping Control */
   .grouping-control {
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .grouping-control :global(.xcp-select) {
+    width: auto;
   }
 
   .group-lbl {
@@ -1436,8 +1312,8 @@
 
   .group-select {
     height: 30px;
-    padding: 0 8px;
-    font-size: 11.5px;
+    padding: 0 28px 0 8px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
