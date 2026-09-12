@@ -827,11 +827,11 @@
             {/if}
           </div>
         {:else}
-          <div class="empty-table-state">
-            <p>{$t('conn.empty_title')}</p>
-          </div>
+          <EmptyState title={$t('conn.empty_title')} description={$t('conn.empty_desc')} />
         {/each}
       </div>
+    {:else if !loading && connections.length === 0}
+      <EmptyState title={$t('conn.empty_title')} description={$t('conn.empty_desc')} />
     {:else}
       <!-- Flat Table View -->
       <div class="table-container conn-table-container">
@@ -1248,7 +1248,7 @@
   .search-input {
     height: 32px;
     padding: 0 26px 0 28px;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     background: var(--bg-secondary);
@@ -1265,7 +1265,7 @@
   }
 
   .match-badge {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     font-weight: 700;
     font-family: var(--font-family-mono);
@@ -1310,24 +1310,12 @@
     color: var(--fg-dim);
   }
 
-  .group-select {
-    height: 30px;
-    padding: 0 28px 0 8px;
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--bg-secondary);
-    color: var(--fg-primary);
-    cursor: pointer;
-  }
-
   /* Metrics Pill */
   .metrics-pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     padding: 4px 10px;
     background: var(--bg-secondary);
     border: 1px solid var(--border-light, rgba(255, 255, 255, 0.06));
@@ -1352,13 +1340,13 @@
   }
 
   .btn-danger-soft {
-    background: rgba(244, 112, 127, 0.15);
-    color: var(--danger, #f4707f);
-    border: 1px solid rgba(244, 112, 127, 0.3);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   }
 
   .btn-danger-soft:hover {
-    background: rgba(244, 112, 127, 0.25);
+    background: color-mix(in srgb, var(--danger) 25%, transparent);
   }
 
   /* Tables & Groups (CONN-01) */
@@ -1410,13 +1398,13 @@
   }
 
   .grp-title {
-    font-size: 13.5px;
+    font-size: var(--font-size-base);
     font-weight: 700;
     color: var(--fg-primary);
   }
 
   .grp-sub {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
   }
@@ -1425,7 +1413,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
   }
 
@@ -1442,10 +1430,9 @@
   }
 
   .connections-table th {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-weight: 600;
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     user-select: none;
@@ -1490,7 +1477,7 @@
 
   .conn-row td {
     padding: 8px 12px;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     vertical-align: middle;
   }
 
@@ -1523,17 +1510,17 @@
   }
 
   .src-sub {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
   .badge-process {
-    font-size: 9.5px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     padding: 1px 4px;
     border-radius: 3px;
-    background: rgba(167, 139, 250, 0.15);
-    color: #c4b5fd;
+    background: color-mix(in srgb, var(--seq-5) 15%, transparent);
+    color: var(--seq-5);
   }
 
   /* Host Cell */
@@ -1547,19 +1534,19 @@
 
   .host-port {
     color: var(--fg-dim);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   /* Badges & Route (CONN-03) */
   .badge-rule {
     background: rgba(255, 255, 255, 0.06);
-    color: #94a3b8;
-    font-size: 10px;
+    color: var(--fg-secondary);
+    font-size: var(--font-size-xs);
     font-weight: 600;
   }
 
   .rule-payload {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-top: 2px;
     max-width: 140px;
@@ -1571,7 +1558,7 @@
   .badge-direct {
     background: rgba(70, 209, 138, 0.15);
     color: var(--success);
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     padding: 2px 6px;
     border-radius: 4px;
@@ -1584,39 +1571,40 @@
     flex-wrap: wrap;
   }
 
+  /* DS2-02 decorative sequence mapping: chain-node -> --seq-1, net-tcp -> --seq-2, net-udp -> --seq-3, badge-process -> --seq-5 */
   .chain-node {
-    font-size: 11px;
-    color: var(--accent);
-    background: rgba(41, 194, 240, 0.08);
+    font-size: var(--font-size-xs);
+    color: var(--seq-1);
+    background: color-mix(in srgb, var(--seq-1) 12%, transparent);
     padding: 1px 5px;
     border-radius: 3px;
   }
 
   .chain-sep {
     color: var(--fg-faint);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .net-badge {
-    font-size: 9.5px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     padding: 1px 5px;
     border-radius: 3px;
   }
 
   .net-tcp {
-    background: rgba(56, 189, 248, 0.15);
-    color: #38bdf8;
+    background: color-mix(in srgb, var(--seq-2) 15%, transparent);
+    color: var(--seq-2);
   }
 
   .net-udp {
-    background: rgba(167, 139, 250, 0.15);
-    color: #a78bfa;
+    background: color-mix(in srgb, var(--seq-3) 15%, transparent);
+    color: var(--seq-3);
   }
 
   /* Speeds (CONN-04) */
   .speed-active {
-    font-size: 10.5px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     font-weight: 600;
     margin-top: 2px;
@@ -1637,7 +1625,7 @@
     border: none;
     border-radius: 4px;
     background: transparent;
-    color: var(--danger, #f4707f);
+    color: var(--danger);
     font-size: 16px;
     cursor: pointer;
     transition: background 0.15s ease;
@@ -1654,7 +1642,7 @@
   }
 
   .btn-close-conn:hover {
-    background: rgba(244, 112, 127, 0.2);
+    background: color-mix(in srgb, var(--danger) 20%, transparent);
   }
 
   /* Inspector Drawer (CONN-06) */
@@ -1697,7 +1685,7 @@
   }
 
   .drawer-subtitle {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
@@ -1731,11 +1719,9 @@
 
   .section-heading {
     margin: 0;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    font-size: var(--font-size-xs);
     color: var(--accent);
-    font-weight: 700;
+    font-weight: 600;
   }
 
   .meta-grid {
