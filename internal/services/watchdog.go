@@ -490,6 +490,8 @@ func (w *WatchdogService) TryReset() (WatchdogSnapshot, error) {
 	w.degradedAt = time.Time{}
 	w.disarmed = false
 	w.disarmEpoch++
+	w.interceptionActive = false
+	w.interceptionFamily = ""
 
 	snapshot := WatchdogSnapshot{
 		State:               w.stateLocked(),

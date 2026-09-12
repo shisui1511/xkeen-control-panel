@@ -2218,3 +2218,45 @@ func TestWatchdogService_ConsecutiveFailuresCapped(t *testing.T) {
 		t.Fatalf("expected snapshot ConsecutiveFailures capped at %d, got %d", watchdogMaxFailures, snap.ConsecutiveFailures)
 	}
 }
+
+func TestWatchdogService_TryResetClearsInterceptionState(t *testing.T) {
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is running\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+
+	w.mu.Lock()
+	w.interceptionActive = true
+	w.interceptionFamily = "ipv4"
+	w.consecutiveFailures = 3
+	w.disarmed = true
+	w.degradedAt = time.Now()
+	w.mu.Unlock()
+
+	snap, err := w.TryReset()
+	if err != nil {
+		t.Fatalf("unexpected error from TryReset: %v", err)
+	}
+
+	if snap.InterceptionActive {
+		t.Errorf("expected InterceptionActive=false in TryReset snapshot, got true")
+	}
+	if snap.InterceptionFamily != "" {
+		t.Errorf("expected InterceptionFamily='' in TryReset snapshot, got %q", snap.InterceptionFamily)
+	}
+	if snap.State != WatchdogStateArmed {
+		t.Errorf("expected state %q, got %q", WatchdogStateArmed, snap.State)
+	}
+	if snap.ConsecutiveFailures != 0 {
+		t.Errorf("expected ConsecutiveFailures=0, got %d", snap.ConsecutiveFailures)
+	}
+
+	w.wg.Wait()
+}
+
