@@ -1054,55 +1054,6 @@
     user-select: none;
   }
 
-  /* Toggle Switch */
-  .toggle-switch {
-    position: relative;
-    display: inline-block;
-    width: 32px;
-    height: 18px;
-  }
-
-  .toggle-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-
-  .toggle-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(255, 255, 255, 0.1);
-    transition: 0.2s;
-    border-radius: 9px;
-    border: 1px solid var(--border);
-  }
-
-  .toggle-slider:before {
-    position: absolute;
-    content: '';
-    height: 12px;
-    width: 12px;
-    left: 2px;
-    bottom: 2px;
-    background-color: var(--fg-secondary);
-    transition: 0.2s;
-    border-radius: 50%;
-  }
-
-  input:checked + .toggle-slider {
-    background-color: var(--primary);
-    border-color: var(--primary);
-  }
-
-  input:checked + .toggle-slider:before {
-    transform: translateX(14px);
-    background-color: #fff;
-  }
-
   :global(.tq-action-notify) {
     background: rgba(240, 180, 80, 0.15);
     color: var(--warning);
@@ -1197,10 +1148,10 @@
   @keyframes toggle-pulse {
     0%,
     100% {
-      background-color: rgba(255, 255, 255, 0.1);
+      background: var(--bg-elevated);
     }
     50% {
-      background-color: var(--primary);
+      background: var(--accent-soft);
     }
   }
 </style>
