@@ -1,4 +1,4 @@
-.PHONY: build run clean test lint fmt deps keenetic-arm64 keenetic-mipsle keenetic-mips compress proto
+.PHONY: build run clean test test-coverage lint fmt deps keenetic-arm64 keenetic-mipsle keenetic-mips compress proto
 
 BINARY_NAME=xcp
 EXACT_TAG := $(shell git describe --tags --exact-match HEAD 2>/dev/null)
@@ -49,6 +49,10 @@ run: build
 
 test:
 	go test -race -v ./...
+
+test-coverage:
+	go test -race -v -coverprofile=coverage.out ./internal/...
+	./scripts/check-coverage.sh coverage.out
 
 lint:
 	golangci-lint run ./...
