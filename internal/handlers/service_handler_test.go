@@ -258,4 +258,3 @@ func TestServiceDNSRedirect(t *testing.T) {
 		t.Errorf("expected 200 for good DNS redirect, got %d: %s", recGood.Code, recGood.Body.String())
 	}
 }
-

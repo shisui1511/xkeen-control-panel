@@ -272,3 +272,100 @@ func TestLogsEndpoints_WithDispatcher(t *testing.T) {
 		t.Errorf("expected 0 entries after clear, got %d", len(historyAfterClear))
 	}
 }
+
+func TestLogsDownload_And_Validation(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "app.log")
+	_ = os.WriteFile(logFile, []byte("test log contents\nline 2"), 0644)
+
+	api := &API{
+		cfg: &config.Config{
+			LogPath:      logFile,
+			AllowedRoots: []string{tmpDir},
+		},
+		pathVal: utils.NewPathValidator([]string{tmpDir}),
+	}
+
+	// 1. LogsDownload Method Not Allowed (POST)
+	reqPost := httptest.NewRequest(http.MethodPost, "/api/logs/download", nil)
+	recPost := httptest.NewRecorder()
+	api.LogsDownload(recPost, reqPost)
+	if recPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST download, got %d", recPost.Code)
+	}
+
+	// 2. LogsDownload Empty LogPath
+	apiEmpty := &API{cfg: &config.Config{}}
+	reqEmpty := httptest.NewRequest(http.MethodGet, "/api/logs/download", nil)
+	recEmpty := httptest.NewRecorder()
+	apiEmpty.LogsDownload(recEmpty, reqEmpty)
+	if recEmpty.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty LogPath, got %d", recEmpty.Code)
+	}
+
+	// 3. LogsDownload Forbidden Path
+	apiForbidden := &API{
+		cfg:     &config.Config{LogPath: "/etc/shadow"},
+		pathVal: utils.NewPathValidator([]string{tmpDir}),
+	}
+	reqForbidden := httptest.NewRequest(http.MethodGet, "/api/logs/download", nil)
+	recForbidden := httptest.NewRecorder()
+	apiForbidden.LogsDownload(recForbidden, reqForbidden)
+	if recForbidden.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for forbidden log path, got %d", recForbidden.Code)
+	}
+
+	// 4. LogsDownload Nonexistent Path
+	apiNonexistent := &API{
+		cfg:     &config.Config{LogPath: filepath.Join(tmpDir, "missing.log")},
+		pathVal: utils.NewPathValidator([]string{tmpDir}),
+	}
+	reqNonexistent := httptest.NewRequest(http.MethodGet, "/api/logs/download", nil)
+	recNonexistent := httptest.NewRecorder()
+	apiNonexistent.LogsDownload(recNonexistent, reqNonexistent)
+	if recNonexistent.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for missing log, got %d", recNonexistent.Code)
+	}
+
+	// 5. LogsDownload Success
+	reqOK := httptest.NewRequest(http.MethodGet, "/api/logs/download", nil)
+	recOK := httptest.NewRecorder()
+	api.LogsDownload(recOK, reqOK)
+	if recOK.Code != http.StatusOK {
+		t.Errorf("expected 200 for valid download, got %d", recOK.Code)
+	}
+	if !strings.Contains(recOK.Body.String(), "test log contents") {
+		t.Errorf("expected body to contain log content, got: %q", recOK.Body.String())
+	}
+
+	// 6. LogsHistory Method Not Allowed
+	reqHistPost := httptest.NewRequest(http.MethodPost, "/api/logs/history", nil)
+	recHistPost := httptest.NewRecorder()
+	api.LogsHistory(recHistPost, reqHistPost)
+	if recHistPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST history, got %d", recHistPost.Code)
+	}
+
+	// 7. LogsSetLevel Method Not Allowed and Bad JSON
+	reqSetGet := httptest.NewRequest(http.MethodGet, "/api/logs/level", nil)
+	recSetGet := httptest.NewRecorder()
+	api.LogsSetLevel(recSetGet, reqSetGet)
+	if recSetGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET level, got %d", recSetGet.Code)
+	}
+
+	reqSetBad := httptest.NewRequest(http.MethodPost, "/api/logs/level", strings.NewReader("{invalid"))
+	recSetBad := httptest.NewRecorder()
+	api.LogsSetLevel(recSetBad, reqSetBad)
+	if recSetBad.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for bad JSON level, got %d", recSetBad.Code)
+	}
+
+	// 8. LogsClear Method Not Allowed
+	reqClearGet := httptest.NewRequest(http.MethodGet, "/api/logs/clear", nil)
+	recClearGet := httptest.NewRecorder()
+	api.LogsClear(recClearGet, reqClearGet)
+	if recClearGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET clear, got %d", recClearGet.Code)
+	}
+}

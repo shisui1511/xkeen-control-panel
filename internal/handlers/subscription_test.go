@@ -773,3 +773,123 @@ func TestSubscriptionDialerProxyTargets(t *testing.T) {
 		t.Errorf("expected 0 targets, got %d", len(emptyResp.Data))
 	}
 }
+
+func TestSubscriptionEndpoints_Extended(t *testing.T) {
+	tmpDir := t.TempDir()
+	subSvc := services.NewSubscriptionService(tmpDir, tmpDir, tmpDir)
+	api := &API{
+		subscriptionSvc: subSvc,
+	}
+
+	// 1. SubscriptionHealth
+	t.Run("SubscriptionHealth", func(t *testing.T) {
+		reqPost := httptest.NewRequest(http.MethodPost, "/api/subscriptions/health?id=sub-1", nil)
+		rrPost := httptest.NewRecorder()
+		api.SubscriptionHealth(rrPost, reqPost)
+		if rrPost.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", rrPost.Code)
+		}
+
+		reqNoID := httptest.NewRequest(http.MethodGet, "/api/subscriptions/health", nil)
+		rrNoID := httptest.NewRecorder()
+		api.SubscriptionHealth(rrNoID, reqNoID)
+		if rrNoID.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for no ID, got %d", rrNoID.Code)
+		}
+
+		reqNotFound := httptest.NewRequest(http.MethodGet, "/api/subscriptions/health?id=sub-ghost", nil)
+		rrNotFound := httptest.NewRecorder()
+		api.SubscriptionHealth(rrNotFound, reqNotFound)
+		if rrNotFound.Code != http.StatusNotFound {
+			t.Errorf("expected 404 for nonexistent sub, got %d", rrNotFound.Code)
+		}
+
+		sub := services.Subscription{ID: "sub-real", Name: "Test Sub", URL: "http://example.com/sub"}
+		_ = subSvc.Add(&sub)
+
+		reqOK := httptest.NewRequest(http.MethodGet, "/api/subscriptions/health?id=sub-real", nil)
+		rrOK := httptest.NewRecorder()
+		api.SubscriptionHealth(rrOK, reqOK)
+		if rrOK.Code != http.StatusOK {
+			t.Errorf("expected 200 for valid sub health, got %d", rrOK.Code)
+		}
+	})
+
+	// 2. SubscriptionRaw, ParseReport, Nodes, Delete, Refresh method checks
+	t.Run("ValidationAndErrors", func(t *testing.T) {
+		// SubscriptionRaw
+		reqRawPost := httptest.NewRequest(http.MethodPost, "/api/subscriptions/raw?id=sub-real", nil)
+		rrRawPost := httptest.NewRecorder()
+		api.SubscriptionRaw(rrRawPost, reqRawPost)
+		if rrRawPost.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405 for POST Raw, got %d", rrRawPost.Code)
+		}
+
+		reqRawEmpty := httptest.NewRequest(http.MethodGet, "/api/subscriptions/raw", nil)
+		rrRawEmpty := httptest.NewRecorder()
+		api.SubscriptionRaw(rrRawEmpty, reqRawEmpty)
+		if rrRawEmpty.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for empty ID Raw, got %d", rrRawEmpty.Code)
+		}
+
+		// SubscriptionParseReport
+		reqParsePost := httptest.NewRequest(http.MethodPost, "/api/subscriptions/parse-report?id=sub-real", nil)
+		rrParsePost := httptest.NewRecorder()
+		api.SubscriptionParseReport(rrParsePost, reqParsePost)
+		if rrParsePost.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405 for POST ParseReport, got %d", rrParsePost.Code)
+		}
+
+		reqParseEmpty := httptest.NewRequest(http.MethodGet, "/api/subscriptions/parse-report", nil)
+		rrParseEmpty := httptest.NewRecorder()
+		api.SubscriptionParseReport(rrParseEmpty, reqParseEmpty)
+		if rrParseEmpty.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for empty ID ParseReport, got %d", rrParseEmpty.Code)
+		}
+
+		// SubscriptionNodes
+		reqNodesPost := httptest.NewRequest(http.MethodPost, "/api/subscriptions/nodes?id=sub-real", nil)
+		rrNodesPost := httptest.NewRecorder()
+		api.SubscriptionNodes(rrNodesPost, reqNodesPost)
+		if rrNodesPost.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405 for POST Nodes, got %d", rrNodesPost.Code)
+		}
+
+		reqNodesEmpty := httptest.NewRequest(http.MethodGet, "/api/subscriptions/nodes", nil)
+		rrNodesEmpty := httptest.NewRecorder()
+		api.SubscriptionNodes(rrNodesEmpty, reqNodesEmpty)
+		if rrNodesEmpty.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for empty ID Nodes, got %d", rrNodesEmpty.Code)
+		}
+
+		// SubscriptionDelete
+		reqDelGet := httptest.NewRequest(http.MethodGet, "/api/subscriptions/delete?id=sub-real", nil)
+		rrDelGet := httptest.NewRecorder()
+		api.SubscriptionDelete(rrDelGet, reqDelGet)
+		if rrDelGet.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405 for GET Delete, got %d", rrDelGet.Code)
+		}
+
+		reqDelEmpty := httptest.NewRequest(http.MethodPost, "/api/subscriptions/delete", nil)
+		rrDelEmpty := httptest.NewRecorder()
+		api.SubscriptionDelete(rrDelEmpty, reqDelEmpty)
+		if rrDelEmpty.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for empty ID Delete, got %d", rrDelEmpty.Code)
+		}
+
+		// SubscriptionRefresh
+		reqRefGet := httptest.NewRequest(http.MethodGet, "/api/subscriptions/refresh?id=sub-real", nil)
+		rrRefGet := httptest.NewRecorder()
+		api.SubscriptionRefresh(rrRefGet, reqRefGet)
+		if rrRefGet.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405 for GET Refresh, got %d", rrRefGet.Code)
+		}
+
+		reqRefEmpty := httptest.NewRequest(http.MethodPost, "/api/subscriptions/refresh", nil)
+		rrRefEmpty := httptest.NewRecorder()
+		api.SubscriptionRefresh(rrRefEmpty, reqRefEmpty)
+		if rrRefEmpty.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for empty ID Refresh, got %d", rrRefEmpty.Code)
+		}
+	})
+}

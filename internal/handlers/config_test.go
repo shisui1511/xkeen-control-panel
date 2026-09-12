@@ -591,3 +591,127 @@ func TestConfigSmartMerge_PreflightWarnings(t *testing.T) {
 		t.Errorf("expected preflight.port_conflict in smart-merge warnings, got %+v", resp.Data.Warnings)
 	}
 }
+
+func TestConfigCRUD_Handlers(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	file1 := filepath.Join(tmpDir, "file1.json")
+	file2 := filepath.Join(tmpDir, "file2.json")
+
+	// 1. ConfigCreate
+	reqCreateGet := httptest.NewRequest(http.MethodGet, "/api/config/create?path="+file1, nil)
+	recCreateGet := httptest.NewRecorder()
+	api.ConfigCreate(recCreateGet, reqCreateGet)
+	if recCreateGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET ConfigCreate, got %d", recCreateGet.Code)
+	}
+
+	reqCreateForbidden := httptest.NewRequest(http.MethodPost, "/api/config/create?path=/etc/shadow", nil)
+	recCreateForbidden := httptest.NewRecorder()
+	api.ConfigCreate(recCreateForbidden, reqCreateForbidden)
+	if recCreateForbidden.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for forbidden ConfigCreate, got %d", recCreateForbidden.Code)
+	}
+
+	reqCreateOK := httptest.NewRequest(http.MethodPost, "/api/config/create?path="+file1, nil)
+	recCreateOK := httptest.NewRecorder()
+	api.ConfigCreate(recCreateOK, reqCreateOK)
+	if recCreateOK.Code != http.StatusOK {
+		t.Fatalf("expected 200 for ConfigCreate, got %d: %s", recCreateOK.Code, recCreateOK.Body.String())
+	}
+
+	reqCreateDup := httptest.NewRequest(http.MethodPost, "/api/config/create?path="+file1, nil)
+	recCreateDup := httptest.NewRecorder()
+	api.ConfigCreate(recCreateDup, reqCreateDup)
+	if recCreateDup.Code != http.StatusConflict {
+		t.Errorf("expected 409 for duplicate ConfigCreate, got %d", recCreateDup.Code)
+	}
+
+	// 2. ConfigBackups
+	reqBackupsPost := httptest.NewRequest(http.MethodPost, "/api/config/backups?path="+file1, nil)
+	recBackupsPost := httptest.NewRecorder()
+	api.ConfigBackups(recBackupsPost, reqBackupsPost)
+	if recBackupsPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST ConfigBackups, got %d", recBackupsPost.Code)
+	}
+
+	reqBackupsForbidden := httptest.NewRequest(http.MethodGet, "/api/config/backups?path=/etc/shadow", nil)
+	recBackupsForbidden := httptest.NewRecorder()
+	api.ConfigBackups(recBackupsForbidden, reqBackupsForbidden)
+	if recBackupsForbidden.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for forbidden ConfigBackups, got %d", recBackupsForbidden.Code)
+	}
+
+	reqBackupsOK := httptest.NewRequest(http.MethodGet, "/api/config/backups?path="+file1, nil)
+	recBackupsOK := httptest.NewRecorder()
+	api.ConfigBackups(recBackupsOK, reqBackupsOK)
+	if recBackupsOK.Code != http.StatusOK {
+		t.Errorf("expected 200 for ConfigBackups, got %d: %s", recBackupsOK.Code, recBackupsOK.Body.String())
+	}
+
+	// 3. ConfigRename
+	reqRenameGet := httptest.NewRequest(http.MethodGet, "/api/config/rename?old="+file1+"&new="+file2, nil)
+	recRenameGet := httptest.NewRecorder()
+	api.ConfigRename(recRenameGet, reqRenameGet)
+	if recRenameGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET ConfigRename, got %d", recRenameGet.Code)
+	}
+
+	reqRenameForbidden := httptest.NewRequest(http.MethodPost, "/api/config/rename?old=/etc/shadow&new="+file2, nil)
+	recRenameForbidden := httptest.NewRecorder()
+	api.ConfigRename(recRenameForbidden, reqRenameForbidden)
+	if recRenameForbidden.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for forbidden old ConfigRename, got %d", recRenameForbidden.Code)
+	}
+
+	reqRenameForbiddenNew := httptest.NewRequest(http.MethodPost, "/api/config/rename?old="+file1+"&new=/etc/shadow", nil)
+	recRenameForbiddenNew := httptest.NewRecorder()
+	api.ConfigRename(recRenameForbiddenNew, reqRenameForbiddenNew)
+	if recRenameForbiddenNew.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for forbidden new ConfigRename, got %d", recRenameForbiddenNew.Code)
+	}
+
+	reqRenameNonexistent := httptest.NewRequest(http.MethodPost, "/api/config/rename?old="+filepath.Join(tmpDir, "ghost.json")+"&new="+file2, nil)
+	recRenameNonexistent := httptest.NewRecorder()
+	api.ConfigRename(recRenameNonexistent, reqRenameNonexistent)
+	if recRenameNonexistent.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for nonexistent ConfigRename, got %d", recRenameNonexistent.Code)
+	}
+
+	reqRenameOK := httptest.NewRequest(http.MethodPost, "/api/config/rename?old="+file1+"&new="+file2, nil)
+	recRenameOK := httptest.NewRecorder()
+	api.ConfigRename(recRenameOK, reqRenameOK)
+	if recRenameOK.Code != http.StatusOK {
+		t.Errorf("expected 200 for ConfigRename, got %d: %s", recRenameOK.Code, recRenameOK.Body.String())
+	}
+
+	// 4. ConfigDelete
+	reqDeleteGet := httptest.NewRequest(http.MethodGet, "/api/config/delete?path="+file2, nil)
+	recDeleteGet := httptest.NewRecorder()
+	api.ConfigDelete(recDeleteGet, reqDeleteGet)
+	if recDeleteGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET ConfigDelete, got %d", recDeleteGet.Code)
+	}
+
+	reqDeleteForbidden := httptest.NewRequest(http.MethodPost, "/api/config/delete?path=/etc/shadow", nil)
+	recDeleteForbidden := httptest.NewRecorder()
+	api.ConfigDelete(recDeleteForbidden, reqDeleteForbidden)
+	if recDeleteForbidden.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for forbidden ConfigDelete, got %d", recDeleteForbidden.Code)
+	}
+
+	reqDeleteNonexistent := httptest.NewRequest(http.MethodPost, "/api/config/delete?path="+file1, nil)
+	recDeleteNonexistent := httptest.NewRecorder()
+	api.ConfigDelete(recDeleteNonexistent, reqDeleteNonexistent)
+	if recDeleteNonexistent.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for nonexistent ConfigDelete, got %d", recDeleteNonexistent.Code)
+	}
+
+	reqDeleteOK := httptest.NewRequest(http.MethodPost, "/api/config/delete?path="+file2, nil)
+	recDeleteOK := httptest.NewRecorder()
+	api.ConfigDelete(recDeleteOK, reqDeleteOK)
+	if recDeleteOK.Code != http.StatusOK {
+		t.Errorf("expected 200 for ConfigDelete, got %d: %s", recDeleteOK.Code, recDeleteOK.Body.String())
+	}
+}

@@ -189,3 +189,143 @@ func TestNetworkPortCheck_InvalidHost(t *testing.T) {
 		t.Fatalf("expected status 400, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestNetworkHandlers_ValidationAndMethods(t *testing.T) {
+	api := NewAPI(&config.Config{}, nil)
+	networkSvc := services.NewNetworkToolsService("")
+	api.SetNetworkToolsService(networkSvc)
+
+	// 1. NetworkPing
+	t.Run("NetworkPing", func(t *testing.T) {
+		reqGet := httptest.NewRequest(http.MethodGet, "/api/network/ping", nil)
+		rrGet := httptest.NewRecorder()
+		api.NetworkPing(rrGet, reqGet)
+		if rrGet.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", rrGet.Code)
+		}
+
+		reqBadJSON := httptest.NewRequest(http.MethodPost, "/api/network/ping", strings.NewReader("{invalid"))
+		rrBadJSON := httptest.NewRecorder()
+		api.NetworkPing(rrBadJSON, reqBadJSON)
+		if rrBadJSON.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rrBadJSON.Code)
+		}
+
+		reqEmptyHost := httptest.NewRequest(http.MethodPost, "/api/network/ping", strings.NewReader(`{"host": ""}`))
+		rrEmptyHost := httptest.NewRecorder()
+		api.NetworkPing(rrEmptyHost, reqEmptyHost)
+		if rrEmptyHost.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rrEmptyHost.Code)
+		}
+
+		reqBadHost := httptest.NewRequest(http.MethodPost, "/api/network/ping", strings.NewReader(`{"host": "bad;host"}`))
+		rrBadHost := httptest.NewRecorder()
+		api.NetworkPing(rrBadHost, reqBadHost)
+		if rrBadHost.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rrBadHost.Code)
+		}
+	})
+
+	// 2. NetworkTraceroute
+	t.Run("NetworkTraceroute", func(t *testing.T) {
+		reqGet := httptest.NewRequest(http.MethodGet, "/api/network/traceroute", nil)
+		rrGet := httptest.NewRecorder()
+		api.NetworkTraceroute(rrGet, reqGet)
+		if rrGet.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", rrGet.Code)
+		}
+
+		reqBadJSON := httptest.NewRequest(http.MethodPost, "/api/network/traceroute", strings.NewReader("{invalid"))
+		rrBadJSON := httptest.NewRecorder()
+		api.NetworkTraceroute(rrBadJSON, reqBadJSON)
+		if rrBadJSON.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rrBadJSON.Code)
+		}
+
+		reqEmptyHost := httptest.NewRequest(http.MethodPost, "/api/network/traceroute", strings.NewReader(`{"host": ""}`))
+		rrEmptyHost := httptest.NewRecorder()
+		api.NetworkTraceroute(rrEmptyHost, reqEmptyHost)
+		if rrEmptyHost.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rrEmptyHost.Code)
+		}
+
+		reqBadHost := httptest.NewRequest(http.MethodPost, "/api/network/traceroute", strings.NewReader(`{"host": "bad;host"}`))
+		rrBadHost := httptest.NewRecorder()
+		api.NetworkTraceroute(rrBadHost, reqBadHost)
+		if rrBadHost.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rrBadHost.Code)
+		}
+	})
+
+	// 3. NetworkDNS
+	t.Run("NetworkDNS", func(t *testing.T) {
+		reqGet := httptest.NewRequest(http.MethodGet, "/api/network/dns", nil)
+		rrGet := httptest.NewRecorder()
+		api.NetworkDNS(rrGet, reqGet)
+		if rrGet.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", rrGet.Code)
+		}
+
+		reqBadJSON := httptest.NewRequest(http.MethodPost, "/api/network/dns", strings.NewReader("{invalid"))
+		rrBadJSON := httptest.NewRecorder()
+		api.NetworkDNS(rrBadJSON, reqBadJSON)
+		if rrBadJSON.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rrBadJSON.Code)
+		}
+
+		reqEmptyHost := httptest.NewRequest(http.MethodPost, "/api/network/dns", strings.NewReader(`{"host": ""}`))
+		rrEmptyHost := httptest.NewRecorder()
+		api.NetworkDNS(rrEmptyHost, reqEmptyHost)
+		if rrEmptyHost.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rrEmptyHost.Code)
+		}
+
+		reqBadHost := httptest.NewRequest(http.MethodPost, "/api/network/dns", strings.NewReader(`{"host": "bad;host"}`))
+		rrBadHost := httptest.NewRecorder()
+		api.NetworkDNS(rrBadHost, reqBadHost)
+		if rrBadHost.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rrBadHost.Code)
+		}
+	})
+
+	// 4. NetworkHTTPTest
+	t.Run("NetworkHTTPTest", func(t *testing.T) {
+		reqGet := httptest.NewRequest(http.MethodGet, "/api/network/http-test", nil)
+		rrGet := httptest.NewRecorder()
+		api.NetworkHTTPTest(rrGet, reqGet)
+		if rrGet.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", rrGet.Code)
+		}
+
+		reqBadJSON := httptest.NewRequest(http.MethodPost, "/api/network/http-test", strings.NewReader("{invalid"))
+		rrBadJSON := httptest.NewRecorder()
+		api.NetworkHTTPTest(rrBadJSON, reqBadJSON)
+		if rrBadJSON.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rrBadJSON.Code)
+		}
+
+		reqEmptyURL := httptest.NewRequest(http.MethodPost, "/api/network/http-test", strings.NewReader(`{"url": ""}`))
+		rrEmptyURL := httptest.NewRecorder()
+		api.NetworkHTTPTest(rrEmptyURL, reqEmptyURL)
+		if rrEmptyURL.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rrEmptyURL.Code)
+		}
+
+		reqSSRF := httptest.NewRequest(http.MethodPost, "/api/network/http-test", strings.NewReader(`{"url": "http://127.0.0.1/admin"}`))
+		rrSSRF := httptest.NewRecorder()
+		api.NetworkHTTPTest(rrSSRF, reqSSRF)
+		if rrSSRF.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for SSRF URL, got %d", rrSSRF.Code)
+		}
+	})
+
+	// 5. NetworkIP
+	t.Run("NetworkIP", func(t *testing.T) {
+		reqPost := httptest.NewRequest(http.MethodPost, "/api/network/ip", nil)
+		rrPost := httptest.NewRecorder()
+		api.NetworkIP(rrPost, reqPost)
+		if rrPost.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", rrPost.Code)
+		}
+	})
+}

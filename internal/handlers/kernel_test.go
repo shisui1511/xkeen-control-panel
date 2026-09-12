@@ -210,3 +210,120 @@ func TestKernelDebug(t *testing.T) {
 		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestKernelHandlers_Validation(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+
+	// 1. KernelList: POST -> 405
+	reqListPost := httptest.NewRequest(http.MethodPost, "/api/kernels", nil)
+	recListPost := httptest.NewRecorder()
+	api.KernelList(recListPost, reqListPost)
+	if recListPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST KernelList, got %d", recListPost.Code)
+	}
+
+	// 2. KernelStatus: POST -> 405, nonexistent -> 404
+	reqStatusPost := httptest.NewRequest(http.MethodPost, "/api/kernels/xray/status", nil)
+	recStatusPost := httptest.NewRecorder()
+	api.KernelStatus(recStatusPost, reqStatusPost)
+	if recStatusPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST KernelStatus, got %d", recStatusPost.Code)
+	}
+
+	reqStatusGhost := httptest.NewRequest(http.MethodGet, "/api/kernels/ghost/status", nil)
+	recStatusGhost := httptest.NewRecorder()
+	api.KernelStatus(recStatusGhost, reqStatusGhost)
+	if recStatusGhost.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for ghost KernelStatus, got %d", recStatusGhost.Code)
+	}
+
+	// 3. KernelCheck: GET -> 405, nonexistent -> 404
+	reqCheckGet := httptest.NewRequest(http.MethodGet, "/api/kernels/xray/check", nil)
+	recCheckGet := httptest.NewRecorder()
+	api.KernelCheck(recCheckGet, reqCheckGet)
+	if recCheckGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET KernelCheck, got %d", recCheckGet.Code)
+	}
+
+	reqCheckGhost := httptest.NewRequest(http.MethodPost, "/api/kernels/ghost/check", nil)
+	recCheckGhost := httptest.NewRecorder()
+	api.KernelCheck(recCheckGhost, reqCheckGhost)
+	if recCheckGhost.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for ghost KernelCheck, got %d", recCheckGhost.Code)
+	}
+
+	// 4. KernelInstall: GET -> 405, nonexistent -> 404
+	reqInstallGet := httptest.NewRequest(http.MethodGet, "/api/kernels/xray/install", nil)
+	recInstallGet := httptest.NewRecorder()
+	api.KernelInstall(recInstallGet, reqInstallGet)
+	if recInstallGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET KernelInstall, got %d", recInstallGet.Code)
+	}
+
+	reqInstallGhost := httptest.NewRequest(http.MethodPost, "/api/kernels/ghost/install", nil)
+	recInstallGhost := httptest.NewRecorder()
+	api.KernelInstall(recInstallGhost, reqInstallGhost)
+	if recInstallGhost.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for ghost KernelInstall, got %d", recInstallGhost.Code)
+	}
+
+	// 5. KernelChannel: GET -> 405, bad JSON -> 400, nonexistent -> 404
+	reqChanGet := httptest.NewRequest(http.MethodGet, "/api/kernels/xray/channel", nil)
+	recChanGet := httptest.NewRecorder()
+	api.KernelChannel(recChanGet, reqChanGet)
+	if recChanGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET KernelChannel, got %d", recChanGet.Code)
+	}
+
+	reqChanBad := httptest.NewRequest(http.MethodPost, "/api/kernels/xray/channel", strings.NewReader("{bad"))
+	recChanBad := httptest.NewRecorder()
+	api.KernelChannel(recChanBad, reqChanBad)
+	if recChanBad.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for bad JSON KernelChannel, got %d", recChanBad.Code)
+	}
+
+	reqChanGhost := httptest.NewRequest(http.MethodPost, "/api/kernels/ghost/channel", strings.NewReader(`{"channel":"stable"}`))
+	recChanGhost := httptest.NewRecorder()
+	api.KernelChannel(recChanGhost, reqChanGhost)
+	if recChanGhost.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for ghost KernelChannel, got %d", recChanGhost.Code)
+	}
+
+	// 6. KernelRollback: GET -> 405, nonexistent -> 404
+	reqRollGet := httptest.NewRequest(http.MethodGet, "/api/kernels/xray/rollback", nil)
+	recRollGet := httptest.NewRecorder()
+	api.KernelRollback(recRollGet, reqRollGet)
+	if recRollGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET KernelRollback, got %d", recRollGet.Code)
+	}
+
+	reqRollGhost := httptest.NewRequest(http.MethodPost, "/api/kernels/ghost/rollback", nil)
+	recRollGhost := httptest.NewRecorder()
+	api.KernelRollback(recRollGhost, reqRollGhost)
+	if recRollGhost.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for ghost KernelRollback, got %d", recRollGhost.Code)
+	}
+
+	// 7. KernelDownload: POST -> 405, nonexistent -> 404
+	reqDownPost := httptest.NewRequest(http.MethodPost, "/api/kernels/xray/download", nil)
+	recDownPost := httptest.NewRecorder()
+	api.KernelDownload(recDownPost, reqDownPost)
+	if recDownPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST KernelDownload, got %d", recDownPost.Code)
+	}
+
+	reqDownGhost := httptest.NewRequest(http.MethodGet, "/api/kernels/ghost/download", nil)
+	recDownGhost := httptest.NewRecorder()
+	api.KernelDownload(recDownGhost, reqDownGhost)
+	if recDownGhost.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for ghost KernelDownload, got %d", recDownGhost.Code)
+	}
+
+	// 8. KernelDebug: POST -> 405
+	reqDbgPost := httptest.NewRequest(http.MethodPost, "/api/kernels/debug", nil)
+	recDbgPost := httptest.NewRecorder()
+	api.KernelDebug(recDbgPost, reqDbgPost)
+	if recDbgPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST KernelDebug, got %d", recDbgPost.Code)
+	}
+}
