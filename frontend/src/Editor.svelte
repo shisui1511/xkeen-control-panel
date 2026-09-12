@@ -1232,9 +1232,18 @@
     selectedTemplate = null;
     templatePreview = '';
     showTemplatesModal = true;
-    const first = filteredTemplates[0];
-    if (first) {
-      loadTemplatePreview(first);
+    if (templates.length === 0) {
+      loadTemplates().then(() => {
+        const first = filteredTemplates[0];
+        if (first && !selectedTemplate) {
+          loadTemplatePreview(first);
+        }
+      });
+    } else {
+      const first = filteredTemplates[0];
+      if (first) {
+        loadTemplatePreview(first);
+      }
     }
   }
 
@@ -2010,7 +2019,7 @@
   onclose={() => (showTemplatesModal = false)}
 >
   <div style="margin-top: -10px; margin-bottom: 12px;">
-    <p class="templates-modal-subtitle" style="margin: 0; color: var(--fg-dim); font-size: 13px;">
+    <p class="templates-modal-subtitle">
       {$t('editor.templates_desc')}
     </p>
   </div>
@@ -2709,16 +2718,10 @@
     flex-shrink: 0;
   }
 
-  :global(.templates-modal-title-block) {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
   .templates-modal-subtitle {
     margin: 0;
     color: var(--fg-dim);
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .templates-body-grid {
