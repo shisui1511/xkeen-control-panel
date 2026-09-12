@@ -146,6 +146,7 @@ cat "$OUT_DIR/rotation-before.txt"
 # 3. Установка trap на восстановление ядра
 restore_kernel() {
     local exit_code=$?
+    set +e
     if [[ "$RESTORE" = true ]]; then
         echo "Восстановление (запуск) ядра на $SSH_ALIAS..."
         ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "$XKEEN_BIN -start" >/dev/null 2>&1 || true
