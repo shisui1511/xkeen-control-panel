@@ -199,12 +199,12 @@ func (w *WatchdogService) runCheck() {
 	}
 }
 
-// isKernelStatusHealthy interprets the free-form output of `xkeen -status`
+// IsKernelStatusHealthy interprets the free-form output of `xkeen -status`
 // (Russian and English builds both exist in the wild). Negative phrasing is
 // checked first: the real stopped-state output is literally "XKeen is not
 // running", which contains the substring "running" and would otherwise be
 // misread as healthy.
-func isKernelStatusHealthy(status string) bool {
+func IsKernelStatusHealthy(status string) bool {
 	lower := strings.ToLower(status)
 	negativeMarkers := []string{"not running", "не запущен", "незапущен", "не актив", "неактив", "не работает", "неработает", "остановлен", "stopped"}
 	for _, m := range negativeMarkers {
@@ -213,6 +213,10 @@ func isKernelStatusHealthy(status string) bool {
 		}
 	}
 	return strings.Contains(lower, "running") || strings.Contains(lower, "актив") || strings.Contains(lower, "запущен") || strings.Contains(lower, "работает")
+}
+
+func isKernelStatusHealthy(status string) bool {
+	return IsKernelStatusHealthy(status)
 }
 
 // CheckHealth polls XKeen's current status and updates the failure counter.

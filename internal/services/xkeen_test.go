@@ -390,3 +390,28 @@ exit 0
 		t.Fatalf("expected hookCalls=2 after failed Start(), got %d", hookCalls)
 	}
 }
+
+func TestXKeenService_StartFailureNotMaskedByNegativeStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	// When start fails, status reports "XKeen is not running" (which contains "running").
+	// Verify that this negative phrasing is NOT misidentified as a successful start.
+	script := `#!/bin/sh
+if [ "$1" = "-status" ]; then
+    echo "XKeen is not running"
+    exit 0
+fi
+echo "failed to start"
+exit 1
+`
+	if err := os.WriteFile(dummy, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewXKeenService(dummy, tmpDir)
+	_, err := svc.Start()
+	if err == nil {
+		t.Fatal("expected error when start failed and status is 'XKeen is not running', got nil")
+	}
+}
+

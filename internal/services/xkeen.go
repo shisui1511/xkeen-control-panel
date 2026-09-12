@@ -433,7 +433,7 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 		}
 		if isStart {
 			status, _ := s.Status()
-			if strings.Contains(status, "running") || strings.Contains(status, "активен") {
+			if IsKernelStatusHealthy(status) {
 				return output, nil
 			}
 		}
@@ -449,7 +449,7 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 		}
 		if err != nil && isStart {
 			status, _ := s.Status()
-			if strings.Contains(status, "running") || strings.Contains(status, "активен") {
+			if IsKernelStatusHealthy(status) {
 				return output, nil
 			}
 		}

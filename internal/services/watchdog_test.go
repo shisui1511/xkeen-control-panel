@@ -2062,7 +2062,15 @@ func TestWatchdogService_RestartWindowSuppressesFailures(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	dummy := filepath.Join(tmpDir, "xkeen")
-	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
+	script := `#!/bin/sh
+if [ "$1" = "-restart" ]; then
+    echo "Restarting XKeen..."
+    exit 0
+fi
+echo "XKeen is not running"
+exit 1
+`
+	if err := os.WriteFile(dummy, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
 
