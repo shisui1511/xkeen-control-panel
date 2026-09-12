@@ -231,5 +231,117 @@
     "fg": "--fg-terminal",
     "bg": "--bg-deep",
     "minRatio": 4.5
+  },
+  {
+    "id": "seq-1-on-card-dark",
+    "theme": "dark",
+    "fg": "--seq-1",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-2-on-card-dark",
+    "theme": "dark",
+    "fg": "--seq-2",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-3-on-card-dark",
+    "theme": "dark",
+    "fg": "--seq-3",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-4-on-card-dark",
+    "theme": "dark",
+    "fg": "--seq-4",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-5-on-card-dark",
+    "theme": "dark",
+    "fg": "--seq-5",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-6-on-card-dark",
+    "theme": "dark",
+    "fg": "--seq-6",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-7-on-card-dark",
+    "theme": "dark",
+    "fg": "--seq-7",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-8-on-card-dark",
+    "theme": "dark",
+    "fg": "--seq-8",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-1-on-card-light",
+    "theme": "light",
+    "fg": "--seq-1",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-2-on-card-light",
+    "theme": "light",
+    "fg": "--seq-2",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-3-on-card-light",
+    "theme": "light",
+    "fg": "--seq-3",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-4-on-card-light",
+    "theme": "light",
+    "fg": "--seq-4",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-5-on-card-light",
+    "theme": "light",
+    "fg": "--seq-5",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-6-on-card-light",
+    "theme": "light",
+    "fg": "--seq-6",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-7-on-card-light",
+    "theme": "light",
+    "fg": "--seq-7",
+    "bg": "--bg-card",
+    "minRatio": 4.5
+  },
+  {
+    "id": "seq-8-on-card-light",
+    "theme": "light",
+    "fg": "--seq-8",
+    "bg": "--bg-card",
+    "minRatio": 4.5
   }
 ]
