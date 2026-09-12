@@ -47,6 +47,12 @@ const WHITELIST = [
     value: '#d9e7f4',
     reason:
       'Терминальная поверхность --fg-terminal намеренно тема-инвариантна: парный к --bg-terminal литерал переднего плана (global.css)'
+  },
+  {
+    file: 'components/Button.svelte',
+    value: '#fff',
+    reason:
+      'Контрастный текст на заливке .btn-danger (--danger): белый текст читаем на обоих значениях --danger (тёмная и светлая тема) без переключения — проектного токена "текст на danger-заливке" не существует, а --btn-primary-text семантически принадлежит primary/warning-варианту (120-03)'
   }
 ];
 

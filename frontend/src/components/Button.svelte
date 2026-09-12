@@ -57,12 +57,12 @@
 
   .btn-primary {
     background: linear-gradient(180deg, var(--accent), var(--accent-2));
-    color: var(--btn-primary-text, #03182a);
+    color: var(--btn-primary-text);
     box-shadow: 0 6px 18px -8px var(--accent);
   }
   .btn-primary:hover:not(:disabled) {
     filter: brightness(1.07);
-    color: var(--btn-primary-text, #03182a);
+    color: var(--btn-primary-text);
   }
 
   .btn-secondary {
@@ -83,6 +83,15 @@
   .btn-danger:hover:not(:disabled) {
     opacity: 0.92;
     color: #fff;
+  }
+
+  .btn-warning {
+    background: var(--warning);
+    color: var(--btn-primary-text);
+  }
+  .btn-warning:hover:not(:disabled) {
+    opacity: 0.92;
+    color: var(--btn-primary-text);
   }
 
   .spinner {

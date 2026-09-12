@@ -1,10 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
 import { render } from 'svelte/server';
 import Button from './Button.svelte';
-
-const SOURCE = fs.readFileSync(path.join(__dirname, 'Button.svelte'), 'utf8');
+import SOURCE from './Button.svelte?raw';
 
 describe('Button — предупреждающий вариант', () => {
   it('renders the btn-warning class for variant="warning"', () => {
