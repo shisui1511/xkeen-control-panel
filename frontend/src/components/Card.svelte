@@ -49,10 +49,9 @@
     justify-content: space-between;
     margin: calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad)) 18px;
     padding: 16px 22px 12px;
-    font-size: 11.5px;
-    font-weight: 700;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
     color: var(--fg-secondary);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
@@ -64,7 +63,5 @@
     display: flex;
     gap: 8px;
     align-items: center;
-    text-transform: none;
-    letter-spacing: normal;
   }
 </style>

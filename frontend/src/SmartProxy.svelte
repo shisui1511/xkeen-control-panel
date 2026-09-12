@@ -929,7 +929,7 @@
   }
 
   .hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-top: 4px;
   }
@@ -1017,7 +1017,7 @@
     border-radius: 50%;
     background: var(--accent);
     color: var(--btn-primary-text);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
   }
 
@@ -1076,7 +1076,7 @@
     left: 0;
     background: var(--bg-card);
     padding: 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     color: var(--fg-secondary);
     border-right: 1px solid var(--border);
@@ -1092,7 +1092,7 @@
 
   .hour-header-cell {
     padding: 6px 4px;
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     text-align: center;
     color: var(--fg-faint);
@@ -1280,7 +1280,7 @@
   }
 
   .template-badge {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
     background: rgba(255, 255, 255, 0.05);
@@ -1334,7 +1334,7 @@
     position: relative;
     display: flex;
     justify-content: space-between;
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-faint);
   }
@@ -1376,10 +1376,9 @@
 
   /* Mode color badges */
   :global(.sp-mode-badge) {
-    font-size: 10.5px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
     padding: 2px 7px;
     border-radius: 4px;
   }

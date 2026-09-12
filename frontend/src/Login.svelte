@@ -195,7 +195,12 @@
     border-radius: 13px;
     display: grid;
     place-items: center;
-    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 60%, #0e6f96 100%);
+    background: linear-gradient(
+      135deg,
+      var(--accent) 0%,
+      var(--accent-2) 60%,
+      color-mix(in srgb, var(--accent-2) 70%, black) 100%
+    );
     box-shadow:
       0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
       0 14px 36px -12px color-mix(in srgb, var(--accent) 70%, transparent);
@@ -221,14 +226,13 @@
   .login-brand .b1 .x {
     color: var(--accent);
     font-weight: 800;
-    text-shadow: 0 0 16px rgba(41, 194, 240, 0.5);
+    text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 50%, transparent);
   }
 
   /* "Control Panel" — mirrors sidebar .b2 */
   .login-brand .b2 {
-    font-size: 10px;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
+    font-size: var(--font-size-xs);
+    letter-spacing: 0.05em;
     color: var(--fg-dim);
     font-weight: 600;
   }
@@ -236,7 +240,7 @@
   .login-footer {
     display: flex;
     justify-content: space-between;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
     margin-top: 20px;
