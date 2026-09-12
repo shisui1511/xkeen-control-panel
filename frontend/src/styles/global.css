@@ -1683,6 +1683,14 @@ td.mono,
   color: var(--fg-secondary);
 }
 
+.status-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
 .status-badge.running,
 .status-badge.active {
   color: var(--success);
@@ -1694,6 +1702,24 @@ td.mono,
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
   background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.status-badge.warning {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.status-badge.idle {
+  color: var(--fg-secondary);
+  border-color: color-mix(in srgb, var(--fg-secondary) 45%, transparent);
+  background: color-mix(in srgb, var(--fg-secondary) 10%, transparent);
+}
+
+.status-badge.info {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 /* version chip */

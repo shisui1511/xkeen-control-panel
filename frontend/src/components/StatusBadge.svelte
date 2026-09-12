@@ -7,4 +7,8 @@
   let { variant, label }: Props = $props();
 </script>
 
-<span class="status-badge">{label}</span>
+<!-- Стили модификаторов живут в global.css под .status-badge / .status-badge.{variant} -->
+<span class="status-badge {variant}">
+  <span class="status-badge-dot" aria-hidden="true"></span>
+  {label}
+</span>

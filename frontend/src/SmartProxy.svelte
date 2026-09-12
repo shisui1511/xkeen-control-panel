@@ -5,6 +5,7 @@
   import PageHeader from './PageHeader.svelte';
   import Button from './components/Button.svelte';
   import Select from './components/Select.svelte';
+  import StatusBadge from './components/StatusBadge.svelte';
   import Icon from './lib/components/Icon.svelte';
   import { t, currentLang } from './i18n';
   import { showConfirm, showToast } from './stores';
@@ -444,8 +445,10 @@
           {#if hasActive}
             <div class="status-active-badges">
               {#each status.active as p}
-                <span class="status-badge active">{p.name} → {p.current_proxy || p.proxy_name}</span
-                >
+                <StatusBadge
+                  variant="running"
+                  label="{p.name} → {p.current_proxy || p.proxy_name}"
+                />
               {/each}
             </div>
           {:else}
@@ -661,9 +664,10 @@
               <div class="lbl">{$t('smartproxy.target_group')}</div>
             </div>
             <div class="ctrl">
-              <span class="status-badge" class:active={p.enabled}>
-                {p.group_name} → {p.current_proxy || p.proxy_name}
-              </span>
+              <StatusBadge
+                variant={p.enabled ? 'running' : 'idle'}
+                label="{p.group_name} → {p.current_proxy || p.proxy_name}"
+              />
             </div>
           </div>
 
