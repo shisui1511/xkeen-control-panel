@@ -321,3 +321,313 @@ func TestChangePassword_Success(t *testing.T) {
 		t.Error("old password still verifies after change")
 	}
 }
+
+func TestAuthService_SessionLifecycle(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	// 1. CreateSession
+	session, err := svc.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	if session.Token == "" || session.CSRFToken == "" {
+		t.Fatal("expected non-empty Token and CSRFToken")
+	}
+	if session.ExpiresAt.Before(time.Now()) {
+		t.Fatal("expected ExpiresAt in the future")
+	}
+
+	// 2. Validate valid session
+	validated, err := svc.ValidateSession(session.Token)
+	if err != nil {
+		t.Fatalf("ValidateSession failed: %v", err)
+	}
+	if validated.Token != session.Token {
+		t.Errorf("validated token mismatch: got %q, want %q", validated.Token, session.Token)
+	}
+
+	// 3. Validate non-existent token
+	_, err = svc.ValidateSession("random-non-existent-token")
+	if err == nil {
+		t.Error("expected error for non-existent session, got nil")
+	}
+
+	// 4. DeleteSession
+	svc.DeleteSession(session.Token)
+	_, err = svc.ValidateSession(session.Token)
+	if err == nil {
+		t.Error("expected error after DeleteSession, got nil")
+	}
+}
+
+func TestAuthService_Stop_And_CleanupGoroutines(t *testing.T) {
+	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	// Stop closes stopCh; ensure multiple or clean stop does not panic
+	svc.Stop()
+}
+
+func TestAuthService_ValidateCSRF(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	session, err := svc.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	// 1. Valid CSRF
+	if !svc.ValidateCSRF(session, session.CSRFToken) {
+		t.Error("expected ValidateCSRF to return true for matching CSRF token")
+	}
+
+	// 2. Invalid CSRF
+	if svc.ValidateCSRF(session, "wrong-csrf-token") {
+		t.Error("expected ValidateCSRF to return false for wrong CSRF token")
+	}
+
+	// 3. Empty CSRF
+	if svc.ValidateCSRF(session, "") {
+		t.Error("expected ValidateCSRF to return false for empty CSRF token")
+	}
+}
+
+func TestAuthService_HandleMe(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	// 1. Without cookie -> authenticated: false
+	req1 := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	rec1 := httptest.NewRecorder()
+	svc.HandleMe(rec1, req1)
+	var resp1 map[string]interface{}
+	if err := json.NewDecoder(rec1.Body).Decode(&resp1); err != nil {
+		t.Fatal(err)
+	}
+	if resp1["authenticated"] != false {
+		t.Errorf("expected authenticated=false, got %v", resp1["authenticated"])
+	}
+
+	// 2. With invalid cookie -> authenticated: false
+	req2 := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req2.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "invalid-token"})
+	rec2 := httptest.NewRecorder()
+	svc.HandleMe(rec2, req2)
+	var resp2 map[string]interface{}
+	if err := json.NewDecoder(rec2.Body).Decode(&resp2); err != nil {
+		t.Fatal(err)
+	}
+	if resp2["authenticated"] != false {
+		t.Errorf("expected authenticated=false, got %v", resp2["authenticated"])
+	}
+
+	// 3. With valid session cookie -> authenticated: true
+	session, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req3 := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req3.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.Token})
+	rec3 := httptest.NewRecorder()
+	svc.HandleMe(rec3, req3)
+	var resp3 map[string]interface{}
+	if err := json.NewDecoder(rec3.Body).Decode(&resp3); err != nil {
+		t.Fatal(err)
+	}
+	if resp3["authenticated"] != true {
+		t.Errorf("expected authenticated=true, got %v", resp3["authenticated"])
+	}
+	if resp3["csrf_token"] != session.CSRFToken {
+		t.Errorf("expected csrf_token %q, got %q", session.CSRFToken, resp3["csrf_token"])
+	}
+}
+
+func TestAuthService_HandleLogout(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	session, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Method not allowed for GET
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/auth/logout", nil)
+	recGet := httptest.NewRecorder()
+	svc.HandleLogout(recGet, reqGet)
+	if recGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET logout, got %d", recGet.Code)
+	}
+
+	// 2. POST logout with valid cookie
+	reqPost := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	reqPost.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.Token})
+	recPost := httptest.NewRecorder()
+	svc.HandleLogout(recPost, reqPost)
+	if recPost.Code != http.StatusOK {
+		t.Errorf("expected 200 for POST logout, got %d", recPost.Code)
+	}
+
+	// Cookie must be expired
+	cookies := recPost.Result().Cookies()
+	var logoutCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == SessionCookieName {
+			logoutCookie = c
+			break
+		}
+	}
+	if logoutCookie == nil || logoutCookie.MaxAge != -1 {
+		t.Errorf("expected session cookie to have MaxAge=-1, got %v", logoutCookie)
+	}
+
+	// Session must be deleted
+	if _, err := svc.ValidateSession(session.Token); err == nil {
+		t.Error("expected session to be deleted after logout")
+	}
+}
+
+func TestAuthService_RequireAuthMiddleware(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	var handlerExecuted bool
+	protectedHandler := svc.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		handlerExecuted = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// 1. GET without session -> 401
+	handlerExecuted = false
+	reqNoAuth := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	recNoAuth := httptest.NewRecorder()
+	protectedHandler(recNoAuth, reqNoAuth)
+	if recNoAuth.Code != http.StatusUnauthorized || handlerExecuted {
+		t.Errorf("expected 401 Unauthorized, got %d, executed=%v", recNoAuth.Code, handlerExecuted)
+	}
+
+	// 2. GET with valid session -> 200
+	session, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	handlerExecuted = false
+	reqGetAuth := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	reqGetAuth.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.Token})
+	recGetAuth := httptest.NewRecorder()
+	protectedHandler(recGetAuth, reqGetAuth)
+	if recGetAuth.Code != http.StatusOK || !handlerExecuted {
+		t.Errorf("expected 200 OK for authenticated GET, got %d, executed=%v", recGetAuth.Code, handlerExecuted)
+	}
+
+	// 3. POST with valid session but missing CSRF token -> 403 Forbidden
+	handlerExecuted = false
+	reqPostNoCSRF := httptest.NewRequest(http.MethodPost, "/api/data", nil)
+	reqPostNoCSRF.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.Token})
+	recPostNoCSRF := httptest.NewRecorder()
+	protectedHandler(recPostNoCSRF, reqPostNoCSRF)
+	if recPostNoCSRF.Code != http.StatusForbidden || handlerExecuted {
+		t.Errorf("expected 403 Forbidden without CSRF, got %d, executed=%v", recPostNoCSRF.Code, handlerExecuted)
+	}
+
+	// 4. POST with valid session and invalid CSRF token -> 403 Forbidden
+	handlerExecuted = false
+	reqPostBadCSRF := httptest.NewRequest(http.MethodPost, "/api/data", nil)
+	reqPostBadCSRF.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.Token})
+	reqPostBadCSRF.Header.Set(CSRFHeaderName, "invalid-token")
+	recPostBadCSRF := httptest.NewRecorder()
+	protectedHandler(recPostBadCSRF, reqPostBadCSRF)
+	if recPostBadCSRF.Code != http.StatusForbidden || handlerExecuted {
+		t.Errorf("expected 403 Forbidden with bad CSRF, got %d, executed=%v", recPostBadCSRF.Code, handlerExecuted)
+	}
+
+	// 5. POST with valid session and matching CSRF token -> 200 OK
+	handlerExecuted = false
+	reqPostGood := httptest.NewRequest(http.MethodPost, "/api/data", nil)
+	reqPostGood.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.Token})
+	reqPostGood.Header.Set(CSRFHeaderName, session.CSRFToken)
+	recPostGood := httptest.NewRecorder()
+	protectedHandler(recPostGood, reqPostGood)
+	if recPostGood.Code != http.StatusOK || !handlerExecuted {
+		t.Errorf("expected 200 OK with valid CSRF, got %d, executed=%v", recPostGood.Code, handlerExecuted)
+	}
+}
+
+func TestAuthService_HandleSetup_Scenarios(t *testing.T) {
+	var savedHash string
+	onPasswordSet := func(hash string) error {
+		savedHash = hash
+		return nil
+	}
+
+	svc := NewAuthService("", false, 5, 5*time.Minute, onPasswordSet)
+	defer svc.Stop()
+
+	// 1. Method not allowed (GET)
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/auth/setup", nil)
+	recGet := httptest.NewRecorder()
+	svc.HandleSetup(recGet, reqGet)
+	if recGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", recGet.Code)
+	}
+
+	// 2. Invalid JSON
+	reqBadJSON := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader([]byte("{invalid")))
+	recBadJSON := httptest.NewRecorder()
+	svc.HandleSetup(recBadJSON, reqBadJSON)
+	if recBadJSON.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for bad json, got %d", recBadJSON.Code)
+	}
+
+	// 3. Password too short (< 8 chars)
+	reqShort := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader([]byte(`{"password":"123"}`)))
+	recShort := httptest.NewRecorder()
+	svc.HandleSetup(recShort, reqShort)
+	if recShort.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for short password, got %d", recShort.Code)
+	}
+
+	// 4. Successful setup (>= 8 chars)
+	reqGood := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader([]byte(`{"password":"validpassword123"}`)))
+	recGood := httptest.NewRecorder()
+	svc.HandleSetup(recGood, reqGood)
+	if recGood.Code != http.StatusOK {
+		t.Errorf("expected 200 for good setup, got %d", recGood.Code)
+	}
+	if savedHash == "" {
+		t.Error("expected onPasswordSet callback to receive saved hash")
+	}
+
+	// 5. Repeated setup when password is already set -> 403 Forbidden
+	reqSecond := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader([]byte(`{"password":"validpassword456"}`)))
+	recSecond := httptest.NewRecorder()
+	svc.HandleSetup(recSecond, reqSecond)
+	if recSecond.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for second setup attempt, got %d", recSecond.Code)
+	}
+}
+
+func TestRateLimiter_Reset_And_GetLockoutRemaining(t *testing.T) {
+	rl := &RateLimiter{attempts: make(map[string]*LoginAttempts)}
+
+	// Initial remaining should be 0
+	if rem := rl.GetLockoutRemaining("1.2.3.4"); rem != 0 {
+		t.Errorf("expected 0 remaining for clean IP, got %v", rem)
+	}
+
+	// CheckLimit until locked
+	for i := 0; i < 3; i++ {
+		_ = rl.CheckLimit("1.2.3.4", 3, 5*time.Minute)
+	}
+
+	rem := rl.GetLockoutRemaining("1.2.3.4")
+	if rem <= 0 || rem > 5*time.Minute {
+		t.Errorf("expected lockout remaining between 0 and 5m, got %v", rem)
+	}
+
+	// Reset attempts
+	rl.ResetAttempts("1.2.3.4")
+	if remAfter := rl.GetLockoutRemaining("1.2.3.4"); remAfter != 0 {
+		t.Errorf("expected 0 remaining after reset, got %v", remAfter)
+	}
+}
