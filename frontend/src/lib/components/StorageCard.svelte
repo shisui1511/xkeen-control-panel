@@ -37,10 +37,10 @@
   {@const isLowSpace = diskStats.free < 10 * 1024 * 1024}
   {@const barColor =
     usedPercent > 90 || isLowSpace
-      ? 'var(--color-danger, #e74c3c)'
+      ? 'var(--danger)'
       : usedPercent >= 80
-        ? 'var(--color-warning, #f39c12)'
-        : 'var(--color-success, var(--color-primary, #2ecc71))'}
+        ? 'var(--warning)'
+        : 'var(--success)'}
 
   <div class="card mb-2">
     <div class="card-label">{$t('settings.section_storage')}</div>
@@ -59,7 +59,7 @@
 
         <div
           class="progress-container"
-          style="background-color: var(--bg-tertiary, #2c2c2e); height: 8px; border-radius: var(--radius-sm, 4px); overflow: hidden; width: 100%;"
+          style="background-color: var(--border); height: 8px; border-radius: var(--radius-sm, 4px); overflow: hidden; width: 100%;"
         >
           <div
             class="progress-bar"
@@ -73,7 +73,7 @@
         </div>
 
         <div
-          style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-muted);"
+          style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary);"
         >
           <span>
             {$t('settings.storage_used').replace('{used}', formatBytes(diskStats.used))}
