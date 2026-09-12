@@ -2794,11 +2794,7 @@
                   {/if}
                   <span class="item-name">{g.name}</span>
                   {#if g.includeAll}
-                    <span
-                      class="item-badge"
-                      style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; font-size: 10px; text-transform: none;"
-                      >include-all</span
-                    >
+                    <span class="item-badge badge-include-all">include-all</span>
                   {/if}
                   {#if g.useProviders && g.useProviders.length > 0}
                     <span
@@ -3645,8 +3641,9 @@
             </div>
           </div>
 
-          <pre class="yaml-preview" data-testid="mihomo-yaml-preview">{yaml ||
-              $t('mihomo.empty_yaml_hint')}</pre>
+          <pre class="yaml-preview" data-testid="mihomo-yaml-preview">{#if yaml}{yaml}{:else}<span
+                class="yaml-preview-hint">{$t('mihomo.empty_yaml_hint')}</span
+              >{/if}</pre>
 
           {#if validationError}
             <div
@@ -4281,7 +4278,7 @@
 
   .sec-count {
     background: var(--primary);
-    color: #0c2237;
+    color: var(--bg-page);
     font-size: 9px;
     font-weight: 700;
     border-radius: 8px;
@@ -4365,9 +4362,11 @@
     background: rgba(255, 255, 255, 0.08);
     color: var(--fg-secondary);
   }
+  /* --seq-1..6 (DS2-02): назначено по порядку объявления правил ниже —
+     group/http/wireguard/trojan/match/zkeen-include, воспроизводимо. */
   .type-group {
     background: rgba(139, 92, 246, 0.15);
-    color: #a78bfa;
+    color: var(--seq-1);
   }
   .badge-warning {
     background: color-mix(in srgb, var(--warning) 20%, transparent);
@@ -4388,7 +4387,7 @@
   }
   .type-http {
     background: rgba(56, 189, 248, 0.15);
-    color: #38bdf8;
+    color: var(--seq-2);
   }
   .type-shadowsocks {
     background: rgba(239, 91, 107, 0.15);
@@ -4405,15 +4404,15 @@
   }
   .type-wireguard {
     background: rgba(168, 85, 247, 0.15);
-    color: #c084fc;
+    color: var(--seq-3);
   }
   .type-trojan {
     background: rgba(236, 72, 153, 0.15);
-    color: #f472b6;
+    color: var(--seq-4);
   }
   .type-match {
     background: rgba(99, 102, 241, 0.15);
-    color: #818cf8;
+    color: var(--seq-5);
     font-weight: 600;
   }
 
@@ -4421,7 +4420,14 @@
     margin-top: 8px;
     border-top: 1px dashed var(--border);
     background: var(--bg-surface-hover, rgba(255, 255, 255, 0.02));
-    border-left: 3px solid #818cf8;
+    border-left: 3px solid var(--seq-5);
+  }
+
+  .badge-include-all {
+    background: color-mix(in srgb, var(--seq-5) 20%, transparent);
+    color: var(--seq-5);
+    font-size: 10px;
+    text-transform: none;
   }
 
   .conf-dropzone {
@@ -4876,19 +4882,32 @@
     font-size: 12px;
   }
 
+  /* --code-*: единый набор для статического YAML-превью (DS2-01), var-chaining
+     на --cm-* из global.css — собственное пространство имён, не новая палитра. */
   .yaml-preview {
     flex: 1;
     overflow-y: auto;
     margin: 0;
     padding: 14px 16px;
-    background: #1e1e1e;
-    color: #d4d4d4;
+    background: var(--code-bg);
+    color: var(--code-fg);
+    border: 1px solid var(--code-border);
     font-family: var(--font-mono, monospace);
     font-size: var(--font-size-xs, 0.75rem);
     line-height: 1.5;
     white-space: pre;
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong) transparent;
+  }
+
+  .yaml-preview-hint {
+    color: var(--code-comment);
+    font-style: italic;
+  }
+
+  .yaml-preview-hint::before {
+    content: '# ';
+    color: var(--code-punctuation);
   }
 
   .gen-preview-footer {
@@ -5106,7 +5125,7 @@
 
   .zkeen-include-badge {
     background: rgba(139, 92, 246, 0.1);
-    color: #a78bfa;
+    color: var(--seq-6);
     font-size: 10px;
     padding: 1px 4px;
     border-radius: 4px;
@@ -5164,7 +5183,7 @@
 
   input:checked + .slider:before {
     transform: translateX(14px);
-    background-color: #0c2237;
+    background-color: var(--bg-page);
   }
 
   .slider.round {
