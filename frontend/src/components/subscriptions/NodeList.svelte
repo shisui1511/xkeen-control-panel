@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { t } from '../../i18n';
   import { detectWireGuardDialect } from '../../lib/awgFields';
+  import Select from '../Select.svelte';
 
   export interface Node {
     tag: string;
@@ -391,12 +392,12 @@
           {#if enableXray}
             <div class="sub-node-dialer-proxy-container" data-testid="dialer-proxy-container">
               {#if dialerProxyTargets && dialerProxyTargets.length > 0}
-                <select
+                <Select
                   class="form-select sub-node-dialer-select"
                   data-testid="dialer-proxy-select"
                   value={node.dialer_proxy || ''}
                   onchange={(e) => {
-                    const val = (e.currentTarget as HTMLSelectElement).value;
+                    const val = e.currentTarget.value;
                     onSetDialerProxy?.(subId, node.tag, val);
                   }}
                   title={$t('subscr.dialer_proxy.hint')}
@@ -411,7 +412,7 @@
                       </option>
                     {/if}
                   {/each}
-                </select>
+                </Select>
               {:else if node.dialer_proxy}
                 <span class="badge badge-tag" data-testid="dialer-proxy-active-tag">
                   {node.dialer_proxy}
@@ -651,7 +652,7 @@
     gap: 5px;
     padding: 3px 10px;
     border-radius: var(--radius-full, 9999px);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--border);
@@ -673,7 +674,7 @@
   }
 
   .node-filter-chip .chip-count {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     opacity: 0.7;
   }
 
@@ -779,7 +780,7 @@
   }
 
   .sub-node-avatar-text {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 800;
     text-transform: uppercase;
     color: inherit;
@@ -818,7 +819,7 @@
   .sub-node-name-new {
     color: var(--warning);
     font-weight: 700;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     letter-spacing: 0.02em;
   }
 
@@ -828,7 +829,7 @@
     color: var(--accent);
     padding: 2px 10px;
     border-radius: 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     display: inline-flex;
     align-items: center;
@@ -840,7 +841,7 @@
   .sub-node-row.active .sub-node-chip-blue {
     background: rgba(255, 255, 255, 0.12);
     border-color: rgba(255, 255, 255, 0.25);
-    color: #fff;
+    color: var(--fg-terminal);
   }
 
   .sub-node-chip-dialect {
@@ -849,7 +850,7 @@
     color: var(--fg-secondary);
     padding: 2px 8px;
     border-radius: 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     display: inline-flex;
     align-items: center;
@@ -859,13 +860,13 @@
   .sub-node-chip-dialect.awg {
     background: var(--purple-bg, rgba(168, 85, 247, 0.12));
     border-color: var(--purple-border, rgba(168, 85, 247, 0.3));
-    color: var(--purple, #c084fc);
+    color: var(--purple);
   }
 
   .sub-node-chip-compat {
     padding: 2px 8px;
     border-radius: 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     display: inline-flex;
     align-items: center;
@@ -888,7 +889,7 @@
     color: var(--warning);
     padding: 2px 6px;
     border-radius: var(--radius-sm, 4px);
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     letter-spacing: 0.05em;
     display: inline-block;
@@ -898,7 +899,7 @@
   .sub-node-row.active .sub-node-chip-gold {
     background: rgba(255, 255, 255, 0.15);
     border-color: rgba(255, 255, 255, 0.3);
-    color: #fff;
+    color: var(--fg-terminal);
   }
 
   .sub-node-meta-row {
@@ -939,7 +940,7 @@
   }
 
   .sub-node-ping-val {
-    font-size: 10.5px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-dim);
   }
@@ -955,28 +956,28 @@
   }
 
   .sub-node-status-icon.success {
-    background: rgba(34, 197, 94, 0.15);
-    border: 1px solid rgba(34, 197, 94, 0.3);
-    color: #22c55e;
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+    color: var(--success);
   }
 
   .sub-node-status-icon.danger {
-    background: rgba(239, 68, 68, 0.15);
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
     color: var(--danger);
   }
 
   .sub-node-status-icon.default-ok {
-    background: rgba(34, 197, 94, 0.15);
-    border: 1px solid rgba(34, 197, 94, 0.3);
-    color: #22c55e;
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+    color: var(--success);
   }
 
   .latency-fast {
-    color: #22c55e;
+    color: var(--success);
   }
   .latency-medium {
-    color: #f59e0b;
+    color: var(--warning);
   }
   .latency-slow {
     color: var(--danger);
@@ -993,19 +994,18 @@
     flex-shrink: 0;
   }
 
-  .sub-node-dialer-select {
-    padding: 3px 8px;
-    font-size: 11px;
-    border-radius: var(--radius-sm, 4px);
-    background: var(--bg-card);
-    color: var(--fg-primary);
-    border: 1px solid var(--border);
+  .sub-node-dialer-proxy-container :global(.xcp-select) {
     max-width: 180px;
-    cursor: pointer;
+  }
+
+  :global(.sub-node-dialer-select) {
+    height: 28px !important;
+    font-size: var(--font-size-xs) !important;
+    padding: 2px 28px 2px 8px !important;
   }
 
   .sub-node-na-badge {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 2px 6px;
     border-radius: var(--radius-sm, 4px);
     background: var(--bg-card-subtle);
@@ -1016,7 +1016,7 @@
   }
 
   .sub-node-no-targets {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-faint);
     white-space: nowrap;
   }
