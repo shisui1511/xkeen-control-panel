@@ -42,7 +42,7 @@
     text-align: center;
     padding: 40px 24px;
     background: var(--bg-card);
-    border: 1px dashed var(--border);
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     gap: 10px;
   }

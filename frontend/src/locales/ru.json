@@ -890,6 +890,8 @@
   "traffic.timeframe_1h": "1 час",
   "traffic.top_clients": "Топ устройств в сети",
   "traffic.top_clients_desc": "Наиболее активные клиенты локальной сети по объёму потребляемого трафика",
+  "traffic.top_clients_empty_title": "Устройства не обнаружены",
+  "traffic.top_clients_empty_desc": "Здесь появится список наиболее активных клиентов локальной сети по объёму трафика",
   "traffic.no_clients": "Нет активных клиентов",
   "traffic.client_ip": "Устройство / IP",
   "traffic.client_speed": "Текущая скорость",
@@ -1325,6 +1327,7 @@
   "net.presets": "Пресеты",
   "net.history": "История проверок",
   "net.no_history": "История пуста",
+  "net.no_history_desc": "Здесь появятся результаты запусков Ping, Traceroute, DNS и HTTP-проверок",
   "net.rtt": "Время отклика: {rtt} мс",
   "net.port_open": "Порт {port} открыт",
   "net.port_closed": "Порт {port} закрыт ({error})",
@@ -2060,5 +2063,7 @@
   "watchdog.interception_active": "Перехват TPROXY может быть активен",
   "watchdog.interception_cleared": "Перехват TPROXY снят",
   "watchdog.no_incidents": "Инцидентов не зафиксировано",
+  "watchdog.empty_title": "Инцидентов не зафиксировано",
+  "watchdog.empty_desc": "Watchdog не выполнял аварийных действий с момента последнего запуска ядра",
   "svc.log_action_watchdog_reset": "Сброс Watchdog"
 }

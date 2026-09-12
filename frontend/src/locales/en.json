@@ -891,6 +891,8 @@
   "traffic.timeframe_1h": "1 hour",
   "traffic.top_clients": "Top LAN Devices",
   "traffic.top_clients_desc": "Most active local network clients by consumed traffic volume",
+  "traffic.top_clients_empty_title": "No devices detected",
+  "traffic.top_clients_empty_desc": "The most active local network clients by traffic volume will appear here",
   "traffic.no_clients": "No active clients",
   "traffic.client_ip": "Device / IP",
   "traffic.client_speed": "Current Speed",
@@ -1326,6 +1328,7 @@
   "net.presets": "Presets",
   "net.history": "Test History",
   "net.no_history": "No history",
+  "net.no_history_desc": "Results of Ping, Traceroute, DNS, and HTTP checks will appear here",
   "net.rtt": "RTT: {rtt} ms",
   "net.port_open": "Port {port} is open",
   "net.port_closed": "Port {port} is closed ({error})",
@@ -2061,5 +2064,7 @@
   "watchdog.interception_active": "TPROXY interception may still be active",
   "watchdog.interception_cleared": "TPROXY interception cleared",
   "watchdog.no_incidents": "No incidents recorded",
+  "watchdog.empty_title": "No incidents recorded",
+  "watchdog.empty_desc": "Watchdog has not performed any emergency actions since the core was last started",
   "svc.log_action_watchdog_reset": "Watchdog reset"
 }
