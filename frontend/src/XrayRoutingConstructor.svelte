@@ -5223,7 +5223,7 @@
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #fff;
+    background: var(--fg-terminal);
     transition: transform var(--transition-fast);
   }
 
@@ -5327,13 +5327,13 @@
   }
 
   .chip-domain {
-    background: rgba(13, 110, 253, 0.15);
-    color: #0d6efd;
+    background: color-mix(in srgb, var(--code-key) 15%, transparent);
+    color: var(--code-key);
   }
 
   .chip-ip {
-    background: rgba(25, 135, 84, 0.15);
-    color: #198754;
+    background: color-mix(in srgb, var(--code-string) 15%, transparent);
+    color: var(--code-string);
   }
 
   .form-card {
@@ -5472,13 +5472,13 @@
   }
 
   .type-socks {
-    background: rgba(13, 110, 253, 0.15);
-    color: #0d6efd;
+    background: color-mix(in srgb, var(--code-key) 15%, transparent);
+    color: var(--code-key);
   }
 
   .type-http {
-    background: rgba(111, 66, 193, 0.15);
-    color: #6f42c1;
+    background: color-mix(in srgb, var(--code-number) 15%, transparent);
+    color: var(--code-number);
   }
 
   .dns-servers-list {
@@ -5613,8 +5613,8 @@
     flex: 1;
     margin: 0;
     padding: var(--spacing-3, 12px);
-    background: #1e1e1e;
-    color: #d4d4d4;
+    background: var(--code-bg);
+    color: var(--code-fg);
     border: none;
     font-family: var(--font-family-mono, monospace);
     font-size: var(--font-size-xs, 0.75rem);
