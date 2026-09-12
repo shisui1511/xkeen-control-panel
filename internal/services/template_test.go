@@ -73,13 +73,25 @@ func TestTemplateService_PathTraversal(t *testing.T) {
 	list := svc.List()
 	for _, tmpl := range list {
 		if tmpl.Name == "Evil" {
-			if tmpl.Content == "SECRET_CONTENT" {
-				t.Fatalf("path traversal vulnerability detected: secret file was read into content")
-			}
-			if tmpl.Content != "" {
-				t.Errorf("expected empty content for traversal path, got: %q", tmpl.Content)
-			}
+			t.Fatalf("expected template with traversal path / unreadable file to be skipped, got: %+v", tmpl)
 		}
+	}
+}
+
+func TestTemplateService_EmptyOrUnreadableCatalog(t *testing.T) {
+	// Проверка сериализации и не-nil среза при пустом или невалидном каталоге (IN-02, WR-01)
+	emptyFS := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{
+			Data: []byte(`{"templates":[{"name":"Missing","description":"d","type":"xray","filename":"missing.json"}]}`),
+		},
+	}
+	svc := NewTemplateService(emptyFS, t.TempDir())
+	list := svc.List()
+	if list == nil {
+		t.Fatal("expected non-nil slice for empty templates list")
+	}
+	if len(list) != 0 {
+		t.Fatalf("expected 0 templates since missing.json cannot be read, got %d", len(list))
 	}
 }
 

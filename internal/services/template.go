@@ -33,6 +33,7 @@ func NewTemplateService(templatesFS fs.FS, dataDir string) *TemplateService {
 	svc := &TemplateService{
 		embeddedFS: templatesFS,
 		dataDir:    dataDir,
+		templates:  []Template{},
 	}
 	svc.cleanupLegacyCache()
 	svc.loadCatalog()
@@ -66,7 +67,7 @@ func (s *TemplateService) loadCatalog() {
 	}
 
 	allowedTypes := map[string]bool{"xray": true, "mihomo": true}
-	var templates []Template
+	templates := make([]Template, 0, len(catalog.Templates))
 	for _, tmpl := range catalog.Templates {
 		if !allowedTypes[tmpl.Type] || tmpl.Filename == "" {
 			continue
@@ -76,9 +77,11 @@ func (s *TemplateService) loadCatalog() {
 		if safeName == "." || safeName == "/" || safeName == ".." {
 			continue
 		}
-		if content, err := fs.ReadFile(s.embeddedFS, tmpl.Type+"/"+safeName); err == nil {
-			tmpl.Content = string(content)
+		content, err := fs.ReadFile(s.embeddedFS, tmpl.Type+"/"+safeName)
+		if err != nil {
+			continue
 		}
+		tmpl.Content = string(content)
 		tmpl.Filename = safeName
 		templates = append(templates, tmpl)
 	}
@@ -92,5 +95,8 @@ func (s *TemplateService) loadCatalog() {
 func (s *TemplateService) List() []Template {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.templates == nil {
+		return []Template{}
+	}
 	return s.templates
 }
