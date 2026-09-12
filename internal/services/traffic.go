@@ -174,7 +174,8 @@ type TrafficQuotaService struct {
 
 	// Kernel liveness check and sleep coordination (WD-05).
 	kernelAliveCheck func() bool
-	wakeCh           chan struct{}
+	trafficWakeCh    chan struct{}
+	connWakeCh       chan struct{}
 	asleep           bool
 
 	// checkQuotasMu serializes checkQuotas() invocations. It is invoked both
@@ -198,7 +199,8 @@ func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaServ
 		proxyStats:     make(map[string]*ProxyTraffic),
 		alerts:         []TrafficAlert{},
 		stopCh:         make(chan struct{}),
-		wakeCh:         make(chan struct{}, 1),
+		trafficWakeCh:  make(chan struct{}, 1),
+		connWakeCh:     make(chan struct{}, 1),
 		connSubs:       make(map[chan []byte]struct{}),
 		trafficSubs:    make(map[chan []byte]struct{}),
 		httpClient:     &http.Client{Timeout: 5 * time.Second},
@@ -225,9 +227,21 @@ func (s *TrafficQuotaService) SetKernelAliveCheck(fn func() bool) {
 // has started (D-24). Wakes sleeping WebSocket reconnection and collector loops immediately.
 func (s *TrafficQuotaService) NotifyKernelStarted() {
 	select {
-	case s.wakeCh <- struct{}{}:
+	case s.trafficWakeCh <- struct{}{}:
 	default:
 	}
+	select {
+	case s.connWakeCh <- struct{}{}:
+	default:
+	}
+}
+
+// getWakeCh returns the loop-specific wake channel for the given label.
+func (s *TrafficQuotaService) getWakeCh(label string) chan struct{} {
+	if label == "connections" {
+		return s.connWakeCh
+	}
+	return s.trafficWakeCh
 }
 
 // kernelAlive reports whether the Mihomo kernel is running according to the
@@ -244,13 +258,11 @@ func (s *TrafficQuotaService) kernelAlive() bool {
 
 // sleepUntilKernelAlive blocks until a wake notification is received, the fallback
 // poll timer fires, or the service is stopped (D-24). Returns false if stopCh is closed.
-func (s *TrafficQuotaService) sleepUntilKernelAlive(label string) bool {
+func (s *TrafficQuotaService) sleepUntilKernelAlive(label string, wakeCh chan struct{}) bool {
 	select {
 	case <-s.stopCh:
 		return false
-	case <-s.wakeCh:
-		// Re-signal so sibling loops (trafficWSLoop / connectionsWSLoop) also wake up immediately.
-		s.NotifyKernelStarted()
+	case <-wakeCh:
 		return true
 	case <-time.After(kernelAsleepPollInterval):
 		return true
@@ -267,9 +279,13 @@ func (s *TrafficQuotaService) handleKernelSleep(label string) {
 	}
 	s.asleep = true
 
-	// Drain any pending wake notification so sleep does not immediately wake without new events.
+	// Drain any pending wake notifications so sleep does not immediately wake without new events.
 	select {
-	case <-s.wakeCh:
+	case <-s.trafficWakeCh:
+	default:
+	}
+	select {
+	case <-s.connWakeCh:
 	default:
 	}
 
@@ -774,6 +790,7 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func() erro
 
 	backoff := baseBackoff
 	consecutiveFailures := 0
+	wakeCh := s.getWakeCh(label)
 
 	for {
 		select {
@@ -785,7 +802,7 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func() erro
 		if !s.kernelAlive() {
 			s.handleKernelSleep(label)
 			for !s.kernelAlive() {
-				if !s.sleepUntilKernelAlive(label) {
+				if !s.sleepUntilKernelAlive(label, wakeCh) {
 					return
 				}
 			}
@@ -821,8 +838,7 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func() erro
 
 		select {
 		case <-time.After(backoff):
-		case <-s.wakeCh:
-			s.NotifyKernelStarted()
+		case <-wakeCh:
 		case <-s.stopCh:
 			return
 		}

@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -1086,6 +1087,41 @@ func TestTrafficQuotaService_WakeOnKernelStarted(t *testing.T) {
 	}
 
 	svc.wg.Wait()
+}
+
+func TestTrafficQuotaService_NoBusySpinOnWakeError(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://127.0.0.1:59999", "")
+
+	// Kernel is alive, but streamFn fails (simulating connection refused while Mihomo initializes)
+	svc.SetKernelAliveCheck(func() bool {
+		return true
+	})
+
+	var attempts atomic.Int32
+	svc.wg.Add(1)
+	go svc.wsReconnectLoop("test-nospin", func() error {
+		attempts.Add(1)
+		return errors.New("connection refused")
+	})
+
+	// Wait briefly for the first failed attempt to enter backoff
+	time.Sleep(50 * time.Millisecond)
+
+	// Send wake notification
+	svc.NotifyKernelStarted()
+
+	// Wait 150ms. If busy-spin occurred (self-re-signaling), attempts would skyrocket to hundreds/thousands.
+	time.Sleep(150 * time.Millisecond)
+
+	// Clean up
+	close(svc.stopCh)
+	svc.wg.Wait()
+
+	got := attempts.Load()
+	if got > 3 {
+		t.Fatalf("expected <= 3 attempts without busy-spin, got %d", got)
+	}
 }
 
 func TestTrafficQuotaService_SleepEmitsZeroSlice(t *testing.T) {
