@@ -12,7 +12,7 @@ describe('Tabs', () => {
     const { body } = render(Tabs, { props: { items, value: 'b' } });
     const buttonCount = (body.match(/class="tab-btn/g) || []).length;
     expect(buttonCount).toBe(3);
-    expect(body).toMatch(/class="tab-btn active"[^>]*>\s*B\s*<\/button>/);
+    expect(body).toMatch(/class="tab-btn[^"]*\bactive\b[^"]*"[^>]*>\s*B\s*<\/button>/);
   });
 
   it('does not render a container for an empty items array', () => {
@@ -38,6 +38,6 @@ describe('Tabs', () => {
     const { body } = render(Tabs, { props: { items, value: 'y' } });
     const order = [...body.matchAll(/class="tab-btn[^"]*"[^>]*>\s*(Same)\s*</g)];
     expect(order.length).toBe(2);
-    expect(body).toMatch(/class="tab-btn active"[^>]*>\s*Same\s*<\/button>/);
+    expect(body).toMatch(/class="tab-btn[^"]*\bactive\b[^"]*"[^>]*>\s*Same\s*<\/button>/);
   });
 });
