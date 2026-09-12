@@ -3,6 +3,7 @@
     value: string;
     label: string;
     disabled?: boolean;
+    testId?: string;
   }
 
   /**
@@ -43,6 +44,7 @@
         class="tab-btn"
         class:active={item.value === value}
         disabled={item.disabled}
+        data-testid={item.testId}
         onclick={() => handleClick(item)}
       >
         {item.label}

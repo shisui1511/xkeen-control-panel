@@ -3,6 +3,10 @@
   import { t, currentLang } from './i18n';
   import { showToast, showConfirm, capabilities, fetchCapabilities } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import PageHeader from './PageHeader.svelte';
+  import SegmentedControl from './components/SegmentedControl.svelte';
+  import Tabs from './components/Tabs.svelte';
+  import EmptyState from './components/EmptyState.svelte';
 
   interface TrafficPoint {
     up: number;
@@ -629,16 +633,15 @@
 </script>
 
 <div class="container">
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_observability')}
-        <span class="crumb-sep">›</span>
-        {$t('traffic.title')}
-      </div>
-      <h1>{$t('traffic.title')}</h1>
-      <p class="sub">{$t('traffic.realtime')}</p>
-    </div>
+  <PageHeader
+    title={$t('traffic.title')}
+    subtitle={$t('traffic.realtime')}
+    breadcrumbs={[
+      { label: $t('nav.group_observability'), tab: 'dashboard' },
+      { label: $t('traffic.title') }
+    ]}
+    {onSwitchTab}
+  >
     <div class="ph-actions">
       <span
         class="badge-live-indicator"
@@ -681,7 +684,7 @@
         {$t('traffic.reset_stats')}
       </button>
     </div>
-  </div>
+  </PageHeader>
 
   <!-- Standard Order KPI Grid: 1. Download (Left), 2. Upload (Center), 3. Connections (Right) -->
   <div class="traffic-stats-grid mb-2">
@@ -801,38 +804,15 @@
 
       <!-- Timeframe Switcher (TRAF-02) -->
       <div class="timeframe-picker">
-        <button
-          type="button"
-          class="tf-pill"
-          class:active={activeTimeframe === '1m'}
-          onclick={() => (activeTimeframe = '1m')}
-        >
-          {$t('traffic.timeframe_1m')}
-        </button>
-        <button
-          type="button"
-          class="tf-pill"
-          class:active={activeTimeframe === '5m'}
-          onclick={() => (activeTimeframe = '5m')}
-        >
-          {$t('traffic.timeframe_5m')}
-        </button>
-        <button
-          type="button"
-          class="tf-pill"
-          class:active={activeTimeframe === '15m'}
-          onclick={() => (activeTimeframe = '15m')}
-        >
-          {$t('traffic.timeframe_15m')}
-        </button>
-        <button
-          type="button"
-          class="tf-pill"
-          class:active={activeTimeframe === '1h'}
-          onclick={() => (activeTimeframe = '1h')}
-        >
-          {$t('traffic.timeframe_1h')}
-        </button>
+        <SegmentedControl
+          bind:value={activeTimeframe}
+          items={[
+            { value: '1m', label: $t('traffic.timeframe_1m'), class: 'tf-pill' },
+            { value: '5m', label: $t('traffic.timeframe_5m'), class: 'tf-pill' },
+            { value: '15m', label: $t('traffic.timeframe_15m'), class: 'tf-pill' },
+            { value: '1h', label: $t('traffic.timeframe_1h'), class: 'tf-pill' }
+          ]}
+        />
       </div>
     </div>
 
@@ -1061,21 +1041,10 @@
       </div>
 
       {#if topClients.length === 0}
-        <div class="no-clients-box">
-          <svg
-            viewBox="0 0 24 24"
-            width="28"
-            height="28"
-            fill="none"
-            stroke="var(--fg-faint)"
-            stroke-width="1.5"
-          >
-            <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-            <line x1="8" y1="21" x2="16" y2="21" />
-            <line x1="12" y1="17" x2="12" y2="21" />
-          </svg>
-          <span>{$t('traffic.no_clients')}</span>
-        </div>
+        <EmptyState
+          title={$t('traffic.top_clients_empty_title')}
+          description={$t('traffic.top_clients_empty_desc')}
+        />
       {:else}
         <div class="clients-list">
           {#each topClients as client}
@@ -1182,36 +1151,26 @@
 
         {#if $capabilities?.xray?.grpc_ready && !xrayStatsError}
           <div class="xray-stats-tabs">
-            <button
-              type="button"
-              class="btn btn-sm"
-              class:btn-primary={activeXrayTab === 'outbounds'}
-              class:btn-secondary={activeXrayTab !== 'outbounds'}
-              data-testid="xray-tab-outbounds"
-              onclick={() => (activeXrayTab = 'outbounds')}
-            >
-              {$t('traffic.xray.tab_outbounds')} ({xrayOutbounds.length})
-            </button>
-            <button
-              type="button"
-              class="btn btn-sm"
-              class:btn-primary={activeXrayTab === 'inbounds'}
-              class:btn-secondary={activeXrayTab !== 'inbounds'}
-              data-testid="xray-tab-inbounds"
-              onclick={() => (activeXrayTab = 'inbounds')}
-            >
-              {$t('traffic.xray.tab_inbounds')} ({xrayInbounds.length})
-            </button>
-            <button
-              type="button"
-              class="btn btn-sm"
-              class:btn-primary={activeXrayTab === 'users'}
-              class:btn-secondary={activeXrayTab !== 'users'}
-              data-testid="xray-tab-users"
-              onclick={() => (activeXrayTab = 'users')}
-            >
-              {$t('traffic.xray.tab_users')} ({xrayUsers.length})
-            </button>
+            <Tabs
+              bind:value={activeXrayTab}
+              items={[
+                {
+                  value: 'outbounds',
+                  label: `${$t('traffic.xray.tab_outbounds')} (${xrayOutbounds.length})`,
+                  testId: 'xray-tab-outbounds'
+                },
+                {
+                  value: 'inbounds',
+                  label: `${$t('traffic.xray.tab_inbounds')} (${xrayInbounds.length})`,
+                  testId: 'xray-tab-inbounds'
+                },
+                {
+                  value: 'users',
+                  label: `${$t('traffic.xray.tab_users')} (${xrayUsers.length})`,
+                  testId: 'xray-tab-users'
+                }
+              ]}
+            />
           </div>
         {/if}
 
@@ -1277,18 +1236,7 @@
 <style>
   /* Xray live-stats slices (Phase 111) */
   .xray-stats-tabs {
-    display: flex;
-    gap: 8px;
     margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
-    flex-wrap: wrap;
-  }
-
-  .xray-stats-tabs .btn-sm {
-    padding: 4px 10px;
-    font-size: var(--font-size-xs, 0.75rem);
-    height: 28px;
   }
 
   .xray-stats-empty {
@@ -1310,10 +1258,8 @@
     gap: 6px;
     padding: 4px 10px;
     border-radius: 9999px;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
     border: 1px solid transparent;
   }
 
@@ -1409,11 +1355,9 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-weight: 700;
+    font-weight: 600;
   }
 
   .stat-value {
@@ -1436,7 +1380,7 @@
   }
 
   .conns-dynamics {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-top: 2px;
   }
@@ -1541,27 +1485,6 @@
     gap: 2px;
   }
 
-  .tf-pill {
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--fg-dim);
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm, 6px);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .tf-pill:hover {
-    color: var(--fg-primary);
-  }
-
-  .tf-pill.active {
-    color: var(--btn-primary-text, #fff);
-    background: var(--accent);
-  }
-
   .chart-area-wrapper {
     display: flex;
     height: 240px;
@@ -1593,7 +1516,7 @@
     flex-direction: column;
     justify-content: space-between;
     padding-right: 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-dim);
     text-align: right;
@@ -1626,7 +1549,7 @@
   }
 
   .tt-time {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     color: var(--fg-dim);
     margin-bottom: 4px;
@@ -1661,7 +1584,7 @@
     display: flex;
     justify-content: space-between;
     padding: 8px 0 0 77px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
   }
@@ -1689,10 +1612,8 @@
 
   .section-title {
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 600;
     color: var(--fg-primary);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
   }
 
   .section-desc {
@@ -1725,11 +1646,9 @@
   }
 
   .peak-period-title {
-    font-size: 11px;
-    font-weight: 700;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
     color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
   }
 
   .peak-metric-row {
@@ -1740,7 +1659,7 @@
 
   .peak-flow {
     font-weight: 600;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     display: flex;
     align-items: center;
     gap: 2px;
@@ -1754,23 +1673,12 @@
   }
 
   .peak-ts {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
   }
 
   /* Top Clients List */
-  .no-clients-box {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 32px 0;
-    color: var(--fg-dim);
-    font-size: 13px;
-  }
-
   .clients-list {
     display: flex;
     flex-direction: column;
@@ -1812,7 +1720,7 @@
   }
 
   .badge-sessions {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
     padding: 2px 6px;
@@ -1845,7 +1753,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
   }
 

@@ -5,6 +5,7 @@
     value: string;
     label: string;
     icon?: Component<{ size?: number }>;
+    class?: string;
   }
 
   /**
@@ -41,7 +42,7 @@
   {#each items as item (item.value)}
     <button
       type="button"
-      class="seg-item"
+      class="seg-item {item.class ?? ''}"
       class:active={item.value === value}
       data-value={item.value}
       aria-pressed={item.value === value}
