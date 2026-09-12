@@ -32,13 +32,8 @@
     name: string;
     description: string;
     type: string;
-    url: string;
-  }
-
-  interface TemplateStatus {
-    updated_at?: string;
-    commit?: string;
-    count?: number;
+    filename?: string;
+    content: string;
   }
 
   interface ConfigFileInfo {
@@ -153,9 +148,6 @@
   let templateTab = $state<'xray' | 'mihomo'>('xray');
   let selectedTemplate = $state<Template | null>(null);
   let templatePreview = $state('');
-  let updatingTemplates = $state(false);
-  let loadingPreview = $state(false);
-  let templateStatus = $state<any>(null);
 
   let filteredTemplates = $derived(templates.filter((t) => t.type === templateTab));
 
@@ -1225,58 +1217,25 @@
     }
   }
 
-  async function loadTemplatePreview(template: Template) {
+  function loadTemplatePreview(template: Template) {
     selectedTemplate = template;
-    templatePreview = '';
-    loadingPreview = true;
-    try {
-      const data = await apiFetchJSON<{ content: string }>(
-        `/api/templates/fetch?name=${encodeURIComponent(template.name)}`
-      );
-      templatePreview = (data.content || '').split('\n').slice(0, 50).join('\n');
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      templatePreview = '';
-    } finally {
-      loadingPreview = false;
-    }
-  }
-
-  async function loadTemplateStatus() {
-    try {
-      templateStatus = await apiFetchJSON<TemplateStatus>('/api/templates/status');
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      templateStatus = null;
-    }
-  }
-
-  async function updateTemplates() {
-    updatingTemplates = true;
-    try {
-      const res = await apiFetch('/api/templates/update', {
-        method: 'POST'
-      });
-      if (!res.ok) throw new Error((await res.text()) || 'Failed');
-      await loadTemplates();
-      const first = templates.find((t) => t.type === templateTab);
-      if (first) await loadTemplatePreview(first);
-      showToast('success', $t('editor.templates_updated'));
-      await loadTemplateStatus();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', $t('editor.templates_update_error'));
-    } finally {
-      updatingTemplates = false;
-    }
+    templatePreview = (template.content || '').split('\n').slice(0, 50).join('\n');
   }
 
   function openTemplatesModal() {
-    templateTab = 'xray';
+    const isMihomo =
+      selectedFile &&
+      (selectedFile.endsWith('.yaml') ||
+        selectedFile.endsWith('.yml') ||
+        selectedFile.includes('mihomo'));
+    templateTab = isMihomo ? 'mihomo' : 'xray';
     selectedTemplate = null;
     templatePreview = '';
     showTemplatesModal = true;
-    loadTemplateStatus();
+    const first = filteredTemplates[0];
+    if (first) {
+      loadTemplatePreview(first);
+    }
   }
 
   async function applyTemplate(template: Template) {
@@ -1296,13 +1255,9 @@
     templateLoading = true;
     saveWarnings = [];
     try {
-      const data = await apiFetchJSON<{ content: string }>(
-        `/api/templates/fetch?name=${encodeURIComponent(template.name)}`
-      );
+      if (!template.content) throw new Error('Template is empty');
 
-      if (!data.content) throw new Error('Template is empty');
-
-      let finalContent = data.content;
+      let finalContent = template.content;
       try {
         const currentContent = editorView.state.doc.toString();
         const mergeRes = await apiFetchJSON<{
@@ -1314,7 +1269,7 @@
           body: JSON.stringify({
             type: template.type,
             existing_content: currentContent,
-            template_content: data.content,
+            template_content: template.content,
             target_file: selectedFile
           })
         });
@@ -2054,40 +2009,11 @@
   class="templates-wide-modal"
   onclose={() => (showTemplatesModal = false)}
 >
-  {#if templateStatus}
-    <div
-      style="margin-top: -10px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;"
-    >
-      <p class="templates-modal-subtitle" style="margin: 0;">
-        {$t('editor.templates_desc')}
-      </p>
-      <div style="display: flex; align-items: center; gap: 8px;">
-        {#if templateStatus.has_update}
-          <span class="templates-badge update-available">
-            <span class="pulse-dot"></span>
-            {$t('editor.update_available')} (v{templateStatus.current_version})
-          </span>
-        {:else if templateStatus.current_version}
-          <span class="templates-badge up-to-date">
-            <span class="dot"></span>
-            {$t('editor.up_to_date')} (v{templateStatus.current_version})
-          </span>
-        {/if}
-        <button
-          class="btn btn-secondary templates-update-btn"
-          style="padding: 4px 8px; font-size: 12px;"
-          onclick={updateTemplates}
-          disabled={updatingTemplates}
-          title={$t('editor.templates_update')}
-        >
-          <span class="templates-update-icon" class:spinning={updatingTemplates}>
-            <Icon name="refresh" size={12} />
-          </span>
-          {$t('editor.templates_update')}
-        </button>
-      </div>
-    </div>
-  {/if}
+  <div style="margin-top: -10px; margin-bottom: 12px;">
+    <p class="templates-modal-subtitle" style="margin: 0; color: var(--fg-dim); font-size: 13px;">
+      {$t('editor.templates_desc')}
+    </p>
+  </div>
 
   <!-- 2-column body -->
   <div class="templates-body-grid">
@@ -2098,12 +2024,12 @@
           class="tab-btn"
           class:active={templateTab === 'xray'}
           aria-pressed={templateTab === 'xray'}
-          onclick={async () => {
+          onclick={() => {
             templateTab = 'xray';
             selectedTemplate = null;
             templatePreview = '';
             const first = filteredTemplates[0];
-            if (first) await loadTemplatePreview(first);
+            if (first) loadTemplatePreview(first);
           }}
         >
           {$t('editor.templates_tab_xray')}
@@ -2112,12 +2038,12 @@
           class="tab-btn"
           class:active={templateTab === 'mihomo'}
           aria-pressed={templateTab === 'mihomo'}
-          onclick={async () => {
+          onclick={() => {
             templateTab = 'mihomo';
             selectedTemplate = null;
             templatePreview = '';
             const first = filteredTemplates[0];
-            if (first) await loadTemplatePreview(first);
+            if (first) loadTemplatePreview(first);
           }}
         >
           {$t('editor.templates_tab_mihomo')}
@@ -2149,11 +2075,7 @@
 
     <!-- Right column: preview -->
     <div class="templates-col-preview">
-      {#if loadingPreview}
-        <div class="templates-preview-loading">
-          <span class="spinning"><Icon name="refresh" size={16} /></span>
-        </div>
-      {:else if templatePreview}
+      {#if templatePreview}
         <pre class="template-preview-code">{templatePreview}</pre>
       {:else}
         <div class="templates-preview-placeholder">
@@ -2799,84 +2721,6 @@
     font-size: 12px;
   }
 
-  .templates-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 3px 8px;
-    border-radius: 12px;
-  }
-  .templates-badge.update-available {
-    background-color: rgba(240, 180, 80, 0.15);
-    color: var(--warning);
-  }
-  .templates-badge.up-to-date {
-    background-color: rgba(70, 209, 138, 0.15);
-    color: var(--success);
-  }
-  .templates-badge .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background-color: var(--success);
-  }
-  .templates-badge .pulse-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background-color: var(--warning);
-    position: relative;
-  }
-  .templates-badge .pulse-dot::after {
-    content: '';
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    top: 0;
-    left: 0;
-    background-color: inherit;
-    border-radius: 50%;
-    animation: badge-pulse 1.5s infinite ease-out;
-  }
-  @keyframes badge-pulse {
-    0% {
-      transform: scale(1);
-      opacity: 1;
-    }
-    100% {
-      transform: scale(2.5);
-      opacity: 0;
-    }
-  }
-
-  :global(.templates-modal-header-actions) {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-
-  .templates-update-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    padding: 6px 10px;
-    height: 32px;
-  }
-
-  .templates-update-icon {
-    display: flex;
-    align-items: center;
-  }
-
-  .spinning {
-    display: inline-flex;
-    animation: spin 0.8s linear infinite;
-  }
-
   .templates-body-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -2943,7 +2787,6 @@
     border-radius: 2px;
   }
 
-  .templates-preview-loading,
   .templates-preview-placeholder {
     display: flex;
     align-items: center;
