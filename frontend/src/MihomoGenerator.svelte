@@ -2,6 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import Modal from './components/Modal.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
+  import Select from './components/Select.svelte';
+  import Button from './components/Button.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { activateRestartGrace } from './lib/serviceGrace';
   import { currentLang, t, tp } from './i18n';
@@ -2246,22 +2248,17 @@
     </div>
   {:else}
     {#if !embedded}
-      <div class="page-head">
-        <div>
-          <div class="crumbs">
-            {$t('nav.group_system')} <span class="crumb-sep">›</span>
-            {$t('editor.title')} <span class="crumb-sep">›</span>
-            {$t('mihomo.breadcrumb_generator')}
-          </div>
-          <h1>{$t('mihomo.h1')}</h1>
-          <p class="sub">
+      <div class="constructor-header">
+        <div class="constructor-header-content">
+          <h2 class="constructor-title">{$t('mihomo.h1')}</h2>
+          <p class="constructor-sub">
             {$t('mihomo.h1_sub')}
           </p>
         </div>
         <div class="ph-actions">
-          <button
+          <Button
             type="button"
-            class="btn btn-secondary"
+            variant="secondary"
             onclick={togglePreviewPane}
             title={showPreviewPane ? $t('mihomo.hide_preview') : $t('mihomo.show_preview')}
           >
@@ -2277,8 +2274,8 @@
               <line x1="15" y1="3" x2="15" y2="21" />
             </svg>
             <span>{showPreviewPane ? $t('mihomo.hide_preview') : $t('mihomo.show_preview')}</span>
-          </button>
-          <button class="btn btn-secondary" onclick={openInEditor}>
+          </Button>
+          <Button variant="secondary" onclick={openInEditor}>
             <svg
               width="13"
               height="13"
@@ -2296,8 +2293,8 @@
             {:else}
               {$t('mihomo.open_editor')}
             {/if}
-          </button>
-          <button class="btn btn-primary" onclick={copyYAML} disabled={!yaml}>
+          </Button>
+          <Button variant="primary" onclick={copyYAML} disabled={!yaml}>
             <svg
               width="13"
               height="13"
@@ -2311,7 +2308,7 @@
               /></svg
             >
             {$t('mihomo.copy_yaml')}
-          </button>
+          </Button>
         </div>
       </div>
     {:else}
@@ -2321,9 +2318,9 @@
           <strong>{$t('mihomo.breadcrumb_generator')}</strong>
         </div>
         <div class="ph-actions">
-          <button
+          <Button
             type="button"
-            class="btn btn-secondary btn-sm"
+            variant="secondary"
             onclick={togglePreviewPane}
             title={showPreviewPane ? $t('mihomo.hide_preview') : $t('mihomo.show_preview')}
           >
@@ -2339,7 +2336,7 @@
               <line x1="15" y1="3" x2="15" y2="21" />
             </svg>
             <span>{showPreviewPane ? $t('mihomo.hide_preview') : $t('mihomo.show_preview')}</span>
-          </button>
+          </Button>
         </div>
       </div>
     {/if}
@@ -2404,10 +2401,9 @@
             <label for="preset-select" class="form-label"
               >{$t('editor.constructor_scenario')}:</label
             >
-            <select
+            <Select
               id="preset-select"
               class="form-select preset-select"
-              data-testid="preset-select"
               value={activePreset}
               onchange={(e) => {
                 const val = e.currentTarget.value;
@@ -2430,7 +2426,7 @@
                 <option value="zkeen-selective">{$t('editor.scenario_zkeen_selective')}</option>
                 <option value="only-blocked">{$t('preset.only-blocked')}</option>
               {/if}
-            </select>
+            </Select>
           </div>
           {#if isPresetModified}
             <span class="preset-modified-chip">{$t('xray.preset_modified')}</span>
@@ -2485,7 +2481,7 @@
         <!-- Rule providers -->
         <div class="rule-providers-row">
           <label class="form-label" for="rp-select">{$t('mihomo.rule_provider_label')}</label>
-          <select
+          <Select
             id="rp-select"
             class="form-select rp-select"
             bind:value={activeRuleProvider}
@@ -2498,7 +2494,7 @@
             <option value="none">{$t('editor.rp_none')}</option>
             <option value="zkeen">{$t('editor.rp_zkeen')}</option>
             <option value="metacubex">{$t('editor.rp_metacubex')}</option>
-          </select>
+          </Select>
         </div>
 
         <!-- Section tabs -->
@@ -2756,10 +2752,10 @@
                         <label
                           for="mihomo-group-default-outbound-{g.name}"
                           class="form-label"
-                          style="font-size: 11px; margin-bottom: 2px;"
+                          style="font-size: var(--font-size-xs); margin-bottom: 2px;"
                           >{$t('mihomo.default_outbound')}</label
                         >
-                        <select
+                        <Select
                           id="mihomo-group-default-outbound-{g.name}"
                           class="form-select"
                           value={g.proxies[0] || 'DIRECT'}
@@ -2774,7 +2770,7 @@
                           {#each allProxyNames.filter((n) => n !== 'DIRECT' && n !== 'REJECT' && n !== g.name) as n}
                             <option value={n}>{n}</option>
                           {/each}
-                        </select>
+                        </Select>
                       </div>
                     {/if}
                   </div>
@@ -2799,14 +2795,14 @@
                   {#if g.useProviders && g.useProviders.length > 0}
                     <span
                       class="item-badge"
-                      style="background: color-mix(in srgb, var(--success) 20%, transparent); color: var(--success); font-size: 10px; text-transform: none;"
+                      style="background: color-mix(in srgb, var(--success) 20%, transparent); color: var(--success); font-size: var(--font-size-xs); text-transform: none;"
                       title={g.useProviders.join(', ')}>use: {g.useProviders.length}</span
                     >
                   {/if}
                   {#if g.type === 'load-balance' && g.strategy}
                     <span
                       class="item-badge"
-                      style="background: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning); font-size: 10px; text-transform: none;"
+                      style="background: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning); font-size: var(--font-size-xs); text-transform: none;"
                       >{g.strategy}</span
                     >
                   {/if}
@@ -2877,7 +2873,8 @@
                   >
                     <div style="display:flex; align-items:center; gap:6px;">
                       <span>{catName}</span>
-                      <span style="font-size:11px; font-weight:normal; color:var(--fg-dim);"
+                      <span
+                        style="font-size: var(--font-size-xs); font-weight:normal; color:var(--fg-dim);"
                         >({items.length})</span
                       >
                     </div>
@@ -2886,7 +2883,7 @@
                         class="badge"
                         class:badge-primary={checkedCount === items.length}
                         class:badge-secondary={checkedCount < items.length}
-                        style="font-size:11px; font-weight:500;"
+                        style="font-size: var(--font-size-xs); font-weight:500;"
                       >
                         {checkedCount}/{items.length}
                       </span>
@@ -2928,24 +2925,25 @@
                           >
                           <span
                             class="ruleset-type-badge"
-                            style="font-size:9px; background:var(--bg-surface); padding:2px 4px; border-radius:4px; opacity:0.7;"
+                            style="font-size:var(--font-size-xs); background:var(--bg-surface); padding:2px 4px; border-radius:4px; opacity:0.7;"
                             >{item.type}</span
                           >
                         </label>
                         {#if isChecked}
-                          <select
-                            class="form-select"
-                            style="font-size:11px; padding:2px 4px; height:24px; width:80px;"
-                            value={selectedMetaRuleSets.get(key)}
-                            onchange={(e) => {
-                              selectedMetaRuleSets.set(key, e.currentTarget.value);
-                              selectedMetaRuleSets = new Map(selectedMetaRuleSets);
-                            }}
-                          >
-                            {#each allProxyNames as n}
-                              <option value={n}>{n}</option>
-                            {/each}
-                          </select>
+                          <div class="ruleset-select-wrapper">
+                            <Select
+                              class="form-select"
+                              value={selectedMetaRuleSets.get(key)}
+                              onchange={(e) => {
+                                selectedMetaRuleSets.set(key, e.currentTarget.value);
+                                selectedMetaRuleSets = new Map(selectedMetaRuleSets);
+                              }}
+                            >
+                              {#each allProxyNames as n}
+                                <option value={n}>{n}</option>
+                              {/each}
+                            </Select>
+                          </div>
                         {/if}
                       </div>
                     {/each}
@@ -3084,14 +3082,14 @@
                 <label class="form-label" for="mihomo-dns-enhanced-mode"
                   >{$t('mihomo.enhanced_mode')}</label
                 >
-                <select
+                <Select
                   id="mihomo-dns-enhanced-mode"
                   class="form-select"
                   bind:value={dns.enhancedMode}
                 >
                   <option value="fake-ip">fake-ip</option>
                   <option value="redir-host">redir-host</option>
-                </select>
+                </Select>
               </div>
               {#if dns.enhancedMode === 'fake-ip'}
                 <div class="form-row">
@@ -3140,11 +3138,11 @@
             {#if tun.enabled}
               <div class="form-row">
                 <label class="form-label" for="mihomo-tun-stack">Stack</label>
-                <select id="mihomo-tun-stack" class="form-select" bind:value={tun.stack}>
+                <Select id="mihomo-tun-stack" class="form-select" bind:value={tun.stack}>
                   <option value="system">system</option>
                   <option value="gvisor">gvisor</option>
                   <option value="mixed">mixed</option>
-                </select>
+                </Select>
               </div>
               <div class="toggle-row">
                 <label class="toggle-label">
@@ -3227,10 +3225,10 @@
             >
               <label class="form-label" for="mihomo-ctrl-type">{$t('mihomo.controller_type')}</label
               >
-              <select id="mihomo-ctrl-type" class="form-select" bind:value={externalControllerType}>
+              <Select id="mihomo-ctrl-type" class="form-select" bind:value={externalControllerType}>
                 <option value="unix">{$t('mihomo.controller_unix_label')}</option>
                 <option value="tcp">{$t('mihomo.controller_tcp_label')}</option>
-              </select>
+              </Select>
             </div>
             {#if externalControllerType === 'tcp'}
               <div class="form-row">
@@ -3307,7 +3305,7 @@
                     <label class="form-label" for="listener-type"
                       >{$t('mihomo.listener_type')}</label
                     >
-                    <select
+                    <Select
                       id="listener-type"
                       class="form-select"
                       bind:value={newListener.type}
@@ -3323,7 +3321,7 @@
                       <option value="shadowsocks">shadowsocks</option>
                       <option value="tproxy">tproxy</option>
                       <option value="redirect">redirect</option>
-                    </select>
+                    </Select>
                   </div>
 
                   <div class="form-col">
@@ -3363,7 +3361,7 @@
                   <label class="form-label" for="listener-destination"
                     >{$t('mihomo.listener_destination')}</label
                   >
-                  <select
+                  <Select
                     id="listener-destination"
                     class="form-select"
                     value={newListener.proxy &&
@@ -3396,7 +3394,7 @@
                         {/each}
                       </optgroup>
                     {/if}
-                  </select>
+                  </Select>
                   <div class="form-hint">
                     {$t('mihomo.listener_destination_hint')}
                   </div>
@@ -3416,7 +3414,7 @@
                     <label class="form-label" for="listener-cipher"
                       >{$t('mihomo.listener_cipher')}</label
                     >
-                    <select
+                    <Select
                       id="listener-cipher"
                       class="form-select"
                       bind:value={newListener.cipher}
@@ -3424,7 +3422,7 @@
                       {#each CIPHERS as c}
                         <option value={c}>{c}</option>
                       {/each}
-                    </select>
+                    </Select>
                   </div>
                   <div class="form-row">
                     <label class="form-label" for="listener-password"
@@ -3907,7 +3905,7 @@
                   {item.rowError}
                 </div>
                 <div
-                  style="font-size: 11px; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
+                  style="font-size: var(--font-size-xs); color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
                   title={item.link}
                 >
                   {item.link}
@@ -4087,9 +4085,47 @@
 </Modal>
 
 <style>
-  .crumb-sep {
-    color: var(--fg-faint);
-    margin: 0 6px;
+  .constructor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .constructor-title {
+    font-size: var(--font-size-xl);
+    font-weight: 600;
+    color: var(--fg-primary);
+    margin: 0 0 4px 0;
+  }
+
+  .constructor-sub {
+    font-size: var(--font-size-sm);
+    color: var(--fg-secondary);
+    margin: 0;
+  }
+
+  .ruleset-select-wrapper {
+    width: 80px;
+    flex-shrink: 0;
+  }
+
+  .ruleset-select-wrapper :global(.xcp-select select) {
+    font-size: var(--font-size-xs);
+    height: 24px;
+    padding: 2px 20px 2px 4px;
+  }
+
+  .scenario-select-wrap :global(.xcp-select) {
+    width: auto;
+    min-width: 200px;
+  }
+
+  .rule-providers-row :global(.xcp-select) {
+    width: auto;
+    min-width: 160px;
   }
 
   .embedded-head-toolbar {
@@ -4145,7 +4181,7 @@
   }
 
   .safe-merge-desc {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-top: 1px;
   }
@@ -4161,7 +4197,7 @@
   }
 
   .directive-tag {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-mono);
     background: var(--bg-surface);
     border: 1px solid var(--border);
@@ -4173,7 +4209,7 @@
   .btn-tag-expand {
     background: none;
     border: none;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--primary);
     cursor: pointer;
     padding: 2px 6px;
@@ -4279,7 +4315,7 @@
   .sec-count {
     background: var(--primary);
     color: var(--bg-page);
-    font-size: 9px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     border-radius: 8px;
     padding: 1px 5px;
@@ -4287,7 +4323,7 @@
   }
 
   .tab-status-badge {
-    font-size: 9px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     border-radius: 6px;
     padding: 1px 5px;
@@ -4332,7 +4368,7 @@
   }
 
   .item-badge {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     padding: 2px 7px;
     border-radius: 10px;
@@ -4375,7 +4411,7 @@
   .type-rule {
     background: rgba(255, 255, 255, 0.05);
     color: var(--fg-dim);
-    font-size: 9px;
+    font-size: var(--font-size-xs);
   }
   .type-mixed {
     background: rgba(41, 194, 240, 0.15);
@@ -4426,7 +4462,7 @@
   .badge-include-all {
     background: color-mix(in srgb, var(--seq-5) 20%, transparent);
     color: var(--seq-5);
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     text-transform: none;
   }
 
@@ -4482,7 +4518,7 @@
   }
 
   .item-meta {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     flex-shrink: 0;
   }
@@ -4530,7 +4566,7 @@
     border: none;
     color: var(--fg-faint);
     cursor: pointer;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 2px 4px;
     border-radius: var(--radius-sm);
     transition: color var(--transition-fast);
@@ -4547,7 +4583,7 @@
     border: none;
     color: var(--fg-faint);
     cursor: pointer;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 2px 4px;
     border-radius: var(--radius-sm);
     transition: color var(--transition-fast);
@@ -4573,7 +4609,7 @@
     background: none;
     border: none;
     color: var(--fg-faint);
-    font-size: 9px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     padding: 1px 3px;
     line-height: 1;
@@ -4621,7 +4657,7 @@
   }
 
   .form-validation-msg {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--warning);
     margin-top: 2px;
   }
@@ -4645,7 +4681,7 @@
   }
 
   .form-users-add-btn {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 2px 8px;
   }
 
@@ -4667,7 +4703,7 @@
   }
 
   .form-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-weight: 500;
   }
@@ -4760,7 +4796,7 @@
     background: rgba(41, 194, 240, 0.12);
     border: 1px solid rgba(41, 194, 240, 0.25);
     color: var(--primary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     border-radius: 10px;
     padding: 2px 8px;
   }
@@ -4770,7 +4806,7 @@
     border: none;
     color: inherit;
     cursor: pointer;
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     padding: 0;
     line-height: 1;
   }
@@ -4856,7 +4892,7 @@
   }
 
   .preview-title {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-dim);
     text-transform: uppercase;
@@ -4864,7 +4900,7 @@
   }
 
   .preview-size-badge {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     background: rgba(255, 255, 255, 0.08);
     color: var(--fg-secondary);
     padding: 1px 6px;
@@ -4974,7 +5010,7 @@
   }
 
   .preset-modified-chip {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--warning);
     background: rgba(245, 158, 11, 0.12);
@@ -5117,7 +5153,7 @@
   .zkeen-exclude-badge {
     background: rgba(240, 180, 80, 0.1);
     color: var(--warning);
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     padding: 1px 4px;
     border-radius: 4px;
     width: fit-content;
@@ -5126,7 +5162,7 @@
   .zkeen-include-badge {
     background: rgba(139, 92, 246, 0.1);
     color: var(--seq-6);
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     padding: 1px 4px;
     border-radius: 4px;
     width: fit-content;
