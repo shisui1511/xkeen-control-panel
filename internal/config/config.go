@@ -29,7 +29,6 @@ type Config struct {
 	HTTPS            HTTPSConfig `json:"https"`
 	MihomoSecret     string      `json:"mihomo_secret"`
 	UpdateChannel    string      `json:"update_channel"` // stable, beta, dev
-	TemplatesRepoURL string      `json:"templates_repo_url"`
 	DevMode          bool        `json:"dev_mode"`
 	ConfigPath       string      `json:"-"`
 }
@@ -107,7 +106,6 @@ func Default() *Config {
 			KeyPath:  "",
 		},
 		UpdateChannel:    "stable",
-		TemplatesRepoURL: "https://raw.githubusercontent.com/shisui1511/xkeen-control-panel-templates/main",
 	}
 }
 

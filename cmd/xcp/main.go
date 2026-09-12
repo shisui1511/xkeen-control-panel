@@ -439,18 +439,9 @@ func main() {
 	if err != nil {
 		fatalf("failed to load embedded templates: %v", err)
 	}
-	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir, cfg.TemplatesRepoURL, api.GetAssetsService())
+	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir)
 	api.SetTemplateService(templateSvc)
 	srv.HandleProtected("/api/templates/list", api.TemplateList)
-	srv.HandleProtected("/api/templates/fetch", api.TemplateFetch)
-	srv.HandleProtected("/api/templates/update", api.TemplateUpdate)
-	srv.HandleProtected("/api/templates/status", api.TemplateStatus)
-	srv.HandleProtected("/api/templates/check", api.TemplateCheck)
-
-	// Фоновый чекер обновлений шаблонов
-	templatesCtx, cancelTemplatesChecker := context.WithCancel(context.Background())
-	defer cancelTemplatesChecker()
-	go templateSvc.StartBackgroundChecker(templatesCtx)
 
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
@@ -536,7 +527,6 @@ func main() {
 	case sig := <-sigCh:
 		log.Printf("Received signal %s, shutting down...", sig)
 		cancelScheduler()
-		cancelTemplatesChecker()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
