@@ -3164,7 +3164,7 @@
                     onclick={() => removeInbound(inbound.tag)}>✕</button
                   >
                 </div>
-                <div class="form-row2" style="margin-top:var(--spacing-2, 8px)">
+                <div class="form-row2" style="margin-top:var(--spacing-2)">
                   <div class="form-col">
                     <label class="form-label" for="xray-inbound-port-{inbound.tag}"
                       >{$t('xray.inbound_port')}</label
@@ -3325,7 +3325,7 @@
                   onchange={() => (isDirty = true)}
                 />
                 <span class="checkmark" style="top: 1px;"></span>
-                <span style="font-weight: 600; color: var(--fg);"
+                <span style="font-weight: 600; color: var(--fg-primary);"
                   >{$t('editor.dns_over_vless')}</span
                 >
               </label>
@@ -3345,7 +3345,7 @@
                     <span class="item-name">{srv}</span>
                   {:else}
                     <div style="flex: 1;">
-                      <div style="font-weight: 600; color: var(--fg);">
+                      <div style="font-weight: 600; color: var(--fg-primary);">
                         {srv.address}:{srv.port || 53}
                       </div>
                       <div style="font-size: 0.75rem; color: var(--fg-secondary);">
@@ -3559,7 +3559,7 @@
               {#each outboundDetails.filter((d) => ['direct', 'block', 'dns-out'].includes(d.tag) || subscriptionOutbounds.some((s) => s.tag === d.tag)) as item}
                 <div
                   class="card tag-card"
-                  style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; opacity: 0.75; background: var(--bg-surface-hover);"
+                  style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; opacity: 0.75; background: var(--bg-elevated);"
                 >
                   <div>
                     <span class="badge badge-tag" style="background: var(--bg-surface-active);"
@@ -4610,7 +4610,7 @@
             <code>{file.name}</code>:
             <span
               class="badge"
-              style="background-color: var(--color-warning-bg); color: var(--color-warning-fg);"
+              style="background-color: var(--warning-soft); color: var(--warning);"
             >
               {$t('xray.sections_modified', { count: file.changesCount })}
             </span>
@@ -4685,7 +4685,7 @@
             bind:value={importLink}
             placeholder={$t('subscr.import_link_placeholder')}
             rows="4"
-            style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
+            style="resize: none; font-family: var(--font-family-mono); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; color: var(--fg-primary);"
           ></textarea>
         </div>
       {:else if importSource === 'file'}
@@ -4729,7 +4729,7 @@
         </div>
       {:else if importSource === 'clipboard'}
         <div
-          style="padding: 24px; text-align: center; background: var(--bg-surface-hover); border: 1px dashed var(--border); border-radius: var(--radius);"
+          style="padding: 24px; text-align: center; background: var(--bg-elevated); border: 1px dashed var(--border); border-radius: var(--radius);"
         >
           <p style="font-size: 13px; color: var(--fg-secondary); margin-bottom: 12px;">
             {$t('subscr.import_clipboard_desc')}
@@ -4768,7 +4768,7 @@
             {#if item.rowError}
               <div
                 class="preview-item-card"
-                style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
               >
                 <button
                   type="button"
@@ -4790,7 +4790,7 @@
             {:else}
               <div
                 class="preview-item-card"
-                style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
               >
                 <button
                   type="button"
@@ -4802,7 +4802,7 @@
                   style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
                 >
                   <span
-                    ><strong style="color: var(--fg);">{item.outbound?.protocol}</strong> · {getNodeServer(
+                    ><strong style="color: var(--fg-primary);">{item.outbound?.protocol}</strong> · {getNodeServer(
                       item.outbound
                     )}:{getNodePort(item.outbound)}</span
                   >
@@ -4818,7 +4818,7 @@
                     type="text"
                     class="input"
                     bind:value={item.tag}
-                    style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
+                    style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; color: var(--fg-primary); width: auto;"
                   />
                 </div>
                 {#if item.outbound?.protocol === 'wireguard' || item.outbound?.settings?.amneziaWgOption || item.outbound?.amneziaWgOption}
@@ -4875,7 +4875,7 @@
     border-radius: var(--radius);
     padding: 24px 16px;
     text-align: center;
-    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.02));
+    background: var(--bg-elevated);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -4891,8 +4891,8 @@
   }
 
   .file-picker-input::file-selector-button {
-    background: var(--bg-surface-hover);
-    color: var(--fg);
+    background: var(--bg-elevated);
+    color: var(--fg-primary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 12px;
@@ -4912,7 +4912,7 @@
   }
 
   .crumbs {
-    font-size: var(--font-size-xs, 0.75rem);
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     margin-bottom: 4px;
   }
@@ -4923,11 +4923,11 @@
     font-size: 1.5rem;
     font-weight: 600;
     margin: 0 0 4px 0;
-    color: var(--fg);
+    color: var(--fg-primary);
   }
   .sub {
     color: var(--fg-secondary);
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
     margin: 0 0 20px 0;
   }
 
@@ -4935,26 +4935,26 @@
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: var(--spacing-4, 16px);
+    margin-bottom: var(--spacing-4);
   }
 
   .embedded-head-toolbar {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: var(--spacing-3, 12px);
-    padding-bottom: var(--spacing-2, 8px);
+    margin-bottom: var(--spacing-3);
+    padding-bottom: var(--spacing-2);
     border-bottom: 1px solid var(--border);
   }
 
   .embedded-title-tag {
-    font-size: var(--font-size-sm, 0.8125rem);
-    color: var(--fg);
+    font-size: var(--font-size-sm);
+    color: var(--fg-primary);
   }
 
   .ph-actions {
     display: flex;
-    gap: var(--spacing-2, 8px);
+    gap: var(--spacing-2);
   }
 
   .gen-layout {
@@ -4973,7 +4973,7 @@
   .gen-left {
     flex: 1;
     min-width: 0;
-    padding-right: var(--spacing-3, 12px);
+    padding-right: var(--spacing-3);
   }
 
   .xray-splitter {
@@ -5034,10 +5034,10 @@
 
   .scenario-chip {
     padding: 4px 10px;
-    background: var(--bg-surface-hover);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: 12px;
-    color: var(--fg);
+    color: var(--fg-primary);
     font-size: 0.75rem;
     cursor: pointer;
     display: inline-flex;
@@ -5053,7 +5053,7 @@
   }
 
   .scenario-chip.active {
-    background: rgba(var(--accent-rgb, 13, 110, 253), 0.15);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
     border-color: var(--accent);
     color: var(--accent);
     font-weight: 600;
@@ -5062,7 +5062,7 @@
   .preset-mod-badge {
     margin-left: 5px;
     font-size: 0.6875rem;
-    color: var(--color-warning-fg, #eab308);
+    color: var(--warning);
     opacity: 0.9;
     font-style: italic;
   }
@@ -5076,9 +5076,9 @@
 
   .sec-tabs {
     display: flex;
-    gap: var(--spacing-2, 8px);
+    gap: var(--spacing-2);
     border-bottom: 1px solid var(--border);
-    margin-bottom: var(--spacing-4, 16px);
+    margin-bottom: var(--spacing-4);
     overflow-x: auto;
     scrollbar-width: none;
   }
@@ -5093,7 +5093,7 @@
     border: none;
     border-bottom: 2px solid transparent;
     color: var(--fg-secondary);
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -5110,8 +5110,8 @@
   }
 
   .sec-count {
-    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.1));
-    color: var(--fg);
+    background: var(--bg-elevated);
+    color: var(--fg-primary);
     font-size: 0.6875rem;
     padding: 1px 5px;
     border-radius: 10px;
@@ -5121,20 +5121,20 @@
   .sec-body {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-4, 16px);
+    gap: var(--spacing-4);
   }
 
   .section-title {
     font-size: 0.875rem;
     font-weight: 600;
-    color: var(--fg);
-    margin-bottom: var(--spacing-2, 8px);
+    color: var(--fg-primary);
+    margin-bottom: var(--spacing-2);
   }
 
   .routing-rules-list {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-2, 8px);
+    gap: var(--spacing-2);
     max-height: 480px;
     overflow-y: auto;
     scrollbar-width: thin;
@@ -5144,7 +5144,7 @@
     padding: 10px 12px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     transition:
       border-color var(--transition-fast),
       opacity var(--transition-fast),
@@ -5153,7 +5153,7 @@
 
   .rule-card.rule-disabled {
     opacity: 0.55;
-    background: var(--bg-surface-hover);
+    background: var(--bg-elevated);
   }
 
   .rule-card.dragging {
@@ -5164,7 +5164,7 @@
 
   .rule-card.drag-over {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 13, 110, 253), 0.25);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
   }
 
   .rule-header {
@@ -5182,7 +5182,7 @@
 
   .drag-handle {
     cursor: grab;
-    color: var(--fg-muted, var(--fg-secondary));
+    color: var(--fg-muted);
     font-size: 1rem;
     line-height: 1;
     user-select: none;
@@ -5193,14 +5193,14 @@
 
   .drag-handle:hover {
     opacity: 1;
-    color: var(--fg);
+    color: var(--fg-primary);
   }
 
   .rule-toggle-btn {
     width: 28px;
     height: 16px;
     border-radius: 9px;
-    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.15));
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     position: relative;
     cursor: pointer;
@@ -5239,7 +5239,7 @@
     padding: 2px 7px;
     border-radius: 4px;
     font-size: 0.75rem;
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
   }
 
   .badge-direct {
@@ -5283,8 +5283,8 @@
   }
 
   .btn-rule-action:hover:not(:disabled) {
-    background: var(--bg-surface-hover);
-    color: var(--fg);
+    background: var(--bg-elevated);
+    color: var(--fg-primary);
     border-color: var(--border);
   }
 
@@ -5303,7 +5303,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
   }
 
   .rule-detail-item {
@@ -5339,11 +5339,11 @@
   .form-card {
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
-    padding: var(--spacing-4, 16px);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-4);
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-3, 12px);
+    gap: var(--spacing-3);
   }
 
   .form-row {
@@ -5365,7 +5365,7 @@
   }
 
   .form-label {
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     font-weight: 500;
   }
@@ -5375,9 +5375,9 @@
     padding: 8px 12px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
-    color: var(--fg);
-    font-size: var(--font-size-sm, 0.8125rem);
+    border-radius: var(--radius-md);
+    color: var(--fg-primary);
+    font-size: var(--font-size-sm);
     font-family: inherit;
     outline: none;
     transition: border-color var(--transition-fast);
@@ -5405,8 +5405,8 @@
 
   .btn {
     padding: 8px 16px;
-    border-radius: var(--radius-md, 6px);
-    font-size: var(--font-size-sm, 0.8125rem);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
     border: none;
@@ -5418,15 +5418,15 @@
 
   .btn-primary {
     background: var(--accent);
-    color: var(--btn-primary-text, #fff);
+    color: var(--btn-primary-text);
   }
   .btn-primary:hover {
     background: var(--accent-hover);
   }
 
   .btn-secondary {
-    background: var(--bg-surface-hover);
-    color: var(--fg);
+    background: var(--bg-elevated);
+    color: var(--fg-primary);
     border: 1px solid var(--border);
   }
   .btn-secondary:hover {
@@ -5440,16 +5440,16 @@
 
   .add-btn {
     width: 100%;
-    padding: var(--spacing-3, 12px);
+    padding: var(--spacing-3);
     background: transparent;
     border: 1px dashed var(--border);
     color: var(--fg-secondary);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     cursor: pointer;
     transition:
       border-color var(--transition-fast),
       color var(--transition-fast);
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
   }
 
   .add-btn:hover {
@@ -5458,10 +5458,10 @@
   }
 
   .inbound-card {
-    padding: var(--spacing-4, 16px);
+    padding: var(--spacing-4);
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
   }
 
   .inbound-title {
@@ -5494,12 +5494,12 @@
     padding: 8px 12px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
   }
 
   .item-name {
-    font-size: var(--font-size-sm, 0.8125rem);
-    color: var(--fg);
+    font-size: var(--font-size-sm);
+    color: var(--fg-primary);
   }
 
   .item-del {
@@ -5510,7 +5510,7 @@
     padding: 0 4px;
   }
   .item-del:hover {
-    color: var(--fg);
+    color: var(--fg-primary);
   }
 
   .gen-right {
@@ -5519,14 +5519,14 @@
     flex-shrink: 0;
     min-width: 280px;
     max-width: 800px;
-    padding-left: var(--spacing-3, 12px);
+    padding-left: var(--spacing-3);
   }
 
   .preview-card {
     display: flex;
     flex-direction: column;
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     overflow: hidden;
     background: var(--bg-surface);
   }
@@ -5553,7 +5553,7 @@
     border-bottom: 2px solid transparent;
     color: var(--fg-secondary);
     font-size: 0.75rem;
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
     cursor: pointer;
     white-space: nowrap;
     transition:
@@ -5563,7 +5563,7 @@
   }
 
   .preview-tab-btn:hover {
-    color: var(--fg);
+    color: var(--fg-primary);
   }
 
   .preview-tab-btn.active {
@@ -5577,14 +5577,14 @@
     justify-content: space-between;
     align-items: center;
     padding: 6px 10px;
-    background: var(--bg-surface-hover);
+    background: var(--bg-elevated);
     border-bottom: 1px solid var(--border);
   }
 
   .preview-meta-size {
     font-size: 0.6875rem;
-    color: var(--fg-muted, var(--fg-secondary));
-    font-family: var(--font-family-mono, monospace);
+    color: var(--fg-muted);
+    font-family: var(--font-family-mono);
   }
 
   .preview-tools-right {
@@ -5612,12 +5612,12 @@
   .constructor-preview-panel {
     flex: 1;
     margin: 0;
-    padding: var(--spacing-3, 12px);
+    padding: var(--spacing-3);
     background: var(--code-bg);
     color: var(--code-fg);
     border: none;
-    font-family: var(--font-family-mono, monospace);
-    font-size: var(--font-size-xs, 0.75rem);
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     overflow: auto;
     scrollbar-width: thin;
@@ -5630,9 +5630,9 @@
     position: relative;
     padding-left: 28px;
     cursor: pointer;
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
     user-select: none;
-    color: var(--fg);
+    color: var(--fg-primary);
   }
 
   .checkbox-container input {
@@ -5649,7 +5649,7 @@
     left: 0;
     height: 16px;
     width: 16px;
-    background-color: var(--bg-surface-hover);
+    background-color: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: 3px;
   }
@@ -5702,7 +5702,7 @@
 
   .form-hint,
   .field-info-hint {
-    font-size: var(--font-size-xs, 0.75rem);
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     line-height: 1.4;
   }
@@ -5748,7 +5748,7 @@
     margin-top: 14px;
     margin-bottom: 8px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 6px);
+    border-radius: var(--radius-md);
     padding: 8px 12px;
     background: var(--bg-page);
   }
@@ -5756,7 +5756,7 @@
   .sockopt-summary {
     cursor: pointer;
     font-weight: 500;
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
     color: var(--accent);
     user-select: none;
   }
@@ -5783,7 +5783,7 @@
 
   .dialer-chain-preview {
     margin-top: 8px;
-    font-size: var(--font-size-xs, 0.75rem);
+    font-size: var(--font-size-xs);
     display: flex;
     align-items: center;
     gap: 6px;
@@ -5819,11 +5819,11 @@
 
   .tls-ping-title {
     font-weight: 600;
-    font-size: var(--font-size-sm, 0.8125rem);
+    font-size: var(--font-size-sm);
   }
 
   .tls-ping-failure {
-    font-size: var(--font-size-xs, 0.75rem);
+    font-size: var(--font-size-xs);
     margin-bottom: 6px;
   }
 
@@ -5831,7 +5831,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 8px;
-    font-size: var(--font-size-xs, 0.75rem);
+    font-size: var(--font-size-xs);
   }
 
   .tls-grid span[data-testid] {
@@ -5840,7 +5840,7 @@
 
   .tls-ping-dns {
     margin-top: 8px;
-    font-size: var(--font-size-xs, 0.75rem);
+    font-size: var(--font-size-xs);
   }
 
   .tls-ping-dns .dns-value {
