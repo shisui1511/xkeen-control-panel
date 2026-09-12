@@ -2187,3 +2187,34 @@ func TestWatchdogService_IdleRecoversOnHealthyKernel(t *testing.T) {
 		t.Fatalf("expected recovery log line about resuming guard, got:\n%s", logBuf.String())
 	}
 }
+
+func TestWatchdogService_ConsecutiveFailuresCapped(t *testing.T) {
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+
+	// In degraded state or sustained failure, consecutiveFailures must not grow beyond watchdogMaxFailures
+	w.mu.Lock()
+	w.degradedAt = time.Now()
+	w.consecutiveFailures = watchdogMaxFailures
+	w.mu.Unlock()
+
+	for i := 0; i < 10; i++ {
+		w.CheckHealth()
+	}
+
+	if got := w.ConsecutiveFailures(); got != watchdogMaxFailures {
+		t.Fatalf("expected consecutiveFailures capped at %d, got %d", watchdogMaxFailures, got)
+	}
+
+	if snap := w.Snapshot(); snap.ConsecutiveFailures != watchdogMaxFailures {
+		t.Fatalf("expected snapshot ConsecutiveFailures capped at %d, got %d", watchdogMaxFailures, snap.ConsecutiveFailures)
+	}
+}

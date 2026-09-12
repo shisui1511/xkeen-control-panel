@@ -269,7 +269,9 @@ func (w *WatchdogService) CheckHealth() {
 
 	w.mu.Lock()
 	if !w.degradedAt.IsZero() {
-		w.consecutiveFailures++
+		if w.consecutiveFailures < watchdogMaxFailures {
+			w.consecutiveFailures++
+		}
 		w.mu.Unlock()
 		return
 	}
@@ -359,11 +361,10 @@ func (w *WatchdogService) CheckHealth() {
 	w.mu.Lock()
 	w.idle = false
 	w.idleRecheckCounter = 0
-	w.consecutiveFailures++
-	displayFailures := w.consecutiveFailures
-	if displayFailures > watchdogMaxFailures {
-		displayFailures = watchdogMaxFailures
+	if w.consecutiveFailures < watchdogMaxFailures {
+		w.consecutiveFailures++
 	}
+	displayFailures := w.consecutiveFailures
 	log.Printf("Watchdog: kernel health check failed (%d/%d): status=%q err=%v",
 		displayFailures, watchdogMaxFailures, strings.TrimSpace(status), err)
 
