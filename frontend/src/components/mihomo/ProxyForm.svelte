@@ -2,6 +2,7 @@
   import { t } from '../../i18n';
   import { capabilities } from '../../stores';
   import { isMihomoAwg31Supported } from '../../lib/awgFields';
+  import Select from '../Select.svelte';
   import {
     AWG_PRESETS,
     getAwgPreset,
@@ -247,11 +248,11 @@
       <div class="awg-preset-bar">
         <div class="preset-select-wrap">
           <label class="form-label" for="proxy-awg-preset">{$t('proxies.awg_preset')}</label>
-          <select
+          <Select
             id="proxy-awg-preset"
             class="form-select"
             value={selectedPreset}
-            onchange={(e) => handleApplyPreset((e.target as HTMLSelectElement).value)}
+            onchange={(e) => handleApplyPreset(e.currentTarget.value)}
           >
             <option value="">{$t('proxies.awg_preset_custom')}</option>
             <option value="standard">{$t('proxies.awg_preset_standard')}</option>
@@ -259,7 +260,7 @@
             <option value="aggressive-dpi">{$t('proxies.awg_preset_aggressive_dpi')}</option>
             <option value="compatibility">{$t('proxies.awg_preset_compatibility')}</option>
             <option value="low-ram-mips">{$t('proxies.awg_preset_low_ram_mips')}</option>
-          </select>
+          </Select>
         </div>
         <button
           type="button"
@@ -654,12 +655,12 @@
     <!-- Dialer Proxy Selector -->
     <div class="form-row">
       <label class="form-label" for="proxy-dialer-compact">{$t('proxies.dialer_proxy')}</label>
-      <select id="proxy-dialer-compact" class="form-select" bind:value={np.dialerProxy}>
+      <Select id="proxy-dialer-compact" class="form-select" bind:value={np.dialerProxy}>
         <option value="">{$t('proxies.dialer_none')}</option>
         {#each availableDialers as d}
           <option value={d}>{d}</option>
         {/each}
-      </select>
+      </Select>
       {#if np.dialerProxy}
         <div class="dialer-chain-preview">
           <span class="chain-title">{$t('proxies.dialer_chain')}:</span>
@@ -698,7 +699,7 @@
           placeholder="1280"
         />
         {#if np.awgEnabled}
-          <div class="form-hint" style="margin-top: 4px; font-size: 11px;">
+          <div class="form-hint" style="margin-top: 4px; font-size: 12px;">
             {$t('proxies.awg_mtu_hint')}
           </div>
         {/if}
@@ -733,9 +734,9 @@
     {/if}
     <div class="form-row">
       <label class="form-label" for="proxy-type">{$t('proxies.type')}</label>
-      <select id="proxy-type" class="form-select" bind:value={np.type}>
+      <Select id="proxy-type" class="form-select" bind:value={np.type}>
         {#each PROXY_TYPES as pt}<option value={pt}>{pt}</option>{/each}
-      </select>
+      </Select>
     </div>
     <div class="form-row">
       <label class="form-label" for="proxy-name">{$t('subscr.name')}</label>
@@ -826,10 +827,10 @@
       </div>
       <div class="form-row">
         <label class="form-label" for="proxy-hysteria2-obfs-type">{$t('editor.obfsType')}</label>
-        <select id="proxy-hysteria2-obfs-type" class="form-select" bind:value={np.obfsType}>
+        <Select id="proxy-hysteria2-obfs-type" class="form-select" bind:value={np.obfsType}>
           <option value="none">{$t('editor.none')}</option>
           <option value="simple">{$t('editor.simple')}</option>
-        </select>
+        </Select>
       </div>
       {#if np.obfsType === 'simple'}
         <div class="form-row">
@@ -884,9 +885,9 @@
     {:else if np.type === 'ss'}
       <div class="form-row">
         <label class="form-label" for="proxy-ss-cipher">Cipher</label>
-        <select id="proxy-ss-cipher" class="form-select" bind:value={np.cipher}>
+        <Select id="proxy-ss-cipher" class="form-select" bind:value={np.cipher}>
           {#each CIPHERS as c}<option value={c}>{c}</option>{/each}
-        </select>
+        </Select>
       </div>
       <div class="form-row">
         <label class="form-label" for="proxy-ss-password">{$t('proxies.password')}</label>
@@ -910,11 +911,11 @@
       <div class="form-row2">
         <div class="form-col">
           <label class="form-label" for="proxy-vmess-network">Network</label>
-          <select id="proxy-vmess-network" class="form-select" bind:value={np.network}>
+          <Select id="proxy-vmess-network" class="form-select" bind:value={np.network}>
             <option value="ws">WebSocket</option>
             <option value="tcp">TCP</option>
             <option value="grpc">gRPC</option>
-          </select>
+          </Select>
         </div>
         <div class="form-col">
           <label class="form-label" for="proxy-vmess-tls">TLS</label>
@@ -970,10 +971,10 @@
       <div class="form-row2">
         <div class="form-col">
           <label class="form-label" for="proxy-trojan-network">Network</label>
-          <select id="proxy-trojan-network" class="form-select" bind:value={np.network}>
+          <Select id="proxy-trojan-network" class="form-select" bind:value={np.network}>
             <option value="tcp">TCP</option>
             <option value="ws">WebSocket</option>
-          </select>
+          </Select>
         </div>
       </div>
       {#if np.network === 'ws'}
@@ -1037,7 +1038,7 @@
             placeholder="1280"
           />
           {#if np.awgEnabled}
-            <div class="form-hint" style="margin-top: 4px; font-size: 11px;">
+            <div class="form-hint" style="margin-top: 4px; font-size: 12px;">
               {$t('proxies.awg_mtu_hint')}
             </div>
           {/if}
@@ -1139,16 +1140,16 @@
     <!-- Dialer Proxy Selector (Mihomo dialer-proxy) -->
     <div class="form-row">
       <label class="form-label" for="proxy-dialer">{$t('proxies.dialer_proxy')}</label>
-      <select id="proxy-dialer" class="form-select" bind:value={np.dialerProxy}>
+      <Select id="proxy-dialer" class="form-select" bind:value={np.dialerProxy}>
         <option value="">{$t('proxies.dialer_none')}</option>
         {#each availableDialers as d}
           <option value={d}>{d}</option>
         {/each}
-      </select>
+      </Select>
       {#if np.dialerProxy}
         <div
           class="dialer-chain-preview"
-          style="margin-top: 6px; font-size: 11px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;"
+          style="margin-top: 6px; font-size: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;"
         >
           <span style="color: var(--fg-secondary);">{$t('proxies.dialer_chain')}:</span>
           {#each dialerChain.chain as node, idx}
@@ -1193,7 +1194,7 @@
   }
 
   .imported-identity-box {
-    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.03));
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 10px 12px;
@@ -1211,15 +1212,15 @@
   }
 
   .mono-endpoint {
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-family-mono);
     font-size: 12px;
     font-weight: 500;
     color: var(--fg-primary);
   }
 
   .mono-uuid {
-    font-family: var(--font-family-mono, monospace);
-    font-size: 11px;
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     background: rgba(255, 255, 255, 0.05);
     padding: 2px 6px;
@@ -1227,7 +1228,7 @@
   }
 
   .identity-hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     line-height: 1.3;
   }
@@ -1237,14 +1238,14 @@
     background: none;
     border: none;
     color: var(--primary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     text-decoration: underline;
     padding: 0;
   }
 
   .toggle-all-fields-btn:hover {
-    color: var(--primary-hover, var(--primary));
+    color: var(--primary-hover);
   }
 
   .dialer-chain-preview {
@@ -1277,14 +1278,13 @@
   }
 
   .form-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-weight: 500;
     text-transform: none;
   }
 
-  .form-input,
-  .form-select {
+  .form-input {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -1296,8 +1296,7 @@
     transition: border-color var(--transition-fast);
   }
 
-  .form-input:focus,
-  .form-select:focus {
+  .form-input:focus {
     border-color: var(--primary);
   }
 
@@ -1355,7 +1354,7 @@
     flex-direction: column;
     gap: 8px;
     padding: 12px;
-    background: var(--bg-surface-raised, rgba(255, 255, 255, 0.03));
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     margin-bottom: 12px;
@@ -1378,10 +1377,9 @@
   }
 
   .awg-group-title {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
     color: var(--fg-secondary);
   }
 
@@ -1431,7 +1429,7 @@
   }
 
   .field-error-hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--warning);
     margin-top: 2px;
   }
@@ -1441,7 +1439,7 @@
     align-items: flex-end;
     gap: 12px;
     padding: 10px;
-    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.04));
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     margin-bottom: 8px;

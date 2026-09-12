@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import { slugifyProviderName } from '../../lib/mihomoYaml';
+  import Select from '../Select.svelte';
 
   let {
     ng = $bindable(),
@@ -35,12 +36,12 @@
 <div class="form-card">
   <div class="form-row">
     <label class="form-label" for="group-type">{$t('groups.type')}</label>
-    <select id="group-type" class="form-select" bind:value={ng.type}>
+    <Select id="group-type" class="form-select" bind:value={ng.type}>
       {#if ng.type === 'relay'}
         <option value="relay" disabled>relay ({$t('app.deprecated')})</option>
       {/if}
       {#each GROUP_TYPES as t}<option value={t}>{t}</option>{/each}
-    </select>
+    </Select>
     {#if ng.type === 'relay'}
       <div
         class="alert alert-warning"
@@ -79,7 +80,7 @@
             >
           </span>
         {/each}
-        <select
+        <Select
           id="group-use-providers"
           class="form-select-inline"
           value=""
@@ -101,19 +102,19 @@
             )}
             <option value={slug}>{sub.name} ({slug})</option>
           {/each}
-        </select>
+        </Select>
       </div>
     </div>
   {/if}
   {#if ng.type === 'load-balance'}
     <div class="form-row">
       <label class="form-label" for="group-strategy">{$t('groups.strategy')}</label>
-      <select id="group-strategy" class="form-select" bind:value={ng.strategy}>
+      <Select id="group-strategy" class="form-select" bind:value={ng.strategy}>
         <option value={undefined}>-- {$t('groups.select_strategy')} --</option>
         <option value="round-robin">round-robin</option>
         <option value="consistent-hashing">consistent-hashing</option>
         <option value="sticky-sessions">sticky-sessions</option>
-      </select>
+      </Select>
     </div>
   {/if}
   <div class="form-row">
@@ -138,7 +139,7 @@
           >
         </span>
       {/each}
-      <select
+      <Select
         id="group-proxies"
         class="form-select-inline"
         bind:value={ngProxyInput}
@@ -146,7 +147,7 @@
       >
         <option value="">+ {$t('groups.add')}...</option>
         {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
-      </select>
+      </Select>
     </div>
   </div>
   {#if ng.type !== 'select'}
@@ -201,13 +202,12 @@
   }
 
   .form-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-weight: 500;
   }
 
-  .form-input,
-  .form-select {
+  .form-input {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -219,20 +219,20 @@
     transition: border-color var(--transition-fast);
   }
 
-  .form-input:focus,
-  .form-select:focus {
+  .form-input:focus {
     border-color: var(--primary);
   }
 
-  .form-select-inline {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-primary);
-    font-size: 12px;
-    padding: 2px 4px;
-    outline: none;
-    cursor: pointer;
+  .tag-input-wrap :global(.xcp-select) {
+    width: auto;
+    flex: 1;
+    min-width: 140px;
+  }
+
+  :global(.form-select-inline) {
+    height: 28px !important;
+    font-size: var(--font-size-xs) !important;
+    padding: 2px 28px 2px 8px !important;
   }
 
   .tag-input-wrap {
@@ -253,7 +253,7 @@
     background: rgba(41, 194, 240, 0.12);
     border: 1px solid rgba(41, 194, 240, 0.25);
     color: var(--primary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     border-radius: 10px;
     padding: 2px 8px;
   }
@@ -263,7 +263,7 @@
     border: none;
     color: inherit;
     cursor: pointer;
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     padding: 0;
     line-height: 1;
   }
