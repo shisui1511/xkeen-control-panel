@@ -145,16 +145,14 @@ func (w *DeduplicatingWriter) flushEntryLocked(entry *dedupEntry) error {
 	return err
 }
 
-// Close flushes any pending summaries and incomplete lines, then closes the underlying writer.
-// Multiple calls to Close are safe and return nil.
-func (w *DeduplicatingWriter) Close() error {
+// Flush flushes any pending incomplete lines and all repeat summaries without closing the writer.
+func (w *DeduplicatingWriter) Flush() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	if w.closed {
 		return nil
 	}
-	w.closed = true
 
 	// If there is residual pending data, process it as a line
 	if len(w.pending) > 0 {
@@ -174,6 +172,21 @@ func (w *DeduplicatingWriter) Close() error {
 			}
 		}
 	}
+	return firstErr
+}
+
+// Close flushes any pending summaries and incomplete lines, then closes the underlying writer.
+// Multiple calls to Close are safe and return nil.
+func (w *DeduplicatingWriter) Close() error {
+	firstErr := w.Flush()
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.closed {
+		return nil
+	}
+	w.closed = true
 
 	if w.underlying != nil {
 		if err := w.underlying.Close(); err != nil && firstErr == nil {

@@ -415,3 +415,46 @@ func TestDeduplicatingWriter_ContinuousRepeatBudget(t *testing.T) {
 		t.Fatalf("expected at most %d lines (24h/periodicFlush + 2), got %d", maxAllowed, totalLines)
 	}
 }
+
+// Test 11: Flush сбрасывает накопленные повторы без закрытия писателя
+func TestDeduplicatingWriter_Flush(t *testing.T) {
+	mock := &mockWriteCloser{}
+	w := NewDeduplicatingWriter(mock)
+	currTime := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	w.now = func() time.Time { return currTime }
+
+	w.Write([]byte("fatal candidate msg\n"))
+	currTime = currTime.Add(5 * time.Second)
+	w.Write([]byte("fatal candidate msg\n"))
+
+	if err := w.Flush(); err != nil {
+		t.Fatalf("unexpected flush error: %v", err)
+	}
+
+	if mock.closeCount != 0 {
+		t.Fatalf("expected underlying not to be closed by Flush(), got closeCount %d", mock.closeCount)
+	}
+
+	lines := mock.Lines()
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines after Flush(), got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[1], "[dedup] previous message repeated 1 time(s)") {
+		t.Fatalf("expected dedup summary in line 1, got %q", lines[1])
+	}
+
+	// Writer must still be usable after Flush
+	w.Write([]byte("next message after flush\n"))
+	linesAfter := mock.Lines()
+	if len(linesAfter) != 3 {
+		t.Fatalf("expected 3 lines after subsequent write, got %d: %v", len(linesAfter), linesAfter)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("unexpected close error: %v", err)
+	}
+	if mock.closeCount != 1 {
+		t.Fatalf("expected closeCount 1, got %d", mock.closeCount)
+	}
+}
+

@@ -113,15 +113,27 @@ func main() {
 	}
 
 	// Setup logging to file if configured with size-based rotation (1 MB) and deduplication (D-16, D-38)
+	var dedupWriter *utils.DeduplicatingWriter
 	if cfg.XCPLogPath != "" {
 		rotator, err := utils.NewRotateWriter(cfg.XCPLogPath, 1*1024*1024)
 		if err == nil {
-			dedupWriter := utils.NewDeduplicatingWriter(rotator)
+			dedupWriter = utils.NewDeduplicatingWriter(rotator)
 			log.SetOutput(dedupWriter)
 			defer dedupWriter.Close()
 		} else {
 			log.Printf("Failed to initialize log rotator for %s: %v", cfg.XCPLogPath, err)
 		}
+	}
+
+	fatalf := func(format string, v ...interface{}) {
+		if dedupWriter != nil {
+			_ = dedupWriter.Flush()
+		}
+		log.Printf(format, v...)
+		if dedupWriter != nil {
+			_ = dedupWriter.Close()
+		}
+		os.Exit(1)
 	}
 
 	// System sysctl profile (STAB-06): no-op on non-Entware machines (see
@@ -163,11 +175,11 @@ func main() {
 
 	webFS, err := xkeencontrolpanel.GetWebFS()
 	if err != nil {
-		log.Fatalf("failed to load embedded web assets: %v", err)
+		fatalf("failed to load embedded web assets: %v", err)
 	}
 	srv, err := server.New(srvCfg, Version, webFS)
 	if err != nil {
-		log.Fatalf("Failed to create server: %v", err)
+		fatalf("Failed to create server: %v", err)
 	}
 
 	// Auth endpoints (public)
@@ -425,7 +437,7 @@ func main() {
 	// Templates
 	templatesFS, err := xkeencontrolpanel.GetTemplatesFS()
 	if err != nil {
-		log.Fatalf("failed to load embedded templates: %v", err)
+		fatalf("failed to load embedded templates: %v", err)
 	}
 	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir, cfg.TemplatesRepoURL, api.GetAssetsService())
 	api.SetTemplateService(templateSvc)
@@ -532,7 +544,7 @@ func main() {
 		}
 	case err := <-srvErrCh:
 		if !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("Server error: %v", err)
+			fatalf("Server error: %v", err)
 		}
 		// If the server was closed (e.g. during update restart), wait for either a signal
 		// or for the update process to call os.Exit().
