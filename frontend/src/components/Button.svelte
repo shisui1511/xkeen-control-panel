@@ -7,6 +7,7 @@
     disabled = false,
     loading = false,
     title,
+    'data-testid': testId,
     onclick,
     children
   } = $props<{
@@ -15,12 +16,20 @@
     disabled?: boolean;
     loading?: boolean;
     title?: string;
+    'data-testid'?: string;
     onclick?: (event: MouseEvent) => void;
     children?: Snippet;
   }>();
 </script>
 
-<button {type} class="btn btn-{variant}" disabled={disabled || loading} {title} {onclick}>
+<button
+  {type}
+  class="btn btn-{variant}"
+  disabled={disabled || loading}
+  {title}
+  data-testid={testId}
+  {onclick}
+>
   {#if loading}
     <span class="spinner" aria-hidden="true"></span>
     <span class="sr-only">Loading...</span>

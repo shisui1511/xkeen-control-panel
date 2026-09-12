@@ -16,6 +16,7 @@
     title?: string;
     name?: string;
     ariaLabel?: string;
+    'data-testid'?: string;
     onchange?: (event: Event & { currentTarget: HTMLSelectElement }) => void;
     options?: Option[];
     children?: Snippet;
@@ -29,6 +30,7 @@
     title,
     name,
     ariaLabel,
+    'data-testid': testId,
     onchange,
     options,
     children
@@ -44,6 +46,7 @@
     {disabled}
     {title}
     aria-label={ariaLabel}
+    data-testid={testId}
     bind:value
     {onchange}
   >

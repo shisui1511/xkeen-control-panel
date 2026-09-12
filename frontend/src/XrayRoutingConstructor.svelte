@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import Modal from './components/Modal.svelte';
+  import Select from './components/Select.svelte';
+  import Button from './components/Button.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { activateRestartGrace } from './lib/serviceGrace';
@@ -2447,21 +2449,17 @@
     </div>
   {:else}
     {#if !embedded}
-      <div class="page-head">
-        <div>
-          <div class="crumbs">
-            {$t('nav.group_system')} <span class="crumb-sep">›</span>
-            {$t('editor.title')} <span class="crumb-sep">›</span>
-            {$t('xray.presets_h1')}
-          </div>
-          <h1>{$t('xray.presets_h1')}</h1>
-          <p class="sub">
+      <div class="constructor-header">
+        <div class="constructor-header-content">
+          <h2 class="constructor-title">{$t('xray.presets_h1')}</h2>
+          <p class="constructor-sub">
             {$t('xray.presets_sub')}
           </p>
         </div>
         <div class="ph-actions">
-          <button
-            class="btn btn-secondary btn-compact"
+          <Button
+            type="button"
+            variant="secondary"
             onclick={() => (showPreviewPane = !showPreviewPane)}
             title={$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
           >
@@ -2478,8 +2476,8 @@
               <line x1="15" y1="3" x2="15" y2="21" />
             </svg>
             {$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
-          </button>
-          <button class="btn btn-secondary btn-compact" onclick={openInEditor}>
+          </Button>
+          <Button type="button" variant="secondary" onclick={openInEditor}>
             <svg
               width="13"
               height="13"
@@ -2497,24 +2495,20 @@
             {:else}
               {$t('mihomo.open_editor')}
             {/if}
-          </button>
+          </Button>
           {#if canUndo}
-            <button
-              class="btn btn-secondary btn-compact"
-              onclick={handleUndo}
-              disabled={applyLoading}
-              style="margin-right: 8px;"
-            >
+            <Button type="button" variant="secondary" onclick={handleUndo} disabled={applyLoading}>
               {$t('editor.undo')}
-            </button>
+            </Button>
           {/if}
-          <button
-            class="btn btn-primary btn-compact"
+          <Button
+            type="button"
+            variant="primary"
             data-testid="apply-changes-btn"
             onclick={handleApplyChanges}
           >
             {$t('mihomo.apply_changes')}
-          </button>
+          </Button>
         </div>
       </div>
     {:else}
@@ -2523,8 +2517,9 @@
           <strong>{$t('xray.presets_h1')}</strong>
         </div>
         <div class="ph-actions">
-          <button
-            class="btn btn-secondary btn-compact"
+          <Button
+            type="button"
+            variant="secondary"
             onclick={() => (showPreviewPane = !showPreviewPane)}
             title={$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
           >
@@ -2541,7 +2536,7 @@
               <line x1="15" y1="3" x2="15" y2="21" />
             </svg>
             {$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
-          </button>
+          </Button>
         </div>
       </div>
     {/if}
@@ -2593,7 +2588,7 @@
         <!-- Outbound Tag selection -->
         <div class="rule-providers-row">
           <label class="form-label" for="proxy-tag-select">{$t('xray.main_proxy_outbound')}:</label>
-          <select
+          <Select
             id="proxy-tag-select"
             class="form-select"
             bind:value={proxyTag}
@@ -2609,7 +2604,7 @@
                 <option value={tag}>{tag}</option>
               {/each}
             {/if}
-          </select>
+          </Select>
         </div>
 
         <!-- Section tabs -->
@@ -2641,7 +2636,7 @@
               <label class="form-label" for="domain-strategy"
                 >{$t('editor.xray_domain_strategy')}</label
               >
-              <select
+              <Select
                 id="domain-strategy"
                 class="form-select"
                 bind:value={routingConfig.domainStrategy}
@@ -2650,7 +2645,7 @@
                 <option value="AsIs">AsIs</option>
                 <option value="IPIfNonMatch">IPIfNonMatch</option>
                 <option value="IPOnDemand">IPOnDemand</option>
-              </select>
+              </Select>
             </div>
 
             <!-- Filter rules -->
@@ -2658,13 +2653,13 @@
               <label class="form-label" for="rule-filter-select"
                 >{$t('xray.filter_by_outbound_tag')}:</label
               >
-              <select id="rule-filter-select" class="form-select" bind:value={ruleFilterTag}>
+              <Select id="rule-filter-select" class="form-select" bind:value={ruleFilterTag}>
                 <option value="">{$t('xray.all_rules')}</option>
                 {#each outboundTags as tag}
                   <option value={tag}>{tag}</option>
                 {/each}
                 <option value="PROXY_TAG">PROXY_TAG</option>
-              </select>
+              </Select>
             </div>
 
             {#if $capabilities?.active_kernel === 'xray'}
@@ -2744,7 +2739,7 @@
                     <label class="form-label" for="test-route-protocol"
                       >{$t('xray.test_route.protocol')}</label
                     >
-                    <select
+                    <Select
                       id="test-route-protocol"
                       class="form-select"
                       data-testid="test-route-protocol"
@@ -2754,7 +2749,7 @@
                       <option value="http">http</option>
                       <option value="tls">tls</option>
                       <option value="bittorrent">bittorrent</option>
-                    </select>
+                    </Select>
                   </div>
                 </div>
 
@@ -3059,7 +3054,7 @@
                   <label class="form-label" for="rule-outbound"
                     >{$t('editor.xray_outbound_tag')}</label
                   >
-                  <select
+                  <Select
                     id="rule-outbound"
                     class="form-select rule-outbound-select"
                     data-testid="rule-outbound-select"
@@ -3069,7 +3064,7 @@
                       <option value={tag}>{tag}</option>
                     {/each}
                     <option value="PROXY_TAG">PROXY_TAG</option>
-                  </select>
+                  </Select>
                 </div>
 
                 <div class="form-row">
@@ -3122,11 +3117,11 @@
                   </div>
                   <div class="form-col">
                     <label class="form-label" for="rule-network">{$t('editor.xray_network')}</label>
-                    <select id="rule-network" class="form-select" bind:value={newRule.network}>
+                    <Select id="rule-network" class="form-select" bind:value={newRule.network}>
                       <option value="tcp,udp">tcp+udp</option>
                       <option value="tcp">tcp</option>
                       <option value="udp">udp</option>
-                    </select>
+                    </Select>
                   </div>
                 </div>
 
@@ -3219,14 +3214,14 @@
                     <label class="form-label" for="xray-new-inbound-protocol"
                       >{$t('xray.protocol')}</label
                     >
-                    <select
+                    <Select
                       id="xray-new-inbound-protocol"
                       class="form-select"
                       bind:value={newInbound.protocol}
                     >
                       <option value="socks">socks</option>
                       <option value="http">http</option>
-                    </select>
+                    </Select>
                   </div>
                 </div>
                 {#if newInbound.protocol === 'socks'}
@@ -3302,7 +3297,7 @@
               <label class="form-label" for="dns-query-strategy"
                 >{$t('xray.dns_query_strategy')}</label
               >
-              <select
+              <Select
                 id="dns-query-strategy"
                 class="form-select"
                 bind:value={dnsConfig.queryStrategy}
@@ -3311,7 +3306,7 @@
                 <option value="UseIP">UseIP</option>
                 <option value="UseIPv4">UseIPv4</option>
                 <option value="UseIPv6">UseIPv6</option>
-              </select>
+              </Select>
             </div>
 
             <div
@@ -3613,7 +3608,7 @@
                 </div>
                 <div class="form-row">
                   <label class="form-label" for="outbound-protocol">{$t('xray.protocol')}</label>
-                  <select
+                  <Select
                     id="outbound-protocol"
                     class="form-select"
                     bind:value={outboundForm.protocol}
@@ -3622,7 +3617,7 @@
                     <option value="vmess">VMess</option>
                     <option value="shadowsocks">Shadowsocks</option>
                     <option value="wireguard">WireGuard</option>
-                  </select>
+                  </Select>
                 </div>
 
                 <!-- Protocol specific fields -->
@@ -3695,16 +3690,16 @@
                   {#if outboundForm.protocol === 'vless'}
                     <div class="form-row">
                       <label class="form-label" for="outbound-flow">{$t('xray.flow')}</label>
-                      <select id="outbound-flow" class="form-select" bind:value={outboundForm.flow}>
+                      <Select id="outbound-flow" class="form-select" bind:value={outboundForm.flow}>
                         <option value="">{$t('app.none')}</option>
                         <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                      </select>
+                      </Select>
                     </div>
                   {:else if outboundForm.protocol === 'vmess'}
                     <div class="form-row2">
                       <div class="form-col">
                         <label class="form-label" for="outbound-cipher">{$t('xray.cipher')}</label>
-                        <select
+                        <Select
                           id="outbound-cipher"
                           class="form-select"
                           bind:value={outboundForm.cipher}
@@ -3713,7 +3708,7 @@
                           <option value="aes-128-gcm">aes-128-gcm</option>
                           <option value="chacha20-poly1305">chacha20-poly1305</option>
                           <option value="none">none</option>
-                        </select>
+                        </Select>
                       </div>
                       <div class="form-col">
                         <label class="form-label" for="outbound-alterid">AlterID</label>
@@ -3733,7 +3728,7 @@
                     <div class="form-col">
                       <label class="form-label" for="outbound-security">{$t('xray.security')}</label
                       >
-                      <select
+                      <Select
                         id="outbound-security"
                         class="form-select"
                         bind:value={outboundForm.security}
@@ -3743,7 +3738,7 @@
                         {#if outboundForm.protocol === 'vless'}
                           <option value="reality">REALITY</option>
                         {/if}
-                      </select>
+                      </Select>
                     </div>
                     <div class="form-col">
                       <label class="form-label" for="outbound-sni">SNI (ServerName)</label>
@@ -3896,7 +3891,7 @@
                         <label class="form-label" for="outbound-fingerprint"
                           >{$t('xray.reality_fingerprint')}</label
                         >
-                        <select
+                        <Select
                           id="outbound-fingerprint"
                           class="form-select"
                           bind:value={outboundForm.fingerprint}
@@ -3906,7 +3901,7 @@
                           <option value="safari">safari</option>
                           <option value="edge">edge</option>
                           <option value="qq">qq</option>
-                        </select>
+                        </Select>
                       </div>
                     {/if}
                   {/if}
@@ -3917,7 +3912,7 @@
                       <label class="form-label" for="outbound-network"
                         >{$t('xray.network_transport')}</label
                       >
-                      <select
+                      <Select
                         id="outbound-network"
                         class="form-select"
                         bind:value={outboundForm.network}
@@ -3926,7 +3921,7 @@
                         <option value="ws">websocket (ws)</option>
                         <option value="grpc">gRPC</option>
                         <option value="xhttp">xhttp (SplitHTTP)</option>
-                      </select>
+                      </Select>
                     </div>
                     <div class="form-col">
                       {#if outboundForm.network === 'ws'}
@@ -3978,7 +3973,7 @@
                   <div class="form-row2">
                     <div class="form-col">
                       <label class="form-label" for="outbound-ss-cipher">{$t('xray.cipher')}</label>
-                      <select
+                      <Select
                         id="outbound-ss-cipher"
                         class="form-select"
                         bind:value={outboundForm.cipher}
@@ -3986,7 +3981,7 @@
                         {#each shadowsocksCiphers as c}
                           <option value={c}>{c}</option>
                         {/each}
-                      </select>
+                      </Select>
                     </div>
                     <div class="form-col">
                       <label class="form-label" for="outbound-ss-password"
@@ -4257,7 +4252,7 @@
                   <label class="form-label" for="outbound-dialer-proxy">
                     {$t('xray.dialer_proxy')}
                   </label>
-                  <select
+                  <Select
                     id="outbound-dialer-proxy"
                     class="form-select"
                     bind:value={outboundForm.dialerProxy}
@@ -4266,7 +4261,7 @@
                     {#each outboundDetails.filter((d) => !['direct', 'block', 'dns-out'].includes(d.tag) && d.tag !== outboundForm.tag.trim()) as o}
                       <option value={o.tag}>{o.tag} ({o.protocol})</option>
                     {/each}
-                  </select>
+                  </Select>
 
                   {#if outboundForm.dialerProxy}
                     <div class="dialer-chain-preview">
@@ -4317,7 +4312,7 @@
 
             <div class="form-row">
               <label class="form-label" for="log-level">{$t('xray.loglevel')}</label>
-              <select
+              <Select
                 id="log-level"
                 class="form-select"
                 bind:value={logConfig.loglevel}
@@ -4328,7 +4323,7 @@
                 <option value="warning">warning</option>
                 <option value="info">info</option>
                 <option value="debug">debug</option>
-              </select>
+              </Select>
             </div>
 
             <div class="form-row" style="margin-top: 8px;">
@@ -4781,7 +4776,7 @@
                   {item.rowError}
                 </div>
                 <div
-                  style="font-size: 11px; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
+                  style="font-size: var(--font-size-xs); color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
                   title={item.link}
                 >
                   {item.link}
@@ -4824,7 +4819,7 @@
                 {#if item.outbound?.protocol === 'wireguard' || item.outbound?.settings?.amneziaWgOption || item.outbound?.amneziaWgOption}
                   <div
                     class="alert alert-warning"
-                    style="margin-top: 6px; font-size: 11px; padding: 6px 10px; border-radius: var(--radius-sm);"
+                    style="margin-top: 6px; font-size: var(--font-size-xs); padding: 6px 10px; border-radius: var(--radius-sm);"
                   >
                     {$t('subscr.import_xray_awg_warning')}
                   </div>
@@ -4911,31 +4906,26 @@
     height: 100%;
   }
 
-  .crumbs {
-    font-size: var(--font-size-xs);
-    color: var(--fg-secondary);
-    margin-bottom: 4px;
+  .constructor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
   }
-  .crumb-sep {
-    margin: 0 4px;
-  }
-  h1 {
-    font-size: 1.5rem;
+
+  .constructor-title {
+    font-size: var(--font-size-xl);
     font-weight: 600;
     margin: 0 0 4px 0;
     color: var(--fg-primary);
   }
-  .sub {
-    color: var(--fg-secondary);
-    font-size: var(--font-size-sm);
-    margin: 0 0 20px 0;
-  }
 
-  .page-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: var(--spacing-4);
+  .constructor-sub {
+    font-size: var(--font-size-sm);
+    color: var(--fg-secondary);
+    margin: 0;
   }
 
   .embedded-head-toolbar {
@@ -5061,7 +5051,7 @@
 
   .preset-mod-badge {
     margin-left: 5px;
-    font-size: 0.6875rem;
+    font-size: var(--font-size-xs);
     color: var(--warning);
     opacity: 0.9;
     font-style: italic;
@@ -5112,7 +5102,7 @@
   .sec-count {
     background: var(--bg-elevated);
     color: var(--fg-primary);
-    font-size: 0.6875rem;
+    font-size: var(--font-size-xs);
     padding: 1px 5px;
     border-radius: 10px;
     font-weight: 600;
@@ -5322,7 +5312,7 @@
   .chip {
     padding: 1px 6px;
     border-radius: 4px;
-    font-size: 0.6875rem;
+    font-size: var(--font-size-xs);
     font-weight: 500;
   }
 
@@ -5371,7 +5361,7 @@
   }
 
   .form-input,
-  .form-select {
+  :global(.form-select) {
     padding: 8px 12px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
@@ -5384,7 +5374,7 @@
   }
 
   .form-input:focus,
-  .form-select:focus {
+  :global(.form-select:focus) {
     border-color: var(--accent);
   }
 
@@ -5582,7 +5572,7 @@
   }
 
   .preview-meta-size {
-    font-size: 0.6875rem;
+    font-size: var(--font-size-xs);
     color: var(--fg-muted);
     font-family: var(--font-family-mono);
   }
@@ -5595,7 +5585,7 @@
 
   .btn-tool-action {
     padding: 3px 8px;
-    font-size: 0.6875rem;
+    font-size: var(--font-size-xs);
     display: inline-flex;
     align-items: center;
     gap: 4px;
