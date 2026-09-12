@@ -70,21 +70,21 @@
 
 <style>
   .awg-diff-card {
-    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.03));
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     padding: 10px 12px;
     display: flex;
     flex-direction: column;
     gap: 8px;
     margin-top: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .awg-diff-card.compact {
     padding: 6px 8px;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .awg-diff-header {
@@ -92,10 +92,9 @@
     align-items: center;
     justify-content: space-between;
     font-weight: 600;
-    color: var(--fg);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    color: var(--fg-primary);
+    font-size: var(--font-size-xs);
+    letter-spacing: 0.02em;
   }
 
   .diff-sections {
