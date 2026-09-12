@@ -885,13 +885,13 @@
             <span class="field-row-name">{$t('settings.animations')}</span>
             <div class="field-row-desc">{$t('settings.animations_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
               bind:checked={animationsEnabled}
               onchange={() => saveSetting('animations', String(animationsEnabled))}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
       </div>
@@ -905,14 +905,14 @@
             <span class="field-row-name">{$t('settings.capsule_visible')}</span>
             <div class="field-row-desc">{$t('settings.capsule_visible_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
               checked={$capsuleConfigStore.visible}
               onchange={(e) =>
                 updateCapsuleConfig({ visible: (e.target as HTMLInputElement).checked })}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
         {#if $capsuleConfigStore.visible}
@@ -921,14 +921,14 @@
               <span class="field-row-name">{$t('settings.capsule_traffic')}</span>
               <div class="field-row-desc">{$t('settings.capsule_traffic_desc')}</div>
             </div>
-            <label class="toggle">
+            <label class="toggle-switch">
               <input
                 type="checkbox"
                 checked={$capsuleConfigStore.showTraffic}
                 onchange={(e) =>
                   updateCapsuleConfig({ showTraffic: (e.target as HTMLInputElement).checked })}
               />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span class="toggle-slider"></span>
             </label>
           </div>
           <div class="field-row">
@@ -936,14 +936,14 @@
               <span class="field-row-name">{$t('settings.capsule_resources')}</span>
               <div class="field-row-desc">{$t('settings.capsule_resources_desc')}</div>
             </div>
-            <label class="toggle">
+            <label class="toggle-switch">
               <input
                 type="checkbox"
                 checked={$capsuleConfigStore.showResources}
                 onchange={(e) =>
                   updateCapsuleConfig({ showResources: (e.target as HTMLInputElement).checked })}
               />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span class="toggle-slider"></span>
             </label>
           </div>
         {/if}
@@ -958,13 +958,13 @@
             <span class="field-row-name">{$t('settings.auto_refresh')}</span>
             <div class="field-row-desc">{$t('settings.auto_refresh_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
               bind:checked={autoRefresh}
               onchange={() => saveSetting('autoRefresh', String(autoRefresh))}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
         <div class="field-row">
@@ -972,13 +972,13 @@
             <span class="field-row-name">{$t('settings.confirm_dangerous')}</span>
             <div class="field-row-desc">{$t('settings.confirm_dangerous_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
               bind:checked={confirmDangerous}
               onchange={() => saveSetting('confirmDangerous', String(confirmDangerous))}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
         <div class="field-row">
@@ -986,13 +986,13 @@
             <span class="field-row-name">{$t('settings.notification_sound')}</span>
             <div class="field-row-desc">{$t('settings.notification_sound_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
               bind:checked={notificationSound}
               onchange={() => saveSetting('notificationSound', String(notificationSound))}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
         <div class="field-row">
@@ -1000,13 +1000,13 @@
             <span class="field-row-name">{$t('settings.dev_mode')}</span>
             <div class="field-row-desc">{$t('settings.dev_mode_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
               checked={$devMode}
               onchange={(e) => setDevMode((e.target as HTMLInputElement).checked)}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
       </div>
@@ -2018,52 +2018,6 @@
   .seg-opt.seg-active {
     background: var(--accent);
     color: var(--btn-primary-text);
-  }
-
-  /* Toggle switch */
-  .toggle {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-
-  .toggle input {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-
-  .toggle-track {
-    width: 36px;
-    height: 20px;
-    background: var(--border);
-    border-radius: 10px;
-    transition: background 0.2s;
-    position: relative;
-    display: block;
-  }
-
-  .toggle input:checked ~ .toggle-track {
-    background: var(--accent);
-  }
-
-  .toggle-thumb {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 16px;
-    height: 16px;
-    background: #fff;
-    border-radius: 50%;
-    transition: transform 0.2s;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  }
-
-  .toggle input:checked ~ .toggle-track .toggle-thumb {
-    transform: translateX(16px);
   }
 
   .btn-sm {
