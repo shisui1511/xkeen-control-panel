@@ -3,7 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 type ServiceStatusResponse struct {
@@ -47,8 +48,7 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Fallback to checking raw output if kernelSvc list is empty or doesn't find running
 	if !resp.IsRunning {
-		lower := strings.ToLower(out)
-		if strings.Contains(lower, "running") || strings.Contains(lower, "запущен") {
+		if services.IsKernelStatusHealthy(out) {
 			resp.IsRunning = true
 		}
 	}
