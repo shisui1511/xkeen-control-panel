@@ -326,8 +326,8 @@
 <style>
   .system-quick-menu {
     width: 250px;
-    background: var(--bg-card, #16202c);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+    background: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md, 10px);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     backdrop-filter: blur(16px);
@@ -351,7 +351,7 @@
 
   .menu-header {
     padding: 6px 10px 8px;
-    border-bottom: 1px solid var(--border-light, rgba(255, 255, 255, 0.06));
+    border-bottom: 1px solid var(--border-light);
     margin-bottom: 4px;
   }
 
@@ -363,22 +363,20 @@
   }
 
   .menu-title {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-muted, #8a99a8);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--fg-muted);
   }
 
   .badge-kernel {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 4px;
-    background: var(--accent-subtle, rgba(56, 189, 248, 0.15));
-    color: var(--accent, #38bdf8);
-    border: 1px solid var(--accent-border, rgba(56, 189, 248, 0.3));
-    text-transform: uppercase;
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   }
 
   .menu-section {
@@ -389,7 +387,7 @@
 
   .menu-divider {
     height: 1px;
-    background: var(--border-light, rgba(255, 255, 255, 0.06));
+    background: var(--border-light);
     margin: 4px 0;
   }
 
@@ -402,7 +400,7 @@
     background: transparent;
     border: none;
     border-radius: var(--radius-sm, 6px);
-    color: var(--text, #e2e8f0);
+    color: var(--fg-primary);
     font-size: 13px;
     font-weight: 500;
     text-align: left;
@@ -414,8 +412,8 @@
   }
 
   .menu-item:hover:not(:disabled) {
-    background: var(--hover, rgba(255, 255, 255, 0.08));
-    color: #fff;
+    background: var(--bg-hover);
+    color: var(--fg-primary);
   }
 
   .menu-item:active:not(:disabled) {
@@ -433,19 +431,19 @@
     justify-content: center;
     width: 18px;
     height: 18px;
-    color: var(--text-muted, #94a3b8);
+    color: var(--fg-muted);
   }
 
   .menu-item:hover:not(:disabled) .item-icon {
-    color: var(--accent, #38bdf8);
+    color: var(--accent);
   }
 
   .danger-btn:hover:not(:disabled) .item-icon {
-    color: var(--color-danger, #ef4444);
+    color: var(--danger);
   }
 
   .success-btn:hover:not(:disabled) .item-icon {
-    color: var(--color-success, #22c55e);
+    color: var(--success);
   }
 
   .spinning {

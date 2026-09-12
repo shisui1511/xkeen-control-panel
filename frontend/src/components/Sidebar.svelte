@@ -644,7 +644,7 @@
     position: fixed;
     transform: translateY(-50%);
     background: var(--bg-deep);
-    color: #fff;
+    color: var(--fg-primary);
     padding: 6px 10px;
     border-radius: 6px;
     font-size: 12px;
@@ -664,12 +664,12 @@
     height: 16px;
     border-radius: 50%;
     background: var(--warning);
-    color: #03182a;
-    font-size: 9px;
-    font-weight: 600;
+    color: var(--btn-primary-text);
+    font-size: var(--font-size-xs);
+    font-weight: 700;
     line-height: 1;
     margin-left: auto;
     flex-shrink: 0;
-    box-shadow: 0 0 6px rgba(240, 180, 80, 0.5);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 50%, transparent);
   }
 </style>
