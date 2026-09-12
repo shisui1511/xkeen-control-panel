@@ -546,3 +546,73 @@ proxies:
 		t.Errorf("expected informational preflight.awg_random_trailers warning")
 	}
 }
+
+func TestValidateConfigContent_Awg31VersionCompatibility(t *testing.T) {
+	awg31Config := `
+proxies:
+  - name: "awg-v3"
+    type: wireguard
+    server: 1.2.3.4
+    port: 51820
+    amnezia-wg-option:
+      version: "3.1"
+      header-protection-key: "my-secret-key"
+      i1: "0A1B2C"
+`
+	// 1. Mihomo < 1.19.30: should emit preflight.awg_version_incompatible, but stay Valid = true
+	resOld := ValidateConfigContent("mihomo", "config.yaml", awg31Config, "v1.19.29")
+	if !resOld.Valid {
+		t.Errorf("expected resOld.Valid to remain true")
+	}
+	if !hasWarningCode(resOld, "preflight.awg_version_incompatible") {
+		t.Errorf("expected preflight.awg_version_incompatible warning for v1.19.29, got: %+v", resOld.Warnings)
+	}
+
+	// 2. Mihomo == 1.19.30: should NOT emit warning
+	resExact := ValidateConfigContent("mihomo", "config.yaml", awg31Config, "1.19.30")
+	if hasWarningCode(resExact, "preflight.awg_version_incompatible") {
+		t.Errorf("unexpected preflight.awg_version_incompatible warning for 1.19.30")
+	}
+
+	// 3. Mihomo > 1.19.30: should NOT emit warning
+	resNewer := ValidateConfigContent("mihomo", "config.yaml", awg31Config, "v1.20.0")
+	if hasWarningCode(resNewer, "preflight.awg_version_incompatible") {
+		t.Errorf("unexpected preflight.awg_version_incompatible warning for v1.20.0")
+	}
+
+	// 4. Empty version string: should NOT emit warning (avoid false positive)
+	resEmpty := ValidateConfigContent("mihomo", "config.yaml", awg31Config, "")
+	if hasWarningCode(resEmpty, "preflight.awg_version_incompatible") {
+		t.Errorf("unexpected preflight.awg_version_incompatible warning for empty version")
+	}
+
+	// 5. Without version argument (variadic omitted): should NOT emit warning
+	resOmitted := ValidateConfigContent("mihomo", "config.yaml", awg31Config)
+	if hasWarningCode(resOmitted, "preflight.awg_version_incompatible") {
+		t.Errorf("unexpected preflight.awg_version_incompatible warning when version omitted")
+	}
+
+	// 6. Classic AWG config on old version: should NOT emit version warning
+	classicConfig := `
+proxies:
+  - name: "classic-awg"
+    type: wireguard
+    server: 1.2.3.4
+    port: 51820
+    amnezia-wg-option:
+      jc: 5
+      jmin: 10
+      jmax: 40
+      s1: 20
+      s2: 100
+      h1: 10
+      h2: 20
+      h3: 30
+      h4: 40
+`
+	resClassicOld := ValidateConfigContent("mihomo", "config.yaml", classicConfig, "1.18.0")
+	if hasWarningCode(resClassicOld, "preflight.awg_version_incompatible") {
+		t.Errorf("unexpected preflight.awg_version_incompatible warning for classic AWG on 1.18.0")
+	}
+}
+
