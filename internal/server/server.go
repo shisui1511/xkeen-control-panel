@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/auth"
@@ -23,6 +25,7 @@ type Server struct {
 	version     string
 	mux         *http.ServeMux
 	authService *auth.AuthService
+	mu          sync.RWMutex
 	httpSrv     *http.Server
 	loopbackSrv *http.Server
 }
@@ -62,6 +65,14 @@ func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			w.Header().Set("Pragma", "no-cache")
 			w.Header().Set("Expires", "0")
+			if path != "/" && path != "/index.html" && filepath.Ext(path) == "" {
+				trimmed := strings.TrimPrefix(path, "/")
+				if f, err := web.Open(trimmed); err != nil {
+					r.URL.Path = "/"
+				} else {
+					_ = f.Close()
+				}
+			}
 		} else if len(path) >= 8 && path[:8] == "/assets/" {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
@@ -94,23 +105,32 @@ func (s *Server) GetAuthService() *auth.AuthService {
 	return s.authService
 }
 
-func (s *Server) Start() error {
-	// Wrap mux with middleware chain
+// BuildHandler constructs and returns the HTTP handler with the complete middleware chain.
+func (s *Server) BuildHandler() http.Handler {
 	var handler http.Handler = s.mux
 	handler = i18n.Middleware(handler)
 	handler = auth.SecurityHeaders(handler)
 	handler = middleware.Recovery(handler)
 	handler = middleware.MaxBytes(handler)
 	handler = middleware.Logging(handler)
+	return handler
+}
+
+func (s *Server) Start() error {
+	handler := s.BuildHandler()
 
 	addr := fmt.Sprintf(":%d", s.cfg.Port)
-	s.httpSrv = &http.Server{
+	httpSrv := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+
+	s.mu.Lock()
+	s.httpSrv = httpSrv
+	s.mu.Unlock()
 
 	if s.cfg.HTTPS.Enabled {
 		certPath := s.cfg.HTTPS.CertPath
@@ -142,39 +162,49 @@ func (s *Server) Start() error {
 
 		// Start HTTP loopback server on localhost (127.0.0.1) only
 		loopbackAddr := fmt.Sprintf("127.0.0.1:%d", s.cfg.LoopbackPort)
-		s.loopbackSrv = &http.Server{
+		loopbackSrv := &http.Server{
 			Addr:              loopbackAddr,
 			Handler:           handler,
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       30 * time.Second,
 			IdleTimeout:       120 * time.Second,
 		}
+
+		s.mu.Lock()
+		s.loopbackSrv = loopbackSrv
+		s.mu.Unlock()
+
 		go func() {
 			log.Printf("Listening HTTP loopback on %s", loopbackAddr)
-			if err := s.loopbackSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := loopbackSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Printf("HTTP loopback server error: %v", err)
 			}
 		}()
 
 		log.Printf("Listening HTTPS on port %d", s.cfg.Port)
-		return s.httpSrv.Serve(listener)
+		return httpSrv.Serve(listener)
 	}
 
 	log.Printf("Listening HTTP on port %d", s.cfg.Port)
-	return s.httpSrv.ListenAndServe()
+	return httpSrv.ListenAndServe()
 }
 
 // Shutdown gracefully stops the HTTP server, waiting up to ctx deadline for
 // active connections to finish.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.mu.RLock()
+	httpSrv := s.httpSrv
+	loopbackSrv := s.loopbackSrv
+	s.mu.RUnlock()
+
 	var errs []error
-	if s.httpSrv != nil {
-		if err := s.httpSrv.Shutdown(ctx); err != nil {
+	if httpSrv != nil {
+		if err := httpSrv.Shutdown(ctx); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	if s.loopbackSrv != nil {
-		if err := s.loopbackSrv.Shutdown(ctx); err != nil {
+	if loopbackSrv != nil {
+		if err := loopbackSrv.Shutdown(ctx); err != nil {
 			errs = append(errs, err)
 		}
 	}
