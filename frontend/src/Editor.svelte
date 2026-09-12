@@ -2652,19 +2652,19 @@
     justify-content: space-between;
     align-items: center;
     padding: 12px;
-    background: var(--bg-deep);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     cursor: pointer;
     text-align: left;
     transition: all 0.2s;
     width: 100%;
-    color: var(--fg-terminal);
+    color: var(--fg-primary);
   }
 
   .template-item:hover {
     border-color: var(--accent);
-    background: var(--hover);
+    background: var(--bg-elevated);
   }
 
   .template-info {
@@ -2697,7 +2697,7 @@
 
   .template-item.selected {
     border-color: var(--accent);
-    background: var(--hover);
+    background: var(--bg-elevated);
   }
 
   :global(.templates-wide-modal) {

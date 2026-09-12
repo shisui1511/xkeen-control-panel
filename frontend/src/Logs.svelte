@@ -1470,9 +1470,9 @@
     bottom: 16px;
     left: 50%;
     transform: translateX(-50%);
-    background: rgba(15, 23, 42, 0.95);
+    background: var(--bg-terminal);
     border: 1px solid var(--accent);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-md);
     border-radius: var(--radius-full);
     padding: 6px 14px;
     display: flex;

@@ -28,7 +28,7 @@
     if (typeof window === 'undefined') return {};
     const styles = getComputedStyle(document.documentElement);
 
-    const bgDeep = styles.getPropertyValue('--bg-deep').trim() || '#050d16';
+    const bgDeep = styles.getPropertyValue('--bg-deep').trim() || '#07182a';
     const fgTerminal = styles.getPropertyValue('--fg-terminal').trim() || '#d9e7f4';
     const accent = styles.getPropertyValue('--accent').trim() || '#29c2f0';
     const danger = styles.getPropertyValue('--danger').trim() || '#f4707f';
