@@ -759,7 +759,7 @@
   "trafficquotas.no_quotas": "Нет лимитов. Добавьте первый.",
   "trafficquotas.empty_title": "Нет настроенных квот",
   "trafficquotas.empty_desc": "Создайте правила ограничения трафика для IP-адресов или подсетей локальной сети.",
-  "trafficquotas.empty_cta": "+ Добавить лимит",
+  "trafficquotas.empty_cta": "Добавить лимит",
   "trafficquotas.new_quota": "Новый лимит",
   "trafficquotas.edit_quota": "Редактировать лимит",
   "trafficquotas.name": "Название",

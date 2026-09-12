@@ -760,7 +760,7 @@
   "trafficquotas.no_quotas": "No quotas. Add the first one.",
   "trafficquotas.empty_title": "No traffic quotas configured",
   "trafficquotas.empty_desc": "Create traffic limit rules for local IP addresses or subnets.",
-  "trafficquotas.empty_cta": "+ Add Quota",
+  "trafficquotas.empty_cta": "Add quota",
   "trafficquotas.new_quota": "New Quota",
   "trafficquotas.edit_quota": "Edit Quota",
   "trafficquotas.name": "Name",

@@ -787,7 +787,9 @@
           <span class="meta-val monospace">{xkeenInfo.pid || activeKernelObj?.pid || '—'}</span>
         </div>
         <div class="meta-item">
-          <span class="meta-lbl">{$t('svc.uptime_label', { time: '' }).replace(':', '')}:</span>
+          <span class="meta-lbl"
+            >{$t('svc.uptime_label', { time: '' }).replace(':', '').trim()}:</span
+          >
           <span class="meta-val monospace"
             >{activeKernelObj?.uptime || xkeenInfo.uptime || '—'}</span
           >
