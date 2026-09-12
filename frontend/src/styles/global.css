@@ -39,6 +39,7 @@
   --accent-2: #1aa6d4;
   --accent-soft: rgba(41, 194, 240, 0.14);
   --accent-line: rgba(41, 194, 240, 0.42);
+  --warning-soft: color-mix(in srgb, var(--warning) 14%, transparent);
 
   /* Semantic */
   --success: #46d18a;
@@ -192,6 +193,41 @@
   --cm-bracket: #d9e7f4;
   --cm-active-line: #0b1a2d;
   --cm-border: #0e2034;
+
+  /* Code-preview token set: one-way semantic projection for static
+     JSON/YAML config previews (constructors). Every value is a var()
+     reference onto the CodeMirror set above; the chain is one-way only
+     (no reverse references) and no new literal colours are introduced
+     here (DS2-01). */
+  --code-bg: var(--cm-bg);
+  --code-fg: var(--cm-property);
+  --code-key: var(--cm-keyword);
+  --code-string: var(--cm-string);
+  --code-number: var(--cm-number);
+  --code-boolean: var(--cm-boolean);
+  --code-null: var(--cm-null);
+  --code-comment: var(--cm-comment);
+  --code-punctuation: var(--cm-bracket);
+  --code-border: var(--cm-border);
+
+  /* --seq-1..8 — named decorative multi-hue sequence (DS2-02). Applied by
+     index: element N in a list gets step ((N - 1) % 8) + 1, so order stays
+     stable across renders (index-based, not hash-based) and cycles cleanly
+     past 8 items. Steps 1-5 reuse existing semantic tokens (var-chaining,
+     no new hex); steps 6-8 are the only literally new colours this phase
+     introduces, with separate dark/light values below. Step 1 chains
+     through --accent-text (not raw --accent): raw --accent measures
+     3.68:1 on a light-theme card and fails WCAG AA as a foreground colour,
+     while --accent-text is the existing alias already engineered to solve
+     exactly this per-theme contrast problem. */
+  --seq-1: var(--accent-text);
+  --seq-2: var(--success);
+  --seq-3: var(--warning);
+  --seq-4: var(--danger);
+  --seq-5: var(--purple);
+  --seq-6: #5b9df9;
+  --seq-7: #f28fce;
+  --seq-8: #8de6c8;
 }
 
 /* ------------ Light theme (inverted) ------------- */
@@ -256,6 +292,12 @@
   --cm-bracket: #0c2237;
   --cm-active-line: #f0f4f9;
   --cm-border: #e1e7ef;
+
+  /* --seq-1..5 resolve through the already-overridden tokens above; only the
+     3 literal steps need a light-theme override (DS2-02). */
+  --seq-6: #2f5fc7;
+  --seq-7: #b23e82;
+  --seq-8: #1f7a63;
 }
 
 /* ------------ Density Modes (Theme-agnostic: applies orthogonally to dark and light themes) ------------- */
