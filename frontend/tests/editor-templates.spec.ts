@@ -140,6 +140,16 @@ test.describe('Templates modal integration test suite', () => {
 
     await expect(xrayTab).toBeVisible();
     await expect(mihomoTab).toBeVisible();
+
+    // Проверяем переключение на вкладку Mihomo и обновление активного состояния (IN-03)
+    await mihomoTab.click();
+    await expect(mihomoTab).toHaveClass(/active/);
+    await expect(xrayTab).not.toHaveClass(/active/);
+
+    // Проверяем возврат на вкладку Xray
+    await xrayTab.click();
+    await expect(xrayTab).toHaveClass(/active/);
+    await expect(mihomoTab).not.toHaveClass(/active/);
   });
 
   test('selecting template shows preview', async ({ page }) => {
