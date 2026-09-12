@@ -3247,7 +3247,7 @@
               {#if externalControllerTarget.startsWith('0.0.0.0:') || externalControllerTarget.startsWith(':') || externalControllerTarget === '0.0.0.0'}
                 <div
                   class="inline-warning"
-                  style="margin-top: 6px; font-size: 12px; color: var(--color-warning, #f59e0b); display: flex; align-items: center; gap: 6px;"
+                  style="margin-top: 6px; font-size: 12px; color: var(--warning); display: flex; align-items: center; gap: 6px;"
                 >
                   <svg
                     width="14"
@@ -3594,7 +3594,7 @@
                       height="12"
                       viewBox="0 0 24 24"
                       fill="none"
-                      stroke="var(--color-success, #22c55e)"
+                      stroke="var(--success)"
                       stroke-width="2.5"
                     >
                       <polyline points="20 6 9 17 4 12" />
@@ -3811,7 +3811,7 @@
             bind:value={importLink}
             placeholder={$t('subscr.import_link_placeholder')}
             rows="4"
-            style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
+            style="resize: none; font-family: var(--font-mono); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; color: var(--fg-primary);"
           ></textarea>
         </div>
       {:else if importSource === 'file'}
@@ -3855,7 +3855,7 @@
         </div>
       {:else if importSource === 'clipboard'}
         <div
-          style="padding: 24px; text-align: center; background: var(--bg-surface-hover); border: 1px dashed var(--border); border-radius: var(--radius);"
+          style="padding: 24px; text-align: center; background: var(--bg-elevated); border: 1px dashed var(--border); border-radius: var(--radius);"
         >
           <p style="font-size: 13px; color: var(--fg-secondary); margin-bottom: 12px;">
             {$t('subscr.import_clipboard_desc')}
@@ -3894,7 +3894,7 @@
             {#if item.rowError}
               <div
                 class="preview-item-card"
-                style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
               >
                 <button
                   type="button"
@@ -3916,7 +3916,7 @@
             {:else}
               <div
                 class="preview-item-card"
-                style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
               >
                 <button
                   type="button"
@@ -3928,7 +3928,7 @@
                   style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
                 >
                   <span
-                    ><strong style="color: var(--fg);">{item.outbound?.protocol}</strong> · {getNodeServer(
+                    ><strong style="color: var(--fg-primary);">{item.outbound?.protocol}</strong> · {getNodeServer(
                       item.outbound
                     )}:{getNodePort(item.outbound)}</span
                   >
@@ -3944,7 +3944,7 @@
                     type="text"
                     class="input"
                     bind:value={item.tag}
-                    style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
+                    style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; color: var(--fg-primary); width: auto;"
                   />
                 </div>
                 {#if item.outbound?.protocol === 'wireguard' || item.outbound?.settings?.amneziaWgOption || item.outbound?.amneziaWgOption}
@@ -4162,7 +4162,7 @@
 
   .directive-tag {
     font-size: 11px;
-    font-family: var(--font-family-mono, monospace);
+    font-family: var(--font-mono);
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -4217,15 +4217,15 @@
 
   .mihomo-splitter:hover .splitter-handle,
   .mihomo-splitter.active .splitter-handle {
-    background: var(--color-primary, #0284c7);
-    box-shadow: 0 0 8px rgba(2, 132, 199, 0.4);
+    background: var(--accent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent);
   }
 
   .splitter-handle {
     width: 4px;
     height: 36px;
     border-radius: 2px;
-    background: var(--color-border, #334155);
+    background: var(--border);
     transition: all 0.15s ease;
   }
 
@@ -4419,7 +4419,7 @@
   .match-rule-row {
     margin-top: 8px;
     border-top: 1px dashed var(--border);
-    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.02));
+    background: var(--bg-elevated);
     border-left: 3px solid var(--seq-5);
   }
 
@@ -4435,7 +4435,7 @@
     border-radius: var(--radius);
     padding: 24px 16px;
     text-align: center;
-    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.02));
+    background: var(--bg-elevated);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -4451,8 +4451,8 @@
   }
 
   .file-picker-input::file-selector-button {
-    background: var(--bg-surface-hover);
-    color: var(--fg);
+    background: var(--bg-elevated);
+    color: var(--fg-primary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 12px;
@@ -4784,7 +4784,7 @@
 
   .add-btn {
     width: 100%;
-    background: var(--bg-surface, #1e293b);
+    background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--fg-secondary);
@@ -4799,8 +4799,8 @@
   }
 
   .add-btn:hover {
-    background: var(--bg-card-hover, #334155);
-    border-color: var(--border-focus, var(--primary));
+    background: var(--bg-card-hover);
+    border-color: var(--border-focus);
     color: var(--fg-primary);
   }
 
@@ -4892,8 +4892,8 @@
     background: var(--code-bg);
     color: var(--code-fg);
     border: 1px solid var(--code-border);
-    font-family: var(--font-mono, monospace);
-    font-size: var(--font-size-xs, 0.75rem);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     white-space: pre;
     scrollbar-width: thin;
@@ -5024,24 +5024,24 @@
   }
 
   .constructor-proxy-list .btn-action-primary {
-    background: var(--bg-surface, #1e293b);
+    background: var(--bg-surface);
     border: 1px solid var(--border);
     color: var(--fg-primary);
   }
 
   .constructor-proxy-list .btn-action-primary:hover {
-    background: var(--bg-card-hover, #334155);
+    background: var(--bg-card-hover);
     border-color: var(--primary);
   }
 
   .constructor-proxy-list .import-btn {
-    background: var(--bg-surface, #1e293b);
+    background: var(--bg-surface);
     border: 1px solid var(--border);
     color: var(--fg-secondary);
   }
 
   .constructor-proxy-list .import-btn:hover:not(:disabled) {
-    background: var(--bg-card-hover, #334155);
+    background: var(--bg-card-hover);
     border-color: var(--primary);
     color: var(--fg-primary);
   }
