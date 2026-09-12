@@ -3,12 +3,11 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
@@ -38,28 +37,10 @@ func buildStubBinary(t *testing.T, output string, exitCode int) string {
 	t.Helper()
 	tmpDir := t.TempDir()
 
-	// Пишем stub main.go
-	src := `package main
-
-import (
-	"fmt"
-	"os"
-)
-
-func main() {
-	fmt.Print("` + output + `")
-	os.Exit(` + strings.TrimSpace(string(rune('0'+exitCode))) + `)
-}
-`
-	srcPath := filepath.Join(tmpDir, "main.go")
-	if err := os.WriteFile(srcPath, []byte(src), 0644); err != nil {
-		t.Fatalf("write stub src: %v", err)
-	}
-
 	binPath := filepath.Join(tmpDir, "xkeen-stub")
-	cmd := exec.Command("go", "build", "-o", binPath, srcPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build stub binary: %v\n%s", err, out)
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s' %q\nexit %d\n", output, exitCode)
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write stub script: %v", err)
 	}
 
 	return binPath

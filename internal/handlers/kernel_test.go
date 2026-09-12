@@ -2,10 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,25 +19,10 @@ func buildKernelStubBinary(t *testing.T, name, output string) string {
 	t.Helper()
 	tmpDir := t.TempDir()
 
-	src := `package main
-
-import (
-	"fmt"
-)
-
-func main() {
-	fmt.Println("` + output + `")
-}
-`
-	srcPath := filepath.Join(tmpDir, "main.go")
-	if err := os.WriteFile(srcPath, []byte(src), 0644); err != nil {
-		t.Fatalf("write stub src: %v", err)
-	}
-
 	binPath := filepath.Join(tmpDir, name)
-	cmd := exec.Command("go", "build", "-o", binPath, srcPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build stub binary: %v\n%s", err, out)
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %q\n", output)
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write stub script: %v", err)
 	}
 
 	return binPath
