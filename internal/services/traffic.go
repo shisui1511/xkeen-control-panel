@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1288,15 +1289,6 @@ type connStats struct {
 	Download int64
 }
 
-func contains(arr []string, target string) bool {
-	for _, item := range arr {
-		if item == target {
-			return true
-		}
-	}
-	return false
-}
-
 type mihomoProxy struct {
 	Name string   `json:"name"`
 	Type string   `json:"type"`
@@ -1499,9 +1491,9 @@ func (s *TrafficQuotaService) checkQuotas() {
 	if hasMihomo {
 		for _, action := range neededActions {
 			if group, ok := mihomoProxies[action.groupName]; ok {
-				if contains(group.All, action.fallback) {
+				if slices.Contains(group.All, action.fallback) {
 					shouldBlock[action.groupName] = action.fallback
-				} else if globalGroup, ok := mihomoProxies["GLOBAL"]; ok && contains(globalGroup.All, action.fallback) {
+				} else if globalGroup, ok := mihomoProxies["GLOBAL"]; ok && slices.Contains(globalGroup.All, action.fallback) {
 					shouldBlock["GLOBAL"] = action.fallback
 				}
 			}
