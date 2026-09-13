@@ -8,6 +8,7 @@
   import PageHeader from './PageHeader.svelte';
   import Button from './components/Button.svelte';
   import StatusBadge from './components/StatusBadge.svelte';
+  import GeoScanModal from './components/GeoScanModal.svelte';
 
   interface Props {
     onSwitchTab?: (tab: string) => void;
@@ -32,6 +33,8 @@
     record_count?: number;
     version?: string;
     info?: string;
+    geo_type?: string;
+    has_backup?: boolean;
   }
 
   interface DATTag {
@@ -45,6 +48,7 @@
   let globalUpdating = $state(false);
   let rollbacking = $state(false);
   let updatingFile: string | null = $state(null);
+  let showGeoScanModal = $state(false);
 
   // Tag browser state
   let tagDrawer: {
@@ -112,7 +116,7 @@
     }
   }
 
-  async function updateAll(filename?: string) {
+  async function updateAll(filename?: string, fileType?: string) {
     if (filename) {
       updatingFile = filename;
     } else {
@@ -120,7 +124,10 @@
     }
     error = '';
     try {
-      const body = filename ? JSON.stringify({ file: filename }) : undefined;
+      const payload: { file?: string; type?: string } = {};
+      if (filename) payload.file = filename;
+      if (fileType) payload.type = fileType;
+      const body = filename ? JSON.stringify(payload) : undefined;
       const headers: Record<string, string> = {};
       if (body) {
         headers['Content-Type'] = 'application/json';
@@ -169,10 +176,9 @@
   async function openTagBrowser(file: DATFile) {
     tagDrawer = { open: true, file, tags: [], loading: true, error: '', search: '', copied: '' };
     try {
-      const json = await apiFetchJSON<{ tags: DATTag[] }>(
-        `/api/dat/tags?name=${encodeURIComponent(file.name)}`
-      );
-      tagDrawer = { ...tagDrawer, loading: false, tags: json.tags || [] };
+      const res = await apiFetchJSON<any>(`/api/dat/tags?name=${encodeURIComponent(file.name)}`);
+      const tagList = Array.isArray(res) ? res : res?.tags || [];
+      tagDrawer = { ...tagDrawer, loading: false, tags: tagList };
     } catch (e: any) {
       if (e?.status === 401) return;
       tagDrawer = { ...tagDrawer, loading: false, error: e.message };
@@ -262,7 +268,14 @@
   }
 
   function getRuleValue(file: DATFile, tag: string): string {
-    return `${getTagPrefix(file)}:${tag}`;
+    const lower = file.name.toLowerCase();
+    if (lower === 'geosite.dat') {
+      return `geosite:${tag}`;
+    }
+    if (lower === 'geoip.dat') {
+      return `geoip:${tag}`;
+    }
+    return `ext:${file.name}:${tag}`;
   }
 
   let copyTimer: ReturnType<typeof setTimeout>;
@@ -328,6 +341,8 @@
   }
 
   function getTypeBadge(file: DATFile): string {
+    if (file.geo_type === 'geoip') return 'GEOIP';
+    if (file.geo_type === 'geosite') return 'GEOSITE';
     const n = file.name.toLowerCase();
     if (n.includes('geoip')) return 'GEOIP';
     if (n.includes('geosite')) return 'GEOSITE';
@@ -370,6 +385,7 @@
     })
   );
 
+  let canRollback = $derived(files.some((f) => f.has_backup));
   let actualCount = $derived(displayedFiles.filter((f) => getFileStatus(f) === 'ok').length);
   let missingCount = $derived(displayedFiles.filter((f) => !f.exists).length);
   let totalSize = $derived(displayedFiles.reduce((sum, f) => sum + (f.size || 0), 0));
@@ -384,15 +400,31 @@
   <PageHeader
     title={$t('dat.h1')}
     subtitle={$t('dat.h1_sub')}
-    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('nav.dat') }]}
+    breadcrumbs={[{ label: $t('nav.group_tools') }, { label: $t('nav.dat') }]}
     {onSwitchTab}
     hideHome={true}
   >
+    <Button variant="secondary" title={$t('dat.geoscan')} onclick={() => (showGeoScanModal = true)}>
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <circle cx="11" cy="11" r="8" />
+        <path d="m21 21-4.35-4.35" />
+      </svg>
+      {$t('dat.geoscan')}
+    </Button>
     <Button
       variant="secondary"
       loading={rollbacking}
-      disabled={rollbacking || loading || globalUpdating || updatingFile !== null}
-      title={$t('dat.rollback_title')}
+      disabled={rollbacking || loading || globalUpdating || updatingFile !== null || !canRollback}
+      title={canRollback ? $t('dat.rollback_title') : $t('dat.rollback_none')}
       onclick={rollbackAll}
     >
       {#if !rollbacking}
@@ -511,9 +543,13 @@
                   {#if file.is_symlink}
                     {$t('dat.symlink')} → {file.symlink_to} ·
                   {/if}
-                  {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
+                  {#if (file.geo_type === 'geosite' || file.name
+                      .toLowerCase()
+                      .includes('geosite')) && file.tag_count}
                     {file.tag_count} {$t('dat.categories')} ·
-                  {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
+                  {:else if (file.geo_type === 'geoip' || file.name
+                      .toLowerCase()
+                      .includes('geoip')) && file.record_count}
                     {pluralize(
                       file.record_count,
                       $t('dat.record_count_one', { count: file.record_count.toLocaleString() }),
@@ -562,7 +598,7 @@
                   <button
                     class="btn btn-primary"
                     class:btn-loading={updatingFile === file.name}
-                    onclick={() => updateAll(file.name)}
+                    onclick={() => updateAll(file.name, file.type)}
                     disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_file')}
                   >
@@ -576,7 +612,7 @@
                   <button
                     class="btn btn-secondary btn-icon-only"
                     class:btn-loading={updatingFile === file.name}
-                    onclick={() => updateAll(file.name)}
+                    onclick={() => updateAll(file.name, file.type)}
                     disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_all')}
                   >
@@ -644,9 +680,13 @@
                   {#if file.is_symlink}
                     {$t('dat.symlink')} → {file.symlink_to} ·
                   {/if}
-                  {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
+                  {#if (file.geo_type === 'geosite' || file.name
+                      .toLowerCase()
+                      .includes('geosite')) && file.tag_count}
                     {file.tag_count} {$t('dat.categories')} ·
-                  {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
+                  {:else if (file.geo_type === 'geoip' || file.name
+                      .toLowerCase()
+                      .includes('geoip')) && file.record_count}
                     {pluralize(
                       file.record_count,
                       $t('dat.record_count_one', { count: file.record_count.toLocaleString() }),
@@ -695,7 +735,7 @@
                   <button
                     class="btn btn-primary"
                     class:btn-loading={updatingFile === file.name}
-                    onclick={() => updateAll(file.name)}
+                    onclick={() => updateAll(file.name, file.type)}
                     disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_file')}
                   >
@@ -709,7 +749,7 @@
                   <button
                     class="btn btn-secondary btn-icon-only"
                     class:btn-loading={updatingFile === file.name}
-                    onclick={() => updateAll(file.name)}
+                    onclick={() => updateAll(file.name, file.type)}
                     disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_all')}
                   >
@@ -1120,6 +1160,12 @@
     {/if}
   </div>
 </Modal>
+
+<GeoScanModal
+  isOpen={showGeoScanModal}
+  availableFiles={files}
+  onclose={() => (showGeoScanModal = false)}
+/>
 
 <style>
   .stats {
