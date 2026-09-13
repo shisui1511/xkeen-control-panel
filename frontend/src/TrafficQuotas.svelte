@@ -7,6 +7,8 @@
   import { usePoller } from './lib/poller';
   import PageHeader from './PageHeader.svelte';
   import Icon from './lib/components/Icon.svelte';
+  import Select from './components/Select.svelte';
+  import Button from './components/Button.svelte';
   import { apiFetch, apiFetchJSON } from './lib/api';
 
   interface Props {
@@ -407,37 +409,33 @@
 </script>
 
 <div class="container">
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_observability')} <span class="crumb-sep">›</span>
-        {$t('nav.trafficquotas')}
-      </div>
-      <h1>{$t('trafficquotas.title')}</h1>
-      <p class="sub">{$t('trafficquotas.subtitle')}</p>
-    </div>
-    <div class="ph-actions">
-      {#if stats}
-        <button class="btn btn-secondary" onclick={clearAlerts}>
-          {$t('trafficquotas.clear_alerts')}
-        </button>
-      {/if}
-      <button class="btn btn-primary" onclick={startCreate}>
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          style="margin-right: 6px;"
-        >
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        {$t('trafficquotas.add_quota')}
-      </button>
-    </div>
-  </div>
+  <PageHeader
+    title={$t('trafficquotas.title')}
+    subtitle={$t('trafficquotas.subtitle')}
+    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('nav.trafficquotas') }]}
+    {onSwitchTab}
+    hideHome={true}
+  >
+    {#if stats}
+      <Button variant="secondary" onclick={clearAlerts}>
+        {$t('trafficquotas.clear_alerts')}
+      </Button>
+    {/if}
+    <Button variant="primary" onclick={startCreate} title={$t('trafficquotas.add_quota')}>
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        style="margin-right: 6px;"
+      >
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+      {$t('trafficquotas.add_quota')}
+    </Button>
+  </PageHeader>
 
   {#if error}
     <div class="alert alert-error mb-2">{error}</div>
@@ -747,10 +745,10 @@
 
     <div class="form-group">
       <label for="form-type" class="form-label">{$t('trafficquotas.target_type')}</label>
-      <select id="form-type" class="input" bind:value={formTargetType}>
+      <Select id="form-type" class="input" bind:value={formTargetType}>
         <option value="global">{$t('trafficquotas.target_global')}</option>
         <option value="proxy">{$t('trafficquotas.target_proxy')}</option>
-      </select>
+      </Select>
     </div>
 
     {#if formTargetType === 'proxy'}
@@ -780,21 +778,21 @@
       </div>
       <div class="form-group">
         <label for="form-unit" class="form-label">{$t('trafficquotas.unit')}</label>
-        <select id="form-unit" class="input" bind:value={formLimitUnit}>
+        <Select id="form-unit" class="input" bind:value={formLimitUnit}>
           {#each units as u}
             <option value={u.value}>{u.value}</option>
           {/each}
-        </select>
+        </Select>
       </div>
     </div>
 
     <div class="form-group">
       <label for="form-period" class="form-label">{$t('trafficquotas.period')}</label>
-      <select id="form-period" class="input" bind:value={formPeriod}>
+      <Select id="form-period" class="input" bind:value={formPeriod}>
         {#each periods as p}
           <option value={p.value}>{p.label}</option>
         {/each}
-      </select>
+      </Select>
     </div>
 
     <div class="form-group">
@@ -813,7 +811,7 @@
 
     <div class="form-group">
       <label for="form-action" class="form-label">{$t('trafficquotas.action')}</label>
-      <select id="form-action" class="input" bind:value={formAction}>
+      <Select id="form-action" class="input" bind:value={formAction}>
         <option value="notify">{$t('trafficquotas.action_notify')}</option>
         <option value="throttle" disabled
           >{$t('trafficquotas.action_throttle')} ({$t('trafficquotas.action_unsupported')})</option
@@ -821,7 +819,7 @@
         <option value="log_only">{$t('trafficquotas.action_log_only')}</option>
         <option value="block">{$t('trafficquotas.action_block')}</option>
         <option value="redirect_direct">{$t('trafficquotas.action_redirect_direct')}</option>
-      </select>
+      </Select>
     </div>
 
     <div class="form-group-checkbox">
@@ -841,11 +839,6 @@
 </Modal>
 
 <style>
-  .crumb-separator {
-    color: var(--fg-faint);
-    margin: 0 6px;
-  }
-
   .flex-between {
     display: flex;
     justify-content: space-between;
@@ -873,11 +866,9 @@
   }
 
   .stat-label {
-    font-size: 11px;
-    font-weight: 700;
+    font-size: 12px;
+    font-weight: 600;
     color: var(--fg-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     margin-bottom: 6px;
   }
 
@@ -894,7 +885,7 @@
   }
 
   .stat-sub {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
     margin-top: 4px;
   }
@@ -917,8 +908,7 @@
     font-weight: 600;
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
-    font-size: 11px;
-    text-transform: uppercase;
+    font-size: 12px;
     letter-spacing: 0.05em;
   }
 
@@ -945,17 +935,17 @@
 
   .stat-bar-fill {
     height: 100%;
-    background: var(--primary, #3b82f6);
+    background: var(--primary);
     border-radius: 3px;
     transition: width 0.3s ease;
   }
 
   .stat-bar-fill.warning {
-    background: var(--warning, #f59e0b);
+    background: var(--warning);
   }
 
   .stat-bar-fill.error {
-    background: var(--error, #ef4444);
+    background: var(--danger);
   }
 
   .actions-wrapper {
@@ -982,7 +972,7 @@
     right: 0;
     top: 100%;
     margin-top: 4px;
-    background: var(--bg-card, #121212);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
