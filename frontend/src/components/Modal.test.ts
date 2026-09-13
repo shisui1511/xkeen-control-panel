@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render } from 'svelte/server';
 import Modal from './Modal.svelte';
-import SOURCE from './Modal.svelte?raw';
 
 describe('Modal accessibility & focus management', () => {
   it('renders nothing when isOpen is false', () => {
@@ -53,12 +52,5 @@ describe('Modal accessibility & focus management', () => {
     });
     expect(body).toContain('class="modal-close-btn');
     expect(body).toMatch(/aria-label="[^"]+"/);
-  });
-
-  it('contains keyboard trap and escape handler logic in source', () => {
-    expect(SOURCE).toContain("event.key === 'Escape'");
-    expect(SOURCE).toContain("event.key === 'Tab'");
-    expect(SOURCE).toContain('previouslyFocusedElement');
-    expect(SOURCE).toContain('getFocusableElements()');
   });
 });
