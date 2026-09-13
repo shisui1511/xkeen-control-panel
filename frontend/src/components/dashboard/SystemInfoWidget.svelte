@@ -132,13 +132,13 @@
   }
 
   .lbl {
-    color: var(--fg-secondary, #8fa3b8);
+    color: var(--fg-secondary);
     font-weight: 500;
     flex-shrink: 0;
   }
 
   .val {
-    color: var(--fg-primary, #ffffff);
+    color: var(--fg-primary);
     font-weight: 500;
     text-align: right;
     word-break: break-word;
@@ -151,7 +151,7 @@
   }
 
   .text-muted {
-    color: var(--fg-muted, var(--fg-secondary, #8fa3b8));
+    color: var(--fg-secondary);
     font-size: 12px;
   }
 
@@ -168,7 +168,7 @@
   /* D-08: Soft muted pill badge */
   .info-badge {
     display: inline-block;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     padding: 2px 7px;
     border-radius: var(--radius-sm, 6px);
@@ -179,7 +179,7 @@
 
   .info-badge-muted {
     background: rgba(255, 255, 255, 0.06);
-    color: var(--fg-secondary, #8fa3b8);
+    color: var(--fg-secondary);
     border: 1px solid rgba(255, 255, 255, 0.1);
   }
 </style>

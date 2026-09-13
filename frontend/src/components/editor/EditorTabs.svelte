@@ -141,7 +141,7 @@
 
   .tab-dirty-dot {
     color: var(--warning);
-    font-size: 10px;
+    font-size: 12px;
     margin-left: 2px;
     line-height: 1;
   }

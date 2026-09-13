@@ -874,7 +874,7 @@
 
   .stat-value {
     font-weight: 600;
-    font-size: 20px;
+    font-size: 22px;
     color: var(--fg-primary);
   }
 
@@ -1115,7 +1115,7 @@
     background: none;
     border: none;
     color: var(--fg-dim);
-    font-size: 20px;
+    font-size: 18px;
     cursor: pointer;
     line-height: 1;
     padding: 4px 8px;

@@ -1207,7 +1207,7 @@
   }
 
   .empty-state-head h2 {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 700;
     color: var(--fg-primary);
     margin-bottom: 8px;
@@ -1290,14 +1290,14 @@
   }
 
   .template-card h3 {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
     color: var(--fg-primary);
     margin: 0;
   }
 
   .template-card p {
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--fg-dim);
     line-height: 1.45;
     margin: 0;

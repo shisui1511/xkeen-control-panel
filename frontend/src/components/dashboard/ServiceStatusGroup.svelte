@@ -269,7 +269,7 @@
   }
 
   .service-sk-card {
-    background: var(--bg-card, #102a44);
+    background: var(--bg-card);
     border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
     border-radius: var(--radius-lg, 12px);
     padding: 16px;
@@ -310,7 +310,7 @@
     align-items: center;
     gap: 8px;
     font-size: 13px;
-    color: var(--error, #f4707f);
+    color: var(--danger);
     font-weight: 500;
   }
 </style>

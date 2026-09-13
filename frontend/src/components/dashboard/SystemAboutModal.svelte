@@ -172,13 +172,13 @@
   .section-title {
     font-size: 14px;
     font-weight: 600;
-    color: var(--fg-primary, #ffffff);
+    color: var(--fg-primary);
     margin: 0;
   }
 
   .section-desc {
     font-size: 12px;
-    color: var(--fg-muted, var(--fg-secondary, #8fa3b8));
+    color: var(--fg-secondary);
     margin: -6px 0 4px;
     line-height: 1.4;
   }
@@ -210,15 +210,15 @@
   }
 
   .diag-label {
-    font-size: 11px;
-    color: var(--fg-secondary, #8fa3b8);
+    font-size: 12px;
+    color: var(--fg-secondary);
     font-weight: 500;
   }
 
   .diag-val {
     font-size: 13px;
     font-weight: 600;
-    color: var(--fg-primary, #ffffff);
+    color: var(--fg-primary);
     word-break: break-all;
   }
 
@@ -230,7 +230,7 @@
     display: inline-block;
     padding: 1px 6px;
     border-radius: 4px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     background: rgba(255, 255, 255, 0.08);
     color: var(--fg-secondary);
@@ -238,15 +238,15 @@
 
   .status-pill-ok {
     background: rgba(70, 209, 138, 0.15);
-    color: var(--success, #46d18a);
+    color: var(--success);
   }
 
   .text-success {
-    color: var(--success, #46d18a);
+    color: var(--success);
   }
 
   .text-error {
-    color: var(--error, #f4707f);
+    color: var(--danger);
   }
 
   .modal-actions-footer {

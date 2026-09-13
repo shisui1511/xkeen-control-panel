@@ -1361,7 +1361,7 @@
   }
 
   .stat-value {
-    font-size: 26px;
+    font-size: 22px;
     font-weight: 800;
     font-family: var(--font-family-mono);
     line-height: 1.2;

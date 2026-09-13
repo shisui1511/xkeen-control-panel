@@ -472,7 +472,7 @@
   .shell-badge {
     display: inline-block;
     padding: 1px 6px;
-    font-size: 11px;
+    font-size: 12px;
     font-family: var(--font-family-mono);
     color: var(--accent);
     background: var(--accent-soft);
@@ -486,7 +486,7 @@
     gap: 6px;
     padding: 2px 8px;
     border-radius: 12px;
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 500;
   }
 
@@ -608,7 +608,7 @@
     padding: 6px 16px;
     background: var(--bg-elevated);
     border-top: 1px solid var(--border);
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--fg-dim);
     gap: 12px;
   }
@@ -633,18 +633,18 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     font-family: var(--font-family-mono);
-    font-size: 10.5px;
+    font-size: 12px;
     color: var(--fg-primary);
     box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
   }
 
   .hint-text {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .geo-badge {
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
     background: var(--bg-card);
     padding: 2px 7px;

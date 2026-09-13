@@ -256,7 +256,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--fg-primary);
     letter-spacing: -0.01em;

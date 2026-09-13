@@ -117,7 +117,7 @@
   }
 
   .obs-head .card-title.obs-title {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.14em;
     text-transform: none;
@@ -184,7 +184,7 @@
   }
 
   .obs-stat-box .res-sub {
-    font-size: 11px;
+    font-size: 12px;
     margin-top: 0;
     line-height: 1.2;
     white-space: nowrap;
@@ -237,10 +237,10 @@
       padding: 6px 10px 8px;
     }
     .obs-stat-box .stat-value {
-      font-size: 15px;
+      font-size: 14px;
     }
     .obs-stat-box .res-sub {
-      font-size: 10px;
+      font-size: 12px;
     }
   }
 </style>
