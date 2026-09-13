@@ -162,9 +162,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background:
-      radial-gradient(ellipse 80% 55% at 50% 20%, rgba(41, 194, 240, 0.07), transparent 65%),
-      var(--bg-page);
+    background: var(--bg-page);
   }
 
   /* Card */
