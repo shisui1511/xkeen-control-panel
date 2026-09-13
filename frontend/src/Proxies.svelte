@@ -5,7 +5,7 @@
   import { capabilities, fetchCapabilities, showToast, devMode, showConfirm } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
-  import { getCountryFlag } from './lib/countryFlags';
+  import { getMissingCountryFlag } from './lib/countryFlags';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
@@ -2178,7 +2178,7 @@
                   <span class="gc-active-label">{$t('proxies.active')}:</span>
 
                   {#snippet chainPill(item: ChainItem)}
-                    {@const itemFlag = !item.isGroup ? getCountryFlag(item.name) : null}
+                    {@const itemFlag = !item.isGroup ? getMissingCountryFlag(item.name) : null}
                     {@const itemLatencyText = getLatencyText(item.name)}
                     {@const itemLatencyClass = getLatencyClass(item.name)}
                     {#if item.isGroup}
@@ -2201,7 +2201,8 @@
                           class:lat-mid={itemLatencyClass === 'lat mid'}
                           class:lat-bad={itemLatencyClass === 'lat bad'}
                         ></div>
-                        {#if itemFlag}{itemFlag}
+                        {#if itemFlag}
+                          <span class="flag-icon" aria-hidden="true">{itemFlag}</span>
                         {/if}{item.name}
                       </button>
                     {:else}
@@ -2226,7 +2227,8 @@
                           class:lat-mid={itemLatencyClass === 'lat mid'}
                           class:lat-bad={itemLatencyClass === 'lat bad'}
                         ></div>
-                        {#if itemFlag}{itemFlag}
+                        {#if itemFlag}
+                          <span class="flag-icon" aria-hidden="true">{itemFlag}</span>
                         {/if}{item.name}
                       </button>
                     {/if}
@@ -2323,7 +2325,7 @@
                         {@const proxy = proxies[proxyName]}
                         {@const isAlive = isProxyAlive(proxy)}
                         {@const isActive = group.now === proxyName}
-                        {@const flag = getCountryFlag(proxyName)}
+                        {@const flag = getMissingCountryFlag(proxyName)}
                         {@const healthClass = getLatencyClass(proxyName)}
                         {@const healthText = getLatencyText(proxyName)}
                         <div class="proxy-card" class:now={isActive}>
@@ -3101,6 +3103,18 @@
     color: var(--fg-primary);
     font-size: 13px;
     word-break: break-all;
+  }
+  .flag-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'TwemojiMozilla', var(--font-family-sans);
+    font-size: 1.15em;
+    line-height: 1;
+    vertical-align: -0.1em;
+    margin-right: 0.35rem;
+    flex-shrink: 0;
+    user-select: none;
   }
   .proxy-card .p-type {
     color: var(--fg-dim);

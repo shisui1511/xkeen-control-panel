@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { t } from '../../i18n';
-  import { getCountryFlag } from '../../lib/countryFlags';
+  import { getMissingCountryFlag } from '../../lib/countryFlags';
   import type { LatencyBucket } from '../../lib/proxyClassification';
 
   export interface QuickSelectNode {
@@ -318,7 +318,7 @@
       {#each sortedNodes as node, index (node.name)}
         {@const isSelected = node.name === currentNode}
         {@const isHighlighted = index === highlightIndex}
-        {@const flag = getCountryFlag(node.name)}
+        {@const flag = getMissingCountryFlag(node.name)}
         <button
           type="button"
           id={`qs-opt-${index}`}
@@ -489,6 +489,10 @@
   }
 
   .qs-flag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'TwemojiMozilla', var(--font-family-sans);
     font-size: 14px;
     line-height: 1;
     flex-shrink: 0;

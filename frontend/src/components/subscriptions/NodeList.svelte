@@ -178,23 +178,7 @@
     return `${h.delay} ms`;
   }
 
-  onMount(() => {
-    try {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = '#000';
-        ctx.textBaseline = 'top';
-        ctx.font = '32px Arial';
-        ctx.fillText('🇺🇸', 0, 0);
-        const widthFlag = ctx.measureText('🇺🇸').width;
-        const widthLetters = ctx.measureText('US').width;
-        flagsSupported = widthFlag > widthLetters;
-      }
-    } catch (e) {
-      flagsSupported = false;
-    }
-  });
+  // Flags are supported universally via bundled TwemojiMozilla webfont
 </script>
 
 <div class="node-list-container">
@@ -776,6 +760,15 @@
     background: var(--accent);
     border-color: var(--accent);
     color: white;
+  }
+
+  .sub-node-flag {
+    font-family: 'TwemojiMozilla', var(--font-family-sans);
+    font-size: 18px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .sub-node-avatar-text {

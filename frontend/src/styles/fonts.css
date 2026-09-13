@@ -63,3 +63,11 @@
   font-display: swap;
   src: url('../assets/fonts/jetbrains-mono-600.woff2') format('woff2');
 }
+
+/* --- Twemoji Flags (Regional Indicator Symbols) --- */
+@font-face {
+  font-family: 'TwemojiMozilla';
+  font-display: swap;
+  src: url('../assets/fonts/TwemojiMozilla-flags.woff2') format('woff2');
+  unicode-range: U+1F1E0-1F1FF;
+}
