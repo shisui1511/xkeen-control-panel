@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -320,4 +322,68 @@ func TestKernelHandlers_Validation(t *testing.T) {
 	if recDbgPost.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected 405 for POST KernelDebug, got %d", recDbgPost.Code)
 	}
+
+	// 9. KernelUpload: GET -> 405, ghost -> 404
+	reqUpGet := httptest.NewRequest(http.MethodGet, "/api/kernels/xray/upload", nil)
+	recUpGet := httptest.NewRecorder()
+	api.KernelUpload(recUpGet, reqUpGet)
+	if recUpGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET KernelUpload, got %d", recUpGet.Code)
+	}
+
+	reqUpGhost := httptest.NewRequest(http.MethodPost, "/api/kernels/ghost/upload", nil)
+	recUpGhost := httptest.NewRecorder()
+	api.KernelUpload(recUpGhost, reqUpGhost)
+	if recUpGhost.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for ghost KernelUpload, got %d", recUpGhost.Code)
+	}
 }
+
+func TestKernelUpload_SuccessAndValidation(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+
+	// Test upload with invalid file (not ELF)
+	bodyNonElf := &bytes.Buffer{}
+	writerNonElf := multipart.NewWriter(bodyNonElf)
+	partNonElf, _ := writerNonElf.CreateFormFile("file", "xray")
+	_, _ = partNonElf.Write([]byte("not an elf binary"))
+	_ = writerNonElf.Close()
+
+	reqNonElf := httptest.NewRequest(http.MethodPost, "/api/kernels/xray/upload", bodyNonElf)
+	reqNonElf.Header.Set("Content-Type", writerNonElf.FormDataContentType())
+	recNonElf := httptest.NewRecorder()
+	api.KernelUpload(recNonElf, reqNonElf)
+	if recNonElf.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for non-ELF upload, got %d: %s", recNonElf.Code, recNonElf.Body.String())
+	}
+
+	// Test upload with valid ELF magic header
+	bodyElf := &bytes.Buffer{}
+	writerElf := multipart.NewWriter(bodyElf)
+	partElf, _ := writerElf.CreateFormFile("file", "xray")
+	elfContent := append([]byte{0x7f, 'E', 'L', 'F'}, []byte("\n#!/bin/sh\necho 'Xray 1.8.25'\n")...)
+	_, _ = partElf.Write(elfContent)
+	_ = writerElf.Close()
+
+	reqElf := httptest.NewRequest(http.MethodPost, "/api/kernels/xray/upload", bodyElf)
+	reqElf.Header.Set("Content-Type", writerElf.FormDataContentType())
+	recElf := httptest.NewRecorder()
+	api.KernelUpload(recElf, reqElf)
+	if recElf.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid ELF upload, got %d: %s", recElf.Code, recElf.Body.String())
+	}
+
+	var resp struct {
+		Data services.KernelInfo `json:"data"`
+	}
+	if err := json.NewDecoder(recElf.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if !resp.Data.HasBackup {
+		t.Errorf("expected HasBackup=true after upload")
+	}
+	if resp.Data.Status != "done" {
+		t.Errorf("expected Status=done, got %s", resp.Data.Status)
+	}
+}
+

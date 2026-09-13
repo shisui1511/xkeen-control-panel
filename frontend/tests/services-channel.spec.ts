@@ -247,4 +247,96 @@ test.describe('Services page — channel & updates card', () => {
     await expect(toast.first()).toBeVisible({ timeout: 3000 });
     await expect(toast.first()).toContainText(/канал|channel/i);
   });
+
+  test('shows reinstall, rollback, and upload buttons and does not offer browser download', async ({
+    page
+  }) => {
+    let rollbackTriggered = false;
+    await page.route('**/api/kernels', async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: [
+            {
+              name: 'mihomo',
+              display_name: 'Mihomo',
+              binary_path: '/opt/sbin/mihomo',
+              current_version: '1.19.30',
+              latest_version: '1.19.30',
+              has_update: false,
+              has_backup: true,
+              channel: 'stable',
+              status: 'idle',
+              process_status: 'running',
+              message: ''
+            },
+            {
+              name: 'xray',
+              display_name: 'Xray',
+              binary_path: '/opt/sbin/xray',
+              current_version: '26.7.28',
+              latest_version: '26.7.28',
+              has_update: false,
+              has_backup: false,
+              channel: 'stable',
+              status: 'idle',
+              process_status: 'stopped',
+              message: ''
+            }
+          ]
+        })
+      });
+    });
+
+    await page.route('**/api/kernels/mihomo/rollback', async (route) => {
+      rollbackTriggered = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: { status: 'rolled_back' } })
+      });
+    });
+
+    page.on('dialog', async (dialog) => {
+      await dialog.accept();
+    });
+
+    await page.goto('/#/services');
+
+    const mihomoItem = page.locator('.update-item', { hasText: 'Mihomo' });
+    const xrayItem = page.locator('.update-item', { hasText: 'Xray' });
+
+    // 1. Browser download links/buttons must NOT exist
+    await expect(page.locator('a[href*="/api/kernels/"][href*="/download"]')).toHaveCount(0);
+
+    // 2. Reinstall button is present for up-to-date kernels
+    const mihomoReinstallBtn = mihomoItem.locator(
+      'button[aria-label*="Переустановить"], button[aria-label*="Reinstall"]'
+    );
+    await expect(mihomoReinstallBtn).toBeVisible();
+
+    // 3. Rollback button is present when has_backup is true (mihomo), and absent when false (xray)
+    const mihomoRollbackBtn = mihomoItem.locator(
+      'button[aria-label*="Откатить"], button[aria-label*="Rollback"]'
+    );
+    await expect(mihomoRollbackBtn).toBeVisible();
+
+    const xrayRollbackBtn = xrayItem.locator(
+      'button[aria-label*="Откатить"], button[aria-label*="Rollback"]'
+    );
+    await expect(xrayRollbackBtn).toHaveCount(0);
+
+    // 4. Upload button is present for both kernels
+    const mihomoUploadBtn = mihomoItem.locator(
+      'button[aria-label*="Загрузить"], button[aria-label*="Upload"]'
+    );
+    await expect(mihomoUploadBtn).toBeVisible();
+
+    // 5. Clicking rollback triggers confirmation dialog and POST /api/kernels/mihomo/rollback
+    await mihomoRollbackBtn.click();
+    await expect.poll(() => rollbackTriggered).toBe(true);
+  });
 });

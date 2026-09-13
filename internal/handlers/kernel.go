@@ -219,3 +219,48 @@ func (a *API) KernelDebug(w http.ResponseWriter, r *http.Request) {
 	}
 	JSONSuccess(w, a.kernelSvc.GetDebugInfo())
 }
+
+func (a *API) KernelUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	name := strings.TrimPrefix(r.URL.Path, "/api/kernels/")
+	name = strings.TrimSuffix(name, "/upload")
+
+	k := a.kernelSvc.Get(name)
+	if k == nil {
+		JSONError(w, http.StatusNotFound, "Kernel not found")
+		return
+	}
+
+	// 100 MB max in request
+	r.Body = http.MaxBytesReader(w, r.Body, 100<<20)
+	if err := r.ParseMultipartForm(100 << 20); err != nil {
+		JSONError(w, http.StatusBadRequest, "file too large or invalid multipart form")
+		return
+	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, "missing file in form")
+		return
+	}
+	defer file.Close()
+
+	if err := a.kernelSvc.UploadBinary(name, file, header.Filename); err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.ClearCapabilitiesCache()
+
+	kUpdated := a.kernelSvc.Get(name)
+	JSONSuccess(w, kUpdated)
+}
+

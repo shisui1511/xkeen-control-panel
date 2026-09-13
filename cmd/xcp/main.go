@@ -506,6 +506,7 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/status", api.KernelStatus)
 	srv.HandleProtected("/api/kernels/{name}/channel", api.KernelChannel)
 	srv.HandleProtected("/api/kernels/{name}/rollback", api.KernelRollback)
+	srv.HandleProtected("/api/kernels/{name}/upload", api.KernelUpload)
 	srv.HandleProtected("/api/kernels/{name}/download", api.KernelDownload)
 
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",

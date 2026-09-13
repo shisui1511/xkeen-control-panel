@@ -30,6 +30,7 @@
     current_version: string;
     latest_version: string;
     has_update: boolean;
+    has_backup?: boolean;
     channel: string;
     status: string;
     process_status: string;
@@ -59,6 +60,8 @@
 
   let xkeenStatus = $state('');
   let actionLoading = $state<Record<string, boolean>>({});
+  let pendingRestartKernel = $state<string | null>(null);
+  let fileInputRefs: Record<string, HTMLInputElement | null> = {};
 
   let kernels = $state<Kernel[]>([]);
   let kernelsLoaded = $state(false);
@@ -442,13 +445,61 @@
     }
   }
 
-  function downloadKernelBinary(name: string) {
-    const a = document.createElement('a');
-    a.href = `/api/kernels/${name}/download`;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  async function rollbackKernel(name: string) {
+    const displayName = name === 'xray' ? 'Xray' : 'Mihomo';
+    if (!confirm($t('svc.rollback_confirm_msg', { name: displayName }))) {
+      return;
+    }
+    actionLoading[`rollback-${name}`] = true;
+    try {
+      const res = await apiFetch(`/api/kernels/${name}/rollback`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      showToast('success', $t('svc.rollback_success', { name: displayName }));
+      await fetchKernels();
+      if (activeKernel === name && isRunning) {
+        pendingRestartKernel = name;
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', `${$t('svc.action_error')}: ${e.message || e}`);
+    } finally {
+      actionLoading[`rollback-${name}`] = false;
+    }
+  }
+
+  async function handleUploadSelected(name: string, event: Event) {
+    const target = event.target as HTMLInputElement;
+    const file = target?.files?.[0];
+    if (!file) return;
+    target.value = '';
+
+    const displayName = name === 'xray' ? 'Xray' : 'Mihomo';
+    actionLoading[`upload-${name}`] = true;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await apiFetch(`/api/kernels/${name}/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      showToast('success', $t('svc.upload_success', { name: displayName }));
+      await fetchKernels();
+      if (activeKernel === name && isRunning) {
+        pendingRestartKernel = name;
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', `${$t('svc.upload_error')}: ${e.message || e}`);
+    } finally {
+      actionLoading[`upload-${name}`] = false;
+    }
   }
 
   // Returns true on success. Callers are responsible for re-fetching kernel
@@ -497,6 +548,9 @@
           delete statusTimeouts[name];
           fetchKernels();
           checkIfFinishedChecking();
+          if (data.status === 'done' && activeKernel === name && isRunning) {
+            pendingRestartKernel = name;
+          }
         }
       } else {
         clearTimeout(statusTimeouts[name]);
@@ -970,6 +1024,40 @@
         </p>
       {/if}
 
+      {#if pendingRestartKernel}
+        <div class="kernel-restart-banner">
+          <div class="banner-content">
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span>
+              {$t('svc.restart_needed_banner', {
+                name: pendingRestartKernel === 'xray' ? 'Xray' : 'Mihomo'
+              })}
+            </span>
+          </div>
+          <button
+            class="btn btn-sm btn-primary"
+            onclick={async () => {
+              await controlService('restart');
+              pendingRestartKernel = null;
+            }}
+            disabled={actionLoading['xkeen-restart']}
+          >
+            {$t('svc.restart_now')}
+          </button>
+        </div>
+      {/if}
+
       <!-- Kernel Updates List -->
       <div class="kernel-updates-list">
         <!-- Mihomo Item -->
@@ -983,6 +1071,8 @@
                 <span>v{mihomo?.current_version || '—'}</span>
                 {#if mihomo?.status === 'failed'}
                   <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
+                {:else if !mihomo?.current_version || mihomo.current_version === 'not installed'}
+                  <StatusBadge variant="stopped" label={$t('kernel.status.not_installed')} />
                 {:else if mihomo?.has_update}
                   <StatusBadge variant="warning" label={`→ v${mihomo.latest_version}`} />
                 {:else}
@@ -990,7 +1080,7 @@
                 {/if}
               {/if}
             </div>
-            {#if kernelsLoaded && mihomo?.message && (mihomo.status === 'failed' || mihomo.status === 'idle')}
+            {#if kernelsLoaded && mihomo?.message && (mihomo.status === 'failed' || mihomo.status === 'idle' || mihomo.status === 'done')}
               <p class="update-hint" class:update-hint-error={mihomo.status === 'failed'}>
                 {mihomo.message}
               </p>
@@ -1001,20 +1091,31 @@
               <button
                 class="btn btn-sm btn-primary"
                 onclick={() => installKernel('mihomo')}
-                disabled={mihomo.status !== 'idle'}
+                disabled={mihomo.status === 'downloading' || mihomo.status === 'installing'}
                 title={$t('svc.install_update')}
               >
                 {mihomo.status === 'downloading' || mihomo.status === 'installing'
                   ? $t('kernels.installing')
                   : $t('svc.install_update')}
               </button>
-            {/if}
-            {#if mihomo?.current_version && mihomo.current_version !== 'not installed'}
+            {:else if !mihomo?.current_version || mihomo.current_version === 'not installed'}
+              <button
+                class="btn btn-sm btn-primary"
+                onclick={() => installKernel('mihomo')}
+                disabled={mihomo?.status === 'downloading' || mihomo?.status === 'installing'}
+                title={$t('svc.install_kernel')}
+              >
+                {mihomo?.status === 'downloading' || mihomo?.status === 'installing'
+                  ? $t('kernels.installing')
+                  : $t('svc.install_kernel')}
+              </button>
+            {:else}
               <button
                 class="btn btn-sm btn-secondary btn-icon"
-                onclick={() => downloadKernelBinary('mihomo')}
-                title={$t('svc.download')}
-                aria-label={$t('svc.download')}
+                onclick={() => installKernel('mihomo')}
+                disabled={mihomo?.status === 'downloading' || mihomo?.status === 'installing'}
+                title={$t('svc.reinstall_tooltip')}
+                aria-label={$t('svc.reinstall')}
               >
                 <svg
                   width="13"
@@ -1023,12 +1124,68 @@
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
-                  ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-                    points="7 10 12 15 17 10"
-                  /><line x1="12" y1="15" x2="12" y2="3" /></svg
                 >
+                  <path d="M21 2v6h-6" />
+                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                  <path d="M3 22v-6h6" />
+                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                </svg>
               </button>
             {/if}
+
+            {#if mihomo?.has_backup}
+              <button
+                class="btn btn-sm btn-secondary btn-icon"
+                onclick={() => rollbackKernel('mihomo')}
+                disabled={mihomo?.status === 'downloading' ||
+                  mihomo?.status === 'installing' ||
+                  actionLoading['rollback-mihomo']}
+                title={$t('svc.rollback_tooltip')}
+                aria-label={$t('svc.rollback')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+              </button>
+            {/if}
+
+            <input
+              type="file"
+              bind:this={fileInputRefs['mihomo']}
+              style="display:none"
+              onchange={(e) => handleUploadSelected('mihomo', e)}
+              accept=".gz,.zip,application/octet-stream,*"
+            />
+            <button
+              class="btn btn-sm btn-secondary btn-icon"
+              onclick={() => fileInputRefs['mihomo']?.click()}
+              disabled={mihomo?.status === 'downloading' ||
+                mihomo?.status === 'installing' ||
+                actionLoading['upload-mihomo']}
+              title={$t('svc.upload_kernel_tooltip')}
+              aria-label={$t('svc.upload_kernel')}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -1043,6 +1200,8 @@
                 <span>v{xray?.current_version || '—'}</span>
                 {#if xray?.status === 'failed'}
                   <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
+                {:else if !xray?.current_version || xray.current_version === 'not installed'}
+                  <StatusBadge variant="stopped" label={$t('kernel.status.not_installed')} />
                 {:else if xray?.has_update}
                   <StatusBadge variant="warning" label={`→ v${xray.latest_version}`} />
                 {:else}
@@ -1050,7 +1209,7 @@
                 {/if}
               {/if}
             </div>
-            {#if kernelsLoaded && xray?.message && (xray.status === 'failed' || xray.status === 'idle')}
+            {#if kernelsLoaded && xray?.message && (xray.status === 'failed' || xray.status === 'idle' || xray.status === 'done')}
               <p class="update-hint" class:update-hint-error={xray.status === 'failed'}>
                 {xray.message}
               </p>
@@ -1061,20 +1220,31 @@
               <button
                 class="btn btn-sm btn-primary"
                 onclick={() => installKernel('xray')}
-                disabled={xray.status !== 'idle'}
+                disabled={xray.status === 'downloading' || xray.status === 'installing'}
                 title={$t('svc.install_update')}
               >
                 {xray.status === 'downloading' || xray.status === 'installing'
                   ? $t('kernels.installing')
                   : $t('svc.install_update')}
               </button>
-            {/if}
-            {#if xray?.current_version && xray.current_version !== 'not installed'}
+            {:else if !xray?.current_version || xray.current_version === 'not installed'}
+              <button
+                class="btn btn-sm btn-primary"
+                onclick={() => installKernel('xray')}
+                disabled={xray?.status === 'downloading' || xray?.status === 'installing'}
+                title={$t('svc.install_kernel')}
+              >
+                {xray?.status === 'downloading' || xray?.status === 'installing'
+                  ? $t('kernels.installing')
+                  : $t('svc.install_kernel')}
+              </button>
+            {:else}
               <button
                 class="btn btn-sm btn-secondary btn-icon"
-                onclick={() => downloadKernelBinary('xray')}
-                title={$t('svc.download')}
-                aria-label={$t('svc.download')}
+                onclick={() => installKernel('xray')}
+                disabled={xray?.status === 'downloading' || xray?.status === 'installing'}
+                title={$t('svc.reinstall_tooltip')}
+                aria-label={$t('svc.reinstall')}
               >
                 <svg
                   width="13"
@@ -1083,12 +1253,68 @@
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
-                  ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-                    points="7 10 12 15 17 10"
-                  /><line x1="12" y1="15" x2="12" y2="3" /></svg
                 >
+                  <path d="M21 2v6h-6" />
+                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                  <path d="M3 22v-6h6" />
+                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                </svg>
               </button>
             {/if}
+
+            {#if xray?.has_backup}
+              <button
+                class="btn btn-sm btn-secondary btn-icon"
+                onclick={() => rollbackKernel('xray')}
+                disabled={xray?.status === 'downloading' ||
+                  xray?.status === 'installing' ||
+                  actionLoading['rollback-xray']}
+                title={$t('svc.rollback_tooltip')}
+                aria-label={$t('svc.rollback')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+              </button>
+            {/if}
+
+            <input
+              type="file"
+              bind:this={fileInputRefs['xray']}
+              style="display:none"
+              onchange={(e) => handleUploadSelected('xray', e)}
+              accept=".gz,.zip,application/octet-stream,*"
+            />
+            <button
+              class="btn btn-sm btn-secondary btn-icon"
+              onclick={() => fileInputRefs['xray']?.click()}
+              disabled={xray?.status === 'downloading' ||
+                xray?.status === 'installing' ||
+                actionLoading['upload-xray']}
+              title={$t('svc.upload_kernel_tooltip')}
+              aria-label={$t('svc.upload_kernel')}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </button>
           </div>
         </div>
       </div>
@@ -1549,6 +1775,27 @@
 
   .update-hint.update-hint-error {
     color: var(--danger);
+  }
+
+  .kernel-restart-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-md);
+    margin-bottom: 12px;
+    font-size: 13px;
+  }
+
+  .banner-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent-text);
+    font-weight: 500;
   }
 
   .kernel-updates-list {

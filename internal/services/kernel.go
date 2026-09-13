@@ -263,6 +263,7 @@ type KernelInfo struct {
 	CurrentVersion string `json:"current_version"`
 	LatestVersion  string `json:"latest_version"`
 	HasUpdate      bool   `json:"has_update"`
+	HasBackup      bool   `json:"has_backup"`
 	Channel        string `json:"channel"` // stable, preview
 	Repo           string `json:"repo"`
 	Status         string `json:"status"`         // idle, checking, downloading, installing, done, failed
@@ -622,8 +623,26 @@ func (s *KernelService) List() []KernelInfo {
 		snapshots[i].ProcessStatus = status
 		snapshots[i].PID = pid
 		snapshots[i].Uptime = uptime
+		snapshots[i].HasBackup = s.hasBackup(snapshots[i].Name, snapshots[i].BinaryPath)
 	}
 	return snapshots
+}
+
+func (s *KernelService) hasBackup(name, binaryPath string) bool {
+	if binaryPath == "" {
+		return false
+	}
+	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && (strings.HasPrefix(e.Name(), name+".bak.") || strings.HasPrefix(e.Name(), "kernel.bak.")) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *KernelService) Get(name string) *KernelInfo {
@@ -646,6 +665,7 @@ func (s *KernelService) Get(name string) *KernelInfo {
 	snap.ProcessStatus = status
 	snap.PID = pid
 	snap.Uptime = uptime
+	snap.HasBackup = s.hasBackup(snap.Name, snap.BinaryPath)
 	return &snap
 }
 
@@ -923,11 +943,25 @@ func (s *KernelService) Install(name string) error {
 		return fmt.Errorf("kernel not found: %s", name)
 	}
 	k.Status = "downloading"
-	k.Message = "Downloading..."
-	// Snapshot immutable fields needed outside the lock
 	binaryPath := k.BinaryPath
 	latestVersion := k.LatestVersion
 	s.mu.Unlock()
+
+	// If latestVersion is unknown, check latest or fallback to current version for reinstall
+	if latestVersion == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_ = s.CheckLatest(ctx, name)
+		cancel()
+		s.mu.RLock()
+		if s.kernels[name] != nil {
+			latestVersion = s.kernels[name].LatestVersion
+			if latestVersion == "" && s.kernels[name].CurrentVersion != "" && s.kernels[name].CurrentVersion != "not installed" {
+				latestVersion = strings.TrimPrefix(s.kernels[name].CurrentVersion, "v")
+				s.kernels[name].LatestVersion = latestVersion
+			}
+		}
+		s.mu.RUnlock()
+	}
 
 	arch := runtime.GOARCH
 	if arch == "mipsle" || arch == "mipsel" {
@@ -939,6 +973,7 @@ func (s *KernelService) Install(name string) error {
 	// Build a temporary KernelInfo for buildDownloadURL (only needs Name, Repo, LatestVersion, Channel)
 	s.mu.RLock()
 	snap := *s.kernels[name]
+	snap.LatestVersion = latestVersion
 	s.mu.RUnlock()
 
 	downloadURL, filename := s.buildDownloadURL(&snap, arch)
@@ -1070,6 +1105,7 @@ func (s *KernelService) Install(name string) error {
 		}
 		kk.Status = "done"
 		kk.Message = "Updated to " + kk.CurrentVersion
+		kk.HasBackup = true
 	}
 	s.mu.Unlock()
 
@@ -1173,6 +1209,7 @@ func (s *KernelService) Rollback(name string) error {
 		kk.CurrentVersion = s.detectVersion(kk)
 		kk.Status = "idle"
 		kk.Message = "Rolled back to backup"
+		kk.HasBackup = s.hasBackup(name, kk.BinaryPath)
 	}
 	s.mu.Unlock()
 
@@ -1276,8 +1313,8 @@ func (s *KernelService) downloadFile(ctx context.Context, url, filepath string) 
 	return closeErr
 }
 
-// maxKernelExtractBytes caps the size of decompressed kernel binaries (50 MB).
-const maxKernelExtractBytes = 50 * 1024 * 1024
+// maxKernelExtractBytes caps the size of decompressed kernel binaries (100 MB).
+const maxKernelExtractBytes = 100 * 1024 * 1024
 
 func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 	r, err := zip.OpenReader(zipPath)
@@ -1287,7 +1324,12 @@ func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 	defer r.Close()
 
 	for _, f := range r.File {
-		if f.Name == binaryName || f.Name == binaryName+"-linux-"+runtime.GOARCH {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		baseName := filepath.Base(f.Name)
+		if f.Name == binaryName || f.Name == binaryName+"-linux-"+runtime.GOARCH ||
+			baseName == binaryName || strings.HasPrefix(baseName, binaryName+"-linux-") {
 			rc, err := f.Open()
 			if err != nil {
 				return "", err
@@ -1465,3 +1507,150 @@ func (s *KernelService) FetchBinary(name string) ([]byte, string, error) {
 
 	return data, name, nil
 }
+
+func isELF(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var magic [4]byte
+	if _, err := io.ReadFull(f, magic[:]); err != nil {
+		return false
+	}
+	return magic == [4]byte{0x7f, 'E', 'L', 'F'}
+}
+
+func copyKernelFile(src, dst string) error {
+	s, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	d, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	if _, err := io.Copy(d, s); err != nil {
+		return err
+	}
+	return d.Sync()
+}
+
+// UploadBinary saves an uploaded kernel binary or archive (.zip/.gz) to the router,
+// validates that it is a valid Linux ELF executable, creates a backup of the current binary,
+// and replaces the kernel binary atomically.
+func (s *KernelService) UploadBinary(name string, src io.Reader, filename string) error {
+	if name != "xray" && name != "mihomo" {
+		return fmt.Errorf("invalid kernel name: %s", name)
+	}
+
+	s.mu.RLock()
+	k, kernelExists := s.kernels[name]
+	s.mu.RUnlock()
+	if !kernelExists {
+		return fmt.Errorf("kernel not found: %s", name)
+	}
+
+	mu := &sync.Mutex{}
+	actual, _ := s.installLocks.LoadOrStore(name, mu)
+	installMu := actual.(*sync.Mutex)
+	if !installMu.TryLock() {
+		return fmt.Errorf("install already in progress")
+	}
+	defer installMu.Unlock()
+
+	s.mu.Lock()
+	s.resolveBinaryPath(k)
+	binaryPath := k.BinaryPath
+	s.mu.Unlock()
+
+	// Create temp file for upload streaming
+	tempFile, err := os.CreateTemp(os.TempDir(), fmt.Sprintf("upload-%s-*.tmp", name))
+	if err != nil {
+		return fmt.Errorf("failed to create temp upload file: %w", err)
+	}
+	tempUploadPath := tempFile.Name()
+	defer os.Remove(tempUploadPath)
+
+	// Stream upload with max 100MB
+	_, err = io.Copy(tempFile, io.LimitReader(src, 100*1024*1024))
+	_ = tempFile.Close()
+	if err != nil {
+		return fmt.Errorf("failed to save upload: %w", err)
+	}
+
+	extractedPath := tempUploadPath
+	lowerFilename := strings.ToLower(filename)
+	if strings.HasSuffix(lowerFilename, ".zip") {
+		extracted, err := s.extractZip(tempUploadPath, name)
+		if err != nil {
+			return fmt.Errorf("extract zip failed: %w", err)
+		}
+		extractedPath = extracted
+		defer os.Remove(extractedPath)
+	} else if strings.HasSuffix(lowerFilename, ".gz") {
+		extracted, err := s.extractGz(tempUploadPath)
+		if err != nil {
+			return fmt.Errorf("extract gz failed: %w", err)
+		}
+		extractedPath = extracted
+		defer os.Remove(extractedPath)
+	}
+
+	// Validate that extractedPath is a Linux ELF binary
+	if !isELF(extractedPath) {
+		return fmt.Errorf("uploaded file is not a valid Linux ELF binary")
+	}
+
+	// Backup current binary if exists
+	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
+	_ = os.MkdirAll(backupDir, 0755)
+	backupName := fmt.Sprintf("%s.bak.%d", name, time.Now().Unix())
+	backupPath := filepath.Join(backupDir, backupName)
+
+	if _, err := os.Stat(binaryPath); err == nil {
+		if err := copyKernelFile(binaryPath, backupPath); err == nil {
+			_ = pruneBackups(backupDir, name+".bak.", 3)
+		}
+	}
+
+	if err := os.Chmod(extractedPath, 0755); err != nil {
+		return fmt.Errorf("chmod failed: %w", err)
+	}
+
+	// Atomic replace
+	tempDest := filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new")
+	if err := validateKernelPath(tempDest); err != nil {
+		return err
+	}
+	if err := os.Rename(extractedPath, tempDest); err != nil {
+		if err := copyKernelFile(extractedPath, tempDest); err != nil {
+			return fmt.Errorf("replace failed: %w", err)
+		}
+	}
+	if err := os.Rename(tempDest, binaryPath); err != nil {
+		if _, statErr := os.Stat(backupPath); statErr == nil {
+			_ = os.Rename(backupPath, binaryPath)
+		}
+		return fmt.Errorf("final replace failed: %w", err)
+	}
+
+	s.mu.Lock()
+	if kk := s.kernels[name]; kk != nil {
+		kk.binaryPathCachedAt = time.Time{}
+		s.resolveBinaryPath(kk)
+		kk.verCache = &versionCache{}
+		kk.CurrentVersion = s.detectVersion(kk)
+		kk.Status = "done"
+		kk.Message = "Installed: " + kk.CurrentVersion
+		kk.HasBackup = true
+	}
+	s.mu.Unlock()
+
+	return nil
+}
+
