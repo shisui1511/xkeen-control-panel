@@ -11,6 +11,9 @@
   import { usePoller } from './lib/poller';
   import Skeleton from './components/Skeleton.svelte';
   import Button from './components/Button.svelte';
+  import PageHeader from './PageHeader.svelte';
+  import StatusBadge from './components/StatusBadge.svelte';
+  import SegmentedControl from './components/SegmentedControl.svelte';
   import { apiFetch } from './lib/api';
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
@@ -88,17 +91,21 @@
   let statusLoaded = $state(false);
   let statusPollError = $state(false);
 
+  // Соответствие состояния watchdog и варианта StatusBadge задано таблицей
+  // явно (T-120-24): деградация не должна визуально сливаться со штатной
+  // работой или с намеренной остановкой — каждое состояние сопоставлено
+  // варианту один к одному, а не выведено из произвольной строки.
   const watchdogBadge = $derived.by(() => {
     if (!watchdogStatus?.state) return null;
     switch (watchdogStatus.state) {
       case 'armed':
-        return { cssClass: 'badge badge-success', labelKey: 'watchdog.state_armed' };
+        return { variant: 'running' as const, labelKey: 'watchdog.state_armed' };
       case 'idle':
-        return { cssClass: 'badge', labelKey: 'watchdog.state_idle' };
+        return { variant: 'idle' as const, labelKey: 'watchdog.state_idle' };
       case 'degraded':
-        return { cssClass: 'badge badge-danger', labelKey: 'watchdog.state_degraded' };
+        return { variant: 'stopped' as const, labelKey: 'watchdog.state_degraded' };
       case 'disarmed':
-        return { cssClass: 'badge badge-warning', labelKey: 'watchdog.state_disarmed' };
+        return { variant: 'warning' as const, labelKey: 'watchdog.state_disarmed' };
       default:
         return null;
     }
@@ -565,56 +572,51 @@
 </script>
 
 <div class="container">
-  <!-- page-head -->
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_system')} <span class="crumb-sep">›</span>
-        {$t('nav.services')}
-      </div>
-      <h1>{$t('svc.h1')}</h1>
-      <p class="sub">{$t('svc.h1_sub')}</p>
-    </div>
-    <div class="ph-actions">
-      <button
-        class="btn btn-secondary"
-        onclick={handleRefreshStatus}
-        disabled={$isKernelChecking || refreshingStatus}
-        class:btn-loading={refreshingStatus}
-        title={$t('svc.refresh_status')}
+  <PageHeader
+    title={$t('svc.h1')}
+    subtitle={$t('svc.h1_sub')}
+    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('nav.services') }]}
+    {onSwitchTab}
+    hideHome={true}
+  >
+    <Button
+      variant="secondary"
+      loading={refreshingStatus}
+      disabled={$isKernelChecking || refreshingStatus}
+      title={$t('svc.refresh_status')}
+      onclick={handleRefreshStatus}
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
       >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-        >
-        {$t('svc.refresh_status')}
-      </button>
-      <button
-        class="btn btn-primary"
-        onclick={() => {
-          checkKernelUpdate('xray');
-          checkKernelUpdate('mihomo');
-        }}
-        disabled={$isKernelChecking || isAnyKernelChecking}
-        class:btn-loading={$isKernelChecking || isAnyKernelChecking}
-        title={$t('svc.check_updates')}
+      {$t('svc.refresh_status')}
+    </Button>
+    <Button
+      variant="primary"
+      loading={$isKernelChecking || isAnyKernelChecking}
+      disabled={$isKernelChecking || isAnyKernelChecking}
+      title={$t('svc.check_updates')}
+      onclick={() => {
+        checkKernelUpdate('xray');
+        checkKernelUpdate('mihomo');
+      }}
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"><polyline points="5 12 10 17 20 7" /></svg
       >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"><polyline points="5 12 10 17 20 7" /></svg
-        >
-        {$t('svc.check_updates')}
-      </button>
-    </div>
-  </div>
+      {$t('svc.check_updates')}
+    </Button>
+  </PageHeader>
 
   <!-- Top 2-Section Grid (Hero 65% / Updates 35%) -->
   <div class="services-top-grid">
@@ -635,17 +637,12 @@
           </div>
         </div>
         <div class="hero-status">
-          {#if isRunning}
-            <span class="status-badge running">
-              <span class="status-dot success"></span>{$t('svc.running')}
-            </span>
-          {:else}
-            <span class="status-badge stopped">
-              <span class="status-dot error"></span>{$t('svc.stopped')}
-            </span>
-          {/if}
+          <StatusBadge
+            variant={isRunning ? 'running' : 'stopped'}
+            label={isRunning ? $t('svc.running') : $t('svc.stopped')}
+          />
           {#if watchdogBadge}
-            <span class={watchdogBadge.cssClass}>{$t(watchdogBadge.labelKey)}</span>
+            <StatusBadge variant={watchdogBadge.variant} label={$t(watchdogBadge.labelKey)} />
           {/if}
         </div>
       </div>
@@ -692,12 +689,11 @@
             {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
               <a
                 href="#/editor"
-                class="badge badge-warning"
-                style="margin-top: 6px; display: inline-flex;"
+                class="mihomo-api-badge-link"
                 title={$t('svc.mihomo_api_unavailable_title')}
                 onclick={(e) => e.stopPropagation()}
               >
-                {$t('svc.mihomo_api_unavailable')}
+                <StatusBadge variant="warning" label={$t('svc.mihomo_api_unavailable')} />
               </a>
             {/if}
           </div>
@@ -933,30 +929,18 @@
       <!-- Channel Selector -->
       <div class="channel-row">
         <span class="channel-lbl">{$t('svc.channel_label')}</span>
-        <div class="channel-pills">
-          <button
-            type="button"
-            class="channel-pill"
-            class:active={(xray?.channel || mihomo?.channel || 'stable') === 'stable'}
-            onclick={() => {
-              setKernelChannel('xray', 'stable');
-              setKernelChannel('mihomo', 'stable');
-            }}
-          >
-            {$t('svc.channel_stable')}
-          </button>
-          <button
-            type="button"
-            class="channel-pill"
-            class:active={(xray?.channel || mihomo?.channel || 'stable') === 'preview'}
-            onclick={() => {
-              setKernelChannel('xray', 'preview');
-              setKernelChannel('mihomo', 'preview');
-            }}
-          >
-            {$t('svc.channel_preview')}
-          </button>
-        </div>
+        <SegmentedControl
+          ariaLabel={$t('svc.channel_label')}
+          value={xray?.channel || mihomo?.channel || 'stable'}
+          items={[
+            { value: 'stable', label: $t('svc.channel_stable') },
+            { value: 'preview', label: $t('svc.channel_preview') }
+          ]}
+          onchange={(v) => {
+            setKernelChannel('xray', v);
+            setKernelChannel('mihomo', v);
+          }}
+        />
       </div>
 
       <!-- Kernel Updates List -->
@@ -971,9 +955,9 @@
               {:else}
                 <span>v{mihomo?.current_version || '—'}</span>
                 {#if mihomo?.has_update}
-                  <span class="badge badge-warning">→ v{mihomo.latest_version}</span>
+                  <StatusBadge variant="warning" label={`→ v${mihomo.latest_version}`} />
                 {:else}
-                  <span class="badge badge-neutral">{$t('svc.actual_badge')}</span>
+                  <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
                 {/if}
               {/if}
             </div>
@@ -1024,9 +1008,9 @@
               {:else}
                 <span>v{xray?.current_version || '—'}</span>
                 {#if xray?.has_update}
-                  <span class="badge badge-warning">→ v{xray.latest_version}</span>
+                  <StatusBadge variant="warning" label={`→ v${xray.latest_version}`} />
                 {:else}
-                  <span class="badge badge-neutral">{$t('svc.actual_badge')}</span>
+                  <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
                 {/if}
               {/if}
             </div>
@@ -1080,7 +1064,7 @@
         {/if}
       </div>
       {#if watchdogBadge}
-        <span class={watchdogBadge.cssClass}>{$t(watchdogBadge.labelKey)}</span>
+        <StatusBadge variant={watchdogBadge.variant} label={$t(watchdogBadge.labelKey)} />
       {/if}
     </div>
 
@@ -1184,13 +1168,10 @@
             >
               <div class="log-meta">
                 <span class="log-action">{formatAction(entry.action)}</span>
-                <span
-                  class="log-badge"
-                  class:badge-ok={entry.success}
-                  class:badge-err={!entry.success}
-                >
-                  {entry.success ? $t('svc.log_ok') : $t('svc.log_fail')}
-                </span>
+                <StatusBadge
+                  variant={entry.success ? 'running' : 'stopped'}
+                  label={entry.success ? $t('svc.log_ok') : $t('svc.log_fail')}
+                />
                 <span class="log-ts monospace">{formatTs(entry.timestamp)}</span>
               </div>
               {#if entry.output}
@@ -1217,9 +1198,7 @@
             <div class="entware-name monospace">/opt/etc/init.d/S99xcp</div>
             <div class="entware-desc">XKeen Control Panel Daemon (Active)</div>
           </div>
-          <span class="status-badge running">
-            <span class="status-dot success"></span>Active
-          </span>
+          <StatusBadge variant="running" label="Active" />
         </div>
 
         <div class="entware-item">
@@ -1229,15 +1208,10 @@
               XKeen Router Core Supervisor ({isRunning ? 'Running' : 'Stopped'})
             </div>
           </div>
-          {#if isRunning}
-            <span class="status-badge running">
-              <span class="status-dot success"></span>Active
-            </span>
-          {:else}
-            <span class="status-badge stopped">
-              <span class="status-dot error"></span>Stopped
-            </span>
-          {/if}
+          <StatusBadge
+            variant={isRunning ? 'running' : 'stopped'}
+            label={isRunning ? 'Active' : 'Stopped'}
+          />
         </div>
       </div>
     </div>
@@ -1255,43 +1229,10 @@
 />
 
 <style>
-  .page-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 24px;
-    gap: 16px;
-  }
-
-  .page-head h1 {
-    margin: 4px 0 6px;
-    font-size: 22px;
-    font-weight: 700;
-  }
-
-  .page-head .sub {
-    margin: 0;
-    color: var(--fg-secondary);
-    font-size: 13px;
-  }
-
-  .crumbs {
-    font-size: 12px;
-    color: var(--fg-dim);
-    margin-bottom: 2px;
-  }
-
-  .crumb-sep {
-    color: var(--fg-faint);
-    margin: 0 6px;
-  }
-
-  .ph-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    flex-shrink: 0;
-    padding-top: 6px;
+  .mihomo-api-badge-link {
+    margin-top: 6px;
+    display: inline-flex;
+    text-decoration: none;
   }
 
   /* 2-Section Grid Layout (SRV-01) */
@@ -1556,30 +1497,6 @@
     color: var(--fg-primary);
   }
 
-  .channel-pills {
-    display: flex;
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    overflow: hidden;
-    background: var(--bg-card);
-  }
-
-  .channel-pill {
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    border: none;
-    background: transparent;
-    color: var(--fg-secondary);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .channel-pill.active {
-    background: var(--accent);
-    color: #fff;
-  }
-
   .kernel-updates-list {
     display: flex;
     flex-direction: column;
@@ -1616,11 +1533,6 @@
     display: flex;
     align-items: center;
     gap: 6px;
-  }
-
-  .badge-neutral {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--fg-dim);
   }
 
   /* Restart Log & Entware Section */
@@ -1678,23 +1590,6 @@
     font-weight: 600;
     font-size: 13px;
     color: var(--fg-primary);
-  }
-
-  .log-badge {
-    font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-weight: 700;
-  }
-
-  .badge-ok {
-    background: rgba(70, 209, 138, 0.15);
-    color: var(--success, #46d18a);
-  }
-
-  .badge-err {
-    background: rgba(244, 112, 127, 0.15);
-    color: var(--danger, #f4707f);
   }
 
   .log-ts {
