@@ -7,6 +7,9 @@
     disabled = false,
     loading = false,
     title,
+    ariaLabel,
+    style,
+    class: className = '',
     'data-testid': testId,
     onclick,
     children
@@ -16,6 +19,9 @@
     disabled?: boolean;
     loading?: boolean;
     title?: string;
+    ariaLabel?: string;
+    style?: string;
+    class?: string;
     'data-testid'?: string;
     onclick?: (event: MouseEvent) => void;
     children?: Snippet;
@@ -24,10 +30,12 @@
 
 <button
   {type}
-  class="btn btn-{variant}"
+  class="btn btn-{variant} {className}"
   disabled={disabled || loading}
   {title}
+  aria-label={ariaLabel}
   data-testid={testId}
+  {style}
   {onclick}
 >
   {#if loading}

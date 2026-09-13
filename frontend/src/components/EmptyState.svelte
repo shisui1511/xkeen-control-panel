@@ -59,7 +59,7 @@
   }
   .empty-state__title {
     font-size: var(--font-size-lg);
-    font-weight: 700;
+    font-weight: 600;
     color: var(--fg-primary);
     margin: 0;
   }
