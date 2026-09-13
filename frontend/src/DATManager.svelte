@@ -5,6 +5,9 @@
   import Icon from './lib/components/Icon.svelte';
   import { showToast, capabilities } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import PageHeader from './PageHeader.svelte';
+  import Button from './components/Button.svelte';
+  import StatusBadge from './components/StatusBadge.svelte';
 
   interface Props {
     onSwitchTab?: (tab: string) => void;
@@ -310,12 +313,18 @@
     return 'ok';
   }
 
-  function getStatusBadge(file: DATFile): { cls: string; label: string } {
+  // Состояние файла и вариант StatusBadge сопоставлены явной таблицей:
+  // отсутствующий файл — вариант остановки, устаревший/предупреждение —
+  // вариант предупреждения, исправный — вариант работы (D8).
+  function getStatusBadge(file: DATFile): {
+    variant: 'running' | 'stopped' | 'warning';
+    label: string;
+  } {
     const s = getFileStatus(file);
-    if (s === 'missing') return { cls: 'badge badge-error', label: $t('dat.status_missing') };
-    if (s === 'outdated') return { cls: 'badge badge-warning', label: $t('dat.status_outdated') };
-    if (s === 'warning') return { cls: 'badge badge-warning', label: $t('dat.status_warning') };
-    return { cls: 'badge badge-success', label: 'OK' };
+    if (s === 'missing') return { variant: 'stopped', label: $t('dat.status_missing') };
+    if (s === 'outdated') return { variant: 'warning', label: $t('dat.status_outdated') };
+    if (s === 'warning') return { variant: 'warning', label: $t('dat.status_warning') };
+    return { variant: 'running', label: 'OK' };
   }
 
   function getTypeBadge(file: DATFile): string {
@@ -372,22 +381,21 @@
 </script>
 
 <div class="container">
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_system')} <span class="crumb-sep">›</span>
-        {$t('nav.dat')}
-      </div>
-      <h1>{$t('dat.h1')}</h1>
-      <p class="sub">{$t('dat.h1_sub')}</p>
-    </div>
-    <div class="ph-actions">
-      <button
-        class="btn btn-secondary"
-        onclick={rollbackAll}
-        disabled={rollbacking || loading || globalUpdating || updatingFile !== null}
-        title={$t('dat.rollback_title')}
-      >
+  <PageHeader
+    title={$t('dat.h1')}
+    subtitle={$t('dat.h1_sub')}
+    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('nav.dat') }]}
+    {onSwitchTab}
+    hideHome={true}
+  >
+    <Button
+      variant="secondary"
+      loading={rollbacking}
+      disabled={rollbacking || loading || globalUpdating || updatingFile !== null}
+      title={$t('dat.rollback_title')}
+      onclick={rollbackAll}
+    >
+      {#if !rollbacking}
         <svg
           width="14"
           height="14"
@@ -397,47 +405,32 @@
           stroke-width="2"
           stroke-linecap="round"
           stroke-linejoin="round"
-          style="margin-right: 6px;"
+          ><polyline points="3 7 3 12 8 12" /><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /></svg
         >
-          <polyline points="3 7 3 12 8 12" />
-          <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
-        </svg>
-        {#if rollbacking}
-          {$t('dat.rolling')}
-        {:else}
-          {$t('dat.rollback')}
-        {/if}
-      </button>
-      <button
-        class="btn btn-primary"
-        onclick={() => updateAll()}
-        disabled={globalUpdating || loading || updatingFile !== null}
-        title={$t('dat.update_all')}
-      >
-        {#if globalUpdating}
-          <span
-            class="spinner"
-            style="--spinner-size: 13px; --spinner-track: currentColor; --spinner-color: transparent; margin-right: 6px;"
-          ></span>
-          {$t('app.loading')}
-        {:else}
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right: 6px;"
-          >
-            <polyline points="21 8 21 3 16 3" />
-            <path d="M3 16v5h5M21 3l-9 9M3 21l9-9" />
-          </svg>
-          {$t('dat.update_all')}
-        {/if}
-      </button>
-    </div>
-  </div>
+      {/if}
+      {rollbacking ? $t('dat.rolling') : $t('dat.rollback')}
+    </Button>
+    <Button
+      variant="primary"
+      loading={globalUpdating}
+      disabled={globalUpdating || loading || updatingFile !== null}
+      title={$t('dat.update_all')}
+      onclick={() => updateAll()}
+    >
+      {#if !globalUpdating}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          ><polyline points="21 8 21 3 16 3" /><path d="M3 16v5h5M21 3l-9 9M3 21l9-9" /></svg
+        >
+      {/if}
+      {globalUpdating ? $t('app.loading') : $t('dat.update_all')}
+    </Button>
+  </PageHeader>
 
   {#if error}
     <div class="alert alert-error mb-3">{error}</div>
@@ -471,7 +464,7 @@
     <!-- Xray Group -->
     {#if xrayFiles.length > 0 && ($capabilities === null || $capabilities.active_kernel === 'xray')}
       <div class="card card-tight mb-3">
-        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
+        <h2 class="card-title dat-section-title">
           Xray ({xrayFiles[0]?.path || '/opt/etc/xray/datfiles'})
         </h2>
         <div class="dat-list">
@@ -507,7 +500,10 @@
               <div class="dr-main">
                 <div class="dr-name">
                   {file.name}
-                  <span class={getStatusBadge(file).cls}>{getStatusBadge(file).label}</span>
+                  <StatusBadge
+                    variant={getStatusBadge(file).variant}
+                    label={getStatusBadge(file).label}
+                  />
                   <span class="badge badge-type">{getTypeBadge(file)}</span>
                 </div>
                 <div class="dr-meta">
@@ -601,7 +597,7 @@
     <!-- Mihomo Group -->
     {#if mihomoFiles.length > 0 && ($capabilities === null || $capabilities.active_kernel === 'mihomo')}
       <div class="card card-tight mb-3">
-        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
+        <h2 class="card-title dat-section-title">
           Mihomo ({mihomoFiles[0]?.path || '/opt/etc/mihomo'})
         </h2>
         <div class="dat-list">
@@ -637,7 +633,10 @@
               <div class="dr-main">
                 <div class="dr-name">
                   {file.name}
-                  <span class={getStatusBadge(file).cls}>{getStatusBadge(file).label}</span>
+                  <StatusBadge
+                    variant={getStatusBadge(file).variant}
+                    label={getStatusBadge(file).label}
+                  />
                   <span class="badge badge-type">{getTypeBadge(file)}</span>
                 </div>
                 <div class="dr-meta">
@@ -731,7 +730,7 @@
     <!-- Other Files -->
     {#if otherFiles.length > 0}
       <div class="card card-tight mb-3">
-        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
+        <h2 class="card-title dat-section-title">
           {$t('dat.other_files')}
         </h2>
         <div class="dat-list">
@@ -753,7 +752,10 @@
               <div class="dr-main">
                 <div class="dr-name">
                   {file.name}
-                  <span class={getStatusBadge(file).cls}>{getStatusBadge(file).label}</span>
+                  <StatusBadge
+                    variant={getStatusBadge(file).variant}
+                    label={getStatusBadge(file).label}
+                  />
                   <span class="badge badge-type">{getTypeBadge(file)}</span>
                 </div>
                 <div class="dr-meta">
@@ -852,9 +854,8 @@
       <div class="td-header">
         <div class="td-title" style="display: flex; align-items: center; gap: 8px;">
           <button
-            class="td-close"
+            class="td-close td-close-icon"
             onclick={closeEntryBrowser}
-            style="padding: 4px; display: inline-flex; align-items: center; justify-content: center;"
             title={$t('dat.back_to_tags')}
           >
             <svg
@@ -969,7 +970,7 @@
             {/each}
 
             {#if entryDrawer.hasMore}
-              <div style="padding: 12px 20px; text-align: center;">
+              <div class="td-load-more">
                 <button
                   class="btn btn-secondary btn-sm"
                   onclick={loadMoreEntries}
@@ -1121,11 +1122,6 @@
 </Modal>
 
 <style>
-  .crumb-separator {
-    color: var(--fg-faint);
-    margin: 0 6px;
-  }
-
   .stats {
     display: flex;
     gap: 16px;
@@ -1146,6 +1142,10 @@
 
   .stat b {
     color: var(--fg-primary);
+  }
+
+  .dat-section-title {
+    padding: 20px 24px 8px;
   }
 
   .dat-list {
@@ -1206,18 +1206,8 @@
   .dr-name .badge {
     padding: 2px 6px;
     border-radius: 4px;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
-  }
-
-  .dr-name .badge-success {
-    background: rgba(16, 185, 129, 0.1);
-    color: var(--success);
-  }
-
-  .dr-name .badge-error {
-    background: rgba(239, 68, 68, 0.1);
-    color: var(--error);
   }
 
   .dr-name .badge-type {
@@ -1325,7 +1315,7 @@
   }
 
   .td-count {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--fg-dim);
     background: rgba(255, 255, 255, 0.05);
@@ -1355,6 +1345,18 @@
     background: rgba(255, 255, 255, 0.06);
   }
 
+  .td-close-icon {
+    padding: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .td-load-more {
+    padding: 12px 20px;
+    text-align: center;
+  }
+
   .td-hint {
     padding: 10px 20px;
     font-size: 12px;
@@ -1370,7 +1372,7 @@
 
   .td-format {
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 11px;
+    font-size: 12px;
     background: rgba(41, 194, 240, 0.1);
     color: var(--primary);
     border: 1px solid rgba(41, 194, 240, 0.2);
@@ -1412,7 +1414,7 @@
     border: none;
     color: var(--fg-dim);
     cursor: pointer;
-    font-size: 11px;
+    font-size: 12px;
     padding: 2px 4px;
     border-radius: var(--radius-sm);
     line-height: 1;
@@ -1468,7 +1470,7 @@
   }
 
   .td-tag-count {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--border);
