@@ -12,6 +12,7 @@
     value?: string;
     id?: string;
     class?: string;
+    wrapperClass?: string;
     style?: string;
     disabled?: boolean;
     title?: string;
@@ -27,6 +28,7 @@
     value = $bindable(),
     id,
     class: className = '',
+    wrapperClass = '',
     style,
     disabled = false,
     title,
@@ -37,10 +39,14 @@
     options,
     children
   }: Props = $props();
+
+  const resolvedWrapperClass = $derived(
+    ['xcp-select', wrapperClass || className].filter(Boolean).join(' ')
+  );
 </script>
 
 <!-- Обёртка над нативным select (D5): appearance:none + иконка стрелки, семантика без изменений -->
-<span class="xcp-select" {style}>
+<span class={resolvedWrapperClass} {style}>
   <select
     {id}
     class={className}
@@ -82,7 +88,7 @@
     color: var(--fg-primary);
     padding: 0 32px 0 12px;
     font-family: var(--font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
   }
 
