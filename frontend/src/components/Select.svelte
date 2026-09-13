@@ -40,9 +40,12 @@
     children
   }: Props = $props();
 
-  const resolvedWrapperClass = $derived(
-    ['xcp-select', wrapperClass || className].filter(Boolean).join(' ')
-  );
+  // wrapperClass — явный opt-in для класса на обёртке <span>. class= (className)
+  // исторически предназначен только для вложенного <select> и не должен
+  // неявно "утекать" на обёртку — иначе box-model-классы вроде .input или
+  // :global(.form-select) применяются одновременно к двум вложенным
+  // элементам, создавая визуальную рамку в рамке (120-REVIEW CR-05).
+  const resolvedWrapperClass = $derived(['xcp-select', wrapperClass].filter(Boolean).join(' '));
 </script>
 
 <!-- Обёртка над нативным select (D5): appearance:none + иконка стрелки, семантика без изменений -->

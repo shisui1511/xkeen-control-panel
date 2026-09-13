@@ -25,15 +25,43 @@ describe('Select', () => {
     expect(body).toContain('Option 2');
   });
 
-  it('falls back to className on wrapper when wrapperClass is not provided', () => {
+  it('does NOT leak className onto the wrapper when wrapperClass is not provided (120-REVIEW CR-05)', () => {
+    // Regression guard: class= is styled box-model CSS in real usage
+    // (.input, :global(.form-select) — both border/background/padding/
+    // border-radius). If the wrapper <span> also received this class, it
+    // would visually double-stack the box-model on top of the already
+    // styled <select>, producing a nested "box in a box". The wrapper must
+    // only ever carry 'xcp-select' plus an explicit wrapperClass opt-in.
     const { body } = render(Select, {
       props: {
-        class: 'group-select'
+        class: 'input'
       }
     });
 
-    expect(body).toMatch(/class="xcp-select group-select\b/);
-    expect(body).toMatch(/<select[^>]*class="group-select\b/);
+    const wrapperMatch = body.match(/<span class="([^"]*)"/);
+    expect(wrapperMatch).not.toBeNull();
+    const wrapperClasses = (wrapperMatch?.[1] ?? '').split(/\s+/);
+    expect(wrapperClasses).toEqual(['xcp-select']);
+    expect(wrapperClasses).not.toContain('input');
+
+    expect(body).toMatch(/<select[^>]*class="input\b/);
+  });
+
+  it('applies wrapperClass on the wrapper only as an explicit opt-in, independent of class=', () => {
+    const { body } = render(Select, {
+      props: {
+        class: 'input',
+        wrapperClass: 'form-row-select'
+      }
+    });
+
+    const wrapperMatch = body.match(/<span class="([^"]*)"/);
+    expect(wrapperMatch).not.toBeNull();
+    const wrapperClasses = (wrapperMatch?.[1] ?? '').split(/\s+/);
+    expect(wrapperClasses).toEqual(['xcp-select', 'form-row-select']);
+    expect(wrapperClasses).not.toContain('input');
+
+    expect(body).toMatch(/<select[^>]*class="input\b/);
   });
 
   it('uses var(--font-size-sm) instead of hardcoded font-size', () => {
