@@ -4,6 +4,12 @@
   import { showToast, showConfirm, capabilities } from './stores';
   import { apiFetch } from './lib/api';
   import { formatBytes } from './lib/format';
+  import PageHeader from './PageHeader.svelte';
+  import Button from './components/Button.svelte';
+  import Select from './components/Select.svelte';
+  import LiveIndicator from './components/LiveIndicator.svelte';
+
+  let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
   interface LogEntry {
     id: number;
@@ -522,58 +528,47 @@
 </script>
 
 <div class="logs-page">
-  <!-- page-head -->
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_observability')} <span class="crumb-sep">›</span>
-        {$t('nav.logs')}
-      </div>
-      <h1>{$t('logs.h1')}</h1>
-      <p class="sub">{$t('logs.h1_sub')}</p>
-    </div>
-    <div class="ph-actions">
-      <!-- Flash Health Badge -->
-      {#if flashHealth}
-        <div
-          class="flash-health-badge"
-          class:pressure={flashHealth.is_under_pressure}
-          title={$t('logs.flash_health_desc')}
+  <PageHeader
+    title={$t('logs.h1')}
+    subtitle={$t('logs.h1_sub')}
+    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('nav.logs') }]}
+    {onSwitchTab}
+    hideHome={true}
+  >
+    <!-- Flash Health Badge -->
+    {#if flashHealth}
+      <div
+        class="flash-health-badge"
+        class:pressure={flashHealth.is_under_pressure}
+        title={$t('logs.flash_health_desc')}
+      >
+        <span class="flash-icon">💾</span>
+        <span class="flash-stat"
+          >{$t('logs.flash_total_logs', {
+            size: formatBytes(flashHealth.total_logs_bytes)
+          })}</span
         >
-          <span class="flash-icon">💾</span>
-          <span class="flash-stat"
-            >{$t('logs.flash_total_logs', {
-              size: formatBytes(flashHealth.total_logs_bytes)
-            })}</span
-          >
-          <span class="flash-divider">•</span>
-          <span class="flash-stat"
-            >{$t('logs.flash_free', { free: formatBytes(flashHealth.free_space_bytes) })}</span
-          >
-          {#if flashHealth.emergency_actions > 0}
-            <span class="flash-alert-tag">⚡ {flashHealth.emergency_actions}</span>
-          {/if}
-        </div>
-      {/if}
+        <span class="flash-divider">•</span>
+        <span class="flash-stat"
+          >{$t('logs.flash_free', { free: formatBytes(flashHealth.free_space_bytes) })}</span
+        >
+        {#if flashHealth.emergency_actions > 0}
+          <span class="flash-alert-tag">⚡ {flashHealth.emergency_actions}</span>
+        {/if}
+      </div>
+    {/if}
 
-      {#if !connected}
-        <span class="status-badge stopped">
-          <span class="status-dot error"></span>{$t('logs.status_disconnected')}
-        </span>
-        <button onclick={connect} class="btn btn-primary btn-sm" title={$t('logs.connect')}>
-          {$t('logs.connect')}
-        </button>
-      {:else if paused}
-        <span class="status-badge warning">
-          <span class="status-dot warning"></span>{$t('logs.status_paused')}
-        </span>
-      {:else}
-        <span class="status-badge running">
-          <span class="status-dot success"></span>{$t('logs.status_connected')}
-        </span>
-      {/if}
-    </div>
-  </div>
+    {#if !connected}
+      <LiveIndicator live={false} label={$t('logs.status_disconnected')} />
+      <Button variant="primary" onclick={connect} title={$t('logs.connect')}>
+        {$t('logs.connect')}
+      </Button>
+    {:else if paused}
+      <LiveIndicator live={false} label={$t('logs.status_paused')} />
+    {:else}
+      <LiveIndicator live={true} label={$t('logs.status_connected')} />
+    {/if}
+  </PageHeader>
 
   {#if flashHealth && flashHealth.is_under_pressure}
     <div class="pressure-banner">
@@ -733,19 +728,19 @@
           <!-- Runtime Core Log-Level Switcher -->
           <div class="runtime-level-control" title={$t('logs.runtime_level')}>
             <span class="ctrl-label">Mihomo:</span>
-            <select
+            <Select
               class="runtime-select"
               value={runtimeLevel}
               disabled={isUpdatingLevel}
               onchange={(e) => changeLogLevel((e.target as HTMLSelectElement).value)}
-              aria-label={$t('logs.runtime_level')}
+              ariaLabel={$t('logs.runtime_level')}
             >
               <option value="silent">SILENT</option>
               <option value="error">ERROR</option>
               <option value="warning">WARN</option>
               <option value="info">INFO</option>
               <option value="debug">DEBUG</option>
-            </select>
+            </Select>
           </div>
         {/if}
       </div>
@@ -801,13 +796,13 @@
         </div>
 
         <!-- Severity Level Dropdown -->
-        <select bind:value={levelFilter} class="level-select" aria-label={$t('logs.level')}>
+        <Select bind:value={levelFilter} class="level-select" ariaLabel={$t('logs.level')}>
           <option value="">{$t('logs.all_levels')}</option>
           <option value="error">ERROR</option>
           <option value="warning">WARN</option>
           <option value="info">INFO</option>
           <option value="debug">DEBUG</option>
-        </select>
+        </Select>
       </div>
     </div>
 
@@ -946,8 +941,7 @@
         )}
       </div>
       <div class="footer-stat footer-live">
-        <span class="live-dot" class:paused class:disconnected={!connected}></span>
-        {$t('logs.realtime_label')}
+        <LiveIndicator live={connected && !paused} label={$t('logs.realtime_label')} />
       </div>
     </div>
   </div>
@@ -1023,9 +1017,18 @@
   }
 
   .flash-health-badge.pressure {
-    border-color: var(--color-error);
-    background: color-mix(in srgb, var(--color-error) 12%, transparent);
-    color: var(--color-error);
+    border-color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    color: var(--danger);
+  }
+
+  .flash-icon {
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .flash-stat {
+    font-weight: 600;
   }
 
   .flash-divider {
@@ -1034,9 +1037,9 @@
   }
 
   .flash-alert-tag {
-    background: var(--color-error);
+    background: var(--danger);
     color: var(--btn-primary-text);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
     padding: 1px 5px;
     border-radius: 4px;
@@ -1046,12 +1049,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: color-mix(in srgb, var(--color-error) 16%, transparent);
-    border: 1px solid var(--color-error);
+    background: color-mix(in srgb, var(--danger) 16%, transparent);
+    border: 1px solid var(--danger);
     border-radius: var(--radius-md);
     padding: 8px 14px;
     font-size: 13px;
-    color: var(--color-error);
+    color: var(--danger);
     font-weight: 600;
   }
 
@@ -1115,7 +1118,7 @@
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .ctrl-label {
@@ -1126,7 +1129,7 @@
   .runtime-select {
     height: 24px;
     padding: 0 4px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     font-family: var(--font-family-mono);
     border-radius: var(--radius-xs);
@@ -1172,7 +1175,7 @@
   .match-badge {
     position: absolute;
     right: 22px;
-    font-size: 10px;
+    font-size: 12px;
     color: var(--accent);
     font-weight: 700;
     font-family: var(--font-family-mono);
@@ -1206,19 +1209,21 @@
 
   .source-pill {
     padding: 3px 8px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--fg-dim);
     background: transparent;
     border: none;
     border-radius: 3px;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition:
+      background 0.15s,
+      color 0.15s;
   }
 
-  .source-pill:hover:not(.active) {
+  .source-pill:hover {
     color: var(--fg-primary);
-    background: var(--bg-hover);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.05));
   }
 
   .source-pill.active {
@@ -1228,7 +1233,7 @@
   }
 
   .source-pill.error-tab.active {
-    background: var(--color-error);
+    background: var(--danger);
     color: var(--btn-primary-text);
   }
 
@@ -1332,7 +1337,7 @@
     flex-shrink: 0;
     width: 70px;
     color: var(--fg-dim);
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .col-src {
@@ -1344,9 +1349,8 @@
   .src-tag {
     display: inline-block;
     padding: 1px 5px;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
     border-radius: 3px;
     background: var(--surface-tint);
     color: var(--fg-dim);
@@ -1365,14 +1369,14 @@
   .lvl-badge {
     display: inline-block;
     padding: 1px 4px;
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 800;
     border-radius: 3px;
     letter-spacing: 0.5px;
   }
 
   .lvl-error {
-    background: var(--color-error);
+    background: var(--danger);
     color: var(--btn-primary-text);
   }
 
@@ -1394,7 +1398,7 @@
   .col-subsystem {
     flex-shrink: 0;
     color: var(--accent);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     margin-right: 8px;
   }
@@ -1502,7 +1506,7 @@
     justify-content: flex-end;
     gap: 16px;
     padding: 2px 4px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
   }
 
@@ -1520,20 +1524,20 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--color-success);
-    box-shadow: 0 0 6px var(--color-success);
+    background: var(--success);
+    box-shadow: 0 0 6px var(--success);
     transition:
       background 0.2s,
       box-shadow 0.2s;
   }
 
   .live-dot.paused {
-    background: var(--color-warning);
-    box-shadow: 0 0 6px var(--color-warning);
+    background: var(--warning);
+    box-shadow: 0 0 6px var(--warning);
   }
 
   .live-dot.disconnected {
-    background: var(--color-error);
-    box-shadow: 0 0 6px var(--color-error);
+    background: var(--danger);
+    box-shadow: 0 0 6px var(--danger);
   }
 </style>
