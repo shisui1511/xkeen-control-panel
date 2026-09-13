@@ -2647,22 +2647,22 @@
     gap: 8px;
     padding: 10px 14px;
     margin-bottom: 16px;
-    background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 40%, transparent);
-    border-radius: var(--radius-sm, 6px);
-    color: var(--fg);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
     font-size: 13px;
     line-height: 1.5;
   }
   .confdir-warning svg {
-    color: var(--color-warning, #f59e0b);
+    color: var(--warning);
     margin-top: 2px;
   }
 
   .group-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
-    gap: var(--grid-gap, 16px);
+    gap: var(--grid-gap);
     margin-bottom: 30px;
     align-items: start;
   }
@@ -2774,7 +2774,7 @@
   .group-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 10px);
+    border-radius: var(--radius-lg);
     overflow: hidden;
     box-shadow: var(--shadow-sm);
     transition: all 0.2s ease;
@@ -2792,11 +2792,7 @@
     background: transparent;
   }
   .group-card .gc-head {
-    background: linear-gradient(
-      135deg,
-      var(--bg-group-head-from, rgba(20, 51, 79, 0.9)),
-      var(--bg-group-head-to, rgba(16, 42, 68, 0.95))
-    );
+    background: linear-gradient(135deg, var(--bg-group-head-from), var(--bg-group-head-to));
     padding: 14px 18px;
     display: flex;
     flex-direction: column;
@@ -2914,7 +2910,7 @@
     padding: 2px 4px;
     cursor: pointer;
     color: var(--fg-faint);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2922,7 +2918,7 @@
   }
   .gc-ping-btn:hover:not(:disabled) {
     color: var(--accent);
-    background: var(--hover, rgba(255, 255, 255, 0.08));
+    background: var(--hover);
   }
   .gc-ping-btn:disabled {
     opacity: 0.5;
@@ -2951,7 +2947,7 @@
     align-items: center;
     gap: 5px;
     padding: 2px 10px;
-    border-radius: var(--radius-lg, 10px);
+    border-radius: var(--radius-lg);
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border);
     color: var(--fg-primary);
@@ -3066,7 +3062,7 @@
     cursor: default;
   }
   .proxy-select-btn:focus-visible {
-    outline: 2px solid var(--accent, #29c2f0);
+    outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
   .proxy-card::after {
@@ -3144,7 +3140,7 @@
     background: rgba(255, 255, 255, 0.08);
   }
   .btn-latency-test:focus-visible {
-    outline: 2px solid var(--accent, #29c2f0);
+    outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
 
@@ -3161,7 +3157,7 @@
     align-items: center;
     gap: 6px;
     padding: 3px 10px;
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     font-size: var(--font-size-xs);
     font-weight: 500;
     background: rgba(255, 255, 255, 0.04);
@@ -3260,7 +3256,7 @@
     opacity: 0.85;
   }
   button.lat:focus-visible {
-    outline: 2px solid var(--accent, #29c2f0);
+    outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
   .lat.ok {
@@ -3284,7 +3280,7 @@
     padding: 6px 12px;
     border: 1px solid var(--border);
     background: var(--bg-input);
-    color: var(--fg);
+    color: var(--fg-primary);
     border-radius: var(--radius-sm);
     font-size: 13px;
     width: 200px;
@@ -3327,7 +3323,7 @@
     gap: 4px;
   }
   .group-grid.group-list .group-card {
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
   }
   .group-grid.group-list .group-card.expanded {
     grid-column: auto;
@@ -3399,9 +3395,9 @@
   .proxy-grid-more {
     width: calc(100% - 32px);
     height: 32px;
-    background: var(--bg-surface, rgba(255, 255, 255, 0.03));
+    background: var(--bg-surface);
     border: 1px dashed var(--border);
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     color: var(--fg-dim);
     font: inherit;
     font-size: 12px;
@@ -3414,7 +3410,7 @@
   }
   .rendered-nodes-hint {
     font-size: var(--font-size-xs);
-    color: var(--fg-muted, var(--fg-dim));
+    color: var(--fg-muted);
   }
 
   @media (max-width: 767px) {
