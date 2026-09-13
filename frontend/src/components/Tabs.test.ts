@@ -13,6 +13,9 @@ describe('Tabs', () => {
     const buttonCount = (body.match(/class="tab-btn/g) || []).length;
     expect(buttonCount).toBe(3);
     expect(body).toMatch(/class="tab-btn[^"]*\bactive\b[^"]*"[^>]*>\s*B\s*<\/button>/);
+    expect(body).toContain('role="tab"');
+    expect(body).toContain('aria-selected="true"');
+    expect(body).toContain('aria-selected="false"');
   });
 
   it('does not render a container for an empty items array', () => {

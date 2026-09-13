@@ -41,6 +41,8 @@
     {#each items as item (item.value)}
       <button
         type="button"
+        role="tab"
+        aria-selected={item.value === value}
         class="tab-btn"
         class:active={item.value === value}
         disabled={item.disabled}
