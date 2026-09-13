@@ -110,7 +110,6 @@
   "nav.expand_sidebar": "Expand sidebar",
   "dash.title": "System Status",
   "dash.welcome": "Overview of services, resources and quick actions.",
-  "dash.restart_xkeen": "Restart XKeen",
   "dash.system_info": "System Information",
   "dash.system_stats": "System Resources",
   "dash.releases": "Releases",

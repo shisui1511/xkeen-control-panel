@@ -920,10 +920,6 @@
               <Icon name="refresh" size={14} />
               {$t('app.refresh')}
             </Button>
-            <Button variant="primary" onclick={restartXkeen} title={$t('dash.restart_xkeen')}>
-              <Icon name="refresh" size={14} />
-              {$t('dash.restart_xkeen')}
-            </Button>
           </PageHeader>
 
           <!-- Quickstart Checklist (Mihomo only, auto-hides when all steps complete).
