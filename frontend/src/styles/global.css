@@ -458,7 +458,6 @@ h2.card-title {
     box-shadow var(--transition-fast),
     opacity var(--transition-fast);
   border: 1px solid transparent;
-  outline: none;
   text-decoration: none;
   color: var(--fg-primary);
 }
@@ -1016,6 +1015,10 @@ input[type='number'] {
 :is(button, a, input, select, textarea, [tabindex]:not([tabindex='-1'])):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+:is(button, a, input, select, textarea, [tabindex]:not([tabindex='-1'])):focus:not(:focus-visible) {
+  outline: none;
 }
 
 .burger-btn {

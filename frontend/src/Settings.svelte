@@ -1653,7 +1653,6 @@
   }
 
   .field-input:focus {
-    outline: none;
     border-color: var(--accent);
   }
 

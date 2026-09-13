@@ -1244,7 +1244,6 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    outline: none;
     transition:
       border-color var(--transition-fast),
       transform var(--transition-fast),

@@ -65,7 +65,6 @@
       box-shadow var(--transition-fast),
       opacity var(--transition-fast);
     border: 1px solid transparent;
-    outline: none;
   }
   .btn:disabled {
     opacity: 0.5;

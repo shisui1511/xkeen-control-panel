@@ -1315,7 +1315,6 @@
     cursor: pointer;
     text-align: left;
     transition: all 0.18s ease;
-    outline: none;
     font-family: inherit;
   }
 

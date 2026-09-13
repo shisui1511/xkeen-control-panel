@@ -165,7 +165,6 @@
     max-height: 90dvh;
     display: flex;
     flex-direction: column;
-    outline: none;
     overflow: hidden;
   }
   .modal-header {

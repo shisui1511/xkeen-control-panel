@@ -1291,7 +1291,6 @@
     color: var(--fg-primary);
     font-size: 13px;
     padding: 6px 10px;
-    outline: none;
     width: 100%;
     transition: border-color var(--transition-fast);
   }

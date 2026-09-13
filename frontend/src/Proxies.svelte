@@ -3288,7 +3288,6 @@
   }
   .group-search:focus {
     border-color: var(--accent);
-    outline: none;
   }
 
   .chevron-wrap {

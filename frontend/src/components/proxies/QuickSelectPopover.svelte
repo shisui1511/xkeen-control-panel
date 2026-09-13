@@ -411,7 +411,6 @@
     border: 1px solid var(--border);
     background: var(--bg-input, rgba(0, 0, 0, 0.2));
     color: var(--fg-primary);
-    outline: none;
     box-sizing: border-box;
   }
 

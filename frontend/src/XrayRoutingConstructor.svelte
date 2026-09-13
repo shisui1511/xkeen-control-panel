@@ -5369,7 +5369,6 @@
     color: var(--fg-primary);
     font-size: var(--font-size-sm);
     font-family: inherit;
-    outline: none;
     transition: border-color var(--transition-fast);
   }
 

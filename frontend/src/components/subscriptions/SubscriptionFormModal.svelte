@@ -441,7 +441,6 @@
     margin: 12px 0 6px 0;
     width: 100%;
     text-align: left;
-    outline: none;
     transition: color var(--transition-fast);
   }
   .advanced-toggle-btn:hover {

@@ -840,7 +840,7 @@
   <div
     role="presentation"
     tabindex="-1"
-    style="outline: none; display: flex; flex-direction: column; height: 100%;"
+    style="display: flex; flex-direction: column; height: 100%;"
     onkeydown={(e) => {
       if (e.key === 'Escape' && entryDrawer.open) {
         e.stopPropagation();
@@ -1399,7 +1399,6 @@
     flex: 1;
     background: none;
     border: none;
-    outline: none;
     color: var(--fg-primary);
     font-size: 13px;
     caret-color: var(--primary);

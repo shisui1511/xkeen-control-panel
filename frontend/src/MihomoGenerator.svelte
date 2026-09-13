@@ -4254,7 +4254,6 @@
     background: transparent;
     border: none;
     padding: 0;
-    outline: none;
   }
 
   .mihomo-splitter:hover .splitter-handle,
@@ -4723,7 +4722,6 @@
     color: var(--fg-primary);
     font-size: 13px;
     padding: 6px 10px;
-    outline: none;
     width: 100%;
     transition: border-color var(--transition-fast);
   }
@@ -4741,7 +4739,6 @@
     font-size: 12px;
     font-family: 'JetBrains Mono', monospace;
     padding: 6px 10px;
-    outline: none;
     width: 100%;
     resize: vertical;
     transition: border-color var(--transition-fast);
@@ -4758,7 +4755,6 @@
     color: var(--fg-secondary);
     font-size: 12px;
     padding: 2px 4px;
-    outline: none;
     cursor: pointer;
   }
 
