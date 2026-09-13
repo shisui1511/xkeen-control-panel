@@ -274,7 +274,9 @@ test.describe('Connections page test suite', () => {
     await expect(page.locator('.status-indicator.connected')).toBeVisible();
   });
 
-  test('keyboard navigation opens drawer on Enter and closes on Escape', async ({ page }) => {
+  test('keyboard navigation opens drawer on Enter, traps focus, and closes on Escape returning focus', async ({
+    page
+  }) => {
     const firstRow = page.locator('.connections-table tbody tr.conn-row').first();
     await firstRow.focus();
     await page.keyboard.press('Enter');
@@ -282,9 +284,22 @@ test.describe('Connections page test suite', () => {
     await expect(page.locator('.inspector-drawer')).toBeVisible();
     await expect(page.locator('.inspector-drawer')).toContainText('youtube.com:443');
 
+    // Focus is moved inside the drawer (close button)
+    await expect(page.locator('.drawer-close')).toBeFocused();
+
+    // Tab key does not escape the drawer
+    await page.keyboard.press('Tab');
+    const isInsideDrawer = await page.evaluate(
+      () => !!document.activeElement?.closest('.inspector-drawer')
+    );
+    expect(isInsideDrawer).toBe(true);
+
     // Press Escape to close
     await page.keyboard.press('Escape');
     await expect(page.locator('.inspector-drawer')).toHaveCount(0);
+
+    // Focus is returned to the connection row
+    await expect(firstRow).toBeFocused();
   });
 
   test('close all connections button opens confirmation dialog', async ({ page }) => {

@@ -93,6 +93,60 @@
   let selectedConnection = $derived(
     selectedConnectionId ? connections.find((c) => c.id === selectedConnectionId) : null
   );
+  let drawerElement: HTMLDivElement | null = $state(null);
+  let previouslyFocusedRow: HTMLElement | null = null;
+
+  $effect(() => {
+    if (selectedConnectionId) {
+      previouslyFocusedRow = document.activeElement as HTMLElement;
+      setTimeout(() => {
+        if (drawerElement) {
+          const focusables = getDrawerFocusableElements();
+          if (focusables.length > 0) focusables[0].focus();
+          else drawerElement.focus();
+        }
+      }, 0);
+    } else if (previouslyFocusedRow) {
+      previouslyFocusedRow.focus();
+      previouslyFocusedRow = null;
+    }
+  });
+
+  function getDrawerFocusableElements(): HTMLElement[] {
+    if (!drawerElement) return [];
+    const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    return Array.from(drawerElement.querySelectorAll(selectors)).filter(
+      (el) => (el as HTMLElement).offsetParent !== null
+    ) as HTMLElement[];
+  }
+
+  function handleDrawerKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      selectedConnectionId = null;
+      return;
+    }
+    if (event.key === 'Tab') {
+      const focusables = getDrawerFocusableElements();
+      if (focusables.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first) {
+          last.focus();
+          event.preventDefault();
+        }
+      } else {
+        if (active === last) {
+          first.focus();
+          event.preventDefault();
+        }
+      }
+    }
+  }
 
   async function loadClients() {
     try {
@@ -1079,7 +1133,15 @@
     onclick={() => (selectedConnectionId = null)}
     aria-label={$t('app.close')}
   ></button>
-  <div class="inspector-drawer" role="dialog" aria-modal="true" aria-labelledby="inspector-title">
+  <div
+    class="inspector-drawer"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="inspector-title"
+    tabindex="-1"
+    bind:this={drawerElement}
+    onkeydown={handleDrawerKeydown}
+  >
     <div class="drawer-header">
       <div class="drawer-title-group">
         <h3 class="drawer-title" id="inspector-title">{$t('conn.inspector_title')}</h3>

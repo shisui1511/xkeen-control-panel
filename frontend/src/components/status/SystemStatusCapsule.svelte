@@ -431,6 +431,7 @@
   .sidebar-traffic-row {
     font-family: var(--font-family-mono, monospace);
     font-size: var(--font-size-xs);
+    color: var(--fg-primary);
   }
 
   .traffic-speed {
@@ -462,7 +463,7 @@
   .res-label {
     font-size: var(--font-size-xs);
     font-weight: 700;
-    color: var(--fg-dim);
+    color: var(--fg-primary);
   }
 
   .res-val {
