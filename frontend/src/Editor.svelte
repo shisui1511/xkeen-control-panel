@@ -1551,6 +1551,7 @@
       value={activeTab}
       onchange={(val) => setTab(val as 'files' | 'constructor')}
       ariaLabel={$t('editor.h1')}
+      variant="pill"
     />
 
     {#if activeTab === 'files'}
@@ -1681,6 +1682,7 @@
             title={$t('editor.select_file')}
             description={$t('editor.empty_state_body')}
             icon={EditorIcon}
+            plain={true}
           />
           {#if !showSidebar}
             <button
@@ -2462,7 +2464,7 @@
   }
 
   .btn-sidebar-toggle:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--hover);
     color: var(--fg-primary);
   }
 
@@ -2487,11 +2489,11 @@
   .subhead-file-meta {
     font-size: 12px;
     font-family: var(--font-family-mono);
-    color: var(--fg-dim);
-    background: rgba(255, 255, 255, 0.03);
+    color: var(--fg-secondary);
+    background: var(--surface-tint);
     padding: 2px 6px;
     border-radius: var(--radius-sm);
-    border: 1px solid var(--border-light, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--border);
   }
 
   .btn-kebab {
@@ -2509,7 +2511,7 @@
   }
 
   .btn-kebab:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--hover);
     color: var(--fg-primary);
   }
 
@@ -2524,7 +2526,7 @@
     padding: 2px 7px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint);
     color: var(--fg-dim);
     cursor: pointer;
     transition: all 0.15s;
@@ -2532,12 +2534,12 @@
   }
 
   .chip-toggle:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--hover);
     color: var(--fg-primary);
   }
 
   .chip-toggle.active {
-    background: rgba(41, 194, 240, 0.15);
+    background: var(--accent-soft);
     border-color: var(--accent);
     color: var(--accent);
   }
@@ -2563,7 +2565,7 @@
   }
 
   .status-shortcut-tip kbd {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-tint);
     border: 1px solid var(--border);
     border-radius: 3px;
     padding: 1px 4px;
@@ -2922,10 +2924,10 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-tint);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     font-size: 12px;
     padding: 4px 10px;
     cursor: pointer;
@@ -2935,7 +2937,7 @@
   }
 
   .backups-toggle-btn:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--hover);
     color: var(--fg-primary);
   }
 
@@ -2948,17 +2950,22 @@
 
   .editor-empty-card :global(.empty-state) {
     justify-content: center;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    max-width: 480px;
   }
 
   .editor-statusbar {
     padding: 6px 14px;
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--surface-tint);
     border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
     font-family: var(--font-family-mono);
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     min-height: 30px;
   }
   .editor-breadcrumbs {
@@ -2967,10 +2974,10 @@
     align-items: center;
     gap: 4px;
     padding: 8px 14px;
-    background: rgba(0, 0, 0, 0.1);
+    background: var(--surface-tint);
     border-bottom: 1px solid var(--border);
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     overflow-x: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;

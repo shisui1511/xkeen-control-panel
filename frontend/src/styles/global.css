@@ -1353,6 +1353,7 @@ body.drawer-locked {
   display: flex;
   gap: var(--spacing-2, 8px);
   flex-wrap: wrap;
+  align-items: center;
 }
 
 /* ----- Breadcrumbs ----- */

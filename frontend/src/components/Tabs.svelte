@@ -22,11 +22,12 @@
   interface Props {
     items: TabItem[];
     value: string;
+    variant?: 'line' | 'pill';
     ariaLabel?: string;
     onchange?: (value: string) => void;
   }
 
-  let { items, value = $bindable(), ariaLabel, onchange }: Props = $props();
+  let { items, value = $bindable(), variant = 'line', ariaLabel, onchange }: Props = $props();
 
   function handleClick(item: TabItem) {
     const next = resolveTabValue(item, value);
@@ -37,7 +38,7 @@
 </script>
 
 {#if items.length > 0}
-  <div class="tabs" role="tablist" aria-label={ariaLabel}>
+  <div class="tabs" class:tabs-pill={variant === 'pill'} role="tablist" aria-label={ariaLabel}>
     {#each items as item (item.value)}
       <button
         type="button"
@@ -64,6 +65,18 @@
     flex-wrap: nowrap;
   }
 
+  .tabs-pill {
+    border-bottom: none;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 3px;
+    gap: 3px;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
   .tab-btn {
     flex-shrink: 0;
     background: transparent;
@@ -79,7 +92,8 @@
     margin-bottom: -1px;
     transition:
       color var(--transition-fast),
-      border-color var(--transition-fast);
+      border-color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .tab-btn:hover:not(:disabled) {
@@ -94,5 +108,27 @@
   .tab-btn.active {
     color: var(--accent);
     border-bottom-color: var(--accent);
+  }
+
+  .tabs-pill .tab-btn {
+    border-bottom: none;
+    margin-bottom: 0;
+    border-radius: var(--radius-sm);
+    padding: 4px 12px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    font-size: var(--font-size-xs);
+  }
+
+  .tabs-pill .tab-btn:hover:not(:disabled):not(.active) {
+    background: var(--hover);
+  }
+
+  .tabs-pill .tab-btn.active {
+    background: var(--accent);
+    color: var(--btn-primary-text);
+    border-bottom: none;
+    box-shadow: var(--shadow-sm);
   }
 </style>

@@ -366,7 +366,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    background: rgba(0, 0, 0, 0.15);
+    background: var(--bg-group-head-from);
   }
 
   .search-input-wrapper {
@@ -425,7 +425,7 @@
   }
 
   .editor-files {
-    border-bottom: 1px solid var(--border-light, rgba(255, 255, 255, 0.04));
+    border-bottom: 1px solid var(--border);
   }
 
   .editor-files-head {
@@ -436,11 +436,12 @@
     cursor: pointer;
     user-select: none;
     font-size: 12px;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint);
+    transition: background var(--transition-fast);
   }
 
   .editor-files-head:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--hover);
   }
 
   .group-ttl-wrap {
@@ -498,12 +499,12 @@
   }
 
   .file-row:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--hover);
     color: var(--fg-primary);
   }
 
   .file-row.active {
-    background: rgba(41, 194, 240, 0.12);
+    background: var(--accent-soft);
     color: var(--accent);
     font-weight: 600;
   }
@@ -581,7 +582,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    box-shadow: var(--shadow-md);
     padding: 4px;
     min-width: 170px;
     display: flex;
@@ -593,7 +594,7 @@
     font-size: 12px;
     color: var(--fg-dim);
     padding: 4px 8px;
-    border-bottom: 1px solid var(--border-light, rgba(255, 255, 255, 0.05));
+    border-bottom: 1px solid var(--border);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -615,7 +616,7 @@
   }
 
   .ctx-item:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--hover);
   }
 
   .ctx-danger {
@@ -628,7 +629,7 @@
 
   .ctx-divider {
     height: 1px;
-    background: var(--border-light, rgba(255, 255, 255, 0.05));
+    background: var(--border);
     margin: 3px 0;
   }
 </style>

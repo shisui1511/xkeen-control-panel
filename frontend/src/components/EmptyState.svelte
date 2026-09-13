@@ -8,6 +8,7 @@
     icon: IconComponent = undefined,
     ctaText = '',
     ctaLoading = false,
+    plain = false,
     oncta = undefined
   } = $props<{
     title: string;
@@ -15,11 +16,12 @@
     icon?: Component<any>;
     ctaText?: string;
     ctaLoading?: boolean;
+    plain?: boolean;
     oncta?: () => void;
   }>();
 </script>
 
-<div class="empty-state" role="status" aria-label={title}>
+<div class="empty-state" class:empty-state--plain={plain} role="status" aria-label={title}>
   {#if IconComponent}
     <div class="empty-state__icon" aria-hidden="true">
       <IconComponent size={42} />
@@ -46,6 +48,19 @@
     border-radius: var(--radius-lg);
     gap: 10px;
   }
+
+  .empty-state.empty-state--plain,
+  :global(.card) .empty-state,
+  :global(.editor-empty-card) .empty-state,
+  :global(.editor-main-card) .empty-state,
+  :global(.table-responsive) .empty-state {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 32px 16px;
+  }
+
   .empty-state__icon {
     width: 64px;
     height: 64px;
@@ -56,6 +71,7 @@
     background: var(--accent-soft);
     border: 1px solid var(--accent-line);
     margin-bottom: 8px;
+    box-shadow: 0 0 24px -4px var(--accent-soft);
   }
   .empty-state__title {
     font-size: var(--font-size-lg);

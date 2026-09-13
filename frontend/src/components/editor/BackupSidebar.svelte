@@ -173,7 +173,7 @@
   }
 
   .backup-item:hover {
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--hover);
     color: var(--fg-primary);
   }
 
@@ -209,7 +209,7 @@
 
   .diff-header {
     padding: 8px 14px;
-    background: rgba(255, 255, 255, 0.01);
+    background: var(--surface-tint);
     border-bottom: 1px solid var(--border);
     font-size: 12px;
     color: var(--fg-dim);

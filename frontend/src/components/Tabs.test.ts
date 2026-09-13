@@ -43,4 +43,13 @@ describe('Tabs', () => {
     expect(order.length).toBe(2);
     expect(body).toMatch(/class="tab-btn[^"]*\bactive\b[^"]*"[^>]*>\s*Same\s*<\/button>/);
   });
+
+  it('renders tabs-pill class when variant="pill"', () => {
+    const items = [
+      { value: 'x', label: 'X' },
+      { value: 'y', label: 'Y' }
+    ];
+    const { body } = render(Tabs, { props: { items, value: 'x', variant: 'pill' } });
+    expect(body).toContain('tabs-pill');
+  });
 });

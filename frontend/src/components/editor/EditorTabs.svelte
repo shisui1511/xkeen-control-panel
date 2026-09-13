@@ -92,7 +92,7 @@
     display: flex;
     align-items: center;
     padding: 0 6px 0 0;
-    background: rgba(255, 255, 255, 0.01);
+    background: transparent;
     color: var(--fg-dim);
     border-right: 1px solid var(--border);
     transition: all 0.15s ease;
@@ -114,12 +114,12 @@
   }
 
   .editor-tab:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--hover);
     color: var(--fg-primary);
   }
 
   .editor-tab.active {
-    background: var(--bg-page);
+    background: var(--bg-card);
     color: var(--fg-primary);
     font-weight: 600;
   }
@@ -163,7 +163,7 @@
   }
 
   .tab-close-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--fg-primary);
+    background: var(--hover);
+    color: var(--danger);
   }
 </style>
