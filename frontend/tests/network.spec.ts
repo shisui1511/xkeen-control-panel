@@ -95,6 +95,7 @@ test.describe('Network Tools E2E suite', () => {
     await expect(page.locator('h3:has-text("HTTP Test")')).toBeVisible();
     await expect(page.locator('h3:has-text("Proxy Test")')).toBeVisible();
     await expect(page.locator('h3:has-text("Port Checker")')).toBeVisible();
+    await expect(page.locator('.empty-state')).toBeVisible();
   });
 
   test('executes Proxy Test successfully and displays result', async ({ page }) => {
@@ -109,7 +110,9 @@ test.describe('Network Tools E2E suite', () => {
     await targetSelect.selectOption('https://www.google.com');
 
     // Trigger proxy delay test
-    const runBtn = page.locator('.nt-card:has(h3:has-text("Proxy Test")) button.btn-primary');
+    const runBtn = page
+      .locator('.nt-card:has(h3:has-text("Proxy Test")) button.btn-secondary')
+      .first();
     await expect(runBtn).toBeVisible();
     await runBtn.click();
 
@@ -136,7 +139,9 @@ test.describe('Network Tools E2E suite', () => {
     await expect(portInput).toHaveValue('443');
 
     // Run port checker
-    const runBtn = page.locator('.nt-card:has(h3:has-text("Port Checker")) button.btn-primary');
+    const runBtn = page
+      .locator('.nt-card:has(h3:has-text("Port Checker")) button.btn-secondary')
+      .first();
     await expect(runBtn).toBeVisible();
     await runBtn.click();
 
@@ -151,7 +156,10 @@ test.describe('Network Tools E2E suite', () => {
     // Form filler helper: Port Checker
     await page.locator('#port-host').fill('my.server.org');
     await page.locator('#port-number').fill('80');
-    await page.locator('.nt-card:has(h3:has-text("Port Checker")) button.btn-primary').click();
+    await page
+      .locator('.nt-card:has(h3:has-text("Port Checker")) button.btn-secondary')
+      .first()
+      .click();
 
     // Verify History card is visible
     const historyBlock = page.locator('.card:has(h3:has-text("Test History"))');

@@ -4,6 +4,9 @@
   import { t } from './i18n';
   import PageHeader from './PageHeader.svelte';
   import Icon from './lib/components/Icon.svelte';
+  import Select from './components/Select.svelte';
+  import EmptyState from './components/EmptyState.svelte';
+  import Button from './components/Button.svelte';
   import { showToast } from './stores';
   import { apiFetch } from './lib/api';
 
@@ -601,16 +604,18 @@
           />
         </div>
       {/if}
-      <div style="display:flex;gap:8px;margin-top:auto;">
-        <button
-          class="btn btn-primary"
-          style="flex:1;"
+      <div class="nt-actions" style="display:flex;gap:8px;margin-top:auto;">
+        <Button
+          variant="primary"
           onclick={() => runTool('ping')}
           disabled={loading || !pingHost}
+          loading={loading && activeTool === 'ping'}
+          title={$t('net.run')}
         >
           {loading && activeTool === 'ping' ? $t('net.running') : $t('net.run')}
-        </button>
+        </Button>
         <button
+          type="button"
           class="btn btn-secondary"
           onclick={() => toggleSettings('ping')}
           title={$t('nav.settings')}>⋯</button
@@ -653,16 +658,18 @@
           />
         </div>
       {/if}
-      <div style="display:flex;gap:8px;margin-top:auto;">
-        <button
-          class="btn btn-primary"
-          style="flex:1;"
+      <div class="nt-actions" style="display:flex;gap:8px;margin-top:auto;">
+        <Button
+          variant="secondary"
           onclick={() => runTool('traceroute')}
           disabled={loading || !tracerouteHost}
+          loading={loading && activeTool === 'traceroute'}
+          title={$t('net.run')}
         >
           {loading && activeTool === 'traceroute' ? $t('net.running') : $t('net.run')}
-        </button>
+        </Button>
         <button
+          type="button"
           class="btn btn-secondary"
           onclick={() => toggleSettings('traceroute')}
           title={$t('nav.settings')}>⋯</button
@@ -696,23 +703,23 @@
         <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
           <div style="margin-bottom: 8px;">
             <label for="dns-resolver" class="lbl">{$t('net.dns_resolver')}</label>
-            <select id="dns-resolver" class="input input-sm" bind:value={dnsResolver}>
+            <Select id="dns-resolver" class="input-sm" bind:value={dnsResolver}>
               <option value="system">{$t('net.resolver_system')}</option>
               <option value="mihomo">{$t('net.resolver_mihomo')}</option>
-            </select>
+            </Select>
           </div>
           <div style="margin-bottom: 8px;">
             <label for="dns-type" class="lbl">{$t('net.record_type')}</label>
-            <select id="dns-type" class="input input-sm" bind:value={recordType}>
+            <Select id="dns-type" class="input-sm" bind:value={recordType}>
               {#each recordTypes as type}
                 <option value={type}>{type}</option>
               {/each}
-            </select>
+            </Select>
           </div>
           <div>
             <button
               class="btn btn-secondary btn-sm"
-              style="width: 100%; font-size: 11.5px;"
+              style="width: 100%; font-size: 12px;"
               onclick={flushFakeIP}
               disabled={flushingFakeIP}
             >
@@ -721,16 +728,18 @@
           </div>
         </div>
       {/if}
-      <div style="display:flex;gap:8px;margin-top:auto;">
-        <button
-          class="btn btn-primary"
-          style="flex:1;"
+      <div class="nt-actions" style="display:flex;gap:8px;margin-top:auto;">
+        <Button
+          variant="secondary"
           onclick={() => runTool('dns')}
           disabled={loading || !dnsHost}
+          loading={loading && activeTool === 'dns'}
+          title={$t('net.run')}
         >
           {loading && activeTool === 'dns' ? $t('net.running') : $t('net.run')}
-        </button>
+        </Button>
         <button
+          type="button"
           class="btn btn-secondary"
           onclick={() => toggleSettings('dns')}
           title={$t('nav.settings')}>⋯</button
@@ -776,16 +785,18 @@
           />
         </div>
       {/if}
-      <div style="display:flex;gap:8px;margin-top:auto;">
-        <button
-          class="btn btn-primary"
-          style="flex:1;"
+      <div class="nt-actions" style="display:flex;gap:8px;margin-top:auto;">
+        <Button
+          variant="secondary"
           onclick={() => runTool('http')}
           disabled={loading || !url}
+          loading={loading && activeTool === 'http'}
+          title={$t('net.run')}
         >
           {loading && activeTool === 'http' ? $t('net.running') : $t('net.run')}
-        </button>
+        </Button>
         <button
+          type="button"
           class="btn btn-secondary"
           onclick={() => toggleSettings('http')}
           title={$t('nav.settings')}>⋯</button
@@ -807,11 +818,11 @@
         <label
           for="proxy-select"
           class="lbl"
-          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+          style="font-size: 12px; font-weight: 600; color: var(--fg-dim);"
         >
           {$t('net.proxy_select')}
         </label>
-        <select id="proxy-select" class="input" bind:value={selectedProxy} disabled={loading}>
+        <Select id="proxy-select" class="input" bind:value={selectedProxy} disabled={loading}>
           <option value="">-- {$t('net.proxy_select')} --</option>
           {#if mihomoGroups.length > 0}
             <optgroup label="Groups">
@@ -827,7 +838,7 @@
               {/each}
             </optgroup>
           {/if}
-        </select>
+        </Select>
       </div>
 
       <div
@@ -837,17 +848,17 @@
         <label
           for="proxy-target"
           class="lbl"
-          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+          style="font-size: 12px; font-weight: 600; color: var(--fg-dim);"
         >
           {$t('net.target_url')}
         </label>
-        <select id="proxy-target" class="input" bind:value={proxyTargetPreset} disabled={loading}>
+        <Select id="proxy-target" class="input" bind:value={proxyTargetPreset} disabled={loading}>
           <option value="https://www.google.com">Google</option>
           <option value="https://www.youtube.com">YouTube</option>
           <option value="https://chatgpt.com">ChatGPT</option>
           <option value="https://github.com">GitHub</option>
           <option value="custom">{$t('net.presets')}: {$t('net.custom_url')}</option>
-        </select>
+        </Select>
       </div>
 
       {#if proxyTargetPreset === 'custom'}
@@ -877,16 +888,18 @@
         </div>
       {/if}
 
-      <div style="display:flex;gap:8px;margin-top:auto;">
-        <button
-          class="btn btn-primary"
-          style="flex:1;"
+      <div class="nt-actions" style="display:flex;gap:8px;margin-top:auto;">
+        <Button
+          variant="secondary"
           onclick={() => runTool('proxy')}
           disabled={loading || !selectedProxy}
+          loading={loading && activeTool === 'proxy'}
+          title={$t('net.run')}
         >
           {loading && activeTool === 'proxy' ? $t('net.running') : $t('net.run')}
-        </button>
+        </Button>
         <button
+          type="button"
           class="btn btn-secondary"
           onclick={() => (showProxySettings = !showProxySettings)}
           title={$t('nav.settings')}
@@ -910,7 +923,7 @@
         <label
           for="port-host"
           class="lbl"
-          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+          style="font-size: 12px; font-weight: 600; color: var(--fg-dim);"
         >
           {$t('net.host_ip')}
         </label>
@@ -931,7 +944,7 @@
         <label
           for="port-number"
           class="lbl"
-          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+          style="font-size: 12px; font-weight: 600; color: var(--fg-dim);"
         >
           {$t('net.port')}
         </label>
@@ -954,7 +967,7 @@
           <button
             type="button"
             class="chip"
-            style="background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:2px 8px; font-size:11px; color:var(--fg-secondary); cursor:pointer; transition:all 0.15s ease;"
+            style="background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:2px 8px; font-size:12px; color:var(--fg-secondary); cursor:pointer; transition:all 0.15s ease;"
             onclick={() => (portNumber = p)}
             disabled={loading}
           >
@@ -986,16 +999,18 @@
         </div>
       {/if}
 
-      <div style="display:flex;gap:8px;margin-top:auto;">
-        <button
-          class="btn btn-primary"
-          style="flex:1;"
+      <div class="nt-actions" style="display:flex;gap:8px;margin-top:auto;">
+        <Button
+          variant="secondary"
           onclick={() => runTool('port')}
           disabled={loading || !portHost || portNumber === null}
+          loading={loading && activeTool === 'port'}
+          title={$t('net.run')}
         >
           {loading && activeTool === 'port' ? $t('net.running') : $t('net.run')}
-        </button>
+        </Button>
         <button
+          type="button"
           class="btn btn-secondary"
           onclick={() => (showPortSettings = !showPortSettings)}
           title={$t('nav.settings')}
@@ -1056,7 +1071,7 @@
       {#if historyList.length > 0}
         <button
           class="btn btn-secondary btn-sm"
-          style="padding: 2px 8px; font-size: 11px;"
+          style="padding: 2px 8px; font-size: 12px;"
           onclick={clearHistory}
         >
           {$t('console.clear')}
@@ -1065,9 +1080,7 @@
     </div>
 
     {#if historyList.length === 0}
-      <div style="color:var(--fg-dim); font-size:12.5px; text-align:center; padding:12px 0;">
-        {$t('net.no_history')}
-      </div>
+      <EmptyState title={$t('net.no_history')} description={$t('net.no_history_desc')} />
     {:else}
       <div style="display:flex; flex-direction:column; gap:8px;">
         {#each historyList as item}
@@ -1083,7 +1096,7 @@
                 class:badge-success={item.type === 'ping' ||
                   item.type === 'port' ||
                   item.type === 'proxy'}
-                style="font-size:11px; text-transform:uppercase; font-weight:600;"
+                style="font-size:12px; text-transform:uppercase; font-weight:600;"
               >
                 {item.type}
               </span>
@@ -1091,9 +1104,7 @@
                 {item.label}
               </span>
             </div>
-            <span
-              style="color:var(--fg-dim); font-size:11.5px; font-family:var(--font-family-mono);"
-            >
+            <span style="color:var(--fg-dim); font-size:12px; font-family:var(--font-family-mono);">
               {new Date(item.timestamp).toLocaleTimeString()}
             </span>
           </button>
@@ -1104,6 +1115,10 @@
 </div>
 
 <style>
+  .nt-actions :global(.btn:first-child) {
+    flex: 1;
+  }
+
   .nt-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -1140,10 +1155,9 @@
   }
 
   .extra-settings .lbl {
-    font-size: 11px;
+    font-size: 12px;
+    font-weight: 600;
     color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
   }
 
   .input-sm {
