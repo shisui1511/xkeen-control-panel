@@ -4688,7 +4688,7 @@
           class="conf-dropzone"
           class:dragging={isDraggingFile}
           role="region"
-          aria-label="Dropzone"
+          aria-label={$t('app.dropzone')}
           ondragover={(e) => {
             e.preventDefault();
             isDraggingFile = true;

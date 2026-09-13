@@ -772,8 +772,8 @@
             <button
               class="clear-search-btn"
               onclick={() => (filter = '')}
-              title="Clear search"
-              aria-label="Clear search"
+              title={$t('logs.clear_search')}
+              aria-label={$t('logs.clear_search')}
             >
               ×
             </button>

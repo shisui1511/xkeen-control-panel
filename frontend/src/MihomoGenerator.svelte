@@ -3817,7 +3817,7 @@
           class="conf-dropzone"
           class:dragging={isDraggingFile}
           role="region"
-          aria-label="Dropzone"
+          aria-label={$t('app.dropzone')}
           ondragover={(e) => {
             e.preventDefault();
             isDraggingFile = true;
@@ -3881,7 +3881,7 @@
       {/if}
     {:else if importStep === 2 && importNodes.length > 0}
       <div class="preview-section">
-        <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
+        <h3 class="preview-title" style="margin: 0 0 12px 0;">
           {$t('subscr.import_preview_title')}
         </h3>
         <div
@@ -4380,7 +4380,8 @@
     border-radius: 10px;
     text-transform: uppercase;
     flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-tint);
+    border: 1px solid var(--border-light);
     color: var(--fg-secondary);
   }
 
@@ -4901,13 +4902,12 @@
     font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
   }
 
   .preview-size-badge {
     font-size: var(--font-size-xs);
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-tint);
+    border: 1px solid var(--border-light);
     color: var(--fg-secondary);
     padding: 1px 6px;
     border-radius: 10px;
