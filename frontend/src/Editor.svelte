@@ -2673,6 +2673,7 @@
   .templates-body-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    grid-template-rows: minmax(0, 1fr);
     gap: 0;
     flex: 1;
     min-height: 0;
@@ -2683,6 +2684,7 @@
   .templates-col-list {
     display: flex;
     flex-direction: column;
+    min-height: 0;
     border-right: 1px solid var(--border);
     overflow: hidden;
   }
@@ -2697,7 +2699,8 @@
   }
 
   .templates-col-preview {
-    background: var(--bg-deep);
+    background: var(--code-bg);
+    min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -2709,7 +2712,7 @@
     font-family: var(--font-family-mono);
     font-size: 14px;
     line-height: 1.5;
-    color: var(--fg-secondary);
+    color: var(--code-fg);
     overflow-y: auto;
     overflow-x: auto;
     white-space: pre;
