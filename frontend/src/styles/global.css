@@ -1386,7 +1386,7 @@ body.drawer-locked {
 .page-header-actions {
   display: flex;
   gap: 0.6rem;
-  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 /* ----- Shared page-head pattern (Connections, Rules, Proxies, etc.) ----- */
