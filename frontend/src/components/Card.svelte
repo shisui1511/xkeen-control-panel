@@ -35,7 +35,7 @@
   .card {
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 60%), var(--bg-card);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--line-soft);
     border-radius: var(--radius-lg);
     padding: var(--card-pad);
     box-shadow: var(--shadow);
