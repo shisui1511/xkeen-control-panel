@@ -2255,7 +2255,7 @@
             {$t('mihomo.h1_sub')}
           </p>
         </div>
-        <div class="ph-actions">
+        <div class="constructor-header-actions">
           <Button
             type="button"
             variant="secondary"
@@ -2317,7 +2317,7 @@
           <span style="color: var(--fg-secondary);">{$t('editor.title')} › </span>
           <strong>{$t('mihomo.breadcrumb_generator')}</strong>
         </div>
-        <div class="ph-actions">
+        <div class="constructor-header-actions">
           <Button
             type="button"
             variant="secondary"
@@ -4139,6 +4139,12 @@
 
   .embedded-title-tag {
     font-size: 14px;
+  }
+
+  .constructor-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
   }
 
   .safe-merge-card {

@@ -642,48 +642,46 @@
     ]}
     {onSwitchTab}
   >
-    <div class="ph-actions">
-      <span
-        class="badge-live-indicator"
-        class:is-live={connected && !isPaused}
-        class:is-paused={isPaused}
-        class:is-offline={!connected}
-      >
-        <span class="live-dot"></span>
-        {#if !connected}
-          {$t('traffic.offline_badge')}
-        {:else if isPaused}
-          {$t('traffic.paused_badge')}
-        {:else}
-          {$t('traffic.live_badge')}
-        {/if}
-      </span>
+    <span
+      class="badge-live-indicator"
+      class:is-live={connected && !isPaused}
+      class:is-paused={isPaused}
+      class:is-offline={!connected}
+    >
+      <span class="live-dot"></span>
+      {#if !connected}
+        {$t('traffic.offline_badge')}
+      {:else if isPaused}
+        {$t('traffic.paused_badge')}
+      {:else}
+        {$t('traffic.live_badge')}
+      {/if}
+    </span>
 
-      <button
-        type="button"
-        class="btn btn-secondary btn-sm"
-        class:btn-active={isPaused}
-        onclick={togglePause}
-        aria-label={isPaused ? $t('traffic.resume_action') : $t('traffic.pause_action')}
-      >
-        {#if isPaused}
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-            <polygon points="5 3 19 12 5 21 5 3" />
-          </svg>
-          {$t('traffic.resume_action')}
-        {:else}
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-            <rect x="6" y="4" width="4" height="16" />
-            <rect x="14" y="4" width="4" height="16" />
-          </svg>
-          {$t('traffic.pause_action')}
-        {/if}
-      </button>
+    <button
+      type="button"
+      class="btn btn-secondary btn-sm"
+      class:btn-active={isPaused}
+      onclick={togglePause}
+      aria-label={isPaused ? $t('traffic.resume_action') : $t('traffic.pause_action')}
+    >
+      {#if isPaused}
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <polygon points="5 3 19 12 5 21 5 3" />
+        </svg>
+        {$t('traffic.resume_action')}
+      {:else}
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <rect x="6" y="4" width="4" height="16" />
+          <rect x="14" y="4" width="4" height="16" />
+        </svg>
+        {$t('traffic.pause_action')}
+      {/if}
+    </button>
 
-      <button type="button" class="btn btn-secondary btn-sm btn-reset" onclick={resetStatistics}>
-        {$t('traffic.reset_stats')}
-      </button>
-    </div>
+    <button type="button" class="btn btn-secondary btn-sm btn-reset" onclick={resetStatistics}>
+      {$t('traffic.reset_stats')}
+    </button>
   </PageHeader>
 
   <!-- Standard Order KPI Grid: 1. Download (Left), 2. Upload (Center), 3. Connections (Right) -->

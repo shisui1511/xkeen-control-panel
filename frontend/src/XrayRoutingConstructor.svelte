@@ -2456,7 +2456,7 @@
             {$t('xray.presets_sub')}
           </p>
         </div>
-        <div class="ph-actions">
+        <div class="constructor-header-actions">
           <Button
             type="button"
             variant="secondary"
@@ -2516,7 +2516,7 @@
         <div class="embedded-title-tag">
           <strong>{$t('xray.presets_h1')}</strong>
         </div>
-        <div class="ph-actions">
+        <div class="constructor-header-actions">
           <Button
             type="button"
             variant="secondary"
@@ -4942,7 +4942,7 @@
     color: var(--fg-primary);
   }
 
-  .ph-actions {
+  .constructor-header-actions {
     display: flex;
     gap: var(--spacing-2);
   }

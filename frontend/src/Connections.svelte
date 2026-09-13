@@ -543,50 +543,48 @@
               ? $t('conn.ws_reconnecting')
               : $t('conn.ws_offline')}
       />
-      <div class="ph-actions">
-        <button
-          class="btn btn-secondary"
-          onclick={() => (paused = !paused)}
-          title={paused ? $t('conn.resume') : $t('conn.pause')}
-        >
-          {#if paused}
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-              ><polygon points="5 3 19 12 5 21 5 3" /></svg
-            >
-            <span>{$t('conn.resume')}</span>
-          {:else}
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-              ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
-                x="14"
-                y="5"
-                width="4"
-                height="14"
-                rx="1"
-              /></svg
-            >
-            <span>{$t('conn.pause')}</span>
-          {/if}
-        </button>
-        <button
-          class="btn btn-danger-soft"
-          onclick={closeAllConnections}
-          disabled={connections.length === 0}
-          title={$t('conn.close_all')}
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            ><polyline points="3 6 5 6 21 6" /><path
-              d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
+      <button
+        class="btn btn-secondary"
+        onclick={() => (paused = !paused)}
+        title={paused ? $t('conn.resume') : $t('conn.pause')}
+      >
+        {#if paused}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
+            ><polygon points="5 3 19 12 5 21 5 3" /></svg
+          >
+          <span>{$t('conn.resume')}</span>
+        {:else}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
+            ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
+              x="14"
+              y="5"
+              width="4"
+              height="14"
+              rx="1"
             /></svg
           >
-          <span>{$t('conn.close_all')}</span>
-        </button>
-      </div>
+          <span>{$t('conn.pause')}</span>
+        {/if}
+      </button>
+      <button
+        class="btn btn-danger-soft"
+        onclick={closeAllConnections}
+        disabled={connections.length === 0}
+        title={$t('conn.close_all')}
+      >
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          ><polyline points="3 6 5 6 21 6" /><path
+            d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
+          /></svg
+        >
+        <span>{$t('conn.close_all')}</span>
+      </button>
     {/snippet}
   </PageHeader>
 
@@ -1205,12 +1203,6 @@
 {/if}
 
 <style>
-  .ph-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
   /* Monolithic Smart Toolbar (CONN-02) */
   .conn-toolbar {
     display: flex;
