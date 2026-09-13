@@ -3646,6 +3646,8 @@
           {#if validationError}
             <div
               class="validation-error-block"
+              role="alert"
+              aria-live="assertive"
               style="margin: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
             >
               <div style="font-weight: bold; margin-bottom: 6px;">
@@ -3761,7 +3763,12 @@
 <Modal isOpen={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
   <div style="display: flex; flex-direction: column; gap: 16px;">
     {#if importErrorMsg}
-      <div class="error-msg" style="color: var(--danger); margin-bottom: 12px; font-size: 13px;">
+      <div
+        class="error-msg"
+        id="mihomo-import-error"
+        role="alert"
+        style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
+      >
         {importErrorMsg}
       </div>
     {/if}
@@ -3806,6 +3813,8 @@
           <textarea
             id="import-link"
             class="input textarea-link"
+            aria-invalid={!!importErrorMsg}
+            aria-describedby={importErrorMsg ? 'mihomo-import-error' : undefined}
             bind:value={importLink}
             placeholder={$t('subscr.import_link_placeholder')}
             rows="4"

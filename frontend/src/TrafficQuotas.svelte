@@ -498,7 +498,15 @@
           <div class="stat-label">{$t('trafficquotas.total')}</div>
           <div class="stat-value">{formatBytes(stats.total)}</div>
           {#if sumQuotaLimit > 0}
-            <div class="stat-bar" style="margin-top: 8px;">
+            <div
+              class="stat-bar"
+              style="margin-top: 8px;"
+              role="progressbar"
+              aria-valuenow={Math.round(totalPct)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="{$t('trafficquotas.of_limit')}: {totalPct.toFixed(1)}%"
+            >
               <div
                 class="stat-bar-fill"
                 class:warning={totalPct >= 80 && totalPct < 100}
@@ -587,7 +595,15 @@
                 </td>
                 <td class="mono">
                   {formatBytes(q.current_bytes)}
-                  <div class="stat-bar" style="width: 100px; margin-top: 4px;">
+                  <div
+                    class="stat-bar"
+                    style="width: 100px; margin-top: 4px;"
+                    role="progressbar"
+                    aria-valuenow={Math.round(percent(q))}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="{q.name || q.client_ip}: {Math.round(percent(q))}%"
+                  >
                     <div
                       class="stat-bar-fill"
                       class:warning={percent(q) >= q.alert_threshold && percent(q) < 100}

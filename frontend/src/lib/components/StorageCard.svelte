@@ -69,6 +69,7 @@
             aria-valuenow={usedPercent}
             aria-valuemin="0"
             aria-valuemax="100"
+            aria-label="{$t('settings.storage')}: {usedPercent}%"
           ></div>
         </div>
 
