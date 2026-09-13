@@ -14,6 +14,10 @@
   import FloatingProgress from './components/FloatingProgress.svelte';
   import LatencyHistoryPopover from './components/LatencyHistoryPopover.svelte';
   import PingTargetQuickMenu from './components/PingTargetQuickMenu.svelte';
+  import PageHeader from './PageHeader.svelte';
+  import Tabs from './components/Tabs.svelte';
+  import SegmentedControl from './components/SegmentedControl.svelte';
+  import Button from './components/Button.svelte';
   import {
     BatchLatencyTester,
     type BatchProgressState,
@@ -59,6 +63,12 @@
   import SubscriptionList from './components/subscriptions/SubscriptionList.svelte';
   import SubscriptionFormModal from './components/subscriptions/SubscriptionFormModal.svelte';
   import NodeImporter from './components/subscriptions/NodeImporter.svelte';
+
+  interface Props {
+    onSwitchTab?: (tab: string) => void;
+  }
+
+  let { onSwitchTab = () => {} }: Props = $props();
 
   interface Proxy {
     name: string;
@@ -1753,139 +1763,106 @@
 </script>
 
 <div class="container">
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_proxy_subs')} <span class="crumb-sep">›</span>
-        {$t('proxies.title')}
-      </div>
-      <h1>{$t('proxies.title')}</h1>
-      <p class="sub">{$t('proxies.subtitle')}</p>
-    </div>
+  <PageHeader
+    title={$t('proxies.title')}
+    subtitle={$t('proxies.subtitle')}
+    breadcrumbs={[{ label: $t('nav.group_proxy_subs') }, { label: $t('proxies.title') }]}
+    {onSwitchTab}
+  >
     {#if activeTab === 'groups'}
-      <div class="ph-actions">
-        <input
-          class="group-search"
-          type="search"
-          bind:value={filterQuery}
-          oninput={handleSearchInput}
-          placeholder={$t('proxies.filter_placeholder')}
-          aria-label={$t('proxies.filter_placeholder')}
-        />
-        <div class="view-toggle" role="group" aria-label={$t('proxies.view_mode_label')}>
-          <button
-            type="button"
-            class="view-toggle-btn"
-            data-view="grid"
-            aria-pressed={viewMode === 'grid'}
-            onclick={() => setViewMode('grid')}
-          >
-            <ViewGrid size={14} />
-            <span>{$t('proxies.view_mode_grid')}</span>
-          </button>
-          <button
-            type="button"
-            class="view-toggle-btn"
-            data-view="list"
-            aria-pressed={viewMode === 'list'}
-            onclick={() => setViewMode('list')}
-          >
-            <ViewList size={14} />
-            <span>{$t('proxies.view_mode_list')}</span>
-          </button>
-        </div>
-        <button class="btn btn-secondary" onclick={expandAll} title={$t('proxies.expand_all')}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right: 6px;"
-          >
-            <polyline points="6 9 12 15 18 9" />
-            <polyline points="6 4 12 10 18 4" />
-          </svg>
-          {$t('proxies.expand_all')}
-        </button>
-        <button class="btn btn-secondary" onclick={collapseAll} title={$t('proxies.collapse_all')}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right: 6px;"
-          >
-            <polyline points="18 15 12 9 6 15" />
-            <polyline points="18 20 12 14 6 20" />
-          </svg>
-          {$t('proxies.collapse_all')}
-        </button>
-        <button class="btn btn-secondary" onclick={() => fetchProxies()} disabled={loading}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-          >
-          {loading ? $t('app.loading') : $t('app.refresh')}
-        </button>
-        <PingTargetQuickMenu />
-      </div>
+      <input
+        class="group-search"
+        type="search"
+        bind:value={filterQuery}
+        oninput={handleSearchInput}
+        placeholder={$t('proxies.filter_placeholder')}
+        aria-label={$t('proxies.filter_placeholder')}
+      />
+      <SegmentedControl
+        value={viewMode}
+        ariaLabel={$t('proxies.view_mode_label')}
+        items={[
+          { value: 'grid', label: $t('proxies.view_mode_grid'), icon: ViewGrid },
+          { value: 'list', label: $t('proxies.view_mode_list'), icon: ViewList }
+        ]}
+        onchange={(mode) => setViewMode(mode as ProxiesViewMode)}
+      />
+      <Button variant="secondary" onclick={expandAll} title={$t('proxies.expand_all')}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"
+        >
+          <polyline points="6 9 12 15 18 9" />
+          <polyline points="6 4 12 10 18 4" />
+        </svg>
+        {$t('proxies.expand_all')}
+      </Button>
+      <Button variant="secondary" onclick={collapseAll} title={$t('proxies.collapse_all')}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"
+        >
+          <polyline points="18 15 12 9 6 15" />
+          <polyline points="18 20 12 14 6 20" />
+        </svg>
+        {$t('proxies.collapse_all')}
+      </Button>
+      <Button variant="secondary" onclick={() => fetchProxies()} disabled={loading}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+        >
+        {loading ? $t('app.loading') : $t('app.refresh')}
+      </Button>
+      <PingTargetQuickMenu />
     {:else}
-      <div class="ph-actions">
-        <button class="btn btn-secondary" onclick={refreshAll} disabled={loading}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-          >
-          {$t('subscr.refresh_all')}
-        </button>
+      <Button variant="secondary" onclick={refreshAll} disabled={loading}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+        >
+        {$t('subscr.refresh_all')}
+      </Button>
 
-        <button class="btn btn-primary" onclick={openAddModal}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
-          >
-          {$t('subscr.add')}
-        </button>
-      </div>
+      <Button variant="primary" onclick={openAddModal}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"><path d="M12 5v14M5 12h14" /></svg
+        >
+        {$t('subscr.add')}
+      </Button>
     {/if}
-  </div>
+  </PageHeader>
 
-  <!-- Вкладки (Tabs) -->
-  <div class="tabs-container">
-    <button
-      class="tab-btn"
-      class:active={activeTab === 'groups'}
-      onclick={() => (activeTab = 'groups')}
-    >
-      {$t('proxies.tab_groups')}
-    </button>
-    <button
-      class="tab-btn"
-      class:active={activeTab === 'providers'}
-      onclick={() => (activeTab = 'providers')}
-    >
-      {$t('proxies.tab_providers')}
-    </button>
-  </div>
+  <Tabs
+    bind:value={activeTab}
+    items={[
+      { value: 'groups', label: $t('proxies.tab_groups') },
+      { value: 'providers', label: $t('proxies.tab_providers') }
+    ]}
+  />
 
   {#if activeTab === 'groups'}
     {#if $capabilities !== null && !$capabilities.mihomo.reachable}
@@ -2663,33 +2640,6 @@
 {/if}
 
 <style>
-  /* Tabs styles */
-  .tabs-container {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 0;
-  }
-  .tab-btn {
-    background: transparent;
-    border: none;
-    padding: 10px 16px;
-    color: var(--fg-dim);
-    font-weight: 500;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    transition: all 0.2s;
-    font-size: 14px;
-  }
-  .tab-btn:hover {
-    color: var(--fg-primary);
-  }
-  .tab-btn.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-  }
-
   /* Confdir warning styles */
   .confdir-warning {
     display: flex;
@@ -2735,7 +2685,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     padding: 1px 6px;
     border-radius: 99px;
     background: var(--bg-elevated);
@@ -2787,7 +2737,7 @@
   }
   .gc-static-out {
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
   .gc-pin-btn {
@@ -2910,7 +2860,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     padding: 0;
     color: var(--fg-dim);
     font-family: var(--font-family-sans);
@@ -2926,7 +2876,7 @@
     padding: 3px 10px;
     border-radius: 99px;
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 800;
     background: none;
     border: none;
@@ -2990,7 +2940,7 @@
   }
   .gc-active-label {
     color: var(--fg-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
   .gc-arrow {
     color: var(--fg-faint);
@@ -3005,7 +2955,7 @@
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border);
     color: var(--fg-primary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     transition: all 0.2s;
     text-align: left;
@@ -3158,7 +3108,7 @@
   }
   .proxy-card .p-type {
     color: var(--fg-dim);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
   }
   .proxy-card .p-footer {
@@ -3212,7 +3162,7 @@
     gap: 6px;
     padding: 3px 10px;
     border-radius: var(--radius-full, 9999px);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--border);
@@ -3231,7 +3181,7 @@
     font-weight: 600;
   }
   .filter-chip .filter-count {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     opacity: 0.7;
   }
 
@@ -3370,44 +3320,6 @@
     outline-offset: 1px;
   }
 
-  /* View toggle (D-17) */
-  .view-toggle {
-    display: inline-flex;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-  }
-  .view-toggle-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 0 10px;
-    height: var(--btn-h, 32px);
-    background: none;
-    border: none;
-    color: var(--fg-dim);
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .view-toggle-btn + .view-toggle-btn {
-    border-left: 1px solid var(--border);
-  }
-  .view-toggle-btn:hover {
-    background: var(--hover);
-    color: var(--fg-primary);
-  }
-  .view-toggle-btn[aria-pressed='true'] {
-    background: var(--accent-soft, var(--hover));
-    color: var(--accent);
-    font-weight: 600;
-  }
-  .view-toggle-btn:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-  }
-
   /* Group List View (D-18, D-19) */
   .group-grid.group-list {
     display: flex;
@@ -3501,7 +3413,7 @@
     border-color: var(--accent);
   }
   .rendered-nodes-hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-muted, var(--fg-dim));
   }
 
@@ -3518,45 +3430,11 @@
     }
   }
 
-  @media (max-width: 480px) {
-    .view-toggle-btn {
-      min-width: 44px;
-      justify-content: center;
-      padding: 0 6px;
-    }
-    .view-toggle-btn span {
-      display: none;
-    }
-  }
-
   /* Mobile: proxy cards stack, observatory stats handled globally at 768px */
   @media (max-width: 640px) {
-    .ph-actions {
-      display: flex;
+    :global(.page-header-actions) {
       flex-wrap: wrap;
-      gap: 8px;
       width: 100%;
-      margin-top: 10px;
-    }
-
-    .ph-actions .group-search {
-      order: -1;
-      flex: 1 1 100%;
-      width: 100%;
-      min-width: 100%;
-      font-size: 13px;
-      padding: 8px 12px;
-    }
-
-    .ph-actions .btn {
-      flex: 1 1 calc(50% - 4px);
-      justify-content: center;
-      padding: 8px 10px;
-      font-size: 12px;
-      min-height: 40px;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      overflow: hidden;
     }
 
     .group-grid {
@@ -3586,7 +3464,7 @@
       font-size: 12px;
     }
     .lat {
-      font-size: 11px;
+      font-size: var(--font-size-xs);
       padding: 2px 5px;
     }
     .group-search {
