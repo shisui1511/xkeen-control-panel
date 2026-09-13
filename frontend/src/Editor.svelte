@@ -21,6 +21,8 @@
   import BackupSidebar from './components/editor/BackupSidebar.svelte';
   import Modal from './components/Modal.svelte';
   import PageHeader from './PageHeader.svelte';
+  import Tabs, { type TabItem } from './components/Tabs.svelte';
+  import Select from './components/Select.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import EditorKernelWidget from './components/status/EditorKernelWidget.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
@@ -57,6 +59,11 @@
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
   let ru = $derived($currentLang === 'ru');
+
+  const editorModeTabItems = $derived<TabItem[]>([
+    { value: 'files', label: $t('editor.tab_files') },
+    { value: 'constructor', label: $t('editor.tab_constructor') }
+  ]);
 
   let editorView = $state<EditorView | null>(null);
 
@@ -151,6 +158,11 @@
   let templatePreview = $state('');
 
   let filteredTemplates = $derived(templates.filter((t) => t.type === templateTab));
+
+  const templateTabItems = $derived<TabItem[]>([
+    { value: 'xray', label: $t('editor.templates_tab_xray') },
+    { value: 'mihomo', label: $t('editor.templates_tab_mihomo') }
+  ]);
 
   // Generator state
   let showGeneratorModal = $state(false);
@@ -1497,24 +1509,12 @@
     {onSwitchTab}
     hideHome={true}
   >
-    <div class="editor-mode-switcher">
-      <button
-        class="mode-pill-btn tab-btn"
-        class:active={activeTab === 'files'}
-        onclick={() => setTab('files')}
-      >
-        <Icon name="editor" size={13} />
-        {$t('editor.tab_files')}
-      </button>
-      <button
-        class="mode-pill-btn tab-btn"
-        class:active={activeTab === 'constructor'}
-        onclick={() => setTab('constructor')}
-      >
-        <Icon name="settings" size={13} />
-        {$t('editor.tab_constructor')}
-      </button>
-    </div>
+    <Tabs
+      items={editorModeTabItems}
+      value={activeTab}
+      onchange={(val) => setTab(val as 'files' | 'constructor')}
+      ariaLabel={$t('editor.h1')}
+    />
 
     {#if activeTab === 'files'}
       <div class="eph-right">
@@ -2031,34 +2031,18 @@
     <!-- Left column: tabs + list -->
     <div class="templates-col-list">
       <div class="templates-kernel-tabs">
-        <button
-          class="tab-btn"
-          class:active={templateTab === 'xray'}
-          aria-pressed={templateTab === 'xray'}
-          onclick={() => {
-            templateTab = 'xray';
+        <Tabs
+          items={templateTabItems}
+          value={templateTab}
+          ariaLabel={$t('editor.templates')}
+          onchange={(val) => {
+            templateTab = val as 'xray' | 'mihomo';
             selectedTemplate = null;
             templatePreview = '';
             const first = filteredTemplates[0];
             if (first) loadTemplatePreview(first);
           }}
-        >
-          {$t('editor.templates_tab_xray')}
-        </button>
-        <button
-          class="tab-btn"
-          class:active={templateTab === 'mihomo'}
-          aria-pressed={templateTab === 'mihomo'}
-          onclick={() => {
-            templateTab = 'mihomo';
-            selectedTemplate = null;
-            templatePreview = '';
-            const first = filteredTemplates[0];
-            if (first) loadTemplatePreview(first);
-          }}
-        >
-          {$t('editor.templates_tab_mihomo')}
-        </button>
+        />
       </div>
 
       <div class="template-list">
@@ -2125,10 +2109,10 @@
       style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
       >{$t('editor.protocol')}</label
     >
-    <select id="gen-protocol" bind:value={genProtocol} class="input" style="width: 100%;">
+    <Select id="gen-protocol" class="input" bind:value={genProtocol}>
       <option value="vless">VLESS</option>
       <option value="shadowsocks">Shadowsocks</option>
-    </select>
+    </Select>
   </div>
 
   <div
@@ -2147,7 +2131,6 @@
         bind:value={genAddress}
         placeholder="example.com"
         class="input"
-        style="width: 100%;"
       />
     </div>
     <div class="form-group">
@@ -2156,7 +2139,7 @@
         style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
         >{$t('editor.port')}</label
       >
-      <input id="gen-port" type="number" bind:value={genPort} class="input" style="width: 100%;" />
+      <input id="gen-port" type="number" bind:value={genPort} class="input" />
     </div>
   </div>
 
@@ -2192,7 +2175,6 @@
         bind:value={genSNI}
         placeholder="sni.example.com"
         class="input"
-        style="width: 100%;"
       />
     </div>
 
@@ -2206,11 +2188,11 @@
           style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
           >Security</label
         >
-        <select id="gen-security" bind:value={genSecurity} class="input" style="width: 100%;">
+        <Select id="gen-security" class="input" bind:value={genSecurity}>
           <option value="reality">Reality</option>
           <option value="tls">TLS</option>
           <option value="none">None</option>
-        </select>
+        </Select>
       </div>
       {#if genSecurity === 'reality'}
         <div class="form-group">
@@ -2225,7 +2207,6 @@
             bind:value={genShortId}
             placeholder="hex string"
             class="input"
-            style="width: 100%;"
           />
         </div>
       {/if}
@@ -2317,40 +2298,9 @@
     gap: 8px;
   }
 
-  .editor-mode-switcher {
-    display: inline-flex;
-    align-items: center;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 2px;
-    gap: 2px;
-  }
-
-  .mode-pill-btn {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11.5px;
-    font-weight: 600;
-    padding: 3px 10px;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    color: var(--fg-secondary);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .mode-pill-btn:hover {
-    color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .mode-pill-btn.active {
-    background: var(--accent);
-    color: var(--btn-primary-text);
-    font-weight: 700;
+  :global(.page-header-actions .tabs) {
+    margin-bottom: 0;
+    border-bottom: none;
   }
 
   /* Уточнение глобального .badge — все цвета берутся из
@@ -2708,17 +2658,9 @@
     overflow: hidden;
   }
 
-  .templates-kernel-tabs {
-    display: flex;
-    gap: 4px;
-    padding: 12px 16px 8px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  .templates-kernel-tabs .tab-btn {
-    padding: 6px 12px;
-    font-size: 14px;
+  .templates-col-list :global(.tabs) {
+    margin-bottom: 0;
+    padding: 0 12px;
   }
 
   .templates-col-list .template-list {
