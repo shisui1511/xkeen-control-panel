@@ -642,6 +642,8 @@
                 <button
                   class="btn btn-secondary action-btn-dots"
                   aria-label={$t('smartproxy.actions') || 'Actions'}
+                  aria-haspopup="menu"
+                  aria-expanded={activeDropdownId === p.id}
                   onclick={() => toggleDropdown(p.id)}>⋯</button
                 >
                 {#if activeDropdownId === p.id}

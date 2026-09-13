@@ -672,6 +672,8 @@
                       <button
                         class="btn btn-secondary action-btn-dots"
                         aria-label={$t('app.actions') || 'Actions'}
+                        aria-haspopup="menu"
+                        aria-expanded={activeDropdownId === q.id}
                         onclick={(e) => toggleDropdown(q.id, e)}>⋯</button
                       >
                       {#if activeDropdownId === q.id}
