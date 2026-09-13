@@ -38,10 +38,12 @@ describe('Select', () => {
       }
     });
 
+    // Svelte SSR appends its own scope class (e.g. svelte-xxxxx) to both
+    // elements, so we assert on membership rather than exact array equality.
     const wrapperMatch = body.match(/<span class="([^"]*)"/);
     expect(wrapperMatch).not.toBeNull();
     const wrapperClasses = (wrapperMatch?.[1] ?? '').split(/\s+/);
-    expect(wrapperClasses).toEqual(['xcp-select']);
+    expect(wrapperClasses).toContain('xcp-select');
     expect(wrapperClasses).not.toContain('input');
 
     expect(body).toMatch(/<select[^>]*class="input\b/);
@@ -58,7 +60,8 @@ describe('Select', () => {
     const wrapperMatch = body.match(/<span class="([^"]*)"/);
     expect(wrapperMatch).not.toBeNull();
     const wrapperClasses = (wrapperMatch?.[1] ?? '').split(/\s+/);
-    expect(wrapperClasses).toEqual(['xcp-select', 'form-row-select']);
+    expect(wrapperClasses).toContain('xcp-select');
+    expect(wrapperClasses).toContain('form-row-select');
     expect(wrapperClasses).not.toContain('input');
 
     expect(body).toMatch(/<select[^>]*class="input\b/);
