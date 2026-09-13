@@ -381,9 +381,9 @@
     gap: 4px;
     padding: 2px 7px;
     border-radius: 4px;
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    color: var(--accent);
+    color: var(--accent-text, var(--accent));
     font-size: var(--font-size-xs);
     font-weight: 700;
     transition: all var(--transition-fast);

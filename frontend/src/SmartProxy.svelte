@@ -629,13 +629,19 @@
 
             <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
               <label class="toggle-switch">
-                <input type="checkbox" checked={p.enabled} onchange={() => toggleEnabled(p)} />
+                <input
+                  type="checkbox"
+                  aria-label={$t('smartproxy.profile_active')}
+                  checked={p.enabled}
+                  onchange={() => toggleEnabled(p)}
+                />
                 <span class="toggle-slider"></span>
               </label>
 
               <div class="dropdown-container">
                 <button
                   class="btn btn-secondary action-btn-dots"
+                  aria-label={$t('smartproxy.actions') || 'Actions'}
                   onclick={() => toggleDropdown(p.id)}>⋯</button
                 >
                 {#if activeDropdownId === p.id}
@@ -755,7 +761,12 @@
 
       <div class="form-group-checkbox" style="margin-top: 10px;">
         <label class="toggle-switch">
-          <input type="checkbox" id="sp-enabled" bind:checked={formEnabled} />
+          <input
+            type="checkbox"
+            id="sp-enabled"
+            aria-label={$t('smartproxy.profile_active')}
+            bind:checked={formEnabled}
+          />
           <span class="toggle-slider"></span>
         </label>
         <label for="sp-enabled" class="checkbox-label">

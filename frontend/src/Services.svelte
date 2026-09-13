@@ -1294,7 +1294,7 @@
   .hero-subtitle {
     margin: 2px 0 0;
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
   }
 
   /* Radio Grid for Kernel Selection (SRV-02) */
@@ -1390,7 +1390,7 @@
 
   .radio-desc {
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     margin-top: 2px;
     font-family: var(--font-family-mono);
   }
@@ -1415,7 +1415,7 @@
   .meta-lbl {
     font-size: 12px;
     font-weight: 500;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
   }
 
   .meta-val {
@@ -1438,7 +1438,7 @@
   }
 
   .btn-danger-soft {
-    background: rgba(244, 112, 127, 0.15);
+    background: rgba(244, 112, 127, 0.08);
     color: var(--danger);
     border: 1px solid rgba(244, 112, 127, 0.3);
   }
@@ -1517,7 +1517,7 @@
 
   .update-version {
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     margin-top: 2px;
     display: flex;
     align-items: center;
@@ -1631,7 +1631,7 @@
 
   .entware-desc {
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     margin-top: 2px;
   }
 

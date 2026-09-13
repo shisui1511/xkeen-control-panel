@@ -56,7 +56,7 @@
     {name}
     {disabled}
     {title}
-    aria-label={ariaLabel}
+    aria-label={ariaLabel || title || undefined}
     data-testid={testId}
     bind:value
     {onchange}

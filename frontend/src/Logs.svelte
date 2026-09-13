@@ -1085,7 +1085,7 @@
   }
 
   .ctrl-label {
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     font-weight: 600;
   }
 
@@ -1160,7 +1160,7 @@
     padding: 3px 8px;
     font-size: 12px;
     font-weight: 600;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     background: transparent;
     border: none;
     border-radius: 3px;
@@ -1391,12 +1391,13 @@
   .empty-title {
     font-size: 14px;
     font-weight: 600;
-    color: var(--fg-secondary);
+    color: var(--fg-terminal);
   }
 
   .empty-desc {
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-terminal);
+    opacity: 0.75;
   }
 
   /* Floating Pause Banner */
@@ -1438,7 +1439,7 @@
     gap: 16px;
     padding: 2px 4px;
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
   }
 
   .footer-stat {

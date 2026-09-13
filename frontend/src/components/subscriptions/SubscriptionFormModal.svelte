@@ -352,6 +352,7 @@
             <input
               type="checkbox"
               id="sockopt-fast-open"
+              aria-label={$t('subscr.sockopt.tcp_fast_open')}
               data-testid="sockopt-fast-open"
               bind:checked={formSockoptFastOpen}
             />
@@ -367,6 +368,7 @@
             <input
               type="checkbox"
               id="sockopt-mptcp"
+              aria-label={$t('subscr.sockopt.tcp_mptcp')}
               data-testid="sockopt-mptcp"
               bind:checked={formSockoptMptcp}
             />
@@ -381,7 +383,12 @@
 
     <div class="form-group-checkbox">
       <label class="toggle-switch">
-        <input type="checkbox" id="enabled" bind:checked={formEnabled} />
+        <input
+          type="checkbox"
+          id="enabled"
+          aria-label={$t('subscr.enabled')}
+          bind:checked={formEnabled}
+        />
         <span class="toggle-slider"></span>
       </label>
       <label for="enabled" class="checkbox-label">{$t('subscr.enabled')}</label>
@@ -389,7 +396,12 @@
 
     <div class="form-group-checkbox">
       <label class="toggle-switch">
-        <input type="checkbox" id="use-provider-interval" bind:checked={formUseProviderInterval} />
+        <input
+          type="checkbox"
+          id="use-provider-interval"
+          aria-label={$t('subscr.use_provider_interval')}
+          bind:checked={formUseProviderInterval}
+        />
         <span class="toggle-slider"></span>
       </label>
       <label for="use-provider-interval" class="checkbox-label">

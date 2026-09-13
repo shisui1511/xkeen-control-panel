@@ -844,6 +844,7 @@
           <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.animations')}
               bind:checked={animationsEnabled}
               onchange={() => saveSetting('animations', String(animationsEnabled))}
             />
@@ -864,6 +865,7 @@
           <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.capsule_visible')}
               checked={$capsuleConfigStore.visible}
               onchange={(e) =>
                 updateCapsuleConfig({ visible: (e.target as HTMLInputElement).checked })}
@@ -880,6 +882,7 @@
             <label class="toggle-switch">
               <input
                 type="checkbox"
+                aria-label={$t('settings.capsule_traffic')}
                 checked={$capsuleConfigStore.showTraffic}
                 onchange={(e) =>
                   updateCapsuleConfig({ showTraffic: (e.target as HTMLInputElement).checked })}
@@ -895,6 +898,7 @@
             <label class="toggle-switch">
               <input
                 type="checkbox"
+                aria-label={$t('settings.capsule_resources')}
                 checked={$capsuleConfigStore.showResources}
                 onchange={(e) =>
                   updateCapsuleConfig({ showResources: (e.target as HTMLInputElement).checked })}
@@ -917,6 +921,7 @@
           <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.auto_refresh')}
               bind:checked={autoRefresh}
               onchange={() => saveSetting('autoRefresh', String(autoRefresh))}
             />
@@ -931,6 +936,7 @@
           <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.confirm_dangerous')}
               bind:checked={confirmDangerous}
               onchange={() => saveSetting('confirmDangerous', String(confirmDangerous))}
             />
@@ -945,6 +951,7 @@
           <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.notification_sound')}
               bind:checked={notificationSound}
               onchange={() => saveSetting('notificationSound', String(notificationSound))}
             />
@@ -959,6 +966,7 @@
           <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.dev_mode')}
               checked={$devMode}
               onchange={(e) => setDevMode((e.target as HTMLInputElement).checked)}
             />

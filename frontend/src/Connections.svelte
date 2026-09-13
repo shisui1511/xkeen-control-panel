@@ -717,7 +717,7 @@
       <!-- Grouping Selector -->
       <div class="grouping-control">
         <span class="group-lbl">{$t('conn.group_by')}</span>
-        <Select bind:value={groupingMode} class="group-select">
+        <Select bind:value={groupingMode} class="group-select" ariaLabel={$t('conn.group_by')}>
           <option value="none">{$t('conn.group_none')}</option>
           <option value="client">{$t('conn.group_client')}</option>
           <option value="host">{$t('conn.group_host')}</option>
@@ -1360,7 +1360,7 @@
 
   .group-lbl {
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
   }
 
   /* Metrics Pill */
@@ -1484,7 +1484,7 @@
 
   .connections-table th {
     font-size: var(--font-size-xs);
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     font-weight: 600;
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);

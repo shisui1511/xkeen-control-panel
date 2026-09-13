@@ -210,7 +210,7 @@
 
   .preset-url {
     font-size: var(--font-size-xs);
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     font-family: var(--font-family-mono);
     overflow: hidden;
     text-overflow: ellipsis;

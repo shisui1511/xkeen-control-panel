@@ -219,12 +219,12 @@
   --border-light: rgba(0, 0, 0, 0.05);
   --border-strong: #c9d3df;
 
-  --accent: #0e8fbf;
-  --primary: #0e8fbf;
-  --accent-hover: #0a779f;
-  --accent-rgb: 14, 143, 191;
+  --accent: #0a779f;
+  --primary: #0a779f;
+  --accent-hover: #08698c;
+  --accent-rgb: 10, 119, 159;
 
-  --hover: rgba(14, 143, 191, 0.07);
+  --hover: rgba(10, 119, 159, 0.07);
 
   --success: #1a7f4e;
   --warning: #8b5c00;
@@ -232,7 +232,7 @@
   --purple: #7e22ce;
   --purple-bg: rgba(126, 34, 206, 0.08);
   --purple-border: rgba(126, 34, 206, 0.25);
-  --accent-text: var(--accent-hover);
+  --accent-text: var(--accent);
   --scrollbar-thumb: var(--border-strong);
   --scrollbar-thumb-hover: #a9b8c9;
   --surface-tint: rgba(12, 34, 55, 0.04);
@@ -1512,14 +1512,14 @@ table.data-table {
 
 .table-container thead th,
 table.data-table thead th {
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--surface-tint, rgba(0, 0, 0, 0.05));
   text-align: left;
   padding: 11px 14px;
   font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   font-weight: 700;
-  color: var(--fg-dim);
+  color: var(--fg-secondary);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1629,7 +1629,7 @@ td.mono,
 .status-badge.active {
   color: var(--success);
   border-color: color-mix(in srgb, var(--success) 45%, transparent);
-  background: color-mix(in srgb, var(--success) 10%, transparent);
+  background: color-mix(in srgb, var(--success) 6%, transparent);
 }
 
 .status-badge.stopped {
@@ -1645,7 +1645,7 @@ td.mono,
 }
 
 .status-badge.idle {
-  color: var(--fg-secondary);
+  color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--fg-secondary) 45%, transparent);
   background: color-mix(in srgb, var(--fg-secondary) 10%, transparent);
 }

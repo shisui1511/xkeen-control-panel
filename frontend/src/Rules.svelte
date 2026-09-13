@@ -449,10 +449,12 @@
             placeholder={$t('rules.search')}
             bind:value={searchQuery}
             class="filter-input"
+            aria-label={$t('rules.search')}
           />
           <Select
             bind:value={typeFilter}
             class="source-select"
+            ariaLabel={$t('rules.all_types')}
             style="flex: 0 0 auto; width: auto; min-width: 140px;"
           >
             <option value="">{$t('rules.all_types')}</option>
@@ -463,6 +465,7 @@
           <Select
             bind:value={proxyFilter}
             class="source-select"
+            ariaLabel={$t('rules.all_targets')}
             style="flex: 0 0 auto; width: auto; min-width: 140px;"
           >
             <option value="">{$t('rules.all_targets')}</option>
@@ -525,7 +528,7 @@
                 <td
                   colspan="5"
                   class="empty-cell"
-                  style="text-align: center; padding: 2rem; color: var(--fg-dim);"
+                  style="text-align: center; padding: 2rem; color: var(--fg-secondary);"
                 >
                   {$t('rules.no_rules')}
                 </td>
@@ -567,10 +570,16 @@
             type="text"
             class="filter-input"
             placeholder={$t('rules.value_placeholder')}
+            aria-label={$t('rules.value_placeholder')}
             bind:value={newRuleValue}
             style="flex: 2; min-width: 180px;"
           />
-          <Select bind:value={newRuleType} class="source-select" style="flex: 1; min-width: 140px;">
+          <Select
+            bind:value={newRuleType}
+            class="source-select"
+            ariaLabel={$t('rules.custom_type_suffix')}
+            style="flex: 1; min-width: 140px;"
+          >
             <option value="domain_suffix">{$t('rules.custom_type_suffix')}</option>
             <option value="domain">{$t('rules.custom_type_domain')}</option>
             <option value="domain_keyword">{$t('rules.custom_type_keyword')}</option>
@@ -580,6 +589,7 @@
           <Select
             bind:value={newRuleTarget}
             class="source-select"
+            ariaLabel={$t('rules.target_proxy')}
             style="flex: 1; min-width: 130px;"
           >
             <option value="proxy">{$t('rules.target_proxy')}</option>
@@ -590,6 +600,7 @@
             type="text"
             class="filter-input"
             placeholder={$t('rules.custom_comment')}
+            aria-label={$t('rules.custom_comment')}
             bind:value={newRuleComment}
             style="flex: 1.5; min-width: 140px;"
           />

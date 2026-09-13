@@ -602,7 +602,7 @@
                     aria-valuenow={Math.round(percent(q))}
                     aria-valuemin={0}
                     aria-valuemax={100}
-                    aria-label="{q.name || q.client_ip}: {Math.round(percent(q))}%"
+                    aria-label="{q.name || q.target_id}: {Math.round(percent(q))}%"
                   >
                     <div
                       class="stat-bar-fill"
@@ -660,6 +660,7 @@
                     >
                       <input
                         type="checkbox"
+                        aria-label={$t('trafficquotas.toggle_limit')}
                         checked={q.enabled}
                         disabled={togglingQuotas[q.id]}
                         onchange={() => toggleEnabled(q)}
@@ -670,6 +671,7 @@
                     <div class="dropdown-container">
                       <button
                         class="btn btn-secondary action-btn-dots"
+                        aria-label={$t('app.actions') || 'Actions'}
                         onclick={(e) => toggleDropdown(q.id, e)}>⋯</button
                       >
                       {#if activeDropdownId === q.id}
@@ -840,7 +842,12 @@
 
     <div class="form-group-checkbox">
       <label class="toggle-switch">
-        <input type="checkbox" id="form-enabled" bind:checked={formEnabled} />
+        <input
+          type="checkbox"
+          id="form-enabled"
+          aria-label={$t('trafficquotas.status_enabled')}
+          bind:checked={formEnabled}
+        />
         <span class="toggle-slider"></span>
       </label>
       <label for="form-enabled" class="checkbox-label">
