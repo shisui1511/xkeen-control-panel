@@ -353,7 +353,9 @@ func TestDATManagerService_SymlinkBackupAndRestore(t *testing.T) {
 	}
 
 	// Call restoreFile
-	restoreFile(linkPath)
+	if err := restoreFile(linkPath); err != nil {
+		t.Fatalf("restoreFile failed: %v", err)
+	}
 
 	// Verify linkPath was restored as symlink to targetPath
 	info, err := os.Lstat(linkPath)

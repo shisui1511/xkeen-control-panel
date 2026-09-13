@@ -325,7 +325,9 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 
 	// Validate against kernel configuration
 	if valErr := s.validateKernelConfig(baseDir, safeName); valErr != nil {
-		restoreFile(targetAbs)
+		if restoreErr := restoreFile(targetAbs); restoreErr != nil {
+			return 0, fmt.Errorf("kernel validation failed with new %s: %s (rollback also failed, %s may be missing: %v)", safeName, valErr.Error(), safeName, restoreErr)
+		}
 		return 0, fmt.Errorf("kernel validation failed with new %s: %s (changes rolled back)", safeName, valErr.Error())
 	}
 
@@ -880,20 +882,27 @@ func rollbackFile(path string) error {
 	return os.Rename(bakPath, path)
 }
 
-func restoreFile(path string) {
+// restoreFile откатывает path к состоянию бэкапа (symlink через .bak.link
+// либо обычный файл через .bak) после провала валидации ядра. Возвращает
+// ошибку, если восстановление не удалось — вызывающая сторона обязана её
+// проверить: если геобаза к этому моменту уже удалена (os.Remove(path)
+// перед os.Symlink), молчаливое игнорирование ошибки оставило бы её
+// отсутствующей на диске при формально "успешном" ответе API.
+func restoreFile(path string) error {
 	linkBak := path + ".bak.link"
 	if data, err := os.ReadFile(linkBak); err == nil {
 		_ = os.Remove(path)
-		_ = os.Symlink(string(data), path)
+		if symErr := os.Symlink(string(data), path); symErr != nil {
+			return fmt.Errorf("critical rollback failure: failed to restore symlink %s: %w", path, symErr)
+		}
 		_ = os.Remove(linkBak)
-		return
+		return nil
 	}
 	bakPath := path + ".bak"
 	if _, err := os.Stat(bakPath); err == nil {
-		_ = os.Rename(bakPath, path)
-	} else {
-		_ = os.Remove(path)
+		return os.Rename(bakPath, path)
 	}
+	return os.Remove(path)
 }
 
 func cleanBackupFile(path string) {
