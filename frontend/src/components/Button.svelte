@@ -46,7 +46,7 @@
     padding: 9px 14px;
     border-radius: var(--radius-md);
     font-family: var(--font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     cursor: pointer;
     transition:

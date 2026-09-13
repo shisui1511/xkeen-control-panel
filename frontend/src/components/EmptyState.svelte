@@ -58,13 +58,13 @@
     margin-bottom: 8px;
   }
   .empty-state__title {
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     font-weight: 700;
     color: var(--fg-primary);
     margin: 0;
   }
   .empty-state__description {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     line-height: 1.5;
     max-width: 420px;

@@ -43,10 +43,7 @@
       {#each GROUP_TYPES as t}<option value={t}>{t}</option>{/each}
     </Select>
     {#if ng.type === 'relay'}
-      <div
-        class="alert alert-warning"
-        style="margin-top: 6px; padding: 6px 10px; font-size: 12px; border-radius: var(--radius-xs);"
-      >
+      <div class="alert alert-warning relay-warning">
         {$t('mihomo.warnings.relay_deprecated', { name: ng.name || 'group' })}
       </div>
     {/if}
@@ -65,10 +62,7 @@
       <label class="form-label" for="group-use-providers">{$t('groups.use_providers')}</label>
       <div class="tag-input-wrap">
         {#each ng.useProviders || [] as p}
-          <span
-            class="tag-pill"
-            style="background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.25); color: var(--success);"
-          >
+          <span class="tag-pill tag-pill--provider">
             {p}
             <button
               class="tag-rm"
@@ -246,16 +240,29 @@
     align-items: center;
   }
 
+  .relay-warning {
+    margin-top: 6px;
+    padding: 6px 10px;
+    font-size: var(--font-size-xs);
+    border-radius: var(--radius-xs);
+  }
+
   .tag-pill {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background: rgba(41, 194, 240, 0.12);
-    border: 1px solid rgba(41, 194, 240, 0.25);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
     color: var(--primary);
     font-size: var(--font-size-xs);
     border-radius: 10px;
     padding: 2px 8px;
+  }
+
+  .tag-pill--provider {
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    border-color: color-mix(in srgb, var(--success) 25%, transparent);
+    color: var(--success);
   }
 
   .tag-rm {
@@ -273,7 +280,7 @@
     align-items: center;
     gap: 8px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 

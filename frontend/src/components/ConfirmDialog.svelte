@@ -103,7 +103,7 @@
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     line-height: 1.4;
     padding: 10px 12px;
     border-radius: var(--radius-sm);
