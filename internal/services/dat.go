@@ -329,6 +329,8 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		return 0, fmt.Errorf("kernel validation failed with new %s: %s (changes rolled back)", safeName, valErr.Error())
 	}
 
+	cleanBackupFile(targetAbs)
+
 	return written, nil
 }
 
@@ -821,16 +823,19 @@ func (s *DATManagerService) Rollback() error {
 }
 
 func backupFile(path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil
-	}
-	// Avoid backing up symlinks (only backup regular files)
 	info, err := os.Lstat(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return nil
+		target, err := os.Readlink(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(path+".bak.link", []byte(target), 0644)
 	}
 
 	src, err := os.Open(path)
@@ -852,6 +857,13 @@ func backupFile(path string) error {
 }
 
 func rollbackFile(path string) error {
+	linkBak := path + ".bak.link"
+	if data, err := os.ReadFile(linkBak); err == nil {
+		_ = os.Remove(path)
+		err := os.Symlink(string(data), path)
+		_ = os.Remove(linkBak)
+		return err
+	}
 	bakPath := path + ".bak"
 	if _, err := os.Stat(bakPath); os.IsNotExist(err) {
 		return nil
@@ -860,12 +872,24 @@ func rollbackFile(path string) error {
 }
 
 func restoreFile(path string) {
+	linkBak := path + ".bak.link"
+	if data, err := os.ReadFile(linkBak); err == nil {
+		_ = os.Remove(path)
+		_ = os.Symlink(string(data), path)
+		_ = os.Remove(linkBak)
+		return
+	}
 	bakPath := path + ".bak"
 	if _, err := os.Stat(bakPath); err == nil {
 		_ = os.Rename(bakPath, path)
 	} else {
 		_ = os.Remove(path)
 	}
+}
+
+func cleanBackupFile(path string) {
+	_ = os.Remove(path + ".bak")
+	_ = os.Remove(path + ".bak.link")
 }
 
 func (s *DATManagerService) validateKernelConfig(baseDir, filename string) error {

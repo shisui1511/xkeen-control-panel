@@ -316,3 +316,84 @@ func TestDATManagerService_ValidationRollback(t *testing.T) {
 		t.Errorf("expected mock validation error, got %v", err)
 	}
 }
+
+func TestDATManagerService_SymlinkBackupAndRestore(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "actual.dat")
+	linkPath := filepath.Join(dir, "link.dat")
+
+	if err := os.WriteFile(targetPath, []byte("target data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Backup the symlink
+	if err := backupFile(linkPath); err != nil {
+		t.Fatalf("backupFile failed: %v", err)
+	}
+
+	// Verify .bak.link exists and contains target path
+	linkBak := linkPath + ".bak.link"
+	content, err := os.ReadFile(linkBak)
+	if err != nil {
+		t.Fatalf("reading link backup failed: %v", err)
+	}
+	if string(content) != targetPath {
+		t.Errorf("expected link target %s, got %s", targetPath, string(content))
+	}
+
+	// Simulate replacement with new file (which breaks symlink)
+	if err := os.Remove(linkPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(linkPath, []byte("replaced data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Call restoreFile
+	restoreFile(linkPath)
+
+	// Verify linkPath was restored as symlink to targetPath
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("lstat restored link failed: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected restored file to be symlink, got regular file")
+	}
+	readTarget, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("readlink failed: %v", err)
+	}
+	if readTarget != targetPath {
+		t.Errorf("expected target %s, got %s", targetPath, readTarget)
+	}
+	if _, err := os.Stat(linkBak); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be removed after restore", linkBak)
+	}
+}
+
+func TestDATManagerService_CleanBackupFile(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "test.dat")
+	if err := os.WriteFile(filePath, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath+".bak", []byte("bak data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath+".bak.link", []byte("link data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanBackupFile(filePath)
+
+	if _, err := os.Stat(filePath + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("expected .bak to be removed")
+	}
+	if _, err := os.Stat(filePath + ".bak.link"); !os.IsNotExist(err) {
+		t.Errorf("expected .bak.link to be removed")
+	}
+}
