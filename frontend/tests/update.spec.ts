@@ -59,7 +59,9 @@ test.describe('Settings updates tab test suite', () => {
     await page.goto('/#/settings');
 
     const updatesTab = page
-      .locator('.stab:has-text("Обновления"), .stab:has-text("Updates")')
+      .locator(
+        '[role="tab"]:has-text("Обновления"), [role="tab"]:has-text("Updates"), .tab-btn:has-text("Обновления"), .tab-btn:has-text("Updates"), .stab:has-text("Обновления"), .stab:has-text("Updates")'
+      )
       .first();
     await expect(updatesTab).toBeVisible({ timeout: 5000 });
     await updatesTab.click();
