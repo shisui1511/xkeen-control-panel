@@ -587,3 +587,118 @@ func TestDATManagerService_Rollback_PropagatesSymlinkRestoreFailure(t *testing.T
 		t.Errorf("expected error to mention failed path %s, got: %v", linkPath, err)
 	}
 }
+
+func TestDATManagerService_Zkeenip_SearchTag_CIDR(t *testing.T) {
+	// 8.8.8.0/24 and 1.1.1.0/24
+	cidr1 := append(makeLD(1, []byte{8, 8, 8, 0}), makeVarintField(2, 24)...)
+	cidr2 := append(makeLD(1, []byte{1, 1, 1, 0}), makeVarintField(2, 24)...)
+
+	entry1 := append(makeLD(1, []byte("zkeenip")), makeLD(2, cidr1)...)
+	entry1 = append(entry1, makeLD(2, cidr2)...)
+
+	outer := makeLD(1, entry1)
+
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	// File named zkeenip.dat - must be detected as GeoIP even without "geoip" substring
+	os.WriteFile(filepath.Join(tmpXray, "zkeenip.dat"), outer, 0644)
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	res, err := svc.SearchTag("zkeenip.dat", "zkeenip", "", 0, 10)
+	if err != nil {
+		t.Fatalf("SearchTag failed: %v", err)
+	}
+	if res.Total != 2 {
+		t.Fatalf("expected 2 CIDRs in zkeenip.dat, got %d", res.Total)
+	}
+	if res.Entries[0] != "8.8.8.0/24" {
+		t.Errorf("expected 8.8.8.0/24, got %s", res.Entries[0])
+	}
+
+	// Test CIDR containment search: searching for IP 8.8.8.8 must match 8.8.8.0/24
+	resSearch, err := svc.SearchTag("zkeenip.dat", "zkeenip", "8.8.8.8", 0, 10)
+	if err != nil {
+		t.Fatalf("SearchTag with IP query failed: %v", err)
+	}
+	if resSearch.Total != 1 || resSearch.Entries[0] != "8.8.8.0/24" {
+		t.Errorf("expected 8.8.8.8 to match 8.8.8.0/24, got %v", resSearch.Entries)
+	}
+}
+
+func TestDATManagerService_Lookup_DomainAndFormatRule(t *testing.T) {
+	dom1 := makeLD(2, []byte("google.com"))
+	entryGoogle := append(makeLD(1, []byte("google")), makeLD(2, dom1)...)
+	outerGeoSite := makeLD(1, entryGoogle)
+
+	domZkeen := makeLD(2, []byte("antizapret.prostovpn.org"))
+	entryZkeen := append(makeLD(1, []byte("antizapret")), makeLD(2, domZkeen)...)
+	outerZkeen := makeLD(1, entryZkeen)
+
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	os.WriteFile(filepath.Join(tmpXray, "geosite.dat"), outerGeoSite, 0644)
+	os.WriteFile(filepath.Join(tmpXray, "zkeen.dat"), outerZkeen, 0644)
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	// Lookup domain in geosite.dat
+	results, err := svc.Lookup("mail.google.com", "domain", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatalf("expected at least 1 match for mail.google.com")
+	}
+
+	foundGoogle := false
+	for _, r := range results {
+		if r.File == "geosite.dat" && r.Tag == "google" {
+			foundGoogle = true
+			if r.Rule != "geosite:google" {
+				t.Errorf("expected rule 'geosite:google', got '%s'", r.Rule)
+			}
+		}
+	}
+	if !foundGoogle {
+		t.Errorf("expected google tag match in geosite.dat")
+	}
+
+	// Lookup domain in zkeen.dat - rule must have ext: prefix
+	resultsZkeen, err := svc.Lookup("antizapret.prostovpn.org", "domain", []string{"zkeen.dat"})
+	if err != nil {
+		t.Fatalf("Lookup zkeen failed: %v", err)
+	}
+	if len(resultsZkeen) == 0 {
+		t.Fatalf("expected match in zkeen.dat")
+	}
+	if resultsZkeen[0].Rule != "ext:zkeen.dat:antizapret" {
+		t.Errorf("expected rule 'ext:zkeen.dat:antizapret', got '%s'", resultsZkeen[0].Rule)
+	}
+}
+
+func TestMatchDomain(t *testing.T) {
+	cases := []struct {
+		rule   string
+		target string
+		want   bool
+	}{
+		{"youtube", "youtube.com", true},
+		{"youtube", "www.youtube.com", true},
+		{"google.com", "mail.google.com", true},
+		{"google.com", "google.com", true},
+		{"google.com", "evilgoogle.com", false},
+		{"keyword:youtube", "youtube.com", true},
+		{"full:youtube.com", "youtube.com", true},
+		{"full:youtube.com", "m.youtube.com", false},
+	}
+	for _, c := range cases {
+		got := matchDomain(c.rule, c.target)
+		if got != c.want {
+			t.Errorf("matchDomain(%q, %q) = %v, want %v", c.rule, c.target, got, c.want)
+		}
+	}
+}
+

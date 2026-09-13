@@ -415,6 +415,7 @@ func main() {
 	srv.HandleProtected("/api/dat/update", api.DATUpdate)
 	srv.HandleProtected("/api/dat/rollback", api.DATRollback)
 	srv.HandleProtected("/api/dat/search", api.DATSearch)
+	srv.HandleProtected("/api/dat/lookup", api.DATLookup)
 
 	// Xkeen Console
 	consoleSvc := services.NewConsoleService(cfg.XKeenBinary)

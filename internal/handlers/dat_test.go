@@ -48,6 +48,13 @@ func TestDATHandlers(t *testing.T) {
 		if recSearch.Code != http.StatusServiceUnavailable {
 			t.Errorf("DATSearch nil: expected 503, got %d", recSearch.Code)
 		}
+
+		reqLookup := httptest.NewRequest(http.MethodGet, "/api/dat/lookup?query=test.com", nil)
+		recLookup := httptest.NewRecorder()
+		apiNil.DATLookup(recLookup, reqLookup)
+		if recLookup.Code != http.StatusServiceUnavailable {
+			t.Errorf("DATLookup nil: expected 503, got %d", recLookup.Code)
+		}
 	})
 
 	// 2. Methods Not Allowed (POST vs GET)
@@ -89,6 +96,13 @@ func TestDATHandlers(t *testing.T) {
 		api.DATSearch(recPostSearch, reqPostSearch)
 		if recPostSearch.Code != http.StatusMethodNotAllowed {
 			t.Errorf("DATSearch POST: expected 405, got %d", recPostSearch.Code)
+		}
+
+		reqPostLookup := httptest.NewRequest(http.MethodPost, "/api/dat/lookup", nil)
+		recPostLookup := httptest.NewRecorder()
+		api.DATLookup(recPostLookup, reqPostLookup)
+		if recPostLookup.Code != http.StatusMethodNotAllowed {
+			t.Errorf("DATLookup POST: expected 405, got %d", recPostLookup.Code)
 		}
 	})
 
@@ -140,6 +154,25 @@ func TestDATHandlers(t *testing.T) {
 		api.DATSearch(rec2, req2)
 		if rec2.Code != http.StatusBadRequest {
 			t.Errorf("expected 400 for missing tag, got %d", rec2.Code)
+		}
+	})
+
+	// 7. DATLookup parameter validation & success
+	t.Run("DATLookup_ValidationAndSuccess", func(t *testing.T) {
+		// Missing query
+		reqEmpty := httptest.NewRequest(http.MethodGet, "/api/dat/lookup", nil)
+		recEmpty := httptest.NewRecorder()
+		api.DATLookup(recEmpty, reqEmpty)
+		if recEmpty.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for missing query, got %d", recEmpty.Code)
+		}
+
+		// Valid query
+		reqOK := httptest.NewRequest(http.MethodGet, "/api/dat/lookup?query=google.com", nil)
+		recOK := httptest.NewRecorder()
+		api.DATLookup(recOK, reqOK)
+		if recOK.Code != http.StatusOK {
+			t.Errorf("expected 200 for valid query, got %d", recOK.Code)
 		}
 	})
 }
