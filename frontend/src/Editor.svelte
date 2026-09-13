@@ -20,6 +20,7 @@
   import CodeMirrorEditor from './components/editor/CodeMirrorEditor.svelte';
   import BackupSidebar from './components/editor/BackupSidebar.svelte';
   import Modal from './components/Modal.svelte';
+  import PageHeader from './PageHeader.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import EditorKernelWidget from './components/status/EditorKernelWidget.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
@@ -1485,33 +1486,34 @@
 
 <div class="editor-page-container">
   <!-- Level 1 Header (EDIT-01) -->
-  <div class="editor-page-head">
-    <div class="eph-left">
-      <div class="crumbs">
-        {$t('nav.group_system')} <span class="crumb-sep">›</span>
-        {$t('nav.editor')}
-        {#if activeTab === 'constructor'}
-          <span class="crumb-sep">›</span> {$t('editor.tab_constructor')}
-        {/if}
-      </div>
-      <div class="editor-mode-switcher">
-        <button
-          class="mode-pill-btn tab-btn"
-          class:active={activeTab === 'files'}
-          onclick={() => setTab('files')}
-        >
-          <Icon name="editor" size={13} />
-          {$t('editor.tab_files')}
-        </button>
-        <button
-          class="mode-pill-btn tab-btn"
-          class:active={activeTab === 'constructor'}
-          onclick={() => setTab('constructor')}
-        >
-          <Icon name="settings" size={13} />
-          {$t('editor.tab_constructor')}
-        </button>
-      </div>
+  <PageHeader
+    title={$t('editor.h1')}
+    subtitle={$t('editor.h1_sub')}
+    breadcrumbs={[
+      { label: $t('nav.group_system') },
+      { label: $t('nav.editor') },
+      ...(activeTab === 'constructor' ? [{ label: $t('editor.tab_constructor') }] : [])
+    ]}
+    {onSwitchTab}
+    hideHome={true}
+  >
+    <div class="editor-mode-switcher">
+      <button
+        class="mode-pill-btn tab-btn"
+        class:active={activeTab === 'files'}
+        onclick={() => setTab('files')}
+      >
+        <Icon name="editor" size={13} />
+        {$t('editor.tab_files')}
+      </button>
+      <button
+        class="mode-pill-btn tab-btn"
+        class:active={activeTab === 'constructor'}
+        onclick={() => setTab('constructor')}
+      >
+        <Icon name="settings" size={13} />
+        {$t('editor.tab_constructor')}
+      </button>
     </div>
 
     {#if activeTab === 'files'}
@@ -1592,7 +1594,7 @@
         {/if}
       </div>
     {/if}
-  </div>
+  </PageHeader>
 
   {#if detectedDraft}
     <DraftRestoreBanner
@@ -2309,45 +2311,10 @@
     gap: 0;
   }
 
-  /* Level 1 Header */
-  .editor-page-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 14px;
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid var(--border);
-    margin-bottom: 8px;
-    border-radius: var(--radius-md);
-    gap: 12px;
-    flex-shrink: 0;
-    flex-wrap: wrap;
-  }
-
-  .eph-left {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
-
   .eph-right {
     display: flex;
     align-items: center;
     gap: 8px;
-  }
-
-  .crumbs {
-    font-size: 12.5px;
-    font-weight: 700;
-    color: var(--fg-primary);
-    display: flex;
-    align-items: center;
-  }
-
-  .crumb-sep {
-    color: var(--fg-faint);
-    margin: 0 6px;
-    font-weight: 400;
   }
 
   .editor-mode-switcher {
