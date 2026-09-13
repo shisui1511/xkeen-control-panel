@@ -1189,7 +1189,7 @@
       <!-- Control panel to create a backup -->
       <div
         class="field-row select-row"
-        style="margin-bottom: 20px; gap: 12px; align-items: center; background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: var(--radius-md);"
+        style="margin-bottom: 20px; gap: 12px; align-items: center; background: var(--surface-tint); border: 1px solid var(--border-light); padding: 12px; border-radius: var(--radius-md);"
       >
         <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
           <input

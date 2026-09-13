@@ -781,7 +781,7 @@
 
   .sub-node-avatar-text {
     font-size: var(--font-size-xs);
-    font-weight: 800;
+    font-weight: 600;
     text-transform: uppercase;
     color: inherit;
     letter-spacing: 0.02em;
@@ -792,7 +792,7 @@
   }
 
   .sub-node-flag-fallback {
-    font-size: 14px;
+    font-size: var(--font-size-base);
   }
 
   .sub-node-info {
@@ -897,9 +897,9 @@
     flex-shrink: 0;
   }
   .sub-node-row.active .sub-node-chip-gold {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.3);
-    color: var(--fg-terminal);
+    background: var(--surface-tint);
+    border-color: var(--border);
+    color: var(--fg-primary);
   }
 
   .sub-node-meta-row {

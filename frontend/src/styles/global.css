@@ -809,7 +809,7 @@ input[type='number'] {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.16em;
-  color: var(--accent);
+  color: var(--fg-secondary);
   cursor: pointer;
   list-style: none;
   user-select: none;
@@ -820,7 +820,7 @@ input[type='number'] {
 }
 
 .nav-group summary:hover {
-  color: var(--accent-hover);
+  color: var(--fg-primary);
 }
 
 .nav-group summary > .group-ttl {
@@ -1348,7 +1348,7 @@ body.drawer-locked {
 
 .page-header-actions {
   display: flex;
-  gap: 0.6rem;
+  gap: var(--spacing-2, 8px);
   flex-wrap: wrap;
 }
 
@@ -2083,11 +2083,10 @@ pre.code-output {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-weight: 700;
+  font-weight: 600;
   font-size: 13px;
   letter-spacing: 0.04em;
   color: var(--danger);
-  text-transform: uppercase;
 }
 
 .api-offline-desc {
