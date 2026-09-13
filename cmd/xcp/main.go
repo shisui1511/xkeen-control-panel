@@ -407,6 +407,7 @@ func main() {
 
 	// DAT Manager
 	datSvc := services.NewDATManagerService()
+	datSvc.SetBinaries(cfg.MihomoBinary, "/opt/sbin/xray", cfg.XRayConfigDir)
 	api.SetDATManagerService(datSvc)
 
 	srv.HandleProtected("/api/dat/list", api.DATList)

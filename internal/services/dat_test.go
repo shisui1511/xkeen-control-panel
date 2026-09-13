@@ -3,6 +3,7 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -181,5 +182,137 @@ func TestSearchTag_MalformedProtobuf(t *testing.T) {
 	_, err := svc.SearchTag("geosite.dat", "any", "", 0, 10)
 	if err != nil {
 		t.Logf("SearchTag returned expected error/nil: %v", err)
+	}
+}
+
+func TestResolveUpdateURL_MihomoConfigGeox(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	configContent := `
+geox-url:
+  geosite: "https://example.com/zkeen.dat"
+  geoip: "https://example.com/zkeenip.dat"
+`
+	if err := os.WriteFile(filepath.Join(tmpMihomo, "config.yaml"), []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	// GeoSite.dat in Mihomo should use custom geox-url.geosite
+	urlSite, err := svc.resolveUpdateURL("GeoSite.dat", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urlSite != "https://example.com/zkeen.dat" {
+		t.Errorf("expected custom geosite URL, got %s", urlSite)
+	}
+
+	// GeoIP.dat in Mihomo should use custom geox-url.geoip
+	urlIP, err := svc.resolveUpdateURL("GeoIP.dat", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urlIP != "https://example.com/zkeenip.dat" {
+		t.Errorf("expected custom geoip URL, got %s", urlIP)
+	}
+
+	// Xray geosite.dat should use standard URL
+	urlXray, err := svc.resolveUpdateURL("geosite.dat", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urlXray != "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat" {
+		t.Errorf("expected v2fly URL for Xray geosite, got %s", urlXray)
+	}
+}
+
+func TestResolveUpdateURL_MihomoDefaultMetaCubeX(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	// No config.yaml exists
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	urlSite, err := svc.resolveUpdateURL("geosite.dat", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urlSite != "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat" {
+		t.Errorf("expected MetaCubeX geosite URL, got %s", urlSite)
+	}
+
+	urlIP, err := svc.resolveUpdateURL("geoip.dat", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urlIP != "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat" {
+		t.Errorf("expected MetaCubeX geoip URL, got %s", urlIP)
+	}
+}
+
+func TestDATManagerService_BrokenSymlink(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	// Create broken symlink
+	brokenLink := filepath.Join(tmpXray, "broken.dat")
+	_ = os.Symlink(filepath.Join(tmpXray, "nonexistent.dat"), brokenLink)
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+	files := svc.List()
+
+	var found *DATFile
+	for i := range files {
+		if files[i].Name == "broken.dat" {
+			found = &files[i]
+			break
+		}
+	}
+
+	if found == nil {
+		t.Fatal("broken.dat not found in List()")
+	}
+	if found.Exists {
+		t.Errorf("expected Exists: false for broken symlink, got true")
+	}
+	if !found.IsSymlink {
+		t.Errorf("expected IsSymlink: true for broken symlink, got false")
+	}
+}
+
+func TestDATManagerService_ValidationRollback(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	// Create initial file
+	target := filepath.Join(tmpMihomo, "GeoSite.dat")
+	initialData := []byte("initial valid data")
+	if err := os.WriteFile(target, initialData, 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Also config.yaml
+	if err := os.WriteFile(filepath.Join(tmpMihomo, "config.yaml"), []byte("mode: rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create mock failing mihomo binary
+	mockBin := filepath.Join(tmpMihomo, "mock-mihomo")
+	mockScript := "#!/bin/sh\necho 'mock validation error'\nexit 1\n"
+	if err := os.WriteFile(mockBin, []byte(mockScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+	svc.SetBinaries(mockBin, "", "")
+
+	// Call validateKernelConfig directly
+	err := svc.validateKernelConfig(tmpMihomo, "GeoSite.dat")
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "mock validation error") {
+		t.Errorf("expected mock validation error, got %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
+	"gopkg.in/yaml.v3"
 )
 
 type DATFile struct {
@@ -42,12 +44,15 @@ type datCacheEntry struct {
 }
 
 type DATManagerService struct {
-	xrayDir    string
-	mihomoDir  string
-	binaryPath string
-	mu         sync.RWMutex
-	cache      map[string]datCacheEntry
-	cacheMu    sync.Mutex
+	xrayDir       string
+	mihomoDir     string
+	binaryPath    string
+	mihomoBinary  string
+	xrayBinary    string
+	xrayConfigDir string
+	mu            sync.RWMutex
+	cache         map[string]datCacheEntry
+	cacheMu       sync.Mutex
 }
 
 func NewDATManagerService(dirs ...string) *DATManagerService {
@@ -66,10 +71,27 @@ func NewDATManagerService(dirs ...string) *DATManagerService {
 	}
 
 	return &DATManagerService{
-		xrayDir:    xrayDir,
-		mihomoDir:  mihomoDir,
-		binaryPath: binaryPath,
-		cache:      make(map[string]datCacheEntry),
+		xrayDir:       xrayDir,
+		mihomoDir:     mihomoDir,
+		binaryPath:    binaryPath,
+		mihomoBinary:  "/opt/sbin/mihomo",
+		xrayBinary:    "/opt/sbin/xray",
+		xrayConfigDir: "/opt/etc/xray/configs",
+		cache:         make(map[string]datCacheEntry),
+	}
+}
+
+func (s *DATManagerService) SetBinaries(mihomoBin, xrayBin, xrayConfDir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if mihomoBin != "" {
+		s.mihomoBinary = mihomoBin
+	}
+	if xrayBin != "" {
+		s.xrayBinary = xrayBin
+	}
+	if xrayConfDir != "" {
+		s.xrayConfigDir = xrayConfDir
 	}
 }
 
@@ -106,6 +128,8 @@ func (s *DATManagerService) List() []DATFile {
 						if targetInfo, err := os.Stat(match); err == nil {
 							f.Size = targetInfo.Size()
 							f.LastUpdate = targetInfo.ModTime().Unix()
+						} else {
+							f.Exists = false
 						}
 					}
 				} else {
@@ -195,7 +219,9 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	defer s.mu.Unlock()
 
 	// 1. Path validation - strictly root files only to prevent path injection
-	safeName := filepath.Base(filepath.Clean(localPath))
+	cleanLocalPath := filepath.Clean(localPath)
+	dir := filepath.Dir(cleanLocalPath)
+	safeName := filepath.Base(cleanLocalPath)
 	if safeName == "." || safeName == ".." || safeName == "" {
 		return 0, fmt.Errorf("invalid file name")
 	}
@@ -205,13 +231,17 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		return 0, fmt.Errorf("invalid characters in file name")
 	}
 
-	// Determine base directory (prefer xray for .dat, mihomo for .mmdb)
-	baseDir := s.xrayDir
-	if strings.HasSuffix(safeName, ".mmdb") {
+	// Determine base directory
+	var baseDir string
+	if filepath.Clean(dir) == filepath.Clean(s.mihomoDir) {
 		baseDir = s.mihomoDir
+	} else if filepath.Clean(dir) == filepath.Clean(s.xrayDir) {
+		baseDir = s.xrayDir
 	} else {
-		// For .dat, check if it already exists in mihomo
-		if _, err := os.Stat(filepath.Join(s.mihomoDir, safeName)); err == nil {
+		baseDir = s.xrayDir
+		if strings.HasSuffix(safeName, ".mmdb") {
+			baseDir = s.mihomoDir
+		} else if _, err := os.Stat(filepath.Join(s.mihomoDir, safeName)); err == nil {
 			baseDir = s.mihomoDir
 		}
 	}
@@ -291,6 +321,12 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	if err := os.Rename(tmpFile, targetAbs); err != nil {
 		os.Remove(tmpFile)
 		return 0, fmt.Errorf("failed to replace file: %w", err)
+	}
+
+	// Validate against kernel configuration
+	if valErr := s.validateKernelConfig(baseDir, safeName); valErr != nil {
+		restoreFile(targetAbs)
+		return 0, fmt.Errorf("kernel validation failed with new %s: %s (changes rolled back)", safeName, valErr.Error())
 	}
 
 	return written, nil
@@ -823,6 +859,55 @@ func rollbackFile(path string) error {
 	return os.Rename(bakPath, path)
 }
 
+func restoreFile(path string) {
+	bakPath := path + ".bak"
+	if _, err := os.Stat(bakPath); err == nil {
+		_ = os.Rename(bakPath, path)
+	} else {
+		_ = os.Remove(path)
+	}
+}
+
+func (s *DATManagerService) validateKernelConfig(baseDir, filename string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	if baseDir == s.mihomoDir && s.mihomoBinary != "" {
+		if _, err := os.Stat(s.mihomoBinary); err == nil {
+			configPath := filepath.Join(s.mihomoDir, "config.yaml")
+			if _, err := os.Stat(configPath); err == nil {
+				cmd := exec.CommandContext(ctx, s.mihomoBinary, "-t", "-d", s.mihomoDir)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+				}
+			}
+		}
+	}
+
+	if baseDir == s.xrayDir && s.xrayBinary != "" {
+		if _, err := os.Stat(s.xrayBinary); err == nil {
+			confDir := s.xrayConfigDir
+			if confDir == "" {
+				confDir = "/opt/etc/xray/configs"
+			}
+			if _, err := os.Stat(confDir); err == nil {
+				cmd := exec.CommandContext(ctx, s.xrayBinary, "-test", "-confdir", confDir)
+				cmd.Env = append(os.Environ(),
+					"XRAY_LOCATION_CONFDIR="+confDir,
+					"XRAY_LOCATION_ASSET="+s.xrayDir,
+				)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 var standardURLs = map[string]string{
 	"geosite_refilter.dat": "https://github.com/1andrevich/Re-filter-lists/releases/latest/download/geosite.dat",
 	"geoip_refilter.dat":   "https://github.com/1andrevich/Re-filter-lists/releases/latest/download/geoip.dat",
@@ -836,29 +921,83 @@ var standardURLs = map[string]string{
 	"geosite.dat":          "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat",
 }
 
+type mihomoGeoxConfig struct {
+	GeoxURL struct {
+		GeoSite string `yaml:"geosite"`
+		GeoIP   string `yaml:"geoip"`
+	} `yaml:"geox-url"`
+}
+
+func (s *DATManagerService) getMihomoGeoxURL(filename string) string {
+	configPath := filepath.Join(s.mihomoDir, "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+
+	var cfg mihomoGeoxConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+
+	lower := strings.ToLower(filename)
+	if (strings.Contains(lower, "geosite") || lower == "zkeen.dat") && cfg.GeoxURL.GeoSite != "" {
+		return cfg.GeoxURL.GeoSite
+	}
+	if (strings.Contains(lower, "geoip") || lower == "zkeenip.dat") && cfg.GeoxURL.GeoIP != "" {
+		return cfg.GeoxURL.GeoIP
+	}
+
+	return ""
+}
+
+func (s *DATManagerService) resolveUpdateURL(filename string, isMihomo bool) (string, error) {
+	safeName := filepath.Base(filepath.Clean(filename))
+	lower := strings.ToLower(safeName)
+
+	if isMihomo {
+		if url := s.getMihomoGeoxURL(safeName); url != "" {
+			return url, nil
+		}
+		if lower == "geosite.dat" {
+			return "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat", nil
+		}
+		if lower == "geoip.dat" {
+			return "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat", nil
+		}
+	}
+
+	if u, ok := standardURLs[lower]; ok {
+		return u, nil
+	}
+
+	return "", fmt.Errorf("no update URL configured for %s", safeName)
+}
+
 func (s *DATManagerService) UpdateFile(filename string) error {
 	safeName := filepath.Base(filepath.Clean(filename))
 	if !safePathComponentRe.MatchString(safeName) {
 		return fmt.Errorf("invalid file name")
 	}
 
-	urlVal, ok := standardURLs[strings.ToLower(safeName)]
-	if !ok {
-		return fmt.Errorf("no update URL configured for %s", safeName)
-	}
-
 	var path string
-	for _, dir := range []string{s.xrayDir, s.mihomoDir} {
+	var isMihomo bool
+
+	for _, dir := range []string{s.mihomoDir, s.xrayDir} {
 		candidate := filepath.Join(dir, safeName)
 		if _, err := os.Stat(candidate); err == nil {
 			path = candidate
+			if dir == s.mihomoDir {
+				isMihomo = true
+			}
 			break
 		}
 	}
 
 	if path == "" {
-		if strings.HasSuffix(strings.ToLower(safeName), ".mmdb") {
+		if strings.HasSuffix(strings.ToLower(safeName), ".mmdb") || strings.HasPrefix(safeName, "GeoSite") || strings.HasPrefix(safeName, "GeoIP") {
 			path = filepath.Join(s.mihomoDir, safeName)
+			isMihomo = true
 		} else {
 			path = filepath.Join(s.xrayDir, safeName)
 		}
@@ -871,7 +1010,17 @@ func (s *DATManagerService) UpdateFile(filename string) error {
 				target = filepath.Join(filepath.Dir(path), target)
 			}
 			path = target
+			if strings.HasPrefix(path, s.mihomoDir) {
+				isMihomo = true
+			} else if strings.HasPrefix(path, s.xrayDir) {
+				isMihomo = false
+			}
 		}
+	}
+
+	urlVal, err := s.resolveUpdateURL(safeName, isMihomo)
+	if err != nil {
+		return err
 	}
 
 	_, err = s.UpdateCustom(path, urlVal)
