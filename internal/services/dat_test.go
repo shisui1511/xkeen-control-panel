@@ -535,3 +535,55 @@ func TestDATManagerService_Update_CleansBackupsAfterSuccess(t *testing.T) {
 		t.Errorf("expected %s.bak to be cleaned up after successful Update()", mmdbPath)
 	}
 }
+
+// TestDATManagerService_Rollback_PropagatesSymlinkRestoreFailure covers the
+// regression from 120-REVIEW.md CR-01: Rollback() used to discard every
+// rollbackFile() error and always return nil, so a failed symlink restore
+// left a geo-file missing on disk while POST /api/dat/rollback reported
+// {"success": true} to the caller. This reproduces an actual rollbackFile
+// failure (the target path is occupied by a non-empty directory, so
+// os.Symlink cannot recreate the symlink) and asserts Rollback() surfaces it.
+func TestDATManagerService_Rollback_PropagatesSymlinkRestoreFailure(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	targetPath := filepath.Join(tmpXray, "actual.dat")
+	linkPath := filepath.Join(tmpXray, "geoip.dat")
+
+	if err := os.WriteFile(targetPath, []byte("target data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Backup the symlink -> creates geoip.dat.bak.link so Rollback() takes
+	// the os.Symlink restore path inside rollbackFile.
+	if err := backupFile(linkPath); err != nil {
+		t.Fatalf("backupFile failed: %v", err)
+	}
+
+	// Simulate the geo-file being replaced by a non-empty directory (e.g. a
+	// botched "xkeen -ug" run). rollbackFile's os.Remove(path) then fails
+	// with ENOTEMPTY (silently ignored), and the subsequent os.Symlink call
+	// fails because a directory still occupies the path.
+	if err := os.Remove(linkPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(linkPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(linkPath, "occupied"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	err := svc.Rollback()
+	if err == nil {
+		t.Fatal("expected Rollback() to return an error when rollbackFile fails, got nil")
+	}
+	if !strings.Contains(err.Error(), linkPath) {
+		t.Errorf("expected error to mention failed path %s, got: %v", linkPath, err)
+	}
+}

@@ -815,22 +815,33 @@ func (s *DATManagerService) Rollback() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	var errs []string
+
 	// Rollback files in xrayDir
 	matches, _ := filepath.Glob(filepath.Join(s.xrayDir, "*.dat"))
 	for _, match := range matches {
-		_ = rollbackFile(match)
+		if err := rollbackFile(match); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", match, err))
+		}
 	}
 
 	// Rollback files in mihomoDir
 	matches2, _ := filepath.Glob(filepath.Join(s.mihomoDir, "*.dat"))
 	for _, match := range matches2 {
-		_ = rollbackFile(match)
+		if err := rollbackFile(match); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", match, err))
+		}
 	}
 	matches3, _ := filepath.Glob(filepath.Join(s.mihomoDir, "*.mmdb"))
 	for _, match := range matches3 {
-		_ = rollbackFile(match)
+		if err := rollbackFile(match); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", match, err))
+		}
 	}
 
+	if len(errs) > 0 {
+		return fmt.Errorf("rollback failed for: %s", strings.Join(errs, "; "))
+	}
 	return nil
 }
 
