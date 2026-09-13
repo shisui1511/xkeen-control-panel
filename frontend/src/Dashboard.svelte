@@ -22,6 +22,7 @@
   import Skeleton from './components/Skeleton.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import PageHeader from './PageHeader.svelte';
   import ServiceStatusGroup from './components/dashboard/ServiceStatusGroup.svelte';
   import SystemResourcesWidget from './components/dashboard/SystemResourcesWidget.svelte';
   import TrafficTelemetryWidget from './components/dashboard/TrafficTelemetryWidget.svelte';
@@ -886,32 +887,28 @@
       {#if currentTab === 'dashboard'}
         <div class="container" transition:fade={{ duration: 150 }}>
           <!-- Page header -->
-          <div class="page-head">
-            <div>
-              <div class="crumbs">
-                {$t('nav.group_overview')} <span class="crumb-sep">›</span>
-                {$t('nav.dashboard')}
-              </div>
-              <h1>{$t('dash.title')}</h1>
-              <p class="sub">{$t('dash.welcome')}</p>
-            </div>
-            <div class="ph-actions">
-              <Button
-                variant="secondary"
-                onclick={handleRefresh}
-                loading={isRefreshing}
-                disabled={isRefreshing}
-                title={$t('app.refresh')}
-              >
-                <Icon name="refresh" size={14} />
-                {$t('app.refresh')}
-              </Button>
-              <Button variant="primary" onclick={restartXkeen} title={$t('dash.restart_xkeen')}>
-                <Icon name="refresh" size={14} />
-                {$t('dash.restart_xkeen')}
-              </Button>
-            </div>
-          </div>
+          <PageHeader
+            title={$t('dash.title')}
+            subtitle={$t('dash.welcome')}
+            breadcrumbs={[{ label: $t('nav.group_overview') }, { label: $t('nav.dashboard') }]}
+            onSwitchTab={switchTab}
+            hideHome={true}
+          >
+            <Button
+              variant="secondary"
+              onclick={handleRefresh}
+              loading={isRefreshing}
+              disabled={isRefreshing}
+              title={$t('app.refresh')}
+            >
+              <Icon name="refresh" size={14} />
+              {$t('app.refresh')}
+            </Button>
+            <Button variant="primary" onclick={restartXkeen} title={$t('dash.restart_xkeen')}>
+              <Icon name="refresh" size={14} />
+              {$t('dash.restart_xkeen')}
+            </Button>
+          </PageHeader>
 
           <!-- Quickstart Checklist (Mihomo only, auto-hides when all steps complete).
                Gated on statusLoading/subsSummaryLoaded so it doesn't flash "incomplete"
@@ -1619,40 +1616,6 @@
   .dash-section {
     width: 100%;
     min-width: 0;
-  }
-
-  /* Page header — title left, buttons top-right */
-  .page-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 16px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-  }
-
-  .crumbs {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--fg-dim);
-    margin-bottom: 6px;
-  }
-
-  .sub {
-    color: var(--fg-secondary);
-    font-size: 13px;
-    margin: 4px 0 0;
-  }
-
-  /* ph-actions */
-  .ph-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    flex-shrink: 0;
-    padding-top: 4px;
   }
 
   /* Quickstart checklist card */
