@@ -11,26 +11,27 @@ import (
 
 // Config represents the main application configuration structure.
 type Config struct {
-	Port             int         `json:"port"`
-	LoopbackPort     int         `json:"loopback_port"`
-	XRayConfigDir    string      `json:"xray_config_dir"`
-	XRayAPIPort      int         `json:"xray_api_port"`
-	XKeenBinary      string      `json:"xkeen_binary"`
-	MihomoConfigDir  string      `json:"mihomo_config_dir"`
-	MihomoBinary     string      `json:"mihomo_binary"`
-	MihomoAPIURL     string      `json:"mihomo_api_url"`
-	AllowedRoots     []string    `json:"allowed_roots"`
-	LogLevel         string      `json:"log_level"`
-	LogPath          string      `json:"log_path"`
-	XCPLogPath       string      `json:"xcp_log_path"`
-	LogSources       []string    `json:"log_sources"`
-	DataDir          string      `json:"data_dir"`
-	Auth             AuthConfig  `json:"auth"`
-	HTTPS            HTTPSConfig `json:"https"`
-	MihomoSecret     string      `json:"mihomo_secret"`
-	UpdateChannel    string      `json:"update_channel"` // stable, beta, dev
-	DevMode          bool        `json:"dev_mode"`
-	ConfigPath       string      `json:"-"`
+	Port            int         `json:"port"`
+	LoopbackPort    int         `json:"loopback_port"`
+	XRayConfigDir   string      `json:"xray_config_dir"`
+	XRayAPIPort     int         `json:"xray_api_port"`
+	XKeenBinary     string      `json:"xkeen_binary"`
+	MihomoConfigDir string      `json:"mihomo_config_dir"`
+	MihomoBinary    string      `json:"mihomo_binary"`
+	XrayBinary      string      `json:"xray_binary"`
+	MihomoAPIURL    string      `json:"mihomo_api_url"`
+	AllowedRoots    []string    `json:"allowed_roots"`
+	LogLevel        string      `json:"log_level"`
+	LogPath         string      `json:"log_path"`
+	XCPLogPath      string      `json:"xcp_log_path"`
+	LogSources      []string    `json:"log_sources"`
+	DataDir         string      `json:"data_dir"`
+	Auth            AuthConfig  `json:"auth"`
+	HTTPS           HTTPSConfig `json:"https"`
+	MihomoSecret    string      `json:"mihomo_secret"`
+	UpdateChannel   string      `json:"update_channel"` // stable, beta, dev
+	DevMode         bool        `json:"dev_mode"`
+	ConfigPath      string      `json:"-"`
 }
 
 // AuthConfig represents the configuration settings for authentication and session management.
@@ -78,6 +79,7 @@ func Default() *Config {
 		XKeenBinary:     findXKeen(),
 		MihomoConfigDir: "/opt/etc/mihomo",
 		MihomoBinary:    "/opt/sbin/mihomo",
+		XrayBinary:      "/opt/sbin/xray",
 		MihomoAPIURL:    "http://127.0.0.1:9090",
 		DataDir:         "/opt/etc/xcp",
 		LogLevel:        "info",
@@ -105,7 +107,7 @@ func Default() *Config {
 			CertPath: "",
 			KeyPath:  "",
 		},
-		UpdateChannel:    "stable",
+		UpdateChannel: "stable",
 	}
 }
 
