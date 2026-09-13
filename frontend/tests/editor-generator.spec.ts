@@ -225,7 +225,9 @@ test.describe('Editor & Constructor integration test suite', () => {
     await expect(page).toHaveURL(/#\/editor/);
 
     // Проверяем, что статус файла изменился на "Изменён" (isDirty, badge дизайн-системы)
-    await expect(page.locator('.eph-right .badge-warning')).toBeVisible();
+    await expect(
+      page.locator('.eph-right .status-badge.warning, .eph-right .badge-warning')
+    ).toBeVisible();
   });
 
   test('metacubex rule-provider selector displays checkbox picker with categories and meta-rules-dat URL', async ({

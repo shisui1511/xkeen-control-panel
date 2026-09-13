@@ -184,7 +184,7 @@
 
   .restore-inline-btn {
     padding: 2px 6px;
-    font-size: 10px;
+    font-size: 12px;
     opacity: 0;
     transition: opacity 0.15s ease;
   }
@@ -211,7 +211,7 @@
     padding: 8px 14px;
     background: rgba(255, 255, 255, 0.01);
     border-bottom: 1px solid var(--border);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
   }
 
@@ -221,7 +221,7 @@
     padding: 10px 14px;
     background: var(--bg-page);
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.5;
     scrollbar-width: thin;
   }
@@ -244,16 +244,16 @@
   }
 
   .diff-line-added {
-    background: rgba(46, 160, 67, 0.12);
-    color: #3fb950;
-    border-left: 3px solid #2ea043;
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    color: var(--success);
+    border-left: 3px solid var(--success);
     padding-left: 6px;
   }
 
   .diff-line-removed {
-    background: rgba(248, 81, 73, 0.12);
-    color: #f85149;
-    border-left: 3px solid #f85149;
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    color: var(--danger);
+    border-left: 3px solid var(--danger);
     padding-left: 6px;
   }
 

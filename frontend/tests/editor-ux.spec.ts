@@ -313,7 +313,9 @@ proxies:
     await page.keyboard.type('\n# edited line\n');
 
     // Проверяем, что dirty-индикатор появился (badge дизайн-системы)
-    await expect(page.locator('.eph-right .badge-warning')).toBeVisible();
+    await expect(
+      page.locator('.eph-right .status-badge.warning, .eph-right .badge-warning')
+    ).toBeVisible();
 
     // Ищем кнопку "Сохранить и применить" по title, так как ее текст меняется при блокировке
     const applyBtn = page.locator('button.btn-accent[title="Сохранить и применить"]');

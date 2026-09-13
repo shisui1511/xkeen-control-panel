@@ -25,6 +25,8 @@
   import Select from './components/Select.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import EditorKernelWidget from './components/status/EditorKernelWidget.svelte';
+  import StatusBadge from './components/StatusBadge.svelte';
+  import LiveIndicator from './components/LiveIndicator.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { activateRestartGrace } from './lib/serviceGrace';
   import PreflightWarnings, {
@@ -180,6 +182,34 @@
   // Dirty state tracking
   let originalContent = $state('');
   let isDirty = $state(false);
+  let saveError = $state(false);
+
+  type SaveBadgeVariant = 'running' | 'warning' | 'stopped';
+
+  const saveStatusState = $derived.by(() => {
+    if (saving || applyLoading) {
+      return { kind: 'live' as const, label: backgroundStatusText || $t('editor.saving') };
+    }
+    if (saveError) {
+      return {
+        kind: 'badge' as const,
+        variant: 'stopped' as SaveBadgeVariant,
+        label: $t('editor.save_error')
+      };
+    }
+    if (isDirty) {
+      return {
+        kind: 'badge' as const,
+        variant: 'warning' as SaveBadgeVariant,
+        label: $t('editor.unsaved')
+      };
+    }
+    return {
+      kind: 'badge' as const,
+      variant: 'running' as SaveBadgeVariant,
+      label: $t('editor.saved')
+    };
+  });
 
   // Local active tab: 'files' | 'constructor'
   let activeTab = $state<'files' | 'constructor'>('files');
@@ -480,6 +510,7 @@
 
   async function loadFile(path: string, isPreviewClick = true) {
     if (!path) return;
+    saveError = false;
 
     const existingTab = tabs.find((t) => t.path === path);
     if (existingTab) {
@@ -797,6 +828,7 @@
     if (!selectedFile || !editorView) return;
 
     saving = true;
+    saveError = false;
     saveWarnings = [];
 
     try {
@@ -824,6 +856,7 @@
       showToast('success', $t('editor.file_saved'));
       originalContent = content;
       isDirty = false;
+      saveError = false;
 
       // Update tab state
       const activeT = tabs.find((t) => t.path === selectedFile);
@@ -839,6 +872,7 @@
       await loadBackups(selectedFile);
     } catch (e: any) {
       if (e?.status === 401) return;
+      saveError = true;
       showToast('error', $t('editor.save_error') + ': ' + e.message);
     } finally {
       saving = false;
@@ -848,6 +882,7 @@
   async function handleSaveAndApply() {
     if (!selectedFile || !editorView) return;
     applyLoading = true;
+    saveError = false;
     saveWarnings = [];
     await tick();
     backgroundStatusText = $t('editor.saving');
@@ -876,6 +911,7 @@
 
       originalContent = content;
       isDirty = false;
+      saveError = false;
       localStorage.removeItem(`editor.draft.${selectedFile}`);
       hasDraft = false;
       draftContent = '';
@@ -905,6 +941,7 @@
     } catch (e: any) {
       if (e?.status === 401) return;
       console.error('handleSaveAndApply error:', e);
+      saveError = true;
       showToast('error', $t('editor.save_error') + ': ' + e.message);
       applyLoading = false;
       backgroundStatusText = '';
@@ -1518,14 +1555,11 @@
 
     {#if activeTab === 'files'}
       <div class="eph-right">
-        <span
-          class="save-status badge"
-          class:badge-success={!isDirty}
-          class:badge-warning={isDirty}
-        >
-          <Icon name={isDirty ? 'edit' : 'check'} size={11} />
-          {isDirty ? $t('editor.unsaved') : $t('editor.saved')}
-        </span>
+        {#if saveStatusState.kind === 'live'}
+          <LiveIndicator live={true} label={saveStatusState.label} />
+        {:else}
+          <StatusBadge variant={saveStatusState.variant} label={saveStatusState.label} />
+        {/if}
         {#if selectedFile}
           <button
             class="btn btn-secondary btn-compact"
@@ -1717,7 +1751,7 @@
                     class="editor-draft-bar"
                     style="display: inline-flex; align-items: center; gap: 4px;"
                   >
-                    <span class="badge badge-warning" style="font-size: 11px; padding: 2px 6px;">
+                    <span class="badge badge-warning" style="font-size: 12px; padding: 2px 6px;">
                       {$t('editor.has_draft')}
                     </span>
                     <button class="btn btn-xs btn-primary" onclick={restoreDraft}>
@@ -1834,6 +1868,7 @@
                     tab.currentContent = newContent;
                     tab.isDirty = newContent !== tab.originalContent;
                     isDirty = tab.isDirty;
+                    saveError = false;
 
                     if (tab.isPreview) {
                       tab.isPreview = false;
@@ -2303,14 +2338,6 @@
     border-bottom: none;
   }
 
-  /* Уточнение глобального .badge — все цвета берутся из
-     .badge-success / .badge-warning в global.css */
-  .save-status {
-    font-size: 10.5px;
-    text-transform: none;
-    letter-spacing: 0.02em;
-  }
-
   .btn-compact {
     padding: 4px 10px;
     font-size: 12px;
@@ -2458,7 +2485,7 @@
   }
 
   .subhead-file-meta {
-    font-size: 10.5px;
+    font-size: 12px;
     font-family: var(--font-family-mono);
     color: var(--fg-dim);
     background: rgba(255, 255, 255, 0.03);
@@ -2491,7 +2518,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     font-family: var(--font-family-mono);
     padding: 2px 7px;
@@ -2540,7 +2567,7 @@
     border: 1px solid var(--border);
     border-radius: 3px;
     padding: 1px 4px;
-    font-size: 10px;
+    font-size: 12px;
     font-family: var(--font-family-mono);
     color: var(--fg-secondary);
   }
@@ -2603,7 +2630,7 @@
 
   .template-type {
     font-size: 12px;
-    text-transform: uppercase;
+    font-weight: 600;
     background: var(--bg-card);
     padding: 2px 6px;
     border-radius: 4px;
@@ -2795,8 +2822,6 @@
     font-size: 12px;
     font-weight: 600;
     color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
     margin-bottom: 6px;
     flex-shrink: 0;
   }
@@ -2840,7 +2865,7 @@
   .btn-accent {
     background: linear-gradient(180deg, var(--accent), var(--accent-2));
     border: 1px solid var(--accent);
-    color: var(--btn-primary-text, #03182a);
+    color: var(--btn-primary-text, var(--bg-deep));
     font-weight: 600;
   }
   .btn-accent:hover:not(:disabled) {

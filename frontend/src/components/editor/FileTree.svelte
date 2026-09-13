@@ -406,7 +406,7 @@
     width: 28px;
     height: 28px;
     background: var(--accent);
-    color: #03182a;
+    color: var(--btn-primary-text, var(--bg-deep));
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;
@@ -455,7 +455,7 @@
   }
 
   .group-count {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
   }
 
@@ -463,7 +463,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: 12px;
     color: var(--fg-faint);
   }
 
@@ -523,7 +523,7 @@
   }
 
   .fr-meta {
-    font-size: 10px;
+    font-size: 12px;
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
     margin-left: 6px;
@@ -531,7 +531,7 @@
   }
 
   .fmt-badge {
-    font-size: 8.5px;
+    font-size: 12px;
     font-weight: 800;
     padding: 1px 4px;
     border-radius: 3px;
@@ -540,37 +540,37 @@
   }
 
   .fmt-yaml {
-    background: rgba(167, 139, 250, 0.2);
-    color: #c4b5fd;
+    background: color-mix(in srgb, var(--seq-1) 15%, transparent);
+    color: var(--seq-1);
   }
 
   .fmt-json {
-    background: rgba(245, 166, 35, 0.2);
-    color: #fcd34d;
+    background: color-mix(in srgb, var(--seq-2) 15%, transparent);
+    color: var(--seq-2);
   }
 
   .fmt-conf {
-    background: rgba(70, 209, 138, 0.2);
-    color: #86efac;
+    background: color-mix(in srgb, var(--seq-3) 15%, transparent);
+    color: var(--seq-3);
   }
 
   .fmt-other {
-    background: rgba(255, 255, 255, 0.1);
-    color: #94a3b8;
+    background: color-mix(in srgb, var(--seq-4) 15%, transparent);
+    color: var(--seq-4);
   }
 
   .active-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #46d18a;
-    box-shadow: 0 0 5px rgba(70, 209, 138, 0.8);
+    background: var(--success);
+    box-shadow: 0 0 5px color-mix(in srgb, var(--success) 80%, transparent);
     flex-shrink: 0;
   }
 
   .sb-empty {
     padding: 6px 12px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-faint);
   }
 
@@ -578,7 +578,7 @@
   .file-context-menu {
     position: fixed;
     z-index: 1000;
-    background: #0d2338;
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
@@ -590,7 +590,7 @@
   }
 
   .ctx-header {
-    font-size: 10px;
+    font-size: 12px;
     color: var(--fg-dim);
     padding: 4px 8px;
     border-bottom: 1px solid var(--border-light, rgba(255, 255, 255, 0.05));
@@ -619,11 +619,11 @@
   }
 
   .ctx-danger {
-    color: var(--danger, #f4707f);
+    color: var(--danger);
   }
 
   .ctx-danger:hover {
-    background: rgba(244, 112, 127, 0.15);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
   }
 
   .ctx-divider {
