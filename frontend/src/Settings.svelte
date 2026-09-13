@@ -60,6 +60,14 @@
     { value: 'auto', label: $t('settings.theme_auto_btn') }
   ]);
 
+  type AccentChoice = 'blue' | 'indigo' | 'steel' | 'graphite';
+  const accentItems: { value: AccentChoice; labelKey: string }[] = [
+    { value: 'blue', labelKey: 'settings.accent_blue_btn' },
+    { value: 'indigo', labelKey: 'settings.accent_indigo_btn' },
+    { value: 'steel', labelKey: 'settings.accent_steel_btn' },
+    { value: 'graphite', labelKey: 'settings.accent_graphite_btn' }
+  ];
+
   const densityItems = $derived<SegmentItem[]>([
     { value: 'comfortable', label: $t('settings.density_comfortable_btn') },
     { value: 'compact', label: $t('settings.density_compact_btn') },
@@ -422,6 +430,7 @@
 
   // Appearance & Behavior settings (persisted in localStorage)
   let selectedTheme = $state<'light' | 'dark' | 'auto'>('auto');
+  let selectedAccent = $state<AccentChoice>('blue');
   let selectedDensity = $state<ThemeDensity>('auto');
   let systemTimezone = $state('—');
   let animationsEnabled = $state(true);
@@ -442,6 +451,11 @@
     try {
       const saved = localStorage.getItem('theme') || '';
       selectedTheme = saved === 'light' || saved === 'dark' ? saved : 'auto';
+      const savedAccent = localStorage.getItem('accent') || '';
+      selectedAccent =
+        savedAccent === 'indigo' || savedAccent === 'steel' || savedAccent === 'graphite'
+          ? savedAccent
+          : 'blue';
       const savedDensity = localStorage.getItem('theme_density');
       selectedDensity =
         savedDensity === 'comfortable' || savedDensity === 'compact' ? savedDensity : 'auto';
@@ -462,6 +476,19 @@
       } else {
         localStorage.setItem('theme', t);
         document.documentElement.setAttribute('data-theme', t);
+      }
+    } catch {}
+  }
+
+  function setAccent(a: AccentChoice) {
+    selectedAccent = a;
+    try {
+      if (a === 'blue') {
+        localStorage.removeItem('accent');
+        document.documentElement.removeAttribute('data-accent');
+      } else {
+        localStorage.setItem('accent', a);
+        document.documentElement.setAttribute('data-accent', a);
       }
     } catch {}
   }
@@ -823,6 +850,28 @@
             ariaLabel={$t('settings.theme')}
             onchange={(val) => setTheme(val as 'light' | 'dark' | 'auto')}
           />
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.accent')}</span>
+            <div class="field-row-desc">{$t('settings.accent_desc')}</div>
+          </div>
+          <div class="accent-picker" role="group" aria-label={$t('settings.accent')}>
+            {#each accentItems as item (item.value)}
+              <button
+                type="button"
+                class="accent-swatch accent-swatch--{item.value}"
+                class:is-active={selectedAccent === item.value}
+                aria-pressed={selectedAccent === item.value}
+                title={$t(item.labelKey)}
+                onclick={() => setAccent(item.value)}
+              >
+                {#if selectedAccent === item.value}
+                  <Icon name="check" size={13} />
+                {/if}
+              </button>
+            {/each}
+          </div>
         </div>
         <div class="field-row">
           <div>
@@ -1626,6 +1675,52 @@
     font-size: 13px;
     color: var(--fg-secondary);
     text-align: right;
+  }
+
+  /* accent color picker */
+  .accent-picker {
+    display: flex;
+    gap: 10px;
+  }
+
+  .accent-swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-full);
+    border: 2px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    cursor: pointer;
+    padding: 0;
+    transition:
+      transform var(--transition-fast),
+      border-color var(--transition-fast);
+  }
+
+  .accent-swatch:hover {
+    transform: scale(1.08);
+  }
+
+  .accent-swatch.is-active {
+    border-color: var(--fg-primary);
+  }
+
+  .accent-swatch--blue {
+    background: #0a779f;
+  }
+
+  .accent-swatch--indigo {
+    background: #4f46e5;
+  }
+
+  .accent-swatch--steel {
+    background: #46647c;
+  }
+
+  .accent-swatch--graphite {
+    background: #33393f;
   }
 
   .field-row-val.mono {

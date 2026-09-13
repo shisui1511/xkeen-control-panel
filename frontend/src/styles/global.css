@@ -37,8 +37,8 @@
   --primary: #29c2f0;
   --accent-hover: #45cef5;
   --accent-2: #1aa6d4;
-  --accent-soft: rgba(41, 194, 240, 0.14);
-  --accent-line: rgba(41, 194, 240, 0.42);
+  --accent-soft: rgba(var(--accent-rgb), 0.14);
+  --accent-line: rgba(var(--accent-rgb), 0.42);
   --warning-soft: color-mix(in srgb, var(--warning) 14%, transparent);
 
   /* Semantic */
@@ -60,7 +60,7 @@
   --bg-group-head-from: rgba(20, 51, 79, 0.9);
   --bg-group-head-to: rgba(16, 42, 68, 0.95);
 
-  --hover: rgba(41, 194, 240, 0.08);
+  --hover: rgba(var(--accent-rgb), 0.08);
 
   /* Phantom-token aliases */
   --fg-muted: var(--fg-dim);
@@ -224,7 +224,7 @@
   --accent-hover: #08698c;
   --accent-rgb: 10, 119, 159;
 
-  --hover: rgba(10, 119, 159, 0.07);
+  --hover: rgba(var(--accent-rgb), 0.07);
 
   --success: #1a7f4e;
   --warning: #8b5c00;
@@ -286,6 +286,61 @@
   --grid-gap: 16px;
   --row-gap: 12px;
   --font-size-table: 0.8125rem;
+}
+
+/* ------------ Accent color variants (Theme-agnostic: applies orthogonally to dark and light themes) ------------- */
+[data-accent='indigo'] {
+  --accent-2: #4f46e5;
+}
+
+[data-accent='indigo']:not([data-theme='light']) {
+  --accent: #818cf8;
+  --primary: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-rgb: 129, 140, 248;
+}
+
+[data-theme='light'][data-accent='indigo'] {
+  --accent: #4f46e5;
+  --primary: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-rgb: 79, 70, 229;
+}
+
+[data-accent='steel'] {
+  --accent-2: #5c7691;
+}
+
+[data-accent='steel']:not([data-theme='light']) {
+  --accent: #7d95ad;
+  --primary: #7d95ad;
+  --accent-hover: #93a8bd;
+  --accent-rgb: 125, 149, 173;
+}
+
+[data-theme='light'][data-accent='steel'] {
+  --accent: #46647c;
+  --primary: #46647c;
+  --accent-hover: #3a5468;
+  --accent-rgb: 70, 100, 124;
+}
+
+[data-accent='graphite'] {
+  --accent-2: #8b96a3;
+}
+
+[data-accent='graphite']:not([data-theme='light']) {
+  --accent: #aab4bf;
+  --primary: #aab4bf;
+  --accent-hover: #c0c8d1;
+  --accent-rgb: 170, 180, 191;
+}
+
+[data-theme='light'][data-accent='graphite'] {
+  --accent: #33393f;
+  --primary: #33393f;
+  --accent-hover: #262b30;
+  --accent-rgb: 51, 57, 63;
 }
 
 @media (prefers-reduced-motion: reduce) {

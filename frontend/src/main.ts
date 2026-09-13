@@ -18,7 +18,22 @@ function initTheme() {
   document.documentElement.setAttribute('data-theme', theme);
 }
 
+function initAccent() {
+  let saved = '';
+  try {
+    saved = localStorage.getItem('accent') || '';
+  } catch (e) {
+    // localStorage may be unavailable in private mode or with blocked cookies
+  }
+  if (saved === 'indigo' || saved === 'steel' || saved === 'graphite') {
+    document.documentElement.setAttribute('data-accent', saved);
+  } else {
+    document.documentElement.removeAttribute('data-accent');
+  }
+}
+
 initTheme();
+initAccent();
 initDensity();
 
 const app = mount(App, {
