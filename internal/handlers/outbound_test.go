@@ -36,7 +36,7 @@ func newOutboundTestAPI(t *testing.T) (*API, string) {
 		pathVal:         pathVal,
 		configSvc:       configSvc,
 		subscriptionSvc: subSvc,
-		kernelSvc:       services.NewKernelService(),
+		kernelSvc:       services.NewKernelService(t.TempDir()),
 		consoleSvc:      services.NewConsoleService("/bin/true"),
 	}
 

@@ -450,6 +450,7 @@ type KernelService struct {
 	kernels      map[string]*KernelInfo
 	mu           sync.RWMutex
 	installLocks sync.Map // per-kernel install lock; key: string, value: *sync.Mutex
+	dataDir      string
 
 	// statFunc is used to check if a file exists; defaults to os.Stat.
 	// Overridable in tests to verify TTL caching without touching the filesystem.
@@ -459,10 +460,17 @@ type KernelService struct {
 	githubAPIBase string
 }
 
-func NewKernelService() *KernelService {
+// kernelChannelStore is the on-disk format used to persist per-kernel update
+// channel selection (SRV channel setting survives xcp restarts/deploys).
+type kernelChannelStore struct {
+	Channels map[string]string `json:"channels"`
+}
+
+func NewKernelService(dataDir string) *KernelService {
 	svc := &KernelService{
 		kernels:  make(map[string]*KernelInfo),
 		statFunc: os.Stat,
+		dataDir:  dataDir,
 	}
 
 	now := time.Now()
@@ -498,12 +506,56 @@ func NewKernelService() *KernelService {
 		verCache:           &versionCache{},
 	}
 
+	// Restore persisted channel selection (falls back to "stable" defaults above
+	// if no store exists yet, e.g. first run or an xcp build predating this feature).
+	svc.loadChannels()
+
 	// Detect current versions (outside lock — no concurrent calls yet)
 	for _, k := range svc.kernels {
 		k.CurrentVersion = svc.detectVersion(k)
 	}
 
 	return svc
+}
+
+// channelStorePath returns the path to the on-disk kernel channel store,
+// creating its parent directory if needed.
+func (s *KernelService) channelStorePath() string {
+	dir := filepath.Join(s.dataDir, "kernels")
+	_ = os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, "channels.json")
+}
+
+// loadChannels restores previously persisted channel selections. Missing or
+// unreadable stores are silently ignored — kernels keep their "stable" default.
+func (s *KernelService) loadChannels() {
+	data, err := os.ReadFile(s.channelStorePath())
+	if err != nil {
+		return
+	}
+	var store kernelChannelStore
+	if err := json.Unmarshal(data, &store); err != nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for name, channel := range store.Channels {
+		if channel != "stable" && channel != "preview" {
+			continue
+		}
+		if k, ok := s.kernels[name]; ok {
+			k.Channel = channel
+		}
+	}
+}
+
+// persistChannels writes the given name->channel map to disk atomically.
+func (s *KernelService) persistChannels(channels map[string]string) error {
+	data, err := json.MarshalIndent(kernelChannelStore{Channels: channels}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return utils.AtomicWriteFile(s.channelStorePath(), data, 0600)
 }
 
 // resolveBinaryPath refreshes k.BinaryPath via auto-detection if the 60s TTL has expired.
@@ -606,17 +658,30 @@ func (s *KernelService) GetActiveKernel() string {
 	return ""
 }
 
+// SetChannel switches a kernel's update channel (stable/preview) and persists
+// the selection to disk so it survives xcp restarts (T-CH-02). Returns false
+// if the channel value is invalid or the kernel is unknown.
 func (s *KernelService) SetChannel(name, channel string) bool {
 	if channel != "stable" && channel != "preview" {
 		return false
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if k, ok := s.kernels[name]; ok {
-		k.Channel = channel
-		return true
+	k, ok := s.kernels[name]
+	if !ok {
+		s.mu.Unlock()
+		return false
 	}
-	return false
+	k.Channel = channel
+	channels := make(map[string]string, len(s.kernels))
+	for n, kk := range s.kernels {
+		channels[n] = kk.Channel
+	}
+	s.mu.Unlock()
+
+	if err := s.persistChannels(channels); err != nil {
+		log.Printf("WARNING: failed to persist kernel channel selection: %v", err)
+	}
+	return true
 }
 
 // versionCacheTTL is the duration for which a detected version string is considered valid.
@@ -714,9 +779,15 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 		githubBase = s.githubAPIBase
 	}
 
+	// previewReleaseWindow bounds how many recent releases are scanned for a
+	// prerelease tag on the "preview" channel. 5 was too narrow: both Xray-core
+	// and mihomo can publish several stable point releases between prereleases,
+	// which produced a false "up to date" instead of surfacing the real preview.
+	const previewReleaseWindow = 30
+
 	apiURL := fmt.Sprintf("%s/repos/%s/releases/latest", githubBase, repo)
 	if channel != "stable" {
-		apiURL = fmt.Sprintf("%s/repos/%s/releases?per_page=5", githubBase, repo)
+		apiURL = fmt.Sprintf("%s/repos/%s/releases?per_page=%d", githubBase, repo, previewReleaseWindow)
 	}
 
 	var client *http.Client
@@ -784,6 +855,14 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 		}
 	}
 
+	// On the preview channel, an empty result only means no prerelease tag was
+	// found within the scanned window — not that the current build is confirmed
+	// up to date. Say so explicitly instead of silently reporting "actual".
+	resultMessage := ""
+	if channel != "stable" && latestVersion == "" {
+		resultMessage = fmt.Sprintf("No prerelease found in the last %d releases of %s", previewReleaseWindow, repo)
+	}
+
 	s.mu.Lock()
 	if kk := s.kernels[name]; kk != nil {
 		kk.LatestVersion = latestVersion
@@ -793,7 +872,7 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 			kk.HasUpdate = latestVersion != ""
 		}
 		kk.Status = "idle"
-		kk.Message = ""
+		kk.Message = resultMessage
 	}
 	s.mu.Unlock()
 	return nil

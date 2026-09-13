@@ -65,7 +65,7 @@ func TestKernelProcessStatus_NotAccessible(t *testing.T) {
 
 // TestKernelBinaryCache_TTL: verifies that resolveBinaryPath respects the 60s TTL cache.
 func TestKernelBinaryCache_TTL(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 
 	// Override statFunc with a counter
 	callCount := 0
@@ -95,14 +95,14 @@ func TestKernelBinaryCache_TTL(t *testing.T) {
 }
 
 func TestKernelService_New(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	if svc == nil {
 		t.Fatal("expected non-nil service")
 	}
 }
 
 func TestKernelService_List(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	kernels := svc.List()
 	if len(kernels) == 0 {
 		t.Fatal("expected at least one kernel")
@@ -110,7 +110,7 @@ func TestKernelService_List(t *testing.T) {
 }
 
 func TestKernelService_Get(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	kernel := svc.Get("xray")
 	if kernel == nil {
 		t.Fatal("expected xray kernel to exist")
@@ -136,7 +136,7 @@ func TestKernelService_GetActiveKernel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	svc.kernels["mihomo"].BinaryPath = mihomoBin
 	svc.kernels["xray"].BinaryPath = xrayBin
 
@@ -184,7 +184,7 @@ func TestKernelService_GetActiveKernel(t *testing.T) {
 }
 
 func TestKernelService_Get_Unknown(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	kernel := svc.Get("unknown")
 	if kernel != nil {
 		t.Fatal("expected nil for unknown kernel")
@@ -192,7 +192,7 @@ func TestKernelService_Get_Unknown(t *testing.T) {
 }
 
 func TestKernelService_SetChannel(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 
 	ok := svc.SetChannel("xray", "preview")
 	if !ok {
@@ -210,12 +210,50 @@ func TestKernelService_SetChannel(t *testing.T) {
 	}
 }
 
+// TestKernelService_ChannelPersistsAcrossRestart verifies channel selection
+// survives process restarts (e.g. the mandatory redeploy after every build),
+// since it is now persisted to <dataDir>/kernels/channels.json instead of
+// living only in the in-memory KernelInfo struct.
+func TestKernelService_ChannelPersistsAcrossRestart(t *testing.T) {
+	dataDir := t.TempDir()
+
+	svc := NewKernelService(dataDir)
+	if !svc.SetChannel("mihomo", "preview") {
+		t.Fatal("expected SetChannel to succeed")
+	}
+
+	restarted := NewKernelService(dataDir)
+	if got := restarted.Get("mihomo").Channel; got != "preview" {
+		t.Fatalf("expected persisted channel 'preview' after restart, got %q", got)
+	}
+	if got := restarted.Get("xray").Channel; got != "stable" {
+		t.Fatalf("expected untouched xray channel to stay 'stable', got %q", got)
+	}
+}
+
+// TestKernelService_ChannelStore_IgnoresGarbage verifies a corrupt or
+// tampered channels.json falls back to defaults instead of failing startup.
+func TestKernelService_ChannelStore_IgnoresGarbage(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dataDir, "kernels"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "kernels", "channels.json"), []byte("not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewKernelService(dataDir)
+	if got := svc.Get("xray").Channel; got != "stable" {
+		t.Fatalf("expected default channel 'stable' with corrupt store, got %q", got)
+	}
+}
+
 func TestKernelService_DetectVersion_Xray(t *testing.T) {
 	tmpDir := t.TempDir()
 	xrayPath := filepath.Join(tmpDir, "xray")
 	os.WriteFile(xrayPath, []byte("#!/bin/sh\necho \"Xray 1.8.24 (Xray, Penetrates Everything.)\"\n"), 0755)
 
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	svc.kernels["xray"].BinaryPath = xrayPath
 
 	v := svc.detectVersion(svc.kernels["xray"])
@@ -229,7 +267,7 @@ func TestKernelService_DetectVersion_Mihomo(t *testing.T) {
 	mihomoPath := filepath.Join(tmpDir, "mihomo")
 	os.WriteFile(mihomoPath, []byte("#!/bin/sh\necho \"Mihomo Version v1.18.0\"\n"), 0755)
 
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	svc.kernels["mihomo"].BinaryPath = mihomoPath
 
 	v := svc.detectVersion(svc.kernels["mihomo"])
@@ -239,7 +277,7 @@ func TestKernelService_DetectVersion_Mihomo(t *testing.T) {
 }
 
 func TestKernelService_DetectVersion_NotInstalled(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	svc.kernels["xray"].BinaryPath = "/tmp/does-not-exist"
 
 	v := svc.detectVersion(svc.kernels["xray"])
@@ -278,7 +316,7 @@ func TestValidateKernelPath(t *testing.T) {
 
 // TestSetChannel_InvalidValue: invalid channel name returns false.
 func TestSetChannel_InvalidValue(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	ok := svc.SetChannel("xray", "nightly")
 	if ok {
 		t.Error("expected SetChannel to return false for invalid channel 'nightly'")
@@ -296,7 +334,7 @@ func TestSetChannel_InvalidValue(t *testing.T) {
 // TestConcurrentInstall409: calling Install twice on the same kernel while the first is in progress
 // returns an error containing "install already in progress".
 func TestConcurrentInstall409(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 
 	// Manually acquire the install lock for "xray" to simulate an in-progress install.
 	mu := &sync.Mutex{}
@@ -318,7 +356,7 @@ func TestConcurrentInstall409(t *testing.T) {
 // TestKernelInstall_Concurrent: two concurrent Install calls for the same kernel
 // should result in only one succeeding; the second must receive "install already in progress".
 func TestKernelInstall_Concurrent(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 
 	// Hold the install lock directly to simulate an in-progress install.
 	mu := &sync.Mutex{}
@@ -358,7 +396,7 @@ func TestKernelVersionCache_TTL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	k := svc.kernels["xray"]
 	k.BinaryPath = scriptPath
 
@@ -404,7 +442,7 @@ func TestKernelVersionCache_TTL(t *testing.T) {
 
 // TestKernelVersionRegex_VPrefix: parseVersion must strip leading 'v'/'V' prefix.
 func TestKernelVersionRegex_VPrefix(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 
 	cases := []struct {
 		name  string
@@ -464,7 +502,7 @@ func TestDecompressionLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	outPath, err := svc.extractZip(zipPath, "xray")
 	// The function should succeed (LimitReader silently stops at limit) but we verify
 	// the output file is not larger than maxKernelExtractBytes
@@ -536,7 +574,7 @@ func TestCheckLatest_SemverHasUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	// Scenario 1: CurrentVersion = "1.18.1", latestVersion = "1.18.0" -> HasUpdate == false
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	svc.testClient = server.Client()
 	svc.githubAPIBase = server.URL
 	svc.kernels["xray"].CurrentVersion = "1.18.1"
@@ -552,7 +590,7 @@ func TestCheckLatest_SemverHasUpdate(t *testing.T) {
 	}
 
 	// Scenario 2: CurrentVersion = "1.17.0", latestVersion = "1.18.0" -> HasUpdate == true
-	svc = NewKernelService()
+	svc = NewKernelService(t.TempDir())
 	svc.testClient = server.Client()
 	svc.githubAPIBase = server.URL
 	svc.kernels["xray"].CurrentVersion = "1.17.0"
@@ -568,7 +606,7 @@ func TestCheckLatest_SemverHasUpdate(t *testing.T) {
 	}
 
 	// Scenario 3: CurrentVersion = "not installed", latestVersion = "1.18.0" -> HasUpdate == true
-	svc = NewKernelService()
+	svc = NewKernelService(t.TempDir())
 	svc.testClient = server.Client()
 	svc.githubAPIBase = server.URL
 	svc.kernels["xray"].CurrentVersion = "not installed"
@@ -581,6 +619,40 @@ func TestCheckLatest_SemverHasUpdate(t *testing.T) {
 	}
 	if !svc.kernels["xray"].HasUpdate {
 		t.Errorf("expected HasUpdate = true for current 'not installed' and latest 1.18.0")
+	}
+}
+
+// TestCheckLatest_PreviewNoPrereleaseFound verifies that when the "preview"
+// channel finds no prerelease tag in the scanned release window, this is
+// reported via Message rather than silently looking identical to "up to date".
+func TestCheckLatest_PreviewNoPrereleaseFound(t *testing.T) {
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[{"tag_name":"v1.18.0","prerelease":false},{"tag_name":"v1.17.0","prerelease":false}]`))
+	}))
+	defer server.Close()
+
+	svc := NewKernelService(t.TempDir())
+	svc.testClient = server.Client()
+	svc.githubAPIBase = server.URL
+	svc.kernels["xray"].CurrentVersion = "1.18.0"
+	svc.kernels["xray"].Channel = "preview"
+	svc.kernels["xray"].Repo = "some/repo"
+
+	if err := svc.CheckLatest(context.Background(), "xray"); err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+	k := svc.kernels["xray"]
+	if k.HasUpdate {
+		t.Errorf("expected HasUpdate = false when no prerelease was found")
+	}
+	if k.Message == "" {
+		t.Errorf("expected a non-empty Message explaining no prerelease was found")
+	}
+	if gotQuery != "per_page=30" {
+		t.Errorf("expected per_page=30 request for preview channel, got query %q", gotQuery)
 	}
 }
 
@@ -635,7 +707,7 @@ func TestIsShortLivedOrHelperProcess(t *testing.T) {
 }
 
 func TestKernelService_List_Order(t *testing.T) {
-	svc := NewKernelService()
+	svc := NewKernelService(t.TempDir())
 	list := svc.List()
 	if len(list) < 2 {
 		t.Fatalf("expected at least 2 kernels, got %d", len(list))

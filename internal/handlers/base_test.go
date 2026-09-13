@@ -82,7 +82,7 @@ func TestAPIGettersAndSetters(t *testing.T) {
 	}
 
 	// KernelService
-	ks := services.NewKernelService()
+	ks := services.NewKernelService(t.TempDir())
 	api.SetKernelService(ks)
 	if api.KernelService() != ks {
 		t.Error("expected non-nil KernelService")

@@ -148,6 +148,11 @@ func (a *API) KernelChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Channel != "stable" && req.Channel != "preview" {
+		JSONError(w, http.StatusBadRequest, "invalid channel: must be 'stable' or 'preview'")
+		return
+	}
+
 	if !a.kernelSvc.SetChannel(name, req.Channel) {
 		JSONError(w, http.StatusNotFound, "Kernel not found")
 		return

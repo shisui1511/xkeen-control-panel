@@ -496,7 +496,7 @@ func main() {
 	api.SetNetworkToolsService(networkSvc)
 
 	// Kernels
-	kernelSvc := services.NewKernelService()
+	kernelSvc := services.NewKernelService(cfg.DataDir)
 	api.SetKernelService(kernelSvc)
 	subscriptionSvc.SetKernelService(kernelSvc)
 	srv.HandleProtected("/api/kernels", api.KernelList)

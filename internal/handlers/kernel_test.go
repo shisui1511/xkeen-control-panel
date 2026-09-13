@@ -63,7 +63,7 @@ func newKernelTestAPI(t *testing.T) (*API, string) {
 	// Update PATH again for the new locations
 	os.Setenv("PATH", tmpDir+string(os.PathListSeparator)+origPath)
 
-	kernelSvc := services.NewKernelService()
+	kernelSvc := services.NewKernelService(t.TempDir())
 
 	return &API{
 		cfg:       cfg,
@@ -272,6 +272,15 @@ func TestKernelHandlers_Validation(t *testing.T) {
 	api.KernelChannel(recChanGhost, reqChanGhost)
 	if recChanGhost.Code != http.StatusNotFound {
 		t.Errorf("expected 404 for ghost KernelChannel, got %d", recChanGhost.Code)
+	}
+
+	// An invalid channel value on a real kernel must be a 400, not the same 404
+	// used for an unknown kernel name — the two failures have different causes.
+	reqChanInvalid := httptest.NewRequest(http.MethodPost, "/api/kernels/xray/channel", strings.NewReader(`{"channel":"nightly"}`))
+	recChanInvalid := httptest.NewRecorder()
+	api.KernelChannel(recChanInvalid, reqChanInvalid)
+	if recChanInvalid.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid channel value, got %d", recChanInvalid.Code)
 	}
 
 	// 6. KernelRollback: GET -> 405, nonexistent -> 404

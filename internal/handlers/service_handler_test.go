@@ -26,7 +26,7 @@ func newServiceTestAPI(t *testing.T, binaryPath string) *API {
 	return &API{
 		cfg:       cfg,
 		xkeenSvc:  services.NewXKeenService(binaryPath, tmpDir),
-		kernelSvc: services.NewKernelService(),
+		kernelSvc: services.NewKernelService(t.TempDir()),
 		pathVal:   utils.NewPathValidator(cfg.AllowedRoots),
 	}
 }
