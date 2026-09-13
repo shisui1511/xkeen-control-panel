@@ -8,11 +8,10 @@ describe('Toast a11y & live regions', () => {
     toastStore.set([]);
   });
 
-  it('renders container with role="region" and aria-live="polite"', () => {
-    toastStore.set([{ id: 1, type: 'info', message: 'Информация' }]);
+  it('renders persistent container with role="region" and aria-label', () => {
     const { body } = render(Toast);
+    expect(body).toContain('toast-container');
     expect(body).toContain('role="region"');
-    expect(body).toContain('aria-live="polite"');
   });
 
   it('renders role="alert" and aria-live="assertive" for error toast', () => {

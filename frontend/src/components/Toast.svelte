@@ -15,46 +15,39 @@
   }
 </script>
 
-{#if $toastStore.length > 0}
-  <div
-    class="toast-container"
-    role="region"
-    aria-label={$t('app.notifications')}
-    aria-live="polite"
-  >
-    {#each $toastStore as toast (toast.id)}
-      <div
-        class="toast toast--{toast.type}"
-        role={toast.type === 'error' ? 'alert' : 'status'}
-        aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
-        aria-atomic="true"
-      >
-        <span class="toast__icon">
-          <Icon name={getIconName(toast.type)} size={16} />
-        </span>
-        <span class="toast__message">{toast.message}</span>
-        {#if toast.action}
-          <button
-            type="button"
-            class="btn btn-secondary toast__action"
-            onclick={() => {
-              toast.action?.onClick();
-              dismiss(toast.id);
-            }}
-          >
-            {toast.action.label}
-          </button>
-        {/if}
+<div class="toast-container" role="region" aria-label={$t('app.notifications')}>
+  {#each $toastStore as toast (toast.id)}
+    <div
+      class="toast toast--{toast.type}"
+      role={toast.type === 'error' ? 'alert' : 'status'}
+      aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
+      aria-atomic="true"
+    >
+      <span class="toast__icon">
+        <Icon name={getIconName(toast.type)} size={16} />
+      </span>
+      <span class="toast__message">{toast.message}</span>
+      {#if toast.action}
         <button
           type="button"
-          class="toast__close"
-          onclick={() => dismiss(toast.id)}
-          aria-label={$t('app.dismiss')}>×</button
+          class="btn btn-secondary toast__action"
+          onclick={() => {
+            toast.action?.onClick();
+            dismiss(toast.id);
+          }}
         >
-      </div>
-    {/each}
-  </div>
-{/if}
+          {toast.action.label}
+        </button>
+      {/if}
+      <button
+        type="button"
+        class="toast__close"
+        onclick={() => dismiss(toast.id)}
+        aria-label={$t('app.dismiss')}>×</button
+      >
+    </div>
+  {/each}
+</div>
 
 <style>
   .toast-container {
