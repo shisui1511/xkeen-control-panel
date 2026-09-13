@@ -14,6 +14,7 @@
   import PageHeader from './PageHeader.svelte';
   import StatusBadge from './components/StatusBadge.svelte';
   import SegmentedControl from './components/SegmentedControl.svelte';
+  import EmptyState from './components/EmptyState.svelte';
   import { apiFetch } from './lib/api';
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
@@ -1075,9 +1076,7 @@
       </div>
     {:else if watchdogStatus}
       {#if watchdogStatus.state === 'armed' || watchdogStatus.state === 'idle'}
-        <div class="watchdog-no-incidents">
-          {$t('watchdog.no_incidents')}
-        </div>
+        <EmptyState title={$t('watchdog.empty_title')} description={$t('watchdog.empty_desc')} />
       {:else}
         <div class="watchdog-content">
           <div
@@ -1382,14 +1381,12 @@
   }
 
   .active-pill {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: 12px;
+    font-weight: 600;
     padding: 1px 6px;
     border-radius: 10px;
     background: var(--accent);
-    color: #fff;
+    color: var(--btn-primary-text);
   }
 
   .radio-desc {
@@ -1417,7 +1414,7 @@
   }
 
   .meta-lbl {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--fg-dim);
   }
@@ -1443,7 +1440,7 @@
 
   .btn-danger-soft {
     background: rgba(244, 112, 127, 0.15);
-    color: var(--danger, #f4707f);
+    color: var(--danger);
     border: 1px solid rgba(244, 112, 127, 0.3);
   }
 
@@ -1453,7 +1450,7 @@
 
   .btn-warning-soft {
     background: rgba(245, 166, 35, 0.15);
-    color: var(--warning, #f5a623);
+    color: var(--warning);
     border: 1px solid rgba(245, 166, 35, 0.3);
   }
 
@@ -1573,11 +1570,11 @@
   }
 
   .log-entry.log-success {
-    border-left-color: var(--success, #46d18a);
+    border-left-color: var(--success);
   }
 
   .log-entry.log-fail {
-    border-left-color: var(--danger, #f4707f);
+    border-left-color: var(--danger);
   }
 
   .log-meta {
@@ -1593,14 +1590,14 @@
   }
 
   .log-ts {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
     margin-left: auto;
   }
 
   .log-output {
     margin: 6px 0 0;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
     white-space: pre-wrap;
     word-break: break-all;
@@ -1634,7 +1631,7 @@
   }
 
   .entware-desc {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
     margin-top: 2px;
   }
@@ -1652,12 +1649,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-2, 8px);
-    padding: var(--spacing-2, 8px) 0;
-  }
-
-  .watchdog-no-incidents {
-    font-size: var(--font-size-sm, 13px);
-    color: var(--fg-secondary);
     padding: var(--spacing-2, 8px) 0;
   }
 
