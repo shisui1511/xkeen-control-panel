@@ -1539,7 +1539,7 @@
     title={$t('editor.h1')}
     subtitle={$t('editor.h1_sub')}
     breadcrumbs={[
-      { label: $t('nav.group_system') },
+      { label: $t('nav.group_tools') },
       { label: $t('nav.editor') },
       ...(activeTab === 'constructor' ? [{ label: $t('editor.tab_constructor') }] : [])
     ]}

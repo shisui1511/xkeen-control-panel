@@ -121,13 +121,29 @@
     if (!watchdogStatus?.state) return null;
     switch (watchdogStatus.state) {
       case 'armed':
-        return { cssClass: 'badge badge-success', labelKey: 'watchdog.state_armed' };
+        return {
+          cssClass: 'badge badge-success',
+          labelKey: 'watchdog.state_armed',
+          hintKey: 'watchdog.state_armed_hint'
+        };
       case 'idle':
-        return { cssClass: 'badge', labelKey: 'watchdog.state_idle' };
+        return {
+          cssClass: 'badge',
+          labelKey: 'watchdog.state_idle',
+          hintKey: 'watchdog.state_idle_hint'
+        };
       case 'degraded':
-        return { cssClass: 'badge badge-danger', labelKey: 'watchdog.state_degraded' };
+        return {
+          cssClass: 'badge badge-danger',
+          labelKey: 'watchdog.state_degraded',
+          hintKey: 'watchdog.state_degraded_hint'
+        };
       case 'disarmed':
-        return { cssClass: 'badge badge-warning', labelKey: 'watchdog.state_disarmed' };
+        return {
+          cssClass: 'badge badge-warning',
+          labelKey: 'watchdog.state_disarmed',
+          hintKey: 'watchdog.state_disarmed_hint'
+        };
       default:
         return null;
     }
@@ -1244,22 +1260,27 @@
               <div class="dash-col-left">
                 <!-- Service Status Group (DASH-03) -->
                 <div class="dash-section">
-                  {#if watchdogBadge}
-                    <div class="dash-watchdog-badge-row">
-                      <span class={watchdogBadge.cssClass}>{$t(watchdogBadge.labelKey)}</span>
-                    </div>
-                  {/if}
-                  <ServiceStatusGroup
-                    {serviceStatus}
-                    capabilities={$capabilities}
-                    xkeenVersion={version !== $t('app.loading') && version !== $t('app.error')
-                      ? version
-                      : ''}
-                    {statusLoading}
-                    {statusError}
-                    onRefresh={fetchLiveStatus}
-                    onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
-                  />
+                  <Card title={$t('dash.service_status')}>
+                    {#snippet actions()}
+                      {#if watchdogBadge}
+                        <div class="dash-watchdog-badge-row" title={$t(watchdogBadge.hintKey)}>
+                          <span class="dash-watchdog-label">{$t('watchdog.section_title')}</span>
+                          <span class={watchdogBadge.cssClass}>{$t(watchdogBadge.labelKey)}</span>
+                        </div>
+                      {/if}
+                    {/snippet}
+                    <ServiceStatusGroup
+                      {serviceStatus}
+                      capabilities={$capabilities}
+                      xkeenVersion={version !== $t('app.loading') && version !== $t('app.error')
+                        ? version
+                        : ''}
+                      {statusLoading}
+                      {statusError}
+                      onRefresh={fetchLiveStatus}
+                      onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
+                    />
+                  </Card>
                 </div>
 
                 <!-- System Resources (DASH-01, DASH-04) -->
@@ -1664,7 +1685,13 @@
   .dash-watchdog-badge-row {
     display: flex;
     align-items: center;
-    margin-bottom: var(--spacing-2, 8px);
+    gap: 6px;
+  }
+
+  .dash-watchdog-label {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--fg-dim);
   }
 
   .watchdog-stale-desc {

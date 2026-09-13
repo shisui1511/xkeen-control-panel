@@ -961,6 +961,46 @@ input[type='number'] {
     display: none;
   }
 
+  /* CR-03: in rail mode the group header carries no label (just an icon +
+     hidden arrow), so it reads as one more page-link icon — indistinguishable
+     from the real nav-item icons below it, even though clicking it actually
+     toggles the native <details> open state. Worse, a group collapsed while
+     the sidebar was expanded stays collapsed in rail mode too, so its pages
+     silently vanish from the icon rail with no visual trace they ever
+     existed. Hiding the (now purely decorative, unlabeled) summary and
+     forcing every item to render regardless of the group's stored open
+     state fixes both: rail always shows the full page set, and grouping is
+     conveyed by spacing instead of an ambiguous toggle control. */
+  .sidebar.rail .nav-group summary {
+    display: none;
+  }
+
+  .sidebar.rail .nav-group > .nav-item {
+    display: flex !important;
+  }
+
+  /* Chromium wraps non-summary <details> content in an internal
+     ::details-content box and hides THAT (content-visibility: hidden +
+     block-size: 0) when the details is closed — not the children
+     directly. Overriding display/content-visibility on the .nav-item
+     children (above) does nothing while their ancestor box is collapsed;
+     the ancestor itself has to be forced open. */
+  .sidebar.rail .nav-group::details-content {
+    content-visibility: visible !important;
+    block-size: auto !important;
+    overflow: visible !important;
+  }
+
+  .sidebar.rail .nav-group {
+    margin-top: 0;
+  }
+
+  .sidebar.rail .nav-group + .nav-group {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+
   /* CR-01: the floating rail-item tooltip used to live here as a CSS-only
      .nav-item::after with position: absolute. It never actually painted —
      .sidebar's overflow-y: auto forces overflow-x to compute to auto too
