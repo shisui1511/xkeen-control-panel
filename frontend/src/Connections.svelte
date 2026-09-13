@@ -98,7 +98,9 @@
 
   $effect(() => {
     if (selectedConnectionId) {
-      previouslyFocusedRow = document.activeElement as HTMLElement;
+      if (!previouslyFocusedRow) {
+        previouslyFocusedRow = document.activeElement as HTMLElement;
+      }
       setTimeout(() => {
         if (drawerElement) {
           const focusables = getDrawerFocusableElements();
@@ -135,7 +137,7 @@
       const last = focusables[focusables.length - 1];
       const active = document.activeElement;
       if (event.shiftKey) {
-        if (active === first) {
+        if (active === first || active === drawerElement || !drawerElement?.contains(active)) {
           last.focus();
           event.preventDefault();
         }
@@ -1130,8 +1132,9 @@
   <button
     type="button"
     class="drawer-backdrop"
+    tabindex="-1"
+    aria-hidden="true"
     onclick={() => (selectedConnectionId = null)}
-    aria-label={$t('app.close')}
   ></button>
   <div
     class="inspector-drawer"
