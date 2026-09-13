@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { t } from './i18n';
   import { apiFetch } from './lib/api';
+  import Button from './components/Button.svelte';
 
   let password = $state('');
   let error = $state('');
@@ -138,14 +139,9 @@
       {/if}
     </div>
 
-    <button
-      class="btn btn-primary"
-      style="width:100%;padding:11px 14px;font-size:13.5px;"
-      onclick={handleLogin}
-      disabled={loading}
-    >
+    <Button variant="primary" class="login-btn" onclick={handleLogin} {loading}>
       {loading ? $t('auth.logging_in') : $t('auth.login_btn')}
-    </button>
+    </Button>
 
     <div class="login-footer">
       <span>{version}</span>
@@ -155,6 +151,11 @@
 </div>
 
 <style>
+  :global(.login-btn) {
+    width: 100%;
+    min-height: var(--btn-h);
+  }
+
   /* Full-page centred layout */
   .login-screen {
     min-height: 100vh;
