@@ -180,6 +180,8 @@ func (s *DATManagerService) List() []DATFile {
 						}
 						if isGeoIPFile(nil, f.Name, "") {
 							entry.GeoType = "geoip"
+						} else if peekData, err := readFirstBytes(match, 4096); err == nil && isGeoIPFile(peekData, f.Name, "") {
+							entry.GeoType = "geoip"
 						} else {
 							entry.GeoType = "geosite"
 						}
@@ -287,12 +289,20 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	// Final absolute path - fully controlled and sanitized
 	targetAbs := filepath.Join(baseDir, safeName)
 
+	origBaseDir := baseDir
 	// If targetAbs is a symlink, resolve to the underlying file so we update the real target and preserve the symlink!
 	if lstat, err := os.Lstat(targetAbs); err == nil && (lstat.Mode()&os.ModeSymlink != 0) {
 		if realTarget, err := filepath.EvalSymlinks(targetAbs); err == nil {
 			targetAbs = realTarget
 			baseDir = filepath.Dir(realTarget)
 			safeName = filepath.Base(realTarget)
+		} else if targetLink, err := os.Readlink(targetAbs); err == nil {
+			if !filepath.IsAbs(targetLink) {
+				targetLink = filepath.Join(filepath.Dir(targetAbs), targetLink)
+			}
+			targetAbs = targetLink
+			baseDir = filepath.Dir(targetLink)
+			safeName = filepath.Base(targetLink)
 		}
 	}
 
@@ -351,8 +361,9 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	}
 	tmpFile := out.Name()
 
-	// Limit response size to 50MB to prevent disk exhaustion on routers
-	written, copyErr := io.Copy(out, io.LimitReader(resp.Body, 50*1024*1024))
+	// Limit response size to 100MB to prevent disk exhaustion on routers
+	const maxDATDownloadSize = 100 * 1024 * 1024
+	written, copyErr := io.Copy(out, io.LimitReader(resp.Body, maxDATDownloadSize+1))
 	closeErr := out.Close()
 	if copyErr != nil {
 		os.Remove(tmpFile)
@@ -362,6 +373,10 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		os.Remove(tmpFile)
 		return 0, fmt.Errorf("failed to close file: %w", closeErr)
 	}
+	if written > maxDATDownloadSize {
+		os.Remove(tmpFile)
+		return 0, fmt.Errorf("downloaded file exceeds maximum allowed size (%d bytes)", maxDATDownloadSize)
+	}
 
 	// targetAbs is now fully sanitized and restricted to baseDir
 	_ = backupFile(targetAbs)
@@ -370,12 +385,21 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		return 0, fmt.Errorf("failed to replace file: %w", err)
 	}
 
-	// Validate against kernel configuration
-	if valErr := s.validateKernelConfig(baseDir, safeName); valErr != nil {
+	// Validate against kernel configuration for the initiating directory
+	if valErr := s.validateKernelConfig(origBaseDir, safeName); valErr != nil {
 		if restoreErr := restoreFile(targetAbs); restoreErr != nil {
 			return 0, fmt.Errorf("kernel validation failed with new %s: %s (rollback also failed, %s may be missing: %v)", safeName, valErr.Error(), safeName, restoreErr)
 		}
 		return 0, fmt.Errorf("kernel validation failed with new %s: %s (changes rolled back)", safeName, valErr.Error())
+	}
+	// Also validate target directory if different (e.g. symlinked file shared across kernels)
+	if baseDir != origBaseDir {
+		if valErr := s.validateKernelConfig(baseDir, safeName); valErr != nil {
+			if restoreErr := restoreFile(targetAbs); restoreErr != nil {
+				return 0, fmt.Errorf("kernel validation failed with new %s: %s (rollback also failed, %s may be missing: %v)", safeName, valErr.Error(), safeName, restoreErr)
+			}
+			return 0, fmt.Errorf("kernel validation failed with new %s: %s (changes rolled back)", safeName, valErr.Error())
+		}
 	}
 
 	cleanBackupFile(targetAbs)
@@ -489,8 +513,37 @@ func (s *DATManagerService) SearchTag(filename, tag, query string, page, pageSiz
 
 		if fieldNum == 1 {
 			entryData := data[pos:end]
-			entryTag, _ := parseDATEntry(entryData)
-			if entryTag == tag {
+			entryTag, _ := parseDATEntryFiltered(entryData, tag)
+			if strings.EqualFold(entryTag, tag) {
+				if pageSize <= 0 {
+					pageSize = 50
+				}
+				if pageSize > 100 {
+					pageSize = 100
+				}
+				start := page * pageSize
+				if start < 0 {
+					start = 0
+				}
+
+				if query == "" {
+					var paged []string
+					var totalCount int
+					if isGeoIP {
+						paged, totalCount = parseDATEntryCIDRsPaged(entryData, start, pageSize)
+					} else {
+						paged, totalCount = parseDATEntryDomainsPaged(entryData, start, pageSize)
+					}
+					hasMore := start+len(paged) < totalCount
+					return &DATSearchResult{
+						Tag:     tag,
+						Entries: paged,
+						Total:   totalCount,
+						Page:    page,
+						HasMore: hasMore,
+					}, nil
+				}
+
 				if isGeoIP {
 					entries = parseDATEntryCIDRs(entryData)
 				} else {
@@ -553,6 +606,92 @@ func (s *DATManagerService) SearchTag(filename, tag, query string, page, pageSiz
 		Page:    page,
 		HasMore: hasMore,
 	}, nil
+}
+
+func parseDATEntryDomainsPaged(data []byte, offset, limit int) ([]string, int) {
+	var domains []string
+	pos := 0
+	idx := 0
+	total := 0
+	endLimit := offset + limit
+
+	for pos < len(data) {
+		ft, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+		wireType := ft & 0x7
+		fieldNum := ft >> 3
+
+		if wireType != 2 {
+			pos, _ = pbSkipField(data, pos, wireType)
+			continue
+		}
+
+		length, n := pbReadVarint(data, pos)
+		if n == 0 || length > uint64(len(data)-pos-n) {
+			break
+		}
+		pos += n
+		end := pos + int(length)
+
+		if fieldNum == 2 {
+			if idx >= offset && idx < endLimit {
+				dom := parseSingleDomain(data[pos:end])
+				if dom != "" {
+					domains = append(domains, dom)
+				}
+			}
+			idx++
+			total++
+		}
+		pos = end
+	}
+	return domains, total
+}
+
+func parseDATEntryCIDRsPaged(data []byte, offset, limit int) ([]string, int) {
+	var cidrs []string
+	pos := 0
+	idx := 0
+	total := 0
+	endLimit := offset + limit
+
+	for pos < len(data) {
+		ft, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+		wireType := ft & 0x7
+		fieldNum := ft >> 3
+
+		if wireType != 2 {
+			pos, _ = pbSkipField(data, pos, wireType)
+			continue
+		}
+
+		length, n := pbReadVarint(data, pos)
+		if n == 0 || length > uint64(len(data)-pos-n) {
+			break
+		}
+		pos += n
+		end := pos + int(length)
+
+		if fieldNum == 2 {
+			if idx >= offset && idx < endLimit {
+				c := parseSingleCIDR(data[pos:end])
+				if c != "" {
+					cidrs = append(cidrs, c)
+				}
+			}
+			idx++
+			total++
+		}
+		pos = end
+	}
+	return cidrs, total
 }
 
 func parseDATEntryDomains(data []byte) []string {
@@ -696,7 +835,7 @@ func parseDATEntryCIDRs(data []byte) []string {
 	return cidrs
 }
 
-func parseSingleCIDR(data []byte) string {
+func parseRawCIDR(data []byte) ([]byte, uint32) {
 	var ip []byte
 	var prefix uint32 = 0
 	pos := 0
@@ -711,10 +850,7 @@ func parseSingleCIDR(data []byte) string {
 
 		if fieldNum == 1 && wireType == 2 {
 			length, n2 := pbReadVarint(data, pos)
-			if n2 == 0 {
-				break
-			}
-			if length > uint64(len(data)-pos-n2) {
+			if n2 == 0 || length > uint64(len(data)-pos-n2) {
 				break
 			}
 			pos += n2
@@ -736,7 +872,11 @@ func parseSingleCIDR(data []byte) string {
 			}
 		}
 	}
+	return ip, prefix
+}
 
+func parseSingleCIDR(data []byte) string {
+	ip, prefix := parseRawCIDR(data)
 	if len(ip) == 4 || len(ip) == 16 {
 		netIP := net.IP(ip)
 		return fmt.Sprintf("%s/%d", netIP.String(), prefix)
@@ -802,6 +942,10 @@ func parseDATTags(data []byte) ([]DATTagResult, error) {
 // parseDATEntry reads a single GeoIP or GeoSite message and returns
 // (country_code, number of domain/cidr sub-entries under field 2).
 func parseDATEntry(data []byte) (string, int) {
+	return parseDATEntryFiltered(data, "")
+}
+
+func parseDATEntryFiltered(data []byte, targetTag string) (string, int) {
 	var tag string
 	count := 0
 	pos := 0
@@ -835,6 +979,9 @@ func parseDATEntry(data []byte) (string, int) {
 		switch fieldNum {
 		case 1: // country_code
 			tag = string(data[pos:end])
+			if targetTag != "" && !strings.EqualFold(tag, targetTag) {
+				return tag, 0
+			}
 		case 2: // domain / cidr list entry — just count them
 			count++
 		}
@@ -869,6 +1016,9 @@ func pbSkipField(data []byte, pos int, wireType uint64) (int, error) {
 		}
 		return pos + n, nil
 	case 1: // 64-bit
+		if pos+8 > len(data) {
+			return len(data), fmt.Errorf("truncated 64-bit field")
+		}
 		return pos + 8, nil
 	case 2: // length-delimited
 		length, n := pbReadVarint(data, pos)
@@ -880,6 +1030,9 @@ func pbSkipField(data []byte, pos int, wireType uint64) (int, error) {
 		}
 		return pos + n + int(length), nil
 	case 5: // 32-bit
+		if pos+4 > len(data) {
+			return len(data), fmt.Errorf("truncated 32-bit field")
+		}
 		return pos + 4, nil
 	default:
 		return len(data), fmt.Errorf("unknown wire type %d", wireType)
@@ -1023,13 +1176,13 @@ func (s *DATManagerService) validateKernelConfig(baseDir, filename string) error
 		}
 	}
 
-	if baseDir == s.xrayDir && s.xrayBinary != "" {
+	if (baseDir == s.xrayDir || strings.HasPrefix(baseDir, s.xrayDir)) && s.xrayBinary != "" {
 		if _, err := os.Stat(s.xrayBinary); err == nil {
 			confDir := s.xrayConfigDir
 			if confDir == "" {
 				confDir = "/opt/etc/xray/configs"
 			}
-			if _, err := os.Stat(confDir); err == nil {
+			if fi, err := os.Stat(confDir); err == nil && fi.IsDir() {
 				cmd := exec.CommandContext(ctx, s.xrayBinary, "-test", "-confdir", confDir)
 				cmd.Env = append(os.Environ(),
 					"XRAY_LOCATION_CONFDIR="+confDir,
@@ -1038,6 +1191,18 @@ func (s *DATManagerService) validateKernelConfig(baseDir, filename string) error
 				out, err := cmd.CombinedOutput()
 				if err != nil {
 					return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+				}
+			} else {
+				singleConfig := filepath.Join(filepath.Dir(s.xrayDir), "config.json")
+				if _, err := os.Stat(singleConfig); err == nil {
+					cmd := exec.CommandContext(ctx, s.xrayBinary, "-test", "-config", singleConfig)
+					cmd.Env = append(os.Environ(),
+						"XRAY_LOCATION_ASSET="+s.xrayDir,
+					)
+					out, err := cmd.CombinedOutput()
+					if err != nil {
+						return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+					}
 				}
 			}
 		}
@@ -1183,6 +1348,20 @@ func (s *DATManagerService) UpdateFile(filename string, fileTypes ...string) err
 	return err
 }
 
+func readFirstBytes(path string, maxBytes int) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	buf := make([]byte, maxBytes)
+	n, err := io.ReadFull(file, buf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, err
+	}
+	return buf[:n], nil
+}
+
 func isGeoIPFile(data []byte, filename, tag string) bool {
 	lowerName := strings.ToLower(filename)
 	lowerTag := strings.ToLower(tag)
@@ -1243,15 +1422,31 @@ func detectProtobufIsGeoIP(data []byte) bool {
 
 				if efn == 2 {
 					itemData := entryData[epos:eend]
-					if len(itemData) > 0 {
-						it, _ := pbReadVarint(itemData, 0)
+					ipos := 0
+					for ipos < len(itemData) {
+						it, in := pbReadVarint(itemData, ipos)
+						if in == 0 {
+							break
+						}
+						ipos += in
 						iwt := it & 0x7
 						ifn := it >> 3
-						if ifn == 1 && iwt == 2 {
-							return true // CIDR has bytes ip = 1 (LEN)
-						} else if ifn == 1 && iwt == 0 {
-							return false // Domain has Type type = 1 (VARINT)
+						// GeoIP: CIDR has field 1 bytes ip (LEN), field 2 prefix (VARINT)
+						// GeoSite: Domain has field 1 type (VARINT), field 2 value (LEN)
+						if ifn == 1 {
+							if iwt == 2 {
+								return true
+							} else if iwt == 0 {
+								return false
+							}
+						} else if ifn == 2 {
+							if iwt == 0 {
+								return true
+							} else if iwt == 2 {
+								return false
+							}
 						}
+						ipos, _ = pbSkipField(itemData, ipos, iwt)
 					}
 				}
 				epos = eend
@@ -1265,14 +1460,15 @@ func detectProtobufIsGeoIP(data []byte) bool {
 // FormatXrayRule produces canonical Xray routing rule selector string
 // e.g. "geosite:google", "geoip:ru", or "ext:zkeen.dat:antizapret".
 func FormatXrayRule(filename, tag string) string {
-	lower := strings.ToLower(filename)
+	base := filepath.Base(filepath.Clean(filename))
+	lower := strings.ToLower(base)
 	if lower == "geosite.dat" {
 		return "geosite:" + tag
 	}
 	if lower == "geoip.dat" {
 		return "geoip:" + tag
 	}
-	return fmt.Sprintf("ext:%s:%s", filename, tag)
+	return fmt.Sprintf("ext:%s:%s", base, tag)
 }
 
 // GeoLookupResult represents a matched tag in a DAT file for a domain or IP.
@@ -1285,48 +1481,147 @@ type GeoLookupResult struct {
 	SampleMatches []string `json:"sample_matches"`
 }
 
-func matchDomain(ruleDomain, targetDomain string) bool {
-	cleanRule := ruleDomain
-	prefix := ""
-	if idx := strings.Index(ruleDomain, ":"); idx != -1 {
-		prefix = ruleDomain[:idx]
-		cleanRule = ruleDomain[idx+1:]
+func normalizeQueryInput(v string) (string, net.IP) {
+	s := strings.TrimSpace(v)
+	if s == "" {
+		return "", nil
 	}
-	cleanRule = strings.ToLower(cleanRule)
-	targetDomain = strings.ToLower(targetDomain)
+
+	// URL -> host
+	if strings.Contains(s, "://") {
+		if u, err := url.Parse(s); err == nil {
+			if u.Host != "" {
+				s = u.Host
+			} else if u.Hostname() != "" {
+				s = u.Hostname()
+			}
+		}
+	}
+
+	// Strip path/query/hash if domain.com/path was pasted
+	if i := strings.IndexAny(s, "/?#"); i >= 0 {
+		s = s[:i]
+	}
+
+	// host:port
+	if h, _, err := net.SplitHostPort(s); err == nil {
+		s = h
+	}
+
+	s = strings.TrimPrefix(s, "[")
+	s = strings.TrimSuffix(s, "]")
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, ".")
+
+	if ip := net.ParseIP(s); ip != nil {
+		return strings.ToLower(s), ip
+	}
+
+	return strings.ToLower(s), nil
+}
+
+func matchDomain(ruleDomain, targetDomain string) bool {
+	return matchDomainCached(ruleDomain, targetDomain, nil)
+}
+
+func matchDomainCached(ruleDomain, targetDomain string, cache map[string]*regexp.Regexp) bool {
+	cleanRule := strings.TrimSpace(ruleDomain)
+	target := strings.ToLower(strings.TrimSpace(targetDomain))
+	if cleanRule == "" || target == "" {
+		return false
+	}
+
+	prefix := ""
+	if idx := strings.Index(cleanRule, ":"); idx != -1 {
+		prefix = cleanRule[:idx]
+		cleanRule = cleanRule[idx+1:]
+	}
 
 	switch prefix {
 	case "full":
-		return targetDomain == cleanRule
+		return target == strings.ToLower(cleanRule)
 	case "keyword", "plain":
-		return strings.Contains(targetDomain, cleanRule) || strings.Contains(cleanRule, targetDomain)
+		return strings.Contains(target, strings.ToLower(cleanRule))
 	case "regexp":
-		re, err := regexp.Compile(cleanRule)
-		if err != nil {
-			return false
+		var re *regexp.Regexp
+		if cache != nil {
+			re = cache[cleanRule]
+			if re == nil {
+				var err error
+				re, err = regexp.Compile(cleanRule)
+				if err != nil {
+					return false
+				}
+				cache[cleanRule] = re
+			}
+		} else {
+			var err error
+			re, err = regexp.Compile(cleanRule)
+			if err != nil {
+				return false
+			}
 		}
-		return re.MatchString(targetDomain)
+		return re.MatchString(target)
 	default: // RootDomain
-		if !strings.Contains(cleanRule, ".") {
-			return strings.Contains(targetDomain, cleanRule) || strings.Contains(cleanRule, targetDomain)
+		v := strings.ToLower(cleanRule)
+		if !strings.Contains(v, ".") {
+			return strings.Contains(target, v)
 		}
-		if targetDomain == cleanRule {
-			return true
-		}
-		if strings.HasSuffix(targetDomain, "."+cleanRule) {
-			return true
-		}
-		if strings.HasSuffix(cleanRule, "."+targetDomain) {
-			return true
-		}
-		return false
+		return target == v || strings.HasSuffix(target, "."+v)
 	}
+}
+
+func matchCIDREntry(entryData []byte, targetIPs []net.IP) []string {
+	var matches []string
+	pos := 0
+	for pos < len(entryData) {
+		ft, n := pbReadVarint(entryData, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+		wt := ft & 0x7
+		fn := ft >> 3
+
+		if wt != 2 {
+			pos, _ = pbSkipField(entryData, pos, wt)
+			continue
+		}
+
+		length, n := pbReadVarint(entryData, pos)
+		if n == 0 || length > uint64(len(entryData)-pos-n) {
+			break
+		}
+		pos += n
+		end := pos + int(length)
+
+		if fn == 2 {
+			cIP, prefix := parseRawCIDR(entryData[pos:end])
+			if len(cIP) == 4 || len(cIP) == 16 {
+				bits := len(cIP) * 8
+				if int(prefix) <= bits {
+					mask := net.CIDRMask(int(prefix), bits)
+					if mask != nil {
+						ipNet := net.IPNet{IP: net.IP(cIP).Mask(mask), Mask: mask}
+						for _, tip := range targetIPs {
+							if ipNet.Contains(tip) {
+								matches = append(matches, fmt.Sprintf("%s/%d (IP: %s)", net.IP(cIP).String(), prefix, tip.String()))
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		pos = end
+	}
+	return matches
 }
 
 // Lookup scans available .dat files for a domain or IP and returns matching tags and rules.
 func (s *DATManagerService) Lookup(query, filterType string, fileNames []string) ([]GeoLookupResult, error) {
-	q := strings.TrimSpace(query)
-	if q == "" {
+	cleanDomain, parsedIP := normalizeQueryInput(query)
+	if cleanDomain == "" && parsedIP == nil {
 		return nil, fmt.Errorf("empty query")
 	}
 
@@ -1365,7 +1660,6 @@ func (s *DATManagerService) Lookup(query, filterType string, fileNames []string)
 	}
 
 	results := make([]GeoLookupResult, 0)
-	parsedIP := net.ParseIP(q)
 
 	var resolvedIPs []net.IP
 	if parsedIP != nil {
@@ -1373,14 +1667,14 @@ func (s *DATManagerService) Lookup(query, filterType string, fileNames []string)
 	} else if filterType == "ip" || filterType == "all" || filterType == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		var r net.Resolver
-		ips, err := r.LookupIP(ctx, "ip", q)
+		ips, err := r.LookupIP(ctx, "ip", cleanDomain)
 		cancel()
 		if err == nil {
 			resolvedIPs = ips
 		}
 	}
 
-	lowerQuery := strings.ToLower(q)
+	reCache := make(map[string]*regexp.Regexp)
 
 	for _, f := range targetFiles {
 		data, err := os.ReadFile(f.Path)
@@ -1393,7 +1687,7 @@ func (s *DATManagerService) Lookup(query, filterType string, fileNames []string)
 		if filterType == "domain" && isGeoIP {
 			continue
 		}
-		if filterType == "ip" && !isGeoIP && len(resolvedIPs) == 0 {
+		if filterType == "ip" && !isGeoIP {
 			continue
 		}
 
@@ -1431,24 +1725,12 @@ func (s *DATManagerService) Lookup(query, filterType string, fileNames []string)
 					var matches []string
 					if isGeoIP {
 						if len(resolvedIPs) > 0 {
-							cidrs := parseDATEntryCIDRs(entryData)
-							for _, c := range cidrs {
-								_, ipNet, err := net.ParseCIDR(c)
-								if err != nil {
-									continue
-								}
-								for _, rip := range resolvedIPs {
-									if ipNet.Contains(rip) {
-										matches = append(matches, fmt.Sprintf("%s (IP: %s)", c, rip.String()))
-										break
-									}
-								}
-							}
+							matches = matchCIDREntry(entryData, resolvedIPs)
 						}
 					} else {
 						domains := parseDATEntryDomains(entryData)
 						for _, d := range domains {
-							if matchDomain(d, lowerQuery) {
+							if matchDomainCached(d, cleanDomain, reCache) {
 								matches = append(matches, d)
 							}
 						}

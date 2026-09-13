@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -690,14 +691,168 @@ func TestMatchDomain(t *testing.T) {
 		{"google.com", "mail.google.com", true},
 		{"google.com", "google.com", true},
 		{"google.com", "evilgoogle.com", false},
+		{"mail.google.com", "google.com", false}, // subdomain rule must NOT match parent domain
 		{"keyword:youtube", "youtube.com", true},
+		{"keyword:google-analytics", "analytics", false}, // target must contain keyword, not vice versa
+		{"keyword:analytics", "google-analytics.com", true},
 		{"full:youtube.com", "youtube.com", true},
 		{"full:youtube.com", "m.youtube.com", false},
+		{"regexp:^[a-z]+\\.google\\.com$", "mail.google.com", true},
+		{"regexp:^[0-9]+\\.google\\.com$", "mail.google.com", false},
 	}
 	for _, c := range cases {
 		got := matchDomain(c.rule, c.target)
 		if got != c.want {
 			t.Errorf("matchDomain(%q, %q) = %v, want %v", c.rule, c.target, got, c.want)
+		}
+	}
+}
+
+func TestNormalizeQueryInput(t *testing.T) {
+	tests := []struct {
+		input       string
+		wantDomain  string
+		wantIsIP    bool
+	}{
+		{"https://mail.google.com/mail/u/0/#inbox", "mail.google.com", false},
+		{"google.com:443", "google.com", false},
+		{"example.com.", "example.com", false},
+		{"1.1.1.1:53", "1.1.1.1", true},
+		{"[2001:4860:4860::8888]:53", "2001:4860:4860::8888", true},
+		{"  8.8.8.8  ", "8.8.8.8", true},
+	}
+
+	for _, tt := range tests {
+		domain, ip := normalizeQueryInput(tt.input)
+		if domain != tt.wantDomain {
+			t.Errorf("normalizeQueryInput(%q) domain = %q, want %q", tt.input, domain, tt.wantDomain)
+		}
+		if (ip != nil) != tt.wantIsIP {
+			t.Errorf("normalizeQueryInput(%q) isIP = %v, want %v", tt.input, ip != nil, tt.wantIsIP)
+		}
+	}
+}
+
+func TestSearchTag_PagedNoQuery(t *testing.T) {
+	// Create a GeoSite tag with 5 domains
+	var entryDomains []byte
+	for i := 1; i <= 5; i++ {
+		dom := makeLD(2, []byte(fmt.Sprintf("sub%d.example.com", i)))
+		entryDomains = append(entryDomains, makeLD(2, dom)...)
+	}
+	entry := append(makeLD(1, []byte("testtag")), entryDomains...)
+	outer := makeLD(1, entry)
+
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+	os.WriteFile(filepath.Join(tmpXray, "geosite.dat"), outer, 0644)
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	// Page 0 with pageSize 2 -> should return 2 items, total 5, has_more true
+	res, err := svc.SearchTag("geosite.dat", "testtag", "", 0, 2)
+	if err != nil {
+		t.Fatalf("SearchTag failed: %v", err)
+	}
+	if res.Total != 5 {
+		t.Errorf("expected total 5, got %d", res.Total)
+	}
+	if len(res.Entries) != 2 {
+		t.Fatalf("expected 2 paged entries, got %d", len(res.Entries))
+	}
+	if res.Entries[0] != "sub1.example.com" || res.Entries[1] != "sub2.example.com" {
+		t.Errorf("unexpected paged entries: %v", res.Entries)
+	}
+	if !res.HasMore {
+		t.Errorf("expected has_more to be true")
+	}
+
+	// Page 2 with pageSize 2 -> should return 1 item (sub5), has_more false
+	resPage2, err := svc.SearchTag("geosite.dat", "testtag", "", 2, 2)
+	if err != nil {
+		t.Fatalf("SearchTag page 2 failed: %v", err)
+	}
+	if len(resPage2.Entries) != 1 || resPage2.Entries[0] != "sub5.example.com" {
+		t.Errorf("unexpected page 2 entries: %v", resPage2.Entries)
+	}
+	if resPage2.HasMore {
+		t.Errorf("expected has_more to be false on last page")
+	}
+}
+
+func TestDetectProtobufIsGeoIP_Proto3Defaults(t *testing.T) {
+	// 1. GeoSite with proto3 default type=0 (Plain), so field 1 is omitted!
+	// Only field 2 (string value = wire type 2) is present in Domain
+	domProto3 := makeLD(2, []byte("google.com"))
+	siteEntry := append(makeLD(1, []byte("tag")), makeLD(2, domProto3)...)
+	siteOuter := makeLD(1, siteEntry)
+
+	if detectProtobufIsGeoIP(siteOuter) {
+		t.Errorf("expected GeoSite with omitted default type=0 to be detected as GeoSite (false), got true")
+	}
+
+	// 2. GeoIP with field 2 prefix (varint = wire type 0)
+	cidrProto3 := append(makeLD(1, []byte{1, 1, 1, 1}), makeVarintField(2, 32)...)
+	ipEntry := append(makeLD(1, []byte("tag")), makeLD(2, cidrProto3)...)
+	ipOuter := makeLD(1, ipEntry)
+
+	if !detectProtobufIsGeoIP(ipOuter) {
+		t.Errorf("expected GeoIP to be detected as GeoIP (true), got false")
+	}
+}
+
+func TestPBSkipField_BoundsChecks(t *testing.T) {
+	// Truncated 64-bit field (only 3 bytes available instead of 8)
+	shortData := []byte{0x01, 0x02, 0x03}
+	_, err := pbSkipField(shortData, 0, 1) // wireType 1 is 64-bit
+	if err == nil {
+		t.Errorf("expected error for truncated 64-bit field, got nil")
+	}
+
+	// Truncated 32-bit field (only 2 bytes available instead of 4)
+	_, err = pbSkipField(shortData, 0, 5) // wireType 5 is 32-bit
+	if err == nil {
+		t.Errorf("expected error for truncated 32-bit field, got nil")
+	}
+}
+
+func TestDATManagerService_Lookup_URLInputAndIPFilter(t *testing.T) {
+	domGoogle := makeLD(2, []byte("google.com"))
+	entryGoogle := append(makeLD(1, []byte("google")), makeLD(2, domGoogle)...)
+	outerGeoSite := makeLD(1, entryGoogle)
+
+	cidrGoogle := append(makeLD(1, []byte{8, 8, 8, 8}), makeVarintField(2, 32)...)
+	entryIP := append(makeLD(1, []byte("dns")), makeLD(2, cidrGoogle)...)
+	outerGeoIP := makeLD(1, entryIP)
+
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	os.WriteFile(filepath.Join(tmpXray, "geosite.dat"), outerGeoSite, 0644)
+	os.WriteFile(filepath.Join(tmpXray, "geoip.dat"), outerGeoIP, 0644)
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	// 1. Lookup with URL input: must be normalized and match google.com
+	resURL, err := svc.Lookup("https://mail.google.com/search?q=test:443", "domain", nil)
+	if err != nil {
+		t.Fatalf("Lookup with URL failed: %v", err)
+	}
+	if len(resURL) == 0 || resURL[0].Tag != "google" {
+		t.Errorf("expected match for URL input, got %v", resURL)
+	}
+
+	// 2. Lookup with filterType "ip": must NOT return geosite results even if DNS succeeds
+	resIP, err := svc.Lookup("8.8.8.8", "ip", nil)
+	if err != nil {
+		t.Fatalf("Lookup with IP failed: %v", err)
+	}
+	if len(resIP) == 0 || resIP[0].Type != "geoip" {
+		t.Errorf("expected geoip result for IP lookup, got %v", resIP)
+	}
+	for _, r := range resIP {
+		if r.Type == "geosite" {
+			t.Errorf("unexpected geosite result when filterType=ip: %v", r)
 		}
 	}
 }
