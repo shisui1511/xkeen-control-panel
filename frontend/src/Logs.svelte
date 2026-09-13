@@ -966,43 +966,6 @@
     }
   }
 
-  .page-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-  }
-
-  .page-head h1 {
-    margin: 4px 0 6px;
-    font-size: 22px;
-    font-weight: 700;
-  }
-
-  .page-head .sub {
-    margin: 0;
-    color: var(--fg-secondary);
-    font-size: 13px;
-  }
-
-  .crumbs {
-    font-size: 12px;
-    color: var(--fg-dim);
-    margin-bottom: 2px;
-  }
-
-  .crumb-sep {
-    color: var(--fg-faint);
-    margin: 0 6px;
-  }
-
-  .ph-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding-top: 6px;
-  }
-
   .flash-health-badge {
     display: inline-flex;
     align-items: center;
@@ -1126,19 +1089,6 @@
     font-weight: 600;
   }
 
-  .runtime-select {
-    height: 24px;
-    padding: 0 4px;
-    font-size: 12px;
-    font-weight: 700;
-    font-family: var(--font-family-mono);
-    border-radius: var(--radius-xs);
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    color: var(--accent);
-    cursor: pointer;
-  }
-
   /* Search Input */
   .search-wrap {
     position: relative;
@@ -1235,24 +1185,6 @@
   .source-pill.error-tab.active {
     background: var(--danger);
     color: var(--btn-primary-text);
-  }
-
-  /* Level Select */
-  .level-select {
-    height: 30px;
-    padding: 0 8px;
-    font-size: 12px;
-    font-weight: 600;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--bg-secondary);
-    color: var(--fg-primary);
-    cursor: pointer;
-  }
-
-  .level-select:focus {
-    outline: none;
-    border-color: var(--accent);
   }
 
   /* Log Console Pane */
@@ -1518,26 +1450,5 @@
 
   .footer-live {
     font-weight: 600;
-  }
-
-  .live-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--success);
-    box-shadow: 0 0 6px var(--success);
-    transition:
-      background 0.2s,
-      box-shadow 0.2s;
-  }
-
-  .live-dot.paused {
-    background: var(--warning);
-    box-shadow: 0 0 6px var(--warning);
-  }
-
-  .live-dot.disconnected {
-    background: var(--danger);
-    box-shadow: 0 0 6px var(--danger);
   }
 </style>
