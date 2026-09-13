@@ -12,6 +12,7 @@
     value?: string;
     id?: string;
     class?: string;
+    style?: string;
     disabled?: boolean;
     title?: string;
     name?: string;
@@ -26,6 +27,7 @@
     value = $bindable(),
     id,
     class: className = '',
+    style,
     disabled = false,
     title,
     name,
@@ -38,7 +40,7 @@
 </script>
 
 <!-- Обёртка над нативным select (D5): appearance:none + иконка стрелки, семантика без изменений -->
-<span class="xcp-select">
+<span class="xcp-select" {style}>
   <select
     {id}
     class={className}

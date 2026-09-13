@@ -6,6 +6,10 @@
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
+  import PageHeader from './PageHeader.svelte';
+  import Tabs from './components/Tabs.svelte';
+  import Select from './components/Select.svelte';
+  import Button from './components/Button.svelte';
 
   interface Props {
     onSwitchTab?: (tab: string) => void;
@@ -374,60 +378,46 @@
 <svelte:window onclick={closeDropdowns} onkeydown={handleKeydown} />
 
 <div class="container">
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_routing')} <span class="crumb-sep">›</span>
-        {$t('nav.rules')}
-      </div>
-      <h1>{$t('rules.title')}</h1>
-      <p class="sub">
-        {activeTab === 'rules' ? $t('rules.subtitle') : $t('rules.providers_subtitle')}
-      </p>
-    </div>
-    <div class="ph-actions">
-      {#if activeTab === 'providers' && ruleProviders.length > 0}
-        <button class="btn btn-primary" onclick={updateAllProviders} disabled={updatingAll}>
-          {#if updatingAll}
-            <span class="spinner-sm"></span>
-            {$t('rules.updating')}
-          {:else}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-            >
-            {$t('rules.update_all')}
-          {/if}
-        </button>
-      {/if}
-    </div>
-  </div>
+  <PageHeader
+    title={$t('rules.title')}
+    subtitle={activeTab === 'rules' ? $t('rules.subtitle') : $t('rules.providers_subtitle')}
+    breadcrumbs={[{ label: $t('nav.group_routing'), tab: 'dashboard' }, { label: $t('nav.rules') }]}
+    {onSwitchTab}
+  >
+    {#if activeTab === 'providers' && ruleProviders.length > 0}
+      <Button variant="primary" onclick={updateAllProviders} disabled={updatingAll}>
+        {#if updatingAll}
+          <span class="spinner-sm"></span>
+          {$t('rules.updating')}
+        {:else}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+          >
+          {$t('rules.update_all')}
+        {/if}
+      </Button>
+    {/if}
+  </PageHeader>
 
-  <div class="rules-tabs">
-    <button
-      class="tab-btn"
-      class:active={activeTab === 'rules'}
-      onclick={() => (activeTab = 'rules')}>{$t('rules.tab_rules')}</button
-    >
-    <button
-      class="tab-btn"
-      class:active={activeTab === 'providers'}
-      onclick={() => (activeTab = 'providers')}>{$t('rules.tab_providers')}</button
-    >
-    <button
-      class="tab-btn"
-      class:active={activeTab === 'custom'}
-      onclick={() => {
-        activeTab = 'custom';
+  <Tabs
+    bind:value={activeTab}
+    items={[
+      { value: 'rules', label: $t('rules.tab_rules') },
+      { value: 'providers', label: $t('rules.tab_providers') },
+      { value: 'custom', label: $t('rules.tab_custom') }
+    ]}
+    onchange={(tab) => {
+      if (tab === 'custom') {
         fetchCustomRules();
-      }}>{$t('rules.tab_custom')}</button
-    >
-  </div>
+      }
+    }}
+  />
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
     <EmptyState
@@ -460,18 +450,26 @@
             bind:value={searchQuery}
             class="filter-input"
           />
-          <select bind:value={typeFilter} class="source-select">
+          <Select
+            bind:value={typeFilter}
+            class="source-select"
+            style="flex: 0 0 auto; width: auto; min-width: 140px;"
+          >
             <option value="">{$t('rules.all_types')}</option>
             {#each getUniqueTypes() as type}
               <option value={type}>{type}</option>
             {/each}
-          </select>
-          <select bind:value={proxyFilter} class="source-select">
+          </Select>
+          <Select
+            bind:value={proxyFilter}
+            class="source-select"
+            style="flex: 0 0 auto; width: auto; min-width: 140px;"
+          >
             <option value="">{$t('rules.all_targets')}</option>
             {#each getUniqueProxies() as proxy}
               <option value={proxy}>{proxy}</option>
             {/each}
-          </select>
+          </Select>
         </div>
       </div>
 
@@ -572,14 +570,14 @@
             bind:value={newRuleValue}
             style="flex: 2; min-width: 180px;"
           />
-          <select bind:value={newRuleType} class="source-select" style="flex: 1; min-width: 140px;">
+          <Select bind:value={newRuleType} class="source-select" style="flex: 1; min-width: 140px;">
             <option value="domain_suffix">{$t('rules.custom_type_suffix')}</option>
             <option value="domain">{$t('rules.custom_type_domain')}</option>
             <option value="domain_keyword">{$t('rules.custom_type_keyword')}</option>
             <option value="ip_cidr">{$t('rules.custom_type_ip')}</option>
             <option value="port">{$t('rules.custom_type_port')}</option>
-          </select>
-          <select
+          </Select>
+          <Select
             bind:value={newRuleTarget}
             class="source-select"
             style="flex: 1; min-width: 130px;"
@@ -587,7 +585,7 @@
             <option value="proxy">{$t('rules.target_proxy')}</option>
             <option value="direct">{$t('rules.target_direct')}</option>
             <option value="reject">{$t('rules.target_reject')}</option>
-          </select>
+          </Select>
           <input
             type="text"
             class="filter-input"
@@ -645,7 +643,7 @@
                       class="btn btn-danger btn-sm"
                       onclick={() => removeCustomRule(rule.id)}
                       title={$t('app.delete')}
-                      style="padding: 2px 8px; font-size: 11px;"
+                      style="padding: 2px 8px; font-size: var(--font-size-xs);"
                     >
                       ✕
                     </button>
@@ -860,40 +858,6 @@
     background: var(--hover);
   }
 
-  .rules-tabs {
-    display: inline-flex;
-    gap: 4px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 4px;
-    margin-bottom: 16px;
-  }
-
-  .tab-btn {
-    background: none;
-    border: none;
-    color: var(--fg-secondary);
-    font-size: 13px;
-    font-weight: 500;
-    padding: 6px 14px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition:
-      background var(--transition-fast),
-      color var(--transition-fast);
-  }
-
-  .tab-btn:hover {
-    color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .tab-btn.active {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--fg-primary);
-  }
-
   .providers-list {
     display: flex;
     flex-direction: column;
@@ -939,9 +903,8 @@
   }
 
   .provider-badge {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
-    text-transform: uppercase;
     padding: 2px 8px;
     border-radius: 4px;
     background: rgba(255, 255, 255, 0.05);
@@ -964,7 +927,7 @@
   }
 
   .provider-updated {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--fg-faint);
     white-space: nowrap;
   }
@@ -1044,7 +1007,8 @@
       min-width: 100%;
     }
 
-    .filters .source-select {
+    .filters :global(.xcp-select),
+    .filters :global(.source-select) {
       flex: 1 1 calc(50% - 4px);
       width: calc(50% - 4px);
       min-width: 0;
