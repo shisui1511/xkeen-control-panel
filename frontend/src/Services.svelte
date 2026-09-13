@@ -451,16 +451,25 @@
     document.body.removeChild(a);
   }
 
-  async function setKernelChannel(name: string, channel: string) {
+  // Returns true on success. Callers are responsible for re-fetching kernel
+  // state once, after both kernels' channel requests have settled — this
+  // used to be pulled per-call, causing two redundant /api/kernels round
+  // trips per click and a mismatch window between them.
+  async function setKernelChannel(name: string, channel: string): Promise<boolean> {
     try {
-      await apiFetch(`/api/kernels/${name}/channel`, {
+      const res = await apiFetch(`/api/kernels/${name}/channel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channel })
       });
-      await fetchKernels();
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      return true;
     } catch (e: any) {
-      if (e?.status === 401) return;
+      if (e?.status === 401) return false;
+      showToast('error', `${$t('svc.channel_error')} (${name}): ${e.message || e}`);
+      return false;
     }
   }
 
@@ -532,6 +541,15 @@
   let xray = $derived(Array.isArray(kernels) ? kernels.find((k) => k.name === 'xray') : undefined);
   let mihomo = $derived(
     Array.isArray(kernels) ? kernels.find((k) => k.name === 'mihomo') : undefined
+  );
+  // Both kernels normally share one channel choice (the shared selector below
+  // sets both at once), but a partial failure in setKernelChannel can leave
+  // them out of sync. Surface that instead of silently showing only Xray's
+  // value (the old `xray?.channel || mihomo?.channel` fallback masked it,
+  // since channel is never an empty string once a kernel exists).
+  let channelMismatch = $derived(!!xray && !!mihomo && xray.channel !== mihomo.channel);
+  let sharedChannel = $derived(
+    channelMismatch ? '' : (xray?.channel ?? mihomo?.channel ?? 'stable')
   );
   let isAnyKernelChecking = $derived(
     Array.isArray(kernels) ? kernels.some((k) => k.status === 'checking') : false
@@ -932,17 +950,25 @@
         <span class="channel-lbl">{$t('svc.channel_label')}</span>
         <SegmentedControl
           ariaLabel={$t('svc.channel_label')}
-          value={xray?.channel || mihomo?.channel || 'stable'}
+          value={sharedChannel}
           items={[
             { value: 'stable', label: $t('svc.channel_stable') },
             { value: 'preview', label: $t('svc.channel_preview') }
           ]}
-          onchange={(v) => {
-            setKernelChannel('xray', v);
-            setKernelChannel('mihomo', v);
+          onchange={async (v) => {
+            await Promise.all([setKernelChannel('xray', v), setKernelChannel('mihomo', v)]);
+            await fetchKernels();
           }}
         />
       </div>
+      {#if channelMismatch}
+        <p class="channel-mismatch-hint">
+          {$t('svc.channel_mismatch_hint', {
+            xray: $t(`svc.channel_${xray?.channel}`),
+            mihomo: $t(`svc.channel_${mihomo?.channel}`)
+          })}
+        </p>
+      {/if}
 
       <!-- Kernel Updates List -->
       <div class="kernel-updates-list">
@@ -955,13 +981,20 @@
                 <Skeleton type="text-line" width="70px" />
               {:else}
                 <span>v{mihomo?.current_version || '—'}</span>
-                {#if mihomo?.has_update}
+                {#if mihomo?.status === 'failed'}
+                  <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
+                {:else if mihomo?.has_update}
                   <StatusBadge variant="warning" label={`→ v${mihomo.latest_version}`} />
                 {:else}
                   <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
                 {/if}
               {/if}
             </div>
+            {#if kernelsLoaded && mihomo?.message && (mihomo.status === 'failed' || mihomo.status === 'idle')}
+              <p class="update-hint" class:update-hint-error={mihomo.status === 'failed'}>
+                {mihomo.message}
+              </p>
+            {/if}
           </div>
           <div class="update-actions">
             {#if mihomo?.has_update}
@@ -1008,13 +1041,20 @@
                 <Skeleton type="text-line" width="70px" />
               {:else}
                 <span>v{xray?.current_version || '—'}</span>
-                {#if xray?.has_update}
+                {#if xray?.status === 'failed'}
+                  <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
+                {:else if xray?.has_update}
                   <StatusBadge variant="warning" label={`→ v${xray.latest_version}`} />
                 {:else}
                   <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
                 {/if}
               {/if}
             </div>
+            {#if kernelsLoaded && xray?.message && (xray.status === 'failed' || xray.status === 'idle')}
+              <p class="update-hint" class:update-hint-error={xray.status === 'failed'}>
+                {xray.message}
+              </p>
+            {/if}
           </div>
           <div class="update-actions">
             {#if xray?.has_update}
@@ -1491,6 +1531,24 @@
     font-size: 13px;
     font-weight: 500;
     color: var(--fg-primary);
+  }
+
+  .channel-mismatch-hint {
+    margin: -2px 0 0;
+    padding: 0 2px;
+    font-size: 12px;
+    color: var(--warning);
+  }
+
+  .update-hint {
+    margin: 0;
+    padding: 0 2px;
+    font-size: 12px;
+    color: var(--fg-dim);
+  }
+
+  .update-hint.update-hint-error {
+    color: var(--danger);
   }
 
   .kernel-updates-list {
