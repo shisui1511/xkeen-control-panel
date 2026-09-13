@@ -1,8 +1,8 @@
 /* eslint-disable */
 // Sibling script to check-contrast.cjs — детектор литеральных hex-цветов
 // в исходниках frontend/src/**/*.svelte (DS2-06). Скан ограничен блоками
-// <style> и inline-атрибутами style="" — не подключён к check:contrast
-// в этой волне, подключение выполняет план 120-14 после схождения счётчика.
+// <style> и inline-атрибутами style="" — подключён к npm run check:contrast
+// (frontend/package.json) и запускается в CI на каждой сборке.
 //
 // Охват намеренно ограничен шестнадцатеричной записью цвета (# + 3/4/6/8
 // знаков), включая второй аргумент функции var(). Функциональные
@@ -21,33 +21,44 @@ const SRC_ROOT = path.join(__dirname, '../src');
 
 // Хешевая запись цвета: # + 3/4/6/8 hex-знаков, на границе слова.
 const HEX_VALUE = '#[0-9a-fA-F]{8}\\b|#[0-9a-fA-F]{6}\\b|#[0-9a-fA-F]{4}\\b|#[0-9a-fA-F]{3}\\b';
-// Находкой считается hex-запись, которой предшествует ':', ',' или '(' —
-// то есть она стоит в значении CSS-декларации (после property: ...), в
-// списке значений (после запятой) или во втором аргументе var(...). Такой
-// префикс естественно исключает CSS ID-селекторы (#sp-group { ... }), у
-// которых перед '#' нет ни одного из этих символов.
-const VALUE_HEX_RE = new RegExp(`[:,(]\\s*(${HEX_VALUE})`, 'g');
+const HEX_VALUE_RE = new RegExp(HEX_VALUE, 'g');
+// Находкой считается hex-запись, встретившаяся где угодно внутри значения
+// CSS-декларации вида "property: value" (до ';' или '}') — а не только
+// сразу после ':', ',' или '(' как раньше. Это ловит формы вида
+// "border: 1px solid #ff0000", "box-shadow: 0 0 5px #00ff00" и т.п.
+// Декларация ищется по шаблону "имя-свойства: значение", что естественно
+// исключает CSS ID-селекторы (#sp-group { ... }) — перед их '#' нет
+// пары "слово:", а также большинство псевдоклассов вида ".foo:hover {" —
+// после "hover" сразу идёт '{', а не значение.
+const DECLARATION_RE = /[a-zA-Z-]+\s*:\s*([^;{}]+)(?=[;}]|$)/g;
+
+// Возвращает находки { value, index } для всех hex-цветов, встретившихся
+// внутри значений CSS-деклараций в `text` (текст одного блока <style> или
+// содержимое одного inline-атрибута style="").
+function findHexInDeclarations(text) {
+  const results = [];
+  let declMatch;
+  DECLARATION_RE.lastIndex = 0;
+  while ((declMatch = DECLARATION_RE.exec(text)) !== null) {
+    const value = declMatch[1];
+    const valueStart = declMatch.index + declMatch[0].length - value.length;
+    let hexMatch;
+    HEX_VALUE_RE.lastIndex = 0;
+    while ((hexMatch = HEX_VALUE_RE.exec(value)) !== null) {
+      results.push({ value: hexMatch[0], index: valueStart + hexMatch.index });
+    }
+  }
+  return results;
+}
 
 const STYLE_BLOCK_RE = /<style\b[^>]*>([\s\S]*?)<\/style>/g;
 const INLINE_STYLE_RE = /\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 
 // Whitelist — явные записи с обязательным обоснованием на каждую. Молчаливое
-// исключение по маске каталога запрещено. Пара ниже — тема-инвариантная
-// терминальная поверхность (--bg-terminal/--fg-terminal, global.css), задана
-// намеренно фиксированной в обеих темах (см. global.css рядом с токенами).
+// исключение по маске каталога запрещено. Записи ограничены *.svelte-файлами,
+// так как именно их сканирует walkSvelteFiles (global.css вне охвата — см.
+// комментарий над walkSvelteFiles).
 const WHITELIST = [
-  {
-    file: 'styles/global.css',
-    value: '#050d16',
-    reason:
-      'Терминальная поверхность --bg-terminal намеренно тема-инвариантна: консоль читается как тёмная поверхность в обеих темах (global.css)'
-  },
-  {
-    file: 'styles/global.css',
-    value: '#d9e7f4',
-    reason:
-      'Терминальная поверхность --fg-terminal намеренно тема-инвариантна: парный к --bg-terminal литерал переднего плана (global.css)'
-  },
   {
     file: 'components/Button.svelte',
     value: '#fff',
@@ -80,13 +91,10 @@ function scanContent(content, relFile) {
   while ((styleMatch = STYLE_BLOCK_RE.exec(content)) !== null) {
     const blockContent = styleMatch[1];
     const blockStart = styleMatch.index + styleMatch[0].indexOf(blockContent);
-    let hexMatch;
-    VALUE_HEX_RE.lastIndex = 0;
-    while ((hexMatch = VALUE_HEX_RE.exec(blockContent)) !== null) {
-      const value = hexMatch[1];
-      if (isWhitelisted(relFile, value)) continue;
-      const absoluteIndex = blockStart + hexMatch.index + hexMatch[0].indexOf(value);
-      findings.push({ file: relFile, line: lineAt(content, absoluteIndex), value });
+    for (const hit of findHexInDeclarations(blockContent)) {
+      if (isWhitelisted(relFile, hit.value)) continue;
+      const absoluteIndex = blockStart + hit.index;
+      findings.push({ file: relFile, line: lineAt(content, absoluteIndex), value: hit.value });
     }
   }
 
@@ -96,13 +104,10 @@ function scanContent(content, relFile) {
   while ((inlineMatch = INLINE_STYLE_RE.exec(content)) !== null) {
     const attrValue = inlineMatch[1] ?? inlineMatch[2] ?? '';
     const attrStart = inlineMatch.index + inlineMatch[0].indexOf(attrValue);
-    let hexMatch;
-    VALUE_HEX_RE.lastIndex = 0;
-    while ((hexMatch = VALUE_HEX_RE.exec(attrValue)) !== null) {
-      const value = hexMatch[1];
-      if (isWhitelisted(relFile, value)) continue;
-      const absoluteIndex = attrStart + hexMatch.index + hexMatch[0].indexOf(value);
-      findings.push({ file: relFile, line: lineAt(content, absoluteIndex), value });
+    for (const hit of findHexInDeclarations(attrValue)) {
+      if (isWhitelisted(relFile, hit.value)) continue;
+      const absoluteIndex = attrStart + hit.index;
+      findings.push({ file: relFile, line: lineAt(content, absoluteIndex), value: hit.value });
     }
   }
 
@@ -120,6 +125,13 @@ function scanFile(filePath) {
   return scanContent(content, relFile);
 }
 
+// Сканер намеренно охватывает только *.svelte (см. walkSvelteFiles ниже) и
+// никогда не сканирует frontend/src/styles/global.css: там литеральные
+// hex-значения — источник истины самих дизайн-токенов (:root /
+// [data-theme='light']), а не хардкод их использования, и это разные вещи.
+// Записей WHITELIST с file: 'styles/global.css' здесь нет специально — они
+// физически не могут сработать при штатном запуске без --path и раньше
+// вводили в заблуждение, будто global.css охвачен сканом.
 function walkSvelteFiles(dir) {
   const results = [];
   const entries = fs.readdirSync(dir, { withFileTypes: true });
