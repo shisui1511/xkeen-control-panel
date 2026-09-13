@@ -495,3 +495,43 @@ func TestDATManagerService_CleanBackupFile(t *testing.T) {
 		t.Errorf("expected .bak.link to be removed")
 	}
 }
+
+// TestDATManagerService_Update_CleansBackupsAfterSuccess covers WR-01:
+// unlike UpdateCustom (which calls cleanBackupFile right after a successful
+// validation), Update() left .bak/.bak.link files behind after every
+// successful bulk "xkeen -ug" run, making it unclear which version
+// Rollback() would actually restore.
+func TestDATManagerService_Update_CleansBackupsAfterSuccess(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	datPath := filepath.Join(tmpXray, "geoip.dat")
+	if err := os.WriteFile(datPath, []byte("initial dat data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mmdbPath := filepath.Join(tmpMihomo, "country.mmdb")
+	if err := os.WriteFile(mmdbPath, []byte("initial mmdb data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock xkeen binary that always succeeds, standing in for the real
+	// "xkeen -ug" invocation.
+	mockBin := filepath.Join(t.TempDir(), "mock-xkeen")
+	mockScript := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(mockBin, []byte(mockScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo, mockBin)
+
+	if err := svc.Update(); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	if _, err := os.Stat(datPath + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("expected %s.bak to be cleaned up after successful Update()", datPath)
+	}
+	if _, err := os.Stat(mmdbPath + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("expected %s.bak to be cleaned up after successful Update()", mmdbPath)
+	}
+}

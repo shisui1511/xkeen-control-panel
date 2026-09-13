@@ -194,12 +194,17 @@ func (s *DATManagerService) Update() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Backup existing files first
+	// Backup existing files first, remembering which paths were touched so
+	// their backups can be cleaned up after a successful update — mirrors
+	// UpdateCustom's cleanBackupFile call and avoids .bak/.bak.link piling
+	// up in xrayDir/mihomoDir after every bulk update (WR-01).
+	var backedUp []string
 	scanAndBackup := func(dir string, patterns ...string) {
 		for _, pattern := range patterns {
 			matches, _ := filepath.Glob(filepath.Join(dir, pattern))
 			for _, match := range matches {
 				_ = backupFile(match)
+				backedUp = append(backedUp, match)
 			}
 		}
 	}
@@ -211,6 +216,11 @@ func (s *DATManagerService) Update() error {
 	if err != nil {
 		return fmt.Errorf("xkeen -ug failed: %v, output: %s", err, string(out))
 	}
+
+	for _, path := range backedUp {
+		cleanBackupFile(path)
+	}
+
 	return nil
 }
 
