@@ -19,6 +19,10 @@
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import { capsuleConfigStore, updateCapsuleConfig } from './lib/capsuleSettings';
   import PingTargetSettingsCard from './components/PingTargetSettingsCard.svelte';
+  import PageHeader from './PageHeader.svelte';
+  import Tabs, { type TabItem } from './components/Tabs.svelte';
+  import SegmentedControl, { type SegmentItem } from './components/SegmentedControl.svelte';
+  import Select from './components/Select.svelte';
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -40,6 +44,27 @@
   let activeTab = $state<'general' | 'updates' | 'security' | 'connection' | 'backups' | 'about'>(
     'general'
   );
+
+  const settingsTabItems = $derived<TabItem[]>([
+    { value: 'general', label: $t('settings.tab_general') },
+    { value: 'updates', label: $t('settings.tab_updates') },
+    { value: 'security', label: $t('settings.tab_security') },
+    { value: 'connection', label: $t('settings.tab_connection') },
+    { value: 'backups', label: $t('settings.tab_backups') },
+    { value: 'about', label: $t('settings.tab_about') }
+  ]);
+
+  const themeItems = $derived<SegmentItem[]>([
+    { value: 'light', label: $t('settings.theme_light_btn') },
+    { value: 'dark', label: $t('settings.theme_dark_btn') },
+    { value: 'auto', label: $t('settings.theme_auto_btn') }
+  ]);
+
+  const densityItems = $derived<SegmentItem[]>([
+    { value: 'comfortable', label: $t('settings.density_comfortable_btn') },
+    { value: 'compact', label: $t('settings.density_compact_btn') },
+    { value: 'auto', label: $t('settings.density_auto_btn') }
+  ]);
 
   // Backups state variables
   let configFiles = $state<string[]>([]);
@@ -742,49 +767,15 @@
 </script>
 
 <div class="container">
-  <!-- page-head -->
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_system')} <span class="crumb-sep">›</span>
-        {$t('settings.h1')}
-      </div>
-      <h1>{$t('settings.h1')}</h1>
-      <p class="sub">{$t('settings.h1_sub')}</p>
-    </div>
-  </div>
+  <PageHeader
+    title={$t('settings.h1')}
+    subtitle={$t('settings.h1_sub')}
+    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('settings.h1') }]}
+    {onSwitchTab}
+    hideHome={true}
+  />
 
-  <!-- tab nav -->
-  <div class="settings-tabs">
-    <button
-      class="stab"
-      class:active={activeTab === 'general'}
-      onclick={() => (activeTab = 'general')}>{$t('settings.tab_general')}</button
-    >
-    <button
-      class="stab"
-      class:active={activeTab === 'updates'}
-      onclick={() => (activeTab = 'updates')}>{$t('settings.tab_updates')}</button
-    >
-    <button
-      class="stab"
-      class:active={activeTab === 'security'}
-      onclick={() => (activeTab = 'security')}>{$t('settings.tab_security')}</button
-    >
-    <button
-      class="stab"
-      class:active={activeTab === 'connection'}
-      onclick={() => (activeTab = 'connection')}>{$t('settings.tab_connection')}</button
-    >
-    <button
-      class="stab"
-      class:active={activeTab === 'backups'}
-      onclick={() => (activeTab = 'backups')}>{$t('settings.tab_backups')}</button
-    >
-    <button class="stab" class:active={activeTab === 'about'} onclick={() => (activeTab = 'about')}
-      >{$t('settings.tab_about')}</button
-    >
-  </div>
+  <Tabs bind:value={activeTab} items={settingsTabItems} ariaLabel={$t('settings.h1')} />
 
   <!-- General tab -->
   {#if activeTab === 'general'}
@@ -793,7 +784,7 @@
       <div class="field-group">
         <div class="field-row">
           <span class="field-row-name">{$t('settings.language')}</span>
-          <select
+          <Select
             class="field-select"
             value={$currentLang}
             onchange={handleLangChange}
@@ -802,7 +793,7 @@
             {#each langs as lang}
               <option value={lang.code}>{lang.name}</option>
             {/each}
-          </select>
+          </Select>
         </div>
         <div class="field-row">
           <div>
@@ -826,59 +817,24 @@
             <span class="field-row-name">{$t('settings.theme')}</span>
             <div class="field-row-desc">{$t('settings.theme_desc')}</div>
           </div>
-          <div class="seg-btn" role="radiogroup" aria-label={$t('settings.theme')}>
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedTheme === 'light'}
-              class:seg-active={selectedTheme === 'light'}
-              onclick={() => setTheme('light')}>{$t('settings.theme_light_btn')}</button
-            >
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedTheme === 'dark'}
-              class:seg-active={selectedTheme === 'dark'}
-              onclick={() => setTheme('dark')}>{$t('settings.theme_dark_btn')}</button
-            >
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedTheme === 'auto'}
-              class:seg-active={selectedTheme === 'auto'}
-              onclick={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button
-            >
-          </div>
+          <SegmentedControl
+            items={themeItems}
+            value={selectedTheme}
+            ariaLabel={$t('settings.theme')}
+            onchange={(val) => setTheme(val as 'light' | 'dark' | 'auto')}
+          />
         </div>
         <div class="field-row">
           <div>
             <span class="field-row-name">{$t('settings.density')}</span>
             <div class="field-row-desc">{$t('settings.density_desc')}</div>
           </div>
-          <div class="seg-btn" role="radiogroup" aria-label={$t('settings.density')}>
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedDensity === 'comfortable'}
-              class:seg-active={selectedDensity === 'comfortable'}
-              onclick={() => setDensity('comfortable')}
-              >{$t('settings.density_comfortable_btn')}</button
-            >
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedDensity === 'compact'}
-              class:seg-active={selectedDensity === 'compact'}
-              onclick={() => setDensity('compact')}>{$t('settings.density_compact_btn')}</button
-            >
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedDensity === 'auto'}
-              class:seg-active={selectedDensity === 'auto'}
-              onclick={() => setDensity('auto')}>{$t('settings.density_auto_btn')}</button
-            >
-          </div>
+          <SegmentedControl
+            items={densityItems}
+            value={selectedDensity}
+            ariaLabel={$t('settings.density')}
+            onchange={(val) => setDensity(val as ThemeDensity)}
+          />
         </div>
         <div class="field-row">
           <div>
@@ -1146,7 +1102,7 @@
             <div class="desc">{$t('settings.backups_desc')}</div>
           </div>
           <div class="ctrl">
-            <select
+            <Select
               class="input"
               style="min-width: 250px;"
               bind:value={selectedFile}
@@ -1158,7 +1114,7 @@
               {:else}
                 <option value="">{$t('settings.no_files')}</option>
               {/each}
-            </select>
+            </Select>
             <button class="btn btn-primary btn-sm" onclick={createBackup} disabled={!selectedFile}>
               {$t('settings.backup_create_btn')}
             </button>
@@ -1183,7 +1139,7 @@
             <div class="field-row">
               <div>
                 <div class="lbl mono">{backup.split('/').pop()}</div>
-                <div class="desc mono" style="font-size: 11px; color: var(--fg-dim);">{backup}</div>
+                <div class="desc mono" style="font-size: 12px; color: var(--fg-dim);">{backup}</div>
               </div>
               <div class="ctrl">
                 <button
@@ -1395,7 +1351,7 @@
           <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
             {isDragOver ? $t('settings.drop_file_to_upload') : $t('settings.select_or_drag_file')}
           </div>
-          <div style="color: var(--fg-dim); font-size: 11px;">
+          <div style="color: var(--fg-dim); font-size: 12px;">
             {$t('settings.supported_file_types')}
           </div>
         {/if}
@@ -1618,77 +1574,11 @@
 />
 
 <style>
-  .page-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 20px;
-    gap: 16px;
-  }
-
-  .page-head h1 {
-    margin: 4px 0 6px;
-    font-size: 22px;
-    font-weight: 700;
-  }
-
-  .page-head .sub {
-    margin: 0;
-    color: var(--fg-secondary);
-    font-size: 13px;
-  }
-
-  .crumbs {
-    font-size: 12px;
-    color: var(--fg-dim);
-    margin-bottom: 2px;
-  }
-
-  .crumb-sep {
-    color: var(--fg-faint);
-    margin: 0 6px;
-  }
-
-  /* tab nav */
-  .settings-tabs {
-    display: flex;
-    gap: 2px;
-    margin-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 0;
-  }
-
-  .stab {
-    padding: 8px 16px;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--fg-secondary);
-    cursor: pointer;
-    border-radius: 4px 4px 0 0;
-    transition:
-      color 0.15s,
-      border-color 0.15s;
-  }
-
-  .stab:hover {
-    color: var(--fg-primary);
-  }
-
-  .stab.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-  }
-
   /* card label */
   .card-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
     color: var(--fg-dim);
     margin-bottom: 14px;
   }
@@ -1738,17 +1628,6 @@
   .mono {
     font-family: var(--font-mono, monospace);
     font-size: 12px;
-  }
-
-  .field-select {
-    font-size: 13px;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg-card);
-    color: var(--fg-primary);
-    cursor: pointer;
-    min-width: 120px;
   }
 
   .field-value-badge {
@@ -1848,7 +1727,7 @@
 
   .channel-btn:hover {
     border-color: var(--accent);
-    color: var(--fg);
+    color: var(--fg-primary);
   }
 
   .channel-btn.active {
@@ -1983,41 +1862,6 @@
     font-size: 12px;
     color: var(--fg-dim);
     margin-top: 2px;
-  }
-
-  /* Segmented button */
-  .seg-btn {
-    display: flex;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
-  .seg-opt {
-    padding: 5px 12px;
-    font-size: 13px;
-    background: transparent;
-    border: none;
-    border-right: 1px solid var(--border);
-    color: var(--fg-secondary);
-    cursor: pointer;
-    transition:
-      background 0.15s,
-      color 0.15s;
-  }
-
-  .seg-opt:last-child {
-    border-right: none;
-  }
-
-  .seg-opt:hover {
-    background: var(--bg-hover, rgba(0, 0, 0, 0.04));
-  }
-
-  .seg-opt.seg-active {
-    background: var(--accent);
-    color: var(--btn-primary-text);
   }
 
   .btn-sm {
