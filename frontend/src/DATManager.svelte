@@ -992,7 +992,7 @@
               <div class="ih-actions">
                 <Button
                   variant="secondary"
-                  size="sm"
+                  class="btn-sm"
                   loading={updatingFile === selectedFile.name}
                   disabled={globalUpdating || updatingFile !== null}
                   onclick={() => selectedFile && updateAll(selectedFile.name, selectedFile.type)}
@@ -1378,7 +1378,7 @@
 
   .qs-type-btn.active {
     background: var(--primary);
-    color: #ffffff;
+    color: var(--btn-primary-text);
   }
 
   .qs-input-row {
@@ -1601,7 +1601,7 @@
 
   .pill-btn.active {
     background: var(--primary);
-    color: #ffffff;
+    color: var(--btn-primary-text);
   }
 
   .master-search {
@@ -1724,7 +1724,7 @@
   }
 
   .badge-geoip {
-    color: #60a5fa;
+    color: var(--primary);
   }
 
   .db-sub-row {

@@ -1691,7 +1691,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #fff;
+    color: var(--swatch-check);
     cursor: pointer;
     padding: 0;
     transition:
@@ -1708,19 +1708,19 @@
   }
 
   .accent-swatch--blue {
-    background: #0a779f;
+    background: var(--swatch-blue);
   }
 
   .accent-swatch--indigo {
-    background: #4f46e5;
+    background: var(--swatch-indigo);
   }
 
   .accent-swatch--steel {
-    background: #46647c;
+    background: var(--swatch-steel);
   }
 
   .accent-swatch--graphite {
-    background: #33393f;
+    background: var(--swatch-graphite);
   }
 
   .field-row-val.mono {

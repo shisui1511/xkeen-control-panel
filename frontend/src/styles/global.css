@@ -62,6 +62,13 @@
 
   --hover: rgba(var(--accent-rgb), 0.08);
 
+  /* Accent swatch tokens */
+  --swatch-check: #ffffff;
+  --swatch-blue: #0a779f;
+  --swatch-indigo: #4f46e5;
+  --swatch-steel: #46647c;
+  --swatch-graphite: #33393f;
+
   /* Phantom-token aliases */
   --fg-muted: var(--fg-dim);
   --text-muted: var(--fg-dim);

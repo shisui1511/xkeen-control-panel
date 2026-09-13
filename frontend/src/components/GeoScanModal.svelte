@@ -28,9 +28,9 @@
     availableFiles = [],
     onclose = () => {}
   } = $props<{
-    isOpen: boolean;
-    availableFiles: DATFile[];
-    onclose: () => void;
+    isOpen?: boolean;
+    availableFiles?: DATFile[];
+    onclose?: () => void;
   }>();
 
   let query = $state('');
@@ -46,7 +46,7 @@
   // Initialize selected files with existing DAT files
   $effect(() => {
     if (isOpen && selectedFiles.length === 0 && availableFiles.length > 0) {
-      selectedFiles = availableFiles.filter((f) => f.exists).map((f) => f.name);
+      selectedFiles = availableFiles.filter((f: DATFile) => f.exists).map((f: DATFile) => f.name);
     }
   });
 
@@ -100,7 +100,7 @@
   }
 
   function selectAllFiles() {
-    selectedFiles = availableFiles.filter((f) => f.exists).map((f) => f.name);
+    selectedFiles = availableFiles.filter((f: DATFile) => f.exists).map((f: DATFile) => f.name);
   }
 
   function deselectAllFiles() {
@@ -461,7 +461,7 @@
 
   .geoscan-toggle-btn.active {
     background: var(--primary);
-    color: var(--color-on-primary, #ffffff);
+    color: var(--btn-primary-text);
   }
 
   .geoscan-file-filter-btn {
@@ -670,7 +670,7 @@
     padding: 3px 8px;
     font-size: var(--font-size-xs, 12px);
     font-family: var(--font-mono);
-    color: var(--primary-light, #93c5fd);
+    color: var(--primary);
   }
 
   .copy-btn {
