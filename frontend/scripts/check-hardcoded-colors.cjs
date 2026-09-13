@@ -32,14 +32,25 @@ const HEX_VALUE_RE = new RegExp(HEX_VALUE, 'g');
 // после "hover" сразу идёт '{', а не значение.
 const DECLARATION_RE = /[a-zA-Z-]+\s*:\s*([^;{}]+)(?=[;}]|$)/g;
 
+// Заменяет содержимое CSS-комментариев /* ... */ пробелами (сохраняя длину
+// строки и переводы строк), чтобы DECLARATION_RE больше не видел "имя: hex"
+// внутри закомментированного кода (например, "/* border: 1px solid #ccc;
+// old */") как настоящую декларацию. Замена пробелами, а не удаление,
+// намеренно сохраняет индексы символов — lineAt() ниже продолжает считать
+// номера строк корректно для находок после комментария.
+function stripCssComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '));
+}
+
 // Возвращает находки { value, index } для всех hex-цветов, встретившихся
 // внутри значений CSS-деклараций в `text` (текст одного блока <style> или
 // содержимое одного inline-атрибута style="").
 function findHexInDeclarations(text) {
   const results = [];
+  const stripped = stripCssComments(text);
   let declMatch;
   DECLARATION_RE.lastIndex = 0;
-  while ((declMatch = DECLARATION_RE.exec(text)) !== null) {
+  while ((declMatch = DECLARATION_RE.exec(stripped)) !== null) {
     const value = declMatch[1];
     const valueStart = declMatch.index + declMatch[0].length - value.length;
     let hexMatch;

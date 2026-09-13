@@ -67,4 +67,28 @@ describe('check-hardcoded-colors — детектор литеральных hex
 `;
     expect(scanContent(cleanSample, 'Sample.svelte')).toHaveLength(0);
   });
+
+  it('не считает находкой hex-цвет внутри CSS-комментария, но ловит реальную декларацию рядом (регрессия 120-REVIEW WR-01)', () => {
+    const commentOnlySample = `
+<style>
+  /* border: 1px solid #ff0000; old */
+  .e {
+    color: var(--fg-primary);
+  }
+</style>
+`;
+    expect(scanContent(commentOnlySample, 'Sample.svelte')).toHaveLength(0);
+
+    const mixedSample = `
+<style>
+  /* было #ccc, заменили на токен */
+  .e {
+    border: 1px solid #fff;
+  }
+</style>
+`;
+    const findings = scanContent(mixedSample, 'Sample.svelte');
+    expect(findings).toHaveLength(1);
+    expect(findings[0].value.toLowerCase()).toBe('#fff');
+  });
 });
