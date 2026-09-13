@@ -375,6 +375,102 @@ func TestDATManagerService_SymlinkBackupAndRestore(t *testing.T) {
 	}
 }
 
+// TestDATManagerService_BackupFile_CleansSiblingBackupOnTypeSwitch covers
+// the regression from 120-REVIEW.md CR-03: a geo-file that alternates
+// between symlink and regular file across successive Update() runs must
+// not leave a stale backup of the opposite type behind, because
+// rollbackFile/restoreFile unconditionally check .bak.link first and would
+// otherwise restore the older, now-wrong backup type.
+func TestDATManagerService_BackupFile_CleansSiblingBackupOnTypeSwitch(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "actual.dat")
+	path := filepath.Join(dir, "geo.dat")
+
+	if err := os.WriteFile(targetPath, []byte("target data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("symlink -> regular file removes stale .bak", func(t *testing.T) {
+		// First backup: path is a symlink -> creates .bak.link.
+		if err := os.Symlink(targetPath, path); err != nil {
+			t.Fatal(err)
+		}
+		if err := backupFile(path); err != nil {
+			t.Fatalf("backupFile (symlink) failed: %v", err)
+		}
+		if _, err := os.Stat(path + ".bak.link"); err != nil {
+			t.Fatalf(".bak.link missing after symlink backup: %v", err)
+		}
+
+		// Simulate an external xkeen -ug rewriting the geo-file as a plain
+		// file, then leave a stale .bak from some earlier backup cycle to
+		// mimic the orphaned-backup scenario described in CR-03.
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("plain data v1"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path+".bak", []byte("stale .bak"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Second backup: path is now a regular file -> must remove the
+		// sibling .bak.link left over from the symlink era.
+		if err := backupFile(path); err != nil {
+			t.Fatalf("backupFile (regular) failed: %v", err)
+		}
+		if _, err := os.Stat(path + ".bak.link"); !os.IsNotExist(err) {
+			t.Errorf("expected stale .bak.link to be removed after regular-file backup")
+		}
+		if _, err := os.Stat(path + ".bak"); err != nil {
+			t.Errorf(".bak missing after regular-file backup: %v", err)
+		}
+
+		cleanBackupFile(path)
+		_ = os.Remove(path)
+	})
+
+	t.Run("regular file -> symlink removes stale .bak.link", func(t *testing.T) {
+		// First backup: path is a regular file -> creates .bak.
+		if err := os.WriteFile(path, []byte("plain data"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := backupFile(path); err != nil {
+			t.Fatalf("backupFile (regular) failed: %v", err)
+		}
+		if _, err := os.Stat(path + ".bak"); err != nil {
+			t.Fatalf(".bak missing after regular-file backup: %v", err)
+		}
+
+		// Simulate the geo-file becoming a symlink, with a stale .bak.link
+		// left over from an even earlier backup cycle.
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(targetPath, path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path+".bak.link", []byte("stale link"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Second backup: path is now a symlink -> must remove the sibling
+		// .bak left over from the regular-file era.
+		if err := backupFile(path); err != nil {
+			t.Fatalf("backupFile (symlink) failed: %v", err)
+		}
+		if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+			t.Errorf("expected stale .bak to be removed after symlink backup")
+		}
+		if _, err := os.Stat(path + ".bak.link"); err != nil {
+			t.Errorf(".bak.link missing after symlink backup: %v", err)
+		}
+
+		cleanBackupFile(path)
+	})
+}
+
 func TestDATManagerService_CleanBackupFile(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "test.dat")

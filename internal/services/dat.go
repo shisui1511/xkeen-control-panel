@@ -835,8 +835,17 @@ func backupFile(path string) error {
 		if err != nil {
 			return err
 		}
+		// Файл сменил тип symlink -> обычный файл со времени предыдущего
+		// backupFile: убираем бэкап устаревшего типа, иначе rollbackFile/
+		// restoreFile безусловно проверяют .bak.link первым и восстановят
+		// более старый symlink вместо актуального .bak.
+		_ = os.Remove(path + ".bak")
 		return os.WriteFile(path+".bak.link", []byte(target), 0644)
 	}
+
+	// Файл сменил тип обычный файл -> symlink со времени предыдущего
+	// backupFile: убираем бэкап устаревшего типа по той же причине.
+	_ = os.Remove(path + ".bak.link")
 
 	src, err := os.Open(path)
 	if err != nil {
