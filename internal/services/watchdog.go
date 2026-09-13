@@ -665,21 +665,6 @@ func (w *WatchdogService) tproxyInterceptionFamilies() (v4, v6 bool) {
 	return check(saveV4), check(saveV6)
 }
 
-// tproxyRulePresent performs a non-destructive check of both mangle tables
-// (iptables and, when present, ip6tables) for a live TPROXY interception
-// rule, without deleting anything. Used by CheckHealth's periodic re-latch
-// check (WR-03) to detect a rule that was reinstalled by an external
-// mechanism (e.g. a supervisor restart-looping XKeen) while the watchdog was
-// latched disarmed and the kernel never reported healthy again. A read
-// failure for a given family is treated as "not confirmed reinstalled"
-// rather than forcing a spurious unlatch on a transient error — a missing
-// ip6tables (xtables.IsCommandNotFound) is expected on many router variants
-// and must not be logged as one.
-func (w *WatchdogService) tproxyRulePresent() bool {
-	v4, v6 := w.tproxyInterceptionFamilies()
-	return v4 || v6
-}
-
 // splitIptablesRule splits an iptables-save rule string into individual command-line
 // arguments, correctly preserving arguments enclosed in single or double quotes
 // (such as rule comments or complex match options).

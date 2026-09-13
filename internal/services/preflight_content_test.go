@@ -615,4 +615,3 @@ proxies:
 		t.Errorf("unexpected preflight.awg_version_incompatible warning for classic AWG on 1.18.0")
 	}
 }
-

@@ -710,9 +710,9 @@ func TestMatchDomain(t *testing.T) {
 
 func TestNormalizeQueryInput(t *testing.T) {
 	tests := []struct {
-		input       string
-		wantDomain  string
-		wantIsIP    bool
+		input      string
+		wantDomain string
+		wantIsIP   bool
 	}{
 		{"https://mail.google.com/mail/u/0/#inbox", "mail.google.com", false},
 		{"google.com:443", "google.com", false},
@@ -856,4 +856,3 @@ func TestDATManagerService_Lookup_URLInputAndIPFilter(t *testing.T) {
 		}
 	}
 }
-

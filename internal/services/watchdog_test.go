@@ -2259,4 +2259,3 @@ func TestWatchdogService_TryResetClearsInterceptionState(t *testing.T) {
 
 	w.wg.Wait()
 }
-

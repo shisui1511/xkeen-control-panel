@@ -414,4 +414,3 @@ exit 1
 		t.Fatal("expected error when start failed and status is 'XKeen is not running', got nil")
 	}
 }
-

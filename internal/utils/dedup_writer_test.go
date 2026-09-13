@@ -457,4 +457,3 @@ func TestDeduplicatingWriter_Flush(t *testing.T) {
 		t.Fatalf("expected closeCount 1, got %d", mock.closeCount)
 	}
 }
-
