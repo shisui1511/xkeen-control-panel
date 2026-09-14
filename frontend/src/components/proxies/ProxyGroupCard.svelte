@@ -687,7 +687,7 @@
   .group-card:hover {
     box-shadow:
       0 4px 20px rgba(0, 0, 0, 0.35),
-      0 0 0 1px rgba(41, 194, 240, 0.15);
+      0 0 0 1px color-mix(in srgb, var(--primary) 15%, transparent);
   }
   .group-card .gc-head {
     background: linear-gradient(135deg, var(--bg-group-head-from), var(--bg-group-head-to));
@@ -708,7 +708,11 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: radial-gradient(ellipse at top left, rgba(41, 194, 240, 0.05), transparent 60%);
+    background: radial-gradient(
+      ellipse at top left,
+      color-mix(in srgb, var(--primary) 5%, transparent),
+      transparent 60%
+    );
     pointer-events: none;
   }
   .group-card .gc-head.collapsible {
@@ -819,23 +823,23 @@
   }
   .gc-lat-box.lat.ok {
     color: var(--success);
-    background: rgba(70, 209, 138, 0.15);
-    border: 1px solid rgba(70, 209, 138, 0.35);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
   }
   .gc-lat-box.lat.mid {
     color: var(--warning);
-    background: rgba(240, 180, 80, 0.15);
-    border: 1px solid rgba(240, 180, 80, 0.35);
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
   }
   .gc-lat-box.lat.bad {
     color: var(--danger);
-    background: rgba(239, 91, 107, 0.15);
-    border: 1px solid rgba(239, 91, 107, 0.35);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   }
   .gc-lat-box.lat.dim {
     color: var(--fg-dim);
-    background: rgba(92, 116, 145, 0.15);
-    border: 1px solid rgba(92, 116, 145, 0.35);
+    background: color-mix(in srgb, var(--fg-dim) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--fg-dim) 35%, transparent);
   }
   .gc-ping-btn {
     background: none;
@@ -888,7 +892,7 @@
     gap: 3px;
     font-size: 11px;
     color: var(--accent);
-    background: rgba(41, 194, 240, 0.08);
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
     padding: 1px 6px;
     border-radius: 4px;
   }
@@ -922,8 +926,8 @@
     font-family: inherit;
   }
   .gc-now-pill.is-leaf {
-    background: rgba(41, 194, 240, 0.08);
-    border-color: rgba(41, 194, 240, 0.2);
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
+    border-color: color-mix(in srgb, var(--primary) 20%, transparent);
     color: var(--accent);
   }
   .gc-now-dot {
@@ -945,18 +949,18 @@
     background: var(--danger);
   }
   .gc-now-pill.lat-ok {
-    background: rgba(70, 209, 138, 0.08);
-    border-color: rgba(70, 209, 138, 0.2);
+    background: color-mix(in srgb, var(--success) 8%, transparent);
+    border-color: color-mix(in srgb, var(--success) 20%, transparent);
     color: var(--success);
   }
   .gc-now-pill.lat-mid {
-    background: rgba(240, 180, 80, 0.08);
-    border-color: rgba(240, 180, 80, 0.2);
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
+    border-color: color-mix(in srgb, var(--warning) 20%, transparent);
     color: var(--warning);
   }
   .gc-now-pill.lat-bad {
-    background: rgba(239, 91, 107, 0.08);
-    border-color: rgba(239, 91, 107, 0.2);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+    border-color: color-mix(in srgb, var(--danger) 20%, transparent);
     color: var(--danger);
   }
   .gc-now-pill-link {
@@ -1025,7 +1029,11 @@
     position: absolute;
     inset: 0;
     border-radius: var(--radius-md);
-    background: linear-gradient(135deg, rgba(41, 194, 240, 0.03), transparent);
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--primary) 3%, transparent),
+      transparent
+    );
     opacity: 0;
     transition: opacity var(--transition-fast);
     pointer-events: none;
@@ -1039,11 +1047,15 @@
     opacity: 1;
   }
   .proxy-card.now {
-    background: linear-gradient(135deg, rgba(41, 194, 240, 0.12), rgba(41, 194, 240, 0.04));
-    border-color: rgba(41, 194, 240, 0.45);
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--primary) 12%, transparent),
+      color-mix(in srgb, var(--primary) 4%, transparent)
+    );
+    border-color: color-mix(in srgb, var(--primary) 45%, transparent);
     box-shadow:
-      inset 0 0 0 1px rgba(41, 194, 240, 0.08),
-      0 2px 8px rgba(41, 194, 240, 0.08);
+      inset 0 0 0 1px color-mix(in srgb, var(--primary) 8%, transparent),
+      0 2px 8px color-mix(in srgb, var(--primary) 8%, transparent);
   }
   .proxy-card .p-header {
     display: flex;
@@ -1137,7 +1149,7 @@
     color: var(--fg-primary);
   }
   .filter-chip.active {
-    background: rgba(41, 194, 240, 0.12);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
     border-color: var(--accent);
     color: var(--accent);
     font-weight: 600;
@@ -1152,10 +1164,10 @@
   .group-test-btn {
     margin-left: auto;
     color: var(--accent);
-    border-color: rgba(41, 194, 240, 0.3);
+    border-color: color-mix(in srgb, var(--primary) 30%, transparent);
   }
   .group-test-btn:hover {
-    background: rgba(41, 194, 240, 0.15);
+    background: color-mix(in srgb, var(--primary) 15%, transparent);
     border-color: var(--accent);
     color: var(--accent);
   }

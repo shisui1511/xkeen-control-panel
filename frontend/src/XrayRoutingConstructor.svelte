@@ -753,7 +753,7 @@
               class="validation-error-block"
               role="alert"
               aria-live="assertive"
-              style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
+              style="margin-top: 12px; padding: 12px; background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
             >
               <div style="font-weight: bold; margin-bottom: 6px;">
                 {$t('editor.validation_failed')}
@@ -808,7 +808,7 @@
             <code>{file.name}</code>:
             <span
               class="badge"
-              style="background-color: var(--warning-soft, rgba(245, 158, 11, 0.15)); color: var(--warning);"
+              style="background-color: var(--warning-soft, color-mix(in srgb, var(--warning) 15%, transparent)); color: var(--warning);"
             >
               {$t('xray.sections_modified', { count: file.changesCount })}
             </span>
@@ -939,9 +939,9 @@
   }
 
   .scenario-chip.active {
-    background: var(--color-primary-subtle, rgba(59, 130, 246, 0.15));
-    border-color: var(--color-primary);
-    color: var(--color-primary);
+    background: var(--color-primary-subtle, color-mix(in srgb, var(--primary) 15%, transparent));
+    border-color: var(--primary);
+    color: var(--primary);
     font-weight: 600;
   }
 

@@ -791,7 +791,7 @@
               class="validation-error-block"
               role="alert"
               aria-live="assertive"
-              style="margin: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
+              style="margin: 12px; padding: 12px; background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
             >
               <div style="font-weight: bold; margin-bottom: 6px;">
                 {$t('editor.validation_failed')}
@@ -816,7 +816,7 @@
               class="constructor-validation-bar"
               role="status"
               aria-live="polite"
-              style="margin: 0 12px 10px 12px; padding: 8px 12px; background: rgba(239, 91, 107, 0.12); border: 1px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-size: 12px; display: flex; align-items: center; gap: 8px;"
+              style="margin: 0 12px 10px 12px; padding: 8px 12px; background: color-mix(in srgb, var(--danger) 12%, transparent); border: 1px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-size: 12px; display: flex; align-items: center; gap: 8px;"
             >
               <span style="flex-shrink: 0;">⚠️</span>
               <span>{blockingValidationMsg}</span>
@@ -1041,7 +1041,7 @@
   }
 
   .preset-modified-chip {
-    background: rgba(240, 180, 80, 0.15);
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
     color: var(--warning);
     font-size: var(--font-size-xs);
     padding: 2px 6px;
@@ -1106,12 +1106,12 @@
   }
 
   .tab-status-badge.status-on {
-    background: rgba(16, 185, 129, 0.15);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
     color: var(--success);
   }
 
   .tab-status-badge.status-off {
-    background: rgba(255, 255, 255, 0.05);
+    background: color-mix(in srgb, var(--fg-dim) 15%, transparent);
     color: var(--fg-dim);
   }
 
@@ -1121,8 +1121,8 @@
   }
 
   .alert-warning {
-    background: rgba(240, 180, 80, 0.1);
-    border: 1px solid rgba(240, 180, 80, 0.3);
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     color: var(--warning);
   }
 

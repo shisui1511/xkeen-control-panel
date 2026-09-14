@@ -503,27 +503,27 @@
   }
 
   .type-mixed {
-    background: rgba(41, 194, 240, 0.15);
+    background: color-mix(in srgb, var(--primary) 15%, transparent);
     color: var(--primary);
   }
   .type-socks {
-    background: rgba(70, 209, 138, 0.15);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
     color: var(--success);
   }
   .type-http {
-    background: rgba(56, 189, 248, 0.15);
+    background: color-mix(in srgb, var(--seq-2) 15%, transparent);
     color: var(--seq-2);
   }
   .type-shadowsocks {
-    background: rgba(239, 91, 107, 0.15);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
     color: var(--danger);
   }
   .type-tproxy {
-    background: rgba(240, 180, 80, 0.15);
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
     color: var(--warning);
   }
   .type-redirect {
-    background: rgba(245, 158, 11, 0.15);
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
     color: var(--warning);
   }
 
@@ -605,8 +605,8 @@
   }
 
   .alert-warning {
-    background: rgba(240, 180, 80, 0.1);
-    border: 1px solid rgba(240, 180, 80, 0.3);
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     color: var(--warning);
   }
 

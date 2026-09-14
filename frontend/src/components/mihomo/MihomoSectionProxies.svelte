@@ -363,7 +363,7 @@
       <div class="item-row" style="border-left: 3px solid var(--success);">
         <span
           class="item-badge type-mihomo"
-          style="background: rgba(16, 185, 129, 0.15); color: var(--success); border-color: rgba(16, 185, 129, 0.3);"
+          style="background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, transparent);"
           >mihomo</span
         >
         <span class="item-name">{sub.name}</span>
@@ -693,13 +693,13 @@
   }
 
   .import-btn {
-    background: rgba(16, 185, 129, 0.1);
+    background: color-mix(in srgb, var(--success) 10%, transparent);
     color: var(--success);
-    border: 1px solid rgba(16, 185, 129, 0.2);
+    border: 1px solid color-mix(in srgb, var(--success) 20%, transparent);
   }
 
   .import-btn:hover:not(:disabled) {
-    background: rgba(16, 185, 129, 0.2);
+    background: color-mix(in srgb, var(--success) 20%, transparent);
   }
 
   .item-row {
@@ -732,31 +732,31 @@
   }
 
   .type-vless {
-    background: rgba(41, 194, 240, 0.15);
+    background: color-mix(in srgb, var(--primary) 15%, transparent);
     color: var(--primary);
   }
   .type-hysteria2 {
-    background: rgba(70, 209, 138, 0.15);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
     color: var(--success);
   }
   .type-tuic {
-    background: rgba(240, 180, 80, 0.15);
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
     color: var(--warning);
   }
   .type-ss {
-    background: rgba(239, 91, 107, 0.15);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
     color: var(--danger);
   }
   .type-vmess {
-    background: rgba(255, 255, 255, 0.08);
+    background: color-mix(in srgb, var(--fg-secondary) 15%, transparent);
     color: var(--fg-secondary);
   }
   .type-trojan {
-    background: rgba(236, 72, 153, 0.15);
+    background: color-mix(in srgb, var(--seq-4) 15%, transparent);
     color: var(--seq-4);
   }
   .type-wireguard {
-    background: rgba(168, 85, 247, 0.15);
+    background: color-mix(in srgb, var(--seq-3) 15%, transparent);
     color: var(--seq-3);
   }
 
@@ -797,12 +797,12 @@
 
   .item-btn:hover {
     color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--bg-hover);
   }
 
   .item-btn-danger:hover {
     color: var(--danger);
-    background: rgba(239, 91, 107, 0.1);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
 
   .item-switch {
@@ -830,7 +830,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: var(--bg-surface-hover);
     transition: 0.4s;
     border: 1px solid var(--border);
   }
@@ -879,7 +879,7 @@
 
   .conf-dropzone.dragging {
     border-color: var(--primary);
-    background: rgba(41, 194, 240, 0.08);
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
   }
 
   .file-picker-input::file-selector-button {
