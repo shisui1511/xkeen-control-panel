@@ -10,12 +10,31 @@
   import Tabs from './components/Tabs.svelte';
   import Select from './components/Select.svelte';
   import Button from './components/Button.svelte';
+  import Icon from './lib/components/Icon.svelte';
 
   interface Props {
     onSwitchTab?: (tab: string) => void;
   }
 
   let { onSwitchTab = () => {} }: Props = $props();
+
+  let flushingFakeIP = $state(false);
+
+  async function flushFakeIP() {
+    flushingFakeIP = true;
+    try {
+      const res = await apiFetch('/api/mihomo/cache/fakeip/flush', {
+        method: 'POST'
+      });
+      if (!res.ok) throw new Error('Failed to flush Fake-IP cache');
+      showToast('success', $t('rules.fakeip_flushed'));
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e.message);
+    } finally {
+      flushingFakeIP = false;
+    }
+  }
 
   interface Rule {
     type: string;
@@ -384,6 +403,22 @@
     breadcrumbs={[{ label: $t('nav.group_routing'), tab: 'dashboard' }, { label: $t('nav.rules') }]}
     {onSwitchTab}
   >
+    {#if $capabilities?.active_kernel === 'mihomo' && $capabilities?.mihomo?.reachable}
+      <Button
+        variant="secondary"
+        onclick={flushFakeIP}
+        disabled={flushingFakeIP}
+        title={$t('rules.flush_fakeip')}
+      >
+        {#if flushingFakeIP}
+          <span class="spinner-sm"></span>
+          {$t('rules.flushing_fakeip')}
+        {:else}
+          <Icon name="refresh" size={14} />
+          {$t('rules.flush_fakeip')}
+        {/if}
+      </Button>
+    {/if}
     {#if activeTab === 'providers' && ruleProviders.length > 0}
       <Button variant="primary" onclick={updateAllProviders} disabled={updatingAll}>
         {#if updatingAll}
