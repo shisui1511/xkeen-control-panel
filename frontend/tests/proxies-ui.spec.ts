@@ -255,6 +255,12 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
           contentType: 'application/json',
           body: JSON.stringify({ connections: [], total: 0 })
         });
+      } else if (url.includes('/api/network/ip')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, ip: '203.0.113.88' })
+        });
       } else {
         await route.fulfill({
           status: 200,
@@ -262,6 +268,19 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
           body: JSON.stringify({ success: true })
         });
       }
+    });
+
+    await page.route('https://ipinfo.io/json', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ip: '198.51.100.42',
+          country: 'NL',
+          city: 'Amsterdam',
+          org: 'AS13335 Mock Network'
+        })
+      });
     });
 
     await page.goto('/#/proxies');
@@ -702,5 +721,25 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     });
 
     await expect(popover).toBeHidden();
+  });
+
+  test('displays ClientExitIpBadge in page header with popover on click', async ({ page }) => {
+    // Badge pill should be present in page header
+    const pill = page.locator('.client-ip-pill');
+    await expect(pill).toBeVisible({ timeout: 6000 });
+
+    // Should display the mocked exit IP
+    await expect(pill).toContainText('198.51.100.42');
+
+    // Click to open popover
+    await page.locator('.pill-main').click();
+
+    const popover = page.locator('.client-ip-popover');
+    await expect(popover).toBeVisible();
+
+    // Verify popover shows both IPs and proxied status
+    await expect(popover).toContainText('198.51.100.42');
+    await expect(popover).toContainText('203.0.113.88');
+    await expect(popover).toContainText('Amsterdam');
   });
 });

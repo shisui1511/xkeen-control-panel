@@ -63,6 +63,8 @@
   import SubscriptionList from './components/subscriptions/SubscriptionList.svelte';
   import SubscriptionFormModal from './components/subscriptions/SubscriptionFormModal.svelte';
   import NodeImporter from './components/subscriptions/NodeImporter.svelte';
+  import ClientExitIpBadge from './components/network/ClientExitIpBadge.svelte';
+  import { fetchClientExitIP } from './lib/clientIp';
 
   interface Props {
     onSwitchTab?: (tab: string) => void;
@@ -607,6 +609,9 @@
         $t('proxies.quick_select_success', { group: groupName, node: proxyName })
       );
       await fetchProxies();
+      setTimeout(() => {
+        fetchClientExitIP(true, $currentLang);
+      }, 1500);
     } catch (e: any) {
       groups[groupIndex] = {
         ...groups[groupIndex],
@@ -1769,6 +1774,7 @@
     breadcrumbs={[{ label: $t('nav.group_proxy_subs') }, { label: $t('proxies.title') }]}
     {onSwitchTab}
   >
+    <ClientExitIpBadge />
     {#if activeTab === 'groups'}
       <input
         class="group-search"

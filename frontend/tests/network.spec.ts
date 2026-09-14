@@ -63,7 +63,7 @@ async function setupRestMocks(page: Page) {
         contentType: 'application/json',
         body: JSON.stringify({
           success: true,
-          ip: '8.8.8.8'
+          ip: '203.0.113.1'
         })
       });
     } else {
@@ -193,21 +193,7 @@ test.describe('Network Tools E2E suite', () => {
     await expect(page.locator('#port-number')).toHaveValue('80');
   });
 
-  test('displays client exit IP and routing mode in diagnostics card', async ({ page }) => {
-    // Card should be visible
-    const diagCard = page.locator('.client-ip-diagnostics-card');
-    await expect(diagCard).toBeVisible();
-
-    // Client exit IP section should show mocked IP
-    await expect(diagCard).toContainText('198.51.100.42');
-    await expect(diagCard).toContainText('Amsterdam');
-
-    // Router WAN IP should show mocked WAN IP
-    await expect(diagCard).toContainText('8.8.8.8');
-
-    // Since client IP (198.51.100.42) != router IP (8.8.8.8), badge should indicate proxied routing
-    const statusBadge = diagCard.locator('.route-badge');
-    await expect(statusBadge).toBeVisible();
-    await expect(statusBadge).toHaveClass(/badge-proxied/);
+  test('displays router WAN IP when available', async ({ page }) => {
+    await expect(page.locator('.card:has-text("203.0.113.1")')).toBeVisible();
   });
 });

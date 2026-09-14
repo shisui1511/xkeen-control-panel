@@ -11,8 +11,6 @@
   import LiveIndicator from './components/LiveIndicator.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
-  import ClientExitIpBadge from './components/network/ClientExitIpBadge.svelte';
-
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
   interface Connection {
@@ -590,7 +588,6 @@
     {onSwitchTab}
   >
     {#snippet actions()}
-      <ClientExitIpBadge />
       <LiveIndicator
         live={wsConnected && !paused}
         label={wsConnected && !paused

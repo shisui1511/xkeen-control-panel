@@ -9,7 +9,6 @@
   import Button from './components/Button.svelte';
   import { showToast } from './stores';
   import { apiFetch } from './lib/api';
-  import ClientIpDiagnosticsCard from './components/network/ClientIpDiagnosticsCard.svelte';
 
   interface Props {
     onSwitchTab?: (tab: string) => void;
@@ -557,7 +556,17 @@
     hideHome={true}
   />
 
-  <ClientIpDiagnosticsCard />
+  {#if publicIP}
+    <div
+      class="card mb-3"
+      style="padding: 12px 18px; display: flex; align-items: center; gap: 8px;"
+    >
+      <Icon name="network" size={14} />
+      <span style="font-size: 13.5px; font-weight: 500; color: var(--fg-secondary);">
+        {$t('net.your_ip', { ip: publicIP })}
+      </span>
+    </div>
+  {/if}
 
   <div class="nt-grid mb-3">
     <!-- Ping -->
