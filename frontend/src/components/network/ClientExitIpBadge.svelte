@@ -326,13 +326,13 @@
   }
 
   .client-ip-pill:hover {
-    border-color: var(--color-primary, #0070f3);
+    border-color: var(--primary);
     background: var(--bg-card-hover, var(--bg-hover));
   }
 
   .client-ip-pill.is-open {
-    border-color: var(--color-primary, #0070f3);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary, #0070f3) 20%, transparent);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 20%, transparent);
   }
 
   .icon-globe {
@@ -370,13 +370,13 @@
   }
 
   .badge-proxy {
-    background: color-mix(in srgb, #10b981 14%, transparent);
-    color: #10b981;
+    background: color-mix(in srgb, var(--success) 14%, transparent);
+    color: var(--success);
   }
 
   .badge-direct {
-    background: color-mix(in srgb, #3b82f6 14%, transparent);
-    color: #3b82f6;
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+    color: var(--primary);
   }
 
   .routing-badge .dot {
@@ -483,15 +483,15 @@
   }
 
   .chip-proxy {
-    background: color-mix(in srgb, #10b981 15%, transparent);
-    color: #10b981;
-    border: 1px solid color-mix(in srgb, #10b981 30%, transparent);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+    color: var(--success);
+    border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
   }
 
   .chip-direct {
-    background: color-mix(in srgb, #3b82f6 15%, transparent);
-    color: #3b82f6;
-    border: 1px solid color-mix(in srgb, #3b82f6 30%, transparent);
+    background: color-mix(in srgb, var(--primary) 15%, transparent);
+    color: var(--primary);
+    border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
   }
 
   .popover-body {
@@ -579,23 +579,23 @@
   }
 
   .routing-explainer.is-proxy {
-    background: color-mix(in srgb, #10b981 10%, transparent);
-    border: 1px solid color-mix(in srgb, #10b981 25%, transparent);
+    background: color-mix(in srgb, var(--success) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
     color: var(--fg-primary);
   }
 
   .routing-explainer.is-proxy .explainer-icon {
-    color: #10b981;
+    color: var(--success);
   }
 
   .routing-explainer.is-direct {
-    background: color-mix(in srgb, #3b82f6 10%, transparent);
-    border: 1px solid color-mix(in srgb, #3b82f6 25%, transparent);
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
     color: var(--fg-primary);
   }
 
   .routing-explainer.is-direct .explainer-icon {
-    color: #3b82f6;
+    color: var(--primary);
   }
 
   .explainer-icon {
@@ -605,7 +605,7 @@
 
   .error-msg {
     font-size: 11px;
-    color: var(--color-danger, #ef4444);
+    color: var(--danger);
   }
 
   .popover-footer {
