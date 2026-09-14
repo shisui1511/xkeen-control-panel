@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import FileTree from './FileTree.svelte';
   import { t } from '../../i18n';
 
@@ -44,14 +45,25 @@
       : 240
   );
   let isResizing = $state(false);
+  let activeCleanup: (() => void) | null = null;
 
-  function startResize(e: MouseEvent | PointerEvent) {
+  onDestroy(() => {
+    if (activeCleanup) {
+      activeCleanup();
+      activeCleanup = null;
+    }
+  });
+
+  function startResize(e: PointerEvent) {
     e.preventDefault();
+    if (activeCleanup) {
+      activeCleanup();
+    }
     isResizing = true;
     const startX = e.clientX;
     const startWidth = fileTreeWidth;
 
-    function onMove(ev: MouseEvent | PointerEvent) {
+    function onMove(ev: PointerEvent) {
       const newWidth = Math.max(160, Math.min(450, startWidth + (ev.clientX - startX)));
       fileTreeWidth = newWidth;
     }
@@ -59,16 +71,22 @@
     function onUp() {
       isResizing = false;
       localStorage.setItem('editor_filetree_width', String(fileTreeWidth));
-      window.removeEventListener('mousemove', onMove as any);
-      window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('pointermove', onMove as any);
-      window.removeEventListener('pointerup', onUp);
+      if (activeCleanup) {
+        activeCleanup();
+        activeCleanup = null;
+      }
     }
 
-    window.addEventListener('mousemove', onMove as any);
-    window.addEventListener('mouseup', onUp);
-    window.addEventListener('pointermove', onMove as any);
+    activeCleanup = () => {
+      isResizing = false;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   }
 </script>
 
@@ -95,7 +113,6 @@
     aria-label={$t('editor.resize_sidebar')}
     tabindex="-1"
     onpointerdown={startResize}
-    onmousedown={startResize}
   ></button>
 {/if}
 
