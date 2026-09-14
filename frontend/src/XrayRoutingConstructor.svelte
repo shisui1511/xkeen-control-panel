@@ -12,12 +12,29 @@
   import { parseValidationError } from './lib/errorParser';
   import { findPortCollisions, parseMihomoPorts, type PortAllocation } from './lib/portChecker';
   import { apiFetch, apiFetchJSON } from './lib/api';
-  import { shadowsocksCiphers } from './schemas/xray';
   import PreflightWarnings, {
     type PreflightWarning
   } from './components/editor/PreflightWarnings.svelte';
-  import AwgDiffCard from './components/awg/AwgDiffCard.svelte';
-  import { analyzeAwgDiff } from './lib/awgPresets';
+  import ConstructorPreview, { type PreviewTab } from './components/ConstructorPreview.svelte';
+  import XraySectionRouting from './components/xray/XraySectionRouting.svelte';
+  import XraySectionInbounds from './components/xray/XraySectionInbounds.svelte';
+  import XraySectionDns from './components/xray/XraySectionDns.svelte';
+  import XraySectionOutbounds from './components/xray/XraySectionOutbounds.svelte';
+  import XraySectionLog from './components/xray/XraySectionLog.svelte';
+  import XraySectionPolicy from './components/xray/XraySectionPolicy.svelte';
+  import {
+    XrayContext,
+    setXrayContext,
+    type XrayRoutingRule,
+    type DNSServer,
+    type XrayInbound,
+    type OutboundDetail,
+    type XraySectionName
+  } from './components/xray/XrayContext.svelte';
+  import {
+    XRAY_DEFAULT_PRESETS,
+    type XrayRoutingPreset
+  } from './lib/constructors/presets/xrayPresets';
 
   let {
     onSwitchTab = () => {},
@@ -31,48 +48,8 @@
     embedded?: boolean;
   }>();
 
-  interface XrayRoutingRule {
-    id: string;
-    type: 'field';
-    outboundTag: string;
-    domain?: string[];
-    ip?: string[];
-    port?: string;
-    network?: string;
-    protocol?: string[];
-    inboundTag?: string[];
-    enabled?: boolean;
-  }
-
-  interface DNSServer {
-    address: string;
-    port?: number;
-    tag?: string;
-    domains?: string[];
-    skipFallback?: boolean;
-    inboundPort?: number;
-  }
-
-  interface XrayInbound {
-    tag: string;
-    port: number;
-    listen?: string;
-    protocol: string;
-    settings?: Record<string, any>;
-    sniffing?: Record<string, any>;
-    streamSettings?: Record<string, any>;
-  }
-
-  interface OutboundDetail {
-    tag: string;
-    protocol: string;
-    server?: string;
-  }
-
   // Runes State (Svelte 5)
-  let activeSection = $state<'log' | 'dns' | 'inbounds' | 'outbounds' | 'routing' | 'policy'>(
-    'routing'
-  );
+  let activeSection = $state<XraySectionName>('routing');
   let logConfig = $state({ loglevel: 'warning', dnsLog: false });
   let dnsConfig = $state<{
     tag: string;
@@ -151,2259 +128,419 @@
     return list;
   });
 
-  let showOutboundForm = $state(false);
-  let editingOutboundIndex = $state<number | null>(null);
-  let outboundForm = $state({
-    tag: '',
-    protocol: 'vless',
-    address: '',
-    port: 443,
-    uuid: '',
-    flow: '',
-    cipher: 'auto',
-    alterId: 0,
-    security: 'none',
-    sni: '',
-    network: 'tcp',
-    path: '/',
-    serviceName: '',
-    publicKey: '',
-    shortId: '',
-    fingerprint: 'chrome',
-    // Shadowsocks
-    shadowsocksPassword: '',
-    // WireGuard
-    wireguardSecretKey: '',
-    wireguardAddress: '10.0.0.2/32',
-    endpoint: '',
-    wireguardPublicKey: '',
-    wireguardPsk: '',
-    wireguardKeepAlive: 25,
-    wireguardAllowedIPs: '0.0.0.0/0, ::/0',
-    wireguardMtu: 1420,
-    wireguardReserved: '',
-    isAwgObfuscated: false,
-    rawAwgOptions: null as any,
-    // Sockopt
-    sockoptMark: '' as string | number,
-    sockoptTcpFastOpen: false,
-    sockoptTcpMptcp: false,
-    sockoptTcpNoDelay: false,
-    sockoptTcpKeepAliveInterval: '' as string | number,
-    dialerProxy: ''
-  });
-
-  function generateShadowsocksKey(method: string): string {
-    const is16 = method.includes('128');
-    const byteLen = is16 ? 16 : 32;
-    const array = new Uint8Array(byteLen);
-    crypto.getRandomValues(array);
-    let binary = '';
-    for (let i = 0; i < array.length; i++) {
-      binary += String.fromCharCode(array[i]);
-    }
-    return btoa(binary);
-  }
-
-  function computeDialerChain(
-    currentTag: string,
-    targetProxy: string
-  ): { chain: string[]; hasCycle: boolean } {
-    if (!targetProxy) {
-      return { chain: [currentTag, 'DIRECT'], hasCycle: false };
-    }
-    const chain: string[] = [currentTag];
-    const visited = new Set<string>([currentTag]);
-    let curr = targetProxy;
-
-    const proxyMap = new Map<string, string>();
-    for (const o of customOutbounds) {
-      if (o?.tag) {
-        const dp = o.streamSettings?.sockopt?.dialerProxy;
-        if (dp) proxyMap.set(o.tag, dp);
-      }
-    }
-    for (const o of subscriptionOutbounds) {
-      if (o?.tag) {
-        const dp = o.streamSettings?.sockopt?.dialerProxy;
-        if (dp) proxyMap.set(o.tag, dp);
-      }
-    }
-    proxyMap.set(currentTag, targetProxy);
-
-    while (curr) {
-      chain.push(curr);
-      if (visited.has(curr)) {
-        return { chain, hasCycle: true };
-      }
-      visited.add(curr);
-      curr = proxyMap.get(curr) || '';
-      if (chain.length > 20) {
-        return { chain, hasCycle: true };
-      }
-    }
-    chain.push('DIRECT');
-    return { chain, hasCycle: false };
-  }
-
-  let dialerChainPreview = $derived.by(() => {
-    const tag = outboundForm.tag.trim() || 'CURRENT';
-    return computeDialerChain(tag, outboundForm.dialerProxy.trim());
-  });
-
-  let generatingUUID = $state(false);
-  async function generateUUID() {
-    generatingUUID = true;
-    try {
-      const res = await apiFetch('/api/xray/uuid');
-      const data = await res.json();
-      if (res.ok && data?.data?.uuid) {
-        outboundForm.uuid = data.data.uuid;
-        showToast('success', $t('xray.uuid_generated'));
-      } else {
-        outboundForm.uuid = crypto.randomUUID();
-      }
-    } catch {
-      outboundForm.uuid = crypto.randomUUID();
-    } finally {
-      generatingUUID = false;
-    }
-  }
-
-  let canUndo = $state(false);
-  function checkUndo() {
-    canUndo = !!localStorage.getItem('xcp_prev_xray_json');
-  }
-
-  let proxyTag = $state<string>('');
   let routingRules = $state<XrayRoutingRule[]>([]);
+  let balancers = $state<any[]>([]);
+  let proxyTag = $state<string>('');
+  let dnsOverVless = $state<boolean>(false);
+
   let policyConfig = $state<{ levels: Record<string, any>; system: Record<string, any> }>({
-    levels: { '0': { handshake: 4, connIdle: 300, uplinkOnly: 2, downlinkOnly: 5 } },
+    levels: {
+      '0': {
+        handshake: 4,
+        connIdle: 300,
+        uplinkOnly: 2,
+        downlinkOnly: 5
+      }
+    },
     system: {}
   });
 
-  // Presets & Modification tracking (BUILD-04)
-  let lastAppliedPreset = $state<string | null>(null);
-  let isPresetModified = $state<boolean>(false);
-
-  const defaultPresets = [
-    {
-      id: 'selective-routing',
-      nameKey: 'xray.preset_selective',
-      descKey: 'xray.preset_selective_desc'
-    },
-    {
-      id: 'all-proxy-routing',
-      nameKey: 'xray.preset_all_proxy',
-      descKey: 'xray.preset_all_proxy_desc'
-    },
-    {
-      id: 'selective-no-quic',
-      nameKey: 'xray.preset_selective_no_quic',
-      descKey: 'xray.preset_selective_no_quic_desc'
-    },
-    {
-      id: 'only-blocked-routing',
-      nameKey: 'xray.preset_blocked_only',
-      descKey: 'xray.preset_blocked_only_desc'
-    },
-    {
-      id: 'minimal-routing',
-      nameKey: 'xray.preset_minimal',
-      descKey: 'xray.preset_minimal_desc'
-    }
-  ];
-
-  // Resizable Splitter State (BUILD-01)
-  let previewWidth = $state<number>(
-    (() => {
-      if (typeof localStorage === 'undefined') return 440;
-      const raw = localStorage.getItem('xray_builder_preview_width');
-      if (!raw) return 440;
-      const num = Number(raw);
-      return !isNaN(num) ? Math.max(280, Math.min(800, num)) : 440;
-    })()
-  );
-  let showPreviewPane = $state<boolean>(true);
-  let isResizingPreview = $state<boolean>(false);
-  let activeSplitterCleanup: (() => void) | null = null;
-
-  function startResizePreview(e: MouseEvent | PointerEvent) {
-    e.preventDefault();
-    isResizingPreview = true;
-    const startX = e.clientX;
-    const startWidth = previewWidth;
-
-    function onMove(ev: MouseEvent | PointerEvent) {
-      const delta = startX - ev.clientX;
-      const newWidth = Math.max(280, Math.min(800, startWidth + delta));
-      previewWidth = newWidth;
-    }
-
-    function onUp() {
-      isResizingPreview = false;
-      localStorage.setItem('xray_builder_preview_width', String(previewWidth));
-      if (activeSplitterCleanup) {
-        activeSplitterCleanup();
-      }
-    }
-
-    function cleanup() {
-      window.removeEventListener('mousemove', onMove as any);
-      window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('pointermove', onMove as any);
-      window.removeEventListener('pointerup', onUp);
-      activeSplitterCleanup = null;
-    }
-
-    activeSplitterCleanup = cleanup;
-
-    window.addEventListener('mousemove', onMove as any);
-    window.addEventListener('mouseup', onUp);
-    window.addEventListener('pointermove', onMove as any);
-    window.addEventListener('pointerup', onUp);
-  }
-
-  // Preview Tabs & Code Toolbar (BUILD-03)
-  let activePreviewTab = $state<
-    | '05_routing.json'
-    | '04_outbounds.json'
-    | '02_dns.json'
-    | '01_log.json'
-    | '03_inbounds.json'
-    | '06_policy.json'
-    | 'all'
-  >('all');
-  let copyFeedback = $state(false);
-
-  // Drag-and-Drop & Rule controls (BUILD-02)
-  let draggedRuleId = $state<string | null>(null);
-  let dragOverRuleId = $state<string | null>(null);
-
-  function handleDragStart(e: DragEvent, ruleId: string) {
-    draggedRuleId = ruleId;
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', ruleId);
-    }
-  }
-
-  function handleDragOver(e: DragEvent, ruleId: string) {
-    e.preventDefault();
-    if (e.dataTransfer) {
-      e.dataTransfer.dropEffect = 'move';
-    }
-    dragOverRuleId = ruleId;
-  }
-
-  function handleDrop(e: DragEvent, targetRuleId: string) {
-    e.preventDefault();
-    if (!draggedRuleId || draggedRuleId === targetRuleId) {
-      draggedRuleId = null;
-      dragOverRuleId = null;
-      return;
-    }
-    const fromIdx = routingRules.findIndex((r) => r.id === draggedRuleId);
-    const toIdx = routingRules.findIndex((r) => r.id === targetRuleId);
-    if (fromIdx !== -1 && toIdx !== -1) {
-      const updated = [...routingRules];
-      const [moved] = updated.splice(fromIdx, 1);
-      updated.splice(toIdx, 0, moved);
-      routingRules = updated;
-      isDirty = true;
-      if (lastAppliedPreset) isPresetModified = true;
-    }
-    draggedRuleId = null;
-    dragOverRuleId = null;
-  }
-
-  function handleDragEnd() {
-    draggedRuleId = null;
-    dragOverRuleId = null;
-  }
-
-  function toggleRuleEnabled(ruleId: string) {
-    routingRules = routingRules.map((r) => {
-      if (r.id === ruleId) {
-        return { ...r, enabled: r.enabled === false ? true : false };
-      }
-      return r;
-    });
-    isDirty = true;
-    if (lastAppliedPreset) isPresetModified = true;
-  }
-
-  function duplicateRule(rule: XrayRoutingRule) {
-    const copy: XrayRoutingRule = {
-      ...JSON.parse(JSON.stringify(rule)),
-      id: crypto.randomUUID()
-    };
-    const idx = routingRules.findIndex((r) => r.id === rule.id);
-    if (idx !== -1) {
-      routingRules.splice(idx + 1, 0, copy);
-    } else {
-      routingRules.push(copy);
-    }
-    routingRules = [...routingRules];
-    isDirty = true;
-    if (lastAppliedPreset) isPresetModified = true;
-  }
-
-  let schema = $state<any>(null);
-  let schemaLoading = $state(true);
-  let schemaError = $state('');
-  let validationError = $state('');
-
-  let dnsOverVless = $state(false);
+  let showPreviewPane = $state(true);
+  let activePreviewTab = $state<string>('05_routing.json');
+  let isDirty = $state(false);
+  let applyLoading = $state(false);
+  let validationError = $state<string | null>(null);
   let dnsRedirectLoading = $state(false);
 
-  async function enableDNSRedirect() {
-    dnsRedirectLoading = true;
-    try {
-      const res = await apiFetch('/api/service/dns-redirect', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ enabled: true })
-      });
-      if (res.ok) {
-        showToast('success', $t('mihomo.dns_intercept_enabled'));
-        await fetchCapabilities();
-      } else {
-        const text = await res.text();
-        showToast('error', text || $t('mihomo.dns_intercept_error'));
+  let showApplyConfirm = $state(false);
+  let filesToModify = $state<Array<{ name: string; changesCount: number }>>([]);
+  let saveWarnings = $state<PreflightWarning[]>([]);
+
+  // Test Route & Logger States
+  let testRouteForm = $state({
+    domain: '',
+    ip: '',
+    port: '',
+    protocol: '',
+    inboundTag: ''
+  });
+  let testRouteRunning = $state(false);
+  let testRouteResult = $state<any>(null);
+  let testRouteError = $state<string>('');
+  let restartingLogger = $state(false);
+
+  // Scenario Bar
+  let schema = $state<any>(null);
+  let schemaLoading = $state(true);
+  let schemaError = $state<string | null>(null);
+  let lastAppliedPreset = $state<string | null>(null);
+  let isPresetModified = $state(false);
+
+  // Raw file contents loaded from backend
+  let xrayFiles = $state<Record<string, any>>({});
+  let rawFilesOnLoad = $state<Record<string, string>>({});
+  let undoHistory = $state<Array<Record<string, any>>>([]);
+
+  // Draft handling
+  let detectedDraft = $state<DraftRecord | null>(null);
+
+  // Setup XrayContext
+  const ctx = new XrayContext();
+  setXrayContext(ctx);
+
+  const previewTabs: PreviewTab[] = [
+    { id: '05_routing.json', title: '05_routing.json' },
+    { id: '04_outbounds.json', title: '04_outbounds.json' },
+    { id: '02_dns.json', title: '02_dns.json' },
+    { id: '01_log.json', title: '01_log.json' },
+    { id: '03_inbounds.json', title: '03_inbounds.json' },
+    { id: '06_policy.json', title: '06_policy.json' },
+    { id: 'all', title: $t('xray.all_files') }
+  ];
+
+  let activePreviewText = $derived.by(() => {
+    const cfgs = generateFileConfigs();
+    if (activePreviewTab === 'all') {
+      const combined: Record<string, any> = {};
+      for (const [_, content] of Object.entries(cfgs)) {
+        Object.assign(combined, content);
       }
-    } catch (err: any) {
-      if (err?.status === 401) return;
-      showToast('error', err.message || String(err));
+      return JSON.stringify(combined, null, 2);
+    }
+    return JSON.stringify(cfgs[activePreviewTab] || {}, null, 2);
+  });
+
+  function generateFileConfigs(): Record<string, any> {
+    const rulesToExport = routingRules.map((r) => {
+      const copy: any = { type: 'field' };
+      if (r.outboundTag) copy.outboundTag = r.outboundTag;
+      if (r.domain && r.domain.length > 0) copy.domain = r.domain;
+      if (r.ip && r.ip.length > 0) copy.ip = r.ip;
+      if (r.port) copy.port = r.port;
+      if (r.network) copy.network = r.network;
+      if (r.protocol && r.protocol.length > 0) copy.protocol = r.protocol;
+      if (r.inboundTag && r.inboundTag.length > 0) copy.inboundTag = r.inboundTag;
+      return copy;
+    });
+
+    const routingObj: any = {
+      routing: {
+        domainStrategy: routingConfig.domainStrategy,
+        rules: rulesToExport
+      }
+    };
+    if (balancers.length > 0) {
+      routingObj.routing.balancers = balancers;
+    }
+
+    const inboundsObj = {
+      inbounds: inbounds.map((ib) => ({
+        tag: ib.tag,
+        port: ib.port,
+        protocol: ib.protocol,
+        listen: ib.listen || undefined,
+        settings: ib.settings || {},
+        sniffing: ib.sniffing || undefined,
+        streamSettings: ib.streamSettings || undefined
+      }))
+    };
+
+    const outboundsObj = {
+      outbounds: customOutbounds
+    };
+
+    const dnsObj = {
+      dns: {
+        tag: dnsConfig.tag,
+        queryStrategy: dnsConfig.queryStrategy,
+        servers: dnsConfig.servers,
+        hosts: Object.keys(dnsConfig.hosts).length > 0 ? dnsConfig.hosts : undefined
+      }
+    };
+
+    const logObj = {
+      log: {
+        loglevel: logConfig.loglevel,
+        dnsLog: logConfig.dnsLog
+      }
+    };
+
+    const policyObj = {
+      policy: {
+        levels: policyConfig.levels,
+        system: policyConfig.system
+      }
+    };
+
+    return {
+      '01_log.json': logObj,
+      '02_dns.json': dnsObj,
+      '03_inbounds.json': inboundsObj,
+      '04_outbounds.json': outboundsObj,
+      '05_routing.json': routingObj,
+      '06_policy.json': policyObj
+    };
+  }
+
+  async function loadXrayConfig() {
+    try {
+      const res = await apiFetch('/api/xray/config');
+      if (res.status === 401) return;
+      const data = await res.json();
+      if (data && typeof data === 'object') {
+        xrayFiles = data.files || {};
+        parseXrayFiles(xrayFiles);
+      }
+    } catch {
+      // Ignored
+    }
+  }
+
+  function parseXrayFiles(files: Record<string, any>) {
+    if (files['01_log.json']?.log) {
+      const l = files['01_log.json'].log;
+      logConfig.loglevel = l.loglevel || 'warning';
+      logConfig.dnsLog = !!l.dnsLog;
+    }
+
+    if (files['02_dns.json']?.dns) {
+      const d = files['02_dns.json'].dns;
+      dnsConfig.tag = d.tag || 'dns-in';
+      dnsConfig.servers = Array.isArray(d.servers) ? d.servers : [];
+      dnsConfig.queryStrategy = d.queryStrategy || 'UseIP';
+      dnsConfig.hosts = d.hosts || {};
+    }
+
+    if (files['03_inbounds.json']?.inbounds) {
+      inbounds = files['03_inbounds.json'].inbounds;
+    }
+
+    if (files['04_outbounds.json']?.outbounds) {
+      customOutbounds = files['04_outbounds.json'].outbounds;
+    }
+
+    if (files['05_routing.json']?.routing) {
+      const r = files['05_routing.json'].routing;
+      routingConfig.domainStrategy = r.domainStrategy || 'IPIfNonMatch';
+      if (Array.isArray(r.rules)) {
+        routingRules = r.rules.map((rule: any) => ({
+          ...rule,
+          id: typeof crypto !== 'undefined' ? crypto.randomUUID() : 'r-' + Math.random(),
+          enabled: rule.enabled !== false
+        }));
+      }
+      if (Array.isArray(r.balancers)) {
+        balancers = r.balancers;
+      }
+    }
+
+    if (files['06_policy.json']?.policy) {
+      const p = files['06_policy.json'].policy;
+      policyConfig.levels = p.levels || {
+        '0': { handshake: 4, connIdle: 300, uplinkOnly: 2, downlinkOnly: 5 }
+      };
+      policyConfig.system = p.system || {};
+    }
+  }
+
+  async function loadXrayOutboundTags() {
+    outboundTagsLoading = true;
+    try {
+      const res = await apiFetch('/api/xray/outbounds');
+      if (res.status === 401) return;
+      const data = await res.json();
+      if (data && Array.isArray(data.outbounds)) {
+        subscriptionOutbounds = data.outbounds;
+      }
+    } catch {
+      // Ignore
     } finally {
-      dnsRedirectLoading = false;
+      outboundTagsLoading = false;
     }
   }
 
   async function loadSchema() {
     schemaLoading = true;
-    schemaError = '';
+    schemaError = null;
     try {
-      const res = await apiFetch('/api/assets/definition');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      schema = await res.json();
+      const res = await apiFetch('/api/constructor/schema');
+      if (res.status === 401) return;
+      const data = await res.json();
+      schema = data?.data || data;
     } catch (e: any) {
-      if (e?.status === 401) return;
-      schemaError = e.message || 'Unknown error';
+      schemaError = e?.message || 'Failed to load schema';
     } finally {
       schemaLoading = false;
     }
   }
 
-  let isDirty = $state(false);
-  let applyLoading = $state(false);
-  let showApplyConfirm = $state(false);
-  let loadErrors = $state<Record<string, string>>({});
-  let xrayFiles = $state<Record<string, any>>({});
-  let saveWarnings = $state<PreflightWarning[]>([]);
+  function applyPreset(presetId: string) {
+    const preset = XRAY_DEFAULT_PRESETS.find((p: XrayRoutingPreset) => p.id === presetId);
+    if (!preset) return;
 
-  // Import Node states (runes)
-  let showImportModal = $state(false);
-  let importLink = $state('');
-  let importTag = $state('');
-  let importStep = $state(1); // 1: Input link, 2: Preview & Confirm tag
-  let importLoading = $state(false);
-  let importNodes = $state<
-    { link: string; outbound: any; tag: string; rowError?: string | null }[]
-  >([]);
-  let importErrorMsg = $state('');
-  let importSource = $state<'links' | 'file' | 'clipboard'>('links');
-  let isDraggingFile = $state(false);
-  let loadedFileName = $state('');
+    routingRules = preset.rules.map((r) => ({
+      ...r,
+      id: typeof crypto !== 'undefined' ? crypto.randomUUID() : 'r-' + Math.random(),
+      enabled: true
+    }));
 
-  // Form states
-  let showRuleForm = $state(false);
-  let newRule = $state({
-    outboundTag: 'direct',
-    domainRaw: '',
-    ipRaw: '',
-    port: '',
-    network: 'tcp,udp',
-    inboundTagRaw: ''
-  });
+    if (preset.dnsServers && preset.dnsServers.length > 0) {
+      dnsConfig.servers = [...preset.dnsServers] as (string | DNSServer)[];
+    }
+    dnsOverVless = preset.dnsOverVless;
+    lastAppliedPreset = presetId;
+    isPresetModified = false;
+    isDirty = true;
+  }
 
-  let showDnsForm = $state(false);
-  let newDns = $state({
-    address: '',
-    port: 53,
-    tag: '',
-    domainsRaw: '',
-    skipFallback: false,
-    inboundPort: 1053
-  });
+  async function runTestRoute() {
+    if (!testRouteForm.domain.trim() && !testRouteForm.ip.trim()) return;
+    testRouteRunning = true;
+    testRouteError = '';
+    testRouteResult = null;
+    try {
+      const res = await apiFetchJSON<any>('/api/xray/test-route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          domain: testRouteForm.domain.trim() || undefined,
+          ip: testRouteForm.ip.trim() || undefined,
+          port: Number(testRouteForm.port) || undefined,
+          protocol: testRouteForm.protocol || undefined,
+          inbound_tag: testRouteForm.inboundTag.trim() || undefined
+        })
+      });
+      testRouteResult = res?.data || res;
+    } catch (e: any) {
+      testRouteError = e?.message || $t('xray.test_route.error');
+    } finally {
+      testRouteRunning = false;
+    }
+  }
 
-  let showHostForm = $state(false);
-  let newHost = $state({
-    domain: '',
-    ip: ''
-  });
+  async function restartLogger() {
+    restartingLogger = true;
+    try {
+      await apiFetchJSON('/api/xray/restart-logger', { method: 'POST' });
+      showToast('success', $t('xray.restart_logger.success'));
+    } catch (e: any) {
+      showToast('error', e?.message || $t('xray.restart_logger.error'));
+    } finally {
+      restartingLogger = false;
+    }
+  }
 
-  let showInboundForm = $state(false);
-  let newInbound = $state({
-    tag: '',
-    port: 10808,
-    listen: '127.0.0.1',
-    protocol: 'socks',
-    udp: true
-  });
+  async function enableDNSRedirect() {
+    dnsRedirectLoading = true;
+    try {
+      await apiFetchJSON('/api/xkeen/dns-redirect/enable', { method: 'POST' });
+      showToast('success', $t('editor.dns_intercept_enabled'));
+      await fetchCapabilities();
+    } catch (e: any) {
+      showToast('error', e?.message || $t('editor.dns_intercept_error'));
+    } finally {
+      dnsRedirectLoading = false;
+    }
+  }
 
-  let ruleFilterTag = $state<string>('');
+  function promptApplyChanges() {
+    filesToModify = [
+      { name: '05_routing.json', changesCount: routingRules.length },
+      { name: '04_outbounds.json', changesCount: customOutbounds.length },
+      { name: '02_dns.json', changesCount: dnsConfig.servers.length },
+      { name: '01_log.json', changesCount: 1 },
+      { name: '03_inbounds.json', changesCount: inbounds.length },
+      { name: '06_policy.json', changesCount: 1 }
+    ];
+    showApplyConfirm = true;
+  }
 
-  const XRAY_DIR = '/opt/etc/xray/configs';
-  const XRAY_FILES = [
-    '01_log.json',
-    '02_dns.json',
-    '03_inbounds.json',
-    '04_outbounds.json',
-    '05_routing.json',
-    '06_policy.json'
-  ];
+  async function handleApplyChanges() {
+    applyLoading = true;
+    validationError = null;
+    try {
+      const generated = generateFileConfigs();
+      for (const [filename, content] of Object.entries(generated)) {
+        await apiFetchJSON('/api/xray/config/file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename, content })
+        });
+      }
+      try {
+        await apiFetchJSON('/api/service/control?action=restart', { method: 'POST' });
+      } catch {
+        // Ignored
+      }
+      showToast('success', $t('app.saved'));
+      isDirty = false;
+      showApplyConfirm = false;
+      activateRestartGrace();
+    } catch (e: any) {
+      const errMsg = e?.message || 'Save error';
+      validationError = errMsg;
+      showToast('error', errMsg);
+    } finally {
+      applyLoading = false;
+    }
+  }
 
-  let detectedDraft = $state<DraftRecord | null>(null);
-  let unregisterDirty: (() => void) | null = null;
+  function handleUndo() {
+    if (undoHistory.length > 0) {
+      const prev = undoHistory.pop();
+      if (prev) {
+        parseXrayFiles(prev);
+        isDirty = true;
+      }
+    }
+  }
+
+  function openInEditor() {
+    onSwitchTab('editor');
+    if (onInsertIntoEditor) {
+      onInsertIntoEditor(activePreviewText);
+    }
+  }
 
   function handleRestoreDraft() {
     if (detectedDraft?.data) {
-      const d = detectedDraft.data;
-      if (d.xrayFiles) xrayFiles = d.xrayFiles;
-      if (d.routingRules || d.rules) routingRules = d.routingRules || d.rules;
-      if (d.dnsConfig) dnsConfig = d.dnsConfig;
-      if (d.logConfig) logConfig = d.logConfig;
-      if (d.inbounds) inbounds = d.inbounds;
-      if (d.customOutbounds) customOutbounds = d.customOutbounds;
-      if (d.routingConfig) routingConfig = d.routingConfig;
-      isDirty = true;
-      clearDraft('xray_constructor');
-      detectedDraft = null;
-      showToast('success', $t('draft.restored_toast'));
+      try {
+        const parsed =
+          typeof detectedDraft.data === 'string'
+            ? JSON.parse(detectedDraft.data)
+            : detectedDraft.data;
+        parseXrayFiles(parsed);
+        isDirty = true;
+      } catch {
+        // Ignored
+      }
     }
+    detectedDraft = null;
   }
 
   function handleDiscardDraft() {
     clearDraft('xray_constructor');
     detectedDraft = null;
-    showToast('info', $t('draft.discarded_toast'));
   }
 
   onMount(async () => {
-    await loadSchema();
-    await loadAllConfigs();
-    checkUndo();
+    registerDirtySource('xray_constructor', {
+      name: 'Xray Constructor',
+      isDirty: () => isDirty,
+      getDraft: () => generateFileConfigs(),
+      onSave: async () => {
+        await handleApplyChanges();
+        return !validationError;
+      }
+    });
 
     const draft = getDraft('xray_constructor');
     if (draft) {
       detectedDraft = draft;
     }
 
-    unregisterDirty = registerDirtySource('xray_constructor', {
-      name: $t('editor.tab_constructor') || 'Xray Constructor',
-      isDirty: () => isDirty,
-      onSave: async () => {
-        await handleApplyChanges(true);
-        return !isDirty;
-      },
-      getDraft: () => ({
-        xrayFiles,
-        routingRules,
-        dnsConfig,
-        logConfig,
-        inbounds,
-        customOutbounds,
-        routingConfig
-      }),
-      restoreDraft: (draftRecord) => {
-        if (draftRecord?.data) {
-          detectedDraft = draftRecord;
-          handleRestoreDraft();
-        }
-      }
-    });
+    await Promise.all([loadXrayConfig(), loadXrayOutboundTags(), loadSchema()]);
   });
-
-  onDestroy(() => {
-    if (unregisterDirty) {
-      unregisterDirty();
-      unregisterDirty = null;
-    }
-    if (activeSplitterCleanup) {
-      activeSplitterCleanup();
-    }
-  });
-
-  async function loadAllConfigs() {
-    loadErrors = {};
-    const promises = XRAY_FILES.map(async (name) => {
-      try {
-        const path = `${XRAY_DIR}/${name}`;
-        const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        xrayFiles[name] = data;
-      } catch (e: any) {
-        if (e?.status === 401) return;
-        loadErrors[name] = e.message;
-        xrayFiles[name] = {};
-      }
-    });
-
-    await Promise.allSettled(promises);
-    populateFromFiles();
-    await loadXrayOutboundTags();
-    if (outboundTags.length > 0) {
-      if (!proxyTag) {
-        const systemTags = ['direct', 'block', 'dns-out'];
-        const custom = outboundTags.find((t) => !systemTags.includes(t));
-        proxyTag = custom || outboundTags[0];
-      }
-      if (!newRule.outboundTag) {
-        newRule.outboundTag = outboundTags[0];
-      }
-    }
-    isDirty = false;
-
-    // Auto-initialize if stub config (CONSTR-06 / D-08)
-    const routingFile = xrayFiles['05_routing.json'] || {};
-    const isRoutingStub = !routingFile.routing?.rules || routingFile.routing.rules.length === 0;
-    const outboundsFile = xrayFiles['04_outbounds.json'] || {};
-    const isOutboundsStub = !outboundsFile.outbounds || outboundsFile.outbounds.length === 0;
-    if (isRoutingStub || isOutboundsStub) {
-      if (!applyLoading) {
-        applyTemplateFiles('selective-routing', false);
-      }
-    }
-  }
-
-  function populateFromFiles() {
-    // 01_log.json
-    const logFile = xrayFiles['01_log.json'] || {};
-    logConfig = {
-      loglevel: logFile.log?.loglevel || 'warning',
-      dnsLog: logFile.log?.dnsLog ?? false
-    };
-
-    // 02_dns.json
-    const dnsFile = xrayFiles['02_dns.json'] || {};
-    dnsConfig = {
-      tag: dnsFile.dns?.tag || 'dns-in',
-      servers: dnsFile.dns?.servers || [],
-      queryStrategy: dnsFile.dns?.queryStrategy || 'UseIP',
-      hosts: dnsFile.dns?.hosts || {}
-    };
-
-    // 03_inbounds.json
-    const inboundsFile = xrayFiles['03_inbounds.json'] || {};
-    inbounds = inboundsFile.inbounds || [];
-
-    // 04_outbounds.json (populate customOutbounds)
-    const outboundsFile = xrayFiles['04_outbounds.json'] || {};
-    const fileOutbounds = (outboundsFile.outbounds ?? []) as any[];
-
-    const allCustom = fileOutbounds.filter(
-      (o: any) => o && o.tag !== 'direct' && o.tag !== 'block' && o.tag !== 'dns-out'
-    );
-
-    const seenTags = new Set<string>();
-    const uniqueCustom: any[] = [];
-    for (const o of allCustom) {
-      if (o.tag && !seenTags.has(o.tag)) {
-        seenTags.add(o.tag);
-        uniqueCustom.push(o);
-      }
-    }
-    customOutbounds = uniqueCustom;
-
-    // 05_routing.json
-    const routingFile = xrayFiles['05_routing.json'] || {};
-    routingConfig = {
-      domainStrategy: routingFile.routing?.domainStrategy || 'IPIfNonMatch'
-    };
-    const rawRules = routingFile.routing?.rules || [];
-    const hasDnsInRule = rawRules.some((r: any) => r.inboundTag && r.inboundTag.includes('dns-in'));
-    const hasPort53Rule = rawRules.some(
-      (r: any) => (r.port === 53 || r.port === '53') && r.outboundTag === 'dns-out'
-    );
-    dnsOverVless = hasDnsInRule && hasPort53Rule;
-
-    const filteredRules = rawRules.filter((r: any) => {
-      const isDnsInRule = r.inboundTag && r.inboundTag.includes('dns-in');
-      const isPort53Rule = (r.port === 53 || r.port === '53') && r.outboundTag === 'dns-out';
-      return !isDnsInRule && !isPort53Rule;
-    });
-
-    routingRules = filteredRules.map((r: any) => ({
-      id: r.id || crypto.randomUUID(),
-      type: r.type || 'field',
-      outboundTag: r.outboundTag || 'direct',
-      domain: r.domain,
-      ip: r.ip,
-      port: r.port,
-      network: r.network,
-      protocol: r.protocol,
-      inboundTag: r.inboundTag
-    }));
-
-    const proxyRule = routingRules.find(
-      (r: any) =>
-        r.outboundTag !== 'direct' && r.outboundTag !== 'block' && r.outboundTag !== 'dns-out'
-    );
-    proxyTag = proxyRule ? proxyRule.outboundTag : '';
-
-    // 06_policy.json
-    const policyFile = xrayFiles['06_policy.json'] || {};
-    policyConfig = {
-      levels: policyFile.policy?.levels || {
-        '0': { handshake: 4, connIdle: 300, uplinkOnly: 2, downlinkOnly: 5 }
-      },
-      system: policyFile.policy?.system || {}
-    };
-  }
-
-  async function loadXrayOutboundTags() {
-    outboundTagsLoading = true;
-    const custom: any[] = [];
-    const subs: any[] = [];
-
-    try {
-      const listRes = await apiFetch(`/api/config/list?dir=${encodeURIComponent(XRAY_DIR)}`);
-      if (listRes.ok) {
-        const files: { name: string; path: string; size: number }[] = await listRes.json();
-        const outboundFiles = files.filter(
-          (f) => f.name.startsWith('04_outbounds') && f.name.endsWith('.json')
-        );
-        for (const f of outboundFiles) {
-          try {
-            const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(f.path)}`);
-            if (!res.ok) continue;
-            const json = await res.json();
-            const fileOutbounds = (json.outbounds ?? []) as any[];
-
-            if (f.name === '04_outbounds.json') {
-              for (const o of fileOutbounds) {
-                if (o && o.tag && o.tag !== 'direct' && o.tag !== 'block' && o.tag !== 'dns-out') {
-                  custom.push(o);
-                }
-              }
-            } else {
-              for (const o of fileOutbounds) {
-                if (o && o.tag) {
-                  subs.push(o);
-                }
-              }
-            }
-          } catch {
-            /* skip missing/corrupted file */
-          }
-        }
-      }
-    } catch {
-      /* fallback */
-    }
-
-    // Deduplicate custom by tag
-    const seenCustom = new Set<string>();
-    const uniqueCustom: any[] = [];
-    for (const o of custom) {
-      if (o.tag && !seenCustom.has(o.tag)) {
-        seenCustom.add(o.tag);
-        uniqueCustom.push(o);
-      }
-    }
-
-    // Deduplicate subs by tag
-    const seenSubs = new Set<string>();
-    const uniqueSubs: any[] = [];
-    for (const o of subs) {
-      if (o.tag && !seenSubs.has(o.tag)) {
-        seenSubs.add(o.tag);
-        uniqueSubs.push(o);
-      }
-    }
-
-    customOutbounds = uniqueCustom;
-    subscriptionOutbounds = uniqueSubs;
-    outboundTagsLoading = false;
-  }
-
-  function parseOutboundToForm(o: any) {
-    const form = {
-      tag: o.tag || '',
-      protocol: o.protocol || 'vless',
-      address: '',
-      port: 443,
-      uuid: '',
-      flow: '',
-      cipher: 'auto',
-      alterId: 0,
-      security: 'none',
-      sni: '',
-      network: 'tcp',
-      path: '/',
-      serviceName: '',
-      publicKey: '',
-      shortId: '',
-      fingerprint: 'chrome',
-      // Shadowsocks
-      shadowsocksPassword: '',
-      // WireGuard
-      wireguardSecretKey: '',
-      wireguardAddress: '10.0.0.2/32',
-      endpoint: '',
-      wireguardPublicKey: '',
-      wireguardPsk: '',
-      wireguardKeepAlive: 25,
-      wireguardAllowedIPs: '0.0.0.0/0, ::/0',
-      wireguardMtu: 1420,
-      wireguardReserved: '',
-      isAwgObfuscated: false,
-      rawAwgOptions: null as any,
-      // Sockopt
-      sockoptMark: '' as string | number,
-      sockoptTcpFastOpen: false,
-      sockoptTcpMptcp: false,
-      sockoptTcpNoDelay: false,
-      sockoptTcpKeepAliveInterval: '' as string | number,
-      dialerProxy: ''
-    };
-
-    if (o.protocol === 'vless' || o.protocol === 'vmess') {
-      const user = o.settings?.vnext?.[0]?.users?.[0];
-      if (o.settings?.vnext?.[0]) {
-        form.address = o.settings.vnext[0].address || '';
-        form.port = o.settings.vnext[0].port || 443;
-      }
-      if (user) {
-        form.uuid = user.id || '';
-        form.flow = user.flow || '';
-        form.cipher = user.security || 'auto';
-        form.alterId = user.alterId || 0;
-      }
-    } else if (o.protocol === 'shadowsocks') {
-      const server = o.settings?.servers?.[0] || o.settings || {};
-      form.address = server.address || '';
-      form.port = server.port || 8388;
-      form.cipher = server.method || o.settings?.method || '2022-blake3-aes-128-gcm';
-      form.shadowsocksPassword = server.password || o.settings?.password || '';
-    } else if (o.protocol === 'wireguard') {
-      const s = o.settings || {};
-      form.wireguardSecretKey = s.secretKey || '';
-      form.wireguardAddress = Array.isArray(s.address)
-        ? s.address.join(', ')
-        : s.address || '10.0.0.2/32';
-      form.wireguardMtu = s.mtu || 1420;
-      if (Array.isArray(s.reserved) && s.reserved.length === 3) {
-        form.wireguardReserved = s.reserved.join(', ');
-      }
-      const peer = s.peers?.[0] || {};
-      form.endpoint = peer.endpoint || '';
-      form.wireguardPublicKey = peer.publicKey || '';
-      form.wireguardPsk = peer.preSharedKey || '';
-      form.wireguardKeepAlive = peer.keepAlive ?? 25;
-      form.wireguardAllowedIPs = Array.isArray(peer.allowedIPs)
-        ? peer.allowedIPs.join(', ')
-        : peer.allowedIPs || '0.0.0.0/0, ::/0';
-
-      if (s.awg || o.awg || o._isAwg || s.amneziaWgOption || o.amneziaWgOption) {
-        form.isAwgObfuscated = true;
-        form.rawAwgOptions = s.amneziaWgOption || o.amneziaWgOption || s.awg || o.awg || {};
-      }
-    }
-
-    const ss = o.streamSettings || {};
-    form.network = ss.network || 'tcp';
-    if (ss.wsSettings?.path) {
-      form.path = ss.wsSettings.path;
-    }
-    if (ss.grpcSettings?.serviceName) {
-      form.serviceName = ss.grpcSettings.serviceName;
-    }
-
-    form.security = ss.security || 'none';
-    if (form.security === 'tls') {
-      form.sni = ss.tlsSettings?.serverName || '';
-    } else if (form.security === 'reality') {
-      form.sni = ss.realitySettings?.serverName || '';
-      form.publicKey = ss.realitySettings?.publicKey || '';
-      form.shortId = ss.realitySettings?.shortId || '';
-      form.fingerprint = ss.realitySettings?.fingerprint || 'chrome';
-    }
-
-    const sockopt = ss.sockopt || {};
-    form.sockoptMark = sockopt.mark ?? '';
-    form.sockoptTcpFastOpen = !!sockopt.tcpFastOpen;
-    form.sockoptTcpMptcp = !!sockopt.tcpMptcp;
-    form.sockoptTcpNoDelay = !!sockopt.tcpNoDelay;
-    form.sockoptTcpKeepAliveInterval = sockopt.tcpKeepAliveInterval ?? '';
-    form.dialerProxy = sockopt.dialerProxy || '';
-
-    return form;
-  }
-
-  function buildOutboundFromForm(form: typeof outboundForm) {
-    const settings: any = {};
-    if (form.protocol === 'vless') {
-      settings.vnext = [
-        {
-          address: form.address.trim(),
-          port: Number(form.port),
-          users: [
-            {
-              id: form.uuid.trim(),
-              encryption: 'none',
-              flow: form.flow === 'xtls-rprx-vision' ? 'xtls-rprx-vision' : undefined
-            }
-          ]
-        }
-      ];
-    } else if (form.protocol === 'vmess') {
-      settings.vnext = [
-        {
-          address: form.address.trim(),
-          port: Number(form.port),
-          users: [
-            {
-              id: form.uuid.trim(),
-              security: form.cipher || 'auto',
-              alterId: Number(form.alterId) || 0
-            }
-          ]
-        }
-      ];
-    } else if (form.protocol === 'shadowsocks') {
-      settings.servers = [
-        {
-          address: form.address.trim(),
-          port: Number(form.port),
-          method: form.cipher || '2022-blake3-aes-128-gcm',
-          password: form.shadowsocksPassword.trim()
-        }
-      ];
-    } else if (form.protocol === 'wireguard') {
-      settings.secretKey = form.wireguardSecretKey.trim();
-      settings.address = form.wireguardAddress
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (Number(form.wireguardMtu) > 0) {
-        settings.mtu = Number(form.wireguardMtu);
-      }
-      if (form.wireguardReserved.trim()) {
-        const parts = form.wireguardReserved
-          .split(',')
-          .map((s) => parseInt(s.trim(), 10))
-          .filter((n) => !isNaN(n) && n >= 0 && n <= 255);
-        if (parts.length === 3) {
-          settings.reserved = parts;
-        }
-      }
-      const peer: any = {
-        endpoint: form.endpoint.trim(),
-        publicKey: form.wireguardPublicKey.trim()
-      };
-      if (form.wireguardPsk.trim()) {
-        peer.preSharedKey = form.wireguardPsk.trim();
-      }
-      if (Number(form.wireguardKeepAlive) > 0) {
-        peer.keepAlive = Number(form.wireguardKeepAlive);
-      }
-      if (form.wireguardAllowedIPs.trim()) {
-        peer.allowedIPs = form.wireguardAllowedIPs
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean);
-      } else {
-        peer.allowedIPs = ['0.0.0.0/0', '::/0'];
-      }
-      settings.peers = [peer];
-    }
-
-    const sockopt: Record<string, any> = {};
-    if (form.sockoptMark !== '' && !isNaN(Number(form.sockoptMark))) {
-      sockopt.mark = Number(form.sockoptMark);
-    }
-    if (form.sockoptTcpFastOpen) sockopt.tcpFastOpen = true;
-    if (form.sockoptTcpMptcp) sockopt.tcpMptcp = true;
-    if (form.sockoptTcpNoDelay) sockopt.tcpNoDelay = true;
-    if (
-      form.sockoptTcpKeepAliveInterval !== '' &&
-      !isNaN(Number(form.sockoptTcpKeepAliveInterval))
-    ) {
-      sockopt.tcpKeepAliveInterval = Number(form.sockoptTcpKeepAliveInterval);
-    }
-    if (form.dialerProxy.trim()) {
-      sockopt.dialerProxy = form.dialerProxy.trim();
-    }
-
-    if (form.protocol === 'wireguard') {
-      return {
-        tag: form.tag.trim(),
-        protocol: form.protocol,
-        settings,
-        ...(Object.keys(sockopt).length > 0 ? { streamSettings: { sockopt } } : {})
-      };
-    }
-
-    const streamSettings: any = {
-      network: form.network || 'tcp'
-    };
-
-    if (form.network === 'ws') {
-      streamSettings.wsSettings = {
-        path: form.path || '/'
-      };
-    } else if (form.network === 'grpc') {
-      streamSettings.grpcSettings = {
-        serviceName: form.serviceName || ''
-      };
-    } else if (form.network === 'xhttp') {
-      streamSettings.xhttpSettings = {
-        path: form.path || '/',
-        mode: 'auto'
-      };
-    }
-
-    if (form.security === 'tls') {
-      streamSettings.security = 'tls';
-      streamSettings.tlsSettings = {
-        serverName: form.sni || ''
-      };
-    } else if (form.security === 'reality') {
-      streamSettings.security = 'reality';
-      streamSettings.realitySettings = {
-        show: false,
-        fingerprint: form.fingerprint || 'chrome',
-        serverName: form.sni || '',
-        publicKey: form.publicKey || '',
-        shortId: form.shortId || '',
-        spiderX: ''
-      };
-    }
-
-    if (Object.keys(sockopt).length > 0) {
-      streamSettings.sockopt = sockopt;
-    }
-
-    return {
-      tag: form.tag.trim(),
-      protocol: form.protocol,
-      settings,
-      streamSettings
-    };
-  }
-
-  function openAddOutbound() {
-    editingOutboundIndex = null;
-    outboundForm = {
-      tag: '',
-      protocol: 'vless',
-      address: '',
-      port: 443,
-      uuid: crypto.randomUUID(),
-      flow: '',
-      cipher: 'auto',
-      alterId: 0,
-      security: 'none',
-      sni: '',
-      network: 'tcp',
-      path: '/',
-      serviceName: '',
-      publicKey: '',
-      shortId: '',
-      fingerprint: 'chrome',
-      shadowsocksPassword: '',
-      wireguardSecretKey: '',
-      wireguardAddress: '10.0.0.2/32',
-      endpoint: '',
-      wireguardPublicKey: '',
-      wireguardPsk: '',
-      wireguardKeepAlive: 25,
-      wireguardAllowedIPs: '0.0.0.0/0, ::/0',
-      wireguardMtu: 1420,
-      wireguardReserved: '',
-      isAwgObfuscated: false,
-      rawAwgOptions: null,
-      sockoptMark: '',
-      sockoptTcpFastOpen: false,
-      sockoptTcpMptcp: false,
-      sockoptTcpNoDelay: false,
-      sockoptTcpKeepAliveInterval: '',
-      dialerProxy: ''
-    };
-    showOutboundForm = true;
-  }
-
-  function openEditOutbound(index: number) {
-    editingOutboundIndex = index;
-    const o = customOutbounds[index];
-    outboundForm = parseOutboundToForm(o);
-    showOutboundForm = true;
-  }
-
-  let generatingRealityKeys = $state(false);
-  async function generateRealityKeys() {
-    generatingRealityKeys = true;
-    try {
-      const res = await apiFetch('/api/xray/reality/keygen');
-      const data = await res.json();
-      if (res.ok && data?.data) {
-        outboundForm.publicKey = data.data.public_key;
-        outboundForm.shortId = data.data.short_id;
-        showToast('success', $t('xray.reality_keys_generated'));
-      } else {
-        showToast('error', data?.error || 'Failed to generate Reality keys');
-      }
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e.message);
-    } finally {
-      generatingRealityKeys = false;
-    }
-  }
-
-  // Routing Test state (D-06)
-  let testRouteForm = $state({
-    domain: '',
-    ip: '',
-    port: 443,
-    network: '',
-    protocol: '',
-    inboundTag: ''
-  });
-  let testRouteRunning = $state(false);
-  let testRouteResult = $state<{
-    outbound_tag?: string;
-    outbound_group_tags?: string[];
-    rule_groups?: string[];
-    matched?: boolean;
-  } | null>(null);
-  let testRouteError = $state<string | null>(null);
-
-  async function runTestRoute() {
-    if (!testRouteForm.domain.trim() && !testRouteForm.ip.trim()) {
-      return;
-    }
-    testRouteRunning = true;
-    testRouteError = null;
-    testRouteResult = null;
-    try {
-      const payload: Record<string, any> = {};
-      if (testRouteForm.domain.trim()) payload.domain = testRouteForm.domain.trim();
-      if (testRouteForm.ip.trim()) payload.ip = testRouteForm.ip.trim();
-      if (testRouteForm.port) payload.port = Number(testRouteForm.port);
-      if (testRouteForm.network.trim()) payload.network = testRouteForm.network.trim();
-      if (testRouteForm.protocol.trim()) payload.protocol = testRouteForm.protocol.trim();
-      if (testRouteForm.inboundTag.trim()) payload.inbound_tag = testRouteForm.inboundTag.trim();
-
-      const res = await apiFetch('/api/xray/test-route', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (res.status === 401) return;
-      if (res.status === 503) {
-        testRouteError = $t('xray.grpc.unavailable');
-        return;
-      }
-      if (!res.ok) {
-        testRouteError = data?.error || $t('xray.test_route.error');
-        return;
-      }
-      testRouteResult = data?.data || data;
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      testRouteError = e.message || $t('xray.test_route.error');
-    } finally {
-      testRouteRunning = false;
-    }
-  }
-
-  // Restart logger (D-02)
-  let restartingLogger = $state(false);
-  async function restartLogger() {
-    restartingLogger = true;
-    try {
-      const res = await apiFetch('/api/xray/restart-logger', {
-        method: 'POST'
-      });
-      const data = await res.json();
-      if (res.status === 401) return;
-      if (res.ok) {
-        showToast('success', $t('xray.restart_logger.success'));
-      } else {
-        showToast('error', data?.error || $t('xray.restart_logger.error'));
-      }
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e.message || $t('xray.restart_logger.error'));
-    } finally {
-      restartingLogger = false;
-    }
-  }
-
-  // TLS Ping state (D-15)
-  let tlsPingRunning = $state(false);
-  let tlsPingResult = $state<{
-    ok: boolean;
-    tls_version?: string;
-    cipher_suite?: string;
-    alpn?: string;
-    peer_cn?: string;
-    dns_names?: string[];
-    not_before?: string;
-    not_after?: string;
-    days_until_expiry?: number;
-    chain_length?: number;
-    handshake_ms?: number;
-    error?: string;
-  } | null>(null);
-  let tlsPingError = $state<string | null>(null);
-
-  async function runTLSPing() {
-    if (!outboundForm.address.trim()) return;
-    tlsPingRunning = true;
-    tlsPingResult = null;
-    tlsPingError = null;
-    try {
-      let dest = outboundForm.address.trim();
-      if (!dest.includes(':')) {
-        dest = `${dest}:${outboundForm.port || 443}`;
-      }
-      const serverName = (outboundForm.sni || outboundForm.address).trim();
-      const alpnList = (outboundForm as any).alpn ? [(outboundForm as any).alpn] : [];
-
-      const res = await apiFetch('/api/xray/tls-ping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dest,
-          server_name: serverName,
-          alpn: alpnList,
-          insecure: (outboundForm as any).insecure || false
-        })
-      });
-      const data = await res.json();
-      if (res.status === 401) return;
-      if (!res.ok) {
-        tlsPingError = data?.error || $t('xray.tls_ping.error');
-        return;
-      }
-      tlsPingResult = data?.data || data;
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      tlsPingError = e.message || $t('xray.tls_ping.error');
-    } finally {
-      tlsPingRunning = false;
-    }
-  }
-
-  function saveOutbound() {
-    if (!outboundForm.tag.trim()) {
-      showToast('error', $t('xray.fill_required_fields'));
-      return;
-    }
-
-    if (outboundForm.protocol === 'wireguard') {
-      if (
-        !outboundForm.wireguardSecretKey.trim() ||
-        !outboundForm.wireguardPublicKey.trim() ||
-        !outboundForm.endpoint.trim()
-      ) {
-        showToast('error', $t('xray.fill_required_fields'));
-        return;
-      }
-      if (outboundForm.wireguardReserved.trim()) {
-        const parts = outboundForm.wireguardReserved
-          .split(',')
-          .map((s) => parseInt(s.trim(), 10))
-          .filter((n) => !isNaN(n) && n >= 0 && n <= 255);
-        if (parts.length !== 3) {
-          showToast('error', $t('xray.reserved_invalid'));
-          return;
-        }
-      }
-    } else {
-      if (!outboundForm.address.trim() || !outboundForm.port) {
-        showToast('error', $t('xray.fill_required_fields'));
-        return;
-      }
-      if (outboundForm.protocol === 'shadowsocks') {
-        if (!outboundForm.shadowsocksPassword.trim()) {
-          showToast('error', $t('xray.fill_required_fields'));
-          return;
-        }
-        if (outboundForm.cipher.startsWith('2022-blake3')) {
-          const is16 = outboundForm.cipher.includes('128');
-          const expectedB64Len = is16 ? 24 : 44;
-          const cleanKey = outboundForm.shadowsocksPassword.trim();
-          if (cleanKey.length !== expectedB64Len) {
-            showToast(
-              'error',
-              $t('xray.ss2022_key_length', {
-                bytes: is16 ? 16 : 32,
-                chars: expectedB64Len
-              })
-            );
-            return;
-          }
-        }
-      }
-    }
-
-    if (dialerChainPreview.hasCycle) {
-      showToast('error', $t('xray.dialer_cycle_detected'));
-      return;
-    }
-
-    const outboundObj = buildOutboundFromForm(outboundForm);
-
-    const tagExists =
-      customOutbounds.some((o, idx) => idx !== editingOutboundIndex && o.tag === outboundObj.tag) ||
-      subscriptionOutbounds.some((o) => o.tag === outboundObj.tag) ||
-      ['direct', 'block', 'dns-out'].includes(outboundObj.tag);
-    if (tagExists) {
-      showToast('error', $t('xray.outbound_tag_exists'));
-      return;
-    }
-
-    if (editingOutboundIndex !== null) {
-      const updated = [...customOutbounds];
-      updated[editingOutboundIndex] = outboundObj;
-      customOutbounds = updated;
-    } else {
-      customOutbounds = [...customOutbounds, outboundObj];
-    }
-
-    showOutboundForm = false;
-    isDirty = true;
-  }
-
-  function removeOutbound(index: number) {
-    const o = customOutbounds[index];
-    if (proxyTag === o.tag) {
-      proxyTag = '';
-    }
-    customOutbounds = customOutbounds.filter((_, idx) => idx !== index);
-    isDirty = true;
-  }
-
-  async function handleUndo() {
-    const prevJson = localStorage.getItem('xcp_prev_xray_json');
-    if (!prevJson) return;
-    try {
-      applyLoading = true;
-      const parsedObj = JSON.parse(prevJson);
-
-      for (const [name, content] of Object.entries(parsedObj)) {
-        const path = `${XRAY_DIR}/${name}`;
-        const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(content, null, 2)
-        });
-
-        if (!saveRes.ok) {
-          throw new Error(`Failed to save ${name}`);
-        }
-      }
-
-      xrayFiles = parsedObj;
-      populateFromFiles();
-      await loadXrayOutboundTags();
-      isDirty = false;
-
-      activateRestartGrace(6000);
-      const restartRes = await apiFetch('/api/service/control?action=restart', {
-        method: 'POST'
-      });
-      if (!restartRes.ok) {
-        throw new Error('Failed to restart service');
-      }
-
-      showToast('success', $t('editor.undo_success'));
-      checkUndo();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', `Undo failed: ${e.message}`);
-    } finally {
-      applyLoading = false;
-    }
-  }
-
-  function getChangedFiles(): Array<[string, any]> {
-    const list: Array<[string, any]> = [];
-
-    // 01_log.json
-    list.push(['01_log.json', { loglevel: logConfig.loglevel, dnsLog: logConfig.dnsLog }]);
-
-    // 02_dns.json
-    list.push([
-      '02_dns.json',
-      {
-        servers: dnsConfig.servers,
-        queryStrategy: dnsConfig.queryStrategy,
-        hosts: dnsConfig.hosts,
-        tag: 'dns-in'
-      }
-    ]);
-
-    // Синхронизируем DNS c inbounds и routing
-    const { dnsInbounds, routingRules: generatedRules } = syncDnsPipeline(
-      dnsConfig.servers,
-      proxyTag
-    );
-
-    // 03_inbounds.json
-    list.push(['03_inbounds.json', { dnsInbounds }]);
-
-    // 04_outbounds.json
-    list.push(['04_outbounds.json', { outbounds: customOutbounds }]);
-
-    // 05_routing.json
-    const rules = routingRules.filter((r) => r.enabled !== false);
-    for (const r of generatedRules) {
-      const exists = rules.some((ex) => ex.inboundTag && ex.inboundTag.includes(r.inboundTag[0]));
-      if (!exists) {
-        rules.unshift({
-          id: crypto.randomUUID(),
-          ...r
-        });
-      }
-    }
-    if (dnsOverVless) {
-      const activeProxy =
-        proxyTag ||
-        outboundTags.find((t) => !['direct', 'block', 'dns-out'].includes(t)) ||
-        'direct';
-      rules.unshift({
-        id: crypto.randomUUID(),
-        type: 'field',
-        port: '53',
-        outboundTag: 'dns-out'
-      });
-      rules.unshift({
-        id: crypto.randomUUID(),
-        type: 'field',
-        inboundTag: ['dns-in'],
-        outboundTag: activeProxy
-      });
-    }
-    list.push([
-      '05_routing.json',
-      { rules, proxyTag, domainStrategy: routingConfig.domainStrategy }
-    ]);
-
-    // 06_policy.json
-    const lvl0 = policyConfig.levels?.['0'] || {
-      handshake: 4,
-      connIdle: 300,
-      uplinkOnly: 2,
-      downlinkOnly: 5
-    };
-    list.push(['06_policy.json', { level0: lvl0, system: policyConfig.system }]);
-
-    return list;
-  }
-
-  async function handleApplyChanges(skipConfirm: boolean | unknown = false) {
-    const shouldSkipConfirm = skipConfirm === true;
-    if (!shouldSkipConfirm && !showApplyConfirm) {
-      showApplyConfirm = true;
-      return;
-    }
-    showApplyConfirm = false;
-    applyLoading = true;
-    await tick();
-
-    // Мягкая валидация proxyTag
-    if (proxyTag && !outboundTags.includes(proxyTag)) {
-      showToast('warning', $t('editor.proxy_tag_warning'));
-    }
-
-    // UX-06: Pre-emptive warning if empty proxies list
-    if (!showApplyConfirm && customOutbounds.length === 0) {
-      if (
-        !(await showConfirm({
-          title: $t('editor.empty_proxies_title'),
-          consequence: $t('editor.empty_proxies_warning'),
-          variant: 'warning',
-          confirmLabel: $t('app.continue')
-        }))
-      ) {
-        applyLoading = false;
-        return;
-      }
-    }
-
-    // Check port collisions
-    const xrayPorts: PortAllocation[] = [];
-    const { dnsInbounds } = syncDnsPipeline(dnsConfig.servers, proxyTag);
-    const activeInbounds = [
-      ...inbounds.filter((ib) => !String(ib.tag || '').startsWith('dns-in-')),
-      ...dnsInbounds
-    ];
-    for (const ib of activeInbounds) {
-      if (ib && ib.port) {
-        xrayPorts.push({
-          port: Number(ib.port),
-          engine: 'xray',
-          purpose: ib.tag || 'inbound'
-        });
-      }
-    }
-
-    let mihomoPorts: PortAllocation[] = [];
-    try {
-      const res = await apiFetch(
-        '/api/config/read?path=' + encodeURIComponent('/opt/etc/mihomo/config.yaml')
-      );
-      if (res.ok) {
-        const yamlText = await res.text();
-        mihomoPorts = parseMihomoPorts(yamlText);
-      }
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      console.warn('Failed to load Mihomo config for port checking:', e);
-    }
-
-    const allPorts = [...xrayPorts, ...mihomoPorts];
-    const collisions = findPortCollisions(allPorts);
-    if (collisions.length > 0) {
-      const details = collisions
-        .map((group) => {
-          const portNum = group[0].port;
-          const descriptions = group.map((p) => `${p.engine} (${p.purpose})`).join(' vs ');
-          return `Port ${portNum}: ${descriptions}`;
-        })
-        .join('\n');
-
-      if (
-        !(await showConfirm({
-          title: $t('editor.port_collision_title'),
-          message: details,
-          consequence: $t('editor.port_collision_warning'),
-          variant: 'danger',
-          confirmLabel: $t('app.continue')
-        }))
-      ) {
-        applyLoading = false;
-        return;
-      }
-    }
-
-    try {
-      const changed = filesToModify.filter((f) => f.changesCount > 0);
-      if (changed.length === 0) {
-        showToast('info', $t('editor.no_changes'));
-        applyLoading = false;
-        return;
-      }
-
-      // Save previous state to localStorage for Undo
-      localStorage.setItem('xcp_prev_xray_json', JSON.stringify(xrayFiles));
-      checkUndo();
-
-      validationError = '';
-      saveWarnings = [];
-      const collectedWarnings: PreflightWarning[] = [];
-
-      // 1. Сохранить изменённые файлы
-      for (const file of changed) {
-        const managedPair = getChangedFiles().find(([n]) => n === file.name);
-        if (!managedPair) continue;
-        const [, managed] = managedPair;
-        const existing = xrayFiles[file.name] ?? {};
-        const merged = mergeXrayFile(file.name, existing, managed);
-        const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(file.path)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(merged, null, 2)
-        });
-        if (!saveRes.ok) {
-          if (saveRes.status === 422) {
-            const data = await saveRes.json();
-            validationError = data.error || 'Unknown validation error';
-            showToast('error', $t('editor.validation_failed'));
-            applyLoading = false;
-            return;
-          }
-          throw new Error(`Failed to save ${file.name}`);
-        }
-        const saveJson = await saveRes.json().catch(() => null);
-        const data = saveJson?.data ?? saveJson;
-        if (Array.isArray(data?.warnings) && data.warnings.length > 0) {
-          collectedWarnings.push(...data.warnings);
-        }
-      }
-      saveWarnings = collectedWarnings;
-
-      // 2. Рестарт XKeen
-      activateRestartGrace(6000);
-      const restartRes = await apiFetch('/api/service/control?action=restart', {
-        method: 'POST'
-      });
-      if (!restartRes.ok) throw new Error('Failed to restart service');
-
-      isDirty = false;
-      showToast('success', $t('editor.file_saved'));
-      await loadAllConfigs();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', $t('editor.save_error') + ': ' + e.message);
-    } finally {
-      applyLoading = false;
-    }
-  }
-
-  // CRUD для правил
-  function addRule() {
-    const domains = newRule.domainRaw.trim()
-      ? newRule.domainRaw.split(/[\s,]+/).filter(Boolean)
-      : undefined;
-    const ips = newRule.ipRaw.trim() ? newRule.ipRaw.split(/[\s,]+/).filter(Boolean) : undefined;
-    const inbounds = newRule.inboundTagRaw.trim()
-      ? newRule.inboundTagRaw.split(/[\s,]+/).filter(Boolean)
-      : undefined;
-
-    routingRules = [
-      ...routingRules,
-      {
-        id: crypto.randomUUID(),
-        type: 'field',
-        outboundTag: newRule.outboundTag,
-        domain: domains,
-        ip: ips,
-        port: newRule.port.trim() || undefined,
-        network: newRule.network !== 'tcp,udp' ? newRule.network : undefined,
-        inboundTag: inbounds
-      }
-    ];
-
-    showRuleForm = false;
-    newRule.domainRaw = '';
-    newRule.ipRaw = '';
-    newRule.port = '';
-    newRule.network = 'tcp,udp';
-    newRule.inboundTagRaw = '';
-    isDirty = true;
-    if (lastAppliedPreset) isPresetModified = true;
-  }
-
-  function removeRule(id: string) {
-    routingRules = routingRules.filter((r) => r.id !== id);
-    isDirty = true;
-    if (lastAppliedPreset) isPresetModified = true;
-  }
-
-  function moveRule(id: string, dir: -1 | 1) {
-    const idx = routingRules.findIndex((r) => r.id === id);
-    if (idx < 0) return;
-    const next = idx + dir;
-    if (next < 0 || next >= routingRules.length) return;
-    const arr = [...routingRules];
-    [arr[idx], arr[next]] = [arr[next], arr[idx]];
-    routingRules = arr;
-    isDirty = true;
-    if (lastAppliedPreset) isPresetModified = true;
-  }
-
-  // CRUD для DNS серверов
-  function addDNSServer() {
-    if (!newDns.address.trim()) return;
-    if (newDns.tag.trim()) {
-      const serverObj: DNSServer = {
-        address: newDns.address.trim(),
-        port: Number(newDns.port) || 53,
-        tag: newDns.tag.trim(),
-        domains: newDns.domainsRaw.trim()
-          ? newDns.domainsRaw.split(/[\s,]+/).filter(Boolean)
-          : undefined,
-        skipFallback: newDns.skipFallback
-      };
-      dnsConfig.servers = [...dnsConfig.servers, serverObj];
-    } else {
-      dnsConfig.servers = [...dnsConfig.servers, newDns.address.trim()];
-    }
-
-    newDns.address = '';
-    newDns.port = 53;
-    newDns.tag = '';
-    newDns.domainsRaw = '';
-    newDns.skipFallback = false;
-    newDns.inboundPort = 1053;
-    showDnsForm = false;
-    isDirty = true;
-  }
-
-  function removeDNSServer(index: number) {
-    dnsConfig.servers = dnsConfig.servers.filter((_, idx) => idx !== index);
-    isDirty = true;
-  }
-
-  // Hosts CRUD
-  function addHost() {
-    if (!newHost.domain.trim() || !newHost.ip.trim()) return;
-    dnsConfig.hosts = {
-      ...dnsConfig.hosts,
-      [newHost.domain.trim()]: newHost.ip.trim()
-    };
-    newHost.domain = '';
-    newHost.ip = '';
-    showHostForm = false;
-    isDirty = true;
-  }
-
-  function removeHost(domain: string) {
-    const updated = { ...dnsConfig.hosts };
-    delete updated[domain];
-    dnsConfig.hosts = updated;
-    isDirty = true;
-  }
-
-  // CRUD для Inbounds
-  function addInbound() {
-    if (!newInbound.tag.trim()) return;
-    inbounds = [
-      ...inbounds,
-      {
-        tag: newInbound.tag.trim(),
-        port: Number(newInbound.port),
-        listen: newInbound.listen.trim(),
-        protocol: newInbound.protocol,
-        settings: newInbound.protocol === 'socks' ? { auth: 'noauth', udp: newInbound.udp } : {}
-      }
-    ];
-    newInbound.tag = '';
-    newInbound.port = 10808;
-    newInbound.listen = '127.0.0.1';
-    showInboundForm = false;
-    isDirty = true;
-  }
-
-  function removeInbound(tag: string) {
-    inbounds = inbounds.filter((ib) => ib.tag !== tag);
-    isDirty = true;
-  }
-
-  // Пресеты
-  function applyPreset(presetId: string) {
-    validationError = '';
-    if (schema && schema.xray && schema.xray.presets) {
-      const p = schema.xray.presets.find((x: any) => x.id === presetId);
-      if (p) {
-        dnsConfig.servers = (p.dns_servers || []).map((s: any) => {
-          if (typeof s === 'string') return s;
-          return {
-            address: s.address,
-            port: s.port,
-            tag: s.tag,
-            domains: s.domains ? [...s.domains] : undefined,
-            skipFallback: s.skipFallback
-          };
-        });
-        routingRules = (p.routing_rules || []).map((r: any) => ({
-          id: crypto.randomUUID(),
-          type: r.type || 'field',
-          outboundTag: r.outboundTag,
-          domain: r.domain ? [...r.domain] : undefined,
-          ip: r.ip ? [...r.ip] : undefined,
-          port: r.port,
-          network: r.network,
-          protocol: r.protocol ? [...r.protocol] : undefined,
-          inboundTag: r.inboundTag ? [...r.inboundTag] : undefined
-        }));
-        dnsOverVless = p.dns_over_vless ?? false;
-        isDirty = true;
-        showToast('success', $t('editor.preset_applied'));
-        return;
-      }
-    }
-
-    if (presetId === 'selective-routing') {
-      dnsConfig.servers = [
-        '1.1.1.1',
-        {
-          address: '8.8.8.8',
-          port: 53,
-          tag: 'dns-in-ytb',
-          domains: ['geosite:youtube', 'geosite:google'],
-          skipFallback: true
-        },
-        {
-          address: '77.88.8.8',
-          port: 53,
-          tag: 'dns-in-direct',
-          domains: ['geosite:tld-ru'],
-          skipFallback: false
-        }
-      ];
-      routingRules = [
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'direct',
-          ip: ['geoip:private']
-        },
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'block',
-          domain: ['geosite:category-ads-all']
-        },
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'PROXY_TAG',
-          network: 'tcp,udp'
-        }
-      ];
-      dnsOverVless = true;
-    } else if (presetId === 'all-proxy-routing') {
-      dnsConfig.servers = ['1.1.1.1', '8.8.8.8'];
-      routingRules = [
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'direct',
-          ip: ['geoip:private']
-        },
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'PROXY_TAG',
-          network: 'tcp,udp'
-        }
-      ];
-      dnsOverVless = true;
-    } else if (presetId === 'selective-no-quic') {
-      dnsConfig.servers = [
-        '1.1.1.1',
-        {
-          address: '8.8.8.8',
-          port: 53,
-          tag: 'dns-in-ytb',
-          domains: ['geosite:youtube', 'geosite:google'],
-          skipFallback: true
-        }
-      ];
-      routingRules = [
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'block',
-          network: 'udp',
-          port: '443'
-        },
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'direct',
-          ip: ['geoip:private']
-        },
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'block',
-          domain: ['geosite:category-ads-all']
-        },
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'PROXY_TAG',
-          network: 'tcp,udp'
-        }
-      ];
-      dnsOverVless = true;
-    } else if (presetId === 'only-blocked-routing') {
-      dnsConfig.servers = [
-        '1.1.1.1',
-        {
-          address: '8.8.8.8',
-          port: 53,
-          tag: 'dns-in-ytb',
-          domains: ['geosite:category-anticensorship', 'geosite:refilter'],
-          skipFallback: true
-        }
-      ];
-      routingRules = [
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'direct',
-          ip: ['geoip:private']
-        },
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'PROXY_TAG',
-          domain: ['geosite:category-anticensorship', 'geosite:refilter']
-        },
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'direct',
-          port: '0-65535'
-        }
-      ];
-    } else if (presetId === 'minimal-routing') {
-      dnsConfig.servers = ['1.1.1.1', '8.8.8.8'];
-      routingRules = [
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'direct',
-          ip: ['geoip:private']
-        },
-        {
-          id: crypto.randomUUID(),
-          type: 'field',
-          outboundTag: 'direct',
-          port: '0-65535'
-        }
-      ];
-      dnsOverVless = false;
-    }
-    lastAppliedPreset = presetId;
-    isPresetModified = false;
-    isDirty = true;
-    showToast('success', $t('editor.preset_applied'));
-  }
-
-  // Template data helpers (Bug C / D-06)
-  // Outbounds identical for all three templates: direct(freedom), block(blackhole)
-  function getOutboundsForTemplate(
-    _id: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing'
-  ): object {
-    return {
-      outbounds: [
-        { tag: 'direct', protocol: 'freedom' },
-        { tag: 'block', protocol: 'blackhole' }
-      ]
-    };
-  }
-
-  function getRoutingForTemplate(
-    id: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing',
-    tag: string
-  ): object {
-    let rules: any[] = [];
-    if (id === 'minimal-routing') {
-      rules = [
-        { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
-        { type: 'field', port: '0-65535', outboundTag: 'direct' }
-      ];
-    } else if (id === 'selective-routing') {
-      rules = [
-        { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
-        { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
-        { type: 'field', domain: ['geosite:geolocation-!cn'], outboundTag: 'PROXY_TAG' }
-      ];
-    } else {
-      // all-proxy-routing
-      rules = [
-        { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
-        { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
-        { type: 'field', port: '0-65535', outboundTag: 'PROXY_TAG' }
-      ];
-    }
-    return {
-      routing: {
-        domainStrategy: 'IPIfNonMatch',
-        rules: substituteProxyTag(rules, tag)
-      }
-    };
-  }
-
-  // Apply template files: writes 04_outbounds.json + 05_routing.json via SmartMergeXray (TMPL-01, D-05, D-06)
-  async function applyTemplateFiles(
-    templateId: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing',
-    silent = false
-  ) {
-    const tag = proxyTag && outboundTags.includes(proxyTag) ? proxyTag : 'direct';
-
-    applyLoading = true;
-    saveWarnings = [];
-    try {
-      // 04_outbounds.json: сохранение кастомных outbounds (все кроме direct и block).
-      // services.SmartMergeXray не реализует семантику outbounds, поэтому здесь выполняется локальное объединение.
-      const outboundsPath = `${XRAY_DIR}/04_outbounds.json`;
-      const existingOutbounds = (xrayFiles['04_outbounds.json']?.outbounds || []) as any[];
-      const customOutbounds = existingOutbounds.filter(
-        (o: any) => o && o.tag !== 'direct' && o.tag !== 'block'
-      );
-      const templateOutbounds = (getOutboundsForTemplate(templateId) as any).outbounds || [];
-      const mergedOutbounds = {
-        outbounds: [...templateOutbounds, ...customOutbounds]
-      };
-
-      const saveOutboundsRes = await apiFetch(
-        `/api/config/save?path=${encodeURIComponent(outboundsPath)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(mergedOutbounds, null, 2)
-        }
-      );
-      if (!saveOutboundsRes.ok) throw new Error('Failed to save 04_outbounds.json');
-
-      // 05_routing.json: собираем шаблон с плейсхолдером PROXY_TAG, подстановку тега выполняет бэкенд
-      const templateRouting = getRoutingForTemplate(templateId, 'PROXY_TAG');
-      const templateContent = JSON.stringify(templateRouting, null, 2);
-
-      const existingRouting = xrayFiles['05_routing.json'];
-      const existingContent = existingRouting ? JSON.stringify(existingRouting, null, 2) : '';
-
-      let mergeRes: { content: string; stats?: { user_rules?: number; rules?: number } };
-      try {
-        mergeRes = await apiFetchJSON<{
-          content: string;
-          stats?: { user_rules?: number; rules?: number };
-        }>('/api/config/smart-merge', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'xray',
-            existing_content: existingContent,
-            template_content: templateContent,
-            target_file: '05_routing.json',
-            active_outbound_tag: tag
-          })
-        });
-      } catch (mergeErr: any) {
-        if (mergeErr?.status === 401) return;
-        console.error('Smart merge failed for 05_routing.json:', mergeErr);
-        if (!silent) {
-          showToast('error', $t('editor.smart_merge_failed'));
-        }
-        return;
-      }
-
-      if (!mergeRes || !mergeRes.content) {
-        if (!silent) {
-          showToast('error', $t('editor.smart_merge_failed'));
-        }
-        return;
-      }
-
-      const routingPath = `${XRAY_DIR}/05_routing.json`;
-      const saveRoutingRes = await apiFetch(
-        `/api/config/save?path=${encodeURIComponent(routingPath)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: mergeRes.content
-        }
-      );
-      if (!saveRoutingRes.ok) {
-        if (saveRoutingRes.status === 422) {
-          const resData = await saveRoutingRes.json().catch(() => ({}));
-          validationError = resData.error || 'Unknown validation error';
-          if (!silent) {
-            showToast('error', $t('editor.validation_failed'));
-          }
-          return;
-        }
-        throw new Error('Failed to save 05_routing.json');
-      }
-
-      const collected: PreflightWarning[] = [];
-      const outJson = await saveOutboundsRes.json().catch(() => null);
-      const outData = outJson?.data ?? outJson;
-      if (Array.isArray(outData?.warnings)) collected.push(...outData.warnings);
-
-      const routJson = await saveRoutingRes.json().catch(() => null);
-      const routData = routJson?.data ?? routJson;
-      if (Array.isArray(routData?.warnings)) {
-        collected.push(...routData.warnings);
-      } else if (Array.isArray((mergeRes as any)?.warnings)) {
-        collected.push(...(mergeRes as any).warnings);
-      }
-      saveWarnings = collected;
-
-      if (!silent) {
-        const stats = mergeRes.stats || {};
-        showToast(
-          'success',
-          $t('editor.smart_merge_applied', {
-            nodes: $tp('editor.smart_merge_applied_nodes', customOutbounds.length),
-            providers: $tp('editor.smart_merge_applied_providers', 0),
-            rules: $tp('editor.smart_merge_applied_rules', stats.rules ?? 0),
-            userRules: $tp('editor.smart_merge_applied_user_rules', stats.user_rules ?? 0)
-          })
-        );
-      }
-      await loadAllConfigs();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      if (!silent) {
-        showToast('error', $t('editor.save_error') + ': ' + e.message);
-      }
-    } finally {
-      applyLoading = false;
-    }
-  }
-
-  function openInEditor() {
-    if (onInsertIntoEditor) {
-      onInsertIntoEditor(previewJson);
-    } else {
-      onSwitchTab('editor');
-    }
-  }
-
-  function countDiffKeys(existing: any, merged: any): number {
-    let count = 0;
-    const allKeys = new Set([...Object.keys(existing || {}), ...Object.keys(merged || {})]);
-    for (const k of allKeys) {
-      if (JSON.stringify(existing?.[k]) !== JSON.stringify(merged?.[k])) {
-        count++;
-      }
-    }
-    return count;
-  }
-
-  interface FileChangeInfo {
-    name: string;
-    path: string;
-    changesCount: number;
-  }
-
-  let filesToModify = $derived.by<FileChangeInfo[]>(() => {
-    const list = getChangedFiles();
-    return list.map(([name, managed]) => {
-      const existing = xrayFiles[name] ?? {};
-      const merged = mergeXrayFile(name, existing, managed);
-      return {
-        name,
-        path: `${XRAY_DIR}/${name}`,
-        changesCount: countDiffKeys(existing, merged)
-      };
-    });
-  });
-
-  let filteredRules = $derived(
-    routingRules.filter((r) => !ruleFilterTag || r.outboundTag === ruleFilterTag)
-  );
-
-  // Превью (BUILD-03)
-  let previewFiles = $derived.by(() => {
-    const list = getChangedFiles();
-    const result: Record<string, any> = {};
-    for (const [name, managed] of list) {
-      const existing = xrayFiles[name] ?? {};
-      result[name] = mergeXrayFile(name, existing, managed);
-    }
-    return result;
-  });
-
-  let previewJson = $derived.by(() => {
-    return JSON.stringify(previewFiles, null, 2);
-  });
-
-  let activePreviewText = $derived.by(() => {
-    if (activePreviewTab === 'all') {
-      return JSON.stringify(previewFiles, null, 2);
-    }
-    if (previewFiles[activePreviewTab]) {
-      return JSON.stringify(previewFiles[activePreviewTab], null, 2);
-    }
-    return JSON.stringify(previewFiles, null, 2);
-  });
-
-  let activeFileSize = $derived.by(() => {
-    const bytes = new Blob([activePreviewText]).size;
-    if (bytes < 1024) return `${bytes} B`;
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  });
-
-  async function copyPreviewJson() {
-    try {
-      await navigator.clipboard.writeText(activePreviewText);
-      copyFeedback = true;
-      showToast('success', $t('xray.copied'));
-      setTimeout(() => {
-        copyFeedback = false;
-      }, 2000);
-    } catch {
-      showToast('error', $t('app.error'));
-    }
-  }
-
-  function downloadPreviewJson() {
-    const fileName = activePreviewTab === 'all' ? 'xray-config.json' : activePreviewTab;
-    const blob = new Blob([activePreviewText], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function getNodeServer(node: any): string {
-    if (!node || !node.settings) return '';
-    if (node.settings.vnext && node.settings.vnext[0]) {
-      return node.settings.vnext[0].address || '';
-    }
-    if (node.settings.servers && node.settings.servers[0]) {
-      return node.settings.servers[0].address || '';
-    }
-    return '';
-  }
-
-  function getNodePort(node: any): string {
-    if (!node || !node.settings) return '';
-    if (node.settings.vnext && node.settings.vnext[0]) {
-      return String(node.settings.vnext[0].port || '');
-    }
-    if (node.settings.servers && node.settings.servers[0]) {
-      return String(node.settings.servers[0].port || '');
-    }
-    return '';
-  }
-
-  function generateUniqueTag(baseTag: string, existing: string[]): string {
-    let tag = baseTag.trim() || 'node';
-    if (!existing.includes(tag)) {
-      return tag;
-    }
-    let counter = 1;
-    while (existing.includes(`${tag}-${counter}`)) {
-      counter++;
-    }
-    return `${tag}-${counter}`;
-  }
-
-  function openImportModal() {
-    showImportModal = true;
-    importLink = '';
-    importTag = '';
-    importStep = 1;
-    importLoading = false;
-    importNodes = [];
-    importErrorMsg = '';
-    importSource = 'links';
-    isDraggingFile = false;
-    loadedFileName = '';
-  }
-
-  function handleConfigFile(file: File) {
-    loadedFileName = file.name;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = (e.target?.result as string) || '';
-      importLink = text;
-      parseImportLink();
-    };
-    reader.readAsText(file);
-  }
-
-  function closeImportModal() {
-    showImportModal = false;
-  }
-
-  async function parseImportLink() {
-    const trimmed = importLink.trim();
-    if (!trimmed) {
-      importErrorMsg = $t('subscr.import_error_empty');
-      return;
-    }
-
-    const lines = trimmed
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
-
-    importErrorMsg = '';
-    importLoading = true;
-
-    try {
-      const data = await apiFetchJSON<any>('/api/outbound/parse', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ links: lines })
-      });
-
-      const parsedItems = (Array.isArray(data) ? data : data?.data) || [];
-
-      if (parsedItems.length > 0) {
-        const newImportNodes = [];
-        const existingTags = [...outboundTags];
-
-        for (let i = 0; i < parsedItems.length; i++) {
-          const result = parsedItems[i];
-          if (result.outbound) {
-            const baseTag = result.outbound.tag || 'node';
-            const uniqueTag = generateUniqueTag(baseTag, existingTags);
-            existingTags.push(uniqueTag);
-            newImportNodes.push({
-              link: lines[i],
-              outbound: result.outbound,
-              tag: uniqueTag,
-              rowError: result.error || null
-            });
-          } else {
-            newImportNodes.push({
-              link: lines[i],
-              outbound: null,
-              tag: '',
-              rowError: result.error || $t('subscr.import_error_invalid')
-            });
-          }
-        }
-
-        importNodes = newImportNodes;
-        importStep = 2;
-      } else {
-        importErrorMsg = $t('subscr.import_error_invalid');
-      }
-    } catch (e: any) {
-      importErrorMsg = e.message || $t('subscr.import_error_invalid');
-    } finally {
-      importLoading = false;
-    }
-  }
-
-  async function confirmImportNode() {
-    importErrorMsg = '';
-    importLoading = true;
-
-    try {
-      const items = importNodes.map((item) => ({
-        link: item.link,
-        tag: item.tag.trim()
-      }));
-
-      await apiFetchJSON('/api/outbound/import-bulk', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ items })
-      });
-
-      showToast('success', $t('subscr.import_success', { count: importNodes.length }));
-      showImportModal = false;
-      await loadXrayOutboundTags();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      importErrorMsg = e.message || $t('subscr.import_error');
-    } finally {
-      importLoading = false;
-    }
-  }
-
-  const ru = $derived($currentLang === 'ru');
 </script>
 
 <div class="container">
@@ -2425,24 +562,7 @@
     </div>
   {:else if schemaError}
     <div class="error-state-block" style="padding: 48px; text-align: center;">
-      <div class="error-icon">
-        <svg
-          width="24"
-          height="24"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          aria-hidden="true"
-        >
-          <path
-            d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-          />
-          <line x1="12" y1="9" x2="12" y2="13" />
-          <line x1="12" y1="17" x2="12.01" y2="17" />
-        </svg>
-      </div>
-      <p style="color: var(--danger); margin-bottom: 16px;">
+      <p style="color: var(--danger, #ef4444); margin-bottom: 16px;">
         {$t('editor.definition_load_error', { error: schemaError })}
       </p>
       <button class="btn btn-secondary" onclick={loadSchema}>{$t('app.retry')}</button>
@@ -2452,9 +572,7 @@
       <div class="constructor-header">
         <div class="constructor-header-content">
           <h2 class="constructor-title">{$t('xray.presets_h1')}</h2>
-          <p class="constructor-sub">
-            {$t('xray.presets_sub')}
-          </p>
+          <p class="constructor-sub">{$t('xray.presets_sub')}</p>
         </div>
         <div class="constructor-header-actions">
           <Button
@@ -2463,40 +581,16 @@
             onclick={() => (showPreviewPane = !showPreviewPane)}
             title={$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
           >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              style="margin-right: 4px;"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-              <line x1="15" y1="3" x2="15" y2="21" />
-            </svg>
             {$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
           </Button>
           <Button type="button" variant="secondary" onclick={openInEditor}>
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              style="margin-right:5px"
-              ><path d="M12 20h9" /><path
-                d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
-              /></svg
-            >
             {#if selectedFile}
               {$t('mihomo.insert_editor')}
             {:else}
               {$t('mihomo.open_editor')}
             {/if}
           </Button>
-          {#if canUndo}
+          {#if undoHistory.length > 0}
             <Button type="button" variant="secondary" onclick={handleUndo} disabled={applyLoading}>
               {$t('editor.undo')}
             </Button>
@@ -2505,9 +599,10 @@
             type="button"
             variant="primary"
             data-testid="apply-changes-btn"
-            onclick={handleApplyChanges}
+            onclick={promptApplyChanges}
+            disabled={applyLoading}
           >
-            {$t('mihomo.apply_changes')}
+            {applyLoading ? $t('editor.saving') : $t('mihomo.apply_changes')}
           </Button>
         </div>
       </div>
@@ -2523,18 +618,6 @@
             onclick={() => (showPreviewPane = !showPreviewPane)}
             title={$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
           >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              style="margin-right: 4px;"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-              <line x1="15" y1="3" x2="15" y2="21" />
-            </svg>
             {$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
           </Button>
         </div>
@@ -2548,41 +631,25 @@
       }}
     />
 
-    <div class="gen-layout" class:resizing={isResizingPreview}>
-      <!-- Left Panel -->
+    <div class="gen-layout">
+      <!-- Left Panel: Navigation and Section Content -->
       <div class="gen-left">
         <!-- Scenario chips (BUILD-04) -->
         <div class="constructor-scenario-bar">
           <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
-          {#if schema && schema.xray && schema.xray.presets}
-            {#each schema.xray.presets as p}
-              <button
-                class="scenario-chip"
-                class:active={lastAppliedPreset === p.id}
-                title={$t(p.desc || p.name)}
-                onclick={() => applyPreset(p.id)}
-              >
-                {$t(p.name)}
-                {#if lastAppliedPreset === p.id && isPresetModified}
-                  <span class="preset-mod-badge">{$t('xray.preset_modified')}</span>
-                {/if}
-              </button>
-            {/each}
-          {:else}
-            {#each defaultPresets as p}
-              <button
-                class="scenario-chip"
-                class:active={lastAppliedPreset === p.id}
-                title={$t(p.descKey)}
-                onclick={() => applyPreset(p.id)}
-              >
-                {$t(p.nameKey)}
-                {#if lastAppliedPreset === p.id && isPresetModified}
-                  <span class="preset-mod-badge">{$t('xray.preset_modified')}</span>
-                {/if}
-              </button>
-            {/each}
-          {/if}
+          {#each XRAY_DEFAULT_PRESETS as p}
+            <button
+              class="scenario-chip"
+              class:active={lastAppliedPreset === p.id}
+              title={$t(p.descKey)}
+              onclick={() => applyPreset(p.id)}
+            >
+              {$t(p.nameKey)}
+              {#if lastAppliedPreset === p.id && isPresetModified}
+                <span class="preset-mod-badge">{$t('xray.preset_modified')}</span>
+              {/if}
+            </button>
+          {/each}
         </div>
 
         <!-- Outbound Tag selection -->
@@ -2615,10 +682,7 @@
               class:active={activeSection === id}
               data-tab={id}
               onclick={() => {
-                activeSection = id as any;
-                showRuleForm = false;
-                showDnsForm = false;
-                showInboundForm = false;
+                activeSection = id as XraySectionName;
               }}
             >
               {label}
@@ -2629,1902 +693,73 @@
           {/each}
         </div>
 
-        <!-- ROUTING SECTION -->
+        <!-- Section Content -->
         {#if activeSection === 'routing'}
-          <div class="sec-body">
-            <div class="form-row">
-              <label class="form-label" for="domain-strategy"
-                >{$t('editor.xray_domain_strategy')}</label
-              >
-              <Select
-                id="domain-strategy"
-                class="form-select"
-                bind:value={routingConfig.domainStrategy}
-                onchange={() => (isDirty = true)}
-              >
-                <option value="AsIs">AsIs</option>
-                <option value="IPIfNonMatch">IPIfNonMatch</option>
-                <option value="IPOnDemand">IPOnDemand</option>
-              </Select>
-            </div>
-
-            <!-- Filter rules -->
-            <div class="form-row" style="margin-bottom: 12px;">
-              <label class="form-label" for="rule-filter-select"
-                >{$t('xray.filter_by_outbound_tag')}:</label
-              >
-              <Select id="rule-filter-select" class="form-select" bind:value={ruleFilterTag}>
-                <option value="">{$t('xray.all_rules')}</option>
-                {#each outboundTags as tag}
-                  <option value={tag}>{tag}</option>
-                {/each}
-                <option value="PROXY_TAG">PROXY_TAG</option>
-              </Select>
-            </div>
-
-            {#if $capabilities?.active_kernel === 'xray'}
-              <!-- Test Route & Logger Rotation Panel (D-05, D-06, D-02) -->
-              <div
-                class="card test-route-card"
-                data-testid="test-route-panel"
-                style="margin-bottom: 20px;"
-              >
-                <div
-                  class="test-route-header"
-                  style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;"
-                >
-                  <div>
-                    <div class="section-title" style="margin: 0 0 4px 0;">
-                      {$t('xray.test_route.title')}
-                    </div>
-                    <div class="form-hint" style="margin: 0;">{$t('xray.test_route.hint')}</div>
-                  </div>
-                  <button
-                    type="button"
-                    class="btn btn-secondary btn-sm"
-                    data-testid="restart-logger-btn"
-                    onclick={restartLogger}
-                    disabled={restartingLogger}
-                    title={$t('xray.restart_logger.hint')}
-                  >
-                    {restartingLogger
-                      ? $t('xray.restart_logger.running')
-                      : $t('xray.restart_logger.button')}
-                  </button>
-                </div>
-
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label" for="test-route-domain"
-                      >{$t('xray.test_route.target_domain')}</label
-                    >
-                    <input
-                      id="test-route-domain"
-                      class="form-input"
-                      data-testid="test-route-domain"
-                      bind:value={testRouteForm.domain}
-                      placeholder="example.com"
-                    />
-                  </div>
-                  <div class="form-col">
-                    <label class="form-label" for="test-route-ip"
-                      >{$t('xray.test_route.target_ip')}</label
-                    >
-                    <input
-                      id="test-route-ip"
-                      class="form-input"
-                      data-testid="test-route-ip"
-                      bind:value={testRouteForm.ip}
-                      placeholder="1.2.3.4"
-                    />
-                  </div>
-                </div>
-
-                <div class="form-row2" style="margin-top: 8px;">
-                  <div class="form-col">
-                    <label class="form-label" for="test-route-port"
-                      >{$t('xray.test_route.target_port')}</label
-                    >
-                    <input
-                      id="test-route-port"
-                      type="number"
-                      class="form-input"
-                      data-testid="test-route-port"
-                      bind:value={testRouteForm.port}
-                      min="1"
-                      max="65535"
-                    />
-                  </div>
-                  <div class="form-col">
-                    <label class="form-label" for="test-route-protocol"
-                      >{$t('xray.test_route.protocol')}</label
-                    >
-                    <Select
-                      id="test-route-protocol"
-                      class="form-select"
-                      data-testid="test-route-protocol"
-                      bind:value={testRouteForm.protocol}
-                    >
-                      <option value="">{$t('xray.all_protocols') || 'Default'}</option>
-                      <option value="http">http</option>
-                      <option value="tls">tls</option>
-                      <option value="bittorrent">bittorrent</option>
-                    </Select>
-                  </div>
-                </div>
-
-                <div class="form-row" style="margin-top: 8px;">
-                  <label class="form-label" for="test-route-inbound"
-                    >{$t('xray.test_route.inbound_tag')}</label
-                  >
-                  <input
-                    id="test-route-inbound"
-                    class="form-input"
-                    data-testid="test-route-inbound"
-                    bind:value={testRouteForm.inboundTag}
-                    placeholder="proxy-in"
-                  />
-                </div>
-
-                <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
-                  <button
-                    type="button"
-                    class="btn btn-primary btn-sm"
-                    data-testid="test-route-submit-btn"
-                    onclick={runTestRoute}
-                    disabled={testRouteRunning ||
-                      (!testRouteForm.domain.trim() && !testRouteForm.ip.trim())}
-                  >
-                    {testRouteRunning ? $t('xray.test_route.running') : $t('xray.test_route.run')}
-                  </button>
-                </div>
-
-                {#if testRouteError}
-                  <div
-                    class="alert alert-error"
-                    data-testid="test-route-error"
-                    style="margin-top: 12px;"
-                  >
-                    {testRouteError}
-                  </div>
-                {/if}
-
-                {#if testRouteResult}
-                  <div
-                    class="test-route-result card"
-                    data-testid="test-route-result"
-                    style="margin-top: 12px; padding: 12px; background: var(--bg-page);"
-                  >
-                    {#if testRouteResult.outbound_tag}
-                      <div
-                        style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;"
-                      >
-                        <span class="form-label" style="margin: 0;"
-                          >{$t('xray.test_route.result_outbound')}:</span
-                        >
-                        <span
-                          class="badge badge-tag badge-proxy"
-                          data-testid="test-route-outbound-tag">{testRouteResult.outbound_tag}</span
-                        >
-                      </div>
-                    {:else}
-                      <div
-                        class="text-muted"
-                        data-testid="test-route-no-match"
-                        style="margin-bottom: 8px;"
-                      >
-                        {$t('xray.test_route.no_match')}
-                      </div>
-                    {/if}
-                    {#if (testRouteResult.outbound_group_tags || testRouteResult.rule_groups) && ((testRouteResult.outbound_group_tags || testRouteResult.rule_groups)?.length ?? 0) > 0}
-                      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                        <span class="form-label" style="margin: 0;"
-                          >{$t('xray.test_route.result_groups')}:</span
-                        >
-                        {#each testRouteResult.outbound_group_tags || testRouteResult.rule_groups as group}
-                          <span class="badge badge-tag" data-testid="test-route-rule-group"
-                            >{group}</span
-                          >
-                        {/each}
-                      </div>
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-            {/if}
-
-            <div class="section-title">{$t('xray.routing_rules')}</div>
-
-            <div class="routing-rules-list" data-testid="routing-rules-list" role="list">
-              {#each filteredRules as rule (rule.id)}
-                <div
-                  class="card rule-card"
-                  role="listitem"
-                  class:rule-disabled={rule.enabled === false}
-                  class:dragging={draggedRuleId === rule.id}
-                  class:drag-over={dragOverRuleId === rule.id}
-                  draggable="true"
-                  ondragstart={(e) => handleDragStart(e, rule.id)}
-                  ondragover={(e) => handleDragOver(e, rule.id)}
-                  ondrop={(e) => handleDrop(e, rule.id)}
-                  ondragend={handleDragEnd}
-                >
-                  <div class="rule-header">
-                    <div class="rule-head-left">
-                      <span class="drag-handle" title={$t('xray.drag_handle')}>⠿</span>
-                      <button
-                        type="button"
-                        class="rule-toggle-btn"
-                        class:active={rule.enabled !== false}
-                        role="switch"
-                        aria-checked={rule.enabled !== false}
-                        aria-label={rule.enabled !== false
-                          ? $t('xray.rule_enabled')
-                          : $t('xray.rule_disabled')}
-                        title={rule.enabled !== false
-                          ? $t('xray.rule_enabled')
-                          : $t('xray.rule_disabled')}
-                        onclick={() => toggleRuleEnabled(rule.id)}
-                      >
-                        <span class="toggle-dot"></span>
-                      </button>
-                      <span
-                        class="badge badge-tag"
-                        class:badge-direct={rule.outboundTag === 'direct'}
-                        class:badge-block={rule.outboundTag === 'block'}
-                        class:badge-proxy={rule.outboundTag !== 'direct' &&
-                          rule.outboundTag !== 'block'}
-                      >
-                        {#if rule.outboundTag === 'direct'}
-                          <svg
-                            width="10"
-                            height="10"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.5"><polyline points="20 6 9 17 4 12" /></svg
-                          >
-                        {:else if rule.outboundTag === 'block'}
-                          <svg
-                            width="10"
-                            height="10"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.5"
-                            ><circle cx="12" cy="12" r="10" /><line
-                              x1="4.93"
-                              y1="4.93"
-                              x2="19.07"
-                              y2="19.07"
-                            /></svg
-                          >
-                        {:else}
-                          <svg
-                            width="10"
-                            height="10"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.5"
-                            ><circle cx="12" cy="12" r="10" /><line
-                              x1="2"
-                              y1="12"
-                              x2="22"
-                              y2="12"
-                            /><path
-                              d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
-                            /></svg
-                          >
-                        {/if}
-                        {rule.outboundTag}
-                      </span>
-                    </div>
-
-                    <div class="rule-actions">
-                      <button
-                        type="button"
-                        class="btn-rule-action rule-move"
-                        onclick={() => moveRule(rule.id, -1)}
-                        disabled={routingRules.findIndex((r) => r.id === rule.id) === 0}
-                        title={$t('app.move_up')}
-                      >
-                        <svg
-                          width="11"
-                          height="11"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2.5"><polyline points="18 15 12 9 6 15" /></svg
-                        >
-                      </button>
-                      <button
-                        type="button"
-                        class="btn-rule-action rule-move"
-                        onclick={() => moveRule(rule.id, 1)}
-                        disabled={routingRules.findIndex((r) => r.id === rule.id) ===
-                          routingRules.length - 1}
-                        title={$t('app.move_down')}
-                      >
-                        <svg
-                          width="11"
-                          height="11"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2.5"><polyline points="6 9 12 15 18 9" /></svg
-                        >
-                      </button>
-                      <button
-                        type="button"
-                        class="btn-rule-action"
-                        onclick={() => duplicateRule(rule)}
-                        title={$t('app.duplicate')}
-                      >
-                        <svg
-                          width="11"
-                          height="11"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2"
-                          ><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
-                            d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                          /></svg
-                        >
-                      </button>
-                      <button
-                        type="button"
-                        class="btn-rule-action btn-rule-del rule-del"
-                        onclick={() => removeRule(rule.id)}
-                        title={$t('app.delete')}
-                      >
-                        <svg
-                          width="11"
-                          height="11"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2"
-                          ><line x1="18" y1="6" x2="6" y2="18" /><line
-                            x1="6"
-                            y1="6"
-                            x2="18"
-                            y2="18"
-                          /></svg
-                        >
-                      </button>
-                    </div>
-                  </div>
-
-                  <div class="rule-details">
-                    {#if rule.inboundTag && rule.inboundTag.length > 0}
-                      <div class="rule-detail-item">
-                        <strong>{$t('xray.inbound_tags')}:</strong>
-                        <span class="rule-chips">
-                          {#each rule.inboundTag as ib}
-                            <span class="chip chip-ip">{ib}</span>
-                          {/each}
-                        </span>
-                      </div>
-                    {/if}
-
-                    {#if rule.domain && rule.domain.length > 0}
-                      <div class="rule-detail-item">
-                        <strong>{$t('xray.domains')}:</strong>
-                        <span class="rule-chips">
-                          {#each rule.domain as d}
-                            <span class="chip chip-domain">{d}</span>
-                          {/each}
-                        </span>
-                      </div>
-                    {/if}
-
-                    {#if rule.ip && rule.ip.length > 0}
-                      <div class="rule-detail-item">
-                        <strong>IP:</strong>
-                        <span class="rule-chips">
-                          {#each rule.ip as ip}
-                            <span class="chip chip-ip">{ip}</span>
-                          {/each}
-                        </span>
-                      </div>
-                    {/if}
-
-                    {#if rule.port}
-                      <div class="rule-detail-item">
-                        <strong>{$t('xray.ports')}:</strong> <code>{rule.port}</code>
-                      </div>
-                    {/if}
-
-                    {#if rule.network}
-                      <div class="rule-detail-item">
-                        <strong>{$t('xray.network')}:</strong>
-                        <span class="badge">{rule.network}</span>
-                      </div>
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-
-            {#if showRuleForm}
-              <div class="form-card">
-                <div class="form-row">
-                  <label class="form-label" for="rule-outbound"
-                    >{$t('editor.xray_outbound_tag')}</label
-                  >
-                  <Select
-                    id="rule-outbound"
-                    class="form-select rule-outbound-select"
-                    data-testid="rule-outbound-select"
-                    bind:value={newRule.outboundTag}
-                  >
-                    {#each outboundTags as tag}
-                      <option value={tag}>{tag}</option>
-                    {/each}
-                    <option value="PROXY_TAG">PROXY_TAG</option>
-                  </Select>
-                </div>
-
-                <div class="form-row">
-                  <label class="form-label" for="rule-inbounds"
-                    >{$t('xray.inbound_tags_placeholder')}</label
-                  >
-                  <input
-                    id="rule-inbounds"
-                    class="form-input"
-                    bind:value={newRule.inboundTagRaw}
-                    placeholder="dns-in-ytb, socks"
-                  />
-                </div>
-
-                <div class="form-row">
-                  <label class="form-label" for="rule-domains"
-                    >{$t('editor.xray_domain_list')} ({$t('xray.comma_separated')})</label
-                  >
-                  <input
-                    id="rule-domains"
-                    class="form-input"
-                    data-testid="rule-domain-input"
-                    bind:value={newRule.domainRaw}
-                    placeholder="geosite:youtube, google.com"
-                  />
-                </div>
-
-                <div class="form-row">
-                  <label class="form-label" for="rule-ips"
-                    >{$t('editor.xray_ip_list')} ({$t('xray.comma_separated')})</label
-                  >
-                  <input
-                    id="rule-ips"
-                    class="form-input"
-                    bind:value={newRule.ipRaw}
-                    placeholder="geoip:private, 1.1.1.1"
-                  />
-                </div>
-
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label" for="rule-ports">{$t('editor.xray_port_range')}</label
-                    >
-                    <input
-                      id="rule-ports"
-                      class="form-input"
-                      bind:value={newRule.port}
-                      placeholder="80,443,1000-2000"
-                    />
-                  </div>
-                  <div class="form-col">
-                    <label class="form-label" for="rule-network">{$t('editor.xray_network')}</label>
-                    <Select id="rule-network" class="form-select" bind:value={newRule.network}>
-                      <option value="tcp,udp">tcp+udp</option>
-                      <option value="tcp">tcp</option>
-                      <option value="udp">udp</option>
-                    </Select>
-                  </div>
-                </div>
-
-                <div class="form-actions">
-                  <button class="btn btn-secondary" onclick={() => (showRuleForm = false)}
-                    >{$t('app.cancel')}</button
-                  >
-                  <button class="btn btn-primary" onclick={addRule}>{$t('app.create')}</button>
-                </div>
-              </div>
-            {:else}
-              <button
-                class="add-btn"
-                data-testid="add-routing-rule"
-                onclick={() => (showRuleForm = true)}
-              >
-                + {$t('editor.xray_routing_add_rule')}
-              </button>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- INBOUNDS SECTION -->
-        {#if activeSection === 'inbounds'}
-          <div class="sec-body">
-            <div class="section-title">{$t('editor.xray_inbounds')}</div>
-            {#each inbounds as inbound}
-              <div class="card inbound-card">
-                <div class="inbound-title">
-                  <span class="badge type-{inbound.protocol}">{inbound.protocol}</span>
-                  <strong>{inbound.tag}</strong>
-                  <button
-                    class="item-del"
-                    style="margin-left:auto"
-                    onclick={() => removeInbound(inbound.tag)}>✕</button
-                  >
-                </div>
-                <div class="form-row2" style="margin-top:var(--spacing-2)">
-                  <div class="form-col">
-                    <label class="form-label" for="xray-inbound-port-{inbound.tag}"
-                      >{$t('xray.inbound_port')}</label
-                    >
-                    <input
-                      id="xray-inbound-port-{inbound.tag}"
-                      class="form-input"
-                      type="number"
-                      bind:value={inbound.port}
-                      oninput={() => (isDirty = true)}
-                      min="1"
-                      max="65535"
-                    />
-                  </div>
-                  <div class="form-col">
-                    <label class="form-label" for="xray-inbound-listen-{inbound.tag}"
-                      >{$t('xray.listen_address')}</label
-                    >
-                    <input
-                      id="xray-inbound-listen-{inbound.tag}"
-                      class="form-input"
-                      bind:value={inbound.listen}
-                      oninput={() => (isDirty = true)}
-                    />
-                  </div>
-                </div>
-              </div>
-            {/each}
-
-            {#if showInboundForm}
-              <div class="form-card">
-                <div class="form-row">
-                  <label class="form-label" for="xray-new-inbound-tag">{$t('xray.tag')}</label>
-                  <input
-                    id="xray-new-inbound-tag"
-                    class="form-input"
-                    bind:value={newInbound.tag}
-                    placeholder="socks-in"
-                  />
-                </div>
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label" for="xray-new-inbound-port">{$t('xray.port')}</label>
-                    <input
-                      id="xray-new-inbound-port"
-                      class="form-input"
-                      type="number"
-                      bind:value={newInbound.port}
-                    />
-                  </div>
-                  <div class="form-col">
-                    <label class="form-label" for="xray-new-inbound-protocol"
-                      >{$t('xray.protocol')}</label
-                    >
-                    <Select
-                      id="xray-new-inbound-protocol"
-                      class="form-select"
-                      bind:value={newInbound.protocol}
-                    >
-                      <option value="socks">socks</option>
-                      <option value="http">http</option>
-                    </Select>
-                  </div>
-                </div>
-                {#if newInbound.protocol === 'socks'}
-                  <div class="form-row">
-                    <label class="checkbox-container">
-                      <input type="checkbox" bind:checked={newInbound.udp} />
-                      <span class="checkmark"></span>
-                      {$t('xray.enable_udp_socks')}
-                    </label>
-                  </div>
-                {/if}
-                <div class="form-actions">
-                  <button class="btn btn-secondary" onclick={() => (showInboundForm = false)}
-                    >{$t('app.cancel')}</button
-                  >
-                  <button class="btn btn-primary" onclick={addInbound}>{$t('app.create')}</button>
-                </div>
-              </div>
-            {:else}
-              <button class="add-btn" onclick={() => (showInboundForm = true)}>
-                + {$t('xray.add_inbound')}
-              </button>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- DNS SECTION -->
-        {#if activeSection === 'dns'}
-          <div class="sec-body">
-            {#if $capabilities?.xkeen_dns === false && dnsConfig.servers.length > 0}
-              <div
-                class="alert alert-warning"
-                style="margin: 0 0 16px 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;"
-                role="status"
-              >
-                <div style="display: flex; gap: 8px; align-items: center;">
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    style="flex-shrink: 0;"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-                    />
-                    <line x1="12" y1="9" x2="12" y2="13" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                  <span>{$t('editor.dns_intercept_warning')}</span>
-                </div>
-                <button
-                  class="btn btn-secondary btn-sm"
-                  style="font-size: 12px; padding: 4px 8px; display: flex; align-items: center; gap: 4px;"
-                  onclick={enableDNSRedirect}
-                  disabled={dnsRedirectLoading}
-                >
-                  {#if dnsRedirectLoading}
-                    <span
-                      class="spinner"
-                      style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
-                    ></span>
-                  {/if}
-                  {$t('editor.dns_intercept_enable')}
-                </button>
-              </div>
-            {/if}
-
-            <div class="form-row">
-              <label class="form-label" for="dns-query-strategy"
-                >{$t('xray.dns_query_strategy')}</label
-              >
-              <Select
-                id="dns-query-strategy"
-                class="form-select"
-                bind:value={dnsConfig.queryStrategy}
-                onchange={() => (isDirty = true)}
-              >
-                <option value="UseIP">UseIP</option>
-                <option value="UseIPv4">UseIPv4</option>
-                <option value="UseIPv6">UseIPv6</option>
-              </Select>
-            </div>
-
-            <div
-              class="card"
-              style="margin-top: 16px; margin-bottom: 16px; padding: 12px; display: flex; flex-direction: column; gap: 4px;"
-            >
-              <label class="checkbox-container" style="margin: 0;">
-                <input
-                  type="checkbox"
-                  bind:checked={dnsOverVless}
-                  onchange={() => (isDirty = true)}
-                />
-                <span class="checkmark" style="top: 1px;"></span>
-                <span style="font-weight: 600; color: var(--fg-primary);"
-                  >{$t('editor.dns_over_vless')}</span
-                >
-              </label>
-              <div
-                style="font-size: 0.75rem; color: var(--fg-secondary); padding-left: 28px; line-height: 1.4;"
-              >
-                {$t('editor.dns_over_vless_desc')}
-              </div>
-            </div>
-
-            <div class="section-title">{$t('editor.xray_dns')}</div>
-
-            <div class="dns-servers-list">
-              {#each dnsConfig.servers as srv, idx}
-                <div class="item-row card" style="margin-bottom: 8px;">
-                  {#if typeof srv === 'string'}
-                    <span class="item-name">{srv}</span>
-                  {:else}
-                    <div style="flex: 1;">
-                      <div style="font-weight: 600; color: var(--fg-primary);">
-                        {srv.address}:{srv.port || 53}
-                      </div>
-                      <div style="font-size: 0.75rem; color: var(--fg-secondary);">
-                        {$t('xray.tag')}: <span class="badge">{srv.tag}</span>
-                        | {$t('xray.domains')}: {srv.domains?.join(', ') || $t('app.none')}
-                        {#if srv.skipFallback}
-                          | <span class="badge">{$t('xray.skip_fallback')}</span>{/if}
-                      </div>
-                    </div>
-                  {/if}
-                  <button
-                    class="item-del"
-                    onclick={() => removeDNSServer(idx)}
-                    title={$t('app.delete')}>✕</button
-                  >
-                </div>
-              {/each}
-            </div>
-
-            {#if showDnsForm}
-              <div class="form-card">
-                <div class="form-row">
-                  <label class="form-label" for="xray-new-dns-address"
-                    >{$t('xray.server_address')}</label
-                  >
-                  <input
-                    id="xray-new-dns-address"
-                    class="form-input"
-                    bind:value={newDns.address}
-                    placeholder="8.8.8.8"
-                  />
-                </div>
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label" for="xray-new-dns-port">{$t('xray.port')}</label>
-                    <input
-                      id="xray-new-dns-port"
-                      class="form-input"
-                      type="number"
-                      bind:value={newDns.port}
-                    />
-                  </div>
-                  <div class="form-col">
-                    <label class="form-label" for="xray-new-dns-tag"
-                      >{$t('xray.tag_optional')}</label
-                    >
-                    <input
-                      id="xray-new-dns-tag"
-                      class="form-input"
-                      bind:value={newDns.tag}
-                      placeholder="dns-in-ytb"
-                    />
-                  </div>
-                </div>
-                {#if newDns.tag.trim()}
-                  <div class="form-row">
-                    <label class="form-label" for="xray-new-dns-domains"
-                      >{$t('xray.redirect_domains')}</label
-                    >
-                    <input
-                      id="xray-new-dns-domains"
-                      class="form-input"
-                      bind:value={newDns.domainsRaw}
-                      placeholder="geosite:youtube, google.com"
-                    />
-                  </div>
-                  <div class="form-row" style="margin-top: 8px;">
-                    <label class="checkbox-container">
-                      <input type="checkbox" bind:checked={newDns.skipFallback} />
-                      <span class="checkmark"></span>
-                      {$t('xray.skip_fallback')}
-                    </label>
-                  </div>
-                {/if}
-                <div class="form-actions">
-                  <button class="btn btn-secondary" onclick={() => (showDnsForm = false)}
-                    >{$t('app.cancel')}</button
-                  >
-                  <button class="btn btn-primary" onclick={addDNSServer}>{$t('app.create')}</button>
-                </div>
-              </div>
-            {:else}
-              <button class="add-btn" onclick={() => (showDnsForm = true)}>
-                + {$t('xray.add_dns_server')}
-              </button>
-            {/if}
-
-            <div class="section-title" style="margin-top: 16px;">Hosts</div>
-            <div class="hosts-list">
-              {#each Object.entries(dnsConfig.hosts) as [domain, ip]}
-                <div class="item-row card" style="margin-bottom: 8px;">
-                  <div style="flex: 1;">
-                    <code>{domain}</code> &rarr; <code>{ip}</code>
-                  </div>
-                  <button
-                    class="item-del"
-                    onclick={() => removeHost(domain)}
-                    title={$t('app.delete')}>✕</button
-                  >
-                </div>
-              {/each}
-            </div>
-
-            {#if showHostForm}
-              <div class="form-card" style="margin-top: 8px;">
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label" for="xray-new-host-domain">{$t('xray.domain')}</label>
-                    <input
-                      id="xray-new-host-domain"
-                      class="form-input"
-                      bind:value={newHost.domain}
-                      placeholder="dns.google"
-                    />
-                  </div>
-                  <div class="form-col">
-                    <label class="form-label" for="xray-new-host-ip">IP</label>
-                    <input
-                      id="xray-new-host-ip"
-                      class="form-input"
-                      bind:value={newHost.ip}
-                      placeholder="8.8.8.8"
-                    />
-                  </div>
-                </div>
-                <div class="form-actions">
-                  <button class="btn btn-secondary" onclick={() => (showHostForm = false)}
-                    >{$t('app.cancel')}</button
-                  >
-                  <button class="btn btn-primary" onclick={addHost}>{$t('app.create')}</button>
-                </div>
-              </div>
-            {:else}
-              <button
-                class="add-btn"
-                style="margin-top: 8px;"
-                onclick={() => (showHostForm = true)}
-              >
-                + {$t('xray.add_host')}
-              </button>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- OUTBOUNDS SECTION -->
-        {#if activeSection === 'outbounds'}
-          <div class="sec-body">
-            <div class="section-title" style="margin-bottom: 12px;">
-              {$t('editor.xray_section_outbounds')}
-            </div>
-
-            <div
-              class="constructor-outbounds-header"
-              style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;"
-            >
-              <button type="button" class="add-btn btn-action-primary" onclick={openImportModal}>
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  style="margin-right: 4px; display: inline-block; vertical-align: middle;"
-                >
-                  <path
-                    d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"
-                  />
-                </svg>
-                {$t('subscr.import_node')}
-              </button>
-              <button type="button" class="add-btn btn-secondary" onclick={openAddOutbound}>
-                + {$t('xray.add_outbound_manual')}
-              </button>
-            </div>
-
-            <div class="outbounds-list">
-              <!-- Custom Outbounds (Editable) -->
-              {#each customOutbounds as item, idx}
-                <div
-                  class="card tag-card"
-                  style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between;"
-                >
-                  <div>
-                    <span class="badge badge-tag">{item.tag}</span>
-                    <span style="font-size: 0.75rem; color: var(--fg-secondary); margin-left: 8px;">
-                      ({item.protocol} &bull; {getNodeServer(item)}:{getNodePort(item)})
-                    </span>
-                  </div>
-                  <div style="display: flex; gap: 8px;">
-                    <button
-                      class="rule-move"
-                      onclick={() => openEditOutbound(idx)}
-                      title={$t('app.edit')}
-                      style="font-size: 12px;"
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      class="rule-del"
-                      onclick={() => removeOutbound(idx)}
-                      title={$t('app.delete')}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              {/each}
-
-              <!-- System / Subscription Outbounds (Read-Only) -->
-              {#each outboundDetails.filter((d) => ['direct', 'block', 'dns-out'].includes(d.tag) || subscriptionOutbounds.some((s) => s.tag === d.tag)) as item}
-                <div
-                  class="card tag-card"
-                  style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; opacity: 0.75; background: var(--bg-elevated);"
-                >
-                  <div>
-                    <span class="badge badge-tag" style="background: var(--bg-surface-active);"
-                      >{item.tag}</span
-                    >
-                    {#if item.server}
-                      <span
-                        style="font-size: 0.75rem; color: var(--fg-secondary); margin-left: 8px;"
-                      >
-                        ({item.protocol} &bull; {item.server})
-                      </span>
-                    {/if}
-                  </div>
-                  <span class="tag-desc" style="font-size: 0.8125rem; color: var(--fg-secondary);">
-                    {item.tag === 'direct' ? $t('xray.direct_freedom') : ''}
-                    {item.tag === 'block' ? $t('xray.block_blackhole') : ''}
-                    {item.tag === 'dns-out' ? $t('xray.dns_requests') : ''}
-                    {!['direct', 'block', 'dns-out'].includes(item.tag)
-                      ? $t('xray.subscription')
-                      : ''}
-                  </span>
-                </div>
-              {/each}
-            </div>
-
-            <div style="margin-top: 12px;">
-              <button class="add-btn btn-secondary" onclick={openAddOutbound} type="button">
-                + {$t('xray.add_outbound_manual')}
-              </button>
-            </div>
-
-            <Modal
-              isOpen={showOutboundForm}
-              title={editingOutboundIndex !== null
-                ? $t('xray.edit_outbound_title', { tag: outboundForm.tag || 'outbound' })
-                : $t('xray.add_outbound_title')}
-              onclose={() => (showOutboundForm = false)}
-            >
-              <div
-                class="modal-form-card"
-                style="display: flex; flex-direction: column; gap: 12px;"
-              >
-                <div class="form-row">
-                  <label class="form-label" for="outbound-tag">{$t('xray.tag_name')} *</label>
-                  <input
-                    id="outbound-tag"
-                    class="form-input"
-                    bind:value={outboundForm.tag}
-                    placeholder="PROXY"
-                  />
-                </div>
-                <div class="form-row">
-                  <label class="form-label" for="outbound-protocol">{$t('xray.protocol')}</label>
-                  <Select
-                    id="outbound-protocol"
-                    class="form-select"
-                    bind:value={outboundForm.protocol}
-                  >
-                    <option value="vless">VLESS</option>
-                    <option value="vmess">VMess</option>
-                    <option value="shadowsocks">Shadowsocks</option>
-                    <option value="wireguard">WireGuard</option>
-                  </Select>
-                </div>
-
-                <!-- Protocol specific fields -->
-                {#if outboundForm.protocol === 'vless' || outboundForm.protocol === 'vmess'}
-                  <div class="form-row2">
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-address"
-                        >{$t('xray.server_address')} *</label
-                      >
-                      <input
-                        id="outbound-address"
-                        class="form-input"
-                        bind:value={outboundForm.address}
-                        placeholder="server.com"
-                      />
-                    </div>
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-port">{$t('xray.port')} *</label>
-                      <input
-                        id="outbound-port"
-                        class="form-input"
-                        type="number"
-                        bind:value={outboundForm.port}
-                        min="1"
-                        max="65535"
-                      />
-                    </div>
-                  </div>
-                  <div class="form-row">
-                    <label class="form-label" for="outbound-uuid">{$t('xray.uuid_label')} *</label>
-                    <div class="input-with-btn">
-                      <input
-                        id="outbound-uuid"
-                        class="form-input"
-                        bind:value={outboundForm.uuid}
-                        placeholder="uuid"
-                      />
-                      <button
-                        class="btn btn-secondary btn-inset"
-                        onclick={generateUUID}
-                        disabled={generatingUUID}
-                        title={$t('app.generate')}
-                        aria-label={$t('app.generate')}
-                        data-testid="outbound-uuid-generate"
-                        type="button"
-                      >
-                        {#if generatingUUID}
-                          <span
-                            class="spinner"
-                            style="--spinner-size: 14px; --spinner-track: currentColor; --spinner-color: transparent;"
-                          ></span>
-                        {:else}
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            aria-hidden="true"
-                          >
-                            <polyline points="23 4 23 10 17 10" />
-                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                          </svg>
-                        {/if}
-                      </button>
-                    </div>
-                  </div>
-
-                  {#if outboundForm.protocol === 'vless'}
-                    <div class="form-row">
-                      <label class="form-label" for="outbound-flow">{$t('xray.flow')}</label>
-                      <Select id="outbound-flow" class="form-select" bind:value={outboundForm.flow}>
-                        <option value="">{$t('app.none')}</option>
-                        <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                      </Select>
-                    </div>
-                  {:else if outboundForm.protocol === 'vmess'}
-                    <div class="form-row2">
-                      <div class="form-col">
-                        <label class="form-label" for="outbound-cipher">{$t('xray.cipher')}</label>
-                        <Select
-                          id="outbound-cipher"
-                          class="form-select"
-                          bind:value={outboundForm.cipher}
-                        >
-                          <option value="auto">auto</option>
-                          <option value="aes-128-gcm">aes-128-gcm</option>
-                          <option value="chacha20-poly1305">chacha20-poly1305</option>
-                          <option value="none">none</option>
-                        </Select>
-                      </div>
-                      <div class="form-col">
-                        <label class="form-label" for="outbound-alterid">AlterID</label>
-                        <input
-                          id="outbound-alterid"
-                          class="form-input"
-                          type="number"
-                          bind:value={outboundForm.alterId}
-                          min="0"
-                        />
-                      </div>
-                    </div>
-                  {/if}
-
-                  <!-- Security Settings -->
-                  <div class="form-row2">
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-security">{$t('xray.security')}</label
-                      >
-                      <Select
-                        id="outbound-security"
-                        class="form-select"
-                        bind:value={outboundForm.security}
-                      >
-                        <option value="none">none</option>
-                        <option value="tls">TLS</option>
-                        {#if outboundForm.protocol === 'vless'}
-                          <option value="reality">REALITY</option>
-                        {/if}
-                      </Select>
-                    </div>
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-sni">SNI (ServerName)</label>
-                      <input
-                        id="outbound-sni"
-                        class="form-input"
-                        bind:value={outboundForm.sni}
-                        placeholder="yahoo.com"
-                      />
-                    </div>
-                  </div>
-
-                  {#if outboundForm.security === 'reality' || outboundForm.security === 'tls'}
-                    <div
-                      style="margin-bottom: 12px; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;"
-                    >
-                      {#if outboundForm.security === 'reality'}
-                        <button
-                          type="button"
-                          class="btn btn-secondary btn-sm"
-                          onclick={generateRealityKeys}
-                          disabled={generatingRealityKeys}
-                        >
-                          {generatingRealityKeys
-                            ? $t('xray.generating')
-                            : $t('xray.generate_reality_keys')}
-                        </button>
-                      {/if}
-                      <button
-                        type="button"
-                        class="btn btn-secondary btn-sm"
-                        data-testid="tls-ping-btn"
-                        onclick={runTLSPing}
-                        disabled={tlsPingRunning || !outboundForm.address.trim()}
-                        title={$t('xray.tls_ping.hint')}
-                      >
-                        {tlsPingRunning ? $t('xray.tls_ping.running') : $t('xray.tls_ping.button')}
-                      </button>
-                    </div>
-
-                    {#if tlsPingError}
-                      <div
-                        class="alert alert-error"
-                        data-testid="tls-ping-error"
-                        style="margin-bottom: 12px;"
-                      >
-                        {tlsPingError}
-                      </div>
-                    {/if}
-
-                    {#if tlsPingResult}
-                      <div class="card tls-ping-result" data-testid="tls-ping-result">
-                        <div class="tls-ping-head">
-                          <span class="tls-ping-title">{$t('xray.tls_ping.title')}</span>
-                          {#if tlsPingResult.ok}
-                            <span class="badge badge-tag badge-direct"
-                              >OK ({tlsPingResult.handshake_ms}ms)</span
-                            >
-                          {:else}
-                            <span class="badge badge-tag badge-block">FAIL</span>
-                          {/if}
-                        </div>
-
-                        {#if !tlsPingResult.ok && tlsPingResult.error}
-                          <div class="text-danger tls-ping-failure" data-testid="tls-ping-failure">
-                            {tlsPingResult.error}
-                          </div>
-                        {/if}
-
-                        {#if tlsPingResult.ok}
-                          <div class="tls-grid">
-                            <div>
-                              <span class="text-muted">{$t('xray.tls_ping.version')}:</span>
-                              <span data-testid="tls-ping-version"
-                                >{tlsPingResult.tls_version || '—'}</span
-                              >
-                            </div>
-                            <div>
-                              <span class="text-muted">{$t('xray.tls_ping.alpn')}:</span>
-                              <span data-testid="tls-ping-alpn">{tlsPingResult.alpn || '—'}</span>
-                            </div>
-                            <div>
-                              <span class="text-muted">{$t('xray.tls_ping.cipher')}:</span>
-                              <span data-testid="tls-ping-cipher"
-                                >{tlsPingResult.cipher_suite || '—'}</span
-                              >
-                            </div>
-                            <div>
-                              <span class="text-muted">{$t('xray.tls_ping.peer_cn')}:</span>
-                              <span data-testid="tls-ping-cn">{tlsPingResult.peer_cn || '—'}</span>
-                            </div>
-                            <div>
-                              <span class="text-muted">{$t('xray.tls_ping.expires')}:</span>
-                              <span data-testid="tls-ping-expires"
-                                >{tlsPingResult.not_after || '—'}</span
-                              >
-                            </div>
-                            <div>
-                              <span class="text-muted">{$t('xray.tls_ping.days_left')}:</span>
-                              {#if tlsPingResult.days_until_expiry !== undefined}
-                                <span
-                                  class="badge badge-tag"
-                                  class:badge-block={tlsPingResult.days_until_expiry < 14}
-                                  class:badge-direct={tlsPingResult.days_until_expiry >= 14}
-                                  data-testid="tls-ping-days"
-                                >
-                                  {tlsPingResult.days_until_expiry}
-                                </span>
-                              {:else}
-                                <span>—</span>
-                              {/if}
-                            </div>
-                          </div>
-                          {#if tlsPingResult.dns_names && tlsPingResult.dns_names.length > 0}
-                            <div class="tls-ping-dns">
-                              <span class="text-muted">{$t('xray.tls_ping.dns_names')}:</span>
-                              <span class="dns-value">{tlsPingResult.dns_names.join(', ')}</span>
-                            </div>
-                          {/if}
-                        {/if}
-                      </div>
-                    {/if}
-
-                    {#if outboundForm.security === 'reality'}
-                      <div class="form-row2">
-                        <div class="form-col">
-                          <label class="form-label" for="outbound-pubkey"
-                            >{$t('xray.reality_public_key')}</label
-                          >
-                          <input
-                            id="outbound-pubkey"
-                            class="form-input"
-                            bind:value={outboundForm.publicKey}
-                            placeholder="base64"
-                          />
-                        </div>
-                        <div class="form-col">
-                          <label class="form-label" for="outbound-shortid"
-                            >{$t('xray.reality_short_id')}</label
-                          >
-                          <input
-                            id="outbound-shortid"
-                            class="form-input"
-                            bind:value={outboundForm.shortId}
-                            placeholder="0123abcd"
-                          />
-                        </div>
-                      </div>
-                      <div class="form-row">
-                        <label class="form-label" for="outbound-fingerprint"
-                          >{$t('xray.reality_fingerprint')}</label
-                        >
-                        <Select
-                          id="outbound-fingerprint"
-                          class="form-select"
-                          bind:value={outboundForm.fingerprint}
-                        >
-                          <option value="chrome">chrome</option>
-                          <option value="firefox">firefox</option>
-                          <option value="safari">safari</option>
-                          <option value="edge">edge</option>
-                          <option value="qq">qq</option>
-                        </Select>
-                      </div>
-                    {/if}
-                  {/if}
-
-                  <!-- Transport Settings -->
-                  <div class="form-row2">
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-network"
-                        >{$t('xray.network_transport')}</label
-                      >
-                      <Select
-                        id="outbound-network"
-                        class="form-select"
-                        bind:value={outboundForm.network}
-                      >
-                        <option value="tcp">tcp</option>
-                        <option value="ws">websocket (ws)</option>
-                        <option value="grpc">gRPC</option>
-                        <option value="xhttp">xhttp (SplitHTTP)</option>
-                      </Select>
-                    </div>
-                    <div class="form-col">
-                      {#if outboundForm.network === 'ws'}
-                        <label class="form-label" for="outbound-path">{$t('xray.ws_path')}</label>
-                        <input
-                          id="outbound-path"
-                          class="form-input"
-                          bind:value={outboundForm.path}
-                          placeholder="/"
-                        />
-                      {:else}
-                        <label class="form-label" for="outbound-service"
-                          >{$t('xray.grpc_service_name')}</label
-                        >
-                        <input
-                          id="outbound-service"
-                          class="form-input"
-                          bind:value={outboundForm.serviceName}
-                          placeholder="grpc-service"
-                        />
-                      {/if}
-                    </div>
-                  </div>
-                {:else if outboundForm.protocol === 'shadowsocks'}
-                  <div class="form-row2">
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-ss-address"
-                        >{$t('xray.server_address')} *</label
-                      >
-                      <input
-                        id="outbound-ss-address"
-                        class="form-input"
-                        bind:value={outboundForm.address}
-                        placeholder="server.com"
-                      />
-                    </div>
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-ss-port">{$t('xray.port')} *</label>
-                      <input
-                        id="outbound-ss-port"
-                        class="form-input"
-                        type="number"
-                        bind:value={outboundForm.port}
-                        min="1"
-                        max="65535"
-                      />
-                    </div>
-                  </div>
-                  <div class="form-row2">
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-ss-cipher">{$t('xray.cipher')}</label>
-                      <Select
-                        id="outbound-ss-cipher"
-                        class="form-select"
-                        bind:value={outboundForm.cipher}
-                      >
-                        {#each shadowsocksCiphers as c}
-                          <option value={c}>{c}</option>
-                        {/each}
-                      </Select>
-                    </div>
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-ss-password"
-                        >{$t('xray.password_key')} *</label
-                      >
-                      <div class="input-with-btn">
-                        <input
-                          id="outbound-ss-password"
-                          class="form-input"
-                          bind:value={outboundForm.shadowsocksPassword}
-                          placeholder="base64"
-                        />
-                        {#if outboundForm.cipher.startsWith('2022-blake3')}
-                          <button
-                            class="btn btn-secondary btn-inset"
-                            onclick={() => {
-                              outboundForm.shadowsocksPassword = generateShadowsocksKey(
-                                outboundForm.cipher
-                              );
-                              showToast('success', $t('xray.key_generated'));
-                            }}
-                            title={$t('xray.generate_key')}
-                            aria-label={$t('xray.generate_key')}
-                            data-testid="outbound-ss-generate-key"
-                            type="button"
-                          >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"
-                              aria-hidden="true"
-                            >
-                              <polyline points="23 4 23 10 17 10" />
-                              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                            </svg>
-                          </button>
-                        {/if}
-                      </div>
-                    </div>
-                  </div>
-                {:else if outboundForm.protocol === 'wireguard'}
-                  {#if outboundForm.isAwgObfuscated}
-                    <div class="alert alert-warning awg-obfuscation-alert">
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        aria-hidden="true"
-                      >
-                        <path
-                          d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-                        />
-                        <line x1="12" y1="9" x2="12" y2="13" />
-                        <line x1="12" y1="17" x2="12.01" y2="17" />
-                      </svg>
-                      <span>{$t('xray.awg_warning')}</span>
-                    </div>
-                    {@const diff = analyzeAwgDiff(
-                      outboundForm.rawAwgOptions || {
-                        jc: 4,
-                        jmin: 40,
-                        jmax: 70,
-                        s1: 15,
-                        s2: 40,
-                        h1: 1000000001,
-                        h2: 1000000002,
-                        h3: 1000000003,
-                        h4: 1000000004
-                      },
-                      'xray'
-                    )}
-                    <div style="margin-bottom: 12px;">
-                      <AwgDiffCard {diff} targetKernel="xray" compact />
-                    </div>
-                  {/if}
-                  <div class="form-row2">
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-wg-endpoint"
-                        >{$t('xray.endpoint')} *</label
-                      >
-                      <input
-                        id="outbound-wg-endpoint"
-                        class="form-input"
-                        bind:value={outboundForm.endpoint}
-                        placeholder="server.com:51820"
-                      />
-                    </div>
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-wg-address"
-                        >{$t('xray.local_address')}</label
-                      >
-                      <input
-                        id="outbound-wg-address"
-                        class="form-input"
-                        bind:value={outboundForm.wireguardAddress}
-                        placeholder="10.0.0.2/32, fd00::2/128"
-                      />
-                    </div>
-                  </div>
-                  <div class="form-row2">
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-wg-secret-key"
-                        >{$t('xray.private_key')} *</label
-                      >
-                      <input
-                        id="outbound-wg-secret-key"
-                        class="form-input"
-                        bind:value={outboundForm.wireguardSecretKey}
-                        placeholder="base64"
-                      />
-                    </div>
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-wg-public-key"
-                        >{$t('xray.public_key')} *</label
-                      >
-                      <input
-                        id="outbound-wg-public-key"
-                        class="form-input"
-                        bind:value={outboundForm.wireguardPublicKey}
-                        placeholder="base64"
-                      />
-                    </div>
-                  </div>
-                  <div class="form-row2">
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-wg-psk"
-                        >{$t('xray.preshared_key')}</label
-                      >
-                      <input
-                        id="outbound-wg-psk"
-                        class="form-input"
-                        bind:value={outboundForm.wireguardPsk}
-                        placeholder="base64"
-                      />
-                    </div>
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-wg-allowed-ips"
-                        >{$t('xray.allowed_ips')}</label
-                      >
-                      <input
-                        id="outbound-wg-allowed-ips"
-                        class="form-input"
-                        bind:value={outboundForm.wireguardAllowedIPs}
-                        placeholder="0.0.0.0/0, ::/0"
-                      />
-                    </div>
-                  </div>
-                  <div class="form-row3">
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-wg-keepalive"
-                        >{$t('xray.keepalive')}</label
-                      >
-                      <input
-                        id="outbound-wg-keepalive"
-                        class="form-input"
-                        type="number"
-                        bind:value={outboundForm.wireguardKeepAlive}
-                        placeholder="25"
-                      />
-                    </div>
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-wg-mtu">{$t('xray.mtu')}</label>
-                      <input
-                        id="outbound-wg-mtu"
-                        class="form-input"
-                        type="number"
-                        bind:value={outboundForm.wireguardMtu}
-                        min="1200"
-                        max="1500"
-                        placeholder="1420"
-                      />
-                      {#if outboundForm.isAwgObfuscated}
-                        <div class="field-info-hint">
-                          {$t('proxies.awg_mtu_hint')}
-                        </div>
-                      {/if}
-                    </div>
-                    <div class="form-col">
-                      <label class="form-label" for="outbound-wg-reserved"
-                        >{$t('xray.reserved')}</label
-                      >
-                      <input
-                        id="outbound-wg-reserved"
-                        class="form-input"
-                        bind:value={outboundForm.wireguardReserved}
-                        placeholder="1, 2, 3"
-                      />
-                    </div>
-                  </div>
-                {/if}
-
-                <!-- Sockopt Section -->
-                <details class="sockopt-details">
-                  <summary class="sockopt-summary">
-                    <svg
-                      class="sockopt-summary-icon"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      aria-hidden="true"
-                    >
-                      <circle cx="12" cy="12" r="3" />
-                      <path
-                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-                      />
-                    </svg>
-                    <span>{$t('xray.sockopt_title')}</span>
-                  </summary>
-                  <div class="sockopt-body">
-                    <div class="form-row2">
-                      <div class="form-col">
-                        <label class="form-label" for="sockopt-mark">{$t('xray.mark')}</label>
-                        <input
-                          id="sockopt-mark"
-                          class="form-input"
-                          type="number"
-                          bind:value={outboundForm.sockoptMark}
-                          placeholder="e.g. 255"
-                        />
-                        <div class="form-hint">
-                          {$t('xray.sockopt_hint')}
-                        </div>
-                      </div>
-                      <div class="form-col">
-                        <label class="form-label" for="sockopt-keepalive"
-                          >{$t('xray.tcp_keepalive_interval')}</label
-                        >
-                        <input
-                          id="sockopt-keepalive"
-                          class="form-input"
-                          type="number"
-                          bind:value={outboundForm.sockoptTcpKeepAliveInterval}
-                          placeholder="seconds"
-                        />
-                      </div>
-                    </div>
-                    <div class="sockopt-checks">
-                      <label class="checkbox-container">
-                        <input type="checkbox" bind:checked={outboundForm.sockoptTcpFastOpen} />
-                        <span class="checkmark"></span>
-                        <span>{$t('xray.tcp_fast_open')}</span>
-                      </label>
-                      <label class="checkbox-container">
-                        <input type="checkbox" bind:checked={outboundForm.sockoptTcpMptcp} />
-                        <span class="checkmark"></span>
-                        <span>{$t('xray.tcp_mptcp')}</span>
-                      </label>
-                      <label class="checkbox-container">
-                        <input type="checkbox" bind:checked={outboundForm.sockoptTcpNoDelay} />
-                        <span class="checkmark"></span>
-                        <span>{$t('xray.tcp_nodelay')}</span>
-                      </label>
-                    </div>
-                  </div>
-                </details>
-
-                <!-- Dialer Proxy Section -->
-                <div class="form-row dialer-proxy-row">
-                  <label class="form-label" for="outbound-dialer-proxy">
-                    {$t('xray.dialer_proxy')}
-                  </label>
-                  <Select
-                    id="outbound-dialer-proxy"
-                    class="form-select"
-                    bind:value={outboundForm.dialerProxy}
-                  >
-                    <option value="">{$t('xray.dialer_none')}</option>
-                    {#each outboundDetails.filter((d) => !['direct', 'block', 'dns-out'].includes(d.tag) && d.tag !== outboundForm.tag.trim()) as o}
-                      <option value={o.tag}>{o.tag} ({o.protocol})</option>
-                    {/each}
-                  </Select>
-
-                  {#if outboundForm.dialerProxy}
-                    <div class="dialer-chain-preview">
-                      <span class="text-muted">{$t('xray.dialer_chain')}:</span>
-                      {#each dialerChainPreview.chain as node, idx}
-                        <span
-                          class="badge"
-                          class:badge-primary={idx === 0}
-                          class:badge-secondary={idx > 0 && node !== 'DIRECT'}
-                          class:badge-tag={node === 'DIRECT'}
-                        >
-                          {node}
-                        </span>
-                        {#if idx < dialerChainPreview.chain.length - 1}
-                          <span class="dialer-chain-sep" aria-hidden="true">→</span>
-                        {/if}
-                      {/each}
-                      {#if dialerChainPreview.hasCycle}
-                        <span class="badge badge-danger">
-                          {$t('xray.dialer_cycle_detected')}
-                        </span>
-                      {/if}
-                    </div>
-                  {/if}
-                </div>
-
-                <div class="form-actions form-actions--sticky">
-                  <button
-                    class="btn btn-secondary"
-                    onclick={() => (showOutboundForm = false)}
-                    type="button"
-                  >
-                    {$t('app.cancel')}
-                  </button>
-                  <button class="btn btn-primary" onclick={saveOutbound} type="button">
-                    {editingOutboundIndex !== null ? $t('app.save') : $t('app.add')}
-                  </button>
-                </div>
-              </div>
-            </Modal>
-          </div>
-        {/if}
-
-        <!-- LOG SECTION -->
-        {#if activeSection === 'log'}
-          <div class="sec-body">
-            <div class="section-title">{$t('editor.xray_section_log')}</div>
-
-            <div class="form-row">
-              <label class="form-label" for="log-level">{$t('xray.loglevel')}</label>
-              <Select
-                id="log-level"
-                class="form-select"
-                bind:value={logConfig.loglevel}
-                onchange={() => (isDirty = true)}
-              >
-                <option value="none">none</option>
-                <option value="error">error</option>
-                <option value="warning">warning</option>
-                <option value="info">info</option>
-                <option value="debug">debug</option>
-              </Select>
-            </div>
-
-            <div class="form-row" style="margin-top: 8px;">
-              <label class="checkbox-container">
-                <input
-                  type="checkbox"
-                  bind:checked={logConfig.dnsLog}
-                  onchange={() => (isDirty = true)}
-                />
-                <span class="checkmark"></span>
-                {$t('xray.enable_dns_logging')}
-              </label>
-            </div>
-
-            {#if xrayFiles['01_log.json']?.log?.access || xrayFiles['01_log.json']?.log?.error}
-              <div class="logs-paths card" style="margin-top: 12px; padding: 12px;">
-                <h4 style="margin: 0 0 8px 0; font-size: 0.875rem;">
-                  {$t('xray.logs_paths')}
-                </h4>
-                {#if xrayFiles['01_log.json']?.log?.access}
-                  <div style="font-size: 0.8125rem;">
-                    <strong>Access:</strong> <code>{xrayFiles['01_log.json'].log.access}</code>
-                  </div>
-                {/if}
-                {#if xrayFiles['01_log.json']?.log?.error}
-                  <div style="font-size: 0.8125rem; margin-top: 4px;">
-                    <strong>Error:</strong> <code>{xrayFiles['01_log.json'].log.error}</code>
-                  </div>
-                {/if}
-              </div>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- POLICY SECTION -->
-        {#if activeSection === 'policy'}
-          <div class="sec-body">
-            <div class="section-title">{$t('editor.xray_section_policy')}</div>
-
-            <div class="card" style="padding: 16px;">
-              <h4 style="margin: 0 0 12px 0;">Level 0 (Default)</h4>
-              <div class="form-row2">
-                <div class="form-col">
-                  <label class="form-label" for="policy-handshake">Handshake</label>
-                  <input
-                    id="policy-handshake"
-                    class="form-input"
-                    type="number"
-                    bind:value={policyConfig.levels['0'].handshake}
-                    oninput={() => (isDirty = true)}
-                  />
-                </div>
-                <div class="form-col">
-                  <label class="form-label" for="policy-connidle">ConnIdle</label>
-                  <input
-                    id="policy-connidle"
-                    class="form-input"
-                    type="number"
-                    bind:value={policyConfig.levels['0'].connIdle}
-                    oninput={() => (isDirty = true)}
-                  />
-                </div>
-              </div>
-              <div class="form-row2" style="margin-top: 12px;">
-                <div class="form-col">
-                  <label class="form-label" for="policy-uplink">UplinkOnly</label>
-                  <input
-                    id="policy-uplink"
-                    class="form-input"
-                    type="number"
-                    bind:value={policyConfig.levels['0'].uplinkOnly}
-                    oninput={() => (isDirty = true)}
-                  />
-                </div>
-                <div class="form-col">
-                  <label class="form-label" for="policy-downlink">DownlinkOnly</label>
-                  <input
-                    id="policy-downlink"
-                    class="form-input"
-                    type="number"
-                    bind:value={policyConfig.levels['0'].downlinkOnly}
-                    oninput={() => (isDirty = true)}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div class="card" style="padding: 16px; margin-top: 12px;">
-              <h4 style="margin: 0 0 12px 0;">System</h4>
-              <div class="form-row">
-                <label class="checkbox-container">
-                  <input
-                    type="checkbox"
-                    bind:checked={policyConfig.system.statsInboundUplink}
-                    onchange={() => (isDirty = true)}
-                  />
-                  <span class="checkmark"></span>
-                  Stats Inbound Uplink
-                </label>
-              </div>
-              <div class="form-row" style="margin-top: 8px;">
-                <label class="checkbox-container">
-                  <input
-                    type="checkbox"
-                    bind:checked={policyConfig.system.statsInboundDownlink}
-                    onchange={() => (isDirty = true)}
-                  />
-                  <span class="checkmark"></span>
-                  Stats Inbound Downlink
-                </label>
-              </div>
-            </div>
-          </div>
+          <XraySectionRouting
+            bind:routingConfig
+            bind:routingRules
+            {outboundTags}
+            isXrayActive={$capabilities?.active_kernel === 'xray'}
+            bind:testRouteForm
+            {testRouteRunning}
+            {testRouteResult}
+            {testRouteError}
+            {restartingLogger}
+            onRunTestRoute={runTestRoute}
+            onRestartLogger={restartLogger}
+            onchange={() => (isDirty = true)}
+          />
+        {:else if activeSection === 'inbounds'}
+          <XraySectionInbounds bind:inbounds onchange={() => (isDirty = true)} />
+        {:else if activeSection === 'dns'}
+          <XraySectionDns
+            bind:dnsConfig
+            bind:dnsOverVless
+            xkeenDns={$capabilities?.xkeen_dns}
+            {dnsRedirectLoading}
+            onEnableDnsRedirect={enableDNSRedirect}
+            onchange={() => (isDirty = true)}
+          />
+        {:else if activeSection === 'outbounds'}
+          <XraySectionOutbounds
+            bind:customOutbounds
+            {subscriptionOutbounds}
+            {outboundDetails}
+            {outboundTags}
+            onReloadTags={loadXrayOutboundTags}
+            onchange={() => (isDirty = true)}
+          />
+        {:else if activeSection === 'log'}
+          <XraySectionLog
+            bind:logConfig
+            accessPath={xrayFiles['01_log.json']?.log?.access}
+            errorPath={xrayFiles['01_log.json']?.log?.error}
+            onchange={() => (isDirty = true)}
+          />
+        {:else if activeSection === 'policy'}
+          <XraySectionPolicy bind:policyConfig onchange={() => (isDirty = true)} />
         {/if}
       </div>
 
+      <!-- Right Panel: ConstructorPreview with Tabs -->
       {#if showPreviewPane}
-        <!-- Resizable Splitter (BUILD-01) -->
-        <button
-          type="button"
-          class="xray-splitter"
-          aria-label={$t('xray.resize_preview')}
-          tabindex="-1"
-          onpointerdown={startResizePreview}
-          onmousedown={startResizePreview}
-        ></button>
-
-        <!-- Right Panel (Tabbed JSON Preview) (BUILD-03) -->
-        <div class="gen-right" style="width: {previewWidth}px;">
-          <div class="preview-card">
-            <!-- File Tabs -->
-            <div class="preview-tabs-bar">
-              {#each [['05_routing.json', '05_routing.json'], ['04_outbounds.json', '04_outbounds.json'], ['02_dns.json', '02_dns.json'], ['01_log.json', '01_log.json'], ['03_inbounds.json', '03_inbounds.json'], ['06_policy.json', '06_policy.json'], ['all', $t('xray.all_files')]] as [tabId, tabTitle]}
-                <button
-                  type="button"
-                  class="preview-tab-btn"
-                  class:active={activePreviewTab === tabId}
-                  onclick={() => (activePreviewTab = tabId as any)}
-                >
-                  {tabTitle}
-                </button>
-              {/each}
-            </div>
-
-            <!-- Preview Toolbar -->
-            <div class="preview-toolbar">
-              <span class="preview-meta-size">{activeFileSize}</span>
-              <div class="preview-tools-right">
-                <button
-                  type="button"
-                  class="btn btn-sm btn-secondary btn-tool-action"
-                  onclick={copyPreviewJson}
-                  title={$t('xray.copy_json')}
-                >
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    ><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
-                      d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                    /></svg
-                  >
-                  <span>{$t(copyFeedback ? 'xray.copied' : 'xray.copy_json')}</span>
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-secondary btn-tool-action"
-                  onclick={downloadPreviewJson}
-                  title={$t('xray.download_json')}
-                >
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-                      points="7 10 12 15 17 10"
-                    /><line x1="12" y1="15" x2="12" y2="3" /></svg
-                  >
-                  <span>{$t('xray.download_json')}</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- JSON Pre Panel -->
-            <pre
-              class="constructor-preview-panel"
-              data-testid="xray-json-preview">{activePreviewText}</pre>
-          </div>
-
+        <ConstructorPreview
+          content={activePreviewText}
+          language="json"
+          storageKey="xray_constructor_preview_width"
+          isOpen={showPreviewPane}
+          onClose={() => (showPreviewPane = false)}
+          tabs={previewTabs}
+          activeTab={activePreviewTab}
+          onTabChange={(tabId) => (activePreviewTab = tabId)}
+          testId="xray-json-preview"
+        >
           {#if validationError}
             <div
               class="validation-error-block"
               role="alert"
               aria-live="assertive"
-              style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
+              style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger, #ef4444); border-radius: var(--radius-md); color: var(--danger, #ef4444); font-size: 13px;"
             >
               <div style="font-weight: bold; margin-bottom: 6px;">
                 {$t('editor.validation_failed')}
@@ -4534,58 +769,30 @@
               >
                 {parseValidationError(validationError, $currentLang)}
               </div>
-              <details>
-                <summary style="cursor: pointer; font-size: 12px; opacity: 0.8; user-select: none;"
-                  >{$t('editor.validation_details')}</summary
-                >
-                <pre
-                  style="margin: 6px 0 0 0; white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 12px; opacity: 0.9; max-height: 200px; overflow-y: auto;">{validationError}</pre>
-              </details>
             </div>
           {/if}
 
           {#if embedded}
             <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
               <button class="btn btn-secondary" style="flex: 1;" onclick={openInEditor}>
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  style="margin-right:5px"
-                  ><path d="M12 20h9" /><path
-                    d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
-                  /></svg
-                >
                 {#if selectedFile}
                   {$t('mihomo.insert_editor')}
                 {:else}
                   {$t('mihomo.open_editor')}
                 {/if}
               </button>
-              {#if canUndo}
-                <button
-                  class="btn btn-secondary"
-                  onclick={handleUndo}
-                  disabled={applyLoading}
-                  style="flex: 1;"
-                >
-                  {$t('editor.undo')}
-                </button>
-              {/if}
               <button
                 class="btn btn-primary"
                 data-testid="apply-changes-btn"
-                onclick={handleApplyChanges}
+                onclick={promptApplyChanges}
+                disabled={applyLoading}
                 style="flex: 1;"
               >
-                {$t('mihomo.apply_changes')}
+                {applyLoading ? $t('editor.saving') : $t('mihomo.apply_changes')}
               </button>
             </div>
           {/if}
-        </div>
+        </ConstructorPreview>
       {/if}
     </div>
   {/if}
@@ -4607,7 +814,7 @@
             <code>{file.name}</code>:
             <span
               class="badge"
-              style="background-color: var(--warning-soft); color: var(--warning);"
+              style="background-color: var(--warning-soft, rgba(245, 158, 11, 0.15)); color: var(--warning, #f59e0b);"
             >
               {$t('xray.sections_modified', { count: file.changesCount })}
             </span>
@@ -4622,293 +829,21 @@
     </p>
   </div>
   <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
-    <button class="btn btn-secondary" onclick={() => (showApplyConfirm = false)}>
+    <button type="button" class="btn btn-secondary" onclick={() => (showApplyConfirm = false)}>
       {$t('app.cancel')}
     </button>
-    <button class="btn btn-primary" onclick={handleApplyChanges} disabled={applyLoading}>
+    <button
+      type="button"
+      class="btn btn-primary"
+      onclick={handleApplyChanges}
+      disabled={applyLoading}
+    >
       {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
     </button>
   </div>
 </Modal>
 
-<Modal isOpen={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
-  <div style="display: flex; flex-direction: column; gap: 16px;">
-    {#if importErrorMsg}
-      <div
-        class="error-msg"
-        id="xray-import-error"
-        role="alert"
-        style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
-      >
-        {importErrorMsg}
-      </div>
-    {/if}
-
-    {#if importStep === 1}
-      <div
-        class="import-source-tabs"
-        style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;"
-      >
-        <button
-          type="button"
-          class="btn btn-xs"
-          class:btn-primary={importSource === 'links'}
-          class:btn-secondary={importSource !== 'links'}
-          onclick={() => (importSource = 'links')}
-        >
-          {$t('subscr.import_source_links')}
-        </button>
-        <button
-          type="button"
-          class="btn btn-xs"
-          class:btn-primary={importSource === 'file'}
-          class:btn-secondary={importSource !== 'file'}
-          onclick={() => (importSource = 'file')}
-        >
-          {$t('subscr.import_source_file')}
-        </button>
-        <button
-          type="button"
-          class="btn btn-xs"
-          class:btn-primary={importSource === 'clipboard'}
-          class:btn-secondary={importSource !== 'clipboard'}
-          onclick={() => (importSource = 'clipboard')}
-        >
-          {$t('subscr.import_source_clipboard')}
-        </button>
-      </div>
-
-      {#if importSource === 'links'}
-        <div class="form-group">
-          <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
-          <textarea
-            id="import-link"
-            class="input textarea-link"
-            aria-invalid={!!importErrorMsg}
-            aria-describedby={importErrorMsg ? 'xray-import-error' : undefined}
-            bind:value={importLink}
-            placeholder={$t('subscr.import_link_placeholder')}
-            rows="4"
-            style="resize: none; font-family: var(--font-family-mono); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; color: var(--fg-primary);"
-          ></textarea>
-        </div>
-      {:else if importSource === 'file'}
-        <div
-          class="conf-dropzone"
-          class:dragging={isDraggingFile}
-          role="region"
-          aria-label={$t('app.dropzone')}
-          ondragover={(e) => {
-            e.preventDefault();
-            isDraggingFile = true;
-          }}
-          ondragleave={() => {
-            isDraggingFile = false;
-          }}
-          ondrop={(e) => {
-            e.preventDefault();
-            isDraggingFile = false;
-            const f = e.dataTransfer?.files?.[0];
-            if (f) handleConfigFile(f);
-          }}
-        >
-          <div style="font-size: 24px;">📄</div>
-          <div style="font-size: 13px; color: var(--fg-secondary);">
-            {#if loadedFileName}
-              <span style="color: var(--primary); font-weight: 600;">{loadedFileName}</span>
-              <span> ({$t('subscr.import_file_loaded')})</span>
-            {:else}
-              {$t('subscr.import_drop_or_select')}
-            {/if}
-          </div>
-          <input
-            type="file"
-            accept=".conf,.txt"
-            class="file-picker-input"
-            onchange={(e) => {
-              const f = e.currentTarget.files?.[0];
-              if (f) handleConfigFile(f);
-            }}
-          />
-        </div>
-      {:else if importSource === 'clipboard'}
-        <div
-          style="padding: 24px; text-align: center; background: var(--bg-elevated); border: 1px dashed var(--border); border-radius: var(--radius);"
-        >
-          <p style="font-size: 13px; color: var(--fg-secondary); margin-bottom: 12px;">
-            {$t('subscr.import_clipboard_desc')}
-          </p>
-          <button
-            type="button"
-            class="btn btn-primary"
-            onclick={async () => {
-              try {
-                const text = await navigator.clipboard.readText();
-                if (!text.trim()) {
-                  importErrorMsg = $t('subscr.import_clipboard_empty');
-                  return;
-                }
-                importLink = text;
-                parseImportLink();
-              } catch (err: any) {
-                importErrorMsg = err.message || 'Clipboard access denied';
-              }
-            }}
-          >
-            📋 {$t('subscr.import_source_clipboard')}
-          </button>
-        </div>
-      {/if}
-    {:else if importStep === 2 && importNodes.length > 0}
-      <div class="preview-section">
-        <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
-          {$t('subscr.import_preview_title')}
-        </h3>
-        <div
-          class="preview-list"
-          style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;"
-        >
-          {#each importNodes as item, idx}
-            {#if item.rowError}
-              <div
-                class="preview-item-card"
-                style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
-              >
-                <button
-                  type="button"
-                  onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
-                  style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                  aria-label={$t('app.remove')}>✕</button
-                >
-                <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
-                  <strong>{$t('app.error')}:</strong>
-                  {item.rowError}
-                </div>
-                <div
-                  style="font-size: var(--font-size-xs); color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
-                  title={item.link}
-                >
-                  {item.link}
-                </div>
-              </div>
-            {:else}
-              <div
-                class="preview-item-card"
-                style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
-              >
-                <button
-                  type="button"
-                  onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
-                  style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                  aria-label={$t('app.remove')}>✕</button
-                >
-                <div
-                  style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
-                >
-                  <span
-                    ><strong style="color: var(--fg-primary);">{item.outbound?.protocol}</strong> · {getNodeServer(
-                      item.outbound
-                    )}:{getNodePort(item.outbound)}</span
-                  >
-                </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <label
-                    class="form-label"
-                    style="margin: 0; font-size: 12px; flex-shrink: 0;"
-                    for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label
-                  >
-                  <input
-                    id="import-tag-{idx}"
-                    type="text"
-                    class="input"
-                    bind:value={item.tag}
-                    style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; color: var(--fg-primary); width: auto;"
-                  />
-                </div>
-                {#if item.outbound?.protocol === 'wireguard' || item.outbound?.settings?.amneziaWgOption || item.outbound?.amneziaWgOption}
-                  <div
-                    class="alert alert-warning"
-                    style="margin-top: 6px; font-size: var(--font-size-xs); padding: 6px 10px; border-radius: var(--radius-sm);"
-                  >
-                    {$t('subscr.import_xray_awg_warning')}
-                  </div>
-                {/if}
-              </div>
-            {/if}
-          {/each}
-        </div>
-      </div>
-    {/if}
-
-    <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
-      <button class="btn btn-secondary" onclick={closeImportModal} disabled={importLoading}>
-        {$t('app.cancel')}
-      </button>
-      {#if importStep === 1}
-        <button
-          class="btn btn-primary"
-          onclick={parseImportLink}
-          disabled={!importLink.trim() || importLoading}
-        >
-          {#if importLoading}
-            <span class="spinner-xs" style="margin-right: 6px;"></span>
-          {/if}
-          {$t('subscr.import_btn_parse')}
-        </button>
-      {:else}
-        <button
-          class="btn btn-primary"
-          onclick={confirmImportNode}
-          disabled={importLoading ||
-            importNodes.length === 0 ||
-            importNodes.some((n) => n.rowError)}
-        >
-          {#if importLoading}
-            <span class="spinner-xs" style="margin-right: 6px;"></span>
-          {/if}
-          {$t('mihomo.import_count', { count: importNodes.length })}
-        </button>
-      {/if}
-    </div>
-  </div>
-</Modal>
-
 <style>
-  .conf-dropzone {
-    border: 2px dashed var(--border);
-    border-radius: var(--radius);
-    padding: 24px 16px;
-    text-align: center;
-    background: var(--bg-elevated);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-    transition:
-      border-color 0.2s ease,
-      background 0.2s ease;
-  }
-  .conf-dropzone.dragging {
-    border-color: var(--primary);
-    background: rgba(41, 194, 240, 0.08);
-  }
-
-  .file-picker-input::file-selector-button {
-    background: var(--bg-elevated);
-    color: var(--fg-primary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 6px 12px;
-    font-size: 12px;
-    cursor: pointer;
-    margin-right: 8px;
-    transition: background 0.15s ease;
-  }
-  .file-picker-input::file-selector-button:hover {
-    background: var(--border);
-  }
-
   .container {
     display: flex;
     flex-direction: column;
@@ -4925,14 +860,14 @@
   }
 
   .constructor-title {
-    font-size: var(--font-size-xl);
+    font-size: var(--font-size-xl, 1.25rem);
     font-weight: 600;
     margin: 0 0 4px 0;
     color: var(--fg-primary);
   }
 
   .constructor-sub {
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-sm, 0.8125rem);
     color: var(--fg-secondary);
     margin: 0;
   }
@@ -4941,79 +876,39 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: var(--spacing-3);
-    padding-bottom: var(--spacing-2);
-    border-bottom: 1px solid var(--border);
+    margin-bottom: var(--spacing-3, 12px);
+    padding-bottom: var(--spacing-2, 8px);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .embedded-title-tag {
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-sm, 0.8125rem);
     color: var(--fg-primary);
   }
 
   .constructor-header-actions {
     display: flex;
-    gap: var(--spacing-2);
+    gap: var(--spacing-2, 8px);
   }
 
   .gen-layout {
     display: flex;
     flex-direction: row;
-    gap: 0;
+    gap: 16px;
     align-items: stretch;
     min-height: 520px;
-  }
-
-  .gen-layout.resizing {
-    user-select: none;
-    cursor: col-resize;
   }
 
   .gen-left {
     flex: 1;
     min-width: 0;
-    padding-right: var(--spacing-3);
-  }
-
-  .xray-splitter {
-    width: 8px;
-    background: transparent;
-    border: none;
-    cursor: col-resize;
-    position: relative;
-    padding: 0;
-    margin: 0 4px;
-    flex-shrink: 0;
-    transition: background-color var(--transition-fast);
-  }
-
-  .xray-splitter::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 3px;
-    width: 2px;
-    background: var(--border);
-    border-radius: 1px;
-    transition: background-color var(--transition-fast);
-  }
-
-  .xray-splitter:hover::after,
-  .gen-layout.resizing .xray-splitter::after {
-    background: var(--accent);
-    width: 3px;
+    display: flex;
+    flex-direction: column;
   }
 
   @media (max-width: 1024px) {
     .gen-layout {
       flex-direction: column;
-    }
-    .gen-left {
-      padding-right: 0;
-    }
-    .xray-splitter {
-      display: none;
     }
   }
 
@@ -5033,35 +928,33 @@
 
   .scenario-chip {
     padding: 4px 10px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
     border-radius: 12px;
     color: var(--fg-primary);
     font-size: 0.75rem;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    transition:
-      background-color var(--transition-fast),
-      border-color var(--transition-fast);
+    transition: all 0.15s ease;
   }
 
   .scenario-chip:hover {
-    background: var(--bg-surface-active);
-    border-color: var(--accent);
+    background: var(--bg-surface-hover);
+    border-color: var(--color-primary);
   }
 
   .scenario-chip.active {
-    background: color-mix(in srgb, var(--accent) 15%, transparent);
-    border-color: var(--accent);
-    color: var(--accent);
+    background: var(--color-primary-subtle, rgba(59, 130, 246, 0.15));
+    border-color: var(--color-primary);
+    color: var(--color-primary);
     font-weight: 600;
   }
 
   .preset-mod-badge {
     margin-left: 5px;
-    font-size: var(--font-size-xs);
-    color: var(--warning);
+    font-size: var(--font-size-xs, 0.6875rem);
+    color: var(--warning, #f59e0b);
     opacity: 0.9;
     font-style: italic;
   }
@@ -5075,9 +968,9 @@
 
   .sec-tabs {
     display: flex;
-    gap: var(--spacing-2);
-    border-bottom: 1px solid var(--border);
-    margin-bottom: var(--spacing-4);
+    gap: var(--spacing-2, 8px);
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: var(--spacing-4, 16px);
     overflow-x: auto;
     scrollbar-width: none;
   }
@@ -5092,7 +985,7 @@
     border: none;
     border-bottom: 2px solid transparent;
     color: var(--fg-secondary);
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-sm, 0.8125rem);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -5103,745 +996,17 @@
   }
 
   .sec-tab.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
     font-weight: 500;
   }
 
   .sec-count {
-    background: var(--bg-elevated);
+    background: var(--bg-surface-active);
     color: var(--fg-primary);
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-xs, 0.6875rem);
     padding: 1px 5px;
     border-radius: 10px;
     font-weight: 600;
-  }
-
-  .sec-body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-4);
-  }
-
-  .section-title {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--fg-primary);
-    margin-bottom: var(--spacing-2);
-  }
-
-  .routing-rules-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-2);
-    max-height: 480px;
-    overflow-y: auto;
-    scrollbar-width: thin;
-  }
-
-  .rule-card {
-    padding: 10px 12px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    transition:
-      border-color var(--transition-fast),
-      opacity var(--transition-fast),
-      background-color var(--transition-fast);
-  }
-
-  .rule-card.rule-disabled {
-    opacity: 0.55;
-    background: var(--bg-elevated);
-  }
-
-  .rule-card.dragging {
-    opacity: 0.35;
-    border-style: dashed;
-    border-color: var(--accent);
-  }
-
-  .rule-card.drag-over {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
-  }
-
-  .rule-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
-  }
-
-  .rule-head-left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .drag-handle {
-    cursor: grab;
-    color: var(--fg-muted);
-    font-size: 1rem;
-    line-height: 1;
-    user-select: none;
-    padding: 0 2px;
-    opacity: 0.6;
-    transition: opacity var(--transition-fast);
-  }
-
-  .drag-handle:hover {
-    opacity: 1;
-    color: var(--fg-primary);
-  }
-
-  .rule-toggle-btn {
-    width: 28px;
-    height: 16px;
-    border-radius: 9px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    position: relative;
-    cursor: pointer;
-    padding: 0;
-    transition:
-      background-color var(--transition-fast),
-      border-color var(--transition-fast);
-    flex-shrink: 0;
-  }
-
-  .rule-toggle-btn.active {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .rule-toggle-btn .toggle-dot {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--fg-terminal);
-    transition: transform var(--transition-fast);
-  }
-
-  .rule-toggle-btn.active .toggle-dot {
-    transform: translateX(12px);
-  }
-
-  .badge-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-weight: 500;
-    padding: 2px 7px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-family: var(--font-family-mono);
-  }
-
-  .badge-direct {
-    background: color-mix(in srgb, var(--success) 15%, transparent);
-    color: var(--success);
-    border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
-  }
-
-  .badge-block {
-    background: color-mix(in srgb, var(--danger) 15%, transparent);
-    color: var(--danger);
-    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
-  }
-
-  .badge-proxy {
-    background: color-mix(in srgb, var(--purple) 15%, transparent);
-    color: var(--purple);
-    border: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
-  }
-
-  .rule-actions {
-    display: flex;
-    gap: 4px;
-    align-items: center;
-  }
-
-  .btn-rule-action {
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--fg-secondary);
-    width: 24px;
-    height: 24px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    border-radius: 4px;
-    transition:
-      background-color var(--transition-fast),
-      color var(--transition-fast);
-  }
-
-  .btn-rule-action:hover:not(:disabled) {
-    background: var(--bg-elevated);
-    color: var(--fg-primary);
-    border-color: var(--border);
-  }
-
-  .btn-rule-action:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-  }
-
-  .btn-rule-del:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--danger) 15%, transparent);
-    color: var(--danger);
-    border-color: color-mix(in srgb, var(--danger) 30%, transparent);
-  }
-
-  .rule-details {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: var(--font-size-sm);
-  }
-
-  .rule-detail-item {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .rule-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-
-  .chip {
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: var(--font-size-xs);
-    font-weight: 500;
-  }
-
-  .chip-domain {
-    background: color-mix(in srgb, var(--code-key) 15%, transparent);
-    color: var(--code-key);
-  }
-
-  .chip-ip {
-    background: color-mix(in srgb, var(--code-string) 15%, transparent);
-    color: var(--code-string);
-  }
-
-  .form-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: var(--spacing-4);
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-3);
-  }
-
-  .form-row {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .form-row2 {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-  }
-
-  .form-col {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .form-label {
-    font-size: var(--font-size-sm);
-    color: var(--fg-secondary);
-    font-weight: 500;
-  }
-
-  .form-input,
-  :global(.form-select) {
-    padding: 8px 12px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    color: var(--fg-primary);
-    font-size: var(--font-size-sm);
-    font-family: inherit;
-    transition: border-color var(--transition-fast);
-  }
-
-  .form-input:focus,
-  :global(.form-select:focus) {
-    border-color: var(--accent);
-  }
-
-  .input-with-btn {
-    display: flex;
-    gap: 8px;
-  }
-  .input-with-btn .form-input {
-    flex: 1;
-  }
-
-  .form-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 8px;
-  }
-
-  .btn {
-    padding: 8px 16px;
-    border-radius: var(--radius-md);
-    font-size: var(--font-size-sm);
-    font-weight: 500;
-    cursor: pointer;
-    border: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: background-color var(--transition-fast);
-  }
-
-  .btn-primary {
-    background: var(--accent);
-    color: var(--btn-primary-text);
-  }
-  .btn-primary:hover {
-    background: var(--accent-hover);
-  }
-
-  .btn-secondary {
-    background: var(--bg-elevated);
-    color: var(--fg-primary);
-    border: 1px solid var(--border);
-  }
-  .btn-secondary:hover {
-    background: var(--bg-surface-active);
-  }
-
-  .btn-secondary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .add-btn {
-    width: 100%;
-    padding: var(--spacing-3);
-    background: transparent;
-    border: 1px dashed var(--border);
-    color: var(--fg-secondary);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition:
-      border-color var(--transition-fast),
-      color var(--transition-fast);
-    font-size: var(--font-size-sm);
-  }
-
-  .add-btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-
-  .inbound-card {
-    padding: var(--spacing-4);
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-  }
-
-  .inbound-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.875rem;
-  }
-
-  .type-socks {
-    background: color-mix(in srgb, var(--code-key) 15%, transparent);
-    color: var(--code-key);
-  }
-
-  .type-http {
-    background: color-mix(in srgb, var(--code-number) 15%, transparent);
-    color: var(--code-number);
-  }
-
-  .dns-servers-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .item-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 12px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-  }
-
-  .item-name {
-    font-size: var(--font-size-sm);
-    color: var(--fg-primary);
-  }
-
-  .item-del {
-    background: transparent;
-    border: none;
-    color: var(--fg-secondary);
-    cursor: pointer;
-    padding: 0 4px;
-  }
-  .item-del:hover {
-    color: var(--fg-primary);
-  }
-
-  .gen-right {
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-    min-width: 280px;
-    max-width: 800px;
-    padding-left: var(--spacing-3);
-  }
-
-  .preview-card {
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    background: var(--bg-surface);
-  }
-
-  .preview-tabs-bar {
-    display: flex;
-    align-items: center;
-    background: var(--bg-surface);
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    scrollbar-width: none;
-    padding: 2px 4px 0 4px;
-    gap: 2px;
-  }
-
-  .preview-tabs-bar::-webkit-scrollbar {
-    display: none;
-  }
-
-  .preview-tab-btn {
-    padding: 6px 10px;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--fg-secondary);
-    font-size: 0.75rem;
-    font-family: var(--font-family-mono);
-    cursor: pointer;
-    white-space: nowrap;
-    transition:
-      color var(--transition-fast),
-      border-color var(--transition-fast);
-    margin-bottom: -1px;
-  }
-
-  .preview-tab-btn:hover {
-    color: var(--fg-primary);
-  }
-
-  .preview-tab-btn.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-    font-weight: 600;
-  }
-
-  .preview-toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 6px 10px;
-    background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .preview-meta-size {
-    font-size: var(--font-size-xs);
-    color: var(--fg-muted);
-    font-family: var(--font-family-mono);
-  }
-
-  .preview-tools-right {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .btn-tool-action {
-    padding: 3px 8px;
-    font-size: var(--font-size-xs);
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border-radius: 4px;
-    height: 24px;
-  }
-
-  .btn-compact {
-    height: 32px;
-    padding: 4px 10px;
-    font-size: 0.75rem;
-  }
-
-  .constructor-preview-panel {
-    flex: 1;
-    margin: 0;
-    padding: var(--spacing-3);
-    background: var(--code-bg);
-    color: var(--code-fg);
-    border: none;
-    font-family: var(--font-family-mono);
-    font-size: var(--font-size-xs);
-    line-height: 1.5;
-    overflow: auto;
-    scrollbar-width: thin;
-    max-height: 520px;
-    min-height: 320px;
-  }
-
-  .checkbox-container {
-    display: block;
-    position: relative;
-    padding-left: 28px;
-    cursor: pointer;
-    font-size: var(--font-size-sm);
-    user-select: none;
-    color: var(--fg-primary);
-  }
-
-  .checkbox-container input {
-    position: absolute;
-    opacity: 0;
-    cursor: pointer;
-    height: 0;
-    width: 0;
-  }
-
-  .checkmark {
-    position: absolute;
-    top: 2px;
-    left: 0;
-    height: 16px;
-    width: 16px;
-    background-color: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-  }
-
-  .checkbox-container:hover input ~ .checkmark {
-    background-color: var(--bg-surface-active);
-  }
-
-  .checkbox-container input:checked ~ .checkmark {
-    background-color: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .checkmark:after {
-    content: '';
-    position: absolute;
-    display: none;
-  }
-
-  .checkbox-container input:checked ~ .checkmark:after {
-    display: block;
-  }
-
-  .checkbox-container .checkmark:after {
-    left: 5px;
-    top: 2px;
-    width: 4px;
-    height: 8px;
-    border: solid white;
-    border-width: 0 2px 2px 0;
-    transform: rotate(45deg);
-  }
-
-  /* Phase 111 — Xray outbound form (sockopt, dialerProxy, WG/SS, TLS ping) */
-  .btn-inset {
-    flex-shrink: 0;
-    min-height: 36px;
-    padding: 0 10px;
-  }
-
-  .btn-inset svg {
-    display: block;
-  }
-
-  .form-row3 {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 12px;
-  }
-
-  .form-hint,
-  .field-info-hint {
-    font-size: var(--font-size-xs);
-    color: var(--fg-secondary);
-    line-height: 1.4;
-  }
-
-  .form-hint {
-    margin-top: 4px;
-  }
-
-  .field-info-hint {
-    margin-top: 2px;
-  }
-
-  .text-muted {
-    color: var(--fg-secondary);
-  }
-
-  .text-danger {
-    color: var(--danger);
-  }
-
-  .awg-obfuscation-alert {
-    margin-bottom: 12px;
-    align-items: flex-start;
-    gap: 8px;
-  }
-
-  .awg-obfuscation-alert svg {
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-
-  .error-icon {
-    color: var(--danger);
-    margin-bottom: 12px;
-  }
-
-  .error-icon svg {
-    display: block;
-    margin: 0 auto;
-  }
-
-  .sockopt-details {
-    margin-top: 14px;
-    margin-bottom: 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 8px 12px;
-    background: var(--bg-page);
-  }
-
-  .sockopt-summary {
-    cursor: pointer;
-    font-weight: 500;
-    font-size: var(--font-size-sm);
-    color: var(--accent);
-    user-select: none;
-  }
-
-  .sockopt-summary-icon {
-    vertical-align: -2px;
-    margin-right: 6px;
-  }
-
-  .sockopt-body {
-    padding-top: 12px;
-  }
-
-  .sockopt-checks {
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-top: 8px;
-  }
-
-  .dialer-proxy-row {
-    margin-top: 12px;
-  }
-
-  .dialer-chain-preview {
-    margin-top: 8px;
-    font-size: var(--font-size-xs);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-
-  .dialer-chain-sep {
-    color: var(--fg-secondary);
-  }
-
-  .form-actions--sticky {
-    position: sticky;
-    bottom: -20px;
-    background: var(--bg-card);
-    padding: 12px 0 0 0;
-    margin-top: 12px;
-    border-top: 1px solid var(--border);
-    z-index: 10;
-  }
-
-  .tls-ping-result {
-    margin-bottom: 12px;
-    padding: 12px;
-    background: var(--bg-page);
-  }
-
-  .tls-ping-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-
-  .tls-ping-title {
-    font-weight: 600;
-    font-size: var(--font-size-sm);
-  }
-
-  .tls-ping-failure {
-    font-size: var(--font-size-xs);
-    margin-bottom: 6px;
-  }
-
-  .tls-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 8px;
-    font-size: var(--font-size-xs);
-  }
-
-  .tls-grid span[data-testid] {
-    font-weight: 500;
-  }
-
-  .tls-ping-dns {
-    margin-top: 8px;
-    font-size: var(--font-size-xs);
-  }
-
-  .tls-ping-dns .dns-value {
-    word-break: break-all;
   }
 </style>

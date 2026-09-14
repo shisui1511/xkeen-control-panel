@@ -20,6 +20,7 @@
     onTabChange?: (tabId: string) => void;
     fileName?: string;
     testId?: string;
+    children?: import('svelte').Snippet;
   }
 
   let {
@@ -33,7 +34,8 @@
     activeTab,
     onTabChange,
     fileName,
-    testId
+    testId,
+    children
   }: Props = $props();
 
   let previewWidth = $state(440);
@@ -165,6 +167,10 @@
           >{content}</code
         ></pre>
     </div>
+
+    {#if children}
+      {@render children()}
+    {/if}
   </div>
 {/if}
 
