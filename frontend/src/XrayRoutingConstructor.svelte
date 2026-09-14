@@ -23,8 +23,6 @@
   import XraySectionLog from './components/xray/XraySectionLog.svelte';
   import XraySectionPolicy from './components/xray/XraySectionPolicy.svelte';
   import {
-    XrayContext,
-    setXrayContext,
     type XrayRoutingRule,
     type DNSServer,
     type XrayInbound,
@@ -183,10 +181,6 @@
 
   // Draft handling
   let detectedDraft = $state<DraftRecord | null>(null);
-
-  // Setup XrayContext
-  const ctx = new XrayContext();
-  setXrayContext(ctx);
 
   const previewTabs: PreviewTab[] = [
     { id: '05_routing.json', title: '05_routing.json' },
