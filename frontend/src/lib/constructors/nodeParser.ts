@@ -217,6 +217,26 @@ export function mapParsedOutboundToMihomoProxy(parsed: any, customTag?: string):
         }
       }
     }
+  } else if (proto === 'trojan') {
+    p.type = 'trojan';
+    const server = parsed.settings?.servers?.[0];
+    if (server) {
+      p.server = server.address || '';
+      p.port = server.port || 443;
+      p.password = server.password || '';
+    }
+    const ss = parsed.streamSettings;
+    if (ss) {
+      p.network = ss.network || 'tcp';
+      p.tls = ss.security === 'tls';
+      if (ss.tlsSettings?.serverName) {
+        p.servername = ss.tlsSettings.serverName;
+        p.sni = ss.tlsSettings.serverName;
+      }
+      if (ss.wsSettings?.path) {
+        p.wsPath = ss.wsSettings.path;
+      }
+    }
   } else if (proto === 'shadowsocks' || proto === 'ss') {
     p.type = 'ss';
     const server = parsed.settings?.servers?.[0];

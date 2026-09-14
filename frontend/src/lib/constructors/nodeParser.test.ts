@@ -183,6 +183,43 @@ describe('nodeParser', () => {
       expect(proxy.password).toBe('secretpassword');
     });
 
+    it('maps Trojan outbound with stream settings', () => {
+      const parsed = {
+        protocol: 'trojan',
+        tag: 'trojan-node',
+        settings: {
+          servers: [
+            {
+              address: 'trojan.example.com',
+              port: 443,
+              password: 'trojan-password'
+            }
+          ]
+        },
+        streamSettings: {
+          network: 'ws',
+          security: 'tls',
+          tlsSettings: {
+            serverName: 'trojan-sni.example.com'
+          },
+          wsSettings: {
+            path: '/trojan-ws'
+          }
+        }
+      };
+
+      const proxy = mapParsedOutboundToMihomoProxy(parsed);
+      expect(proxy.type).toBe('trojan');
+      expect(proxy.server).toBe('trojan.example.com');
+      expect(proxy.port).toBe(443);
+      expect(proxy.password).toBe('trojan-password');
+      expect(proxy.network).toBe('ws');
+      expect(proxy.tls).toBe(true);
+      expect(proxy.servername).toBe('trojan-sni.example.com');
+      expect(proxy.sni).toBe('trojan-sni.example.com');
+      expect(proxy.wsPath).toBe('/trojan-ws');
+    });
+
     it('maps WireGuard and AmneziaWG parameters', () => {
       const parsed = {
         protocol: 'wireguard',
