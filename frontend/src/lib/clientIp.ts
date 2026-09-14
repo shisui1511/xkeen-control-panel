@@ -46,14 +46,22 @@ interface RawGeoResult {
   org?: string;
 }
 
-async function fetchWithTimeout(url: string, timeoutMs = 4000): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  timeoutMs = 4000,
+  acceptJson = false
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers: Record<string, string> = {};
+    if (acceptJson) {
+      headers['Accept'] = 'application/json';
+    }
     // eslint-disable-next-line no-restricted-syntax -- external public echo service request from client browser
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: 'application/json' }
+      headers
     });
     return res;
   } finally {
@@ -64,7 +72,7 @@ async function fetchWithTimeout(url: string, timeoutMs = 4000): Promise<Response
 async function queryPublicEcho(): Promise<RawGeoResult> {
   // Service 1: ipinfo.io
   try {
-    const res = await fetchWithTimeout('https://ipinfo.io/json');
+    const res = await fetchWithTimeout('https://ipinfo.io/json', 3500, true);
     if (res.ok) {
       const data = await res.json();
       if (data && typeof data.ip === 'string' && data.ip.trim()) {
@@ -80,14 +88,35 @@ async function queryPublicEcho(): Promise<RawGeoResult> {
     // try next service
   }
 
-  // Service 2: api.ipify.org
+  // Service 2: api.my-ip.io
   try {
-    const res = await fetchWithTimeout('https://api.ipify.org?format=json');
+    const res = await fetchWithTimeout('https://api.my-ip.io/v2/ip.json', 3500, true);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success && typeof data.ip === 'string' && data.ip.trim()) {
+        const asnStr = data.asn?.number
+          ? `AS${data.asn.number} ${data.asn?.name || ''}`.trim()
+          : undefined;
+        return {
+          ip: data.ip.trim(),
+          countryCode:
+            typeof data.country?.code === 'string' ? data.country.code.trim() : undefined,
+          city: typeof data.city === 'string' ? data.city.trim() : undefined,
+          org: asnStr
+        };
+      }
+    }
+  } catch {
+    // try next service
+  }
+
+  // Service 3: api.ipify.org
+  try {
+    const res = await fetchWithTimeout('https://api.ipify.org?format=json', 3500, true);
     if (res.ok) {
       const data = await res.json();
       if (data && typeof data.ip === 'string' && data.ip.trim()) {
         const ip = data.ip.trim();
-        // Try secondary geo enrichment for this IP
         const enriched = await tryEnrichGeo(ip);
         return { ip, ...enriched };
       }
@@ -96,9 +125,39 @@ async function queryPublicEcho(): Promise<RawGeoResult> {
     // try next service
   }
 
-  // Service 3: ipapi.co
+  // Service 4: api64.ipify.org
   try {
-    const res = await fetchWithTimeout('https://ipapi.co/json/');
+    const res = await fetchWithTimeout('https://api64.ipify.org?format=json', 3500, true);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && typeof data.ip === 'string' && data.ip.trim()) {
+        const ip = data.ip.trim();
+        const enriched = await tryEnrichGeo(ip);
+        return { ip, ...enriched };
+      }
+    }
+  } catch {
+    // try next service
+  }
+
+  // Service 5: icanhazip.com (plain text fallback)
+  try {
+    const res = await fetchWithTimeout('https://icanhazip.com', 3500, false);
+    if (res.ok) {
+      const text = await res.text();
+      const ip = text.trim();
+      if (ip && /^[\d.:a-fA-F]+$/.test(ip)) {
+        const enriched = await tryEnrichGeo(ip);
+        return { ip, ...enriched };
+      }
+    }
+  } catch {
+    // try next service
+  }
+
+  // Service 6: ipapi.co
+  try {
+    const res = await fetchWithTimeout('https://ipapi.co/json/', 3500, true);
     if (res.ok) {
       const data = await res.json();
       if (data && typeof data.ip === 'string' && data.ip.trim()) {
@@ -112,21 +171,6 @@ async function queryPublicEcho(): Promise<RawGeoResult> {
     }
   } catch {
     // try next service
-  }
-
-  // Service 4: icanhazip.com (fallback plain text)
-  try {
-    const res = await fetchWithTimeout('https://icanhazip.com');
-    if (res.ok) {
-      const text = await res.text();
-      const ip = text.trim();
-      if (ip && /^[\d.:a-fA-F]+$/.test(ip)) {
-        const enriched = await tryEnrichGeo(ip);
-        return { ip, ...enriched };
-      }
-    }
-  } catch {
-    // all failed
   }
 
   throw new Error('Unable to detect public IP address');
@@ -201,12 +245,27 @@ export async function fetchClientExitIP(force = false, lang = 'ru'): Promise<Cli
 
   currentFetchPromise = (async () => {
     try {
-      // Parallel fetch: Client public IP (browser) + Router WAN IP (backend)
-      const [clientResult, routerWanIp] = await Promise.all([
+      // Independent parallel fetch: Client public IP (browser) + Router WAN IP (backend)
+      const [clientSettled, routerSettled] = await Promise.allSettled([
         queryPublicEcho(),
         fetchRouterWanIp()
       ]);
 
+      const routerWanIp = routerSettled.status === 'fulfilled' ? routerSettled.value : undefined;
+
+      if (clientSettled.status === 'rejected') {
+        const errorMsg = clientSettled.reason?.message || 'Unable to detect public IP address';
+        const errorInfo: ClientExitIPInfo = {
+          ...get(clientExitIpStore),
+          status: 'error',
+          error: errorMsg,
+          routerWanIp: routerWanIp ?? get(clientExitIpStore).routerWanIp
+        };
+        clientExitIpStore.set(errorInfo);
+        return errorInfo;
+      }
+
+      const clientResult = clientSettled.value;
       const countryCode = clientResult.countryCode
         ? clientResult.countryCode.toUpperCase()
         : undefined;
@@ -228,7 +287,7 @@ export async function fetchClientExitIP(force = false, lang = 'ru'): Promise<Cli
         isp,
         asn,
         org: clientResult.org,
-        routerWanIp,
+        routerWanIp: routerWanIp ?? get(clientExitIpStore).routerWanIp,
         isProxied,
         status: 'success',
         lastChecked: Date.now()

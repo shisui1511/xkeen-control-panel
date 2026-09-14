@@ -252,26 +252,37 @@ type IPInfo struct {
 func (s *NetworkToolsService) GetPublicIP() (*IPInfo, error) {
 	result := &IPInfo{}
 
-	// Try multiple services
+	// List of reliable public echo endpoints
 	services := []string{
-		"https://api.ipify.org",
+		"https://ipinfo.io/ip",
 		"https://icanhazip.com",
 		"https://ifconfig.me/ip",
+		"https://api.ipify.org",
 	}
 
-	client := &net.Dialer{Timeout: 5 * time.Second}
+	httpClient := &http.Client{
+		Timeout: 4 * time.Second,
+	}
 
 	for _, svc := range services {
-		conn, err := client.Dial("tcp", strings.TrimPrefix(strings.TrimPrefix(svc, "https://"), "http://")+":443")
+		req, err := http.NewRequest(http.MethodGet, svc, nil)
 		if err != nil {
 			continue
 		}
-		conn.Close()
-		// If we can connect, try curl
-		cmd := exec.Command("curl", "-s", "--connect-timeout", "5", svc)
-		out, err := cmd.Output()
-		if err == nil {
-			result.IP = strings.TrimSpace(string(out))
+		req.Header.Set("User-Agent", "curl/7.88.1")
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			continue
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		resp.Body.Close()
+		if err != nil || resp.StatusCode != http.StatusOK {
+			continue
+		}
+		candidate := strings.TrimSpace(string(body))
+		parsed := net.ParseIP(candidate)
+		if parsed != nil {
+			result.IP = parsed.String()
 			result.Success = true
 			return result, nil
 		}
