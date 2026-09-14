@@ -59,7 +59,8 @@ function handleUnauthorized(): void {
  */
 export async function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Response> {
   const { skip401Redirect, ...init } = options;
-  const csrfToken = localStorage.getItem('csrf_token') ?? '';
+  const csrfToken =
+    typeof localStorage !== 'undefined' ? (localStorage.getItem('csrf_token') ?? '') : '';
   const headers = new Headers(init.headers);
   if (csrfToken) {
     headers.set('X-CSRF-Token', csrfToken);

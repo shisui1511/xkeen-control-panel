@@ -74,6 +74,19 @@ async function setupRestMocks(page: Page) {
       });
     }
   });
+
+  await page.route('https://ipinfo.io/json', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ip: '198.51.100.42',
+        country: 'NL',
+        city: 'Amsterdam',
+        org: 'AS13335 Cloudflare, Inc.'
+      })
+    });
+  });
 }
 
 test.describe('Network Tools E2E suite', () => {
@@ -178,5 +191,23 @@ test.describe('Network Tools E2E suite', () => {
     await historyRow.click();
     await expect(page.locator('#port-host')).toHaveValue('my.server.org');
     await expect(page.locator('#port-number')).toHaveValue('80');
+  });
+
+  test('displays client exit IP and routing mode in diagnostics card', async ({ page }) => {
+    // Card should be visible
+    const diagCard = page.locator('.client-ip-diagnostics-card');
+    await expect(diagCard).toBeVisible();
+
+    // Client exit IP section should show mocked IP
+    await expect(diagCard).toContainText('198.51.100.42');
+    await expect(diagCard).toContainText('Amsterdam');
+
+    // Router WAN IP should show mocked WAN IP
+    await expect(diagCard).toContainText('8.8.8.8');
+
+    // Since client IP (198.51.100.42) != router IP (8.8.8.8), badge should indicate proxied routing
+    const statusBadge = diagCard.locator('.route-badge');
+    await expect(statusBadge).toBeVisible();
+    await expect(statusBadge).toHaveClass(/badge-proxied/);
   });
 });
