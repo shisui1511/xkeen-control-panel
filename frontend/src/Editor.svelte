@@ -15,37 +15,43 @@
   import { buildPathAtCursor, type PathSegment } from './lib/editor-utils';
 
   // Subcomponents
-  import FileTree from './components/editor/FileTree.svelte';
-  import EditorTabs from './components/editor/EditorTabs.svelte';
+  import EditorSidebar from './components/editor/EditorSidebar.svelte';
+  import EditorHeaderActions from './components/editor/EditorHeaderActions.svelte';
   import CodeMirrorEditor from './components/editor/CodeMirrorEditor.svelte';
   import BackupSidebar from './components/editor/BackupSidebar.svelte';
-  import Modal from './components/Modal.svelte';
+  import FileActionModals from './components/editor/FileActionModals.svelte';
+  import TemplatesModal, { type Template } from './components/editor/TemplatesModal.svelte';
+  import SaveConfirmModal from './components/editor/SaveConfirmModal.svelte';
+  import OutboundGeneratorModal from './components/editor/OutboundGeneratorModal.svelte';
+  import DeleteFileModal from './components/editor/DeleteFileModal.svelte';
+  import EditorToolbar from './components/editor/EditorToolbar.svelte';
+  import EditorStatusBar from './components/editor/EditorStatusBar.svelte';
+  import EditorBreadcrumbs from './components/editor/EditorBreadcrumbs.svelte';
   import PageHeader from './PageHeader.svelte';
   import Tabs, { type TabItem } from './components/Tabs.svelte';
-  import Select from './components/Select.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
-  import EditorKernelWidget from './components/status/EditorKernelWidget.svelte';
-  import StatusBadge from './components/StatusBadge.svelte';
-  import LiveIndicator from './components/LiveIndicator.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { activateRestartGrace } from './lib/serviceGrace';
   import PreflightWarnings, {
     type PreflightWarning
   } from './components/editor/PreflightWarnings.svelte';
-
-  interface Template {
-    name: string;
-    description: string;
-    type: string;
-    filename?: string;
-    content: string;
-  }
-
-  interface ConfigFileInfo {
-    name: string;
-    path: string;
-    size: number;
-  }
+  import { getDiff, getDiffGroups, type DiffGroup } from './components/editor/diff';
+  import { computeQuickFixes } from './components/editor/quickFixes';
+  import { startServiceStatusPolling } from './components/editor/serviceChecker';
+  import {
+    duplicateConfigFile,
+    downloadConfigFile,
+    downloadContent,
+    fetchBackupsList,
+    fetchBackupContent,
+    readConfigFile,
+    createConfigFile,
+    deleteConfigFile,
+    renameConfigFile,
+    listConfigFiles,
+    formatBytes,
+    type ConfigFileInfo
+  } from './components/editor/fileOps';
 
   interface EditorTab {
     path: string;
@@ -83,12 +89,12 @@
   let breadcrumbs = $state<PathSegment[]>([]);
   let applyLoading = $state(false);
   let backgroundStatusText = $state('');
-  let statusCheckInterval: ReturnType<typeof setInterval> | null = null;
+  let stopPollingStatus: (() => void) | null = null;
 
   // Drawer states
   let drawerOpen = $state(false);
   let selectedBackup = $state('');
-  let diffGroups = $state<any[]>([]);
+  let diffGroups = $state<DiffGroup[]>([]);
   let backupLoading = $state(false);
   let saveWarnings = $state<PreflightWarning[]>([]);
 
@@ -101,40 +107,6 @@
   let xrayFiles = $state<ConfigFileInfo[]>([]);
   let mihomoFiles = $state<ConfigFileInfo[]>([]);
   let showSidebar = $state(true);
-
-  // Resizable Splitter (EDIT-02)
-  let fileTreeWidth = $state(
-    typeof localStorage !== 'undefined'
-      ? Number(localStorage.getItem('editor_filetree_width')) || 240
-      : 240
-  );
-  let isResizing = $state(false);
-
-  function startResize(e: MouseEvent | PointerEvent) {
-    e.preventDefault();
-    isResizing = true;
-    const startX = e.clientX;
-    const startWidth = fileTreeWidth;
-
-    function onMove(ev: MouseEvent | PointerEvent) {
-      const newWidth = Math.max(160, Math.min(450, startWidth + (ev.clientX - startX)));
-      fileTreeWidth = newWidth;
-    }
-
-    function onUp() {
-      isResizing = false;
-      localStorage.setItem('editor_filetree_width', String(fileTreeWidth));
-      window.removeEventListener('mousemove', onMove as any);
-      window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('pointermove', onMove as any);
-      window.removeEventListener('pointerup', onUp);
-    }
-
-    window.addEventListener('mousemove', onMove as any);
-    window.addEventListener('mouseup', onUp);
-    window.addEventListener('pointermove', onMove as any);
-    window.addEventListener('pointerup', onUp);
-  }
 
   let isMac = $derived(
     typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
@@ -152,32 +124,9 @@
   let showCreateModal = $state(false);
   let showRenameModal = $state(false);
   let showTemplatesModal = $state(false);
+  let showGeneratorModal = $state(false);
   let newFileName = $state('');
   let renameTarget = $state('');
-  let templates = $state<Template[]>([]);
-  let templateTab = $state<'xray' | 'mihomo'>('xray');
-  let selectedTemplate = $state<Template | null>(null);
-  let templatePreview = $state('');
-
-  let filteredTemplates = $derived(templates.filter((t) => t.type === templateTab));
-
-  const templateTabItems = $derived<TabItem[]>([
-    { value: 'xray', label: $t('editor.templates_tab_xray') },
-    { value: 'mihomo', label: $t('editor.templates_tab_mihomo') }
-  ]);
-
-  // Generator state
-  let showGeneratorModal = $state(false);
-  let genProtocol = $state('vless');
-  let genAddress = $state('');
-  let genPort = $state(443);
-  let genUUID = $state(crypto.randomUUID());
-  let genSNI = $state('');
-  let genFlow = $state('xtls-rprx-vision');
-  let genSecurity = $state('reality');
-  let genPublicKey = $state('');
-  let genShortId = $state('');
-  let genSpiderDomain = $state('');
 
   // Dirty state tracking
   let originalContent = $state('');
@@ -356,14 +305,8 @@
   async function loadFiles(dir?: string) {
     if (dir) currentDir = dir;
     try {
-      const resXray = await apiFetch(`/api/config/list?dir=${encodeURIComponent(xrayDir)}`);
-      if (resXray.ok) {
-        xrayFiles = await resXray.json();
-      }
-      const resMihomo = await apiFetch(`/api/config/list?dir=${encodeURIComponent(mihomoDir)}`);
-      if (resMihomo.ok) {
-        mihomoFiles = await resMihomo.json();
-      }
+      xrayFiles = await listConfigFiles(xrayDir);
+      mihomoFiles = await listConfigFiles(mihomoDir);
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', $t('editor.load_error'));
@@ -539,10 +482,7 @@
     }
 
     try {
-      const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
-      if (!res.ok) throw new Error('Failed to load file');
-
-      const content = await res.text();
+      const content = await readConfigFile(path);
 
       // Save active tab state before leaving
       if (activeTabPath && editorView) {
@@ -647,13 +587,9 @@
 
   async function loadBackups(path: string) {
     try {
-      const res = await apiFetch(`/api/config/backups?path=${encodeURIComponent(path)}`);
-      if (res.ok) {
-        backups = await res.json();
-      }
+      backups = await fetchBackupsList(path);
     } catch (e: any) {
       if (e?.status === 401) return;
-      // Backups are optional
     }
   }
 
@@ -663,9 +599,7 @@
     backupLoading = true;
     diffGroups = [];
     try {
-      const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
-      if (!res.ok) throw new Error('Failed to load backup content');
-      const backupContent = await res.text();
+      const backupContent = await fetchBackupContent(backupPath);
       const currentContent = editorView ? editorView.state.doc.toString() : '';
       diffGroups = getDiffGroups(backupContent, currentContent);
     } catch (e: any) {
@@ -678,137 +612,9 @@
   let showSaveConfirmModal = $state(false);
   let diffChanges = $state<any[]>([]);
 
-  // Kebab menu for destructive actions (Delete)
-  let showKebabMenu = $state(false);
-  function toggleKebab(e: MouseEvent) {
-    e.stopPropagation();
-    showKebabMenu = !showKebabMenu;
-    if (showKebabMenu) {
-      const close = () => {
-        showKebabMenu = false;
-        window.removeEventListener('click', close);
-      };
-      setTimeout(() => window.addEventListener('click', close), 0);
-    }
-  }
-
-  interface DiffChange {
-    type: 'added' | 'removed' | 'unchanged';
-    value: string;
-  }
-
-  interface DiffGroup {
-    type: 'added' | 'removed' | 'unchanged' | 'collapsed';
-    lines: string[];
-  }
-
-  function getDiff(oldStr: string, newStr: string): DiffChange[] {
-    const oldLines = oldStr.split('\n');
-    const newLines = newStr.split('\n');
-
-    const m = oldLines.length;
-    const n = newLines.length;
-
-    if (m + n > 2000) {
-      return [
-        {
-          type: 'removed',
-          value: $t('editor.diff_large_old')
-        },
-        {
-          type: 'added',
-          value: $t('editor.diff_large_new')
-        }
-      ];
-    }
-
-    const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-
-    for (let i = 1; i <= m; i++) {
-      for (let j = 1; j <= n; j++) {
-        if (oldLines[i - 1] === newLines[j - 1]) {
-          dp[i][j] = dp[i - 1][j - 1] + 1;
-        } else {
-          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-        }
-      }
-    }
-
-    const diff: DiffChange[] = [];
-    let i = m,
-      j = n;
-    while (i > 0 || j > 0) {
-      if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-        diff.unshift({ type: 'unchanged', value: oldLines[i - 1] });
-        i--;
-        j--;
-      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-        diff.unshift({ type: 'added', value: newLines[j - 1] });
-        j--;
-      } else if (i > 0 && (j === 0 || dp[i - 1][j] > dp[i][j - 1])) {
-        diff.unshift({ type: 'removed', value: oldLines[i - 1] });
-        i--;
-      }
-    }
-    return diff;
-  }
-
-  function getDiffGroups(oldStr: string, newStr: string): DiffGroup[] {
-    const changes = getDiff(oldStr, newStr);
-    if (changes.length === 0) return [];
-    const groups: DiffGroup[] = [];
-
-    let currentType = changes[0]?.type;
-    let currentLines: string[] = [];
-
-    for (const change of changes) {
-      if (change.type === currentType) {
-        currentLines.push(change.value);
-      } else {
-        if (currentLines.length > 0) {
-          groups.push({ type: currentType, lines: currentLines });
-        }
-        currentType = change.type;
-        currentLines = [change.value];
-      }
-    }
-    if (currentLines.length > 0) {
-      groups.push({ type: currentType, lines: currentLines });
-    }
-
-    const processedGroups: DiffGroup[] = [];
-    for (const g of groups) {
-      if (g.type === 'unchanged' && g.lines.length > 10) {
-        const head = g.lines.slice(0, 3);
-        const tail = g.lines.slice(-3);
-        const collapsedCount = g.lines.length - 6;
-
-        processedGroups.push({ type: 'unchanged', lines: head });
-        processedGroups.push({
-          type: 'collapsed',
-          lines: [`... (${collapsedCount} lines hidden) ...`]
-        });
-        processedGroups.push({ type: 'unchanged', lines: tail });
-      } else {
-        processedGroups.push(g);
-      }
-    }
-
-    return processedGroups;
-  }
-
   function downloadFile() {
     if (!selectedFile || !editorView) return;
-    const content = editorView.state.doc.toString();
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = selectedFile.split('/').pop() || 'config';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadContent(selectedFile.split('/').pop() || 'config', editorView.state.doc.toString());
   }
 
   async function checkBeforeSave() {
@@ -950,57 +756,26 @@
   }
 
   function startBackgroundStatusCheck() {
-    let attempts = 0;
-    const maxAttempts = 12;
-    const intervalTime = 1500;
-
-    backgroundStatusText = `${$t('editor.checking_status')} (1/${maxAttempts})`;
-
-    if (statusCheckInterval) {
-      clearInterval(statusCheckInterval);
-      statusCheckInterval = null;
+    if (stopPollingStatus) {
+      stopPollingStatus();
+      stopPollingStatus = null;
     }
 
-    statusCheckInterval = setInterval(async () => {
-      attempts++;
-      backgroundStatusText = `${$t('editor.checking_status')} (${attempts}/${maxAttempts})`;
-
-      try {
-        const res = await apiFetch('/api/service/status');
-        if (res.ok) {
-          const parsed = await res.json();
-          if (parsed && parsed.success && parsed.data && parsed.data.is_running === true) {
-            if (statusCheckInterval) {
-              clearInterval(statusCheckInterval);
-              statusCheckInterval = null;
-            }
-            showToast('success', $t('editor.apply_success'));
-            applyLoading = false;
-            backgroundStatusText = '';
-            return;
-          }
-        }
-      } catch (err: any) {
-        if (err?.status === 401) {
-          if (statusCheckInterval) {
-            clearInterval(statusCheckInterval);
-            statusCheckInterval = null;
-          }
-          return;
-        }
-        // Ignore check errors and retry
-      }
-
-      if (attempts >= maxAttempts) {
-        if (statusCheckInterval) {
-          clearInterval(statusCheckInterval);
-          statusCheckInterval = null;
-        }
-        showToast('error', $t('editor.apply_timeout'));
+    stopPollingStatus = startServiceStatusPolling({
+      onStatusChange: (text) => {
+        backgroundStatusText = text;
+      },
+      onSuccess: () => {
         applyLoading = false;
         backgroundStatusText = '';
+        stopPollingStatus = null;
+      },
+      onError: () => {
+        applyLoading = false;
+        backgroundStatusText = '';
+        stopPollingStatus = null;
       }
-    }, intervalTime);
+    });
   }
 
   async function restoreBackup(backupPath: string) {
@@ -1017,10 +792,7 @@
       return;
 
     try {
-      const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
-      if (!res.ok) throw new Error('Failed to load backup');
-
-      const content = await res.text();
+      const content = await fetchBackupContent(backupPath);
 
       if (editorView) {
         editorView.dispatch({
@@ -1052,20 +824,16 @@
     }
   }
 
-  async function createFile() {
-    if (!newFileName) return;
+  async function createFile(fileName?: string) {
+    const name = fileName || newFileName;
+    if (!name) return;
 
     const path = selectedFile
-      ? selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + newFileName
-      : '/opt/etc/xray/configs/' + newFileName;
+      ? selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + name
+      : '/opt/etc/xray/configs/' + name;
 
     try {
-      const res = await apiFetch(`/api/config/create?path=${encodeURIComponent(path)}`, {
-        method: 'POST'
-      });
-
-      if (!res.ok) throw new Error(await res.text());
-
+      await createConfigFile(path);
       showToast('success', $t('editor.create_file'));
       showCreateModal = false;
       newFileName = '';
@@ -1089,12 +857,7 @@
     showDeleteConfirmModal = false;
 
     try {
-      const res = await apiFetch(`/api/config/delete?path=${encodeURIComponent(selectedFile)}`, {
-        method: 'POST'
-      });
-
-      if (!res.ok) throw new Error(await res.text());
-
+      await deleteConfigFile(selectedFile);
       showToast('success', $t('app.delete'));
       const fileToDelete = selectedFile;
       await closeTab(fileToDelete, true);
@@ -1105,21 +868,14 @@
     }
   }
 
-  async function renameFile() {
-    if (!renameTarget || !selectedFile) return;
+  async function renameFile(newName?: string) {
+    const target = newName || renameTarget;
+    if (!target || !selectedFile) return;
 
-    const newPath = selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + renameTarget;
+    const newPath = selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + target;
 
     try {
-      const res = await apiFetch(
-        `/api/config/rename?old=${encodeURIComponent(selectedFile)}&new=${encodeURIComponent(newPath)}`,
-        {
-          method: 'POST'
-        }
-      );
-
-      if (!res.ok) throw new Error(await res.text());
-
+      await renameConfigFile(selectedFile, newPath);
       showToast('success', $t('app.rename'));
       showRenameModal = false;
       renameTarget = '';
@@ -1133,24 +889,7 @@
 
   async function duplicateFile(file: ConfigFileInfo) {
     try {
-      const dotIdx = file.name.lastIndexOf('.');
-      const base = dotIdx !== -1 ? file.name.substring(0, dotIdx) : file.name;
-      const ext = dotIdx !== -1 ? file.name.substring(dotIdx) : '';
-      const dir = file.path.substring(0, file.path.lastIndexOf('/') + 1);
-      const newName = `${base}_copy${ext}`;
-      const newPath = `${dir}${newName}`;
-
-      const readRes = await apiFetch(`/api/config/read?path=${encodeURIComponent(file.path)}`);
-      if (!readRes.ok) throw new Error(await readRes.text());
-      const content = await readRes.text();
-
-      const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(newPath)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: content
-      });
-      if (!saveRes.ok) throw new Error(await saveRes.text());
-
+      const newPath = await duplicateConfigFile(file);
       showToast('success', $t('editor.duplicate_file'));
       await loadFiles();
       await loadFile(newPath);
@@ -1159,25 +898,16 @@
     }
   }
 
-  function downloadFileByName(file: ConfigFileInfo) {
+  async function downloadFileByName(file: ConfigFileInfo) {
     if (file.path === selectedFile && editorView) {
       downloadFile();
       return;
     }
-    apiFetch(`/api/config/read?path=${encodeURIComponent(file.path)}`)
-      .then((r) => r.text())
-      .then((content) => {
-        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      })
-      .catch((err) => showToast('error', err?.message || 'Download failed'));
+    try {
+      await downloadConfigFile(file);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Download failed');
+    }
   }
 
   function deleteFileByInfo(file: ConfigFileInfo) {
@@ -1202,48 +932,9 @@
   function applyQuickFixes() {
     if (!editorView || !selectedFile) return;
 
-    const content = editorView.state.doc.toString();
-    const isYaml = selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml');
-    const isXray = selectedFile.includes('xray');
-    const isMihomo = selectedFile.includes('mihomo') || selectedFile.includes('config.yaml');
-
-    let fixed = content;
-    let fixesApplied = 0;
-
     try {
-      if (isYaml) {
-        // Simple YAML fixes
-        if (isMihomo) {
-          if (!fixed.includes('proxies:') && !fixed.includes('proxy-providers:')) {
-            fixed = 'proxies:\n' + fixed;
-            fixesApplied++;
-          }
-          if (!fixed.includes('proxy-groups:')) {
-            fixed =
-              fixed +
-              '\nproxy-groups:\n  - name: Proxy Selection\n    type: select\n    proxies:\n      - DIRECT\n';
-            fixesApplied++;
-          }
-        }
-      } else {
-        // JSON fixes
-        const data = JSON.parse(fixed);
-        if (isXray) {
-          if (!data.inbounds) {
-            data.inbounds = [];
-            fixesApplied++;
-          }
-          if (!data.outbounds) {
-            data.outbounds = [{ protocol: 'freedom', tag: 'direct' }];
-            fixesApplied++;
-          }
-          if (!data.routing) {
-            data.routing = { rules: [] };
-            fixesApplied++;
-          }
-        }
-        fixed = JSON.stringify(data, null, 2);
-      }
+      const content = editorView.state.doc.toString();
+      const { fixed, fixesApplied } = computeQuickFixes(content, selectedFile);
 
       if (fixesApplied > 0) {
         editorView.dispatch({
@@ -1258,44 +949,8 @@
     }
   }
 
-  async function loadTemplates() {
-    try {
-      const data = await apiFetchJSON<Template[]>('/api/templates/list');
-      templates = Array.isArray(data) ? data : [];
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      templates = [];
-    }
-  }
-
-  function loadTemplatePreview(template: Template) {
-    selectedTemplate = template;
-    templatePreview = (template.content || '').split('\n').slice(0, 50).join('\n');
-  }
-
   function openTemplatesModal() {
-    const isMihomo =
-      selectedFile &&
-      (selectedFile.endsWith('.yaml') ||
-        selectedFile.endsWith('.yml') ||
-        selectedFile.includes('mihomo'));
-    templateTab = isMihomo ? 'mihomo' : 'xray';
-    selectedTemplate = null;
-    templatePreview = '';
     showTemplatesModal = true;
-    if (templates.length === 0) {
-      loadTemplates().then(() => {
-        const first = filteredTemplates[0];
-        if (first && !selectedTemplate) {
-          loadTemplatePreview(first);
-        }
-      });
-    } else {
-      const first = filteredTemplates[0];
-      if (first) {
-        loadTemplatePreview(first);
-      }
-    }
   }
 
   async function applyTemplate(template: Template) {
@@ -1362,68 +1017,13 @@
     }
   }
 
-  function generateOutbound() {
+  function handleGeneratedOutbound(content: string) {
     if (!editorView) return;
-
-    let config: any = {};
-    if (genProtocol === 'vless') {
-      config = {
-        protocol: 'vless',
-        settings: {
-          vnext: [
-            {
-              address: genAddress,
-              port: genPort,
-              users: [{ id: genUUID, encryption: 'none', flow: genFlow }]
-            }
-          ]
-        },
-        streamSettings: {
-          network: 'tcp',
-          security: genSecurity,
-          realitySettings:
-            genSecurity === 'reality'
-              ? {
-                  show: false,
-                  dest: genSpiderDomain + ':443',
-                  xver: 0,
-                  serverNames: [genSNI],
-                  privateKey: '', // User must fill
-                  shortIds: [genShortId]
-                }
-              : undefined
-        }
-      };
-    } else if (genProtocol === 'shadowsocks') {
-      config = {
-        protocol: 'shadowsocks',
-        settings: {
-          servers: [
-            {
-              address: genAddress,
-              port: genPort,
-              method: 'aes-256-gcm',
-              password: genUUID
-            }
-          ]
-        }
-      };
-    }
-
-    const content = JSON.stringify(config, null, 2);
     const cursor = editorView.state.selection.main.head;
     editorView.dispatch({
       changes: { from: cursor, insert: content }
     });
     showGeneratorModal = false;
-  }
-
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   }
 
   // Reactive file info using $derived
@@ -1477,7 +1077,6 @@
 
   onMount(() => {
     loadFiles();
-    loadTemplates();
     checkHashTab();
     window.addEventListener('hashchange', checkHashTab);
 
@@ -1525,9 +1124,9 @@
       unregisterDirty();
       unregisterDirty = null;
     }
-    if (statusCheckInterval) {
-      clearInterval(statusCheckInterval);
-      statusCheckInterval = null;
+    if (stopPollingStatus) {
+      stopPollingStatus();
+      stopPollingStatus = null;
     }
   });
 </script>
@@ -1556,79 +1155,16 @@
     />
 
     {#if activeTab === 'files'}
-      <div class="eph-right">
-        {#if saveStatusState.kind === 'live'}
-          <LiveIndicator live={true} label={saveStatusState.label} />
-        {:else}
-          <StatusBadge variant={saveStatusState.variant} label={saveStatusState.label} />
-        {/if}
-        {#if selectedFile}
-          <button
-            class="btn btn-secondary btn-compact"
-            onclick={() => loadFile(selectedFile)}
-            disabled={loading}
-            title={$t('editor.reload')}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg
-            >
-            {$t('editor.reload')}
-          </button>
-          <button
-            class="btn btn-secondary btn-compact"
-            onclick={checkBeforeSave}
-            disabled={saving || applyLoading}
-            title={$t('app.save')}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              ><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline
-                points="17 21 17 13 7 13 7 21"
-              /><polyline points="7 3 7 8 15 8" /></svg
-            >
-            {saving ? $t('app.loading') : $t('app.save')}
-          </button>
-          <button
-            class="btn btn-accent btn-compact"
-            onclick={handleSaveAndApply}
-            disabled={saving || applyLoading}
-            title={$t('editor.save_and_apply')}
-          >
-            {#if applyLoading}
-              <span class="ks-dot-spin"
-                ><span class="ks-dot"></span><span class="ks-dot"></span><span class="ks-dot"
-                ></span></span
-              >
-              {$t('app.loading')}
-            {:else}
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-                ><path
-                  d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"
-                /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /><path
-                  d="m14 11-2 2-2-2"
-                /><path d="M12 7v6" /></svg
-              >
-              {$t('editor.save_and_apply')}
-            {/if}
-          </button>
-        {/if}
-      </div>
+      <EditorHeaderActions
+        {saveStatusState}
+        {selectedFile}
+        {loading}
+        {saving}
+        {applyLoading}
+        onReloadFile={() => loadFile(selectedFile)}
+        onSaveFile={checkBeforeSave}
+        onSaveAndApply={handleSaveAndApply}
+      />
     {/if}
   </PageHeader>
 
@@ -1642,39 +1178,28 @@
 
   {#if activeTab === 'files'}
     <!-- Workspace with Resizable Splitter (EDIT-02) -->
-    <div class="editor-workspace" class:resizing={isResizing}>
-      {#if showSidebar}
-        <div class="file-tree-pane" style="width: {fileTreeWidth}px;">
-          <FileTree
-            {xrayFiles}
-            {mihomoFiles}
-            {selectedFile}
-            activeKernel={$capabilities?.active_kernel || ''}
-            onLoadFile={loadFile}
-            onCreateFile={() => {
-              showCreateModal = true;
-              newFileName = '';
-            }}
-            onRenameFile={(f) => {
-              showRenameModal = true;
-              renameTarget = f.name;
-              selectedFile = f.path;
-            }}
-            onDuplicateFile={duplicateFile}
-            onDownloadFile={downloadFileByName}
-            onDeleteFile={deleteFileByInfo}
-            onViewBackups={openBackupsForFile}
-          />
-        </div>
-        <button
-          type="button"
-          class="editor-splitter"
-          aria-label={$t('editor.resize_sidebar')}
-          tabindex="-1"
-          onpointerdown={startResize}
-          onmousedown={startResize}
-        ></button>
-      {/if}
+    <div class="editor-workspace">
+      <EditorSidebar
+        show={showSidebar}
+        {xrayFiles}
+        {mihomoFiles}
+        {selectedFile}
+        activeKernel={$capabilities?.active_kernel || ''}
+        onLoadFile={loadFile}
+        onCreateFile={() => {
+          showCreateModal = true;
+          newFileName = '';
+        }}
+        onRenameFile={(f) => {
+          showRenameModal = true;
+          renameTarget = f.name;
+          selectedFile = f.path;
+        }}
+        onDuplicateFile={duplicateFile}
+        onDownloadFile={downloadFileByName}
+        onDeleteFile={deleteFileByInfo}
+        onViewBackups={openBackupsForFile}
+      />
 
       <!-- Main Editor Card -->
       {#if tabs.length === 0}
@@ -1709,139 +1234,32 @@
       {:else}
         <div class="editor-main-card">
           <!-- Level 2 Subhead Bar (EDIT-01) -->
-          <div class="editor-subhead-bar">
-            <button
-              class="btn-sidebar-toggle"
-              onclick={() => (showSidebar = !showSidebar)}
-              title={showSidebar ? $t('editor.hide_sidebar') : $t('editor.show_sidebar')}
-              aria-label={showSidebar ? $t('editor.hide_sidebar') : $t('editor.show_sidebar')}
-            >
-              {#if showSidebar}
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"><polyline points="15 18 9 12 15 6" /></svg
-                >
-              {:else}
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"><polyline points="9 18 15 12 9 6" /></svg
-                >
-              {/if}
-            </button>
+          <EditorToolbar
+            {showSidebar}
+            {tabs}
+            {activeTabPath}
+            {selectedFile}
+            {hasDraft}
+            {fileType}
+            activeKernel={$capabilities?.active_kernel}
+            onToggleSidebar={() => (showSidebar = !showSidebar)}
+            onSwitchTab={switchTab}
+            onPinTab={pinTab}
+            onCloseTab={closeTab}
+            onRestoreDraft={restoreDraft}
+            onDiscardDraft={discardDraft}
+            onDownloadFile={downloadFile}
+            onRenameFile={() => {
+              showRenameModal = true;
+              renameTarget = selectedFile.split('/').pop() || '';
+            }}
+            onOpenTemplates={openTemplatesModal}
+            onOpenGenerator={() => (showGeneratorModal = true)}
+            onApplyQuickFixes={applyQuickFixes}
+            onDeleteFile={deleteFile}
+          />
 
-            <div class="subhead-tabs-container">
-              <EditorTabs
-                {tabs}
-                {activeTabPath}
-                onSwitchTab={switchTab}
-                onPinTab={pinTab}
-                onCloseTab={closeTab}
-              />
-            </div>
-
-            {#if selectedFile}
-              <div class="subhead-meta-container">
-                {#if hasDraft}
-                  <div
-                    class="editor-draft-bar"
-                    style="display: inline-flex; align-items: center; gap: 4px;"
-                  >
-                    <span class="badge badge-warning" style="font-size: 12px; padding: 2px 6px;">
-                      {$t('editor.has_draft')}
-                    </span>
-                    <button class="btn btn-xs btn-primary" onclick={restoreDraft}>
-                      {$t('editor.restore_draft')}
-                    </button>
-                    <button class="btn btn-xs btn-secondary" onclick={discardDraft}>
-                      {$t('editor.discard_draft')}
-                    </button>
-                  </div>
-                {/if}
-                <EditorKernelWidget activeKernel={$capabilities?.active_kernel} />
-                <span class="subhead-file-meta">{fileType} • UTF‑8</span>
-                <div class="kebab-wrap">
-                  <button
-                    class="btn-kebab"
-                    onclick={toggleKebab}
-                    aria-label={$t('editor.more_actions')}
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle
-                        cx="12"
-                        cy="19"
-                        r="1"
-                      />
-                    </svg>
-                  </button>
-                  {#if showKebabMenu}
-                    <div class="kebab-dropdown" transition:fade={{ duration: 100 }}>
-                      <button class="kebab-item" onclick={downloadFile}>
-                        <Icon name="download" size={14} />
-                        {$t('editor.download_file')}
-                      </button>
-                      <button
-                        class="kebab-item"
-                        onclick={() => {
-                          showRenameModal = true;
-                          renameTarget = selectedFile.split('/').pop() || '';
-                        }}
-                      >
-                        <Icon name="edit" size={14} />
-                        {$t('app.rename')}
-                      </button>
-                      <button class="kebab-item" onclick={openTemplatesModal}>
-                        <Icon name="settings" size={14} />
-                        {$t('editor.templates')}
-                      </button>
-                      {#if fileType === 'JSON'}
-                        <button class="kebab-item" onclick={() => (showGeneratorModal = true)}>
-                          <Icon name="settings" size={14} />
-                          {$t('editor.generator')}
-                        </button>
-                      {/if}
-                      <button class="kebab-item" onclick={applyQuickFixes}>
-                        <Icon name="settings" size={14} />
-                        {$t('editor.quick_fixes')}
-                      </button>
-                      <div class="kebab-divider"></div>
-                      <button class="kebab-item danger" onclick={deleteFile}>
-                        <Icon name="trash" size={14} />
-                        {$t('app.delete')}
-                      </button>
-                    </div>
-                  {/if}
-                </div>
-              </div>
-            {/if}
-          </div>
-
-          {#if breadcrumbs.length > 0}
-            <div class="editor-breadcrumbs">
-              {#each breadcrumbs as segment, i}
-                {#if i > 0}
-                  <span class="breadcrumb-divider">&gt;</span>
-                {/if}
-                <button class="breadcrumb-segment" onclick={() => jumpToSegment(segment.pos)}>
-                  {segment.label}
-                </button>
-              {/each}
-            </div>
-          {/if}
+          <EditorBreadcrumbs {breadcrumbs} onJump={jumpToSegment} />
 
           <PreflightWarnings
             warnings={saveWarnings}
@@ -1897,66 +1315,20 @@
           </div>
 
           <!-- Status Bar (EDIT-05, EDIT-06) -->
-          <div class="editor-statusbar">
-            <div class="sb-left">
-              <span>Ln {cursorLine}, Col {cursorCol}</span>
-              <span class="status-tip status-shortcut-tip">
-                <kbd>{isMac ? '⌘' : 'Ctrl'}</kbd>+<kbd>S</kbd>
-                {$t('editor.to_save')}
-              </span>
-            </div>
-
-            <div class="sb-right">
-              <button
-                class="chip-toggle"
-                class:active={schemaEnabled}
-                onclick={toggleSchema}
-                type="button"
-                title={$t(schemaEnabled ? 'editor.schema_on' : 'editor.schema_off')}
-              >
-                <span class="chip-dot"></span>
-                {$t(schemaEnabled ? 'editor.schema_on' : 'editor.schema_off')}
-              </button>
-              <button
-                class="chip-toggle"
-                class:active={expertMode}
-                onclick={toggleExpertMode}
-                type="button"
-                title={$t(expertMode ? 'editor.expert_on' : 'editor.expert_off')}
-              >
-                <span class="chip-dot"></span>
-                {$t(expertMode ? 'editor.expert_on' : 'editor.expert_off')}
-              </button>
-
-              {#if applyLoading && backgroundStatusText}
-                <div class="status-apply-indicator">
-                  <span class="ks-dot-spin"
-                    ><span class="ks-dot"></span><span class="ks-dot"></span><span class="ks-dot"
-                    ></span></span
-                  >
-                  <span>{backgroundStatusText}</span>
-                </div>
-              {/if}
-
-              {#if backups.length > 0}
-                <button class="backups-toggle-btn" onclick={() => (drawerOpen = !drawerOpen)}>
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.5"
-                    class="chevron-icon"
-                    class:rotated={drawerOpen}
-                  >
-                    <polyline points="18 15 12 9 6 15"></polyline>
-                  </svg>
-                  {$t('editor.backups')} ({backups.length})
-                </button>
-              {/if}
-            </div>
-          </div>
+          <EditorStatusBar
+            {cursorLine}
+            {cursorCol}
+            {isMac}
+            {schemaEnabled}
+            {expertMode}
+            {applyLoading}
+            {backgroundStatusText}
+            backupCount={backups.length}
+            {drawerOpen}
+            onToggleSchema={toggleSchema}
+            onToggleExpertMode={toggleExpertMode}
+            onToggleDrawer={() => (drawerOpen = !drawerOpen)}
+          />
 
           <!-- Bottom Drawer -->
           {#if drawerOpen && backups.length > 0}
@@ -2001,325 +1373,46 @@
 </div>
 
 <!-- CRUD Modals -->
-<Modal
-  isOpen={showCreateModal}
-  title={$t('editor.create_file')}
-  onclose={() => (showCreateModal = false)}
->
-  <label for="new-file-name" class="sr-only">{$t('editor.file_name')}</label>
-  <input
-    id="new-file-name"
-    type="text"
-    bind:value={newFileName}
-    placeholder={$t('editor.file_name')}
-    class="input"
-    style="margin-bottom: 16px; width: 100%;"
-    onkeydown={(e) => e.key === 'Enter' && createFile()}
-  />
-  <div class="confirm-modal-actions">
-    <button onclick={() => (showCreateModal = false)} class="btn btn-secondary">
-      {$t('app.cancel')}
-    </button>
-    <button onclick={createFile} class="btn btn-primary">
-      {$t('app.create')}
-    </button>
-  </div>
-</Modal>
+<FileActionModals
+  createOpen={showCreateModal}
+  renameOpen={showRenameModal}
+  initialRenameValue={renameTarget}
+  onCreate={createFile}
+  onRename={renameFile}
+  onCloseCreate={() => (showCreateModal = false)}
+  onCloseRename={() => (showRenameModal = false)}
+/>
 
-<Modal
-  isOpen={showRenameModal}
-  title={$t('editor.rename_file')}
-  onclose={() => (showRenameModal = false)}
->
-  <label for="rename-target" class="sr-only">{$t('editor.new_name')}</label>
-  <input
-    id="rename-target"
-    type="text"
-    bind:value={renameTarget}
-    placeholder={$t('editor.new_name')}
-    class="input"
-    style="margin-bottom: 16px; width: 100%;"
-    onkeydown={(e) => e.key === 'Enter' && renameFile()}
-  />
-  <div class="confirm-modal-actions">
-    <button onclick={() => (showRenameModal = false)} class="btn btn-secondary">
-      {$t('app.cancel')}
-    </button>
-    <button onclick={renameFile} class="btn btn-primary">
-      {$t('app.rename')}
-    </button>
-  </div>
-</Modal>
-
-<Modal
+<!-- Templates Modal -->
+<TemplatesModal
   isOpen={showTemplatesModal}
-  title={$t('editor.templates')}
-  maxWidth="900px"
-  class="templates-wide-modal"
-  onclose={() => (showTemplatesModal = false)}
->
-  <div style="margin-top: -10px; margin-bottom: 12px;">
-    <p class="templates-modal-subtitle">
-      {$t('editor.templates_desc')}
-    </p>
-  </div>
+  {selectedFile}
+  hasEditorView={!!editorView}
+  onApplyTemplate={applyTemplate}
+  onClose={() => (showTemplatesModal = false)}
+/>
 
-  <!-- 2-column body -->
-  <div class="templates-body-grid">
-    <!-- Left column: tabs + list -->
-    <div class="templates-col-list">
-      <div class="templates-kernel-tabs">
-        <Tabs
-          items={templateTabItems}
-          value={templateTab}
-          ariaLabel={$t('editor.templates')}
-          onchange={(val) => {
-            templateTab = val as 'xray' | 'mihomo';
-            selectedTemplate = null;
-            templatePreview = '';
-            const first = filteredTemplates[0];
-            if (first) loadTemplatePreview(first);
-          }}
-        />
-      </div>
-
-      <div class="template-list">
-        {#each filteredTemplates as template (template.name)}
-          <button
-            class="template-item"
-            class:selected={selectedTemplate?.name === template.name}
-            onclick={() => loadTemplatePreview(template)}
-            disabled={templateLoading}
-          >
-            <div class="template-info">
-              <span class="template-name">{template.name}</span>
-              <span class="template-desc">{template.description}</span>
-            </div>
-            <span class="template-type">{template.type}</span>
-          </button>
-        {:else}
-          <div class="templates-empty-state">
-            <p class="templates-empty-title">{$t('editor.no_templates')}</p>
-            <p class="templates-empty-hint">{$t('editor.no_templates_hint')}</p>
-          </div>
-        {/each}
-      </div>
-    </div>
-
-    <!-- Right column: preview -->
-    <div class="templates-col-preview">
-      {#if templatePreview}
-        <pre class="template-preview-code">{templatePreview}</pre>
-      {:else}
-        <div class="templates-preview-placeholder">
-          <p style="color: var(--fg-dim); font-size: 14px; text-align: center;">
-            {selectedTemplate ? '' : $t('editor.select_template_preview')}
-          </p>
-        </div>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Footer -->
-  <div
-    class="templates-modal-footer"
-    style="margin-top: 16px; display: flex; justify-content: flex-end;"
-  >
-    <button
-      class="btn btn-primary"
-      disabled={!selectedTemplate || !editorView || templateLoading}
-      title={!editorView ? $t('editor.no_file_for_template') : undefined}
-      onclick={() => selectedTemplate && applyTemplate(selectedTemplate)}
-    >
-      {$t('editor.apply_template')}
-    </button>
-  </div>
-</Modal>
-
-<Modal
+<OutboundGeneratorModal
   isOpen={showGeneratorModal}
-  title={$t('editor.generator')}
-  onclose={() => (showGeneratorModal = false)}
->
-  <div class="form-group" style="margin-bottom: 12px;">
-    <label
-      for="gen-protocol"
-      style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-      >{$t('editor.protocol')}</label
-    >
-    <Select id="gen-protocol" class="input" bind:value={genProtocol}>
-      <option value="vless">VLESS</option>
-      <option value="shadowsocks">Shadowsocks</option>
-    </Select>
-  </div>
+  onGenerate={handleGeneratedOutbound}
+  onClose={() => (showGeneratorModal = false)}
+/>
 
-  <div
-    class="form-grid"
-    style="margin-bottom: 12px; display: grid; grid-template-columns: 2fr 1fr; gap: 12px;"
-  >
-    <div class="form-group">
-      <label
-        for="gen-address"
-        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-        >{$t('editor.address')}</label
-      >
-      <input
-        id="gen-address"
-        type="text"
-        bind:value={genAddress}
-        placeholder="example.com"
-        class="input"
-      />
-    </div>
-    <div class="form-group">
-      <label
-        for="gen-port"
-        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-        >{$t('editor.port')}</label
-      >
-      <input id="gen-port" type="number" bind:value={genPort} class="input" />
-    </div>
-  </div>
-
-  <div class="form-group" style="margin-bottom: 12px;">
-    <label
-      for="gen-uuid"
-      style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-      >{genProtocol === 'vless' ? 'UUID' : 'Password'}</label
-    >
-    <div class="input-group" style="display: flex; gap: 8px;">
-      <input id="gen-uuid" type="text" bind:value={genUUID} class="input" style="flex: 1;" />
-      <button
-        class="btn btn-secondary"
-        style="padding: 0 12px;"
-        onclick={() => (genUUID = crypto.randomUUID())}
-        title={$t('editor.generate_uuid')}
-      >
-        <Icon name="refresh" size={14} />
-      </button>
-    </div>
-  </div>
-
-  {#if genProtocol === 'vless'}
-    <div class="form-group" style="margin-bottom: 12px;">
-      <label
-        for="gen-sni"
-        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-        >SNI</label
-      >
-      <input
-        id="gen-sni"
-        type="text"
-        bind:value={genSNI}
-        placeholder="sni.example.com"
-        class="input"
-      />
-    </div>
-
-    <div
-      class="form-grid"
-      style="margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;"
-    >
-      <div class="form-group">
-        <label
-          for="gen-security"
-          style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-          >Security</label
-        >
-        <Select id="gen-security" class="input" bind:value={genSecurity}>
-          <option value="reality">Reality</option>
-          <option value="tls">TLS</option>
-          <option value="none">None</option>
-        </Select>
-      </div>
-      {#if genSecurity === 'reality'}
-        <div class="form-group">
-          <label
-            for="gen-shortid"
-            style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-            >Short ID</label
-          >
-          <input
-            id="gen-shortid"
-            type="text"
-            bind:value={genShortId}
-            placeholder="hex string"
-            class="input"
-          />
-        </div>
-      {/if}
-    </div>
-  {/if}
-
-  <div class="confirm-modal-actions" style="margin-top: 16px;">
-    <button onclick={() => (showGeneratorModal = false)} class="btn btn-secondary">
-      {$t('app.cancel')}
-    </button>
-    <button onclick={generateOutbound} class="btn btn-primary">
-      {$t('app.generate')}
-    </button>
-  </div>
-</Modal>
-
-<Modal
+<SaveConfirmModal
   isOpen={showSaveConfirmModal}
-  title={$t('editor.confirm_save_title')}
-  maxWidth="700px"
-  onclose={() => (showSaveConfirmModal = false)}
->
-  <!-- Diff Preview -->
-  <div class="diff-preview" style="margin-top: 12px;">
-    <div class="diff-preview-title">
-      {$t('editor.diff_preview')}
-    </div>
-    <div class="diff-preview-body" style="max-height: 40vh; overflow-y: auto;">
-      {#each getDiffGroups(originalContent, editorView ? editorView.state.doc.toString() : '') as group}
-        {#if group.type === 'added'}
-          {#each group.lines as line}
-            <div class="diff-line diff-line-added">+ {line}</div>
-          {/each}
-        {:else if group.type === 'removed'}
-          {#each group.lines as line}
-            <div class="diff-line diff-line-removed">- {line}</div>
-          {/each}
-        {:else if group.type === 'collapsed'}
-          <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
-        {:else}
-          {#each group.lines as line}
-            <div class="diff-line diff-line-unchanged">{line}</div>
-          {/each}
-        {/if}
-      {/each}
-    </div>
-  </div>
+  {originalContent}
+  currentContent={editorView ? editorView.state.doc.toString() : ''}
+  {saving}
+  onConfirm={confirmSave}
+  onClose={() => (showSaveConfirmModal = false)}
+/>
 
-  <div class="confirm-modal-actions" style="margin-top: 16px;">
-    <button onclick={() => (showSaveConfirmModal = false)} class="btn btn-secondary">
-      {$t('app.cancel')}
-    </button>
-    <button onclick={confirmSave} class="btn btn-primary" disabled={saving}>
-      {saving ? $t('app.loading') : $t('app.save')}
-    </button>
-  </div>
-</Modal>
-
-<Modal
+<DeleteFileModal
   isOpen={showDeleteConfirmModal}
-  title={`${$t('editor.delete_file')}: ${selectedFile.split('/').pop() || ''}`}
-  onclose={() => (showDeleteConfirmModal = false)}
->
-  <p style="margin: 0;">
-    {$t('editor.delete_confirm_body', { file: selectedFile.split('/').pop() || '' })}
-  </p>
-  <div class="confirm-modal-actions" style="margin-top: 16px;">
-    <button onclick={() => (showDeleteConfirmModal = false)} class="btn btn-secondary">
-      {$t('app.cancel')}
-    </button>
-    <button onclick={confirmDeleteFile} class="btn btn-danger">
-      {$t('app.delete')}
-    </button>
-  </div>
-</Modal>
+  filePath={selectedFile}
+  onConfirm={confirmDeleteFile}
+  onClose={() => (showDeleteConfirmModal = false)}
+/>
 
 <style>
   .editor-page-container {
@@ -2336,27 +1429,11 @@
     padding-bottom: 60px;
   }
 
-  .eph-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
   :global(.page-header-actions .tabs) {
     margin-bottom: 0;
     border-bottom: none;
   }
 
-  .btn-compact {
-    padding: 4px 10px;
-    font-size: 12px;
-    height: 28px;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  /* Workspace & Resizable Splitter */
   .editor-workspace {
     display: flex;
     flex-direction: row;
@@ -2365,68 +1442,6 @@
     gap: 0;
     overflow: hidden;
     position: relative;
-  }
-
-  .editor-workspace.resizing {
-    user-select: none;
-    cursor: col-resize;
-  }
-
-  .file-tree-pane {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-    flex-shrink: 0;
-    overflow: hidden;
-    max-width: 42%;
-  }
-
-  /* Разделитель — это <button>, поэтому появлялась дефолтная браузерная
-     рамка кнопки (2px outset). Сбрасываем всё оформление и рисуем
-     тонкую линию собственным псевдоэлементом поверх прозрачной
-     hit-area шириной 10px (удобная зона для col-resize). */
-  .editor-splitter {
-    appearance: none;
-    -webkit-appearance: none;
-    border: 0;
-    padding: 0;
-    margin: 0 2px;
-    background: transparent;
-    box-sizing: border-box;
-    width: 10px;
-    flex-shrink: 0;
-    position: relative;
-    z-index: 10;
-    cursor: col-resize;
-    touch-action: none;
-  }
-
-  .editor-splitter::before {
-    content: '';
-    position: absolute;
-    inset: 0 auto;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 1px;
-    height: 100%;
-    background: var(--border);
-    border-radius: 1px;
-    transition:
-      width 0.15s ease,
-      background 0.15s ease;
-  }
-
-  .editor-splitter:hover::before,
-  .editor-splitter:active::before,
-  .editor-workspace.resizing .editor-splitter::before {
-    width: 2px;
-    background: var(--accent);
-  }
-
-  .editor-splitter:focus-visible::before {
-    background: var(--accent);
-    width: 2px;
   }
 
   .editor-main-card {
@@ -2442,522 +1457,6 @@
     overflow: hidden;
   }
 
-  /* Level 2 Subhead Bar */
-  .editor-subhead-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-card);
-    min-height: 36px;
-    gap: 6px;
-    padding-right: 8px;
-    flex-shrink: 0;
-  }
-
-  .btn-sidebar-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 36px;
-    background: transparent;
-    border: none;
-    border-right: 1px solid var(--border);
-    color: var(--fg-dim);
-    cursor: pointer;
-    transition: all 0.15s;
-    flex-shrink: 0;
-  }
-
-  .btn-sidebar-toggle:hover {
-    background: var(--hover);
-    color: var(--fg-primary);
-  }
-
-  .subhead-tabs-container {
-    flex: 1;
-    min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .subhead-tabs-container::-webkit-scrollbar {
-    display: none;
-  }
-
-  .subhead-meta-container {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-
-  .subhead-file-meta {
-    font-size: 12px;
-    font-family: var(--font-family-mono);
-    color: var(--fg-secondary);
-    background: var(--surface-tint);
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-  }
-
-  .btn-kebab {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-dim);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .btn-kebab:hover {
-    background: var(--hover);
-    color: var(--fg-primary);
-  }
-
-  /* Status Bar Elements */
-  .chip-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    font-weight: 600;
-    font-family: var(--font-family-mono);
-    padding: 2px 7px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--surface-tint);
-    color: var(--fg-dim);
-    cursor: pointer;
-    transition: all 0.15s;
-    line-height: 1.3;
-  }
-
-  .chip-toggle:hover {
-    background: var(--hover);
-    color: var(--fg-primary);
-  }
-
-  .chip-toggle.active {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-
-  .chip-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: currentColor;
-  }
-
-  .sb-left {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .sb-right {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .status-shortcut-tip kbd {
-    background: var(--surface-tint);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 1px 4px;
-    font-size: 12px;
-    font-family: var(--font-family-mono);
-    color: var(--fg-secondary);
-  }
-
-  .template-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    overflow-y: auto;
-    flex: 1;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) transparent;
-  }
-
-  .template-list::-webkit-scrollbar {
-    width: 4px;
-  }
-
-  .template-list::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
-    border-radius: 2px;
-  }
-
-  .template-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    text-align: left;
-    transition: all 0.2s;
-    width: 100%;
-    color: var(--fg-primary);
-  }
-
-  .template-item:hover {
-    border-color: var(--accent);
-    background: var(--bg-elevated);
-  }
-
-  .template-info {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .template-name {
-    font-weight: 600;
-    font-size: 14px;
-    color: var(--fg-primary);
-  }
-
-  .template-desc {
-    font-size: 12px;
-    color: var(--fg-dim);
-  }
-
-  .template-type {
-    font-size: 12px;
-    font-weight: 600;
-    background: var(--bg-card);
-    padding: 2px 6px;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-    color: var(--fg-dim);
-    font-family: var(--font-family-mono);
-  }
-
-  .template-item.selected {
-    border-color: var(--accent);
-    background: var(--bg-elevated);
-  }
-
-  :global(.templates-wide-modal) {
-    max-width: 900px !important;
-    width: 90vw !important;
-    padding: 0 !important;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
-  :global(.templates-wide-modal .modal-header) {
-    padding: 20px 20px 12px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    flex-shrink: 0;
-  }
-
-  .templates-modal-subtitle {
-    margin: 0;
-    color: var(--fg-dim);
-    font-size: 13px;
-  }
-
-  .templates-body-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: minmax(0, 1fr);
-    gap: 0;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    max-height: 460px;
-  }
-
-  .templates-col-list {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    border-right: 1px solid var(--border);
-    overflow: hidden;
-  }
-
-  .templates-col-list :global(.tabs) {
-    margin-bottom: 0;
-    padding: 0 12px;
-  }
-
-  .templates-col-list .template-list {
-    padding: 12px;
-  }
-
-  .templates-col-preview {
-    background: var(--code-bg);
-    min-height: 0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .template-preview-code {
-    margin: 0;
-    padding: 16px;
-    font-family: var(--font-family-mono);
-    font-size: 14px;
-    line-height: 1.5;
-    color: var(--code-fg);
-    overflow-y: auto;
-    overflow-x: auto;
-    white-space: pre;
-    height: 100%;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) transparent;
-  }
-
-  .template-preview-code::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
-
-  .template-preview-code::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
-    border-radius: 2px;
-  }
-
-  .templates-preview-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    min-height: 200px;
-    color: var(--fg-dim);
-  }
-
-  .templates-empty-state {
-    padding: 24px 16px;
-    text-align: center;
-  }
-
-  .templates-empty-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--fg-secondary);
-    margin: 0 0 6px;
-  }
-
-  .templates-empty-hint {
-    font-size: 12px;
-    color: var(--fg-dim);
-    margin: 0;
-  }
-
-  .templates-modal-footer {
-    padding: 12px 20px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: flex-end;
-    flex-shrink: 0;
-  }
-
-  .kebab-wrap {
-    position: relative;
-    display: inline-block;
-  }
-
-  .kebab-dropdown {
-    position: absolute;
-    right: 0;
-    top: calc(100% + 4px);
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    min-width: 180px;
-    z-index: 100;
-    overflow: hidden;
-    padding: 4px;
-  }
-
-  .kebab-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 8px 12px;
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
-    color: var(--fg-primary);
-    text-align: left;
-    transition: background 0.15s;
-  }
-
-  .kebab-item:hover {
-    background: var(--hover);
-  }
-
-  .kebab-item.danger {
-    color: var(--danger);
-  }
-
-  .kebab-divider {
-    height: 1px;
-    background: var(--border);
-    margin: 4px 0;
-  }
-
-  .diff-preview {
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  .diff-preview-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--fg-dim);
-    margin-bottom: 6px;
-    flex-shrink: 0;
-  }
-
-  .diff-preview-body {
-    flex: 1;
-    overflow-y: auto;
-    background: var(--cm-bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px;
-    font-family: var(--font-family-mono);
-    font-size: 12px;
-    line-height: 1.5;
-  }
-
-  .diff-line {
-    white-space: pre-wrap;
-    word-break: break-all;
-  }
-
-  .diff-line-added {
-    color: var(--success);
-    background: rgba(163, 233, 182, 0.04);
-  }
-
-  .diff-line-removed {
-    color: var(--danger);
-    background: rgba(248, 113, 113, 0.04);
-  }
-
-  .diff-line-collapsed {
-    color: var(--fg-faint);
-    font-style: italic;
-  }
-
-  .diff-line-unchanged {
-    color: var(--fg-secondary);
-  }
-
-  .btn-accent {
-    background: linear-gradient(180deg, var(--accent), var(--accent-2));
-    border: 1px solid var(--accent);
-    color: var(--btn-primary-text, var(--bg-deep));
-    font-weight: 600;
-  }
-  .btn-accent:hover:not(:disabled) {
-    background: var(--accent-hover);
-    box-shadow: 0 0 10px var(--accent-soft);
-  }
-  .btn-accent:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .ks-dot-spin {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin-right: 6px;
-  }
-  .ks-dot {
-    width: 6px;
-    height: 6px;
-    background-color: currentColor;
-    border-radius: 50%;
-    animation: ks-dot-bounce 1.4s infinite ease-in-out both;
-  }
-  .ks-dot:nth-child(1) {
-    animation-delay: -0.32s;
-  }
-  .ks-dot:nth-child(2) {
-    animation-delay: -0.16s;
-  }
-
-  @keyframes ks-dot-bounce {
-    0%,
-    80%,
-    100% {
-      transform: scale(0);
-    }
-    40% {
-      transform: scale(1);
-    }
-  }
-
-  .status-apply-indicator {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--accent);
-    padding: 0 10px;
-    border-left: 1px solid var(--border);
-  }
-
-  .backups-toggle-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: var(--surface-tint);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--fg-secondary);
-    font-size: 12px;
-    padding: 4px 10px;
-    cursor: pointer;
-    font-family: var(--font-family-mono);
-    transition: all 0.15s ease;
-    margin-left: 10px;
-  }
-
-  .backups-toggle-btn:hover {
-    background: var(--hover);
-    color: var(--fg-primary);
-  }
-
-  .chevron-icon {
-    transition: transform 0.2s ease;
-  }
-  .chevron-icon.rotated {
-    transform: rotate(180deg);
-  }
-
   .editor-empty-card :global(.empty-state) {
     justify-content: center;
     background: transparent;
@@ -2965,62 +1464,5 @@
     box-shadow: none;
     padding: 0;
     max-width: 480px;
-  }
-
-  .editor-statusbar {
-    padding: 6px 14px;
-    background: var(--surface-tint);
-    border-top: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    font-family: var(--font-family-mono);
-    font-size: 12px;
-    color: var(--fg-secondary);
-    min-height: 30px;
-  }
-  .editor-breadcrumbs {
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 4px;
-    padding: 8px 14px;
-    background: var(--surface-tint);
-    border-bottom: 1px solid var(--border);
-    font-size: 12px;
-    color: var(--fg-secondary);
-    overflow-x: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-  }
-  .editor-breadcrumbs::-webkit-scrollbar {
-    height: 3px;
-  }
-  .editor-breadcrumbs::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: var(--radius);
-  }
-  .breadcrumb-segment {
-    display: inline-block;
-    background: transparent;
-    border: none;
-    padding: 0;
-    color: var(--fg-dim);
-    font: inherit;
-    cursor: pointer;
-    max-width: 160px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .breadcrumb-divider {
-    flex-shrink: 0;
-  }
-  @media (max-width: 768px) {
-    .editor-breadcrumbs {
-      display: none !important;
-    }
-    .status-shortcut-tip {
-      display: none !important;
-    }
   }
 </style>

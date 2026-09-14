@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
 
-  interface EditorTab {
+  export interface EditorTab {
     path: string;
     name: string;
     isDirty: boolean;
