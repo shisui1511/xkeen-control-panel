@@ -1770,7 +1770,7 @@
     margin: 0;
     padding: 0 2px;
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
   }
 
   .update-hint.update-hint-error {

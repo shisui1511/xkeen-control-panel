@@ -562,7 +562,7 @@
     </div>
   {:else if schemaError}
     <div class="error-state-block" style="padding: 48px; text-align: center;">
-      <p style="color: var(--danger, #ef4444); margin-bottom: 16px;">
+      <p style="color: var(--danger); margin-bottom: 16px;">
         {$t('editor.definition_load_error', { error: schemaError })}
       </p>
       <button class="btn btn-secondary" onclick={loadSchema}>{$t('app.retry')}</button>
@@ -759,7 +759,7 @@
               class="validation-error-block"
               role="alert"
               aria-live="assertive"
-              style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger, #ef4444); border-radius: var(--radius-md); color: var(--danger, #ef4444); font-size: 13px;"
+              style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
             >
               <div style="font-weight: bold; margin-bottom: 6px;">
                 {$t('editor.validation_failed')}
@@ -814,7 +814,7 @@
             <code>{file.name}</code>:
             <span
               class="badge"
-              style="background-color: var(--warning-soft, rgba(245, 158, 11, 0.15)); color: var(--warning, #f59e0b);"
+              style="background-color: var(--warning-soft, rgba(245, 158, 11, 0.15)); color: var(--warning);"
             >
               {$t('xray.sections_modified', { count: file.changesCount })}
             </span>
@@ -954,7 +954,7 @@
   .preset-mod-badge {
     margin-left: 5px;
     font-size: var(--font-size-xs, 0.6875rem);
-    color: var(--warning, #f59e0b);
+    color: var(--warning);
     opacity: 0.9;
     font-style: italic;
   }

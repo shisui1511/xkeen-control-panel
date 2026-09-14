@@ -675,7 +675,7 @@
 
   .btn-action-primary {
     background: var(--primary);
-    color: var(--primary-fg, #fff);
+    color: var(--primary-fg);
   }
 
   .btn-action-primary:hover {

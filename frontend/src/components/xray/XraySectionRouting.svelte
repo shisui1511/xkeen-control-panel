@@ -802,7 +802,7 @@
     left: 1px;
     width: 12px;
     height: 12px;
-    background: var(--color-on-primary, #ffffff);
+    background: var(--color-on-primary);
     border-radius: 50%;
     transition: transform 0.2s;
   }
@@ -823,12 +823,12 @@
 
   .badge-direct {
     background: var(--color-success-subtle, rgba(16, 185, 129, 0.15));
-    color: var(--color-success, #10b981);
+    color: var(--color-success);
   }
 
   .badge-block {
     background: var(--color-danger-subtle, rgba(239, 68, 68, 0.15));
-    color: var(--color-danger, #ef4444);
+    color: var(--color-danger);
   }
 
   .badge-proxy {
@@ -867,8 +867,8 @@
   }
 
   .btn-rule-del:hover {
-    color: var(--danger, #ef4444) !important;
-    border-color: var(--danger, #ef4444) !important;
+    color: var(--danger) !important;
+    border-color: var(--danger) !important;
   }
 
   .rule-details {
@@ -906,7 +906,7 @@
 
   .chip-ip {
     background: var(--color-warning-subtle, rgba(245, 158, 11, 0.15));
-    color: var(--color-warning, #f59e0b);
+    color: var(--color-warning);
   }
 
   .form-card {

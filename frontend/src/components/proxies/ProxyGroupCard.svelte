@@ -1256,7 +1256,7 @@
     border-top: 1px solid var(--border);
   }
   .proxy-grid-more {
-    background: var(--bg-surface, #1e293b);
+    background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--accent);
@@ -1266,7 +1266,7 @@
     transition: all 0.15s;
   }
   .proxy-grid-more:hover {
-    background: var(--bg-card-hover, #334155);
+    background: var(--bg-card-hover);
     border-color: var(--accent);
   }
   .rendered-nodes-hint {

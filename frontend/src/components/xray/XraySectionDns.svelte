@@ -369,7 +369,7 @@
   }
 
   .item-del:hover {
-    color: var(--danger, #ef4444);
+    color: var(--danger);
     background: var(--bg-surface-active);
   }
 
@@ -474,7 +474,7 @@
     top: 2px;
     width: 4px;
     height: 8px;
-    border: solid var(--color-on-primary, #ffffff);
+    border: solid var(--color-on-primary);
     border-width: 0 2px 2px 0;
     transform: rotate(45deg);
   }

@@ -541,7 +541,7 @@
           class="error-msg"
           id="xray-import-error"
           role="alert"
-          style="color: var(--danger, #ef4444); margin-bottom: 12px; font-size: 13px;"
+          style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
         >
           {importErrorMsg}
         </div>
@@ -675,7 +675,7 @@
               {#if item.rowError}
                 <div
                   class="preview-item-card"
-                  style="background: var(--bg-surface); border: 1px solid var(--danger, #ef4444); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                  style="background: var(--bg-surface); border: 1px solid var(--danger); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
                 >
                   <button
                     type="button"
@@ -683,7 +683,7 @@
                     style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
                     aria-label={$t('app.remove')}>✕</button
                   >
-                  <div style="font-size: 12px; color: var(--danger, #ef4444); padding-right: 20px;">
+                  <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
                     <strong>{$t('app.error')}:</strong>
                     {item.rowError}
                   </div>
@@ -832,8 +832,8 @@
   }
 
   .btn-del:hover {
-    color: var(--danger, #ef4444) !important;
-    border-color: var(--danger, #ef4444) !important;
+    color: var(--danger) !important;
+    border-color: var(--danger) !important;
   }
 
   .form-label {
@@ -883,7 +883,7 @@
 
   .btn-action-primary:hover {
     background: var(--color-primary);
-    color: var(--color-on-primary, #ffffff);
+    color: var(--color-on-primary);
   }
 
   .conf-dropzone {

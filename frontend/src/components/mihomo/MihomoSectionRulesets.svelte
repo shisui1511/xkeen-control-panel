@@ -131,7 +131,7 @@
 
   .badge-primary {
     background: var(--primary);
-    color: var(--primary-fg, #fff);
+    color: var(--primary-fg);
   }
 
   .badge-secondary {

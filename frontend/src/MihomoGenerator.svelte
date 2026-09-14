@@ -1010,6 +1010,12 @@
     align-items: stretch;
   }
 
+  @media (max-width: 1024px) {
+    .gen-layout {
+      flex-direction: column;
+    }
+  }
+
   .gen-left {
     flex: 1;
     min-width: 0;
