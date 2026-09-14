@@ -260,7 +260,7 @@
     height: 24px;
     border-radius: var(--radius-sm);
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -287,7 +287,7 @@
   }
 
   .zkeen-exclude-badge {
-    background: rgba(240, 180, 80, 0.1);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
     color: var(--warning);
     font-size: var(--font-size-xs);
     padding: 1px 4px;
@@ -296,7 +296,7 @@
   }
 
   .zkeen-include-badge {
-    background: rgba(139, 92, 246, 0.1);
+    background: color-mix(in srgb, var(--seq-6) 12%, transparent);
     color: var(--seq-6);
     font-size: var(--font-size-xs);
     padding: 1px 4px;
@@ -306,7 +306,7 @@
 
   .zkeen-group-body {
     margin-top: 4px;
-    border-top: 1px solid rgba(255, 255, 255, 0.03);
+    border-top: 1px solid var(--border-subtle);
     padding-top: 8px;
   }
 
@@ -331,7 +331,7 @@
   }
 
   .type-group {
-    background: rgba(139, 92, 246, 0.15);
+    background: color-mix(in srgb, var(--seq-1) 15%, transparent);
     color: var(--seq-1);
   }
 
@@ -425,7 +425,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: var(--hover);
     transition: 0.4s;
     border: 1px solid var(--border);
   }

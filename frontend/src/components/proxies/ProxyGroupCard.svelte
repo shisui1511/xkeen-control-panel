@@ -802,7 +802,7 @@
     font-weight: 700;
     padding: 2px 8px;
     border-radius: var(--radius-sm);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     color: var(--fg-secondary);
   }
   .gc-lat-box {
@@ -916,7 +916,7 @@
     gap: 5px;
     padding: 2px 10px;
     border-radius: var(--radius-lg);
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-tint);
     border: 1px solid var(--border);
     color: var(--fg-primary);
     font-size: var(--font-size-xs);
@@ -1116,7 +1116,7 @@
   }
   .btn-latency-test:hover {
     color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--hover);
   }
   .btn-latency-test:focus-visible {
     outline: 2px solid var(--accent);
@@ -1138,14 +1138,14 @@
     border-radius: var(--radius-full);
     font-size: var(--font-size-xs);
     font-weight: 500;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--surface-tint);
     border: 1px solid var(--border);
     color: var(--fg-secondary);
     cursor: pointer;
     transition: all 0.15s ease;
   }
   .filter-chip:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--hover);
     color: var(--fg-primary);
   }
   .filter-chip.active {

@@ -97,12 +97,12 @@
 
   .diff-line-added {
     color: var(--success);
-    background: rgba(163, 233, 182, 0.04);
+    background: color-mix(in srgb, var(--success) 6%, transparent);
   }
 
   .diff-line-removed {
     color: var(--danger);
-    background: rgba(248, 113, 113, 0.04);
+    background: color-mix(in srgb, var(--danger) 6%, transparent);
   }
 
   .diff-line-collapsed {

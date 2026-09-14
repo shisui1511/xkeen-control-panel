@@ -173,13 +173,13 @@
   }
 
   .type-rule {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     color: var(--fg-dim);
     font-size: var(--font-size-xs);
   }
 
   .type-match {
-    background: rgba(99, 102, 241, 0.15);
+    background: color-mix(in srgb, var(--seq-5) 15%, transparent);
     color: var(--seq-5);
     font-weight: 600;
   }
@@ -226,7 +226,7 @@
 
   .item-btn:hover {
     color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--hover);
   }
 
   .item-del {

@@ -174,8 +174,8 @@
   }
 
   .alert-warning {
-    background: rgba(240, 180, 80, 0.1);
-    border: 1px solid rgba(240, 180, 80, 0.3);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     color: var(--warning);
   }
 </style>

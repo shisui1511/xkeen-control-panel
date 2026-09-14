@@ -1272,7 +1272,7 @@
           <div style="flex: 1; min-height: 0; position:relative; background: var(--cm-bg);">
             {#if loading}
               <div
-                style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:rgba(5,13,22,0.7);z-index:10;"
+                style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:color-mix(in srgb, var(--bg-card) 75%, transparent);z-index:10;"
               >
                 <div class="spinner" style="--spinner-size: 24px;"></div>
               </div>
