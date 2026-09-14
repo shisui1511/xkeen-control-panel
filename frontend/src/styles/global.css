@@ -2526,6 +2526,13 @@ a.chip:hover {
   box-sizing: border-box !important;
 }
 
+.editor-page-container.constructor-mode {
+  height: auto !important;
+  min-height: 100% !important;
+  overflow: visible !important;
+  padding-bottom: 60px !important;
+}
+
 .editor-tabs {
   flex: 0 0 auto !important;
   align-self: flex-start !important;

@@ -281,6 +281,7 @@
     } else {
       window.location.hash = '#/editor';
     }
+    window.dispatchEvent(new Event('hashchange'));
   }
 
   async function handleInsertIntoEditor(yamlContent: string) {
@@ -1533,7 +1534,7 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<div class="editor-page-container">
+<div class="editor-page-container" class:constructor-mode={activeTab === 'constructor'}>
   <!-- Level 1 Header (EDIT-01) -->
   <PageHeader
     title={$t('editor.h1')}
@@ -2327,6 +2328,12 @@
     height: calc(100vh - 76px);
     min-height: 500px;
     gap: 0;
+  }
+
+  .editor-page-container.constructor-mode {
+    height: auto;
+    min-height: 100%;
+    padding-bottom: 60px;
   }
 
   .eph-right {

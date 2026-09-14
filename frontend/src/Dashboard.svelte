@@ -51,6 +51,22 @@
   let isSavingAndNavigating = $state(false);
   let dirtySourceNames = $state<string[]>([]);
   let currentTab = $state('dashboard');
+  let currentHash = $state(typeof window !== 'undefined' ? window.location.hash : '');
+
+  function checkIsConstructorHash(hash: string): boolean {
+    if (!hash) return false;
+    const cleanHash = hash.replace(/^#\/?/, '');
+    const [path, query] = cleanHash.split('?');
+    if (path === 'constructor' || path === 'mihomo-gen') return true;
+    if (path === 'editor' && query) {
+      const params = new URLSearchParams(query);
+      if (params.get('tab') === 'constructor') return true;
+    }
+    return false;
+  }
+
+  const isConstructorMode = $derived(checkIsConstructorHash(currentHash));
+  const isEditorFullscreen = $derived(currentTab === 'editor' && !isConstructorMode);
   const mihomoDependentTabs = [
     'proxies',
     'connections',
@@ -531,6 +547,7 @@
   }
 
   function handleHashChange() {
+    currentHash = window.location.hash;
     const targetTab = getTabFromHash();
     if (targetTab !== currentTab && isAnySourceDirty()) {
       pendingTargetTab = targetTab;
@@ -756,6 +773,7 @@
     fetchVersion();
     fetchProxySummary();
 
+    currentHash = window.location.hash;
     currentTab = getTabFromHash();
     window.addEventListener('hashchange', handleHashChange);
     if (!window.location.hash) {
@@ -806,7 +824,7 @@
   });
 </script>
 
-<div class="dashboard-layout" class:editor-active={currentTab === 'editor'}>
+<div class="dashboard-layout" class:editor-active={isEditorFullscreen}>
   <!-- Mobile header bar -->
   <header class="mobile-header" inert={drawerIsModal}>
     <button
@@ -874,7 +892,7 @@
   <!-- Main content area -->
   <div
     class="main-content"
-    class:editor-active={currentTab === 'editor'}
+    class:editor-active={isEditorFullscreen}
     class:rail={$isSidebarCollapsed}
     inert={drawerIsModal}
   >
@@ -1316,7 +1334,9 @@
           <Skeleton type="card" height="100%" />
         {:then { default: Editor }}
           <div
-            style="flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100%;"
+            style={isEditorFullscreen
+              ? 'flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100%;'
+              : 'flex: 1; display: flex; flex-direction: column; min-height: 100%;'}
             transition:fade={{ duration: 150 }}
           >
             <Editor onSwitchTab={switchTab} />

@@ -242,4 +242,51 @@ test.describe('Xray Constructor integration test suite', () => {
     expect(options).toContain('direct');
     expect(options).toContain('block');
   });
+
+  test('constructor mode enables vertical scrolling and toggles editor-active correctly', async ({
+    page
+  }) => {
+    await page.goto('/#/constructor');
+
+    const layout = page.locator('.dashboard-layout');
+    const mainContent = page.locator('.main-content');
+    const editorPage = page.locator('.editor-page-container');
+
+    // Ожидаем завершения загрузки ленивого чанка конструктора
+    await expect(page.locator('.constructor-wrapper')).toBeVisible({ timeout: 10000 });
+
+    // В режиме конструктора editor-active отключен, а constructor-mode активен
+    await expect(layout).not.toHaveClass(/editor-active/);
+    await expect(mainContent).not.toHaveClass(/editor-active/);
+    await expect(editorPage).toHaveClass(/constructor-mode/);
+
+    // main-content имеет overflow-y: auto (скролл доступен, а не заблокирован через hidden)
+    const overflowY = await mainContent.evaluate((el) => getComputedStyle(el).overflowY);
+    expect(overflowY).toBe('auto');
+
+    // layout не имеет overflow: hidden
+    const layoutOverflow = await layout.evaluate((el) => getComputedStyle(el).overflow);
+    expect(layoutOverflow).not.toBe('hidden');
+
+    // Переключаемся на вкладку «Файлы» — editor-active должен включиться
+    const filesTab = page.locator('button.tab-btn:has-text("Файлы")');
+    await filesTab.click();
+    await expect(layout).toHaveClass(/editor-active/);
+    await expect(mainContent).toHaveClass(/editor-active/);
+    await expect(editorPage).not.toHaveClass(/constructor-mode/);
+
+    // При активном editor-active layout блокирует внешний скролл
+    const editorLayoutOverflow = await layout.evaluate((el) => getComputedStyle(el).overflow);
+    expect(editorLayoutOverflow).toBe('hidden');
+
+    // Переключаемся обратно на «Конструктор» — editor-active должен снова сняться
+    const constructorTab = page.locator('button.tab-btn:has-text("Конструктор")');
+    await constructorTab.click();
+    await expect(layout).not.toHaveClass(/editor-active/);
+    await expect(mainContent).not.toHaveClass(/editor-active/);
+    await expect(editorPage).toHaveClass(/constructor-mode/);
+
+    const restoredOverflowY = await mainContent.evaluate((el) => getComputedStyle(el).overflowY);
+    expect(restoredOverflowY).toBe('auto');
+  });
 });
