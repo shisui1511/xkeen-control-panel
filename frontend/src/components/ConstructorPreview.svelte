@@ -50,13 +50,18 @@
 
   function handleCopy() {
     if (!content) return;
-    navigator.clipboard.writeText(content).then(() => {
-      copyFeedback = true;
-      showToast('success', $t('app.copied'));
-      setTimeout(() => {
-        copyFeedback = false;
-      }, 2000);
-    });
+    navigator.clipboard
+      .writeText(content)
+      .then(() => {
+        copyFeedback = true;
+        showToast('success', $t('app.copied'));
+        setTimeout(() => {
+          copyFeedback = false;
+        }, 2000);
+      })
+      .catch((err) => {
+        console.warn('Clipboard write rejected:', err);
+      });
   }
 
   function handleDownload() {

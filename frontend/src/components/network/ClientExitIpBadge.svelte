@@ -27,9 +27,14 @@
   function handleCopy(text: string, e?: MouseEvent) {
     if (e) e.stopPropagation();
     if (!text) return;
-    navigator.clipboard.writeText(text).then(() => {
-      showToast('success', $t('app.copied'));
-    });
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        showToast('success', $t('app.copied'));
+      })
+      .catch((err) => {
+        console.warn('Clipboard write rejected:', err);
+      });
   }
 
   function handleClickOutside(event: MouseEvent) {
