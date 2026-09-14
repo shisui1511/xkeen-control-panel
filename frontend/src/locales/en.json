@@ -309,6 +309,7 @@
   "editor.diff_preview": "Changes Preview:",
   "editor.diff_large_old": "File is too large for visual diff. Old version content hidden.",
   "editor.diff_large_new": "File is too large for visual diff. New version content will be saved.",
+  "editor.diff_lines_hidden": "... {count} lines hidden ...",
   "editor.resize_sidebar": "Resize sidebar",
   "editor.confirm_save_btn": "Save Changes",
   "editor.has_draft": "Unsaved draft available",

@@ -63,6 +63,21 @@ export function getDiff(oldStr: string, newStr: string): DiffChange[] {
   return diff;
 }
 
+function getHiddenLinesText(count: number): string {
+  try {
+    const $t = get(t);
+    if (typeof $t === 'function') {
+      const text = $t('editor.diff_lines_hidden', { count });
+      if (text && text !== 'editor.diff_lines_hidden') {
+        return text;
+      }
+    }
+  } catch {
+    // fallback if store is unavailable
+  }
+  return `... ${count} lines hidden ...`;
+}
+
 export function getDiffGroups(oldStr: string, newStr: string): DiffGroup[] {
   const changes = getDiff(oldStr, newStr);
   if (changes.length === 0) return [];
@@ -82,7 +97,7 @@ export function getDiffGroups(oldStr: string, newStr: string): DiffGroup[] {
         });
         groups.push({
           type: 'collapsed',
-          lines: [`... ${currentLines.length - 6} lines hidden ...`]
+          lines: [getHiddenLinesText(currentLines.length - 6)]
         });
         groups.push({
           type: 'unchanged',
@@ -107,7 +122,7 @@ export function getDiffGroups(oldStr: string, newStr: string): DiffGroup[] {
       });
       groups.push({
         type: 'collapsed',
-        lines: [`... ${currentLines.length - 6} lines hidden ...`]
+        lines: [getHiddenLinesText(currentLines.length - 6)]
       });
       groups.push({
         type: 'unchanged',
