@@ -6,6 +6,8 @@ export interface Proxy {
   type: string;
   server: string;
   port: number;
+  enabled?: boolean;
+  isImported?: boolean;
   uuid?: string;
   flow?: string;
   publicKey?: string;
