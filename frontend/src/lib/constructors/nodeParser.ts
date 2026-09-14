@@ -307,3 +307,33 @@ export function mapParsedOutboundToMihomoProxy(parsed: any, customTag?: string):
 
   return p;
 }
+
+export function getNodeServer(node: any): string {
+  if (!node || !node.settings) return '';
+  if (node.settings.vnext && node.settings.vnext[0]) {
+    return node.settings.vnext[0].address || '';
+  }
+  if (node.settings.servers && node.settings.servers[0]) {
+    return node.settings.servers[0].address || '';
+  }
+  if (node.settings.peers && node.settings.peers[0]?.endpoint) {
+    const ep = node.settings.peers[0].endpoint;
+    return ep.includes(':') ? ep.substring(0, ep.lastIndexOf(':')) : ep;
+  }
+  return '';
+}
+
+export function getNodePort(node: any): string {
+  if (!node || !node.settings) return '';
+  if (node.settings.vnext && node.settings.vnext[0]) {
+    return String(node.settings.vnext[0].port || '');
+  }
+  if (node.settings.servers && node.settings.servers[0]) {
+    return String(node.settings.servers[0].port || '');
+  }
+  if (node.settings.peers && node.settings.peers[0]?.endpoint) {
+    const ep = node.settings.peers[0].endpoint;
+    return ep.includes(':') ? ep.substring(ep.lastIndexOf(':') + 1) : '51820';
+  }
+  return '';
+}
