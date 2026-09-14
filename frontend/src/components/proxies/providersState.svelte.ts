@@ -551,8 +551,8 @@ export class ProvidersState {
           target_tag: targetTag
         })
       });
-      const data = await res.json();
       if (res.status === 401) return;
+      const data = await res.json().catch(() => null);
       if (res.status === 409) {
         if (data?.error === 'cannot cascade node that is already used as a proxy target') {
           showToast('error', get(t)('subscr.dialer_proxy.already_target'));
@@ -689,14 +689,16 @@ export class ProvidersState {
           method: 'POST'
         }
       );
+      if (res.status === 401) return;
       if (res.ok) {
         showToast('success', get(t)('app.success'));
         await this.loadNodesBySource(subId);
       } else {
-        const text = await res.text();
+        const text = await res.text().catch(() => '');
         showToast('error', text || get(t)('app.error'));
       }
-    } catch {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', get(t)('app.error'));
     }
   }
