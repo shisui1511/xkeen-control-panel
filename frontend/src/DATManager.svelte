@@ -1364,7 +1364,7 @@
     background: transparent;
     border: none;
     padding: 4px 10px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--fg-secondary);
     border-radius: var(--radius-sm, 4px);

@@ -19,14 +19,13 @@ export const MIGRATED_ROUTES = [
   '/#/logs',
   '/#/editor',
   '/#/dat',
-  '/#/network',
   '/#/subscriptions',
   '/#/settings'
 ];
 
 const THEMES = ['light', 'dark'] as const;
 
-test.describe('Design System Sweep — четырнадцать маршрутов панели', () => {
+test.describe('Design System Sweep — тринадцать маршрутов панели', () => {
   for (const route of MIGRATED_ROUTES) {
     for (const theme of THEMES) {
       test(`${route} [${theme}]: ровно один h1 с вычисленным font-size 22px`, async ({ page }) => {

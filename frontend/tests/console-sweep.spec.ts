@@ -218,19 +218,6 @@ test.describe('Mihomo mode — console sweep (16 pages)', () => {
     expect(errors, `console errors on mihomo:dat: ${JSON.stringify(errors)}`).toHaveLength(0);
   });
 
-  test('mihomo:network has no console errors', async ({ page }) => {
-    await setupMocks(page, 'mihomo');
-    const { errors, warnings } = attachConsoleCollectors(page);
-    await visitPage(page, '/#/network');
-    if (warnings.length > 0) {
-      console.log(
-        '[console-sweep] mihomo:network warnings:',
-        warnings.map((w) => w.text).join(' | ')
-      );
-    }
-    expect(errors, `console errors on mihomo:network: ${JSON.stringify(errors)}`).toHaveLength(0);
-  });
-
   test('mihomo:subscriptions has no console errors', async ({ page }) => {
     await setupMocks(page, 'mihomo');
     const { errors, warnings } = attachConsoleCollectors(page);
@@ -322,19 +309,6 @@ test.describe('Xray mode — console sweep (8 pages)', () => {
       console.log('[console-sweep] xray:dat warnings:', warnings.map((w) => w.text).join(' | '));
     }
     expect(errors, `console errors on xray:dat: ${JSON.stringify(errors)}`).toHaveLength(0);
-  });
-
-  test('xray:network has no console errors', async ({ page }) => {
-    await setupMocks(page, 'xray');
-    const { errors, warnings } = attachConsoleCollectors(page);
-    await visitPage(page, '/#/network');
-    if (warnings.length > 0) {
-      console.log(
-        '[console-sweep] xray:network warnings:',
-        warnings.map((w) => w.text).join(' | ')
-      );
-    }
-    expect(errors, `console errors on xray:network: ${JSON.stringify(errors)}`).toHaveLength(0);
   });
 
   test('xray:subscriptions has no console errors', async ({ page }) => {

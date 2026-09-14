@@ -1538,23 +1538,6 @@
             />
           </div>
         {/await}
-      {:else if currentTab === 'network'}
-        {#await import('./NetworkTools.svelte')}
-          <Skeleton type="card" height="60vh" />
-        {:then { default: NetworkTools }}
-          <div transition:fade={{ duration: 150 }}>
-            <NetworkTools onSwitchTab={switchTab} />
-          </div>
-        {:catch err}
-          <div use:reportChunkErrorAction={err}>
-            <EmptyState
-              title={$t('app.chunk_load_failed')}
-              description=""
-              ctaText={$t('app.retry')}
-              oncta={retryChunkLoad}
-            />
-          </div>
-        {/await}
       {:else if currentTab === 'settings'}
         {#await import('./Settings.svelte')}
           <Skeleton type="card" height="60vh" />

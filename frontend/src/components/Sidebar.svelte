@@ -529,17 +529,6 @@
       <span class="lbl">{$t('nav.services')}</span>
     </a>
     <a
-      href="#/network"
-      class="nav-item"
-      aria-current={currentTab === 'network' ? 'page' : undefined}
-      data-label={$t('nav.network')}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$isSidebarCollapsed ? undefined : $t('nav.network')}
-    >
-      <Icon name="network" size={16} />
-      <span class="lbl">{$t('nav.network')}</span>
-    </a>
-    <a
       href="#/settings"
       class="nav-item"
       aria-current={currentTab === 'settings' ? 'page' : undefined}
