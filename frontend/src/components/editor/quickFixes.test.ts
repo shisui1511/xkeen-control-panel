@@ -26,6 +26,18 @@ describe('computeQuickFixes', () => {
     expect(parsed.routing).toEqual({ rules: [] });
   });
 
+  it('ignores json arrays and primitives without modifying them or falsely applying fixes', () => {
+    const arrayInput = JSON.stringify(['item1', 'item2']);
+    const arrayResult = computeQuickFixes(arrayInput, 'xray/05_routing.json');
+    expect(arrayResult.fixed).toBe(arrayInput);
+    expect(arrayResult.fixesApplied).toBe(0);
+
+    const nullInput = 'null';
+    const nullResult = computeQuickFixes(nullInput, 'xray/05_routing.json');
+    expect(nullResult.fixed).toBe('null');
+    expect(nullResult.fixesApplied).toBe(0);
+  });
+
   it('applies missing sections to Mihomo YAML', () => {
     const input = 'mixed-port: 7890\n';
     const result = computeQuickFixes(input, 'mihomo/config.yaml');

@@ -28,7 +28,7 @@ export function computeQuickFixes(content: string, filePath: string): QuickFixRe
   } else if (isJson) {
     try {
       const data = JSON.parse(fixed);
-      if (isXray) {
+      if (isXray && typeof data === 'object' && data !== null && !Array.isArray(data)) {
         if (!data.inbounds) {
           data.inbounds = [];
           fixesApplied++;
@@ -41,8 +41,8 @@ export function computeQuickFixes(content: string, filePath: string): QuickFixRe
           data.routing = { rules: [] };
           fixesApplied++;
         }
+        fixed = JSON.stringify(data, null, 2);
       }
-      fixed = JSON.stringify(data, null, 2);
     } catch {
       return { fixed: content, fixesApplied: 0 };
     }
