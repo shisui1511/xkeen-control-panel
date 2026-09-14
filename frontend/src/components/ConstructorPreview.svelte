@@ -163,9 +163,10 @@
         </div>
       </div>
 
-      <pre class="constructor-preview-panel" data-testid={testId || 'constructor-preview'}><code
-          >{content}</code
-        ></pre>
+      <pre
+        id={testId}
+        class="constructor-preview-panel yaml-preview"
+        data-testid={testId || 'constructor-preview'}><code>{content}</code></pre>
     </div>
 
     {#if children}

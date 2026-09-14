@@ -131,22 +131,37 @@ export const ZKEEN_16_GROUPS_TEMPLATE: Omit<ProxyGroup, 'id'>[] = [
     name: 'Reddit',
     type: 'select',
     includeAll: true,
-    proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
-    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Reddit.png'
+    proxies: ['DIRECT', 'Blocked Services', 'Fallback', 'Fastest'],
+    icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png'
   },
   {
-    name: 'Social Networks',
+    name: 'Meta',
     type: 'select',
     includeAll: true,
     proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
-    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Instagram.png'
+    icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png'
   },
   {
     name: 'Spotify',
     type: 'select',
     includeAll: true,
-    proxies: ['DIRECT', 'Blocked Services', 'Fallback', 'Fastest'],
+    excludeFilter: '🇷🇺',
+    proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
     icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png'
+  },
+  {
+    name: 'Speedtest',
+    type: 'select',
+    includeAll: true,
+    proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
+    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png'
+  },
+  {
+    name: 'Telegram',
+    type: 'select',
+    includeAll: true,
+    proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
+    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png'
   },
   {
     name: 'Steam',
@@ -156,46 +171,47 @@ export const ZKEEN_16_GROUPS_TEMPLATE: Omit<ProxyGroup, 'id'>[] = [
     icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png'
   },
   {
-    name: 'Gaming',
+    name: 'CDN',
+    type: 'select',
+    includeAll: true,
+    proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
+    icon: 'https://www.svgrepo.com/show/396567/globe-with-meridians.svg'
+  },
+  {
+    name: 'Google',
     type: 'select',
     includeAll: true,
     proxies: ['DIRECT', 'Blocked Services', 'Fallback', 'Fastest'],
-    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Game.png'
+    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png'
   },
   {
-    name: 'AI Services',
+    name: 'GitHub',
     type: 'select',
     includeAll: true,
+    proxies: ['DIRECT', 'Blocked Services', 'Fallback', 'Fastest'],
+    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png'
+  },
+  {
+    name: 'AI',
+    type: 'select',
+    includeAll: true,
+    excludeFilter: '🇷🇺',
     proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
     icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png'
   },
   {
-    name: 'Crypto',
+    name: 'Twitter',
     type: 'select',
     includeAll: true,
-    proxies: ['DIRECT', 'Blocked Services', 'Fallback', 'Fastest'],
-    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bank.png'
+    proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
+    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png'
   },
   {
-    name: 'AdBlock',
-    type: 'select',
-    includeAll: false,
-    proxies: ['REJECT', 'DIRECT'],
-    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Advertising.png'
-  },
-  {
-    name: 'Direct Services',
-    type: 'select',
-    includeAll: false,
-    proxies: ['DIRECT', 'Blocked Services'],
-    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Direct.png'
-  },
-  {
-    name: 'Other',
+    name: 'TikTok',
     type: 'select',
     includeAll: true,
-    proxies: ['DIRECT', 'Blocked Services', 'Fallback', 'Fastest'],
-    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Final.png'
+    proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
+    icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/TikTok.png'
   }
 ];
 
