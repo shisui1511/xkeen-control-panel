@@ -72,16 +72,12 @@
     function cleanup() {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
       activeCleanup = null;
     }
 
     activeCleanup = cleanup;
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
   }
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -122,7 +118,6 @@
   class:is-resizing={isResizing}
   aria-label={ariaLabel}
   onpointerdown={startResize}
-  onmousedown={startResize}
   onkeydown={handleKeyDown}
 >
   <span class="splitter-line" aria-hidden="true"></span>
