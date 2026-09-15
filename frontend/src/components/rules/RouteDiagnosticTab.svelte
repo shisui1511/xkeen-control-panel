@@ -279,14 +279,14 @@
   }
 
   .diagnostic-title {
-    font-size: 15px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
     margin: 0 0 4px 0;
   }
 
   .diagnostic-subtitle {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     margin: 0;
   }
@@ -309,7 +309,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     box-sizing: border-box;
     transition: border-color var(--transition-fast, 0.15s ease);
   }
@@ -331,7 +331,7 @@
     gap: 10px;
     padding: 12px 16px;
     border-radius: var(--radius-md);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .alert-danger {
@@ -359,7 +359,7 @@
   }
 
   .result-title {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -372,7 +372,7 @@
   }
 
   .trace-latency {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono, monospace);
     color: var(--fg-secondary);
     background: var(--surface-2);
@@ -402,7 +402,7 @@
     border-radius: 50%;
     background: var(--surface-2);
     color: var(--fg-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     display: flex;
     align-items: center;
@@ -423,7 +423,7 @@
   }
 
   .step-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -438,7 +438,7 @@
   }
 
   .step-value {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--fg-primary);
   }
@@ -558,14 +558,14 @@
   }
 
   .guide-title {
-    font-size: 15px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
     margin: 0 0 6px 0;
   }
 
   .guide-desc {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     max-width: 440px;
     margin: 0;

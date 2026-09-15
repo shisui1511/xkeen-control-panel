@@ -272,7 +272,7 @@
                 <!-- Reorder arrows / handle -->
                 <td class="col-order">
                   <div class="order-controls">
-                    <span class="drag-handle" title="Drag to reorder">⠿</span>
+                    <span class="drag-handle" title={$t('rules.drag_reorder')}>⠿</span>
                     <button
                       type="button"
                       class="icon-btn order-btn"

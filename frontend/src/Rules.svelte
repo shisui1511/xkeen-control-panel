@@ -178,7 +178,7 @@
         showToast('success', $t('rules.update_all_success'));
       } else {
         for (const p of failed) {
-          showToast('error', `${$t('rules.update')} ${p.name}: failed`);
+          showToast('error', $t('rules.update_provider_failed', { name: p.name }));
         }
       }
     } catch (e: any) {
@@ -207,8 +207,13 @@
   });
 </script>
 
-<div class="rules-page">
-  <PageHeader title={$t('rules.title')} subtitle={currentSubtitle} {onSwitchTab}>
+<div class="container rules-page">
+  <PageHeader
+    title={$t('rules.title')}
+    subtitle={currentSubtitle}
+    breadcrumbs={[{ label: $t('nav.group_routing') }, { label: $t('rules.title') }]}
+    {onSwitchTab}
+  >
     {#snippet actions()}
       <Button
         variant="secondary"
@@ -263,7 +268,6 @@
     max-width: 1200px;
     margin: 0 auto;
     width: 100%;
-    padding-bottom: 32px;
   }
 
   .tabs-wrapper {

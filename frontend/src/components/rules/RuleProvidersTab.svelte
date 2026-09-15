@@ -183,7 +183,7 @@
   }
 
   .header-title {
-    font-size: 15px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -195,7 +195,7 @@
     min-width: 20px;
     height: 20px;
     padding: 0 6px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     background: var(--surface-2);
     color: var(--fg-secondary);
@@ -253,7 +253,7 @@
   }
 
   .provider-name {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
     overflow: hidden;
@@ -270,7 +270,7 @@
   }
 
   .badge {
-    font-size: var(--font-size-xs, 10px);
+    font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 4px;
@@ -294,7 +294,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .meta-item {

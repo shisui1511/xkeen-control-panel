@@ -88,7 +88,7 @@
       await navigator.clipboard.writeText(payload);
       showToast('success', $t('app.copied'));
     } catch {
-      showToast('error', 'Clipboard error');
+      showToast('error', $t('rules.clipboard_error'));
     }
   }
 
@@ -99,7 +99,7 @@
       await navigator.clipboard.writeText(text);
       showToast('success', $t('app.copied'));
     } catch {
-      showToast('error', 'Clipboard error');
+      showToast('error', $t('rules.clipboard_error'));
     }
   }
 
@@ -202,7 +202,8 @@
                   <button
                     class="btn-more"
                     onclick={(e) => toggleDropdown(e, i)}
-                    aria-label="Actions"
+                    aria-label={$t('rules.actions_col')}
+                    title={$t('rules.actions_col')}
                   >
                     ⋯
                   </button>
@@ -235,7 +236,8 @@
                     <button
                       class="btn-more"
                       onclick={(e) => toggleDropdown(e, 100000 + j)}
-                      aria-label="Actions"
+                      aria-label={$t('rules.actions_col')}
+                      title={$t('rules.actions_col')}
                     >
                       ⋯
                     </button>
@@ -296,7 +298,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     box-sizing: border-box;
     transition: border-color var(--transition-fast, 0.15s ease);
   }
@@ -318,7 +320,7 @@
   }
 
   .stats-text {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     font-family: var(--font-family-mono, monospace);
   }
@@ -364,7 +366,7 @@
   .rules-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     text-align: left;
   }
 
@@ -373,9 +375,9 @@
     font-weight: 600;
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
-    background: rgba(0, 0, 0, 0.08);
+    background: var(--bg-elevated);
     white-space: nowrap;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     letter-spacing: 0.02em;
   }
 
@@ -402,7 +404,7 @@
   .col-num {
     width: 48px;
     color: var(--fg-dim);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     text-align: center;
   }
 
@@ -435,7 +437,7 @@
 
   .badge {
     display: inline-block;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 2px 7px;
     border-radius: 4px;
@@ -529,7 +531,7 @@
     color: var(--fg-primary);
     padding: 8px 12px;
     text-align: left;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     width: 100%;
     transition: background-color 0.15s ease;
