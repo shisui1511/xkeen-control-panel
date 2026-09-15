@@ -320,7 +320,7 @@
                 </td>
 
                 <!-- Rule Value -->
-                <td class="col-value font-mono">
+                <td class="col-value mono font-mono">
                   <span class="value-text" title={rule.value}>{rule.value}</span>
                 </td>
 

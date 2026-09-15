@@ -1,16 +1,25 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
-  import { t, currentLang } from './i18n';
-  import { capabilities, fetchCapabilities, showToast } from './stores';
-  import { apiFetch } from './lib/api';
-  import EmptyState from './components/EmptyState.svelte';
-  import PlayIcon from './lib/components/icons/Play.svelte';
-  import WarningIcon from './lib/components/icons/Warning.svelte';
+  import { onMount } from 'svelte';
+  import { t } from './i18n';
+  import { showToast } from './stores';
+  import {
+    apiFetch,
+    fetchCustomRules,
+    saveCustomRules,
+    flushFakeIP,
+    fetchRuleProviders,
+    updateRuleProvider,
+    type UserRule,
+    type RuleProvider
+  } from './lib/api';
   import PageHeader from './PageHeader.svelte';
-  import Tabs from './components/Tabs.svelte';
-  import Select from './components/Select.svelte';
+  import Tabs, { type TabItem } from './components/Tabs.svelte';
   import Button from './components/Button.svelte';
   import Icon from './lib/components/Icon.svelte';
+  import UserRulesTab from './components/rules/UserRulesTab.svelte';
+  import RuleProvidersTab from './components/rules/RuleProvidersTab.svelte';
+  import RouteDiagnosticTab from './components/rules/RouteDiagnosticTab.svelte';
+  import AllKernelRulesTab, { type KernelRule } from './components/rules/AllKernelRulesTab.svelte';
 
   interface Props {
     onSwitchTab?: (tab: string) => void;
@@ -18,195 +27,152 @@
 
   let { onSwitchTab = () => {} }: Props = $props();
 
+  // Active tab state
+  type TabKey = 'exceptions' | 'providers' | 'diagnostic' | 'all_rules';
+  let activeTab = $state<TabKey>('exceptions');
+
+  // Custom Rules State
+  let customRules = $state<UserRule[]>([]);
+  let loadingCustom = $state(false);
+
+  // Kernel Rules State
+  let kernelRules = $state<KernelRule[]>([]);
+  let loadingKernelRules = $state(false);
+
+  // Rule Providers State
+  let ruleProviders = $state<RuleProvider[]>([]);
+  let loadingProviders = $state(false);
+
+  // Proxy Groups State
+  let proxyGroups = $state<string[]>([]);
+
+  // Fake-IP flushing state
   let flushingFakeIP = $state(false);
 
-  async function flushFakeIP() {
-    flushingFakeIP = true;
+  // Subtitle mapping based on active tab
+  let currentSubtitle = $derived.by(() => {
+    switch (activeTab) {
+      case 'exceptions':
+        return $t('rules.exceptions_subtitle');
+      case 'providers':
+        return $t('rules.providers_subtitle');
+      case 'diagnostic':
+        return $t('rules.diagnostic_subtitle');
+      case 'all_rules':
+        return $t('rules.all_rules_subtitle');
+      default:
+        return $t('rules.subtitle');
+    }
+  });
+
+  // Tab definitions
+  let tabItems = $derived<TabItem[]>([
+    { value: 'exceptions', label: $t('rules.tab_exceptions'), testId: 'tab-exceptions' },
+    { value: 'providers', label: $t('rules.tab_providers'), testId: 'tab-providers' },
+    { value: 'diagnostic', label: $t('rules.tab_diagnostic'), testId: 'tab-diagnostic' },
+    { value: 'all_rules', label: $t('rules.tab_all_rules'), testId: 'tab-all_rules' }
+  ]);
+
+  async function loadCustomRules() {
+    loadingCustom = true;
     try {
-      const res = await apiFetch('/api/mihomo/cache/fakeip/flush', {
-        method: 'POST'
-      });
-      if (!res.ok) throw new Error('Failed to flush Fake-IP cache');
-      showToast('success', $t('rules.fakeip_flushed'));
+      customRules = await fetchCustomRules();
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', e.message);
-    } finally {
-      flushingFakeIP = false;
-    }
-  }
-
-  interface Rule {
-    type: string;
-    payload: string;
-    proxy: string;
-  }
-
-  interface RuleProvider {
-    name: string;
-    behavior: string;
-    type: string;
-    ruleCount: number;
-    updatedAt: string;
-    vehicleType: string;
-  }
-
-  let rules: Rule[] = $state([]);
-  let loading = $state(false);
-  let error = $state('');
-  let searchQuery = $state('');
-  let typeFilter = $state('');
-  let proxyFilter = $state('');
-  let activeTab: 'rules' | 'providers' | 'custom' = $state('rules');
-
-  interface UserRule {
-    id: string;
-    type: string;
-    value: string;
-    target: string;
-    comment?: string;
-    enabled: boolean;
-  }
-
-  let customRules: UserRule[] = $state([]);
-  let loadingCustom = $state(false);
-  let savingCustom = $state(false);
-  let newRuleValue = $state('');
-  let newRuleType = $state('domain_suffix');
-  let newRuleTarget = $state('proxy');
-  let newRuleComment = $state('');
-
-  async function fetchCustomRules() {
-    loadingCustom = true;
-    try {
-      const res = await apiFetch('/api/rules/custom');
-      if (res.ok) {
-        const data = await res.json();
-        customRules = data.data || data.rules || data || [];
-      }
-    } catch (e: any) {
-      if (e?.status === 401) return;
     } finally {
       loadingCustom = false;
     }
   }
 
-  async function saveCustomRules() {
-    savingCustom = true;
+  async function handleSaveCustomRules(rules: UserRule[]) {
     try {
-      const res = await apiFetch('/api/rules/custom', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rules: customRules })
-      });
-      if (!res.ok) throw new Error('Failed to save rules');
-      showToast('success', $t('rules.custom_saved'));
+      const res = await saveCustomRules(rules);
+      customRules = rules;
+      if (res.reloaded) {
+        showToast('success', $t('rules.custom_saved'));
+      } else {
+        showToast('success', $t('rules.custom_saved'));
+      }
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', e.message);
-    } finally {
-      savingCustom = false;
+      throw e;
     }
   }
 
-  function addCustomRule() {
-    if (!newRuleValue.trim()) return;
-    customRules = [
-      {
-        id: 'rule_' + Date.now(),
-        type: newRuleType,
-        value: newRuleValue.trim(),
-        target: newRuleTarget,
-        comment: newRuleComment.trim(),
-        enabled: true
-      },
-      ...customRules
-    ];
-    newRuleValue = '';
-    newRuleComment = '';
-    saveCustomRules();
-  }
-
-  function removeCustomRule(id: string) {
-    customRules = customRules.filter((r) => r.id !== id);
-    saveCustomRules();
-  }
-
-  function toggleCustomRule(id: string) {
-    customRules = customRules.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r));
-    saveCustomRules();
-  }
-
-  let ruleProviders: RuleProvider[] = $state([]);
-  let loadingProviders = $state(false);
-  let updatingProvider: string | null = $state(null);
-  let updatingAll = $state(false);
-
-  async function fetchRules() {
-    loading = true;
-    error = '';
-
+  async function loadKernelRules() {
+    loadingKernelRules = true;
     try {
       const res = await apiFetch('/api/mihomo/proxy/rules');
-      if (!res.ok) throw new Error('Failed to load rules');
-
-      const data = await res.json();
-      rules = data.rules || [];
+      if (res.ok) {
+        const data = await res.json();
+        kernelRules = data.rules || [];
+      }
     } catch (e: any) {
       if (e?.status === 401) return;
-      error = e.message;
     } finally {
-      loading = false;
+      loadingKernelRules = false;
     }
   }
 
-  async function fetchRuleProviders() {
+  async function loadProviders() {
     loadingProviders = true;
     try {
-      const res = await apiFetch('/api/mihomo/proxy/providers/rules');
-      if (!res.ok) throw new Error('Failed to load rule providers');
-      const data = await res.json();
-      // API возвращает { providers: { "name": { ... }, ... } }
-      const providersMap = data.providers || {};
-      ruleProviders = Object.values(providersMap) as RuleProvider[];
+      ruleProviders = await fetchRuleProviders();
     } catch (e: any) {
-      ruleProviders = [];
       if (e?.status === 401) return;
-      showToast('error', e.message);
     } finally {
       loadingProviders = false;
     }
   }
 
-  async function updateProvider(name: string) {
-    updatingProvider = name;
+  async function loadProxyGroups() {
     try {
-      const res = await apiFetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(name)}`, {
-        method: 'PUT'
-      });
-      if (!res.ok) throw new Error(`Failed to update provider: ${name}`);
-      showToast('success', $t('rules.update_success'));
-      // Re-fetch чтобы обновить updatedAt и ruleCount
-      await fetchRuleProviders();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e.message);
-    } finally {
-      updatingProvider = null;
+      const res = await apiFetch('/api/mihomo/proxy/proxies');
+      if (res.ok) {
+        const data = await res.json();
+        const proxies = data.proxies || {};
+        const groups: string[] = [];
+        for (const [name, info] of Object.entries(proxies) as [string, any][]) {
+          const type = (info.type || '').toLowerCase();
+          if (['selector', 'urltest', 'fallback', 'loadbalance', 'relay'].includes(type)) {
+            groups.push(name);
+          }
+        }
+        proxyGroups = groups.sort();
+      }
+    } catch {
+      // Fallback: extract groups from rules
+      const set = new Set<string>();
+      for (const r of kernelRules) {
+        const p = (r.proxy || '').trim();
+        if (p && !['DIRECT', 'REJECT', 'PASS'].includes(p.toUpperCase())) {
+          set.add(p);
+        }
+      }
+      proxyGroups = Array.from(set).sort();
     }
   }
 
-  async function updateAllProviders() {
-    updatingAll = true;
+  async function handleUpdateProvider(name: string) {
+    try {
+      await updateRuleProvider(name);
+      showToast('success', $t('rules.update_success'));
+      await loadProviders();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e.message);
+    }
+  }
+
+  async function handleUpdateAllProviders() {
     try {
       const beforeTimestamps = new Map(ruleProviders.map((p) => [p.name, p.updatedAt]));
       for (const provider of ruleProviders) {
-        await apiFetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(provider.name)}`, {
-          method: 'PUT'
-        });
+        await updateRuleProvider(provider.name);
       }
-      await fetchRuleProviders();
-      // Mihomo's PUT is async — determine success by comparing actual updatedAt timestamps
+      await loadProviders();
       const failed = ruleProviders.filter((p) => p.updatedAt === beforeTimestamps.get(p.name));
       if (failed.length === 0) {
         showToast('success', $t('rules.update_all_success'));
@@ -218,892 +184,93 @@
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', e.message);
-    } finally {
-      updatingAll = false;
     }
   }
 
-  function formatRelativeTime(isoDate: string): string {
-    if (!isoDate || isoDate.startsWith('0001')) return $t('rules.time_never');
+  async function handleFlushFakeIP() {
+    flushingFakeIP = true;
     try {
-      const date = new Date(isoDate);
-      const now = new Date();
-      const diffMs = now.getTime() - date.getTime();
-      const diffMin = Math.floor(diffMs / 60000);
-      if (diffMin < 1) return $t('rules.time_just_now');
-      if (diffMin < 60) return $t('rules.time_min_ago', { n: diffMin });
-      const diffHours = Math.floor(diffMin / 60);
-      if (diffHours < 24) return $t('rules.time_h_ago', { n: diffHours });
-      const diffDays = Math.floor(diffHours / 24);
-      return $t('rules.time_d_ago', { n: diffDays });
-    } catch {
-      return isoDate;
-    }
-  }
-
-  function getFilteredRules(): Rule[] {
-    return rules.filter((rule) => {
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        if (!rule.payload.toLowerCase().includes(q) && !rule.proxy.toLowerCase().includes(q))
-          return false;
-      }
-      if (typeFilter && rule.type !== typeFilter) return false;
-      if (proxyFilter && rule.proxy !== proxyFilter) return false;
-      return true;
-    });
-  }
-
-  function getUniqueTypes(): string[] {
-    const types = new Set(rules.map((r) => r.type));
-    return Array.from(types).sort();
-  }
-
-  function getUniqueProxies(): string[] {
-    const targets = new Set(rules.map((r) => r.proxy));
-    return Array.from(targets).sort();
-  }
-
-  function getRuleBadgeClass(type: string): string {
-    const typeUpper = type.toUpperCase();
-    if (typeUpper === 'DOMAIN-SUFFIX') return 'badge rule-type-domain-suffix';
-    if (typeUpper === 'DOMAIN-KEYWORD') return 'badge rule-type-domain-keyword';
-    if (typeUpper.startsWith('DOMAIN')) return 'badge rule-type-domain';
-    if (typeUpper === 'GEOIP') return 'badge rule-type-geoip';
-    if (typeUpper === 'GEOSITE') return 'badge rule-type-geosite';
-    if (typeUpper.startsWith('IP-CIDR')) return 'badge rule-type-ip-cidr';
-    if (typeUpper.startsWith('IP')) return 'badge badge-warning';
-    if (typeUpper === 'PROCESS-NAME') return 'badge rule-type-process';
-    if (typeUpper === 'MATCH') return 'badge rule-type-match';
-    return 'badge';
-  }
-
-  function getTargetBadgeClass(proxy: string): string {
-    const proxyUpper = proxy.toUpperCase();
-    if (proxyUpper === 'DIRECT') return 'status-badge active';
-    if (proxyUpper === 'REJECT') return 'status-badge stopped';
-    return 'status-badge';
-  }
-
-  let mihomoLaunching = $state(false);
-  let _launchTimer: ReturnType<typeof setTimeout> | null = null;
-
-  onDestroy(() => {
-    if (_launchTimer) clearTimeout(_launchTimer);
-  });
-
-  async function launchMihomo() {
-    mihomoLaunching = true;
-    try {
-      const res = await apiFetch('/api/mihomo/control', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ action: 'start' })
-      });
-      if (!res.ok) throw new Error('Failed to start Mihomo');
-      _launchTimer = setTimeout(async () => {
-        try {
-          await fetchCapabilities();
-          fetchRules();
-        } finally {
-          mihomoLaunching = false;
-        }
-      }, 2500);
+      await flushFakeIP();
+      showToast('success', $t('rules.fakeip_flushed'));
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', e.message);
-      mihomoLaunching = false;
+    } finally {
+      flushingFakeIP = false;
     }
   }
-
-  let activeDropdownRule: Rule | null = $state(null);
-
-  function toggleDropdown(event: MouseEvent, rule: Rule) {
-    event.stopPropagation();
-    if (activeDropdownRule === rule) {
-      activeDropdownRule = null;
-    } else {
-      activeDropdownRule = rule;
-    }
-  }
-
-  function closeDropdowns() {
-    activeDropdownRule = null;
-  }
-
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      closeDropdowns();
-    }
-  }
-
-  async function copyToClipboard(text: string, successMsg: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast('success', successMsg);
-    } catch (err) {
-      showToast('error', 'Failed to copy');
-    }
-  }
-
-  function copyPayload(rule: Rule) {
-    if (!rule.payload) return;
-    copyToClipboard(rule.payload, $t('rules.payload_copied'));
-    closeDropdowns();
-  }
-
-  function copyFullRule(rule: Rule) {
-    const text =
-      rule.type.toUpperCase() === 'MATCH'
-        ? `${rule.type},${rule.proxy}`
-        : `${rule.type},${rule.payload},${rule.proxy}`;
-    copyToClipboard(text, $t('rules.rule_copied'));
-    closeDropdowns();
-  }
-
-  let filteredRules = $derived(
-    rules.filter((rule) => {
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        if (!rule.payload.toLowerCase().includes(q) && !rule.proxy.toLowerCase().includes(q))
-          return false;
-      }
-      if (typeFilter && rule.type !== typeFilter) return false;
-      if (proxyFilter && rule.proxy !== proxyFilter) return false;
-      return true;
-    })
-  );
-  let nonMatchRules = $derived(filteredRules.filter((r) => r.type.toUpperCase() !== 'MATCH'));
-  let matchRules = $derived(filteredRules.filter((r) => r.type.toUpperCase() === 'MATCH'));
-
-  let _didFetchProviders = false;
-  $effect(() => {
-    if ($capabilities?.mihomo?.reachable && !_didFetchProviders) {
-      _didFetchProviders = true;
-      fetchRuleProviders();
-    }
-  });
 
   onMount(() => {
-    if ($capabilities === null || $capabilities.mihomo.reachable) {
-      fetchRules();
-      fetchRuleProviders();
-    }
+    loadCustomRules();
+    loadProviders();
+    loadKernelRules().then(() => loadProxyGroups());
   });
 </script>
 
-<svelte:window onclick={closeDropdowns} onkeydown={handleKeydown} />
-
-<div class="container">
-  <PageHeader
-    title={$t('rules.title')}
-    subtitle={activeTab === 'rules' ? $t('rules.subtitle') : $t('rules.providers_subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_routing'), tab: 'dashboard' }, { label: $t('nav.rules') }]}
-    {onSwitchTab}
-  >
-    {#if $capabilities?.active_kernel === 'mihomo' && $capabilities?.mihomo?.reachable}
+<div class="rules-page">
+  <PageHeader title={$t('rules.title')} subtitle={currentSubtitle} {onSwitchTab}>
+    {#snippet actions()}
       <Button
         variant="secondary"
-        onclick={flushFakeIP}
+        class="btn-sm"
+        loading={flushingFakeIP}
         disabled={flushingFakeIP}
-        title={$t('rules.flush_fakeip')}
+        onclick={handleFlushFakeIP}
       >
-        {#if flushingFakeIP}
-          <span class="spinner-sm"></span>
-          {$t('rules.flushing_fakeip')}
-        {:else}
-          <Icon name="refresh" size={14} />
-          {$t('rules.flush_fakeip')}
-        {/if}
+        <Icon name="refresh" size={14} />
+        <span>{flushingFakeIP ? $t('rules.flushing_fakeip') : $t('rules.flush_fakeip')}</span>
       </Button>
-    {/if}
-    {#if activeTab === 'providers' && ruleProviders.length > 0}
-      <Button variant="primary" onclick={updateAllProviders} disabled={updatingAll}>
-        {#if updatingAll}
-          <span class="spinner-sm"></span>
-          {$t('rules.updating')}
-        {:else}
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-          >
-          {$t('rules.update_all')}
-        {/if}
-      </Button>
-    {/if}
+    {/snippet}
   </PageHeader>
 
-  <Tabs
-    bind:value={activeTab}
-    items={[
-      { value: 'rules', label: $t('rules.tab_rules') },
-      { value: 'providers', label: $t('rules.tab_providers') },
-      { value: 'custom', label: $t('rules.tab_custom') }
-    ]}
-    onchange={(tab) => {
-      if (tab === 'custom') {
-        fetchCustomRules();
-      }
-    }}
-  />
-
-  {#if $capabilities !== null && !$capabilities.mihomo.reachable}
-    <EmptyState
-      title={$t('ds.empty.mihomo_offline_title')}
-      description={$capabilities?.active_kernel === 'mihomo'
-        ? $t('ds.empty.mihomo_offline_desc_actionable')
-        : $t('ds.empty.mihomo_offline_desc')}
-      icon={PlayIcon}
-      ctaText={mihomoLaunching
-        ? $t('ds.empty.mihomo_offline_loading')
-        : $t('ds.empty.mihomo_offline_cta')}
-      ctaLoading={mihomoLaunching}
-      oncta={launchMihomo}
+  <div class="tabs-wrapper">
+    <Tabs
+      items={tabItems}
+      value={activeTab}
+      onchange={(val) => (activeTab = val as TabKey)}
+      ariaLabel={$t('rules.title')}
     />
-  {:else if activeTab === 'rules'}
-    {#if error}
-      <EmptyState
-        title={$t('ds.empty.error_title')}
-        description={error}
-        icon={WarningIcon}
-        ctaText={$t('app.refresh')}
-        oncta={fetchRules}
+  </div>
+
+  <div class="tab-content" role="tabpanel">
+    {#if activeTab === 'exceptions'}
+      <UserRulesTab
+        rules={customRules}
+        groups={proxyGroups}
+        loading={loadingCustom}
+        onSave={handleSaveCustomRules}
       />
-    {:else}
-      <div class="toolbar mb-2">
-        <div class="filters">
-          <input
-            type="text"
-            placeholder={$t('rules.search')}
-            bind:value={searchQuery}
-            class="filter-input"
-            aria-label={$t('rules.search')}
-          />
-          <Select
-            bind:value={typeFilter}
-            class="source-select"
-            ariaLabel={$t('rules.all_types')}
-            style="flex: 0 0 auto; width: auto; min-width: 140px;"
-          >
-            <option value="">{$t('rules.all_types')}</option>
-            {#each getUniqueTypes() as type}
-              <option value={type}>{type}</option>
-            {/each}
-          </Select>
-          <Select
-            bind:value={proxyFilter}
-            class="source-select"
-            ariaLabel={$t('rules.all_targets')}
-            style="flex: 0 0 auto; width: auto; min-width: 140px;"
-          >
-            <option value="">{$t('rules.all_targets')}</option>
-            {#each getUniqueProxies() as proxy}
-              <option value={proxy}>{proxy}</option>
-            {/each}
-          </Select>
-        </div>
-      </div>
-
-      <div class="stats mb-2">
-        <span class="stat"><b>{rules.length}</b> {$t('rules.total')}</span>
-        <span class="stat"><b>{filteredRules.length}</b> {$t('rules.shown')}</span>
-      </div>
-
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th class="col-num" style="width:60px;">#</th>
-              <th>{$t('rules.type_col')}</th>
-              <th>Payload</th>
-              <th>{$t('rules.target')}</th>
-              <th style="width:50px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each nonMatchRules as rule, i}
-              <tr>
-                <td class="mono col-num" style="color:var(--fg-dim);"
-                  >{String(i + 1).padStart(3, '0')}</td
-                >
-                <td>
-                  <span class={getRuleBadgeClass(rule.type)}>
-                    {rule.type}
-                  </span>
-                </td>
-                <td class="mono">{rule.payload}</td>
-                <td>
-                  <span class={getTargetBadgeClass(rule.proxy)}>
-                    {rule.proxy}
-                  </span>
-                </td>
-                <td style="position: relative; text-align: right;">
-                  <button class="action-btn" onclick={(e) => toggleDropdown(e, rule)}>⋯</button>
-                  {#if activeDropdownRule === rule}
-                    <div class="dropdown-menu">
-                      <button onclick={() => copyPayload(rule)}>
-                        {$t('rules.copy_payload')}
-                      </button>
-                      <button onclick={() => copyFullRule(rule)}>
-                        {$t('rules.copy_rule')}
-                      </button>
-                    </div>
-                  {/if}
-                </td>
-              </tr>
-            {:else}
-              <tr>
-                <td
-                  colspan="5"
-                  class="empty-cell"
-                  style="text-align: center; padding: 2rem; color: var(--fg-secondary);"
-                >
-                  {$t('rules.no_rules')}
-                </td>
-              </tr>
-            {/each}
-            {#if matchRules.length > 0}
-              {#each matchRules as rule}
-                <tr class="match-fallback-row">
-                  <td class="mono col-num" style="color:var(--fg-dim);">—</td>
-                  <td><span class={getRuleBadgeClass(rule.type)}>{rule.type}</span></td>
-                  <td class="mono" style="color:var(--fg-dim);">{$t('rules.match_fallback')}</td>
-                  <td><span class={getTargetBadgeClass(rule.proxy)}>{rule.proxy}</span></td>
-                  <td style="position: relative; text-align: right;">
-                    <button class="action-btn" onclick={(e) => toggleDropdown(e, rule)}>⋯</button>
-                    {#if activeDropdownRule === rule}
-                      <div class="dropdown-menu">
-                        <button onclick={() => copyPayload(rule)}>
-                          {$t('rules.copy_payload')}
-                        </button>
-                        <button onclick={() => copyFullRule(rule)}>
-                          {$t('rules.copy_rule')}
-                        </button>
-                      </div>
-                    {/if}
-                  </td>
-                </tr>
-              {/each}
-            {/if}
-          </tbody>
-        </table>
-      </div>
+    {:else if activeTab === 'providers'}
+      <RuleProvidersTab
+        providers={ruleProviders}
+        loading={loadingProviders}
+        onUpdate={handleUpdateProvider}
+        onUpdateAll={handleUpdateAllProviders}
+      />
+    {:else if activeTab === 'diagnostic'}
+      <RouteDiagnosticTab />
+    {:else if activeTab === 'all_rules'}
+      <AllKernelRulesTab rules={kernelRules} loading={loadingKernelRules} />
     {/if}
-  {:else if activeTab === 'custom'}
-    <div class="custom-rules-section">
-      <div class="custom-add-card mb-3">
-        <h3 class="custom-form-title">{$t('rules.add_custom_rule')}</h3>
-        <div class="custom-form-row">
-          <input
-            type="text"
-            class="filter-input"
-            placeholder={$t('rules.value_placeholder')}
-            aria-label={$t('rules.value_placeholder')}
-            bind:value={newRuleValue}
-            style="flex: 2; min-width: 180px;"
-          />
-          <Select
-            bind:value={newRuleType}
-            class="source-select"
-            ariaLabel={$t('rules.custom_type_suffix')}
-            style="flex: 1; min-width: 140px;"
-          >
-            <option value="domain_suffix">{$t('rules.custom_type_suffix')}</option>
-            <option value="domain">{$t('rules.custom_type_domain')}</option>
-            <option value="domain_keyword">{$t('rules.custom_type_keyword')}</option>
-            <option value="ip_cidr">{$t('rules.custom_type_ip')}</option>
-            <option value="port">{$t('rules.custom_type_port')}</option>
-          </Select>
-          <Select
-            bind:value={newRuleTarget}
-            class="source-select"
-            ariaLabel={$t('rules.target_proxy')}
-            style="flex: 1; min-width: 130px;"
-          >
-            <option value="proxy">{$t('rules.target_proxy')}</option>
-            <option value="direct">{$t('rules.target_direct')}</option>
-            <option value="reject">{$t('rules.target_reject')}</option>
-          </Select>
-          <input
-            type="text"
-            class="filter-input"
-            placeholder={$t('rules.custom_comment')}
-            aria-label={$t('rules.custom_comment')}
-            bind:value={newRuleComment}
-            style="flex: 1.5; min-width: 140px;"
-          />
-          <button class="btn btn-primary" onclick={addCustomRule} disabled={!newRuleValue.trim()}>
-            {$t('rules.add_custom_rule')}
-          </button>
-        </div>
-      </div>
-
-      {#if loadingCustom}
-        <div class="loading-state">
-          <span class="spinner"></span>
-        </div>
-      {:else if customRules.length === 0}
-        <div class="empty-providers">
-          <p style="color: var(--fg-dim);">{$t('rules.no_custom_rules')}</p>
-        </div>
-      {:else}
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 50px;">{$t('rules.enabled_col')}</th>
-                <th>{$t('rules.type_col')}</th>
-                <th>{$t('rules.value')}</th>
-                <th>{$t('rules.target')}</th>
-                <th>{$t('rules.comment_col')}</th>
-                <th style="width: 50px;"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each customRules as rule}
-                <tr style={!rule.enabled ? 'opacity: 0.5;' : ''}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={rule.enabled}
-                      onchange={() => toggleCustomRule(rule.id)}
-                    />
-                  </td>
-                  <td>
-                    <span class={getRuleBadgeClass(rule.type)}>{rule.type}</span>
-                  </td>
-                  <td class="mono">{rule.value}</td>
-                  <td>
-                    <span class={getTargetBadgeClass(rule.target)}>{rule.target}</span>
-                  </td>
-                  <td style="color: var(--fg-dim); font-size: 0.8125rem;">{rule.comment || '—'}</td>
-                  <td style="text-align: right;">
-                    <button
-                      class="btn btn-danger btn-sm"
-                      onclick={() => removeCustomRule(rule.id)}
-                      title={$t('app.delete')}
-                      style="padding: 2px 8px; font-size: var(--font-size-xs);"
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-    </div>
-  {:else if activeTab === 'providers'}
-    {#if loadingProviders}
-      <div class="loading-state">
-        <span class="spinner"></span>
-      </div>
-    {:else if ruleProviders.length === 0}
-      <div class="empty-providers">
-        <svg
-          width="40"
-          height="40"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          style="opacity: 0.4; margin-bottom: 12px;"
-        >
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
-          <line x1="16" y1="13" x2="8" y2="13" />
-          <line x1="16" y1="17" x2="8" y2="17" />
-          <polyline points="10 9 9 9 8 9" />
-        </svg>
-        <p
-          style="font-size: 14px; font-weight: 500; color: var(--fg-secondary); margin-bottom: 4px;"
-        >
-          {$t('rules.no_providers')}
-        </p>
-      </div>
-    {:else}
-      <div class="providers-list">
-        {#each ruleProviders as provider}
-          <div class="provider-card">
-            <div class="provider-info">
-              <div class="provider-name">{provider.name}</div>
-              <div class="provider-meta">
-                <span class="provider-badge">{provider.vehicleType || provider.type}</span>
-                {#if provider.behavior}
-                  <span class="provider-badge">{provider.behavior}</span>
-                {/if}
-                <span class="provider-count"
-                  >{provider.ruleCount} {$t('rules.provider_rules_count')}</span
-                >
-              </div>
-            </div>
-            <div class="provider-actions">
-              <span class="provider-updated">
-                {$t('rules.provider_updated')}: {formatRelativeTime(provider.updatedAt)}
-              </span>
-              <button
-                class="btn btn-secondary btn-sm"
-                onclick={() => updateProvider(provider.name)}
-                disabled={updatingProvider === provider.name || updatingAll}
-              >
-                {#if updatingProvider === provider.name}
-                  <span class="spinner-sm"></span>
-                {:else}
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    style="margin-right: 4px;"
-                    ><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-                  >
-                {/if}
-                {$t('rules.update')}
-              </button>
-            </div>
-          </div>
-        {/each}
-      </div>
-    {/if}
-  {/if}
+  </div>
 </div>
 
 <style>
-  /* Local styles matching redesign spec */
-  .table-container {
-    overflow-x: auto;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-  }
-
-  table {
+  .rules-page {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
     width: 100%;
-    border-collapse: collapse;
-    font-size: var(--font-size-table, 0.8125rem);
+    padding-bottom: 32px;
   }
 
-  th {
-    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 16px;
-    text-align: left;
-    font-weight: 600;
-    color: var(--fg-secondary);
-    border-bottom: 1px solid var(--border);
-    background: rgba(0, 0, 0, 0.1);
+  .tabs-wrapper {
+    margin-top: -4px;
   }
 
-  td {
-    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 16px;
-    border-bottom: 1px solid var(--border-light);
-    color: var(--fg-primary);
-  }
-
-  tr:last-child td {
-    border-bottom: 0;
-  }
-
-  tr:hover td {
-    background: var(--hover);
-  }
-
-  .mono {
-    font-family: var(--font-family-mono);
-  }
-
-  /* Rule type colored badges — категорийная семантика через токены темы:
-     domain-* → accent (cyan), geo* → success (green), ip-cidr → warning (amber),
-     process/match → нейтральный. Полутоновые фоны через color-mix, чтобы
-     бейджи адаптировались к светлой теме (раньше был хардкод hex). */
-  :global(.rule-type-domain-suffix),
-  :global(.rule-type-domain) {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--accent);
-    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
-  }
-  :global(.rule-type-domain-keyword) {
-    background: color-mix(in srgb, var(--warning) 12%, transparent);
-    color: var(--warning);
-    border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
-  }
-  :global(.rule-type-geoip),
-  :global(.rule-type-geosite) {
-    background: color-mix(in srgb, var(--success) 12%, transparent);
-    color: var(--success);
-    border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
-  }
-  :global(.rule-type-ip-cidr) {
-    background: color-mix(in srgb, var(--warning) 14%, transparent);
-    color: var(--warning);
-    border: 1px solid color-mix(in srgb, var(--warning) 28%, transparent);
-  }
-  :global(.rule-type-process),
-  :global(.rule-type-match) {
-    background: color-mix(in srgb, var(--fg-dim) 12%, transparent);
-    color: var(--fg-secondary);
-    border: 1px solid color-mix(in srgb, var(--fg-dim) 22%, transparent);
-  }
-
-  .match-fallback-row td {
-    background: color-mix(in srgb, var(--fg-dim) 5%, transparent);
-    color: var(--fg-dim);
-    border-top: 1px solid var(--border);
-  }
-
-  .action-btn {
-    background: none;
-    border: none;
-    color: var(--fg-dim);
-    cursor: pointer;
-    font-size: 16px;
-    padding: 4px 8px;
-    border-radius: var(--radius-sm);
-  }
-
-  .action-btn:hover {
-    background: var(--hover);
-    color: var(--fg-primary);
-  }
-
-  .dropdown-menu {
-    position: absolute;
-    right: 18px;
-    top: 36px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    z-index: 100;
-    min-width: 150px;
-    display: flex;
-    flex-direction: column;
-    padding: 4px 0;
-  }
-
-  .dropdown-menu button {
-    background: none;
-    border: none;
-    color: var(--fg-primary);
-    padding: 8px 12px;
-    text-align: left;
-    font-size: 12px;
-    cursor: pointer;
-    width: 100%;
-  }
-
-  .dropdown-menu button:hover {
-    background: var(--hover);
-  }
-
-  .providers-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .provider-card {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 14px 18px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    transition: border-color 0.15s;
-  }
-
-  .provider-card:hover {
-    border-color: var(--border-hover, var(--border));
-  }
-
-  .provider-info {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .provider-name {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--fg-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .provider-meta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .provider-badge {
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--border);
-    color: var(--fg-dim);
-    font-family: var(--font-family-mono);
-    letter-spacing: 0.03em;
-  }
-
-  .provider-count {
-    font-size: 12px;
-    color: var(--fg-dim);
-  }
-
-  .provider-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-shrink: 0;
-  }
-
-  .provider-updated {
-    font-size: var(--font-size-xs);
-    color: var(--fg-faint);
-    white-space: nowrap;
-  }
-
-  .btn-sm {
-    padding: 4px 10px;
-    font-size: 12px;
-    height: 28px;
-  }
-
-  .spinner-sm {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    margin-right: 4px;
-    vertical-align: middle;
-  }
-
-  .empty-providers {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 60px 20px;
-    text-align: center;
-    color: var(--fg-dim);
-  }
-
-  .loading-state {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 60px 20px;
-  }
-
-  .filters .filter-input {
-    flex: 1;
-  }
-
-  .custom-add-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 16px;
-  }
-
-  .custom-form-title {
-    font-size: 14px;
-    font-weight: 600;
-    margin-bottom: 12px;
-    color: var(--fg-primary);
-  }
-
-  .custom-form-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  /* Column priority on mobile — hide # index, truncate payload */
-  @media (max-width: 640px) {
-    .filters {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      width: 100%;
-    }
-
-    .filters .filter-input {
-      flex: 1 1 100%;
-      width: 100%;
-      min-width: 100%;
-    }
-
-    .filters :global(.xcp-select),
-    .filters :global(.source-select) {
-      flex: 1 1 calc(50% - 4px);
-      width: calc(50% - 4px);
-      min-width: 0;
-      padding: 8px 10px;
-    }
-
-    .col-num {
-      display: none;
-    }
-    .table-container {
-      overflow-x: visible;
-    }
-    table {
-      table-layout: fixed;
-      width: 100%;
-    }
-    th:nth-child(2) {
-      width: 25%;
-    }
-    th:nth-child(3) {
-      width: auto;
-    }
-    th:nth-child(4) {
-      width: 28%;
-    }
-    th:last-child {
-      width: 40px;
-    }
-    td.mono {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      max-width: 0;
-    }
-    td,
-    th {
-      padding: 10px 10px;
-      font-size: 12px;
-    }
-
-    /* Mobile: stack provider card vertically */
-    .provider-card {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 10px;
-    }
-    .provider-actions {
-      width: 100%;
-      justify-content: space-between;
-    }
+  .tab-content {
+    min-height: 280px;
   }
 </style>
