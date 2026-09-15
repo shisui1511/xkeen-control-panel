@@ -181,8 +181,8 @@
     <div class="quick-add-header">
       <h3 class="quick-add-title">{$t('rules.quick_add')}</h3>
       <Button variant="secondary" class="btn-sm" onclick={openAddModal}>
-        <Icon name="plus" size={14} />
-        {$t('rules.add_rule')}
+        <Icon name="add" size={14} />
+        <span>{$t('rules.modal_form')}</span>
       </Button>
     </div>
 
@@ -408,9 +408,11 @@
 
   .quick-add-title {
     margin: 0;
-    font-size: var(--font-size-md);
-    font-weight: 600;
-    color: var(--fg-primary);
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-secondary);
   }
 
   .quick-add-form {
@@ -421,8 +423,8 @@
   }
 
   .value-field {
-    flex: 2;
-    min-width: 220px;
+    flex: 3;
+    min-width: 240px;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -431,13 +433,14 @@
   .type-field,
   .target-field,
   .group-field {
-    flex: 1;
-    min-width: 140px;
+    flex: 1.2;
+    min-width: 160px;
   }
 
   .quick-add-action {
     display: flex;
     align-items: center;
+    flex-shrink: 0;
   }
 
   .input {
@@ -455,7 +458,8 @@
   }
 
   .input:focus {
-    border-color: var(--color-primary);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
 
   .font-mono {
@@ -464,7 +468,7 @@
 
   .quick-error {
     font-size: var(--font-size-xs);
-    color: var(--color-danger);
+    color: var(--danger);
   }
 
   .table-card {
@@ -571,11 +575,20 @@
   }
 
   .edit-btn:hover {
-    color: var(--color-primary);
+    color: var(--accent);
   }
 
   .delete-btn:hover {
-    color: var(--color-danger);
+    color: var(--danger);
+  }
+
+  .col-actions {
+    width: 80px;
+    text-align: right;
+  }
+
+  .rules-table th.col-actions {
+    text-align: right;
   }
 
   .type-badge {
@@ -592,7 +605,7 @@
 
   .value-text {
     display: block;
-    max-width: 320px;
+    max-width: min(45vw, 650px);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -613,7 +626,7 @@
 
   .comment-text {
     display: block;
-    max-width: 200px;
+    max-width: min(25vw, 350px);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -624,6 +637,7 @@
   .row-actions {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 6px;
   }
 
@@ -643,7 +657,7 @@
     width: 18px;
     height: 18px;
     border: 2px solid var(--border);
-    border-top-color: var(--color-primary);
+    border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
   }
@@ -651,6 +665,21 @@
   @keyframes spin {
     to {
       transform: rotate(360deg);
+    }
+  }
+
+  @media (max-width: 768px) {
+    .value-field,
+    .type-field,
+    .target-field,
+    .group-field,
+    .quick-add-action {
+      flex: 1 1 100%;
+      min-width: 100%;
+    }
+
+    .quick-add-action :global(.btn) {
+      width: 100%;
     }
   }
 </style>

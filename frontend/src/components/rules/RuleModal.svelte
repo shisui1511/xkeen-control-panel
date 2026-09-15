@@ -189,7 +189,8 @@
   }
 
   .input:focus {
-    border-color: var(--color-primary);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
 
   .font-mono {
@@ -198,7 +199,7 @@
 
   .form-error {
     font-size: var(--font-size-xs);
-    color: var(--color-danger);
+    color: var(--danger);
   }
 
   .modal-actions {
