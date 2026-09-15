@@ -1407,7 +1407,7 @@
           <Skeleton type="card" height="60vh" />
         {:then { default: Rules }}
           <div transition:fade={{ duration: 150 }}>
-            <Rules />
+            <Rules onSwitchTab={switchTab} />
           </div>
         {:catch err}
           <div use:reportChunkErrorAction={err}>
