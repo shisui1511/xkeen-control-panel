@@ -168,9 +168,6 @@
   let restartingLogger = $state(false);
 
   // Scenario Bar
-  let schema = $state<any>(null);
-  let schemaLoading = $state(true);
-  let schemaError = $state<string | null>(null);
   let lastAppliedPreset = $state<string | null>(null);
   let isPresetModified = $state(false);
 
@@ -353,21 +350,6 @@
     }
   }
 
-  async function loadSchema() {
-    schemaLoading = true;
-    schemaError = '';
-    try {
-      const res = await apiFetch('/api/assets/definition');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      schema = await res.json();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      schemaError = e?.message || 'Failed to load schema';
-    } finally {
-      schemaLoading = false;
-    }
-  }
-
   function applyPreset(presetId: string) {
     const preset = XRAY_DEFAULT_PRESETS.find((p: XrayRoutingPreset) => p.id === presetId);
     if (!preset) return;
@@ -533,7 +515,7 @@
       detectedDraft = draft;
     }
 
-    await Promise.all([loadXrayConfig(), loadXrayOutboundTags(), loadSchema()]);
+    await Promise.all([loadXrayConfig(), loadXrayOutboundTags()]);
   });
 </script>
 
@@ -546,250 +528,233 @@
     />
   {/if}
 
-  {#if schemaLoading}
-    <div
-      class="loading-state-block"
-      style="padding: 48px; text-align: center; color: var(--fg-secondary);"
-    >
-      <div class="spinner" style="--spinner-size: 24px; margin: 0 auto 12px;"></div>
-      <p>{$t('editor.loading_definition')}</p>
-    </div>
-  {:else if schemaError}
-    <div class="error-state-block" style="padding: 48px; text-align: center;">
-      <p style="color: var(--danger); margin-bottom: 16px;">
-        {$t('editor.definition_load_error', { error: schemaError })}
-      </p>
-      <button class="btn btn-secondary" onclick={loadSchema}>{$t('app.retry')}</button>
+  {#if !embedded}
+    <div class="constructor-header">
+      <div class="constructor-header-content">
+        <h2 class="constructor-title">{$t('xray.presets_h1')}</h2>
+        <p class="constructor-sub">{$t('xray.presets_sub')}</p>
+      </div>
+      <div class="constructor-header-actions">
+        <Button
+          type="button"
+          variant="secondary"
+          onclick={() => (showPreviewPane = !showPreviewPane)}
+          title={$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
+        >
+          {$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
+        </Button>
+        <Button type="button" variant="secondary" onclick={openInEditor}>
+          {#if selectedFile}
+            {$t('mihomo.insert_editor')}
+          {:else}
+            {$t('mihomo.open_editor')}
+          {/if}
+        </Button>
+        {#if undoHistory.length > 0}
+          <Button type="button" variant="secondary" onclick={handleUndo} disabled={applyLoading}>
+            {$t('editor.undo')}
+          </Button>
+        {/if}
+        <Button
+          type="button"
+          variant="primary"
+          data-testid="apply-changes-btn"
+          onclick={promptApplyChanges}
+          disabled={applyLoading}
+        >
+          {applyLoading ? $t('editor.saving') : $t('mihomo.apply_changes')}
+        </Button>
+      </div>
     </div>
   {:else}
-    {#if !embedded}
-      <div class="constructor-header">
-        <div class="constructor-header-content">
-          <h2 class="constructor-title">{$t('xray.presets_h1')}</h2>
-          <p class="constructor-sub">{$t('xray.presets_sub')}</p>
-        </div>
-        <div class="constructor-header-actions">
-          <Button
-            type="button"
-            variant="secondary"
-            onclick={() => (showPreviewPane = !showPreviewPane)}
-            title={$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
-          >
-            {$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
-          </Button>
-          <Button type="button" variant="secondary" onclick={openInEditor}>
-            {#if selectedFile}
-              {$t('mihomo.insert_editor')}
-            {:else}
-              {$t('mihomo.open_editor')}
-            {/if}
-          </Button>
-          {#if undoHistory.length > 0}
-            <Button type="button" variant="secondary" onclick={handleUndo} disabled={applyLoading}>
-              {$t('editor.undo')}
-            </Button>
-          {/if}
-          <Button
-            type="button"
-            variant="primary"
-            data-testid="apply-changes-btn"
-            onclick={promptApplyChanges}
-            disabled={applyLoading}
-          >
-            {applyLoading ? $t('editor.saving') : $t('mihomo.apply_changes')}
-          </Button>
-        </div>
+    <div class="embedded-head-toolbar">
+      <div class="embedded-title-tag">
+        <strong>{$t('xray.presets_h1')}</strong>
       </div>
-    {:else}
-      <div class="embedded-head-toolbar">
-        <div class="embedded-title-tag">
-          <strong>{$t('xray.presets_h1')}</strong>
-        </div>
-        <div class="constructor-header-actions">
-          <Button
-            type="button"
-            variant="secondary"
-            onclick={() => (showPreviewPane = !showPreviewPane)}
-            title={$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
-          >
-            {$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
-          </Button>
-        </div>
-      </div>
-    {/if}
-
-    <PreflightWarnings
-      warnings={saveWarnings}
-      onDismiss={() => {
-        saveWarnings = [];
-      }}
-    />
-
-    <div class="gen-layout">
-      <!-- Left Panel: Navigation and Section Content -->
-      <div class="gen-left">
-        <!-- Scenario chips (BUILD-04) -->
-        <div class="constructor-scenario-bar">
-          <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
-          {#each XRAY_DEFAULT_PRESETS as p}
-            <button
-              class="scenario-chip"
-              class:active={lastAppliedPreset === p.id}
-              title={$t(p.descKey)}
-              onclick={() => applyPreset(p.id)}
-            >
-              {$t(p.nameKey)}
-              {#if lastAppliedPreset === p.id && isPresetModified}
-                <span class="preset-mod-badge">{$t('xray.preset_modified')}</span>
-              {/if}
-            </button>
-          {/each}
-        </div>
-
-        <!-- Outbound Tag selection -->
-        <div class="rule-providers-row">
-          <label class="form-label" for="proxy-tag-select">{$t('xray.main_proxy_outbound')}:</label>
-          <Select
-            id="proxy-tag-select"
-            class="form-select"
-            bind:value={proxyTag}
-            disabled={outboundTagsLoading}
-            onchange={() => (isDirty = true)}
-          >
-            {#if outboundTagsLoading}
-              <option value="" disabled>{$t('editor.loading_tags')}</option>
-            {:else if outboundTags.filter((t) => t !== 'direct' && t !== 'block' && t !== 'dns-out').length === 0}
-              <option value="" disabled>{$t('editor.no_outbounds_configured')}</option>
-            {:else}
-              {#each outboundTags.filter((t) => t !== 'direct' && t !== 'block' && t !== 'dns-out') as tag}
-                <option value={tag}>{tag}</option>
-              {/each}
-            {/if}
-          </Select>
-        </div>
-
-        <!-- Section tabs -->
-        <div class="sec-tabs" data-testid="xray-section-tabs">
-          {#each [['routing', $t('xray.tab_routing')], ['inbounds', $t('xray.tab_inbounds')], ['dns', 'DNS'], ['outbounds', $t('xray.tab_outbounds')], ['log', $t('xray.tab_log')], ['policy', $t('xray.tab_policy')]] as [id, label]}
-            <button
-              class="sec-tab"
-              class:active={activeSection === id}
-              data-tab={id}
-              onclick={() => {
-                activeSection = id as XraySectionName;
-              }}
-            >
-              {label}
-              {#if id === 'routing' && routingRules.length > 0}
-                <span class="sec-count">{routingRules.length}</span>
-              {/if}
-            </button>
-          {/each}
-        </div>
-
-        <!-- Section Content -->
-        {#if activeSection === 'routing'}
-          <XraySectionRouting
-            bind:routingConfig
-            bind:routingRules
-            {outboundTags}
-            isXrayActive={$capabilities?.active_kernel === 'xray'}
-            bind:testRouteForm
-            {testRouteRunning}
-            {testRouteResult}
-            {testRouteError}
-            {restartingLogger}
-            onRunTestRoute={runTestRoute}
-            onRestartLogger={restartLogger}
-            onchange={() => (isDirty = true)}
-          />
-        {:else if activeSection === 'inbounds'}
-          <XraySectionInbounds bind:inbounds onchange={() => (isDirty = true)} />
-        {:else if activeSection === 'dns'}
-          <XraySectionDns
-            bind:dnsConfig
-            bind:dnsOverVless
-            xkeenDns={$capabilities?.xkeen_dns}
-            {dnsRedirectLoading}
-            onEnableDnsRedirect={enableDNSRedirect}
-            onchange={() => (isDirty = true)}
-          />
-        {:else if activeSection === 'outbounds'}
-          <XraySectionOutbounds
-            bind:customOutbounds
-            {subscriptionOutbounds}
-            {outboundDetails}
-            {outboundTags}
-            onReloadTags={loadXrayOutboundTags}
-            onchange={() => (isDirty = true)}
-          />
-        {:else if activeSection === 'log'}
-          <XraySectionLog
-            bind:logConfig
-            accessPath={xrayFiles['01_log.json']?.log?.access}
-            errorPath={xrayFiles['01_log.json']?.log?.error}
-            onchange={() => (isDirty = true)}
-          />
-        {:else if activeSection === 'policy'}
-          <XraySectionPolicy bind:policyConfig onchange={() => (isDirty = true)} />
-        {/if}
-      </div>
-
-      <!-- Right Panel: ConstructorPreview with Tabs -->
-      {#if showPreviewPane}
-        <ConstructorPreview
-          content={activePreviewText}
-          language="json"
-          storageKey="xray_constructor_preview_width"
-          isOpen={showPreviewPane}
-          onClose={() => (showPreviewPane = false)}
-          tabs={previewTabs}
-          activeTab={activePreviewTab}
-          onTabChange={(tabId) => (activePreviewTab = tabId)}
-          testId="xray-json-preview"
+      <div class="constructor-header-actions">
+        <Button
+          type="button"
+          variant="secondary"
+          onclick={() => (showPreviewPane = !showPreviewPane)}
+          title={$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
         >
-          {#if validationError}
-            <div
-              class="validation-error-block"
-              role="alert"
-              aria-live="assertive"
-              style="margin-top: 12px; padding: 12px; background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
-            >
-              <div style="font-weight: bold; margin-bottom: 6px;">
-                {$t('editor.validation_failed')}
-              </div>
-              <div
-                style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;"
-              >
-                {parseValidationError(validationError, $currentLang)}
-              </div>
-            </div>
-          {/if}
-
-          {#if embedded}
-            <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
-              <button class="btn btn-secondary" style="flex: 1;" onclick={openInEditor}>
-                {#if selectedFile}
-                  {$t('mihomo.insert_editor')}
-                {:else}
-                  {$t('mihomo.open_editor')}
-                {/if}
-              </button>
-              <button
-                class="btn btn-primary"
-                data-testid="apply-changes-btn"
-                onclick={promptApplyChanges}
-                disabled={applyLoading}
-                style="flex: 1;"
-              >
-                {applyLoading ? $t('editor.saving') : $t('mihomo.apply_changes')}
-              </button>
-            </div>
-          {/if}
-        </ConstructorPreview>
-      {/if}
+          {$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
+        </Button>
+      </div>
     </div>
   {/if}
+
+  <PreflightWarnings
+    warnings={saveWarnings}
+    onDismiss={() => {
+      saveWarnings = [];
+    }}
+  />
+
+  <div class="gen-layout">
+    <!-- Left Panel: Navigation and Section Content -->
+    <div class="gen-left">
+      <!-- Scenario chips (BUILD-04) -->
+      <div class="constructor-scenario-bar">
+        <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
+        {#each XRAY_DEFAULT_PRESETS as p}
+          <button
+            class="scenario-chip"
+            class:active={lastAppliedPreset === p.id}
+            title={$t(p.descKey)}
+            onclick={() => applyPreset(p.id)}
+          >
+            {$t(p.nameKey)}
+            {#if lastAppliedPreset === p.id && isPresetModified}
+              <span class="preset-mod-badge">{$t('xray.preset_modified')}</span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+
+      <!-- Outbound Tag selection -->
+      <div class="rule-providers-row">
+        <label class="form-label" for="proxy-tag-select">{$t('xray.main_proxy_outbound')}:</label>
+        <Select
+          id="proxy-tag-select"
+          class="form-select"
+          bind:value={proxyTag}
+          disabled={outboundTagsLoading}
+          onchange={() => (isDirty = true)}
+        >
+          {#if outboundTagsLoading}
+            <option value="" disabled>{$t('editor.loading_tags')}</option>
+          {:else if outboundTags.filter((t) => t !== 'direct' && t !== 'block' && t !== 'dns-out').length === 0}
+            <option value="" disabled>{$t('editor.no_outbounds_configured')}</option>
+          {:else}
+            {#each outboundTags.filter((t) => t !== 'direct' && t !== 'block' && t !== 'dns-out') as tag}
+              <option value={tag}>{tag}</option>
+            {/each}
+          {/if}
+        </Select>
+      </div>
+
+      <!-- Section tabs -->
+      <div class="sec-tabs" data-testid="xray-section-tabs">
+        {#each [['routing', $t('xray.tab_routing')], ['inbounds', $t('xray.tab_inbounds')], ['dns', 'DNS'], ['outbounds', $t('xray.tab_outbounds')], ['log', $t('xray.tab_log')], ['policy', $t('xray.tab_policy')]] as [id, label]}
+          <button
+            class="sec-tab"
+            class:active={activeSection === id}
+            data-tab={id}
+            onclick={() => {
+              activeSection = id as XraySectionName;
+            }}
+          >
+            {label}
+            {#if id === 'routing' && routingRules.length > 0}
+              <span class="sec-count">{routingRules.length}</span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+
+      <!-- Section Content -->
+      {#if activeSection === 'routing'}
+        <XraySectionRouting
+          bind:routingConfig
+          bind:routingRules
+          {outboundTags}
+          isXrayActive={$capabilities?.active_kernel === 'xray'}
+          bind:testRouteForm
+          {testRouteRunning}
+          {testRouteResult}
+          {testRouteError}
+          {restartingLogger}
+          onRunTestRoute={runTestRoute}
+          onRestartLogger={restartLogger}
+          onchange={() => (isDirty = true)}
+        />
+      {:else if activeSection === 'inbounds'}
+        <XraySectionInbounds bind:inbounds onchange={() => (isDirty = true)} />
+      {:else if activeSection === 'dns'}
+        <XraySectionDns
+          bind:dnsConfig
+          bind:dnsOverVless
+          xkeenDns={$capabilities?.xkeen_dns}
+          {dnsRedirectLoading}
+          onEnableDnsRedirect={enableDNSRedirect}
+          onchange={() => (isDirty = true)}
+        />
+      {:else if activeSection === 'outbounds'}
+        <XraySectionOutbounds
+          bind:customOutbounds
+          {subscriptionOutbounds}
+          {outboundDetails}
+          {outboundTags}
+          onReloadTags={loadXrayOutboundTags}
+          onchange={() => (isDirty = true)}
+        />
+      {:else if activeSection === 'log'}
+        <XraySectionLog
+          bind:logConfig
+          accessPath={xrayFiles['01_log.json']?.log?.access}
+          errorPath={xrayFiles['01_log.json']?.log?.error}
+          onchange={() => (isDirty = true)}
+        />
+      {:else if activeSection === 'policy'}
+        <XraySectionPolicy bind:policyConfig onchange={() => (isDirty = true)} />
+      {/if}
+    </div>
+
+    <!-- Right Panel: ConstructorPreview with Tabs -->
+    {#if showPreviewPane}
+      <ConstructorPreview
+        content={activePreviewText}
+        language="json"
+        storageKey="xray_constructor_preview_width"
+        isOpen={showPreviewPane}
+        onClose={() => (showPreviewPane = false)}
+        tabs={previewTabs}
+        activeTab={activePreviewTab}
+        onTabChange={(tabId) => (activePreviewTab = tabId)}
+        testId="xray-json-preview"
+      >
+        {#if validationError}
+          <div
+            class="validation-error-block"
+            role="alert"
+            aria-live="assertive"
+            style="margin-top: 12px; padding: 12px; background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
+          >
+            <div style="font-weight: bold; margin-bottom: 6px;">
+              {$t('editor.validation_failed')}
+            </div>
+            <div
+              style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;"
+            >
+              {parseValidationError(validationError, $currentLang)}
+            </div>
+          </div>
+        {/if}
+
+        {#if embedded}
+          <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
+            <button class="btn btn-secondary" style="flex: 1;" onclick={openInEditor}>
+              {#if selectedFile}
+                {$t('mihomo.insert_editor')}
+              {:else}
+                {$t('mihomo.open_editor')}
+              {/if}
+            </button>
+            <button
+              class="btn btn-primary"
+              data-testid="apply-changes-btn"
+              onclick={promptApplyChanges}
+              disabled={applyLoading}
+              style="flex: 1;"
+            >
+              {applyLoading ? $t('editor.saving') : $t('mihomo.apply_changes')}
+            </button>
+          </div>
+        {/if}
+      </ConstructorPreview>
+    {/if}
+  </div>
 </div>
 
 <Modal
