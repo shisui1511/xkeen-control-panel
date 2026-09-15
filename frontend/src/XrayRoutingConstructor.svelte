@@ -334,20 +334,74 @@
     }
   }
 
+  const XRAY_DIR = '/opt/etc/xray/configs';
+
   async function loadXrayOutboundTags() {
     outboundTagsLoading = true;
+    const custom: any[] = [];
+    const subs: any[] = [];
+
     try {
-      const res = await apiFetch('/api/xray/outbounds');
-      if (res.status === 401) return;
-      const data = await res.json();
-      if (data && Array.isArray(data.outbounds)) {
-        subscriptionOutbounds = data.outbounds;
+      const listRes = await apiFetch(`/api/config/list?dir=${encodeURIComponent(XRAY_DIR)}`);
+      if (listRes.ok) {
+        const files: { name: string; path: string; size: number }[] = await listRes.json();
+        const outboundFiles = files.filter(
+          (f) => f.name.startsWith('04_outbounds') && f.name.endsWith('.json')
+        );
+        for (const f of outboundFiles) {
+          try {
+            const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(f.path)}`);
+            if (!res.ok) continue;
+            const json = await res.json();
+            const fileOutbounds = (json.outbounds ?? []) as any[];
+
+            if (f.name === '04_outbounds.json') {
+              for (const o of fileOutbounds) {
+                if (o && o.tag && o.tag !== 'direct' && o.tag !== 'block' && o.tag !== 'dns-out') {
+                  custom.push(o);
+                }
+              }
+            } else {
+              for (const o of fileOutbounds) {
+                if (o && o.tag) {
+                  subs.push(o);
+                }
+              }
+            }
+          } catch {
+            /* skip missing/corrupted file */
+          }
+        }
       }
     } catch {
-      // Ignore
-    } finally {
-      outboundTagsLoading = false;
+      /* fallback */
     }
+
+    // Deduplicate custom by tag
+    const seenCustom = new Set<string>();
+    const uniqueCustom: any[] = [];
+    for (const o of custom) {
+      if (o.tag && !seenCustom.has(o.tag)) {
+        seenCustom.add(o.tag);
+        uniqueCustom.push(o);
+      }
+    }
+
+    // Deduplicate subs by tag
+    const seenSubs = new Set<string>();
+    const uniqueSubs: any[] = [];
+    for (const o of subs) {
+      if (o.tag && !seenSubs.has(o.tag)) {
+        seenSubs.add(o.tag);
+        uniqueSubs.push(o);
+      }
+    }
+
+    if (uniqueCustom.length > 0) {
+      customOutbounds = uniqueCustom;
+    }
+    subscriptionOutbounds = uniqueSubs;
+    outboundTagsLoading = false;
   }
 
   function applyPreset(presetId: string) {
@@ -578,6 +632,18 @@
           onclick={() => (showPreviewPane = !showPreviewPane)}
           title={$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
         >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right: 4px;"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+            <line x1="15" y1="3" x2="15" y2="21" />
+          </svg>
           {$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
         </Button>
       </div>
@@ -853,14 +919,16 @@
   .gen-layout {
     display: flex;
     flex-direction: row;
-    gap: 16px;
+    gap: 0;
     align-items: stretch;
+    position: relative;
     min-height: 520px;
   }
 
   .gen-left {
     flex: 1;
-    min-width: 0;
+    min-width: 320px;
+    padding-right: var(--spacing-3, 12px);
     display: flex;
     flex-direction: column;
   }
@@ -923,6 +991,12 @@
     align-items: center;
     gap: 12px;
     margin-bottom: 16px;
+  }
+
+  .rule-providers-row :global(.xcp-select) {
+    width: auto;
+    min-width: 200px;
+    max-width: 360px;
   }
 
   .sec-tabs {

@@ -523,7 +523,6 @@
     {:else}
       <div class="embedded-head-toolbar">
         <div class="embedded-title-tag">
-          <span style="color: var(--fg-secondary);">{$t('editor.title')} › </span>
           <strong>{$t('mihomo.breadcrumb_generator')}</strong>
         </div>
         <div class="constructor-header-actions">
@@ -540,6 +539,7 @@
               fill="none"
               stroke="currentColor"
               stroke-width="2"
+              style="margin-right: 4px;"
             >
               <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
               <line x1="15" y1="3" x2="15" y2="21" />
@@ -823,17 +823,8 @@
             </div>
           {/if}
 
-          <div style="margin: 12px; display: flex; flex-direction: column; gap: 8px;">
-            <button
-              type="button"
-              class="btn btn-primary"
-              data-testid="apply-changes-btn"
-              onclick={() => handleApplyMihomo()}
-              disabled={applyLoading || !yaml || !!blockingValidationMsg}
-            >
-              {applyLoading ? $t('editor.saving') : $t('mihomo.apply_and_restart')}
-            </button>
-            <button type="button" class="btn btn-secondary" onclick={openInEditor}>
+          <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
+            <button class="btn btn-secondary" style="flex: 1;" onclick={openInEditor}>
               <svg
                 width="13"
                 height="13"
@@ -859,10 +850,22 @@
                 class="btn btn-secondary"
                 onclick={handleUndo}
                 disabled={applyLoading}
+                style="flex: 1;"
               >
                 {$t('editor.undo')}
               </button>
             {/if}
+
+            <button
+              type="button"
+              class="btn btn-primary"
+              data-testid="apply-changes-btn"
+              onclick={() => handleApplyMihomo()}
+              disabled={applyLoading || !yaml || !!blockingValidationMsg}
+              style="flex: 1;"
+            >
+              {applyLoading ? $t('editor.saving') : $t('mihomo.apply_and_restart')}
+            </button>
           </div>
         </ConstructorPreview>
       {/if}
@@ -1006,8 +1009,10 @@
 
   .gen-layout {
     display: flex;
-    gap: 16px;
+    gap: 0;
     align-items: stretch;
+    position: relative;
+    min-height: 520px;
   }
 
   @media (max-width: 1024px) {
@@ -1018,26 +1023,24 @@
 
   .gen-left {
     flex: 1;
-    min-width: 0;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    overflow: hidden;
+    min-width: 320px;
+    padding-right: 12px;
   }
 
   .constructor-scenario-bar {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border);
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
   }
 
   .scenario-select-wrap {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
   }
 
   .preset-modified-chip {
@@ -1053,41 +1056,57 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
+    margin-bottom: 14px;
+  }
+
+  .rule-providers-row :global(.xcp-select) {
+    width: auto;
+    min-width: 160px;
   }
 
   .sec-tabs {
     display: flex;
-    flex-wrap: wrap;
-    background: var(--bg-surface);
-    border-bottom: 1px solid var(--border);
+    gap: 2px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px;
+    margin-bottom: 16px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sec-tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .sec-tab {
-    padding: 10px 16px;
+    flex: 1 0 auto;
+    white-space: nowrap;
     background: none;
     border: none;
-    border-bottom: 2px solid transparent;
     color: var(--fg-secondary);
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
     transition: all var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
   }
 
   .sec-tab:hover {
     color: var(--fg-primary);
-    background: var(--bg-hover);
+    background: var(--bg-card-hover);
   }
 
   .sec-tab.active {
-    color: var(--primary);
-    border-bottom-color: var(--primary);
-    background: var(--bg-card);
+    color: var(--fg-primary);
+    background: var(--accent);
+    font-weight: 500;
   }
 
   .sec-count {

@@ -38,7 +38,7 @@
     children
   }: Props = $props();
 
-  let previewWidth = $state(440);
+  let previewWidth = $state<number>(440);
   let copyFeedback = $state(false);
 
   const fileSize = $derived.by(() => {
@@ -85,6 +85,7 @@
   <div class="constructor-preview-wrapper" style="width: {previewWidth}px;">
     <div class="preview-card">
       {#if tabs && tabs.length > 0}
+        <!-- Tabbed Header (Xray style) -->
         <div class="preview-tabs-bar">
           {#each tabs as tab}
             <button
@@ -97,85 +98,143 @@
             </button>
           {/each}
         </div>
-      {:else if title}
-        <div class="preview-header-title">
-          <span class="title-text">{title}</span>
-          {#if onClose}
-            <button
-              type="button"
-              class="btn-close-header"
-              onclick={onClose}
-              aria-label={$t('app.close')}
-            >
-              ✕
-            </button>
-          {/if}
-        </div>
-      {/if}
 
-      <div class="preview-toolbar">
-        <span class="preview-meta-size">{fileSize}</span>
-        <div class="preview-tools-right">
-          <button
-            type="button"
-            class="btn btn-sm btn-secondary btn-tool-action"
-            onclick={handleCopy}
-            title={$t('xray.copy_json')}
-          >
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-            <span>{$t(copyFeedback ? 'app.copied' : 'app.copy')}</span>
-          </button>
-          <button
-            type="button"
-            class="btn btn-sm btn-secondary btn-tool-action"
-            onclick={handleDownload}
-            title={$t('xray.download_json')}
-          >
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            <span>{$t('app.download')}</span>
-          </button>
-          {#if onClose && (!tabs || tabs.length === 0) && !title}
+        <div class="preview-toolbar">
+          <span class="preview-meta-size">{fileSize}</span>
+          <div class="preview-tools-right">
             <button
               type="button"
               class="btn btn-sm btn-secondary btn-tool-action"
-              onclick={onClose}
-              title={$t('app.close')}
+              onclick={handleCopy}
+              title={$t(language === 'yaml' ? 'mihomo.copy_yaml' : 'xray.copy_json')}
             >
-              <span>✕</span>
+              {#if copyFeedback}
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--success)"
+                  stroke-width="2.5"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              {:else}
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              {/if}
+              <span>{$t(copyFeedback ? 'app.copied' : 'app.copy')}</span>
             </button>
-          {/if}
+            <button
+              type="button"
+              class="btn btn-sm btn-secondary btn-tool-action"
+              onclick={handleDownload}
+              title={$t(language === 'yaml' ? 'mihomo.download_yaml_title' : 'xray.download_json')}
+            >
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>{$t('app.download')}</span>
+            </button>
+          </div>
         </div>
-      </div>
+      {:else}
+        <!-- Single Header (Mihomo original style) -->
+        <div class="preview-header">
+          <div class="preview-title-wrap">
+            <span class="preview-title"
+              >{title ||
+                (language === 'yaml'
+                  ? 'YAML ' + $t('mihomo.preview')
+                  : 'JSON ' + $t('editor.constructor_preview'))}</span
+            >
+            <span class="preview-size-badge">{fileSize}</span>
+          </div>
+          <div class="preview-header-actions">
+            <button
+              type="button"
+              class="btn btn-sm btn-secondary btn-tool-action"
+              onclick={handleCopy}
+              title={$t(language === 'yaml' ? 'mihomo.copy_yaml' : 'xray.copy_json')}
+            >
+              {#if copyFeedback}
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--success)"
+                  stroke-width="2.5"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              {:else}
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              {/if}
+              <span>{$t(copyFeedback ? 'app.copied' : 'app.copy')}</span>
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm btn-secondary btn-tool-action"
+              onclick={handleDownload}
+              title={$t(language === 'yaml' ? 'mihomo.download_yaml_title' : 'xray.download_json')}
+            >
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>{$t('app.download')}</span>
+            </button>
+          </div>
+        </div>
+      {/if}
 
       <pre
         id={testId}
-        class="constructor-preview-panel yaml-preview"
+        class="constructor-preview-panel {language === 'yaml' ? 'yaml-preview' : ''}"
         data-testid={testId || 'constructor-preview'}><code>{content}</code></pre>
     </div>
 
     {#if children}
-      {@render children()}
+      <div class="constructor-preview-footer">
+        {@render children()}
+      </div>
     {/if}
   </div>
 {/if}
@@ -184,9 +243,12 @@
   .constructor-preview-wrapper {
     flex-shrink: 0;
     min-width: 280px;
-    max-width: 100%;
+    max-width: 800px;
     display: flex;
     flex-direction: column;
+    position: sticky;
+    top: 16px;
+    height: calc(100vh - 160px);
   }
 
   .preview-card {
@@ -194,88 +256,105 @@
     flex-direction: column;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius);
     overflow: hidden;
-    box-shadow: var(--shadow-md);
+    flex: 1;
+    min-height: 0;
   }
 
-  .preview-header-title {
+  .preview-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--spacing-2) var(--spacing-3);
-    background: var(--bg-elevated);
+    padding: 8px 12px;
+    background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
   }
 
-  .title-text {
-    font-size: var(--font-size-sm);
+  .preview-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .preview-title {
+    font-size: var(--font-size-xs);
     font-weight: 600;
-    color: var(--fg-primary);
+    color: var(--fg-dim);
   }
 
-  .btn-close-header {
-    background: transparent;
-    border: none;
-    color: var(--fg-muted);
-    cursor: pointer;
-    padding: 2px 6px;
-    font-size: 13px;
-    border-radius: 4px;
-    transition: color var(--transition-fast);
+  .preview-size-badge {
+    font-size: var(--font-size-xs);
+    background: var(--surface-tint);
+    border: 1px solid var(--border-light);
+    color: var(--fg-secondary);
+    padding: 1px 6px;
+    border-radius: 10px;
   }
 
-  .btn-close-header:hover {
-    color: var(--fg-primary);
+  .preview-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .preview-tabs-bar {
     display: flex;
-    flex-wrap: wrap;
-    gap: 2px;
-    padding: 4px 6px;
-    background: var(--bg-elevated);
+    align-items: center;
+    background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 2px 4px 0 4px;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .preview-tabs-bar::-webkit-scrollbar {
+    display: none;
   }
 
   .preview-tab-btn {
-    padding: 4px 8px;
+    padding: 6px 10px;
     background: transparent;
     border: none;
-    border-radius: var(--radius-sm);
+    border-bottom: 2px solid transparent;
     color: var(--fg-secondary);
     font-size: 0.75rem;
-    font-family: var(--font-family-mono);
+    font-family: var(--font-mono);
     cursor: pointer;
+    white-space: nowrap;
     transition:
-      background-color var(--transition-fast),
-      color var(--transition-fast);
+      color var(--transition-fast),
+      border-color var(--transition-fast);
+    margin-bottom: -1px;
   }
 
   .preview-tab-btn:hover {
     color: var(--fg-primary);
-    background: var(--bg-surface-active);
   }
 
   .preview-tab-btn.active {
-    background: var(--bg-card);
     color: var(--accent);
+    border-bottom-color: var(--accent);
     font-weight: 600;
   }
 
   .preview-toolbar {
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    padding: 6px var(--spacing-3);
+    align-items: center;
+    padding: 6px 10px;
     background: var(--bg-elevated);
     border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
   }
 
   .preview-meta-size {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     color: var(--fg-muted);
-    font-family: var(--font-family-mono);
+    font-family: var(--font-mono);
   }
 
   .preview-tools-right {
@@ -290,23 +369,23 @@
     gap: 4px;
     height: 24px;
     padding: 2px 8px;
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
   }
 
   .constructor-preview-panel {
     flex: 1;
     margin: 0;
-    padding: var(--spacing-3);
+    padding: 14px 16px;
     background: var(--code-bg);
     color: var(--code-fg);
     border: none;
-    font-family: var(--font-family-mono);
+    font-family: var(--font-mono);
     font-size: var(--font-size-xs);
     line-height: 1.5;
-    overflow: auto;
+    overflow-y: auto;
     scrollbar-width: thin;
-    max-height: 600px;
-    min-height: 320px;
+    scrollbar-color: var(--border-strong) transparent;
+    min-height: 0;
   }
 
   .constructor-preview-panel code {
@@ -318,10 +397,21 @@
     border: none;
   }
 
+  .constructor-preview-footer {
+    margin-top: 12px;
+    flex-shrink: 0;
+  }
+
   @media (max-width: 1024px) {
     .constructor-preview-wrapper {
       width: 100% !important;
+      position: static;
+      height: auto;
       margin-top: var(--spacing-3);
+    }
+
+    .constructor-preview-panel {
+      max-height: 500px;
     }
   }
 </style>

@@ -120,48 +120,43 @@
   onpointerdown={startResize}
   onkeydown={handleKeyDown}
 >
-  <span class="splitter-line" aria-hidden="true"></span>
+  <div class="splitter-handle" aria-hidden="true"></div>
 </button>
 
 <style>
   .resizable-splitter {
-    width: 8px;
-    background: transparent;
-    border: none;
+    width: 12px;
+    margin: 0 4px;
     cursor: col-resize;
     position: relative;
-    padding: 0;
-    margin: 0 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
-    outline: none;
     user-select: none;
+    z-index: 10;
+    background: transparent;
+    border: none;
+    padding: 0;
+    outline: none;
     touch-action: none;
-    transition: background-color var(--transition-fast);
   }
 
-  .resizable-splitter:focus-visible .splitter-line {
-    background: var(--accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
-  }
-
-  .splitter-line {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 3px;
-    width: 2px;
+  .splitter-handle {
+    width: 4px;
+    height: 40px;
+    border-radius: 2px;
     background: var(--border);
-    border-radius: 1px;
     transition:
-      background-color var(--transition-fast),
-      width var(--transition-fast);
+      background var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
 
-  .resizable-splitter:hover .splitter-line,
-  .resizable-splitter.is-resizing .splitter-line {
+  .resizable-splitter:hover .splitter-handle,
+  .resizable-splitter.is-resizing .splitter-handle,
+  .resizable-splitter:focus-visible .splitter-handle {
     background: var(--accent);
-    width: 3px;
-    left: 2.5px;
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent);
   }
 
   @media (max-width: 1024px) {

@@ -938,6 +938,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+    max-width: 480px;
   }
 
   .form-label {
