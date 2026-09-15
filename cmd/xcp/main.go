@@ -226,6 +226,7 @@ func main() {
 			api.UserRulesSave(w, r)
 		}
 	})
+	srv.HandleProtected("/api/rules/test", api.RouteTest)
 	srv.HandleProtected("/api/config/mihomo-migrate-socket", api.MihomoMigrateSocket)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
@@ -429,6 +430,10 @@ func main() {
 	// User Custom Rules Service (TMPL-06, TMPL-07)
 	userRulesSvc := services.NewUserRulesService(cfg.DataDir)
 	api.SetUserRulesService(userRulesSvc)
+
+	// Route Tracer Service (ROUTE-04)
+	routeTracerSvc := services.NewRouteTracerService(userRulesSvc, api.MihomoService(), cfg.MihomoConfigDir)
+	api.SetRouteTracerService(routeTracerSvc)
 
 	// Templates
 	templatesFS, err := xkeencontrolpanel.GetTemplatesFS()

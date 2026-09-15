@@ -39,6 +39,7 @@ type API struct {
 	templateSvc           *services.TemplateService
 	logDispatcher         *services.LogDispatcher
 	userRulesSvc          *services.UserRulesService
+	routeTracerSvc        *services.RouteTracerService
 	clientResolver        *services.ClientResolver
 	assetsSvc             *assets.AssetsService
 	pathVal               *utils.PathValidator
@@ -137,6 +138,14 @@ func (a *API) SetUserRulesService(svc *services.UserRulesService) {
 
 func (a *API) UserRulesService() *services.UserRulesService {
 	return a.userRulesSvc
+}
+
+func (a *API) SetRouteTracerService(svc *services.RouteTracerService) {
+	a.routeTracerSvc = svc
+}
+
+func (a *API) RouteTracerService() *services.RouteTracerService {
+	return a.routeTracerSvc
 }
 
 func (a *API) SetAssetsService(svc *assets.AssetsService) {
