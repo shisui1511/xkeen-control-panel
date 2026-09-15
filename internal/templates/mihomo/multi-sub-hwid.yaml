@@ -65,8 +65,11 @@ proxy-providers:
         - "Keenetic"
     health-check:
       enable: true
-      url: https://www.gstatic.com/generate_204
+      url: http://www.gstatic.com/generate_204
       interval: 300
+      timeout: 5000
+      lazy: true
+      expected-status: 204
     override:
       udp: true
       tfo: true
@@ -87,8 +90,11 @@ proxy-providers:
         - "Keenetic"
     health-check:
       enable: true
-      url: https://www.gstatic.com/generate_204
+      url: http://www.gstatic.com/generate_204
       interval: 300
+      timeout: 5000
+      lazy: true
+      expected-status: 204
     override:
       udp: true
       tfo: true

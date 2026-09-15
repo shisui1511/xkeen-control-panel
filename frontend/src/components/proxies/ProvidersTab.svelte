@@ -113,6 +113,8 @@
   bind:formFilterName={state.formFilterName}
   bind:formFilterType={state.formFilterType}
   bind:formFilterTransport={state.formFilterTransport}
+  bind:formExcludeFilter={state.formExcludeFilter}
+  bind:formExcludeType={state.formExcludeType}
   bind:formMihomoGroups={state.formMihomoGroups}
   bind:formEnabled={state.formEnabled}
   bind:formUseProviderInterval={state.formUseProviderInterval}

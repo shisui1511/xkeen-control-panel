@@ -30,6 +30,8 @@ export interface Subscription {
   filter_name?: string;
   filter_type?: string;
   filter_transport?: string;
+  exclude_filter?: string;
+  exclude_type?: string;
   mihomo_groups?: string[];
   routing_mode?: 'manual' | 'auto';
   mihomo_provider?: {
@@ -87,6 +89,8 @@ export class ProvidersState {
   formFilterName = $state('');
   formFilterType = $state('');
   formFilterTransport = $state('');
+  formExcludeFilter = $state('');
+  formExcludeType = $state('');
   formMihomoGroups = $state<string[]>([]);
   formEnabled = $state(true);
   formUseProviderInterval = $state(false);
@@ -306,6 +310,8 @@ export class ProvidersState {
       filter_name: this.formFilterName,
       filter_type: this.formFilterType,
       filter_transport: this.formFilterTransport,
+      exclude_filter: this.formExcludeFilter,
+      exclude_type: this.formExcludeType,
       mihomo_groups: this.formMihomoGroups,
       routing_mode: this.formRoutingMode,
       sockopt_mark:
@@ -389,6 +395,8 @@ export class ProvidersState {
     this.formFilterName = '';
     this.formFilterType = '';
     this.formFilterTransport = '';
+    this.formExcludeFilter = '';
+    this.formExcludeType = '';
     this.formMihomoGroups = [];
     this.formSockoptMark = null;
     this.formSockoptFastOpen = false;
@@ -411,6 +419,8 @@ export class ProvidersState {
     this.formFilterName = sub.filter_name ?? '';
     this.formFilterType = sub.filter_type ?? '';
     this.formFilterTransport = sub.filter_transport ?? '';
+    this.formExcludeFilter = sub.exclude_filter ?? '';
+    this.formExcludeType = sub.exclude_type ?? '';
     this.formMihomoGroups = sub.mihomo_groups ?? [];
     this.formSockoptMark =
       (sub as any).sockopt_mark !== undefined && (sub as any).sockopt_mark !== 0

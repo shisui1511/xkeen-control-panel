@@ -861,6 +861,21 @@ export function generateYAML(state: MihomoConfigState): string {
         lines.push(`      enable: true`);
         lines.push(`      url: http://www.gstatic.com/generate_204`);
         lines.push(`      interval: 300`);
+        lines.push(`      timeout: 5000`);
+        lines.push(`      lazy: true`);
+        lines.push(`      expected-status: 204`);
+        lines.push(`    override:`);
+        lines.push(`      udp: true`);
+        lines.push(`      tfo: true`);
+        if (sub.filter_name) {
+          lines.push(`    filter: ${yamlSafeString(sub.filter_name)}`);
+        }
+        if (sub.exclude_filter) {
+          lines.push(`    exclude-filter: ${yamlSafeString(sub.exclude_filter)}`);
+        }
+        if (sub.exclude_type) {
+          lines.push(`    exclude-type: ${yamlSafeString(sub.exclude_type)}`);
+        }
       }
     }
     lines.push('');

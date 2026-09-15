@@ -552,3 +552,65 @@ func TestSyncMihomoProviderBlocksNoConfig(t *testing.T) {
 	}
 	svc.SyncMihomoProviderBlocks()
 }
+
+func TestGenerateMihomoProxyProviderBlockLocked_Filters(t *testing.T) {
+	svc := NewSubscriptionService(t.TempDir(), t.TempDir(), t.TempDir())
+	svc.SetPanelAddress(8090, false, 8091)
+
+	sub := &Subscription{
+		ID:            "sub_1",
+		Name:          "MyProvider",
+		URL:           "https://example.com/sub",
+		ProviderName:  "MyProvider",
+		FilterName:    "RU|DE",
+		ExcludeFilter: "Test's|Expired",
+		ExcludeType:   "ss|vmess",
+		Interval:      1,
+	}
+
+	block := svc.generateMihomoProxyProviderBlockLocked(sub, 8090, false, 8091)
+
+	if !strings.Contains(block, "filter: 'RU|DE'") {
+		t.Errorf("expected filter in block, got:\n%s", block)
+	}
+	if !strings.Contains(block, "exclude-filter: 'Test''s|Expired'") {
+		t.Errorf("expected escaped exclude-filter in block, got:\n%s", block)
+	}
+	if !strings.Contains(block, "exclude-type: 'ss|vmess'") {
+		t.Errorf("expected exclude-type in block, got:\n%s", block)
+	}
+	if !strings.Contains(block, "lazy: true") || !strings.Contains(block, "timeout: 5000") || !strings.Contains(block, "expected-status: 204") {
+		t.Errorf("expected optimized health-check in block, got:\n%s", block)
+	}
+	if !strings.Contains(block, "override:\n      udp: true\n      tfo: true") {
+		t.Errorf("expected override in block, got:\n%s", block)
+	}
+}
+
+func TestSubscriptionService_UpdateExcludeFilters(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	sub := &Subscription{
+		ID:   "test_sub",
+		Name: "Test",
+		URL:  "https://example.com",
+	}
+	if err := svc.Add(sub); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	update := &Subscription{
+		Name:          "Test",
+		URL:           "https://example.com",
+		ExcludeFilter: "ExcludeRegex",
+		ExcludeType:   "trojan",
+	}
+	if err := svc.Update("test_sub", update); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	got := svc.Get("test_sub")
+	if got.ExcludeFilter != "ExcludeRegex" || got.ExcludeType != "trojan" {
+		t.Errorf("expected ExcludeFilter and ExcludeType updated, got %+v", got)
+	}
+}

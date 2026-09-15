@@ -23,6 +23,8 @@
     formFilterName = $bindable(''),
     formFilterType = $bindable(''),
     formFilterTransport = $bindable(''),
+    formExcludeFilter = $bindable(''),
+    formExcludeType = $bindable(''),
     formMihomoGroups = $bindable([]),
     formEnabled = $bindable(true),
     formUseProviderInterval = $bindable(false),
@@ -45,6 +47,8 @@
     formFilterName: string;
     formFilterType: string;
     formFilterTransport: string;
+    formExcludeFilter?: string;
+    formExcludeType?: string;
     formMihomoGroups: string[];
     formEnabled: boolean;
     formUseProviderInterval: boolean;
@@ -149,7 +153,9 @@
           />
         </div>
       </div>
+    {/if}
 
+    {#if formEnableXray || formEnableMihomo}
       <button
         type="button"
         class="advanced-toggle-btn"
@@ -161,16 +167,18 @@
 
       {#if showAdvanced}
         <div class="advanced-fields-box">
-          <div class="form-group">
-            <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
-            <input
-              id="form-tag-prefix"
-              type="text"
-              class="input"
-              bind:value={formTagPrefix}
-              placeholder={$t('subscr.tag_prefix_placeholder')}
-            />
-          </div>
+          {#if formEnableXray}
+            <div class="form-group">
+              <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
+              <input
+                id="form-tag-prefix"
+                type="text"
+                class="input"
+                bind:value={formTagPrefix}
+                placeholder={$t('subscr.tag_prefix_placeholder')}
+              />
+            </div>
+          {/if}
 
           <div class="form-group">
             <label for="form-filter-name" class="form-label">{$t('subscr.filter_name')}</label>
@@ -184,28 +192,55 @@
           </div>
 
           <div class="form-group">
-            <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
+            <label for="form-exclude-filter" class="form-label">{$t('subscr.exclude_filter')}</label
+            >
             <input
-              id="form-filter-type"
+              id="form-exclude-filter"
               type="text"
               class="input"
-              bind:value={formFilterType}
-              placeholder="vmess, vless, trojan..."
+              bind:value={formExcludeFilter}
+              placeholder={$t('subscr.exclude_placeholder')}
             />
           </div>
 
+          {#if formEnableXray}
+            <div class="form-group">
+              <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
+              <input
+                id="form-filter-type"
+                type="text"
+                class="input"
+                bind:value={formFilterType}
+                placeholder="vmess, vless, trojan..."
+              />
+            </div>
+          {/if}
+
           <div class="form-group">
-            <label for="form-filter-transport" class="form-label"
-              >{$t('subscr.filter_transport')}</label
-            >
+            <label for="form-exclude-type" class="form-label">{$t('subscr.exclude_type')}</label>
             <input
-              id="form-filter-transport"
+              id="form-exclude-type"
               type="text"
               class="input"
-              bind:value={formFilterTransport}
-              placeholder="ws, grpc, tcp..."
+              bind:value={formExcludeType}
+              placeholder={$t('subscr.exclude_type_placeholder')}
             />
           </div>
+
+          {#if formEnableXray}
+            <div class="form-group">
+              <label for="form-filter-transport" class="form-label"
+                >{$t('subscr.filter_transport')}</label
+              >
+              <input
+                id="form-filter-transport"
+                type="text"
+                class="input"
+                bind:value={formFilterTransport}
+                placeholder="ws, grpc, tcp..."
+              />
+            </div>
+          {/if}
         </div>
       {/if}
     {/if}

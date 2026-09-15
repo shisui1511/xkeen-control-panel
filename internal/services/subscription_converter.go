@@ -16,8 +16,29 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
+func parseExcludeTypes(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var types []string
+	for _, part := range strings.Split(raw, "|") {
+		for _, item := range strings.Split(part, ",") {
+			trimmed := strings.ToLower(strings.TrimSpace(item))
+			if trimmed != "" {
+				types = append(types, trimmed)
+				if trimmed == "ss" {
+					types = append(types, "shadowsocks")
+				} else if trimmed == "shadowsocks" {
+					types = append(types, "ss")
+				}
+			}
+		}
+	}
+	return types
+}
+
 func (s *SubscriptionService) applyFilters(outbounds []Outbound, sub *Subscription) []Outbound {
-	if sub.FilterName == "" && sub.FilterType == "" && sub.FilterTransport == "" {
+	if sub.FilterName == "" && sub.FilterType == "" && sub.FilterTransport == "" && sub.ExcludeFilter == "" && sub.ExcludeType == "" {
 		return outbounds
 	}
 
@@ -30,13 +51,37 @@ func (s *SubscriptionService) applyFilters(outbounds []Outbound, sub *Subscripti
 		}
 	}
 
+	var excludeRe *regexp.Regexp
+	if sub.ExcludeFilter != "" {
+		if r, err := regexp.Compile("(?i)" + sub.ExcludeFilter); err == nil {
+			excludeRe = r
+		}
+	}
+
+	excludeTypes := parseExcludeTypes(sub.ExcludeType)
+
 	var filtered []Outbound
 	for _, ob := range outbounds {
 		if nameRe != nil && !nameRe.MatchString(ob.Tag) {
 			continue
 		}
+		if excludeRe != nil && excludeRe.MatchString(ob.Tag) {
+			continue
+		}
 		if sub.FilterType != "" && !strings.EqualFold(ob.Protocol, sub.FilterType) {
 			continue
+		}
+		if len(excludeTypes) > 0 {
+			matched := false
+			for _, et := range excludeTypes {
+				if strings.EqualFold(ob.Protocol, et) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				continue
+			}
 		}
 		if sub.FilterTransport != "" {
 			transport := ""
@@ -671,7 +716,7 @@ func writeTransportOpts(sb *strings.Builder, n SubscriptionNode) {
 }
 
 func (s *SubscriptionService) applyClashFilters(blocks []string, names []string, sub *Subscription) ([]string, []string) {
-	if sub.FilterName == "" && sub.FilterType == "" && sub.FilterTransport == "" {
+	if sub.FilterName == "" && sub.FilterType == "" && sub.FilterTransport == "" && sub.ExcludeFilter == "" && sub.ExcludeType == "" {
 		return blocks, names
 	}
 
@@ -681,6 +726,15 @@ func (s *SubscriptionService) applyClashFilters(blocks []string, names []string,
 			nameRe = r
 		}
 	}
+
+	var excludeRe *regexp.Regexp
+	if sub.ExcludeFilter != "" {
+		if r, err := regexp.Compile("(?i)" + sub.ExcludeFilter); err == nil {
+			excludeRe = r
+		}
+	}
+
+	excludeTypes := parseExcludeTypes(sub.ExcludeType)
 
 	var filteredBlocks []string
 	var filteredNames []string
@@ -694,8 +748,23 @@ func (s *SubscriptionService) applyClashFilters(blocks []string, names []string,
 		if nameRe != nil && !nameRe.MatchString(node.Tag) {
 			continue
 		}
+		if excludeRe != nil && excludeRe.MatchString(node.Tag) {
+			continue
+		}
 		if sub.FilterType != "" && !strings.EqualFold(node.Protocol, sub.FilterType) {
 			continue
+		}
+		if len(excludeTypes) > 0 {
+			matched := false
+			for _, et := range excludeTypes {
+				if strings.EqualFold(node.Protocol, et) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				continue
+			}
 		}
 		if sub.FilterTransport != "" && !strings.EqualFold(node.Transport, sub.FilterTransport) {
 			continue
