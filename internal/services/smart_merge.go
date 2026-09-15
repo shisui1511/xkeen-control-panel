@@ -326,7 +326,11 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 		userRulesCount++
 		target := strings.ToUpper(ur.Target)
 		if target == "PROXY" {
-			target = proxyGroupName
+			if ur.Group != "" {
+				target = ur.Group
+			} else {
+				target = proxyGroupName
+			}
 		}
 		val := strings.TrimSpace(ur.Value)
 		switch ur.Type {
@@ -516,7 +520,11 @@ func SmartMergeXray(existingContent string, templateContent string, targetFilena
 		userRulesCount++
 		target := strings.ToLower(ur.Target)
 		if target == "proxy" {
-			target = activeOutboundTag
+			if ur.Group != "" {
+				target = ur.Group
+			} else {
+				target = activeOutboundTag
+			}
 		}
 		val := strings.TrimSpace(ur.Value)
 		switch ur.Type {

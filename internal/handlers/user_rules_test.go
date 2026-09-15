@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
@@ -73,6 +77,21 @@ func TestUserRulesHandlers(t *testing.T) {
 		t.Errorf("expected 200 for good UserRulesSave, got %d", recSaveGood.Code)
 	}
 
+	var saveResp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Applied  bool `json:"applied"`
+			Reloaded bool `json:"reloaded"`
+			Count    int  `json:"count"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(recSaveGood.Body).Decode(&saveResp); err != nil {
+		t.Fatalf("failed to decode save response: %v", err)
+	}
+	if !saveResp.Success || saveResp.Data.Count != 2 {
+		t.Errorf("unexpected save response: %+v", saveResp)
+	}
+
 	// Verify UserRulesList returns the saved rules
 	recGetList := httptest.NewRecorder()
 	api.UserRulesList(recGetList, reqGet)
@@ -89,5 +108,84 @@ func TestUserRulesHandlers(t *testing.T) {
 	}
 	if !resp.Success || len(resp.Data) != 2 {
 		t.Errorf("unexpected list response: %+v", resp)
+	}
+}
+
+func TestUserRulesSave_RuntimeInjectionAndReload(t *testing.T) {
+	reloaded := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.RequestURI() == "/configs?force=true" {
+			reloaded = true
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	hostPort := strings.TrimPrefix(server.URL, "http://")
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	cfgContent := "external-controller: " + hostPort + "\nrules:\n  - MATCH,DIRECT\n"
+	if err := os.WriteFile(configPath, []byte(cfgContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	api := &API{
+		cfg: &config.Config{
+			MihomoConfigDir: tmpDir,
+		},
+		userRulesSvc: services.NewUserRulesService(tmpDir),
+		mihomoSvc:    services.NewMihomoService("", "", tmpDir),
+	}
+
+	rulesPayload := map[string]interface{}{
+		"rules": []services.UserRule{
+			{
+				ID:      "rule-1",
+				Type:    "domain",
+				Value:   "injected.org",
+				Target:  "proxy",
+				Group:   "SpecialProxy",
+				Enabled: true,
+			},
+		},
+	}
+	body, _ := json.Marshal(rulesPayload)
+	req := httptest.NewRequest(http.MethodPost, "/api/rules/custom", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	api.UserRulesSave(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var saveResp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Applied  bool `json:"applied"`
+			Reloaded bool `json:"reloaded"`
+			Count    int  `json:"count"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&saveResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !saveResp.Data.Applied {
+		t.Errorf("expected applied: true")
+	}
+	if !saveResp.Data.Reloaded {
+		t.Errorf("expected reloaded: true")
+	}
+	if !reloaded {
+		t.Errorf("expected server to receive PUT /configs?force=true")
+	}
+
+	// Verify config.yaml contains markers and injected rule
+	contentBytes, _ := os.ReadFile(configPath)
+	content := string(contentBytes)
+	if !strings.Contains(content, services.UserRulesBeginMarker) || !strings.Contains(content, "DOMAIN,injected.org,SpecialProxy") {
+		t.Errorf("config.yaml was not properly injected:\n%s", content)
 	}
 }
