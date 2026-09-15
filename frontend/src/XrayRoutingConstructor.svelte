@@ -355,13 +355,13 @@
 
   async function loadSchema() {
     schemaLoading = true;
-    schemaError = null;
+    schemaError = '';
     try {
-      const res = await apiFetch('/api/constructor/schema');
-      if (res.status === 401) return;
-      const data = await res.json();
-      schema = data?.data || data;
+      const res = await apiFetch('/api/assets/definition');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      schema = await res.json();
     } catch (e: any) {
+      if (e?.status === 401) return;
       schemaError = e?.message || 'Failed to load schema';
     } finally {
       schemaLoading = false;
