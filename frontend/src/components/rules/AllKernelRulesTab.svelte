@@ -210,7 +210,7 @@
                   {#if activeDropdownKey === 'rule_' + i}
                     <div
                       class="dropdown-menu"
-                      class:dropdown-menu-up={i >= paginatedRules.length - 2}
+                      class:dropdown-menu-up={i >= nonMatchRules.length - 2}
                     >
                       <button onclick={() => copyPayload(rule.payload)}>
                         {$t('rules.copy_payload')}
