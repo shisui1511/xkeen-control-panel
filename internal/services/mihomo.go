@@ -551,7 +551,10 @@ func (s *MihomoService) ReloadConfig(configPath string) error {
 		return fmt.Errorf("failed to marshal reload payload: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPut, reqURL, bytes.NewReader(bodyBytes))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return err
 	}
