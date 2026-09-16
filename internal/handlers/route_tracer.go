@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
@@ -36,7 +38,10 @@ func (a *API) RouteTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := a.routeTracerSvc.TraceRoute(r.Context(), cleanTarget, req.Port)
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	result, err := a.routeTracerSvc.TraceRoute(ctx, cleanTarget, req.Port)
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusBadRequest)
 		return
