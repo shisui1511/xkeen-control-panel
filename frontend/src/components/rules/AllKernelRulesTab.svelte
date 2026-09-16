@@ -21,7 +21,7 @@
   let searchQuery = $state('');
   let typeFilter = $state('');
   let proxyFilter = $state('');
-  let activeDropdownIndex = $state<number | null>(null);
+  let activeDropdownKey = $state<string | null>(null);
 
   // Dynamic filter options
   let availableTypes = $derived.by(() => {
@@ -83,7 +83,7 @@
   }
 
   async function copyPayload(payload: string) {
-    activeDropdownIndex = null;
+    activeDropdownKey = null;
     try {
       await navigator.clipboard.writeText(payload);
       showToast('success', $t('app.copied'));
@@ -93,7 +93,7 @@
   }
 
   async function copyFullRule(rule: KernelRule) {
-    activeDropdownIndex = null;
+    activeDropdownKey = null;
     const text = `${rule.type},${rule.payload},${rule.proxy}`;
     try {
       await navigator.clipboard.writeText(text);
@@ -103,13 +103,13 @@
     }
   }
 
-  function toggleDropdown(e: MouseEvent, index: number) {
+  function toggleDropdown(e: MouseEvent, key: string) {
     e.stopPropagation();
-    activeDropdownIndex = activeDropdownIndex === index ? null : index;
+    activeDropdownKey = activeDropdownKey === key ? null : key;
   }
 
   function handleWindowClick() {
-    activeDropdownIndex = null;
+    activeDropdownKey = null;
   }
 </script>
 
@@ -201,14 +201,17 @@
                 <td class="col-actions">
                   <button
                     class="btn-more"
-                    onclick={(e) => toggleDropdown(e, i)}
+                    onclick={(e) => toggleDropdown(e, 'rule_' + i)}
                     aria-label={$t('rules.actions_col')}
                     title={$t('rules.actions_col')}
                   >
                     ⋯
                   </button>
-                  {#if activeDropdownIndex === i}
-                    <div class="dropdown-menu">
+                  {#if activeDropdownKey === 'rule_' + i}
+                    <div
+                      class="dropdown-menu"
+                      class:dropdown-menu-up={i >= paginatedRules.length - 2}
+                    >
                       <button onclick={() => copyPayload(rule.payload)}>
                         {$t('rules.copy_payload')}
                       </button>
@@ -222,7 +225,7 @@
             {/each}
 
             {#if matchRules.length > 0}
-              {#each matchRules as rule, j (100000 + j)}
+              {#each matchRules as rule, j ('match_' + j)}
                 <tr class="match-row">
                   <td class="col-num mono">—</td>
                   <td class="col-type">
@@ -235,14 +238,14 @@
                   <td class="col-actions">
                     <button
                       class="btn-more"
-                      onclick={(e) => toggleDropdown(e, 100000 + j)}
+                      onclick={(e) => toggleDropdown(e, 'match_' + j)}
                       aria-label={$t('rules.actions_col')}
                       title={$t('rules.actions_col')}
                     >
                       ⋯
                     </button>
-                    {#if activeDropdownIndex === 100000 + j}
-                      <div class="dropdown-menu">
+                    {#if activeDropdownKey === 'match_' + j}
+                      <div class="dropdown-menu dropdown-menu-up">
                         <button onclick={() => copyPayload(rule.proxy)}>
                           {$t('rules.copy_payload')}
                         </button>
@@ -523,6 +526,11 @@
     display: flex;
     flex-direction: column;
     padding: 4px 0;
+  }
+
+  .dropdown-menu-up {
+    top: auto;
+    bottom: 32px;
   }
 
   .dropdown-menu button {
