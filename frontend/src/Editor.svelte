@@ -1574,7 +1574,7 @@
     font-family: var(--font-family-mono);
     color: var(--fg-secondary);
     line-height: 1.3;
-    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow-sm);
   }
 
   .editor-empty-shortcuts .shortcut-dot {
