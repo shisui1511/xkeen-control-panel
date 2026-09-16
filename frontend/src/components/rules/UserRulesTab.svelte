@@ -7,6 +7,7 @@
   import Icon from '../../lib/components/Icon.svelte';
   import RulesIcon from '../../lib/components/icons/Rules.svelte';
   import RuleModal from './RuleModal.svelte';
+  import { showConfirm } from '../../stores';
 
   interface Props {
     rules: UserRule[];
@@ -91,7 +92,13 @@
   }
 
   async function deleteRule(id: string) {
-    if (!confirm($t('rules.delete_confirm'))) return;
+    const confirmed = await showConfirm({
+      title: $t('rules.delete_rule'),
+      message: $t('rules.delete_confirm'),
+      confirmLabel: $t('app.delete'),
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     const nextRules = rules.filter((r) => r.id !== id);
     await onSave(nextRules);
   }
