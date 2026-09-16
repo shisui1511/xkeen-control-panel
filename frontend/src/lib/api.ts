@@ -155,10 +155,15 @@ export async function fetchCustomRules(): Promise<UserRule[]> {
   return data.data || data.rules || data || [];
 }
 
-export async function saveCustomRules(
-  rules: UserRule[]
-): Promise<{ applied: boolean; reloaded: boolean; count: number }> {
-  return apiFetchJSON<{ applied: boolean; reloaded: boolean; count: number }>('/api/rules/custom', {
+export interface SaveCustomRulesResult {
+  applied: boolean;
+  reloaded: boolean;
+  count: number;
+  warning?: string;
+}
+
+export async function saveCustomRules(rules: UserRule[]): Promise<SaveCustomRulesResult> {
+  return apiFetchJSON<SaveCustomRulesResult>('/api/rules/custom', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rules })

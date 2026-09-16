@@ -91,6 +91,8 @@
       customRules = rules;
       if (!res.applied) {
         showToast('warning', $t('rules.saved_but_not_applied'));
+      } else if (res.warning) {
+        showToast('warning', res.warning);
       } else {
         showToast('success', $t('rules.custom_saved'));
       }
