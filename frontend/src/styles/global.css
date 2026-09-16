@@ -977,6 +977,14 @@ input[type='number'] {
   opacity: 1;
 }
 
+.nav-item .lbl,
+.nav-group summary > .group-ttl .lbl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 /* Icon-rail collapse (desktop-only, D-12) — mobile off-canvas drawer
    (max-width: 768px) must never be affected, so every rail rule is
    scoped inside this media query to keep the two collapse mechanisms

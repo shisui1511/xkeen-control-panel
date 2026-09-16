@@ -82,7 +82,7 @@
   "nav.logs": "Логи",
   "nav.proxies": "Прокси",
   "nav.connections": "Подключения",
-  "nav.rules": "Маршрутизация и исключения",
+  "nav.rules": "Правила и исключения",
   "nav.traffic": "Трафик",
   "nav.services": "Сервисы",
   "nav.settings": "Настройки",

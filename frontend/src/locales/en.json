@@ -82,7 +82,7 @@
   "nav.logs": "Logs",
   "nav.proxies": "Proxies",
   "nav.connections": "Connections",
-  "nav.rules": "Routing & Exceptions",
+  "nav.rules": "Rules & Exceptions",
   "nav.traffic": "Traffic",
   "nav.services": "Services",
   "nav.settings": "Settings",

@@ -212,7 +212,7 @@
   <PageHeader
     title={$t('rules.title')}
     subtitle={currentSubtitle}
-    breadcrumbs={[{ label: $t('nav.group_routing') }, { label: $t('rules.title') }]}
+    breadcrumbs={[{ label: $t('nav.group_routing') }, { label: $t('nav.rules') }]}
     {onSwitchTab}
   >
     {#snippet actions()}
