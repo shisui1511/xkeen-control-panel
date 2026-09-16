@@ -5,6 +5,7 @@
   import Select from './components/Select.svelte';
   import Button from './components/Button.svelte';
   import ConstructorPreview from './components/ConstructorPreview.svelte';
+  import ScenarioChips from './components/ScenarioChips.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
@@ -607,42 +608,31 @@
       <!-- Left: sections -->
       <div class="gen-left">
         <!-- Scenario selection -->
-        <div class="constructor-scenario-bar">
-          <div class="scenario-select-wrap">
-            <label for="preset-select" class="form-label"
-              >{$t('editor.constructor_scenario')}:</label
-            >
-            <Select
-              id="preset-select"
-              class="form-select preset-select"
-              value={ctx.activePreset}
-              onchange={(e) => {
-                const val = e.currentTarget.value;
-                applyPreset(val);
-                if (val === 'rule-based') {
-                  ctx.activeSection = 'rulesets';
-                } else if (val === 'zkeen-selective') {
-                  ctx.activeSection = 'groups';
-                }
-              }}
-            >
-              <option value="">-- {$t('editor.constructor_scenario')} --</option>
-              {#if schema && schema.mihomo && schema.mihomo.presets}
-                {#each schema.mihomo.presets as p}
-                  <option value={p.id}>{$t(p.name)}</option>
-                {/each}
-              {:else}
-                <option value="rule-based">{$t('editor.scenario_rule_based')}</option>
-                <option value="global-proxy">{$t('editor.scenario_global_proxy')}</option>
-                <option value="zkeen-selective">{$t('editor.scenario_zkeen_selective')}</option>
-                <option value="only-blocked">{$t('preset.only-blocked')}</option>
-              {/if}
-            </Select>
-          </div>
-          {#if isPresetModified}
-            <span class="preset-modified-chip">{$t('xray.preset_modified')}</span>
-          {/if}
-        </div>
+        <ScenarioChips
+          label={$t('editor.constructor_scenario')}
+          options={schema && schema.mihomo && schema.mihomo.presets
+            ? schema.mihomo.presets.map((p: any) => ({
+                id: p.id,
+                label: $t(p.name),
+                description: $t(p.description)
+              }))
+            : [
+                { id: 'rule-based', label: $t('editor.scenario_rule_based') },
+                { id: 'global-proxy', label: $t('editor.scenario_global_proxy') },
+                { id: 'zkeen-selective', label: $t('editor.scenario_zkeen_selective') },
+                { id: 'only-blocked', label: $t('preset.only-blocked') }
+              ]}
+          active={ctx.activePreset}
+          modifiedBadge={isPresetModified ? $t('xray.preset_modified') : undefined}
+          onSelect={(val) => {
+            applyPreset(val);
+            if (val === 'rule-based') {
+              ctx.activeSection = 'rulesets';
+            } else if (val === 'zkeen-selective') {
+              ctx.activeSection = 'groups';
+            }
+          }}
+        />
 
         <PreflightWarnings
           warnings={saveWarnings}
@@ -1025,31 +1015,6 @@
     flex: 1;
     min-width: 320px;
     padding-right: 12px;
-  }
-
-  .constructor-scenario-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 12px;
-  }
-
-  .scenario-select-wrap {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .preset-modified-chip {
-    background: color-mix(in srgb, var(--warning) 15%, transparent);
-    color: var(--warning);
-    font-size: var(--font-size-xs);
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-weight: 500;
   }
 
   .rule-providers-row {

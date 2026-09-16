@@ -16,6 +16,7 @@
     type PreflightWarning
   } from './components/editor/PreflightWarnings.svelte';
   import ConstructorPreview, { type PreviewTab } from './components/ConstructorPreview.svelte';
+  import ScenarioChips from './components/ScenarioChips.svelte';
   import XraySectionRouting from './components/xray/XraySectionRouting.svelte';
   import XraySectionInbounds from './components/xray/XraySectionInbounds.svelte';
   import XraySectionDns from './components/xray/XraySectionDns.svelte';
@@ -661,22 +662,17 @@
     <!-- Left Panel: Navigation and Section Content -->
     <div class="gen-left">
       <!-- Scenario chips (BUILD-04) -->
-      <div class="constructor-scenario-bar">
-        <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
-        {#each XRAY_DEFAULT_PRESETS as p}
-          <button
-            class="scenario-chip"
-            class:active={lastAppliedPreset === p.id}
-            title={$t(p.descKey)}
-            onclick={() => applyPreset(p.id)}
-          >
-            {$t(p.nameKey)}
-            {#if lastAppliedPreset === p.id && isPresetModified}
-              <span class="preset-mod-badge">{$t('xray.preset_modified')}</span>
-            {/if}
-          </button>
-        {/each}
-      </div>
+      <ScenarioChips
+        label={$t('editor.constructor_scenario')}
+        options={XRAY_DEFAULT_PRESETS.map((p) => ({
+          id: p.id,
+          label: $t(p.nameKey),
+          description: $t(p.descKey)
+        }))}
+        active={lastAppliedPreset || ''}
+        modifiedBadge={isPresetModified ? $t('xray.preset_modified') : undefined}
+        onSelect={applyPreset}
+      />
 
       <!-- Outbound Tag selection -->
       <div class="rule-providers-row">
@@ -937,53 +933,6 @@
     .gen-layout {
       flex-direction: column;
     }
-  }
-
-  .constructor-scenario-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
-    flex-wrap: wrap;
-  }
-
-  .scenario-label {
-    font-size: 0.8125rem;
-    color: var(--fg-secondary);
-    font-weight: 500;
-  }
-
-  .scenario-chip {
-    padding: 4px 10px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    color: var(--fg-primary);
-    font-size: 0.75rem;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    transition: all 0.15s ease;
-  }
-
-  .scenario-chip:hover {
-    background: var(--bg-surface-hover);
-    border-color: var(--color-primary);
-  }
-
-  .scenario-chip.active {
-    background: var(--color-primary-subtle, color-mix(in srgb, var(--primary) 15%, transparent));
-    border-color: var(--primary);
-    color: var(--primary);
-    font-weight: 600;
-  }
-
-  .preset-mod-badge {
-    margin-left: 5px;
-    font-size: var(--font-size-xs, 0.6875rem);
-    color: var(--warning);
-    opacity: 0.9;
-    font-style: italic;
   }
 
   .rule-providers-row {
