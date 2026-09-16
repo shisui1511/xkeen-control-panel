@@ -1,5 +1,6 @@
 <script lang="ts">
   import Select from '../Select.svelte';
+  import Icon from '../Icon.svelte';
   import { t } from '../../i18n';
   import { getMihomoContext } from './MihomoContext.svelte';
   import type { Listener } from '../../lib/mihomoYaml';
@@ -291,7 +292,7 @@
                     title={$t('app.delete')}
                     onclick={() => removeListenerUser(uIdx)}
                   >
-                    ✕
+                    <Icon name="close" size={12} />
                   </button>
                 </div>
               {/each}
@@ -344,7 +345,7 @@
             title={$t('app.edit')}
             onclick={() => openListenerForm(l)}
           >
-            ✎
+            <Icon name="edit" />
           </button>
           <button
             type="button"
@@ -353,7 +354,7 @@
             title={$t('app.delete')}
             onclick={() => ctx.removeListener(l.id)}
           >
-            ✕
+            <Icon name="close" size={12} />
           </button>
         </div>
       </div>
@@ -570,6 +571,8 @@
     transition: color var(--transition-fast);
     flex-shrink: 0;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
   }
 
   .item-edit:hover {

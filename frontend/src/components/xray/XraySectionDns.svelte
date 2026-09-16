@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import Select from '../Select.svelte';
+  import Icon from '../Icon.svelte';
   import type { DNSServer } from './XrayContext.svelte';
 
   interface DnsConfig {
@@ -202,7 +203,7 @@
           onclick={() => removeDNSServer(idx)}
           title={$t('app.delete')}
         >
-          ✕
+          <Icon name="close" size={12} />
         </button>
       </div>
     {/each}
@@ -280,7 +281,7 @@
           onclick={() => removeHost(domain)}
           title={$t('app.delete')}
         >
-          ✕
+          <Icon name="close" size={12} />
         </button>
       </div>
     {/each}
@@ -366,6 +367,8 @@
     transition:
       color 0.15s ease,
       background 0.15s ease;
+    display: inline-flex;
+    align-items: center;
   }
 
   .item-del:hover {
@@ -500,9 +503,9 @@
   }
 
   .add-btn:hover {
-    border-color: var(--color-primary);
-    color: var(--color-primary);
-    background: var(--bg-surface-hover);
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--hover);
   }
 
   code {

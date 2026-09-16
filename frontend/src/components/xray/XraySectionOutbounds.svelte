@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import Modal from '../Modal.svelte';
+  import Icon from '../Icon.svelte';
   import XrayOutboundForm from './XrayOutboundForm.svelte';
   import type { OutboundDetail } from './XrayContext.svelte';
   import { apiFetchJSON } from '../../lib/api';
@@ -467,7 +468,7 @@
             onclick={() => openEditOutbound(idx)}
             title={$t('app.edit')}
           >
-            ✏️
+            <Icon name="edit" />
           </button>
           <button
             type="button"
@@ -475,7 +476,7 @@
             onclick={() => removeOutbound(idx)}
             title={$t('app.delete')}
           >
-            ✕
+            <Icon name="close" size={12} />
           </button>
         </div>
       </div>
@@ -680,8 +681,8 @@
                   <button
                     type="button"
                     onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
-                    style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                    aria-label={$t('app.remove')}>✕</button
+                    style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; display: flex; align-items: center;"
+                    aria-label={$t('app.remove')}><Icon name="close" size={12} /></button
                   >
                   <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
                     <strong>{$t('app.error')}:</strong>
@@ -702,8 +703,8 @@
                   <button
                     type="button"
                     onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
-                    style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                    aria-label={$t('app.remove')}>✕</button
+                    style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; display: flex; align-items: center;"
+                    aria-label={$t('app.remove')}><Icon name="close" size={12} /></button
                   >
                   <div
                     style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
@@ -824,11 +825,13 @@
     cursor: pointer;
     color: var(--fg-secondary);
     transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
   }
 
   .btn-icon:hover {
     color: var(--fg-primary);
-    background: var(--bg-surface-hover);
+    background: var(--hover);
   }
 
   .btn-del:hover {
@@ -870,9 +873,9 @@
   }
 
   .add-btn:hover {
-    border-color: var(--color-primary);
-    color: var(--color-primary);
-    background: var(--bg-surface-hover);
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--hover);
   }
 
   .btn-action-primary {

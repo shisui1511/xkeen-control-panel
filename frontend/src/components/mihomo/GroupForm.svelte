@@ -2,6 +2,7 @@
   import { t } from '../../i18n';
   import { slugifyProviderName } from '../../lib/mihomoYaml';
   import Select from '../Select.svelte';
+  import Icon from '../Icon.svelte';
 
   let {
     ng = $bindable(),
@@ -70,7 +71,7 @@
                 (ng = {
                   ...ng,
                   useProviders: (ng.useProviders || []).filter((x: string) => x !== p)
-                })}>✕</button
+                })}><Icon name="close" size={10} /></button
             >
           </span>
         {/each}
@@ -129,7 +130,7 @@
           <button
             class="tag-rm"
             onclick={() => (ng = { ...ng, proxies: ng.proxies.filter((x: string) => x !== p) })}
-            >✕</button
+            ><Icon name="close" size={10} /></button
           >
         </span>
       {/each}
@@ -272,6 +273,8 @@
     font-size: var(--font-size-xs);
     padding: 0;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
   }
 
   .toggle-label {

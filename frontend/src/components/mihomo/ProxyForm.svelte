@@ -3,6 +3,7 @@
   import { capabilities } from '../../stores';
   import { isMihomoAwg31Supported } from '../../lib/awgFields';
   import Select from '../Select.svelte';
+  import Icon from '../Icon.svelte';
   import {
     AWG_PRESETS,
     getAwgPreset,
@@ -773,7 +774,7 @@
           <button
             class="btn-gen"
             onclick={() => (np.uuid = crypto.randomUUID())}
-            title={$t('app.generate')}>⟳</button
+            title={$t('app.generate')}><Icon name="refresh" /></button
           >
         </div>
       </div>
@@ -860,7 +861,7 @@
         <div class="input-with-btn">
           <input id="proxy-tuic-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
           <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
-            >⟳</button
+            ><Icon name="refresh" /></button
           >
         </div>
       </div>
@@ -904,7 +905,7 @@
         <div class="input-with-btn">
           <input id="proxy-vmess-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
           <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
-            >⟳</button
+            ><Icon name="refresh" /></button
           >
         </div>
       </div>
@@ -1310,7 +1311,7 @@
   }
 
   .btn-gen {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--bg-surface);
     border: 1px solid var(--border);
     color: var(--fg-secondary);
     border-radius: var(--radius-sm);
@@ -1319,10 +1320,12 @@
     font-size: 14px;
     transition: background var(--transition-fast);
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
   }
 
   .btn-gen:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--hover);
     color: var(--fg-primary);
   }
 

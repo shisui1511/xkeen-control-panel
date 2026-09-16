@@ -862,7 +862,7 @@
 
   .btn-rule-action:not(:disabled):hover {
     color: var(--fg-primary);
-    background: var(--bg-surface-hover);
+    background: var(--hover);
     border-color: var(--fg-secondary);
   }
 
@@ -991,9 +991,9 @@
   }
 
   .add-btn:hover {
-    border-color: var(--color-primary);
-    color: var(--color-primary);
-    background: var(--bg-surface-hover);
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--hover);
   }
 
   code {

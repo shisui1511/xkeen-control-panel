@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import Select from '../Select.svelte';
+  import Icon from '../Icon.svelte';
   import type { XrayInbound } from './XrayContext.svelte';
 
   let {
@@ -60,7 +61,7 @@
           onclick={() => removeInbound(inbound.tag)}
           title={$t('app.delete')}
         >
-          ✕
+          <Icon name="close" size={12} />
         </button>
       </div>
       <div class="form-row2" style="margin-top:var(--spacing-2, 8px)">
@@ -187,6 +188,8 @@
     transition:
       color 0.15s ease,
       background 0.15s ease;
+    display: inline-flex;
+    align-items: center;
   }
 
   .item-del:hover {
@@ -321,8 +324,8 @@
   }
 
   .add-btn:hover {
-    border-color: var(--color-primary);
-    color: var(--color-primary);
-    background: var(--bg-surface-hover);
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--hover);
   }
 </style>

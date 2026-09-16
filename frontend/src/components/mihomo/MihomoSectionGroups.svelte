@@ -1,5 +1,6 @@
 <script lang="ts">
   import Modal from '../Modal.svelte';
+  import Icon from '../Icon.svelte';
   import GroupForm from './GroupForm.svelte';
   import Select from '../Select.svelte';
   import { t } from '../../i18n';
@@ -182,9 +183,11 @@
           >
         {/if}
         <span class="item-meta">{g.proxies.length} {$t('mihomo.proxies_count')}</span>
-        <button class="item-edit" onclick={() => editGroup(g)} title={$t('app.edit')}>✎</button>
+        <button class="item-edit" onclick={() => editGroup(g)} title={$t('app.edit')}
+          ><Icon name="edit" /></button
+        >
         <button class="item-del" onclick={() => ctx.removeGroup(g.id)} title={$t('app.delete')}
-          >✕</button
+          ><Icon name="close" size={12} /></button
         >
       </div>
     {/each}
@@ -376,6 +379,8 @@
     transition: color var(--transition-fast);
     flex-shrink: 0;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
   }
 
   .item-edit:hover {

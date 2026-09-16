@@ -1,5 +1,6 @@
 <script lang="ts">
   import Modal from '../Modal.svelte';
+  import Icon from '../Icon.svelte';
   import ProxyForm from './ProxyForm.svelte';
   import AwgDiffCard from '../awg/AwgDiffCard.svelte';
   import { t } from '../../i18n';
@@ -330,7 +331,7 @@
 
       <div class="item-actions">
         <button type="button" class="item-btn" onclick={() => editProxy(p)} title={$t('app.edit')}>
-          ✎
+          <Icon name="edit" />
         </button>
         <button
           type="button"
@@ -338,7 +339,7 @@
           onclick={() => ctx.duplicateProxy(p.id)}
           title={$t('app.duplicate')}
         >
-          ⎘
+          <Icon name="copy" />
         </button>
         <button
           type="button"
@@ -346,7 +347,7 @@
           onclick={() => ctx.removeProxy(p.id)}
           title={$t('app.delete')}
         >
-          ✕
+          <Icon name="close" />
         </button>
       </div>
     </div>
@@ -380,7 +381,7 @@
           onclick={loadSubscriptions}
           title={$t('mihomo.refresh_provider')}
         >
-          ⟳
+          <Icon name="refresh" />
         </button>
       </div>
     {/each}
@@ -561,8 +562,8 @@
                 <button
                   type="button"
                   onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
-                  style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                  aria-label={$t('app.remove')}>✕</button
+                  style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; display: flex; align-items: center;"
+                  aria-label={$t('app.remove')}><Icon name="close" size={12} /></button
                 >
                 <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
                   <strong>{$t('app.error')}:</strong>
@@ -583,8 +584,8 @@
                 <button
                   type="button"
                   onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
-                  style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                  aria-label={$t('app.remove')}>✕</button
+                  style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; display: flex; align-items: center;"
+                  aria-label={$t('app.remove')}><Icon name="close" size={12} /></button
                 >
                 <div
                   style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
@@ -793,6 +794,8 @@
     padding: 4px 6px;
     border-radius: var(--radius-sm);
     transition: all var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
   }
 
   .item-btn:hover {

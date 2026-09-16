@@ -1,5 +1,6 @@
 <script lang="ts">
   import Modal from '../Modal.svelte';
+  import Icon from '../Icon.svelte';
   import RuleForm from './RuleForm.svelte';
   import { t } from '../../i18n';
   import { getMihomoContext } from './MihomoContext.svelte';
@@ -77,27 +78,27 @@
           class="order-btn"
           onclick={() => moveRule(r.id, -1)}
           disabled={i === 0}
-          aria-label={$t('app.move_up')}>▲</button
+          aria-label={$t('app.move_up')}><Icon name="chevron-up" size={11} /></button
         >
         <button
           type="button"
           class="order-btn"
           onclick={() => moveRule(r.id, 1)}
           disabled={i === nonMatchRules.length - 1}
-          aria-label={$t('app.move_down')}>▼</button
+          aria-label={$t('app.move_down')}><Icon name="chevron-down" size={11} /></button
         >
       </div>
       <span class="item-badge type-rule">{r.type}</span>
       <span class="item-name rule-value">{r.value}</span>
       <span class="item-meta">→ {r.outbound}</span>
       <button type="button" class="item-btn" onclick={() => editRule(r)} title={$t('app.edit')}>
-        ✎
+        <Icon name="edit" />
       </button>
       <button
         type="button"
         class="item-del"
         onclick={() => ctx.removeRule(r.id)}
-        title={$t('app.delete')}>✕</button
+        title={$t('app.delete')}><Icon name="close" size={12} /></button
       >
     </div>
   {/each}
@@ -115,13 +116,13 @@
         onclick={() => editRule(matchRule)}
         title={$t('app.edit')}
       >
-        ✎
+        <Icon name="edit" />
       </button>
       <button
         type="button"
         class="item-del"
         onclick={() => ctx.removeRule(matchRule.id)}
-        title={$t('app.delete')}>✕</button
+        title={$t('app.delete')}><Icon name="close" size={12} /></button
       >
     </div>
   {/if}
@@ -222,6 +223,8 @@
     padding: 4px 6px;
     border-radius: var(--radius-sm);
     transition: all var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
   }
 
   .item-btn:hover {
@@ -240,6 +243,8 @@
     transition: color var(--transition-fast);
     flex-shrink: 0;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
   }
 
   .item-del:hover {
@@ -262,6 +267,8 @@
     padding: 1px 3px;
     line-height: 1;
     transition: color var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
   }
 
   .order-btn:hover:not(:disabled) {
