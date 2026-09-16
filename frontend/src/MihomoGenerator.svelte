@@ -921,8 +921,8 @@
   }
 
   .constructor-title {
-    font-size: 1.5rem;
-    font-weight: 700;
+    font-size: var(--font-size-xl);
+    font-weight: 600;
     margin: 0 0 4px 0;
     color: var(--fg-primary);
   }
@@ -1088,6 +1088,7 @@
     border: none;
     color: var(--fg-secondary);
     font-size: 12px;
+    font-weight: 500;
     padding: 6px 10px;
     border-radius: var(--radius-sm);
     cursor: pointer;
@@ -1105,13 +1106,13 @@
 
   .sec-tab.active {
     color: var(--fg-primary);
-    background: var(--accent);
-    font-weight: 500;
+    background: color-mix(in srgb, var(--fg-primary) 10%, transparent);
   }
 
   .sec-count {
-    background: var(--bg-surface);
-    color: var(--fg-secondary);
+    background: var(--primary);
+    color: var(--bg-page);
+    font-weight: 700;
     font-size: var(--font-size-xs);
     padding: 1px 6px;
     border-radius: 10px;
