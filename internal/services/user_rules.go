@@ -64,6 +64,15 @@ func (s *UserRulesService) Save(rules []UserRule) error {
 	defer s.mu.Unlock()
 
 	for i, r := range rules {
+		if strings.ContainsAny(r.Type, "\r\n") || strings.ContainsAny(r.Value, "\r\n") ||
+			strings.ContainsAny(r.Target, "\r\n") || strings.ContainsAny(r.Group, "\r\n") ||
+			strings.ContainsAny(r.Comment, "\r\n") {
+			return fmt.Errorf("rule fields cannot contain newline characters")
+		}
+		if len(r.Value) > 255 || len(r.Group) > 64 || len(r.Comment) > 500 {
+			return fmt.Errorf("rule field length exceeds limit")
+		}
+
 		if r.ID == "" {
 			rules[i].ID = fmt.Sprintf("rule_%d", i+1)
 		}

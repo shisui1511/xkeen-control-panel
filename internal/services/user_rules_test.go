@@ -277,3 +277,59 @@ func TestInjectXrayRules(t *testing.T) {
 		t.Errorf("expected domain:updated.org, got %v", domains)
 	}
 }
+
+func TestUserRules_SaveValidation(t *testing.T) {
+	svc := NewUserRulesService(t.TempDir())
+
+	tests := []struct {
+		name    string
+		rules   []UserRule
+		wantErr bool
+	}{
+		{
+			name: "valid rule",
+			rules: []UserRule{
+				{Type: "domain_suffix", Value: "example.com", Target: "proxy", Group: "ProxyGroup", Comment: "test"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "newline in value",
+			rules: []UserRule{
+				{Type: "domain_suffix", Value: "example.com\n- evil.org", Target: "proxy"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "newline in group",
+			rules: []UserRule{
+				{Type: "domain_suffix", Value: "example.com", Target: "proxy", Group: "Group\r\nInjected"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "newline in comment",
+			rules: []UserRule{
+				{Type: "domain_suffix", Value: "example.com", Target: "proxy", Comment: "Line 1\nLine 2"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "value exceeds length limit",
+			rules: []UserRule{
+				{Type: "domain_suffix", Value: strings.Repeat("a", 256), Target: "proxy"},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := svc.Save(tt.rules)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Save() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
