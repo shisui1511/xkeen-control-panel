@@ -271,15 +271,18 @@
               <tr
                 class="rule-row"
                 class:row-disabled={!rule.enabled}
-                draggable="true"
-                ondragstart={() => handleDragStart(idx)}
                 ondragover={(e) => handleDragOver(e, idx)}
                 ondrop={() => handleDrop(idx)}
               >
                 <!-- Reorder arrows / handle -->
                 <td class="col-order">
                   <div class="order-controls">
-                    <span class="drag-handle" title={$t('rules.drag_reorder')}>⠿</span>
+                    <span
+                      class="drag-handle"
+                      draggable="true"
+                      ondragstart={() => handleDragStart(idx)}
+                      title={$t('rules.drag_reorder')}>⠿</span
+                    >
                     <button
                       type="button"
                       class="icon-btn order-btn"
@@ -515,6 +518,7 @@
     border-bottom: 1px solid var(--border);
     color: var(--fg-primary);
     vertical-align: middle;
+    user-select: text;
   }
 
   .rules-table tbody tr:last-child td {
