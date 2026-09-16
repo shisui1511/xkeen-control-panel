@@ -279,9 +279,12 @@
                   <div class="order-controls">
                     <span
                       class="drag-handle"
+                      role="button"
+                      tabindex="0"
                       draggable="true"
                       ondragstart={() => handleDragStart(idx)}
-                      title={$t('rules.drag_reorder')}>⠿</span
+                      title={$t('rules.drag_reorder')}
+                      aria-label={$t('rules.drag_reorder')}>⠿</span
                     >
                     <button
                       type="button"
