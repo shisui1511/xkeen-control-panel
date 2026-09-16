@@ -72,7 +72,7 @@ test.describe('Phase 123: Routing Center & Exception Rules', () => {
             selected_proxy: 'NL-Amsterdam-01',
             proxy_type: 'Vmess',
             trace_time_ms: 1.45,
-            source: 'user'
+            source: 'user_rule'
           }
         })
       });

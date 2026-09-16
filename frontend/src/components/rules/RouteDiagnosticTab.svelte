@@ -51,7 +51,7 @@
   }
 
   function getSourceBadge(source: string): { label: string; className: string } {
-    if (source === 'user') {
+    if (source === 'user' || source === 'user_rule') {
       return { label: $t('rules.diagnostic_source_user'), className: 'source-user' };
     }
     if (source === 'fallback') {
