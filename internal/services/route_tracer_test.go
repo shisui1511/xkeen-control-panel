@@ -214,3 +214,52 @@ func TestRouteTracer_FullTrace(t *testing.T) {
 		t.Errorf("unexpected fallback proxy: %s (%s)", resFallback.SelectedProxy, resFallback.ProxyType)
 	}
 }
+
+func TestRouteTracer_NestedProxyGroupResolution(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/proxies/CHAIN-TOP":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"name": "CHAIN-TOP",
+				"type": "Selector",
+				"now":  "CHAIN-MID",
+			})
+		case "/proxies/CHAIN-MID":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"name": "CHAIN-MID",
+				"type": "URLTest",
+				"now":  "TERMINAL-NODE",
+			})
+		case "/proxies/TERMINAL-NODE":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"name": "TERMINAL-NODE",
+				"type": "Hysteria2",
+				"now":  "",
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	hostPort := strings.TrimPrefix(server.URL, "http://")
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+	cfgContent := fmt.Sprintf("external-controller: %s\nsecret: \"test-token\"\n", hostPort)
+	if err := os.WriteFile(cfgFile, []byte(cfgContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	userRulesSvc := NewUserRulesService(tmpDir)
+	mihomoSvc := NewMihomoService("", "", tmpDir)
+	tracer := NewRouteTracerService(userRulesSvc, mihomoSvc, tmpDir)
+
+	proxy, pType := tracer.lookupSelectedProxy(context.Background(), "CHAIN-TOP")
+	if proxy != "TERMINAL-NODE" {
+		t.Errorf("expected TERMINAL-NODE, got %s", proxy)
+	}
+	if pType != "Hysteria2" {
+		t.Errorf("expected Hysteria2, got %s", pType)
+	}
+}

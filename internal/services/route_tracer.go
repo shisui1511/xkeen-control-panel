@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -383,90 +382,71 @@ func (s *RouteTracerService) lookupSelectedProxy(ctx context.Context, groupName 
 		return groupName, "proxy"
 	}
 
-	var reqURL string
-	if info.Type == "unix" {
-		reqURL = "http://localhost/proxies/" + url.PathEscape(groupName)
-	} else {
-		target := info.Target
-		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-			target = "http://" + target
-		}
-		reqURL = strings.TrimRight(target, "/") + "/proxies/" + url.PathEscape(groupName)
-	}
-
-	req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if reqErr != nil {
-		return groupName, "proxy"
-	}
-	if info.Secret != "" {
-		req.Header.Set("Authorization", "Bearer "+info.Secret)
-	}
-
 	client := s.mihomoSvc.GetHTTPClient()
-	resp, doErr := client.Do(req)
-	if doErr != nil {
-		return groupName, "proxy"
-	}
-	defer resp.Body.Close()
+	currentName := groupName
+	selected := groupName
+	nodeType := "proxy"
 
-	if resp.StatusCode != http.StatusOK {
-		return groupName, "proxy"
-	}
+	visited := make(map[string]bool)
+	for depth := 0; depth < 5; depth++ {
+		if currentName == "" || visited[currentName] {
+			break
+		}
+		visited[currentName] = true
 
-	var pData struct {
-		Name string `json:"name"`
-		Type string `json:"type"`
-		Now  string `json:"now"`
-	}
-	body, readErr := io.ReadAll(resp.Body)
-	if readErr != nil {
-		return groupName, "proxy"
-	}
-	if jsonErr := json.Unmarshal(body, &pData); jsonErr != nil {
-		return groupName, "proxy"
-	}
-
-	selected := pData.Now
-	if selected == "" {
-		selected = pData.Name
-	}
-	if selected == "" {
-		selected = groupName
-	}
-
-	nodeType := pData.Type
-	if nodeType == "" {
-		nodeType = "proxy"
-	}
-
-	// If now is a nested proxy or group, inspect it
-	if pData.Now != "" && pData.Now != pData.Name {
-		var subURL string
+		var reqURL string
 		if info.Type == "unix" {
-			subURL = "http://localhost/proxies/" + url.PathEscape(pData.Now)
+			reqURL = "http://localhost/proxies/" + url.PathEscape(currentName)
 		} else {
 			target := info.Target
 			if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
 				target = "http://" + target
 			}
-			subURL = strings.TrimRight(target, "/") + "/proxies/" + url.PathEscape(pData.Now)
+			reqURL = strings.TrimRight(target, "/") + "/proxies/" + url.PathEscape(currentName)
 		}
-		if subReq, err := http.NewRequestWithContext(ctx, http.MethodGet, subURL, nil); err == nil {
-			if info.Secret != "" {
-				subReq.Header.Set("Authorization", "Bearer "+info.Secret)
-			}
-			if subResp, err := client.Do(subReq); err == nil {
-				defer subResp.Body.Close()
-				if subResp.StatusCode == http.StatusOK {
-					var subData struct {
-						Type string `json:"type"`
-					}
-					if json.NewDecoder(subResp.Body).Decode(&subData) == nil && subData.Type != "" {
-						nodeType = subData.Type
-					}
-				}
+
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if reqErr != nil {
+			break
+		}
+		if info.Secret != "" {
+			req.Header.Set("Authorization", "Bearer "+info.Secret)
+		}
+
+		resp, doErr := client.Do(req)
+		if doErr != nil {
+			break
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			break
+		}
+
+		var pData struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+			Now  string `json:"now"`
+		}
+		decErr := json.NewDecoder(resp.Body).Decode(&pData)
+		resp.Body.Close()
+		if decErr != nil {
+			break
+		}
+
+		if pData.Type != "" {
+			nodeType = pData.Type
+		}
+		if pData.Name != "" {
+			selected = pData.Name
+		}
+		if pData.Now != "" {
+			selected = pData.Now
+			if pData.Now != currentName {
+				currentName = pData.Now
+				continue
 			}
 		}
+		break
 	}
 
 	return selected, nodeType
