@@ -111,6 +111,12 @@
   function handleWindowClick() {
     activeDropdownKey = null;
   }
+
+  function resetFilters() {
+    searchQuery = '';
+    typeFilter = '';
+    proxyFilter = '';
+  }
 </script>
 
 <svelte:window onclick={handleWindowClick} />
@@ -126,6 +132,16 @@
           placeholder={$t('rules.all_rules_search_placeholder')}
           bind:value={searchQuery}
         />
+        {#if searchQuery}
+          <button
+            class="clear-search-btn"
+            onclick={() => (searchQuery = '')}
+            aria-label={$t('app.clear')}
+            title={$t('app.clear')}
+          >
+            ×
+          </button>
+        {/if}
       </div>
 
       <div class="filter-field">
@@ -172,6 +188,8 @@
       icon={RulesIcon}
       title={$t('rules.all_rules_empty')}
       description={$t('rules.all_rules_subtitle')}
+      ctaText={$t('rules.reset_filters')}
+      oncta={resetFilters}
     />
   {:else}
     <!-- Rules Table -->
@@ -292,11 +310,14 @@
   .search-field {
     flex: 2;
     min-width: 220px;
+    position: relative;
+    display: flex;
+    align-items: center;
   }
 
   .search-input {
     width: 100%;
-    padding: 8px 12px;
+    padding: 8px 28px 8px 12px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -304,6 +325,27 @@
     font-size: var(--font-size-sm);
     box-sizing: border-box;
     transition: border-color var(--transition-fast, 0.15s ease);
+  }
+
+  .clear-search-btn {
+    position: absolute;
+    right: 8px;
+    background: transparent;
+    border: none;
+    color: var(--fg-dim);
+    cursor: pointer;
+    font-size: var(--font-size-base);
+    line-height: 1;
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color var(--transition-fast, 0.15s ease);
+  }
+
+  .clear-search-btn:hover {
+    color: var(--fg-primary);
   }
 
   .search-input:focus {
@@ -501,9 +543,14 @@
     border: none;
     color: var(--fg-dim);
     cursor: pointer;
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     line-height: 1;
     padding: 4px 8px;
+    min-width: 32px;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border-radius: var(--radius-sm);
     transition: all 0.15s ease;
   }
@@ -515,7 +562,7 @@
 
   .dropdown-menu {
     position: absolute;
-    right: 8px;
+    right: 4px;
     top: 32px;
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -559,6 +606,11 @@
     .toolbar-row {
       flex-direction: column;
       align-items: stretch;
+    }
+
+    .dropdown-menu {
+      right: 0;
+      min-width: 140px;
     }
   }
 </style>

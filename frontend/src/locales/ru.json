@@ -877,6 +877,7 @@
   "rules.all_rules_type_filter": "Все типы",
   "rules.all_rules_target_filter": "Все направления",
   "rules.all_rules_empty": "Правила не найдены",
+  "rules.reset_filters": "Сбросить фильтры",
   "rules.search": "Поиск по правилам...",
   "rules.all_types": "Все типы",
   "rules.total": "Всего: {count}",

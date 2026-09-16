@@ -878,6 +878,7 @@
   "rules.all_rules_type_filter": "All types",
   "rules.all_rules_target_filter": "All targets",
   "rules.all_rules_empty": "No rules found",
+  "rules.reset_filters": "Reset filters",
   "rules.search": "Search rules...",
   "rules.all_types": "All types",
   "rules.total": "Total: {count}",

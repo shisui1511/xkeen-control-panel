@@ -559,7 +559,7 @@
   .drag-handle {
     cursor: grab;
     color: var(--fg-muted);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     user-select: none;
     padding: 2px 4px;
   }
@@ -592,7 +592,7 @@
   }
 
   .order-btn {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     width: 20px;
     height: 20px;
   }
@@ -621,7 +621,7 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
   }

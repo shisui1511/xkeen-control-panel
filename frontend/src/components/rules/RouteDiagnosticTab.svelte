@@ -481,7 +481,7 @@
   }
 
   .badge {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 4px;
