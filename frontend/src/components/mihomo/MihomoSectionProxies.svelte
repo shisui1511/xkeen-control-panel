@@ -830,7 +830,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: var(--bg-surface-hover);
+    background-color: var(--hover);
     transition: 0.4s;
     border: 1px solid var(--border);
   }
