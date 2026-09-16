@@ -19,17 +19,32 @@
     result = null;
 
     try {
-      // Parse optional port if formatted as host:port
-      let target = cleanTarget;
+      let clean = cleanTarget;
+      if (clean.includes('://')) {
+        clean = clean.split('://')[1];
+      }
+      if (clean.includes('/')) {
+        clean = clean.split('/')[0];
+      }
+      if (clean.includes('?')) {
+        clean = clean.split('?')[0];
+      }
+      if (clean.includes('#')) {
+        clean = clean.split('#')[0];
+      }
+
+      let target = clean;
       let port: number | undefined;
 
       // Handle IPv6 [::1]:port or host:port
-      if (cleanTarget.startsWith('[') && cleanTarget.includes(']:')) {
-        const parts = cleanTarget.split(']:');
+      if (clean.startsWith('[') && clean.includes(']:')) {
+        const parts = clean.split(']:');
         target = parts[0].replace('[', '');
         port = parseInt(parts[1], 10) || undefined;
-      } else if (!cleanTarget.includes('::') && cleanTarget.includes(':')) {
-        const parts = cleanTarget.split(':');
+      } else if (clean.startsWith('[') && clean.endsWith(']')) {
+        target = clean.slice(1, -1);
+      } else if (!clean.includes('::') && clean.includes(':')) {
+        const parts = clean.split(':');
         target = parts[0];
         port = parseInt(parts[1], 10) || undefined;
       }
