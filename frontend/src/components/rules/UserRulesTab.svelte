@@ -283,6 +283,15 @@
                       tabindex="0"
                       draggable="true"
                       ondragstart={() => handleDragStart(idx)}
+                      onkeydown={(e) => {
+                        if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          moveRule(idx, 'up');
+                        } else if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          moveRule(idx, 'down');
+                        }
+                      }}
                       title={$t('rules.drag_reorder')}
                       aria-label={$t('rules.drag_reorder')}>⠿</span
                     >
