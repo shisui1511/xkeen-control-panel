@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"gopkg.in/yaml.v3"
 )
 
 // UserRule represents a custom user-defined routing rule preserved across template switches.
@@ -246,6 +248,20 @@ const (
 	UserRulesEndMarker = "# --- END USER RULES ---"
 )
 
+// yamlRuleLine renders a Mihomo rule string as a YAML sequence item, quoting it
+// exactly as yaml.v3 would if the scalar contains characters (e.g. "`: `" or a
+// leading/embedded structural token) that are unsafe in a plain/unquoted flow
+// scalar. This prevents user-controlled rule values (Value/Group/Comment) from
+// corrupting the surrounding config.yaml structure when hand-spliced as text.
+func yamlRuleLine(indent, rule string) (string, error) {
+	out, err := yaml.Marshal(rule)
+	if err != nil {
+		return "", fmt.Errorf("failed to yaml-encode rule %q: %w", rule, err)
+	}
+	scalar := strings.TrimSuffix(string(out), "\n")
+	return fmt.Sprintf("%s- %s", indent, scalar), nil
+}
+
 // InjectMihomoRules replaces or inserts the user rules block within the rules section of config.yaml.
 func (s *UserRulesService) InjectMihomoRules(configPath string, proxyGroupName string) error {
 	if configPath == "" {
@@ -281,7 +297,11 @@ func (s *UserRulesService) InjectMihomoRules(configPath string, proxyGroupName s
 	ruleLines := make([]string, 0, len(newRules)+2)
 	ruleLines = append(ruleLines, markerIndent+UserRulesBeginMarker)
 	for _, r := range newRules {
-		ruleLines = append(ruleLines, fmt.Sprintf("%s- %s", markerIndent, r))
+		line, err := yamlRuleLine(markerIndent, r)
+		if err != nil {
+			return err
+		}
+		ruleLines = append(ruleLines, line)
 	}
 	ruleLines = append(ruleLines, markerIndent+UserRulesEndMarker)
 
@@ -300,7 +320,11 @@ func (s *UserRulesService) InjectMihomoRules(configPath string, proxyGroupName s
 		ruleLines = make([]string, 0, len(newRules)+2)
 		ruleLines = append(ruleLines, markerIndent+UserRulesBeginMarker)
 		for _, r := range newRules {
-			ruleLines = append(ruleLines, fmt.Sprintf("%s- %s", markerIndent, r))
+			line, err := yamlRuleLine(markerIndent, r)
+			if err != nil {
+				return err
+			}
+			ruleLines = append(ruleLines, line)
 		}
 		ruleLines = append(ruleLines, markerIndent+UserRulesEndMarker)
 

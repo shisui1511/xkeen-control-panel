@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestUserRules_GroupField(t *testing.T) {
@@ -176,6 +178,65 @@ rules:
 	// Ensure markers are not duplicated
 	if strings.Count(content2, UserRulesBeginMarker) != 1 || strings.Count(content2, UserRulesEndMarker) != 1 {
 		t.Errorf("markers duplicated in config:\n%s", content2)
+	}
+}
+
+// TestInjectMihomoRules_EscapesYAMLMetacharacters is a regression test for
+// CR-01: a rule Value containing YAML-significant characters (here, ": ",
+// which turns an unquoted flow scalar into a mapping) must round-trip through
+// InjectMihomoRules + yaml.Unmarshal as a plain string rule entry, not a map.
+func TestInjectMihomoRules_EscapesYAMLMetacharacters(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	initialYAML := `port: 7890
+mode: rule
+rules:
+  - MATCH,PROXY
+`
+	if err := os.WriteFile(configPath, []byte(initialYAML), 0644); err != nil {
+		t.Fatalf("failed to write initial config: %v", err)
+	}
+
+	svc := NewUserRulesService(tmpDir)
+	rules := []UserRule{
+		{
+			ID:      "r1",
+			Type:    "domain",
+			Value:   "note: this looks innocent",
+			Target:  "proxy",
+			Enabled: true,
+		},
+	}
+	if err := svc.Save(rules); err != nil {
+		t.Fatalf("failed to save rules: %v", err)
+	}
+
+	if err := svc.InjectMihomoRules(configPath, "PROXY"); err != nil {
+		t.Fatalf("InjectMihomoRules failed: %v", err)
+	}
+
+	contentBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read injected config: %v", err)
+	}
+
+	var parsed struct {
+		Rules []string `yaml:"rules"`
+	}
+	if err := yaml.Unmarshal(contentBytes, &parsed); err != nil {
+		t.Fatalf("injected config.yaml did not parse as rules: []string, got error: %v\ncontent:\n%s", err, contentBytes)
+	}
+
+	found := false
+	for _, r := range parsed.Rules {
+		if r == "DOMAIN,note: this looks innocent,PROXY" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected quoted rule string in rules list, got:\n%s", contentBytes)
 	}
 }
 
