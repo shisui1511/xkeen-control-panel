@@ -1204,32 +1204,67 @@
       <!-- Main Editor Card -->
       {#if tabs.length === 0}
         <div class="editor-empty-card">
-          <EmptyState
-            title={$t('editor.select_file')}
-            description={$t('editor.empty_state_body')}
-            icon={EditorIcon}
-            plain={true}
-          />
-          {#if !showSidebar}
-            <button
-              class="btn btn-primary"
-              style="margin-top: 14px;"
-              onclick={() => (showSidebar = true)}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                ><path
-                  d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-                /></svg
+          <div class="editor-empty-content">
+            <EmptyState
+              title={$t('editor.select_file')}
+              description={$t('editor.empty_state_body')}
+              icon={EditorIcon}
+              plain={true}
+            />
+            <div class="editor-empty-actions">
+              {#if !showSidebar}
+                <button class="btn btn-secondary" onclick={() => (showSidebar = true)}>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><path
+                      d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                    /></svg
+                  >
+                  {$t('editor.show_files')}
+                </button>
+              {/if}
+              <button
+                class="btn btn-primary"
+                onclick={() => {
+                  showCreateModal = true;
+                  newFileName = '';
+                }}
               >
-              {$t('editor.show_files')}
-            </button>
-          {/if}
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                {$t('editor.create_file')}
+              </button>
+            </div>
+
+            <div class="editor-empty-shortcuts">
+              <span class="shortcut-item"
+                ><kbd>{isMac ? '⌘' : 'Ctrl'}+S</kbd> <span>{$t('editor.to_save')}</span></span
+              >
+              <span class="shortcut-dot">•</span>
+              <span class="shortcut-item"
+                ><kbd>{isMac ? '⌘' : 'Ctrl'}+F</kbd>
+                <span>{$t('editor.shortcut_search')}</span></span
+              >
+              <span class="shortcut-dot">•</span>
+              <span class="shortcut-item"
+                ><kbd>{isMac ? '⌘' : 'Ctrl'}+Z</kbd> <span>{$t('editor.shortcut_undo')}</span></span
+              >
+            </div>
+          </div>
         </div>
       {:else}
         <div class="editor-main-card">
@@ -1457,6 +1492,34 @@
     overflow: hidden;
   }
 
+  .editor-empty-card {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    position: relative;
+    padding: 32px 24px;
+    box-sizing: border-box;
+  }
+
+  .editor-empty-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    max-width: 520px;
+    width: 100%;
+  }
+
   .editor-empty-card :global(.empty-state) {
     justify-content: center;
     background: transparent;
@@ -1464,5 +1527,58 @@
     box-shadow: none;
     padding: 0;
     max-width: 480px;
+  }
+
+  .editor-empty-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+  }
+
+  .editor-empty-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .editor-empty-shortcuts {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 32px;
+    padding-top: 18px;
+    border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+    color: var(--fg-muted);
+    font-size: 12px;
+  }
+
+  .editor-empty-shortcuts .shortcut-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .editor-empty-shortcuts kbd {
+    background: var(--surface-tint);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    padding: 2px 6px;
+    font-size: 11px;
+    font-family: var(--font-family-mono);
+    color: var(--fg-secondary);
+    line-height: 1.3;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+  }
+
+  .editor-empty-shortcuts .shortcut-dot {
+    color: var(--border);
+    user-select: none;
   }
 </style>

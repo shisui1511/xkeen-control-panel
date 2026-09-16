@@ -2595,6 +2595,8 @@ a.chip:hover {
 }
 
 .editor-empty-card {
+  flex: 1 !important;
+  min-width: 0 !important;
   align-items: center !important;
   justify-content: center !important;
   padding: 24px !important;
