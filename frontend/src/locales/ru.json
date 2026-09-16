@@ -901,6 +901,7 @@
   "rules.target_proxy": "PROXY (В прокси)",
   "rules.target_reject": "REJECT (Блокировать)",
   "rules.custom_saved": "Пользовательские правила успешно сохранены",
+  "rules.saved_but_not_applied": "Правила сохранены, но не применены к активному ядру",
   "rules.no_custom_rules": "Пользовательских правил пока нет. Добавьте свои домены или IP выше.",
   "rules.custom_comment": "Комментарий (необязательно)",
   "rules.providers_subtitle": "Провайдеры правил маршрутизации",

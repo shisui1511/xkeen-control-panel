@@ -902,6 +902,7 @@
   "rules.target_proxy": "PROXY",
   "rules.target_reject": "REJECT",
   "rules.custom_saved": "Custom rules saved successfully",
+  "rules.saved_but_not_applied": "Rules saved, but not applied to the active kernel",
   "rules.no_custom_rules": "No custom rules yet. Add your domains or IPs above.",
   "rules.custom_comment": "Comment (optional)",
   "rules.providers_subtitle": "Rule providers",

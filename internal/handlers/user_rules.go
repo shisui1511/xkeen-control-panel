@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -46,12 +47,13 @@ func (a *API) UserRulesSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.userRulesSvc.Save(req.Rules); err != nil {
-		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	applied := false
 	reloaded := false
+	var warningMsg string
 	activeKernel := a.getActiveKernelName()
 
 	// Mihomo injection & reload
@@ -62,10 +64,18 @@ func (a *API) UserRulesSave(w http.ResponseWriter, r *http.Request) {
 				configPath = filepath.Join(a.cfg.MihomoConfigDir, "config.yml")
 			}
 			if _, err := os.Stat(configPath); err == nil {
-				if err := a.userRulesSvc.InjectMihomoRules(configPath, "PROXY"); err == nil {
+				if err := a.userRulesSvc.InjectMihomoRules(configPath, "PROXY"); err != nil {
+					log.Printf("[UserRules] Failed to inject Mihomo rules into %s: %v", configPath, err)
+					warningMsg = "Failed to inject rules into Mihomo configuration"
+				} else {
 					applied = true
 					if a.mihomoSvc != nil {
-						if err := a.mihomoSvc.ReloadConfig(configPath); err == nil {
+						if err := a.mihomoSvc.ReloadConfig(configPath); err != nil {
+							log.Printf("[UserRules] Failed to reload Mihomo config %s: %v", configPath, err)
+							if warningMsg == "" {
+								warningMsg = "Failed to reload Mihomo configuration"
+							}
+						} else {
 							reloaded = true
 						}
 					}
@@ -79,16 +89,26 @@ func (a *API) UserRulesSave(w http.ResponseWriter, r *http.Request) {
 		if a.cfg != nil && a.cfg.XRayConfigDir != "" {
 			routingPath := filepath.Join(a.cfg.XRayConfigDir, "05_routing.json")
 			if _, err := os.Stat(routingPath); err == nil {
-				if err := a.userRulesSvc.InjectXrayRules(routingPath, "proxy"); err == nil {
+				if err := a.userRulesSvc.InjectXrayRules(routingPath, "proxy"); err != nil {
+					log.Printf("[UserRules] Failed to inject Xray rules into %s: %v", routingPath, err)
+					if warningMsg == "" {
+						warningMsg = "Failed to inject rules into Xray configuration"
+					}
+				} else {
 					applied = true
 				}
 			}
 		}
 	}
 
-	JSONSuccess(w, map[string]interface{}{
+	res := map[string]interface{}{
 		"applied":  applied,
 		"reloaded": reloaded,
 		"count":    len(req.Rules),
-	})
+	}
+	if warningMsg != "" {
+		res["warning"] = warningMsg
+	}
+
+	JSONSuccess(w, res)
 }

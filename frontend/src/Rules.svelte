@@ -89,8 +89,8 @@
     try {
       const res = await saveCustomRules(rules);
       customRules = rules;
-      if (res.reloaded) {
-        showToast('success', $t('rules.custom_saved'));
+      if (!res.applied) {
+        showToast('warning', $t('rules.saved_but_not_applied'));
       } else {
         showToast('success', $t('rules.custom_saved'));
       }
