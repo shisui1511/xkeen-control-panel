@@ -197,8 +197,9 @@
     padding: 0 6px;
     font-size: var(--font-size-xs);
     font-weight: 600;
-    background: var(--surface-2);
+    background: var(--bg-elevated);
     color: var(--fg-secondary);
+    border: 1px solid var(--border);
     border-radius: var(--radius-full, 9999px);
   }
 

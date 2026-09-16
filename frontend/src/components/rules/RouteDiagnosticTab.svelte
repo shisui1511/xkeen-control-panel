@@ -390,7 +390,7 @@
     font-size: var(--font-size-xs);
     font-family: var(--font-family-mono, monospace);
     color: var(--fg-secondary);
-    background: var(--surface-2);
+    background: var(--bg-elevated);
     padding: 3px 8px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border-light, var(--border));
@@ -415,7 +415,7 @@
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: var(--surface-2);
+    background: var(--bg-elevated);
     color: var(--fg-secondary);
     font-size: var(--font-size-xs);
     font-weight: 700;
@@ -509,7 +509,7 @@
   }
 
   .rule-type-badge {
-    background: var(--surface-2);
+    background: var(--bg-elevated);
     color: var(--fg-secondary);
     border: 1px solid var(--border);
   }
@@ -533,7 +533,7 @@
   }
 
   .proxy-type-badge {
-    background: var(--surface-2);
+    background: var(--bg-elevated);
     color: var(--fg-dim);
     border: 1px solid var(--border);
   }

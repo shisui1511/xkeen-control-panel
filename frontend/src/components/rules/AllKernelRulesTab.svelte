@@ -515,7 +515,7 @@
   }
 
   .rule-badge-neutral {
-    background: var(--surface-2);
+    background: var(--bg-elevated);
     color: var(--fg-secondary);
     border: 1px solid var(--border);
   }
@@ -567,7 +567,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--shadow-md);
     z-index: 100;
     min-width: 160px;
     display: flex;
