@@ -167,23 +167,22 @@
   }
 
   async function handleUpdateAllProviders() {
-    try {
-      const beforeTimestamps = new Map(ruleProviders.map((p) => [p.name, p.updatedAt]));
-      for (const provider of ruleProviders) {
+    const failed: string[] = [];
+    for (const provider of ruleProviders) {
+      try {
         await updateRuleProvider(provider.name);
+      } catch (e: any) {
+        if (e?.status === 401) return;
+        failed.push(provider.name);
       }
-      await loadProviders();
-      const failed = ruleProviders.filter((p) => p.updatedAt === beforeTimestamps.get(p.name));
-      if (failed.length === 0) {
-        showToast('success', $t('rules.update_all_success'));
-      } else {
-        for (const p of failed) {
-          showToast('error', $t('rules.update_provider_failed', { name: p.name }));
-        }
+    }
+    await loadProviders();
+    if (failed.length === 0) {
+      showToast('success', $t('rules.update_all_success'));
+    } else {
+      for (const name of failed) {
+        showToast('error', $t('rules.update_provider_failed', { name }));
       }
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e.message);
     }
   }
 
