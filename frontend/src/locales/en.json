@@ -831,7 +831,7 @@
   "trafficquotas.status_warning": "Warning",
   "trafficquotas.status_enabled": "Enabled",
   "trafficquotas.action_unsupported": "unsupported",
-  "rules.title": "Routing & Exceptions",
+  "rules.title": "Rules & Exceptions",
   "rules.subtitle": "Manage custom exceptions, rule providers, and route diagnostics",
   "rules.exceptions_subtitle": "Custom user exceptions (domains, IPs, ports) prioritized over kernel rules",
   "rules.diagnostic_subtitle": "Interactive traffic matching diagnostics and target node inspection",

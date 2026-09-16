@@ -830,7 +830,7 @@
   "trafficquotas.status_warning": "Предупреждение",
   "trafficquotas.status_enabled": "Активен",
   "trafficquotas.action_unsupported": "не поддерживается",
-  "rules.title": "Маршрутизация и исключения",
+  "rules.title": "Правила и исключения",
   "rules.subtitle": "Управление пользовательскими исключениями, базами правил и диагностика маршрутов",
   "rules.exceptions_subtitle": "Пользовательские исключения (домены, IP, порты) с приоритетом над системными правилами ядра",
   "rules.diagnostic_subtitle": "Интерактивная диагностика сопоставления трафика и проверка целевых узлов",
