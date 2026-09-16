@@ -248,11 +248,19 @@ func setupXrayCmdEnv(cmd *exec.Cmd, configDir string) {
 func (a *API) getActiveKernelName() string {
 	var active string
 	if a.kernelSvc != nil {
+		var running []string
 		for _, info := range a.kernelSvc.List() {
 			if info.ProcessStatus == "running" {
-				active = info.Name
-				break
+				running = append(running, info.Name)
 			}
+		}
+		switch len(running) {
+		case 0:
+			// fall through to the xkeenSvc fallback below
+		case 1:
+			active = running[0]
+		default:
+			active = "both"
 		}
 	}
 	if active == "" && a.xkeenSvc != nil {
