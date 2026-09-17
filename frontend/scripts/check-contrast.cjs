@@ -28,6 +28,16 @@ function extractBlock(css, selectorRegex) {
   return blocks.join('\n');
 }
 
+function extractStyleBlock(content) {
+  const blocks = [];
+  const re = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+  let match;
+  while ((match = re.exec(content)) !== null) {
+    blocks.push(match[1]);
+  }
+  return blocks.join('\n');
+}
+
 function parseTokens(blockText) {
   const tokens = {};
   const re = /--([\w-]+)\s*:\s*([^;\r\n]+);/g;
@@ -257,7 +267,7 @@ function main() {
     // Проверка Toast.svelte и Login.svelte
     if (fs.existsSync(TOAST_PATH)) {
       const toastContent = fs.readFileSync(TOAST_PATH, 'utf8');
-      const toastStyle = extractBlock(toastContent, /<style\b[^>]*>/);
+      const toastStyle = extractStyleBlock(toastContent);
       const toastBlock = extractBlock(toastStyle, /\.toast(?![a-zA-Z0-9_-])[^{]*\{/);
       if (toastBlock && checkRawColors(toastBlock, 'Toast.svelte (.toast)')) {
         failed = true;
@@ -266,7 +276,7 @@ function main() {
 
     if (fs.existsSync(LOGIN_PATH)) {
       const loginContent = fs.readFileSync(LOGIN_PATH, 'utf8');
-      const loginStyle = extractBlock(loginContent, /<style\b[^>]*>/);
+      const loginStyle = extractStyleBlock(loginContent);
       const loginBlock = extractBlock(loginStyle, /\.login-card(?![a-zA-Z0-9_-])[^{]*\{/);
       if (loginBlock && checkRawColors(loginBlock, 'Login.svelte (.login-card)')) {
         failed = true;
@@ -299,5 +309,6 @@ module.exports = {
   resolve,
   parseTokens,
   extractBlock,
+  extractStyleBlock,
   checkRawColors
 };
