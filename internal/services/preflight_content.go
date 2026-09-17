@@ -444,7 +444,9 @@ func validateLanRdp(kernel string, filename string, data map[string]interface{},
 			target := strings.ToUpper(strings.TrimSpace(parts[2]))
 
 			if target == "DIRECT" {
-				if ruleType == "GEOIP" && strings.EqualFold(payload, "private") {
+				if (ruleType == "GEOIP" && strings.EqualFold(payload, "private")) ||
+					(ruleType == "RULE-SET" && strings.Contains(strings.ToLower(payload), "private")) ||
+					((ruleType == "IP-CIDR" || ruleType == "IP-CIDR6") && (payload == "192.168.0.0/16" || payload == "10.0.0.0/8" || payload == "172.16.0.0/12" || strings.HasPrefix(payload, "192.168.") || strings.HasPrefix(payload, "10.") || strings.HasPrefix(payload, "172.16."))) {
 					hasPrivateDirect = true
 				}
 				if ruleType == "DST-PORT" && (payload == "3389" || strings.Contains(payload, "3389")) {
@@ -492,7 +494,8 @@ func validateLanRdp(kernel string, filename string, data map[string]interface{},
 			if strings.EqualFold(outbound, "direct") || strings.EqualFold(outbound, "freedom") {
 				if ipList, ok := ruleMap["ip"].([]interface{}); ok {
 					for _, ipItem := range ipList {
-						if fmt.Sprintf("%v", ipItem) == "geoip:private" {
+						ipStr := fmt.Sprintf("%v", ipItem)
+						if ipStr == "geoip:private" || ipStr == "192.168.0.0/16" || ipStr == "10.0.0.0/8" || ipStr == "172.16.0.0/12" {
 							hasPrivateDirect = true
 						}
 					}

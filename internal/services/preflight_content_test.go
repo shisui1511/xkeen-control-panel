@@ -206,6 +206,32 @@ rules:
 		t.Errorf("unexpected preflight.lan_rdp when LAN and 3389 are present")
 	}
 
+	// Mihomo with RULE-SET private and 3389
+	goodMihomoRuleSet := `
+rules:
+  - 'IP-CIDR,127.0.0.53/32,DIRECT,no-resolve'
+  - 'RULE-SET,private@ip,DIRECT'
+  - 'DST-PORT,3389,DIRECT'
+  - 'MATCH,proxy'
+`
+	resGoodRuleSet := ValidateConfigContent("mihomo", "config.yaml", goodMihomoRuleSet)
+	if hasWarningCode(resGoodRuleSet, "preflight.lan_rdp") {
+		t.Errorf("unexpected preflight.lan_rdp when RULE-SET private and 3389 are present")
+	}
+
+	// Mihomo with IP-CIDR private subnets and 3389
+	goodMihomoIPCidr := `
+rules:
+  - 'IP-CIDR,127.0.0.53/32,DIRECT,no-resolve'
+  - 'IP-CIDR,192.168.0.0/16,DIRECT,no-resolve'
+  - 'DST-PORT,3389,DIRECT'
+  - 'MATCH,proxy'
+`
+	resGoodIPCidr := ValidateConfigContent("mihomo", "config.yaml", goodMihomoIPCidr)
+	if hasWarningCode(resGoodIPCidr, "preflight.lan_rdp") {
+		t.Errorf("unexpected preflight.lan_rdp when IP-CIDR private subnet and 3389 are present")
+	}
+
 	// Xray missing LAN/RDP
 	badXray := `{
 		"routing": {
