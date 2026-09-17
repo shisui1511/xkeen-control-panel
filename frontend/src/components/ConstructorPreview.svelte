@@ -2,6 +2,9 @@
   import { t } from '../i18n';
   import { showToast } from '../stores';
   import ResizableSplitter from './ResizableSplitter.svelte';
+  import { jsonLanguage } from '@codemirror/lang-json';
+  import { yamlLanguage } from '@codemirror/lang-yaml';
+  import { highlightTree, classHighlighter } from '@lezer/highlight';
 
   export interface PreviewTab {
     id: string;
@@ -77,6 +80,35 @@
     a.click();
     URL.revokeObjectURL(url);
   }
+
+  function escapeHtml(str: string): string {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function highlightCode(code: string, lang: 'json' | 'yaml'): string {
+    if (!code) return '';
+    try {
+      const parser = lang === 'yaml' ? yamlLanguage.parser : jsonLanguage.parser;
+      const tree = parser.parse(code);
+      let pos = 0;
+      let html = '';
+      highlightTree(tree, classHighlighter, (from, to, classes) => {
+        if (from > pos) {
+          html += escapeHtml(code.slice(pos, from));
+        }
+        html += `<span class="${classes}">${escapeHtml(code.slice(from, to))}</span>`;
+        pos = to;
+      });
+      if (pos < code.length) {
+        html += escapeHtml(code.slice(pos));
+      }
+      return html;
+    } catch {
+      return escapeHtml(code);
+    }
+  }
+
+  const highlightedHtml = $derived(highlightCode(content, language));
 </script>
 
 {#if isOpen}
@@ -225,10 +257,12 @@
         </div>
       {/if}
 
+      <!-- eslint-disable svelte/no-at-html-tags -->
       <pre
         id={testId}
         class="constructor-preview-panel {language === 'yaml' ? 'yaml-preview' : ''}"
-        data-testid={testId || 'constructor-preview'}><code>{content}</code></pre>
+        data-testid={testId || 'constructor-preview'}><code>{@html highlightedHtml}</code></pre>
+      <!-- eslint-enable svelte/no-at-html-tags -->
     </div>
 
     {#if children}
@@ -395,6 +429,35 @@
     background: transparent;
     padding: 0;
     border: none;
+  }
+
+  .constructor-preview-panel :global(.tok-propertyName) {
+    color: var(--code-fg);
+  }
+
+  .constructor-preview-panel :global(.tok-string) {
+    color: var(--code-string);
+  }
+
+  .constructor-preview-panel :global(.tok-number) {
+    color: var(--code-number);
+  }
+
+  .constructor-preview-panel :global(.tok-keyword),
+  .constructor-preview-panel :global(.tok-bool) {
+    color: var(--code-key);
+  }
+
+  .constructor-preview-panel :global(.tok-null) {
+    color: var(--code-null);
+  }
+
+  .constructor-preview-panel :global(.tok-punctuation) {
+    color: var(--code-punctuation);
+  }
+
+  .constructor-preview-panel :global(.tok-comment) {
+    color: var(--code-comment);
   }
 
   .constructor-preview-footer {
