@@ -63,7 +63,9 @@ describe('xraySchema outbound protocols & WireGuard settings (D-08)', () => {
     expect(settingsProps.secretKey.type).toBe('string');
 
     expect(settingsProps.address).toBeDefined();
-    expect(settingsProps.address.type).toBe('array');
+    const addressTypes = settingsProps.address.oneOf.map((s: any) => s.type);
+    expect(addressTypes).toContain('array');
+    expect(addressTypes).toContain('string');
 
     expect(settingsProps.mtu).toBeDefined();
     expect(settingsProps.mtu.type).toBe('integer');
@@ -112,5 +114,101 @@ describe('xraySchema routing domainMatcher (D-13 отменено)', () => {
     const routingProps = (xraySchema.properties.routing as any).properties;
     expect(routingProps.domainMatcher).toBeDefined();
     expect(routingProps.domainMatcher.enum).toEqual(['hybrid', 'linear']);
+  });
+});
+
+describe('xraySchema vmess/vless/trojan authentication settings', () => {
+  const outboundSettings = (xraySchema.properties.outbounds.items as any).properties.settings
+    .properties;
+  const inboundSettings = (xraySchema.properties.inbounds.items as any).properties.settings
+    .properties;
+
+  test('outbound settings.vnext описывает address/port/users с id-паттерном UUID', () => {
+    const vnext = outboundSettings.vnext;
+    expect(vnext.type).toBe('array');
+    const userSchema = vnext.items.properties.users.items;
+    expect(userSchema.properties.id.pattern).toBeDefined();
+    expect('123e4567-e89b-12d3-a456-426614174000').toMatch(
+      new RegExp(userSchema.properties.id.pattern)
+    );
+  });
+
+  test('outbound settings.servers допускает и trojan (password), и shadowsocks (method) форму', () => {
+    const serversOneOf = outboundSettings.servers.oneOf;
+    const itemShapes = serversOneOf.map((branch: any) =>
+      Object.keys(branch.items.properties).sort()
+    );
+    expect(itemShapes).toContainEqual(['address', 'email', 'level', 'password', 'port'].sort());
+    expect(itemShapes).toContainEqual(
+      ['address', 'level', 'method', 'password', 'port', 'uot'].sort()
+    );
+  });
+
+  test('inbound settings.clients поддерживает id-клиентов (vmess/vless) и password-клиентов (trojan)', () => {
+    const clientOneOf = inboundSettings.clients.items.oneOf;
+    const keys = clientOneOf.map((branch: any) => Object.keys(branch.properties).sort());
+    expect(keys.some((k: string[]) => k.includes('id'))).toBe(true);
+    expect(keys.some((k: string[]) => k.includes('password') && !k.includes('id'))).toBe(true);
+  });
+});
+
+describe('xraySchema streamSettings TLS/Reality/transport coverage', () => {
+  const outboundStream = (xraySchema.properties.outbounds.items as any).properties.streamSettings;
+  const inboundStream = (xraySchema.properties.inbounds.items as any).properties.streamSettings;
+
+  test('streamSettings переиспользуется дословно между inbound и outbound', () => {
+    expect(outboundStream).toBe(inboundStream);
+  });
+
+  test('network и security описаны как закрытые enum, а не свободная строка', () => {
+    expect(outboundStream.properties.network.enum).toEqual(
+      expect.arrayContaining(['tcp', 'ws', 'grpc', 'xhttp'])
+    );
+    expect(outboundStream.properties.security.enum).toEqual(['none', 'tls', 'reality']);
+  });
+
+  test('tlsSettings и realitySettings присутствуют с ключевыми полями', () => {
+    expect(outboundStream.properties.tlsSettings.properties.serverName).toBeDefined();
+    expect(outboundStream.properties.tlsSettings.properties.alpn).toBeDefined();
+    expect(outboundStream.properties.realitySettings.properties.publicKey).toBeDefined();
+    expect(outboundStream.properties.realitySettings.properties.shortId).toBeDefined();
+  });
+
+  test('wsSettings и grpcSettings присутствуют', () => {
+    expect(outboundStream.properties.wsSettings.properties.path).toBeDefined();
+    expect(outboundStream.properties.grpcSettings.properties.serviceName).toBeDefined();
+  });
+});
+
+describe('xraySchema freedom/blackhole/dns/loopback outbound settings', () => {
+  const settingsProps = (xraySchema.properties.outbounds.items as any).properties.settings
+    .properties;
+
+  test('freedom-специфичные поля присутствуют', () => {
+    expect(settingsProps.domainStrategy).toBeDefined();
+    expect(settingsProps.redirect).toBeDefined();
+  });
+
+  test('blackhole response.type присутствует', () => {
+    expect(settingsProps.response.properties.type.enum).toEqual(['none', 'http']);
+  });
+
+  test('loopback inboundTag присутствует', () => {
+    expect(settingsProps.inboundTag).toBeDefined();
+  });
+});
+
+describe('xraySchema port bounds and required fields', () => {
+  test('inbound port — oneOf integer(1-65535)/string, как у listeners Mihomo', () => {
+    const portProp = (xraySchema.properties.inbounds.items as any).properties.port;
+    const intBranch = portProp.oneOf.find((b: any) => b.type === 'integer');
+    expect(intBranch.minimum).toBe(1);
+    expect(intBranch.maximum).toBe(65535);
+    expect(portProp.oneOf.some((b: any) => b.type === 'string')).toBe(true);
+  });
+
+  test('inbounds и outbounds требуют обязательное поле protocol', () => {
+    expect((xraySchema.properties.inbounds.items as any).required).toContain('protocol');
+    expect((xraySchema.properties.outbounds.items as any).required).toContain('protocol');
   });
 });
