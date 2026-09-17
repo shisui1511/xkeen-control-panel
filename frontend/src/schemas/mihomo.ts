@@ -6,25 +6,35 @@ export const mihomoSchema = {
   properties: {
     port: {
       type: 'integer',
+      minimum: 1,
+      maximum: 65535,
       description: 'HTTP proxy port',
       default: 7890
     },
     'socks-port': {
       type: 'integer',
+      minimum: 1,
+      maximum: 65535,
       description: 'SOCKS5 proxy port',
       default: 7891
     },
     'mixed-port': {
       type: 'integer',
+      minimum: 1,
+      maximum: 65535,
       description: 'Mixed HTTP+SOCKS port',
       default: 7892
     },
     'redir-port': {
       type: 'integer',
+      minimum: 1,
+      maximum: 65535,
       description: 'Transparent proxy port (Linux)'
     },
     'tproxy-port': {
       type: 'integer',
+      minimum: 1,
+      maximum: 65535,
       description: 'TPROXY port (Linux)'
     },
     'allow-lan': {
@@ -56,19 +66,52 @@ export const mihomoSchema = {
     },
     'external-controller': {
       type: 'string',
+      pattern: '^[^:\\s]*:\\d{1,5}$',
       description: 'REST API bind address (e.g. 127.0.0.1:9090)'
     },
     'external-controller-unix': {
       type: 'string',
       description: 'Unix Domain Socket path for REST API (e.g. /opt/var/run/mihomo.sock)'
     },
+    'external-controller-tls': {
+      type: 'string',
+      description: 'HTTPS bind address for REST API (requires tls-cert/tls-key)'
+    },
     'external-ui': {
       type: 'string',
       description: 'Path to external dashboard files'
     },
+    'external-ui-name': {
+      type: 'string',
+      description: 'Name of the bundled external dashboard to serve'
+    },
+    'external-ui-url': {
+      type: 'string',
+      description: 'Download URL used to auto-fetch the external dashboard on startup'
+    },
     secret: {
       type: 'string',
       description: 'API secret token'
+    },
+    authentication: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Basic-auth credentials for HTTP/SOCKS/Mixed inbound in "user:pass" form'
+    },
+    'skip-auth-prefixes': {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Source CIDR prefixes exempt from inbound authentication'
+    },
+    'lan-allowed-ips': {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'CIDR list allowed to use inbound listeners when allow-lan is enabled'
+    },
+    'lan-disallowed-ips': {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'CIDR list denied from using inbound listeners when allow-lan is enabled'
     },
     'interface-name': {
       type: 'string',
@@ -76,7 +119,30 @@ export const mihomoSchema = {
     },
     'routing-mark': {
       type: 'integer',
+      minimum: 0,
       description: 'SO_MARK value for Linux'
+    },
+    'global-ua': {
+      type: 'string',
+      description: 'Custom User-Agent for outbound HTTP requests made by the core itself'
+    },
+    'keep-alive-idle': {
+      type: 'integer',
+      minimum: 0,
+      description: 'TCP keep-alive idle time in seconds before probing starts'
+    },
+    'keep-alive-interval': {
+      type: 'integer',
+      minimum: 0,
+      description: 'TCP keep-alive probe interval in seconds'
+    },
+    'tcp-concurrent': {
+      type: 'boolean',
+      description: 'Dial all resolved IPs concurrently and use the fastest handshake'
+    },
+    'unified-delay': {
+      type: 'boolean',
+      description: 'Measure proxy latency including handshake time for consistent comparisons'
     },
     'find-process-mode': {
       type: 'string',
@@ -117,6 +183,11 @@ export const mihomoSchema = {
       type: 'boolean',
       description: 'Use geodata format instead of GeoSite/GeoIP'
     },
+    'geodata-loader': {
+      type: 'string',
+      enum: ['standard', 'memconservative'],
+      description: 'GeoData loader strategy (memconservative trades speed for lower RAM usage)'
+    },
     'geox-url': {
       type: 'object',
       description: 'Custom GeoIP/GeoSite download URLs',
@@ -132,7 +203,37 @@ export const mihomoSchema = {
     },
     'geo-update-interval': {
       type: 'integer',
+      minimum: 1,
       description: 'Geo update interval in hours'
+    },
+    ntp: {
+      type: 'object',
+      description: 'NTP time sync configuration',
+      properties: {
+        enable: { type: 'boolean' },
+        'write-to-system': {
+          type: 'boolean',
+          description: 'Write synced time to the system clock'
+        },
+        server: { type: 'string', description: 'NTP server address' },
+        port: { type: 'integer', minimum: 1, maximum: 65535 },
+        interval: { type: 'integer', description: 'Sync interval in seconds' }
+      }
+    },
+    experimental: {
+      type: 'object',
+      description: 'Experimental / unstable core features, subject to change between releases',
+      properties: {
+        'ignore-resolve-fail': {
+          type: 'boolean',
+          description: 'Do not fail dial on DNS resolve error'
+        },
+        'dialer-ip-version': {
+          type: 'string',
+          enum: ['dual', '4', '6', 'ipv4', 'ipv6', 'ipv4-prefer', 'ipv6-prefer'],
+          description: 'Preferred IP version when dialing'
+        }
+      }
     },
     sniffer: {
       type: 'object',
@@ -189,7 +290,11 @@ export const mihomoSchema = {
           enum: ['fake-ip', 'redir-host', 'normal'],
           description: 'DNS enhanced mode'
         },
-        'fake-ip-range': { type: 'string', description: 'Fake-IP address pool CIDR' },
+        'fake-ip-range': {
+          type: 'string',
+          pattern: '^([0-9]{1,3}\\.){3}[0-9]{1,3}/\\d{1,2}$',
+          description: 'Fake-IP address pool CIDR'
+        },
         'fake-ip-filter': { type: 'array', items: { type: 'string' } },
         nameserver: {
           type: 'array',
@@ -222,6 +327,43 @@ export const mihomoSchema = {
         oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }]
       }
     },
+    'proxy-providers': {
+      type: 'object',
+      description: 'Named remote/local proxy subscription providers, referenced by proxy-groups',
+      additionalProperties: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['http', 'file', 'inline'],
+            description: 'Provider source type'
+          },
+          url: { type: 'string', description: 'Subscription URL (type: http)' },
+          path: { type: 'string', description: 'Local cache/config path' },
+          interval: { type: 'integer', description: 'Auto-update interval in seconds' },
+          'health-check': {
+            type: 'object',
+            properties: {
+              enable: { type: 'boolean' },
+              url: { type: 'string' },
+              interval: { type: 'integer' },
+              lazy: { type: 'boolean' }
+            }
+          },
+          filter: { type: 'string', description: 'Regex filter applied to proxy names' },
+          'exclude-filter': {
+            type: 'string',
+            description: 'Regex exclusion filter applied to proxy names'
+          },
+          'exclude-type': { type: 'string', description: 'Regex filter excluding proxy types' },
+          override: {
+            type: 'object',
+            description: 'Per-field overrides applied to every proxy from this provider'
+          }
+        },
+        required: ['type']
+      }
+    },
     proxies: {
       type: 'array',
       description: 'Proxy server definitions',
@@ -248,16 +390,101 @@ export const mihomoSchema = {
             description: 'Proxy protocol type'
           },
           server: { type: 'string', description: 'Server address' },
-          port: { type: 'integer', description: 'Server port' },
+          port: { type: 'integer', minimum: 1, maximum: 65535, description: 'Server port' },
+          username: { type: 'string', description: 'Username (socks5/http auth)' },
           password: { type: 'string' },
-          uuid: { type: 'string', description: 'VMess/VLESS UUID' },
+          uuid: {
+            type: 'string',
+            pattern:
+              '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+            description: 'VMess/VLESS UUID'
+          },
           alterId: { type: 'integer' },
           cipher: { type: 'string', description: 'Encryption method' },
           udp: { type: 'boolean', description: 'Enable UDP relay' },
           tfo: { type: 'boolean', description: 'Enable TCP Fast Open' },
           'skip-cert-verify': { type: 'boolean' },
           tls: { type: 'boolean' },
-          network: { type: 'string', enum: ['tcp', 'udp', 'ws', 'grpc', 'h2'] },
+          sni: { type: 'string', description: 'TLS Server Name Indication (overrides server)' },
+          servername: { type: 'string', description: 'Alias of sni used by some proxy types' },
+          alpn: { type: 'array', items: { type: 'string' }, description: 'TLS ALPN protocol list' },
+          'client-fingerprint': {
+            type: 'string',
+            enum: ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '360', 'qq', 'random'],
+            description: 'uTLS client hello fingerprint'
+          },
+          flow: {
+            type: 'string',
+            enum: ['xtls-rprx-vision', ''],
+            description: 'VLESS flow control (XTLS)'
+          },
+          network: {
+            type: 'string',
+            enum: ['tcp', 'udp', 'ws', 'grpc', 'h2', 'http'],
+            description: 'Transport protocol'
+          },
+          'ws-opts': {
+            type: 'object',
+            description: 'WebSocket transport options (network: ws)',
+            properties: {
+              path: { type: 'string' },
+              headers: { type: 'object', additionalProperties: { type: 'string' } },
+              'max-early-data': { type: 'integer' },
+              'early-data-header-name': { type: 'string' }
+            }
+          },
+          'grpc-opts': {
+            type: 'object',
+            description: 'gRPC transport options (network: grpc)',
+            properties: {
+              'grpc-service-name': { type: 'string' }
+            }
+          },
+          'h2-opts': {
+            type: 'object',
+            description: 'HTTP/2 transport options (network: h2)',
+            properties: {
+              host: { type: 'array', items: { type: 'string' } },
+              path: { type: 'string' }
+            }
+          },
+          'reality-opts': {
+            type: 'object',
+            description: 'REALITY TLS camouflage options (requires tls: true)',
+            properties: {
+              'public-key': { type: 'string', description: 'REALITY server public key' },
+              'short-id': { type: 'string', description: 'REALITY short ID' }
+            },
+            required: ['public-key']
+          },
+          plugin: {
+            type: 'string',
+            enum: ['obfs', 'v2ray-plugin', 'shadow-tls', 'restls'],
+            description: 'Shadowsocks plugin'
+          },
+          'plugin-opts': {
+            type: 'object',
+            description: 'Shadowsocks plugin-specific options',
+            properties: {
+              mode: { type: 'string' },
+              host: { type: 'string' },
+              tls: { type: 'boolean' },
+              'skip-cert-verify': { type: 'boolean' },
+              password: { type: 'string' },
+              version: { type: 'string' }
+            }
+          },
+          obfs: { type: 'string', description: 'Hysteria obfuscation mode' },
+          'obfs-password': { type: 'string', description: 'Hysteria obfuscation password' },
+          'auth-str': { type: 'string', description: 'Hysteria auth string (v1)' },
+          up: { type: 'string', description: 'Hysteria upload bandwidth (e.g. "100 Mbps")' },
+          down: { type: 'string', description: 'Hysteria download bandwidth (e.g. "100 Mbps")' },
+          'congestion-controller': {
+            type: 'string',
+            enum: ['cubic', 'new_reno', 'bbr'],
+            description: 'TUIC congestion control algorithm'
+          },
+          'reduce-rtt': { type: 'boolean', description: 'TUIC 0-RTT handshake' },
           'dialer-proxy': { type: 'string', description: 'Chain dialer proxy' },
           ports: { type: 'string', description: 'Port hopping range' },
           smux: { type: 'object', description: 'Multiplexing settings' },
@@ -314,7 +541,28 @@ export const mihomoSchema = {
             }
           }
         },
-        required: ['name', 'type', 'server', 'port']
+        required: ['name', 'type', 'server', 'port'],
+        allOf: [
+          {
+            if: { properties: { type: { enum: ['vmess', 'vless'] } }, required: ['type'] },
+            then: { required: ['uuid'] }
+          },
+          {
+            if: {
+              properties: { type: { enum: ['ss', 'ssr', 'trojan', 'snell', 'hysteria2'] } },
+              required: ['type']
+            },
+            then: { required: ['password'] }
+          },
+          {
+            if: { properties: { type: { const: 'tuic' } }, required: ['type'] },
+            then: { required: ['uuid', 'password'] }
+          },
+          {
+            if: { properties: { type: { const: 'wireguard' } }, required: ['type'] },
+            then: { required: ['private-key', 'ip'] }
+          }
+        ]
       }
     },
     'proxy-groups': {
@@ -335,8 +583,8 @@ export const mihomoSchema = {
             description: 'Proxy names in this group'
           },
           url: { type: 'string', description: 'Test URL for url-test/fallback' },
-          interval: { type: 'integer', description: 'Test interval in seconds' },
-          tolerance: { type: 'integer', description: 'Latency tolerance in ms' },
+          interval: { type: 'integer', minimum: 1, description: 'Test interval in seconds' },
+          tolerance: { type: 'integer', minimum: 0, description: 'Latency tolerance in ms' },
           lazy: { type: 'boolean', description: 'Lazy test (only on select)' },
           'expected-status': { type: 'string', description: 'Expected HTTP status code' },
           'exclude-type': { type: 'string', description: 'Exclude proxy types regex' },
@@ -387,7 +635,10 @@ export const mihomoSchema = {
           },
           listen: { type: 'string', description: 'Binding IP address (defaults to 0.0.0.0)' },
           port: {
-            oneOf: [{ type: 'integer' }, { type: 'string' }],
+            oneOf: [
+              { type: 'integer', minimum: 1, maximum: 65535 },
+              { type: 'string', description: 'Port range, e.g. "20000-20100"' }
+            ],
             description: 'Listening port or port range'
           },
           proxy: {
@@ -400,6 +651,7 @@ export const mihomoSchema = {
           },
           'routing-mark': {
             type: 'integer',
+            minimum: 0,
             description: 'Linux socket SO_MARK value'
           },
           udp: { type: 'boolean', description: 'Enable UDP support' },
@@ -420,12 +672,51 @@ export const mihomoSchema = {
         required: ['name', 'type']
       }
     },
+    'rule-providers': {
+      type: 'object',
+      description: 'Named remote/local rule-set providers, referenced from rules via RULE-SET',
+      additionalProperties: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['http', 'file', 'inline'],
+            description: 'Provider source type'
+          },
+          behavior: {
+            type: 'string',
+            enum: ['domain', 'ipcidr', 'classical'],
+            description: 'Rule-set content format'
+          },
+          url: { type: 'string', description: 'Rule-set URL (type: http)' },
+          path: { type: 'string', description: 'Local cache/config path' },
+          format: {
+            type: 'string',
+            enum: ['yaml', 'text', 'mrs'],
+            description: 'Rule-set file format'
+          },
+          interval: { type: 'integer', description: 'Auto-update interval in seconds' }
+        },
+        required: ['type', 'behavior']
+      }
+    },
+    'sub-rules': {
+      type: 'object',
+      description:
+        'Named rule subsets matchable from listeners[].rule or rules via SUB-RULE, for split routing scopes',
+      additionalProperties: {
+        type: 'array',
+        items: { type: 'string' }
+      }
+    },
     rules: {
       type: 'array',
       description: 'Traffic routing rules',
       items: {
         type: 'string',
-        description: 'Rule in format: TYPE,ARG,POLICY or MATCH,POLICY'
+        pattern:
+          '^(DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|DOMAIN-REGEX|DOMAIN-WILDCARD|GEOSITE|GEOIP|SRC-GEOIP|IP-ASN|SRC-IP-ASN|IP-CIDR|IP-CIDR6|SRC-IP-CIDR|IP-SUFFIX|SRC-IP-SUFFIX|SRC-PORT|DST-PORT|IN-PORT|IN-TYPE|IN-USER|IN-NAME|PROCESS-NAME|PROCESS-PATH|PROCESS-NAME-REGEX|PROCESS-PATH-REGEX|NETWORK|UID|SUB-RULE|RULE-SET|AND|OR|NOT|MATCH),.+$',
+        description: 'Rule in format: TYPE,ARG[,ARG2],POLICY[,no-resolve] or MATCH,POLICY'
       }
     },
     script: {
