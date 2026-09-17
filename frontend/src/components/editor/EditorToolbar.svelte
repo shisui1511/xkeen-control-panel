@@ -169,12 +169,12 @@
 <style>
   .editor-subhead-bar {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     justify-content: space-between;
     border-bottom: 1px solid var(--border);
     background: var(--bg-card);
     min-height: 36px;
-    gap: 6px;
+    gap: 0;
     padding-right: 8px;
     flex-shrink: 0;
   }
@@ -184,7 +184,8 @@
     align-items: center;
     justify-content: center;
     width: 32px;
-    height: 36px;
+    min-height: 36px;
+    height: 100%;
     background: transparent;
     border: none;
     border-right: 1px solid var(--border);
@@ -202,6 +203,9 @@
   .subhead-tabs-container {
     flex: 1;
     min-width: 0;
+    display: flex;
+    align-items: stretch;
+    height: 100%;
     overflow-x: auto;
     scrollbar-width: none;
   }
@@ -214,6 +218,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-left: 8px;
     flex-shrink: 0;
   }
 

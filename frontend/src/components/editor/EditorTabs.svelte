@@ -71,7 +71,9 @@
 <style>
   .editor-tab-strip {
     display: flex;
-    gap: 2px;
+    gap: 0;
+    height: 100%;
+    align-items: stretch;
     background: transparent;
     border-bottom: none;
     overflow-x: auto;
@@ -91,7 +93,8 @@
   .editor-tab {
     display: flex;
     align-items: center;
-    padding: 0 6px 0 0;
+    height: 100%;
+    padding: 0 8px 0 0;
     background: transparent;
     color: var(--fg-dim);
     border-right: 1px solid var(--border);
@@ -102,8 +105,9 @@
   .tab-main {
     display: flex;
     align-items: center;
+    height: 100%;
     gap: 8px;
-    padding: 8px 10px 8px 16px;
+    padding: 0 8px 0 12px;
     background: none;
     border: 0;
     color: inherit;
@@ -127,11 +131,12 @@
   .editor-tab.active::after {
     content: '';
     position: absolute;
-    bottom: 0;
+    bottom: -1px;
     left: 0;
     right: 0;
     height: 2px;
     background: var(--accent);
+    z-index: 1;
   }
 
   .editor-tab.preview .tab-name {
