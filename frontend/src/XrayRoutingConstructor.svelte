@@ -274,17 +274,42 @@
     };
   }
 
+  const XRAY_DIR = '/opt/etc/xray/configs';
+  const XRAY_FILES = [
+    '01_log.json',
+    '02_dns.json',
+    '03_inbounds.json',
+    '04_outbounds.json',
+    '05_routing.json',
+    '06_policy.json'
+  ];
+
   async function loadXrayConfig() {
-    try {
-      const res = await apiFetch('/api/xray/config');
-      if (res.status === 401) return;
-      const data = await res.json();
-      if (data && typeof data === 'object') {
-        xrayFiles = data.files || {};
-        parseXrayFiles(xrayFiles);
+    const promises = XRAY_FILES.map(async (name) => {
+      try {
+        const path = `${XRAY_DIR}/${name}`;
+        const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        xrayFiles[name] = data;
+      } catch (e: any) {
+        if (e?.status === 401) return;
+        xrayFiles[name] = {};
       }
-    } catch {
-      // Ignored
+    });
+
+    await Promise.allSettled(promises);
+    parseXrayFiles(xrayFiles);
+
+    // Auto-initialize if stub config (CONSTR-06 / D-08)
+    const routingFile = xrayFiles['05_routing.json'] || {};
+    const isRoutingStub = !routingFile.routing?.rules || routingFile.routing.rules.length === 0;
+    const outboundsFile = xrayFiles['04_outbounds.json'] || {};
+    const isOutboundsStub = !outboundsFile.outbounds || outboundsFile.outbounds.length === 0;
+    if (isRoutingStub || isOutboundsStub) {
+      if (!applyLoading) {
+        applyTemplateFiles('selective-routing', false);
+      }
     }
   }
 
@@ -320,6 +345,16 @@
           id: typeof crypto !== 'undefined' ? crypto.randomUUID() : 'r-' + Math.random(),
           enabled: rule.enabled !== false
         }));
+        const proxyRule = routingRules.find(
+          (rule: any) =>
+            rule.outboundTag &&
+            rule.outboundTag !== 'direct' &&
+            rule.outboundTag !== 'block' &&
+            rule.outboundTag !== 'dns-out'
+        );
+        if (proxyRule) {
+          proxyTag = proxyRule.outboundTag;
+        }
       }
       if (Array.isArray(r.balancers)) {
         balancers = r.balancers;
@@ -334,8 +369,6 @@
       policyConfig.system = p.system || {};
     }
   }
-
-  const XRAY_DIR = '/opt/etc/xray/configs';
 
   async function loadXrayOutboundTags() {
     outboundTagsLoading = true;
@@ -403,6 +436,18 @@
     }
     subscriptionOutbounds = uniqueSubs;
     outboundTagsLoading = false;
+
+    if (!proxyTag) {
+      const allTags = [
+        ...uniqueCustom.map((o) => o.tag).filter(Boolean),
+        ...uniqueSubs.map((o) => o.tag).filter(Boolean)
+      ];
+      const systemTags = ['direct', 'block', 'dns-out'];
+      const customTag = allTags.find((t) => !systemTags.includes(t));
+      if (customTag) {
+        proxyTag = customTag;
+      }
+    }
   }
 
   function applyPreset(presetId: string) {
@@ -486,20 +531,213 @@
     showApplyConfirm = true;
   }
 
+  function getOutboundsForTemplate(
+    _id: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing'
+  ): object {
+    return {
+      outbounds: [
+        { tag: 'direct', protocol: 'freedom' },
+        { tag: 'block', protocol: 'blackhole' }
+      ]
+    };
+  }
+
+  function getRoutingForTemplate(
+    id: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing',
+    tag: string
+  ): object {
+    let rules: any[] = [];
+    if (id === 'minimal-routing') {
+      rules = [
+        { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
+        { type: 'field', port: '0-65535', outboundTag: 'direct' }
+      ];
+    } else if (id === 'selective-routing') {
+      rules = [
+        { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
+        { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
+        { type: 'field', domain: ['geosite:geolocation-!cn'], outboundTag: 'PROXY_TAG' }
+      ];
+    } else {
+      // all-proxy-routing
+      rules = [
+        { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
+        { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
+        { type: 'field', port: '0-65535', outboundTag: 'PROXY_TAG' }
+      ];
+    }
+    return {
+      routing: {
+        domainStrategy: 'IPIfNonMatch',
+        rules: substituteProxyTag(rules, tag)
+      }
+    };
+  }
+
+  async function applyTemplateFiles(
+    templateId: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing',
+    silent = false
+  ) {
+    const tag = proxyTag && outboundTags.includes(proxyTag) ? proxyTag : 'direct';
+
+    applyLoading = true;
+    saveWarnings = [];
+    try {
+      const outboundsPath = `${XRAY_DIR}/04_outbounds.json`;
+      const existingOutbounds = (xrayFiles['04_outbounds.json']?.outbounds || []) as any[];
+      const custom = existingOutbounds.filter(
+        (o: any) => o && o.tag !== 'direct' && o.tag !== 'block'
+      );
+      const templateOutbounds = (getOutboundsForTemplate(templateId) as any).outbounds || [];
+      const mergedOutbounds = {
+        outbounds: [...templateOutbounds, ...custom]
+      };
+
+      const saveOutboundsRes = await apiFetch(
+        `/api/config/save?path=${encodeURIComponent(outboundsPath)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(mergedOutbounds, null, 2)
+        }
+      );
+      if (!saveOutboundsRes.ok) throw new Error('Failed to save 04_outbounds.json');
+
+      const templateRouting = getRoutingForTemplate(templateId, 'PROXY_TAG');
+      const templateContent = JSON.stringify(templateRouting, null, 2);
+
+      const existingRouting = xrayFiles['05_routing.json'];
+      const existingContent = existingRouting ? JSON.stringify(existingRouting, null, 2) : '';
+
+      let mergeRes: { content: string; stats?: { user_rules?: number; rules?: number } };
+      try {
+        mergeRes = await apiFetchJSON<{
+          content: string;
+          stats?: { user_rules?: number; rules?: number };
+        }>('/api/config/smart-merge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'xray',
+            existing_content: existingContent,
+            template_content: templateContent,
+            target_file: '05_routing.json',
+            active_outbound_tag: tag
+          })
+        });
+      } catch (mergeErr: any) {
+        if (mergeErr?.status === 401) return;
+        console.error('Smart merge failed for 05_routing.json:', mergeErr);
+        if (!silent) {
+          showToast('error', $t('editor.smart_merge_failed'));
+        }
+        return;
+      }
+
+      if (!mergeRes || !mergeRes.content) {
+        if (!silent) {
+          showToast('error', $t('editor.smart_merge_failed'));
+        }
+        return;
+      }
+
+      const routingPath = `${XRAY_DIR}/05_routing.json`;
+      const saveRoutingRes = await apiFetch(
+        `/api/config/save?path=${encodeURIComponent(routingPath)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: mergeRes.content
+        }
+      );
+      if (!saveRoutingRes.ok) {
+        if (saveRoutingRes.status === 422) {
+          const resData = await saveRoutingRes.json().catch(() => ({}));
+          validationError = resData.error || 'Unknown validation error';
+          if (!silent) {
+            showToast('error', $t('editor.validation_failed'));
+          }
+          return;
+        }
+        throw new Error('Failed to save 05_routing.json');
+      }
+
+      const collected: PreflightWarning[] = [];
+      const outJson = await saveOutboundsRes.json().catch(() => null);
+      const outData = outJson?.data ?? outJson;
+      if (Array.isArray(outData?.warnings)) collected.push(...outData.warnings);
+
+      const routJson = await saveRoutingRes.json().catch(() => null);
+      const routData = routJson?.data ?? routJson;
+      if (Array.isArray(routData?.warnings)) {
+        collected.push(...routData.warnings);
+      } else if (Array.isArray((mergeRes as any)?.warnings)) {
+        collected.push(...(mergeRes as any).warnings);
+      }
+      saveWarnings = collected;
+
+      if (!silent) {
+        const stats = mergeRes.stats || {};
+        showToast(
+          'success',
+          $t('editor.smart_merge_applied', {
+            nodes: $tp('editor.smart_merge_applied_nodes', custom.length),
+            providers: $tp('editor.smart_merge_applied_providers', 0),
+            rules: $tp('editor.smart_merge_applied_rules', stats.rules ?? 0),
+            userRules: $tp('editor.smart_merge_applied_user_rules', stats.user_rules ?? 0)
+          })
+        );
+      }
+      await loadXrayConfig();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      if (!silent) {
+        showToast('error', $t('editor.save_error') + ': ' + e.message);
+      }
+    } finally {
+      applyLoading = false;
+    }
+  }
+
   async function handleApplyChanges() {
     applyLoading = true;
     validationError = null;
+    saveWarnings = [];
+    const collectedWarnings: PreflightWarning[] = [];
+
+    // Мягкая валидация proxyTag
+    if (proxyTag && !outboundTags.includes(proxyTag)) {
+      showToast('warning', $t('editor.proxy_tag_warning'));
+    }
     try {
       const generated = generateFileConfigs();
       for (const [filename, content] of Object.entries(generated)) {
-        await apiFetchJSON('/api/xray/config/file', {
+        const filePath = `${XRAY_DIR}/${filename}`;
+        const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(filePath)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename, content })
+          body: typeof content === 'string' ? content : JSON.stringify(content, null, 2)
         });
+        if (!saveRes.ok) {
+          if (saveRes.status === 422) {
+            const data = await saveRes.json().catch(() => ({}));
+            validationError = data.error || 'Unknown validation error';
+            showToast('error', $t('editor.validation_failed'));
+            applyLoading = false;
+            return;
+          }
+          throw new Error(`Failed to save ${filename}`);
+        }
+        const saveJson = await saveRes.json().catch(() => null);
+        const data = saveJson?.data ?? saveJson;
+        if (Array.isArray(data?.warnings) && data.warnings.length > 0) {
+          collectedWarnings.push(...data.warnings);
+        }
       }
+      saveWarnings = collectedWarnings;
+
       try {
-        await apiFetchJSON('/api/service/control?action=restart', { method: 'POST' });
+        await apiFetch('/api/service/control?action=restart', { method: 'POST' });
       } catch {
         // Ignored
       }
@@ -507,6 +745,7 @@
       isDirty = false;
       showApplyConfirm = false;
       activateRestartGrace();
+      await loadXrayConfig();
     } catch (e: any) {
       const errMsg = e?.message || 'Save error';
       validationError = errMsg;
@@ -570,7 +809,8 @@
       detectedDraft = draft;
     }
 
-    await Promise.all([loadXrayConfig(), loadXrayOutboundTags()]);
+    await loadXrayOutboundTags();
+    await loadXrayConfig();
   });
 </script>
 

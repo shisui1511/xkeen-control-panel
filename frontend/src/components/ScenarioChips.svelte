@@ -26,6 +26,8 @@
         type="button"
         class="scenario-chip"
         class:active={active === opt.id}
+        data-scenario-id={opt.id}
+        data-testid={`scenario-chip-${opt.id}`}
         onclick={() => onSelect(opt.id)}
       >
         {opt.label}

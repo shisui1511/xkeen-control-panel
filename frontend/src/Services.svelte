@@ -762,7 +762,7 @@
             {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
               <a
                 href="#/editor"
-                class="mihomo-api-badge-link"
+                class="badge badge-warning mihomo-api-badge-link"
                 title={$t('svc.mihomo_api_unavailable_title')}
                 onclick={(e) => e.stopPropagation()}
               >

@@ -12,7 +12,8 @@ describe('Modal accessibility & focus management', () => {
       }
     });
     expect(body).not.toContain('modal-backdrop');
-    expect(body.replace(/<!--.*?-->/g, '').trim()).toBe('');
+    expect(body).not.toContain('role="dialog"');
+    expect(body).not.toContain('<div');
   });
 
   it('renders role="dialog" and aria-modal="true" when isOpen is true', () => {

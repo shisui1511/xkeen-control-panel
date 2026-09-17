@@ -123,12 +123,12 @@
 
 <div class="kernel-rules-container">
   <!-- Filter Toolbar -->
-  <div class="card toolbar-card">
+  <div class="card toolbar-card filters">
     <div class="toolbar-row">
       <div class="search-field">
         <input
           type="text"
-          class="input search-input font-mono"
+          class="input search-input filter-input font-mono"
           placeholder={$t('rules.all_rules_search_placeholder')}
           bind:value={searchQuery}
         />
@@ -144,20 +144,24 @@
         {/if}
       </div>
 
-      <div class="filter-field">
-        <Select
-          bind:value={typeFilter}
-          options={availableTypes}
-          ariaLabel={$t('rules.all_types')}
-        />
-      </div>
+      <div class="filter-fields-row">
+        <div class="filter-field">
+          <Select
+            class="source-select"
+            bind:value={typeFilter}
+            options={availableTypes}
+            ariaLabel={$t('rules.all_types')}
+          />
+        </div>
 
-      <div class="filter-field">
-        <Select
-          bind:value={proxyFilter}
-          options={availableProxies}
-          ariaLabel={$t('rules.all_targets')}
-        />
+        <div class="filter-field">
+          <Select
+            class="source-select"
+            bind:value={proxyFilter}
+            options={availableProxies}
+            ariaLabel={$t('rules.all_targets')}
+          />
+        </div>
       </div>
     </div>
 
@@ -602,10 +606,35 @@
     }
   }
 
+  .filter-fields-row {
+    display: flex;
+    gap: 10px;
+    flex: 1.5;
+    min-width: 240px;
+  }
+
+  .filter-field {
+    flex: 1;
+    min-width: 0;
+  }
+
   @media (max-width: 640px) {
+    .search-input {
+      font-size: 16px;
+    }
+
     .toolbar-row {
       flex-direction: column;
       align-items: stretch;
+    }
+
+    .search-field {
+      width: 100%;
+    }
+
+    .filter-fields-row {
+      width: 100%;
+      min-width: 0;
     }
 
     .dropdown-menu {

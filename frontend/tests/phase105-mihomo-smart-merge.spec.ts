@@ -85,11 +85,9 @@ test.describe('Phase 105: Mihomo Smart Merge Integration', () => {
     await mihomoKernelBtn.click();
 
     // Select preset zkeen-selective to generate YAML
-    const presetSelect = page.locator(
-      'select.preset-select, [data-testid="preset-select"], select#preset-select'
-    );
-    await expect(presetSelect).toBeVisible({ timeout: 10000 });
-    await presetSelect.selectOption('zkeen-selective');
+    const presetChip = page.locator('[data-scenario-id="zkeen-selective"]');
+    await expect(presetChip).toBeVisible({ timeout: 10000 });
+    await presetChip.click();
 
     // Wait for the constructor to load and apply button to become ready
     const applyBtn = page.locator('[data-testid="apply-changes-btn"]');

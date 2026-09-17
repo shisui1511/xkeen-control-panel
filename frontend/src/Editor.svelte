@@ -69,8 +69,8 @@
   let ru = $derived($currentLang === 'ru');
 
   const editorModeTabItems = $derived<TabItem[]>([
-    { value: 'files', label: $t('editor.tab_files') },
-    { value: 'constructor', label: $t('editor.tab_constructor') }
+    { value: 'files', label: $t('editor.tab_files'), testId: 'tab-files' },
+    { value: 'constructor', label: $t('editor.tab_constructor'), testId: 'tab-constructor' }
   ]);
 
   let editorView = $state<EditorView | null>(null);
@@ -1570,7 +1570,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm, 4px);
     padding: 2px 6px;
-    font-size: 11px;
+    font-size: 12px;
     font-family: var(--font-family-mono);
     color: var(--fg-secondary);
     line-height: 1.3;

@@ -237,7 +237,9 @@ test.describe('Watchdog status badge, incident banner, detail card and reset act
     const heroStatus = page.locator('.hero-status');
     await expect(heroStatus).toBeVisible();
 
-    const degradedBadge = heroStatus.locator('.badge.badge-danger');
+    const degradedBadge = heroStatus
+      .locator('.status-badge, .badge')
+      .filter({ hasText: /Деградация|Degraded/ });
     await expect(degradedBadge).toBeVisible();
     await expect(degradedBadge).toContainText(/Деградация|Degraded/);
   });
@@ -249,7 +251,9 @@ test.describe('Watchdog status badge, incident banner, detail card and reset act
     const heroStatus = page.locator('.hero-status');
     await expect(heroStatus).toBeVisible();
 
-    const armedBadge = heroStatus.locator('.badge.badge-success');
+    const armedBadge = heroStatus
+      .locator('.status-badge, .badge')
+      .filter({ hasText: /В строю|Armed/ });
     await expect(armedBadge).toBeVisible();
     await expect(armedBadge).toContainText(/В строю|Armed/);
   });

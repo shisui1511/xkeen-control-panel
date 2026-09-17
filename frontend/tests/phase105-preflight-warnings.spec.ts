@@ -222,9 +222,9 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
     await mihomoKernelBtn.click();
 
     // Выбираем пресет
-    const presetSelect = page.locator('select.preset-select, select#preset-select');
-    await expect(presetSelect).toBeVisible({ timeout: 10000 });
-    await presetSelect.selectOption('zkeen-selective');
+    const presetChip = page.locator('[data-scenario-id="zkeen-selective"]');
+    await expect(presetChip).toBeVisible({ timeout: 10000 });
+    await presetChip.click();
 
     // Кликаем применить
     const applyBtn = page.locator('[data-testid="apply-changes-btn"]');

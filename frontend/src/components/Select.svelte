@@ -108,4 +108,10 @@
     pointer-events: none;
     color: var(--fg-secondary);
   }
+
+  @media (max-width: 768px) {
+    .xcp-select select {
+      font-size: 16px;
+    }
+  }
 </style>

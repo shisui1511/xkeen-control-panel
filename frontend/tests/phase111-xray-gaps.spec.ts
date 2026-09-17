@@ -293,14 +293,18 @@ test.describe('Phase 111: Xray Gaps and Enhancements', () => {
 
     // Невалидный reserved (> 255)
     await page.locator('#outbound-wg-reserved').fill('300, 400, 500');
-    await page.locator('.modal-form-card button.btn-primary').click();
+    await page
+      .locator('.modal-container button.btn-primary, .modal-form-card button.btn-primary')
+      .click();
 
     // Модальное окно не закрывается из-за ошибки валидации
     await expect(page.locator('#outbound-tag')).toBeVisible();
 
     // Валидный reserved (0..255)
     await page.locator('#outbound-wg-reserved').fill('10, 20, 30');
-    await page.locator('.modal-form-card button.btn-primary').click();
+    await page
+      .locator('.modal-container button.btn-primary, .modal-form-card button.btn-primary')
+      .click();
 
     // Узел успешно добавлен в список
     await expect(page.locator('.outbounds-list')).toContainText('wg-test');

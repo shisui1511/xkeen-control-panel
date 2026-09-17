@@ -254,6 +254,16 @@
         ]
       };
     } else if (form.protocol === 'wireguard') {
+      if (form.wireguardReserved && form.wireguardReserved.trim()) {
+        const parts = form.wireguardReserved
+          .split(',')
+          .map((s: string) => parseInt(s.trim(), 10))
+          .filter((n: number) => !isNaN(n) && n >= 0 && n <= 255);
+        if (parts.length !== 3) {
+          showToast('error', $t('xray.reserved_invalid'));
+          return;
+        }
+      }
       outbound.settings = {
         secretKey: (form.wireguardSecretKey || '').trim(),
         address: (form.wireguardAddress || '')
@@ -268,11 +278,11 @@
           }
         ]
       };
-      if (form.wireguardReserved) {
+      if (form.wireguardReserved && form.wireguardReserved.trim()) {
         outbound.settings.reserved = form.wireguardReserved
           .split(',')
-          .map((s: string) => Number(s.trim()))
-          .filter((n: number) => !isNaN(n));
+          .map((s: string) => parseInt(s.trim(), 10))
+          .filter((n: number) => !isNaN(n) && n >= 0 && n <= 255);
       }
     }
 

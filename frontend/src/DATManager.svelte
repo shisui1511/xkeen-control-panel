@@ -462,8 +462,14 @@
   // Filtered files in master column
   let displayedFiles = $derived(
     files.filter((f) => {
-      if (kernelFilter === 'xray' && f.type !== 'xray') return false;
-      if (kernelFilter === 'mihomo' && f.type !== 'mihomo') return false;
+      if (kernelFilter === 'xray') {
+        if (f.type !== 'xray') return false;
+      } else if (kernelFilter === 'mihomo') {
+        if (f.type !== 'mihomo') return false;
+      } else if (activeKernel) {
+        if (f.type === 'xray' && activeKernel !== 'xray') return false;
+        if (f.type === 'mihomo' && activeKernel !== 'mihomo') return false;
+      }
       if (fileSearch.trim()) {
         const q = fileSearch.toLowerCase();
         return f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q);
@@ -479,9 +485,9 @@
   );
 
   let canRollback = $derived(files.some((f) => f.has_backup));
-  let actualCount = $derived(files.filter((f) => getFileStatus(f) === 'ok').length);
-  let missingCount = $derived(files.filter((f) => !f.exists).length);
-  let totalSize = $derived(files.reduce((sum, f) => sum + (f.size || 0), 0));
+  let actualCount = $derived(displayedFiles.filter((f) => getFileStatus(f) === 'ok').length);
+  let missingCount = $derived(displayedFiles.filter((f) => !f.exists).length);
+  let totalSize = $derived(displayedFiles.reduce((sum, f) => sum + (f.size || 0), 0));
 
   onMount(fetchFiles);
 </script>
@@ -563,9 +569,9 @@
   {/if}
 
   <!-- Stats Bar -->
-  {#if !loading && files.length > 0}
+  {#if !loading && displayedFiles.length > 0}
     <div class="stats mb-3">
-      <span class="stat"><b>{files.length}</b> {$t('dat.total_files')}</span>
+      <span class="stat"><b>{displayedFiles.length}</b> {$t('dat.total_files')}</span>
       <span class="stat"><b>{actualCount}</b> {$t('dat.active_count')}</span>
       {#if missingCount > 0}
         <span class="stat" style="color: var(--warning);">
@@ -803,7 +809,7 @@
                 selectedFile?.name === file.name && selectedFile?.path === file.path}
               {@const status = getStatusBadge(file)}
               <div
-                class="db-card-item"
+                class="db-card-item dat-row"
                 class:selected={isSelected}
                 class:is-symlink={file.is_symlink}
                 role="button"
@@ -1003,6 +1009,15 @@
                     {$t('dat.update')}
                   {/if}
                 </Button>
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm td-close"
+                  onclick={() => (selectedFile = null)}
+                  aria-label={$t('app.close')}
+                  title={$t('app.close')}
+                >
+                  ✕
+                </button>
               </div>
             </div>
 
@@ -1223,7 +1238,7 @@
                             onclick={() => selectTag(tagItem.tag)}
                             title={$t('dat.inspect_tag')}
                           >
-                            <span class="tag-name">{tagItem.tag}</span>
+                            <span class="tag-name td-tag-name">{tagItem.tag}</span>
                             {#if tagItem.count > 0}
                               <span class="tag-count">
                                 {tagItem.count.toLocaleString()}

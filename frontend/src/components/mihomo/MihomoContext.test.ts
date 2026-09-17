@@ -119,8 +119,9 @@ describe('MihomoContext', () => {
       expect(ctx.ruleProviders.length).toBeGreaterThan(0);
       expect(ctx.groups.length).toBeGreaterThan(0);
 
+      const initialCount = ctx.ruleProviders.length;
       ctx.removeRuleProvider(ctx.ruleProviders[0].name);
-      const remainingCount = ctx.ruleProviders.length;
+      expect(ctx.ruleProviders.length).toBeLessThan(initialCount);
 
       ctx.applyPreset('none');
       expect(ctx.activePreset).toBe('');

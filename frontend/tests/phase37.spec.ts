@@ -173,7 +173,7 @@ proxies:
     // 2. Click Tags button for geosite.dat
     const tagsButton = page
       .locator(
-        '.dat-row:has-text("geosite.dat") button:has-text("Теги"), .dat-row:has-text("geosite.dat") button:has-text("Tags")'
+        '.db-card-item:has-text("geosite.dat"), .dat-row:has-text("geosite.dat") button:has-text("Теги"), .dat-row:has-text("geosite.dat") button:has-text("Tags")'
       )
       .first();
     await expect(tagsButton).toBeVisible();
@@ -202,7 +202,7 @@ proxies:
     await expect(page.locator('text=google.de')).toBeVisible();
 
     // 7. Verify search input filtering with debounce
-    const searchInput = page.locator('.td-search-input');
+    const searchInput = page.locator('.inspector-search-input, .td-search-input');
     await expect(searchInput).toBeVisible();
     await searchInput.fill('ru');
     await page.waitForTimeout(400); // Wait for debounce timer (300ms) to fire

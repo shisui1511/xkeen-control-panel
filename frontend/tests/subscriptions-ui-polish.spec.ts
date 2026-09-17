@@ -127,9 +127,14 @@ proxy-groups:
     // Uncheck XRay integration
     await xrayCheckbox.click();
 
-    // Advanced toggle and tag prefix should now be hidden
-    await expect(advancedToggle).not.toBeVisible();
+    // Tag prefix is Xray-specific and should now be hidden
     await expect(modal.locator('input#form-tag-prefix')).not.toBeVisible();
+
+    // Uncheck Mihomo integration as well
+    await mihomoCheckbox.click();
+
+    // Advanced toggle should now be hidden when no kernel is selected
+    await expect(advancedToggle).not.toBeVisible();
   });
 
   test('saves subscription with selected kernel flags and mihomo groups', async ({ page }) => {

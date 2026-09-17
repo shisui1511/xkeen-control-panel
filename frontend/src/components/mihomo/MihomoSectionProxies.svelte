@@ -98,6 +98,10 @@
 
   function saveProxy() {
     if (!np.name.trim()) return;
+    if (np.type === 'hysteria2' && np.obfsType === 'simple' && !np.obfsPassword?.trim()) {
+      showToast('error', $t('mihomo.simple_obfs_pass_required'));
+      return;
+    }
     if (editingProxyId) {
       ctx.updateProxy(editingProxyId, { ...np, name: np.name.trim() });
     } else {

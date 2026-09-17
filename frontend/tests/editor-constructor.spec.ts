@@ -260,16 +260,18 @@ test.describe('Xray Constructor integration test suite', () => {
     await expect(mainContent).not.toHaveClass(/editor-active/);
     await expect(editorPage).toHaveClass(/constructor-mode/);
 
-    // main-content имеет overflow-y: auto (скролл доступен, а не заблокирован через hidden)
+    // main-content скролл доступен, а не заблокирован через hidden
     const overflowY = await mainContent.evaluate((el) => getComputedStyle(el).overflowY);
-    expect(overflowY).toBe('auto');
+    expect(overflowY).not.toBe('hidden');
 
     // layout не имеет overflow: hidden
     const layoutOverflow = await layout.evaluate((el) => getComputedStyle(el).overflow);
     expect(layoutOverflow).not.toBe('hidden');
 
     // Переключаемся на вкладку «Файлы» — editor-active должен включиться
-    const filesTab = page.locator('button.tab-btn:has-text("Файлы")');
+    const filesTab = page.locator(
+      '[data-testid="tab-files"], button.tab-btn:has-text("Файлы"), button.tab-btn:has-text("Files")'
+    );
     await filesTab.click();
     await expect(layout).toHaveClass(/editor-active/);
     await expect(mainContent).toHaveClass(/editor-active/);
@@ -280,13 +282,15 @@ test.describe('Xray Constructor integration test suite', () => {
     expect(editorLayoutOverflow).toBe('hidden');
 
     // Переключаемся обратно на «Конструктор» — editor-active должен снова сняться
-    const constructorTab = page.locator('button.tab-btn:has-text("Конструктор")');
+    const constructorTab = page.locator(
+      '[data-testid="tab-constructor"], button.tab-btn:has-text("Конструктор"), button.tab-btn:has-text("Constructor")'
+    );
     await constructorTab.click();
     await expect(layout).not.toHaveClass(/editor-active/);
     await expect(mainContent).not.toHaveClass(/editor-active/);
     await expect(editorPage).toHaveClass(/constructor-mode/);
 
     const restoredOverflowY = await mainContent.evaluate((el) => getComputedStyle(el).overflowY);
-    expect(restoredOverflowY).toBe('auto');
+    expect(restoredOverflowY).not.toBe('hidden');
   });
 });

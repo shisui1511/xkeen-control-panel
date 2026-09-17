@@ -351,9 +351,11 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
     await page.waitForLoadState('networkidle');
 
     // 1. Проверяем открытие Tag Browser и распаковку тегов
-    const tagsBtn = page.locator(
-      '.dat-row:has-text("geosite.dat") button:has-text("Tags"), .dat-row:has-text("geosite.dat") button:has-text("Теги")'
-    );
+    const tagsBtn = page
+      .locator(
+        '.db-card-item:has-text("geosite.dat"), .dat-row:has-text("geosite.dat") button:has-text("Tags"), .dat-row:has-text("geosite.dat") button:has-text("Теги")'
+      )
+      .first();
     await tagsBtn.click();
 
     // Теги должны отрендериться (не пустой список)
