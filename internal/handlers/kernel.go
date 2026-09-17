@@ -263,4 +263,3 @@ func (a *API) KernelUpload(w http.ResponseWriter, r *http.Request) {
 	kUpdated := a.kernelSvc.Get(name)
 	JSONSuccess(w, kUpdated)
 }
-

@@ -1653,4 +1653,3 @@ func (s *KernelService) UploadBinary(name string, src io.Reader, filename string
 
 	return nil
 }
-

@@ -393,4 +393,3 @@ func TestUserRules_SaveValidation(t *testing.T) {
 		})
 	}
 }
-

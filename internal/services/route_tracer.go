@@ -255,7 +255,7 @@ func (s *RouteTracerService) fetchKernelRules(ctx context.Context) ([]MihomoKern
 		if readErr == nil {
 			var parsed struct {
 				ProxyGroups []map[string]interface{} `yaml:"proxy-groups"`
-				Rules       []string                  `yaml:"rules"`
+				Rules       []string                 `yaml:"rules"`
 			}
 			if yamlErr := yaml.Unmarshal(data, &parsed); yamlErr == nil {
 				if len(parsed.ProxyGroups) > 0 {

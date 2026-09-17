@@ -386,4 +386,3 @@ func TestKernelUpload_SuccessAndValidation(t *testing.T) {
 		t.Errorf("expected Status=done, got %s", resp.Data.Status)
 	}
 }
-
