@@ -417,9 +417,9 @@
   :global(.cm-tooltip:has(.cm6-json-schema-hover)) {
     background: var(--bg-surface-elevated) !important;
     border: 1px solid var(--border-strong) !important;
-    border-radius: var(--radius-lg, 10px) !important;
+    border-radius: var(--radius-lg) !important;
     box-shadow:
-      var(--shadow-lg, 0 10px 25px -5px rgba(0, 0, 0, 0.5)),
+      var(--shadow-md),
       0 0 0 1px var(--border) !important;
     padding: 0 !important;
     min-width: 320px;
@@ -529,7 +529,7 @@
 
   /* 2. Body */
   :global(.cm-schema-tooltip-body) {
-    padding: var(--spacing-3-5) var(--spacing-4);
+    padding: var(--spacing-3) var(--spacing-4);
     font-size: var(--font-size-sm);
     line-height: 1.6;
     overflow-y: auto;
@@ -573,7 +573,7 @@
     margin: var(--spacing-2) 0;
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-1-5);
+    gap: var(--spacing-2);
   }
   :global(.cm-schema-tooltip-description li) {
     position: relative;
@@ -608,7 +608,7 @@
   /* Warning / tip callouts for blockquotes */
   :global(.cm-schema-tooltip-description blockquote) {
     margin: var(--spacing-3) 0 var(--spacing-1) 0;
-    padding: var(--spacing-2-5) var(--spacing-3-5);
+    padding: var(--spacing-3) var(--spacing-3);
     background: color-mix(in srgb, var(--warning) 12%, var(--bg-surface));
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     border-left: 3px solid var(--warning);
@@ -623,18 +623,18 @@
 
   /* 3. Enum Pills Section */
   :global(.cm-schema-tooltip-enums) {
-    padding: var(--spacing-2-5) var(--spacing-4);
+    padding: var(--spacing-3) var(--spacing-4);
     background: color-mix(in srgb, var(--bg-surface) 60%, transparent);
     border-top: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-1-5);
+    gap: var(--spacing-2);
     flex-shrink: 0;
   }
   :global(.cm-schema-tooltip-enums-header) {
     display: flex;
     align-items: center;
-    gap: var(--spacing-1-5);
+    gap: var(--spacing-2);
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
