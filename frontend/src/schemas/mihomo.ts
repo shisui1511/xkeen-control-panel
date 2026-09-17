@@ -1285,13 +1285,115 @@ export const mihomoSchema = {
               en: 'Auto-update interval in seconds'
             }
           },
+          proxy: {
+            type: 'string',
+            description: {
+              ru: `Имя прокси или группы, через которые скачивать/обновлять подписку — только для загрузки провайдера, не выбирает маршрут для пользовательского трафика.`,
+              en: "Proxy/group to route the provider's own download/refresh through — only affects fetching the subscription, not user traffic routing."
+            }
+          },
+          'size-limit': {
+            type: 'integer',
+            description: {
+              ru: `Максимальный размер скачиваемого файла провайдера в байтах. 0 — без ограничения.`,
+              en: 'Max size of the downloaded provider file, in bytes. 0 means unlimited.'
+            }
+          },
+          header: {
+            type: 'object',
+            description: {
+              ru: `Дополнительные HTTP-заголовки при скачивании подписки: User-Agent, Authorization, HWID и прочие требования конкретного провайдера. Значения — строка или список строк.`,
+              en: 'Extra HTTP headers sent when fetching the subscription: User-Agent, Authorization, HWID, or whatever the provider requires. Values are a string or a list of strings.'
+            },
+            properties: {
+              'User-Agent': {
+                type: 'array',
+                items: { type: 'string' },
+                description: {
+                  ru: `User-Agent при скачивании подписки.`,
+                  en: 'User-Agent sent when fetching the subscription.'
+                }
+              },
+              'x-hwid': {
+                type: 'array',
+                items: { type: 'string' },
+                description: {
+                  ru: `HWID устройства для подписок, привязанных к устройству/роутеру.`,
+                  en: 'Device HWID for subscriptions tied to a specific device/router.'
+                }
+              },
+              'x-device-os': {
+                type: 'array',
+                items: { type: 'string' },
+                description: {
+                  ru: `ОС устройства, которую ожидает сервер подписки.`,
+                  en: 'Device OS expected by the subscription server.'
+                }
+              },
+              'x-ver-os': {
+                type: 'array',
+                items: { type: 'string' },
+                description: { ru: `Версия ОС устройства.`, en: 'Device OS version.' }
+              },
+              'x-device-model': {
+                type: 'array',
+                items: { type: 'string' },
+                description: {
+                  ru: `Модель устройства для HWID-подписки.`,
+                  en: 'Device model for an HWID-bound subscription.'
+                }
+              }
+            }
+          },
           'health-check': {
             type: 'object',
+            description: {
+              ru: `Проверка доступности и задержки уже загруженных узлов провайдера — отдельно от скачивания самой подписки (за него отвечает interval).`,
+              en: "Availability/latency checks for the provider's already-loaded nodes — separate from re-downloading the subscription itself, which interval controls."
+            },
             properties: {
-              enable: { type: 'boolean' },
-              url: { type: 'string' },
-              interval: { type: 'integer' },
-              lazy: { type: 'boolean' }
+              enable: {
+                type: 'boolean',
+                description: {
+                  ru: `Включить health-check для узлов этого провайдера.`,
+                  en: "Enable health-checking for this provider's nodes."
+                }
+              },
+              url: {
+                type: 'string',
+                description: {
+                  ru: `URL проверки доступности. Обычно короткий endpoint, быстро возвращающий 204 (например https://www.gstatic.com/generate_204).`,
+                  en: 'Health-check URL — typically a short endpoint that quickly returns 204 (e.g. https://www.gstatic.com/generate_204).'
+                }
+              },
+              interval: {
+                type: 'integer',
+                description: {
+                  ru: `Интервал health-check в секундах — как часто проверять уже загруженные узлы (не путать с interval провайдера — тот про скачивание подписки).`,
+                  en: "Health-check interval in seconds — how often already-loaded nodes are re-checked (not to be confused with the provider's own interval, which is about re-downloading the subscription)."
+                }
+              },
+              timeout: {
+                type: 'integer',
+                description: {
+                  ru: `Таймаут одной проверки в миллисодах.`,
+                  en: 'Timeout for one check, in milliseconds.'
+                }
+              },
+              lazy: {
+                type: 'boolean',
+                description: {
+                  ru: `Ленивый режим — по умолчанию true: для узлов, которые сейчас не используются, плановая проверка не выполняется.`,
+                  en: 'Lazy mode — defaults to true: nodes not currently in use skip their scheduled check.'
+                }
+              },
+              'expected-status': {
+                type: 'string',
+                description: {
+                  ru: `Ожидаемый HTTP-статус ответа. Поддерживает число, список через "/" и диапазон через "-".`,
+                  en: 'Expected HTTP response status. Supports a number, a "/"-separated list, or a "-" range.'
+                }
+              }
             }
           },
           filter: {
@@ -1315,11 +1417,139 @@ export const mihomoSchema = {
               en: 'Regex filter excluding proxy types'
             }
           },
+          payload: {
+            type: 'array',
+            items: { type: 'object' },
+            description: {
+              ru: `Inline-список прокси (для type: inline), заданный прямо внутри этого конфига вместо отдельного файла.`,
+              en: 'Inline proxy list (type: inline) defined directly in this config instead of a separate file.'
+            }
+          },
           override: {
             type: 'object',
             description: {
-              ru: `Переопределения полей, применяемые ко всем прокси из этого провайдера.`,
-              en: 'Per-field overrides applied to every proxy from this provider'
+              ru: `Массовые переопределения полей, накладываемые поверх всех прокси из этого провайдера — например включить UDP всем узлам сразу или добавить префикс к именам.`,
+              en: 'Bulk field overrides applied on top of every proxy from this provider — e.g. force UDP on for all nodes at once, or add a name prefix.'
+            },
+            properties: {
+              tfo: {
+                type: 'boolean',
+                description: {
+                  ru: `Массово включить/выключить TCP Fast Open.`,
+                  en: 'Bulk override TCP Fast Open.'
+                }
+              },
+              mptcp: {
+                type: 'boolean',
+                description: {
+                  ru: `Массово переопределить MPTCP.`,
+                  en: 'Bulk override Multipath TCP.'
+                }
+              },
+              udp: {
+                type: 'boolean',
+                description: {
+                  ru: `Массово переопределить поддержку UDP.`,
+                  en: 'Bulk override UDP support.'
+                }
+              },
+              'udp-over-tcp': {
+                type: 'boolean',
+                description: {
+                  ru: `Массово переопределить UDP-over-TCP для Shadowsocks-подобных узлов, если сервер это поддерживает.`,
+                  en: 'Bulk override UDP-over-TCP for Shadowsocks-like nodes, where the server supports it.'
+                }
+              },
+              up: {
+                type: 'string',
+                description: {
+                  ru: `Лимит/заявленная скорость uplink для Hysteria/Hysteria2/TUIC-подобных узлов.`,
+                  en: 'Declared uplink speed for Hysteria/Hysteria2/TUIC-style nodes.'
+                }
+              },
+              down: {
+                type: 'string',
+                description: {
+                  ru: `Лимит/заявленная скорость downlink для Hysteria/Hysteria2/TUIC-подобных узлов.`,
+                  en: 'Declared downlink speed for Hysteria/Hysteria2/TUIC-style nodes.'
+                }
+              },
+              'skip-cert-verify': {
+                type: 'boolean',
+                description: {
+                  ru: `Массово переопределить проверку TLS-сертификата.`,
+                  en: 'Bulk override TLS certificate verification.'
+                }
+              },
+              'dialer-proxy': {
+                type: 'string',
+                description: {
+                  ru: `Массово задать dialer-proxy для всех узлов провайдера.`,
+                  en: 'Bulk-set dialer-proxy for every node from this provider.'
+                }
+              },
+              'interface-name': {
+                type: 'string',
+                description: {
+                  ru: `Массово задать исходящий интерфейс для узлов провайдера.`,
+                  en: "Bulk-set the outbound interface for this provider's nodes."
+                }
+              },
+              'routing-mark': {
+                type: 'integer',
+                description: {
+                  ru: `Массово задать fwmark для узлов провайдера.`,
+                  en: "Bulk-set fwmark for this provider's nodes."
+                }
+              },
+              'ip-version': {
+                type: 'string',
+                enum: ['dual', 'ipv4', 'ipv6', 'ipv4-prefer', 'ipv6-prefer'],
+                description: {
+                  ru: `Массово переопределить предпочитаемое семейство IP при подключении к доменным серверам провайдера.`,
+                  en: "Bulk override the preferred IP family when connecting to this provider's domain-based servers."
+                }
+              },
+              'additional-prefix': {
+                type: 'string',
+                description: {
+                  ru: `Добавить фиксированный префикс к имени каждого узла провайдера.`,
+                  en: 'Prepend a fixed prefix to every node name from this provider.'
+                }
+              },
+              'additional-suffix': {
+                type: 'string',
+                description: {
+                  ru: `Добавить фиксированный суффикс к имени каждого узла провайдера.`,
+                  en: 'Append a fixed suffix to every node name from this provider.'
+                }
+              },
+              'proxy-name': {
+                type: 'array',
+                description: {
+                  ru: `Правила переименования узлов по регулярным выражениям — pattern ищет часть имени, target задаёт замену (можно использовать группы regex вида $1).`,
+                  en: 'Regex-based node rename rules — pattern matches part of the name, target is the replacement (regex groups like $1 are allowed).'
+                },
+                items: {
+                  type: 'object',
+                  properties: {
+                    pattern: {
+                      type: 'string',
+                      description: {
+                        ru: `Regex, ищущий часть имени узла.`,
+                        en: 'Regex matching part of the node name.'
+                      }
+                    },
+                    target: {
+                      type: 'string',
+                      description: {
+                        ru: `Строка замены (можно использовать $1 и другие группы regex).`,
+                        en: 'Replacement string ($1 and other regex groups allowed).'
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         },
@@ -2338,65 +2568,172 @@ export const mihomoSchema = {
       items: {
         type: 'object',
         properties: {
-          name: { type: 'string', description: { ru: `Имя группы.`, en: 'Group name' } },
+          name: {
+            type: 'string',
+            description: {
+              ru: `Имя группы. Используется в rules и в proxies других групп.`,
+              en: "Group name. Referenced from rules and from other groups' proxies lists."
+            }
+          },
           type: {
             type: 'string',
-            enum: ['select', 'url-test', 'fallback', 'load-balance'],
-            description: { ru: `Тип группы.`, en: 'Group type' }
+            enum: ['select', 'url-test', 'fallback', 'load-balance', 'relay'],
+            description: {
+              ru: `Тип группы. "select" — ручной выбор через API/UI; "url-test" — автовыбор по минимальной задержке; "fallback" — первый рабочий узел по порядку; "load-balance" — распределение по стратегии; "relay" — цепочка (трафик идёт последовательно через все прокси списка).`,
+              en: '"select": manual choice via API/UI. "url-test": auto-pick the lowest-latency node. "fallback": first working node in list order. "load-balance": spread traffic per strategy. "relay": a chain — traffic passes through every proxy in the list in sequence.'
+            }
           },
           proxies: {
             type: 'array',
             items: { type: 'string' },
-            description: { ru: `Имена прокси в этой группе`, en: 'Proxy names in this group' }
+            description: {
+              ru: `Имена прокси/групп. Также допустимы DIRECT, REJECT, PASS.`,
+              en: 'Proxy/group names. DIRECT, REJECT and PASS are also accepted here.'
+            }
+          },
+          use: {
+            type: 'array',
+            items: { type: 'string' },
+            description: {
+              ru: `Имена proxy-providers, из которых берутся серверы — все узлы провайдера автоматически добавляются в группу.`,
+              en: 'Names of proxy-providers to pull servers from — every node from that provider is automatically added to the group.'
+            }
           },
           url: {
             type: 'string',
             description: {
-              ru: `URL для проверки url-test/fallback`,
-              en: 'Test URL for url-test/fallback'
+              ru: `URL для проверки задержки/доступности (url-test, fallback, load-balance). Проверяет только узлы из proxies — узлы, подключённые через use, проверяются собственным health-check провайдера.`,
+              en: "URL for latency/availability checks (url-test, fallback, load-balance). Only checks nodes listed in proxies — nodes pulled in via use are checked by the provider's own health-check instead."
             }
           },
           interval: {
             type: 'integer',
             minimum: 1,
-            description: { ru: `Интервал проверки в секундах`, en: 'Test interval in seconds' }
+            description: {
+              ru: `Интервал проверки в секундах.`,
+              en: 'Check interval in seconds.'
+            }
+          },
+          timeout: {
+            type: 'integer',
+            description: {
+              ru: `Таймаут одной проверки в миллисекундах. Слишком маленькое значение может отбраковывать рабочие, но дальние узлы.`,
+              en: 'Timeout for one check, in milliseconds. Too small a value can wrongly mark working-but-distant nodes as dead.'
+            }
           },
           tolerance: {
             type: 'integer',
             minimum: 0,
             description: {
-              ru: `Допустимое отклонение задержки в мс`,
-              en: 'Latency tolerance in ms'
+              ru: `Допустимое отклонение задержки в мс (для url-test). Если текущий прокси быстрее ±tolerance — группа не переключается.`,
+              en: 'Latency tolerance in ms (url-test). If the current proxy stays within ±tolerance, the group does not switch.'
             }
           },
           lazy: {
             type: 'boolean',
             description: {
-              ru: `Ленивая проверка (только при select)`,
-              en: 'Lazy test (only on select)'
+              ru: `Ленивый режим проверки. По умолчанию true: пока группа не выбрана как активная, плановые проверки для неё не выполняются.`,
+              en: 'Lazy checking. Defaults to true: while the group is not the active one, its scheduled checks do not run, saving router resources.'
+            }
+          },
+          'max-failed-times': {
+            type: 'integer',
+            description: {
+              ru: `Максимум подряд неудачных проверок, после которого принудительно запускается health-check (по умолчанию 5).`,
+              en: 'Consecutive failed checks allowed before a forced health-check kicks in (defaults to 5).'
             }
           },
           'expected-status': {
             type: 'string',
-            description: { ru: `Ожидаемый HTTP-статус ответа`, en: 'Expected HTTP status code' }
+            description: {
+              ru: `Ожидаемый HTTP-статус ответа проверки. Поддерживаются число, список через "/" и диапазон через "-" (например "200/204" или "200-299").`,
+              en: 'Expected HTTP status of the check response. Supports a single code, a "/"-separated list, or a "-" range (e.g. "200/204" or "200-299").'
+            }
+          },
+          'exclude-filter': {
+            type: 'string',
+            description: {
+              ru: `Regex-исключение по имени узла.`,
+              en: 'Regex exclusion filter applied to node names.'
+            }
           },
           'exclude-type': {
             type: 'string',
-            description: { ru: `Regex-исключение по типам прокси`, en: 'Exclude proxy types regex' }
+            description: {
+              ru: `Исключить узлы по типу протокола (не regex, типы через "|", например "ss|http").`,
+              en: 'Exclude nodes by protocol type — not a regex, types separated by "|" (e.g. "ss|http").'
+            }
+          },
+          filter: {
+            type: 'string',
+            description: {
+              ru: `Regex-фильтр по имени: оставить в группе только подходящие узлы (применяется к use и include-all наборам).`,
+              en: 'Regex allow-filter on node names — keeps only matching nodes (applies to use and include-all sets).'
+            }
           },
           'include-all': {
             type: 'boolean',
-            description: { ru: `Включить все прокси`, en: 'Include all proxies' }
+            description: {
+              ru: `Включить все верхнеуровневые proxies и все proxy-providers (proxy-groups автоматически не включаются).`,
+              en: 'Include all top-level proxies and all proxy-providers (other proxy-groups are not auto-included).'
+            }
+          },
+          'include-all-proxies': {
+            type: 'boolean',
+            description: {
+              ru: `Включить все одиночные узлы из proxies, без proxy-providers.`,
+              en: 'Include every standalone node from proxies, without pulling in proxy-providers.'
+            }
           },
           'include-all-providers': {
             type: 'boolean',
-            description: { ru: `Включить все провайдеры`, en: 'Include all providers' }
+            description: {
+              ru: `Включить все proxy-providers автоматически (делает ручное перечисление через use для них излишним).`,
+              en: 'Auto-include every proxy-provider (makes listing them via use redundant).'
+            }
           },
-          'disable-udp': { type: 'boolean' },
+          'disable-udp': {
+            type: 'boolean',
+            description: {
+              ru: `Отключить UDP через эту группу, даже если отдельные узлы его поддерживают.`,
+              en: 'Disable UDP through this group even where individual nodes support it.'
+            }
+          },
+          'interface-name': {
+            type: 'string',
+            description: {
+              ru: `Переопределить исходящий интерфейс для группы. Считается устаревшим в документации — предпочтительнее задавать interface-name на конкретном узле.`,
+              en: 'Override the outbound interface for the group. Documented as deprecated in favor of setting interface-name on individual proxy nodes.'
+            }
+          },
+          'routing-mark': {
+            type: 'integer',
+            description: {
+              ru: `Переопределить fwmark для группы. Считается устаревшим — предпочтительнее задавать routing-mark на конкретном узле.`,
+              en: 'Override fwmark for the group. Documented as deprecated in favor of setting routing-mark on individual proxy nodes.'
+            }
+          },
           strategy: {
             type: 'string',
-            enum: ['consistent-hashing', 'round-robin'],
-            description: { ru: `Стратегия балансировки нагрузки`, en: 'Load balance strategy' }
+            enum: ['consistent-hashing', 'round-robin', 'sticky-sessions'],
+            description: {
+              ru: `Стратегия балансировки (только для load-balance). "consistent-hashing" — по хешу домена назначения (один домен → один прокси); "round-robin" — по кругу; "sticky-sessions" — по хешу src-IP+dst.`,
+              en: 'Load-balance strategy (load-balance only). "consistent-hashing": hashed by destination domain (one domain → one proxy). "round-robin": rotates through nodes. "sticky-sessions": hashed by src-IP + dst.'
+            }
+          },
+          icon: {
+            type: 'string',
+            description: {
+              ru: `URL иконки группы для отображения во внешнем дашборде.`,
+              en: 'URL of an icon for this group, shown in an external dashboard UI.'
+            }
+          },
+          hidden: {
+            type: 'boolean',
+            description: {
+              ru: `Скрыть группу из внешнего UI.`,
+              en: 'Hide the group from an external dashboard UI.'
+            }
           }
         },
         required: ['name', 'type']
@@ -2473,15 +2810,15 @@ export const mihomoSchema = {
           proxy: {
             type: 'string',
             description: {
-              ru: `Направлять трафик напрямую в прокси/группу, минуя правила`,
-              en: 'Forward traffic directly to proxy/group bypassing rules'
+              ru: `Имя прокси или proxy-group, в который этот листенер жёстко отправляет трафик напрямую, минуя выбор через rules. Не задавайте одновременно с rule — это два разных способа выбрать маршрут.`,
+              en: 'Name of a proxy or proxy-group this listener sends traffic to directly, bypassing normal rule matching. Do not set alongside rule — pick one routing method.'
             }
           },
           rule: {
             type: 'string',
             description: {
-              ru: `Имя раздела sub-rules для матчинга трафика`,
-              en: 'Name of sub-rules section to match traffic against'
+              ru: `Прогонять трафик этого листенера через обычные rules Mihomo (например "MATCH,PROXY"), вместо жёсткой привязки к одному proxy. Не задавайте одновременно с proxy.`,
+              en: 'Route this listener\'s traffic through Mihomo\'s normal rules processing (e.g. "MATCH,PROXY"), instead of pinning it to one proxy. Do not set alongside proxy.'
             }
           },
           'routing-mark': {
@@ -2534,12 +2871,18 @@ export const mihomoSchema = {
           type: {
             type: 'string',
             enum: ['http', 'file', 'inline'],
-            description: { ru: `Тип источника набора правил`, en: 'Provider source type' }
+            description: {
+              ru: `Тип источника набора правил. "http" — скачать по URL, "file" — читать локальный файл, "inline" — задать payload прямо в этом конфиге.`,
+              en: '"http" downloads by URL, "file" reads a local file, "inline" defines payload directly in this config.'
+            }
           },
           behavior: {
             type: 'string',
             enum: ['domain', 'ipcidr', 'classical'],
-            description: { ru: `Формат содержимого rule-set`, en: 'Rule-set content format' }
+            description: {
+              ru: `Тип правил в наборе. "domain" — только домены/суффиксы, "ipcidr" — только IP/CIDR, "classical" — смешанный формат (DOMAIN-SUFFIX, IP-CIDR и т.д., как в основных rules). Несовпадение с реальным содержимым файла — тихая ошибка: набор загрузится, но будет матчиться неправильно.`,
+              en: '"domain": domains/suffixes only. "ipcidr": IP/CIDR only. "classical": mixed format (DOMAIN-SUFFIX, IP-CIDR, etc., like the main rules array). A mismatch with the actual file content fails silently — the set loads but matches incorrectly.'
+            }
           },
           url: {
             type: 'string',
@@ -2547,18 +2890,54 @@ export const mihomoSchema = {
           },
           path: {
             type: 'string',
-            description: { ru: `Локальный путь кэша/конфига`, en: 'Local cache/config path' }
+            description: {
+              ru: `Локальный путь. Для type: file — источник, для type: http — файл кэша. Можно не указывать — Mihomo сгенерирует путь сама.`,
+              en: 'Local path — the source file for type: file, or the cache file for type: http. Optional; Mihomo can generate one automatically.'
+            }
           },
           format: {
             type: 'string',
             enum: ['yaml', 'text', 'mrs'],
-            description: { ru: `Формат файла rule-set`, en: 'Rule-set file format' }
+            description: {
+              ru: `Формат файла. "yaml" — YAML-список с payload:, "text" — простой текстовый список, "mrs" — бинарный формат Mihomo для больших наборов (поддерживает только behavior: domain и behavior: ipcidr, не classical).`,
+              en: '"yaml": a YAML list under payload:. "text": a plain text list. "mrs": Mihomo\'s compact binary format for large sets — supports behavior: domain and behavior: ipcidr only, not classical.'
+            }
           },
           interval: {
             type: 'integer',
             description: {
-              ru: `Интервал автообновления в секундах`,
-              en: 'Auto-update interval in seconds'
+              ru: `Интервал автообновления в секундах (для type: http) — как часто перекачивается сам набор правил.`,
+              en: 'Auto-update interval in seconds (type: http) — how often the rule set itself is re-downloaded.'
+            }
+          },
+          proxy: {
+            type: 'string',
+            description: {
+              ru: `Прокси или группа для загрузки rule-set, если источник недоступен напрямую — влияет только на скачивание, не на то, куда отправляется совпавший трафик (это задаётся в самой строке RULE-SET,... в rules).`,
+              en: 'Proxy/group used to fetch this rule-set when the source is not directly reachable — affects only the download, not where matched traffic is sent (that is set in the RULE-SET,... rule line itself).'
+            }
+          },
+          'size-limit': {
+            type: 'integer',
+            description: {
+              ru: `Максимальный размер скачиваемого файла в байтах. 0 — без ограничения.`,
+              en: 'Max size of the downloaded file, in bytes. 0 means unlimited.'
+            }
+          },
+          header: {
+            type: 'object',
+            additionalProperties: { type: 'array', items: { type: 'string' } },
+            description: {
+              ru: `Дополнительные HTTP-заголовки при скачивании набора правил: User-Agent, Authorization и прочие требования источника.`,
+              en: 'Extra HTTP headers sent when fetching the rule set: User-Agent, Authorization, or whatever the source requires.'
+            }
+          },
+          payload: {
+            type: 'array',
+            items: { type: 'string' },
+            description: {
+              ru: `Inline-список правил (для type: inline) — короткие собственные наборы удобно держать прямо здесь вместо отдельного файла.`,
+              en: 'Inline rule list (type: inline) — convenient for short custom sets instead of a separate provider file.'
             }
           }
         },
