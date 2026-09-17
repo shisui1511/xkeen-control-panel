@@ -13,7 +13,11 @@ const sockoptSchema = {
   type: 'object',
   description: 'Socket options for connection tuning and proxy chaining',
   properties: {
-    mark: { type: 'integer', description: 'SO_MARK value for routing' },
+    mark: {
+      type: 'integer',
+      description:
+        "SO_MARK stamped on this outbound's own sockets so XKeen's iptables/ip-rule setup can recognize and exclude Xray's own upstream traffic from transparent-proxy interception — without it, Xray's own connections can get redirected back into itself (a routing loop)."
+    },
     tcpFastOpen: {
       oneOf: [{ type: 'boolean' }, { type: 'integer' }],
       description: 'TCP Fast Open (TFO)'
@@ -38,7 +42,11 @@ const tlsSettingsSchema = {
       enum: ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '360', 'qq', 'random'],
       description: 'uTLS client hello fingerprint'
     },
-    allowInsecure: { type: 'boolean', description: 'Skip server certificate verification' },
+    allowInsecure: {
+      type: 'boolean',
+      description:
+        'Accept the server TLS certificate without validation. Only for self-signed certs on a server you control — enabling this generally defeats the point of TLS by allowing a trivial man-in-the-middle.'
+    },
     certificates: {
       type: 'array',
       items: {
@@ -54,7 +62,8 @@ const tlsSettingsSchema = {
 
 const realitySettingsSchema = {
   type: 'object',
-  description: 'REALITY transport security settings (security: reality)',
+  description:
+    "REALITY: connects with the TLS certificate of a real, unrelated website (no cert/domain of your own needed) so passive DPI sees what looks like a normal HTTPS handshake to that site. Client-side publicKey/shortId must match the server's REALITY config exactly, or the handshake fails.",
   properties: {
     show: { type: 'boolean', description: 'Print debug info (server-side)' },
     dest: { type: 'string', description: 'Camouflage target address:port (server-side)' },
@@ -115,12 +124,14 @@ const streamSettingsSchema = {
     network: {
       type: 'string',
       enum: ['tcp', 'kcp', 'ws', 'http', 'domainsocket', 'quic', 'grpc', 'httpupgrade', 'xhttp'],
-      description: 'Transport protocol'
+      description:
+        'How the connection is wrapped for delivery over the wire. "tcp"/raw is fastest but least disguised; "ws"/"grpc"/"httpupgrade"/"xhttp" ride over an HTTP(S)-like layer so the traffic can hide behind a CDN or plain reverse proxy — pick whichever the server side is configured for, it must match exactly.'
     },
     security: {
       type: 'string',
       enum: ['none', 'tls', 'reality'],
-      description: 'Transport-layer security'
+      description:
+        '"none": no encryption at this layer (fine if the inner protocol already encrypts, e.g. Shadowsocks). "tls": standard TLS to your own domain/certificate. "reality": borrows a real site\'s certificate identity instead of needing your own — see realitySettings.'
     },
     tlsSettings: tlsSettingsSchema,
     realitySettings: realitySettingsSchema,
@@ -304,15 +315,19 @@ export const xraySchema = {
         domainStrategy: {
           type: 'string',
           enum: ['AsIs', 'IPIfNonMatch', 'IPOnDemand'],
-          description: 'Domain resolution strategy'
+          description:
+            'Whether routing rules match on the domain name, or resolve it to an IP first. "AsIs": match by domain, never resolve unless a rule needs an IP. "IPIfNonMatch": resolve if no domain-based rule matched, then try again by IP. "IPOnDemand": resolve as soon as any rule set needs an IP-based match.'
         },
         domainMatcher: {
           type: 'string',
-          enum: ['hybrid', 'linear']
+          enum: ['hybrid', 'linear'],
+          description:
+            'Algorithm used to match domain rules against traffic. "hybrid" is the faster indexed matcher and the current default; "linear" checks rules in order and is mainly a debugging/compatibility fallback.'
         },
         rules: {
           type: 'array',
-          description: 'Routing rules',
+          description:
+            'Traffic routing rules. Unlike Mihomo, order does not strictly decide priority — the most specific matching rule wins. outboundTag/balancerTag must name a tag that actually exists among outbounds/balancers; a typo does not error, it just silently falls through and never matches.',
           items: {
             type: 'object',
             properties: {
@@ -388,10 +403,20 @@ export const xraySchema = {
           listen: { type: 'string', description: 'Bind address' },
           sniffing: {
             type: 'object',
+            description:
+              'Peeks at TLS SNI / HTTP Host to recover the real domain of a connection when routing only has a bare destination IP to go on (e.g. under transparent/dokodemo-door inbounds) — without it, domain-based routing rules cannot match traffic coming through this inbound.',
             properties: {
               enabled: { type: 'boolean' },
-              destOverride: { type: 'array', items: { type: 'string' } },
-              routeOnly: { type: 'boolean' }
+              destOverride: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Which protocols to sniff for, e.g. ["tls","http"].'
+              },
+              routeOnly: {
+                type: 'boolean',
+                description:
+                  'Use the sniffed domain only for routing decisions, keep connecting to the original destination IP — set true when the IP is directly reachable and you just need domain-based rule matching, not a full rewrite.'
+              }
             }
           },
           settings: {
@@ -502,17 +527,20 @@ export const xraySchema = {
               domainStrategy: {
                 type: 'string',
                 enum: ['AsIs', 'UseIP', 'UseIPv4', 'UseIPv6'],
-                description: 'Freedom outbound domain resolution strategy'
+                description:
+                  'How the freedom (direct-connect) outbound handles a domain destination. "AsIs" connects by domain (server does the DNS lookup); "UseIP*" resolves via Xray\'s own dns config first — useful to force a specific IP family for direct traffic.'
               },
               redirect: {
                 type: 'string',
-                description: 'Freedom outbound forced target address:port'
+                description:
+                  'Force every connection through this outbound to a fixed address:port instead of the original destination — handy for pointing "direct" traffic at a local service.'
               },
               userLevel: { type: 'integer' },
               // blackhole
               response: {
                 type: 'object',
-                description: 'Blackhole outbound response type',
+                description:
+                  'What the blackhole outbound sends before dropping the connection. "none": close immediately with no data (best for silently killing blocked traffic). "http": send a canned HTTP response first — mimics a real server for protocols that expect one.',
                 properties: {
                   type: { type: 'string', enum: ['none', 'http'] }
                 }
@@ -554,7 +582,8 @@ export const xraySchema = {
               reserved: {
                 type: 'array',
                 items: { type: 'integer' },
-                description: 'Reserved bytes for handshake padding'
+                description:
+                  'Reserved handshake bytes used by some WireGuard-obfuscating servers (e.g. certain VPS providers) to tag/allow traffic. Leave [0,0,0] unless the server explicitly issued specific reserved values — a mismatch fails silently as a connection timeout.'
               }
             }
           },
@@ -562,7 +591,8 @@ export const xraySchema = {
           proxySettings: { type: 'object', description: 'Proxy forwarding settings' },
           mux: {
             type: 'object',
-            description: 'Multiplexing configuration',
+            description:
+              'Multiplexes several logical connections over one underlying TCP/TLS connection, cutting down on repeated handshakes for many short-lived requests — mainly useful on high-latency or handshake-expensive links; can hurt throughput on a single large transfer if concurrency is set too high.',
             properties: {
               enabled: { type: 'boolean' },
               concurrency: { type: 'integer' },
@@ -615,7 +645,8 @@ export const xraySchema = {
     },
     fakedns: {
       type: 'object',
-      description: 'FakeDNS pool configuration',
+      description:
+        "Xray's own fake-ip pool for domain-based routing, independent from Mihomo's dns.fake-ip-range — if both cores run on this router, use non-overlapping ranges so the two never hand out colliding placeholder addresses.",
       properties: {
         ipPool: { type: 'string', description: 'Fake-IP address pool CIDR (e.g. 198.18.0.0/15)' },
         poolSize: { type: 'integer', description: 'Fake-IP pool size' }
@@ -632,7 +663,8 @@ export const xraySchema = {
     },
     observatory: {
       type: 'object',
-      description: 'Outbound health monitoring',
+      description:
+        'Background health/latency prober for the outbounds listed in subjectSelector — results feed balancer strategies like leastPing so routing can automatically avoid a currently-down or slow upstream.',
       properties: {
         subjectSelector: { type: 'array', items: { type: 'string' } },
         probeURL: { type: 'string', description: 'URL for health probes' },

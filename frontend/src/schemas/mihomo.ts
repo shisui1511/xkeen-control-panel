@@ -29,17 +29,20 @@ export const mihomoSchema = {
       type: 'integer',
       minimum: 1,
       maximum: 65535,
-      description: 'Transparent proxy port (Linux)'
+      description:
+        'REDIRECT transparent-proxy port. Only needed if traffic is routed into Mihomo via iptables REDIRECT; on this panel XKeen usually owns the iptables rules, so this is set to match whatever XKeen was configured to redirect to.'
     },
     'tproxy-port': {
       type: 'integer',
       minimum: 1,
       maximum: 65535,
-      description: 'TPROXY port (Linux)'
+      description:
+        'TPROXY transparent-proxy port (preserves original destination IP, needed for correct GEOIP/IP-CIDR rule matching). Same caveat as redir-port: XKeen manages the iptables TPROXY rules on this router, this value must match what XKeen points at.'
     },
     'allow-lan': {
       type: 'boolean',
-      description: 'Allow LAN connections',
+      description:
+        'Allow other LAN devices to reach port/socks-port/mixed-port on this router, not just localhost. Combine with authentication or lan-allowed-ips, otherwise anyone on the LAN gets an open proxy.',
       default: false
     },
     'bind-address': {
@@ -67,7 +70,8 @@ export const mihomoSchema = {
     'external-controller': {
       type: 'string',
       pattern: '^[^:\\s]*:\\d{1,5}$',
-      description: 'REST API bind address (e.g. 127.0.0.1:9090)'
+      description:
+        'REST API bind address (e.g. 127.0.0.1:9090). This panel talks to Mihomo over this API, normally via a local unix socket instead — only set this to a LAN-reachable address (0.0.0.0:9090) if you deliberately want an external dashboard like Zashboard, and always pair it with secret.'
     },
     'external-controller-unix': {
       type: 'string',
@@ -91,27 +95,32 @@ export const mihomoSchema = {
     },
     secret: {
       type: 'string',
-      description: 'API secret token'
+      description:
+        'Bearer token required to call external-controller. Mandatory in practice whenever external-controller is reachable from the LAN, otherwise anyone on the network can read traffic stats or change the active proxy/rules.'
     },
     authentication: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Basic-auth credentials for HTTP/SOCKS/Mixed inbound in "user:pass" form'
+      description:
+        'Basic-auth credentials for HTTP/SOCKS/Mixed inbound in "user:pass" form. Use this (or lan-allowed-ips) whenever allow-lan is true, so the router does not become an open proxy for the whole LAN/guest Wi-Fi.'
     },
     'skip-auth-prefixes': {
       type: 'array',
       items: { type: 'string' },
-      description: 'Source CIDR prefixes exempt from inbound authentication'
+      description:
+        "Source CIDR prefixes exempt from the authentication above — e.g. the router's own LAN subnet, so trusted devices are not prompted while a guest network still is."
     },
     'lan-allowed-ips': {
       type: 'array',
       items: { type: 'string' },
-      description: 'CIDR list allowed to use inbound listeners when allow-lan is enabled'
+      description:
+        'CIDR allow-list for inbound listeners when allow-lan is enabled — the simplest way to expose the proxy to your own devices only, without per-device credentials.'
     },
     'lan-disallowed-ips': {
       type: 'array',
       items: { type: 'string' },
-      description: 'CIDR list denied from using inbound listeners when allow-lan is enabled'
+      description:
+        'CIDR deny-list for inbound listeners when allow-lan is enabled — evaluated before lan-allowed-ips, useful for blocking a specific guest-Wi-Fi subnet while allowing everything else.'
     },
     'interface-name': {
       type: 'string',
@@ -120,7 +129,8 @@ export const mihomoSchema = {
     'routing-mark': {
       type: 'integer',
       minimum: 0,
-      description: 'SO_MARK value for Linux'
+      description:
+        "SO_MARK stamped on Mihomo's own outbound sockets so XKeen's ip rule/iptables setup can recognize and exclude them from transparent-proxy interception — without it, Mihomo's own upstream connections can get redirected back into itself (a routing loop)."
     },
     'global-ua': {
       type: 'string',
@@ -138,16 +148,19 @@ export const mihomoSchema = {
     },
     'tcp-concurrent': {
       type: 'boolean',
-      description: 'Dial all resolved IPs concurrently and use the fastest handshake'
+      description:
+        'Dial all resolved IPs concurrently (Happy Eyeballs) and use whichever handshake completes first. Helps when a domain resolves to both IPv4 and IPv6 or multiple servers and one path is slow/blocked.'
     },
     'unified-delay': {
       type: 'boolean',
-      description: 'Measure proxy latency including handshake time for consistent comparisons'
+      description:
+        'Include TLS/TCP handshake time in the latency shown for url-test/fallback groups, not just round-trip ping. Without it, a proxy with a fast ping but slow handshake can still look "fastest" and get auto-selected.'
     },
     'find-process-mode': {
       type: 'string',
       enum: ['always', 'strict', 'off'],
-      description: 'Process name resolution mode'
+      description:
+        'Controls PROCESS-NAME rule matching by resolving which local process owns a connection. Mihomo running on the router itself (not the client device) generally cannot see per-app process names for LAN clients — leave this off unless you know the router OS actually exposes that info, otherwise it just adds overhead for rules that will never match.'
     },
     'global-client-fingerprint': {
       type: 'string',
@@ -163,30 +176,36 @@ export const mihomoSchema = {
         'random',
         'none'
       ],
-      description: 'Default TLS fingerprint'
+      description:
+        'Default uTLS client-hello fingerprint applied to outbound TLS connections when a proxy does not set its own client-fingerprint. Mimicking a real browser (chrome/firefox/...) helps traffic blend in and avoids TLS-fingerprint-based DPI blocking.'
     },
     profile: {
       type: 'object',
-      description: 'Profile settings',
+      description:
+        'What Mihomo persists to disk across restarts (survives router reboots as long as the cache directory is on non-volatile storage).',
       properties: {
         'store-selected': {
           type: 'boolean',
-          description: 'Remember selected proxy for groups'
+          description:
+            'Remember which proxy was manually selected in each select-type group, so a router reboot does not silently fall back to the group default.'
         },
         'store-fake-ip': {
           type: 'boolean',
-          description: 'Cache fake-ip mappings'
+          description:
+            'Persist the fake-ip domain↔IP cache across restarts, so DNS-dependent rules keep matching the same way right after Mihomo restarts instead of needing fresh lookups.'
         }
       }
     },
     'geodata-mode': {
       type: 'boolean',
-      description: 'Use geodata format instead of GeoSite/GeoIP'
+      description:
+        'Use the compact .dat geodata format instead of separate GeoIP.mmdb/GeoSite.dat files — smaller on-disk footprint, relevant on router storage.'
     },
     'geodata-loader': {
       type: 'string',
       enum: ['standard', 'memconservative'],
-      description: 'GeoData loader strategy (memconservative trades speed for lower RAM usage)'
+      description:
+        'How geo databases are loaded into memory. "standard" loads them fully for fastest lookups; "memconservative" streams from disk to save RAM — worth switching to on routers with limited RAM (typical Keenetic hardware) if Mihomo is getting OOM-killed.'
     },
     'geox-url': {
       type: 'object',
@@ -208,7 +227,8 @@ export const mihomoSchema = {
     },
     ntp: {
       type: 'object',
-      description: 'NTP time sync configuration',
+      description:
+        "Built-in NTP client Mihomo can use to correct its own clock. Matters because most Keenetic routers have no battery-backed RTC — after a power loss the clock resets to a stale build date, which breaks TLS certificate validation (REALITY/TLS handshakes fail with 'certificate expired/not yet valid') until the system clock syncs some other way.",
       properties: {
         enable: { type: 'boolean' },
         'write-to-system': {
@@ -222,53 +242,79 @@ export const mihomoSchema = {
     },
     experimental: {
       type: 'object',
-      description: 'Experimental / unstable core features, subject to change between releases',
+      description:
+        'Opt-in core behaviour that may still change or be removed between Mihomo releases — expect these keys to occasionally need re-checking against release notes after an update.',
       properties: {
         'ignore-resolve-fail': {
           type: 'boolean',
-          description: 'Do not fail dial on DNS resolve error'
+          description:
+            "Keep dialing even when Mihomo's own DNS resolution fails for a domain, letting the proxy's own remote DNS resolve it instead — useful with domains that are only resolvable from the proxy server's network (e.g. behind GFW-style DNS poisoning)."
         },
         'dialer-ip-version': {
           type: 'string',
           enum: ['dual', '4', '6', 'ipv4', 'ipv6', 'ipv4-prefer', 'ipv6-prefer'],
-          description: 'Preferred IP version when dialing'
+          description:
+            'Which IP family Mihomo prefers when a destination has both A and AAAA records. Force "ipv4"/"4" if the router\'s IPv6 uplink is flaky or unavailable, to stop connections stalling on a dead IPv6 route.'
         }
       }
     },
     sniffer: {
       type: 'object',
-      description: 'Traffic sniffing configuration',
+      description:
+        'Peeks at TLS SNI / HTTP Host / QUIC handshakes to recover the real domain of a connection when only an IP address is available for rule matching. This is what makes DOMAIN-based rules work correctly under redir-port/tproxy-port or fake-ip mode, where Mihomo otherwise only sees a bare destination IP.',
       properties: {
         enable: { type: 'boolean' },
         'force-dns-mapping': { type: 'boolean' },
         'parse-pure-ip': { type: 'boolean' },
-        'override-destination': { type: 'boolean' },
+        'override-destination': {
+          type: 'boolean',
+          description:
+            'Replace the connection target with the sniffed domain before routing, instead of only using it for rule matching. Needed when the destination IP itself is unreachable directly (e.g. it was a fake-ip placeholder).'
+        },
         sniff: {
           type: 'object',
+          description:
+            'Per-protocol sniffing toggles — disable ones you do not need to save router CPU.',
           properties: {
             TLS: { type: 'boolean' },
             HTTP: { type: 'boolean' },
             QUIC: { type: 'boolean' }
           }
         },
-        'force-domain': { type: 'array', items: { type: 'string' } },
-        'skip-domain': { type: 'array', items: { type: 'string' } },
+        'force-domain': {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Always sniff these domains even if global sniffing conditions would otherwise skip them.'
+        },
+        'skip-domain': {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Never sniff these domains — e.g. ones known to break when their destination is rewritten.'
+        },
         'port-whitelist': { type: 'array', items: { type: 'integer' } }
       }
     },
     tun: {
       type: 'object',
-      description: 'TUN device configuration',
+      description:
+        "Mihomo's own virtual network interface for transparent proxying (an alternative to the redir-port/tproxy-port + iptables approach). On this panel XKeen already owns transparent interception via its own iptables/TPROXY rules on Keenetic — enabling tun here on top of that is redundant and the two can fight over the same traffic. Leave tun disabled unless you specifically switched XKeen's interception mode to rely on it.",
       properties: {
         enable: { type: 'boolean' },
         device: { type: 'string', description: 'TUN device name' },
         stack: {
           type: 'string',
           enum: ['system', 'gvisor', 'mixed'],
-          description: 'TUN stack implementation'
+          description:
+            'Userspace network stack backing the TUN device. "gvisor" is the safest portable default; "system" needs kernel TUN support and can be faster but is more sensitive to the router\'s kernel/network stack quirks.'
         },
         'dns-hijack': { type: 'array', items: { type: 'string' } },
-        'auto-route': { type: 'boolean' },
+        'auto-route': {
+          type: 'boolean',
+          description:
+            "Let Mihomo add its own system routes to send traffic into the TUN device automatically. On Keenetic this conflicts with XKeen's own routing/iptables setup and typically does not work as expected — routes must be managed by XKeen's scripts instead."
+        },
         'auto-detect-interface': { type: 'boolean' },
         'strict-route': { type: 'boolean' },
         mtu: { type: 'integer' }
@@ -288,14 +334,21 @@ export const mihomoSchema = {
         'enhanced-mode': {
           type: 'string',
           enum: ['fake-ip', 'redir-host', 'normal'],
-          description: 'DNS enhanced mode'
+          description:
+            '"fake-ip": Mihomo answers DNS queries with addresses from fake-ip-range and maps them back to the real domain internally — most reliable for DOMAIN-based rules and works well with redir-port/tproxy-port, but breaks apps that hardcode/compare IP addresses. "redir-host": rewrites DNS answers to Mihomo\'s own listen address — simpler but only carries the domain through HTTP Host headers. "normal": no rewriting, DOMAIN rules need sniffer to work at all under transparent proxying.'
         },
         'fake-ip-range': {
           type: 'string',
           pattern: '^([0-9]{1,3}\\.){3}[0-9]{1,3}/\\d{1,2}$',
-          description: 'Fake-IP address pool CIDR'
+          description:
+            'CIDR pool of placeholder IPs handed out in fake-ip mode. Must not overlap any real subnet in use on the LAN/WAN (default 198.18.0.0/16 is an IANA-reserved benchmarking range, safe to keep unless something else on the network already uses it).'
         },
-        'fake-ip-filter': { type: 'array', items: { type: 'string' } },
+        'fake-ip-filter': {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Domains that always get their real IP instead of a fake one — needed for anything that breaks under fake-ip, e.g. LAN hostnames, NTP, or services that do reverse-IP checks.'
+        },
         nameserver: {
           type: 'array',
           items: { type: 'string' },
@@ -329,7 +382,8 @@ export const mihomoSchema = {
     },
     'proxy-providers': {
       type: 'object',
-      description: 'Named remote/local proxy subscription providers, referenced by proxy-groups',
+      description:
+        'Subscription-based alternative to hand-listing servers in proxies: each entry auto-downloads/refreshes a proxy list from a URL (or watches a local file) and can be referenced from proxy-groups via use, instead of a static proxies array.',
       additionalProperties: {
         type: 'object',
         properties: {
@@ -403,7 +457,11 @@ export const mihomoSchema = {
           cipher: { type: 'string', description: 'Encryption method' },
           udp: { type: 'boolean', description: 'Enable UDP relay' },
           tfo: { type: 'boolean', description: 'Enable TCP Fast Open' },
-          'skip-cert-verify': { type: 'boolean' },
+          'skip-cert-verify': {
+            type: 'boolean',
+            description:
+              'Accept the server TLS certificate without validation. Only for self-signed certs on a server you control — leaving this on generally defeats the point of TLS by allowing a trivial man-in-the-middle.'
+          },
           tls: { type: 'boolean' },
           sni: { type: 'string', description: 'TLS Server Name Indication (overrides server)' },
           servername: { type: 'string', description: 'Alias of sni used by some proxy types' },
@@ -411,12 +469,14 @@ export const mihomoSchema = {
           'client-fingerprint': {
             type: 'string',
             enum: ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '360', 'qq', 'random'],
-            description: 'uTLS client hello fingerprint'
+            description:
+              "Makes the TLS ClientHello look like a real browser's (uTLS) instead of Go's default, which many DPI systems fingerprint and block specifically because it does not look like normal browser traffic."
           },
           flow: {
             type: 'string',
             enum: ['xtls-rprx-vision', ''],
-            description: 'VLESS flow control (XTLS)'
+            description:
+              'VLESS-only XTLS flow control. "xtls-rprx-vision" avoids double-encrypting TLS-in-TLS traffic for a real throughput gain, but only applies with tls: true (typically paired with reality-opts) — leave empty for plain/ws/grpc transports where it does not apply.'
           },
           network: {
             type: 'string',
@@ -450,7 +510,8 @@ export const mihomoSchema = {
           },
           'reality-opts': {
             type: 'object',
-            description: 'REALITY TLS camouflage options (requires tls: true)',
+            description:
+              "REALITY: connects with the TLS certificate of a real, unrelated website (no cert/domain of your own needed) so passive DPI sees what looks like a normal HTTPS handshake to that site. Server and public-key/short-id here must match the server's REALITY setup exactly, or the handshake fails outright.",
             properties: {
               'public-key': { type: 'string', description: 'REALITY server public key' },
               'short-id': { type: 'string', description: 'REALITY short ID' }
@@ -460,7 +521,8 @@ export const mihomoSchema = {
           plugin: {
             type: 'string',
             enum: ['obfs', 'v2ray-plugin', 'shadow-tls', 'restls'],
-            description: 'Shadowsocks plugin'
+            description:
+              'Wraps Shadowsocks traffic in another protocol to disguise it — plain Shadowsocks has a detectable traffic pattern that some DPI blocks outright. shadow-tls/restls make the connection look like real TLS to a cover domain, v2ray-plugin adds WebSocket/TLS, obfs is the simpler legacy option.'
           },
           'plugin-opts': {
             type: 'object',
@@ -485,9 +547,21 @@ export const mihomoSchema = {
             description: 'TUIC congestion control algorithm'
           },
           'reduce-rtt': { type: 'boolean', description: 'TUIC 0-RTT handshake' },
-          'dialer-proxy': { type: 'string', description: 'Chain dialer proxy' },
-          ports: { type: 'string', description: 'Port hopping range' },
-          smux: { type: 'object', description: 'Multiplexing settings' },
+          'dialer-proxy': {
+            type: 'string',
+            description:
+              "Name of another proxy in this file to tunnel through first (proxy chaining) — this proxy's connection is made through that one instead of directly, e.g. WireGuard-over-a-proxy to reach a server blocked by IP."
+          },
+          ports: {
+            type: 'string',
+            description:
+              'Hysteria2/TUIC port-hopping range (e.g. "20000-30000") — the client rotates source ports across this range, which helps evade simple UDP-flow-based blocking of a single fixed port.'
+          },
+          smux: {
+            type: 'object',
+            description:
+              'Multiplexes several logical streams over one underlying connection, cutting down on repeated TLS/QUIC handshakes for many short-lived requests — mainly useful on high-latency or handshake-expensive links.'
+          },
           // WireGuard & AmneziaWG (TMPL-08)
           'private-key': { type: 'string', description: 'WireGuard private key' },
           'public-key': { type: 'string', description: 'WireGuard or Reality public key' },
@@ -496,7 +570,8 @@ export const mihomoSchema = {
           mtu: { type: 'integer', description: 'WireGuard interface MTU' },
           'amnezia-wg-option': {
             type: 'object',
-            description: 'AmneziaWG obfuscation options',
+            description:
+              "AmneziaWG packet-obfuscation options layered on top of WireGuard. Plain WireGuard has a very recognizable handshake that DPI can fingerprint and block even without decrypting it; these junk-packet/header-magic parameters must match the server's AmneziaWG config exactly (a mismatch fails silently as a connection timeout, not a clear error).",
             properties: {
               jc: { type: 'integer', description: 'Junk packet count' },
               jmin: { type: 'integer', description: 'Minimum junk packet size' },
@@ -602,7 +677,8 @@ export const mihomoSchema = {
     },
     listeners: {
       type: 'array',
-      description: 'Inbound listener definitions',
+      description:
+        'Extra inbound servers Mihomo itself exposes (running it as a socks/vmess/vless/... server), separate from and in addition to port/socks-port/mixed-port. Opposite direction from proxies (which are upstream servers Mihomo connects out to) — use this only if other devices/clients should connect to this router as a proxy server over a specific protocol.',
       items: {
         type: 'object',
         properties: {
@@ -674,7 +750,8 @@ export const mihomoSchema = {
     },
     'rule-providers': {
       type: 'object',
-      description: 'Named remote/local rule-set providers, referenced from rules via RULE-SET',
+      description:
+        'Reusable, auto-updating rule sets (e.g. a domain list for a specific service or region) referenced from rules via RULE-SET,<name>,<policy> instead of pasting hundreds of individual rule lines — keeps the rules list short and lets a set update itself without editing this config.',
       additionalProperties: {
         type: 'object',
         properties: {
@@ -711,7 +788,8 @@ export const mihomoSchema = {
     },
     rules: {
       type: 'array',
-      description: 'Traffic routing rules',
+      description:
+        'Traffic routing rules, evaluated top to bottom — the first matching rule wins and later rules are never checked, so more specific rules (a single domain) must come before broader ones (a whole GEOSITE/GEOIP set) that would otherwise shadow them. Usually ends with a catch-all MATCH,<policy> rule.',
       items: {
         type: 'string',
         pattern:
