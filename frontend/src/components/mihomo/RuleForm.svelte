@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from '../../i18n';
+  import Select from '../Select.svelte';
 
   let {
     nr = $bindable(),
@@ -30,15 +31,15 @@
   <div class="form-row2">
     <div class="form-col">
       <label class="form-label" for="rule-type">{$t('rules.rule_type')}</label>
-      <select id="rule-type" class="form-select" bind:value={nr.type}>
+      <Select id="rule-type" class="form-select" bind:value={nr.type}>
         {#each RULE_TYPES as t}<option value={t}>{t}</option>{/each}
-      </select>
+      </Select>
     </div>
     <div class="form-col">
       <label class="form-label" for="rule-outbound">{$t('rules.outbound')}</label>
-      <select id="rule-outbound" class="form-select" bind:value={nr.outbound}>
+      <Select id="rule-outbound" class="form-select" bind:value={nr.outbound}>
         {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
-      </select>
+      </Select>
     </div>
   </div>
   {#if nr.type !== 'MATCH'}
@@ -93,26 +94,23 @@
   }
 
   .form-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-weight: 500;
   }
 
-  .form-input,
-  .form-select {
+  .form-input {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
     font-size: 13px;
     padding: 6px 10px;
-    outline: none;
     width: 100%;
     transition: border-color var(--transition-fast);
   }
 
-  .form-input:focus,
-  .form-select:focus {
+  .form-input:focus {
     border-color: var(--primary);
   }
 

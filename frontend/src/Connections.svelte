@@ -5,8 +5,13 @@
   import { apiFetch } from './lib/api';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import PageHeader from './PageHeader.svelte';
+  import Select from './components/Select.svelte';
+  import SegmentedControl from './components/SegmentedControl.svelte';
+  import LiveIndicator from './components/LiveIndicator.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
+  let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
   interface Connection {
     id: string;
@@ -87,6 +92,62 @@
   let selectedConnection = $derived(
     selectedConnectionId ? connections.find((c) => c.id === selectedConnectionId) : null
   );
+  let drawerElement: HTMLDivElement | null = $state(null);
+  let previouslyFocusedRow: HTMLElement | null = null;
+
+  $effect(() => {
+    if (selectedConnectionId) {
+      if (!previouslyFocusedRow) {
+        previouslyFocusedRow = document.activeElement as HTMLElement;
+      }
+      setTimeout(() => {
+        if (drawerElement) {
+          const focusables = getDrawerFocusableElements();
+          if (focusables.length > 0) focusables[0].focus();
+          else drawerElement.focus();
+        }
+      }, 0);
+    } else if (previouslyFocusedRow) {
+      previouslyFocusedRow.focus();
+      previouslyFocusedRow = null;
+    }
+  });
+
+  function getDrawerFocusableElements(): HTMLElement[] {
+    if (!drawerElement) return [];
+    const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    return Array.from(drawerElement.querySelectorAll(selectors)).filter(
+      (el) => (el as HTMLElement).offsetParent !== null
+    ) as HTMLElement[];
+  }
+
+  function handleDrawerKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      selectedConnectionId = null;
+      return;
+    }
+    if (event.key === 'Tab') {
+      const focusables = getDrawerFocusableElements();
+      if (focusables.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first || active === drawerElement || !drawerElement?.contains(active)) {
+          last.focus();
+          event.preventDefault();
+        }
+      } else {
+        if (active === last) {
+          first.focus();
+          event.preventDefault();
+        }
+      }
+    }
+  }
 
   async function loadClients() {
     try {
@@ -520,36 +581,23 @@
 <svelte:window onkeydown={handleWindowKeyDown} />
 
 <div class="container">
-  <!-- page-head -->
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_observability')} <span class="crumb-sep">›</span>
-        {$t('conn.title')}
-      </div>
-      <h1>
-        {$t('conn.title')}
-        {#if wsConnected && !paused}
-          <span class="live-badge running">
-            <span class="live-dot success"></span>{$t('traffic.live_badge')}
-          </span>
-        {:else if wsConnected && paused}
-          <span class="live-badge paused">
-            <span class="live-dot warning"></span>{$t('traffic.paused_badge')}
-          </span>
-        {:else if wsReconnecting}
-          <span class="live-badge warning">
-            <span class="live-dot warning"></span>{$t('conn.ws_reconnecting')}
-          </span>
-        {:else}
-          <span class="live-badge stopped">
-            <span class="live-dot error"></span>{$t('conn.ws_offline')}
-          </span>
-        {/if}
-      </h1>
-      <p class="sub">{$t('conn.h1_sub')}</p>
-    </div>
-    <div class="ph-actions">
+  <PageHeader
+    title={$t('conn.title')}
+    subtitle={$t('conn.h1_sub')}
+    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('conn.title') }]}
+    {onSwitchTab}
+  >
+    {#snippet actions()}
+      <LiveIndicator
+        live={wsConnected && !paused}
+        label={wsConnected && !paused
+          ? $t('traffic.live_badge')
+          : wsConnected && paused
+            ? $t('traffic.paused_badge')
+            : wsReconnecting
+              ? $t('conn.ws_reconnecting')
+              : $t('conn.ws_offline')}
+      />
       <button
         class="btn btn-secondary"
         onclick={() => (paused = !paused)}
@@ -592,8 +640,8 @@
         >
         <span>{$t('conn.close_all')}</span>
       </button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
     <EmptyState
@@ -656,49 +704,26 @@
 
       <!-- Quick Filter Chips -->
       <div class="filter-chips">
-        <button
-          type="button"
-          class="f-chip"
-          class:active={quickFilter === 'all'}
-          onclick={() => (quickFilter = 'all')}
-        >
-          {$t('conn.filter_all')}
-        </button>
-        <button
-          type="button"
-          class="f-chip"
-          class:active={quickFilter === 'proxy'}
-          onclick={() => (quickFilter = 'proxy')}
-        >
-          {$t('conn.filter_proxy')}
-        </button>
-        <button
-          type="button"
-          class="f-chip"
-          class:active={quickFilter === 'direct'}
-          onclick={() => (quickFilter = 'direct')}
-        >
-          {$t('conn.filter_direct')}
-        </button>
-        <button
-          type="button"
-          class="f-chip"
-          class:active={quickFilter === 'active'}
-          onclick={() => (quickFilter = 'active')}
-        >
-          {$t('conn.filter_active')}
-        </button>
+        <SegmentedControl
+          bind:value={quickFilter}
+          items={[
+            { value: 'all', label: $t('conn.filter_all') },
+            { value: 'proxy', label: $t('conn.filter_proxy') },
+            { value: 'direct', label: $t('conn.filter_direct') },
+            { value: 'active', label: $t('conn.filter_active') }
+          ]}
+        />
       </div>
 
       <!-- Grouping Selector -->
       <div class="grouping-control">
         <span class="group-lbl">{$t('conn.group_by')}</span>
-        <select bind:value={groupingMode} class="group-select">
+        <Select bind:value={groupingMode} class="group-select" ariaLabel={$t('conn.group_by')}>
           <option value="none">{$t('conn.group_none')}</option>
           <option value="client">{$t('conn.group_client')}</option>
           <option value="host">{$t('conn.group_host')}</option>
           <option value="route">{$t('conn.group_route')}</option>
-        </select>
+        </Select>
       </div>
 
       <!-- Live Totals Summary -->
@@ -855,11 +880,11 @@
             {/if}
           </div>
         {:else}
-          <div class="empty-table-state">
-            <p>{$t('conn.empty_title')}</p>
-          </div>
+          <EmptyState title={$t('conn.empty_title')} description={$t('conn.empty_desc')} />
         {/each}
       </div>
+    {:else if !loading && connections.length === 0}
+      <EmptyState title={$t('conn.empty_title')} description={$t('conn.empty_desc')} />
     {:else}
       <!-- Flat Table View -->
       <div class="table-container conn-table-container">
@@ -1106,10 +1131,19 @@
   <button
     type="button"
     class="drawer-backdrop"
+    tabindex="-1"
+    aria-hidden="true"
     onclick={() => (selectedConnectionId = null)}
-    aria-label={$t('app.close')}
   ></button>
-  <div class="inspector-drawer" role="dialog" aria-modal="true" aria-labelledby="inspector-title">
+  <div
+    class="inspector-drawer"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="inspector-title"
+    tabindex="-1"
+    bind:this={drawerElement}
+    onkeydown={handleDrawerKeydown}
+  >
     <div class="drawer-header">
       <div class="drawer-title-group">
         <h3 class="drawer-title" id="inspector-title">{$t('conn.inspector_title')}</h3>
@@ -1233,89 +1267,6 @@
 {/if}
 
 <style>
-  .page-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 20px;
-    gap: 16px;
-  }
-
-  .page-head h1 {
-    margin: 4px 0 6px;
-    font-size: 22px;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .page-head .sub {
-    margin: 0;
-    color: var(--fg-secondary);
-    font-size: 13px;
-  }
-
-  .crumbs {
-    font-size: 12px;
-    color: var(--fg-dim);
-    margin-bottom: 2px;
-  }
-
-  .crumb-sep {
-    color: var(--fg-faint);
-    margin: 0 6px;
-  }
-
-  .ph-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding-top: 6px;
-  }
-
-  .live-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-  }
-
-  .live-badge.running {
-    color: var(--success);
-    border-color: color-mix(in srgb, var(--success) 30%, transparent);
-  }
-
-  .live-badge.paused {
-    color: var(--warning);
-    border-color: color-mix(in srgb, var(--warning) 30%, transparent);
-  }
-
-  .live-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-  }
-
-  .live-dot.success {
-    background: var(--success);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--success) 60%, transparent);
-  }
-
-  .live-dot.warning {
-    background: var(--warning);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 60%, transparent);
-  }
-
-  .live-dot.error {
-    background: var(--danger);
-  }
-
   /* Monolithic Smart Toolbar (CONN-02) */
   .conn-toolbar {
     display: flex;
@@ -1353,7 +1304,7 @@
   .search-input {
     height: 32px;
     padding: 0 26px 0 28px;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     background: var(--bg-secondary);
@@ -1363,14 +1314,13 @@
   }
 
   .search-input:focus {
-    outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 2px rgba(41, 194, 240, 0.2);
     width: 260px;
   }
 
   .match-badge {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     font-weight: 700;
     font-family: var(--font-family-mono);
@@ -1399,29 +1349,6 @@
     padding: 1px;
   }
 
-  .f-chip {
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--fg-dim);
-    background: transparent;
-    border: none;
-    border-radius: 3px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .f-chip:hover:not(.active) {
-    color: var(--fg-primary);
-    background: var(--bg-hover);
-  }
-
-  .f-chip.active {
-    background: var(--accent);
-    color: var(--btn-primary-text);
-    font-weight: 700;
-  }
-
   /* Grouping Control */
   .grouping-control {
     display: flex;
@@ -1429,21 +1356,13 @@
     gap: 6px;
   }
 
-  .group-lbl {
-    font-size: 12px;
-    color: var(--fg-dim);
+  .grouping-control :global(.xcp-select) {
+    width: auto;
   }
 
-  .group-select {
-    height: 30px;
-    padding: 0 8px;
-    font-size: 11.5px;
-    font-weight: 600;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--bg-secondary);
-    color: var(--fg-primary);
-    cursor: pointer;
+  .group-lbl {
+    font-size: 12px;
+    color: var(--fg-secondary);
   }
 
   /* Metrics Pill */
@@ -1451,7 +1370,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     padding: 4px 10px;
     background: var(--bg-secondary);
     border: 1px solid var(--border-light, rgba(255, 255, 255, 0.06));
@@ -1476,13 +1395,13 @@
   }
 
   .btn-danger-soft {
-    background: rgba(244, 112, 127, 0.15);
-    color: var(--danger, #f4707f);
-    border: 1px solid rgba(244, 112, 127, 0.3);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   }
 
   .btn-danger-soft:hover {
-    background: rgba(244, 112, 127, 0.25);
+    background: color-mix(in srgb, var(--danger) 25%, transparent);
   }
 
   /* Tables & Groups (CONN-01) */
@@ -1534,13 +1453,13 @@
   }
 
   .grp-title {
-    font-size: 13.5px;
+    font-size: var(--font-size-base);
     font-weight: 700;
     color: var(--fg-primary);
   }
 
   .grp-sub {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
   }
@@ -1549,7 +1468,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
   }
 
@@ -1566,10 +1485,9 @@
   }
 
   .connections-table th {
-    font-size: 11px;
-    color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: var(--font-size-xs);
+    color: var(--fg-secondary);
+    font-weight: 600;
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     user-select: none;
@@ -1614,7 +1532,7 @@
 
   .conn-row td {
     padding: 8px 12px;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     vertical-align: middle;
   }
 
@@ -1647,17 +1565,17 @@
   }
 
   .src-sub {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
   .badge-process {
-    font-size: 9.5px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     padding: 1px 4px;
     border-radius: 3px;
-    background: rgba(167, 139, 250, 0.15);
-    color: #c4b5fd;
+    background: color-mix(in srgb, var(--seq-5) 15%, transparent);
+    color: var(--seq-5);
   }
 
   /* Host Cell */
@@ -1671,19 +1589,19 @@
 
   .host-port {
     color: var(--fg-dim);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   /* Badges & Route (CONN-03) */
   .badge-rule {
     background: rgba(255, 255, 255, 0.06);
-    color: #94a3b8;
-    font-size: 10px;
+    color: var(--fg-secondary);
+    font-size: var(--font-size-xs);
     font-weight: 600;
   }
 
   .rule-payload {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-top: 2px;
     max-width: 140px;
@@ -1695,7 +1613,7 @@
   .badge-direct {
     background: rgba(70, 209, 138, 0.15);
     color: var(--success);
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     padding: 2px 6px;
     border-radius: 4px;
@@ -1708,39 +1626,40 @@
     flex-wrap: wrap;
   }
 
+  /* DS2-02 decorative sequence mapping: chain-node -> --seq-1, net-tcp -> --seq-2, net-udp -> --seq-3, badge-process -> --seq-5 */
   .chain-node {
-    font-size: 11px;
-    color: var(--accent);
-    background: rgba(41, 194, 240, 0.08);
+    font-size: var(--font-size-xs);
+    color: var(--seq-1);
+    background: color-mix(in srgb, var(--seq-1) 12%, transparent);
     padding: 1px 5px;
     border-radius: 3px;
   }
 
   .chain-sep {
     color: var(--fg-faint);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .net-badge {
-    font-size: 9.5px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     padding: 1px 5px;
     border-radius: 3px;
   }
 
   .net-tcp {
-    background: rgba(56, 189, 248, 0.15);
-    color: #38bdf8;
+    background: color-mix(in srgb, var(--seq-2) 15%, transparent);
+    color: var(--seq-2);
   }
 
   .net-udp {
-    background: rgba(167, 139, 250, 0.15);
-    color: #a78bfa;
+    background: color-mix(in srgb, var(--seq-3) 15%, transparent);
+    color: var(--seq-3);
   }
 
   /* Speeds (CONN-04) */
   .speed-active {
-    font-size: 10.5px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     font-weight: 600;
     margin-top: 2px;
@@ -1761,7 +1680,7 @@
     border: none;
     border-radius: 4px;
     background: transparent;
-    color: var(--danger, #f4707f);
+    color: var(--danger);
     font-size: 16px;
     cursor: pointer;
     transition: background 0.15s ease;
@@ -1778,7 +1697,7 @@
   }
 
   .btn-close-conn:hover {
-    background: rgba(244, 112, 127, 0.2);
+    background: color-mix(in srgb, var(--danger) 20%, transparent);
   }
 
   /* Inspector Drawer (CONN-06) */
@@ -1821,7 +1740,7 @@
   }
 
   .drawer-subtitle {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
@@ -1855,11 +1774,9 @@
 
   .section-heading {
     margin: 0;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    font-size: var(--font-size-xs);
     color: var(--accent);
-    font-weight: 700;
+    font-weight: 600;
   }
 
   .meta-grid {

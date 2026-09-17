@@ -1,5 +1,6 @@
 <script lang="ts">
   import Modal from '../Modal.svelte';
+  import SegmentedControl from '../SegmentedControl.svelte';
   import { t, currentLang } from '../../i18n';
   import { capabilities } from '../../stores';
 
@@ -22,6 +23,8 @@
     formFilterName = $bindable(''),
     formFilterType = $bindable(''),
     formFilterTransport = $bindable(''),
+    formExcludeFilter = $bindable(''),
+    formExcludeType = $bindable(''),
     formMihomoGroups = $bindable([]),
     formEnabled = $bindable(true),
     formUseProviderInterval = $bindable(false),
@@ -44,6 +47,8 @@
     formFilterName: string;
     formFilterType: string;
     formFilterTransport: string;
+    formExcludeFilter?: string;
+    formExcludeType?: string;
     formMihomoGroups: string[];
     formEnabled: boolean;
     formUseProviderInterval: boolean;
@@ -137,28 +142,20 @@
         <span class="form-label" style="display: block; margin-bottom: 6px;"
           >{$t('subscr.modal.xray_routing_mode')}</span
         >
-        <div class="seg-btn" style="margin-bottom: 12px;">
-          <button
-            type="button"
-            class="seg-opt"
-            class:seg-active={formRoutingMode === 'manual'}
-            aria-pressed={formRoutingMode === 'manual'}
-            onclick={() => (formRoutingMode = 'manual')}
-          >
-            {$t('subscr.modal.manual')}
-          </button>
-          <button
-            type="button"
-            class="seg-opt"
-            class:seg-active={formRoutingMode === 'auto'}
-            aria-pressed={formRoutingMode === 'auto'}
-            onclick={() => (formRoutingMode = 'auto')}
-          >
-            {$t('subscr.modal.auto_cn')}
-          </button>
+        <div style="margin-bottom: 12px;">
+          <SegmentedControl
+            bind:value={formRoutingMode}
+            items={[
+              { value: 'manual', label: $t('subscr.modal.manual') },
+              { value: 'auto', label: $t('subscr.modal.auto_cn') }
+            ]}
+            ariaLabel={$t('subscr.modal.xray_routing_mode')}
+          />
         </div>
       </div>
+    {/if}
 
+    {#if formEnableXray || formEnableMihomo}
       <button
         type="button"
         class="advanced-toggle-btn"
@@ -170,16 +167,18 @@
 
       {#if showAdvanced}
         <div class="advanced-fields-box">
-          <div class="form-group">
-            <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
-            <input
-              id="form-tag-prefix"
-              type="text"
-              class="input"
-              bind:value={formTagPrefix}
-              placeholder={$t('subscr.tag_prefix_placeholder')}
-            />
-          </div>
+          {#if formEnableXray}
+            <div class="form-group">
+              <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
+              <input
+                id="form-tag-prefix"
+                type="text"
+                class="input"
+                bind:value={formTagPrefix}
+                placeholder={$t('subscr.tag_prefix_placeholder')}
+              />
+            </div>
+          {/if}
 
           <div class="form-group">
             <label for="form-filter-name" class="form-label">{$t('subscr.filter_name')}</label>
@@ -193,28 +192,55 @@
           </div>
 
           <div class="form-group">
-            <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
+            <label for="form-exclude-filter" class="form-label">{$t('subscr.exclude_filter')}</label
+            >
             <input
-              id="form-filter-type"
+              id="form-exclude-filter"
               type="text"
               class="input"
-              bind:value={formFilterType}
-              placeholder="vmess, vless, trojan..."
+              bind:value={formExcludeFilter}
+              placeholder={$t('subscr.exclude_placeholder')}
             />
           </div>
 
+          {#if formEnableXray}
+            <div class="form-group">
+              <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
+              <input
+                id="form-filter-type"
+                type="text"
+                class="input"
+                bind:value={formFilterType}
+                placeholder="vmess, vless, trojan..."
+              />
+            </div>
+          {/if}
+
           <div class="form-group">
-            <label for="form-filter-transport" class="form-label"
-              >{$t('subscr.filter_transport')}</label
-            >
+            <label for="form-exclude-type" class="form-label">{$t('subscr.exclude_type')}</label>
             <input
-              id="form-filter-transport"
+              id="form-exclude-type"
               type="text"
               class="input"
-              bind:value={formFilterTransport}
-              placeholder="ws, grpc, tcp..."
+              bind:value={formExcludeType}
+              placeholder={$t('subscr.exclude_type_placeholder')}
             />
           </div>
+
+          {#if formEnableXray}
+            <div class="form-group">
+              <label for="form-filter-transport" class="form-label"
+                >{$t('subscr.filter_transport')}</label
+              >
+              <input
+                id="form-filter-transport"
+                type="text"
+                class="input"
+                bind:value={formFilterTransport}
+                placeholder="ws, grpc, tcp..."
+              />
+            </div>
+          {/if}
         </div>
       {/if}
     {/if}
@@ -297,7 +323,7 @@
             {/each}
             {#each missingGroups as missingGroup}
               <label
-                style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-muted, #888);"
+                style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-dim);"
               >
                 <input
                   type="checkbox"
@@ -309,10 +335,7 @@
                   }}
                 />
                 <span>{missingGroup}</span>
-                <span
-                  class="badge"
-                  style="font-size:10px; padding:1px 6px; background:rgba(239,68,68,0.15); color:var(--color-danger, #ef4444); border:1px solid rgba(239,68,68,0.3); border-radius:var(--radius-xs);"
-                >
+                <span class="badge missing-group-badge">
                   ({$t('subscr.modal.group_missing_in_config')})
                 </span>
               </label>
@@ -351,7 +374,10 @@
             min="0"
             max="2147483647"
           />
-          <div class="form-hint" style="font-size: 11px; color: var(--fg-faint); margin-top: 4px;">
+          <div
+            class="form-hint"
+            style="font-size: var(--font-size-xs); color: var(--fg-faint); margin-top: 4px;"
+          >
             {$t('subscr.sockopt.mark_hint')}
           </div>
         </div>
@@ -361,6 +387,7 @@
             <input
               type="checkbox"
               id="sockopt-fast-open"
+              aria-label={$t('subscr.sockopt.tcp_fast_open')}
               data-testid="sockopt-fast-open"
               bind:checked={formSockoptFastOpen}
             />
@@ -376,6 +403,7 @@
             <input
               type="checkbox"
               id="sockopt-mptcp"
+              aria-label={$t('subscr.sockopt.tcp_mptcp')}
               data-testid="sockopt-mptcp"
               bind:checked={formSockoptMptcp}
             />
@@ -390,7 +418,12 @@
 
     <div class="form-group-checkbox">
       <label class="toggle-switch">
-        <input type="checkbox" id="enabled" bind:checked={formEnabled} />
+        <input
+          type="checkbox"
+          id="enabled"
+          aria-label={$t('subscr.enabled')}
+          bind:checked={formEnabled}
+        />
         <span class="toggle-slider"></span>
       </label>
       <label for="enabled" class="checkbox-label">{$t('subscr.enabled')}</label>
@@ -398,13 +431,18 @@
 
     <div class="form-group-checkbox">
       <label class="toggle-switch">
-        <input type="checkbox" id="use-provider-interval" bind:checked={formUseProviderInterval} />
+        <input
+          type="checkbox"
+          id="use-provider-interval"
+          aria-label={$t('subscr.use_provider_interval')}
+          bind:checked={formUseProviderInterval}
+        />
         <span class="toggle-slider"></span>
       </label>
       <label for="use-provider-interval" class="checkbox-label">
         {$t('subscr.use_provider_interval')}
         {#if editingSub && editingSub.profile_update_hours && editingSub.profile_update_hours > 0}
-          <span style="color: var(--accent); font-size: 11px; margin-left: 4px;">
+          <span style="color: var(--accent); font-size: var(--font-size-xs); margin-left: 4px;">
             ({$t('subscr.provider_dictates').replace(
               '{hours}',
               String(editingSub.profile_update_hours)
@@ -450,16 +488,15 @@
     margin: 12px 0 6px 0;
     width: 100%;
     text-align: left;
-    outline: none;
     transition: color var(--transition-fast);
   }
   .advanced-toggle-btn:hover {
-    color: var(--accent-hover, #64b5f6);
+    color: var(--accent-hover);
   }
   .advanced-toggle-btn .arrow {
     display: inline-block;
     transition: transform var(--transition-fast);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     width: 12px;
   }
   .advanced-fields-box {
@@ -474,40 +511,12 @@
     margin-bottom: 12px;
   }
 
-  .seg-btn {
-    display: flex;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 4px);
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
-  .seg-opt {
-    padding: 6px 12px;
-    font-size: 13px;
-    background: transparent;
-    border: none;
-    border-right: 1px solid var(--border);
-    color: var(--fg-secondary);
-    cursor: pointer;
-    transition:
-      background var(--transition-fast, 0.15s),
-      color var(--transition-fast, 0.15s);
-    flex: 1;
-    text-align: center;
-    font-weight: 500;
-  }
-
-  .seg-opt:last-child {
-    border-right: none;
-  }
-
-  .seg-opt:hover {
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .seg-opt.seg-active {
-    background: var(--accent);
-    color: #fff;
+  .missing-group-badge {
+    font-size: var(--font-size-xs);
+    padding: 1px 6px;
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+    border-radius: var(--radius-xs);
   }
 </style>

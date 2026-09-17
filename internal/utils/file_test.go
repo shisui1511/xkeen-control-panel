@@ -176,3 +176,118 @@ func TestAtomicWriteFile_RegularFile(t *testing.T) {
 		t.Errorf("expected %q, got %q", "new content", got)
 	}
 }
+
+func TestValidatePathAllowed(t *testing.T) {
+	tempDir := t.TempDir()
+	subDir := filepath.Join(tempDir, "allowed")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	allowedRoots := []string{subDir}
+
+	tests := []struct {
+		name         string
+		path         string
+		allowedRoots []string
+		wantErr      bool
+	}{
+		{
+			name:         "Direct file in allowed root",
+			path:         filepath.Join(subDir, "test.txt"),
+			allowedRoots: allowedRoots,
+			wantErr:      false,
+		},
+		{
+			name:         "Subdirectory file in allowed root",
+			path:         filepath.Join(subDir, "nested", "test.txt"),
+			allowedRoots: allowedRoots,
+			wantErr:      false,
+		},
+		{
+			name:         "Path traversal attempt using parent reference",
+			path:         filepath.Join(subDir, "..", "outside.txt"),
+			allowedRoots: allowedRoots,
+			wantErr:      true,
+		},
+		{
+			name:         "Completely outside path",
+			path:         filepath.Join(tempDir, "other.txt"),
+			allowedRoots: allowedRoots,
+			wantErr:      true,
+		},
+		{
+			name:         "Empty allowed roots",
+			path:         filepath.Join(subDir, "test.txt"),
+			allowedRoots: []string{},
+			wantErr:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := validatePathAllowed(tt.path, tt.allowedRoots)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validatePathAllowed() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got == "" {
+				t.Errorf("validatePathAllowed() returned empty path for valid input")
+			}
+		})
+	}
+}
+
+func TestAtomicWriteFileSafe(t *testing.T) {
+	tempDir := t.TempDir()
+	allowedDir := filepath.Join(tempDir, "safe_dir")
+	if err := os.MkdirAll(allowedDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	allowedRoots := []string{allowedDir}
+
+	// 1. Safe write inside allowed roots
+	safeFile := filepath.Join(allowedDir, "file.txt")
+	err := AtomicWriteFileSafe(safeFile, []byte("safe content"), 0644, allowedRoots)
+	if err != nil {
+		t.Fatalf("AtomicWriteFileSafe inside allowed root failed: %v", err)
+	}
+	content, err := os.ReadFile(safeFile)
+	if err != nil || string(content) != "safe content" {
+		t.Fatalf("read content mismatch: got %q, err %v", string(content), err)
+	}
+
+	// 2. Unsafe write outside allowed roots
+	unsafeFile := filepath.Join(tempDir, "outside.txt")
+	err = AtomicWriteFileSafe(unsafeFile, []byte("unsafe content"), 0644, allowedRoots)
+	if err == nil {
+		t.Fatal("expected AtomicWriteFileSafe outside allowed root to fail, but succeeded")
+	}
+	if _, err := os.Stat(unsafeFile); !os.IsNotExist(err) {
+		t.Fatalf("unsafe file should not have been created: %v", err)
+	}
+}
+
+func TestCopyFile(t *testing.T) {
+	tempDir := t.TempDir()
+	src := filepath.Join(tempDir, "src.txt")
+	dst := filepath.Join(tempDir, "nested", "dst.txt")
+
+	if err := os.WriteFile(src, []byte("source data to copy"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Copy valid file
+	if err := CopyFile(src, dst); err != nil {
+		t.Fatalf("CopyFile failed: %v", err)
+	}
+	content, err := os.ReadFile(dst)
+	if err != nil || string(content) != "source data to copy" {
+		t.Fatalf("read destination mismatch: got %q, err %v", string(content), err)
+	}
+
+	// 2. Copy non-existent source
+	nonExistentSrc := filepath.Join(tempDir, "missing.txt")
+	err = CopyFile(nonExistentSrc, filepath.Join(tempDir, "missing_dst.txt"))
+	if err == nil {
+		t.Fatal("expected CopyFile with missing source to fail, but succeeded")
+	}
+}

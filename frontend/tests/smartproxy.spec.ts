@@ -112,8 +112,8 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
   }) => {
     await page.goto('/#/smartproxy');
 
-    // 1. Verify single CTA in page-head and no redundant "Из шаблона" button
-    const headerActions = page.locator('.ph-actions button');
+    // 1. Verify single CTA in page header and no redundant "Из шаблона" button
+    const headerActions = page.locator('.page-header-actions button');
     await expect(headerActions).toHaveCount(1);
     await expect(headerActions.first()).toContainText(/Создать профиль/i);
 

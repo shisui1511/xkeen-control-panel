@@ -306,18 +306,18 @@
   .qa-title {
     font-size: 13.5px;
     font-weight: 600;
-    color: var(--fg-primary, #ffffff);
+    color: var(--fg-primary);
     line-height: 1.25;
     letter-spacing: -0.01em;
   }
 
   .title-danger {
-    color: var(--error, #f4707f);
+    color: var(--danger);
   }
 
   .qa-sub {
-    font-size: 11.5px;
-    color: var(--fg-muted, var(--fg-secondary, #8fa3b8));
+    font-size: 12px;
+    color: var(--fg-secondary);
     line-height: 1.35;
     display: -webkit-box;
     -webkit-line-clamp: 2;

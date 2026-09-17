@@ -1,6 +1,8 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import { slugifyProviderName } from '../../lib/mihomoYaml';
+  import Select from '../Select.svelte';
+  import Icon from '../Icon.svelte';
 
   let {
     ng = $bindable(),
@@ -35,17 +37,14 @@
 <div class="form-card">
   <div class="form-row">
     <label class="form-label" for="group-type">{$t('groups.type')}</label>
-    <select id="group-type" class="form-select" bind:value={ng.type}>
+    <Select id="group-type" class="form-select" bind:value={ng.type}>
       {#if ng.type === 'relay'}
         <option value="relay" disabled>relay ({$t('app.deprecated')})</option>
       {/if}
       {#each GROUP_TYPES as t}<option value={t}>{t}</option>{/each}
-    </select>
+    </Select>
     {#if ng.type === 'relay'}
-      <div
-        class="alert alert-warning"
-        style="margin-top: 6px; padding: 6px 10px; font-size: 12px; border-radius: var(--radius-xs);"
-      >
+      <div class="alert alert-warning relay-warning">
         {$t('mihomo.warnings.relay_deprecated', { name: ng.name || 'group' })}
       </div>
     {/if}
@@ -64,10 +63,7 @@
       <label class="form-label" for="group-use-providers">{$t('groups.use_providers')}</label>
       <div class="tag-input-wrap">
         {#each ng.useProviders || [] as p}
-          <span
-            class="tag-pill"
-            style="background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.25); color: var(--success);"
-          >
+          <span class="tag-pill tag-pill--provider">
             {p}
             <button
               class="tag-rm"
@@ -75,11 +71,11 @@
                 (ng = {
                   ...ng,
                   useProviders: (ng.useProviders || []).filter((x: string) => x !== p)
-                })}>✕</button
+                })}><Icon name="close" size={10} /></button
             >
           </span>
         {/each}
-        <select
+        <Select
           id="group-use-providers"
           class="form-select-inline"
           value=""
@@ -101,19 +97,19 @@
             )}
             <option value={slug}>{sub.name} ({slug})</option>
           {/each}
-        </select>
+        </Select>
       </div>
     </div>
   {/if}
   {#if ng.type === 'load-balance'}
     <div class="form-row">
       <label class="form-label" for="group-strategy">{$t('groups.strategy')}</label>
-      <select id="group-strategy" class="form-select" bind:value={ng.strategy}>
+      <Select id="group-strategy" class="form-select" bind:value={ng.strategy}>
         <option value={undefined}>-- {$t('groups.select_strategy')} --</option>
         <option value="round-robin">round-robin</option>
         <option value="consistent-hashing">consistent-hashing</option>
         <option value="sticky-sessions">sticky-sessions</option>
-      </select>
+      </Select>
     </div>
   {/if}
   <div class="form-row">
@@ -134,11 +130,11 @@
           <button
             class="tag-rm"
             onclick={() => (ng = { ...ng, proxies: ng.proxies.filter((x: string) => x !== p) })}
-            >✕</button
+            ><Icon name="close" size={10} /></button
           >
         </span>
       {/each}
-      <select
+      <Select
         id="group-proxies"
         class="form-select-inline"
         bind:value={ngProxyInput}
@@ -146,7 +142,7 @@
       >
         <option value="">+ {$t('groups.add')}...</option>
         {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
-      </select>
+      </Select>
     </div>
   </div>
   {#if ng.type !== 'select'}
@@ -201,38 +197,36 @@
   }
 
   .form-label {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-weight: 500;
   }
 
-  .form-input,
-  .form-select {
+  .form-input {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
     font-size: 13px;
     padding: 6px 10px;
-    outline: none;
     width: 100%;
     transition: border-color var(--transition-fast);
   }
 
-  .form-input:focus,
-  .form-select:focus {
+  .form-input:focus {
     border-color: var(--primary);
   }
 
-  .form-select-inline {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-primary);
-    font-size: 12px;
-    padding: 2px 4px;
-    outline: none;
-    cursor: pointer;
+  .tag-input-wrap :global(.xcp-select) {
+    width: auto;
+    flex: 1;
+    min-width: 140px;
+  }
+
+  :global(.form-select-inline) {
+    height: 28px !important;
+    font-size: var(--font-size-xs) !important;
+    padding: 2px 28px 2px 8px !important;
   }
 
   .tag-input-wrap {
@@ -246,16 +240,29 @@
     align-items: center;
   }
 
+  .relay-warning {
+    margin-top: 6px;
+    padding: 6px 10px;
+    font-size: var(--font-size-xs);
+    border-radius: var(--radius-xs);
+  }
+
   .tag-pill {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background: rgba(41, 194, 240, 0.12);
-    border: 1px solid rgba(41, 194, 240, 0.25);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
     color: var(--primary);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     border-radius: 10px;
     padding: 2px 8px;
+  }
+
+  .tag-pill--provider {
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    border-color: color-mix(in srgb, var(--success) 25%, transparent);
+    color: var(--success);
   }
 
   .tag-rm {
@@ -263,9 +270,11 @@
     border: none;
     color: inherit;
     cursor: pointer;
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     padding: 0;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
   }
 
   .toggle-label {
@@ -273,7 +282,7 @@
     align-items: center;
     gap: 8px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 

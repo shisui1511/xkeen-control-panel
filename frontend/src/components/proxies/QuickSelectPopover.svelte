@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { t } from '../../i18n';
-  import { getCountryFlag } from '../../lib/countryFlags';
+  import { getMissingCountryFlag } from '../../lib/countryFlags';
   import type { LatencyBucket } from '../../lib/proxyClassification';
 
   export interface QuickSelectNode {
@@ -318,7 +318,7 @@
       {#each sortedNodes as node, index (node.name)}
         {@const isSelected = node.name === currentNode}
         {@const isHighlighted = index === highlightIndex}
-        {@const flag = getCountryFlag(node.name)}
+        {@const flag = getMissingCountryFlag(node.name)}
         <button
           type="button"
           id={`qs-opt-${index}`}
@@ -356,8 +356,8 @@
     z-index: 1100;
     width: 280px;
     max-height: 320px;
-    background: var(--bg-elevated, var(--bg-card, #1e293b));
-    border: 1px solid var(--border, #334155);
+    background: var(--bg-elevated, var(--bg-card));
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg, 8px);
     box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.3));
     display: flex;
@@ -394,7 +394,7 @@
     width: 36px;
     height: 4px;
     border-radius: 2px;
-    background: var(--border-strong, var(--border, #475569));
+    background: var(--border-strong, var(--border));
   }
 
   .qs-header {
@@ -411,7 +411,6 @@
     border: 1px solid var(--border);
     background: var(--bg-input, rgba(0, 0, 0, 0.2));
     color: var(--fg-primary);
-    outline: none;
     box-sizing: border-box;
   }
 
@@ -422,8 +421,8 @@
 
   .qs-auto-note {
     padding: 6px 10px;
-    font-size: 11px;
-    color: var(--warning, #eab308);
+    font-size: 12px;
+    color: var(--warning);
     background: rgba(234, 179, 8, 0.08);
     border-bottom: 1px solid var(--border);
     line-height: 1.3;
@@ -477,7 +476,7 @@
   }
 
   .qs-item[aria-selected='true'] {
-    color: var(--accent, #3b82f6);
+    color: var(--accent);
     font-weight: 600;
   }
 
@@ -490,6 +489,10 @@
   }
 
   .qs-flag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'TwemojiMozilla', var(--font-family-sans);
     font-size: 14px;
     line-height: 1;
     flex-shrink: 0;
@@ -503,7 +506,7 @@
   }
 
   .qs-check {
-    color: var(--success, #22c55e);
+    color: var(--success);
     font-weight: bold;
     font-size: 14px;
     margin-left: 4px;
@@ -514,34 +517,34 @@
     padding: 16px 12px;
     text-align: center;
     font-size: 12px;
-    color: var(--fg-muted, #64748b);
+    color: var(--fg-dim);
   }
 
   .lat {
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: 12px;
     padding: 2px 4px;
     border-radius: 3px;
     flex-shrink: 0;
   }
 
   .lat.ok {
-    color: var(--success, #22c55e);
+    color: var(--success);
     background: rgba(34, 197, 94, 0.1);
   }
 
   .lat.mid {
-    color: var(--warning, #eab308);
+    color: var(--warning);
     background: rgba(234, 179, 8, 0.1);
   }
 
   .lat.bad {
-    color: var(--danger, #ef4444);
+    color: var(--danger);
     background: rgba(239, 68, 68, 0.1);
   }
 
   .lat.dim {
-    color: var(--fg-dim, #64748b);
+    color: var(--fg-dim);
     background: rgba(100, 116, 139, 0.1);
   }
 </style>

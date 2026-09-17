@@ -82,27 +82,17 @@ test.describe('Templates modal integration test suite', () => {
               description:
                 'Selective routing: GeoSite/GeoIP → PROXY_TAG, private → direct, ads → block',
               type: 'xray',
-              filename: 'selective-routing.json'
+              filename: 'selective-routing.json',
+              content: '{\n  "routing": {\n    "rules": []\n  }\n}'
             },
             {
               name: 'Mihomo: Rule-Based Routing',
               description: 'Selective routing: MetaCubeX rule-sets, fake-ip DNS, proxy-providers',
               type: 'mihomo',
-              filename: 'rule-based.yaml'
+              filename: 'rule-based.yaml',
+              content: 'rule-providers:\n  rules: []'
             }
           ])
-        });
-      } else if (url.includes('/api/templates/fetch')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ content: '# template content\nline2\nline3' })
-        });
-      } else if (url.includes('/api/templates/update') && method === 'POST') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ updated: 2 })
         });
       } else {
         await route.fulfill({
@@ -150,6 +140,16 @@ test.describe('Templates modal integration test suite', () => {
 
     await expect(xrayTab).toBeVisible();
     await expect(mihomoTab).toBeVisible();
+
+    // Проверяем переключение на вкладку Mihomo и обновление активного состояния (IN-03)
+    await mihomoTab.click();
+    await expect(mihomoTab).toHaveClass(/active/);
+    await expect(xrayTab).not.toHaveClass(/active/);
+
+    // Проверяем возврат на вкладку Xray
+    await xrayTab.click();
+    await expect(xrayTab).toHaveClass(/active/);
+    await expect(mihomoTab).not.toHaveClass(/active/);
   });
 
   test('selecting template shows preview', async ({ page }) => {
@@ -165,11 +165,19 @@ test.describe('Templates modal integration test suite', () => {
     await expect(preview).toBeVisible();
   });
 
-  test('update button is visible in modal header', async ({ page }) => {
+  test('templates modal has clean subtitle and no update button', async ({ page }) => {
     await openTemplatesModal(page);
 
-    // Кнопка «Обновить шаблоны» видна в хедере модалки
-    const updateBtn = page.locator('.templates-update-btn, button:has-text("Обновить")').first();
-    await expect(updateBtn).toBeVisible();
+    // Подзаголовок виден
+    const subtitle = page.locator('.templates-modal-subtitle').first();
+    await expect(subtitle).toBeVisible();
+
+    // Кнопка обновления отсутствует
+    const updateBtn = page.locator('.templates-update-btn, button:has-text("Обновить шаблоны")');
+    await expect(updateBtn).toHaveCount(0);
+
+    // Бейджи статуса отсутствуют
+    const badge = page.locator('.templates-badge');
+    await expect(badge).toHaveCount(0);
   });
 });

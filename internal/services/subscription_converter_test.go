@@ -471,6 +471,45 @@ func TestApplyClashFilters(t *testing.T) {
 	if len(fb3) != 1 || fn3[0] != "de-vmess" {
 		t.Errorf("FilterTransport failed: got %v", fn3)
 	}
+
+	sub4 := &Subscription{ExcludeFilter: "de-"}
+	fb4, fn4 := svc.applyClashFilters(blocks, names, sub4)
+	if len(fb4) != 1 || fn4[0] != "us-vless" {
+		t.Errorf("ExcludeFilter failed: got %v", fn4)
+	}
+
+	sub5 := &Subscription{ExcludeType: "ss,vmess"}
+	fb5, fn5 := svc.applyClashFilters(blocks, names, sub5)
+	if len(fb5) != 1 || fn5[0] != "us-vless" {
+		t.Errorf("ExcludeType failed: got %v", fn5)
+	}
+}
+
+func TestApplyFilters_Xray(t *testing.T) {
+	svc := &SubscriptionService{}
+	outbounds := []Outbound{
+		{Tag: "us-vless", Protocol: "vless"},
+		{Tag: "de-vmess", Protocol: "vmess"},
+		{Tag: "de-ss", Protocol: "shadowsocks"},
+	}
+
+	subName := &Subscription{FilterName: "de-"}
+	res1 := svc.applyFilters(outbounds, subName)
+	if len(res1) != 2 || res1[0].Tag != "de-vmess" || res1[1].Tag != "de-ss" {
+		t.Errorf("FilterName failed: got %v", res1)
+	}
+
+	subExclude := &Subscription{ExcludeFilter: "vmess"}
+	res2 := svc.applyFilters(outbounds, subExclude)
+	if len(res2) != 2 || res2[0].Tag != "us-vless" || res2[1].Tag != "de-ss" {
+		t.Errorf("ExcludeFilter failed: got %v", res2)
+	}
+
+	subExcludeType := &Subscription{ExcludeType: "ss"}
+	res3 := svc.applyFilters(outbounds, subExcludeType)
+	if len(res3) != 2 || res3[0].Tag != "us-vless" || res3[1].Tag != "de-vmess" {
+		t.Errorf("ExcludeType ss alias failed: got %v", res3)
+	}
 }
 
 func TestConvertSubscriptionNodesToClashYAML_Wireguard(t *testing.T) {

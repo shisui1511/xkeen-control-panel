@@ -101,6 +101,48 @@ describe('Mihomo YAML generation with proxy-providers and groups', () => {
     expect(yaml).toContain('    strategy: consistent-hashing');
     expect(yaml).toContain('    proxies:\n      - "DIRECT"');
   });
+
+  test('генерация proxy-providers включает фильтры filter, exclude-filter, exclude-type и оптимизированный health-check', () => {
+    const mockState: any = {
+      existingTproxyPort: 12345,
+      existingRedirPort: 12346,
+      subscriptions: [],
+      mihomoProviders: [
+        {
+          id: 'sub-filters',
+          name: 'Filter Sub',
+          enabled: true,
+          type: 'mihomo',
+          url: 'https://example.com/sub',
+          interval: 1,
+          filter_name: 'RU|DE',
+          exclude_filter: 'Test|Expired',
+          exclude_type: 'ss|vmess'
+        }
+      ],
+      proxies: [],
+      groups: [],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: {}
+    };
+
+    const yaml = generateYAML(mockState);
+    expect(yaml).toContain('proxy-providers:');
+    expect(yaml).toContain('  Filter-Sub:');
+    expect(yaml).toContain('    filter: "RU|DE"');
+    expect(yaml).toContain('    exclude-filter: "Test|Expired"');
+    expect(yaml).toContain('    exclude-type: "ss|vmess"');
+    expect(yaml).toContain('    health-check:');
+    expect(yaml).toContain('      url: http://www.gstatic.com/generate_204');
+    expect(yaml).toContain('      timeout: 5000');
+    expect(yaml).toContain('      lazy: true');
+    expect(yaml).toContain('      expected-status: 204');
+    expect(yaml).toContain('    override:');
+    expect(yaml).toContain('      udp: true');
+    expect(yaml).toContain('      tfo: true');
+  });
 });
 
 describe('Mihomo YAML parsing (populateMihomoFromYAML)', () => {

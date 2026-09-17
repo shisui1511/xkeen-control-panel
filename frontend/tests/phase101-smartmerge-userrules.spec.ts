@@ -60,7 +60,7 @@ test.describe('Phase 101: Smart Merge, Remnawave & Custom Rules', () => {
 
     // Tab buttons must exist
     const customTab = page.locator(
-      'button.tab-btn:has-text("Мои правила"), button.tab-btn:has-text("My Rules")'
+      'button.tab-btn:has-text("Исключения"), button.tab-btn:has-text("Exceptions"), button.tab-btn:has-text("Мои правила"), button.tab-btn:has-text("My Rules")'
     );
     await expect(customTab).toBeVisible({ timeout: 5000 });
     await customTab.click();
@@ -74,9 +74,11 @@ test.describe('Phase 101: Smart Merge, Remnawave & Custom Rules', () => {
     await expect(input).toBeVisible();
     await input.fill('facebook.com');
 
-    const addBtn = page.locator(
-      'button.btn-primary:has-text("Добавить правило"), button.btn-primary:has-text("Add Rule")'
-    );
+    const addBtn = page
+      .locator(
+        '.quick-add-form button[type="submit"], button.btn-primary:has-text("Добавить правило"), button.btn-primary:has-text("Add Rule")'
+      )
+      .first();
     await expect(addBtn).toBeEnabled();
     await addBtn.click();
 

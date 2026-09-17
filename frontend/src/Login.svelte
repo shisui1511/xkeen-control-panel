@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { t } from './i18n';
   import { apiFetch } from './lib/api';
+  import Button from './components/Button.svelte';
 
   let password = $state('');
   let error = $state('');
@@ -138,14 +139,9 @@
       {/if}
     </div>
 
-    <button
-      class="btn btn-primary"
-      style="width:100%;padding:11px 14px;font-size:13.5px;"
-      onclick={handleLogin}
-      disabled={loading}
-    >
+    <Button variant="primary" class="login-btn" onclick={handleLogin} {loading}>
       {loading ? $t('auth.logging_in') : $t('auth.login_btn')}
-    </button>
+    </Button>
 
     <div class="login-footer">
       <span>{version}</span>
@@ -155,15 +151,18 @@
 </div>
 
 <style>
+  :global(.login-btn) {
+    width: 100%;
+    min-height: var(--btn-h);
+  }
+
   /* Full-page centred layout */
   .login-screen {
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    background:
-      radial-gradient(ellipse 80% 55% at 50% 20%, rgba(41, 194, 240, 0.07), transparent 65%),
-      var(--bg-page);
+    background: var(--bg-page);
   }
 
   /* Card */
@@ -195,7 +194,12 @@
     border-radius: 13px;
     display: grid;
     place-items: center;
-    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 60%, #0e6f96 100%);
+    background: linear-gradient(
+      135deg,
+      var(--accent) 0%,
+      var(--accent-2) 60%,
+      color-mix(in srgb, var(--accent-2) 70%, black) 100%
+    );
     box-shadow:
       0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
       0 14px 36px -12px color-mix(in srgb, var(--accent) 70%, transparent);
@@ -221,14 +225,13 @@
   .login-brand .b1 .x {
     color: var(--accent);
     font-weight: 800;
-    text-shadow: 0 0 16px rgba(41, 194, 240, 0.5);
+    text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 50%, transparent);
   }
 
   /* "Control Panel" — mirrors sidebar .b2 */
   .login-brand .b2 {
-    font-size: 10px;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
+    font-size: var(--font-size-xs);
+    letter-spacing: 0.05em;
     color: var(--fg-dim);
     font-weight: 600;
   }
@@ -236,7 +239,7 @@
   .login-footer {
     display: flex;
     justify-content: space-between;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
     margin-top: 20px;

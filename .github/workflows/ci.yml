@@ -96,6 +96,9 @@ jobs:
       - name: Run tests
         run: go test -race -v -coverprofile=coverage.out ./...
 
+      - name: Verify test coverage thresholds
+        run: ./scripts/check-coverage.sh coverage.out
+
       - name: Upload coverage to artifact
         uses: actions/upload-artifact@v7
         with:

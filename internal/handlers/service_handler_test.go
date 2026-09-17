@@ -1,12 +1,13 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
@@ -25,7 +26,7 @@ func newServiceTestAPI(t *testing.T, binaryPath string) *API {
 	return &API{
 		cfg:       cfg,
 		xkeenSvc:  services.NewXKeenService(binaryPath, tmpDir),
-		kernelSvc: services.NewKernelService(),
+		kernelSvc: services.NewKernelService(t.TempDir()),
 		pathVal:   utils.NewPathValidator(cfg.AllowedRoots),
 	}
 }
@@ -36,28 +37,10 @@ func buildStubBinary(t *testing.T, output string, exitCode int) string {
 	t.Helper()
 	tmpDir := t.TempDir()
 
-	// Пишем stub main.go
-	src := `package main
-
-import (
-	"fmt"
-	"os"
-)
-
-func main() {
-	fmt.Print("` + output + `")
-	os.Exit(` + strings.TrimSpace(string(rune('0'+exitCode))) + `)
-}
-`
-	srcPath := filepath.Join(tmpDir, "main.go")
-	if err := os.WriteFile(srcPath, []byte(src), 0644); err != nil {
-		t.Fatalf("write stub src: %v", err)
-	}
-
 	binPath := filepath.Join(tmpDir, "xkeen-stub")
-	cmd := exec.Command("go", "build", "-o", binPath, srcPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build stub binary: %v\n%s", err, out)
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s' %q\nexit %d\n", output, exitCode)
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write stub script: %v", err)
 	}
 
 	return binPath
@@ -194,5 +177,65 @@ func TestServiceStatus_MethodNotAllowed(t *testing.T) {
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected 405, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestServiceRestartLog(t *testing.T) {
+	binPath := buildStubBinary(t, "ok", 0)
+	api := newServiceTestAPI(t, binPath)
+
+	// 1. Method Not Allowed (POST)
+	reqPost := httptest.NewRequest(http.MethodPost, "/api/service/restart-log", nil)
+	recPost := httptest.NewRecorder()
+	api.ServiceRestartLog(recPost, reqPost)
+	if recPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST, got %d", recPost.Code)
+	}
+
+	// 2. GET -> 200 OK
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/service/restart-log", nil)
+	recGet := httptest.NewRecorder()
+	api.ServiceRestartLog(recGet, reqGet)
+	if recGet.Code != http.StatusOK {
+		t.Errorf("expected 200 for GET, got %d", recGet.Code)
+	}
+}
+
+func TestServiceDNSRedirect(t *testing.T) {
+	binPath := buildStubBinary(t, "DNS proxying updated", 0)
+	api := newServiceTestAPI(t, binPath)
+
+	// 1. Method Not Allowed (GET)
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/service/dns-redirect", nil)
+	recGet := httptest.NewRecorder()
+	api.ServiceDNSRedirect(recGet, reqGet)
+	if recGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET, got %d", recGet.Code)
+	}
+
+	// 2. Invalid JSON
+	reqBadJSON := httptest.NewRequest(http.MethodPost, "/api/service/dns-redirect", bytes.NewReader([]byte("{invalid")))
+	recBadJSON := httptest.NewRecorder()
+	api.ServiceDNSRedirect(recBadJSON, reqBadJSON)
+	if recBadJSON.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for bad JSON, got %d", recBadJSON.Code)
+	}
+
+	// 3. Enabled is nil
+	reqNil := httptest.NewRequest(http.MethodPost, "/api/service/dns-redirect", bytes.NewReader([]byte(`{}`)))
+	recNil := httptest.NewRecorder()
+	api.ServiceDNSRedirect(recNil, reqNil)
+	if recNil.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 when enabled is nil, got %d", recNil.Code)
+	}
+
+	// 4. Enabled = true
+	enabled := true
+	body, _ := json.Marshal(map[string]*bool{"enabled": &enabled})
+	reqGood := httptest.NewRequest(http.MethodPost, "/api/service/dns-redirect", bytes.NewReader(body))
+	recGood := httptest.NewRecorder()
+	api.ServiceDNSRedirect(recGood, reqGood)
+	if recGood.Code != http.StatusOK {
+		t.Errorf("expected 200 for good DNS redirect, got %d: %s", recGood.Code, recGood.Body.String())
 	}
 }

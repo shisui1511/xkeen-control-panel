@@ -35,7 +35,7 @@
       {/if}
     </div>
     {#if actions || children}
-      <div class="page-header-actions">
+      <div class="page-header-actions ph-actions">
         {#if actions}
           {@render actions()}
         {/if}

@@ -59,7 +59,8 @@ function handleUnauthorized(): void {
  */
 export async function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Response> {
   const { skip401Redirect, ...init } = options;
-  const csrfToken = localStorage.getItem('csrf_token') ?? '';
+  const csrfToken =
+    typeof localStorage !== 'undefined' ? (localStorage.getItem('csrf_token') ?? '') : '';
   const headers = new Headers(init.headers);
   if (csrfToken) {
     headers.set('X-CSRF-Token', csrfToken);
@@ -113,4 +114,88 @@ export async function apiFetchJSON<T = unknown>(
   }
 
   return payload as T;
+}
+
+export interface UserRule {
+  id: string;
+  type: string; // 'domain' | 'domain_suffix' | 'domain_keyword' | 'ip_cidr' | 'port'
+  value: string;
+  target: string; // 'direct' | 'proxy' | 'reject'
+  group?: string;
+  comment?: string;
+  enabled: boolean;
+}
+
+export interface RuleProvider {
+  name: string;
+  behavior: string;
+  type: string;
+  ruleCount: number;
+  updatedAt: string;
+  vehicleType: string;
+}
+
+export interface RouteTraceResult {
+  target: string;
+  matched: boolean;
+  rule_type: string;
+  rule_payload: string;
+  target_action: string;
+  target_group: string;
+  selected_proxy: string;
+  proxy_type: string;
+  trace_time_ms: number;
+  source: string;
+}
+
+export async function fetchCustomRules(): Promise<UserRule[]> {
+  const res = await apiFetch('/api/rules/custom');
+  if (!res.ok) throw new Error('Failed to load custom rules');
+  const data = await res.json();
+  return data.data || data.rules || data || [];
+}
+
+export interface SaveCustomRulesResult {
+  applied: boolean;
+  reloaded: boolean;
+  count: number;
+  warning?: string;
+}
+
+export async function saveCustomRules(rules: UserRule[]): Promise<SaveCustomRulesResult> {
+  return apiFetchJSON<SaveCustomRulesResult>('/api/rules/custom', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rules })
+  });
+}
+
+export async function testRoute(target: string, port?: number): Promise<RouteTraceResult> {
+  return apiFetchJSON<RouteTraceResult>('/api/rules/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target, port })
+  });
+}
+
+export async function flushFakeIP(): Promise<void> {
+  const res = await apiFetch('/api/mihomo/cache/fakeip/flush', {
+    method: 'POST'
+  });
+  if (!res.ok) throw new Error('Failed to flush Fake-IP cache');
+}
+
+export async function fetchRuleProviders(): Promise<RuleProvider[]> {
+  const res = await apiFetch('/api/mihomo/proxy/providers/rules');
+  if (!res.ok) throw new Error('Failed to load rule providers');
+  const data = await res.json();
+  const providersMap = data.providers || {};
+  return Object.values(providersMap) as RuleProvider[];
+}
+
+export async function updateRuleProvider(name: string): Promise<void> {
+  const res = await apiFetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(name)}`, {
+    method: 'PUT'
+  });
+  if (!res.ok) throw new Error(`Failed to update provider: ${name}`);
 }

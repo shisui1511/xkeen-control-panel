@@ -4,6 +4,7 @@
   import Terminal from './components/Terminal.svelte';
   import { t } from './i18n';
   import PageHeader from './PageHeader.svelte';
+  import Tabs, { type TabItem } from './components/Tabs.svelte';
   import { showToast } from './stores';
   import { apiFetch } from './lib/api';
 
@@ -32,6 +33,10 @@
   }
 
   let activeTab = $state<'terminal' | 'commands'>('terminal');
+  const consoleTabItems = $derived<TabItem[]>([
+    { value: 'terminal', label: $t('console.tab_terminal') },
+    { value: 'commands', label: $t('console.tab_commands') }
+  ]);
   let categories = $state<CommandCategory[]>([]);
   let loading = $state(true);
   let error = $state('');
@@ -150,28 +155,13 @@
   <PageHeader
     title={$t('console.title')}
     subtitle={$t('console.subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('nav.console') }]}
+    breadcrumbs={[{ label: $t('nav.group_tools') }, { label: $t('nav.console') }]}
     {onSwitchTab}
     hideHome={true}
   />
 
   <!-- Tab Navigation -->
-  <div class="settings-tabs">
-    <button
-      class="stab"
-      class:active={activeTab === 'terminal'}
-      onclick={() => (activeTab = 'terminal')}
-    >
-      {$t('console.tab_terminal')}
-    </button>
-    <button
-      class="stab"
-      class:active={activeTab === 'commands'}
-      onclick={() => (activeTab = 'commands')}
-    >
-      {$t('console.tab_commands')}
-    </button>
-  </div>
+  <Tabs bind:value={activeTab} items={consoleTabItems} ariaLabel={$t('console.title')} />
 
   {#if activeTab === 'terminal'}
     <Terminal />
@@ -300,7 +290,7 @@
         {#if history.length > 0}
           <h4
             class="mt-3"
-            style="font-size: 11px; font-weight: 700; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.18em; padding: 0 4px;"
+            style="font-size: 12px; font-weight: 600; color: var(--fg-dim); letter-spacing: 0.04em; padding: 0 4px;"
           >
             {$t('console.history')}
           </h4>
@@ -348,39 +338,6 @@
 </Modal>
 
 <style>
-  .settings-tabs {
-    display: flex;
-    gap: 2px;
-    margin-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 0;
-  }
-
-  .stab {
-    padding: 8px 16px;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--fg-secondary);
-    cursor: pointer;
-    border-radius: 4px 4px 0 0;
-    transition:
-      color 0.15s,
-      border-color 0.15s;
-  }
-
-  .stab:hover {
-    color: var(--fg-primary);
-  }
-
-  .stab.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-  }
-
   .console-grid {
     display: grid;
     grid-template-columns: 2fr 3fr;
@@ -395,11 +352,10 @@
   .cmd-cat-head {
     padding: 11px 14px;
     background: rgba(0, 0, 0, 0.18);
-    font-size: 10.5px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 0.04em;
     color: var(--fg-dim);
-    font-weight: 700;
+    font-weight: 600;
     border-bottom: 1px solid var(--border);
     margin-bottom: 8px;
   }
@@ -531,7 +487,7 @@
   .history-status {
     font-weight: 700;
     color: var(--success);
-    font-size: 10px;
+    font-size: 12px;
   }
 
   .history-status.error-text {

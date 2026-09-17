@@ -191,7 +191,13 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 
 	kernelType := detectKernelFromPath(cleanPath)
 	filename := filepath.Base(cleanPath)
-	preflightRes := services.ValidateConfigContent(kernelType, filename, string(data))
+	var kVer string
+	if a.kernelSvc != nil {
+		if k := a.kernelSvc.Get(kernelType); k != nil {
+			kVer = k.CurrentVersion
+		}
+	}
+	preflightRes := services.ValidateConfigContent(kernelType, filename, string(data), kVer)
 
 	JSONSuccess(w, map[string]interface{}{
 		"warnings": mapIssues(preflightRes.Warnings),
@@ -749,7 +755,13 @@ func (a *API) ConfigSmartMerge(w http.ResponseWriter, r *http.Request) {
 			targetFile = "05_routing.json"
 		}
 	}
-	preflightRes := services.ValidateConfigContent(kernelType, targetFile, merged)
+	var kVer string
+	if a.kernelSvc != nil {
+		if k := a.kernelSvc.Get(kernelType); k != nil {
+			kVer = k.CurrentVersion
+		}
+	}
+	preflightRes := services.ValidateConfigContent(kernelType, targetFile, merged, kVer)
 
 	JSONSuccess(w, map[string]interface{}{
 		"content":  merged,

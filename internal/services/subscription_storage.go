@@ -445,6 +445,8 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			existing.Enabled = sub.Enabled
 			existing.FilterName = sub.FilterName
 			existing.FilterType = sub.FilterType
+			existing.ExcludeFilter = sub.ExcludeFilter
+			existing.ExcludeType = sub.ExcludeType
 			// FilterTransport — обновляем только если явно указан (форма может не отправлять поле).
 			if sub.FilterTransport != "" {
 				existing.FilterTransport = sub.FilterTransport

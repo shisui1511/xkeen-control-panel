@@ -74,7 +74,7 @@
     gap: 16px;
     padding: 12px 18px;
     background: rgba(245, 158, 11, 0.12);
-    border: 1px solid var(--warning, #f59e0b);
+    border: 1px solid var(--warning);
     border-radius: var(--radius-md);
     margin-bottom: 16px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -92,7 +92,7 @@
 
   .warning-icon {
     flex-shrink: 0;
-    color: var(--warning, #f59e0b);
+    color: var(--warning);
   }
 
   .banner-text {

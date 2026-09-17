@@ -163,7 +163,7 @@
   }
 
   .tab-btn:hover {
-    color: var(--fg);
+    color: var(--fg-primary);
   }
 
   .tab-btn.active {

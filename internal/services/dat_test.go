@@ -1,8 +1,10 @@
 package services
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -181,5 +183,676 @@ func TestSearchTag_MalformedProtobuf(t *testing.T) {
 	_, err := svc.SearchTag("geosite.dat", "any", "", 0, 10)
 	if err != nil {
 		t.Logf("SearchTag returned expected error/nil: %v", err)
+	}
+}
+
+func TestResolveUpdateURL_MihomoConfigGeox(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	configContent := `
+geox-url:
+  geosite: "https://example.com/zkeen.dat"
+  geoip: "https://example.com/zkeenip.dat"
+`
+	if err := os.WriteFile(filepath.Join(tmpMihomo, "config.yaml"), []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	// GeoSite.dat in Mihomo should use custom geox-url.geosite
+	urlSite, err := svc.resolveUpdateURL("GeoSite.dat", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urlSite != "https://example.com/zkeen.dat" {
+		t.Errorf("expected custom geosite URL, got %s", urlSite)
+	}
+
+	// GeoIP.dat in Mihomo should use custom geox-url.geoip
+	urlIP, err := svc.resolveUpdateURL("GeoIP.dat", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urlIP != "https://example.com/zkeenip.dat" {
+		t.Errorf("expected custom geoip URL, got %s", urlIP)
+	}
+
+	// Xray geosite.dat should use standard URL
+	urlXray, err := svc.resolveUpdateURL("geosite.dat", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urlXray != "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat" {
+		t.Errorf("expected v2fly URL for Xray geosite, got %s", urlXray)
+	}
+}
+
+func TestResolveUpdateURL_MihomoDefaultMetaCubeX(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	// No config.yaml exists
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	urlSite, err := svc.resolveUpdateURL("geosite.dat", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urlSite != "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat" {
+		t.Errorf("expected MetaCubeX geosite URL, got %s", urlSite)
+	}
+
+	urlIP, err := svc.resolveUpdateURL("geoip.dat", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urlIP != "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat" {
+		t.Errorf("expected MetaCubeX geoip URL, got %s", urlIP)
+	}
+}
+
+func TestDATManagerService_BrokenSymlink(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	// Create broken symlink
+	brokenLink := filepath.Join(tmpXray, "broken.dat")
+	_ = os.Symlink(filepath.Join(tmpXray, "nonexistent.dat"), brokenLink)
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+	files := svc.List()
+
+	var found *DATFile
+	for i := range files {
+		if files[i].Name == "broken.dat" {
+			found = &files[i]
+			break
+		}
+	}
+
+	if found == nil {
+		t.Fatal("broken.dat not found in List()")
+	}
+	if found.Exists {
+		t.Errorf("expected Exists: false for broken symlink, got true")
+	}
+	if !found.IsSymlink {
+		t.Errorf("expected IsSymlink: true for broken symlink, got false")
+	}
+}
+
+func TestDATManagerService_ValidationRollback(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	// Create initial file
+	target := filepath.Join(tmpMihomo, "GeoSite.dat")
+	initialData := []byte("initial valid data")
+	if err := os.WriteFile(target, initialData, 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Also config.yaml
+	if err := os.WriteFile(filepath.Join(tmpMihomo, "config.yaml"), []byte("mode: rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create mock failing mihomo binary
+	mockBin := filepath.Join(tmpMihomo, "mock-mihomo")
+	mockScript := "#!/bin/sh\necho 'mock validation error'\nexit 1\n"
+	if err := os.WriteFile(mockBin, []byte(mockScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+	svc.SetBinaries(mockBin, "", "")
+
+	// Call validateKernelConfig directly
+	err := svc.validateKernelConfig(tmpMihomo, "GeoSite.dat")
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "mock validation error") {
+		t.Errorf("expected mock validation error, got %v", err)
+	}
+}
+
+func TestDATManagerService_SymlinkBackupAndRestore(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "actual.dat")
+	linkPath := filepath.Join(dir, "link.dat")
+
+	if err := os.WriteFile(targetPath, []byte("target data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Backup the symlink
+	if err := backupFile(linkPath); err != nil {
+		t.Fatalf("backupFile failed: %v", err)
+	}
+
+	// Verify .bak.link exists and contains target path
+	linkBak := linkPath + ".bak.link"
+	content, err := os.ReadFile(linkBak)
+	if err != nil {
+		t.Fatalf("reading link backup failed: %v", err)
+	}
+	if string(content) != targetPath {
+		t.Errorf("expected link target %s, got %s", targetPath, string(content))
+	}
+
+	// Simulate replacement with new file (which breaks symlink)
+	if err := os.Remove(linkPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(linkPath, []byte("replaced data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Call restoreFile
+	if err := restoreFile(linkPath); err != nil {
+		t.Fatalf("restoreFile failed: %v", err)
+	}
+
+	// Verify linkPath was restored as symlink to targetPath
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("lstat restored link failed: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected restored file to be symlink, got regular file")
+	}
+	readTarget, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("readlink failed: %v", err)
+	}
+	if readTarget != targetPath {
+		t.Errorf("expected target %s, got %s", targetPath, readTarget)
+	}
+	if _, err := os.Stat(linkBak); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be removed after restore", linkBak)
+	}
+}
+
+// TestDATManagerService_BackupFile_CleansSiblingBackupOnTypeSwitch covers
+// the regression from 120-REVIEW.md CR-03: a geo-file that alternates
+// between symlink and regular file across successive Update() runs must
+// not leave a stale backup of the opposite type behind, because
+// rollbackFile/restoreFile unconditionally check .bak.link first and would
+// otherwise restore the older, now-wrong backup type.
+func TestDATManagerService_BackupFile_CleansSiblingBackupOnTypeSwitch(t *testing.T) {
+	dir := t.TempDir()
+	targetPath := filepath.Join(dir, "actual.dat")
+	path := filepath.Join(dir, "geo.dat")
+
+	if err := os.WriteFile(targetPath, []byte("target data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("symlink -> regular file removes stale .bak", func(t *testing.T) {
+		// First backup: path is a symlink -> creates .bak.link.
+		if err := os.Symlink(targetPath, path); err != nil {
+			t.Fatal(err)
+		}
+		if err := backupFile(path); err != nil {
+			t.Fatalf("backupFile (symlink) failed: %v", err)
+		}
+		if _, err := os.Stat(path + ".bak.link"); err != nil {
+			t.Fatalf(".bak.link missing after symlink backup: %v", err)
+		}
+
+		// Simulate an external xkeen -ug rewriting the geo-file as a plain
+		// file, then leave a stale .bak from some earlier backup cycle to
+		// mimic the orphaned-backup scenario described in CR-03.
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("plain data v1"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path+".bak", []byte("stale .bak"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Second backup: path is now a regular file -> must remove the
+		// sibling .bak.link left over from the symlink era.
+		if err := backupFile(path); err != nil {
+			t.Fatalf("backupFile (regular) failed: %v", err)
+		}
+		if _, err := os.Stat(path + ".bak.link"); !os.IsNotExist(err) {
+			t.Errorf("expected stale .bak.link to be removed after regular-file backup")
+		}
+		if _, err := os.Stat(path + ".bak"); err != nil {
+			t.Errorf(".bak missing after regular-file backup: %v", err)
+		}
+
+		cleanBackupFile(path)
+		_ = os.Remove(path)
+	})
+
+	t.Run("regular file -> symlink removes stale .bak.link", func(t *testing.T) {
+		// First backup: path is a regular file -> creates .bak.
+		if err := os.WriteFile(path, []byte("plain data"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := backupFile(path); err != nil {
+			t.Fatalf("backupFile (regular) failed: %v", err)
+		}
+		if _, err := os.Stat(path + ".bak"); err != nil {
+			t.Fatalf(".bak missing after regular-file backup: %v", err)
+		}
+
+		// Simulate the geo-file becoming a symlink, with a stale .bak.link
+		// left over from an even earlier backup cycle.
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(targetPath, path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path+".bak.link", []byte("stale link"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Second backup: path is now a symlink -> must remove the sibling
+		// .bak left over from the regular-file era.
+		if err := backupFile(path); err != nil {
+			t.Fatalf("backupFile (symlink) failed: %v", err)
+		}
+		if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+			t.Errorf("expected stale .bak to be removed after symlink backup")
+		}
+		if _, err := os.Stat(path + ".bak.link"); err != nil {
+			t.Errorf(".bak.link missing after symlink backup: %v", err)
+		}
+
+		cleanBackupFile(path)
+	})
+}
+
+func TestDATManagerService_CleanBackupFile(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "test.dat")
+	if err := os.WriteFile(filePath, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath+".bak", []byte("bak data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath+".bak.link", []byte("link data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanBackupFile(filePath)
+
+	if _, err := os.Stat(filePath + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("expected .bak to be removed")
+	}
+	if _, err := os.Stat(filePath + ".bak.link"); !os.IsNotExist(err) {
+		t.Errorf("expected .bak.link to be removed")
+	}
+}
+
+// TestDATManagerService_Update_CleansBackupsAfterSuccess covers WR-01:
+// unlike UpdateCustom (which calls cleanBackupFile right after a successful
+// validation), Update() left .bak/.bak.link files behind after every
+// successful bulk "xkeen -ug" run, making it unclear which version
+// Rollback() would actually restore.
+func TestDATManagerService_Update_CleansBackupsAfterSuccess(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	datPath := filepath.Join(tmpXray, "geoip.dat")
+	if err := os.WriteFile(datPath, []byte("initial dat data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mmdbPath := filepath.Join(tmpMihomo, "country.mmdb")
+	if err := os.WriteFile(mmdbPath, []byte("initial mmdb data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock xkeen binary that always succeeds, standing in for the real
+	// "xkeen -ug" invocation.
+	mockBin := filepath.Join(t.TempDir(), "mock-xkeen")
+	mockScript := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(mockBin, []byte(mockScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo, mockBin)
+
+	if err := svc.Update(); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	if _, err := os.Stat(datPath + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("expected %s.bak to be cleaned up after successful Update()", datPath)
+	}
+	if _, err := os.Stat(mmdbPath + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("expected %s.bak to be cleaned up after successful Update()", mmdbPath)
+	}
+}
+
+// TestDATManagerService_Rollback_PropagatesSymlinkRestoreFailure covers the
+// regression from 120-REVIEW.md CR-01: Rollback() used to discard every
+// rollbackFile() error and always return nil, so a failed symlink restore
+// left a geo-file missing on disk while POST /api/dat/rollback reported
+// {"success": true} to the caller. This reproduces an actual rollbackFile
+// failure (the target path is occupied by a non-empty directory, so
+// os.Symlink cannot recreate the symlink) and asserts Rollback() surfaces it.
+func TestDATManagerService_Rollback_PropagatesSymlinkRestoreFailure(t *testing.T) {
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	targetPath := filepath.Join(tmpXray, "actual.dat")
+	linkPath := filepath.Join(tmpXray, "geoip.dat")
+
+	if err := os.WriteFile(targetPath, []byte("target data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Backup the symlink -> creates geoip.dat.bak.link so Rollback() takes
+	// the os.Symlink restore path inside rollbackFile.
+	if err := backupFile(linkPath); err != nil {
+		t.Fatalf("backupFile failed: %v", err)
+	}
+
+	// Simulate the geo-file being replaced by a non-empty directory (e.g. a
+	// botched "xkeen -ug" run). rollbackFile's os.Remove(path) then fails
+	// with ENOTEMPTY (silently ignored), and the subsequent os.Symlink call
+	// fails because a directory still occupies the path.
+	if err := os.Remove(linkPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(linkPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(linkPath, "occupied"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	err := svc.Rollback()
+	if err == nil {
+		t.Fatal("expected Rollback() to return an error when rollbackFile fails, got nil")
+	}
+	if !strings.Contains(err.Error(), linkPath) {
+		t.Errorf("expected error to mention failed path %s, got: %v", linkPath, err)
+	}
+}
+
+func TestDATManagerService_Zkeenip_SearchTag_CIDR(t *testing.T) {
+	// 8.8.8.0/24 and 1.1.1.0/24
+	cidr1 := append(makeLD(1, []byte{8, 8, 8, 0}), makeVarintField(2, 24)...)
+	cidr2 := append(makeLD(1, []byte{1, 1, 1, 0}), makeVarintField(2, 24)...)
+
+	entry1 := append(makeLD(1, []byte("zkeenip")), makeLD(2, cidr1)...)
+	entry1 = append(entry1, makeLD(2, cidr2)...)
+
+	outer := makeLD(1, entry1)
+
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	// File named zkeenip.dat - must be detected as GeoIP even without "geoip" substring
+	os.WriteFile(filepath.Join(tmpXray, "zkeenip.dat"), outer, 0644)
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	res, err := svc.SearchTag("zkeenip.dat", "zkeenip", "", 0, 10)
+	if err != nil {
+		t.Fatalf("SearchTag failed: %v", err)
+	}
+	if res.Total != 2 {
+		t.Fatalf("expected 2 CIDRs in zkeenip.dat, got %d", res.Total)
+	}
+	if res.Entries[0] != "8.8.8.0/24" {
+		t.Errorf("expected 8.8.8.0/24, got %s", res.Entries[0])
+	}
+
+	// Test CIDR containment search: searching for IP 8.8.8.8 must match 8.8.8.0/24
+	resSearch, err := svc.SearchTag("zkeenip.dat", "zkeenip", "8.8.8.8", 0, 10)
+	if err != nil {
+		t.Fatalf("SearchTag with IP query failed: %v", err)
+	}
+	if resSearch.Total != 1 || resSearch.Entries[0] != "8.8.8.0/24" {
+		t.Errorf("expected 8.8.8.8 to match 8.8.8.0/24, got %v", resSearch.Entries)
+	}
+}
+
+func TestDATManagerService_Lookup_DomainAndFormatRule(t *testing.T) {
+	dom1 := makeLD(2, []byte("google.com"))
+	entryGoogle := append(makeLD(1, []byte("google")), makeLD(2, dom1)...)
+	outerGeoSite := makeLD(1, entryGoogle)
+
+	domZkeen := makeLD(2, []byte("antizapret.prostovpn.org"))
+	entryZkeen := append(makeLD(1, []byte("antizapret")), makeLD(2, domZkeen)...)
+	outerZkeen := makeLD(1, entryZkeen)
+
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	os.WriteFile(filepath.Join(tmpXray, "geosite.dat"), outerGeoSite, 0644)
+	os.WriteFile(filepath.Join(tmpXray, "zkeen.dat"), outerZkeen, 0644)
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	// Lookup domain in geosite.dat
+	results, err := svc.Lookup("mail.google.com", "domain", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatalf("expected at least 1 match for mail.google.com")
+	}
+
+	foundGoogle := false
+	for _, r := range results {
+		if r.File == "geosite.dat" && r.Tag == "google" {
+			foundGoogle = true
+			if r.Rule != "geosite:google" {
+				t.Errorf("expected rule 'geosite:google', got '%s'", r.Rule)
+			}
+		}
+	}
+	if !foundGoogle {
+		t.Errorf("expected google tag match in geosite.dat")
+	}
+
+	// Lookup domain in zkeen.dat - rule must have ext: prefix
+	resultsZkeen, err := svc.Lookup("antizapret.prostovpn.org", "domain", []string{"zkeen.dat"})
+	if err != nil {
+		t.Fatalf("Lookup zkeen failed: %v", err)
+	}
+	if len(resultsZkeen) == 0 {
+		t.Fatalf("expected match in zkeen.dat")
+	}
+	if resultsZkeen[0].Rule != "ext:zkeen.dat:antizapret" {
+		t.Errorf("expected rule 'ext:zkeen.dat:antizapret', got '%s'", resultsZkeen[0].Rule)
+	}
+}
+
+func TestMatchDomain(t *testing.T) {
+	cases := []struct {
+		rule   string
+		target string
+		want   bool
+	}{
+		{"youtube", "youtube.com", true},
+		{"youtube", "www.youtube.com", true},
+		{"google.com", "mail.google.com", true},
+		{"google.com", "google.com", true},
+		{"google.com", "evilgoogle.com", false},
+		{"mail.google.com", "google.com", false}, // subdomain rule must NOT match parent domain
+		{"keyword:youtube", "youtube.com", true},
+		{"keyword:google-analytics", "analytics", false}, // target must contain keyword, not vice versa
+		{"keyword:analytics", "google-analytics.com", true},
+		{"full:youtube.com", "youtube.com", true},
+		{"full:youtube.com", "m.youtube.com", false},
+		{"regexp:^[a-z]+\\.google\\.com$", "mail.google.com", true},
+		{"regexp:^[0-9]+\\.google\\.com$", "mail.google.com", false},
+	}
+	for _, c := range cases {
+		got := matchDomain(c.rule, c.target)
+		if got != c.want {
+			t.Errorf("matchDomain(%q, %q) = %v, want %v", c.rule, c.target, got, c.want)
+		}
+	}
+}
+
+func TestNormalizeQueryInput(t *testing.T) {
+	tests := []struct {
+		input      string
+		wantDomain string
+		wantIsIP   bool
+	}{
+		{"https://mail.google.com/mail/u/0/#inbox", "mail.google.com", false},
+		{"google.com:443", "google.com", false},
+		{"example.com.", "example.com", false},
+		{"1.1.1.1:53", "1.1.1.1", true},
+		{"[2001:4860:4860::8888]:53", "2001:4860:4860::8888", true},
+		{"  8.8.8.8  ", "8.8.8.8", true},
+	}
+
+	for _, tt := range tests {
+		domain, ip := normalizeQueryInput(tt.input)
+		if domain != tt.wantDomain {
+			t.Errorf("normalizeQueryInput(%q) domain = %q, want %q", tt.input, domain, tt.wantDomain)
+		}
+		if (ip != nil) != tt.wantIsIP {
+			t.Errorf("normalizeQueryInput(%q) isIP = %v, want %v", tt.input, ip != nil, tt.wantIsIP)
+		}
+	}
+}
+
+func TestSearchTag_PagedNoQuery(t *testing.T) {
+	// Create a GeoSite tag with 5 domains
+	var entryDomains []byte
+	for i := 1; i <= 5; i++ {
+		dom := makeLD(2, []byte(fmt.Sprintf("sub%d.example.com", i)))
+		entryDomains = append(entryDomains, makeLD(2, dom)...)
+	}
+	entry := append(makeLD(1, []byte("testtag")), entryDomains...)
+	outer := makeLD(1, entry)
+
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+	os.WriteFile(filepath.Join(tmpXray, "geosite.dat"), outer, 0644)
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	// Page 0 with pageSize 2 -> should return 2 items, total 5, has_more true
+	res, err := svc.SearchTag("geosite.dat", "testtag", "", 0, 2)
+	if err != nil {
+		t.Fatalf("SearchTag failed: %v", err)
+	}
+	if res.Total != 5 {
+		t.Errorf("expected total 5, got %d", res.Total)
+	}
+	if len(res.Entries) != 2 {
+		t.Fatalf("expected 2 paged entries, got %d", len(res.Entries))
+	}
+	if res.Entries[0] != "sub1.example.com" || res.Entries[1] != "sub2.example.com" {
+		t.Errorf("unexpected paged entries: %v", res.Entries)
+	}
+	if !res.HasMore {
+		t.Errorf("expected has_more to be true")
+	}
+
+	// Page 2 with pageSize 2 -> should return 1 item (sub5), has_more false
+	resPage2, err := svc.SearchTag("geosite.dat", "testtag", "", 2, 2)
+	if err != nil {
+		t.Fatalf("SearchTag page 2 failed: %v", err)
+	}
+	if len(resPage2.Entries) != 1 || resPage2.Entries[0] != "sub5.example.com" {
+		t.Errorf("unexpected page 2 entries: %v", resPage2.Entries)
+	}
+	if resPage2.HasMore {
+		t.Errorf("expected has_more to be false on last page")
+	}
+}
+
+func TestDetectProtobufIsGeoIP_Proto3Defaults(t *testing.T) {
+	// 1. GeoSite with proto3 default type=0 (Plain), so field 1 is omitted!
+	// Only field 2 (string value = wire type 2) is present in Domain
+	domProto3 := makeLD(2, []byte("google.com"))
+	siteEntry := append(makeLD(1, []byte("tag")), makeLD(2, domProto3)...)
+	siteOuter := makeLD(1, siteEntry)
+
+	if detectProtobufIsGeoIP(siteOuter) {
+		t.Errorf("expected GeoSite with omitted default type=0 to be detected as GeoSite (false), got true")
+	}
+
+	// 2. GeoIP with field 2 prefix (varint = wire type 0)
+	cidrProto3 := append(makeLD(1, []byte{1, 1, 1, 1}), makeVarintField(2, 32)...)
+	ipEntry := append(makeLD(1, []byte("tag")), makeLD(2, cidrProto3)...)
+	ipOuter := makeLD(1, ipEntry)
+
+	if !detectProtobufIsGeoIP(ipOuter) {
+		t.Errorf("expected GeoIP to be detected as GeoIP (true), got false")
+	}
+}
+
+func TestPBSkipField_BoundsChecks(t *testing.T) {
+	// Truncated 64-bit field (only 3 bytes available instead of 8)
+	shortData := []byte{0x01, 0x02, 0x03}
+	_, err := pbSkipField(shortData, 0, 1) // wireType 1 is 64-bit
+	if err == nil {
+		t.Errorf("expected error for truncated 64-bit field, got nil")
+	}
+
+	// Truncated 32-bit field (only 2 bytes available instead of 4)
+	_, err = pbSkipField(shortData, 0, 5) // wireType 5 is 32-bit
+	if err == nil {
+		t.Errorf("expected error for truncated 32-bit field, got nil")
+	}
+}
+
+func TestDATManagerService_Lookup_URLInputAndIPFilter(t *testing.T) {
+	domGoogle := makeLD(2, []byte("google.com"))
+	entryGoogle := append(makeLD(1, []byte("google")), makeLD(2, domGoogle)...)
+	outerGeoSite := makeLD(1, entryGoogle)
+
+	cidrGoogle := append(makeLD(1, []byte{8, 8, 8, 8}), makeVarintField(2, 32)...)
+	entryIP := append(makeLD(1, []byte("dns")), makeLD(2, cidrGoogle)...)
+	outerGeoIP := makeLD(1, entryIP)
+
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	os.WriteFile(filepath.Join(tmpXray, "geosite.dat"), outerGeoSite, 0644)
+	os.WriteFile(filepath.Join(tmpXray, "geoip.dat"), outerGeoIP, 0644)
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	// 1. Lookup with URL input: must be normalized and match google.com
+	resURL, err := svc.Lookup("https://mail.google.com/search?q=test:443", "domain", nil)
+	if err != nil {
+		t.Fatalf("Lookup with URL failed: %v", err)
+	}
+	if len(resURL) == 0 || resURL[0].Tag != "google" {
+		t.Errorf("expected match for URL input, got %v", resURL)
+	}
+
+	// 2. Lookup with filterType "ip": must NOT return geosite results even if DNS succeeds
+	resIP, err := svc.Lookup("8.8.8.8", "ip", nil)
+	if err != nil {
+		t.Fatalf("Lookup with IP failed: %v", err)
+	}
+	if len(resIP) == 0 || resIP[0].Type != "geoip" {
+		t.Errorf("expected geoip result for IP lookup, got %v", resIP)
+	}
+	for _, r := range resIP {
+		if r.Type == "geosite" {
+			t.Errorf("unexpected geosite result when filterType=ip: %v", r)
+		}
 	}
 }

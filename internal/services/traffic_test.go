@@ -1,10 +1,15 @@
 package services
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -986,5 +991,205 @@ func TestCheckQuotas_QuotasUnderLimitNoAPIQuery(t *testing.T) {
 
 	if apiCalled {
 		t.Fatal("expected no API calls when quota is not exceeded")
+	}
+}
+
+func TestTrafficQuotaService_KernelAliveGate(t *testing.T) {
+	origOutput := log.Writer()
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(origOutput) })
+
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://127.0.0.1:59999", "")
+	svc.SetKernelAliveCheck(func() bool { return false })
+
+	var streamCalls atomic.Int64
+	svc.wg.Add(1)
+	go svc.wsReconnectLoop("test-gate", func() error {
+		streamCalls.Add(1)
+		return nil
+	})
+
+	// Wait 100ms - if it wasn't sleeping, it would have executed streamFn immediately
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop service
+	close(svc.stopCh)
+	svc.wg.Wait()
+
+	if calls := streamCalls.Load(); calls != 0 {
+		t.Fatalf("expected 0 streamFn calls while kernel is dead, got %d", calls)
+	}
+
+	output := logBuf.String()
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	matchCount := 0
+	for _, l := range lines {
+		if strings.Contains(l, "TrafficQuota: [test-gate] Mihomo kernel is not running, entering sleep mode") {
+			matchCount++
+		}
+	}
+	if matchCount != 1 {
+		t.Fatalf("expected exactly 1 sleep log line, got %d (output: %s)", matchCount, output)
+	}
+
+	// Also verify that with nil predicate, streamFn IS called
+	svc2 := NewTrafficQuotaService(tmp, "http://127.0.0.1:59999", "")
+	var streamCalls2 atomic.Int64
+	svc2.wg.Add(1)
+	go svc2.wsReconnectLoop("test-default", func() error {
+		streamCalls2.Add(1)
+		return nil // returns nil -> exits loop
+	})
+	svc2.wg.Wait()
+	if calls := streamCalls2.Load(); calls != 1 {
+		t.Fatalf("expected 1 streamFn call with default (nil) predicate, got %d", calls)
+	}
+}
+
+func TestTrafficQuotaService_WakeOnKernelStarted(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://127.0.0.1:59999", "")
+
+	var alive atomic.Bool
+	alive.Store(false)
+	svc.SetKernelAliveCheck(func() bool {
+		return alive.Load()
+	})
+
+	called := make(chan struct{})
+	svc.wg.Add(1)
+	go svc.wsReconnectLoop("test-wake", func() error {
+		close(called)
+		return nil // returns nil -> wsReconnectLoop exits gracefully
+	})
+
+	// Ensure it is in sleep mode
+	time.Sleep(50 * time.Millisecond)
+
+	// Test non-blocking property of NotifyKernelStarted when channel might be full
+	for i := 0; i < 5; i++ {
+		svc.NotifyKernelStarted()
+	}
+
+	// Wake the service
+	alive.Store(true)
+	svc.NotifyKernelStarted()
+
+	// Assert called receives within 2 seconds (well below 15s fallback poll)
+	select {
+	case <-called:
+		// Success: woke up on event!
+	case <-time.After(2 * time.Second):
+		close(svc.stopCh)
+		t.Fatal("streamFn was not called within 2s after NotifyKernelStarted()")
+	}
+
+	svc.wg.Wait()
+}
+
+func TestTrafficQuotaService_NoBusySpinOnWakeError(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://127.0.0.1:59999", "")
+
+	// Kernel is alive, but streamFn fails (simulating connection refused while Mihomo initializes)
+	svc.SetKernelAliveCheck(func() bool {
+		return true
+	})
+
+	var attempts atomic.Int32
+	svc.wg.Add(1)
+	go svc.wsReconnectLoop("test-nospin", func() error {
+		attempts.Add(1)
+		return errors.New("connection refused")
+	})
+
+	// Wait briefly for the first failed attempt to enter backoff
+	time.Sleep(50 * time.Millisecond)
+
+	// Send wake notification
+	svc.NotifyKernelStarted()
+
+	// Wait 150ms. If busy-spin occurred (self-re-signaling), attempts would skyrocket to hundreds/thousands.
+	time.Sleep(150 * time.Millisecond)
+
+	// Clean up
+	close(svc.stopCh)
+	svc.wg.Wait()
+
+	got := attempts.Load()
+	if got > 3 {
+		t.Fatalf("expected <= 3 attempts without busy-spin, got %d", got)
+	}
+}
+
+func TestTrafficQuotaService_SleepEmitsZeroSlice(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://127.0.0.1:59999", "")
+
+	// Set initial stats so we can verify they get saved to disk
+	svc.mu.Lock()
+	svc.proxyStats["test-proxy"] = &ProxyTraffic{
+		ProxyName:   "test-proxy",
+		UploadBytes: 1234,
+	}
+	svc.mu.Unlock()
+
+	trafficCh, unsubTraffic := svc.SubscribeTraffic()
+	defer unsubTraffic()
+
+	connCh, unsubConn := svc.SubscribeConnections()
+	defer unsubConn()
+
+	svc.handleKernelSleep("test-slice")
+
+	// Verify zero traffic message
+	select {
+	case msg := <-trafficCh:
+		var payload map[string]interface{}
+		if err := json.Unmarshal(msg, &payload); err != nil {
+			t.Fatalf("failed to unmarshal traffic message: %v", err)
+		}
+		if up, ok := payload["up"].(float64); !ok || up != 0 {
+			t.Fatalf("expected up=0 in zero slice, got %v", payload["up"])
+		}
+		if down, ok := payload["down"].(float64); !ok || down != 0 {
+			t.Fatalf("expected down=0 in zero slice, got %v", payload["down"])
+		}
+		if conns, ok := payload["connections"].(float64); !ok || conns != 0 {
+			t.Fatalf("expected connections=0 in zero slice, got %v", payload["connections"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for zero traffic slice")
+	}
+
+	// Verify empty connections message
+	select {
+	case msg := <-connCh:
+		var payload struct {
+			Connections []mihomoConn `json:"connections"`
+		}
+		if err := json.Unmarshal(msg, &payload); err != nil {
+			t.Fatalf("failed to unmarshal connections message: %v", err)
+		}
+		if len(payload.Connections) != 0 {
+			t.Fatalf("expected empty connections slice, got %d items", len(payload.Connections))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for empty connections slice")
+	}
+
+	// Verify disk persistence
+	data, err := os.ReadFile(svc.storePath())
+	if err != nil {
+		t.Fatalf("expected traffic store file to exist on disk: %v", err)
+	}
+	var store TrafficStore
+	if err := json.Unmarshal(data, &store); err != nil {
+		t.Fatalf("failed to unmarshal saved traffic store: %v", err)
+	}
+	if store.ProxyStats["test-proxy"] == nil || store.ProxyStats["test-proxy"].UploadBytes != 1234 {
+		t.Fatalf("expected saved proxy stats on disk, got %+v", store.ProxyStats)
 	}
 }

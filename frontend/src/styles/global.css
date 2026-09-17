@@ -37,8 +37,9 @@
   --primary: #29c2f0;
   --accent-hover: #45cef5;
   --accent-2: #1aa6d4;
-  --accent-soft: rgba(41, 194, 240, 0.14);
-  --accent-line: rgba(41, 194, 240, 0.42);
+  --accent-soft: rgba(var(--accent-rgb), 0.14);
+  --accent-line: rgba(var(--accent-rgb), 0.42);
+  --warning-soft: color-mix(in srgb, var(--warning) 14%, transparent);
 
   /* Semantic */
   --success: #46d18a;
@@ -59,41 +60,16 @@
   --bg-group-head-from: rgba(20, 51, 79, 0.9);
   --bg-group-head-to: rgba(16, 42, 68, 0.95);
 
-  --hover: rgba(41, 194, 240, 0.08);
+  --hover: rgba(var(--accent-rgb), 0.08);
 
-  /* Design system aliases (Card.svelte / Button.svelte / etc.) */
-  --color-primary-500: var(--accent);
-  --color-primary-600: var(--accent-hover);
-  --color-bg-canvas: var(--bg-page);
-  --color-bg-surface: var(--bg-card);
-  --color-text-primary: var(--fg-primary);
-  --color-text-secondary: var(--fg-secondary);
-  --color-border-subtle: var(--border);
-  --color-danger: var(--danger);
+  /* Accent swatch tokens */
+  --swatch-check: #ffffff;
+  --swatch-blue: #0a779f;
+  --swatch-indigo: #4f46e5;
+  --swatch-steel: #46647c;
+  --swatch-graphite: #33393f;
 
-  /* Semantic status aliases — consumed by Logs / SmartProxy / constructors /
-     MihomoSocketMigrateModal. Each points at a base token that already has a
-     [data-theme="light"] override, so the alias adapts per-theme with no
-     duplicate block. Several call sites carry a hardcoded hex fallback
-     (var(--color-warning, #f59e0b)); once these are defined the fallback is
-     never reached and light-theme adaptation is restored. */
-  --color-success: var(--success);
-  --color-error: var(--danger);
-  --color-warning: var(--warning);
-  --color-info: var(--accent);
-  --color-primary: var(--primary);
-  --color-border: var(--border);
-  --color-warning-fg: var(--warning);
-  --color-warning-bg: color-mix(in srgb, var(--warning) 14%, transparent);
-
-  /* Phantom-token aliases — a shadow vocabulary that several later components
-     (XrayRoutingConstructor, MihomoGenerator, Connections, Services, Logs …)
-     reference but that was never defined here. Most call sites have no
-     fallback, so `background: var(--bg-surface-hover)` silently became
-     `transparent` and `color: var(--fg)` fell through to inheritance. Each
-     alias points at a canonical token that already carries a
-     [data-theme="light"] override, so light-theme adaptation comes for free. */
-  --fg: var(--fg-primary);
+  /* Phantom-token aliases */
   --fg-muted: var(--fg-dim);
   --text-muted: var(--fg-dim);
   --error: var(--danger);
@@ -112,7 +88,6 @@
   --fg-terminal: #d9e7f4;
   --bg-card-hover: var(--bg-elevated);
   --bg-card-subtle: var(--surface-tint);
-  --bg-surface-hover: var(--bg-elevated);
   --bg-surface-elevated: var(--bg-elevated);
   --bg-surface-raised: var(--bg-elevated);
   --bg-surface-active: var(--accent-soft);
@@ -133,8 +108,10 @@
   --spacing-xs: var(--spacing-1);
 
   /* Type */
-  --font-family-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-family-sans:
+    'Manrope', 'TwemojiMozilla', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-mono:
+    'JetBrains Mono', 'TwemojiMozilla', ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.8125rem;
   --font-size-base: 0.875rem;
@@ -192,6 +169,41 @@
   --cm-bracket: #d9e7f4;
   --cm-active-line: #0b1a2d;
   --cm-border: #0e2034;
+
+  /* Code-preview token set: one-way semantic projection for static
+     JSON/YAML config previews (constructors). Every value is a var()
+     reference onto the CodeMirror set above; the chain is one-way only
+     (no reverse references) and no new literal colours are introduced
+     here (DS2-01). */
+  --code-bg: var(--cm-bg);
+  --code-fg: var(--cm-property);
+  --code-key: var(--cm-keyword);
+  --code-string: var(--cm-string);
+  --code-number: var(--cm-number);
+  --code-boolean: var(--cm-boolean);
+  --code-null: var(--cm-null);
+  --code-comment: var(--cm-comment);
+  --code-punctuation: var(--cm-bracket);
+  --code-border: var(--cm-border);
+
+  /* --seq-1..8 — named decorative multi-hue sequence (DS2-02). Applied by
+     index: element N in a list gets step ((N - 1) % 8) + 1, so order stays
+     stable across renders (index-based, not hash-based) and cycles cleanly
+     past 8 items. Steps 1-5 reuse existing semantic tokens (var-chaining,
+     no new hex); steps 6-8 are the only literally new colours this phase
+     introduces, with separate dark/light values below. Step 1 chains
+     through --accent-text (not raw --accent): raw --accent measures
+     3.68:1 on a light-theme card and fails WCAG AA as a foreground colour,
+     while --accent-text is the existing alias already engineered to solve
+     exactly this per-theme contrast problem. */
+  --seq-1: var(--accent-text);
+  --seq-2: var(--success);
+  --seq-3: var(--warning);
+  --seq-4: var(--danger);
+  --seq-5: var(--purple);
+  --seq-6: #5b9df9;
+  --seq-7: #f28fce;
+  --seq-8: #8de6c8;
 }
 
 /* ------------ Light theme (inverted) ------------- */
@@ -216,12 +228,12 @@
   --border-light: rgba(0, 0, 0, 0.05);
   --border-strong: #c9d3df;
 
-  --accent: #0e8fbf;
-  --primary: #0e8fbf;
-  --accent-hover: #0a779f;
-  --accent-rgb: 14, 143, 191;
+  --accent: #0a779f;
+  --primary: #0a779f;
+  --accent-hover: #08698c;
+  --accent-rgb: 10, 119, 159;
 
-  --hover: rgba(14, 143, 191, 0.07);
+  --hover: rgba(var(--accent-rgb), 0.07);
 
   --success: #1a7f4e;
   --warning: #8b5c00;
@@ -229,7 +241,7 @@
   --purple: #7e22ce;
   --purple-bg: rgba(126, 34, 206, 0.08);
   --purple-border: rgba(126, 34, 206, 0.25);
-  --accent-text: var(--accent-hover);
+  --accent-text: var(--accent);
   --scrollbar-thumb: var(--border-strong);
   --scrollbar-thumb-hover: #a9b8c9;
   --surface-tint: rgba(12, 34, 55, 0.04);
@@ -256,6 +268,12 @@
   --cm-bracket: #0c2237;
   --cm-active-line: #f0f4f9;
   --cm-border: #e1e7ef;
+
+  /* --seq-1..5 resolve through the already-overridden tokens above; only the
+     3 literal steps need a light-theme override (DS2-02). */
+  --seq-6: #2f5fc7;
+  --seq-7: #b23e82;
+  --seq-8: #1f7a63;
 }
 
 /* ------------ Density Modes (Theme-agnostic: applies orthogonally to dark and light themes) ------------- */
@@ -277,6 +295,61 @@
   --grid-gap: 16px;
   --row-gap: 12px;
   --font-size-table: 0.8125rem;
+}
+
+/* ------------ Accent color variants (Theme-agnostic: applies orthogonally to dark and light themes) ------------- */
+[data-accent='indigo'] {
+  --accent-2: #4f46e5;
+}
+
+[data-accent='indigo']:not([data-theme='light']) {
+  --accent: #818cf8;
+  --primary: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-rgb: 129, 140, 248;
+}
+
+[data-theme='light'][data-accent='indigo'] {
+  --accent: #4f46e5;
+  --primary: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-rgb: 79, 70, 229;
+}
+
+[data-accent='steel'] {
+  --accent-2: #5c7691;
+}
+
+[data-accent='steel']:not([data-theme='light']) {
+  --accent: #7d95ad;
+  --primary: #7d95ad;
+  --accent-hover: #93a8bd;
+  --accent-rgb: 125, 149, 173;
+}
+
+[data-theme='light'][data-accent='steel'] {
+  --accent: #46647c;
+  --primary: #46647c;
+  --accent-hover: #3a5468;
+  --accent-rgb: 70, 100, 124;
+}
+
+[data-accent='graphite'] {
+  --accent-2: #8b96a3;
+}
+
+[data-accent='graphite']:not([data-theme='light']) {
+  --accent: #aab4bf;
+  --primary: #aab4bf;
+  --accent-hover: #c0c8d1;
+  --accent-rgb: 170, 180, 191;
+}
+
+[data-theme='light'][data-accent='graphite'] {
+  --accent: #33393f;
+  --primary: #33393f;
+  --accent-hover: #262b30;
+  --accent-rgb: 51, 57, 63;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -330,7 +403,7 @@ body {
 
 /* ------------ Typography ------------- */
 h1 {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.01em;
   margin-bottom: 0.25rem;
@@ -360,7 +433,7 @@ p {
 /* ------------ Card ------------- */
 .card {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 60%), var(--bg-card);
-  border: 1px solid var(--line-soft, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
   padding: var(--card-pad);
   box-shadow: var(--shadow);
@@ -376,10 +449,9 @@ h2.card-title {
   justify-content: space-between;
   margin: calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad)) 18px;
   padding: 16px 22px 12px;
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--fg-secondary);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   border-bottom: 0;
@@ -399,7 +471,7 @@ h2.card-title {
   text-transform: none;
   letter-spacing: 0;
   font-weight: 500;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .card .card-title .ct-actions > button,
@@ -450,7 +522,6 @@ h2.card-title {
     box-shadow var(--transition-fast),
     opacity var(--transition-fast);
   border: 1px solid transparent;
-  outline: none;
   text-decoration: none;
   color: var(--fg-primary);
 }
@@ -573,14 +644,14 @@ input[type='number'] {
 .error-text {
   display: block;
   margin-top: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--danger);
 }
 
 .warning-text {
   display: block;
   margin-top: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--warning);
 }
 
@@ -797,11 +868,11 @@ input[type='number'] {
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px 8px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.16em;
-  color: var(--accent);
+  color: var(--fg-secondary);
   cursor: pointer;
   list-style: none;
   user-select: none;
@@ -812,7 +883,7 @@ input[type='number'] {
 }
 
 .nav-group summary:hover {
-  color: var(--accent-hover);
+  color: var(--fg-primary);
 }
 
 .nav-group summary > .group-ttl {
@@ -833,7 +904,7 @@ input[type='number'] {
 
 .nav-group-arrow {
   transition: transform 0.2s ease;
-  font-size: 9px;
+  font-size: 12px;
   color: var(--fg-faint);
   opacity: 0.6;
 }
@@ -906,6 +977,14 @@ input[type='number'] {
   opacity: 1;
 }
 
+.nav-item .lbl,
+.nav-group summary > .group-ttl .lbl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 /* Icon-rail collapse (desktop-only, D-12) — mobile off-canvas drawer
    (max-width: 768px) must never be affected, so every rail rule is
    scoped inside this media query to keep the two collapse mechanisms
@@ -954,6 +1033,46 @@ input[type='number'] {
     display: none;
   }
 
+  /* CR-03: in rail mode the group header carries no label (just an icon +
+     hidden arrow), so it reads as one more page-link icon — indistinguishable
+     from the real nav-item icons below it, even though clicking it actually
+     toggles the native <details> open state. Worse, a group collapsed while
+     the sidebar was expanded stays collapsed in rail mode too, so its pages
+     silently vanish from the icon rail with no visual trace they ever
+     existed. Hiding the (now purely decorative, unlabeled) summary and
+     forcing every item to render regardless of the group's stored open
+     state fixes both: rail always shows the full page set, and grouping is
+     conveyed by spacing instead of an ambiguous toggle control. */
+  .sidebar.rail .nav-group summary {
+    display: none;
+  }
+
+  .sidebar.rail .nav-group > .nav-item {
+    display: flex !important;
+  }
+
+  /* Chromium wraps non-summary <details> content in an internal
+     ::details-content box and hides THAT (content-visibility: hidden +
+     block-size: 0) when the details is closed — not the children
+     directly. Overriding display/content-visibility on the .nav-item
+     children (above) does nothing while their ancestor box is collapsed;
+     the ancestor itself has to be forced open. */
+  .sidebar.rail .nav-group::details-content {
+    content-visibility: visible !important;
+    block-size: auto !important;
+    overflow: visible !important;
+  }
+
+  .sidebar.rail .nav-group {
+    margin-top: 0;
+  }
+
+  .sidebar.rail .nav-group + .nav-group {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+
   /* CR-01: the floating rail-item tooltip used to live here as a CSS-only
      .nav-item::after with position: absolute. It never actually painted —
      .sidebar's overflow-y: auto forces overflow-x to compute to auto too
@@ -984,7 +1103,6 @@ input[type='number'] {
 /* Main content */
 .main-content {
   flex: 1;
-  overflow-y: auto;
   margin-left: var(--sidebar-w);
   min-width: 0;
   background: var(--bg-page);
@@ -1008,6 +1126,10 @@ input[type='number'] {
 :is(button, a, input, select, textarea, [tabindex]:not([tabindex='-1'])):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+:is(button, a, input, select, textarea, [tabindex]:not([tabindex='-1'])):focus:not(:focus-visible) {
+  outline: none;
 }
 
 .burger-btn {
@@ -1204,7 +1326,7 @@ body.drawer-locked {
 }
 
 .version-badge {
-  font-size: 10.5px;
+  font-size: 12px;
   background: var(--surface-tint);
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -1249,11 +1371,10 @@ body.drawer-locked {
 }
 
 .stat-label {
-  font-size: 10.5px;
+  font-size: var(--font-size-xs);
   color: var(--fg-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  font-weight: 700;
+  letter-spacing: 0.01em;
+  font-weight: 600;
   margin-bottom: 12px;
 }
 
@@ -1268,7 +1389,7 @@ body.drawer-locked {
 
 .res-sub {
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: 12px;
   margin-top: 8px;
   font-family: var(--font-family-mono);
 }
@@ -1339,86 +1460,11 @@ body.drawer-locked {
   flex-wrap: wrap;
 }
 
-.page-header-content h1 {
-  margin: 0;
-}
-
 .page-header-actions {
   display: flex;
-  gap: 0.6rem;
-  flex-shrink: 0;
-}
-
-/* ----- Shared page-head pattern (Connections, Rules, Proxies, etc.) ----- */
-.page-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 24px;
-  gap: 16px;
+  gap: var(--spacing-2, 8px);
   flex-wrap: wrap;
-}
-
-.page-head h1 {
-  margin: 4px 0 6px;
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.page-head .sub {
-  margin: 0;
-  color: var(--fg-secondary);
-  font-size: 13px;
-}
-
-.page-head .crumbs {
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: var(--fg-dim);
-  font-weight: 600;
-  text-transform: uppercase;
-  margin-bottom: 6px;
-}
-
-.crumb-sep,
-.crumb-separator {
-  color: var(--fg-faint);
-  margin: 0 6px;
-  font-weight: 400;
-  display: inline-block;
-}
-
-.ph-actions {
-  display: flex;
-  gap: 10px;
   align-items: center;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  padding-top: 6px;
-  /* flex-shrink: 0 сохраняет высоту кнопок при переносе .page-head на новую
-     строку, но без ограничения ширины сам блок не переносит свои дочерние
-     кнопки внутри себя и вылезает за край контента на узких экранах */
-  max-width: 100%;
-}
-
-@media (max-width: 640px) {
-  .page-head {
-    flex-direction: column;
-    gap: 12px;
-    margin-bottom: 16px;
-  }
-
-  .ph-actions {
-    width: 100%;
-    padding-top: 0;
-    gap: 8px;
-  }
-
-  .ph-actions .btn {
-    flex: 1;
-    justify-content: center;
-    min-width: 0;
-  }
 }
 
 /* ----- Breadcrumbs ----- */
@@ -1427,7 +1473,7 @@ body.drawer-locked {
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.06em;
   color: var(--fg-dim);
   font-weight: 600;
@@ -1513,7 +1559,7 @@ select.input {
   border-radius: var(--radius-md);
   color: var(--fg-primary);
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 13px;
   min-width: 140px;
   outline: none;
   transition:
@@ -1548,7 +1594,7 @@ select.input:focus {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--fg-secondary);
   font-family: var(--font-family-mono);
   letter-spacing: 0.02em;
@@ -1578,14 +1624,14 @@ table.data-table {
 
 .table-container thead th,
 table.data-table thead th {
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--surface-tint, rgba(0, 0, 0, 0.05));
   text-align: left;
   padding: 11px 14px;
-  font-size: 10.5px;
+  font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   font-weight: 700;
-  color: var(--fg-dim);
+  color: var(--fg-secondary);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1628,7 +1674,7 @@ td.mono,
   gap: 4px;
   padding: 2px 8px;
   border-radius: 3px;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1676,18 +1722,26 @@ td.mono,
   gap: 6px;
   padding: 4px 10px;
   border-radius: 4px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--fg-secondary);
 }
 
+.status-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
 .status-badge.running,
 .status-badge.active {
   color: var(--success);
   border-color: color-mix(in srgb, var(--success) 45%, transparent);
-  background: color-mix(in srgb, var(--success) 10%, transparent);
+  background: color-mix(in srgb, var(--success) 6%, transparent);
 }
 
 .status-badge.stopped {
@@ -1696,9 +1750,27 @@ td.mono,
   background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
+.status-badge.warning {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.status-badge.idle {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--fg-secondary) 45%, transparent);
+  background: color-mix(in srgb, var(--fg-secondary) 10%, transparent);
+}
+
+.status-badge.info {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
 /* version chip */
 .version-tag {
-  font-size: 10.5px;
+  font-size: 12px;
   background: var(--surface-tint);
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -1716,7 +1788,7 @@ td.mono,
   gap: 6px;
   padding: 4px 10px;
   border-radius: 4px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   border: 1px solid var(--border);
   color: var(--fg-secondary);
@@ -1895,7 +1967,7 @@ pre.code-output {
 }
 
 .stat-session {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-dim);
   margin-top: 6px;
   font-family: var(--font-family-mono);
@@ -1945,12 +2017,12 @@ pre.code-output {
 .file-row .fr-name {
   flex: 1;
   font-family: var(--font-family-mono);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .file-row .fr-meta {
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: 12px;
   font-family: var(--font-family-mono);
 }
 
@@ -1965,10 +2037,9 @@ pre.code-output {
 }
 
 .field-group-head {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  font-weight: 700;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.01em;
+  font-weight: 600;
   color: var(--fg-dim);
   margin-bottom: 12px;
 }
@@ -2127,15 +2198,14 @@ pre.code-output {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-weight: 700;
-  font-size: 12.5px;
+  font-weight: 600;
+  font-size: 13px;
   letter-spacing: 0.04em;
   color: var(--danger);
-  text-transform: uppercase;
 }
 
 .api-offline-desc {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--fg-secondary);
 }
 
@@ -2160,7 +2230,7 @@ pre.code-output {
 
 .api-offline-tag {
   font-family: var(--font-family-mono);
-  font-size: 10.5px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   color: var(--fg-dim);
   padding: 3px 8px;
@@ -2401,17 +2471,16 @@ a.chip:hover {
   h2.card-title {
     margin: calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad)) 12px;
     padding: 12px 14px 10px;
-    font-size: 11px;
-    letter-spacing: 0.12em;
+    font-size: var(--font-size-xs);
+    letter-spacing: 0.01em;
   }
 
   .card-label {
-    font-size: 11px;
+    font-size: 12px;
     letter-spacing: 0.05em;
   }
 
   .filters,
-  .ph-actions,
   .btn-group,
   .toolbar {
     display: flex;
@@ -2421,11 +2490,6 @@ a.chip:hover {
 
   .form-group {
     margin-bottom: 0.75rem;
-  }
-
-  .page-head {
-    margin-bottom: 14px;
-    gap: 10px;
   }
 }
 
@@ -2469,8 +2533,11 @@ a.chip:hover {
   box-sizing: border-box !important;
 }
 
-.editor-page-container > .page-head {
-  flex: 0 0 auto !important;
+.editor-page-container.constructor-mode {
+  height: auto !important;
+  min-height: 100% !important;
+  overflow: visible !important;
+  padding-bottom: 60px !important;
 }
 
 .editor-tabs {
@@ -2527,6 +2594,8 @@ a.chip:hover {
 }
 
 .editor-empty-card {
+  flex: 1 !important;
+  min-width: 0 !important;
   align-items: center !important;
   justify-content: center !important;
   padding: 24px !important;
@@ -2756,4 +2825,18 @@ a.chip:hover {
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
   vertical-align: middle;
+}
+
+/* Country Flag Icon */
+.flag-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'TwemojiMozilla', var(--font-family-sans);
+  font-size: 1.15em;
+  line-height: 1;
+  vertical-align: -0.1em;
+  margin-right: 0.35rem;
+  flex-shrink: 0;
+  user-select: none;
 }

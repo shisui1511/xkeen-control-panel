@@ -26,15 +26,28 @@ type RestartLogEntry struct {
 	Output    string `json:"output"` // last 50 lines of combined stdout+stderr
 }
 
+// xkeenRestartWindow is the grace window during Restart and SwitchKernel (D-06).
+const xkeenRestartWindow = 60 * time.Second
+
 type XKeenService struct {
 	BinaryPath string
 	dataDir    string
 	logMu      sync.Mutex
 	restartLog []RestartLogEntry
+
+	stateMu           sync.Mutex
+	intentionalStop   bool
+	inRestartUntil    time.Time
+	kernelStartedHook func()
+	now               func() time.Time
 }
 
 func NewXKeenService(binary, dataDir string) *XKeenService {
-	svc := &XKeenService{BinaryPath: binary, dataDir: dataDir}
+	svc := &XKeenService{
+		BinaryPath: binary,
+		dataDir:    dataDir,
+		now:        time.Now,
+	}
 	svc.loadRestartLog()
 	return svc
 }
@@ -148,35 +161,97 @@ func (s *XKeenService) Status() (string, error) {
 }
 
 func (s *XKeenService) Start() (string, error) {
+	s.stateMu.Lock()
+	s.intentionalStop = false
+	hook := s.kernelStartedHook
+	s.stateMu.Unlock()
+
 	out, err := s.runWithTimeout("-start", 30*time.Second)
 	s.RecordAction("start", out, err)
+	if err == nil && hook != nil {
+		hook()
+	}
 	return out, err
 }
 
 func (s *XKeenService) Stop() (string, error) {
+	s.stateMu.Lock()
+	s.intentionalStop = true
+	s.stateMu.Unlock()
+
 	out, err := s.runWithTimeout("-stop", 30*time.Second)
 	s.RecordAction("stop", out, err)
 	return out, err
 }
 
 func (s *XKeenService) Restart() (string, error) {
+	s.stateMu.Lock()
+	s.intentionalStop = false
+	s.inRestartUntil = s.now().Add(xkeenRestartWindow)
+	s.stateMu.Unlock()
+
 	out, err := s.runWithTimeout("-restart", 45*time.Second)
 	s.RecordAction("restart", out, err)
 	return out, err
 }
 
 func (s *XKeenService) SwitchKernel(name string) (string, error) {
+	if name != "xray" && name != "mihomo" {
+		return "", fmt.Errorf("invalid kernel: %s", name)
+	}
+
+	s.stateMu.Lock()
+	s.intentionalStop = false
+	s.inRestartUntil = s.now().Add(xkeenRestartWindow)
+	hook := s.kernelStartedHook
+	s.stateMu.Unlock()
+
 	var out string
 	var err error
 	if name == "xray" {
 		out, err = s.runWithTimeout("-xray", 30*time.Second)
-	} else if name == "mihomo" {
-		out, err = s.runWithTimeout("-mihomo", 30*time.Second)
 	} else {
-		return "", fmt.Errorf("invalid kernel: %s", name)
+		out, err = s.runWithTimeout("-mihomo", 30*time.Second)
 	}
 	s.RecordAction("switch_kernel:"+name, out, err)
+	if err == nil && name == "mihomo" && hook != nil {
+		hook()
+	}
 	return out, err
+}
+
+// SetKernelStartedHook configures a callback invoked when a kernel is successfully
+// started via Start() or switched to mihomo via SwitchKernel("mihomo") (D-24).
+// The hook is invoked outside stateMu to prevent lock inversion.
+func (s *XKeenService) SetKernelStartedHook(fn func()) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.kernelStartedHook = fn
+}
+
+// IntentionalStop reports whether the kernel was stopped intentionally via panel Stop() (D-01).
+// Read by WatchdogService to distinguish planned downtime from crashes.
+func (s *XKeenService) IntentionalStop() bool {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.intentionalStop
+}
+
+// InRestart reports whether a planned restart window (Restart / SwitchKernel) is currently active (D-06).
+// Read by WatchdogService to avoid spurious failure increments during kernel restart.
+func (s *XKeenService) InRestart() bool {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return !s.inRestartUntil.IsZero() && s.now().Before(s.inRestartUntil)
+}
+
+// ClearIntentionalStop resets the intentional stop flag (D-03, D-07).
+// Called by WatchdogService when interception rules are detected during stopped state
+// or when the kernel recovers to healthy state.
+func (s *XKeenService) ClearIntentionalStop() {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.intentionalStop = false
 }
 
 // ValidateXrayConfig inspects the Xray config directory for outbound configuration quality.
@@ -358,7 +433,7 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 		}
 		if isStart {
 			status, _ := s.Status()
-			if strings.Contains(status, "running") || strings.Contains(status, "активен") {
+			if IsKernelStatusHealthy(status) {
 				return output, nil
 			}
 		}
@@ -374,7 +449,7 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 		}
 		if err != nil && isStart {
 			status, _ := s.Status()
-			if strings.Contains(status, "running") || strings.Contains(status, "активен") {
+			if IsKernelStatusHealthy(status) {
 				return output, nil
 			}
 		}

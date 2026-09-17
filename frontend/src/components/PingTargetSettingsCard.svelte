@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from '../i18n';
+  import Select from './Select.svelte';
   import {
     pingTargetStore,
     setPingTargetConfig,
@@ -137,17 +138,17 @@
       <label for="ping_timeout" class="form-label">
         {$t('settings.ping_timeout_label')}
       </label>
-      <select
+      <Select
         id="ping_timeout"
         class="input select"
-        value={config.timeoutMs}
+        value={String(config.timeoutMs)}
         onchange={handleTimeoutChange}
       >
-        <option value={2000}>{$t('settings.ping_timeout_2s')}</option>
-        <option value={5000}>{$t('settings.ping_timeout_5s')}</option>
-        <option value={8000}>{$t('settings.ping_timeout_8s')}</option>
-        <option value={10000}>{$t('settings.ping_timeout_10s')}</option>
-      </select>
+        <option value="2000">{$t('settings.ping_timeout_2s')}</option>
+        <option value="5000">{$t('settings.ping_timeout_5s')}</option>
+        <option value="8000">{$t('settings.ping_timeout_8s')}</option>
+        <option value="10000">{$t('settings.ping_timeout_10s')}</option>
+      </Select>
     </div>
   </div>
 </div>
@@ -208,8 +209,8 @@
   }
 
   .preset-url {
-    font-size: 11px;
-    color: var(--fg-dim);
+    font-size: var(--font-size-xs);
+    color: var(--fg-secondary);
     font-family: var(--font-family-mono);
     overflow: hidden;
     text-overflow: ellipsis;

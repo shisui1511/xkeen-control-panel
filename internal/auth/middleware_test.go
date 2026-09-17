@@ -64,6 +64,9 @@ func TestSecurityHeaders(t *testing.T) {
 		if !strings.Contains(csp, "font-src 'self' https://fonts.gstatic.com;") {
 			t.Errorf("CSP font-src does not contain https://fonts.gstatic.com: %s", csp)
 		}
+		if !strings.Contains(csp, "connect-src 'self' https://ipinfo.io") {
+			t.Errorf("CSP connect-src does not contain https://ipinfo.io: %s", csp)
+		}
 	})
 
 	t.Run("TLS request", func(t *testing.T) {

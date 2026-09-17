@@ -119,23 +119,23 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
-    color: var(--fg-secondary, #8fa3b8);
+    color: var(--fg-secondary);
   }
 
   .live-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background-color: var(--fg-dim, #63778a);
+    background-color: var(--fg-dim);
     transition:
       background-color 0.25s ease,
       box-shadow 0.25s ease;
   }
 
   .live-dot-active {
-    background-color: var(--success, #46d18a);
+    background-color: var(--success);
     box-shadow: 0 0 6px rgba(70, 209, 138, 0.6);
     animation: livePulse 2s infinite;
   }
@@ -216,13 +216,13 @@
     font-size: 13px;
     font-weight: 600;
     text-transform: none;
-    color: var(--fg-secondary, #8fa3b8);
+    color: var(--fg-secondary);
   }
 
   .box-value {
     font-size: 22px;
     font-weight: 600;
-    color: var(--fg-primary, #ffffff);
+    color: var(--fg-primary);
     line-height: 1.2;
     font-family: var(--font-family-mono, monospace);
   }
@@ -232,8 +232,8 @@
   }
 
   .box-sub {
-    font-size: 11.5px;
-    color: var(--fg-muted, var(--fg-secondary, #8fa3b8));
+    font-size: 12px;
+    color: var(--fg-secondary);
     line-height: 1.4;
     white-space: nowrap;
     overflow: hidden;

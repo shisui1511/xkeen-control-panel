@@ -276,10 +276,12 @@ type Subscription struct {
 	EnableXray   bool `json:"enable_xray"`
 	EnableMihomo bool `json:"enable_mihomo"`
 
-	// Filters (Xray only)
+	// Filters
 	FilterName      string `json:"filter_name,omitempty"`
 	FilterType      string `json:"filter_type,omitempty"`
 	FilterTransport string `json:"filter_transport,omitempty"`
+	ExcludeFilter   string `json:"exclude_filter,omitempty"`
+	ExcludeType     string `json:"exclude_type,omitempty"`
 
 	// RoutingMode управляет автоматическим созданием routing-правила (XRay only).
 	// "" / "manual" — только запись outbounds, пользователь настраивает routing сам.
@@ -559,7 +561,20 @@ func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscr
 	sb.WriteString("    health-check:\n")
 	sb.WriteString("      enable: true\n")
 	sb.WriteString("      url: http://www.gstatic.com/generate_204\n")
-	sb.WriteString("      interval: 300")
+	sb.WriteString("      interval: 300\n")
+	sb.WriteString("      timeout: 5000\n")
+	sb.WriteString("      lazy: true\n")
+	sb.WriteString("      expected-status: 204\n")
 
-	return sb.String()
+	if sub.FilterName != "" {
+		sb.WriteString(fmt.Sprintf("    filter: '%s'\n", strings.ReplaceAll(sub.FilterName, "'", "''")))
+	}
+	if sub.ExcludeFilter != "" {
+		sb.WriteString(fmt.Sprintf("    exclude-filter: '%s'\n", strings.ReplaceAll(sub.ExcludeFilter, "'", "''")))
+	}
+	if sub.ExcludeType != "" {
+		sb.WriteString(fmt.Sprintf("    exclude-type: '%s'\n", strings.ReplaceAll(sub.ExcludeType, "'", "''")))
+	}
+
+	return strings.TrimRight(sb.String(), "\n")
 }

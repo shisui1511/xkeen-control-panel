@@ -228,9 +228,9 @@
   }
 
   .diag-sum-card .title {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
     color: var(--fg-dim);
   }
 

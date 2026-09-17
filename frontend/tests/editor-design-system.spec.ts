@@ -13,7 +13,7 @@ test.describe('Редактор — разделитель и индикатор
     await setupMocks(page, 'mihomo');
     await visitPage(page, '/#/editor');
 
-    const badge = page.locator('.eph-right .badge');
+    const badge = page.locator('.eph-right .status-badge, .eph-right .badge');
     await expect(badge).toBeVisible();
     await expect(badge).toContainText(/Сохранён|Изменён|Saved|Modified/);
 
@@ -27,7 +27,7 @@ test.describe('Редактор — разделитель и индикатор
     await setupMocks(page, 'mihomo');
     await visitPage(page, '/#/editor');
 
-    const badge = page.locator('.eph-right .badge');
+    const badge = page.locator('.eph-right .status-badge, .eph-right .badge');
     await expect(badge).toBeVisible();
 
     const styleAttr = await badge.getAttribute('style');

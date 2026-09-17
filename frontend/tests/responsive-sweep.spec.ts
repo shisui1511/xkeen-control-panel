@@ -154,7 +154,6 @@ test.describe('Панель — отсутствие горизонтально�
     '/#/logs',
     '/#/editor',
     '/#/dat',
-    '/#/network',
     '/#/subscriptions',
     '/#/settings'
   ];

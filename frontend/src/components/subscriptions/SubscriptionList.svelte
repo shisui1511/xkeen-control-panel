@@ -662,7 +662,7 @@
               <button
                 class="btn btn-xs"
                 onclick={() => onRetryNodes(sub.id)}
-                style="padding: 2px 8px; font-size: 11px; height: auto;"
+                style="padding: 2px 8px; font-size: var(--font-size-xs); height: auto;"
               >
                 {$t('subscr.retry')}
               </button>
@@ -761,20 +761,20 @@
     transition: all var(--transition-fast);
   }
   .type-dot.mihomo {
-    background: #8b5cf6;
-    box-shadow: 0 0 8px #8b5cf6;
+    background: var(--purple);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--purple) 60%, transparent);
   }
   .type-dot.both {
-    background: linear-gradient(135deg, var(--accent), #8b5cf6);
-    box-shadow: 0 0 8px #8b5cf6;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    box-shadow: 0 0 8px color-mix(in srgb, var(--purple) 60%, transparent);
   }
   .type-dot.disabled {
     background: var(--fg-faint);
     box-shadow: none;
   }
   .type-dot.cached-fallback {
-    background: var(--warning, #f0b450);
-    box-shadow: 0 0 8px var(--warning, #f0b450);
+    background: var(--warning);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--warning) 60%, transparent);
   }
   .type-dot.has-error {
     background: var(--danger);
@@ -818,7 +818,7 @@
     color: var(--accent);
     padding: 2px 10px;
     border-radius: 12px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     transition: all var(--transition-fast);
   }
@@ -890,28 +890,26 @@
   }
 
   .sub-type-label {
-    text-transform: uppercase;
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    font-weight: 700;
+    font-size: var(--font-size-xs);
+    letter-spacing: 0.02em;
+    font-weight: 600;
     color: var(--fg-dim);
   }
 
   .mihomo-integrated-badge {
-    text-transform: uppercase;
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    font-weight: 700;
+    font-size: var(--font-size-xs);
+    letter-spacing: 0.02em;
+    font-weight: 600;
     color: var(--fg-faint);
   }
 
   .mihomo-provider-chip {
-    background: rgba(139, 92, 246, 0.08);
-    color: #8b5cf6;
-    border: 1px solid rgba(139, 92, 246, 0.2);
+    background: color-mix(in srgb, var(--purple) 12%, transparent);
+    color: var(--purple);
+    border: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
     padding: 4px 8px;
     border-radius: 12px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     white-space: nowrap;
     overflow: hidden;
@@ -935,9 +933,9 @@
   }
 
   .btn-support {
-    background: rgba(139, 92, 246, 0.12);
-    border: 1px solid rgba(139, 92, 246, 0.25);
-    color: #a78bfa;
+    background: color-mix(in srgb, var(--purple) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
+    color: var(--purple);
     padding: 6px 14px;
     border-radius: 20px;
     font-size: 12px;
@@ -950,10 +948,10 @@
     transition: all var(--transition-fast);
   }
   .btn-support:hover {
-    background: rgba(139, 92, 246, 0.22);
-    border-color: rgba(139, 92, 246, 0.45);
-    color: #c4b5fd;
-    box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
+    background: color-mix(in srgb, var(--purple) 24%, transparent);
+    border-color: color-mix(in srgb, var(--purple) 50%, transparent);
+    color: var(--purple);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--purple) 25%, transparent);
   }
 
   .announcement-wrapper {
@@ -962,9 +960,9 @@
   }
 
   .btn-announcement {
-    background: rgba(240, 180, 80, 0.1);
-    border: 1px solid rgba(240, 180, 80, 0.25);
-    color: #f3d9a6;
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+    color: var(--warning);
     padding: 6px 14px;
     border-radius: 20px;
     font-size: 12px;
@@ -977,10 +975,10 @@
     transition: all var(--transition-fast);
   }
   .btn-announcement:hover {
-    background: rgba(240, 180, 80, 0.2);
-    border-color: rgba(240, 180, 80, 0.45);
-    color: #fff;
-    box-shadow: 0 0 10px rgba(240, 180, 80, 0.2);
+    background: color-mix(in srgb, var(--warning) 22%, transparent);
+    border-color: color-mix(in srgb, var(--warning) 50%, transparent);
+    color: var(--warning);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--warning) 25%, transparent);
   }
 
   /* Popover при ховере на объявление */
@@ -1054,7 +1052,7 @@
   }
 
   .inline-warn-text {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     line-height: 1.4;
     white-space: pre-wrap;

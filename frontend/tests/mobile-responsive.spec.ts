@@ -297,7 +297,11 @@ test.describe('Mobile Responsiveness and Layout (Phase 81)', () => {
     await expect(overlay).toBeVisible();
     const overlayBlur = await overlay.evaluate((el) => {
       const s = window.getComputedStyle(el);
-      return s.backdropFilter || (s as Record<string, string>)['-webkit-backdrop-filter'] || '';
+      return (
+        s.backdropFilter ||
+        (s as unknown as Record<string, string>)['-webkit-backdrop-filter'] ||
+        ''
+      );
     });
     expect(overlayBlur).toContain('blur');
 
@@ -320,6 +324,8 @@ test.describe('Mobile Responsiveness and Layout (Phase 81)', () => {
   test('Rules filter bar (MOB-03, D-06)', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto('/#/rules');
+
+    await page.locator('[data-testid="tab-all_rules"]').click();
 
     const filters = page.locator('.filters');
     await expect(filters).toBeVisible({ timeout: 5000 });

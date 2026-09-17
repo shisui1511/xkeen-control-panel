@@ -300,7 +300,7 @@
 
   .history-badge {
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     padding: 2px 6px;
     border-radius: var(--radius-sm);

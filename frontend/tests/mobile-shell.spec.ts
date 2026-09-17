@@ -171,19 +171,15 @@ test.describe('Mobile shell (Pixel 5)', () => {
 
   test('anti-zoom: filter-input and select.input computed font-size >= 16px', async ({ page }) => {
     await page.goto('/#/rules');
-    // Дожидаемся рендеринга страницы и полей ввода/выбора
-    await expect(page.locator('.filter-input')).toBeVisible();
-    await expect(page.locator('select.source-select').first()).toBeVisible();
+    const input = page.locator('.quick-add-form input, .filter-input, input.input').first();
+    const select = page
+      .locator('.quick-add-form select, select.source-select, .xcp-select select')
+      .first();
+    await expect(input).toBeVisible();
+    await expect(select).toBeVisible();
 
-    const filterFontSize = await page
-      .locator('.filter-input')
-      .first()
-      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-
-    const selectFontSize = await page
-      .locator('select.source-select')
-      .first()
-      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    const filterFontSize = await input.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    const selectFontSize = await select.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
 
     expect(filterFontSize).toBeGreaterThanOrEqual(16);
     expect(selectFontSize).toBeGreaterThanOrEqual(16);

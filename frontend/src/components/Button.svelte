@@ -7,6 +7,10 @@
     disabled = false,
     loading = false,
     title,
+    ariaLabel,
+    style,
+    class: className = '',
+    'data-testid': testId,
     onclick,
     children
   } = $props<{
@@ -15,12 +19,25 @@
     disabled?: boolean;
     loading?: boolean;
     title?: string;
+    ariaLabel?: string;
+    style?: string;
+    class?: string;
+    'data-testid'?: string;
     onclick?: (event: MouseEvent) => void;
     children?: Snippet;
   }>();
 </script>
 
-<button {type} class="btn btn-{variant}" disabled={disabled || loading} {title} {onclick}>
+<button
+  {type}
+  class="btn btn-{variant} {className}"
+  disabled={disabled || loading}
+  {title}
+  aria-label={ariaLabel}
+  data-testid={testId}
+  {style}
+  {onclick}
+>
   {#if loading}
     <span class="spinner" aria-hidden="true"></span>
     <span class="sr-only">Loading...</span>
@@ -37,7 +54,7 @@
     padding: 9px 14px;
     border-radius: var(--radius-md);
     font-family: var(--font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     cursor: pointer;
     transition:
@@ -48,7 +65,6 @@
       box-shadow var(--transition-fast),
       opacity var(--transition-fast);
     border: 1px solid transparent;
-    outline: none;
   }
   .btn:disabled {
     opacity: 0.5;
@@ -57,12 +73,12 @@
 
   .btn-primary {
     background: linear-gradient(180deg, var(--accent), var(--accent-2));
-    color: var(--btn-primary-text, #03182a);
+    color: var(--btn-primary-text);
     box-shadow: 0 6px 18px -8px var(--accent);
   }
   .btn-primary:hover:not(:disabled) {
     filter: brightness(1.07);
-    color: var(--btn-primary-text, #03182a);
+    color: var(--btn-primary-text);
   }
 
   .btn-secondary {
@@ -83,6 +99,15 @@
   .btn-danger:hover:not(:disabled) {
     opacity: 0.92;
     color: #fff;
+  }
+
+  .btn-warning {
+    background: var(--warning);
+    color: var(--btn-primary-text);
+  }
+  .btn-warning:hover:not(:disabled) {
+    opacity: 0.92;
+    color: var(--btn-primary-text);
   }
 
   .spinner {

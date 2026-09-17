@@ -192,7 +192,7 @@
   .health-bar:hover,
   .health-bar:focus-visible {
     height: 6px;
-    outline: 2px solid var(--accent, #3b82f6);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
 
@@ -202,34 +202,34 @@
   }
 
   .health-segment.fast {
-    background-color: var(--success, #22c55e);
+    background-color: var(--success);
   }
 
   .health-segment.mid {
-    background-color: var(--warning, #eab308);
+    background-color: var(--warning);
   }
 
   .health-segment.bad {
-    background-color: var(--danger, #ef4444);
+    background-color: var(--danger);
   }
 
   .health-segment.unchecked {
-    background-color: var(--fg-dim, #64748b);
+    background-color: var(--fg-dim);
   }
 
   .health-segment.system {
-    background-color: var(--fg-faint, #475569);
+    background-color: var(--fg-faint);
   }
 
   .health-tooltip {
     position: fixed;
     z-index: 1100;
-    background: var(--bg-elevated, var(--bg-card, #1e293b));
-    border: 1px solid var(--border, #334155);
+    background: var(--bg-elevated, var(--bg-card));
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg, 8px);
     padding: 8px 10px;
     font-size: 12px;
-    color: var(--fg-primary, #f8fafc);
+    color: var(--fg-primary);
     box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.3));
     pointer-events: none;
     white-space: nowrap;
@@ -253,36 +253,36 @@
   }
 
   .ht-dot.color-fast {
-    background: var(--success, #22c55e);
+    background: var(--success);
   }
 
   .ht-dot.color-mid {
-    background: var(--warning, #eab308);
+    background: var(--warning);
   }
 
   .ht-dot.color-bad {
-    background: var(--danger, #ef4444);
+    background: var(--danger);
   }
 
   .ht-dot.color-unchecked {
-    background: var(--fg-dim, #64748b);
+    background: var(--fg-dim);
   }
 
   .ht-dot.color-system {
-    background: var(--fg-faint, #475569);
+    background: var(--fg-faint);
   }
 
   .ht-label {
-    color: var(--fg-secondary, #94a3b8);
+    color: var(--fg-secondary);
   }
 
   .ht-count {
     font-weight: 600;
-    color: var(--fg-primary, #f8fafc);
+    color: var(--fg-primary);
   }
 
   .ht-pct {
-    color: var(--fg-muted, #64748b);
-    font-size: 11px;
+    color: var(--fg-dim);
+    font-size: 12px;
   }
 </style>

@@ -225,7 +225,9 @@ test.describe('Editor & Constructor integration test suite', () => {
     await expect(page).toHaveURL(/#\/editor/);
 
     // Проверяем, что статус файла изменился на "Изменён" (isDirty, badge дизайн-системы)
-    await expect(page.locator('.eph-right .badge-warning')).toBeVisible();
+    await expect(
+      page.locator('.eph-right .status-badge.warning, .eph-right .badge-warning')
+    ).toBeVisible();
   });
 
   test('metacubex rule-provider selector displays checkbox picker with categories and meta-rules-dat URL', async ({
@@ -405,11 +407,10 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await mihomoBtn.click();
 
     // Выбрать пресет zkeen-selective
-    const presetSelect = page.locator(
-      'select.preset-select, [data-testid="preset-select"], select#preset-select'
+    const presetChip = page.locator(
+      '[data-scenario-id="zkeen-selective"], [data-testid="scenario-chip-zkeen-selective"], button.scenario-chip:has-text("ZKeen")'
     );
-    await expect(presetSelect).toBeVisible({ timeout: 5000 });
-    await presetSelect.selectOption('zkeen-selective');
+    await presetChip.click();
 
     // Получить сгенерированный YAML из превью
     const previewPane = page
@@ -470,11 +471,10 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await mihomoKernelBtn.click();
 
     // Выбираем пресет zkeen-selective, чтобы сгенерировать YAML и активировать кнопку применить
-    const presetSelect = page.locator(
-      'select.preset-select, [data-testid="preset-select"], select#preset-select'
+    const presetChip = page.locator(
+      '[data-scenario-id="zkeen-selective"], [data-testid="scenario-chip-zkeen-selective"], button.scenario-chip:has-text("ZKeen")'
     );
-    await expect(presetSelect).toBeVisible();
-    await presetSelect.selectOption('zkeen-selective');
+    await presetChip.click();
 
     const applyBtn = page.locator('[data-testid="apply-changes-btn"]');
     await expect(applyBtn).toBeVisible();

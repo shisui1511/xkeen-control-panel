@@ -7,6 +7,8 @@
   import { usePoller } from './lib/poller';
   import PageHeader from './PageHeader.svelte';
   import Icon from './lib/components/Icon.svelte';
+  import Select from './components/Select.svelte';
+  import Button from './components/Button.svelte';
   import { apiFetch, apiFetchJSON } from './lib/api';
 
   interface Props {
@@ -407,37 +409,33 @@
 </script>
 
 <div class="container">
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_observability')} <span class="crumb-sep">›</span>
-        {$t('nav.trafficquotas')}
-      </div>
-      <h1>{$t('trafficquotas.title')}</h1>
-      <p class="sub">{$t('trafficquotas.subtitle')}</p>
-    </div>
-    <div class="ph-actions">
-      {#if stats}
-        <button class="btn btn-secondary" onclick={clearAlerts}>
-          {$t('trafficquotas.clear_alerts')}
-        </button>
-      {/if}
-      <button class="btn btn-primary" onclick={startCreate}>
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          style="margin-right: 6px;"
-        >
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        {$t('trafficquotas.add_quota')}
-      </button>
-    </div>
-  </div>
+  <PageHeader
+    title={$t('trafficquotas.title')}
+    subtitle={$t('trafficquotas.subtitle')}
+    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('nav.trafficquotas') }]}
+    {onSwitchTab}
+    hideHome={true}
+  >
+    {#if stats}
+      <Button variant="secondary" onclick={clearAlerts}>
+        {$t('trafficquotas.clear_alerts')}
+      </Button>
+    {/if}
+    <Button variant="primary" onclick={startCreate} title={$t('trafficquotas.add_quota')}>
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        style="margin-right: 6px;"
+      >
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+      {$t('trafficquotas.add_quota')}
+    </Button>
+  </PageHeader>
 
   {#if error}
     <div class="alert alert-error mb-2">{error}</div>
@@ -500,7 +498,15 @@
           <div class="stat-label">{$t('trafficquotas.total')}</div>
           <div class="stat-value">{formatBytes(stats.total)}</div>
           {#if sumQuotaLimit > 0}
-            <div class="stat-bar" style="margin-top: 8px;">
+            <div
+              class="stat-bar"
+              style="margin-top: 8px;"
+              role="progressbar"
+              aria-valuenow={Math.round(totalPct)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="{$t('trafficquotas.of_limit')}: {totalPct.toFixed(1)}%"
+            >
               <div
                 class="stat-bar-fill"
                 class:warning={totalPct >= 80 && totalPct < 100}
@@ -589,7 +595,15 @@
                 </td>
                 <td class="mono">
                   {formatBytes(q.current_bytes)}
-                  <div class="stat-bar" style="width: 100px; margin-top: 4px;">
+                  <div
+                    class="stat-bar"
+                    style="width: 100px; margin-top: 4px;"
+                    role="progressbar"
+                    aria-valuenow={Math.round(percent(q))}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="{q.name || q.target_id}: {Math.round(percent(q))}%"
+                  >
                     <div
                       class="stat-bar-fill"
                       class:warning={percent(q) >= q.alert_threshold && percent(q) < 100}
@@ -646,6 +660,7 @@
                     >
                       <input
                         type="checkbox"
+                        aria-label={$t('trafficquotas.toggle_limit')}
                         checked={q.enabled}
                         disabled={togglingQuotas[q.id]}
                         onchange={() => toggleEnabled(q)}
@@ -656,6 +671,9 @@
                     <div class="dropdown-container">
                       <button
                         class="btn btn-secondary action-btn-dots"
+                        aria-label={$t('app.actions') || 'Actions'}
+                        aria-haspopup="menu"
+                        aria-expanded={activeDropdownId === q.id}
                         onclick={(e) => toggleDropdown(q.id, e)}>⋯</button
                       >
                       {#if activeDropdownId === q.id}
@@ -747,10 +765,10 @@
 
     <div class="form-group">
       <label for="form-type" class="form-label">{$t('trafficquotas.target_type')}</label>
-      <select id="form-type" class="input" bind:value={formTargetType}>
+      <Select id="form-type" class="input" bind:value={formTargetType}>
         <option value="global">{$t('trafficquotas.target_global')}</option>
         <option value="proxy">{$t('trafficquotas.target_proxy')}</option>
-      </select>
+      </Select>
     </div>
 
     {#if formTargetType === 'proxy'}
@@ -780,21 +798,21 @@
       </div>
       <div class="form-group">
         <label for="form-unit" class="form-label">{$t('trafficquotas.unit')}</label>
-        <select id="form-unit" class="input" bind:value={formLimitUnit}>
+        <Select id="form-unit" class="input" bind:value={formLimitUnit}>
           {#each units as u}
             <option value={u.value}>{u.value}</option>
           {/each}
-        </select>
+        </Select>
       </div>
     </div>
 
     <div class="form-group">
       <label for="form-period" class="form-label">{$t('trafficquotas.period')}</label>
-      <select id="form-period" class="input" bind:value={formPeriod}>
+      <Select id="form-period" class="input" bind:value={formPeriod}>
         {#each periods as p}
           <option value={p.value}>{p.label}</option>
         {/each}
-      </select>
+      </Select>
     </div>
 
     <div class="form-group">
@@ -813,7 +831,7 @@
 
     <div class="form-group">
       <label for="form-action" class="form-label">{$t('trafficquotas.action')}</label>
-      <select id="form-action" class="input" bind:value={formAction}>
+      <Select id="form-action" class="input" bind:value={formAction}>
         <option value="notify">{$t('trafficquotas.action_notify')}</option>
         <option value="throttle" disabled
           >{$t('trafficquotas.action_throttle')} ({$t('trafficquotas.action_unsupported')})</option
@@ -821,12 +839,17 @@
         <option value="log_only">{$t('trafficquotas.action_log_only')}</option>
         <option value="block">{$t('trafficquotas.action_block')}</option>
         <option value="redirect_direct">{$t('trafficquotas.action_redirect_direct')}</option>
-      </select>
+      </Select>
     </div>
 
     <div class="form-group-checkbox">
       <label class="toggle-switch">
-        <input type="checkbox" id="form-enabled" bind:checked={formEnabled} />
+        <input
+          type="checkbox"
+          id="form-enabled"
+          aria-label={$t('trafficquotas.status_enabled')}
+          bind:checked={formEnabled}
+        />
         <span class="toggle-slider"></span>
       </label>
       <label for="form-enabled" class="checkbox-label">
@@ -841,11 +864,6 @@
 </Modal>
 
 <style>
-  .crumb-separator {
-    color: var(--fg-faint);
-    margin: 0 6px;
-  }
-
   .flex-between {
     display: flex;
     justify-content: space-between;
@@ -873,17 +891,15 @@
   }
 
   .stat-label {
-    font-size: 11px;
-    font-weight: 700;
+    font-size: 12px;
+    font-weight: 600;
     color: var(--fg-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     margin-bottom: 6px;
   }
 
   .stat-value {
     font-weight: 600;
-    font-size: 20px;
+    font-size: 22px;
     color: var(--fg-primary);
   }
 
@@ -894,7 +910,7 @@
   }
 
   .stat-sub {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
     margin-top: 4px;
   }
@@ -917,8 +933,7 @@
     font-weight: 600;
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
-    font-size: 11px;
-    text-transform: uppercase;
+    font-size: 12px;
     letter-spacing: 0.05em;
   }
 
@@ -945,17 +960,17 @@
 
   .stat-bar-fill {
     height: 100%;
-    background: var(--primary, #3b82f6);
+    background: var(--primary);
     border-radius: 3px;
     transition: width 0.3s ease;
   }
 
   .stat-bar-fill.warning {
-    background: var(--warning, #f59e0b);
+    background: var(--warning);
   }
 
   .stat-bar-fill.error {
-    background: var(--error, #ef4444);
+    background: var(--danger);
   }
 
   .actions-wrapper {
@@ -982,7 +997,7 @@
     right: 0;
     top: 100%;
     margin-top: 4px;
-    background: var(--bg-card, #121212);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
@@ -1052,55 +1067,6 @@
     color: var(--fg-primary);
     cursor: pointer;
     user-select: none;
-  }
-
-  /* Toggle Switch */
-  .toggle-switch {
-    position: relative;
-    display: inline-block;
-    width: 32px;
-    height: 18px;
-  }
-
-  .toggle-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-
-  .toggle-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(255, 255, 255, 0.1);
-    transition: 0.2s;
-    border-radius: 9px;
-    border: 1px solid var(--border);
-  }
-
-  .toggle-slider:before {
-    position: absolute;
-    content: '';
-    height: 12px;
-    width: 12px;
-    left: 2px;
-    bottom: 2px;
-    background-color: var(--fg-secondary);
-    transition: 0.2s;
-    border-radius: 50%;
-  }
-
-  input:checked + .toggle-slider {
-    background-color: var(--primary);
-    border-color: var(--primary);
-  }
-
-  input:checked + .toggle-slider:before {
-    transform: translateX(14px);
-    background-color: #fff;
   }
 
   :global(.tq-action-notify) {
@@ -1174,7 +1140,7 @@
     background: none;
     border: none;
     color: var(--fg-dim);
-    font-size: 20px;
+    font-size: 18px;
     cursor: pointer;
     line-height: 1;
     padding: 4px 8px;
@@ -1197,10 +1163,10 @@
   @keyframes toggle-pulse {
     0%,
     100% {
-      background-color: rgba(255, 255, 255, 0.1);
+      background: var(--bg-elevated);
     }
     50% {
-      background-color: var(--primary);
+      background: var(--accent-soft);
     }
   }
 </style>

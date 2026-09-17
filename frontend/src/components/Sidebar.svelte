@@ -29,13 +29,14 @@
     isXkeenRunning?: boolean;
   } = $props();
 
-  type GroupKey = 'overview' | 'proxy_subs' | 'routing' | 'observability' | 'system';
+  type GroupKey = 'overview' | 'proxy_subs' | 'routing' | 'observability' | 'system' | 'tools';
   const DEFAULT_GROUP_OPEN: Record<GroupKey, boolean> = {
     overview: true,
     proxy_subs: true,
     routing: true,
     observability: true,
-    system: true
+    system: true,
+    tools: true
   };
 
   function loadGroupOpenState(): Record<GroupKey, boolean> {
@@ -66,7 +67,8 @@
       proxy_subs: groupOpen.proxy_subs,
       routing: groupOpen.routing,
       observability: groupOpen.observability,
-      system: groupOpen.system
+      system: groupOpen.system,
+      tools: groupOpen.tools
     };
     try {
       localStorage.setItem('sidebar_group_state', JSON.stringify(snapshot));
@@ -431,11 +433,14 @@
     </a>
   </details>
 
-  <!-- System group -->
-  <details class="nav-group" bind:open={groupOpen.system}>
+  <!-- Tools group — placed ahead of System on purpose (confirmed with the
+       user, not guessed): Editor is the tool actually opened most often in
+       day-to-day work, so its group sits right after Observability instead
+       of behind the mostly set-once System group below. -->
+  <details class="nav-group" bind:open={groupOpen.tools}>
     <summary>
       <span class="group-ttl">
-        <!-- Система → wrench + screwdriver crossed -->
+        <!-- Инструменты → wrench + screwdriver crossed -->
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -448,6 +453,66 @@
             d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-7 7V21h3.3l7-7a4 4 0 0 0 5.4-5.4l-2.3 2.3-2-2 1-1z"
           /><path d="m17 14 4 4-2 2-4-4" /></svg
         >
+        <span class="lbl">{$t('nav.group_tools')}</span>
+      </span>
+      <span class="nav-group-arrow">▶</span>
+    </summary>
+    <!-- Editor first: confirmed as the most-opened item in this group. -->
+    <a
+      href="#/editor"
+      class="nav-item"
+      aria-current={currentTab === 'editor' ? 'page' : undefined}
+      data-label={$t('nav.editor')}
+      onclick={() => isSidebarOpen.set(false)}
+      title={$isSidebarCollapsed ? undefined : $t('nav.editor')}
+    >
+      <Icon name="editor" size={16} />
+      <span class="lbl">{$t('nav.editor')}</span>
+    </a>
+    <a
+      href="#/console"
+      class="nav-item"
+      aria-current={currentTab === 'console' ? 'page' : undefined}
+      data-label={$t('nav.console')}
+      onclick={() => isSidebarOpen.set(false)}
+      title={$isSidebarCollapsed ? undefined : $t('nav.console')}
+    >
+      <Icon name="console" size={16} />
+      <span class="lbl">{$t('nav.console')}</span>
+    </a>
+    <a
+      href="#/dat"
+      class="nav-item"
+      aria-current={currentTab === 'dat' ? 'page' : undefined}
+      data-label={$t('nav.dat')}
+      onclick={() => isSidebarOpen.set(false)}
+      title={$isSidebarCollapsed ? undefined : $t('nav.dat')}
+    >
+      <Icon name="dat" size={16} />
+      <span class="lbl">{$t('nav.dat')}</span>
+    </a>
+  </details>
+
+  <!-- System group — device state & configuration surface. Mostly set once
+       and revisited rarely (services/network/settings), so it sits last. -->
+  <details class="nav-group" bind:open={groupOpen.system}>
+    <summary>
+      <span class="group-ttl">
+        <!-- Система → device/chip: internal state of the router itself -->
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="7" y="7" width="10" height="10" rx="1.5" />
+          <path
+            d="M12 2v3M12 19v3M2 12h3M19 12h3M4.5 4.5l2 2M17.5 17.5l2 2M4.5 19.5l2-2M17.5 6.5l2-2"
+          />
+        </svg>
         <span class="lbl">{$t('nav.group_system')}</span>
       </span>
       <span class="nav-group-arrow">▶</span>
@@ -462,50 +527,6 @@
     >
       <Icon name="services" size={16} />
       <span class="lbl">{$t('nav.services')}</span>
-    </a>
-    <a
-      href="#/dat"
-      class="nav-item"
-      aria-current={currentTab === 'dat' ? 'page' : undefined}
-      data-label={$t('nav.dat')}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$isSidebarCollapsed ? undefined : $t('nav.dat')}
-    >
-      <Icon name="dat" size={16} />
-      <span class="lbl">{$t('nav.dat')}</span>
-    </a>
-    <a
-      href="#/console"
-      class="nav-item"
-      aria-current={currentTab === 'console' ? 'page' : undefined}
-      data-label={$t('nav.console')}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$isSidebarCollapsed ? undefined : $t('nav.console')}
-    >
-      <Icon name="console" size={16} />
-      <span class="lbl">{$t('nav.console')}</span>
-    </a>
-    <a
-      href="#/network"
-      class="nav-item"
-      aria-current={currentTab === 'network' ? 'page' : undefined}
-      data-label={$t('nav.network')}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$isSidebarCollapsed ? undefined : $t('nav.network')}
-    >
-      <Icon name="network" size={16} />
-      <span class="lbl">{$t('nav.network')}</span>
-    </a>
-    <a
-      href="#/editor"
-      class="nav-item"
-      aria-current={currentTab === 'editor' ? 'page' : undefined}
-      data-label={$t('nav.editor')}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$isSidebarCollapsed ? undefined : $t('nav.editor')}
-    >
-      <Icon name="editor" size={16} />
-      <span class="lbl">{$t('nav.editor')}</span>
     </a>
     <a
       href="#/settings"
@@ -609,11 +630,22 @@
     flex: 1;
     overflow-y: auto;
     padding: 4px 0 10px;
-    scrollbar-width: none;
+    /* CR-02: this list can overflow the viewport (e.g. the System/Tools
+       groups push "Настройки" past the fold on short windows). A hidden
+       scrollbar left zero affordance that more items existed below — the
+       item was simply unreachable-looking. Use the app's standard thin
+       themed scrollbar (see global.css `*` rule) instead of hiding it. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .sidebar-nav::-webkit-scrollbar {
-    display: none;
+    width: 4px;
+  }
+
+  .sidebar-nav::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
   }
 
   .sidebar-footer {
@@ -644,7 +676,7 @@
     position: fixed;
     transform: translateY(-50%);
     background: var(--bg-deep);
-    color: #fff;
+    color: var(--fg-primary);
     padding: 6px 10px;
     border-radius: 6px;
     font-size: 12px;
@@ -664,12 +696,12 @@
     height: 16px;
     border-radius: 50%;
     background: var(--warning);
-    color: #03182a;
-    font-size: 9px;
-    font-weight: 600;
+    color: var(--btn-primary-text);
+    font-size: var(--font-size-xs);
+    font-weight: 700;
     line-height: 1;
     margin-left: auto;
     flex-shrink: 0;
-    box-shadow: 0 0 6px rgba(240, 180, 80, 0.5);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 50%, transparent);
   }
 </style>

@@ -3,16 +3,18 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 type ServiceStatusResponse struct {
-	IsRunning    bool   `json:"is_running"`
-	ActiveKernel string `json:"active_kernel"`
-	PID          int    `json:"pid"`
-	Uptime       string `json:"uptime"`
-	BinaryPath   string `json:"binary_path"`
-	Raw          string `json:"raw"`
+	IsRunning    bool                    `json:"is_running"`
+	ActiveKernel string                  `json:"active_kernel"`
+	PID          int                     `json:"pid"`
+	Uptime       string                  `json:"uptime"`
+	BinaryPath   string                  `json:"binary_path"`
+	Raw          string                  `json:"raw"`
+	Watchdog     *WatchdogStatusResponse `json:"watchdog,omitempty"`
 }
 
 func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
@@ -46,10 +48,14 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Fallback to checking raw output if kernelSvc list is empty or doesn't find running
 	if !resp.IsRunning {
-		lower := strings.ToLower(out)
-		if strings.Contains(lower, "running") || strings.Contains(lower, "запущен") {
+		if services.IsKernelStatusHealthy(out) {
 			resp.IsRunning = true
 		}
+	}
+
+	if a.watchdogSvc != nil {
+		wd := newWatchdogStatusResponse(a.watchdogSvc.Snapshot())
+		resp.Watchdog = &wd
 	}
 
 	JSONSuccess(w, resp)

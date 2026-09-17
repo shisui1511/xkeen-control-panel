@@ -39,4 +39,17 @@ describe('WCAG 2.1 Contrast Math Verification', () => {
     expect(compositeOver(fg, 0.5, bg)).toEqual([128, 128, 128]);
     expect(compositeOver(fg, 0.08, bg)).toEqual([20, 20, 20]);
   });
+
+  it('should extract style block correctly from component content', () => {
+    const svelteCode = `<script>let x = 1;</script>\n<style>\n.test { color: red; }\n</style>\n<div>hello</div>`;
+    const style = checkContrast.extractStyleBlock(svelteCode);
+    expect(style.trim()).toBe('.test { color: red; }');
+  });
+
+  it('should extract scoped CSS block for a selector correctly', () => {
+    const css = `.toast { display: flex; color: var(--fg); }\n.toast:hover { opacity: 0.9; }`;
+    const block = checkContrast.extractBlock(css, /\.toast(?![a-zA-Z0-9_-])[^{]*\{/);
+    expect(block).toContain('display: flex;');
+    expect(block).toContain('color: var(--fg);');
+  });
 });

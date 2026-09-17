@@ -100,7 +100,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--warning, #f59e0b);
+    color: var(--warning);
   }
 
   .warning-text {

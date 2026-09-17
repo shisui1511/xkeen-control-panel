@@ -123,6 +123,106 @@ describe('mihomoSchema listeners type enum', () => {
   });
 });
 
+describe('mihomoSchema top-level coverage', () => {
+  const props = (mihomoSchema as any).properties;
+
+  it('defines proxy-providers, rule-providers and sub-rules as objects', () => {
+    expect(props['proxy-providers'].type).toBe('object');
+    expect(props['rule-providers'].type).toBe('object');
+    expect(props['sub-rules'].type).toBe('object');
+  });
+
+  it('bounds all documented ports to the valid TCP/UDP range', () => {
+    for (const key of ['port', 'socks-port', 'mixed-port', 'redir-port', 'tproxy-port']) {
+      expect(props[key].minimum).toBe(1);
+      expect(props[key].maximum).toBe(65535);
+    }
+  });
+
+  it('validates fake-ip-range as a CIDR string', () => {
+    const fakeIpRange = props.dns.properties['fake-ip-range'];
+    expect(fakeIpRange.pattern).toBeDefined();
+    expect('198.18.0.0/16').toMatch(new RegExp(fakeIpRange.pattern));
+    expect('not-a-cidr').not.toMatch(new RegExp(fakeIpRange.pattern));
+  });
+
+  it('does not define a blanket top-level required array', () => {
+    expect((mihomoSchema as any).required).toBeUndefined();
+  });
+});
+
+describe('mihomoSchema proxies conditional requirements', () => {
+  const allOf = (mihomoSchema as any).properties.proxies.items.allOf;
+
+  it('requires uuid for vmess/vless via if/then', () => {
+    const branch = allOf.find((b: any) => b.if.properties.type.enum?.includes('vmess'));
+    expect(branch.then.required).toContain('uuid');
+  });
+
+  it('requires private-key and ip for wireguard via if/then', () => {
+    const branch = allOf.find((b: any) => b.if.properties.type.const === 'wireguard');
+    expect(branch.then.required).toEqual(expect.arrayContaining(['private-key', 'ip']));
+  });
+
+  it('validates uuid values against the RFC 4122 shape', () => {
+    const uuidProp = (mihomoSchema as any).properties.proxies.items.properties.uuid;
+    const re = new RegExp(uuidProp.pattern);
+    expect('123e4567-e89b-12d3-a456-426614174000').toMatch(re);
+    expect('not-a-uuid').not.toMatch(re);
+  });
+});
+
+describe('mihomoSchema rules pattern validation', () => {
+  const rulePattern = new RegExp((mihomoSchema as any).properties.rules.items.pattern);
+
+  it('accepts well-known rule types', () => {
+    expect('DOMAIN-SUFFIX,google.com,PROXY').toMatch(rulePattern);
+    expect('RULE-SET,my-set,PROXY').toMatch(rulePattern);
+    expect('MATCH,DIRECT').toMatch(rulePattern);
+  });
+
+  it('rejects an unknown rule type prefix', () => {
+    expect('TOTALLY-UNKNOWN-TYPE,foo,PROXY').not.toMatch(rulePattern);
+  });
+});
+
+describe('mihomoSchema proxies type coverage and conditional requirements', () => {
+  const proxyItems = (mihomoSchema as any).properties.proxies.items;
+
+  it('includes direct/openvpn/tailscale/ssh/anytls alongside the network protocols', () => {
+    expect(proxyItems.properties.type.enum).toEqual(
+      expect.arrayContaining(['direct', 'openvpn', 'tailscale', 'ssh', 'anytls'])
+    );
+  });
+
+  it('only requires name+type at the base level (server/port move to allOf)', () => {
+    expect(proxyItems.required).toEqual(['name', 'type']);
+  });
+
+  it('does not require server/port for tailscale or direct', () => {
+    const branch = proxyItems.allOf.find((b: any) =>
+      b.if.properties?.type?.not?.enum?.includes('tailscale')
+    );
+    expect(branch.if.properties.type.not.enum).toEqual(
+      expect.arrayContaining(['tailscale', 'direct'])
+    );
+    expect(branch.then.required).toEqual(['server', 'port']);
+  });
+
+  it('requires ca/tls-crypt for openvpn', () => {
+    const branch = proxyItems.allOf.find((b: any) => b.if.properties?.type?.const === 'openvpn');
+    expect(branch.then.required).toEqual(expect.arrayContaining(['ca', 'tls-crypt']));
+  });
+
+  it('exposes bilingual { ru, en } description objects', () => {
+    const desc = proxyItems.properties.type.description;
+    expect(typeof desc).toBe('object');
+    expect(desc.ru).toBeTruthy();
+    expect(desc.en).toBeTruthy();
+    expect(desc.ru).not.toEqual(desc.en);
+  });
+});
+
 describe('mihomoSchema amnezia-wg-option', () => {
   it('covers all AmneziaWG 3.1 parameters with expected types', () => {
     const awgProps = (mihomoSchema as any).properties.proxies.items.properties['amnezia-wg-option']
@@ -144,9 +244,34 @@ describe('mihomoSchema amnezia-wg-option', () => {
     expect(awgProps['header-protection-key'].type).toBe('string');
     expect(awgProps.i1.type).toBe('string');
     expect(awgProps.i5.type).toBe('string');
-    expect(awgProps['content-padding-addition'].type).toBe('integer');
+    expect(awgProps['content-padding-addition'].oneOf.map((s: any) => s.type)).toEqual([
+      'integer',
+      'string'
+    ]);
     expect(awgProps['random-trailers'].type).toBe('boolean');
     expect(awgProps['disable-cookies'].type).toBe('boolean');
-    expect(awgProps['rekey-after-time'].type).toBe('integer');
+    expect(awgProps['rekey-after-time'].oneOf.map((s: any) => s.type)).toEqual([
+      'integer',
+      'string'
+    ]);
+  });
+
+  it('covers AWG 1.5 legacy fields and AWG 3+ timing fields for protocol coverage', () => {
+    const awgProps = (mihomoSchema as any).properties.proxies.items.properties['amnezia-wg-option']
+      .properties;
+
+    expect(awgProps.j1.type).toBe('string');
+    expect(awgProps.j2.type).toBe('string');
+    expect(awgProps.j3.type).toBe('string');
+    expect(awgProps.itime.type).toBe('integer');
+
+    for (const key of [
+      'rekey-timeout',
+      'reject-after-time',
+      'keepalive-timeout',
+      'max-handshake-attempts'
+    ]) {
+      expect(awgProps[key].oneOf.map((s: any) => s.type)).toEqual(['integer', 'string']);
+    }
   });
 });

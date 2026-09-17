@@ -10,6 +10,11 @@
   } from './stores';
   import { usePoller } from './lib/poller';
   import Skeleton from './components/Skeleton.svelte';
+  import Button from './components/Button.svelte';
+  import PageHeader from './PageHeader.svelte';
+  import StatusBadge from './components/StatusBadge.svelte';
+  import SegmentedControl from './components/SegmentedControl.svelte';
+  import EmptyState from './components/EmptyState.svelte';
   import { apiFetch } from './lib/api';
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
@@ -25,6 +30,7 @@
     current_version: string;
     latest_version: string;
     has_update: boolean;
+    has_backup?: boolean;
     channel: string;
     status: string;
     process_status: string;
@@ -54,10 +60,12 @@
 
   let xkeenStatus = $state('');
   let actionLoading = $state<Record<string, boolean>>({});
+  let pendingRestartKernel = $state<string | null>(null);
+  let fileInputRefs: Record<string, HTMLInputElement | null> = {};
 
   let kernels = $state<Kernel[]>([]);
   let kernelsLoaded = $state(false);
-  const statusIntervals: Record<string, ReturnType<typeof setInterval>> = {};
+  const statusTimeouts: Record<string, ReturnType<typeof setTimeout>> = {};
 
   // Restart log
   interface RestartLogEntry {
@@ -69,6 +77,68 @@
   }
   let restartLog = $state<RestartLogEntry[]>([]);
   let restartLogExpanded = $state(false);
+
+  // Watchdog status
+  interface WatchdogStatus {
+    state: string;
+    consecutive_failures: number;
+    disarm_attempts: number;
+    last_disarm_error: string;
+    interception_active: boolean;
+    interception_family: string;
+    next_attempt_at: number;
+    degraded_at: number;
+  }
+
+  let watchdogStatus = $state<WatchdogStatus | null>(null);
+  let isResettingWatchdog = $state(false);
+  let statusLoaded = $state(false);
+  let statusPollError = $state(false);
+
+  // Соответствие состояния watchdog и варианта StatusBadge задано таблицей
+  // явно (T-120-24): деградация не должна визуально сливаться со штатной
+  // работой или с намеренной остановкой — каждое состояние сопоставлено
+  // варианту один к одному, а не выведено из произвольной строки.
+  const watchdogBadge = $derived.by(() => {
+    if (!watchdogStatus?.state) return null;
+    switch (watchdogStatus.state) {
+      case 'armed':
+        return { variant: 'running' as const, labelKey: 'watchdog.state_armed' };
+      case 'idle':
+        return { variant: 'idle' as const, labelKey: 'watchdog.state_idle' };
+      case 'degraded':
+        return { variant: 'stopped' as const, labelKey: 'watchdog.state_degraded' };
+      case 'disarmed':
+        return { variant: 'warning' as const, labelKey: 'watchdog.state_disarmed' };
+      default:
+        return null;
+    }
+  });
+
+  async function handleResetWatchdog() {
+    if (isResettingWatchdog) return;
+    isResettingWatchdog = true;
+    try {
+      const res = await apiFetch('/api/service/watchdog/reset', { method: 'POST' });
+      if (!res.ok) {
+        let errMessage = '';
+        try {
+          const errData = await res.json();
+          errMessage = errData?.error || errData?.message || '';
+        } catch (_) {
+          errMessage = await res.text().catch(() => '');
+        }
+        showToast('error', $t('watchdog.reset_failed', { error: errMessage || res.statusText }));
+        return;
+      }
+      await fetchStatus();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', $t('watchdog.reset_failed', { error: e?.message || $t('app.error') }));
+    } finally {
+      isResettingWatchdog = false;
+    }
+  }
 
   async function fetchRestartLog() {
     try {
@@ -86,7 +156,8 @@
     const map: Record<string, string> = {
       start: $t('svc.log_action_start'),
       stop: $t('svc.log_action_stop'),
-      restart: $t('svc.log_action_restart')
+      restart: $t('svc.log_action_restart'),
+      watchdog_reset: $t('svc.log_action_watchdog_reset')
     };
     if (action.startsWith('switch_kernel:')) {
       return $t('svc.log_action_switch') + ' ' + action.split(':')[1];
@@ -116,10 +187,14 @@
     try {
       const res = await apiFetch('/api/service/status', { signal });
       if (res.ok) {
+        statusPollError = false;
         const text = await res.text();
         try {
           const parsed = JSON.parse(text);
           if (parsed && parsed.success && parsed.data) {
+            if (parsed.data.watchdog !== undefined) {
+              watchdogStatus = parsed.data.watchdog;
+            }
             xkeenInfo = {
               isRunning: parsed.data.is_running,
               activeKernel: parsed.data.active_kernel || '',
@@ -147,6 +222,7 @@
           parseRawText(text);
         }
       } else {
+        statusPollError = true;
         xkeenStatus = $t('app.error');
         xkeenInfo = {
           isRunning: false,
@@ -160,6 +236,7 @@
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       if (e?.status === 401) return;
+      statusPollError = true;
       xkeenStatus = $t('app.unavailable');
       xkeenInfo = {
         isRunning: false,
@@ -170,6 +247,8 @@
         raw: $t('app.unavailable')
       };
       throw e;
+    } finally {
+      statusLoaded = true;
     }
   }
 
@@ -210,7 +289,7 @@
         const list = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
         kernels = list;
         kernels.forEach((k: (typeof kernels)[0]) => {
-          if (k.status !== 'idle' && !statusIntervals[k.name]) {
+          if (k.status !== 'idle' && !statusTimeouts[k.name]) {
             startPolling(k.name);
           }
         });
@@ -366,31 +445,88 @@
     }
   }
 
-  function downloadKernelBinary(name: string) {
-    const a = document.createElement('a');
-    a.href = `/api/kernels/${name}/download`;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  async function rollbackKernel(name: string) {
+    const displayName = name === 'xray' ? 'Xray' : 'Mihomo';
+    if (!confirm($t('svc.rollback_confirm_msg', { name: displayName }))) {
+      return;
+    }
+    actionLoading[`rollback-${name}`] = true;
+    try {
+      const res = await apiFetch(`/api/kernels/${name}/rollback`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      showToast('success', $t('svc.rollback_success', { name: displayName }));
+      await fetchKernels();
+      if (activeKernel === name && isRunning) {
+        pendingRestartKernel = name;
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', `${$t('svc.action_error')}: ${e.message || e}`);
+    } finally {
+      actionLoading[`rollback-${name}`] = false;
+    }
   }
 
-  async function setKernelChannel(name: string, channel: string) {
+  async function handleUploadSelected(name: string, event: Event) {
+    const target = event.target as HTMLInputElement;
+    const file = target?.files?.[0];
+    if (!file) return;
+    target.value = '';
+
+    const displayName = name === 'xray' ? 'Xray' : 'Mihomo';
+    actionLoading[`upload-${name}`] = true;
     try {
-      await apiFetch(`/api/kernels/${name}/channel`, {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await apiFetch(`/api/kernels/${name}/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      showToast('success', $t('svc.upload_success', { name: displayName }));
+      await fetchKernels();
+      if (activeKernel === name && isRunning) {
+        pendingRestartKernel = name;
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', `${$t('svc.upload_error')}: ${e.message || e}`);
+    } finally {
+      actionLoading[`upload-${name}`] = false;
+    }
+  }
+
+  // Returns true on success. Callers are responsible for re-fetching kernel
+  // state once, after both kernels' channel requests have settled — this
+  // used to be pulled per-call, causing two redundant /api/kernels round
+  // trips per click and a mismatch window between them.
+  async function setKernelChannel(name: string, channel: string): Promise<boolean> {
+    try {
+      const res = await apiFetch(`/api/kernels/${name}/channel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channel })
       });
-      await fetchKernels();
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      return true;
     } catch (e: any) {
-      if (e?.status === 401) return;
+      if (e?.status === 401) return false;
+      showToast('error', `${$t('svc.channel_error')} (${name}): ${e.message || e}`);
+      return false;
     }
   }
 
   function checkIfFinishedChecking() {
     const isAnyChecking =
-      Object.keys(statusIntervals).length > 0 || kernels.some((k) => k.status === 'checking');
+      Object.keys(statusTimeouts).length > 0 || kernels.some((k) => k.status === 'checking');
     if (!isAnyChecking) {
       isKernelChecking.set(false);
     }
@@ -408,14 +544,17 @@
           kernels = [...kernels];
         }
         if (data.status === 'idle' || data.status === 'done' || data.status === 'failed') {
-          clearInterval(statusIntervals[name]);
-          delete statusIntervals[name];
+          clearTimeout(statusTimeouts[name]);
+          delete statusTimeouts[name];
           fetchKernels();
           checkIfFinishedChecking();
+          if (data.status === 'done' && activeKernel === name && isRunning) {
+            pendingRestartKernel = name;
+          }
         }
       } else {
-        clearInterval(statusIntervals[name]);
-        delete statusIntervals[name];
+        clearTimeout(statusTimeouts[name]);
+        delete statusTimeouts[name];
         const idx = kernels.findIndex((k) => k.name === name);
         if (
           idx >= 0 &&
@@ -430,8 +569,8 @@
       }
     } catch (e: any) {
       if (e?.status === 401) return;
-      clearInterval(statusIntervals[name]);
-      delete statusIntervals[name];
+      clearTimeout(statusTimeouts[name]);
+      delete statusTimeouts[name];
       const idx = kernels.findIndex((k) => k.name === name);
       if (idx >= 0) {
         kernels[idx] = { ...kernels[idx], status: 'failed' };
@@ -442,14 +581,29 @@
   }
 
   function startPolling(name: string) {
-    if (statusIntervals[name]) clearInterval(statusIntervals[name]);
+    if (statusTimeouts[name]) clearTimeout(statusTimeouts[name]);
     fetchKernelStatus(name);
-    statusIntervals[name] = setInterval(() => fetchKernelStatus(name), 2000);
+    const scheduleNext = () => {
+      statusTimeouts[name] = setTimeout(() => {
+        fetchKernelStatus(name);
+        scheduleNext();
+      }, 2000);
+    };
+    scheduleNext();
   }
 
   let xray = $derived(Array.isArray(kernels) ? kernels.find((k) => k.name === 'xray') : undefined);
   let mihomo = $derived(
     Array.isArray(kernels) ? kernels.find((k) => k.name === 'mihomo') : undefined
+  );
+  // Both kernels normally share one channel choice (the shared selector below
+  // sets both at once), but a partial failure in setKernelChannel can leave
+  // them out of sync. Surface that instead of silently showing only Xray's
+  // value (the old `xray?.channel || mihomo?.channel` fallback masked it,
+  // since channel is never an empty string once a kernel exists).
+  let channelMismatch = $derived(!!xray && !!mihomo && xray.channel !== mihomo.channel);
+  let sharedChannel = $derived(
+    channelMismatch ? '' : (xray?.channel ?? mihomo?.channel ?? 'stable')
   );
   let isAnyKernelChecking = $derived(
     Array.isArray(kernels) ? kernels.some((k) => k.status === 'checking') : false
@@ -485,62 +639,57 @@
     return () => {
       kernelPoller.stop();
       statusPoller.stop();
-      Object.values(statusIntervals).forEach(clearInterval);
+      Object.values(statusTimeouts).forEach(clearTimeout);
     };
   });
 </script>
 
 <div class="container">
-  <!-- page-head -->
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_system')} <span class="crumb-sep">›</span>
-        {$t('nav.services')}
-      </div>
-      <h1>{$t('svc.h1')}</h1>
-      <p class="sub">{$t('svc.h1_sub')}</p>
-    </div>
-    <div class="ph-actions">
-      <button
-        class="btn btn-secondary"
-        onclick={handleRefreshStatus}
-        disabled={$isKernelChecking || refreshingStatus}
-        class:btn-loading={refreshingStatus}
-        title={$t('svc.refresh_status')}
+  <PageHeader
+    title={$t('svc.h1')}
+    subtitle={$t('svc.h1_sub')}
+    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('nav.services') }]}
+    {onSwitchTab}
+    hideHome={true}
+  >
+    <Button
+      variant="secondary"
+      loading={refreshingStatus}
+      disabled={$isKernelChecking || refreshingStatus}
+      title={$t('svc.refresh_status')}
+      onclick={handleRefreshStatus}
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
       >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-        >
-        {$t('svc.refresh_status')}
-      </button>
-      <button
-        class="btn btn-primary"
-        onclick={() => {
-          checkKernelUpdate('xray');
-          checkKernelUpdate('mihomo');
-        }}
-        disabled={$isKernelChecking || isAnyKernelChecking}
-        class:btn-loading={$isKernelChecking || isAnyKernelChecking}
-        title={$t('svc.check_updates')}
+      {$t('svc.refresh_status')}
+    </Button>
+    <Button
+      variant="primary"
+      loading={$isKernelChecking || isAnyKernelChecking}
+      disabled={$isKernelChecking || isAnyKernelChecking}
+      title={$t('svc.check_updates')}
+      onclick={() => {
+        checkKernelUpdate('xray');
+        checkKernelUpdate('mihomo');
+      }}
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"><polyline points="5 12 10 17 20 7" /></svg
       >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"><polyline points="5 12 10 17 20 7" /></svg
-        >
-        {$t('svc.check_updates')}
-      </button>
-    </div>
-  </div>
+      {$t('svc.check_updates')}
+    </Button>
+  </PageHeader>
 
   <!-- Top 2-Section Grid (Hero 65% / Updates 35%) -->
   <div class="services-top-grid">
@@ -561,14 +710,12 @@
           </div>
         </div>
         <div class="hero-status">
-          {#if isRunning}
-            <span class="status-badge running">
-              <span class="status-dot success"></span>{$t('svc.running')}
-            </span>
-          {:else}
-            <span class="status-badge stopped">
-              <span class="status-dot error"></span>{$t('svc.stopped')}
-            </span>
+          <StatusBadge
+            variant={isRunning ? 'running' : 'stopped'}
+            label={isRunning ? $t('svc.running') : $t('svc.stopped')}
+          />
+          {#if watchdogBadge}
+            <StatusBadge variant={watchdogBadge.variant} label={$t(watchdogBadge.labelKey)} />
           {/if}
         </div>
       </div>
@@ -615,12 +762,11 @@
             {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
               <a
                 href="#/editor"
-                class="badge badge-warning"
-                style="margin-top: 6px; display: inline-flex;"
+                class="badge badge-warning mihomo-api-badge-link"
                 title={$t('svc.mihomo_api_unavailable_title')}
                 onclick={(e) => e.stopPropagation()}
               >
-                {$t('svc.mihomo_api_unavailable')}
+                <StatusBadge variant="warning" label={$t('svc.mihomo_api_unavailable')} />
               </a>
             {/if}
           </div>
@@ -710,7 +856,9 @@
           <span class="meta-val monospace">{xkeenInfo.pid || activeKernelObj?.pid || '—'}</span>
         </div>
         <div class="meta-item">
-          <span class="meta-lbl">{$t('svc.uptime_label', { time: '' }).replace(':', '')}:</span>
+          <span class="meta-lbl"
+            >{$t('svc.uptime_label', { time: '' }).replace(':', '').trim()}:</span
+          >
           <span class="meta-val monospace"
             >{activeKernelObj?.uptime || xkeenInfo.uptime || '—'}</span
           >
@@ -854,31 +1002,61 @@
       <!-- Channel Selector -->
       <div class="channel-row">
         <span class="channel-lbl">{$t('svc.channel_label')}</span>
-        <div class="channel-pills">
+        <SegmentedControl
+          ariaLabel={$t('svc.channel_label')}
+          value={sharedChannel}
+          items={[
+            { value: 'stable', label: $t('svc.channel_stable') },
+            { value: 'preview', label: $t('svc.channel_preview') }
+          ]}
+          onchange={async (v) => {
+            await Promise.all([setKernelChannel('xray', v), setKernelChannel('mihomo', v)]);
+            await fetchKernels();
+          }}
+        />
+      </div>
+      {#if channelMismatch}
+        <p class="channel-mismatch-hint">
+          {$t('svc.channel_mismatch_hint', {
+            xray: $t(`svc.channel_${xray?.channel}`),
+            mihomo: $t(`svc.channel_${mihomo?.channel}`)
+          })}
+        </p>
+      {/if}
+
+      {#if pendingRestartKernel}
+        <div class="kernel-restart-banner">
+          <div class="banner-content">
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span>
+              {$t('svc.restart_needed_banner', {
+                name: pendingRestartKernel === 'xray' ? 'Xray' : 'Mihomo'
+              })}
+            </span>
+          </div>
           <button
-            type="button"
-            class="channel-pill"
-            class:active={(xray?.channel || mihomo?.channel || 'stable') === 'stable'}
-            onclick={() => {
-              setKernelChannel('xray', 'stable');
-              setKernelChannel('mihomo', 'stable');
+            class="btn btn-sm btn-primary"
+            onclick={async () => {
+              await controlService('restart');
+              pendingRestartKernel = null;
             }}
+            disabled={actionLoading['xkeen-restart']}
           >
-            {$t('svc.channel_stable')}
-          </button>
-          <button
-            type="button"
-            class="channel-pill"
-            class:active={(xray?.channel || mihomo?.channel || 'stable') === 'preview'}
-            onclick={() => {
-              setKernelChannel('xray', 'preview');
-              setKernelChannel('mihomo', 'preview');
-            }}
-          >
-            {$t('svc.channel_preview')}
+            {$t('svc.restart_now')}
           </button>
         </div>
-      </div>
+      {/if}
 
       <!-- Kernel Updates List -->
       <div class="kernel-updates-list">
@@ -891,33 +1069,53 @@
                 <Skeleton type="text-line" width="70px" />
               {:else}
                 <span>v{mihomo?.current_version || '—'}</span>
-                {#if mihomo?.has_update}
-                  <span class="badge badge-warning">→ v{mihomo.latest_version}</span>
+                {#if mihomo?.status === 'failed'}
+                  <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
+                {:else if !mihomo?.current_version || mihomo.current_version === 'not installed'}
+                  <StatusBadge variant="stopped" label={$t('kernel.status.not_installed')} />
+                {:else if mihomo?.has_update}
+                  <StatusBadge variant="warning" label={`→ v${mihomo.latest_version}`} />
                 {:else}
-                  <span class="badge badge-neutral">{$t('svc.actual_badge')}</span>
+                  <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
                 {/if}
               {/if}
             </div>
+            {#if kernelsLoaded && mihomo?.message && (mihomo.status === 'failed' || mihomo.status === 'idle' || mihomo.status === 'done')}
+              <p class="update-hint" class:update-hint-error={mihomo.status === 'failed'}>
+                {mihomo.message}
+              </p>
+            {/if}
           </div>
           <div class="update-actions">
             {#if mihomo?.has_update}
               <button
                 class="btn btn-sm btn-primary"
                 onclick={() => installKernel('mihomo')}
-                disabled={mihomo.status !== 'idle'}
+                disabled={mihomo.status === 'downloading' || mihomo.status === 'installing'}
                 title={$t('svc.install_update')}
               >
                 {mihomo.status === 'downloading' || mihomo.status === 'installing'
                   ? $t('kernels.installing')
                   : $t('svc.install_update')}
               </button>
-            {/if}
-            {#if mihomo?.current_version && mihomo.current_version !== 'not installed'}
+            {:else if !mihomo?.current_version || mihomo.current_version === 'not installed'}
+              <button
+                class="btn btn-sm btn-primary"
+                onclick={() => installKernel('mihomo')}
+                disabled={mihomo?.status === 'downloading' || mihomo?.status === 'installing'}
+                title={$t('svc.install_kernel')}
+              >
+                {mihomo?.status === 'downloading' || mihomo?.status === 'installing'
+                  ? $t('kernels.installing')
+                  : $t('svc.install_kernel')}
+              </button>
+            {:else}
               <button
                 class="btn btn-sm btn-secondary btn-icon"
-                onclick={() => downloadKernelBinary('mihomo')}
-                title={$t('svc.download')}
-                aria-label={$t('svc.download')}
+                onclick={() => installKernel('mihomo')}
+                disabled={mihomo?.status === 'downloading' || mihomo?.status === 'installing'}
+                title={$t('svc.reinstall_tooltip')}
+                aria-label={$t('svc.reinstall')}
               >
                 <svg
                   width="13"
@@ -926,12 +1124,68 @@
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
-                  ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-                    points="7 10 12 15 17 10"
-                  /><line x1="12" y1="15" x2="12" y2="3" /></svg
                 >
+                  <path d="M21 2v6h-6" />
+                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                  <path d="M3 22v-6h6" />
+                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                </svg>
               </button>
             {/if}
+
+            {#if mihomo?.has_backup}
+              <button
+                class="btn btn-sm btn-secondary btn-icon"
+                onclick={() => rollbackKernel('mihomo')}
+                disabled={mihomo?.status === 'downloading' ||
+                  mihomo?.status === 'installing' ||
+                  actionLoading['rollback-mihomo']}
+                title={$t('svc.rollback_tooltip')}
+                aria-label={$t('svc.rollback')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+              </button>
+            {/if}
+
+            <input
+              type="file"
+              bind:this={fileInputRefs['mihomo']}
+              style="display:none"
+              onchange={(e) => handleUploadSelected('mihomo', e)}
+              accept=".gz,.zip,application/octet-stream,*"
+            />
+            <button
+              class="btn btn-sm btn-secondary btn-icon"
+              onclick={() => fileInputRefs['mihomo']?.click()}
+              disabled={mihomo?.status === 'downloading' ||
+                mihomo?.status === 'installing' ||
+                actionLoading['upload-mihomo']}
+              title={$t('svc.upload_kernel_tooltip')}
+              aria-label={$t('svc.upload_kernel')}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -944,33 +1198,53 @@
                 <Skeleton type="text-line" width="70px" />
               {:else}
                 <span>v{xray?.current_version || '—'}</span>
-                {#if xray?.has_update}
-                  <span class="badge badge-warning">→ v{xray.latest_version}</span>
+                {#if xray?.status === 'failed'}
+                  <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
+                {:else if !xray?.current_version || xray.current_version === 'not installed'}
+                  <StatusBadge variant="stopped" label={$t('kernel.status.not_installed')} />
+                {:else if xray?.has_update}
+                  <StatusBadge variant="warning" label={`→ v${xray.latest_version}`} />
                 {:else}
-                  <span class="badge badge-neutral">{$t('svc.actual_badge')}</span>
+                  <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
                 {/if}
               {/if}
             </div>
+            {#if kernelsLoaded && xray?.message && (xray.status === 'failed' || xray.status === 'idle' || xray.status === 'done')}
+              <p class="update-hint" class:update-hint-error={xray.status === 'failed'}>
+                {xray.message}
+              </p>
+            {/if}
           </div>
           <div class="update-actions">
             {#if xray?.has_update}
               <button
                 class="btn btn-sm btn-primary"
                 onclick={() => installKernel('xray')}
-                disabled={xray.status !== 'idle'}
+                disabled={xray.status === 'downloading' || xray.status === 'installing'}
                 title={$t('svc.install_update')}
               >
                 {xray.status === 'downloading' || xray.status === 'installing'
                   ? $t('kernels.installing')
                   : $t('svc.install_update')}
               </button>
-            {/if}
-            {#if xray?.current_version && xray.current_version !== 'not installed'}
+            {:else if !xray?.current_version || xray.current_version === 'not installed'}
+              <button
+                class="btn btn-sm btn-primary"
+                onclick={() => installKernel('xray')}
+                disabled={xray?.status === 'downloading' || xray?.status === 'installing'}
+                title={$t('svc.install_kernel')}
+              >
+                {xray?.status === 'downloading' || xray?.status === 'installing'
+                  ? $t('kernels.installing')
+                  : $t('svc.install_kernel')}
+              </button>
+            {:else}
               <button
                 class="btn btn-sm btn-secondary btn-icon"
-                onclick={() => downloadKernelBinary('xray')}
-                title={$t('svc.download')}
-                aria-label={$t('svc.download')}
+                onclick={() => installKernel('xray')}
+                disabled={xray?.status === 'downloading' || xray?.status === 'installing'}
+                title={$t('svc.reinstall_tooltip')}
+                aria-label={$t('svc.reinstall')}
               >
                 <svg
                   width="13"
@@ -979,16 +1253,132 @@
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
-                  ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-                    points="7 10 12 15 17 10"
-                  /><line x1="12" y1="15" x2="12" y2="3" /></svg
                 >
+                  <path d="M21 2v6h-6" />
+                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                  <path d="M3 22v-6h6" />
+                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                </svg>
               </button>
             {/if}
+
+            {#if xray?.has_backup}
+              <button
+                class="btn btn-sm btn-secondary btn-icon"
+                onclick={() => rollbackKernel('xray')}
+                disabled={xray?.status === 'downloading' ||
+                  xray?.status === 'installing' ||
+                  actionLoading['rollback-xray']}
+                title={$t('svc.rollback_tooltip')}
+                aria-label={$t('svc.rollback')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+              </button>
+            {/if}
+
+            <input
+              type="file"
+              bind:this={fileInputRefs['xray']}
+              style="display:none"
+              onchange={(e) => handleUploadSelected('xray', e)}
+              accept=".gz,.zip,application/octet-stream,*"
+            />
+            <button
+              class="btn btn-sm btn-secondary btn-icon"
+              onclick={() => fileInputRefs['xray']?.click()}
+              disabled={xray?.status === 'downloading' ||
+                xray?.status === 'installing' ||
+                actionLoading['upload-xray']}
+              title={$t('svc.upload_kernel_tooltip')}
+              aria-label={$t('svc.upload_kernel')}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </button>
           </div>
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Watchdog Card (WD-06, D-31) -->
+  <div class="card watchdog-card">
+    <div class="card-head-row">
+      <div>
+        <h2 class="card-title">{$t('watchdog.section_title')}</h2>
+        {#if statusPollError}
+          <p class="card-subtitle watchdog-stale-text">{$t('watchdog.stale_note')}</p>
+        {/if}
+      </div>
+      {#if watchdogBadge}
+        <StatusBadge variant={watchdogBadge.variant} label={$t(watchdogBadge.labelKey)} />
+      {/if}
+    </div>
+
+    {#if !statusLoaded && !watchdogStatus}
+      <div class="watchdog-skeleton">
+        <Skeleton type="text-line" width="60%" />
+        <Skeleton type="text-line" width="40%" />
+      </div>
+    {:else if watchdogStatus}
+      {#if watchdogStatus.state === 'armed' || watchdogStatus.state === 'idle'}
+        <EmptyState title={$t('watchdog.empty_title')} description={$t('watchdog.empty_desc')} />
+      {:else}
+        <div class="watchdog-content">
+          <div
+            class="watchdog-row"
+            class:watchdog-interception-alert={watchdogStatus.interception_active}
+          >
+            <span class="watchdog-label">
+              {$t(
+                watchdogStatus.interception_active
+                  ? 'watchdog.interception_active'
+                  : 'watchdog.interception_cleared'
+              )}
+            </span>
+          </div>
+          {#if watchdogStatus.disarm_attempts > 0}
+            <div class="watchdog-row">
+              <span class="watchdog-label">
+                {$t('watchdog.attempts', { n: watchdogStatus.disarm_attempts })}
+              </span>
+            </div>
+          {/if}
+          {#if watchdogStatus.last_disarm_error}
+            <div class="watchdog-row watchdog-error-row">
+              <span class="watchdog-label">
+                {$t('watchdog.last_error', { error: watchdogStatus.last_disarm_error })}
+              </span>
+            </div>
+          {/if}
+        </div>
+        <div class="watchdog-footer">
+          <Button variant="secondary" loading={isResettingWatchdog} onclick={handleResetWatchdog}>
+            {$t(watchdogStatus.state === 'degraded' ? 'watchdog.cta_retry' : 'watchdog.cta_reset')}
+          </Button>
+        </div>
+      {/if}
+    {/if}
   </div>
 
   <!-- Bottom Grid: Restart History & Entware System Status (SRV-03, SRV-04) -->
@@ -1043,13 +1433,10 @@
             >
               <div class="log-meta">
                 <span class="log-action">{formatAction(entry.action)}</span>
-                <span
-                  class="log-badge"
-                  class:badge-ok={entry.success}
-                  class:badge-err={!entry.success}
-                >
-                  {entry.success ? $t('svc.log_ok') : $t('svc.log_fail')}
-                </span>
+                <StatusBadge
+                  variant={entry.success ? 'running' : 'stopped'}
+                  label={entry.success ? $t('svc.log_ok') : $t('svc.log_fail')}
+                />
                 <span class="log-ts monospace">{formatTs(entry.timestamp)}</span>
               </div>
               {#if entry.output}
@@ -1076,9 +1463,7 @@
             <div class="entware-name monospace">/opt/etc/init.d/S99xcp</div>
             <div class="entware-desc">XKeen Control Panel Daemon (Active)</div>
           </div>
-          <span class="status-badge running">
-            <span class="status-dot success"></span>Active
-          </span>
+          <StatusBadge variant="running" label="Active" />
         </div>
 
         <div class="entware-item">
@@ -1088,15 +1473,10 @@
               XKeen Router Core Supervisor ({isRunning ? 'Running' : 'Stopped'})
             </div>
           </div>
-          {#if isRunning}
-            <span class="status-badge running">
-              <span class="status-dot success"></span>Active
-            </span>
-          {:else}
-            <span class="status-badge stopped">
-              <span class="status-dot error"></span>Stopped
-            </span>
-          {/if}
+          <StatusBadge
+            variant={isRunning ? 'running' : 'stopped'}
+            label={isRunning ? 'Active' : 'Stopped'}
+          />
         </div>
       </div>
     </div>
@@ -1114,43 +1494,10 @@
 />
 
 <style>
-  .page-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 24px;
-    gap: 16px;
-  }
-
-  .page-head h1 {
-    margin: 4px 0 6px;
-    font-size: 22px;
-    font-weight: 700;
-  }
-
-  .page-head .sub {
-    margin: 0;
-    color: var(--fg-secondary);
-    font-size: 13px;
-  }
-
-  .crumbs {
-    font-size: 12px;
-    color: var(--fg-dim);
-    margin-bottom: 2px;
-  }
-
-  .crumb-sep {
-    color: var(--fg-faint);
-    margin: 0 6px;
-  }
-
-  .ph-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    flex-shrink: 0;
-    padding-top: 6px;
+  .mihomo-api-badge-link {
+    margin-top: 6px;
+    display: inline-flex;
+    text-decoration: none;
   }
 
   /* 2-Section Grid Layout (SRV-01) */
@@ -1213,7 +1560,7 @@
   .hero-subtitle {
     margin: 2px 0 0;
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
   }
 
   /* Radio Grid for Kernel Selection (SRV-02) */
@@ -1234,7 +1581,6 @@
     cursor: pointer;
     text-align: left;
     transition: all 0.18s ease;
-    outline: none;
     font-family: inherit;
   }
 
@@ -1300,19 +1646,17 @@
   }
 
   .active-pill {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: 12px;
+    font-weight: 600;
     padding: 1px 6px;
     border-radius: 10px;
     background: var(--accent);
-    color: #fff;
+    color: var(--btn-primary-text);
   }
 
   .radio-desc {
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     margin-top: 2px;
     font-family: var(--font-family-mono);
   }
@@ -1335,9 +1679,9 @@
   }
 
   .meta-lbl {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
   }
 
   .meta-val {
@@ -1360,8 +1704,8 @@
   }
 
   .btn-danger-soft {
-    background: rgba(244, 112, 127, 0.15);
-    color: var(--danger, #f4707f);
+    background: rgba(244, 112, 127, 0.08);
+    color: var(--danger);
     border: 1px solid rgba(244, 112, 127, 0.3);
   }
 
@@ -1371,7 +1715,7 @@
 
   .btn-warning-soft {
     background: rgba(245, 166, 35, 0.15);
-    color: var(--warning, #f5a623);
+    color: var(--warning);
     border: 1px solid rgba(245, 166, 35, 0.3);
   }
 
@@ -1415,28 +1759,43 @@
     color: var(--fg-primary);
   }
 
-  .channel-pills {
-    display: flex;
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    overflow: hidden;
-    background: var(--bg-card);
+  .channel-mismatch-hint {
+    margin: -2px 0 0;
+    padding: 0 2px;
+    font-size: 12px;
+    color: var(--warning);
   }
 
-  .channel-pill {
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    border: none;
-    background: transparent;
+  .update-hint {
+    margin: 0;
+    padding: 0 2px;
+    font-size: 12px;
     color: var(--fg-secondary);
-    cursor: pointer;
-    transition: all 0.15s ease;
   }
 
-  .channel-pill.active {
-    background: var(--accent);
-    color: #fff;
+  .update-hint.update-hint-error {
+    color: var(--danger);
+  }
+
+  .kernel-restart-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-md);
+    margin-bottom: 12px;
+    font-size: 13px;
+  }
+
+  .banner-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent-text);
+    font-weight: 500;
   }
 
   .kernel-updates-list {
@@ -1463,7 +1822,7 @@
 
   .update-version {
     font-size: 12px;
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     margin-top: 2px;
     display: flex;
     align-items: center;
@@ -1475,11 +1834,6 @@
     display: flex;
     align-items: center;
     gap: 6px;
-  }
-
-  .badge-neutral {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--fg-dim);
   }
 
   /* Restart Log & Entware Section */
@@ -1520,11 +1874,11 @@
   }
 
   .log-entry.log-success {
-    border-left-color: var(--success, #46d18a);
+    border-left-color: var(--success);
   }
 
   .log-entry.log-fail {
-    border-left-color: var(--danger, #f4707f);
+    border-left-color: var(--danger);
   }
 
   .log-meta {
@@ -1539,32 +1893,15 @@
     color: var(--fg-primary);
   }
 
-  .log-badge {
-    font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-weight: 700;
-  }
-
-  .badge-ok {
-    background: rgba(70, 209, 138, 0.15);
-    color: var(--success, #46d18a);
-  }
-
-  .badge-err {
-    background: rgba(244, 112, 127, 0.15);
-    color: var(--danger, #f4707f);
-  }
-
   .log-ts {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
     margin-left: auto;
   }
 
   .log-output {
     margin: 6px 0 0;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
     white-space: pre-wrap;
     word-break: break-all;
@@ -1598,9 +1935,56 @@
   }
 
   .entware-desc {
-    font-size: 11px;
-    color: var(--fg-dim);
+    font-size: 12px;
+    color: var(--fg-secondary);
     margin-top: 2px;
+  }
+
+  .watchdog-card {
+    margin-bottom: var(--spacing-6, 24px);
+  }
+
+  .watchdog-stale-text {
+    font-size: var(--font-size-xs, 12px);
+    color: var(--fg-dim);
+  }
+
+  .watchdog-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2, 8px);
+    padding: var(--spacing-2, 8px) 0;
+  }
+
+  .watchdog-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2, 8px);
+    padding: var(--spacing-2, 8px) 0;
+  }
+
+  .watchdog-row {
+    font-size: var(--font-size-sm, 13px);
+    color: var(--fg-primary);
+  }
+
+  .watchdog-interception-alert {
+    color: var(--danger);
+    font-weight: 600;
+  }
+
+  .watchdog-error-row {
+    font-family: var(--font-family-mono, monospace);
+    font-size: var(--font-size-xs, 12px);
+    color: var(--danger);
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+  .watchdog-footer {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: var(--spacing-3, 12px);
   }
 
   @media (max-width: 900px) {

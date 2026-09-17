@@ -11,14 +11,69 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// isMihomoAwg31Supported checks if Mihomo core version supports AmneziaWG 3.1 options.
+// Minimum required version is 1.19.30 (ported from frontend/src/lib/awgFields.ts).
+func isMihomoAwg31Supported(version string) bool {
+	if version == "" {
+		return false
+	}
+	clean := strings.TrimSpace(version)
+	clean = strings.TrimPrefix(clean, "v")
+	clean = strings.TrimPrefix(clean, "V")
+
+	parts := strings.Split(clean, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	patch := 0
+	if len(parts) > 2 {
+		patchStr := parts[2]
+		for i, r := range patchStr {
+			if r < '0' || r > '9' {
+				patchStr = patchStr[:i]
+				break
+			}
+		}
+		if p, err := strconv.Atoi(patchStr); err == nil {
+			patch = p
+		}
+	}
+
+	if major > 1 {
+		return true
+	}
+	if major == 1 {
+		if minor > 19 {
+			return true
+		}
+		if minor == 19 {
+			return patch >= 30
+		}
+	}
+	return false
+}
+
 // ValidateConfigContent performs 6-stage semantic preflight validation over raw config content.
 // It is a pure function: no file I/O, no network calls, no subprocess execution.
 // Soft gate: Valid is always true, Errors is always empty, issues are collected in Warnings.
-func ValidateConfigContent(kernel string, filename string, content string) PreflightResult {
+func ValidateConfigContent(kernel string, filename string, content string, kernelVersion ...string) PreflightResult {
 	result := PreflightResult{
 		Valid:    true,
 		Errors:   []PreflightIssue{},
 		Warnings: []PreflightIssue{},
+	}
+
+	var installedVersion string
+	if len(kernelVersion) > 0 {
+		installedVersion = strings.TrimSpace(kernelVersion[0])
 	}
 
 	trimmed := strings.TrimSpace(content)
@@ -97,7 +152,7 @@ func ValidateConfigContent(kernel string, filename string, content string) Prefl
 	// Step 7: AmneziaWG obfuscation options check (preflight.awg_flat_fields) [Mihomo only]
 	// -------------------------------------------------------------------------
 	if kernel == "mihomo" {
-		validateAmneziaWgOptions(data, &result)
+		validateAmneziaWgOptions(data, &result, installedVersion)
 	}
 
 	return result
@@ -389,7 +444,9 @@ func validateLanRdp(kernel string, filename string, data map[string]interface{},
 			target := strings.ToUpper(strings.TrimSpace(parts[2]))
 
 			if target == "DIRECT" {
-				if ruleType == "GEOIP" && strings.EqualFold(payload, "private") {
+				if (ruleType == "GEOIP" && strings.EqualFold(payload, "private")) ||
+					(ruleType == "RULE-SET" && strings.Contains(strings.ToLower(payload), "private")) ||
+					((ruleType == "IP-CIDR" || ruleType == "IP-CIDR6") && (payload == "192.168.0.0/16" || payload == "10.0.0.0/8" || payload == "172.16.0.0/12" || strings.HasPrefix(payload, "192.168.") || strings.HasPrefix(payload, "10.") || strings.HasPrefix(payload, "172.16."))) {
 					hasPrivateDirect = true
 				}
 				if ruleType == "DST-PORT" && (payload == "3389" || strings.Contains(payload, "3389")) {
@@ -437,7 +494,8 @@ func validateLanRdp(kernel string, filename string, data map[string]interface{},
 			if strings.EqualFold(outbound, "direct") || strings.EqualFold(outbound, "freedom") {
 				if ipList, ok := ruleMap["ip"].([]interface{}); ok {
 					for _, ipItem := range ipList {
-						if fmt.Sprintf("%v", ipItem) == "geoip:private" {
+						ipStr := fmt.Sprintf("%v", ipItem)
+						if ipStr == "geoip:private" || ipStr == "192.168.0.0/16" || ipStr == "10.0.0.0/8" || ipStr == "172.16.0.0/12" {
 							hasPrivateDirect = true
 						}
 					}
@@ -617,7 +675,7 @@ func parseHField(val interface{}) (hFieldInfo, bool) {
 	return hFieldInfo{raw: s, min: 0, max: 0}, false
 }
 
-func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult) {
+func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult, installedVersion string) {
 	rawProxies, ok := data["proxies"]
 	if !ok || rawProxies == nil {
 		return
@@ -812,14 +870,32 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult)
 				})
 			}
 
-			// TODO(AUDIT-05 / Phase 114): emit PreflightIssue{Code: "preflight.awg_version_incompatible"}
-			// (soft, Valid stays true) when 3.1 knobs are present here (version / i1..i5 /
-			// header-protection-key / content-padding-addition / random-trailers /
-			// disable-cookies / rekey-after-time) AND the installed mihomo version is < 1.19.30.
-			// Deferred: ValidateConfigContent currently receives only the kernel *type*, not its
-			// version; threading kernelVersion touches >4 call sites (config.go x2 + template/test
-			// suites) and there is no version probe at those sites yet. Port the threshold from
-			// frontend isMihomoAwg31Supported when implementing.
+			// 6.5. AWG 3.1 kernel version compatibility check
+			hasAwg31Knobs := false
+			awg31Keys := []string{
+				"version",
+				"header-protection-key",
+				"content-padding-addition",
+				"random-trailers",
+				"disable-cookies",
+				"rekey-after-time",
+				"i1", "i2", "i3", "i4", "i5",
+			}
+			for _, k := range awg31Keys {
+				if val, exists := awgMap[k]; exists && val != nil {
+					s := strings.TrimSpace(fmt.Sprintf("%v", val))
+					if s != "" && s != "<nil>" {
+						hasAwg31Knobs = true
+						break
+					}
+				}
+			}
+			if hasAwg31Knobs && installedVersion != "" && !isMihomoAwg31Supported(installedVersion) {
+				res.Warnings = append(res.Warnings, PreflightIssue{
+					Code:    "preflight.awg_version_incompatible",
+					Message: fmt.Sprintf("Proxy %q: AmneziaWG 3.1 options require Mihomo >= 1.19.30 (current: %s)", pName, installedVersion),
+				})
+			}
 
 			// 7. Random trailers informational warning
 			if rtVal, exists := awgMap["random-trailers"]; exists && rtVal != nil {

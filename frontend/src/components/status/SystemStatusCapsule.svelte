@@ -347,7 +347,7 @@
     border: none;
     padding: 2px 2px;
     cursor: pointer;
-    color: var(--fg-primary, #d9e7f4);
+    color: var(--fg-primary);
     border-radius: 4px;
     transition: opacity 0.15s ease;
   }
@@ -381,17 +381,17 @@
     gap: 4px;
     padding: 2px 7px;
     border-radius: 4px;
-    background: rgba(41, 194, 240, 0.12);
-    border: 1px solid rgba(41, 194, 240, 0.25);
-    color: var(--accent, #29c2f0);
-    font-size: 10px;
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    color: var(--accent-text, var(--accent));
+    font-size: var(--font-size-xs);
     font-weight: 700;
     transition: all var(--transition-fast);
   }
 
   .sidebar-kernel-row:hover .quick-ctrl-badge {
-    background: rgba(41, 194, 240, 0.2);
-    border-color: var(--accent, #29c2f0);
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    border-color: var(--accent);
   }
 
   .sidebar-metrics-block {
@@ -412,8 +412,8 @@
     border: 1px solid var(--border-light);
     border-radius: 5px;
     padding: 4px 8px;
-    color: var(--fg-secondary, #8aa0b7);
-    font-size: 11px;
+    color: var(--fg-secondary);
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition:
       background 0.15s ease,
@@ -423,14 +423,15 @@
 
   .sidebar-metric-row:hover,
   .sidebar-traffic-row:hover {
-    background: rgba(41, 194, 240, 0.08);
-    border-color: rgba(41, 194, 240, 0.2);
-    color: var(--fg-primary, #d9e7f4);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 20%, transparent);
+    color: var(--fg-primary);
   }
 
   .sidebar-traffic-row {
     font-family: var(--font-family-mono, monospace);
-    font-size: 10.5px;
+    font-size: var(--font-size-xs);
+    color: var(--fg-primary);
   }
 
   .traffic-speed {
@@ -440,17 +441,17 @@
   }
 
   .traffic-speed.down .arr {
-    color: #38bdf8;
+    color: var(--accent);
     font-weight: 700;
   }
 
   .traffic-speed.up .arr {
-    color: #a78bfa;
+    color: var(--purple);
     font-weight: 700;
   }
 
   .traffic-divider {
-    color: var(--fg-faint, #3e5774);
+    color: var(--fg-faint);
   }
 
   .res-item {
@@ -460,21 +461,20 @@
   }
 
   .res-label {
-    font-size: 9.5px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
-    color: var(--fg-dim, #869cb3);
-    text-transform: uppercase;
+    color: var(--fg-primary);
   }
 
   .res-val {
     font-family: var(--font-family-mono, monospace);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
-    color: var(--fg-primary, #d9e7f4);
+    color: var(--fg-primary);
   }
 
   .res-divider {
-    color: var(--fg-faint, #3e5774);
+    color: var(--fg-faint);
   }
 
   /* ==================== Sidebar Rail Variant ==================== */
@@ -493,27 +493,27 @@
     justify-content: center;
     gap: 3px;
     background: var(--bg-elevated);
-    border: 1px solid var(--border, #1c3e5c);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md, 6px);
     cursor: pointer;
     padding: 0;
-    color: var(--fg-primary, #d9e7f4);
+    color: var(--fg-primary);
     transition:
       background 0.15s ease,
       border-color 0.15s ease;
   }
 
   .rail-status-btn:hover {
-    background: rgba(41, 194, 240, 0.1);
-    border-color: var(--accent, #29c2f0);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-color: var(--accent);
   }
 
   .rail-code {
-    font-size: 9px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     letter-spacing: 0.05em;
     font-family: var(--font-family-mono, monospace);
-    color: var(--fg-secondary, #8aa0b7);
+    color: var(--fg-secondary);
   }
 
   /* ==================== LED Dots ==================== */
@@ -528,23 +528,23 @@
   }
 
   .led-green {
-    background-color: #22c55e;
-    box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+    background-color: var(--success);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--success) 60%, transparent);
   }
 
   .led-amber-pulse {
-    background-color: #f59e0b;
-    box-shadow: 0 0 8px rgba(245, 158, 11, 0.8);
+    background-color: var(--warning);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--warning) 80%, transparent);
     animation: pulse-amber 1.2s infinite ease-in-out;
   }
 
   .led-red {
-    background-color: #ef4444;
-    box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+    background-color: var(--danger);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--danger) 60%, transparent);
   }
 
   .led-gray {
-    background-color: #64748b;
+    background-color: var(--fg-faint);
   }
 
   @keyframes pulse-amber {
@@ -570,22 +570,22 @@
   }
 
   .warning-glow {
-    color: #f59e0b !important;
-    border-color: rgba(245, 158, 11, 0.3) !important;
+    color: var(--warning) !important;
+    border-color: color-mix(in srgb, var(--warning) 30%, transparent) !important;
   }
 
   .danger-pulse {
-    color: #ef4444 !important;
-    border-color: rgba(239, 68, 68, 0.4) !important;
+    color: var(--danger) !important;
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent) !important;
     animation: resource-danger 1.5s infinite alternate;
   }
 
   @keyframes resource-danger {
     0% {
-      box-shadow: inset 0 0 4px rgba(239, 68, 68, 0.3);
+      box-shadow: inset 0 0 4px color-mix(in srgb, var(--danger) 30%, transparent);
     }
     100% {
-      box-shadow: inset 0 0 10px rgba(239, 68, 68, 0.6);
+      box-shadow: inset 0 0 10px color-mix(in srgb, var(--danger) 60%, transparent);
     }
   }
 
@@ -604,13 +604,13 @@
     background: rgba(18, 28, 40, 0.72);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+    border: 1px solid var(--border);
     border-radius: 9999px;
     /* Pill background stays a fixed dark glass regardless of site theme
        (matches the always-dark mobile header), so its text stays fixed
        light too instead of flipping with theme tokens. */
-    color: #e2e8f0;
-    font-size: 11px;
+    color: var(--fg-terminal);
+    font-size: var(--font-size-xs);
     font-weight: 600;
     cursor: pointer;
     height: 28px;
@@ -625,8 +625,8 @@
 
   .mobile-traffic {
     font-family: var(--font-family-mono, monospace);
-    color: #94a3b8;
-    font-size: 10px;
+    color: var(--fg-secondary);
+    font-size: var(--font-size-xs);
   }
 
   /* ==================== Standalone Desktop Pill ==================== */
@@ -642,7 +642,7 @@
     background: rgba(18, 28, 40, 0.72);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+    border: 1px solid var(--border);
     border-radius: 9999px;
     box-shadow:
       0 2px 8px rgba(0, 0, 0, 0.25),
@@ -661,7 +661,7 @@
     background: transparent;
     border: none;
     border-radius: 9999px;
-    color: var(--text, #e2e8f0);
+    color: var(--fg-primary);
     font-size: 12px;
     font-weight: 500;
     cursor: pointer;
@@ -669,19 +669,19 @@
   }
 
   .capsule-segment:hover {
-    background: var(--hover, rgba(255, 255, 255, 0.08));
-    color: #fff;
+    background: var(--bg-hover);
+    color: var(--fg-primary);
   }
 
   .resource-segment {
-    border-left: 1px solid var(--border-light, rgba(255, 255, 255, 0.08));
+    border-left: 1px solid var(--border-light);
   }
 
   .traffic-segment {
-    border-left: 1px solid var(--border-light, rgba(255, 255, 255, 0.08));
+    border-left: 1px solid var(--border-light);
     gap: 8px;
     font-family: var(--font-family-mono, monospace);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
   }
 
   .traffic-item {
@@ -696,10 +696,10 @@
   }
 
   .traffic-item.down .traffic-arrow {
-    color: #38bdf8;
+    color: var(--accent);
   }
 
   .traffic-item.up .traffic-arrow {
-    color: #a78bfa;
+    color: var(--purple);
   }
 </style>

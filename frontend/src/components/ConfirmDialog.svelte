@@ -77,25 +77,25 @@
   .confirm-body {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-3, 12px);
-    margin-bottom: var(--spacing-6, 24px);
+    gap: 12px;
+    margin-bottom: 24px;
   }
 
   .confirm-object {
-    font-size: var(--font-size-base, 14px);
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
     word-break: break-word;
     padding: 8px 12px;
-    background: var(--bg-tertiary, rgba(255, 255, 255, 0.04));
-    border-radius: var(--radius-sm, 6px);
-    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
   }
 
   .confirm-message {
     margin: 0;
-    font-size: var(--font-size-sm, 13px);
-    color: var(--fg-secondary, rgba(255, 255, 255, 0.7));
+    font-size: var(--font-size-sm);
+    color: var(--fg-secondary);
     line-height: 1.5;
   }
 
@@ -103,19 +103,19 @@
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     line-height: 1.4;
     padding: 10px 12px;
-    border-radius: var(--radius-sm, 6px);
-    background: rgba(239, 68, 68, 0.1);
-    color: var(--color-danger, #f87171);
-    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   }
 
   .confirm-consequence.warning {
-    background: rgba(245, 158, 11, 0.1);
-    color: var(--color-warning, #fbbf24);
-    border-color: rgba(245, 158, 11, 0.2);
+    background: var(--warning-soft);
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 30%, transparent);
   }
 
   .confirm-consequence svg {
@@ -125,7 +125,7 @@
 
   .confirm-actions {
     display: flex;
-    gap: var(--spacing-3, 12px);
+    gap: 12px;
     justify-content: flex-end;
   }
 </style>

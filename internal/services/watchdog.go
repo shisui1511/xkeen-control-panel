@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils/xtables"
 )
 
 // watchdogCheckInterval is how often the watchdog polls kernel health.
@@ -22,6 +23,68 @@ const watchdogCheckInterval = 30 * time.Second
 // watchdogMaxFailures is the number of consecutive failed health checks
 // before the watchdog trips the emergency TPROXY disarm (STAB-05).
 const watchdogMaxFailures = 3
+
+// disarmedRecheckInterval is the number of unhealthy CheckHealth cycles
+// between non-destructive mangle-table re-checks while w.disarmed is latched
+// true (WR-03). A restart-loop (e.g. a supervisor repeatedly restarting a
+// crashing XKeen, which reinstalls its TPROXY rule on every restart) can
+// leave the kernel permanently unhealthy without ever reporting a recovery,
+// which is the only event that currently clears the latch — without a
+// periodic re-check the watchdog would stay silently latched disarmed even
+// after interception returns. At the default 30s check interval this is a
+// ~2.5 minute cadence.
+const disarmedRecheckInterval = 5
+
+// watchdogResetCooldown is the minimum interval between manual watchdog resets.
+const watchdogResetCooldown = 5 * time.Second
+
+// watchdogBackoffGrid defines the retry backoff sequence after failed disarm attempts (D-10, D-35).
+var watchdogBackoffGrid = []time.Duration{
+	30 * time.Second,
+	time.Minute,
+	2 * time.Minute,
+	5 * time.Minute,
+	15 * time.Minute,
+}
+
+const (
+	// watchdogMaxDisarmAttempts is the maximum number of consecutive failed
+	// disarm attempts before entering degraded state (D-11).
+	watchdogMaxDisarmAttempts = 5
+
+	// watchdogStartGracePeriod is the window after Start() during which
+	// emergency disarm is suppressed to allow cold boot / deployment (D-05, D-40).
+	watchdogStartGracePeriod = 90 * time.Second
+
+	// watchdogDisarmTimeout is the overall context timeout for an EmergencyDisarmTProxy operation (D-14).
+	watchdogDisarmTimeout = 20 * time.Second
+)
+
+// Sentinel errors returned by TryReset.
+var (
+	ErrWatchdogResetInFlight = errors.New("watchdog disarm in flight")
+	ErrWatchdogResetCooldown = errors.New("watchdog reset cooldown active")
+)
+
+// Watchdog state constants for API and UI.
+const (
+	WatchdogStateArmed    = "armed"
+	WatchdogStateIdle     = "idle"
+	WatchdogStateDegraded = "degraded"
+	WatchdogStateDisarmed = "disarmed"
+)
+
+// WatchdogSnapshot captures the internal watchdog state at a single point in time.
+type WatchdogSnapshot struct {
+	State               string
+	ConsecutiveFailures int
+	DisarmAttempts      int
+	LastDisarmError     string
+	InterceptionActive  bool
+	InterceptionFamily  string
+	NextAttemptAt       time.Time
+	DegradedAt          time.Time
+}
 
 // WatchdogService supervises the health of the currently active proxy kernel
 // (Xray/Mihomo, driven via XKeenService) and acts as a circuit breaker: after
@@ -34,13 +97,28 @@ type WatchdogService struct {
 	mihomoDir string
 	xrayDir   string
 
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 
-	mu                  sync.Mutex
-	consecutiveFailures int
-	disarmed            bool
-	disarmInFlight      bool
+	now       func() time.Time
+	startedAt time.Time
+
+	mu                     sync.Mutex
+	consecutiveFailures    int
+	idle                   bool
+	idleRecheckCounter     int
+	disarmed               bool
+	disarmInFlight         bool
+	disarmEpoch            uint64
+	disarmedRecheckCounter int
+	interceptionActive     bool
+	interceptionFamily     string
+	lastResetAt            time.Time
+	disarmAttempts         int
+	nextDisarmAttempt      time.Time
+	degradedAt             time.Time
+	lastDisarmError        string
 
 	iptablesSaveBin  string
 	iptablesBin      string
@@ -59,18 +137,35 @@ func NewWatchdogService(xkeenSvc *XKeenService, mihomoDir, xrayDir string) *Watc
 		mihomoDir: mihomoDir,
 		xrayDir:   xrayDir,
 		stopCh:    make(chan struct{}),
+		now:       time.Now,
 	}
+}
+
+// inGraceLocked reports whether the service is within its start grace period.
+// Returns false if startedAt is zero (service not started via Start()).
+// Must be called with w.mu held.
+func (w *WatchdogService) inGraceLocked() bool {
+	if w.startedAt.IsZero() {
+		return false
+	}
+	return w.now().Sub(w.startedAt) < watchdogStartGracePeriod
 }
 
 // Start launches the background health-check loop.
 func (w *WatchdogService) Start() {
+	w.mu.Lock()
+	w.startedAt = w.now()
+	w.mu.Unlock()
+
 	w.wg.Add(1)
 	go w.loop()
 }
 
-// Stop signals the loop to exit and waits for it to finish.
+// Stop signals the loop to exit and waits for it to finish. Safe to call multiple times.
 func (w *WatchdogService) Stop() {
-	close(w.stopCh)
+	w.stopOnce.Do(func() {
+		close(w.stopCh)
+	})
 	w.wg.Wait()
 }
 
@@ -104,12 +199,12 @@ func (w *WatchdogService) runCheck() {
 	}
 }
 
-// isKernelStatusHealthy interprets the free-form output of `xkeen -status`
+// IsKernelStatusHealthy interprets the free-form output of `xkeen -status`
 // (Russian and English builds both exist in the wild). Negative phrasing is
 // checked first: the real stopped-state output is literally "XKeen is not
 // running", which contains the substring "running" and would otherwise be
 // misread as healthy.
-func isKernelStatusHealthy(status string) bool {
+func IsKernelStatusHealthy(status string) bool {
 	lower := strings.ToLower(status)
 	negativeMarkers := []string{"not running", "не запущен", "незапущен", "не актив", "неактив", "не работает", "неработает", "остановлен", "stopped"}
 	for _, m := range negativeMarkers {
@@ -118,6 +213,10 @@ func isKernelStatusHealthy(status string) bool {
 		}
 	}
 	return strings.Contains(lower, "running") || strings.Contains(lower, "актив") || strings.Contains(lower, "запущен") || strings.Contains(lower, "работает")
+}
+
+func isKernelStatusHealthy(status string) bool {
+	return IsKernelStatusHealthy(status)
 }
 
 // CheckHealth polls XKeen's current status and updates the failure counter.
@@ -129,49 +228,199 @@ func (w *WatchdogService) CheckHealth() {
 		return
 	}
 
-	status, err := w.xkeenSvc.Status()
-	healthy := err == nil && isKernelStatusHealthy(status)
-
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if healthy {
-		if w.consecutiveFailures > 0 {
-			log.Printf("Watchdog: kernel recovered after %d failed health check(s)", w.consecutiveFailures)
-		}
-		w.consecutiveFailures = 0
-		w.disarmed = false
+	// 1. Окно штатного рестарта (D-06).
+	if w.xkeenSvc.InRestart() {
 		return
 	}
 
-	w.consecutiveFailures++
-	log.Printf("Watchdog: kernel health check failed (%d/%d): status=%q err=%v",
-		w.consecutiveFailures, watchdogMaxFailures, strings.TrimSpace(status), err)
+	status, err := w.xkeenSvc.Status()
+	healthy := err == nil && isKernelStatusHealthy(status)
 
-	if w.consecutiveFailures >= watchdogMaxFailures && !w.disarmed && !w.disarmInFlight {
+	if healthy {
+		w.xkeenSvc.ClearIntentionalStop()
+
+		w.mu.Lock()
+		wasDegraded := !w.degradedAt.IsZero()
+		wasIdle := w.idle
+		if wasDegraded {
+			log.Printf("Watchdog: kernel recovered from degraded state after %d failed health check(s)", w.consecutiveFailures)
+		} else if wasIdle {
+			log.Printf("Watchdog: kernel recovered from idle state — resuming guard")
+		} else if w.consecutiveFailures > 0 {
+			log.Printf("Watchdog: kernel recovered after %d failed health check(s)", w.consecutiveFailures)
+		}
+		w.consecutiveFailures = 0
+		w.idle = false
+		w.idleRecheckCounter = 0
+		w.disarmed = false
+		w.disarmedRecheckCounter = 0
+		w.disarmEpoch++
+		w.interceptionActive = false
+		w.interceptionFamily = ""
+		w.disarmAttempts = 0
+		w.nextDisarmAttempt = time.Time{}
+		w.degradedAt = time.Time{}
+		w.lastDisarmError = ""
+		w.mu.Unlock()
+		return
+	}
+
+	intentionalStop := w.xkeenSvc.IntentionalStop()
+
+	w.mu.Lock()
+	if !w.degradedAt.IsZero() {
+		if w.consecutiveFailures < watchdogMaxFailures {
+			w.consecutiveFailures++
+		}
+		w.mu.Unlock()
+		return
+	}
+
+	isDisarmed := w.disarmed
+	isIdle := w.idle
+	checkRules := false
+
+	if isDisarmed {
+		// WR-03: while latched disarmed, periodically check if rules were reinstalled
+		if !w.disarmInFlight {
+			w.disarmedRecheckCounter++
+			if w.disarmedRecheckCounter >= disarmedRecheckInterval {
+				w.disarmedRecheckCounter = 0
+				checkRules = true
+			}
+		}
+	} else if isIdle {
+		// While in idle, periodically check if rules appeared
+		w.idleRecheckCounter++
+		if w.idleRecheckCounter >= disarmedRecheckInterval {
+			w.idleRecheckCounter = 0
+			checkRules = true
+		}
+	} else {
+		// When not disarmed and not idle: check rules on first failure (or when intentional stop is signaled)
+		// to determine whether to enter idle or fail. In intermediate failure cycles, use cached rulesActive.
+		if w.consecutiveFailures == 0 || intentionalStop {
+			checkRules = true
+		}
+	}
+	rulesActive := w.interceptionActive
+	w.mu.Unlock()
+
+	if checkRules {
+		v4, v6 := w.tproxyInterceptionFamilies()
+		rulesActive = v4 || v6
+		var family string
+		switch {
+		case v4 && v6:
+			family = "ipv4+ipv6"
+		case v4:
+			family = "ipv4"
+		case v6:
+			family = "ipv6"
+		default:
+			family = ""
+		}
+		w.mu.Lock()
+		w.interceptionActive = rulesActive
+		w.interceptionFamily = family
+		if rulesActive && w.disarmed && !w.disarmInFlight {
+			log.Printf("Watchdog: TPROXY interception rule reappeared while latched disarmed — unlatching to allow a fresh disarm attempt")
+			w.disarmed = false
+			isDisarmed = false
+		}
+		w.mu.Unlock()
+	}
+
+	if !isDisarmed {
+		// 3. Приоритет факта над намерением (D-03).
+		if intentionalStop && rulesActive {
+			w.xkeenSvc.ClearIntentionalStop()
+			intentionalStop = false
+			log.Printf("Watchdog: TPROXY interception rules present while kernel stopped — treating as incident")
+			w.mu.Lock()
+			w.idle = false
+			w.idleRecheckCounter = 0
+			w.mu.Unlock()
+		}
+
+		// 4. Штатный простой (D-01, D-02, D-09).
+		if intentionalStop || !rulesActive {
+			w.mu.Lock()
+			wasIdle := w.idle
+			w.idle = true
+			w.consecutiveFailures = 0
+			w.mu.Unlock()
+
+			if !wasIdle {
+				log.Printf("Watchdog: kernel stopped intentionally, disarm disabled")
+			}
+			return
+		}
+	}
+
+	w.mu.Lock()
+	w.idle = false
+	w.idleRecheckCounter = 0
+	if w.consecutiveFailures < watchdogMaxFailures {
+		w.consecutiveFailures++
+	}
+	displayFailures := w.consecutiveFailures
+	log.Printf("Watchdog: kernel health check failed (%d/%d): status=%q err=%v",
+		displayFailures, watchdogMaxFailures, strings.TrimSpace(status), err)
+
+	canDisarm := w.consecutiveFailures >= watchdogMaxFailures &&
+		!w.disarmed &&
+		!w.disarmInFlight &&
+		w.degradedAt.IsZero() &&
+		!w.inGraceLocked() &&
+		!w.now().Before(w.nextDisarmAttempt)
+
+	if canDisarm {
 		w.disarmInFlight = true
-		log.Printf("Watchdog: %d consecutive kernel failures — triggering emergency TPROXY disarm", w.consecutiveFailures)
+		epoch := w.disarmEpoch
+		log.Printf("Watchdog: %d consecutive kernel failures — triggering emergency TPROXY disarm", watchdogMaxFailures)
 		// Tracked by wg so Stop() (called during graceful shutdown/restart)
 		// waits for an in-flight disarm sequence instead of abandoning it
 		// mid-way through mutating iptables state.
 		w.wg.Add(1)
 		go func() {
 			defer w.wg.Done()
-			ok := w.EmergencyDisarmTProxy()
+			outcome := w.EmergencyDisarmTProxy()
 			w.mu.Lock()
 			w.disarmInFlight = false
-			// Only latch disarmed on confirmed success. On failure, leave it
-			// false so the next qualifying health check (consecutiveFailures
-			// is still >= watchdogMaxFailures) retries instead of the
-			// circuit breaker silently sitting there having never actually
-			// removed the interception rule.
-			w.disarmed = ok
-			w.mu.Unlock()
-			if !ok {
-				log.Printf("Watchdog: EmergencyDisarmTProxy failed — will retry on next qualifying health check")
+			// Latch only if the epoch has not changed while the disarm was in flight.
+			// If the kernel recovered and subsequently failed again, this previous attempt's
+			// outcome is stale and must not block the new failure cycle from disarming (CR-01).
+			if epoch == w.disarmEpoch {
+				if outcome != DisarmFailed {
+					w.disarmed = true
+					w.interceptionActive = false
+					w.interceptionFamily = ""
+					w.disarmAttempts = 0
+					w.nextDisarmAttempt = time.Time{}
+					w.lastDisarmError = ""
+				} else {
+					w.disarmed = false
+					w.interceptionActive = true
+					w.disarmAttempts++
+					if w.disarmAttempts >= watchdogMaxDisarmAttempts {
+						w.degradedAt = w.now()
+						w.nextDisarmAttempt = time.Time{}
+						log.Printf("Watchdog: entered degraded state after %d failed emergency disarm attempt(s): %s; TPROXY interception may remain active",
+							w.disarmAttempts, w.lastDisarmError)
+					} else {
+						w.nextDisarmAttempt = w.now().Add(watchdogBackoffGrid[w.disarmAttempts-1])
+						log.Printf("Watchdog: EmergencyDisarmTProxy failed (attempt %d/%d) — next attempt in %v at %s",
+							w.disarmAttempts, watchdogMaxDisarmAttempts, watchdogBackoffGrid[w.disarmAttempts-1], w.nextDisarmAttempt.Format(time.RFC3339))
+					}
+				}
+			} else {
+				log.Printf("Watchdog: EmergencyDisarmTProxy outcome %v discarded — health recovered and re-failed while attempt was in flight", outcome)
 			}
+			w.mu.Unlock()
 		}()
 	}
+	w.mu.Unlock()
 }
 
 // ConsecutiveFailures returns the current failure streak (for diagnostics/tests).
@@ -179,6 +428,94 @@ func (w *WatchdogService) ConsecutiveFailures() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.consecutiveFailures
+}
+
+// stateLocked derives the current watchdog state from latches and timestamps.
+// Must be called with w.mu held.
+func (w *WatchdogService) stateLocked() string {
+	if !w.degradedAt.IsZero() {
+		return WatchdogStateDegraded
+	}
+	if w.disarmed {
+		return WatchdogStateDisarmed
+	}
+	if w.idle {
+		return WatchdogStateIdle
+	}
+	return WatchdogStateArmed
+}
+
+// Snapshot returns an atomic point-in-time snapshot of the watchdog state.
+// It never spawns subprocesses or queries netfilter directly.
+func (w *WatchdogService) Snapshot() WatchdogSnapshot {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return WatchdogSnapshot{
+		State:               w.stateLocked(),
+		ConsecutiveFailures: w.consecutiveFailures,
+		DisarmAttempts:      w.disarmAttempts,
+		LastDisarmError:     w.lastDisarmError,
+		InterceptionActive:  w.interceptionActive,
+		InterceptionFamily:  w.interceptionFamily,
+		NextAttemptAt:       w.nextDisarmAttempt,
+		DegradedAt:          w.degradedAt,
+	}
+}
+
+// TryReset attempts an atomic manual reset of watchdog counters and latches.
+// Rejects with ErrWatchdogResetInFlight if a disarm operation is currently running,
+// or with ErrWatchdogResetCooldown if called within watchdogResetCooldown of the last reset.
+// Records the reset action in XKeenService restart log and triggers an out-of-order health check.
+func (w *WatchdogService) TryReset() (WatchdogSnapshot, error) {
+	w.mu.Lock()
+	if w.disarmInFlight {
+		w.mu.Unlock()
+		return WatchdogSnapshot{}, ErrWatchdogResetInFlight
+	}
+
+	if !w.lastResetAt.IsZero() && w.now().Sub(w.lastResetAt) < watchdogResetCooldown {
+		w.mu.Unlock()
+		return WatchdogSnapshot{}, ErrWatchdogResetCooldown
+	}
+
+	w.lastResetAt = w.now()
+	w.consecutiveFailures = 0
+	w.disarmAttempts = 0
+	w.disarmedRecheckCounter = 0
+	w.idle = false
+	w.idleRecheckCounter = 0
+	w.lastDisarmError = ""
+	w.nextDisarmAttempt = time.Time{}
+	w.degradedAt = time.Time{}
+	w.disarmed = false
+	w.disarmEpoch++
+	w.interceptionActive = false
+	w.interceptionFamily = ""
+
+	snapshot := WatchdogSnapshot{
+		State:               w.stateLocked(),
+		ConsecutiveFailures: w.consecutiveFailures,
+		DisarmAttempts:      w.disarmAttempts,
+		LastDisarmError:     w.lastDisarmError,
+		InterceptionActive:  w.interceptionActive,
+		InterceptionFamily:  w.interceptionFamily,
+		NextAttemptAt:       w.nextDisarmAttempt,
+		DegradedAt:          w.degradedAt,
+	}
+	w.mu.Unlock()
+
+	if w.xkeenSvc != nil {
+		w.xkeenSvc.RecordAction("watchdog_reset", "", nil)
+	}
+
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		w.CheckHealth()
+	}()
+
+	return snapshot, nil
 }
 
 // tproxyChainMarker is a literal chain/comment name some XKeen builds may
@@ -208,6 +545,31 @@ var builtinMangleChains = map[string]bool{
 	"PREROUTING": true, "INPUT": true, "FORWARD": true, "OUTPUT": true, "POSTROUTING": true,
 }
 
+// DisarmOutcome represents the result of an EmergencyDisarmTProxy attempt.
+type DisarmOutcome int
+
+const (
+	// DisarmFailed indicates at least one family could not be verified clean.
+	DisarmFailed DisarmOutcome = iota
+	// DisarmAlreadyClean indicates no TPROXY interception rules were present to disarm.
+	DisarmAlreadyClean
+	// DisarmDisarmed indicates interception rules were present, removed, and verified gone.
+	DisarmDisarmed
+)
+
+func (o DisarmOutcome) String() string {
+	switch o {
+	case DisarmFailed:
+		return "failed"
+	case DisarmAlreadyClean:
+		return "already-clean"
+	case DisarmDisarmed:
+		return "disarmed"
+	default:
+		return "unknown"
+	}
+}
+
 // EmergencyDisarmTProxy removes the TPROXY interception rule(s) installed by
 // XKeen from the iptables (and ip6tables, when present) mangle table so LAN
 // devices regain direct internet access when the proxy kernel has failed
@@ -215,48 +577,92 @@ var builtinMangleChains = map[string]bool{
 // directly (not via the xkeen binary) because the XKeen binary itself may be
 // the thing that's wedged.
 //
-// It reports whether the disarm can be considered handled: true if every
-// family it could query came back clean (rules removed, or confirmed none
-// present); false on an execution failure (iptables missing, xtables lock
-// contention, permission error) so the caller can retry on the next
-// qualifying health check instead of silently latching a failed attempt as
-// success.
-func (w *WatchdogService) EmergencyDisarmTProxy() bool {
-	ctx := context.Background()
+// It reports a DisarmOutcome: DisarmDisarmed if rules were found and their removal
+// was confirmed via re-reading the mangle table; DisarmAlreadyClean if no rules
+// were found; or DisarmFailed if execution or verification failed.
+func (w *WatchdogService) EmergencyDisarmTProxy() DisarmOutcome {
+	ctx, cancel := context.WithTimeout(context.Background(), watchdogDisarmTimeout)
+	defer cancel()
 
-	saveV4 := w.iptablesSaveBin
-	if saveV4 == "" {
-		saveV4 = "iptables-save"
-	}
-	delV4 := w.iptablesBin
-	if delV4 == "" {
-		delV4 = "iptables"
-	}
-	saveV6 := w.ip6tablesSaveBin
-	if saveV6 == "" {
-		saveV6 = "ip6tables-save"
-	}
-	delV6 := w.ip6tablesBin
-	if delV6 == "" {
-		delV6 = "ip6tables"
+	saveV4, delV4, saveV6, delV6 := w.resolveXtablesBins()
+
+	waitArgsV4 := xtables.WaitArgsFor(ctx, delV4)
+	waitArgsV6 := xtables.WaitArgsFor(ctx, delV6)
+
+	removedV4, okV4, failV4 := disarmTProxyFamily(ctx, saveV4, delV4, waitArgsV4)
+	removedV6, okV6, failV6 := disarmTProxyFamily(ctx, saveV6, delV6, waitArgsV6)
+
+	var lastErr string
+	switch {
+	case !okV4 && !okV6:
+		lastErr = fmt.Sprintf("IPv4 failed: %s, IPv6 failed: %s", failV4, failV6)
+	case !okV4 && okV6:
+		lastErr = fmt.Sprintf("IPv6 disarmed, IPv4 failed: %s", failV4)
+	case okV4 && !okV6:
+		lastErr = fmt.Sprintf("IPv4 disarmed, IPv6 failed: %s", failV6)
+	default:
+		lastErr = ""
 	}
 
-	removedV4, okV4 := disarmTProxyFamily(ctx, saveV4, delV4)
-	removedV6, okV6 := disarmTProxyFamily(ctx, saveV6, delV6)
+	w.mu.Lock()
+	w.lastDisarmError = lastErr
+	w.mu.Unlock()
 
 	if !okV4 || !okV6 {
 		log.Printf("Watchdog: EmergencyDisarmTProxy incomplete (ipv4 ok=%v removed=%d, ipv6 ok=%v removed=%d) — TPROXY interception may still be active",
 			okV4, removedV4, okV6, removedV6)
-		return false
+		return DisarmFailed
 	}
 
 	if removedV4+removedV6 == 0 {
-		log.Printf("Watchdog: EmergencyDisarmTProxy: no %s rules found in mangle table (already absent or interception not installed)", tproxyChainMarker)
-	} else {
-		log.Printf("Watchdog: EmergencyDisarmTProxy removed %d TPROXY interception rule(s) (ipv4=%d, ipv6=%d)",
-			removedV4+removedV6, removedV4, removedV6)
+		log.Printf("Watchdog: EmergencyDisarmTProxy: no TPROXY interception rules found in mangle table (already absent or interception not installed)")
+		return DisarmAlreadyClean
 	}
-	return true
+
+	log.Printf("Watchdog: EmergencyDisarmTProxy removed %d TPROXY interception rule(s) (ipv4=%d, ipv6=%d)",
+		removedV4+removedV6, removedV4, removedV6)
+	return DisarmDisarmed
+}
+
+// resolveXtablesBins returns the iptables-save/iptables and ip6tables-save/
+// ip6tables binary paths to use, falling back to the bare command names
+// (resolved via PATH at exec time) when the service has no override
+// configured (overrides are used by tests to point at fake binaries).
+func (w *WatchdogService) resolveXtablesBins() (saveV4, delV4, saveV6, delV6 string) {
+	saveV4 = w.iptablesSaveBin
+	if saveV4 == "" {
+		saveV4 = "iptables-save"
+	}
+	delV4 = w.iptablesBin
+	if delV4 == "" {
+		delV4 = "iptables"
+	}
+	saveV6 = w.ip6tablesSaveBin
+	if saveV6 == "" {
+		saveV6 = "ip6tables-save"
+	}
+	delV6 = w.ip6tablesBin
+	if delV6 == "" {
+		delV6 = "ip6tables"
+	}
+	return saveV4, delV4, saveV6, delV6
+}
+
+// tproxyInterceptionFamilies performs a non-destructive check of both IPv4 and IPv6
+// mangle tables, returning whether TPROXY interception rules are present in each family.
+func (w *WatchdogService) tproxyInterceptionFamilies() (v4, v6 bool) {
+	ctx := context.Background()
+	saveV4, _, saveV6, _ := w.resolveXtablesBins()
+
+	check := func(saveBin string) bool {
+		lines, err := listMangleRules(ctx, saveBin)
+		if err != nil {
+			return false
+		}
+		return len(selectTproxyRules(lines)) > 0
+	}
+
+	return check(saveV4), check(saveV6)
 }
 
 // splitIptablesRule splits an iptables-save rule string into individual command-line
@@ -294,10 +700,83 @@ func splitIptablesRule(line string) []string {
 			current.WriteRune(r)
 		}
 	}
+	// WR-06: an unpaired quote (malformed iptables-save output, or manual
+	// third-party edits to the rule set) would otherwise leave inQuotes
+	// true and silently swallow the rest of the line — including spaces —
+	// into a single argument, producing a malformed "-D ..." command that
+	// either fails opaquely or, worse, could coincidentally match and
+	// delete an unrelated rule. Refuse to guess: log and skip the line.
+	if inQuotes {
+		log.Printf("splitIptablesRule: unterminated quote in line, skipping: %q", line)
+		return nil
+	}
 	if current.Len() > 0 {
 		args = append(args, current.String())
 	}
 	return args
+}
+
+// listMangleRules lists all rule appending lines ("-A ") from the mangle table using saveBin.
+func listMangleRules(ctx context.Context, saveBin string) ([]string, error) {
+	saveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	out, err := exec.CommandContext(saveCtx, saveBin, "-t", "mangle").Output()
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+
+	var lines []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if l = strings.TrimSpace(l); strings.HasPrefix(l, "-A ") {
+			lines = append(lines, l)
+		}
+	}
+	return lines, nil
+}
+
+// isXkeenTproxyRule reports whether an iptables rule targets TPROXY or has the XKeen marker.
+func isXkeenTproxyRule(line string, fields []string) bool {
+	for i, f := range fields {
+		if (f == "-j" || f == "-g") && i+1 < len(fields) && fields[i+1] == tproxyTarget {
+			return true
+		}
+	}
+	return strings.Contains(line, tproxyChainMarker)
+}
+
+// selectTproxyRules finds all rules in mangle lines that intercept traffic or jump into custom chains doing so.
+func selectTproxyRules(lines []string) map[string]bool {
+	toDelete := map[string]bool{} // dedup: a line could match both signals
+	customChains := map[string]bool{}
+	for _, line := range lines {
+		fields := splitIptablesRule(line)
+		if len(fields) < 2 {
+			continue
+		}
+		chain := fields[1]
+		if isXkeenTproxyRule(line, fields) {
+			toDelete[line] = true
+			if !builtinMangleChains[chain] {
+				customChains[chain] = true
+			}
+		}
+	}
+
+	// Second pass: also remove any rule that jumps into a custom chain we
+	// just identified as holding the interception rule, so the chain is
+	// fully unreachable (not just emptied).
+	if len(customChains) > 0 {
+		for _, line := range lines {
+			fields := splitIptablesRule(line)
+			for i, f := range fields {
+				if (f == "-j" || f == "-g") && i+1 < len(fields) && customChains[fields[i+1]] {
+					toDelete[line] = true
+					break
+				}
+			}
+		}
+	}
+	return toDelete
 }
 
 // disarmTProxyFamily removes every mangle-table rule that installs XKeen's
@@ -324,97 +803,104 @@ func splitIptablesRule(line string) []string {
 // attempt). ok is false only on a genuine execution failure such as xtables
 // lock contention or a permission error, where we can't tell whether the
 // interception rule is actually gone.
-func disarmTProxyFamily(ctx context.Context, saveBin, delBin string) (removed int, ok bool) {
-	saveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	out, err := exec.CommandContext(saveCtx, saveBin, "-t", "mangle").Output()
-	cancel()
+func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []string) (removed int, ok bool, failReason string) {
+	lines, err := listMangleRules(ctx, saveBin)
 	if err != nil {
-		if isCommandNotFound(err) {
+		if xtables.IsCommandNotFound(err) {
 			// This iptables family isn't present on this system — nothing to
 			// disarm here, not a failure.
-			return 0, true
+			return 0, true, ""
 		}
 		log.Printf("Watchdog: EmergencyDisarmTProxy: failed to list mangle table via %s: %v", saveBin, err)
-		return 0, false
+		return 0, false, fmt.Sprintf("list mangle table via %s: %v", saveBin, err)
 	}
 
-	var lines []string
-	for _, l := range strings.Split(string(out), "\n") {
-		if l = strings.TrimSpace(l); strings.HasPrefix(l, "-A ") {
-			lines = append(lines, l)
-		}
+	toDelete := selectTproxyRules(lines)
+	if len(toDelete) == 0 {
+		return 0, true, ""
 	}
 
-	toDelete := map[string]bool{} // dedup: a line could match both signals
-	customChains := map[string]bool{}
-	for _, line := range lines {
-		fields := splitIptablesRule(line)
-		if len(fields) < 2 {
-			continue
-		}
-		chain := fields[1]
-		matchesTarget := false
-		for i, f := range fields {
-			if f == "-j" && i+1 < len(fields) && fields[i+1] == tproxyTarget {
-				matchesTarget = true
-				break
+	var lastDelErr error
+	deleteRules := func(rules map[string]bool) (deleted int, hasErr bool) {
+		for line := range rules {
+			args := splitIptablesRule(line)
+			if len(args) == 0 {
+				continue
 			}
-		}
-		if matchesTarget || strings.Contains(line, tproxyChainMarker) {
-			toDelete[line] = true
-			if !builtinMangleChains[chain] {
-				customChains[chain] = true
+			args[0] = "-D" // "-A CHAIN ..." -> "-D CHAIN ..." removes exactly this rule
+			delArgs := append(append([]string{}, waitArgs...), "-t", "mangle")
+			delArgs = append(delArgs, args...)
+
+			delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
+			delOut, delErr := exec.CommandContext(delCtx, delBin, delArgs...).CombinedOutput()
+			delCancel()
+			if delErr != nil {
+				hasErr = true
+				lastDelErr = fmt.Errorf("%v (%s)", delErr, strings.TrimSpace(string(delOut)))
+				continue
 			}
+
+			log.Printf("Watchdog: removed TPROXY interception rule via %s: %s", delBin, line)
+			deleted++
 		}
+		return deleted, hasErr
 	}
 
-	// Second pass: also remove any rule that jumps into a custom chain we
-	// just identified as holding the interception rule, so the chain is
-	// fully unreachable (not just emptied).
-	if len(customChains) > 0 {
-		for _, line := range lines {
-			fields := splitIptablesRule(line)
-			for i, f := range fields {
-				if f == "-j" && i+1 < len(fields) && customChains[fields[i+1]] {
-					toDelete[line] = true
-					break
-				}
+	// WR-02: iptables' "-D" removes exactly one physical match per invocation.
+	// selectTproxyRules dedups by rule text, so if the mangle table holds 3+
+	// physically identical copies of the same rule (e.g. XKeen looping
+	// crash-restart re-installs its interception rule before the watchdog
+	// catches up), a single deletion pass per unique rule text leaves
+	// duplicates behind. Loop deletion+re-read passes — driven by whether
+	// selectTproxyRules still finds a match, not a hardcoded pass count —
+	// until the table is clean or maxDisarmPasses is reached (a hard ceiling
+	// so a persistently re-installed rule can't spin this forever).
+	const maxDisarmPasses = 5
+	var hasErrAny bool
+	pass := 0
+	for {
+		pass++
+		delCount, hasErr := deleteRules(toDelete)
+		removed += delCount
+		hasErrAny = hasErrAny || hasErr
+
+		if delCount == 0 && hasErr {
+			reason := fmt.Sprintf("deletion failed via %s", delBin)
+			if lastDelErr != nil {
+				reason += fmt.Sprintf(": %v", lastDelErr)
 			}
-		}
-	}
-
-	for line := range toDelete {
-		args := splitIptablesRule(line)
-		if len(args) == 0 {
-			continue
-		}
-		args[0] = "-D" // "-A CHAIN ..." -> "-D CHAIN ..." removes exactly this rule
-		delArgs := append([]string{"-w", "5", "-t", "mangle"}, args...)
-
-		delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
-		delOut, delErr := exec.CommandContext(delCtx, delBin, delArgs...).CombinedOutput()
-		delCancel()
-		if delErr != nil {
-			log.Printf("Watchdog: EmergencyDisarmTProxy: failed to remove rule via %s (%q): %v — %s",
-				delBin, line, delErr, strings.TrimSpace(string(delOut)))
-			return removed, false
+			return removed, false, reason
 		}
 
-		log.Printf("Watchdog: removed TPROXY interception rule via %s: %s", delBin, line)
-		removed++
-	}
+		lines, err := listMangleRules(ctx, saveBin)
+		if err != nil {
+			log.Printf("Watchdog: EmergencyDisarmTProxy: failed to re-read mangle table via %s after pass %d: %v", saveBin, pass, err)
+			return removed, false, fmt.Sprintf("re-read mangle table via %s: %v", saveBin, err)
+		}
+		remaining := selectTproxyRules(lines)
+		if len(remaining) == 0 {
+			if hasErrAny {
+				log.Printf("Watchdog: EmergencyDisarmTProxy: rule deletion encountered errors via %s, but re-read after pass %d confirmed mangle table clean", delBin, pass)
+			} else if pass == 1 && delCount == 0 {
+				log.Printf("Watchdog: EmergencyDisarmTProxy: TPROXY rules disappeared from mangle table before deletion via %s (cleared concurrently)", delBin)
+			}
+			return removed, true, ""
+		}
 
-	return removed, true
-}
+		if pass >= maxDisarmPasses {
+			log.Printf("Watchdog: EmergencyDisarmTProxy: %d interception rule(s) still remain after %d passes via %s",
+				len(remaining), pass, delBin)
+			reason := fmt.Sprintf("%d rule(s) remain after %d passes", len(remaining), pass)
+			if lastDelErr != nil {
+				reason += fmt.Sprintf(" (%v)", lastDelErr)
+			}
+			return removed, false, reason
+		}
 
-// isCommandNotFound reports whether err comes from exec failing to locate
-// the binary on PATH (as opposed to the binary running and failing).
-func isCommandNotFound(err error) bool {
-	var execErr *exec.Error
-	if errors.As(err, &execErr) {
-		return errors.Is(execErr.Err, exec.ErrNotFound)
+		log.Printf("Watchdog: EmergencyDisarmTProxy: %d interception rule(s) remain after pass %d — retrying via %s",
+			len(remaining), pass, delBin)
+		toDelete = remaining
 	}
-	return false
 }
 
 // defaultMihomoConfigYAML is a minimal, self-contained recovery config: DIRECT-only

@@ -151,7 +151,7 @@ test.describe('Connections page test suite', () => {
   });
 
   test('live indicator badge appears when WS connects', async ({ page }) => {
-    await expect(page.locator('.live-badge.running')).toBeVisible();
+    await expect(page.locator('.status-indicator.connected')).toBeVisible();
   });
 
   test('connection columns display correct data from WS frame', async ({ page }) => {
@@ -190,21 +190,21 @@ test.describe('Connections page test suite', () => {
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(2);
 
     // Click Direct only
-    await page.locator('.f-chip:has-text("Direct")').click();
+    await page.locator('.seg-item:has-text("Direct")').click();
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(1);
     await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
       'google.com'
     );
 
     // Click Proxy only
-    await page.locator('.f-chip:has-text("Proxy")').click();
+    await page.locator('.seg-item:has-text("Proxy")').click();
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(1);
     await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
       'youtube.com'
     );
 
     // Click All
-    await page.locator('.f-chip:has-text("Все"), .f-chip:has-text("All")').first().click();
+    await page.locator('.seg-item:has-text("Все"), .seg-item:has-text("All")').first().click();
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(2);
   });
 
@@ -260,21 +260,23 @@ test.describe('Connections page test suite', () => {
   });
 
   test('pause button toggles stream live status', async ({ page }) => {
-    await expect(page.locator('.live-badge.running')).toBeVisible();
+    await expect(page.locator('.status-indicator.connected')).toBeVisible();
 
     // Click pause button in actions
     const pauseBtn = page.locator('.ph-actions button.btn-secondary').last();
     await pauseBtn.click();
 
     // Paused badge visible
-    await expect(page.locator('.live-badge.paused')).toBeVisible();
+    await expect(page.locator('.status-indicator:not(.connected)')).toBeVisible();
 
     // Click resume button
     await pauseBtn.click();
-    await expect(page.locator('.live-badge.running')).toBeVisible();
+    await expect(page.locator('.status-indicator.connected')).toBeVisible();
   });
 
-  test('keyboard navigation opens drawer on Enter and closes on Escape', async ({ page }) => {
+  test('keyboard navigation opens drawer on Enter, traps focus, and closes on Escape returning focus', async ({
+    page
+  }) => {
     const firstRow = page.locator('.connections-table tbody tr.conn-row').first();
     await firstRow.focus();
     await page.keyboard.press('Enter');
@@ -282,9 +284,22 @@ test.describe('Connections page test suite', () => {
     await expect(page.locator('.inspector-drawer')).toBeVisible();
     await expect(page.locator('.inspector-drawer')).toContainText('youtube.com:443');
 
+    // Focus is moved inside the drawer (close button)
+    await expect(page.locator('.drawer-close')).toBeFocused();
+
+    // Tab key does not escape the drawer
+    await page.keyboard.press('Tab');
+    const isInsideDrawer = await page.evaluate(
+      () => !!document.activeElement?.closest('.inspector-drawer')
+    );
+    expect(isInsideDrawer).toBe(true);
+
     // Press Escape to close
     await page.keyboard.press('Escape');
     await expect(page.locator('.inspector-drawer')).toHaveCount(0);
+
+    // Focus is returned to the connection row
+    await expect(firstRow).toBeFocused();
   });
 
   test('close all connections button opens confirmation dialog', async ({ page }) => {

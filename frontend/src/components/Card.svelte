@@ -29,13 +29,14 @@
 </div>
 
 <style>
-  /* All visual rules now live in global.css under .card / .card-title so
-     dark-navy redesign + theme variables apply consistently. This file
-     stays minimal so component scoping does not strand the new tokens. */
+  /* Note: global.css also defines .card / .card-title for non-component
+     markup (e.g. server-rendered fragments). These scoped rules mirror
+     those values but win here because Svelte's scope attribute makes them
+     more specific — keep both copies in sync manually when changing either. */
   .card {
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 60%), var(--bg-card);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-lg);
     padding: var(--card-pad);
     box-shadow: var(--shadow);
@@ -49,10 +50,9 @@
     justify-content: space-between;
     margin: calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad)) 18px;
     padding: 16px 22px 12px;
-    font-size: 11.5px;
-    font-weight: 700;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
     color: var(--fg-secondary);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
@@ -64,7 +64,5 @@
     display: flex;
     gap: 8px;
     align-items: center;
-    text-transform: none;
-    letter-spacing: normal;
   }
 </style>

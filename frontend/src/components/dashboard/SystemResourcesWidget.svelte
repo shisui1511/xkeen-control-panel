@@ -346,7 +346,7 @@
   }
 
   .res-sub {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--fg-secondary);
     line-height: 1.4;
     white-space: nowrap;
@@ -355,7 +355,7 @@
   }
 
   .res-sub-load {
-    font-size: 11px;
+    font-size: 12px;
     font-family: var(--font-family-mono, monospace);
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
@@ -431,7 +431,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--success);
     background: color-mix(in srgb, var(--success) 12%, transparent);

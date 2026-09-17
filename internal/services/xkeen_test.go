@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestXKeenService_New(t *testing.T) {
@@ -215,5 +216,201 @@ func TestXKeenService_LocalhostBypass(t *testing.T) {
 	}
 	if !strings.Contains(out2, "Bypassed service command") {
 		t.Fatalf("expected bypass message, got %s", out2)
+	}
+}
+
+func TestXKeenService_IntentionalStopLifecycle(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	// Start with a script that exits 0
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewXKeenService(dummy, tmpDir)
+
+	// Test 1: newly created service has intentionalStop=false, inRestart=false
+	if svc.IntentionalStop() {
+		t.Fatal("expected IntentionalStop() to be false initially")
+	}
+	if svc.InRestart() {
+		t.Fatal("expected InRestart() to be false initially")
+	}
+
+	// Test 2: successful Stop() sets intentionalStop=true
+	if _, err := svc.Stop(); err != nil {
+		t.Fatalf("unexpected stop error: %v", err)
+	}
+	if !svc.IntentionalStop() {
+		t.Fatal("expected IntentionalStop() to be true after successful Stop()")
+	}
+
+	// Test 3: failed Stop() STILL sets intentionalStop=true (operator intent was expressed)
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho 'Stop failed' >&2\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Reset first
+	svc.ClearIntentionalStop()
+	if svc.IntentionalStop() {
+		t.Fatal("expected ClearIntentionalStop() to clear the flag")
+	}
+
+	if _, err := svc.Stop(); err == nil {
+		t.Fatal("expected error from failed Stop()")
+	}
+	if !svc.IntentionalStop() {
+		t.Fatal("expected IntentionalStop() to be true even after failed Stop()")
+	}
+
+	// Test 4: Start() clears intentionalStop even when it fails (D-08)
+	// dummy script exits 1
+	if _, err := svc.Start(); err == nil {
+		t.Fatal("expected error from failed Start()")
+	}
+	if svc.IntentionalStop() {
+		t.Fatal("expected IntentionalStop() to be false after failed Start() (D-08)")
+	}
+
+	// Test 7: ClearIntentionalStop clears flag regardless of how it was set
+	svc.stateMu.Lock()
+	svc.intentionalStop = true
+	svc.stateMu.Unlock()
+	svc.ClearIntentionalStop()
+	if svc.IntentionalStop() {
+		t.Fatal("expected ClearIntentionalStop() to clear flag")
+	}
+}
+
+func TestXKeenService_RestartWindow(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewXKeenService(dummy, tmpDir)
+	currTime := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return currTime }
+
+	// Ensure intentionalStop was set
+	svc.stateMu.Lock()
+	svc.intentionalStop = true
+	svc.stateMu.Unlock()
+
+	// Test 5: Restart() clears intentionalStop and activates restart window
+	if _, err := svc.Restart(); err != nil {
+		t.Fatalf("unexpected restart error: %v", err)
+	}
+	if svc.IntentionalStop() {
+		t.Fatal("expected intentionalStop to be cleared by Restart()")
+	}
+	if !svc.InRestart() {
+		t.Fatal("expected InRestart() to be true after Restart()")
+	}
+
+	// Test 6: restart window expires past deadline
+	currTime = currTime.Add(xkeenRestartWindow + time.Second)
+	if svc.InRestart() {
+		t.Fatal("expected InRestart() to be false after window expired")
+	}
+
+	// SwitchKernel("mihomo") activates restart window
+	if _, err := svc.SwitchKernel("mihomo"); err != nil {
+		t.Fatalf("unexpected switch kernel error: %v", err)
+	}
+	if !svc.InRestart() {
+		t.Fatal("expected InRestart() to be true after SwitchKernel('mihomo')")
+	}
+
+	// SwitchKernel("unknown") returns error and does not activate window
+	currTime = currTime.Add(xkeenRestartWindow + time.Second)
+	if svc.InRestart() {
+		t.Fatal("expected InRestart() to be false")
+	}
+	if _, err := svc.SwitchKernel("unknown"); err == nil {
+		t.Fatal("expected error for invalid kernel")
+	}
+	if svc.InRestart() {
+		t.Fatal("expected invalid SwitchKernel to NOT activate restart window")
+	}
+}
+
+func TestXKeenService_KernelStartedHook(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	script := `#!/bin/sh
+if [ "$1" = "-fail" ]; then
+	exit 1
+fi
+exit 0
+`
+	if err := os.WriteFile(dummy, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewXKeenService(dummy, tmpDir)
+
+	hookCalls := 0
+	svc.SetKernelStartedHook(func() {
+		hookCalls++
+		// Verify no deadlock: calling service methods from inside the hook
+		_ = svc.IntentionalStop()
+	})
+
+	// 1. Successful Start() triggers hook
+	if _, err := svc.Start(); err != nil {
+		t.Fatalf("unexpected start error: %v", err)
+	}
+	if hookCalls != 1 {
+		t.Fatalf("expected hookCalls=1 after successful Start(), got %d", hookCalls)
+	}
+
+	// 2. Successful SwitchKernel("mihomo") triggers hook
+	if _, err := svc.SwitchKernel("mihomo"); err != nil {
+		t.Fatalf("unexpected switch error: %v", err)
+	}
+	if hookCalls != 2 {
+		t.Fatalf("expected hookCalls=2 after SwitchKernel('mihomo'), got %d", hookCalls)
+	}
+
+	// 3. SwitchKernel("xray") does NOT trigger hook
+	if _, err := svc.SwitchKernel("xray"); err != nil {
+		t.Fatalf("unexpected switch error: %v", err)
+	}
+	if hookCalls != 2 {
+		t.Fatalf("expected hookCalls=2 after SwitchKernel('xray'), got %d", hookCalls)
+	}
+
+	// 4. Failed Start() does NOT trigger hook
+	svc.BinaryPath = filepath.Join(tmpDir, "nonexistent")
+	if _, err := svc.Start(); err == nil {
+		t.Fatal("expected error with nonexistent binary")
+	}
+	if hookCalls != 2 {
+		t.Fatalf("expected hookCalls=2 after failed Start(), got %d", hookCalls)
+	}
+}
+
+func TestXKeenService_StartFailureNotMaskedByNegativeStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	// When start fails, status reports "XKeen is not running" (which contains "running").
+	// Verify that this negative phrasing is NOT misidentified as a successful start.
+	script := `#!/bin/sh
+if [ "$1" = "-status" ]; then
+    echo "XKeen is not running"
+    exit 0
+fi
+echo "failed to start"
+exit 1
+`
+	if err := os.WriteFile(dummy, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewXKeenService(dummy, tmpDir)
+	_, err := svc.Start()
+	if err == nil {
+		t.Fatal("expected error when start failed and status is 'XKeen is not running', got nil")
 	}
 }

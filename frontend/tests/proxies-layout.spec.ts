@@ -321,7 +321,9 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     // Переходим на страницу прокси
     await page.goto('/#/proxies');
     // Ждём появления первой группы или контейнера прокси
-    await page.waitForSelector('.group-card, .proxies-page, .ph-actions', { timeout: 10000 });
+    await page.waitForSelector('.group-card, .proxies-page, .page-header-actions', {
+      timeout: 10000
+    });
   });
 
   // D-03: Collapse-by-default — группа с >8 прокси свёрнута по умолчанию
@@ -478,7 +480,9 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     await expect(page.locator('.proxy-section-core [data-group="YouTube"]')).toBeVisible();
 
     await page.reload();
-    await page.waitForSelector('.group-card, .proxies-page, .ph-actions', { timeout: 10000 });
+    await page.waitForSelector('.group-card, .proxies-page, .page-header-actions', {
+      timeout: 10000
+    });
     await expect(page.locator('.proxy-section-core [data-group="YouTube"]')).toBeVisible();
   });
 
@@ -541,8 +545,8 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
   // D-17: переключатель режимов сетки/списка и сохранение выбора
   test('view mode: переключатель сохраняет выбор между перезагрузками', async ({ page }) => {
-    const gridBtn = page.locator('.view-toggle-btn[data-view="grid"]');
-    const listBtn = page.locator('.view-toggle-btn[data-view="list"]');
+    const gridBtn = page.locator('.seg-item[data-value="grid"]');
+    const listBtn = page.locator('.seg-item[data-value="list"]');
 
     await expect(gridBtn).toHaveAttribute('aria-pressed', 'true');
     await expect(listBtn).toHaveAttribute('aria-pressed', 'false');
@@ -554,8 +558,10 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
     // Перезагрузка страницы восстанавливает сохранённый режим списка
     await page.reload();
-    await page.waitForSelector('.group-card, .proxies-page, .ph-actions', { timeout: 10000 });
-    await expect(page.locator('.view-toggle-btn[data-view="list"]')).toHaveAttribute(
+    await page.waitForSelector('.group-card, .proxies-page, .page-header-actions', {
+      timeout: 10000
+    });
+    await expect(page.locator('.seg-item[data-value="list"]')).toHaveAttribute(
       'aria-pressed',
       'true'
     );
@@ -564,8 +570,10 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     // Повреждённое значение в localStorage безопасно откатывается к сетке
     await page.evaluate(() => localStorage.setItem('proxies_view_mode', '{"a":1}'));
     await page.reload();
-    await page.waitForSelector('.group-card, .proxies-page, .ph-actions', { timeout: 10000 });
-    await expect(page.locator('.view-toggle-btn[data-view="grid"]')).toHaveAttribute(
+    await page.waitForSelector('.group-card, .proxies-page, .page-header-actions', {
+      timeout: 10000
+    });
+    await expect(page.locator('.seg-item[data-value="grid"]')).toHaveAttribute(
       'aria-pressed',
       'true'
     );
@@ -573,7 +581,7 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
   // D-18: строка списка занимает 40px на десктопе
   test('view mode: строка списка занимает 40px', async ({ page }) => {
-    await page.locator('.view-toggle-btn[data-view="list"]').click();
+    await page.locator('.seg-item[data-value="list"]').click();
     const head = page.locator('.group-list [data-group="YouTube"] .gc-head');
     await expect(head).toBeVisible();
     const box = await head.boundingBox();
@@ -582,7 +590,7 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
   // D-19: клик по строке списка раскрывает суб-сетку узлов
   test('view mode: клик по строке раскрывает суб-сетку узлов', async ({ page }) => {
-    await page.locator('.view-toggle-btn[data-view="list"]').click();
+    await page.locator('.seg-item[data-value="list"]').click();
     const groupCard = page.locator('.group-list [data-group="YouTube"]');
     const head = groupCard.locator('.gc-head');
 
@@ -598,7 +606,7 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
   // D-18 / D-19: интерактивные элементы работают в режиме списка
   test('view mode: интерактивные элементы работают в режиме списка', async ({ page }) => {
-    await page.locator('.view-toggle-btn[data-view="list"]').click();
+    await page.locator('.seg-item[data-value="list"]').click();
     const groupCard = page.locator('.group-list [data-group="YouTube"]');
     const head = groupCard.locator('.gc-head');
 
@@ -638,7 +646,7 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
   // D-18: мобильная высота строки списка равна 44px
   test('view mode: мобильная высота строки списка равна 44px', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
-    await page.locator('.view-toggle-btn[data-view="list"]').click();
+    await page.locator('.seg-item[data-value="list"]').click();
     const head = page.locator('.group-list [data-group="YouTube"] .gc-head');
     await expect(head).toBeVisible();
     const box = await head.boundingBox();
@@ -683,7 +691,7 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
   // D-20: «Развернуть все» не выводит всю простыню узлов сразу
   test('view mode: «Развернуть все» не выводит всю простыню узлов сразу', async ({ page }) => {
-    const expandAllBtn = page.locator('.ph-actions button[title="Развернуть все"]');
+    const expandAllBtn = page.locator('.page-header-actions button[title="Развернуть все"]');
     await expandAllBtn.click();
 
     // Даем время таймерам пачек отработать

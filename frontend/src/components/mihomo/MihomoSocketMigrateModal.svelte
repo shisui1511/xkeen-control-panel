@@ -166,7 +166,7 @@
               height="14"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="var(--color-success)"
+              stroke="var(--success)"
               stroke-width="2"
             >
               <polyline points="20 6 9 17 4 12" />
@@ -179,7 +179,7 @@
               height="14"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="var(--color-success)"
+              stroke="var(--success)"
               stroke-width="2"
             >
               <polyline points="20 6 9 17 4 12" />
@@ -192,7 +192,7 @@
               height="14"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="var(--color-success)"
+              stroke="var(--success)"
               stroke-width="2"
             >
               <polyline points="20 6 9 17 4 12" />
@@ -239,14 +239,14 @@
     gap: 12px;
     align-items: flex-start;
     padding: 12px 14px;
-    background: rgba(59, 130, 246, 0.08);
-    border: 1px solid rgba(59, 130, 246, 0.2);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
     border-radius: var(--radius-md);
     color: var(--fg-primary);
   }
 
   .info-icon {
-    color: var(--color-info, #3b82f6);
+    color: var(--accent);
     flex-shrink: 0;
     margin-top: 2px;
   }
@@ -269,11 +269,11 @@
   }
 
   .diff-container {
-    background: var(--bg-tertiary, #12151c);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     overflow: hidden;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-family-mono);
     font-size: 12px;
   }
 
@@ -282,10 +282,9 @@
     background: rgba(255, 255, 255, 0.03);
     border-bottom: 1px solid var(--border);
     color: var(--fg-dim);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.02em;
   }
 
   .diff-content {
@@ -301,13 +300,13 @@
   }
 
   .diff-del {
-    background: rgba(239, 68, 68, 0.12);
-    color: #fca5a5;
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+    color: var(--danger);
   }
 
   .diff-add {
-    background: rgba(34, 197, 94, 0.12);
-    color: #86efac;
+    background: color-mix(in srgb, var(--success) 14%, transparent);
+    color: var(--success);
   }
 
   .diff-sign {
@@ -327,11 +326,10 @@
   }
 
   .guarantees-title {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
     margin-bottom: 4px;
   }
 
@@ -348,10 +346,10 @@
     align-items: center;
     gap: 8px;
     padding: 10px 12px;
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.25);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
     border-radius: var(--radius-md);
-    color: var(--color-danger, #ef4444);
+    color: var(--danger);
     font-size: 13px;
   }
 
@@ -360,10 +358,10 @@
     align-items: center;
     gap: 8px;
     padding: 12px 14px;
-    background: rgba(34, 197, 94, 0.1);
-    border: 1px solid rgba(34, 197, 94, 0.25);
+    background: color-mix(in srgb, var(--success) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
     border-radius: var(--radius-md);
-    color: var(--color-success, #22c55e);
+    color: var(--success);
     font-size: 13px;
   }
 

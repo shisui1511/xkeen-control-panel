@@ -112,15 +112,28 @@ func main() {
 		goExp = "none (greenteagc default)"
 	}
 
-	// Setup logging to file if configured with size-based rotation (1 MB)
+	// Setup logging to file if configured with size-based rotation (1 MB) and deduplication (D-16, D-38)
+	var dedupWriter *utils.DeduplicatingWriter
 	if cfg.XCPLogPath != "" {
-		logWriter, err := utils.NewRotateWriter(cfg.XCPLogPath, 1*1024*1024)
+		rotator, err := utils.NewRotateWriter(cfg.XCPLogPath, 1*1024*1024)
 		if err == nil {
-			log.SetOutput(logWriter)
-			defer logWriter.Close()
+			dedupWriter = utils.NewDeduplicatingWriter(rotator)
+			log.SetOutput(dedupWriter)
+			defer dedupWriter.Close()
 		} else {
 			log.Printf("Failed to initialize log rotator for %s: %v", cfg.XCPLogPath, err)
 		}
+	}
+
+	fatalf := func(format string, v ...interface{}) {
+		if dedupWriter != nil {
+			_ = dedupWriter.Flush()
+		}
+		log.Printf(format, v...)
+		if dedupWriter != nil {
+			_ = dedupWriter.Close()
+		}
+		os.Exit(1)
 	}
 
 	// System sysctl profile (STAB-06): no-op on non-Entware machines (see
@@ -162,11 +175,11 @@ func main() {
 
 	webFS, err := xkeencontrolpanel.GetWebFS()
 	if err != nil {
-		log.Fatalf("failed to load embedded web assets: %v", err)
+		fatalf("failed to load embedded web assets: %v", err)
 	}
 	srv, err := server.New(srvCfg, Version, webFS)
 	if err != nil {
-		log.Fatalf("Failed to create server: %v", err)
+		fatalf("Failed to create server: %v", err)
 	}
 
 	// Auth endpoints (public)
@@ -213,6 +226,7 @@ func main() {
 			api.UserRulesSave(w, r)
 		}
 	})
+	srv.HandleProtected("/api/rules/test", api.RouteTest)
 	srv.HandleProtected("/api/config/mihomo-migrate-socket", api.MihomoMigrateSocket)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
@@ -221,6 +235,8 @@ func main() {
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
 	srv.HandleProtected("/api/service/dns-redirect", api.ServiceDNSRedirect)
 	srv.HandleProtected("/api/service/restart-log", api.ServiceRestartLog)
+	srv.HandleProtected("/api/service/watchdog/status", api.WatchdogStatus)
+	srv.HandleProtected("/api/service/watchdog/reset", api.WatchdogReset)
 	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
 	srv.HandleProtected("/api/logs/history", api.LogsHistory)
 	srv.HandleProtected("/api/logs/flash-health", api.LogsFlashHealth)
@@ -272,14 +288,8 @@ func main() {
 	srv.HandleProtected("/api/proxy-providers", api.ProxyProvidersRouter)
 	srv.HandleProtected("/api/proxy-providers/", api.ProxyProvidersRouter)
 
-	// Network Tools endpoints
-	srv.HandleProtected("/api/network/ping", api.NetworkPing)
-	srv.HandleProtected("/api/network/traceroute", api.NetworkTraceroute)
-	srv.HandleProtected("/api/network/dns", api.NetworkDNS)
-	srv.HandleProtected("/api/network/http", api.NetworkHTTPTest)
+	// Network IP endpoint (Router WAN IP detection)
 	srv.HandleProtected("/api/network/ip", api.NetworkIP)
-	srv.HandleProtected("/api/network/proxy-test", api.NetworkProxyTest)
-	srv.HandleProtected("/api/network/port-check", api.NetworkPortCheck)
 
 	// Smart Proxy Manager endpoints
 	srv.HandleProtected("/api/smart-proxy/profiles", api.SmartProxyList)
@@ -315,6 +325,19 @@ func main() {
 	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL, cfg.MihomoSecret)
 	trafficQuotaSvc.SetMihomoService(api.MihomoService())
 	trafficQuotaSvc.Start()
+	trafficQuotaSvc.SetKernelAliveCheck(func() bool {
+		if kSvc := api.KernelService(); kSvc != nil {
+			for _, info := range kSvc.List() {
+				if info.Name == "mihomo" && info.ProcessStatus == "running" {
+					return true
+				}
+			}
+		}
+		return false
+	})
+	if xSvc := api.XKeenService(); xSvc != nil {
+		xSvc.SetKernelStartedHook(trafficQuotaSvc.NotifyKernelStarted)
+	}
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
 
@@ -349,6 +372,7 @@ func main() {
 	// without internet access.
 	watchdogSvc := services.NewWatchdogService(api.XKeenService(), cfg.MihomoConfigDir, cfg.XRayConfigDir)
 	watchdogSvc.Start()
+	api.SetWatchdogService(watchdogSvc)
 	defer watchdogSvc.Stop()
 
 	// Unified Log Dispatcher (LOGHUB-04, LOGHUB-05, LOGHUB-06)
@@ -378,6 +402,7 @@ func main() {
 
 	// DAT Manager
 	datSvc := services.NewDATManagerService()
+	datSvc.SetBinaries(cfg.MihomoBinary, cfg.XrayBinary, cfg.XRayConfigDir)
 	api.SetDATManagerService(datSvc)
 
 	srv.HandleProtected("/api/dat/list", api.DATList)
@@ -385,6 +410,7 @@ func main() {
 	srv.HandleProtected("/api/dat/update", api.DATUpdate)
 	srv.HandleProtected("/api/dat/rollback", api.DATRollback)
 	srv.HandleProtected("/api/dat/search", api.DATSearch)
+	srv.HandleProtected("/api/dat/lookup", api.DATLookup)
 
 	// Xkeen Console
 	consoleSvc := services.NewConsoleService(cfg.XKeenBinary)
@@ -405,23 +431,18 @@ func main() {
 	userRulesSvc := services.NewUserRulesService(cfg.DataDir)
 	api.SetUserRulesService(userRulesSvc)
 
+	// Route Tracer Service (ROUTE-04)
+	routeTracerSvc := services.NewRouteTracerService(userRulesSvc, api.MihomoService(), cfg.MihomoConfigDir)
+	api.SetRouteTracerService(routeTracerSvc)
+
 	// Templates
 	templatesFS, err := xkeencontrolpanel.GetTemplatesFS()
 	if err != nil {
-		log.Fatalf("failed to load embedded templates: %v", err)
+		fatalf("failed to load embedded templates: %v", err)
 	}
-	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir, cfg.TemplatesRepoURL, api.GetAssetsService())
+	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir)
 	api.SetTemplateService(templateSvc)
 	srv.HandleProtected("/api/templates/list", api.TemplateList)
-	srv.HandleProtected("/api/templates/fetch", api.TemplateFetch)
-	srv.HandleProtected("/api/templates/update", api.TemplateUpdate)
-	srv.HandleProtected("/api/templates/status", api.TemplateStatus)
-	srv.HandleProtected("/api/templates/check", api.TemplateCheck)
-
-	// Фоновый чекер обновлений шаблонов
-	templatesCtx, cancelTemplatesChecker := context.WithCancel(context.Background())
-	defer cancelTemplatesChecker()
-	go templateSvc.StartBackgroundChecker(templatesCtx)
 
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
@@ -474,7 +495,7 @@ func main() {
 	api.SetNetworkToolsService(networkSvc)
 
 	// Kernels
-	kernelSvc := services.NewKernelService()
+	kernelSvc := services.NewKernelService(cfg.DataDir)
 	api.SetKernelService(kernelSvc)
 	subscriptionSvc.SetKernelService(kernelSvc)
 	srv.HandleProtected("/api/kernels", api.KernelList)
@@ -484,6 +505,7 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/status", api.KernelStatus)
 	srv.HandleProtected("/api/kernels/{name}/channel", api.KernelChannel)
 	srv.HandleProtected("/api/kernels/{name}/rollback", api.KernelRollback)
+	srv.HandleProtected("/api/kernels/{name}/upload", api.KernelUpload)
 	srv.HandleProtected("/api/kernels/{name}/download", api.KernelDownload)
 
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
@@ -507,7 +529,6 @@ func main() {
 	case sig := <-sigCh:
 		log.Printf("Received signal %s, shutting down...", sig)
 		cancelScheduler()
-		cancelTemplatesChecker()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -515,7 +536,7 @@ func main() {
 		}
 	case err := <-srvErrCh:
 		if !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("Server error: %v", err)
+			fatalf("Server error: %v", err)
 		}
 		// If the server was closed (e.g. during update restart), wait for either a signal
 		// or for the update process to call os.Exit().

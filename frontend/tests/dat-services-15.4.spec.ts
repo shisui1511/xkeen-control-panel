@@ -242,4 +242,148 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
     expect(statsTextMihomo).toMatch(/2\s+(Files|Файлов)/i);
     expect(statsTextMihomo).toMatch(/1\s+(active|актуальных)/i);
   });
+
+  test('DAT Manager: tag browser correctly unpacks tags and GeoScan modal performs lookup', async ({
+    page
+  }) => {
+    await page.route('**/api/**', async (route) => {
+      const url = route.request().url();
+      if (url.includes('/api/auth/me')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf-token'
+          })
+        });
+      } else if (url.includes('/api/capabilities')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              kernels: {
+                xray: { installed: true, version: '1.8.4', channel: 'stable' }
+              },
+              active_kernel: 'xray'
+            }
+          })
+        });
+      } else if (url.includes('/api/dat/list')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              name: 'geosite.dat',
+              path: '/xray/geosite.dat',
+              size: 2048,
+              last_update: Math.floor(Date.now() / 1000) - 3600,
+              exists: true,
+              type: 'xray',
+              geo_type: 'geosite',
+              tag_count: 5
+            },
+            {
+              name: 'zkeen.dat',
+              path: '/xray/zkeen.dat',
+              size: 1024,
+              last_update: Math.floor(Date.now() / 1000) - 3600,
+              exists: true,
+              type: 'xray',
+              geo_type: 'geosite',
+              tag_count: 2
+            }
+          ])
+        });
+      } else if (url.includes('/api/dat/tags?name=geosite.dat')) {
+        // apiFetchJSON unpacks response.data or raw array
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: [
+              { tag: 'google', count: 120 },
+              { tag: 'youtube', count: 45 }
+            ]
+          })
+        });
+      } else if (url.includes('/api/dat/lookup')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: [
+              {
+                file: 'geosite.dat',
+                type: 'geosite',
+                tag: 'youtube',
+                rule: 'geosite:youtube',
+                match_count: 1,
+                sample_matches: ['youtube.com']
+              },
+              {
+                file: 'zkeen.dat',
+                type: 'geosite',
+                tag: 'antizapret',
+                rule: 'ext:zkeen.dat:antizapret',
+                match_count: 1,
+                sample_matches: ['youtube.com']
+              }
+            ]
+          })
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: {} })
+        });
+      }
+    });
+
+    await page.goto('/#/dat');
+    await page.waitForLoadState('networkidle');
+
+    // 1. Проверяем открытие Tag Browser и распаковку тегов
+    const tagsBtn = page
+      .locator(
+        '.db-card-item:has-text("geosite.dat"), .dat-row:has-text("geosite.dat") button:has-text("Tags"), .dat-row:has-text("geosite.dat") button:has-text("Теги")'
+      )
+      .first();
+    await tagsBtn.click();
+
+    // Теги должны отрендериться (не пустой список)
+    await expect(page.locator('.td-tag-name:has-text("google")')).toBeVisible();
+    await expect(page.locator('.td-tag-name:has-text("youtube")')).toBeVisible();
+
+    // Закрываем Tag Browser
+    await page.locator('.td-close').first().click();
+
+    // 2. Открываем GeoScan
+    const scanBtn = page.locator('button:has-text("GeoScan"), button:has-text("Скан геофайлов")');
+    await scanBtn.click();
+
+    const scanInput = page.locator('.geoscan-input');
+    await expect(scanInput).toBeVisible();
+
+    await scanInput.fill('youtube.com');
+    await page
+      .locator(
+        '.geoscan-search-bar button:has-text("Search"), .geoscan-search-bar button:has-text("Поиск")'
+      )
+      .click();
+
+    // Проверяем результаты
+    await expect(page.locator('.geoscan-result-card')).toHaveCount(2);
+    await expect(page.locator('.geoscan-rule-code:has-text("geosite:youtube")')).toBeVisible();
+    await expect(
+      page.locator('.geoscan-rule-code:has-text("ext:zkeen.dat:antizapret")')
+    ).toBeVisible();
+  });
 });

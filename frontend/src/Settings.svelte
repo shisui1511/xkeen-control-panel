@@ -19,6 +19,10 @@
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import { capsuleConfigStore, updateCapsuleConfig } from './lib/capsuleSettings';
   import PingTargetSettingsCard from './components/PingTargetSettingsCard.svelte';
+  import PageHeader from './PageHeader.svelte';
+  import Tabs, { type TabItem } from './components/Tabs.svelte';
+  import SegmentedControl, { type SegmentItem } from './components/SegmentedControl.svelte';
+  import Select from './components/Select.svelte';
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -40,6 +44,35 @@
   let activeTab = $state<'general' | 'updates' | 'security' | 'connection' | 'backups' | 'about'>(
     'general'
   );
+
+  const settingsTabItems = $derived<TabItem[]>([
+    { value: 'general', label: $t('settings.tab_general') },
+    { value: 'updates', label: $t('settings.tab_updates') },
+    { value: 'security', label: $t('settings.tab_security') },
+    { value: 'connection', label: $t('settings.tab_connection') },
+    { value: 'backups', label: $t('settings.tab_backups') },
+    { value: 'about', label: $t('settings.tab_about') }
+  ]);
+
+  const themeItems = $derived<SegmentItem[]>([
+    { value: 'light', label: $t('settings.theme_light_btn') },
+    { value: 'dark', label: $t('settings.theme_dark_btn') },
+    { value: 'auto', label: $t('settings.theme_auto_btn') }
+  ]);
+
+  type AccentChoice = 'blue' | 'indigo' | 'steel' | 'graphite';
+  const accentItems: { value: AccentChoice; labelKey: string }[] = [
+    { value: 'blue', labelKey: 'settings.accent_blue_btn' },
+    { value: 'indigo', labelKey: 'settings.accent_indigo_btn' },
+    { value: 'steel', labelKey: 'settings.accent_steel_btn' },
+    { value: 'graphite', labelKey: 'settings.accent_graphite_btn' }
+  ];
+
+  const densityItems = $derived<SegmentItem[]>([
+    { value: 'comfortable', label: $t('settings.density_comfortable_btn') },
+    { value: 'compact', label: $t('settings.density_compact_btn') },
+    { value: 'auto', label: $t('settings.density_auto_btn') }
+  ]);
 
   // Backups state variables
   let configFiles = $state<string[]>([]);
@@ -397,6 +430,7 @@
 
   // Appearance & Behavior settings (persisted in localStorage)
   let selectedTheme = $state<'light' | 'dark' | 'auto'>('auto');
+  let selectedAccent = $state<AccentChoice>('blue');
   let selectedDensity = $state<ThemeDensity>('auto');
   let systemTimezone = $state('—');
   let animationsEnabled = $state(true);
@@ -417,6 +451,11 @@
     try {
       const saved = localStorage.getItem('theme') || '';
       selectedTheme = saved === 'light' || saved === 'dark' ? saved : 'auto';
+      const savedAccent = localStorage.getItem('accent') || '';
+      selectedAccent =
+        savedAccent === 'indigo' || savedAccent === 'steel' || savedAccent === 'graphite'
+          ? savedAccent
+          : 'blue';
       const savedDensity = localStorage.getItem('theme_density');
       selectedDensity =
         savedDensity === 'comfortable' || savedDensity === 'compact' ? savedDensity : 'auto';
@@ -437,6 +476,19 @@
       } else {
         localStorage.setItem('theme', t);
         document.documentElement.setAttribute('data-theme', t);
+      }
+    } catch {}
+  }
+
+  function setAccent(a: AccentChoice) {
+    selectedAccent = a;
+    try {
+      if (a === 'blue') {
+        localStorage.removeItem('accent');
+        document.documentElement.removeAttribute('data-accent');
+      } else {
+        localStorage.setItem('accent', a);
+        document.documentElement.setAttribute('data-accent', a);
       }
     } catch {}
   }
@@ -718,71 +770,6 @@
     }
   }
 
-  let templatesVersion = $state('');
-  let templatesRepoUrl = $state('');
-  let templatesLastCheck = $state('');
-  let templatesHasUpdate = $state(false);
-  let checkingTemplates = $state(false);
-  let updatingTemplates = $state(false);
-  let templatesIncompatible = $state(false);
-  let templatesWarningMessage = $state('');
-
-  async function fetchTemplatesStatus() {
-    try {
-      const data = await apiFetchJSON<any>('/api/templates/status');
-      templatesVersion = data.current_version || '';
-      templatesRepoUrl = data.templates_repo_url || '';
-      templatesHasUpdate = data.has_update || false;
-      templatesIncompatible = data.incompatible || false;
-      templatesWarningMessage = data.warning_message || '';
-      if (data.last_check && data.last_check !== '0001-01-01T00:00:00Z') {
-        const date = new Date(data.last_check);
-        templatesLastCheck = date.toLocaleString();
-      } else {
-        templatesLastCheck = '';
-      }
-    } catch (_: any) {}
-  }
-
-  async function checkTemplatesUpdates() {
-    checkingTemplates = true;
-    try {
-      const data = await apiFetchJSON<{ has_update?: boolean }>('/api/templates/check', {
-        method: 'POST'
-      });
-      templatesHasUpdate = data.has_update || false;
-      await fetchTemplatesStatus();
-      if (templatesHasUpdate) {
-        showToast('info', $t('editor.update_available'));
-      } else {
-        showToast('success', $t('editor.up_to_date'));
-      }
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e.message);
-      await fetchTemplatesStatus();
-    } finally {
-      checkingTemplates = false;
-    }
-  }
-
-  async function installTemplatesUpdates() {
-    updatingTemplates = true;
-    try {
-      await apiFetchJSON('/api/templates/update', {
-        method: 'POST'
-      });
-      showToast('success', $t('editor.templates_updated'));
-      await fetchTemplatesStatus();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e.message);
-      await fetchTemplatesStatus();
-    } finally {
-      updatingTemplates = false;
-    }
-  }
-
   onMount(async () => {
     fetchVersion();
     fetchCapabilities();
@@ -790,7 +777,6 @@
     loadAppearanceSettings();
     loadSystemTimezone();
     fetchUpdateChannel();
-    fetchTemplatesStatus();
 
     await fetchStatus();
     if (updateStatus && !['idle', 'done', 'failed'].includes(updateStatus.status)) {
@@ -808,49 +794,15 @@
 </script>
 
 <div class="container">
-  <!-- page-head -->
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_system')} <span class="crumb-sep">›</span>
-        {$t('settings.h1')}
-      </div>
-      <h1>{$t('settings.h1')}</h1>
-      <p class="sub">{$t('settings.h1_sub')}</p>
-    </div>
-  </div>
+  <PageHeader
+    title={$t('settings.h1')}
+    subtitle={$t('settings.h1_sub')}
+    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('settings.h1') }]}
+    {onSwitchTab}
+    hideHome={true}
+  />
 
-  <!-- tab nav -->
-  <div class="settings-tabs">
-    <button
-      class="stab"
-      class:active={activeTab === 'general'}
-      onclick={() => (activeTab = 'general')}>{$t('settings.tab_general')}</button
-    >
-    <button
-      class="stab"
-      class:active={activeTab === 'updates'}
-      onclick={() => (activeTab = 'updates')}>{$t('settings.tab_updates')}</button
-    >
-    <button
-      class="stab"
-      class:active={activeTab === 'security'}
-      onclick={() => (activeTab = 'security')}>{$t('settings.tab_security')}</button
-    >
-    <button
-      class="stab"
-      class:active={activeTab === 'connection'}
-      onclick={() => (activeTab = 'connection')}>{$t('settings.tab_connection')}</button
-    >
-    <button
-      class="stab"
-      class:active={activeTab === 'backups'}
-      onclick={() => (activeTab = 'backups')}>{$t('settings.tab_backups')}</button
-    >
-    <button class="stab" class:active={activeTab === 'about'} onclick={() => (activeTab = 'about')}
-      >{$t('settings.tab_about')}</button
-    >
-  </div>
+  <Tabs bind:value={activeTab} items={settingsTabItems} ariaLabel={$t('settings.h1')} />
 
   <!-- General tab -->
   {#if activeTab === 'general'}
@@ -859,7 +811,7 @@
       <div class="field-group">
         <div class="field-row">
           <span class="field-row-name">{$t('settings.language')}</span>
-          <select
+          <Select
             class="field-select"
             value={$currentLang}
             onchange={handleLangChange}
@@ -868,7 +820,7 @@
             {#each langs as lang}
               <option value={lang.code}>{lang.name}</option>
             {/each}
-          </select>
+          </Select>
         </div>
         <div class="field-row">
           <div>
@@ -892,28 +844,33 @@
             <span class="field-row-name">{$t('settings.theme')}</span>
             <div class="field-row-desc">{$t('settings.theme_desc')}</div>
           </div>
-          <div class="seg-btn" role="radiogroup" aria-label={$t('settings.theme')}>
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedTheme === 'light'}
-              class:seg-active={selectedTheme === 'light'}
-              onclick={() => setTheme('light')}>{$t('settings.theme_light_btn')}</button
-            >
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedTheme === 'dark'}
-              class:seg-active={selectedTheme === 'dark'}
-              onclick={() => setTheme('dark')}>{$t('settings.theme_dark_btn')}</button
-            >
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedTheme === 'auto'}
-              class:seg-active={selectedTheme === 'auto'}
-              onclick={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button
-            >
+          <SegmentedControl
+            items={themeItems}
+            value={selectedTheme}
+            ariaLabel={$t('settings.theme')}
+            onchange={(val) => setTheme(val as 'light' | 'dark' | 'auto')}
+          />
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.accent')}</span>
+            <div class="field-row-desc">{$t('settings.accent_desc')}</div>
+          </div>
+          <div class="accent-picker" role="group" aria-label={$t('settings.accent')}>
+            {#each accentItems as item (item.value)}
+              <button
+                type="button"
+                class="accent-swatch accent-swatch--{item.value}"
+                class:is-active={selectedAccent === item.value}
+                aria-pressed={selectedAccent === item.value}
+                title={$t(item.labelKey)}
+                onclick={() => setAccent(item.value)}
+              >
+                {#if selectedAccent === item.value}
+                  <Icon name="check" size={13} />
+                {/if}
+              </button>
+            {/each}
           </div>
         </div>
         <div class="field-row">
@@ -921,43 +878,26 @@
             <span class="field-row-name">{$t('settings.density')}</span>
             <div class="field-row-desc">{$t('settings.density_desc')}</div>
           </div>
-          <div class="seg-btn" role="radiogroup" aria-label={$t('settings.density')}>
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedDensity === 'comfortable'}
-              class:seg-active={selectedDensity === 'comfortable'}
-              onclick={() => setDensity('comfortable')}
-              >{$t('settings.density_comfortable_btn')}</button
-            >
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedDensity === 'compact'}
-              class:seg-active={selectedDensity === 'compact'}
-              onclick={() => setDensity('compact')}>{$t('settings.density_compact_btn')}</button
-            >
-            <button
-              class="seg-opt"
-              role="radio"
-              aria-checked={selectedDensity === 'auto'}
-              class:seg-active={selectedDensity === 'auto'}
-              onclick={() => setDensity('auto')}>{$t('settings.density_auto_btn')}</button
-            >
-          </div>
+          <SegmentedControl
+            items={densityItems}
+            value={selectedDensity}
+            ariaLabel={$t('settings.density')}
+            onchange={(val) => setDensity(val as ThemeDensity)}
+          />
         </div>
         <div class="field-row">
           <div>
             <span class="field-row-name">{$t('settings.animations')}</span>
             <div class="field-row-desc">{$t('settings.animations_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.animations')}
               bind:checked={animationsEnabled}
               onchange={() => saveSetting('animations', String(animationsEnabled))}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
       </div>
@@ -971,14 +911,15 @@
             <span class="field-row-name">{$t('settings.capsule_visible')}</span>
             <div class="field-row-desc">{$t('settings.capsule_visible_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.capsule_visible')}
               checked={$capsuleConfigStore.visible}
               onchange={(e) =>
                 updateCapsuleConfig({ visible: (e.target as HTMLInputElement).checked })}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
         {#if $capsuleConfigStore.visible}
@@ -987,14 +928,15 @@
               <span class="field-row-name">{$t('settings.capsule_traffic')}</span>
               <div class="field-row-desc">{$t('settings.capsule_traffic_desc')}</div>
             </div>
-            <label class="toggle">
+            <label class="toggle-switch">
               <input
                 type="checkbox"
+                aria-label={$t('settings.capsule_traffic')}
                 checked={$capsuleConfigStore.showTraffic}
                 onchange={(e) =>
                   updateCapsuleConfig({ showTraffic: (e.target as HTMLInputElement).checked })}
               />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span class="toggle-slider"></span>
             </label>
           </div>
           <div class="field-row">
@@ -1002,14 +944,15 @@
               <span class="field-row-name">{$t('settings.capsule_resources')}</span>
               <div class="field-row-desc">{$t('settings.capsule_resources_desc')}</div>
             </div>
-            <label class="toggle">
+            <label class="toggle-switch">
               <input
                 type="checkbox"
+                aria-label={$t('settings.capsule_resources')}
                 checked={$capsuleConfigStore.showResources}
                 onchange={(e) =>
                   updateCapsuleConfig({ showResources: (e.target as HTMLInputElement).checked })}
               />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span class="toggle-slider"></span>
             </label>
           </div>
         {/if}
@@ -1024,13 +967,14 @@
             <span class="field-row-name">{$t('settings.auto_refresh')}</span>
             <div class="field-row-desc">{$t('settings.auto_refresh_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.auto_refresh')}
               bind:checked={autoRefresh}
               onchange={() => saveSetting('autoRefresh', String(autoRefresh))}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
         <div class="field-row">
@@ -1038,13 +982,14 @@
             <span class="field-row-name">{$t('settings.confirm_dangerous')}</span>
             <div class="field-row-desc">{$t('settings.confirm_dangerous_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.confirm_dangerous')}
               bind:checked={confirmDangerous}
               onchange={() => saveSetting('confirmDangerous', String(confirmDangerous))}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
         <div class="field-row">
@@ -1052,13 +997,14 @@
             <span class="field-row-name">{$t('settings.notification_sound')}</span>
             <div class="field-row-desc">{$t('settings.notification_sound_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.notification_sound')}
               bind:checked={notificationSound}
               onchange={() => saveSetting('notificationSound', String(notificationSound))}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
         <div class="field-row">
@@ -1066,13 +1012,14 @@
             <span class="field-row-name">{$t('settings.dev_mode')}</span>
             <div class="field-row-desc">{$t('settings.dev_mode_desc')}</div>
           </div>
-          <label class="toggle">
+          <label class="toggle-switch">
             <input
               type="checkbox"
+              aria-label={$t('settings.dev_mode')}
               checked={$devMode}
               onchange={(e) => setDevMode((e.target as HTMLInputElement).checked)}
             />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-slider"></span>
           </label>
         </div>
       </div>
@@ -1174,66 +1121,6 @@
         {/if}
       </div>
     </div>
-
-    <!-- Templates updates card -->
-    <div class="card mb-2">
-      <div class="card-label">{$t('settings.templates_title')}</div>
-      {#if templatesIncompatible}
-        <div class="alert alert-warning" style="margin-top: 0; margin-bottom: 12px;">
-          <strong>{$t('settings.templates_incompatible_warning')}</strong>
-          {templatesWarningMessage}
-        </div>
-      {/if}
-      <div class="field-group">
-        <div class="field-row">
-          <span class="field-row-name">{$t('settings.templates_repo_url')}</span>
-          <span
-            class="field-row-val mono"
-            style="font-size: 11px; word-break: break-all; text-align: right; max-width: 70%;"
-            >{templatesRepoUrl || '...'}</span
-          >
-        </div>
-        <div class="field-row">
-          <span class="field-row-name">{$t('settings.current_version')}</span>
-          <span class="field-row-val mono">{templatesVersion || '...'}</span>
-        </div>
-        <div class="field-row">
-          <span class="field-row-name">{$t('settings.templates_last_check')}</span>
-          <span class="field-row-val mono">
-            {templatesLastCheck ? templatesLastCheck : $t('settings.templates_never_checked')}
-          </span>
-        </div>
-        {#if templatesHasUpdate}
-          <div class="field-row">
-            <span class="field-row-name" style="color: var(--warning)"
-              >{$t('editor.update_available')}</span
-            >
-            <span class="field-row-val" style="color: var(--warning)">Yes</span>
-          </div>
-        {/if}
-      </div>
-
-      <div class="card-actions">
-        <button
-          class="btn btn-secondary"
-          onclick={checkTemplatesUpdates}
-          disabled={checkingTemplates || updatingTemplates}
-          title={$t('settings.check_updates')}
-        >
-          {checkingTemplates ? $t('settings.checking') : $t('settings.check_updates')}
-        </button>
-        {#if templatesHasUpdate}
-          <button
-            class="btn btn-primary"
-            onclick={installTemplatesUpdates}
-            disabled={updatingTemplates}
-            title={$t('settings.install_updates')}
-          >
-            {updatingTemplates ? $t('settings.installing') : $t('settings.install_updates')}
-          </button>
-        {/if}
-      </div>
-    </div>
   {/if}
 
   <Modal
@@ -1272,7 +1159,7 @@
             <div class="desc">{$t('settings.backups_desc')}</div>
           </div>
           <div class="ctrl">
-            <select
+            <Select
               class="input"
               style="min-width: 250px;"
               bind:value={selectedFile}
@@ -1284,7 +1171,7 @@
               {:else}
                 <option value="">{$t('settings.no_files')}</option>
               {/each}
-            </select>
+            </Select>
             <button class="btn btn-primary btn-sm" onclick={createBackup} disabled={!selectedFile}>
               {$t('settings.backup_create_btn')}
             </button>
@@ -1309,7 +1196,7 @@
             <div class="field-row">
               <div>
                 <div class="lbl mono">{backup.split('/').pop()}</div>
-                <div class="desc mono" style="font-size: 11px; color: var(--fg-dim);">{backup}</div>
+                <div class="desc mono" style="font-size: 12px; color: var(--fg-dim);">{backup}</div>
               </div>
               <div class="ctrl">
                 <button
@@ -1359,7 +1246,7 @@
       <!-- Control panel to create a backup -->
       <div
         class="field-row select-row"
-        style="margin-bottom: 20px; gap: 12px; align-items: center; background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: var(--radius-md);"
+        style="margin-bottom: 20px; gap: 12px; align-items: center; background: var(--surface-tint); border: 1px solid var(--border-light); padding: 12px; border-radius: var(--radius-md);"
       >
         <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
           <input
@@ -1521,7 +1408,7 @@
           <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
             {isDragOver ? $t('settings.drop_file_to_upload') : $t('settings.select_or_drag_file')}
           </div>
-          <div style="color: var(--fg-dim); font-size: 11px;">
+          <div style="color: var(--fg-dim); font-size: 12px;">
             {$t('settings.supported_file_types')}
           </div>
         {/if}
@@ -1744,77 +1631,11 @@
 />
 
 <style>
-  .page-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 20px;
-    gap: 16px;
-  }
-
-  .page-head h1 {
-    margin: 4px 0 6px;
-    font-size: 22px;
-    font-weight: 700;
-  }
-
-  .page-head .sub {
-    margin: 0;
-    color: var(--fg-secondary);
-    font-size: 13px;
-  }
-
-  .crumbs {
-    font-size: 12px;
-    color: var(--fg-dim);
-    margin-bottom: 2px;
-  }
-
-  .crumb-sep {
-    color: var(--fg-faint);
-    margin: 0 6px;
-  }
-
-  /* tab nav */
-  .settings-tabs {
-    display: flex;
-    gap: 2px;
-    margin-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 0;
-  }
-
-  .stab {
-    padding: 8px 16px;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--fg-secondary);
-    cursor: pointer;
-    border-radius: 4px 4px 0 0;
-    transition:
-      color 0.15s,
-      border-color 0.15s;
-  }
-
-  .stab:hover {
-    color: var(--fg-primary);
-  }
-
-  .stab.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-  }
-
   /* card label */
   .card-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
     color: var(--fg-dim);
     margin-bottom: 14px;
   }
@@ -1856,6 +1677,52 @@
     text-align: right;
   }
 
+  /* accent color picker */
+  .accent-picker {
+    display: flex;
+    gap: 10px;
+  }
+
+  .accent-swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-full);
+    border: 2px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--swatch-check);
+    cursor: pointer;
+    padding: 0;
+    transition:
+      transform var(--transition-fast),
+      border-color var(--transition-fast);
+  }
+
+  .accent-swatch:hover {
+    transform: scale(1.08);
+  }
+
+  .accent-swatch.is-active {
+    border-color: var(--fg-primary);
+  }
+
+  .accent-swatch--blue {
+    background: var(--swatch-blue);
+  }
+
+  .accent-swatch--indigo {
+    background: var(--swatch-indigo);
+  }
+
+  .accent-swatch--steel {
+    background: var(--swatch-steel);
+  }
+
+  .accent-swatch--graphite {
+    background: var(--swatch-graphite);
+  }
+
   .field-row-val.mono {
     font-family: var(--font-mono, monospace);
     font-size: 12px;
@@ -1864,17 +1731,6 @@
   .mono {
     font-family: var(--font-mono, monospace);
     font-size: 12px;
-  }
-
-  .field-select {
-    font-size: 13px;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg-card);
-    color: var(--fg-primary);
-    cursor: pointer;
-    min-width: 120px;
   }
 
   .field-value-badge {
@@ -1900,7 +1756,6 @@
   }
 
   .field-input:focus {
-    outline: none;
     border-color: var(--accent);
   }
 
@@ -1974,7 +1829,7 @@
 
   .channel-btn:hover {
     border-color: var(--accent);
-    color: var(--fg);
+    color: var(--fg-primary);
   }
 
   .channel-btn.active {
@@ -2109,87 +1964,6 @@
     font-size: 12px;
     color: var(--fg-dim);
     margin-top: 2px;
-  }
-
-  /* Segmented button */
-  .seg-btn {
-    display: flex;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
-  .seg-opt {
-    padding: 5px 12px;
-    font-size: 13px;
-    background: transparent;
-    border: none;
-    border-right: 1px solid var(--border);
-    color: var(--fg-secondary);
-    cursor: pointer;
-    transition:
-      background 0.15s,
-      color 0.15s;
-  }
-
-  .seg-opt:last-child {
-    border-right: none;
-  }
-
-  .seg-opt:hover {
-    background: var(--bg-hover, rgba(0, 0, 0, 0.04));
-  }
-
-  .seg-opt.seg-active {
-    background: var(--accent);
-    color: var(--btn-primary-text);
-  }
-
-  /* Toggle switch */
-  .toggle {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-
-  .toggle input {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-
-  .toggle-track {
-    width: 36px;
-    height: 20px;
-    background: var(--border);
-    border-radius: 10px;
-    transition: background 0.2s;
-    position: relative;
-    display: block;
-  }
-
-  .toggle input:checked ~ .toggle-track {
-    background: var(--accent);
-  }
-
-  .toggle-thumb {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 16px;
-    height: 16px;
-    background: #fff;
-    border-radius: 50%;
-    transition: transform 0.2s;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  }
-
-  .toggle input:checked ~ .toggle-track .toggle-thumb {
-    transform: translateX(16px);
   }
 
   .btn-sm {

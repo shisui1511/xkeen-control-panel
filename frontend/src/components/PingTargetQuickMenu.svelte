@@ -190,10 +190,9 @@
   }
 
   .dropdown-header {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
     color: var(--fg-dim);
     padding: 4px 12px 6px;
   }
@@ -203,9 +202,8 @@
   }
 
   .section-title {
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     color: var(--fg-faint);
-    text-transform: uppercase;
     padding: 2px 6px 4px;
     font-weight: 600;
   }
@@ -233,11 +231,11 @@
   .dropdown-item.selected {
     color: var(--accent);
     font-weight: 600;
-    background: rgba(41, 194, 240, 0.08);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
 
   .check-mark {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
   }
 
@@ -256,7 +254,7 @@
   .timeout-chip {
     flex: 1;
     padding: 4px 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     text-align: center;
     background: var(--bg-card);
@@ -274,7 +272,7 @@
 
   .timeout-chip.selected {
     background: var(--accent);
-    color: #03182a;
+    color: var(--btn-primary-text);
     border-color: var(--accent);
     font-weight: 700;
   }

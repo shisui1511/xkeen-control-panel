@@ -22,6 +22,7 @@
   import Skeleton from './components/Skeleton.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import PageHeader from './PageHeader.svelte';
   import ServiceStatusGroup from './components/dashboard/ServiceStatusGroup.svelte';
   import SystemResourcesWidget from './components/dashboard/SystemResourcesWidget.svelte';
   import TrafficTelemetryWidget from './components/dashboard/TrafficTelemetryWidget.svelte';
@@ -50,6 +51,22 @@
   let isSavingAndNavigating = $state(false);
   let dirtySourceNames = $state<string[]>([]);
   let currentTab = $state('dashboard');
+  let currentHash = $state(typeof window !== 'undefined' ? window.location.hash : '');
+
+  function checkIsConstructorHash(hash: string): boolean {
+    if (!hash) return false;
+    const cleanHash = hash.replace(/^#\/?/, '');
+    const [path, query] = cleanHash.split('?');
+    if (path === 'constructor' || path === 'mihomo-gen') return true;
+    if (path === 'editor' && query) {
+      const params = new URLSearchParams(query);
+      if (params.get('tab') === 'constructor') return true;
+    }
+    return false;
+  }
+
+  const isConstructorMode = $derived(checkIsConstructorHash(currentHash));
+  const isEditorFullscreen = $derived(currentTab === 'editor' && !isConstructorMode);
   const mihomoDependentTabs = [
     'proxies',
     'connections',
@@ -97,6 +114,81 @@
   });
   let statusError = $state(false);
   let statusLoading = $state(true);
+
+  interface WatchdogStatus {
+    state: string;
+    consecutive_failures: number;
+    disarm_attempts: number;
+    last_disarm_error: string;
+    interception_active: boolean;
+    interception_family: string;
+    next_attempt_at: number;
+    degraded_at: number;
+  }
+
+  let watchdogStatus = $state<WatchdogStatus | null>(null);
+  let isResettingWatchdog = $state(false);
+
+  const isWatchdogIncident = $derived(
+    watchdogStatus?.state === 'degraded' || watchdogStatus?.state === 'disarmed'
+  );
+
+  const watchdogBadge = $derived.by(() => {
+    if (!watchdogStatus?.state) return null;
+    switch (watchdogStatus.state) {
+      case 'armed':
+        return {
+          cssClass: 'badge badge-success',
+          labelKey: 'watchdog.state_armed',
+          hintKey: 'watchdog.state_armed_hint'
+        };
+      case 'idle':
+        return {
+          cssClass: 'badge',
+          labelKey: 'watchdog.state_idle',
+          hintKey: 'watchdog.state_idle_hint'
+        };
+      case 'degraded':
+        return {
+          cssClass: 'badge badge-danger',
+          labelKey: 'watchdog.state_degraded',
+          hintKey: 'watchdog.state_degraded_hint'
+        };
+      case 'disarmed':
+        return {
+          cssClass: 'badge badge-warning',
+          labelKey: 'watchdog.state_disarmed',
+          hintKey: 'watchdog.state_disarmed_hint'
+        };
+      default:
+        return null;
+    }
+  });
+
+  async function handleResetWatchdog() {
+    if (isResettingWatchdog) return;
+    isResettingWatchdog = true;
+    try {
+      const res = await apiFetch('/api/service/watchdog/reset', { method: 'POST' });
+      if (!res.ok) {
+        let errMessage = '';
+        try {
+          const errData = await res.json();
+          errMessage = errData?.error || errData?.message || '';
+        } catch (_) {
+          errMessage = await res.text().catch(() => '');
+        }
+        showToast('error', $t('watchdog.reset_failed', { error: errMessage || res.statusText }));
+        return;
+      }
+      await fetchLiveStatus();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', $t('watchdog.reset_failed', { error: e?.message || $t('app.error') }));
+    } finally {
+      isResettingWatchdog = false;
+    }
+  }
 
   interface SystemStats {
     memory: { total: number; used: number; free: number };
@@ -252,6 +344,9 @@
           if (parsed && parsed.success && parsed.data) {
             isXkeenRunning = parsed.data.is_running;
             xkeenRaw = parsed.data.raw || '';
+            if (parsed.data.watchdog) {
+              watchdogStatus = parsed.data.watchdog;
+            }
           } else {
             xkeenRaw = text;
             isXkeenRunning = guessXkeenRunning(text);
@@ -260,6 +355,8 @@
           xkeenRaw = text;
           isXkeenRunning = guessXkeenRunning(text);
         }
+      } else {
+        statusError = true;
       }
 
       const mihomoText =
@@ -444,12 +541,13 @@
       if (basePath === 'mihomo-gen' || basePath === 'constructor') {
         return 'editor';
       }
-      return basePath;
+      return basePath || 'dashboard';
     }
     return 'dashboard';
   }
 
   function handleHashChange() {
+    currentHash = window.location.hash;
     const targetTab = getTabFromHash();
     if (targetTab !== currentTab && isAnySourceDirty()) {
       pendingTargetTab = targetTab;
@@ -675,6 +773,7 @@
     fetchVersion();
     fetchProxySummary();
 
+    currentHash = window.location.hash;
     currentTab = getTabFromHash();
     window.addEventListener('hashchange', handleHashChange);
     if (!window.location.hash) {
@@ -725,7 +824,7 @@
   });
 </script>
 
-<div class="dashboard-layout" class:editor-active={currentTab === 'editor'}>
+<div class="dashboard-layout" class:editor-active={isEditorFullscreen}>
   <!-- Mobile header bar -->
   <header class="mobile-header" inert={drawerIsModal}>
     <button
@@ -793,7 +892,7 @@
   <!-- Main content area -->
   <div
     class="main-content"
-    class:editor-active={currentTab === 'editor'}
+    class:editor-active={isEditorFullscreen}
     class:rail={$isSidebarCollapsed}
     inert={drawerIsModal}
   >
@@ -822,32 +921,24 @@
       {#if currentTab === 'dashboard'}
         <div class="container" transition:fade={{ duration: 150 }}>
           <!-- Page header -->
-          <div class="page-head">
-            <div>
-              <div class="crumbs">
-                {$t('nav.group_overview')} <span class="crumb-sep">›</span>
-                {$t('nav.dashboard')}
-              </div>
-              <h1>{$t('dash.title')}</h1>
-              <p class="sub">{$t('dash.welcome')}</p>
-            </div>
-            <div class="ph-actions">
-              <Button
-                variant="secondary"
-                onclick={handleRefresh}
-                loading={isRefreshing}
-                disabled={isRefreshing}
-                title={$t('app.refresh')}
-              >
-                <Icon name="refresh" size={14} />
-                {$t('app.refresh')}
-              </Button>
-              <Button variant="primary" onclick={restartXkeen} title={$t('dash.restart_xkeen')}>
-                <Icon name="refresh" size={14} />
-                {$t('dash.restart_xkeen')}
-              </Button>
-            </div>
-          </div>
+          <PageHeader
+            title={$t('dash.title')}
+            subtitle={$t('dash.welcome')}
+            breadcrumbs={[{ label: $t('nav.group_overview') }, { label: $t('nav.dashboard') }]}
+            onSwitchTab={switchTab}
+            hideHome={true}
+          >
+            <Button
+              variant="secondary"
+              onclick={handleRefresh}
+              loading={isRefreshing}
+              disabled={isRefreshing}
+              title={$t('app.refresh')}
+            >
+              <Icon name="refresh" size={14} />
+              {$t('app.refresh')}
+            </Button>
+          </PageHeader>
 
           <!-- Quickstart Checklist (Mihomo only, auto-hides when all steps complete).
                Gated on statusLoading/subsSummaryLoaded so it doesn't flash "incomplete"
@@ -869,7 +960,7 @@
                 <ul class="quickstart-list" role="list">
                   <!-- Step 1: kernel selected (always done when card is visible) -->
                   <li class="qs-step qs-step--done">
-                    <span class="qs-icon" aria-label={$t('dash.quickstart.step_done')}>
+                    <span class="qs-icon" role="img" aria-label={$t('dash.quickstart.step_done')}>
                       <Icon name="check" size={16} color="var(--success)" />
                     </span>
                     <span class="qs-text">{$t('dash.quickstart.step1_label')}</span>
@@ -878,6 +969,7 @@
                   <li class="qs-step" class:qs-step--done={hasSubscription}>
                     <span
                       class="qs-icon"
+                      role="img"
                       aria-label={hasSubscription
                         ? $t('dash.quickstart.step_done')
                         : $t('dash.quickstart.step_pending')}
@@ -911,6 +1003,7 @@
                   <li class="qs-step" class:qs-step--done={$mihomoApiAvailable}>
                     <span
                       class="qs-icon"
+                      role="img"
                       aria-label={$mihomoApiAvailable
                         ? $t('dash.quickstart.step_done')
                         : $t('dash.quickstart.step_pending')}
@@ -950,6 +1043,7 @@
                   <li class="qs-step" class:qs-step--done={serviceStatus.mihomo === 'running'}>
                     <span
                       class="qs-icon"
+                      role="img"
                       aria-label={serviceStatus.mihomo === 'running'
                         ? $t('dash.quickstart.step_done')
                         : $t('dash.quickstart.step_pending')}
@@ -989,10 +1083,56 @@
           {/if}
 
           <!-- Problems Panel (conditional) -->
-          {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring}
+          {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring || isWatchdogIncident}
             <div style="margin-bottom: 18px;">
               <Card title={$t('dash.problems_panel')}>
                 <div class="problems-list">
+                  {#if isWatchdogIncident && watchdogStatus}
+                    <div
+                      class="problem-item {watchdogStatus.state === 'degraded'
+                        ? 'alert-error'
+                        : 'alert-warning'}"
+                    >
+                      <div class="problem-content">
+                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                        <div>
+                          <strong class="problem-title">
+                            {$t(
+                              watchdogStatus.state === 'degraded'
+                                ? 'watchdog.banner_degraded_title'
+                                : 'watchdog.banner_disarmed_title'
+                            )}
+                          </strong>
+                          <div class="problem-desc">
+                            {$t(
+                              watchdogStatus.state === 'degraded'
+                                ? 'watchdog.banner_degraded_desc'
+                                : 'watchdog.banner_disarmed_desc'
+                            )}
+                            {#if statusError}
+                              <span class="watchdog-stale-desc">({$t('watchdog.stale_note')})</span>
+                            {/if}
+                          </div>
+                          {#if watchdogStatus.last_disarm_error}
+                            <div class="watchdog-error-detail">
+                              {watchdogStatus.last_disarm_error}
+                            </div>
+                          {/if}
+                        </div>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        loading={isResettingWatchdog}
+                        onclick={handleResetWatchdog}
+                      >
+                        {$t(
+                          watchdogStatus.state === 'degraded'
+                            ? 'watchdog.cta_retry'
+                            : 'watchdog.cta_reset'
+                        )}
+                      </Button>
+                    </div>
+                  {/if}
                   {#if isKernelCrashed}
                     <div class="problem-item alert-error">
                       <div class="problem-content">
@@ -1134,17 +1274,27 @@
               <div class="dash-col-left">
                 <!-- Service Status Group (DASH-03) -->
                 <div class="dash-section">
-                  <ServiceStatusGroup
-                    {serviceStatus}
-                    capabilities={$capabilities}
-                    xkeenVersion={version !== $t('app.loading') && version !== $t('app.error')
-                      ? version
-                      : ''}
-                    {statusLoading}
-                    {statusError}
-                    onRefresh={fetchLiveStatus}
-                    onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
-                  />
+                  <Card title={$t('dash.service_status')}>
+                    {#snippet actions()}
+                      {#if watchdogBadge}
+                        <div class="dash-watchdog-badge-row" title={$t(watchdogBadge.hintKey)}>
+                          <span class="dash-watchdog-label">{$t('watchdog.section_title')}</span>
+                          <span class={watchdogBadge.cssClass}>{$t(watchdogBadge.labelKey)}</span>
+                        </div>
+                      {/if}
+                    {/snippet}
+                    <ServiceStatusGroup
+                      {serviceStatus}
+                      capabilities={$capabilities}
+                      xkeenVersion={version !== $t('app.loading') && version !== $t('app.error')
+                        ? version
+                        : ''}
+                      {statusLoading}
+                      {statusError}
+                      onRefresh={fetchLiveStatus}
+                      onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
+                    />
+                  </Card>
                 </div>
 
                 <!-- System Resources (DASH-01, DASH-04) -->
@@ -1184,7 +1334,9 @@
           <Skeleton type="card" height="100%" />
         {:then { default: Editor }}
           <div
-            style="flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100%;"
+            style={isEditorFullscreen
+              ? 'flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100%;'
+              : 'flex: 1; display: flex; flex-direction: column; min-height: 100%;'}
             transition:fade={{ duration: 150 }}
           >
             <Editor onSwitchTab={switchTab} />
@@ -1255,7 +1407,7 @@
           <Skeleton type="card" height="60vh" />
         {:then { default: Rules }}
           <div transition:fade={{ duration: 150 }}>
-            <Rules />
+            <Rules onSwitchTab={switchTab} />
           </div>
         {:catch err}
           <div use:reportChunkErrorAction={err}>
@@ -1386,23 +1538,6 @@
             />
           </div>
         {/await}
-      {:else if currentTab === 'network'}
-        {#await import('./NetworkTools.svelte')}
-          <Skeleton type="card" height="60vh" />
-        {:then { default: NetworkTools }}
-          <div transition:fade={{ duration: 150 }}>
-            <NetworkTools onSwitchTab={switchTab} />
-          </div>
-        {:catch err}
-          <div use:reportChunkErrorAction={err}>
-            <EmptyState
-              title={$t('app.chunk_load_failed')}
-              description=""
-              ctaText={$t('app.retry')}
-              oncta={retryChunkLoad}
-            />
-          </div>
-        {/await}
       {:else if currentTab === 'settings'}
         {#await import('./Settings.svelte')}
           <Skeleton type="card" height="60vh" />
@@ -1506,40 +1641,6 @@
     min-width: 0;
   }
 
-  /* Page header — title left, buttons top-right */
-  .page-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 16px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-  }
-
-  .crumbs {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--fg-dim);
-    margin-bottom: 6px;
-  }
-
-  .sub {
-    color: var(--fg-secondary);
-    font-size: 13px;
-    margin: 4px 0 0;
-  }
-
-  /* ph-actions */
-  .ph-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    flex-shrink: 0;
-    padding-top: 4px;
-  }
-
   /* Quickstart checklist card */
   .quickstart-list {
     list-style: none;
@@ -1578,6 +1679,34 @@
     padding: 4px 8px;
     margin-left: auto;
     flex-shrink: 0;
+  }
+
+  .dash-watchdog-badge-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .dash-watchdog-label {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--fg-dim);
+  }
+
+  .watchdog-stale-desc {
+    display: inline-block;
+    margin-left: var(--spacing-1, 4px);
+    color: var(--fg-dim);
+    font-size: var(--font-size-xs, 12px);
+  }
+
+  .watchdog-error-detail {
+    font-family: var(--font-family-mono, monospace);
+    font-size: var(--font-size-xs, 12px);
+    color: var(--fg-secondary);
+    margin-top: var(--spacing-2, 8px);
+    word-break: break-word;
+    white-space: pre-wrap;
   }
 
   /* Fullscreen editor layout geometry (.dashboard-layout.editor-active,

@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -142,5 +144,220 @@ func TestUpdateRollback_MethodNotAllowed(t *testing.T) {
 				t.Errorf("method %s: expected 405, got %d", method, rr.Code)
 			}
 		})
+	}
+}
+
+func TestCompareSemver(t *testing.T) {
+	tests := []struct {
+		a, b     string
+		expected int
+	}{
+		{"0.15.0", "0.15.1", -1},
+		{"0.16.0", "0.15.9", 1},
+		{"0.15.0", "0.15.0", 0},
+		{"0.15.0-beta.1", "0.15.0", -1},
+		{"0.15.0", "0.15.0-beta.1", 1},
+		{"0.15.0-beta.1", "0.15.0-beta.2", -1},
+		{"0.15.0-beta.2", "0.15.0-beta.1", 1},
+		{"1.0.0", "2.0.0", -1},
+		{"2.0.0", "1.9.9", 1},
+	}
+
+	for _, tc := range tests {
+		got := compareSemver(tc.a, tc.b)
+		if got != tc.expected {
+			t.Errorf("compareSemver(%q, %q) = %d, expected %d", tc.a, tc.b, got, tc.expected)
+		}
+	}
+}
+
+func TestUpdateChannel_Handlers(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	cfg := &config.Config{
+		ConfigPath:    cfgPath,
+		UpdateChannel: "stable",
+	}
+	_ = config.Save(cfgPath, cfg)
+	api := &API{cfg: cfg}
+
+	// 1. UpdateChannelGet
+	reqPostGet := httptest.NewRequest(http.MethodPost, "/api/update/channel", nil)
+	recPostGet := httptest.NewRecorder()
+	api.UpdateChannelGet(recPostGet, reqPostGet)
+	if recPostGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST to UpdateChannelGet, got %d", recPostGet.Code)
+	}
+
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/update/channel", nil)
+	recGet := httptest.NewRecorder()
+	api.UpdateChannelGet(recGet, reqGet)
+	if recGet.Code != http.StatusOK {
+		t.Errorf("expected 200 for UpdateChannelGet, got %d", recGet.Code)
+	}
+
+	// 2. UpdateChannelSet
+	reqGetSet := httptest.NewRequest(http.MethodGet, "/api/update/channel", nil)
+	recGetSet := httptest.NewRecorder()
+	api.UpdateChannelSet(recGetSet, reqGetSet)
+	if recGetSet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET to UpdateChannelSet, got %d", recGetSet.Code)
+	}
+
+	reqBadJSON := httptest.NewRequest(http.MethodPost, "/api/update/channel", bytes.NewBufferString("{invalid"))
+	recBadJSON := httptest.NewRecorder()
+	api.UpdateChannelSet(recBadJSON, reqBadJSON)
+	if recBadJSON.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for bad JSON, got %d", recBadJSON.Code)
+	}
+
+	reqBadChannel := httptest.NewRequest(http.MethodPost, "/api/update/channel", bytes.NewBufferString(`{"channel":"alpha"}`))
+	recBadChannel := httptest.NewRecorder()
+	api.UpdateChannelSet(recBadChannel, reqBadChannel)
+	if recBadChannel.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid channel alpha, got %d", recBadChannel.Code)
+	}
+
+	reqValidBeta := httptest.NewRequest(http.MethodPost, "/api/update/channel", bytes.NewBufferString(`{"channel":"beta"}`))
+	recValidBeta := httptest.NewRecorder()
+	api.UpdateChannelSet(recValidBeta, reqValidBeta)
+	if recValidBeta.Code != http.StatusOK {
+		t.Errorf("expected 200 for setting beta, got %d", recValidBeta.Code)
+	}
+	if api.cfg.UpdateChannel != "beta" {
+		t.Errorf("expected channel beta, got %s", api.cfg.UpdateChannel)
+	}
+
+	// 3. UpdateChannelHandler
+	reqRouterDelete := httptest.NewRequest(http.MethodDelete, "/api/update/channel", nil)
+	recRouterDelete := httptest.NewRecorder()
+	api.UpdateChannelHandler(recRouterDelete, reqRouterDelete)
+	if recRouterDelete.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for DELETE router, got %d", recRouterDelete.Code)
+	}
+
+	reqRouterGet := httptest.NewRequest(http.MethodGet, "/api/update/channel", nil)
+	recRouterGet := httptest.NewRecorder()
+	api.UpdateChannelHandler(recRouterGet, reqRouterGet)
+	if recRouterGet.Code != http.StatusOK {
+		t.Errorf("expected 200 for router GET, got %d", recRouterGet.Code)
+	}
+}
+
+func TestUpdateStatusEndpoint(t *testing.T) {
+	api := &API{}
+
+	reqPost := httptest.NewRequest(http.MethodPost, "/api/update/status", nil)
+	recPost := httptest.NewRecorder()
+	api.UpdateStatusEndpoint(recPost, reqPost)
+	if recPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST, got %d", recPost.Code)
+	}
+
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/update/status", nil)
+	recGet := httptest.NewRecorder()
+	api.UpdateStatusEndpoint(recGet, reqGet)
+	if recGet.Code != http.StatusOK {
+		t.Errorf("expected 200 for GET, got %d", recGet.Code)
+	}
+}
+
+func TestCopyFile_And_PruneBackupsDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := filepath.Join(tmpDir, "src.bin")
+	dst := filepath.Join(tmpDir, "dst.bin")
+
+	content := []byte("hello binary world")
+	if err := os.WriteFile(src, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("copyFile failed: %v", err)
+	}
+
+	copied, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read copied file: %v", err)
+	}
+	if string(copied) != string(content) {
+		t.Errorf("content mismatch: got %q, want %q", string(copied), string(content))
+	}
+
+	// copyFile error on nonexistent src
+	if err := copyFile(filepath.Join(tmpDir, "nonexistent"), dst); err == nil {
+		t.Error("expected error copying nonexistent file, got nil")
+	}
+
+	// pruneBackupsDir
+	backupsDir := filepath.Join(tmpDir, "backups")
+	_ = os.MkdirAll(backupsDir, 0755)
+	for i := 1; i <= 5; i++ {
+		p := filepath.Join(backupsDir, fmt.Sprintf("xcp-backup-%02d", i))
+		_ = os.WriteFile(p, []byte("data"), 0644)
+	}
+
+	if err := pruneBackupsDir(backupsDir, 2); err != nil {
+		t.Fatalf("pruneBackupsDir failed: %v", err)
+	}
+
+	entries, _ := os.ReadDir(backupsDir)
+	if len(entries) != 2 {
+		t.Errorf("expected 2 backups remaining, got %d", len(entries))
+	}
+}
+
+func TestUpdateEndpoints_Validation(t *testing.T) {
+	api := &API{}
+
+	// 1. UpdateCheck: Method Not Allowed (POST)
+	reqCheckPost := httptest.NewRequest(http.MethodPost, "/api/update/check", nil)
+	recCheckPost := httptest.NewRecorder()
+	api.UpdateCheck(recCheckPost, reqCheckPost)
+	if recCheckPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST check, got %d", recCheckPost.Code)
+	}
+
+	// 2. UpdateChangelog: Method Not Allowed (POST)
+	reqChangePost := httptest.NewRequest(http.MethodPost, "/api/update/changelog", nil)
+	recChangePost := httptest.NewRecorder()
+	api.UpdateChangelog(recChangePost, reqChangePost)
+	if recChangePost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST changelog, got %d", recChangePost.Code)
+	}
+
+	// 3. UpdateChangelog: Missing version query param
+	reqChangeEmpty := httptest.NewRequest(http.MethodGet, "/api/update/changelog", nil)
+	recChangeEmpty := httptest.NewRecorder()
+	api.UpdateChangelog(recChangeEmpty, reqChangeEmpty)
+	if recChangeEmpty.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty version changelog, got %d", recChangeEmpty.Code)
+	}
+
+	// 4. UpdateInstall: Method Not Allowed (GET)
+	reqInstallGet := httptest.NewRequest(http.MethodGet, "/api/update/install", nil)
+	recInstallGet := httptest.NewRecorder()
+	api.UpdateInstall(recInstallGet, reqInstallGet)
+	if recInstallGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET install, got %d", recInstallGet.Code)
+	}
+}
+
+func TestUpdateEventsSSE(t *testing.T) {
+	api := &API{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/update/events", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	api.UpdateEventsSSE(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for UpdateEventsSSE, got %d", rec.Code)
+	}
+	if rec.Header().Get("Content-Type") != "text/event-stream" {
+		t.Errorf("expected text/event-stream, got %s", rec.Header().Get("Content-Type"))
 	}
 }

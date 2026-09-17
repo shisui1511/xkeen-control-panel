@@ -1,6 +1,10 @@
 package services
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -610,5 +614,50 @@ secret: "test"
 	}
 	if client1 != client2 {
 		t.Errorf("expected GetHTTPClient() to reuse *http.Client instance, got %p and %p", client1, client2)
+	}
+}
+
+func TestMihomoReloadConfig(t *testing.T) {
+	var receivedMethod, receivedPath, receivedAuth, receivedContentType string
+	var receivedBody map[string]string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.RequestURI()
+		receivedAuth = r.Header.Get("Authorization")
+		receivedContentType = r.Header.Get("Content-Type")
+		_ = json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	hostPort := strings.TrimPrefix(server.URL, "http://")
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+	cfgContent := fmt.Sprintf("external-controller: %s\nsecret: \"my-secret\"\n", hostPort)
+	if err := os.WriteFile(cfgFile, []byte(cfgContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewMihomoService("", "", tmpDir)
+	targetConfigPath := "/opt/etc/mihomo/config.yaml"
+	if err := svc.ReloadConfig(targetConfigPath); err != nil {
+		t.Fatalf("ReloadConfig failed: %v", err)
+	}
+
+	if receivedMethod != http.MethodPut {
+		t.Errorf("expected PUT method, got %s", receivedMethod)
+	}
+	if receivedPath != "/configs?force=true" {
+		t.Errorf("expected /configs?force=true path, got %s", receivedPath)
+	}
+	if receivedAuth != "Bearer my-secret" {
+		t.Errorf("expected Bearer my-secret auth, got %s", receivedAuth)
+	}
+	if receivedContentType != "application/json" {
+		t.Errorf("expected application/json content type, got %s", receivedContentType)
+	}
+	if receivedBody["path"] != targetConfigPath {
+		t.Errorf("expected path %s, got %v", targetConfigPath, receivedBody)
 	}
 }

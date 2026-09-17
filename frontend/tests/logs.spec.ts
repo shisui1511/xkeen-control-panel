@@ -78,7 +78,7 @@ test.describe('System Logs Console test suite', () => {
     await page.goto('/#/logs');
 
     // Check page title and toolbar elements
-    await expect(page.locator('.page-head h1')).toBeVisible();
+    await expect(page.locator('h1')).toBeVisible();
 
     const toolbar = page.locator('.logs-toolbar');
     await expect(toolbar).toBeVisible();

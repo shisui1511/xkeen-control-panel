@@ -20,7 +20,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 				"script-src 'self' 'unsafe-inline'; "+
 				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 				"img-src 'self' data: https://cdn.jsdelivr.net https://raw.githubusercontent.com https://github.com https://www.redditstatic.com https://www.svgrepo.com; "+
-				"connect-src 'self'; "+
+				"connect-src 'self' https://ipinfo.io https://*.ipinfo.io https://api.ipify.org https://api64.ipify.org https://icanhazip.com https://*.icanhazip.com https://ipapi.co https://api.my-ip.io; "+
 				"font-src 'self' https://fonts.gstatic.com; "+
 				"frame-ancestors 'none'")
 

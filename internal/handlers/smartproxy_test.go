@@ -238,3 +238,70 @@ func TestSmartProxyStatus(t *testing.T) {
 		t.Errorf("expected 200, got %d", rr.Code)
 	}
 }
+
+func TestSmartProxyListAndGet(t *testing.T) {
+	// Nil svc
+	apiNil := &API{}
+	reqListNil := httptest.NewRequest(http.MethodGet, "/api/smartproxy/list", nil)
+	rrListNil := httptest.NewRecorder()
+	apiNil.SmartProxyList(rrListNil, reqListNil)
+	if rrListNil.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 for nil list, got %d", rrListNil.Code)
+	}
+
+	reqGetNil := httptest.NewRequest(http.MethodGet, "/api/smartproxy/get?id=1", nil)
+	rrGetNil := httptest.NewRecorder()
+	apiNil.SmartProxyGet(rrGetNil, reqGetNil)
+	if rrGetNil.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 for nil get, got %d", rrGetNil.Code)
+	}
+
+	// Initialized API
+	api, spSvc := newSmartProxyTestAPI(t)
+
+	// SmartProxyList: 405 on POST, 200 on GET
+	reqListPost := httptest.NewRequest(http.MethodPost, "/api/smartproxy/list", nil)
+	rrListPost := httptest.NewRecorder()
+	api.SmartProxyList(rrListPost, reqListPost)
+	if rrListPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST list, got %d", rrListPost.Code)
+	}
+
+	reqListOK := httptest.NewRequest(http.MethodGet, "/api/smartproxy/list", nil)
+	rrListOK := httptest.NewRecorder()
+	api.SmartProxyList(rrListOK, reqListOK)
+	if rrListOK.Code != http.StatusOK {
+		t.Errorf("expected 200 for GET list, got %d", rrListOK.Code)
+	}
+
+	// SmartProxyGet: 405 on POST, 400 on empty id, 404 on ghost, 200 on valid
+	reqGetPost := httptest.NewRequest(http.MethodPost, "/api/smartproxy/get?id=1", nil)
+	rrGetPost := httptest.NewRecorder()
+	api.SmartProxyGet(rrGetPost, reqGetPost)
+	if rrGetPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST get, got %d", rrGetPost.Code)
+	}
+
+	reqGetEmpty := httptest.NewRequest(http.MethodGet, "/api/smartproxy/get", nil)
+	rrGetEmpty := httptest.NewRecorder()
+	api.SmartProxyGet(rrGetEmpty, reqGetEmpty)
+	if rrGetEmpty.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty id, got %d", rrGetEmpty.Code)
+	}
+
+	reqGetGhost := httptest.NewRequest(http.MethodGet, "/api/smartproxy/get?id=ghost-id", nil)
+	rrGetGhost := httptest.NewRecorder()
+	api.SmartProxyGet(rrGetGhost, reqGetGhost)
+	if rrGetGhost.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for ghost id, got %d", rrGetGhost.Code)
+	}
+
+	p := &services.Profile{Name: "Test Get", GroupName: "group", ProxyName: "proxy"}
+	_ = spSvc.Add(p)
+	reqGetOK := httptest.NewRequest(http.MethodGet, "/api/smartproxy/get?id="+p.ID, nil)
+	rrGetOK := httptest.NewRecorder()
+	api.SmartProxyGet(rrGetOK, reqGetOK)
+	if rrGetOK.Code != http.StatusOK {
+		t.Errorf("expected 200 for valid id, got %d", rrGetOK.Code)
+	}
+}

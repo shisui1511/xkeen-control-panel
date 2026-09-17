@@ -30,6 +30,7 @@ type API struct {
 	networkSvc            *services.NetworkToolsService
 	smartProxySvc         *services.SmartProxyService
 	trafficQuotaSvc       *services.TrafficQuotaService
+	watchdogSvc           *services.WatchdogService
 	xrayGRPCSvc           *services.XrayGRPCService
 	datSvc                *services.DATManagerService
 	snapshotSvc           *services.SnapshotService
@@ -38,6 +39,7 @@ type API struct {
 	templateSvc           *services.TemplateService
 	logDispatcher         *services.LogDispatcher
 	userRulesSvc          *services.UserRulesService
+	routeTracerSvc        *services.RouteTracerService
 	clientResolver        *services.ClientResolver
 	assetsSvc             *assets.AssetsService
 	pathVal               *utils.PathValidator
@@ -86,6 +88,14 @@ func (a *API) SetTrafficQuotaService(svc *services.TrafficQuotaService) {
 	a.trafficQuotaSvc = svc
 }
 
+func (a *API) SetWatchdogService(svc *services.WatchdogService) {
+	a.watchdogSvc = svc
+}
+
+func (a *API) WatchdogService() *services.WatchdogService {
+	return a.watchdogSvc
+}
+
 func (a *API) SetXrayGRPCService(svc *services.XrayGRPCService) {
 	a.xrayGRPCSvc = svc
 }
@@ -128,6 +138,14 @@ func (a *API) SetUserRulesService(svc *services.UserRulesService) {
 
 func (a *API) UserRulesService() *services.UserRulesService {
 	return a.userRulesSvc
+}
+
+func (a *API) SetRouteTracerService(svc *services.RouteTracerService) {
+	a.routeTracerSvc = svc
+}
+
+func (a *API) RouteTracerService() *services.RouteTracerService {
+	return a.routeTracerSvc
 }
 
 func (a *API) SetAssetsService(svc *assets.AssetsService) {
@@ -230,11 +248,19 @@ func setupXrayCmdEnv(cmd *exec.Cmd, configDir string) {
 func (a *API) getActiveKernelName() string {
 	var active string
 	if a.kernelSvc != nil {
+		var running []string
 		for _, info := range a.kernelSvc.List() {
 			if info.ProcessStatus == "running" {
-				active = info.Name
-				break
+				running = append(running, info.Name)
 			}
+		}
+		switch len(running) {
+		case 0:
+			// fall through to the xkeenSvc fallback below
+		case 1:
+			active = running[0]
+		default:
+			active = "both"
 		}
 	}
 	if active == "" && a.xkeenSvc != nil {

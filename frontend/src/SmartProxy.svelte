@@ -2,6 +2,11 @@
   import { onMount } from 'svelte';
   import { usePoller } from './lib/poller';
   import Modal from './components/Modal.svelte';
+  import PageHeader from './PageHeader.svelte';
+  import Button from './components/Button.svelte';
+  import Select from './components/Select.svelte';
+  import StatusBadge from './components/StatusBadge.svelte';
+  import Icon from './lib/components/Icon.svelte';
   import { t, currentLang } from './i18n';
   import { showConfirm, showToast } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
@@ -410,32 +415,18 @@
 </script>
 
 <div class="container">
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {$t('nav.group_proxy_subs')} <span class="crumb-sep">›</span>
-        {$t('smartproxy.title')}
-      </div>
-      <h1>{$t('smartproxy.title')}</h1>
-      <p class="sub">{$t('smartproxy.subtitle')}</p>
-    </div>
-    <div class="ph-actions">
-      <button class="btn btn-primary" onclick={startCreate}>
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          style="margin-right: 6px;"
-        >
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        {$t('smartproxy.create_profile')}
-      </button>
-    </div>
-  </div>
+  <PageHeader
+    title={$t('smartproxy.title')}
+    subtitle={$t('smartproxy.subtitle')}
+    breadcrumbs={[{ label: $t('nav.group_proxy_subs') }, { label: $t('smartproxy.title') }]}
+    {onSwitchTab}
+    hideHome={true}
+  >
+    <Button variant="primary" onclick={startCreate}>
+      <Icon name="add" size={14} />
+      {$t('smartproxy.create_profile')}
+    </Button>
+  </PageHeader>
 
   {#if error && !showForm}
     <div class="alert alert-error mb-2">{error}</div>
@@ -454,8 +445,10 @@
           {#if hasActive}
             <div class="status-active-badges">
               {#each status.active as p}
-                <span class="status-badge active">{p.name} → {p.current_proxy || p.proxy_name}</span
-                >
+                <StatusBadge
+                  variant="running"
+                  label="{p.name} → {p.current_proxy || p.proxy_name}"
+                />
               {/each}
             </div>
           {:else}
@@ -636,13 +629,21 @@
 
             <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
               <label class="toggle-switch">
-                <input type="checkbox" checked={p.enabled} onchange={() => toggleEnabled(p)} />
+                <input
+                  type="checkbox"
+                  aria-label={$t('smartproxy.profile_active')}
+                  checked={p.enabled}
+                  onchange={() => toggleEnabled(p)}
+                />
                 <span class="toggle-slider"></span>
               </label>
 
               <div class="dropdown-container">
                 <button
                   class="btn btn-secondary action-btn-dots"
+                  aria-label={$t('smartproxy.actions') || 'Actions'}
+                  aria-haspopup="menu"
+                  aria-expanded={activeDropdownId === p.id}
                   onclick={() => toggleDropdown(p.id)}>⋯</button
                 >
                 {#if activeDropdownId === p.id}
@@ -671,9 +672,10 @@
               <div class="lbl">{$t('smartproxy.target_group')}</div>
             </div>
             <div class="ctrl">
-              <span class="status-badge" class:active={p.enabled}>
-                {p.group_name} → {p.current_proxy || p.proxy_name}
-              </span>
+              <StatusBadge
+                variant={p.enabled ? 'running' : 'idle'}
+                label="{p.group_name} → {p.current_proxy || p.proxy_name}"
+              />
             </div>
           </div>
 
@@ -751,9 +753,9 @@
 
       <div class="form-group">
         <label for="sp-mode" class="form-label">{$t('smartproxy.mode')}</label>
-        <select id="sp-mode" class="input" bind:value={formMode} disabled>
+        <Select id="sp-mode" class="input" bind:value={formMode} disabled>
           <option value="time-based">{$t('smartproxy.mode_time')}</option>
-        </select>
+        </Select>
         <p class="hint" style="margin-top:6px;">
           {$t('smartproxy.schedule_mode_hint')}
         </p>
@@ -761,7 +763,12 @@
 
       <div class="form-group-checkbox" style="margin-top: 10px;">
         <label class="toggle-switch">
-          <input type="checkbox" id="sp-enabled" bind:checked={formEnabled} />
+          <input
+            type="checkbox"
+            id="sp-enabled"
+            aria-label={$t('smartproxy.profile_active')}
+            bind:checked={formEnabled}
+          />
           <span class="toggle-slider"></span>
         </label>
         <label for="sp-enabled" class="checkbox-label">
@@ -775,12 +782,12 @@
       <div class="form-group">
         <label for="sp-group" class="form-label">{$t('smartproxy.form_proxy_group')} *</label>
         {#if mihomoGroups.length > 0}
-          <select id="sp-group" class="input" bind:value={formGroupName}>
+          <Select id="sp-group" class="input" bind:value={formGroupName}>
             <option value="">-- {$t('smartproxy.select_group')} --</option>
             {#each mihomoGroups as g}
               <option value={g}>{g}</option>
             {/each}
-          </select>
+          </Select>
         {:else}
           <input
             id="sp-group"
@@ -795,13 +802,13 @@
       <div class="form-group">
         <label for="sp-proxy" class="form-label">{$t('smartproxy.form_target_proxy')} *</label>
         {#if mihomoProxies.length > 0}
-          <select id="sp-proxy" class="input" bind:value={formProxyName}>
+          <Select id="sp-proxy" class="input" bind:value={formProxyName}>
             <option value="">-- {$t('smartproxy.select_proxy')} --</option>
             <option value="DIRECT">DIRECT</option>
             {#each mihomoProxies as p}
               <option value={p}>{p}</option>
             {/each}
-          </select>
+          </Select>
         {:else}
           <input
             id="sp-proxy"
@@ -935,7 +942,7 @@
   }
 
   .hint {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-top: 4px;
   }
@@ -1023,7 +1030,7 @@
     border-radius: 50%;
     background: var(--accent);
     color: var(--btn-primary-text);
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
   }
 
@@ -1082,7 +1089,7 @@
     left: 0;
     background: var(--bg-card);
     padding: 8px;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     color: var(--fg-secondary);
     border-right: 1px solid var(--border);
@@ -1098,7 +1105,7 @@
 
   .hour-header-cell {
     padding: 6px 4px;
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     text-align: center;
     color: var(--fg-faint);
@@ -1188,12 +1195,12 @@
   }
 
   :global(.status-dot.inactive) {
-    background-color: var(--fg-dim, #64748b);
+    background-color: var(--fg-dim);
     box-shadow: none;
   }
 
   :global(.status-dot.active) {
-    background-color: var(--success, #46d18a);
+    background-color: var(--success);
     box-shadow: 0 0 8px rgba(70, 209, 138, 0.4);
   }
 
@@ -1213,7 +1220,7 @@
   }
 
   .empty-state-head h2 {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 700;
     color: var(--fg-primary);
     margin-bottom: 8px;
@@ -1250,7 +1257,6 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    outline: none;
     transition:
       border-color var(--transition-fast),
       transform var(--transition-fast),
@@ -1286,7 +1292,7 @@
   }
 
   .template-badge {
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
     background: rgba(255, 255, 255, 0.05);
@@ -1296,14 +1302,14 @@
   }
 
   .template-card h3 {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
     color: var(--fg-primary);
     margin: 0;
   }
 
   .template-card p {
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--fg-dim);
     line-height: 1.45;
     margin: 0;
@@ -1340,7 +1346,7 @@
     position: relative;
     display: flex;
     justify-content: space-between;
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-faint);
   }
@@ -1382,10 +1388,9 @@
 
   /* Mode color badges */
   :global(.sp-mode-badge) {
-    font-size: 10.5px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
     padding: 2px 7px;
     border-radius: 4px;
   }

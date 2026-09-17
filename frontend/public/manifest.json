@@ -4,8 +4,8 @@
   "description": "Панель управления XKeen для роутеров Keenetic",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#0d6efd",
+  "background_color": "#0c2237",
+  "theme_color": "#0c2237",
   "orientation": "any",
   "icons": [
     {

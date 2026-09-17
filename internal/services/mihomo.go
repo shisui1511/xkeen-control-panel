@@ -2,7 +2,9 @@ package services
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -519,6 +521,58 @@ func (s *MihomoService) FlushFakeIPCache(ctx context.Context) error {
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("failed to flush fake-ip cache (status %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// ReloadConfig reloads Mihomo configuration at runtime via PUT /configs?force=true.
+func (s *MihomoService) ReloadConfig(configPath string) error {
+	info, err := s.ParseControllerConfig()
+	if err != nil {
+		return fmt.Errorf("failed to parse controller config: %w", err)
+	}
+
+	var reqURL string
+	if info.Type == "unix" {
+		reqURL = "http://localhost/configs?force=true"
+	} else if info.Type == "tcp" && info.Target != "" {
+		target := info.Target
+		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+			target = "http://" + target
+		}
+		reqURL = strings.TrimRight(target, "/") + "/configs?force=true"
+	} else {
+		return fmt.Errorf("mihomo controller is not configured")
+	}
+
+	payload := map[string]string{"path": configPath}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal reload payload: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if info.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+info.Secret)
+	}
+
+	client := s.GetHTTPClient()
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to reload mihomo config (status %d): %s", resp.StatusCode, string(body))
 	}
 	return nil
 }

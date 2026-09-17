@@ -202,13 +202,12 @@
     justify-content: space-between;
     min-width: 0;
     min-height: 124px;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 70%), var(--bg-card, #102a44);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 70%), var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg, 12px);
     padding: 14px 16px;
     gap: 12px;
-    box-shadow: var(--shadow, 0 4px 12px rgba(0, 0, 0, 0.2));
+    box-shadow: var(--shadow);
     transition:
       border-color 0.2s ease,
       transform 0.15s ease,
@@ -216,14 +215,14 @@
   }
 
   .service-card:hover {
-    border-color: rgba(41, 194, 240, 0.3);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
   }
 
   .service-card-active {
-    border-color: rgba(41, 194, 240, 0.4);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
     box-shadow:
-      0 0 16px rgba(41, 194, 240, 0.08),
-      var(--shadow, 0 4px 12px rgba(0, 0, 0, 0.2));
+      0 0 16px color-mix(in srgb, var(--accent) 8%, transparent),
+      var(--shadow);
   }
 
   .service-card-disabled {
@@ -257,17 +256,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
-    color: var(--fg-primary, #ffffff);
+    color: var(--fg-primary);
     letter-spacing: -0.01em;
     line-height: 1.2;
   }
 
   .sub-label {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     font-weight: 400;
-    color: var(--fg-muted, var(--fg-secondary, #8fa3b8));
+    color: var(--fg-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -291,20 +290,20 @@
   }
 
   .status-text-running {
-    color: var(--success, #46d18a);
+    color: var(--success);
   }
 
   .status-text-stopped,
   .status-text-error {
-    color: var(--error, #f4707f);
+    color: var(--danger);
   }
 
   .status-text-loading {
-    color: var(--warning, #f0b450);
+    color: var(--warning);
   }
 
   .status-text-not_installed {
-    color: var(--fg-dim, #63778a);
+    color: var(--fg-dim);
   }
 
   .status-dot {
@@ -318,25 +317,25 @@
   }
 
   .dot-running {
-    background-color: var(--success, #46d18a);
-    box-shadow: 0 0 8px rgba(70, 209, 138, 0.5);
+    background-color: var(--success);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--success) 50%, transparent);
   }
 
   .dot-stopped,
   .dot-error {
-    background-color: var(--error, #f4707f);
-    box-shadow: 0 0 6px rgba(244, 112, 127, 0.4);
+    background-color: var(--danger);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--danger) 40%, transparent);
   }
 
   .dot-loading {
-    background-color: var(--warning, #f0b450);
-    box-shadow: 0 0 6px rgba(240, 180, 80, 0.4);
+    background-color: var(--warning);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 40%, transparent);
     animation: pulse 1.5s infinite;
   }
 
   .dot-uninstalled,
   .dot-unknown {
-    background-color: var(--fg-dim, #63778a);
+    background-color: var(--fg-dim);
   }
 
   @keyframes pulse {
@@ -351,22 +350,21 @@
 
   .badge-active {
     flex-shrink: 0;
-    background: rgba(41, 194, 240, 0.12);
-    color: var(--accent, #29c2f0);
-    border: 1px solid rgba(41, 194, 240, 0.25);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
     padding: 1px 6px;
     border-radius: var(--radius-sm, 4px);
-    text-transform: uppercase;
   }
 
   .version-badge {
     background: rgba(255, 255, 255, 0.05);
-    color: var(--fg-muted, var(--fg-secondary, #8fa3b8));
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    font-size: 10.5px;
+    color: var(--fg-secondary);
+    border: 1px solid var(--border);
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono, monospace);
     font-weight: 500;
     padding: 1px 6px;
@@ -377,7 +375,7 @@
   .migrate-badge {
     cursor: pointer;
     border: none;
-    font-size: 10.5px;
+    font-size: var(--font-size-xs);
     padding: 1px 6px;
     border-radius: var(--radius-sm, 4px);
   }
@@ -386,7 +384,7 @@
     display: flex;
     align-items: center;
     padding-top: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    border-top: 1px solid var(--border-light);
     margin-top: auto;
   }
 

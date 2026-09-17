@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -59,19 +60,28 @@ func New(defaultLang string) *I18n {
 }
 
 // T translates the key into the specified language, falling back to the default language or key itself.
-func (i *I18n) T(lang, key string) string {
+// If args are provided, it formats the translated string using fmt.Sprintf.
+func (i *I18n) T(lang, key string, args ...any) string {
+	msg := key
+	found := false
 	if dict, ok := i.translations[lang]; ok {
 		if val, ok := dict[key]; ok {
-			return val
+			msg = val
+			found = true
 		}
 	}
-	// Fallback to default language
-	if dict, ok := i.translations[i.defaultLang]; ok {
-		if val, ok := dict[key]; ok {
-			return val
+	// Fallback to default language if not found
+	if !found {
+		if dict, ok := i.translations[i.defaultLang]; ok {
+			if val, ok := dict[key]; ok {
+				msg = val
+			}
 		}
 	}
-	return key
+	if len(args) > 0 {
+		return fmt.Sprintf(msg, args...)
+	}
+	return msg
 }
 
 // GetLang gets the language from request query parameters, cookies, Accept-Language header, or falls back to default.
@@ -113,8 +123,8 @@ func (i *I18n) hasLang(lang string) bool {
 // Global functions using default instance
 
 // T is a global helper that translates the key using the default I18n instance.
-func T(lang, key string) string {
-	return defaultI18n.T(lang, key)
+func T(lang, key string, args ...any) string {
+	return defaultI18n.T(lang, key, args...)
 }
 
 // GetLang is a global helper that retrieves the language from the request using the default I18n instance.

@@ -1,6 +1,6 @@
 {
   "name": "xkeen-control-panel-frontend",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,13 +10,14 @@
     "test:e2e": "playwright test",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "check:contrast": "node scripts/check-contrast.cjs",
+    "check:contrast": "node scripts/check-contrast.cjs && node scripts/check-hardcoded-colors.cjs",
     "check:bundle-size": "node scripts/check-bundle-size.cjs",
     "check:i18n": "node scripts/check-i18n.cjs",
     "lint": "svelte-check --tsconfig ./tsconfig.json && eslint .",
     "format:check": "prettier --check ."
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
