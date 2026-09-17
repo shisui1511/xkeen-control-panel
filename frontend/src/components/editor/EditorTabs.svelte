@@ -21,10 +21,18 @@
     onPinTab: (path: string) => void;
     onCloseTab: (path: string) => void;
   } = $props();
+
+  function handleWheel(e: WheelEvent) {
+    if (e.deltaY !== 0) {
+      const el = e.currentTarget as HTMLElement;
+      el.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }
+  }
 </script>
 
 {#if tabs.length > 0}
-  <div class="editor-tab-strip" role="tablist">
+  <div class="editor-tab-strip" role="tablist" onwheel={handleWheel}>
     {#each tabs as tab (tab.path)}
       <div
         class="editor-tab"
@@ -73,21 +81,18 @@
     display: flex;
     gap: 0;
     height: 100%;
+    min-width: 0;
+    flex: 1;
     align-items: stretch;
     background: transparent;
     border-bottom: none;
     overflow-x: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
+    overflow-y: hidden;
+    scrollbar-width: none;
   }
 
   .editor-tab-strip::-webkit-scrollbar {
-    height: 3px;
-  }
-
-  .editor-tab-strip::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: var(--radius);
+    display: none;
   }
 
   .editor-tab {

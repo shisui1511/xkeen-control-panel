@@ -206,12 +206,7 @@
     display: flex;
     align-items: stretch;
     height: 100%;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .subhead-tabs-container::-webkit-scrollbar {
-    display: none;
+    overflow: hidden;
   }
 
   .subhead-meta-container {
