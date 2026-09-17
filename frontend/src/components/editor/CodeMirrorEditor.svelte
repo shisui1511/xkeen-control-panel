@@ -506,9 +506,9 @@
     font-weight: 600;
     padding: 1px 6px;
     border-radius: var(--radius-full, 9999px);
-    background: color-mix(in srgb, var(--danger, #f4707f) 15%, transparent);
-    color: var(--danger, #f4707f);
-    border: 1px solid color-mix(in srgb, var(--danger, #f4707f) 30%, transparent);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   }
   :global(.cm-schema-badge-default) {
     display: inline-flex;
