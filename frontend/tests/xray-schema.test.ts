@@ -268,3 +268,38 @@ describe('xraySchema bilingual descriptions and localization', () => {
     assertAllStringDescriptions(enSchema);
   });
 });
+
+describe('xraySchema top-level coverage parity', () => {
+  test('содержит env/transport/metrics/geodata/version помимо уже описанных ключей', () => {
+    const keys = Object.keys((xraySchema as any).properties);
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        'log',
+        'api',
+        'dns',
+        'routing',
+        'inbounds',
+        'outbounds',
+        'policy',
+        'stats',
+        'reverse',
+        'fakedns',
+        'burstObservatory',
+        'observatory',
+        'env',
+        'transport',
+        'metrics',
+        'geodata',
+        'version'
+      ])
+    );
+  });
+
+  test('metrics.tag и policy.system.overrideAccessLogDest описаны', () => {
+    const props = (xraySchema as any).properties;
+    expect(props.metrics.properties.tag.description).toBeTruthy();
+    expect(
+      props.policy.properties.system.properties.overrideAccessLogDest.description
+    ).toBeTruthy();
+  });
+});

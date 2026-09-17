@@ -1472,10 +1472,41 @@ export const xraySchema = {
             en: 'System-wide statistics collection settings.'
           },
           properties: {
-            statsInboundUplink: { type: 'boolean' },
-            statsInboundDownlink: { type: 'boolean' },
-            statsOutboundUplink: { type: 'boolean' },
-            statsOutboundDownlink: { type: 'boolean' }
+            statsInboundUplink: {
+              type: 'boolean',
+              description: {
+                ru: 'Считать исходящий трафик по всем inbound.',
+                en: 'Count uplink traffic across all inbounds.'
+              }
+            },
+            statsInboundDownlink: {
+              type: 'boolean',
+              description: {
+                ru: 'Считать входящий трафик по всем inbound.',
+                en: 'Count downlink traffic across all inbounds.'
+              }
+            },
+            statsOutboundUplink: {
+              type: 'boolean',
+              description: {
+                ru: 'Считать исходящий трафик по всем outbound.',
+                en: 'Count uplink traffic across all outbounds.'
+              }
+            },
+            statsOutboundDownlink: {
+              type: 'boolean',
+              description: {
+                ru: 'Считать входящий трафик по всем outbound.',
+                en: 'Count downlink traffic across all outbounds.'
+              }
+            },
+            overrideAccessLogDest: {
+              type: 'boolean',
+              description: {
+                ru: 'Переопределить путь access-лога значением из `log.access`, когда он меняется через runtime API.',
+                en: "Override the access log destination with `log.access`'s value when changed via the runtime API."
+              }
+            }
           }
         }
       }
@@ -1602,6 +1633,51 @@ export const xraySchema = {
             en: 'Enable concurrent probing across multiple outbounds.'
           }
         }
+      }
+    },
+    env: {
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      description: {
+        ru: 'Переменные окружения Xray, заданные прямо в конфигурации, а не через окружение процесса на роутере.',
+        en: 'Xray environment variables set directly in the config, instead of via the router process environment.'
+      }
+    },
+    transport: {
+      type: 'object',
+      description: {
+        ru: '> Устаревший способ задать транспорт глобально — используйте `streamSettings` внутри конкретного `inbound`/`outbound` вместо этого блока.',
+        en: '> Deprecated global transport block — use `streamSettings` inside a specific `inbound`/`outbound` instead.'
+      }
+    },
+    metrics: {
+      type: 'object',
+      description: {
+        ru: 'Встроенный HTTP-сервер метрик в формате Prometheus. Активируется через inbound с тем же тегом, что указан здесь — доступ к `/debug/vars` и `/metrics` идёт через этот inbound.',
+        en: 'Built-in Prometheus-compatible metrics HTTP server. Activated via an inbound sharing the same tag as configured here — `/debug/vars` and `/metrics` are served through that inbound.'
+      },
+      properties: {
+        tag: {
+          type: 'string',
+          description: {
+            ru: 'Тег inbound, обслуживающего метрики. Нужно объявить `inbound` с этим тегом и `protocol: dokodemo-door`, а правило маршрутизации — вести на `outboundTag: metrics`.',
+            en: 'Tag of the inbound serving metrics. Requires declaring an `inbound` with this tag and `protocol: dokodemo-door`, with a routing rule pointing to `outboundTag: metrics`.'
+          }
+        }
+      }
+    },
+    geodata: {
+      type: 'object',
+      description: {
+        ru: 'Автообновление и горячая перезагрузка файлов geodata (geosite/geoip) без перезапуска ядра. Набор доступных полей зависит от версии Xray-core.',
+        en: 'Auto-update and hot-reload of geodata (geosite/geoip) files without restarting the core. Available fields depend on the Xray-core version.'
+      }
+    },
+    version: {
+      type: 'object',
+      description: {
+        ru: 'Ограничение версий Xray-core, с которыми разрешено запускать этот конфиг — ядро откажется стартовать при несовпадении.',
+        en: 'Restricts which Xray-core versions may run this config — the core refuses to start on a mismatch.'
       }
     }
   }
