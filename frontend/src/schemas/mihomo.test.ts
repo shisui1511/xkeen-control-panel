@@ -186,6 +186,43 @@ describe('mihomoSchema rules pattern validation', () => {
   });
 });
 
+describe('mihomoSchema proxies type coverage and conditional requirements', () => {
+  const proxyItems = (mihomoSchema as any).properties.proxies.items;
+
+  it('includes direct/openvpn/tailscale/ssh/anytls alongside the network protocols', () => {
+    expect(proxyItems.properties.type.enum).toEqual(
+      expect.arrayContaining(['direct', 'openvpn', 'tailscale', 'ssh', 'anytls'])
+    );
+  });
+
+  it('only requires name+type at the base level (server/port move to allOf)', () => {
+    expect(proxyItems.required).toEqual(['name', 'type']);
+  });
+
+  it('does not require server/port for tailscale or direct', () => {
+    const branch = proxyItems.allOf.find((b: any) =>
+      b.if.properties?.type?.not?.enum?.includes('tailscale')
+    );
+    expect(branch.if.properties.type.not.enum).toEqual(
+      expect.arrayContaining(['tailscale', 'direct'])
+    );
+    expect(branch.then.required).toEqual(['server', 'port']);
+  });
+
+  it('requires ca/tls-crypt for openvpn', () => {
+    const branch = proxyItems.allOf.find((b: any) => b.if.properties?.type?.const === 'openvpn');
+    expect(branch.then.required).toEqual(expect.arrayContaining(['ca', 'tls-crypt']));
+  });
+
+  it('exposes bilingual { ru, en } description objects', () => {
+    const desc = proxyItems.properties.type.description;
+    expect(typeof desc).toBe('object');
+    expect(desc.ru).toBeTruthy();
+    expect(desc.en).toBeTruthy();
+    expect(desc.ru).not.toEqual(desc.en);
+  });
+});
+
 describe('mihomoSchema amnezia-wg-option', () => {
   it('covers all AmneziaWG 3.1 parameters with expected types', () => {
     const awgProps = (mihomoSchema as any).properties.proxies.items.properties['amnezia-wg-option']
@@ -207,9 +244,34 @@ describe('mihomoSchema amnezia-wg-option', () => {
     expect(awgProps['header-protection-key'].type).toBe('string');
     expect(awgProps.i1.type).toBe('string');
     expect(awgProps.i5.type).toBe('string');
-    expect(awgProps['content-padding-addition'].type).toBe('integer');
+    expect(awgProps['content-padding-addition'].oneOf.map((s: any) => s.type)).toEqual([
+      'integer',
+      'string'
+    ]);
     expect(awgProps['random-trailers'].type).toBe('boolean');
     expect(awgProps['disable-cookies'].type).toBe('boolean');
-    expect(awgProps['rekey-after-time'].type).toBe('integer');
+    expect(awgProps['rekey-after-time'].oneOf.map((s: any) => s.type)).toEqual([
+      'integer',
+      'string'
+    ]);
+  });
+
+  it('covers AWG 1.5 legacy fields and AWG 3+ timing fields for protocol coverage', () => {
+    const awgProps = (mihomoSchema as any).properties.proxies.items.properties['amnezia-wg-option']
+      .properties;
+
+    expect(awgProps.j1.type).toBe('string');
+    expect(awgProps.j2.type).toBe('string');
+    expect(awgProps.j3.type).toBe('string');
+    expect(awgProps.itime.type).toBe('integer');
+
+    for (const key of [
+      'rekey-timeout',
+      'reject-after-time',
+      'keepalive-timeout',
+      'max-handshake-attempts'
+    ]) {
+      expect(awgProps[key].oneOf.map((s: any) => s.type)).toEqual(['integer', 'string']);
+    }
   });
 });
