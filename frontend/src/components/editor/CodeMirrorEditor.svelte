@@ -397,6 +397,82 @@
     background: var(--fg-dim);
   }
 
+  /* Schema hover tooltip (codemirror-json-schema) — themed to match the panel
+     instead of the library's unstyled default, and structured for markdown
+     descriptions (bold section labels, inline code, blockquote warnings). */
+  :global(.cm-tooltip:has(.cm6-json-schema-hover)) {
+    background: var(--bg-surface-elevated) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: var(--shadow-md) !important;
+    padding: 0 !important;
+    max-width: 440px;
+  }
+  :global(.cm6-json-schema-hover) {
+    font-family: var(--font-family-sans);
+    color: var(--fg-secondary);
+  }
+  :global(.cm6-json-schema-hover--description) {
+    padding: var(--spacing-3) var(--spacing-4);
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+  }
+  :global(.cm6-json-schema-hover--description p) {
+    margin: 0 0 var(--spacing-2) 0;
+  }
+  :global(.cm6-json-schema-hover--description p:last-child) {
+    margin-bottom: 0;
+  }
+  :global(.cm6-json-schema-hover--description strong) {
+    color: var(--fg-primary);
+    font-weight: 600;
+  }
+  :global(.cm6-json-schema-hover--description code) {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    font-family: var(--font-family-mono);
+    font-size: 0.9em;
+    padding: 0.05em 0.35em;
+    border-radius: var(--radius-xs);
+  }
+  :global(.cm6-json-schema-hover--description ul) {
+    margin: var(--spacing-1) 0;
+    padding-left: var(--spacing-4);
+  }
+  :global(.cm6-json-schema-hover--description li) {
+    margin: 2px 0;
+  }
+  :global(.cm6-json-schema-hover--description li p) {
+    margin: 0;
+  }
+  :global(.cm6-json-schema-hover--description blockquote) {
+    margin: var(--spacing-2) 0 0 0;
+    padding: var(--spacing-2) var(--spacing-3);
+    border-left: 3px solid var(--warning);
+    background: var(--warning-soft);
+    border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+    color: var(--fg-primary);
+  }
+  :global(.cm6-json-schema-hover--description blockquote p) {
+    margin: 0;
+  }
+  :global(.cm6-json-schema-hover--code-wrapper) {
+    border-top: 1px solid var(--border);
+    padding: var(--spacing-2) var(--spacing-4);
+    background: var(--bg-surface);
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+  }
+  :global(.cm6-json-schema-hover--code) {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+    color: var(--fg-dim);
+  }
+  :global(.cm6-json-schema-hover--code code) {
+    background: transparent;
+    color: var(--accent);
+    padding: 0;
+  }
+
   @media (max-width: 768px) {
     :global(.cm-editor) {
       font-size: 16px;

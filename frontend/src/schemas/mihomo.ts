@@ -446,8 +446,8 @@ export const mihomoSchema = {
       type: 'string',
       enum: ['rule', 'global', 'direct'],
       description: {
-        ru: `"rule" — маршрутизация по массиву rules (обычный режим). "global" — весь трафик через текущий выбранный прокси, правила игнорируются — удобно для быстрой проверки full-tunnel. "direct" — весь трафик напрямую, минуя прокси.`,
-        en: '"rule": route by the rules array (normal mode). "global": send everything through the currently selected proxy, ignoring rules — useful for a quick full-tunnel test. "direct": send everything straight out, bypassing proxies entirely.'
+        ru: `- **rule** — маршрутизация по массиву \`rules\` (обычный режим).\n- **global** — весь трафик через текущий выбранный прокси, правила игнорируются.\n- **direct** — весь трафик напрямую, минуя прокси.\n\n> \`global\` удобен для быстрой проверки full-tunnel, но не забудьте вернуть \`rule\` после теста.`,
+        en: '- **rule** — route by the `rules` array (normal mode).\n- **global** — send everything through the currently selected proxy, ignoring rules.\n- **direct** — send everything straight out, bypassing proxies entirely.\n\n> `global` is handy for a quick full-tunnel test — remember to switch back to `rule` afterwards.'
       },
       default: 'rule'
     },
@@ -455,8 +455,8 @@ export const mihomoSchema = {
       type: 'string',
       enum: ['info', 'warning', 'error', 'debug', 'silent'],
       description: {
-        ru: `"silent" полностью отключает логирование; "error"/"warning" показывают только проблемы (рекомендуется для обычной работы роутера); "info" — умеренно; "debug" — очень подробно и быстро забивает хранилище/логи роутера — только для активной отладки.`,
-        en: '"silent" disables logging entirely; "error"/"warning" show only problems (recommended for normal router operation); "info" is moderate; "debug" is very verbose and quickly fills router storage/logs — only for active troubleshooting.'
+        ru: `- **silent** — логирование полностью отключено.\n- **error** / **warning** — только проблемы (рекомендуется для обычной работы роутера).\n- **info** — умеренная подробность.\n- **debug** — очень подробно, только для активной отладки.\n\n> \`debug\` быстро забивает хранилище и логи роутера — не оставляйте его включённым надолго.`,
+        en: '- **silent** — logging disabled entirely.\n- **error** / **warning** — only problems (recommended for normal router operation).\n- **info** — moderate detail.\n- **debug** — very verbose, for active troubleshooting only.\n\n> `debug` quickly fills router storage/logs — do not leave it on for long.'
       },
       default: 'info'
     },
@@ -890,8 +890,8 @@ export const mihomoSchema = {
     tun: {
       type: 'object',
       description: {
-        ru: `Собственный виртуальный сетевой интерфейс Mihomo для прозрачного проксирования (альтернатива связке redir-port/tproxy-port + iptables). В этой панели XKeen уже сам управляет прозрачным перехватом через собственные iptables/TPROXY правила на Keenetic — включение tun поверх этого избыточно, и оба механизма могут конфликтовать за один и тот же трафик. Оставляйте tun выключенным, если вы осознанно не переключили режим перехвата XKeen на использование tun.`,
-        en: "Mihomo's own virtual network interface for transparent proxying (an alternative to the redir-port/tproxy-port + iptables approach). On this panel XKeen already owns transparent interception via its own iptables/TPROXY rules on Keenetic — enabling tun here on top of that is redundant and the two can fight over the same traffic. Leave tun disabled unless you specifically switched XKeen's interception mode to rely on it."
+        ru: `Собственный виртуальный сетевой интерфейс Mihomo для прозрачного проксирования — альтернатива связке \`redir-port\`/\`tproxy-port\` + iptables.\n\n> На этой панели XKeen уже сам управляет прозрачным перехватом через собственные iptables/TPROXY правила на Keenetic. Включение \`tun\` поверх этого избыточно, и оба механизма могут конфликтовать за один и тот же трафик — оставляйте выключенным, если осознанно не переключили режим перехвата XKeen на \`tun\`.`,
+        en: "Mihomo's own virtual network interface for transparent proxying — an alternative to the `redir-port`/`tproxy-port` + iptables approach.\n\n> On this panel XKeen already owns transparent interception via its own iptables/TPROXY rules on Keenetic. Enabling `tun` on top of that is redundant and the two can fight over the same traffic — leave it disabled unless you specifically switched XKeen's interception mode to rely on `tun`."
       },
       properties: {
         enable: {

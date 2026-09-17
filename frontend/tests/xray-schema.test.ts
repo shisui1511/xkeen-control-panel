@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from 'vitest';
 import { shadowsocksCiphers, xraySchema } from '../src/schemas/xray';
+import { localizeSchema } from '../src/schemas/localize';
 
 describe('xraySchema Shadowsocks ciphers (D-07)', () => {
   test('длина списка шифров ровно 8', () => {
@@ -210,5 +211,60 @@ describe('xraySchema port bounds and required fields', () => {
   test('inbounds и outbounds требуют обязательное поле protocol', () => {
     expect((xraySchema.properties.inbounds.items as any).required).toContain('protocol');
     expect((xraySchema.properties.outbounds.items as any).required).toContain('protocol');
+  });
+});
+
+describe('xraySchema bilingual descriptions and localization', () => {
+  test('все description в xraySchema содержат непустые поля ru и en', () => {
+    let count = 0;
+    function walk(node: any, path = ''): void {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        node.forEach((child, i) => walk(child, `${path}[${i}]`));
+        return;
+      }
+      if ('description' in node) {
+        count++;
+        const desc = node.description;
+        expect(typeof desc, `description at ${path} must be an object`).toBe('object');
+        expect(desc, `description at ${path} must not be null`).not.toBeNull();
+        expect(typeof desc.ru, `desc.ru at ${path} must be string`).toBe('string');
+        expect(desc.ru.length, `desc.ru at ${path} must not be empty`).toBeGreaterThan(0);
+        expect(typeof desc.en, `desc.en at ${path} must be string`).toBe('string');
+        expect(desc.en.length, `desc.en at ${path} must not be empty`).toBeGreaterThan(0);
+      }
+      for (const [key, val] of Object.entries(node)) {
+        if (key !== 'description') {
+          walk(val, path ? `${path}.${key}` : key);
+        }
+      }
+    }
+    walk(xraySchema);
+    expect(count).toBeGreaterThan(100);
+  });
+
+  test('localizeSchema корректно преобразует xraySchema для ru и en в строковые описания', () => {
+    const ruSchema: any = localizeSchema(xraySchema, 'ru');
+    const enSchema: any = localizeSchema(xraySchema, 'en');
+
+    expect(ruSchema.description).toBe('Конфигурационный файл Xray-core');
+    expect(enSchema.description).toBe('Xray-core configuration file');
+
+    function assertAllStringDescriptions(node: any): void {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        node.forEach(assertAllStringDescriptions);
+        return;
+      }
+      if ('description' in node) {
+        expect(typeof node.description).toBe('string');
+      }
+      for (const val of Object.values(node)) {
+        assertAllStringDescriptions(val);
+      }
+    }
+
+    assertAllStringDescriptions(ruSchema);
+    assertAllStringDescriptions(enSchema);
   });
 });
