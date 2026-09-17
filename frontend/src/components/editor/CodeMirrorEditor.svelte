@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
-  import { t as translate } from '../../i18n';
+  import { t as translate, currentLang, type Lang } from '../../i18n';
   import {
     EditorView,
     keymap,
@@ -50,6 +50,7 @@
   // Schema definitions
   import { xraySchema } from '../../schemas/xray';
   import { mihomoSchema } from '../../schemas/mihomo';
+  import { localizeSchema } from '../../schemas/localize';
   import { xraySnippetSource, mihomoSnippetSource } from '../../lib/snippets';
 
   const customHighlightStyle = HighlightStyle.define([
@@ -91,7 +92,7 @@
   const schemaCompartment = new Compartment();
   let lastPath = '';
 
-  function getSchemaExtensions(filePath: string, expert: boolean = false) {
+  function getSchemaExtensions(filePath: string, expert: boolean = false, lang: Lang = 'ru') {
     if (!schemaEnabled) return [];
 
     const isYaml = filePath.endsWith('.yaml') || filePath.endsWith('.yml');
@@ -105,6 +106,7 @@
     }
 
     if (!schema) return [];
+    schema = localizeSchema(schema, lang);
 
     const isXray = filePath.includes('xray') || filePath.includes('/opt/etc/xray');
     const snippetSource = isXray ? xraySnippetSource : mihomoSnippetSource;
@@ -154,13 +156,14 @@
   $effect(() => {
     if (!editorContainer || !path) return;
 
-    // Track path, expertMode, schemaEnabled reactively
+    // Track path, expertMode, schemaEnabled, language reactively
     const currentPath = path;
     const currentExpertMode = expertMode;
     const currentSchemaEnabled = schemaEnabled;
+    const currentLang_ = $currentLang;
 
     if (view && view.dom.isConnected && lastPath === currentPath) {
-      const schemaExts = getSchemaExtensions(currentPath, currentExpertMode);
+      const schemaExts = getSchemaExtensions(currentPath, currentExpertMode, currentLang_);
       view.dispatch({
         effects: schemaCompartment.reconfigure(schemaExts)
       });
@@ -169,7 +172,7 @@
 
     lastPath = currentPath;
     const lang = currentPath.endsWith('.yaml') || currentPath.endsWith('.yml') ? yaml() : json();
-    const schemaExts = getSchemaExtensions(currentPath, currentExpertMode);
+    const schemaExts = getSchemaExtensions(currentPath, currentExpertMode, currentLang_);
 
     const state = EditorState.create({
       doc: untrack(() => content),
