@@ -360,27 +360,11 @@ jobs:
       - name: Update binaries branch
         if: steps.rolling.outputs.published != 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-
-          git fetch origin binaries 2>/dev/null || true
-          git checkout -b binaries origin/binaries 2>/dev/null || git checkout --orphan binaries
-
-          git rm -rf . 2>/dev/null || true
-          mkdir -p bin
-          cp artifacts/xcp_arm64/xcp_${VERSION}_arm64 bin/
-          cp artifacts/xcp_arm64/xcp_${VERSION}_arm64.sha256 bin/
-          cp artifacts/xcp_mipsle/xcp_${VERSION}_mipsle bin/
-          cp artifacts/xcp_mipsle/xcp_${VERSION}_mipsle.sha256 bin/
-          cp artifacts/xcp_mips/xcp_${VERSION}_mips bin/
-          cp artifacts/xcp_mips/xcp_${VERSION}_mips.sha256 bin/
-
-          git add bin/
-          git commit -m "${VERSION}" || true
-          git push origin binaries --force
+          bash .github/scripts/update_binaries.sh "${VERSION}" artifacts
 
   cleanup:
     name: Cleanup artifacts
