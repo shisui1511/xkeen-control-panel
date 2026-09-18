@@ -16,7 +16,6 @@ test.describe('Templates modal integration test suite', () => {
     // Перехватываем все запросы к API
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
-      const method = route.request().method();
 
       if (url.includes('/api/auth/me')) {
         await route.fulfill({
