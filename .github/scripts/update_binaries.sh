@@ -19,7 +19,8 @@ keep_file() {
   if [[ "$version" == *-dev ]]; then
     [[ "$ver" != *-dev ]]
   else
-    [[ "$ver" == *-dev ]] && ! version_le "${ver#v}" "${version#v}"
+    local base="${ver#v}"
+    [[ "$ver" == *-dev ]] && ! version_le "${base%-dev}" "${version#v}"
   fi
 }
 
