@@ -304,12 +304,22 @@ func TestValidateKernelPath(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		err := validateKernelPath(tc.path)
-		if tc.wantErr && err == nil {
-			t.Errorf("path %q: expected error, got nil", tc.path)
+		clean, err := sanitizeKernelPath(tc.path)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("path %q: expected error, got nil", tc.path)
+			}
+			if clean != "" {
+				t.Errorf("path %q: expected empty path on error, got %q", tc.path, clean)
+			}
+			continue
 		}
-		if !tc.wantErr && err != nil {
+		if err != nil {
 			t.Errorf("path %q: unexpected error: %v", tc.path, err)
+			continue
+		}
+		if clean != filepath.Clean(tc.path) {
+			t.Errorf("path %q: got %q, expected cleaned path", tc.path, clean)
 		}
 	}
 }

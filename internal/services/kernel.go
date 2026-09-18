@@ -85,27 +85,43 @@ func findKernelBinary(name string) string {
 	return ""
 }
 
-func validateKernelPath(path string) error {
+// sanitizeKernelPath возвращает очищенный путь, лежащий внутри allowedKernelRoots.
+// Файловые операции должны использовать именно возвращённое значение, а не исходное:
+// иначе проверка не видна анализаторам потока данных и не считается защитой.
+func sanitizeKernelPath(path string) (string, error) {
 	if path == "" {
-		return errors.New("empty path")
+		return "", errors.New("empty path")
 	}
 	if !filepath.IsAbs(path) {
-		return errors.New("path must be absolute")
+		return "", errors.New("path must be absolute")
 	}
 	// Reject raw paths containing ".." components to prevent traversal regardless of Clean result.
 	for _, part := range strings.Split(path, "/") {
 		if part == ".." {
-			return errors.New("path traversal detected")
+			return "", errors.New("path traversal detected")
 		}
 	}
 	clean := filepath.Clean(path)
 	// Ensure the cleaned path actually starts with one of the allowed roots
 	for _, root := range allowedKernelRoots {
 		if strings.HasPrefix(clean+"/", root) || strings.HasPrefix(clean, root) {
-			return nil
+			return clean, nil
 		}
 	}
-	return errors.New("path is outside allowed directories")
+	return "", errors.New("path is outside allowed directories")
+}
+
+// canonicalKernelName сводит имя ядра из запроса к литералу: дальше в путях
+// используется только константа, а не пришедшая извне строка.
+func canonicalKernelName(name string) (string, error) {
+	switch name {
+	case "xray":
+		return "xray", nil
+	case "mihomo":
+		return "mihomo", nil
+	default:
+		return "", fmt.Errorf("invalid kernel name: %s", name)
+	}
 }
 
 func safeTempPath(name string) (string, error) {
@@ -574,13 +590,8 @@ func (s *KernelService) resolveBinaryPath(k *KernelInfo) {
 	case "mihomo":
 		paths = mihomoProbePaths
 	default:
-		paths = []string{
-			"/opt/sbin/" + k.Name,
-			"/opt/bin/" + k.Name,
-			"/usr/sbin/" + k.Name,
-			"/usr/local/bin/" + k.Name,
-			"/usr/bin/" + k.Name,
-		}
+		// Других ядер не бывает: путь из имени не собираем, чтобы имя из запроса не попадало в файловые операции
+		return
 	}
 	for _, p := range paths {
 		if _, err := s.statFunc(p); err == nil {
@@ -900,13 +911,9 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 
 // Install downloads and installs the kernel
 func (s *KernelService) Install(name string) error {
-	// Sanitize kernel name to prevent path injection
-	if name == "xray" {
-		name = "xray"
-	} else if name == "mihomo" {
-		name = "mihomo"
-	} else {
-		return fmt.Errorf("invalid kernel name: %s", name)
+	name, err := canonicalKernelName(name)
+	if err != nil {
+		return err
 	}
 
 	// Verify kernel exists first
@@ -1004,8 +1011,8 @@ func (s *KernelService) Install(name string) error {
 	}
 	// Use name and timestamp in backup name to prevent cross-kernel backup collisions
 	backupName := fmt.Sprintf("%s.bak.%d", name, time.Now().Unix())
-	backupPath := filepath.Join(backupDir, backupName)
-	if err := validateKernelPath(backupPath); err != nil {
+	backupPath, err := sanitizeKernelPath(filepath.Join(backupDir, backupName))
+	if err != nil {
 		setStatus("failed", "Invalid backup path: "+err.Error())
 		return err
 	}
@@ -1061,28 +1068,34 @@ func (s *KernelService) Install(name string) error {
 	}
 
 	// Make executable and replace
-	if err := validateKernelPath(extractedPath); err != nil {
+	safeExtracted, err := sanitizeKernelPath(extractedPath)
+	if err != nil {
 		setStatus("failed", "Invalid extracted path: "+err.Error())
 		return err
 	}
-	if err := os.Chmod(extractedPath, 0755); err != nil {
+	if err := os.Chmod(safeExtracted, 0755); err != nil {
 		setStatus("failed", "Chmod failed: "+err.Error())
 		return err
 	}
 
 	// Atomic replace
-	tempDest := filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new")
-	if err := validateKernelPath(tempDest); err != nil {
+	tempDest, err := sanitizeKernelPath(filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new"))
+	if err != nil {
 		setStatus("failed", "Invalid temp dest path: "+err.Error())
 		return err
 	}
-	if err := os.Rename(extractedPath, tempDest); err != nil {
+	safeBinaryPath, err := sanitizeKernelPath(binaryPath)
+	if err != nil {
+		setStatus("failed", "Invalid binary path: "+err.Error())
+		return err
+	}
+	if err := os.Rename(safeExtracted, tempDest); err != nil {
 		setStatus("failed", "Replace failed: "+err.Error())
 		return err
 	}
-	if err := os.Rename(tempDest, binaryPath); err != nil {
+	if err := os.Rename(tempDest, safeBinaryPath); err != nil {
 		// Try rollback
-		_ = os.Rename(backupPath, binaryPath)
+		_ = os.Rename(backupPath, safeBinaryPath)
 		setStatus("failed", "Replace failed: "+err.Error())
 		return err
 	}
@@ -1114,13 +1127,9 @@ func (s *KernelService) Install(name string) error {
 
 // Rollback restores the kernel binary from the latest backup.
 func (s *KernelService) Rollback(name string) error {
-	// Sanitize kernel name to prevent path injection
-	if name == "xray" {
-		name = "xray"
-	} else if name == "mihomo" {
-		name = "mihomo"
-	} else {
-		return fmt.Errorf("invalid kernel name: %s", name)
+	name, err := canonicalKernelName(name)
+	if err != nil {
+		return err
 	}
 
 	s.mu.Lock()
@@ -1164,8 +1173,8 @@ func (s *KernelService) Rollback(name string) error {
 	latestBackup := backups[len(backups)-1]
 
 	// Atomic replace
-	tempDest := filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new")
-	if err := validateKernelPath(tempDest); err != nil {
+	tempDest, err := sanitizeKernelPath(filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new"))
+	if err != nil {
 		return err
 	}
 
@@ -1340,7 +1349,8 @@ func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			if err := validateKernelPath(outPath); err != nil {
+			outPath, err = sanitizeKernelPath(outPath)
+			if err != nil {
 				return "", err
 			}
 			out, err := os.Create(outPath)
@@ -1382,7 +1392,8 @@ func (s *KernelService) extractGz(gzPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := validateKernelPath(outPath); err != nil {
+	outPath, err = sanitizeKernelPath(outPath)
+	if err != nil {
 		return "", err
 	}
 	out, err := os.Create(outPath)
@@ -1522,20 +1533,22 @@ func isELF(path string) bool {
 }
 
 func copyKernelFile(src, dst string) error {
-	if err := validateKernelPath(src); err != nil {
+	safeSrc, err := sanitizeKernelPath(src)
+	if err != nil {
 		return fmt.Errorf("invalid src path: %w", err)
 	}
-	if err := validateKernelPath(dst); err != nil {
+	safeDst, err := sanitizeKernelPath(dst)
+	if err != nil {
 		return fmt.Errorf("invalid dst path: %w", err)
 	}
 
-	s, err := os.Open(src)
+	s, err := os.Open(safeSrc)
 	if err != nil {
 		return err
 	}
 	defer s.Close()
 
-	d, err := os.Create(dst)
+	d, err := os.Create(safeDst)
 	if err != nil {
 		return err
 	}
@@ -1550,9 +1563,10 @@ func copyKernelFile(src, dst string) error {
 // UploadBinary saves an uploaded kernel binary or archive (.zip/.gz) to the router,
 // validates that it is a valid Linux ELF executable, creates a backup of the current binary,
 // and replaces the kernel binary atomically.
-func (s *KernelService) UploadBinary(name string, src io.Reader, filename string) error {
-	if name != "xray" && name != "mihomo" {
-		return fmt.Errorf("invalid kernel name: %s", name)
+func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filename string) error {
+	name, err := canonicalKernelName(requestedName)
+	if err != nil {
+		return err
 	}
 
 	s.mu.RLock()
@@ -1617,34 +1631,42 @@ func (s *KernelService) UploadBinary(name string, src io.Reader, filename string
 	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
 	_ = os.MkdirAll(backupDir, 0755)
 	backupName := fmt.Sprintf("%s.bak.%d", name, time.Now().Unix())
-	backupPath := filepath.Join(backupDir, backupName)
-	if err := validateKernelPath(backupPath); err != nil {
+	backupPath, err := sanitizeKernelPath(filepath.Join(backupDir, backupName))
+	if err != nil {
 		return fmt.Errorf("invalid backup path: %w", err)
 	}
+	safeBinaryPath, err := sanitizeKernelPath(binaryPath)
+	if err != nil {
+		return fmt.Errorf("invalid binary path: %w", err)
+	}
 
-	if _, err := os.Stat(binaryPath); err == nil {
-		if err := copyKernelFile(binaryPath, backupPath); err == nil {
+	if _, err := os.Stat(safeBinaryPath); err == nil {
+		if err := copyKernelFile(safeBinaryPath, backupPath); err == nil {
 			_ = pruneBackups(backupDir, name+".bak.", 3)
 		}
 	}
 
-	if err := os.Chmod(extractedPath, 0755); err != nil {
+	safeExtracted, err := sanitizeKernelPath(extractedPath)
+	if err != nil {
+		return fmt.Errorf("invalid extracted path: %w", err)
+	}
+	if err := os.Chmod(safeExtracted, 0755); err != nil {
 		return fmt.Errorf("chmod failed: %w", err)
 	}
 
 	// Atomic replace
-	tempDest := filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new")
-	if err := validateKernelPath(tempDest); err != nil {
+	tempDest, err := sanitizeKernelPath(filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new"))
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(extractedPath, tempDest); err != nil {
-		if err := copyKernelFile(extractedPath, tempDest); err != nil {
+	if err := os.Rename(safeExtracted, tempDest); err != nil {
+		if err := copyKernelFile(safeExtracted, tempDest); err != nil {
 			return fmt.Errorf("replace failed: %w", err)
 		}
 	}
-	if err := os.Rename(tempDest, binaryPath); err != nil {
+	if err := os.Rename(tempDest, safeBinaryPath); err != nil {
 		if _, statErr := os.Stat(backupPath); statErr == nil {
-			_ = os.Rename(backupPath, binaryPath)
+			_ = os.Rename(backupPath, safeBinaryPath)
 		}
 		return fmt.Errorf("final replace failed: %w", err)
 	}
