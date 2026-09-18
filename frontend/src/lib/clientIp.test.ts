@@ -138,17 +138,18 @@ describe('clientIp module', () => {
 
     it('falls back to api.ipify.org when ipinfo fails', async () => {
       const globalFetch = vi.fn().mockImplementation((url: string) => {
-        if (url.includes('/api/network/ip')) {
+        const parsed = new URL(url, 'http://localhost');
+        if (parsed.pathname === '/api/network/ip') {
           return Promise.resolve({
             ok: true,
             status: 200,
             json: () => Promise.resolve({ success: true, ip: '95.100.100.1' })
           });
         }
-        if (url.includes('ipinfo.io')) {
+        if (parsed.hostname === 'ipinfo.io') {
           return Promise.reject(new Error('Network error on ipinfo'));
         }
-        if (url.includes('api.ipify.org')) {
+        if (parsed.hostname === 'api.ipify.org') {
           return Promise.resolve({
             ok: true,
             status: 200,
