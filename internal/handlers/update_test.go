@@ -171,6 +171,92 @@ func TestCompareSemver(t *testing.T) {
 	}
 }
 
+func TestPickLatestRelease(t *testing.T) {
+	// Порядок как у GitHub API: по дате публикации, пересобранный dev-релиз сверху
+	republishedDev := []githubRelease{
+		{TagName: "v0.25.0-dev", Prerelease: true, Body: "dev"},
+		{TagName: "v0.25.1", Body: "stable 0.25.1"},
+		{TagName: "v0.25.0", Body: "stable 0.25.0"},
+	}
+	newerDev := []githubRelease{
+		{TagName: "v0.25.1"},
+		{TagName: "v0.25.2-dev", Prerelease: true},
+		{TagName: "v0.25.0"},
+	}
+	stableOnly := []githubRelease{
+		{TagName: "v0.25.0"},
+		{TagName: "v0.25.1"},
+	}
+
+	tests := []struct {
+		name     string
+		releases []githubRelease
+		channel  string
+		want     string
+		wantErr  bool
+	}{
+		{"stable пропускает pre-release", republishedDev, "stable", "0.25.1", false},
+		{"beta не берёт устаревший pre-release", republishedDev, "beta", "0.25.1", false},
+		{"beta берёт более новый pre-release", newerDev, "beta", "0.25.2-dev", false},
+		{"stable не зависит от порядка", stableOnly, "stable", "0.25.1", false},
+		{"beta без pre-release отдаёт stable", stableOnly, "beta", "0.25.1", false},
+		{"пустой список", nil, "stable", "", true},
+		{"stable без stable-релизов", []githubRelease{{TagName: "v0.1.0-dev", Prerelease: true}}, "stable", "", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := pickLatestRelease(tc.releases, tc.channel)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("ожидалась ошибка, получено %q", got.LatestVersion)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("неожиданная ошибка: %v", err)
+			}
+			if got.LatestVersion != tc.want {
+				t.Errorf("LatestVersion = %q, ожидалось %q", got.LatestVersion, tc.want)
+			}
+		})
+	}
+
+	got, _ := pickLatestRelease(republishedDev, "stable")
+	if got.Changelog != "stable 0.25.1" {
+		t.Errorf("Changelog = %q, ожидался changelog выбранного релиза", got.Changelog)
+	}
+}
+
+func TestUpdateAvailable(t *testing.T) {
+	tests := []struct {
+		latest, current string
+		want            bool
+	}{
+		{"0.25.1", "0.25.0", true},
+		{"0.25.1", "0.25.1", false},
+		{"0.25.0", "0.25.1", false},
+		{"", "0.25.0", false},
+		// Rolling dev-сборка пересобирается под тем же тегом
+		{"0.25.2-dev", "0.25.2-dev", true},
+		{"0.25.2", "0.25.2-dev", true},
+		{"0.26.0-dev", "0.25.2-dev", true},
+		// Даунгрейд с dev-сборки не предлагается
+		{"0.25.1", "0.25.2-dev", false},
+		{"0.25.0-dev", "0.25.2-dev", false},
+		{"", "0.25.2-dev", false},
+		// Stable-сборка обновляется только на более новую версию
+		{"0.25.2-dev", "0.25.1", true},
+		{"0.25.1-dev", "0.25.1", false},
+	}
+
+	for _, tc := range tests {
+		if got := updateAvailable(tc.latest, tc.current); got != tc.want {
+			t.Errorf("updateAvailable(%q, %q) = %v, ожидалось %v", tc.latest, tc.current, got, tc.want)
+		}
+	}
+}
+
 func TestUpdateChannel_Handlers(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.json")
