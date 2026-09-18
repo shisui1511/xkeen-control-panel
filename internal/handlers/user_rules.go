@@ -72,9 +72,7 @@ func (a *API) UserRulesSave(w http.ResponseWriter, r *http.Request) {
 					if a.mihomoSvc != nil {
 						if err := a.mihomoSvc.ReloadConfig(configPath); err != nil {
 							log.Printf("[UserRules] Failed to reload Mihomo config %s: %v", configPath, err)
-							if warningMsg == "" {
-								warningMsg = "Failed to reload Mihomo configuration"
-							}
+							warningMsg = "Failed to reload Mihomo configuration"
 						} else {
 							reloaded = true
 						}

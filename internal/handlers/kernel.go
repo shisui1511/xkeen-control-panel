@@ -229,6 +229,11 @@ func (a *API) KernelUpload(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/kernels/")
 	name = strings.TrimSuffix(name, "/upload")
 
+	if name != "xray" && name != "mihomo" {
+		JSONError(w, http.StatusNotFound, "Kernel not found")
+		return
+	}
+
 	k := a.kernelSvc.Get(name)
 	if k == nil {
 		JSONError(w, http.StatusNotFound, "Kernel not found")

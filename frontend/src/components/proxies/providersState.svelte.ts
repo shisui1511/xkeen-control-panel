@@ -4,6 +4,16 @@ import { parseValidationError } from '../../lib/errorParser';
 import { capabilities, showToast, showConfirm } from '../../stores';
 import { get } from 'svelte/store';
 
+function isSafeKey(key: unknown): key is string {
+  return (
+    typeof key === 'string' &&
+    key.length > 0 &&
+    key !== '__proto__' &&
+    key !== 'constructor' &&
+    key !== 'prototype'
+  );
+}
+
 export interface Subscription {
   id: string;
   name: string;
@@ -469,9 +479,17 @@ export class ProvidersState {
   }
 
   async loadNodes(subId: string) {
+    if (
+      !isSafeKey(subId) ||
+      subId === '__proto__' ||
+      subId === 'constructor' ||
+      subId === 'prototype'
+    ) {
+      return;
+    }
     this.subNodesLoading[subId] = true;
     try {
-      const res = await apiFetch(`/api/subscriptions/nodes?id=${subId}`);
+      const res = await apiFetch(`/api/subscriptions/nodes?id=${encodeURIComponent(subId)}`);
       if (res.ok) {
         this.subNodes[subId] = await res.json();
       }
@@ -483,6 +501,14 @@ export class ProvidersState {
   }
 
   async loadMihomoNodes(subId: string) {
+    if (
+      !isSafeKey(subId) ||
+      subId === '__proto__' ||
+      subId === 'constructor' ||
+      subId === 'prototype'
+    ) {
+      return;
+    }
     const sub = this.subscriptions.find((s) => s.id === subId);
     if (!sub || !sub.mihomo_provider?.name) {
       this.subNodesError[subId] = true;
@@ -492,7 +518,9 @@ export class ProvidersState {
     this.subNodesLoading[subId] = true;
     this.subNodesError[subId] = false;
     try {
-      const res = await apiFetch(`/api/proxy-providers/${sub.mihomo_provider.name}/nodes`);
+      const res = await apiFetch(
+        `/api/proxy-providers/${encodeURIComponent(sub.mihomo_provider.name)}/nodes`
+      );
       if (res.ok) {
         const data: {
           tag: string;
@@ -510,6 +538,9 @@ export class ProvidersState {
         }));
         if (!this.subHealth[subId]) this.subHealth[subId] = {};
         data.forEach((n) => {
+          if (!n.tag || n.tag === '__proto__' || n.tag === 'constructor' || n.tag === 'prototype') {
+            return;
+          }
           this.subHealth[subId][n.tag] = {
             alive: n.alive,
             delay: n.tested ? n.delay_ms : undefined,
@@ -538,10 +569,20 @@ export class ProvidersState {
   }
 
   async loadDialerProxyTargets(subId: string) {
+    if (
+      !isSafeKey(subId) ||
+      subId === '__proto__' ||
+      subId === 'constructor' ||
+      subId === 'prototype'
+    ) {
+      return;
+    }
     const sub = this.subscriptions.find((s) => s.id === subId);
     if (!sub || !sub.enable_xray) return;
     try {
-      const res = await apiFetch(`/api/subscriptions/dialer-proxy-targets?id=${subId}&node_tag=_`);
+      const res = await apiFetch(
+        `/api/subscriptions/dialer-proxy-targets?id=${encodeURIComponent(subId)}&node_tag=_`
+      );
       if (res.ok) {
         const json = await res.json();
         this.dialerProxyTargets[subId] = json?.data || json || [];
@@ -585,6 +626,14 @@ export class ProvidersState {
   }
 
   async toggleExpand(subId: string) {
+    if (
+      !isSafeKey(subId) ||
+      subId === '__proto__' ||
+      subId === 'constructor' ||
+      subId === 'prototype'
+    ) {
+      return;
+    }
     this.expandedSubs[subId] = !this.expandedSubs[subId];
     if (this.expandedSubs[subId]) {
       await this.loadNodesBySource(subId);
@@ -593,6 +642,22 @@ export class ProvidersState {
   }
 
   async checkMihomoNodeHealth(subId: string, providerName: string, nodeTag: string) {
+    if (
+      !isSafeKey(subId) ||
+      subId === '__proto__' ||
+      subId === 'constructor' ||
+      subId === 'prototype'
+    ) {
+      return;
+    }
+    if (
+      !isSafeKey(nodeTag) ||
+      nodeTag === '__proto__' ||
+      nodeTag === 'constructor' ||
+      nodeTag === 'prototype'
+    ) {
+      return;
+    }
     if (!this.checkingNodes[subId]) this.checkingNodes[subId] = {};
     this.checkingNodes[subId][nodeTag] = true;
 
@@ -636,6 +701,14 @@ export class ProvidersState {
               if (Array.isArray(nodesData)) {
                 if (!this.subHealth[subId]) this.subHealth[subId] = {};
                 nodesData.forEach((n: any) => {
+                  if (
+                    !n.tag ||
+                    n.tag === '__proto__' ||
+                    n.tag === 'constructor' ||
+                    n.tag === 'prototype'
+                  ) {
+                    return;
+                  }
                   this.subHealth[subId][n.tag] = {
                     alive: n.alive,
                     delay: n.tested ? n.delay_ms : undefined,
@@ -664,6 +737,22 @@ export class ProvidersState {
   }
 
   async checkNodeHealth(subId: string, nodeTag: string) {
+    if (
+      !isSafeKey(subId) ||
+      subId === '__proto__' ||
+      subId === 'constructor' ||
+      subId === 'prototype'
+    ) {
+      return;
+    }
+    if (
+      !isSafeKey(nodeTag) ||
+      nodeTag === '__proto__' ||
+      nodeTag === 'constructor' ||
+      nodeTag === 'prototype'
+    ) {
+      return;
+    }
     const sub = this.subscriptions.find((s) => s.id === subId);
     if (!sub) return;
 
@@ -677,7 +766,7 @@ export class ProvidersState {
     this.checkingNodes[subId][nodeTag] = true;
     try {
       const res = await apiFetch(
-        `/api/subscriptions/health?id=${subId}&tag=${encodeURIComponent(nodeTag)}`
+        `/api/subscriptions/health?id=${encodeURIComponent(subId)}&tag=${encodeURIComponent(nodeTag)}`
       );
       if (res.ok) {
         const health = await res.json();
@@ -715,10 +804,29 @@ export class ProvidersState {
 
   checkAutoExpand() {
     const hash = window.location.hash;
-    const regex = /#\/proxies\?expand=(.+)/;
+    const regex = /#\/proxies\?expand=([a-zA-Z0-9_.-]+)/;
     const match = hash.match(regex);
     if (match && match[1]) {
-      const subId = match[1];
+      const rawId = match[1];
+      if (
+        !isSafeKey(rawId) ||
+        rawId === '__proto__' ||
+        rawId === 'constructor' ||
+        rawId === 'prototype'
+      ) {
+        return;
+      }
+      const matched = this.subscriptions.find((s) => s.id === rawId);
+      if (!matched) return;
+      const subId = matched.id;
+      if (
+        !isSafeKey(subId) ||
+        subId === '__proto__' ||
+        subId === 'constructor' ||
+        subId === 'prototype'
+      ) {
+        return;
+      }
       this.expandedSubs[subId] = true;
       this.loadNodesBySource(subId).then(() => {
         setTimeout(() => {

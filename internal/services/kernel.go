@@ -1522,6 +1522,13 @@ func isELF(path string) bool {
 }
 
 func copyKernelFile(src, dst string) error {
+	if err := validateKernelPath(src); err != nil {
+		return fmt.Errorf("invalid src path: %w", err)
+	}
+	if err := validateKernelPath(dst); err != nil {
+		return fmt.Errorf("invalid dst path: %w", err)
+	}
+
 	s, err := os.Open(src)
 	if err != nil {
 		return err
@@ -1611,6 +1618,9 @@ func (s *KernelService) UploadBinary(name string, src io.Reader, filename string
 	_ = os.MkdirAll(backupDir, 0755)
 	backupName := fmt.Sprintf("%s.bak.%d", name, time.Now().Unix())
 	backupPath := filepath.Join(backupDir, backupName)
+	if err := validateKernelPath(backupPath); err != nil {
+		return fmt.Errorf("invalid backup path: %w", err)
+	}
 
 	if _, err := os.Stat(binaryPath); err == nil {
 		if err := copyKernelFile(binaryPath, backupPath); err == nil {
