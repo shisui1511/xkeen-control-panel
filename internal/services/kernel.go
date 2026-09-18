@@ -111,6 +111,19 @@ func sanitizeKernelPath(path string) (string, error) {
 	return "", errors.New("path is outside allowed directories")
 }
 
+// canonicalKernelName сводит имя ядра из запроса к литералу: дальше в путях
+// используется только константа, а не пришедшая извне строка.
+func canonicalKernelName(name string) (string, error) {
+	switch name {
+	case "xray":
+		return "xray", nil
+	case "mihomo":
+		return "mihomo", nil
+	default:
+		return "", fmt.Errorf("invalid kernel name: %s", name)
+	}
+}
+
 func safeTempPath(name string) (string, error) {
 	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
 		return "", errors.New("invalid temp file name")
@@ -898,13 +911,9 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 
 // Install downloads and installs the kernel
 func (s *KernelService) Install(name string) error {
-	// Sanitize kernel name to prevent path injection
-	if name == "xray" {
-		name = "xray"
-	} else if name == "mihomo" {
-		name = "mihomo"
-	} else {
-		return fmt.Errorf("invalid kernel name: %s", name)
+	name, err := canonicalKernelName(name)
+	if err != nil {
+		return err
 	}
 
 	// Verify kernel exists first
@@ -1118,13 +1127,9 @@ func (s *KernelService) Install(name string) error {
 
 // Rollback restores the kernel binary from the latest backup.
 func (s *KernelService) Rollback(name string) error {
-	// Sanitize kernel name to prevent path injection
-	if name == "xray" {
-		name = "xray"
-	} else if name == "mihomo" {
-		name = "mihomo"
-	} else {
-		return fmt.Errorf("invalid kernel name: %s", name)
+	name, err := canonicalKernelName(name)
+	if err != nil {
+		return err
 	}
 
 	s.mu.Lock()
@@ -1558,9 +1563,10 @@ func copyKernelFile(src, dst string) error {
 // UploadBinary saves an uploaded kernel binary or archive (.zip/.gz) to the router,
 // validates that it is a valid Linux ELF executable, creates a backup of the current binary,
 // and replaces the kernel binary atomically.
-func (s *KernelService) UploadBinary(name string, src io.Reader, filename string) error {
-	if name != "xray" && name != "mihomo" {
-		return fmt.Errorf("invalid kernel name: %s", name)
+func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filename string) error {
+	name, err := canonicalKernelName(requestedName)
+	if err != nil {
+		return err
 	}
 
 	s.mu.RLock()
