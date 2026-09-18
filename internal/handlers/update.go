@@ -84,8 +84,7 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 	info.CurrentVersion = currentVersion
 	info.Channel = channel
 
-	isDevBuild := strings.Contains(currentVersion, "-dev")
-	info.HasUpdate = info.LatestVersion != "" && (isDevBuild || compareSemver(info.LatestVersion, currentVersion) > 0)
+	info.HasUpdate = updateAvailable(info.LatestVersion, currentVersion)
 
 	if info.HasUpdate {
 		arch := runtime.GOARCH
@@ -365,8 +364,7 @@ func (a *API) performUpdate(channel string) {
 	}
 
 	currentVersion := strings.TrimPrefix(a.srv.GetVersion(), "v")
-	isDevOrBeta := strings.Contains(currentVersion, "dev") || strings.Contains(currentVersion, "beta")
-	if !isDevOrBeta && compareSemver(info.LatestVersion, currentVersion) <= 0 {
+	if !updateAvailable(info.LatestVersion, currentVersion) {
 		setUpdateState(UpdateStatus{
 			Status:    "done",
 			Progress:  100,
@@ -649,6 +647,12 @@ func compareSemver(a, b string) int {
 	return 0
 }
 
+type githubRelease struct {
+	TagName    string `json:"tag_name"`
+	Prerelease bool   `json:"prerelease"`
+	Body       string `json:"body"`
+}
+
 func fetchLatestRelease(channel string) (*UpdateInfo, error) {
 	client := utils.SafeHTTPClient(15 * time.Second)
 	resp, err := client.Get(githubAPIReleases + "?per_page=10")
@@ -657,34 +661,55 @@ func fetchLatestRelease(channel string) (*UpdateInfo, error) {
 	}
 	defer resp.Body.Close()
 
-	var releases []struct {
-		TagName    string `json:"tag_name"`
-		Prerelease bool   `json:"prerelease"`
-		Body       string `json:"body"`
-	}
-
+	var releases []githubRelease
 	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 		return nil, err
 	}
 
-	for _, rel := range releases {
-		tag := strings.TrimPrefix(rel.TagName, "v")
+	return pickLatestRelease(releases, channel)
+}
 
-		if channel == "stable" && !rel.Prerelease {
-			return &UpdateInfo{
-				LatestVersion: tag,
-				Changelog:     rel.Body,
-			}, nil
+// pickLatestRelease выбирает самый новый по semver релиз канала: GitHub сортирует
+// релизы по дате публикации, и пересобранный pre-release оказывается выше более
+// нового stable. Канал beta включает stable, иначе после релиза, когда dev-сборки
+// удалены, beta остаётся без версий.
+func pickLatestRelease(releases []githubRelease, channel string) (*UpdateInfo, error) {
+	var best *githubRelease
+	for i := range releases {
+		rel := &releases[i]
+		if rel.Prerelease && channel != "beta" {
+			continue
 		}
-		if channel == "beta" && rel.Prerelease {
-			return &UpdateInfo{
-				LatestVersion: tag,
-				Changelog:     rel.Body,
-			}, nil
+		if best == nil || compareSemver(strings.TrimPrefix(rel.TagName, "v"), strings.TrimPrefix(best.TagName, "v")) > 0 {
+			best = rel
 		}
 	}
 
-	return nil, fmt.Errorf("no release found for channel %s", channel)
+	if best == nil {
+		return nil, fmt.Errorf("no release found for channel %s", channel)
+	}
+	return &UpdateInfo{
+		LatestVersion: strings.TrimPrefix(best.TagName, "v"),
+		Changelog:     best.Body,
+	}, nil
+}
+
+// updateAvailable решает, предлагать ли обновление. Rolling dev-сборка пересобирается
+// под тем же тегом, поэтому равная версия для неё тоже считается обновлением;
+// версия ниже текущей не предлагается никогда.
+func updateAvailable(latest, current string) bool {
+	if latest == "" {
+		return false
+	}
+	if strings.HasSuffix(current, "-dev") {
+		return compareSemver(semverCore(latest), semverCore(current)) >= 0
+	}
+	return compareSemver(latest, current) > 0
+}
+
+func semverCore(v string) string {
+	core, _, _ := strings.Cut(v, "-")
+	return core
 }
 
 func fetchChangelog(version string) (string, error) {
