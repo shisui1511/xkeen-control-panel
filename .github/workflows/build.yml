@@ -112,17 +112,25 @@ jobs:
             else
               SKIP="false"
               
-              # Read version from frontend/package.json
-              PKG_VERSION=$(grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4 || echo "0.0.0")
-              if [[ "$PKG_VERSION" == v* ]]; then
-                VERSION="${PKG_VERSION}-dev"
-              else
-                VERSION="v${PKG_VERSION}-dev"
-              fi
-              IS_STABLE="false"
-              
-              # Calculate commit count since the last stable tag for build notes
+              # package.json хранит версию, которую готовит текущая веха
+              PKG_VERSION=$(grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4)
+              PKG_VERSION="${PKG_VERSION#v}"
+              BASE="${PKG_VERSION:-0.0.0}"
+
               LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
+              if [ -n "$LATEST_TAG" ]; then
+                LATEST="${LATEST_TAG#v}"
+                # Версия из package.json уже выпущена — dev-сборка должна быть выше релиза
+                if [ "$(printf '%s\n%s\n' "$BASE" "$LATEST" | sort -V | tail -1)" = "$LATEST" ]; then
+                  IFS=. read -r L_MAJOR L_MINOR L_PATCH <<< "$LATEST"
+                  BASE="${L_MAJOR}.${L_MINOR}.$((L_PATCH + 1))"
+                  echo "package.json (${PKG_VERSION}) не опережает ${LATEST_TAG}, dev-версия поднята до ${BASE}"
+                fi
+              fi
+              VERSION="v${BASE}-dev"
+              IS_STABLE="false"
+
+              # Calculate commit count since the last stable tag for build notes
               if [ -n "$LATEST_TAG" ]; then
                 RANGE="${LATEST_TAG}..HEAD"
               else
@@ -275,6 +283,7 @@ jobs:
           path: artifacts
 
       - name: Rolling pre-release
+        id: rolling
         if: needs.build.outputs.is_stable != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -283,12 +292,23 @@ jobs:
           PR_NUMBER: ${{ needs.build.outputs.pr_number }}
           MODE: prerelease
         run: |
+          # Пока шла сборка, мог выйти stable-релиз той же или более новой версии
+          BASE="${VERSION#v}"
+          BASE="${BASE%-dev}"
+          LATEST_TAG=$(git ls-remote --tags --refs origin | sed 's#.*refs/tags/##' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+          LATEST="${LATEST_TAG#v}"
+          if [ -n "$LATEST" ] && [ "$(printf '%s\n%s\n' "$BASE" "$LATEST" | sort -V | tail -1)" = "$LATEST" ]; then
+            echo "${VERSION} не новее ${LATEST_TAG}, pre-release не публикуется"
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           python3 .github/scripts/gen_notes.py
 
-          # Удаляем старый rolling pre-release и тег
-          gh release delete "${VERSION}" --yes 2>/dev/null || true
+          # Rolling pre-release всегда один: убираем прежний и все устаревшие dev-релизы
+          bash .github/scripts/prune_dev_releases.sh
           git tag -d "${VERSION}" 2>/dev/null || true
-          git push origin --delete "refs/tags/${VERSION}" 2>/dev/null || true
 
           # Создаём новый tag на текущем HEAD (force на случай race condition)
           git tag -f "${VERSION}" "${GITHUB_SHA}"
@@ -334,23 +354,21 @@ jobs:
             artifacts/xcp_mips/xcp_${VERSION}_mips \
             artifacts/xcp_mips/xcp_${VERSION}_mips.sha256
 
-          # Удаляем rolling pre-release этой же версии (cleanup)
-          ROLLING_TAG="${VERSION}-dev"
-          echo "Cleaning up rolling pre-release ${ROLLING_TAG}..."
-          gh release delete "${ROLLING_TAG}" --yes 2>/dev/null || true
-          git push origin --delete "refs/tags/${ROLLING_TAG}" 2>/dev/null || true
+          # Dev-релизы не новее выпущенной версии устарели, включая осиротевшие теги
+          bash .github/scripts/prune_dev_releases.sh "${VERSION}"
 
       - name: Update binaries branch
+        if: steps.rolling.outputs.published != 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          
+
           git fetch origin binaries 2>/dev/null || true
           git checkout -b binaries origin/binaries 2>/dev/null || git checkout --orphan binaries
-          
+
           git rm -rf . 2>/dev/null || true
           mkdir -p bin
           cp artifacts/xcp_arm64/xcp_${VERSION}_arm64 bin/
@@ -359,7 +377,7 @@ jobs:
           cp artifacts/xcp_mipsle/xcp_${VERSION}_mipsle.sha256 bin/
           cp artifacts/xcp_mips/xcp_${VERSION}_mips bin/
           cp artifacts/xcp_mips/xcp_${VERSION}_mips.sha256 bin/
-          
+
           git add bin/
           git commit -m "${VERSION}" || true
           git push origin binaries --force
