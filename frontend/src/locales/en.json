@@ -2197,5 +2197,19 @@
   "xkeen_settings.issue.gomemlimit_mb_range": "gomemlimit_mb {value} is below 64, XKeen will ignore it",
   "dash.qa_latency_test_current": "Current route {name}: {delay} ms · {alive} of {total} alive",
   "dash.qa_latency_test_summary": "{alive} of {total} alive, best latency {best} ms",
-  "dash.qa_latency_test_none_alive": "No node answered the latency check"
+  "dash.qa_latency_test_none_alive": "No node answered the latency check",
+  "proxies.mode.label": "Mihomo routing mode",
+  "proxies.mode.rule": "Rules",
+  "proxies.mode.global": "Global",
+  "proxies.mode.direct": "Direct",
+  "proxies.mode.hint": "Mode of the running core: by rules, all traffic via the GLOBAL group, or everything direct. Lasts until the core restarts, config.yaml is not changed",
+  "proxies.mode.confirm_title": "Change routing mode?",
+  "proxies.mode.confirm_global": "All traffic of every device will go through the node selected in the GLOBAL group, rules will stop applying.",
+  "proxies.mode.confirm_direct": "All traffic of every device will go direct, bypassing the proxy.",
+  "proxies.mode.confirm_btn": "Change mode",
+  "proxies.mode.changed": "Mihomo mode: {mode}",
+  "proxies.mode.error": "Failed to change mode",
+  "rules.flush_dns": "Flush DNS cache",
+  "rules.flush_dns_title": "Clear Mihomo's DNS answer cache — useful after changing rules or DNS servers",
+  "rules.dns_flushed": "Mihomo DNS cache flushed"
 }

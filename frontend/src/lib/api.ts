@@ -185,6 +185,13 @@ export async function flushFakeIP(): Promise<void> {
   if (!res.ok) throw new Error('Failed to flush Fake-IP cache');
 }
 
+export async function flushDNSCache(): Promise<void> {
+  const res = await apiFetch('/api/mihomo/proxy/cache/dns/flush', {
+    method: 'POST'
+  });
+  if (!res.ok) throw new Error('Failed to flush DNS cache');
+}
+
 export async function fetchRuleProviders(): Promise<RuleProvider[]> {
   const res = await apiFetch('/api/mihomo/proxy/providers/rules');
   if (!res.ok) throw new Error('Failed to load rule providers');

@@ -7,6 +7,7 @@
     fetchCustomRules,
     saveCustomRules,
     flushFakeIP,
+    flushDNSCache,
     fetchRuleProviders,
     updateRuleProvider,
     type UserRule,
@@ -48,6 +49,7 @@
 
   // Fake-IP flushing state
   let flushingFakeIP = $state(false);
+  let flushingDNS = $state(false);
 
   // Subtitle mapping based on active tab
   let currentSubtitle = $derived.by(() => {
@@ -201,6 +203,19 @@
     }
   }
 
+  async function handleFlushDNS() {
+    flushingDNS = true;
+    try {
+      await flushDNSCache();
+      showToast('success', $t('rules.dns_flushed'));
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e.message);
+    } finally {
+      flushingDNS = false;
+    }
+  }
+
   onMount(() => {
     loadCustomRules();
     loadProviders();
@@ -225,6 +240,17 @@
       >
         <Icon name="refresh" size={14} />
         <span>{flushingFakeIP ? $t('rules.flushing_fakeip') : $t('rules.flush_fakeip')}</span>
+      </Button>
+      <Button
+        variant="secondary"
+        class="btn-sm"
+        loading={flushingDNS}
+        disabled={flushingDNS}
+        title={$t('rules.flush_dns_title')}
+        onclick={handleFlushDNS}
+      >
+        <Icon name="refresh" size={14} />
+        <span>{flushingDNS ? $t('rules.flushing_fakeip') : $t('rules.flush_dns')}</span>
       </Button>
     {/snippet}
   </PageHeader>

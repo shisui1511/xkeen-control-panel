@@ -2197,5 +2197,19 @@
   "xkeen_settings.issue.gomemlimit_mb_range": "gomemlimit_mb {value} меньше 64, XKeen его проигнорирует",
   "dash.qa_latency_test_current": "Текущий маршрут {name}: {delay} мс · доступно {alive} из {total}",
   "dash.qa_latency_test_summary": "Доступно {alive} из {total}, лучшая задержка {best} мс",
-  "dash.qa_latency_test_none_alive": "Ни один узел не ответил на проверку задержки"
+  "dash.qa_latency_test_none_alive": "Ни один узел не ответил на проверку задержки",
+  "proxies.mode.label": "Режим маршрутизации Mihomo",
+  "proxies.mode.rule": "Правила",
+  "proxies.mode.global": "Глобальный",
+  "proxies.mode.direct": "Напрямую",
+  "proxies.mode.hint": "Режим работающего ядра: по правилам, весь трафик через группу GLOBAL или всё напрямую. Действует до перезапуска ядра, config.yaml не меняется",
+  "proxies.mode.confirm_title": "Сменить режим маршрутизации?",
+  "proxies.mode.confirm_global": "Весь трафик всех устройств пойдёт через узел, выбранный в группе GLOBAL, правила перестанут применяться.",
+  "proxies.mode.confirm_direct": "Весь трафик всех устройств пойдёт напрямую, мимо прокси.",
+  "proxies.mode.confirm_btn": "Сменить режим",
+  "proxies.mode.changed": "Режим Mihomo: {mode}",
+  "proxies.mode.error": "Не удалось сменить режим",
+  "rules.flush_dns": "Сбросить DNS-кэш",
+  "rules.flush_dns_title": "Очистить кэш DNS-ответов Mihomo — пригодится после смены правил или DNS-серверов",
+  "rules.dns_flushed": "DNS-кэш Mihomo сброшен"
 }
