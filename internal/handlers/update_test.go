@@ -164,6 +164,11 @@ func TestCompareSemver(t *testing.T) {
 		// Build metadata of local dev builds is ignored.
 		{"0.25.4", "0.25.4+16.g60cb1057.dirty", 0},
 		{"0.25.5", "0.25.4+16.g60cb1057", 1},
+		// Numeric pre-release identifiers compare numerically.
+		{"0.26.0-dev.9", "0.26.0-dev.17", -1},
+		{"0.26.0-dev", "0.26.0-dev.1", -1},
+		{"0.26.0-dev.17+gabc", "0.26.0", -1},
+		{"0.26.0-dev.1", "0.25.4", 1},
 	}
 
 	for _, tc := range tests {
@@ -254,11 +259,35 @@ func TestUpdateAvailable(t *testing.T) {
 		// Local build on top of a release does not offer that release again
 		{"0.25.4", "0.25.4+16.g60cb1057.dirty", false},
 		{"0.25.5", "0.25.4+16.g60cb1057", true},
+		// Builds from scripts/version.sh behave like the rolling dev channel
+		{"0.26.0-dev", "0.26.0-dev.17+gabc123", true},
+		{"0.26.0", "0.26.0-dev.17+gabc123", true},
+		{"0.25.4", "0.26.0-dev.17+gabc123", false},
 	}
 
 	for _, tc := range tests {
 		if got := updateAvailable(tc.latest, tc.current); got != tc.want {
 			t.Errorf("updateAvailable(%q, %q) = %v, ожидалось %v", tc.latest, tc.current, got, tc.want)
+		}
+	}
+}
+
+func TestVersionMatches(t *testing.T) {
+	tests := []struct {
+		expected, actual string
+		want             bool
+	}{
+		{"v0.25.4", "v0.25.4", true},
+		{"0.25.4", "v0.25.4", true},
+		{"0.26.0-dev", "v0.26.0-dev.17+gabc123", true},
+		{"0.26.0-dev", "v0.26.0-dev", true},
+		{"0.26.0-dev", "v0.26.1-dev.1+gabc", false},
+		{"0.25.4", "v0.25.3", false},
+		{"0.25.4", "v0.25.40", false},
+	}
+	for _, tc := range tests {
+		if got := versionMatches(tc.expected, tc.actual); got != tc.want {
+			t.Errorf("versionMatches(%q, %q) = %v, want %v", tc.expected, tc.actual, got, tc.want)
 		}
 	}
 }

@@ -550,9 +550,7 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 					PanelVersion string `json:"panel_version"`
 				}
 				_ = json.NewDecoder(resp.Body).Decode(&versionResp)
-				newVer := strings.TrimPrefix(expectedVersion, "v")
-				actualVer := strings.TrimPrefix(versionResp.PanelVersion, "v")
-				ok = actualVer == newVer
+				ok = versionMatches(expectedVersion, versionResp.PanelVersion)
 			}
 			resp.Body.Close()
 			if ok {
@@ -604,22 +602,18 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 // compareSemver сравнивает две версии без префикса "v".
 // Возвращает -1 (a < b), 0 (a == b), 1 (a > b).
 // Pre-release суффикс (через "-") считается меньше стабильной версии.
+// compareSemver compares two versions per SemVer 2.0: numeric core, then
+// pre-release identifiers (numeric ones numerically, "dev.9" < "dev.17"),
+// a release ranks above its pre-releases, build metadata is ignored.
 func compareSemver(a, b string) int {
-	// Build metadata ("+12.gabc123" of dev builds) has no precedence in SemVer.
 	a, _, _ = strings.Cut(a, "+")
 	b, _, _ = strings.Cut(b, "+")
-	aParts := strings.SplitN(a, "-", 2)
-	bParts := strings.SplitN(b, "-", 2)
+	aCore, aPre, aHasPre := strings.Cut(a, "-")
+	bCore, bPre, bHasPre := strings.Cut(b, "-")
 
-	aNums := strings.Split(aParts[0], ".")
-	bNums := strings.Split(bParts[0], ".")
-
-	maxLen := len(aNums)
-	if len(bNums) > maxLen {
-		maxLen = len(bNums)
-	}
-
-	for i := 0; i < maxLen; i++ {
+	aNums := strings.Split(aCore, ".")
+	bNums := strings.Split(bCore, ".")
+	for i := 0; i < max(len(aNums), len(bNums)); i++ {
 		var an, bn int
 		if i < len(aNums) {
 			an, _ = strconv.Atoi(aNums[i])
@@ -627,25 +621,51 @@ func compareSemver(a, b string) int {
 		if i < len(bNums) {
 			bn, _ = strconv.Atoi(bNums[i])
 		}
-		if an < bn {
-			return -1
-		}
-		if an > bn {
+		if an != bn {
+			if an < bn {
+				return -1
+			}
 			return 1
 		}
 	}
 
-	// Одинаковые цифры: pre-release < stable.
-	aHasPre := len(aParts) > 1
-	bHasPre := len(bParts) > 1
-	if aHasPre && !bHasPre {
+	switch {
+	case aHasPre && !bHasPre:
 		return -1
-	}
-	if !aHasPre && bHasPre {
+	case !aHasPre && bHasPre:
 		return 1
+	case !aHasPre && !bHasPre:
+		return 0
 	}
-	if aHasPre && bHasPre {
-		return strings.Compare(aParts[1], bParts[1])
+
+	aIDs := strings.Split(aPre, ".")
+	bIDs := strings.Split(bPre, ".")
+	for i := 0; i < min(len(aIDs), len(bIDs)); i++ {
+		an, aErr := strconv.Atoi(aIDs[i])
+		bn, bErr := strconv.Atoi(bIDs[i])
+		switch {
+		case aErr == nil && bErr == nil:
+			if an != bn {
+				if an < bn {
+					return -1
+				}
+				return 1
+			}
+		case aErr == nil:
+			return -1 // numeric identifiers rank below alphanumeric ones
+		case bErr == nil:
+			return 1
+		default:
+			if c := strings.Compare(aIDs[i], bIDs[i]); c != 0 {
+				return c
+			}
+		}
+	}
+	switch {
+	case len(aIDs) < len(bIDs):
+		return -1
+	case len(aIDs) > len(bIDs):
+		return 1
 	}
 	return 0
 }
@@ -704,10 +724,31 @@ func updateAvailable(latest, current string) bool {
 	if latest == "" {
 		return false
 	}
-	if strings.HasSuffix(current, "-dev") {
+	if isDevVersion(current) {
 		return compareSemver(semverCore(latest), semverCore(current)) >= 0
 	}
 	return compareSemver(latest, current) > 0
+}
+
+// isDevVersion reports whether v is a development build: the rolling
+// channel "X.Y.Z-dev" or a build of it "X.Y.Z-dev.N+gSHA" (scripts/version.sh).
+func isDevVersion(v string) bool {
+	v, _, _ = strings.Cut(v, "+")
+	_, pre, ok := strings.Cut(v, "-")
+	return ok && (pre == "dev" || strings.HasPrefix(pre, "dev."))
+}
+
+// versionMatches reports whether the running binary reports the version of
+// the release that was installed. Dev releases are published under the
+// channel tag "X.Y.Z-dev" while the binary carries "X.Y.Z-dev.N+gSHA".
+func versionMatches(expected, actual string) bool {
+	expected = strings.TrimPrefix(expected, "v")
+	actual = strings.TrimPrefix(actual, "v")
+	if actual == expected {
+		return true
+	}
+	build, _, _ := strings.Cut(actual, "+")
+	return build == expected || strings.HasPrefix(build, expected+".")
 }
 
 func semverCore(v string) string {
