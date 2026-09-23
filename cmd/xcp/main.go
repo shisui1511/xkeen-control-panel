@@ -42,6 +42,12 @@ func main() {
 
 	flag.Parse()
 
+	// Keenetic keeps the timezone as a POSIX string Go cannot read on its own;
+	// without this every schedule and timestamp runs in UTC.
+	if tz := utils.ApplySystemTimezone(); tz != "" {
+		log.Printf("Timezone: applied system timezone %s", tz)
+	}
+
 	// Router-grade RAM/GC limits (STAB-06): Keenetic devices typically have
 	// 128-256 MB total RAM shared with the kernel and other services. A
 	// soft-memory-limit plus a moderately aggressive GC target keeps XCP's
@@ -509,9 +515,13 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/download", api.KernelDownload)
 
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
-		Version, runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
+		strings.TrimPrefix(Version, "v"), runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
 	if cfg.Auth.PasswordHash == "" {
-		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)
+		proto := "http"
+		if cfg.HTTPS.Enabled {
+			proto = "https"
+		}
+		log.Printf("⚠️  No password set. Please visit %s://<router-ip>:%d to complete setup.", proto, cfg.Port)
 	}
 
 	// Graceful shutdown on SIGINT/SIGTERM
