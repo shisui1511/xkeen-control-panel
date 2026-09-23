@@ -605,6 +605,9 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 // Возвращает -1 (a < b), 0 (a == b), 1 (a > b).
 // Pre-release суффикс (через "-") считается меньше стабильной версии.
 func compareSemver(a, b string) int {
+	// Build metadata ("+12.gabc123" of dev builds) has no precedence in SemVer.
+	a, _, _ = strings.Cut(a, "+")
+	b, _, _ = strings.Cut(b, "+")
 	aParts := strings.SplitN(a, "-", 2)
 	bParts := strings.SplitN(b, "-", 2)
 

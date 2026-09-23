@@ -161,6 +161,9 @@ func TestCompareSemver(t *testing.T) {
 		{"0.15.0-beta.2", "0.15.0-beta.1", 1},
 		{"1.0.0", "2.0.0", -1},
 		{"2.0.0", "1.9.9", 1},
+		// Build metadata of local dev builds is ignored.
+		{"0.25.4", "0.25.4+16.g60cb1057.dirty", 0},
+		{"0.25.5", "0.25.4+16.g60cb1057", 1},
 	}
 
 	for _, tc := range tests {
@@ -248,6 +251,9 @@ func TestUpdateAvailable(t *testing.T) {
 		// Stable-сборка обновляется только на более новую версию
 		{"0.25.2-dev", "0.25.1", true},
 		{"0.25.1-dev", "0.25.1", false},
+		// Local build on top of a release does not offer that release again
+		{"0.25.4", "0.25.4+16.g60cb1057.dirty", false},
+		{"0.25.5", "0.25.4+16.g60cb1057", true},
 	}
 
 	for _, tc := range tests {

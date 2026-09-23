@@ -12,9 +12,31 @@ function injectVersion(source, version) {
   return source.replace(CACHE_NAME_RE, `const CACHE_NAME = 'xcp-v${version}';`);
 }
 
+// package.json is not bumped on release, so the cache name is derived from
+// the nearest stable git tag plus the commit; otherwise it never changed
+// between releases and caches of old hashed assets were never evicted.
+function resolveVersion() {
+  try {
+    const { execSync } = require('child_process');
+    const described = execSync(
+      "git describe --tags --long --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*'",
+      { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }
+    )
+      .toString()
+      .trim();
+    const m = described.match(/^v(\d+\.\d+\.\d+)-(\d+)-g([0-9a-f]+)$/);
+    if (m) {
+      return m[2] === '0' ? m[1] : `${m[1]}+${m[2]}.g${m[3]}`;
+    }
+  } catch {
+    // No git or no tags (e.g. source tarball): fall back below.
+  }
+  return require('../package.json').version;
+}
+
 function main() {
   try {
-    const version = require('../package.json').version;
+    const version = resolveVersion();
     let source;
     try {
       source = fs.readFileSync(SW_PATH, 'utf8');
@@ -41,4 +63,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { injectVersion };
+module.exports = { injectVersion, resolveVersion };

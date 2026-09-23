@@ -7,10 +7,16 @@ IS_STABLE := $(shell echo "$(EXACT_TAG)" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$')
 ifneq ($(IS_STABLE),)
   VERSION ?= $(EXACT_TAG)
 else
+  # Dev build: nearest stable tag plus SemVer build metadata, e.g.
+  # v0.25.4+12.g60cb1057(.dirty). frontend/package.json is not bumped on
+  # release, so it is only a fallback when no tag is reachable.
+  LAST_TAG := $(shell git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' 2>/dev/null)
   PKG_VERSION := $(shell grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4 || echo "dev")
+  GIT_COUNT := $(if $(LAST_TAG),$(shell git rev-list --count $(LAST_TAG)..HEAD 2>/dev/null))
   GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo "")
   GIT_DIRTY := $(shell git status --porcelain 2>/dev/null)
-  VERSION ?= v$(PKG_VERSION)$(if $(GIT_SHA),-$(GIT_SHA))$(if $(GIT_DIRTY),-dirty)
+  BASE_VERSION := $(if $(LAST_TAG),$(LAST_TAG),v$(PKG_VERSION))
+  VERSION ?= $(BASE_VERSION)+$(if $(GIT_COUNT),$(GIT_COUNT).)g$(GIT_SHA)$(if $(GIT_DIRTY),.dirty)
 endif
 
 deps:
