@@ -222,7 +222,12 @@ func TestLogsEndpoints_WithDispatcher(t *testing.T) {
 	dispatcher.IngestLine("[mihomo] [INFO] Mihomo running", "mihomo")
 	dispatcher.IngestLine("[xray] [ERROR] Xray failed with timeout", "xray")
 
-	api := &API{}
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer controller.Close()
+
+	api := &API{cfg: &config.Config{MihomoAPIURL: controller.URL}}
 	api.SetLogDispatcher(dispatcher)
 
 	// 1. Test History
