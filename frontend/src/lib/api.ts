@@ -146,6 +146,11 @@ export interface RouteTraceResult {
   proxy_type: string;
   trace_time_ms: number;
   source: string;
+  rule_index?: number;
+  undetermined?: boolean;
+  undetermined_rule?: string;
+  undetermined_group?: string;
+  undetermined_reason?: string;
 }
 
 export async function fetchCustomRules(): Promise<UserRule[]> {

@@ -2211,5 +2211,10 @@
   "proxies.mode.error": "Failed to change mode",
   "rules.flush_dns": "Flush DNS cache",
   "rules.flush_dns_title": "Clear Mihomo's DNS answer cache — useful after changing rules or DNS servers",
-  "rules.dns_flushed": "Mihomo DNS cache flushed"
+  "rules.dns_flushed": "Mihomo DNS cache flushed",
+  "rules.diagnostic_undetermined": "The result may be inaccurate: rule {rule} → {group} comes earlier and the panel could not check it. If it matches, the core routes the traffic there.",
+  "rules.diagnostic_undetermined_reason.unsupported_type": "This rule type depends on data the simulation does not have (process, source, inbound port, etc.).",
+  "rules.diagnostic_undetermined_reason.rule_set_unavailable": "The rule list was not found on disk or could not be read — the provider may not be downloaded yet.",
+  "rules.diagnostic_undetermined_reason.geodata_unavailable": "No GeoSite.dat/GeoIP.dat in the Mihomo directory to check against.",
+  "rules.diagnostic_undetermined_reason.resolve_failed": "Could not resolve the domain's IP address to check an IP rule."
 }

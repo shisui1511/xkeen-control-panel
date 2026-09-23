@@ -2211,5 +2211,10 @@
   "proxies.mode.error": "Не удалось сменить режим",
   "rules.flush_dns": "Сбросить DNS-кэш",
   "rules.flush_dns_title": "Очистить кэш DNS-ответов Mihomo — пригодится после смены правил или DNS-серверов",
-  "rules.dns_flushed": "DNS-кэш Mihomo сброшен"
+  "rules.dns_flushed": "DNS-кэш Mihomo сброшен",
+  "rules.diagnostic_undetermined": "Результат может быть неточным: выше стоит правило {rule} → {group}, которое панель проверить не смогла. Если оно совпадёт, ядро направит трафик туда.",
+  "rules.diagnostic_undetermined_reason.unsupported_type": "Этот тип правила зависит от данных, которых нет в симуляции (процесс, источник, входящий порт и т. п.).",
+  "rules.diagnostic_undetermined_reason.rule_set_unavailable": "Список правил не найден на диске или не прочитан — возможно, провайдер ещё не загружен.",
+  "rules.diagnostic_undetermined_reason.geodata_unavailable": "Нет файла GeoSite.dat/GeoIP.dat в каталоге Mihomo для проверки.",
+  "rules.diagnostic_undetermined_reason.resolve_failed": "Не удалось получить IP-адрес домена для проверки IP-правила."
 }
