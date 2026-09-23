@@ -57,6 +57,13 @@ if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
   DIRTY=".dirty"
 fi
 
+# В shallow-клоне без тегов (checkout CI по умолчанию) версию не угадываем:
+# вызывающий должен сделать fetch-depth: 0 или задать XCP_VERSION.
+if [ -z "$LAST_TAG" ] && [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+  echo "version.sh: shallow-клон без тегов, нужна полная история или XCP_VERSION" >&2
+  exit 1
+fi
+
 if [ -n "$LAST_TAG" ]; then
   RANGE="$LAST_TAG..HEAD"
   BASE="${LAST_TAG#v}"

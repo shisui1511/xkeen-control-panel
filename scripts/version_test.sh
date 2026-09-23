@@ -76,5 +76,11 @@ check "незакоммиченные правки → .dirty" "$(v)" "v2.0.0-de
 
 check "XCP_VERSION переопределяет" "$(cd "$REPO" && XCP_VERSION=0.30.0 sh scripts/version.sh)" "v0.30.0"
 
+SHALLOW=$(mktemp -d)
+git clone -q --depth 1 --no-tags "file://$REPO" "$SHALLOW/r" 2>/dev/null
+mkdir -p "$SHALLOW/r/scripts" && cp "$SCRIPT" "$SHALLOW/r/scripts/version.sh"
+if (cd "$SHALLOW/r" && env -u XCP_VERSION sh scripts/version.sh >/dev/null 2>&1); then rc=0; else rc=1; fi
+check "shallow-клон без тегов — ошибка, а не 0.0.1" "$rc" "1"
+
 printf "\nИтого: %d пройдено, %d провалено\n" "$PASS" "$FAIL"
 [ "$FAIL" = 0 ]
