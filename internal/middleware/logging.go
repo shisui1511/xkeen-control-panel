@@ -39,12 +39,33 @@ func sanitizeLogInput(s string) string {
 	return utils.SanitizeLogInput(s)
 }
 
+// slowRequestThreshold marks read requests worth logging even when they succeed.
+const slowRequestThreshold = 3 * time.Second
+
+// shouldLogRequest keeps the access log useful on router flash: the UI polls
+// status endpoints every few seconds, so successful reads are skipped while
+// state changes, errors and slow requests are always recorded.
+func shouldLogRequest(method string, status int, elapsed time.Duration) bool {
+	if status == http.StatusSwitchingProtocols {
+		return false
+	}
+	if method != http.MethodGet && method != http.MethodHead {
+		return true
+	}
+	return status >= http.StatusBadRequest || elapsed >= slowRequestThreshold
+}
+
 // Logging is an HTTP middleware that logs request method, URL path, response status code, and duration.
 func Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		// Handlers such as the Mihomo reverse proxy rewrite r.URL.Path.
+		path := r.URL.Path
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(wrapped, r)
-		log.Printf("%s %s %d %s", sanitizeLogInput(r.Method), sanitizeLogInput(r.URL.Path), wrapped.statusCode, time.Since(start))
+		elapsed := time.Since(start)
+		if shouldLogRequest(r.Method, wrapped.statusCode, elapsed) {
+			log.Printf("%s %s %d %s", sanitizeLogInput(r.Method), sanitizeLogInput(path), wrapped.statusCode, elapsed)
+		}
 	})
 }
