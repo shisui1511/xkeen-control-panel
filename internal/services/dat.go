@@ -1759,3 +1759,38 @@ func (s *DATManagerService) Lookup(query, filterType string, fileNames []string)
 
 	return results, nil
 }
+
+// MihomoGeoTagLookup matches a domain or IP against Mihomo's own GeoSite.dat
+// and GeoIP.dat (in mihomoDir) and returns the lower-cased tags that contain
+// it. A database that is absent yields a nil map so callers can tell
+// "not listed" from "cannot check".
+func (s *DATManagerService) MihomoGeoTagLookup(mihomoDir string) GeoTagLookup {
+	return func(ctx context.Context, target string) (map[string]bool, map[string]bool, error) {
+		var files []string
+		var sites, ips map[string]bool
+		if _, err := os.Stat(filepath.Join(mihomoDir, "GeoSite.dat")); err == nil {
+			files = append(files, "GeoSite.dat")
+			sites = map[string]bool{}
+		}
+		if _, err := os.Stat(filepath.Join(mihomoDir, "GeoIP.dat")); err == nil {
+			files = append(files, "GeoIP.dat")
+			ips = map[string]bool{}
+		}
+		if len(files) == 0 {
+			return nil, nil, nil
+		}
+		results, err := s.Lookup(target, "all", files)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, r := range results {
+			tag := strings.ToLower(r.Tag)
+			if r.Type == "geoip" && ips != nil {
+				ips[tag] = true
+			} else if r.Type == "geosite" && sites != nil {
+				sites[tag] = true
+			}
+		}
+		return sites, ips, nil
+	}
+}

@@ -449,6 +449,7 @@ func main() {
 
 	// Route Tracer Service (ROUTE-04)
 	routeTracerSvc := services.NewRouteTracerService(userRulesSvc, api.MihomoService(), cfg.MihomoConfigDir)
+	routeTracerSvc.SetRuleEvaluation(datSvc.MihomoGeoTagLookup(cfg.MihomoConfigDir), cfg.MihomoBinary, filepath.Join(cfg.DataDir, "cache", "rulesets"))
 	api.SetRouteTracerService(routeTracerSvc)
 
 	// Templates

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -35,6 +36,14 @@ type RouteTraceResult struct {
 	ProxyType     string  `json:"proxy_type"`
 	TraceTimeMs   float64 `json:"trace_time_ms"`
 	Source        string  `json:"source"` // "user_rule" | "kernel_rule" | "fallback"
+	RuleIndex     int     `json:"rule_index,omitempty"`
+	// Undetermined is set when a rule before the reported match could not be
+	// evaluated by the panel (e.g. an unreadable rule set). Mihomo may route
+	// the target by that rule instead; UndeterminedRule names it.
+	Undetermined       bool   `json:"undetermined,omitempty"`
+	UndeterminedRule   string `json:"undetermined_rule,omitempty"`
+	UndeterminedGroup  string `json:"undetermined_group,omitempty"`
+	UndeterminedReason string `json:"undetermined_reason,omitempty"`
 }
 
 // RouteTracerService evaluates targets against user custom rules and kernel routing rules.
@@ -42,6 +51,20 @@ type RouteTracerService struct {
 	userRulesSvc *UserRulesService
 	mihomoSvc    *MihomoService
 	configDir    string
+
+	geo       GeoTagLookup
+	mihomoBin string
+	cacheDir  string
+	convertMu sync.Mutex
+}
+
+// SetRuleEvaluation enables GEOSITE/GEOIP checks via geo and RULE-SET checks
+// by reading provider files (MRS sets are converted with mihomoBin and
+// cached in cacheDir).
+func (s *RouteTracerService) SetRuleEvaluation(geo GeoTagLookup, mihomoBin, cacheDir string) {
+	s.geo = geo
+	s.mihomoBin = mihomoBin
+	s.cacheDir = cacheDir
 }
 
 // NewRouteTracerService initializes RouteTracerService.
@@ -195,9 +218,13 @@ func matchUserRules(rules []UserRule, host string, port int, isIP bool, ip net.I
 
 // MihomoKernelRule represents a parsed rule item from Mihomo API or config.yaml.
 type MihomoKernelRule struct {
-	Type    string `json:"type"`
-	Payload string `json:"payload"`
-	Proxy   string `json:"proxy"`
+	Type    string   `json:"type"`
+	Payload string   `json:"payload"`
+	Proxy   string   `json:"proxy"`
+	Params  []string `json:"-"`
+	Extra   struct {
+		Disabled bool `json:"disabled"`
+	} `json:"extra"`
 }
 
 // fetchKernelRules retrieves rules either from Mihomo REST API or by parsing config.yaml.
@@ -265,26 +292,19 @@ func (s *RouteTracerService) fetchKernelRules(ctx context.Context) ([]MihomoKern
 				}
 				var kRules []MihomoKernelRule
 				for _, rStr := range parsed.Rules {
-					parts := strings.Split(rStr, ",")
-					if len(parts) >= 2 {
-						kType := strings.TrimSpace(parts[0])
-						kPayload := strings.TrimSpace(parts[1])
-						kProxy := ""
-						if len(parts) >= 3 {
-							kProxy = strings.TrimSpace(parts[2])
-						} else {
-							// MATCH,PROXY has 2 parts
-							if strings.EqualFold(kType, "MATCH") {
-								kProxy = kPayload
-								kPayload = ""
-							}
-						}
-						kRules = append(kRules, MihomoKernelRule{
-							Type:    kType,
-							Payload: kPayload,
-							Proxy:   kProxy,
-						})
+					kType, kPayload, rest := splitRuleLine(rStr)
+					if kType == "" {
+						continue
 					}
+					rule := MihomoKernelRule{Type: kType, Payload: kPayload}
+					if normalizeRuleType(kType) == "MATCH" {
+						// MATCH,TARGET has no payload.
+						rule.Payload, rule.Proxy = "", kPayload
+					} else if len(rest) > 0 {
+						rule.Proxy = rest[0]
+						rule.Params = rest[1:]
+					}
+					kRules = append(kRules, rule)
 				}
 				if len(kRules) > 0 {
 					return kRules, defaultGroup, nil
@@ -296,71 +316,56 @@ func (s *RouteTracerService) fetchKernelRules(ctx context.Context) ([]MihomoKern
 	return nil, defaultGroup, fmt.Errorf("no kernel rules available")
 }
 
-// matchKernelRules tests the target against Mihomo kernel rules.
-func matchKernelRules(rules []MihomoKernelRule, host string, port int, isIP bool, ip net.IP) *RouteTraceResult {
-	for _, r := range rules {
-		kType := strings.ToUpper(r.Type)
-		payload := strings.TrimSpace(r.Payload)
-		proxy := strings.TrimSpace(r.Proxy)
-		matched := false
-
-		switch kType {
-		case "DOMAIN":
-			if strings.EqualFold(host, payload) {
-				matched = true
-			}
-		case "DOMAIN-SUFFIX":
-			lowHost := strings.ToLower(host)
-			lowVal := strings.ToLower(strings.TrimPrefix(payload, "."))
-			if lowHost == lowVal || strings.HasSuffix(lowHost, "."+lowVal) {
-				matched = true
-			}
-		case "DOMAIN-KEYWORD":
-			if strings.Contains(strings.ToLower(host), strings.ToLower(payload)) {
-				matched = true
-			}
-		case "GEOIP":
-			if isIP && ip != nil && strings.EqualFold(payload, "private") {
-				if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-					matched = true
-				}
-			}
-		case "IP-CIDR", "IP-CIDR6":
-			if isIP && ip != nil {
-				cidr := payload
-				if !strings.Contains(cidr, "/") {
-					cidr += "/32"
-				}
-				if _, ipNet, err := net.ParseCIDR(cidr); err == nil && ipNet.Contains(ip) {
-					matched = true
-				}
-			}
-		case "DST-PORT":
-			if p, err := strconv.Atoi(payload); err == nil && p == port {
-				matched = true
-			}
-		case "MATCH":
-			matched = true
+// matchKernelRules walks the rules in order like Mihomo does and returns
+// the first rule that certainly matches. Rules the panel cannot evaluate are
+// remembered: the first of them is reported as a possible earlier match.
+func matchKernelRules(ec *ruleEvalContext, rules []MihomoKernelRule) *RouteTraceResult {
+	var pending *RouteTraceResult
+	for i, r := range rules {
+		if r.Extra.Disabled {
+			continue
 		}
-
-		if matched {
-			action := strings.ToUpper(proxy)
-			if action != "DIRECT" && action != "REJECT" {
-				action = "PROXY"
+		verdict, reason := ec.evalRule(r.Type, r.Payload, r.Params)
+		switch verdict {
+		case verdictUnknown:
+			if pending == nil {
+				pending = &RouteTraceResult{
+					Undetermined:       true,
+					UndeterminedRule:   strings.TrimSuffix(r.Type+","+r.Payload, ","),
+					UndeterminedGroup:  r.Proxy,
+					UndeterminedReason: reason,
+				}
 			}
-			return &RouteTraceResult{
-				Target:       host,
+		case verdictYes:
+			res := &RouteTraceResult{
+				Target:       ec.host,
 				Matched:      true,
 				RuleType:     r.Type,
-				RulePayload:  payload,
-				TargetAction: action,
-				TargetGroup:  proxy,
+				RulePayload:  r.Payload,
+				TargetAction: routeAction(r.Proxy),
+				TargetGroup:  r.Proxy,
 				Source:       "kernel_rule",
+				RuleIndex:    i + 1,
 			}
+			if pending != nil {
+				res.Undetermined = true
+				res.UndeterminedRule = pending.UndeterminedRule
+				res.UndeterminedGroup = pending.UndeterminedGroup
+				res.UndeterminedReason = pending.UndeterminedReason
+			}
+			return res
 		}
 	}
+	return pending
+}
 
-	return nil
+func routeAction(proxy string) string {
+	switch action := strings.ToUpper(strings.TrimSpace(proxy)); action {
+	case "DIRECT", "REJECT", "REJECT-DROP":
+		return action
+	default:
+		return "PROXY"
+	}
 }
 
 // lookupSelectedProxy resolves the currently selected node name and type for a proxy group.
@@ -452,13 +457,81 @@ func (s *RouteTracerService) lookupSelectedProxy(ctx context.Context, groupName 
 	return selected, nodeType
 }
 
+// fetchEmptyRuleSets asks the running core which rule providers hold no
+// rules. Errors yield an empty map: every set is then read from disk.
+func (s *RouteTracerService) fetchEmptyRuleSets(ctx context.Context) map[string]bool {
+	empty := map[string]bool{}
+	if s.mihomoSvc == nil {
+		return empty
+	}
+	info, err := s.mihomoSvc.ParseControllerConfig()
+	if err != nil || (info.Type != "unix" && (info.Type != "tcp" || info.Target == "")) {
+		return empty
+	}
+	reqURL := "http://localhost/providers/rules"
+	if info.Type == "tcp" {
+		target := info.Target
+		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+			target = "http://" + target
+		}
+		reqURL = strings.TrimRight(target, "/") + "/providers/rules"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return empty
+	}
+	if info.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+info.Secret)
+	}
+	resp, err := s.mihomoSvc.GetHTTPClient().Do(req)
+	if err != nil {
+		return empty
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Providers map[string]struct {
+			RuleCount int `json:"ruleCount"`
+		} `json:"providers"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&body) != nil {
+		return empty
+	}
+	for name, p := range body.Providers {
+		if p.RuleCount == 0 {
+			empty[name] = true
+		}
+	}
+	return empty
+}
+
+// ruleSetStore builds a reader for the rule-providers declared in the
+// Mihomo config, or nil when the config cannot be read.
+func (s *RouteTracerService) ruleSetStore() *ruleSetStore {
+	cfgDir := s.configDir
+	if cfgDir == "" && s.mihomoSvc != nil {
+		cfgDir = s.mihomoSvc.ConfigDir
+	}
+	if cfgDir == "" {
+		return nil
+	}
+	configPath := filepath.Join(cfgDir, "config.yaml")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		configPath = filepath.Join(cfgDir, "config.yml")
+	}
+	providers, err := loadRuleProviders(configPath)
+	if err != nil || len(providers) == 0 {
+		return nil
+	}
+	return &ruleSetStore{providers: providers, homeDir: filepath.Clean(cfgDir), cacheDir: s.cacheDir, mihomoBin: s.mihomoBin, mu: &s.convertMu}
+}
+
 // TraceRoute simulates routing evaluation for the given target and port.
-func (s *RouteTracerService) TraceRoute(ctx context.Context, rawTarget string, port int) (*RouteTraceResult, error) {
+func (s *RouteTracerService) TraceRoute(ctx context.Context, rawTarget string, port int) (res *RouteTraceResult, err error) {
 	start := time.Now()
 
-	host, targetPort, isIP, ip, err := normalizeTarget(rawTarget, port)
-	if err != nil {
-		return nil, err
+	host, targetPort, isIP, ip, nerr := normalizeTarget(rawTarget, port)
+	if nerr != nil {
+		return nil, nerr
 	}
 
 	defaultGroup := "PROXY"
@@ -468,7 +541,7 @@ func (s *RouteTracerService) TraceRoute(ctx context.Context, rawTarget string, p
 	}
 
 	// 1. Check user custom rules first
-	res := matchUserRules(userRules, host, targetPort, isIP, ip, defaultGroup)
+	res = matchUserRules(userRules, host, targetPort, isIP, ip, defaultGroup)
 
 	// 2. If no user rule matched, check kernel rules
 	if res == nil {
@@ -477,7 +550,26 @@ func (s *RouteTracerService) TraceRoute(ctx context.Context, rawTarget string, p
 			defaultGroup = kDefGroup
 		}
 		if len(kRules) > 0 {
-			res = matchKernelRules(kRules, host, targetPort, isIP, ip)
+			ec := &ruleEvalContext{ctx: ctx, host: host, port: targetPort, isIP: isIP, ip: ip, geo: s.geo}
+			ec.sets = s.ruleSetStore()
+			if ec.sets != nil {
+				ec.sets.empty = s.fetchEmptyRuleSets(ctx)
+			}
+			res = matchKernelRules(ec, kRules)
+			if res != nil && !res.Matched {
+				// Only undetermined rules and no certain match: keep the
+				// warning and fall back to the default group below.
+				pending := res
+				res = nil
+				defer func() {
+					if res != nil {
+						res.Undetermined = true
+						res.UndeterminedRule = pending.UndeterminedRule
+						res.UndeterminedGroup = pending.UndeterminedGroup
+						res.UndeterminedReason = pending.UndeterminedReason
+					}
+				}()
+			}
 		}
 	}
 
