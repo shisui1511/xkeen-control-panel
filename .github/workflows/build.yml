@@ -95,10 +95,12 @@ jobs:
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="${GITHUB_REF#refs/tags/}"
+            BUILD_VERSION="$VERSION"
             IS_STABLE="true"
             SKIP="false"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="v${{ github.event.inputs.version }}"
+            BUILD_VERSION="$VERSION"
             IS_STABLE="true"
             SKIP="false"
           else
@@ -108,27 +110,19 @@ jobs:
               echo "HEAD is exactly tagged as stable ($EXACT_TAG). Skipping redundant branch-triggered build."
               SKIP="true"
               VERSION="$EXACT_TAG"
+              BUILD_VERSION="$VERSION"
               IS_STABLE="true"
             else
               SKIP="false"
               
-              # package.json хранит версию, которую готовит текущая веха
-              PKG_VERSION=$(grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4)
-              PKG_VERSION="${PKG_VERSION#v}"
-              BASE="${PKG_VERSION:-0.0.0}"
-
-              LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
-              if [ -n "$LATEST_TAG" ]; then
-                LATEST="${LATEST_TAG#v}"
-                # Версия из package.json уже выпущена — dev-сборка должна быть выше релиза
-                if [ "$(printf '%s\n%s\n' "$BASE" "$LATEST" | sort -V | tail -1)" = "$LATEST" ]; then
-                  IFS=. read -r L_MAJOR L_MINOR L_PATCH <<< "$LATEST"
-                  BASE="${L_MAJOR}.${L_MINOR}.$((L_PATCH + 1))"
-                  echo "package.json (${PKG_VERSION}) не опережает ${LATEST_TAG}, dev-версия поднята до ${BASE}"
-                fi
-              fi
-              VERSION="v${BASE}-dev"
+              # Единый источник версии (как локально в Makefile):
+              #   VERSION       — канал rolling pre-release (тег и имена ассетов), vX.Y.Z-dev
+              #   BUILD_VERSION — версия внутри бинарника, vX.Y.Z-dev.N+g<sha>
+              # X.Y.Z — следующий релиз по conventional commits после последнего тега.
+              VERSION=$(sh scripts/version.sh --channel)
+              BUILD_VERSION=$(sh scripts/version.sh)
               IS_STABLE="false"
+              LATEST_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' 2>/dev/null || echo "")
 
               # Calculate commit count since the last stable tag for build notes
               if [ -n "$LATEST_TAG" ]; then
@@ -144,9 +138,10 @@ jobs:
           PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/pulls --jq '.[0].number' 2>/dev/null || echo "")
           echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "build_version=${BUILD_VERSION}" >> $GITHUB_OUTPUT
           echo "is_stable=${IS_STABLE}" >> $GITHUB_OUTPUT
           echo "skip=${SKIP}" >> $GITHUB_OUTPUT
-          echo "Version: ${VERSION} (stable=${IS_STABLE}, pr=${PR_NUMBER}, skip=${SKIP})"
+          echo "Version: ${VERSION}, build ${BUILD_VERSION} (stable=${IS_STABLE}, pr=${PR_NUMBER}, skip=${SKIP})"
 
       - name: Set up Node.js
         if: steps.version.outputs.skip != 'true'
@@ -156,15 +151,11 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Update frontend package version
-        if: steps.version.outputs.skip != 'true'
-        run: |
-          cd frontend
-          VERSION_CLEAN=$(echo "${{ steps.version.outputs.version }}" | sed 's/^v//')
-          npm version $VERSION_CLEAN --no-git-tag-version --allow-same-version
-
       - name: Build frontend
         if: steps.version.outputs.skip != 'true'
+        env:
+          # Имя кэша Service Worker берётся из версии сборки
+          XCP_VERSION: ${{ steps.version.outputs.build_version }}
         run: |
           cd frontend
           npm ci
@@ -185,8 +176,9 @@ jobs:
           GOMIPS: ${{ matrix.GOMIPS }}
           CGO_ENABLED: 0
           VERSION: ${{ steps.version.outputs.version }}
+          BUILD_VERSION: ${{ steps.version.outputs.build_version }}
         run: |
-          go build -ldflags="-s -w -X main.Version=${VERSION}" \
+          go build -ldflags="-s -w -X main.Version=${BUILD_VERSION}" \
             -o build/xcp_${VERSION}_${{ matrix.name }} ./cmd/xcp
 
       - name: Install QEMU and tools
@@ -212,8 +204,14 @@ jobs:
         timeout-minutes: 1
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          BUILD_VERSION: ${{ steps.version.outputs.build_version }}
         run: |
-          ${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}" -v
+          ACTUAL=$(${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}" -v)
+          echo "xcp -v: ${ACTUAL}"
+          if [ "$ACTUAL" != "$BUILD_VERSION" ]; then
+            echo "::error::Бинарник сообщает версию '${ACTUAL}', ожидалась '${BUILD_VERSION}'"
+            exit 1
+          fi
 
       - name: Compress with UPX (pre-release only)
         if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_stable != 'true'

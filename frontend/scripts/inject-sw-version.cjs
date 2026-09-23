@@ -12,24 +12,21 @@ function injectVersion(source, version) {
   return source.replace(CACHE_NAME_RE, `const CACHE_NAME = 'xcp-v${version}';`);
 }
 
-// package.json is not bumped on release, so the cache name is derived from
-// the nearest stable git tag plus the commit; otherwise it never changed
-// between releases and caches of old hashed assets were never evicted.
+// The cache name follows the build version from scripts/version.sh (or
+// XCP_VERSION set by make/CI), so every build evicts caches of old assets.
+// package.json is only a fallback for trees without git.
 function resolveVersion() {
+  const fromEnv = (process.env.XCP_VERSION || '').trim();
+  if (fromEnv) return fromEnv.replace(/^v/, '');
   try {
     const { execSync } = require('child_process');
-    const described = execSync(
-      "git describe --tags --long --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*'",
-      { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }
-    )
+    const script = path.join(__dirname, '../../scripts/version.sh');
+    const out = execSync(`sh "${script}"`, { stdio: ['ignore', 'pipe', 'ignore'] })
       .toString()
       .trim();
-    const m = described.match(/^v(\d+\.\d+\.\d+)-(\d+)-g([0-9a-f]+)$/);
-    if (m) {
-      return m[2] === '0' ? m[1] : `${m[1]}+${m[2]}.g${m[3]}`;
-    }
+    if (out) return out.replace(/^v/, '');
   } catch {
-    // No git or no tags (e.g. source tarball): fall back below.
+    // No git or no script (e.g. source tarball): fall back below.
   }
   return require('../package.json').version;
 }
