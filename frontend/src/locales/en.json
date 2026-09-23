@@ -2194,5 +2194,8 @@
   "xkeen_settings.issue.policy_without_name": "Policy #{value} has no name — XKeen won't start the proxy",
   "xkeen_settings.issue.killswitch_value": "killswitch \"{value}\" — only on and off are allowed",
   "xkeen_settings.issue.gomemlimit_percent_range": "gomemlimit_percent {value} is outside 1–90, XKeen will ignore it",
-  "xkeen_settings.issue.gomemlimit_mb_range": "gomemlimit_mb {value} is below 64, XKeen will ignore it"
+  "xkeen_settings.issue.gomemlimit_mb_range": "gomemlimit_mb {value} is below 64, XKeen will ignore it",
+  "dash.qa_latency_test_current": "Current route {name}: {delay} ms · {alive} of {total} alive",
+  "dash.qa_latency_test_summary": "{alive} of {total} alive, best latency {best} ms",
+  "dash.qa_latency_test_none_alive": "No node answered the latency check"
 }

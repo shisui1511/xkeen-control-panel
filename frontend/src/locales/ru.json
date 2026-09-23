@@ -2194,5 +2194,8 @@
   "xkeen_settings.issue.policy_without_name": "Политика №{value} без поля name — XKeen не запустит прокси",
   "xkeen_settings.issue.killswitch_value": "killswitch «{value}» — допустимы только on и off",
   "xkeen_settings.issue.gomemlimit_percent_range": "gomemlimit_percent {value} вне диапазона 1–90, XKeen его проигнорирует",
-  "xkeen_settings.issue.gomemlimit_mb_range": "gomemlimit_mb {value} меньше 64, XKeen его проигнорирует"
+  "xkeen_settings.issue.gomemlimit_mb_range": "gomemlimit_mb {value} меньше 64, XKeen его проигнорирует",
+  "dash.qa_latency_test_current": "Текущий маршрут {name}: {delay} мс · доступно {alive} из {total}",
+  "dash.qa_latency_test_summary": "Доступно {alive} из {total}, лучшая задержка {best} мс",
+  "dash.qa_latency_test_none_alive": "Ни один узел не ответил на проверку задержки"
 }

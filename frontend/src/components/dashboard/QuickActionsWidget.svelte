@@ -4,6 +4,7 @@
   import { showToast, showConfirm } from '../../stores';
   import Icon from '../../lib/components/Icon.svelte';
   import Card from '../Card.svelte';
+  import { summarizeGroupDelay } from '../../lib/groupDelay';
 
   let { onSwitchTab } = $props<{
     onSwitchTab?: (tab: string) => void;
@@ -38,32 +39,48 @@
     isTestingLatency = true;
     showToast('info', $t('dash.qa_latency_test_title') + '...');
     try {
-      const targetUrl = 'http://www.gstatic.com/generate_204';
+      const targetUrl = encodeURIComponent('http://www.gstatic.com/generate_204');
+      const global = await apiFetchJSON<{ all?: string[]; now?: string }>(
+        '/api/mihomo/proxy/proxies/GLOBAL'
+      );
       const res = await apiFetch(
-        `/api/mihomo/proxy/group/GLOBAL/delay?url=${encodeURIComponent(targetUrl)}&timeout=5000`
+        `/api/mihomo/proxy/group/GLOBAL/delay?url=${targetUrl}&timeout=5000`
       );
       if (res.ok) {
-        const data = await res.json();
-        const delayVal = data?.delay ?? data?.GLOBAL ?? 0;
-        showToast(
-          'success',
-          $t('dash.qa_latency_test_success', { delay: String(delayVal || '—') })
-        );
-      } else {
-        // Fallback check on generic proxy latency
-        const fbRes = await apiFetch(
-          `/api/mihomo/proxy/proxies/GLOBAL/delay?url=${encodeURIComponent(targetUrl)}&timeout=5000`
-        );
-        if (fbRes.ok) {
-          const fbData = await fbRes.json();
-          const delayVal = fbData?.delay ?? 0;
+        // The group endpoint returns { member: delayMs } for every member.
+        const s = summarizeGroupDelay(await res.json(), global.all ?? [], global.now);
+        if (s.current !== null && global.now) {
           showToast(
             'success',
-            $t('dash.qa_latency_test_success', { delay: String(delayVal || '—') })
+            $t('dash.qa_latency_test_current', {
+              name: global.now,
+              delay: String(s.current),
+              alive: String(s.alive),
+              total: String(s.total)
+            })
+          );
+        } else if (s.best !== null) {
+          showToast(
+            'success',
+            $t('dash.qa_latency_test_summary', {
+              alive: String(s.alive),
+              total: String(s.total),
+              best: String(s.best)
+            })
           );
         } else {
-          showToast('error', $t('dash.qa_latency_test_err'));
+          showToast('error', $t('dash.qa_latency_test_none_alive'));
         }
+        return;
+      }
+      // Older cores without group delay: measure GLOBAL itself.
+      const data = await apiFetchJSON<{ delay?: number }>(
+        `/api/mihomo/proxy/proxies/GLOBAL/delay?url=${targetUrl}&timeout=5000`
+      );
+      if (data?.delay) {
+        showToast('success', $t('dash.qa_latency_test_success', { delay: String(data.delay) }));
+      } else {
+        showToast('error', $t('dash.qa_latency_test_err'));
       }
     } catch (e: any) {
       if (e?.status === 401) return;
