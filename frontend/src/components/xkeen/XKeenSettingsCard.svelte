@@ -69,7 +69,9 @@
     loading = true;
     loadError = '';
     try {
-      const list = await apiFetchJSON<SettingsFile[]>('/api/xkeen/settings');
+      const res = await apiFetchJSON<SettingsFile[]>('/api/xkeen/settings');
+      // Older panels (or a missing XKeen) may answer without a list.
+      const list = Array.isArray(res) ? res : [];
       const next: Record<string, SettingsFile> = {};
       const nextDrafts: Record<string, string> = {};
       for (const f of list) {
