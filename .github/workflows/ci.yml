@@ -347,6 +347,11 @@ jobs:
       - name: Check i18n translations
         run: node scripts/check-i18n.js
 
+      - name: Test version script
+        run: |
+          sh scripts/version_test.sh
+          echo "Build version: $(sh scripts/version.sh), next release: $(sh scripts/version.sh --next)"
+
       - name: Check commit messages
         run: |
           node scripts/check-commits.js "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"

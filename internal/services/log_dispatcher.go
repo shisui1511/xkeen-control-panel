@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -598,6 +599,10 @@ func (d *LogDispatcher) GetHistory(source string, level string, limit int) []Log
 		all = filtered
 	}
 
+	// Buffers live in a map, so entries from several sources arrive in random
+	// order; IDs are assigned monotonically at ingest time.
+	sort.SliceStable(all, func(i, j int) bool { return all[i].ID < all[j].ID })
+
 	if len(all) > limit {
 		all = all[len(all)-limit:]
 	}
@@ -692,6 +697,7 @@ func (d *LogDispatcher) tailFile(path string) {
 		fallbackSource = "xkeen"
 	}
 
+	reopened := false
 	for {
 		select {
 		case <-d.ctx.Done():
@@ -709,13 +715,17 @@ func (d *LogDispatcher) tailFile(path string) {
 			}
 		}
 
-		// Seek to near the end for initial tail
 		stat, statErr := file.Stat()
-		if statErr == nil && stat.Size() > 8192 {
-			_, _ = file.Seek(-8192, io.SeekEnd)
-		}
-
 		reader := bufio.NewReader(file)
+		// On the first open show only the recent tail. After a rotation the
+		// new file is read from its start so no lines are lost or repeated.
+		if !reopened && statErr == nil && stat.Size() > 8192 {
+			_, _ = file.Seek(-8192, io.SeekEnd)
+			// The seek lands mid-line; drop the partial fragment.
+			_, _ = reader.ReadString('\n')
+		}
+		reopened = true
+
 		for {
 			select {
 			case <-d.ctx.Done():
@@ -731,10 +741,12 @@ func (d *LogDispatcher) tailFile(path string) {
 
 			if readErr != nil {
 				if readErr == io.EOF {
-					// Check if file was rotated or truncated
-					if curStat, err := os.Stat(path); err == nil {
-						if curStat.Size() < stat.Size() {
-							// Truncated, reopen
+					// Reopen when the path now points to a different file
+					// (rename-based rotation) or the file was truncated.
+					if curStat, err := os.Stat(path); err == nil && statErr == nil {
+						pos, _ := file.Seek(0, io.SeekCurrent)
+						pos -= int64(reader.Buffered())
+						if !os.SameFile(stat, curStat) || curStat.Size() < pos {
 							file.Close()
 							break
 						}

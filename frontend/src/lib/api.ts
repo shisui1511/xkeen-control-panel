@@ -146,6 +146,11 @@ export interface RouteTraceResult {
   proxy_type: string;
   trace_time_ms: number;
   source: string;
+  rule_index?: number;
+  undetermined?: boolean;
+  undetermined_rule?: string;
+  undetermined_group?: string;
+  undetermined_reason?: string;
 }
 
 export async function fetchCustomRules(): Promise<UserRule[]> {
@@ -183,6 +188,13 @@ export async function flushFakeIP(): Promise<void> {
     method: 'POST'
   });
   if (!res.ok) throw new Error('Failed to flush Fake-IP cache');
+}
+
+export async function flushDNSCache(): Promise<void> {
+  const res = await apiFetch('/api/mihomo/proxy/cache/dns/flush', {
+    method: 'POST'
+  });
+  if (!res.ok) throw new Error('Failed to flush DNS cache');
 }
 
 export async function fetchRuleProviders(): Promise<RuleProvider[]> {

@@ -42,6 +42,10 @@ func main() {
 
 	flag.Parse()
 
+	// Keenetic keeps the timezone as a POSIX string Go cannot read on its own;
+	// without this every schedule and timestamp runs in UTC.
+	appliedTZ := utils.ApplySystemTimezone()
+
 	// Router-grade RAM/GC limits (STAB-06): Keenetic devices typically have
 	// 128-256 MB total RAM shared with the kernel and other services. A
 	// soft-memory-limit plus a moderately aggressive GC target keeps XCP's
@@ -123,6 +127,9 @@ func main() {
 		} else {
 			log.Printf("Failed to initialize log rotator for %s: %v", cfg.XCPLogPath, err)
 		}
+	}
+	if appliedTZ != "" {
+		log.Printf("Timezone: applied system timezone %s", appliedTZ)
 	}
 
 	fatalf := func(format string, v ...interface{}) {
@@ -231,6 +238,12 @@ func main() {
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
 	srv.HandleProtected("/api/settings/dev-mode", api.SettingsDevMode)
+
+	// XKeen own settings: proxied/excluded ports, excluded IPs, xkeen.json
+	api.SetXKeenSettingsService(services.NewXKeenSettingsService(services.DefaultXKeenConfigDir, cfg.DataDir, cfg.AllowedRoots))
+	srv.HandleProtected("/api/xkeen/settings", api.XKeenSettingsList)
+	srv.HandleProtected("/api/xkeen/settings/validate", api.XKeenSettingsValidate)
+	srv.HandleProtected("/api/xkeen/settings/save", api.XKeenSettingsSave)
 	srv.HandleProtected("/api/service/status", api.ServiceStatus)
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
 	srv.HandleProtected("/api/service/dns-redirect", api.ServiceDNSRedirect)
@@ -315,6 +328,11 @@ func main() {
 	srv.HandleProtected("/api/traffic/reset", api.TrafficReset)
 	srv.HandleProtected("/api/mihomo/connections/ws", api.ConnectionsWebSocket)
 
+	// Kernel service must exist before background services that query it
+	// (traffic quota liveness check) are started.
+	kernelSvc := services.NewKernelService(cfg.DataDir)
+	api.SetKernelService(kernelSvc)
+
 	// Start background services
 	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, cfg.MihomoAPIURL)
 	smartProxySvc.SetMihomoService(api.MihomoService())
@@ -324,17 +342,15 @@ func main() {
 
 	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL, cfg.MihomoSecret)
 	trafficQuotaSvc.SetMihomoService(api.MihomoService())
-	trafficQuotaSvc.Start()
 	trafficQuotaSvc.SetKernelAliveCheck(func() bool {
-		if kSvc := api.KernelService(); kSvc != nil {
-			for _, info := range kSvc.List() {
-				if info.Name == "mihomo" && info.ProcessStatus == "running" {
-					return true
-				}
+		for _, info := range kernelSvc.List() {
+			if info.Name == "mihomo" && info.ProcessStatus == "running" {
+				return true
 			}
 		}
 		return false
 	})
+	trafficQuotaSvc.Start()
 	if xSvc := api.XKeenService(); xSvc != nil {
 		xSvc.SetKernelStartedHook(trafficQuotaSvc.NotifyKernelStarted)
 	}
@@ -433,6 +449,7 @@ func main() {
 
 	// Route Tracer Service (ROUTE-04)
 	routeTracerSvc := services.NewRouteTracerService(userRulesSvc, api.MihomoService(), cfg.MihomoConfigDir)
+	routeTracerSvc.SetRuleEvaluation(datSvc.MihomoGeoTagLookup(cfg.MihomoConfigDir), cfg.MihomoBinary, filepath.Join(cfg.DataDir, "cache", "rulesets"))
 	api.SetRouteTracerService(routeTracerSvc)
 
 	// Templates
@@ -495,8 +512,6 @@ func main() {
 	api.SetNetworkToolsService(networkSvc)
 
 	// Kernels
-	kernelSvc := services.NewKernelService(cfg.DataDir)
-	api.SetKernelService(kernelSvc)
 	subscriptionSvc.SetKernelService(kernelSvc)
 	srv.HandleProtected("/api/kernels", api.KernelList)
 	srv.HandleProtected("/api/kernels/debug", api.KernelDebug)
@@ -509,9 +524,13 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/download", api.KernelDownload)
 
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
-		Version, runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
+		strings.TrimPrefix(Version, "v"), runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
 	if cfg.Auth.PasswordHash == "" {
-		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)
+		proto := "http"
+		if cfg.HTTPS.Enabled {
+			proto = "https"
+		}
+		log.Printf("⚠️  No password set. Please visit %s://<router-ip>:%d to complete setup.", proto, cfg.Port)
 	}
 
 	// Graceful shutdown on SIGINT/SIGTERM

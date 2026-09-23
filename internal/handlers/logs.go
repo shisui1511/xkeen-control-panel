@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -310,6 +313,19 @@ func (a *API) LogsSetLevel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Source == "mihomo" {
+		if !validMihomoLogLevels[req.Level] {
+			a.errorResponse(w, "Invalid log level", http.StatusBadRequest)
+			return
+		}
+		if err := a.setMihomoLogLevel(req.Level); err != nil {
+			a.errorResponse(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		a.jsonResponse(w, map[string]bool{"success": true})
+		return
+	}
+
 	if a.logDispatcher != nil {
 		if err := a.logDispatcher.SetLogLevel(req.Source, req.Level); err != nil {
 			a.errorResponse(w, err.Error(), http.StatusInternalServerError)
@@ -371,4 +387,38 @@ func (a *API) LogsDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	redactedReader := services.NewRedactionReader(f)
 	_, _ = io.Copy(w, redactedReader)
+}
+
+var validMihomoLogLevels = map[string]bool{
+	"silent": true, "error": true, "warning": true, "info": true, "debug": true,
+}
+
+// setMihomoLogLevel changes Mihomo's runtime log level through the actual
+// external-controller (TCP or unix socket) with the configured secret.
+func (a *API) setMihomoLogLevel(level string) error {
+	if a.cfg == nil && a.mihomoSvc == nil {
+		return errors.New("mihomo controller is not configured")
+	}
+	payload, err := json.Marshal(map[string]string{"log-level": level})
+	if err != nil {
+		return err
+	}
+	client, baseURL := a.getMihomoHTTPClientAndBaseURL()
+	req, err := http.NewRequest(http.MethodPatch, baseURL+"/configs", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if secret := a.ResolveMihomoSecret(); secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("mihomo API returned status %d", resp.StatusCode)
+	}
+	return nil
 }

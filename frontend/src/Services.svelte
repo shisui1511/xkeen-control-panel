@@ -18,6 +18,7 @@
   import { apiFetch } from './lib/api';
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
+  import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -1320,6 +1321,13 @@
       </div>
     </div>
   </div>
+
+  <XKeenSettingsCard
+    onrestarted={() => {
+      fetchStatus();
+      fetchRestartLog();
+    }}
+  />
 
   <!-- Watchdog Card (WD-06, D-31) -->
   <div class="card watchdog-card">

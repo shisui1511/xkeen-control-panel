@@ -12,9 +12,28 @@ function injectVersion(source, version) {
   return source.replace(CACHE_NAME_RE, `const CACHE_NAME = 'xcp-v${version}';`);
 }
 
+// The cache name follows the build version from scripts/version.sh (or
+// XCP_VERSION set by make/CI), so every build evicts caches of old assets.
+// package.json is only a fallback for trees without git.
+function resolveVersion() {
+  const fromEnv = (process.env.XCP_VERSION || '').trim();
+  if (fromEnv) return fromEnv.replace(/^v/, '');
+  try {
+    const { execSync } = require('child_process');
+    const script = path.join(__dirname, '../../scripts/version.sh');
+    const out = execSync(`sh "${script}"`, { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+    if (out) return out.replace(/^v/, '');
+  } catch {
+    // No git or no script (e.g. source tarball): fall back below.
+  }
+  return require('../package.json').version;
+}
+
 function main() {
   try {
-    const version = require('../package.json').version;
+    const version = resolveVersion();
     let source;
     try {
       source = fs.readFileSync(SW_PATH, 'utf8');
@@ -41,4 +60,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { injectVersion };
+module.exports = { injectVersion, resolveVersion };

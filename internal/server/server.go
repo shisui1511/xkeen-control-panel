@@ -126,6 +126,7 @@ func (s *Server) Start() error {
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		ErrorLog:          newServerErrorLog(),
 	}
 
 	s.mu.Lock()

@@ -2,10 +2,10 @@
   import { t } from './i18n';
   import { apiFetch } from './lib/api';
 
-  let password = '';
-  let confirmPassword = '';
-  let error = '';
-  let loading = false;
+  let password = $state('');
+  let confirmPassword = $state('');
+  let error = $state('');
+  let loading = $state(false);
 
   async function handleSetup() {
     error = '';

@@ -20,6 +20,7 @@
     "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
+    "@sveltejs/mcp": "^0.1.26",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tsconfig/svelte": "^5.0.0",
     "@types/node": "^26.6.1",

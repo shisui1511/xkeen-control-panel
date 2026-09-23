@@ -57,6 +57,7 @@
   import ProxyDiagnosticModal from './components/proxies/ProxyDiagnosticModal.svelte';
   import { ProvidersState, type Subscription } from './components/proxies/providersState.svelte';
   import ClientExitIpBadge from './components/network/ClientExitIpBadge.svelte';
+  import MihomoModeSwitch from './components/proxies/MihomoModeSwitch.svelte';
   import { fetchClientExitIP } from './lib/clientIp';
 
   interface Props {
@@ -958,6 +959,7 @@
   >
     <ClientExitIpBadge />
     {#if activeTab === 'groups'}
+      <MihomoModeSwitch onchanged={() => fetchProxies()} />
       <ProxyFilterBar
         bind:filterQuery
         bind:viewMode

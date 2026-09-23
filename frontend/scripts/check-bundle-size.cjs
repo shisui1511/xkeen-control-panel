@@ -70,7 +70,8 @@ function checkWoff2Only(css) {
 }
 
 // Проверка REQ-13: CACHE_NAME в собранном dist/sw.js версионирован —
-// плейсхолдер подставлен, значение совпадает с версией из package.json.
+// плейсхолдер подставлен, значение совпадает с версией сборки (та же
+// resolveVersion, что и в inject-sw-version.cjs).
 function checkSwCacheVersioned(distSwSource, version) {
   const violations = [];
   if (distSwSource.includes('__BUILD_VERSION__')) {
@@ -81,7 +82,7 @@ function checkSwCacheVersioned(distSwSource, version) {
   const actual = match ? match[1] : null;
   if (actual !== expected) {
     violations.push(
-      `CACHE_NAME в dist/sw.js равен '${actual}', ожидалось '${expected}' (версия package.json не подставлена)`
+      `CACHE_NAME в dist/sw.js равен '${actual}', ожидалось '${expected}' (версия сборки не подставлена)`
     );
   }
   return violations;
@@ -218,7 +219,7 @@ function main(argv) {
     let swVersionOk = true;
     if (fs.existsSync(DIST_SW_PATH)) {
       const distSwSource = fs.readFileSync(DIST_SW_PATH, 'utf8');
-      const version = require('../package.json').version;
+      const version = require('./inject-sw-version.cjs').resolveVersion();
       for (const violation of checkSwCacheVersioned(distSwSource, version)) {
         console.error(`❌ ${violation}`);
         swVersionOk = false;

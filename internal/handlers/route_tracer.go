@@ -38,7 +38,9 @@ func (a *API) RouteTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	// Geo lookups and a first-time MRS conversion can take several seconds
+	// on router CPUs.
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
 	result, err := a.routeTracerSvc.TraceRoute(ctx, cleanTarget, req.Port)

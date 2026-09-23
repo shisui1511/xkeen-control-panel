@@ -249,6 +249,25 @@
           </div>
         </div>
       </div>
+
+      {#if result.undetermined && result.undetermined_rule}
+        <div class="undetermined-note" role="note">
+          <Icon name="warning" size={16} />
+          <div>
+            <p class="undetermined-title">
+              {$t('rules.diagnostic_undetermined', {
+                rule: result.undetermined_rule,
+                group: result.undetermined_group || '—'
+              })}
+            </p>
+            <p class="undetermined-reason">
+              {$t(
+                `rules.diagnostic_undetermined_reason.${result.undetermined_reason || 'unsupported_type'}`
+              )}
+            </p>
+          </div>
+        </div>
+      {/if}
     </div>
   {:else if !testing}
     <!-- Empty / Initial Guide Card -->
@@ -276,6 +295,32 @@
 </div>
 
 <style>
+  .undetermined-note {
+    display: flex;
+    gap: var(--spacing-2);
+    align-items: flex-start;
+    margin-top: var(--spacing-3);
+    padding: var(--spacing-3);
+    border-radius: var(--radius-md);
+    background: var(--warning-soft);
+    color: var(--warning);
+  }
+
+  .undetermined-title,
+  .undetermined-reason {
+    margin: 0;
+    font-size: var(--font-size-sm);
+  }
+
+  .undetermined-title {
+    font-weight: 600;
+    word-break: break-word;
+  }
+
+  .undetermined-reason {
+    color: var(--fg-secondary);
+  }
+
   .diagnostic-container {
     display: flex;
     flex-direction: column;

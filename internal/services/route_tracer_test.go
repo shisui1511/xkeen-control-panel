@@ -111,8 +111,9 @@ func TestRouteTracer_FullTrace(t *testing.T) {
 		case r.URL.Path == "/rules":
 			resp := map[string]interface{}{
 				"rules": []map[string]string{
-					{"type": "DOMAIN-SUFFIX", "payload": "google.com", "proxy": "GOOGLE-GROUP"},
-					{"type": "MATCH", "payload": "", "proxy": "DEFAULT-GROUP"},
+					// Real Clash API spelling (CamelCase), not the config one.
+					{"type": "DomainSuffix", "payload": "google.com", "proxy": "GOOGLE-GROUP"},
+					{"type": "Match", "payload": "", "proxy": "DEFAULT-GROUP"},
 				},
 			}
 			w.Header().Set("Content-Type", "application/json")

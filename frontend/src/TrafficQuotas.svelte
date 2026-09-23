@@ -282,7 +282,6 @@
       showToast('error', e.message);
     } finally {
       delete togglingQuotas[q.id];
-      togglingQuotas = togglingQuotas;
     }
   }
 
@@ -336,7 +335,7 @@
       return a.message;
     }
     const key =
-      a.kind === 'exceeded' ? 'trafficquotas.alert_exceeded' : 'trafficquotas.alert_threshold';
+      a.kind === 'exceeded' ? 'trafficquotas.alert_exceeded' : 'trafficquotas.alert_threshold_msg';
     return $t(key, {
       name: a.quota_name,
       current: formatBytes(a.current_bytes),
