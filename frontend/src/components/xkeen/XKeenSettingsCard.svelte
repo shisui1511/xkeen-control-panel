@@ -276,11 +276,34 @@
     gap: var(--spacing-3);
   }
 
-  .xs-subtitle,
+  /* Same header as the neighbouring cards on the services page instead of
+     the global compact .card-title strip. */
+  .xs-head .card-title {
+    display: block;
+    margin: 0;
+    padding: 0;
+    font-size: var(--font-size-lg);
+    font-weight: 700;
+    color: var(--fg-primary);
+  }
+
+  .xs-subtitle {
+    margin: 2px 0 0;
+    font-size: var(--font-size-xs);
+    color: var(--fg-dim);
+  }
+
   .xs-hint {
     margin: 0;
     color: var(--fg-muted);
     font-size: var(--font-size-sm);
+  }
+
+  /* Four file tabs do not fit a phone width; wrap instead of hiding the
+     last one behind horizontal scroll. */
+  .xkeen-settings-card :global(.seg) {
+    flex-wrap: wrap;
+    align-self: flex-start;
   }
 
   .xs-skeleton {
