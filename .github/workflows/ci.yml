@@ -62,6 +62,10 @@ jobs:
         with:
           go-version-file: go.mod
           repo-checkout: false
+          # Проверяется то, что попадает в бинарник: граф пакетов от cmd/.
+          # Тестовые хелперы (internal/xrayapi/testutil поднимает gRPC-сервер
+          # для моков) импортируются только из _test.go и в сборку не входят.
+          go-package: ./cmd/...
 
   # Job 2: Тестирование Go кода
   test-go:
