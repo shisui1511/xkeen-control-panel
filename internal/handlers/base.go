@@ -29,6 +29,7 @@ type API struct {
 	kernelSvc             *services.KernelService
 	networkSvc            *services.NetworkToolsService
 	smartProxySvc         *services.SmartProxyService
+	xkeenSettingsSvc      *services.XKeenSettingsService
 	trafficQuotaSvc       *services.TrafficQuotaService
 	watchdogSvc           *services.WatchdogService
 	xrayGRPCSvc           *services.XrayGRPCService
