@@ -282,7 +282,6 @@
       showToast('error', e.message);
     } finally {
       delete togglingQuotas[q.id];
-      togglingQuotas = togglingQuotas;
     }
   }
 

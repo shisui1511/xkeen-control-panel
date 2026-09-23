@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import Modal from './components/Modal.svelte';
   import Select from './components/Select.svelte';
   import Button from './components/Button.svelte';
