@@ -1014,12 +1014,7 @@ func (s *KernelService) Install(name string) error {
 		s.mu.RUnlock()
 	}
 
-	arch := runtime.GOARCH
-	if arch == "mipsle" || arch == "mipsel" {
-		arch = "mipsle-softfloat"
-	} else if arch == "mips" {
-		arch = "mips-softfloat"
-	}
+	arch := kernelAssetArch(runtime.GOARCH)
 
 	// Build a temporary KernelInfo for buildDownloadURL (only needs Name, Repo, LatestVersion, Channel)
 	s.mu.RLock()
@@ -1301,6 +1296,22 @@ func pruneBackups(dir string, prefix string, keep int) error {
 	return nil
 }
 
+// kernelAssetArch переводит GOARCH панели в суффикс архитектуры релизных
+// ассетов ядер. Роутеры Keenetic на MIPS не имеют FPU, поэтому для mips/mipsle
+// выбираются softfloat-сборки.
+func kernelAssetArch(goarch string) string {
+	switch goarch {
+	case "mipsle":
+		return "mipsle-softfloat"
+	case "mips":
+		return "mips-softfloat"
+	}
+	return goarch
+}
+
+// zipPreferSoftfloat: на MIPS из архива Xray берётся xray_softfloat, если он есть.
+var zipPreferSoftfloat = runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle"
+
 func (s *KernelService) buildDownloadURL(k *KernelInfo, arch string) (string, string) {
 	version := k.LatestVersion
 	if version == "" {
@@ -1309,13 +1320,16 @@ func (s *KernelService) buildDownloadURL(k *KernelInfo, arch string) (string, st
 
 	switch k.Name {
 	case "xray":
-		// Xray: Xray-linux-arm64-v8a.zip or Xray-linux-mipsle-softfloat.zip
+		// Xray: Xray-linux-arm64-v8a.zip, Xray-linux-mips32le.zip or Xray-linux-mips32.zip
+		// (MIPS-архивы содержат и xray, и xray_softfloat — выбор в extractZip)
 		var file string
 		switch arch {
 		case "arm64":
-			file = fmt.Sprintf("Xray-linux-%s-v8a.zip", arch)
-		case "mipsle-softfloat", "mips-softfloat":
-			file = fmt.Sprintf("Xray-linux-%s.zip", arch)
+			file = "Xray-linux-arm64-v8a.zip"
+		case "mipsle-softfloat":
+			file = "Xray-linux-mips32le.zip"
+		case "mips-softfloat":
+			file = "Xray-linux-mips32.zip"
 		default:
 			return "", ""
 		}
@@ -1376,46 +1390,55 @@ func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 	}
 	defer r.Close()
 
+	var match *zip.File
 	for _, f := range r.File {
 		if f.FileInfo().IsDir() {
 			continue
 		}
 		baseName := filepath.Base(f.Name)
-		if f.Name == binaryName || f.Name == binaryName+"-linux-"+runtime.GOARCH ||
-			baseName == binaryName || strings.HasPrefix(baseName, binaryName+"-linux-") {
-			rc, err := f.Open()
-			if err != nil {
-				return "", err
-			}
-			defer rc.Close()
-
-			outPath, err := safeTempPath(binaryName + ".new")
-			if err != nil {
-				return "", err
-			}
-			outPath, err = sanitizeKernelPath(outPath)
-			if err != nil {
-				return "", err
-			}
-			out, err := os.Create(outPath)
-			if err != nil {
-				return "", err
-			}
-			defer out.Close()
-
-			_, copyErr := io.Copy(out, io.LimitReader(rc, maxKernelExtractBytes))
-			closeErr := out.Close()
-			if copyErr != nil {
-				return "", copyErr
-			}
-			if closeErr != nil {
-				return "", closeErr
-			}
-			return outPath, nil
+		if zipPreferSoftfloat && baseName == binaryName+"_softfloat" {
+			match = f
+			break
+		}
+		if match == nil && (f.Name == binaryName || f.Name == binaryName+"-linux-"+runtime.GOARCH ||
+			baseName == binaryName || strings.HasPrefix(baseName, binaryName+"-linux-")) {
+			match = f
 		}
 	}
 
-	return "", fmt.Errorf("binary not found in archive")
+	if match == nil {
+		return "", fmt.Errorf("binary not found in archive")
+	}
+
+	rc, err := match.Open()
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+
+	outPath, err := safeTempPath(binaryName + ".new")
+	if err != nil {
+		return "", err
+	}
+	outPath, err = sanitizeKernelPath(outPath)
+	if err != nil {
+		return "", err
+	}
+	out, err := os.Create(outPath)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+
+	_, copyErr := io.Copy(out, io.LimitReader(rc, maxKernelExtractBytes))
+	closeErr := out.Close()
+	if copyErr != nil {
+		return "", copyErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	return outPath, nil
 }
 
 func (s *KernelService) extractGz(gzPath string) (string, error) {
@@ -1516,12 +1539,7 @@ func (s *KernelService) FetchBinary(name string) ([]byte, string, error) {
 	snap := *k
 	s.mu.RUnlock()
 
-	arch := runtime.GOARCH
-	if arch == "mipsle" || arch == "mipsel" {
-		arch = "mipsle-softfloat"
-	} else if arch == "mips" {
-		arch = "mips-softfloat"
-	}
+	arch := kernelAssetArch(runtime.GOARCH)
 
 	downloadURL, filename := s.buildDownloadURL(&snap, arch)
 	if downloadURL == "" {

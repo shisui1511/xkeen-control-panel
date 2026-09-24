@@ -756,3 +756,87 @@ func TestGetProcUptime_FromStatStartTime(t *testing.T) {
 		t.Fatalf("missing process: %q", got)
 	}
 }
+
+// TestBuildDownloadURL_AllArches: имена ассетов совпадают с релизами Xray и Mihomo
+// для всех архитектур сборки панели.
+func TestBuildDownloadURL_AllArches(t *testing.T) {
+	svc := NewKernelService(t.TempDir())
+	cases := []struct {
+		kernel, repo, goarch, wantFile string
+	}{
+		{"xray", "XTLS/Xray-core", "arm64", "Xray-linux-arm64-v8a.zip"},
+		{"xray", "XTLS/Xray-core", "mipsle", "Xray-linux-mips32le.zip"},
+		{"xray", "XTLS/Xray-core", "mips", "Xray-linux-mips32.zip"},
+		{"mihomo", "MetaCubeX/mihomo", "arm64", "mihomo-linux-arm64-v1.19.31.gz"},
+		{"mihomo", "MetaCubeX/mihomo", "mipsle", "mihomo-linux-mipsle-softfloat-v1.19.31.gz"},
+		{"mihomo", "MetaCubeX/mihomo", "mips", "mihomo-linux-mips-softfloat-v1.19.31.gz"},
+	}
+	for _, c := range cases {
+		t.Run(c.kernel+"/"+c.goarch, func(t *testing.T) {
+			k := &KernelInfo{Name: c.kernel, Repo: c.repo, LatestVersion: "1.19.31"}
+			url, file := svc.buildDownloadURL(k, kernelAssetArch(c.goarch))
+			if file != c.wantFile {
+				t.Fatalf("file = %q, want %q", file, c.wantFile)
+			}
+			want := "https://github.com/" + c.repo + "/releases/download/v1.19.31/" + c.wantFile
+			if url != want {
+				t.Errorf("url = %q, want %q", url, want)
+			}
+		})
+	}
+
+	k := &KernelInfo{Name: "xray", Repo: "XTLS/Xray-core", LatestVersion: "1.0.0"}
+	if url, _ := svc.buildDownloadURL(k, kernelAssetArch("amd64")); url != "" {
+		t.Errorf("unsupported arch must yield empty url, got %q", url)
+	}
+}
+
+// TestExtractZip_PrefersSoftfloatOnMIPS: MIPS-архив Xray содержит xray и
+// xray_softfloat; на MIPS должен распаковываться softfloat-вариант.
+func TestExtractZip_PrefersSoftfloatOnMIPS(t *testing.T) {
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	for _, e := range []struct{ name, body string }{
+		{"geoip.dat", "geo"},
+		{"xray_softfloat", "soft"},
+		{"xray", "hard"},
+	} {
+		fw, err := w.Create(e.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fw.Write([]byte(e.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(t.TempDir(), "Xray-linux-mips32le.zip")
+	if err := os.WriteFile(zipPath, buf.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := zipPreferSoftfloat
+	t.Cleanup(func() { zipPreferSoftfloat = orig })
+	svc := NewKernelService(t.TempDir())
+
+	for _, c := range []struct {
+		preferSoft bool
+		want       string
+	}{{true, "soft"}, {false, "hard"}} {
+		zipPreferSoftfloat = c.preferSoft
+		out, err := svc.extractZip(zipPath, "xray")
+		if err != nil {
+			t.Fatalf("preferSoft=%v: %v", c.preferSoft, err)
+		}
+		got, err := os.ReadFile(out)
+		os.Remove(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != c.want {
+			t.Errorf("preferSoft=%v: extracted %q, want %q", c.preferSoft, got, c.want)
+		}
+	}
+}
