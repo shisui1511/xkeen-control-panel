@@ -8,6 +8,8 @@
   import Button from './components/Button.svelte';
   import Select from './components/Select.svelte';
   import LiveIndicator from './components/LiveIndicator.svelte';
+  import SegmentedControl from './components/SegmentedControl.svelte';
+  import XrayDevicesPanel from './components/logs/XrayDevicesPanel.svelte';
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -51,6 +53,12 @@
   let pausedNewCount = $state(0);
   let filter = $state('');
   let sourceFilter = $state('');
+  // Stream of all sources or the Xray access log grouped by device.
+  let logsView = $state<'stream' | 'xray-devices'>('stream');
+  const viewItems = $derived([
+    { value: 'stream', label: $t('xlog.view_stream') },
+    { value: 'xray-devices', label: $t('xlog.view_devices') }
+  ]);
   let levelFilter = $state('');
   let autoScroll = $state(true);
   let wordWrap = $state(false);
@@ -535,6 +543,7 @@
     {onSwitchTab}
     hideHome={true}
   >
+    <SegmentedControl items={viewItems} bind:value={logsView} ariaLabel={$t('xlog.view_label')} />
     <!-- Flash Health Badge -->
     {#if flashHealth}
       <div
@@ -580,91 +589,62 @@
     </div>
   {/if}
 
-  <div class="logs-page-container">
-    <!-- Unified Balanced Toolbar (LOGHUB-08) -->
-    <div class="logs-toolbar">
-      <!-- Left Controls: Stream Lifecycle -->
-      <div class="tb-group tb-stream">
-        <button
-          class="btn btn-secondary btn-sm"
-          onclick={togglePause}
-          title={paused ? $t('logs.resume') : $t('logs.pause')}
-        >
-          {#if paused}
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-              ><polygon points="5 3 19 12 5 21 5 3" /></svg
-            >
-            <span>{$t('logs.resume')}</span>
-          {:else}
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-              ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
-                x="14"
-                y="5"
-                width="4"
-                height="14"
-                rx="1"
+  {#if logsView === 'xray-devices'}
+    <XrayDevicesPanel />
+  {:else}
+    <div class="logs-page-container">
+      <!-- Unified Balanced Toolbar (LOGHUB-08) -->
+      <div class="logs-toolbar">
+        <!-- Left Controls: Stream Lifecycle -->
+        <div class="tb-group tb-stream">
+          <button
+            class="btn btn-secondary btn-sm"
+            onclick={togglePause}
+            title={paused ? $t('logs.resume') : $t('logs.pause')}
+          >
+            {#if paused}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
+                ><polygon points="5 3 19 12 5 21 5 3" /></svg
+              >
+              <span>{$t('logs.resume')}</span>
+            {:else}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
+                ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
+                  x="14"
+                  y="5"
+                  width="4"
+                  height="14"
+                  rx="1"
+                /></svg
+              >
+              <span>{$t('logs.pause')}</span>
+            {/if}
+          </button>
+
+          <button
+            class="btn btn-secondary btn-sm"
+            onclick={handleClearLogs}
+            title={$t('logs.clear')}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              ><polyline points="3 6 5 6 21 6" /><path
+                d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
               /></svg
             >
-            <span>{$t('logs.pause')}</span>
-          {/if}
-        </button>
+            <span>{$t('logs.clear')}</span>
+          </button>
 
-        <button class="btn btn-secondary btn-sm" onclick={handleClearLogs} title={$t('logs.clear')}>
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            ><polyline points="3 6 5 6 21 6" /><path
-              d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
-            /></svg
-          >
-          <span>{$t('logs.clear')}</span>
-        </button>
-
-        <button
-          class="btn btn-secondary btn-sm"
-          class:btn-active={autoScroll}
-          onclick={() => (autoScroll = !autoScroll)}
-          title={$t('logs.autoscroll')}
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            ><polyline points="7 13 12 18 17 13" /><polyline points="7 6 12 11 17 6" /></svg
-          >
-          <span>{$t('logs.autoscroll')}</span>
-        </button>
-
-        <button
-          class="btn btn-secondary btn-sm"
-          class:btn-active={wordWrap}
-          onclick={() => (wordWrap = !wordWrap)}
-          title={$t('logs.word_wrap')}
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            ><polyline points="9 10 4 15 9 20" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg
-          >
-          <span>{$t('logs.word_wrap')}</span>
-        </button>
-
-        <div class="export-split">
           <button
             class="btn btn-secondary btn-sm"
-            onclick={exportFiltered}
-            title={$t('logs.export_filtered')}
+            class:btn-active={autoScroll}
+            onclick={() => (autoScroll = !autoScroll)}
+            title={$t('logs.autoscroll')}
           >
             <svg
               width="13"
@@ -673,37 +653,16 @@
               fill="none"
               stroke="currentColor"
               stroke-width="2"
-              ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-                points="7 10 12 15 17 10"
-              /><line x1="12" y1="15" x2="12" y2="3" /></svg
+              ><polyline points="7 13 12 18 17 13" /><polyline points="7 6 12 11 17 6" /></svg
             >
-            <span>{$t('logs.export_filtered')}</span>
+            <span>{$t('logs.autoscroll')}</span>
           </button>
-          <button
-            class="btn btn-secondary btn-sm btn-icon"
-            onclick={exportFull}
-            title={$t('logs.export_full')}
-            aria-label={$t('logs.export_full')}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"><path d="M6 9l6 6 6-6" /></svg
-            >
-          </button>
-        </div>
 
-        {#if $capabilities?.active_kernel === 'xray'}
           <button
-            type="button"
             class="btn btn-secondary btn-sm"
-            onclick={handleRestartXrayLogger}
-            disabled={restartingXrayLogger || restartLoggerCooldown > 0}
-            title={$t('logs.restart_xray_logger_hint')}
-            data-testid="restart-xray-logger-btn"
+            class:btn-active={wordWrap}
+            onclick={() => (wordWrap = !wordWrap)}
+            title={$t('logs.word_wrap')}
           >
             <svg
               width="13"
@@ -712,239 +671,297 @@
               fill="none"
               stroke="currentColor"
               stroke-width="2"
+              ><polyline points="9 10 4 15 9 20" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg
             >
-              <polyline points="23 4 23 10 17 10" />
-              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-            </svg>
-            <span>
-              {restartingXrayLogger
-                ? $t('logs.restarting_logger')
-                : restartLoggerCooldown > 0
-                  ? `${$t('logs.restart_logger')} (${restartLoggerCooldown}s)`
-                  : $t('logs.restart_logger')}
-            </span>
+            <span>{$t('logs.word_wrap')}</span>
           </button>
-        {:else}
-          <!-- Runtime Core Log-Level Switcher -->
-          <div class="runtime-level-control" title={$t('logs.runtime_level')}>
-            <span class="ctrl-label">Mihomo:</span>
-            <Select
-              class="runtime-select"
-              value={runtimeLevel}
-              disabled={isUpdatingLevel}
-              onchange={(e) => changeLogLevel((e.target as HTMLSelectElement).value)}
-              ariaLabel={$t('logs.runtime_level')}
-            >
-              <option value="silent">SILENT</option>
-              <option value="error">ERROR</option>
-              <option value="warning">WARN</option>
-              <option value="info">INFO</option>
-              <option value="debug">DEBUG</option>
-            </Select>
-          </div>
-        {/if}
-      </div>
 
-      <!-- Right Controls: Search & Filtering -->
-      <div class="tb-group tb-filters">
-        <!-- Search Input with Inversion & Match Counter -->
-        <div class="search-wrap">
-          <svg
-            class="search-icon"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            ><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg
-          >
-          <input
-            type="text"
-            class="search-input"
-            placeholder={$t('logs.search_placeholder')}
-            bind:value={filter}
-          />
-          {#if filter}
-            <span class="match-badge">
-              {filteredLogs.length}/{logs.length}
-            </span>
+          <div class="export-split">
             <button
-              class="clear-search-btn"
-              onclick={() => (filter = '')}
-              title={$t('logs.clear_search')}
-              aria-label={$t('logs.clear_search')}
+              class="btn btn-secondary btn-sm"
+              onclick={exportFiltered}
+              title={$t('logs.export_filtered')}
             >
-              ×
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+                  points="7 10 12 15 17 10"
+                /><line x1="12" y1="15" x2="12" y2="3" /></svg
+              >
+              <span>{$t('logs.export_filtered')}</span>
             </button>
-          {/if}
-        </div>
+            <button
+              class="btn btn-secondary btn-sm btn-icon"
+              onclick={exportFull}
+              title={$t('logs.export_full')}
+              aria-label={$t('logs.export_full')}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"><path d="M6 9l6 6 6-6" /></svg
+              >
+            </button>
+          </div>
 
-        <!-- Source Tabs -->
-        <div class="source-pills" role="group" aria-label={$t('logs.source')}>
-          {#each SOURCE_TABS as tab}
+          {#if $capabilities?.active_kernel === 'xray'}
             <button
               type="button"
-              class="source-pill"
-              class:error-tab={tab.isError}
-              class:active={sourceFilter === tab.id}
-              onclick={() => (sourceFilter = sourceFilter === tab.id ? '' : tab.id)}
+              class="btn btn-secondary btn-sm"
+              onclick={handleRestartXrayLogger}
+              disabled={restartingXrayLogger || restartLoggerCooldown > 0}
+              title={$t('logs.restart_xray_logger_hint')}
+              data-testid="restart-xray-logger-btn"
             >
-              {tab.label.startsWith('logs.') ? $t(tab.label) : tab.label}
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+              </svg>
+              <span>
+                {restartingXrayLogger
+                  ? $t('logs.restarting_logger')
+                  : restartLoggerCooldown > 0
+                    ? `${$t('logs.restart_logger')} (${restartLoggerCooldown}s)`
+                    : $t('logs.restart_logger')}
+              </span>
             </button>
-          {/each}
+          {:else}
+            <!-- Runtime Core Log-Level Switcher -->
+            <div class="runtime-level-control" title={$t('logs.runtime_level')}>
+              <span class="ctrl-label">Mihomo:</span>
+              <Select
+                class="runtime-select"
+                value={runtimeLevel}
+                disabled={isUpdatingLevel}
+                onchange={(e) => changeLogLevel((e.target as HTMLSelectElement).value)}
+                ariaLabel={$t('logs.runtime_level')}
+              >
+                <option value="silent">SILENT</option>
+                <option value="error">ERROR</option>
+                <option value="warning">WARN</option>
+                <option value="info">INFO</option>
+                <option value="debug">DEBUG</option>
+              </Select>
+            </div>
+          {/if}
         </div>
 
-        <!-- Severity Level Dropdown -->
-        <Select bind:value={levelFilter} class="level-select" ariaLabel={$t('logs.level')}>
-          <option value="">{$t('logs.all_levels')}</option>
-          <option value="error">ERROR</option>
-          <option value="warning">WARN</option>
-          <option value="info">INFO</option>
-          <option value="debug">DEBUG</option>
-        </Select>
-      </div>
-    </div>
-
-    <!-- Log Console Pane (Virtual Scroll + Fluid Layout) -->
-    <div
-      class="logs-console"
-      class:wrap-mode={wordWrap}
-      bind:this={logContainer}
-      bind:clientHeight={containerHeight}
-      onscroll={handleScroll}
-    >
-      {#if totalItems > 0}
-        {#if !wordWrap}
-          <div
-            class="logs-spacer"
-            style="height: {totalItems *
-              ROW_HEIGHT}px; width: 100%; pointer-events: none; position: absolute; top: 0; left: 0;"
-          ></div>
-        {/if}
-
-        <div class="lines-container" class:static-layout={wordWrap}>
-          {#each visibleLogs as item (item.log.id)}
-            <div
-              class="log-row"
-              class:row-error={item.log.level === 'error' || item.log.level === 'fatal'}
-              class:row-warning={item.log.level === 'warning'}
-              class:row-debug={item.log.level === 'debug'}
-              style={!wordWrap
-                ? `position: absolute; top: 0; left: 0; right: 0; height: ${ROW_HEIGHT}px; transform: translateY(${item.y}px);`
-                : ''}
+        <!-- Right Controls: Search & Filtering -->
+        <div class="tb-group tb-filters">
+          <!-- Search Input with Inversion & Match Counter -->
+          <div class="search-wrap">
+            <svg
+              class="search-icon"
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              ><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg
             >
-              <span class="col-ts monospace">{item.log.timestamp}</span>
-              <span class="col-src">
-                <span class="src-tag">{item.log.source || 'sys'}</span>
+            <input
+              type="text"
+              class="search-input"
+              placeholder={$t('logs.search_placeholder')}
+              bind:value={filter}
+            />
+            {#if filter}
+              <span class="match-badge">
+                {filteredLogs.length}/{logs.length}
               </span>
-              <span class="col-level">
-                {#if item.log.level === 'error' || item.log.level === 'fatal'}
-                  <span class="lvl-badge lvl-error">ERR</span>
-                {:else if item.log.level === 'warning'}
-                  <span class="lvl-badge lvl-warn">WRN</span>
-                {:else if item.log.level === 'debug'}
-                  <span class="lvl-badge lvl-debug">DBG</span>
-                {:else}
-                  <span class="lvl-badge lvl-info">INF</span>
-                {/if}
-              </span>
-              {#if item.log.subsystem}
-                <span class="col-subsystem">[{item.log.subsystem}]</span>
-              {/if}
-              <span class="col-msg">
-                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                {@html highlightMatches(item.log.message, filter)}
-              </span>
+              <button
+                class="clear-search-btn"
+                onclick={() => (filter = '')}
+                title={$t('logs.clear_search')}
+                aria-label={$t('logs.clear_search')}
+              >
+                ×
+              </button>
+            {/if}
+          </div>
 
+          <!-- Source Tabs -->
+          <div class="source-pills" role="group" aria-label={$t('logs.source')}>
+            {#each SOURCE_TABS as tab}
               <button
                 type="button"
-                class="copy-row-btn"
-                onclick={() => copyRow(item.log)}
-                title={$t('logs.copy_row')}
-                aria-label={$t('logs.copy_row')}
+                class="source-pill"
+                class:error-tab={tab.isError}
+                class:active={sourceFilter === tab.id}
+                onclick={() => (sourceFilter = sourceFilter === tab.id ? '' : tab.id)}
               >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  ><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
-                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                  /></svg
-                >
+                {tab.label.startsWith('logs.') ? $t(tab.label) : tab.label}
               </button>
+            {/each}
+          </div>
+
+          <!-- Severity Level Dropdown -->
+          <Select bind:value={levelFilter} class="level-select" ariaLabel={$t('logs.level')}>
+            <option value="">{$t('logs.all_levels')}</option>
+            <option value="error">ERROR</option>
+            <option value="warning">WARN</option>
+            <option value="info">INFO</option>
+            <option value="debug">DEBUG</option>
+          </Select>
+        </div>
+      </div>
+
+      <!-- Log Console Pane (Virtual Scroll + Fluid Layout) -->
+      <div
+        class="logs-console"
+        class:wrap-mode={wordWrap}
+        bind:this={logContainer}
+        bind:clientHeight={containerHeight}
+        onscroll={handleScroll}
+      >
+        {#if totalItems > 0}
+          {#if !wordWrap}
+            <div
+              class="logs-spacer"
+              style="height: {totalItems *
+                ROW_HEIGHT}px; width: 100%; pointer-events: none; position: absolute; top: 0; left: 0;"
+            ></div>
+          {/if}
+
+          <div class="lines-container" class:static-layout={wordWrap}>
+            {#each visibleLogs as item (item.log.id)}
+              <div
+                class="log-row"
+                class:row-error={item.log.level === 'error' || item.log.level === 'fatal'}
+                class:row-warning={item.log.level === 'warning'}
+                class:row-debug={item.log.level === 'debug'}
+                style={!wordWrap
+                  ? `position: absolute; top: 0; left: 0; right: 0; height: ${ROW_HEIGHT}px; transform: translateY(${item.y}px);`
+                  : ''}
+              >
+                <span class="col-ts monospace">{item.log.timestamp}</span>
+                <span class="col-src">
+                  <span class="src-tag">{item.log.source || 'sys'}</span>
+                </span>
+                <span class="col-level">
+                  {#if item.log.level === 'error' || item.log.level === 'fatal'}
+                    <span class="lvl-badge lvl-error">ERR</span>
+                  {:else if item.log.level === 'warning'}
+                    <span class="lvl-badge lvl-warn">WRN</span>
+                  {:else if item.log.level === 'debug'}
+                    <span class="lvl-badge lvl-debug">DBG</span>
+                  {:else}
+                    <span class="lvl-badge lvl-info">INF</span>
+                  {/if}
+                </span>
+                {#if item.log.subsystem}
+                  <span class="col-subsystem">[{item.log.subsystem}]</span>
+                {/if}
+                <span class="col-msg">
+                  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                  {@html highlightMatches(item.log.message, filter)}
+                </span>
+
+                <button
+                  type="button"
+                  class="copy-row-btn"
+                  onclick={() => copyRow(item.log)}
+                  title={$t('logs.copy_row')}
+                  aria-label={$t('logs.copy_row')}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
+                      d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                    /></svg
+                  >
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        {#if totalItems === 0}
+          <div class="empty-state">
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              ><circle cx="12" cy="12" r="10" /><line x1="8" y1="12" x2="16" y2="12" /></svg
+            >
+            <div class="empty-title">
+              {!connected
+                ? $t('logs.disconnected_title')
+                : filter || sourceFilter || levelFilter
+                  ? $t('logs.no_filtered_logs')
+                  : $t('logs.no_logs')}
             </div>
-          {/each}
-        </div>
-      {/if}
-
-      {#if totalItems === 0}
-        <div class="empty-state">
-          <svg
-            width="32"
-            height="32"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            ><circle cx="12" cy="12" r="10" /><line x1="8" y1="12" x2="16" y2="12" /></svg
-          >
-          <div class="empty-title">
-            {!connected
-              ? $t('logs.disconnected_title')
-              : filter || sourceFilter || levelFilter
-                ? $t('logs.no_filtered_logs')
-                : $t('logs.no_logs')}
+            <div class="empty-desc">
+              {!connected
+                ? $t('logs.disconnected_desc')
+                : connected
+                  ? $t('logs.waiting')
+                  : $t('logs.connect_hint')}
+            </div>
           </div>
-          <div class="empty-desc">
-            {!connected
-              ? $t('logs.disconnected_desc')
-              : connected
-                ? $t('logs.waiting')
-                : $t('logs.connect_hint')}
+        {/if}
+
+        <!-- Floating Paused Notification Banner -->
+        {#if paused && pausedNewCount > 0}
+          <div class="floating-pause-banner">
+            <span>{$t('logs.paused_notice', { count: String(pausedNewCount) })}</span>
+            <button class="btn btn-sm btn-primary" onclick={unpauseAndScroll}>
+              {$t('logs.scroll_to_bottom')}
+            </button>
           </div>
-        </div>
-      {/if}
-
-      <!-- Floating Paused Notification Banner -->
-      {#if paused && pausedNewCount > 0}
-        <div class="floating-pause-banner">
-          <span>{$t('logs.paused_notice', { count: String(pausedNewCount) })}</span>
-          <button class="btn btn-sm btn-primary" onclick={unpauseAndScroll}>
-            {$t('logs.scroll_to_bottom')}
-          </button>
-        </div>
-      {/if}
-    </div>
-
-    <!-- Status Bar / Stats Footer -->
-    <div class="logs-footer">
-      <div class="footer-stat">
-        {pluralize(
-          logs.length,
-          $t('logs.buffer_count_one', { count: String(logs.length) }),
-          $t('logs.buffer_count_few', { count: String(logs.length) }),
-          $t('logs.buffer_count_many', { count: String(logs.length) }),
-          $currentLang
-        )}
+        {/if}
       </div>
-      <div class="footer-stat">
-        {pluralize(
-          availableSources.length,
-          $t('logs.active_sources_count_one', { count: String(availableSources.length) }),
-          $t('logs.active_sources_count_few', { count: String(availableSources.length) }),
-          $t('logs.active_sources_count_many', { count: String(availableSources.length) }),
-          $currentLang
-        )}
-      </div>
-      <div class="footer-stat footer-live">
-        <LiveIndicator live={connected && !paused} label={$t('logs.realtime_label')} />
+
+      <!-- Status Bar / Stats Footer -->
+      <div class="logs-footer">
+        <div class="footer-stat">
+          {pluralize(
+            logs.length,
+            $t('logs.buffer_count_one', { count: String(logs.length) }),
+            $t('logs.buffer_count_few', { count: String(logs.length) }),
+            $t('logs.buffer_count_many', { count: String(logs.length) }),
+            $currentLang
+          )}
+        </div>
+        <div class="footer-stat">
+          {pluralize(
+            availableSources.length,
+            $t('logs.active_sources_count_one', { count: String(availableSources.length) }),
+            $t('logs.active_sources_count_few', { count: String(availableSources.length) }),
+            $t('logs.active_sources_count_many', { count: String(availableSources.length) }),
+            $currentLang
+          )}
+        </div>
+        <div class="footer-stat footer-live">
+          <LiveIndicator live={connected && !paused} label={$t('logs.realtime_label')} />
+        </div>
       </div>
     </div>
-  </div>
+  {/if}
 </div>
 
 <style>
