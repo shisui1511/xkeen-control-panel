@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 	"gopkg.in/yaml.v3"
 )
 
@@ -345,28 +346,10 @@ func (s *UserRulesService) InjectMihomoRules(configPath string, proxyGroupName s
 	}
 
 	outContent := strings.Join(resultLines, "\n")
-	dir := filepath.Dir(configPath)
-	tmpFile, err := os.CreateTemp(dir, filepath.Base(configPath)+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("failed to create tmp config file: %w", err)
+	// Follows a config.yaml symlink to the active profile and keeps its mode.
+	if err := utils.AtomicReplaceFile(configPath, []byte(outContent)); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
 	}
-	tmpName := tmpFile.Name()
-	defer os.Remove(tmpName)
-
-	if _, err := tmpFile.WriteString(outContent); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("failed to write tmp config file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close tmp config file: %w", err)
-	}
-
-	_ = os.Chmod(tmpName, 0644)
-
-	if err := os.Rename(tmpName, configPath); err != nil {
-		return fmt.Errorf("failed to rename tmp config file: %w", err)
-	}
-
 	return nil
 }
 
@@ -467,27 +450,8 @@ func (s *UserRulesService) InjectXrayRules(routingPath string, activeOutbound st
 		return fmt.Errorf("failed to marshal routing json: %w", err)
 	}
 
-	dir := filepath.Dir(routingPath)
-	tmpFile, err := os.CreateTemp(dir, filepath.Base(routingPath)+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("failed to create tmp routing file: %w", err)
+	if err := utils.AtomicReplaceFile(routingPath, outData); err != nil {
+		return fmt.Errorf("failed to write routing file: %w", err)
 	}
-	tmpName := tmpFile.Name()
-	defer os.Remove(tmpName)
-
-	if _, err := tmpFile.Write(outData); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("failed to write tmp routing file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close tmp routing file: %w", err)
-	}
-
-	_ = os.Chmod(tmpName, 0644)
-
-	if err := os.Rename(tmpName, routingPath); err != nil {
-		return fmt.Errorf("failed to rename tmp routing file: %w", err)
-	}
-
 	return nil
 }

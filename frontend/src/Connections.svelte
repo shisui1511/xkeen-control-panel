@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { t, pluralize, currentLang } from './i18n';
   import { capabilities, fetchCapabilities, showToast, showConfirm } from './stores';
-  import { apiFetch } from './lib/api';
+  import { apiFetch, startMihomo } from './lib/api';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PageHeader from './PageHeader.svelte';
@@ -364,12 +364,7 @@
   async function launchMihomo() {
     mihomoLaunching = true;
     try {
-      const res = await apiFetch('/api/mihomo/control', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'start' })
-      });
-      if (!res.ok) throw new Error('Failed to start Mihomo');
+      await startMihomo();
       launchTimer1 = setTimeout(async () => {
         if (destroyed) return;
         await fetchCapabilities();
@@ -965,7 +960,7 @@
           </thead>
           <tbody>
             {#if loading && connections.length === 0}
-              {#each Array(6) as _}
+              {#each Array(6) as _, i (i)}
                 <tr>
                   <td class="col-src"><Skeleton type="text-line" width="120px" /></td>
                   <td class="col-host"><Skeleton type="text-line" width="160px" /></td>
@@ -1063,8 +1058,8 @@
         <span class="badge badge-direct">DIRECT</span>
       {:else}
         <div class="chain-flow">
-          {#each nodes as node, idx}
-            <span class="chain-node">{node}</span>
+          {#each nodes as node, idx (idx)}
+            <span class="chain-node" title={node}>{node}</span>
             {#if idx < nodes.length - 1}
               <span class="chain-sep">›</span>
             {/if}
@@ -1213,7 +1208,7 @@
           <div class="m-row">
             <span class="m-key">{$t('conn.chain')}:</span>
             <div class="m-val chain-flow">
-              {#each getChainNodes(conn) as node, idx}
+              {#each getChainNodes(conn) as node, idx (idx)}
                 <span class="chain-node">{node}</span>
                 {#if idx < getChainNodes(conn).length - 1}
                   <span class="chain-sep">›</span>
@@ -1342,6 +1337,9 @@
   /* Filter Chips */
   .filter-chips {
     display: inline-flex;
+    /* Never wider than the screen: the segmented control scrolls instead. */
+    max-width: 100%;
+    min-width: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     overflow: hidden;
@@ -1488,7 +1486,7 @@
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     font-weight: 600;
-    padding: 8px 12px;
+    padding: 8px;
     border-bottom: 1px solid var(--border);
     user-select: none;
   }
@@ -1531,7 +1529,7 @@
   }
 
   .conn-row td {
-    padding: 8px 12px;
+    padding: 8px;
     font-size: var(--font-size-sm);
     vertical-align: middle;
   }
@@ -1581,7 +1579,7 @@
   /* Host Cell */
   .host-cell {
     display: inline-block;
-    max-width: min(35vw, 360px);
+    max-width: clamp(160px, 12vw, 260px);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1619,6 +1617,15 @@
     border-radius: 4px;
   }
 
+  td.col-duration {
+    white-space: nowrap;
+  }
+
+  td.col-chain {
+    min-width: 150px;
+    max-width: 170px;
+  }
+
   .chain-flow {
     display: flex;
     align-items: center;
@@ -1628,6 +1635,10 @@
 
   /* DS2-02 decorative sequence mapping: chain-node -> --seq-1, net-tcp -> --seq-2, net-udp -> --seq-3, badge-process -> --seq-5 */
   .chain-node {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: var(--font-size-xs);
     color: var(--seq-1);
     background: color-mix(in srgb, var(--seq-1) 12%, transparent);

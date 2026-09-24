@@ -102,6 +102,31 @@ export interface DNSConfig {
   fallback: string[];
   enhancedMode: 'fake-ip' | 'redir-host';
   fakeIPRange: string;
+  /** Proxy group encrypted resolvers go through ("DNS over proxy"); '' = direct. */
+  proxyGroup?: string;
+  /** Plain resolvers for proxy server names, needed to avoid a DNS loop. */
+  proxyServerNameservers?: string[];
+}
+
+/** Resolvers that break the loop when DNS goes through a proxy group. */
+export const DEFAULT_PROXY_SERVER_NAMESERVERS = ['77.88.8.8', '1.1.1.1'];
+
+const ENCRYPTED_DNS = /^(https|tls|quic|h3):\/\//i;
+
+/** Adds `#group` to encrypted resolvers (Mihomo sends them via the group), or strips it. */
+export function applyDnsProxyGroup(nameservers: string[], group: string): string[] {
+  return nameservers.map((ns) => {
+    const base = ns.replace(/#.*$/, '');
+    return group && ENCRYPTED_DNS.test(base) ? `${base}#${group}` : base;
+  });
+}
+
+/** Group shared by `#group` suffixes of the resolvers, or ''. */
+export function detectDnsProxyGroup(nameservers: string[]): string {
+  const groups = new Set(
+    nameservers.filter((ns) => ns.includes('#')).map((ns) => ns.slice(ns.indexOf('#') + 1))
+  );
+  return groups.size === 1 ? [...groups][0] : '';
 }
 
 export interface TUNConfig {
@@ -814,6 +839,13 @@ export function generateYAML(state: MihomoConfigState): string {
       if (sub.rawLines && sub.rawLines.length > 0) {
         let currentParent = '';
         let parentIndent = 0;
+        // url/interval of the provider itself sit at the smallest indent;
+        // nested ones (health-check, …) must keep their own values.
+        const baseIndent = Math.min(
+          ...sub.rawLines
+            .filter((l: string) => l.trim())
+            .map((l: string) => l.length - l.trimStart().length)
+        );
         for (const rawLine of sub.rawLines) {
           let processedLine = rawLine;
           const trimmed = rawLine.trim();
@@ -829,10 +861,11 @@ export function generateYAML(state: MihomoConfigState): string {
             parentIndent = lineIndent;
           }
 
-          if (trimmed.startsWith('url:')) {
+          const topLevel = lineIndent === baseIndent;
+          if (topLevel && trimmed.startsWith('url:')) {
             processedLine =
               rawLine.substring(0, rawLine.indexOf('url:') + 4) + ` ${yamlSafeString(sub.url)}`;
-          } else if (trimmed.startsWith('interval:')) {
+          } else if (topLevel && trimmed.startsWith('interval:')) {
             const intervalSec = sub.interval > 720 ? sub.interval : sub.interval * 3600 || 86400;
             processedLine =
               rawLine.substring(0, rawLine.indexOf('interval:') + 9) + ` ${intervalSec}`;
@@ -1292,8 +1325,19 @@ export function generateYAML(state: MihomoConfigState): string {
     lines.push(`  enhanced-mode: ${state.dns.enhancedMode}`);
     if (state.dns.enhancedMode === 'fake-ip')
       lines.push(`  fake-ip-range: ${state.dns.fakeIPRange}`);
+    const group = state.dns.proxyGroup ?? '';
+    if (group) {
+      const plain = state.dns.proxyServerNameservers?.length
+        ? state.dns.proxyServerNameservers
+        : DEFAULT_PROXY_SERVER_NAMESERVERS;
+      lines.push(`  default-nameserver:`);
+      for (const ns of plain) lines.push(`    - ${yamlSafeString(ns)}`);
+      lines.push(`  proxy-server-nameserver:`);
+      for (const ns of plain) lines.push(`    - ${yamlSafeString(ns)}`);
+    }
     lines.push(`  nameserver:`);
-    for (const ns of state.dns.nameservers) lines.push(`    - ${yamlSafeString(ns)}`);
+    for (const ns of applyDnsProxyGroup(state.dns.nameservers, group))
+      lines.push(`    - ${yamlSafeString(ns)}`);
     if (state.dns.fallback.length > 0) {
       lines.push(`  fallback:`);
       for (const fb of state.dns.fallback) lines.push(`    - ${yamlSafeString(fb)}`);
@@ -1602,8 +1646,8 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     rules: [],
     dns: {
       enabled: false,
-      nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],
-      fallback: ['https://8.8.8.8/dns-query', '1.1.1.1'],
+      nameservers: ['https://dns.google/dns-query', 'https://cloudflare-dns.com/dns-query'],
+      fallback: [],
       enhancedMode: 'fake-ip',
       fakeIPRange: '198.18.0.1/16'
     },
@@ -1647,6 +1691,7 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     let inRules = false;
     let inNameservers = false;
     let inFallback = false;
+    let inProxyServerNs = false;
     let inDnsHijack = false;
     let inSniffer = false;
     let inUselist = false;
@@ -2251,7 +2296,31 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
         if (trimmed.startsWith('nameserver:')) {
           inNameservers = true;
           inFallback = false;
+          inProxyServerNs = false;
           parsed.dns.nameservers = [];
+          continue;
+        }
+        if (trimmed.startsWith('proxy-server-nameserver:')) {
+          inProxyServerNs = true;
+          inNameservers = false;
+          inFallback = false;
+          parsed.dns.proxyServerNameservers = [];
+          continue;
+        }
+        // Any other key ends the current list (default-nameserver, policy, …).
+        if (/^[A-Za-z][\w-]*:/.test(trimmed) && !trimmed.startsWith('fallback:')) {
+          inNameservers = false;
+          inFallback = false;
+          inProxyServerNs = false;
+        }
+        if (inProxyServerNs && trimmed.startsWith('-')) {
+          const listMatch = trimmed.match(/^-\s*(.+)$/);
+          if (listMatch) {
+            parsed.dns.proxyServerNameservers = [
+              ...(parsed.dns.proxyServerNameservers ?? []),
+              unquote(listMatch[1])
+            ];
+          }
           continue;
         }
         if (trimmed.startsWith('fallback:')) {
@@ -2494,6 +2563,10 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
   } catch (e) {
     console.error('Failed to parse Mihomo config:', e);
   }
+
+  // "#Group" suffixes are shown as the DNS proxy group, not in the list.
+  parsed.dns.proxyGroup = detectDnsProxyGroup(parsed.dns.nameservers);
+  parsed.dns.nameservers = applyDnsProxyGroup(parsed.dns.nameservers, '');
 
   return parsed;
 }

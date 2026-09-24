@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -229,7 +231,8 @@ func TestServiceDNSRedirect(t *testing.T) {
 		t.Errorf("expected 400 when enabled is nil, got %d", recNil.Code)
 	}
 
-	// 4. Enabled = true
+	// 4. Enabled = true (router DNS keeps answering)
+	api.xkeenSvc.SetDNSProbe(func(context.Context) error { return nil })
 	enabled := true
 	body, _ := json.Marshal(map[string]*bool{"enabled": &enabled})
 	reqGood := httptest.NewRequest(http.MethodPost, "/api/service/dns-redirect", bytes.NewReader(body))
@@ -237,5 +240,14 @@ func TestServiceDNSRedirect(t *testing.T) {
 	api.ServiceDNSRedirect(recGood, reqGood)
 	if recGood.Code != http.StatusOK {
 		t.Errorf("expected 200 for good DNS redirect, got %d: %s", recGood.Code, recGood.Body.String())
+	}
+
+	// 5. Router stops resolving: redirection is rolled back with 409
+	api.xkeenSvc.SetDNSProbe(func(context.Context) error { return errors.New("no answer") })
+	reqDead := httptest.NewRequest(http.MethodPost, "/api/service/dns-redirect", bytes.NewReader(body))
+	recDead := httptest.NewRecorder()
+	api.ServiceDNSRedirect(recDead, reqDead)
+	if recDead.Code != http.StatusConflict {
+		t.Errorf("expected 409 when DNS dies, got %d: %s", recDead.Code, recDead.Body.String())
 	}
 }

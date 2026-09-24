@@ -14,6 +14,7 @@
   let {
     dnsConfig = $bindable(),
     dnsOverVless = $bindable(false),
+    proxyTag = '',
     xkeenDns = true,
     dnsRedirectLoading = false,
     onEnableDnsRedirect,
@@ -21,6 +22,7 @@
   }: {
     dnsConfig: DnsConfig;
     dnsOverVless: boolean;
+    proxyTag?: string;
     xkeenDns?: boolean;
     dnsRedirectLoading?: boolean;
     onEnableDnsRedirect?: () => void;
@@ -174,6 +176,9 @@
     >
       {$t('editor.dns_over_vless_desc')}
     </div>
+    {#if dnsOverVless && !proxyTag}
+      <div class="dns-proxy-missing" role="status">{$t('editor.dns_over_vless_no_proxy')}</div>
+    {/if}
   </div>
 
   <div class="section-title">{$t('editor.xray_dns')}</div>
@@ -515,5 +520,11 @@
     background: var(--code-bg, var(--bg-surface-active));
     padding: 2px 4px;
     border-radius: var(--radius-xs);
+  }
+
+  .dns-proxy-missing {
+    padding-left: 28px;
+    font-size: var(--font-size-xs);
+    color: var(--warning);
   }
 </style>

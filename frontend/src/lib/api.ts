@@ -190,6 +190,24 @@ export async function flushFakeIP(): Promise<void> {
   if (!res.ok) throw new Error('Failed to flush Fake-IP cache');
 }
 
+/** Switches XKeen to Mihomo and starts it (the "launch Mihomo" buttons). */
+export async function startMihomo(): Promise<void> {
+  const res = await apiFetch('/api/service/control?action=switch_kernel&kernel=mihomo', {
+    method: 'POST'
+  });
+  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+}
+
+/** Turns XKeen's DNS redirection into the proxy core on or off. */
+export async function setDNSRedirect(enabled: boolean): Promise<void> {
+  const res = await apiFetch('/api/service/dns-redirect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled })
+  });
+  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+}
+
 export async function flushDNSCache(): Promise<void> {
   const res = await apiFetch('/api/mihomo/proxy/cache/dns/flush', {
     method: 'POST'
@@ -209,5 +227,72 @@ export async function updateRuleProvider(name: string): Promise<void> {
   const res = await apiFetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(name)}`, {
     method: 'PUT'
   });
-  if (!res.ok) throw new Error(`Failed to update provider: ${name}`);
+  if (!res.ok) {
+    // Mihomo explains the failure, e.g. {"message":"404 Not Found"} for a dead URL.
+    let reason = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      reason = body?.message || body?.error || reason;
+    } catch {
+      // non-JSON body: keep the status
+    }
+    throw new Error(`${name}: ${reason}`);
+  }
+}
+
+export interface RuleProviderDetails {
+  name: string;
+  type: string;
+  behavior: string;
+  format: string;
+  url?: string;
+  path?: string;
+  file_exists: boolean;
+  file_size?: number;
+  file_mtime?: number;
+  inline_count?: number;
+}
+
+export interface RuleProviderPage {
+  name: string;
+  total: number;
+  matched: number;
+  offset: number;
+  entries: string[];
+}
+
+export interface RuleProviderURLCheck {
+  name: string;
+  url: string;
+  status_code?: number;
+  error?: string;
+  ok: boolean;
+  duration_ms: number;
+}
+
+export async function fetchRuleProviderDetails(): Promise<RuleProviderDetails[]> {
+  const list = await apiFetchJSON<RuleProviderDetails[]>('/api/rule-providers/info');
+  return Array.isArray(list) ? list : [];
+}
+
+export async function fetchRuleProviderContent(
+  name: string,
+  query: string,
+  offset: number,
+  limit = 200
+): Promise<RuleProviderPage> {
+  const params = new URLSearchParams({
+    name,
+    q: query,
+    offset: String(offset),
+    limit: String(limit)
+  });
+  return apiFetchJSON<RuleProviderPage>(`/api/rule-providers/content?${params}`);
+}
+
+export async function checkRuleProviderURL(name: string): Promise<RuleProviderURLCheck> {
+  return apiFetchJSON<RuleProviderURLCheck>(
+    `/api/rule-providers/check-url?name=${encodeURIComponent(name)}`,
+    { method: 'POST' }
+  );
 }

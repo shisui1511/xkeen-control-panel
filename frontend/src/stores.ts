@@ -198,6 +198,12 @@ export function showConfirm(
 
 export const devMode = writable(false);
 
+/**
+ * A file another page asks the Editor to open (absolute path). The Editor
+ * consumes and clears it on mount.
+ */
+export const editorOpenRequest = writable<string | null>(null);
+
 export async function fetchDevMode(): Promise<void> {
   try {
     const data = await apiFetchJSON<{ dev_mode: boolean }>('/api/settings');

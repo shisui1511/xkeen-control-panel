@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +32,9 @@ type RestartLogEntry struct {
 const xkeenRestartWindow = 60 * time.Second
 
 type XKeenService struct {
+	// dnsProbe checks that the router resolves names; nil uses 127.0.0.1:53.
+	dnsProbe func(ctx context.Context) error
+
 	BinaryPath string
 	dataDir    string
 	logMu      sync.Mutex
@@ -349,6 +354,39 @@ func (s *XKeenService) IsDNSProxyingEnabled() bool {
 	return false
 }
 
+// ErrDNSRolledBack means DNS redirection was switched on, the router stopped
+// resolving names and the change was undone.
+var ErrDNSRolledBack = errors.New("dns redirection rolled back: the router could not resolve names")
+
+// dnsProbeWindow is how long a freshly restarted core gets to start
+// answering DNS before redirection is rolled back.
+var dnsProbeWindow = 20 * time.Second
+
+// SetDNSProbe overrides the resolver health check (tests).
+func (s *XKeenService) SetDNSProbe(probe func(ctx context.Context) error) {
+	s.stateMu.Lock()
+	s.dnsProbe = probe
+	s.stateMu.Unlock()
+}
+
+// probeRouterDNS resolves a well-known name through the router's own DNS
+// on 127.0.0.1:53, i.e. the path LAN clients use.
+func probeRouterDNS(ctx context.Context) error {
+	r := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, network, "127.0.0.1:53")
+		},
+	}
+	_, err := r.LookupHost(ctx, "www.google.com")
+	return err
+}
+
+// SetDNSProxying switches XKeen's DNS redirection into the proxy core. When
+// switching it on, the router must still resolve names afterwards;
+// otherwise redirection is switched off again and ErrDNSRolledBack returned,
+// so a broken DNS setup never leaves the whole network without DNS.
 func (s *XKeenService) SetDNSProxying(enabled bool) (string, error) {
 	arg := "off"
 	if enabled {
@@ -361,8 +399,46 @@ func (s *XKeenService) SetDNSProxying(enabled bool) (string, error) {
 	}
 	restartOut, restartErr := s.Restart()
 	combinedOut := out + "\n" + restartOut
-	s.RecordAction("dns_redirect:"+arg, combinedOut, restartErr)
-	return combinedOut, restartErr
+	if restartErr != nil || !enabled {
+		s.RecordAction("dns_redirect:"+arg, combinedOut, restartErr)
+		return combinedOut, restartErr
+	}
+
+	s.stateMu.Lock()
+	probe := s.dnsProbe
+	s.stateMu.Unlock()
+	if probe == nil {
+		probe = probeRouterDNS
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dnsProbeWindow)
+	defer cancel()
+	var probeErr error
+	for {
+		attempt, stop := context.WithTimeout(ctx, 3*time.Second)
+		probeErr = probe(attempt)
+		stop()
+		if probeErr == nil || ctx.Err() != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Second):
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	if probeErr == nil {
+		s.RecordAction("dns_redirect:on", combinedOut, nil)
+		return combinedOut, nil
+	}
+
+	offOut, _ := s.runWithTimeoutArgs(30*time.Second, "-dns", "off")
+	backOut, _ := s.Restart()
+	combinedOut += "\n" + offOut + "\n" + backOut
+	err = fmt.Errorf("%w: %v", ErrDNSRolledBack, probeErr)
+	s.RecordAction("dns_redirect:on", combinedOut, err)
+	return combinedOut, err
 }
 
 func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (string, error) {

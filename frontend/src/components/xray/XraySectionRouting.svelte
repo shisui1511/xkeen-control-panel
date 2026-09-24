@@ -3,6 +3,9 @@
   import Select from '../Select.svelte';
   import Modal from '../Modal.svelte';
   import type { XrayRoutingRule } from './XrayContext.svelte';
+  import XrayRuleEditor from './XrayRuleEditor.svelte';
+  import XrayBalancersEditor from './XrayBalancersEditor.svelte';
+  import type { ObservatorySettings, XrayBalancer } from '../../lib/constructors/xrayRouting';
   import {
     XRAY_DEFAULT_PRESETS,
     type XrayRoutingPreset
@@ -11,6 +14,8 @@
   let {
     routingConfig = $bindable(),
     routingRules = $bindable([]),
+    balancers = $bindable([]),
+    observatorySettings = $bindable(),
     outboundTags = [],
     isXrayActive = false,
     testRouteForm = $bindable({
@@ -30,6 +35,8 @@
   }: {
     routingConfig: { domainStrategy: string };
     routingRules: XrayRoutingRule[];
+    balancers?: XrayBalancer[];
+    observatorySettings: ObservatorySettings;
     outboundTags: string[];
     isXrayActive?: boolean;
     testRouteForm?: {
@@ -51,27 +58,24 @@
   let ruleFilterTag = $state('');
   let draggedRuleId = $state<string | null>(null);
   let dragOverRuleId = $state<string | null>(null);
-  let showRuleForm = $state(false);
+  /** Rule open in the editor: null = new rule, undefined = editor closed. */
+  let editingRule = $state<XrayRoutingRule | null | undefined>(undefined);
+  const balancerTags = $derived(balancers.map((b) => b.tag).filter(Boolean));
+
+  function saveRule(rule: XrayRoutingRule) {
+    const idx = routingRules.findIndex((r) => r.id === rule.id);
+    if (idx === -1) routingRules.push(rule);
+    else routingRules[idx] = rule;
+    editingRule = undefined;
+    onchange?.();
+  }
   let showPresetModal = $state(false);
-
-  let newRule = $state({
-    outboundTag: '',
-    inboundTagRaw: '',
-    domainRaw: '',
-    ipRaw: '',
-    port: '',
-    network: 'tcp,udp'
-  });
-
-  $effect(() => {
-    if (!newRule.outboundTag && outboundTags.length > 0) {
-      newRule.outboundTag = outboundTags[0];
-    }
-  });
 
   let filteredRules = $derived.by(() => {
     if (!ruleFilterTag) return routingRules;
-    return routingRules.filter((r) => r.outboundTag === ruleFilterTag);
+    return routingRules.filter(
+      (r) => r.outboundTag === ruleFilterTag || r.balancerTag === ruleFilterTag
+    );
   });
 
   function toggleRuleEnabled(id: string) {
@@ -108,37 +112,6 @@
       routingRules.splice(idx, 1);
       onchange?.();
     }
-  }
-
-  function addRule() {
-    const domains = newRule.domainRaw.trim()
-      ? newRule.domainRaw.split(/[\s,]+/).filter(Boolean)
-      : undefined;
-    const ips = newRule.ipRaw.trim() ? newRule.ipRaw.split(/[\s,]+/).filter(Boolean) : undefined;
-    const inbounds = newRule.inboundTagRaw.trim()
-      ? newRule.inboundTagRaw.split(/[\s,]+/).filter(Boolean)
-      : undefined;
-
-    const r: XrayRoutingRule = {
-      id: typeof crypto !== 'undefined' ? crypto.randomUUID() : 'r-' + Date.now(),
-      type: 'field',
-      outboundTag: newRule.outboundTag || 'direct',
-      domain: domains,
-      ip: ips,
-      inboundTag: inbounds,
-      port: newRule.port.trim() || undefined,
-      network: newRule.network !== 'tcp,udp' ? newRule.network : undefined,
-      enabled: true
-    };
-
-    routingRules.push(r);
-    newRule.domainRaw = '';
-    newRule.ipRaw = '';
-    newRule.port = '';
-    newRule.network = 'tcp,udp';
-    newRule.inboundTagRaw = '';
-    showRuleForm = false;
-    onchange?.();
   }
 
   function applyPreset(presetId: string) {
@@ -455,7 +428,7 @@
                   /></svg
                 >
               {/if}
-              {rule.outboundTag}
+              {rule.balancerTag ? `⚖ ${rule.balancerTag}` : rule.outboundTag}
             </span>
           </div>
 
@@ -490,6 +463,24 @@
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2.5"><polyline points="6 9 12 15 18 9" /></svg
+              >
+            </button>
+            <button
+              type="button"
+              class="btn-rule-action"
+              data-testid="edit-routing-rule"
+              onclick={() => (editingRule = rule)}
+              title={$t('app.edit')}
+              aria-label={$t('app.edit')}
+            >
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                ><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg
               >
             </button>
             <button
@@ -575,102 +566,63 @@
               <span class="badge">{rule.network}</span>
             </div>
           {/if}
+
+          {#if rule.source && rule.source.length > 0}
+            <div class="rule-detail-item">
+              <strong>{$t('xray.rule_source')}:</strong>
+              <span class="rule-chips">
+                {#each rule.source as src (src)}
+                  <span class="chip chip-ip">{src}</span>
+                {/each}
+              </span>
+            </div>
+          {/if}
+
+          {#if rule.sourcePort}
+            <div class="rule-detail-item">
+              <strong>{$t('xray.rule_source_port')}:</strong> <code>{rule.sourcePort}</code>
+            </div>
+          {/if}
+
+          {#if rule.protocol && rule.protocol.length > 0}
+            <div class="rule-detail-item">
+              <strong>{$t('xray.rule_protocol')}:</strong>
+              {#each rule.protocol as p (p)}<span class="badge">{p}</span>{/each}
+            </div>
+          {/if}
+
+          {#if rule.ruleTag}
+            <div class="rule-detail-item">
+              <strong>{$t('xray.rule_tag')}:</strong> <code>{rule.ruleTag}</code>
+            </div>
+          {/if}
         </div>
       </div>
     {/each}
   </div>
 
-  {#if showRuleForm}
-    <div class="form-card card">
-      <div class="form-row">
-        <label class="form-label" for="rule-outbound">{$t('editor.xray_outbound_tag')}</label>
-        <Select
-          id="rule-outbound"
-          class="form-select rule-outbound-select"
-          data-testid="rule-outbound-select"
-          bind:value={newRule.outboundTag}
-        >
-          {#each outboundTags as tag}
-            <option value={tag}>{tag}</option>
-          {/each}
-          <option value="PROXY_TAG">PROXY_TAG</option>
-        </Select>
-      </div>
+  <button
+    type="button"
+    class="add-btn"
+    data-testid="add-routing-rule"
+    onclick={() => (editingRule = null)}
+  >
+    + {$t('editor.xray_routing_add_rule')}
+  </button>
 
-      <div class="form-row">
-        <label class="form-label" for="rule-inbounds">{$t('xray.inbound_tags_placeholder')}</label>
-        <input
-          id="rule-inbounds"
-          class="form-input"
-          bind:value={newRule.inboundTagRaw}
-          placeholder="dns-in-ytb, socks"
-        />
-      </div>
-
-      <div class="form-row">
-        <label class="form-label" for="rule-domains"
-          >{$t('editor.xray_domain_list')} ({$t('xray.comma_separated')})</label
-        >
-        <input
-          id="rule-domains"
-          class="form-input"
-          data-testid="rule-domain-input"
-          bind:value={newRule.domainRaw}
-          placeholder="geosite:youtube, google.com"
-        />
-      </div>
-
-      <div class="form-row">
-        <label class="form-label" for="rule-ips"
-          >{$t('editor.xray_ip_list')} ({$t('xray.comma_separated')})</label
-        >
-        <input
-          id="rule-ips"
-          class="form-input"
-          bind:value={newRule.ipRaw}
-          placeholder="geoip:private, 1.1.1.1"
-        />
-      </div>
-
-      <div class="form-row2">
-        <div class="form-col">
-          <label class="form-label" for="rule-ports">{$t('editor.xray_port_range')}</label>
-          <input
-            id="rule-ports"
-            class="form-input"
-            bind:value={newRule.port}
-            placeholder="80,443,1000-2000"
-          />
-        </div>
-        <div class="form-col">
-          <label class="form-label" for="rule-network">{$t('editor.xray_network')}</label>
-          <Select id="rule-network" class="form-select" bind:value={newRule.network}>
-            <option value="tcp,udp">tcp+udp</option>
-            <option value="tcp">tcp</option>
-            <option value="udp">udp</option>
-          </Select>
-        </div>
-      </div>
-
-      <div class="form-actions">
-        <button type="button" class="btn btn-secondary" onclick={() => (showRuleForm = false)}>
-          {$t('app.cancel')}
-        </button>
-        <button type="button" class="btn btn-primary" onclick={addRule}>
-          {$t('app.create')}
-        </button>
-      </div>
-    </div>
-  {:else}
-    <button
-      type="button"
-      class="add-btn"
-      data-testid="add-routing-rule"
-      onclick={() => (showRuleForm = true)}
-    >
-      + {$t('editor.xray_routing_add_rule')}
-    </button>
+  {#if editingRule !== undefined}
+    {#key editingRule?.id ?? 'new'}
+      <XrayRuleEditor
+        rule={editingRule}
+        {outboundTags}
+        {balancerTags}
+        onsave={saveRule}
+        onclose={() => (editingRule = undefined)}
+      />
+    {/key}
   {/if}
+
+  <XrayBalancersEditor bind:balancers bind:observatorySettings {outboundTags} {onchange} />
 
   <Modal
     isOpen={showPresetModal}
@@ -909,13 +861,6 @@
     color: var(--color-warning);
   }
 
-  .form-card {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
   .form-row2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -968,13 +913,6 @@
     padding: 6px 10px;
     font-size: 0.8125rem;
     color: var(--fg-primary);
-  }
-
-  .form-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 4px;
   }
 
   .add-btn {

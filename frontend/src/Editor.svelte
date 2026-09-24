@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { fade, slide } from 'svelte/transition';
   import { t, currentLang } from './i18n';
-  import { showToast, capabilities, showConfirm } from './stores';
+  import { showToast, capabilities, showConfirm, editorOpenRequest } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
@@ -1078,6 +1078,13 @@
   onMount(() => {
     loadFiles();
     checkHashTab();
+
+    const requested = $editorOpenRequest;
+    if (requested) {
+      editorOpenRequest.set(null);
+      if (requested.startsWith(mihomoDir + '/')) currentDir = mihomoDir;
+      loadFile(requested, false);
+    }
     window.addEventListener('hashchange', checkHashTab);
 
     const draft = getDraft('editor');

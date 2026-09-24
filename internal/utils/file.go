@@ -107,6 +107,18 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpPath, targetPath)
 }
 
+// AtomicReplaceFile atomically replaces the content of an existing file.
+// Symlinks are followed (a config.yaml pointing at a profile stays a
+// symlink) and the current permissions are kept, so files holding secrets
+// with 0600 are not widened. A missing file is created with 0644.
+func AtomicReplaceFile(path string, data []byte) error {
+	perm := os.FileMode(0o644)
+	if st, err := os.Stat(path); err == nil {
+		perm = st.Mode().Perm()
+	}
+	return AtomicWriteFile(path, data, perm)
+}
+
 // AtomicWriteFileSafe is like AtomicWriteFile but validates path against allowedRoots first.
 // Use this variant when the path originates from user input (CWE-22).
 func AtomicWriteFileSafe(path string, data []byte, perm os.FileMode, allowedRoots []string) error {

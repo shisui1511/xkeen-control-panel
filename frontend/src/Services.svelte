@@ -19,6 +19,7 @@
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
+  import MihomoProfilesCard from './components/mihomo/MihomoProfilesCard.svelte';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -1322,12 +1323,24 @@
     </div>
   </div>
 
-  <XKeenSettingsCard
-    onrestarted={() => {
-      fetchStatus();
-      fetchRestartLog();
-    }}
-  />
+  <div class="services-stack">
+    <XKeenSettingsCard
+      onrestarted={() => {
+        fetchStatus();
+        fetchRestartLog();
+      }}
+    />
+
+    {#if $capabilities?.kernels?.mihomo?.installed}
+      <MihomoProfilesCard
+        {onSwitchTab}
+        onactivated={() => {
+          fetchStatus();
+          fetchRestartLog();
+        }}
+      />
+    {/if}
+  </div>
 
   <!-- Watchdog Card (WD-06, D-31) -->
   <div class="card watchdog-card">
@@ -1433,7 +1446,7 @@
         </div>
       {:else}
         <div class="restart-log">
-          {#each Array.isArray(restartLog) ? (restartLogExpanded ? restartLog : restartLog.slice(0, 5)) : [] as entry}
+          {#each Array.isArray(restartLog) ? (restartLogExpanded ? restartLog : restartLog.slice(0, 5)) : [] as entry, i (i)}
             <div
               class="log-entry"
               class:log-success={entry.success}
@@ -1469,21 +1482,19 @@
         <div class="entware-item">
           <div class="entware-info">
             <div class="entware-name monospace">/opt/etc/init.d/S99xcp</div>
-            <div class="entware-desc">XKeen Control Panel Daemon (Active)</div>
+            <div class="entware-desc">XKeen Control Panel</div>
           </div>
-          <StatusBadge variant="running" label="Active" />
+          <StatusBadge variant="running" label={$t('app.running')} />
         </div>
 
         <div class="entware-item">
           <div class="entware-info">
-            <div class="entware-name monospace">/opt/etc/init.d/S24xkeen</div>
-            <div class="entware-desc">
-              XKeen Router Core Supervisor ({isRunning ? 'Running' : 'Stopped'})
-            </div>
+            <div class="entware-name monospace">/opt/etc/init.d/S05xkeen</div>
+            <div class="entware-desc">XKeen</div>
           </div>
           <StatusBadge
             variant={isRunning ? 'running' : 'stopped'}
-            label={isRunning ? 'Active' : 'Stopped'}
+            label={isRunning ? $t('app.running') : $t('svc.stopped')}
           />
         </div>
       </div>
@@ -1737,7 +1748,9 @@
   }
 
   .card-title {
+    display: block;
     margin: 0;
+    padding: 0;
     font-size: 16px;
     font-weight: 700;
     color: var(--fg-primary);
@@ -1747,6 +1760,10 @@
     margin: 2px 0 0;
     font-size: 12px;
     color: var(--fg-dim);
+  }
+
+  .channel-row :global(.seg) {
+    max-width: 100%;
   }
 
   .channel-row {
@@ -1930,13 +1947,19 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     padding: 12px 14px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
   }
 
+  .entware-info {
+    min-width: 0;
+  }
+
   .entware-name {
+    overflow-wrap: anywhere;
     font-size: 13px;
     font-weight: 700;
     color: var(--fg-primary);
@@ -1946,6 +1969,13 @@
     font-size: 12px;
     color: var(--fg-secondary);
     margin-top: 2px;
+  }
+
+  .services-stack {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    margin-bottom: 24px;
   }
 
   .watchdog-card {

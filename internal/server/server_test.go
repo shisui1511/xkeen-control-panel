@@ -50,6 +50,12 @@ func TestServer_StaticAndSPAFallback(t *testing.T) {
 		expectedCacheControl string
 	}{
 		{
+			name:                 "Unknown API route is a JSON 404, not the SPA page",
+			path:                 "/api/xkeen/dns-redirect/enable",
+			expectedStatus:       http.StatusNotFound,
+			expectedBodyContains: "unknown API endpoint",
+		},
+		{
 			name:                 "Root path serves index.html with no-cache",
 			path:                 "/",
 			expectedStatus:       http.StatusOK,

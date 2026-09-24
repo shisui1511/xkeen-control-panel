@@ -234,6 +234,9 @@ func main() {
 		}
 	})
 	srv.HandleProtected("/api/rules/test", api.RouteTest)
+	srv.HandleProtected("/api/rule-providers/info", api.RuleProvidersInfo)
+	srv.HandleProtected("/api/rule-providers/content", api.RuleProviderContent)
+	srv.HandleProtected("/api/rule-providers/check-url", api.RuleProviderCheckURL)
 	srv.HandleProtected("/api/config/mihomo-migrate-socket", api.MihomoMigrateSocket)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
@@ -244,6 +247,18 @@ func main() {
 	srv.HandleProtected("/api/xkeen/settings", api.XKeenSettingsList)
 	srv.HandleProtected("/api/xkeen/settings/validate", api.XKeenSettingsValidate)
 	srv.HandleProtected("/api/xkeen/settings/save", api.XKeenSettingsSave)
+
+	// Mihomo profiles: profiles/<name>.yaml with config.yaml as a symlink
+	api.SetMihomoProfileService(services.NewMihomoProfileService(cfg.MihomoConfigDir, cfg.DataDir))
+	srv.HandleProtected("/api/mihomo/profiles", api.MihomoProfiles)
+	for _, action := range []string{"create", "rename", "delete", "activate", "adopt"} {
+		srv.HandleProtected("/api/mihomo/profiles/"+action, api.MihomoProfileAction)
+	}
+
+	// Xray access log by device
+	api.SetXrayAccessLogService(services.NewXrayAccessLogService(cfg.XRayConfigDir))
+	srv.HandleProtected("/api/xray/access-log", api.XrayAccessLog)
+	srv.HandleProtected("/api/xray/access-log/toggle", api.XrayAccessLogToggle)
 	srv.HandleProtected("/api/service/status", api.ServiceStatus)
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
 	srv.HandleProtected("/api/service/dns-redirect", api.ServiceDNSRedirect)

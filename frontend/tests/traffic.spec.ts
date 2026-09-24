@@ -150,6 +150,8 @@ test.describe('Traffic page test suite', () => {
     await expect(clientRows).toHaveCount(1);
     await expect(clientRows.first()).toContainText('192.168.1.105');
     await expect(clientRows.first()).toContainText('4');
+    // download/upload are byte totals of the session, not rates.
+    await expect(clientRows.first().locator('.client-meta-sub')).not.toContainText('/s');
   });
 
   test('timeframe buttons switch active interval', async ({ page }) => {

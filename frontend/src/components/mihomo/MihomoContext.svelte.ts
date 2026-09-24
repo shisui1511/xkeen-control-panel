@@ -27,8 +27,8 @@ export class MihomoContext {
 
   dns = $state<DNSConfig>({
     enabled: false,
-    nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],
-    fallback: ['https://8.8.8.8/dns-query', '1.1.1.1'],
+    nameservers: ['https://dns.google/dns-query', 'https://cloudflare-dns.com/dns-query'],
+    fallback: [],
     enhancedMode: 'fake-ip',
     fakeIPRange: '198.18.0.1/16'
   });

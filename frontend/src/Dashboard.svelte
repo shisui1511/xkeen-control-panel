@@ -250,6 +250,26 @@
     systemStats !== null && systemStats.ssl_cert_days >= 0 && systemStats.ssl_cert_days < 7
   );
 
+  /**
+   * A subscription may be declared directly in config.yaml as an HTTP
+   * proxy-provider (not managed by the panel); it counts for the quick start.
+   */
+  async function hasCoreProxyProvider(signal?: AbortSignal): Promise<boolean> {
+    try {
+      const res = await apiFetch('/api/mihomo/proxy/providers/proxies', { signal });
+      if (!res.ok) return false;
+      const data = await res.json();
+      return Object.values(data?.providers ?? {}).some(
+        (p: any) =>
+          String(p?.vehicleType).toUpperCase() === 'HTTP' &&
+          Array.isArray(p?.proxies) &&
+          p.proxies.length > 0
+      );
+    } catch {
+      return false;
+    }
+  }
+
   async function fetchSubscriptionSummary(signal?: AbortSignal) {
     try {
       const res = await apiFetch('/api/subscriptions', { signal });
@@ -258,7 +278,7 @@
         const rawList = Array.isArray(envelope) ? envelope : (envelope?.data ?? []);
         const subs = Array.isArray(rawList) ? rawList : [];
         totalSubsCount = subs.length;
-        hasSubscription = subs.length > 0;
+        hasSubscription = subs.length > 0 || (await hasCoreProxyProvider(signal));
         subscriptionProxiesCount = subs.reduce(
           (acc: number, s: any) => acc + (s.proxy_count || 0),
           0
@@ -456,6 +476,12 @@
 
   const sparklineData = $derived(
     loadHistory.length >= 2 ? JSON.parse(buildSparklinePath(loadHistory)) : null
+  );
+
+  // Unknown until the first status poll: keep the capsule LED neutral
+  // instead of reporting XKeen as stopped.
+  const xkeenRunningForCapsule = $derived(
+    serviceStatus.xkeen === 'loading' ? undefined : serviceStatus.xkeen === 'running'
   );
 
   // Quickstart checklist reactive state
@@ -845,7 +871,7 @@
         variant="mobile"
         {systemStats}
         activeKernel={$capabilities?.active_kernel}
-        isXkeenRunning={serviceStatus.xkeen === 'running'}
+        isXkeenRunning={xkeenRunningForCapsule}
         onSwitchTab={switchTab}
       />
     {:else}
@@ -885,7 +911,7 @@
       {pwaInstallPrompt}
       onInstallPWA={installPWA}
       {systemStats}
-      isXkeenRunning={serviceStatus.xkeen === 'running'}
+      isXkeenRunning={xkeenRunningForCapsule}
     />
   </div>
 

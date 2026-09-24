@@ -227,8 +227,8 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
     // Для Xray должны показываться: geoip.dat, geosite.dat и custom.dat (displayedFiles.length = 3)
     // Все 3 файла актуальны (не outdated).
     const statsTextXray = await page.locator('.stats').innerText();
-    expect(statsTextXray).toMatch(/3\s+(Files|Файлов)/i);
-    expect(statsTextXray).toMatch(/3\s+(active|актуальных)/i);
+    expect(statsTextXray).toMatch(/3\s+(files|файла)/i);
+    expect(statsTextXray).toMatch(/3\s+(up to date|актуальных)/i);
     expect(statsTextXray).not.toContain('отсутствует');
 
     // 2. Меняем активное ядро на mihomo и перезагружаем страницу
@@ -239,8 +239,8 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
     // Для Mihomo должны показываться: geoip.metadb и custom.dat (displayedFiles.length = 2)
     // geoip.metadb устарел (>30 дней), custom.dat актуален. Итого: 1 актуальный.
     const statsTextMihomo = await page.locator('.stats').innerText();
-    expect(statsTextMihomo).toMatch(/2\s+(Files|Файлов)/i);
-    expect(statsTextMihomo).toMatch(/1\s+(active|актуальных)/i);
+    expect(statsTextMihomo).toMatch(/2\s+(files|файла)/i);
+    expect(statsTextMihomo).toMatch(/1\s+(up to date|актуальный)/i);
   });
 
   test('DAT Manager: tag browser correctly unpacks tags and GeoScan modal performs lookup', async ({

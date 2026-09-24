@@ -61,6 +61,14 @@ func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 	fileServer := http.FileServer(http.FS(web))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		// An unknown API route must fail loudly: answering with the SPA page
+		// and 200 hid calls to endpoints that do not exist.
+		if strings.HasPrefix(path, "/api/") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"success":false,"error":"unknown API endpoint"}`))
+			return
+		}
 		if path == "/" || path == "/index.html" || filepath.Ext(path) == "" {
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			w.Header().Set("Pragma", "no-cache")

@@ -1,9 +1,13 @@
 package services
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -84,5 +88,84 @@ func TestGetHistory_AllSourcesSortedByID(t *testing.T) {
 		if h[i-1].ID > h[i].ID {
 			t.Fatalf("history not ordered by ID at %d: %d > %d", i, h[i-1].ID, h[i].ID)
 		}
+	}
+}
+
+func TestPollRCILog_IngestsNewEntriesOnce(t *testing.T) {
+	var round int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&round, 1)
+		entries := `"1": {"id": 1, "timestamp": "Sep 24 09:07:48", "ident": "dropbear[25629]", "message": {"level": "Info", "message": "Child connection"}}`
+		if n > 1 {
+			entries += `, "2": {"id": 2, "timestamp": "Sep 24 09:07:50", "ident": "ndm", "message": {"level": "Error", "message": "Core::Syslog: link down"}}`
+		}
+		fmt.Fprintf(w, `{"show": {"log": {"log": {%s}}}}`, entries)
+	}))
+	defer srv.Close()
+
+	d := NewLogDispatcher(nil, t.TempDir(), "")
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.pollRCILog(srv.URL, 50*time.Millisecond)
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	var h []LogEntry
+	for time.Now().Before(deadline) {
+		h = d.GetHistory("syslog", "", 100)
+		if len(h) >= 2 && atomic.LoadInt32(&round) >= 3 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	d.Stop()
+
+	if len(h) != 2 {
+		t.Fatalf("expected each entry once, got %d: %+v", len(h), h)
+	}
+	if h[0].Timestamp != "09:07:48" || h[0].Subsystem != "dropbear" || !strings.Contains(h[0].Message, "Child connection") {
+		t.Errorf("first entry: %+v", h[0])
+	}
+	if h[1].Level != "error" || h[1].Subsystem != "ndm" {
+		t.Errorf("second entry: %+v", h[1])
+	}
+}
+
+func TestReadFileTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.log")
+	content := "aaaa first\nbbbb second\ncccc third\npartial"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines, offset, err := readFileTail(path, int64(len(content)-3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(lines, "|") != "bbbb second|cccc third" {
+		t.Errorf("lines = %q", lines)
+	}
+	if want := int64(strings.Index(content, "partial")); offset != want {
+		t.Errorf("offset = %d, want %d", offset, want)
+	}
+}
+
+func TestIngestBackfillOrdersByTime(t *testing.T) {
+	d := NewLogDispatcher(nil, t.TempDir(), "")
+	defer d.Stop()
+	now := time.Date(2026, 9, 24, 13, 55, 0, 0, time.Local)
+	d.ingestBackfill([]backfillLine{
+		{raw: "2026/09/24 13:50:53 GET /a", source: "xcp"},
+		{raw: "2026/09/24 13:52:10 GET /b", source: "xcp"},
+		{raw: "[syslog] 23:59:58 [info] yesterday", source: "syslog"},
+		{raw: "[syslog] 13:51:00 [info] between", source: "syslog"},
+	}, now)
+	h := d.GetHistory("", "", 100)
+	var got []string
+	for _, e := range h {
+		got = append(got, e.Timestamp)
+	}
+	if strings.Join(got, " ") != "23:59:58 13:50:53 13:51:00 13:52:10" {
+		t.Errorf("order = %v", got)
 	}
 }

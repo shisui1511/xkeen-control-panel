@@ -351,6 +351,9 @@ jobs:
       - name: Check i18n translations
         run: node scripts/check-i18n.js
 
+      - name: Check frontend API calls against backend routes
+        run: node scripts/check-api-routes.js
+
       - name: Test version script
         run: |
           sh scripts/version_test.sh

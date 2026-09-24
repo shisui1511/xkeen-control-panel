@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { DEFAULT_PROXY_SERVER_NAMESERVERS } from '../../lib/mihomoYaml';
   import Select from '../Select.svelte';
   import { t } from '../../i18n';
   import { capabilities, showToast, fetchCapabilities } from '../../stores';
@@ -32,6 +33,14 @@
       dnsRedirectLoading = false;
     }
   }
+
+  const dnsGroupOptions = $derived([
+    { value: '', label: $t('mihomo.dns_proxy_group_direct') },
+    ...ctx.groups
+      .map((g) => g.name)
+      .filter((n, idx, all) => n && all.indexOf(n) === idx)
+      .map((n) => ({ value: n, label: n }))
+  ]);
 </script>
 
 <div class="sec-body" data-testid="mihomo-section-dns">
@@ -90,6 +99,39 @@
           bind:value={ctx.dns.fakeIPRange}
           oninput={() => ctx.markDirty()}
         />
+      </div>
+    {/if}
+    <div class="form-row">
+      <label class="form-label" for="mihomo-dns-proxy-group">{$t('mihomo.dns_proxy_group')}</label>
+      <Select
+        id="mihomo-dns-proxy-group"
+        value={ctx.dns.proxyGroup ?? ''}
+        options={dnsGroupOptions}
+        onchange={(e) => {
+          ctx.dns.proxyGroup = e.currentTarget.value;
+          ctx.markDirty();
+        }}
+      />
+      <p class="form-hint">{$t('mihomo.dns_proxy_group_hint')}</p>
+    </div>
+    {#if ctx.dns.proxyGroup}
+      <div class="form-row">
+        <label class="form-label" for="mihomo-dns-proxy-server-ns"
+          >{$t('mihomo.dns_proxy_server_ns')}</label
+        >
+        <input
+          id="mihomo-dns-proxy-server-ns"
+          class="form-input"
+          value={(ctx.dns.proxyServerNameservers?.length
+            ? ctx.dns.proxyServerNameservers
+            : DEFAULT_PROXY_SERVER_NAMESERVERS
+          ).join(', ')}
+          onchange={(e) => {
+            ctx.dns.proxyServerNameservers = e.currentTarget.value.split(/[\s,]+/).filter(Boolean);
+            ctx.markDirty();
+          }}
+        />
+        <p class="form-hint">{$t('mihomo.dns_proxy_server_ns_hint')}</p>
       </div>
     {/if}
     <div class="form-row">
@@ -177,5 +219,11 @@
     background: color-mix(in srgb, var(--warning) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     color: var(--warning);
+  }
+
+  .form-hint {
+    margin: 4px 0 0;
+    font-size: var(--font-size-xs);
+    color: var(--fg-muted);
   }
 </style>
