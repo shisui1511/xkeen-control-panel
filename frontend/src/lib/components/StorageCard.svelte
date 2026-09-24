@@ -43,45 +43,78 @@
         : 'var(--success)'}
 
   <div class="card mb-2">
-    <div class="card-label">{$t('settings.section_storage')}</div>
-    <div class="field-group">
-      <div class="field-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
-        <div
-          style="display: flex; justify-content: space-between; font-size: 14px; font-weight: 500;"
-        >
-          <span style="color: var(--fg-secondary);">{$t('settings.section_storage')}</span>
-          <span style="color: var(--fg-primary);">
-            {$t('settings.storage_free_of')
-              .replace('{free}', formatBytes(diskStats.free))
-              .replace('{total}', formatBytes(diskStats.total))}
-          </span>
-        </div>
-
-        <div
-          class="progress-container"
-          style="background-color: var(--border); height: 8px; border-radius: var(--radius-sm, 4px); overflow: hidden; width: 100%;"
-        >
-          <div
-            class="progress-bar"
-            style="width: {usedPercent}%; height: 100%; background-color: {barColor}; transition: width 0.3s ease; border-radius: var(--radius-sm, 4px);"
-            title="{usedPercent}%"
-            role="progressbar"
-            aria-valuenow={usedPercent}
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-label="{$t('settings.storage')}: {usedPercent}%"
-          ></div>
-        </div>
-
-        <div
-          style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary);"
-        >
-          <span>
-            {$t('settings.storage_used').replace('{used}', formatBytes(diskStats.used))}
-          </span>
-          <span>{usedPercent}%</span>
-        </div>
+    <div class="storage-label">{$t('settings.section_storage')}</div>
+    <div class="storage-body">
+      <div class="storage-head">
+        <span class="storage-free">
+          {$t('settings.storage_free_of')
+            .replace('{free}', formatBytes(diskStats.free))
+            .replace('{total}', formatBytes(diskStats.total))}
+        </span>
+        <span class="storage-percent">{usedPercent}%</span>
+      </div>
+      <div
+        class="storage-track"
+        role="progressbar"
+        aria-valuenow={usedPercent}
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-label="{$t('settings.storage')}: {usedPercent}%"
+      >
+        <div class="storage-bar" style:width="{usedPercent}%" style:background={barColor}></div>
+      </div>
+      <div class="storage-used">
+        {$t('settings.storage_used').replace('{used}', formatBytes(diskStats.used))}
       </div>
     </div>
   </div>
 {/if}
+
+<style>
+  .storage-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--fg-dim);
+    margin-bottom: 14px;
+  }
+
+  .storage-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .storage-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--fg-primary);
+  }
+
+  .storage-percent {
+    color: var(--fg-secondary);
+    font-family: var(--font-family-mono);
+  }
+
+  .storage-track {
+    height: 8px;
+    width: 100%;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: var(--border);
+  }
+
+  .storage-bar {
+    height: 100%;
+    border-radius: var(--radius-sm);
+    transition: width 0.3s ease;
+  }
+
+  .storage-used {
+    font-size: 12px;
+    color: var(--fg-secondary);
+  }
+</style>
