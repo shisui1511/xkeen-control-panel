@@ -131,3 +131,41 @@ func TestPollRCILog_IngestsNewEntriesOnce(t *testing.T) {
 		t.Errorf("second entry: %+v", h[1])
 	}
 }
+
+func TestReadFileTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.log")
+	content := "aaaa first\nbbbb second\ncccc third\npartial"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines, offset, err := readFileTail(path, int64(len(content)-3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(lines, "|") != "bbbb second|cccc third" {
+		t.Errorf("lines = %q", lines)
+	}
+	if want := int64(strings.Index(content, "partial")); offset != want {
+		t.Errorf("offset = %d, want %d", offset, want)
+	}
+}
+
+func TestIngestBackfillOrdersByTime(t *testing.T) {
+	d := NewLogDispatcher(nil, t.TempDir(), "")
+	defer d.Stop()
+	now := time.Date(2026, 9, 24, 13, 55, 0, 0, time.Local)
+	d.ingestBackfill([]backfillLine{
+		{raw: "2026/09/24 13:50:53 GET /a", source: "xcp"},
+		{raw: "2026/09/24 13:52:10 GET /b", source: "xcp"},
+		{raw: "[syslog] 23:59:58 [info] yesterday", source: "syslog"},
+		{raw: "[syslog] 13:51:00 [info] between", source: "syslog"},
+	}, now)
+	h := d.GetHistory("", "", 100)
+	var got []string
+	for _, e := range h {
+		got = append(got, e.Timestamp)
+	}
+	if strings.Join(got, " ") != "23:59:58 13:50:53 13:51:00 13:52:10" {
+		t.Errorf("order = %v", got)
+	}
+}

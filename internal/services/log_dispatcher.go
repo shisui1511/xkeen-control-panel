@@ -665,37 +665,171 @@ func (d *LogDispatcher) startFileConnectors() {
 		}
 	}
 
+	// History from before the start is read synchronously and ingested in
+	// time order: concurrent tails would interleave IDs of different
+	// sources, and the UI orders entries by ID.
+	var backfill []backfillLine
+	offsets := make(map[string]int64)
 	seen := make(map[string]bool)
+	var files []string
 	for _, src := range sources {
 		if src == "" || seen[src] {
 			continue
 		}
 		seen[src] = true
-		if _, err := os.Stat(src); err == nil {
-			d.wg.Add(1)
-			go d.tailFile(src)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		files = append(files, src)
+		lines, offset, err := readFileTail(src, fileTailBytes)
+		if err != nil {
+			continue
+		}
+		offsets[src] = offset
+		source := fileFallbackSource(src)
+		for _, l := range lines {
+			backfill = append(backfill, backfillLine{raw: l, source: source})
 		}
 	}
 
-	// Syslog connector via logread -f
+	_, lookErr := exec.LookPath("logread")
+	useLogread := lookErr == nil
+	rciLastID := int64(-1)
+	if !useLogread {
+		if entries, err := fetchRCILog(d.ctx, defaultRCILogURL, 50); err == nil {
+			for _, e := range entries {
+				backfill = append(backfill, backfillLine{raw: rciLogLine(e), source: "syslog"})
+				rciLastID = e.ID
+			}
+		}
+	}
+
+	d.ingestBackfill(backfill, time.Now())
+
+	for _, src := range files {
+		start, ok := offsets[src]
+		if !ok {
+			start = -1
+		}
+		d.wg.Add(1)
+		go d.tailFileFrom(src, start)
+	}
+
+	// Syslog connector: logread -f, or the Keenetic RCI.
 	d.wg.Add(1)
-	go d.tailSyslog()
+	go func() {
+		defer d.wg.Done()
+		if useLogread {
+			d.followLogread()
+			return
+		}
+		d.pollRCILogFrom(defaultRCILogURL, 5*time.Second, rciLastID)
+	}()
+}
+
+// fileTailBytes is how much of each log file is shown on start.
+const fileTailBytes = 8192
+
+type backfillLine struct {
+	raw    string
+	source string
+}
+
+// readFileTail returns the complete lines of the last n bytes of path and
+// the offset the follower continues from.
+func readFileTail(path string, n int64) ([]string, int64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer file.Close()
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, 0, err
+	}
+	size := stat.Size()
+	start := int64(0)
+	if size > n {
+		start = size - n
+	}
+	buf := make([]byte, size-start)
+	if _, err := file.ReadAt(buf, start); err != nil && err != io.EOF {
+		return nil, 0, err
+	}
+	text := string(buf)
+	if start > 0 {
+		// The window starts mid-line; drop the partial fragment.
+		i := strings.IndexByte(text, '\n')
+		if i < 0 {
+			return nil, size, nil
+		}
+		text = text[i+1:]
+	}
+	// An unterminated last line is left to the follower.
+	end := strings.LastIndexByte(text, '\n')
+	if end < 0 {
+		return nil, size - int64(len(text)), nil
+	}
+	offset := size - int64(len(text)-end-1)
+	var lines []string
+	for _, l := range strings.Split(text[:end], "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines, offset, nil
+}
+
+// ingestBackfill ingests historical lines ordered by their time of day.
+// Times later than now belong to the previous day.
+func (d *LogDispatcher) ingestBackfill(lines []backfillLine, now time.Time) {
+	nowSec := now.Hour()*3600 + now.Minute()*60 + now.Second()
+	keys := make([]int, len(lines))
+	for i, l := range lines {
+		e := d.parseRedactedLine(RedactSensitiveText(l.raw), l.source)
+		keys[i] = nowSec
+		if t, err := time.Parse("15:04:05", e.Timestamp); err == nil {
+			sec := t.Hour()*3600 + t.Minute()*60 + t.Second()
+			if sec > nowSec+60 {
+				sec -= 86400
+			}
+			keys[i] = sec
+		}
+	}
+	order := make([]int, len(lines))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return keys[order[a]] < keys[order[b]] })
+	for _, i := range order {
+		d.IngestLine(lines[i].raw, lines[i].source)
+	}
+}
+
+func fileFallbackSource(path string) string {
+	base := strings.ToLower(filepath.Base(path))
+	switch {
+	case strings.Contains(base, "xray") || strings.Contains(path, "xray"):
+		return "xray"
+	case strings.Contains(base, "mihomo"):
+		return "mihomo"
+	case strings.Contains(base, "xcp"):
+		return "xcp"
+	default:
+		return "xkeen"
+	}
 }
 
 func (d *LogDispatcher) tailFile(path string) {
+	d.tailFileFrom(path, -1)
+}
+
+// tailFileFrom follows path starting at offset start; a negative start
+// shows the recent tail first.
+func (d *LogDispatcher) tailFileFrom(path string, start int64) {
 	defer d.wg.Done()
 
-	var fallbackSource string
-	base := strings.ToLower(filepath.Base(path))
-	if strings.Contains(base, "xray") || strings.Contains(path, "xray") {
-		fallbackSource = "xray"
-	} else if strings.Contains(base, "mihomo") {
-		fallbackSource = "mihomo"
-	} else if strings.Contains(base, "xcp") {
-		fallbackSource = "xcp"
-	} else {
-		fallbackSource = "xkeen"
-	}
+	fallbackSource := fileFallbackSource(path)
 
 	reopened := false
 	for {
@@ -717,10 +851,13 @@ func (d *LogDispatcher) tailFile(path string) {
 
 		stat, statErr := file.Stat()
 		reader := bufio.NewReader(file)
-		// On the first open show only the recent tail. After a rotation the
+		// On the first open continue after the backfill or show the recent
+		// tail; a file that shrank since was rotated. After a rotation the
 		// new file is read from its start so no lines are lost or repeated.
-		if !reopened && statErr == nil && stat.Size() > 8192 {
-			_, _ = file.Seek(-8192, io.SeekEnd)
+		if !reopened && start >= 0 && statErr == nil && start <= stat.Size() {
+			_, _ = file.Seek(start, io.SeekStart)
+		} else if !reopened && start < 0 && statErr == nil && stat.Size() > fileTailBytes {
+			_, _ = file.Seek(-fileTailBytes, io.SeekEnd)
 			// The seek lands mid-line; drop the partial fragment.
 			_, _ = reader.ReadString('\n')
 		}
@@ -764,17 +901,6 @@ func (d *LogDispatcher) tailFile(path string) {
 			}
 		}
 	}
-}
-
-func (d *LogDispatcher) tailSyslog() {
-	defer d.wg.Done()
-
-	if _, err := exec.LookPath("logread"); err == nil {
-		d.followLogread()
-		return
-	}
-	// Keenetic has no logread; its system log is served by the local RCI.
-	d.pollRCILog(defaultRCILogURL, 5*time.Second)
 }
 
 // followLogread streams "logread -f" and restarts it when it exits (syslog
@@ -874,8 +1000,16 @@ func rciLogLine(e rciLogEntry) string {
 
 // pollRCILog ingests new Keenetic system log entries every interval.
 func (d *LogDispatcher) pollRCILog(rciURL string, interval time.Duration) {
-	var lastID int64 = -1
+	d.pollRCILogFrom(rciURL, interval, -1)
+}
+
+// pollRCILogFrom polls the RCI log for entries newer than lastID; -1 starts
+// with the recent entries.
+func (d *LogDispatcher) pollRCILogFrom(rciURL string, interval time.Duration, lastID int64) {
 	wait := time.Duration(0)
+	if lastID >= 0 {
+		wait = interval
+	}
 	for {
 		select {
 		case <-d.ctx.Done():
