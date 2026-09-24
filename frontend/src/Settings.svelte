@@ -536,12 +536,17 @@
         newPassword = '';
         confirmPassword = '';
       } else {
-        const text = await res.text();
-        passwordError = text || $t('settings.password_error');
+        let payload: any = null;
+        try {
+          payload = await res.json();
+        } catch {
+          // тело ответа не JSON
+        }
+        passwordError = payload?.error || $t('settings.password_error');
       }
     } catch (e: any) {
       if (e?.status === 401) return;
-      passwordError = e.message;
+      passwordError = e?.message || $t('settings.password_error');
     } finally {
       passwordChanging = false;
     }

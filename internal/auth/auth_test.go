@@ -3,6 +3,7 @@ package auth
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -253,7 +254,7 @@ func TestChangePassword_WrongCurrent(t *testing.T) {
 	}
 	svc.SetPasswordHash(hash)
 
-	err = svc.ChangePassword("wrongpass", "newpassword123")
+	err = svc.ChangePassword("127.0.0.1", "", "wrongpass", "newpassword123")
 	if err == nil {
 		t.Error("expected error for wrong current password, got nil")
 	}
@@ -307,7 +308,7 @@ func TestChangePassword_Success(t *testing.T) {
 	}
 	svc.SetPasswordHash(hash)
 
-	err = svc.ChangePassword("oldpass123", "newpass456")
+	err = svc.ChangePassword("127.0.0.1", "", "oldpass123", "newpass456")
 	if err != nil {
 		t.Fatalf("ChangePassword failed: %v", err)
 	}
@@ -629,5 +630,69 @@ func TestRateLimiter_Reset_And_GetLockoutRemaining(t *testing.T) {
 	rl.ResetAttempts("1.2.3.4")
 	if remAfter := rl.GetLockoutRemaining("1.2.3.4"); remAfter != 0 {
 		t.Errorf("expected 0 remaining after reset, got %v", remAfter)
+	}
+}
+
+// TestChangePassword_SaveFailureKeepsOldPassword: если новый хеш не удалось
+// сохранить, действующим остаётся старый пароль (иначе после перезапуска
+// вернулся бы старый, а до него работал бы «несохранённый» новый).
+func TestChangePassword_SaveFailureKeepsOldPassword(t *testing.T) {
+	svc := NewAuthService("", false, 5, 5*time.Minute, func(string) error {
+		return errors.New("disk full")
+	})
+	hash, err := svc.HashPassword("oldpass123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetPasswordHash(hash)
+
+	if err := svc.ChangePassword("127.0.0.1", "", "oldpass123", "newpass456"); err == nil {
+		t.Fatal("expected save error")
+	}
+	if err := svc.VerifyPassword("oldpass123"); err != nil {
+		t.Errorf("old password must stay active after failed save: %v", err)
+	}
+	if err := svc.VerifyPassword("newpass456"); err == nil {
+		t.Error("unsaved new password must not be active")
+	}
+}
+
+// TestChangePassword_EndsOtherSessions: смена пароля завершает остальные
+// сессии и сохраняет текущую.
+func TestChangePassword_EndsOtherSessions(t *testing.T) {
+	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	hash, _ := svc.HashPassword("oldpass123")
+	svc.SetPasswordHash(hash)
+
+	current, _ := svc.CreateSession()
+	other, _ := svc.CreateSession()
+
+	if err := svc.ChangePassword("127.0.0.1", current.Token, "oldpass123", "newpass456"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ValidateSession(current.Token); err != nil {
+		t.Errorf("current session must survive: %v", err)
+	}
+	if _, err := svc.ValidateSession(other.Token); err == nil {
+		t.Error("other session must be ended after password change")
+	}
+}
+
+// TestChangePassword_RateLimited: подбор текущего пароля упирается в лимит.
+func TestChangePassword_RateLimited(t *testing.T) {
+	svc := NewAuthService("", false, 3, 5*time.Minute, nil)
+	hash, _ := svc.HashPassword("oldpass123")
+	svc.SetPasswordHash(hash)
+
+	var last error
+	for i := 0; i < 5; i++ {
+		last = svc.ChangePassword("10.0.0.5", "", "wrong-guess", "newpass456")
+	}
+	if !errors.Is(last, ErrTooManyAttempts) {
+		t.Errorf("expected ErrTooManyAttempts after repeated wrong guesses, got %v", last)
+	}
+	// Даже верный пароль не принимается, пока действует блокировка
+	if err := svc.ChangePassword("10.0.0.5", "", "oldpass123", "newpass456"); !errors.Is(err, ErrTooManyAttempts) {
+		t.Errorf("lockout must apply to the correct password too, got %v", err)
 	}
 }
