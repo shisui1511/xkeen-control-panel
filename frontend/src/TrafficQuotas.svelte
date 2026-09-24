@@ -1129,7 +1129,9 @@
   .info-banner-description {
     margin: 0;
     font-size: 13px;
-    color: var(--fg-secondary);
+    /* На тонированной подложке --fg-secondary в светлой теме даёт 4.35:1 —
+       ниже WCAG AA; подмешиваем основной цвет текста */
+    color: color-mix(in srgb, var(--fg-secondary) 80%, var(--fg-primary));
     line-height: 1.4;
   }
   .info-banner-close {
