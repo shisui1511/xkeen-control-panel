@@ -19,6 +19,7 @@
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
+  import MihomoProfilesCard from './components/mihomo/MihomoProfilesCard.svelte';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -1328,6 +1329,16 @@
       fetchRestartLog();
     }}
   />
+
+  {#if $capabilities?.kernels?.mihomo?.installed}
+    <MihomoProfilesCard
+      {onSwitchTab}
+      onactivated={() => {
+        fetchStatus();
+        fetchRestartLog();
+      }}
+    />
+  {/if}
 
   <!-- Watchdog Card (WD-06, D-31) -->
   <div class="card watchdog-card">
