@@ -115,3 +115,85 @@ test('Xray constructor keeps rule fields, stores disabled rules and saves only c
   ]);
   expect(saved['05_routing.json'].observatory.subjectSelector).toEqual(['vless-']);
 });
+
+test('rule editor retargets a rule to a new balancer', async ({ page }) => {
+  const saved: Record<string, any> = {};
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'serviceWorker', {
+      value: undefined,
+      configurable: true
+    });
+    window.localStorage.setItem('lang', 'ru');
+  });
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    if (url.pathname === '/api/auth/me') {
+      return route.fulfill({
+        json: { authenticated: true, setup_required: false, csrf_token: 't' }
+      });
+    }
+    if (url.pathname === '/api/capabilities') {
+      return route.fulfill({
+        json: {
+          success: true,
+          data: {
+            kernels: { xray: { installed: true }, mihomo: { installed: true } },
+            active_kernel: 'xray'
+          }
+        }
+      });
+    }
+    if (url.pathname === '/api/config/read') {
+      const path = url.searchParams.get('path') || '';
+      const key = Object.keys(FILES).find((k) => path.includes(k));
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: key ? FILES[key] : '{}'
+      });
+    }
+    if (url.pathname === '/api/config/save' && method === 'POST') {
+      const name = (url.searchParams.get('path') || '').split('/').pop() || '';
+      saved[name] = JSON.parse(route.request().postData() || '{}');
+      return route.fulfill({ json: { success: true } });
+    }
+    if (url.pathname === '/api/config/list' || url.pathname === '/api/templates/list') {
+      return route.fulfill({ json: [] });
+    }
+    return route.fulfill({ json: { success: true, data: {} } });
+  });
+
+  await page.goto('/#/constructor');
+  await page.locator('.constructor-kernel-toggle button:has-text("Xray")').click();
+  const list = page.locator('[data-testid="routing-rules-list"]');
+  await expect(list.locator('.rule-card')).toHaveCount(3);
+
+  // Add a round-robin balancer over vless- outbounds.
+  await page.getByRole('button', { name: 'Добавить балансировщик' }).click();
+  const card = page.locator('[data-testid="balancer-card"]').last();
+  await card.getByLabel('Тег', { exact: true }).fill('rr');
+  await card.getByLabel(/Селектор outbound/).fill('vless-');
+  await card.getByLabel(/Селектор outbound/).blur();
+  await card.getByLabel('Стратегия').selectOption('roundRobin');
+  await expect(card.getByText('Попадают: vless-a')).toBeVisible();
+
+  // Edit the third rule (network -> direct) to point to the balancer.
+  await list.locator('.rule-card').nth(2).getByTestId('edit-routing-rule').click();
+  const editor = page.getByTestId('xray-rule-editor');
+  await editor.getByRole('button', { name: 'Балансировщик' }).click();
+  await editor.getByLabel('Балансировщик', { exact: true }).selectOption('rr');
+  await editor.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(list.locator('.rule-card').nth(2)).toContainText('⚖ rr');
+
+  await page.locator('[data-testid="apply-changes-btn"]').click();
+  await page.locator('[data-testid="apply-confirm-dialog"] button.btn-primary').click();
+  await expect.poll(() => Object.keys(saved)).toContain('05_routing.json');
+  const routing = saved['05_routing.json'].routing;
+  expect(routing.rules[2]).toEqual({ type: 'field', network: 'tcp,udp', balancerTag: 'rr' });
+  expect(routing.balancers).toContainEqual({
+    tag: 'rr',
+    selector: ['vless-'],
+    strategy: { type: 'roundRobin' }
+  });
+});

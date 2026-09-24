@@ -1042,6 +1042,8 @@
         <XraySectionRouting
           bind:routingConfig
           bind:routingRules
+          bind:balancers
+          bind:observatorySettings
           {outboundTags}
           isXrayActive={$capabilities?.active_kernel === 'xray'}
           bind:testRouteForm
