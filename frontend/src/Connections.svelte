@@ -1337,6 +1337,9 @@
   /* Filter Chips */
   .filter-chips {
     display: inline-flex;
+    /* Never wider than the screen: the segmented control scrolls instead. */
+    max-width: 100%;
+    min-width: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     overflow: hidden;

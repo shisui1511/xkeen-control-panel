@@ -1031,6 +1031,9 @@
 
   .sec-tabs {
     display: flex;
+    /* Scroll inside instead of widening the page on phones. */
+    max-width: 100%;
+    min-width: 0;
     gap: 2px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border);

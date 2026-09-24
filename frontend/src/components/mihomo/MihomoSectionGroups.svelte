@@ -364,7 +364,13 @@
   .item-meta {
     font-size: var(--font-size-xs);
     color: var(--fg-dim);
-    flex-shrink: 0;
+    /* Long values (provider URLs, server addresses) shrink with an ellipsis
+       instead of pushing the row actions off a phone screen. */
+    min-width: 0;
+    max-width: 50%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .item-edit,

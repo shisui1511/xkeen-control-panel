@@ -1298,6 +1298,8 @@
 
   .sec-tabs {
     display: flex;
+    max-width: 100%;
+    min-width: 0;
     gap: var(--spacing-2, 8px);
     border-bottom: 1px solid var(--border-color);
     margin-bottom: var(--spacing-4, 16px);
