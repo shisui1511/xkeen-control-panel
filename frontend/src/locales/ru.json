@@ -2312,5 +2312,10 @@
   "xray.observatory_hint": "Стратегии «наименьший пинг/нагрузка» опираются на observatory: панель сама соберёт его из селекторов балансировщиков.",
   "xray.observatory_url": "URL проверки",
   "xray.observatory_interval": "Интервал проверки",
-  "editor.dns_over_vless_no_proxy": "Не найден прокси-outbound: правила DNS через прокси не будут созданы. Добавьте правило на прокси-outbound во вкладке маршрутизации."
+  "editor.dns_over_vless_no_proxy": "Не найден прокси-outbound: правила DNS через прокси не будут созданы. Добавьте правило на прокси-outbound во вкладке маршрутизации.",
+  "mihomo.dns_proxy_group": "DNS через прокси-группу",
+  "mihomo.dns_proxy_group_direct": "Напрямую (без прокси)",
+  "mihomo.dns_proxy_group_hint": "Зашифрованные резолверы (https://, tls://, quic://) пойдут через выбранную группу: провайдер не увидит и не подменит DNS-запросы. Включите перехват DNS в XKeen, чтобы им пользовалась вся сеть.",
+  "mihomo.dns_proxy_server_ns": "Резолверы для адресов прокси",
+  "mihomo.dns_proxy_server_ns_hint": "Обычные DNS-серверы для разрешения имён самих прокси-серверов, без них DNS зациклится."
 }

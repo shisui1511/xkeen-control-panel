@@ -2312,5 +2312,10 @@
   "xray.observatory_hint": "Least ping/load strategies rely on the observatory: the panel builds it from the balancer selectors.",
   "xray.observatory_url": "Probe URL",
   "xray.observatory_interval": "Probe interval",
-  "editor.dns_over_vless_no_proxy": "No proxy outbound found: DNS-over-proxy rules will not be created. Add a rule to a proxy outbound on the routing tab."
+  "editor.dns_over_vless_no_proxy": "No proxy outbound found: DNS-over-proxy rules will not be created. Add a rule to a proxy outbound on the routing tab.",
+  "mihomo.dns_proxy_group": "DNS through proxy group",
+  "mihomo.dns_proxy_group_direct": "Direct (no proxy)",
+  "mihomo.dns_proxy_group_hint": "Encrypted resolvers (https://, tls://, quic://) go through the selected group: the ISP cannot see or spoof DNS queries. Turn on DNS redirection in XKeen so the whole network uses it.",
+  "mihomo.dns_proxy_server_ns": "Resolvers for proxy addresses",
+  "mihomo.dns_proxy_server_ns_hint": "Plain DNS servers resolving the proxy servers' own names; without them DNS would loop."
 }
