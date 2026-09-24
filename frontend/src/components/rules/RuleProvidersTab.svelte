@@ -299,6 +299,7 @@
 
   .tab-header {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
@@ -349,11 +350,12 @@
 
   .providers-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
     gap: 12px;
   }
 
   .provider-card {
+    min-width: 0;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -369,6 +371,7 @@
   }
 
   .provider-body {
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -376,26 +379,23 @@
 
   .provider-top {
     display: flex;
+    flex-direction: column;
     align-items: flex-start;
-    justify-content: space-between;
-    gap: 8px;
+    gap: 6px;
   }
 
   .provider-name {
     font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    word-break: break-all;
+    overflow-wrap: anywhere;
   }
 
   .badges {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 4px;
-    flex-shrink: 0;
   }
 
   .badge {
@@ -450,10 +450,16 @@
 
   .provider-actions {
     display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
     justify-content: flex-end;
     margin-top: 12px;
     padding-top: 10px;
     border-top: 1px solid var(--border-light, var(--border));
+  }
+
+  .provider-actions :global(.btn) {
+    flex: 1 1 auto;
   }
 
   .btn-icon {
