@@ -715,3 +715,35 @@ func TestConfigCRUD_Handlers(t *testing.T) {
 		t.Errorf("expected 200 for ConfigDelete, got %d: %s", recDeleteOK.Code, recDeleteOK.Body.String())
 	}
 }
+
+// TestIsActiveMihomoConfig_Symlink: в режиме профилей config.yaml — симлинк
+// на profiles/<name>.yaml; путь после PathValidator (разрешённый симлинк)
+// всё равно распознаётся как активный конфиг Mihomo.
+func TestIsActiveMihomoConfig_Symlink(t *testing.T) {
+	dir := t.TempDir()
+	profiles := filepath.Join(dir, "profiles")
+	if err := os.MkdirAll(profiles, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	profile := filepath.Join(profiles, "default.yaml")
+	other := filepath.Join(profiles, "other.yaml")
+	for _, f := range []string{profile, other} {
+		if err := os.WriteFile(f, []byte("mode: rule\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(profile, filepath.Join(dir, "config.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	api := &API{cfg: &config.Config{MihomoConfigDir: dir}}
+	if !api.isActiveMihomoConfig(profile) {
+		t.Error("resolved symlink target of config.yaml must be the active Mihomo config")
+	}
+	if api.isActiveMihomoConfig(other) {
+		t.Error("inactive profile must not be treated as the active config")
+	}
+	if !api.isActiveMihomoConfig(filepath.Join(dir, "config.yml")) {
+		t.Error("config.yml path must match even when the file does not exist yet")
+	}
+}

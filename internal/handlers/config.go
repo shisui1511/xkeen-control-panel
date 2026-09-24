@@ -127,6 +127,26 @@ func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+// isActiveMihomoConfig сообщает, что path — это config.yaml/config.yml Mihomo.
+// PathValidator разрешает симлинки, а в режиме профилей config.yaml — симлинк
+// на profiles/<name>.yaml, поэтому пути сравниваются как файлы, а не строки.
+func (a *API) isActiveMihomoConfig(path string) bool {
+	target, err := os.Stat(path)
+	for _, name := range []string{"config.yaml", "config.yml"} {
+		candidate := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, name))
+		if path == candidate {
+			return true
+		}
+		if err != nil {
+			continue
+		}
+		if info, statErr := os.Stat(candidate); statErr == nil && os.SameFile(target, info) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -140,9 +160,7 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mihomoConfigPath := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yaml"))
-	mihomoConfigPathYml := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yml"))
-	isMihomoConfig := (cleanPath == mihomoConfigPath || cleanPath == mihomoConfigPathYml)
+	isMihomoConfig := a.isActiveMihomoConfig(cleanPath)
 
 	if isMihomoConfig && a.subscriptionSvc != nil {
 		a.subscriptionSvc.LockMihomo()
