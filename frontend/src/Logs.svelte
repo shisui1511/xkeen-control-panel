@@ -38,6 +38,7 @@
   let destroyed = false;
   let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   let flashHealthInterval: ReturnType<typeof setInterval> | null = null;
+  // Ids for entries without a server id; negative so they never collide.
   let logIdCounter = 0;
 
   let logs = $state<LogEntry[]>([]);
@@ -193,7 +194,10 @@
         return;
       }
 
-      const toAppend = incomingBuffer;
+      // The stream can repeat entries already loaded from history; ids are
+      // the {#each} keys, so duplicates must never reach the list.
+      const known = new Set(logs.map((l) => l.id));
+      const toAppend = incomingBuffer.filter((l) => !known.has(l.id) && known.add(l.id));
       incomingBuffer = [];
       logs = [...logs, ...toAppend].slice(-MAX_LOG_BUFFER);
       updateSources();
@@ -207,7 +211,7 @@
   }
 
   function parseFallbackLogLine(raw: string): LogEntry {
-    logIdCounter += 1;
+    logIdCounter -= 1;
     let text = raw.trim();
     let source = 'xkeen';
     let level = 'info';
@@ -264,7 +268,10 @@
       if (res.ok) {
         const data = await res.json();
         if (data.entries && Array.isArray(data.entries) && data.entries.length > 0) {
-          logs = data.entries;
+          // Merge with entries the stream may have delivered meanwhile.
+          const byId = new Map<number, any>();
+          for (const l of [...data.entries, ...logs]) byId.set(l.id, l);
+          logs = [...byId.values()].sort((a, b) => a.id - b.id).slice(-MAX_LOG_BUFFER);
           updateSources();
           if (autoScroll && logContainer) {
             setTimeout(() => {
@@ -332,8 +339,9 @@
         const parsed = JSON.parse(event.data);
         if (Array.isArray(parsed)) {
           for (const item of parsed) {
-            logIdCounter += 1;
+            logIdCounter -= 1;
             incomingBuffer.push({
+              // Local ids are negative so they never collide with server ids.
               id: item.id || logIdCounter,
               timestamp: item.timestamp || new Date().toTimeString().split(' ')[0],
               source: item.source || 'sys',
@@ -345,7 +353,7 @@
           scheduleBatchFlush();
           return;
         } else if (parsed && typeof parsed === 'object') {
-          logIdCounter += 1;
+          logIdCounter -= 1;
           incomingBuffer.push({
             id: parsed.id || logIdCounter,
             timestamp: parsed.timestamp || new Date().toTimeString().split(' ')[0],
