@@ -176,10 +176,46 @@ jobs:
           strip-hash: "-[a-zA-Z0-9_-]{8}"
           build-script: "npm run build"
 
-  # Job 4: Тестирование Frontend (E2E)
-  test-frontend:
-    name: Test Frontend E2E
+  # Job 4a: Выбор e2e-спеков по изменённым файлам
+  # Граф импортов фронтенда строится заново (frontend/scripts/select-e2e.mjs):
+  # запускаются только спеки страниц, которые затрагивает PR. Изменения
+  # оболочки приложения, хелперов тестов и конфигов запускают все спеки.
+  e2e-plan:
+    name: E2E Plan
     runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      specs: ${{ steps.plan.outputs.specs }}
+      shards: ${{ steps.plan.outputs.shards }}
+      shard_total: ${{ steps.plan.outputs.shard_total }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Select specs
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node frontend/scripts/select-e2e.mjs --base "$BASE_SHA" --head "$HEAD_SHA" --github-output
+
+  # Job 4b: Тестирование Frontend (E2E) — выбранные спеки, по шардам
+  test-frontend:
+    name: Test Frontend E2E (${{ matrix.shard }}/${{ needs.e2e-plan.outputs.shard_total }})
+    needs: e2e-plan
+    if: needs.e2e-plan.outputs.mode != 'none'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.e2e-plan.outputs.shards) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -195,59 +231,42 @@ jobs:
           cd frontend
           npm ci
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
       - name: Install Playwright Browsers
         run: |
           cd frontend
           npx playwright install chromium
 
-      - name: Build frontend
-        run: |
-          cd frontend
-          npm run build
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: "1.26"
-          cache: false
-
-      - name: Build Go backend
-        run: |
-          go mod download
-          go build -ldflags="-s -w" -o xcp ./cmd/xcp
-
-      - name: Run Go backend
-        run: |
-          mkdir -p /tmp/xcp-data
-          cat > config.json <<EOF
-          {
-            "port": 8090,
-            "data_dir": "/tmp/xcp-data",
-            "https": { "enabled": false }
-          }
-          EOF
-          ./xcp -config config.json &
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:8090/api/version && break
-            sleep 0.5
-          done
-
+      # Бэкенд и сборка не нужны: спеки мокают API через page.route и
+      # работают через Vite dev-сервер (webServer в playwright.config.ts)
       - name: Run Playwright tests
+        env:
+          SHARD: ${{ matrix.shard }}/${{ needs.e2e-plan.outputs.shard_total }}
+          # Имена файлов из PR — только через env, не подстановкой в скрипт
+          SPECS: ${{ needs.e2e-plan.outputs.specs }}
         run: |
           cd frontend
-          npm run test:e2e
+          # shellcheck disable=SC2086 # SPECS — список через пробел
+          npx playwright test --shard="$SHARD" $SPECS
 
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: frontend/playwright-report/
           retention-days: 30
 
   # Job 5: Проверка сборки
   build-check:
     name: Build Check
-    needs: [lint-go, test-go, lint-frontend, test-frontend, check-rules]
+    needs: [lint-go, test-go, lint-frontend, e2e-plan, test-frontend, check-rules]
+    # test-frontend пропускается, если PR не затрагивает фронтенд
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
