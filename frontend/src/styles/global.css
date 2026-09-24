@@ -765,8 +765,7 @@ input[type='number'] {
   justify-content: center;
   min-height: 100vh;
   padding: 24px;
-  background:
-    radial-gradient(ellipse 60% 50% at 50% 20%, var(--accent-soft), transparent 70%), var(--bg-page);
+  background: var(--bg-page);
 }
 
 /* ------------ Sidebar ------------- */
