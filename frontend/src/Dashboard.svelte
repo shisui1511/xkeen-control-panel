@@ -478,6 +478,12 @@
     loadHistory.length >= 2 ? JSON.parse(buildSparklinePath(loadHistory)) : null
   );
 
+  // Unknown until the first status poll: keep the capsule LED neutral
+  // instead of reporting XKeen as stopped.
+  const xkeenRunningForCapsule = $derived(
+    serviceStatus.xkeen === 'loading' ? undefined : serviceStatus.xkeen === 'running'
+  );
+
   // Quickstart checklist reactive state
   const quickstartDoneCount = $derived(
     [
@@ -865,7 +871,7 @@
         variant="mobile"
         {systemStats}
         activeKernel={$capabilities?.active_kernel}
-        isXkeenRunning={serviceStatus.xkeen === 'running'}
+        isXkeenRunning={xkeenRunningForCapsule}
         onSwitchTab={switchTab}
       />
     {:else}
@@ -905,7 +911,7 @@
       {pwaInstallPrompt}
       onInstallPWA={installPWA}
       {systemStats}
-      isXkeenRunning={serviceStatus.xkeen === 'running'}
+      isXkeenRunning={xkeenRunningForCapsule}
     />
   </div>
 
