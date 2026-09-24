@@ -291,3 +291,39 @@ func TestCopyFile(t *testing.T) {
 		t.Fatal("expected CopyFile with missing source to fail, but succeeded")
 	}
 }
+
+func TestAtomicReplaceFile_KeepsSymlinkAndMode(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "profiles", "default.yaml")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AtomicReplaceFile(link, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("config.yaml symlink was replaced by a regular file")
+	}
+	if data, _ := os.ReadFile(target); string(data) != "new" {
+		t.Fatalf("profile content = %q", data)
+	}
+	if fi, _ := os.Stat(target); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode widened to %v", fi.Mode().Perm())
+	}
+
+	fresh := filepath.Join(dir, "fresh.json")
+	if err := AtomicReplaceFile(fresh, []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(fresh); fi.Mode().Perm() != 0o644 {
+		t.Fatalf("new file mode = %v", fi.Mode().Perm())
+	}
+}

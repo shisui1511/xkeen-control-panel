@@ -393,3 +393,40 @@ func TestUserRules_SaveValidation(t *testing.T) {
 		})
 	}
 }
+
+// Regression: on routers where config.yaml is a symlink to the active
+// profile (with 0600 because it holds private keys), injecting user rules
+// replaced the symlink with a regular 0644 file.
+func TestInjectMihomoRules_KeepsProfileSymlink(t *testing.T) {
+	dir := t.TempDir()
+	profile := filepath.Join(dir, "profiles", "default.yaml")
+	if err := os.MkdirAll(filepath.Dir(profile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(profile, []byte("rules:\n  - MATCH,DIRECT\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink(profile, configPath); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewUserRulesService(t.TempDir())
+	if err := svc.Save([]UserRule{{ID: "1", Type: "domain_suffix", Value: "example.com", Target: "direct", Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.InjectMihomoRules(configPath, "PROXY"); err != nil {
+		t.Fatal(err)
+	}
+
+	if fi, _ := os.Lstat(configPath); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("config.yaml is no longer a symlink")
+	}
+	data, _ := os.ReadFile(profile)
+	if !strings.Contains(string(data), "example.com") {
+		t.Fatalf("rule not written into the profile: %s", data)
+	}
+	if fi, _ := os.Stat(profile); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("profile mode widened to %v", fi.Mode().Perm())
+	}
+}

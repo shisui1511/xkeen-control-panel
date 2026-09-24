@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 const DefaultMihomoSocketPath = "/opt/var/run/mihomo.sock"
@@ -149,12 +151,8 @@ func (s *MihomoService) MigrateToSocket(xkeenSvc *XKeenService) (*MigrationResul
 	}
 
 	newContent := strings.Join(newLines, "\n")
-	tmpFile := filepath.Join(s.ConfigDir, ".config.yaml.tmp")
-	if err := os.WriteFile(tmpFile, []byte(newContent), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write temp config: %w", err)
-	}
-	if err := os.Rename(tmpFile, configPath); err != nil {
-		_ = os.Remove(tmpFile)
+	// Follows a config.yaml symlink to the active profile and keeps its mode.
+	if err := utils.AtomicReplaceFile(configPath, []byte(newContent)); err != nil {
 		return nil, fmt.Errorf("failed to replace config: %w", err)
 	}
 
@@ -165,7 +163,7 @@ func (s *MihomoService) MigrateToSocket(xkeenSvc *XKeenService) (*MigrationResul
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				// Rollback
-				_ = os.WriteFile(configPath, origBytes, 0644)
+				_ = utils.AtomicReplaceFile(configPath, origBytes)
 				return &MigrationResult{
 					Success:    false,
 					RolledBack: true,
@@ -183,7 +181,7 @@ func (s *MihomoService) MigrateToSocket(xkeenSvc *XKeenService) (*MigrationResul
 	if isRunning && xkeenSvc != nil {
 		if _, err := xkeenSvc.Restart(); err != nil {
 			// Rollback
-			_ = os.WriteFile(configPath, origBytes, 0644)
+			_ = utils.AtomicReplaceFile(configPath, origBytes)
 			_, _ = xkeenSvc.Restart()
 			return &MigrationResult{
 				Success:    false,
@@ -209,7 +207,7 @@ func (s *MihomoService) MigrateToSocket(xkeenSvc *XKeenService) (*MigrationResul
 
 		if !socketReachable {
 			// Rollback to backup
-			_ = os.WriteFile(configPath, origBytes, 0644)
+			_ = utils.AtomicReplaceFile(configPath, origBytes)
 			_, _ = xkeenSvc.Restart()
 			return &MigrationResult{
 				Success:    false,
