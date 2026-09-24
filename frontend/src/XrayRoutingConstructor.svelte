@@ -16,6 +16,19 @@
     type PreflightWarning
   } from './components/editor/PreflightWarnings.svelte';
   import ConstructorPreview, { type PreviewTab } from './components/ConstructorPreview.svelte';
+  import {
+    rulesFromConfig,
+    rulesToConfig,
+    cleanBalancer,
+    observatoryFor,
+    parseJsonc,
+    lineDiff,
+    hasJsonComments,
+    DEFAULT_OBSERVATORY,
+    type DiffLine,
+    type XrayBalancer,
+    type ObservatorySettings
+  } from './lib/constructors/xrayRouting';
   import ScenarioChips from './components/ScenarioChips.svelte';
   import XraySectionRouting from './components/xray/XraySectionRouting.svelte';
   import XraySectionInbounds from './components/xray/XraySectionInbounds.svelte';
@@ -128,7 +141,16 @@
   });
 
   let routingRules = $state<XrayRoutingRule[]>([]);
-  let balancers = $state<any[]>([]);
+  let balancers = $state<XrayBalancer[]>([]);
+  let observatorySettings = $state<ObservatorySettings>({ ...DEFAULT_OBSERVATORY });
+  // routing keys the constructor does not edit (domainMatcher, …) and other
+  // top-level keys of 05_routing.json are written back unchanged.
+  let routingExtra = $state<Record<string, unknown>>({});
+  let routingFileExtra = $state<Record<string, unknown>>({});
+  // Original file texts, for the apply diff and comment warnings.
+  let xrayRawFiles = $state<Record<string, string>>({});
+  // Files that exist but could not be parsed: never auto-replace them.
+  let unparsedFiles = $state<string[]>([]);
   let proxyTag = $state<string>('');
   let dnsOverVless = $state<boolean>(false);
 
@@ -152,7 +174,17 @@
   let dnsRedirectLoading = $state(false);
 
   let showApplyConfirm = $state(false);
-  let filesToModify = $state<Array<{ name: string; changesCount: number }>>([]);
+  interface FilePlan {
+    name: string;
+    changed: boolean;
+    added: number;
+    removed: number;
+    hasComments: boolean;
+    /** Changed lines with two lines of context; null marks a skipped gap. */
+    diff: (DiffLine | null)[];
+    content: string;
+  }
+  let filesToModify = $state<FilePlan[]>([]);
   let saveWarnings = $state<PreflightWarning[]>([]);
 
   // Test Route & Logger States
@@ -203,26 +235,21 @@
   });
 
   function generateFileConfigs(): Record<string, any> {
-    const rulesToExport = routingRules.map((r) => {
-      const copy: any = { type: 'field' };
-      if (r.outboundTag) copy.outboundTag = r.outboundTag;
-      if (r.domain && r.domain.length > 0) copy.domain = r.domain;
-      if (r.ip && r.ip.length > 0) copy.ip = r.ip;
-      if (r.port) copy.port = r.port;
-      if (r.network) copy.network = r.network;
-      if (r.protocol && r.protocol.length > 0) copy.protocol = r.protocol;
-      if (r.inboundTag && r.inboundTag.length > 0) copy.inboundTag = r.inboundTag;
-      return copy;
-    });
-
     const routingObj: any = {
+      ...routingFileExtra,
       routing: {
+        ...routingExtra,
         domainStrategy: routingConfig.domainStrategy,
-        rules: rulesToExport
+        ...rulesToConfig(routingRules)
       }
     };
-    if (balancers.length > 0) {
-      routingObj.routing.balancers = balancers;
+    const cleanBalancers = balancers.filter((b) => b.tag.trim()).map(cleanBalancer);
+    if (cleanBalancers.length > 0) {
+      routingObj.routing.balancers = cleanBalancers;
+    }
+    const observatory = observatoryFor(cleanBalancers, observatorySettings);
+    if (observatory) {
+      routingObj.observatory = observatory;
     }
 
     const inboundsObj = {
@@ -290,8 +317,13 @@
         const path = `${XRAY_DIR}/${name}`;
         const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
         if (!res.ok) return;
-        const data = await res.json();
-        xrayFiles[name] = data;
+        const text = await res.text();
+        xrayRawFiles[name] = text;
+        const data = parseJsonc(text);
+        if (data === undefined && text.trim()) {
+          unparsedFiles = [...unparsedFiles, name];
+        }
+        xrayFiles[name] = data ?? {};
       } catch (e: any) {
         if (e?.status === 401) return;
         xrayFiles[name] = {};
@@ -306,7 +338,8 @@
     const isRoutingStub = !routingFile.routing?.rules || routingFile.routing.rules.length === 0;
     const outboundsFile = xrayFiles['04_outbounds.json'] || {};
     const isOutboundsStub = !outboundsFile.outbounds || outboundsFile.outbounds.length === 0;
-    if (isRoutingStub || isOutboundsStub) {
+    // A file that exists but does not parse is the user's to fix, not a stub.
+    if ((isRoutingStub || isOutboundsStub) && unparsedFiles.length === 0) {
       if (!applyLoading) {
         applyTemplateFiles('selective-routing', false);
       }
@@ -337,27 +370,42 @@
     }
 
     if (files['05_routing.json']?.routing) {
-      const r = files['05_routing.json'].routing;
-      routingConfig.domainStrategy = r.domainStrategy || 'IPIfNonMatch';
-      if (Array.isArray(r.rules)) {
-        routingRules = r.rules.map((rule: any) => ({
-          ...rule,
-          id: typeof crypto !== 'undefined' ? crypto.randomUUID() : 'r-' + Math.random(),
-          enabled: rule.enabled !== false
-        }));
-        const proxyRule = routingRules.find(
-          (rule: any) =>
-            rule.outboundTag &&
-            rule.outboundTag !== 'direct' &&
-            rule.outboundTag !== 'block' &&
-            rule.outboundTag !== 'dns-out'
-        );
-        if (proxyRule) {
-          proxyTag = proxyRule.outboundTag;
-        }
+      const { routing: r, observatory, ...fileRest } = files['05_routing.json'];
+      const {
+        domainStrategy,
+        rules: _rules,
+        xcpDisabledRules: _disabled,
+        balancers: loadedBalancers,
+        ...routingRest
+      } = r;
+      void _rules;
+      void _disabled;
+      routingConfig.domainStrategy = domainStrategy || 'IPIfNonMatch';
+      routingRules = rulesFromConfig(r);
+      routingExtra = routingRest;
+      routingFileExtra = fileRest;
+      const proxyRule = routingRules.find(
+        (rule) =>
+          rule.outboundTag &&
+          rule.outboundTag !== 'direct' &&
+          rule.outboundTag !== 'block' &&
+          rule.outboundTag !== 'dns-out'
+      );
+      if (proxyRule?.outboundTag) {
+        proxyTag = proxyRule.outboundTag;
       }
-      if (Array.isArray(r.balancers)) {
-        balancers = r.balancers;
+      balancers = Array.isArray(loadedBalancers)
+        ? loadedBalancers.map((b: any) => ({
+            ...b,
+            tag: String(b.tag ?? ''),
+            selector: Array.isArray(b.selector) ? b.selector : []
+          }))
+        : [];
+      if (observatory) {
+        observatorySettings = {
+          probeUrl: observatory.probeUrl || DEFAULT_OBSERVATORY.probeUrl,
+          probeInterval: observatory.probeInterval || DEFAULT_OBSERVATORY.probeInterval
+        };
       }
     }
 
@@ -519,15 +567,39 @@
     }
   }
 
+  /** Compares every generated file with what was loaded from the router. */
+  function computeFilePlans(): FilePlan[] {
+    const generated = generateFileConfigs();
+    return Object.entries(generated).map(([name, content]) => {
+      const after = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+      const loaded = xrayFiles[name];
+      const before =
+        loaded && Object.keys(loaded).length > 0 ? JSON.stringify(loaded, null, 2) : '';
+      const changed = before !== after;
+      const full = changed ? lineDiff(before, after) : [];
+      const diff: (DiffLine | null)[] = [];
+      let lastShown = -1;
+      full.forEach((line, i) => {
+        const near = full.slice(Math.max(0, i - 2), i + 3).some((l) => l.kind !== 'same');
+        if (!near) return;
+        if (lastShown !== -1 && i > lastShown + 1) diff.push(null);
+        diff.push(line);
+        lastShown = i;
+      });
+      return {
+        name,
+        changed,
+        added: full.filter((l) => l.kind === 'add').length,
+        removed: full.filter((l) => l.kind === 'del').length,
+        hasComments: changed && hasJsonComments(xrayRawFiles[name] ?? ''),
+        diff,
+        content: after
+      };
+    });
+  }
+
   function promptApplyChanges() {
-    filesToModify = [
-      { name: '05_routing.json', changesCount: routingRules.length },
-      { name: '04_outbounds.json', changesCount: customOutbounds.length },
-      { name: '02_dns.json', changesCount: dnsConfig.servers.length },
-      { name: '01_log.json', changesCount: 1 },
-      { name: '03_inbounds.json', changesCount: inbounds.length },
-      { name: '06_policy.json', changesCount: 1 }
-    ];
+    filesToModify = computeFilePlans();
     showApplyConfirm = true;
   }
 
@@ -710,13 +782,23 @@
       showToast('warning', $t('editor.proxy_tag_warning'));
     }
     try {
-      const generated = generateFileConfigs();
-      for (const [filename, content] of Object.entries(generated)) {
+      // Only changed files are written: unchanged ones keep their formatting
+      // and comments, and the router flash is spared needless writes.
+      const changedPlans = computeFilePlans().filter((p) => p.changed);
+      if (changedPlans.length === 0) {
+        showToast('info', $t('xray.no_changes_to_apply'));
+        isDirty = false;
+        showApplyConfirm = false;
+        applyLoading = false;
+        return;
+      }
+      for (const plan of changedPlans) {
+        const filename = plan.name;
         const filePath = `${XRAY_DIR}/${filename}`;
         const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(filePath)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: typeof content === 'string' ? content : JSON.stringify(content, null, 2)
+          body: plan.content
         });
         if (!saveRes.ok) {
           if (saveRes.status === 422) {
@@ -1066,28 +1148,39 @@
   onclose={() => (showApplyConfirm = false)}
 >
   <p>{$t('editor.apply_confirm_body')}</p>
-  <div class="changed-files-list" style="margin-top: 12px;">
+  <div class="apply-plan">
     <strong>{$t('xray.files_to_modify')}</strong>
-    <ul style="margin: 8px 0 0 0; padding-left: 20px;">
-      {#each filesToModify as file}
-        {#if file.changesCount > 0}
-          <li>
-            <code>{file.name}</code>:
-            <span
-              class="badge"
-              style="background-color: var(--warning-soft, color-mix(in srgb, var(--warning) 15%, transparent)); color: var(--warning);"
-            >
-              {$t('xray.sections_modified', { count: file.changesCount })}
-            </span>
-          </li>
-        {:else}
-          <li><code>{file.name}</code>: {$t('xray.no_changes')}</li>
-        {/if}
+    <ul class="apply-plan-list">
+      {#each filesToModify as file (file.name)}
+        <li>
+          {#if file.changed}
+            {#if file.hasComments}
+              <p class="apply-plan-warn">{$t('xray.comments_will_be_lost')}</p>
+            {/if}
+            <details>
+              <summary>
+                <code>{file.name}</code>
+                <span class="diff-stat add">+{file.added}</span>
+                <span class="diff-stat del">−{file.removed}</span>
+              </summary>
+
+              <pre class="apply-diff">{#each file.diff as line, i (i)}{#if line === null}<span
+                      class="diff-gap">…</span
+                    >{:else}<span class="diff-{line.kind}"
+                      >{line.kind === 'add'
+                        ? '+ '
+                        : line.kind === 'del'
+                          ? '- '
+                          : '  '}{line.text}</span
+                    >{/if}{/each}</pre>
+            </details>
+          {:else}
+            <code>{file.name}</code>: {$t('xray.no_changes')}
+          {/if}
+        </li>
       {/each}
     </ul>
-    <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
-      {$t('mihomo.backup_notice')}
-    </p>
+    <p class="apply-plan-note">{$t('mihomo.backup_notice')}</p>
   </div>
   <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
     <button type="button" class="btn btn-secondary" onclick={() => (showApplyConfirm = false)}>
@@ -1230,5 +1323,77 @@
     padding: 1px 5px;
     border-radius: 10px;
     font-weight: 600;
+  }
+
+  .apply-plan {
+    margin-top: var(--spacing-3);
+  }
+
+  .apply-plan-list {
+    margin: var(--spacing-2) 0 0;
+    padding-left: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+  }
+
+  .apply-plan-list summary {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+  }
+
+  .diff-stat {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+  }
+
+  .diff-stat.add,
+  .apply-diff :global(.diff-add) {
+    color: var(--success);
+  }
+
+  .diff-stat.del,
+  .apply-diff :global(.diff-del) {
+    color: var(--danger);
+  }
+
+  .apply-diff {
+    margin: var(--spacing-2) 0 0;
+    max-height: 40vh;
+    overflow: auto;
+    padding: var(--spacing-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--code-bg);
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+    line-height: 1.45;
+    white-space: pre;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  .apply-diff :global(span) {
+    display: block;
+  }
+
+  .apply-diff :global(.diff-same),
+  .apply-diff :global(.diff-gap) {
+    color: var(--fg-muted);
+  }
+
+  .apply-plan-warn {
+    margin: var(--spacing-2) 0 0;
+    font-size: var(--font-size-xs);
+    color: var(--warning);
+  }
+
+  .apply-plan-note {
+    margin-top: var(--spacing-3);
+    font-size: var(--font-size-sm);
+    color: var(--fg-secondary);
   }
 </style>

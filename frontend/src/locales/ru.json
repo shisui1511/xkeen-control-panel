@@ -1250,7 +1250,6 @@
   "xray.enable_dns_logging": "Включить логирование DNS",
   "xray.logs_paths": "Пути к логам:",
   "xray.files_to_modify": "Будут изменены файлы:",
-  "xray.sections_modified": "Изменено {count} секций",
   "xray.no_changes": "Без изменений",
   "xray.generate_reality_keys": "Сгенерировать ключи Reality",
   "xray.generating": "Генерация...",
@@ -2286,5 +2285,7 @@
   "xlog.col_time": "Время",
   "xlog.col_device": "Устройство",
   "xlog.col_dest": "Назначение",
-  "xlog.col_route": "Маршрут"
+  "xlog.col_route": "Маршрут",
+  "xray.no_changes_to_apply": "Изменений нет — файлы не записаны, Xray не перезапускался",
+  "xray.comments_will_be_lost": "В этом файле есть комментарии: при сохранении из конструктора они будут удалены."
 }

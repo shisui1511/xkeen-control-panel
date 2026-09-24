@@ -1,15 +1,7 @@
-export interface XrayRoutingRule {
-  id: string;
-  type: 'field';
-  outboundTag: string;
-  domain?: string[];
-  ip?: string[];
-  port?: string;
-  network?: string;
-  protocol?: string[];
-  inboundTag?: string[];
-  enabled?: boolean;
-}
+import type { UIRoutingRule } from '../../lib/constructors/xrayRouting';
+
+/** A routing rule as edited in the constructor (all Xray fields kept). */
+export type XrayRoutingRule = UIRoutingRule & { type?: 'field' };
 
 export interface DNSServer {
   address: string;

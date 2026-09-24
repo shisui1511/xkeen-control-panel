@@ -1250,7 +1250,6 @@
   "xray.enable_dns_logging": "Enable DNS Logging",
   "xray.logs_paths": "Logs paths:",
   "xray.files_to_modify": "Files to be modified:",
-  "xray.sections_modified": "Modified {count} sections",
   "xray.no_changes": "No changes",
   "xray.generate_reality_keys": "Generate Reality Keys",
   "xray.generating": "Generating...",
@@ -2286,5 +2285,7 @@
   "xlog.col_time": "Time",
   "xlog.col_device": "Device",
   "xlog.col_dest": "Destination",
-  "xlog.col_route": "Route"
+  "xlog.col_route": "Route",
+  "xray.no_changes_to_apply": "No changes — nothing was written, Xray was not restarted",
+  "xray.comments_will_be_lost": "This file has comments: saving from the constructor removes them."
 }
