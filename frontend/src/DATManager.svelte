@@ -1198,7 +1198,8 @@
               <!-- Tag Browser View -->
               <div class="inspector-tags-view">
                 <div class="tag-rule-banner">
-                  <span class="banner-label">
+                  <!-- Не "banner-label": блокировщики рекламы скрывают этот класс -->
+                  <span class="rule-format-label">
                     {#if getTagPrefix(selectedFile) === 'geoip'}
                       {$t('dat.geoip_rule_format')}
                     {:else}

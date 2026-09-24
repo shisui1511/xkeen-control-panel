@@ -2259,3 +2259,39 @@ func TestWatchdogService_TryResetClearsInterceptionState(t *testing.T) {
 
 	w.wg.Wait()
 }
+
+// TestWatchdogService_ReportRoutingIssues_LogsOnlyOnChange: неизменный набор
+// проблем маршрутизации пишется в лог один раз, а не на каждой проверке.
+func TestWatchdogService_ReportRoutingIssues_LogsOnlyOnChange(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	w := NewWatchdogService(nil, "", "")
+	issueA := []string{`05_routing.json: outboundTag "a" not declared`}
+	issueB := []string{`05_routing.json: outboundTag "b" not declared`}
+
+	steps := []struct {
+		issues  []string
+		wantLog string
+	}{
+		{nil, ""},
+		{issueA, "found 1 issue(s)"},
+		{issueA, ""},
+		{issueA, ""},
+		{issueB, `"b"`},
+		{nil, "issues resolved"},
+		{nil, ""},
+	}
+	for i, st := range steps {
+		buf.Reset()
+		w.reportRoutingIssues(st.issues)
+		got := buf.String()
+		if st.wantLog == "" && got != "" {
+			t.Errorf("step %d: expected no log, got %q", i, got)
+		}
+		if st.wantLog != "" && !strings.Contains(got, st.wantLog) {
+			t.Errorf("step %d: expected log containing %q, got %q", i, st.wantLog, got)
+		}
+	}
+}

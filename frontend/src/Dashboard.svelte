@@ -585,7 +585,18 @@
       showUnsavedModal = true;
       return;
     }
+    if (targetTab !== currentTab) {
+      resetScrollForNewTab();
+    }
     currentTab = targetTab;
+  }
+
+  // Новая страница открывается сверху, а не с прокруткой предыдущей.
+  // lockedScrollY обнуляется, иначе закрытие мобильного меню вернёт
+  // позицию старой страницы.
+  function resetScrollForNewTab() {
+    lockedScrollY = 0;
+    window.scrollTo(0, 0);
   }
 
   async function handleSaveAndLeave() {
@@ -599,6 +610,7 @@
         pendingTargetTab = null;
         pendingTargetHash = null;
         if (target) {
+          resetScrollForNewTab();
           currentTab = target;
           window.location.hash = hash || '#/' + target;
         }
@@ -620,6 +632,7 @@
     pendingTargetTab = null;
     pendingTargetHash = null;
     if (target) {
+      resetScrollForNewTab();
       currentTab = target;
       window.location.hash = hash || '#/' + target;
     }

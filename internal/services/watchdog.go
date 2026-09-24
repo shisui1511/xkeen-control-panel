@@ -119,6 +119,7 @@ type WatchdogService struct {
 	nextDisarmAttempt      time.Time
 	degradedAt             time.Time
 	lastDisarmError        string
+	lastRoutingIssues      string
 
 	iptablesSaveBin  string
 	iptablesBin      string
@@ -194,9 +195,28 @@ func (w *WatchdogService) loop() {
 // runCheck performs one health-check + routing-validation pass.
 func (w *WatchdogService) runCheck() {
 	w.CheckHealth()
-	if issues := ValidateXrayRoutingTags(w.xrayDir); len(issues) > 0 {
-		log.Printf("Watchdog: Xray routing validation found %d issue(s): %s", len(issues), strings.Join(issues, "; "))
+	w.reportRoutingIssues(ValidateXrayRoutingTags(w.xrayDir))
+}
+
+// reportRoutingIssues логирует проблемы маршрутизации Xray только при
+// изменении их набора: проверка идёт каждые 30 с, и неизменная ошибка в
+// конфиге (в том числе неактивного ядра) забивала лог тысячами одинаковых строк.
+func (w *WatchdogService) reportRoutingIssues(issues []string) {
+	joined := strings.Join(issues, "; ")
+
+	w.mu.Lock()
+	prev := w.lastRoutingIssues
+	w.lastRoutingIssues = joined
+	w.mu.Unlock()
+
+	if joined == prev {
+		return
 	}
+	if len(issues) == 0 {
+		log.Printf("Watchdog: Xray routing validation issues resolved")
+		return
+	}
+	log.Printf("Watchdog: Xray routing validation found %d issue(s): %s", len(issues), joined)
 }
 
 // IsKernelStatusHealthy interprets the free-form output of `xkeen -status`

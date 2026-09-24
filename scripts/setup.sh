@@ -503,41 +503,56 @@ get_proto() {
   echo "$proto"
 }
 
-# Опрос API для проверки доступности
+# Один запрос к API: curl или wget, с коротким таймаутом на попытку
+api_responds() {
+  curl -k -fsL --max-time 3 "$1" >/dev/null 2>&1 || \
+    wget --no-check-certificate -T 3 -qO- "$1" >/dev/null 2>&1
+}
+
+# Опрос API для проверки доступности. Первый запуск (создание каталога
+# данных и self-signed сертификата) занимает до ~15 с даже на ARM64, на MIPS
+# дольше, поэтому ждём до XCP_POLL_TIMEOUT секунд. Слишком короткое окно
+# приводило к ложному откату рабочей версии в do_update.
 poll_api() {
   local port
   local url
-  local https_url
-  local count
-  local max_tries
+  local alt_url
   local proto
-  
+  local timeout
+  local interval
+  local waited
+
   port="$1"
   proto=$(get_proto)
-  url="http://127.0.0.1:${port}/api/auth/me"
-  https_url="https://127.0.0.1:${port}/api/auth/me"
-  count=1
-  max_tries=3
-  
-  info "Проверяем доступность API по адресу ${proto}://127.0.0.1:${port}/api/auth/me..."
-  
-  while [ $count -le $max_tries ]; do
-    if curl -k -fsL "$url" >/dev/null 2>&1 || wget --no-check-certificate -qO- "$url" >/dev/null 2>&1; then
+  # Сначала протокол из конфига: HTTP-запрос к HTTPS-серверу оставляет в логе
+  # панели "TLS handshake error"
+  url="${proto}://127.0.0.1:${port}/api/auth/me"
+  if [ "$proto" = "https" ]; then
+    alt_url="http://127.0.0.1:${port}/api/auth/me"
+  else
+    alt_url="https://127.0.0.1:${port}/api/auth/me"
+  fi
+  timeout="${XCP_POLL_TIMEOUT:-60}"
+  interval="${XCP_POLL_INTERVAL:-2}"
+  waited=0
+
+  info "Проверяем доступность API по адресу ${proto}://127.0.0.1:${port}/api/auth/me (до ${timeout} с)..."
+
+  while :; do
+    if api_responds "$url" || api_responds "$alt_url"; then
       ok "API успешно отвечает"
-      log_install "API polling succeeded on try $count"
+      log_install "API polling succeeded after ${waited}s"
       return 0
     fi
-    if curl -k -fsL "$https_url" >/dev/null 2>&1 || wget --no-check-certificate -qO- "$https_url" >/dev/null 2>&1; then
-      ok "API успешно отвечает (HTTPS)"
-      log_install "API polling succeeded on try $count (HTTPS)"
-      return 0
+    if [ "$waited" -ge "$timeout" ]; then
+      break
     fi
-    
-    warn "Попытка $count из $max_tries: API недоступен, ждем..."
-    sleep 3
-    count=$((count + 1))
+    sleep "$interval"
+    waited=$((waited + interval))
   done
-  
+
+  warn "API не ответил за ${timeout} с. Лог панели: /opt/var/log/xcp.log"
+  log_install "API polling failed after ${timeout}s"
   return 1
 }
 
