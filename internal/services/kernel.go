@@ -438,14 +438,58 @@ func kernelProcessStatusDetailed(binaryPath string) (status string, pid int, upt
 	return "stopped", 0, ""
 }
 
+// clockTicksPerSecond is USER_HZ, 100 on every Linux architecture routers use.
+const clockTicksPerSecond = 100
+
+// getProcUptime returns how long a process has been running. The mtime of
+// /proc/<pid> is when procfs instantiated the entry, not when the process
+// started, so the start time is taken from /proc/<pid>/stat (field 22,
+// clock ticks since boot) and compared with /proc/uptime.
 func getProcUptime(pidStr string) string {
-	procPath := filepath.Join(procDir, pidStr)
-	st, err := os.Stat(procPath)
-	if err != nil {
+	d, ok := procAge(pidStr)
+	if !ok {
 		return ""
 	}
-	duration := time.Since(st.ModTime())
-	return formatUptimeRu(duration)
+	return formatUptimeRu(d)
+}
+
+func procAge(pidStr string) (time.Duration, bool) {
+	stat, err := os.ReadFile(filepath.Join(procDir, pidStr, "stat"))
+	if err != nil {
+		return 0, false
+	}
+	// comm (field 2) may contain spaces and parentheses: fields after the
+	// last ')' start at field 3.
+	rest := string(stat)
+	if i := strings.LastIndexByte(rest, ')'); i >= 0 {
+		rest = rest[i+1:]
+	}
+	fields := strings.Fields(rest)
+	const startTimeIdx = 22 - 3
+	if len(fields) <= startTimeIdx {
+		return 0, false
+	}
+	startTicks, err := strconv.ParseFloat(fields[startTimeIdx], 64)
+	if err != nil {
+		return 0, false
+	}
+	up, err := os.ReadFile(filepath.Join(procDir, "uptime"))
+	if err != nil {
+		return 0, false
+	}
+	upFields := strings.Fields(string(up))
+	if len(upFields) == 0 {
+		return 0, false
+	}
+	sysUp, err := strconv.ParseFloat(upFields[0], 64)
+	if err != nil {
+		return 0, false
+	}
+	age := sysUp - startTicks/clockTicksPerSecond
+	if age < 0 {
+		age = 0
+	}
+	return time.Duration(age * float64(time.Second)), true
 }
 
 func formatUptimeRu(d time.Duration) string {

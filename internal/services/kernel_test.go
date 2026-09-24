@@ -729,3 +729,30 @@ func TestKernelService_List_Order(t *testing.T) {
 		t.Errorf("expected second kernel to be mihomo, got %s", list[1].Name)
 	}
 }
+
+// Uptime comes from /proc/<pid>/stat starttime, not the mtime of /proc/<pid>.
+func TestGetProcUptime_FromStatStartTime(t *testing.T) {
+	tmpDir := t.TempDir()
+	origProcDir := procDir
+	procDir = tmpDir
+	defer func() { procDir = origProcDir }()
+
+	if err := os.MkdirAll(filepath.Join(tmpDir, "4242"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// comm with spaces and parentheses; starttime (field 22) = 22623900 ticks.
+	stat := "4242 (my (odd) proc) S 1 1 1 0 -1 4194560 0 0 0 0 10 5 0 0 20 0 8 0 22623900 1000 100\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "4242", "stat"), []byte(stat), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "uptime"), []byte("301764.85 580624.92\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 301764.85 - 226239 = 75525.85 s = 20h 58m
+	if got := getProcUptime("4242"); got != "20ч 58м" {
+		t.Fatalf("uptime = %q, want 20ч 58м", got)
+	}
+	if got := getProcUptime("9999"); got != "" {
+		t.Fatalf("missing process: %q", got)
+	}
+}
