@@ -254,6 +254,11 @@ func main() {
 	for _, action := range []string{"create", "rename", "delete", "activate", "adopt"} {
 		srv.HandleProtected("/api/mihomo/profiles/"+action, api.MihomoProfileAction)
 	}
+
+	// Xray access log by device
+	api.SetXrayAccessLogService(services.NewXrayAccessLogService(cfg.XRayConfigDir))
+	srv.HandleProtected("/api/xray/access-log", api.XrayAccessLog)
+	srv.HandleProtected("/api/xray/access-log/toggle", api.XrayAccessLogToggle)
 	srv.HandleProtected("/api/service/status", api.ServiceStatus)
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
 	srv.HandleProtected("/api/service/dns-redirect", api.ServiceDNSRedirect)
