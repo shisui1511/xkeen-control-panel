@@ -29,6 +29,30 @@
     isXkeenRunning?: boolean;
   } = $props();
 
+  // Докручивает меню до активного пункта: при невысоком окне пункты
+  // «Система» уходят под подвал, и открытая страница не видна в меню.
+  // Скроллится только сам список — не окно и не выдвижная панель.
+  function revealActiveItem(nav: HTMLElement) {
+    void currentTab;
+    const reveal = () => {
+      const item = nav.querySelector<HTMLElement>('[aria-current="page"]');
+      if (!item) return;
+      const navRect = nav.getBoundingClientRect();
+      const itemRect = item.getBoundingClientRect();
+      if (itemRect.top < navRect.top) {
+        nav.scrollTop -= navRect.top - itemRect.top;
+      } else if (itemRect.bottom > navRect.bottom) {
+        nav.scrollTop += itemRect.bottom - navRect.bottom;
+      }
+    };
+    reveal();
+    // Высота списка меняется после первой отрисовки (подвал, капсула статуса)
+    // и при изменении размера окна — пересчитываем положение.
+    const observer = new ResizeObserver(reveal);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }
+
   type GroupKey = 'overview' | 'proxy_subs' | 'routing' | 'observability' | 'system' | 'tools';
   const DEFAULT_GROUP_OPEN: Record<GroupKey, boolean> = {
     overview: true,
@@ -221,7 +245,7 @@
   </span>
 </div>
 
-<nav class="sidebar-nav">
+<nav class="sidebar-nav" {@attach revealActiveItem}>
   <!-- Overview group -->
   <details class="nav-group" bind:open={groupOpen.overview}>
     <summary>
