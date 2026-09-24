@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { t, pluralize, currentLang } from './i18n';
   import { capabilities, fetchCapabilities, showToast, showConfirm } from './stores';
-  import { apiFetch } from './lib/api';
+  import { apiFetch, startMihomo } from './lib/api';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PageHeader from './PageHeader.svelte';
@@ -364,12 +364,7 @@
   async function launchMihomo() {
     mihomoLaunching = true;
     try {
-      const res = await apiFetch('/api/mihomo/control', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'start' })
-      });
-      if (!res.ok) throw new Error('Failed to start Mihomo');
+      await startMihomo();
       launchTimer1 = setTimeout(async () => {
         if (destroyed) return;
         await fetchCapabilities();

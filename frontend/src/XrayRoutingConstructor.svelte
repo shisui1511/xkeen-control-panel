@@ -11,7 +11,7 @@
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
   import { parseValidationError } from './lib/errorParser';
   import { findPortCollisions, parseMihomoPorts, type PortAllocation } from './lib/portChecker';
-  import { apiFetch, apiFetchJSON } from './lib/api';
+  import { apiFetch, apiFetchJSON, setDNSRedirect } from './lib/api';
   import PreflightWarnings, {
     type PreflightWarning
   } from './components/editor/PreflightWarnings.svelte';
@@ -557,7 +557,7 @@
   async function enableDNSRedirect() {
     dnsRedirectLoading = true;
     try {
-      await apiFetchJSON('/api/xkeen/dns-redirect/enable', { method: 'POST' });
+      await setDNSRedirect(true);
       showToast('success', $t('editor.dns_intercept_enabled'));
       await fetchCapabilities();
     } catch (e: any) {
