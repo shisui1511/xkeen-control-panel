@@ -445,9 +445,16 @@ func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (str
 	return s.runWithTimeoutArgs(timeout, action)
 }
 
+// binaryAvailable resolves a bare name ("xkeen" in config.json) through PATH
+// exactly like exec.Command does; os.Stat would look in the working directory.
+func binaryAvailable(path string) bool {
+	_, err := exec.LookPath(path)
+	return err == nil
+}
+
 func (s *XKeenService) isLocalhost() bool {
-	// 1. If binary does not exist
-	if _, err := os.Stat(s.BinaryPath); os.IsNotExist(err) {
+	// 1. If binary cannot be found
+	if !binaryAvailable(s.BinaryPath) {
 		// If we are running unit tests, only bypass if the path explicitly contains "xkeen-control-panel" or "local_dev"
 		if flag.Lookup("test.v") != nil {
 			return strings.Contains(s.BinaryPath, "xkeen-control-panel") || strings.Contains(s.BinaryPath, "local_dev")
