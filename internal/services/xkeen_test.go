@@ -459,3 +459,33 @@ func TestXKeenService_SetDNSProxying_RollsBackWhenDNSDies(t *testing.T) {
 		t.Fatalf("disable: %v", err)
 	}
 }
+
+// A bare binary name from config.json ("xkeen") is found through PATH;
+// lifecycle commands must run instead of being treated as a dev machine.
+func TestXKeenService_BareBinaryNameRunsLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "called")
+	script := "#!/bin/sh\necho \"$@\" > " + marker + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "xkeen-bare-test"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if !binaryAvailable("xkeen-bare-test") {
+		t.Fatal("binary on PATH must be found")
+	}
+	if binaryAvailable(filepath.Join(dir, "missing")) {
+		t.Fatal("missing binary must not be found")
+	}
+	svc := NewXKeenService("xkeen-bare-test", t.TempDir())
+	if svc.isLocalhost() {
+		t.Fatal("binary on PATH must not be treated as localhost")
+	}
+	if _, err := svc.Restart(); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	got, err := os.ReadFile(marker)
+	if err != nil || !strings.Contains(string(got), "-restart") {
+		t.Fatalf("restart was not executed: %q %v", got, err)
+	}
+}
