@@ -755,12 +755,9 @@ do_update() {
     stop_service
     mv "${BIN_PATH}.bak" "$BIN_PATH"
     chmod +x "$BIN_PATH"
-    
-    if [ -f "${INIT_SCRIPT}.bak" ]; then
-      mv "${INIT_SCRIPT}.bak" "$INIT_SCRIPT"
-      chmod +x "$INIT_SCRIPT"
-    fi
-    
+    # init-скрипт do_update не меняет — его .bak остался от давней установки,
+    # восстанавливать его нельзя
+
     start_service
     
     if poll_api "$port"; then

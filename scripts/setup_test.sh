@@ -403,6 +403,34 @@ fi
 cleanup
 
 # ---------------------------------------------------------------------------
+# Откат do_update не подменяет init-скрипт давним .bak
+# ---------------------------------------------------------------------------
+echo ""
+echo "── do_update rollback ───────────────────────────────────────"
+make_sandbox
+mock_opkg_not_found
+mock_uname_aarch64
+install_mock_binary "v1.1.0"
+mock_curl_version "v1.2.0"
+# API панели недоступен — do_update уйдёт в откат
+sed -i '2i case "$*" in *127.0.0.1*) exit 1 ;; esac' "$MOCK_BIN/curl"
+printf '#!/bin/sh\nexit 1\n' > "$MOCK_BIN/wget"; chmod +x "$MOCK_BIN/wget"
+mock_sha256sum_pass
+mock_killall
+mock_pgrep_not_running
+mock_init_script
+echo "current-init" >> "$INIT_SCRIPT"
+printf '#!/bin/sh\n# stale init from old install\n' > "${INIT_SCRIPT}.bak"
+printf '{"port":8090}\n' > "$INSTALL_DIR/config.json"
+run_in_sandbox "ARCH_LABEL=arm64; CHANNEL=stable; XCP_POLL_TIMEOUT=0; XCP_POLL_INTERVAL=0; do_update" > "$TMP/update.log" 2>&1 || true; [ -n "$DEBUG_SETUP_TEST" ] && sed "s/\x1b\[[0-9;]*m//g" "$TMP/update.log"
+if grep -q "current-init" "$INIT_SCRIPT"; then
+    pass "откат do_update оставил текущий init-скрипт"
+else
+    fail "откат do_update подменил init-скрипт давним .bak"
+fi
+cleanup
+
+# ---------------------------------------------------------------------------
 # Итог
 # ---------------------------------------------------------------------------
 echo ""
