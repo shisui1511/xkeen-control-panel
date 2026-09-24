@@ -10,6 +10,8 @@
     flushDNSCache,
     fetchRuleProviders,
     updateRuleProvider,
+    fetchRuleProviderDetails,
+    type RuleProviderDetails,
     type UserRule,
     type RuleProvider
   } from './lib/api';
@@ -42,6 +44,7 @@
 
   // Rule Providers State
   let ruleProviders = $state<RuleProvider[]>([]);
+  let ruleProviderDetails = $state<Record<string, RuleProviderDetails>>({});
   let loadingProviders = $state(false);
 
   // Proxy Groups State
@@ -123,7 +126,12 @@
   async function loadProviders() {
     loadingProviders = true;
     try {
-      ruleProviders = await fetchRuleProviders();
+      const [providers, details] = await Promise.all([
+        fetchRuleProviders(),
+        fetchRuleProviderDetails().catch(() => [])
+      ]);
+      ruleProviders = providers;
+      ruleProviderDetails = Object.fromEntries(details.map((d) => [d.name, d]));
     } catch (e: any) {
       if (e?.status === 401) return;
     } finally {
@@ -177,16 +185,21 @@
         await updateRuleProvider(provider.name);
       } catch (e: any) {
         if (e?.status === 401) return;
-        failed.push(provider.name);
+        failed.push(e?.message || provider.name);
       }
     }
     await loadProviders();
     if (failed.length === 0) {
       showToast('success', $t('rules.update_all_success'));
     } else {
-      for (const name of failed) {
-        showToast('error', $t('rules.update_provider_failed', { name }));
-      }
+      showToast(
+        'error',
+        $t('rules.update_providers_failed', {
+          n: String(failed.length),
+          list: failed.join('; ')
+        }),
+        8000
+      );
     }
   }
 
@@ -275,6 +288,7 @@
     {:else if activeTab === 'providers'}
       <RuleProvidersTab
         providers={ruleProviders}
+        details={ruleProviderDetails}
         loading={loadingProviders}
         onUpdate={handleUpdateProvider}
         onUpdateAll={handleUpdateAllProviders}

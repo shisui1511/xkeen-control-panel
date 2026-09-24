@@ -1,21 +1,67 @@
 <script lang="ts">
   import { t } from '../../i18n';
-  import type { RuleProvider } from '../../lib/api';
+  import {
+    checkRuleProviderURL,
+    type RuleProvider,
+    type RuleProviderDetails,
+    type RuleProviderURLCheck
+  } from '../../lib/api';
+  import RuleProviderContentModal from './RuleProviderContentModal.svelte';
   import EmptyState from '../EmptyState.svelte';
   import Button from '../Button.svelte';
   import DatIcon from '../../lib/components/icons/Dat.svelte';
 
   interface Props {
     providers: RuleProvider[];
+    /** Config-level details by provider name (file state, URL). */
+    details?: Record<string, RuleProviderDetails>;
     loading?: boolean;
     onUpdate: (name: string) => Promise<void>;
     onUpdateAll: () => Promise<void>;
   }
 
-  let { providers = [], loading = false, onUpdate, onUpdateAll }: Props = $props();
+  let { providers = [], details = {}, loading = false, onUpdate, onUpdateAll }: Props = $props();
 
   let updatingProvider = $state<string | null>(null);
   let updatingAll = $state(false);
+  let contentName = $state<string | null>(null);
+  let checkingURL = $state<string | null>(null);
+  let urlChecks = $state<Record<string, RuleProviderURLCheck>>({});
+
+  const emptyCount = $derived(providers.filter((p) => isEmpty(p)).length);
+
+  function isInline(p: RuleProvider): boolean {
+    return (details[p.name]?.type || p.vehicleType || '').toLowerCase() === 'inline';
+  }
+
+  function isEmpty(p: RuleProvider): boolean {
+    return !isInline(p) && p.ruleCount === 0;
+  }
+
+  async function handleCheckURL(name: string) {
+    if (checkingURL) return;
+    checkingURL = name;
+    try {
+      urlChecks[name] = await checkRuleProviderURL(name);
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      urlChecks[name] = {
+        name,
+        url: '',
+        ok: false,
+        error: e?.message || String(e),
+        duration_ms: 0
+      };
+    } finally {
+      checkingURL = null;
+    }
+  }
+
+  function urlCheckText(c: RuleProviderURLCheck): string {
+    if (c.ok) return $t('rules.provider_url_ok', { code: String(c.status_code ?? '') });
+    if (c.status_code) return $t('rules.provider_url_http_error', { code: String(c.status_code) });
+    return $t('rules.provider_url_error', { error: c.error || '' });
+  }
 
   async function handleUpdate(name: string) {
     if (updatingProvider || updatingAll) return;
@@ -61,6 +107,11 @@
     <div class="header-info">
       <span class="header-title">{$t('rules.tab_providers')}</span>
       <span class="header-badge">{providers.length}</span>
+      {#if emptyCount > 0}
+        <span class="header-warning" role="status">
+          {$t('rules.providers_empty_warning', { n: String(emptyCount) })}
+        </span>
+      {/if}
     </div>
     {#if providers.length > 0}
       <Button
@@ -114,8 +165,29 @@
                 {#if provider.behavior}
                   <span class="badge badge-behavior">{provider.behavior}</span>
                 {/if}
+                {#if isEmpty(provider)}
+                  <span class="badge badge-empty">{$t('rules.provider_status_empty')}</span>
+                {/if}
+                {#if details[provider.name] && !details[provider.name].file_exists}
+                  <span class="badge badge-empty">{$t('rules.provider_status_no_file')}</span>
+                {/if}
               </div>
             </div>
+
+            {#if details[provider.name]?.url}
+              <span class="provider-url font-mono" title={details[provider.name].url}>
+                {details[provider.name].url}
+              </span>
+            {/if}
+            {#if urlChecks[provider.name]}
+              <span
+                class="provider-url-check"
+                class:is-ok={urlChecks[provider.name].ok}
+                role="status"
+              >
+                {urlCheckText(urlChecks[provider.name])}
+              </span>
+            {/if}
 
             <div class="provider-meta">
               <div class="meta-item">
@@ -131,6 +203,27 @@
           </div>
 
           <div class="provider-actions">
+            <Button
+              variant="secondary"
+              class="btn-sm"
+              disabled={isEmpty(provider)}
+              title={$t('rules.provider_content_btn_title')}
+              onclick={() => (contentName = provider.name)}
+            >
+              <span>{$t('rules.provider_content_btn')}</span>
+            </Button>
+            {#if details[provider.name]?.url}
+              <Button
+                variant="secondary"
+                class="btn-sm"
+                loading={checkingURL === provider.name}
+                disabled={!!checkingURL}
+                title={$t('rules.provider_url_check_title')}
+                onclick={() => handleCheckURL(provider.name)}
+              >
+                <span>{$t('rules.provider_url_check')}</span>
+              </Button>
+            {/if}
             <Button
               variant="secondary"
               class="btn-sm"
@@ -162,7 +255,42 @@
   {/if}
 </div>
 
+{#if contentName}
+  {#key contentName}
+    <RuleProviderContentModal name={contentName} onclose={() => (contentName = null)} />
+  {/key}
+{/if}
+
 <style>
+  .header-warning {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--warning);
+  }
+
+  .badge-empty {
+    background: var(--warning-soft);
+    color: var(--warning);
+  }
+
+  .provider-url {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-size-xs);
+    color: var(--fg-muted);
+  }
+
+  .provider-url-check {
+    font-size: var(--font-size-xs);
+    color: var(--danger);
+  }
+
+  .provider-url-check.is-ok {
+    color: var(--success);
+  }
+
   .providers-tab {
     display: flex;
     flex-direction: column;

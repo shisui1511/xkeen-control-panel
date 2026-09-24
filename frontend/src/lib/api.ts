@@ -209,5 +209,72 @@ export async function updateRuleProvider(name: string): Promise<void> {
   const res = await apiFetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(name)}`, {
     method: 'PUT'
   });
-  if (!res.ok) throw new Error(`Failed to update provider: ${name}`);
+  if (!res.ok) {
+    // Mihomo explains the failure, e.g. {"message":"404 Not Found"} for a dead URL.
+    let reason = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      reason = body?.message || body?.error || reason;
+    } catch {
+      // non-JSON body: keep the status
+    }
+    throw new Error(`${name}: ${reason}`);
+  }
+}
+
+export interface RuleProviderDetails {
+  name: string;
+  type: string;
+  behavior: string;
+  format: string;
+  url?: string;
+  path?: string;
+  file_exists: boolean;
+  file_size?: number;
+  file_mtime?: number;
+  inline_count?: number;
+}
+
+export interface RuleProviderPage {
+  name: string;
+  total: number;
+  matched: number;
+  offset: number;
+  entries: string[];
+}
+
+export interface RuleProviderURLCheck {
+  name: string;
+  url: string;
+  status_code?: number;
+  error?: string;
+  ok: boolean;
+  duration_ms: number;
+}
+
+export async function fetchRuleProviderDetails(): Promise<RuleProviderDetails[]> {
+  const list = await apiFetchJSON<RuleProviderDetails[]>('/api/rule-providers/info');
+  return Array.isArray(list) ? list : [];
+}
+
+export async function fetchRuleProviderContent(
+  name: string,
+  query: string,
+  offset: number,
+  limit = 200
+): Promise<RuleProviderPage> {
+  const params = new URLSearchParams({
+    name,
+    q: query,
+    offset: String(offset),
+    limit: String(limit)
+  });
+  return apiFetchJSON<RuleProviderPage>(`/api/rule-providers/content?${params}`);
+}
+
+export async function checkRuleProviderURL(name: string): Promise<RuleProviderURLCheck> {
+  return apiFetchJSON<RuleProviderURLCheck>(
+    `/api/rule-providers/check-url?name=${encodeURIComponent(name)}`,
+    { method: 'POST' }
+  );
 }
