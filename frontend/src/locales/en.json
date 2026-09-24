@@ -2311,5 +2311,6 @@
   "xray.fallback_none": "Not set",
   "xray.observatory_hint": "Least ping/load strategies rely on the observatory: the panel builds it from the balancer selectors.",
   "xray.observatory_url": "Probe URL",
-  "xray.observatory_interval": "Probe interval"
+  "xray.observatory_interval": "Probe interval",
+  "editor.dns_over_vless_no_proxy": "No proxy outbound found: DNS-over-proxy rules will not be created. Add a rule to a proxy outbound on the routing tab."
 }

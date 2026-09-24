@@ -197,3 +197,84 @@ test('rule editor retargets a rule to a new balancer', async ({ page }) => {
     strategy: { type: 'roundRobin' }
   });
 });
+
+test('DNS over proxy switch owns its managed routing rules', async ({ page }) => {
+  const saved: Record<string, any> = {};
+  const routing = {
+    routing: {
+      domainStrategy: 'IPIfNonMatch',
+      rules: [
+        {
+          type: 'field',
+          inboundTag: ['dns-in'],
+          ip: ['geoip:private'],
+          outboundTag: 'direct',
+          ruleTag: 'xcp-dns-over-proxy'
+        },
+        {
+          type: 'field',
+          inboundTag: ['dns-in'],
+          outboundTag: 'vless-a',
+          ruleTag: 'xcp-dns-over-proxy'
+        },
+        { type: 'field', network: 'tcp,udp', outboundTag: 'vless-a' }
+      ]
+    }
+  };
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'serviceWorker', {
+      value: undefined,
+      configurable: true
+    });
+    window.localStorage.setItem('lang', 'ru');
+  });
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/auth/me') {
+      return route.fulfill({
+        json: { authenticated: true, setup_required: false, csrf_token: 't' }
+      });
+    }
+    if (url.pathname === '/api/capabilities') {
+      return route.fulfill({
+        json: {
+          success: true,
+          data: { kernels: { xray: { installed: true } }, active_kernel: 'xray', xkeen_dns: true }
+        }
+      });
+    }
+    if (url.pathname === '/api/config/read') {
+      const path = url.searchParams.get('path') || '';
+      const key = Object.keys(FILES).find((k) => path.includes(k));
+      const body = key === '05_routing' ? JSON.stringify(routing) : key ? FILES[key] : '{}';
+      return route.fulfill({ status: 200, contentType: 'application/json', body });
+    }
+    if (url.pathname === '/api/config/save') {
+      const name = (url.searchParams.get('path') || '').split('/').pop() || '';
+      saved[name] = JSON.parse(route.request().postData() || '{}');
+      return route.fulfill({ json: { success: true } });
+    }
+    if (url.pathname === '/api/config/list' || url.pathname === '/api/templates/list') {
+      return route.fulfill({ json: [] });
+    }
+    return route.fulfill({ json: { success: true, data: {} } });
+  });
+
+  await page.goto('/#/constructor');
+  await page.locator('.constructor-kernel-toggle button:has-text("Xray")').click();
+  // Managed rules are not shown as user rules.
+  await expect(page.locator('[data-testid="routing-rules-list"] .rule-card')).toHaveCount(1);
+
+  await page.locator('[data-tab="dns"]').first().click();
+  const toggle = page.getByRole('checkbox', { name: /DNS-over-VLESS/ });
+  await expect(toggle).toBeChecked();
+  await toggle.evaluate((el: HTMLInputElement) => el.click());
+  await expect(toggle).not.toBeChecked();
+
+  await page.locator('[data-testid="apply-changes-btn"]').click();
+  await page.locator('[data-testid="apply-confirm-dialog"] button.btn-primary').click();
+  await expect.poll(() => Object.keys(saved)).toContain('05_routing.json');
+  expect(saved['05_routing.json'].routing.rules).toEqual([
+    { type: 'field', network: 'tcp,udp', outboundTag: 'vless-a' }
+  ]);
+});

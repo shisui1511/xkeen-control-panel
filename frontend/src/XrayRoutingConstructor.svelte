@@ -24,6 +24,8 @@
     parseJsonc,
     lineDiff,
     hasJsonComments,
+    dnsOverProxyRules,
+    takeDnsOverProxyRules,
     DEFAULT_OBSERVATORY,
     type DiffLine,
     type XrayBalancer,
@@ -243,6 +245,14 @@
         ...rulesToConfig(routingRules)
       }
     };
+    // "DNS over proxy": the DNS module's queries go through the proxy
+    // outbound; the managed rules come first so nothing else catches them.
+    if (dnsOverVless && proxyTag) {
+      routingObj.routing.rules = [
+        ...dnsOverProxyRules(dnsConfig.tag || 'dns-in', proxyTag),
+        ...routingObj.routing.rules
+      ];
+    }
     const cleanBalancers = balancers.filter((b) => b.tag.trim()).map(cleanBalancer);
     if (cleanBalancers.length > 0) {
       routingObj.routing.balancers = cleanBalancers;
@@ -270,7 +280,7 @@
 
     const dnsObj = {
       dns: {
-        tag: dnsConfig.tag,
+        tag: dnsConfig.tag || (dnsOverVless ? 'dns-in' : undefined),
         queryStrategy: dnsConfig.queryStrategy,
         servers: dnsConfig.servers,
         hosts: Object.keys(dnsConfig.hosts).length > 0 ? dnsConfig.hosts : undefined
@@ -381,7 +391,9 @@
       void _rules;
       void _disabled;
       routingConfig.domainStrategy = domainStrategy || 'IPIfNonMatch';
-      routingRules = rulesFromConfig(r);
+      const { enabled: managedDns, rest: userRules } = takeDnsOverProxyRules(rulesFromConfig(r));
+      routingRules = userRules;
+      dnsOverVless = managedDns;
       routingExtra = routingRest;
       routingFileExtra = fileRest;
       const proxyRule = routingRules.find(
@@ -1061,6 +1073,7 @@
         <XraySectionDns
           bind:dnsConfig
           bind:dnsOverVless
+          {proxyTag}
           xkeenDns={$capabilities?.xkeen_dns}
           {dnsRedirectLoading}
           onEnableDnsRedirect={enableDNSRedirect}

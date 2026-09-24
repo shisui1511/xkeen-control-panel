@@ -232,3 +232,33 @@ export function parseJsonc(text: string): any {
     return undefined;
   }
 }
+
+/** ruleTag of the routing rules the "DNS over proxy" switch manages. */
+export const DNS_OVER_PROXY_TAG = 'xcp-dns-over-proxy';
+
+/**
+ * Rules sending the Xray DNS module's own queries through the proxy:
+ * private resolvers (router, LAN) stay direct, everything else goes to
+ * `proxyTag`. They are placed first so no other rule catches the queries.
+ */
+export function dnsOverProxyRules(dnsTag: string, proxyTag: string): Record<string, unknown>[] {
+  return [
+    {
+      type: 'field',
+      inboundTag: [dnsTag],
+      ip: ['geoip:private'],
+      outboundTag: 'direct',
+      ruleTag: DNS_OVER_PROXY_TAG
+    },
+    { type: 'field', inboundTag: [dnsTag], outboundTag: proxyTag, ruleTag: DNS_OVER_PROXY_TAG }
+  ];
+}
+
+/** Splits managed DNS-over-proxy rules from the user's rules. */
+export function takeDnsOverProxyRules(rules: UIRoutingRule[]): {
+  enabled: boolean;
+  rest: UIRoutingRule[];
+} {
+  const rest = rules.filter((r) => r.ruleTag !== DNS_OVER_PROXY_TAG);
+  return { enabled: rest.length !== rules.length, rest };
+}

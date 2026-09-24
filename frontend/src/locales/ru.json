@@ -2311,5 +2311,6 @@
   "xray.fallback_none": "Не задан",
   "xray.observatory_hint": "Стратегии «наименьший пинг/нагрузка» опираются на observatory: панель сама соберёт его из селекторов балансировщиков.",
   "xray.observatory_url": "URL проверки",
-  "xray.observatory_interval": "Интервал проверки"
+  "xray.observatory_interval": "Интервал проверки",
+  "editor.dns_over_vless_no_proxy": "Не найден прокси-outbound: правила DNS через прокси не будут созданы. Добавьте правило на прокси-outbound во вкладке маршрутизации."
 }

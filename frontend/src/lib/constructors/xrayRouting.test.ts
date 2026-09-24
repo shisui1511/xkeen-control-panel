@@ -127,3 +127,19 @@ describe('jsonc helpers', () => {
     expect(parseJsonc('{"s": "a\\"//b"}')).toEqual({ s: 'a"//b' });
   });
 });
+
+describe('dns over proxy rules', () => {
+  it('builds managed rules and takes them back out of the rule list', async () => {
+    const { dnsOverProxyRules, takeDnsOverProxyRules, rulesFromConfig, DNS_OVER_PROXY_TAG } =
+      await import('./xrayRouting');
+    const managed = dnsOverProxyRules('dns-in', 'vless-reality');
+    expect(managed.map((r) => r.outboundTag)).toEqual(['direct', 'vless-reality']);
+    expect(managed.every((r) => r.ruleTag === DNS_OVER_PROXY_TAG)).toBe(true);
+
+    const ui = rulesFromConfig({ rules: [...managed, { outboundTag: 'direct', port: '53' }] });
+    const { enabled, rest } = takeDnsOverProxyRules(ui);
+    expect(enabled).toBe(true);
+    expect(rest.map((r) => r.port)).toEqual(['53']);
+    expect(takeDnsOverProxyRules(rest).enabled).toBe(false);
+  });
+});
