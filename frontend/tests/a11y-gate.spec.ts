@@ -10,7 +10,7 @@ const ROUTES = [
   { name: 'rules', path: '/#/rules' },
   { name: 'settings', path: '/#/settings' },
   { name: 'logs', path: '/#/logs' },
-  { name: 'traffic-quotas', path: '/#/traffic-quotas' }
+  { name: 'traffic-quotas', path: '/#/trafficquotas' }
 ];
 
 const THEMES = ['dark', 'light'] as const;
@@ -28,6 +28,11 @@ test.describe('A11y automated gate (@axe-core)', () => {
           }, theme);
 
           await visitPage(page, route.path);
+          // Страница действительно отрисовалась: опечатка в маршруте иначе
+          // даёт пустую область, и скан проходит, ничего не проверив
+          await expect(page.locator('.main-content .page-header h1').first()).toBeVisible({
+            timeout: 15000
+          });
 
           // Гарантируем выставление атрибута data-theme на <html>
           await page.evaluate((t) => {
