@@ -677,10 +677,14 @@ func (d *LogDispatcher) startFileConnectors() {
 			continue
 		}
 		seen[src] = true
+		// Хвост ведётся и для ещё не созданных файлов: лог ядра появляется
+		// после старта панели (XKeen стартует позже, смена Xray ↔ Mihomo).
+		// Такой файл новый — читается с начала.
+		files = append(files, src)
 		if _, err := os.Stat(src); err != nil {
+			offsets[src] = 0
 			continue
 		}
-		files = append(files, src)
 		lines, offset, err := readFileTail(src, fileTailBytes)
 		if err != nil {
 			continue
@@ -729,6 +733,10 @@ func (d *LogDispatcher) startFileConnectors() {
 
 // fileTailBytes is how much of each log file is shown on start.
 const fileTailBytes = 8192
+
+// maxPartialLineBytes ограничивает недописанную строку: если перевода строки
+// так и нет, накопленное уходит в журнал как есть.
+const maxPartialLineBytes = 64 * 1024
 
 type backfillLine struct {
 	raw    string
@@ -863,6 +871,16 @@ func (d *LogDispatcher) tailFileFrom(path string, start int64) {
 		}
 		reopened = true
 
+		// Строка, которую ядро дописало не до конца (два write()), копится
+		// до перевода строки, а не уходит в журнал обрывками
+		var partial string
+		flushPartial := func() {
+			if partial != "" {
+				d.IngestLine(partial, fallbackSource)
+				partial = ""
+			}
+		}
+
 		for {
 			select {
 			case <-d.ctx.Done():
@@ -873,7 +891,15 @@ func (d *LogDispatcher) tailFileFrom(path string, start int64) {
 
 			line, readErr := reader.ReadString('\n')
 			if len(line) > 0 {
-				d.IngestLine(line, fallbackSource)
+				if readErr == io.EOF && !strings.HasSuffix(line, "\n") {
+					partial += line
+					if len(partial) > maxPartialLineBytes {
+						flushPartial()
+					}
+				} else {
+					d.IngestLine(partial+line, fallbackSource)
+					partial = ""
+				}
 			}
 
 			if readErr != nil {
@@ -884,6 +910,7 @@ func (d *LogDispatcher) tailFileFrom(path string, start int64) {
 						pos, _ := file.Seek(0, io.SeekCurrent)
 						pos -= int64(reader.Buffered())
 						if !os.SameFile(stat, curStat) || curStat.Size() < pos {
+							flushPartial()
 							file.Close()
 							break
 						}
@@ -896,6 +923,7 @@ func (d *LogDispatcher) tailFileFrom(path string, start int64) {
 					}
 					continue
 				}
+				flushPartial()
 				file.Close()
 				break
 			}
