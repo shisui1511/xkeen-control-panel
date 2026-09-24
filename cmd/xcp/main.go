@@ -234,6 +234,9 @@ func main() {
 		}
 	})
 	srv.HandleProtected("/api/rules/test", api.RouteTest)
+	srv.HandleProtected("/api/rule-providers/info", api.RuleProvidersInfo)
+	srv.HandleProtected("/api/rule-providers/content", api.RuleProviderContent)
+	srv.HandleProtected("/api/rule-providers/check-url", api.RuleProviderCheckURL)
 	srv.HandleProtected("/api/config/mihomo-migrate-socket", api.MihomoMigrateSocket)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
