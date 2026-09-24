@@ -559,7 +559,24 @@
         class:pressure={flashHealth.is_under_pressure}
         title={$t('logs.flash_health_desc')}
       >
-        <span class="flash-icon">💾</span>
+        <svg
+          class="flash-icon"
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+          ><line x1="22" y1="12" x2="2" y2="12" /><path
+            d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
+          /><line x1="6" y1="16" x2="6.01" y2="16" /><line
+            x1="10"
+            y1="16"
+            x2="10.01"
+            y2="16"
+          /></svg
+        >
         <span class="flash-stat"
           >{$t('logs.flash_total_logs', {
             size: formatBytes(flashHealth.total_logs_bytes)
@@ -806,7 +823,7 @@
 
           <!-- Source Tabs -->
           <div class="source-pills" role="group" aria-label={$t('logs.source')}>
-            {#each SOURCE_TABS as tab}
+            {#each SOURCE_TABS as tab (tab.id)}
               <button
                 type="button"
                 class="source-pill"
@@ -820,7 +837,12 @@
           </div>
 
           <!-- Severity Level Dropdown -->
-          <Select bind:value={levelFilter} class="level-select" ariaLabel={$t('logs.level')}>
+          <Select
+            bind:value={levelFilter}
+            class="level-select"
+            wrapperClass="level-select-wrap"
+            ariaLabel={$t('logs.level')}
+          >
             <option value="">{$t('logs.all_levels')}</option>
             <option value="error">ERROR</option>
             <option value="warning">WARN</option>
@@ -1011,8 +1033,7 @@
   }
 
   .flash-icon {
-    font-size: 14px;
-    line-height: 1;
+    flex-shrink: 0;
   }
 
   .flash-stat {
@@ -1171,9 +1192,22 @@
     color: var(--fg-primary);
   }
 
+  .tb-filters {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .tb-filters :global(.level-select-wrap) {
+    width: auto;
+    min-width: 140px;
+  }
+
   /* Source Pills */
   .source-pills {
     display: inline-flex;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     overflow: hidden;
@@ -1182,6 +1216,8 @@
   }
 
   .source-pill {
+    flex-shrink: 0;
+    white-space: nowrap;
     padding: 3px 8px;
     font-size: 12px;
     font-weight: 600;
@@ -1310,6 +1346,8 @@
     border-radius: 3px;
     background: var(--surface-tint);
     color: var(--fg-dim);
+    line-height: 18px;
+    vertical-align: middle;
     max-width: 70px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1324,6 +1362,8 @@
 
   .lvl-badge {
     display: inline-block;
+    line-height: 18px;
+    vertical-align: middle;
     padding: 1px 4px;
     font-size: 12px;
     font-weight: 800;
