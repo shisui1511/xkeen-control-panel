@@ -977,7 +977,6 @@
   "traffic.client_ip": "Device / IP",
   "traffic.client_speed": "Current Speed",
   "traffic.client_total": "Traffic Volume",
-  "traffic.client_conns": "Sessions",
   "traffic.dynamics": "Dynamics: ",
   "traffic.hour_peak": "Peak: ",
   "dat.title": "DAT Manager",

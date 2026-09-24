@@ -977,7 +977,6 @@
   "traffic.client_ip": "Устройство / IP",
   "traffic.client_speed": "Текущая скорость",
   "traffic.client_total": "Объём трафика",
-  "traffic.client_conns": "Сессий",
   "traffic.dynamics": "Динамика: ",
   "traffic.hour_peak": "Пик: ",
   "dat.title": "DAT Manager",

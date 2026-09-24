@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { t, currentLang } from './i18n';
+  import { t, currentLang, pluralize } from './i18n';
   import { showToast, showConfirm, capabilities, fetchCapabilities } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import PageHeader from './PageHeader.svelte';
@@ -1069,7 +1069,13 @@
                   </span>
                   <span class="client-ip mono">{client.ip}</span>
                   <span class="badge-sessions"
-                    >{client.active_connections} {$t('traffic.client_conns').toLowerCase()}</span
+                    >{pluralize(
+                      client.active_connections,
+                      $t('conn.sessions_count_one', { count: String(client.active_connections) }),
+                      $t('conn.sessions_count_few', { count: String(client.active_connections) }),
+                      $t('conn.sessions_count_many', { count: String(client.active_connections) }),
+                      $currentLang
+                    )}</span
                   >
                 </div>
                 <div class="client-bytes mono">{formatBytes(client.total_bytes)}</div>
@@ -1078,9 +1084,9 @@
                 <div class="client-progress-bar" style="width: {sharePercent}%;"></div>
               </div>
               <div class="client-meta-sub">
-                <span class="download-color">↓ {formatSpeed(client.download)}</span>
+                <span class="download-color">↓ {formatBytes(client.download)}</span>
                 <span class="sep">·</span>
-                <span class="upload-color">↑ {formatSpeed(client.upload)}</span>
+                <span class="upload-color">↑ {formatBytes(client.upload)}</span>
                 <span class="sep">·</span>
                 <span class="share-label">{sharePercent}% {$t('traffic.session')}</span>
               </div>
