@@ -769,24 +769,138 @@ func (d *LogDispatcher) tailFile(path string) {
 func (d *LogDispatcher) tailSyslog() {
 	defer d.wg.Done()
 
-	// Check if logread command exists
-	if _, err := exec.LookPath("logread"); err != nil {
+	if _, err := exec.LookPath("logread"); err == nil {
+		d.followLogread()
 		return
 	}
+	// Keenetic has no logread; its system log is served by the local RCI.
+	d.pollRCILog(defaultRCILogURL, 5*time.Second)
+}
 
-	cmd := exec.CommandContext(d.ctx, "logread", "-f")
-	stdout, err := cmd.StdoutPipe()
+// followLogread streams "logread -f" and restarts it when it exits (syslog
+// restart, oversized line) instead of silently losing the system log.
+func (d *LogDispatcher) followLogread() {
+	for {
+		cmd := exec.CommandContext(d.ctx, "logread", "-f")
+		stdout, err := cmd.StdoutPipe()
+		if err == nil && cmd.Start() == nil {
+			scanner := bufio.NewScanner(stdout)
+			scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+			for scanner.Scan() {
+				d.IngestLine(scanner.Text(), "syslog")
+			}
+			_ = cmd.Wait()
+		}
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+const defaultRCILogURL = "http://127.0.0.1:79/rci/"
+
+type rciLogEntry struct {
+	ID        int64  `json:"id"`
+	Timestamp string `json:"timestamp"`
+	Ident     string `json:"ident"`
+	Message   struct {
+		Level   string `json:"level"`
+		Message string `json:"message"`
+	} `json:"message"`
+}
+
+// fetchRCILog asks the Keenetic RCI for the last lines of the system log.
+func fetchRCILog(ctx context.Context, rciURL string, lines int) ([]rciLogEntry, error) {
+	body := fmt.Sprintf(`{"show":{"log":{"max-lines":%d}}}`, lines)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rciURL, strings.NewReader(body))
 	if err != nil {
-		return
+		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
-		return
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
 	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("rci returned %d", resp.StatusCode)
+	}
+	var out struct {
+		Show struct {
+			Log struct {
+				Log map[string]rciLogEntry `json:"log"`
+			} `json:"log"`
+		} `json:"show"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out); err != nil {
+		return nil, err
+	}
+	entries := make([]rciLogEntry, 0, len(out.Show.Log.Log))
+	for _, e := range out.Show.Log.Log {
+		entries = append(entries, e)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+	return entries, nil
+}
 
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := scanner.Text()
-		d.IngestLine(line, "syslog")
+// rciLogLine formats an RCI entry for IngestLine: "[syslog] 09:07:48 [error] [dropbear] msg".
+func rciLogLine(e rciLogEntry) string {
+	ts := e.Timestamp
+	if i := strings.LastIndexByte(ts, ' '); i >= 0 {
+		ts = ts[i+1:]
 	}
-	_ = cmd.Wait()
+	ident := e.Ident
+	if i := strings.IndexByte(ident, '['); i >= 0 {
+		ident = ident[:i]
+	}
+	ident = strings.Map(func(r rune) rune {
+		if r == ' ' || r == ']' || r == '[' {
+			return '_'
+		}
+		return r
+	}, ident)
+	level := strings.ToLower(e.Message.Level)
+	if level == "" {
+		level = "info"
+	}
+	line := "[syslog] " + ts + " [" + level + "]"
+	if ident != "" {
+		line += " [" + ident + "]"
+	}
+	return line + " " + e.Message.Message
+}
+
+// pollRCILog ingests new Keenetic system log entries every interval.
+func (d *LogDispatcher) pollRCILog(rciURL string, interval time.Duration) {
+	var lastID int64 = -1
+	wait := time.Duration(0)
+	for {
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait = interval
+		lines := 100
+		if lastID < 0 {
+			lines = 50
+		}
+		entries, err := fetchRCILog(d.ctx, rciURL, lines)
+		if err != nil {
+			// Not a Keenetic or RCI unavailable: retry rarely.
+			wait = time.Minute
+			continue
+		}
+		if n := len(entries); n > 0 && entries[n-1].ID < lastID {
+			lastID = -1 // log was cleared or the router rebooted
+		}
+		for _, e := range entries {
+			if e.ID > lastID {
+				d.IngestLine(rciLogLine(e), "syslog")
+				lastID = e.ID
+			}
+		}
+	}
 }

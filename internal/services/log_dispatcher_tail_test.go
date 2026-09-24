@@ -1,9 +1,13 @@
 package services
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -84,5 +88,46 @@ func TestGetHistory_AllSourcesSortedByID(t *testing.T) {
 		if h[i-1].ID > h[i].ID {
 			t.Fatalf("history not ordered by ID at %d: %d > %d", i, h[i-1].ID, h[i].ID)
 		}
+	}
+}
+
+func TestPollRCILog_IngestsNewEntriesOnce(t *testing.T) {
+	var round int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&round, 1)
+		entries := `"1": {"id": 1, "timestamp": "Sep 24 09:07:48", "ident": "dropbear[25629]", "message": {"level": "Info", "message": "Child connection"}}`
+		if n > 1 {
+			entries += `, "2": {"id": 2, "timestamp": "Sep 24 09:07:50", "ident": "ndm", "message": {"level": "Error", "message": "Core::Syslog: link down"}}`
+		}
+		fmt.Fprintf(w, `{"show": {"log": {"log": {%s}}}}`, entries)
+	}))
+	defer srv.Close()
+
+	d := NewLogDispatcher(nil, t.TempDir(), "")
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.pollRCILog(srv.URL, 50*time.Millisecond)
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	var h []LogEntry
+	for time.Now().Before(deadline) {
+		h = d.GetHistory("syslog", "", 100)
+		if len(h) >= 2 && atomic.LoadInt32(&round) >= 3 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	d.Stop()
+
+	if len(h) != 2 {
+		t.Fatalf("expected each entry once, got %d: %+v", len(h), h)
+	}
+	if h[0].Timestamp != "09:07:48" || h[0].Subsystem != "dropbear" || !strings.Contains(h[0].Message, "Child connection") {
+		t.Errorf("first entry: %+v", h[0])
+	}
+	if h[1].Level != "error" || h[1].Subsystem != "ndm" {
+		t.Errorf("second entry: %+v", h[1])
 	}
 }
