@@ -856,3 +856,18 @@ func TestDATManagerService_Lookup_URLInputAndIPFilter(t *testing.T) {
 		}
 	}
 }
+
+// Mihomo keeps GeoSite.dat while callers ask for geosite.dat.
+func TestDATManagerService_ListTags_CaseInsensitiveName(t *testing.T) {
+	xrayDir, mihomoDir := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(mihomoDir, "GeoSite.dat"), []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewDATManagerService(xrayDir, mihomoDir)
+	if _, err := svc.ListTags("geosite.dat"); err != nil && strings.Contains(err.Error(), "file not found") {
+		t.Fatalf("GeoSite.dat not found by case-insensitive name: %v", err)
+	}
+	if _, err := svc.ListTags("geoip.dat"); err == nil || !strings.Contains(err.Error(), "file not found") {
+		t.Fatalf("expected file not found for a missing base, got %v", err)
+	}
+}

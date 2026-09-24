@@ -424,13 +424,28 @@ func (s *DATManagerService) ListTags(name string) ([]DATTagResult, error) {
 		return nil, fmt.Errorf("invalid file name")
 	}
 
-	// Look in both directories
+	// Look in both directories; Mihomo names its base GeoSite.dat while Xray
+	// uses geosite.dat, so fall back to a case-insensitive match.
 	var path string
 	for _, dir := range []string{s.xrayDir, s.mihomoDir} {
 		candidate := filepath.Join(dir, safeName)
 		if _, err := os.Stat(candidate); err == nil {
 			path = candidate
 			break
+		}
+	}
+	if path == "" {
+		for _, dir := range []string{s.xrayDir, s.mihomoDir} {
+			entries, _ := os.ReadDir(dir)
+			for _, e := range entries {
+				if !e.IsDir() && strings.EqualFold(e.Name(), safeName) {
+					path = filepath.Join(dir, e.Name())
+					break
+				}
+			}
+			if path != "" {
+				break
+			}
 		}
 	}
 	if path == "" {
