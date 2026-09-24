@@ -266,7 +266,8 @@ func (s *MihomoProfileService) Delete(name string) error {
 	}
 	if err := os.MkdirAll(s.backupDir, 0o700); err == nil {
 		stamp := time.Now().Format("20060102-150405")
-		_ = os.WriteFile(filepath.Join(s.backupDir, fmt.Sprintf("%s.%s.yaml", name, stamp)), data, 0o600)
+		base := strings.TrimSuffix(filepath.Base(path), ".yaml")
+		_ = os.WriteFile(filepath.Join(s.backupDir, fmt.Sprintf("%s.%s.yaml", base, stamp)), data, 0o600)
 	}
 	return os.Remove(path)
 }
@@ -335,9 +336,13 @@ func (s *MihomoProfileService) Activate(name string) (*ActivationResult, error) 
 
 // pointConfigTo atomically re-points config.yaml to profiles/<name>.yaml.
 func (s *MihomoProfileService) pointConfigTo(name string) error {
+	target, err := s.profilePath(name)
+	if err != nil {
+		return err
+	}
 	tmp := s.configPath() + ".xcp-link"
 	_ = os.Remove(tmp)
-	if err := os.Symlink(filepath.Join(s.profilesDir(), name+".yaml"), tmp); err != nil {
+	if err := os.Symlink(target, tmp); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, s.configPath()); err != nil {
