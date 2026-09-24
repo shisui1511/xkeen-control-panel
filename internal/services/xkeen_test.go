@@ -1,6 +1,8 @@
 package services
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -412,5 +414,48 @@ exit 1
 	_, err := svc.Start()
 	if err == nil {
 		t.Fatal("expected error when start failed and status is 'XKeen is not running', got nil")
+	}
+}
+
+func TestXKeenService_SetDNSProxying_RollsBackWhenDNSDies(t *testing.T) {
+	tmpDir := t.TempDir()
+	calls := filepath.Join(tmpDir, "calls.log")
+	dummy := filepath.Join(tmpDir, "xkeen")
+	script := "#!/bin/sh\necho \"$*\" >> " + calls + "\nexit 0\n"
+	if err := os.WriteFile(dummy, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prev := dnsProbeWindow
+	dnsProbeWindow = 2 * time.Second
+	defer func() { dnsProbeWindow = prev }()
+
+	svc := NewXKeenService(dummy, tmpDir)
+
+	// Healthy DNS after switching on: no rollback.
+	svc.SetDNSProbe(func(ctx context.Context) error { return nil })
+	if _, err := svc.SetDNSProxying(true); err != nil {
+		t.Fatalf("healthy enable: %v", err)
+	}
+	data, _ := os.ReadFile(calls)
+	if got := strings.Fields(strings.ReplaceAll(string(data), "\n", " ")); strings.Join(got, " ") != "-dns on -restart" {
+		t.Fatalf("healthy calls: %q", data)
+	}
+
+	// Router stops resolving: redirection is switched off again.
+	_ = os.Remove(calls)
+	svc.SetDNSProbe(func(ctx context.Context) error { return errors.New("no answer") })
+	_, err := svc.SetDNSProxying(true)
+	if !errors.Is(err, ErrDNSRolledBack) {
+		t.Fatalf("expected rollback, got %v", err)
+	}
+	data, _ = os.ReadFile(calls)
+	if got := strings.Join(strings.Fields(strings.ReplaceAll(string(data), "\n", " ")), " "); got != "-dns on -restart -dns off -restart" {
+		t.Fatalf("rollback calls: %q", got)
+	}
+
+	// Switching off never probes.
+	_ = os.Remove(calls)
+	if _, err := svc.SetDNSProxying(false); err != nil {
+		t.Fatalf("disable: %v", err)
 	}
 }

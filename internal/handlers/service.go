@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -154,6 +155,12 @@ func (a *API) ServiceDNSRedirect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out, err := a.xkeenSvc.SetDNSProxying(*req.Enabled)
+	if errors.Is(err, services.ErrDNSRolledBack) {
+		// Redirection was undone because the router stopped resolving names.
+		a.ClearCapabilitiesCache()
+		a.errorResponse(w, a.t(r, "dns.redirect_rolled_back"), http.StatusConflict)
+		return
+	}
 	if err != nil {
 		a.errorResponse(w, out, http.StatusInternalServerError)
 		return

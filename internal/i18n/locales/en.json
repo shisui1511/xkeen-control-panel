@@ -55,5 +55,6 @@
   "error.method_not_allowed": "Method not allowed",
   "error.invalid_request": "Invalid request",
   "auth.wrong_password": "Current password is incorrect",
-  "preflight.awg_version_incompatible": "AmneziaWG 3.1 options require Mihomo core version 1.19.30 or higher"
+  "preflight.awg_version_incompatible": "AmneziaWG 3.1 options require Mihomo core version 1.19.30 or higher",
+  "dns.redirect_rolled_back": "DNS redirection was undone: after switching it on the router stopped resolving names. Check the DNS servers in the core configuration."
 }
