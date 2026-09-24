@@ -119,6 +119,20 @@ mock_opkg_arch() {
     chmod +x "$MOCK_BIN/opkg"
 }
 
+# curl, который первые $1 вызовов падает (панель ещё стартует), потом отвечает
+mock_curl_fails_then_ok() {
+    cat > "$MOCK_BIN/curl" <<EOF
+#!/bin/sh
+STATE_FILE="$TMP/curl_calls"
+count=\$(cat "\$STATE_FILE" 2>/dev/null || echo 0)
+echo \$((count+1)) > "\$STATE_FILE"
+[ "\$count" -ge "$1" ]
+EOF
+    chmod +x "$MOCK_BIN/curl"
+    printf '#!/bin/sh\nexit 1\n' > "$MOCK_BIN/wget"
+    chmod +x "$MOCK_BIN/wget"
+}
+
 mock_sha256sum_pass() {
     cat > "$MOCK_BIN/sha256sum" <<'EOF'
 #!/bin/sh
@@ -345,6 +359,31 @@ if grep -q "killall" "$KILL_LOG"; then
     pass "do_update вызвал stop_service (killall найден в логе)"
 else
     fail "do_update не вызвал stop_service"
+fi
+cleanup
+
+# ---------------------------------------------------------------------------
+# poll_api — медленный старт не считается отказом
+# ---------------------------------------------------------------------------
+echo ""
+echo "── poll_api ─────────────────────────────────────────────────"
+make_sandbox
+# 7 вызовов curl (http+https за попытку) падают — старое окно в 3 попытки
+# признало бы такую панель мёртвой
+mock_curl_fails_then_ok 7
+if run_in_sandbox "XCP_POLL_TIMEOUT=20 XCP_POLL_INTERVAL=0 poll_api 8090" >/dev/null 2>&1; then
+    pass "poll_api дожидается медленно стартующей панели"
+else
+    fail "poll_api сдался раньше таймаута"
+fi
+cleanup
+
+make_sandbox
+mock_curl_fails_then_ok 1000
+if run_in_sandbox "XCP_POLL_TIMEOUT=0 XCP_POLL_INTERVAL=0 poll_api 8090" >/dev/null 2>&1; then
+    fail "poll_api должен вернуть ошибку, если API так и не ответил"
+else
+    pass "poll_api возвращает ошибку по таймауту"
 fi
 cleanup
 
