@@ -840,3 +840,45 @@ func TestExtractZip_PrefersSoftfloatOnMIPS(t *testing.T) {
 		}
 	}
 }
+
+// TestCopyKernelFile_PreservesExecBit: копия ядра (запасной путь при
+// переносе между файловыми системами и резервная копия) остаётся исполняемой.
+func TestCopyKernelFile_PreservesExecBit(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "xray.new")
+	dst := filepath.Join(dir, "xray")
+	if err := os.WriteFile(src, []byte("\x7fELF"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyKernelFile(src, dst); err != nil {
+		t.Fatalf("copyKernelFile: %v", err)
+	}
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("copied kernel is not executable: mode %v", info.Mode().Perm())
+	}
+}
+
+// TestMoveKernelFile_MovesAndRemovesSource: перенос кладёт файл на место
+// назначения и не оставляет источник.
+func TestMoveKernelFile_MovesAndRemovesSource(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "mihomo.extracted")
+	dst := filepath.Join(dir, "mihomo.new")
+	if err := os.WriteFile(src, []byte("payload"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := moveKernelFile(src, dst); err != nil {
+		t.Fatalf("moveKernelFile: %v", err)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Errorf("source still exists after move: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil || string(got) != "payload" {
+		t.Errorf("destination content = %q, err = %v", got, err)
+	}
+}
