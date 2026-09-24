@@ -389,9 +389,11 @@
     return b + ' B';
   }
 
+  const numLocale = $derived($currentLang === 'ru' ? 'ru-RU' : 'en-US');
+
   function formatDate(ts: number): string {
     if (!ts) return '-';
-    return new Date(ts * 1000).toLocaleString($currentLang === 'ru' ? 'ru-RU' : 'en-US');
+    return new Date(ts * 1000).toLocaleString(numLocale);
   }
 
   function isDatFile(file: DATFile): boolean {
@@ -571,12 +573,36 @@
   <!-- Stats Bar -->
   {#if !loading && displayedFiles.length > 0}
     <div class="stats mb-3">
-      <span class="stat"><b>{displayedFiles.length}</b> {$t('dat.total_files')}</span>
-      <span class="stat"><b>{actualCount}</b> {$t('dat.active_count')}</span>
+      <span class="stat"
+        ><b>{displayedFiles.length}</b>
+        {pluralize(
+          displayedFiles.length,
+          $t('dat.files_one'),
+          $t('dat.files_few'),
+          $t('dat.files_many'),
+          $currentLang
+        )}</span
+      >
+      <span class="stat"
+        ><b>{actualCount}</b>
+        {pluralize(
+          actualCount,
+          $t('dat.active_one'),
+          $t('dat.active_few'),
+          $t('dat.active_many'),
+          $currentLang
+        )}</span
+      >
       {#if missingCount > 0}
         <span class="stat" style="color: var(--warning);">
           <b>{missingCount}</b>
-          {$t('dat.missing_count')}
+          {pluralize(
+            missingCount,
+            $t('dat.missing_one'),
+            $t('dat.missing_few'),
+            $t('dat.missing_many'),
+            $currentLang
+          )}
         </span>
       {/if}
       <span class="stat">
@@ -707,7 +733,7 @@
             </button>
           </div>
           <div class="qs-chips-grid">
-            {#each quickResults as res}
+            {#each quickResults as res, i (i)}
               {@const isCopied = quickCopiedRule === res.rule}
               <div class="qs-result-chip">
                 <div class="qs-chip-left">
@@ -804,7 +830,7 @@
 
           <!-- File List -->
           <div class="master-list">
-            {#each displayedFiles as file}
+            {#each displayedFiles as file, i (i)}
               {@const isSelected =
                 selectedFile?.name === file.name && selectedFile?.path === file.path}
               {@const status = getStatusBadge(file)}
@@ -877,13 +903,13 @@
                           {pluralize(
                             file.record_count,
                             $t('dat.record_count_one', {
-                              count: file.record_count.toLocaleString()
+                              count: file.record_count.toLocaleString(numLocale)
                             }),
                             $t('dat.record_count_few', {
-                              count: file.record_count.toLocaleString()
+                              count: file.record_count.toLocaleString(numLocale)
                             }),
                             $t('dat.record_count_many', {
-                              count: file.record_count.toLocaleString()
+                              count: file.record_count.toLocaleString(numLocale)
                             }),
                             $currentLang
                           )}
@@ -1053,7 +1079,7 @@
                     <span class="dd-tag-name">{activeTag}</span>
                     {#if !entriesLoading && entriesTotal > 0}
                       <span class="badge badge-count">
-                        {$t('dat.entries_count', { count: entriesTotal.toLocaleString() })}
+                        {$t('dat.entries_count', { count: entriesTotal.toLocaleString(numLocale) })}
                       </span>
                     {/if}
                   </div>
@@ -1110,7 +1136,7 @@
                     <div class="td-state">{$t('dat.no_entries')}</div>
                   {:else}
                     <div class="entries-list">
-                      {#each entries as entry}
+                      {#each entries as entry, i (i)}
                         {@const isCopied = copiedEntry === entry}
                         <div class="entry-row" class:copied={isCopied}>
                           <code class="entry-text">{entry}</code>
@@ -1227,7 +1253,7 @@
                     <div class="td-state">{$t('dat.no_tags_found')}</div>
                   {:else}
                     <div class="tags-grid">
-                      {#each filteredTags as tagItem}
+                      {#each filteredTags as tagItem, i (i)}
                         {@const ruleVal = selectedFile
                           ? getRuleValue(selectedFile, tagItem.tag)
                           : tagItem.tag}
@@ -1241,7 +1267,7 @@
                             <span class="tag-name td-tag-name">{tagItem.tag}</span>
                             {#if tagItem.count > 0}
                               <span class="tag-count">
-                                {tagItem.count.toLocaleString()}
+                                {tagItem.count.toLocaleString(numLocale)}
                                 {pluralize(
                                   tagItem.count,
                                   $t('dat.record_one'),
