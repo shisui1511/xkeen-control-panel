@@ -103,6 +103,22 @@ mock_uname_aarch64() {
     chmod +x "$MOCK_BIN/uname"
 }
 
+mock_uname_mips() {
+    printf '#!/bin/sh\necho "mips"\n' > "$MOCK_BIN/uname"
+    chmod +x "$MOCK_BIN/uname"
+}
+
+# Пишет файл с ELF-заголовком: $1 = EI_DATA (1 — little-endian, 2 — big-endian)
+make_elf_probe() {
+    ELF_PROBE_FILE="$TMP/elf_probe"
+    printf "\177ELF\001\00$1\001" > "$ELF_PROBE_FILE"
+}
+
+mock_opkg_arch() {
+    printf '#!/bin/sh\necho "arch all 1"\necho "arch %s 10"\n' "$1" > "$MOCK_BIN/opkg"
+    chmod +x "$MOCK_BIN/opkg"
+}
+
 mock_sha256sum_pass() {
     cat > "$MOCK_BIN/sha256sum" <<'EOF'
 #!/bin/sh
@@ -125,6 +141,7 @@ run_in_sandbox() {
     XCP_INSTALL_DIR="$INSTALL_DIR" \
     XCP_BIN_PATH="$BIN_PATH" \
     XCP_INIT_SCRIPT="$INIT_SCRIPT" \
+    XCP_ELF_PROBE="${ELF_PROBE_FILE:-/nonexistent}" \
     PATH="$MOCK_BIN:$PATH" \
     sh -c ". '$SETUP'; $1"
 }
@@ -144,6 +161,56 @@ else
     fail "aarch64 → arm64 (got: $result)"
 fi
 cleanup
+
+# uname на 32-битных MIPS всегда "mips" — порядок байт берётся из ELF
+make_sandbox
+mock_opkg_not_found
+mock_uname_mips
+make_elf_probe 1
+result=$(run_in_sandbox "detect_arch; echo \$ARCH_LABEL")
+if [ "$result" = "mipsle" ]; then
+    pass "uname mips + little-endian ELF → mipsle"
+else
+    fail "uname mips + little-endian ELF → mipsle (got: $result)"
+fi
+cleanup
+
+make_sandbox
+mock_opkg_not_found
+mock_uname_mips
+make_elf_probe 2
+result=$(run_in_sandbox "detect_arch; echo \$ARCH_LABEL")
+if [ "$result" = "mips" ]; then
+    pass "uname mips + big-endian ELF → mips"
+else
+    fail "uname mips + big-endian ELF → mips (got: $result)"
+fi
+cleanup
+
+make_sandbox
+mock_opkg_not_found
+mock_uname_mips
+ELF_PROBE_FILE=""
+if run_in_sandbox "detect_arch" >/dev/null 2>&1; then
+    fail "uname mips без ELF-пробы должен завершаться ошибкой"
+else
+    pass "uname mips без ELF-пробы → ошибка, а не угаданная сборка"
+fi
+cleanup
+
+# opkg приоритетнее uname
+for pair in "mipsel-3.4:mipsle" "mips-3.4:mips"; do
+    make_sandbox
+    mock_opkg_arch "${pair%%:*}"
+    mock_uname_mips
+    result=$(run_in_sandbox "detect_arch; echo \$ARCH_LABEL")
+    if [ "$result" = "${pair#*:}" ]; then
+        pass "opkg ${pair%%:*} → ${pair#*:}"
+    else
+        fail "opkg ${pair%%:*} → ${pair#*:} (got: $result)"
+    fi
+    cleanup
+done
 
 # ---------------------------------------------------------------------------
 # Test 2: install_binary — идемпотентность (уже актуальная версия)

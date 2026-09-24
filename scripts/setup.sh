@@ -132,6 +132,21 @@ ask_port() {
   echo "$chosen_p"
 }
 
+# Порядок байт системы по полю EI_DATA ELF-заголовка (01 — little-endian,
+# 02 — big-endian). На 32-битных MIPS `uname -m` всегда отдаёт "mips",
+# независимо от порядка байт, поэтому mipsle без opkg иначе не отличить.
+ELF_PROBE="${XCP_ELF_PROBE:-/bin/sh}"
+detect_mips_endian() {
+  local ei_data
+  # `od -b` вместо `od -An -tx1`: busybox od на Keenetic не знает флаг -A
+  ei_data=$(dd if="$ELF_PROBE" bs=1 skip=5 count=1 2>/dev/null | od -b 2>/dev/null | awk 'NR==1{print $2}')
+  case "$ei_data" in
+    001) echo "mipsle" ;;
+    002) echo "mips" ;;
+    *)  echo "" ;;
+  esac
+}
+
 # Определение архитектуры
 detect_arch() {
   local arch
@@ -158,7 +173,11 @@ detect_arch() {
       ARCH_LABEL="mipsle"
       ;;
     mips)
-      ARCH_LABEL="mips"
+      ARCH_LABEL=$(detect_mips_endian)
+      if [ -z "$ARCH_LABEL" ]; then
+        error "Не удалось определить порядок байт MIPS (mips/mipsle). Установите Entware (opkg) и повторите."
+        exit 1
+      fi
       ;;
     aarch64|arm64)
       ARCH_LABEL="arm64"
