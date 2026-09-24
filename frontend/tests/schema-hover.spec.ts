@@ -91,7 +91,7 @@ test.describe('Editor Schema Tooltip UI/UX', () => {
     });
   });
 
-  test('displays enhanced schema hover tooltip on config keys', async ({ page }) => {
+  test('displays enhanced schema hover tooltip on config keys', async ({ page }, testInfo) => {
     await page.goto('/#/editor');
 
     // Open config.yaml
@@ -119,10 +119,13 @@ test.describe('Editor Schema Tooltip UI/UX', () => {
     await expect(enumPills.first()).toBeVisible();
 
     // Take a screenshot of the tooltip
-    await page.screenshot({ path: 'schema-tooltip-hover.png' });
+    // В каталог результатов теста, а не в рабочую копию
+    await page.screenshot({ path: testInfo.outputPath('schema-tooltip-hover.png') });
   });
 
-  test('displays breadcrumbs and nested property schema for Xray JSON', async ({ page }) => {
+  test('displays breadcrumbs and nested property schema for Xray JSON', async ({
+    page
+  }, testInfo) => {
     await page.goto('/#/editor');
 
     // Open 05_routing.json
@@ -151,6 +154,6 @@ test.describe('Editor Schema Tooltip UI/UX', () => {
     await expect(tooltip.locator('.cm-schema-enum-pill:has-text("IPIfNonMatch")')).toBeVisible();
 
     // Screenshot
-    await page.screenshot({ path: 'schema-tooltip-xray-hover.png' });
+    await page.screenshot({ path: testInfo.outputPath('schema-tooltip-xray-hover.png') });
   });
 });

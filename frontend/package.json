@@ -8,6 +8,7 @@
     "postbuild": "node scripts/inject-sw-version.cjs",
     "preview": "vite preview",
     "test:e2e": "playwright test",
+    "test:e2e:changed": "node scripts/select-e2e.mjs --base origin/main --explain --run",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
     "check:contrast": "node scripts/check-contrast.cjs && node scripts/check-hardcoded-colors.cjs",
