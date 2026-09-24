@@ -16,6 +16,7 @@
   "config.delete_success": "File deleted",
   "config.rename_success": "File renamed",
   "config.path_not_allowed": "Path not allowed",
+  "config.validation_timeout": "Configuration check did not finish within %d s — changes were not saved",
   "config.invalid_path": "Invalid path",
   "config.file_exists": "File already exists",
   "config.backup_restored": "Backup restored",

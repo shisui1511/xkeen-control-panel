@@ -13,8 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"fmt"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
+	"log"
 )
 
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
@@ -676,6 +678,10 @@ func detectKernelFromPath(cleanPath string) string {
 	return "xray"
 }
 
+// configValidateTimeout — время на `xray -test` / `mihomo -t` при сохранении.
+// На MIPS с большими geosite/geoip проверка идёт дольше прежних 5 с.
+var configValidateTimeout = 30 * time.Second
+
 func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data []byte, backupExists bool, backupData []byte) string {
 	kernelType := detectKernelFromPath(cleanPath)
 
@@ -697,7 +703,9 @@ func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data 
 	}
 
 	var cmd *exec.Cmd
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	// Отключение клиента не должно обрывать проверку и откатывать сохранённый
+	// конфиг: контекст запроса используется без отмены
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), configValidateTimeout)
 	defer cancel()
 
 	if kernelType == "xray" {
@@ -707,18 +715,39 @@ func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data 
 		cmd = exec.CommandContext(ctx, binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, filename))
 	}
 
+	// После таймаута не ждать дочерние процессы валидатора, держащие вывод
+	cmd.WaitDelay = 2 * time.Second
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		// Rollback!
-		if backupExists {
-			_ = utils.AtomicWriteFile(cleanPath, backupData, 0644)
-		} else {
-			_ = os.Remove(cleanPath)
-		}
-		return strings.TrimSpace(string(out))
+	if err == nil {
+		return ""
 	}
 
-	return ""
+	timedOut := ctx.Err() != nil
+	var exitErr *exec.ExitError
+	if !timedOut && !errors.As(err, &exitErr) {
+		// Валидатор не запустился (нет доступа, text file busy…): проверить
+		// нельзя — как и без бинарника, сохранённый конфиг остаётся
+		log.Printf("config validation skipped for %s: %v", cleanPath, err)
+		return ""
+	}
+
+	// Rollback!
+	if backupExists {
+		_ = utils.AtomicWriteFile(cleanPath, backupData, 0644)
+	} else {
+		_ = os.Remove(cleanPath)
+	}
+
+	// Пустое сообщение обработчик принял бы за успешное сохранение, хотя файл
+	// уже откачен
+	msg := strings.TrimSpace(string(out))
+	if timedOut {
+		msg = fmt.Sprintf(a.t(r, "config.validation_timeout"), int(configValidateTimeout.Seconds()))
+	}
+	if msg == "" {
+		msg = err.Error()
+	}
+	return msg
 }
 
 // ConfigSmartMergeRequest represents the payload for smart template merging.

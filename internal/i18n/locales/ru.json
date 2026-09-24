@@ -16,6 +16,7 @@
   "config.delete_success": "Файл удален",
   "config.rename_success": "Файл переименован",
   "config.path_not_allowed": "Путь не разрешен",
+  "config.validation_timeout": "Проверка конфигурации не завершилась за %d с — изменения не сохранены",
   "config.invalid_path": "Неверный путь",
   "config.file_exists": "Файл уже существует",
   "config.backup_restored": "Backup восстановлен",

@@ -2,13 +2,16 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -745,5 +748,79 @@ func TestIsActiveMihomoConfig_Symlink(t *testing.T) {
 	}
 	if !api.isActiveMihomoConfig(filepath.Join(dir, "config.yml")) {
 		t.Error("config.yml path must match even when the file does not exist yet")
+	}
+}
+
+// fakeValidatorAPI готовит config.yaml с новым содержимым (старое — в бэкапе)
+// и поддельный mihomo с заданным телом скрипта.
+func fakeValidatorAPI(t *testing.T, script string) (*API, string) {
+	t.Helper()
+	if _, err := exec.LookPath("mihomo"); err == nil {
+		t.Skip("настоящий mihomo в PATH перекрыл бы поддельный")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "fake-validator")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api := &API{cfg: &config.Config{MihomoBinary: bin, AllowedRoots: []string{dir}}}
+	return api, cfgPath
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// TestValidateConfigAndRollback_Timeout: зависший валидатор — откат и
+// непустое сообщение (пустое обработчик принял бы за успешное сохранение).
+func TestValidateConfigAndRollback_Timeout(t *testing.T) {
+	api, cfgPath := fakeValidatorAPI(t, "sleep 5")
+	orig := configValidateTimeout
+	configValidateTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { configValidateTimeout = orig })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/save", nil)
+	msg := api.validateConfigAndRollback(req, cfgPath, []byte("new"), true, []byte("old"))
+	if msg == "" {
+		t.Fatal("timeout must produce a non-empty error, otherwise the save is reported as successful")
+	}
+	if got := readFileString(t, cfgPath); got != "old" {
+		t.Errorf("config must be rolled back on timeout, got %q", got)
+	}
+}
+
+func TestValidateConfigAndRollback_Rejected(t *testing.T) {
+	api, cfgPath := fakeValidatorAPI(t, "echo 'bad config'; exit 1")
+	req := httptest.NewRequest(http.MethodPost, "/api/config/save", nil)
+	msg := api.validateConfigAndRollback(req, cfgPath, []byte("new"), true, []byte("old"))
+	if msg != "bad config" {
+		t.Errorf("msg = %q, want validator output", msg)
+	}
+	if got := readFileString(t, cfgPath); got != "old" {
+		t.Errorf("rejected config must be rolled back, got %q", got)
+	}
+}
+
+// TestValidateConfigAndRollback_ClientGone: закрытие вкладки во время
+// проверки не откатывает корректный конфиг.
+func TestValidateConfigAndRollback_ClientGone(t *testing.T) {
+	api, cfgPath := fakeValidatorAPI(t, "sleep 0.2; exit 0")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPost, "/api/config/save", nil).WithContext(ctx)
+	if msg := api.validateConfigAndRollback(req, cfgPath, []byte("new"), true, []byte("old")); msg != "" {
+		t.Errorf("valid config must pass, got %q", msg)
+	}
+	if got := readFileString(t, cfgPath); got != "new" {
+		t.Errorf("valid config must stay saved, got %q", got)
 	}
 }
