@@ -30,6 +30,7 @@ type API struct {
 	networkSvc            *services.NetworkToolsService
 	smartProxySvc         *services.SmartProxyService
 	xkeenSettingsSvc      *services.XKeenSettingsService
+	mihomoProfileSvc      *services.MihomoProfileService
 	trafficQuotaSvc       *services.TrafficQuotaService
 	watchdogSvc           *services.WatchdogService
 	xrayGRPCSvc           *services.XrayGRPCService
