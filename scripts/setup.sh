@@ -516,7 +516,7 @@ api_responds() {
 poll_api() {
   local port
   local url
-  local https_url
+  local alt_url
   local proto
   local timeout
   local interval
@@ -524,8 +524,14 @@ poll_api() {
 
   port="$1"
   proto=$(get_proto)
-  url="http://127.0.0.1:${port}/api/auth/me"
-  https_url="https://127.0.0.1:${port}/api/auth/me"
+  # Сначала протокол из конфига: HTTP-запрос к HTTPS-серверу оставляет в логе
+  # панели "TLS handshake error"
+  url="${proto}://127.0.0.1:${port}/api/auth/me"
+  if [ "$proto" = "https" ]; then
+    alt_url="http://127.0.0.1:${port}/api/auth/me"
+  else
+    alt_url="https://127.0.0.1:${port}/api/auth/me"
+  fi
   timeout="${XCP_POLL_TIMEOUT:-60}"
   interval="${XCP_POLL_INTERVAL:-2}"
   waited=0
@@ -533,7 +539,7 @@ poll_api() {
   info "Проверяем доступность API по адресу ${proto}://127.0.0.1:${port}/api/auth/me (до ${timeout} с)..."
 
   while :; do
-    if api_responds "$url" || api_responds "$https_url"; then
+    if api_responds "$url" || api_responds "$alt_url"; then
       ok "API успешно отвечает"
       log_install "API polling succeeded after ${waited}s"
       return 0
