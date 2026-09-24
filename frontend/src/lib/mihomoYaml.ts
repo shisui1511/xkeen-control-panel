@@ -839,6 +839,13 @@ export function generateYAML(state: MihomoConfigState): string {
       if (sub.rawLines && sub.rawLines.length > 0) {
         let currentParent = '';
         let parentIndent = 0;
+        // url/interval of the provider itself sit at the smallest indent;
+        // nested ones (health-check, …) must keep their own values.
+        const baseIndent = Math.min(
+          ...sub.rawLines
+            .filter((l: string) => l.trim())
+            .map((l: string) => l.length - l.trimStart().length)
+        );
         for (const rawLine of sub.rawLines) {
           let processedLine = rawLine;
           const trimmed = rawLine.trim();
@@ -854,10 +861,11 @@ export function generateYAML(state: MihomoConfigState): string {
             parentIndent = lineIndent;
           }
 
-          if (trimmed.startsWith('url:')) {
+          const topLevel = lineIndent === baseIndent;
+          if (topLevel && trimmed.startsWith('url:')) {
             processedLine =
               rawLine.substring(0, rawLine.indexOf('url:') + 4) + ` ${yamlSafeString(sub.url)}`;
-          } else if (trimmed.startsWith('interval:')) {
+          } else if (topLevel && trimmed.startsWith('interval:')) {
             const intervalSec = sub.interval > 720 ? sub.interval : sub.interval * 3600 || 86400;
             processedLine =
               rawLine.substring(0, rawLine.indexOf('interval:') + 9) + ` ${intervalSec}`;
