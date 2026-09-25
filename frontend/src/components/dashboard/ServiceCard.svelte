@@ -150,7 +150,9 @@
   <div class="card-actions">
     {#if isNotInstalled}
       <a href="#/services" class="btn btn-secondary btn-sm install-link">
-        {$t('dash.problems.kernel_missing_cta')}
+        {serviceId === 'xkeen'
+          ? $t('dash.problems.xkeen_missing_cta')
+          : $t('dash.problems.kernel_missing_cta')}
       </a>
     {:else}
       <div class="btn-group">
