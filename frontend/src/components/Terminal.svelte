@@ -7,6 +7,18 @@
   import { showToast } from '../stores';
   import Icon from '../lib/components/Icon.svelte';
 
+  interface Props {
+    /** shell — интерактивная оболочка; xkeen-install — официальный установщик XKeen */
+    mode?: 'shell' | 'xkeen-install';
+    /** Канал установщика XKeen (только для mode="xkeen-install") */
+    channel?: 'stable' | 'beta';
+    /** Процесс в терминале завершился с кодом code */
+    onexit?: (code: number) => void;
+  }
+
+  let { mode = 'shell', channel = 'stable', onexit }: Props = $props();
+  const isInstaller = $derived(mode === 'xkeen-install');
+
   let terminalContainer: HTMLDivElement | null = $state(null);
   let status = $state<'connected' | 'connecting' | 'disconnected'>('connecting');
   let isFullscreen = $state(false);
@@ -85,7 +97,12 @@
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const cols = term?.cols || 80;
     const rows = term?.rows || 24;
-    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws?cols=${cols}&rows=${rows}`;
+    const params = new URLSearchParams({ cols: String(cols), rows: String(rows) });
+    if (isInstaller) {
+      params.set('mode', 'xkeen-install');
+      params.set('channel', channel);
+    }
+    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws?${params}`;
 
     try {
       ws = new WebSocket(wsUrl);
@@ -109,8 +126,10 @@
               term?.writeln(`\r\n\x1b[31m[ERROR] ${msg.message}\x1b[0m`);
               return;
             } else if (msg.type === 'exit') {
+              const code = typeof msg.code === 'number' ? msg.code : -1;
               term?.writeln(`\r\n\x1b[33m[${$t('console.terminal_process_terminated')}]\x1b[0m`);
               status = 'disconnected';
+              onexit?.(code);
               return;
             }
           } catch (_) {
@@ -289,8 +308,13 @@
     <div class="header-left">
       <div class="terminal-title">
         <Icon name="console" size={16} />
-        <span class="title-text">root@xkeen</span>
-        <span class="shell-badge">sh</span>
+        {#if isInstaller}
+          <span class="title-text">{$t('xkinst.terminal_title')}</span>
+          <span class="shell-badge">{channel}</span>
+        {:else}
+          <span class="title-text">root@xkeen</span>
+          <span class="shell-badge">sh</span>
+        {/if}
       </div>
 
       <div class="status-pill {status}">
@@ -314,15 +338,17 @@
     </div>
 
     <div class="header-right">
-      <button
-        class="btn btn-sm btn-primary"
-        onclick={runXKeen}
-        title={$t('console.terminal_run_xkeen')}
-        disabled={status !== 'connected'}
-      >
-        <Icon name="play" size={12} />
-        <span>{$t('console.terminal_run_xkeen')}</span>
-      </button>
+      {#if !isInstaller}
+        <button
+          class="btn btn-sm btn-primary"
+          onclick={runXKeen}
+          title={$t('console.terminal_run_xkeen')}
+          disabled={status !== 'connected'}
+        >
+          <Icon name="play" size={12} />
+          <span>{$t('console.terminal_run_xkeen')}</span>
+        </button>
+      {/if}
 
       <button
         class="btn btn-sm btn-secondary"
@@ -333,14 +359,17 @@
         <span>{$t('console.terminal_clear')}</span>
       </button>
 
-      <button
-        class="btn btn-sm btn-secondary"
-        onclick={connect}
-        title={$t('console.terminal_reconnect')}
-      >
-        <Icon name="refresh" size={12} />
-        <span>{$t('console.terminal_reconnect')}</span>
-      </button>
+      <!-- Переподключение в режиме установщика запустило бы установку заново -->
+      {#if !isInstaller}
+        <button
+          class="btn btn-sm btn-secondary"
+          onclick={connect}
+          title={$t('console.terminal_reconnect')}
+        >
+          <Icon name="refresh" size={12} />
+          <span>{$t('console.terminal_reconnect')}</span>
+        </button>
+      {/if}
 
       <button
         class="btn btn-sm btn-secondary"

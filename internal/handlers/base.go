@@ -42,6 +42,7 @@ type API struct {
 	snapshotSvc           *services.SnapshotService
 	consoleSvc            *services.ConsoleService
 	ptySvc                *services.PTYService
+	xkeenInstaller        *services.XKeenInstaller
 	templateSvc           *services.TemplateService
 	logDispatcher         *services.LogDispatcher
 	userRulesSvc          *services.UserRulesService
@@ -124,6 +125,10 @@ func (a *API) SetConsoleService(svc *services.ConsoleService) {
 
 func (a *API) SetPTYService(svc *services.PTYService) {
 	a.ptySvc = svc
+}
+
+func (a *API) SetXKeenInstaller(svc *services.XKeenInstaller) {
+	a.xkeenInstaller = svc
 }
 
 func (a *API) SetTemplateService(svc *services.TemplateService) {

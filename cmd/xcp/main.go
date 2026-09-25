@@ -453,6 +453,7 @@ func main() {
 	ptySvc := services.NewPTYService()
 	api.SetPTYService(ptySvc)
 	defer ptySvc.CloseAll()
+	api.SetXKeenInstaller(services.NewXKeenInstaller())
 	srv.HandleProtected("/api/terminal/ws", api.TerminalWebSocket)
 
 	// Assets Service

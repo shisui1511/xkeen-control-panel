@@ -232,6 +232,9 @@
   let subscriptionProxiesCount = $state(0);
   let statsLastFetched = $state('');
 
+  // XKeen не установлен: без него ядра не запустить, а ставятся они тем же
+  // установщиком — пункт про ядра в этом случае не показывается
+  const isXKeenMissing = $derived($capabilities?.xkeen_installed === false);
   const isKernelCrashed = $derived(
     serviceStatus.xkeen === 'running' &&
       $capabilities?.active_kernel &&
@@ -1122,7 +1125,7 @@
           {/if}
 
           <!-- Problems Panel (conditional) -->
-          {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring || isWatchdogIncident}
+          {#if (systemStats && systemStats.invalid_config) || isXKeenMissing || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring || isWatchdogIncident}
             <div style="margin-bottom: 18px;">
               <Card title={$t('dash.problems_panel')}>
                 <div class="problems-list">
@@ -1268,7 +1271,22 @@
                       </Button>
                     </div>
                   {/if}
-                  {#if $capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed}
+                  {#if isXKeenMissing}
+                    <div class="problem-item alert-error" data-testid="problem-xkeen-missing">
+                      <div class="problem-content">
+                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                        <div>
+                          <strong class="problem-title"
+                            >{$t('dash.problems.xkeen_missing_title')}</strong
+                          >
+                          <div class="problem-desc">{$t('dash.problems.xkeen_missing_desc')}</div>
+                        </div>
+                      </div>
+                      <Button variant="secondary" onclick={() => switchTab('services')}>
+                        {$t('dash.problems.xkeen_missing_cta')}
+                      </Button>
+                    </div>
+                  {:else if $capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed}
                     <div class="problem-item alert-error">
                       <div class="problem-content">
                         <span class="problem-icon"><Icon name="warning" size={16} /></span>

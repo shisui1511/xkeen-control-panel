@@ -207,3 +207,101 @@ func TestTerminalWebSocket_MaxSessions(t *testing.T) {
 	}
 	defer conn4.Close()
 }
+
+// runXKeenInstallWS подключается к терминалу в режиме установки XKeen и
+// возвращает весь вывод и код из кадра exit.
+func runXKeenInstallWS(t *testing.T, api *API, query string) (string, int) {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(api.TerminalWebSocket))
+	defer ts.Close()
+	header := http.Header{}
+	header.Set("Origin", ts.URL)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+ts.URL[4:]+"?mode=xkeen-install&"+query, header)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	var out strings.Builder
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	for {
+		msgType, p, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("no exit frame, output so far: %q (%v)", out.String(), err)
+		}
+		if msgType == websocket.TextMessage {
+			var msg struct {
+				Type string `json:"type"`
+				Code int    `json:"code"`
+			}
+			if json.Unmarshal(p, &msg) == nil && msg.Type == "exit" {
+				return out.String(), msg.Code
+			}
+		}
+		out.Write(p)
+	}
+}
+
+// TestTerminalWebSocket_XKeenInstall: установщик скачивается, запускается
+// в PTY с флагом канала, его код завершения доходит до клиента.
+func TestTerminalWebSocket_XKeenInstall(t *testing.T) {
+	installer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("#!/bin/sh\n# jameszeroX/XKeen\necho \"INSTALLER $1\"\nexit 7\n"))
+	}))
+	defer installer.Close()
+
+	ptySvc := services.NewPTYService()
+	defer ptySvc.CloseAll()
+	api := &API{cfg: config.Default()}
+	api.SetPTYService(ptySvc)
+	api.SetXKeenInstaller(&services.XKeenInstaller{
+		URL:     installer.URL + "/install.sh",
+		Mirrors: []string{""},
+		Client:  installer.Client(),
+		Dir:     t.TempDir(),
+		InitDir: t.TempDir(),
+	})
+
+	out, code := runXKeenInstallWS(t, api, "channel=beta")
+	if !strings.Contains(out, "INSTALLER --beta") {
+		t.Errorf("installer did not run with channel flag, output %q", out)
+	}
+	if code != 7 {
+		t.Errorf("exit code = %d, want installer's 7", code)
+	}
+
+	_, code = runXKeenInstallWS(t, api, "channel=nightly")
+	if code == 0 {
+		t.Error("unknown channel must fail")
+	}
+}
+
+// TestTerminalWebSocket_XKeenInstallNoEntware: без Entware (ПК разработчика)
+// установщик не скачивается и не запускается.
+func TestTerminalWebSocket_XKeenInstallNoEntware(t *testing.T) {
+	downloaded := false
+	installer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		downloaded = true
+	}))
+	defer installer.Close()
+
+	ptySvc := services.NewPTYService()
+	defer ptySvc.CloseAll()
+	api := &API{cfg: config.Default()}
+	api.SetPTYService(ptySvc)
+	api.SetXKeenInstaller(&services.XKeenInstaller{
+		URL:     installer.URL + "/install.sh",
+		Mirrors: []string{""},
+		Client:  installer.Client(),
+		Dir:     t.TempDir(),
+		InitDir: "/nonexistent/init.d",
+	})
+
+	out, code := runXKeenInstallWS(t, api, "channel=stable")
+	if code == 0 || !strings.Contains(out, "Entware") {
+		t.Errorf("install without Entware must fail with a reason, got %d %q", code, out)
+	}
+	if downloaded {
+		t.Error("installer must not be downloaded without Entware")
+	}
+}

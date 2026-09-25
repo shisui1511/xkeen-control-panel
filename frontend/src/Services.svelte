@@ -19,6 +19,7 @@
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
+  import XKeenInstallCard from './components/xkeen/XKeenInstallCard.svelte';
   import MihomoProfilesCard from './components/mihomo/MihomoProfilesCard.svelte';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
@@ -61,6 +62,9 @@
   });
 
   let xkeenStatus = $state('');
+  // null — статус ещё не получен: карточку установки не показываем заранее
+  let xkeenInstalled = $state<boolean | null>(null);
+  let xkeenInstallerAvailable = $state(false);
   let actionLoading = $state<Record<string, boolean>>({});
   let pendingRestartKernel = $state<string | null>(null);
   let fileInputRefs: Record<string, HTMLInputElement | null> = {};
@@ -197,6 +201,10 @@
             if (parsed.data.watchdog !== undefined) {
               watchdogStatus = parsed.data.watchdog;
             }
+            if (typeof parsed.data.xkeen_installed === 'boolean') {
+              xkeenInstalled = parsed.data.xkeen_installed;
+            }
+            xkeenInstallerAvailable = parsed.data.xkeen_installer_available === true;
             xkeenInfo = {
               isRunning: parsed.data.is_running,
               activeKernel: parsed.data.active_kernel || '',
@@ -692,6 +700,16 @@
       {$t('svc.check_updates')}
     </Button>
   </PageHeader>
+
+  {#if xkeenInstalled === false}
+    <XKeenInstallCard
+      available={xkeenInstallerAvailable}
+      onfinished={() => {
+        fetchStatus();
+        fetchKernels();
+      }}
+    />
+  {/if}
 
   <!-- Top 2-Section Grid (Hero 65% / Updates 35%) -->
   <div class="services-top-grid">
