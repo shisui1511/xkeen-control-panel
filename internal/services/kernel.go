@@ -1128,7 +1128,7 @@ func (s *KernelService) Install(name string) error {
 		setStatus("failed", "Invalid binary path: "+err.Error())
 		return err
 	}
-	if err := os.Rename(safeExtracted, tempDest); err != nil {
+	if err := moveKernelFile(safeExtracted, tempDest); err != nil {
 		setStatus("failed", "Replace failed: "+err.Error())
 		return err
 	}
@@ -1610,7 +1610,13 @@ func copyKernelFile(src, dst string) error {
 	}
 	defer s.Close()
 
-	d, err := os.Create(safeDst)
+	info, err := s.Stat()
+	if err != nil {
+		return err
+	}
+	// Права источника (в т.ч. бит исполнения) переносятся на копию: иначе
+	// os.Create дал бы 0666 и скопированное ядро не запустилось бы
+	d, err := os.OpenFile(safeDst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
 	if err != nil {
 		return err
 	}
@@ -1619,7 +1625,22 @@ func copyKernelFile(src, dst string) error {
 	if _, err := io.Copy(d, s); err != nil {
 		return err
 	}
+	if err := d.Chmod(info.Mode().Perm()); err != nil {
+		return err
+	}
 	return d.Sync()
+}
+
+// moveKernelFile переносит файл: rename, а если источник на другой файловой
+// системе (/tmp — tmpfs, /opt — накопитель на роутере) — копирование.
+func moveKernelFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	if err := copyKernelFile(src, dst); err != nil {
+		return err
+	}
+	return os.Remove(src)
 }
 
 // UploadBinary saves an uploaded kernel binary or archive (.zip/.gz) to the router,
@@ -1721,10 +1742,8 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 	if err != nil {
 		return err
 	}
-	if err := os.Rename(safeExtracted, tempDest); err != nil {
-		if err := copyKernelFile(safeExtracted, tempDest); err != nil {
-			return fmt.Errorf("replace failed: %w", err)
-		}
+	if err := moveKernelFile(safeExtracted, tempDest); err != nil {
+		return fmt.Errorf("replace failed: %w", err)
 	}
 	if err := os.Rename(tempDest, safeBinaryPath); err != nil {
 		if _, statErr := os.Stat(backupPath); statErr == nil {

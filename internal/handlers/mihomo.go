@@ -95,6 +95,20 @@ func (a *API) MihomoGroups(w http.ResponseWriter, r *http.Request) {
 	a.jsonResponse(w, MihomoGroupsResponse{Groups: groups})
 }
 
+const mihomoProxyPrefix = "/api/mihomo/proxy"
+
+// fallbackMihomoTransport — общий транспорт для Clash API, когда адрес берётся
+// из cfg.MihomoAPIURL. Создавать его на каждый запрос нельзя: keep-alive
+// соединения старых транспортов не закрываются и копят дескрипторы.
+var fallbackMihomoTransport = &http.Transport{
+	DialContext: (&net.Dialer{
+		Timeout: 30 * time.Second,
+	}).DialContext,
+	ResponseHeaderTimeout: 30 * time.Second,
+	IdleConnTimeout:       90 * time.Second,
+	MaxIdleConnsPerHost:   4,
+}
+
 func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 	// Whitelist allowed HTTP methods
 	switch r.Method {
@@ -156,12 +170,7 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 			a.errorResponse(w, a.t(r, "mihomo.api_error"), http.StatusInternalServerError)
 			return
 		}
-		transport = &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout: 30 * time.Second,
-			}).DialContext,
-			ResponseHeaderTimeout: 30 * time.Second,
-		}
+		transport = fallbackMihomoTransport
 	}
 
 	if secret == "" {
@@ -191,10 +200,19 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	// Strip /api/mihomo/proxy prefix and forward the rest
-	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api/mihomo/proxy")
+	// Strip /api/mihomo/proxy prefix and forward the rest. RawPath обрезается
+	// вместе с Path: иначе он перестаёт соответствовать Path, EscapedPath()
+	// его отбрасывает, и %2F в имени прокси («HK/SG Auto») становится
+	// разделителем пути.
+	r.URL.Path = strings.TrimPrefix(r.URL.Path, mihomoProxyPrefix)
 	if r.URL.Path == "" {
 		r.URL.Path = "/"
+	}
+	if r.URL.RawPath != "" {
+		r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, mihomoProxyPrefix)
+		if r.URL.RawPath == "" {
+			r.URL.RawPath = "/"
+		}
 	}
 
 	proxy.ServeHTTP(w, r)

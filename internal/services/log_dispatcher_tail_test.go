@@ -169,3 +169,74 @@ func TestIngestBackfillOrdersByTime(t *testing.T) {
 		t.Errorf("order = %v", got)
 	}
 }
+
+// TestTailFile_JoinsLineWrittenInTwoParts: строка, дописанная двумя write(),
+// попадает в журнал одной записью, а не двумя обрывками.
+func TestTailFile_JoinsLineWrittenInTwoParts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "xcp.log")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := NewLogDispatcher(nil, dir, "")
+	d.wg.Add(1)
+	go d.tailFileFrom(path, 0)
+	defer d.Stop()
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString("2026/09/25 02:00:00 first half"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1200 * time.Millisecond) // tail успевает дочитать до EOF
+	if _, err := f.WriteString(" second half\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	waitForHistory(t, d, func(h []LogEntry) bool { return len(h) >= 1 })
+	time.Sleep(700 * time.Millisecond)
+	h := d.GetHistory("xcp", "", 100)
+	if len(h) != 1 {
+		t.Fatalf("expected one joined entry, got %d: %+v", len(h), h)
+	}
+	if !strings.Contains(h[0].Message, "first half second half") {
+		t.Errorf("line not joined: %q", h[0].Message)
+	}
+}
+
+// TestFileConnectors_FollowFileCreatedAfterStart: лог, созданный после
+// старта диспетчера (ядро запустилось позже панели), попадает в журнал.
+func TestFileConnectors_FollowFileCreatedAfterStart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "xcp-late.log")
+
+	d := NewLogDispatcher([]string{path}, dir, "")
+	d.wg.Add(1)
+	go d.startFileConnectors()
+	defer d.Stop()
+
+	time.Sleep(300 * time.Millisecond)
+	if err := os.WriteFile(path, []byte("2026/09/25 02:00:00 kernel started later\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := waitForHistory(t, d, func(h []LogEntry) bool {
+		for _, e := range h {
+			if strings.Contains(e.Message, "kernel started later") {
+				return true
+			}
+		}
+		return false
+	})
+	found := false
+	for _, e := range h {
+		found = found || strings.Contains(e.Message, "kernel started later")
+	}
+	if !found {
+		t.Fatal("line from a log file created after start was not ingested")
+	}
+}

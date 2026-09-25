@@ -536,12 +536,17 @@
         newPassword = '';
         confirmPassword = '';
       } else {
-        const text = await res.text();
-        passwordError = text || $t('settings.password_error');
+        let payload: any = null;
+        try {
+          payload = await res.json();
+        } catch {
+          // тело ответа не JSON
+        }
+        passwordError = payload?.error || $t('settings.password_error');
       }
     } catch (e: any) {
       if (e?.status === 401) return;
-      passwordError = e.message;
+      passwordError = e?.message || $t('settings.password_error');
     } finally {
       passwordChanging = false;
     }
@@ -817,7 +822,7 @@
             onchange={handleLangChange}
             title={$t('settings.language')}
           >
-            {#each langs as lang}
+            {#each langs as lang (lang.code)}
               <option value={lang.code}>{lang.name}</option>
             {/each}
           </Select>
@@ -1049,7 +1054,7 @@
           <span class="field-row-name">{$t('settings.update_channel')}</span>
           <div class="field-row-val">
             <div class="channel-switcher">
-              {#each ['stable', 'beta'] as const as ch}
+              {#each ['stable', 'beta'] as const as ch (ch)}
                 <button
                   class="channel-btn"
                   class:active={updateChannel === ch}
@@ -1166,7 +1171,7 @@
               onchange={fetchBackups}
               title={$t('settings.backup_file')}
             >
-              {#each configFiles as file}
+              {#each configFiles as file (file)}
                 <option value={file}>{file}</option>
               {:else}
                 <option value="">{$t('settings.no_files')}</option>
@@ -1192,7 +1197,7 @@
             {$t('settings.backups_empty')}
           </div>
         {:else}
-          {#each backups as backup}
+          {#each backups as backup (backup)}
             <div class="field-row">
               <div>
                 <div class="lbl mono">{backup.split('/').pop()}</div>
@@ -1313,7 +1318,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each snapshots as snap}
+              {#each snapshots as snap (snap.id)}
                 <tr
                   class="backup-tr"
                   style="border-bottom: 1px solid var(--border-light); transition: background 0.2s ease;"

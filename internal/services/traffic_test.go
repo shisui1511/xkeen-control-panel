@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1191,5 +1192,56 @@ func TestTrafficQuotaService_SleepEmitsZeroSlice(t *testing.T) {
 	}
 	if store.ProxyStats["test-proxy"] == nil || store.ProxyStats["test-proxy"].UploadBytes != 1234 {
 		t.Fatalf("expected saved proxy stats on disk, got %+v", store.ProxyStats)
+	}
+}
+
+// TestQuotaBlockGroups: лимит на ноду переключает селекторы, ведущие через
+// неё, а не группу GLOBAL.
+func TestQuotaBlockGroups(t *testing.T) {
+	proxies := map[string]mihomoProxy{
+		"GLOBAL":    {Name: "GLOBAL", Type: "Selector", Now: "US-Group", All: []string{"US-Group", "DIRECT", "REJECT"}},
+		"US-Group":  {Name: "US-Group", Type: "Selector", Now: "us-node-1", All: []string{"us-node-1", "us-node-2", "DIRECT", "REJECT"}},
+		"AI":        {Name: "AI", Type: "Selector", Now: "us-node-1", All: []string{"us-node-1", "REJECT"}},
+		"Fastest":   {Name: "Fastest", Type: "URLTest", Now: "us-node-1", All: []string{"us-node-1", "us-node-2"}},
+		"us-node-1": {Name: "us-node-1", Type: "Vless"},
+	}
+
+	cases := []struct {
+		name     string
+		blocked  map[string]string
+		target   string
+		fallback string
+		want     []string
+	}{
+		{"группа с fallback переключается сама", nil, "US-Group", "DIRECT", []string{"US-Group"}},
+		{"глобальный лимит — GLOBAL", nil, "GLOBAL", "REJECT", []string{"GLOBAL"}},
+		{"нода — селекторы, ведущие через неё", nil, "us-node-1", "REJECT", []string{"AI", "US-Group"}},
+		{"нода — только селекторы, где есть fallback", nil, "us-node-1", "DIRECT", []string{"US-Group"}},
+		{"нода без селекторов — GLOBAL не трогается", nil, "us-node-2", "REJECT", nil},
+		{
+			"уже переключённая группа остаётся заблокированной",
+			map[string]string{"AI": "us-node-1"},
+			"us-node-1", "REJECT",
+			[]string{"AI", "US-Group"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := proxies
+			if c.blocked != nil {
+				// AI уже переключена на REJECT по этому лимиту
+				p = map[string]mihomoProxy{}
+				for k, v := range proxies {
+					p[k] = v
+				}
+				ai := p["AI"]
+				ai.Now = "REJECT"
+				p["AI"] = ai
+			}
+			got := quotaBlockGroups(p, c.blocked, c.target, c.fallback)
+			if !slices.Equal(got, c.want) {
+				t.Errorf("got %v, want %v", got, c.want)
+			}
+		})
 	}
 }

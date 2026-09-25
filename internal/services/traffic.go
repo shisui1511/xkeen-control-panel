@@ -1296,6 +1296,32 @@ type mihomoProxy struct {
 	All  []string `json:"all"`
 }
 
+// quotaBlockGroups — группы, которые нужно переключить на fallback
+// (REJECT/DIRECT), чтобы трафик перестал идти через target.
+//
+// Группа, в которой fallback есть, переключается сама (в т.ч. GLOBAL для
+// глобального лимита). Иначе target — нода или группа без fallback: тогда
+// переключаются селекторы, ведущие через неё сейчас, и уже переключённые
+// ради неё (blocked: группа → исходный выбор), чтобы не восстанавливать их
+// на следующей проверке. GLOBAL «на всякий случай» не трогается: в режиме
+// rule это ничего не блокирует, а в режиме global блокирует весь трафик.
+func quotaBlockGroups(proxies map[string]mihomoProxy, blocked map[string]string, target, fallback string) []string {
+	if group, ok := proxies[target]; ok && slices.Contains(group.All, fallback) {
+		return []string{target}
+	}
+	var groups []string
+	for name, p := range proxies {
+		if p.Type != "Selector" || !slices.Contains(p.All, fallback) {
+			continue
+		}
+		if p.Now == target || (blocked[name] == target && p.Now == fallback) {
+			groups = append(groups, name)
+		}
+	}
+	slices.Sort(groups)
+	return groups
+}
+
 func (s *TrafficQuotaService) getMihomoProxies() (map[string]mihomoProxy, error) {
 	client, baseURL, secret := s.getMihomoHTTPClientAndBaseURL()
 	url := fmt.Sprintf("%s/proxies", baseURL)
@@ -1489,13 +1515,15 @@ func (s *TrafficQuotaService) checkQuotas() {
 
 	shouldBlock := make(map[string]string)
 	if hasMihomo {
+		s.mu.Lock()
+		blocked := make(map[string]string, len(s.blockedProxies))
+		for g, orig := range s.blockedProxies {
+			blocked[g] = orig
+		}
+		s.mu.Unlock()
 		for _, action := range neededActions {
-			if group, ok := mihomoProxies[action.groupName]; ok {
-				if slices.Contains(group.All, action.fallback) {
-					shouldBlock[action.groupName] = action.fallback
-				} else if globalGroup, ok := mihomoProxies["GLOBAL"]; ok && slices.Contains(globalGroup.All, action.fallback) {
-					shouldBlock["GLOBAL"] = action.fallback
-				}
+			for _, g := range quotaBlockGroups(mihomoProxies, blocked, action.groupName, action.fallback) {
+				shouldBlock[g] = action.fallback
 			}
 		}
 	}

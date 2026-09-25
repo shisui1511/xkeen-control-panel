@@ -3,8 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/auth"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -30,10 +32,25 @@ func (a *API) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+	var keepToken string
+	if cookie, err := r.Cookie(auth.SessionCookieName); err == nil {
+		keepToken = cookie.Value
+	}
+
 	authSvc := a.srv.GetAuthService()
-	if err := authSvc.ChangePassword(req.CurrentPassword, req.NewPassword); err != nil {
+	if err := authSvc.ChangePassword(ip, keepToken, req.CurrentPassword, req.NewPassword); err != nil {
 		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-			a.errorResponse(w, a.t(r, "auth.wrong_password"), http.StatusUnauthorized)
+			// 403, а не 401: сессия действительна, неверен только введённый
+			// пароль — клиент не должен разлогинивать пользователя
+			a.errorResponse(w, a.t(r, "auth.wrong_password"), http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, auth.ErrTooManyAttempts) {
+			a.errorResponse(w, a.t(r, "auth.rate_limited"), http.StatusTooManyRequests)
 			return
 		}
 		a.errorResponse(w, a.t(r, "error.internal"), http.StatusInternalServerError)

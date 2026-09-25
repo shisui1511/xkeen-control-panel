@@ -489,3 +489,26 @@ func TestXKeenService_BareBinaryNameRunsLifecycle(t *testing.T) {
 		t.Fatalf("restart was not executed: %q %v", got, err)
 	}
 }
+
+// TestRunWithTimeoutArgs_TimeoutReadsOutputSafely: при таймауте вывод
+// читается после завершения Wait (без гонки с горутиной копирования), а
+// дочерний процесс, держащий вывод, не блокирует возврат.
+func TestRunWithTimeoutArgs_TimeoutReadsOutputSafely(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "xkeen")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho partial\nsleep 10\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	svc := &XKeenService{BinaryPath: bin}
+
+	start := time.Now()
+	out, err := svc.runWithTimeoutArgs(200*time.Millisecond, "-status")
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(out, "partial") {
+		t.Errorf("output before timeout lost: %q", out)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("returned after %v: child holding the pipe blocked the timeout path", elapsed)
+	}
+}

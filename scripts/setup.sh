@@ -457,8 +457,9 @@ do_migration() {
     "$old_init" stop 2>/dev/null || true
     rm -f "$old_init"
   fi
+  # Только процесс старой установки: текущий xcp останавливает stop_service,
+  # и лишь когда бинарник действительно заменяется
   killall -q "xkeen-control-panel" 2>/dev/null || true
-  killall -q "xcp" 2>/dev/null || true
   
   if [ -d "$old_dir" ]; then
     info "Обнаружена старая установка. Начинаем миграцию в $INSTALL_DIR..."
@@ -676,6 +677,9 @@ do_install() {
   if [ $install_status -ne 2 ]; then
     stop_service
     start_service
+  elif ! pgrep -x "$BINARY" >/dev/null 2>&1; then
+    # Версия актуальна, но служба не запущена (например, остановлена вручную)
+    start_service
   fi
   
   poll_api "$chosen_port" || return 1
@@ -751,12 +755,9 @@ do_update() {
     stop_service
     mv "${BIN_PATH}.bak" "$BIN_PATH"
     chmod +x "$BIN_PATH"
-    
-    if [ -f "${INIT_SCRIPT}.bak" ]; then
-      mv "${INIT_SCRIPT}.bak" "$INIT_SCRIPT"
-      chmod +x "$INIT_SCRIPT"
-    fi
-    
+    # init-скрипт do_update не меняет — его .bak остался от давней установки,
+    # восстанавливать его нельзя
+
     start_service
     
     if poll_api "$port"; then

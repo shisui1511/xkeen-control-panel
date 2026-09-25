@@ -98,8 +98,14 @@ func DeploySysctlProfile(sysctlDir string) error {
 	}
 
 	path := filepath.Join(sysctlDir, sysctlProfileFilename)
-	if err := utils.AtomicWriteFile(path, []byte(sysctlProfileContent), 0644); err != nil {
-		return fmt.Errorf("write sysctl profile %s: %w", path, err)
+	// Неизменный профиль не переписывается: AtomicWriteFile делает fsync, а
+	// сразу после замены бинарника (обновление, переустановка) fsync на ext4
+	// ждёт сброса всех грязных страниц на USB-накопитель — старт панели
+	// затягивался на ~10 с; заодно меньше износ флеш-памяти.
+	if existing, err := os.ReadFile(path); err != nil || string(existing) != sysctlProfileContent {
+		if err := utils.AtomicWriteFile(path, []byte(sysctlProfileContent), 0644); err != nil {
+			return fmt.Errorf("write sysctl profile %s: %w", path, err)
+		}
 	}
 
 	return execSysctlApply(path)

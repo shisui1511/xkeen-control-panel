@@ -217,3 +217,34 @@ func TestMihomoDNSQuery_And_FlushFakeIP_Errors(t *testing.T) {
 		t.Errorf("expected 503 for nil service, got %d", recFlushSvc.Code)
 	}
 }
+
+// TestMihomoProxy_PreservesEncodedSlashInName: имя прокси с «/» доходит до
+// Clash API одним сегментом пути (%2F не превращается в разделитель).
+func TestMihomoProxy_PreservesEncodedSlashInName(t *testing.T) {
+	var gotRawPath, gotPath string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRawPath = r.URL.EscapedPath()
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+
+	api := &API{
+		cfg:     &config.Config{MihomoAPIURL: backend.URL},
+		pathVal: utils.NewPathValidator([]string{t.TempDir()}),
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/mihomo/proxy/proxies/HK%2FSG%20Auto", bytes.NewBufferString(`{"name":"x"}`))
+	rec := httptest.NewRecorder()
+	api.MihomoProxy(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotRawPath != "/proxies/HK%2FSG%20Auto" {
+		t.Errorf("escaped path at backend = %q, want /proxies/HK%%2FSG%%20Auto", gotRawPath)
+	}
+	if gotPath != "/proxies/HK/SG Auto" {
+		t.Errorf("decoded path at backend = %q", gotPath)
+	}
+}

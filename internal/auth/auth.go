@@ -80,19 +80,48 @@ func (a *AuthService) Stop() {
 
 // ChangePassword validates the current password and replaces it with a new bcrypt hash.
 // Returns bcrypt.ErrMismatchedHashAndPassword if currentPassword is wrong.
-func (a *AuthService) ChangePassword(currentPassword, newPassword string) error {
+// ErrTooManyAttempts — превышен лимит попыток ввода пароля.
+var ErrTooManyAttempts = errors.New("too many attempts")
+
+// ChangePassword меняет пароль администратора.
+//
+//   - попытки ввода текущего пароля ограничены тем же лимитом, что и вход
+//     (ip), — украденная сессия не даёт подбирать пароль без ограничений;
+//   - новый хеш сначала сохраняется на диск и только потом применяется:
+//     при ошибке записи действующим остаётся старый пароль;
+//   - все сессии, кроме текущей (keepToken), завершаются.
+func (a *AuthService) ChangePassword(ip, keepToken, currentPassword, newPassword string) error {
+	if err := a.rateLimiter.CheckLimit(ip, a.maxLoginAttempts, a.lockoutDuration); err != nil {
+		return ErrTooManyAttempts
+	}
 	if err := a.VerifyPassword(currentPassword); err != nil {
 		return err
 	}
+	a.rateLimiter.ResetAttempts(ip)
+
 	newHash, err := a.HashPassword(newPassword)
 	if err != nil {
 		return err
 	}
-	a.SetPasswordHash(newHash)
 	if a.onPasswordSet != nil {
-		return a.onPasswordSet(newHash)
+		if err := a.onPasswordSet(newHash); err != nil {
+			return err
+		}
 	}
+	a.SetPasswordHash(newHash)
+	a.deleteSessionsExcept(keepToken)
 	return nil
+}
+
+// deleteSessionsExcept завершает все сессии, кроме keepToken.
+func (a *AuthService) deleteSessionsExcept(keepToken string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for token := range a.sessions {
+		if token != keepToken {
+			delete(a.sessions, token)
+		}
+	}
 }
 
 func (a *AuthService) startCleanup() {

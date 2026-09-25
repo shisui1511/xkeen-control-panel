@@ -490,6 +490,9 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
+	// Дочерние процессы убитого скрипта держат вывод открытым: без WaitDelay
+	// Wait не вернётся никогда, и горутина с пайпом утекут
+	cmd.WaitDelay = 2 * time.Second
 
 	err := cmd.Start()
 	if err != nil {
@@ -506,6 +509,9 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 		if cmd.Process != nil {
 			cmd.Process.Kill()
 		}
+		// Буфер читается только после Wait: до этого в него ещё пишет
+		// горутина копирования вывода
+		<-done
 		output := utils.StripANSI(out.String())
 		isStart := false
 		for _, arg := range args {

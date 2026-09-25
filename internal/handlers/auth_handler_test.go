@@ -79,7 +79,7 @@ func TestChangePassword_Handler(t *testing.T) {
 		t.Errorf("expected 400 for short password, got %d", recShort.Code)
 	}
 
-	// 4. Wrong current password -> 401 Unauthorized
+	// 4. Wrong current password -> 403: сессия действительна, клиент не разлогинивается
 	bodyWrong, _ := json.Marshal(map[string]string{
 		"current_password": "wrongpassword",
 		"new_password":     "brandnewpass123",
@@ -87,8 +87,8 @@ func TestChangePassword_Handler(t *testing.T) {
 	reqWrong := httptest.NewRequest(http.MethodPost, "/api/auth/change-password", bytes.NewReader(bodyWrong))
 	recWrong := httptest.NewRecorder()
 	api.ChangePassword(recWrong, reqWrong)
-	if recWrong.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 for wrong current password, got %d", recWrong.Code)
+	if recWrong.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for wrong current password, got %d", recWrong.Code)
 	}
 
 	// 5. Success -> 200 OK
