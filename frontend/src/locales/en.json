@@ -1419,6 +1419,8 @@
   "net.status_direct": "Direct",
   "net.status_proxied_desc": "Device traffic is routed through a remote proxy server",
   "net.status_direct_desc": "Device traffic exits directly through your local ISP",
+  "net.status_other": "Other gateway",
+  "net.status_other_desc": "The browser IP differs from the router WAN IP, but no panel core is installed. Traffic leaves through a VPN on this device or a tunnel set up in the router itself.",
   "net.check_client_ip": "Check IP",
   "net.checking_ip": "Detecting IP...",
   "net.location": "Location",

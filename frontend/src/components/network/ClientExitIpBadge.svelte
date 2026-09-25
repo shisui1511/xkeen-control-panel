@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t, currentLang } from '../../i18n';
-  import { showToast } from '../../stores';
+  import { showToast, capabilities } from '../../stores';
   import { clientExitIpStore, fetchClientExitIP, type ClientExitIPInfo } from '../../lib/clientIp';
 
   let { compact = false }: { compact?: boolean } = $props();
@@ -11,6 +11,32 @@
 
   const info = $derived<ClientExitIPInfo>($clientExitIpStore);
   const isLoading = $derived(info.status === 'loading');
+
+  // An exit IP that differs from the router's WAN only means "our proxy" when
+  // a core is installed; otherwise the device or the router itself tunnels it
+  // (a VPN app, Keenetic's own WireGuard policy).
+  const noCore = $derived(
+    $capabilities !== null &&
+      !$capabilities.kernels?.mihomo?.installed &&
+      !$capabilities.kernels?.xray?.installed
+  );
+  const route = $derived<'proxy' | 'other' | 'direct' | null>(
+    info.isProxied === undefined ? null : !info.isProxied ? 'direct' : noCore ? 'other' : 'proxy'
+  );
+  const routeLabel = $derived(
+    route === 'proxy'
+      ? $t('net.status_proxied')
+      : route === 'other'
+        ? $t('net.status_other')
+        : $t('net.status_direct')
+  );
+  const routeDesc = $derived(
+    route === 'proxy'
+      ? $t('net.status_proxied_desc')
+      : route === 'other'
+        ? $t('net.status_other_desc')
+        : $t('net.status_direct_desc')
+  );
 
   function toggleOpen() {
     isOpen = !isOpen;
@@ -68,8 +94,8 @@
     class="client-ip-pill"
     class:is-loading={isLoading}
     class:is-open={isOpen}
-    class:is-proxied={info.isProxied === true}
-    class:is-direct={info.isProxied === false}
+    class:is-proxied={route === 'proxy'}
+    class:is-direct={route === 'direct'}
   >
     <button
       type="button"
@@ -103,16 +129,15 @@
         {#if info.flag}
           <span class="flag-icon" aria-hidden="true">{info.flag}</span>
         {/if}
-        {#if info.isProxied !== undefined}
+        {#if route}
           <span
             class="routing-badge"
-            class:badge-proxy={info.isProxied}
-            class:badge-direct={!info.isProxied}
+            class:badge-proxy={route === 'proxy'}
+            class:badge-direct={route === 'direct'}
+            class:badge-other={route === 'other'}
           >
             <span class="dot" aria-hidden="true"></span>
-            <span class="badge-text">
-              {info.isProxied ? $t('net.status_proxied') : $t('net.status_direct')}
-            </span>
+            <span class="badge-text">{routeLabel}</span>
           </span>
         {/if}
       {:else}
@@ -147,13 +172,14 @@
       <div class="popover-header">
         <div class="popover-title-row">
           <span class="popover-title">{$t('net.ip_diag_title')}</span>
-          {#if info.isProxied !== undefined}
+          {#if route}
             <span
               class="popover-status-chip"
-              class:chip-proxy={info.isProxied}
-              class:chip-direct={!info.isProxied}
+              class:chip-proxy={route === 'proxy'}
+              class:chip-direct={route === 'direct'}
+              class:chip-other={route === 'other'}
             >
-              {info.isProxied ? $t('net.status_proxied') : $t('net.status_direct')}
+              {routeLabel}
             </span>
           {/if}
         </div>
@@ -224,14 +250,14 @@
         {/if}
 
         <!-- Routing description box -->
-        {#if info.isProxied !== undefined}
+        {#if route}
           <div
             class="routing-explainer"
-            class:is-proxy={info.isProxied}
-            class:is-direct={!info.isProxied}
+            class:is-proxy={route === 'proxy'}
+            class:is-direct={route !== 'proxy'}
           >
             <div class="explainer-icon">
-              {#if info.isProxied}
+              {#if route === 'proxy'}
                 <svg
                   width="14"
                   height="14"
@@ -259,7 +285,7 @@
               {/if}
             </div>
             <div class="explainer-text">
-              {info.isProxied ? $t('net.status_proxied_desc') : $t('net.status_direct_desc')}
+              {routeDesc}
             </div>
           </div>
         {/if}
@@ -382,6 +408,16 @@
   .badge-direct {
     background: color-mix(in srgb, var(--primary) 14%, transparent);
     color: var(--primary);
+  }
+
+  .badge-other,
+  .chip-other {
+    background: color-mix(in srgb, var(--fg-secondary) 14%, transparent);
+    color: var(--fg-secondary);
+  }
+
+  .chip-other {
+    border: 1px solid color-mix(in srgb, var(--fg-secondary) 30%, transparent);
   }
 
   .routing-badge .dot {
