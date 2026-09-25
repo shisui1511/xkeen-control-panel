@@ -495,8 +495,12 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 		log.Printf("Update: shutdown error: %v", err)
 	}
 
-	// Fork new process
+	// Fork new process с тем же конфигом, с которым запущен текущий: data_dir
+	// может не совпадать с каталогом config.json
 	configPath := filepath.Join(dataDir, "config.json")
+	if a.cfg != nil && a.cfg.ConfigPath != "" {
+		configPath = a.cfg.ConfigPath
+	}
 	cmd := exec.Command(binPath, "-config", configPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
