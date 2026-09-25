@@ -2186,6 +2186,7 @@
   "xkeen_settings.save_error": "Не удалось сохранить",
   "xkeen_settings.load_error": "Не удалось загрузить настройки XKeen",
   "xkeen_settings.retry": "Повторить",
+  "xkeen_settings.not_installed": "Настройки появятся после установки XKeen: панель читает их из /opt/etc/xkeen/.",
   "xkeen_settings.issue.invalid_port": "«{value}» — не порт и не диапазон 1–65535, XKeen молча его пропустит",
   "xkeen_settings.issue.invalid_ip": "«{value}» — не IP-адрес и не подсеть",
   "xkeen_settings.issue.local_ip": "«{value}» — локальная сеть, в прокси она и так не попадает",

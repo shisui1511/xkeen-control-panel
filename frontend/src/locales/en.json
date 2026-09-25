@@ -2186,6 +2186,7 @@
   "xkeen_settings.save_error": "Failed to save",
   "xkeen_settings.load_error": "Failed to load XKeen settings",
   "xkeen_settings.retry": "Retry",
+  "xkeen_settings.not_installed": "Settings appear once XKeen is installed: the panel reads them from /opt/etc/xkeen/.",
   "xkeen_settings.issue.invalid_port": "\"{value}\" is not a port or range 1–65535, XKeen will silently skip it",
   "xkeen_settings.issue.invalid_ip": "\"{value}\" is not an IP address or subnet",
   "xkeen_settings.issue.local_ip": "\"{value}\" is a local network, it never reaches the proxy anyway",

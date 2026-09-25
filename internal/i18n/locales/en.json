@@ -54,6 +54,7 @@
   "error.forbidden": "Access forbidden",
   "error.not_found": "Not found",
   "error.method_not_allowed": "Method not allowed",
+  "error.xkeen_not_installed": "XKeen is not installed",
   "error.invalid_request": "Invalid request",
   "auth.wrong_password": "Current password is incorrect",
   "preflight.awg_version_incompatible": "AmneziaWG 3.1 options require Mihomo core version 1.19.30 or higher",

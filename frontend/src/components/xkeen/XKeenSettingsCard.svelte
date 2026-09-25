@@ -43,6 +43,7 @@
   let activeKind = $state<Kind>('port_proxying');
   let loading = $state(true);
   let loadError = $state('');
+  let notInstalled = $state(false);
   let saving = $state(false);
 
   let validateTimer: ReturnType<typeof setTimeout> | undefined;
@@ -68,6 +69,7 @@
   async function load() {
     loading = true;
     loadError = '';
+    notInstalled = false;
     try {
       const res = await apiFetchJSON<SettingsFile[]>('/api/xkeen/settings');
       // Older panels (or a missing XKeen) may answer without a list.
@@ -83,7 +85,8 @@
       liveIssues = {};
       liveEntries = {};
     } catch (e: any) {
-      loadError = e?.message || String(e);
+      if (e?.status === 404) notInstalled = true;
+      else loadError = e?.message || String(e);
     } finally {
       loading = false;
     }
@@ -191,6 +194,8 @@
       <Skeleton type="text-line" width="70%" />
       <Skeleton type="text-line" width="50%" />
     </div>
+  {:else if notInstalled}
+    <p class="xs-hint">{$t('xkeen_settings.not_installed')}</p>
   {:else if loadError}
     <div class="xs-load-error" role="alert">
       <span>{$t('xkeen_settings.load_error')}: {loadError}</span>

@@ -54,6 +54,7 @@
   "error.forbidden": "Доступ запрещен",
   "error.not_found": "Не найдено",
   "error.method_not_allowed": "Метод не поддерживается",
+  "error.xkeen_not_installed": "XKeen не установлен",
   "error.invalid_request": "Некорректный запрос",
   "auth.wrong_password": "Текущий пароль неверен",
   "preflight.awg_version_incompatible": "Опции AmneziaWG 3.1 требуют ядро Mihomo версии 1.19.30 или выше",

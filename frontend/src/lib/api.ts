@@ -103,7 +103,9 @@ export async function apiFetchJSON<T = unknown>(
       payload && typeof payload === 'object' && payload.error
         ? payload.error
         : `HTTP ${res.status}`;
-    throw new Error(errorMsg);
+    const err: any = new Error(errorMsg);
+    err.status = res.status;
+    throw err;
   }
 
   if (payload && typeof payload === 'object' && 'success' in payload) {
