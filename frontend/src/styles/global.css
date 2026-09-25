@@ -877,7 +877,7 @@ input[type='number'] {
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.12em;
   color: var(--fg-secondary);
   cursor: pointer;
   list-style: none;
