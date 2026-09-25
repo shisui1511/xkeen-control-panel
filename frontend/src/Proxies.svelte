@@ -66,6 +66,8 @@
 
   let { onSwitchTab = () => {} }: Props = $props();
 
+  const mihomoOffline = $derived($capabilities !== null && !$capabilities.mihomo.reachable);
+
   interface Proxy {
     name: string;
     type: string;
@@ -952,16 +954,20 @@
   >
     <ClientExitIpBadge />
     {#if activeTab === 'groups'}
-      <MihomoModeSwitch onchanged={() => fetchProxies()} />
-      <ProxyFilterBar
-        bind:filterQuery
-        bind:viewMode
-        {loading}
-        onSearchInput={handleSearchInput}
-        onExpandAll={expandAll}
-        onCollapseAll={collapseAll}
-        onRefresh={() => fetchProxies()}
-      />
+      {#if mihomoOffline}
+        <!-- No groups to filter, expand or refresh: the empty state below explains why. -->
+      {:else}
+        <MihomoModeSwitch onchanged={() => fetchProxies()} />
+        <ProxyFilterBar
+          bind:filterQuery
+          bind:viewMode
+          {loading}
+          onSearchInput={handleSearchInput}
+          onExpandAll={expandAll}
+          onCollapseAll={collapseAll}
+          onRefresh={() => fetchProxies()}
+        />
+      {/if}
     {:else}
       <Button
         variant="secondary"
@@ -1036,14 +1042,14 @@
       <!-- Groups Grid -->
       {#if loading && groups.length === 0}
         <div class="group-grid">
-          {#each Array(4) as _}
+          {#each Array(4) as _, i (i)}
             <div class="group-card skeleton-card">
               <div class="gc-head">
                 <Skeleton width="120px" height="18px" />
                 <Skeleton width="60px" height="14px" style="margin-left: auto;" />
               </div>
               <div class="proxy-grid">
-                {#each Array(3) as _}
+                {#each Array(3) as _, j (j)}
                   <div class="proxy-card">
                     <div class="p-header">
                       <Skeleton width="70px" height="14px" />
