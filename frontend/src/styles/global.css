@@ -1098,7 +1098,8 @@ input[type='number'] {
      .nav-badge-warn's margin-left: auto consumes all free space before
      justify-content: center can act, pushing the icon to the rail's left
      edge (WR-05). */
-  .sidebar.rail .nav-badge-warn {
+  .sidebar.rail .nav-badge-warn,
+  .sidebar.rail .nav-badge-update {
     margin-left: 0;
     position: absolute;
     top: 4px;

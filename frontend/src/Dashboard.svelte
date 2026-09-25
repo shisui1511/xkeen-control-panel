@@ -32,6 +32,8 @@
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import UnsavedChangesModal from './components/UnsavedChangesModal.svelte';
   import SystemStatusCapsule from './components/status/SystemStatusCapsule.svelte';
+  import UpdateBanner from './components/dashboard/UpdateBanner.svelte';
+  import { refreshUpdateState, detectPanelUpdate } from './lib/updateNotify';
   import { capsuleConfigStore } from './lib/capsuleSettings';
   import {
     isAnySourceDirty,
@@ -517,6 +519,10 @@
       const data = await apiFetchJSON<{ version: string; panel_version: string }>('/api/version');
       version = data.version;
       panelVersion = data.panel_version;
+      const updatedTo = detectPanelUpdate(data.panel_version);
+      if (updatedTo) {
+        showToast('success', $t('dash.panel_updated', { version: updatedTo }), 8000);
+      }
     } catch (e: any) {
       if (e?.status === 401) return;
       version = $t('app.error');
@@ -836,6 +842,8 @@
     usePoller((signal) => fetchCapabilities(signal), 10000);
     usePoller((signal) => fetchSubscriptionSummary(signal), 30000);
     usePoller((signal) => fetchProxySummary(signal), 30000);
+    // Результат фоновой проверки обновлений: бэкенд проверяет раз в 6 ч
+    usePoller((signal) => refreshUpdateState(signal), 30 * 60 * 1000);
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       pwaInstallPrompt = e;
@@ -1123,6 +1131,8 @@
               </Card>
             </div>
           {/if}
+
+          <UpdateBanner />
 
           <!-- Problems Panel (conditional) -->
           {#if (systemStats && systemStats.invalid_config) || isXKeenMissing || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring || isWatchdogIncident}

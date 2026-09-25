@@ -4,6 +4,7 @@
   import { capsuleConfigStore } from '../lib/capsuleSettings';
   import Icon from '../lib/components/Icon.svelte';
   import SystemStatusCapsule from './status/SystemStatusCapsule.svelte';
+  import { updateState } from '../lib/updateNotify';
 
   let {
     currentTab = 'dashboard',
@@ -564,6 +565,15 @@
     >
       <Icon name="settings" size={16} />
       <span class="lbl">{$t('nav.settings')}</span>
+      {#if $updateState?.has_update}
+        <span
+          class="nav-badge-update"
+          role="img"
+          aria-label={$t('nav.update_available_aria', {
+            version: $updateState.latest_version ?? ''
+          })}
+        ></span>
+      {/if}
     </a>
   </details>
 </nav>
@@ -712,6 +722,16 @@
     pointer-events: none;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
     z-index: 400;
+  }
+
+  .nav-badge-update {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    margin-left: auto;
+    flex-shrink: 0;
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 50%, transparent);
   }
 
   .nav-badge-warn {

@@ -12,6 +12,8 @@
   } from '../../lib/releaseNotes';
   import SegmentedControl, { type SegmentItem } from '../SegmentedControl.svelte';
   import Modal from '../Modal.svelte';
+  import Select from '../Select.svelte';
+  import { updateState, refreshUpdateState, type UpdateCheckState } from '../../lib/updateNotify';
 
   interface ReleaseNote {
     version: string;
@@ -92,6 +94,44 @@
     ).map((r) => ({ ...r, sections: parseReleaseNotes(r.body) }))
   );
 
+  // Окна автоустановки: ночные часы, когда сетью почти не пользуются
+  const WINDOW_PRESETS = [
+    '00:00-02:00',
+    '01:00-03:00',
+    '02:00-04:00',
+    '03:00-05:00',
+    '04:00-06:00',
+    '05:00-07:00'
+  ];
+  const windowOptions = $derived(
+    (!$updateState?.install_window || WINDOW_PRESETS.includes($updateState.install_window)
+      ? WINDOW_PRESETS
+      : [...WINDOW_PRESETS, $updateState.install_window]
+    ).map((w) => ({ value: w, label: w.replace('-', ' – ') }))
+  );
+  let savingAuto = $state(false);
+
+  async function saveAuto(
+    patch: Partial<Pick<UpdateCheckState, 'auto_check' | 'auto_install' | 'install_window'>>
+  ) {
+    savingAuto = true;
+    try {
+      const st = await apiFetchJSON<UpdateCheckState>('/api/update/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch)
+      });
+      updateState.set(st);
+      showToast('success', $t('settings.update_auto_saved'));
+    } catch (e: any) {
+      await refreshUpdateState();
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
+    } finally {
+      savingAuto = false;
+    }
+  }
+
   const busy = $derived(
     installing || (!!status && !['idle', 'done', 'failed'].includes(status.status))
   );
@@ -157,6 +197,8 @@
     try {
       info = await apiFetchJSON<UpdateInfo>(`/api/update/check?channel=${channel}`);
       checkedAt = new Date();
+      // Ручная проверка обновляет и уведомления (точка в меню, баннер)
+      refreshUpdateState();
     } catch (e: any) {
       if (e?.status === 401) return;
       checkError = e instanceof Error ? e.message : String(e);
@@ -301,6 +343,7 @@
   onMount(async () => {
     await Promise.all([fetchChannel(), fetchStatus()]);
     fetchBackups();
+    refreshUpdateState();
     if (status && !['idle', 'done', 'failed'].includes(status.status)) {
       startStatusSSE();
     } else {
@@ -426,6 +469,81 @@
     {/if}
   </div>
 </div>
+
+{#if $updateState}
+  {@const auto = $updateState}
+  <div class="card mb-2">
+    <div class="card-label">{$t('settings.update_auto_title')}</div>
+    <div class="field-group">
+      <div class="field-row">
+        <div>
+          <span class="field-row-name">{$t('settings.update_auto_check')}</span>
+          <div class="field-row-desc">{$t('settings.update_auto_check_desc')}</div>
+        </div>
+        <label class="toggle-switch">
+          <input
+            type="checkbox"
+            aria-label={$t('settings.update_auto_check')}
+            checked={auto.auto_check}
+            disabled={savingAuto}
+            onchange={(e) => saveAuto({ auto_check: e.currentTarget.checked })}
+          />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="field-row">
+        <div>
+          <span class="field-row-name">{$t('settings.update_auto_install')}</span>
+          <div class="field-row-desc">{$t('settings.update_auto_install_desc')}</div>
+        </div>
+        <label class="toggle-switch">
+          <input
+            type="checkbox"
+            aria-label={$t('settings.update_auto_install')}
+            checked={auto.auto_install}
+            disabled={savingAuto}
+            onchange={(e) => saveAuto({ auto_install: e.currentTarget.checked })}
+          />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      {#if auto.auto_install}
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.update_window')}</span>
+            <div class="field-row-desc">{$t('settings.update_window_desc')}</div>
+          </div>
+          <Select
+            value={auto.install_window}
+            options={windowOptions}
+            ariaLabel={$t('settings.update_window')}
+            disabled={savingAuto}
+            onchange={(e) => saveAuto({ install_window: e.currentTarget.value })}
+          />
+        </div>
+      {/if}
+    </div>
+
+    {#if auto.last_auto_install}
+      {@const last = auto.last_auto_install}
+      <div class="update-state {last.ok ? 'state-ok' : 'state-error'}">
+        {last.ok
+          ? $t('settings.update_auto_last_ok', {
+              from: last.from,
+              version: last.version,
+              date: formatDate(last.done_at || last.started_at)
+            })
+          : $t('settings.update_auto_last_failed', { version: last.version, from: last.from })}
+      </div>
+    {/if}
+    {#if auto.checked_at}
+      <div class="checked-at auto-checked">
+        {$t('settings.update_auto_checked', { date: formatDate(auto.checked_at) })}
+        {#if auto.error}· <span class="auto-error">{auto.error}</span>{/if}
+      </div>
+    {/if}
+  </div>
+{/if}
 
 {#if notes.length > 0 && !busy}
   <div class="card mb-2">
@@ -880,6 +998,16 @@
 
   .commit-link:hover {
     color: var(--accent);
+  }
+
+  .auto-checked {
+    display: block;
+    margin-top: 12px;
+  }
+
+  .auto-error {
+    color: var(--danger);
+    word-break: break-word;
   }
 
   .backups-hint {
