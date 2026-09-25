@@ -251,3 +251,27 @@ func TestServiceDNSRedirect(t *testing.T) {
 		t.Errorf("expected 409 when DNS dies, got %d: %s", recDead.Code, recDead.Body.String())
 	}
 }
+
+// TestServiceStatus_XKeenNotInstalled: без XKeen статус отдаётся успешно с
+// xkeen_installed=false — по нему UI предлагает установку (раньше был 500,
+// и карточка установки не появлялась).
+func TestServiceStatus_XKeenNotInstalled(t *testing.T) {
+	api := newServiceTestAPI(t, "/nonexistent/xkeen-binary")
+	api.SetXKeenInstaller(&services.XKeenInstaller{InitDir: t.TempDir()})
+
+	rr := httptest.NewRecorder()
+	api.ServiceStatus(rr, httptest.NewRequest(http.MethodGet, "/api/service/status", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data ServiceStatusResponse `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Data.XKeenInstalled || !resp.Data.XKeenInstallerAvailable {
+		t.Errorf("got installed=%v available=%v, want false/true",
+			resp.Data.XKeenInstalled, resp.Data.XKeenInstallerAvailable)
+	}
+}

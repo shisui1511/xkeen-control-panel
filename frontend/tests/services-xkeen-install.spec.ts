@@ -41,6 +41,7 @@ async function mockCommonRoutes(
               mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
             },
             active_kernel: 'xray',
+            xkeen_installed: status.installed,
             mihomo: { reachable: true, process_running: false, api_reachable: false }
           }
         })
@@ -140,5 +141,15 @@ test.describe('Services page — XKeen installer card', () => {
     await page.getByTestId('xkeen-install-start').click();
     const result = page.getByTestId('xkeen-install-modal').locator('.install-result.fail');
     await expect(result).toContainText('3');
+  });
+
+  test('dashboard problems panel points to the XKeen installer', async ({ page }) => {
+    await mockCommonRoutes(page, { installed: false, available: true });
+    await page.goto('/#/');
+    const problem = page.getByTestId('problem-xkeen-missing');
+    await expect(problem).toBeVisible();
+    await problem.getByRole('button').click();
+    await expect(page).toHaveURL(/#\/services/);
+    await expect(page.getByTestId('xkeen-install-card')).toBeVisible();
   });
 });

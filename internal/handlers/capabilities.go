@@ -16,7 +16,9 @@ type CapabilitiesResponse struct {
 	XRay         XRayCapability              `json:"xray"`
 	ActiveKernel string                      `json:"active_kernel"`
 	XKeenDNS     bool                        `json:"xkeen_dns"`
-	GlobalHwid   string                      `json:"global_hwid,omitempty"`
+	// XKeenInstalled — бинарник XKeen найден (без него ядра не запустить)
+	XKeenInstalled bool   `json:"xkeen_installed"`
+	GlobalHwid     string `json:"global_hwid,omitempty"`
 }
 
 // XRayCapability describes XRay confdir setup status.
@@ -162,6 +164,7 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 
 	if a.xkeenSvc != nil {
 		resp.XKeenDNS = a.xkeenSvc.IsDNSProxyingEnabled()
+		resp.XKeenInstalled = a.xkeenSvc.Installed()
 	}
 
 	if a.subscriptionSvc != nil {

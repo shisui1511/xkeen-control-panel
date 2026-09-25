@@ -2338,5 +2338,8 @@
   "xkinst.failed": "Установщик завершился с ошибкой (код {code})",
   "xkinst.abort_title": "Прервать установку?",
   "xkinst.abort_message": "Установщик XKeen ещё работает. Если закрыть окно, установка будет прервана.",
-  "xkinst.abort_confirm": "Прервать установку"
+  "xkinst.abort_confirm": "Прервать установку",
+  "dash.problems.xkeen_missing_title": "XKeen не установлен",
+  "dash.problems.xkeen_missing_desc": "Без XKeen ядра проксирования не запустятся. Установите XKeen на странице «Службы» — ядра Xray/Mihomo ставятся тем же установщиком.",
+  "dash.problems.xkeen_missing_cta": "Установить XKeen"
 }

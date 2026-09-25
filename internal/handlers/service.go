@@ -27,6 +27,15 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
+	// Без XKeen `xkeen -status` не запустить: это не ошибка сервера, а
+	// состояние, по которому UI предлагает установку
+	if !a.xkeenSvc.Installed() {
+		JSONSuccess(w, ServiceStatusResponse{
+			BinaryPath:              a.cfg.XKeenBinary,
+			XKeenInstallerAvailable: a.xkeenInstaller != nil && a.xkeenInstaller.Available(),
+		})
+		return
+	}
 	out, err := a.xkeenSvc.Status()
 	if err != nil {
 		JSONError(w, http.StatusInternalServerError, out)
