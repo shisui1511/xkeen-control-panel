@@ -1057,27 +1057,10 @@ func (s *KernelService) Install(name string) error {
 	}
 
 	if _, err := os.Stat(binaryPath); err == nil {
-		src, err := os.Open(binaryPath)
-		if err != nil {
+		// Копия с правами оригинала: откат на неё должен дать запускаемое ядро
+		if err := copyKernelFile(binaryPath, backupPath); err != nil {
 			setStatus("failed", "Backup failed: "+err.Error())
 			return err
-		}
-		dst, err := os.Create(backupPath)
-		if err != nil {
-			src.Close()
-			setStatus("failed", "Backup failed: "+err.Error())
-			return err
-		}
-		_, copyErr := io.Copy(dst, src)
-		src.Close()
-		closeErr := dst.Close()
-		if copyErr != nil {
-			setStatus("failed", "Backup failed: "+copyErr.Error())
-			return copyErr
-		}
-		if closeErr != nil {
-			setStatus("failed", "Backup failed: "+closeErr.Error())
-			return closeErr
 		}
 	}
 
@@ -1133,8 +1116,9 @@ func (s *KernelService) Install(name string) error {
 		return err
 	}
 	if err := os.Rename(tempDest, safeBinaryPath); err != nil {
-		// Try rollback
-		_ = os.Rename(backupPath, safeBinaryPath)
+		// Rename в пределах каталога атомарен: при ошибке рабочее ядро не
+		// тронуто, откатывать нечего — убрать только недоустановленный файл
+		_ = os.Remove(tempDest)
 		setStatus("failed", "Replace failed: "+err.Error())
 		return err
 	}
@@ -1643,6 +1627,9 @@ func moveKernelFile(src, dst string) error {
 	return os.Remove(src)
 }
 
+// kernelUploadMaxBytes — предел загружаемого ядра или архива с ним.
+const kernelUploadMaxBytes = 100 << 20
+
 // UploadBinary saves an uploaded kernel binary or archive (.zip/.gz) to the router,
 // validates that it is a valid Linux ELF executable, creates a backup of the current binary,
 // and replaces the kernel binary atomically.
@@ -1680,11 +1667,15 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 	tempUploadPath := tempFile.Name()
 	defer os.Remove(tempUploadPath)
 
-	// Stream upload with max 100MB
-	_, err = io.Copy(tempFile, io.LimitReader(src, 100*1024*1024))
+	// Лимит проверяется явно: молча обрезанный файл с заголовком ELF
+	// прошёл бы проверку isELF и встал бы ядром, которое не запустится
+	n, err := io.Copy(tempFile, io.LimitReader(src, kernelUploadMaxBytes+1))
 	_ = tempFile.Close()
 	if err != nil {
 		return fmt.Errorf("failed to save upload: %w", err)
+	}
+	if n > kernelUploadMaxBytes {
+		return fmt.Errorf("uploaded file exceeds %d MB", kernelUploadMaxBytes>>20)
 	}
 
 	extractedPath := tempUploadPath
@@ -1746,9 +1737,8 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		return fmt.Errorf("replace failed: %w", err)
 	}
 	if err := os.Rename(tempDest, safeBinaryPath); err != nil {
-		if _, statErr := os.Stat(backupPath); statErr == nil {
-			_ = os.Rename(backupPath, safeBinaryPath)
-		}
+		// Рабочее ядро не тронуто (rename атомарен) — убрать только .new
+		_ = os.Remove(tempDest)
 		return fmt.Errorf("final replace failed: %w", err)
 	}
 
