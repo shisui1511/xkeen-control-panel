@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -881,4 +882,25 @@ func TestMoveKernelFile_MovesAndRemovesSource(t *testing.T) {
 	if err != nil || string(got) != "payload" {
 		t.Errorf("destination content = %q, err = %v", got, err)
 	}
+}
+
+// TestUploadBinary_OversizedRejected: файл сверх лимита отклоняется с ошибкой,
+// а не обрезается до ELF-похожего огрызка, который встал бы ядром.
+func TestUploadBinary_OversizedRejected(t *testing.T) {
+	svc := NewKernelService(t.TempDir())
+	src := io.MultiReader(
+		strings.NewReader("\x7fELF"),
+		io.LimitReader(zeroReader{}, kernelUploadMaxBytes),
+	)
+	err := svc.UploadBinary("xray", src, "xray")
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized upload must be rejected, got %v", err)
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
 }

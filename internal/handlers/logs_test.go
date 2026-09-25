@@ -213,6 +213,76 @@ func TestLogsWebSocket_Sources(t *testing.T) {
 	}
 }
 
+// TestLogsWebSocket_PicksUpLateLogFile: лог, созданный после подключения
+// (mihomo.log после переключения ядра), попадает в поток без переподключения.
+func TestLogsWebSocket_PicksUpLateLogFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	xrayLogPath := filepath.Join(tmpDir, "xray.log")
+	if err := os.WriteFile(xrayLogPath, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	lateLogPath := filepath.Join(tmpDir, "late", "mihomo.log")
+
+	cfg := &config.Config{
+		LogSources:   []string{xrayLogPath, lateLogPath},
+		AllowedRoots: []string{tmpDir},
+	}
+	api := &API{
+		cfg:                cfg,
+		pathVal:            utils.NewPathValidator(cfg.AllowedRoots),
+		logsRescanInterval: 100 * time.Millisecond,
+	}
+
+	handlerDone := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(handlerDone)
+		api.LogsWebSocket(w, r)
+	}))
+	defer ts.Close()
+	header := http.Header{}
+	header.Set("Origin", ts.URL)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+ts.URL[4:], header)
+	if err != nil {
+		t.Skipf("WebSocket dial failed: %v", err)
+	}
+	// Уход клиента завершает обработчик вместе с tail
+	defer func() {
+		conn.Close()
+		select {
+		case <-handlerDone:
+		case <-time.After(5 * time.Second):
+			t.Error("handler kept running after the client disconnected")
+		}
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	// Каталог и файл появляются уже после подключения
+	if err := os.MkdirAll(filepath.Dir(lateLogPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lateLogPath, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond) // перескан и перезапуск tail
+	f, err := os.OpenFile(lateLogPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("late mihomo line\n")
+	f.Close()
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		_, p, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("line from log file created after connect never arrived: %v", err)
+		}
+		if strings.Contains(string(p), "late mihomo line") {
+			return
+		}
+	}
+}
+
 func TestLogsEndpoints_WithDispatcher(t *testing.T) {
 	tmpDir := t.TempDir()
 	dispatcher := services.NewLogDispatcher(nil, tmpDir, "")

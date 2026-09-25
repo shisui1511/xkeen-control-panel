@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -122,65 +123,88 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Чтение нужно, чтобы заметить уход клиента (и обработать pong): иначе
+	// tail работает, пока в лог не придёт строка и запись не упадёт
+	go func() {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				cancel()
+				return
+			}
+		}
+	}()
+
 	sources := a.cfg.LogSources
 	if len(sources) == 0 {
 		sources = []string{a.cfg.LogPath}
 	}
 
-	// Dynamically append other existing standard log files
+	// Стандартные логи ядер добавляются всегда: файл (и даже его каталог)
+	// может появиться уже после подключения — например, mihomo.log после
+	// переключения Xray → Mihomo
 	for _, df := range []string{
 		"/opt/var/log/xray/access.log",
 		"/opt/var/log/xray/error.log",
 		"/opt/var/log/xkeen-detached.log",
 		"/opt/var/log/mihomo.log",
 	} {
-		already := false
-		for _, s := range sources {
-			if s == df {
-				already = true
-				break
-			}
-		}
-		if !already {
-			if _, err := os.Stat(df); err == nil {
-				sources = append(sources, df)
-			}
+		if !slices.Contains(sources, df) {
+			sources = append(sources, df)
 		}
 	}
 
-	// Validate log sources using pathVal
-	var validSources []string
-	for _, src := range sources {
-		if clean, err := a.pathVal.Validate(src); err == nil {
-			validSources = append(validSources, clean)
+	// existingLogSources — прошедшие PathValidator и существующие сейчас
+	// источники. Пересчитывается на каждом круге: Validate отклоняет файл,
+	// пока нет его каталога
+	existingLogSources := func() []string {
+		var existing []string
+		for _, src := range sources {
+			clean, err := a.pathVal.Validate(src)
+			if err != nil {
+				continue
+			}
+			if _, err := os.Stat(clean); err == nil && !slices.Contains(existing, clean) {
+				existing = append(existing, clean)
+			}
 		}
+		return existing
 	}
-	if len(validSources) == 0 {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("[system] No valid log sources configured\n"))
-		return
+
+	rescanInterval := a.logsRescanInterval
+	if rescanInterval <= 0 {
+		rescanInterval = defaultLogsRescanInterval
 	}
 
 	var hasShownWaiting bool
 
 	for {
-		var existingSources []string
-		for _, src := range validSources {
-			if _, err := os.Stat(src); err == nil {
-				existingSources = append(existingSources, src)
-			}
-		}
+		existingSources := existingLogSources()
 
 		if len(existingSources) > 0 {
 			hasShownWaiting = false
-			var cmd *exec.Cmd
-			if len(existingSources) == 1 {
-				cmd = exec.CommandContext(ctx, "tail", "-f", existingSources[0])
-			} else {
-				args := append([]string{"-f"}, existingSources...)
-				cmd = exec.CommandContext(ctx, "tail", args...)
-			}
+			// tailCtx отменяется, когда появился новый файл лога: tail
+			// перезапускается уже с ним
+			tailCtx, stopTail := context.WithCancel(ctx)
+			args := append([]string{"-f"}, existingSources...)
+			cmd := exec.CommandContext(tailCtx, "tail", args...)
+			go func() {
+				ticker := time.NewTicker(rescanInterval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-tailCtx.Done():
+						return
+					case <-ticker.C:
+						if len(existingLogSources()) > len(existingSources) {
+							stopTail()
+							return
+						}
+					}
+				}
+			}()
 			stdout, err := cmd.StdoutPipe()
 			if err != nil {
+				stopTail()
 				select {
 				case <-ctx.Done():
 					return
@@ -190,6 +214,7 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if err := cmd.Start(); err != nil {
+				stopTail()
 				select {
 				case <-ctx.Done():
 					return
@@ -238,10 +263,16 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 
 			err = runTailReader()
+			restarted := tailCtx.Err() != nil
+			stopTail()
+			if ctx.Err() != nil {
+				return
+			}
+			if restarted {
+				// Появился новый файл: сразу перезапустить tail с ним
+				continue
+			}
 			if err != nil {
-				if ctx.Err() != nil {
-					return
-				}
 				select {
 				case <-ctx.Done():
 					return
@@ -264,6 +295,10 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+// defaultLogsRescanInterval — как часто запасной поток логов проверяет,
+// не появились ли новые файлы логов.
+const defaultLogsRescanInterval = 2 * time.Second
 
 // LogsHistory returns recent entries from in-memory ring buffers.
 func (a *API) LogsHistory(w http.ResponseWriter, r *http.Request) {

@@ -22,11 +22,15 @@ const (
 )
 
 type AuthService struct {
-	passwordHash     string
-	secureCookie     bool
-	sessions         map[string]*Session
-	rateLimiter      *RateLimiter
-	mu               sync.RWMutex
+	passwordHash string
+	secureCookie bool
+	sessions     map[string]*Session
+	rateLimiter  *RateLimiter
+	mu           sync.RWMutex
+	// pwMu сериализует смену пароля целиком (проверка → запись на диск →
+	// применение): иначе параллельные запросы оставят в памяти и на диске
+	// разные пароли
+	pwMu             sync.Mutex
 	onPasswordSet    func(string) error
 	maxLoginAttempts int
 	lockoutDuration  time.Duration
@@ -94,6 +98,8 @@ func (a *AuthService) ChangePassword(ip, keepToken, currentPassword, newPassword
 	if err := a.rateLimiter.CheckLimit(ip, a.maxLoginAttempts, a.lockoutDuration); err != nil {
 		return ErrTooManyAttempts
 	}
+	a.pwMu.Lock()
+	defer a.pwMu.Unlock()
 	if err := a.VerifyPassword(currentPassword); err != nil {
 		return err
 	}
@@ -523,14 +529,21 @@ func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.SetPasswordHash(hash)
-
+	// Повторная проверка под pwMu: параллельный первичный запрос мог уже
+	// задать пароль, и этот не должен его перезаписать
+	a.pwMu.Lock()
+	defer a.pwMu.Unlock()
+	if a.GetPasswordHash() != "" {
+		jsonError(w, http.StatusForbidden, "Setup already completed")
+		return
+	}
 	if a.onPasswordSet != nil {
 		if err := a.onPasswordSet(hash); err != nil {
 			jsonError(w, http.StatusInternalServerError, "Failed to save password")
 			return
 		}
 	}
+	a.SetPasswordHash(hash)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})

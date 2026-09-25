@@ -19,7 +19,10 @@ import (
 )
 
 type API struct {
-	cfg                   *config.Config
+	cfg *config.Config
+	// logsRescanInterval — период проверки новых файлов в запасном потоке
+	// логов; ноль — defaultLogsRescanInterval
+	logsRescanInterval    time.Duration
 	srv                   *server.Server
 	xkeenSvc              *services.XKeenService
 	mihomoSvc             *services.MihomoService

@@ -512,3 +512,40 @@ func TestRunWithTimeoutArgs_TimeoutReadsOutputSafely(t *testing.T) {
 		t.Errorf("returned after %v: child holding the pipe blocked the timeout path", elapsed)
 	}
 }
+
+// TestRunWithTimeoutArgs_BackgroundChildKeepsPipe: скрипт завершился с кодом 0,
+// оставив фоновый процесс на своём выводе (как ядро после xkeen -start).
+// Вызов успешен и возвращается быстро, а потомок продолжает писать в вывод
+// без SIGPIPE.
+func TestRunWithTimeoutArgs_BackgroundChildKeepsPipe(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "alive")
+	bin := filepath.Join(dir, "xkeen")
+	script := "#!/bin/sh\necho started\n" +
+		"(sleep 3; echo late; echo ok > " + marker + ") &\nexit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	svc := &XKeenService{BinaryPath: bin}
+
+	start := time.Now()
+	out, err := svc.runWithTimeoutArgs(10*time.Second, "-status")
+	if err != nil {
+		t.Fatalf("successful script reported error: %v", err)
+	}
+	if !strings.Contains(out, "started") {
+		t.Errorf("script output lost: %q", out)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("returned after %v: waited for background child", elapsed)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(marker); err == nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("background child died after writing to inherited output (SIGPIPE)")
+}

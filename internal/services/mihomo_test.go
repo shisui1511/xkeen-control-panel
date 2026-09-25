@@ -661,3 +661,20 @@ func TestMihomoReloadConfig(t *testing.T) {
 		t.Errorf("expected path %s, got %v", targetConfigPath, receivedBody)
 	}
 }
+
+// TestGetHTTPTransport_Shared: прокси Clash API и клиент сервиса используют
+// один пул соединений, а не новый транспорт на каждый запрос.
+func TestGetHTTPTransport_Shared(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("external-controller: 127.0.0.1:9090\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewMihomoService("", "", dir)
+	first := svc.GetHTTPTransport()
+	if second := svc.GetHTTPTransport(); first != second {
+		t.Error("GetHTTPTransport must return the cached transport")
+	}
+	if svc.GetHTTPClient().Transport != first {
+		t.Error("GetHTTPTransport must share the GetHTTPClient pool")
+	}
+}
