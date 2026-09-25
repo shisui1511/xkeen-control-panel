@@ -330,7 +330,7 @@ jobs:
         run: |
           ok=0
           for i in 1 2 3; do
-            sudo apt-get update && sudo apt-get install -y qemu-user-static upx-ucl && { ok=1; break; }
+            sudo apt-get update && sudo apt-get install -y qemu-user-static && { ok=1; break; }
             echo "apt-get failed, retry $i"; sleep 5
           done
           [ "$ok" = 1 ] || { echo "::error::apt-get failed after 3 attempts"; exit 1; }
@@ -340,18 +340,10 @@ jobs:
           file "xcp-${{ matrix.name }}"
           file "xcp-${{ matrix.name }}" | grep -q "statically linked"
 
-      - name: Smoke test under QEMU (uncompressed)
+      - name: Smoke test under QEMU
         timeout-minutes: 1
         run: |
           ${{ matrix.qemu }} "./xcp-${{ matrix.name }}" -v
-
-      - name: Test UPX compression & execution under QEMU
-        continue-on-error: true
-        timeout-minutes: 1
-        run: |
-          upx -9 --lzma "xcp-${{ matrix.name }}" -o "xcp-${{ matrix.name }}-upx"
-          file "xcp-${{ matrix.name }}-upx"
-          ${{ matrix.qemu }} "./xcp-${{ matrix.name }}-upx" -v
 
   # Job 6: Проверка правил коммитов и синхронизации локализации
   check-rules:
@@ -373,10 +365,11 @@ jobs:
       - name: Check frontend API calls against backend routes
         run: node scripts/check-api-routes.js
 
-      - name: Test version script
+      - name: Test version, release and setup scripts
         run: |
           sh scripts/version_test.sh
           bash .github/scripts/auto_release_test.sh
+          sh scripts/setup_test.sh
           echo "Build version: $(sh scripts/version.sh), next release: $(sh scripts/version.sh --next)"
 
       - name: Check commit messages

@@ -1,4 +1,4 @@
-.PHONY: build run clean test test-coverage lint fmt deps hooks keenetic-arm64 keenetic-mipsle keenetic-mips compress proto
+.PHONY: build run clean test test-coverage lint fmt deps hooks keenetic-arm64 keenetic-mipsle keenetic-mips proto
 
 BINARY_NAME=xcp
 # Single source of truth for the version: scripts/version.sh (git tags +
@@ -36,12 +36,6 @@ keenetic-mipsle: update-version
 # Сборка для Keenetic MIPS big-endian (KN-3610, KN-2310 и др.)
 keenetic-mips: update-version
 	CGO_ENABLED=0 GOOS=linux GOARCH=mips GOMIPS=softfloat go build -buildvcs=false -ldflags "-s -w -X main.Version=$(VERSION)" -o build/$(BINARY_NAME)_$(VERSION)_mips ./cmd/xcp
-
-# Сжатие UPX (для уменьшения размера)
-compress: build
-	upx --best --lzma build/$(BINARY_NAME) || true
-	@echo "Compressed size:"
-	@ls -lh build/$(BINARY_NAME)
 
 run: build
 	./build/$(BINARY_NAME)

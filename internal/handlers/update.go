@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -401,7 +403,7 @@ func (a *API) performUpdate(channel string) {
 
 	// Download to the same directory as the binary to avoid cross-device rename
 	tempFile := filepath.Join(filepath.Dir(binPath), "xcp.new")
-	if err := downloadFile(downloadURL, tempFile); err != nil {
+	if err := downloadBinary(downloadURL, tempFile); err != nil {
 		setUpdateState(UpdateStatus{
 			Status:    "failed",
 			Message:   "Download failed: " + err.Error(),
@@ -778,27 +780,61 @@ func fetchChangelog(version string) (string, error) {
 	return release.Body, nil
 }
 
-func downloadFile(url, destPath string) error {
-	client := utils.SafeHTTPClient(300 * time.Second)
+// maxBinarySize ограничивает распакованный бинарник: повреждённый или подменённый
+// .gz не должен заполнить диск роутера до проверки SHA-256.
+const maxBinarySize = 128 << 20
+
+var errDownloadNotFound = errors.New("not found")
+
+// downloadBinary скачивает сжатый ассет url+".gz" и распаковывает его в destPath.
+// Релизы, опубликованные до появления .gz, отдают только несжатый бинарник.
+func downloadBinary(url, destPath string) error {
+	return downloadBinaryWithClient(utils.SafeHTTPClient(300*time.Second), url, destPath)
+}
+
+func downloadBinaryWithClient(client *http.Client, url, destPath string) error {
+	err := downloadTo(client, url+".gz", destPath, true)
+	if errors.Is(err, errDownloadNotFound) {
+		log.Printf("Update: %s.gz not found, downloading uncompressed binary", url)
+		err = downloadTo(client, url, destPath, false)
+	}
+	return err
+}
+
+func downloadTo(client *http.Client, url, destPath string, gzipped bool) error {
 	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return errDownloadNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed: %s", resp.Status)
+	}
+
+	var body io.Reader = resp.Body
+	if gzipped {
+		zr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return fmt.Errorf("gzip: %w", err)
+		}
+		defer zr.Close()
+		body = zr
 	}
 
 	out, err := os.Create(destPath)
 	if err != nil {
 		return err
 	}
-
-	_, copyErr := io.Copy(out, resp.Body)
+	n, copyErr := io.Copy(out, io.LimitReader(body, maxBinarySize+1))
+	if copyErr == nil && n > maxBinarySize {
+		copyErr = fmt.Errorf("binary exceeds %d MB", maxBinarySize>>20)
+	}
 	// Always close before possible removal
 	closeErr := out.Close()
-
 	if copyErr != nil {
 		_ = os.Remove(destPath) // cleanup on copy error
 		return copyErr

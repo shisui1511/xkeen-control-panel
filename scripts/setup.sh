@@ -360,16 +360,34 @@ ENVEOF
 }
 
 # Попытка скачать с одного URL
-try_download() {
-  local url
+fetch_to() {
+  local url dest
   url="$1"
+  dest="$2"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsL --connect-timeout 10 --max-time 120 -o "$TEMP_BIN" "$url" 2>/dev/null
+    curl -fsL --connect-timeout 10 --max-time 120 -o "$dest" "$url" 2>/dev/null
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$TEMP_BIN" "$url" 2>/dev/null
+    wget -qO "$dest" "$url" 2>/dev/null
   else
     return 1
   fi
+}
+
+# Сначала сжатый .gz: в ~3 раза меньше и укладывается в лимит jsDelivr (20 МБ).
+# Нет .gz (старый релиз) или нет gunzip — несжатый бинарник. SHA-256 после
+# распаковки проверяет verify_checksum, как для несжатого.
+try_download() {
+  local url
+  url="$1"
+  if command -v gunzip >/dev/null 2>&1 && fetch_to "${url}.gz" "${TEMP_BIN}.gz"; then
+    if gunzip -c "${TEMP_BIN}.gz" >"$TEMP_BIN" 2>/dev/null; then
+      rm -f "${TEMP_BIN}.gz"
+      return 0
+    fi
+    rm -f "$TEMP_BIN"
+  fi
+  rm -f "${TEMP_BIN}.gz"
+  fetch_to "$url" "$TEMP_BIN"
 }
 
 # Проверка контрольной суммы SHA-256
