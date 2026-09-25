@@ -199,6 +199,7 @@ rm -rf /opt/etc/xcp   # удалить конфиги (опционально)
 # Зависимости
 make deps
 cd frontend && npm ci && cd ..
+make hooks                     # pre-commit: prettier + gofmt
 
 # Сборка
 cd frontend && npm run build && cd ..
