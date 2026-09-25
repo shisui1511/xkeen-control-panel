@@ -200,7 +200,11 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			// Read from tail and send to WS
 			runTailReader := func() error {
-				defer cmd.Process.Kill()
+				// Wait после Kill: иначе каждый переподключённый tail остаётся зомби
+				defer func() {
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
+				}()
 				scanner := bufio.NewScanner(stdout)
 				currentSource := ""
 				for scanner.Scan() {
