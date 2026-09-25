@@ -233,13 +233,11 @@ func (s *MihomoService) GetDialContext() func(ctx context.Context, network, addr
 	}).DialContext
 }
 
-// GetHTTPTransport creates an *http.Transport tailored for communicating with Mihomo API.
+// GetHTTPTransport returns the shared *http.Transport for the Mihomo API — the
+// one behind GetHTTPClient. A fresh transport per request would leave its
+// keep-alive connections open and pile up sockets under UI polling.
 func (s *MihomoService) GetHTTPTransport() *http.Transport {
-	return &http.Transport{
-		DialContext:           s.GetDialContext(),
-		ResponseHeaderTimeout: 30 * time.Second,
-		IdleConnTimeout:       30 * time.Second,
-	}
+	return s.GetHTTPClient().Transport.(*http.Transport)
 }
 
 // GetHTTPClient returns an *http.Client with 30s timeout using GetHTTPTransport.
@@ -262,6 +260,10 @@ func (s *MihomoService) GetHTTPClient() *http.Client {
 		MaxIdleConnsPerHost:   10,
 	}
 
+	// Контроллер сменил адрес: соединения со старым больше не нужны
+	if s.cachedClient != nil {
+		s.cachedClient.CloseIdleConnections()
+	}
 	s.cachedClient = &http.Client{
 		Transport: transport,
 		Timeout:   30 * time.Second,
@@ -296,12 +298,8 @@ func (s *MihomoService) ProbeAPI(secret string) (reachable bool, authenticated b
 		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 
-	transport := &http.Transport{
-		DialContext:           s.GetDialContext(),
-		ResponseHeaderTimeout: 3 * time.Second,
-	}
 	client := &http.Client{
-		Transport: transport,
+		Transport: s.GetHTTPTransport(),
 		Timeout:   3 * time.Second,
 	}
 
