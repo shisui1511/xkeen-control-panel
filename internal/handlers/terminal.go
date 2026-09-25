@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -61,7 +62,20 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 		rows = 500
 	}
 
-	session, err := a.ptySvc.StartSession(cols, rows)
+	var session *services.PTYSession
+	if r.URL.Query().Get("mode") == "xkeen-install" {
+		var release func()
+		session, release, err = a.startXKeenInstall(r, conn, cols, rows)
+		if release != nil {
+			defer release()
+		}
+		if err != nil && session == nil && release == nil {
+			// Ошибка уже показана в терминале
+			return
+		}
+	} else {
+		session, err = a.ptySvc.StartSession(cols, rows)
+	}
 	if err != nil {
 		if err == services.ErrMaxSessionsReached {
 			_ = conn.WriteJSON(map[string]string{
@@ -134,7 +148,8 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 			case <-stopCh:
 				return
 			case <-session.Done():
-				closeAll()
+				// Соединение закроет читатель вывода: сначала он дочитает
+				// остаток и отправит кадр exit
 				return
 			}
 		}
@@ -159,10 +174,10 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 			if err != nil {
 				var pathErr *os.PathError
-				if errors.Is(err, io.EOF) || errors.Is(err, syscall.EIO) || (errors.As(err, &pathErr) && errors.Is(pathErr.Err, syscall.EIO)) {
+				if errors.Is(err, io.EOF) || errors.Is(err, os.ErrClosed) || errors.Is(err, syscall.EIO) || (errors.As(err, &pathErr) && errors.Is(pathErr.Err, syscall.EIO)) {
 					_ = safeWriteJSON(map[string]interface{}{
 						"type": "exit",
-						"code": 0,
+						"code": session.ExitCode(2 * time.Second),
 					})
 				}
 				return
@@ -221,4 +236,54 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// startXKeenInstall скачивает официальный установщик XKeen и запускает его в
+// PTY вместо оболочки. Ход подготовки выводится в терминал. Если session и
+// release равны nil при ошибке — сообщение уже отправлено клиенту.
+func (a *API) startXKeenInstall(r *http.Request, conn *websocket.Conn, cols, rows int) (*services.PTYSession, func(), error) {
+	notify := func(color, msg string) {
+		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b["+color+"m"+msg+"\x1b[0m\r\n"))
+	}
+	fail := func(msg string) (*services.PTYSession, func(), error) {
+		notify("31", msg)
+		_ = conn.WriteJSON(map[string]interface{}{"type": "exit", "code": 1})
+		return nil, nil, errors.New(msg)
+	}
+
+	if a.xkeenInstaller == nil {
+		return fail("XKeen installer is unavailable")
+	}
+	channel := r.URL.Query().Get("channel")
+	if _, ok := services.XKeenChannels[channel]; !ok {
+		return fail("Unknown XKeen channel: " + channel)
+	}
+	release, err := a.xkeenInstaller.Acquire()
+	if err != nil {
+		return fail(err.Error())
+	}
+
+	notify("36", "Downloading XKeen installer...")
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	scriptPath, source, err := a.xkeenInstaller.Download(ctx)
+	cancel()
+	if err != nil {
+		release()
+		return fail(err.Error())
+	}
+	notify("32", "Installer downloaded: "+source)
+
+	argv, err := a.xkeenInstaller.Command(scriptPath, channel)
+	if err != nil {
+		_ = os.Remove(scriptPath)
+		release()
+		return fail(err.Error())
+	}
+	session, err := a.ptySvc.StartCommand(cols, rows, argv)
+	if err != nil {
+		_ = os.Remove(scriptPath)
+		// Ошибку старта (в т.ч. лимит сессий) обработает общий код
+		return nil, release, err
+	}
+	return session, release, nil
 }

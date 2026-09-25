@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -32,6 +33,12 @@ type PTYSession struct {
 	closeOnce sync.Once
 	done      chan struct{}
 	service   *PTYService
+	// exited закрывается после Wait процесса; exitCode читается только после него
+	exited   chan struct{}
+	exitCode int
+	// drained закрывается, когда Read вернул ошибку (вывод дочитан до EIO)
+	drained     chan struct{}
+	drainedOnce sync.Once
 }
 
 // PTYService manages interactive PTY sessions
@@ -97,14 +104,8 @@ func (s *PTYService) buildEnv() []string {
 	return env
 }
 
-// StartSession initiates a new PTY process with the requested window size
-func (s *PTYService) StartSession(cols, rows int) (*PTYSession, error) {
-	s.mu.Lock()
-	if len(s.sessions) >= s.maxSessions {
-		s.mu.Unlock()
-		return nil, ErrMaxSessionsReached
-	}
-
+// clampWinsize приводит размер окна к допустимому диапазону.
+func clampWinsize(cols, rows int) *pty.Winsize {
 	var winCols uint16 = 80
 	if cols >= 1 && cols <= 1000 {
 		winCols = uint16(cols)
@@ -118,23 +119,37 @@ func (s *PTYService) StartSession(cols, rows int) (*PTYSession, error) {
 	} else if rows > 500 {
 		winRows = 500
 	}
+	return &pty.Winsize{Rows: winRows, Cols: winCols}
+}
 
+// StartSession initiates a new PTY process with the requested window size
+func (s *PTYService) StartSession(cols, rows int) (*PTYSession, error) {
 	shellPath := s.detectShell()
-	var cmd *exec.Cmd
 	if shellPath != "/bin/sh" {
-		cmd = exec.Command(shellPath, "-l")
-	} else {
-		cmd = exec.Command(shellPath)
+		return s.StartCommand(cols, rows, []string{shellPath, "-l"})
 	}
+	return s.StartCommand(cols, rows, []string{shellPath})
+}
+
+// StartCommand запускает argv в новой PTY-сессии (вместо интерактивной
+// оболочки) — например, интерактивный установщик.
+func (s *PTYService) StartCommand(cols, rows int, argv []string) (*PTYSession, error) {
+	if len(argv) == 0 {
+		return nil, errors.New("empty command")
+	}
+	s.mu.Lock()
+	if len(s.sessions) >= s.maxSessions {
+		s.mu.Unlock()
+		return nil, ErrMaxSessionsReached
+	}
+
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = s.buildEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
 	}
 
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
-		Rows: winRows,
-		Cols: winCols,
-	})
+	ptmx, err := pty.StartWithSize(cmd, clampWinsize(cols, rows))
 	if err != nil {
 		s.mu.Unlock()
 		return nil, err
@@ -150,6 +165,8 @@ func (s *PTYService) StartSession(cols, rows int) (*PTYSession, error) {
 		ptmx:    ptmx,
 		done:    make(chan struct{}),
 		service: s,
+		exited:  make(chan struct{}),
+		drained: make(chan struct{}),
 	}
 
 	s.sessions[id] = sess
@@ -158,15 +175,42 @@ func (s *PTYService) StartSession(cols, rows int) (*PTYSession, error) {
 	// Background reaper goroutine to prevent zombie processes
 	go func() {
 		_ = cmd.Wait()
+		sess.exitCode = cmd.ProcessState.ExitCode()
+		close(sess.exited)
+		// Дать читателю забрать остаток вывода: закрытый раньше времени ptmx
+		// теряет последние строки и сообщение о завершении
+		select {
+		case <-sess.drained:
+		case <-time.After(ptyDrainTimeout):
+		}
 		_ = sess.Close()
 	}()
 
 	return sess, nil
 }
 
+// ExitCode ждёт завершения процесса сессии (не дольше wait) и возвращает его
+// код; -1 — процесс ещё работает или убит сигналом.
+func (s *PTYSession) ExitCode(wait time.Duration) int {
+	select {
+	case <-s.exited:
+		return s.exitCode
+	case <-time.After(wait):
+		return -1
+	}
+}
+
+// ptyDrainTimeout — сколько после выхода процесса ждать, пока читатель
+// дочитает вывод, прежде чем закрыть PTY.
+const ptyDrainTimeout = 2 * time.Second
+
 // Read reads output from the PTY master device
 func (s *PTYSession) Read(p []byte) (n int, err error) {
-	return s.ptmx.Read(p)
+	n, err = s.ptmx.Read(p)
+	if err != nil {
+		s.drainedOnce.Do(func() { close(s.drained) })
+	}
+	return n, err
 }
 
 // Write writes input to the PTY master device
@@ -180,20 +224,6 @@ func (s *PTYSession) Resize(cols, rows int) error {
 		return errors.New("invalid terminal dimensions")
 	}
 
-	var winCols uint16 = 80
-	if cols >= 1 && cols <= 1000 {
-		winCols = uint16(cols)
-	} else if cols > 1000 {
-		winCols = 1000
-	}
-
-	var winRows uint16 = 24
-	if rows >= 1 && rows <= 500 {
-		winRows = uint16(rows)
-	} else if rows > 500 {
-		winRows = 500
-	}
-
 	s.service.mu.Lock()
 	defer s.service.mu.Unlock()
 
@@ -201,10 +231,7 @@ func (s *PTYSession) Resize(cols, rows int) error {
 		return errors.New("terminal session closed")
 	}
 
-	return pty.Setsize(s.ptmx, &pty.Winsize{
-		Rows: winRows,
-		Cols: winCols,
-	})
+	return pty.Setsize(s.ptmx, clampWinsize(cols, rows))
 }
 
 // Done returns a channel that is closed when the session terminates
