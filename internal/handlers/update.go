@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,19 +34,34 @@ const (
 )
 
 type UpdateInfo struct {
-	CurrentVersion string `json:"current_version"`
-	LatestVersion  string `json:"latest_version"`
-	HasUpdate      bool   `json:"has_update"`
-	Channel        string `json:"channel"`
-	DownloadURL    string `json:"download_url,omitempty"`
-	Changelog      string `json:"changelog,omitempty"`
+	CurrentVersion string        `json:"current_version"`
+	LatestVersion  string        `json:"latest_version"`
+	HasUpdate      bool          `json:"has_update"`
+	Channel        string        `json:"channel"`
+	DownloadURL    string        `json:"download_url,omitempty"`
+	DownloadSize   int64         `json:"download_size,omitempty"` // байт, .gz если есть
+	Prerelease     bool          `json:"prerelease"`
+	PublishedAt    string        `json:"published_at,omitempty"`
+	Changelog      string        `json:"changelog,omitempty"`
+	Releases       []ReleaseNote `json:"releases,omitempty"` // от новой версии к текущей
+}
+
+// ReleaseNote — описание одного релиза между текущей и доступной версией.
+type ReleaseNote struct {
+	Version     string `json:"version"`
+	Prerelease  bool   `json:"prerelease"`
+	PublishedAt string `json:"published_at,omitempty"`
+	URL         string `json:"url,omitempty"`
+	Body        string `json:"body"`
 }
 
 type UpdateStatus struct {
-	Status    string `json:"status"` // idle, checking, downloading, installing, restarting, done, failed
-	Message   string `json:"message"`
-	Progress  int    `json:"progress"` // 0-100
-	Timestamp int64  `json:"timestamp"`
+	Status     string `json:"status"` // idle, checking, downloading, installing, restarting, restoring, done, failed
+	Message    string `json:"message"`
+	Progress   int    `json:"progress"` // 0-100
+	Downloaded int64  `json:"downloaded,omitempty"`
+	Total      int64  `json:"total,omitempty"`
+	Timestamp  int64  `json:"timestamp"`
 }
 
 var (
@@ -77,7 +93,12 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 
 	currentVersion := strings.TrimPrefix(a.srv.GetVersion(), "v")
 
-	info, err := fetchLatestRelease(channel)
+	releases, err := fetchReleases()
+	if err != nil {
+		JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	info, err := pickLatestRelease(releases, channel)
 	if err != nil {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -85,16 +106,13 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 
 	info.CurrentVersion = currentVersion
 	info.Channel = channel
-
 	info.HasUpdate = updateAvailable(info.LatestVersion, currentVersion)
 
 	if info.HasUpdate {
-		arch := runtime.GOARCH
-		if arch == "mipsle" || arch == "mipsel" {
-			arch = "mipsle"
-		}
-		info.DownloadURL = fmt.Sprintf("%s/v%s/xcp_v%s_%s",
-			githubDownloadURL, info.LatestVersion, info.LatestVersion, arch)
+		binaryName := fmt.Sprintf("xcp_v%s_%s", info.LatestVersion, releaseArch())
+		info.DownloadURL = fmt.Sprintf("%s/v%s/%s", githubDownloadURL, info.LatestVersion, binaryName)
+		info.DownloadSize = releaseAssetSize(releases, info.LatestVersion, binaryName)
+		info.Releases = releaseNotesBetween(releases, channel, currentVersion, info.LatestVersion)
 	}
 
 	JSONSuccess(w, info)
@@ -117,8 +135,7 @@ func (a *API) UpdateChangelog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(changelog))
+	JSONSuccess(w, map[string]string{"changelog": changelog})
 }
 
 func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
@@ -164,26 +181,23 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Find latest backup by modification time (not by filename)
-	backups, err := os.ReadDir(backupDir)
-	if err != nil || len(backups) == 0 {
-		JSONError(w, http.StatusNotFound, "No backup found")
+	if st := getUpdateState(); st.Status != "idle" && st.Status != "failed" && st.Status != "done" {
+		JSONError(w, http.StatusConflict, "Update already in progress")
 		return
 	}
 
-	var latestBackup string
-	var latestModTime time.Time
-	for _, entry := range backups {
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(latestModTime) {
-			latestModTime = info.ModTime()
-			latestBackup = filepath.Join(backupDir, entry.Name())
+	// Тело необязательно: {"backup": "xcp.bak.<unix>[.<версия>]"}, без него — самая новая копия
+	var req struct {
+		Backup string `json:"backup"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			JSONError(w, http.StatusBadRequest, "invalid request body")
+			return
 		}
 	}
-	if latestBackup == "" {
+	latestBackup, err := resolveBackup(backupDir, req.Backup)
+	if err != nil {
 		JSONError(w, http.StatusNotFound, "No backup found")
 		return
 	}
@@ -393,17 +407,13 @@ func (a *API) performUpdate(channel string) {
 		Message:  "Downloading update...",
 	})
 
-	arch := runtime.GOARCH
-	if arch == "mipsle" || arch == "mipsel" {
-		arch = "mipsle"
-	}
-
+	arch := releaseArch()
 	downloadURL := fmt.Sprintf("%s/v%s/xcp_v%s_%s",
 		githubDownloadURL, info.LatestVersion, info.LatestVersion, arch)
 
 	// Download to the same directory as the binary to avoid cross-device rename
 	tempFile := filepath.Join(filepath.Dir(binPath), "xcp.new")
-	if err := downloadBinary(downloadURL, tempFile); err != nil {
+	if err := downloadBinary(downloadURL, tempFile, reportDownloadProgress); err != nil {
 		setUpdateState(UpdateStatus{
 			Status:    "failed",
 			Message:   "Download failed: " + err.Error(),
@@ -443,7 +453,7 @@ func (a *API) performUpdate(channel string) {
 	backupDir := filepath.Join(a.cfg.DataDir, "backup")
 	_ = os.MkdirAll(backupDir, 0755)
 
-	backupPath := filepath.Join(backupDir, fmt.Sprintf("xcp.bak.%d", time.Now().Unix()))
+	backupPath := filepath.Join(backupDir, backupFileName(time.Now(), currentVersion))
 	if err := copyFile(binPath, backupPath); err != nil {
 		setUpdateState(UpdateStatus{
 			Status:    "failed",
@@ -677,25 +687,100 @@ func compareSemver(a, b string) int {
 }
 
 type githubRelease struct {
-	TagName    string `json:"tag_name"`
-	Prerelease bool   `json:"prerelease"`
-	Body       string `json:"body"`
+	TagName     string `json:"tag_name"`
+	Prerelease  bool   `json:"prerelease"`
+	Body        string `json:"body"`
+	PublishedAt string `json:"published_at"`
+	HTMLURL     string `json:"html_url"`
+	Assets      []struct {
+		Name string `json:"name"`
+		Size int64  `json:"size"`
+	} `json:"assets"`
 }
 
 func fetchLatestRelease(channel string) (*UpdateInfo, error) {
+	releases, err := fetchReleases()
+	if err != nil {
+		return nil, err
+	}
+	return pickLatestRelease(releases, channel)
+}
+
+// fetchReleases возвращает последние релизы: 30 хватает на описание изменений
+// при пропуске нескольких версий.
+func fetchReleases() ([]githubRelease, error) {
 	client := utils.SafeHTTPClient(15 * time.Second)
-	resp, err := client.Get(githubAPIReleases + "?per_page=10")
+	resp, err := client.Get(githubAPIReleases + "?per_page=30")
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API: %s", resp.Status)
+	}
 
 	var releases []githubRelease
 	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 		return nil, err
 	}
+	return releases, nil
+}
 
-	return pickLatestRelease(releases, channel)
+// releaseArch — суффикс архитектуры в именах ассетов релиза.
+func releaseArch() string {
+	if runtime.GOARCH == "mipsle" || runtime.GOARCH == "mipsel" {
+		return "mipsle"
+	}
+	return runtime.GOARCH
+}
+
+// releaseAssetSize — размер того, что панель скачает: .gz, если он есть в релизе.
+func releaseAssetSize(releases []githubRelease, version, binaryName string) int64 {
+	for _, rel := range releases {
+		if strings.TrimPrefix(rel.TagName, "v") != version {
+			continue
+		}
+		var plain int64
+		for _, a := range rel.Assets {
+			switch a.Name {
+			case binaryName + ".gz":
+				return a.Size
+			case binaryName:
+				plain = a.Size
+			}
+		}
+		return plain
+	}
+	return 0
+}
+
+// releaseNotesBetween — релизы канала новее current и не новее latest, от новых к старым.
+func releaseNotesBetween(releases []githubRelease, channel, current, latest string) []ReleaseNote {
+	const maxNotes = 15
+	var notes []ReleaseNote
+	for _, rel := range releases {
+		if rel.Prerelease && channel != "beta" {
+			continue
+		}
+		v := strings.TrimPrefix(rel.TagName, "v")
+		if compareSemver(v, current) <= 0 || compareSemver(v, latest) > 0 {
+			continue
+		}
+		notes = append(notes, ReleaseNote{
+			Version:     v,
+			Prerelease:  rel.Prerelease,
+			PublishedAt: rel.PublishedAt,
+			URL:         rel.HTMLURL,
+			Body:        rel.Body,
+		})
+	}
+	sort.SliceStable(notes, func(i, j int) bool {
+		return compareSemver(notes[i].Version, notes[j].Version) > 0
+	})
+	if len(notes) > maxNotes {
+		notes = notes[:maxNotes]
+	}
+	return notes
 }
 
 // pickLatestRelease выбирает самый новый по semver релиз канала: GitHub сортирует
@@ -720,6 +805,8 @@ func pickLatestRelease(releases []githubRelease, channel string) (*UpdateInfo, e
 	return &UpdateInfo{
 		LatestVersion: strings.TrimPrefix(best.TagName, "v"),
 		Changelog:     best.Body,
+		Prerelease:    best.Prerelease,
+		PublishedAt:   best.PublishedAt,
 	}, nil
 }
 
@@ -782,26 +869,64 @@ func fetchChangelog(version string) (string, error) {
 
 // maxBinarySize ограничивает распакованный бинарник: повреждённый или подменённый
 // .gz не должен заполнить диск роутера до проверки SHA-256.
-const maxBinarySize = 128 << 20
+var maxBinarySize int64 = 128 << 20 // переменная: тест подменяет лимит
 
 var errDownloadNotFound = errors.New("not found")
 
 // downloadBinary скачивает сжатый ассет url+".gz" и распаковывает его в destPath.
 // Релизы, опубликованные до появления .gz, отдают только несжатый бинарник.
-func downloadBinary(url, destPath string) error {
-	return downloadBinaryWithClient(utils.SafeHTTPClient(300*time.Second), url, destPath)
+func downloadBinary(url, destPath string, progress progressFunc) error {
+	return downloadBinaryWithClient(utils.SafeHTTPClient(300*time.Second), url, destPath, progress)
 }
 
-func downloadBinaryWithClient(client *http.Client, url, destPath string) error {
-	err := downloadTo(client, url+".gz", destPath, true)
+func downloadBinaryWithClient(client *http.Client, url, destPath string, progress progressFunc) error {
+	err := downloadTo(client, url+".gz", destPath, true, progress)
 	if errors.Is(err, errDownloadNotFound) {
 		log.Printf("Update: %s.gz not found, downloading uncompressed binary", url)
-		err = downloadTo(client, url, destPath, false)
+		err = downloadTo(client, url, destPath, false, progress)
 	}
 	return err
 }
 
-func downloadTo(client *http.Client, url, destPath string, gzipped bool) error {
+// progressFunc получает число скачанных байт (сжатых, если это .gz) и общий
+// размер из Content-Length (0 — неизвестен).
+type progressFunc func(done, total int64)
+
+// progressReader сообщает о прогрессе не чаще, чем раз в progressStep байт.
+type progressReader struct {
+	r        io.Reader
+	done     int64
+	reported int64
+	total    int64
+	fn       progressFunc
+}
+
+const progressStep = 256 << 10
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	p.done += int64(n)
+	if p.done-p.reported >= progressStep || (err == io.EOF && p.done != p.reported) {
+		p.reported = p.done
+		p.fn(p.done, p.total)
+	}
+	return n, err
+}
+
+// reportDownloadProgress переводит байты в этап «скачивание» (30–55%).
+func reportDownloadProgress(done, total int64) {
+	st := getUpdateState()
+	st.Status = "downloading"
+	st.Downloaded = done
+	st.Total = total
+	st.Progress = 30
+	if total > 0 {
+		st.Progress = 30 + int(25*done/total)
+	}
+	setUpdateState(st)
+}
+
+func downloadTo(client *http.Client, url, destPath string, gzipped bool, progress progressFunc) error {
 	resp, err := client.Get(url)
 	if err != nil {
 		return err
@@ -816,8 +941,11 @@ func downloadTo(client *http.Client, url, destPath string, gzipped bool) error {
 	}
 
 	var body io.Reader = resp.Body
+	if progress != nil {
+		body = &progressReader{r: resp.Body, total: max(resp.ContentLength, 0), fn: progress}
+	}
 	if gzipped {
-		zr, err := gzip.NewReader(resp.Body)
+		zr, err := gzip.NewReader(body)
 		if err != nil {
 			return fmt.Errorf("gzip: %w", err)
 		}

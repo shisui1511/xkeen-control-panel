@@ -292,6 +292,7 @@ func main() {
 	srv.HandleProtected("/api/update/changelog", api.UpdateChangelog)
 	srv.HandleProtected("/api/update/install", api.UpdateInstall)
 	srv.HandleProtected("/api/update/rollback", api.UpdateRollback)
+	srv.HandleProtected("/api/update/backups", api.UpdateBackups)
 	srv.HandleProtected("/api/update/status", api.UpdateStatusEndpoint)
 	srv.HandleProtected("/api/update/events", api.UpdateEventsSSE)
 	srv.HandleProtected("/api/update/channel", api.UpdateChannelHandler)
