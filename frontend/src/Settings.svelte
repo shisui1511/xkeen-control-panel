@@ -42,9 +42,24 @@
 
   let version = $state('...');
   let langs = getAvailableLangs();
-  let activeTab = $state<'general' | 'updates' | 'security' | 'connection' | 'backups' | 'about'>(
-    'general'
-  );
+  type SettingsTab = 'general' | 'updates' | 'security' | 'connection' | 'backups' | 'about';
+  const SETTINGS_TABS: SettingsTab[] = [
+    'general',
+    'updates',
+    'security',
+    'connection',
+    'backups',
+    'about'
+  ];
+
+  // #/settings?tab=updates — ссылка из уведомления об обновлении
+  function tabFromHash(): SettingsTab {
+    const query = window.location.hash.split('?')[1] ?? '';
+    const tab = new URLSearchParams(query).get('tab') as SettingsTab | null;
+    return tab && SETTINGS_TABS.includes(tab) ? tab : 'general';
+  }
+
+  let activeTab = $state<SettingsTab>(tabFromHash());
 
   const settingsTabItems = $derived<TabItem[]>([
     { value: 'general', label: $t('settings.tab_general') },
