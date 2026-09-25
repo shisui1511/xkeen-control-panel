@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -694,5 +695,76 @@ func TestChangePassword_RateLimited(t *testing.T) {
 	// Даже верный пароль не принимается, пока действует блокировка
 	if err := svc.ChangePassword("10.0.0.5", "", "oldpass123", "newpass456"); !errors.Is(err, ErrTooManyAttempts) {
 		t.Errorf("lockout must apply to the correct password too, got %v", err)
+	}
+}
+
+// TestChangePassword_ConcurrentMemoryMatchesDisk: при параллельной смене
+// пароля в памяти остаётся тот же хеш, что последним записан на диск.
+func TestChangePassword_ConcurrentMemoryMatchesDisk(t *testing.T) {
+	var diskMu sync.Mutex
+	var disk string
+	svc := NewAuthService("", false, 100, time.Minute, func(h string) error {
+		time.Sleep(5 * time.Millisecond) // окно для гонки между записью и применением
+		diskMu.Lock()
+		disk = h
+		diskMu.Unlock()
+		return nil
+	})
+	defer svc.Stop()
+	hash, err := svc.HashPassword("oldpass123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetPasswordHash(hash)
+
+	var wg sync.WaitGroup
+	for _, pw := range []string{"newpassAAA", "newpassBBB"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = svc.ChangePassword("127.0.0.1", "", "oldpass123", pw)
+		}()
+	}
+	wg.Wait()
+
+	diskMu.Lock()
+	defer diskMu.Unlock()
+	if got := svc.GetPasswordHash(); got != disk {
+		t.Fatal("password in memory differs from the one saved on disk")
+	}
+}
+
+// TestHandleSetup_ConcurrentOnlyOneWins: из параллельных первичных настроек
+// проходит одна, вторая не перезаписывает уже заданный пароль.
+func TestHandleSetup_ConcurrentOnlyOneWins(t *testing.T) {
+	svc := NewAuthService("", false, 100, time.Minute, func(string) error {
+		time.Sleep(5 * time.Millisecond)
+		return nil
+	})
+	defer svc.Stop()
+
+	codes := make(chan int, 2)
+	var wg sync.WaitGroup
+	for _, pw := range []string{"firstpass1", "secondpass2"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body, _ := json.Marshal(map[string]string{"password": pw})
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(body))
+			rr := httptest.NewRecorder()
+			svc.HandleSetup(rr, req)
+			codes <- rr.Code
+		}()
+	}
+	wg.Wait()
+	close(codes)
+	ok := 0
+	for c := range codes {
+		if c == http.StatusOK {
+			ok++
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d setups succeeded, want exactly 1", ok)
 	}
 }
