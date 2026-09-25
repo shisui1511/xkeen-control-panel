@@ -610,20 +610,8 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var kernelType string
-	filename := filepath.Base(cleanPath)
-	ext := filepath.Ext(cleanPath)
-
-	if strings.Contains(cleanPath, "xray") || ext == ".json" {
-		kernelType = "xray"
-	} else if strings.Contains(cleanPath, "mihomo") || ext == ".yaml" || ext == ".yml" {
-		kernelType = "mihomo"
-	} else {
-		kernelType = "xray"
-	}
-
-	binaryPath := a.getBinaryPath(kernelType)
-	if binaryPath == "" {
+	kernelType := detectKernelFromPath(cleanPath)
+	if a.getBinaryPath(kernelType) == "" {
 		a.jsonResponse(w, ConfigValidateResponse{
 			Valid: false,
 			Error: "validator binary for " + kernelType + " not found on the system",
@@ -631,41 +619,27 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tempDir, err := os.MkdirTemp("", "xcp-val-*")
-	if err != nil {
-		a.errorResponse(w, "failed to create validation temp dir: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer os.RemoveAll(tempDir)
-
-	origDir := filepath.Dir(cleanPath)
-	if err := copyDirConfigs(origDir, tempDir, filename, req.Content, a.cfg.AllowedRoots); err != nil {
-		a.errorResponse(w, "failed to prepare validation files: "+err.Error(), http.StatusInternalServerError)
+	// Отключение клиента прерывает ручную проверку: результат уже некому показать
+	ctx, cancel := context.WithTimeout(r.Context(), configValidateTimeout)
+	defer cancel()
+	out, err := a.runConfigValidator(ctx, cleanPath, req.Content)
+	if err == nil {
+		a.jsonResponse(w, ConfigValidateResponse{Valid: true})
 		return
 	}
 
-	var cmd *exec.Cmd
-	if kernelType == "xray" {
-		cmd = exec.Command(binaryPath, "-test", "-confdir", tempDir)
-		setupXrayCmdEnv(cmd, tempDir)
-	} else {
-		cmd = exec.Command(binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, filename))
-	}
-
-	out, err := cmd.CombinedOutput()
-	outputStr := string(out)
-
-	if err != nil {
-		a.jsonResponse(w, ConfigValidateResponse{
-			Valid: false,
-			Error: strings.TrimSpace(outputStr),
-		})
+	msg := strings.TrimSpace(out)
+	var exitErr *exec.ExitError
+	switch {
+	case ctx.Err() != nil:
+		msg = fmt.Sprintf(a.t(r, "config.validation_timeout"), int(configValidateTimeout.Seconds()))
+	case !errors.As(err, &exitErr):
+		a.errorResponse(w, "failed to run validator: "+err.Error(), http.StatusInternalServerError)
 		return
+	case msg == "":
+		msg = err.Error()
 	}
-
-	a.jsonResponse(w, ConfigValidateResponse{
-		Valid: true,
-	})
+	a.jsonResponse(w, ConfigValidateResponse{Valid: false, Error: msg})
 }
 
 func detectKernelFromPath(cleanPath string) string {
@@ -683,42 +657,50 @@ func detectKernelFromPath(cleanPath string) string {
 // На MIPS с большими geosite/geoip проверка идёт дольше прежних 5 с.
 var configValidateTimeout = 30 * time.Second
 
-func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data []byte, backupExists bool, backupData []byte) string {
+// runConfigValidator проверяет content как файл cleanPath вместе с соседними
+// конфигами каталога: `xray -test` / `mihomo -t` во временной копии.
+// Ошибка без *exec.ExitError — валидатор не запустился или не успел.
+func (a *API) runConfigValidator(ctx context.Context, cleanPath, content string) (string, error) {
 	kernelType := detectKernelFromPath(cleanPath)
-
 	binaryPath := a.getBinaryPath(kernelType)
 	if binaryPath == "" {
-		return ""
+		return "", fmt.Errorf("validator binary for %s not found", kernelType)
 	}
 
-	tempDir, err := os.MkdirTemp("", "xcp-save-val-*")
+	tempDir, err := os.MkdirTemp("", "xcp-val-*")
 	if err != nil {
-		return ""
+		return "", err
 	}
 	defer os.RemoveAll(tempDir)
 
-	origDir := filepath.Dir(cleanPath)
 	filename := filepath.Base(cleanPath)
-	if err := copyDirConfigs(origDir, tempDir, filename, string(data), a.cfg.AllowedRoots); err != nil {
-		return ""
+	if err := copyDirConfigs(filepath.Dir(cleanPath), tempDir, filename, content, a.cfg.AllowedRoots); err != nil {
+		return "", err
 	}
 
 	var cmd *exec.Cmd
-	// Отключение клиента не должно обрывать проверку и откатывать сохранённый
-	// конфиг: контекст запроса используется без отмены
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), configValidateTimeout)
-	defer cancel()
-
 	if kernelType == "xray" {
 		cmd = exec.CommandContext(ctx, binaryPath, "-test", "-confdir", tempDir)
 		setupXrayCmdEnv(cmd, tempDir)
 	} else {
 		cmd = exec.CommandContext(ctx, binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, filename))
 	}
-
 	// После таймаута не ждать дочерние процессы валидатора, держащие вывод
 	cmd.WaitDelay = 2 * time.Second
 	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data []byte, backupExists bool, backupData []byte) string {
+	if a.getBinaryPath(detectKernelFromPath(cleanPath)) == "" {
+		return ""
+	}
+
+	// Отключение клиента не должно обрывать проверку и откатывать сохранённый
+	// конфиг: контекст запроса используется без отмены
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), configValidateTimeout)
+	defer cancel()
+	out, err := a.runConfigValidator(ctx, cleanPath, string(data))
 	if err == nil {
 		return ""
 	}
@@ -741,7 +723,7 @@ func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data 
 
 	// Пустое сообщение обработчик принял бы за успешное сохранение, хотя файл
 	// уже откачен
-	msg := strings.TrimSpace(string(out))
+	msg := strings.TrimSpace(out)
 	if timedOut {
 		msg = fmt.Sprintf(a.t(r, "config.validation_timeout"), int(configValidateTimeout.Seconds()))
 	}

@@ -824,3 +824,44 @@ func TestValidateConfigAndRollback_ClientGone(t *testing.T) {
 		t.Errorf("valid config must stay saved, got %q", got)
 	}
 }
+
+// TestConfigValidate_Timeout: ручная проверка с зависшим валидатором
+// укладывается в таймаут и сообщает о нём, а не висит вместе с процессом.
+func TestConfigValidate_Timeout(t *testing.T) {
+	api, cfgPath := fakeValidatorAPI(t, "sleep 5")
+	api.pathVal = utils.NewPathValidator(api.cfg.AllowedRoots)
+	orig := configValidateTimeout
+	configValidateTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { configValidateTimeout = orig })
+
+	body := `{"path":"` + cfgPath + `","content":"new"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	start := time.Now()
+	api.ConfigValidate(rr, req)
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Fatalf("validate returned after %v: validator not bounded by timeout", elapsed)
+	}
+	var resp ConfigValidateResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rr.Body.String())
+	}
+	if resp.Valid || resp.Error == "" {
+		t.Errorf("timeout must be reported as invalid with a message, got %+v", resp)
+	}
+}
+
+func TestConfigValidate_Rejected(t *testing.T) {
+	api, cfgPath := fakeValidatorAPI(t, "echo 'bad config'; exit 1")
+	api.pathVal = utils.NewPathValidator(api.cfg.AllowedRoots)
+	body := `{"path":"` + cfgPath + `","content":"new"}`
+	rr := httptest.NewRecorder()
+	api.ConfigValidate(rr, httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(body)))
+	var resp ConfigValidateResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Valid || resp.Error != "bad config" {
+		t.Errorf("got %+v, want validator output", resp)
+	}
+}
