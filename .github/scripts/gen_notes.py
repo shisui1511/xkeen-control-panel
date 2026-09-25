@@ -3,7 +3,8 @@
 Release notes generator for xkeen-control-panel.
 
 Reads environment variables set by the GitHub Actions workflow:
-  MODE          - "prerelease" or "stable"
+  MODE          - "prerelease" (rolling dev), "rc" (release candidate) or "stable"
+  SOAK_HOURS    - how long a release candidate waits before promotion (rc only)
   GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_ACTOR
   VERSION       - e.g. "v0.12.0" or "v0.13.0-dev"
   COMMIT_COUNT  - number of commits since last stable (pre-release only)
@@ -186,6 +187,19 @@ sha256sum -c xcp_{version}_arm64.sha256
 """
 
 
+def rc_notes(version, prev_tag):
+    repo_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}"
+    base = version.split("-")[0]
+    soak = os.environ.get("SOAK_HOURS", "24")
+    banner = (
+        f"> 🧪 **Release candidate {base}** — доступен в канале обновлений beta.\n"
+        f"> Если за {soak} ч не выйдет новый RC, этот же коммит автоматически станет "
+        f"стабильным релизом **{base}**.\n"
+        f"> Нашли проблему — [создайте issue]({repo_url}/issues/new).\n\n"
+    )
+    return banner + stable_notes(version, prev_tag)
+
+
 def main():
     mode = os.environ.get("MODE", "stable")
     version = os.environ["VERSION"]
@@ -197,7 +211,11 @@ def main():
 
     stable_tags = get_stable_tags()
 
-    if mode == "prerelease":
+    if mode == "rc":
+        base_version = version.split("-")[0]
+        prev_tag = next((t for t in reversed(stable_tags) if t != base_version), "")
+        notes = rc_notes(version, prev_tag)
+    elif mode == "prerelease":
         base_version = version.split("-")[0]
         prev_tag = next((t for t in reversed(stable_tags) if t != version and t != base_version), "")
         notes = prerelease_notes(version, commit_count, pr_number, prev_tag, short_sha, full_sha)

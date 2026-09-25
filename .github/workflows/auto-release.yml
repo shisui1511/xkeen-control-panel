@@ -1,0 +1,52 @@
+name: Auto Release
+
+# Выпуск без участия человека (.github/scripts/auto_release.sh):
+#   feat / ломающие изменения → release candidate vX.Y.0-rc.N в канале beta;
+#   RC без замены SOAK_HOURS (vars.RC_SOAK_HOURS, по умолчанию 24) → stable из его коммита;
+#   только fix/perf/refactor/revert → stable patch сразу;
+#   chore/docs/test/ci → ничего.
+# Решение принимается, когда все push-прогоны коммита main зелёные: запускается по
+# завершении каждого из них, последний видит полную картину. Cron добирает выдержку RC.
+on:
+  workflow_run:
+    workflows: ["Build and Release", "E2E Full", "CodeQL"]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Только показать решение, ничего не выпускать"
+        type: boolean
+        default: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    name: Decide and release
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'push'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOAK_HOURS: ${{ vars.RC_SOAK_HOURS || '24' }}
+          DRY_RUN: ${{ inputs.dry_run == true && '1' || '0' }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: bash .github/scripts/auto_release.sh run

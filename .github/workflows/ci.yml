@@ -376,6 +376,7 @@ jobs:
       - name: Test version script
         run: |
           sh scripts/version_test.sh
+          bash .github/scripts/auto_release_test.sh
           echo "Build version: $(sh scripts/version.sh), next release: $(sh scripts/version.sh --next)"
 
       - name: Check commit messages
