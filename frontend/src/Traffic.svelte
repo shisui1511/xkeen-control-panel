@@ -643,7 +643,7 @@
     title={$t('traffic.title')}
     subtitle={$t('traffic.realtime')}
     breadcrumbs={[
-      { label: $t('nav.group_observability'), tab: 'dashboard' },
+      { label: $t('nav.group_observability') },
       { label: $t('traffic.title') }
     ]}
     {onSwitchTab}

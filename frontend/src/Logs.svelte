@@ -549,7 +549,6 @@
     subtitle={$t('logs.h1_sub')}
     breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('nav.logs') }]}
     {onSwitchTab}
-    hideHome={true}
   >
     <SegmentedControl items={viewItems} bind:value={logsView} ariaLabel={$t('xlog.view_label')} />
     <!-- Flash Health Badge -->

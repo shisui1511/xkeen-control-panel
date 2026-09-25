@@ -420,7 +420,6 @@
     subtitle={$t('smartproxy.subtitle')}
     breadcrumbs={[{ label: $t('nav.group_proxy_subs') }, { label: $t('smartproxy.title') }]}
     {onSwitchTab}
-    hideHome={true}
   >
     <Button variant="primary" onclick={startCreate}>
       <Icon name="add" size={14} />

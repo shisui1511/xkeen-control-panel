@@ -658,7 +658,6 @@
     subtitle={$t('svc.h1_sub')}
     breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('nav.services') }]}
     {onSwitchTab}
-    hideHome={true}
   >
     <Button
       variant="secondary"

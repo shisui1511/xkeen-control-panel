@@ -804,7 +804,6 @@
     subtitle={$t('settings.h1_sub')}
     breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('settings.h1') }]}
     {onSwitchTab}
-    hideHome={true}
   />
 
   <Tabs bind:value={activeTab} items={settingsTabItems} ariaLabel={$t('settings.h1')} />

@@ -1151,7 +1151,6 @@
       ...(activeTab === 'constructor' ? [{ label: $t('editor.tab_constructor') }] : [])
     ]}
     {onSwitchTab}
-    hideHome={true}
   >
     <Tabs
       items={editorModeTabItems}

@@ -413,7 +413,6 @@
     subtitle={$t('trafficquotas.subtitle')}
     breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('nav.trafficquotas') }]}
     {onSwitchTab}
-    hideHome={true}
   >
     {#if stats}
       <Button variant="secondary" onclick={clearAlerts}>
