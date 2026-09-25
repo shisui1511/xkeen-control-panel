@@ -444,6 +444,11 @@ func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (str
 	return s.runWithTimeoutArgs(timeout, action)
 }
 
+// Installed сообщает, установлен ли XKeen (бинарник находится в PATH).
+func (s *XKeenService) Installed() bool {
+	return binaryAvailable(s.BinaryPath)
+}
+
 // binaryAvailable resolves a bare name ("xkeen" in config.json) through PATH
 // exactly like exec.Command does; os.Stat would look in the working directory.
 func binaryAvailable(path string) bool {

@@ -254,6 +254,9 @@ func (a *API) startXKeenInstall(r *http.Request, conn *websocket.Conn, cols, row
 	if a.xkeenInstaller == nil {
 		return fail("XKeen installer is unavailable")
 	}
+	if !a.xkeenInstaller.Available() {
+		return fail(services.ErrXKeenNoEntware.Error())
+	}
 	channel := r.URL.Query().Get("channel")
 	if _, ok := services.XKeenChannels[channel]; !ok {
 		return fail("Unknown XKeen channel: " + channel)

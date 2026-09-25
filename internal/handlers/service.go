@@ -16,6 +16,10 @@ type ServiceStatusResponse struct {
 	BinaryPath   string                  `json:"binary_path"`
 	Raw          string                  `json:"raw"`
 	Watchdog     *WatchdogStatusResponse `json:"watchdog,omitempty"`
+	// XKeenInstalled — бинарник XKeen найден; XKeenInstallerAvailable —
+	// панель может установить XKeen (есть Entware)
+	XKeenInstalled          bool `json:"xkeen_installed"`
+	XKeenInstallerAvailable bool `json:"xkeen_installer_available"`
 }
 
 func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
@@ -30,8 +34,10 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := ServiceStatusResponse{
-		BinaryPath: a.cfg.XKeenBinary,
-		Raw:        out,
+		BinaryPath:              a.cfg.XKeenBinary,
+		Raw:                     out,
+		XKeenInstalled:          a.xkeenSvc.Installed(),
+		XKeenInstallerAvailable: a.xkeenInstaller != nil && a.xkeenInstaller.Available(),
 	}
 
 	// Detect which kernel is running and get its PID/Uptime

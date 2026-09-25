@@ -259,6 +259,7 @@ func TestTerminalWebSocket_XKeenInstall(t *testing.T) {
 		Mirrors: []string{""},
 		Client:  installer.Client(),
 		Dir:     t.TempDir(),
+		InitDir: t.TempDir(),
 	})
 
 	out, code := runXKeenInstallWS(t, api, "channel=beta")
@@ -272,5 +273,35 @@ func TestTerminalWebSocket_XKeenInstall(t *testing.T) {
 	_, code = runXKeenInstallWS(t, api, "channel=nightly")
 	if code == 0 {
 		t.Error("unknown channel must fail")
+	}
+}
+
+// TestTerminalWebSocket_XKeenInstallNoEntware: без Entware (ПК разработчика)
+// установщик не скачивается и не запускается.
+func TestTerminalWebSocket_XKeenInstallNoEntware(t *testing.T) {
+	downloaded := false
+	installer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		downloaded = true
+	}))
+	defer installer.Close()
+
+	ptySvc := services.NewPTYService()
+	defer ptySvc.CloseAll()
+	api := &API{cfg: config.Default()}
+	api.SetPTYService(ptySvc)
+	api.SetXKeenInstaller(&services.XKeenInstaller{
+		URL:     installer.URL + "/install.sh",
+		Mirrors: []string{""},
+		Client:  installer.Client(),
+		Dir:     t.TempDir(),
+		InitDir: "/nonexistent/init.d",
+	})
+
+	out, code := runXKeenInstallWS(t, api, "channel=stable")
+	if code == 0 || !strings.Contains(out, "Entware") {
+		t.Errorf("install without Entware must fail with a reason, got %d %q", code, out)
+	}
+	if downloaded {
+		t.Error("installer must not be downloaded without Entware")
 	}
 }

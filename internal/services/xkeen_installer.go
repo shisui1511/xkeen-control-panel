@@ -49,8 +49,20 @@ type XKeenInstaller struct {
 	// Dir — каталог для скачанного install.sh. На роутере это /opt/tmp на
 	// накопителе: /tmp в RAM, а установщик качает в текущий каталог архивы
 	Dir string
+	// InitDir — каталог init-скриптов Entware: без него XKeen не установить
+	// (и установщик не должен запускаться на ПК разработчика)
+	InitDir string
 
 	running sync.Mutex
+}
+
+// ErrXKeenNoEntware — установка невозможна: Entware не найден.
+var ErrXKeenNoEntware = errors.New("Entware not found: XKeen can only be installed on a router with Entware")
+
+// Available сообщает, можно ли ставить XKeen на этой системе.
+func (x *XKeenInstaller) Available() bool {
+	fi, err := os.Stat(x.InitDir)
+	return err == nil && fi.IsDir()
 }
 
 // NewXKeenInstaller создаёт установщик с официальным URL и зеркалами.
@@ -64,6 +76,7 @@ func NewXKeenInstaller() *XKeenInstaller {
 		Mirrors: xkeenInstallerMirrors,
 		Client:  utils.SafeHTTPClient(30 * time.Second),
 		Dir:     dir,
+		InitDir: "/opt/etc/init.d",
 	}
 }
 
