@@ -1,7 +1,6 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -487,14 +486,15 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 	// INVARIANT: no shell interpreter — exec.Command receives the binary path directly,
 	// never via "sh -c", so action cannot trigger shell injection.
 	cmd := exec.Command(s.BinaryPath, args...)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	// Дочерние процессы убитого скрипта держат вывод открытым: без WaitDelay
-	// Wait не вернётся никогда, и горутина с пайпом утекут
-	cmd.WaitDelay = 2 * time.Second
+	// Вывод идёт через собственный пайп: Wait не ждёт фоновое ядро,
+	// унаследовавшее stdout, а ядро не получает SIGPIPE после выхода скрипта
+	out, err := attachScriptOutput(cmd)
+	if err != nil {
+		return "", err
+	}
 
-	err := cmd.Start()
+	err = cmd.Start()
+	out.started()
 	if err != nil {
 		return "", err
 	}
@@ -509,10 +509,8 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 		if cmd.Process != nil {
 			cmd.Process.Kill()
 		}
-		// Буфер читается только после Wait: до этого в него ещё пишет
-		// горутина копирования вывода
 		<-done
-		output := utils.StripANSI(out.String())
+		output := utils.StripANSI(out.snapshot(scriptOutputGrace))
 		isStart := false
 		for _, arg := range args {
 			if strings.Contains(arg, "start") || strings.Contains(arg, "restart") {
@@ -528,7 +526,7 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 		}
 		return output, fmt.Errorf("timeout exceeded")
 	case err := <-done:
-		output := utils.StripANSI(out.String())
+		output := utils.StripANSI(out.snapshot(scriptOutputGrace))
 		isStart := false
 		for _, arg := range args {
 			if strings.Contains(arg, "start") || strings.Contains(arg, "restart") {
