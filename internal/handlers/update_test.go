@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ func TestUpdateState_ConcurrentAccess(t *testing.T) {
 
 // TestSHA256Verification_Mismatch verifies that verifyFileChecksum returns an
 // error when the SHA-256 of the downloaded file does not match the checksum
-// entry in checksums.txt.
+// entry in the checksum file.
 func TestSHA256Verification_Mismatch(t *testing.T) {
 	// Create a temp binary file with known content.
 	tmpDir := t.TempDir()
@@ -71,7 +72,7 @@ func TestSHA256Verification_Mismatch(t *testing.T) {
 
 	binaryName := filepath.Base(binPath)
 
-	// Serve a checksums.txt that contains the wrong hash for our binary.
+	// Serve a checksum file that contains the wrong hash for our binary.
 	checksumBody := fmt.Sprintf("%s  %s\n", wrongHash, binaryName)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -112,22 +113,62 @@ func TestSHA256Verification_Match(t *testing.T) {
 	}
 }
 
-// TestSHA256Verification_404 verifies that verifyFileChecksum gracefully skips
-// verification when checksums.txt is not found (backward compatibility).
-func TestSHA256Verification_404(t *testing.T) {
+// TestSHA256Verification_Unverifiable verifies that an update is refused when
+// the checksum cannot be confirmed: a missing .sha256 asset, a server error or
+// a checksum file without an entry for the binary.
+func TestSHA256Verification_Unverifiable(t *testing.T) {
 	tmpDir := t.TempDir()
-	binPath := filepath.Join(tmpDir, "xkeen-control-panel")
+	binPath := filepath.Join(tmpDir, "xcp_v1.0.0_arm64")
 	if err := os.WriteFile(binPath, []byte("content"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer ts.Close()
+	cases := map[string]http.HandlerFunc{
+		"404": func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNotFound) },
+		"500": func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) },
+		"no entry": func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, "%s  xcp_v1.0.0_mipsle\n", strings.Repeat("a", 64))
+		},
+		"truncated hash": func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "abc  xcp_v1.0.0_arm64\n")
+		},
+	}
+	for name, handler := range cases {
+		t.Run(name, func(t *testing.T) {
+			ts := httptest.NewServer(handler)
+			defer ts.Close()
+			if err := verifyFileChecksumWithClient(binPath, "xcp_v1.0.0_arm64", ts.URL, plainHTTPClient()); err == nil {
+				t.Fatal("expected error when the checksum cannot be verified, got nil")
+			}
+		})
+	}
+}
 
-	if err := verifyFileChecksumWithClient(binPath, "xkeen-control-panel", ts.URL, plainHTTPClient()); err != nil {
-		t.Fatalf("expected nil for 404 checksums (backward compat), got: %v", err)
+// TestSHA256Verification_ReleaseAssetFormat verifies the format CI publishes
+// next to every binary (build.yml: sha256sum xcp_<v>_<arch> > xcp_<v>_<arch>.sha256),
+// including the binary-mode "*name" variant of sha256sum.
+func TestSHA256Verification_ReleaseAssetFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+	binPath := filepath.Join(tmpDir, "xcp.new")
+	content := []byte("release binary")
+	if err := os.WriteFile(binPath, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	hash := strings.ToUpper(hex.EncodeToString(sum[:]))
+
+	for _, line := range []string{
+		hash + "  xcp_v0.29.0-rc.1_arm64\n",
+		hash + " *xcp_v0.29.0-rc.1_arm64\n",
+	} {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, line)
+		}))
+		err := verifyFileChecksumWithClient(binPath, "xcp_v0.29.0-rc.1_arm64", ts.URL, plainHTTPClient())
+		ts.Close()
+		if err != nil {
+			t.Fatalf("line %q: expected nil, got %v", line, err)
+		}
 	}
 }
 
