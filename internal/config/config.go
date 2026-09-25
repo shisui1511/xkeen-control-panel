@@ -30,8 +30,12 @@ type Config struct {
 	HTTPS           HTTPSConfig `json:"https"`
 	MihomoSecret    string      `json:"mihomo_secret"`
 	UpdateChannel   string      `json:"update_channel"` // stable, beta, dev
-	DevMode         bool        `json:"dev_mode"`
-	ConfigPath      string      `json:"-"`
+	// Фоновая проверка обновлений (уведомления) и автоустановка в окно времени
+	UpdateAutoCheck     bool   `json:"update_auto_check"`
+	UpdateAutoInstall   bool   `json:"update_auto_install"`
+	UpdateInstallWindow string `json:"update_install_window"` // "HH:MM-HH:MM", местное время роутера
+	DevMode             bool   `json:"dev_mode"`
+	ConfigPath          string `json:"-"`
 }
 
 // AuthConfig represents the configuration settings for authentication and session management.
@@ -107,7 +111,10 @@ func Default() *Config {
 			CertPath: "",
 			KeyPath:  "",
 		},
-		UpdateChannel: "stable",
+		UpdateChannel:       "stable",
+		UpdateAutoCheck:     true,
+		UpdateAutoInstall:   false,
+		UpdateInstallWindow: "03:00-05:00",
 	}
 }
 

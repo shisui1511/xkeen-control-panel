@@ -293,6 +293,8 @@ func main() {
 	srv.HandleProtected("/api/update/install", api.UpdateInstall)
 	srv.HandleProtected("/api/update/rollback", api.UpdateRollback)
 	srv.HandleProtected("/api/update/backups", api.UpdateBackups)
+	srv.HandleProtected("/api/update/state", api.UpdateStateHandler)
+	srv.HandleProtected("/api/update/settings", api.UpdateSettingsHandler)
 	srv.HandleProtected("/api/update/status", api.UpdateStatusEndpoint)
 	srv.HandleProtected("/api/update/events", api.UpdateEventsSSE)
 	srv.HandleProtected("/api/update/channel", api.UpdateChannelHandler)
@@ -406,6 +408,12 @@ func main() {
 	watchdogSvc.Start()
 	api.SetWatchdogService(watchdogSvc)
 	defer watchdogSvc.Stop()
+
+	// Фоновая проверка обновлений (уведомления) и автоустановка в окно времени
+	updateScheduler := handlers.NewUpdateScheduler(api)
+	updateScheduler.Start()
+	api.SetUpdateScheduler(updateScheduler)
+	defer updateScheduler.Stop()
 
 	// Unified Log Dispatcher (LOGHUB-04, LOGHUB-05, LOGHUB-06)
 	logDir := filepath.Dir(cfg.XCPLogPath)

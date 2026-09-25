@@ -37,6 +37,7 @@ type API struct {
 	xrayAccessLogSvc      *services.XrayAccessLogService
 	trafficQuotaSvc       *services.TrafficQuotaService
 	watchdogSvc           *services.WatchdogService
+	updateScheduler       *UpdateScheduler
 	xrayGRPCSvc           *services.XrayGRPCService
 	datSvc                *services.DATManagerService
 	snapshotSvc           *services.SnapshotService

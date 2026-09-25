@@ -107,6 +107,10 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 	info.CurrentVersion = currentVersion
 	info.Channel = channel
 	info.HasUpdate = updateAvailable(info.LatestVersion, currentVersion)
+	if a.updateScheduler != nil && channel == a.cfg.UpdateChannel {
+		// Ручная проверка обновляет и уведомления
+		a.updateScheduler.Record(channel, currentVersion, info, nil)
+	}
 
 	if info.HasUpdate {
 		binaryName := fmt.Sprintf("xcp_v%s_%s", info.LatestVersion, releaseArch())
@@ -144,26 +148,31 @@ func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	st := getUpdateState()
-	if st.Status != "idle" && st.Status != "failed" {
-		JSONError(w, http.StatusConflict, "Update already in progress")
-		return
-	}
-
 	channel := r.URL.Query().Get("channel")
 	if channel == "" {
 		channel = "stable"
 	}
+	if !a.startUpdate(channel) {
+		JSONError(w, http.StatusConflict, "Update already in progress")
+		return
+	}
+	JSONSuccess(w, getUpdateState())
+}
 
-	// Lock state BEFORE spawning goroutine to prevent race condition
-	st.Status = "checking"
-	st.Progress = 5
-	st.Timestamp = time.Now().Unix()
-	setUpdateState(st)
+// startUpdate запускает обновление, если другое не идёт: проверка и захват
+// состояния — под одной блокировкой, чтобы кнопка и автоустановка не стартовали
+// обновление дважды.
+func (a *API) startUpdate(channel string) bool {
+	updateStateMu.Lock()
+	if updateState.Status != "idle" && updateState.Status != "failed" && updateState.Status != "done" {
+		updateStateMu.Unlock()
+		return false
+	}
+	updateState = UpdateStatus{Status: "checking", Progress: 5, Timestamp: time.Now().Unix()}
+	updateStateMu.Unlock()
 
 	go a.performUpdate(channel)
-
-	JSONSuccess(w, getUpdateState())
+	return true
 }
 
 func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
