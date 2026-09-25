@@ -218,10 +218,11 @@
   /* sidebar stays dark for character */
 
   --fg-primary: #0c2237;
-  --fg-secondary: #5b6f86;
+  --fg-secondary: #4a5d73;
   --text: #0c2237;
-  --text-secondary: #5b6f86;
-  --fg-dim: #8298b0;
+  --text-secondary: #4a5d73;
+  /* 4.5:1 on the page background: 12px labels and hints use this token. */
+  --fg-dim: #5e738a;
   --fg-faint: #b0bccc;
 
   --border: #e1e7ef;
@@ -350,6 +351,12 @@
   --primary: #33393f;
   --accent-hover: #262b30;
   --accent-rgb: 51, 57, 63;
+}
+
+/* The dark-theme --accent-2 is a lighter tint; under white button text in the
+   light theme it drops below 3:1, so the gradient ends on the hover shade. */
+[data-theme='light'] {
+  --accent-2: var(--accent-hover);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -870,7 +877,7 @@ input[type='number'] {
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.12em;
   color: var(--fg-secondary);
   cursor: pointer;
   list-style: none;

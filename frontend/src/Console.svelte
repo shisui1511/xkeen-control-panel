@@ -157,7 +157,6 @@
     subtitle={$t('console.subtitle')}
     breadcrumbs={[{ label: $t('nav.group_tools') }, { label: $t('nav.console') }]}
     {onSwitchTab}
-    hideHome={true}
   />
 
   <!-- Tab Navigation -->

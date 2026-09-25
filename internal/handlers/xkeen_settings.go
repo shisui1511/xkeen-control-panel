@@ -29,6 +29,10 @@ func (a *API) XKeenSettingsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	files, err := a.xkeenSettingsSvc.List()
+	if errors.Is(err, services.ErrXKeenConfigDirMissing) {
+		JSONError(w, http.StatusNotFound, a.t(r, "error.xkeen_not_installed"))
+		return
+	}
 	if err != nil {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return

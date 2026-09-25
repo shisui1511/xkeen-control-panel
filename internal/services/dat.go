@@ -99,7 +99,7 @@ func (s *DATManagerService) SetBinaries(mihomoBin, xrayBin, xrayConfDir string) 
 }
 
 func (s *DATManagerService) List() []DATFile {
-	var files []DATFile
+	files := []DATFile{}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -98,7 +98,7 @@
       const res = await apiFetch('/api/dat/list');
       if (!res.ok) throw new Error('Failed to load DAT files');
 
-      let data: DATFile[] = await res.json();
+      const data: DATFile[] = (await res.json()) ?? [];
       // Sort files: xray first, then mihomo
       files = data.sort((a: DATFile, b: DATFile) => {
         if (a.type !== b.type) return a.type.localeCompare(b.type);
@@ -500,7 +500,6 @@
     subtitle={$t('dat.h1_sub')}
     breadcrumbs={[{ label: $t('nav.group_tools') }, { label: $t('nav.dat') }]}
     {onSwitchTab}
-    hideHome={true}
   >
     <Button variant="secondary" title={$t('dat.geoscan')} onclick={() => (showGeoScanModal = true)}>
       <svg
@@ -782,7 +781,9 @@
   {#if loading && files.length === 0}
     <p class="text-secondary">{$t('app.loading')}</p>
   {:else if files.length === 0}
-    <p class="text-secondary">{$t('dat.no_files')}</p>
+    <div class="card">
+      <EmptyState title={$t('dat.no_files_title')} description={$t('dat.no_files')} />
+    </div>
   {:else}
     <div class="dat-workspace" class:detail-open={selectedFile !== null}>
       <!-- Master Column: Database Catalog -->

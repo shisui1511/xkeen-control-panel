@@ -549,7 +549,6 @@
     subtitle={$t('logs.h1_sub')}
     breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('nav.logs') }]}
     {onSwitchTab}
-    hideHome={true}
   >
     <SegmentedControl items={viewItems} bind:value={logsView} ariaLabel={$t('xlog.view_label')} />
     <!-- Flash Health Badge -->
@@ -1122,11 +1121,7 @@
   .runtime-level-control {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 6px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    gap: 8px;
     font-size: 12px;
   }
 

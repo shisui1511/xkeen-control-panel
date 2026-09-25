@@ -266,7 +266,7 @@
             opacity=".85"
           /></svg
         >
-        <span class="lbl">{$t('nav.group_overview')}</span>
+        <span class="lbl" title={$t('nav.group_overview')}>{$t('nav.group_overview')}</span>
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
@@ -300,7 +300,7 @@
           >
             <path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6Z" />
           </svg>
-          <span class="lbl">{$t('nav.group_proxy_subs')}</span>
+          <span class="lbl" title={$t('nav.group_proxy_subs')}>{$t('nav.group_proxy_subs')}</span>
         </span>
         <span class="nav-group-arrow">▶</span>
       </summary>
@@ -355,7 +355,7 @@
             <circle cx="18" cy="18" r="2.5" />
             <path d="M8.2 7.5C10 10 14 14 15.8 16.5" />
           </svg>
-          <span class="lbl">{$t('nav.group_routing')}</span>
+          <span class="lbl" title={$t('nav.group_routing')}>{$t('nav.group_routing')}</span>
         </span>
         <span class="nav-group-arrow">▶</span>
       </summary>
@@ -396,7 +396,9 @@
         >
           <path d="M3 12h4l2-7 4 14 2-7h6" />
         </svg>
-        <span class="lbl">{$t('nav.group_observability')}</span>
+        <span class="lbl" title={$t('nav.group_observability')}
+          >{$t('nav.group_observability')}</span
+        >
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
@@ -477,7 +479,7 @@
             d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-7 7V21h3.3l7-7a4 4 0 0 0 5.4-5.4l-2.3 2.3-2-2 1-1z"
           /><path d="m17 14 4 4-2 2-4-4" /></svg
         >
-        <span class="lbl">{$t('nav.group_tools')}</span>
+        <span class="lbl" title={$t('nav.group_tools')}>{$t('nav.group_tools')}</span>
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
@@ -537,7 +539,7 @@
             d="M12 2v3M12 19v3M2 12h3M19 12h3M4.5 4.5l2 2M17.5 17.5l2 2M4.5 19.5l2-2M17.5 6.5l2-2"
           />
         </svg>
-        <span class="lbl">{$t('nav.group_system')}</span>
+        <span class="lbl" title={$t('nav.group_system')}>{$t('nav.group_system')}</span>
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>

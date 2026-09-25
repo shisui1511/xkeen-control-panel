@@ -64,6 +64,12 @@
 
   let ws: WebSocket | null = null;
   let connected = $state(false);
+  // Mihomo feeds the chart; while its API is down no samples will ever arrive.
+  let coreOffline = $derived(
+    $capabilities !== null &&
+      $capabilities.active_kernel !== 'xray' &&
+      !$capabilities.mihomo?.reachable
+  );
   let totalUp = $state(0);
   let totalDown = $state(0);
   let sessionUp = $state(0);
@@ -636,20 +642,17 @@
   <PageHeader
     title={$t('traffic.title')}
     subtitle={$t('traffic.realtime')}
-    breadcrumbs={[
-      { label: $t('nav.group_observability'), tab: 'dashboard' },
-      { label: $t('traffic.title') }
-    ]}
+    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('traffic.title') }]}
     {onSwitchTab}
   >
     <span
       class="badge-live-indicator"
-      class:is-live={connected && !isPaused}
+      class:is-live={connected && !coreOffline && !isPaused}
       class:is-paused={isPaused}
-      class:is-offline={!connected}
+      class:is-offline={!connected || coreOffline}
     >
       <span class="live-dot"></span>
-      {#if !connected}
+      {#if !connected || coreOffline}
         {$t('traffic.offline_badge')}
       {:else if isPaused}
         {$t('traffic.paused_badge')}
@@ -815,7 +818,12 @@
     </div>
 
     <div class="chart-area-wrapper">
-      {#if chartData.pointsCount < 2}
+      {#if chartData.pointsCount < 2 && coreOffline}
+        <div class="chart-empty">
+          <span class="chart-empty-title">{$t('traffic.core_offline_title')}</span>
+          <p class="chart-empty-sub">{$t('traffic.core_offline_body')}</p>
+        </div>
+      {:else if chartData.pointsCount < 2}
         <div class="chart-empty">
           <span class="spinner"></span>
           <span class="chart-empty-title">{$t('traffic.waiting')}</span>

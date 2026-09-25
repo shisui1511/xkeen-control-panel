@@ -155,12 +155,12 @@
           <span class="group-count">({filteredXrayFiles.length})</span>
         </div>
         <span class="group-path-wrap">
-          <span class="group-path">{xrayDir}</span>
+          <span class="group-path" title={xrayDir}>{xrayDir}</span>
           <span class="nav-group-arrow">›</span>
         </span>
       </summary>
       <div class="file-list">
-        {#each filteredXrayFiles as file}
+        {#each filteredXrayFiles as file (file.path)}
           {@const fmt = getFormatBadge(file.name)}
           {@const activeConfig = isActiveRunningConfig(file)}
           <button
@@ -196,12 +196,12 @@
           <span class="group-count">({filteredMihomoFiles.length})</span>
         </div>
         <span class="group-path-wrap">
-          <span class="group-path">{mihomoDir}</span>
+          <span class="group-path" title={mihomoDir}>{mihomoDir}</span>
           <span class="nav-group-arrow">›</span>
         </span>
       </summary>
       <div class="file-list">
-        {#each filteredMihomoFiles as file}
+        {#each filteredMihomoFiles as file (file.path)}
           {@const fmt = getFormatBadge(file.name)}
           {@const activeConfig = isActiveRunningConfig(file)}
           <button
@@ -436,6 +436,10 @@
     cursor: pointer;
     user-select: none;
     font-size: 12px;
+    /* .nav-group brings the sidebar's uppercase tracking; directory paths are
+       case-sensitive and must render as-is. */
+    text-transform: none;
+    letter-spacing: normal;
     background: var(--surface-tint);
     transition: background var(--transition-fast);
   }
@@ -465,11 +469,11 @@
     align-items: center;
     gap: 4px;
     font-size: 12px;
-    color: var(--fg-faint);
+    color: var(--fg-dim);
   }
 
   .group-path {
-    max-width: 90px;
+    max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

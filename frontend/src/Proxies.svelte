@@ -8,6 +8,7 @@
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
+  import DownloadIcon from './lib/components/icons/Download.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
   import FloatingProgress from './components/FloatingProgress.svelte';
   import LatencyHistoryPopover from './components/LatencyHistoryPopover.svelte';
@@ -1002,7 +1003,15 @@
   />
 
   {#if activeTab === 'groups'}
-    {#if $capabilities !== null && !$capabilities.mihomo.reachable}
+    {#if $capabilities?.kernels?.mihomo?.installed === false}
+      <EmptyState
+        title={$t('ds.empty.mihomo_missing_title')}
+        description={$t('ds.empty.mihomo_missing_desc')}
+        icon={DownloadIcon}
+        ctaText={$t('ds.empty.mihomo_missing_cta')}
+        oncta={() => onSwitchTab('services')}
+      />
+    {:else if $capabilities !== null && !$capabilities.mihomo.reachable}
       <EmptyState
         title={$t('ds.empty.mihomo_offline_title')}
         description={$capabilities?.active_kernel === 'mihomo'

@@ -158,6 +158,16 @@
     }
   }
 
+  // Backend reports a missing core as the literal "not installed".
+  function kernelVersion(v: string | undefined): string {
+    if (!v || v === 'not installed') return '';
+    return `v${v.replace(/^v/, '')}`;
+  }
+
+  function kernelInstalled(v: string | undefined, name: 'mihomo' | 'xray'): boolean {
+    return !!kernelVersion(v) || !!$capabilities?.kernels?.[name]?.installed;
+  }
+
   function formatAction(action: string): string {
     const map: Record<string, string> = {
       start: $t('svc.log_action_start'),
@@ -660,7 +670,6 @@
     subtitle={$t('svc.h1_sub')}
     breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('nav.services') }]}
     {onSwitchTab}
-    hideHome={true}
   >
     <Button
       variant="secondary"
@@ -761,9 +770,9 @@
           <div class="radio-body k-body">
             <div class="radio-name">
               <span>Mihomo</span>
-              {#if mihomo?.current_version}
+              {#if kernelVersion(mihomo?.current_version)}
                 <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
-                  >v{mihomo.current_version}</span
+                  >{kernelVersion(mihomo?.current_version)}</span
                 >
               {/if}
               {#if activeKernel === 'mihomo'}
@@ -776,7 +785,9 @@
               {:else}
                 {mihomo?.process_status === 'running'
                   ? `${$t('svc.running')} · PID ${mihomo?.pid || xkeenInfo.pid || '—'}`
-                  : $t('svc.stopped')}
+                  : kernelInstalled(mihomo?.current_version, 'mihomo')
+                    ? $t('svc.stopped')
+                    : $t('kernel.status.not_installed')}
               {/if}
             </div>
             {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
@@ -790,7 +801,7 @@
               </a>
             {/if}
           </div>
-          {#if !isRunning}
+          {#if !isRunning && kernelInstalled(mihomo?.current_version, 'mihomo')}
             <button
               type="button"
               class="btn btn-primary btn-sm"
@@ -827,9 +838,9 @@
           <div class="radio-body k-body">
             <div class="radio-name">
               <span>Xray</span>
-              {#if xray?.current_version}
+              {#if kernelVersion(xray?.current_version)}
                 <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
-                  >v{xray.current_version}</span
+                  >{kernelVersion(xray?.current_version)}</span
                 >
               {/if}
               {#if activeKernel === 'xray'}
@@ -842,11 +853,13 @@
               {:else}
                 {xray?.process_status === 'running'
                   ? `${$t('svc.running')} · PID ${xray?.pid || xkeenInfo.pid || '—'}`
-                  : $t('svc.stopped')}
+                  : kernelInstalled(xray?.current_version, 'xray')
+                    ? $t('svc.stopped')
+                    : $t('kernel.status.not_installed')}
               {/if}
             </div>
           </div>
-          {#if !isRunning}
+          {#if !isRunning && kernelInstalled(xray?.current_version, 'xray')}
             <button
               type="button"
               class="btn btn-primary btn-sm"
@@ -1088,7 +1101,7 @@
               {#if !kernelsLoaded}
                 <Skeleton type="text-line" width="70px" />
               {:else}
-                <span>v{mihomo?.current_version || '—'}</span>
+                <span>{kernelVersion(mihomo?.current_version) || '—'}</span>
                 {#if mihomo?.status === 'failed'}
                   <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
                 {:else if !mihomo?.current_version || mihomo.current_version === 'not installed'}
@@ -1217,7 +1230,7 @@
               {#if !kernelsLoaded}
                 <Skeleton type="text-line" width="70px" />
               {:else}
-                <span>v{xray?.current_version || '—'}</span>
+                <span>{kernelVersion(xray?.current_version) || '—'}</span>
                 {#if xray?.status === 'failed'}
                   <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
                 {:else if !xray?.current_version || xray.current_version === 'not installed'}
@@ -1417,6 +1430,8 @@
           </Button>
         </div>
       {/if}
+    {:else}
+      <p class="card-subtitle">{$t('watchdog.unavailable')}</p>
     {/if}
   </div>
 

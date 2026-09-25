@@ -46,6 +46,10 @@ const xkeenBackupsKept = 5
 // ErrUnknownXKeenSetting is returned for an unsupported settings kind.
 var ErrUnknownXKeenSetting = errors.New("unknown xkeen settings kind")
 
+// ErrXKeenConfigDirMissing is returned when XKeen's config directory does not
+// exist, i.e. XKeen is not installed yet.
+var ErrXKeenConfigDirMissing = errors.New("xkeen config directory not found")
+
 // XKeenSettingsIssue describes one problem found during validation.
 // Severity is "error" (XKeen would drop or reject it) or "warning".
 type XKeenSettingsIssue struct {
@@ -97,6 +101,9 @@ func (s *XKeenSettingsService) pathFor(kind string) (string, error) {
 // List returns every settings file with content and validation issues.
 // Cross-file checks (proxied and excluded ports both set) are included.
 func (s *XKeenSettingsService) List() ([]XKeenSettingsFile, error) {
+	if _, err := os.Stat(s.dir); errors.Is(err, os.ErrNotExist) {
+		return nil, ErrXKeenConfigDirMissing
+	}
 	files := make([]XKeenSettingsFile, 0, len(xkeenSettingsOrder))
 	for _, kind := range xkeenSettingsOrder {
 		f, err := s.Get(kind)
