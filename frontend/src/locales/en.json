@@ -2160,6 +2160,7 @@
   "watchdog.reset_failed": "Reset failed: {error}",
   "watchdog.stale_note": "Data may be out of date (poll failed)",
   "watchdog.section_title": "Watchdog",
+  "watchdog.unavailable": "Status unavailable: XKeen is not installed or not responding. The watchdog tracks the core while XKeen runs it.",
   "watchdog.attempts": "Disarm attempts: {n} of 5",
   "watchdog.last_error": "Last error: {error}",
   "watchdog.interception_active": "TPROXY interception may still be active",

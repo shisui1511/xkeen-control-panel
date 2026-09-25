@@ -2160,6 +2160,7 @@
   "watchdog.reset_failed": "Не удалось выполнить сброс: {error}",
   "watchdog.stale_note": "Данные могут быть неактуальны (сбой опроса)",
   "watchdog.section_title": "Watchdog",
+  "watchdog.unavailable": "Состояние недоступно: XKeen не установлен или не отвечает. Watchdog следит за ядром, пока его запускает XKeen.",
   "watchdog.attempts": "Попыток disarm: {n} из 5",
   "watchdog.last_error": "Последняя ошибка: {error}",
   "watchdog.interception_active": "Перехват TPROXY может быть активен",

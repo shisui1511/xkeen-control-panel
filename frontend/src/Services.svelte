@@ -1412,6 +1412,8 @@
     <!-- Restart History Card (SRV-04) -->
     <div class="card restart-card">
       <div class="card-head-row">
+    {:else}
+      <p class="card-subtitle">{$t('watchdog.unavailable')}</p>
         <div>
           <h2 class="card-title">{$t('svc.restart_log_title')}</h2>
           <p class="card-subtitle">
