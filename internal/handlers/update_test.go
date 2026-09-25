@@ -556,7 +556,7 @@ func TestDownloadBinary_Gzip(t *testing.T) {
 		defer ts.Close()
 
 		dest := filepath.Join(t.TempDir(), "xcp.new")
-		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest); err != nil {
+		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest, nil); err != nil {
 			t.Fatal(err)
 		}
 		got, _ := os.ReadFile(dest)
@@ -579,7 +579,7 @@ func TestDownloadBinary_Gzip(t *testing.T) {
 		defer ts.Close()
 
 		dest := filepath.Join(t.TempDir(), "xcp.new")
-		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest); err != nil {
+		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest, nil); err != nil {
 			t.Fatal(err)
 		}
 		got, _ := os.ReadFile(dest)
@@ -595,7 +595,7 @@ func TestDownloadBinary_Gzip(t *testing.T) {
 		defer ts.Close()
 
 		dest := filepath.Join(t.TempDir(), "xcp.new")
-		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest); err == nil {
+		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest, nil); err == nil {
 			t.Fatal("expected error for corrupt gzip")
 		}
 		if _, err := os.Stat(dest); !os.IsNotExist(err) {
@@ -616,7 +616,7 @@ func TestDownloadBinary_Gzip(t *testing.T) {
 		defer ts.Close()
 
 		dest := filepath.Join(t.TempDir(), "xcp.new")
-		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest); err == nil {
+		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest, nil); err == nil {
 			t.Fatal("expected error for HTTP 502")
 		}
 		if plainHits != 0 {
@@ -628,10 +628,14 @@ func TestDownloadBinary_Gzip(t *testing.T) {
 // TestDownloadTo_SizeLimit verifies that an oversized (decompressed) payload is
 // rejected and removed instead of filling the router's disk.
 func TestDownloadTo_SizeLimit(t *testing.T) {
+	prev := maxBinarySize
+	maxBinarySize = 1 << 20
+	t.Cleanup(func() { maxBinarySize = prev })
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		zw := gzip.NewWriter(w)
 		chunk := make([]byte, 1<<20)
-		for i := 0; i <= maxBinarySize>>20; i++ {
+		for i := int64(0); i <= maxBinarySize>>20; i++ {
 			if _, err := zw.Write(chunk); err != nil {
 				return
 			}
@@ -641,7 +645,7 @@ func TestDownloadTo_SizeLimit(t *testing.T) {
 	defer ts.Close()
 
 	dest := filepath.Join(t.TempDir(), "xcp.new")
-	err := downloadTo(plainHTTPClient(), ts.URL+"/x.gz", dest, true)
+	err := downloadTo(plainHTTPClient(), ts.URL+"/x.gz", dest, true, nil)
 	if err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("expected size limit error, got %v", err)
 	}
