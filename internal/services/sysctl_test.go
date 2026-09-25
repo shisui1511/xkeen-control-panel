@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stubSysctlApply replaces execSysctlApply for the duration of a test so the
@@ -112,5 +113,38 @@ func TestDeploySysctlProfile_OverwritesExistingFile(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "nf_conntrack_max") {
 		t.Fatal("expected fresh profile content after redeploy")
+	}
+}
+
+// TestDeploySysctlProfile_SkipsUnchangedFile: неизменный профиль не
+// переписывается (без fsync на каждом старте), но sysctl -p применяется.
+func TestDeploySysctlProfile_SkipsUnchangedFile(t *testing.T) {
+	applied := 0
+	orig := execSysctlApply
+	execSysctlApply = func(string) error { applied++; return nil }
+	t.Cleanup(func() { execSysctlApply = orig })
+
+	sysctlDir := filepath.Join(t.TempDir(), "sysctl.d")
+	if err := DeploySysctlProfile(sysctlDir); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sysctlDir, "99-xkeen.conf")
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := DeploySysctlProfile(sysctlDir); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(past) {
+		t.Errorf("unchanged profile was rewritten (mtime %v)", info.ModTime())
+	}
+	if applied != 2 {
+		t.Errorf("sysctl -p must still run on every start, ran %d times", applied)
 	}
 }
