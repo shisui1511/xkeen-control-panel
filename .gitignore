@@ -11,6 +11,8 @@ build/
 .mcp.json
 
 # Внутренняя документация разработчика
+# Личные скрипты (деплой и замеры на роутере разработчика)
+scripts/local/
 AGENTS.md
 ROADMAP.md
 CLAUDE.md
