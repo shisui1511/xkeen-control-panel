@@ -1122,11 +1122,7 @@
   .runtime-level-control {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 6px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    gap: 8px;
     font-size: 12px;
   }
 
