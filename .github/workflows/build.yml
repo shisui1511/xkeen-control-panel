@@ -339,9 +339,18 @@ jobs:
 
           python3 .github/scripts/gen_notes.py
 
-          # shellcheck disable=SC2086 # PRERELEASE пустой для stable
+          # Тег ставит auto-release (или человек) до сборки — релиз создаётся по нему,
+          # без --target. С --target на коммит, чьи workflow-файлы отличаются от main
+          # (RC/stable со старого коммита), GitHub отвечает GITHUB_TOKEN 403
+          # «Resource not accessible by integration» — так упал v0.29.0-rc.2.
+          TARGET="--target ${GITHUB_SHA}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null; then
+            TARGET="--verify-tag"
+          fi
+
+          # shellcheck disable=SC2086 # PRERELEASE пустой для stable, TARGET — два слова
           gh release create "${VERSION}" \
-            --target "${GITHUB_SHA}" \
+            $TARGET \
             --title "${VERSION}" \
             --notes-file /tmp/release-notes.md \
             $PRERELEASE \

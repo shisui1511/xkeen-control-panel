@@ -9,7 +9,11 @@
 #                              "stable vX.Y.Z vX.Y.Z-rc.N" — RC провисел в beta SOAK_HOURS, и после
 #                                                          него в main нет новых feat/fix
 #                              "none <причина>"
-#   auto_release.sh run      полный цикл в CI: promote, затем plan для зелёного main;
+#   auto_release.sh heal     свежие (7 дней) теги релизов без опубликованного релиза:
+#                              "delete vX.Y.Z-rc.N" — RC вытеснен более новым тегом
+#                              "publish vX.Y.Z[-rc.N]" — актуальный тег, сборку повторить
+#                            опубликованные теги — в RELEASED (по строке на тег)
+#   auto_release.sh run      полный цикл в CI: heal, promote, затем plan для зелёного main;
 #                            ставит тег и запускает build.yml через workflow_dispatch
 #                            (тег, запушенный GITHUB_TOKEN, сам сборку не запускает).
 #
@@ -31,6 +35,8 @@ NOW="${NOW:-$(date +%s)}"
 # Коммиты, ради которых выходит релиз; chore/docs/test/ci бинарник не меняют
 WORTHY='^(feat|fix|perf|refactor|revert)(\([^)]*\))?!?:|^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE'
 STABLE_RE='^v[0-9]+\.[0-9]+\.[0-9]+$'
+RC_RE='^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$'
+HEAL_DAYS=7
 
 ROOT=$(git rev-parse --show-toplevel)
 
@@ -67,6 +73,41 @@ latest_rc() {
     found="$tag"
   done
   echo "$found"
+}
+
+version_gt() {
+  [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]
+}
+
+# RC больше не нужен: есть stable его версии, RC той же версии с большим номером
+# или любой тег более новой версии
+rc_superseded() {
+  local tag="$1" base n other obase
+  base="${tag%-rc.*}"
+  n="${tag##*-rc.}"
+  tag_exists "$base" && return 0
+  for other in $(git tag -l 'v*' | grep -E "$STABLE_RE|$RC_RE" || true); do
+    obase="${other%-rc.*}"
+    if [ "$obase" = "$base" ] && [ "$other" != "$base" ] && [ "${other##*-rc.}" -gt "$n" ]; then
+      return 0
+    fi
+    version_gt "${obase#v}" "${base#v}" && return 0
+  done
+  return 1
+}
+
+heal() {
+  local since tag
+  since=$((NOW - HEAL_DAYS * 24 * 3600))
+  for tag in $(git tag -l 'v*' | grep -E "$STABLE_RE|$RC_RE" | sort -V || true); do
+    [ "$(tag_time "$tag")" -ge "$since" ] || continue
+    grep -qxF -- "$tag" <<<"${RELEASED:-}" && continue
+    if [[ "$tag" =~ $RC_RE ]] && rc_superseded "$tag"; then
+      echo "delete $tag"
+    else
+      echo "publish $tag"
+    fi
+  done
 }
 
 plan() {
@@ -167,12 +208,40 @@ publish() {
   if [ "$active" -gt 0 ]; then
     log "сборка $tag уже идёт"
   elif [ "$failed" -ge 2 ]; then
-    log "сборка $tag упала $failed раза, нужен ручной разбор"
+    echo "::error::сборка $tag упала $failed раза, нужен ручной разбор: gh run list --workflow build.yml --branch $tag"
     exit 1
   else
+    if [ "$failed" -ge 1 ]; then
+      echo "::warning::сборка $tag упала, повторяю"
+    fi
     gh workflow run build.yml --ref "$tag" -f version="${tag#v}"
     log "запущена сборка $tag"
   fi
+}
+
+# Упавшая сборка не должна теряться: вытесненный RC без релиза удаляется с
+# предупреждением в сводке прогона, актуальный тег пересобирается через publish.
+heal_tags() {
+  local action tag
+  RELEASED=$(gh release list --limit 100 --json tagName --jq '.[].tagName')
+  export RELEASED
+  while read -r action tag; do
+    case "$action" in
+      delete)
+        if [ "${DRY_RUN:-0}" = 1 ]; then
+          log "DRY_RUN: удалил бы вытесненный неопубликованный $tag"
+          continue
+        fi
+        echo "::warning::$tag вытеснен более новым релизом и не был опубликован (сборка: gh run list --workflow build.yml --branch $tag) — тег удалён"
+        git push origin --delete "refs/tags/$tag" || true
+        git tag -d "$tag" >/dev/null
+        ;;
+      publish)
+        log "heal: у $tag нет релиза"
+        publish "$tag" "$(git rev-list -n1 "$tag")"
+        ;;
+    esac
+  done < <(heal)
 }
 
 run() {
@@ -182,6 +251,8 @@ run() {
   fi
 
   local decision kind tag rc main_sha state
+  heal_tags
+
   decision=$(promote)
   log "promote: $decision"
   read -r kind tag rc <<<"$decision"
@@ -218,9 +289,10 @@ run() {
 case "${1:-}" in
   plan) plan ;;
   promote) promote ;;
+  heal) heal ;;
   run) run ;;
   *)
-    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac
