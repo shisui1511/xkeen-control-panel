@@ -2,8 +2,10 @@ import js from '@eslint/js';
 import ts from 'typescript-eslint';
 import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
+import { defineConfig } from 'eslint/config';
 
-export default ts.config(
+export default defineConfig(
+  { ignores: ['dist/', 'playwright-report/', 'test-results/', 'coverage/'] },
   js.configs.recommended,
   ...ts.configs.recommended,
   ...svelte.configs['flat/recommended'],
