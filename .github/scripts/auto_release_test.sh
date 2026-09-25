@@ -93,6 +93,26 @@ check "promote берёт rc.10, а не rc.9" "$(NOW=$((T0 + 25 * HOUR)) ar pro
 commit "fix: ещё"
 check "номер RC после rc.10 сравнивается численно" "$(ar plan)" "rc v0.3.0-rc.11"
 
+# heal: свежие теги без релиза (RELEASED — опубликованные)
+hl() { (cd "$REPO" && NOW="${NOW:-$T0}" RELEASED="$1" bash "$HERE/auto_release.sh" heal | tr '\n' ';'); }
+HEAL_NOW=$((T0 + 40 * HOUR))
+commit "feat: для heal"
+atag v0.4.0-rc.1 $((T0 + 30 * HOUR))
+atag v0.4.0-rc.2 $((T0 + 31 * HOUR))
+atag v0.4.0-rc.3 $((T0 + 32 * HOUR))
+OLD_RELEASED=$(printf '%s\n' v0.1.0 v0.1.1 v0.2.0 v0.2.0-rc.1 v0.2.0-rc.2 v0.3.0-rc.9 v0.3.0-rc.10)
+check "вытесненный RC без релиза удаляется" \
+  "$(NOW=$HEAL_NOW hl "$(printf '%s\n' "$OLD_RELEASED" v0.4.0-rc.1 v0.4.0-rc.3)")" "delete v0.4.0-rc.2;"
+check "актуальный RC без релиза пересобирается" \
+  "$(NOW=$HEAL_NOW hl "$(printf '%s\n' "$OLD_RELEASED" v0.4.0-rc.1 v0.4.0-rc.2)")" "publish v0.4.0-rc.3;"
+atag v0.4.0 $((T0 + 33 * HOUR)) v0.4.0-rc.3^{}
+check "stable без релиза пересобирается, его RC вытеснены" \
+  "$(NOW=$HEAL_NOW hl "$(printf '%s\n' "$OLD_RELEASED" v0.4.0-rc.3)")" "publish v0.4.0;delete v0.4.0-rc.1;delete v0.4.0-rc.2;"
+check "всё опубликовано — лечить нечего" \
+  "$(NOW=$HEAL_NOW hl "$(printf '%s\n' "$OLD_RELEASED" v0.4.0 v0.4.0-rc.1 v0.4.0-rc.2 v0.4.0-rc.3)")" ""
+check "теги старше 7 дней не трогаются" \
+  "$(NOW=$((T0 + 30 * 24 * HOUR)) hl "")" ""
+
 echo
 echo "PASS: $PASS  FAIL: $FAIL"
 [ "$FAIL" = 0 ]
