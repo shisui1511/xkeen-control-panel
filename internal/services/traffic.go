@@ -1296,25 +1296,87 @@ type mihomoProxy struct {
 	All  []string `json:"all"`
 }
 
+// quotaBuiltinOutbounds — встроенные исходящие mihomo: трафик через них
+// не идёт через прокси и под глобальный лимит не попадает.
+var quotaBuiltinOutbounds = map[string]bool{
+	"DIRECT": true, "REJECT": true, "REJECT-DROP": true, "PASS": true, "COMPATIBLE": true,
+}
+
+// quotaNextHop — куда группа name ведёт трафик. Уже переключённая ради
+// лимита группа считается ведущей в свой исходный выбор: иначе на следующей
+// проверке вышестоящий селектор «потерял» бы цель и был бы восстановлен.
+func quotaNextHop(proxies map[string]mihomoProxy, blocked map[string]string, name, fallback string) string {
+	p := proxies[name]
+	if orig, ok := blocked[name]; ok && p.Now == fallback {
+		return orig
+	}
+	return p.Now
+}
+
+// quotaSwitchable — селектор, который можно переключить на fallback.
+func quotaSwitchable(p mihomoProxy, fallback string) bool {
+	return p.Type == "Selector" && slices.Contains(p.All, fallback)
+}
+
+// quotaChainEnd проходит цепочку выбора от селектора name (Selector →
+// URLTest → … → нода) и возвращает, куда она приводит. Цепочка обрывается на
+// следующем переключаемом селекторе (stopped=true): переключится он сам, а
+// вышестоящие группы трогать незачем.
+func quotaChainEnd(proxies map[string]mihomoProxy, blocked map[string]string, name, target, fallback string) (end string, stopped bool) {
+	seen := map[string]bool{name: true}
+	cur := quotaNextHop(proxies, blocked, name, fallback)
+	for cur != "" && !seen[cur] {
+		if cur == target {
+			return cur, false
+		}
+		p, ok := proxies[cur]
+		if ok && quotaSwitchable(p, fallback) {
+			return cur, true
+		}
+		seen[cur] = true
+		next := quotaNextHop(proxies, blocked, cur, fallback)
+		if next == "" {
+			break
+		}
+		cur = next
+	}
+	return cur, false
+}
+
 // quotaBlockGroups — группы, которые нужно переключить на fallback
 // (REJECT/DIRECT), чтобы трафик перестал идти через target.
 //
-// Группа, в которой fallback есть, переключается сама (в т.ч. GLOBAL для
-// глобального лимита). Иначе target — нода или группа без fallback: тогда
-// переключаются селекторы, ведущие через неё сейчас, и уже переключённые
-// ради неё (blocked: группа → исходный выбор), чтобы не восстанавливать их
-// на следующей проверке. GLOBAL «на всякий случай» не трогается: в режиме
-// rule это ничего не блокирует, а в режиме global блокирует весь трафик.
+// Группа, в которой fallback есть, переключается сама. Иначе target — нода
+// или группа без fallback: переключаются селекторы, чья цепочка выбора
+// (в том числе через url-test/fallback и вложенные селекторы) сейчас ведёт
+// через target, и уже переключённые ради неё.
 func quotaBlockGroups(proxies map[string]mihomoProxy, blocked map[string]string, target, fallback string) []string {
 	if group, ok := proxies[target]; ok && slices.Contains(group.All, fallback) {
 		return []string{target}
 	}
 	var groups []string
 	for name, p := range proxies {
-		if p.Type != "Selector" || !slices.Contains(p.All, fallback) {
+		if !quotaSwitchable(p, fallback) {
 			continue
 		}
-		if p.Now == target || (blocked[name] == target && p.Now == fallback) {
+		if end, stopped := quotaChainEnd(proxies, blocked, name, target, fallback); !stopped && end == target {
+			groups = append(groups, name)
+		}
+	}
+	slices.Sort(groups)
+	return groups
+}
+
+// quotaGlobalBlockGroups — группы для глобального лимита: селекторы
+// (включая GLOBAL), чья цепочка сейчас ведёт в прокси. Одного GLOBAL мало:
+// в режиме rule трафик идёт по правилам через остальные группы.
+func quotaGlobalBlockGroups(proxies map[string]mihomoProxy, blocked map[string]string, fallback string) []string {
+	var groups []string
+	for name, p := range proxies {
+		if !quotaSwitchable(p, fallback) {
+			continue
+		}
+		if end, stopped := quotaChainEnd(proxies, blocked, name, "", fallback); !stopped && end != "" && !quotaBuiltinOutbounds[end] {
 			groups = append(groups, name)
 		}
 	}
@@ -1415,6 +1477,7 @@ func (s *TrafficQuotaService) checkQuotas() {
 	type quotaFallback struct {
 		groupName string
 		fallback  string
+		global    bool
 	}
 	var neededActions []quotaFallback
 
@@ -1454,13 +1517,11 @@ func (s *TrafficQuotaService) checkQuotas() {
 			}
 
 			if fallback != "" {
-				var groupName string
 				if q.TargetType == "proxy" {
-					groupName = q.TargetID
+					neededActions = append(neededActions, quotaFallback{groupName: q.TargetID, fallback: fallback})
 				} else {
-					groupName = "GLOBAL"
+					neededActions = append(neededActions, quotaFallback{fallback: fallback, global: true})
 				}
-				neededActions = append(neededActions, quotaFallback{groupName: groupName, fallback: fallback})
 			}
 		} else if q.AlertThreshold > 0 && percent >= float64(q.AlertThreshold) {
 			alertsToCreate = append(alertsToCreate, struct {
@@ -1522,7 +1583,13 @@ func (s *TrafficQuotaService) checkQuotas() {
 		}
 		s.mu.Unlock()
 		for _, action := range neededActions {
-			for _, g := range quotaBlockGroups(mihomoProxies, blocked, action.groupName, action.fallback) {
+			var groups []string
+			if action.global {
+				groups = quotaGlobalBlockGroups(mihomoProxies, blocked, action.fallback)
+			} else {
+				groups = quotaBlockGroups(mihomoProxies, blocked, action.groupName, action.fallback)
+			}
+			for _, g := range groups {
 				shouldBlock[g] = action.fallback
 			}
 		}

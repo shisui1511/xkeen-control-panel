@@ -1245,3 +1245,59 @@ func TestQuotaBlockGroups(t *testing.T) {
 		})
 	}
 }
+
+// TestQuotaBlockGroups_ThroughNestedGroups: трафик к ноде идёт через
+// url-test и вложенные селекторы — переключается ближайший к ноде селектор
+// с fallback, вышестоящие не трогаются.
+func TestQuotaBlockGroups_ThroughNestedGroups(t *testing.T) {
+	proxies := map[string]mihomoProxy{
+		"PROXY": {Type: "Selector", Now: "Auto", All: []string{"Auto", "Sub", "REJECT"}},
+		"Auto":  {Type: "URLTest", Now: "node-x", All: []string{"node-x", "node-y"}},
+		"Media": {Type: "Selector", Now: "Sub", All: []string{"Sub", "REJECT"}},
+		"Sub":   {Type: "Selector", Now: "node-x", All: []string{"node-x", "REJECT"}},
+		"Plain": {Type: "Selector", Now: "NoFb", All: []string{"NoFb", "REJECT"}},
+		"NoFb":  {Type: "Selector", Now: "node-x", All: []string{"node-x"}},
+	}
+	got := quotaBlockGroups(proxies, nil, "node-x", "REJECT")
+	want := []string{"PROXY", "Plain", "Sub"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+
+	// Следующая проверка после переключения: набор не меняется, иначе
+	// группы мигали бы между REJECT и исходным выбором
+	blocked := map[string]string{}
+	for _, g := range got {
+		p := proxies[g]
+		blocked[g] = p.Now
+		p.Now = "REJECT"
+		proxies[g] = p
+	}
+	if again := quotaBlockGroups(proxies, blocked, "node-x", "REJECT"); !slices.Equal(again, want) {
+		t.Errorf("after blocking got %v, want %v", again, want)
+	}
+}
+
+// TestQuotaGlobalBlockGroups: глобальный лимит в режиме rule переключает
+// селекторы, ведущие в прокси; DIRECT-группы и вышестоящие не трогаются.
+func TestQuotaGlobalBlockGroups(t *testing.T) {
+	proxies := map[string]mihomoProxy{
+		"GLOBAL":  {Type: "Selector", Now: "DIRECT", All: []string{"DIRECT", "PROXY", "REJECT"}},
+		"PROXY":   {Type: "Selector", Now: "Auto", All: []string{"Auto", "REJECT"}},
+		"Auto":    {Type: "URLTest", Now: "node-x", All: []string{"node-x"}},
+		"Russia":  {Type: "Selector", Now: "DIRECT", All: []string{"DIRECT", "PROXY", "REJECT"}},
+		"YouTube": {Type: "Selector", Now: "PROXY", All: []string{"PROXY", "REJECT"}},
+	}
+	got := quotaGlobalBlockGroups(proxies, nil, "REJECT")
+	if want := []string{"PROXY"}; !slices.Equal(got, want) {
+		t.Errorf("rule mode: got %v, want %v", got, want)
+	}
+
+	g := proxies["GLOBAL"]
+	g.Now = "node-x"
+	proxies["GLOBAL"] = g
+	got = quotaGlobalBlockGroups(proxies, nil, "REJECT")
+	if want := []string{"GLOBAL", "PROXY"}; !slices.Equal(got, want) {
+		t.Errorf("global mode: got %v, want %v", got, want)
+	}
+}
