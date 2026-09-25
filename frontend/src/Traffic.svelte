@@ -642,20 +642,17 @@
   <PageHeader
     title={$t('traffic.title')}
     subtitle={$t('traffic.realtime')}
-    breadcrumbs={[
-      { label: $t('nav.group_observability') },
-      { label: $t('traffic.title') }
-    ]}
+    breadcrumbs={[{ label: $t('nav.group_observability') }, { label: $t('traffic.title') }]}
     {onSwitchTab}
   >
     <span
       class="badge-live-indicator"
-      class:is-live={connected && !isPaused}
+      class:is-live={connected && !coreOffline && !isPaused}
       class:is-paused={isPaused}
-      class:is-offline={!connected}
+      class:is-offline={!connected || coreOffline}
     >
       <span class="live-dot"></span>
-      {#if !connected}
+      {#if !connected || coreOffline}
         {$t('traffic.offline_badge')}
       {:else if isPaused}
         {$t('traffic.paused_badge')}
