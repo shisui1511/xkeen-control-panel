@@ -10,6 +10,7 @@
   import SegmentedControl from './components/SegmentedControl.svelte';
   import LiveIndicator from './components/LiveIndicator.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
+  import DownloadIcon from './lib/components/icons/Download.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -638,7 +639,15 @@
     {/snippet}
   </PageHeader>
 
-  {#if $capabilities !== null && !$capabilities.mihomo.reachable}
+  {#if $capabilities?.kernels?.mihomo?.installed === false}
+    <EmptyState
+      title={$t('ds.empty.mihomo_missing_title')}
+      description={$t('ds.empty.mihomo_missing_desc')}
+      icon={DownloadIcon}
+      ctaText={$t('ds.empty.mihomo_missing_cta')}
+      oncta={() => onSwitchTab('services')}
+    />
+  {:else if $capabilities !== null && !$capabilities.mihomo.reachable}
     <EmptyState
       title={$t('ds.empty.mihomo_offline_title')}
       description={$capabilities?.active_kernel === 'mihomo'
