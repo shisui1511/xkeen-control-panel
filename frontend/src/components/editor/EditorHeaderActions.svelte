@@ -35,7 +35,8 @@
 <div class="eph-right">
   {#if saveStatusState.kind === 'live'}
     <LiveIndicator live={true} label={saveStatusState.label} />
-  {:else}
+  {:else if selectedFile}
+    <!-- Without an open file there is nothing to be saved or unsaved. -->
     <StatusBadge variant={saveStatusState.variant || 'idle'} label={saveStatusState.label} />
   {/if}
   {#if selectedFile}

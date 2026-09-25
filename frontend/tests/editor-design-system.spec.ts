@@ -1,5 +1,25 @@
 import { test, expect } from '@playwright/test';
 import { setupMocks, visitPage } from './helpers/api-mocks';
+import type { Page } from '@playwright/test';
+
+// Маршруты, зарегистрированные позже setupMocks, имеют приоритет:
+// даём редактору один файл, чтобы его можно было открыть.
+async function mockOneConfig(page: Page) {
+  await page.route('**/api/config/list**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(
+        route.request().url().includes('mihomo')
+          ? [{ name: 'config.yaml', path: '/opt/etc/mihomo/config.yaml', size: 20 }]
+          : []
+      )
+    })
+  );
+  await page.route('**/api/config/read**', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/plain', body: 'mixed-port: 7890\n' })
+  );
+}
 
 // ============================================================
 // Editor Design System — разделитель редактора и индикаторы
@@ -11,7 +31,10 @@ import { setupMocks, visitPage } from './helpers/api-mocks';
 test.describe('Редактор — разделитель и индикаторы дизайн-системы', () => {
   test('статус сохранения — badge с иконкой, без круглого глифа', async ({ page }) => {
     await setupMocks(page, 'mihomo');
+    await mockOneConfig(page);
     await visitPage(page, '/#/editor');
+    // Бейдж сохранения показывается только для открытого файла.
+    await page.locator('.file-row', { hasText: 'config.yaml' }).first().click();
 
     const badge = page.locator('.eph-right .status-badge, .eph-right .badge');
     await expect(badge).toBeVisible();
@@ -21,11 +44,23 @@ test.describe('Редактор — разделитель и индикатор
     expect(dotCount).toBe(0);
   });
 
+  test('без открытого файла бейдж сохранения не показывается', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    await mockOneConfig(page);
+    await visitPage(page, '/#/editor');
+
+    await expect(page.locator('.file-row').first()).toBeVisible();
+    await expect(page.locator('.eph-right .status-badge, .eph-right .badge')).toHaveCount(0);
+  });
+
   test('badge статуса — border 1px, цвет из палитры темы, без inline style с цветом', async ({
     page
   }) => {
     await setupMocks(page, 'mihomo');
+    await mockOneConfig(page);
     await visitPage(page, '/#/editor');
+    // Бейдж сохранения показывается только для открытого файла.
+    await page.locator('.file-row', { hasText: 'config.yaml' }).first().click();
 
     const badge = page.locator('.eph-right .status-badge, .eph-right .badge');
     await expect(badge).toBeVisible();
