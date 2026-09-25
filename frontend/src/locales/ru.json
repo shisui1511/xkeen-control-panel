@@ -949,6 +949,8 @@
   "traffic.chart_legend_time": "последняя минута · 1 точка/с",
   "traffic.waiting": "Ожидание данных трафика...",
   "traffic.empty_state_body": "Подключение к службе сбора метрик прокси-ядра",
+  "traffic.core_offline_title": "Mihomo не отвечает",
+  "traffic.core_offline_body": "График начнёт заполняться, когда Mihomo запустится. Управление ядром — на странице «Сервисы».",
   "traffic.sec_ago": "сек назад",
   "traffic.sec": "сек",
   "traffic.now": "сейчас",

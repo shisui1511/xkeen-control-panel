@@ -64,6 +64,12 @@
 
   let ws: WebSocket | null = null;
   let connected = $state(false);
+  // Mihomo feeds the chart; while its API is down no samples will ever arrive.
+  let coreOffline = $derived(
+    $capabilities !== null &&
+      $capabilities.active_kernel !== 'xray' &&
+      !$capabilities.mihomo?.reachable
+  );
   let totalUp = $state(0);
   let totalDown = $state(0);
   let sessionUp = $state(0);
@@ -815,7 +821,12 @@
     </div>
 
     <div class="chart-area-wrapper">
-      {#if chartData.pointsCount < 2}
+      {#if chartData.pointsCount < 2 && coreOffline}
+        <div class="chart-empty">
+          <span class="chart-empty-title">{$t('traffic.core_offline_title')}</span>
+          <p class="chart-empty-sub">{$t('traffic.core_offline_body')}</p>
+        </div>
+      {:else if chartData.pointsCount < 2}
         <div class="chart-empty">
           <span class="spinner"></span>
           <span class="chart-empty-title">{$t('traffic.waiting')}</span>

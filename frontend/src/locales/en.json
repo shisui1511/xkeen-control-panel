@@ -949,6 +949,8 @@
   "traffic.chart_legend_time": "last minute · 1 point/s",
   "traffic.waiting": "Waiting for traffic data...",
   "traffic.empty_state_body": "Connecting to the proxy kernel metrics gathering service",
+  "traffic.core_offline_title": "Mihomo is not responding",
+  "traffic.core_offline_body": "The chart fills in once Mihomo is running. Manage the core on the Services page.",
   "traffic.sec_ago": "sec ago",
   "traffic.sec": "sec",
   "traffic.now": "now",
