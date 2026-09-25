@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"html"
 	"net/http"
 )
 
@@ -20,8 +19,11 @@ func JSONSuccess(w http.ResponseWriter, data interface{}) {
 }
 
 // JSONError writes a failure JSON response with the given HTTP status code and error message.
+// Сообщение не экранируется как HTML: фронтенд выводит его текстом, а
+// encoding/json и так кодирует <, >, & как \u003c…; иначе вывод валидатора
+// показывался бы с сущностями вида &#34;.
 func JSONError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: html.EscapeString(msg)})
+	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: msg})
 }
