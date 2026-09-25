@@ -127,7 +127,7 @@ def prerelease_notes(version, commit_count, pr_number, prev_tag, short_sha, full
 
 ## 📥 Скачать
 
-> 📦 Бинарники сжаты [UPX](https://upx.github.io/) `--best --lzma` — размер ~60% от стабильного релиза.
+> 📦 Рядом с каждым бинарником лежит `.gz` (~7 МБ вместо ~20 МБ) — его скачивают панель и `setup.sh`.
 
 {arch_table(version)}
 

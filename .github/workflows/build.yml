@@ -94,8 +94,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          # KIND: dev — rolling pre-release (UPX), rc — release candidate, stable — релиз.
-          # RC собирается как stable (без UPX), публикуется как pre-release: в beta
+          # KIND: dev — rolling pre-release, rc — release candidate, stable — релиз.
+          # Все собираются одинаково; RC публикуется как pre-release: в beta
           # тестируется ровно тот бинарник, который станет стабильным.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="v${INPUT_VERSION#v}"
@@ -197,7 +197,7 @@ jobs:
         run: |
           ok=0
           for i in 1 2 3; do
-            sudo apt-get update && sudo apt-get install -y qemu-user-static upx-ucl && { ok=1; break; }
+            sudo apt-get update && sudo apt-get install -y qemu-user-static && { ok=1; break; }
             echo "apt-get failed, retry $i"; sleep 5
           done
           [ "$ok" = 1 ] || { echo "::error::apt-get failed after 3 attempts"; exit 1; }
@@ -210,7 +210,7 @@ jobs:
           file "build/xcp_${VERSION}_${{ matrix.name }}"
           file "build/xcp_${VERSION}_${{ matrix.name }}" | grep -q "statically linked"
 
-      - name: Smoke test under QEMU (uncompressed)
+      - name: Smoke test under QEMU
         if: steps.version.outputs.skip != 'true'
         timeout-minutes: 1
         env:
@@ -224,34 +224,6 @@ jobs:
             exit 1
           fi
 
-      - name: Compress with UPX (pre-release only)
-        if: steps.version.outputs.skip != 'true' && steps.version.outputs.kind == 'dev'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          upx -9 --lzma build/xcp_${VERSION}_${{ matrix.name }} -o build/xcp_${VERSION}_${{ matrix.name }}_upx
-
-      - name: Smoke test under QEMU (compressed, pre-release only)
-        if: steps.version.outputs.skip != 'true' && steps.version.outputs.kind == 'dev'
-        # Hard-fail for little-endian targets (arm64, mipsle) so a UPX-broken
-        # pre-release cannot ship the compressed binary. Big-endian mips stays
-        # advisory: UPX stubs are flaky under qemu-mips-static (see WR-02), so a
-        # failure there must not block the pre-release.
-        continue-on-error: ${{ matrix.name == 'mips' }}
-        timeout-minutes: 1
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          file "build/xcp_${VERSION}_${{ matrix.name }}_upx"
-          ${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}_upx" -v
-
-      - name: Promote compressed binary (pre-release only)
-        if: steps.version.outputs.skip != 'true' && steps.version.outputs.kind == 'dev'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          mv build/xcp_${VERSION}_${{ matrix.name }}_upx build/xcp_${VERSION}_${{ matrix.name }}
-
       - name: Generate checksum
         if: steps.version.outputs.skip != 'true'
         env:
@@ -260,6 +232,17 @@ jobs:
           cd build
           sha256sum xcp_${VERSION}_${{ matrix.name }} > xcp_${VERSION}_${{ matrix.name }}.sha256
 
+      # Сжатие только для скачивания: панель и setup.sh распаковывают .gz и сверяют
+      # SHA-256 несжатого бинарника. UPX не используется — распакованный в RAM образ
+      # занимал ~20 МБ на роутере и делал dev-сборки непохожими на stable.
+      - name: Compress for download
+        if: steps.version.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gzip -9 -n -k "build/xcp_${VERSION}_${{ matrix.name }}"
+          ls -l build/
+
       - name: Upload artifact
         if: steps.version.outputs.skip != 'true'
         uses: actions/upload-artifact@v7
@@ -267,6 +250,7 @@ jobs:
           name: xcp_${{ matrix.name }}
           path: |
             build/xcp_${{ steps.version.outputs.version }}_${{ matrix.name }}
+            build/xcp_${{ steps.version.outputs.version }}_${{ matrix.name }}.gz
             build/xcp_${{ steps.version.outputs.version }}_${{ matrix.name }}.sha256
 
     outputs:
@@ -330,12 +314,7 @@ jobs:
             --title "${TITLE}" \
             --notes-file /tmp/release-notes.md \
             --prerelease \
-            artifacts/xcp_arm64/xcp_${VERSION}_arm64 \
-            artifacts/xcp_arm64/xcp_${VERSION}_arm64.sha256 \
-            artifacts/xcp_mipsle/xcp_${VERSION}_mipsle \
-            artifacts/xcp_mipsle/xcp_${VERSION}_mipsle.sha256 \
-            artifacts/xcp_mips/xcp_${VERSION}_mips \
-            artifacts/xcp_mips/xcp_${VERSION}_mips.sha256
+            artifacts/xcp_*/xcp_"${VERSION}"_*
 
       - name: Create stable release or release candidate
         if: needs.build.outputs.kind != 'dev'
@@ -366,12 +345,7 @@ jobs:
             --title "${VERSION}" \
             --notes-file /tmp/release-notes.md \
             $PRERELEASE \
-            artifacts/xcp_arm64/xcp_${VERSION}_arm64 \
-            artifacts/xcp_arm64/xcp_${VERSION}_arm64.sha256 \
-            artifacts/xcp_mipsle/xcp_${VERSION}_mipsle \
-            artifacts/xcp_mipsle/xcp_${VERSION}_mipsle.sha256 \
-            artifacts/xcp_mips/xcp_${VERSION}_mips \
-            artifacts/xcp_mips/xcp_${VERSION}_mips.sha256
+            artifacts/xcp_*/xcp_"${VERSION}"_*
 
           # Dev-сборки и RC не новее выпущенной версии устарели, включая осиротевшие теги
           if [ "$MODE" = stable ]; then

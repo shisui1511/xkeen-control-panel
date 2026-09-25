@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -521,5 +522,130 @@ func TestUpdateEventsSSE(t *testing.T) {
 	}
 	if rec.Header().Get("Content-Type") != "text/event-stream" {
 		t.Errorf("expected text/event-stream, got %s", rec.Header().Get("Content-Type"))
+	}
+}
+
+func gzipBytes(t *testing.T, data []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// TestDownloadBinary_Gzip verifies that the compressed asset is preferred and
+// unpacked, and that releases without .gz fall back to the plain binary.
+func TestDownloadBinary_Gzip(t *testing.T) {
+	binary := bytes.Repeat([]byte("xcp binary "), 1000)
+
+	t.Run("gz asset", func(t *testing.T) {
+		var plainHits int
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, ".gz") {
+				w.Write(gzipBytes(t, binary))
+				return
+			}
+			plainHits++
+			w.Write(binary)
+		}))
+		defer ts.Close()
+
+		dest := filepath.Join(t.TempDir(), "xcp.new")
+		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := os.ReadFile(dest)
+		if !bytes.Equal(got, binary) {
+			t.Fatalf("unpacked %d bytes, want %d", len(got), len(binary))
+		}
+		if plainHits != 0 {
+			t.Fatalf("plain binary downloaded %d times, want 0", plainHits)
+		}
+	})
+
+	t.Run("no gz falls back to plain", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, ".gz") {
+				http.NotFound(w, r)
+				return
+			}
+			w.Write(binary)
+		}))
+		defer ts.Close()
+
+		dest := filepath.Join(t.TempDir(), "xcp.new")
+		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := os.ReadFile(dest)
+		if !bytes.Equal(got, binary) {
+			t.Fatal("plain binary content mismatch")
+		}
+	})
+
+	t.Run("corrupt gz is an error", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("not gzip"))
+		}))
+		defer ts.Close()
+
+		dest := filepath.Join(t.TempDir(), "xcp.new")
+		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest); err == nil {
+			t.Fatal("expected error for corrupt gzip")
+		}
+		if _, err := os.Stat(dest); !os.IsNotExist(err) {
+			t.Fatal("partial file must be removed")
+		}
+	})
+
+	t.Run("server error does not fall back", func(t *testing.T) {
+		var plainHits int
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, ".gz") {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			plainHits++
+			w.Write(binary)
+		}))
+		defer ts.Close()
+
+		dest := filepath.Join(t.TempDir(), "xcp.new")
+		if err := downloadBinaryWithClient(plainHTTPClient(), ts.URL+"/xcp_v1.0.0_arm64", dest); err == nil {
+			t.Fatal("expected error for HTTP 502")
+		}
+		if plainHits != 0 {
+			t.Fatal("plain binary must not be tried on server error")
+		}
+	})
+}
+
+// TestDownloadTo_SizeLimit verifies that an oversized (decompressed) payload is
+// rejected and removed instead of filling the router's disk.
+func TestDownloadTo_SizeLimit(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		zw := gzip.NewWriter(w)
+		chunk := make([]byte, 1<<20)
+		for i := 0; i <= maxBinarySize>>20; i++ {
+			if _, err := zw.Write(chunk); err != nil {
+				return
+			}
+		}
+		zw.Close()
+	}))
+	defer ts.Close()
+
+	dest := filepath.Join(t.TempDir(), "xcp.new")
+	err := downloadTo(plainHTTPClient(), ts.URL+"/x.gz", dest, true)
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("expected size limit error, got %v", err)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatal("oversized file must be removed")
 	}
 }

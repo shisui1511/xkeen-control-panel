@@ -52,6 +52,9 @@ if [ -n "\$DEST" ]; then
     # Write a sha256 file or a dummy executable
     case "\$DEST" in
         *.sha256) sha256sum "$BIN_PATH" 2>/dev/null | awk '{print \$1}' > "\$DEST" || echo "dummy" > "\$DEST" ;;
+        *.gz)     [ -n "\$MOCK_GZ" ] || exit 22
+                  echo "gz" >> "$TMP/gz_hits"
+                  printf '#!/bin/sh\necho "$ver"\n' | gzip -c > "\$DEST" ;;
         *)        printf '#!/bin/sh\necho "$ver"\n' > "\$DEST"; chmod +x "\$DEST" ;;
     esac
     exit 0
@@ -285,6 +288,41 @@ if [ "$NEW_VER" = "v1.2.0" ]; then
     pass "Бинарник обновлён до v1.2.0"
 else
     fail "Бинарник не обновлён (версия: $NEW_VER)"
+fi
+if [ ! -f "$TMP/gz_hits" ]; then
+    pass "Без .gz в релизе скачан несжатый бинарник"
+else
+    fail "Mock без .gz, но .gz был скачан"
+fi
+cleanup
+
+# ---------------------------------------------------------------------------
+# Test 3b: install_binary — сжатый .gz скачивается первым и распаковывается
+# ---------------------------------------------------------------------------
+echo ""
+echo "── Обновление из .gz ─────────────────────────────────────────"
+make_sandbox
+mock_opkg_not_found
+mock_uname_aarch64
+install_mock_binary "v1.1.0"
+mock_curl_version "v1.2.0"
+mock_sha256sum_pass
+mock_pgrep_not_running
+
+export MOCK_GZ=1
+rc=0
+run_in_sandbox "ARCH_LABEL=arm64; CHANNEL=stable; install_binary" || rc=$?
+unset MOCK_GZ
+NEW_VER=$(run_in_sandbox "ARCH_LABEL=arm64; get_version" 2>/dev/null || echo "")
+if [ "$rc" = "0" ] && [ "$NEW_VER" = "v1.2.0" ] && [ -f "$TMP/gz_hits" ]; then
+    pass "Бинарник обновлён из .gz до v1.2.0"
+else
+    fail "Обновление из .gz: rc=$rc, версия=$NEW_VER, gz_hits=$(cat "$TMP/gz_hits" 2>/dev/null)"
+fi
+if ! ls /tmp/xcp.new.gz >/dev/null 2>&1; then
+    pass "Временный .gz удалён"
+else
+    fail "Временный .gz остался в /tmp"
 fi
 cleanup
 
