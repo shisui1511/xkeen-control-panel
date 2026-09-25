@@ -174,7 +174,7 @@
 <div class="service-status-container">
   {#if statusLoading}
     <div class="services-grid">
-      {#each [1, 2, 3] as _}
+      {#each [1, 2, 3] as n (n)}
         <div class="service-sk-card">
           <div class="sk-head">
             <Skeleton type="circle" width="10px" height="10px" />
@@ -214,7 +214,7 @@
         status={serviceStatus.xkeen}
         version={xkeenVersion}
         isActiveKernel={false}
-        isInstalled={true}
+        isInstalled={capabilities?.xkeen_installed !== false}
         onRestart={restartXkeen}
         onStart={startXkeen}
         onStop={stopXkeen}
