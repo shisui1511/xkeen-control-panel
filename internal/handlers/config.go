@@ -14,9 +14,10 @@ import (
 	"time"
 
 	"fmt"
+	"log"
+
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
-	"log"
 )
 
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB

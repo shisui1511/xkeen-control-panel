@@ -197,9 +197,9 @@ func TestTailFile_JoinsLineWrittenInTwoParts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := waitForHistory(t, d, func(h []LogEntry) bool { return len(h) >= 1 })
+	waitForHistory(t, d, func(h []LogEntry) bool { return len(h) >= 1 })
 	time.Sleep(700 * time.Millisecond)
-	h = d.GetHistory("xcp", "", 100)
+	h := d.GetHistory("xcp", "", 100)
 	if len(h) != 1 {
 		t.Fatalf("expected one joined entry, got %d: %+v", len(h), h)
 	}
