@@ -1,4 +1,4 @@
-.PHONY: build run clean test test-coverage lint fmt deps keenetic-arm64 keenetic-mipsle keenetic-mips compress proto
+.PHONY: build run clean test test-coverage lint fmt deps hooks keenetic-arm64 keenetic-mipsle keenetic-mips compress proto
 
 BINARY_NAME=xcp
 # Single source of truth for the version: scripts/version.sh (git tags +
@@ -10,6 +10,11 @@ endif
 deps:
 	go mod download
 	go mod tidy
+
+# Git-хуки из .githooks (pre-commit: prettier + gofmt по файлам из индекса)
+hooks:
+	git config core.hooksPath .githooks
+	@echo "Git hooks: .githooks"
 
 update-version:
 	@echo "Building version $(VERSION)"

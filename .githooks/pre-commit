@@ -1,0 +1,42 @@
+#!/bin/sh
+# .githooks/pre-commit — быстрые проверки форматирования перед коммитом.
+# Подключение: make hooks (git config core.hooksPath .githooks).
+#
+# Проверяются только файлы из индекса:
+#   frontend/** → prettier --check (те же правила, что в CI/Lint Frontend)
+#   *.go        → gofmt -l
+# Пропустить разово: git commit --no-verify.
+
+set -eu
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -n "$STAGED" ] || exit 0
+
+FAILED=0
+
+FRONT=$(printf '%s\n' "$STAGED" | sed -n 's#^frontend/##p')
+if [ -n "$FRONT" ]; then
+  if [ ! -x frontend/node_modules/.bin/prettier ]; then
+    echo "pre-commit: нет frontend/node_modules — выполните cd frontend && npm ci" >&2
+    exit 1
+  fi
+  if ! (cd frontend && printf '%s\n' "$FRONT" | xargs node_modules/.bin/prettier --check --ignore-unknown --log-level warn); then
+    echo "pre-commit: исправьте форматирование: cd frontend && npx prettier --write ." >&2
+    FAILED=1
+  fi
+fi
+
+GO=$(printf '%s\n' "$STAGED" | grep '\.go$' || true)
+if [ -n "$GO" ]; then
+  UNFORMATTED=$(printf '%s\n' "$GO" | xargs gofmt -l)
+  if [ -n "$UNFORMATTED" ]; then
+    echo "pre-commit: файлы не отформатированы gofmt (make fmt):" >&2
+    printf "%s\n" "$UNFORMATTED" | sed "s/^/  /" >&2
+    FAILED=1
+  fi
+fi
+
+exit "$FAILED"
