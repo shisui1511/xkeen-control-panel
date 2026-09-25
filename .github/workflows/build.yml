@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Версия (например: 0.1.0)"
+        description: "Версия: 0.1.0 — stable, 0.2.0-rc.1 — release candidate"
         required: true
         type: string
 
@@ -92,16 +92,27 @@ jobs:
         id: version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
+          # KIND: dev — rolling pre-release (UPX), rc — release candidate, stable — релиз.
+          # RC собирается как stable (без UPX), публикуется как pre-release: в beta
+          # тестируется ровно тот бинарник, который станет стабильным.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="v${INPUT_VERSION#v}"
+            BUILD_VERSION="$VERSION"
+            if echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$'; then
+              KIND="rc"
+            elif echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+              KIND="stable"
+            else
+              echo "::error::Версия '${VERSION}' — ни vX.Y.Z, ни vX.Y.Z-rc.N"
+              exit 1
+            fi
+            SKIP="false"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="${GITHUB_REF#refs/tags/}"
             BUILD_VERSION="$VERSION"
-            IS_STABLE="true"
-            SKIP="false"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="v${{ github.event.inputs.version }}"
-            BUILD_VERSION="$VERSION"
-            IS_STABLE="true"
+            KIND="stable"
             SKIP="false"
           else
             # Проверяем, не запущен ли рабочий процесс для ветки main, но при этом текущий коммит уже протегирован стабильной версией
@@ -111,7 +122,7 @@ jobs:
               SKIP="true"
               VERSION="$EXACT_TAG"
               BUILD_VERSION="$VERSION"
-              IS_STABLE="true"
+              KIND="stable"
             else
               SKIP="false"
               
@@ -121,7 +132,7 @@ jobs:
               # X.Y.Z — следующий релиз по conventional commits после последнего тега.
               VERSION=$(sh scripts/version.sh --channel)
               BUILD_VERSION=$(sh scripts/version.sh)
-              IS_STABLE="false"
+              KIND="dev"
               LATEST_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' 2>/dev/null || echo "")
 
               # Calculate commit count since the last stable tag for build notes
@@ -139,9 +150,9 @@ jobs:
           echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "build_version=${BUILD_VERSION}" >> $GITHUB_OUTPUT
-          echo "is_stable=${IS_STABLE}" >> $GITHUB_OUTPUT
+          echo "kind=${KIND}" >> $GITHUB_OUTPUT
           echo "skip=${SKIP}" >> $GITHUB_OUTPUT
-          echo "Version: ${VERSION}, build ${BUILD_VERSION} (stable=${IS_STABLE}, pr=${PR_NUMBER}, skip=${SKIP})"
+          echo "Version: ${VERSION}, build ${BUILD_VERSION} (kind=${KIND}, pr=${PR_NUMBER}, skip=${SKIP})"
 
       - name: Set up Node.js
         if: steps.version.outputs.skip != 'true'
@@ -214,14 +225,14 @@ jobs:
           fi
 
       - name: Compress with UPX (pre-release only)
-        if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_stable != 'true'
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.kind == 'dev'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           upx -9 --lzma build/xcp_${VERSION}_${{ matrix.name }} -o build/xcp_${VERSION}_${{ matrix.name }}_upx
 
       - name: Smoke test under QEMU (compressed, pre-release only)
-        if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_stable != 'true'
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.kind == 'dev'
         # Hard-fail for little-endian targets (arm64, mipsle) so a UPX-broken
         # pre-release cannot ship the compressed binary. Big-endian mips stays
         # advisory: UPX stubs are flaky under qemu-mips-static (see WR-02), so a
@@ -235,7 +246,7 @@ jobs:
           ${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}_upx" -v
 
       - name: Promote compressed binary (pre-release only)
-        if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_stable != 'true'
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.kind == 'dev'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -260,7 +271,7 @@ jobs:
 
     outputs:
       version: ${{ steps.version.outputs.version }}
-      is_stable: ${{ steps.version.outputs.is_stable }}
+      kind: ${{ steps.version.outputs.kind }}
       commit_count: ${{ steps.version.outputs.commit_count }}
       pr_number: ${{ steps.version.outputs.pr_number }}
       skip: ${{ steps.version.outputs.skip }}
@@ -282,7 +293,7 @@ jobs:
 
       - name: Rolling pre-release
         id: rolling
-        if: needs.build.outputs.is_stable != 'true'
+        if: needs.build.outputs.kind == 'dev'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
@@ -326,25 +337,35 @@ jobs:
             artifacts/xcp_mips/xcp_${VERSION}_mips \
             artifacts/xcp_mips/xcp_${VERSION}_mips.sha256
 
-      - name: Create stable release
-        if: needs.build.outputs.is_stable == 'true'
+      - name: Create stable release or release candidate
+        if: needs.build.outputs.kind != 'dev'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
           PR_NUMBER: ${{ needs.build.outputs.pr_number }}
-          MODE: stable
+          MODE: ${{ needs.build.outputs.kind }}
+          SOAK_HOURS: ${{ vars.RC_SOAK_HOURS || '24' }}
         run: |
-          if echo "$VERSION" | grep -qvE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "ERROR: Invalid stable version format: $VERSION"
+          if [ "$MODE" = rc ]; then
+            PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$'
+            PRERELEASE="--prerelease"
+          else
+            PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+$'
+            PRERELEASE=""
+          fi
+          if echo "$VERSION" | grep -qvE "$PATTERN"; then
+            echo "ERROR: Invalid ${MODE} version format: $VERSION"
             exit 1
           fi
 
           python3 .github/scripts/gen_notes.py
 
+          # shellcheck disable=SC2086 # PRERELEASE пустой для stable
           gh release create "${VERSION}" \
             --target "${GITHUB_SHA}" \
             --title "${VERSION}" \
             --notes-file /tmp/release-notes.md \
+            $PRERELEASE \
             artifacts/xcp_arm64/xcp_${VERSION}_arm64 \
             artifacts/xcp_arm64/xcp_${VERSION}_arm64.sha256 \
             artifacts/xcp_mipsle/xcp_${VERSION}_mipsle \
@@ -352,11 +373,14 @@ jobs:
             artifacts/xcp_mips/xcp_${VERSION}_mips \
             artifacts/xcp_mips/xcp_${VERSION}_mips.sha256
 
-          # Dev-релизы не новее выпущенной версии устарели, включая осиротевшие теги
-          bash .github/scripts/prune_dev_releases.sh "${VERSION}"
+          # Dev-сборки и RC не новее выпущенной версии устарели, включая осиротевшие теги
+          if [ "$MODE" = stable ]; then
+            bash .github/scripts/prune_dev_releases.sh "${VERSION}"
+          fi
 
       - name: Update binaries branch
-        if: steps.rolling.outputs.published != 'false'
+        # Зеркало setup.sh держит только stable и dev, RC туда не попадает
+        if: needs.build.outputs.kind != 'rc' && steps.rolling.outputs.published != 'false'
         env:
           VERSION: ${{ needs.build.outputs.version }}
         run: |

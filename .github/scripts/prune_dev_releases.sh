@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Удаляет rolling dev-релизы (vX.Y.Z-dev) вместе с тегами.
+# Удаляет pre-release вместе с тегами.
 # Использование: prune_dev_releases.sh [VERSION]
-#   без аргумента — удалить все dev-релизы;
-#   с VERSION     — только те, чья базовая версия не выше VERSION.
+#   без аргумента — удалить все rolling dev-релизы (vX.Y.Z-dev), RC не трогаются;
+#   с VERSION     — dev-релизы и release candidate (vX.Y.Z-rc.N), чья базовая версия
+#                   не выше VERSION (после выхода stable).
 set -euo pipefail
 
 limit="${1:-}"
@@ -13,12 +14,12 @@ tags=$(
   {
     git ls-remote --tags --refs origin | sed 's#.*refs/tags/##'
     gh release list --limit 100 --json tagName --jq '.[].tagName'
-  } | grep -E -- '^v[0-9]+\.[0-9]+\.[0-9]+-dev$' | sort -u || true
+  } | grep -E -- "^v[0-9]+\\.[0-9]+\\.[0-9]+-(dev${limit:+|rc\\.[0-9]+})\$" | sort -u || true
 )
 
 for tag in $tags; do
   base="${tag#v}"
-  base="${base%-dev}"
+  base="${base%%-*}"
   if [ -n "$limit" ] && [ "$(printf '%s\n%s\n' "$base" "$limit" | sort -V | tail -1)" != "$limit" ]; then
     echo "Оставляем ${tag}: новее v${limit}"
     continue
