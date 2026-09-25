@@ -160,6 +160,10 @@
     return `v${v.replace(/^v/, '')}`;
   }
 
+  function kernelInstalled(v: string | undefined, name: 'mihomo' | 'xray'): boolean {
+    return !!kernelVersion(v) || !!$capabilities?.kernels?.[name]?.installed;
+  }
+
   function formatAction(action: string): string {
     const map: Record<string, string> = {
       start: $t('svc.log_action_start'),
@@ -763,7 +767,9 @@
               {:else}
                 {mihomo?.process_status === 'running'
                   ? `${$t('svc.running')} · PID ${mihomo?.pid || xkeenInfo.pid || '—'}`
-                  : $t('svc.stopped')}
+                  : kernelInstalled(mihomo?.current_version, 'mihomo')
+                    ? $t('svc.stopped')
+                    : $t('kernel.status.not_installed')}
               {/if}
             </div>
             {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
@@ -777,7 +783,7 @@
               </a>
             {/if}
           </div>
-          {#if !isRunning}
+          {#if !isRunning && kernelInstalled(mihomo?.current_version, 'mihomo')}
             <button
               type="button"
               class="btn btn-primary btn-sm"
@@ -829,11 +835,13 @@
               {:else}
                 {xray?.process_status === 'running'
                   ? `${$t('svc.running')} · PID ${xray?.pid || xkeenInfo.pid || '—'}`
-                  : $t('svc.stopped')}
+                  : kernelInstalled(xray?.current_version, 'xray')
+                    ? $t('svc.stopped')
+                    : $t('kernel.status.not_installed')}
               {/if}
             </div>
           </div>
-          {#if !isRunning}
+          {#if !isRunning && kernelInstalled(xray?.current_version, 'xray')}
             <button
               type="button"
               class="btn btn-primary btn-sm"
@@ -1404,6 +1412,8 @@
           </Button>
         </div>
       {/if}
+    {:else}
+      <p class="card-subtitle">{$t('watchdog.unavailable')}</p>
     {/if}
   </div>
 
@@ -1412,8 +1422,6 @@
     <!-- Restart History Card (SRV-04) -->
     <div class="card restart-card">
       <div class="card-head-row">
-    {:else}
-      <p class="card-subtitle">{$t('watchdog.unavailable')}</p>
         <div>
           <h2 class="card-title">{$t('svc.restart_log_title')}</h2>
           <p class="card-subtitle">
