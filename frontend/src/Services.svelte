@@ -154,6 +154,12 @@
     }
   }
 
+  // Backend reports a missing core as the literal "not installed".
+  function kernelVersion(v: string | undefined): string {
+    if (!v || v === 'not installed') return '';
+    return `v${v.replace(/^v/, '')}`;
+  }
+
   function formatAction(action: string): string {
     const map: Record<string, string> = {
       start: $t('svc.log_action_start'),
@@ -743,9 +749,9 @@
           <div class="radio-body k-body">
             <div class="radio-name">
               <span>Mihomo</span>
-              {#if mihomo?.current_version}
+              {#if kernelVersion(mihomo?.current_version)}
                 <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
-                  >v{mihomo.current_version}</span
+                  >{kernelVersion(mihomo?.current_version)}</span
                 >
               {/if}
               {#if activeKernel === 'mihomo'}
@@ -809,9 +815,9 @@
           <div class="radio-body k-body">
             <div class="radio-name">
               <span>Xray</span>
-              {#if xray?.current_version}
+              {#if kernelVersion(xray?.current_version)}
                 <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
-                  >v{xray.current_version}</span
+                  >{kernelVersion(xray?.current_version)}</span
                 >
               {/if}
               {#if activeKernel === 'xray'}
@@ -1070,7 +1076,7 @@
               {#if !kernelsLoaded}
                 <Skeleton type="text-line" width="70px" />
               {:else}
-                <span>v{mihomo?.current_version || '—'}</span>
+                <span>{kernelVersion(mihomo?.current_version) || '—'}</span>
                 {#if mihomo?.status === 'failed'}
                   <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
                 {:else if !mihomo?.current_version || mihomo.current_version === 'not installed'}
@@ -1199,7 +1205,7 @@
               {#if !kernelsLoaded}
                 <Skeleton type="text-line" width="70px" />
               {:else}
-                <span>v{xray?.current_version || '—'}</span>
+                <span>{kernelVersion(xray?.current_version) || '—'}</span>
                 {#if xray?.status === 'failed'}
                   <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
                 {:else if !xray?.current_version || xray.current_version === 'not installed'}
