@@ -250,6 +250,38 @@
     }, 2000);
   }
 
+  // Стандартные наборы баз: «Обновить все» (xkeen -ug) обновляет только уже
+  // установленные файлы, поэтому на пустой системе базы ставятся отсюда
+  const STANDARD_SETS = [
+    { id: 'refilter', label: 'Re:filter', files: ['geosite_refilter.dat', 'geoip_refilter.dat'] },
+    { id: 'v2fly', label: 'v2fly', files: ['geosite_v2fly.dat', 'geoip_v2fly.dat'] },
+    { id: 'zkeen', label: 'ZKeen', files: ['geosite_zkeen.dat', 'geoip_zkeenip.dat'] }
+  ];
+  let installingSet = $state<string | null>(null);
+
+  async function installSet(set: (typeof STANDARD_SETS)[number]) {
+    installingSet = set.id;
+    error = '';
+    try {
+      for (const file of set.files) {
+        const res = await apiFetch('/api/dat/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file, type: 'xray' })
+        });
+        if (!res.ok) throw new Error(`${file}: ${await res.text()}`);
+      }
+      showToast('success', $t('dat.set_installed', { name: set.label }));
+      await fetchFiles();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      error = e.message;
+      showToast('error', e.message);
+    } finally {
+      installingSet = null;
+    }
+  }
+
   async function updateAll(filename?: string, fileType?: string) {
     if (filename) {
       updatingFile = filename;
@@ -544,7 +576,7 @@
     <Button
       variant="primary"
       loading={globalUpdating}
-      disabled={globalUpdating || loading || updatingFile !== null}
+      disabled={globalUpdating || loading || updatingFile !== null || files.length === 0}
       title={$t('dat.update_all')}
       onclick={() => updateAll()}
     >
@@ -783,6 +815,22 @@
   {:else if files.length === 0}
     <div class="card">
       <EmptyState title={$t('dat.no_files_title')} description={$t('dat.no_files')} />
+      <div class="dat-sets" data-testid="dat-standard-sets">
+        <span class="dat-sets-label">{$t('dat.sets_title')}</span>
+        <div class="dat-sets-row">
+          {#each STANDARD_SETS as set (set.id)}
+            <Button
+              variant="secondary"
+              loading={installingSet === set.id}
+              disabled={installingSet !== null}
+              onclick={() => installSet(set)}
+            >
+              {set.label}
+            </Button>
+          {/each}
+        </div>
+        <p class="dat-sets-hint">{$t('dat.sets_hint')}</p>
+      </div>
     </div>
   {:else}
     <div class="dat-workspace" class:detail-open={selectedFile !== null}>
@@ -1554,6 +1602,33 @@
     padding: 3px 8px;
     color: var(--primary);
     letter-spacing: 0.2px;
+  }
+
+  .dat-sets {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: 0 var(--spacing-4) var(--spacing-6);
+  }
+
+  .dat-sets-label {
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .dat-sets-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--spacing-2);
+  }
+
+  .dat-sets-hint {
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--fg-secondary);
+    text-align: center;
   }
 
   .qs-empty-state {
