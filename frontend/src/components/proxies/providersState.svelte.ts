@@ -833,12 +833,11 @@ export class ProvidersState {
 
   async setActiveNode(subId: string, nodeTag: string) {
     try {
-      const res = await apiFetch(
-        `/api/subscriptions/active?id=${subId}&tag=${encodeURIComponent(nodeTag)}`,
-        {
-          method: 'POST'
-        }
-      );
+      const res = await apiFetch(`/api/subscriptions/active?id=${encodeURIComponent(subId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ node_tag: nodeTag })
+      });
       if (res.status === 401) return;
       if (res.ok) {
         showToast('success', get(t)('app.success'));

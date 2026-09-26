@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -401,21 +400,11 @@ func (s *SubscriptionService) fragmentOutboundCount(path string) int {
 }
 
 func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {
-	safeID := filepath.Base(sub.ID)
-	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
-	if matched, _ := regexp.MatchString(`^[a-z0-9_-]+$`, safeID); !matched {
-		safeID = "safe_id"
-	}
-	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", safeID))
+	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", subscriptionSafeID(sub)))
 }
 
 func (s *SubscriptionService) getRoutingFragmentPath(sub *Subscription) string {
-	safeID := filepath.Base(sub.ID)
-	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
-	if matched, _ := regexp.MatchString(`^[a-z0-9_-]+$`, safeID); !matched {
-		safeID = "safe_id"
-	}
-	return filepath.Join(s.configDir, fmt.Sprintf("05_routing.%s.json", safeID))
+	return filepath.Join(s.configDir, fmt.Sprintf("05_routing.%s.json", subscriptionSafeID(sub)))
 }
 
 func (s *SubscriptionService) writeRoutingFragment(path string, sub *Subscription, tags []string) error {
@@ -678,9 +667,11 @@ func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) e
 	return nil
 }
 
-// SetActiveNode перемещает ноду с указанным тегом на первую позицию в
-// 04_outbounds.{id}.json. XRay читает outbounds по порядку и использует первый
-// в качестве активного. Доступно только при routing_mode = "manual".
+// SetActiveNode делает узел подписки дефолтным outbound Xray (SUBS-05): копия
+// узла под стабильным тегом xcp-<id> пишется в собственный файл дефолта, который
+// Xray ставит первым в итоговом списке. Фрагмент подписки и файлы XKeen не
+// меняются. Дефолт глобально один: прежний дефолт других подписок сбрасывается.
+// Доступно только при routing_mode = "manual".
 func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) error {
 	s.mu.Lock()
 
@@ -697,64 +688,59 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 		s.mu.Unlock()
 		return fmt.Errorf("cannot set active node in auto routing mode (balancer is managing selection)")
 	}
-
-	fragmentPath := s.getFragmentPath(sub)
-	data, err := os.ReadFile(fragmentPath)
-	if err != nil {
+	if !sub.Enabled {
 		s.mu.Unlock()
-		return fmt.Errorf("outbounds file not found: %w", err)
+		return fmt.Errorf("subscription is disabled")
 	}
 
-	var wrapper struct {
-		Outbounds []Outbound `json:"outbounds"`
-	}
-	if err := json.Unmarshal(data, &wrapper); err != nil {
-		s.mu.Unlock()
-		return fmt.Errorf("parse outbounds: %w", err)
-	}
-
-	// Находим ноду по тегу
-	idx := -1
-	for i, ob := range wrapper.Outbounds {
-		if ob.Tag == nodeTag {
-			idx = i
+	nodeIdx := -1
+	for i := range sub.Nodes {
+		if sub.Nodes[i].Tag == nodeTag {
+			nodeIdx = i
 			break
 		}
 	}
-	if idx < 0 {
+	if nodeIdx < 0 {
 		s.mu.Unlock()
-		return fmt.Errorf("node %q not found in subscription outbounds", nodeTag)
+		return fmt.Errorf("node %q: %w", nodeTag, ErrSelectionNodeNotFound)
+	}
+	if sub.Nodes[nodeIdx].Stub {
+		s.mu.Unlock()
+		return fmt.Errorf("node %q: %w", nodeTag, ErrStubNodeSelection)
+	}
+	if _, err := s.readFragmentOutboundLocked(sub, nodeTag); err != nil {
+		s.mu.Unlock()
+		return err
 	}
 
-	// Перемещаем на первую позицию
-	if idx > 0 {
-		selected := wrapper.Outbounds[idx]
-		newOutbounds := make([]Outbound, 0, len(wrapper.Outbounds))
-		newOutbounds = append(newOutbounds, selected)
-		newOutbounds = append(newOutbounds, wrapper.Outbounds[:idx]...)
-		newOutbounds = append(newOutbounds, wrapper.Outbounds[idx+1:]...)
-		wrapper.Outbounds = newOutbounds
+	// Снимок состояния для отката, если запись файла дефолта не удалась.
+	snapshot := make([]Subscription, len(s.subscriptions))
+	for i := range s.subscriptions {
+		snapshot[i] = s.subscriptions[i].Clone()
 	}
 
-	// Обновляем Active-флаг в Nodes
+	for i := range s.subscriptions {
+		s.subscriptions[i].IsDefault = false
+	}
+	sub.SelectedTag = nodeTag
+	sub.SelectedServer = sub.Nodes[nodeIdx].Server
+	sub.IsDefault = true
 	for i := range sub.Nodes {
 		sub.Nodes[i].Active = sub.Nodes[i].Tag == nodeTag
 	}
 
-	newData, err := json.MarshalIndent(wrapper, "", "  ")
+	changed, err := s.writeSelectionFilesLocked()
 	if err != nil {
-		s.mu.Unlock()
-		return err
-	}
-	if err := utils.AtomicWriteFile(fragmentPath, newData, 0600); err != nil {
+		copy(s.subscriptions, snapshot)
 		s.mu.Unlock()
 		return err
 	}
 	_ = s.save()
+	subID := sub.ID
 	s.mu.Unlock()
 
-	// Триггер рестарта через ConsoleService.
-	s.restartXkeenIfRunning(sub.ID, "active node switch")
-
+	if changed {
+		s.restartXkeenIfRunning(subID, "active node switch")
+	}
 	return nil
 }

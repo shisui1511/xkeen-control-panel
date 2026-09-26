@@ -343,6 +343,15 @@ type Subscription struct {
 	// лимит устройств). Выставляется при refresh, снимается первым рабочим ответом.
 	DeviceRejected bool `json:"device_rejected,omitempty"`
 
+	// SelectedTag — тег узла, выбранного пользователем в ручном режиме Xray
+	// (тег во фрагменте подписки). SelectedServer — его адрес хост:порт для
+	// поиска узла после refresh, когда теги пересчитались.
+	SelectedTag    string `json:"selected_tag,omitempty"`
+	SelectedServer string `json:"selected_server,omitempty"`
+	// IsDefault — выбранный узел этой подписки сейчас дефолтный outbound Xray
+	// (первый в итоговом мердже). Дефолт глобально один на все подписки.
+	IsDefault bool `json:"is_default,omitempty"`
+
 	// MihomoIntegrated — интегрирована ли подписка в config.yaml Mihomo
 	MihomoIntegrated bool `json:"mihomo_integrated"`
 
