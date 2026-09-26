@@ -399,8 +399,22 @@ func (s *SubscriptionService) fragmentOutboundCount(path string) int {
 	return len(wrapper.Outbounds)
 }
 
+// getFragmentPath — фрагмент outbounds подписки. Суффикс tail в имени велит Xray
+// дописывать его outbounds в конец итогового списка, чтобы фрагмент не
+// перехватывал дефолтный outbound у файлов XKeen (см. subscription_selection.go).
 func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {
-	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", subscriptionSafeID(sub)))
+	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.tail.json", subscriptionSafeID(sub)))
+}
+
+// legacyFragmentPath — прежнее имя фрагмента (без tail), которое подхватывается
+// миграцией при старте панели. Пустая строка, если имя совпало бы с файлом
+// дефолта: его переименовывать и удалять как фрагмент нельзя.
+func (s *SubscriptionService) legacyFragmentPath(sub *Subscription) string {
+	path := filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", subscriptionSafeID(sub)))
+	if path == s.selectionDefaultPath() {
+		return ""
+	}
+	return path
 }
 
 func (s *SubscriptionService) getRoutingFragmentPath(sub *Subscription) string {

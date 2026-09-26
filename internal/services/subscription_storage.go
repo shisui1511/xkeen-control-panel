@@ -202,6 +202,8 @@ func (s *SubscriptionService) load() {
 		}
 	}
 
+	s.migrateLegacyFragmentsLocked()
+
 	// Миграция кэш-файлов со старой схемы "sub_<id>_*" на схему по имени провайдера.
 	for i := range s.subscriptions {
 		safeID := invalidIDCharsRe.ReplaceAllString(strings.ToLower(filepath.Base(s.subscriptions[i].ID)), "_")
@@ -220,6 +222,43 @@ func (s *SubscriptionService) load() {
 			}
 		}
 	}
+}
+
+// migrateLegacyFragmentsLocked переименовывает фрагменты подписок со старого
+// имени 04_outbounds.<id>.json в 04_outbounds.<id>.tail.json, чтобы они больше
+// не перехватывали дефолтный outbound. Если существуют оба файла, лишний
+// legacy-файл удаляется, а новый не трогается. Трогает только собственные
+// файлы панели и ядро не перезапускает: новое имя вступит в силу при
+// следующем старте ядра. mu должен быть захвачен вызывающим.
+func (s *SubscriptionService) migrateLegacyFragmentsLocked() bool {
+	if s.configDir == "" {
+		return false
+	}
+	changed := false
+	for i := range s.subscriptions {
+		sub := &s.subscriptions[i]
+		legacy := s.legacyFragmentPath(sub)
+		if legacy == "" {
+			continue
+		}
+		if _, err := os.Stat(legacy); err != nil {
+			continue
+		}
+		current := s.getFragmentPath(sub)
+		if _, err := os.Stat(current); err == nil {
+			if err := os.Remove(legacy); err == nil {
+				changed = true
+			}
+			continue
+		}
+		if err := os.Rename(legacy, current); err != nil {
+			log.Printf("[Subscriptions] Failed to rename fragment %s: %v", filepath.Base(legacy), err)
+			continue
+		}
+		changed = true
+		log.Printf("[Subscriptions] Fragment renamed for tail merge: %s", filepath.Base(current))
+	}
+	return changed
 }
 
 func (s *SubscriptionService) save() error {
@@ -487,6 +526,9 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			// Clean up Xray if it was enabled and is now disabled
 			if existing.EnableXray && !sub.EnableXray {
 				os.Remove(s.getFragmentPath(existing))
+				if legacy := s.legacyFragmentPath(existing); legacy != "" {
+					os.Remove(legacy)
+				}
 				os.Remove(s.getRoutingFragmentPath(existing))
 				existing.LastHash = ""
 				needRestart = true
@@ -555,6 +597,25 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				existing.MihomoGroups = sub.MihomoGroups
 			}
 
+			// Подписка перестала подходить для выбора узла (Xray или подписка
+			// выключены, режим auto): выбор снимается, файл дефолта
+			// перестраивается, дефолтом снова становится первый outbound XKeen.
+			if existing.SelectedTag != "" && !selectionEligible(existing) {
+				existing.SelectedTag = ""
+				existing.SelectedServer = ""
+				existing.IsDefault = false
+				for n := range existing.Nodes {
+					existing.Nodes[n].Active = false
+				}
+				changed, err := s.writeSelectionFilesLocked()
+				if err != nil {
+					log.Printf("[Subscriptions] failed to rebuild default node file after update of %s: %v", existing.ID, err)
+				}
+				if changed {
+					needRestart = true
+				}
+			}
+
 			// Если интеграция Mihomo включена (или была только что включена), обновляем/добавляем провайдер и привязываем его к группам
 			if existing.EnableMihomo {
 				s.mihomoMu.Lock()
@@ -612,6 +673,7 @@ func (s *SubscriptionService) Delete(id string) error {
 
 	enableXray := sub.EnableXray
 	enableMihomo := sub.EnableMihomo
+	hadSelection := sub.SelectedTag != ""
 
 	// Remove from list
 	newList := make([]Subscription, 0, len(s.subscriptions)-1)
@@ -625,7 +687,15 @@ func (s *SubscriptionService) Delete(id string) error {
 	// Delete managed fragment files.
 	if enableXray {
 		os.Remove(s.getFragmentPath(sub))
+		if legacy := s.legacyFragmentPath(sub); legacy != "" {
+			os.Remove(legacy)
+		}
 		os.Remove(s.getRoutingFragmentPath(sub)) // noop если файла нет
+	}
+	if hadSelection {
+		if _, err := s.writeSelectionFilesLocked(); err != nil {
+			log.Printf("[Subscriptions] failed to rebuild default node file after delete of %s: %v", safeID, err)
+		}
 	}
 	if enableMihomo {
 		configDir := s.mihomoConfigDir

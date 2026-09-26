@@ -109,7 +109,7 @@ func TestSubscriptionE2E(t *testing.T) {
 	}
 
 	// 5. Проверка генерации файлов конфигурации Xray
-	fragmentFile := filepath.Join(xrayDir, "04_outbounds."+id+".json")
+	fragmentFile := filepath.Join(xrayDir, "04_outbounds."+id+".tail.json")
 	if _, err := os.Stat(fragmentFile); os.IsNotExist(err) {
 		t.Fatalf("fragment file %s was not created", fragmentFile)
 	}

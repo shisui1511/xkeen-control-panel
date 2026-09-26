@@ -50,7 +50,7 @@ func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 
 	id := svc.List()[0].ID
 
-	fragmentPath := filepath.Join(xrayDir, fmt.Sprintf("04_outbounds.%s.json", id))
+	fragmentPath := filepath.Join(xrayDir, fmt.Sprintf("04_outbounds.%s.tail.json", id))
 	_ = os.WriteFile(fragmentPath, []byte(`[]`), 0600)
 
 	updatedSub := sub
@@ -1248,7 +1248,7 @@ func TestRefreshXray_StoppedKernelIsNotStarted(t *testing.T) {
 	if calls, _ := os.ReadFile(logFile); strings.Contains(string(calls), "-restart") {
 		t.Fatalf("xkeen -restart must not start a stopped kernel, calls: %q", calls)
 	}
-	if _, err := os.Stat(filepath.Join(xrayDir, "04_outbounds.s.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(xrayDir, "04_outbounds.s.tail.json")); err != nil {
 		t.Errorf("fragment must still be written: %v", err)
 	}
 
@@ -1285,7 +1285,7 @@ func (e *stubProviderEnv) restartCalls(t *testing.T) int {
 
 func (e *stubProviderEnv) fragment(t *testing.T, id string) []byte {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(e.xrayDir, "04_outbounds."+id+".json"))
+	data, err := os.ReadFile(filepath.Join(e.xrayDir, "04_outbounds."+id+".tail.json"))
 	if err != nil {
 		t.Fatalf("read fragment: %v", err)
 	}

@@ -229,3 +229,128 @@ func TestSelectNode_StoppedKernelNotStarted(t *testing.T) {
 		t.Errorf("default file must still be written: %v", err)
 	}
 }
+
+func TestNoSelection_BaseDirectStaysFirst(t *testing.T) {
+	env := newOrderEnv(t)
+
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	if len(merged) != 4 {
+		t.Fatalf("expected direct, block and 2 subscription nodes, got %d", len(merged))
+	}
+	if merged[0]["tag"] != "direct" {
+		t.Fatalf("without selection the first outbound must stay direct, got %v", merged[0]["tag"])
+	}
+	if _, err := os.Stat(filepath.Join(env.xrayDir, selectionDefaultFileName)); !os.IsNotExist(err) {
+		t.Error("default file must not exist without a selection")
+	}
+	if _, err := os.Stat(filepath.Join(env.xrayDir, "04_outbounds.sub_1.tail.json")); err != nil {
+		t.Errorf("subscription fragment must use the tail name: %v", err)
+	}
+}
+
+func TestLegacyFragmentMigratedOnLoad(t *testing.T) {
+	tmp := t.TempDir()
+	xrayDir := filepath.Join(tmp, "xray")
+	if err := os.MkdirAll(xrayDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	first := NewSubscriptionService(tmp, xrayDir, tmp)
+	for _, id := range []string{"sub_1", "sub_2"} {
+		if err := first.Add(&Subscription{ID: id, Name: id, URL: "https://example.com/" + id, Enabled: true, EnableXray: true, Interval: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	const legacyBody = `{"outbounds":[{"tag":"legacy","protocol":"freedom"}]}`
+	const tailBody = `{"outbounds":[{"tag":"already-new","protocol":"freedom"}]}`
+	legacy1 := filepath.Join(xrayDir, "04_outbounds.sub_1.json")
+	tail1 := filepath.Join(xrayDir, "04_outbounds.sub_1.tail.json")
+	legacy2 := filepath.Join(xrayDir, "04_outbounds.sub_2.json")
+	tail2 := filepath.Join(xrayDir, "04_outbounds.sub_2.tail.json")
+	baseBody := []byte(orderBaseOutbounds)
+	basePath := filepath.Join(xrayDir, "04_outbounds.json")
+	for path, body := range map[string][]byte{
+		legacy1:  []byte(legacyBody),
+		legacy2:  []byte(legacyBody),
+		tail2:    []byte(tailBody),
+		basePath: baseBody,
+	} {
+		if err := os.WriteFile(path, body, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	NewSubscriptionService(tmp, xrayDir, tmp)
+
+	// Только legacy: переименован, содержимое то же.
+	if _, err := os.Stat(legacy1); !os.IsNotExist(err) {
+		t.Error("legacy fragment must be renamed")
+	}
+	if got, err := os.ReadFile(tail1); err != nil || string(got) != legacyBody {
+		t.Errorf("renamed fragment content = %q, err %v", got, err)
+	}
+	// Оба файла: legacy удалён, новый не тронут.
+	if _, err := os.Stat(legacy2); !os.IsNotExist(err) {
+		t.Error("legacy fragment must be removed when the tail file already exists")
+	}
+	if got, _ := os.ReadFile(tail2); string(got) != tailBody {
+		t.Errorf("existing tail fragment must stay untouched, got %q", got)
+	}
+	// Файлы XKeen не тронуты.
+	if got, _ := os.ReadFile(basePath); !bytes.Equal(got, baseBody) {
+		t.Error("04_outbounds.json must not be touched by migration")
+	}
+}
+
+func TestSelection_DroppedOnDeleteDisableAuto(t *testing.T) {
+	cases := []struct {
+		name string
+		act  func(env *stubProviderEnv) error
+		gone bool
+	}{
+		{"delete", func(env *stubProviderEnv) error { return env.svc.Delete("sub_1") }, true},
+		{"disable xray", func(env *stubProviderEnv) error {
+			return env.svc.Update("sub_1", &Subscription{Name: "S", URL: "https://example.com/s", Enabled: true, EnableXray: false, Interval: 1})
+		}, false},
+		{"disable subscription", func(env *stubProviderEnv) error {
+			return env.svc.Update("sub_1", &Subscription{Name: "S", URL: "https://example.com/s", Enabled: false, EnableXray: true, Interval: 1})
+		}, false},
+		{"auto routing", func(env *stubProviderEnv) error {
+			return env.svc.Update("sub_1", &Subscription{Name: "S", URL: "https://example.com/s", Enabled: true, EnableXray: true, RoutingMode: "auto", Interval: 1})
+		}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newOrderEnv(t)
+			tag := nodeTagByServer(t, env, "sub_1", "2.2.2.2:443")
+			if err := env.svc.SetActiveNode("sub_1", tag); err != nil {
+				t.Fatalf("SetActiveNode: %v", err)
+			}
+			if merged := simulateXrayConfdirMerge(t, env.xrayDir); merged[0]["tag"] != "xcp-sub_1" {
+				t.Fatalf("precondition: selected node must be first, got %v", merged[0]["tag"])
+			}
+
+			if err := tc.act(env); err != nil {
+				t.Fatalf("action: %v", err)
+			}
+
+			if _, err := os.Stat(filepath.Join(env.xrayDir, selectionDefaultFileName)); !os.IsNotExist(err) {
+				t.Error("default file must be removed")
+			}
+			if merged := simulateXrayConfdirMerge(t, env.xrayDir); len(merged) == 0 || merged[0]["tag"] != "direct" {
+				t.Errorf("first outbound must be direct again, got %v", merged)
+			}
+			if !tc.gone {
+				sub := env.svc.Get("sub_1")
+				if sub == nil || sub.SelectedTag != "" || sub.IsDefault || sub.SelectedServer != "" {
+					t.Errorf("selection must be dropped: %+v", sub)
+				}
+				for _, n := range sub.Nodes {
+					if n.Active {
+						t.Errorf("node %s must not stay active", n.Tag)
+					}
+				}
+			}
+		})
+	}
+}

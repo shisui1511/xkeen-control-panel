@@ -401,7 +401,7 @@ func TestSubscriptionSetActive(t *testing.T) {
 	id := subSvc.List()[0].ID
 
 	// Write mock outbounds file
-	fragmentPath := filepath.Join(api.cfg.XRayConfigDir, "04_outbounds."+id+".json")
+	fragmentPath := filepath.Join(api.cfg.XRayConfigDir, "04_outbounds."+id+".tail.json")
 	outboundsContent := `{"outbounds": [{"tag": "node-1", "protocol": "vless"}, {"tag": "node-2", "protocol": "vless"}]}`
 	if err := os.WriteFile(fragmentPath, []byte(outboundsContent), 0644); err != nil {
 		t.Fatal(err)
