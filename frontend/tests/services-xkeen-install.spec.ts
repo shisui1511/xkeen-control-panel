@@ -176,6 +176,51 @@ test.describe('Services page — XKeen installer card', () => {
     await expect(page.getByTestId('xkeen-install-card')).toHaveCount(0);
   });
 
+  test('reloads XKeen settings once installation completes', async ({ page }) => {
+    const status = { installed: false, available: true };
+    await mockCommonRoutes(page, status);
+    let settingsCalls = 0;
+    await page.route('**/api/xkeen/settings', async (route) => {
+      settingsCalls++;
+      if (!status.installed) {
+        await route.fulfill({ status: 404, json: { success: false, error: 'not installed' } });
+        return;
+      }
+      await route.fulfill({
+        json: {
+          success: true,
+          data: [
+            {
+              kind: 'port_proxying',
+              path: '/opt/etc/xkeen/port_proxying.lst',
+              exists: true,
+              content: '#80\n',
+              entries: 0,
+              issues: []
+            }
+          ]
+        }
+      });
+    });
+    let socket: import('@playwright/test').WebSocketRoute | null = null;
+    await page.routeWebSocket(/\/api\/terminal\/ws/, (ws) => {
+      socket = ws;
+    });
+
+    await page.clock.install();
+    await page.goto('/#/services');
+    await expect.poll(() => settingsCalls).toBe(1);
+    await page.getByTestId('xkeen-install-start').click();
+    await expect.poll(() => socket !== null).toBe(true);
+
+    status.installed = true;
+    socket!.send(JSON.stringify({ type: 'exit', code: 0 }));
+    const modal = page.getByTestId('xkeen-install-modal');
+    await expect(modal.locator('.install-result.ok')).toBeVisible();
+    await expect.poll(() => settingsCalls).toBeGreaterThan(1);
+    await expect(page.getByText('/opt/etc/xkeen/port_proxying.lst')).toBeAttached();
+  });
+
   test('shows the installer exit code on failure', async ({ page }) => {
     await mockCommonRoutes(page, { installed: false, available: true });
     await page.routeWebSocket(/\/api\/terminal\/ws/, (ws) => {

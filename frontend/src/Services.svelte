@@ -1363,12 +1363,16 @@
   </div>
 
   <div class="services-stack">
-    <XKeenSettingsCard
-      onrestarted={() => {
-        fetchStatus();
-        fetchRestartLog();
-      }}
-    />
+    <!-- Настройки читаются при монтировании: после установки XKeen из панели
+         карточку нужно перечитать, иначе она ждёт установки до F5 -->
+    {#key xkeenInstalled === true && !xkeenSetupIncomplete}
+      <XKeenSettingsCard
+        onrestarted={() => {
+          fetchStatus();
+          fetchRestartLog();
+        }}
+      />
+    {/key}
 
     {#if $capabilities?.kernels?.mihomo?.installed}
       <MihomoProfilesCard
