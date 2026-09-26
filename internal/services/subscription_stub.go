@@ -248,24 +248,61 @@ func filterStubsFromProviderPayload(payload []byte, format string) (filtered []b
 	return payload, countProviderNodes(string(payload)), 0
 }
 
+// filterStubsFromClashYAML вырезает из секции proxies блоки-заглушки прямо в
+// исходном тексте: остальные строки (включая блоки, которые не удалось
+// разобрать, например flow-стиль) остаются побайтно как были.
 func filterStubsFromClashYAML(payload []byte) ([]byte, int, int) {
-	blocks, _ := ParseMihomoSubscriptionBlocks(string(payload))
-	var keep []string
-	stubs := 0
-	for _, block := range blocks {
-		if isStubClashNode(ParseClashProxyNode(block)) {
+	lines := strings.Split(string(payload), "\n")
+	start, end, indent := findTopLevelSection(lines, "proxies")
+	if start == -1 {
+		return payload, countProviderNodes(string(payload)), 0
+	}
+
+	blocks := extractProxyBlocks(lines, start, end, indent)
+	drop := make([]bool, len(lines))
+	kept, stubs := 0, 0
+	for _, b := range blocks {
+		blockEnd := trimTrailingEmpty(lines, b.StartLine, b.EndLine)
+		if isStubClashNode(ParseClashProxyNode(reindentProxyBlock(lines[b.StartLine:blockEnd], indent))) {
 			stubs++
+			for i := b.StartLine; i < b.EndLine; i++ {
+				drop[i] = true
+			}
 			continue
 		}
-		keep = append(keep, block)
+		kept++
 	}
 	if stubs == 0 {
-		return payload, len(blocks), 0
+		return payload, kept, 0
 	}
-	if len(keep) == 0 {
+	if kept == 0 {
 		return []byte("proxies: []\n"), 0, stubs
 	}
-	return []byte("proxies:\n" + strings.Join(keep, "\n") + "\n"), len(keep), stubs
+
+	out := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if !drop[i] {
+			out = append(out, line)
+		}
+	}
+	return []byte(strings.Join(out, "\n")), kept, stubs
+}
+
+// reindentProxyBlock приводит блок прокси к отступу 2, которого ждёт ParseClashProxyNode.
+func reindentProxyBlock(blockLines []string, baseIndent int) string {
+	if baseIndent == 2 {
+		return strings.Join(blockLines, "\n")
+	}
+	out := make([]string, len(blockLines))
+	for i, l := range blockLines {
+		t := strings.TrimLeft(l, " \t")
+		ni := 2 + (len(l) - len(t) - baseIndent)
+		if ni < 0 {
+			ni = 0
+		}
+		out[i] = strings.Repeat(" ", ni) + t
+	}
+	return strings.Join(out, "\n")
 }
 
 func filterStubsFromShareLinks(payload []byte) ([]byte, int, int) {
