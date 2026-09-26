@@ -811,3 +811,119 @@ func TestConvertSubscriptionNodesToClashYAML_SafeEscapingDNSAndRawOptions(t *tes
 		t.Errorf("expected RawOptions int in YAML, got:\n%s", yaml)
 	}
 }
+
+func stubTestVless(tag, addr string, port int, id string) Outbound {
+	return Outbound{
+		Tag:      tag,
+		Protocol: "vless",
+		Settings: map[string]interface{}{
+			"vnext": []interface{}{
+				map[string]interface{}{
+					"address": addr,
+					"port":    float64(port),
+					"users":   []interface{}{map[string]interface{}{"id": id, "encryption": "none"}},
+				},
+			},
+		},
+	}
+}
+
+func TestOutboundStubReason_Table(t *testing.T) {
+	const okID = "11111111-2222-3333-4444-555555555555"
+	cases := []struct {
+		name string
+		ob   Outbound
+		want string
+	}{
+		{"audit fixture: 0.0.0.0:1 + zero uuid", stubTestVless("a", "0.0.0.0", 1, zeroUUID), stubReasonAddress},
+		{"loopback address", stubTestVless("a", "127.0.0.1", 443, okID), stubReasonAddress},
+		{"empty address", stubTestVless("a", "", 443, okID), stubReasonAddress},
+		{"port zero", stubTestVless("a", "1.2.3.4", 0, okID), stubReasonPort},
+		{"port one", stubTestVless("a", "1.2.3.4", 1, okID), stubReasonPort},
+		{"zero uuid on working host", stubTestVless("a", "1.2.3.4", 443, zeroUUID), stubReasonUUID},
+		{"zero uuid uppercase", stubTestVless("a", "1.2.3.4", 443, "00000000-0000-0000-0000-000000000000"), stubReasonUUID},
+		{
+			"trojan password is zero uuid",
+			Outbound{Tag: "t", Protocol: "trojan", Settings: map[string]interface{}{
+				"servers": []interface{}{map[string]interface{}{"address": "1.2.3.4", "port": float64(443), "password": zeroUUID}},
+			}},
+			stubReasonUUID,
+		},
+		{
+			"flat settings.address",
+			Outbound{Tag: "f", Protocol: "vless", Settings: map[string]interface{}{"address": "0.0.0.0", "port": float64(443)}},
+			stubReasonAddress,
+		},
+		{
+			"flat settings port as string",
+			Outbound{Tag: "f", Protocol: "vless", Settings: map[string]interface{}{"address": "1.2.3.4", "port": "1"}},
+			stubReasonPort,
+		},
+		{
+			"wireguard endpoint 0.0.0.0",
+			Outbound{Tag: "w", Protocol: "wireguard", Settings: map[string]interface{}{
+				"peers": []interface{}{map[string]interface{}{"endpoint": "0.0.0.0:51820"}},
+			}},
+			stubReasonAddress,
+		},
+		{"working vless", stubTestVless("a", "1.2.3.4", 443, okID), ""},
+		{"no address at all", Outbound{Tag: "x", Protocol: "vmess"}, ""},
+		{"unknown settings shape", Outbound{Tag: "x", Protocol: "vmess", Settings: map[string]interface{}{"foo": "bar"}}, ""},
+		{"stub-like name on working host", stubTestVless("Превышен лимит устройств", "1.2.3.4", 443, okID), ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ob := tc.ob
+			if got := outboundStubReason(&ob); got != tc.want {
+				t.Errorf("outboundStubReason = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWriteFragment_FiltersStubNodes(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	sub := &Subscription{ID: "stubs", Name: "stubs"}
+
+	outbounds := []Outbound{
+		stubTestVless("Превышен лимит устройств", "0.0.0.0", 1, zeroUUID),
+		stubTestVless("Превышен лимит устройств", "0.0.0.0", 1, zeroUUID),
+		stubTestVless("working", "1.2.3.4", 443, "11111111-2222-3333-4444-555555555555"),
+	}
+
+	path := svc.getFragmentPath(sub)
+	nodes, err := svc.writeFragment(path, outbounds, sub)
+	if err != nil {
+		t.Fatalf("writeFragment failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wrapper struct {
+		Outbounds []Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		t.Fatal(err)
+	}
+	if len(wrapper.Outbounds) != 1 || wrapper.Outbounds[0].Tag != "working" {
+		t.Fatalf("fragment must contain only the working outbound, got %+v", wrapper.Outbounds)
+	}
+	if len(nodes) != 3 {
+		t.Fatalf("returned nodes must include stubs for the UI: got %d, want 3", len(nodes))
+	}
+	stubs := 0
+	for _, n := range nodes {
+		if n.Stub {
+			stubs++
+			if n.StubReason != stubReasonAddress {
+				t.Errorf("stub reason = %q, want %q", n.StubReason, stubReasonAddress)
+			}
+		}
+	}
+	if stubs != 2 {
+		t.Errorf("stub nodes = %d, want 2", stubs)
+	}
+}

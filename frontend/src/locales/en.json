@@ -2052,6 +2052,8 @@
   "subscr.sockopt.saved": "Socket options saved",
   "subscr.health.not_applicable": "Not applicable",
   "subscr.health.not_applicable_hint": "TCP health check is not applicable for UDP protocols (WireGuard)",
+  "subscr.node_stub_badge": "Provider rejected this device",
+  "subscr.node_stub_hint": "Provider stub node: address 0.0.0.0/127.0.0.1, port 0–1 or zero UUID. The node is not used.",
   "editor.smart_merge_applied": "Configuration applied via Smart Merge: {nodes}, {providers}, {rules} ({userRules})",
   "editor.smart_merge_applied_nodes": "{count} nodes",
   "editor.smart_merge_applied_nodes_one": "{count} node",

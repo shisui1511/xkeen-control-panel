@@ -79,6 +79,11 @@ type SubscriptionNode struct {
 
 	// DialerProxy holds the tag of the outbound node to chain/cascade through (D-11).
 	DialerProxy string `json:"dialer_proxy,omitempty"`
+
+	// Stub — узел-заглушка провайдера (адрес 0.0.0.0/127.0.0.1, порт 0–1 или нулевой UUID).
+	// Такие узлы не пишутся в конфиги ядра и не выбираются в UI.
+	Stub       bool   `json:"stub,omitempty"`
+	StubReason string `json:"stub_reason,omitempty"` // address | port | uuid
 }
 
 // AWGOptions содержит параметры обфускации протокола AmneziaWG (Classic, 2.0, 3.1).

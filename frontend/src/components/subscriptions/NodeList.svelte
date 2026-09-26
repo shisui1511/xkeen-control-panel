@@ -19,6 +19,8 @@
     dialer_proxy?: string;
     dialect?: string;
     awg?: any;
+    stub?: boolean;
+    stub_reason?: string;
   }
 
   export interface DialerProxyTarget {
@@ -284,12 +286,14 @@
             : node.protocol === 'wireguard'
               ? `${node.transport && node.transport !== 'udp' ? node.transport : ''}${node.security && node.security !== 'none' ? (node.transport ? ' · ' : '') + node.security : ''}`
               : `${node.protocol || ''}${node.protocol && node.transport ? ' · ' + node.transport : ''}${node.security && node.security !== 'none' ? ' · ' + node.security : ''}`}
-        <div class="sub-node-row" class:active={isNodeActive}>
+        <div class="sub-node-row" class:active={isNodeActive} class:stub={node.stub}>
           <button
             type="button"
             class="sub-node-select-btn"
+            disabled={node.stub}
+            aria-disabled={node.stub ? 'true' : undefined}
             onclick={() => {
-              if (enableXray) {
+              if (enableXray && !node.stub) {
                 onSetActiveNode(subId, node.tag);
               }
             }}
@@ -373,7 +377,7 @@
           </button>
 
           <!-- Dialer Proxy (Cascade) right (D-11) -->
-          {#if enableXray}
+          {#if enableXray && !node.stub}
             <div class="sub-node-dialer-proxy-container" data-testid="dialer-proxy-container">
               {#if dialerProxyTargets && dialerProxyTargets.length > 0}
                 <Select
@@ -415,7 +419,15 @@
 
           <!-- Status / Ping right -->
           <div class="sub-node-status-container">
-            {#if node.protocol === 'wireguard'}
+            {#if node.stub}
+              <span
+                class="sub-node-na-badge sub-node-stub-badge"
+                data-testid="stub-node-badge"
+                title={$t('subscr.node_stub_hint')}
+              >
+                {$t('subscr.node_stub_badge')}
+              </span>
+            {:else if node.protocol === 'wireguard'}
               <span
                 class="sub-node-na-badge"
                 data-testid="wireguard-check-na"
@@ -994,6 +1006,17 @@
     height: 28px !important;
     font-size: var(--font-size-xs) !important;
     padding: 2px 28px 2px 8px !important;
+  }
+
+  .sub-node-row.stub .sub-node-select-btn {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .sub-node-stub-badge {
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
   }
 
   .sub-node-na-badge {

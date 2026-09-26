@@ -123,6 +123,8 @@ func (s *SubscriptionService) outboundsToNodes(outbounds []Outbound, sub *Subscr
 		node.Tag = outbounds[i].Tag
 		node.Protocol = outbounds[i].Protocol
 		node.Server = extractServer(&outbounds[i])
+		node.StubReason = outboundStubReason(&outbounds[i])
+		node.Stub = node.StubReason != ""
 
 		// Извлекаем transport и security
 		node.Transport = "tcp"
@@ -1020,7 +1022,9 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 	allowedOutbounds := make([]Outbound, 0, len(outbounds))
 	allowedNodes := make([]SubscriptionNode, 0, len(outbounds))
 	for i, node := range nodes {
-		if allowedXrayProtocols[node.Protocol] {
+		if node.Stub {
+			log.Printf("[Subscriptions] Skipping provider stub %q (%s)", outbounds[i].Tag, node.StubReason)
+		} else if allowedXrayProtocols[node.Protocol] {
 			allowedOutbounds = append(allowedOutbounds, outbounds[i])
 			allowedNodes = append(allowedNodes, node)
 			if node.Protocol == "wireguard" && node.AWG != nil && !node.AWG.IsEmpty() {
@@ -1083,7 +1087,7 @@ func (s *SubscriptionService) collectActiveXrayTags(currentSub *Subscription, cu
 				continue
 			}
 			for _, node := range sub.Nodes {
-				if allowedXrayProtocols[node.Protocol] && node.Tag != "" {
+				if allowedXrayProtocols[node.Protocol] && node.Tag != "" && !node.Stub {
 					tags[node.Tag] = true
 				}
 			}
