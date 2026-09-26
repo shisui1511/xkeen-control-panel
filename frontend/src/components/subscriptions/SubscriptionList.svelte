@@ -2,6 +2,7 @@
   import { t, currentLang } from '../../i18n';
   import { pluralize } from '../../i18n';
   import { formatTimeUntil, subscriptionDisplayName } from '../proxies/providersState.svelte';
+  import { capabilities } from '../../stores';
   import NodeList from './NodeList.svelte';
 
   interface Subscription {
@@ -16,6 +17,9 @@
     enable_mihomo: boolean;
     mihomo_integrated: boolean;
     hwid_locked: boolean;
+    device_rejected?: boolean;
+    hwid_token?: string;
+    profile_web_page_url?: string;
     last_update: string;
     last_error?: string;
     proxy_count?: number;
@@ -124,6 +128,17 @@
     dialerProxyTargets?: Record<string, any[]>;
     onSetDialerProxy?: (subId: string, nodeTag: string, targetTag: string) => void;
   } = $props();
+
+  // Ссылка на кабинет провайдера приходит из заголовка ответа: пропускаем только http/https.
+  function safeCabinetUrl(raw?: string): string {
+    if (!raw) return '';
+    try {
+      const u = new URL(raw.trim());
+      return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : '';
+    } catch {
+      return '';
+    }
+  }
 
   function isFormatError(err?: string): boolean {
     if (!err) return false;
@@ -492,6 +507,32 @@
         </div>
       </div>
 
+      {#if sub.device_rejected}
+        {@const cabinetUrl = safeCabinetUrl(sub.profile_web_page_url)}
+        <div class="sub-device-rejected" role="alert" data-testid="device-rejected-banner">
+          <div class="sub-device-rejected-title">{$t('subscr.device_rejected.title')}</div>
+          <div class="sub-device-rejected-text">
+            {$t('subscr.device_rejected.text', {
+              hwid: sub.hwid_token || $capabilities?.global_hwid || '—'
+            })}
+          </div>
+          {#if (sub.proxy_count ?? 0) > 0}
+            <div class="sub-device-rejected-text">{$t('subscr.device_rejected.kept_previous')}</div>
+          {/if}
+          {#if cabinetUrl}
+            <a
+              class="sub-device-rejected-link"
+              data-testid="device-rejected-cabinet-link"
+              href={cabinetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {$t('subscr.device_rejected.cabinet_link')}
+            </a>
+          {/if}
+        </div>
+      {/if}
+
       {#if sub.last_error}
         {@const nodeCount = sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0}
         {@const errorColor = nodeCount > 0 ? 'var(--warning, #f0b450)' : 'var(--danger)'}
@@ -850,6 +891,36 @@
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 160px;
+  }
+
+  /* D-16: провайдер отклонил устройство, все узлы — заглушки */
+  .sub-device-rejected {
+    margin: 0 0 8px 34px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+    border-radius: var(--radius-md, 6px);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: var(--font-size-sm, 13px);
+    line-height: 1.4;
+    word-break: break-word;
+  }
+
+  .sub-device-rejected-title {
+    color: var(--danger);
+    font-weight: 600;
+  }
+
+  .sub-device-rejected-text {
+    color: var(--fg-secondary);
+  }
+
+  .sub-device-rejected-link {
+    align-self: flex-start;
+    color: var(--accent);
+    font-weight: 600;
   }
 
   .sub-header-right {

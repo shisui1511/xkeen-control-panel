@@ -26,6 +26,9 @@ export interface Subscription {
   enable_mihomo: boolean;
   mihomo_integrated: boolean;
   hwid_locked: boolean;
+  device_rejected?: boolean;
+  hwid_token?: string;
+  profile_web_page_url?: string;
   last_update: string;
   last_error?: string;
   proxy_count?: number;
@@ -276,13 +279,16 @@ export class ProvidersState {
 
       const results = await Promise.allSettled(tasks);
 
+      // Успех показываем только после перезагрузки списка: провайдер мог
+      // отклонить устройство, тогда узлы не обновлены и успех был бы ложью.
+      const successMessages: string[] = [];
       for (const res of results) {
         if (res.status === 'fulfilled') {
           const val = res.value;
           if (val.kernel === 'xray') {
-            showToast('success', get(t)('subscr.refresh.xray_started'));
+            successMessages.push(get(t)('subscr.refresh.xray_started'));
           } else {
-            showToast('success', get(t)('subscr.refresh.mihomo_started'));
+            successMessages.push(get(t)('subscr.refresh.mihomo_started'));
           }
         } else {
           const err = res.reason;
@@ -303,6 +309,13 @@ export class ProvidersState {
       }
 
       await this.loadSubscriptions();
+      if (this.subscriptions.find((s) => s.id === id)?.device_rejected) {
+        showToast('warning', get(t)('subscr.refresh.device_rejected'));
+      } else {
+        for (const message of successMessages) {
+          showToast('success', message);
+        }
+      }
       if (this.expandedSubs[id]) {
         await this.loadNodesBySource(id);
       }

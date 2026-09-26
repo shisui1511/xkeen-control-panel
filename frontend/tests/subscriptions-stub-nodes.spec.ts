@@ -173,4 +173,126 @@ test.describe('Subscriptions: узлы-заглушки провайдера (Ph
     await expect(workingRow.locator('[data-testid="stub-node-badge"]')).toHaveCount(0);
     await expect(workingRow.locator('.sub-node-select-btn')).toBeEnabled();
   });
+
+  test('4. баннер отказа провайдера показывает HWID, сохранённые узлы и ссылку на кабинет', async ({
+    page
+  }) => {
+    await mockSubscription(
+      page,
+      {
+        ...baseSub,
+        device_rejected: true,
+        hwid_token: 'D49C531AE27F',
+        profile_web_page_url: 'https://cabinet.example.org',
+        proxy_count: 2
+      },
+      [...stubNodes]
+    );
+    await page.goto('/#/subscriptions');
+
+    const banner = page.locator('[data-testid="device-rejected-banner"]');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('Провайдер отклонил устройство');
+    await expect(banner).toContainText('D49C531AE27F');
+    await expect(banner).toContainText('Прежние рабочие узлы сохранены');
+
+    const link = banner.locator('[data-testid="device-rejected-cabinet-link"]');
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute('href', 'https://cabinet.example.org/');
+    await expect(link).toHaveAttribute('rel', /noopener/);
+  });
+
+  test('5. без profile_web_page_url ссылки на кабинет нет, без сохранённых узлов строки о них нет', async ({
+    page
+  }) => {
+    await mockSubscription(
+      page,
+      { ...baseSub, device_rejected: true, hwid_token: 'D49C531AE27F', proxy_count: 0 },
+      [...stubNodes]
+    );
+    await page.goto('/#/subscriptions');
+
+    const banner = page.locator('[data-testid="device-rejected-banner"]');
+    await expect(banner).toBeVisible();
+    await expect(banner.locator('[data-testid="device-rejected-cabinet-link"]')).toHaveCount(0);
+    await expect(banner).not.toContainText('Прежние рабочие узлы сохранены');
+  });
+
+  test('6. ссылка javascript: в profile_web_page_url не выводится', async ({ page }) => {
+    await mockSubscription(
+      page,
+      {
+        ...baseSub,
+        device_rejected: true,
+        hwid_token: 'D49C531AE27F',
+        profile_web_page_url: 'javascript:alert(1)',
+        proxy_count: 1
+      },
+      [...stubNodes]
+    );
+    await page.goto('/#/subscriptions');
+
+    await expect(page.locator('[data-testid="device-rejected-banner"]')).toBeVisible();
+    await expect(page.locator('[data-testid="device-rejected-cabinet-link"]')).toHaveCount(0);
+  });
+
+  test('7. подписка без отказа не показывает баннер', async ({ page }) => {
+    await mockSubscription(page, { ...baseSub, proxy_count: 1 }, [workingNode]);
+    await page.goto('/#/subscriptions');
+    await expect(page.locator('#sub-card-sub-1')).toBeVisible();
+    await expect(page.locator('[data-testid="device-rejected-banner"]')).toHaveCount(0);
+  });
+
+  test('8. обновление с отказом провайдера даёт тост-предупреждение, а не успех', async ({
+    page
+  }) => {
+    let refreshed = false;
+    await page.route('**/api/proxy-providers', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          refreshed
+            ? { ...baseSub, device_rejected: true, hwid_token: 'D49C531AE27F', proxy_count: 1 }
+            : { ...baseSub, proxy_count: 1 }
+        ])
+      });
+    });
+    await page.route('**/api/subscriptions/nodes?id=sub-1', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([workingNode])
+      });
+    });
+    await page.route('**/api/subscriptions/refresh*', async (route: Route) => {
+      refreshed = true;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
+    await page.goto('/#/subscriptions');
+    const card = page.locator('#sub-card-sub-1');
+    await expect(card).toBeVisible();
+    await card.locator('button[title="Обновить"]').click();
+
+    const toasts = page.locator('.toast');
+    await expect(toasts.filter({ hasText: 'Провайдер отклонил устройство' })).toBeVisible();
+    await expect(toasts.filter({ hasText: 'обновление подписки запущено' })).toHaveCount(0);
+  });
+
+  test('9. обычное обновление по-прежнему показывает успех', async ({ page }) => {
+    await mockSubscription(page, { ...baseSub, proxy_count: 1 }, [workingNode]);
+    await page.route('**/api/subscriptions/refresh*', async (route: Route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
+    await page.goto('/#/subscriptions');
+    const card = page.locator('#sub-card-sub-1');
+    await expect(card).toBeVisible();
+    await card.locator('button[title="Обновить"]').click();
+
+    await expect(
+      page.locator('.toast').filter({ hasText: 'обновление подписки запущено' })
+    ).toBeVisible();
+  });
 });
