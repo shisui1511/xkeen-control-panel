@@ -1,10 +1,17 @@
 package services
 
 import (
+	"encoding/base64"
+	"errors"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 )
+
+// ErrProviderRejectedDevice сообщает, что провайдер вернул только узлы-заглушки:
+// он отклонил устройство, а рабочих узлов в ответе нет.
+var ErrProviderRejectedDevice = errors.New("provider rejected device: all nodes are stubs")
 
 // Признаки узла-заглушки провайдера. Провайдер, отклонивший устройство
 // (например, из-за лимита HWID), вместо рабочих узлов отдаёт фиктивные:
@@ -175,4 +182,124 @@ func countXrayWorkingAndStubs(outbounds []Outbound) (working int, stubs int) {
 		}
 	}
 	return working, stubs
+}
+
+// isStubClashNode сообщает, что разобранный блок прокси Clash — заглушка
+// провайдера. Блок без распознанного адреса и без нулевого UUID заглушкой не
+// считается: неразобранное не отбрасывается.
+func isStubClashNode(node SubscriptionNode) bool {
+	for _, cred := range []string{node.UUID, node.Password} {
+		if strings.EqualFold(strings.TrimSpace(cred), zeroUUID) {
+			return true
+		}
+	}
+	if node.Server == "" {
+		return false
+	}
+	host, portStr, err := net.SplitHostPort(node.Server)
+	if err != nil {
+		idx := strings.LastIndex(node.Server, ":")
+		if idx < 0 {
+			return isStubHost(node.Server)
+		}
+		host, portStr = node.Server[:idx], node.Server[idx+1:]
+	}
+	host = strings.Trim(host, "[]")
+	if isStubHost(host) {
+		return true
+	}
+	if port, ok := portFromValue(portStr); ok && port <= 1 {
+		return true
+	}
+	return false
+}
+
+// isStubShareLink сообщает, что строка share-ссылки — заглушка провайдера.
+// Строки, которые не удалось разобрать, заглушками не считаются.
+func isStubShareLink(line string) bool {
+	if ob := parseShareLink(line); ob != nil {
+		return outboundStubReason(ob) != ""
+	}
+	// Запасной путь: parseShareLink отвергает часть заглушек (например, порт 0).
+	u, err := url.Parse(line)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if isStubHost(u.Hostname()) {
+		return true
+	}
+	if u.User != nil && strings.EqualFold(u.User.Username(), zeroUUID) {
+		return true
+	}
+	return false
+}
+
+// filterStubsFromProviderPayload убирает узлы-заглушки из payload, который
+// панель отдаёт Mihomo. Возвращает отфильтрованный payload, число оставшихся
+// узлов и число отброшенных заглушек. Если заглушек нет, payload возвращается
+// побайтно неизменным.
+func filterStubsFromProviderPayload(payload []byte, format string) (filtered []byte, kept int, stubs int) {
+	switch format {
+	case providerFormatXrayJSON, providerFormatYAMLFull, providerFormatYAMLProxies:
+		return filterStubsFromClashYAML(payload)
+	case providerFormatRaw:
+		return filterStubsFromShareLinks(payload)
+	}
+	return payload, countProviderNodes(string(payload)), 0
+}
+
+func filterStubsFromClashYAML(payload []byte) ([]byte, int, int) {
+	blocks, _ := ParseMihomoSubscriptionBlocks(string(payload))
+	var keep []string
+	stubs := 0
+	for _, block := range blocks {
+		if isStubClashNode(ParseClashProxyNode(block)) {
+			stubs++
+			continue
+		}
+		keep = append(keep, block)
+	}
+	if stubs == 0 {
+		return payload, len(blocks), 0
+	}
+	if len(keep) == 0 {
+		return []byte("proxies: []\n"), 0, stubs
+	}
+	return []byte("proxies:\n" + strings.Join(keep, "\n") + "\n"), len(keep), stubs
+}
+
+func filterStubsFromShareLinks(payload []byte) ([]byte, int, int) {
+	text := string(payload)
+	wasBase64 := false
+	if !providerURISchemeRe.MatchString(text) {
+		if decoded := tryDecodeBase64Text(strings.TrimSpace(text)); providerURISchemeRe.MatchString(decoded) {
+			text, wasBase64 = decoded, true
+		}
+	}
+
+	lines := strings.Split(text, "\n")
+	keptLines := make([]string, 0, len(lines))
+	kept, stubs := 0, 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && providerURISchemeRe.MatchString(trimmed) {
+			if isStubShareLink(trimmed) {
+				stubs++
+				continue
+			}
+			kept++
+		}
+		keptLines = append(keptLines, line)
+	}
+	if stubs == 0 {
+		return payload, kept, 0
+	}
+	out := strings.Join(keptLines, "\n")
+	if wasBase64 {
+		out = base64.StdEncoding.EncodeToString([]byte(out))
+	}
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return []byte(out), kept, stubs
 }

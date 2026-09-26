@@ -119,6 +119,18 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 		return nil, fmt.Errorf("upstream returned empty/unparseable payload")
 	}
 
+	// Узлы-заглушки (провайдер отклонил устройство) в Mihomo не отдаются.
+	// Ответ из одних заглушек — отказ: кэш рабочих узлов не затираем.
+	filtered, kept, stubs := filterStubsFromProviderPayload(payload, format)
+	if stubs > 0 && kept == 0 {
+		log.Printf("[Subscriptions] Upstream %s returned only stub nodes (%d), provider rejected device", utils.SanitizeLogInput(upstreamURL), stubs)
+		return nil, fmt.Errorf("%w (%d stub nodes)", ErrProviderRejectedDevice, stubs)
+	}
+	if stubs > 0 {
+		log.Printf("[Subscriptions] Provider payload: dropped %d stub nodes (%s)", stubs, utils.SanitizeLogInput(upstreamURL))
+	}
+	payload = filtered
+
 	nodeCount := countProviderNodes(string(payload))
 	if nodeCount == 0 {
 		log.Printf("[Subscriptions] Upstream %s returned payload with 0 valid nodes (%d bytes, format=%s)", utils.SanitizeLogInput(upstreamURL), len(body), format)
@@ -129,6 +141,10 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 	sub.DetectedFormat = format
 	sub.LastCount = nodeCount
 	sub.LastError = ""
+	sub.DeviceRejected = false
+	if !sub.EnableXray {
+		sub.LastSkipped = stubs
+	}
 	sub.LastUpdate = time.Now()
 
 	applySubscriptionHeaders(headers, sub)
