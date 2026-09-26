@@ -519,6 +519,8 @@
   "svc.check_updates": "Check Updates",
   "svc.channel_prefix": "channel",
   "svc.actual_badge": "up to date",
+  "svc.kernel_installed": "Installed: {version}",
+  "svc.kernel_no_prerelease": "No preview release among the last 30 releases",
   "svc.kernel_error_badge": "error",
   "svc.channel_error": "Failed to change channel",
   "svc.channel_mismatch_hint": "Kernel channels differ: Xray — {xray}, Mihomo — {mihomo}. Click the channel again to sync.",
