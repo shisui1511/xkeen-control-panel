@@ -27,23 +27,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Frontend нужен для go:embed (embed.go ссылается на frontend/dist)
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Build frontend
-        run: |
-          cd frontend
-          npm ci
-          npm run build
+      # go:embed требует frontend/dist; линтеру и тестам сборка не нужна
+      - name: Stub frontend for go:embed
+        run: mkdir -p frontend/dist && echo '<!doctype html>' > frontend/dist/index.html
 
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
           go-version: "1.27"
-          cache: false
 
       - name: Download Go dependencies
         env:
@@ -74,23 +65,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Frontend нужен для go:embed
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Build frontend
-        run: |
-          cd frontend
-          npm ci
-          npm run build
+      # go:embed требует frontend/dist; линтеру и тестам сборка не нужна
+      - name: Stub frontend for go:embed
+        run: mkdir -p frontend/dist && echo '<!doctype html>' > frontend/dist/index.html
 
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
           go-version: "1.27"
-          cache: false
 
       - name: Download dependencies
         env:
@@ -161,6 +143,14 @@ jobs:
         run: |
           cd frontend
           npm run build
+
+      # Сборка переиспользуется в Build Check вместо трёх пересборок
+      - name: Upload frontend
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 1
 
       - name: Check bundle size budget (<=200 KB gzip)
         run: |
@@ -286,24 +276,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
+      - name: Download frontend
+        uses: actions/download-artifact@v8
         with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        run: |
-          cd frontend
-          npm ci
-          npm run build
+          name: frontend-dist
+          path: frontend/dist
 
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
           go-version: "1.27"
-          cache: false
 
       - name: Build binary
         env:

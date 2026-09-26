@@ -24,10 +24,13 @@ permissions:
   contents: write
 
 jobs:
+  # Push в main: страховочный прогон тестов merge-коммита (PR мог отставать от main)
+  # и сигнал для auto-release. Сборки на push нет: RC и stable собираются по тегу,
+  # коммит к этому моменту уже зелёный, поэтому тесты там не повторяются.
   test:
     name: Test
     runs-on: ubuntu-latest
-    if: github.actor != 'dependabot[bot]'
+    if: github.actor != 'dependabot[bot]' && github.event_name == 'push' && github.ref_type == 'branch'
     steps:
       - uses: actions/checkout@v7
 
@@ -35,24 +38,10 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: "1.27"
-          cache: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        run: |
-          cd frontend
-          npm ci
-
-      - name: Build frontend
-        run: |
-          cd frontend
-          npm run build
+      # go:embed требует frontend/dist; тестам сборка не нужна
+      - name: Stub frontend for go:embed
+        run: mkdir -p frontend/dist && echo '<!doctype html>' > frontend/dist/index.html
 
       - name: Download Go dependencies
         run: go mod download
@@ -63,11 +52,74 @@ jobs:
       - name: Run Go vet
         run: go vet ./...
 
+  # Версия и фронтенд готовятся один раз, матрица архитектур берёт их артефактом.
+  # Сборка — только для RC и stable: по тегу (auto-release или человек) или вручную.
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      kind: ${{ steps.version.outputs.kind }}
+      pr_number: ${{ steps.version.outputs.pr_number }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Calculate version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          # KIND: rc — release candidate, stable — релиз. Собираются одинаково; RC
+          # публикуется как pre-release: в beta тестируется ровно тот бинарник,
+          # который станет стабильным.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="v${INPUT_VERSION#v}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          if echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$'; then
+            KIND="rc"
+          elif echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            KIND="stable"
+          else
+            echo "::error::Версия '${VERSION}' — ни vX.Y.Z, ни vX.Y.Z-rc.N"
+            exit 1
+          fi
+          PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/pulls --jq '.[0].number' 2>/dev/null || echo "")
+          echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "kind=${KIND}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION} (kind=${KIND}, pr=${PR_NUMBER})"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        env:
+          # Имя кэша Service Worker берётся из версии сборки
+          XCP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Upload frontend
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 1
+
   build:
     name: Build
-    needs: test
+    needs: prepare
     runs-on: ubuntu-latest
-    if: github.actor != 'dependabot[bot]'
     strategy:
       matrix:
         include:
@@ -82,118 +134,33 @@ jobs:
             GOMIPS: softfloat
             name: mips
             qemu: qemu-mips-static
-
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Download frontend
+        uses: actions/download-artifact@v8
         with:
-          fetch-depth: 0
-
-      - name: Calculate version
-        id: version
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          INPUT_VERSION: ${{ github.event.inputs.version }}
-        run: |
-          # KIND: dev — rolling pre-release, rc — release candidate, stable — релиз.
-          # Все собираются одинаково; RC публикуется как pre-release: в beta
-          # тестируется ровно тот бинарник, который станет стабильным.
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="v${INPUT_VERSION#v}"
-            BUILD_VERSION="$VERSION"
-            if echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$'; then
-              KIND="rc"
-            elif echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-              KIND="stable"
-            else
-              echo "::error::Версия '${VERSION}' — ни vX.Y.Z, ни vX.Y.Z-rc.N"
-              exit 1
-            fi
-            SKIP="false"
-          elif [ "${{ github.ref_type }}" = "tag" ]; then
-            VERSION="${GITHUB_REF#refs/tags/}"
-            BUILD_VERSION="$VERSION"
-            KIND="stable"
-            SKIP="false"
-          else
-            # Проверяем, не запущен ли рабочий процесс для ветки main, но при этом текущий коммит уже протегирован стабильной версией
-            EXACT_TAG=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "")
-            if echo "$EXACT_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-              echo "HEAD is exactly tagged as stable ($EXACT_TAG). Skipping redundant branch-triggered build."
-              SKIP="true"
-              VERSION="$EXACT_TAG"
-              BUILD_VERSION="$VERSION"
-              KIND="stable"
-            else
-              SKIP="false"
-              
-              # Единый источник версии (как локально в Makefile):
-              #   VERSION       — канал rolling pre-release (тег и имена ассетов), vX.Y.Z-dev
-              #   BUILD_VERSION — версия внутри бинарника, vX.Y.Z-dev.N+g<sha>
-              # X.Y.Z — следующий релиз по conventional commits после последнего тега.
-              VERSION=$(sh scripts/version.sh --channel)
-              BUILD_VERSION=$(sh scripts/version.sh)
-              KIND="dev"
-              LATEST_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' 2>/dev/null || echo "")
-
-              # Calculate commit count since the last stable tag for build notes
-              if [ -n "$LATEST_TAG" ]; then
-                RANGE="${LATEST_TAG}..HEAD"
-              else
-                RANGE="HEAD"
-              fi
-              COMMIT_COUNT=$(git rev-list "$RANGE" --count 2>/dev/null || git rev-list HEAD --count)
-              echo "commit_count=${COMMIT_COUNT}" >> $GITHUB_OUTPUT
-            fi
-          fi
-          
-          PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/pulls --jq '.[0].number' 2>/dev/null || echo "")
-          echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "build_version=${BUILD_VERSION}" >> $GITHUB_OUTPUT
-          echo "kind=${KIND}" >> $GITHUB_OUTPUT
-          echo "skip=${SKIP}" >> $GITHUB_OUTPUT
-          echo "Version: ${VERSION}, build ${BUILD_VERSION} (kind=${KIND}, pr=${PR_NUMBER}, skip=${SKIP})"
-
-      - name: Set up Node.js
-        if: steps.version.outputs.skip != 'true'
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        if: steps.version.outputs.skip != 'true'
-        env:
-          # Имя кэша Service Worker берётся из версии сборки
-          XCP_VERSION: ${{ steps.version.outputs.build_version }}
-        run: |
-          cd frontend
-          npm ci
-          npm run build
+          name: frontend-dist
+          path: frontend/dist
 
       - name: Set up Go
-        if: steps.version.outputs.skip != 'true'
         uses: actions/setup-go@v7
         with:
           go-version: "1.27"
-          cache: false
 
       - name: Build binary
-        if: steps.version.outputs.skip != 'true'
         env:
           GOOS: linux
           GOARCH: ${{ matrix.GOARCH }}
           GOMIPS: ${{ matrix.GOMIPS }}
           CGO_ENABLED: 0
-          VERSION: ${{ steps.version.outputs.version }}
-          BUILD_VERSION: ${{ steps.version.outputs.build_version }}
         run: |
-          go build -ldflags="-s -w -X main.Version=${BUILD_VERSION}" \
+          go build -ldflags="-s -w -X main.Version=${VERSION}" \
             -o build/xcp_${VERSION}_${{ matrix.name }} ./cmd/xcp
 
       - name: Install QEMU and tools
-        if: steps.version.outputs.skip != 'true'
         run: |
           ok=0
           for i in 1 2 3; do
@@ -203,68 +170,46 @@ jobs:
           [ "$ok" = 1 ] || { echo "::error::apt-get failed after 3 attempts"; exit 1; }
 
       - name: Verify static linkage
-        if: steps.version.outputs.skip != 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           file "build/xcp_${VERSION}_${{ matrix.name }}"
           file "build/xcp_${VERSION}_${{ matrix.name }}" | grep -q "statically linked"
 
       - name: Smoke test under QEMU
-        if: steps.version.outputs.skip != 'true'
         timeout-minutes: 1
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          BUILD_VERSION: ${{ steps.version.outputs.build_version }}
         run: |
           ACTUAL=$(${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}" -v)
           echo "xcp -v: ${ACTUAL}"
-          if [ "$ACTUAL" != "$BUILD_VERSION" ]; then
-            echo "::error::Бинарник сообщает версию '${ACTUAL}', ожидалась '${BUILD_VERSION}'"
+          if [ "$ACTUAL" != "$VERSION" ]; then
+            echo "::error::Бинарник сообщает версию '${ACTUAL}', ожидалась '${VERSION}'"
             exit 1
           fi
 
       - name: Generate checksum
-        if: steps.version.outputs.skip != 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           cd build
           sha256sum xcp_${VERSION}_${{ matrix.name }} > xcp_${VERSION}_${{ matrix.name }}.sha256
 
       # Сжатие только для скачивания: панель и setup.sh распаковывают .gz и сверяют
       # SHA-256 несжатого бинарника. UPX не используется — распакованный в RAM образ
-      # занимал ~20 МБ на роутере и делал dev-сборки непохожими на stable.
+      # занимал ~20 МБ на роутере.
       - name: Compress for download
-        if: steps.version.outputs.skip != 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           gzip -9 -n -k "build/xcp_${VERSION}_${{ matrix.name }}"
           ls -l build/
 
       - name: Upload artifact
-        if: steps.version.outputs.skip != 'true'
         uses: actions/upload-artifact@v7
         with:
           name: xcp_${{ matrix.name }}
           path: |
-            build/xcp_${{ steps.version.outputs.version }}_${{ matrix.name }}
-            build/xcp_${{ steps.version.outputs.version }}_${{ matrix.name }}.gz
-            build/xcp_${{ steps.version.outputs.version }}_${{ matrix.name }}.sha256
-
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      kind: ${{ steps.version.outputs.kind }}
-      commit_count: ${{ steps.version.outputs.commit_count }}
-      pr_number: ${{ steps.version.outputs.pr_number }}
-      skip: ${{ steps.version.outputs.skip }}
+            build/xcp_${{ env.VERSION }}_${{ matrix.name }}
+            build/xcp_${{ env.VERSION }}_${{ matrix.name }}.gz
+            build/xcp_${{ env.VERSION }}_${{ matrix.name }}.sha256
 
   release:
     name: Create Release
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
-    if: github.actor != 'dependabot[bot]' && needs.build.outputs.skip != 'true'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -275,54 +220,12 @@ jobs:
         with:
           path: artifacts
 
-      - name: Rolling pre-release
-        id: rolling
-        if: needs.build.outputs.kind == 'dev'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.build.outputs.version }}
-          COMMIT_COUNT: ${{ needs.build.outputs.commit_count }}
-          PR_NUMBER: ${{ needs.build.outputs.pr_number }}
-          MODE: prerelease
-        run: |
-          # Пока шла сборка, мог выйти stable-релиз той же или более новой версии
-          BASE="${VERSION#v}"
-          BASE="${BASE%-dev}"
-          LATEST_TAG=$(git ls-remote --tags --refs origin | sed 's#.*refs/tags/##' \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
-          LATEST="${LATEST_TAG#v}"
-          if [ -n "$LATEST" ] && [ "$(printf '%s\n%s\n' "$BASE" "$LATEST" | sort -V | tail -1)" = "$LATEST" ]; then
-            echo "${VERSION} не новее ${LATEST_TAG}, pre-release не публикуется"
-            echo "published=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          python3 .github/scripts/gen_notes.py
-
-          # Rolling pre-release всегда один: убираем прежний и все устаревшие dev-релизы
-          bash .github/scripts/prune_dev_releases.sh
-          git tag -d "${VERSION}" 2>/dev/null || true
-
-          # Создаём новый tag на текущем HEAD (force на случай race condition)
-          git tag -f "${VERSION}" "${GITHUB_SHA}"
-          git push origin -f "${VERSION}"
-
-          TITLE="${VERSION} · build #${COMMIT_COUNT}"
-
-          gh release create "${VERSION}" \
-            --target "${GITHUB_SHA}" \
-            --title "${TITLE}" \
-            --notes-file /tmp/release-notes.md \
-            --prerelease \
-            artifacts/xcp_*/xcp_"${VERSION}"_*
-
       - name: Create stable release or release candidate
-        if: needs.build.outputs.kind != 'dev'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.build.outputs.version }}
-          PR_NUMBER: ${{ needs.build.outputs.pr_number }}
-          MODE: ${{ needs.build.outputs.kind }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          MODE: ${{ needs.prepare.outputs.kind }}
           SOAK_HOURS: ${{ vars.RC_SOAK_HOURS || '24' }}
         run: |
           if [ "$MODE" = rc ]; then
@@ -361,22 +264,14 @@ jobs:
             bash .github/scripts/prune_dev_releases.sh "${VERSION}"
           fi
 
-      - name: Update binaries branch
-        # Зеркало setup.sh держит только stable и dev, RC туда не попадает
-        if: needs.build.outputs.kind != 'rc' && steps.rolling.outputs.published != 'false'
-        env:
-          VERSION: ${{ needs.build.outputs.version }}
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          bash .github/scripts/update_binaries.sh "${VERSION}" artifacts
-
   cleanup:
     name: Cleanup artifacts
     runs-on: ubuntu-latest
     needs: release
-    if: always() && github.actor != 'dependabot[bot]'
+    if: always() && github.actor != 'dependabot[bot]' && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
     steps:
       - uses: geekyeggo/delete-artifact@v6
         with:
-          name: xcp_*
+          name: |
+            xcp_*
+            frontend-dist
