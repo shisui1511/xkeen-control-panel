@@ -469,6 +469,107 @@ fi
 cleanup
 
 # ---------------------------------------------------------------------------
+# pick_prerelease — канал prerelease: последний RC, если нет более нового stable
+# ---------------------------------------------------------------------------
+echo ""
+echo "── pick_prerelease ──────────────────────────────────────────"
+make_sandbox
+for case in "v0.29.0-rc.9 v0.28.0 v0.29.0-rc.9" "v0.29.0-rc.9 v0.29.0 v0.29.0" \
+            "v0.29.0-rc.2 v0.30.1 v0.30.1" " v0.28.0 v0.28.0" "v0.10.0-rc.1 v0.9.5 v0.10.0-rc.1"; do
+    set -- $case
+    if [ $# -eq 2 ]; then rc=""; stable="$1"; want="$2"; else rc="$1"; stable="$2"; want="$3"; fi
+    got=$(run_in_sandbox "pick_prerelease '$rc' '$stable'")
+    if [ "$got" = "$want" ]; then
+        pass "pick_prerelease '${rc}' '${stable}' → ${want}"
+    else
+        fail "pick_prerelease '${rc}' '${stable}' → ${want} (got: $got)"
+    fi
+done
+cleanup
+
+# ---------------------------------------------------------------------------
+# get_asset_digest / verify_checksum — эталон SHA-256 из API GitHub
+# ---------------------------------------------------------------------------
+echo ""
+echo "── verify_checksum (digest из API) ──────────────────────────"
+make_sandbox
+cat > "$MOCK_BIN/curl" <<'EOF2'
+#!/bin/sh
+cat <<'JSON'
+{"tag_name":"v1.0.0","assets":[
+ {"name":"xcp_v1.0.0_mips","uploader":{"login":"x"},"digest":"sha256:1111"},
+ {"name":"xcp_v1.0.0_arm64","uploader":{"login":"x"},"size":5,"digest":"sha256:2222"}]}
+JSON
+EOF2
+chmod +x "$MOCK_BIN/curl"
+got=$(run_in_sandbox "get_asset_digest v1.0.0 xcp_v1.0.0_arm64")
+if [ "$got" = "2222" ]; then
+    pass "get_asset_digest берёт digest своего ассета"
+else
+    fail "get_asset_digest берёт digest своего ассета (got: $got)"
+fi
+printf 'payload' > "$TMP/bin.new"
+if run_in_sandbox "ARCH_LABEL=arm64; verify_checksum '$TMP/bin.new' v1.0.0" >/dev/null 2>&1; then
+    fail "verify_checksum отвергает бинарник, не совпавший с digest из API"
+else
+    pass "verify_checksum отвергает бинарник, не совпавший с digest из API"
+fi
+cleanup
+
+# Без API эталон не берётся с прокси: иначе прокси подменил бы и бинарник, и хеш
+make_sandbox
+cat > "$MOCK_BIN/curl" <<EOF2
+#!/bin/sh
+DEST=""; URL=""
+for arg; do
+    [ "\$prev" = "-o" ] && DEST="\$arg"
+    case "\$arg" in http*) URL="\$arg" ;; esac
+    prev="\$arg"
+done
+case "\$URL" in https://github.com/*|https://api.github.com/*) exit 7 ;; esac
+[ -n "\$DEST" ] && sha256sum "$TMP/bin.new" | awk '{print \$1}' > "\$DEST"
+EOF2
+chmod +x "$MOCK_BIN/curl"
+printf '#!/bin/sh\nexit 1\n' > "$MOCK_BIN/wget"; chmod +x "$MOCK_BIN/wget"
+printf 'payload' > "$TMP/bin.new"
+if run_in_sandbox "ARCH_LABEL=arm64; verify_checksum '$TMP/bin.new' v1.0.0" >/dev/null 2>&1; then
+    fail "verify_checksum не доверяет хешу с прокси"
+else
+    pass "verify_checksum не доверяет хешу с прокси"
+fi
+cleanup
+
+# ---------------------------------------------------------------------------
+# do_update — GitHub недоступен: бинарник через прокси GitHub
+# ---------------------------------------------------------------------------
+echo ""
+echo "── загрузка через прокси GitHub ─────────────────────────────"
+make_sandbox
+cat > "$MOCK_BIN/curl" <<EOF2
+#!/bin/sh
+DEST=""; URL=""
+for arg; do
+    [ "\$prev" = "-o" ] && DEST="\$arg"
+    case "\$arg" in http*) URL="\$arg" ;; esac
+    prev="\$arg"
+done
+echo "\$URL" >> "$TMP/urls"
+[ -n "\$DEST" ] || exit 22
+case "\$URL" in https://github.com/*) exit 7 ;; esac
+case "\$DEST" in *.gz) exit 22 ;; esac
+printf 'bin' > "\$DEST"
+EOF2
+chmod +x "$MOCK_BIN/curl"
+printf '#!/bin/sh\nexit 1\n' > "$MOCK_BIN/wget"; chmod +x "$MOCK_BIN/wget"
+src=$(run_in_sandbox "TEMP_BIN='$TMP/xcp.new'; download_from_sources https://github.com/r/xcp >/dev/null 2>&1 && echo \"\$DOWNLOAD_SOURCE\"")
+if [ "$src" = "https://gh-proxy.com/" ] && [ -s "$TMP/xcp.new" ]; then
+    pass "при недоступном GitHub бинарник берётся через gh-proxy.com"
+else
+    fail "при недоступном GitHub бинарник берётся через gh-proxy.com ($(cat "$TMP/urls" 2>/dev/null | tr '\n' ' '))"
+fi
+cleanup
+
+# ---------------------------------------------------------------------------
 # Итог
 # ---------------------------------------------------------------------------
 echo ""
