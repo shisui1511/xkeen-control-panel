@@ -891,6 +891,16 @@ func kernelHasUpdate(latest, current string) bool {
 	}
 }
 
+// refreshInstalledVersion перечитывает версию после замены бинарника (установка,
+// откат, загрузка) и пересчитывает HasUpdate. Кеш версии сбрасывается: он
+// держит версию прежнего бинарника до 60 с, и новое ядро считалось старым —
+// «v26.9.9 → v26.9.9, Обновить». Вызывается под s.mu.
+func (s *KernelService) refreshInstalledVersion(kk *KernelInfo) {
+	kk.verCache = &versionCache{}
+	kk.CurrentVersion = s.detectVersion(kk)
+	kk.HasUpdate = kernelHasUpdate(kk.LatestVersion, kk.CurrentVersion)
+}
+
 // CheckLatest queries GitHub API for latest release.
 // ctx is used to cancel the HTTP request (e.g. on service shutdown).
 func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
@@ -1189,8 +1199,7 @@ func (s *KernelService) Install(name string) error {
 		kk.binaryPathCachedAt = time.Time{}
 		// Re-resolve path immediately so we report the correct location
 		s.resolveBinaryPath(kk)
-		kk.CurrentVersion = s.detectVersion(kk)
-		kk.HasUpdate = kernelHasUpdate(latestVersion, kk.CurrentVersion)
+		s.refreshInstalledVersion(kk)
 		kk.Status = "done"
 		kk.Message = "Updated to " + kk.CurrentVersion
 		kk.HasBackup = true
@@ -1289,8 +1298,7 @@ func (s *KernelService) Rollback(name string) error {
 	if kk := s.kernels[name]; kk != nil {
 		kk.binaryPathCachedAt = time.Time{}
 		s.resolveBinaryPath(kk)
-		kk.verCache = &versionCache{} // clear version cache
-		kk.CurrentVersion = s.detectVersion(kk)
+		s.refreshInstalledVersion(kk)
 		kk.Status = "idle"
 		kk.Message = "Rolled back to backup"
 		kk.HasBackup = s.hasBackup(name, kk.BinaryPath)
@@ -1809,8 +1817,7 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 	if kk := s.kernels[name]; kk != nil {
 		kk.binaryPathCachedAt = time.Time{}
 		s.resolveBinaryPath(kk)
-		kk.verCache = &versionCache{}
-		kk.CurrentVersion = s.detectVersion(kk)
+		s.refreshInstalledVersion(kk)
 		kk.Status = "done"
 		kk.Message = "Installed: " + kk.CurrentVersion
 		kk.HasBackup = true
