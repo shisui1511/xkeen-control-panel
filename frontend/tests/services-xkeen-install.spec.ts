@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 async function mockCommonRoutes(
   page: import('@playwright/test').Page,
   // Объект читается при каждом запросе: тест может менять статус по ходу
-  status: { installed: boolean; available: boolean }
+  status: { installed: boolean; available: boolean; incomplete?: boolean }
 ) {
   await page.addInitScript(() => {
     Object.defineProperty(window.navigator, 'serviceWorker', {
@@ -79,7 +79,8 @@ async function mockCommonRoutes(
             binary_path: '/opt/sbin/xkeen',
             raw: 'Xray-core (running)\nXKeen is running',
             xkeen_installed: status.installed,
-            xkeen_installer_available: status.available
+            xkeen_installer_available: status.available,
+            xkeen_setup_incomplete: status.incomplete === true
           }
         })
       });
@@ -99,6 +100,15 @@ test.describe('Services page — XKeen installer card', () => {
     await page.goto('/#/services');
     await expect(page.locator('.hero-card')).toBeVisible();
     await expect(page.getByTestId('xkeen-install-card')).toHaveCount(0);
+  });
+
+  test('offers the installer again when XKeen setup was interrupted', async ({ page }) => {
+    await mockCommonRoutes(page, { installed: true, available: true, incomplete: true });
+    await page.goto('/#/services');
+    const card = page.getByTestId('xkeen-install-card');
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(/не до конца|partly installed/);
+    await expect(page.getByTestId('xkeen-install-start')).toBeVisible();
   });
 
   test('without Entware explains why installation is unavailable', async ({ page }) => {

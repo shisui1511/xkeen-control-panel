@@ -275,3 +275,44 @@ func TestServiceStatus_XKeenNotInstalled(t *testing.T) {
 			resp.Data.XKeenInstalled, resp.Data.XKeenInstallerAvailable)
 	}
 }
+
+// TestServiceStatus_XKeenSetupIncomplete: бинарник XKeen есть, а init-скрипта
+// нет — установка прервана, UI должен снова предложить установщик.
+func TestServiceStatus_XKeenSetupIncomplete(t *testing.T) {
+	bin := buildStubBinary(t, "XKeen is not running", 0)
+	for _, tc := range []struct {
+		name       string
+		initScript bool
+		want       bool
+	}{
+		{"init script missing", false, true},
+		{"setup complete", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := newServiceTestAPI(t, bin)
+			initDir := t.TempDir()
+			if tc.initScript {
+				if err := os.WriteFile(filepath.Join(initDir, "S05xkeen"), nil, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			api.SetXKeenInstaller(&services.XKeenInstaller{InitDir: initDir})
+
+			rr := httptest.NewRecorder()
+			api.ServiceStatus(rr, httptest.NewRequest(http.MethodGet, "/api/service/status", nil))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+			}
+			var resp struct {
+				Data ServiceStatusResponse `json:"data"`
+			}
+			if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+				t.Fatal(err)
+			}
+			if !resp.Data.XKeenInstalled || resp.Data.XKeenSetupIncomplete != tc.want {
+				t.Errorf("got installed=%v incomplete=%v, want true/%v",
+					resp.Data.XKeenInstalled, resp.Data.XKeenSetupIncomplete, tc.want)
+			}
+		})
+	}
+}

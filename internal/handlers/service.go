@@ -20,6 +20,15 @@ type ServiceStatusResponse struct {
 	// панель может установить XKeen (есть Entware)
 	XKeenInstalled          bool `json:"xkeen_installed"`
 	XKeenInstallerAvailable bool `json:"xkeen_installer_available"`
+	// XKeenSetupIncomplete — бинарник есть, но `xkeen -i` не дошёл до конца
+	// (нет init-скрипта): установку нужно запустить снова
+	XKeenSetupIncomplete bool `json:"xkeen_setup_incomplete"`
+}
+
+// xkeenSetupIncomplete — XKeen распакован, но настройка прервана.
+func (a *API) xkeenSetupIncomplete() bool {
+	return a.xkeenInstaller != nil && a.xkeenInstaller.Available() &&
+		a.xkeenSvc.Installed() && !a.xkeenInstaller.SetupComplete()
 }
 
 func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +56,7 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 		Raw:                     out,
 		XKeenInstalled:          a.xkeenSvc.Installed(),
 		XKeenInstallerAvailable: a.xkeenInstaller != nil && a.xkeenInstaller.Available(),
+		XKeenSetupIncomplete:    a.xkeenSetupIncomplete(),
 	}
 
 	// Detect which kernel is running and get its PID/Uptime

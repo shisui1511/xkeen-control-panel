@@ -2361,6 +2361,7 @@
   "mihomo.dns_proxy_server_ns_hint": "Plain DNS servers resolving the proxy servers' own names; without them DNS would loop.",
   "xkinst.title": "Install XKeen",
   "xkinst.desc": "XKeen was not found on the router. The panel will download the official XKeen installer and run it in the built-in terminal.",
+  "xkinst.desc_incomplete": "XKeen is only partly installed: setup was interrupted. Run the installer again to finish installation and setup.",
   "xkinst.channel": "Version",
   "xkinst.channel_stable": "Stable",
   "xkinst.channel_beta": "Beta",

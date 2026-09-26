@@ -9,6 +9,8 @@
   interface Props {
     /** Панель может поставить XKeen (на роутере есть Entware) */
     available: boolean;
+    /** Бинарник XKeen есть, но настройка прервана — установку нужно повторить */
+    incomplete?: boolean;
     /** Установщик завершился — родитель обновляет статус служб */
     onfinished?: () => void;
     /** Окно установки открыто или закрыто: пока оно открыто, родитель не
@@ -16,7 +18,7 @@
     onopenchange?: (open: boolean) => void;
   }
 
-  let { available, onfinished, onopenchange }: Props = $props();
+  let { available, incomplete = false, onfinished, onopenchange }: Props = $props();
 
   let channel = $state<'stable' | 'beta'>('stable');
   let isOpen = $state(false);
@@ -61,7 +63,7 @@
 <div class="card install-card" data-testid="xkeen-install-card">
   <div class="install-head">
     <h2 class="card-title">{$t('xkinst.title')}</h2>
-    <p class="card-subtitle">{$t('xkinst.desc')}</p>
+    <p class="card-subtitle">{$t(incomplete ? 'xkinst.desc_incomplete' : 'xkinst.desc')}</p>
   </div>
 
   {#if available}
