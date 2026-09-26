@@ -224,6 +224,7 @@ func (s *SubscriptionService) Refresh(id string) error {
 		if xraySuccess {
 			live.LastHash = subCopy.LastHash
 			live.LastSkipped = subCopy.LastSkipped
+			live.DeviceRejected = subCopy.DeviceRejected
 			if !subCopy.EnableMihomo || live.DetectedFormat == "" {
 				live.DetectedFormat = subCopy.DetectedFormat
 			}
@@ -274,8 +275,40 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	// Apply filters
 	outbounds = s.applyFilters(outbounds, live)
 
-	// Generate fragment file
+	// Провайдер, отклонивший устройство, отдаёт только узлы-заглушки. Считаем до
+	// writeFragment: он мутирует теги outbounds.
+	working, stubs := countXrayWorkingAndStubs(outbounds)
+
 	fragmentPath := s.getFragmentPath(live)
+
+	// Все узлы — заглушки, а раньше во фрагменте были рабочие: не затираем их и
+	// не перезапускаем ядро (как при ошибке скачивания), только помечаем отказ.
+	if working == 0 && stubs > 0 && s.fragmentOutboundCount(fragmentPath) > 0 {
+		sub.Nodes = make([]SubscriptionNode, len(live.Nodes))
+		for i := range live.Nodes {
+			sub.Nodes[i] = live.Nodes[i].Clone()
+		}
+		sub.Announcement = parseAnnouncement(body, headers)
+		sub.LastHash = live.LastHash
+		sub.LastChanged = false
+		sub.LastCount = live.LastCount
+		sub.LastSkipped += stubs
+		sub.DeviceRejected = true
+		sub.LastUpdate = time.Now()
+
+		log.Printf("[Subscriptions] Refresh Xray ID: %s: provider returned only stub nodes (%d), keeping previous outbounds", sub.ID, stubs)
+		report := &ParseReport{
+			ParsedCount:  sub.LastCount,
+			SkippedCount: sub.LastSkipped,
+			Skipped:      skipReasons,
+			Timestamp:    sub.LastUpdate,
+		}
+		s.saveDebugFiles(sub.ID, body, headers, report)
+		s.mu.Unlock()
+		return nil
+	}
+
+	// Generate fragment file
 	nodes, err := s.writeFragment(fragmentPath, outbounds, live)
 	if err != nil {
 		s.mu.Unlock()
@@ -284,13 +317,19 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 
 	sub.Nodes = nodes
 	sub.Announcement = parseAnnouncement(body, headers)
+	sub.DeviceRejected = working == 0 && stubs > 0
+	sub.LastSkipped += stubs
+	sub.LastCount -= stubs
+	if sub.LastCount < 0 {
+		sub.LastCount = 0
+	}
 
 	// В режиме "auto" — создать routing-фрагмент с balancer и правилом для !CN.
 	if live.RoutingMode == "auto" {
-		tags := make([]string, 0, len(outbounds))
-		for _, ob := range outbounds {
-			if allowedXrayProtocols[ob.Protocol] {
-				tags = append(tags, ob.Tag)
+		tags := make([]string, 0, len(nodes))
+		for _, n := range nodes {
+			if allowedXrayProtocols[n.Protocol] && !n.Stub {
+				tags = append(tags, n.Tag)
 			}
 		}
 		routingPath := s.getRoutingFragmentPath(live)
@@ -317,7 +356,8 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	needRestart := false
 	if newHash != oldHash {
 		sub.LastChanged = true
-		needRestart = true
+		// Фрагмент без рабочих узлов (одни заглушки) поведение ядра не меняет.
+		needRestart = !(working == 0 && stubs > 0)
 	} else {
 		sub.LastChanged = false
 	}
@@ -342,6 +382,22 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	}
 
 	return nil
+}
+
+// fragmentOutboundCount возвращает число outbounds во фрагменте подписки
+// или 0, если файла нет или он не разбирается.
+func (s *SubscriptionService) fragmentOutboundCount(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	var wrapper struct {
+		Outbounds []json.RawMessage `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return 0
+	}
+	return len(wrapper.Outbounds)
 }
 
 func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {

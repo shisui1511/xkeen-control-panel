@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -1256,5 +1257,257 @@ func TestRefreshXray_StoppedKernelIsNotStarted(t *testing.T) {
 	svc.restartXkeenIfRunning("s", "test")
 	if calls, _ := os.ReadFile(logFile); !strings.Contains(string(calls), "-restart") {
 		t.Error("running kernel must be restarted")
+	}
+}
+
+// stubProviderBody собирает тело подписки из vless-ссылок: «host:port|uuid|имя».
+func stubProviderBody(lines ...string) string {
+	var uris []string
+	for _, l := range lines {
+		parts := strings.SplitN(l, "|", 3)
+		uris = append(uris, fmt.Sprintf("vless://%s@%s?encryption=none&type=tcp&security=none#%s", parts[1], parts[0], parts[2]))
+	}
+	return base64.StdEncoding.EncodeToString([]byte(strings.Join(uris, "\n")))
+}
+
+type stubProviderEnv struct {
+	svc     *SubscriptionService
+	xrayDir string
+	logFile string
+	body    *atomic.Value
+}
+
+func (e *stubProviderEnv) restartCalls(t *testing.T) int {
+	t.Helper()
+	data, _ := os.ReadFile(e.logFile)
+	return strings.Count(string(data), "-restart")
+}
+
+func (e *stubProviderEnv) fragment(t *testing.T, id string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(e.xrayDir, "04_outbounds."+id+".json"))
+	if err != nil {
+		t.Fatalf("read fragment: %v", err)
+	}
+	return data
+}
+
+// newStubProviderEnv поднимает httptest-провайдер, тело которого можно менять,
+// и сервис с работающим ядром и mock-xkeen, ведущим лог вызовов.
+func newStubProviderEnv(t *testing.T, sub Subscription) *stubProviderEnv {
+	t.Helper()
+	tmp := t.TempDir()
+	body := &atomic.Value{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(body.Load().(string)))
+	}))
+	t.Cleanup(srv.Close)
+
+	logFile := filepath.Join(tmp, "xkeen_calls.log")
+	mockXkeenPath := filepath.Join(tmp, "mock-xkeen")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$1\" >> %q\n", logFile)
+	if err := os.WriteFile(mockXkeenPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	xrayDir := filepath.Join(tmp, "xray")
+	if err := os.MkdirAll(xrayDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewSubscriptionService(tmp, xrayDir, tmp)
+	svc.httpClient = srv.Client()
+	svc.SetConsoleService(NewConsoleService(mockXkeenPath))
+	svc.SetKernelService(&statusKernelService{status: map[string]string{"xray": "running", "mihomo": "not_installed"}})
+
+	sub.URL = srv.URL
+	sub.EnableXray = true
+	sub.Enabled = true
+	if sub.Interval == 0 {
+		sub.Interval = 1
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatal(err)
+	}
+	return &stubProviderEnv{svc: svc, xrayDir: xrayDir, logFile: logFile, body: body}
+}
+
+const stubWorkingUUID = "11111111-2222-3333-4444-555555555555"
+
+func TestRefreshXray_AllStubsKeepsPreviousFragment(t *testing.T) {
+	env := newStubProviderEnv(t, Subscription{ID: "s", Name: "S"})
+
+	env.body.Store(stubProviderBody("1.2.3.4:443|" + stubWorkingUUID + "|work"))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("first Refresh: %v", err)
+	}
+	before := env.fragment(t, "s")
+	restartsBefore := env.restartCalls(t)
+	prev := env.svc.Get("s")
+	if prev == nil || len(prev.Nodes) != 1 || prev.Nodes[0].Stub {
+		t.Fatalf("first refresh must give 1 working node, got %+v", prev)
+	}
+	if prev.DeviceRejected {
+		t.Fatal("device_rejected must be false after a working refresh")
+	}
+
+	env.body.Store(stubProviderBody(
+		"0.0.0.0:1|"+zeroUUID+"|Превышен лимит устройств",
+		"0.0.0.0:1|"+zeroUUID+"|Превышен лимит устройств",
+	))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("second Refresh: %v", err)
+	}
+
+	if after := env.fragment(t, "s"); string(after) != string(before) {
+		t.Errorf("fragment must be untouched when the provider returns only stubs:\nbefore=%s\nafter=%s", before, after)
+	}
+	if got := env.restartCalls(t); got != restartsBefore {
+		t.Errorf("kernel must not be restarted on device rejection: restarts %d -> %d", restartsBefore, got)
+	}
+	live := env.svc.Get("s")
+	if !live.DeviceRejected {
+		t.Error("DeviceRejected must be true")
+	}
+	if live.LastError != "" {
+		t.Errorf("LastError = %q, want empty", live.LastError)
+	}
+	if len(live.Nodes) != 1 || live.Nodes[0].Tag != prev.Nodes[0].Tag || live.Nodes[0].Stub {
+		t.Errorf("previous working nodes must be kept, got %+v", live.Nodes)
+	}
+	if live.LastSkipped < 2 {
+		t.Errorf("LastSkipped = %d, want >= 2 (stubs are counted)", live.LastSkipped)
+	}
+	if live.LastCount != prev.LastCount {
+		t.Errorf("LastCount = %d, want previous %d", live.LastCount, prev.LastCount)
+	}
+
+	// Провайдер снова отдаёт рабочий узел — отказ снимается.
+	env.body.Store(stubProviderBody("5.6.7.8:443|" + stubWorkingUUID + "|work2"))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("third Refresh: %v", err)
+	}
+	if env.svc.Get("s").DeviceRejected {
+		t.Error("DeviceRejected must be cleared after a working refresh")
+	}
+}
+
+func TestRefreshXray_AllStubsFirstFetch(t *testing.T) {
+	env := newStubProviderEnv(t, Subscription{ID: "s", Name: "S"})
+
+	env.body.Store(stubProviderBody(
+		"0.0.0.0:1|"+zeroUUID+"|Превышен лимит устройств",
+		"0.0.0.0:1|"+zeroUUID+"|Превышен лимит устройств",
+	))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	var wrapper struct {
+		Outbounds []Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(env.fragment(t, "s"), &wrapper); err != nil {
+		t.Fatal(err)
+	}
+	if len(wrapper.Outbounds) != 0 {
+		t.Errorf("fragment must have no outbounds, got %d", len(wrapper.Outbounds))
+	}
+	live := env.svc.Get("s")
+	if !live.DeviceRejected {
+		t.Error("DeviceRejected must be true on first fetch with only stubs")
+	}
+	if len(live.Nodes) != 2 {
+		t.Fatalf("stub nodes must be visible in the list, got %d", len(live.Nodes))
+	}
+	for _, n := range live.Nodes {
+		if !n.Stub {
+			t.Errorf("node %q must be marked as stub", n.Tag)
+		}
+	}
+}
+
+func TestRefreshXray_StubsCountedAsSkipped(t *testing.T) {
+	env := newStubProviderEnv(t, Subscription{ID: "s", Name: "S"})
+
+	env.body.Store(stubProviderBody(
+		"0.0.0.0:1|"+zeroUUID+"|stub-a",
+		"1.2.3.4:443|"+stubWorkingUUID+"|work",
+		"127.0.0.1:443|"+stubWorkingUUID+"|stub-b",
+	))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	live := env.svc.Get("s")
+	if live.LastSkipped != 2 {
+		t.Errorf("LastSkipped = %d, want 2", live.LastSkipped)
+	}
+	if live.LastCount != 1 {
+		t.Errorf("LastCount = %d, want 1", live.LastCount)
+	}
+	if live.DeviceRejected {
+		t.Error("DeviceRejected must be false when a working node exists")
+	}
+	var wrapper struct {
+		Outbounds []Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(env.fragment(t, "s"), &wrapper); err != nil {
+		t.Fatal(err)
+	}
+	if len(wrapper.Outbounds) != 1 {
+		t.Errorf("fragment outbounds = %d, want 1", len(wrapper.Outbounds))
+	}
+}
+
+func TestRefreshXray_AutoModeSkipsStubTags(t *testing.T) {
+	env := newStubProviderEnv(t, Subscription{ID: "s", Name: "S", RoutingMode: "auto"})
+
+	env.body.Store(stubProviderBody(
+		"0.0.0.0:1|"+zeroUUID+"|stub-first",
+		"1.2.3.4:443|"+stubWorkingUUID+"|work",
+	))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	live := env.svc.Get("s")
+	var workingTag, stubTag string
+	for _, n := range live.Nodes {
+		if n.Stub {
+			stubTag = n.Tag
+		} else {
+			workingTag = n.Tag
+		}
+	}
+	if workingTag == "" || stubTag == "" {
+		t.Fatalf("expected one working and one stub node, got %+v", live.Nodes)
+	}
+
+	routing, err := os.ReadFile(env.svc.getRoutingFragmentPath(live))
+	if err != nil {
+		t.Fatalf("routing fragment must be written: %v", err)
+	}
+	if !strings.Contains(string(routing), workingTag) {
+		t.Errorf("routing fragment must reference working tag %q: %s", workingTag, routing)
+	}
+	if strings.Contains(string(routing), stubTag) {
+		t.Errorf("routing fragment must not reference stub tag %q: %s", stubTag, routing)
+	}
+}
+
+func TestDialerProxyTargets_SkipsStubs(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	svc.subscriptions = []Subscription{{
+		ID: "s", Name: "S", Enabled: true, EnableXray: true,
+		Nodes: []SubscriptionNode{
+			{Tag: "stub-1", Name: "stub", Protocol: "vless", Stub: true, StubReason: stubReasonAddress},
+			{Tag: "ok-1", Name: "ok", Protocol: "vless"},
+		},
+	}}
+	targets, err := svc.DialerProxyTargets("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].Tag != "ok-1" {
+		t.Errorf("targets must contain only the working node, got %+v", targets)
 	}
 }

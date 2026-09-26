@@ -1354,7 +1354,7 @@ func (s *SubscriptionService) DialerProxyTargets(subID, nodeTag string) ([]Diale
 			if node.Tag == nodeTag {
 				continue
 			}
-			if node.DialerProxy != "" {
+			if node.DialerProxy != "" || node.Stub {
 				continue
 			}
 			targets = append(targets, DialerProxyTarget{

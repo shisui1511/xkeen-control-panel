@@ -339,6 +339,9 @@ type Subscription struct {
 	HwidToken string `json:"hwid_token,omitempty"`
 	// HwidLocked — провайдер вернул X-Hwid-Not-Supported: true при последнем refresh.
 	HwidLocked bool `json:"hwid_locked,omitempty"`
+	// DeviceRejected — провайдер вернул только узлы-заглушки (например, превышен
+	// лимит устройств). Выставляется при refresh, снимается первым рабочим ответом.
+	DeviceRejected bool `json:"device_rejected,omitempty"`
 
 	// MihomoIntegrated — интегрирована ли подписка в config.yaml Mihomo
 	MihomoIntegrated bool `json:"mihomo_integrated"`
