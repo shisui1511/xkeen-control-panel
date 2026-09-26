@@ -43,6 +43,38 @@ func (s *SubscriptionService) SetConsoleService(svc *ConsoleService) {
 	s.consoleSvc = svc
 }
 
+// restartXkeenIfRunning применяет изменённые фрагменты перезапуском XKeen, но
+// только если ядро уже работает: ядро, остановленное пользователем, обновление
+// или правка подписки не запускает. Статус «unknown» не считается остановкой.
+func (s *SubscriptionService) restartXkeenIfRunning(subID, reason string) {
+	if s.consoleSvc == nil {
+		return
+	}
+	cleanID := strings.NewReplacer("\n", "", "\r", "").Replace(subID)
+	if s.kernelSvc != nil && !s.anyKernelMayRun() {
+		log.Printf("subscription %s: kernel is stopped, skip xkeen -restart after %s", cleanID, reason)
+		return
+	}
+	if _, err := s.consoleSvc.Execute("-restart"); err != nil {
+		log.Printf("subscription %s: xkeen -restart after %s: %v", cleanID, reason, err)
+	}
+}
+
+func (s *SubscriptionService) anyKernelMayRun() bool {
+	for _, name := range []string{"xray", "mihomo"} {
+		info := s.kernelSvc.Get(name)
+		if info == nil {
+			continue
+		}
+		switch info.ProcessStatus {
+		case "stopped", "not_installed":
+		default:
+			return true
+		}
+	}
+	return false
+}
+
 func (s *SubscriptionService) SetKernelService(svc KernelStatusProvider) {
 	s.kernelSvc = svc
 }
@@ -305,10 +337,8 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 
 	s.mu.Unlock()
 
-	if needRestart && s.consoleSvc != nil {
-		if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-			log.Printf("subscription %s: xkeen -restart after xray fragment update: %v", sub.ID, err)
-		}
+	if needRestart {
+		s.restartXkeenIfRunning(sub.ID, "xray fragment update")
 	}
 
 	return nil
@@ -616,11 +646,7 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 	s.mu.Unlock()
 
 	// Триггер рестарта через ConsoleService.
-	if s.consoleSvc != nil {
-		if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-			log.Printf("subscription %s: xkeen -restart after active node switch: %v", sub.ID, err)
-		}
-	}
+	s.restartXkeenIfRunning(sub.ID, "active node switch")
 
 	return nil
 }
