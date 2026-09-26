@@ -983,3 +983,29 @@ func TestParseVersion_MihomoAlpha(t *testing.T) {
 		t.Errorf("stable: got %q", got)
 	}
 }
+
+// TestRefreshInstalledVersion: после замены бинарника версия перечитывается в
+// обход кеша — иначе новое ядро считалось старым и снова предлагалось обновить.
+func TestRefreshInstalledVersion(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "xray")
+	write := func(v string) {
+		if err := os.WriteFile(bin, []byte("#!/bin/sh\necho \"Xray "+v+" (Xray, Penetrates Everything.)\"\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("26.9.8")
+	svc := NewKernelService(t.TempDir())
+	k := svc.kernels["xray"]
+	k.BinaryPath = bin
+	k.LatestVersion = "26.9.9"
+	if v := svc.detectVersion(k); v != "26.9.8" {
+		t.Fatalf("old version: %q", v)
+	}
+
+	write("26.9.9")
+	svc.refreshInstalledVersion(k)
+	if k.CurrentVersion != "26.9.9" || k.HasUpdate {
+		t.Errorf("after install: current=%q hasUpdate=%v, want 26.9.9/false", k.CurrentVersion, k.HasUpdate)
+	}
+}
