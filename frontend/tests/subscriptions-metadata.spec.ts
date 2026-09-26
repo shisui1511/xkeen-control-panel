@@ -281,4 +281,116 @@ test.describe('Subscriptions metadata: имя, срок обновления, Mi
     const bodyText = (await page.locator('body').textContent()) || '';
     expect(bodyText).not.toContain('subscr.stats.');
   });
+
+  test('3a. форма добавления отправляет введённое имя в POST /api/subscriptions/add', async ({
+    page
+  }) => {
+    let savedPayload: Record<string, unknown> | null = null;
+    await page.route('**/api/subscriptions/add', async (route: Route) => {
+      savedPayload = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
+    });
+
+    await page.goto('/#/subscriptions');
+    await page.locator('button:has-text("Добавить")').first().click();
+
+    const modal = page.locator('.modal-container');
+    await modal.locator('input#form-name').fill('Провайдер');
+    await modal.locator('input#form-url').fill('https://example.com/named-add.yaml');
+    await modal.locator('button:has-text("Сохранить")').click();
+
+    expect(savedPayload).not.toBeNull();
+    expect((savedPayload as Record<string, unknown>).name).toBe('Провайдер');
+  });
+
+  test('3b. имя из формы — главный заголовок, profile_title — подпись (D-10)', async ({ page }) => {
+    const mockSubs = [
+      {
+        id: 'sub-name-and-brand',
+        name: 'Мой VPN',
+        profile_title: 'Brand',
+        url: 'https://example.com/named-and-brand',
+        enabled: true,
+        enable_xray: true,
+        enable_mihomo: false,
+        interval: 24
+      }
+    ];
+
+    await page.route('**/api/proxy-providers', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockSubs)
+      });
+    });
+
+    await page.goto('/#/subscriptions');
+
+    const card = page.locator('#sub-card-sub-name-and-brand');
+    await expect(card.locator('.sub-name')).toHaveText('Мой VPN');
+    await expect(card.locator('[data-testid="sub-profile-title"]')).toHaveText('Brand');
+  });
+
+  test('3c. пустое имя — заголовком становится profile_title, подписи нет', async ({ page }) => {
+    const mockSubs = [
+      {
+        id: 'sub-no-name',
+        name: '',
+        profile_title: 'Brand',
+        url: 'https://example.com/no-name',
+        enabled: true,
+        enable_xray: true,
+        enable_mihomo: false,
+        interval: 24
+      }
+    ];
+
+    await page.route('**/api/proxy-providers', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockSubs)
+      });
+    });
+
+    await page.goto('/#/subscriptions');
+
+    const card = page.locator('#sub-card-sub-no-name');
+    await expect(card.locator('.sub-name')).toHaveText('Brand');
+    await expect(card.locator('[data-testid="sub-profile-title"]')).toHaveCount(0);
+  });
+
+  test('3d. пустые имя и profile_title — заголовком становится хост URL', async ({ page }) => {
+    const mockSubs = [
+      {
+        id: 'sub-host-fallback',
+        name: '',
+        profile_title: '',
+        url: 'https://sub.example.org/abc',
+        enabled: true,
+        enable_xray: true,
+        enable_mihomo: false,
+        interval: 24
+      }
+    ];
+
+    await page.route('**/api/proxy-providers', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockSubs)
+      });
+    });
+
+    await page.goto('/#/subscriptions');
+
+    const card = page.locator('#sub-card-sub-host-fallback');
+    await expect(card.locator('.sub-name')).toHaveText('sub.example.org');
+    await expect(card.locator('[data-testid="sub-profile-title"]')).toHaveCount(0);
+  });
 });

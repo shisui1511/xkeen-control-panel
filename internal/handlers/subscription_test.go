@@ -117,6 +117,62 @@ func TestSubscriptionAdd(t *testing.T) {
 	}
 }
 
+// TestSubscriptionAdd_PersistsName проверяет прямую трассировку формы
+// (D-11): имя, отправленное в теле /api/subscriptions/add, должно быть видно
+// в последующем GET /api/subscriptions (List()).
+func TestSubscriptionAdd_PersistsName(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+
+	payload := `{"name": "Провайдер", "url": "http://example.com/named-sub"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/add", strings.NewReader(payload))
+	rr := httptest.NewRecorder()
+	api.SubscriptionAdd(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	list := subSvc.List()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 subscription, got %d", len(list))
+	}
+	if list[0].Name != "Провайдер" {
+		t.Errorf("expected name %q to persist through Add, got %q", "Провайдер", list[0].Name)
+	}
+}
+
+// TestSubscriptionUpdate_KeepsNameWhenAbsent — D-11: POST
+// /api/subscriptions/update без ключа "name" в JSON не должен стирать имя
+// подписки. До фикса SubscriptionUpdate декодирует тело в services.Subscription
+// напрямую — отсутствующий ключ "name" даёт zero-value "", который затем
+// безусловно перезаписывает existing.Name в Update().
+func TestSubscriptionUpdate_KeepsNameWhenAbsent(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+
+	sub := &services.Subscription{Name: "Провайдер", URL: "http://example.com/named-sub", Enabled: true, EnableXray: true}
+	if err := subSvc.Add(sub); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	id := subSvc.List()[0].ID
+
+	// Payload без ключа "name" — как если бы клиент отправил частичное
+	// обновление, не затрагивающее имя.
+	payload := `{"url": "http://example.com/named-sub", "enabled": true, "enable_xray": true, "interval": 24}`
+	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/update?id="+id, strings.NewReader(payload))
+	rr := httptest.NewRecorder()
+	api.SubscriptionUpdate(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	got := subSvc.Get(id)
+	if got == nil {
+		t.Fatal("subscription not found after update")
+	}
+	if got.Name != "Провайдер" {
+		t.Errorf("expected name to survive update without \"name\" key (D-11), got %q", got.Name)
+	}
+}
+
 func TestSubscriptionAdd_DefaultKernels(t *testing.T) {
 	// Case A: omitted (defaulting to true)
 	{

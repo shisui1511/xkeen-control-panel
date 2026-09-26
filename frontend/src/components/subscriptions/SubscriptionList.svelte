@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t, currentLang } from '../../i18n';
   import { pluralize } from '../../i18n';
-  import { formatTimeUntil } from '../proxies/providersState.svelte';
+  import { formatTimeUntil, subscriptionDisplayName } from '../proxies/providersState.svelte';
   import NodeList from './NodeList.svelte';
 
   interface Subscription {
@@ -366,8 +366,17 @@
           ></div>
 
           <h2 class="sub-name">
-            {sub.profile_title || sub.name}
+            {subscriptionDisplayName(sub)}
           </h2>
+          {#if sub.name?.trim() && sub.profile_title?.trim() && sub.profile_title.trim() !== sub.name.trim()}
+            <span
+              class="sub-profile-title"
+              data-testid="sub-profile-title"
+              title={$t('subscr.profile_title_hint')}
+            >
+              {sub.profile_title}
+            </span>
+          {/if}
           {#if sub.last_error && (sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0) > 0}
             <span
               class="badge badge-warning"
@@ -831,6 +840,16 @@
   }
   .sub-name:hover {
     color: var(--accent);
+  }
+
+  /* D-10: подпись бренда провайдера — вторичный текст, имя из формы важнее */
+  .sub-profile-title {
+    font-size: var(--font-size-xs, 12px);
+    color: var(--fg-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
   }
 
   .sub-header-right {

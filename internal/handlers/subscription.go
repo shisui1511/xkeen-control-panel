@@ -106,6 +106,10 @@ func (a *API) SubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
 		SockoptMark     *int  `json:"sockopt_mark"`
 		SockoptFastOpen *bool `json:"sockopt_fast_open"`
 		SockoptMptcp    *bool `json:"sockopt_mptcp"`
+
+		// D-11: имя из формы — критическая пользовательская правка, не должна
+		// стираться запросом update, который не затрагивает поле name.
+		Name *string `json:"name"`
 	}
 	if err := json.Unmarshal(body, &presence); err == nil {
 		if presence.EnableXray == nil {
@@ -122,6 +126,11 @@ func (a *API) SubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 		if presence.SockoptMptcp == nil {
 			sub.SockoptMptcp = existing.SockoptMptcp
+		}
+		// D-11: имя из формы — критическая пользовательская правка, не должна
+		// стираться запросом update, который не затрагивает поле name.
+		if presence.Name == nil {
+			sub.Name = existing.Name
 		}
 	}
 

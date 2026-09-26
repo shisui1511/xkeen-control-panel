@@ -98,6 +98,30 @@ export function formatTimeUntil(diffMs: number, tr: (key: string) => string): st
   return `${days} ${tr('subscr.stats.days')} ${hours} ${tr('subscr.stats.hours')}`;
 }
 
+// subscriptionDisplayName возвращает главное отображаемое имя подписки
+// (D-10): имя из формы важнее бренда провайдера — раньше `profile_title ||
+// name` безусловно показывал бренд, даже когда пользователь явно назвал
+// подписку сам. Пустое имя → profile_title → хост из URL (в try/catch —
+// битый URL не должен ронять рендер), пустой URL → сам url (или "").
+export function subscriptionDisplayName(sub: {
+  name?: string;
+  profile_title?: string;
+  url?: string;
+}): string {
+  const name = sub.name?.trim();
+  if (name) return name;
+  const profileTitle = sub.profile_title?.trim();
+  if (profileTitle) return profileTitle;
+  if (sub.url) {
+    try {
+      return new URL(sub.url).hostname;
+    } catch {
+      return sub.url;
+    }
+  }
+  return '';
+}
+
 export class ProvidersState {
   subscriptions = $state<Subscription[]>([]);
   expandedSubs = $state<Record<string, boolean>>({});
@@ -376,7 +400,7 @@ export class ProvidersState {
   async deleteSubscription(id: string) {
     const sub = this.subscriptions.find((s) => s.id === id);
     if (!sub) return;
-    const subName = sub.profile_title || sub.name || id;
+    const subName = subscriptionDisplayName(sub) || id;
 
     if (
       !(await showConfirm({
