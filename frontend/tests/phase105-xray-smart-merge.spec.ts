@@ -349,3 +349,46 @@ test.describe('Phase 105: Xray Constructor Smart-Merge (TMPL-01, TMPL-07)', () =
     expect(routingSaveCalls.length).toBe(0);
   });
 });
+
+// Аудит: XKeen не ставит geoip.dat/geosite.dat. Шаблон автоинициализации на
+// системе без баз не должен ссылаться на них — иначе Xray не проходит проверку.
+test('шаблон автоинициализации без баз не ссылается на geoip:/geosite:', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'serviceWorker', {
+      value: undefined,
+      writable: false,
+      configurable: true
+    });
+    window.localStorage.setItem('lang', 'ru');
+  });
+  let template = '';
+  await page.route('**/api/**', async (route) => {
+    const url = route.request().url();
+    const method = route.request().method();
+    if (url.includes('/api/auth/me')) {
+      await route.fulfill({
+        json: { authenticated: true, setup_required: false, csrf_token: 'mock-csrf' }
+      });
+    } else if (url.includes('/api/dat/list')) {
+      await route.fulfill({ json: [] });
+    } else if (url.includes('/api/config/smart-merge') && method === 'POST') {
+      template = route.request().postDataJSON().template_content;
+      await route.fulfill({
+        json: { success: true, data: { content: template, stats: { rules: 1, user_rules: 0 } } }
+      });
+    } else if (url.includes('/api/config/read') && method === 'GET') {
+      const path = new URL(url).searchParams.get('path') || '';
+      await route.fulfill({ contentType: 'application/json', body: getStubXrayFile(path) });
+    } else if (url.includes('/api/config/list')) {
+      await route.fulfill({ json: [] });
+    } else {
+      await route.fulfill({ json: { success: true, data: {} } });
+    }
+  });
+
+  await page.goto('/#/constructor');
+  await page.locator('.constructor-kernel-toggle button:has-text("Xray")').click();
+  await expect.poll(() => template).not.toBe('');
+  expect(template).not.toMatch(/geoip:|geosite:/);
+  expect(template).toContain('10.0.0.0/8');
+});

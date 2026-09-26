@@ -6,6 +6,7 @@
   import XrayRuleEditor from './XrayRuleEditor.svelte';
   import XrayBalancersEditor from './XrayBalancersEditor.svelte';
   import type { ObservatorySettings, XrayBalancer } from '../../lib/constructors/xrayRouting';
+  import { adaptPresetRules, xrayGeoAvailability } from '../../lib/constructors/geodata';
   import {
     XRAY_DEFAULT_PRESETS,
     type XrayRoutingPreset
@@ -117,7 +118,7 @@
   function applyPreset(presetId: string) {
     const preset = XRAY_DEFAULT_PRESETS.find((p: XrayRoutingPreset) => p.id === presetId);
     if (!preset) return;
-    for (const rule of preset.rules) {
+    for (const rule of adaptPresetRules(preset.rules, $xrayGeoAvailability)) {
       routingRules.push({
         ...rule,
         id: typeof crypto !== 'undefined' ? crypto.randomUUID() : 'r-' + Date.now(),

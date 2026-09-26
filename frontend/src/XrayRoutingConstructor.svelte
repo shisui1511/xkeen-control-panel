@@ -9,6 +9,12 @@
   import { currentLang, t, tp } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
+  import {
+    adaptDnsServers,
+    adaptPresetRules,
+    geoAvailability,
+    xrayGeoAvailability
+  } from './lib/constructors/geodata';
   import { parseValidationError } from './lib/errorParser';
   import { findPortCollisions, parseMihomoPorts, type PortAllocation } from './lib/portChecker';
   import { apiFetch, apiFetchJSON, setDNSRedirect } from './lib/api';
@@ -321,7 +327,28 @@
     '06_policy.json'
   ];
 
+  // Установленные базы Xray: пресеты ссылаются на geoip:/geosite:, а XKeen
+  // ставит файлы под своими именами (geosite_v2fly.dat и т. п.)
+  async function loadGeoAvailability() {
+    try {
+      const res = await apiFetch('/api/dat/list');
+      if (!res.ok) return;
+      const list = (await res.json()) as unknown;
+      if (!Array.isArray(list)) return;
+      xrayGeoAvailability.set(
+        geoAvailability(
+          (list as { name: string; type?: string }[])
+            .filter((f) => f.type !== 'mihomo')
+            .map((f) => f.name)
+        )
+      );
+    } catch (e: any) {
+      if (e?.status === 401) return;
+    }
+  }
+
   async function loadXrayConfig() {
+    const geoLoaded = loadGeoAvailability();
     const promises = XRAY_FILES.map(async (name) => {
       try {
         const path = `${XRAY_DIR}/${name}`;
@@ -340,7 +367,11 @@
       }
     });
 
-    await Promise.allSettled(promises);
+    // Список баз не должен задерживать конструктор: не успел — ссылки пресетов как есть
+    await Promise.allSettled([
+      ...promises,
+      Promise.race([geoLoaded, new Promise((r) => setTimeout(r, 3000))])
+    ]);
     parseXrayFiles(xrayFiles);
 
     // Auto-initialize if stub config (CONSTR-06 / D-08)
@@ -514,14 +545,16 @@
     const preset = XRAY_DEFAULT_PRESETS.find((p: XrayRoutingPreset) => p.id === presetId);
     if (!preset) return;
 
-    routingRules = preset.rules.map((r) => ({
+    routingRules = adaptPresetRules(preset.rules, $xrayGeoAvailability).map((r) => ({
       ...r,
       id: typeof crypto !== 'undefined' ? crypto.randomUUID() : 'r-' + Math.random(),
       enabled: true
     }));
 
     if (preset.dnsServers && preset.dnsServers.length > 0) {
-      dnsConfig.servers = [...preset.dnsServers] as (string | DNSServer)[];
+      dnsConfig.servers = adaptDnsServers([...preset.dnsServers], $xrayGeoAvailability) as (
+        string | DNSServer
+      )[];
     }
     dnsOverVless = preset.dnsOverVless;
     lastAppliedPreset = presetId;
@@ -653,7 +686,7 @@
     return {
       routing: {
         domainStrategy: 'IPIfNonMatch',
-        rules: substituteProxyTag(rules, tag)
+        rules: substituteProxyTag(adaptPresetRules(rules, $xrayGeoAvailability), tag)
       }
     };
   }
