@@ -865,3 +865,27 @@ func TestConfigValidate_Rejected(t *testing.T) {
 		t.Errorf("got %+v, want validator output", resp)
 	}
 }
+
+// TestConfig_MissingDirectory: на чистой системе каталога mihomo ещё нет —
+// чтение отвечает 404 (конструктор начинает с пустого конфига), а не 403
+// «path traversal», и первое сохранение создаёт каталог.
+func TestConfig_MissingDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+	path := filepath.Join(tmpDir, "mihomo", "config.yaml")
+
+	rr := httptest.NewRecorder()
+	api.ConfigRead(rr, httptest.NewRequest(http.MethodGet, "/api/config/read?path="+path, nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("read: expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	api.ConfigSave(rr, httptest.NewRequest(http.MethodPost, "/api/config/save?path="+path, bytes.NewReader([]byte("mode: rule\n"))))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("save: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "mode: rule\n" {
+		t.Errorf("saved file: %q, %v", data, err)
+	}
+}

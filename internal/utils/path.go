@@ -2,6 +2,7 @@ package utils
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -37,17 +38,13 @@ func (v *PathValidator) Validate(path string) (string, error) {
 		return "", errors.New("path traversal detected or path not allowed")
 	}
 
-	// Resolve symlinks for the target path. If it does not exist, resolve the parent directory.
-	var resolved string
-	if rp, err := filepath.EvalSymlinks(absPath); err == nil {
-		resolved = rp
-	} else {
-		parentDir := filepath.Dir(absPath)
-		resolvedParent, err := filepath.EvalSymlinks(parentDir)
-		if err != nil {
-			return "", errors.New("path traversal detected or path not allowed")
-		}
-		resolved = filepath.Join(resolvedParent, filepath.Base(absPath))
+	// Resolve symlinks for the target path. If it does not exist, resolve the
+	// nearest existing ancestor and append the missing tail: missing components
+	// cannot be symlinks. So a file in a directory that is yet to be created
+	// (/opt/etc/mihomo/config.yaml before the first save) validates too.
+	resolved, err := resolveExisting(absPath)
+	if err != nil {
+		return "", errors.New("path traversal detected or path not allowed")
 	}
 
 	for _, root := range v.AllowedRoots {
@@ -68,4 +65,24 @@ func (v *PathValidator) Validate(path string) (string, error) {
 		}
 	}
 	return "", errors.New("path traversal detected or path not allowed")
+}
+
+// resolveExisting resolves symlinks of the longest existing prefix of absPath
+// and appends the rest unchanged.
+func resolveExisting(absPath string) (string, error) {
+	tail := ""
+	cur := absPath
+	for {
+		if rp, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(rp, tail), nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return "", os.ErrNotExist
+		}
+		tail = filepath.Join(filepath.Base(cur), tail)
+		cur = parent
+	}
 }
