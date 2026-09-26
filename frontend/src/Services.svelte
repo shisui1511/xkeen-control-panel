@@ -68,6 +68,8 @@
   // и без этого флага карточка с терминалом пропадала посреди `xkeen -i`
   let xkeenInstallOpen = $state(false);
   let xkeenInstallerAvailable = $state(false);
+  // XKeen распакован, но `xkeen -i` не дошёл до конца — установщик нужен снова
+  let xkeenSetupIncomplete = $state(false);
   let actionLoading = $state<Record<string, boolean>>({});
   let pendingRestartKernel = $state<string | null>(null);
   let fileInputRefs: Record<string, HTMLInputElement | null> = {};
@@ -218,6 +220,7 @@
               xkeenInstalled = parsed.data.xkeen_installed;
             }
             xkeenInstallerAvailable = parsed.data.xkeen_installer_available === true;
+            xkeenSetupIncomplete = parsed.data.xkeen_setup_incomplete === true;
             xkeenInfo = {
               isRunning: parsed.data.is_running,
               activeKernel: parsed.data.active_kernel || '',
@@ -713,9 +716,10 @@
     </Button>
   </PageHeader>
 
-  {#if xkeenInstalled === false || xkeenInstallOpen}
+  {#if xkeenInstalled === false || xkeenSetupIncomplete || xkeenInstallOpen}
     <XKeenInstallCard
       available={xkeenInstallerAvailable}
+      incomplete={xkeenSetupIncomplete}
       onopenchange={(open) => (xkeenInstallOpen = open)}
       onfinished={() => {
         fetchStatus();
@@ -1359,12 +1363,16 @@
   </div>
 
   <div class="services-stack">
-    <XKeenSettingsCard
-      onrestarted={() => {
-        fetchStatus();
-        fetchRestartLog();
-      }}
-    />
+    <!-- Настройки читаются при монтировании: после установки XKeen из панели
+         карточку нужно перечитать, иначе она ждёт установки до F5 -->
+    {#key xkeenInstalled === true && !xkeenSetupIncomplete}
+      <XKeenSettingsCard
+        onrestarted={() => {
+          fetchStatus();
+          fetchRestartLog();
+        }}
+      />
+    {/key}
 
     {#if $capabilities?.kernels?.mihomo?.installed}
       <MihomoProfilesCard
