@@ -116,6 +116,34 @@ func TestXKeenInstaller_CommandRunsScriptThenStopsOnFailure(t *testing.T) {
 	}
 }
 
+// TestXKeenInstaller_CommandShell: оболочка Entware важнее /bin/sh (на
+// Keenetic это NDM Shell Wrapper, теряющий аргументы `sh -c`), явная — важнее всех.
+func TestXKeenInstaller_CommandShell(t *testing.T) {
+	dir := t.TempDir()
+	entware := filepath.Join(dir, "opt-sh")
+	if err := os.WriteFile(entware, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	saved := xkeenShellCandidates
+	t.Cleanup(func() { xkeenShellCandidates = saved })
+
+	x := &XKeenInstaller{Dir: dir}
+	script := filepath.Join(dir, "xcp-xkeen-install-1.sh")
+
+	xkeenShellCandidates = []string{filepath.Join(dir, "missing"), entware, "/bin/sh"}
+	if argv, _ := x.Command(script, "stable"); argv[0] != entware {
+		t.Errorf("first existing candidate must be used, got %q", argv[0])
+	}
+	xkeenShellCandidates = []string{filepath.Join(dir, "missing")}
+	if argv, _ := x.Command(script, "stable"); argv[0] != "/bin/sh" {
+		t.Errorf("fallback must be /bin/sh, got %q", argv[0])
+	}
+	x.Shell = "/custom/sh"
+	if argv, _ := x.Command(script, "stable"); argv[0] != "/custom/sh" {
+		t.Errorf("explicit Shell must win, got %q", argv[0])
+	}
+}
+
 func TestXKeenInstaller_SingleRun(t *testing.T) {
 	x := &XKeenInstaller{}
 	release, err := x.Acquire()
