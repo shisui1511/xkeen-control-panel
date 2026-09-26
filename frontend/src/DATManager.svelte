@@ -1261,11 +1261,7 @@
                     {/if}
                   </span>
                   <code class="banner-format">
-                    {#if getTagPrefix(selectedFile) === 'geoip'}
-                      geoip:TAGNAME
-                    {:else}
-                      geosite:TAGNAME
-                    {/if}
+                    {selectedFile ? getRuleValue(selectedFile, 'TAGNAME') : 'geosite:TAGNAME'}
                   </code>
                 </div>
 

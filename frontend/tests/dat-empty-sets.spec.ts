@@ -93,3 +93,49 @@ test('lists databases when no kernel is active', async ({ page }) => {
   await page.goto('/#/dat');
   await expect(page.locator('.db-card-item')).toHaveCount(2);
 });
+
+// Для нестандартных баз Xray нужен формат ext:<файл>:<тег>, а не geosite:<тег>.
+test('rule format banner matches the copied rule', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'serviceWorker', {
+      value: undefined,
+      writable: false,
+      configurable: true
+    });
+  });
+  await page.route('**/api/**', async (route) => {
+    const url = route.request().url();
+    if (url.includes('/api/auth/me')) {
+      await route.fulfill({
+        json: { authenticated: true, setup_required: false, csrf_token: 'mock-csrf-token' }
+      });
+    } else if (url.includes('/api/dat/tags')) {
+      await route.fulfill({ json: [{ tag: 'google', count: 10 }] });
+    } else if (url.includes('/api/dat/list')) {
+      await route.fulfill({
+        json: ['geosite.dat', 'geosite_v2fly.dat'].map((name) => ({
+          name,
+          path: `/opt/etc/xray/dat/${name}`,
+          size: 1024,
+          last_update: Math.floor(Date.now() / 1000),
+          exists: true,
+          type: 'xray'
+        }))
+      });
+    } else {
+      await route.fulfill({ json: { success: true, data: {} } });
+    }
+  });
+
+  await page.goto('/#/dat');
+  const banner = page.locator('.banner-format');
+
+  await page.locator('.db-card-item', { hasText: 'geosite_v2fly.dat' }).click();
+  await expect(banner).toHaveText('ext:geosite_v2fly.dat:TAGNAME');
+
+  await page
+    .locator('.db-card-item', { hasText: /^\s*geosite\.dat/ })
+    .first()
+    .click();
+  await expect(banner).toHaveText('geosite:TAGNAME');
+});
