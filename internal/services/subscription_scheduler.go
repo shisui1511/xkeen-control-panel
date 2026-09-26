@@ -758,3 +758,39 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 	}
 	return nil
 }
+
+// ClearActiveNode снимает дефолтный статус выбранного узла подписки: файл
+// дефолта перестраивается, и дефолтным снова становится первый outbound файлов
+// XKeen (direct). Стабильный тег xcp-<id> перестаёт быть дефолтом, но не
+// удаляется: выбор (SelectedTag) остаётся, правила роутинга пользователя со
+// ссылкой на тег не ломают проверку конфига Xray. Для подписки, которая не
+// дефолтная, ничего не меняется.
+func (s *SubscriptionService) ClearActiveNode(subscriptionID string) error {
+	s.mu.Lock()
+
+	sub := s.GetLocked(subscriptionID)
+	if sub == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("subscription not found")
+	}
+	if !sub.IsDefault {
+		s.mu.Unlock()
+		return nil
+	}
+
+	sub.IsDefault = false
+	changed, err := s.writeSelectionFilesLocked()
+	if err != nil {
+		sub.IsDefault = true
+		s.mu.Unlock()
+		return err
+	}
+	_ = s.save()
+	subID := sub.ID
+	s.mu.Unlock()
+
+	if changed {
+		s.restartXkeenIfRunning(subID, "active node cleared")
+	}
+	return nil
+}

@@ -354,3 +354,85 @@ func TestSelection_DroppedOnDeleteDisableAuto(t *testing.T) {
 		})
 	}
 }
+
+func TestClearDefault_DirectFirstAgain(t *testing.T) {
+	env := newOrderEnv(t)
+	tag := nodeTagByServer(t, env, "sub_1", "2.2.2.2:443")
+	if err := env.svc.SetActiveNode("sub_1", tag); err != nil {
+		t.Fatalf("SetActiveNode: %v", err)
+	}
+	restartsBefore := env.restartCalls(t)
+
+	if err := env.svc.ClearActiveNode("sub_1"); err != nil {
+		t.Fatalf("ClearActiveNode: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(env.xrayDir, selectionDefaultFileName)); !os.IsNotExist(err) {
+		t.Error("default file must be removed")
+	}
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	if len(merged) == 0 || merged[0]["tag"] != "direct" {
+		t.Fatalf("first outbound must be direct again, got %v", merged)
+	}
+	sub := env.svc.Get("sub_1")
+	if sub.IsDefault {
+		t.Error("subscription must stop being the default")
+	}
+	if sub.SelectedTag != tag {
+		t.Errorf("selected tag must be kept for by-tag use, got %q", sub.SelectedTag)
+	}
+	if got := env.restartCalls(t); got != restartsBefore+1 {
+		t.Errorf("running kernel must be restarted once: %d -> %d", restartsBefore, got)
+	}
+
+	// Повторный выбор после снятия снова делает узел дефолтным.
+	if err := env.svc.SetActiveNode("sub_1", tag); err != nil {
+		t.Fatalf("SetActiveNode again: %v", err)
+	}
+	if merged := simulateXrayConfdirMerge(t, env.xrayDir); merged[0]["tag"] != "xcp-sub_1" {
+		t.Errorf("reselected node must be first, got %v", merged[0]["tag"])
+	}
+}
+
+func TestClearActiveNode_NoopWhenNotDefault(t *testing.T) {
+	env := newOrderEnv(t)
+	restartsBefore := env.restartCalls(t)
+	fragBefore := env.fragment(t, "sub_1")
+
+	if err := env.svc.ClearActiveNode("sub_1"); err != nil {
+		t.Fatalf("ClearActiveNode: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.xrayDir, selectionDefaultFileName)); !os.IsNotExist(err) {
+		t.Error("default file must not appear")
+	}
+	if !bytes.Equal(fragBefore, env.fragment(t, "sub_1")) {
+		t.Error("fragment must stay unchanged")
+	}
+	if got := env.restartCalls(t); got != restartsBefore {
+		t.Errorf("no-op clear must not restart kernel: %d -> %d", restartsBefore, got)
+	}
+
+	if err := env.svc.ClearActiveNode("nope"); err == nil || err.Error() != "subscription not found" {
+		t.Errorf("unknown subscription must give 'subscription not found', got %v", err)
+	}
+}
+
+func TestClearActiveNode_StoppedKernelNotStarted(t *testing.T) {
+	env := newOrderEnv(t)
+	tag := nodeTagByServer(t, env, "sub_1", "2.2.2.2:443")
+	if err := env.svc.SetActiveNode("sub_1", tag); err != nil {
+		t.Fatalf("SetActiveNode: %v", err)
+	}
+	env.svc.SetKernelService(&statusKernelService{status: map[string]string{"xray": "stopped", "mihomo": "not_installed"}})
+	before := env.restartCalls(t)
+
+	if err := env.svc.ClearActiveNode("sub_1"); err != nil {
+		t.Fatalf("ClearActiveNode: %v", err)
+	}
+	if got := env.restartCalls(t); got != before {
+		t.Fatalf("xkeen -restart must not start a stopped kernel: %d -> %d", before, got)
+	}
+	if _, err := os.Stat(filepath.Join(env.xrayDir, selectionDefaultFileName)); !os.IsNotExist(err) {
+		t.Error("default file must still be removed")
+	}
+}

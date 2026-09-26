@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -351,7 +352,14 @@ func (a *API) SubscriptionSetActive(w http.ResponseWriter, r *http.Request) {
 
 	if err := a.subscriptionSvc.SetActiveNode(id, body.NodeTag); err != nil {
 		status := http.StatusInternalServerError
-		if err.Error() == "cannot set active node in auto routing mode (balancer is managing selection)" {
+		switch {
+		case errors.Is(err, services.ErrStubNodeSelection):
+			status = http.StatusConflict
+		case errors.Is(err, services.ErrSelectionNodeNotFound):
+			status = http.StatusNotFound
+		case err.Error() == "subscription not found":
+			status = http.StatusNotFound
+		case err.Error() == "cannot set active node in auto routing mode (balancer is managing selection)":
 			status = http.StatusConflict
 		}
 		a.errorResponse(w, err.Error(), status)
@@ -359,6 +367,32 @@ func (a *API) SubscriptionSetActive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSONSuccess(w, map[string]string{"active_node": body.NodeTag})
+}
+
+// SubscriptionClearActive снимает выбор дефолтного узла подписки: дефолтом
+// снова становится первый outbound файлов XKeen (direct).
+func (a *API) SubscriptionClearActive(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		a.errorResponse(w, "ID is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := a.subscriptionSvc.ClearActiveNode(id); err != nil {
+		status := http.StatusInternalServerError
+		if err.Error() == "subscription not found" {
+			status = http.StatusNotFound
+		}
+		a.errorResponse(w, err.Error(), status)
+		return
+	}
+
+	JSONSuccess(w, map[string]bool{"is_default": false})
 }
 
 // adhocSubscriptionID возвращает стабильный ID для подписки, не

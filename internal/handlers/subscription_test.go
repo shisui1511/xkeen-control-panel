@@ -949,3 +949,109 @@ func TestSubscriptionEndpoints_Extended(t *testing.T) {
 		}
 	})
 }
+
+// newSelectableSub добавляет Xray-подписку с двумя рабочими узлами и
+// заглушкой; во фрагменте только рабочие узлы, как после refresh.
+func newSelectableSub(t *testing.T, api *API, subSvc *services.SubscriptionService) string {
+	t.Helper()
+	sub := &services.Subscription{
+		Name:       "Select Sub",
+		URL:        "http://example.com/sub",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []services.SubscriptionNode{
+			{Tag: "stub-1", Name: "Stub", Protocol: "vless", Server: "0.0.0.0:1", Stub: true},
+			{Tag: "node-1", Name: "Node 1", Protocol: "vless", Server: "1.1.1.1:443"},
+			{Tag: "node-2", Name: "Node 2", Protocol: "vless", Server: "2.2.2.2:443"},
+		},
+	}
+	if err := subSvc.Add(sub); err != nil {
+		t.Fatal(err)
+	}
+	id := subSvc.List()[0].ID
+	fragmentPath := filepath.Join(api.cfg.XRayConfigDir, "04_outbounds."+id+".tail.json")
+	content := `{"outbounds": [{"tag": "node-1", "protocol": "vless"}, {"tag": "node-2", "protocol": "vless"}]}`
+	if err := os.WriteFile(fragmentPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestSubscriptionSetActive_StubConflict(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+	id := newSelectableSub(t, api, subSvc)
+
+	post := func(tag string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/active?id="+id, strings.NewReader(`{"node_tag": "`+tag+`"}`))
+		rr := httptest.NewRecorder()
+		api.SubscriptionSetActive(rr, req)
+		return rr.Code
+	}
+
+	if code := post("stub-1"); code != http.StatusConflict {
+		t.Errorf("stub selection: expected 409, got %d", code)
+	}
+	if code := post("no-such-node"); code != http.StatusNotFound {
+		t.Errorf("unknown node: expected 404, got %d", code)
+	}
+	if code := post("node-2"); code != http.StatusOK {
+		t.Errorf("working node: expected 200, got %d", code)
+	}
+}
+
+func TestSubscriptionClearActive(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+	id := newSelectableSub(t, api, subSvc)
+	if err := subSvc.SetActiveNode(id, "node-1"); err != nil {
+		t.Fatalf("SetActiveNode: %v", err)
+	}
+	if !subSvc.Get(id).IsDefault {
+		t.Fatal("precondition: subscription must be the default")
+	}
+
+	// 405 на GET.
+	rr := httptest.NewRecorder()
+	api.SubscriptionClearActive(rr, httptest.NewRequest(http.MethodGet, "/api/subscriptions/active/clear?id="+id, nil))
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET: expected 405, got %d", rr.Code)
+	}
+
+	// 400 без id.
+	rr = httptest.NewRecorder()
+	api.SubscriptionClearActive(rr, httptest.NewRequest(http.MethodPost, "/api/subscriptions/active/clear", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("no id: expected 400, got %d", rr.Code)
+	}
+
+	// 404 для неизвестной подписки.
+	rr = httptest.NewRecorder()
+	api.SubscriptionClearActive(rr, httptest.NewRequest(http.MethodPost, "/api/subscriptions/active/clear?id=nope", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("unknown id: expected 404, got %d", rr.Code)
+	}
+
+	// 200 и is_default=false.
+	rr = httptest.NewRecorder()
+	api.SubscriptionClearActive(rr, httptest.NewRequest(http.MethodPost, "/api/subscriptions/active/clear?id="+id, nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			IsDefault bool `json:"is_default"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rr.Body.String())
+	}
+	if !resp.Success || resp.Data.IsDefault {
+		t.Errorf("unexpected response: %s", rr.Body.String())
+	}
+	if subSvc.Get(id).IsDefault {
+		t.Error("subscription must stop being the default")
+	}
+	if _, err := os.Stat(filepath.Join(api.cfg.XRayConfigDir, "04_outbounds.zz_xcp_default.json")); !os.IsNotExist(err) {
+		t.Error("default file must be removed")
+	}
+}
