@@ -166,7 +166,18 @@
   // Backend reports a missing core as the literal "not installed".
   function kernelVersion(v: string | undefined): string {
     if (!v || v === 'not installed') return '';
-    return `v${v.replace(/^v/, '')}`;
+    const bare = v.replace(/^v/, '');
+    // Плавающая сборка (alpha-<sha>) — без префикса v
+    return /^\d/.test(bare) ? `v${bare}` : bare;
+  }
+
+  // Подсказка под строкой ядра: готовые статусы — переведённым текстом, ошибки — как есть
+  function kernelHint(k: { status: string; message: string; current_version: string }): string {
+    if (k.status === 'done')
+      return $t('svc.kernel_installed', { version: kernelVersion(k.current_version) });
+    if (k.status === 'idle' && k.message.startsWith('No prerelease found'))
+      return $t('svc.kernel_no_prerelease');
+    return k.message;
   }
 
   function kernelInstalled(v: string | undefined, name: 'mihomo' | 'xray'): boolean {
@@ -1115,7 +1126,10 @@
                 {:else if !mihomo?.current_version || mihomo.current_version === 'not installed'}
                   <StatusBadge variant="stopped" label={$t('kernel.status.not_installed')} />
                 {:else if mihomo?.has_update}
-                  <StatusBadge variant="warning" label={`→ v${mihomo.latest_version}`} />
+                  <StatusBadge
+                    variant="warning"
+                    label={`→ ${kernelVersion(mihomo.latest_version)}`}
+                  />
                 {:else}
                   <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
                 {/if}
@@ -1123,7 +1137,7 @@
             </div>
             {#if kernelsLoaded && mihomo?.message && (mihomo.status === 'failed' || mihomo.status === 'idle' || mihomo.status === 'done')}
               <p class="update-hint" class:update-hint-error={mihomo.status === 'failed'}>
-                {mihomo.message}
+                {kernelHint(mihomo)}
               </p>
             {/if}
           </div>
@@ -1244,7 +1258,10 @@
                 {:else if !xray?.current_version || xray.current_version === 'not installed'}
                   <StatusBadge variant="stopped" label={$t('kernel.status.not_installed')} />
                 {:else if xray?.has_update}
-                  <StatusBadge variant="warning" label={`→ v${xray.latest_version}`} />
+                  <StatusBadge
+                    variant="warning"
+                    label={`→ ${kernelVersion(xray.latest_version)}`}
+                  />
                 {:else}
                   <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
                 {/if}
@@ -1252,7 +1269,7 @@
             </div>
             {#if kernelsLoaded && xray?.message && (xray.status === 'failed' || xray.status === 'idle' || xray.status === 'done')}
               <p class="update-hint" class:update-hint-error={xray.status === 'failed'}>
-                {xray.message}
+                {kernelHint(xray)}
               </p>
             {/if}
           </div>

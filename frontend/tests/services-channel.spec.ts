@@ -140,6 +140,58 @@ test.describe('Services page — channel & updates card', () => {
     await expect(xrayItem.locator('.update-hint')).toContainText('GitHub API error');
   });
 
+  test('shows a rolling mihomo alpha without a v prefix and a translated install hint', async ({
+    page
+  }) => {
+    await page.route('**/api/kernels', async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: [
+            {
+              name: 'xray',
+              display_name: 'Xray-core',
+              binary_path: '/opt/sbin/xray',
+              current_version: '26.9.9',
+              latest_version: '26.9.9',
+              has_update: false,
+              channel: 'preview',
+              status: 'done',
+              process_status: 'stopped',
+              message: 'Updated to 26.9.9'
+            },
+            {
+              name: 'mihomo',
+              display_name: 'Mihomo',
+              binary_path: '/opt/sbin/mihomo',
+              current_version: '1.19.31',
+              latest_version: 'alpha-f103639',
+              latest_tag: 'Prerelease-Alpha',
+              has_update: true,
+              channel: 'preview',
+              status: 'idle',
+              process_status: 'stopped',
+              message: ''
+            }
+          ]
+        })
+      });
+    });
+
+    await page.goto('/#/services');
+
+    const mihomoItem = page.locator('.update-item', { hasText: 'Mihomo' });
+    await expect(mihomoItem.locator('.status-badge')).toContainText('→ alpha-f103639');
+    const xrayItem = page.locator('.update-item', { hasText: 'Xray' });
+    await expect(xrayItem.locator('.update-hint')).toContainText(
+      /Установлено: v26\.9\.9|Installed: v26\.9\.9/
+    );
+    await expect(xrayItem).not.toContainText('Updated to');
+  });
+
   test('surfaces a hint when the two kernels have diverging channels', async ({ page }) => {
     await page.route('**/api/kernels', async (route) => {
       if (route.request().method() !== 'GET') return route.fallback();

@@ -278,16 +278,19 @@ type KernelInfo struct {
 	BinaryPath     string `json:"binary_path"`
 	CurrentVersion string `json:"current_version"`
 	LatestVersion  string `json:"latest_version"`
-	HasUpdate      bool   `json:"has_update"`
-	HasBackup      bool   `json:"has_backup"`
-	Channel        string `json:"channel"` // stable, preview
-	Repo           string `json:"repo"`
-	Status         string `json:"status"`         // idle, checking, downloading, installing, done, failed
-	ProcessStatus  string `json:"process_status"` // running, stopped, not_installed, not_accessible, unknown
-	Message        string `json:"message"`
-	PID            int    `json:"pid,omitempty"`
-	Uptime         string `json:"uptime,omitempty"`
-	APIAddr        string `json:"api_addr,omitempty"`
+	// LatestTag — тег релиза с LatestVersion. У плавающих pre-release (mihomo
+	// Prerelease-Alpha) он не совпадает с "v"+версия
+	LatestTag     string `json:"latest_tag,omitempty"`
+	HasUpdate     bool   `json:"has_update"`
+	HasBackup     bool   `json:"has_backup"`
+	Channel       string `json:"channel"` // stable, preview
+	Repo          string `json:"repo"`
+	Status        string `json:"status"`         // idle, checking, downloading, installing, done, failed
+	ProcessStatus string `json:"process_status"` // running, stopped, not_installed, not_accessible, unknown
+	Message       string `json:"message"`
+	PID           int    `json:"pid,omitempty"`
+	Uptime        string `json:"uptime,omitempty"`
+	APIAddr       string `json:"api_addr,omitempty"`
 
 	// binaryPathCachedAt records when BinaryPath was last resolved via auto-detection.
 	// Access must be protected by the KernelService mutex.
@@ -805,6 +808,9 @@ func (s *KernelService) detectVersion(k *KernelInfo) string {
 // optional leading 'v' or 'V' prefix, including pre-release suffixes (e.g. v1.8.24-rc1).
 var versionRe = regexp.MustCompile(`[vV]?(\d+\.\d+\.\d+[^\s]*)`)
 
+// mihomoAlphaVersionRe — версия alpha-сборки в выводе `mihomo -v`.
+var mihomoAlphaVersionRe = regexp.MustCompile(`\b(alpha-[0-9a-f]{7,})\b`)
+
 func (s *KernelService) parseVersion(name, output string) string {
 	output = strings.TrimSpace(output)
 	switch name {
@@ -819,6 +825,10 @@ func (s *KernelService) parseVersion(name, output string) string {
 			return m[1]
 		}
 	case "mihomo":
+		// Alpha-сборка: Mihomo Meta alpha-f103639 linux arm64 ...
+		if m := mihomoAlphaVersionRe.FindStringSubmatch(output); m != nil {
+			return m[1]
+		}
 		// Mihomo Version: v1.18.0 ...
 		re := regexp.MustCompile(`(?:Mihomo\s+)?Version[:\s]*` + versionRe.String())
 		if m := re.FindStringSubmatch(output); len(m) > 1 {
@@ -830,6 +840,55 @@ func (s *KernelService) parseVersion(name, output string) string {
 		}
 	}
 	return "unknown"
+}
+
+// githubKernelRelease — релиз ядра в ответе GitHub API (канал preview).
+type githubKernelRelease struct {
+	TagName    string `json:"tag_name"`
+	Prerelease bool   `json:"prerelease"`
+	Assets     []struct {
+		Name string `json:"name"`
+	} `json:"assets"`
+}
+
+// mihomoAlphaAssetRe — ассет плавающего pre-release mihomo: mihomo-linux-<arch>-alpha-<sha>.gz
+var mihomoAlphaAssetRe = regexp.MustCompile(`^mihomo-linux-[a-z0-9-]+-(alpha-[0-9a-f]+)\.gz$`)
+
+// previewVersion — версия pre-release: semver из тега, а для плавающего тега
+// mihomo (Prerelease-Alpha) — alpha-<sha> из имени ассета.
+func previewVersion(name string, rel githubKernelRelease) string {
+	v := strings.TrimPrefix(rel.TagName, "v")
+	if isValidSemver(v) {
+		return v
+	}
+	if name == "mihomo" {
+		for _, a := range rel.Assets {
+			if m := mihomoAlphaAssetRe.FindStringSubmatch(a.Name); m != nil {
+				return m[1]
+			}
+		}
+	}
+	return ""
+}
+
+// isRollingBuild — версия плавающей сборки (alpha-<sha>), не semver.
+func isRollingBuild(v string) bool {
+	return strings.HasPrefix(v, "alpha-")
+}
+
+// kernelHasUpdate — предлагать ли latest вместо current. У плавающей сборки нет
+// порядка версий: обновление — любой другой коммит.
+func kernelHasUpdate(latest, current string) bool {
+	switch {
+	case latest == "":
+		return false
+	case isRollingBuild(latest):
+		return latest != current
+	case isValidSemver(current):
+		return compareSemver(latest, current) > 0
+	default:
+		return true
+	}
 }
 
 // CheckLatest queries GitHub API for latest release.
@@ -893,7 +952,7 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	}
 	defer resp.Body.Close()
 
-	var latestVersion string
+	var latestVersion, latestTag string
 	if channel == "stable" {
 		var release struct {
 			TagName string `json:"tag_name"`
@@ -908,11 +967,9 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 			return err
 		}
 		latestVersion = strings.TrimPrefix(release.TagName, "v")
+		latestTag = release.TagName
 	} else {
-		var releases []struct {
-			TagName    string `json:"tag_name"`
-			Prerelease bool   `json:"prerelease"`
-		}
+		var releases []githubKernelRelease
 		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 			s.mu.Lock()
 			if kk := s.kernels[name]; kk != nil {
@@ -924,8 +981,10 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 		}
 		for _, rel := range releases {
 			if channel == "preview" && rel.Prerelease {
-				latestVersion = strings.TrimPrefix(rel.TagName, "v")
-				break
+				if v := previewVersion(name, rel); v != "" {
+					latestVersion, latestTag = v, rel.TagName
+					break
+				}
 			}
 		}
 	}
@@ -941,11 +1000,8 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	s.mu.Lock()
 	if kk := s.kernels[name]; kk != nil {
 		kk.LatestVersion = latestVersion
-		if isValidSemver(currentVersion) {
-			kk.HasUpdate = latestVersion != "" && compareSemver(latestVersion, currentVersion) > 0
-		} else {
-			kk.HasUpdate = latestVersion != ""
-		}
+		kk.LatestTag = latestTag
+		kk.HasUpdate = kernelHasUpdate(latestVersion, currentVersion)
 		kk.Status = "idle"
 		kk.Message = resultMessage
 	}
@@ -1134,11 +1190,7 @@ func (s *KernelService) Install(name string) error {
 		// Re-resolve path immediately so we report the correct location
 		s.resolveBinaryPath(kk)
 		kk.CurrentVersion = s.detectVersion(kk)
-		if isValidSemver(kk.CurrentVersion) {
-			kk.HasUpdate = latestVersion != "" && compareSemver(latestVersion, kk.CurrentVersion) > 0
-		} else {
-			kk.HasUpdate = latestVersion != ""
-		}
+		kk.HasUpdate = kernelHasUpdate(latestVersion, kk.CurrentVersion)
 		kk.Status = "done"
 		kk.Message = "Updated to " + kk.CurrentVersion
 		kk.HasBackup = true
@@ -1302,6 +1354,12 @@ func (s *KernelService) buildDownloadURL(k *KernelInfo, arch string) (string, st
 		return "", ""
 	}
 
+	// Тег релиза: у плавающих pre-release он свой, иначе "v"+версия
+	tag := k.LatestTag
+	if tag == "" {
+		tag = "v" + version
+	}
+
 	switch k.Name {
 	case "xray":
 		// Xray: Xray-linux-arm64-v8a.zip, Xray-linux-mips32le.zip or Xray-linux-mips32.zip
@@ -1317,18 +1375,23 @@ func (s *KernelService) buildDownloadURL(k *KernelInfo, arch string) (string, st
 		default:
 			return "", ""
 		}
-		return fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", k.Repo, version, file), file
+		return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", k.Repo, tag, file), file
 
 	case "mihomo":
 		// Mihomo: mihomo-linux-arm64-v1.18.0.gz or mihomo-linux-mipsle-softfloat-v1.18.0.gz
 		var file string
 		switch arch {
 		case "arm64", "mipsle-softfloat", "mips-softfloat":
-			file = fmt.Sprintf("mihomo-linux-%s-v%s.gz", arch, version)
+			if isRollingBuild(version) {
+				// Alpha: mihomo-linux-arm64-alpha-f103639.gz
+				file = fmt.Sprintf("mihomo-linux-%s-%s.gz", arch, version)
+			} else {
+				file = fmt.Sprintf("mihomo-linux-%s-v%s.gz", arch, version)
+			}
 		default:
 			return "", ""
 		}
-		return fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", k.Repo, version, file), file
+		return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", k.Repo, tag, file), file
 	}
 
 	return "", ""

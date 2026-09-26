@@ -904,3 +904,82 @@ func (zeroReader) Read(p []byte) (int, error) {
 	clear(p)
 	return len(p), nil
 }
+
+// TestCheckLatest_MihomoRollingAlpha: pre-release mihomo — плавающий тег
+// Prerelease-Alpha, версия берётся из имени ассета, загрузка — по этому тегу.
+func TestCheckLatest_MihomoRollingAlpha(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[{"tag_name":"Prerelease-Alpha","prerelease":true,"assets":[
+			{"name":"mihomo-linux-arm64-alpha-f103639.deb"},
+			{"name":"mihomo-linux-arm64-alpha-f103639.gz"}]},
+			{"tag_name":"v1.19.31","prerelease":false}]`))
+	}))
+	defer server.Close()
+
+	for _, tc := range []struct {
+		current string
+		want    bool
+	}{
+		{"1.19.31", true},        // stable → alpha
+		{"alpha-f103639", false}, // та же alpha
+		{"alpha-0000000", true},  // старая alpha
+	} {
+		svc := NewKernelService(t.TempDir())
+		svc.testClient = server.Client()
+		svc.githubAPIBase = server.URL
+		k := svc.kernels["mihomo"]
+		k.CurrentVersion = tc.current
+		k.Channel = "preview"
+		k.Repo = "MetaCubeX/mihomo"
+
+		if err := svc.CheckLatest(context.Background(), "mihomo"); err != nil {
+			t.Fatalf("CheckLatest: %v", err)
+		}
+		if k.LatestVersion != "alpha-f103639" || k.LatestTag != "Prerelease-Alpha" {
+			t.Fatalf("latest = %q tag %q", k.LatestVersion, k.LatestTag)
+		}
+		if k.HasUpdate != tc.want {
+			t.Errorf("current %q: HasUpdate = %v, want %v", tc.current, k.HasUpdate, tc.want)
+		}
+		url, file := svc.buildDownloadURL(k, "arm64")
+		if file != "mihomo-linux-arm64-alpha-f103639.gz" ||
+			url != "https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/"+file {
+			t.Errorf("download = %q (%q)", url, file)
+		}
+	}
+}
+
+// TestCheckLatest_StableAfterAlpha: с alpha на канале stable предлагается stable.
+func TestCheckLatest_StableAfterAlpha(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"tag_name":"v1.19.31"}`))
+	}))
+	defer server.Close()
+	svc := NewKernelService(t.TempDir())
+	svc.testClient = server.Client()
+	svc.githubAPIBase = server.URL
+	k := svc.kernels["mihomo"]
+	k.CurrentVersion = "alpha-f103639"
+	k.Channel = "stable"
+	k.Repo = "MetaCubeX/mihomo"
+	if err := svc.CheckLatest(context.Background(), "mihomo"); err != nil {
+		t.Fatal(err)
+	}
+	url, _ := svc.buildDownloadURL(k, "arm64")
+	if !k.HasUpdate || url != "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-linux-arm64-v1.19.31.gz" {
+		t.Errorf("HasUpdate=%v url=%q", k.HasUpdate, url)
+	}
+}
+
+func TestParseVersion_MihomoAlpha(t *testing.T) {
+	svc := NewKernelService(t.TempDir())
+	out := "Mihomo Meta alpha-f103639 linux arm64 with go1.26.8 Mon Sep 14 13:20:46 UTC 2026\nUse tags: with_gvisor"
+	if got := svc.parseVersion("mihomo", out); got != "alpha-f103639" {
+		t.Errorf("alpha: got %q", got)
+	}
+	out = "Mihomo Meta v1.19.31 linux arm64 with go1.26.8 Mon Sep 14 13:20:46 UTC 2026"
+	if got := svc.parseVersion("mihomo", out); got != "1.19.31" {
+		t.Errorf("stable: got %q", got)
+	}
+}
