@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +20,11 @@ import (
 )
 
 var ErrMihomoAPINotConfigured = errors.New("Mihomo API URL is not configured")
+
+// ErrMihomoNotRunning — контроллер Mihomo не принимает соединения (ядро
+// остановлено). Перезагружать провайдер некому: Mihomo сам скачает подписку
+// при следующем запуске.
+var ErrMihomoNotRunning = errors.New("Mihomo is not running")
 
 // MihomoAPIStatusError описывает неуспешный HTTP-статус ответа Clash API,
 // позволяя обработчикам различать 404 (неизвестный провайдер), 401 и прочие
@@ -128,8 +134,16 @@ func (s *SubscriptionService) Refresh(id string) error {
 			activeKernel = s.kernelSvc.GetActiveKernel()
 		}
 		log.Printf("[Subscriptions] Mihomo reload triggered for provider %s (active kernel: %s)", providerName, activeKernel)
-		if err := s.TriggerMihomoProviderReload(providerName); err != nil {
+		err := s.TriggerMihomoProviderReload(providerName)
+		if err != nil {
 			log.Printf("[Subscriptions] Mihomo reload failed: %v", err)
+		}
+		// Остановленный Mihomo — не ошибка подписки, если узлы уже получены
+		// для Xray: провайдер подтянется при запуске ядра.
+		if subCopy.EnableXray && errors.Is(err, ErrMihomoNotRunning) {
+			err = nil
+		}
+		if err != nil {
 			if !subCopy.EnableXray || refreshErr == nil {
 				refreshErr = err
 			}
@@ -513,6 +527,10 @@ func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) e
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && opErr.Op == "dial" {
+			return fmt.Errorf("%w: %v", ErrMihomoNotRunning, err)
+		}
 		return fmt.Errorf("API PUT failed: %w", err)
 	}
 	defer resp.Body.Close()

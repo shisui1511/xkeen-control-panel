@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -889,5 +890,58 @@ func TestSubscriptionService_Refresh_DualKernel_PreserveMihomoFormat(t *testing.
 	}
 	if got.LastCount != 42 {
 		t.Errorf("expected LastCount 42, got %d", got.LastCount)
+	}
+}
+
+func TestRefreshDualKernel_MihomoStoppedIsNotAnError(t *testing.T) {
+	// Mihomo остановлен (контроллер не принимает соединения): узлы для Xray
+	// получены, поэтому обновление подписки успешно и last_error пуст.
+	tmp := t.TempDir()
+	xrayDir := filepath.Join(tmp, "xray")
+	mihomoDir := filepath.Join(tmp, "mihomo")
+	_ = os.MkdirAll(xrayDir, 0755)
+	_ = os.MkdirAll(mihomoDir, 0755)
+	svc := NewSubscriptionService(tmp, xrayDir, mihomoDir)
+
+	subServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml")
+		_, _ = w.Write([]byte("proxies:\n  - name: n1\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: 11111111-2222-3333-4444-555555555555\n"))
+	}))
+	defer subServer.Close()
+
+	// Закрытый порт: сервер поднят и сразу остановлен.
+	closed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	closedURL := closed.URL
+	closed.Close()
+
+	svc.httpClient = subServer.Client()
+	svc.SetMihomoAPI(closedURL, "")
+	svc.SetKernelService(&fakeKernelService{active: "xray"})
+
+	sub := Subscription{
+		ID:           "dual-stopped",
+		Name:         "Dual",
+		URL:          subServer.URL,
+		EnableXray:   true,
+		EnableMihomo: true,
+		Enabled:      true,
+		Interval:     1,
+	}
+	_ = svc.Add(&sub)
+
+	if err := svc.Refresh("dual-stopped"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	got := svc.List()[0]
+	if got.LastError != "" {
+		t.Errorf("expected empty last_error, got %q", got.LastError)
+	}
+	if len(got.Nodes) != 1 {
+		t.Errorf("expected 1 node, got %d", len(got.Nodes))
+	}
+
+	// Mihomo-only подписка по-прежнему сообщает, что ядро не запущено.
+	if err := svc.TriggerMihomoProviderReload("x"); !errors.Is(err, ErrMihomoNotRunning) {
+		t.Errorf("expected ErrMihomoNotRunning, got %v", err)
 	}
 }
