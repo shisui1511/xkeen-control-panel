@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +20,11 @@ import (
 )
 
 var ErrMihomoAPINotConfigured = errors.New("Mihomo API URL is not configured")
+
+// ErrMihomoNotRunning — контроллер Mihomo не принимает соединения (ядро
+// остановлено). Перезагружать провайдер некому: Mihomo сам скачает подписку
+// при следующем запуске.
+var ErrMihomoNotRunning = errors.New("Mihomo is not running")
 
 // MihomoAPIStatusError описывает неуспешный HTTP-статус ответа Clash API,
 // позволяя обработчикам различать 404 (неизвестный провайдер), 401 и прочие
@@ -35,6 +41,38 @@ func (e *MihomoAPIStatusError) Error() string {
 // после изменения Mihomo config.yaml.
 func (s *SubscriptionService) SetConsoleService(svc *ConsoleService) {
 	s.consoleSvc = svc
+}
+
+// restartXkeenIfRunning применяет изменённые фрагменты перезапуском XKeen, но
+// только если ядро уже работает: ядро, остановленное пользователем, обновление
+// или правка подписки не запускает. Статус «unknown» не считается остановкой.
+func (s *SubscriptionService) restartXkeenIfRunning(subID, reason string) {
+	if s.consoleSvc == nil {
+		return
+	}
+	cleanID := strings.NewReplacer("\n", "", "\r", "").Replace(subID)
+	if s.kernelSvc != nil && !s.anyKernelMayRun() {
+		log.Printf("subscription %s: kernel is stopped, skip xkeen -restart after %s", cleanID, reason)
+		return
+	}
+	if _, err := s.consoleSvc.Execute("-restart"); err != nil {
+		log.Printf("subscription %s: xkeen -restart after %s: %v", cleanID, reason, err)
+	}
+}
+
+func (s *SubscriptionService) anyKernelMayRun() bool {
+	for _, name := range []string{"xray", "mihomo"} {
+		info := s.kernelSvc.Get(name)
+		if info == nil {
+			continue
+		}
+		switch info.ProcessStatus {
+		case "stopped", "not_installed":
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func (s *SubscriptionService) SetKernelService(svc KernelStatusProvider) {
@@ -128,8 +166,16 @@ func (s *SubscriptionService) Refresh(id string) error {
 			activeKernel = s.kernelSvc.GetActiveKernel()
 		}
 		log.Printf("[Subscriptions] Mihomo reload triggered for provider %s (active kernel: %s)", providerName, activeKernel)
-		if err := s.TriggerMihomoProviderReload(providerName); err != nil {
+		err := s.TriggerMihomoProviderReload(providerName)
+		if err != nil {
 			log.Printf("[Subscriptions] Mihomo reload failed: %v", err)
+		}
+		// Остановленный Mihomo — не ошибка подписки, если узлы уже получены
+		// для Xray: провайдер подтянется при запуске ядра.
+		if subCopy.EnableXray && errors.Is(err, ErrMihomoNotRunning) {
+			err = nil
+		}
+		if err != nil {
 			if !subCopy.EnableXray || refreshErr == nil {
 				refreshErr = err
 			}
@@ -291,10 +337,8 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 
 	s.mu.Unlock()
 
-	if needRestart && s.consoleSvc != nil {
-		if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-			log.Printf("subscription %s: xkeen -restart after xray fragment update: %v", sub.ID, err)
-		}
+	if needRestart {
+		s.restartXkeenIfRunning(sub.ID, "xray fragment update")
 	}
 
 	return nil
@@ -513,6 +557,10 @@ func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) e
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && opErr.Op == "dial" {
+			return fmt.Errorf("%w: %v", ErrMihomoNotRunning, err)
+		}
 		return fmt.Errorf("API PUT failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -598,11 +646,7 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 	s.mu.Unlock()
 
 	// Триггер рестарта через ConsoleService.
-	if s.consoleSvc != nil {
-		if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-			log.Printf("subscription %s: xkeen -restart after active node switch: %v", sub.ID, err)
-		}
-	}
+	s.restartXkeenIfRunning(sub.ID, "active node switch")
 
 	return nil
 }

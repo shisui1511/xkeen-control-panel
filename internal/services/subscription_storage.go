@@ -551,11 +551,8 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				return err
 			}
 
-			if needRestart && s.consoleSvc != nil {
-				if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-					cleanID := strings.NewReplacer("\n", "", "\r", "").Replace(safeID)
-					log.Printf("subscription %s: xkeen -restart after update (disabled integration): %v", cleanID, err)
-				}
+			if needRestart {
+				s.restartXkeenIfRunning(safeID, "update (disabled integration)")
 			}
 			return nil
 		}
@@ -649,11 +646,8 @@ func (s *SubscriptionService) Delete(id string) error {
 		return err
 	}
 
-	if (enableXray || enableMihomo) && s.consoleSvc != nil {
-		if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-			cleanID := strings.NewReplacer("\n", "", "\r", "").Replace(safeID)
-			log.Printf("subscription %s: xkeen -restart after delete: %v", cleanID, err)
-		}
+	if enableXray || enableMihomo {
+		s.restartXkeenIfRunning(safeID, "delete")
 	}
 	return nil
 }
@@ -1239,10 +1233,8 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 				return err
 			}
 		}
-		if s.consoleSvc != nil && sourceSub.EnableXray {
-			if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-				log.Printf("subscription %s: xkeen -restart after dialerProxy clear: %v", sourceSub.ID, err)
-			}
+		if sourceSub.EnableXray {
+			s.restartXkeenIfRunning(sourceSub.ID, "dialerProxy clear")
 		}
 		return nil
 	}
@@ -1300,10 +1292,8 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 		}
 	}
 
-	if s.consoleSvc != nil && sourceSub.EnableXray {
-		if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-			log.Printf("subscription %s: xkeen -restart after dialerProxy update: %v", sourceSub.ID, err)
-		}
+	if sourceSub.EnableXray {
+		s.restartXkeenIfRunning(sourceSub.ID, "dialerProxy update")
 	}
 
 	return nil

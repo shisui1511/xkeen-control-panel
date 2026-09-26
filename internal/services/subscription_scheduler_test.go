@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -889,5 +890,121 @@ func TestSubscriptionService_Refresh_DualKernel_PreserveMihomoFormat(t *testing.
 	}
 	if got.LastCount != 42 {
 		t.Errorf("expected LastCount 42, got %d", got.LastCount)
+	}
+}
+
+func TestRefreshDualKernel_MihomoStoppedIsNotAnError(t *testing.T) {
+	// Mihomo остановлен (контроллер не принимает соединения): узлы для Xray
+	// получены, поэтому обновление подписки успешно и last_error пуст.
+	tmp := t.TempDir()
+	xrayDir := filepath.Join(tmp, "xray")
+	mihomoDir := filepath.Join(tmp, "mihomo")
+	_ = os.MkdirAll(xrayDir, 0755)
+	_ = os.MkdirAll(mihomoDir, 0755)
+	svc := NewSubscriptionService(tmp, xrayDir, mihomoDir)
+
+	subServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml")
+		_, _ = w.Write([]byte("proxies:\n  - name: n1\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: 11111111-2222-3333-4444-555555555555\n"))
+	}))
+	defer subServer.Close()
+
+	// Закрытый порт: сервер поднят и сразу остановлен.
+	closed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	closedURL := closed.URL
+	closed.Close()
+
+	svc.httpClient = subServer.Client()
+	svc.SetMihomoAPI(closedURL, "")
+	svc.SetKernelService(&fakeKernelService{active: "xray"})
+
+	sub := Subscription{
+		ID:           "dual-stopped",
+		Name:         "Dual",
+		URL:          subServer.URL,
+		EnableXray:   true,
+		EnableMihomo: true,
+		Enabled:      true,
+		Interval:     1,
+	}
+	_ = svc.Add(&sub)
+
+	if err := svc.Refresh("dual-stopped"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	got := svc.List()[0]
+	if got.LastError != "" {
+		t.Errorf("expected empty last_error, got %q", got.LastError)
+	}
+	if len(got.Nodes) != 1 {
+		t.Errorf("expected 1 node, got %d", len(got.Nodes))
+	}
+
+	// Mihomo-only подписка по-прежнему сообщает, что ядро не запущено.
+	if err := svc.TriggerMihomoProviderReload("x"); !errors.Is(err, ErrMihomoNotRunning) {
+		t.Errorf("expected ErrMihomoNotRunning, got %v", err)
+	}
+}
+
+type statusKernelService struct {
+	status map[string]string
+}
+
+func (f *statusKernelService) GetActiveKernel() string { return "xray" }
+
+func (f *statusKernelService) Get(name string) *KernelInfo {
+	st, ok := f.status[name]
+	if !ok {
+		return nil
+	}
+	return &KernelInfo{Name: name, ProcessStatus: st}
+}
+
+func TestRefreshXray_StoppedKernelIsNotStarted(t *testing.T) {
+	// Пользователь остановил ядро: обновление подписки меняет фрагмент, но
+	// xkeen -restart не вызывает — иначе ядро запускается само.
+	tmp := t.TempDir()
+	vmess := `{"ps":"n","add":"1.1.1.1","port":"443","id":"uuid","net":"tcp"}`
+	body := base64.StdEncoding.EncodeToString([]byte("vmess://" + base64.StdEncoding.EncodeToString([]byte(vmess))))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	logFile := filepath.Join(tmp, "xkeen_calls.log")
+	mockXkeenPath := filepath.Join(tmp, "mock-xkeen")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$1\" >> %q\n", logFile)
+	if err := os.WriteFile(mockXkeenPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	xrayDir := filepath.Join(tmp, "xray")
+	_ = os.MkdirAll(xrayDir, 0755)
+
+	svc := NewSubscriptionService(tmp, xrayDir, tmp)
+	svc.httpClient = srv.Client()
+	svc.SetConsoleService(NewConsoleService(mockXkeenPath))
+	kernels := &statusKernelService{status: map[string]string{"xray": "stopped", "mihomo": "not_installed"}}
+	svc.SetKernelService(kernels)
+
+	sub := Subscription{ID: "s", Name: "S", URL: srv.URL, EnableXray: true, Enabled: true, Interval: 1}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Refresh("s"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if calls, _ := os.ReadFile(logFile); strings.Contains(string(calls), "-restart") {
+		t.Fatalf("xkeen -restart must not start a stopped kernel, calls: %q", calls)
+	}
+	if _, err := os.Stat(filepath.Join(xrayDir, "04_outbounds.s.json")); err != nil {
+		t.Errorf("fragment must still be written: %v", err)
+	}
+
+	// Работающее ядро по-прежнему перезапускается, чтобы применить узлы.
+	kernels.status["xray"] = "running"
+	svc.restartXkeenIfRunning("s", "test")
+	if calls, _ := os.ReadFile(logFile); !strings.Contains(string(calls), "-restart") {
+		t.Error("running kernel must be restarted")
 	}
 }
