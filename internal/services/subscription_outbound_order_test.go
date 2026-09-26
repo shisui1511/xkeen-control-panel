@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -434,5 +436,188 @@ func TestClearActiveNode_StoppedKernelNotStarted(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(env.xrayDir, selectionDefaultFileName)); !os.IsNotExist(err) {
 		t.Error("default file must still be removed")
+	}
+}
+
+// addOrderSub добавляет в окружение ещё одну Xray-подписку со своим
+// httptest-провайдером и выполняет refresh (узлы 3.3.3.3 и 4.4.4.4).
+func addOrderSub(t *testing.T, env *stubProviderEnv, id string) {
+	t.Helper()
+	body := stubProviderBody(
+		"3.3.3.3:443|"+stubWorkingUUID+"|third",
+		"4.4.4.4:443|"+stubWorkingUUID+"|fourth",
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	sub := Subscription{ID: id, Name: id, URL: srv.URL, Enabled: true, EnableXray: true, Interval: 1}
+	if err := env.svc.Add(&sub); err != nil {
+		t.Fatalf("Add %s: %v", id, err)
+	}
+	if err := env.svc.Refresh(id); err != nil {
+		t.Fatalf("Refresh %s: %v", id, err)
+	}
+}
+
+// mergedByTag ищет outbound в итоговом мердже по тегу.
+func mergedByTag(merged []map[string]interface{}, tag string) (map[string]interface{}, int) {
+	for i, ob := range merged {
+		if ob["tag"] == tag {
+			return ob, i
+		}
+	}
+	return nil, -1
+}
+
+func TestMultiSubscription_LastSelectedIsDefault(t *testing.T) {
+	env := newOrderEnv(t)
+	addOrderSub(t, env, "sub_b")
+	baseBefore, _ := os.ReadFile(filepath.Join(env.xrayDir, "04_outbounds.json"))
+
+	tagA := nodeTagByServer(t, env, "sub_1", "2.2.2.2:443")
+	tagB := nodeTagByServer(t, env, "sub_b", "4.4.4.4:443")
+
+	if err := env.svc.SetActiveNode("sub_1", tagA); err != nil {
+		t.Fatalf("select in sub_1: %v", err)
+	}
+	if err := env.svc.SetActiveNode("sub_b", tagB); err != nil {
+		t.Fatalf("select in sub_b: %v", err)
+	}
+
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	if merged[0]["tag"] != "xcp-sub_b" || outboundAddress(merged[0]) != "4.4.4.4" {
+		t.Fatalf("last selected must be first, got %v (%s)", merged[0]["tag"], outboundAddress(merged[0]))
+	}
+	first, idx := mergedByTag(merged, "xcp-sub_1")
+	if first == nil {
+		t.Fatal("xcp-sub_1 must stay reachable by its stable tag")
+	}
+	if outboundAddress(first) != "2.2.2.2" {
+		t.Errorf("xcp-sub_1 address = %q, want 2.2.2.2", outboundAddress(first))
+	}
+	_, directIdx := mergedByTag(merged, "direct")
+	if idx <= directIdx {
+		t.Errorf("by-tag node must be after XKeen outbounds: xcp-sub_1 at %d, direct at %d", idx, directIdx)
+	}
+
+	subA, subB := env.svc.Get("sub_1"), env.svc.Get("sub_b")
+	if subA.IsDefault || !subB.IsDefault {
+		t.Errorf("default flags: sub_1=%v sub_b=%v", subA.IsDefault, subB.IsDefault)
+	}
+	if subA.StableTag != "xcp-sub_1" || subB.StableTag != "xcp-sub_b" {
+		t.Errorf("stable tags: %q, %q", subA.StableTag, subB.StableTag)
+	}
+
+	// Выбор в первой подписке возвращает ей дефолт; вторая остаётся по тегу.
+	if err := env.svc.SetActiveNode("sub_1", tagA); err != nil {
+		t.Fatalf("reselect in sub_1: %v", err)
+	}
+	merged = simulateXrayConfdirMerge(t, env.xrayDir)
+	if merged[0]["tag"] != "xcp-sub_1" {
+		t.Fatalf("after reselect first must be xcp-sub_1, got %v", merged[0]["tag"])
+	}
+	if ob, _ := mergedByTag(merged, "xcp-sub_b"); ob == nil || outboundAddress(ob) != "4.4.4.4" {
+		t.Errorf("xcp-sub_b must stay reachable, got %v", ob)
+	}
+
+	// Инвариант: стабильный тег встречается ровно один раз в мердже.
+	seen := map[string]int{}
+	for _, ob := range merged {
+		if tag, _ := ob["tag"].(string); strings.HasPrefix(tag, stableTagPrefix) {
+			seen[tag]++
+		}
+	}
+	for tag, n := range seen {
+		if n != 1 {
+			t.Errorf("tag %s occurs %d times in merged outbounds", tag, n)
+		}
+	}
+
+	if after, _ := os.ReadFile(filepath.Join(env.xrayDir, "04_outbounds.json")); !bytes.Equal(baseBefore, after) {
+		t.Error("04_outbounds.json must stay byte-identical")
+	}
+}
+
+func TestStableTag_SurvivesNodeChange(t *testing.T) {
+	env := newOrderEnv(t)
+
+	tag1 := nodeTagByServer(t, env, "sub_1", "1.1.1.1:443")
+	tag2 := nodeTagByServer(t, env, "sub_1", "2.2.2.2:443")
+	if err := env.svc.SetActiveNode("sub_1", tag1); err != nil {
+		t.Fatal(err)
+	}
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	if merged[0]["tag"] != "xcp-sub_1" || outboundAddress(merged[0]) != "1.1.1.1" {
+		t.Fatalf("first selection: %v (%s)", merged[0]["tag"], outboundAddress(merged[0]))
+	}
+
+	if err := env.svc.SetActiveNode("sub_1", tag2); err != nil {
+		t.Fatal(err)
+	}
+	merged = simulateXrayConfdirMerge(t, env.xrayDir)
+	if merged[0]["tag"] != "xcp-sub_1" {
+		t.Fatalf("stable tag must not change with the node, got %v", merged[0]["tag"])
+	}
+	if outboundAddress(merged[0]) != "2.2.2.2" {
+		t.Errorf("stable tag must point at the new node, got %s", outboundAddress(merged[0]))
+	}
+	if _, n := mergedByTag(merged, "xcp-sub_1"); n != 0 {
+		t.Errorf("xcp-sub_1 must occur once and first, at %d", n)
+	}
+	if sub := env.svc.Get("sub_1"); sub.StableTag != "xcp-sub_1" {
+		t.Errorf("stable_tag in API = %q", sub.StableTag)
+	}
+}
+
+func TestClearDefault_StableTagStaysReachable(t *testing.T) {
+	env := newOrderEnv(t)
+	tag := nodeTagByServer(t, env, "sub_1", "2.2.2.2:443")
+	if err := env.svc.SetActiveNode("sub_1", tag); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.svc.ClearActiveNode("sub_1"); err != nil {
+		t.Fatal(err)
+	}
+
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	if merged[0]["tag"] != "direct" {
+		t.Fatalf("first outbound must be direct again, got %v", merged[0]["tag"])
+	}
+	ob, _ := mergedByTag(merged, "xcp-sub_1")
+	if ob == nil {
+		t.Fatal("stable tag must stay in the config after clearing the default")
+	}
+	if outboundAddress(ob) != "2.2.2.2" {
+		t.Errorf("xcp-sub_1 address = %q, want 2.2.2.2", outboundAddress(ob))
+	}
+	if _, err := os.Stat(filepath.Join(env.xrayDir, selectionDefaultFileName)); !os.IsNotExist(err) {
+		t.Error("default file must be removed")
+	}
+	if _, err := os.Stat(filepath.Join(env.xrayDir, selectionTailFileName)); err != nil {
+		t.Errorf("tail file must hold the by-tag node: %v", err)
+	}
+	if sub := env.svc.Get("sub_1"); sub.StableTag != "xcp-sub_1" || sub.IsDefault {
+		t.Errorf("stable_tag/is_default after clear: %+v", sub)
+	}
+
+	// Снятие выбора у выбранного, но недефолтного узла в нескольких подписках.
+	addOrderSub(t, env, "sub_b")
+	tagB := nodeTagByServer(t, env, "sub_b", "3.3.3.3:443")
+	if err := env.svc.SetActiveNode("sub_b", tagB); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.svc.ClearActiveNode("sub_b"); err != nil {
+		t.Fatal(err)
+	}
+	merged = simulateXrayConfdirMerge(t, env.xrayDir)
+	if merged[0]["tag"] != "direct" {
+		t.Fatalf("first outbound must be direct, got %v", merged[0]["tag"])
+	}
+	for _, want := range []string{"xcp-sub_1", "xcp-sub_b"} {
+		if ob, _ := mergedByTag(merged, want); ob == nil {
+			t.Errorf("%s must stay reachable", want)
+		}
 	}
 }

@@ -1055,3 +1055,37 @@ func TestSubscriptionClearActive(t *testing.T) {
 		t.Error("default file must be removed")
 	}
 }
+
+func TestSubscriptionSetActive_ResponseHasStableTag(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+	id := newSelectableSub(t, api, subSvc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/active?id="+id, strings.NewReader(`{"node_tag": "node-2"}`))
+	rr := httptest.NewRecorder()
+	api.SubscriptionSetActive(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			ActiveNode string `json:"active_node"`
+			StableTag  string `json:"stable_tag"`
+			IsDefault  bool   `json:"is_default"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rr.Body.String())
+	}
+	if !resp.Success || resp.Data.ActiveNode != "node-2" || !resp.Data.IsDefault {
+		t.Errorf("unexpected response: %s", rr.Body.String())
+	}
+	if resp.Data.StableTag != "xcp-"+id {
+		t.Errorf("stable_tag = %q, want xcp-%s", resp.Data.StableTag, id)
+	}
+
+	// В списке подписок поле тоже есть.
+	if got := subSvc.Get(id).StableTag; got != "xcp-"+id {
+		t.Errorf("Get().StableTag = %q", got)
+	}
+}

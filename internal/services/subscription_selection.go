@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,9 +26,15 @@ import (
 //   - 04_outbounds.zz_xcp_default.json — файл дефолта с одним выбранным узлом
 //     под стабильным тегом xcp-<id>. Имя без tail и лексикографически позже
 //     остальных, поэтому его outbound встаёт в начало итогового списка.
+//   - tail-файл выбранных узлов (zz_xcp_selected) — выбранные узлы остальных подписок
+//     под их стабильными тегами (в конце мерджа, дефолт не перехватывают).
 const (
 	selectionDefaultFileName = "04_outbounds.zz_xcp_default.json"
-	stableTagPrefix          = "xcp-"
+	// selectionTailFileName — файл выбранных узлов остальных подписок под их
+	// стабильными тегами. Суффикс tail дописывает их в конец мерджа; имя
+	// лексикографически после файла дефолта.
+	selectionTailFileName = "04_outbounds.zz_xcp_selected.tail.json"
+	stableTagPrefix       = "xcp-"
 )
 
 var (
@@ -61,6 +68,11 @@ func stableSubscriptionTag(sub *Subscription) string {
 // selectionEligible — подписка вправе давать выбранный узел в конфиг Xray.
 func selectionEligible(sub *Subscription) bool {
 	return sub.Enabled && sub.EnableXray && sub.RoutingMode != "auto" && sub.SelectedTag != ""
+}
+
+// selectionTailPath — путь tail-файла выбранных узлов. Имя статическое.
+func (s *SubscriptionService) selectionTailPath() string {
+	return filepath.Join(s.configDir, selectionTailFileName)
 }
 
 // selectionDefaultPath — путь файла дефолта. Имя статическое, из ввода не выводится.
@@ -98,76 +110,140 @@ func (s *SubscriptionService) readFragmentOutboundLocked(sub *Subscription, node
 	return nil, fmt.Errorf("node %q: %w", nodeTag, ErrSelectionNodeNotFound)
 }
 
-// buildSelectionOutboundsLocked строит содержимое файла дефолта: копию узла
-// дефолтной подписки под стабильным тегом. Пусто — дефолтом остаётся первый
-// outbound файлов XKeen. mu должен быть захвачен вызывающим.
-func (s *SubscriptionService) buildSelectionOutboundsLocked() ([]map[string]interface{}, error) {
+// buildSelectionOutboundsLocked строит содержимое двух файлов выбора.
+// defaultObs — копия узла дефолтной подписки под стабильным тегом (файл
+// дефолта, первый в мердже). tailObs — копии выбранных узлов остальных
+// подписок под их стабильными тегами в порядке списка подписок (tail-файл,
+// в конце мерджа): они доступны только по тегу и дефолт не перехватывают.
+// Стабильный тег встречается ровно в одном списке. Пусто в обоих — дефолтом
+// остаётся первый outbound файлов XKeen. mu должен быть захвачен вызывающим.
+func (s *SubscriptionService) buildSelectionOutboundsLocked() (defaultObs, tailObs []map[string]interface{}, err error) {
 	for i := range s.subscriptions {
 		sub := &s.subscriptions[i]
-		if !sub.IsDefault || !selectionEligible(sub) {
+		if !selectionEligible(sub) {
 			continue
 		}
-		ob, err := s.readFragmentOutboundLocked(sub, sub.SelectedTag)
-		if err != nil {
-			return nil, err
+		ob, readErr := s.readFragmentOutboundLocked(sub, sub.SelectedTag)
+		if sub.IsDefault {
+			if readErr != nil {
+				return nil, nil, readErr
+			}
+			ob["tag"] = stableSubscriptionTag(sub)
+			defaultObs = append(defaultObs, ob)
+			continue
+		}
+		if readErr != nil {
+			// Выбор недефолтной подписки не должен ломать чужой выбор: узел
+			// пропускается, фрагмент подписки восстановит следующий refresh.
+			log.Printf("[Subscriptions] selected node of %s is unavailable for tag %s: %v",
+				utils.SanitizeLogInput(sub.ID), stableSubscriptionTag(sub), readErr)
+			continue
 		}
 		ob["tag"] = stableSubscriptionTag(sub)
-		return []map[string]interface{}{ob}, nil
+		tailObs = append(tailObs, ob)
 	}
-	return nil, nil
+	return defaultObs, tailObs, nil
 }
 
-// writeSelectionFilesLocked приводит файл дефолта в соответствие с состоянием
-// подписок: пишет его атомарно, удаляет, когда дефолтного узла нет, и
-// откатывает прежние байты, если Xray отверг конфиг. Возвращает, изменился ли
-// файл (нужен ли рестарт ядра). mu должен быть захвачен вызывающим.
+// selectionFileWrite — планируемое изменение одного файла выбора.
+type selectionFileWrite struct {
+	path    string
+	newData []byte // nil — файл должен отсутствовать
+	oldData []byte
+	existed bool
+	changed bool
+}
+
+// planSelectionFile сравнивает желаемое содержимое файла с диском.
+func planSelectionFile(path string, outbounds []map[string]interface{}) (selectionFileWrite, error) {
+	w := selectionFileWrite{path: path}
+	old, readErr := os.ReadFile(path)
+	w.existed = readErr == nil
+	w.oldData = old
+	if len(outbounds) > 0 {
+		data, err := json.MarshalIndent(map[string]interface{}{"outbounds": outbounds}, "", "  ")
+		if err != nil {
+			return w, err
+		}
+		w.newData = data
+		w.changed = !w.existed || !bytes.Equal(old, data)
+	} else {
+		w.changed = w.existed
+	}
+	return w, nil
+}
+
+// apply записывает (или удаляет) файл.
+func (w selectionFileWrite) apply() error {
+	if w.newData == nil {
+		if err := os.Remove(w.path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	return utils.AtomicWriteFile(w.path, w.newData, 0600)
+}
+
+// rollback возвращает файл к прежним байтам.
+func (w selectionFileWrite) rollback() {
+	if w.existed {
+		_ = utils.AtomicWriteFile(w.path, w.oldData, 0600)
+	} else {
+		_ = os.Remove(w.path)
+	}
+}
+
+// writeSelectionFilesLocked приводит файлы выбора (дефолт и tail) в
+// соответствие с состоянием подписок: пишет их атомарно, удаляет пустые и
+// откатывает оба к прежним байтам, если Xray отверг конфиг. Валидация одна на
+// оба файла. Возвращает, изменился ли хотя бы один (нужен ли рестарт ядра).
+// mu должен быть захвачен вызывающим.
 func (s *SubscriptionService) writeSelectionFilesLocked() (bool, error) {
 	if s.configDir == "" {
 		return false, nil
 	}
-	outbounds, err := s.buildSelectionOutboundsLocked()
+	defaultObs, tailObs, err := s.buildSelectionOutboundsLocked()
 	if err != nil {
 		return false, err
 	}
 
-	path := s.selectionDefaultPath()
-	oldData, readErr := os.ReadFile(path)
-	existed := readErr == nil
-
-	if len(outbounds) == 0 {
-		if !existed {
-			return false, nil
-		}
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return false, err
-		}
-		if ok, out := ValidateXrayConfigDir(s.configDir); !ok {
-			_ = utils.AtomicWriteFile(path, oldData, 0600)
-			return false, fmt.Errorf("Xray validation failed after clearing default node, rolled back: %s", out)
-		}
-		return true, nil
-	}
-
-	newData, err := json.MarshalIndent(map[string]interface{}{"outbounds": outbounds}, "", "  ")
+	defaultPlan, err := planSelectionFile(s.selectionDefaultPath(), defaultObs)
 	if err != nil {
 		return false, err
 	}
-	if existed && bytes.Equal(oldData, newData) {
+	tailPlan, err := planSelectionFile(s.selectionTailPath(), tailObs)
+	if err != nil {
+		return false, err
+	}
+	plans := []selectionFileWrite{defaultPlan, tailPlan}
+
+	var changed []selectionFileWrite
+	for _, p := range plans {
+		if p.changed {
+			changed = append(changed, p)
+		}
+	}
+	if len(changed) == 0 {
 		return false, nil
 	}
-	if err := os.MkdirAll(s.configDir, 0755); err != nil {
-		return false, err
+	if defaultPlan.newData != nil || tailPlan.newData != nil {
+		if err := os.MkdirAll(s.configDir, 0755); err != nil {
+			return false, err
+		}
 	}
-	if err := utils.AtomicWriteFile(path, newData, 0600); err != nil {
-		return false, err
+	for i, p := range changed {
+		if err := p.apply(); err != nil {
+			for _, done := range changed[:i] {
+				done.rollback()
+			}
+			return false, err
+		}
 	}
 	if ok, out := ValidateXrayConfigDir(s.configDir); !ok {
-		if existed {
-			_ = utils.AtomicWriteFile(path, oldData, 0600)
-		} else {
-			_ = os.Remove(path)
+		for _, p := range changed {
+			p.rollback()
 		}
-		return false, fmt.Errorf("Xray default node validation failed, rolled back: %s", out)
+		return false, fmt.Errorf("Xray selection validation failed, rolled back: %s", out)
 	}
 	return true, nil
 }

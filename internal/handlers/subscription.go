@@ -366,7 +366,17 @@ func (a *API) SubscriptionSetActive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONSuccess(w, map[string]string{"active_node": body.NodeTag})
+	// Выбранный узел доступен в конфиге под стабильным тегом xcp-<id>; UI
+	// показывает его и отметку «по умолчанию».
+	stableTag := ""
+	if sub := a.subscriptionSvc.Get(id); sub != nil {
+		stableTag = sub.StableTag
+	}
+	JSONSuccess(w, map[string]interface{}{
+		"active_node": body.NodeTag,
+		"stable_tag":  stableTag,
+		"is_default":  true,
+	})
 }
 
 // SubscriptionClearActive снимает выбор дефолтного узла подписки: дефолтом

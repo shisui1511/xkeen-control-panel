@@ -403,7 +403,12 @@ func (s *SubscriptionService) fragmentOutboundCount(path string) int {
 // дописывать его outbounds в конец итогового списка, чтобы фрагмент не
 // перехватывал дефолтный outbound у файлов XKeen (см. subscription_selection.go).
 func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {
-	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.tail.json", subscriptionSafeID(sub)))
+	path := filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.tail.json", subscriptionSafeID(sub)))
+	if path == s.selectionTailPath() {
+		// ID подписки zz_xcp_selected совпал бы с файлом выбранных узлов.
+		path = filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s_sub.tail.json", subscriptionSafeID(sub)))
+	}
+	return path
 }
 
 // legacyFragmentPath — прежнее имя фрагмента (без tail), которое подхватывается

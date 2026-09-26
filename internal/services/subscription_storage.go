@@ -315,6 +315,10 @@ func (s *SubscriptionService) populateMihomoIntegrated(subs []Subscription) {
 // последовательных List() без изменения состояния подписок.
 func (s *SubscriptionService) populateSchedule(sub *Subscription, now time.Time) {
 	sub.NextUpdate = s.computeNextUpdate(sub, now)
+	sub.StableTag = ""
+	if sub.SelectedTag != "" {
+		sub.StableTag = stableSubscriptionTag(sub)
+	}
 	switch {
 	case sub.EnableXray:
 		sub.RefreshIntervalHours = effectiveRefreshIntervalHours(sub)
@@ -437,6 +441,7 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 	// заново в populateSchedule, а не доверять значению из тела запроса.
 	sub.NextUpdate = nil
 	sub.RefreshIntervalHours = 0
+	sub.StableTag = ""
 
 	s.subscriptions = append(s.subscriptions, *sub)
 	return s.save()

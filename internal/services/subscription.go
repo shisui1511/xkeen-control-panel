@@ -351,6 +351,11 @@ type Subscription struct {
 	// IsDefault — выбранный узел этой подписки сейчас дефолтный outbound Xray
 	// (первый в итоговом мердже). Дефолт глобально один на все подписки.
 	IsDefault bool `json:"is_default,omitempty"`
+	// StableTag — стабильный тег xcp-<id>, под которым выбранный узел доступен
+	// в конфиге Xray (правила роутинга ссылаются на него). Вычисляемое поле:
+	// заполняется в List()/Get() только при непустом SelectedTag, из
+	// клиентского JSON не принимается (Add() обнуляет).
+	StableTag string `json:"stable_tag,omitempty"`
 
 	// MihomoIntegrated — интегрирована ли подписка в config.yaml Mihomo
 	MihomoIntegrated bool `json:"mihomo_integrated"`
