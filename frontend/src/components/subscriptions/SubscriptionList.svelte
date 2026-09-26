@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t, currentLang } from '../../i18n';
   import { pluralize } from '../../i18n';
+  import { formatTimeUntil } from '../proxies/providersState.svelte';
   import NodeList from './NodeList.svelte';
 
   interface Subscription {
@@ -24,6 +25,9 @@
     expire?: number;
     support_url?: string;
     announcement?: string;
+    next_update?: string;
+    refresh_interval_hours?: number;
+    profile_update_hours?: number;
     mihomo_provider?: {
       name: string;
       vehicle_type: string;
@@ -200,6 +204,17 @@
     }
   }
 
+  // Тултип чипа срока обновления (D-12): интервал провайдера, если подписка
+  // использует use_provider_interval с положительным profile_update_hours,
+  // иначе — интервал, заданный пользователем в форме.
+  function subRefreshTooltip(sub: Subscription): string {
+    const key =
+      sub.use_provider_interval && (sub.profile_update_hours ?? 0) > 0
+        ? 'subscr.refresh_every_provider'
+        : 'subscr.refresh_every';
+    return $t(key, { hours: String(sub.refresh_interval_hours ?? sub.interval) });
+  }
+
   function parseAnnouncementLines(text: string): AnnouncementLine[] {
     if (!text) return [];
     return text.split('\n').map((line) => {
@@ -292,7 +307,7 @@
     {$t('subscr.nodes_total_label')}
   </span>
   {#if stats.next !== '—'}
-    <span class="chip chip-default chip--icon">
+    <span class="chip chip-default chip--icon" data-testid="subs-next-update">
       <svg
         width="12"
         height="12"
@@ -527,6 +542,25 @@
           {#if sub.hwid_locked}
             <span class="meta-divider">|</span>
             <span class="hwid-locked-badge">⚠ HWID Locked</span>
+          {/if}
+
+          {#if sub.enabled && sub.enable_xray && sub.next_update}
+            <span class="meta-divider">|</span>
+            <span
+              class="chip chip-default chip--icon"
+              data-testid="sub-next-update-chip"
+              title={subRefreshTooltip(sub)}
+            >
+              {$t('subscr.next_update_in')}
+              {formatTimeUntil(Date.parse(sub.next_update) - Date.now(), (key) => $t(key))}
+            </span>
+          {:else if sub.enabled && !sub.enable_xray && sub.enable_mihomo}
+            <span class="meta-divider">|</span>
+            <span class="chip chip-default chip--icon" data-testid="sub-mihomo-refresh-chip">
+              {$t('subscr.updated_by_mihomo', {
+                hours: String(sub.refresh_interval_hours ?? sub.interval)
+              })}
+            </span>
           {/if}
         </div>
 
