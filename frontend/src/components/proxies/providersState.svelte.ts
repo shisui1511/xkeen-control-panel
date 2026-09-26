@@ -36,6 +36,8 @@ export interface Subscription {
   support_url?: string;
   announcement?: string;
   profile_update_hours?: number;
+  next_update?: string;
+  refresh_interval_hours?: number;
   tag_prefix?: string;
   filter_name?: string;
   filter_type?: string;
@@ -71,6 +73,29 @@ export interface NodeHealth {
   delay?: number;
   http_code?: number;
   tested?: boolean;
+}
+
+// formatTimeUntil форматирует разницу во времени (мс) до следующего события
+// в переведённую строку "N мин" / "N ч M мин" / "N д M ч" (D-12). Единицы
+// переводятся через переданную tr()-функцию (subscr.stats.soon/mins/hours/days) —
+// чистая функция, не зависящая от store, чтобы её можно было переиспользовать
+// и на карточке подписки (Task 2), и в шапке (stats ниже).
+export function formatTimeUntil(diffMs: number, tr: (key: string) => string): string {
+  if (diffMs <= 0) {
+    return tr('subscr.stats.soon');
+  }
+  const totalMins = Math.floor(diffMs / (60 * 1000));
+  if (totalMins < 60) {
+    return `${totalMins} ${tr('subscr.stats.mins')}`;
+  }
+  const totalHours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (totalHours < 24) {
+    return `${totalHours} ${tr('subscr.stats.hours')} ${mins} ${tr('subscr.stats.mins')}`;
+  }
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return `${days} ${tr('subscr.stats.days')} ${hours} ${tr('subscr.stats.hours')}`;
 }
 
 export class ProvidersState {
@@ -111,38 +136,27 @@ export class ProvidersState {
 
   stats = $derived.by(() => {
     let totalNodes = 0;
-    let nextUpdate: Date | null = null;
+    // Ближайший next_update среди подписок enabled && enable_xray — тот же
+    // расчёт, что бэкенд использует в isRefreshDue (D-12, B13). Mihomo-only
+    // подписки в общий срок шапки не входят (D-13) — у них нет next_update.
+    let nextUpdateMs: number | null = null;
 
     for (const sub of this.subscriptions) {
       if (!sub.enabled) continue;
       totalNodes += sub.proxy_count || 0;
 
-      if (sub.last_update && sub.interval > 0) {
-        const last = new Date(sub.last_update);
-        if (!isNaN(last.getTime())) {
-          const next = new Date(last.getTime() + sub.interval * 3600 * 1000);
-          if (!nextUpdate || next < nextUpdate) {
-            nextUpdate = next;
-          }
+      if (sub.enable_xray && sub.next_update) {
+        const next = Date.parse(sub.next_update);
+        if (!isNaN(next) && (nextUpdateMs === null || next < nextUpdateMs)) {
+          nextUpdateMs = next;
         }
       }
     }
 
     let nextStr = '—';
-    if (nextUpdate) {
-      const now = new Date();
-      const diffMs = (nextUpdate as Date).getTime() - now.getTime();
-      if (diffMs <= 0) {
-        nextStr = get(t)('subscr.stats.soon');
-      } else {
-        const hours = Math.floor(diffMs / (3600 * 1000));
-        const mins = Math.floor((diffMs % (3600 * 1000)) / (60 * 1000));
-        if (hours > 0) {
-          nextStr = `${hours} ${get(t)('subscr.stats.hours')} ${mins} ${get(t)('subscr.stats.mins')}`;
-        } else {
-          nextStr = `${mins} ${get(t)('subscr.stats.mins')}`;
-        }
-      }
+    if (nextUpdateMs !== null) {
+      const diffMs = nextUpdateMs - Date.now();
+      nextStr = formatTimeUntil(diffMs, (key) => get(t)(key));
     }
     return {
       total: this.subscriptions.length,

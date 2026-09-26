@@ -425,15 +425,26 @@ func (s *SubscriptionService) writeRoutingFragment(path string, sub *Subscriptio
 	return utils.AtomicWriteFile(path, data, 0600)
 }
 
+// effectiveRefreshIntervalHours возвращает интервал обновления подписки в
+// часах, который панель фактически использует: интервал провайдера, если
+// use_provider_interval включён и профиль сообщил положительный
+// profile_update_hours, иначе — интервал, заданный пользователем в форме.
+// Единая точка истины для isRefreshDue и computeNextUpdate (D-12) — до этой
+// правки isRefreshDue и фронтенд считали интервал независимо друг от друга,
+// что и породило баг B13 (шапка игнорировала use_provider_interval).
+func effectiveRefreshIntervalHours(sub *Subscription) int {
+	if sub.UseProviderInterval && sub.ProfileUpdateHours > 0 {
+		return sub.ProfileUpdateHours
+	}
+	return sub.Interval
+}
+
 // isRefreshDue returns true if a subscription needs to be refreshed.
 func (s *SubscriptionService) isRefreshDue(sub *Subscription, now time.Time) bool {
 	if !sub.EnableXray {
 		return false // Mihomo-only subs are refreshed natively by Mihomo itself (D-07)
 	}
-	interval := sub.Interval
-	if sub.UseProviderInterval && sub.ProfileUpdateHours > 0 {
-		interval = sub.ProfileUpdateHours
-	}
+	interval := effectiveRefreshIntervalHours(sub)
 	if !sub.Enabled || interval <= 0 {
 		return false
 	}
@@ -446,22 +457,63 @@ func (s *SubscriptionService) isRefreshDue(sub *Subscription, now time.Time) boo
 	return now.Sub(sub.LastUpdate) >= time.Duration(interval)*time.Hour
 }
 
-// recordFailure increments the failure counter and schedules the next retry
+// computeNextUpdate возвращает время следующего обновления Xray-подписки той
+// же формулой интервала, что isRefreshDue (D-12) — единственная точка
+// расчёта, отдаваемая в API как next_update. nil для Mihomo-only (D-13),
+// выключенных подписок и подписок без положительного интервала: у них нет
+// собственного таймера обновления Xray. Если запланирован повторный запрос
+// backoff'ом (recordFailure) позже, чем обычный расчёт по интервалу —
+// возвращается именно он, чтобы isRefreshDue(sub, now) ==
+// !computeNextUpdate(sub, now).After(now) выполнялось при любом состоянии.
+func (s *SubscriptionService) computeNextUpdate(sub *Subscription, now time.Time) *time.Time {
+	if !sub.EnableXray || !sub.Enabled {
+		return nil
+	}
+	interval := effectiveRefreshIntervalHours(sub)
+	if interval <= 0 {
+		return nil
+	}
+
+	base := now
+	if !sub.LastUpdate.IsZero() {
+		base = sub.LastUpdate.Add(time.Duration(interval) * time.Hour)
+	}
+
+	if val, ok := s.retries.Load(sub.ID); ok {
+		rs := val.(*retryState)
+		if rs.nextRetry.After(base) {
+			base = rs.nextRetry
+		}
+	}
+
+	result := base
+	return &result
+}
+
+// recordFailure increments the failure counter and schedules the next retry.
+//
+// Stores a fresh *retryState on every call instead of mutating the previously
+// stored pointer in place (Rule 1 — pre-existing data race, T-133-01/edge
+// concurrency): computeNextUpdate/isRefreshDue read the *retryState returned
+// by sync.Map.Load concurrently with recordFailure on the same subscription
+// ID (e.g. a manual refresh failing while List()/Get() render next_update).
+// Mutating shared struct fields under those reads is a genuine race even
+// though sync.Map itself is safe for concurrent Load/Store — the struct
+// pointed to by a previously Loaded value is not. Treating each stored
+// *retryState as immutable once published removes the race entirely.
 func (s *SubscriptionService) recordFailure(id string) {
-	rs := &retryState{failCount: 1}
+	failCount := 1
 	if val, ok := s.retries.Load(id); ok {
-		rs = val.(*retryState)
-		rs.failCount++
+		failCount = val.(*retryState).failCount + 1
 	}
 	delay := backoffMax
-	if rs.failCount <= 6 { // 5m * 2^5 = 160m < 4h (backoffMax)
-		delay = backoffBase * (1 << uint(rs.failCount-1))
+	if failCount <= 6 { // 5m * 2^5 = 160m < 4h (backoffMax)
+		delay = backoffBase * (1 << uint(failCount-1))
 		if delay > backoffMax {
 			delay = backoffMax
 		}
 	}
-	rs.nextRetry = time.Now().Add(delay)
-	s.retries.Store(id, rs)
+	s.retries.Store(id, &retryState{failCount: failCount, nextRetry: time.Now().Add(delay)})
 }
 
 // clearFailure resets the backoff state on a successful refresh.

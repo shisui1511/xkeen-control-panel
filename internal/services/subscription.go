@@ -340,6 +340,18 @@ type Subscription struct {
 
 	// ProviderName — зафиксированное имя провайдера в Mihomo
 	ProviderName string `json:"provider_name,omitempty"`
+
+	// NextUpdate — вычисляемое время следующего обновления Xray-подписки
+	// (D-12), считается той же формулой, что isRefreshDue. nil для
+	// Mihomo-only/выключенных подписок (D-13). Заполняется в
+	// populateSchedule для List()/Get() — не персистится из клиентского
+	// JSON: Add() обнуляет поле перед сохранением (T-133-01).
+	NextUpdate *time.Time `json:"next_update,omitempty"`
+	// RefreshIntervalHours — интервал обновления в часах, который панель
+	// фактически использует для соответствующего ядра:
+	// effectiveRefreshIntervalHours для Xray, mihomoProviderIntervalHours
+	// для Mihomo-only (D-13). Вычисляемое поле, см. NextUpdate.
+	RefreshIntervalHours int `json:"refresh_interval_hours,omitempty"`
 }
 
 // GetProviderName возвращает стабильное имя провайдера для Mihomo.
@@ -397,6 +409,20 @@ type ParseReport struct {
 	SkippedCount int          `json:"skipped_count"`
 	Skipped      []SkipReason `json:"skipped"`
 	Timestamp    time.Time    `json:"timestamp"`
+}
+
+// mihomoProviderIntervalHours возвращает интервал обновления в часах,
+// с которым Mihomo реально опрашивает proxy-provider этой подписки: интервал
+// подписки, либо 24 часа по умолчанию, если он не задан/некорректен. Общая
+// точка расчёта для generateMihomoProxyProviderBlockLocked (генерация блока
+// config.yaml) и populateSchedule (подпись «Обновляет Mihomo · каждые N ч»
+// в UI Mihomo-only подписок, D-13) — чтобы отображаемый интервал никогда не
+// разошёлся с интервалом, который панель реально пишет в config.yaml.
+func mihomoProviderIntervalHours(sub *Subscription) int {
+	if sub.Interval > 0 {
+		return sub.Interval
+	}
+	return 24
 }
 
 // backoff constants for failed auto-refreshes
@@ -527,10 +553,7 @@ func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscr
 	escapedURL := url.QueryEscape(sub.URL)
 	loopbackURL := fmt.Sprintf("%s://127.0.0.1:%d/api/provider.yaml?url=%s", scheme, usePort, escapedURL)
 
-	intervalSec := sub.Interval * 3600
-	if intervalSec <= 0 {
-		intervalSec = 24 * 3600 // дефолт 24 часа
-	}
+	intervalSec := mihomoProviderIntervalHours(sub) * 3600
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("  %s:\n", providerName))

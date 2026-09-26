@@ -267,12 +267,33 @@ func (s *SubscriptionService) populateMihomoIntegrated(subs []Subscription) {
 	}
 }
 
+// populateSchedule заполняет вычисляемые поля расписания следующего
+// обновления на клоне подписки (D-12/D-13): next_update — тем же расчётом,
+// что isRefreshDue (computeNextUpdate), refresh_interval_hours — интервал,
+// который панель реально использует для соответствующего ядра. Вызывается
+// на клоне из List()/Get() тем же приёмом, что уже применяется для
+// ProxyCount — единый now на весь вызов гарантирует идемпотентность двух
+// последовательных List() без изменения состояния подписок.
+func (s *SubscriptionService) populateSchedule(sub *Subscription, now time.Time) {
+	sub.NextUpdate = s.computeNextUpdate(sub, now)
+	switch {
+	case sub.EnableXray:
+		sub.RefreshIntervalHours = effectiveRefreshIntervalHours(sub)
+	case sub.EnableMihomo:
+		sub.RefreshIntervalHours = mihomoProviderIntervalHours(sub)
+	default:
+		sub.RefreshIntervalHours = 0
+	}
+}
+
 func (s *SubscriptionService) List() []Subscription {
 	s.mu.RLock()
+	now := time.Now()
 	res := make([]Subscription, len(s.subscriptions))
 	for i := range s.subscriptions {
 		res[i] = s.subscriptions[i].Clone()
 		res[i].ProxyCount = s.getProxyCount(&res[i])
+		s.populateSchedule(&res[i], now)
 	}
 	s.mu.RUnlock()
 	s.populateMihomoIntegrated(res)
@@ -282,10 +303,12 @@ func (s *SubscriptionService) List() []Subscription {
 func (s *SubscriptionService) Get(id string) *Subscription {
 	var cloned *Subscription
 	s.mu.RLock()
+	now := time.Now()
 	for i := range s.subscriptions {
 		if s.subscriptions[i].ID == id {
 			c := s.subscriptions[i].Clone()
 			c.ProxyCount = s.getProxyCount(&c)
+			s.populateSchedule(&c, now)
 			cloned = &c
 			break
 		}
@@ -369,6 +392,12 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 		}
 		s.mihomoMu.Unlock()
 	}
+
+	// NextUpdate/RefreshIntervalHours — вычисляемые поля (T-133-01): клиент
+	// теоретически может прислать их в JSON, но панель обязана считать их
+	// заново в populateSchedule, а не доверять значению из тела запроса.
+	sub.NextUpdate = nil
+	sub.RefreshIntervalHours = 0
 
 	s.subscriptions = append(s.subscriptions, *sub)
 	return s.save()

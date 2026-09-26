@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -261,6 +262,255 @@ func TestExponentialBackoff(t *testing.T) {
 	if _, ok := svc.retries.Load(id); ok {
 		t.Error("expected retry state to be cleared after success")
 	}
+}
+
+// TestComputeNextUpdate_ProviderInterval покрывает кейс B13 из аудита:
+// use_provider_interval=true, profile_update_hours=1, interval=24. До фикса
+// D-12 UI считал срок от interval (24ч) и показывал «23 ч 59 мин» вместо
+// «~1 ч» — расчёт должен использовать интервал провайдера.
+func TestComputeNextUpdate_ProviderInterval(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+
+	now := time.Now()
+	sub := &Subscription{
+		ID:                  "sub_b13",
+		Enabled:             true,
+		EnableXray:          true,
+		Interval:            24,
+		UseProviderInterval: true,
+		ProfileUpdateHours:  1,
+		LastUpdate:          now.Add(-1 * time.Minute),
+	}
+
+	next := svc.computeNextUpdate(sub, now)
+	if next == nil {
+		t.Fatal("expected non-nil next_update")
+	}
+	diff := next.Sub(now)
+	if diff < 58*time.Minute || diff > 60*time.Minute {
+		t.Errorf("expected next_update ~59 min from now (B13 fix), got %v", diff)
+	}
+}
+
+// TestComputeNextUpdate_MihomoOnlyAndDisabledAreNil: Mihomo-only (D-13),
+// выключенные и нулевой-интервал подписки не крутят собственный таймер
+// обновления Xray — next_update должен быть nil.
+func TestComputeNextUpdate_MihomoOnlyAndDisabledAreNil(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	now := time.Now()
+
+	mihomoOnly := &Subscription{ID: "sub_mihomo_only", Enabled: true, EnableXray: false, EnableMihomo: true, Interval: 24}
+	if got := svc.computeNextUpdate(mihomoOnly, now); got != nil {
+		t.Errorf("expected nil next_update for Mihomo-only subscription (D-13), got %v", got)
+	}
+
+	disabled := &Subscription{ID: "sub_disabled", Enabled: false, EnableXray: true, Interval: 24}
+	if got := svc.computeNextUpdate(disabled, now); got != nil {
+		t.Errorf("expected nil next_update for disabled subscription, got %v", got)
+	}
+
+	zeroInterval := &Subscription{ID: "sub_zero_interval", Enabled: true, EnableXray: true, Interval: 0}
+	if got := svc.computeNextUpdate(zeroInterval, now); got != nil {
+		t.Errorf("expected nil next_update for zero interval subscription, got %v", got)
+	}
+}
+
+// TestComputeNextUpdate_BackoffWins: если запланирован retry backoff'ом
+// позже, чем обычный расчёт по интервалу — next_update должен вернуть именно
+// retry-время (иначе UI покажет срок раньше, чем реально произойдёт попытка).
+func TestComputeNextUpdate_BackoffWins(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	now := time.Now()
+
+	sub := &Subscription{
+		ID:         "sub_backoff_next",
+		Enabled:    true,
+		EnableXray: true,
+		Interval:   24,
+		LastUpdate: now.Add(-25 * time.Hour), // уже пора обновиться (интервал истёк час назад)
+	}
+	svc.recordFailure(sub.ID)
+
+	val, ok := svc.retries.Load(sub.ID)
+	if !ok {
+		t.Fatal("expected retry state after recordFailure")
+	}
+	rs := val.(*retryState)
+
+	next := svc.computeNextUpdate(sub, now)
+	if next == nil {
+		t.Fatal("expected non-nil next_update")
+	}
+	if !next.Equal(rs.nextRetry) {
+		t.Errorf("expected next_update to equal backoff nextRetry %v, got %v", rs.nextRetry, *next)
+	}
+}
+
+// TestComputeNextUpdate_ZeroLastUpdateIsNow: подписка, которую ещё ни разу
+// не обновляли (LastUpdate — нулевое время), должна получить next_update не
+// позже now (edge empty из must_haves.truths).
+func TestComputeNextUpdate_ZeroLastUpdateIsNow(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	now := time.Now()
+
+	sub := &Subscription{ID: "sub_zero_last_update", Enabled: true, EnableXray: true, Interval: 24}
+	next := svc.computeNextUpdate(sub, now)
+	if next == nil {
+		t.Fatal("expected non-nil next_update")
+	}
+	if next.After(now) {
+		t.Errorf("expected next_update <= now for never-updated subscription, got %v (now=%v)", *next, now)
+	}
+}
+
+// TestIsRefreshDue_AgreesWithNextUpdate — табличный тест инварианта из
+// computeNextUpdate: isRefreshDue(sub, now) == !computeNextUpdate(sub,
+// now).After(now) на границе интервала (edge adjacency), до и после неё, а
+// также с активным backoff-состоянием.
+func TestIsRefreshDue_AgreesWithNextUpdate(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	now := time.Now()
+
+	cases := []struct {
+		name        string
+		sub         *Subscription
+		withBackoff bool
+	}{
+		{
+			name: "before interval",
+			sub:  &Subscription{ID: "sub_before", Enabled: true, EnableXray: true, Interval: 24, LastUpdate: now.Add(-1 * time.Hour)},
+		},
+		{
+			name: "exactly at boundary (edge adjacency)",
+			sub:  &Subscription{ID: "sub_boundary", Enabled: true, EnableXray: true, Interval: 24, LastUpdate: now.Add(-24 * time.Hour)},
+		},
+		{
+			name: "after interval",
+			sub:  &Subscription{ID: "sub_after", Enabled: true, EnableXray: true, Interval: 24, LastUpdate: now.Add(-25 * time.Hour)},
+		},
+		{
+			name:        "with backoff active",
+			sub:         &Subscription{ID: "sub_backoff_active", Enabled: true, EnableXray: true, Interval: 1, LastUpdate: now.Add(-2 * time.Hour)},
+			withBackoff: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.withBackoff {
+				svc.recordFailure(tc.sub.ID)
+			}
+			due := svc.isRefreshDue(tc.sub, now)
+			next := svc.computeNextUpdate(tc.sub, now)
+			if next == nil {
+				t.Fatal("expected non-nil next_update for enabled Xray subscription with positive interval")
+			}
+			gotDue := !next.After(now)
+			if gotDue != due {
+				t.Errorf("isRefreshDue=%v but computeNextUpdate-derived due=%v (next_update=%v, now=%v)", due, gotDue, *next, now)
+			}
+		})
+	}
+}
+
+// TestList_PopulatesNextUpdate: два последовательных вызова List() без
+// изменения состояния дают одинаковый next_update (edge idempotency);
+// Mihomo-only подписка → next_update=nil, refresh_interval_hours — интервал
+// provider-блока (D-13).
+func TestList_PopulatesNextUpdate(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+
+	xraySub := &Subscription{
+		Name:                "Xray Sub",
+		URL:                 "https://example.com/xray",
+		Enabled:             true,
+		EnableXray:          true,
+		Interval:            24,
+		UseProviderInterval: true,
+		ProfileUpdateHours:  1,
+		LastUpdate:          time.Now().Add(-1 * time.Minute),
+	}
+	if err := svc.Add(xraySub); err != nil {
+		t.Fatalf("Add xraySub: %v", err)
+	}
+
+	mihomoSub := &Subscription{
+		Name:         "Mihomo Only Sub",
+		URL:          "https://example.com/mihomo",
+		Enabled:      true,
+		EnableMihomo: true,
+		Interval:     12,
+	}
+	if err := svc.Add(mihomoSub); err != nil {
+		t.Fatalf("Add mihomoSub: %v", err)
+	}
+
+	list1 := svc.List()
+	list2 := svc.List()
+	if len(list1) != 2 || len(list2) != 2 {
+		t.Fatalf("expected 2 subscriptions in both lists, got %d and %d", len(list1), len(list2))
+	}
+
+	byName := func(list []Subscription, name string) *Subscription {
+		for i := range list {
+			if list[i].Name == name {
+				return &list[i]
+			}
+		}
+		return nil
+	}
+
+	x1 := byName(list1, "Xray Sub")
+	x2 := byName(list2, "Xray Sub")
+	if x1 == nil || x2 == nil || x1.NextUpdate == nil || x2.NextUpdate == nil {
+		t.Fatal("expected non-nil next_update on Xray subscription in both List() calls")
+	}
+	if !x1.NextUpdate.Equal(*x2.NextUpdate) {
+		t.Errorf("expected idempotent next_update across two List() calls, got %v and %v", *x1.NextUpdate, *x2.NextUpdate)
+	}
+	if x1.RefreshIntervalHours != 1 {
+		t.Errorf("expected refresh_interval_hours=1 (provider interval, B13), got %d", x1.RefreshIntervalHours)
+	}
+
+	m1 := byName(list1, "Mihomo Only Sub")
+	if m1 == nil {
+		t.Fatal("mihomo subscription not found")
+	}
+	if m1.NextUpdate != nil {
+		t.Errorf("expected nil next_update for Mihomo-only subscription (D-13), got %v", *m1.NextUpdate)
+	}
+	if m1.RefreshIntervalHours != 12 {
+		t.Errorf("expected refresh_interval_hours=12 (mihomo provider interval), got %d", m1.RefreshIntervalHours)
+	}
+}
+
+// TestComputeNextUpdate_ConcurrentWithRecordFailure — computeNextUpdate
+// читает s.retries параллельно с recordFailure без гонок (edge concurrency,
+// проверяется прогоном под -race).
+func TestComputeNextUpdate_ConcurrentWithRecordFailure(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	sub := &Subscription{ID: "sub_concurrent", Enabled: true, EnableXray: true, Interval: 1, LastUpdate: time.Now().Add(-2 * time.Hour)}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			svc.recordFailure(sub.ID)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = svc.computeNextUpdate(sub, time.Now())
+		}()
+	}
+	wg.Wait()
 }
 
 func TestBackoffCap(t *testing.T) {
