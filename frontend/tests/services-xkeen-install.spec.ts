@@ -6,6 +6,7 @@ import { test, expect } from '@playwright/test';
 
 async function mockCommonRoutes(
   page: import('@playwright/test').Page,
+  // Объект читается при каждом запросе: тест может менять статус по ходу
   status: { installed: boolean; available: boolean }
 ) {
   await page.addInitScript(() => {
@@ -129,6 +130,40 @@ test.describe('Services page — XKeen installer card', () => {
     await expect(modal.locator('.install-result.ok')).toBeVisible();
     expect(wsUrl).toContain('mode=xkeen-install');
     expect(wsUrl).toContain('channel=beta');
+  });
+
+  test('keeps the installer open when XKeen appears mid-install', async ({ page }) => {
+    // Установщик кладёт бинарник xkeen до конца `xkeen -i`: статус становится
+    // «установлен», а окно с терминалом должно остаться до закрытия
+    const status = { installed: false, available: true };
+    await mockCommonRoutes(page, status);
+    let socket: import('@playwright/test').WebSocketRoute | null = null;
+    await page.routeWebSocket(/\/api\/terminal\/ws/, (ws) => {
+      socket = ws;
+      ws.send('Installing XKeen...\r\n');
+    });
+
+    await page.clock.install();
+    await page.goto('/#/services');
+    await page.getByTestId('xkeen-install-start').click();
+    const modal = page.getByTestId('xkeen-install-modal');
+    await expect(modal).toBeVisible();
+    await expect.poll(() => socket !== null).toBe(true);
+
+    // Следующий опрос статуса (раз в 15 с) приносит xkeen_installed: true
+    status.installed = true;
+    const polled = page.waitForResponse(
+      (r) => r.url().includes('/api/service/status') && r.request().method() === 'GET'
+    );
+    await page.clock.runFor(16_000);
+    await polled;
+    await expect(modal).toBeVisible();
+    await expect(modal.locator('.install-terminal')).toBeVisible();
+
+    socket!.send(JSON.stringify({ type: 'exit', code: 0 }));
+    await expect(modal.locator('.install-result.ok')).toBeVisible();
+    await modal.locator('.install-actions button').click();
+    await expect(page.getByTestId('xkeen-install-card')).toHaveCount(0);
   });
 
   test('shows the installer exit code on failure', async ({ page }) => {
