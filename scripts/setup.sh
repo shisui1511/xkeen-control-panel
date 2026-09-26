@@ -202,16 +202,33 @@ get_latest_stable_version() {
   fi
 }
 
-# Получить latest pre-release версию
+# Получить latest pre-release версию: последний release candidate, а если после
+# него уже вышел stable той же или более новой версии — stable (как канал beta в панели)
 get_latest_prerelease_version() {
-  local json
-  local tag
+  local json rc stable
   json=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases?per_page=30" || echo "")
-  if [ -n "$json" ]; then
-    tag=$(echo "$json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' | grep '\-dev$' | sort -V | tail -1)
-    echo "$tag"
+  [ -n "$json" ] || { echo ""; return; }
+  rc=$(echo "$json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' | sed 's/^v//' \
+    | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -1 | sed 's/^./v&/')
+  stable=$(get_latest_stable_version)
+  pick_prerelease "$rc" "$stable"
+}
+
+# pick_prerelease RC STABLE — RC, если его базовая версия новее stable, иначе stable
+pick_prerelease() {
+  local rc stable base
+  rc="$1"
+  stable="$2"
+  if [ -z "$rc" ]; then
+    echo "$stable"
+    return
+  fi
+  base="${rc%-rc.*}"
+  if [ -n "$stable" ] && [ "$(printf '%s\n%s\n' "${base#v}" "${stable#v}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)" = "${stable#v}" ]; then
+    echo "$stable"
   else
-    echo ""
+    echo "$rc"
   fi
 }
 
@@ -230,16 +247,19 @@ get_github_releases_url() {
   echo "https://github.com/${REPO}/releases/download/${ver}/xcp_${ver}_${ARCH_LABEL}"
 }
 
-get_jsdelivr_url() {
-  local ver
-  ver="$1"
-  echo "https://cdn.jsdelivr.net/gh/${REPO}@binaries/bin/xcp_${ver}_${ARCH_LABEL}"
-}
+# Прокси GitHub — запасной путь, когда загрузки с github.com недоступны (их же
+# использует установщик XKeen). Целостность проверяет SHA-256 из API GitHub.
+GH_PROXIES="https://gh-proxy.com/ https://ghfast.top/"
 
-get_raw_url() {
-  local ver
+# get_asset_digest VER NAME — SHA-256 ассета релиза из API GitHub (поле digest)
+get_asset_digest() {
+  local ver name json
   ver="$1"
-  echo "https://raw.githubusercontent.com/${REPO}/binaries/bin/xcp_${ver}_${ARCH_LABEL}"
+  name="$2"
+  json=$(curl -fsL --connect-timeout 10 --max-time 20 "https://api.github.com/repos/${REPO}/releases/tags/${ver}" 2>/dev/null) || return 1
+  echo "$json" | tr ',{}' '\n\n\n' | awk -v n="\"$name\"" '
+    /"name"[[:space:]]*:/ { v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); hit=(v==n); next }
+    hit && /"digest"[[:space:]]*:/ { v=$0; sub(/^[^:]*:[[:space:]]*"sha256:/, "", v); sub(/".*/, "", v); print v; exit }'
 }
 
 # Трехфазная остановка сервиса
@@ -373,7 +393,7 @@ fetch_to() {
   fi
 }
 
-# Сначала сжатый .gz: в ~3 раза меньше и укладывается в лимит jsDelivr (20 МБ).
+# Сначала сжатый .gz: в ~3 раза меньше.
 # Нет .gz (старый релиз) или нет gunzip — несжатый бинарник. SHA-256 после
 # распаковки проверяет verify_checksum, как для несжатого.
 try_download() {
@@ -388,6 +408,26 @@ try_download() {
   fi
   rm -f "${TEMP_BIN}.gz"
   fetch_to "$url" "$TEMP_BIN"
+}
+
+# download_from_sources URL — GitHub Releases, затем прокси GitHub. Источник
+# удачной загрузки — в DOWNLOAD_SOURCE.
+download_from_sources() {
+  local url proxy
+  url="$1"
+  info "Пробуем GitHub Releases..."
+  if try_download "$url"; then
+    DOWNLOAD_SOURCE="GitHub Releases"
+    return 0
+  fi
+  for proxy in $GH_PROXIES; do
+    warn "GitHub недоступен, пробуем ${proxy}..."
+    if try_download "${proxy}${url}"; then
+      DOWNLOAD_SOURCE="$proxy"
+      return 0
+    fi
+  done
+  return 1
 }
 
 # Проверка контрольной суммы SHA-256
@@ -408,36 +448,29 @@ verify_checksum() {
   hash_file="/tmp/${BINARY}_${ver}_${ARCH_LABEL}.sha256"
   rm -f "$hash_file"
 
-  hash_downloaded=false
-  for source in "github" "jsdelivr" "raw"; do
-    url=""
-    case "$source" in
-      github) url="https://github.com/${REPO}/releases/download/${ver}/xcp_${ver}_${ARCH_LABEL}.sha256" ;;
-      jsdelivr) url="https://cdn.jsdelivr.net/gh/${REPO}@binaries/bin/xcp_${ver}_${ARCH_LABEL}.sha256" ;;
-      raw) url="https://raw.githubusercontent.com/${REPO}/binaries/bin/xcp_${ver}_${ARCH_LABEL}.sha256" ;;
-    esac
-    
-    if command -v curl >/dev/null 2>&1; then
-      curl -fsL --connect-timeout 10 -o "$hash_file" "$url" 2>/dev/null && hash_downloaded=true && break
-    elif command -v wget >/dev/null 2>&1; then
-      wget -qO "$hash_file" "$url" 2>/dev/null && hash_downloaded=true && break
-    fi
-  done
-  
-  if [ "$hash_downloaded" != "true" ]; then
-    error "Сеть недоступна: не удалось загрузить файл контрольной суммы .sha256!"
-    log_install "Error: sha256 checksum file unreachable"
-    return 1
-  fi
-  
-  expected_hash=$(awk '{print $1}' "$hash_file" | tr -d '[:space:]')
+  # Эталон — digest из API GitHub: он не зависит от того, откуда скачан бинарник.
+  # Нет API — файл .sha256 релиза, напрямую или через прокси.
+  expected_hash=$(get_asset_digest "$ver" "xcp_${ver}_${ARCH_LABEL}" | tr -d '[:space:]')
   if [ -z "$expected_hash" ]; then
-    error "Не удалось считать хэш из файла .sha256"
+    hash_downloaded=false
+    url="https://github.com/${REPO}/releases/download/${ver}/xcp_${ver}_${ARCH_LABEL}.sha256"
+    for source in "" $GH_PROXIES; do
+      fetch_to "${source}${url}" "$hash_file" && hash_downloaded=true && break
+    done
+    if [ "$hash_downloaded" != "true" ]; then
+      error "Сеть недоступна: не удалось получить контрольную сумму SHA-256!"
+      log_install "Error: sha256 checksum unreachable"
+      return 1
+    fi
+    expected_hash=$(awk '{print $1}' "$hash_file" | tr -d '[:space:]')
+  fi
+  if [ -z "$expected_hash" ]; then
+    error "Не удалось считать хэш SHA-256"
     log_install "Error: expected hash is empty"
     rm -f "$hash_file"
     return 1
   fi
-  
+
   if ! command -v sha256sum >/dev/null 2>&1; then
     warn "Утилита sha256sum не найдена, пропускаем проверку хеша"
     rm -f "$hash_file"
@@ -612,20 +645,9 @@ install_binary() {
 
   local url
 
-  # 1. Основной источник — GitHub Releases
-  info "Пробуем GitHub Releases..."
-  url=$(get_github_releases_url "$LATEST_VER")
-  try_download "$url" && { _apply_binary "GitHub Releases" && return 0 || return 1; }
-
-  # 2. Fallback — jsDelivr CDN
-  warn "GitHub недоступен, пробуем jsDelivr..."
-  url=$(get_jsdelivr_url "$LATEST_VER")
-  try_download "$url" && { _apply_binary "jsDelivr CDN" && return 0 || return 1; }
-
-  # 3. Fallback — raw.githubusercontent.com
-  warn "jsDelivr недоступен, пробуем raw.githubusercontent.com..."
-  url=$(get_raw_url "$LATEST_VER")
-  try_download "$url" && { _apply_binary "raw.githubusercontent.com" && return 0 || return 1; }
+  download_from_sources "$(get_github_releases_url "$LATEST_VER")" && {
+    _apply_binary "$DOWNLOAD_SOURCE" && return 0 || return 1
+  }
 
   error "Все источники недоступны. Проверьте интернет"
   log_install "Error: all download sources failed"
