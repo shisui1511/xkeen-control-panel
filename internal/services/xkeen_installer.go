@@ -52,12 +52,29 @@ type XKeenInstaller struct {
 	// InitDir — каталог init-скриптов Entware: без него XKeen не установить
 	// (и установщик не должен запускаться на ПК разработчика)
 	InitDir string
+	// Shell — оболочка для запуска установщика; пусто — xkeenInstallerShell()
+	Shell string
 
 	running sync.Mutex
 }
 
 // ErrXKeenNoEntware — установка невозможна: Entware не найден.
 var ErrXKeenNoEntware = errors.New("Entware not found: XKeen can only be installed on a router with Entware")
+
+// xkeenShellCandidates — оболочки по приоритету. /bin/sh на Keenetic — это
+// NDM Shell Wrapper: в режиме `-c` он отбрасывает аргументы после скрипта,
+// и установщик получал пустой путь. Шелл Entware передаёт их как положено.
+var xkeenShellCandidates = []string{"/opt/bin/sh", "/bin/sh"}
+
+// xkeenInstallerShell возвращает первую существующую оболочку из кандидатов.
+func xkeenInstallerShell() string {
+	for _, sh := range xkeenShellCandidates {
+		if fi, err := os.Stat(sh); err == nil && !fi.IsDir() {
+			return sh
+		}
+	}
+	return "/bin/sh"
+}
 
 // Available сообщает, можно ли ставить XKeen на этой системе.
 func (x *XKeenInstaller) Available() bool {
@@ -165,5 +182,9 @@ sh "$1" "$2"; rc=$?
 rm -f "$1"
 [ "$rc" -eq 0 ] || exit "$rc"
 exec xkeen -i`
-	return []string{"/bin/sh", "-c", script, "xkeen-install", scriptPath, flag}, nil
+	shell := x.Shell
+	if shell == "" {
+		shell = xkeenInstallerShell()
+	}
+	return []string{shell, "-c", script, "xkeen-install", scriptPath, flag}, nil
 }
