@@ -147,6 +147,10 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if activeKernel == "" && a.xkeenSvc != nil {
+		// Ни одно ядро не запущено: активным считается то, что запустит XKeen
+		activeKernel = a.xkeenSvc.ConfiguredKernel()
+	}
 	if activeKernel == "" {
 		activeKernel = "none"
 	}

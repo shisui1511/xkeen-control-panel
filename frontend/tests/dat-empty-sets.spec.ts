@@ -57,3 +57,39 @@ test.describe('DAT Manager — empty state', () => {
     await expect(page.getByText('geosite_zkeen.dat').first()).toBeVisible();
   });
 });
+
+test('lists databases when no kernel is active', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'serviceWorker', {
+      value: undefined,
+      writable: false,
+      configurable: true
+    });
+  });
+  await page.route('**/api/**', async (route) => {
+    const url = route.request().url();
+    if (url.includes('/api/auth/me')) {
+      await route.fulfill({
+        json: { authenticated: true, setup_required: false, csrf_token: 'mock-csrf-token' }
+      });
+    } else if (url.includes('/api/capabilities')) {
+      await route.fulfill({ json: { success: true, data: { active_kernel: 'none' } } });
+    } else if (url.includes('/api/dat/list')) {
+      await route.fulfill({
+        json: ['geosite_v2fly.dat', 'geoip_v2fly.dat'].map((name) => ({
+          name,
+          path: `/opt/etc/xray/dat/${name}`,
+          size: 1024,
+          last_update: Math.floor(Date.now() / 1000),
+          exists: true,
+          type: 'xray'
+        }))
+      });
+    } else {
+      await route.fulfill({ json: { success: true, data: {} } });
+    }
+  });
+
+  await page.goto('/#/dat');
+  await expect(page.locator('.db-card-item')).toHaveCount(2);
+});

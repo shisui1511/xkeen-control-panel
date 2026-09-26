@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,8 @@ type XKeenService struct {
 	dnsProbe func(ctx context.Context) error
 
 	BinaryPath string
+	// InitScript — init-скрипт XKeen; пусто — /opt/etc/init.d/S05xkeen
+	InitScript string
 	dataDir    string
 	logMu      sync.Mutex
 	restartLog []RestartLogEntry
@@ -324,6 +327,27 @@ func (s *XKeenService) ValidateXrayConfig(configDir string) (PreflightResult, er
 		Valid:    true,
 		Warnings: warnings,
 	}, nil
+}
+
+const defaultXKeenInitScript = "/opt/etc/init.d/S05xkeen"
+
+var nameClientRe = regexp.MustCompile(`(?m)^\s*name_client="?(xray|mihomo)"?\s*$`)
+
+// ConfiguredKernel — ядро, которое запускает XKeen (name_client в init-скрипте;
+// `xkeen -xray`/`-mihomo` переписывают его). Пусто, если XKeen не настроен.
+func (s *XKeenService) ConfiguredKernel() string {
+	path := s.InitScript
+	if path == "" {
+		path = defaultXKeenInitScript
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	if m := nameClientRe.FindSubmatch(data); m != nil {
+		return string(m[1])
+	}
+	return ""
 }
 
 func (s *XKeenService) IsDNSProxyingEnabled() bool {

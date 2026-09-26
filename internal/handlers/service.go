@@ -78,6 +78,10 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 			resp.IsRunning = true
 		}
 	}
+	if resp.ActiveKernel == "" {
+		// Ядро остановлено: показываем то, которое запустит XKeen
+		resp.ActiveKernel = a.xkeenSvc.ConfiguredKernel()
+	}
 
 	if a.watchdogSvc != nil {
 		wd := newWatchdogStatusResponse(a.watchdogSvc.Snapshot())
