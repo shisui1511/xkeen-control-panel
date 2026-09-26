@@ -3,6 +3,7 @@ package utils
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -227,5 +228,34 @@ func TestPathValidator_SymlinkChain_NonExistentTarget(t *testing.T) {
 	_, err := validator.Validate(filepath.Join(linkPath, "nonexistent.json"))
 	if err == nil {
 		t.Error("Validate() expected error for symlink chain escaping AllowedRoots, got nil")
+	}
+}
+
+// TestPathValidator_MissingDirectories: файл в ещё не созданном каталоге внутри
+// разрешённого корня проходит (первый конфиг mihomo), вне корня — нет, а выход
+// из корня через symlink существующего предка по-прежнему блокируется.
+func TestPathValidator_MissingDirectories(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	v := NewPathValidator([]string{root})
+
+	ok := filepath.Join(root, "mihomo", "sub", "config.yaml")
+	got, err := v.Validate(ok)
+	if err != nil {
+		t.Fatalf("missing dirs inside root must validate: %v", err)
+	}
+	if !strings.HasSuffix(got, filepath.Join("mihomo", "sub", "config.yaml")) {
+		t.Errorf("resolved path %q lost the missing tail", got)
+	}
+	for _, bad := range []string{
+		filepath.Join(outside, "new", "config.yaml"),
+		filepath.Join(root, "escape", "new", "config.yaml"),
+	} {
+		if _, err := v.Validate(bad); err == nil {
+			t.Errorf("%s must be rejected", bad)
+		}
 	}
 }
