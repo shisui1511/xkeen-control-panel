@@ -621,3 +621,165 @@ func TestClearDefault_StableTagStaysReachable(t *testing.T) {
 		}
 	}
 }
+
+// Тег proxy — типовой тег шаблонов роутинга. Панель публикует его для текущего
+// дефолтного узла, но только если outbound proxy не объявлен в файлах XKeen
+// или пользователя: чужой outbound молча не подменяется.
+
+func TestProxyTag_PublishedForDefault(t *testing.T) {
+	env := newOrderEnv(t)
+	tag1 := nodeTagByServer(t, env, "sub_1", "1.1.1.1:443")
+	tag2 := nodeTagByServer(t, env, "sub_1", "2.2.2.2:443")
+
+	if err := env.svc.SetActiveNode("sub_1", tag1); err != nil {
+		t.Fatal(err)
+	}
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	proxy, _ := mergedByTag(merged, panelProxyTag)
+	if proxy == nil {
+		t.Fatal("proxy must be published for the default node")
+	}
+	if outboundAddress(proxy) != "1.1.1.1" {
+		t.Errorf("proxy address = %q, want 1.1.1.1", outboundAddress(proxy))
+	}
+	if merged[0]["tag"] != "xcp-sub_1" {
+		t.Errorf("stable tag must stay first, got %v", merged[0]["tag"])
+	}
+	if sub := env.svc.Get("sub_1"); sub.ProxyTagTaken {
+		t.Error("proxy_tag_taken must be false without a foreign proxy")
+	}
+
+	// proxy следует за сменой узла.
+	if err := env.svc.SetActiveNode("sub_1", tag2); err != nil {
+		t.Fatal(err)
+	}
+	merged = simulateXrayConfdirMerge(t, env.xrayDir)
+	proxy, _ = mergedByTag(merged, panelProxyTag)
+	if proxy == nil || outboundAddress(proxy) != "2.2.2.2" {
+		t.Fatalf("proxy must follow the new node, got %v", proxy)
+	}
+
+	// proxy следует за дефолтом между подписками.
+	addOrderSub(t, env, "sub_b")
+	tagB := nodeTagByServer(t, env, "sub_b", "4.4.4.4:443")
+	if err := env.svc.SetActiveNode("sub_b", tagB); err != nil {
+		t.Fatal(err)
+	}
+	merged = simulateXrayConfdirMerge(t, env.xrayDir)
+	if proxy, _ = mergedByTag(merged, panelProxyTag); proxy == nil || outboundAddress(proxy) != "4.4.4.4" {
+		t.Fatalf("proxy must follow the default subscription, got %v", proxy)
+	}
+	count := 0
+	for _, ob := range merged {
+		if ob["tag"] == panelProxyTag {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("proxy occurs %d times in merged outbounds", count)
+	}
+}
+
+func TestProxyTag_FreedomWhenNoDefault(t *testing.T) {
+	env := newOrderEnv(t)
+	tag := nodeTagByServer(t, env, "sub_1", "2.2.2.2:443")
+	if err := env.svc.SetActiveNode("sub_1", tag); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.svc.ClearActiveNode("sub_1"); err != nil {
+		t.Fatal(err)
+	}
+
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	if merged[0]["tag"] != "direct" {
+		t.Fatalf("first outbound must be direct, got %v", merged[0]["tag"])
+	}
+	proxy, _ := mergedByTag(merged, panelProxyTag)
+	if proxy == nil {
+		t.Fatal("proxy must stay in the config after clearing the default (rules keep xray -test valid)")
+	}
+	if proxy["protocol"] != "freedom" {
+		t.Errorf("proxy without a default must be freedom, got %v", proxy["protocol"])
+	}
+
+	// Совсем без выбора файлов панели нет и proxy не появляется.
+	env2 := newOrderEnv(t)
+	merged = simulateXrayConfdirMerge(t, env2.xrayDir)
+	if ob, _ := mergedByTag(merged, panelProxyTag); ob != nil {
+		t.Errorf("proxy must not appear without any selection, got %v", ob)
+	}
+}
+
+func TestProxyTag_UserOutboundConflict(t *testing.T) {
+	env := newOrderEnv(t)
+	userBase := `{
+  "outbounds": [
+    {"tag": "direct", "protocol": "freedom"},
+    {"tag": "proxy", "protocol": "vless", "settings": {"vnext": [{"address": "9.9.9.9", "port": 443, "users": [{"id": "` + stubWorkingUUID + `"}]}]}}
+  ]
+}
+`
+	basePath := filepath.Join(env.xrayDir, "04_outbounds.json")
+	if err := os.WriteFile(basePath, []byte(userBase), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	tag := nodeTagByServer(t, env, "sub_1", "2.2.2.2:443")
+	if err := env.svc.SetActiveNode("sub_1", tag); err != nil {
+		t.Fatal(err)
+	}
+
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	proxy, _ := mergedByTag(merged, panelProxyTag)
+	if proxy == nil || outboundAddress(proxy) != "9.9.9.9" {
+		t.Fatalf("user proxy must stay untouched, got %v", proxy)
+	}
+	if merged[0]["tag"] != "xcp-sub_1" || outboundAddress(merged[0]) != "2.2.2.2" {
+		t.Errorf("node must stay reachable by the stable tag, first = %v", merged[0]["tag"])
+	}
+	if after, _ := os.ReadFile(basePath); string(after) != userBase {
+		t.Error("user 04_outbounds.json must stay byte-identical")
+	}
+	// Файлы панели не объявляют proxy.
+	for _, name := range []string{selectionDefaultFileName, selectionTailFileName} {
+		data, err := os.ReadFile(filepath.Join(env.xrayDir, name))
+		if err == nil && strings.Contains(string(data), `"proxy"`) {
+			t.Errorf("%s must not declare proxy while the tag is taken", name)
+		}
+	}
+	if sub := env.svc.Get("sub_1"); !sub.ProxyTagTaken || sub.StableTag != "xcp-sub_1" {
+		t.Errorf("proxy_tag_taken/stable_tag = %v/%q", sub.ProxyTagTaken, sub.StableTag)
+	}
+	for _, s := range env.svc.List() {
+		if s.SelectedTag == "" && s.ProxyTagTaken {
+			t.Errorf("proxy_tag_taken must be set only for subscriptions with a selection: %s", s.ID)
+		}
+	}
+
+	// Снятие выбора: панель по-прежнему не создаёт заглушку поверх чужого proxy.
+	if err := env.svc.ClearActiveNode("sub_1"); err != nil {
+		t.Fatal(err)
+	}
+	merged = simulateXrayConfdirMerge(t, env.xrayDir)
+	if proxy, _ = mergedByTag(merged, panelProxyTag); proxy == nil || outboundAddress(proxy) != "9.9.9.9" {
+		t.Fatalf("user proxy must survive clearing the default, got %v", proxy)
+	}
+	if after, _ := os.ReadFile(basePath); string(after) != userBase {
+		t.Error("user 04_outbounds.json must stay byte-identical after clear")
+	}
+
+	// Пользователь убрал свой proxy — следующий выбор публикует тег панели.
+	if err := os.WriteFile(basePath, []byte(orderBaseOutbounds), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.svc.SetActiveNode("sub_1", tag); err != nil {
+		t.Fatal(err)
+	}
+	merged = simulateXrayConfdirMerge(t, env.xrayDir)
+	if proxy, _ = mergedByTag(merged, panelProxyTag); proxy == nil || outboundAddress(proxy) != "2.2.2.2" {
+		t.Fatalf("proxy must be published once it is free, got %v", proxy)
+	}
+	if sub := env.svc.Get("sub_1"); sub.ProxyTagTaken {
+		t.Error("proxy_tag_taken must clear once the foreign proxy is gone")
+	}
+}

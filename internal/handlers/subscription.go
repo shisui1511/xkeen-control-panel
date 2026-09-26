@@ -368,14 +368,19 @@ func (a *API) SubscriptionSetActive(w http.ResponseWriter, r *http.Request) {
 
 	// Выбранный узел доступен в конфиге под стабильным тегом xcp-<id>; UI
 	// показывает его и отметку «по умолчанию».
+	// proxy_published — панель опубликовала общий тег proxy для этого узла;
+	// false, если тег занят outbound пользователя и панель его не трогает.
 	stableTag := ""
+	proxyPublished := true
 	if sub := a.subscriptionSvc.Get(id); sub != nil {
 		stableTag = sub.StableTag
+		proxyPublished = !sub.ProxyTagTaken
 	}
 	JSONSuccess(w, map[string]interface{}{
-		"active_node": body.NodeTag,
-		"stable_tag":  stableTag,
-		"is_default":  true,
+		"active_node":     body.NodeTag,
+		"stable_tag":      stableTag,
+		"is_default":      true,
+		"proxy_published": proxyPublished,
 	})
 }
 

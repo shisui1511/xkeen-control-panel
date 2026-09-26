@@ -356,6 +356,11 @@ type Subscription struct {
 	// заполняется в List()/Get() только при непустом SelectedTag, из
 	// клиентского JSON не принимается (Add() обнуляет).
 	StableTag string `json:"stable_tag,omitempty"`
+	// ProxyTagTaken — тег proxy уже объявлен в файлах XKeen или пользователя,
+	// поэтому панель его не публикует и узел доступен только по стабильному
+	// тегу. Вычисляемое поле: List()/Get() выставляют его подпискам с выбором,
+	// из клиентского JSON не принимается (Add() обнуляет).
+	ProxyTagTaken bool `json:"proxy_tag_taken,omitempty"`
 
 	// MihomoIntegrated — интегрирована ли подписка в config.yaml Mihomo
 	MihomoIntegrated bool `json:"mihomo_integrated"`

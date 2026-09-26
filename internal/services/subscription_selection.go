@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -35,6 +36,10 @@ const (
 	// лексикографически после файла дефолта.
 	selectionTailFileName = "04_outbounds.zz_xcp_selected.tail.json"
 	stableTagPrefix       = "xcp-"
+	// panelProxyTag — общий тег текущего дефолтного узла. Типовые шаблоны и
+	// пресеты роутинга ссылаются на proxy; панель публикует его только если
+	// outbound с таким тегом не объявлен в файлах XKeen или пользователя.
+	panelProxyTag = "proxy"
 )
 
 var (
@@ -80,6 +85,79 @@ func (s *SubscriptionService) selectionDefaultPath() string {
 	return filepath.Join(s.configDir, selectionDefaultFileName)
 }
 
+// cloneOutbound делает глубокую копию outbound через JSON, чтобы правка тега
+// копии не затронула оригинал.
+func cloneOutbound(ob map[string]interface{}) (map[string]interface{}, error) {
+	raw, err := json.Marshal(ob)
+	if err != nil {
+		return nil, err
+	}
+	var cp map[string]interface{}
+	if err := json.Unmarshal(raw, &cp); err != nil {
+		return nil, err
+	}
+	return cp, nil
+}
+
+// foreignProxyOutboundFileLocked возвращает имя первого файла 04_outbounds*.json,
+// который объявляет outbound с тегом proxy и не принадлежит панели (файлы выбора
+// и фрагменты подписок исключаются). Пустая строка — тег proxy свободен и панель
+// вправе его опубликовать. Нечитаемые и невалидные файлы пропускаются: они не
+// объявляют outbound в мердже Xray. mu должен быть захвачен вызывающим (RLock
+// достаточно).
+func (s *SubscriptionService) foreignProxyOutboundFileLocked() string {
+	if s.configDir == "" {
+		return ""
+	}
+	entries, err := os.ReadDir(s.configDir)
+	if err != nil {
+		return ""
+	}
+	own := map[string]bool{
+		s.selectionDefaultPath(): true,
+		s.selectionTailPath():    true,
+	}
+	for i := range s.subscriptions {
+		own[s.getFragmentPath(&s.subscriptions[i])] = true
+		if legacy := s.legacyFragmentPath(&s.subscriptions[i]); legacy != "" {
+			own[legacy] = true
+		}
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "04_outbounds") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		path := filepath.Join(s.configDir, name)
+		if own[path] {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var wrapper struct {
+			Outbounds []struct {
+				Tag string `json:"tag"`
+			} `json:"outbounds"`
+		}
+		if json.Unmarshal(data, &wrapper) != nil {
+			continue
+		}
+		for _, ob := range wrapper.Outbounds {
+			if ob.Tag == panelProxyTag {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
 // readFragmentOutboundLocked читает outbound с тегом nodeTag из фрагмента
 // подписки как map, чтобы сохранить все поля, включая неизвестные структуре
 // Outbound. Возвращает глубокую копию. mu должен быть захвачен вызывающим.
@@ -116,7 +194,13 @@ func (s *SubscriptionService) readFragmentOutboundLocked(sub *Subscription, node
 // подписок под их стабильными тегами в порядке списка подписок (tail-файл,
 // в конце мерджа): они доступны только по тегу и дефолт не перехватывают.
 // Стабильный тег встречается ровно в одном списке. Пусто в обоих — дефолтом
-// остаётся первый outbound файлов XKeen. mu должен быть захвачен вызывающим.
+// остаётся первый outbound файлов XKeen.
+//
+// Общий тег proxy (D-03) публикуется, только если он не занят чужим outbound:
+// при дефолте — вторым элементом defaultObs, копией дефолтного узла; без
+// дефолта, но с выбором по тегу — заглушкой freedom в tailObs, чтобы правила со
+// ссылкой на proxy оставались валидными и вели в direct. mu должен быть
+// захвачен вызывающим.
 func (s *SubscriptionService) buildSelectionOutboundsLocked() (defaultObs, tailObs []map[string]interface{}, err error) {
 	for i := range s.subscriptions {
 		sub := &s.subscriptions[i]
@@ -141,6 +225,24 @@ func (s *SubscriptionService) buildSelectionOutboundsLocked() (defaultObs, tailO
 		}
 		ob["tag"] = stableSubscriptionTag(sub)
 		tailObs = append(tailObs, ob)
+	}
+
+	if s.foreignProxyOutboundFileLocked() == "" {
+		switch {
+		case len(defaultObs) > 0:
+			proxyOb, cloneErr := cloneOutbound(defaultObs[0])
+			if cloneErr != nil {
+				return nil, nil, cloneErr
+			}
+			proxyOb["tag"] = panelProxyTag
+			defaultObs = append(defaultObs, proxyOb)
+		case len(tailObs) > 0:
+			tailObs = append([]map[string]interface{}{{
+				"tag":      panelProxyTag,
+				"protocol": "freedom",
+				"settings": map[string]interface{}{},
+			}}, tailObs...)
+		}
 	}
 	return defaultObs, tailObs, nil
 }

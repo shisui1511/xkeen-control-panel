@@ -1072,10 +1072,15 @@ func TestSubscriptionSetActive_ResponseHasStableTag(t *testing.T) {
 			ActiveNode string `json:"active_node"`
 			StableTag  string `json:"stable_tag"`
 			IsDefault  bool   `json:"is_default"`
+			// proxy_published без конфликта — true.
+			ProxyPublished bool `json:"proxy_published"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v (%s)", err, rr.Body.String())
+	}
+	if !resp.Data.ProxyPublished {
+		t.Errorf("proxy_published must be true without a foreign proxy: %s", rr.Body.String())
 	}
 	if !resp.Success || resp.Data.ActiveNode != "node-2" || !resp.Data.IsDefault {
 		t.Errorf("unexpected response: %s", rr.Body.String())
@@ -1087,5 +1092,44 @@ func TestSubscriptionSetActive_ResponseHasStableTag(t *testing.T) {
 	// В списке подписок поле тоже есть.
 	if got := subSvc.Get(id).StableTag; got != "xcp-"+id {
 		t.Errorf("Get().StableTag = %q", got)
+	}
+}
+
+func TestSubscriptionSetActive_ProxyTagTaken(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+	id := newSelectableSub(t, api, subSvc)
+
+	basePath := filepath.Join(api.cfg.XRayConfigDir, "04_outbounds.json")
+	userBase := `{"outbounds": [{"tag": "direct", "protocol": "freedom"}, {"tag": "proxy", "protocol": "freedom"}]}`
+	if err := os.WriteFile(basePath, []byte(userBase), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/active?id="+id, strings.NewReader(`{"node_tag": "node-2"}`))
+	rr := httptest.NewRecorder()
+	api.SubscriptionSetActive(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data struct {
+			StableTag      string `json:"stable_tag"`
+			ProxyPublished *bool  `json:"proxy_published"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rr.Body.String())
+	}
+	if resp.Data.ProxyPublished == nil || *resp.Data.ProxyPublished {
+		t.Errorf("proxy_published must be false when the user owns the proxy tag: %s", rr.Body.String())
+	}
+	if resp.Data.StableTag != "xcp-"+id {
+		t.Errorf("stable_tag = %q, want xcp-%s", resp.Data.StableTag, id)
+	}
+	if !subSvc.Get(id).ProxyTagTaken {
+		t.Error("Get().ProxyTagTaken must be true")
+	}
+	if after, _ := os.ReadFile(basePath); string(after) != userBase {
+		t.Error("user 04_outbounds.json must stay byte-identical")
 	}
 }

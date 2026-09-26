@@ -329,14 +329,28 @@ func (s *SubscriptionService) populateSchedule(sub *Subscription, now time.Time)
 	}
 }
 
+// proxyTagTakenLocked — тег proxy занят чужим outbound. Скан файлов делается
+// только если у какой-либо подписки есть выбор (иначе флаг не нужен). mu
+// должен быть захвачен вызывающим.
+func (s *SubscriptionService) proxyTagTakenLocked() bool {
+	for i := range s.subscriptions {
+		if s.subscriptions[i].SelectedTag != "" {
+			return s.foreignProxyOutboundFileLocked() != ""
+		}
+	}
+	return false
+}
+
 func (s *SubscriptionService) List() []Subscription {
 	s.mu.RLock()
 	now := time.Now()
+	taken := s.proxyTagTakenLocked()
 	res := make([]Subscription, len(s.subscriptions))
 	for i := range s.subscriptions {
 		res[i] = s.subscriptions[i].Clone()
 		res[i].ProxyCount = s.getProxyCount(&res[i])
 		s.populateSchedule(&res[i], now)
+		res[i].ProxyTagTaken = taken && res[i].SelectedTag != ""
 	}
 	s.mu.RUnlock()
 	s.populateMihomoIntegrated(res)
@@ -352,6 +366,7 @@ func (s *SubscriptionService) Get(id string) *Subscription {
 			c := s.subscriptions[i].Clone()
 			c.ProxyCount = s.getProxyCount(&c)
 			s.populateSchedule(&c, now)
+			c.ProxyTagTaken = c.SelectedTag != "" && s.foreignProxyOutboundFileLocked() != ""
 			cloned = &c
 			break
 		}
@@ -442,6 +457,7 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 	sub.NextUpdate = nil
 	sub.RefreshIntervalHours = 0
 	sub.StableTag = ""
+	sub.ProxyTagTaken = false
 
 	s.subscriptions = append(s.subscriptions, *sub)
 	return s.save()
