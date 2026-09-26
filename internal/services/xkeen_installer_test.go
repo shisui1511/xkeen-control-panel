@@ -86,7 +86,7 @@ func TestXKeenInstaller_Command(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if argv[len(argv)-2] != script || argv[len(argv)-1] != "--beta" {
+	if argv[len(argv)-3] != script || argv[len(argv)-2] != "--beta" {
 		t.Errorf("path and flag must be positional args, got %q", argv)
 	}
 }
@@ -113,6 +113,59 @@ func TestXKeenInstaller_CommandRunsScriptThenStopsOnFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(script); !os.IsNotExist(err) {
 		t.Error("downloaded installer must be removed after run")
+	}
+}
+
+// TestXKeenInstaller_CommandSetupOnce: install.sh сам запускает `xkeen -i`;
+// панель повторяет настройку, только если init-скрипт XKeen не появился.
+func TestXKeenInstaller_CommandSetupOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		initExist bool
+		wantSetup bool
+	}{
+		{"setup done by install.sh", true, false},
+		{"setup interrupted", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			initDir := filepath.Join(dir, "init.d")
+			binDir := filepath.Join(dir, "bin")
+			for _, d := range []string{initDir, binDir} {
+				if err := os.Mkdir(d, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.initExist {
+				if err := os.WriteFile(filepath.Join(initDir, xkeenInitScript), nil, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(binDir, "xkeen"), []byte("#!/bin/sh\necho \"setup $1\"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			x := &XKeenInstaller{Dir: dir, InitDir: initDir}
+			script := filepath.Join(dir, "xcp-xkeen-install-1.sh")
+			if err := os.WriteFile(script, []byte("echo installed\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			argv, err := x.Command(script, "stable")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(argv[0], argv[1:]...)
+			cmd.Env = append(os.Environ(), "PATH="+binDir+":"+os.Getenv("PATH"))
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("run: %v (%s)", err, out)
+			}
+			if got := strings.Contains(string(out), "setup -i"); got != tc.wantSetup {
+				t.Errorf("xkeen -i ran=%v, want %v; output %q", got, tc.wantSetup, out)
+			}
+			if x.SetupComplete() != tc.initExist {
+				t.Errorf("SetupComplete()=%v, want %v", x.SetupComplete(), tc.initExist)
+			}
+		})
 	}
 }
 

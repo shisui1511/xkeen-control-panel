@@ -76,6 +76,16 @@ func xkeenInstallerShell() string {
 	return "/bin/sh"
 }
 
+// xkeenInitScript — init-скрипт, который создаёт `xkeen -i` в конце настройки.
+// Бинарник без него — прерванная установка.
+const xkeenInitScript = "S05xkeen"
+
+// SetupComplete сообщает, доведена ли настройка XKeen до конца.
+func (x *XKeenInstaller) SetupComplete() bool {
+	fi, err := os.Stat(filepath.Join(x.InitDir, xkeenInitScript))
+	return err == nil && !fi.IsDir()
+}
+
 // Available сообщает, можно ли ставить XKeen на этой системе.
 func (x *XKeenInstaller) Available() bool {
 	fi, err := os.Stat(x.InitDir)
@@ -164,8 +174,9 @@ func (x *XKeenInstaller) fetch(ctx context.Context, src string) ([]byte, error) 
 	return body, nil
 }
 
-// Command — argv для PTY: установщик выбранного канала, затем полный цикл
-// интерактивной настройки `xkeen -i`. Скачанный скрипт удаляется сразу после
+// Command — argv для PTY: установщик выбранного канала. install.sh сам
+// заканчивается `exec xkeen -i`; повторно настройка запускается, только если
+// init-скрипт XKeen так и не появился. Скачанный скрипт удаляется сразу после
 // запуска установщика.
 func (x *XKeenInstaller) Command(scriptPath, channel string) ([]string, error) {
 	flag, ok := XKeenChannels[channel]
@@ -175,16 +186,17 @@ func (x *XKeenInstaller) Command(scriptPath, channel string) ([]string, error) {
 	if filepath.Dir(scriptPath) != filepath.Clean(x.Dir) {
 		return nil, errors.New("installer script outside of installer dir")
 	}
-	// Путь и флаг передаются позиционными аргументами, не подстановкой в
-	// текст скрипта. cd — установщик скачивает архив в текущий каталог
+	// Путь, флаг и init-скрипт передаются позиционными аргументами, не
+	// подстановкой в текст скрипта. cd — установщик скачивает архив в текущий каталог
 	const script = `cd "$(dirname "$1")" || exit 1
 sh "$1" "$2"; rc=$?
 rm -f "$1"
 [ "$rc" -eq 0 ] || exit "$rc"
-exec xkeen -i`
+[ -f "$3" ] || exec xkeen -i`
 	shell := x.Shell
 	if shell == "" {
 		shell = xkeenInstallerShell()
 	}
-	return []string{shell, "-c", script, "xkeen-install", scriptPath, flag}, nil
+	initScript := filepath.Join(x.InitDir, xkeenInitScript)
+	return []string{shell, "-c", script, "xkeen-install", scriptPath, flag, initScript}, nil
 }
