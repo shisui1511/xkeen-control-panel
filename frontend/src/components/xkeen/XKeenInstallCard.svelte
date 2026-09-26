@@ -11,9 +11,12 @@
     available: boolean;
     /** Установщик завершился — родитель обновляет статус служб */
     onfinished?: () => void;
+    /** Окно установки открыто или закрыто: пока оно открыто, родитель не
+     *  должен убирать карточку, иначе сессия установщика оборвётся */
+    onopenchange?: (open: boolean) => void;
   }
 
-  let { available, onfinished }: Props = $props();
+  let { available, onfinished, onopenchange }: Props = $props();
 
   let channel = $state<'stable' | 'beta'>('stable');
   let isOpen = $state(false);
@@ -24,6 +27,7 @@
     exitCode = null;
     running = true;
     isOpen = true;
+    onopenchange?.(true);
   }
 
   function handleExit(code: number) {
@@ -50,6 +54,7 @@
       onfinished?.();
     }
     isOpen = false;
+    onopenchange?.(false);
   }
 </script>
 

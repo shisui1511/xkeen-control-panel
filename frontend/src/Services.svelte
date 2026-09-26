@@ -64,6 +64,9 @@
   let xkeenStatus = $state('');
   // null — статус ещё не получен: карточку установки не показываем заранее
   let xkeenInstalled = $state<boolean | null>(null);
+  // Окно установщика открыто: бинарник xkeen появляется до конца установки,
+  // и без этого флага карточка с терминалом пропадала посреди `xkeen -i`
+  let xkeenInstallOpen = $state(false);
   let xkeenInstallerAvailable = $state(false);
   let actionLoading = $state<Record<string, boolean>>({});
   let pendingRestartKernel = $state<string | null>(null);
@@ -710,9 +713,10 @@
     </Button>
   </PageHeader>
 
-  {#if xkeenInstalled === false}
+  {#if xkeenInstalled === false || xkeenInstallOpen}
     <XKeenInstallCard
       available={xkeenInstallerAvailable}
+      onopenchange={(open) => (xkeenInstallOpen = open)}
       onfinished={() => {
         fetchStatus();
         fetchKernels();
