@@ -448,15 +448,13 @@ verify_checksum() {
   hash_file="/tmp/${BINARY}_${ver}_${ARCH_LABEL}.sha256"
   rm -f "$hash_file"
 
-  # Эталон — digest из API GitHub: он не зависит от того, откуда скачан бинарник.
-  # Нет API — файл .sha256 релиза, напрямую или через прокси.
+  # Эталон берётся только у GitHub — digest из API или .sha256 релиза напрямую.
+  # Через прокси хеш не качается: иначе прокси подменил бы и бинарник, и эталон.
   expected_hash=$(get_asset_digest "$ver" "xcp_${ver}_${ARCH_LABEL}" | tr -d '[:space:]')
   if [ -z "$expected_hash" ]; then
     hash_downloaded=false
     url="https://github.com/${REPO}/releases/download/${ver}/xcp_${ver}_${ARCH_LABEL}.sha256"
-    for source in "" $GH_PROXIES; do
-      fetch_to "${source}${url}" "$hash_file" && hash_downloaded=true && break
-    done
+    fetch_to "$url" "$hash_file" && hash_downloaded=true
     if [ "$hash_downloaded" != "true" ]; then
       error "Сеть недоступна: не удалось получить контрольную сумму SHA-256!"
       log_install "Error: sha256 checksum unreachable"

@@ -516,6 +516,29 @@ else
 fi
 cleanup
 
+# Без API эталон не берётся с прокси: иначе прокси подменил бы и бинарник, и хеш
+make_sandbox
+cat > "$MOCK_BIN/curl" <<EOF2
+#!/bin/sh
+DEST=""; URL=""
+for arg; do
+    [ "\$prev" = "-o" ] && DEST="\$arg"
+    case "\$arg" in http*) URL="\$arg" ;; esac
+    prev="\$arg"
+done
+case "\$URL" in https://github.com/*|https://api.github.com/*) exit 7 ;; esac
+[ -n "\$DEST" ] && sha256sum "$TMP/bin.new" | awk '{print \$1}' > "\$DEST"
+EOF2
+chmod +x "$MOCK_BIN/curl"
+printf '#!/bin/sh\nexit 1\n' > "$MOCK_BIN/wget"; chmod +x "$MOCK_BIN/wget"
+printf 'payload' > "$TMP/bin.new"
+if run_in_sandbox "ARCH_LABEL=arm64; verify_checksum '$TMP/bin.new' v1.0.0" >/dev/null 2>&1; then
+    fail "verify_checksum не доверяет хешу с прокси"
+else
+    pass "verify_checksum не доверяет хешу с прокси"
+fi
+cleanup
+
 # ---------------------------------------------------------------------------
 # do_update — GitHub недоступен: бинарник через прокси GitHub
 # ---------------------------------------------------------------------------
