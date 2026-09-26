@@ -22,8 +22,9 @@
   let kernelInitialized = $state(false);
 
   $effect(() => {
-    if (!kernelInitialized && $capabilities?.active_kernel) {
-      kernel = $capabilities.active_kernel as 'xray' | 'mihomo';
+    const active = $capabilities?.active_kernel;
+    if (!kernelInitialized && (active === 'xray' || active === 'mihomo')) {
+      kernel = active;
       kernelInitialized = true;
     }
   });

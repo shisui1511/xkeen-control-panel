@@ -491,7 +491,12 @@
     return formatDate(ts);
   }
 
-  let activeKernel = $derived($capabilities?.active_kernel || null);
+  // "none" — ни одно ядро не определено: фильтровать базы не по чему
+  let activeKernel = $derived(
+    $capabilities?.active_kernel && $capabilities.active_kernel !== 'none'
+      ? $capabilities.active_kernel
+      : null
+  );
 
   // Filtered files in master column
   let displayedFiles = $derived(

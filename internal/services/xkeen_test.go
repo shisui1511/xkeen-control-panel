@@ -549,3 +549,25 @@ func TestRunWithTimeoutArgs_BackgroundChildKeepsPipe(t *testing.T) {
 	}
 	t.Fatal("background child died after writing to inherited output (SIGPIPE)")
 }
+
+func TestXKeenService_ConfiguredKernel(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct{ body, want string }{
+		{"#!/bin/sh\nname_client=\"xray\"\ndirectory_configs_app=\"/opt/etc/$name_client\"\n", "xray"},
+		{"name_client=mihomo\n", "mihomo"},
+		{"# name_client=\"mihomo\"\nname_client=\"xray\"\n", "xray"},
+		{"name_client=\"other\"\n", ""},
+	} {
+		path := filepath.Join(dir, "S05xkeen")
+		if err := os.WriteFile(path, []byte(tc.body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		s := &XKeenService{InitScript: path}
+		if got := s.ConfiguredKernel(); got != tc.want {
+			t.Errorf("%q: got %q, want %q", tc.body, got, tc.want)
+		}
+	}
+	if got := (&XKeenService{InitScript: filepath.Join(dir, "missing")}).ConfiguredKernel(); got != "" {
+		t.Errorf("missing script: got %q", got)
+	}
+}
