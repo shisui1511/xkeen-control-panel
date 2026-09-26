@@ -217,6 +217,10 @@ test.describe('Phase 105: Xray Constructor Smart-Merge (TMPL-01, TMPL-07)', () =
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
     await expect(xrayBtn).toBeVisible({ timeout: 5000 });
     await xrayBtn.click();
+    await page
+      .getByTestId('xray-stub-banner')
+      .getByRole('button', { name: /Применить шаблон|Apply template/ })
+      .click();
 
     // Ожидаем появления тоста с успешным слиянием (D-04)
     const toast = page.locator('.toast--success, [role="alert"]');
@@ -334,6 +338,10 @@ test.describe('Phase 105: Xray Constructor Smart-Merge (TMPL-01, TMPL-07)', () =
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
     await expect(xrayBtn).toBeVisible({ timeout: 5000 });
     await xrayBtn.click();
+    await page
+      .getByTestId('xray-stub-banner')
+      .getByRole('button', { name: /Применить шаблон|Apply template/ })
+      .click();
 
     // Ожидаем появления тоста об ошибке smart-merge
     const errorToast = page.locator('.toast--error, [role="alert"]');
@@ -388,7 +396,52 @@ test('шаблон автоинициализации без баз не ссы�
 
   await page.goto('/#/constructor');
   await page.locator('.constructor-kernel-toggle button:has-text("Xray")').click();
+  await page
+    .getByTestId('xray-stub-banner')
+    .getByRole('button', { name: /Применить шаблон|Apply template/ })
+    .click();
   await expect.poll(() => template).not.toBe('');
   expect(template).not.toMatch(/geoip:|geosite:/);
   expect(template).toContain('10.0.0.0/8');
+});
+
+// Аудит: открытие конструктора на заготовке XKeen не должно само писать файлы
+test('заготовка XKeen: без согласия файлы не пишутся', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'serviceWorker', {
+      value: undefined,
+      writable: false,
+      configurable: true
+    });
+    window.localStorage.setItem('lang', 'ru');
+  });
+  const writes: string[] = [];
+  await page.route('**/api/**', async (route) => {
+    const url = route.request().url();
+    const method = route.request().method();
+    if (url.includes('/api/auth/me')) {
+      await route.fulfill({
+        json: { authenticated: true, setup_required: false, csrf_token: 'mock-csrf' }
+      });
+    } else if (method === 'POST') {
+      writes.push(url);
+      await route.fulfill({ json: { success: true, data: {} } });
+    } else if (url.includes('/api/config/read')) {
+      const path = new URL(url).searchParams.get('path') || '';
+      await route.fulfill({ contentType: 'application/json', body: getStubXrayFile(path) });
+    } else if (url.includes('/api/config/list') || url.includes('/api/dat/list')) {
+      await route.fulfill({ json: [] });
+    } else {
+      await route.fulfill({ json: { success: true, data: {} } });
+    }
+  });
+
+  await page.goto('/#/constructor');
+  await page.locator('.constructor-kernel-toggle button:has-text("Xray")').click();
+  const banner = page.getByTestId('xray-stub-banner');
+  await expect(banner).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(writes.filter((u) => u.includes('/api/config/save'))).toEqual([]);
+  await banner.getByRole('button', { name: /Не сейчас|Not now/ }).click();
+  await expect(banner).toHaveCount(0);
 });

@@ -315,13 +315,18 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
       });
     });
 
-    // Переход в конструктор: пустой rules в 05_routing.json автоматически запускает applyTemplateFiles
+    // Переход в конструктор: пустой rules в 05_routing.json — заготовка, шаблон
+    // применяется кнопкой баннера
     await page.goto('/#/constructor');
 
     const xrayKernelBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
     if (await xrayKernelBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await xrayKernelBtn.click();
     }
+    await page
+      .getByTestId('xray-stub-banner')
+      .getByRole('button', { name: /Применить шаблон|Apply template/ })
+      .click();
 
     // Проверяем появление предупреждений после сохранения
     const warningsBlock = page.locator('.preflight-warnings');
