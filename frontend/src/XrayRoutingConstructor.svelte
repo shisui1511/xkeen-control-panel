@@ -347,6 +347,14 @@
     }
   }
 
+  // Конфиг Xray — заготовка XKeen: предлагаем базовый шаблон
+  let stubDetected = $state(false);
+
+  async function applyStarterTemplate() {
+    await applyTemplateFiles('selective-routing', false);
+    stubDetected = false;
+  }
+
   async function loadXrayConfig() {
     const geoLoaded = loadGeoAvailability();
     const promises = XRAY_FILES.map(async (name) => {
@@ -380,11 +388,9 @@
     const outboundsFile = xrayFiles['04_outbounds.json'] || {};
     const isOutboundsStub = !outboundsFile.outbounds || outboundsFile.outbounds.length === 0;
     // A file that exists but does not parse is the user's to fix, not a stub.
-    if ((isRoutingStub || isOutboundsStub) && unparsedFiles.length === 0) {
-      if (!applyLoading) {
-        applyTemplateFiles('selective-routing', false);
-      }
-    }
+    // Заготовку XKeen не переписываем молча: открытие страницы не должно
+    // менять конфиг на роутере — шаблон применяется кнопкой баннера
+    stubDetected = (isRoutingStub || isOutboundsStub) && unparsedFiles.length === 0;
   }
 
   function parseXrayFiles(files: Record<string, any>) {
@@ -942,6 +948,23 @@
 </script>
 
 <div class="container">
+  {#if stubDetected}
+    <div class="stub-banner" role="status" data-testid="xray-stub-banner">
+      <div class="stub-banner-text">
+        <strong>{$t('xray.stub_title')}</strong>
+        <span>{$t('xray.stub_desc')}</span>
+      </div>
+      <div class="stub-banner-actions">
+        <Button variant="primary" loading={applyLoading} onclick={applyStarterTemplate}>
+          {$t('xray.stub_apply')}
+        </Button>
+        <Button variant="secondary" disabled={applyLoading} onclick={() => (stubDetected = false)}>
+          {$t('xray.stub_dismiss')}
+        </Button>
+      </div>
+    </div>
+  {/if}
+
   {#if detectedDraft}
     <DraftRestoreBanner
       timestamp={detectedDraft.timestamp}
@@ -1246,6 +1269,36 @@
 </Modal>
 
 <style>
+  .stub-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 12px 18px;
+    margin-bottom: 16px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-md);
+    background: var(--accent-soft);
+  }
+
+  .stub-banner-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13.5px;
+    color: var(--fg-secondary);
+  }
+
+  .stub-banner-text strong {
+    color: var(--fg-primary);
+  }
+
+  .stub-banner-actions {
+    display: flex;
+    gap: 8px;
+  }
+
   .container {
     display: flex;
     flex-direction: column;
