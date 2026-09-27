@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -183,6 +184,36 @@ func TestSetNodeDialerProxy(t *testing.T) {
 	}
 }
 
+// TestSetNodeDialerProxy_UnsupportedProtocolTarget — узел с протоколом,
+// который Xray не пишет во фрагмент (hysteria2/tuic), не может быть целью
+// каскада: collectActiveXrayTags его не увидит, и сохранённый dialerProxy
+// молча не применился бы (WR-02 из код-ревью фазы 133).
+func TestSetNodeDialerProxy_UnsupportedProtocolTarget(t *testing.T) {
+	svc, _ := setupTestStorage(t)
+
+	sub1 := &Subscription{
+		ID:         "sub1",
+		Name:       "Sub 1",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []SubscriptionNode{
+			{Tag: "node1", Name: "Node 1", Protocol: "vless"},
+			{Tag: "h2", Name: "Hysteria2 Node", Protocol: "hysteria2"},
+		},
+	}
+	if err := svc.Add(sub1); err != nil {
+		t.Fatalf("failed to add sub1: %v", err)
+	}
+
+	err := svc.SetNodeDialerProxy("sub1", "node1", "h2")
+	if !errors.Is(err, ErrProtocolNotSupportedByXray) {
+		t.Fatalf("expected ErrProtocolNotSupportedByXray, got: %v", err)
+	}
+	if updated := svc.Get("sub1"); updated.Nodes[0].DialerProxy != "" {
+		t.Errorf("expected DialerProxy to stay empty, got %q", updated.Nodes[0].DialerProxy)
+	}
+}
+
 func TestDialerProxyTargets(t *testing.T) {
 	svc, _ := setupTestStorage(t)
 
@@ -199,7 +230,8 @@ func TestDialerProxyTargets(t *testing.T) {
 	}
 	_ = svc.Add(sub1)
 
-	// sub2: node3 (available), node4 (has its own dialerProxy -> excluded)
+	// sub2: node3 (available), node4 (has its own dialerProxy -> excluded),
+	// node6 (hysteria2 -> excluded, Xray does not write it to the fragment)
 	sub2 := &Subscription{
 		ID:         "sub2",
 		Name:       "Sub 2",
@@ -208,6 +240,7 @@ func TestDialerProxyTargets(t *testing.T) {
 		Nodes: []SubscriptionNode{
 			{Tag: "node3", Name: "Node 3", Protocol: "vmess"},
 			{Tag: "node4", Name: "Node 4", Protocol: "vmess", DialerProxy: "node2"},
+			{Tag: "node6", Name: "Node 6", Protocol: "hysteria2"},
 		},
 	}
 	_ = svc.Add(sub2)
@@ -230,7 +263,8 @@ func TestDialerProxyTargets(t *testing.T) {
 	}
 
 	// Expected targets: node2 (same sub), node3 (other active Xray sub)
-	// Excluded: node1 (source itself), node4 (has own cascade), node5 (sub3 has Xray disabled)
+	// Excluded: node1 (source itself), node4 (has own cascade), node5 (sub3
+	// has Xray disabled), node6 (hysteria2, unsupported by Xray)
 	if len(targets) != 2 {
 		t.Fatalf("expected exactly 2 targets, got %d: %+v", len(targets), targets)
 	}

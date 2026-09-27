@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -19,6 +20,16 @@ const maxSubscriptionBytes = 10 * 1024 * 1024
 // invalidIDCharsRe — символы, недопустимые в ID подписки (path injection).
 var invalidIDCharsRe = regexp.MustCompile(`[^a-z0-9_-]`)
 
+// allowedXrayProtocols — протоколы, для которых Xray пишет outbound во
+// фрагмент подписки (writeFragment). Список продублирован вручную во
+// фронтенде как XRAY_SELECTABLE_PROTOCOLS
+// (frontend/src/components/subscriptions/NodeList.svelte) — единого
+// источника истины нет (IN-03 из код-ревью фазы 133). При добавлении сюда
+// нового протокола обязательно обновить фронтенд-копию: иначе кнопка
+// выбора узла останется задизейблена для валидного узла. Список закреплён
+// тестом TestAllowedXrayProtocols_MatchesFrontendList в
+// subscription_selection_test.go — падение теста напоминает о ручной
+// синхронизации.
 var (
 	nonAlphanumericDashRe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
 	multiDashRe           = regexp.MustCompile(`-+`)
@@ -343,8 +354,9 @@ type Subscription struct {
 	// лимит устройств). Выставляется при refresh, снимается первым рабочим ответом.
 	DeviceRejected bool `json:"device_rejected,omitempty"`
 	// LastWarning — код предупреждения последнего refresh, которое пользователь
-	// должен увидеть (сейчас только selected_node_lost: выбранный узел пропал из
-	// подписки и заменён первым рабочим). Сбрасывается refresh без потерь.
+	// должен увидеть: selected_node_lost (выбранный узел пропал из подписки и
+	// заменён первым рабочим) или selected_node_gone (выбранный узел пропал, а
+	// рабочих узлов для замены не осталось). Сбрасывается refresh без потерь.
 	LastWarning string `json:"last_warning,omitempty"`
 
 	// SelectedTag — тег узла, выбранного пользователем в ручном режиме Xray
@@ -568,10 +580,10 @@ func (s *SubscriptionService) SetPanelAddress(port int, https bool, loopbackPort
 
 func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscription, port int, https bool, loopbackPort int) string {
 	if port == 0 {
-		port = 8090
+		port = config.DefaultPanelPort
 	}
 	if loopbackPort == 0 {
-		loopbackPort = 8091
+		loopbackPort = config.DefaultLoopbackPort
 	}
 
 	scheme := "http"

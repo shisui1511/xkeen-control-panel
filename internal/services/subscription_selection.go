@@ -47,6 +47,11 @@ var (
 	ErrStubNodeSelection = errors.New("cannot select a provider stub node")
 	// ErrSelectionNodeNotFound — выбранного узла нет среди узлов подписки.
 	ErrSelectionNodeNotFound = errors.New("node not found in subscription outbounds")
+	// ErrProtocolNotSupportedByXray — протокол узла (например, hysteria2/tuic)
+	// не входит в allowedXrayProtocols: Xray не пишет для него outbound во
+	// фрагмент, поэтому узел нельзя выбрать активным или использовать как цель
+	// dialerProxy (WR-02 из код-ревью фазы 133).
+	ErrProtocolNotSupportedByXray = errors.New("node protocol is not supported by Xray")
 
 	safeIDRe = regexp.MustCompile(`^[a-z0-9_-]+$`)
 )
@@ -73,6 +78,16 @@ func stableSubscriptionTag(sub *Subscription) string {
 // selectionEligible — подписка вправе давать выбранный узел в конфиг Xray.
 func selectionEligible(sub *Subscription) bool {
 	return sub.Enabled && sub.EnableXray && sub.RoutingMode != "auto" && sub.SelectedTag != ""
+}
+
+// xraySelectable — узел пригоден для выбора активным/цели dialerProxy в
+// Xray-подписке: не заглушка провайдера и протокол входит в
+// allowedXrayProtocols. writeFragment пишет во фрагмент только такие узлы
+// (subscription_converter.go), поэтому непригодный узел не найдётся ни по
+// тегу во фрагменте (readFragmentOutboundLocked), ни в collectActiveXrayTags —
+// выбор такого узла или каскад на него молча не применяется (WR-02).
+func xraySelectable(n *SubscriptionNode) bool {
+	return n != nil && !n.Stub && allowedXrayProtocols[n.Protocol]
 }
 
 // selectionTailPath — путь tail-файла выбранных узлов. Имя статическое.

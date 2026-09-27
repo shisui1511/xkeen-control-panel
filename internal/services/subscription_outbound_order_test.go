@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -212,6 +213,27 @@ func TestSelectNode_StubRejected(t *testing.T) {
 	err = env.svc.SetActiveNode("sub_1", "no-such-tag")
 	if !errors.Is(err, ErrSelectionNodeNotFound) {
 		t.Fatalf("expected ErrSelectionNodeNotFound, got %v", err)
+	}
+}
+
+// TestSelectNode_UnsupportedProtocolRejected — узел hysteria2/tuic не пишется
+// во фрагмент Xray (writeFragment фильтрует по allowedXrayProtocols), поэтому
+// выбор такого узла активным должен возвращать ErrProtocolNotSupportedByXray,
+// а не generic ErrSelectionNodeNotFound (WR-02 из код-ревью фазы 133).
+func TestSelectNode_UnsupportedProtocolRejected(t *testing.T) {
+	env := newOrderEnv(t)
+
+	env.svc.mu.Lock()
+	live := env.svc.GetLocked("sub_1")
+	live.Nodes = append(live.Nodes, SubscriptionNode{Tag: "h2-1", Name: "hysteria2 node", Protocol: "hysteria2", Server: "3.3.3.3:443"})
+	env.svc.mu.Unlock()
+
+	err := env.svc.SetActiveNode("sub_1", "h2-1")
+	if !errors.Is(err, ErrProtocolNotSupportedByXray) {
+		t.Fatalf("expected ErrProtocolNotSupportedByXray, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(env.xrayDir, selectionDefaultFileName)); !os.IsNotExist(statErr) {
+		t.Error("default file must not be created for an unsupported-protocol node")
 	}
 }
 
@@ -918,6 +940,35 @@ func TestRefresh_SelectionLostPicksFirstWorking(t *testing.T) {
 	}
 	if got := env.svc.Get("sub_1").LastWarning; got != "" {
 		t.Errorf("LastWarning after stable refresh = %q, want empty", got)
+	}
+}
+
+// TestRefresh_SelectionGoneWhenNoWorkingNodesRemain — если среди свежих узлов
+// не осталось ни одного рабочего (не заглушка, разрешённый Xray протокол),
+// текст предупреждения должен отличаться от «заменён первым рабочим»: узел на
+// самом деле не выбран (IN-01 из код-ревью фазы 133).
+func TestRefresh_SelectionGoneWhenNoWorkingNodesRemain(t *testing.T) {
+	env := newOrderEnv(t)
+	selectNodeByServer(t, env, "2.2.2.2:443")
+
+	// Провайдер вернул единственный узел с протоколом, который Xray не пишет
+	// во фрагмент (hysteria2): заменить выбор нечем.
+	env.body.Store(base64.StdEncoding.EncodeToString(
+		[]byte("hysteria2://pass@6.6.6.6:443?sni=test#h2-node"),
+	))
+	if err := env.svc.Refresh("sub_1"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	sub := env.svc.Get("sub_1")
+	if sub.SelectedTag != "" {
+		t.Errorf("SelectedTag = %q, want empty (no usable nodes remain)", sub.SelectedTag)
+	}
+	if sub.IsDefault {
+		t.Error("IsDefault must be cleared when no usable nodes remain")
+	}
+	if sub.LastWarning != warningSelectedNodeGone {
+		t.Errorf("LastWarning = %q, want %q", sub.LastWarning, warningSelectedNodeGone)
 	}
 }
 

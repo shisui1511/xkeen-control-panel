@@ -254,6 +254,54 @@ test.describe('Subscriptions: видимость выбора узла (Phase 13
     await expect(warning).toContainText('Выбранный узел пропал');
   });
 
+  test('last_warning=selected_node_gone показывает баннер «рабочих узлов не осталось», а не текст selected_node_lost', async ({
+    page
+  }) => {
+    subs = [
+      { ...sub, is_default: true, stable_tag: 'xcp-sub-1', last_warning: 'selected_node_gone' }
+    ];
+    nodeLists['sub-1'] = nodes;
+
+    await page.goto('/#/subscriptions');
+    const warning = page.locator('#sub-card-sub-1').getByTestId('sub-last-warning');
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText('рабочих узлов не осталось');
+    await expect(warning).not.toContainText('выбран первый рабочий узел');
+  });
+
+  test('узел с протоколом, не поддерживаемым Xray, показывает бейдж и не даёт выбрать активным (WR-02/WR-03)', async ({
+    page
+  }) => {
+    subs = [{ ...sub }];
+    nodeLists['sub-1'] = [
+      { tag: 'node-1', name: 'Узел 1', protocol: 'vless', active: false },
+      { tag: 'node-2', name: 'Узел 2', protocol: 'hysteria2', active: false }
+    ];
+    const requests: Array<{ method: string; url: string }> = [];
+    await page.route('**/api/subscriptions/active**', async (route: Route) => {
+      const req = route.request();
+      requests.push({ method: req.method(), url: req.url() });
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: false, error: 'protocol not supported by xray' })
+      });
+    });
+
+    const card = await openCard(page, 'sub-1');
+    const unsupportedRow = card.locator('.sub-node-row').nth(1);
+    const badge = unsupportedRow.getByTestId('protocol-unsupported-badge');
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('Не поддерживается Xray');
+
+    const selectBtn = unsupportedRow.locator('.sub-node-select-btn');
+    await expect(selectBtn).toBeDisabled();
+    await selectBtn.click({ force: true });
+
+    await page.waitForTimeout(200);
+    expect(requests.length).toBe(0);
+  });
+
   test('без last_warning строки предупреждения нет', async ({ page }) => {
     subs = [{ ...sub }];
     nodeLists['sub-1'] = nodes;
