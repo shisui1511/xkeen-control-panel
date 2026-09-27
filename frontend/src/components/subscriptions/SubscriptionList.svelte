@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t, currentLang } from '../../i18n';
+  import { t } from '../../i18n';
   import { pluralize } from '../../i18n';
   import { formatTimeUntil, subscriptionDisplayName } from '../proxies/providersState.svelte';
   import { capabilities } from '../../stores';
@@ -162,7 +162,6 @@
   function getExpireDays(expire?: number): ExpireDaysInfo | null {
     if (!expire || expire <= 0) return null;
     const diff = expire * 1000 - Date.now();
-    const isRu = $currentLang === 'ru';
     if (diff <= 0) {
       return {
         text: $t('subscr.expired'),
