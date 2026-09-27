@@ -1,7 +1,7 @@
 # ==============================================================================
 # awg-antifilter.yaml — Mihomo: AmneziaWG Антифильтр
 # Сценарий: Обход блокировок через AmneziaWG (пресет Compatibility, MTU 1280).
-# Защита портов управления Keenetic и приватных сетей.
+# Защита портов управления роутера Keenetic/Netcraze и приватных сетей.
 # ==============================================================================
 mixed-port: 10808
 redir-port: 5000
@@ -31,6 +31,12 @@ dns:
     - "*.keenetic.link"
     - "*.keenetic.name"
     - "*.my.keenetic.net"
+    - "*.netcraze.pro"
+    - "*.netcraze.link"
+    - "*.netcraze.club"
+    - "*.netcraze.io"
+    - "*.crazedns.ru"
+    - "my.netcraze.net"
     - "router.local"
     - "time.*.com"
     - "ntp.*"
@@ -134,7 +140,7 @@ rule-providers:
     interval: 86400
 
 rules:
-  # Защита системных портов Keenetic и локальных сетей
+  # Защита системных портов роутера Keenetic/Netcraze и локальных сетей
   - DST-PORT,3389,DIRECT
   - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
   - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve

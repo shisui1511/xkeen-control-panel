@@ -10,12 +10,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// KeeneticFakeIPExclusions defines standard domains that must never be assigned Fake-IP.
-var KeeneticFakeIPExclusions = []string{
+// RouterFakeIPExclusions defines standard domains that must never be assigned
+// Fake-IP: router access names of Keenetic (KeenDNS) and Netcraze (CrazeDNS)
+// firmware, private networks and local zones.
+var RouterFakeIPExclusions = []string{
 	"+.keenetic.pro",
 	"+.keenetic.net",
 	"+.keenetic.link",
 	"+.keenetic.io",
+	"+.netcraze.pro",
+	"+.netcraze.net",
+	"+.netcraze.link",
+	"+.netcraze.club",
+	"+.netcraze.io",
+	"+.crazedns.ru",
 	"192.168.*",
 	"172.16.*",
 	"10.*",
@@ -235,7 +243,7 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 
 	// 5. Deep merge DNS section:
 	// Preserves existing nameserver-policy, default-nameserver, fallback, fallback-filter, etc.,
-	// while adopting template baseline and unioning fake-ip-filter with Keenetic exclusions.
+	// while adopting template baseline and unioning fake-ip-filter with router exclusions.
 	tmplDNS, hasTmplDNS := tmpl["dns"].(map[string]interface{})
 	existingDNS, hasExistingDNS := result["dns"].(map[string]interface{})
 
@@ -264,7 +272,7 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 		// when the effective enhanced-mode is fake-ip.
 		effectiveMode, _ := mergedDNS["enhanced-mode"].(string)
 		if effectiveMode == "fake-ip" {
-			// Combine fake-ip-filter without duplicates across existing, template, and Keenetic exclusions
+			// Combine fake-ip-filter without duplicates across existing, template, and router exclusions
 			filterSet := make(map[string]bool)
 			var combinedFilter []interface{}
 
@@ -291,7 +299,7 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 					}
 				}
 			}
-			for _, exc := range KeeneticFakeIPExclusions {
+			for _, exc := range RouterFakeIPExclusions {
 				addFilter(exc)
 			}
 			mergedDNS["fake-ip-filter"] = combinedFilter
@@ -302,7 +310,7 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 	// 6. Build Rules: [Safety Bypasses] -> [User Rules] -> [Template Rules]
 	var finalRules []interface{}
 
-	// A) Mandatory Keenetic DNS-over-VLESS Resolver Protection & Safety direct ports
+	// A) Mandatory router DNS-over-VLESS Resolver Protection & Safety direct ports
 	finalRules = append(finalRules, "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve")
 	for _, port := range SafetyDirectPorts {
 		finalRules = append(finalRules, fmt.Sprintf("DST-PORT,%s,DIRECT", port))
@@ -402,7 +410,7 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 
 // SmartMergeXray merges an Xray routing template into an existing Xray configuration.
 // It auto-detects modular routing vs monolithic files, auto-replaces "PROXY_TAG" with active outbound tag,
-// and injects Keenetic DNS-over-VLESS protection (127.0.0.53 DIRECT) and user rules.
+// and injects router DNS-over-VLESS protection (127.0.0.53 DIRECT) and user rules.
 func SmartMergeXray(existingContent string, templateContent string, targetFilename string, activeOutboundTag string, userRules []UserRule) (string, MergeStats, error) {
 	var stats MergeStats
 	if activeOutboundTag == "" {
@@ -496,7 +504,7 @@ func SmartMergeXray(existingContent string, templateContent string, targetFilena
 		})
 	}
 
-	// 1. Mandatory Keenetic DNS-over-VLESS Resolver Protection (127.0.0.53 DIRECT)
+	// 1. Mandatory router DNS-over-VLESS Resolver Protection (127.0.0.53 DIRECT)
 	finalRules = append(finalRules, map[string]interface{}{
 		"type":        "field",
 		"outboundTag": "direct",

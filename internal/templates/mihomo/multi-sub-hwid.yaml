@@ -29,6 +29,12 @@ dns:
     - "*.keenetic.link"
     - "*.keenetic.name"
     - "*.my.keenetic.net"
+    - "*.netcraze.pro"
+    - "*.netcraze.link"
+    - "*.netcraze.club"
+    - "*.netcraze.io"
+    - "*.crazedns.ru"
+    - "my.netcraze.net"
   default-nameserver:
     - 77.88.8.8
     - 1.1.1.1
@@ -58,11 +64,11 @@ proxy-providers:
       User-Agent:
         - "Mihomo"
       x-hwid:
-        - "keenetic-router-hwid"
+        - "router-hwid"
       x-device-os:
         - "xKeen"
       x-device-model:
-        - "Keenetic"
+        - "Router"
     health-check:
       enable: true
       url: http://www.gstatic.com/generate_204
@@ -83,11 +89,11 @@ proxy-providers:
       User-Agent:
         - "Mihomo"
       x-hwid:
-        - "keenetic-router-hwid"
+        - "router-hwid"
       x-device-os:
         - "xKeen"
       x-device-model:
-        - "Keenetic"
+        - "Router"
     health-check:
       enable: true
       url: http://www.gstatic.com/generate_204

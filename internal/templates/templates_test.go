@@ -679,7 +679,7 @@ func TestReferenceTemplatesTMPL05(t *testing.T) {
 				}
 			}
 
-			// Наличие правила защиты системного резолвера Keenetic (DNS-over-VLESS)
+			// Наличие правила защиты системного резолвера роутера (DNS-over-VLESS)
 			foundDNSProtect := false
 			for _, r := range rulesList {
 				if rStr, ok := r.(string); ok && (strings.TrimSpace(rStr) == "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve" || strings.TrimSpace(rStr) == "IP-CIDR,127.0.0.53/32,DIRECT,no-resolve") {
