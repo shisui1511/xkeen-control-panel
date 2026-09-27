@@ -32,6 +32,12 @@ dns:
     - "*.keenetic.link"
     - "*.keenetic.name"
     - "*.my.keenetic.net"
+    - "*.netcraze.pro"
+    - "*.netcraze.link"
+    - "*.netcraze.club"
+    - "*.netcraze.io"
+    - "*.crazedns.ru"
+    - "my.netcraze.net"
     - "router.local"
     - "time.*.com"
     - "ntp.*"
@@ -81,7 +87,7 @@ proxy-providers:
       User-Agent:
         - "Mihomo"
       x-hwid:
-        - "keenetic-router-hwid"
+        - "router-hwid"
       x-device-os:
         - "xKeen"
     health-check:

@@ -14,7 +14,7 @@
 
   // An exit IP that differs from the router's WAN only means "our proxy" when
   // a core is installed; otherwise the device or the router itself tunnels it
-  // (a VPN app, Keenetic's own WireGuard policy).
+  // (a VPN app, the router firmware's own WireGuard policy).
   const noCore = $derived(
     $capabilities !== null &&
       !$capabilities.kernels?.mihomo?.installed &&

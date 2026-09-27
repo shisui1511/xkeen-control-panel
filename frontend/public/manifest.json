@@ -1,7 +1,7 @@
 {
   "name": "XKeen Control Panel",
   "short_name": "XKeen",
-  "description": "Панель управления XKeen для роутеров Keenetic",
+  "description": "Панель управления XKeen для роутеров Keenetic/Netcraze",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0c2237",

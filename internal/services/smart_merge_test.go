@@ -90,9 +90,11 @@ dns:
 		t.Errorf("expected user custom direct rule, got:\n%s", merged)
 	}
 
-	// 4. Verify Keenetic fake-ip-filter exclusions
-	if !strings.Contains(merged, "+.keenetic.pro") {
-		t.Errorf("expected Keenetic fake-ip-filter exclusion, got:\n%s", merged)
+	// 4. Verify router fake-ip-filter exclusions (Keenetic and Netcraze)
+	for _, exc := range []string{"+.keenetic.pro", "+.netcraze.pro", "+.netcraze.net", "+.crazedns.ru"} {
+		if !strings.Contains(merged, exc) {
+			t.Errorf("expected router fake-ip-filter exclusion %q, got:\n%s", exc, merged)
+		}
 	}
 }
 
@@ -135,7 +137,7 @@ func TestSmartMergeXray(t *testing.T) {
 		t.Errorf("expected vless-reality-node in merged Xray JSON, got:\n%s", merged)
 	}
 
-	// 2. Verify Keenetic 127.0.0.53 DNS protection
+	// 2. Verify router 127.0.0.53 DNS protection
 	if !strings.Contains(merged, "127.0.0.53") {
 		t.Errorf("expected 127.0.0.53 DNS protection rule, got:\n%s", merged)
 	}
@@ -601,7 +603,7 @@ rules:
 }
 
 func TestSmartMergeMihomo_FakeIPFilterOnlyInFakeIPMode(t *testing.T) {
-	// enhanced-mode: redir-host -> no fake-ip-filter / Keenetic exclusions injected
+	// enhanced-mode: redir-host -> no fake-ip-filter / router exclusions injected
 	existingRedirHost := `
 dns:
   enable: true
@@ -621,7 +623,7 @@ rules:
 		t.Errorf("expected no fake-ip-filter under redir-host mode, got:\n%s", merged)
 	}
 	if strings.Contains(merged, "+.keenetic.pro") {
-		t.Errorf("expected no Keenetic fake-ip exclusions under redir-host mode, got:\n%s", merged)
+		t.Errorf("expected no router fake-ip exclusions under redir-host mode, got:\n%s", merged)
 	}
 
 	// enhanced-mode: fake-ip -> exclusions injected
@@ -635,7 +637,7 @@ dns:
 		t.Fatalf("SmartMergeMihomo failed: %v", err)
 	}
 	if !strings.Contains(mergedFakeIP, "+.keenetic.pro") {
-		t.Errorf("expected Keenetic fake-ip exclusions under fake-ip mode, got:\n%s", mergedFakeIP)
+		t.Errorf("expected router fake-ip exclusions under fake-ip mode, got:\n%s", mergedFakeIP)
 	}
 }
 
@@ -929,7 +931,7 @@ dns:
 		t.Errorf("expected fallback nameservers to be preserved, got:\n%s", merged)
 	}
 
-	// 6. Verify combined fake-ip-filter contains custom, template, and Keenetic exclusions
+	// 6. Verify combined fake-ip-filter contains custom, template, and router exclusions
 	if !strings.Contains(merged, "*.custom.dev") {
 		t.Errorf("expected existing fake-ip-filter to be preserved, got:\n%s", merged)
 	}
@@ -937,7 +939,7 @@ dns:
 		t.Errorf("expected template fake-ip-filter to be included, got:\n%s", merged)
 	}
 	if !strings.Contains(merged, "+.keenetic.pro") {
-		t.Errorf("expected Keenetic fake-ip exclusion, got:\n%s", merged)
+		t.Errorf("expected router fake-ip exclusion, got:\n%s", merged)
 	}
 }
 

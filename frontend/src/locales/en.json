@@ -1323,7 +1323,7 @@
   "xray.generate_key": "Generate Key",
   "xray.key_generated": "Key generated",
   "xray.sockopt_title": "Socket Options (sockopt)",
-  "xray.sockopt_hint": "fwmark for Keenetic ip rule / routing tables integration",
+  "xray.sockopt_hint": "fwmark for Keenetic/Netcraze ip rule / routing tables integration",
   "xray.mark": "SO_MARK (fwmark)",
   "xray.tcp_fast_open": "TCP Fast Open (TFO)",
   "xray.tcp_mptcp": "Multipath TCP (MPTCP)",

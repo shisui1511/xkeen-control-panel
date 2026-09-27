@@ -2,7 +2,7 @@
 # full-tunnel.yaml — Полный туннель
 # Сценарий: Весь интернет-трафик через прокси, локальная сеть и управление напрямую.
 # В отличие от global-proxy.yaml (mode: global), использует mode: rule с явными
-# исключениями приватных сетей, системного резолвера и портов управления Keenetic.
+# исключениями приватных сетей, системного резолвера и портов управления роутера Keenetic/Netcraze.
 # Пользователь добавляет proxy-providers через страницу Subscriptions.
 # Требует Mihomo Meta >= 1.15 (поддержка include-all: true).
 # ==============================================================================
@@ -31,6 +31,12 @@ dns:
     - "*.keenetic.link"
     - "*.keenetic.name"
     - "*.my.keenetic.net"
+    - "*.netcraze.pro"
+    - "*.netcraze.link"
+    - "*.netcraze.club"
+    - "*.netcraze.io"
+    - "*.crazedns.ru"
+    - "my.netcraze.net"
     - "router.local"
     - "127.0.0.53"
   default-nameserver:
@@ -62,7 +68,7 @@ proxy-providers:
       User-Agent:
         - "Mihomo"
       x-hwid:
-        - "keenetic-router-hwid"
+        - "router-hwid"
     health-check:
       enable: true
       url: http://www.gstatic.com/generate_204
@@ -89,7 +95,7 @@ rules:
   - DST-PORT,1194,DIRECT
   - DST-PORT,51820,DIRECT
 
-  # Приватные адреса и локальные сервисы Keenetic — строго DIRECT
+  # Приватные адреса и локальные сервисы роутера Keenetic/Netcraze — строго DIRECT
   - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
   - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
   - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve

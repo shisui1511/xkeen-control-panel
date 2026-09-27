@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// DeviceInfo определяет модель роутера и версию ОС через ndmc (Keenetic OS),
-// с ленивой инициализацией и кэшированием результата (ndmc выполняется не
+// DeviceInfo определяет модель роутера и версию ОС через ndmc (прошивка
+// Keenetic/Netcraze), с ленивой инициализацией и кэшированием результата (ndmc выполняется не
 // более одного раза за время жизни процесса).
 type DeviceInfo struct {
 	mu          sync.Mutex
@@ -32,6 +32,7 @@ func NewDeviceInfo() *DeviceInfo {
 var (
 	ndmcModelRe        = regexp.MustCompile(`(?mi)^\s*model:\s*(.+)$`)
 	ndmcTitleRe        = regexp.MustCompile(`(?mi)^\s*title:\s*(\S+)`)
+	ndmcVendorRe       = regexp.MustCompile(`(?mi)^\s*vendor:\s*(\S+)`)
 	modelUnsafeCharsRe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 )
 
@@ -66,7 +67,7 @@ func (d *DeviceInfo) Get() (model, osName, osVersion string) {
 }
 
 func (d *DeviceInfo) detect() {
-	// Fallbacks — на случай, если ndmc недоступен (dev-машина, не-Keenetic окружение).
+	// Fallbacks — на случай, если ndmc недоступен (dev-машина, окружение без прошивки NDM).
 	d.model = "XKeen-Control-Panel"
 	d.osName = "Linux"
 	d.osVersion = kernelReleaseFallback()
@@ -78,9 +79,20 @@ func (d *DeviceInfo) detect() {
 	if err != nil || len(bytes.TrimSpace(out)) == 0 {
 		return
 	}
-	text := string(out)
+	d.applyNdmcVersion(string(out))
+}
 
+// applyNdmcVersion разбирает вывод `ndmc -c "show version"`. Название ОС
+// строится из поля vendor ("Keenetic" → "Keenetic OS", "Netcraze" →
+// "Netcraze OS"); без vendor остаётся "Keenetic OS" — ndmc есть только
+// в прошивке NDM.
+func (d *DeviceInfo) applyNdmcVersion(text string) {
 	d.osName = "Keenetic OS"
+	if m := ndmcVendorRe.FindStringSubmatch(text); len(m) == 2 {
+		if vendor := modelUnsafeCharsRe.ReplaceAllString(m[1], ""); vendor != "" {
+			d.osName = vendor + " OS"
+		}
+	}
 
 	if m := ndmcModelRe.FindStringSubmatch(text); len(m) == 2 {
 		if sanitized := sanitizeModelForHeader(m[1]); sanitized != "" {
