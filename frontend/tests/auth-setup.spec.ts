@@ -1,7 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
 
 // Экран первичной настройки пароля: общий с формой входа каркас,
-// отправка по Enter и разбор JSON-ошибок бэкенда.
+// код настройки, отправка по Enter и разбор JSON-ошибок бэкенда.
+
+test.use({ locale: 'ru-RU' });
 
 async function mockSetupApi(page: Page, setupResponse: { status: number; body: unknown }) {
   const setupBodies: string[] = [];
@@ -53,7 +55,7 @@ test('экран настройки использует каркас формы
 
   await expect(page.locator('.login-card .login-brand')).toBeVisible();
   await expect(page.locator('.login-footer')).toContainText('v9.9.9');
-  await expect(page.locator('#password')).toBeFocused();
+  await expect(page.locator('#setup-code')).toBeFocused();
 
   const bgImage = await page
     .locator('.login-screen')
@@ -61,19 +63,61 @@ test('экран настройки использует каркас формы
   expect(bgImage).toBe('none');
 });
 
-test('Enter в поле подтверждения отправляет форму', async ({ page }) => {
+test('экран настройки подсказывает команды роутера для кода и сброса пароля', async ({ page }) => {
+  await mockSetupApi(page, { status: 200, body: { success: true } });
+  await page.goto('/');
+
+  await expect(page.locator('code', { hasText: 'xcp --setup-code' })).toBeVisible();
+  await expect(page.locator('code', { hasText: 'xcp --reset-password' })).toBeVisible();
+});
+
+test('Enter в поле подтверждения отправляет форму с кодом настройки', async ({ page }) => {
   const setupBodies = await mockSetupApi(page, {
     status: 400,
     body: { error: 'Password must be at least 8 characters' }
   });
   await page.goto('/');
 
+  await page.locator('#setup-code').fill('A1B2C3D4');
   await page.locator('#password').fill('test-pass-123');
   await page.locator('#confirm').fill('test-pass-123');
   await page.locator('#confirm').press('Enter');
 
   await expect.poll(() => setupBodies.length).toBe(1);
-  expect(JSON.parse(setupBodies[0])).toEqual({ password: 'test-pass-123' });
+  expect(JSON.parse(setupBodies[0])).toEqual({
+    password: 'test-pass-123',
+    setup_code: 'A1B2C3D4'
+  });
+});
+
+test('неверный код настройки — ошибка текстом, без сырого JSON', async ({ page }) => {
+  const setupBodies = await mockSetupApi(page, {
+    status: 400,
+    body: { success: false, error: 'invalid setup code', code: 'setup_code_invalid' }
+  });
+  await page.goto('/');
+
+  await page.locator('#setup-code').fill('WRONGCOD');
+  await page.locator('#password').fill('test-pass-123');
+  await page.locator('#confirm').fill('test-pass-123');
+  await page.locator('button[type="submit"]').click();
+
+  await expect.poll(() => setupBodies.length).toBe(1);
+  const alert = page.locator('.alert-error');
+  await expect(alert).toHaveText('Неверный код настройки');
+  await expect(alert).not.toContainText('{');
+});
+
+test('пустой код настройки — «Заполните все поля», запрос не уходит', async ({ page }) => {
+  const setupBodies = await mockSetupApi(page, { status: 200, body: { success: true } });
+  await page.goto('/');
+
+  await page.locator('#password').fill('test-pass-123');
+  await page.locator('#confirm').fill('test-pass-123');
+  await page.locator('button[type="submit"]').click();
+
+  await expect(page.locator('.alert-error')).toHaveText('Заполните все поля');
+  expect(setupBodies).toHaveLength(0);
 });
 
 test('ошибка бэкенда показывается текстом, а не сырым JSON', async ({ page }) => {
@@ -83,6 +127,7 @@ test('ошибка бэкенда показывается текстом, а н
   });
   await page.goto('/');
 
+  await page.locator('#setup-code').fill('A1B2C3D4');
   await page.locator('#password').fill('test-pass-123');
   await page.locator('#confirm').fill('test-pass-123');
   await page.locator('button[type="submit"]').click();
@@ -96,6 +141,7 @@ test('несовпадающие пароли не отправляются на
   const setupBodies = await mockSetupApi(page, { status: 200, body: { success: true } });
   await page.goto('/');
 
+  await page.locator('#setup-code').fill('A1B2C3D4');
   await page.locator('#password').fill('test-pass-123');
   await page.locator('#confirm').fill('test-pass-456');
   await page.locator('button[type="submit"]').click();
