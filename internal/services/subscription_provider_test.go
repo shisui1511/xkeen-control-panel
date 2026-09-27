@@ -1,7 +1,10 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -388,5 +391,200 @@ func TestLastErrorClearedOnSuccess(t *testing.T) {
 	}
 	if liveAfter.LastCount != 1 {
 		t.Errorf("expected LastCount 1, got %d", liveAfter.LastCount)
+	}
+}
+
+const (
+	testStubLink = "vless://00000000-0000-0000-0000-000000000000@0.0.0.0:1?security=none#stub"
+	testOKLink   = "vless://11111111-2222-3333-4444-555555555555@1.2.3.4:443?security=none#ok"
+)
+
+func TestFilterStubsFromProviderPayload_Formats(t *testing.T) {
+	xrayJSON := []byte(`[
+		{"remarks": "stub", "outbounds": [{"tag": "proxy", "protocol": "vless",
+			"settings": {"vnext": [{"address": "0.0.0.0", "port": 1, "users": [{"id": "00000000-0000-0000-0000-000000000000", "encryption": "none"}]}]}}]},
+		{"remarks": "ok", "outbounds": [{"tag": "proxy", "protocol": "vless",
+			"settings": {"vnext": [{"address": "1.2.3.4", "port": 443, "users": [{"id": "11111111-2222-3333-4444-555555555555", "encryption": "none"}]}]}}]}
+	]`)
+	yamlFull := []byte("proxies:\n" +
+		"  - name: stub\n    type: vless\n    server: 0.0.0.0\n    port: 1\n    uuid: 11111111-2222-3333-4444-555555555555\n" +
+		"  - name: ok\n    type: vless\n    server: 1.2.3.4\n    port: 443\n    uuid: 11111111-2222-3333-4444-555555555555\n" +
+		"rules:\n  - MATCH,DIRECT\n")
+	yamlProxies := []byte("proxies:\n" +
+		"  - name: stub\n    type: trojan\n    server: 5.6.7.8\n    port: 443\n    password: 00000000-0000-0000-0000-000000000000\n" +
+		"  - name: ok\n    type: trojan\n    server: 1.2.3.4\n    port: 443\n    password: secret\n")
+	rawLinks := []byte(testStubLink + "\n" + testOKLink + "\n")
+	base64Links := []byte(base64.StdEncoding.EncodeToString([]byte(testStubLink + "\n" + testOKLink)))
+
+	tests := []struct {
+		name      string
+		body      []byte
+		wantOK    string
+		wantNoStr string
+	}{
+		{"xray-json", xrayJSON, "1.2.3.4", "0.0.0.0"},
+		{"yaml-full", yamlFull, "1.2.3.4", "0.0.0.0"},
+		{"yaml-proxies trojan zero password", yamlProxies, "1.2.3.4", "5.6.7.8"},
+		{"raw links", rawLinks, "1.2.3.4", "0.0.0.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, format := providerPayload(tt.body)
+			filtered, kept, stubs := filterStubsFromProviderPayload(payload, format)
+			if stubs != 1 || kept != 1 {
+				t.Fatalf("format=%s: want kept=1 stubs=1, got kept=%d stubs=%d\n%s", format, kept, stubs, filtered)
+			}
+			out := string(filtered)
+			if !strings.Contains(out, tt.wantOK) {
+				t.Errorf("working node lost: %s", out)
+			}
+			if strings.Contains(out, tt.wantNoStr) {
+				t.Errorf("stub node left in payload: %s", out)
+			}
+		})
+	}
+
+	t.Run("base64 links", func(t *testing.T) {
+		payload, format := providerPayload(base64Links)
+		filtered, kept, stubs := filterStubsFromProviderPayload(payload, format)
+		if stubs != 1 || kept != 1 {
+			t.Fatalf("want kept=1 stubs=1, got kept=%d stubs=%d", kept, stubs)
+		}
+		decoded := tryDecodeBase64Text(string(filtered))
+		if !strings.Contains(decoded, "1.2.3.4") || strings.Contains(decoded, "0.0.0.0") {
+			t.Errorf("decoded payload wrong: %q", decoded)
+		}
+		if n := len(providerURISchemeRe.FindAllString(decoded, -1)); n != 1 {
+			t.Errorf("expected exactly one link after decode, got %d", n)
+		}
+	})
+
+	t.Run("flow style block without server is kept", func(t *testing.T) {
+		body := []byte("proxies:\n  - {name: flow, type: vless, uuid: 11111111-2222-3333-4444-555555555555}\n" +
+			"  - name: stub\n    type: vless\n    server: 0.0.0.0\n    port: 1\n")
+		payload, format := providerPayload(body)
+		filtered, kept, stubs := filterStubsFromProviderPayload(payload, format)
+		if stubs != 1 || kept != 1 {
+			t.Fatalf("want kept=1 stubs=1, got kept=%d stubs=%d\n%s", kept, stubs, filtered)
+		}
+		if !strings.Contains(string(filtered), "flow") {
+			t.Errorf("unparsed block must be kept: %s", filtered)
+		}
+	})
+}
+
+func TestProviderFetch_CleanPayloadUnchanged(t *testing.T) {
+	bodies := map[string][]byte{
+		"yaml-proxies": []byte("proxies:\n  - name: a\n    type: ss\n    server: 1.2.3.4\n    port: 8388\n    cipher: aes-256-gcm\n    password: p\n"),
+		"raw":          []byte(testOKLink + "\n"),
+		"base64":       []byte(base64.StdEncoding.EncodeToString([]byte(testOKLink))),
+	}
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			payload, format := providerPayload(body)
+			filtered, kept, stubs := filterStubsFromProviderPayload(payload, format)
+			if stubs != 0 || kept != 1 {
+				t.Fatalf("want kept=1 stubs=0, got kept=%d stubs=%d", kept, stubs)
+			}
+			if !bytes.Equal(filtered, payload) {
+				t.Errorf("clean payload must stay byte-identical:\nwant %q\ngot  %q", payload, filtered)
+			}
+		})
+	}
+}
+
+// newProviderStubFixture поднимает upstream с переключаемым телом и подписку Mihomo.
+func newProviderStubFixture(t *testing.T) (*SubscriptionService, *Subscription, *atomic.Value) {
+	t.Helper()
+	var body atomic.Value
+	body.Store(testOKLink + "\n")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body.Load().(string)))
+	}))
+	t.Cleanup(ts.Close)
+
+	svc := NewSubscriptionService(t.TempDir(), t.TempDir(), t.TempDir())
+	svc.SetHTTPClient(http.DefaultClient)
+	sub := &Subscription{Name: "Stub Provider", URL: ts.URL, Enabled: true, EnableMihomo: true}
+	if err := svc.Add(sub); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	return svc, sub, &body
+}
+
+func TestProviderFetch_AllStubsServesCache(t *testing.T) {
+	svc, sub, body := newProviderStubFixture(t)
+
+	first, err := svc.ProviderFetchWithFallback(context.Background(), sub.URL, sub)
+	if err != nil {
+		t.Fatalf("first fetch: %v", err)
+	}
+	if !strings.Contains(string(first), "1.2.3.4") {
+		t.Fatalf("first payload must hold working node: %s", first)
+	}
+
+	body.Store(testStubLink + "\n")
+	second, err := svc.ProviderFetchWithFallback(context.Background(), sub.URL, sub)
+	if err != nil {
+		t.Fatalf("second fetch must fall back to cache, got error: %v", err)
+	}
+	if !bytes.Equal(second, first) {
+		t.Errorf("stub-only response must serve cached payload:\nwant %q\ngot  %q", first, second)
+	}
+	cached, err := os.ReadFile(svc.providerCachePath(sub))
+	if err != nil || !bytes.Equal(cached, first) {
+		t.Errorf("cache must keep working nodes, got %q err=%v", cached, err)
+	}
+
+	live := svc.Get(sub.ID)
+	if live == nil || !live.DeviceRejected {
+		t.Fatalf("live subscription must be device_rejected, got %+v", live)
+	}
+	if live.LastError != "" {
+		t.Errorf("last_error must stay empty on provider rejection, got %q", live.LastError)
+	}
+	if _, failed := svc.retries.Load(sub.ID); failed {
+		t.Errorf("provider rejection is not a fetch failure, retry backoff must stay untouched")
+	}
+
+	// Возврат рабочих узлов снимает отказ.
+	body.Store(testOKLink + "\n")
+	if _, err := svc.ProviderFetchWithFallback(context.Background(), sub.URL, sub); err != nil {
+		t.Fatalf("third fetch: %v", err)
+	}
+	if svc.Get(sub.ID).DeviceRejected {
+		t.Errorf("device_rejected must clear after working nodes return")
+	}
+}
+
+func TestProviderFetch_AllStubsNoCache(t *testing.T) {
+	svc, sub, body := newProviderStubFixture(t)
+	body.Store(testStubLink + "\n")
+
+	payload, err := svc.ProviderFetchWithFallback(context.Background(), sub.URL, sub)
+	if err == nil {
+		t.Fatalf("expected error without cache, got payload %q", payload)
+	}
+	if !errors.Is(err, ErrProviderRejectedDevice) {
+		t.Errorf("error must wrap ErrProviderRejectedDevice, got %v", err)
+	}
+	if live := svc.Get(sub.ID); live == nil || !live.DeviceRejected {
+		t.Errorf("live subscription must be device_rejected without cache")
+	}
+}
+
+func TestProviderFetch_MihomoOnlyCountsSkippedStubs(t *testing.T) {
+	svc, sub, body := newProviderStubFixture(t)
+	body.Store(testStubLink + "\n" + testOKLink + "\n")
+
+	payload, err := svc.ProviderFetchWithFallback(context.Background(), sub.URL, sub)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if strings.Contains(string(payload), "0.0.0.0") {
+		t.Errorf("stub in payload: %s", payload)
+	}
+	if live := svc.Get(sub.ID); live == nil || live.LastSkipped != 1 {
+		t.Errorf("last_skipped must count dropped stubs, got %+v", live)
 	}
 }

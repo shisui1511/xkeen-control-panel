@@ -79,6 +79,11 @@ type SubscriptionNode struct {
 
 	// DialerProxy holds the tag of the outbound node to chain/cascade through (D-11).
 	DialerProxy string `json:"dialer_proxy,omitempty"`
+
+	// Stub — узел-заглушка провайдера (адрес 0.0.0.0/127.0.0.1, порт 0–1 или нулевой UUID).
+	// Такие узлы не пишутся в конфиги ядра и не выбираются в UI.
+	Stub       bool   `json:"stub,omitempty"`
+	StubReason string `json:"stub_reason,omitempty"` // address | port | uuid
 }
 
 // AWGOptions содержит параметры обфускации протокола AmneziaWG (Classic, 2.0, 3.1).
@@ -334,12 +339,50 @@ type Subscription struct {
 	HwidToken string `json:"hwid_token,omitempty"`
 	// HwidLocked — провайдер вернул X-Hwid-Not-Supported: true при последнем refresh.
 	HwidLocked bool `json:"hwid_locked,omitempty"`
+	// DeviceRejected — провайдер вернул только узлы-заглушки (например, превышен
+	// лимит устройств). Выставляется при refresh, снимается первым рабочим ответом.
+	DeviceRejected bool `json:"device_rejected,omitempty"`
+	// LastWarning — код предупреждения последнего refresh, которое пользователь
+	// должен увидеть (сейчас только selected_node_lost: выбранный узел пропал из
+	// подписки и заменён первым рабочим). Сбрасывается refresh без потерь.
+	LastWarning string `json:"last_warning,omitempty"`
+
+	// SelectedTag — тег узла, выбранного пользователем в ручном режиме Xray
+	// (тег во фрагменте подписки). SelectedServer — его адрес хост:порт для
+	// поиска узла после refresh, когда теги пересчитались.
+	SelectedTag    string `json:"selected_tag,omitempty"`
+	SelectedServer string `json:"selected_server,omitempty"`
+	// IsDefault — выбранный узел этой подписки сейчас дефолтный outbound Xray
+	// (первый в итоговом мердже). Дефолт глобально один на все подписки.
+	IsDefault bool `json:"is_default,omitempty"`
+	// StableTag — стабильный тег xcp-<id>, под которым выбранный узел доступен
+	// в конфиге Xray (правила роутинга ссылаются на него). Вычисляемое поле:
+	// заполняется в List()/Get() только при непустом SelectedTag, из
+	// клиентского JSON не принимается (Add() обнуляет).
+	StableTag string `json:"stable_tag,omitempty"`
+	// ProxyTagTaken — тег proxy уже объявлен в файлах XKeen или пользователя,
+	// поэтому панель его не публикует и узел доступен только по стабильному
+	// тегу. Вычисляемое поле: List()/Get() выставляют его подпискам с выбором,
+	// из клиентского JSON не принимается (Add() обнуляет).
+	ProxyTagTaken bool `json:"proxy_tag_taken,omitempty"`
 
 	// MihomoIntegrated — интегрирована ли подписка в config.yaml Mihomo
 	MihomoIntegrated bool `json:"mihomo_integrated"`
 
 	// ProviderName — зафиксированное имя провайдера в Mihomo
 	ProviderName string `json:"provider_name,omitempty"`
+
+	// NextUpdate — вычисляемое время следующего обновления Xray-подписки
+	// (D-12), считается той же формулой, что isRefreshDue. nil для
+	// Mihomo-only/выключенных подписок (D-13). Заполняется в
+	// populateSchedule для List()/Get() — не персистится из клиентского
+	// JSON: Add() обнуляет поле перед сохранением (T-133-01).
+	NextUpdate *time.Time `json:"next_update,omitempty"`
+	// RefreshIntervalHours — интервал обновления в часах, который панель
+	// фактически использует для соответствующего ядра:
+	// effectiveRefreshIntervalHours для Xray, mihomoProviderIntervalHours
+	// для Mihomo-only (D-13). Вычисляемое поле, см. NextUpdate.
+	RefreshIntervalHours int `json:"refresh_interval_hours,omitempty"`
 }
 
 // GetProviderName возвращает стабильное имя провайдера для Mihomo.
@@ -397,6 +440,20 @@ type ParseReport struct {
 	SkippedCount int          `json:"skipped_count"`
 	Skipped      []SkipReason `json:"skipped"`
 	Timestamp    time.Time    `json:"timestamp"`
+}
+
+// mihomoProviderIntervalHours возвращает интервал обновления в часах,
+// с которым Mihomo реально опрашивает proxy-provider этой подписки: интервал
+// подписки, либо 24 часа по умолчанию, если он не задан/некорректен. Общая
+// точка расчёта для generateMihomoProxyProviderBlockLocked (генерация блока
+// config.yaml) и populateSchedule (подпись «Обновляет Mihomo · каждые N ч»
+// в UI Mihomo-only подписок, D-13) — чтобы отображаемый интервал никогда не
+// разошёлся с интервалом, который панель реально пишет в config.yaml.
+func mihomoProviderIntervalHours(sub *Subscription) int {
+	if sub.Interval > 0 {
+		return sub.Interval
+	}
+	return 24
 }
 
 // backoff constants for failed auto-refreshes
@@ -527,10 +584,7 @@ func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscr
 	escapedURL := url.QueryEscape(sub.URL)
 	loopbackURL := fmt.Sprintf("%s://127.0.0.1:%d/api/provider.yaml?url=%s", scheme, usePort, escapedURL)
 
-	intervalSec := sub.Interval * 3600
-	if intervalSec <= 0 {
-		intervalSec = 24 * 3600 // дефолт 24 часа
-	}
+	intervalSec := mihomoProviderIntervalHours(sub) * 3600
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("  %s:\n", providerName))

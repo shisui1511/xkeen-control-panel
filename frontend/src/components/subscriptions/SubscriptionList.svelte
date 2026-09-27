@@ -1,6 +1,8 @@
 <script lang="ts">
   import { t, currentLang } from '../../i18n';
   import { pluralize } from '../../i18n';
+  import { formatTimeUntil, subscriptionDisplayName } from '../proxies/providersState.svelte';
+  import { capabilities } from '../../stores';
   import NodeList from './NodeList.svelte';
 
   interface Subscription {
@@ -15,6 +17,13 @@
     enable_mihomo: boolean;
     mihomo_integrated: boolean;
     hwid_locked: boolean;
+    device_rejected?: boolean;
+    is_default?: boolean;
+    stable_tag?: string;
+    proxy_tag_taken?: boolean;
+    last_warning?: string;
+    hwid_token?: string;
+    profile_web_page_url?: string;
     last_update: string;
     last_error?: string;
     proxy_count?: number;
@@ -24,6 +33,9 @@
     expire?: number;
     support_url?: string;
     announcement?: string;
+    next_update?: string;
+    refresh_interval_hours?: number;
+    profile_update_hours?: number;
     mihomo_provider?: {
       name: string;
       vehicle_type: string;
@@ -90,6 +102,7 @@
     onDeleteSub,
     onOpenDiagnostic,
     onSetActiveNode,
+    onClearActiveNode,
     onCheckNodeHealth,
     onToggleDropdown,
     onRetryNodes,
@@ -114,12 +127,24 @@
     onDeleteSub: (subId: string) => void;
     onOpenDiagnostic: (sub: Subscription) => void;
     onSetActiveNode: (subId: string, tag: string) => void;
+    onClearActiveNode?: (subId: string) => void;
     onCheckNodeHealth: (subId: string, tag: string) => void;
     onToggleDropdown: (subId: string) => void;
     onRetryNodes: (subId: string) => Promise<void>;
     dialerProxyTargets?: Record<string, any[]>;
     onSetDialerProxy?: (subId: string, nodeTag: string, targetTag: string) => void;
   } = $props();
+
+  // Ссылка на кабинет провайдера приходит из заголовка ответа: пропускаем только http/https.
+  function safeCabinetUrl(raw?: string): string {
+    if (!raw) return '';
+    try {
+      const u = new URL(raw.trim());
+      return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : '';
+    } catch {
+      return '';
+    }
+  }
 
   function isFormatError(err?: string): boolean {
     if (!err) return false;
@@ -198,6 +223,17 @@
     } catch {
       return dateStr;
     }
+  }
+
+  // Тултип чипа срока обновления (D-12): интервал провайдера, если подписка
+  // использует use_provider_interval с положительным profile_update_hours,
+  // иначе — интервал, заданный пользователем в форме.
+  function subRefreshTooltip(sub: Subscription): string {
+    const key =
+      sub.use_provider_interval && (sub.profile_update_hours ?? 0) > 0
+        ? 'subscr.refresh_every_provider'
+        : 'subscr.refresh_every';
+    return $t(key, { hours: String(sub.refresh_interval_hours ?? sub.interval) });
   }
 
   function parseAnnouncementLines(text: string): AnnouncementLine[] {
@@ -292,7 +328,7 @@
     {$t('subscr.nodes_total_label')}
   </span>
   {#if stats.next !== '—'}
-    <span class="chip chip-default chip--icon">
+    <span class="chip chip-default chip--icon" data-testid="subs-next-update">
       <svg
         width="12"
         height="12"
@@ -351,8 +387,17 @@
           ></div>
 
           <h2 class="sub-name">
-            {sub.profile_title || sub.name}
+            {subscriptionDisplayName(sub)}
           </h2>
+          {#if sub.name?.trim() && sub.profile_title?.trim() && sub.profile_title.trim() !== sub.name.trim()}
+            <span
+              class="sub-profile-title"
+              data-testid="sub-profile-title"
+              title={$t('subscr.profile_title_hint')}
+            >
+              {sub.profile_title}
+            </span>
+          {/if}
           {#if sub.last_error && (sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0) > 0}
             <span
               class="badge badge-warning"
@@ -468,6 +513,44 @@
         </div>
       </div>
 
+      {#if sub.device_rejected}
+        {@const cabinetUrl = safeCabinetUrl(sub.profile_web_page_url)}
+        <div class="sub-device-rejected" role="alert" data-testid="device-rejected-banner">
+          <div class="sub-device-rejected-title">{$t('subscr.device_rejected.title')}</div>
+          <div class="sub-device-rejected-text">
+            {$t('subscr.device_rejected.text', {
+              hwid: sub.hwid_token || $capabilities?.global_hwid || '—'
+            })}
+          </div>
+          {#if (sub.proxy_count ?? 0) > 0}
+            <div class="sub-device-rejected-text">{$t('subscr.device_rejected.kept_previous')}</div>
+          {/if}
+          {#if cabinetUrl}
+            <a
+              class="sub-device-rejected-link"
+              data-testid="device-rejected-cabinet-link"
+              href={cabinetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {$t('subscr.device_rejected.cabinet_link')}
+            </a>
+          {/if}
+        </div>
+      {/if}
+
+      {#if sub.last_warning === 'selected_node_lost'}
+        <div class="sub-warning-details" role="status" data-testid="sub-last-warning">
+          {$t('subscr.warning.selected_node_lost')}
+        </div>
+      {/if}
+
+      {#if sub.proxy_tag_taken && sub.is_default && sub.stable_tag}
+        <div class="sub-warning-details" role="status" data-testid="sub-proxy-tag-taken">
+          {$t('subscr.warning.proxy_tag_taken', { tag: sub.stable_tag })}
+        </div>
+      {/if}
+
       {#if sub.last_error}
         {@const nodeCount = sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0}
         {@const errorColor = nodeCount > 0 ? 'var(--warning, #f0b450)' : 'var(--danger)'}
@@ -527,6 +610,25 @@
           {#if sub.hwid_locked}
             <span class="meta-divider">|</span>
             <span class="hwid-locked-badge">⚠ HWID Locked</span>
+          {/if}
+
+          {#if sub.enabled && sub.enable_xray && sub.next_update}
+            <span class="meta-divider">|</span>
+            <span
+              class="chip chip-default chip--icon"
+              data-testid="sub-next-update-chip"
+              title={subRefreshTooltip(sub)}
+            >
+              {$t('subscr.next_update_in')}
+              {formatTimeUntil(Date.parse(sub.next_update) - Date.now(), (key) => $t(key))}
+            </span>
+          {:else if sub.enabled && !sub.enable_xray && sub.enable_mihomo}
+            <span class="meta-divider">|</span>
+            <span class="chip chip-default chip--icon" data-testid="sub-mihomo-refresh-chip">
+              {$t('subscr.updated_by_mihomo', {
+                hours: String(sub.refresh_interval_hours ?? sub.interval)
+              })}
+            </span>
           {/if}
         </div>
 
@@ -682,7 +784,10 @@
                 health={subHealth[sub.id] || {}}
                 checkingNodes={checkingNodes[sub.id] || {}}
                 dialerProxyTargets={dialerProxyTargets[sub.id] || []}
+                isDefault={!!sub.is_default}
+                stableTag={sub.stable_tag || ''}
                 {onSetActiveNode}
+                {onClearActiveNode}
                 {onCheckNodeHealth}
                 {onSetDialerProxy}
               />
@@ -797,6 +902,55 @@
   }
   .sub-name:hover {
     color: var(--accent);
+  }
+
+  /* D-10: подпись бренда провайдера — вторичный текст, имя из формы важнее */
+  .sub-profile-title {
+    font-size: var(--font-size-xs, 12px);
+    color: var(--fg-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
+  }
+
+  /* D-16: провайдер отклонил устройство, все узлы — заглушки */
+  .sub-device-rejected {
+    margin: 0 0 8px 34px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+    border-radius: var(--radius-md, 6px);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: var(--font-size-sm, 13px);
+    line-height: 1.4;
+    word-break: break-word;
+  }
+
+  .sub-warning-details {
+    margin: -4px 0 8px 34px;
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--warning);
+    font-family: var(--font-family-sans);
+    word-break: break-word;
+  }
+
+  .sub-device-rejected-title {
+    color: var(--danger);
+    font-weight: 600;
+  }
+
+  .sub-device-rejected-text {
+    color: var(--fg-secondary);
+  }
+
+  .sub-device-rejected-link {
+    align-self: flex-start;
+    color: var(--accent);
+    font-weight: 600;
   }
 
   .sub-header-right {

@@ -202,6 +202,8 @@ func (s *SubscriptionService) load() {
 		}
 	}
 
+	s.migrateLegacyFragmentsLocked()
+
 	// Миграция кэш-файлов со старой схемы "sub_<id>_*" на схему по имени провайдера.
 	for i := range s.subscriptions {
 		safeID := invalidIDCharsRe.ReplaceAllString(strings.ToLower(filepath.Base(s.subscriptions[i].ID)), "_")
@@ -220,6 +222,43 @@ func (s *SubscriptionService) load() {
 			}
 		}
 	}
+}
+
+// migrateLegacyFragmentsLocked переименовывает фрагменты подписок со старого
+// имени 04_outbounds.<id>.json в 04_outbounds.<id>.tail.json, чтобы они больше
+// не перехватывали дефолтный outbound. Если существуют оба файла, лишний
+// legacy-файл удаляется, а новый не трогается. Трогает только собственные
+// файлы панели и ядро не перезапускает: новое имя вступит в силу при
+// следующем старте ядра. mu должен быть захвачен вызывающим.
+func (s *SubscriptionService) migrateLegacyFragmentsLocked() bool {
+	if s.configDir == "" {
+		return false
+	}
+	changed := false
+	for i := range s.subscriptions {
+		sub := &s.subscriptions[i]
+		legacy := s.legacyFragmentPath(sub)
+		if legacy == "" {
+			continue
+		}
+		if _, err := os.Stat(legacy); err != nil {
+			continue
+		}
+		current := s.getFragmentPath(sub)
+		if _, err := os.Stat(current); err == nil {
+			if err := os.Remove(legacy); err == nil {
+				changed = true
+			}
+			continue
+		}
+		if err := os.Rename(legacy, current); err != nil {
+			log.Printf("[Subscriptions] Failed to rename fragment %s: %v", filepath.Base(legacy), err)
+			continue
+		}
+		changed = true
+		log.Printf("[Subscriptions] Fragment renamed for tail merge: %s", filepath.Base(current))
+	}
+	return changed
 }
 
 func (s *SubscriptionService) save() error {
@@ -267,12 +306,51 @@ func (s *SubscriptionService) populateMihomoIntegrated(subs []Subscription) {
 	}
 }
 
+// populateSchedule заполняет вычисляемые поля расписания следующего
+// обновления на клоне подписки (D-12/D-13): next_update — тем же расчётом,
+// что isRefreshDue (computeNextUpdate), refresh_interval_hours — интервал,
+// который панель реально использует для соответствующего ядра. Вызывается
+// на клоне из List()/Get() тем же приёмом, что уже применяется для
+// ProxyCount — единый now на весь вызов гарантирует идемпотентность двух
+// последовательных List() без изменения состояния подписок.
+func (s *SubscriptionService) populateSchedule(sub *Subscription, now time.Time) {
+	sub.NextUpdate = s.computeNextUpdate(sub, now)
+	sub.StableTag = ""
+	if sub.SelectedTag != "" {
+		sub.StableTag = stableSubscriptionTag(sub)
+	}
+	switch {
+	case sub.EnableXray:
+		sub.RefreshIntervalHours = effectiveRefreshIntervalHours(sub)
+	case sub.EnableMihomo:
+		sub.RefreshIntervalHours = mihomoProviderIntervalHours(sub)
+	default:
+		sub.RefreshIntervalHours = 0
+	}
+}
+
+// proxyTagTakenLocked — тег proxy занят чужим outbound. Скан файлов делается
+// только если у какой-либо подписки есть выбор (иначе флаг не нужен). mu
+// должен быть захвачен вызывающим.
+func (s *SubscriptionService) proxyTagTakenLocked() bool {
+	for i := range s.subscriptions {
+		if s.subscriptions[i].SelectedTag != "" {
+			return s.foreignProxyOutboundFileLocked() != ""
+		}
+	}
+	return false
+}
+
 func (s *SubscriptionService) List() []Subscription {
 	s.mu.RLock()
+	now := time.Now()
+	taken := s.proxyTagTakenLocked()
 	res := make([]Subscription, len(s.subscriptions))
 	for i := range s.subscriptions {
 		res[i] = s.subscriptions[i].Clone()
 		res[i].ProxyCount = s.getProxyCount(&res[i])
+		s.populateSchedule(&res[i], now)
+		res[i].ProxyTagTaken = taken && res[i].SelectedTag != ""
 	}
 	s.mu.RUnlock()
 	s.populateMihomoIntegrated(res)
@@ -282,10 +360,13 @@ func (s *SubscriptionService) List() []Subscription {
 func (s *SubscriptionService) Get(id string) *Subscription {
 	var cloned *Subscription
 	s.mu.RLock()
+	now := time.Now()
 	for i := range s.subscriptions {
 		if s.subscriptions[i].ID == id {
 			c := s.subscriptions[i].Clone()
 			c.ProxyCount = s.getProxyCount(&c)
+			s.populateSchedule(&c, now)
+			c.ProxyTagTaken = c.SelectedTag != "" && s.foreignProxyOutboundFileLocked() != ""
 			cloned = &c
 			break
 		}
@@ -369,6 +450,14 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 		}
 		s.mihomoMu.Unlock()
 	}
+
+	// NextUpdate/RefreshIntervalHours — вычисляемые поля (T-133-01): клиент
+	// теоретически может прислать их в JSON, но панель обязана считать их
+	// заново в populateSchedule, а не доверять значению из тела запроса.
+	sub.NextUpdate = nil
+	sub.RefreshIntervalHours = 0
+	sub.StableTag = ""
+	sub.ProxyTagTaken = false
 
 	s.subscriptions = append(s.subscriptions, *sub)
 	return s.save()
@@ -458,6 +547,9 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			// Clean up Xray if it was enabled and is now disabled
 			if existing.EnableXray && !sub.EnableXray {
 				os.Remove(s.getFragmentPath(existing))
+				if legacy := s.legacyFragmentPath(existing); legacy != "" {
+					os.Remove(legacy)
+				}
 				os.Remove(s.getRoutingFragmentPath(existing))
 				existing.LastHash = ""
 				needRestart = true
@@ -526,6 +618,25 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				existing.MihomoGroups = sub.MihomoGroups
 			}
 
+			// Подписка перестала подходить для выбора узла (Xray или подписка
+			// выключены, режим auto): выбор снимается, файл дефолта
+			// перестраивается, дефолтом снова становится первый outbound XKeen.
+			if existing.SelectedTag != "" && !selectionEligible(existing) {
+				existing.SelectedTag = ""
+				existing.SelectedServer = ""
+				existing.IsDefault = false
+				for n := range existing.Nodes {
+					existing.Nodes[n].Active = false
+				}
+				changed, err := s.writeSelectionFilesLocked()
+				if err != nil {
+					log.Printf("[Subscriptions] failed to rebuild default node file after update of %s: %v", existing.ID, err)
+				}
+				if changed {
+					needRestart = true
+				}
+			}
+
 			// Если интеграция Mihomo включена (или была только что включена), обновляем/добавляем провайдер и привязываем его к группам
 			if existing.EnableMihomo {
 				s.mihomoMu.Lock()
@@ -583,6 +694,7 @@ func (s *SubscriptionService) Delete(id string) error {
 
 	enableXray := sub.EnableXray
 	enableMihomo := sub.EnableMihomo
+	hadSelection := sub.SelectedTag != ""
 
 	// Remove from list
 	newList := make([]Subscription, 0, len(s.subscriptions)-1)
@@ -596,7 +708,15 @@ func (s *SubscriptionService) Delete(id string) error {
 	// Delete managed fragment files.
 	if enableXray {
 		os.Remove(s.getFragmentPath(sub))
+		if legacy := s.legacyFragmentPath(sub); legacy != "" {
+			os.Remove(legacy)
+		}
 		os.Remove(s.getRoutingFragmentPath(sub)) // noop если файла нет
+	}
+	if hadSelection {
+		if _, err := s.writeSelectionFilesLocked(); err != nil {
+			log.Printf("[Subscriptions] failed to rebuild default node file after delete of %s: %v", safeID, err)
+		}
 	}
 	if enableMihomo {
 		configDir := s.mihomoConfigDir
@@ -1325,7 +1445,7 @@ func (s *SubscriptionService) DialerProxyTargets(subID, nodeTag string) ([]Diale
 			if node.Tag == nodeTag {
 				continue
 			}
-			if node.DialerProxy != "" {
+			if node.DialerProxy != "" || node.Stub {
 				continue
 			}
 			targets = append(targets, DialerProxyTarget{
@@ -1465,6 +1585,13 @@ func (s *SubscriptionService) refreshXrayFragmentLocked(sub *Subscription) error
 			_ = utils.AtomicWriteFile(fragmentPath, data, 0600)
 			return fmt.Errorf("Xray fragment validation failed, rolled back: %s", out)
 		}
+	}
+
+	// Копия выбранного узла под стабильным тегом строится из фрагмента и должна
+	// следовать за его правками (sockopt, dialerProxy). Вызывающие Update и
+	// SetNodeDialerProxy сами перезапускают ядро.
+	if _, err := s.writeSelectionFilesLocked(); err != nil {
+		log.Printf("[Subscriptions] failed to rebuild selection files after fragment update of %s: %v", sub.ID, err)
 	}
 
 	return nil

@@ -532,7 +532,7 @@ func TestWriteFragmentWireguard(t *testing.T) {
 		},
 	}
 
-	fragPath := filepath.Join(configDir, "04_outbounds.sub_wg.json")
+	fragPath := filepath.Join(configDir, "04_outbounds.sub_wg.tail.json")
 	nodes, err := svc.writeFragment(fragPath, outbounds, sub)
 	if err != nil {
 		t.Fatalf("writeFragment failed: %v", err)

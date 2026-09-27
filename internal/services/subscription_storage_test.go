@@ -42,6 +42,82 @@ func TestSubscriptionService_Add(t *testing.T) {
 	}
 }
 
+// TestSubscriptionService_NamePreservedAcrossRefreshMetadata — воспроизведение
+// аудита D-11: имя, введённое в форме при создании подписки, не должно
+// теряться после того, как провайдер прислал свой profile-title при
+// метаданных-обновлении (PersistHeaderMetadata, путь, идущий через
+// maybeRenameProviderLocked). Get().Name должен остаться "Провайдер".
+func TestSubscriptionService_NamePreservedAcrossRefreshMetadata(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+
+	sub := Subscription{
+		Name:       "Провайдер",
+		URL:        "https://example.com/named-sub",
+		Enabled:    true,
+		EnableXray: true,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	id := svc.List()[0].ID
+
+	subCopy := &Subscription{ProfileTitle: "Brand", ProfileUpdateHours: 24}
+	if err := svc.PersistHeaderMetadata(id, subCopy); err != nil {
+		t.Fatalf("PersistHeaderMetadata failed: %v", err)
+	}
+
+	got := svc.Get(id)
+	if got == nil {
+		t.Fatal("subscription not found after PersistHeaderMetadata")
+	}
+	if got.Name != "Провайдер" {
+		t.Errorf("expected name to survive provider profile-title refresh, got %q", got.Name)
+	}
+}
+
+// TestSubscriptionService_NamePreservedConcurrentUpdate — edge concurrency из
+// must_haves.truths: refresh-метаданные (PersistHeaderMetadata) и Update формы
+// с тем же именем, идущие параллельно, не должны стереть друг друга —
+// итоговый Name должен остаться введённым пользователем.
+func TestSubscriptionService_NamePreservedConcurrentUpdate(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+
+	sub := Subscription{
+		Name:       "Провайдер",
+		URL:        "https://example.com/concurrent-named-sub",
+		Enabled:    true,
+		EnableXray: true,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	id := svc.List()[0].ID
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_ = svc.PersistHeaderMetadata(id, &Subscription{ProfileTitle: "Brand", ProfileUpdateHours: 24})
+		}()
+		go func() {
+			defer wg.Done()
+			_ = svc.Update(id, &Subscription{Name: "Провайдер", URL: sub.URL, Enabled: true, EnableXray: true})
+		}()
+	}
+	wg.Wait()
+
+	got := svc.Get(id)
+	if got == nil {
+		t.Fatal("subscription not found after concurrent updates")
+	}
+	if got.Name != "Провайдер" {
+		t.Errorf("expected name to survive concurrent refresh+update, got %q", got.Name)
+	}
+}
+
 func TestSubscriptionService_Delete(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")

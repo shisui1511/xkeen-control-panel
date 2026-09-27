@@ -26,6 +26,14 @@ export interface Subscription {
   enable_mihomo: boolean;
   mihomo_integrated: boolean;
   hwid_locked: boolean;
+  device_rejected?: boolean;
+  selected_tag?: string;
+  is_default?: boolean;
+  stable_tag?: string;
+  proxy_tag_taken?: boolean;
+  last_warning?: string;
+  hwid_token?: string;
+  profile_web_page_url?: string;
   last_update: string;
   last_error?: string;
   proxy_count?: number;
@@ -36,6 +44,8 @@ export interface Subscription {
   support_url?: string;
   announcement?: string;
   profile_update_hours?: number;
+  next_update?: string;
+  refresh_interval_hours?: number;
   tag_prefix?: string;
   filter_name?: string;
   filter_type?: string;
@@ -71,6 +81,53 @@ export interface NodeHealth {
   delay?: number;
   http_code?: number;
   tested?: boolean;
+}
+
+// formatTimeUntil форматирует разницу во времени (мс) до следующего события
+// в переведённую строку "N мин" / "N ч M мин" / "N д M ч" (D-12). Единицы
+// переводятся через переданную tr()-функцию (subscr.stats.soon/mins/hours/days) —
+// чистая функция, не зависящая от store, чтобы её можно было переиспользовать
+// и на карточке подписки (Task 2), и в шапке (stats ниже).
+export function formatTimeUntil(diffMs: number, tr: (key: string) => string): string {
+  if (diffMs <= 0) {
+    return tr('subscr.stats.soon');
+  }
+  const totalMins = Math.floor(diffMs / (60 * 1000));
+  if (totalMins < 60) {
+    return `${totalMins} ${tr('subscr.stats.mins')}`;
+  }
+  const totalHours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (totalHours < 24) {
+    return `${totalHours} ${tr('subscr.stats.hours')} ${mins} ${tr('subscr.stats.mins')}`;
+  }
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return `${days} ${tr('subscr.stats.days')} ${hours} ${tr('subscr.stats.hours')}`;
+}
+
+// subscriptionDisplayName возвращает главное отображаемое имя подписки
+// (D-10): имя из формы важнее бренда провайдера — раньше `profile_title ||
+// name` безусловно показывал бренд, даже когда пользователь явно назвал
+// подписку сам. Пустое имя → profile_title → хост из URL (в try/catch —
+// битый URL не должен ронять рендер), пустой URL → сам url (или "").
+export function subscriptionDisplayName(sub: {
+  name?: string;
+  profile_title?: string;
+  url?: string;
+}): string {
+  const name = sub.name?.trim();
+  if (name) return name;
+  const profileTitle = sub.profile_title?.trim();
+  if (profileTitle) return profileTitle;
+  if (sub.url) {
+    try {
+      return new URL(sub.url).hostname;
+    } catch {
+      return sub.url;
+    }
+  }
+  return '';
 }
 
 export class ProvidersState {
@@ -111,38 +168,27 @@ export class ProvidersState {
 
   stats = $derived.by(() => {
     let totalNodes = 0;
-    let nextUpdate: Date | null = null;
+    // Ближайший next_update среди подписок enabled && enable_xray — тот же
+    // расчёт, что бэкенд использует в isRefreshDue (D-12, B13). Mihomo-only
+    // подписки в общий срок шапки не входят (D-13) — у них нет next_update.
+    let nextUpdateMs: number | null = null;
 
     for (const sub of this.subscriptions) {
       if (!sub.enabled) continue;
       totalNodes += sub.proxy_count || 0;
 
-      if (sub.last_update && sub.interval > 0) {
-        const last = new Date(sub.last_update);
-        if (!isNaN(last.getTime())) {
-          const next = new Date(last.getTime() + sub.interval * 3600 * 1000);
-          if (!nextUpdate || next < nextUpdate) {
-            nextUpdate = next;
-          }
+      if (sub.enable_xray && sub.next_update) {
+        const next = Date.parse(sub.next_update);
+        if (!isNaN(next) && (nextUpdateMs === null || next < nextUpdateMs)) {
+          nextUpdateMs = next;
         }
       }
     }
 
     let nextStr = '—';
-    if (nextUpdate) {
-      const now = new Date();
-      const diffMs = (nextUpdate as Date).getTime() - now.getTime();
-      if (diffMs <= 0) {
-        nextStr = get(t)('subscr.stats.soon');
-      } else {
-        const hours = Math.floor(diffMs / (3600 * 1000));
-        const mins = Math.floor((diffMs % (3600 * 1000)) / (60 * 1000));
-        if (hours > 0) {
-          nextStr = `${hours} ${get(t)('subscr.stats.hours')} ${mins} ${get(t)('subscr.stats.mins')}`;
-        } else {
-          nextStr = `${mins} ${get(t)('subscr.stats.mins')}`;
-        }
-      }
+    if (nextUpdateMs !== null) {
+      const diffMs = nextUpdateMs - Date.now();
+      nextStr = formatTimeUntil(diffMs, (key) => get(t)(key));
     }
     return {
       total: this.subscriptions.length,
@@ -238,13 +284,16 @@ export class ProvidersState {
 
       const results = await Promise.allSettled(tasks);
 
+      // Успех показываем только после перезагрузки списка: провайдер мог
+      // отклонить устройство, тогда узлы не обновлены и успех был бы ложью.
+      const successMessages: string[] = [];
       for (const res of results) {
         if (res.status === 'fulfilled') {
           const val = res.value;
           if (val.kernel === 'xray') {
-            showToast('success', get(t)('subscr.refresh.xray_started'));
+            successMessages.push(get(t)('subscr.refresh.xray_started'));
           } else {
-            showToast('success', get(t)('subscr.refresh.mihomo_started'));
+            successMessages.push(get(t)('subscr.refresh.mihomo_started'));
           }
         } else {
           const err = res.reason;
@@ -265,6 +314,19 @@ export class ProvidersState {
       }
 
       await this.loadSubscriptions();
+      const refreshed = this.subscriptions.find((s) => s.id === id);
+      if (refreshed?.device_rejected) {
+        showToast('warning', get(t)('subscr.refresh.device_rejected'));
+      } else {
+        for (const message of successMessages) {
+          showToast('success', message);
+        }
+        // Выбранный узел пропал из подписки и заменён первым рабочим: замена
+        // не должна проходить незамеченной.
+        if (refreshed?.last_warning === 'selected_node_lost') {
+          showToast('warning', get(t)('subscr.warning.selected_node_lost'));
+        }
+      }
       if (this.expandedSubs[id]) {
         await this.loadNodesBySource(id);
       }
@@ -362,7 +424,7 @@ export class ProvidersState {
   async deleteSubscription(id: string) {
     const sub = this.subscriptions.find((s) => s.id === id);
     if (!sub) return;
-    const subName = sub.profile_title || sub.name || id;
+    const subName = subscriptionDisplayName(sub) || id;
 
     if (
       !(await showConfirm({
@@ -782,15 +844,44 @@ export class ProvidersState {
 
   async setActiveNode(subId: string, nodeTag: string) {
     try {
-      const res = await apiFetch(
-        `/api/subscriptions/active?id=${subId}&tag=${encodeURIComponent(nodeTag)}`,
-        {
-          method: 'POST'
+      const res = await apiFetch(`/api/subscriptions/active?id=${encodeURIComponent(subId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ node_tag: nodeTag })
+      });
+      if (res.status === 401) return;
+      if (res.ok) {
+        const body = await res.json().catch(() => null);
+        const data = body?.data;
+        if (data && data.proxy_published === false) {
+          const tag = data.stable_tag || '';
+          showToast('warning', get(t)('subscr.warning.proxy_tag_taken', { tag }));
+        } else {
+          showToast('success', get(t)('app.success'));
         }
+        // is_default меняется и у других подписок: дефолтом становится последний выбранный.
+        await this.loadSubscriptions();
+        await this.loadNodesBySource(subId);
+      } else {
+        const text = await res.text().catch(() => '');
+        showToast('error', text || get(t)('app.error'));
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', get(t)('app.error'));
+    }
+  }
+
+  async clearActiveNode(subId: string) {
+    try {
+      const res = await apiFetch(
+        `/api/subscriptions/active/clear?id=${encodeURIComponent(subId)}`,
+        { method: 'POST' }
       );
       if (res.status === 401) return;
       if (res.ok) {
-        showToast('success', get(t)('app.success'));
+        showToast('success', get(t)('subscr.node.selection_cleared'));
+        await this.loadSubscriptions();
         await this.loadNodesBySource(subId);
       } else {
         const text = await res.text().catch(() => '');

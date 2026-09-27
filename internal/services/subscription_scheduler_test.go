@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -48,7 +50,7 @@ func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 
 	id := svc.List()[0].ID
 
-	fragmentPath := filepath.Join(xrayDir, fmt.Sprintf("04_outbounds.%s.json", id))
+	fragmentPath := filepath.Join(xrayDir, fmt.Sprintf("04_outbounds.%s.tail.json", id))
 	_ = os.WriteFile(fragmentPath, []byte(`[]`), 0600)
 
 	updatedSub := sub
@@ -261,6 +263,255 @@ func TestExponentialBackoff(t *testing.T) {
 	if _, ok := svc.retries.Load(id); ok {
 		t.Error("expected retry state to be cleared after success")
 	}
+}
+
+// TestComputeNextUpdate_ProviderInterval покрывает кейс B13 из аудита:
+// use_provider_interval=true, profile_update_hours=1, interval=24. До фикса
+// D-12 UI считал срок от interval (24ч) и показывал «23 ч 59 мин» вместо
+// «~1 ч» — расчёт должен использовать интервал провайдера.
+func TestComputeNextUpdate_ProviderInterval(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+
+	now := time.Now()
+	sub := &Subscription{
+		ID:                  "sub_b13",
+		Enabled:             true,
+		EnableXray:          true,
+		Interval:            24,
+		UseProviderInterval: true,
+		ProfileUpdateHours:  1,
+		LastUpdate:          now.Add(-1 * time.Minute),
+	}
+
+	next := svc.computeNextUpdate(sub, now)
+	if next == nil {
+		t.Fatal("expected non-nil next_update")
+	}
+	diff := next.Sub(now)
+	if diff < 58*time.Minute || diff > 60*time.Minute {
+		t.Errorf("expected next_update ~59 min from now (B13 fix), got %v", diff)
+	}
+}
+
+// TestComputeNextUpdate_MihomoOnlyAndDisabledAreNil: Mihomo-only (D-13),
+// выключенные и нулевой-интервал подписки не крутят собственный таймер
+// обновления Xray — next_update должен быть nil.
+func TestComputeNextUpdate_MihomoOnlyAndDisabledAreNil(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	now := time.Now()
+
+	mihomoOnly := &Subscription{ID: "sub_mihomo_only", Enabled: true, EnableXray: false, EnableMihomo: true, Interval: 24}
+	if got := svc.computeNextUpdate(mihomoOnly, now); got != nil {
+		t.Errorf("expected nil next_update for Mihomo-only subscription (D-13), got %v", got)
+	}
+
+	disabled := &Subscription{ID: "sub_disabled", Enabled: false, EnableXray: true, Interval: 24}
+	if got := svc.computeNextUpdate(disabled, now); got != nil {
+		t.Errorf("expected nil next_update for disabled subscription, got %v", got)
+	}
+
+	zeroInterval := &Subscription{ID: "sub_zero_interval", Enabled: true, EnableXray: true, Interval: 0}
+	if got := svc.computeNextUpdate(zeroInterval, now); got != nil {
+		t.Errorf("expected nil next_update for zero interval subscription, got %v", got)
+	}
+}
+
+// TestComputeNextUpdate_BackoffWins: если запланирован retry backoff'ом
+// позже, чем обычный расчёт по интервалу — next_update должен вернуть именно
+// retry-время (иначе UI покажет срок раньше, чем реально произойдёт попытка).
+func TestComputeNextUpdate_BackoffWins(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	now := time.Now()
+
+	sub := &Subscription{
+		ID:         "sub_backoff_next",
+		Enabled:    true,
+		EnableXray: true,
+		Interval:   24,
+		LastUpdate: now.Add(-25 * time.Hour), // уже пора обновиться (интервал истёк час назад)
+	}
+	svc.recordFailure(sub.ID)
+
+	val, ok := svc.retries.Load(sub.ID)
+	if !ok {
+		t.Fatal("expected retry state after recordFailure")
+	}
+	rs := val.(*retryState)
+
+	next := svc.computeNextUpdate(sub, now)
+	if next == nil {
+		t.Fatal("expected non-nil next_update")
+	}
+	if !next.Equal(rs.nextRetry) {
+		t.Errorf("expected next_update to equal backoff nextRetry %v, got %v", rs.nextRetry, *next)
+	}
+}
+
+// TestComputeNextUpdate_ZeroLastUpdateIsNow: подписка, которую ещё ни разу
+// не обновляли (LastUpdate — нулевое время), должна получить next_update не
+// позже now (edge empty из must_haves.truths).
+func TestComputeNextUpdate_ZeroLastUpdateIsNow(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	now := time.Now()
+
+	sub := &Subscription{ID: "sub_zero_last_update", Enabled: true, EnableXray: true, Interval: 24}
+	next := svc.computeNextUpdate(sub, now)
+	if next == nil {
+		t.Fatal("expected non-nil next_update")
+	}
+	if next.After(now) {
+		t.Errorf("expected next_update <= now for never-updated subscription, got %v (now=%v)", *next, now)
+	}
+}
+
+// TestIsRefreshDue_AgreesWithNextUpdate — табличный тест инварианта из
+// computeNextUpdate: isRefreshDue(sub, now) == !computeNextUpdate(sub,
+// now).After(now) на границе интервала (edge adjacency), до и после неё, а
+// также с активным backoff-состоянием.
+func TestIsRefreshDue_AgreesWithNextUpdate(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	now := time.Now()
+
+	cases := []struct {
+		name        string
+		sub         *Subscription
+		withBackoff bool
+	}{
+		{
+			name: "before interval",
+			sub:  &Subscription{ID: "sub_before", Enabled: true, EnableXray: true, Interval: 24, LastUpdate: now.Add(-1 * time.Hour)},
+		},
+		{
+			name: "exactly at boundary (edge adjacency)",
+			sub:  &Subscription{ID: "sub_boundary", Enabled: true, EnableXray: true, Interval: 24, LastUpdate: now.Add(-24 * time.Hour)},
+		},
+		{
+			name: "after interval",
+			sub:  &Subscription{ID: "sub_after", Enabled: true, EnableXray: true, Interval: 24, LastUpdate: now.Add(-25 * time.Hour)},
+		},
+		{
+			name:        "with backoff active",
+			sub:         &Subscription{ID: "sub_backoff_active", Enabled: true, EnableXray: true, Interval: 1, LastUpdate: now.Add(-2 * time.Hour)},
+			withBackoff: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.withBackoff {
+				svc.recordFailure(tc.sub.ID)
+			}
+			due := svc.isRefreshDue(tc.sub, now)
+			next := svc.computeNextUpdate(tc.sub, now)
+			if next == nil {
+				t.Fatal("expected non-nil next_update for enabled Xray subscription with positive interval")
+			}
+			gotDue := !next.After(now)
+			if gotDue != due {
+				t.Errorf("isRefreshDue=%v but computeNextUpdate-derived due=%v (next_update=%v, now=%v)", due, gotDue, *next, now)
+			}
+		})
+	}
+}
+
+// TestList_PopulatesNextUpdate: два последовательных вызова List() без
+// изменения состояния дают одинаковый next_update (edge idempotency);
+// Mihomo-only подписка → next_update=nil, refresh_interval_hours — интервал
+// provider-блока (D-13).
+func TestList_PopulatesNextUpdate(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+
+	xraySub := &Subscription{
+		Name:                "Xray Sub",
+		URL:                 "https://example.com/xray",
+		Enabled:             true,
+		EnableXray:          true,
+		Interval:            24,
+		UseProviderInterval: true,
+		ProfileUpdateHours:  1,
+		LastUpdate:          time.Now().Add(-1 * time.Minute),
+	}
+	if err := svc.Add(xraySub); err != nil {
+		t.Fatalf("Add xraySub: %v", err)
+	}
+
+	mihomoSub := &Subscription{
+		Name:         "Mihomo Only Sub",
+		URL:          "https://example.com/mihomo",
+		Enabled:      true,
+		EnableMihomo: true,
+		Interval:     12,
+	}
+	if err := svc.Add(mihomoSub); err != nil {
+		t.Fatalf("Add mihomoSub: %v", err)
+	}
+
+	list1 := svc.List()
+	list2 := svc.List()
+	if len(list1) != 2 || len(list2) != 2 {
+		t.Fatalf("expected 2 subscriptions in both lists, got %d and %d", len(list1), len(list2))
+	}
+
+	byName := func(list []Subscription, name string) *Subscription {
+		for i := range list {
+			if list[i].Name == name {
+				return &list[i]
+			}
+		}
+		return nil
+	}
+
+	x1 := byName(list1, "Xray Sub")
+	x2 := byName(list2, "Xray Sub")
+	if x1 == nil || x2 == nil || x1.NextUpdate == nil || x2.NextUpdate == nil {
+		t.Fatal("expected non-nil next_update on Xray subscription in both List() calls")
+	}
+	if !x1.NextUpdate.Equal(*x2.NextUpdate) {
+		t.Errorf("expected idempotent next_update across two List() calls, got %v and %v", *x1.NextUpdate, *x2.NextUpdate)
+	}
+	if x1.RefreshIntervalHours != 1 {
+		t.Errorf("expected refresh_interval_hours=1 (provider interval, B13), got %d", x1.RefreshIntervalHours)
+	}
+
+	m1 := byName(list1, "Mihomo Only Sub")
+	if m1 == nil {
+		t.Fatal("mihomo subscription not found")
+	}
+	if m1.NextUpdate != nil {
+		t.Errorf("expected nil next_update for Mihomo-only subscription (D-13), got %v", *m1.NextUpdate)
+	}
+	if m1.RefreshIntervalHours != 12 {
+		t.Errorf("expected refresh_interval_hours=12 (mihomo provider interval), got %d", m1.RefreshIntervalHours)
+	}
+}
+
+// TestComputeNextUpdate_ConcurrentWithRecordFailure — computeNextUpdate
+// читает s.retries параллельно с recordFailure без гонок (edge concurrency,
+// проверяется прогоном под -race).
+func TestComputeNextUpdate_ConcurrentWithRecordFailure(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	sub := &Subscription{ID: "sub_concurrent", Enabled: true, EnableXray: true, Interval: 1, LastUpdate: time.Now().Add(-2 * time.Hour)}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			svc.recordFailure(sub.ID)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = svc.computeNextUpdate(sub, time.Now())
+		}()
+	}
+	wg.Wait()
 }
 
 func TestBackoffCap(t *testing.T) {
@@ -997,7 +1248,7 @@ func TestRefreshXray_StoppedKernelIsNotStarted(t *testing.T) {
 	if calls, _ := os.ReadFile(logFile); strings.Contains(string(calls), "-restart") {
 		t.Fatalf("xkeen -restart must not start a stopped kernel, calls: %q", calls)
 	}
-	if _, err := os.Stat(filepath.Join(xrayDir, "04_outbounds.s.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(xrayDir, "04_outbounds.s.tail.json")); err != nil {
 		t.Errorf("fragment must still be written: %v", err)
 	}
 
@@ -1006,5 +1257,257 @@ func TestRefreshXray_StoppedKernelIsNotStarted(t *testing.T) {
 	svc.restartXkeenIfRunning("s", "test")
 	if calls, _ := os.ReadFile(logFile); !strings.Contains(string(calls), "-restart") {
 		t.Error("running kernel must be restarted")
+	}
+}
+
+// stubProviderBody собирает тело подписки из vless-ссылок: «host:port|uuid|имя».
+func stubProviderBody(lines ...string) string {
+	var uris []string
+	for _, l := range lines {
+		parts := strings.SplitN(l, "|", 3)
+		uris = append(uris, fmt.Sprintf("vless://%s@%s?encryption=none&type=tcp&security=none#%s", parts[1], parts[0], parts[2]))
+	}
+	return base64.StdEncoding.EncodeToString([]byte(strings.Join(uris, "\n")))
+}
+
+type stubProviderEnv struct {
+	svc     *SubscriptionService
+	xrayDir string
+	logFile string
+	body    *atomic.Value
+}
+
+func (e *stubProviderEnv) restartCalls(t *testing.T) int {
+	t.Helper()
+	data, _ := os.ReadFile(e.logFile)
+	return strings.Count(string(data), "-restart")
+}
+
+func (e *stubProviderEnv) fragment(t *testing.T, id string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(e.xrayDir, "04_outbounds."+id+".tail.json"))
+	if err != nil {
+		t.Fatalf("read fragment: %v", err)
+	}
+	return data
+}
+
+// newStubProviderEnv поднимает httptest-провайдер, тело которого можно менять,
+// и сервис с работающим ядром и mock-xkeen, ведущим лог вызовов.
+func newStubProviderEnv(t *testing.T, sub Subscription) *stubProviderEnv {
+	t.Helper()
+	tmp := t.TempDir()
+	body := &atomic.Value{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(body.Load().(string)))
+	}))
+	t.Cleanup(srv.Close)
+
+	logFile := filepath.Join(tmp, "xkeen_calls.log")
+	mockXkeenPath := filepath.Join(tmp, "mock-xkeen")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$1\" >> %q\n", logFile)
+	if err := os.WriteFile(mockXkeenPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	xrayDir := filepath.Join(tmp, "xray")
+	if err := os.MkdirAll(xrayDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewSubscriptionService(tmp, xrayDir, tmp)
+	svc.httpClient = srv.Client()
+	svc.SetConsoleService(NewConsoleService(mockXkeenPath))
+	svc.SetKernelService(&statusKernelService{status: map[string]string{"xray": "running", "mihomo": "not_installed"}})
+
+	sub.URL = srv.URL
+	sub.EnableXray = true
+	sub.Enabled = true
+	if sub.Interval == 0 {
+		sub.Interval = 1
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatal(err)
+	}
+	return &stubProviderEnv{svc: svc, xrayDir: xrayDir, logFile: logFile, body: body}
+}
+
+const stubWorkingUUID = "11111111-2222-3333-4444-555555555555"
+
+func TestRefreshXray_AllStubsKeepsPreviousFragment(t *testing.T) {
+	env := newStubProviderEnv(t, Subscription{ID: "s", Name: "S"})
+
+	env.body.Store(stubProviderBody("1.2.3.4:443|" + stubWorkingUUID + "|work"))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("first Refresh: %v", err)
+	}
+	before := env.fragment(t, "s")
+	restartsBefore := env.restartCalls(t)
+	prev := env.svc.Get("s")
+	if prev == nil || len(prev.Nodes) != 1 || prev.Nodes[0].Stub {
+		t.Fatalf("first refresh must give 1 working node, got %+v", prev)
+	}
+	if prev.DeviceRejected {
+		t.Fatal("device_rejected must be false after a working refresh")
+	}
+
+	env.body.Store(stubProviderBody(
+		"0.0.0.0:1|"+zeroUUID+"|Превышен лимит устройств",
+		"0.0.0.0:1|"+zeroUUID+"|Превышен лимит устройств",
+	))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("second Refresh: %v", err)
+	}
+
+	if after := env.fragment(t, "s"); string(after) != string(before) {
+		t.Errorf("fragment must be untouched when the provider returns only stubs:\nbefore=%s\nafter=%s", before, after)
+	}
+	if got := env.restartCalls(t); got != restartsBefore {
+		t.Errorf("kernel must not be restarted on device rejection: restarts %d -> %d", restartsBefore, got)
+	}
+	live := env.svc.Get("s")
+	if !live.DeviceRejected {
+		t.Error("DeviceRejected must be true")
+	}
+	if live.LastError != "" {
+		t.Errorf("LastError = %q, want empty", live.LastError)
+	}
+	if len(live.Nodes) != 1 || live.Nodes[0].Tag != prev.Nodes[0].Tag || live.Nodes[0].Stub {
+		t.Errorf("previous working nodes must be kept, got %+v", live.Nodes)
+	}
+	if live.LastSkipped < 2 {
+		t.Errorf("LastSkipped = %d, want >= 2 (stubs are counted)", live.LastSkipped)
+	}
+	if live.LastCount != prev.LastCount {
+		t.Errorf("LastCount = %d, want previous %d", live.LastCount, prev.LastCount)
+	}
+
+	// Провайдер снова отдаёт рабочий узел — отказ снимается.
+	env.body.Store(stubProviderBody("5.6.7.8:443|" + stubWorkingUUID + "|work2"))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("third Refresh: %v", err)
+	}
+	if env.svc.Get("s").DeviceRejected {
+		t.Error("DeviceRejected must be cleared after a working refresh")
+	}
+}
+
+func TestRefreshXray_AllStubsFirstFetch(t *testing.T) {
+	env := newStubProviderEnv(t, Subscription{ID: "s", Name: "S"})
+
+	env.body.Store(stubProviderBody(
+		"0.0.0.0:1|"+zeroUUID+"|Превышен лимит устройств",
+		"0.0.0.0:1|"+zeroUUID+"|Превышен лимит устройств",
+	))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	var wrapper struct {
+		Outbounds []Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(env.fragment(t, "s"), &wrapper); err != nil {
+		t.Fatal(err)
+	}
+	if len(wrapper.Outbounds) != 0 {
+		t.Errorf("fragment must have no outbounds, got %d", len(wrapper.Outbounds))
+	}
+	live := env.svc.Get("s")
+	if !live.DeviceRejected {
+		t.Error("DeviceRejected must be true on first fetch with only stubs")
+	}
+	if len(live.Nodes) != 2 {
+		t.Fatalf("stub nodes must be visible in the list, got %d", len(live.Nodes))
+	}
+	for _, n := range live.Nodes {
+		if !n.Stub {
+			t.Errorf("node %q must be marked as stub", n.Tag)
+		}
+	}
+}
+
+func TestRefreshXray_StubsCountedAsSkipped(t *testing.T) {
+	env := newStubProviderEnv(t, Subscription{ID: "s", Name: "S"})
+
+	env.body.Store(stubProviderBody(
+		"0.0.0.0:1|"+zeroUUID+"|stub-a",
+		"1.2.3.4:443|"+stubWorkingUUID+"|work",
+		"127.0.0.1:443|"+stubWorkingUUID+"|stub-b",
+	))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	live := env.svc.Get("s")
+	if live.LastSkipped != 2 {
+		t.Errorf("LastSkipped = %d, want 2", live.LastSkipped)
+	}
+	if live.LastCount != 1 {
+		t.Errorf("LastCount = %d, want 1", live.LastCount)
+	}
+	if live.DeviceRejected {
+		t.Error("DeviceRejected must be false when a working node exists")
+	}
+	var wrapper struct {
+		Outbounds []Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(env.fragment(t, "s"), &wrapper); err != nil {
+		t.Fatal(err)
+	}
+	if len(wrapper.Outbounds) != 1 {
+		t.Errorf("fragment outbounds = %d, want 1", len(wrapper.Outbounds))
+	}
+}
+
+func TestRefreshXray_AutoModeSkipsStubTags(t *testing.T) {
+	env := newStubProviderEnv(t, Subscription{ID: "s", Name: "S", RoutingMode: "auto"})
+
+	env.body.Store(stubProviderBody(
+		"0.0.0.0:1|"+zeroUUID+"|stub-first",
+		"1.2.3.4:443|"+stubWorkingUUID+"|work",
+	))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	live := env.svc.Get("s")
+	var workingTag, stubTag string
+	for _, n := range live.Nodes {
+		if n.Stub {
+			stubTag = n.Tag
+		} else {
+			workingTag = n.Tag
+		}
+	}
+	if workingTag == "" || stubTag == "" {
+		t.Fatalf("expected one working and one stub node, got %+v", live.Nodes)
+	}
+
+	routing, err := os.ReadFile(env.svc.getRoutingFragmentPath(live))
+	if err != nil {
+		t.Fatalf("routing fragment must be written: %v", err)
+	}
+	if !strings.Contains(string(routing), workingTag) {
+		t.Errorf("routing fragment must reference working tag %q: %s", workingTag, routing)
+	}
+	if strings.Contains(string(routing), stubTag) {
+		t.Errorf("routing fragment must not reference stub tag %q: %s", stubTag, routing)
+	}
+}
+
+func TestDialerProxyTargets_SkipsStubs(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	svc.subscriptions = []Subscription{{
+		ID: "s", Name: "S", Enabled: true, EnableXray: true,
+		Nodes: []SubscriptionNode{
+			{Tag: "stub-1", Name: "stub", Protocol: "vless", Stub: true, StubReason: stubReasonAddress},
+			{Tag: "ok-1", Name: "ok", Protocol: "vless"},
+		},
+	}}
+	targets, err := svc.DialerProxyTargets("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].Tag != "ok-1" {
+		t.Errorf("targets must contain only the working node, got %+v", targets)
 	}
 }

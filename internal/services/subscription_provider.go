@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -119,6 +120,18 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 		return nil, fmt.Errorf("upstream returned empty/unparseable payload")
 	}
 
+	// Узлы-заглушки (провайдер отклонил устройство) в Mihomo не отдаются.
+	// Ответ из одних заглушек — отказ: кэш рабочих узлов не затираем.
+	filtered, kept, stubs := filterStubsFromProviderPayload(payload, format)
+	if stubs > 0 && kept == 0 {
+		log.Printf("[Subscriptions] Upstream %s returned only stub nodes (%d), provider rejected device", utils.SanitizeLogInput(upstreamURL), stubs)
+		return nil, fmt.Errorf("%w (%d stub nodes)", ErrProviderRejectedDevice, stubs)
+	}
+	if stubs > 0 {
+		log.Printf("[Subscriptions] Provider payload: dropped %d stub nodes (%s)", stubs, utils.SanitizeLogInput(upstreamURL))
+	}
+	payload = filtered
+
 	nodeCount := countProviderNodes(string(payload))
 	if nodeCount == 0 {
 		log.Printf("[Subscriptions] Upstream %s returned payload with 0 valid nodes (%d bytes, format=%s)", utils.SanitizeLogInput(upstreamURL), len(body), format)
@@ -129,6 +142,10 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 	sub.DetectedFormat = format
 	sub.LastCount = nodeCount
 	sub.LastError = ""
+	sub.DeviceRejected = false
+	if !sub.EnableXray {
+		sub.LastSkipped = stubs
+	}
 	sub.LastUpdate = time.Now()
 
 	applySubscriptionHeaders(headers, sub)
@@ -159,21 +176,40 @@ func (s *SubscriptionService) ProviderFetchWithFallback(ctx context.Context, ups
 			live.LastCount = sub.LastCount
 			live.DetectedFormat = sub.DetectedFormat
 			live.LastUpdate = sub.LastUpdate
+			live.DeviceRejected = false
+			if !live.EnableXray {
+				live.LastSkipped = sub.LastSkipped
+			}
 			_ = s.save()
 		}
 		s.mu.Unlock()
 		return payload, nil
 	}
 
-	// Сбой запроса к upstream: фиксируем ошибку в retry и sub.LastError
-	s.recordFailure(sub.ID)
-	s.mu.Lock()
-	if live := s.GetLocked(sub.ID); live != nil {
-		live.LastError = err.Error()
-		_ = s.save()
+	if errors.Is(err, ErrProviderRejectedDevice) {
+		// Скачивание удалось, отказ — ответ провайдера, а не сбой запроса:
+		// backoff не трогаем, сырой текст в last_error не пишем. Ниже отдаётся
+		// кэш рабочих узлов, чтобы Mihomo не заменил их заглушками.
+		s.mu.Lock()
+		if live := s.GetLocked(sub.ID); live != nil {
+			live.DeviceRejected = true
+			live.LastError = ""
+			_ = s.save()
+		}
+		sub.DeviceRejected = true
+		sub.LastError = ""
+		s.mu.Unlock()
+	} else {
+		// Сбой запроса к upstream: фиксируем ошибку в retry и sub.LastError
+		s.recordFailure(sub.ID)
+		s.mu.Lock()
+		if live := s.GetLocked(sub.ID); live != nil {
+			live.LastError = err.Error()
+			_ = s.save()
+		}
+		sub.LastError = err.Error()
+		s.mu.Unlock()
 	}
-	sub.LastError = err.Error()
-	s.mu.Unlock()
 
 	// 1. Попытка прочитать из изолированного кэша панели
 	cached, readErr := os.ReadFile(s.providerCachePath(sub))

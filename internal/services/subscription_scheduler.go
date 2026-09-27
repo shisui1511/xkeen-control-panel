@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -224,6 +223,8 @@ func (s *SubscriptionService) Refresh(id string) error {
 		if xraySuccess {
 			live.LastHash = subCopy.LastHash
 			live.LastSkipped = subCopy.LastSkipped
+			live.DeviceRejected = subCopy.DeviceRejected
+			live.LastWarning = subCopy.LastWarning
 			if !subCopy.EnableMihomo || live.DetectedFormat == "" {
 				live.DetectedFormat = subCopy.DetectedFormat
 			}
@@ -274,23 +275,85 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	// Apply filters
 	outbounds = s.applyFilters(outbounds, live)
 
-	// Generate fragment file
+	// Провайдер, отклонивший устройство, отдаёт только узлы-заглушки. Считаем до
+	// writeFragment: он мутирует теги outbounds.
+	working, stubs := countXrayWorkingAndStubs(outbounds)
+
 	fragmentPath := s.getFragmentPath(live)
+
+	// Все узлы — заглушки, а раньше во фрагменте были рабочие: не затираем их и
+	// не перезапускаем ядро (как при ошибке скачивания), только помечаем отказ.
+	if working == 0 && stubs > 0 && s.fragmentOutboundCount(fragmentPath) > 0 {
+		sub.Nodes = make([]SubscriptionNode, len(live.Nodes))
+		for i := range live.Nodes {
+			sub.Nodes[i] = live.Nodes[i].Clone()
+		}
+		sub.Announcement = parseAnnouncement(body, headers)
+		sub.LastHash = live.LastHash
+		sub.LastChanged = false
+		sub.LastCount = live.LastCount
+		sub.LastSkipped += stubs
+		sub.DeviceRejected = true
+		sub.LastWarning = live.LastWarning
+		sub.LastUpdate = time.Now()
+
+		log.Printf("[Subscriptions] Refresh Xray ID: %s: provider returned only stub nodes (%d), keeping previous outbounds", sub.ID, stubs)
+		report := &ParseReport{
+			ParsedCount:  sub.LastCount,
+			SkippedCount: sub.LastSkipped,
+			Skipped:      skipReasons,
+			Timestamp:    sub.LastUpdate,
+		}
+		s.saveDebugFiles(sub.ID, body, headers, report)
+		s.mu.Unlock()
+		return nil
+	}
+
+	// Generate fragment file
 	nodes, err := s.writeFragment(fragmentPath, outbounds, live)
 	if err != nil {
 		s.mu.Unlock()
 		return err
 	}
 
+	// Выбор пользователя переживает refresh: узел ищется по тегу, затем по
+	// адресу и порту. Пропавший узел заменяется первым рабочим с предупреждением.
+	sub.LastWarning = ""
+	if live.SelectedTag != "" {
+		tag, lost := s.resolveSelectionLocked(live, nodes)
+		live.SelectedTag = tag
+		live.SelectedServer = ""
+		if tag == "" {
+			// Рабочих узлов не осталось: выбирать нечего.
+			live.IsDefault = false
+		}
+		for i := range nodes {
+			nodes[i].Active = tag != "" && nodes[i].Tag == tag
+			if nodes[i].Active {
+				live.SelectedServer = nodes[i].Server
+			}
+		}
+		if lost {
+			sub.LastWarning = warningSelectedNodeLost
+			log.Printf("[Subscriptions] Refresh Xray ID: %s: selected node disappeared, selected %q instead", sub.ID, tag)
+		}
+	}
+
 	sub.Nodes = nodes
 	sub.Announcement = parseAnnouncement(body, headers)
+	sub.DeviceRejected = working == 0 && stubs > 0
+	sub.LastSkipped += stubs
+	sub.LastCount -= stubs
+	if sub.LastCount < 0 {
+		sub.LastCount = 0
+	}
 
 	// В режиме "auto" — создать routing-фрагмент с balancer и правилом для !CN.
 	if live.RoutingMode == "auto" {
-		tags := make([]string, 0, len(outbounds))
-		for _, ob := range outbounds {
-			if allowedXrayProtocols[ob.Protocol] {
-				tags = append(tags, ob.Tag)
+		tags := make([]string, 0, len(nodes))
+		for _, n := range nodes {
+			if allowedXrayProtocols[n.Protocol] && !n.Stub {
+				tags = append(tags, n.Tag)
 			}
 		}
 		routingPath := s.getRoutingFragmentPath(live)
@@ -317,10 +380,19 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	needRestart := false
 	if newHash != oldHash {
 		sub.LastChanged = true
-		needRestart = true
+		// Фрагмент без рабочих узлов (одни заглушки) поведение ядра не меняет.
+		needRestart = !(working == 0 && stubs > 0)
 	} else {
 		sub.LastChanged = false
 	}
+
+	// Копии выбранных узлов под стабильными тегами перестраиваются после каждой
+	// перезаписи фрагмента: иначе они устаревают вместе с адресом узла.
+	selChanged, selErr := s.writeSelectionFilesLocked()
+	if selErr != nil {
+		log.Printf("[Subscriptions] Refresh Xray ID: %s: failed to rebuild selection files: %v", sub.ID, selErr)
+	}
+	needRestart = needRestart || selChanged
 
 	// Логирование UA-ответа
 	log.Printf("[Subscriptions] Refresh Xray ID: %s, Format: %s, Size: %d bytes, Proxies: %d, Skipped: %d",
@@ -344,22 +416,79 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	return nil
 }
 
-func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {
-	safeID := filepath.Base(sub.ID)
-	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
-	if matched, _ := regexp.MatchString(`^[a-z0-9_-]+$`, safeID); !matched {
-		safeID = "safe_id"
+// resolveSelectionLocked находит узел выбора пользователя среди свежих узлов
+// подписки: сначала по тегу, затем по адресу и порту. Учитываются только
+// рабочие узлы (разрешённый протокол, не заглушка). Пустой выбор даёт пустой
+// тег. Узел не найден — возвращается первый рабочий и lost=true; если рабочих
+// нет, тег пуст и lost=true. mu должен быть захвачен вызывающим.
+func (s *SubscriptionService) resolveSelectionLocked(live *Subscription, nodes []SubscriptionNode) (tag string, lost bool) {
+	if live == nil || live.SelectedTag == "" {
+		return "", false
 	}
-	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", safeID))
+	usable := func(n *SubscriptionNode) bool {
+		return allowedXrayProtocols[n.Protocol] && !n.Stub
+	}
+	for i := range nodes {
+		if usable(&nodes[i]) && nodes[i].Tag == live.SelectedTag {
+			return nodes[i].Tag, false
+		}
+	}
+	if live.SelectedServer != "" {
+		for i := range nodes {
+			if usable(&nodes[i]) && nodes[i].Server == live.SelectedServer {
+				return nodes[i].Tag, false
+			}
+		}
+	}
+	for i := range nodes {
+		if usable(&nodes[i]) {
+			return nodes[i].Tag, true
+		}
+	}
+	return "", true
+}
+
+// fragmentOutboundCount возвращает число outbounds во фрагменте подписки
+// или 0, если файла нет или он не разбирается.
+func (s *SubscriptionService) fragmentOutboundCount(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	var wrapper struct {
+		Outbounds []json.RawMessage `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return 0
+	}
+	return len(wrapper.Outbounds)
+}
+
+// getFragmentPath — фрагмент outbounds подписки. Суффикс tail в имени велит Xray
+// дописывать его outbounds в конец итогового списка, чтобы фрагмент не
+// перехватывал дефолтный outbound у файлов XKeen (см. subscription_selection.go).
+func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {
+	path := filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.tail.json", subscriptionSafeID(sub)))
+	if path == s.selectionTailPath() {
+		// ID подписки zz_xcp_selected совпал бы с файлом выбранных узлов.
+		path = filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s_sub.tail.json", subscriptionSafeID(sub)))
+	}
+	return path
+}
+
+// legacyFragmentPath — прежнее имя фрагмента (без tail), которое подхватывается
+// миграцией при старте панели. Пустая строка, если имя совпало бы с файлом
+// дефолта: его переименовывать и удалять как фрагмент нельзя.
+func (s *SubscriptionService) legacyFragmentPath(sub *Subscription) string {
+	path := filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", subscriptionSafeID(sub)))
+	if path == s.selectionDefaultPath() {
+		return ""
+	}
+	return path
 }
 
 func (s *SubscriptionService) getRoutingFragmentPath(sub *Subscription) string {
-	safeID := filepath.Base(sub.ID)
-	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
-	if matched, _ := regexp.MatchString(`^[a-z0-9_-]+$`, safeID); !matched {
-		safeID = "safe_id"
-	}
-	return filepath.Join(s.configDir, fmt.Sprintf("05_routing.%s.json", safeID))
+	return filepath.Join(s.configDir, fmt.Sprintf("05_routing.%s.json", subscriptionSafeID(sub)))
 }
 
 func (s *SubscriptionService) writeRoutingFragment(path string, sub *Subscription, tags []string) error {
@@ -425,15 +554,26 @@ func (s *SubscriptionService) writeRoutingFragment(path string, sub *Subscriptio
 	return utils.AtomicWriteFile(path, data, 0600)
 }
 
+// effectiveRefreshIntervalHours возвращает интервал обновления подписки в
+// часах, который панель фактически использует: интервал провайдера, если
+// use_provider_interval включён и профиль сообщил положительный
+// profile_update_hours, иначе — интервал, заданный пользователем в форме.
+// Единая точка истины для isRefreshDue и computeNextUpdate (D-12) — до этой
+// правки isRefreshDue и фронтенд считали интервал независимо друг от друга,
+// что и породило баг B13 (шапка игнорировала use_provider_interval).
+func effectiveRefreshIntervalHours(sub *Subscription) int {
+	if sub.UseProviderInterval && sub.ProfileUpdateHours > 0 {
+		return sub.ProfileUpdateHours
+	}
+	return sub.Interval
+}
+
 // isRefreshDue returns true if a subscription needs to be refreshed.
 func (s *SubscriptionService) isRefreshDue(sub *Subscription, now time.Time) bool {
 	if !sub.EnableXray {
 		return false // Mihomo-only subs are refreshed natively by Mihomo itself (D-07)
 	}
-	interval := sub.Interval
-	if sub.UseProviderInterval && sub.ProfileUpdateHours > 0 {
-		interval = sub.ProfileUpdateHours
-	}
+	interval := effectiveRefreshIntervalHours(sub)
 	if !sub.Enabled || interval <= 0 {
 		return false
 	}
@@ -446,22 +586,63 @@ func (s *SubscriptionService) isRefreshDue(sub *Subscription, now time.Time) boo
 	return now.Sub(sub.LastUpdate) >= time.Duration(interval)*time.Hour
 }
 
-// recordFailure increments the failure counter and schedules the next retry
+// computeNextUpdate возвращает время следующего обновления Xray-подписки той
+// же формулой интервала, что isRefreshDue (D-12) — единственная точка
+// расчёта, отдаваемая в API как next_update. nil для Mihomo-only (D-13),
+// выключенных подписок и подписок без положительного интервала: у них нет
+// собственного таймера обновления Xray. Если запланирован повторный запрос
+// backoff'ом (recordFailure) позже, чем обычный расчёт по интервалу —
+// возвращается именно он, чтобы isRefreshDue(sub, now) ==
+// !computeNextUpdate(sub, now).After(now) выполнялось при любом состоянии.
+func (s *SubscriptionService) computeNextUpdate(sub *Subscription, now time.Time) *time.Time {
+	if !sub.EnableXray || !sub.Enabled {
+		return nil
+	}
+	interval := effectiveRefreshIntervalHours(sub)
+	if interval <= 0 {
+		return nil
+	}
+
+	base := now
+	if !sub.LastUpdate.IsZero() {
+		base = sub.LastUpdate.Add(time.Duration(interval) * time.Hour)
+	}
+
+	if val, ok := s.retries.Load(sub.ID); ok {
+		rs := val.(*retryState)
+		if rs.nextRetry.After(base) {
+			base = rs.nextRetry
+		}
+	}
+
+	result := base
+	return &result
+}
+
+// recordFailure increments the failure counter and schedules the next retry.
+//
+// Stores a fresh *retryState on every call instead of mutating the previously
+// stored pointer in place (Rule 1 — pre-existing data race, T-133-01/edge
+// concurrency): computeNextUpdate/isRefreshDue read the *retryState returned
+// by sync.Map.Load concurrently with recordFailure on the same subscription
+// ID (e.g. a manual refresh failing while List()/Get() render next_update).
+// Mutating shared struct fields under those reads is a genuine race even
+// though sync.Map itself is safe for concurrent Load/Store — the struct
+// pointed to by a previously Loaded value is not. Treating each stored
+// *retryState as immutable once published removes the race entirely.
 func (s *SubscriptionService) recordFailure(id string) {
-	rs := &retryState{failCount: 1}
+	failCount := 1
 	if val, ok := s.retries.Load(id); ok {
-		rs = val.(*retryState)
-		rs.failCount++
+		failCount = val.(*retryState).failCount + 1
 	}
 	delay := backoffMax
-	if rs.failCount <= 6 { // 5m * 2^5 = 160m < 4h (backoffMax)
-		delay = backoffBase * (1 << uint(rs.failCount-1))
+	if failCount <= 6 { // 5m * 2^5 = 160m < 4h (backoffMax)
+		delay = backoffBase * (1 << uint(failCount-1))
 		if delay > backoffMax {
 			delay = backoffMax
 		}
 	}
-	rs.nextRetry = time.Now().Add(delay)
-	s.retries.Store(id, rs)
+	s.retries.Store(id, &retryState{failCount: failCount, nextRetry: time.Now().Add(delay)})
 }
 
 // clearFailure resets the backoff state on a successful refresh.
@@ -570,9 +751,11 @@ func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) e
 	return nil
 }
 
-// SetActiveNode перемещает ноду с указанным тегом на первую позицию в
-// 04_outbounds.{id}.json. XRay читает outbounds по порядку и использует первый
-// в качестве активного. Доступно только при routing_mode = "manual".
+// SetActiveNode делает узел подписки дефолтным outbound Xray (SUBS-05): копия
+// узла под стабильным тегом xcp-<id> пишется в собственный файл дефолта, который
+// Xray ставит первым в итоговом списке. Фрагмент подписки и файлы XKeen не
+// меняются. Дефолт глобально один: прежний дефолт других подписок сбрасывается.
+// Доступно только при routing_mode = "manual".
 func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) error {
 	s.mu.Lock()
 
@@ -589,64 +772,99 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 		s.mu.Unlock()
 		return fmt.Errorf("cannot set active node in auto routing mode (balancer is managing selection)")
 	}
-
-	fragmentPath := s.getFragmentPath(sub)
-	data, err := os.ReadFile(fragmentPath)
-	if err != nil {
+	if !sub.Enabled {
 		s.mu.Unlock()
-		return fmt.Errorf("outbounds file not found: %w", err)
+		return fmt.Errorf("subscription is disabled")
 	}
 
-	var wrapper struct {
-		Outbounds []Outbound `json:"outbounds"`
-	}
-	if err := json.Unmarshal(data, &wrapper); err != nil {
-		s.mu.Unlock()
-		return fmt.Errorf("parse outbounds: %w", err)
-	}
-
-	// Находим ноду по тегу
-	idx := -1
-	for i, ob := range wrapper.Outbounds {
-		if ob.Tag == nodeTag {
-			idx = i
+	nodeIdx := -1
+	for i := range sub.Nodes {
+		if sub.Nodes[i].Tag == nodeTag {
+			nodeIdx = i
 			break
 		}
 	}
-	if idx < 0 {
+	if nodeIdx < 0 {
 		s.mu.Unlock()
-		return fmt.Errorf("node %q not found in subscription outbounds", nodeTag)
+		return fmt.Errorf("node %q: %w", nodeTag, ErrSelectionNodeNotFound)
+	}
+	if sub.Nodes[nodeIdx].Stub {
+		s.mu.Unlock()
+		return fmt.Errorf("node %q: %w", nodeTag, ErrStubNodeSelection)
+	}
+	if _, err := s.readFragmentOutboundLocked(sub, nodeTag); err != nil {
+		s.mu.Unlock()
+		return err
 	}
 
-	// Перемещаем на первую позицию
-	if idx > 0 {
-		selected := wrapper.Outbounds[idx]
-		newOutbounds := make([]Outbound, 0, len(wrapper.Outbounds))
-		newOutbounds = append(newOutbounds, selected)
-		newOutbounds = append(newOutbounds, wrapper.Outbounds[:idx]...)
-		newOutbounds = append(newOutbounds, wrapper.Outbounds[idx+1:]...)
-		wrapper.Outbounds = newOutbounds
+	// Снимок состояния для отката, если запись файла дефолта не удалась.
+	snapshot := make([]Subscription, len(s.subscriptions))
+	for i := range s.subscriptions {
+		snapshot[i] = s.subscriptions[i].Clone()
 	}
 
-	// Обновляем Active-флаг в Nodes
+	for i := range s.subscriptions {
+		s.subscriptions[i].IsDefault = false
+	}
+	sub.SelectedTag = nodeTag
+	sub.SelectedServer = sub.Nodes[nodeIdx].Server
+	sub.IsDefault = true
 	for i := range sub.Nodes {
 		sub.Nodes[i].Active = sub.Nodes[i].Tag == nodeTag
 	}
 
-	newData, err := json.MarshalIndent(wrapper, "", "  ")
+	changed, err := s.writeSelectionFilesLocked()
 	if err != nil {
-		s.mu.Unlock()
-		return err
-	}
-	if err := utils.AtomicWriteFile(fragmentPath, newData, 0600); err != nil {
+		copy(s.subscriptions, snapshot)
 		s.mu.Unlock()
 		return err
 	}
 	_ = s.save()
+	subID := sub.ID
 	s.mu.Unlock()
 
-	// Триггер рестарта через ConsoleService.
-	s.restartXkeenIfRunning(sub.ID, "active node switch")
-
+	if changed {
+		s.restartXkeenIfRunning(subID, "active node switch")
+	}
 	return nil
 }
+
+// ClearActiveNode снимает дефолтный статус выбранного узла подписки: файл
+// дефолта перестраивается, и дефолтным снова становится первый outbound файлов
+// XKeen (direct). Стабильный тег xcp-<id> перестаёт быть дефолтом, но не
+// удаляется: выбор (SelectedTag) остаётся, правила роутинга пользователя со
+// ссылкой на тег не ломают проверку конфига Xray. Для подписки, которая не
+// дефолтная, ничего не меняется.
+func (s *SubscriptionService) ClearActiveNode(subscriptionID string) error {
+	s.mu.Lock()
+
+	sub := s.GetLocked(subscriptionID)
+	if sub == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("subscription not found")
+	}
+	if !sub.IsDefault {
+		s.mu.Unlock()
+		return nil
+	}
+
+	sub.IsDefault = false
+	changed, err := s.writeSelectionFilesLocked()
+	if err != nil {
+		sub.IsDefault = true
+		s.mu.Unlock()
+		return err
+	}
+	_ = s.save()
+	subID := sub.ID
+	s.mu.Unlock()
+
+	if changed {
+		s.restartXkeenIfRunning(subID, "active node cleared")
+	}
+	return nil
+}
+
+// warningSelectedNodeLost — код last_warning: выбранный пользователем узел
+// пропал из подписки и заменён первым рабочим узлом.
+const warningSelectedNodeLost = "selected_node_lost"
