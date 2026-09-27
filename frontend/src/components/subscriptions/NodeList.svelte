@@ -46,7 +46,10 @@
     health = {},
     checkingNodes = {},
     dialerProxyTargets = [],
+    isDefault = false,
+    stableTag = '',
     onSetActiveNode,
+    onClearActiveNode,
     onCheckNodeHealth,
     onSetDialerProxy
   }: {
@@ -58,7 +61,10 @@
     health: Record<string, NodeHealth>;
     checkingNodes: Record<string, boolean>;
     dialerProxyTargets?: DialerProxyTarget[];
+    isDefault?: boolean;
+    stableTag?: string;
     onSetActiveNode: (subId: string, tag: string) => void;
+    onClearActiveNode?: (subId: string) => void;
     onCheckNodeHealth: (subId: string, tag: string) => void;
     onSetDialerProxy?: (subId: string, nodeTag: string, targetTag: string) => void;
   } = $props();
@@ -280,6 +286,7 @@
       {#each filteredNodes as node}
         {@const h = health[node.tag]}
         {@const isNodeActive = node.active}
+        {@const showSelectionBadge = enableXray && isNodeActive && !node.stub}
         {@const metaText =
           node.use_case || node.speed
             ? `${node.use_case || ''}${node.use_case && node.speed ? ' - ' : ''}${node.speed || ''}`
@@ -328,6 +335,23 @@
                     <span class="sub-node-name-new"> [NEW]</span>
                   {/if}
                 </span>
+                {#if showSelectionBadge && isDefault}
+                  <span
+                    class="badge badge-success sub-node-selection-badge"
+                    data-testid="node-default-badge"
+                    title={stableTag ? $t('subscr.node.stable_tag_hint', { tag: stableTag }) : ''}
+                  >
+                    {$t('subscr.node.default_badge')}
+                  </span>
+                {:else if showSelectionBadge && stableTag}
+                  <span
+                    class="badge badge-info sub-node-selection-badge"
+                    data-testid="node-by-tag-badge"
+                    title={$t('subscr.node.stable_tag_hint', { tag: stableTag })}
+                  >
+                    {$t('subscr.node.by_tag_badge', { tag: stableTag })}
+                  </span>
+                {/if}
               </div>
               <div class="sub-node-meta-row">
                 {#if metaText}
@@ -375,6 +399,18 @@
             <!-- Status chip -->
             <span class="sub-node-chip-gold">{enableMihomo ? 'YAML' : 'JSON'}</span>
           </button>
+
+          {#if showSelectionBadge && isDefault && onClearActiveNode}
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm sub-node-clear-btn"
+              data-testid="node-clear-selection"
+              title={$t('subscr.node.clear_selection')}
+              onclick={() => onClearActiveNode(subId)}
+            >
+              {$t('subscr.node.clear_selection')}
+            </button>
+          {/if}
 
           <!-- Dialer Proxy (Cascade) right (D-11) -->
           {#if enableXray && !node.stub}
@@ -1006,6 +1042,25 @@
     height: 28px !important;
     font-size: var(--font-size-xs) !important;
     padding: 2px 28px 2px 8px !important;
+  }
+
+  .sub-node-selection-badge {
+    flex-shrink: 0;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: var(--font-size-xs);
+    white-space: nowrap;
+  }
+
+  .sub-node-clear-btn {
+    flex-shrink: 0;
+    margin-left: 8px;
+    white-space: nowrap;
+  }
+
+  .sub-node-clear-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .sub-node-row.stub .sub-node-select-btn {

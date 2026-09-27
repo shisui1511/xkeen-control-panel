@@ -27,6 +27,11 @@ export interface Subscription {
   mihomo_integrated: boolean;
   hwid_locked: boolean;
   device_rejected?: boolean;
+  selected_tag?: string;
+  is_default?: boolean;
+  stable_tag?: string;
+  proxy_tag_taken?: boolean;
+  last_warning?: string;
   hwid_token?: string;
   profile_web_page_url?: string;
   last_update: string;
@@ -840,7 +845,37 @@ export class ProvidersState {
       });
       if (res.status === 401) return;
       if (res.ok) {
-        showToast('success', get(t)('app.success'));
+        const body = await res.json().catch(() => null);
+        const data = body?.data;
+        if (data && data.proxy_published === false) {
+          const tag = data.stable_tag || '';
+          showToast('warning', get(t)('subscr.warning.proxy_tag_taken', { tag }));
+        } else {
+          showToast('success', get(t)('app.success'));
+        }
+        // is_default меняется и у других подписок: дефолтом становится последний выбранный.
+        await this.loadSubscriptions();
+        await this.loadNodesBySource(subId);
+      } else {
+        const text = await res.text().catch(() => '');
+        showToast('error', text || get(t)('app.error'));
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', get(t)('app.error'));
+    }
+  }
+
+  async clearActiveNode(subId: string) {
+    try {
+      const res = await apiFetch(
+        `/api/subscriptions/active/clear?id=${encodeURIComponent(subId)}`,
+        { method: 'POST' }
+      );
+      if (res.status === 401) return;
+      if (res.ok) {
+        showToast('success', get(t)('subscr.node.selection_cleared'));
+        await this.loadSubscriptions();
         await this.loadNodesBySource(subId);
       } else {
         const text = await res.text().catch(() => '');

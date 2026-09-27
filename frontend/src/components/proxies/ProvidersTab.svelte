@@ -90,6 +90,7 @@
         onDeleteSub={(id) => state.deleteSubscription(id)}
         {onOpenDiagnostic}
         onSetActiveNode={(subId, nodeTag) => state.setActiveNode(subId, nodeTag)}
+        onClearActiveNode={(subId) => state.clearActiveNode(subId)}
         onCheckNodeHealth={(subId, nodeTag) => state.checkNodeHealth(subId, nodeTag)}
         onToggleDropdown={(id) => state.toggleDropdown(id)}
         onRetryNodes={(subId) => state.loadMihomoNodes(subId)}

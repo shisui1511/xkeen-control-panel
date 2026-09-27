@@ -18,6 +18,10 @@
     mihomo_integrated: boolean;
     hwid_locked: boolean;
     device_rejected?: boolean;
+    is_default?: boolean;
+    stable_tag?: string;
+    proxy_tag_taken?: boolean;
+    last_warning?: string;
     hwid_token?: string;
     profile_web_page_url?: string;
     last_update: string;
@@ -98,6 +102,7 @@
     onDeleteSub,
     onOpenDiagnostic,
     onSetActiveNode,
+    onClearActiveNode,
     onCheckNodeHealth,
     onToggleDropdown,
     onRetryNodes,
@@ -122,6 +127,7 @@
     onDeleteSub: (subId: string) => void;
     onOpenDiagnostic: (sub: Subscription) => void;
     onSetActiveNode: (subId: string, tag: string) => void;
+    onClearActiveNode?: (subId: string) => void;
     onCheckNodeHealth: (subId: string, tag: string) => void;
     onToggleDropdown: (subId: string) => void;
     onRetryNodes: (subId: string) => Promise<void>;
@@ -533,6 +539,18 @@
         </div>
       {/if}
 
+      {#if sub.last_warning === 'selected_node_lost'}
+        <div class="sub-warning-details" role="status" data-testid="sub-last-warning">
+          {$t('subscr.warning.selected_node_lost')}
+        </div>
+      {/if}
+
+      {#if sub.proxy_tag_taken && sub.is_default && sub.stable_tag}
+        <div class="sub-warning-details" role="status" data-testid="sub-proxy-tag-taken">
+          {$t('subscr.warning.proxy_tag_taken', { tag: sub.stable_tag })}
+        </div>
+      {/if}
+
       {#if sub.last_error}
         {@const nodeCount = sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0}
         {@const errorColor = nodeCount > 0 ? 'var(--warning, #f0b450)' : 'var(--danger)'}
@@ -766,7 +784,10 @@
                 health={subHealth[sub.id] || {}}
                 checkingNodes={checkingNodes[sub.id] || {}}
                 dialerProxyTargets={dialerProxyTargets[sub.id] || []}
+                isDefault={!!sub.is_default}
+                stableTag={sub.stable_tag || ''}
                 {onSetActiveNode}
+                {onClearActiveNode}
                 {onCheckNodeHealth}
                 {onSetDialerProxy}
               />
@@ -905,6 +926,15 @@
     gap: 4px;
     font-size: var(--font-size-sm, 13px);
     line-height: 1.4;
+    word-break: break-word;
+  }
+
+  .sub-warning-details {
+    margin: -4px 0 8px 34px;
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--warning);
+    font-family: var(--font-family-sans);
     word-break: break-word;
   }
 
