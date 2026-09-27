@@ -314,11 +314,17 @@ export class ProvidersState {
       }
 
       await this.loadSubscriptions();
-      if (this.subscriptions.find((s) => s.id === id)?.device_rejected) {
+      const refreshed = this.subscriptions.find((s) => s.id === id);
+      if (refreshed?.device_rejected) {
         showToast('warning', get(t)('subscr.refresh.device_rejected'));
       } else {
         for (const message of successMessages) {
           showToast('success', message);
+        }
+        // Выбранный узел пропал из подписки и заменён первым рабочим: замена
+        // не должна проходить незамеченной.
+        if (refreshed?.last_warning === 'selected_node_lost') {
+          showToast('warning', get(t)('subscr.warning.selected_node_lost'));
         }
       }
       if (this.expandedSubs[id]) {

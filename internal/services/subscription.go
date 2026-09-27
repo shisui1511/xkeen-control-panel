@@ -342,6 +342,10 @@ type Subscription struct {
 	// DeviceRejected — провайдер вернул только узлы-заглушки (например, превышен
 	// лимит устройств). Выставляется при refresh, снимается первым рабочим ответом.
 	DeviceRejected bool `json:"device_rejected,omitempty"`
+	// LastWarning — код предупреждения последнего refresh, которое пользователь
+	// должен увидеть (сейчас только selected_node_lost: выбранный узел пропал из
+	// подписки и заменён первым рабочим). Сбрасывается refresh без потерь.
+	LastWarning string `json:"last_warning,omitempty"`
 
 	// SelectedTag — тег узла, выбранного пользователем в ручном режиме Xray
 	// (тег во фрагменте подписки). SelectedServer — его адрес хост:порт для

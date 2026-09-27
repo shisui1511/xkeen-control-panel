@@ -783,3 +783,212 @@ func TestProxyTag_UserOutboundConflict(t *testing.T) {
 		t.Error("proxy_tag_taken must clear once the foreign proxy is gone")
 	}
 }
+
+// selectNodeByServer выбирает узел по адресу и возвращает его тег.
+func selectNodeByServer(t *testing.T, env *stubProviderEnv, server string) string {
+	t.Helper()
+	tag := nodeTagByServer(t, env, "sub_1", server)
+	if err := env.svc.SetActiveNode("sub_1", tag); err != nil {
+		t.Fatalf("SetActiveNode: %v", err)
+	}
+	return tag
+}
+
+func TestRefresh_SelectionKeptByTag(t *testing.T) {
+	env := newOrderEnv(t)
+	tag := selectNodeByServer(t, env, "2.2.2.2:443")
+
+	// Тег «second» сохранился, адрес узла сменился.
+	env.body.Store(stubProviderBody(
+		"1.1.1.1:443|"+stubWorkingUUID+"|first",
+		"3.3.3.3:443|"+stubWorkingUUID+"|second",
+	))
+	if err := env.svc.Refresh("sub_1"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	sub := env.svc.Get("sub_1")
+	if sub.SelectedTag != tag {
+		t.Errorf("SelectedTag = %q, want %q (найден по тегу)", sub.SelectedTag, tag)
+	}
+	if sub.SelectedServer != "3.3.3.3:443" {
+		t.Errorf("SelectedServer = %q, want 3.3.3.3:443", sub.SelectedServer)
+	}
+	if sub.LastWarning != "" {
+		t.Errorf("LastWarning = %q, want empty", sub.LastWarning)
+	}
+	if !sub.IsDefault {
+		t.Error("подписка должна остаться дефолтной")
+	}
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	if merged[0]["tag"] != "xcp-sub_1" || outboundAddress(merged[0]) != "3.3.3.3" {
+		t.Errorf("копия под стабильным тегом должна вести на 3.3.3.3, got %v (%s)", merged[0]["tag"], outboundAddress(merged[0]))
+	}
+	active := 0
+	for _, n := range sub.Nodes {
+		if n.Active {
+			active++
+			if n.Tag != tag {
+				t.Errorf("active node = %q, want %q", n.Tag, tag)
+			}
+		}
+	}
+	if active != 1 {
+		t.Errorf("active nodes = %d, want 1", active)
+	}
+}
+
+func TestRefresh_SelectionKeptByAddress(t *testing.T) {
+	env := newOrderEnv(t)
+	oldTag := selectNodeByServer(t, env, "2.2.2.2:443")
+
+	// Тот же адрес, но провайдер сменил тег узла.
+	env.body.Store(stubProviderBody(
+		"1.1.1.1:443|"+stubWorkingUUID+"|first",
+		"2.2.2.2:443|"+stubWorkingUUID+"|second-new",
+	))
+	if err := env.svc.Refresh("sub_1"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	newTag := nodeTagByServer(t, env, "sub_1", "2.2.2.2:443")
+	if newTag == oldTag {
+		t.Fatalf("тест некорректен: тег не сменился (%q)", newTag)
+	}
+	sub := env.svc.Get("sub_1")
+	if sub.SelectedTag != newTag {
+		t.Errorf("SelectedTag = %q, want %q (найден по адресу)", sub.SelectedTag, newTag)
+	}
+	if sub.SelectedServer != "2.2.2.2:443" {
+		t.Errorf("SelectedServer = %q", sub.SelectedServer)
+	}
+	if sub.LastWarning != "" {
+		t.Errorf("LastWarning = %q, want empty", sub.LastWarning)
+	}
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	if merged[0]["tag"] != "xcp-sub_1" || outboundAddress(merged[0]) != "2.2.2.2" {
+		t.Errorf("стабильный тег должен вести на 2.2.2.2, got %v (%s)", merged[0]["tag"], outboundAddress(merged[0]))
+	}
+	for _, n := range sub.Nodes {
+		if n.Active != (n.Tag == newTag) {
+			t.Errorf("node %q active=%v", n.Tag, n.Active)
+		}
+	}
+}
+
+func TestRefresh_SelectionLostPicksFirstWorking(t *testing.T) {
+	env := newOrderEnv(t)
+	selectNodeByServer(t, env, "2.2.2.2:443")
+
+	// Выбранный узел исчез (нет ни тега, ни адреса); первым идёт заглушка.
+	env.body.Store(stubProviderBody(
+		"127.0.0.1:443|"+stubWorkingUUID+"|stub",
+		"4.4.4.4:443|"+stubWorkingUUID+"|third",
+		"5.5.5.5:443|"+stubWorkingUUID+"|fourth",
+	))
+	if err := env.svc.Refresh("sub_1"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	thirdTag := nodeTagByServer(t, env, "sub_1", "4.4.4.4:443")
+	sub := env.svc.Get("sub_1")
+	if sub.SelectedTag != thirdTag {
+		t.Errorf("SelectedTag = %q, want первый не-заглушечный %q", sub.SelectedTag, thirdTag)
+	}
+	if sub.SelectedServer != "4.4.4.4:443" {
+		t.Errorf("SelectedServer = %q", sub.SelectedServer)
+	}
+	if sub.LastWarning != warningSelectedNodeLost {
+		t.Errorf("LastWarning = %q, want %q", sub.LastWarning, warningSelectedNodeLost)
+	}
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	if merged[0]["tag"] != "xcp-sub_1" || outboundAddress(merged[0]) != "4.4.4.4" {
+		t.Errorf("стабильный тег должен вести на 4.4.4.4, got %v (%s)", merged[0]["tag"], outboundAddress(merged[0]))
+	}
+
+	// Предупреждение переживает перезапуск сервиса и уходит в API.
+	raw, err := json.Marshal(sub)
+	if err != nil || !strings.Contains(string(raw), `"last_warning":"selected_node_lost"`) {
+		t.Errorf("last_warning не попал в JSON: %s (%v)", raw, err)
+	}
+
+	// Следующий refresh без потерь снимает предупреждение.
+	if err := env.svc.Refresh("sub_1"); err != nil {
+		t.Fatalf("second Refresh: %v", err)
+	}
+	if got := env.svc.Get("sub_1").LastWarning; got != "" {
+		t.Errorf("LastWarning after stable refresh = %q, want empty", got)
+	}
+}
+
+func TestRefresh_UnchangedNodesNoRestart(t *testing.T) {
+	env := newOrderEnv(t)
+	selectNodeByServer(t, env, "2.2.2.2:443")
+	defPath := filepath.Join(env.xrayDir, selectionDefaultFileName)
+	before, err := os.ReadFile(defPath)
+	if err != nil {
+		t.Fatalf("read default file: %v", err)
+	}
+	restartsBefore := env.restartCalls(t)
+
+	if err := env.svc.Refresh("sub_1"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	after, _ := os.ReadFile(defPath)
+	if !bytes.Equal(before, after) {
+		t.Error("файл дефолта изменился при refresh без изменений узлов")
+	}
+	if got := env.restartCalls(t); got != restartsBefore {
+		t.Errorf("refresh без изменений не должен перезапускать ядро: %d -> %d", restartsBefore, got)
+	}
+	if sub := env.svc.Get("sub_1"); sub.LastChanged || sub.LastWarning != "" {
+		t.Errorf("LastChanged=%v LastWarning=%q", sub.LastChanged, sub.LastWarning)
+	}
+}
+
+func TestRefresh_AllStubsKeepsSelection(t *testing.T) {
+	env := newOrderEnv(t)
+	tag := selectNodeByServer(t, env, "2.2.2.2:443")
+	defPath := filepath.Join(env.xrayDir, selectionDefaultFileName)
+	before, _ := os.ReadFile(defPath)
+	restartsBefore := env.restartCalls(t)
+
+	env.body.Store(stubProviderBody("127.0.0.1:443|" + stubWorkingUUID + "|stub"))
+	if err := env.svc.Refresh("sub_1"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	sub := env.svc.Get("sub_1")
+	if sub.SelectedTag != tag || !sub.IsDefault || sub.LastWarning != "" {
+		t.Errorf("выбор тронут в ветке одних заглушек: %+v", sub)
+	}
+	after, _ := os.ReadFile(defPath)
+	if !bytes.Equal(before, after) {
+		t.Error("файл дефолта изменился в ветке одних заглушек")
+	}
+	if got := env.restartCalls(t); got != restartsBefore {
+		t.Errorf("ядро перезапущено: %d -> %d", restartsBefore, got)
+	}
+}
+
+func TestSockoptChange_RebuildsSelectionCopy(t *testing.T) {
+	env := newOrderEnv(t)
+	selectNodeByServer(t, env, "2.2.2.2:443")
+
+	upd := env.svc.Get("sub_1")
+	upd.SockoptMark = 255
+	if err := env.svc.Update("sub_1", upd); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	merged := simulateXrayConfdirMerge(t, env.xrayDir)
+	if merged[0]["tag"] != "xcp-sub_1" {
+		t.Fatalf("first outbound = %v", merged[0]["tag"])
+	}
+	stream, _ := merged[0]["streamSettings"].(map[string]interface{})
+	sockopt, _ := stream["sockopt"].(map[string]interface{})
+	if mark, _ := sockopt["mark"].(float64); mark != 255 {
+		t.Errorf("копия под стабильным тегом должна содержать sockopt.mark=255, got %v", merged[0]["streamSettings"])
+	}
+}

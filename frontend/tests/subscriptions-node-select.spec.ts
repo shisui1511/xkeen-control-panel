@@ -304,4 +304,37 @@ test.describe('Subscriptions: видимость выбора узла (Phase 13
     await expect(warning).toBeVisible();
     await expect(warning).toContainText('xcp-sub-1');
   });
+
+  test('refresh с пропавшим выбранным узлом показывает тост-предупреждение', async ({ page }) => {
+    subs = [{ ...sub, is_default: true, selected_tag: 'node-1', stable_tag: 'xcp-sub-1' }];
+    nodeLists['sub-1'] = nodes;
+    let refreshCalls = 0;
+    await page.route('**/api/subscriptions/refresh?id=sub-1', async (route: Route) => {
+      refreshCalls++;
+      subs = [
+        {
+          ...sub,
+          is_default: true,
+          selected_tag: 'node-2',
+          stable_tag: 'xcp-sub-1',
+          last_warning: 'selected_node_lost'
+        }
+      ];
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
+    });
+
+    await page.goto('/#/subscriptions');
+    const card = page.locator('#sub-card-sub-1');
+    await expect(card).toBeVisible();
+    await expect(page.getByTestId('sub-last-warning')).toHaveCount(0);
+    await card.locator('button.action-icon-btn[title="Обновить"]').click();
+
+    await expect.poll(() => refreshCalls).toBe(1);
+    await expect(page.locator('.toast').filter({ hasText: 'Выбранный узел пропал' })).toBeVisible();
+    await expect(page.getByTestId('sub-last-warning')).toBeVisible();
+  });
 });

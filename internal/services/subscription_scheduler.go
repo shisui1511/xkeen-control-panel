@@ -224,6 +224,7 @@ func (s *SubscriptionService) Refresh(id string) error {
 			live.LastHash = subCopy.LastHash
 			live.LastSkipped = subCopy.LastSkipped
 			live.DeviceRejected = subCopy.DeviceRejected
+			live.LastWarning = subCopy.LastWarning
 			if !subCopy.EnableMihomo || live.DetectedFormat == "" {
 				live.DetectedFormat = subCopy.DetectedFormat
 			}
@@ -293,6 +294,7 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 		sub.LastCount = live.LastCount
 		sub.LastSkipped += stubs
 		sub.DeviceRejected = true
+		sub.LastWarning = live.LastWarning
 		sub.LastUpdate = time.Now()
 
 		log.Printf("[Subscriptions] Refresh Xray ID: %s: provider returned only stub nodes (%d), keeping previous outbounds", sub.ID, stubs)
@@ -312,6 +314,29 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	if err != nil {
 		s.mu.Unlock()
 		return err
+	}
+
+	// Выбор пользователя переживает refresh: узел ищется по тегу, затем по
+	// адресу и порту. Пропавший узел заменяется первым рабочим с предупреждением.
+	sub.LastWarning = ""
+	if live.SelectedTag != "" {
+		tag, lost := s.resolveSelectionLocked(live, nodes)
+		live.SelectedTag = tag
+		live.SelectedServer = ""
+		if tag == "" {
+			// Рабочих узлов не осталось: выбирать нечего.
+			live.IsDefault = false
+		}
+		for i := range nodes {
+			nodes[i].Active = tag != "" && nodes[i].Tag == tag
+			if nodes[i].Active {
+				live.SelectedServer = nodes[i].Server
+			}
+		}
+		if lost {
+			sub.LastWarning = warningSelectedNodeLost
+			log.Printf("[Subscriptions] Refresh Xray ID: %s: selected node disappeared, selected %q instead", sub.ID, tag)
+		}
 	}
 
 	sub.Nodes = nodes
@@ -361,6 +386,14 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 		sub.LastChanged = false
 	}
 
+	// Копии выбранных узлов под стабильными тегами перестраиваются после каждой
+	// перезаписи фрагмента: иначе они устаревают вместе с адресом узла.
+	selChanged, selErr := s.writeSelectionFilesLocked()
+	if selErr != nil {
+		log.Printf("[Subscriptions] Refresh Xray ID: %s: failed to rebuild selection files: %v", sub.ID, selErr)
+	}
+	needRestart = needRestart || selChanged
+
 	// Логирование UA-ответа
 	log.Printf("[Subscriptions] Refresh Xray ID: %s, Format: %s, Size: %d bytes, Proxies: %d, Skipped: %d",
 		sub.ID, sub.DetectedFormat, len(body), sub.LastCount, sub.LastSkipped)
@@ -381,6 +414,38 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	}
 
 	return nil
+}
+
+// resolveSelectionLocked находит узел выбора пользователя среди свежих узлов
+// подписки: сначала по тегу, затем по адресу и порту. Учитываются только
+// рабочие узлы (разрешённый протокол, не заглушка). Пустой выбор даёт пустой
+// тег. Узел не найден — возвращается первый рабочий и lost=true; если рабочих
+// нет, тег пуст и lost=true. mu должен быть захвачен вызывающим.
+func (s *SubscriptionService) resolveSelectionLocked(live *Subscription, nodes []SubscriptionNode) (tag string, lost bool) {
+	if live == nil || live.SelectedTag == "" {
+		return "", false
+	}
+	usable := func(n *SubscriptionNode) bool {
+		return allowedXrayProtocols[n.Protocol] && !n.Stub
+	}
+	for i := range nodes {
+		if usable(&nodes[i]) && nodes[i].Tag == live.SelectedTag {
+			return nodes[i].Tag, false
+		}
+	}
+	if live.SelectedServer != "" {
+		for i := range nodes {
+			if usable(&nodes[i]) && nodes[i].Server == live.SelectedServer {
+				return nodes[i].Tag, false
+			}
+		}
+	}
+	for i := range nodes {
+		if usable(&nodes[i]) {
+			return nodes[i].Tag, true
+		}
+	}
+	return "", true
 }
 
 // fragmentOutboundCount возвращает число outbounds во фрагменте подписки
@@ -799,3 +864,7 @@ func (s *SubscriptionService) ClearActiveNode(subscriptionID string) error {
 	}
 	return nil
 }
+
+// warningSelectedNodeLost — код last_warning: выбранный пользователем узел
+// пропал из подписки и заменён первым рабочим узлом.
+const warningSelectedNodeLost = "selected_node_lost"

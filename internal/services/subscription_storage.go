@@ -1587,5 +1587,12 @@ func (s *SubscriptionService) refreshXrayFragmentLocked(sub *Subscription) error
 		}
 	}
 
+	// Копия выбранного узла под стабильным тегом строится из фрагмента и должна
+	// следовать за его правками (sockopt, dialerProxy). Вызывающие Update и
+	// SetNodeDialerProxy сами перезапускают ядро.
+	if _, err := s.writeSelectionFilesLocked(); err != nil {
+		log.Printf("[Subscriptions] failed to rebuild selection files after fragment update of %s: %v", sub.ID, err)
+	}
+
 	return nil
 }
