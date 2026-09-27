@@ -214,6 +214,9 @@ func main() {
 	// API handlers
 	api := handlers.NewAPI(cfg, srv)
 	srv.HandleProtected("/api/auth/change-password", api.ChangePassword)
+	srv.HandleProtected("/api/auth/sessions", api.AuthSessions)
+	srv.HandleProtected("/api/auth/sessions/terminate", api.AuthSessionTerminate)
+	srv.HandleProtected("/api/auth/sessions/terminate-others", api.AuthSessionsTerminateOthers)
 
 	// Profiling endpoints (protected)
 	srv.HandleProtected("/debug/pprof/", pprof.Index)

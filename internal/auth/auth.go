@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -36,6 +37,20 @@ const (
 	// session_absolute_ttl_days), см. cmd/xcp/main.go.
 	defaultIdleTTL     = 24 * time.Hour
 	defaultAbsoluteTTL = 30 * 24 * time.Hour
+
+	// Причины 401 (D-19): различают клиенту, почему сессия недействительна —
+	// завершена с другого устройства/из-за смены пароля, или истекла сама
+	// собой (по умолчанию, если ни одна из первых двух причин не применима).
+	ReasonSessionExpired      = "session_expired"
+	ReasonPasswordChanged     = "password_changed"
+	ReasonTerminatedElsewhere = "terminated_elsewhere"
+
+	// tombstoneTTL — как долго после структурного завершения сессии (не по
+	// истечении TTL, а явным terminate/password change) её токен ещё даёт
+	// клиенту точную причину 401 вместо дефолтного session_expired. Разумный
+	// запас, чтобы клиент на другом устройстве узнал причину при следующем же
+	// запросе, но не бесконечно растущая карта в памяти.
+	tombstoneTTL = 10 * time.Minute
 )
 
 // Options конфигурирует AuthService. Заменяет прежний набор позиционных
@@ -51,11 +66,24 @@ type Options struct {
 	OnPasswordSet    func(string) error
 }
 
+// tombstone — причина, по которой сессия с данным хешем токена была
+// структурно завершена (не сама истекла по TTL), и до какого момента эта
+// причина ещё актуальна для ответа RequireAuth.
+type tombstone struct {
+	reason string
+	until  time.Time
+}
+
 type AuthService struct {
 	passwordHash string
 	sessions     map[string]*Session // ключ — hashToken(сырой токен)
-	rateLimiter  *RateLimiter
-	mu           sync.RWMutex
+	// tombstones — причины 401 для недавно завершённых сессий (D-19), ключ —
+	// тот же hashToken(токен), что и в sessions. Не персистируется на диск:
+	// не переживает рестарт процесса — после рестарта завершённая сессия
+	// получает дефолтный ReasonSessionExpired (RESEARCH считает это приемлемым).
+	tombstones  map[string]tombstone
+	rateLimiter *RateLimiter
+	mu          sync.RWMutex
 	// pwMu сериализует смену пароля целиком (проверка → запись на диск →
 	// применение): иначе параллельные запросы оставят в памяти и на диске
 	// разные пароли
@@ -138,6 +166,7 @@ func NewAuthService(opts Options) *AuthService {
 	svc := &AuthService{
 		passwordHash:     opts.PasswordHash,
 		sessions:         make(map[string]*Session),
+		tombstones:       make(map[string]tombstone),
 		rateLimiter:      &RateLimiter{attempts: make(map[string]*LoginAttempts)},
 		onPasswordSet:    opts.OnPasswordSet,
 		maxLoginAttempts: opts.MaxLoginAttempts,
@@ -325,6 +354,11 @@ func (a *AuthService) cleanupSessions() {
 				if now.Sub(s.CreatedAt) >= a.absoluteTTL || now.Sub(s.LastSeen) >= a.idleTTL {
 					delete(a.sessions, hash)
 					removed = true
+				}
+			}
+			for hash, t := range a.tombstones {
+				if now.After(t.until) {
+					delete(a.tombstones, hash)
 				}
 			}
 			var fingerprint string
@@ -517,6 +551,134 @@ func (a *AuthService) ValidateCSRF(session *Session, csrfToken string) bool {
 	return hmac.Equal([]byte(hashToken(csrfToken)), []byte(session.CSRFHash))
 }
 
+// ErrSessionNotFound — сессия с таким непрозрачным id не найдена (уже
+// завершена или никогда не существовала).
+var ErrSessionNotFound = errors.New("session not found")
+
+// ErrSessionIsCurrent — попытка завершить текущую (свою же) сессию через
+// TerminateSession; для этого есть отдельный поток — Logout.
+var ErrSessionIsCurrent = errors.New("cannot terminate the current session")
+
+// SessionInfo — представление сессии для GET /api/auth/sessions. Ни токен,
+// ни его хеш сюда никогда не попадают (T-134-09) — только непрозрачный ID,
+// разобранные из User-Agent браузер/ОС, IP и время.
+type SessionInfo struct {
+	ID        string    `json:"id"`
+	Browser   string    `json:"browser"`
+	OS        string    `json:"os"`
+	IP        string    `json:"ip"`
+	CreatedAt time.Time `json:"created_at"`
+	LastSeen  time.Time `json:"last_seen"`
+	Current   bool      `json:"current"`
+}
+
+// ListSessions возвращает список активных сессий: текущая (currentToken)
+// первой, остальные — по убыванию LastSeen.
+func (a *AuthService) ListSessions(currentToken string) []SessionInfo {
+	currentHash := hashToken(currentToken)
+
+	a.mu.RLock()
+	list := make([]SessionInfo, 0, len(a.sessions))
+	for hash, s := range a.sessions {
+		browser, os := ParseUserAgent(s.UserAgent)
+		list = append(list, SessionInfo{
+			ID:        s.ID,
+			Browser:   browser,
+			OS:        os,
+			IP:        s.IP,
+			CreatedAt: s.CreatedAt,
+			LastSeen:  s.LastSeen,
+			Current:   hash == currentHash,
+		})
+	}
+	a.mu.RUnlock()
+
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Current != list[j].Current {
+			return list[i].Current
+		}
+		return list[i].LastSeen.After(list[j].LastSeen)
+	})
+	return list
+}
+
+// TerminateSession завершает чужую сессию по непрозрачному id — в памяти и
+// синхронно на диске. Завершение текущей сессии (currentToken) запрещено
+// (ErrSessionIsCurrent) — для выхода из своего же браузера есть Logout.
+// Завершённое устройство получает 401 с reason=terminated_elsewhere при
+// следующем запросе (D-19).
+func (a *AuthService) TerminateSession(id, currentToken string) error {
+	currentHash := hashToken(currentToken)
+
+	a.mu.Lock()
+	var targetHash string
+	for hash, s := range a.sessions {
+		if s.ID == id {
+			targetHash = hash
+			break
+		}
+	}
+	if targetHash == "" {
+		a.mu.Unlock()
+		return ErrSessionNotFound
+	}
+	if targetHash == currentHash {
+		a.mu.Unlock()
+		return ErrSessionIsCurrent
+	}
+	delete(a.sessions, targetHash)
+	a.tombstones[targetHash] = tombstone{reason: ReasonTerminatedElsewhere, until: a.now().Add(tombstoneTTL)}
+	fingerprint, snapshot := a.snapshotSessionsLocked()
+	a.mu.Unlock()
+
+	a.persistSnapshot(fingerprint, snapshot)
+	return nil
+}
+
+// TerminateOtherSessions завершает все сессии, кроме currentToken, — в
+// памяти и синхронно на диске. Возвращает число завершённых сессий (0, если
+// кроме текущей ничего не было — идемпотентно при повторном вызове).
+func (a *AuthService) TerminateOtherSessions(currentToken string) int {
+	currentHash := hashToken(currentToken)
+
+	a.mu.Lock()
+	count := 0
+	for hash := range a.sessions {
+		if hash == currentHash {
+			continue
+		}
+		delete(a.sessions, hash)
+		a.tombstones[hash] = tombstone{reason: ReasonTerminatedElsewhere, until: a.now().Add(tombstoneTTL)}
+		count++
+	}
+	var fingerprint string
+	var snapshot []*Session
+	if count > 0 {
+		fingerprint, snapshot = a.snapshotSessionsLocked()
+	}
+	a.mu.Unlock()
+
+	if count > 0 {
+		a.persistSnapshot(fingerprint, snapshot)
+	}
+	return count
+}
+
+// sessionReason возвращает причину недействительности сессии по её сырому
+// токену — из tombstone, если он ещё не истёк, иначе дефолтный
+// ReasonSessionExpired (D-19: «по умолчанию и по TTL»).
+func (a *AuthService) sessionReason(token string) string {
+	hash := hashToken(token)
+	a.mu.RLock()
+	t, ok := a.tombstones[hash]
+	now := a.now()
+	a.mu.RUnlock()
+	if ok && now.Before(t.until) {
+		return t.reason
+	}
+	return ReasonSessionExpired
+}
+
 // SetTTL меняет idle/absolute TTL сессий немедленно — уже существующие
 // сессии проверяются по новым значениям при следующем ValidateSession
 // (срок считается от CreatedAt/LastSeen на лету, а не кешируется при
@@ -664,18 +826,34 @@ func jsonError(w http.ResponseWriter, code int, msg string) {
 	})
 }
 
+// jsonErrorFields — как jsonError, но со свободным набором дополнительных
+// полей в JSON-теле (например reason у 401 ответов RequireAuth, D-19).
+func jsonErrorFields(w http.ResponseWriter, code int, fields map[string]interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(fields)
+}
+
 // Middleware
 func (a *AuthService) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(SessionCookieName)
 		if err != nil {
-			jsonError(w, http.StatusUnauthorized, "Unauthorized")
+			jsonErrorFields(w, http.StatusUnauthorized, map[string]interface{}{
+				"success": false,
+				"error":   "Unauthorized",
+				"reason":  ReasonSessionExpired,
+			})
 			return
 		}
 
 		session, err := a.ValidateSession(cookie.Value)
 		if err != nil {
-			jsonError(w, http.StatusUnauthorized, "Unauthorized")
+			jsonErrorFields(w, http.StatusUnauthorized, map[string]interface{}{
+				"success": false,
+				"error":   "Unauthorized",
+				"reason":  a.sessionReason(cookie.Value),
+			})
 			return
 		}
 

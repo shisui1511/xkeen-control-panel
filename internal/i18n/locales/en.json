@@ -7,6 +7,8 @@
   "auth.password_too_short": "Password must be at least 8 characters",
   "auth.setup_complete": "Setup complete",
   "auth.logout_success": "Logged out successfully",
+  "auth.session_not_found": "Session not found",
+  "auth.session_is_current": "The current session cannot be terminated here — use Logout",
 
   "config.file_not_found": "File not found",
   "config.read_error": "Error reading file",

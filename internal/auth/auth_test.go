@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -994,5 +995,223 @@ func TestLogin_RememberMeCookieMaxAge(t *testing.T) {
 	}
 	if !cookie2.Expires.IsZero() {
 		t.Errorf("expected no Expires for remember_me=false, got %v", cookie2.Expires)
+	}
+}
+
+// --- Task 3 (134-03 Task 1): список/завершение сессий, причина 401 ---
+
+// TestListSessions_OpaqueIDsNoSecrets: сериализованный список сессий не
+// содержит ни сырых токенов/CSRF, ни их хешей — только непрозрачный
+// 32-символьный hex id (T-134-09).
+func TestListSessions_OpaqueIDsNoSecrets(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	current, err := svc.CreateSessionWithMeta(SessionMeta{
+		IP:        "1.2.3.4",
+		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := svc.CreateSessionWithMeta(SessionMeta{
+		IP:        "5.6.7.8",
+		UserAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/118.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list := svc.ListSessions(current.Token)
+	if len(list) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(list))
+	}
+	if !list[0].Current {
+		t.Error("expected current session listed first")
+	}
+
+	data, err := json.Marshal(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	secrets := []string{
+		current.Token, other.Token,
+		current.CSRFToken, other.CSRFToken,
+		hashToken(current.Token), hashToken(other.Token),
+	}
+	for _, secret := range secrets {
+		if strings.Contains(body, secret) {
+			t.Errorf("session list JSON leaks a secret: %q", secret)
+		}
+	}
+
+	for _, s := range list {
+		if len(s.ID) != 32 {
+			t.Errorf("expected opaque 32-hex-char id, got %q (%d chars)", s.ID, len(s.ID))
+		}
+	}
+}
+
+// TestTerminateSession_ReasonTerminatedElsewhere: устройство B после
+// завершения его сессии с устройства A получает 401 с
+// reason=terminated_elsewhere при следующем запросе.
+func TestTerminateSession_ReasonTerminatedElsewhere(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	deviceA, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	deviceB, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.TerminateSession(deviceB.ID, deviceA.Token); err != nil {
+		t.Fatalf("TerminateSession failed: %v", err)
+	}
+
+	if _, err := svc.ValidateSession(deviceB.Token); err == nil {
+		t.Fatal("expected terminated session to be invalid")
+	}
+	svc.mu.RLock()
+	_, exists := svc.sessions[hashToken(deviceB.Token)]
+	svc.mu.RUnlock()
+	if exists {
+		t.Error("expected terminated session removed from the in-memory map (and thus from the persisted snapshot)")
+	}
+
+	protected := svc.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: deviceB.Token})
+	rec := httptest.NewRecorder()
+	protected(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	var resp struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Reason != ReasonTerminatedElsewhere {
+		t.Errorf("expected reason %q, got %q", ReasonTerminatedElsewhere, resp.Reason)
+	}
+}
+
+// TestTerminateSession_CurrentRejected: попытку завершить свою же сессию
+// TerminateSession отклоняет — для этого есть Logout.
+func TestTerminateSession_CurrentRejected(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	current, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.TerminateSession(current.ID, current.Token); !errors.Is(err, ErrSessionIsCurrent) {
+		t.Errorf("expected ErrSessionIsCurrent, got %v", err)
+	}
+	if _, err := svc.ValidateSession(current.Token); err != nil {
+		t.Errorf("current session must remain valid after rejected terminate: %v", err)
+	}
+}
+
+// TestTerminateOtherSessions_KeepsCurrent: завершает все, кроме текущей;
+// повторный вызов с одной оставшейся сессией идемпотентен (возвращает 0).
+func TestTerminateOtherSessions_KeepsCurrent(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	current, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other1, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other2, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if n := svc.TerminateOtherSessions(current.Token); n != 2 {
+		t.Errorf("expected 2 terminated, got %d", n)
+	}
+	if _, err := svc.ValidateSession(current.Token); err != nil {
+		t.Errorf("current session must survive: %v", err)
+	}
+	if _, err := svc.ValidateSession(other1.Token); err == nil {
+		t.Error("other1 must be terminated")
+	}
+	if _, err := svc.ValidateSession(other2.Token); err == nil {
+		t.Error("other2 must be terminated")
+	}
+
+	if n := svc.TerminateOtherSessions(current.Token); n != 0 {
+		t.Errorf("expected idempotent 0 on repeated call with only the current session left, got %d", n)
+	}
+}
+
+// TestRequireAuth_401Reason: без cookie, с неизвестным токеном и с сессией,
+// истёкшей по idle-TTL — все три случая дают дефолтную причину
+// session_expired (только явные terminate/password-change дают другую).
+func TestRequireAuth_401Reason(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	protected := svc.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	readReason := func(rec *httptest.ResponseRecorder) string {
+		var resp struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.NewDecoder(rec.Body).Decode(&resp)
+		return resp.Reason
+	}
+
+	req1 := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	rec1 := httptest.NewRecorder()
+	protected(rec1, req1)
+	if rec1.Code != http.StatusUnauthorized || readReason(rec1) != ReasonSessionExpired {
+		t.Errorf("no cookie: expected 401/%q, got %d/%q", ReasonSessionExpired, rec1.Code, readReason(rec1))
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	req2.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "unknown-token"})
+	rec2 := httptest.NewRecorder()
+	protected(rec2, req2)
+	if rec2.Code != http.StatusUnauthorized || readReason(rec2) != ReasonSessionExpired {
+		t.Errorf("unknown token: expected 401/%q, got %d/%q", ReasonSessionExpired, rec2.Code, readReason(rec2))
+	}
+
+	svc2 := NewAuthService(Options{IdleTTL: time.Hour, AbsoluteTTL: 24 * time.Hour})
+	defer svc2.Stop()
+	start := time.Now()
+	svc2.now = func() time.Time { return start }
+	issued, err := svc2.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc2.now = func() time.Time { return start.Add(2 * time.Hour) }
+	protected2 := svc2.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	req3 := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	req3.AddCookie(&http.Cookie{Name: SessionCookieName, Value: issued.Token})
+	rec3 := httptest.NewRecorder()
+	protected2(rec3, req3)
+	if rec3.Code != http.StatusUnauthorized || readReason(rec3) != ReasonSessionExpired {
+		t.Errorf("idle expired: expected 401/%q, got %d/%q", ReasonSessionExpired, rec3.Code, readReason(rec3))
 	}
 }

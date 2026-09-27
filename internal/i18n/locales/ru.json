@@ -7,6 +7,8 @@
   "auth.password_too_short": "Пароль должен быть не менее 8 символов",
   "auth.setup_complete": "Настройка завершена",
   "auth.logout_success": "Выход выполнен",
+  "auth.session_not_found": "Сессия не найдена",
+  "auth.session_is_current": "Текущую сессию нельзя завершить отсюда — используйте «Выйти»",
 
   "config.file_not_found": "Файл не найден",
   "config.read_error": "Ошибка чтения файла",

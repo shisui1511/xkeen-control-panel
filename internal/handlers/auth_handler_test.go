@@ -111,3 +111,133 @@ func TestChangePassword_Handler(t *testing.T) {
 		t.Error("old password still works after change")
 	}
 }
+
+// TestAuthSessionsHandlers exercises AuthSessions / AuthSessionTerminate /
+// AuthSessionsTerminateOthers end to end: list (with method guard), reject
+// terminating the current session, terminate an other session, repeated
+// terminate of the same id is idempotent (404), and terminate-others with
+// only the current session left returns 0.
+func TestAuthSessionsHandlers(t *testing.T) {
+	api, authSvc := newAuthHandlerTestAPI(t, "initialpass123")
+	defer authSvc.Stop()
+
+	login := func(t *testing.T) *http.Cookie {
+		t.Helper()
+		issued, err := authSvc.CreateSession()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Cookie{Name: auth.SessionCookieName, Value: issued.Token}
+	}
+
+	currentCookie := login(t)
+	login(t) // second session — identified below via ListSessions, not by cookie
+
+	// GET-only endpoint rejects POST.
+	reqBadMethod := httptest.NewRequest(http.MethodPost, "/api/auth/sessions", nil)
+	recBadMethod := httptest.NewRecorder()
+	api.AuthSessions(recBadMethod, reqBadMethod)
+	if recBadMethod.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", recBadMethod.Code)
+	}
+
+	reqList := httptest.NewRequest(http.MethodGet, "/api/auth/sessions", nil)
+	reqList.AddCookie(currentCookie)
+	recList := httptest.NewRecorder()
+	api.AuthSessions(recList, reqList)
+	if recList.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recList.Code, recList.Body.String())
+	}
+	var listResp struct {
+		Success bool               `json:"success"`
+		Data    []auth.SessionInfo `json:"data"`
+	}
+	if err := json.NewDecoder(recList.Body).Decode(&listResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(listResp.Data) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(listResp.Data))
+	}
+
+	var currentID, otherID string
+	for _, s := range listResp.Data {
+		if s.Current {
+			currentID = s.ID
+		} else {
+			otherID = s.ID
+		}
+	}
+	if currentID == "" || otherID == "" {
+		t.Fatalf("expected one current and one other session, got %+v", listResp.Data)
+	}
+
+	// Empty id -> 400.
+	reqEmptyID := httptest.NewRequest(http.MethodPost, "/api/auth/sessions/terminate", bytes.NewReader([]byte(`{}`)))
+	reqEmptyID.AddCookie(currentCookie)
+	recEmptyID := httptest.NewRecorder()
+	api.AuthSessionTerminate(recEmptyID, reqEmptyID)
+	if recEmptyID.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty id, got %d", recEmptyID.Code)
+	}
+
+	// Terminating the current session -> 400 session_is_current.
+	bodyCurrent, _ := json.Marshal(map[string]string{"id": currentID})
+	reqCurrent := httptest.NewRequest(http.MethodPost, "/api/auth/sessions/terminate", bytes.NewReader(bodyCurrent))
+	reqCurrent.AddCookie(currentCookie)
+	recCurrent := httptest.NewRecorder()
+	api.AuthSessionTerminate(recCurrent, reqCurrent)
+	if recCurrent.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for current session, got %d", recCurrent.Code)
+	}
+	var currentErrResp struct {
+		Code string `json:"code"`
+	}
+	json.NewDecoder(recCurrent.Body).Decode(&currentErrResp)
+	if currentErrResp.Code != "session_is_current" {
+		t.Errorf("expected code session_is_current, got %q", currentErrResp.Code)
+	}
+
+	// Terminating the other session -> 200.
+	bodyOther, _ := json.Marshal(map[string]string{"id": otherID})
+	reqOther := httptest.NewRequest(http.MethodPost, "/api/auth/sessions/terminate", bytes.NewReader(bodyOther))
+	reqOther.AddCookie(currentCookie)
+	recOther := httptest.NewRecorder()
+	api.AuthSessionTerminate(recOther, reqOther)
+	if recOther.Code != http.StatusOK {
+		t.Errorf("expected 200 terminating other session, got %d: %s", recOther.Code, recOther.Body.String())
+	}
+
+	// Repeated terminate of the same id -> 404 (idempotent).
+	reqRepeat := httptest.NewRequest(http.MethodPost, "/api/auth/sessions/terminate", bytes.NewReader(bodyOther))
+	reqRepeat.AddCookie(currentCookie)
+	recRepeat := httptest.NewRecorder()
+	api.AuthSessionTerminate(recRepeat, reqRepeat)
+	if recRepeat.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for repeated terminate, got %d", recRepeat.Code)
+	}
+	var repeatResp struct {
+		Code string `json:"code"`
+	}
+	json.NewDecoder(recRepeat.Body).Decode(&repeatResp)
+	if repeatResp.Code != "session_not_found" {
+		t.Errorf("expected code session_not_found, got %q", repeatResp.Code)
+	}
+
+	// terminate-others with only the current session left -> 0.
+	reqOthers := httptest.NewRequest(http.MethodPost, "/api/auth/sessions/terminate-others", nil)
+	reqOthers.AddCookie(currentCookie)
+	recOthers := httptest.NewRecorder()
+	api.AuthSessionsTerminateOthers(recOthers, reqOthers)
+	if recOthers.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recOthers.Code)
+	}
+	var othersResp struct {
+		Data struct {
+			Terminated int `json:"terminated"`
+		} `json:"data"`
+	}
+	json.NewDecoder(recOthers.Body).Decode(&othersResp)
+	if othersResp.Data.Terminated != 0 {
+		t.Errorf("expected 0 terminated (only current left), got %d", othersResp.Data.Terminated)
+	}
+}
