@@ -1321,7 +1321,6 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	var sourceSub *Subscription
 	var sourceNode *SubscriptionNode
@@ -1339,27 +1338,38 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 	}
 
 	if sourceSub == nil || sourceNode == nil {
+		s.mu.Unlock()
 		return errors.New("node not found")
 	}
 
 	if targetTag == "" {
 		sourceNode.DialerProxy = ""
 		if err := s.save(); err != nil {
+			s.mu.Unlock()
 			return err
 		}
 		if sourceSub.EnableXray {
 			if err := s.refreshXrayFragmentLocked(sourceSub); err != nil {
 				log.Printf("[Subscriptions] failed to refresh Xray fragment for %s: %v", sourceSub.ID, err)
+				s.mu.Unlock()
 				return err
 			}
 		}
-		if sourceSub.EnableXray {
-			s.restartXkeenIfRunning(sourceSub.ID, "dialerProxy clear")
+		needRestart := sourceSub.EnableXray
+		restartID := sourceSub.ID
+		// Рестарт ядра выполняется вне блокировки — так же, как в
+		// SetActiveNode/ClearActiveNode: xkeen -restart синхронный и может
+		// занимать несколько секунд, всё это время нельзя держать s.mu и
+		// замораживать остальные операции с подписками (WR-01).
+		s.mu.Unlock()
+		if needRestart {
+			s.restartXkeenIfRunning(restartID, "dialerProxy clear")
 		}
 		return nil
 	}
 
 	if targetTag == nodeTag {
+		s.mu.Unlock()
 		return errors.New("cannot cascade node to itself")
 	}
 
@@ -1367,6 +1377,7 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 	for i := range s.subscriptions {
 		for j := range s.subscriptions[i].Nodes {
 			if s.subscriptions[i].Nodes[j].DialerProxy == nodeTag {
+				s.mu.Unlock()
 				return errors.New("cannot cascade node that is already used as a proxy target")
 			}
 		}
@@ -1384,6 +1395,7 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 			if node.Tag == targetTag {
 				targetFound = true
 				if node.DialerProxy != "" {
+					s.mu.Unlock()
 					return errors.New("chain limited to one level")
 				}
 				break
@@ -1395,11 +1407,13 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 	}
 
 	if !targetFound {
+		s.mu.Unlock()
 		return errors.New("target not available")
 	}
 
 	sourceNode.DialerProxy = targetTag
 	if err := s.save(); err != nil {
+		s.mu.Unlock()
 		return err
 	}
 
@@ -1408,12 +1422,17 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 			log.Printf("[Subscriptions] failed to refresh Xray fragment for %s: %v", sourceSub.ID, err)
 			sourceNode.DialerProxy = ""
 			_ = s.save()
+			s.mu.Unlock()
 			return err
 		}
 	}
 
-	if sourceSub.EnableXray {
-		s.restartXkeenIfRunning(sourceSub.ID, "dialerProxy update")
+	needRestart := sourceSub.EnableXray
+	restartID := sourceSub.ID
+	// См. комментарий выше: рестарт ядра — вне блокировки (WR-01).
+	s.mu.Unlock()
+	if needRestart {
+		s.restartXkeenIfRunning(restartID, "dialerProxy update")
 	}
 
 	return nil
