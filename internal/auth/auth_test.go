@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1361,5 +1362,128 @@ func TestRequireAuth_401Reason(t *testing.T) {
 	protected2(rec3, req3)
 	if rec3.Code != http.StatusUnauthorized || readReason(rec3) != ReasonSessionExpired {
 		t.Errorf("idle expired: expected 401/%q, got %d/%q", ReasonSessionExpired, rec3.Code, readReason(rec3))
+	}
+}
+
+// --- 134-03 Task 3: аудит-лог входа ---
+
+// TestAuditLog_NoSecrets: вход, неудачная попытка, блокировка, выход, смена
+// пароля и завершение сессий пишут строки «[auth] … ip=…» (D-11); ни один
+// пароль, токен, CSRF-токен или их хеш в лог не попадают, а перевод строки в
+// RemoteAddr не создаёт поддельную строку лога без префикса [auth]
+// (T-134-11).
+func TestAuditLog_NoSecrets(t *testing.T) {
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prevOutput) })
+
+	svc := NewAuthService(Options{MaxLoginAttempts: 2, LockoutDuration: 5 * time.Minute})
+	defer svc.Stop()
+	hash, err := svc.HashPassword("secretpass123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetPasswordHash(hash)
+
+	// 1-я неудачная попытка (10.0.0.1) — "login failed".
+	bodyWrong, _ := json.Marshal(map[string]string{"password": "wrongpass"})
+	reqWrong := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(bodyWrong))
+	reqWrong.RemoteAddr = "10.0.0.1:1111"
+	svc.HandleLogin(httptest.NewRecorder(), reqWrong)
+
+	// 2-я неудачная попытка того же IP достигает maxAttempts=2 — CheckLimit
+	// сам возвращает ошибку блокировки уже на входе в HandleLogin — "lockout".
+	reqWrong2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(bodyWrong))
+	reqWrong2.RemoteAddr = "10.0.0.1:1112"
+	svc.HandleLogin(httptest.NewRecorder(), reqWrong2)
+
+	// Успешный вход с другого IP, содержащего попытку log-инъекции —
+	// "login ok".
+	bodyGood, _ := json.Marshal(map[string]string{"password": "secretpass123"})
+	reqGood := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(bodyGood))
+	reqGood.RemoteAddr = "1.2.3.4\nFAKE:1234"
+	recGood := httptest.NewRecorder()
+	svc.HandleLogin(recGood, reqGood)
+	if recGood.Code != http.StatusOK {
+		t.Fatalf("login failed: %d %s", recGood.Code, recGood.Body.String())
+	}
+	var loginResp struct {
+		CSRFToken string `json:"csrf_token"`
+	}
+	_ = json.NewDecoder(recGood.Body).Decode(&loginResp)
+	var loginCookie *http.Cookie
+	for _, c := range recGood.Result().Cookies() {
+		if c.Name == SessionCookieName {
+			loginCookie = c
+		}
+	}
+	if loginCookie == nil {
+		t.Fatal("expected session cookie")
+	}
+
+	// Выход — "logout".
+	reqLogout := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	reqLogout.AddCookie(loginCookie)
+	reqLogout.RemoteAddr = "1.2.3.4:2222"
+	svc.HandleLogout(httptest.NewRecorder(), reqLogout)
+
+	// Смена пароля — "password changed".
+	issued2, err := svc.ChangePassword("1.2.3.4", "", "secretpass123", "newsecretpass456")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Завершение чужой сессии — "session terminated".
+	other, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.TerminateSession(other.ID, issued2.Token); err != nil {
+		t.Fatal(err)
+	}
+
+	// Завершение остальных сессий — "sessions terminated others".
+	svc.TerminateOtherSessions(issued2.Token)
+
+	output := buf.String()
+
+	for _, want := range []string{
+		"[auth] login failed",
+		"[auth] lockout",
+		"[auth] login ok",
+		"[auth] logout",
+		"[auth] password changed",
+		"[auth] session terminated",
+		"[auth] sessions terminated others",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected audit log to contain %q, full log:\n%s", want, output)
+		}
+	}
+	if !strings.Contains(output, "ip=") {
+		t.Error("expected at least one audit line with ip=")
+	}
+
+	secrets := []string{
+		"secretpass123", "wrongpass", "newsecretpass456",
+		loginCookie.Value, loginResp.CSRFToken,
+		hashToken(loginCookie.Value), hashToken(loginResp.CSRFToken),
+		issued2.Token, issued2.CSRFToken,
+	}
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(output, secret) {
+			t.Errorf("audit log leaks a secret: %q", secret)
+		}
+	}
+
+	// Перевод строки из RemoteAddr не должен породить отдельную "голую"
+	// строку без префикса [auth] — SanitizeLogInput вырезает \n/\r, так что
+	// внедрённый текст остаётся внутри легитимной строки лога, а не образует
+	// поддельную новую запись.
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "FAKE") && !strings.Contains(line, "[auth]") {
+			t.Errorf("log injection: forged line without [auth] prefix: %q", line)
+		}
 	}
 }

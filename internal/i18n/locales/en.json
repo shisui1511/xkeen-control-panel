@@ -9,6 +9,7 @@
   "auth.logout_success": "Logged out successfully",
   "auth.session_not_found": "Session not found",
   "auth.session_is_current": "The current session cannot be terminated here — use Logout",
+  "settings.session_ttl_out_of_range": "Session lifetime is out of the allowed range",
 
   "config.file_not_found": "File not found",
   "config.read_error": "Error reading file",

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -316,8 +317,13 @@ func (a *AuthService) ChangePassword(ip, keepToken, currentPassword, newPassword
 	}
 	a.SetPasswordHash(newHash)
 
-	meta := a.terminateAllForPasswordChange(keepToken)
-	return a.CreateSessionWithMeta(meta)
+	meta, terminated := a.terminateAllForPasswordChange(keepToken)
+	issued, err := a.CreateSessionWithMeta(meta)
+	if err != nil {
+		return nil, err
+	}
+	auditf("password changed", ip, fmt.Sprintf(" session=%s terminated=%d", shortSessionID(issued.ID), terminated))
+	return issued, nil
 }
 
 // terminateAllForPasswordChange удаляет из памяти все сессии (включая
@@ -325,8 +331,8 @@ func (a *AuthService) ChangePassword(ip, keepToken, currentPassword, newPassword
 // на диск: единственный write делает последующий CreateSessionWithMeta.
 // Возвращает контекст входа (IP/UA/RememberMe) сессии keepToken, если она
 // была жива, — чтобы перевыпущенная сессия выглядела для клиента так же, как
-// прежняя, кроме токена/CSRF.
-func (a *AuthService) terminateAllForPasswordChange(keepToken string) SessionMeta {
+// прежняя, кроме токена/CSRF, — и число завершённых сессий (для аудит-лога).
+func (a *AuthService) terminateAllForPasswordChange(keepToken string) (SessionMeta, int) {
 	keepHash := hashToken(keepToken)
 	var meta SessionMeta
 
@@ -335,13 +341,14 @@ func (a *AuthService) terminateAllForPasswordChange(keepToken string) SessionMet
 		meta = SessionMeta{IP: s.IP, UserAgent: s.UserAgent, RememberMe: s.RememberMe}
 	}
 	now := a.now()
+	terminated := len(a.sessions)
 	for hash := range a.sessions {
 		delete(a.sessions, hash)
 		a.tombstones[hash] = tombstone{reason: ReasonPasswordChanged, until: now.Add(tombstoneTTL)}
 	}
 	a.mu.Unlock()
 
-	return meta
+	return meta, terminated
 }
 
 // ReloadPasswordHash применяет новый хеш пароля без рестарта процесса
@@ -377,6 +384,7 @@ func (a *AuthService) ReloadPasswordHash(hash string, apply func(string)) int {
 	a.persistSnapshot(fingerprint, snapshot)
 
 	a.rateLimiter.Reset()
+	auditf("password reloaded", "local", fmt.Sprintf(" terminated=%d", count))
 
 	return count
 }
@@ -711,12 +719,21 @@ func (a *AuthService) TerminateSession(id, currentToken string) error {
 		a.mu.Unlock()
 		return ErrSessionIsCurrent
 	}
+	// ip/byID для аудита: ip — устройства, чья сессия завершается (её
+	// собственный, а не запросивший завершение — TerminateSession не получает
+	// ip актёра как параметр), byID — id текущей сессии запросившего.
+	targetIP := a.sessions[targetHash].IP
+	var byID string
+	if cs, ok := a.sessions[currentHash]; ok {
+		byID = cs.ID
+	}
 	delete(a.sessions, targetHash)
 	a.tombstones[targetHash] = tombstone{reason: ReasonTerminatedElsewhere, until: a.now().Add(tombstoneTTL)}
 	fingerprint, snapshot := a.snapshotSessionsLocked()
 	a.mu.Unlock()
 
 	a.persistSnapshot(fingerprint, snapshot)
+	auditf("session terminated", targetIP, fmt.Sprintf(" session=%s by=%s", shortSessionID(id), shortSessionID(byID)))
 	return nil
 }
 
@@ -727,6 +744,10 @@ func (a *AuthService) TerminateOtherSessions(currentToken string) int {
 	currentHash := hashToken(currentToken)
 
 	a.mu.Lock()
+	var actorIP string
+	if cs, ok := a.sessions[currentHash]; ok {
+		actorIP = cs.IP
+	}
 	count := 0
 	for hash := range a.sessions {
 		if hash == currentHash {
@@ -746,6 +767,7 @@ func (a *AuthService) TerminateOtherSessions(currentToken string) int {
 	if count > 0 {
 		a.persistSnapshot(fingerprint, snapshot)
 	}
+	auditf("sessions terminated others", actorIP, fmt.Sprintf(" count=%d", count))
 	return count
 }
 
@@ -961,6 +983,27 @@ func jsonError(w http.ResponseWriter, code int, msg string) {
 	})
 }
 
+// auditf пишет строку аудита «[auth] event ip=<ip><extra>» в xcp.log (D-11).
+// ip и extra экранируются через utils.SanitizeLogInput — перевод строки или
+// возврат каретки из данных запроса (RemoteAddr, User-Agent и т.п.) не может
+// разбить лог на поддельные строки (T-134-11). Сюда никогда не передаются
+// пароли, токены, CSRF-токены или их хеши — только непрозрачные session ID
+// (не секрет: тот же id уже отдаётся клиенту в GET /api/auth/sessions) и
+// агрегированные числа.
+func auditf(event, ip, extra string) {
+	log.Printf("[auth] %s ip=%s%s", event, utils.SanitizeLogInput(ip), utils.SanitizeLogInput(extra))
+}
+
+// shortSessionID возвращает первые 8 символов непрозрачного id сессии —
+// достаточно, чтобы связать несколько строк лога об одной и той же сессии,
+// не раздувая при этом каждую запись полным 32-символьным id.
+func shortSessionID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
 // jsonErrorFields — как jsonError, но со свободным набором дополнительных
 // полей в JSON-теле (например reason у 401 ответов RequireAuth, D-19).
 func jsonErrorFields(w http.ResponseWriter, code int, fields map[string]interface{}) {
@@ -1022,6 +1065,8 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		if seconds <= 0 {
 			seconds = int(a.lockoutDuration.Seconds())
 		}
+		until := a.now().Add(time.Duration(seconds) * time.Second)
+		auditf("lockout", ip, fmt.Sprintf(" until=%s", until.Format(time.RFC3339)))
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", seconds))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -1043,6 +1088,7 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.VerifyPassword(req.Password); err != nil {
+		auditf("login failed", ip, "")
 		jsonError(w, http.StatusUnauthorized, "Invalid password")
 		return
 	}
@@ -1058,6 +1104,7 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, "Failed to create session")
 		return
 	}
+	auditf("login ok", ip, fmt.Sprintf(" session=%s", shortSessionID(issued.ID)))
 
 	_, absoluteTTL := a.TTL()
 	setSessionCookie(w, issued.Token, issued.RememberMe, absoluteTTL)
@@ -1073,9 +1120,20 @@ func (a *AuthService) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cookie, err := r.Cookie(SessionCookieName)
-	if err == nil {
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+
+	if cookie, err := r.Cookie(SessionCookieName); err == nil {
+		var sessionID string
+		a.mu.RLock()
+		if s, ok := a.sessions[hashToken(cookie.Value)]; ok {
+			sessionID = s.ID
+		}
+		a.mu.RUnlock()
 		a.DeleteSession(cookie.Value)
+		auditf("logout", ip, fmt.Sprintf(" session=%s", shortSessionID(sessionID)))
 	}
 
 	clearSessionCookies(w)

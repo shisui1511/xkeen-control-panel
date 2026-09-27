@@ -258,6 +258,7 @@ func main() {
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
 	srv.HandleProtected("/api/settings/dev-mode", api.SettingsDevMode)
+	srv.HandleProtected("/api/settings/session", api.SessionSettings)
 
 	// XKeen own settings: proxied/excluded ports, excluded IPs, xkeen.json
 	api.SetXKeenSettingsService(services.NewXKeenSettingsService(services.DefaultXKeenConfigDir, cfg.DataDir, cfg.AllowedRoots))
