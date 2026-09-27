@@ -42,11 +42,11 @@ func main() {
 
 	flag.Parse()
 
-	// Keenetic keeps the timezone as a POSIX string Go cannot read on its own;
+	// Keenetic/Netcraze firmware keeps the timezone as a POSIX string Go cannot read on its own;
 	// without this every schedule and timestamp runs in UTC.
 	appliedTZ := utils.ApplySystemTimezone()
 
-	// Router-grade RAM/GC limits (STAB-06): Keenetic devices typically have
+	// Router-grade RAM/GC limits (STAB-06): Keenetic/Netcraze devices typically have
 	// 128-256 MB total RAM shared with the kernel and other services. A
 	// soft-memory-limit plus a moderately aggressive GC target keeps XCP's
 	// own footprint predictable instead of relying on the Go runtime's

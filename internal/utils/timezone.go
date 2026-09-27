@@ -8,13 +8,13 @@ import (
 	"time"
 )
 
-// systemTZPaths lists the files where Keenetic/Entware/OpenWrt keep the
+// systemTZPaths lists the files where Keenetic/Netcraze/Entware/OpenWrt keep the
 // router's timezone as a POSIX TZ string (e.g. "MSK-3").
 var systemTZPaths = []string{"/etc/TZ", "/opt/etc/TZ", "/var/TZ"}
 
 // ApplySystemTimezone sets time.Local to the router's configured timezone.
 //
-// On Keenetic /etc/localtime is a symlink to /var/TZ, which holds a POSIX TZ
+// On Keenetic/Netcraze /etc/localtime is a symlink to /var/TZ, which holds a POSIX TZ
 // string rather than a TZif file. Go cannot parse it and silently falls back
 // to UTC, shifting schedules, day/week boundaries and log timestamps by the
 // router's UTC offset. An explicit $TZ in the environment keeps precedence.

@@ -440,7 +440,7 @@ func getPrimaryLANIP() string {
 var posixTZOffsetRe = regexp.MustCompile(`^(?:<[^>]+>|[A-Za-z]+)([+-]?\d+)`)
 
 // posixTZOffsetHours extracts the UTC offset in hours encoded in a POSIX TZ
-// string such as "MSK-3" (used by /etc/TZ on OpenWrt/Keenetic/Entware).
+// string such as "MSK-3" (used by /etc/TZ on OpenWrt/Keenetic/Netcraze/Entware).
 // POSIX offsets are inverted relative to everyday usage — the offset is the
 // amount added to local time to reach UTC, so local = UTC - offset. That
 // makes "MSK-3" (offset -3) an actual UTC+3, not UTC-3.

@@ -1,4 +1,4 @@
-.PHONY: build run clean test test-coverage lint fmt deps hooks keenetic-arm64 keenetic-mipsle keenetic-mips proto
+.PHONY: build run clean test test-coverage lint fmt deps hooks router-arm64 router-mipsle router-mips proto
 
 BINARY_NAME=xcp
 # Single source of truth for the version: scripts/version.sh (git tags +
@@ -25,16 +25,16 @@ version:
 build: update-version
 	go build -buildvcs=false -ldflags "-s -w -X main.Version=$(VERSION)" -o build/$(BINARY_NAME) ./cmd/xcp
 
-# Сборка для Keenetic ARM64 (KN-1010, KN-1810, KN-1910)
-keenetic-arm64: update-version
+# Сборка для роутеров Keenetic/Netcraze ARM64 (KN-1812/NC-1812, KN-1012/NC-1012, KN-3811/NC-3811 и др.)
+router-arm64: update-version
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags "-s -w -X main.Version=$(VERSION)" -o build/$(BINARY_NAME)_$(VERSION)_arm64 ./cmd/xcp
 
-# Сборка для Keenetic MIPSLE (KN-1912 Viva, KN-2410 и др.)
-keenetic-mipsle: update-version
+# Сборка для роутеров Keenetic/Netcraze MIPSLE (KN-1010, KN-1810, KN-1913/NC-1913 и др.)
+router-mipsle: update-version
 	CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -buildvcs=false -ldflags "-s -w -X main.Version=$(VERSION)" -o build/$(BINARY_NAME)_$(VERSION)_mipsle ./cmd/xcp
 
-# Сборка для Keenetic MIPS big-endian (KN-3610, KN-2310 и др.)
-keenetic-mips: update-version
+# Сборка для роутеров Keenetic MIPS big-endian (KN-2410, KN-2510, KN-3610 и др.)
+router-mips: update-version
 	CGO_ENABLED=0 GOOS=linux GOARCH=mips GOMIPS=softfloat go build -buildvcs=false -ldflags "-s -w -X main.Version=$(VERSION)" -o build/$(BINARY_NAME)_$(VERSION)_mips ./cmd/xcp
 
 run: build
