@@ -262,7 +262,7 @@ func TestChangePassword_WrongCurrent(t *testing.T) {
 	}
 	svc.SetPasswordHash(hash)
 
-	err = svc.ChangePassword("127.0.0.1", "", "wrongpass", "newpassword123")
+	_, err = svc.ChangePassword("127.0.0.1", "", "wrongpass", "newpassword123")
 	if err == nil {
 		t.Error("expected error for wrong current password, got nil")
 	}
@@ -316,7 +316,7 @@ func TestChangePassword_Success(t *testing.T) {
 	}
 	svc.SetPasswordHash(hash)
 
-	err = svc.ChangePassword("127.0.0.1", "", "oldpass123", "newpass456")
+	_, err = svc.ChangePassword("127.0.0.1", "", "oldpass123", "newpass456")
 	if err != nil {
 		t.Fatalf("ChangePassword failed: %v", err)
 	}
@@ -658,7 +658,7 @@ func TestChangePassword_SaveFailureKeepsOldPassword(t *testing.T) {
 	}
 	svc.SetPasswordHash(hash)
 
-	if err := svc.ChangePassword("127.0.0.1", "", "oldpass123", "newpass456"); err == nil {
+	if _, err := svc.ChangePassword("127.0.0.1", "", "oldpass123", "newpass456"); err == nil {
 		t.Fatal("expected save error")
 	}
 	if err := svc.VerifyPassword("oldpass123"); err != nil {
@@ -670,23 +670,50 @@ func TestChangePassword_SaveFailureKeepsOldPassword(t *testing.T) {
 }
 
 // TestChangePassword_EndsOtherSessions: смена пароля завершает остальные
-// сессии и сохраняет текущую.
+// сессии, а старый токен текущей больше не принимается — вместо него
+// выдаётся новая сессия (SESS-02, D-09). На диске остаётся ровно одна
+// сессия с новым password_fingerprint.
 func TestChangePassword_EndsOtherSessions(t *testing.T) {
-	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
+	dir := t.TempDir()
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute, DataDir: dir})
+	defer svc.Stop()
 	hash, _ := svc.HashPassword("oldpass123")
 	svc.SetPasswordHash(hash)
 
 	current, _ := svc.CreateSession()
 	other, _ := svc.CreateSession()
 
-	if err := svc.ChangePassword("127.0.0.1", current.Token, "oldpass123", "newpass456"); err != nil {
+	issued, err := svc.ChangePassword("127.0.0.1", current.Token, "oldpass123", "newpass456")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.ValidateSession(current.Token); err != nil {
-		t.Errorf("current session must survive: %v", err)
+	if issued == nil || issued.Token == "" {
+		t.Fatal("expected a reissued session")
+	}
+	if _, err := svc.ValidateSession(current.Token); err == nil {
+		t.Error("old token of the current session must be rejected after password change")
 	}
 	if _, err := svc.ValidateSession(other.Token); err == nil {
 		t.Error("other session must be ended after password change")
+	}
+	if _, err := svc.ValidateSession(issued.Token); err != nil {
+		t.Errorf("reissued session must be valid: %v", err)
+	}
+
+	svc.mu.RLock()
+	sessionCount := len(svc.sessions)
+	svc.mu.RUnlock()
+	if sessionCount != 1 {
+		t.Errorf("expected exactly 1 session after password change, got %d", sessionCount)
+	}
+
+	newFingerprint := passwordFingerprint(svc.GetPasswordHash())
+	restored := newFileStore(dir).loadSessions(newFingerprint)
+	if len(restored) != 1 {
+		t.Fatalf("expected exactly 1 session on disk under the new fingerprint, got %d", len(restored))
+	}
+	if restored[0].TokenHash != hashToken(issued.Token) {
+		t.Error("the session persisted on disk must be the reissued one")
 	}
 }
 
@@ -698,13 +725,13 @@ func TestChangePassword_RateLimited(t *testing.T) {
 
 	var last error
 	for i := 0; i < 5; i++ {
-		last = svc.ChangePassword("10.0.0.5", "", "wrong-guess", "newpass456")
+		_, last = svc.ChangePassword("10.0.0.5", "", "wrong-guess", "newpass456")
 	}
 	if !errors.Is(last, ErrTooManyAttempts) {
 		t.Errorf("expected ErrTooManyAttempts after repeated wrong guesses, got %v", last)
 	}
 	// Даже верный пароль не принимается, пока действует блокировка
-	if err := svc.ChangePassword("10.0.0.5", "", "oldpass123", "newpass456"); !errors.Is(err, ErrTooManyAttempts) {
+	if _, err := svc.ChangePassword("10.0.0.5", "", "oldpass123", "newpass456"); !errors.Is(err, ErrTooManyAttempts) {
 		t.Errorf("lockout must apply to the correct password too, got %v", err)
 	}
 }
@@ -733,7 +760,7 @@ func TestChangePassword_ConcurrentMemoryMatchesDisk(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = svc.ChangePassword("127.0.0.1", "", "oldpass123", pw)
+			_, _ = svc.ChangePassword("127.0.0.1", "", "oldpass123", pw)
 		}()
 	}
 	wg.Wait()
@@ -1158,6 +1185,127 @@ func TestTerminateOtherSessions_KeepsCurrent(t *testing.T) {
 
 	if n := svc.TerminateOtherSessions(current.Token); n != 0 {
 		t.Errorf("expected idempotent 0 on repeated call with only the current session left, got %d", n)
+	}
+}
+
+// --- 134-03 Task 2: перевыпуск сессии, горячая перезагрузка хеша ---
+
+// TestChangePassword_ReissuesCurrentSession: смена пароля сохраняет
+// remember_me на перевыпущенной сессии, а старые токены (свой и чужой)
+// после этого дают 401 с reason=password_changed (D-09).
+func TestChangePassword_ReissuesCurrentSession(t *testing.T) {
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
+	defer svc.Stop()
+	hash, _ := svc.HashPassword("oldpass123")
+	svc.SetPasswordHash(hash)
+
+	current, err := svc.CreateSessionWithMeta(SessionMeta{IP: "1.2.3.4", UserAgent: "test-agent", RememberMe: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	issued, err := svc.ChangePassword("127.0.0.1", current.Token, "oldpass123", "newpass456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !issued.RememberMe {
+		t.Error("expected remember_me to be preserved on the reissued session")
+	}
+	if issued.CSRFToken != DeriveCSRFToken(issued.Token) {
+		t.Error("expected csrf_token derived from the new token")
+	}
+
+	protected := svc.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	check := func(token string) (int, string) {
+		req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+		req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: token})
+		rec := httptest.NewRecorder()
+		protected(rec, req)
+		var resp struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.NewDecoder(rec.Body).Decode(&resp)
+		return rec.Code, resp.Reason
+	}
+
+	if code, reason := check(current.Token); code != http.StatusUnauthorized || reason != ReasonPasswordChanged {
+		t.Errorf("own old token: expected 401/%q, got %d/%q", ReasonPasswordChanged, code, reason)
+	}
+	if code, reason := check(other.Token); code != http.StatusUnauthorized || reason != ReasonPasswordChanged {
+		t.Errorf("other session: expected 401/%q, got %d/%q", ReasonPasswordChanged, code, reason)
+	}
+	if code, _ := check(issued.Token); code != http.StatusOK {
+		t.Errorf("reissued session must remain valid, got %d", code)
+	}
+}
+
+// TestReloadPasswordHash_InvalidatesAllAndResetsLimiter: ReloadPasswordHash
+// применяет новый хеш без рестарта, завершает все сессии с причиной
+// password_changed и полностью сбрасывает блокировки rate-limiter'а (D-22).
+func TestReloadPasswordHash_InvalidatesAllAndResetsLimiter(t *testing.T) {
+	svc := NewAuthService(Options{MaxLoginAttempts: 3, LockoutDuration: 5 * time.Minute})
+	defer svc.Stop()
+	oldHash, _ := svc.HashPassword("oldpass123")
+	svc.SetPasswordHash(oldHash)
+
+	sessionA, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionB, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 5; i++ {
+		_ = svc.rateLimiter.CheckLimit("9.9.9.9", 3, 5*time.Minute)
+	}
+	if svc.rateLimiter.GetLockoutRemaining("9.9.9.9") <= 0 {
+		t.Fatal("expected 9.9.9.9 to be locked out before ReloadPasswordHash")
+	}
+
+	var applied string
+	newHash, _ := svc.HashPassword("newpass456")
+	n := svc.ReloadPasswordHash(newHash, func(h string) { applied = h })
+
+	if n != 2 {
+		t.Errorf("expected 2 terminated sessions, got %d", n)
+	}
+	if applied != newHash {
+		t.Errorf("expected apply callback to receive the new hash, got %q", applied)
+	}
+	if svc.GetPasswordHash() != newHash {
+		t.Error("expected password hash to be updated")
+	}
+
+	protected := svc.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	for _, tok := range []string{sessionA.Token, sessionB.Token} {
+		req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+		req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: tok})
+		rec := httptest.NewRecorder()
+		protected(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("expected 401 for session terminated by ReloadPasswordHash, got %d", rec.Code)
+		}
+		var resp struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.NewDecoder(rec.Body).Decode(&resp)
+		if resp.Reason != ReasonPasswordChanged {
+			t.Errorf("expected reason %q, got %q", ReasonPasswordChanged, resp.Reason)
+		}
+	}
+
+	if svc.rateLimiter.GetLockoutRemaining("9.9.9.9") != 0 {
+		t.Error("expected rate limiter lockout to be reset by ReloadPasswordHash")
 	}
 }
 

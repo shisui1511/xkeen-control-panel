@@ -141,6 +141,18 @@ type IssuedSession struct {
 type RateLimiter struct {
 	attempts map[string]*LoginAttempts
 	mu       sync.RWMutex
+	// save — синхронный колбэк персистентности (D-04); nil в
+	// «только память»-режиме (тесты конструируют RateLimiter напрямую без
+	// него). Вызывается уже со снимком (копией по значению), не с
+	// указателями — тот же инвариант, что и snapshotSessionsLocked.
+	save func(map[string]LoginAttempts)
+	// dirty — есть ли рост счётчика, не записанный на диск с последнего
+	// flush; для установки/снятия блокировки и полного сброса пишем
+	// синхронно сразу (persistLocked), не дожидаясь тикера — блокировка
+	// обязана пережить рестарт (D-04), рост счётчика без блокировки — нет
+	// (RESEARCH считает потерю незаблокированного счётчика при аварийном
+	// падении приемлемой).
+	dirty bool
 }
 
 type LoginAttempts struct {
@@ -188,6 +200,22 @@ func NewAuthService(opts Options) *AuthService {
 		svc.sessions[s.TokenHash] = s
 	}
 
+	// Rate-limiter пишет на тот же store, что и сессии (D-04): блокировка
+	// IP переживает рестарт процесса на том же data_dir.
+	svc.rateLimiter.save = func(snapshot map[string]LoginAttempts) {
+		if err := svc.store.saveRateLimit(snapshot); err != nil {
+			log.Printf("[auth] failed to persist rate limiter state: %v", err)
+		}
+	}
+	if loaded := svc.store.loadRateLimit(); loaded != nil {
+		svc.rateLimiter.mu.Lock()
+		for ip, la := range loaded {
+			cp := la
+			svc.rateLimiter.attempts[ip] = &cp
+		}
+		svc.rateLimiter.mu.Unlock()
+	}
+
 	svc.startCleanup()
 	return svc
 }
@@ -199,6 +227,7 @@ func (a *AuthService) Stop() {
 		if err := a.Flush(); err != nil {
 			log.Printf("[auth] final flush on Stop failed: %v", err)
 		}
+		a.rateLimiter.flushIfDirty()
 		if a.store != nil {
 			a.store.close()
 		}
@@ -249,52 +278,107 @@ func (a *AuthService) persistSnapshot(fingerprint string, sessions []*Session) {
 // ErrTooManyAttempts — превышен лимит попыток ввода пароля.
 var ErrTooManyAttempts = errors.New("too many attempts")
 
-// ChangePassword меняет пароль администратора.
+// ChangePassword меняет пароль администратора и перевыпускает текущую
+// сессию (SESS-02, D-09): вместо того чтобы оставить сессию, стоящую за
+// keepToken, как есть, она тоже завершается вместе со всеми остальными —
+// клиент получает новый токен, новый CSRF и новую cookie тем же контекстом
+// входа (IP/UA/RememberMe), что был у старой. Это защищает от session
+// fixation через уже скомпрометированный токен: старый токен текущего
+// браузера после смены пароля больше не принимается ни при каких условиях.
 //
 //   - попытки ввода текущего пароля ограничены тем же лимитом, что и вход
 //     (ip), — украденная сессия не даёт подбирать пароль без ограничений;
 //   - новый хеш сначала сохраняется на диск и только потом применяется:
 //     при ошибке записи действующим остаётся старый пароль;
-//   - все сессии, кроме текущей (keepToken), завершаются — и в памяти, и на
-//     диске (новый password_fingerprint делает старые сессии недействительными
-//     и после рестарта).
-func (a *AuthService) ChangePassword(ip, keepToken, currentPassword, newPassword string) error {
+//   - все сессии удаляются с tombstone password_changed (включая старый
+//     токен keepToken) одним снимком в памяти, затем создаётся новая — итог
+//     один синхронный диск-write с новым password_fingerprint (через
+//     CreateSessionWithMeta), а не два отдельных.
+func (a *AuthService) ChangePassword(ip, keepToken, currentPassword, newPassword string) (*IssuedSession, error) {
 	if err := a.rateLimiter.CheckLimit(ip, a.maxLoginAttempts, a.lockoutDuration); err != nil {
-		return ErrTooManyAttempts
+		return nil, ErrTooManyAttempts
 	}
 	a.pwMu.Lock()
 	defer a.pwMu.Unlock()
 	if err := a.VerifyPassword(currentPassword); err != nil {
-		return err
+		return nil, err
 	}
 	a.rateLimiter.ResetAttempts(ip)
 
 	newHash, err := a.HashPassword(newPassword)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if a.onPasswordSet != nil {
 		if err := a.onPasswordSet(newHash); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	a.SetPasswordHash(newHash)
-	a.deleteSessionsExcept(keepToken)
-	return nil
+
+	meta := a.terminateAllForPasswordChange(keepToken)
+	return a.CreateSessionWithMeta(meta)
 }
 
-// deleteSessionsExcept завершает все сессии, кроме keepToken (сырой токен),
-// в памяти и синхронно на диске.
-func (a *AuthService) deleteSessionsExcept(keepToken string) {
+// terminateAllForPasswordChange удаляет из памяти все сессии (включая
+// keepToken) и ставит им tombstone password_changed — без немедленной записи
+// на диск: единственный write делает последующий CreateSessionWithMeta.
+// Возвращает контекст входа (IP/UA/RememberMe) сессии keepToken, если она
+// была жива, — чтобы перевыпущенная сессия выглядела для клиента так же, как
+// прежняя, кроме токена/CSRF.
+func (a *AuthService) terminateAllForPasswordChange(keepToken string) SessionMeta {
 	keepHash := hashToken(keepToken)
+	var meta SessionMeta
+
 	a.mu.Lock()
+	if s, ok := a.sessions[keepHash]; ok {
+		meta = SessionMeta{IP: s.IP, UserAgent: s.UserAgent, RememberMe: s.RememberMe}
+	}
+	now := a.now()
 	for hash := range a.sessions {
-		if hash != keepHash {
-			delete(a.sessions, hash)
-		}
+		delete(a.sessions, hash)
+		a.tombstones[hash] = tombstone{reason: ReasonPasswordChanged, until: now.Add(tombstoneTTL)}
 	}
 	a.mu.Unlock()
-	a.persistSessions()
+
+	return meta
+}
+
+// ReloadPasswordHash применяет новый хеш пароля без рестарта процесса
+// (D-22) — используется CLI-сбросом пароля (134-10), который меняет
+// password_hash в config.json, пока панель уже запущена, и должен
+// синхронизировать работающий процесс, а не полагаться на то, что
+// администратор его перезапустит. Под pwMu (та же сериализация, что и
+// ChangePassword): SetPasswordHash, затем apply(hash), если задан (даёт
+// вызывающему коду точку для собственной синхронизации, например
+// пересохранения своей копии конфига), затем все сессии получают tombstone
+// password_changed и удаляются одним снимком, и наконец rate-limiter
+// полностью сбрасывается (в памяти и на диске) — заблокированный IP сразу
+// снова может пробовать войти с новым паролем. Возвращает число завершённых
+// сессий.
+func (a *AuthService) ReloadPasswordHash(hash string, apply func(string)) int {
+	a.pwMu.Lock()
+	defer a.pwMu.Unlock()
+
+	a.SetPasswordHash(hash)
+	if apply != nil {
+		apply(hash)
+	}
+
+	now := a.now()
+	a.mu.Lock()
+	count := len(a.sessions)
+	for h := range a.sessions {
+		delete(a.sessions, h)
+		a.tombstones[h] = tombstone{reason: ReasonPasswordChanged, until: now.Add(tombstoneTTL)}
+	}
+	fingerprint, snapshot := a.snapshotSessionsLocked()
+	a.mu.Unlock()
+	a.persistSnapshot(fingerprint, snapshot)
+
+	a.rateLimiter.Reset()
+
+	return count
 }
 
 func (a *AuthService) startCleanup() {
@@ -331,6 +415,7 @@ func (a *AuthService) flushLoop() {
 		select {
 		case <-ticker.C:
 			a.flushIfDirty()
+			a.rateLimiter.flushIfDirty()
 		case <-a.stopCh:
 			return
 		}
@@ -727,6 +812,14 @@ func setSessionCookie(w http.ResponseWriter, token string, rememberMe bool, abso
 	clearLegacySessionCookie(w)
 }
 
+// WriteSessionCookie выставляет клиенту cookie сессии, выпущенной
+// ChangePassword — с текущим absoluteTTL и remember_me перевыпущенной
+// сессии (унаследованным от прежней, см. terminateAllForPasswordChange).
+func (a *AuthService) WriteSessionCookie(w http.ResponseWriter, s *IssuedSession) {
+	_, absoluteTTL := a.TTL()
+	setSessionCookie(w, s.Token, s.RememberMe, absoluteTTL)
+}
+
 // clearLegacySessionCookie гасит cookie старого имени (xcp_session), если
 // она осталась в браузере с версии до фазы 134.
 func clearLegacySessionCookie(w http.ResponseWriter) {
@@ -772,6 +865,7 @@ func (rl *RateLimiter) CheckLimit(ip string, maxAttempts int, lockoutDuration ti
 	attempts, exists := rl.attempts[ip]
 	if !exists {
 		rl.attempts[ip] = &LoginAttempts{Count: 1, LastAttempt: now}
+		rl.dirty = true
 		return nil
 	}
 
@@ -782,6 +876,7 @@ func (rl *RateLimiter) CheckLimit(ip string, maxAttempts int, lockoutDuration ti
 	if time.Since(attempts.LastAttempt) > 15*time.Minute {
 		attempts.Count = 1
 		attempts.LastAttempt = time.Now()
+		rl.dirty = true
 		return nil
 	}
 
@@ -790,15 +885,55 @@ func (rl *RateLimiter) CheckLimit(ip string, maxAttempts int, lockoutDuration ti
 
 	if attempts.Count >= maxAttempts {
 		attempts.LockedUntil = time.Now().Add(lockoutDuration)
+		// Блокировка обязана пережить рестарт (D-04) — пишем синхронно, не
+		// дожидаясь троттлинга.
+		rl.persistLocked()
 		return errors.New("too many login attempts, account locked")
 	}
 
+	rl.dirty = true
 	return nil
 }
 
 func (rl *RateLimiter) ResetAttempts(ip string) {
 	rl.mu.Lock()
 	delete(rl.attempts, ip)
+	rl.persistLocked()
+	rl.mu.Unlock()
+}
+
+// Reset снимает все блокировки и счётчики попыток — в памяти и синхронно на
+// диске (используется ReloadPasswordHash, D-22: горячая смена пароля не
+// должна оставлять старые блокировки действующими).
+func (rl *RateLimiter) Reset() {
+	rl.mu.Lock()
+	rl.attempts = make(map[string]*LoginAttempts)
+	rl.persistLocked()
+	rl.mu.Unlock()
+}
+
+// persistLocked пишет текущий снимок attempts на диск через save (если он
+// задан) и снимает dirty. Вызывающий код уже держит rl.mu.
+func (rl *RateLimiter) persistLocked() {
+	rl.dirty = false
+	if rl.save == nil {
+		return
+	}
+	snapshot := make(map[string]LoginAttempts, len(rl.attempts))
+	for k, v := range rl.attempts {
+		snapshot[k] = *v
+	}
+	rl.save(snapshot)
+}
+
+// flushIfDirty сохраняет накопленный (не заблокированный) рост счётчиков,
+// только если с последнего flush была активность — throttled-аналог
+// AuthService.flushIfDirty, вызывается тем же flushLoop/Stop.
+func (rl *RateLimiter) flushIfDirty() {
+	rl.mu.Lock()
+	if rl.dirty {
+		rl.persistLocked()
+	}
 	rl.mu.Unlock()
 }
 

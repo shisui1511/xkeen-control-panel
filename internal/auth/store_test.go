@@ -391,3 +391,86 @@ func TestSessions_ConcurrentAccess(t *testing.T) {
 
 	svc.Stop() // финальный вызов должен остаться безопасным
 }
+
+// --- 134-03 Task 2: rate-limiter на диске, сброс для CLI ---
+
+// TestRateLimiterStore_PersistsAcrossRestart проверяет D-04: блокировка IP
+// переживает Stop()/NewAuthService на том же data_dir — обходить блокировку
+// рестартом процесса нельзя.
+func TestRateLimiterStore_PersistsAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	svc1 := NewAuthService(Options{DataDir: dir, MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
+
+	for i := 0; i < 5; i++ {
+		_ = svc1.rateLimiter.CheckLimit("203.0.113.5", 5, 5*time.Minute)
+	}
+	if svc1.rateLimiter.GetLockoutRemaining("203.0.113.5") <= 0 {
+		t.Fatal("expected 203.0.113.5 to be locked before Stop()")
+	}
+	svc1.Stop()
+
+	svc2 := NewAuthService(Options{DataDir: dir, MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
+	defer svc2.Stop()
+
+	body, _ := json.Marshal(map[string]string{"password": "whatever"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+	req.RemoteAddr = "203.0.113.5:12345"
+	rec := httptest.NewRecorder()
+	svc2.HandleLogin(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected the lockout to survive a restart on the same data_dir, got %d", rec.Code)
+	}
+	var resp struct {
+		RetryAfter int `json:"retry_after"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.RetryAfter <= 0 {
+		t.Errorf("expected retry_after > 0, got %d", resp.RetryAfter)
+	}
+}
+
+// TestResetPersistedAuthState_ClearsFiles проверяет ResetPersistedAuthState
+// (CLI-сброс пароля, 134-10): sessions.json и ratelimit.json существуют,
+// пусты и 0600 после вызова; пустой dataDir — no-op.
+func TestResetPersistedAuthState_ClearsFiles(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAuthService(Options{DataDir: dir})
+	if _, err := svc.CreateSession(); err != nil {
+		t.Fatal(err)
+	}
+	_ = svc.rateLimiter.CheckLimit("1.2.3.4", 3, time.Minute)
+	svc.Stop()
+
+	if err := ResetPersistedAuthState(dir); err != nil {
+		t.Fatalf("ResetPersistedAuthState failed: %v", err)
+	}
+
+	for _, name := range []string{sessionsFileName, rateLimitFileName} {
+		path := filepath.Join(dir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", name, err)
+		}
+		if perm := info.Mode().Perm(); perm != 0600 {
+			t.Errorf("expected %s permissions 0600, got %04o", name, perm)
+		}
+	}
+
+	fresh := NewAuthService(Options{DataDir: dir})
+	defer fresh.Stop()
+	fresh.mu.RLock()
+	sessionCount := len(fresh.sessions)
+	fresh.mu.RUnlock()
+	if sessionCount != 0 {
+		t.Errorf("expected 0 sessions after reset, got %d", sessionCount)
+	}
+	if rem := fresh.rateLimiter.GetLockoutRemaining("1.2.3.4"); rem != 0 {
+		t.Errorf("expected rate limiter cleared after reset, got remaining=%v", rem)
+	}
+
+	if err := ResetPersistedAuthState(""); err != nil {
+		t.Errorf("expected nil for empty dataDir, got %v", err)
+	}
+}

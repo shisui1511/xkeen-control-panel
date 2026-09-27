@@ -112,6 +112,66 @@ func TestChangePassword_Handler(t *testing.T) {
 	}
 }
 
+// TestChangePassword_Handler_SetsNewCookieAndCSRF: успешная смена пароля
+// перевыпускает текущую сессию (SESS-02, D-09) — ответ содержит csrf_token,
+// соответствующий новому токену из Set-Cookie, а старый токен того же
+// браузера после этого больше не принимается.
+func TestChangePassword_Handler_SetsNewCookieAndCSRF(t *testing.T) {
+	api, authSvc := newAuthHandlerTestAPI(t, "initialpass123")
+	defer authSvc.Stop()
+
+	current, err := authSvc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"current_password": "initialpass123",
+		"new_password":     "brandnewpass456",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/change-password", bytes.NewReader(body))
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: current.Token})
+	rec := httptest.NewRecorder()
+	api.ChangePassword(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Status    string `json:"status"`
+		CSRFToken string `json:"csrf_token"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.CSRFToken == "" {
+		t.Fatal("expected a non-empty csrf_token in the response")
+	}
+
+	var newCookie *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == auth.SessionCookieName {
+			newCookie = c
+		}
+	}
+	if newCookie == nil {
+		t.Fatal("expected a new session cookie in the response")
+	}
+	if newCookie.Value == current.Token {
+		t.Error("expected a newly issued token, not the old one")
+	}
+	if resp.CSRFToken != auth.DeriveCSRFToken(newCookie.Value) {
+		t.Error("csrf_token in the response must match the new session's derived CSRF")
+	}
+
+	if _, err := authSvc.ValidateSession(current.Token); err == nil {
+		t.Error("the old token of the current session must be rejected after password change")
+	}
+	if _, err := authSvc.ValidateSession(newCookie.Value); err != nil {
+		t.Errorf("the newly issued session must be valid: %v", err)
+	}
+}
+
 // TestAuthSessionsHandlers exercises AuthSessions / AuthSessionTerminate /
 // AuthSessionsTerminateOthers end to end: list (with method guard), reject
 // terminating the current session, terminate an other session, repeated

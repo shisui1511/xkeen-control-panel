@@ -42,7 +42,8 @@ func (a *API) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	authSvc := a.srv.GetAuthService()
-	if err := authSvc.ChangePassword(ip, keepToken, req.CurrentPassword, req.NewPassword); err != nil {
+	issued, err := authSvc.ChangePassword(ip, keepToken, req.CurrentPassword, req.NewPassword)
+	if err != nil {
 		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
 			// 403, а не 401: сессия действительна, неверен только введённый
 			// пароль — клиент не должен разлогинивать пользователя
@@ -57,8 +58,13 @@ func (a *API) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Смена пароля перевыпускает текущую сессию (SESS-02, D-09): новая
+	// cookie и новый csrf_token — старый токен этого же браузера больше не
+	// принимается.
+	authSvc.WriteSessionCookie(w, issued)
+
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "csrf_token": issued.CSRFToken})
 }
 
 // AuthSessions handles GET /api/auth/sessions (protected) — returns the list
