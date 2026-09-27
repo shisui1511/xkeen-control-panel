@@ -99,8 +99,8 @@ test.describe('Dashboard 60/40 Redesign and Operational Controls', () => {
               gomaxprocs: 4,
               goarch: 'arm64'
             },
-            router_model: 'Keenetic Hopper (KN-3810)',
-            hostname: 'Keenetic-Router',
+            router_model: 'Netcraze Hopper 4G+ (NC-2312)',
+            hostname: 'Netcraze-Router',
             wan_status: 'online',
             default_gateway: '192.168.1.1',
             dns_servers: ['1.1.1.1', '8.8.8.8'],
@@ -218,7 +218,7 @@ test.describe('Dashboard 60/40 Redesign and Operational Controls', () => {
     await expect(modal).toContainText('Go Runtime');
     await expect(modal).toContainText('Goroutines');
     await expect(modal).toContainText('Heap Alloc');
-    await expect(modal).toContainText('Keenetic Hopper');
+    await expect(modal).toContainText('Netcraze Hopper 4G+');
 
     // Close modal
     const closeBtn = modal.locator('button:has-text("Закрыть"), button:has-text("Close")');
