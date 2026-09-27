@@ -444,7 +444,7 @@
           {/if}
 
           <!-- Dialer Proxy (Cascade) right (D-11) -->
-          {#if enableXray && !node.stub}
+          {#if enableXray && !node.stub && !protocolUnsupported}
             <div class="sub-node-dialer-proxy-container" data-testid="dialer-proxy-container">
               {#if dialerProxyTargets && dialerProxyTargets.length > 0}
                 <Select
