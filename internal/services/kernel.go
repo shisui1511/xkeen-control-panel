@@ -1649,7 +1649,7 @@ func isELF(path string) bool {
 	return magic == [4]byte{0x7f, 'E', 'L', 'F'}
 }
 
-func copyKernelFile(src, dst string) error {
+func copyKernelFile(src, dst string) (err error) {
 	safeSrc, err := sanitizeKernelPath(src)
 	if err != nil {
 		return fmt.Errorf("invalid src path: %w", err)
@@ -1675,7 +1675,13 @@ func copyKernelFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer d.Close()
+	// Ошибка Close записываемого файла означает недописанную копию ядра —
+	// её нельзя терять, иначе moveKernelFile удалит исходник
+	defer func() {
+		if cerr := d.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	if _, err := io.Copy(d, s); err != nil {
 		return err
