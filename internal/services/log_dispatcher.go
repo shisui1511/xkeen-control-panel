@@ -719,7 +719,7 @@ func (d *LogDispatcher) startFileConnectors() {
 		go d.tailFileFrom(src, start)
 	}
 
-	// Syslog connector: logread -f, or the Keenetic RCI.
+	// Syslog connector: logread -f, or the Keenetic/Netcraze firmware RCI.
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
@@ -965,7 +965,7 @@ type rciLogEntry struct {
 	} `json:"message"`
 }
 
-// fetchRCILog asks the Keenetic RCI for the last lines of the system log.
+// fetchRCILog asks the Keenetic/Netcraze firmware RCI for the last lines of the system log.
 func fetchRCILog(ctx context.Context, rciURL string, lines int) ([]rciLogEntry, error) {
 	body := fmt.Sprintf(`{"show":{"log":{"max-lines":%d}}}`, lines)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rciURL, strings.NewReader(body))
@@ -1026,7 +1026,7 @@ func rciLogLine(e rciLogEntry) string {
 	return line + " " + e.Message.Message
 }
 
-// pollRCILog ingests new Keenetic system log entries every interval.
+// pollRCILog ingests new Keenetic/Netcraze system log entries every interval.
 func (d *LogDispatcher) pollRCILog(rciURL string, interval time.Duration) {
 	d.pollRCILogFrom(rciURL, interval, -1)
 }
@@ -1051,7 +1051,7 @@ func (d *LogDispatcher) pollRCILogFrom(rciURL string, interval time.Duration, la
 		}
 		entries, err := fetchRCILog(d.ctx, rciURL, lines)
 		if err != nil {
-			// Not a Keenetic or RCI unavailable: retry rarely.
+			// Not a Keenetic/Netcraze router or RCI unavailable: retry rarely.
 			wait = time.Minute
 			continue
 		}

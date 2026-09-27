@@ -28,7 +28,7 @@ type ClientInfo struct {
 }
 
 // ClientResolver разрешает IP-адреса клиентов в имена устройств и сетевые метаданные
-// через опрос Keenetic RCI (`/rci/show/ip/hotspot`), fallback на `ndmc` и `/proc/net/arp`
+// через опрос RCI прошивки Keenetic/Netcraze (`/rci/show/ip/hotspot`), fallback на `ndmc` и `/proc/net/arp`
 // с кэшированием результатов.
 type ClientResolver struct {
 	mu        sync.RWMutex
@@ -116,7 +116,7 @@ func (r *ClientResolver) Resolve(ip string) (ClientInfo, bool) {
 }
 
 func (r *ClientResolver) fetchClients() map[string]ClientInfo {
-	// 1. Попытка через Keenetic RCI HTTP (порт 79)
+	// 1. Попытка через RCI HTTP прошивки Keenetic/Netcraze (порт 79)
 	if clients, err := r.fetchFromRCI(); err == nil && len(clients) > 0 {
 		return clients
 	}
@@ -178,7 +178,7 @@ func (r *ClientResolver) fetchFromRCI() (map[string]ClientInfo, error) {
 	return ParseRCIHotspotJSON(body)
 }
 
-// ParseRCIHotspotJSON парсит JSON-ответ Keenetic RCI hotspot.
+// ParseRCIHotspotJSON парсит JSON-ответ RCI hotspot прошивки Keenetic/Netcraze.
 func ParseRCIHotspotJSON(data []byte) (map[string]ClientInfo, error) {
 	var resp rciHotspotResponse
 	if err := json.Unmarshal(data, &resp); err != nil {

@@ -1341,7 +1341,7 @@ func pruneBackups(dir string, prefix string, keep int) error {
 }
 
 // kernelAssetArch переводит GOARCH панели в суффикс архитектуры релизных
-// ассетов ядер. Роутеры Keenetic на MIPS не имеют FPU, поэтому для mips/mipsle
+// ассетов ядер. Роутеры Keenetic/Netcraze на MIPS не имеют FPU, поэтому для mips/mipsle
 // выбираются softfloat-сборки.
 func kernelAssetArch(goarch string) string {
 	switch goarch {

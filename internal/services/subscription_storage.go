@@ -32,7 +32,7 @@ func normalizeMACtoHWID(mac string) string {
 }
 
 func detectRouterMAC() string {
-	// 1. Prefer br0 and eth0 (standard on Keenetic routers)
+	// 1. Prefer br0 and eth0 (standard on Keenetic/Netcraze routers)
 	for _, iface := range []string{"br0", "eth0"} {
 		data, err := os.ReadFile(filepath.Join("/sys/class/net", iface, "address"))
 		if err == nil {

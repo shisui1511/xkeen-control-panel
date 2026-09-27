@@ -170,7 +170,7 @@ func TestXKeenInstaller_CommandSetupOnce(t *testing.T) {
 }
 
 // TestXKeenInstaller_CommandShell: оболочка Entware важнее /bin/sh (на
-// Keenetic это NDM Shell Wrapper, теряющий аргументы `sh -c`), явная — важнее всех.
+// Keenetic/Netcraze это NDM Shell Wrapper, теряющий аргументы `sh -c`), явная — важнее всех.
 func TestXKeenInstaller_CommandShell(t *testing.T) {
 	dir := t.TempDir()
 	entware := filepath.Join(dir, "opt-sh")

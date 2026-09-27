@@ -61,7 +61,7 @@ type XKeenInstaller struct {
 // ErrXKeenNoEntware — установка невозможна: Entware не найден.
 var ErrXKeenNoEntware = errors.New("Entware not found: XKeen can only be installed on a router with Entware")
 
-// xkeenShellCandidates — оболочки по приоритету. /bin/sh на Keenetic — это
+// xkeenShellCandidates — оболочки по приоритету. /bin/sh на Keenetic/Netcraze — это
 // NDM Shell Wrapper: в режиме `-c` он отбрасывает аргументы после скрипта,
 // и установщик получал пустой путь. Шелл Entware передаёт их как положено.
 var xkeenShellCandidates = []string{"/opt/bin/sh", "/bin/sh"}
