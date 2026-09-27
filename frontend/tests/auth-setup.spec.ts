@@ -137,6 +137,56 @@ test('ошибка бэкенда показывается текстом, а н
   await expect(alert).not.toContainText('{');
 });
 
+test('пароль из чёрного списка — ошибка политики, запрос не уходит', async ({ page }) => {
+  const setupBodies = await mockSetupApi(page, { status: 200, body: { success: true } });
+  await page.goto('/');
+
+  await page.locator('#setup-code').fill('A1B2C3D4');
+  await page.locator('#password').fill('password123');
+  await page.locator('#confirm').fill('password123');
+  await page.locator('button[type="submit"]').click();
+
+  await expect(page.locator('.alert-error')).toHaveText('Пароль слишком простой — выберите другой');
+  expect(setupBodies).toHaveLength(0);
+});
+
+test('пароль из одного повторяющегося символа — ошибка политики, запрос не уходит', async ({
+  page
+}) => {
+  const setupBodies = await mockSetupApi(page, { status: 200, body: { success: true } });
+  await page.goto('/');
+
+  await page.locator('#setup-code').fill('A1B2C3D4');
+  await page.locator('#password').fill('aaaaaaaa');
+  await page.locator('#confirm').fill('aaaaaaaa');
+  await page.locator('button[type="submit"]').click();
+
+  await expect(page.locator('.alert-error')).toHaveText(
+    'Пароль не может состоять из одного повторяющегося символа'
+  );
+  expect(setupBodies).toHaveLength(0);
+});
+
+test('ответ бэкенда password_too_long — переведённый текст, а не сырой код', async ({ page }) => {
+  const setupBodies = await mockSetupApi(page, {
+    status: 400,
+    body: { success: false, error: 'password too long', code: 'password_too_long' }
+  });
+  await page.goto('/');
+
+  // Валидный по клиентской политике пароль (<=72 байта), чтобы запрос дошёл
+  // до мокнутого бэкенда — сервер здесь источник истины по факту длины.
+  await page.locator('#setup-code').fill('A1B2C3D4');
+  await page.locator('#password').fill('valid-password-1');
+  await page.locator('#confirm').fill('valid-password-1');
+  await page.locator('button[type="submit"]').click();
+
+  await expect.poll(() => setupBodies.length).toBe(1);
+  const alert = page.locator('.alert-error');
+  await expect(alert).toHaveText('Пароль не должен превышать 72 байта');
+  await expect(alert).not.toContainText('{');
+});
+
 test('несовпадающие пароли не отправляются на сервер', async ({ page }) => {
   const setupBodies = await mockSetupApi(page, { status: 200, body: { success: true } });
   await page.goto('/');

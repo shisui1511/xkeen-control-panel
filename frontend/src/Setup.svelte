@@ -4,6 +4,7 @@
   import Button from './components/Button.svelte';
   import AuthLayout from './components/AuthLayout.svelte';
   import PasswordField from './components/PasswordField.svelte';
+  import { validatePasswordPolicy, policyErrorKey } from './lib/passwordPolicy';
 
   const SETUP_CODE_COMMAND = 'xcp --setup-code';
   const RESET_PASSWORD_COMMAND = 'xcp --reset-password';
@@ -23,8 +24,9 @@
       return;
     }
 
-    if (password.length < 8) {
-      error = $t('auth.password_short');
+    const policyCode = validatePasswordPolicy(password);
+    if (policyCode) {
+      error = $t(policyErrorKey(policyCode) ?? 'auth.setup_error');
       return;
     }
 
@@ -59,8 +61,9 @@
         if (res.status === 429 && payload?.retry_after) {
           throw new Error($t('auth.too_many_attempts', { seconds: String(payload.retry_after) }));
         }
-        if (payload?.code === 'setup_code_invalid') {
-          throw new Error($t('auth.setup_code_invalid'));
+        const key = policyErrorKey(payload?.code);
+        if (key) {
+          throw new Error($t(key));
         }
         throw new Error(payload?.error || $t('auth.setup_error'));
       }
@@ -125,6 +128,7 @@
         disabled={loading}
         autocomplete="new-password"
       />
+      <p class="setup-desc setup-hint">{$t('auth.password_policy_hint')}</p>
     </div>
 
     <div class="form-group">
