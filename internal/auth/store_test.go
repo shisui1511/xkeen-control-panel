@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -227,4 +229,165 @@ func TestAuthService_StopIsIdempotent(t *testing.T) {
 	if after != before {
 		t.Errorf("expected no store writes after Stop(), before=%d after=%d", before, after)
 	}
+}
+
+// --- Task 3: лимит 20 сессий и отложенная запись last_seen ---
+
+// TestCreateSession_EvictsOldestByLastSeen проверяет D-03: при создании
+// 21-й сессии удаляется сессия с самой давней последней активностью,
+// остаётся ровно MaxSessions.
+func TestCreateSession_EvictsOldestByLastSeen(t *testing.T) {
+	svc := NewAuthService(Options{})
+	defer svc.Stop()
+
+	base := time.Now()
+	tokens := make([]string, 0, MaxSessions)
+	for i := 0; i < MaxSessions; i++ {
+		svc.now = func(i int) func() time.Time {
+			return func() time.Time { return base.Add(time.Duration(i) * time.Minute) }
+		}(i)
+		issued, err := svc.CreateSession()
+		if err != nil {
+			t.Fatalf("CreateSession #%d failed: %v", i, err)
+		}
+		tokens = append(tokens, issued.Token)
+	}
+
+	// Сессия №5 (индекс 4) искусственно делается самой давно неактивной.
+	oldestIdx := 4
+	svc.mu.Lock()
+	if s, ok := svc.sessions[hashToken(tokens[oldestIdx])]; ok {
+		s.LastSeen = base.Add(-time.Hour)
+	} else {
+		svc.mu.Unlock()
+		t.Fatalf("session #%d not found in map", oldestIdx)
+	}
+	svc.mu.Unlock()
+
+	svc.now = func() time.Time { return base.Add(time.Duration(MaxSessions) * time.Minute) }
+	if _, err := svc.CreateSession(); err != nil {
+		t.Fatalf("21st CreateSession failed: %v", err)
+	}
+
+	svc.mu.RLock()
+	count := len(svc.sessions)
+	_, oldestStillPresent := svc.sessions[hashToken(tokens[oldestIdx])]
+	svc.mu.RUnlock()
+
+	if count != MaxSessions {
+		t.Errorf("expected exactly %d sessions after eviction, got %d", MaxSessions, count)
+	}
+	if oldestStillPresent {
+		t.Error("expected the session with the oldest LastSeen to be evicted")
+	}
+}
+
+// TestValidateSession_DoesNotWritePerRequest проверяет T-134-05: 100
+// последовательных ValidateSession не дают ни одной дополнительной записи
+// на диск (только throttled flushLoop/Stop пишут накопленный last_seen).
+func TestValidateSession_DoesNotWritePerRequest(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAuthService(Options{DataDir: dir})
+	defer svc.Stop()
+
+	issued, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	before := svc.store.writes.Load()
+	for i := 0; i < 100; i++ {
+		if _, err := svc.ValidateSession(issued.Token); err != nil {
+			t.Fatalf("ValidateSession #%d failed: %v", i, err)
+		}
+	}
+	after := svc.store.writes.Load()
+
+	if after != before {
+		t.Errorf("expected no additional writes from 100 ValidateSession calls, before=%d after=%d", before, after)
+	}
+}
+
+// TestLastSeen_FlushedAndRestored проверяет, что явный flush (эмулирующий
+// срабатывание тикера flushLoop) переживает рестарт: LastSeen
+// восстановленной сессии не меньше значения до рестарта.
+func TestLastSeen_FlushedAndRestored(t *testing.T) {
+	dir := t.TempDir()
+	svc1 := NewAuthService(Options{DataDir: dir})
+
+	issued, err := svc1.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fixed := time.Now().Add(2 * time.Hour)
+	svc1.now = func() time.Time { return fixed }
+	if _, err := svc1.ValidateSession(issued.Token); err != nil {
+		t.Fatalf("ValidateSession failed: %v", err)
+	}
+
+	svc1.flushIfDirty()
+	svc1.Stop()
+
+	svc2 := NewAuthService(Options{DataDir: dir})
+	defer svc2.Stop()
+
+	svc2.mu.RLock()
+	var restoredLastSeen time.Time
+	for _, s := range svc2.sessions {
+		restoredLastSeen = s.LastSeen
+	}
+	svc2.mu.RUnlock()
+
+	if restoredLastSeen.Before(fixed.Add(-time.Second)) {
+		t.Errorf("expected restored LastSeen >= %v, got %v", fixed, restoredLastSeen)
+	}
+}
+
+// TestSessions_ConcurrentAccess проверяет, что параллельные
+// CreateSession/ValidateSession/Flush/Stop не дают гонок под -race и что
+// Stop() остаётся идемпотентным при конкурентных вызовах.
+func TestSessions_ConcurrentAccess(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewAuthService(Options{DataDir: dir})
+
+	var tokensMu sync.Mutex
+	var tokens []string
+
+	var wg sync.WaitGroup
+	for g := 0; g < 10; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 50; i++ {
+				switch i % 4 {
+				case 0:
+					issued, err := svc.CreateSession()
+					if err == nil {
+						tokensMu.Lock()
+						tokens = append(tokens, issued.Token)
+						tokensMu.Unlock()
+					}
+				case 1:
+					tokensMu.Lock()
+					var tok string
+					if n := len(tokens); n > 0 {
+						tok = tokens[i%n]
+					}
+					tokensMu.Unlock()
+					if tok == "" {
+						tok = "nonexistent"
+					}
+					_, _ = svc.ValidateSession(tok)
+				case 2:
+					_ = svc.Flush()
+				case 3:
+					svc.Stop()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	svc.Stop() // финальный вызов должен остаться безопасным
 }

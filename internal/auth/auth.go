@@ -69,7 +69,14 @@ type AuthService struct {
 	now              func() time.Time
 	stopCh           chan struct{}
 	stopOnce         sync.Once
+	// lastSeenDirty — есть ли накопленная активность (LastSeen), не
+	// записанная на диск с последнего flush; сбрасывается flushIfDirty.
+	lastSeenDirty bool
 }
+
+// MaxSessions — лимит одновременных сессий (D-03). При создании 21-й
+// удаляется сессия с самой давней последней активностью.
+const MaxSessions = 20
 
 // Session — состояние сессии, как оно живёт в памяти AuthService.
 // Сырые Token/CSRFToken здесь не хранятся (D-01/D-02): только их SHA-256,
@@ -264,6 +271,41 @@ func (a *AuthService) deleteSessionsExcept(keepToken string) {
 func (a *AuthService) startCleanup() {
 	go a.cleanupSessions()
 	go a.cleanupRateLimiter()
+	go a.flushLoop()
+}
+
+// flushIfDirty сохраняет снимок сессий, только если с последнего flush была
+// активность (lastSeenDirty) — иначе no-op. Структурные изменения
+// (создание/удаление сессии) пишутся синхронно сами по себе и не зависят от
+// этого флага; он покрывает только LastSeen, обновляемый на каждый
+// authenticated-запрос (T-134-05: без троттлинга это был бы один write на
+// каждый запрос — неприемлемый износ флеша роутера).
+func (a *AuthService) flushIfDirty() {
+	a.mu.Lock()
+	if !a.lastSeenDirty {
+		a.mu.Unlock()
+		return
+	}
+	a.lastSeenDirty = false
+	fingerprint, snapshot := a.snapshotSessionsLocked()
+	a.mu.Unlock()
+	a.persistSnapshot(fingerprint, snapshot)
+}
+
+// flushLoop сбрасывает накопленную активность (last_seen) не чаще раза в
+// lastSeenFlushInterval; финальный сброс делает Stop() через Flush()
+// (безусловно, не только при lastSeenDirty).
+func (a *AuthService) flushLoop() {
+	ticker := time.NewTicker(lastSeenFlushInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			a.flushIfDirty()
+		case <-a.stopCh:
+			return
+		}
+	}
 }
 
 // cleanupSessions выселяет по тикеру сессии, истёкшие по idle- или
@@ -380,6 +422,26 @@ func (a *AuthService) CreateSessionWithMeta(meta SessionMeta) (*IssuedSession, e
 
 	a.mu.Lock()
 	now := a.now()
+
+	// D-03: не больше MaxSessions одновременно. При превышении лимита
+	// удаляется сессия с самой давней последней активностью — единственный
+	// линейный проход по ≤MaxSessions записям, отдельный индекс не нужен.
+	if len(a.sessions) >= MaxSessions {
+		var oldestHash string
+		var oldestSeen time.Time
+		first := true
+		for hash, s := range a.sessions {
+			if first || s.LastSeen.Before(oldestSeen) {
+				oldestHash = hash
+				oldestSeen = s.LastSeen
+				first = false
+			}
+		}
+		if oldestHash != "" {
+			delete(a.sessions, oldestHash)
+		}
+	}
+
 	session := &Session{
 		ID:         hex.EncodeToString(idBytes),
 		TokenHash:  hashToken(token),
@@ -413,8 +475,8 @@ func (a *AuthService) CreateSession() (*IssuedSession, error) {
 // ValidateSession ищет сессию по хешу токена и проверяет её срок:
 // недействительна, если now >= CreatedAt+absoluteTTL или
 // now >= LastSeen+idleTTL (граница уже считается истечением). При активности
-// продлевает LastSeen только в памяти — на диск это не пишется на каждый
-// запрос (T-134-05), периодическая persist-логика — Task 3 (flushLoop).
+// продлевает LastSeen только в памяти и помечает lastSeenDirty — на диск это
+// пишется не на каждый запрос, а throttled через flushLoop (T-134-05).
 func (a *AuthService) ValidateSession(token string) (*Session, error) {
 	tokenHash := hashToken(token)
 
@@ -435,6 +497,7 @@ func (a *AuthService) ValidateSession(token string) (*Session, error) {
 	}
 
 	session.LastSeen = now
+	a.lastSeenDirty = true
 	a.mu.Unlock()
 
 	return session, nil
