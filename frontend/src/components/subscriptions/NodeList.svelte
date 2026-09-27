@@ -39,7 +39,11 @@
   // Протоколы, для которых Xray пишет outbound во фрагмент подписки
   // (internal/services/subscription.go: allowedXrayProtocols). Узел вне этого
   // списка (hysteria2, tuic) нельзя выбрать активным или использовать как
-  // цель каскада dialerProxy для Xray-подписки (WR-02).
+  // цель каскада dialerProxy для Xray-подписки (WR-02). Единого источника
+  // истины нет (IN-03 из код-ревью фазы 133): список продублирован вручную
+  // и закреплён тестом TestAllowedXrayProtocols_MatchesFrontendList
+  // (internal/services/subscription_selection_test.go) — при добавлении
+  // протокола в бэкенд-список обновить и этот массив.
   const XRAY_SELECTABLE_PROTOCOLS = new Set([
     'vless',
     'vmess',

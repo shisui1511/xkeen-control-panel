@@ -20,6 +20,16 @@ const maxSubscriptionBytes = 10 * 1024 * 1024
 // invalidIDCharsRe — символы, недопустимые в ID подписки (path injection).
 var invalidIDCharsRe = regexp.MustCompile(`[^a-z0-9_-]`)
 
+// allowedXrayProtocols — протоколы, для которых Xray пишет outbound во
+// фрагмент подписки (writeFragment). Список продублирован вручную во
+// фронтенде как XRAY_SELECTABLE_PROTOCOLS
+// (frontend/src/components/subscriptions/NodeList.svelte) — единого
+// источника истины нет (IN-03 из код-ревью фазы 133). При добавлении сюда
+// нового протокола обязательно обновить фронтенд-копию: иначе кнопка
+// выбора узла останется задизейблена для валидного узла. Список закреплён
+// тестом TestAllowedXrayProtocols_MatchesFrontendList в
+// subscription_selection_test.go — падение теста напоминает о ручной
+// синхронизации.
 var (
 	nonAlphanumericDashRe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
 	multiDashRe           = regexp.MustCompile(`-+`)
