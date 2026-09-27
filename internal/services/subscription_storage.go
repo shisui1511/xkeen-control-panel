@@ -721,7 +721,7 @@ func (s *SubscriptionService) Delete(id string) error {
 	}
 	if hadSelection {
 		if _, err := s.writeSelectionFilesLocked(); err != nil {
-			log.Printf("[Subscriptions] failed to rebuild default node file after delete of %s: %v", safeID, err)
+			log.Printf("[Subscriptions] failed to rebuild default node file after delete of %s: %v", utils.SanitizeLogInput(safeID), err)
 		}
 	}
 	if enableMihomo {

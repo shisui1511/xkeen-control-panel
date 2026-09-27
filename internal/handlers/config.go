@@ -709,7 +709,7 @@ func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data 
 	if !timedOut && !errors.As(err, &exitErr) {
 		// Валидатор не запустился (нет доступа, text file busy…): проверить
 		// нельзя — как и без бинарника, сохранённый конфиг остаётся
-		log.Printf("config validation skipped for %s: %v", cleanPath, err)
+		log.Printf("config validation skipped for %s: %v", utils.SanitizeLogInput(cleanPath), err)
 		return ""
 	}
 
