@@ -3,10 +3,13 @@ package auth
 import (
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -18,13 +21,32 @@ import (
 const (
 	SessionCookieName = "xcp_session"
 	CSRFHeaderName    = "X-CSRF-Token"
-	SessionDuration   = 24 * time.Hour
+
+	// defaultIdleTTL/defaultAbsoluteTTL — дефолты D-05, применяются когда
+	// Options не задаёт своих значений (например, старые тесты, вызывающие
+	// NewAuthService с нулевым Options.IdleTTL/AbsoluteTTL). Начиная с Task 2
+	// реальные значения приходят из config.json (session_idle_ttl_hours /
+	// session_absolute_ttl_days).
+	defaultIdleTTL     = 24 * time.Hour
+	defaultAbsoluteTTL = 30 * 24 * time.Hour
 )
+
+// Options конфигурирует AuthService. Заменяет прежний набор позиционных
+// аргументов NewAuthService — новые поля (IdleTTL/AbsoluteTTL/DataDir)
+// добавляются без изменения сигнатуры конструктора.
+type Options struct {
+	PasswordHash     string
+	MaxLoginAttempts int
+	LockoutDuration  time.Duration
+	IdleTTL          time.Duration
+	AbsoluteTTL      time.Duration
+	DataDir          string
+	OnPasswordSet    func(string) error
+}
 
 type AuthService struct {
 	passwordHash string
-	secureCookie bool
-	sessions     map[string]*Session
+	sessions     map[string]*Session // ключ — hashToken(сырой токен)
 	rateLimiter  *RateLimiter
 	mu           sync.RWMutex
 	// pwMu сериализует смену пароля целиком (проверка → запись на диск →
@@ -34,14 +56,44 @@ type AuthService struct {
 	onPasswordSet    func(string) error
 	maxLoginAttempts int
 	lockoutDuration  time.Duration
+	idleTTL          time.Duration
+	absoluteTTL      time.Duration
+	store            *fileStore
+	now              func() time.Time
 	stopCh           chan struct{}
+	stopOnce         sync.Once
 }
 
+// Session — состояние сессии, как оно живёт в памяти AuthService.
+// Сырые Token/CSRFToken здесь не хранятся (D-01/D-02): только их SHA-256,
+// тот же инвариант — на диске (см. persistedSession в store.go).
 type Session struct {
-	Token     string
-	CSRFToken string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	ID         string
+	TokenHash  string
+	CSRFHash   string
+	CreatedAt  time.Time
+	LastSeen   time.Time
+	RememberMe bool
+	UserAgent  string
+	IP         string
+}
+
+// SessionMeta — контекст входа, известный на момент создания сессии.
+type SessionMeta struct {
+	IP         string
+	UserAgent  string
+	RememberMe bool
+}
+
+// IssuedSession — то, что реально возвращается вызывающему коду при создании
+// сессии. Единственное место, где сырые Token/CSRFToken существуют в памяти
+// дольше одного выражения — они никогда не попадают в Session/на диск.
+type IssuedSession struct {
+	ID         string
+	Token      string
+	CSRFToken  string
+	CreatedAt  time.Time
+	RememberMe bool
 }
 
 type RateLimiter struct {
@@ -55,31 +107,98 @@ type LoginAttempts struct {
 	LockedUntil time.Time
 }
 
-func NewAuthService(passwordHash string, secureCookie bool, maxLoginAttempts int, lockoutDuration time.Duration, onPasswordSet func(string) error) *AuthService {
-	if maxLoginAttempts <= 0 {
-		maxLoginAttempts = 5
+func NewAuthService(opts Options) *AuthService {
+	if opts.MaxLoginAttempts <= 0 {
+		opts.MaxLoginAttempts = 5
 	}
-	if lockoutDuration <= 0 {
-		lockoutDuration = 5 * time.Minute
+	if opts.LockoutDuration <= 0 {
+		opts.LockoutDuration = 5 * time.Minute
+	}
+	if opts.IdleTTL <= 0 {
+		opts.IdleTTL = defaultIdleTTL
+	}
+	if opts.AbsoluteTTL <= 0 {
+		opts.AbsoluteTTL = defaultAbsoluteTTL
 	}
 
 	svc := &AuthService{
-		passwordHash:     passwordHash,
-		secureCookie:     secureCookie,
+		passwordHash:     opts.PasswordHash,
 		sessions:         make(map[string]*Session),
 		rateLimiter:      &RateLimiter{attempts: make(map[string]*LoginAttempts)},
-		onPasswordSet:    onPasswordSet,
-		maxLoginAttempts: maxLoginAttempts,
-		lockoutDuration:  lockoutDuration,
+		onPasswordSet:    opts.OnPasswordSet,
+		maxLoginAttempts: opts.MaxLoginAttempts,
+		lockoutDuration:  opts.LockoutDuration,
+		idleTTL:          opts.IdleTTL,
+		absoluteTTL:      opts.AbsoluteTTL,
+		store:            newFileStore(opts.DataDir),
+		now:              time.Now,
 		stopCh:           make(chan struct{}),
 	}
+
+	// Восстановление сессий, переживших рестарт процесса (SESS-01, D-01).
+	// Уже истёкшие (idle или absolute) при загрузке не восстанавливаются.
+	now := svc.now()
+	for _, s := range svc.store.loadSessions(passwordFingerprint(opts.PasswordHash)) {
+		if now.Sub(s.CreatedAt) >= svc.absoluteTTL || now.Sub(s.LastSeen) >= svc.idleTTL {
+			continue
+		}
+		svc.sessions[s.TokenHash] = s
+	}
+
 	svc.startCleanup()
 	return svc
 }
 
-// Stop stops background cleanup goroutines
+// Stop останавливает фоновые горутины очистки и делает финальный Flush
+// сессий на диск. Идемпотентен — повторный вызов безопасен (stopOnce).
 func (a *AuthService) Stop() {
-	close(a.stopCh)
+	a.stopOnce.Do(func() {
+		if err := a.Flush(); err != nil {
+			log.Printf("[auth] final flush on Stop failed: %v", err)
+		}
+		if a.store != nil {
+			a.store.close()
+		}
+		close(a.stopCh)
+	})
+}
+
+// snapshotSessionsLocked копирует текущие сессии по значению (не по
+// указателю), пока вызывающий код держит a.mu — это единственный способ
+// затем безопасно сериализовать снимок за пределами блокировки без гонки с
+// одновременной записью LastSeen другим запросом (go test -race).
+func (a *AuthService) snapshotSessionsLocked() (string, []*Session) {
+	sessions := make([]*Session, 0, len(a.sessions))
+	for _, s := range a.sessions {
+		cp := *s
+		sessions = append(sessions, &cp)
+	}
+	return passwordFingerprint(a.passwordHash), sessions
+}
+
+// Flush сохраняет снимок текущих сессий на диск синхронно.
+func (a *AuthService) Flush() error {
+	a.mu.Lock()
+	fingerprint, snapshot := a.snapshotSessionsLocked()
+	a.mu.Unlock()
+	return a.store.saveSessions(fingerprint, snapshot)
+}
+
+// persistSessions — Flush() с логированием ошибки вместо её возврата;
+// используется после структурных изменений сессий (создание/удаление),
+// которые сами по себе не возвращают ошибку вызывающему HTTP-хендлеру.
+func (a *AuthService) persistSessions() {
+	if err := a.Flush(); err != nil {
+		log.Printf("[auth] failed to persist sessions: %v", err)
+	}
+}
+
+// persistSnapshot — как persistSessions, но принимает уже готовый снимок
+// (снятый под a.mu в вызывающем коде, например в cleanupSessions).
+func (a *AuthService) persistSnapshot(fingerprint string, sessions []*Session) {
+	if err := a.store.saveSessions(fingerprint, sessions); err != nil {
+		log.Printf("[auth] failed to persist sessions: %v", err)
+	}
 }
 
 // ChangePassword validates the current password and replaces it with a new bcrypt hash.
@@ -93,7 +212,9 @@ var ErrTooManyAttempts = errors.New("too many attempts")
 //     (ip), — украденная сессия не даёт подбирать пароль без ограничений;
 //   - новый хеш сначала сохраняется на диск и только потом применяется:
 //     при ошибке записи действующим остаётся старый пароль;
-//   - все сессии, кроме текущей (keepToken), завершаются.
+//   - все сессии, кроме текущей (keepToken), завершаются — и в памяти, и на
+//     диске (новый password_fingerprint делает старые сессии недействительными
+//     и после рестарта).
 func (a *AuthService) ChangePassword(ip, keepToken, currentPassword, newPassword string) error {
 	if err := a.rateLimiter.CheckLimit(ip, a.maxLoginAttempts, a.lockoutDuration); err != nil {
 		return ErrTooManyAttempts
@@ -119,15 +240,18 @@ func (a *AuthService) ChangePassword(ip, keepToken, currentPassword, newPassword
 	return nil
 }
 
-// deleteSessionsExcept завершает все сессии, кроме keepToken.
+// deleteSessionsExcept завершает все сессии, кроме keepToken (сырой токен),
+// в памяти и синхронно на диске.
 func (a *AuthService) deleteSessionsExcept(keepToken string) {
+	keepHash := hashToken(keepToken)
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	for token := range a.sessions {
-		if token != keepToken {
-			delete(a.sessions, token)
+	for hash := range a.sessions {
+		if hash != keepHash {
+			delete(a.sessions, hash)
 		}
 	}
+	a.mu.Unlock()
+	a.persistSessions()
 }
 
 func (a *AuthService) startCleanup() {
@@ -135,20 +259,34 @@ func (a *AuthService) startCleanup() {
 	go a.cleanupRateLimiter()
 }
 
+// cleanupSessions выселяет по тикеру сессии, истёкшие по idle- или
+// absolute-TTL, и сохраняет снимок на диск, только если что-то было удалено
+// (structural change) — сама по себе периодическая проверка не пишет на
+// флеш, если выселять нечего.
 func (a *AuthService) cleanupSessions() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			now := time.Now()
 			a.mu.Lock()
-			for k, s := range a.sessions {
-				if now.After(s.ExpiresAt) {
-					delete(a.sessions, k)
+			now := a.now()
+			removed := false
+			for hash, s := range a.sessions {
+				if now.Sub(s.CreatedAt) >= a.absoluteTTL || now.Sub(s.LastSeen) >= a.idleTTL {
+					delete(a.sessions, hash)
+					removed = true
 				}
 			}
+			var fingerprint string
+			var snapshot []*Session
+			if removed {
+				fingerprint, snapshot = a.snapshotSessionsLocked()
+			}
 			a.mu.Unlock()
+			if removed {
+				a.persistSnapshot(fingerprint, snapshot)
+			}
 		case <-a.stopCh:
 			return
 		}
@@ -208,64 +346,105 @@ func (a *AuthService) VerifyPassword(password string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 }
 
-func (a *AuthService) CreateSession() (*Session, error) {
-	token := make([]byte, 32)
-	if _, err := rand.Read(token); err != nil {
-		return nil, err
-	}
-
-	csrfToken := make([]byte, 32)
-	if _, err := rand.Read(csrfToken); err != nil {
-		return nil, err
-	}
-
-	session := &Session{
-		Token:     base64.URLEncoding.EncodeToString(token),
-		CSRFToken: base64.URLEncoding.EncodeToString(csrfToken),
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(SessionDuration),
-	}
-
-	a.mu.Lock()
-	a.sessions[session.Token] = session
-	a.mu.Unlock()
-
-	return session, nil
+// DeriveCSRFToken выводит CSRF-токен из session-токена детерминированно
+// (HMAC-SHA256, ключ — сам токен). Позволяет восстановить действующий
+// CSRF-токен из cookie после рестарта процесса, не храня его сырым нигде,
+// кроме памяти запроса (D-02): на диске и в Session — только hashToken(CSRF).
+func DeriveCSRFToken(token string) string {
+	mac := hmac.New(sha256.New, []byte(token))
+	mac.Write([]byte("xcp-csrf-v1"))
+	return base64.URLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (a *AuthService) ValidateSession(token string) (*Session, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	// Evict expired sessions
-	now := time.Now()
-	for k, s := range a.sessions {
-		if now.After(s.ExpiresAt) {
-			delete(a.sessions, k)
-		}
+// CreateSessionWithMeta создаёt новую сессию с контекстом входа (IP,
+// User-Agent, «Запомнить меня»). Записывает синхронный снимок на диск.
+func (a *AuthService) CreateSessionWithMeta(meta SessionMeta) (*IssuedSession, error) {
+	idBytes := make([]byte, 16)
+	if _, err := rand.Read(idBytes); err != nil {
+		return nil, err
+	}
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, err
 	}
 
-	session, exists := a.sessions[token]
+	token := base64.URLEncoding.EncodeToString(tokenBytes)
+	csrfToken := DeriveCSRFToken(token)
+
+	a.mu.Lock()
+	now := a.now()
+	session := &Session{
+		ID:         hex.EncodeToString(idBytes),
+		TokenHash:  hashToken(token),
+		CSRFHash:   hashToken(csrfToken),
+		CreatedAt:  now,
+		LastSeen:   now,
+		RememberMe: meta.RememberMe,
+		UserAgent:  meta.UserAgent,
+		IP:         meta.IP,
+	}
+	a.sessions[session.TokenHash] = session
+	a.mu.Unlock()
+
+	a.persistSessions()
+
+	return &IssuedSession{
+		ID:         session.ID,
+		Token:      token,
+		CSRFToken:  csrfToken,
+		CreatedAt:  session.CreatedAt,
+		RememberMe: session.RememberMe,
+	}, nil
+}
+
+// CreateSession — обёртка CreateSessionWithMeta без контекста входа,
+// используется тестами и местами, где IP/UA/remember_me не важны.
+func (a *AuthService) CreateSession() (*IssuedSession, error) {
+	return a.CreateSessionWithMeta(SessionMeta{})
+}
+
+// ValidateSession ищет сессию по хешу токена и проверяет её срок:
+// недействительна, если now >= CreatedAt+absoluteTTL или
+// now >= LastSeen+idleTTL (граница уже считается истечением). При активности
+// продлевает LastSeen только в памяти — на диск это не пишется на каждый
+// запрос (T-134-05), периодическая persist-логика — Task 3 (flushLoop).
+func (a *AuthService) ValidateSession(token string) (*Session, error) {
+	tokenHash := hashToken(token)
+
+	a.mu.Lock()
+	now := a.now()
+	session, exists := a.sessions[tokenHash]
 	if !exists {
+		a.mu.Unlock()
 		return nil, errors.New("session not found")
 	}
 
-	if now.After(session.ExpiresAt) {
-		delete(a.sessions, token)
+	if now.Sub(session.CreatedAt) >= a.absoluteTTL || now.Sub(session.LastSeen) >= a.idleTTL {
+		delete(a.sessions, tokenHash)
+		fingerprint, snapshot := a.snapshotSessionsLocked()
+		a.mu.Unlock()
+		a.persistSnapshot(fingerprint, snapshot)
 		return nil, errors.New("session expired")
 	}
+
+	session.LastSeen = now
+	a.mu.Unlock()
 
 	return session, nil
 }
 
 func (a *AuthService) DeleteSession(token string) {
 	a.mu.Lock()
-	delete(a.sessions, token)
+	delete(a.sessions, hashToken(token))
 	a.mu.Unlock()
+	a.persistSessions()
 }
 
+// ValidateCSRF сравнивает хеш CSRF-токена из заголовка с сохранённым при
+// сессии CSRFHash — не зависит от того, восстановлена сессия из файла или
+// создана в этом же процессе (Pattern 3, вариант «б»).
 func (a *AuthService) ValidateCSRF(session *Session, csrfToken string) bool {
-	return hmac.Equal([]byte(session.CSRFToken), []byte(csrfToken))
+	return hmac.Equal([]byte(hashToken(csrfToken)), []byte(session.CSRFHash))
 }
 
 func (rl *RateLimiter) CheckLimit(ip string, maxAttempts int, lockoutDuration time.Duration) error {
@@ -408,24 +587,31 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	a.rateLimiter.ResetAttempts(ip)
 
-	session, err := a.CreateSession()
+	ua := r.UserAgent()
+	if len(ua) > 256 {
+		ua = ua[:256]
+	}
+	issued, err := a.CreateSessionWithMeta(SessionMeta{IP: ip, UserAgent: ua})
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "Failed to create session")
 		return
 	}
 
+	// Cookie-хардинг (__Host- префикс, remember_me, симметрия с логаутом) —
+	// Task 2; здесь сохраняется прежнее поведение (Secure по r.TLS, Expires
+	// по absolute-TTL) с новым источником токена/CSRF.
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookieName,
-		Value:    session.Token,
+		Value:    issued.Token,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteStrictMode,
-		Expires:  session.ExpiresAt,
+		Expires:  issued.CreatedAt.Add(a.absoluteTTL),
 	})
 
 	json.NewEncoder(w).Encode(map[string]string{
-		"csrf_token": session.CSRFToken,
+		"csrf_token": issued.CSRFToken,
 	})
 }
 
@@ -445,7 +631,7 @@ func (a *AuthService) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   a.secureCookie,
+		Secure:   true, // временно всегда true — полный симметричный хелпер cookie в Task 2
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
 	})
@@ -463,7 +649,7 @@ func (a *AuthService) HandleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := a.ValidateSession(cookie.Value)
+	_, err = a.ValidateSession(cookie.Value)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"authenticated":  false,
@@ -474,7 +660,9 @@ func (a *AuthService) HandleMe(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"authenticated": true,
-		"csrf_token":    session.CSRFToken,
+		// Выводится из токена cookie, а не из памяти сессии — тот же CSRF
+		// после рестарта процесса, без хранения сырого CSRF где-либо (D-02).
+		"csrf_token": DeriveCSRFToken(cookie.Value),
 	})
 }
 

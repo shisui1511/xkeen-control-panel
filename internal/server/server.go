@@ -31,21 +31,22 @@ type Server struct {
 }
 
 type Config struct {
-	Port             int
-	LoopbackPort     int
-	XRayConfigDir    string
-	XKeenBinary      string
-	MihomoConfigDir  string
-	MihomoBinary     string
-	AllowedRoots     []string
-	LogLevel         string
-	DataDir          string
-	PasswordHash     string
-	SecureCookie     bool
-	MaxLoginAttempts int
-	LockoutDuration  time.Duration
-	HTTPS            HTTPSConfig
-	SavePasswordHash func(string) error
+	Port               int
+	LoopbackPort       int
+	XRayConfigDir      string
+	XKeenBinary        string
+	MihomoConfigDir    string
+	MihomoBinary       string
+	AllowedRoots       []string
+	LogLevel           string
+	DataDir            string
+	PasswordHash       string
+	MaxLoginAttempts   int
+	LockoutDuration    time.Duration
+	SessionIdleTTL     time.Duration
+	SessionAbsoluteTTL time.Duration
+	HTTPS              HTTPSConfig
+	SavePasswordHash   func(string) error
 }
 
 type HTTPSConfig struct {
@@ -87,7 +88,15 @@ func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 		fileServer.ServeHTTP(w, r)
 	})
 
-	authService := auth.NewAuthService(cfg.PasswordHash, cfg.SecureCookie, cfg.MaxLoginAttempts, cfg.LockoutDuration, cfg.SavePasswordHash)
+	authService := auth.NewAuthService(auth.Options{
+		PasswordHash:     cfg.PasswordHash,
+		MaxLoginAttempts: cfg.MaxLoginAttempts,
+		LockoutDuration:  cfg.LockoutDuration,
+		IdleTTL:          cfg.SessionIdleTTL,
+		AbsoluteTTL:      cfg.SessionAbsoluteTTL,
+		DataDir:          cfg.DataDir,
+		OnPasswordSet:    cfg.SavePasswordHash,
+	})
 
 	return &Server{
 		cfg:         cfg,

@@ -16,7 +16,7 @@ import (
 func newAuthHandlerTestAPI(t *testing.T, initialPassword string) (*API, *auth.AuthService) {
 	t.Helper()
 
-	authSvcTemp := auth.NewAuthService("", false, 5, 0, nil)
+	authSvcTemp := auth.NewAuthService(auth.Options{MaxLoginAttempts: 5})
 	hash, err := authSvcTemp.HashPassword(initialPassword)
 	if err != nil {
 		t.Fatalf("hash password: %v", err)

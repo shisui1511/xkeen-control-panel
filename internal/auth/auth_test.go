@@ -12,7 +12,7 @@ import (
 )
 
 func newTestAuthService() *AuthService {
-	return NewAuthService("", false, 5, 5*time.Minute, nil)
+	return NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
 }
 
 // TestRateLimiterIPOnly verifies that the rate limiter uses only the IP (not IP:port).
@@ -65,27 +65,33 @@ func TestRateLimiterEviction(t *testing.T) {
 	}
 }
 
-// TestSessionEviction verifies that expired sessions are cleaned up on ValidateSession.
+// TestSessionEviction verifies that an expired session is evicted when it is
+// itself looked up via ValidateSession (the map-wide sweep on every call was
+// removed in Phase 134 — periodic eviction is now cleanupSessions's job).
 func TestSessionEviction(t *testing.T) {
 	svc := newTestAuthService()
+	defer svc.Stop()
 
-	// Manually insert an expired session
+	// Manually insert a session whose idle-TTL (default 24h) has elapsed.
 	expiredToken := "expired-token"
+	tokenHash := hashToken(expiredToken)
 	svc.mu.Lock()
-	svc.sessions[expiredToken] = &Session{
-		Token:     expiredToken,
-		CSRFToken: "csrf",
+	svc.sessions[tokenHash] = &Session{
+		ID:        "test-id",
+		TokenHash: tokenHash,
+		CSRFHash:  hashToken("csrf"),
 		CreatedAt: time.Now().Add(-48 * time.Hour),
-		ExpiresAt: time.Now().Add(-24 * time.Hour),
+		LastSeen:  time.Now().Add(-25 * time.Hour),
 	}
 	svc.mu.Unlock()
 
-	// Validate a different (non-existent) token — this triggers the eviction sweep
-	_, _ = svc.ValidateSession("nonexistent")
+	if _, err := svc.ValidateSession(expiredToken); err == nil {
+		t.Error("expected error validating an expired session")
+	}
 
 	// The expired session should now be gone
 	svc.mu.RLock()
-	_, exists := svc.sessions[expiredToken]
+	_, exists := svc.sessions[tokenHash]
 	svc.mu.RUnlock()
 
 	if exists {
@@ -96,7 +102,7 @@ func TestSessionEviction(t *testing.T) {
 // TestSetupRateLimit verifies that HandleSetup blocks after maxAttempts (3) are exhausted.
 // CheckLimit with maxAttempts=3: attempts 1,2 pass; attempt 3 triggers lock; attempt 4+ returns 429.
 func TestSetupRateLimit(t *testing.T) {
-	svc := NewAuthService("", false, 3, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 3, LockoutDuration: 5 * time.Minute})
 
 	// First 2 attempts should not be 429 (short password rejected by validation, not rate limit)
 	for i := 0; i < 2; i++ {
@@ -135,7 +141,7 @@ func TestSetupRateLimit(t *testing.T) {
 // TestRateLimitResponseDetails verifies that exceeding the attempts limit returns 429,
 // Retry-After header, and detailed JSON message.
 func TestRateLimitResponseDetails(t *testing.T) {
-	svc := NewAuthService("hash", false, 2, 10*time.Second, nil)
+	svc := NewAuthService(Options{PasswordHash: "hash", MaxLoginAttempts: 2, LockoutDuration: 10 * time.Second})
 
 	// 1st login attempt (wrong password) -> 401
 	body, _ := json.Marshal(map[string]string{"password": "wrong"})
@@ -248,7 +254,7 @@ func TestRateLimiter_IPOnly(t *testing.T) {
 
 // TestChangePassword_WrongCurrent (T017): wrong current password returns error.
 func TestChangePassword_WrongCurrent(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
 	hash, err := svc.HashPassword("correctpass")
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +270,7 @@ func TestChangePassword_WrongCurrent(t *testing.T) {
 // TestCSRFRotation_OnLogin verifies that each login creates a new session with
 // a unique CSRF token (token rotation on re-login).
 func TestCSRFRotation_OnLogin(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
 	hash, err := svc.HashPassword("securepass123")
 	if err != nil {
 		t.Fatal(err)
@@ -302,7 +308,7 @@ func TestCSRFRotation_OnLogin(t *testing.T) {
 
 // TestChangePassword_Success (T017): correct current password → password changed.
 func TestChangePassword_Success(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
 	hash, err := svc.HashPassword("oldpass123")
 	if err != nil {
 		t.Fatal(err)
@@ -336,8 +342,8 @@ func TestAuthService_SessionLifecycle(t *testing.T) {
 	if session.Token == "" || session.CSRFToken == "" {
 		t.Fatal("expected non-empty Token and CSRFToken")
 	}
-	if session.ExpiresAt.Before(time.Now()) {
-		t.Fatal("expected ExpiresAt in the future")
+	if session.CreatedAt.After(time.Now()) {
+		t.Fatal("expected CreatedAt not in the future")
 	}
 
 	// 2. Validate valid session
@@ -345,8 +351,8 @@ func TestAuthService_SessionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidateSession failed: %v", err)
 	}
-	if validated.Token != session.Token {
-		t.Errorf("validated token mismatch: got %q, want %q", validated.Token, session.Token)
+	if validated.TokenHash != hashToken(session.Token) {
+		t.Errorf("validated token hash mismatch: got %q, want %q", validated.TokenHash, hashToken(session.Token))
 	}
 
 	// 3. Validate non-existent token
@@ -364,7 +370,7 @@ func TestAuthService_SessionLifecycle(t *testing.T) {
 }
 
 func TestAuthService_Stop_And_CleanupGoroutines(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
 	// Stop closes stopCh; ensure multiple or clean stop does not panic
 	svc.Stop()
 }
@@ -373,13 +379,17 @@ func TestAuthService_ValidateCSRF(t *testing.T) {
 	svc := newTestAuthService()
 	defer svc.Stop()
 
-	session, err := svc.CreateSession()
+	issued, err := svc.CreateSession()
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
+	session, err := svc.ValidateSession(issued.Token)
+	if err != nil {
+		t.Fatalf("ValidateSession failed: %v", err)
+	}
 
 	// 1. Valid CSRF
-	if !svc.ValidateCSRF(session, session.CSRFToken) {
+	if !svc.ValidateCSRF(session, issued.CSRFToken) {
 		t.Error("expected ValidateCSRF to return true for matching CSRF token")
 	}
 
@@ -562,7 +572,7 @@ func TestAuthService_HandleSetup_Scenarios(t *testing.T) {
 		return nil
 	}
 
-	svc := NewAuthService("", false, 5, 5*time.Minute, onPasswordSet)
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute, OnPasswordSet: onPasswordSet})
 	defer svc.Stop()
 
 	// 1. Method not allowed (GET)
@@ -638,9 +648,9 @@ func TestRateLimiter_Reset_And_GetLockoutRemaining(t *testing.T) {
 // сохранить, действующим остаётся старый пароль (иначе после перезапуска
 // вернулся бы старый, а до него работал бы «несохранённый» новый).
 func TestChangePassword_SaveFailureKeepsOldPassword(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, func(string) error {
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute, OnPasswordSet: func(string) error {
 		return errors.New("disk full")
-	})
+	}})
 	hash, err := svc.HashPassword("oldpass123")
 	if err != nil {
 		t.Fatal(err)
@@ -661,7 +671,7 @@ func TestChangePassword_SaveFailureKeepsOldPassword(t *testing.T) {
 // TestChangePassword_EndsOtherSessions: смена пароля завершает остальные
 // сессии и сохраняет текущую.
 func TestChangePassword_EndsOtherSessions(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
 	hash, _ := svc.HashPassword("oldpass123")
 	svc.SetPasswordHash(hash)
 
@@ -681,7 +691,7 @@ func TestChangePassword_EndsOtherSessions(t *testing.T) {
 
 // TestChangePassword_RateLimited: подбор текущего пароля упирается в лимит.
 func TestChangePassword_RateLimited(t *testing.T) {
-	svc := NewAuthService("", false, 3, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 3, LockoutDuration: 5 * time.Minute})
 	hash, _ := svc.HashPassword("oldpass123")
 	svc.SetPasswordHash(hash)
 
@@ -703,13 +713,13 @@ func TestChangePassword_RateLimited(t *testing.T) {
 func TestChangePassword_ConcurrentMemoryMatchesDisk(t *testing.T) {
 	var diskMu sync.Mutex
 	var disk string
-	svc := NewAuthService("", false, 100, time.Minute, func(h string) error {
+	svc := NewAuthService(Options{MaxLoginAttempts: 100, LockoutDuration: time.Minute, OnPasswordSet: func(h string) error {
 		time.Sleep(5 * time.Millisecond) // окно для гонки между записью и применением
 		diskMu.Lock()
 		disk = h
 		diskMu.Unlock()
 		return nil
-	})
+	}})
 	defer svc.Stop()
 	hash, err := svc.HashPassword("oldpass123")
 	if err != nil {
@@ -737,10 +747,10 @@ func TestChangePassword_ConcurrentMemoryMatchesDisk(t *testing.T) {
 // TestHandleSetup_ConcurrentOnlyOneWins: из параллельных первичных настроек
 // проходит одна, вторая не перезаписывает уже заданный пароль.
 func TestHandleSetup_ConcurrentOnlyOneWins(t *testing.T) {
-	svc := NewAuthService("", false, 100, time.Minute, func(string) error {
+	svc := NewAuthService(Options{MaxLoginAttempts: 100, LockoutDuration: time.Minute, OnPasswordSet: func(string) error {
 		time.Sleep(5 * time.Millisecond)
 		return nil
-	})
+	}})
 	defer svc.Stop()
 
 	codes := make(chan int, 2)

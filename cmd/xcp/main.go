@@ -167,7 +167,6 @@ func main() {
 		LogLevel:         cfg.LogLevel,
 		DataDir:          cfg.DataDir,
 		PasswordHash:     cfg.Auth.PasswordHash,
-		SecureCookie:     cfg.Auth.SecureCookie,
 		MaxLoginAttempts: cfg.Auth.MaxLoginAttempts,
 		LockoutDuration:  time.Duration(cfg.Auth.LockoutDuration) * time.Minute,
 		HTTPS: server.HTTPSConfig{
