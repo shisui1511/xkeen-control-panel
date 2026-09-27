@@ -9,6 +9,16 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
+// DefaultPanelPort и DefaultLoopbackPort — дефолтные HTTP/HTTPS-порты панели.
+// Именованные константы вместо литералов там, где панель ссылается на свой
+// собственный дефолтный адрес (например, в mihomo proxy-provider блоке
+// подписки, subscription.go), чтобы рассинхронизация с Default() ниже была
+// невозможна при смене дефолтного порта (IN-02 из код-ревью фазы 133).
+const (
+	DefaultPanelPort    = 8090
+	DefaultLoopbackPort = 8091
+)
+
 // Config represents the main application configuration structure.
 type Config struct {
 	Port            int         `json:"port"`
@@ -76,8 +86,8 @@ func findXKeen() string {
 // Default returns the default configuration for the application.
 func Default() *Config {
 	return &Config{
-		Port:            8090,
-		LoopbackPort:    8091,
+		Port:            DefaultPanelPort,
+		LoopbackPort:    DefaultLoopbackPort,
 		XRayConfigDir:   "/opt/etc/xray/configs",
 		XRayAPIPort:     10085,
 		XKeenBinary:     findXKeen(),

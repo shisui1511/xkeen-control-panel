@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -569,10 +570,10 @@ func (s *SubscriptionService) SetPanelAddress(port int, https bool, loopbackPort
 
 func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscription, port int, https bool, loopbackPort int) string {
 	if port == 0 {
-		port = 8090
+		port = config.DefaultPanelPort
 	}
 	if loopbackPort == 0 {
-		loopbackPort = 8091
+		loopbackPort = config.DefaultLoopbackPort
 	}
 
 	scheme := "http"
