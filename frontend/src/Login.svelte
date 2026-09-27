@@ -3,8 +3,10 @@
   import { apiFetch } from './lib/api';
   import Button from './components/Button.svelte';
   import AuthLayout from './components/AuthLayout.svelte';
+  import PasswordField from './components/PasswordField.svelte';
 
   let password = $state('');
+  let rememberMe = $state(false);
   let error = $state('');
   let loading = $state(false);
   async function handleLogin() {
@@ -20,7 +22,7 @@
       const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password, remember_me: rememberMe }),
         skip401Redirect: true
       });
 
@@ -68,25 +70,49 @@
 </script>
 
 <AuthLayout>
-  <div class="form-group" style="margin-bottom:14px;">
+  <div class="form-group">
     <label class="form-label" for="password">{$t('auth.password')}</label>
-    <input
+    <PasswordField
       id="password"
-      type="password"
-      class="input"
       bind:value={password}
       onkeydown={handleKeydown}
       placeholder={$t('auth.enter_password')}
       disabled={loading}
       autocomplete="current-password"
-      {@attach (node) => node.focus()}
+      autofocus
     />
+    <label class="remember-me">
+      <input type="checkbox" bind:checked={rememberMe} />
+      {$t('auth.remember_me')}
+    </label>
     {#if error}
-      <div class="alert alert-error" style="margin-top:10px;margin-bottom:0;">{error}</div>
+      <div class="alert alert-error">{error}</div>
     {/if}
   </div>
 
-  <Button variant="primary" class="login-btn" onclick={handleLogin} {loading}>
+  <Button variant="primary" class="login-btn" onclick={handleLogin} {loading} disabled={!password}>
     {loading ? $t('auth.logging_in') : $t('auth.login_btn')}
   </Button>
 </AuthLayout>
+
+<style>
+  .remember-me {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: var(--font-size-sm);
+    color: var(--fg-secondary);
+    cursor: pointer;
+  }
+
+  .remember-me input[type='checkbox'] {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  .alert-error {
+    margin-top: 10px;
+    margin-bottom: 0;
+  }
+</style>
