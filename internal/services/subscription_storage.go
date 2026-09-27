@@ -468,7 +468,6 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for i := range s.subscriptions {
 		if s.subscriptions[i].ID == safeID {
 			// Partial update: preserve ID and all runtime-fetched data.
@@ -659,15 +658,22 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			}
 
 			if err := s.save(); err != nil {
+				s.mu.Unlock()
 				return err
 			}
 
+			// Рестарт ядра — вне блокировки: xkeen -restart синхронный и может
+			// занимать несколько секунд, всё это время нельзя держать s.mu и
+			// замораживать остальные операции с подписками (WR-01, тот же
+			// паттерн, что в SetNodeDialerProxy/SetActiveNode/ClearActiveNode).
+			s.mu.Unlock()
 			if needRestart {
 				s.restartXkeenIfRunning(safeID, "update (disabled integration)")
 			}
 			return nil
 		}
 	}
+	s.mu.Unlock()
 	return fmt.Errorf("subscription not found")
 }
 
@@ -679,7 +685,6 @@ func (s *SubscriptionService) Delete(id string) error {
 	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	// Find subscription
 	var sub *Subscription
 	for i := range s.subscriptions {
@@ -689,6 +694,7 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 	}
 	if sub == nil {
+		s.mu.Unlock()
 		return fmt.Errorf("subscription not found")
 	}
 
@@ -763,10 +769,15 @@ func (s *SubscriptionService) Delete(id string) error {
 	}
 
 	if err := s.save(); err != nil {
+		s.mu.Unlock()
 		return err
 	}
 
-	if enableXray || enableMihomo {
+	needRestart := enableXray || enableMihomo
+	// Рестарт ядра — вне блокировки (WR-01, тот же паттерн, что в
+	// SetNodeDialerProxy/SetActiveNode/ClearActiveNode).
+	s.mu.Unlock()
+	if needRestart {
 		s.restartXkeenIfRunning(safeID, "delete")
 	}
 	return nil
