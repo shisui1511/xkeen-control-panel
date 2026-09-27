@@ -14,7 +14,6 @@
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { isServiceRestarting, activateRestartGrace } from './lib/serviceGrace';
   import Sidebar from './components/Sidebar.svelte';
-  import Toast from './components/Toast.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import Card from './components/Card.svelte';
   import Button from './components/Button.svelte';
@@ -1627,7 +1626,6 @@
   </div>
 </div>
 
-<Toast />
 <ConfirmDialog />
 <MihomoSocketMigrateModal
   bind:open={showMihomoMigrateModal}

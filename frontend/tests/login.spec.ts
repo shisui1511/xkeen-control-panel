@@ -124,3 +124,71 @@ test('429 с retry_after — ошибка содержит число секун
 
   await expect(page.locator('.alert-error')).toContainText('30');
 });
+
+test('«Забыли пароль?» раскрывает инструкцию с командой сброса', async ({ page }) => {
+  await mockLoginApi(page);
+  await page.goto('/');
+
+  await expect(page.locator('.forgot-password-instructions')).toBeHidden();
+
+  await page.locator('.forgot-password summary').click();
+
+  await expect(page.locator('.forgot-password-instructions')).toBeVisible();
+  await expect(page.locator('.forgot-password code')).toHaveText('xcp --reset-password');
+});
+
+test('копирование команды сброса пароля — тост об успехе', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await mockLoginApi(page);
+  await page.goto('/');
+
+  await page.locator('.forgot-password summary').click();
+  await page.locator('.forgot-password-cmd button').click();
+
+  await expect(page.locator('.toast--success')).toContainText('Команда скопирована');
+  const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clipboardText).toBe('xcp --reset-password');
+});
+
+test('ошибка копирования — тост об ошибке, команда остаётся видимой', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.reject(new Error('Clipboard write denied')) },
+      configurable: true
+    });
+  });
+  await mockLoginApi(page);
+  await page.goto('/');
+
+  await page.locator('.forgot-password summary').click();
+  await page.locator('.forgot-password-cmd button').click();
+
+  await expect(page.locator('.toast--error')).toContainText('Не удалось скопировать');
+  await expect(page.locator('.forgot-password code')).toBeVisible();
+});
+
+test('overflow: инструкция «Забыли пароль?» не создаёт горизонтальный скролл на узком экране', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 380, height: 740 });
+  await mockLoginApi(page);
+  await page.goto('/');
+
+  await page.locator('.forgot-password summary').click();
+
+  const fits = await page
+    .locator('.forgot-password')
+    .evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+  expect(fits).toBe(true);
+});
+
+test('инструкция не раскрывает алиас или IP роутера разработчика', async ({ page }) => {
+  await mockLoginApi(page);
+  await page.goto('/');
+
+  await page.locator('.forgot-password summary').click();
+
+  const text = await page.locator('.forgot-password').innerText();
+  expect(text).not.toContain('router-shi');
+  expect(text).not.toContain('172.16.');
+});

@@ -36,6 +36,7 @@
   import Upload from './icons/Upload.svelte';
   import Eye from './icons/Eye.svelte';
   import EyeOff from './icons/EyeOff.svelte';
+  import Copy from './icons/Copy.svelte';
 
   let {
     name,
@@ -122,4 +123,6 @@
   <Eye {size} {color} class={className} />
 {:else if name === 'eye-off'}
   <EyeOff {size} {color} class={className} />
+{:else if name === 'copy'}
+  <Copy {size} {color} class={className} />
 {/if}

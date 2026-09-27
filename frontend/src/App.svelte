@@ -5,6 +5,7 @@
   import Login from './Login.svelte';
   import Setup from './Setup.svelte';
   import Dashboard from './Dashboard.svelte';
+  import Toast from './components/Toast.svelte';
   import './styles/global.css';
 
   let authenticated = $state(false);
@@ -77,3 +78,5 @@
 {:else}
   <Dashboard />
 {/if}
+
+<Toast />
