@@ -4,6 +4,7 @@
   import Button from './components/Button.svelte';
   import AuthLayout from './components/AuthLayout.svelte';
   import PasswordField from './components/PasswordField.svelte';
+  import PasswordStrengthMeter from './components/PasswordStrengthMeter.svelte';
   import { validatePasswordPolicy, policyErrorKey } from './lib/passwordPolicy';
 
   const SETUP_CODE_COMMAND = 'xcp --setup-code';
@@ -128,6 +129,7 @@
         disabled={loading}
         autocomplete="new-password"
       />
+      <PasswordStrengthMeter {password} userInputs={[setupCode]} />
       <p class="setup-desc setup-hint">{$t('auth.password_policy_hint')}</p>
     </div>
 

@@ -4,6 +4,18 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 export default defineConfig({
   plugins: [svelte()],
   base: './',
+  optimizeDeps: {
+    // Пакеты грузятся только динамическим import() внутри passwordStrength.ts
+    // (D-18); включение сюда лишь стабилизирует dev-сервер Vite при первом
+    // ленивом импорте (без этого он перезагружает страницу посреди
+    // Playwright-теста) — на состав production-сборки не влияет.
+    include: [
+      '@zxcvbn-ts/core',
+      '@zxcvbn-ts/language-common',
+      '@zxcvbn-ts/language-en',
+      '@zxcvbn-ts/language-ru'
+    ]
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
