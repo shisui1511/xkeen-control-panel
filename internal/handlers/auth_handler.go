@@ -27,11 +27,6 @@ func (a *API) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.NewPassword) < 8 {
-		a.errorResponse(w, a.t(r, "auth.password_too_short"), http.StatusBadRequest)
-		return
-	}
-
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		ip = r.RemoteAddr
@@ -52,6 +47,13 @@ func (a *API) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, auth.ErrTooManyAttempts) {
 			a.errorResponse(w, a.t(r, "auth.rate_limited"), http.StatusTooManyRequests)
+			return
+		}
+		// Ошибки политики нового пароля (D-17) — 400 с машиночитаемым кодом,
+		// переведённым текстом; попытка уже сброшена ResetAttempts выше в
+		// AuthService.ChangePassword, IP не блокируется.
+		if code := auth.PolicyErrorCode(err); code != "" {
+			JSONErrorCode(w, http.StatusBadRequest, code, a.t(r, "auth."+code))
 			return
 		}
 		a.errorResponse(w, a.t(r, "error.internal"), http.StatusInternalServerError)

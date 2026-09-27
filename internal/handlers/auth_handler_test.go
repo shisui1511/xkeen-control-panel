@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -169,6 +170,51 @@ func TestChangePassword_Handler_SetsNewCookieAndCSRF(t *testing.T) {
 	}
 	if _, err := authSvc.ValidateSession(newCookie.Value); err != nil {
 		t.Errorf("the newly issued session must be valid: %v", err)
+	}
+}
+
+// TestChangePassword_Handler_PolicyCodes проверяет, что ошибки политики
+// нового пароля (D-17) приходят как 400 с машиночитаемым code и переведённым
+// текстом, а не как общий 500 или 400 без кода; попытка с блокирующей
+// ошибкой политики не блокирует IP для последующей успешной смены.
+func TestChangePassword_Handler_PolicyCodes(t *testing.T) {
+	api, authSvc := newAuthHandlerTestAPI(t, "initialpass123")
+	defer authSvc.Stop()
+
+	post := func(newPassword string) (int, string) {
+		body, _ := json.Marshal(map[string]string{
+			"current_password": "initialpass123",
+			"new_password":     newPassword,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/change-password", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+		api.ChangePassword(rec, req)
+		var resp struct {
+			Code string `json:"code"`
+		}
+		json.NewDecoder(rec.Body).Decode(&resp)
+		return rec.Code, resp.Code
+	}
+
+	// Слишком длинный (73 байта) — 400 password_too_long, не 500.
+	if status, code := post(strings.Repeat("a", 73)); status != http.StatusBadRequest || code != "password_too_long" {
+		t.Errorf("expected 400 password_too_long, got %d %q", status, code)
+	}
+
+	// Из чёрного списка — 400 password_blacklisted.
+	if status, code := post("password123"); status != http.StatusBadRequest || code != "password_blacklisted" {
+		t.Errorf("expected 400 password_blacklisted, got %d %q", status, code)
+	}
+
+	// Совпадает с текущим — 400 password_same_as_current.
+	if status, code := post("initialpass123"); status != http.StatusBadRequest || code != "password_same_as_current" {
+		t.Errorf("expected 400 password_same_as_current, got %d %q", status, code)
+	}
+
+	// Ни одна из ошибок политики не должна была заблокировать IP: успешная
+	// смена всё ещё проходит.
+	if status, _ := post("brandnewvalid1"); status != http.StatusOK {
+		t.Errorf("expected 200 for a valid password change after policy rejections, got %d", status)
 	}
 }
 

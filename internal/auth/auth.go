@@ -378,6 +378,16 @@ func (a *AuthService) ChangePassword(ip, keepToken, currentPassword, newPassword
 	}
 	a.rateLimiter.ResetAttempts(ip)
 
+	// Политика нового пароля (D-17): проверка совпадения с текущим — прямым
+	// сравнением с уже верифицированным currentPassword (currentHash="" в
+	// ValidateNewPassword), без второго вызова bcrypt.CompareHashAndPassword.
+	if err := ValidateNewPassword(newPassword, ""); err != nil {
+		return nil, err
+	}
+	if newPassword == currentPassword {
+		return nil, ErrPasswordSameAsCurrent
+	}
+
 	newHash, err := a.HashPassword(newPassword)
 	if err != nil {
 		return nil, err
@@ -579,12 +589,10 @@ func (a *AuthService) GetPasswordHash() string {
 	return a.passwordHash
 }
 
+// HashPassword делегирует GeneratePasswordHash (password_policy.go) — один
+// bcrypt cost для веб-хендлеров и будущего CLI-сброса пароля (134-10).
 func (a *AuthService) HashPassword(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(hash), nil
+	return GeneratePasswordHash(password)
 }
 
 func (a *AuthService) VerifyPassword(password string) error {
@@ -1305,8 +1313,8 @@ func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Password) < 8 {
-		jsonError(w, http.StatusBadRequest, "Password must be at least 8 characters")
+	if err := ValidateNewPassword(req.Password, ""); err != nil {
+		jsonErrorCode(w, http.StatusBadRequest, PolicyErrorCode(err), err.Error())
 		return
 	}
 
