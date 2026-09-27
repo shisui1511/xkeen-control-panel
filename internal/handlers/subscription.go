@@ -355,6 +355,8 @@ func (a *API) SubscriptionSetActive(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, services.ErrStubNodeSelection):
 			status = http.StatusConflict
+		case errors.Is(err, services.ErrProtocolNotSupportedByXray):
+			status = http.StatusConflict
 		case errors.Is(err, services.ErrSelectionNodeNotFound):
 			status = http.StatusNotFound
 		case err.Error() == "subscription not found":
@@ -526,10 +528,15 @@ func (a *API) SubscriptionSetNodeDialerProxy(w http.ResponseWriter, r *http.Requ
 
 	if err := a.subscriptionSvc.SetNodeDialerProxy(id, body.NodeTag, body.TargetTag); err != nil {
 		status := http.StatusInternalServerError
-		switch err.Error() {
-		case "node not found":
+		switch {
+		case errors.Is(err, services.ErrProtocolNotSupportedByXray):
+			status = http.StatusConflict
+		case err.Error() == "node not found":
 			status = http.StatusNotFound
-		case "target not available", "chain limited to one level", "cannot cascade node to itself", "cannot cascade node that is already used as a proxy target":
+		case err.Error() == "target not available",
+			err.Error() == "chain limited to one level",
+			err.Error() == "cannot cascade node to itself",
+			err.Error() == "cannot cascade node that is already used as a proxy target":
 			status = http.StatusConflict
 		}
 		a.errorResponse(w, err.Error(), status)

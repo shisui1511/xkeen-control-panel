@@ -37,6 +37,20 @@
     tested?: boolean;
   }
 
+  // Протоколы, для которых Xray пишет outbound во фрагмент подписки
+  // (internal/services/subscription.go: allowedXrayProtocols). Узел вне этого
+  // списка (hysteria2, tuic) нельзя выбрать активным или использовать как
+  // цель каскада dialerProxy для Xray-подписки (WR-02).
+  const XRAY_SELECTABLE_PROTOCOLS = new Set([
+    'vless',
+    'vmess',
+    'trojan',
+    'shadowsocks',
+    'socks',
+    'http',
+    'wireguard'
+  ]);
+
   let {
     subId = '',
     enableXray = false,
@@ -287,20 +301,27 @@
         {@const h = health[node.tag]}
         {@const isNodeActive = node.active}
         {@const showSelectionBadge = enableXray && isNodeActive && !node.stub}
+        {@const protocolUnsupported =
+          enableXray && !!node.protocol && !XRAY_SELECTABLE_PROTOCOLS.has(node.protocol)}
         {@const metaText =
           node.use_case || node.speed
             ? `${node.use_case || ''}${node.use_case && node.speed ? ' - ' : ''}${node.speed || ''}`
             : node.protocol === 'wireguard'
               ? `${node.transport && node.transport !== 'udp' ? node.transport : ''}${node.security && node.security !== 'none' ? (node.transport ? ' · ' : '') + node.security : ''}`
               : `${node.protocol || ''}${node.protocol && node.transport ? ' · ' + node.transport : ''}${node.security && node.security !== 'none' ? ' · ' + node.security : ''}`}
-        <div class="sub-node-row" class:active={isNodeActive} class:stub={node.stub}>
+        <div
+          class="sub-node-row"
+          class:active={isNodeActive}
+          class:stub={node.stub}
+          class:protocol-unsupported={protocolUnsupported}
+        >
           <button
             type="button"
             class="sub-node-select-btn"
-            disabled={node.stub}
-            aria-disabled={node.stub ? 'true' : undefined}
+            disabled={node.stub || protocolUnsupported}
+            aria-disabled={node.stub || protocolUnsupported ? 'true' : undefined}
             onclick={() => {
-              if (enableXray && !node.stub) {
+              if (enableXray && !node.stub && !protocolUnsupported) {
                 onSetActiveNode(subId, node.tag);
               }
             }}
@@ -350,6 +371,17 @@
                     title={$t('subscr.node.stable_tag_hint', { tag: stableTag })}
                   >
                     {$t('subscr.node.by_tag_badge', { tag: stableTag })}
+                  </span>
+                {/if}
+                {#if protocolUnsupported}
+                  <span
+                    class="sub-node-na-badge"
+                    data-testid="protocol-unsupported-badge"
+                    title={$t('subscr.node.protocol_unsupported_hint', {
+                      protocol: node.protocol || ''
+                    })}
+                  >
+                    {$t('subscr.node.protocol_unsupported_badge')}
                   </span>
                 {/if}
               </div>
@@ -1063,7 +1095,8 @@
     outline-offset: 2px;
   }
 
-  .sub-node-row.stub .sub-node-select-btn {
+  .sub-node-row.stub .sub-node-select-btn,
+  .sub-node-row.protocol-unsupported .sub-node-select-btn {
     opacity: 0.6;
     cursor: not-allowed;
   }

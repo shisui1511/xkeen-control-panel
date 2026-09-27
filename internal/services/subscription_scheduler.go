@@ -334,8 +334,16 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 			}
 		}
 		if lost {
-			sub.LastWarning = warningSelectedNodeLost
-			log.Printf("[Subscriptions] Refresh Xray ID: %s: selected node disappeared, selected %q instead", sub.ID, tag)
+			if tag == "" {
+				// Рабочих узлов не осталось — не путать с заменой на первый
+				// рабочий узел: текст предупреждения должен различать оба
+				// исхода (IN-01 из код-ревью фазы 133).
+				sub.LastWarning = warningSelectedNodeGone
+				log.Printf("[Subscriptions] Refresh Xray ID: %s: selected node disappeared, no working nodes remain", sub.ID)
+			} else {
+				sub.LastWarning = warningSelectedNodeLost
+				log.Printf("[Subscriptions] Refresh Xray ID: %s: selected node disappeared, selected %q instead", sub.ID, tag)
+			}
 		}
 	}
 
@@ -792,6 +800,13 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 		s.mu.Unlock()
 		return fmt.Errorf("node %q: %w", nodeTag, ErrStubNodeSelection)
 	}
+	if !allowedXrayProtocols[sub.Nodes[nodeIdx].Protocol] {
+		// Протокол вроде hysteria2/tuic не пишется во фрагмент Xray
+		// (writeFragment), поэтому readFragmentOutboundLocked ниже вернул бы
+		// generic ErrSelectionNodeNotFound — сообщаем настоящую причину (WR-02).
+		s.mu.Unlock()
+		return fmt.Errorf("node %q: %w", nodeTag, ErrProtocolNotSupportedByXray)
+	}
 	if _, err := s.readFragmentOutboundLocked(sub, nodeTag); err != nil {
 		s.mu.Unlock()
 		return err
@@ -868,3 +883,8 @@ func (s *SubscriptionService) ClearActiveNode(subscriptionID string) error {
 // warningSelectedNodeLost — код last_warning: выбранный пользователем узел
 // пропал из подписки и заменён первым рабочим узлом.
 const warningSelectedNodeLost = "selected_node_lost"
+
+// warningSelectedNodeGone — код last_warning: выбранный пользователем узел
+// пропал из подписки, а рабочих узлов (не заглушка, разрешённый Xray
+// протокол), чтобы его заменить, не осталось (IN-01 из код-ревью фазы 133).
+const warningSelectedNodeGone = "selected_node_gone"

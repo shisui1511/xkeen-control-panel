@@ -1393,6 +1393,13 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 		for j := range sub.Nodes {
 			node := &sub.Nodes[j]
 			if node.Tag == targetTag {
+				if !xraySelectable(node) {
+					// hysteria2/tuic и т.п. не пишутся во фрагмент Xray — цель
+					// молча не применилась бы (collectActiveXrayTags её не
+					// увидит), поэтому отклоняем явной ошибкой (WR-02).
+					s.mu.Unlock()
+					return fmt.Errorf("target %q: %w", targetTag, ErrProtocolNotSupportedByXray)
+				}
 				targetFound = true
 				if node.DialerProxy != "" {
 					s.mu.Unlock()
@@ -1464,7 +1471,7 @@ func (s *SubscriptionService) DialerProxyTargets(subID, nodeTag string) ([]Diale
 			if node.Tag == nodeTag {
 				continue
 			}
-			if node.DialerProxy != "" || node.Stub {
+			if node.DialerProxy != "" || !xraySelectable(node) {
 				continue
 			}
 			targets = append(targets, DialerProxyTarget{

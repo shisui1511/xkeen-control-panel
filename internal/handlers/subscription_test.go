@@ -429,6 +429,34 @@ func TestSubscriptionSetActive(t *testing.T) {
 	}
 }
 
+// TestSubscriptionSetActive_UnsupportedProtocol — узел с протоколом, который
+// Xray не пишет во фрагмент (hysteria2/tuic), нельзя выбрать активным: должен
+// вернуться 409 с понятной причиной, а не 404 "node not found" (WR-02 из
+// код-ревью фазы 133).
+func TestSubscriptionSetActive_UnsupportedProtocol(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+
+	sub := &services.Subscription{
+		Name:       "Routing Sub",
+		URL:        "http://example.com/sub",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []services.SubscriptionNode{
+			{Tag: "node-h2", Name: "Hysteria2 Node", Protocol: "hysteria2"},
+		},
+	}
+	subSvc.Add(sub)
+	id := subSvc.List()[0].ID
+
+	body := `{"node_tag": "node-h2"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/active?id="+id, strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	api.SubscriptionSetActive(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Errorf("expected 409 for unsupported-protocol node, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestMihomoProviderAdapter(t *testing.T) {
 	api, subSvc := newSubTestAPI(t)
 	api.cfg.MihomoConfigDir = api.cfg.DataDir
@@ -752,6 +780,36 @@ func TestSubscriptionNodeDialerProxy(t *testing.T) {
 	api.SubscriptionSetNodeDialerProxy(rrClear, reqClear)
 	if rrClear.Code != http.StatusOK {
 		t.Fatalf("expected 200 for clear, got %d: %s", rrClear.Code, rrClear.Body.String())
+	}
+}
+
+// TestSubscriptionNodeDialerProxy_UnsupportedProtocolTarget — цель каскада с
+// протоколом, который Xray не пишет во фрагмент (hysteria2/tuic), должна
+// отклоняться 409, а не сохраняться как рабочий каскад (WR-02 из код-ревью
+// фазы 133).
+func TestSubscriptionNodeDialerProxy_UnsupportedProtocolTarget(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+
+	sub := &services.Subscription{
+		ID:         "sub-1",
+		Name:       "Sub 1",
+		URL:        "http://example.com/sub",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []services.SubscriptionNode{
+			{Tag: "node-src", Name: "Source Node", Protocol: "vless"},
+			{Tag: "node-h2", Name: "Hysteria2 Node", Protocol: "hysteria2"},
+		},
+	}
+	if err := subSvc.Add(sub); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=sub-1", strings.NewReader(`{"node_tag":"node-src","target_tag":"node-h2"}`))
+	rr := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Errorf("expected 409 for unsupported-protocol target, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
