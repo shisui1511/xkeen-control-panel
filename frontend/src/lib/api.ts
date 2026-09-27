@@ -1,8 +1,9 @@
 import { get } from 'svelte/store';
-import { showToast } from '../stores';
+import { showToast, panelUnreachable } from '../stores';
 import { t } from '../i18n';
 import { saveDraftsToSessionStorage } from './dirtyRegistry';
 import { claimUnauthorized, markLoggedOut } from './authState';
+import { reportPanelUnreachable } from './panelHealth';
 
 /**
  * APIResponse — standard envelope returned by migrated backend handlers.
@@ -51,6 +52,10 @@ export function reasonToastKey(reason?: string): string {
  * survive for DraftRestoreBanner to pick up after the next login.
  */
 function handleUnauthorized(reason?: string): void {
+  // A 401 means the server answered — the panel is reachable again. Clear
+  // the reconnect banner first so the reason toast and the banner are never
+  // shown at the same time for the same event (UI-SPEC backstop).
+  panelUnreachable.set(false);
   try {
     saveDraftsToSessionStorage();
   } catch (e) {
@@ -78,7 +83,19 @@ export async function apiFetch(url: string, options: ApiFetchOptions = {}): Prom
   if (csrfToken) {
     headers.set('X-CSRF-Token', csrfToken);
   }
-  const res = await fetch(url, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, headers });
+  } catch (e: any) {
+    // A rejected fetch() (TypeError, connection refused/reset) means the
+    // panel process itself is unreachable — the restart/update/deploy case
+    // D-20 targets. An aborted request (component unmount, poller backoff
+    // cancellation) is not an outage and must not trigger the banner.
+    if (e?.name !== 'AbortError') {
+      reportPanelUnreachable();
+    }
+    throw e;
+  }
   if (res.status === 401) {
     if (!skip401Redirect && claimUnauthorized()) {
       let reason: string | undefined;

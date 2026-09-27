@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
-import { confirmStore, showConfirm, toastStore, showToast } from './stores';
+import { confirmStore, showConfirm, toastStore, showToast, panelUnreachable } from './stores';
 
 describe('stores - ConfirmDialog & Toast', () => {
   beforeEach(() => {
     confirmStore.set(null);
     toastStore.set([]);
+    panelUnreachable.set(false);
   });
 
   it('showConfirm opens confirmation store and returns a promise resolving to boolean', async () => {
@@ -54,5 +55,22 @@ describe('stores - ConfirmDialog & Toast', () => {
     expect(items.length).toBe(0);
 
     vi.useRealTimers();
+  });
+
+  it('showToast suppresses error toasts while panelUnreachable, but not warning/success (D-20)', () => {
+    panelUnreachable.set(true);
+
+    showToast('error', 'Сеть недоступна');
+    expect(get(toastStore)).toHaveLength(0);
+
+    showToast('warning', 'Внимание');
+    expect(get(toastStore)).toHaveLength(1);
+
+    showToast('success', 'Готово');
+    expect(get(toastStore)).toHaveLength(2);
+
+    panelUnreachable.set(false);
+    showToast('error', 'Снова доступно для тоста');
+    expect(get(toastStore)).toHaveLength(3);
   });
 });

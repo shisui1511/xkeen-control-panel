@@ -8,11 +8,13 @@
     capabilities,
     fetchCapabilities,
     showToast,
-    mihomoApiAvailable
+    mihomoApiAvailable,
+    panelUnreachable
   } from './stores';
   import { usePoller } from './lib/poller';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { isServiceRestarting, activateRestartGrace } from './lib/serviceGrace';
+  import { panelNewVersion, rememberPanelVersion } from './lib/panelHealth';
   import Sidebar from './components/Sidebar.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import Card from './components/Card.svelte';
@@ -518,6 +520,7 @@
       const data = await apiFetchJSON<{ version: string; panel_version: string }>('/api/version');
       version = data.version;
       panelVersion = data.panel_version;
+      rememberPanelVersion(data.panel_version);
       const updatedTo = detectPanelUpdate(data.panel_version);
       if (updatedTo) {
         showToast('success', $t('dash.panel_updated', { version: updatedTo }), 8000);
@@ -964,6 +967,27 @@
           />
         </div>
       {/if}
+    {/if}
+
+    <!-- Panel reconnect banner (D-20) — not scoped to mihomoDependentTabs:
+         xcp itself may be restarting/updating regardless of active kernel,
+         so this must render above every tab, not only Mihomo ones. -->
+    {#if $panelNewVersion}
+      <div class="panel-reconnect-banner" role="status" aria-live="polite">
+        <span>{$t('service.panel_new_version')}</span>
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm"
+          onclick={() => window.location.reload()}
+        >
+          {$t('service.panel_reload')}
+        </button>
+      </div>
+    {:else if $panelUnreachable}
+      <div class="panel-reconnect-banner" role="status" aria-live="polite">
+        <span class="spinner"></span>
+        <span>{$t('service.panel_unreachable')}</span>
+      </div>
     {/if}
 
     {#key chunkReloadKey}
@@ -1772,6 +1796,28 @@
     margin-top: var(--spacing-2, 8px);
     word-break: break-word;
     white-space: pre-wrap;
+  }
+
+  /* Panel reconnect banner (D-20) — same recipe as .service-restarting-banner
+     above, kept as a real class (not an inline style) since it appears on
+     every tab rather than only inside the Mihomo-scoped block. */
+  .panel-reconnect-banner {
+    margin: 12px 16px 0;
+    padding: 12px 18px;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 13.5px;
+    color: var(--fg-primary);
+  }
+
+  .panel-reconnect-banner .btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
   }
 
   /* Fullscreen editor layout geometry (.dashboard-layout.editor-active,

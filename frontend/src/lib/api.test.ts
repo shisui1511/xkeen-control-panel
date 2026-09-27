@@ -218,4 +218,41 @@ describe('apiFetch', () => {
     await expect(apiFetch('/api/settings')).rejects.toMatchObject({ status: 401 });
     expect(get(toastStore)).toHaveLength(2);
   });
+
+  it('scenario 11: a rejected fetch (network down) reports the panel as unreachable (D-20)', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const { apiFetch } = await loadFreshApi();
+    const stores = await import('../stores');
+    const panelHealth = await import('./panelHealth');
+
+    await expect(apiFetch('/api/settings')).rejects.toThrow();
+    expect(get(stores.panelUnreachable)).toBe(true);
+
+    // The failed probe schedules a real setTimeout retry — clear it so it
+    // cannot fire against a torn-down fetch mock after this test ends.
+    panelHealth.__resetPanelHealthForTests();
+  });
+
+  it('scenario 12: an AbortError from fetch does not report the panel as unreachable', async () => {
+    const abortError = new Error('aborted');
+    abortError.name = 'AbortError';
+    fetchMock.mockRejectedValueOnce(abortError);
+    const { apiFetch } = await loadFreshApi();
+    const stores = await import('../stores');
+
+    await expect(apiFetch('/api/settings')).rejects.toThrow();
+    expect(get(stores.panelUnreachable)).toBe(false);
+  });
+
+  it('scenario 13: a 401 clears panelUnreachable before showing the reason toast (never both at once)', async () => {
+    const stores = await import('../stores');
+    stores.panelUnreachable.set(true);
+    fetchMock.mockResolvedValue(makeResponse(401, { success: false }));
+    const { apiFetch, toastStore } = await loadFreshApi();
+
+    await expect(apiFetch('/api/settings')).rejects.toMatchObject({ status: 401 });
+
+    expect(get(stores.panelUnreachable)).toBe(false);
+    expect(get(toastStore)).toHaveLength(1);
+  });
 });
