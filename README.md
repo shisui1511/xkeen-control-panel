@@ -181,13 +181,17 @@ rm -rf /opt/etc/xcp   # удалить конфиги (опционально)
 
 > \*Модели с 64 MB RAM могут испытывать нехватку памяти при одновременной работе Entware, XKeen/Mihomo и веб-панели. Рекомендуется использовать роутеры с >= 128 MB RAM.
 
-### Совместимые модели Keenetic
+### Совместимые модели Keenetic и Netcraze
 
-| Архитектура | Модели |
-|-------------|--------|
-| **ARM64 (aarch64)** | Peak (KN-2710), Ultra/Titan (KN-1811/KN-1812), Giga (KN-1012), Hopper (KN-3811), Hopper SE (KN-3812), Hopper 4G+ (KN-2312), Hero 5G (KN-4110) |
-| **MIPSLE (mipsel)** | Giga/Hero (KN-1010/KN-1011), Ultra (KN-1810), Viva/Skipper (KN-1910/KN-1912/KN-1913), Giant (KN-2610), Hero 4G (KN-2310/KN-2311), Hopper (KN-3810), Skipper 4G (KN-2910), Launcher DSL (KN-2012), Speedster DSL (KN-2113), Hopper DSL (KN-3611), 4G (KN-1212), Extra/Carrier (KN-1711/KN-1713) |
-| **MIPS (mips)** | Ultra SE/Peak DSL (KN-2510), Giga SE/Hero DSL (KN-2410), DSL/Omni DSL (KN-2010), Skipper DSL (KN-2112), Duo/Extra DSL (KN-2110), Hopper DSL (KN-3610) |
+Netcraze — бренд, под которым роутеры Keenetic выпускаются для России и стран ЕАЭС. Прошивка у них общая, поэтому панель одинаково работает на обоих брендах; индексы моделей обычно совпадают (KN-1812 ↔ NC-1812), а названия могут отличаться. Архитектуру `scripts/setup.sh` определяет сам.
+
+| Архитектура | Keenetic | Netcraze |
+|-------------|----------|----------|
+| **ARM64 (aarch64)** | Peak (KN-2710), Ultra/Titan (KN-1811/KN-1812), Giga (KN-1012), Hopper (KN-3811), Hopper SE (KN-3812), Hopper 4G+ (KN-2312), Hopper DSL (KN-3611), Hero 5G (KN-4110) | Ultra (NC-1812), Giga (NC-1012), Hopper (NC-3811), Hopper SE (NC-3812), Hopper 4G+ (NC-2312), Hopper DSL (NC-3611), Hero 5G (NC-4110) |
+| **MIPSLE (mipsel)** | Giga/Hero (KN-1010/KN-1011), Ultra (KN-1810), Viva/Skipper (KN-1910/KN-1912/KN-1913), Giant (KN-2610), Hero 4G (KN-2310/KN-2311), Hopper (KN-3810), Skipper 4G (KN-2910), Launcher DSL (KN-2012), Speedster DSL (KN-2113), 4G (KN-1212), Extra/Carrier (KN-1711/KN-1713) | Viva (NC-1913) |
+| **MIPS (mips)** | Ultra SE/Peak DSL (KN-2510), Giga SE/Hero DSL (KN-2410), DSL/Omni DSL (KN-2010), Skipper DSL (KN-2112), Duo/Extra DSL (KN-2110), Hopper DSL (KN-3610) | — |
+
+Модели Netcraze перечислены по справке производителя: у них есть инструкция по установке Entware с указанием архитектуры. Для Titan SE (NC-4210) Entware поддерживается, но архитектура в справке не указана. Для остальных моделей Netcraze инструкции по Entware нет, а без Entware XKeen и панель не устанавливаются.
 
 Панель работает совместно с другими инструментами (другие веб-панели, zashboard) на разных портах без конфликтов.
 
@@ -206,9 +210,9 @@ cd frontend && npm run build && cd ..
 make build
 
 # Cross-compile для роутеров
-make keenetic-arm64
-make keenetic-mipsle
-make keenetic-mips
+make router-arm64
+make router-mipsle
+make router-mips
 
 # Frontend dev-сервер (proxy /api → :8090)
 cd frontend && npm run dev
