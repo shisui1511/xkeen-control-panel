@@ -778,3 +778,221 @@ func TestHandleSetup_ConcurrentOnlyOneWins(t *testing.T) {
 		t.Fatalf("%d setups succeeded, want exactly 1", ok)
 	}
 }
+
+// --- Task 2: TTL из конфига, cookie-хардинг, «Запомнить меня» ---
+
+func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
+	for _, c := range cookies {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
+}
+
+func assertProtectedCookieAttrs(t *testing.T, c *http.Cookie, phase string) {
+	t.Helper()
+	if !c.HttpOnly {
+		t.Errorf("%s: expected HttpOnly cookie", phase)
+	}
+	if !c.Secure {
+		t.Errorf("%s: expected Secure cookie", phase)
+	}
+	if c.SameSite != http.SameSiteStrictMode {
+		t.Errorf("%s: expected SameSite=Strict, got %v", phase, c.SameSite)
+	}
+	if c.Path != "/" {
+		t.Errorf("%s: expected Path=/, got %q", phase, c.Path)
+	}
+	if c.Domain != "" {
+		t.Errorf("%s: expected empty Domain, got %q", phase, c.Domain)
+	}
+}
+
+// TestSession_IdleVsAbsoluteTTL: активность продлевает только idle-TTL;
+// без активности дольше idle-TTL сессия истекает даже если absolute-TTL ещё
+// далеко.
+func TestSession_IdleVsAbsoluteTTL(t *testing.T) {
+	svc := NewAuthService(Options{IdleTTL: time.Hour, AbsoluteTTL: 24 * time.Hour})
+	defer svc.Stop()
+
+	current := time.Now()
+	svc.now = func() time.Time { return current }
+
+	issued, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Активность за минуту до idle-TTL продлевает сессию.
+	current = current.Add(59 * time.Minute)
+	if _, err := svc.ValidateSession(issued.Token); err != nil {
+		t.Fatalf("expected session valid just before idle TTL: %v", err)
+	}
+
+	// Без дальнейшей активности дольше idle-TTL — сессия истекает.
+	current = current.Add(61 * time.Minute)
+	if _, err := svc.ValidateSession(issued.Token); err == nil {
+		t.Error("expected session to expire after idle TTL elapses without activity")
+	}
+}
+
+// TestSession_TTLBoundaryIsExpiry: now == created_at+absoluteTTL и
+// now == last_seen+idleTTL — сессия уже недействительна (edge adjacency).
+func TestSession_TTLBoundaryIsExpiry(t *testing.T) {
+	svc := NewAuthService(Options{IdleTTL: time.Hour, AbsoluteTTL: 2 * time.Hour})
+	defer svc.Stop()
+
+	start := time.Now()
+	svc.now = func() time.Time { return start }
+
+	idleIssued, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.now = func() time.Time { return start.Add(time.Hour) }
+	if _, err := svc.ValidateSession(idleIssued.Token); err == nil {
+		t.Error("expected session invalid exactly at idle TTL boundary")
+	}
+
+	svc.now = func() time.Time { return start }
+	absIssued, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Активность прямо перед границей продлевает LastSeen, но absolute-TTL
+	// не продлевается ей же.
+	svc.now = func() time.Time { return start.Add(30 * time.Minute) }
+	if _, err := svc.ValidateSession(absIssued.Token); err != nil {
+		t.Fatalf("expected session valid before the boundary: %v", err)
+	}
+	svc.now = func() time.Time { return start.Add(2 * time.Hour) }
+	if _, err := svc.ValidateSession(absIssued.Token); err == nil {
+		t.Error("expected session invalid exactly at absolute TTL boundary")
+	}
+}
+
+// TestSetTTL_AppliesToExistingSessions: SetTTL применяется немедленно к уже
+// созданным сессиям, а не только к новым.
+func TestSetTTL_AppliesToExistingSessions(t *testing.T) {
+	svc := NewAuthService(Options{IdleTTL: 24 * time.Hour, AbsoluteTTL: 30 * 24 * time.Hour})
+	defer svc.Stop()
+
+	start := time.Now()
+	svc.now = func() time.Time { return start }
+	issued, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc.SetTTL(time.Hour, 24*time.Hour)
+
+	svc.now = func() time.Time { return start.Add(90 * time.Minute) }
+	if _, err := svc.ValidateSession(issued.Token); err == nil {
+		t.Error("expected SetTTL to apply immediately to an already-existing session")
+	}
+}
+
+// TestSessionCookie_LoginLogoutSymmetric: cookie сессии выставлена
+// одинаково (HttpOnly/Secure/SameSite=Strict/Path=/, без Domain) на входе и
+// на выходе; оба ответа дополнительно гасят legacy-cookie xcp_session.
+func TestSessionCookie_LoginLogoutSymmetric(t *testing.T) {
+	svc := NewAuthService(Options{})
+	hash, err := svc.HashPassword("symmetricpass123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetPasswordHash(hash)
+	defer svc.Stop()
+
+	body, _ := json.Marshal(map[string]string{"password": "symmetricpass123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:1111"
+	rec := httptest.NewRecorder()
+	svc.HandleLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	loginCookie := findCookie(rec.Result().Cookies(), SessionCookieName)
+	if loginCookie == nil {
+		t.Fatal("expected session cookie on login")
+	}
+	assertProtectedCookieAttrs(t, loginCookie, "login")
+
+	legacyLogin := findCookie(rec.Result().Cookies(), LegacySessionCookieName)
+	if legacyLogin == nil || legacyLogin.MaxAge >= 0 {
+		t.Error("expected login to also clear the legacy xcp_session cookie")
+	}
+
+	reqLogout := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	reqLogout.AddCookie(loginCookie)
+	recLogout := httptest.NewRecorder()
+	svc.HandleLogout(recLogout, reqLogout)
+	if recLogout.Code != http.StatusOK {
+		t.Fatalf("logout failed: %d", recLogout.Code)
+	}
+
+	logoutCookie := findCookie(recLogout.Result().Cookies(), SessionCookieName)
+	if logoutCookie == nil {
+		t.Fatal("expected session cookie on logout")
+	}
+	assertProtectedCookieAttrs(t, logoutCookie, "logout")
+	if logoutCookie.MaxAge != -1 {
+		t.Errorf("expected logout cookie MaxAge=-1, got %d", logoutCookie.MaxAge)
+	}
+
+	legacyLogout := findCookie(recLogout.Result().Cookies(), LegacySessionCookieName)
+	if legacyLogout == nil || legacyLogout.MaxAge >= 0 {
+		t.Error("expected logout to also clear the legacy xcp_session cookie")
+	}
+}
+
+// TestLogin_RememberMeCookieMaxAge: remember_me=true даёт постоянную cookie
+// (Max-Age = absolute-TTL в секундах); remember_me=false — ни Max-Age, ни
+// Expires (cookie сессии браузера).
+func TestLogin_RememberMeCookieMaxAge(t *testing.T) {
+	svc := NewAuthService(Options{AbsoluteTTL: 48 * time.Hour})
+	hash, err := svc.HashPassword("remembermepass123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetPasswordHash(hash)
+	defer svc.Stop()
+
+	body, _ := json.Marshal(map[string]interface{}{"password": "remembermepass123", "remember_me": true})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:2221"
+	rec := httptest.NewRecorder()
+	svc.HandleLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login failed: %d %s", rec.Code, rec.Body.String())
+	}
+	cookie := findCookie(rec.Result().Cookies(), SessionCookieName)
+	if cookie == nil {
+		t.Fatal("expected session cookie")
+	}
+	wantMaxAge := int((48 * time.Hour).Seconds())
+	if cookie.MaxAge != wantMaxAge {
+		t.Errorf("expected MaxAge=%d for remember_me=true, got %d", wantMaxAge, cookie.MaxAge)
+	}
+
+	body2, _ := json.Marshal(map[string]interface{}{"password": "remembermepass123", "remember_me": false})
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body2))
+	req2.RemoteAddr = "127.0.0.1:2222"
+	rec2 := httptest.NewRecorder()
+	svc.HandleLogin(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("login failed: %d %s", rec2.Code, rec2.Body.String())
+	}
+	cookie2 := findCookie(rec2.Result().Cookies(), SessionCookieName)
+	if cookie2 == nil {
+		t.Fatal("expected session cookie")
+	}
+	if cookie2.MaxAge != 0 {
+		t.Errorf("expected no Max-Age for remember_me=false, got %d", cookie2.MaxAge)
+	}
+	if !cookie2.Expires.IsZero() {
+		t.Errorf("expected no Expires for remember_me=false, got %v", cookie2.Expires)
+	}
+}

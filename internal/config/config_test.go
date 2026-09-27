@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,8 +18,11 @@ func TestDefault(t *testing.T) {
 		t.Errorf("Expected XRayConfigDir /opt/etc/xray/configs, got %s", cfg.XRayConfigDir)
 	}
 
-	if cfg.Auth.SessionTimeout != 24 {
-		t.Errorf("Expected SessionTimeout 24, got %d", cfg.Auth.SessionTimeout)
+	if cfg.Auth.SessionIdleTTLHours != DefaultSessionIdleTTLHours {
+		t.Errorf("Expected SessionIdleTTLHours %d, got %d", DefaultSessionIdleTTLHours, cfg.Auth.SessionIdleTTLHours)
+	}
+	if cfg.Auth.SessionAbsoluteTTLDays != DefaultSessionAbsoluteTTLDays {
+		t.Errorf("Expected SessionAbsoluteTTLDays %d, got %d", DefaultSessionAbsoluteTTLDays, cfg.Auth.SessionAbsoluteTTLDays)
 	}
 }
 
@@ -111,5 +115,131 @@ func TestConfigSave_FilePermissions(t *testing.T) {
 	want := os.FileMode(0600)
 	if got != want {
 		t.Errorf("file permissions: got %04o, want %04o", got, want)
+	}
+}
+
+// TestLoad_MigratesLegacySessionTimeout: legacy session_timeout_hours без
+// нового ключа мигрирует в session_idle_ttl_hours, помечает NeedsSave и
+// оставляет след в Migrations; после Save() legacy-ключ не пишется обратно.
+func TestLoad_MigratesLegacySessionTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	raw := `{"auth":{"password_hash":"h","session_timeout_hours":12,"max_login_attempts":5,"lockout_duration_minutes":5}}`
+	if err := os.WriteFile(configPath, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Auth.SessionIdleTTLHours != 12 {
+		t.Errorf("expected migrated idle TTL 12, got %d", cfg.Auth.SessionIdleTTLHours)
+	}
+	if !cfg.NeedsSave {
+		t.Error("expected NeedsSave=true after legacy key migration")
+	}
+	found := false
+	for _, m := range cfg.Migrations {
+		if strings.Contains(m, "session_timeout_hours") && strings.Contains(m, "session_idle_ttl_hours") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a migration entry mentioning both keys, got %v", cfg.Migrations)
+	}
+
+	if err := Save(configPath, cfg); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if strings.Contains(content, "session_timeout_hours") {
+		t.Error("saved config must not contain the legacy session_timeout_hours key")
+	}
+	if strings.Contains(content, "secure_cookie") {
+		t.Error("saved config must not contain the removed secure_cookie key")
+	}
+}
+
+// TestLoad_DefaultSessionTTL: конфиг без auth-ключей вообще получает
+// дефолтные idle/absolute TTL.
+func TestLoad_DefaultSessionTTL(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	if err := os.WriteFile(configPath, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Auth.SessionIdleTTLHours != DefaultSessionIdleTTLHours {
+		t.Errorf("expected default idle TTL %d, got %d", DefaultSessionIdleTTLHours, cfg.Auth.SessionIdleTTLHours)
+	}
+	if cfg.Auth.SessionAbsoluteTTLDays != DefaultSessionAbsoluteTTLDays {
+		t.Errorf("expected default absolute TTL %d, got %d", DefaultSessionAbsoluteTTLDays, cfg.Auth.SessionAbsoluteTTLDays)
+	}
+}
+
+// TestLoad_ClampsOutOfRangeSessionTTL: значения TTL вне допустимого
+// диапазона заменяются дефолтами и помечают NeedsSave.
+func TestLoad_ClampsOutOfRangeSessionTTL(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	raw := `{"auth":{"session_idle_ttl_hours":0,"session_absolute_ttl_days":400}}`
+	if err := os.WriteFile(configPath, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Auth.SessionIdleTTLHours != DefaultSessionIdleTTLHours {
+		t.Errorf("expected idle TTL clamped to default %d, got %d", DefaultSessionIdleTTLHours, cfg.Auth.SessionIdleTTLHours)
+	}
+	if cfg.Auth.SessionAbsoluteTTLDays != DefaultSessionAbsoluteTTLDays {
+		t.Errorf("expected absolute TTL clamped to default %d, got %d", DefaultSessionAbsoluteTTLDays, cfg.Auth.SessionAbsoluteTTLDays)
+	}
+	if !cfg.NeedsSave {
+		t.Error("expected NeedsSave=true after clamping out-of-range TTL values")
+	}
+}
+
+// TestSave_DropsLegacyAuthKeys: Save() никогда не пишет удалённые ключи
+// session_timeout_hours/secure_cookie — они просто не существуют в структуре.
+func TestSave_DropsLegacyAuthKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	cfg := Default()
+	if err := Save(configPath, cfg); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if strings.Contains(content, "session_timeout_hours") {
+		t.Error("saved config must not contain session_timeout_hours")
+	}
+	if strings.Contains(content, "secure_cookie") {
+		t.Error("saved config must not contain secure_cookie")
+	}
+	if !strings.Contains(content, "session_idle_ttl_hours") {
+		t.Error("saved config must contain session_idle_ttl_hours")
 	}
 }

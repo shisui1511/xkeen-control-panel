@@ -19,14 +19,21 @@ import (
 )
 
 const (
-	SessionCookieName = "xcp_session"
-	CSRFHeaderName    = "X-CSRF-Token"
+	// SessionCookieName использует префикс __Host- (RFC 6265bis): браузер
+	// принимает такую cookie только по HTTPS, без Domain и с Path=/ — то же
+	// самое, что уже требует D-15 (Secure+HttpOnly+SameSite=Strict). Ослабляет
+	// класс атак с поддоменов/самоподписанными cookie на других портах.
+	SessionCookieName = "__Host-xcp_session"
+	// LegacySessionCookieName — имя cookie до фазы 134; активно очищается на
+	// входе и выходе, пока у клиентов остаётся старая cookie в браузере.
+	LegacySessionCookieName = "xcp_session"
+	CSRFHeaderName          = "X-CSRF-Token"
 
 	// defaultIdleTTL/defaultAbsoluteTTL — дефолты D-05, применяются когда
-	// Options не задаёт своих значений (например, старые тесты, вызывающие
-	// NewAuthService с нулевым Options.IdleTTL/AbsoluteTTL). Начиная с Task 2
-	// реальные значения приходят из config.json (session_idle_ttl_hours /
-	// session_absolute_ttl_days).
+	// Options не задаёт своих значений (например, тесты, вызывающие
+	// NewAuthService с нулевым Options.IdleTTL/AbsoluteTTL). В проде реальные
+	// значения приходят из config.json (session_idle_ttl_hours /
+	// session_absolute_ttl_days), см. cmd/xcp/main.go.
 	defaultIdleTTL     = 24 * time.Hour
 	defaultAbsoluteTTL = 30 * 24 * time.Hour
 )
@@ -447,6 +454,84 @@ func (a *AuthService) ValidateCSRF(session *Session, csrfToken string) bool {
 	return hmac.Equal([]byte(hashToken(csrfToken)), []byte(session.CSRFHash))
 }
 
+// SetTTL меняет idle/absolute TTL сессий немедленно — уже существующие
+// сессии проверяются по новым значениям при следующем ValidateSession
+// (срок считается от CreatedAt/LastSeen на лету, а не кешируется при
+// создании сессии), а не только новые сессии, созданные после вызова.
+// Нулевое значение аргумента оставляет соответствующий TTL без изменений.
+func (a *AuthService) SetTTL(idle, absolute time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if idle > 0 {
+		a.idleTTL = idle
+	}
+	if absolute > 0 {
+		a.absoluteTTL = absolute
+	}
+}
+
+// TTL возвращает текущие idle/absolute TTL.
+func (a *AuthService) TTL() (idle, absolute time.Duration) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.idleTTL, a.absoluteTTL
+}
+
+// setSessionCookie выставляет cookie сессии одинаково при входе и выходе
+// (D-15, T-134-03): HttpOnly + Secure + SameSite=Strict + Path=/. Domain
+// сознательно не выставляется — непустой Domain делает cookie с префиксом
+// __Host- недействительной для браузера (RFC 6265bis, __Host- требует
+// отсутствия Domain и Path=/). При rememberMe выставляется Max-Age по
+// absoluteTTL (постоянная cookie); без него — cookie сессии браузера,
+// живущая до его закрытия, хотя серверный TTL один и тот же в обоих
+// случаях (D-07). Одновременно очищает cookie legacy-имени (миграция с
+// xcp_session на __Host-xcp_session).
+func setSessionCookie(w http.ResponseWriter, token string, rememberMe bool, absoluteTTL time.Duration) {
+	cookie := &http.Cookie{
+		Name:     SessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	}
+	if rememberMe {
+		cookie.MaxAge = int(absoluteTTL.Seconds())
+	}
+	http.SetCookie(w, cookie)
+	clearLegacySessionCookie(w)
+}
+
+// clearLegacySessionCookie гасит cookie старого имени (xcp_session), если
+// она осталась в браузере с версии до фазы 134.
+func clearLegacySessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     LegacySessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+}
+
+// clearSessionCookies очищает текущую и legacy cookie сессии — симметрично
+// setSessionCookie, используется при выходе (D-15: атрибуты одинаковы на
+// входе и на выходе).
+func clearSessionCookies(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+	clearLegacySessionCookie(w)
+}
+
 func (rl *RateLimiter) CheckLimit(ip string, maxAttempts int, lockoutDuration time.Duration) error {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -572,7 +657,8 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Password string `json:"password"`
+		Password   string `json:"password"`
+		RememberMe bool   `json:"remember_me"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -591,24 +677,14 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if len(ua) > 256 {
 		ua = ua[:256]
 	}
-	issued, err := a.CreateSessionWithMeta(SessionMeta{IP: ip, UserAgent: ua})
+	issued, err := a.CreateSessionWithMeta(SessionMeta{IP: ip, UserAgent: ua, RememberMe: req.RememberMe})
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "Failed to create session")
 		return
 	}
 
-	// Cookie-хардинг (__Host- префикс, remember_me, симметрия с логаутом) —
-	// Task 2; здесь сохраняется прежнее поведение (Secure по r.TLS, Expires
-	// по absolute-TTL) с новым источником токена/CSRF.
-	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookieName,
-		Value:    issued.Token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   r.TLS != nil,
-		SameSite: http.SameSiteStrictMode,
-		Expires:  issued.CreatedAt.Add(a.absoluteTTL),
-	})
+	_, absoluteTTL := a.TTL()
+	setSessionCookie(w, issued.Token, issued.RememberMe, absoluteTTL)
 
 	json.NewEncoder(w).Encode(map[string]string{
 		"csrf_token": issued.CSRFToken,
@@ -626,15 +702,7 @@ func (a *AuthService) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		a.DeleteSession(cookie.Value)
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookieName,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   true, // временно всегда true — полный симметричный хелпер cookie в Task 2
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   -1,
-	})
+	clearSessionCookies(w)
 
 	w.WriteHeader(http.StatusOK)
 }

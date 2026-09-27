@@ -132,6 +132,19 @@ func main() {
 		log.Printf("Timezone: applied system timezone %s", appliedTZ)
 	}
 
+	// Config.Load() не логирует сама (лог-файл на тот момент ещё не
+	// настроен, см. выше) — записи миграции TTL сессии (D-06, legacy
+	// session_timeout_hours → session_idle_ttl_hours) пишутся сюда, теперь,
+	// когда xcp.log уже подключён.
+	for _, m := range cfg.Migrations {
+		log.Printf("config migration: %s", m)
+	}
+	if cfg.NeedsSave {
+		if err := config.Save(cfg.ConfigPath, cfg); err != nil {
+			log.Printf("Failed to save migrated config: %v", err)
+		}
+	}
+
 	fatalf := func(format string, v ...interface{}) {
 		if dedupWriter != nil {
 			_ = dedupWriter.Flush()
@@ -157,18 +170,20 @@ func main() {
 	}
 
 	srvCfg := &server.Config{
-		Port:             cfg.Port,
-		LoopbackPort:     cfg.LoopbackPort,
-		XRayConfigDir:    cfg.XRayConfigDir,
-		XKeenBinary:      cfg.XKeenBinary,
-		MihomoConfigDir:  cfg.MihomoConfigDir,
-		MihomoBinary:     cfg.MihomoBinary,
-		AllowedRoots:     cfg.AllowedRoots,
-		LogLevel:         cfg.LogLevel,
-		DataDir:          cfg.DataDir,
-		PasswordHash:     cfg.Auth.PasswordHash,
-		MaxLoginAttempts: cfg.Auth.MaxLoginAttempts,
-		LockoutDuration:  time.Duration(cfg.Auth.LockoutDuration) * time.Minute,
+		Port:               cfg.Port,
+		LoopbackPort:       cfg.LoopbackPort,
+		XRayConfigDir:      cfg.XRayConfigDir,
+		XKeenBinary:        cfg.XKeenBinary,
+		MihomoConfigDir:    cfg.MihomoConfigDir,
+		MihomoBinary:       cfg.MihomoBinary,
+		AllowedRoots:       cfg.AllowedRoots,
+		LogLevel:           cfg.LogLevel,
+		DataDir:            cfg.DataDir,
+		PasswordHash:       cfg.Auth.PasswordHash,
+		MaxLoginAttempts:   cfg.Auth.MaxLoginAttempts,
+		LockoutDuration:    time.Duration(cfg.Auth.LockoutDuration) * time.Minute,
+		SessionIdleTTL:     time.Duration(cfg.Auth.SessionIdleTTLHours) * time.Hour,
+		SessionAbsoluteTTL: time.Duration(cfg.Auth.SessionAbsoluteTTLDays) * 24 * time.Hour,
 		HTTPS: server.HTTPSConfig{
 			Enabled:  cfg.HTTPS.Enabled,
 			CertPath: cfg.HTTPS.CertPath,

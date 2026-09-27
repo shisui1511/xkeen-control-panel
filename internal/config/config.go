@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,18 @@ import (
 const (
 	DefaultPanelPort    = 8090
 	DefaultLoopbackPort = 8091
+)
+
+// Диапазоны и дефолты TTL сессии (D-05, D-06). Диапазоны — решение
+// планировщика (Claude's Discretion, 134-RESEARCH.md A5): idle 1ч..30д
+// (720ч), absolute 1..365 дней.
+const (
+	DefaultSessionIdleTTLHours    = 24
+	DefaultSessionAbsoluteTTLDays = 30
+	MinSessionIdleTTLHours        = 1
+	MaxSessionIdleTTLHours        = 720
+	MinSessionAbsoluteTTLDays     = 1
+	MaxSessionAbsoluteTTLDays     = 365
 )
 
 // Config represents the main application configuration structure.
@@ -46,15 +59,23 @@ type Config struct {
 	UpdateInstallWindow string `json:"update_install_window"` // "HH:MM-HH:MM", местное время роутера
 	DevMode             bool   `json:"dev_mode"`
 	ConfigPath          string `json:"-"`
+
+	// NeedsSave и Migrations — служебные поля, не сериализуются. Load()
+	// выставляет их, когда конфиг на диске содержит устаревшие ключи
+	// (session_timeout_hours, secure_cookie) или значения вне допустимого
+	// диапазона; main.go пишет Migrations в xcp.log и пересохраняет конфиг
+	// при NeedsSave (лог-файл на момент самого Load() ещё не настроен).
+	NeedsSave  bool     `json:"-"`
+	Migrations []string `json:"-"`
 }
 
 // AuthConfig represents the configuration settings for authentication and session management.
 type AuthConfig struct {
-	PasswordHash     string `json:"password_hash"`
-	SessionTimeout   int    `json:"session_timeout_hours"`
-	MaxLoginAttempts int    `json:"max_login_attempts"`
-	LockoutDuration  int    `json:"lockout_duration_minutes"`
-	SecureCookie     bool   `json:"secure_cookie"`
+	PasswordHash           string `json:"password_hash"`
+	SessionIdleTTLHours    int    `json:"session_idle_ttl_hours"`
+	SessionAbsoluteTTLDays int    `json:"session_absolute_ttl_days"`
+	MaxLoginAttempts       int    `json:"max_login_attempts"`
+	LockoutDuration        int    `json:"lockout_duration_minutes"`
 }
 
 // HTTPSConfig represents the settings for enabling/configuring HTTPS on the control panel.
@@ -110,11 +131,11 @@ func Default() *Config {
 			"/opt/bin",
 		},
 		Auth: AuthConfig{
-			PasswordHash:     "",
-			SessionTimeout:   24,
-			MaxLoginAttempts: 5,
-			LockoutDuration:  5,
-			SecureCookie:     true,
+			PasswordHash:           "",
+			SessionIdleTTLHours:    DefaultSessionIdleTTLHours,
+			SessionAbsoluteTTLDays: DefaultSessionAbsoluteTTLDays,
+			MaxLoginAttempts:       5,
+			LockoutDuration:        5,
 		},
 		HTTPS: HTTPSConfig{
 			Enabled:  true,
@@ -169,7 +190,87 @@ func Load(path string) (*Config, error) {
 			cfg.LogSources = append(cfg.LogSources, cfg.XCPLogPath)
 		}
 	}
+
+	migrateSessionTTL(cfg, data)
+
 	return cfg, nil
+}
+
+// validIdleHours/validAbsoluteDays — диапазоны допустимых значений TTL
+// сессии (см. константы выше).
+func validIdleHours(h int) bool {
+	return h >= MinSessionIdleTTLHours && h <= MaxSessionIdleTTLHours
+}
+
+func validAbsoluteDays(d int) bool {
+	return d >= MinSessionAbsoluteTTLDays && d <= MaxSessionAbsoluteTTLDays
+}
+
+// ValidSessionTTL проверяет, что оба TTL сессии (idle-часы, absolute-дни)
+// находятся в допустимых диапазонах.
+func ValidSessionTTL(idleHours, absDays int) bool {
+	return validIdleHours(idleHours) && validAbsoluteDays(absDays)
+}
+
+// authTTLProbe читает сырой JSON конфига отдельно от основного Unmarshal —
+// нужно различить «ключа нет в файле» (nil-указатель) от «ключ есть и равен
+// нулю», что обычный Unmarshal в cfg такого различия не даёт (отсутствующее
+// поле и нулевое значение неразличимы после заполнения из Default()).
+type authTTLProbe struct {
+	Auth struct {
+		IdleHours            *int `json:"session_idle_ttl_hours"`
+		AbsoluteDays         *int `json:"session_absolute_ttl_days"`
+		LegacySessionTimeout *int `json:"session_timeout_hours"`
+	} `json:"auth"`
+}
+
+// migrateSessionTTL реализует D-06: legacy session_timeout_hours переносится
+// в session_idle_ttl_hours и удаляется из файла вместе с secure_cookie;
+// значения TTL вне допустимого диапазона заменяются дефолтами. Не логирует
+// сама (лог-файл на этом этапе main() ещё не настроен) — только копит
+// cfg.Migrations и выставляет cfg.NeedsSave, чтобы main.go записал строки в
+// xcp.log и пересохранил конфиг уже после настройки логирования.
+func migrateSessionTTL(cfg *Config, data []byte) {
+	var probe authTTLProbe
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return
+	}
+
+	if probe.Auth.IdleHours == nil {
+		if probe.Auth.LegacySessionTimeout != nil && validIdleHours(*probe.Auth.LegacySessionTimeout) {
+			cfg.Auth.SessionIdleTTLHours = *probe.Auth.LegacySessionTimeout
+			cfg.NeedsSave = true
+			cfg.Migrations = append(cfg.Migrations, fmt.Sprintf(
+				"auth.session_timeout_hours=%d migrated to auth.session_idle_ttl_hours",
+				*probe.Auth.LegacySessionTimeout))
+		}
+		// Иначе новый ключ отсутствует, а legacy нет или вне диапазона —
+		// в cfg.Auth.SessionIdleTTLHours уже лежит дефолт из Default().
+	}
+
+	if probe.Auth.LegacySessionTimeout != nil {
+		cfg.NeedsSave = true // legacy-ключ должен исчезнуть из файла при Save
+	}
+	// secure_cookie не пробится отдельно: поле убрано из AuthConfig целиком,
+	// поэтому Save() уже не пишет его — переписывать файл специально ради
+	// этого ключа не нужно (в отличие от session_timeout_hours, чьё СТАРОЕ
+	// значение нужно было прочитать перед тем, как оно перестанет
+	// парситься).
+
+	if !validIdleHours(cfg.Auth.SessionIdleTTLHours) {
+		cfg.Migrations = append(cfg.Migrations, fmt.Sprintf(
+			"auth.session_idle_ttl_hours=%d out of range, reset to default %d",
+			cfg.Auth.SessionIdleTTLHours, DefaultSessionIdleTTLHours))
+		cfg.Auth.SessionIdleTTLHours = DefaultSessionIdleTTLHours
+		cfg.NeedsSave = true
+	}
+	if !validAbsoluteDays(cfg.Auth.SessionAbsoluteTTLDays) {
+		cfg.Migrations = append(cfg.Migrations, fmt.Sprintf(
+			"auth.session_absolute_ttl_days=%d out of range, reset to default %d",
+			cfg.Auth.SessionAbsoluteTTLDays, DefaultSessionAbsoluteTTLDays))
+		cfg.Auth.SessionAbsoluteTTLDays = DefaultSessionAbsoluteTTLDays
+		cfg.NeedsSave = true
+	}
 }
 
 // Save writes the given configuration to the specified path atomically.
