@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from './i18n';
   import { apiFetch } from './lib/api';
+  import { markAuthenticated } from './lib/authState';
   import { showToast } from './stores';
   import Button from './components/Button.svelte';
   import AuthLayout from './components/AuthLayout.svelte';
@@ -53,8 +54,9 @@
       const data = await res.json();
       localStorage.setItem('csrf_token', data.csrf_token);
 
-      // Redirect to dashboard
-      window.location.href = '/';
+      // Switch to the dashboard in place (D-19) — no navigation, so the
+      // current #/route and any restored drafts survive the re-login.
+      markAuthenticated();
     } catch (e: any) {
       if (e?.status === 401) {
         error = $t('auth.invalid_password');
