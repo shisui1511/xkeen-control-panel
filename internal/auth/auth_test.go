@@ -105,10 +105,11 @@ func TestSessionEviction(t *testing.T) {
 // CheckLimit with maxAttempts=3: attempts 1,2 pass; attempt 3 triggers lock; attempt 4+ returns 429.
 func TestSetupRateLimit(t *testing.T) {
 	svc := NewAuthService(Options{MaxLoginAttempts: 3, LockoutDuration: 5 * time.Minute})
+	code := svc.currentSetupCode()
 
 	// First 2 attempts should not be 429 (short password rejected by validation, not rate limit)
 	for i := 0; i < 2; i++ {
-		body, _ := json.Marshal(map[string]string{"password": "short"})
+		body, _ := json.Marshal(map[string]string{"password": "short", "setup_code": code})
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(body))
 		req.RemoteAddr = "127.0.0.1:12345"
 		rr := httptest.NewRecorder()
@@ -119,7 +120,7 @@ func TestSetupRateLimit(t *testing.T) {
 	}
 
 	// 3rd attempt reaches maxAttempts=3 → locked. The handler returns 429.
-	body, _ := json.Marshal(map[string]string{"password": "short"})
+	body, _ := json.Marshal(map[string]string{"password": "short", "setup_code": code})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr := httptest.NewRecorder()
@@ -129,7 +130,7 @@ func TestSetupRateLimit(t *testing.T) {
 	}
 
 	// 4th attempt should also be rate limited (429)
-	body, _ = json.Marshal(map[string]string{"password": "short"})
+	body, _ = json.Marshal(map[string]string{"password": "short", "setup_code": code})
 	req = httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr = httptest.NewRecorder()
@@ -576,6 +577,7 @@ func TestAuthService_HandleSetup_Scenarios(t *testing.T) {
 
 	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute, OnPasswordSet: onPasswordSet})
 	defer svc.Stop()
+	code := svc.currentSetupCode()
 
 	// 1. Method not allowed (GET)
 	reqGet := httptest.NewRequest(http.MethodGet, "/api/auth/setup", nil)
@@ -594,7 +596,8 @@ func TestAuthService_HandleSetup_Scenarios(t *testing.T) {
 	}
 
 	// 3. Password too short (< 8 chars)
-	reqShort := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader([]byte(`{"password":"123"}`)))
+	bodyShort, _ := json.Marshal(map[string]string{"password": "123", "setup_code": code})
+	reqShort := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(bodyShort))
 	recShort := httptest.NewRecorder()
 	svc.HandleSetup(recShort, reqShort)
 	if recShort.Code != http.StatusBadRequest {
@@ -602,7 +605,8 @@ func TestAuthService_HandleSetup_Scenarios(t *testing.T) {
 	}
 
 	// 4. Successful setup (>= 8 chars)
-	reqGood := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader([]byte(`{"password":"validpassword123"}`)))
+	bodyGood, _ := json.Marshal(map[string]string{"password": "validpassword123", "setup_code": code})
+	reqGood := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(bodyGood))
 	recGood := httptest.NewRecorder()
 	svc.HandleSetup(recGood, reqGood)
 	if recGood.Code != http.StatusOK {
@@ -613,7 +617,8 @@ func TestAuthService_HandleSetup_Scenarios(t *testing.T) {
 	}
 
 	// 5. Repeated setup when password is already set -> 403 Forbidden
-	reqSecond := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader([]byte(`{"password":"validpassword456"}`)))
+	bodySecond, _ := json.Marshal(map[string]string{"password": "validpassword456", "setup_code": code})
+	reqSecond := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(bodySecond))
 	recSecond := httptest.NewRecorder()
 	svc.HandleSetup(recSecond, reqSecond)
 	if recSecond.Code != http.StatusForbidden {
@@ -781,6 +786,7 @@ func TestHandleSetup_ConcurrentOnlyOneWins(t *testing.T) {
 		return nil
 	}})
 	defer svc.Stop()
+	code := svc.currentSetupCode()
 
 	codes := make(chan int, 2)
 	var wg sync.WaitGroup
@@ -788,7 +794,7 @@ func TestHandleSetup_ConcurrentOnlyOneWins(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			body, _ := json.Marshal(map[string]string{"password": pw})
+			body, _ := json.Marshal(map[string]string{"password": pw, "setup_code": code})
 			req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(body))
 			rr := httptest.NewRecorder()
 			svc.HandleSetup(rr, req)

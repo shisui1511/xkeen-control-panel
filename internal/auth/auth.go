@@ -101,6 +101,14 @@ type AuthService struct {
 	// lastSeenDirty — есть ли накопленная активность (LastSeen), не
 	// записанная на диск с последнего flush; сбрасывается flushIfDirty.
 	lastSeenDirty bool
+	// dataDir — DataDir из Options; хранится отдельно от store (который
+	// может быть nil в «только память»-режиме тестов), чтобы код настройки
+	// (setupcode.go) знал, писать ли его на диск.
+	dataDir string
+	// memSetupCode — одноразовый код настройки (D-24) в «только память»-режиме
+	// (DataDir==""); при DataDir!="" код живёт на диске (data_dir/setup_code),
+	// это поле не используется.
+	memSetupCode string
 }
 
 // MaxSessions — лимит одновременных сессий (D-03). При создании 21-й
@@ -189,6 +197,7 @@ func NewAuthService(opts Options) *AuthService {
 		store:            newFileStore(opts.DataDir),
 		now:              time.Now,
 		stopCh:           make(chan struct{}),
+		dataDir:          opts.DataDir,
 	}
 
 	// Восстановление сессий, переживших рестарт процесса (SESS-01, D-01).
@@ -217,8 +226,71 @@ func NewAuthService(opts Options) *AuthService {
 		svc.rateLimiter.mu.Unlock()
 	}
 
+	// Пока пароль не задан, панель требует одноразовый код настройки (D-24):
+	// подготовить его сразу при старте, а не при первом запросе к HandleSetup
+	// — иначе setup.sh (134-10) не смог бы прочитать код сразу после запуска.
+	if opts.PasswordHash == "" {
+		svc.ensureSetupCodeReady()
+		log.Printf("[auth] setup code ready: run 'xcp --setup-code' on the router")
+	}
+
 	svc.startCleanup()
 	return svc
+}
+
+// ensureSetupCodeReady готовит одноразовый код настройки (на диске при
+// DataDir!="", иначе в memSetupCode) — вызывается при старте без пароля и из
+// ReloadPasswordHash, когда хеш сбрасывается в пустой (D-24).
+func (a *AuthService) ensureSetupCodeReady() {
+	if a.dataDir != "" {
+		if _, err := EnsureSetupCode(a.dataDir); err != nil {
+			log.Printf("[auth] failed to prepare setup code: %v", err)
+		}
+		return
+	}
+	code, err := generateSetupCode()
+	if err != nil {
+		log.Printf("[auth] failed to generate setup code: %v", err)
+		return
+	}
+	a.mu.Lock()
+	a.memSetupCode = code
+	a.mu.Unlock()
+}
+
+// clearSetupCode удаляет одноразовый код настройки (файл и/или память) —
+// вызывается после успешного HandleSetup и из ReloadPasswordHash, когда хеш
+// становится непустым. Код не должен оставаться действительным после того,
+// как пароль задан (T-134-27).
+func (a *AuthService) clearSetupCode() {
+	if err := RemoveSetupCode(a.dataDir); err != nil {
+		log.Printf("[auth] failed to remove setup code file: %v", err)
+	}
+	a.mu.Lock()
+	a.memSetupCode = ""
+	a.mu.Unlock()
+}
+
+// currentSetupCode возвращает действующий одноразовый код настройки: при
+// DataDir!="" читает его с диска, регенерируя при отсутствии файла (например,
+// после переиздания через `xcp --setup-code`, 134-10, — HandleSetup всегда
+// сверяется с диском, а не с застывшим значением в памяти); иначе отдаёт
+// memSetupCode.
+func (a *AuthService) currentSetupCode() string {
+	if a.dataDir != "" {
+		if code, err := ReadSetupCode(a.dataDir); err == nil {
+			return code
+		}
+		code, err := EnsureSetupCode(a.dataDir)
+		if err != nil {
+			log.Printf("[auth] failed to ensure setup code: %v", err)
+			return ""
+		}
+		return code
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.memSetupCode
 }
 
 // Stop останавливает фоновые горутины очистки и делает финальный Flush
@@ -370,6 +442,11 @@ func (a *AuthService) ReloadPasswordHash(hash string, apply func(string)) int {
 	a.SetPasswordHash(hash)
 	if apply != nil {
 		apply(hash)
+	}
+	if hash != "" {
+		a.clearSetupCode()
+	} else {
+		a.ensureSetupCodeReady()
 	}
 
 	now := a.now()
@@ -1012,6 +1089,17 @@ func jsonErrorFields(w http.ResponseWriter, code int, fields map[string]interfac
 	_ = json.NewEncoder(w).Encode(fields)
 }
 
+// jsonErrorCode — как jsonError, но добавляет машиночитаемый code (setup_code_invalid,
+// коды политики пароля из PolicyErrorCode) — клиент переводит его в текст
+// сам, не парсит error.
+func jsonErrorCode(w http.ResponseWriter, status int, code, msg string) {
+	jsonErrorFields(w, status, map[string]interface{}{
+		"success": false,
+		"error":   msg,
+		"code":    code,
+	})
+}
+
 // Middleware
 func (a *AuthService) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1200,11 +1288,20 @@ func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Password string `json:"password"`
+		Password  string `json:"password"`
+		SetupCode string `json:"setup_code"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+
+	// Код первичной настройки (D-24): без него или с неверным — 400
+	// setup_code_invalid, попытка уже учтена CheckLimit выше (T-134-26).
+	if err := ValidateSetupCode(a.currentSetupCode(), req.SetupCode); err != nil {
+		auditf("setup code rejected", ip, "")
+		jsonErrorCode(w, http.StatusBadRequest, "setup_code_invalid", "Invalid setup code")
 		return
 	}
 
@@ -1234,6 +1331,8 @@ func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.SetPasswordHash(hash)
+	a.clearSetupCode()
+	auditf("setup completed", ip, "")
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
