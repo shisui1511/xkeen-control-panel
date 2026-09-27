@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 	"github.com/shisui1511/xkeen-control-panel/internal/xrayapi"
@@ -412,7 +413,7 @@ func (a *API) XrayTLSPing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	panelPort := 8090
+	panelPort := config.DefaultPanelPort
 	if a.cfg != nil && a.cfg.Port > 0 {
 		panelPort = a.cfg.Port
 	}
