@@ -46,8 +46,9 @@ detect_lang() {
 check_entware() {
   if [ ! -d "/opt" ]; then
     error "Директория /opt не найдена! Установка невозможна."
-    error "Пожалуйста, сначала установите Entware на ваш Keenetic роутер."
-    error "Инструкция: https://help.keenetic.com/hc/ru/articles/360021214159"
+    error "Пожалуйста, сначала установите Entware на ваш роутер Keenetic/Netcraze."
+    error "Инструкция Keenetic: https://help.keenetic.com/hc/ru/articles/360021214159"
+    error "Инструкция Netcraze: https://support.netcraze.ru/giga/nc-1012/ru/20980-installing-the-entware-repository-on-a-usb-drive.html"
     exit 1
   fi
   if [ ! -w "/opt" ]; then
@@ -138,7 +139,7 @@ ask_port() {
 ELF_PROBE="${XCP_ELF_PROBE:-/bin/sh}"
 detect_mips_endian() {
   local ei_data
-  # `od -b` вместо `od -An -tx1`: busybox od на Keenetic не знает флаг -A
+  # `od -b` вместо `od -An -tx1`: busybox od на Keenetic/Netcraze не знает флаг -A
   ei_data=$(dd if="$ELF_PROBE" bs=1 skip=5 count=1 2>/dev/null | od -b 2>/dev/null | awk 'NR==1{print $2}')
   case "$ei_data" in
     001) echo "mipsle" ;;
