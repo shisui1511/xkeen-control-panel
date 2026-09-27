@@ -322,9 +322,12 @@ export class ProvidersState {
           showToast('success', message);
         }
         // Выбранный узел пропал из подписки и заменён первым рабочим: замена
-        // не должна проходить незамеченной.
+        // не должна проходить незамеченной. selected_node_gone — рабочих
+        // узлов для замены не осталось (IN-01 из код-ревью фазы 133).
         if (refreshed?.last_warning === 'selected_node_lost') {
           showToast('warning', get(t)('subscr.warning.selected_node_lost'));
+        } else if (refreshed?.last_warning === 'selected_node_gone') {
+          showToast('warning', get(t)('subscr.warning.selected_node_gone'));
         }
       }
       if (this.expandedSubs[id]) {

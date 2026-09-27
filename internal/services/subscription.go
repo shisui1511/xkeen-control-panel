@@ -343,8 +343,9 @@ type Subscription struct {
 	// лимит устройств). Выставляется при refresh, снимается первым рабочим ответом.
 	DeviceRejected bool `json:"device_rejected,omitempty"`
 	// LastWarning — код предупреждения последнего refresh, которое пользователь
-	// должен увидеть (сейчас только selected_node_lost: выбранный узел пропал из
-	// подписки и заменён первым рабочим). Сбрасывается refresh без потерь.
+	// должен увидеть: selected_node_lost (выбранный узел пропал из подписки и
+	// заменён первым рабочим) или selected_node_gone (выбранный узел пропал, а
+	// рабочих узлов для замены не осталось). Сбрасывается refresh без потерь.
 	LastWarning string `json:"last_warning,omitempty"`
 
 	// SelectedTag — тег узла, выбранного пользователем в ручном режиме Xray

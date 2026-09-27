@@ -543,6 +543,10 @@
         <div class="sub-warning-details" role="status" data-testid="sub-last-warning">
           {$t('subscr.warning.selected_node_lost')}
         </div>
+      {:else if sub.last_warning === 'selected_node_gone'}
+        <div class="sub-warning-details" role="status" data-testid="sub-last-warning">
+          {$t('subscr.warning.selected_node_gone')}
+        </div>
       {/if}
 
       {#if sub.proxy_tag_taken && sub.is_default && sub.stable_tag}
