@@ -13,6 +13,23 @@ test('неверный текущий пароль не разлогинивае
       body: JSON.stringify({ success: false, error: 'Текущий пароль неверен' })
     });
   });
+  await page.route('**/api/settings/session', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        data: {
+          idle_ttl_hours: 24,
+          absolute_ttl_days: 30,
+          idle_ttl_min: 1,
+          idle_ttl_max: 720,
+          absolute_ttl_min: 1,
+          absolute_ttl_max: 365
+        }
+      })
+    });
+  });
 
   await visitPage(page, '/#/settings');
   await page
@@ -25,7 +42,7 @@ test('неверный текущий пароль не разлогинивае
   await page.locator('#conf-pwd').fill('new-pass-123');
   await page.locator('.card-actions .btn-primary').first().click();
 
-  const error = page.locator('.field-error');
+  const error = page.locator('.card:has(#curr-pwd) .field-error');
   await expect(error).toHaveText('Текущий пароль неверен');
   await expect(error).not.toContainText('{');
   await expect(page).toHaveURL(/#\/settings/);

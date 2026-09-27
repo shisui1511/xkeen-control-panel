@@ -252,3 +252,182 @@ test.describe('Настройки → Активные сессии', () => {
     });
   });
 });
+
+test.describe('Настройки → Время жизни сессии', () => {
+  test('поля показывают сохранённые значения 24 ч / 30 дн.', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    await mockSessions(page, threeSessions());
+    await mockSessionTTL(page);
+    await openSecurityTab(page);
+
+    await expect(page.locator('#idle-ttl')).toHaveValue('24');
+    await expect(page.locator('#absolute-ttl')).toHaveValue('30');
+  });
+
+  test('idle-TTL вне диапазона — ошибка под полем, «Сохранить» disabled, запрос не уходит', async ({
+    page
+  }) => {
+    await setupMocks(page, 'mihomo');
+    await mockSessions(page, threeSessions());
+    let postCalled = false;
+    await page.route('**/api/settings/session', async (route) => {
+      if (route.request().method() === 'GET') {
+        return route.fulfill({ json: { success: true, data: DEFAULT_TTL } });
+      }
+      postCalled = true;
+      return route.fulfill({ json: { success: true, data: DEFAULT_TTL } });
+    });
+    await openSecurityTab(page);
+
+    const ttlCard = page.locator('.card', { hasText: 'Время жизни сессии' });
+    await ttlCard.locator('#idle-ttl').fill('0');
+
+    await expect(ttlCard.getByText('Введите значение в допустимом диапазоне')).toBeVisible();
+    await expect(ttlCard.getByRole('button', { name: 'Сохранить', exact: true })).toBeDisabled();
+    expect(postCalled).toBe(false);
+  });
+
+  test('валидное изменение idle-TTL сохраняется', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    await mockSessions(page, threeSessions());
+    let savedBody: any = null;
+    await page.route('**/api/settings/session', async (route) => {
+      if (route.request().method() === 'GET') {
+        return route.fulfill({ json: { success: true, data: DEFAULT_TTL } });
+      }
+      savedBody = route.request().postDataJSON();
+      return route.fulfill({
+        json: { success: true, data: { ...DEFAULT_TTL, ...savedBody } }
+      });
+    });
+    await openSecurityTab(page);
+
+    const ttlCard = page.locator('.card', { hasText: 'Время жизни сессии' });
+    await ttlCard.locator('#idle-ttl').fill('12');
+    await ttlCard.getByRole('button', { name: 'Сохранить', exact: true }).click();
+
+    expect(savedBody).toEqual({ idle_ttl_hours: 12, absolute_ttl_days: 30 });
+    await expect(page.getByText('Время жизни сессии сохранено')).toBeVisible();
+  });
+
+  test('без изменений — «Сохранить» disabled', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    await mockSessions(page, threeSessions());
+    await mockSessionTTL(page);
+    await openSecurityTab(page);
+
+    const ttlCard = page.locator('.card', { hasText: 'Время жизни сессии' });
+    await expect(ttlCard.getByRole('button', { name: 'Сохранить', exact: true })).toBeDisabled();
+  });
+});
+
+test.describe('Настройки → Смена пароля (политика, индикатор, новый CSRF)', () => {
+  test('строка о завершении других сессий видна над кнопкой', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    await mockSessions(page, threeSessions());
+    await mockSessionTTL(page);
+    await openSecurityTab(page);
+
+    await expect(
+      page.getByText('После смены пароля все остальные сессии будут завершены')
+    ).toBeVisible();
+  });
+
+  test('индикатор надёжности появляется под новым паролем', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    await mockSessions(page, threeSessions());
+    await mockSessionTTL(page);
+    await openSecurityTab(page);
+
+    await page.locator('#new-pwd').fill('correct-horse-battery-staple-9');
+    await expect(page.locator('.strength-meter')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('пароль из чёрного списка — ошибка политики, запрос не уходит', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    await mockSessions(page, threeSessions());
+    await mockSessionTTL(page);
+    let changeCalled = false;
+    await page.route('**/api/auth/change-password', async (route) => {
+      changeCalled = true;
+      return route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: false, error: 'should not be called' })
+      });
+    });
+    await openSecurityTab(page);
+
+    await page.locator('#curr-pwd').fill('some-current-pass');
+    await page.locator('#new-pwd').fill('password123');
+    await page.locator('#conf-pwd').fill('password123');
+    await page.locator('.card:has(#curr-pwd) .card-actions .btn-primary').click();
+
+    await expect(page.locator('.card:has(#curr-pwd) .field-error')).toHaveText(
+      'Пароль слишком простой — выберите другой'
+    );
+    expect(changeCalled).toBe(false);
+  });
+
+  test('успешная смена пароля сохраняет новый csrf_token из ответа', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    await mockSessions(page, threeSessions());
+    await mockSessionTTL(page);
+    await page.route('**/api/auth/change-password', async (route) => {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'ok', csrf_token: 'new-csrf' })
+      });
+    });
+    await openSecurityTab(page);
+
+    await page.locator('#curr-pwd').fill('current-good-pass');
+    await page.locator('#new-pwd').fill('brand-new-pass-99');
+    await page.locator('#conf-pwd').fill('brand-new-pass-99');
+    await page.locator('.card:has(#curr-pwd) .card-actions .btn-primary').click();
+
+    await expect(page.getByText('Пароль изменён')).toBeVisible();
+    const stored = await page.evaluate(() => localStorage.getItem('csrf_token'));
+    expect(stored).toBe('new-csrf');
+  });
+
+  test('400 password_same_as_current — «Новый пароль совпадает с текущим»', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    await mockSessions(page, threeSessions());
+    await mockSessionTTL(page);
+    await page.route('**/api/auth/change-password', async (route) => {
+      return route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: false,
+          error: 'password matches current',
+          code: 'password_same_as_current'
+        })
+      });
+    });
+    await openSecurityTab(page);
+
+    await page.locator('#curr-pwd').fill('same-password-1');
+    await page.locator('#new-pwd').fill('different-pass-1');
+    await page.locator('#conf-pwd').fill('different-pass-1');
+    await page.locator('.card:has(#curr-pwd) .card-actions .btn-primary').click();
+
+    await expect(page.locator('.card:has(#curr-pwd) .field-error')).toHaveText(
+      'Новый пароль совпадает с текущим'
+    );
+  });
+});
+
+test.describe('Настройки → Безопасность (чек-лист)', () => {
+  test('строки про HTTPS и cookie видны', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    await mockSessions(page, threeSessions());
+    await mockSessionTTL(page);
+    await openSecurityTab(page);
+
+    await expect(page.getByText('Только HTTPS: запросы по HTTP перенаправляются')).toBeVisible();
+    await expect(page.getByText('Cookie сессии: HttpOnly, Secure, SameSite=Strict')).toBeVisible();
+  });
+});
