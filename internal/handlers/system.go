@@ -234,7 +234,7 @@ func getRouterModel() string {
 			return strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", ""))
 		}
 	}
-	return "Keenetic Router"
+	return "Router"
 }
 
 func getWANStats() (string, string) {
@@ -405,7 +405,7 @@ func getKernelVersion() string {
 }
 
 func getPrimaryLANIP() string {
-	// Prefer common Keenetic LAN bridge interface
+	// Prefer the LAN bridge interface of Keenetic/Netcraze firmware
 	for _, name := range []string{"br0", "br-lan", "eth0"} {
 		if iface, err := net.InterfaceByName(name); err == nil {
 			if addrs, err := iface.Addrs(); err == nil {
