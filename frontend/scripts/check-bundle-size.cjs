@@ -17,6 +17,22 @@ function findEntryChunk(manifest) {
   return entry || null;
 }
 
+// Чанки первого экрана: entry и его статические импорты (транзитивно) — их
+// браузер грузит сразу (<script> + <link rel="modulepreload">). Динамические
+// импорты (ленивые вкладки) не учитываются.
+function collectFirstScreenChunks(manifest, entry) {
+  const files = [];
+  const seen = new Set();
+  const walk = (chunk) => {
+    if (!chunk || seen.has(chunk.file)) return;
+    seen.add(chunk.file);
+    files.push(chunk.file);
+    for (const key of chunk.imports || []) walk(manifest[key]);
+  };
+  walk(entry);
+  return files;
+}
+
 function gzipSize(buffer) {
   return zlib.gzipSync(buffer, { level: 9 }).length;
 }
@@ -125,7 +141,7 @@ function main(argv) {
     const reportOnly = args.includes('--report');
     let failed = false;
 
-    // Группа 1: бюджет размера главного JS-чанка первого экрана
+    // Группа 1: бюджет размера JS первого экрана (entry + статические импорты)
     console.log('🔄 Проверка бюджета размера бандла...');
     if (!fs.existsSync(MANIFEST_PATH)) {
       console.error('❌ Не найден dist/.vite/manifest.json — сначала выполните npm run build');
@@ -137,20 +153,22 @@ function main(argv) {
         console.error('❌ Не найден entry-чанк в dist/.vite/manifest.json');
         failed = true;
       } else {
-        const jsPath = path.join(DIST_DIR, entry.file);
-        const buffer = fs.readFileSync(jsPath);
-        const gzipBytes = gzipSize(buffer);
-        const kb = formatKb(gzipBytes);
         const budgetKb = formatKb(BUDGET_BYTES);
+        let gzipBytes = 0;
+        for (const file of collectFirstScreenChunks(manifest, entry)) {
+          const chunkBytes = gzipSize(fs.readFileSync(path.join(DIST_DIR, file)));
+          gzipBytes += chunkBytes;
+          console.log(`chunk: ${file} — ${formatKb(chunkBytes)} KB gzip`);
+        }
+        const kb = formatKb(gzipBytes);
 
-        console.log(`entry: ${entry.file}`);
-        console.log(`gzip: ${kb} KB (бюджет ${budgetKb} KB)`);
+        console.log(`gzip первого экрана: ${kb} KB (бюджет ${budgetKb} KB)`);
 
         if (gzipBytes > BUDGET_BYTES) {
-          console.error(`❌ FAIL: ${entry.file} = ${kb} KB gzip > ${budgetKb} KB бюджет`);
+          console.error(`❌ FAIL: первый экран = ${kb} KB gzip > ${budgetKb} KB бюджет`);
           failed = true;
         } else {
-          console.log(`✅ PASS: ${entry.file} = ${kb} KB gzip ≤ ${budgetKb} KB бюджет`);
+          console.log(`✅ PASS: первый экран = ${kb} KB gzip ≤ ${budgetKb} KB бюджет`);
         }
       }
     }
