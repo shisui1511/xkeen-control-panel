@@ -24,6 +24,7 @@
   import Tabs, { type TabItem } from './components/Tabs.svelte';
   import SegmentedControl, { type SegmentItem } from './components/SegmentedControl.svelte';
   import Select from './components/Select.svelte';
+  import Skeleton from './components/Skeleton.svelte';
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -567,6 +568,105 @@
       passwordChanging = false;
     }
   }
+
+  // Active sessions — «Активные сессии» (D-10, SESS-02)
+  interface SessionInfo {
+    id: string;
+    browser: string;
+    os: string;
+    ip: string;
+    created_at: string;
+    last_seen: string;
+    current: boolean;
+  }
+
+  let sessions = $state<SessionInfo[]>([]);
+  let sessionsLoading = $state(false);
+  let sessionsError = $state('');
+  let terminatingSessionId = $state('');
+  let terminatingOthers = $state(false);
+
+  function sessionDeviceLabel(s: SessionInfo): string {
+    const parts = [s.browser, s.os].filter((p) => p && p.trim() !== '');
+    return parts.length > 0 ? parts.join(' · ') : $t('settings.sessions_unknown_device');
+  }
+
+  function formatSessionTime(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString($currentLang, { dateStyle: 'short', timeStyle: 'short' });
+  }
+
+  async function loadSessions() {
+    sessionsLoading = true;
+    sessionsError = '';
+    try {
+      sessions = (await apiFetchJSON<SessionInfo[]>('/api/auth/sessions')) ?? [];
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      sessionsError = $t('settings.sessions_load_error');
+    } finally {
+      sessionsLoading = false;
+    }
+  }
+
+  async function terminateSession(s: SessionInfo) {
+    const ok = await showConfirm({
+      title: $t('settings.sessions_terminate_confirm_title'),
+      objectName: `${sessionDeviceLabel(s)} · ${s.ip}`,
+      consequence: $t('settings.sessions_terminate_consequence'),
+      confirmLabel: $t('settings.sessions_terminate_confirm'),
+      variant: 'danger'
+    });
+    if (!ok) return;
+    terminatingSessionId = s.id;
+    try {
+      await apiFetchJSON('/api/auth/sessions/terminate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: s.id })
+      });
+      showToast('success', $t('settings.sessions_terminated'));
+      await loadSessions();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
+    } finally {
+      terminatingSessionId = '';
+    }
+  }
+
+  async function terminateOtherSessions() {
+    const ok = await showConfirm({
+      title: $t('settings.sessions_terminate_all_confirm_title'),
+      message: $t('settings.sessions_terminate_all_message'),
+      consequence: $t('settings.sessions_terminate_all_consequence'),
+      confirmLabel: $t('settings.sessions_terminate_all_confirm'),
+      variant: 'danger'
+    });
+    if (!ok) return;
+    terminatingOthers = true;
+    try {
+      await apiFetchJSON('/api/auth/sessions/terminate-others', { method: 'POST' });
+      showToast('success', $t('settings.sessions_terminated_all'));
+      await loadSessions();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
+    } finally {
+      terminatingOthers = false;
+    }
+  }
+
+  let securityLoaded = $state(false);
+  $effect(() => {
+    if (activeTab === 'security' && !securityLoaded) {
+      securityLoaded = true;
+      loadSessions();
+    } else if (activeTab !== 'security') {
+      securityLoaded = false;
+    }
+  });
 
   async function fetchVersion() {
     try {
@@ -1260,6 +1360,65 @@
     </div>
 
     <div class="card mb-2">
+      <div class="card-label">{$t('settings.sessions_title')}</div>
+      <div class="sessions-list">
+        {#if sessionsLoading}
+          {#each { length: 3 } as _, i (i)}
+            <div class="field-row session-skeleton-row">
+              <div class="session-skeleton-lines">
+                <Skeleton type="text-line" width="55%" height="14px" />
+                <Skeleton type="text-line" width="75%" height="12px" />
+              </div>
+            </div>
+          {/each}
+        {:else if sessionsError}
+          <div class="field-row-desc">{sessionsError}</div>
+          <button class="btn btn-secondary btn-sm" onclick={loadSessions}>{$t('app.retry')}</button>
+        {:else}
+          {#each sessions as s (s.id)}
+            <div class="field-row" data-testid="session-row">
+              <div class="session-info">
+                <div class="session-name-row">
+                  <span class="field-row-name session-name-text" title={sessionDeviceLabel(s)}>
+                    {sessionDeviceLabel(s)}
+                  </span>
+                  {#if s.current}
+                    <span class="badge badge-info">{$t('settings.sessions_current_badge')}</span>
+                  {/if}
+                </div>
+                <div class="field-row-desc">
+                  IP {s.ip} · {$t('settings.sessions_login_at', {
+                    time: formatSessionTime(s.created_at)
+                  })} · {$t('settings.sessions_last_seen', {
+                    time: formatSessionTime(s.last_seen)
+                  })}
+                </div>
+              </div>
+              {#if !s.current}
+                <button
+                  class="btn btn-secondary btn-sm"
+                  onclick={() => terminateSession(s)}
+                  disabled={terminatingSessionId === s.id}
+                >
+                  {$t('settings.sessions_terminate')}
+                </button>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      </div>
+      <div class="card-actions">
+        <button
+          class="btn btn-danger"
+          onclick={terminateOtherSessions}
+          disabled={sessions.length <= 1 || terminatingOthers || sessionsLoading}
+        >
+          {$t('settings.sessions_terminate_all_others')}
+        </button>
+      </div>
+    </div>
+
+    <div class="card mb-2">
       <div class="card-label">{$t('settings.security')}</div>
       <div class="field-group">
         <div class="field-row-info">
@@ -1504,6 +1663,7 @@
     font-size: 12px;
     color: var(--fg-dim);
     margin-top: 2px;
+    overflow-wrap: anywhere;
   }
 
   .btn-sm {
@@ -1514,5 +1674,62 @@
   .backup-dropzone:hover {
     border-color: var(--accent);
     background: var(--accent-soft);
+  }
+
+  /* Активные сессии (D-10) */
+  .sessions-list {
+    display: flex;
+    flex-direction: column;
+    max-height: 480px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .sessions-list::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .sessions-list::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius-full);
+  }
+
+  .sessions-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .session-skeleton-row {
+    display: block;
+  }
+
+  .session-skeleton-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .session-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .session-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .field-row-name.session-name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex-shrink: 1;
   }
 </style>
