@@ -1323,7 +1323,7 @@
   "xray.generate_key": "Сгенерировать ключ",
   "xray.key_generated": "Ключ сгенерирован",
   "xray.sockopt_title": "Параметры сокета (sockopt)",
-  "xray.sockopt_hint": "fwmark для связки с правилами Keenetic ip rule / routing tables",
+  "xray.sockopt_hint": "fwmark для связки с правилами Keenetic/Netcraze ip rule / routing tables",
   "xray.mark": "SO_MARK (fwmark)",
   "xray.tcp_fast_open": "TCP Fast Open (TFO)",
   "xray.tcp_mptcp": "Multipath TCP (MPTCP)",

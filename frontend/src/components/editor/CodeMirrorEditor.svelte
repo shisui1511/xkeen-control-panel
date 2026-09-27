@@ -412,7 +412,7 @@
     background: var(--fg-dim);
   }
 
-  /* Schema hover tooltip — modern IDE-grade layout matching Keenetic design system */
+  /* Schema hover tooltip — modern IDE-grade layout matching Keenetic/Netcraze design system */
   :global(.cm-tooltip:has(.cm-schema-tooltip)),
   :global(.cm-tooltip:has(.cm6-json-schema-hover)) {
     background: var(--bg-surface-elevated) !important;

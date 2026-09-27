@@ -553,8 +553,8 @@ export const mihomoSchema = {
     'interface-name': {
       type: 'string',
       description: {
-        ru: `Исходящий сетевой интерфейс для собственных соединений Mihomo глобально (переопределяется на уровне прокси/группы). На Keenetic это обычно WAN-интерфейс, например nwan0 или имя, выданное провайдером.`,
-        en: "Outbound network interface for Mihomo's own connections globally (overridable per proxy/group). On Keenetic this is normally the WAN interface, e.g. nwan0 or the ISP-assigned name."
+        ru: `Исходящий сетевой интерфейс для собственных соединений Mihomo глобально (переопределяется на уровне прокси/группы). На Keenetic/Netcraze это обычно WAN-интерфейс, например nwan0 или имя, выданное провайдером.`,
+        en: "Outbound network interface for Mihomo's own connections globally (overridable per proxy/group). On Keenetic/Netcraze this is normally the WAN interface, e.g. nwan0 or the ISP-assigned name."
       }
     },
     'routing-mark': {
@@ -663,8 +663,8 @@ export const mihomoSchema = {
       type: 'string',
       enum: ['standard', 'memconservative'],
       description: {
-        ru: `Как гео-базы загружаются в память. "standard" грузит их целиком для самого быстрого поиска; "memconservative" читает с диска по мере необходимости, экономя RAM — имеет смысл переключить на роутерах с ограниченной памятью (типичное железо Keenetic), если Mihomo убивает OOM-killer.`,
-        en: 'How geo databases are loaded into memory. "standard" loads them fully for fastest lookups; "memconservative" streams from disk to save RAM — worth switching to on routers with limited RAM (typical Keenetic hardware) if Mihomo is getting OOM-killed.'
+        ru: `Как гео-базы загружаются в память. "standard" грузит их целиком для самого быстрого поиска; "memconservative" читает с диска по мере необходимости, экономя RAM — имеет смысл переключить на роутерах с ограниченной памятью (типичное железо Keenetic/Netcraze), если Mihomo убивает OOM-killer.`,
+        en: 'How geo databases are loaded into memory. "standard" loads them fully for fastest lookups; "memconservative" streams from disk to save RAM — worth switching to on routers with limited RAM (typical Keenetic/Netcraze hardware) if Mihomo is getting OOM-killed.'
       }
     },
     'geox-url': {
@@ -697,8 +697,8 @@ export const mihomoSchema = {
     ntp: {
       type: 'object',
       description: {
-        ru: `Встроенный NTP-клиент Mihomo для коррекции собственных часов. Важно, потому что у большинства роутеров Keenetic нет RTC с батарейкой — после отключения питания часы сбрасываются на устаревшую дату сборки, из-за чего валидация TLS-сертификатов (REALITY/TLS handshake) начинает падать с ошибкой вида "сертификат просрочен/ещё не действителен", пока время не синхронизируется каким-то другим способом.`,
-        en: "Built-in NTP client Mihomo can use to correct its own clock. Matters because most Keenetic routers have no battery-backed RTC — after a power loss the clock resets to a stale build date, which breaks TLS certificate validation (REALITY/TLS handshakes fail with 'certificate expired/not yet valid') until the system clock syncs some other way."
+        ru: `Встроенный NTP-клиент Mihomo для коррекции собственных часов. Важно, потому что у большинства роутеров Keenetic/Netcraze нет RTC с батарейкой — после отключения питания часы сбрасываются на устаревшую дату сборки, из-за чего валидация TLS-сертификатов (REALITY/TLS handshake) начинает падать с ошибкой вида "сертификат просрочен/ещё не действителен", пока время не синхронизируется каким-то другим способом.`,
+        en: "Built-in NTP client Mihomo can use to correct its own clock. Matters because most Keenetic/Netcraze routers have no battery-backed RTC — after a power loss the clock resets to a stale build date, which breaks TLS certificate validation (REALITY/TLS handshakes fail with 'certificate expired/not yet valid') until the system clock syncs some other way."
       },
       properties: {
         enable: { type: 'boolean' },
@@ -890,8 +890,8 @@ export const mihomoSchema = {
     tun: {
       type: 'object',
       description: {
-        ru: `Собственный виртуальный сетевой интерфейс Mihomo для прозрачного проксирования — альтернатива связке \`redir-port\`/\`tproxy-port\` + iptables.\n\n> На этой панели XKeen уже сам управляет прозрачным перехватом через собственные iptables/TPROXY правила на Keenetic. Включение \`tun\` поверх этого избыточно, и оба механизма могут конфликтовать за один и тот же трафик — оставляйте выключенным, если осознанно не переключили режим перехвата XKeen на \`tun\`.`,
-        en: "Mihomo's own virtual network interface for transparent proxying — an alternative to the `redir-port`/`tproxy-port` + iptables approach.\n\n> On this panel XKeen already owns transparent interception via its own iptables/TPROXY rules on Keenetic. Enabling `tun` on top of that is redundant and the two can fight over the same traffic — leave it disabled unless you specifically switched XKeen's interception mode to rely on `tun`."
+        ru: `Собственный виртуальный сетевой интерфейс Mihomo для прозрачного проксирования — альтернатива связке \`redir-port\`/\`tproxy-port\` + iptables.\n\n> На этой панели XKeen уже сам управляет прозрачным перехватом через собственные iptables/TPROXY правила на Keenetic/Netcraze. Включение \`tun\` поверх этого избыточно, и оба механизма могут конфликтовать за один и тот же трафик — оставляйте выключенным, если осознанно не переключили режим перехвата XKeen на \`tun\`.`,
+        en: "Mihomo's own virtual network interface for transparent proxying — an alternative to the `redir-port`/`tproxy-port` + iptables approach.\n\n> On this panel XKeen already owns transparent interception via its own iptables/TPROXY rules on Keenetic/Netcraze. Enabling `tun` on top of that is redundant and the two can fight over the same traffic — leave it disabled unless you specifically switched XKeen's interception mode to rely on `tun`."
       },
       properties: {
         enable: {
@@ -912,8 +912,8 @@ export const mihomoSchema = {
           type: 'string',
           enum: ['system', 'gvisor', 'mixed'],
           description: {
-            ru: `Пользовательский сетевой стек TUN-устройства. "gvisor" — самый безопасный портируемый вариант по умолчанию, рекомендуется на Keenetic; "system" использует стек ядра (быстрее, только Linux/Android, чувствительнее к особенностям ядра); "mixed" — system для TCP + gvisor для UDP.`,
-            en: 'Userspace network stack backing the TUN device. "gvisor" is the safest portable default and recommended on Keenetic; "system" uses the kernel network stack (faster, Linux/Android only, more sensitive to kernel quirks); "mixed" is system for TCP + gvisor for UDP.'
+            ru: `Пользовательский сетевой стек TUN-устройства. "gvisor" — самый безопасный портируемый вариант по умолчанию, рекомендуется на Keenetic/Netcraze; "system" использует стек ядра (быстрее, только Linux/Android, чувствительнее к особенностям ядра); "mixed" — system для TCP + gvisor для UDP.`,
+            en: 'Userspace network stack backing the TUN device. "gvisor" is the safest portable default and recommended on Keenetic/Netcraze; "system" uses the kernel network stack (faster, Linux/Android only, more sensitive to kernel quirks); "mixed" is system for TCP + gvisor for UDP.'
           }
         },
         'dns-hijack': {
@@ -927,8 +927,8 @@ export const mihomoSchema = {
         'auto-route': {
           type: 'boolean',
           description: {
-            ru: `Разрешить Mihomo самостоятельно добавлять default-маршрут через TUN-устройство. На Keenetic это конфликтует с собственной настройкой маршрутизации/iptables в XKeen и обычно не работает как ожидается — маршруты должны управляться скриптами XKeen, поэтому оставляйте false.`,
-            en: "Let Mihomo add its own default route through the TUN device automatically. On Keenetic this conflicts with XKeen's own routing/iptables setup and typically does not work as expected — routes must be managed by XKeen's scripts instead, so leave this false."
+            ru: `Разрешить Mihomo самостоятельно добавлять default-маршрут через TUN-устройство. На Keenetic/Netcraze это конфликтует с собственной настройкой маршрутизации/iptables в XKeen и обычно не работает как ожидается — маршруты должны управляться скриптами XKeen, поэтому оставляйте false.`,
+            en: "Let Mihomo add its own default route through the TUN device automatically. On Keenetic/Netcraze this conflicts with XKeen's own routing/iptables setup and typically does not work as expected — routes must be managed by XKeen's scripts instead, so leave this false."
           }
         },
         'auto-detect-interface': {
@@ -1044,8 +1044,8 @@ export const mihomoSchema = {
     dns: {
       type: 'object',
       description: {
-        ru: `Встроенный DNS-резолвер Mihomo. Без TUN резолвинг обычно берёт на себя сам роутер (Keenetic Cloud/AdGuard Home/и т.п.), и весь этот блок можно оставить выключенным; с TUN + enhanced-mode: fake-ip dns.enable: true обязателен, чтобы Mihomo сам мог перехватывать и отвечать на доменные запросы.`,
-        en: "Mihomo's built-in DNS resolver. Without TUN, the router's own DNS (Keenetic Cloud/AdGuard Home/etc.) usually handles resolution and this whole block can stay off; with TUN + enhanced-mode: fake-ip, dns.enable: true is required so Mihomo can intercept and answer domain lookups itself."
+        ru: `Встроенный DNS-резолвер Mihomo. Без TUN резолвинг обычно берёт на себя сам роутер (DNS прошивки, AdGuard Home и т.п.), и весь этот блок можно оставить выключенным; с TUN + enhanced-mode: fake-ip dns.enable: true обязателен, чтобы Mihomo сам мог перехватывать и отвечать на доменные запросы.`,
+        en: "Mihomo's built-in DNS resolver. Without TUN, the router's own DNS (firmware DNS, AdGuard Home, etc.) usually handles resolution and this whole block can stay off; with TUN + enhanced-mode: fake-ip, dns.enable: true is required so Mihomo can intercept and answer domain lookups itself."
       },
       properties: {
         enable: {
