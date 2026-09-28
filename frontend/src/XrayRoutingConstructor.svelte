@@ -5,7 +5,7 @@
   import Button from './components/Button.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
-  import { activateRestartGrace } from './lib/serviceGrace';
+  import { applyToKernel, notifyApplyOutcome, willRestartOnApply } from './lib/serviceApply';
   import { currentLang, t, tp } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
@@ -182,6 +182,8 @@
   let dnsRedirectLoading = $state(false);
 
   let showApplyConfirm = $state(false);
+  const willRestart = $derived(willRestartOnApply($capabilities, 'xray'));
+  const applyLabel = $derived(willRestart ? $t('editor.apply_and_restart') : $t('apply.apply'));
   interface FilePlan {
     name: string;
     changed: boolean;
@@ -409,7 +411,9 @@
     }
 
     if (files['03_inbounds.json']?.inbounds) {
-      inbounds = files['03_inbounds.json'].inbounds;
+      // Копия по той же причине, что у customOutbounds ниже: правка черновика не должна
+      // менять загруженный с роутера исходник.
+      inbounds = $state.snapshot(files['03_inbounds.json'].inbounds);
     }
 
     if (files['04_outbounds.json']?.outbounds) {
@@ -871,15 +875,28 @@
       }
       saveWarnings = collectedWarnings;
 
-      try {
-        await apiFetch('/api/service/control?action=restart', { method: 'POST' });
-      } catch {
-        // Ignored
-      }
-      showToast('success', $t('app.saved'));
+      // Files are on disk from here on: whatever happens next, the draft is
+      // no longer "unsaved" and the dialog is done.
       isDirty = false;
       showApplyConfirm = false;
-      activateRestartGrace();
+      try {
+        notifyApplyOutcome(await applyToKernel({ kernel: 'xray' }));
+      } catch (applyErr: any) {
+        if (applyErr?.status === 401) return;
+        showToast(
+          'error',
+          $t('apply.restart_failed', {
+            reason: parseValidationError(applyErr?.message || '', $currentLang) || applyErr?.message
+          }),
+          10000,
+          {
+            label: $t('apply.open_logs'),
+            onClick: () => {
+              window.location.hash = '#/logs';
+            }
+          }
+        );
+      }
       await loadXrayConfig();
     } catch (e: any) {
       const errMsg = e?.message || 'Save error';
@@ -1009,7 +1026,7 @@
           onclick={promptApplyChanges}
           disabled={applyLoading}
         >
-          {applyLoading ? $t('editor.saving') : $t('mihomo.apply_changes')}
+          {applyLoading ? $t('editor.saving') : applyLabel}
         </Button>
       </div>
     </div>
@@ -1204,7 +1221,7 @@
               disabled={applyLoading}
               style="flex: 1;"
             >
-              {applyLoading ? $t('editor.saving') : $t('mihomo.apply_changes')}
+              {applyLoading ? $t('editor.saving') : applyLabel}
             </button>
           </div>
         {/if}
@@ -1219,7 +1236,7 @@
   dataTestid="apply-confirm-dialog"
   onclose={() => (showApplyConfirm = false)}
 >
-  <p>{$t('editor.apply_confirm_body')}</p>
+  <p>{willRestart ? $t('editor.apply_confirm_body') : $t('apply.confirm_body_no_restart')}</p>
   <div class="apply-plan">
     <strong>{$t('xray.files_to_modify')}</strong>
     <ul class="apply-plan-list">
@@ -1264,7 +1281,7 @@
       onclick={handleApplyChanges}
       disabled={applyLoading}
     >
-      {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
+      {applyLoading ? $t('editor.saving') : applyLabel}
     </button>
   </div>
 </Modal>

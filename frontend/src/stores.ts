@@ -32,6 +32,8 @@ export interface CapabilitiesData {
     grpc_ready?: boolean;
   };
   global_hwid?: string;
+  /** Prediction of "will Apply restart this kernel" per kernel (button labels). */
+  apply_restarts?: Record<string, boolean>;
 }
 
 export const capabilities = writable<CapabilitiesData | null>(null);

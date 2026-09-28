@@ -2493,5 +2493,20 @@
   "settings.update_auto_saved": "Automatic update settings saved",
   "settings.update_auto_last_ok": "Automatically updated from {from} to {version} · {date}",
   "settings.update_auto_last_failed": "Automatic update to {version} failed — the panel returned to {from}. You can install this version manually; it won't be installed automatically again.",
-  "settings.update_auto_checked": "Background check: {date}"
+  "settings.update_auto_checked": "Background check: {date}",
+  "apply.apply": "Apply",
+  "apply.confirm_body_no_restart": "The changes will be written to the configuration files. The core is not restarted right now.",
+  "apply.restarted": "Saved, core restarted",
+  "apply.saved_kernel_stopped": "Saved. The core is stopped — the changes will take effect when it starts",
+  "apply.start_now": "Start now",
+  "apply.start_failed": "Could not start the core: {error}",
+  "apply.saved_kernel_inactive": "Saved. Takes effect after switching to {kernel}",
+  "apply.restart_failed": "Saved, but the restart failed: {reason}",
+  "apply.restart_failed_unknown": "reason unknown",
+  "apply.open_logs": "Logs",
+  "apply.switch_mihomo_body": "Config saved. Xray is running now — switch to Mihomo?",
+  "apply.switch_and_start": "Switch and start",
+  "apply.save_only": "Save only",
+  "apply.mihomo_saved_after_switch": "Mihomo config saved. Takes effect after switching to Mihomo",
+  "apply.switch_failed": "Config saved, but switching to Mihomo failed: {reason}"
 }

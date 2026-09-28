@@ -2493,5 +2493,20 @@
   "settings.update_auto_saved": "Настройки автообновления сохранены",
   "settings.update_auto_last_ok": "Автоматически обновлено с {from} до {version} · {date}",
   "settings.update_auto_last_failed": "Автообновление до {version} не удалось — панель вернулась на {from}. Эту версию можно поставить вручную, сама она больше не установится.",
-  "settings.update_auto_checked": "Фоновая проверка: {date}"
+  "settings.update_auto_checked": "Фоновая проверка: {date}",
+  "apply.apply": "Применить",
+  "apply.confirm_body_no_restart": "Изменения будут записаны в файлы конфигурации. Ядро сейчас не перезапускается.",
+  "apply.restarted": "Сохранено, ядро перезапущено",
+  "apply.saved_kernel_stopped": "Сохранено. Ядро остановлено — изменения вступят в силу при запуске",
+  "apply.start_now": "Запустить сейчас",
+  "apply.start_failed": "Не удалось запустить ядро: {error}",
+  "apply.saved_kernel_inactive": "Сохранено. Вступит в силу после переключения на {kernel}",
+  "apply.restart_failed": "Сохранено, но перезапуск не удался: {reason}",
+  "apply.restart_failed_unknown": "причина неизвестна",
+  "apply.open_logs": "Логи",
+  "apply.switch_mihomo_body": "Конфиг сохранён. Сейчас работает Xray — переключить на Mihomo?",
+  "apply.switch_and_start": "Переключить и запустить",
+  "apply.save_only": "Только сохранить",
+  "apply.mihomo_saved_after_switch": "Конфиг Mihomo сохранён. Вступит в силу после переключения на Mihomo",
+  "apply.switch_failed": "Конфиг сохранён, но переключение на Mihomo не удалось: {reason}"
 }
