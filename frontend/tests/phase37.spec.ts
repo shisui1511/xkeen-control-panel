@@ -247,10 +247,9 @@ proxies:
     const confirmModal = page.locator('[data-testid="apply-confirm-dialog"]');
     await expect(confirmModal).toBeVisible({ timeout: 5000 });
 
-    // Click the "Apply and Restart" button in the modal to trigger the collision check
-    const confirmBtn = confirmModal
-      .locator('button:has-text("Apply and Restart"), button:has-text("Применить и перезапустить")')
-      .first();
+    // Click the primary button in the modal to trigger the collision check
+    // (its label is "Apply" or "Apply and Restart" depending on the kernel state)
+    const confirmBtn = confirmModal.locator('button.btn-primary').first();
     await expect(confirmBtn).toBeVisible();
     await confirmBtn.click();
 

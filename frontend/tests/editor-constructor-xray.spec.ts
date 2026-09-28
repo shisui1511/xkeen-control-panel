@@ -8,6 +8,7 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { fulfillServiceControl } from './helpers/api-mocks';
 
 test.use({ locale: 'ru-RU' });
 
@@ -144,11 +145,7 @@ test.describe('Xray Constructor integration test suite', () => {
           body: JSON.stringify({ success: true })
         });
       } else if (url.includes('/api/service/control') && method === 'POST') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ success: true })
-        });
+        await fulfillServiceControl(route);
       } else if (url.includes('/api/templates/list')) {
         await route.fulfill({
           status: 200,
@@ -228,7 +225,7 @@ test.describe('Xray Constructor integration test suite', () => {
     let serviceControlCalled = false;
 
     // Перехватить вызов service/control ДО beforeEach-мока (route.fulfill первым матчит)
-    await page.route('**/api/service/control', async (route) => {
+    await page.route('**/api/service/control**', async (route) => {
       serviceControlCalled = true;
       await route.fulfill({
         status: 200,

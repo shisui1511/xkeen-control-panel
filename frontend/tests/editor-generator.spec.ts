@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { fulfillServiceControl } from './helpers/api-mocks';
 
 // Принудительно задаем русский язык для тестов интерфейса
 test.use({ locale: 'ru-RU' });
@@ -441,7 +442,7 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     expect(yamlText).toContain('MATCH');
   });
 
-  test('применение изменений Mihomo (Apply) требует подтверждения и отправляет запрос на merge + restart (D-05, D-19)', async ({
+  test('применение изменений Mihomo (Apply) требует подтверждения и отправляет запрос на merge + apply к ядру (D-05, D-19)', async ({
     page
   }) => {
     const postRequests: string[] = [];
@@ -450,6 +451,8 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
         postRequests.push(request.url());
       }
     });
+
+    await page.route('**/api/service/control**', fulfillServiceControl);
 
     page.on('dialog', async (dialog) => {
       await dialog.accept();
@@ -500,12 +503,19 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await expect(page.locator('[data-testid="apply-changes-btn"]')).toBeEnabled({ timeout: 5000 });
 
     const mergeCall = postRequests.some((url) => url.includes('/api/config/smart-merge'));
-    const restartCall = postRequests.some(
+    const applyCall = postRequests.some(
+      (url) =>
+        url.includes('/api/service/control') &&
+        url.includes('action=apply') &&
+        url.includes('kernel=mihomo')
+    );
+    const blindRestart = postRequests.some(
       (url) => url.includes('/api/service/control') && url.includes('action=restart')
     );
 
     expect(mergeCall).toBe(true);
-    expect(restartCall).toBe(true);
+    expect(applyCall).toBe(true);
+    expect(blindRestart).toBe(false);
   });
 
   test('displays warning banner listing preserved non-managed keys and sends smart-merge request', async ({
