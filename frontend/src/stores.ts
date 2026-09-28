@@ -137,6 +137,14 @@ export interface ToastItem {
 
 export const toastStore = writable<ToastItem[]>([]);
 
+// --- Panel reachability store (D-20) ---
+// Set by lib/panelHealth.ts's reportPanelUnreachable() whenever apiFetch's
+// underlying fetch() throws (network down — xcp restarting/updating/being
+// deployed). While true, showToast() suppresses new error toasts so a flood
+// of failed background polls does not spam the user; the reconnect banner
+// in Dashboard.svelte is the single non-blocking indicator instead.
+export const panelUnreachable = writable<boolean>(false);
+
 let _toastCounter = 0;
 
 export function showToast(
@@ -145,6 +153,7 @@ export function showToast(
   duration = 4000,
   action?: ToastAction
 ): void {
+  if (type === 'error' && get(panelUnreachable)) return;
   const id = ++_toastCounter;
   toastStore.update((items) => [...items, { id, type, message, duration, action }]);
   if (duration > 0) {

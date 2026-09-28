@@ -24,6 +24,10 @@
   import Tabs, { type TabItem } from './components/Tabs.svelte';
   import SegmentedControl, { type SegmentItem } from './components/SegmentedControl.svelte';
   import Select from './components/Select.svelte';
+  import Skeleton from './components/Skeleton.svelte';
+  import PasswordField from './components/PasswordField.svelte';
+  import PasswordStrengthMeter from './components/PasswordStrengthMeter.svelte';
+  import { validatePasswordPolicy, policyErrorKey } from './lib/passwordPolicy';
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -531,12 +535,14 @@
   async function changePassword() {
     passwordError = '';
     passwordSuccess = false;
-    if (newPassword.length < 8) {
-      passwordError = $t('settings.password_too_short');
-      return;
-    }
     if (newPassword !== confirmPassword) {
       passwordError = $t('settings.password_mismatch');
+      return;
+    }
+    const policyCode = validatePasswordPolicy(newPassword, { current: currentPassword });
+    if (policyCode) {
+      const key = policyErrorKey(policyCode);
+      passwordError = key ? $t(key) : $t('settings.password_error');
       return;
     }
     passwordChanging = true;
@@ -546,19 +552,24 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
       });
+      let payload: any = null;
+      try {
+        payload = await res.json();
+      } catch {
+        // тело ответа не JSON
+      }
       if (res.ok) {
+        if (payload?.csrf_token) {
+          localStorage.setItem('csrf_token', payload.csrf_token);
+        }
         passwordSuccess = true;
         currentPassword = '';
         newPassword = '';
         confirmPassword = '';
+        loadSessions();
       } else {
-        let payload: any = null;
-        try {
-          payload = await res.json();
-        } catch {
-          // тело ответа не JSON
-        }
-        passwordError = payload?.error || $t('settings.password_error');
+        const key = policyErrorKey(payload?.code);
+        passwordError = (key ? $t(key) : payload?.error) || $t('settings.password_error');
       }
     } catch (e: any) {
       if (e?.status === 401) return;
@@ -567,6 +578,201 @@
       passwordChanging = false;
     }
   }
+
+  // Active sessions — «Активные сессии» (D-10, SESS-02)
+  interface SessionInfo {
+    id: string;
+    browser: string;
+    os: string;
+    ip: string;
+    created_at: string;
+    last_seen: string;
+    current: boolean;
+  }
+
+  let sessions = $state<SessionInfo[]>([]);
+  let sessionsLoading = $state(false);
+  let sessionsError = $state('');
+  let terminatingSessionId = $state('');
+  let terminatingOthers = $state(false);
+
+  function sessionDeviceLabel(s: SessionInfo): string {
+    const parts = [s.browser, s.os].filter((p) => p && p.trim() !== '');
+    return parts.length > 0 ? parts.join(' · ') : $t('settings.sessions_unknown_device');
+  }
+
+  function formatSessionTime(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString($currentLang, { dateStyle: 'short', timeStyle: 'short' });
+  }
+
+  async function loadSessions() {
+    sessionsLoading = true;
+    sessionsError = '';
+    try {
+      sessions = (await apiFetchJSON<SessionInfo[]>('/api/auth/sessions')) ?? [];
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      sessionsError = $t('settings.sessions_load_error');
+    } finally {
+      sessionsLoading = false;
+    }
+  }
+
+  async function terminateSession(s: SessionInfo) {
+    const ok = await showConfirm({
+      title: $t('settings.sessions_terminate_confirm_title'),
+      objectName: `${sessionDeviceLabel(s)} · ${s.ip}`,
+      consequence: $t('settings.sessions_terminate_consequence'),
+      confirmLabel: $t('settings.sessions_terminate_confirm'),
+      variant: 'danger'
+    });
+    if (!ok) return;
+    terminatingSessionId = s.id;
+    try {
+      await apiFetchJSON('/api/auth/sessions/terminate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: s.id })
+      });
+      showToast('success', $t('settings.sessions_terminated'));
+      await loadSessions();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
+    } finally {
+      terminatingSessionId = '';
+    }
+  }
+
+  async function terminateOtherSessions() {
+    const ok = await showConfirm({
+      title: $t('settings.sessions_terminate_all_confirm_title'),
+      message: $t('settings.sessions_terminate_all_message'),
+      consequence: $t('settings.sessions_terminate_all_consequence'),
+      confirmLabel: $t('settings.sessions_terminate_all_confirm'),
+      variant: 'danger'
+    });
+    if (!ok) return;
+    terminatingOthers = true;
+    try {
+      await apiFetchJSON('/api/auth/sessions/terminate-others', { method: 'POST' });
+      showToast('success', $t('settings.sessions_terminated_all'));
+      await loadSessions();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
+    } finally {
+      terminatingOthers = false;
+    }
+  }
+
+  // Время жизни сессии — «Время жизни сессии» (D-06)
+  interface SessionTTLSettings {
+    idle_ttl_hours: number;
+    absolute_ttl_days: number;
+    idle_ttl_min: number;
+    idle_ttl_max: number;
+    absolute_ttl_min: number;
+    absolute_ttl_max: number;
+  }
+
+  let sessionTTL = $state<SessionTTLSettings | null>(null);
+  let ttlLoading = $state(false);
+  let ttlSaving = $state(false);
+  let ttlError = $state('');
+  // <input type="number" bind:value> в Svelte 5 биндит число, а не строку;
+  // пустое поле отдаёт '' (не 0) — используем это же для «поле очищено».
+  let idleTtlInput = $state<number | ''>('');
+  let absoluteTtlInput = $state<number | ''>('');
+
+  function parseTtlField(raw: number | ''): number | null {
+    if (raw === '' || raw === null || raw === undefined) return null;
+    if (!Number.isInteger(raw)) return null;
+    return raw;
+  }
+
+  const idleTtlValue = $derived(parseTtlField(idleTtlInput));
+  const absoluteTtlValue = $derived(parseTtlField(absoluteTtlInput));
+
+  const idleTtlInvalid = $derived(
+    sessionTTL !== null &&
+      (idleTtlValue === null ||
+        idleTtlValue < sessionTTL.idle_ttl_min ||
+        idleTtlValue > sessionTTL.idle_ttl_max)
+  );
+  const absoluteTtlInvalid = $derived(
+    sessionTTL !== null &&
+      (absoluteTtlValue === null ||
+        absoluteTtlValue < sessionTTL.absolute_ttl_min ||
+        absoluteTtlValue > sessionTTL.absolute_ttl_max)
+  );
+  const ttlUnchanged = $derived(
+    sessionTTL !== null &&
+      idleTtlValue === sessionTTL.idle_ttl_hours &&
+      absoluteTtlValue === sessionTTL.absolute_ttl_days
+  );
+  const ttlSaveDisabled = $derived(
+    sessionTTL === null ||
+      ttlLoading ||
+      ttlSaving ||
+      idleTtlInvalid ||
+      absoluteTtlInvalid ||
+      ttlUnchanged
+  );
+
+  async function loadSessionTTL() {
+    ttlLoading = true;
+    ttlError = '';
+    try {
+      const data = await apiFetchJSON<SessionTTLSettings>('/api/settings/session');
+      sessionTTL = data;
+      idleTtlInput = data.idle_ttl_hours;
+      absoluteTtlInput = data.absolute_ttl_days;
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
+    } finally {
+      ttlLoading = false;
+    }
+  }
+
+  async function saveSessionTTL() {
+    if (!sessionTTL || idleTtlValue === null || absoluteTtlValue === null) return;
+    ttlSaving = true;
+    ttlError = '';
+    try {
+      const data = await apiFetchJSON<SessionTTLSettings>('/api/settings/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idle_ttl_hours: idleTtlValue,
+          absolute_ttl_days: absoluteTtlValue
+        })
+      });
+      sessionTTL = data;
+      idleTtlInput = data.idle_ttl_hours;
+      absoluteTtlInput = data.absolute_ttl_days;
+      showToast('success', $t('settings.session_ttl_saved'));
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      ttlError = e?.message || $t('settings.session_ttl_range_error');
+    } finally {
+      ttlSaving = false;
+    }
+  }
+
+  let securityLoaded = $state(false);
+  $effect(() => {
+    if (activeTab === 'security' && !securityLoaded) {
+      securityLoaded = true;
+      loadSessions();
+      loadSessionTTL();
+    } else if (activeTab !== 'security') {
+      securityLoaded = false;
+    }
+  });
 
   async function fetchVersion() {
     try {
@@ -1212,33 +1418,40 @@
       <div class="field-group">
         <div class="field-row">
           <label class="field-row-name" for="curr-pwd">{$t('settings.current_password')}</label>
-          <input
-            id="curr-pwd"
-            type="password"
-            class="field-input"
-            bind:value={currentPassword}
-            placeholder="••••••••"
-          />
+          <div class="password-field-wrap">
+            <PasswordField
+              id="curr-pwd"
+              bind:value={currentPassword}
+              autocomplete="current-password"
+              inputClass="field-input"
+              placeholder="••••••••"
+            />
+          </div>
         </div>
         <div class="field-row">
           <label class="field-row-name" for="new-pwd">{$t('settings.new_password')}</label>
-          <input
-            id="new-pwd"
-            type="password"
-            class="field-input"
-            bind:value={newPassword}
-            placeholder="••••••••"
-          />
+          <div class="password-field-wrap password-field-with-meter">
+            <PasswordField
+              id="new-pwd"
+              bind:value={newPassword}
+              autocomplete="new-password"
+              inputClass="field-input"
+              placeholder="••••••••"
+            />
+            <PasswordStrengthMeter password={newPassword} userInputs={[currentPassword]} />
+          </div>
         </div>
         <div class="field-row">
           <label class="field-row-name" for="conf-pwd">{$t('settings.confirm_password')}</label>
-          <input
-            id="conf-pwd"
-            type="password"
-            class="field-input"
-            bind:value={confirmPassword}
-            placeholder="••••••••"
-          />
+          <div class="password-field-wrap">
+            <PasswordField
+              id="conf-pwd"
+              bind:value={confirmPassword}
+              autocomplete="new-password"
+              inputClass="field-input"
+              placeholder="••••••••"
+            />
+          </div>
         </div>
       </div>
       {#if passwordError}
@@ -1247,6 +1460,7 @@
       {#if passwordSuccess}
         <div class="field-success">{$t('settings.password_changed')}</div>
       {/if}
+      <div class="field-row-desc">{$t('settings.password_change_side_effect')}</div>
       <div class="card-actions">
         <button
           class="btn btn-primary"
@@ -1255,6 +1469,133 @@
           title={$t('settings.save_password')}
         >
           {passwordChanging ? $t('app.loading') : $t('settings.save_password')}
+        </button>
+      </div>
+    </div>
+
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.session_ttl_title')}</div>
+      <div class="field-group">
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.session_idle_ttl')}</span>
+            <div class="field-row-desc">{$t('settings.session_idle_ttl_desc')}</div>
+            {#if sessionTTL}
+              <div class="field-row-desc">
+                {$t('settings.session_ttl_range_hint', {
+                  min: sessionTTL.idle_ttl_min,
+                  max: sessionTTL.idle_ttl_max
+                })}
+              </div>
+            {/if}
+          </div>
+          <div class="ttl-input-group">
+            <input
+              id="idle-ttl"
+              type="number"
+              class="field-input"
+              bind:value={idleTtlInput}
+              disabled={ttlLoading || sessionTTL === null}
+            />
+            <span class="field-row-desc">{$t('settings.session_ttl_unit_hours')}</span>
+          </div>
+        </div>
+        {#if idleTtlInvalid}
+          <div class="field-error">{$t('settings.session_ttl_range_error')}</div>
+        {/if}
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.session_absolute_ttl')}</span>
+            <div class="field-row-desc">{$t('settings.session_absolute_ttl_desc')}</div>
+            {#if sessionTTL}
+              <div class="field-row-desc">
+                {$t('settings.session_ttl_range_hint', {
+                  min: sessionTTL.absolute_ttl_min,
+                  max: sessionTTL.absolute_ttl_max
+                })}
+              </div>
+            {/if}
+          </div>
+          <div class="ttl-input-group">
+            <input
+              id="absolute-ttl"
+              type="number"
+              class="field-input"
+              bind:value={absoluteTtlInput}
+              disabled={ttlLoading || sessionTTL === null}
+            />
+            <span class="field-row-desc">{$t('settings.session_ttl_unit_days')}</span>
+          </div>
+        </div>
+        {#if absoluteTtlInvalid}
+          <div class="field-error">{$t('settings.session_ttl_range_error')}</div>
+        {/if}
+      </div>
+      {#if ttlError}
+        <div class="field-error">{ttlError}</div>
+      {/if}
+      <div class="card-actions">
+        <button class="btn btn-primary" onclick={saveSessionTTL} disabled={ttlSaveDisabled}>
+          {ttlSaving ? $t('app.loading') : $t('app.save')}
+        </button>
+      </div>
+    </div>
+
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.sessions_title')}</div>
+      <div class="sessions-list">
+        {#if sessionsLoading}
+          {#each { length: 3 } as _, i (i)}
+            <div class="field-row session-skeleton-row">
+              <div class="session-skeleton-lines">
+                <Skeleton type="text-line" width="55%" height="14px" />
+                <Skeleton type="text-line" width="75%" height="12px" />
+              </div>
+            </div>
+          {/each}
+        {:else if sessionsError}
+          <div class="field-row-desc">{sessionsError}</div>
+          <button class="btn btn-secondary btn-sm" onclick={loadSessions}>{$t('app.retry')}</button>
+        {:else}
+          {#each sessions as s (s.id)}
+            <div class="field-row" data-testid="session-row">
+              <div class="session-info">
+                <div class="session-name-row">
+                  <span class="field-row-name session-name-text" title={sessionDeviceLabel(s)}>
+                    {sessionDeviceLabel(s)}
+                  </span>
+                  {#if s.current}
+                    <span class="badge badge-info">{$t('settings.sessions_current_badge')}</span>
+                  {/if}
+                </div>
+                <div class="field-row-desc">
+                  IP {s.ip} · {$t('settings.sessions_login_at', {
+                    time: formatSessionTime(s.created_at)
+                  })} · {$t('settings.sessions_last_seen', {
+                    time: formatSessionTime(s.last_seen)
+                  })}
+                </div>
+              </div>
+              {#if !s.current}
+                <button
+                  class="btn btn-secondary btn-sm"
+                  onclick={() => terminateSession(s)}
+                  disabled={terminatingSessionId === s.id}
+                >
+                  {$t('settings.sessions_terminate')}
+                </button>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      </div>
+      <div class="card-actions">
+        <button
+          class="btn btn-danger"
+          onclick={terminateOtherSessions}
+          disabled={sessions.length <= 1 || terminatingOthers || sessionsLoading}
+        >
+          {$t('settings.sessions_terminate_all_others')}
         </button>
       </div>
     </div>
@@ -1273,6 +1614,12 @@
         </div>
         <div class="field-row-info">
           <Icon name="check" size={14} /><span>{$t('settings.security_headers')}</span>
+        </div>
+        <div class="field-row-info">
+          <Icon name="check" size={14} /><span>{$t('settings.security_https_only')}</span>
+        </div>
+        <div class="field-row-info">
+          <Icon name="check" size={14} /><span>{$t('settings.security_cookie_flags')}</span>
         </div>
       </div>
     </div>
@@ -1504,6 +1851,7 @@
     font-size: 12px;
     color: var(--fg-dim);
     margin-top: 2px;
+    overflow-wrap: anywhere;
   }
 
   .btn-sm {
@@ -1514,5 +1862,96 @@
   .backup-dropzone:hover {
     border-color: var(--accent);
     background: var(--accent-soft);
+  }
+
+  /* Активные сессии (D-10) */
+  .sessions-list {
+    display: flex;
+    flex-direction: column;
+    max-height: 480px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .sessions-list::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .sessions-list::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius-full);
+  }
+
+  .sessions-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .session-skeleton-row {
+    display: block;
+  }
+
+  .session-skeleton-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .session-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .session-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .field-row-name.session-name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  /* Смена пароля — индикатор надёжности под новым паролем (D-18) */
+  .password-field-wrap {
+    flex: 1;
+    min-width: 0;
+    max-width: 260px;
+  }
+
+  .password-field-wrap :global(.password-field) {
+    width: 100%;
+  }
+
+  .password-field-wrap :global(.password-field input) {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .password-field-with-meter {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  /* Время жизни сессии (D-06) */
+  .ttl-input-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ttl-input-group .field-input {
+    width: 90px;
+    min-width: 0;
   }
 </style>

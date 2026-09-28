@@ -474,7 +474,10 @@ func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 	payload, err := a.subscriptionSvc.ProviderFetchWithFallback(r.Context(), urlStr, sub)
 	if err != nil {
 		log.Printf("[Subscriptions] provider fetch failed for sub=%s: %s", sub.ID, utils.SanitizeLogInput(err.Error()))
-		http.Error(w, "Bad Gateway: "+err.Error(), http.StatusBadGateway)
+		// Причина ошибки (может содержать сырой url из query-параметра)
+		// уходит только в лог; клиенту — фиксированный текст без
+		// отражения пользовательского ввода (CodeQL reflected-XSS sink).
+		a.errorResponse(w, "Bad Gateway: upstream fetch failed", http.StatusBadGateway)
 		return
 	}
 
@@ -490,11 +493,14 @@ func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 }
 
 // MihomoProviderRedirect редиректит устаревший путь /mihomo/provider.yaml на
-// новый /api/provider.yaml, сохраняя все query-параметры.
+// новый /api/provider.yaml, сохраняя все query-параметры. Query
+// перекодируется через url.Values.Encode() (а не сырой r.URL.RawQuery) —
+// канонический percent-encoding, а не проброс исходных байт клиента, в
+// Location и в HTML-тело редиректа (CodeQL go/reflected-xss).
 func (a *API) MihomoProviderRedirect(w http.ResponseWriter, r *http.Request) {
 	target := "/api/provider.yaml"
-	if r.URL.RawQuery != "" {
-		target += "?" + r.URL.RawQuery
+	if q := r.URL.Query(); len(q) > 0 {
+		target += "?" + q.Encode()
 	}
 	http.Redirect(w, r, target, http.StatusFound)
 }

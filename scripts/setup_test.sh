@@ -570,6 +570,89 @@ fi
 cleanup
 
 # ---------------------------------------------------------------------------
+# get_proto — панель только по HTTPS (D-12), флаг конфига не действует
+# ---------------------------------------------------------------------------
+echo ""
+echo "── get_proto ────────────────────────────────────────────────"
+make_sandbox
+mkdir -p "$INSTALL_DIR"
+printf '{"https":{"enabled":false}}\n' > "$INSTALL_DIR/config.json"
+result=$(run_in_sandbox "get_proto")
+if [ "$result" = "https" ]; then
+    pass "get_proto отдаёт https даже при enabled:false в конфиге"
+else
+    fail "get_proto отдаёт https даже при enabled:false в конфиге (got: $result)"
+fi
+cleanup
+
+make_sandbox
+result=$(run_in_sandbox "get_proto")
+if [ "$result" = "https" ]; then
+    pass "get_proto отдаёт https без config.json вообще"
+else
+    fail "get_proto отдаёт https без config.json вообще (got: $result)"
+fi
+cleanup
+
+# ---------------------------------------------------------------------------
+# offer_password_setup — предложение задать пароль или код настройки (D-25)
+# ---------------------------------------------------------------------------
+echo ""
+echo "── offer_password_setup ─────────────────────────────────────"
+
+# mock-бинарник xcp: --setup-code печатает фиксированный код, --reset-password
+# логирует факт вызова (чтобы тесты могли утверждать, что он НЕ вызывался)
+install_mock_xcp_setup_code() {
+    cat > "$BIN_PATH" <<'EOF'
+#!/bin/sh
+case "$1" in
+    --setup-code) echo "A1B2C3D4" ;;
+    --reset-password) echo "reset-password called" >> "$XCP_CALL_LOG"; exit 0 ;;
+esac
+EOF
+    chmod +x "$BIN_PATH"
+}
+
+make_sandbox
+install_mock_xcp_setup_code
+printf '{}\n' > "$INSTALL_DIR/config.json"
+export XCP_CALL_LOG="$TMP/xcp_calls.log"
+touch "$XCP_CALL_LOG"
+out=$(XCP_CALL_LOG="$XCP_CALL_LOG" run_in_sandbox "INTERACTIVE=false; offer_password_setup 8090 192.168.1.1" 2>&1)
+if echo "$out" | grep -q "https://192.168.1.1:8090" && echo "$out" | grep -q "A1B2C3D4"; then
+    pass "offer_password_setup (неинтерактивно) печатает https-адрес и код"
+else
+    fail "offer_password_setup (неинтерактивно) печатает https-адрес и код (got: $out)"
+fi
+if [ -s "$XCP_CALL_LOG" ]; then
+    fail "offer_password_setup (неинтерактивно) не должен вызывать --reset-password"
+else
+    pass "offer_password_setup (неинтерактивно) не вызывает --reset-password"
+fi
+unset XCP_CALL_LOG
+cleanup
+
+make_sandbox
+install_mock_xcp_setup_code
+password_hash_json='{"auth":{"password_hash":"$2a$10$abcdefghijklmnopqrstuv"}}'
+printf '%s\n' "$password_hash_json" > "$INSTALL_DIR/config.json"
+export XCP_CALL_LOG="$TMP/xcp_calls.log"
+touch "$XCP_CALL_LOG"
+out=$(XCP_CALL_LOG="$XCP_CALL_LOG" run_in_sandbox "INTERACTIVE=false; offer_password_setup 8090 192.168.1.1" 2>&1)
+if [ -z "$out" ]; then
+    pass "offer_password_setup молчит, если пароль уже задан"
+else
+    fail "offer_password_setup молчит, если пароль уже задан (got: $out)"
+fi
+if [ -s "$XCP_CALL_LOG" ]; then
+    fail "offer_password_setup с заданным паролем не должен вызывать mock xcp"
+else
+    pass "offer_password_setup с заданным паролем не вызывает mock xcp"
+fi
+unset XCP_CALL_LOG
+cleanup
+
+# ---------------------------------------------------------------------------
 # Итог
 # ---------------------------------------------------------------------------
 echo ""

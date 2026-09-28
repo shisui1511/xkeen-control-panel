@@ -4,15 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
 func newTestAuthService() *AuthService {
-	return NewAuthService("", false, 5, 5*time.Minute, nil)
+	return NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
 }
 
 // TestRateLimiterIPOnly verifies that the rate limiter uses only the IP (not IP:port).
@@ -65,27 +67,33 @@ func TestRateLimiterEviction(t *testing.T) {
 	}
 }
 
-// TestSessionEviction verifies that expired sessions are cleaned up on ValidateSession.
+// TestSessionEviction verifies that an expired session is evicted when it is
+// itself looked up via ValidateSession (the map-wide sweep on every call was
+// removed in Phase 134 — periodic eviction is now cleanupSessions's job).
 func TestSessionEviction(t *testing.T) {
 	svc := newTestAuthService()
+	defer svc.Stop()
 
-	// Manually insert an expired session
+	// Manually insert a session whose idle-TTL (default 24h) has elapsed.
 	expiredToken := "expired-token"
+	tokenHash := hashToken(expiredToken)
 	svc.mu.Lock()
-	svc.sessions[expiredToken] = &Session{
-		Token:     expiredToken,
-		CSRFToken: "csrf",
+	svc.sessions[tokenHash] = &Session{
+		ID:        "test-id",
+		TokenHash: tokenHash,
+		CSRFHash:  hashToken("csrf"),
 		CreatedAt: time.Now().Add(-48 * time.Hour),
-		ExpiresAt: time.Now().Add(-24 * time.Hour),
+		LastSeen:  time.Now().Add(-25 * time.Hour),
 	}
 	svc.mu.Unlock()
 
-	// Validate a different (non-existent) token — this triggers the eviction sweep
-	_, _ = svc.ValidateSession("nonexistent")
+	if _, err := svc.ValidateSession(expiredToken); err == nil {
+		t.Error("expected error validating an expired session")
+	}
 
 	// The expired session should now be gone
 	svc.mu.RLock()
-	_, exists := svc.sessions[expiredToken]
+	_, exists := svc.sessions[tokenHash]
 	svc.mu.RUnlock()
 
 	if exists {
@@ -96,11 +104,12 @@ func TestSessionEviction(t *testing.T) {
 // TestSetupRateLimit verifies that HandleSetup blocks after maxAttempts (3) are exhausted.
 // CheckLimit with maxAttempts=3: attempts 1,2 pass; attempt 3 triggers lock; attempt 4+ returns 429.
 func TestSetupRateLimit(t *testing.T) {
-	svc := NewAuthService("", false, 3, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 3, LockoutDuration: 5 * time.Minute})
+	code := svc.currentSetupCode()
 
 	// First 2 attempts should not be 429 (short password rejected by validation, not rate limit)
 	for i := 0; i < 2; i++ {
-		body, _ := json.Marshal(map[string]string{"password": "short"})
+		body, _ := json.Marshal(map[string]string{"password": "short", "setup_code": code})
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(body))
 		req.RemoteAddr = "127.0.0.1:12345"
 		rr := httptest.NewRecorder()
@@ -111,7 +120,7 @@ func TestSetupRateLimit(t *testing.T) {
 	}
 
 	// 3rd attempt reaches maxAttempts=3 → locked. The handler returns 429.
-	body, _ := json.Marshal(map[string]string{"password": "short"})
+	body, _ := json.Marshal(map[string]string{"password": "short", "setup_code": code})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr := httptest.NewRecorder()
@@ -121,7 +130,7 @@ func TestSetupRateLimit(t *testing.T) {
 	}
 
 	// 4th attempt should also be rate limited (429)
-	body, _ = json.Marshal(map[string]string{"password": "short"})
+	body, _ = json.Marshal(map[string]string{"password": "short", "setup_code": code})
 	req = httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr = httptest.NewRecorder()
@@ -135,7 +144,7 @@ func TestSetupRateLimit(t *testing.T) {
 // TestRateLimitResponseDetails verifies that exceeding the attempts limit returns 429,
 // Retry-After header, and detailed JSON message.
 func TestRateLimitResponseDetails(t *testing.T) {
-	svc := NewAuthService("hash", false, 2, 10*time.Second, nil)
+	svc := NewAuthService(Options{PasswordHash: "hash", MaxLoginAttempts: 2, LockoutDuration: 10 * time.Second})
 
 	// 1st login attempt (wrong password) -> 401
 	body, _ := json.Marshal(map[string]string{"password": "wrong"})
@@ -248,14 +257,14 @@ func TestRateLimiter_IPOnly(t *testing.T) {
 
 // TestChangePassword_WrongCurrent (T017): wrong current password returns error.
 func TestChangePassword_WrongCurrent(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
 	hash, err := svc.HashPassword("correctpass")
 	if err != nil {
 		t.Fatal(err)
 	}
 	svc.SetPasswordHash(hash)
 
-	err = svc.ChangePassword("127.0.0.1", "", "wrongpass", "newpassword123")
+	_, err = svc.ChangePassword("127.0.0.1", "", "wrongpass", "newpassword123")
 	if err == nil {
 		t.Error("expected error for wrong current password, got nil")
 	}
@@ -264,7 +273,7 @@ func TestChangePassword_WrongCurrent(t *testing.T) {
 // TestCSRFRotation_OnLogin verifies that each login creates a new session with
 // a unique CSRF token (token rotation on re-login).
 func TestCSRFRotation_OnLogin(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
 	hash, err := svc.HashPassword("securepass123")
 	if err != nil {
 		t.Fatal(err)
@@ -302,14 +311,14 @@ func TestCSRFRotation_OnLogin(t *testing.T) {
 
 // TestChangePassword_Success (T017): correct current password → password changed.
 func TestChangePassword_Success(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
 	hash, err := svc.HashPassword("oldpass123")
 	if err != nil {
 		t.Fatal(err)
 	}
 	svc.SetPasswordHash(hash)
 
-	err = svc.ChangePassword("127.0.0.1", "", "oldpass123", "newpass456")
+	_, err = svc.ChangePassword("127.0.0.1", "", "oldpass123", "newpass456")
 	if err != nil {
 		t.Fatalf("ChangePassword failed: %v", err)
 	}
@@ -336,8 +345,8 @@ func TestAuthService_SessionLifecycle(t *testing.T) {
 	if session.Token == "" || session.CSRFToken == "" {
 		t.Fatal("expected non-empty Token and CSRFToken")
 	}
-	if session.ExpiresAt.Before(time.Now()) {
-		t.Fatal("expected ExpiresAt in the future")
+	if session.CreatedAt.After(time.Now()) {
+		t.Fatal("expected CreatedAt not in the future")
 	}
 
 	// 2. Validate valid session
@@ -345,8 +354,8 @@ func TestAuthService_SessionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidateSession failed: %v", err)
 	}
-	if validated.Token != session.Token {
-		t.Errorf("validated token mismatch: got %q, want %q", validated.Token, session.Token)
+	if validated.TokenHash != hashToken(session.Token) {
+		t.Errorf("validated token hash mismatch: got %q, want %q", validated.TokenHash, hashToken(session.Token))
 	}
 
 	// 3. Validate non-existent token
@@ -364,7 +373,7 @@ func TestAuthService_SessionLifecycle(t *testing.T) {
 }
 
 func TestAuthService_Stop_And_CleanupGoroutines(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
 	// Stop closes stopCh; ensure multiple or clean stop does not panic
 	svc.Stop()
 }
@@ -373,13 +382,17 @@ func TestAuthService_ValidateCSRF(t *testing.T) {
 	svc := newTestAuthService()
 	defer svc.Stop()
 
-	session, err := svc.CreateSession()
+	issued, err := svc.CreateSession()
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
+	session, err := svc.ValidateSession(issued.Token)
+	if err != nil {
+		t.Fatalf("ValidateSession failed: %v", err)
+	}
 
 	// 1. Valid CSRF
-	if !svc.ValidateCSRF(session, session.CSRFToken) {
+	if !svc.ValidateCSRF(session, issued.CSRFToken) {
 		t.Error("expected ValidateCSRF to return true for matching CSRF token")
 	}
 
@@ -562,8 +575,9 @@ func TestAuthService_HandleSetup_Scenarios(t *testing.T) {
 		return nil
 	}
 
-	svc := NewAuthService("", false, 5, 5*time.Minute, onPasswordSet)
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute, OnPasswordSet: onPasswordSet})
 	defer svc.Stop()
+	code := svc.currentSetupCode()
 
 	// 1. Method not allowed (GET)
 	reqGet := httptest.NewRequest(http.MethodGet, "/api/auth/setup", nil)
@@ -582,7 +596,8 @@ func TestAuthService_HandleSetup_Scenarios(t *testing.T) {
 	}
 
 	// 3. Password too short (< 8 chars)
-	reqShort := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader([]byte(`{"password":"123"}`)))
+	bodyShort, _ := json.Marshal(map[string]string{"password": "123", "setup_code": code})
+	reqShort := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(bodyShort))
 	recShort := httptest.NewRecorder()
 	svc.HandleSetup(recShort, reqShort)
 	if recShort.Code != http.StatusBadRequest {
@@ -590,7 +605,8 @@ func TestAuthService_HandleSetup_Scenarios(t *testing.T) {
 	}
 
 	// 4. Successful setup (>= 8 chars)
-	reqGood := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader([]byte(`{"password":"validpassword123"}`)))
+	bodyGood, _ := json.Marshal(map[string]string{"password": "validpassword123", "setup_code": code})
+	reqGood := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(bodyGood))
 	recGood := httptest.NewRecorder()
 	svc.HandleSetup(recGood, reqGood)
 	if recGood.Code != http.StatusOK {
@@ -601,7 +617,8 @@ func TestAuthService_HandleSetup_Scenarios(t *testing.T) {
 	}
 
 	// 5. Repeated setup when password is already set -> 403 Forbidden
-	reqSecond := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader([]byte(`{"password":"validpassword456"}`)))
+	bodySecond, _ := json.Marshal(map[string]string{"password": "validpassword456", "setup_code": code})
+	reqSecond := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(bodySecond))
 	recSecond := httptest.NewRecorder()
 	svc.HandleSetup(recSecond, reqSecond)
 	if recSecond.Code != http.StatusForbidden {
@@ -638,16 +655,16 @@ func TestRateLimiter_Reset_And_GetLockoutRemaining(t *testing.T) {
 // сохранить, действующим остаётся старый пароль (иначе после перезапуска
 // вернулся бы старый, а до него работал бы «несохранённый» новый).
 func TestChangePassword_SaveFailureKeepsOldPassword(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, func(string) error {
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute, OnPasswordSet: func(string) error {
 		return errors.New("disk full")
-	})
+	}})
 	hash, err := svc.HashPassword("oldpass123")
 	if err != nil {
 		t.Fatal(err)
 	}
 	svc.SetPasswordHash(hash)
 
-	if err := svc.ChangePassword("127.0.0.1", "", "oldpass123", "newpass456"); err == nil {
+	if _, err := svc.ChangePassword("127.0.0.1", "", "oldpass123", "newpass456"); err == nil {
 		t.Fatal("expected save error")
 	}
 	if err := svc.VerifyPassword("oldpass123"); err != nil {
@@ -659,41 +676,68 @@ func TestChangePassword_SaveFailureKeepsOldPassword(t *testing.T) {
 }
 
 // TestChangePassword_EndsOtherSessions: смена пароля завершает остальные
-// сессии и сохраняет текущую.
+// сессии, а старый токен текущей больше не принимается — вместо него
+// выдаётся новая сессия (SESS-02, D-09). На диске остаётся ровно одна
+// сессия с новым password_fingerprint.
 func TestChangePassword_EndsOtherSessions(t *testing.T) {
-	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	dir := t.TempDir()
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute, DataDir: dir})
+	defer svc.Stop()
 	hash, _ := svc.HashPassword("oldpass123")
 	svc.SetPasswordHash(hash)
 
 	current, _ := svc.CreateSession()
 	other, _ := svc.CreateSession()
 
-	if err := svc.ChangePassword("127.0.0.1", current.Token, "oldpass123", "newpass456"); err != nil {
+	issued, err := svc.ChangePassword("127.0.0.1", current.Token, "oldpass123", "newpass456")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.ValidateSession(current.Token); err != nil {
-		t.Errorf("current session must survive: %v", err)
+	if issued == nil || issued.Token == "" {
+		t.Fatal("expected a reissued session")
+	}
+	if _, err := svc.ValidateSession(current.Token); err == nil {
+		t.Error("old token of the current session must be rejected after password change")
 	}
 	if _, err := svc.ValidateSession(other.Token); err == nil {
 		t.Error("other session must be ended after password change")
+	}
+	if _, err := svc.ValidateSession(issued.Token); err != nil {
+		t.Errorf("reissued session must be valid: %v", err)
+	}
+
+	svc.mu.RLock()
+	sessionCount := len(svc.sessions)
+	svc.mu.RUnlock()
+	if sessionCount != 1 {
+		t.Errorf("expected exactly 1 session after password change, got %d", sessionCount)
+	}
+
+	newFingerprint := passwordFingerprint(svc.GetPasswordHash())
+	restored := newFileStore(dir).loadSessions(newFingerprint)
+	if len(restored) != 1 {
+		t.Fatalf("expected exactly 1 session on disk under the new fingerprint, got %d", len(restored))
+	}
+	if restored[0].TokenHash != hashToken(issued.Token) {
+		t.Error("the session persisted on disk must be the reissued one")
 	}
 }
 
 // TestChangePassword_RateLimited: подбор текущего пароля упирается в лимит.
 func TestChangePassword_RateLimited(t *testing.T) {
-	svc := NewAuthService("", false, 3, 5*time.Minute, nil)
+	svc := NewAuthService(Options{MaxLoginAttempts: 3, LockoutDuration: 5 * time.Minute})
 	hash, _ := svc.HashPassword("oldpass123")
 	svc.SetPasswordHash(hash)
 
 	var last error
 	for i := 0; i < 5; i++ {
-		last = svc.ChangePassword("10.0.0.5", "", "wrong-guess", "newpass456")
+		_, last = svc.ChangePassword("10.0.0.5", "", "wrong-guess", "newpass456")
 	}
 	if !errors.Is(last, ErrTooManyAttempts) {
 		t.Errorf("expected ErrTooManyAttempts after repeated wrong guesses, got %v", last)
 	}
 	// Даже верный пароль не принимается, пока действует блокировка
-	if err := svc.ChangePassword("10.0.0.5", "", "oldpass123", "newpass456"); !errors.Is(err, ErrTooManyAttempts) {
+	if _, err := svc.ChangePassword("10.0.0.5", "", "oldpass123", "newpass456"); !errors.Is(err, ErrTooManyAttempts) {
 		t.Errorf("lockout must apply to the correct password too, got %v", err)
 	}
 }
@@ -703,13 +747,13 @@ func TestChangePassword_RateLimited(t *testing.T) {
 func TestChangePassword_ConcurrentMemoryMatchesDisk(t *testing.T) {
 	var diskMu sync.Mutex
 	var disk string
-	svc := NewAuthService("", false, 100, time.Minute, func(h string) error {
+	svc := NewAuthService(Options{MaxLoginAttempts: 100, LockoutDuration: time.Minute, OnPasswordSet: func(h string) error {
 		time.Sleep(5 * time.Millisecond) // окно для гонки между записью и применением
 		diskMu.Lock()
 		disk = h
 		diskMu.Unlock()
 		return nil
-	})
+	}})
 	defer svc.Stop()
 	hash, err := svc.HashPassword("oldpass123")
 	if err != nil {
@@ -722,7 +766,7 @@ func TestChangePassword_ConcurrentMemoryMatchesDisk(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = svc.ChangePassword("127.0.0.1", "", "oldpass123", pw)
+			_, _ = svc.ChangePassword("127.0.0.1", "", "oldpass123", pw)
 		}()
 	}
 	wg.Wait()
@@ -737,11 +781,12 @@ func TestChangePassword_ConcurrentMemoryMatchesDisk(t *testing.T) {
 // TestHandleSetup_ConcurrentOnlyOneWins: из параллельных первичных настроек
 // проходит одна, вторая не перезаписывает уже заданный пароль.
 func TestHandleSetup_ConcurrentOnlyOneWins(t *testing.T) {
-	svc := NewAuthService("", false, 100, time.Minute, func(string) error {
+	svc := NewAuthService(Options{MaxLoginAttempts: 100, LockoutDuration: time.Minute, OnPasswordSet: func(string) error {
 		time.Sleep(5 * time.Millisecond)
 		return nil
-	})
+	}})
 	defer svc.Stop()
+	code := svc.currentSetupCode()
 
 	codes := make(chan int, 2)
 	var wg sync.WaitGroup
@@ -749,7 +794,7 @@ func TestHandleSetup_ConcurrentOnlyOneWins(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			body, _ := json.Marshal(map[string]string{"password": pw})
+			body, _ := json.Marshal(map[string]string{"password": pw, "setup_code": code})
 			req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(body))
 			rr := httptest.NewRecorder()
 			svc.HandleSetup(rr, req)
@@ -766,5 +811,685 @@ func TestHandleSetup_ConcurrentOnlyOneWins(t *testing.T) {
 	}
 	if ok != 1 {
 		t.Fatalf("%d setups succeeded, want exactly 1", ok)
+	}
+}
+
+// --- Task 2: TTL из конфига, cookie-хардинг, «Запомнить меня» ---
+
+func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
+	for _, c := range cookies {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
+}
+
+func assertProtectedCookieAttrs(t *testing.T, c *http.Cookie, phase string) {
+	t.Helper()
+	if !c.HttpOnly {
+		t.Errorf("%s: expected HttpOnly cookie", phase)
+	}
+	if !c.Secure {
+		t.Errorf("%s: expected Secure cookie", phase)
+	}
+	if c.SameSite != http.SameSiteStrictMode {
+		t.Errorf("%s: expected SameSite=Strict, got %v", phase, c.SameSite)
+	}
+	if c.Path != "/" {
+		t.Errorf("%s: expected Path=/, got %q", phase, c.Path)
+	}
+	if c.Domain != "" {
+		t.Errorf("%s: expected empty Domain, got %q", phase, c.Domain)
+	}
+}
+
+// TestSession_IdleVsAbsoluteTTL: активность продлевает только idle-TTL;
+// без активности дольше idle-TTL сессия истекает даже если absolute-TTL ещё
+// далеко.
+func TestSession_IdleVsAbsoluteTTL(t *testing.T) {
+	svc := NewAuthService(Options{IdleTTL: time.Hour, AbsoluteTTL: 24 * time.Hour})
+	defer svc.Stop()
+
+	current := time.Now()
+	svc.now = func() time.Time { return current }
+
+	issued, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Активность за минуту до idle-TTL продлевает сессию.
+	current = current.Add(59 * time.Minute)
+	if _, err := svc.ValidateSession(issued.Token); err != nil {
+		t.Fatalf("expected session valid just before idle TTL: %v", err)
+	}
+
+	// Без дальнейшей активности дольше idle-TTL — сессия истекает.
+	current = current.Add(61 * time.Minute)
+	if _, err := svc.ValidateSession(issued.Token); err == nil {
+		t.Error("expected session to expire after idle TTL elapses without activity")
+	}
+}
+
+// TestSession_TTLBoundaryIsExpiry: now == created_at+absoluteTTL и
+// now == last_seen+idleTTL — сессия уже недействительна (edge adjacency).
+func TestSession_TTLBoundaryIsExpiry(t *testing.T) {
+	svc := NewAuthService(Options{IdleTTL: time.Hour, AbsoluteTTL: 2 * time.Hour})
+	defer svc.Stop()
+
+	start := time.Now()
+	svc.now = func() time.Time { return start }
+
+	idleIssued, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.now = func() time.Time { return start.Add(time.Hour) }
+	if _, err := svc.ValidateSession(idleIssued.Token); err == nil {
+		t.Error("expected session invalid exactly at idle TTL boundary")
+	}
+
+	svc.now = func() time.Time { return start }
+	absIssued, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Активность прямо перед границей продлевает LastSeen, но absolute-TTL
+	// не продлевается ей же.
+	svc.now = func() time.Time { return start.Add(30 * time.Minute) }
+	if _, err := svc.ValidateSession(absIssued.Token); err != nil {
+		t.Fatalf("expected session valid before the boundary: %v", err)
+	}
+	svc.now = func() time.Time { return start.Add(2 * time.Hour) }
+	if _, err := svc.ValidateSession(absIssued.Token); err == nil {
+		t.Error("expected session invalid exactly at absolute TTL boundary")
+	}
+}
+
+// TestSetTTL_AppliesToExistingSessions: SetTTL применяется немедленно к уже
+// созданным сессиям, а не только к новым.
+func TestSetTTL_AppliesToExistingSessions(t *testing.T) {
+	svc := NewAuthService(Options{IdleTTL: 24 * time.Hour, AbsoluteTTL: 30 * 24 * time.Hour})
+	defer svc.Stop()
+
+	start := time.Now()
+	svc.now = func() time.Time { return start }
+	issued, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc.SetTTL(time.Hour, 24*time.Hour)
+
+	svc.now = func() time.Time { return start.Add(90 * time.Minute) }
+	if _, err := svc.ValidateSession(issued.Token); err == nil {
+		t.Error("expected SetTTL to apply immediately to an already-existing session")
+	}
+}
+
+// TestSessionCookie_LoginLogoutSymmetric: cookie сессии выставлена
+// одинаково (HttpOnly/Secure/SameSite=Strict/Path=/, без Domain) на входе и
+// на выходе; оба ответа дополнительно гасят legacy-cookie xcp_session.
+func TestSessionCookie_LoginLogoutSymmetric(t *testing.T) {
+	svc := NewAuthService(Options{})
+	hash, err := svc.HashPassword("symmetricpass123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetPasswordHash(hash)
+	defer svc.Stop()
+
+	body, _ := json.Marshal(map[string]string{"password": "symmetricpass123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:1111"
+	rec := httptest.NewRecorder()
+	svc.HandleLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	loginCookie := findCookie(rec.Result().Cookies(), SessionCookieName)
+	if loginCookie == nil {
+		t.Fatal("expected session cookie on login")
+	}
+	assertProtectedCookieAttrs(t, loginCookie, "login")
+
+	legacyLogin := findCookie(rec.Result().Cookies(), LegacySessionCookieName)
+	if legacyLogin == nil || legacyLogin.MaxAge >= 0 {
+		t.Error("expected login to also clear the legacy xcp_session cookie")
+	}
+
+	reqLogout := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	reqLogout.AddCookie(loginCookie)
+	recLogout := httptest.NewRecorder()
+	svc.HandleLogout(recLogout, reqLogout)
+	if recLogout.Code != http.StatusOK {
+		t.Fatalf("logout failed: %d", recLogout.Code)
+	}
+
+	logoutCookie := findCookie(recLogout.Result().Cookies(), SessionCookieName)
+	if logoutCookie == nil {
+		t.Fatal("expected session cookie on logout")
+	}
+	assertProtectedCookieAttrs(t, logoutCookie, "logout")
+	if logoutCookie.MaxAge != -1 {
+		t.Errorf("expected logout cookie MaxAge=-1, got %d", logoutCookie.MaxAge)
+	}
+
+	legacyLogout := findCookie(recLogout.Result().Cookies(), LegacySessionCookieName)
+	if legacyLogout == nil || legacyLogout.MaxAge >= 0 {
+		t.Error("expected logout to also clear the legacy xcp_session cookie")
+	}
+}
+
+// TestLogin_RememberMeCookieMaxAge: remember_me=true даёт постоянную cookie
+// (Max-Age = absolute-TTL в секундах); remember_me=false — ни Max-Age, ни
+// Expires (cookie сессии браузера).
+func TestLogin_RememberMeCookieMaxAge(t *testing.T) {
+	svc := NewAuthService(Options{AbsoluteTTL: 48 * time.Hour})
+	hash, err := svc.HashPassword("remembermepass123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetPasswordHash(hash)
+	defer svc.Stop()
+
+	body, _ := json.Marshal(map[string]interface{}{"password": "remembermepass123", "remember_me": true})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:2221"
+	rec := httptest.NewRecorder()
+	svc.HandleLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login failed: %d %s", rec.Code, rec.Body.String())
+	}
+	cookie := findCookie(rec.Result().Cookies(), SessionCookieName)
+	if cookie == nil {
+		t.Fatal("expected session cookie")
+	}
+	wantMaxAge := int((48 * time.Hour).Seconds())
+	if cookie.MaxAge != wantMaxAge {
+		t.Errorf("expected MaxAge=%d for remember_me=true, got %d", wantMaxAge, cookie.MaxAge)
+	}
+
+	body2, _ := json.Marshal(map[string]interface{}{"password": "remembermepass123", "remember_me": false})
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body2))
+	req2.RemoteAddr = "127.0.0.1:2222"
+	rec2 := httptest.NewRecorder()
+	svc.HandleLogin(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("login failed: %d %s", rec2.Code, rec2.Body.String())
+	}
+	cookie2 := findCookie(rec2.Result().Cookies(), SessionCookieName)
+	if cookie2 == nil {
+		t.Fatal("expected session cookie")
+	}
+	if cookie2.MaxAge != 0 {
+		t.Errorf("expected no Max-Age for remember_me=false, got %d", cookie2.MaxAge)
+	}
+	if !cookie2.Expires.IsZero() {
+		t.Errorf("expected no Expires for remember_me=false, got %v", cookie2.Expires)
+	}
+}
+
+// --- Task 3 (134-03 Task 1): список/завершение сессий, причина 401 ---
+
+// TestListSessions_OpaqueIDsNoSecrets: сериализованный список сессий не
+// содержит ни сырых токенов/CSRF, ни их хешей — только непрозрачный
+// 32-символьный hex id (T-134-09).
+func TestListSessions_OpaqueIDsNoSecrets(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	current, err := svc.CreateSessionWithMeta(SessionMeta{
+		IP:        "1.2.3.4",
+		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := svc.CreateSessionWithMeta(SessionMeta{
+		IP:        "5.6.7.8",
+		UserAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/118.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list := svc.ListSessions(current.Token)
+	if len(list) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(list))
+	}
+	if !list[0].Current {
+		t.Error("expected current session listed first")
+	}
+
+	data, err := json.Marshal(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	secrets := []string{
+		current.Token, other.Token,
+		current.CSRFToken, other.CSRFToken,
+		hashToken(current.Token), hashToken(other.Token),
+	}
+	for _, secret := range secrets {
+		if strings.Contains(body, secret) {
+			t.Errorf("session list JSON leaks a secret: %q", secret)
+		}
+	}
+
+	for _, s := range list {
+		if len(s.ID) != 32 {
+			t.Errorf("expected opaque 32-hex-char id, got %q (%d chars)", s.ID, len(s.ID))
+		}
+	}
+}
+
+// TestTerminateSession_ReasonTerminatedElsewhere: устройство B после
+// завершения его сессии с устройства A получает 401 с
+// reason=terminated_elsewhere при следующем запросе.
+func TestTerminateSession_ReasonTerminatedElsewhere(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	deviceA, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	deviceB, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.TerminateSession(deviceB.ID, deviceA.Token); err != nil {
+		t.Fatalf("TerminateSession failed: %v", err)
+	}
+
+	if _, err := svc.ValidateSession(deviceB.Token); err == nil {
+		t.Fatal("expected terminated session to be invalid")
+	}
+	svc.mu.RLock()
+	_, exists := svc.sessions[hashToken(deviceB.Token)]
+	svc.mu.RUnlock()
+	if exists {
+		t.Error("expected terminated session removed from the in-memory map (and thus from the persisted snapshot)")
+	}
+
+	protected := svc.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: deviceB.Token})
+	rec := httptest.NewRecorder()
+	protected(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	var resp struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Reason != ReasonTerminatedElsewhere {
+		t.Errorf("expected reason %q, got %q", ReasonTerminatedElsewhere, resp.Reason)
+	}
+}
+
+// TestTerminateSession_CurrentRejected: попытку завершить свою же сессию
+// TerminateSession отклоняет — для этого есть Logout.
+func TestTerminateSession_CurrentRejected(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	current, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.TerminateSession(current.ID, current.Token); !errors.Is(err, ErrSessionIsCurrent) {
+		t.Errorf("expected ErrSessionIsCurrent, got %v", err)
+	}
+	if _, err := svc.ValidateSession(current.Token); err != nil {
+		t.Errorf("current session must remain valid after rejected terminate: %v", err)
+	}
+}
+
+// TestTerminateOtherSessions_KeepsCurrent: завершает все, кроме текущей;
+// повторный вызов с одной оставшейся сессией идемпотентен (возвращает 0).
+func TestTerminateOtherSessions_KeepsCurrent(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	current, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other1, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other2, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if n := svc.TerminateOtherSessions(current.Token); n != 2 {
+		t.Errorf("expected 2 terminated, got %d", n)
+	}
+	if _, err := svc.ValidateSession(current.Token); err != nil {
+		t.Errorf("current session must survive: %v", err)
+	}
+	if _, err := svc.ValidateSession(other1.Token); err == nil {
+		t.Error("other1 must be terminated")
+	}
+	if _, err := svc.ValidateSession(other2.Token); err == nil {
+		t.Error("other2 must be terminated")
+	}
+
+	if n := svc.TerminateOtherSessions(current.Token); n != 0 {
+		t.Errorf("expected idempotent 0 on repeated call with only the current session left, got %d", n)
+	}
+}
+
+// --- 134-03 Task 2: перевыпуск сессии, горячая перезагрузка хеша ---
+
+// TestChangePassword_ReissuesCurrentSession: смена пароля сохраняет
+// remember_me на перевыпущенной сессии, а старые токены (свой и чужой)
+// после этого дают 401 с reason=password_changed (D-09).
+func TestChangePassword_ReissuesCurrentSession(t *testing.T) {
+	svc := NewAuthService(Options{MaxLoginAttempts: 5, LockoutDuration: 5 * time.Minute})
+	defer svc.Stop()
+	hash, _ := svc.HashPassword("oldpass123")
+	svc.SetPasswordHash(hash)
+
+	current, err := svc.CreateSessionWithMeta(SessionMeta{IP: "1.2.3.4", UserAgent: "test-agent", RememberMe: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	issued, err := svc.ChangePassword("127.0.0.1", current.Token, "oldpass123", "newpass456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !issued.RememberMe {
+		t.Error("expected remember_me to be preserved on the reissued session")
+	}
+	if issued.CSRFToken != DeriveCSRFToken(issued.Token) {
+		t.Error("expected csrf_token derived from the new token")
+	}
+
+	protected := svc.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	check := func(token string) (int, string) {
+		req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+		req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: token})
+		rec := httptest.NewRecorder()
+		protected(rec, req)
+		var resp struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.NewDecoder(rec.Body).Decode(&resp)
+		return rec.Code, resp.Reason
+	}
+
+	if code, reason := check(current.Token); code != http.StatusUnauthorized || reason != ReasonPasswordChanged {
+		t.Errorf("own old token: expected 401/%q, got %d/%q", ReasonPasswordChanged, code, reason)
+	}
+	if code, reason := check(other.Token); code != http.StatusUnauthorized || reason != ReasonPasswordChanged {
+		t.Errorf("other session: expected 401/%q, got %d/%q", ReasonPasswordChanged, code, reason)
+	}
+	if code, _ := check(issued.Token); code != http.StatusOK {
+		t.Errorf("reissued session must remain valid, got %d", code)
+	}
+}
+
+// TestReloadPasswordHash_InvalidatesAllAndResetsLimiter: ReloadPasswordHash
+// применяет новый хеш без рестарта, завершает все сессии с причиной
+// password_changed и полностью сбрасывает блокировки rate-limiter'а (D-22).
+func TestReloadPasswordHash_InvalidatesAllAndResetsLimiter(t *testing.T) {
+	svc := NewAuthService(Options{MaxLoginAttempts: 3, LockoutDuration: 5 * time.Minute})
+	defer svc.Stop()
+	oldHash, _ := svc.HashPassword("oldpass123")
+	svc.SetPasswordHash(oldHash)
+
+	sessionA, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionB, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 5; i++ {
+		_ = svc.rateLimiter.CheckLimit("9.9.9.9", 3, 5*time.Minute)
+	}
+	if svc.rateLimiter.GetLockoutRemaining("9.9.9.9") <= 0 {
+		t.Fatal("expected 9.9.9.9 to be locked out before ReloadPasswordHash")
+	}
+
+	var applied string
+	newHash, _ := svc.HashPassword("newpass456")
+	n := svc.ReloadPasswordHash(newHash, func(h string) { applied = h })
+
+	if n != 2 {
+		t.Errorf("expected 2 terminated sessions, got %d", n)
+	}
+	if applied != newHash {
+		t.Errorf("expected apply callback to receive the new hash, got %q", applied)
+	}
+	if svc.GetPasswordHash() != newHash {
+		t.Error("expected password hash to be updated")
+	}
+
+	protected := svc.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	for _, tok := range []string{sessionA.Token, sessionB.Token} {
+		req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+		req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: tok})
+		rec := httptest.NewRecorder()
+		protected(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("expected 401 for session terminated by ReloadPasswordHash, got %d", rec.Code)
+		}
+		var resp struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.NewDecoder(rec.Body).Decode(&resp)
+		if resp.Reason != ReasonPasswordChanged {
+			t.Errorf("expected reason %q, got %q", ReasonPasswordChanged, resp.Reason)
+		}
+	}
+
+	if svc.rateLimiter.GetLockoutRemaining("9.9.9.9") != 0 {
+		t.Error("expected rate limiter lockout to be reset by ReloadPasswordHash")
+	}
+}
+
+// TestRequireAuth_401Reason: без cookie, с неизвестным токеном и с сессией,
+// истёкшей по idle-TTL — все три случая дают дефолтную причину
+// session_expired (только явные terminate/password-change дают другую).
+func TestRequireAuth_401Reason(t *testing.T) {
+	svc := newTestAuthService()
+	defer svc.Stop()
+
+	protected := svc.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	readReason := func(rec *httptest.ResponseRecorder) string {
+		var resp struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.NewDecoder(rec.Body).Decode(&resp)
+		return resp.Reason
+	}
+
+	req1 := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	rec1 := httptest.NewRecorder()
+	protected(rec1, req1)
+	if rec1.Code != http.StatusUnauthorized || readReason(rec1) != ReasonSessionExpired {
+		t.Errorf("no cookie: expected 401/%q, got %d/%q", ReasonSessionExpired, rec1.Code, readReason(rec1))
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	req2.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "unknown-token"})
+	rec2 := httptest.NewRecorder()
+	protected(rec2, req2)
+	if rec2.Code != http.StatusUnauthorized || readReason(rec2) != ReasonSessionExpired {
+		t.Errorf("unknown token: expected 401/%q, got %d/%q", ReasonSessionExpired, rec2.Code, readReason(rec2))
+	}
+
+	svc2 := NewAuthService(Options{IdleTTL: time.Hour, AbsoluteTTL: 24 * time.Hour})
+	defer svc2.Stop()
+	start := time.Now()
+	svc2.now = func() time.Time { return start }
+	issued, err := svc2.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc2.now = func() time.Time { return start.Add(2 * time.Hour) }
+	protected2 := svc2.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	req3 := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	req3.AddCookie(&http.Cookie{Name: SessionCookieName, Value: issued.Token})
+	rec3 := httptest.NewRecorder()
+	protected2(rec3, req3)
+	if rec3.Code != http.StatusUnauthorized || readReason(rec3) != ReasonSessionExpired {
+		t.Errorf("idle expired: expected 401/%q, got %d/%q", ReasonSessionExpired, rec3.Code, readReason(rec3))
+	}
+}
+
+// --- 134-03 Task 3: аудит-лог входа ---
+
+// TestAuditLog_NoSecrets: вход, неудачная попытка, блокировка, выход, смена
+// пароля и завершение сессий пишут строки «[auth] … ip=…» (D-11); ни один
+// пароль, токен, CSRF-токен или их хеш в лог не попадают, а перевод строки в
+// RemoteAddr не создаёт поддельную строку лога без префикса [auth]
+// (T-134-11).
+func TestAuditLog_NoSecrets(t *testing.T) {
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prevOutput) })
+
+	svc := NewAuthService(Options{MaxLoginAttempts: 2, LockoutDuration: 5 * time.Minute})
+	defer svc.Stop()
+	hash, err := svc.HashPassword("secretpass123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetPasswordHash(hash)
+
+	// 1-я неудачная попытка (10.0.0.1) — "login failed".
+	bodyWrong, _ := json.Marshal(map[string]string{"password": "wrongpass"})
+	reqWrong := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(bodyWrong))
+	reqWrong.RemoteAddr = "10.0.0.1:1111"
+	svc.HandleLogin(httptest.NewRecorder(), reqWrong)
+
+	// 2-я неудачная попытка того же IP достигает maxAttempts=2 — CheckLimit
+	// сам возвращает ошибку блокировки уже на входе в HandleLogin — "lockout".
+	reqWrong2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(bodyWrong))
+	reqWrong2.RemoteAddr = "10.0.0.1:1112"
+	svc.HandleLogin(httptest.NewRecorder(), reqWrong2)
+
+	// Успешный вход с другого IP, содержащего попытку log-инъекции —
+	// "login ok".
+	bodyGood, _ := json.Marshal(map[string]string{"password": "secretpass123"})
+	reqGood := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(bodyGood))
+	reqGood.RemoteAddr = "1.2.3.4\nFAKE:1234"
+	recGood := httptest.NewRecorder()
+	svc.HandleLogin(recGood, reqGood)
+	if recGood.Code != http.StatusOK {
+		t.Fatalf("login failed: %d %s", recGood.Code, recGood.Body.String())
+	}
+	var loginResp struct {
+		CSRFToken string `json:"csrf_token"`
+	}
+	_ = json.NewDecoder(recGood.Body).Decode(&loginResp)
+	var loginCookie *http.Cookie
+	for _, c := range recGood.Result().Cookies() {
+		if c.Name == SessionCookieName {
+			loginCookie = c
+		}
+	}
+	if loginCookie == nil {
+		t.Fatal("expected session cookie")
+	}
+
+	// Выход — "logout".
+	reqLogout := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	reqLogout.AddCookie(loginCookie)
+	reqLogout.RemoteAddr = "1.2.3.4:2222"
+	svc.HandleLogout(httptest.NewRecorder(), reqLogout)
+
+	// Смена пароля — "password changed".
+	issued2, err := svc.ChangePassword("1.2.3.4", "", "secretpass123", "newsecretpass456")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Завершение чужой сессии — "session terminated".
+	other, err := svc.CreateSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.TerminateSession(other.ID, issued2.Token); err != nil {
+		t.Fatal(err)
+	}
+
+	// Завершение остальных сессий — "sessions terminated others".
+	svc.TerminateOtherSessions(issued2.Token)
+
+	output := buf.String()
+
+	for _, want := range []string{
+		"[auth] login failed",
+		"[auth] lockout",
+		"[auth] login ok",
+		"[auth] logout",
+		"[auth] password changed",
+		"[auth] session terminated",
+		"[auth] sessions terminated others",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected audit log to contain %q, full log:\n%s", want, output)
+		}
+	}
+	if !strings.Contains(output, "ip=") {
+		t.Error("expected at least one audit line with ip=")
+	}
+
+	secrets := []string{
+		"secretpass123", "wrongpass", "newsecretpass456",
+		loginCookie.Value, loginResp.CSRFToken,
+		hashToken(loginCookie.Value), hashToken(loginResp.CSRFToken),
+		issued2.Token, issued2.CSRFToken,
+	}
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(output, secret) {
+			t.Errorf("audit log leaks a secret: %q", secret)
+		}
+	}
+
+	// Перевод строки из RemoteAddr не должен породить отдельную "голую"
+	// строку без префикса [auth] — SanitizeLogInput вырезает \n/\r, так что
+	// внедрённый текст остаётся внутри легитимной строки лога, а не образует
+	// поддельную новую запись.
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "FAKE") && !strings.Contains(line, "[auth]") {
+			t.Errorf("log injection: forged line without [auth] prefix: %q", line)
+		}
 	}
 }

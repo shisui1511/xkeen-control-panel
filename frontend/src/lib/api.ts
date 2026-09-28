@@ -1,7 +1,9 @@
 import { get } from 'svelte/store';
-import { showToast } from '../stores';
+import { showToast, panelUnreachable } from '../stores';
 import { t } from '../i18n';
 import { saveDraftsToSessionStorage } from './dirtyRegistry';
+import { claimUnauthorized, markLoggedOut } from './authState';
+import { reportPanelUnreachable } from './panelHealth';
 
 /**
  * APIResponse — standard envelope returned by migrated backend handlers.
@@ -26,26 +28,42 @@ export interface ApiFetchOptions extends RequestInit {
   skip401Redirect?: boolean;
 }
 
-// Module-level de-dup guard: prevents duplicate logout/toast/redirect when
-// multiple concurrent requests (e.g. several usePoller instances) hit 401 at
-// once. First 401 wins; it is never reset back to false — a full page
-// navigation follows the redirect, so a manual reset would only open a
-// window for repeated toasts.
-let loggingOut = false;
+/**
+ * reasonToastKey — maps the backend's 401 `reason` field (134-03 contract)
+ * to the matching i18n key. An absent or unrecognized reason falls back to
+ * the generic session-expired copy (D-19).
+ */
+export function reasonToastKey(reason?: string): string {
+  switch (reason) {
+    case 'password_changed':
+      return 'auth.session_password_changed';
+    case 'terminated_elsewhere':
+      return 'auth.session_terminated_elsewhere';
+    default:
+      return 'auth.session_expired';
+  }
+}
 
 /**
- * handleUnauthorized — centralized session-expiry side effects (D-01).
- * Not exported: only apiFetch's 401 branch is allowed to trigger this.
+ * handleUnauthorized — centralized session-expiry side effects (D-01, D-19).
+ * Not exported: only apiFetch's 401 branch (via claimUnauthorized()) is
+ * allowed to trigger this. Switches the app to the login screen in place —
+ * no navigation/reload — so the current #/route and sessionStorage drafts
+ * survive for DraftRestoreBanner to pick up after the next login.
  */
-function handleUnauthorized(): void {
+function handleUnauthorized(reason?: string): void {
+  // A 401 means the server answered — the panel is reachable again. Clear
+  // the reconnect banner first so the reason toast and the banner are never
+  // shown at the same time for the same event (UI-SPEC backstop).
+  panelUnreachable.set(false);
   try {
     saveDraftsToSessionStorage();
   } catch (e) {
     console.error('[api] Failed to auto-save drafts on 401:', e);
   }
   localStorage.removeItem('csrf_token');
-  showToast('error', get(t)('auth.session_expired'));
-  window.location.href = '/';
+  showToast('error', get(t)(reasonToastKey(reason)));
+  markLoggedOut();
 }
 
 /**
@@ -65,11 +83,29 @@ export async function apiFetch(url: string, options: ApiFetchOptions = {}): Prom
   if (csrfToken) {
     headers.set('X-CSRF-Token', csrfToken);
   }
-  const res = await fetch(url, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, headers });
+  } catch (e: any) {
+    // A rejected fetch() (TypeError, connection refused/reset) means the
+    // panel process itself is unreachable — the restart/update/deploy case
+    // D-20 targets. An aborted request (component unmount, poller backoff
+    // cancellation) is not an outage and must not trigger the banner.
+    if (e?.name !== 'AbortError') {
+      reportPanelUnreachable();
+    }
+    throw e;
+  }
   if (res.status === 401) {
-    if (!skip401Redirect && !loggingOut) {
-      loggingOut = true;
-      handleUnauthorized();
+    if (!skip401Redirect && claimUnauthorized()) {
+      let reason: string | undefined;
+      try {
+        const payload = await res.clone().json();
+        reason = payload?.reason;
+      } catch {
+        // non-JSON or empty 401 body: fall back to the default reason
+      }
+      handleUnauthorized(reason);
     }
     const err: any = new Error('Unauthorized');
     err.status = 401;

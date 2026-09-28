@@ -10,6 +10,11 @@ type APIResponse struct {
 	Success bool        `json:"success"`
 	Data    interface{} `json:"data,omitempty"`
 	Error   string      `json:"error,omitempty"`
+	// Code — машиночитаемая причина ошибки (session_is_current,
+	// session_not_found, session_ttl_out_of_range, …), в дополнение к
+	// человекочитаемому Error — фронтенд различает конкретные отказы без
+	// парсинга текста сообщения.
+	Code string `json:"code,omitempty"`
 }
 
 // JSONSuccess writes a successful JSON response with the given data payload.
@@ -26,4 +31,13 @@ func JSONError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: msg})
+}
+
+// JSONErrorCode is like JSONError but also sets a machine-readable Code
+// alongside the human-readable message (e.g. "session_is_current",
+// "session_not_found", "session_ttl_out_of_range").
+func JSONErrorCode(w http.ResponseWriter, status int, code, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: msg, Code: code})
 }

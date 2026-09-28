@@ -34,6 +34,9 @@
   import Trash from './icons/Trash.svelte';
   import ArrowDown from './icons/ArrowDown.svelte';
   import Upload from './icons/Upload.svelte';
+  import Eye from './icons/Eye.svelte';
+  import EyeOff from './icons/EyeOff.svelte';
+  import Copy from './icons/Copy.svelte';
 
   let {
     name,
@@ -116,4 +119,10 @@
   <ArrowDown {size} {color} class={className} />
 {:else if name === 'upload'}
   <Upload {size} {color} class={className} />
+{:else if name === 'eye'}
+  <Eye {size} {color} class={className} />
+{:else if name === 'eye-off'}
+  <EyeOff {size} {color} class={className} />
+{:else if name === 'copy'}
+  <Copy {size} {color} class={className} />
 {/if}

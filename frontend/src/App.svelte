@@ -2,14 +2,13 @@
   import { onMount } from 'svelte';
   import { t, i18nReady } from './i18n';
   import { apiFetch } from './lib/api';
+  import { authStatus } from './lib/authState';
   import Login from './Login.svelte';
   import Setup from './Setup.svelte';
   import Dashboard from './Dashboard.svelte';
+  import Toast from './components/Toast.svelte';
   import './styles/global.css';
 
-  let authenticated = $state(false);
-  let setupRequired = $state(false);
-  let loading = $state(true);
   let authError = $state('');
 
   async function checkAuth() {
@@ -29,18 +28,21 @@
 
       const data = await res.json();
 
-      authenticated = data.authenticated || false;
-      setupRequired = data.setup_required || false;
       // Сохранить CSRF-токен при автологине через checkAuth (при перезагрузке страницы)
       if (data.csrf_token) {
         localStorage.setItem('csrf_token', data.csrf_token);
       }
+
+      if (data.setup_required) {
+        authStatus.set('setup');
+      } else if (data.authenticated) {
+        authStatus.set('authenticated');
+      } else {
+        authStatus.set('login');
+      }
     } catch (e: any) {
-      authenticated = false;
-      setupRequired = false;
+      authStatus.set('error');
       authError = e.name === 'AbortError' ? 'Request timeout' : e.message || 'Network error';
-    } finally {
-      loading = false;
     }
   }
 
@@ -49,7 +51,7 @@
   });
 </script>
 
-{#if loading}
+{#if $authStatus === 'loading'}
   <div class="center-container">
     <div class="card">
       <p>{$t('app.loading')}</p>
@@ -70,10 +72,12 @@
       </button>
     </div>
   </div>
-{:else if setupRequired}
+{:else if $authStatus === 'setup'}
   <Setup />
-{:else if !authenticated}
+{:else if $authStatus === 'login'}
   <Login />
 {:else}
   <Dashboard />
 {/if}
+
+<Toast />

@@ -186,44 +186,6 @@ func TestServer_Handle_And_HandleProtected(t *testing.T) {
 	}
 }
 
-func TestServer_Start_And_Shutdown_HTTP(t *testing.T) {
-	mapFS := createTestMapFS()
-	cfg := &Config{
-		Port:         0,
-		AllowedRoots: []string{t.TempDir()},
-		DataDir:      t.TempDir(),
-		HTTPS: HTTPSConfig{
-			Enabled: false,
-		},
-	}
-
-	srv, err := New(cfg, "v1.0.0", mapFS)
-	if err != nil {
-		t.Fatalf("failed to create server: %v", err)
-	}
-	defer srv.GetAuthService().Stop()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Start()
-	}()
-
-	// Wait for server to start
-	time.Sleep(50 * time.Millisecond)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		t.Fatalf("Shutdown failed: %v", err)
-	}
-
-	startErr := <-errCh
-	if startErr != nil && !errors.Is(startErr, http.ErrServerClosed) {
-		t.Fatalf("expected ErrServerClosed, got %v", startErr)
-	}
-}
-
 func TestServer_Start_And_Shutdown_HTTPS(t *testing.T) {
 	mapFS := createTestMapFS()
 	cfg := &Config{
@@ -231,9 +193,6 @@ func TestServer_Start_And_Shutdown_HTTPS(t *testing.T) {
 		LoopbackPort: 0,
 		AllowedRoots: []string{t.TempDir()},
 		DataDir:      t.TempDir(),
-		HTTPS: HTTPSConfig{
-			Enabled: true,
-		},
 	}
 
 	srv, err := New(cfg, "v1.0.0", mapFS)

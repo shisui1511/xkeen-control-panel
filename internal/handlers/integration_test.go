@@ -311,51 +311,6 @@ func TestSettingsGet_ReturnsConfig(t *testing.T) {
 	}
 }
 
-// TestSettingsHTTPS_MethodNotAllowed verifies GET to SettingsHTTPS returns 405.
-func TestSettingsHTTPS_MethodNotAllowed(t *testing.T) {
-	api := &API{cfg: &config.Config{}}
-	req := httptest.NewRequest(http.MethodGet, "/api/settings/https", nil)
-	rr := httptest.NewRecorder()
-	api.SettingsHTTPS(rr, req)
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405, got %d", rr.Code)
-	}
-}
-
-// TestSettingsHTTPS_Toggle verifies that POST toggles the HTTPS.Enabled flag.
-func TestSettingsHTTPS_Toggle(t *testing.T) {
-	tmp := t.TempDir()
-	cfg := &config.Config{Port: 8090}
-	// ConfigPath empty → Save is skipped; just toggles in memory.
-	api := &API{cfg: cfg}
-
-	body := bytes.NewBufferString(`{"enabled":true}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/settings/https", body)
-	rr := httptest.NewRecorder()
-	api.SettingsHTTPS(rr, req)
-	_ = tmp // suppress unused warning
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if !cfg.HTTPS.Enabled {
-		t.Error("expected HTTPS.Enabled=true after toggle")
-	}
-
-	// Check response body contains restart_required.
-	body2 := bytes.NewBufferString(`{"enabled":false}`)
-	req2 := httptest.NewRequest(http.MethodPost, "/api/settings/https", body2)
-	rr2 := httptest.NewRecorder()
-	api.SettingsHTTPS(rr2, req2)
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("second toggle: expected 200, got %d", rr2.Code)
-	}
-	respBody := rr2.Body.String()
-	if !strings.Contains(respBody, "restart_required") {
-		t.Errorf("expected restart_required in response, got: %s", respBody)
-	}
-}
-
 // --- Outbound import handler tests ---
 
 func TestOutboundImport_Success(t *testing.T) {
