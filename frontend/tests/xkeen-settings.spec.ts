@@ -103,4 +103,84 @@ test.describe('XKeen settings card', () => {
     await expect(card.locator('.xs-path')).toHaveText('/opt/etc/xkeen/ip_exclude.lst');
     await expect(card.locator('.xs-badge')).toBeVisible();
   });
+
+  test.describe('save and restart (ru)', () => {
+    test.use({ locale: 'ru-RU' });
+
+    async function mockSettingsAndApply(
+      page: import('@playwright/test').Page,
+      applyBody: Record<string, unknown>,
+      controlRequests: string[]
+    ) {
+      await setupMocks(page, 'mihomo');
+      await page.route('**/api/xkeen/settings**', async (route) => {
+        const url = route.request().url();
+        const body = route.request().postDataJSON?.() ?? {};
+        if (url.endsWith('/api/xkeen/settings')) {
+          await route.fulfill({ json: { success: true, data: FILES } });
+        } else if (url.includes('/validate')) {
+          await route.fulfill({ json: { success: true, data: { entries: 1, issues: [] } } });
+        } else if (url.includes('/save')) {
+          await route.fulfill({
+            json: {
+              success: true,
+              data: { ...FILES[0], content: body.content, entries: 2, issues: [] }
+            }
+          });
+        }
+      });
+      await page.route('**/api/service/control**', async (route) => {
+        const url = route.request().url();
+        controlRequests.push(url);
+        await route.fulfill({
+          json: { success: true, data: url.includes('action=apply') ? applyBody : {} }
+        });
+      });
+    }
+
+    async function saveAndRestart(page: import('@playwright/test').Page) {
+      await visitPage(page, '/#/services');
+      const card = page.locator('.xkeen-settings-card');
+      await expect(card).toBeVisible();
+      await card.locator('textarea').fill('80\n443\n');
+      const restartBtn = card.getByRole('button', {
+        name: /Сохранить и перезапустить|Save and restart/
+      });
+      await expect(restartBtn).toBeEnabled();
+      await restartBtn.click();
+    }
+
+    test('save and restart with stopped kernel does not start it', async ({ page }) => {
+      const controlRequests: string[] = [];
+      await mockSettingsAndApply(
+        page,
+        { outcome: 'saved_kernel_stopped', kernel: 'mihomo', active_kernel: 'mihomo' },
+        controlRequests
+      );
+      await saveAndRestart(page);
+
+      const toast = page.locator('.toast', { hasText: 'вступят в силу при запуске' });
+      await expect(toast).toBeVisible();
+      await expect(toast.locator('button.toast__action')).toHaveText('Запустить сейчас');
+      expect(controlRequests.some((u) => u.includes('action=apply&kernel=active'))).toBe(true);
+      expect(controlRequests.some((u) => u.includes('action=restart'))).toBe(false);
+      expect(controlRequests.some((u) => u.includes('action=start'))).toBe(false);
+    });
+
+    test('save and restart with running kernel reports the restart', async ({ page }) => {
+      const controlRequests: string[] = [];
+      await mockSettingsAndApply(
+        page,
+        { outcome: 'restarted', kernel: 'mihomo', active_kernel: 'mihomo', active_running: true },
+        controlRequests
+      );
+      await saveAndRestart(page);
+
+      await expect(
+        page.locator('.toast', { hasText: 'Сохранено, XKeen перезапущен' })
+      ).toBeVisible();
+      expect(controlRequests.some((u) => u.includes('action=apply&kernel=active'))).toBe(true);
+      expect(controlRequests.some((u) => u.includes('action=restart'))).toBe(false);
+    });
+  });
 });
