@@ -420,6 +420,12 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 		// Санитизируем ID — только [a-z0-9_-] допустимы в имени файла.
 		sub.ID = strings.ToLower(sub.ID)
 		sub.ID = invalidIDCharsRe.ReplaceAllString(sub.ID, "_")
+		if s.clientIDHitsStoplist(sub.ID) {
+			// ID станет частью имён файлов в каталоге Xray; имя из стоп-списка
+			// XKeen отменило бы запуск Xray. ID клиента игнорируется без ошибки.
+			log.Printf("[Subscriptions] client subscription ID %s matches the XKeen stop-list, replaced", utils.SanitizeLogInput(sub.ID))
+			sub.ID = s.generateIDLocked()
+		}
 		if s.GetLocked(sub.ID) != nil {
 			return fmt.Errorf("subscription with ID %s already exists", sub.ID)
 		}
