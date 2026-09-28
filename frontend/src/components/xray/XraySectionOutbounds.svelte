@@ -13,14 +13,12 @@
     subscriptionOutbounds = [],
     outboundDetails = [],
     outboundTags = [],
-    onReloadTags,
     onchange
   }: {
     customOutbounds: any[];
     subscriptionOutbounds: any[];
     outboundDetails: OutboundDetail[];
     outboundTags: string[];
-    onReloadTags?: () => Promise<void>;
     onchange?: () => void;
   } = $props();
 
@@ -399,32 +397,38 @@
     }
   }
 
-  async function confirmImportNode() {
-    importErrorMsg = '';
-    importLoading = true;
+  // Ошибка тега для каждой строки разбора: пустой тег или тег, который уже занят
+  // (ручные узлы, фрагменты подписок, системные теги, другая строка импорта).
+  // Теги Xray регистрозависимы, сравнение точное.
+  let importTagErrors = $derived(
+    importNodes.map((item, i) => {
+      if (item.rowError) return '';
+      const tag = String(item.tag ?? '').trim();
+      if (!tag) return $t('xray.import_tag_empty');
+      const taken =
+        outboundTags.includes(tag) ||
+        importNodes.some((n, j) => j !== i && !n.rowError && String(n.tag ?? '').trim() === tag);
+      return taken ? $t('xray.import_tag_taken', { tag }) : '';
+    })
+  );
 
-    try {
-      const items = importNodes.map((item) => ({
-        link: item.link,
-        tag: item.tag.trim()
-      }));
-
-      await apiFetchJSON('/api/outbound/import-bulk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items })
-      });
-
-      showToast('success', $t('subscr.import_success', { count: importNodes.length }));
-      showImportModal = false;
-      await onReloadTags?.();
-      onchange?.();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      importErrorMsg = e.message || $t('subscr.import_error');
-    } finally {
-      importLoading = false;
+  // Импорт только пополняет черновик конструктора: на диск узлы попадают по «Применить».
+  // Новые узлы идут в конец списка, чтобы не сдвинуть первый outbound (маршрут по умолчанию).
+  function confirmImportNode() {
+    if (
+      importNodes.length === 0 ||
+      importNodes.some((n) => n.rowError) ||
+      importTagErrors.some(Boolean)
+    ) {
+      return;
     }
+    const count = importNodes.length;
+    for (const item of importNodes) {
+      customOutbounds.push({ ...$state.snapshot(item.outbound), tag: item.tag.trim() });
+    }
+    showToast('success', $t('xray.import_added', { count }));
+    showImportModal = false;
+    onchange?.();
   }
 </script>
 
@@ -738,9 +742,23 @@
                       type="text"
                       class="form-input"
                       bind:value={item.tag}
+                      aria-invalid={!!importTagErrors[idx]}
+                      aria-describedby={importTagErrors[idx]
+                        ? `import-tag-error-${idx}`
+                        : undefined}
                       style="flex-grow: 1; font-size: 12px; padding: 4px 8px;"
                     />
                   </div>
+                  {#if importTagErrors[idx]}
+                    <div
+                      class="import-tag-error"
+                      id="import-tag-error-{idx}"
+                      role="alert"
+                      style="font-size: 12px; color: var(--danger);"
+                    >
+                      {importTagErrors[idx]}
+                    </div>
+                  {/if}
                 </div>
               {/if}
             {/each}
@@ -774,13 +792,10 @@
             type="button"
             class="btn btn-primary"
             onclick={confirmImportNode}
-            disabled={importLoading ||
-              importNodes.length === 0 ||
-              importNodes.some((n) => n.rowError)}
+            disabled={importNodes.length === 0 ||
+              importNodes.some((n) => n.rowError) ||
+              importTagErrors.some(Boolean)}
           >
-            {#if importLoading}
-              <span class="spinner-xs" style="margin-right: 6px;"></span>
-            {/if}
             {$t('mihomo.import_count', { count: importNodes.length })}
           </button>
         {/if}

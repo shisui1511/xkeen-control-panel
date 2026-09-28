@@ -413,7 +413,9 @@
     }
 
     if (files['04_outbounds.json']?.outbounds) {
-      customOutbounds = files['04_outbounds.json'].outbounds;
+      // Копия, а не тот же массив: правки черновика (импорт, ручной узел, удаление) не должны
+      // менять загруженный с роутера исходник, иначе сравнение перед записью видит «без изменений».
+      customOutbounds = $state.snapshot(files['04_outbounds.json'].outbounds);
     }
 
     if (files['05_routing.json']?.routing) {
@@ -1141,7 +1143,6 @@
           {subscriptionOutbounds}
           {outboundDetails}
           {outboundTags}
-          onReloadTags={loadXrayOutboundTags}
           onchange={() => (isDirty = true)}
         />
       {:else if activeSection === 'log'}
