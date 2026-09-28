@@ -75,6 +75,23 @@ export function reportPanelUnreachable(): void {
   pollTimer = setTimeout(probe, delayForAttempt(pollAttempt));
 }
 
+/**
+ * confirmPanelReachable — the same reset performed by probe()'s success
+ * branch, exposed for callers that already know the panel answered (a 401
+ * response, for instance): cancels any pending backoff poll started by an
+ * earlier network failure so it doesn't fire a redundant /api/version
+ * request after reachability was already confirmed by other means
+ * (134-REVIEW IN-01).
+ */
+export function confirmPanelReachable(): void {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  pollAttempt = 0;
+  panelUnreachable.set(false);
+}
+
 /** Test-only reset: clears timers/state between unit test cases. */
 export function __resetPanelHealthForTests(): void {
   if (pollTimer) {
