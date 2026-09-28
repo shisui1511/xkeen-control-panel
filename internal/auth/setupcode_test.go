@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/i18n"
 )
 
 // TestSetupCode_GeneratedOnStartWithoutPassword проверяет D-24: при старте
@@ -231,4 +233,142 @@ func TestNormalizeSetupCode_and_Matches(t *testing.T) {
 	if err := ValidateSetupCode("ABCDEFGH", "wrong"); err != ErrSetupCodeInvalid {
 		t.Errorf("expected ErrSetupCodeInvalid, got %v", err)
 	}
+}
+
+// TestHandleSetup_LocalizedErrors проверяет 134-REVIEW WR-01: HandleSetup
+// отдаёт текст ошибки ("error") на языке запроса (ru/en через контекст
+// i18n.Middleware), тем же способом, что и ChangePassword — а не
+// нелокализованный английский текст. Машинный код ("code") при этом не
+// меняется в зависимости от языка.
+func TestHandleSetup_LocalizedErrors(t *testing.T) {
+	newRequest := func(lang string, payload map[string]string) *http.Request {
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(body))
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("Accept-Language", lang)
+		// Пропускаем через реальный i18n.Middleware — тот же путь, что и в
+		// проде, а не подделанный контекст с приватным ключом пакета i18n.
+		var captured *http.Request
+		i18n.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured = r
+		})).ServeHTTP(httptest.NewRecorder(), req)
+		return captured
+	}
+
+	post := func(svc *AuthService, lang string, payload map[string]string) (int, struct {
+		Error      string `json:"error"`
+		Code       string `json:"code"`
+		RetryAfter int    `json:"retry_after"`
+	}) {
+		req := newRequest(lang, payload)
+		rr := httptest.NewRecorder()
+		svc.HandleSetup(rr, req)
+		var resp struct {
+			Error      string `json:"error"`
+			Code       string `json:"code"`
+			RetryAfter int    `json:"retry_after"`
+		}
+		json.NewDecoder(rr.Body).Decode(&resp)
+		return rr.Code, resp
+	}
+
+	t.Run("wrong setup code", func(t *testing.T) {
+		svc := NewAuthService(Options{MaxLoginAttempts: 100, LockoutDuration: time.Minute})
+		defer svc.Stop()
+
+		statusRu, respRu := post(svc, "ru", map[string]string{"password": "validpassword123", "setup_code": "WRONGCOD"})
+		if statusRu != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", statusRu)
+		}
+		wantRu := i18n.T("ru", "auth.setup_code_invalid")
+		if respRu.Error != wantRu {
+			t.Errorf("ru: expected error %q, got %q", wantRu, respRu.Error)
+		}
+		if respRu.Code != "setup_code_invalid" {
+			t.Errorf("ru: expected code=setup_code_invalid, got %q", respRu.Code)
+		}
+
+		statusEn, respEn := post(svc, "en", map[string]string{"password": "validpassword123", "setup_code": "WRONGCOD"})
+		if statusEn != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", statusEn)
+		}
+		wantEn := i18n.T("en", "auth.setup_code_invalid")
+		if respEn.Error != wantEn {
+			t.Errorf("en: expected error %q, got %q", wantEn, respEn.Error)
+		}
+		if respEn.Code != "setup_code_invalid" {
+			t.Errorf("en: expected code=setup_code_invalid, got %q", respEn.Code)
+		}
+
+		if respRu.Error == respEn.Error {
+			t.Fatalf("expected ru and en error text to differ, both were %q", respRu.Error)
+		}
+		if wantRu != "Неверный код настройки" || wantEn != "Invalid setup code" {
+			t.Fatalf("locale fixtures drifted: ru=%q en=%q", wantRu, wantEn)
+		}
+	})
+
+	t.Run("password policy violation", func(t *testing.T) {
+		svc := NewAuthService(Options{MaxLoginAttempts: 100, LockoutDuration: time.Minute})
+		defer svc.Stop()
+		code := svc.currentSetupCode()
+
+		statusRu, respRu := post(svc, "ru", map[string]string{"password": "aaaaaaaaaaaa", "setup_code": code})
+		if statusRu != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: error=%q code=%q", statusRu, respRu.Error, respRu.Code)
+		}
+		if respRu.Code != "password_repeated_char" {
+			t.Fatalf("expected code=password_repeated_char, got %q (error=%q)", respRu.Code, respRu.Error)
+		}
+		wantRu := i18n.T("ru", "auth.password_repeated_char")
+		if respRu.Error != wantRu {
+			t.Errorf("ru: expected localized policy error %q, got %q", wantRu, respRu.Error)
+		}
+
+		statusEn, respEn := post(svc, "en", map[string]string{"password": "aaaaaaaaaaaa", "setup_code": code})
+		if statusEn != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", statusEn)
+		}
+		wantEn := i18n.T("en", "auth.password_repeated_char")
+		if respEn.Error != wantEn {
+			t.Errorf("en: expected localized policy error %q, got %q", wantEn, respEn.Error)
+		}
+		if respRu.Error == respEn.Error {
+			t.Fatalf("expected ru and en policy error text to differ, both were %q", respRu.Error)
+		}
+	})
+
+	t.Run("rate limited", func(t *testing.T) {
+		svc := NewAuthService(Options{MaxLoginAttempts: 3, LockoutDuration: time.Minute})
+		defer svc.Stop()
+
+		var lastRu struct {
+			Error      string `json:"error"`
+			Code       string `json:"code"`
+			RetryAfter int    `json:"retry_after"`
+		}
+		var lastStatus int
+		for i := 0; i < 3; i++ {
+			lastStatus, lastRu = post(svc, "ru", map[string]string{"password": "validpassword123", "setup_code": "WRONGCOD"})
+		}
+		if lastStatus != http.StatusTooManyRequests {
+			t.Fatalf("expected 429 after exhausting attempts, got %d", lastStatus)
+		}
+		wantRu := i18n.T("ru", "auth.rate_limited")
+		if lastRu.Error != wantRu {
+			t.Errorf("ru: expected localized rate-limit error %q, got %q", wantRu, lastRu.Error)
+		}
+
+		statusEn, respEn := post(svc, "en", map[string]string{"password": "validpassword123", "setup_code": "WRONGCOD"})
+		if statusEn != http.StatusTooManyRequests {
+			t.Fatalf("expected 429, got %d", statusEn)
+		}
+		wantEn := i18n.T("en", "auth.rate_limited")
+		if respEn.Error != wantEn {
+			t.Errorf("en: expected localized rate-limit error %q, got %q", wantEn, respEn.Error)
+		}
+		if lastRu.Error == respEn.Error {
+			t.Fatalf("expected ru and en rate-limit error text to differ, both were %q", lastRu.Error)
+		}
+	})
 }
