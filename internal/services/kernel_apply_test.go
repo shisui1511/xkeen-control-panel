@@ -171,6 +171,49 @@ func TestKernelApplier_ActiveResolution(t *testing.T) {
 	})
 }
 
+// Неизвестные цели (WR-01): не паника и не рестарт при любом состоянии ядер.
+func TestKernelApplier_UnknownTargets(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured string
+		xray       string
+		targets    []string
+	}{
+		{"unknown, active running", "xray", "running", []string{"foo"}},
+		{"empty name, active running", "xray", "running", []string{""}},
+		{"unknown, active stopped", "xray", "stopped", []string{"foo"}},
+		{"unknown, no active kernel", "", "stopped", []string{"foo"}},
+		{"several unknown", "xray", "running", []string{"foo", "", "bar"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &applyFake{configured: tc.configured, statuses: map[string]string{"xray": tc.xray, "mihomo": "stopped"}}
+			a := f.applier(nil)
+			res := a.Apply(tc.targets...)
+			if res.Outcome != ApplySavedKernelInactive {
+				t.Errorf("outcome = %q, want %q", res.Outcome, ApplySavedKernelInactive)
+			}
+			if res.Kernel != "" {
+				t.Errorf("kernel = %q, want empty", res.Kernel)
+			}
+			if got := a.Preview(tc.targets...).Outcome; got != ApplySavedKernelInactive {
+				t.Errorf("Preview outcome = %q, want %q", got, ApplySavedKernelInactive)
+			}
+			if got := atomic.LoadInt32(&f.restarts); got != 0 {
+				t.Errorf("restart calls = %d, want 0", got)
+			}
+		})
+	}
+
+	t.Run("unknown next to a valid target still applies the valid one", func(t *testing.T) {
+		f := &applyFake{configured: "xray", statuses: map[string]string{"xray": "running"}}
+		res := f.applier(nil).Apply("foo", "xray")
+		if res.Outcome != ApplyRestarted || res.Kernel != "xray" {
+			t.Errorf("got %+v, want xray restarted", res)
+		}
+	})
+}
+
 func TestKernelApplier_MultiTarget(t *testing.T) {
 	f := &applyFake{configured: "mihomo", statuses: map[string]string{"xray": "stopped", "mihomo": "running"}}
 	res := f.applier(nil).Apply("xray", "mihomo")

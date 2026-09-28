@@ -157,6 +157,15 @@ func (k *KernelApplier) decide(targets []string) applyDecision {
 		}
 	}
 
+	if len(concrete) == 0 && !wantsActive {
+		// Только неизвестные имена: применять не к чему, ядро не трогаем.
+		res := ApplyResult{Outcome: ApplySavedKernelInactive, ActiveKernel: active}
+		if active != "" {
+			res.ActiveRunning = KernelMayRun(k.status(active))
+		}
+		return applyDecision{result: res}
+	}
+
 	if active == "" {
 		if len(concrete) == 0 {
 			// «Активное» без активного ядра: применять не к чему.
