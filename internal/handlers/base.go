@@ -30,6 +30,7 @@ type API struct {
 	subscriptionSvc       *services.SubscriptionService
 	subscriptionHealthSvc *services.SubscriptionHealthService
 	kernelSvc             *services.KernelService
+	kernelApplier         *services.KernelApplier
 	networkSvc            *services.NetworkToolsService
 	smartProxySvc         *services.SmartProxyService
 	xkeenSettingsSvc      *services.XKeenSettingsService
@@ -178,6 +179,19 @@ func (a *API) XKeenService() *services.XKeenService {
 
 func (a *API) SetKernelService(svc *services.KernelService) {
 	a.kernelSvc = svc
+	// Применение конфигурации решает по статусам ядер: собираем его здесь, при
+	// старте, а не лениво в обработчике.
+	if svc == nil {
+		a.kernelApplier = nil
+		return
+	}
+	a.kernelApplier = services.NewKernelApplier(svc, a.xkeenSvc)
+}
+
+// KernelApplier — общий исполнитель «применить конфиг к ядру»; nil до
+// SetKernelService.
+func (a *API) KernelApplier() *services.KernelApplier {
+	return a.kernelApplier
 }
 
 func (a *API) KernelService() *services.KernelService {

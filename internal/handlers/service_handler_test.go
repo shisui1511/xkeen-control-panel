@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
@@ -314,5 +315,184 @@ func TestServiceStatus_XKeenSetupIncomplete(t *testing.T) {
 					resp.Data.XKeenInstalled, resp.Data.XKeenSetupIncomplete, tc.want)
 			}
 		})
+	}
+}
+
+// newApplyTestAPI — API с фейковым KernelApplier: статусы задаются картой,
+// вызовы рестарта считаются.
+func newApplyTestAPI(t *testing.T, configured string, statuses map[string]string) (*API, *int32) {
+	t.Helper()
+	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+	var restarts int32
+	api.kernelApplier = services.NewKernelApplierFunc(
+		func(name string) string {
+			if s, ok := statuses[name]; ok {
+				return s
+			}
+			return "not_installed"
+		},
+		func() string { return configured },
+		func() (string, error) {
+			atomic.AddInt32(&restarts, 1)
+			return "ok", nil
+		},
+	)
+	return api, &restarts
+}
+
+func decodeApplyResult(t *testing.T, body []byte) services.ApplyResult {
+	t.Helper()
+	var env struct {
+		Success bool                 `json:"success"`
+		Data    services.ApplyResult `json:"data"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode apply response: %v: %s", err, body)
+	}
+	if !env.Success {
+		t.Fatalf("success=false: %s", body)
+	}
+	return env.Data
+}
+
+// TestServiceControl_Apply: остановленное целевое ядро не запускается, запущенное
+// перезапускается ровно один раз, чужое не трогается.
+func TestServiceControl_Apply(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured string
+		statuses   map[string]string
+		query      string
+		want       services.ApplyResult
+		wantCalls  int32
+	}{
+		{
+			name: "xray stopped", configured: "xray",
+			statuses: map[string]string{"xray": "stopped", "mihomo": "stopped"},
+			query:    "kernel=xray", wantCalls: 0,
+			want: services.ApplyResult{Outcome: services.ApplySavedKernelStopped, Kernel: "xray", ActiveKernel: "xray", ActiveRunning: false},
+		},
+		{
+			name: "xray not_installed", configured: "xray",
+			statuses: map[string]string{"xray": "not_installed"},
+			query:    "kernel=xray", wantCalls: 0,
+			want: services.ApplyResult{Outcome: services.ApplySavedKernelStopped, Kernel: "xray", ActiveKernel: "xray", ActiveRunning: false},
+		},
+		{
+			name: "xray running", configured: "xray",
+			statuses: map[string]string{"xray": "running"},
+			query:    "kernel=xray", wantCalls: 1,
+			want: services.ApplyResult{Outcome: services.ApplyRestarted, Kernel: "xray", ActiveKernel: "xray", ActiveRunning: true},
+		},
+		{
+			name: "xray unknown", configured: "xray",
+			statuses: map[string]string{"xray": "unknown"},
+			query:    "kernel=xray", wantCalls: 1,
+			want: services.ApplyResult{Outcome: services.ApplyRestarted, Kernel: "xray", ActiveKernel: "xray", ActiveRunning: true},
+		},
+		{
+			name: "mihomo while xray runs", configured: "xray",
+			statuses: map[string]string{"xray": "running", "mihomo": "running"},
+			query:    "kernel=mihomo", wantCalls: 0,
+			want: services.ApplyResult{Outcome: services.ApplySavedKernelInactive, Kernel: "mihomo", ActiveKernel: "xray", ActiveRunning: true},
+		},
+		{
+			name: "mihomo while xray stopped", configured: "xray",
+			statuses: map[string]string{"xray": "stopped", "mihomo": "running"},
+			query:    "kernel=mihomo", wantCalls: 0,
+			want: services.ApplyResult{Outcome: services.ApplySavedKernelInactive, Kernel: "mihomo", ActiveKernel: "xray", ActiveRunning: false},
+		},
+		{
+			name: "active resolves to configured", configured: "mihomo",
+			statuses: map[string]string{"xray": "stopped", "mihomo": "running"},
+			query:    "kernel=active", wantCalls: 1,
+			want: services.ApplyResult{Outcome: services.ApplyRestarted, Kernel: "mihomo", ActiveKernel: "mihomo", ActiveRunning: true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api, restarts := newApplyTestAPI(t, tc.configured, tc.statuses)
+			req := httptest.NewRequest(http.MethodPost, "/api/service/control?action=apply&"+tc.query, nil)
+			rr := httptest.NewRecorder()
+			api.ServiceControl(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+			}
+			if got := decodeApplyResult(t, rr.Body.Bytes()); got != tc.want {
+				t.Errorf("result = %+v, want %+v", got, tc.want)
+			}
+			if got := atomic.LoadInt32(restarts); got != tc.wantCalls {
+				t.Errorf("restart calls = %d, want %d", got, tc.wantCalls)
+			}
+		})
+	}
+}
+
+// TestServiceControl_ApplyRestartFailed: ошибка рестарта — 200 и outcome
+// restart_failed с полем error.
+func TestServiceControl_ApplyRestartFailed(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+	api.kernelApplier = services.NewKernelApplierFunc(
+		func(string) string { return "running" },
+		func() string { return "xray" },
+		func() (string, error) { return "\x1b[31mboom\x1b[0m", errors.New("exit status 1") },
+	)
+	req := httptest.NewRequest(http.MethodPost, "/api/service/control?action=apply&kernel=xray", nil)
+	rr := httptest.NewRecorder()
+	api.ServiceControl(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	got := decodeApplyResult(t, rr.Body.Bytes())
+	if got.Outcome != services.ApplyRestartFailed || got.Error != "boom" {
+		t.Errorf("result = %+v, want restart_failed with error boom", got)
+	}
+}
+
+// TestServiceControl_ApplyNoApplier: без KernelApplier ничего не перезапускается.
+func TestServiceControl_ApplyNoApplier(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+	req := httptest.NewRequest(http.MethodPost, "/api/service/control?action=apply&kernel=xray", nil)
+	rr := httptest.NewRecorder()
+	api.ServiceControl(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := decodeApplyResult(t, rr.Body.Bytes()); got.Outcome != services.ApplySavedKernelStopped {
+		t.Errorf("outcome = %q, want saved_kernel_stopped", got.Outcome)
+	}
+}
+
+// TestServiceControl_ApplyInvalidKernel: allow-list kernel с точным сравнением,
+// рестарта нет.
+func TestServiceControl_ApplyInvalidKernel(t *testing.T) {
+	api, restarts := newApplyTestAPI(t, "xray", map[string]string{"xray": "running"})
+
+	for _, query := range []string{
+		"action=apply",
+		"action=apply&kernel=",
+		"action=apply&kernel=Xray",
+		"action=apply&kernel=MIHOMO",
+		"action=apply&kernel=both",
+		"action=apply&kernel=xray%20",
+		"action=apply&kernel=..%2Fetc",
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/service/control?"+query, nil)
+		rr := httptest.NewRecorder()
+		api.ServiceControl(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%s: expected 400, got %d: %s", query, rr.Code, rr.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/service/control?action=apply&kernel=xray", nil)
+	rr := httptest.NewRecorder()
+	api.ServiceControl(rr, req)
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET: expected 405, got %d", rr.Code)
+	}
+
+	if got := atomic.LoadInt32(restarts); got != 0 {
+		t.Errorf("restart calls = %d, want 0", got)
 	}
 }

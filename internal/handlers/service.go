@@ -3,9 +3,13 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type ServiceStatusResponse struct {
@@ -98,6 +102,11 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	}
 	action := r.URL.Query().Get("action")
 
+	if action == "apply" {
+		a.serviceApply(w, r)
+		return
+	}
+
 	var out string
 	var err error
 
@@ -150,6 +159,70 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	a.ClearCapabilitiesCache()
 
 	w.Write([]byte(out))
+}
+
+// serviceApply — action=apply: применить записанную конфигурацию к ядру.
+// Перезапускается только запущенное целевое ядро; остановленное не
+// запускается, чужое не трогается. HTTP 200 для всех исходов: файлы к этому
+// моменту уже записаны, по outcome UI выбирает тост.
+func (a *API) serviceApply(w http.ResponseWriter, r *http.Request) {
+	var target string
+	if path := r.URL.Query().Get("path"); path != "" {
+		cleanPath, err := a.pathVal.Validate(path)
+		if err != nil {
+			a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+			return
+		}
+		target = a.kernelForConfigPath(cleanPath)
+	} else {
+		target = r.URL.Query().Get("kernel")
+		if target != "xray" && target != "mihomo" && target != services.ApplyTargetActive {
+			a.errorResponse(w, a.t(r, "service.invalid_kernel"), http.StatusBadRequest)
+			return
+		}
+	}
+
+	result := a.applyKernel(target)
+	log.Printf("apply: target=%s active=%s outcome=%s",
+		utils.SanitizeLogInput(target), utils.SanitizeLogInput(result.ActiveKernel), utils.SanitizeLogInput(string(result.Outcome)))
+	a.ClearCapabilitiesCache()
+	JSONSuccess(w, result)
+}
+
+// applyKernel применяет конфигурацию к целевым ядрам через KernelApplier. Без
+// applier ничего не перезапускается.
+func (a *API) applyKernel(targets ...string) services.ApplyResult {
+	if a.kernelApplier == nil {
+		log.Printf("apply: kernel applier is not configured, restart skipped")
+		res := services.ApplyResult{Outcome: services.ApplySavedKernelStopped}
+		if len(targets) > 0 {
+			res.Kernel = targets[0]
+		}
+		return res
+	}
+	return a.kernelApplier.Apply(targets...)
+}
+
+// kernelForConfigPath — ядро, которому принадлежит файл конфигурации: каталог
+// Xray → xray, каталог Mihomo → mihomo, остальное → active.
+func (a *API) kernelForConfigPath(cleanPath string) string {
+	if pathInDir(cleanPath, a.cfg.XRayConfigDir) {
+		return "xray"
+	}
+	if pathInDir(cleanPath, a.cfg.MihomoConfigDir) {
+		return "mihomo"
+	}
+	return services.ApplyTargetActive
+}
+
+// pathInDir — path равен dir или лежит внутри него (граница по разделителю).
+func pathInDir(path, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	dir = filepath.Clean(dir)
+	path = filepath.Clean(path)
+	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
 }
 
 func (a *API) ServiceRestartLog(w http.ResponseWriter, r *http.Request) {
