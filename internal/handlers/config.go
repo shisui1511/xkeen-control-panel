@@ -191,10 +191,21 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 
 	var backupData []byte
 	var backupExists bool
+	fileExisted := false
 	if _, statErr := os.Stat(cleanPath); statErr == nil {
+		fileExisted = true
 		if d, readErr := os.ReadFile(cleanPath); readErr == nil {
 			backupData = d
 			backupExists = true
+		}
+	}
+
+	// Стоп-список XKeen проверяется только для нового файла: сохранение уже
+	// существующего на том же месте не блокируется.
+	if !fileExisted {
+		if word, blocked := a.xkeenStoplistBlock(r, cleanPath); blocked {
+			a.stoplistConflict(w, r, cleanPath, word)
+			return
 		}
 	}
 
@@ -355,6 +366,13 @@ func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 	cleanNewPath, err := a.pathVal.Validate(newPath)
 	if err != nil {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	// Проверяется только новое имя: переименование проблемного файла в
+	// безопасное имя — путь исправления и не блокируется.
+	if word, blocked := a.xkeenStoplistBlock(r, cleanNewPath); blocked {
+		a.stoplistConflict(w, r, cleanNewPath, word)
 		return
 	}
 
