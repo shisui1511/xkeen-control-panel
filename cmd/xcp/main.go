@@ -185,7 +185,6 @@ func main() {
 		SessionIdleTTL:     time.Duration(cfg.Auth.SessionIdleTTLHours) * time.Hour,
 		SessionAbsoluteTTL: time.Duration(cfg.Auth.SessionAbsoluteTTLDays) * 24 * time.Hour,
 		HTTPS: server.HTTPSConfig{
-			Enabled:  cfg.HTTPS.Enabled,
 			CertPath: cfg.HTTPS.CertPath,
 			KeyPath:  cfg.HTTPS.KeyPath,
 		},
@@ -256,7 +255,6 @@ func main() {
 	srv.HandleProtected("/api/rule-providers/check-url", api.RuleProviderCheckURL)
 	srv.HandleProtected("/api/config/mihomo-migrate-socket", api.MihomoMigrateSocket)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
-	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
 	srv.HandleProtected("/api/settings/dev-mode", api.SettingsDevMode)
 	srv.HandleProtected("/api/settings/session", api.SessionSettings)
 
@@ -570,11 +568,7 @@ func main() {
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
 		strings.TrimPrefix(Version, "v"), runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
 	if cfg.Auth.PasswordHash == "" {
-		proto := "http"
-		if cfg.HTTPS.Enabled {
-			proto = "https"
-		}
-		log.Printf("⚠️  No password set. Please visit %s://<router-ip>:%d to complete setup.", proto, cfg.Port)
+		log.Printf("⚠️  No password set. Please visit https://<router-ip>:%d to complete setup.", cfg.Port)
 	}
 
 	// Graceful shutdown on SIGINT/SIGTERM

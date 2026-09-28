@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -49,8 +50,9 @@ type Config struct {
 	SavePasswordHash   func(string) error
 }
 
+// HTTPSConfig задаёт свой сертификат панели (D-12). Панель всегда работает
+// только по HTTPS — переключателя больше нет (см. Server.Start).
 type HTTPSConfig struct {
-	Enabled  bool
 	CertPath string
 	KeyPath  string
 }
@@ -150,61 +152,62 @@ func (s *Server) Start() error {
 	s.httpSrv = httpSrv
 	s.mu.Unlock()
 
-	if s.cfg.HTTPS.Enabled {
-		certPath := s.cfg.HTTPS.CertPath
-		keyPath := s.cfg.HTTPS.KeyPath
-		if certPath == "" {
-			certPath = filepath.Join(s.cfg.DataDir, "ssl", "cert.pem")
-		}
-		if keyPath == "" {
-			keyPath = filepath.Join(s.cfg.DataDir, "ssl", "key.pem")
-		}
-
-		if _, err := os.Stat(certPath); os.IsNotExist(err) {
-			log.Printf("Generating self-signed certificate: %s", certPath)
-			if err := cert.GenerateSelfSigned(certPath, keyPath, nil); err != nil {
-				return fmt.Errorf("failed to generate certificate: %w", err)
-			}
-		}
-
-		tlsConfig, err := cert.LoadOrGenerate(certPath, keyPath, nil)
-		if err != nil {
-			return fmt.Errorf("failed to load certificate: %w", err)
-		}
-
-		listener, err := tls.Listen("tcp", addr, tlsConfig)
-		if err != nil {
-			return fmt.Errorf("failed to listen TLS: %w", err)
-		}
-		defer listener.Close()
-
-		// Start HTTP loopback server on localhost (127.0.0.1) only
-		loopbackAddr := fmt.Sprintf("127.0.0.1:%d", s.cfg.LoopbackPort)
-		loopbackSrv := &http.Server{
-			Addr:              loopbackAddr,
-			Handler:           handler,
-			ReadHeaderTimeout: 5 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			IdleTimeout:       120 * time.Second,
-		}
-
-		s.mu.Lock()
-		s.loopbackSrv = loopbackSrv
-		s.mu.Unlock()
-
-		go func() {
-			log.Printf("Listening HTTP loopback on %s", loopbackAddr)
-			if err := loopbackSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Printf("HTTP loopback server error: %v", err)
-			}
-		}()
-
-		log.Printf("Listening HTTPS on port %d", s.cfg.Port)
-		return httpSrv.Serve(listener)
+	// D-12: панель отвечает только по HTTPS — переключателя https.enabled
+	// больше нет (config.Load принудительно ставит его в true, 134-06).
+	certPath := s.cfg.HTTPS.CertPath
+	keyPath := s.cfg.HTTPS.KeyPath
+	if certPath == "" {
+		certPath = filepath.Join(s.cfg.DataDir, "ssl", "cert.pem")
+	}
+	if keyPath == "" {
+		keyPath = filepath.Join(s.cfg.DataDir, "ssl", "key.pem")
 	}
 
-	log.Printf("Listening HTTP on port %d", s.cfg.Port)
-	return httpSrv.ListenAndServe()
+	if _, err := os.Stat(certPath); os.IsNotExist(err) {
+		log.Printf("Generating self-signed certificate: %s", certPath)
+		if err := cert.GenerateSelfSigned(certPath, keyPath, nil); err != nil {
+			return fmt.Errorf("failed to generate certificate: %w", err)
+		}
+	}
+
+	tlsConfig, err := cert.LoadOrGenerate(certPath, keyPath, nil)
+	if err != nil {
+		return fmt.Errorf("failed to load certificate: %w", err)
+	}
+
+	raw, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("failed to listen: %w", err)
+	}
+
+	// D-13: тот же порт распознаёт обычный HTTP по первому байту и отвечает
+	// 308 на https, не пропуская соединение в tls.Listener/http.Server.
+	listener := tls.NewListener(newSniffListener(raw, sniffPeekTimeout), tlsConfig)
+	defer listener.Close()
+
+	// Start HTTP loopback server on localhost (127.0.0.1) only
+	loopbackAddr := fmt.Sprintf("127.0.0.1:%d", s.cfg.LoopbackPort)
+	loopbackSrv := &http.Server{
+		Addr:              loopbackAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	s.mu.Lock()
+	s.loopbackSrv = loopbackSrv
+	s.mu.Unlock()
+
+	go func() {
+		log.Printf("Listening HTTP loopback on %s", loopbackAddr)
+		if err := loopbackSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("HTTP loopback server error: %v", err)
+		}
+	}()
+
+	log.Printf("Listening HTTPS on port %d", s.cfg.Port)
+	return httpSrv.Serve(listener)
 }
 
 // Shutdown gracefully stops the HTTP server, waiting up to ctx deadline for
