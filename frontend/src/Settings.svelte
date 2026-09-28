@@ -16,6 +16,7 @@
     applyDensity
   } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import { notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import { capsuleConfigStore, updateCapsuleConfig } from './lib/capsuleSettings';
   import PingTargetSettingsCard from './components/PingTargetSettingsCard.svelte';
@@ -237,10 +238,10 @@
       return;
     restoringSnapshot = id;
     try {
-      await apiFetchJSON(`/api/snapshots/${id}/restore`, {
+      const result = await apiFetchJSON<ApplyResult>(`/api/snapshots/${id}/restore`, {
         method: 'POST'
       });
-      showToast('success', $t('settings.snapshot_restored'));
+      notifyApplyOutcome(result, { restartedMessage: $t('settings.snapshot_restored') });
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', e.message);

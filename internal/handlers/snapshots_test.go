@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
@@ -217,5 +219,65 @@ func TestSnapshotUpload(t *testing.T) {
 	api.SnapshotUpload(recTar, reqTar)
 	if recTar.Code != http.StatusOK {
 		t.Errorf("expected 200 for valid .tar.gz, got %d: %s", recTar.Code, recTar.Body.String())
+	}
+}
+
+// TestSnapshotRestore_ApplyOutcome: восстановление снимка применяется к активному
+// ядру через KernelApplier. Остановленное ядро не запускается, сбой рестарта не
+// превращается в 500.
+func TestSnapshotRestore_ApplyOutcome(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      string
+		restartErr  error
+		wantOutcome services.ApplyOutcome
+		wantCalls   int32
+		wantErrText bool
+	}{
+		{name: "active kernel stopped", status: "stopped", wantOutcome: services.ApplySavedKernelStopped, wantCalls: 0},
+		{name: "active kernel running", status: "running", wantOutcome: services.ApplyRestarted, wantCalls: 1},
+		{name: "restart fails", status: "running", restartErr: errors.New("xkeen: boom"), wantOutcome: services.ApplyRestartFailed, wantCalls: 1, wantErrText: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api, _, _ := newSnapshotTestAPI(t)
+			var restarts int32
+			api.kernelApplier = services.NewKernelApplierFunc(
+				func(name string) string {
+					if name == "xray" {
+						return tc.status
+					}
+					return "not_installed"
+				},
+				func() string { return "xray" },
+				func() (string, error) {
+					atomic.AddInt32(&restarts, 1)
+					return "", tc.restartErr
+				},
+			)
+
+			recCreate := httptest.NewRecorder()
+			api.SnapshotCreate(recCreate, httptest.NewRequest(http.MethodPost, "/api/snapshots/create", nil))
+			var meta services.SnapshotMeta
+			if err := json.Unmarshal(recCreate.Body.Bytes(), &meta); err != nil || meta.ID == "" {
+				t.Fatalf("create snapshot: %v: %s", err, recCreate.Body.String())
+			}
+
+			rec := httptest.NewRecorder()
+			api.SnapshotRestore(rec, httptest.NewRequest(http.MethodPost, "/api/snapshots/"+meta.ID+"/restore", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			res := decodeApplyResult(t, rec.Body.Bytes())
+			if res.Outcome != tc.wantOutcome {
+				t.Errorf("outcome = %q, want %q", res.Outcome, tc.wantOutcome)
+			}
+			if got := atomic.LoadInt32(&restarts); got != tc.wantCalls {
+				t.Errorf("restarts = %d, want %d", got, tc.wantCalls)
+			}
+			if tc.wantErrText && res.Error == "" {
+				t.Error("restart_failed must carry an error reason")
+			}
+		})
 	}
 }

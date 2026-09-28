@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 var snapshotIDRx = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
@@ -77,13 +79,12 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Automatically restart active kernels and services after restore
-	if _, err := a.xkeenSvc.Restart(); err != nil {
-		a.errorResponse(w, fmt.Sprintf("Restore succeeded, but service restart failed: %s", err.Error()), http.StatusInternalServerError)
-		return
-	}
-
-	JSONSuccess(w, nil)
+	// Снимок возвращает каталоги обоих ядер: применяем к активному. Остановленное
+	// ядро не запускается, сбой рестарта не откатывает восстановленные файлы и
+	// приходит исходом restart_failed (HTTP 200).
+	result := a.applyKernel(services.ApplyTargetActive)
+	a.ClearCapabilitiesCache()
+	JSONSuccess(w, result)
 }
 
 func (a *API) SnapshotUpload(w http.ResponseWriter, r *http.Request) {
