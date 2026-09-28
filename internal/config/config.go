@@ -80,6 +80,11 @@ type AuthConfig struct {
 
 // HTTPSConfig represents the settings for enabling/configuring HTTPS on the control panel.
 type HTTPSConfig struct {
+	// Enabled принудительно true после Load() (D-12, 134-06): панель
+	// работает только по HTTPS, флаг из файла больше не отключает TLS.
+	// Поле оставлено в конфиге и структуре: старый бинарник при откате,
+	// прочитав "enabled": true из уже смигрированного файла, тоже
+	// останется на HTTPS.
 	Enabled  bool   `json:"enabled"`
 	CertPath string `json:"cert_path"`
 	KeyPath  string `json:"key_path"`
@@ -192,6 +197,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	migrateSessionTTL(cfg, data)
+	migrateHTTPSEnabled(cfg, data)
 
 	return cfg, nil
 }
@@ -271,6 +277,35 @@ func migrateSessionTTL(cfg *Config, data []byte) {
 		cfg.Auth.SessionAbsoluteTTLDays = DefaultSessionAbsoluteTTLDays
 		cfg.NeedsSave = true
 	}
+}
+
+// httpsProbe читает сырой JSON конфига отдельно от основного Unmarshal, тем
+// же приёмом, что и authTTLProbe: указатель различает «ключа нет в файле» от
+// «ключ есть и равен false» — обычный Unmarshal в cfg этого не различает,
+// потому что Default() уже заполнил поле значением true.
+type httpsProbe struct {
+	HTTPS struct {
+		Enabled *bool `json:"enabled"`
+	} `json:"https"`
+}
+
+// migrateHTTPSEnabled реализует D-12: панель работает только по HTTPS,
+// флаг https.enabled из файла больше не может её отключить.
+// "enabled": false в файле мигрирует в true с записью в cfg.Migrations и
+// cfg.NeedsSave (лог-файл на этом этапе main() ещё не настроен — как и
+// migrateSessionTTL, эта функция не логирует сама). После неё
+// cfg.HTTPS.Enabled всегда true, независимо от того, что было в файле или в
+// probe.
+func migrateHTTPSEnabled(cfg *Config, data []byte) {
+	var probe httpsProbe
+	if err := json.Unmarshal(data, &probe); err == nil {
+		if probe.HTTPS.Enabled != nil && !*probe.HTTPS.Enabled {
+			cfg.Migrations = append(cfg.Migrations,
+				"https.enabled=false is ignored: panel is HTTPS-only, migrated to true")
+			cfg.NeedsSave = true
+		}
+	}
+	cfg.HTTPS.Enabled = true
 }
 
 // Save writes the given configuration to the specified path atomically.

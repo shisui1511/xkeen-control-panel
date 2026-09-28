@@ -29,9 +29,13 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // D-12: панель отвечает только по HTTPS (134-06); dev-сервер на ПК не
+      // запускается (CLAUDE.md — службы только на роутере), правка нужна
+      // лишь для согласованности конфига с HTTPS-only панелью.
       '/api': {
-        target: 'http://localhost:8090',
-        changeOrigin: true
+        target: 'https://localhost:8090',
+        changeOrigin: true,
+        secure: false
       }
     }
   },

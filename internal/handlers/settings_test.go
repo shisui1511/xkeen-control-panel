@@ -22,7 +22,10 @@ func newSettingsTestAPI(t *testing.T) *API {
 		AllowedRoots: []string{tmpDir},
 		DevMode:      false,
 		HTTPS: config.HTTPSConfig{
-			Enabled: false,
+			// D-12: https.enabled принудительно true (config.Load мигрирует
+			// его); здесь конфиг строится напрямую, минуя Load, поэтому
+			// значение выставляется явно, как это делал бы Load().
+			Enabled: true,
 		},
 	}
 	_ = config.Save(cfgPath, cfg)
@@ -64,37 +67,8 @@ func TestSettingsGet(t *testing.T) {
 	if resp.Data.Port != 8090 {
 		t.Errorf("expected port 8090, got %d", resp.Data.Port)
 	}
-}
-
-func TestSettingsHTTPS(t *testing.T) {
-	api := newSettingsTestAPI(t)
-
-	// 1. Method Not Allowed (GET)
-	reqGet := httptest.NewRequest(http.MethodGet, "/api/settings/https", nil)
-	recGet := httptest.NewRecorder()
-	api.SettingsHTTPS(recGet, reqGet)
-	if recGet.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405 for GET, got %d", recGet.Code)
-	}
-
-	// 2. Invalid JSON
-	reqBadJSON := httptest.NewRequest(http.MethodPost, "/api/settings/https", bytes.NewReader([]byte("{invalid")))
-	recBadJSON := httptest.NewRecorder()
-	api.SettingsHTTPS(recBadJSON, reqBadJSON)
-	if recBadJSON.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 for bad JSON, got %d", recBadJSON.Code)
-	}
-
-	// 3. Valid toggle HTTPS enabled
-	body, _ := json.Marshal(map[string]bool{"enabled": true})
-	reqGood := httptest.NewRequest(http.MethodPost, "/api/settings/https", bytes.NewReader(body))
-	recGood := httptest.NewRecorder()
-	api.SettingsHTTPS(recGood, reqGood)
-	if recGood.Code != http.StatusOK {
-		t.Errorf("expected 200 for good HTTPS toggle, got %d", recGood.Code)
-	}
-	if !api.cfg.HTTPS.Enabled {
-		t.Error("expected HTTPS.Enabled to be true")
+	if !resp.Data.HTTPS.Enabled {
+		t.Error("expected https.enabled = true (D-12: HTTPS-only, флаг больше не отключает TLS)")
 	}
 }
 

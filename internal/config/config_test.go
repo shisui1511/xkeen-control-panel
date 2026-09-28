@@ -243,3 +243,80 @@ func TestSave_DropsLegacyAuthKeys(t *testing.T) {
 		t.Error("saved config must contain session_idle_ttl_hours")
 	}
 }
+
+// TestLoad_ForcesHTTPSEnabled реализует D-12: https.enabled из файла больше
+// не может отключить HTTPS — Load() всегда переводит его в true, а
+// "enabled": false в файле мигрирует с записью в Migrations/NeedsSave.
+func TestLoad_ForcesHTTPSEnabled(t *testing.T) {
+	t.Run("enabled=false in file migrates to true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.json")
+
+		raw := `{"https":{"enabled":false,"cert_path":"/opt/etc/xcp/my.pem","key_path":"/opt/etc/xcp/my.key"}}`
+		if err := os.WriteFile(configPath, []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if !cfg.HTTPS.Enabled {
+			t.Error("expected HTTPS.Enabled=true after forced migration")
+		}
+		if !cfg.NeedsSave {
+			t.Error("expected NeedsSave=true after https.enabled=false migration")
+		}
+		found := false
+		for _, m := range cfg.Migrations {
+			if strings.Contains(m, "https.enabled") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected a migration entry mentioning https.enabled, got %v", cfg.Migrations)
+		}
+		// cert_path/key_path сохраняются без изменений.
+		if cfg.HTTPS.CertPath != "/opt/etc/xcp/my.pem" {
+			t.Errorf("expected cert_path preserved, got %q", cfg.HTTPS.CertPath)
+		}
+		if cfg.HTTPS.KeyPath != "/opt/etc/xcp/my.key" {
+			t.Errorf("expected key_path preserved, got %q", cfg.HTTPS.KeyPath)
+		}
+
+		if err := Save(configPath, cfg); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), `"enabled": true`) {
+			t.Errorf("expected saved config to contain enabled: true, got: %s", data)
+		}
+	})
+
+	t.Run("no https section in file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.json")
+
+		if err := os.WriteFile(configPath, []byte(`{}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		if !cfg.HTTPS.Enabled {
+			t.Error("expected HTTPS.Enabled=true by default")
+		}
+		for _, m := range cfg.Migrations {
+			if strings.Contains(m, "https.enabled") {
+				t.Errorf("expected no https.enabled migration entry when key is absent, got %v", cfg.Migrations)
+			}
+		}
+	})
+}
