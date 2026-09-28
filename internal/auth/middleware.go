@@ -30,9 +30,15 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		// Permissions policy
 		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 
-		// HSTS: enforce HTTPS for one year when served over TLS
+		// HSTS: не включаем (D-16). Панель использует самоподписанный (или
+		// пользовательский собственный) сертификат — если браузер запомнит
+		// положительный max-age, при следующем недоверенном сертификате
+		// Chrome не даст пройти предупреждение и заблокирует доступ к
+		// панели без обхода через flags/chrome://net-internals. max-age=0
+		// не включает HSTS, но снимает политику, закэшированную версиями
+		// панели до этого плана (RFC 6797 §6.1.1).
 		if r.TLS != nil {
-			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			w.Header().Set("Strict-Transport-Security", "max-age=0")
 		}
 
 		next.ServeHTTP(w, r)

@@ -76,9 +76,12 @@ func TestSecurityHeaders(t *testing.T) {
 
 		middleware.ServeHTTP(rr, req)
 
+		// D-16: HSTS не включается с положительным max-age — самоподписанный
+		// сертификат заблокировал бы доступ к панели в Chrome. max-age=0
+		// снимает политику, закэшированную прежними версиями (RFC 6797 §6.1.1).
 		hsts := rr.Header().Get("Strict-Transport-Security")
-		if hsts != "max-age=31536000; includeSubDomains" {
-			t.Errorf("expected Strict-Transport-Security header to be %q, got %q", "max-age=31536000; includeSubDomains", hsts)
+		if hsts != "max-age=0" {
+			t.Errorf("expected Strict-Transport-Security header to be %q, got %q", "max-age=0", hsts)
 		}
 	})
 }
