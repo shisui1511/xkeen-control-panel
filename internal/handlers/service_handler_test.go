@@ -496,3 +496,94 @@ func TestServiceControl_ApplyInvalidKernel(t *testing.T) {
 		t.Errorf("restart calls = %d, want 0", got)
 	}
 }
+
+// applyPathTestAPI — API с каталогами xray (симлинк на реальный каталог),
+// mihomo и other внутри разрешённого корня.
+func applyPathTestAPI(t *testing.T, configured string, statuses map[string]string) (api *API, xrayLink, mihomoDir, otherDir string, restarts *int32) {
+	t.Helper()
+	root := t.TempDir()
+	realXray := filepath.Join(root, "real-xray")
+	xrayLink = filepath.Join(root, "xray")
+	mihomoDir = filepath.Join(root, "mihomo")
+	otherDir = filepath.Join(root, "other")
+	for _, d := range []string{realXray, mihomoDir, otherDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(realXray, xrayLink); err != nil {
+		t.Skipf("symlink недоступен: %v", err)
+	}
+	api, restarts = newApplyTestAPI(t, configured, statuses)
+	api.cfg = &config.Config{
+		XKeenBinary:     api.cfg.XKeenBinary,
+		AllowedRoots:    []string{root},
+		XRayConfigDir:   xrayLink,
+		MihomoConfigDir: mihomoDir,
+	}
+	api.pathVal = utils.NewPathValidator(api.cfg.AllowedRoots)
+	return api, xrayLink, mihomoDir, otherDir, restarts
+}
+
+// TestServiceControl_ApplyByPath: path=<файл> выбирает ядро по каталогу файла.
+func TestServiceControl_ApplyByPath(t *testing.T) {
+	statuses := map[string]string{"xray": "running", "mihomo": "running"}
+	api, xrayDir, mihomoDir, otherDir, restarts := applyPathTestAPI(t, "mihomo", statuses)
+
+	apply := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/service/control?action=apply&path="+path, nil)
+		rr := httptest.NewRecorder()
+		api.ServiceControl(rr, req)
+		return rr
+	}
+
+	// Классификация пути: xray / mihomo / active (в том числе через симлинк).
+	realXrayFile := filepath.Join(filepath.Dir(xrayDir), "real-xray", "04_outbounds.json")
+	for path, want := range map[string]string{
+		filepath.Join(xrayDir, "04_outbounds.json"): "xray",
+		realXrayFile:                                  "xray",
+		filepath.Join(mihomoDir, "config.yaml"):       "mihomo",
+		filepath.Join(otherDir, "xkeen.json"):         services.ApplyTargetActive,
+		filepath.Join(filepath.Dir(xrayDir), "x.txt"): services.ApplyTargetActive,
+	} {
+		validated, err := api.pathVal.Validate(path)
+		if err != nil {
+			t.Fatalf("validate %s: %v", path, err)
+		}
+		if got := api.kernelForConfigPath(validated); got != want {
+			t.Errorf("kernelForConfigPath(%s) = %q, want %q", path, got, want)
+		}
+	}
+
+	// Файл каталога Xray (адресованный через симлинк) при активном mihomo:
+	// цель xray, активное ядро не трогается.
+	rr := apply(filepath.Join(xrayDir, "04_outbounds.json"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("xray path: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := decodeApplyResult(t, rr.Body.Bytes()); got.Outcome != services.ApplySavedKernelInactive || got.Kernel != "xray" {
+		t.Errorf("xray path: result = %+v, want saved_kernel_inactive for xray", got)
+	}
+	if got := atomic.LoadInt32(restarts); got != 0 {
+		t.Errorf("restart calls = %d, want 0", got)
+	}
+
+	// Файл каталога Mihomo — цель mihomo, оно активно и запущено.
+	rr = apply(filepath.Join(mihomoDir, "config.yaml"))
+	if got := decodeApplyResult(t, rr.Body.Bytes()); got.Outcome != services.ApplyRestarted || got.Kernel != "mihomo" {
+		t.Errorf("mihomo path: result = %+v, want restarted mihomo", got)
+	}
+	if got := atomic.LoadInt32(restarts); got != 1 {
+		t.Errorf("restart calls = %d, want 1", got)
+	}
+
+	// Пути вне разрешённых корней и с «..» — 403, рестарта нет.
+	for _, bad := range []string{"/etc/passwd", filepath.Join(otherDir, "..", "..", "etc", "passwd"), "relative/../../x"} {
+		if rr := apply(bad); rr.Code != http.StatusForbidden {
+			t.Errorf("path %q: expected 403, got %d: %s", bad, rr.Code, rr.Body.String())
+		}
+	}
+	if got := atomic.LoadInt32(restarts); got != 1 {
+		t.Errorf("restart calls after rejected paths = %d, want 1", got)
+	}
+}

@@ -216,13 +216,24 @@ func (a *API) kernelForConfigPath(cleanPath string) string {
 }
 
 // pathInDir — path равен dir или лежит внутри него (граница по разделителю).
+// Оба пути нормализуются как в PathValidator: Clean и разрешение симлинков (при
+// ошибке остаётся Clean), иначе каталог-симлинк не узнал бы файл по реальному
+// пути.
 func pathInDir(path, dir string) bool {
 	if dir == "" {
 		return false
 	}
-	dir = filepath.Clean(dir)
-	path = filepath.Clean(path)
+	dir = normalizeApplyPath(dir)
+	path = normalizeApplyPath(path)
 	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
+}
+
+func normalizeApplyPath(p string) string {
+	p = filepath.Clean(p)
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return p
 }
 
 func (a *API) ServiceRestartLog(w http.ResponseWriter, r *http.Request) {
