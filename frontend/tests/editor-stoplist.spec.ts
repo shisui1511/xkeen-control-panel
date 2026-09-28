@@ -186,5 +186,90 @@ test.describe('Editor: стоп-список XKeen', () => {
     await page.getByRole('button', { name: 'Создать', exact: true }).click();
     await expect(page.getByText('Имя из стоп-списка XKeen')).toHaveCount(0);
     expect(rec.create).toHaveLength(0);
+    await expect(page.locator('#new-file-hint')).toHaveCount(0);
+  });
+
+  test('подсказка под полем имени: видна для стоп-слова, нет для обычного имени', async ({
+    page
+  }) => {
+    await openCreateModal(page);
+    const hint = page.locator('#new-file-hint');
+
+    await page.locator('#new-file-name').fill('04_outbounds.bak.json');
+    await expect(hint).toBeVisible();
+    await expect(hint).toContainText('XKeen отменит запуск Xray');
+    await expect(hint).toContainText('«bak»');
+    await expect(page.locator('#new-file-name')).toHaveAttribute(
+      'aria-describedby',
+      'new-file-hint'
+    );
+
+    await page.locator('#new-file-name').fill('routing.json');
+    await expect(hint).toHaveCount(0);
+  });
+
+  test('каталог Mihomo: подсказки и диалога нет даже для x.bak.json', async ({ page }) => {
+    await page.locator('.file-row:has-text("config.yaml")').click();
+    await openCreateModal(page);
+    await page.locator('#new-file-name').fill('x.bak.json');
+    await expect(page.locator('#new-file-hint')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Создать', exact: true }).click();
+    await expect.poll(() => rec.create.length).toBe(1);
+    expect(rec.create[0].searchParams.get('confirm_stoplist')).toBeNull();
+    expect(rec.create[0].searchParams.get('path')).toBe(`${MIHOMO_DIR}/x.bak.json`);
+    await expect(page.getByText('Имя из стоп-списка XKeen')).toHaveCount(0);
+  });
+
+  test('переименование в стоп-имя: подсказка, диалог, запрос только после подтверждения', async ({
+    page
+  }) => {
+    await page.locator('.file-row:has-text("04_outbounds.json")').click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Переименовать файл' }).click();
+
+    const input = page.locator('#rename-target');
+    await expect(input).toBeVisible();
+    await input.fill('04_outbounds.old.json');
+    const hint = page.locator('#rename-file-hint');
+    await expect(hint).toBeVisible();
+    await expect(hint).toContainText('«old»');
+
+    await page.getByRole('button', { name: 'Переименовать', exact: true }).click();
+    await expect(page.getByText('Имя из стоп-списка XKeen')).toBeVisible();
+    expect(rec.rename).toHaveLength(0);
+
+    await page.getByRole('button', { name: 'Отмена' }).last().click();
+    expect(rec.rename).toHaveLength(0);
+
+    await page.getByRole('button', { name: 'Переименовать', exact: true }).click();
+    await page.getByRole('button', { name: 'Всё равно переименовать', exact: true }).click();
+
+    await expect.poll(() => rec.rename.length).toBe(1);
+    expect(rec.rename[0].searchParams.get('confirm_stoplist')).toBe('1');
+    expect(rec.rename[0].searchParams.get('new')).toBe(`${XRAY_DIR}/04_outbounds.old.json`);
+  });
+
+  test('«Создать копию» называет файл <имя>-2.json без стоп-слов и без флага', async ({ page }) => {
+    await page.locator('.file-row:has-text("04_outbounds.json")').click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Создать копию' }).click();
+
+    await expect.poll(() => rec.save.length).toBe(1);
+    expect(rec.save[0].searchParams.get('path')).toBe(`${XRAY_DIR}/04_outbounds-2.json`);
+    expect(rec.save[0].searchParams.get('path')).not.toContain('_copy');
+    expect(rec.save[0].searchParams.get('confirm_stoplist')).toBeNull();
+    await expect(page.getByText('Имя из стоп-списка XKeen')).toHaveCount(0);
+  });
+
+  test('копия файла, уже совпадающего со стоп-списком, требует подтверждения', async ({ page }) => {
+    await page.locator('.file-row:has-text("old_config.json")').click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Создать копию' }).click();
+
+    await expect(page.getByText('Имя из стоп-списка XKeen')).toBeVisible();
+    expect(rec.save).toHaveLength(0);
+
+    await page.getByRole('button', { name: 'Всё равно создать копию', exact: true }).click();
+    await expect.poll(() => rec.save.length).toBe(1);
+    expect(rec.save[0].searchParams.get('confirm_stoplist')).toBe('1');
+    expect(rec.save[0].searchParams.get('path')).toBe(`${XRAY_DIR}/old_config-2.json`);
   });
 });

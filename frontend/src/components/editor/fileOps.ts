@@ -82,9 +82,14 @@ export async function deleteConfigFile(path: string): Promise<void> {
   if (!res.ok) throw await readConfigOpError(res);
 }
 
-export async function renameConfigFile(oldPath: string, newPath: string): Promise<void> {
+export async function renameConfigFile(
+  oldPath: string,
+  newPath: string,
+  opts: ConfigOpOptions = {}
+): Promise<void> {
+  const flag = opts.confirmStoplist ? '&confirm_stoplist=1' : '';
   const res = await apiFetch(
-    `/api/config/rename?old=${encodeURIComponent(oldPath)}&new=${encodeURIComponent(newPath)}`,
+    `/api/config/rename?old=${encodeURIComponent(oldPath)}&new=${encodeURIComponent(newPath)}${flag}`,
     {
       method: 'POST'
     }
@@ -99,8 +104,13 @@ export async function listConfigFiles(dir: string): Promise<ConfigFileInfo[]> {
   return Array.isArray(data) ? data : [];
 }
 
-export async function saveConfigFile(path: string, content: string): Promise<any> {
-  const res = await apiFetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
+export async function saveConfigFile(
+  path: string,
+  content: string,
+  opts: ConfigOpOptions = {}
+): Promise<any> {
+  const flag = opts.confirmStoplist ? '&confirm_stoplist=1' : '';
+  const res = await apiFetch(`/api/config/save?path=${encodeURIComponent(path)}${flag}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: content
@@ -109,22 +119,32 @@ export async function saveConfigFile(path: string, content: string): Promise<any
   return res.json().catch(() => null);
 }
 
-// Заготовка для RED-фазы: реализация — в следующем коммите.
+/**
+ * Имя копии `<основа>-<n><расширение>` со следующим свободным номером в
+ * каталоге (n от 2). Суффикс не содержит слов стоп-списка XKeen и никогда не
+ * совпадает с существующим именем (сравнение с учётом регистра).
+ */
 export function nextDuplicateName(name: string, existingNames: string[]): string {
-  void existingNames;
-  return name;
+  const dotIdx = name.lastIndexOf('.');
+  const hasExt = dotIdx > 0;
+  const base = hasExt ? name.substring(0, dotIdx) : name;
+  const ext = hasExt ? name.substring(dotIdx) : '';
+  const taken = new Set(existingNames);
+  let n = 2;
+  while (taken.has(`${base}-${n}${ext}`)) n++;
+  return `${base}-${n}${ext}`;
 }
 
-export async function duplicateConfigFile(file: ConfigFileInfo): Promise<string> {
-  const dotIdx = file.name.lastIndexOf('.');
-  const base = dotIdx !== -1 ? file.name.substring(0, dotIdx) : file.name;
-  const ext = dotIdx !== -1 ? file.name.substring(dotIdx) : '';
+export async function duplicateConfigFile(
+  file: ConfigFileInfo,
+  existingNames: string[],
+  opts: ConfigOpOptions = {}
+): Promise<string> {
   const dir = file.path.substring(0, file.path.lastIndexOf('/') + 1);
-  const newName = `${base}_copy${ext}`;
-  const newPath = `${dir}${newName}`;
+  const newPath = `${dir}${nextDuplicateName(file.name, existingNames)}`;
 
   const content = await readConfigFile(file.path);
-  await saveConfigFile(newPath, content);
+  await saveConfigFile(newPath, content, opts);
   return newPath;
 }
 

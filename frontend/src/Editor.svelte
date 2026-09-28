@@ -51,6 +51,7 @@
     listConfigFiles,
     formatBytes,
     ConfigOpError,
+    nextDuplicateName,
     type ConfigFileInfo,
     type ConfigOpOptions
   } from './components/editor/fileOps';
@@ -948,10 +949,17 @@
     const target = newName || renameTarget;
     if (!target || !selectedFile) return;
 
-    const newPath = selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + target;
+    const oldPath = selectedFile;
+    const newPath = oldPath.substring(0, oldPath.lastIndexOf('/') + 1) + target;
 
     try {
-      await renameConfigFile(selectedFile, newPath);
+      const outcome = await withStoplistConfirm(
+        target,
+        newPath,
+        'stoplist.confirm_rename',
+        (opts) => renameConfigFile(oldPath, newPath, opts)
+      );
+      if (outcome === STOPLIST_CANCELLED) return;
       showToast('success', $t('app.rename'));
       showRenameModal = false;
       renameTarget = '';
@@ -964,12 +972,23 @@
   }
 
   async function duplicateFile(file: ConfigFileInfo) {
+    const dir = file.path.substring(0, file.path.lastIndexOf('/'));
+    const siblings = (dir === mihomoDir ? mihomoFiles : xrayFiles).map((f) => f.name);
+    const copyName = nextDuplicateName(file.name, siblings);
+    const copyPath = `${dir}/${copyName}`;
     try {
-      const newPath = await duplicateConfigFile(file);
+      const outcome = await withStoplistConfirm(
+        copyName,
+        copyPath,
+        'stoplist.confirm_duplicate',
+        (opts) => duplicateConfigFile(file, siblings, opts)
+      );
+      if (outcome === STOPLIST_CANCELLED) return;
       showToast('success', $t('editor.duplicate_file'));
       await loadFiles();
-      await loadFile(newPath);
+      await loadFile(outcome);
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e?.message || 'Failed to duplicate file');
     }
   }
@@ -1494,6 +1513,9 @@
   createOpen={showCreateModal}
   renameOpen={showRenameModal}
   initialRenameValue={renameTarget}
+  {xrayDir}
+  createDir={selectedFile ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : xrayDir}
+  renameDir={selectedFile ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : ''}
   onCreate={createFile}
   onRename={renameFile}
   onCloseCreate={() => (showCreateModal = false)}
