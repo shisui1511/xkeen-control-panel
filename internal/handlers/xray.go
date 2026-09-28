@@ -176,8 +176,8 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		a.applyKernel("xray")
-		JSONSuccess(w, map[string]interface{}{"enabled": true})
+		apply := a.applyKernel("xray")
+		JSONSuccess(w, map[string]interface{}{"enabled": true, "apply": apply})
 		return
 	}
 
@@ -223,8 +223,8 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.applyKernel("xray")
-	JSONSuccess(w, map[string]interface{}{"enabled": false})
+	apply := a.applyKernel("xray")
+	JSONSuccess(w, map[string]interface{}{"enabled": false, "apply": apply})
 }
 
 // XrayTestRouteRequest defines parameters for testing an Xray route.

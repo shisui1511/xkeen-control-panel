@@ -3,6 +3,7 @@
   import { t, currentLang, pluralize } from './i18n';
   import { showToast, showConfirm, capabilities, fetchCapabilities } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import { notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
   import PageHeader from './PageHeader.svelte';
   import SegmentedControl from './components/SegmentedControl.svelte';
   import Tabs from './components/Tabs.svelte';
@@ -464,7 +465,15 @@
         showToast('error', data?.error || $t('xray.grpc.unavailable'));
         return;
       }
-      showToast('success', targetState ? $t('xray.grpc.enabled') : $t('xray.grpc.disabled'));
+      const doneMessage = targetState ? $t('xray.grpc.enabled') : $t('xray.grpc.disabled');
+      const apply: Partial<ApplyResult> | undefined = data?.data?.apply;
+      if (apply && typeof apply.outcome === 'string') {
+        // Исход применения показывает, перезапущен ли Xray, остановлен ли он
+        // или рестарт не удался; текст «включено/выключено» — для restarted.
+        notifyApplyOutcome(apply as ApplyResult, { restartedMessage: doneMessage });
+      } else {
+        showToast('success', doneMessage);
+      }
       await fetchCapabilities();
     } catch (e: any) {
       if (e?.status === 401) return;
