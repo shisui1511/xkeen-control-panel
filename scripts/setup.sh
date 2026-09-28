@@ -543,15 +543,10 @@ do_migration() {
   rm -f "$old_bin_1" "$old_bin_2"
 }
 
-# Определение протокола панели (http или https) на основе конфига
+# Протокол панели: всегда https (D-12) — флаг https.enabled в config.json
+# панель больше не читает как переключатель, она отвечает только по TLS.
 get_proto() {
-  local proto="http"
-  if [ -f "$INSTALL_DIR/config.json" ]; then
-    if sed -n '/"https":/,/}/p' "$INSTALL_DIR/config.json" 2>/dev/null | grep -q '"enabled":[[:space:]]*true'; then
-      proto="https"
-    fi
-  fi
-  echo "$proto"
+  echo "https"
 }
 
 # Один запрос к API: curl или wget, с коротким таймаутом на попытку
@@ -567,30 +562,20 @@ api_responds() {
 poll_api() {
   local port
   local url
-  local alt_url
-  local proto
   local timeout
   local interval
   local waited
 
   port="$1"
-  proto=$(get_proto)
-  # Сначала протокол из конфига: HTTP-запрос к HTTPS-серверу оставляет в логе
-  # панели "TLS handshake error"
-  url="${proto}://127.0.0.1:${port}/api/auth/me"
-  if [ "$proto" = "https" ]; then
-    alt_url="http://127.0.0.1:${port}/api/auth/me"
-  else
-    alt_url="https://127.0.0.1:${port}/api/auth/me"
-  fi
+  url="https://127.0.0.1:${port}/api/auth/me"
   timeout="${XCP_POLL_TIMEOUT:-60}"
   interval="${XCP_POLL_INTERVAL:-2}"
   waited=0
 
-  info "Проверяем доступность API по адресу ${proto}://127.0.0.1:${port}/api/auth/me (до ${timeout} с)..."
+  info "Проверяем доступность API по адресу ${url} (до ${timeout} с)..."
 
   while :; do
-    if api_responds "$url" || api_responds "$alt_url"; then
+    if api_responds "$url"; then
       ok "API успешно отвечает"
       log_install "API polling succeeded after ${waited}s"
       return 0
@@ -605,6 +590,50 @@ poll_api() {
   warn "API не ответил за ${timeout} с. Лог панели: /opt/var/log/xcp.log"
   log_install "API polling failed after ${timeout}s"
   return 1
+}
+
+# Задан ли пароль администратора в конфиге текущей установки
+password_is_set() {
+  [ -f "$INSTALL_DIR/config.json" ] || return 1
+  grep -qE '"password_hash"[[:space:]]*:[[:space:]]*"[^"]+"' "$INSTALL_DIR/config.json" 2>/dev/null
+}
+
+# Предлагает задать пароль администратора сразу после установки (D-25): при
+# наличии терминала — интерактивный xcp --reset-password по SSH; при отказе,
+# ошибке команды или неинтерактивном запуске — https-адрес панели и
+# одноразовый код первичной настройки (xcp --setup-code).
+offer_password_setup() {
+  local port
+  local ip
+  local response
+  local code
+  port="$1"
+  ip="$2"
+
+  if password_is_set; then
+    return 0
+  fi
+
+  if [ "$INTERACTIVE" = "true" ] && [ -r /dev/tty ]; then
+    printf "Задать пароль администратора сейчас? [Y/n]: "
+    read response < /dev/tty
+    case "$response" in
+      [Nn]*) ;;
+      *)
+        if "$BIN_PATH" --reset-password -config "$INSTALL_DIR/config.json" < /dev/tty; then
+          ok "Пароль задан. Вход: https://${ip}:${port}"
+          return 0
+        else
+          warn "Не удалось задать пароль интерактивно"
+        fi
+        ;;
+    esac
+  fi
+
+  code=$("$BIN_PATH" --setup-code -config "$INSTALL_DIR/config.json" 2>/dev/null)
+  printf "Откройте https://%s:%s и введите код настройки: %s\n" "$ip" "$port" "$code"
+  printf "Показать код снова: xcp --setup-code\n"
+  printf "Задать пароль по SSH: xcp --reset-password\n"
 }
 
 # Верификация, chmod, mv — общая часть после успешной загрузки
@@ -740,6 +769,8 @@ do_install() {
   printf "    %s status   — статус\n" "$INIT_SCRIPT"
   printf "${GREEN}${BOLD}========================================${NC}\n\n"
   log_install "Installation completed successfully"
+
+  offer_password_setup "$chosen_port" "$_ip"
 }
 
 # Обновление
