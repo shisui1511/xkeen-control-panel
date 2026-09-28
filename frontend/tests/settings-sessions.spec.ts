@@ -250,6 +250,102 @@ test.describe('Настройки → Активные сессии', () => {
       );
       expect(overflowX).toBe(false);
     });
+
+    // G-134-5: на узкой карточке (393px) название сессии рядом с кнопкой
+    // «Завершить сессию» должно переноситься на следующую строку целиком, а
+    // не обрезаться многоточием. До фикса (23e98da5) .session-name-text имел
+    // white-space: nowrap + text-overflow: ellipsis — при ширине колонки
+    // ~170px «Неизвестное устройство» превращалось в «Неизвестное устро…»
+    // и scrollWidth элемента превышал clientWidth. Этот тест сравнивает
+    // именно computed-стиль и geometry, а не textContent (который остаётся
+    // полным даже при визуальной обрезке).
+    test('название «Неизвестное устройство» на узкой карточке переносится, а не обрезается многоточием', async ({
+      page
+    }) => {
+      await setupMocks(page, 'mihomo');
+      await mockSessions(page, [
+        threeSessions()[0],
+        {
+          id: 's-unknown',
+          browser: '',
+          os: '',
+          ip: '10.0.0.5',
+          created_at: '2026-09-27T10:00:00Z',
+          last_seen: '2026-09-27T11:00:00Z',
+          current: false
+        }
+      ]);
+      await mockSessionTTL(page);
+      await openSecurityTab(page);
+
+      const nameEl = page
+        .locator('[data-testid="session-row"]', { hasText: 'Неизвестное устройство' })
+        .locator('.session-name-text');
+      await expect(nameEl).toBeVisible();
+
+      const metrics = await nameEl.evaluate((el) => {
+        const style = getComputedStyle(el);
+        return {
+          scrollWidth: el.scrollWidth,
+          clientWidth: el.clientWidth,
+          textOverflow: style.textOverflow,
+          whiteSpace: style.whiteSpace
+        };
+      });
+
+      // Не обрезано визуально: при обрезке multiline scrollWidth (полная
+      // ширина текста в одну строку) был бы больше clientWidth колонки.
+      expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
+      expect(metrics.textOverflow).not.toBe('ellipsis');
+      expect(metrics.whiteSpace).not.toBe('nowrap');
+
+      const overflowX = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+      );
+      expect(overflowX).toBe(false);
+    });
+  });
+});
+
+test.describe('Активные сессии — скелетон без сдвига вёрстки', () => {
+  // commit 05de535f: скелетон списка сессий должен по высоте совпадать со
+  // списком реальных строк (на роутере: 3px/сессию — остаток от бейджа
+  // «Эта сессия», до фикса — 12px/сессию). Держим ответ на GET
+  // /api/auth/sessions зависшим, измеряем высоту .sessions-list со
+  // скелетоном (всегда 3 строки), затем отпускаем тот же промис тремя
+  // реальными сессиями (тоже 3 строки, включая одну текущую — источник
+  // бейджа) и сравниваем.
+  test('высота списка сессий не скачет при переходе skeleton → данные', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+
+    let releaseSessions!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseSessions = resolve;
+    });
+
+    await page.route('**/api/auth/sessions', async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      await gate;
+      return route.fulfill({ json: { success: true, data: threeSessions() } });
+    });
+    await mockSessionTTL(page);
+    await openSecurityTab(page);
+
+    const list = page.locator('.sessions-list');
+    await expect(page.locator('.session-skeleton-line').first()).toBeVisible();
+
+    const skeletonHeight = await list.evaluate((el) => el.getBoundingClientRect().height);
+
+    releaseSessions();
+    await expect(page.locator('[data-testid="session-row"]')).toHaveCount(3);
+
+    const loadedHeight = await list.evaluate((el) => el.getBoundingClientRect().height);
+
+    const delta = Math.abs(skeletonHeight - loadedHeight);
+    // Известный остаток — высота бейджа «Эта сессия» у текущей сессии
+    // (~3px на роутере). Допуск существенно ниже дофиксового расхождения
+    // (~12px на сессию × 3 строки), чтобы регресс к nowrap-скелетону ловился.
+    expect(delta).toBeLessThanOrEqual(6);
   });
 });
 

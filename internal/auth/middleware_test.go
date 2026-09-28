@@ -67,6 +67,42 @@ func TestSecurityHeaders(t *testing.T) {
 		if !strings.Contains(csp, "connect-src 'self' https://ipinfo.io") {
 			t.Errorf("CSP connect-src does not contain https://ipinfo.io: %s", csp)
 		}
+
+		// 134-REVIEW WR-01: script-src не должен содержать 'unsafe-inline' —
+		// иначе CSP не защищает от inline-XSS. Разбираем директивы, а не просто
+		// ищем подстроку в заголовке целиком, чтобы не спутать script-src со
+		// style-src, где 'unsafe-inline' допустим.
+		directives := make(map[string]string)
+		for _, part := range strings.Split(csp, ";") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			fields := strings.SplitN(part, " ", 2)
+			name := fields[0]
+			value := ""
+			if len(fields) > 1 {
+				value = fields[1]
+			}
+			directives[name] = value
+		}
+
+		scriptSrc, ok := directives["script-src"]
+		if !ok {
+			t.Fatal("CSP is missing script-src directive")
+		}
+		if strings.Contains(scriptSrc, "unsafe-inline") {
+			t.Errorf("script-src must not contain 'unsafe-inline' (WR-01), got %q", scriptSrc)
+		}
+		hasSelf := false
+		for _, src := range strings.Fields(scriptSrc) {
+			if src == "'self'" {
+				hasSelf = true
+			}
+		}
+		if !hasSelf {
+			t.Errorf("script-src must contain 'self', got %q", scriptSrc)
+		}
 	})
 
 	t.Run("TLS request", func(t *testing.T) {

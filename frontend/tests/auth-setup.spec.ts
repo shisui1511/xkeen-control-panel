@@ -187,6 +187,35 @@ test('ответ бэкенда password_too_long — переведённый �
   await expect(alert).not.toContainText('{');
 });
 
+test.describe('узкий экран (320px)', () => {
+  // commit 1b66e112: на узком экране подсказки-команды не должны
+  // переноситься посередине («xcp --» / «setup-code») — весь <code> целиком
+  // уходит на следующую строку. До фикса .setup-hint code имел
+  // overflow-wrap: anywhere (унаследованный от .setup-hint) вместо
+  // white-space: nowrap, поэтому браузер мог перенести строку внутри самого
+  // элемента <code> — getClientRects().length был бы > 1 при узкой карточке.
+  test.use({ viewport: { width: 320, height: 700 } });
+
+  test('подсказки команд не переносятся посередине на узком экране (320px)', async ({ page }) => {
+    await mockSetupApi(page, { status: 200, body: { success: true } });
+    await page.goto('/');
+
+    const codeElements = page.locator('.setup-hint code');
+    await expect(codeElements).toHaveCount(2);
+
+    for (const el of await codeElements.all()) {
+      await expect(el).toBeVisible();
+      const rectCount = await el.evaluate((node) => node.getClientRects().length);
+      expect(rectCount).toBe(1);
+    }
+
+    const overflowX = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+    );
+    expect(overflowX).toBe(false);
+  });
+});
+
 test('несовпадающие пароли не отправляются на сервер', async ({ page }) => {
   const setupBodies = await mockSetupApi(page, { status: 200, body: { success: true } });
   await page.goto('/');
