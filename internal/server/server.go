@@ -58,6 +58,7 @@ type Server struct {
 	cfg         *Config
 	version     string
 	mux         *http.ServeMux
+	loopbackMux *http.ServeMux
 	authService *auth.AuthService
 	mu          sync.RWMutex
 	httpSrv     *http.Server
@@ -137,12 +138,24 @@ func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 		cfg:         cfg,
 		version:     version,
 		mux:         mux,
+		loopbackMux: http.NewServeMux(),
 		authService: authService,
 	}, nil
 }
 
+// Handle регистрирует обработчик в основном mux и, если путь входит в
+// loopbackAllowedPaths (D-14), дополнительно — в отдельном loopbackMux.
+// BuildLoopbackHandler диспетчеризует именно через loopbackMux, а не через
+// общий mux: статически (а не только по рантайм-проверке карты) достижимы
+// только явно разрешённые обработчики — остальная поверхность приложения
+// (включая обработчики с чувствительными к XSS-скептике данными в других
+// частях мукса) недостижима из loopback-листенера даже теоретически, что
+// также закрывает false-positive CodeQL go/reflected-xss от общего мукса.
 func (s *Server) Handle(pattern string, handler http.HandlerFunc) {
 	s.mux.HandleFunc(pattern, handler)
+	if loopbackAllowedPaths[pattern] {
+		s.loopbackMux.HandleFunc(pattern, handler)
+	}
 }
 
 func (s *Server) HandleProtected(pattern string, handler http.HandlerFunc) {
@@ -170,12 +183,15 @@ func (s *Server) BuildHandler() http.Handler {
 
 // BuildLoopbackHandler constructs the HTTP handler for the 127.0.0.1
 // loopback listener (D-14, T-134-34). Unlike BuildHandler, this handler only
-// forwards requests whose cleaned path is in loopbackAllowedPaths to s.mux —
-// everything else (in particular login, setup and /api/auth/me) gets a 403
-// JSON response without ever reaching the mux, so no cookie-issuing or
-// auth-checking code path is reachable from an unauthenticated local
-// process. Allowed responses are wrapped in noCookieWriter as defense in
-// depth against a future allowlisted handler issuing a cookie.
+// forwards requests whose cleaned path is in loopbackAllowedPaths to
+// s.loopbackMux — a separate, minimal ServeMux that only ever has the
+// allowlisted patterns registered on it (see Handle) — everything else (in
+// particular login, setup and /api/auth/me) gets a 403 JSON response without
+// ever reaching a mux, so no cookie-issuing or auth-checking code path is
+// reachable from an unauthenticated local process, and no unrelated handler
+// on the public mux is even statically reachable from this listener. Allowed
+// responses are wrapped in noCookieWriter as defense in depth against a
+// future allowlisted handler issuing a cookie.
 func (s *Server) BuildLoopbackHandler() http.Handler {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cleanPath := path.Clean(r.URL.Path)
@@ -188,7 +204,7 @@ func (s *Server) BuildLoopbackHandler() http.Handler {
 			})
 			return
 		}
-		s.mux.ServeHTTP(&noCookieWriter{ResponseWriter: w}, r)
+		s.loopbackMux.ServeHTTP(&noCookieWriter{ResponseWriter: w}, r)
 	})
 
 	var handler http.Handler = inner
