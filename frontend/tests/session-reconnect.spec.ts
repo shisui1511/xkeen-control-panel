@@ -28,6 +28,12 @@ async function triggerReasonedLogout(page: Page, reason?: string): Promise<void>
   });
 
   await page.route('**/api/auth/login', async (route) => {
+    // Успешный повторный вход должен остановить мок «всегда 401» для
+    // /api/system/stats — иначе следующий фоновый опрос статуса реагирует
+    // на устаревший 401 и гонкой возвращает экран входа до того, как тест
+    // успеет проверить восстановленный маршрут (documented flake, см.
+    // .planning/phases/134-besshovnye-sessii/deferred-items.md).
+    trigger401 = false;
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
