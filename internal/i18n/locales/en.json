@@ -27,6 +27,7 @@
   "config.validation_timeout": "Configuration check did not finish within %d s — changes were not saved",
   "config.invalid_path": "Invalid path",
   "config.file_exists": "File already exists",
+  "config.xkeen_stoplist_name": "XKeen will refuse to start Xray: the file name \"%s\" contains \"%s\". Change the extension to .bak or move the file into a subfolder.",
   "config.backup_restored": "Backup restored",
 
   "service.start_success": "Service started",

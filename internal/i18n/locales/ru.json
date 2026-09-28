@@ -27,6 +27,7 @@
   "config.validation_timeout": "Проверка конфигурации не завершилась за %d с — изменения не сохранены",
   "config.invalid_path": "Неверный путь",
   "config.file_exists": "Файл уже существует",
+  "config.xkeen_stoplist_name": "XKeen отменит запуск Xray: имя файла «%s» содержит «%s». Смените расширение на .bak или положите файл в подкаталог.",
   "config.backup_restored": "Backup восстановлен",
 
   "service.start_success": "Сервис запущен",
