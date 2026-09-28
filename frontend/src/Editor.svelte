@@ -31,7 +31,7 @@
   import Tabs, { type TabItem } from './components/Tabs.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
-  import { activateRestartGrace } from './lib/serviceGrace';
+  import { applyToKernel, notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
   import PreflightWarnings, {
     type PreflightWarning
   } from './components/editor/PreflightWarnings.svelte';
@@ -733,18 +733,36 @@
 
       await loadBackups(selectedFile);
 
-      // 2. POST /api/service/control?action=restart
-      activateRestartGrace(6000);
+      // 2. Применение к ядру каталога файла: сервер сам решает, нужен ли рестарт
       backgroundStatusText = $t('editor.restarting');
-      const restartRes = await apiFetch('/api/service/control?action=restart', {
-        method: 'POST'
-      });
+      let result: ApplyResult;
+      try {
+        result = await applyToKernel({ path: selectedFile });
+      } catch (applyErr: any) {
+        if (applyErr?.status === 401) return;
+        // Файл уже записан: это не ошибка сохранения
+        console.error('handleSaveAndApply apply error:', applyErr);
+        const reason =
+          parseValidationError(applyErr?.message || '', $currentLang) || applyErr?.message;
+        showToast('error', $t('apply.restart_failed', { reason }), 10000, {
+          label: $t('apply.open_logs'),
+          onClick: () => {
+            window.location.hash = '#/logs';
+          }
+        });
+        applyLoading = false;
+        backgroundStatusText = '';
+        return;
+      }
 
-      const restartText = await restartRes.text();
-      if (!restartRes.ok) throw new Error(restartText || 'Failed to restart service');
-
-      // 3. Status polling
-      startBackgroundStatusCheck();
+      if (result.outcome === 'restarted') {
+        // 3. Опрос статуса — только после реального рестарта
+        startBackgroundStatusCheck();
+      } else {
+        notifyApplyOutcome(result);
+        applyLoading = false;
+        backgroundStatusText = '';
+      }
     } catch (e: any) {
       if (e?.status === 401) return;
       console.error('handleSaveAndApply error:', e);
