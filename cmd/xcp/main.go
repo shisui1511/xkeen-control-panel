@@ -46,6 +46,11 @@ func main() {
 	flag.Usage = func() { printUsage(os.Stderr) }
 	flag.Parse()
 
+	// Keenetic/Netcraze firmware keeps the timezone as a POSIX string Go cannot read on its own;
+	// without this every schedule and timestamp runs in UTC. Applied before the CLI modes
+	// below too: --reset-password appends to the same xcp.log as the daemon.
+	appliedTZ := utils.ApplySystemTimezone()
+
 	// --reset-password/--setup-code (134-10) — CLI-режимы, работающие с
 	// config.json напрямую, без запуска демона панели вообще. Обрабатываются
 	// сразу после flag.Parse(), до любой инициализации демона (лог-файл,
@@ -61,10 +66,6 @@ func main() {
 	if *setupCodeFlag {
 		os.Exit(runSetupCode(*configPath, defaultCLIDeps()))
 	}
-
-	// Keenetic/Netcraze firmware keeps the timezone as a POSIX string Go cannot read on its own;
-	// without this every schedule and timestamp runs in UTC.
-	appliedTZ := utils.ApplySystemTimezone()
 
 	// Router-grade RAM/GC limits (STAB-06): Keenetic/Netcraze devices typically have
 	// 128-256 MB total RAM shared with the kernel and other services. A

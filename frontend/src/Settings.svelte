@@ -1570,9 +1570,7 @@
             <div class="field-row" data-testid="session-row">
               <div class="session-info">
                 <div class="session-name-row">
-                  <span class="field-row-name session-name-text" title={sessionDeviceLabel(s)}>
-                    {sessionDeviceLabel(s)}
-                  </span>
+                  <span class="field-row-name session-name-text">{sessionDeviceLabel(s)}</span>
                   {#if s.current}
                     <span class="badge badge-info">{$t('settings.sessions_current_badge')}</span>
                   {/if}
@@ -1913,9 +1911,7 @@
   }
 
   .field-row-name.session-name-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
     min-width: 0;
     flex-shrink: 1;
   }
