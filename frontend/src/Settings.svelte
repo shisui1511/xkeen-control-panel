@@ -1416,39 +1416,39 @@
     <div class="card mb-2">
       <div class="card-label">{$t('settings.change_password')}</div>
       <div class="field-group">
-        <div class="field-row">
+        <div class="field-row password-row">
           <label class="field-row-name" for="curr-pwd">{$t('settings.current_password')}</label>
           <div class="password-field-wrap">
             <PasswordField
               id="curr-pwd"
               bind:value={currentPassword}
               autocomplete="current-password"
-              inputClass="field-input"
+              inputClass="input"
               placeholder="••••••••"
             />
           </div>
         </div>
-        <div class="field-row">
+        <div class="field-row password-row">
           <label class="field-row-name" for="new-pwd">{$t('settings.new_password')}</label>
           <div class="password-field-wrap password-field-with-meter">
             <PasswordField
               id="new-pwd"
               bind:value={newPassword}
               autocomplete="new-password"
-              inputClass="field-input"
+              inputClass="input"
               placeholder="••••••••"
             />
             <PasswordStrengthMeter password={newPassword} userInputs={[currentPassword]} />
           </div>
         </div>
-        <div class="field-row">
+        <div class="field-row password-row">
           <label class="field-row-name" for="conf-pwd">{$t('settings.confirm_password')}</label>
           <div class="password-field-wrap">
             <PasswordField
               id="conf-pwd"
               bind:value={confirmPassword}
               autocomplete="new-password"
-              inputClass="field-input"
+              inputClass="input"
               placeholder="••••••••"
             />
           </div>
@@ -1466,7 +1466,6 @@
           class="btn btn-primary"
           onclick={changePassword}
           disabled={passwordChanging || !currentPassword || !newPassword || !confirmPassword}
-          title={$t('settings.save_password')}
         >
           {passwordChanging ? $t('app.loading') : $t('settings.save_password')}
         </button>
@@ -1478,7 +1477,7 @@
       <div class="field-group">
         <div class="field-row">
           <div>
-            <span class="field-row-name">{$t('settings.session_idle_ttl')}</span>
+            <label class="field-row-name" for="idle-ttl">{$t('settings.session_idle_ttl')}</label>
             <div class="field-row-desc">{$t('settings.session_idle_ttl_desc')}</div>
             {#if sessionTTL}
               <div class="field-row-desc">
@@ -1493,11 +1492,13 @@
             <input
               id="idle-ttl"
               type="number"
-              class="field-input"
+              class="input"
+              class:input-error={idleTtlInvalid}
+              aria-invalid={idleTtlInvalid}
               bind:value={idleTtlInput}
               disabled={ttlLoading || sessionTTL === null}
             />
-            <span class="field-row-desc">{$t('settings.session_ttl_unit_hours')}</span>
+            <span class="ttl-unit">{$t('settings.session_ttl_unit_hours')}</span>
           </div>
         </div>
         {#if idleTtlInvalid}
@@ -1505,7 +1506,9 @@
         {/if}
         <div class="field-row">
           <div>
-            <span class="field-row-name">{$t('settings.session_absolute_ttl')}</span>
+            <label class="field-row-name" for="absolute-ttl"
+              >{$t('settings.session_absolute_ttl')}</label
+            >
             <div class="field-row-desc">{$t('settings.session_absolute_ttl_desc')}</div>
             {#if sessionTTL}
               <div class="field-row-desc">
@@ -1520,11 +1523,13 @@
             <input
               id="absolute-ttl"
               type="number"
-              class="field-input"
+              class="input"
+              class:input-error={absoluteTtlInvalid}
+              aria-invalid={absoluteTtlInvalid}
               bind:value={absoluteTtlInput}
               disabled={ttlLoading || sessionTTL === null}
             />
-            <span class="field-row-desc">{$t('settings.session_ttl_unit_days')}</span>
+            <span class="ttl-unit">{$t('settings.session_ttl_unit_days')}</span>
           </div>
         </div>
         {#if absoluteTtlInvalid}
@@ -1543,7 +1548,7 @@
 
     <div class="card mb-2">
       <div class="card-label">{$t('settings.sessions_title')}</div>
-      <div class="sessions-list">
+      <div class="field-group sessions-list">
         {#if sessionsLoading}
           {#each { length: 3 } as _, i (i)}
             <div class="field-row session-skeleton-row">
@@ -1604,22 +1609,34 @@
       <div class="card-label">{$t('settings.security')}</div>
       <div class="field-group">
         <div class="field-row-info">
-          <Icon name="check" size={14} /><span>{$t('settings.auth_bcrypt')}</span>
+          <span class="feature-check"><Icon name="check" size={14} /></span><span
+            >{$t('settings.auth_bcrypt')}</span
+          >
         </div>
         <div class="field-row-info">
-          <Icon name="check" size={14} /><span>{$t('settings.csrf')}</span>
+          <span class="feature-check"><Icon name="check" size={14} /></span><span
+            >{$t('settings.csrf')}</span
+          >
         </div>
         <div class="field-row-info">
-          <Icon name="check" size={14} /><span>{$t('settings.rate_limit')}</span>
+          <span class="feature-check"><Icon name="check" size={14} /></span><span
+            >{$t('settings.rate_limit')}</span
+          >
         </div>
         <div class="field-row-info">
-          <Icon name="check" size={14} /><span>{$t('settings.security_headers')}</span>
+          <span class="feature-check"><Icon name="check" size={14} /></span><span
+            >{$t('settings.security_headers')}</span
+          >
         </div>
         <div class="field-row-info">
-          <Icon name="check" size={14} /><span>{$t('settings.security_https_only')}</span>
+          <span class="feature-check"><Icon name="check" size={14} /></span><span
+            >{$t('settings.security_https_only')}</span
+          >
         </div>
         <div class="field-row-info">
-          <Icon name="check" size={14} /><span>{$t('settings.security_cookie_flags')}</span>
+          <span class="feature-check"><Icon name="check" size={14} /></span><span
+            >{$t('settings.security_cookie_flags')}</span
+          >
         </div>
       </div>
     </div>
@@ -1780,20 +1797,6 @@
     align-items: center;
   }
 
-  .field-input {
-    font-size: 13px;
-    padding: 6px 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg-deep, var(--bg));
-    color: var(--fg-primary);
-    min-width: 180px;
-  }
-
-  .field-input:focus {
-    border-color: var(--accent);
-  }
-
   .field-row-info {
     display: flex;
     align-items: center;
@@ -1937,6 +1940,19 @@
     min-width: 0;
   }
 
+  /* На узком экране подпись над полем: иначе ширина поля зависит от длины подписи */
+  @media (max-width: 480px) {
+    .password-row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+    }
+
+    .password-row .password-field-wrap {
+      max-width: none;
+    }
+  }
+
   .password-field-with-meter {
     display: flex;
     flex-direction: column;
@@ -1950,8 +1966,19 @@
     gap: 8px;
   }
 
-  .ttl-input-group .field-input {
-    width: 90px;
-    min-width: 0;
+  .ttl-input-group .input {
+    width: 96px;
+  }
+
+  /* Единицы разной длины («ч» / «дн.») не должны сдвигать поля */
+  .ttl-unit {
+    min-width: 24px;
+    font-size: 12px;
+    color: var(--fg-dim);
+  }
+
+  .feature-check {
+    display: inline-flex;
+    color: var(--success);
   }
 </style>
