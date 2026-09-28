@@ -188,6 +188,7 @@
     padding: 0 4px;
     border-radius: var(--radius-xs);
     background: var(--surface-tint);
-    overflow-wrap: anywhere;
+    /* Команда переносится целиком: разрыв на «--» ломает её при чтении и копировании */
+    white-space: nowrap;
   }
 </style>
