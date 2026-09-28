@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -394,4 +395,74 @@ func TestReloadAuthFromConfig_InvalidatesSessionsAndUpdatesCfg(t *testing.T) {
 	if err := svc.VerifyPassword("new-password-2026"); err != nil {
 		t.Fatalf("expected the new password to verify: %v", err)
 	}
+}
+
+// TestReloadAuthFromConfig_RaceWithConcurrentConfigSave locks in the fix for
+// 134-REVIEW CR-01: the SIGHUP handler's reloadAuthFromConfig writes
+// cfg.Auth.PasswordHash on its own goroutine while HTTP handler goroutines
+// (simulated here by directly mutating cfg.Auth.SessionIdleTTLHours and
+// calling config.Save, the same pattern used by session_settings.go and
+// settings.go) read/write the same shared *config.Config concurrently.
+// Before the fix (config.Config had no synchronization), `go test -race`
+// flagged a data race here; this test exists to keep it caught if the
+// locking is ever removed or bypassed.
+func TestReloadAuthFromConfig_RaceWithConcurrentConfigSave(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	oldHash, err := auth.GeneratePasswordHash("old-password-2026")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newHash, err := auth.GeneratePasswordHash("new-password-2026")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := auth.NewAuthService(auth.Options{PasswordHash: oldHash, DataDir: dataDir})
+	defer svc.Stop()
+
+	cfgPath := filepath.Join(dir, "config.json")
+	cfgJSON := fmt.Sprintf(`{"data_dir": %q, "auth": {"password_hash": %q}}`, dataDir, newHash)
+	if err := os.WriteFile(cfgPath, []byte(cfgJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	liveCfg := &config.Config{ConfigPath: cfgPath, Auth: config.AuthConfig{PasswordHash: oldHash}}
+
+	const iterations = 200
+	var wg sync.WaitGroup
+
+	// Goroutine #1: repeated SIGHUP-style hot password reload.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			if err := reloadAuthFromConfig(cfgPath, liveCfg, svc); err != nil {
+				t.Errorf("reloadAuthFromConfig: %v", err)
+				return
+			}
+		}
+	}()
+
+	// Goroutine #2: repeated concurrent handler-style field write + save,
+	// mirroring internal/handlers/session_settings.go's sessionSettingsUpdate.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			liveCfg.Lock()
+			liveCfg.Auth.SessionIdleTTLHours = 1 + i%720
+			liveCfg.Unlock()
+			if err := config.Save(cfgPath, liveCfg); err != nil {
+				t.Errorf("config.Save: %v", err)
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
 }

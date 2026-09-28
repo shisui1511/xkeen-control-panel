@@ -15,9 +15,16 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 
 		// Content Security Policy
+		//
+		// script-src намеренно без 'unsafe-inline' (134-REVIEW WR-01):
+		// единственный inline-скрипт (регистрация service worker) вынесен в
+		// frontend/src/sw-register.ts и подключается как обычный
+		// module-скрипт (frontend/index.html), уже покрытый 'self'.
+		// 'unsafe-inline' отключал бы основную анти-XSS защиту CSP для
+		// всего приложения.
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-inline'; "+
+				"script-src 'self'; "+
 				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 				"img-src 'self' data: https://cdn.jsdelivr.net https://raw.githubusercontent.com https://github.com https://www.redditstatic.com https://www.svgrepo.com; "+
 				"connect-src 'self' https://ipinfo.io https://*.ipinfo.io https://api.ipify.org https://api64.ipify.org https://icanhazip.com https://*.icanhazip.com https://ipapi.co https://api.my-ip.io; "+

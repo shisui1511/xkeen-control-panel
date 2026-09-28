@@ -107,7 +107,10 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 	info.CurrentVersion = currentVersion
 	info.Channel = channel
 	info.HasUpdate = updateAvailable(info.LatestVersion, currentVersion)
-	if a.updateScheduler != nil && channel == a.cfg.UpdateChannel {
+	a.cfg.RLock()
+	sameChannel := channel == a.cfg.UpdateChannel
+	a.cfg.RUnlock()
+	if a.updateScheduler != nil && sameChannel {
 		// Ручная проверка обновляет и уведомления
 		a.updateScheduler.Record(channel, currentVersion, info, nil)
 	}
@@ -326,7 +329,9 @@ func (a *API) UpdateChannelGet(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
+	a.cfg.RLock()
 	ch := a.cfg.UpdateChannel
+	a.cfg.RUnlock()
 	if ch == "" {
 		ch = "stable"
 	}
@@ -352,7 +357,12 @@ func (a *API) UpdateChannelSet(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, "channel must be stable or beta", http.StatusBadRequest)
 		return
 	}
+	// Lock/Unlock bracket only the field write (134-REVIEW CR-01);
+	// config.Save below takes its own RLock for the marshal, so it must run
+	// unlocked here to avoid deadlocking against that RLock.
+	a.cfg.Lock()
 	a.cfg.UpdateChannel = body.Channel
+	a.cfg.Unlock()
 	if err := config.Save(a.cfg.ConfigPath, a.cfg); err != nil {
 		a.errorResponse(w, "failed to save config: "+err.Error(), http.StatusInternalServerError)
 		return
