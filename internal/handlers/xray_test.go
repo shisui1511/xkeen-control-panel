@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -395,6 +396,85 @@ func TestXrayGRPCMonitoring(t *testing.T) {
 	}
 	if _, err := os.Stat(apiJSONPath); !os.IsNotExist(err) {
 		t.Errorf("expected 00_api.json to not be created on repeated disable")
+	}
+}
+
+// TestXrayGRPCMonitoring_ApplyTarget: включение и выключение gRPC-мониторинга
+// применяются через KernelApplier с целью xray: остановленный Xray не
+// запускается, unknown считается запущенным, при активном Mihomo Xray не
+// трогается. Ответ по-прежнему {"enabled": ...}.
+func TestXrayGRPCMonitoring_ApplyTarget(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured string
+		xrayStatus string
+		wantEach   int32 // рестартов на каждое из двух изменений
+	}{
+		{name: "xray stopped", configured: "xray", xrayStatus: "stopped", wantEach: 0},
+		{name: "xray running", configured: "xray", xrayStatus: "running", wantEach: 1},
+		{name: "xray unknown", configured: "xray", xrayStatus: "unknown", wantEach: 1},
+		{name: "mihomo active", configured: "mihomo", xrayStatus: "running", wantEach: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			freeLn, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("failed to find free port: %v", err)
+			}
+			port := freeLn.Addr().(*net.TCPAddr).Port
+			_ = freeLn.Close()
+
+			cfgPath := filepath.Join(tmpDir, "config.json")
+			if err := os.WriteFile(cfgPath, []byte(`{"inbounds":[{"tag":"socks-in","port":10808,"protocol":"socks"}]}`), 0600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			var restarts int32
+			api := &API{
+				cfg:     &config.Config{XRayConfigDir: tmpDir, XRayAPIPort: port},
+				pathVal: utils.NewPathValidator([]string{tmpDir}),
+				kernelApplier: services.NewKernelApplierFunc(
+					func(name string) string {
+						switch name {
+						case "xray":
+							return tc.xrayStatus
+						case "mihomo":
+							return "stopped"
+						}
+						return "not_installed"
+					},
+					func() string { return tc.configured },
+					func() (string, error) {
+						atomic.AddInt32(&restarts, 1)
+						return "ok", nil
+					},
+				),
+			}
+
+			for i, enabled := range []bool{true, false} {
+				body := fmt.Sprintf(`{"enabled": %t}`, enabled)
+				rr := httptest.NewRecorder()
+				api.XrayGRPCMonitoring(rr, httptest.NewRequest(http.MethodPost, "/api/xray/grpc/monitoring", bytes.NewBufferString(body)))
+				if rr.Code != http.StatusOK {
+					t.Fatalf("enabled=%t: expected 200, got %d: %s", enabled, rr.Code, rr.Body.String())
+				}
+				var env struct {
+					Data struct {
+						Enabled bool `json:"enabled"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+					t.Fatalf("decode response: %v: %s", err, rr.Body.String())
+				}
+				if env.Data.Enabled != enabled {
+					t.Errorf("response enabled = %t, want %t", env.Data.Enabled, enabled)
+				}
+				if got, want := atomic.LoadInt32(&restarts), tc.wantEach*int32(i+1); got != want {
+					t.Errorf("enabled=%t: restarts = %d, want %d", enabled, got, want)
+				}
+			}
+		})
 	}
 }
 

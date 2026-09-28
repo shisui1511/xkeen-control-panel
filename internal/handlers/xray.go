@@ -99,14 +99,6 @@ type XrayGRPCMonitoringRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
-func (a *API) reloadXrayIfRunning() {
-	if a.consoleSvc != nil && a.kernelSvc != nil {
-		if k := a.kernelSvc.Get("xray"); k != nil && k.ProcessStatus == "running" {
-			_, _ = a.consoleSvc.Execute("-restart")
-		}
-	}
-}
-
 // XrayGRPCMonitoring handles POST /api/xray/grpc/monitoring to enable or disable
 // the gRPC api block in Xray's config.json.
 func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +176,7 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		a.reloadXrayIfRunning()
+		a.applyKernel("xray")
 		JSONSuccess(w, map[string]interface{}{"enabled": true})
 		return
 	}
@@ -231,7 +223,7 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.reloadXrayIfRunning()
+	a.applyKernel("xray")
 	JSONSuccess(w, map[string]interface{}{"enabled": false})
 }
 
