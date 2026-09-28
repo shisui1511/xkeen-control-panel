@@ -14,6 +14,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/auth"
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
+	"golang.org/x/term"
 )
 
 // cliDeps — зависимости CLI-команд xcp (--reset-password, --setup-code),
@@ -31,19 +32,25 @@ type cliDeps struct {
 	sleep          func(time.Duration)
 }
 
-// defaultCLIDeps — реальные зависимости для запуска на роутере. isTerminal и
-// readPassword подключаются к golang.org/x/term в Task 2 (ввод пароля без
-// эха) — здесь заглушки, безусловно отклоняющие интерактивный режим.
+// defaultCLIDeps — реальные зависимости для запуска на роутере: isTerminal и
+// readPassword используют golang.org/x/term — ввод пароля без эха
+// (T-134-39), с подтверждением в интерактивном режиме.
 func defaultCLIDeps() cliDeps {
 	return cliDeps{
 		stdin:  os.Stdin,
 		stdout: os.Stdout,
 		stderr: os.Stderr,
 		isTerminal: func() bool {
-			return false
+			return term.IsTerminal(int(os.Stdin.Fd()))
 		},
 		readPassword: func(prompt string) (string, error) {
-			return "", fmt.Errorf("интерактивный ввод пароля пока недоступен")
+			fmt.Fprint(os.Stderr, prompt)
+			b, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+			if err != nil {
+				return "", err
+			}
+			return string(b), nil
 		},
 		findDaemonPIDs: findDaemonPIDsDefault,
 		signalPID: func(pid int) error {
@@ -285,6 +292,48 @@ func findDaemonPIDsDefault() ([]int, error) {
 		}
 	}
 	return filterDaemonPIDs(pids, selfPID, readProcCmdline), nil
+}
+
+// runSetupCode реализует `xcp --setup-code` (D-26): пока пароль не задан,
+// печатает действующий одноразовый код первичной настройки (переиздавая его
+// при необходимости через auth.EnsureSetupCode — тот же код, что видит
+// setup.sh/веб-UI); если пароль уже задан, код настройки больше не
+// применяется — сообщает об этом и предлагает `xcp --reset-password`.
+func runSetupCode(configPath string, d cliDeps) int {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Fprintf(d.stderr, "конфиг не найден: %s\n", configPath)
+		return 1
+	}
+
+	if cfg.Auth.PasswordHash != "" {
+		fmt.Fprintln(d.stderr, "Пароль уже задан. Для сброса выполните: xcp --reset-password")
+		return 1
+	}
+
+	code, err := auth.EnsureSetupCode(cfg.DataDir)
+	if err != nil {
+		fmt.Fprintf(d.stderr, "не удалось получить код настройки: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintln(d.stdout, code)
+	return 0
+}
+
+// printUsage печатает справку `xcp --help`/`-h` (D-23): синтаксис, флаги и
+// инструкцию восстановления доступа при утере пароля.
+func printUsage(w io.Writer) {
+	fmt.Fprintln(w, "Использование: xcp [-config путь] [флаги]")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Флаги:")
+	fmt.Fprintln(w, "  -config путь       Путь к config.json (по умолчанию /opt/etc/xcp/config.json)")
+	fmt.Fprintln(w, "  -v, --version      Показать версию и выйти")
+	fmt.Fprintln(w, "  --reset-password   Задать новый пароль администратора (интерактивно, без эха)")
+	fmt.Fprintln(w, "  --password-stdin   С --reset-password: прочитать новый пароль из первой строки stdin")
+	fmt.Fprintln(w, "  --setup-code       Показать действующий код первичной настройки (пока пароль не задан)")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Забыли пароль? Подключитесь к роутеру по SSH и выполните: xcp --reset-password")
 }
 
 // reloadAuthFromConfig перечитывает config.json и применяет новый хеш пароля

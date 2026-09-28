@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -56,6 +57,127 @@ func testDeps(stdin string, findPIDs func() ([]int, error), signaled *[]int) cli
 		},
 		selfPID: 200,
 		sleep:   func(time.Duration) {},
+	}
+}
+
+// interactiveDeps — testDeps-аналог для интерактивного режима (isTerminal
+// возвращает true): readPassword последовательно отдаёт значения из answers,
+// имитируя два запроса «Новый пароль:» / «Повторите пароль:».
+func interactiveDeps(answers []string, findPIDs func() ([]int, error)) cliDeps {
+	i := 0
+	return cliDeps{
+		stdin:  strings.NewReader(""),
+		stdout: io.Discard,
+		stderr: io.Discard,
+		isTerminal: func() bool {
+			return true
+		},
+		readPassword: func(string) (string, error) {
+			if i >= len(answers) {
+				return "", fmt.Errorf("unexpected extra readPassword call")
+			}
+			a := answers[i]
+			i++
+			return a, nil
+		},
+		findDaemonPIDs: findPIDs,
+		signalPID:      func(int) error { return nil },
+		selfPID:        200,
+		sleep:          func(time.Duration) {},
+	}
+}
+
+func TestResetPassword_InteractiveTwoPrompts(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir, "")
+
+	deps := interactiveDeps([]string{"new-pass-2026", "new-pass-2026"}, func() ([]int, error) { return nil, nil })
+	if code := runResetPassword(cfgPath, false, deps); code != 0 {
+		t.Fatalf("expected exit 0 for a matching interactive confirmation, got %d", code)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(cfg.Auth.PasswordHash), []byte("new-pass-2026")); err != nil {
+		t.Fatalf("password hash does not match: %v", err)
+	}
+}
+
+func TestResetPassword_MismatchedConfirmation(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir, "")
+
+	deps := interactiveDeps([]string{"new-pass-2026", "different-pass-2026"}, func() ([]int, error) { return nil, nil })
+	if code := runResetPassword(cfgPath, false, deps); code != 1 {
+		t.Fatalf("expected exit 1 for mismatched confirmation, got %d", code)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.PasswordHash != "" {
+		t.Fatalf("expected password hash to remain empty after a mismatched confirmation")
+	}
+}
+
+func TestSetupCode_PrintsCodeWhenNoPassword(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir, "")
+
+	var out bytes.Buffer
+	deps := testDeps("", nil, nil)
+	deps.stdout = &out
+
+	if code := runSetupCode(cfgPath, deps); code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	first := strings.TrimSpace(out.String())
+	if len(first) == 0 {
+		t.Fatalf("expected a setup code on stdout, got empty output")
+	}
+
+	out.Reset()
+	if code := runSetupCode(cfgPath, deps); code != 0 {
+		t.Fatalf("expected exit 0 on the second call, got %d", code)
+	}
+	second := strings.TrimSpace(out.String())
+	if second != first {
+		t.Fatalf("expected the same setup code across calls, got %q then %q", first, second)
+	}
+}
+
+func TestSetupCode_PasswordAlreadySet(t *testing.T) {
+	dir := t.TempDir()
+	hash, err := auth.GeneratePasswordHash("existing-pass-2026")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := writeTestConfig(t, dir, hash)
+
+	var out bytes.Buffer
+	deps := testDeps("", nil, nil)
+	deps.stdout = &out
+
+	if code := runSetupCode(cfgPath, deps); code != 1 {
+		t.Fatalf("expected exit 1 when a password is already set, got %d", code)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("expected empty stdout when a password is already set, got: %s", out.String())
+	}
+}
+
+func TestPrintUsage_ContainsResetInstructions(t *testing.T) {
+	var buf bytes.Buffer
+	printUsage(&buf)
+	out := buf.String()
+
+	for _, want := range []string{"--reset-password", "--password-stdin", "--setup-code", "-config", "Забыли пароль"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected usage text to contain %q, got: %s", want, out)
+		}
 	}
 }
 

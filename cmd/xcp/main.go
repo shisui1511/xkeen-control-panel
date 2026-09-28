@@ -31,6 +31,7 @@ var (
 	configPath        = flag.String("config", "/opt/etc/xcp/config.json", "Path to config file")
 	resetPasswordFlag = flag.Bool("reset-password", false, "Reset the admin password from the router (SSH), no restart required")
 	passwordStdinFlag = flag.Bool("password-stdin", false, "Read the new password from the first line of stdin (for scripts), requires --reset-password")
+	setupCodeFlag     = flag.Bool("setup-code", false, "Print the current first-run setup code (only while no password is set)")
 )
 
 func main() {
@@ -42,6 +43,7 @@ func main() {
 		}
 	}
 
+	flag.Usage = func() { printUsage(os.Stderr) }
 	flag.Parse()
 
 	// --reset-password/--setup-code (134-10) — CLI-режимы, работающие с
@@ -55,6 +57,9 @@ func main() {
 	}
 	if *resetPasswordFlag {
 		os.Exit(runResetPassword(*configPath, *passwordStdinFlag, defaultCLIDeps()))
+	}
+	if *setupCodeFlag {
+		os.Exit(runSetupCode(*configPath, defaultCLIDeps()))
 	}
 
 	// Keenetic/Netcraze firmware keeps the timezone as a POSIX string Go cannot read on its own;
