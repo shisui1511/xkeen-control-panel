@@ -49,6 +49,19 @@ func (w *noCookieWriter) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
+// Write forwards to the underlying ResponseWriter for every allowlisted
+// loopback handler, so CodeQL's go/reflected-xss flags it as a generic sink
+// reachable from request-derived data (same shape/false-positive class as the
+// already-dismissed alert on maxBytesResponseWriter.Write in
+// internal/middleware/maxbytes.go). This is a false positive: since Handle()
+// only ever registers loopbackAllowedPaths handlers on s.loopbackMux (Version,
+// MihomoProviderAdapter, MihomoProviderRedirect), the only bytes that ever
+// reach here are a JSON body (json.NewEncoder, auto-escaping), a text/yaml
+// upstream-subscription payload (never an error message that echoes the raw
+// request), or net/http.Redirect's own html.EscapeString-ed anchor body over
+// a url.Values.Encode()-normalized query. auth.SecurityHeaders additionally
+// sets X-Content-Type-Options: nosniff on every loopback response, so a
+// browser will never interpret this body as HTML/JS regardless of content.
 func (w *noCookieWriter) Write(b []byte) (int, error) {
 	w.Header().Del("Set-Cookie")
 	return w.ResponseWriter.Write(b)
