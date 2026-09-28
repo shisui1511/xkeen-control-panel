@@ -474,7 +474,10 @@ func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 	payload, err := a.subscriptionSvc.ProviderFetchWithFallback(r.Context(), urlStr, sub)
 	if err != nil {
 		log.Printf("[Subscriptions] provider fetch failed for sub=%s: %s", sub.ID, utils.SanitizeLogInput(err.Error()))
-		http.Error(w, "Bad Gateway: "+err.Error(), http.StatusBadGateway)
+		// Причина ошибки (может содержать сырой url из query-параметра)
+		// уходит только в лог; клиенту — фиксированный текст без
+		// отражения пользовательского ввода (CodeQL reflected-XSS sink).
+		a.errorResponse(w, "Bad Gateway: upstream fetch failed", http.StatusBadGateway)
 		return
 	}
 

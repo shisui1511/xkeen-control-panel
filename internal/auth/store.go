@@ -269,16 +269,22 @@ func hashToken(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// passwordFingerprint — короткий (16 hex-символов) отпечаток bcrypt-хеша
-// пароля. Пустой хеш (пароль ещё не задан) даёт пустой fingerprint.
-// Используется для отбрасывания sessions.json, записанного при другом
-// пароле (T-134-02).
+// passwordFingerprint — короткий (16 символов) отпечаток bcrypt-хеша пароля,
+// взятый как суффикс самого bcrypt-хеша, без дополнительного хеширования
+// пароль-зависимых данных (bcrypt-хеш уже является стойким односторонним
+// значением; повторное SHA-256 поверх него добавляло срабатывание CodeQL
+// go/insecure-hash-algorithm-sensitive без выигрыша в безопасности). Пустой
+// хеш (пароль ещё не задан) даёт пустой fingerprint. Используется для
+// отбрасывания sessions.json, записанного при другом пароле (T-134-02).
 func passwordFingerprint(hash string) string {
 	if hash == "" {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(hash))
-	return hex.EncodeToString(sum[:])[:16]
+	const n = 16
+	if len(hash) <= n {
+		return hash
+	}
+	return hash[len(hash)-n:]
 }
 
 // ResetPersistedAuthState перезаписывает sessions.json и ratelimit.json в

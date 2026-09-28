@@ -216,7 +216,11 @@ func appendAuthLog(path string, daemonNotified bool) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			log.Printf("[auth] failed to close audit log %s: %v", path, cerr)
+		}
+	}()
 	log.New(f, "", log.LstdFlags).Printf("[auth] password reset via CLI (daemon notified: %t)", daemonNotified)
 }
 
