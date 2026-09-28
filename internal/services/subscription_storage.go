@@ -542,7 +542,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			existing.UseProviderInterval = sub.UseProviderInterval
 			existing.ProviderName = newProviderName
 
-			needRestart := false
+			var restartTargets []string
 			// Clean up Xray if it was enabled and is now disabled
 			if existing.EnableXray && !sub.EnableXray {
 				os.Remove(s.getFragmentPath(existing))
@@ -551,7 +551,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				}
 				os.Remove(s.getRoutingFragmentPath(existing))
 				existing.LastHash = ""
-				needRestart = true
+				restartTargets = addKernelTarget(restartTargets, "xray")
 			}
 
 			// Clean up Mihomo if it was enabled and is now disabled
@@ -589,7 +589,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				existing.ManagedYAML = ""
 				existing.LastCount = 0
 				existing.LastHashMihomo = ""
-				needRestart = true
+				restartTargets = addKernelTarget(restartTargets, "mihomo")
 			}
 
 			existing.EnableXray = sub.EnableXray
@@ -607,7 +607,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				if err := s.refreshXrayFragmentLocked(existing); err != nil {
 					log.Printf("[Subscriptions] failed to refresh Xray fragment for %s: %v", existing.ID, err)
 				}
-				needRestart = true
+				restartTargets = addKernelTarget(restartTargets, "xray")
 			}
 
 			if sub.RoutingMode != "" {
@@ -632,7 +632,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 					log.Printf("[Subscriptions] failed to rebuild default node file after update of %s: %v", existing.ID, err)
 				}
 				if changed {
-					needRestart = true
+					restartTargets = addKernelTarget(restartTargets, "xray")
 				}
 			}
 
@@ -667,8 +667,8 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			// замораживать остальные операции с подписками (WR-01, тот же
 			// паттерн, что в SetNodeDialerProxy/SetActiveNode/ClearActiveNode).
 			s.mu.Unlock()
-			if needRestart {
-				s.restartXkeenIfRunning(safeID, "update (disabled integration)")
+			if len(restartTargets) > 0 {
+				s.restartXkeenIfRunning(safeID, "update (disabled integration)", restartTargets...)
 			}
 			return nil
 		}
@@ -773,12 +773,19 @@ func (s *SubscriptionService) Delete(id string) error {
 		return err
 	}
 
-	needRestart := enableXray || enableMihomo
-	// Рестарт ядра — вне блокировки (WR-01, тот же паттерн, что в
+	// Цели рестарта — ядра, чьи файлы подписка занимала. Рестарт ядра — вне
+	// блокировки (WR-01, тот же паттерн, что в
 	// SetNodeDialerProxy/SetActiveNode/ClearActiveNode).
+	var restartTargets []string
+	if enableXray {
+		restartTargets = addKernelTarget(restartTargets, "xray")
+	}
+	if enableMihomo {
+		restartTargets = addKernelTarget(restartTargets, "mihomo")
+	}
 	s.mu.Unlock()
-	if needRestart {
-		s.restartXkeenIfRunning(safeID, "delete")
+	if len(restartTargets) > 0 {
+		s.restartXkeenIfRunning(safeID, "delete", restartTargets...)
 	}
 	return nil
 }
@@ -1374,7 +1381,7 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 		// замораживать остальные операции с подписками (WR-01).
 		s.mu.Unlock()
 		if needRestart {
-			s.restartXkeenIfRunning(restartID, "dialerProxy clear")
+			s.restartXkeenIfRunning(restartID, "dialerProxy clear", "xray")
 		}
 		return nil
 	}
@@ -1450,7 +1457,7 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 	// См. комментарий выше: рестарт ядра — вне блокировки (WR-01).
 	s.mu.Unlock()
 	if needRestart {
-		s.restartXkeenIfRunning(restartID, "dialerProxy update")
+		s.restartXkeenIfRunning(restartID, "dialerProxy update", "xray")
 	}
 
 	return nil

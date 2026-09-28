@@ -541,7 +541,7 @@ func main() {
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
 	subscriptionSvc.SetPanelAddress(cfg.Port, cfg.HTTPS.Enabled, cfg.LoopbackPort)
-	subscriptionSvc.SetConsoleService(consoleSvc)
+	subscriptionSvc.SetKernelApplier(api.KernelApplier())
 	subscriptionSvc.SetMihomoService(api.MihomoService())
 	subscriptionSvc.SetMihomoAPI(cfg.MihomoAPIURL, cfg.MihomoSecret)
 	// Fallback-резолвер секрета Clash API: при пустом MihomoSecret в конфиге

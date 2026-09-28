@@ -239,7 +239,7 @@ func TestSelectNode_UnsupportedProtocolRejected(t *testing.T) {
 
 func TestSelectNode_StoppedKernelNotStarted(t *testing.T) {
 	env := newOrderEnv(t)
-	env.svc.SetKernelService(&statusKernelService{status: map[string]string{"xray": "stopped", "mihomo": "not_installed"}})
+	env.status["xray"] = "stopped"
 	before := env.restartCalls(t)
 
 	tag := nodeTagByServer(t, env, "sub_1", "2.2.2.2:443")
@@ -447,7 +447,7 @@ func TestClearActiveNode_StoppedKernelNotStarted(t *testing.T) {
 	if err := env.svc.SetActiveNode("sub_1", tag); err != nil {
 		t.Fatalf("SetActiveNode: %v", err)
 	}
-	env.svc.SetKernelService(&statusKernelService{status: map[string]string{"xray": "stopped", "mihomo": "not_installed"}})
+	env.status["xray"] = "stopped"
 	before := env.restartCalls(t)
 
 	if err := env.svc.ClearActiveNode("sub_1"); err != nil {

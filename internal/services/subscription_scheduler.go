@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,42 +37,38 @@ func (e *MihomoAPIStatusError) Error() string {
 	return fmt.Sprintf("API returned status %d", e.StatusCode)
 }
 
-// SetConsoleService подключает ConsoleService для триггера xkeen -restart
-// после изменения Mihomo config.yaml.
-func (s *SubscriptionService) SetConsoleService(svc *ConsoleService) {
-	s.consoleSvc = svc
+// SetKernelApplier подключает общий исполнитель «применить к ядру»: он решает,
+// перезапускать ли целевое ядро после изменения его фрагментов.
+func (s *SubscriptionService) SetKernelApplier(a *KernelApplier) {
+	s.applier = a
 }
 
 // restartXkeenIfRunning применяет изменённые фрагменты перезапуском XKeen, но
-// только если ядро уже работает: ядро, остановленное пользователем, обновление
-// или правка подписки не запускает. Статус «unknown» не считается остановкой.
-func (s *SubscriptionService) restartXkeenIfRunning(subID, reason string) {
-	if s.consoleSvc == nil {
+// только активного и запущенного целевого ядра: остановленное пользователем
+// ядро обновление или правка подписки не запускает, а изменение, касающееся
+// только другого ядра, активное ядро не перезапускает. Решение принимает
+// KernelApplier по списку kernels (xray, mihomo); без него ничего не
+// перезапускается.
+func (s *SubscriptionService) restartXkeenIfRunning(subID, reason string, kernels ...string) {
+	cleanID := utils.SanitizeLogInput(subID)
+	if s.applier == nil {
+		log.Printf("subscription %s: no kernel applier, skip restart after %s", cleanID, utils.SanitizeLogInput(reason))
 		return
 	}
-	cleanID := strings.NewReplacer("\n", "", "\r", "").Replace(subID)
-	if s.kernelSvc != nil && !s.anyKernelMayRun() {
-		log.Printf("subscription %s: kernel is stopped, skip xkeen -restart after %s", cleanID, reason)
+	res := s.applier.Apply(kernels...)
+	if res.Outcome == ApplyRestartFailed {
+		log.Printf("subscription %s: %s: outcome=%s kernel=%s: %s", cleanID, reason, res.Outcome, res.Kernel, utils.SanitizeLogInput(res.Error))
 		return
 	}
-	if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-		log.Printf("subscription %s: xkeen -restart after %s: %v", cleanID, reason, err)
-	}
+	log.Printf("subscription %s: %s: outcome=%s kernel=%s", cleanID, reason, res.Outcome, res.Kernel)
 }
 
-func (s *SubscriptionService) anyKernelMayRun() bool {
-	for _, name := range []string{"xray", "mihomo"} {
-		info := s.kernelSvc.Get(name)
-		if info == nil {
-			continue
-		}
-		switch info.ProcessStatus {
-		case "stopped", "not_installed":
-		default:
-			return true
-		}
+// addKernelTarget добавляет ядро в набор целей рестарта без повторов.
+func addKernelTarget(targets []string, kernel string) []string {
+	if slices.Contains(targets, kernel) {
+		return targets
 	}
-	return false
+	return append(targets, kernel)
 }
 
 func (s *SubscriptionService) SetKernelService(svc KernelStatusProvider) {
@@ -418,7 +415,7 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	s.mu.Unlock()
 
 	if needRestart {
-		s.restartXkeenIfRunning(sub.ID, "xray fragment update")
+		s.restartXkeenIfRunning(sub.ID, "xray fragment update", "xray")
 	}
 
 	return nil
@@ -839,7 +836,7 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 	s.mu.Unlock()
 
 	if changed {
-		s.restartXkeenIfRunning(subID, "active node switch")
+		s.restartXkeenIfRunning(subID, "active node switch", "xray")
 	}
 	return nil
 }
@@ -875,7 +872,7 @@ func (s *SubscriptionService) ClearActiveNode(subscriptionID string) error {
 	s.mu.Unlock()
 
 	if changed {
-		s.restartXkeenIfRunning(subID, "active node cleared")
+		s.restartXkeenIfRunning(subID, "active node cleared", "xray")
 	}
 	return nil
 }

@@ -831,8 +831,7 @@ proxy-groups:
 	svc.httpClient = srv.Client()
 	svc.SetKernelService(&fakeKernelService{active: "mihomo"})
 
-	consoleSvc := NewConsoleService(mockXkeenPath)
-	svc.SetConsoleService(consoleSvc)
+	svc.SetKernelApplier(logRestartApplier(logFile, "mihomo", map[string]string{"xray": "not_installed", "mihomo": "running"}))
 
 	svc.SetPanelAddress(8090, false, 8091)
 
@@ -940,8 +939,7 @@ func TestRefreshXray_DoesNotRestartXray(t *testing.T) {
 	svc := NewSubscriptionService(tmp, xrayConfigDir, tmp)
 	svc.httpClient = srv.Client()
 
-	consoleSvc := NewConsoleService(mockXkeenPath)
-	svc.SetConsoleService(consoleSvc)
+	svc.SetKernelApplier(logRestartApplier(logFile, "xray", map[string]string{"xray": "running", "mihomo": "not_installed"}))
 
 	sub := Subscription{
 		ID:           "xray-sub",
@@ -1211,6 +1209,30 @@ func (f *statusKernelService) Get(name string) *KernelInfo {
 	return &KernelInfo{Name: name, ProcessStatus: st}
 }
 
+// logRestartApplier собирает KernelApplier, чей рестарт дописывает «-restart» в
+// logFile. status — изменяемая карта статусов ядер (тест правит её по ходу),
+// configured — активное ядро из init-скрипта XKeen.
+func logRestartApplier(logFile, configured string, status map[string]string) *KernelApplier {
+	return NewKernelApplierFunc(
+		func(name string) string {
+			if st, ok := status[name]; ok {
+				return st
+			}
+			return "not_installed"
+		},
+		func() string { return configured },
+		func() (string, error) {
+			f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+			if err != nil {
+				return "", err
+			}
+			defer f.Close()
+			_, err = f.WriteString("-restart\n")
+			return "", err
+		},
+	)
+}
+
 func TestRefreshXray_StoppedKernelIsNotStarted(t *testing.T) {
 	// Пользователь остановил ядро: обновление подписки меняет фрагмент, но
 	// xkeen -restart не вызывает — иначе ядро запускается само.
@@ -1234,9 +1256,9 @@ func TestRefreshXray_StoppedKernelIsNotStarted(t *testing.T) {
 
 	svc := NewSubscriptionService(tmp, xrayDir, tmp)
 	svc.httpClient = srv.Client()
-	svc.SetConsoleService(NewConsoleService(mockXkeenPath))
 	kernels := &statusKernelService{status: map[string]string{"xray": "stopped", "mihomo": "not_installed"}}
 	svc.SetKernelService(kernels)
+	svc.SetKernelApplier(logRestartApplier(logFile, "xray", kernels.status))
 
 	sub := Subscription{ID: "s", Name: "S", URL: srv.URL, EnableXray: true, Enabled: true, Interval: 1}
 	if err := svc.Add(&sub); err != nil {
@@ -1260,6 +1282,110 @@ func TestRefreshXray_StoppedKernelIsNotStarted(t *testing.T) {
 	}
 }
 
+// countRestarts — сколько раз applier дописал «-restart» в logFile.
+func countRestarts(t *testing.T, logFile string) int {
+	t.Helper()
+	data, _ := os.ReadFile(logFile)
+	return strings.Count(string(data), "-restart")
+}
+
+// newBothKernelsService — сервис без сети, каталоги Xray и Mihomo во временной
+// папке, applier настроен на переданное активное ядро и статусы.
+func newBothKernelsService(t *testing.T, configured string, status map[string]string) (*SubscriptionService, string) {
+	t.Helper()
+	tmp := t.TempDir()
+	xrayDir := filepath.Join(tmp, "xray")
+	mihomoDir := filepath.Join(tmp, "mihomo")
+	for _, d := range []string{xrayDir, mihomoDir} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := NewSubscriptionService(tmp, xrayDir, mihomoDir)
+	logFile := filepath.Join(tmp, "restarts.log")
+	svc.SetKernelApplier(logRestartApplier(logFile, configured, status))
+	return svc, logFile
+}
+
+func TestRestartTargets_XrayFragmentWithActiveMihomo(t *testing.T) {
+	// Активен и запущен Mihomo, Xray остановлен: обновление Xray-фрагмента
+	// пишет файл, но XKeen не перезапускает — Xray и так не работает, а Mihomo
+	// изменение не касается.
+	env := newStubProviderEnv(t, Subscription{ID: "s", Name: "S"})
+	env.status["xray"] = "stopped"
+	env.status["mihomo"] = "running"
+	env.svc.SetKernelApplier(logRestartApplier(env.logFile, "mihomo", env.status))
+
+	env.body.Store(stubProviderBody("1.2.3.4:443|" + stubWorkingUUID + "|work"))
+	if err := env.svc.Refresh("s"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if len(env.fragment(t, "s")) == 0 {
+		t.Error("fragment must be written")
+	}
+	if got := env.restartCalls(t); got != 0 {
+		t.Fatalf("Xray fragment update with Mihomo active must not restart XKeen, restarts: %d", got)
+	}
+}
+
+func TestRestartTargets_MihomoOnlyChangeKeepsXray(t *testing.T) {
+	// Активен и запущен Xray. Отключение Mihomo-интеграции его не касается;
+	// отключение Xray-интеграции перезапускает его ровно один раз.
+	svc, logFile := newBothKernelsService(t, "xray", map[string]string{"xray": "running", "mihomo": "running"})
+	sub := Subscription{ID: "both", Name: "Both", URL: "https://example.com/sub", Enabled: true, EnableXray: true, EnableMihomo: true}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatal(err)
+	}
+
+	noMihomo := sub
+	noMihomo.EnableMihomo = false
+	if err := svc.Update("both", &noMihomo); err != nil {
+		t.Fatalf("Update (disable Mihomo): %v", err)
+	}
+	if got := countRestarts(t, logFile); got != 0 {
+		t.Fatalf("disabling Mihomo integration must not restart active Xray, restarts: %d", got)
+	}
+
+	noXray := noMihomo
+	noXray.EnableXray = false
+	if err := svc.Update("both", &noXray); err != nil {
+		t.Fatalf("Update (disable Xray): %v", err)
+	}
+	if got := countRestarts(t, logFile); got != 1 {
+		t.Fatalf("disabling Xray integration must restart active running Xray once, restarts: %d", got)
+	}
+}
+
+func TestRestartTargets_DeleteBothKernels(t *testing.T) {
+	// Удаление подписки с обеими интеграциями перезапускает только активное
+	// ядро и только если оно запущено: остановленное не запускается.
+	sub := Subscription{ID: "both", Name: "Both", URL: "https://example.com/sub", Enabled: true, EnableXray: true, EnableMihomo: true}
+
+	stopped, stoppedLog := newBothKernelsService(t, "mihomo", map[string]string{"xray": "running", "mihomo": "stopped"})
+	first := sub
+	if err := stopped.Add(&first); err != nil {
+		t.Fatal(err)
+	}
+	if err := stopped.Delete("both"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if got := countRestarts(t, stoppedLog); got != 0 {
+		t.Fatalf("delete with stopped active Mihomo must not start it, restarts: %d", got)
+	}
+
+	running, runningLog := newBothKernelsService(t, "mihomo", map[string]string{"xray": "stopped", "mihomo": "running"})
+	second := sub
+	if err := running.Add(&second); err != nil {
+		t.Fatal(err)
+	}
+	if err := running.Delete("both"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if got := countRestarts(t, runningLog); got != 1 {
+		t.Fatalf("delete with running active Mihomo must restart it once, restarts: %d", got)
+	}
+}
+
 // stubProviderBody собирает тело подписки из vless-ссылок: «host:port|uuid|имя».
 func stubProviderBody(lines ...string) string {
 	var uris []string
@@ -1275,6 +1401,8 @@ type stubProviderEnv struct {
 	xrayDir string
 	logFile string
 	body    *atomic.Value
+	// status — статусы ядер, по которым решает KernelApplier сервиса.
+	status map[string]string
 }
 
 func (e *stubProviderEnv) restartCalls(t *testing.T) int {
@@ -1317,8 +1445,9 @@ func newStubProviderEnv(t *testing.T, sub Subscription) *stubProviderEnv {
 
 	svc := NewSubscriptionService(tmp, xrayDir, tmp)
 	svc.httpClient = srv.Client()
-	svc.SetConsoleService(NewConsoleService(mockXkeenPath))
-	svc.SetKernelService(&statusKernelService{status: map[string]string{"xray": "running", "mihomo": "not_installed"}})
+	status := map[string]string{"xray": "running", "mihomo": "not_installed"}
+	svc.SetKernelService(&statusKernelService{status: status})
+	svc.SetKernelApplier(logRestartApplier(logFile, "xray", status))
 
 	sub.URL = srv.URL
 	sub.EnableXray = true
@@ -1329,7 +1458,7 @@ func newStubProviderEnv(t *testing.T, sub Subscription) *stubProviderEnv {
 	if err := svc.Add(&sub); err != nil {
 		t.Fatal(err)
 	}
-	return &stubProviderEnv{svc: svc, xrayDir: xrayDir, logFile: logFile, body: body}
+	return &stubProviderEnv{svc: svc, xrayDir: xrayDir, logFile: logFile, body: body, status: status}
 }
 
 const stubWorkingUUID = "11111111-2222-3333-4444-555555555555"
