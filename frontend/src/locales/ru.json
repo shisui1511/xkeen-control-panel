@@ -2508,5 +2508,12 @@
   "apply.switch_and_start": "Переключить и запустить",
   "apply.save_only": "Только сохранить",
   "apply.mihomo_saved_after_switch": "Конфиг Mihomo сохранён. Вступит в силу после переключения на Mihomo",
-  "apply.switch_failed": "Конфиг сохранён, но переключение на Mihomo не удалось: {reason}"
+  "apply.switch_failed": "Конфиг сохранён, но переключение на Mihomo не удалось: {reason}",
+  "stoplist.hint": "XKeen отменит запуск Xray: имя содержит «{word}». Смените расширение на .bak или положите файл в подкаталог.",
+  "stoplist.confirm_title": "Имя из стоп-списка XKeen",
+  "stoplist.confirm_consequence": "Пока в каталоге Xray есть файл с «{word}» в имени, XKeen отменит запуск Xray. Смените расширение на .bak или положите файл в подкаталог.",
+  "stoplist.confirm_create": "Всё равно создать",
+  "stoplist.confirm_rename": "Всё равно переименовать",
+  "stoplist.confirm_duplicate": "Всё равно создать копию",
+  "stoplist.badge_title": "XKeen отменит запуск Xray: имя содержит «{word}». Переименуйте файл через контекстное меню, смените расширение на .bak или перенесите в подкаталог."
 }

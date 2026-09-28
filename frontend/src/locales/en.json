@@ -2508,5 +2508,12 @@
   "apply.switch_and_start": "Switch and start",
   "apply.save_only": "Save only",
   "apply.mihomo_saved_after_switch": "Mihomo config saved. Takes effect after switching to Mihomo",
-  "apply.switch_failed": "Config saved, but switching to Mihomo failed: {reason}"
+  "apply.switch_failed": "Config saved, but switching to Mihomo failed: {reason}",
+  "stoplist.hint": "XKeen will refuse to start Xray: the name contains “{word}”. Change the extension to .bak or put the file in a subdirectory.",
+  "stoplist.confirm_title": "Name from the XKeen stop list",
+  "stoplist.confirm_consequence": "While the Xray directory holds a file with “{word}” in its name, XKeen will refuse to start Xray. Change the extension to .bak or put the file in a subdirectory.",
+  "stoplist.confirm_create": "Create anyway",
+  "stoplist.confirm_rename": "Rename anyway",
+  "stoplist.confirm_duplicate": "Create the copy anyway",
+  "stoplist.badge_title": "XKeen will refuse to start Xray: the name contains “{word}”. Rename the file from the context menu, change the extension to .bak or move it to a subdirectory."
 }

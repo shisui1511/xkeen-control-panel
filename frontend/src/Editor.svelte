@@ -50,8 +50,11 @@
     renameConfigFile,
     listConfigFiles,
     formatBytes,
-    type ConfigFileInfo
+    ConfigOpError,
+    type ConfigFileInfo,
+    type ConfigOpOptions
   } from './components/editor/fileOps';
+  import { isXrayRootPath, matchXKeenStoplist } from './lib/xkeenStoplist';
 
   interface EditorTab {
     path: string;
@@ -842,16 +845,71 @@
     }
   }
 
+  /**
+   * Подтверждение имени из стоп-списка XKeen: пока такой файл лежит в корне
+   * каталога Xray, XKeen отменяет запуск Xray. `serverMessage` — текст ответа
+   * сервера, если имя предсказала не клиентская проверка, а 409.
+   */
+  async function confirmStoplistName(
+    name: string,
+    word: string,
+    confirmLabelKey: string,
+    serverMessage?: string
+  ): Promise<boolean> {
+    return await showConfirm({
+      title: $t('stoplist.confirm_title'),
+      objectName: name,
+      consequence: serverMessage || $t('stoplist.confirm_consequence', { word }),
+      variant: 'warning',
+      confirmLabel: $t(confirmLabelKey),
+      cancelLabel: $t('app.cancel')
+    });
+  }
+
+  const STOPLIST_CANCELLED = Symbol('stoplist-cancelled');
+
+  /**
+   * Выполняет операцию с файлом в каталоге: имя из стоп-списка в корне Xray
+   * подтверждается до запроса; 409 xkeen_stoplist_name, которого не предсказало
+   * зеркало, приводит к тому же диалогу и повтору с флагом.
+   */
+  async function withStoplistConfirm<T>(
+    name: string,
+    targetPath: string,
+    confirmLabelKey: string,
+    run: (opts: ConfigOpOptions) => Promise<T>
+  ): Promise<T | typeof STOPLIST_CANCELLED> {
+    const word = isXrayRootPath(targetPath, xrayDir) ? matchXKeenStoplist(name) : null;
+    if (word) {
+      if (!(await confirmStoplistName(name, word, confirmLabelKey))) return STOPLIST_CANCELLED;
+      return await run({ confirmStoplist: true });
+    }
+    try {
+      return await run({});
+    } catch (e) {
+      if (e instanceof ConfigOpError && e.code === 'xkeen_stoplist_name') {
+        if (!(await confirmStoplistName(name, '', confirmLabelKey, e.message))) {
+          return STOPLIST_CANCELLED;
+        }
+        return await run({ confirmStoplist: true });
+      }
+      throw e;
+    }
+  }
+
   async function createFile(fileName?: string) {
     const name = fileName || newFileName;
     if (!name) return;
 
     const path = selectedFile
       ? selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + name
-      : '/opt/etc/xray/configs/' + name;
+      : xrayDir + '/' + name;
 
     try {
-      await createConfigFile(path);
+      const outcome = await withStoplistConfirm(name, path, 'stoplist.confirm_create', (opts) =>
+        createConfigFile(path, opts)
+      );
+      if (outcome === STOPLIST_CANCELLED) return;
       showToast('success', $t('editor.create_file'));
       showCreateModal = false;
       newFileName = '';
