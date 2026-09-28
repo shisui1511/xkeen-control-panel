@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/i18n"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -1059,6 +1060,13 @@ func (rl *RateLimiter) GetLockoutRemaining(ip string) time.Duration {
 	return remaining
 }
 
+// t переводит машиночитаемый ключ в текст для текущего запроса (134-REVIEW
+// WR-01) — тот же паттерн, что handlers.API.t; internal/i18n не импортирует
+// internal/auth, поэтому цикла зависимостей нет.
+func (a *AuthService) t(r *http.Request, key string) string {
+	return i18n.T(i18n.LangFromContext(r.Context()), key)
+}
+
 func jsonError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -1289,7 +1297,7 @@ func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":       "too many attempts, account locked",
+			"error":       a.t(r, "auth.rate_limited"),
 			"retry_after": seconds,
 		})
 		return
@@ -1307,14 +1315,19 @@ func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 
 	// Код первичной настройки (D-24): без него или с неверным — 400
 	// setup_code_invalid, попытка уже учтена CheckLimit выше (T-134-26).
+	// error переведён тем же способом, что и ChangePassword (handlers.API.t,
+	// 134-REVIEW WR-01) — раньше отдавался нелокализованный текст на
+	// английском, полагаясь на то, что фронтенд всегда подменяет его через
+	// policyErrorKey(code).
 	if err := ValidateSetupCode(a.currentSetupCode(), req.SetupCode); err != nil {
 		auditf("setup code rejected", ip, "")
-		jsonErrorCode(w, http.StatusBadRequest, "setup_code_invalid", "Invalid setup code")
+		jsonErrorCode(w, http.StatusBadRequest, "setup_code_invalid", a.t(r, "auth.setup_code_invalid"))
 		return
 	}
 
 	if err := ValidateNewPassword(req.Password, ""); err != nil {
-		jsonErrorCode(w, http.StatusBadRequest, PolicyErrorCode(err), err.Error())
+		code := PolicyErrorCode(err)
+		jsonErrorCode(w, http.StatusBadRequest, code, a.t(r, "auth."+code))
 		return
 	}
 
