@@ -245,6 +245,12 @@ func (s *SubscriptionService) migrateLegacyFragmentsLocked() bool {
 			continue
 		}
 		current := s.getFragmentPath(sub)
+		if err := guardXrayRootName(current); err != nil {
+			// Переименование создало бы файл со стоп-списочным именем и отменило
+			// бы запуск Xray: legacy-фрагмент остаётся на месте.
+			log.Printf("[Subscriptions] Fragment %s not renamed: %v", filepath.Base(legacy), err)
+			continue
+		}
 		if _, err := os.Stat(current); err == nil {
 			if err := os.Remove(legacy); err == nil {
 				changed = true
@@ -1625,6 +1631,9 @@ func (s *SubscriptionService) refreshXrayFragmentLocked(sub *Subscription) error
 		return fmt.Errorf("marshal fragment: %w", err)
 	}
 
+	if err := guardXrayRootName(fragmentPath); err != nil {
+		return err
+	}
 	if err := utils.AtomicWriteFile(fragmentPath, newData, 0600); err != nil {
 		return err
 	}

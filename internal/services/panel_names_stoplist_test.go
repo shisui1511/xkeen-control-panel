@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"regexp"
 	"testing"
@@ -91,4 +92,122 @@ func TestGuardXrayRootName_Names(t *testing.T) {
 	if err := guardXrayRootName(filepath.Join(dir, "04_outbounds.sub_1.tail.json")); err != nil {
 		t.Errorf("safe name must pass, got %v", err)
 	}
+}
+
+// injectSubscription кладёт подписку в срез в обход Add — так проверяется
+// защита записи для ID, созданных до появления правила (Add такой ID заменил бы).
+func injectSubscription(svc *SubscriptionService, sub Subscription) *Subscription {
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	svc.subscriptions = append(svc.subscriptions, sub)
+	return &svc.subscriptions[len(svc.subscriptions)-1]
+}
+
+func assertNoFile(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("file %s must not be created (stat err: %v)", filepath.Base(path), err)
+	}
+}
+
+func TestGuardXrayRootName_BlocksWrite(t *testing.T) {
+	newSvc := func(t *testing.T) (*SubscriptionService, string) {
+		t.Helper()
+		tmp := t.TempDir()
+		xrayDir := filepath.Join(tmp, "xray")
+		if err := os.MkdirAll(xrayDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		return NewSubscriptionService(tmp, xrayDir, tmp), xrayDir
+	}
+	outbounds := []Outbound{{Tag: "n1", Protocol: "freedom"}}
+
+	t.Run("writeFragment", func(t *testing.T) {
+		svc, _ := newSvc(t)
+		sub := injectSubscription(svc, Subscription{ID: "bak_x", Name: "S", EnableXray: true, Enabled: true})
+		path := svc.getFragmentPath(sub)
+		if _, err := svc.writeFragment(path, outbounds, sub); !errors.Is(err, ErrXKeenStoplistName) {
+			t.Fatalf("want ErrXKeenStoplistName, got %v", err)
+		}
+		assertNoFile(t, path)
+	})
+
+	t.Run("writeRoutingFragment", func(t *testing.T) {
+		svc, _ := newSvc(t)
+		sub := injectSubscription(svc, Subscription{ID: "bak_x", Name: "S", EnableXray: true, Enabled: true})
+		path := svc.getRoutingFragmentPath(sub)
+		if err := svc.writeRoutingFragment(path, sub, []string{"n1"}); !errors.Is(err, ErrXKeenStoplistName) {
+			t.Fatalf("want ErrXKeenStoplistName, got %v", err)
+		}
+		assertNoFile(t, path)
+	})
+
+	t.Run("refreshXrayFragmentLocked", func(t *testing.T) {
+		svc, _ := newSvc(t)
+		sub := injectSubscription(svc, Subscription{ID: "bak_x", Name: "S", EnableXray: true, Enabled: true})
+		path := svc.getFragmentPath(sub)
+		orig := []byte(`{"outbounds":[{"tag":"n1","protocol":"freedom"}]}`)
+		if err := os.WriteFile(path, orig, 0600); err != nil {
+			t.Fatal(err)
+		}
+		svc.mu.Lock()
+		err := svc.refreshXrayFragmentLocked(sub)
+		svc.mu.Unlock()
+		if !errors.Is(err, ErrXKeenStoplistName) {
+			t.Fatalf("want ErrXKeenStoplistName, got %v", err)
+		}
+		if got, _ := os.ReadFile(path); string(got) != string(orig) {
+			t.Errorf("fragment must stay untouched, got %q", got)
+		}
+	})
+
+	t.Run("selectionFileWrite.apply", func(t *testing.T) {
+		_, dir := newSvc(t)
+		path := filepath.Join(dir, "04_outbounds.zz_xcp_bak.json")
+		w := selectionFileWrite{path: path, newData: []byte(`{}`)}
+		if err := w.apply(); !errors.Is(err, ErrXKeenStoplistName) {
+			t.Fatalf("want ErrXKeenStoplistName, got %v", err)
+		}
+		assertNoFile(t, path)
+
+		// Удаление файла проверке не подлежит.
+		if err := os.WriteFile(path, []byte(`{}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := (selectionFileWrite{path: path}).apply(); err != nil {
+			t.Fatalf("removal must not be gated: %v", err)
+		}
+		assertNoFile(t, path)
+	})
+
+	t.Run("migrateLegacyFragments", func(t *testing.T) {
+		svc, _ := newSvc(t)
+		sub := injectSubscription(svc, Subscription{ID: "bak_x", Name: "S", EnableXray: true, Enabled: true})
+		legacy := svc.legacyFragmentPath(sub)
+		if err := os.WriteFile(legacy, []byte(`{"outbounds":[]}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		svc.mu.Lock()
+		changed := svc.migrateLegacyFragmentsLocked()
+		svc.mu.Unlock()
+		if changed {
+			t.Error("legacy fragment with a stop-list target name must not be renamed")
+		}
+		if _, err := os.Stat(legacy); err != nil {
+			t.Errorf("legacy fragment must stay in place: %v", err)
+		}
+		assertNoFile(t, svc.getFragmentPath(sub))
+	})
+
+	t.Run("safe_id_is_written", func(t *testing.T) {
+		svc, _ := newSvc(t)
+		sub := injectSubscription(svc, Subscription{ID: "sub_1", Name: "S", EnableXray: true, Enabled: true})
+		path := svc.getFragmentPath(sub)
+		if _, err := svc.writeFragment(path, outbounds, sub); err != nil {
+			t.Fatalf("safe name must be written: %v", err)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("fragment must exist: %v", err)
+		}
+	})
 }

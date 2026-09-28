@@ -500,6 +500,9 @@ func (s *SubscriptionService) writeRoutingFragment(path string, sub *Subscriptio
 	if len(tags) == 0 {
 		return nil
 	}
+	if err := guardXrayRootName(path); err != nil {
+		return err
+	}
 
 	type Rule struct {
 		Type        string   `json:"type"`
