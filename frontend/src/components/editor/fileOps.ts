@@ -109,6 +109,12 @@ export async function saveConfigFile(path: string, content: string): Promise<any
   return res.json().catch(() => null);
 }
 
+// Заготовка для RED-фазы: реализация — в следующем коммите.
+export function nextDuplicateName(name: string, existingNames: string[]): string {
+  void existingNames;
+  return name;
+}
+
 export async function duplicateConfigFile(file: ConfigFileInfo): Promise<string> {
   const dotIdx = file.name.lastIndexOf('.');
   const base = dotIdx !== -1 ? file.name.substring(0, dotIdx) : file.name;
