@@ -27,8 +27,10 @@ import (
 )
 
 var (
-	Version    = "dev"
-	configPath = flag.String("config", "/opt/etc/xcp/config.json", "Path to config file")
+	Version           = "dev"
+	configPath        = flag.String("config", "/opt/etc/xcp/config.json", "Path to config file")
+	resetPasswordFlag = flag.Bool("reset-password", false, "Reset the admin password from the router (SSH), no restart required")
+	passwordStdinFlag = flag.Bool("password-stdin", false, "Read the new password from the first line of stdin (for scripts), requires --reset-password")
 )
 
 func main() {
@@ -41,6 +43,19 @@ func main() {
 	}
 
 	flag.Parse()
+
+	// --reset-password/--setup-code (134-10) — CLI-режимы, работающие с
+	// config.json напрямую, без запуска демона панели вообще. Обрабатываются
+	// сразу после flag.Parse(), до любой инициализации демона (лог-файл,
+	// sysctl, фоновые сервисы) — они не зависят от неё и не должны её
+	// запускать.
+	if *passwordStdinFlag && !*resetPasswordFlag {
+		fmt.Fprintln(os.Stderr, "--password-stdin требует --reset-password")
+		os.Exit(2)
+	}
+	if *resetPasswordFlag {
+		os.Exit(runResetPassword(*configPath, *passwordStdinFlag, defaultCLIDeps()))
+	}
 
 	// Keenetic/Netcraze firmware keeps the timezone as a POSIX string Go cannot read on its own;
 	// without this every schedule and timestamp runs in UTC.
@@ -205,6 +220,22 @@ func main() {
 	// Auth endpoints (public)
 	authSvc := srv.GetAuthService()
 	defer authSvc.Stop()
+
+	// SIGHUP триггерит горячую перезагрузку пароля (D-22): xcp --reset-password
+	// (134-10) меняет password_hash в config.json, пока панель уже запущена —
+	// без этого обработчика SIGHUP завершил бы процесс (поведение Go по
+	// умолчанию), а не применил новый пароль без рестарта.
+	hupCh := make(chan os.Signal, 1)
+	signal.Notify(hupCh, syscall.SIGHUP)
+	defer signal.Stop(hupCh)
+	go func() {
+		for range hupCh {
+			if err := reloadAuthFromConfig(*configPath, cfg, authSvc); err != nil {
+				log.Printf("[auth] password reload failed: %v", err)
+			}
+		}
+	}()
+
 	srv.Handle("/api/auth/login", authSvc.HandleLogin)
 	srv.HandleProtected("/api/auth/logout", authSvc.HandleLogout)
 	srv.Handle("/api/auth/me", authSvc.HandleMe)
