@@ -228,7 +228,7 @@
   </div>
 </div>
 
-<!-- Context Menu (EDIT-03) -->
+<!-- Context Menu (EDIT-03). Обработчик вызывается до closeContextMenu(): после закрытия f обнуляется. -->
 {#if ctxMenu.visible && ctxMenu.file}
   {@const f = ctxMenu.file}
   <div
@@ -244,8 +244,8 @@
       class="ctx-item"
       role="menuitem"
       onclick={() => {
-        closeContextMenu();
         onRenameFile(f);
+        closeContextMenu();
       }}
     >
       <svg
@@ -265,8 +265,8 @@
       class="ctx-item"
       role="menuitem"
       onclick={() => {
-        closeContextMenu();
         onDuplicateFile(f);
+        closeContextMenu();
       }}
     >
       <svg
@@ -286,8 +286,8 @@
       class="ctx-item"
       role="menuitem"
       onclick={() => {
-        closeContextMenu();
         onDownloadFile(f);
+        closeContextMenu();
       }}
     >
       <svg
@@ -307,8 +307,8 @@
       class="ctx-item"
       role="menuitem"
       onclick={() => {
-        closeContextMenu();
         onViewBackups(f);
+        closeContextMenu();
       }}
     >
       <svg
@@ -327,8 +327,8 @@
       class="ctx-item ctx-danger"
       role="menuitem"
       onclick={() => {
-        closeContextMenu();
         onDeleteFile(f);
+        closeContextMenu();
       }}
     >
       <svg
