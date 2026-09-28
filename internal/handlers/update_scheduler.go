@@ -147,27 +147,35 @@ func (s *UpdateScheduler) tick() {
 	now := s.now()
 	current := s.version()
 
+	// Snapshot the mutable cfg fields under cfg.RLock() BEFORE taking s.mu:
+	// s.mu only protects s.state/s.journal, not *config.Config, which is
+	// shared with UpdateChannelSet/UpdateSettingsHandler writing under
+	// cfg.Lock() from arbitrary HTTP-handler goroutines (134-REVIEW CR-01).
+	cfg.RLock()
+	channel, autoCheck, autoInstall, installWindow := cfg.UpdateChannel, cfg.UpdateAutoCheck, cfg.UpdateAutoInstall, cfg.UpdateInstallWindow
+	cfg.RUnlock()
+
 	s.mu.Lock()
 	// Автоустановка упала до перезапуска (скачивание, контрольная сумма)
 	if s.journal.Pending != nil && getUpdateState().Status == "failed" {
 		s.finishPending(false, now)
 	}
 	stale := s.state.CheckedAt == 0 ||
-		s.state.Channel != cfg.UpdateChannel ||
+		s.state.Channel != channel ||
 		now.Sub(time.Unix(s.state.CheckedAt, 0)) >= updateCheckInterval
 	s.mu.Unlock()
 
-	if (cfg.UpdateAutoCheck || cfg.UpdateAutoInstall) && stale {
-		info, err := s.check(cfg.UpdateChannel, current)
-		s.Record(cfg.UpdateChannel, current, info, err)
+	if (autoCheck || autoInstall) && stale {
+		info, err := s.check(channel, current)
+		s.Record(channel, current, info, err)
 	}
 
-	if !cfg.UpdateAutoInstall || !inInstallWindow(now, cfg.UpdateInstallWindow) {
+	if !autoInstall || !inInstallWindow(now, installWindow) {
 		return
 	}
 	s.mu.Lock()
 	latest := s.state.LatestVersion
-	ready := s.state.HasUpdate && s.state.Channel == cfg.UpdateChannel &&
+	ready := s.state.HasUpdate && s.state.Channel == channel &&
 		s.journal.Pending == nil && latest != s.journal.FailedVersion
 	s.mu.Unlock()
 	if !ready {
@@ -179,7 +187,7 @@ func (s *UpdateScheduler) tick() {
 	s.saveJournal()
 	s.mu.Unlock()
 
-	if !s.install(cfg.UpdateChannel) {
+	if !s.install(channel) {
 		// Идёт ручное обновление или откат — попробуем в следующий тик
 		s.mu.Lock()
 		s.journal.Pending = nil
@@ -187,7 +195,7 @@ func (s *UpdateScheduler) tick() {
 		s.mu.Unlock()
 		return
 	}
-	log.Printf("Update: auto-install %s → %s started (window %s)", current, latest, cfg.UpdateInstallWindow)
+	log.Printf("Update: auto-install %s → %s started (window %s)", current, latest, installWindow)
 }
 
 // Record сохраняет результат проверки — фоновой или ручной (/api/update/check).
@@ -209,23 +217,30 @@ func (s *UpdateScheduler) Record(channel, current string, info *UpdateInfo, err 
 
 // State — копия состояния с актуальными настройками из конфига.
 func (s *UpdateScheduler) State() UpdateCheckState {
+	// Snapshot cfg fields under cfg.RLock() before taking s.mu, not nested
+	// inside it: s.mu only guards s.state/s.journal, cfg has its own lock
+	// (134-REVIEW CR-01, same class as tick() above).
+	cfg := s.api.cfg
+	cfg.RLock()
+	channel, autoCheck, autoInstall, installWindow := cfg.UpdateChannel, cfg.UpdateAutoCheck, cfg.UpdateAutoInstall, cfg.UpdateInstallWindow
+	cfg.RUnlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.state
-	cfg := s.api.cfg
 	if st.Channel == "" {
-		st.Channel = cfg.UpdateChannel
+		st.Channel = channel
 	}
 	if st.CurrentVersion == "" {
 		st.CurrentVersion = s.version()
 	}
 	// Результат другого канала не показываем как доступное обновление
-	if st.Channel != cfg.UpdateChannel {
+	if st.Channel != channel {
 		st.HasUpdate = false
 	}
-	st.AutoCheck = cfg.UpdateAutoCheck
-	st.AutoInstall = cfg.UpdateAutoInstall
-	st.InstallWindow = cfg.UpdateInstallWindow
+	st.AutoCheck = autoCheck
+	st.AutoInstall = autoInstall
+	st.InstallWindow = installWindow
 	st.FailedVersion = s.journal.FailedVersion
 	if s.journal.Last != nil {
 		last := *s.journal.Last

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -313,4 +314,66 @@ func TestConfigDefaults_AutoUpdate(t *testing.T) {
 	if !loaded.UpdateAutoCheck || loaded.UpdateAutoInstall || loaded.UpdateInstallWindow != "03:00-05:00" {
 		t.Fatalf("legacy config: %+v", loaded)
 	}
+}
+
+// TestUpdateScheduler_RaceWithConcurrentConfigWrites locks in the fix for
+// 134-REVIEW (deep re-review) CR-01: tick() (run from the background loop()
+// goroutine every updateTickInterval) and State() (run synchronously from the
+// GET /api/update/state HTTP handler) read cfg.UpdateChannel/UpdateAutoCheck/
+// UpdateAutoInstall/UpdateInstallWindow while UpdateChannelSet- and
+// UpdateSettingsHandler-style writers (simulated here by directly mutating
+// the same *config.Config under cfg.Lock(), the pattern used by
+// internal/handlers/update.go's UpdateChannelSet and this package's
+// UpdateSettingsHandler) mutate those same fields from other goroutines.
+// Before the fix, tick()/State() read these fields without cfg.RLock(); `go
+// test -race` flagged a data race here. This test exists to keep the race
+// caught if the RLock snapshot is ever removed or bypassed.
+func TestUpdateScheduler_RaceWithConcurrentConfigWrites(t *testing.T) {
+	f := newSchedFixture(t)
+	api := f.s.api
+	api.SetUpdateScheduler(f.s)
+
+	const iterations = 200
+	var wg sync.WaitGroup
+
+	// Goroutine #1: the scheduler's own read paths — tick() as invoked from
+	// loop(), and State() as invoked from UpdateStateHandler.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			f.s.tick()
+			_ = f.s.State()
+		}
+	}()
+
+	// Goroutine #2: UpdateChannelSet-style concurrent write.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			channel := "stable"
+			if i%2 == 0 {
+				channel = "beta"
+			}
+			f.cfg.Lock()
+			f.cfg.UpdateChannel = channel
+			f.cfg.Unlock()
+		}
+	}()
+
+	// Goroutine #3: UpdateSettingsHandler-style concurrent write.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			f.cfg.Lock()
+			f.cfg.UpdateAutoCheck = i%2 == 0
+			f.cfg.UpdateAutoInstall = i%3 == 0
+			f.cfg.UpdateInstallWindow = "03:00-05:00"
+			f.cfg.Unlock()
+		}
+	}()
+
+	wg.Wait()
 }
