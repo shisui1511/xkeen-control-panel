@@ -24,12 +24,22 @@ func (a *API) SetMihomoProfileService(svc *services.MihomoProfileService) {
 	svc.CoreActive = func() bool {
 		return a.kernelApplier != nil && a.kernelApplier.WillRestart("mihomo")
 	}
+	// Сам рестарт идёт через KernelApplier.Apply: под тем же мьютексом, что и
+	// остальные применения, и с решением по свежему статусу после захвата.
+	// CoreActive выше — лишь предварительная проверка без замка.
 	svc.Restart = func() error {
-		if a.xkeenSvc == nil {
-			return errors.New("xkeen service unavailable")
+		if a.kernelApplier == nil {
+			return errors.New("kernel applier is not configured")
 		}
-		_, err := a.xkeenSvc.Restart()
-		return err
+		res := a.kernelApplier.Apply("mihomo")
+		switch res.Outcome {
+		case services.ApplyRestarted:
+			return nil
+		case services.ApplyRestartFailed:
+			return errors.New(res.Error)
+		default:
+			return services.ErrRestartSkipped
+		}
 	}
 	svc.Healthy = a.waitMihomoRunning
 	a.mihomoProfileSvc = svc

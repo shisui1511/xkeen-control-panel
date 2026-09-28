@@ -2,13 +2,16 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -162,5 +165,180 @@ func TestMihomoProfileActivate_CoreActiveByApplier(t *testing.T) {
 				t.Errorf("active = %q, want %q", env.Data.Active, tc.wantActive)
 			}
 		})
+	}
+}
+
+// newActivationFixture — каталог Mihomo с профилями default (активный) и work.
+func newActivationFixture(t *testing.T) (dir, dataDir string) {
+	t.Helper()
+	root := t.TempDir()
+	dir = filepath.Join(root, "mihomo")
+	if err := os.MkdirAll(filepath.Join(dir, "profiles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"default", "work"} {
+		if err := os.WriteFile(filepath.Join(dir, "profiles", n+".yaml"), []byte("mode: rule\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(dir, "profiles", "default.yaml"), filepath.Join(dir, "config.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	return dir, filepath.Join(root, "xcp")
+}
+
+// TestMihomoProfileActivate_RestartSerialisedByApplier (WR-02): рестарт при
+// активации профиля идёт через KernelApplier, то есть под его мьютексом и с
+// решением по свежему статусу. Пока другое применение держит рестарт,
+// активация не запускает второй xkeen -restart, а после освобождения видит
+// остановленное ядро и не перезапускает его (профиль остаётся активным).
+func TestMihomoProfileActivate_RestartSerialisedByApplier(t *testing.T) {
+	dir, dataDir := newActivationFixture(t)
+
+	var (
+		statusMu     sync.Mutex
+		mihomoStatus = "running"
+		running      int32
+		maxRunning   int32
+		restarts     int32
+	)
+	firstEntered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+
+	api := &API{cfg: &config.Config{MihomoConfigDir: dir}}
+	api.kernelApplier = services.NewKernelApplierFunc(
+		func(name string) string {
+			statusMu.Lock()
+			defer statusMu.Unlock()
+			if name == "mihomo" {
+				return mihomoStatus
+			}
+			return "not_installed"
+		},
+		func() string { return "mihomo" },
+		func() (string, error) {
+			cur := atomic.AddInt32(&running, 1)
+			for {
+				m := atomic.LoadInt32(&maxRunning)
+				if cur <= m || atomic.CompareAndSwapInt32(&maxRunning, m, cur) {
+					break
+				}
+			}
+			atomic.AddInt32(&restarts, 1)
+			once.Do(func() {
+				close(firstEntered)
+				<-release
+			})
+			atomic.AddInt32(&running, -1)
+			return "", nil
+		},
+	)
+	svc := services.NewMihomoProfileService(dir, dataDir)
+	api.SetMihomoProfileService(svc)
+	svc.Validate = func(string) error { return nil }
+
+	// Лишь после предварительной проверки CoreActive активация упирается в
+	// мьютекс применения.
+	coreActive := svc.CoreActive
+	decided := make(chan struct{})
+	svc.CoreActive = func() bool {
+		ok := coreActive()
+		close(decided)
+		return ok
+	}
+
+	// Чужое применение (например, обновление подписки) уже держит рестарт.
+	otherDone := make(chan struct{})
+	go func() {
+		defer close(otherDone)
+		api.kernelApplier.Apply("mihomo")
+	}()
+	<-firstEntered
+
+	var rec *httptest.ResponseRecorder
+	activated := make(chan struct{})
+	go func() {
+		defer close(activated)
+		rec = httptest.NewRecorder()
+		api.MihomoProfileAction(rec, httptest.NewRequest(http.MethodPost, "/api/mihomo/profiles/activate", strings.NewReader(`{"name":"work"}`)))
+	}()
+	<-decided
+	time.Sleep(50 * time.Millisecond)
+
+	// Ядро остановили, пока шёл чужой рестарт.
+	statusMu.Lock()
+	mihomoStatus = "stopped"
+	statusMu.Unlock()
+	close(release)
+	<-otherDone
+	<-activated
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("activate: %d %s", rec.Code, rec.Body.String())
+	}
+	var env struct {
+		Data struct {
+			Active     string `json:"active"`
+			Restarted  bool   `json:"restarted"`
+			RolledBack bool   `json:"rolled_back"`
+			Outcome    string `json:"outcome"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v: %s", err, rec.Body.String())
+	}
+	if got := atomic.LoadInt32(&maxRunning); got != 1 {
+		t.Errorf("одновременных рестартов = %d, want 1", got)
+	}
+	if got := atomic.LoadInt32(&restarts); got != 1 {
+		t.Errorf("рестартов = %d, want 1 (только чужой: активация видит остановленное ядро)", got)
+	}
+	if env.Data.Restarted || env.Data.RolledBack {
+		t.Errorf("restarted=%t rolled_back=%t, want false/false", env.Data.Restarted, env.Data.RolledBack)
+	}
+	if env.Data.Active != "work" {
+		t.Errorf("active = %q, want work", env.Data.Active)
+	}
+	if env.Data.Outcome != "saved_kernel_stopped" {
+		t.Errorf("outcome = %q, want saved_kernel_stopped", env.Data.Outcome)
+	}
+}
+
+// TestMihomoProfileActivate_RestartFailureRollsBack: реальный хук Restart
+// переводит restart_failed приложения в ошибку, и Activate откатывает профиль.
+func TestMihomoProfileActivate_RestartFailureRollsBack(t *testing.T) {
+	dir, dataDir := newActivationFixture(t)
+	var restarts int32
+	api := &API{cfg: &config.Config{MihomoConfigDir: dir}}
+	api.kernelApplier = services.NewKernelApplierFunc(
+		func(name string) string {
+			if name == "mihomo" {
+				return "running"
+			}
+			return "not_installed"
+		},
+		func() string { return "mihomo" },
+		func() (string, error) {
+			// Первый рестарт (новый профиль) падает, второй (откат) проходит.
+			if atomic.AddInt32(&restarts, 1) == 1 {
+				return "boom", errors.New("exit status 1")
+			}
+			return "", nil
+		},
+	)
+	svc := services.NewMihomoProfileService(dir, dataDir)
+	api.SetMihomoProfileService(svc)
+	svc.Validate = func(string) error { return nil }
+
+	res, err := svc.Activate("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Restarted || !res.RolledBack || res.Active != "default" || res.Error != "boom" {
+		t.Errorf("got %+v, want restarted+rolled_back to default with error boom", res)
+	}
+	if got := atomic.LoadInt32(&restarts); got != 2 {
+		t.Errorf("restarts = %d, want 2 (новый профиль и откат)", got)
 	}
 }

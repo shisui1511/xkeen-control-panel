@@ -25,6 +25,11 @@ var (
 	ErrProfileActive      = errors.New("profile is active")
 	ErrProfileInvalidName = errors.New("invalid profile name")
 	ErrProfilesUnmanaged  = errors.New("config.yaml is not a profile symlink")
+
+	// ErrRestartSkipped — Restart решил не перезапускать ядро: под замком
+	// применения оно оказалось остановленным или неактивным. Активация
+	// профиля при этом остаётся в силе, откат не делается.
+	ErrRestartSkipped = errors.New("restart skipped: core is not running or not active")
 )
 
 var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
@@ -66,7 +71,8 @@ type MihomoProfileService struct {
 	// CoreActive reports whether Mihomo is the kernel XKeen currently runs;
 	// only then activation restarts it.
 	CoreActive func() bool
-	// Restart restarts the running core.
+	// Restart restarts the running core. It may return ErrRestartSkipped when
+	// the core turned out not to need a restart at that moment.
 	Restart func() error
 	// Healthy reports whether the core came up after a restart.
 	Healthy func() bool
@@ -314,6 +320,11 @@ func (s *MihomoProfileService) Activate(name string) (*ActivationResult, error) 
 	}
 
 	restartErr := s.Restart()
+	if errors.Is(restartErr, ErrRestartSkipped) {
+		// Решение CoreActive устарело: ядро остановили между проверкой и
+		// рестартом. Профиль записан, перезапускать нечего.
+		return res, nil
+	}
 	res.Restarted = true
 	if restartErr == nil && (s.Healthy == nil || s.Healthy()) {
 		return res, nil
