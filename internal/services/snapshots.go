@@ -32,11 +32,32 @@ type SnapshotMeta struct {
 type SnapshotService struct {
 	dataDir    string
 	configDirs []string // directories to include in snapshot
-	mu         sync.Mutex
+	// xrayRoot — каталог конфигураций Xray, где XKeen ищет файлы со
+	// стоп-списочными именами. Пусто — проверка при восстановлении отключена.
+	xrayRoot string
+	mu       sync.Mutex
 }
 
 func NewSnapshotService(dataDir string, configDirs []string) *SnapshotService {
 	return &SnapshotService{dataDir: dataDir, configDirs: configDirs}
+}
+
+// SetXrayRoot задаёт каталог конфигураций Xray: Restore не пересоздаёт в нём
+// файлы, чьё имя входит в стоп-список XKeen (см. guardXrayRootName).
+func (s *SnapshotService) SetXrayRoot(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.xrayRoot = dir
+}
+
+// canonicalDir приводит каталог к каноническому виду (Clean + EvalSymlinks,
+// при ошибке — только Clean), как xrayRootDir в обработчиках.
+func canonicalDir(dir string) string {
+	dir = filepath.Clean(dir)
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		return resolved
+	}
+	return dir
 }
 
 func (s *SnapshotService) snapshotsDir() string {
@@ -234,27 +255,29 @@ func (s *SnapshotService) ArchivePath(id string) (string, error) {
 
 // Restore extracts a snapshot archive back to the original config dirs.
 // Only files whose path prefix matches a known config dir base name are restored.
-func (s *SnapshotService) Restore(id string) error {
+// Файлы со стоп-списочным именем XKeen в корне каталога Xray не восстанавливаются
+// (иначе XKeen откажется запускать Xray): их имена возвращаются списком skipped.
+func (s *SnapshotService) Restore(id string) (skipped []string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if !snapshotIDRx.MatchString(id) {
-		return fmt.Errorf("invalid snapshot id")
+		return nil, fmt.Errorf("invalid snapshot id")
 	}
 	archPath, err := s.ArchivePath(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	f, err := os.Open(archPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer f.Close()
 
 	gr, err := gzip.NewReader(f)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer gr.Close()
 
@@ -263,11 +286,11 @@ func (s *SnapshotService) Restore(id string) error {
 	// 1. Create temporary restore directory
 	tmpParentDir := filepath.Join(s.dataDir, "tmp")
 	if err := os.MkdirAll(tmpParentDir, 0750); err != nil {
-		return fmt.Errorf("create temp parent dir: %w", err)
+		return nil, fmt.Errorf("create temp parent dir: %w", err)
 	}
 	tmpRestoreDir, err := os.MkdirTemp(tmpParentDir, "restore-*")
 	if err != nil {
-		return fmt.Errorf("create temp restore dir: %w", err)
+		return nil, fmt.Errorf("create temp restore dir: %w", err)
 	}
 	defer os.RemoveAll(tmpRestoreDir) // 6. Always clean up
 
@@ -284,7 +307,7 @@ func (s *SnapshotService) Restore(id string) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("read tar: %w", err)
+			return nil, fmt.Errorf("read tar: %w", err)
 		}
 
 		// Only allow regular files and directories
@@ -293,49 +316,49 @@ func (s *SnapshotService) Restore(id string) error {
 		}
 
 		if strings.Contains(hdr.Name, "..") {
-			return fmt.Errorf("invalid path in archive (Zip Slip prevention)")
+			return nil, fmt.Errorf("invalid path in archive (Zip Slip prevention)")
 		}
 
 		destPath := filepath.Join(tmpRestoreDir, filepath.FromSlash(hdr.Name))
 		cleanDest := filepath.Clean(destPath)
 		cleanTmp := filepath.Clean(tmpRestoreDir)
 		if !strings.HasPrefix(cleanDest, cleanTmp+string(filepath.Separator)) && cleanDest != cleanTmp {
-			return fmt.Errorf("invalid path in archive (Zip Slip prevention)")
+			return nil, fmt.Errorf("invalid path in archive (Zip Slip prevention)")
 		}
 
 		if hdr.Typeflag == tar.TypeDir {
 			if err := os.MkdirAll(destPath, 0750); err != nil {
-				return fmt.Errorf("create temp dir %s: %w", destPath, err)
+				return nil, fmt.Errorf("create temp dir %s: %w", destPath, err)
 			}
 			continue
 		}
 
 		if err := os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
-			return fmt.Errorf("create temp subdir: %w", err)
+			return nil, fmt.Errorf("create temp subdir: %w", err)
 		}
 
 		if hdr.Size > 10*1024*1024 {
-			return fmt.Errorf("file %s exceeds maximum allowed size of 10 MB", hdr.Name)
+			return nil, fmt.Errorf("file %s exceeds maximum allowed size of 10 MB", hdr.Name)
 		}
 
 		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, hdr.FileInfo().Mode().Perm())
 		if err != nil {
-			return fmt.Errorf("create temp file: %w", err)
+			return nil, fmt.Errorf("create temp file: %w", err)
 		}
 		// Write with size limit: 10 MB per file
 		if _, err := io.Copy(out, io.LimitReader(tr, 10*1024*1024)); err != nil {
 			_ = out.Close()
-			return fmt.Errorf("write temp file: %w", err)
+			return nil, fmt.Errorf("write temp file: %w", err)
 		}
 		if err := out.Close(); err != nil {
-			return fmt.Errorf("close temp file: %w", err)
+			return nil, fmt.Errorf("close temp file: %w", err)
 		}
 	}
 
 	// 4. Validate structure: check that we have at least one valid folder
 	entries, err := os.ReadDir(tmpRestoreDir)
 	if err != nil {
-		return fmt.Errorf("read temp restore dir: %w", err)
+		return nil, fmt.Errorf("read temp restore dir: %w", err)
 	}
 	hasValidFolder := false
 	for _, entry := range entries {
@@ -348,10 +371,14 @@ func (s *SnapshotService) Restore(id string) error {
 		}
 	}
 	if !hasValidFolder {
-		return fmt.Errorf("invalid backup structure: no valid configuration directories found")
+		return nil, fmt.Errorf("invalid backup structure: no valid configuration directories found")
 	}
 
 	// 5. Copy files from temp directory to target directories
+	xrayRoot := ""
+	if s.xrayRoot != "" {
+		xrayRoot = canonicalDir(s.xrayRoot)
+	}
 	for name, targetDir := range dirMap {
 		srcSubDir := filepath.Join(tmpRestoreDir, name)
 		info, err := os.Stat(srcSubDir)
@@ -359,7 +386,7 @@ func (s *SnapshotService) Restore(id string) error {
 			if os.IsNotExist(err) {
 				continue // this directory wasn't in the snapshot, skip
 			}
-			return err
+			return nil, err
 		}
 		if !info.IsDir() {
 			continue
@@ -393,6 +420,15 @@ func (s *SnapshotService) Restore(id string) error {
 				return os.MkdirAll(targetPath, 0750)
 			}
 
+			// Стоп-списочное имя в корне каталога Xray: файл не создаётся, иначе
+			// XKeen откажется запускать Xray. Уже лежащие на диске файлы не трогаем.
+			if xrayRoot != "" && canonicalDir(filepath.Dir(targetPath)) == xrayRoot {
+				if guardXrayRootName(targetPath) != nil {
+					skipped = append(skipped, filepath.Base(targetPath))
+					return nil
+				}
+			}
+
 			// Read file info to preserve permissions if possible
 			fi, err := d.Info()
 			if err != nil {
@@ -417,11 +453,12 @@ func (s *SnapshotService) Restore(id string) error {
 			return err
 		})
 		if err != nil {
-			return fmt.Errorf("restore directory %s: %w", name, err)
+			return nil, fmt.Errorf("restore directory %s: %w", name, err)
 		}
 	}
 
-	return nil
+	sort.Strings(skipped)
+	return skipped, nil
 }
 
 // SaveUploaded receives a reader for a tar.gz upload, limits it to 15 MB,

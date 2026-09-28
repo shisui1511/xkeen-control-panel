@@ -74,7 +74,8 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.snapshotSvc.Restore(id); err != nil {
+	skipped, err := a.snapshotSvc.Restore(id)
+	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -84,7 +85,15 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 	// приходит исходом restart_failed (HTTP 200).
 	result := a.applyKernel(services.ApplyTargetActive)
 	a.ClearCapabilitiesCache()
-	JSONSuccess(w, result)
+	JSONSuccess(w, snapshotRestoreResponse{ApplyResult: result, SkippedStoplist: skipped})
+}
+
+// snapshotRestoreResponse — ответ восстановления: исход применения (поля
+// ApplyResult на верхнем уровне, как раньше) и имена файлов корня каталога
+// Xray, которые не восстановлены из-за стоп-списка XKeen.
+type snapshotRestoreResponse struct {
+	services.ApplyResult
+	SkippedStoplist []string `json:"skipped_stoplist,omitempty"`
 }
 
 func (a *API) SnapshotUpload(w http.ResponseWriter, r *http.Request) {

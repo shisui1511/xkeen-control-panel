@@ -594,6 +594,7 @@
   "settings.snapshot_restore_confirm": "Are you sure you want to restore this snapshot? Current configuration files will be overwritten and active services restarted.",
   "settings.snapshot_restore_error": "Failed to restore backup: {error}. Please verify archive file integrity and try again.",
   "settings.snapshot_restored": "Snapshot restored",
+  "settings.snapshot_restore_skipped": "Files with XKeen stop-list names were not restored in the Xray config directory (XKeen would refuse to start Xray): {files}",
   "settings.snapshot_download_btn": "Download",
   "settings.snapshot_delete_btn": "Delete",
   "settings.snapshot_delete_title": "Delete Snapshot",

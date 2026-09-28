@@ -486,6 +486,7 @@ func main() {
 		xkeenDir,
 		cfg.DataDir,
 	})
+	snapshotSvc.SetXrayRoot(cfg.XRayConfigDir)
 	api.SetSnapshotService(snapshotSvc)
 	srv.HandleProtected("/api/snapshots/list", api.SnapshotList)
 	srv.HandleProtected("/api/snapshots/create", api.SnapshotCreate)

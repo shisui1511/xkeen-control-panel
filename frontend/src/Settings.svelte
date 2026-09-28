@@ -238,10 +238,21 @@
       return;
     restoringSnapshot = id;
     try {
-      const result = await apiFetchJSON<ApplyResult>(`/api/snapshots/${id}/restore`, {
-        method: 'POST'
-      });
+      const result = await apiFetchJSON<ApplyResult & { skipped_stoplist?: string[] }>(
+        `/api/snapshots/${id}/restore`,
+        { method: 'POST' }
+      );
       notifyApplyOutcome(result, { restartedMessage: $t('settings.snapshot_restored') });
+      // Файлы со стоп-словами XKeen в корне каталога Xray не восстанавливаются:
+      // иначе XKeen откажется запускать Xray.
+      const skipped = result.skipped_stoplist ?? [];
+      if (skipped.length > 0) {
+        showToast(
+          'warning',
+          $t('settings.snapshot_restore_skipped', { files: skipped.join(', ') }),
+          10000
+        );
+      }
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', e.message);

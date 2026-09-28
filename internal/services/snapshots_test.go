@@ -137,7 +137,7 @@ func TestSnapshotService(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := svc.Restore(meta.ID); err != nil {
+	if _, err := svc.Restore(meta.ID); err != nil {
 		t.Fatalf("Restore failed: %v", err)
 	}
 
@@ -192,7 +192,7 @@ func TestSnapshotService(t *testing.T) {
 	}
 
 	// Trigger restore - should FAIL (return error) due to Zip Slip detection
-	if err := svc.Restore("escaped-id"); err == nil {
+	if _, err := svc.Restore("escaped-id"); err == nil {
 		t.Fatal("restore should have failed due to Zip Slip path")
 	}
 
@@ -333,7 +333,7 @@ func TestSnapshotService_EdgeCases(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = svc.Restore("large-id")
+	_, err = svc.Restore("large-id")
 	if err == nil {
 		t.Error("expected restore to fail due to file exceeding 10 MB limit")
 	} else if !strings.Contains(err.Error(), "exceeds maximum allowed size of 10 MB") {
@@ -399,7 +399,7 @@ func TestSnapshotExcludeCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := svc.Restore(meta.ID); err != nil {
+	if _, err := svc.Restore(meta.ID); err != nil {
 		t.Fatalf("Restore failed: %v", err)
 	}
 
@@ -410,5 +410,136 @@ func TestSnapshotExcludeCache(t *testing.T) {
 	}
 	if string(cacheData) != "proxies: [{name: updated}]" {
 		t.Errorf("cache file was unexpectedly overwritten: %q", string(cacheData))
+	}
+}
+
+// writeSnapshotArchive собирает tar.gz из пар «путь в архиве → содержимое».
+func writeSnapshotArchive(t *testing.T, files map[string]string) *strings.Reader {
+	t.Helper()
+	var sb strings.Builder
+	gw := gzip.NewWriter(&sb)
+	tw := tar.NewWriter(gw)
+	for name, content := range files {
+		hdr := &tar.Header{Name: name, Mode: 0o644, Size: int64(len(content)), Typeflag: tar.TypeReg}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return strings.NewReader(sb.String())
+}
+
+// WR-04: восстановление снимка (в том числе загруженного архива) не создаёт в
+// корне каталога Xray файлы со стоп-списочными именами XKeen; подкаталоги и
+// другие каталоги гейтом не затрагиваются, уже лежащие на диске файлы остаются.
+func TestSnapshotRestore_SkipsStoplistNamesInXrayRoot(t *testing.T) {
+	archive := map[string]string{
+		"xray/configs/03_inbounds.json":      `{"inbounds":[]}`,
+		"xray/configs/04_outbounds.bak.json": `{"bak":true}`,
+		"xray/configs/x.OLD.json":            `{"old":true}`,
+		"xray/configs/a(1).json":             `{"paren":true}`,
+		"xray/configs/backup/x.old.json":     `{"nested":true}`,
+		"xray/configs/notes.bak.txt":         `not json: XKeen does not match`,
+		"mihomo/config.bak.yaml":             "other kernel: no gate",
+		"mihomo/config.yaml":                 "mode: rule",
+	}
+
+	for _, viaSymlink := range []bool{false, true} {
+		name := "real root"
+		if viaSymlink {
+			name = "symlinked root"
+		}
+		t.Run(name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			xrayDir := filepath.Join(dataDir, "xray")
+			xrayRoot := filepath.Join(xrayDir, "configs")
+			mihomoDir := filepath.Join(dataDir, "mihomo")
+			for _, d := range []string{xrayRoot, mihomoDir} {
+				if err := os.MkdirAll(d, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			existing := filepath.Join(xrayRoot, "keep.old.json")
+			if err := os.WriteFile(existing, []byte(`{"user":"file"}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			svc := NewSnapshotService(dataDir, []string{xrayDir, mihomoDir})
+			if viaSymlink {
+				link := filepath.Join(dataDir, "configs-link")
+				if err := os.Symlink(xrayRoot, link); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				svc.SetXrayRoot(link)
+			} else {
+				svc.SetXrayRoot(xrayRoot)
+			}
+
+			// Архив приходит загрузкой: путь без гейта на этапе SaveUploaded.
+			meta, err := svc.SaveUploaded(writeSnapshotArchive(t, archive), "backup.tar.gz")
+			if err != nil {
+				t.Fatalf("SaveUploaded: %v", err)
+			}
+			skipped, err := svc.Restore(meta.ID)
+			if err != nil {
+				t.Fatalf("Restore: %v", err)
+			}
+
+			wantSkipped := []string{"04_outbounds.bak.json", "a(1).json", "x.OLD.json"}
+			if strings.Join(skipped, ",") != strings.Join(wantSkipped, ",") {
+				t.Errorf("skipped = %v, want %v", skipped, wantSkipped)
+			}
+			for _, n := range wantSkipped {
+				if _, err := os.Stat(filepath.Join(xrayRoot, n)); !os.IsNotExist(err) {
+					t.Errorf("стоп-списочный файл %s создан в корне Xray (err=%v)", n, err)
+				}
+			}
+			for _, rel := range []string{
+				"03_inbounds.json",
+				"notes.bak.txt",
+				"backup/x.old.json",
+			} {
+				if _, err := os.Stat(filepath.Join(xrayRoot, filepath.FromSlash(rel))); err != nil {
+					t.Errorf("%s должен быть восстановлен: %v", rel, err)
+				}
+			}
+			for _, rel := range []string{"config.bak.yaml", "config.yaml"} {
+				if _, err := os.Stat(filepath.Join(mihomoDir, rel)); err != nil {
+					t.Errorf("mihomo/%s должен быть восстановлен: %v", rel, err)
+				}
+			}
+			if data, err := os.ReadFile(existing); err != nil || string(data) != `{"user":"file"}` {
+				t.Errorf("существующий файл тронут: %v %q", err, data)
+			}
+		})
+	}
+}
+
+// Без заданного корня Xray проверка выключена: поведение прежнее.
+func TestSnapshotRestore_NoXrayRootRestoresEverything(t *testing.T) {
+	dataDir := t.TempDir()
+	xrayDir := filepath.Join(dataDir, "xray")
+	if err := os.MkdirAll(filepath.Join(xrayDir, "configs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSnapshotService(dataDir, []string{xrayDir})
+	meta, err := svc.SaveUploaded(writeSnapshotArchive(t, map[string]string{"xray/configs/x.bak.json": "{}"}), "b.tar.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	skipped, err := svc.Restore(meta.ID)
+	if err != nil || len(skipped) != 0 {
+		t.Fatalf("Restore: skipped=%v err=%v", skipped, err)
+	}
+	if _, err := os.Stat(filepath.Join(xrayDir, "configs", "x.bak.json")); err != nil {
+		t.Errorf("файл должен быть восстановлен: %v", err)
 	}
 }
