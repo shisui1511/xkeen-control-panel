@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t } from '../../i18n';
+  import { t, currentLang } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
   import { usePoller } from '../../lib/poller';
-  import { activateRestartGrace } from '../../lib/serviceGrace';
+  import { applyToKernel, notifyApplyOutcome, type ApplyResult } from '../../lib/serviceApply';
+  import { parseValidationError } from '../../lib/errorParser';
   import { showConfirm, showToast } from '../../stores';
   import Button from '../Button.svelte';
   import Select from '../Select.svelte';
@@ -112,12 +113,26 @@
       });
       const payload = await res.json().catch(() => null);
       if (!res.ok || !payload?.success) throw new Error(payload?.error || `HTTP ${res.status}`);
-      if (payload.data.restart_required) {
-        activateRestartGrace(6000);
-        const r = await apiFetch('/api/service/control?action=restart', { method: 'POST' });
-        if (!r.ok) throw new Error(await r.text());
+      // Конфиг записан: сервер сам решает, перезапускать ли запущенный активный Xray
+      let result: ApplyResult | null = null;
+      try {
+        result = await applyToKernel({ kernel: 'xray' });
+      } catch (applyErr: any) {
+        if (applyErr?.status === 401) return;
+        const reason =
+          parseValidationError(applyErr?.message || '', $currentLang) || applyErr?.message;
+        showToast('error', $t('apply.restart_failed', { reason }), 10000, {
+          label: $t('apply.open_logs'),
+          onClick: () => {
+            window.location.hash = '#/logs';
+          }
+        });
       }
-      showToast('success', enabled ? $t('xlog.enabled_toast') : $t('xlog.disabled_toast'));
+      if (result) {
+        notifyApplyOutcome(result, {
+          restartedMessage: enabled ? $t('xlog.enabled_toast') : $t('xlog.disabled_toast')
+        });
+      }
       await load();
     } catch (e: any) {
       if (e?.status === 401) return;
