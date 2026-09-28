@@ -44,3 +44,29 @@ func TestXrayAccessLogHandlers(t *testing.T) {
 		t.Fatalf("no log config: expected 404, got %d", rec.Code)
 	}
 }
+
+// Toggle только записывает конфиг: решение о рестарте принимает action=apply,
+// поэтому в ответе не должно быть restart_required.
+func TestXrayAccessLogToggle_NoRestartRequired(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(t.TempDir(), "access.log")
+	if err := os.WriteFile(filepath.Join(dir, "01_log.json"), []byte(`{"log": {"access": "`+logFile+`"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api := &API{}
+	api.SetXrayAccessLogService(services.NewXrayAccessLogService(dir))
+
+	// Выключение не трогает системные пути (включение пишет в /opt/var).
+	rec := httptest.NewRecorder()
+	api.XrayAccessLogToggle(rec, httptest.NewRequest(http.MethodPost, "/api/xray/access-log/toggle", strings.NewReader(`{"enabled":false}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("toggle: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"status"`) {
+		t.Fatalf("в ответе нет status: %s", body)
+	}
+	if strings.Contains(body, "restart_required") {
+		t.Fatalf("ответ содержит restart_required: %s", body)
+	}
+}
