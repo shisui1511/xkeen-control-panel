@@ -10,6 +10,7 @@
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { apiFetch } from './lib/api';
+  import { willRestartOnApply } from './lib/serviceApply';
   import { parseValidationError } from './lib/errorParser';
   import {
     applyMihomoConfig,
@@ -75,6 +76,7 @@
   let schemaError = $state('');
   let showApplyConfirm = $state(false);
   let applyLoading = $state(false);
+  const willRestart = $derived(willRestartOnApply($capabilities, 'mihomo'));
 
   let dismissZkeenGeodataWarning = $state(false);
   let lastActivePreset = '';
@@ -404,7 +406,7 @@
   async function handleUndo() {
     applyLoading = true;
     try {
-      const ok = await undoMihomoConfig(selectedFile, $capabilities, (prevYaml: string) =>
+      const ok = await undoMihomoConfig(selectedFile, (prevYaml: string) =>
         populateMihomoFromYAML(prevYaml)
       );
       if (ok) {
@@ -854,7 +856,11 @@
               disabled={applyLoading || !yaml || !!blockingValidationMsg}
               style="flex: 1;"
             >
-              {applyLoading ? $t('editor.saving') : $t('mihomo.apply_and_restart')}
+              {applyLoading
+                ? $t('editor.saving')
+                : willRestart
+                  ? $t('mihomo.apply_and_restart')
+                  : $t('apply.apply')}
             </button>
           </div>
         </ConstructorPreview>
@@ -870,7 +876,7 @@
   dataTestid="apply-confirm-dialog"
   onclose={() => (showApplyConfirm = false)}
 >
-  <p>{$t('editor.apply_confirm_body')}</p>
+  <p>{willRestart ? $t('editor.apply_confirm_body') : $t('apply.confirm_body_no_restart')}</p>
   <div class="changed-files-list" style="margin-top: 12px;">
     <strong>{$t('mihomo.sections_to_update')}</strong>
     <div style="margin: 8px 0; font-family: monospace; font-size: 13px;">
@@ -890,7 +896,11 @@
       {$t('app.cancel')}
     </button>
     <button class="btn btn-primary" onclick={() => handleApplyMihomo(true)} disabled={applyLoading}>
-      {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
+      {applyLoading
+        ? $t('editor.saving')
+        : willRestart
+          ? $t('editor.apply_and_restart')
+          : $t('apply.apply')}
     </button>
   </div>
 </Modal>

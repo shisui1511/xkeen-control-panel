@@ -1,7 +1,8 @@
 import { get } from 'svelte/store';
-import { apiFetch, apiFetchJSON } from '../api';
+import { apiFetch, apiFetchJSON, startMihomo } from '../api';
 import { showToast, showConfirm, fetchCapabilities } from '../../stores';
 import { activateRestartGrace } from '../serviceGrace';
+import { applyToKernel, notifyApplyOutcome, type ApplyResult } from '../serviceApply';
 import { t, tp } from '../../i18n';
 import {
   findPortCollisions,
@@ -72,6 +73,66 @@ export function collectListenerPortWarnings(yaml: string, extraYaml?: string): P
   }
 
   return warnings;
+}
+
+/**
+ * The files are already written when this runs, so a failed request is reported
+ * as a failed restart (D-06) instead of being thrown as a save error. 401 is
+ * rethrown for the caller's login handling.
+ */
+async function applyToKernelSafe(): Promise<ApplyResult> {
+  try {
+    return await applyToKernel({ kernel: 'mihomo' });
+  } catch (e: any) {
+    if (e?.status === 401) throw e;
+    return { outcome: 'restart_failed', kernel: 'mihomo', error: e?.message };
+  }
+}
+
+/**
+ * Finishes the apply/undo of the Mihomo config after the file is written:
+ * the toast follows the outcome the server reported. The only place that may
+ * offer switching the kernel is "Xray is running, Mihomo is not active" (D-07),
+ * and it never switches without an explicit "Switch and start".
+ */
+export async function finishMihomoApply(
+  result: ApplyResult,
+  successMessage?: string
+): Promise<void> {
+  try {
+    if (result.outcome !== 'saved_kernel_inactive') {
+      notifyApplyOutcome(result, { restartedMessage: successMessage });
+      return;
+    }
+    const xrayRunning = result.active_kernel === 'xray' && result.active_running === true;
+    if (
+      xrayRunning &&
+      (await showConfirm({
+        title: tr('editor.switch_kernel_title'),
+        consequence: tr('apply.switch_mihomo_body'),
+        variant: 'primary',
+        confirmLabel: tr('apply.switch_and_start'),
+        cancelLabel: tr('apply.save_only')
+      }))
+    ) {
+      try {
+        activateRestartGrace(6000);
+        await startMihomo();
+        showToast('success', successMessage ?? tr('apply.restarted'));
+      } catch (e: any) {
+        if (e?.status === 401) return;
+        showToast(
+          'error',
+          tr('apply.switch_failed', { reason: e?.message || tr('apply.restart_failed_unknown') })
+        );
+      }
+      return;
+    }
+    // "Save only", or Xray is not running: nothing is restarted or switched.
+    showToast('info', tr('apply.mihomo_saved_after_switch'));
+  } finally {
+    await fetchCapabilities();
+  }
 }
 
 export interface ApplyMihomoOptions {
@@ -228,36 +289,13 @@ export async function applyMihomoConfig({
       allWarnings.length > 0 ? tr('editor.save_warnings_title') : undefined
     );
 
-    let restartUrl = '/api/service/control?action=restart';
-    const activeKernel = capabilitiesKernel?.active_kernel;
-    if (activeKernel && activeKernel !== 'mihomo') {
-      if (
-        await showConfirm({
-          title: tr('editor.switch_kernel_title'),
-          consequence: tr('editor.switch_kernel_confirm', { kernel: activeKernel }),
-          variant: 'primary',
-          confirmLabel: tr('editor.switch')
-        })
-      ) {
-        restartUrl = '/api/service/control?action=switch_kernel&kernel=mihomo';
-      }
-    }
+    const result = await applyToKernelSafe();
 
-    activateRestartGrace(6000);
-    const restartRes = await apiFetch(restartUrl, {
-      method: 'POST'
-    });
-
-    if (!restartRes.ok) {
-      throw new Error('Failed to restart service');
-    }
-
-    await fetchCapabilities();
-
-    ctx.resetDirty();
     const stats = mergeRes.stats || {};
-    showToast(
-      'success',
+    // The files are written whatever the restart outcome (D-06): the draft is saved.
+    ctx.resetDirty();
+    await finishMihomoApply(
+      result,
       tr('editor.smart_merge_applied', {
         nodes: trp('editor.smart_merge_applied_nodes', stats.proxies ?? 0),
         providers: trp('editor.smart_merge_applied_providers', stats.proxy_providers ?? 0),
@@ -276,7 +314,6 @@ export async function applyMihomoConfig({
 
 export async function undoMihomoConfig(
   selectedFile: string,
-  capabilitiesKernel: any,
   onPopulateFromYaml: (text: string) => void
 ): Promise<boolean> {
   const prevYAML = localStorage.getItem('xcp_prev_mihomo_yaml');
@@ -298,30 +335,8 @@ export async function undoMihomoConfig(
 
     onPopulateFromYaml(prevYAML);
 
-    let restartUrl = '/api/service/control?action=restart';
-    const activeKernel = capabilitiesKernel?.active_kernel;
-    if (activeKernel && activeKernel !== 'mihomo') {
-      if (
-        await showConfirm({
-          title: tr('editor.switch_kernel_title'),
-          consequence: tr('editor.switch_kernel_confirm', { kernel: activeKernel }),
-          variant: 'primary',
-          confirmLabel: tr('editor.switch')
-        })
-      ) {
-        restartUrl = '/api/service/control?action=switch_kernel&kernel=mihomo';
-      }
-    }
-
-    const restartRes = await apiFetch(restartUrl, {
-      method: 'POST'
-    });
-    if (!restartRes.ok) {
-      throw new Error('Failed to restart service');
-    }
-
-    await fetchCapabilities();
-    showToast('success', tr('editor.undo_success'));
+    const result = await applyToKernelSafe();
+    await finishMihomoApply(result, tr('editor.undo_success'));
     return true;
   } catch (e: any) {
     if (e?.status === 401) return false;

@@ -361,3 +361,187 @@ test.describe('Применение конструктора Xray', () => {
     await expect.poll(() => saves.some((p) => p.endsWith('03_inbounds.json'))).toBe(true);
   });
 });
+
+async function openMihomoConstructor(page: Page) {
+  await page.goto('/#/constructor');
+  const mihomoBtn = page.locator('.constructor-kernel-toggle button:has-text("Mihomo")');
+  await expect(mihomoBtn).toBeVisible({ timeout: 15000 });
+  await mihomoBtn.click();
+  await expect(page.locator('[data-testid="apply-changes-btn"]')).toBeVisible({ timeout: 15000 });
+}
+
+/** Открывает диалог применения Mihomo и подтверждает его; возвращает кнопки диалога переключения. */
+async function applyMihomo(page: Page) {
+  await page.locator('[data-testid="apply-changes-btn"]').click();
+  const dialog = page.locator('[data-testid="apply-confirm-dialog"]');
+  await expect(dialog).toBeVisible({ timeout: 5000 });
+  await confirmButton(dialog).click();
+}
+
+const switchPrompt = 'Сейчас работает Xray — переключить на Mihomo?';
+
+test.describe('Применение конструктора Mihomo', () => {
+  const inactiveRunning = {
+    outcome: 'saved_kernel_inactive',
+    kernel: 'mihomo',
+    active_kernel: 'xray',
+    active_running: true
+  };
+
+  test('«Только сохранить» не трогает ядра, повторное применение тоже', async ({ page }) => {
+    const { calls, saves } = await setup(page, {
+      activeKernel: 'xray',
+      applyData: inactiveRunning
+    });
+    await openMihomoConstructor(page);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await applyMihomo(page);
+      const prompt = page.getByText(switchPrompt);
+      await expect(prompt).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('button', { name: 'Переключить и запустить' })).toBeVisible();
+      await page.getByRole('button', { name: 'Только сохранить' }).click();
+
+      const toast = page.locator('.toast', {
+        hasText: 'Конфиг Mihomo сохранён. Вступит в силу после переключения на Mihomo'
+      });
+      await expect(toast.first()).toBeVisible({ timeout: 5000 });
+      await expect(toast.first().locator('button.toast__action')).toHaveCount(0);
+      await expect(prompt).toBeHidden();
+    }
+
+    expect(saves.some((p) => p.endsWith('config.yaml'))).toBe(true);
+    expect(calls.filter((c) => c.action === 'apply')).toHaveLength(2);
+    expect(calls.filter((c) => c.action === 'restart')).toHaveLength(0);
+    expect(calls.filter((c) => c.action === 'switch_kernel')).toHaveLength(0);
+  });
+
+  test('«Переключить и запустить» вызывает один switch_kernel на mihomo', async ({ page }) => {
+    const { calls } = await setup(page, { activeKernel: 'xray', applyData: inactiveRunning });
+    await openMihomoConstructor(page);
+
+    await applyMihomo(page);
+    await expect(page.getByText(switchPrompt)).toBeVisible({ timeout: 5000 });
+    await page.getByRole('button', { name: 'Переключить и запустить' }).click();
+
+    await expect.poll(() => calls.filter((c) => c.action === 'switch_kernel').length).toBe(1);
+    expect(calls.find((c) => c.action === 'switch_kernel')?.kernel).toBe('mihomo');
+    expect(calls.filter((c) => c.action === 'restart')).toHaveLength(0);
+  });
+
+  test('Xray не запущен: диалога нет, конфиг сохранён, без switch_kernel', async ({ page }) => {
+    const { calls } = await setup(page, {
+      activeKernel: 'xray',
+      applyData: { ...inactiveRunning, active_running: false }
+    });
+    await openMihomoConstructor(page);
+
+    await applyMihomo(page);
+
+    await expect(
+      page.locator('.toast', { hasText: 'Вступит в силу после переключения на Mihomo' }).first()
+    ).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(switchPrompt)).toHaveCount(0);
+    expect(calls.filter((c) => c.action === 'switch_kernel')).toHaveLength(0);
+    expect(calls.filter((c) => c.action === 'restart')).toHaveLength(0);
+  });
+
+  test('Mihomo активен и остановлен: без запуска, тост «Запустить сейчас»', async ({ page }) => {
+    const { calls } = await setup(page, {
+      activeKernel: 'mihomo',
+      applyData: {
+        outcome: 'saved_kernel_stopped',
+        kernel: 'mihomo',
+        active_kernel: 'mihomo',
+        active_running: false
+      }
+    });
+    await openMihomoConstructor(page);
+
+    await applyMihomo(page);
+
+    const toast = page.locator('.toast', { hasText: 'вступят в силу при запуске' });
+    await expect(toast).toBeVisible({ timeout: 5000 });
+    await expect(toast.getByRole('button', { name: 'Запустить сейчас' })).toBeVisible();
+    expect(calls.filter((c) => c.action === 'restart')).toHaveLength(0);
+    expect(calls.filter((c) => c.action === 'start')).toHaveLength(0);
+  });
+
+  test('подпись кнопки и диалога зависят от apply_restarts.mihomo', async ({ page }) => {
+    await setup(page, { activeKernel: 'mihomo', applyRestarts: { mihomo: false } });
+    await openMihomoConstructor(page);
+    const btn = page.locator('[data-testid="apply-changes-btn"]');
+    await expect(btn).toHaveText('Применить');
+    await btn.click();
+    const dialog = page.locator('[data-testid="apply-confirm-dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog).not.toContainText('перезапустить');
+    await expect(confirmButton(dialog)).toHaveText('Применить');
+  });
+
+  test('запущенный Mihomo: «Применить и перезапустить» и тост об успехе', async ({ page }) => {
+    const { calls } = await setup(page, {
+      activeKernel: 'mihomo',
+      applyRestarts: { mihomo: true },
+      applyData: {
+        outcome: 'restarted',
+        kernel: 'mihomo',
+        active_kernel: 'mihomo',
+        active_running: true
+      }
+    });
+    await openMihomoConstructor(page);
+    const btn = page.locator('[data-testid="apply-changes-btn"]');
+    await expect(btn).toHaveText(/Применить и перезапустить/);
+    await applyMihomo(page);
+    await expect(page.locator('.toast--success').first()).toBeVisible({ timeout: 5000 });
+    expect(calls.filter((c) => c.action === 'restart')).toHaveLength(0);
+    expect(calls.filter((c) => c.action === 'apply')).toHaveLength(1);
+  });
+
+  test('рестарт Mihomo упал: ошибка с причиной и «Логи», не «Failed to restart service»', async ({
+    page
+  }) => {
+    await setup(page, {
+      activeKernel: 'mihomo',
+      applyRestarts: { mihomo: true },
+      applyData: {
+        outcome: 'restart_failed',
+        kernel: 'mihomo',
+        active_kernel: 'mihomo',
+        active_running: true,
+        error: 'mihomo failed: bad config'
+      }
+    });
+    await openMihomoConstructor(page);
+    await applyMihomo(page);
+
+    const toast = page.locator('.toast--error', { hasText: 'перезапуск не удался' });
+    await expect(toast).toBeVisible({ timeout: 5000 });
+    await expect(toast).toContainText('bad config');
+    await expect(toast.getByRole('button', { name: 'Логи' })).toBeVisible();
+    await expect(page.getByText('Failed to restart service')).toHaveCount(0);
+  });
+
+  test('двойной клик по подтверждению отправляет один action=apply', async ({ page }) => {
+    const { calls } = await setup(page, {
+      activeKernel: 'mihomo',
+      applyDelayMs: 1000,
+      applyData: {
+        outcome: 'restarted',
+        kernel: 'mihomo',
+        active_kernel: 'mihomo',
+        active_running: true
+      }
+    });
+    await openMihomoConstructor(page);
+
+    await page.locator('[data-testid="apply-changes-btn"]').click();
+    const dialog = page.locator('[data-testid="apply-confirm-dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await confirmButton(dialog).dblclick();
+
+    await expect(page.locator('.toast--success').first()).toBeVisible({ timeout: 8000 });
+    expect(calls.filter((c) => c.action === 'apply')).toHaveLength(1);
+  });
+});
