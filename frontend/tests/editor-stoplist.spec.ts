@@ -272,4 +272,24 @@ test.describe('Editor: стоп-список XKeen', () => {
     expect(rec.save[0].searchParams.get('confirm_stoplist')).toBe('1');
     expect(rec.save[0].searchParams.get('path')).toBe(`${XRAY_DIR}/old_config-2.json`);
   });
+  test('значок в дереве: у old_config.json есть, у 04_outbounds.json и Mihomo нет', async ({
+    page
+  }) => {
+    const stopRow = page.locator('.file-row:has-text("old_config.json")');
+    const mark = stopRow.locator('.stoplist-mark');
+    await expect(mark).toBeVisible();
+    await expect(mark).toHaveAttribute('title', /«old»/);
+    await expect(mark).toHaveAttribute('title', /отменит запуск Xray/);
+    await expect(mark).toHaveAttribute('aria-label', /«old»/);
+
+    await expect(
+      page.locator('.file-row:has-text("04_outbounds.json") .stoplist-mark')
+    ).toHaveCount(0);
+    await expect(page.locator('.file-row:has-text("config.yaml") .stoplist-mark')).toHaveCount(0);
+
+    // Строка остаётся кликабельной, контекстное меню на месте
+    await stopRow.click({ button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Переименовать файл' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Удалить' })).toBeVisible();
+  });
 });
