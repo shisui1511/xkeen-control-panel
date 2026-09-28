@@ -1,9 +1,9 @@
 import { get } from 'svelte/store';
-import { showToast, panelUnreachable } from '../stores';
+import { showToast } from '../stores';
 import { t } from '../i18n';
 import { saveDraftsToSessionStorage } from './dirtyRegistry';
 import { claimUnauthorized, markLoggedOut } from './authState';
-import { reportPanelUnreachable } from './panelHealth';
+import { confirmPanelReachable, reportPanelUnreachable } from './panelHealth';
 
 /**
  * APIResponse — standard envelope returned by migrated backend handlers.
@@ -54,8 +54,11 @@ export function reasonToastKey(reason?: string): string {
 function handleUnauthorized(reason?: string): void {
   // A 401 means the server answered — the panel is reachable again. Clear
   // the reconnect banner first so the reason toast and the banner are never
-  // shown at the same time for the same event (UI-SPEC backstop).
-  panelUnreachable.set(false);
+  // shown at the same time for the same event (UI-SPEC backstop). Also
+  // cancels any backoff poll still pending from an earlier network failure
+  // (134-REVIEW IN-01) — otherwise it fires a redundant /api/version request
+  // after reachability was already confirmed by this response.
+  confirmPanelReachable();
   try {
     saveDraftsToSessionStorage();
   } catch (e) {

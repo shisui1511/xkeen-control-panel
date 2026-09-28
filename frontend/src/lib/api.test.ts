@@ -255,4 +255,33 @@ describe('apiFetch', () => {
     expect(get(stores.panelUnreachable)).toBe(false);
     expect(get(toastStore)).toHaveLength(1);
   });
+
+  it('scenario 14: a 401 after a network failure cancels the pending backoff poll (134-REVIEW IN-01)', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      const { apiFetch } = await loadFreshApi();
+      const stores = await import('../stores');
+
+      // First request: network down — starts the backoff poll (D-20).
+      await expect(apiFetch('/api/settings')).rejects.toThrow();
+      expect(get(stores.panelUnreachable)).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Second request: the server answers with 401 before the backoff
+      // timer fires — confirmPanelReachable() must cancel the pending poll,
+      // not just flip panelUnreachable back to false.
+      fetchMock.mockResolvedValue(makeResponse(401, { success: false }));
+      await expect(apiFetch('/api/settings')).rejects.toMatchObject({ status: 401 });
+      expect(get(stores.panelUnreachable)).toBe(false);
+
+      const callsAfter401 = fetchMock.mock.calls.length;
+      // Advance well past every rung of the backoff ladder (2s..30s): if the
+      // poll were still pending, this would fire an extra /api/version call.
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(fetchMock).toHaveBeenCalledTimes(callsAfter401);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
