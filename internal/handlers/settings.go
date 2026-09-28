@@ -18,11 +18,14 @@ func (a *API) SettingsGet(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
-	JSONSuccess(w, SettingsResponse{
+	a.cfg.RLock()
+	resp := SettingsResponse{
 		Port:    a.cfg.Port,
 		HTTPS:   a.cfg.HTTPS,
 		DevMode: a.cfg.DevMode,
-	})
+	}
+	a.cfg.RUnlock()
+	JSONSuccess(w, resp)
 }
 
 func (a *API) SettingsDevMode(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +42,11 @@ func (a *API) SettingsDevMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Lock/Unlock bracket only the field write (134-REVIEW CR-01); config.Save
+	// below takes its own RLock for the marshal, so it must run unlocked here.
+	a.cfg.Lock()
 	a.cfg.DevMode = req.Enabled
+	a.cfg.Unlock()
 
 	if a.cfg.ConfigPath != "" {
 		if err := config.Save(a.cfg.ConfigPath, a.cfg); err != nil {
@@ -48,5 +55,8 @@ func (a *API) SettingsDevMode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	JSONSuccess(w, map[string]bool{"dev_mode": a.cfg.DevMode})
+	a.cfg.RLock()
+	devMode := a.cfg.DevMode
+	a.cfg.RUnlock()
+	JSONSuccess(w, map[string]bool{"dev_mode": devMode})
 }

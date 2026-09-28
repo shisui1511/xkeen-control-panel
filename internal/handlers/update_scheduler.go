@@ -345,6 +345,10 @@ func (a *API) UpdateStateHandler(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) updateCheckState() UpdateCheckState {
 	if a.updateScheduler == nil {
+		// RLock: a.cfg is shared with the SIGHUP password-reload goroutine
+		// and other handlers that write to it concurrently (134-REVIEW CR-01).
+		a.cfg.RLock()
+		defer a.cfg.RUnlock()
 		return UpdateCheckState{
 			Channel:       a.cfg.UpdateChannel,
 			AutoCheck:     a.cfg.UpdateAutoCheck,
@@ -376,6 +380,12 @@ func (a *API) UpdateSettingsHandler(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	// Lock/Unlock bracket only the field writes (134-REVIEW CR-01);
+	// config.Save below takes its own RLock for the marshal, so it must run
+	// unlocked here to avoid deadlocking against that RLock.
+	a.cfg.Lock()
+	if body.InstallWindow != nil {
 		a.cfg.UpdateInstallWindow = *body.InstallWindow
 	}
 	if body.AutoCheck != nil {
@@ -384,6 +394,7 @@ func (a *API) UpdateSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	if body.AutoInstall != nil {
 		a.cfg.UpdateAutoInstall = *body.AutoInstall
 	}
+	a.cfg.Unlock()
 	if err := config.Save(a.cfg.ConfigPath, a.cfg); err != nil {
 		JSONError(w, http.StatusInternalServerError, "failed to save config: "+err.Error())
 		return

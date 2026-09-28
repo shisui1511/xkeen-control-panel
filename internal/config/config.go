@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
@@ -33,7 +34,19 @@ const (
 )
 
 // Config represents the main application configuration structure.
+//
+// After Load(), a single *Config is shared between the HTTP handler
+// goroutines (internal/handlers) and the SIGHUP hot-password-reload
+// goroutine (cmd/xcp/main.go, D-22): several of its fields are mutated at
+// runtime by any of these goroutines and read back wholesale by Save()'s
+// reflection-based json.Marshal. mu guards every such read/write so that
+// concurrent field writes never race with each other or with Save's marshal
+// (134-REVIEW CR-01). mu is unexported and excluded from JSON (un-exported
+// fields are never marshaled) — callers outside this package use the
+// Lock/Unlock/RLock/RUnlock wrappers below.
 type Config struct {
+	mu sync.RWMutex
+
 	Port            int         `json:"port"`
 	LoopbackPort    int         `json:"loopback_port"`
 	XRayConfigDir   string      `json:"xray_config_dir"`
@@ -308,15 +321,30 @@ func migrateHTTPSEnabled(cfg *Config, data []byte) {
 	cfg.HTTPS.Enabled = true
 }
 
+// Lock/Unlock/RLock/RUnlock guard concurrent access to the runtime-mutable
+// fields of a shared *Config (134-REVIEW CR-01). Every direct field write
+// made after Load() from a goroutine that may run concurrently with other
+// requests or with Save must be bracketed with Lock/Unlock; Save takes
+// RLock for the duration of its marshal so writers and the marshal never
+// observe each other's torn writes.
+func (c *Config) Lock()    { c.mu.Lock() }
+func (c *Config) Unlock()  { c.mu.Unlock() }
+func (c *Config) RLock()   { c.mu.RLock() }
+func (c *Config) RUnlock() { c.mu.RUnlock() }
+
 // Save writes the given configuration to the specified path atomically.
 func Save(path string, cfg *Config) error {
+	cfg.mu.RLock()
 	data, _ := json.MarshalIndent(cfg, "", "  ")
+	cfg.mu.RUnlock()
 	os.MkdirAll(filepath.Dir(path), 0755)
 	return utils.AtomicWriteFile(path, data, 0600)
 }
 
 // SavePasswordHash updates the password hash in the configuration and saves it to the specified path.
 func (c *Config) SavePasswordHash(path string, hash string) error {
+	c.mu.Lock()
 	c.Auth.PasswordHash = hash
+	c.mu.Unlock()
 	return Save(path, c)
 }

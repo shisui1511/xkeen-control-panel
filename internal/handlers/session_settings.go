@@ -21,9 +21,13 @@ type sessionSettingsResponse struct {
 }
 
 func (a *API) sessionSettingsSnapshot() sessionSettingsResponse {
+	a.cfg.RLock()
+	idleTTLHours := a.cfg.Auth.SessionIdleTTLHours
+	absoluteTTLDays := a.cfg.Auth.SessionAbsoluteTTLDays
+	a.cfg.RUnlock()
 	return sessionSettingsResponse{
-		IdleTTLHours:    a.cfg.Auth.SessionIdleTTLHours,
-		AbsoluteTTLDays: a.cfg.Auth.SessionAbsoluteTTLDays,
+		IdleTTLHours:    idleTTLHours,
+		AbsoluteTTLDays: absoluteTTLDays,
 		IdleTTLMin:      config.MinSessionIdleTTLHours,
 		IdleTTLMax:      config.MaxSessionIdleTTLHours,
 		AbsoluteTTLMin:  config.MinSessionAbsoluteTTLDays,
@@ -63,8 +67,15 @@ func (a *API) sessionSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Lock/Unlock bracket only the field writes (134-REVIEW CR-01):
+	// a.cfg is the same *config.Config the SIGHUP password-reload goroutine
+	// and other handler goroutines mutate concurrently, and config.Save
+	// below takes its own RLock for the marshal — holding Lock across the
+	// Save call would deadlock against that RLock.
+	a.cfg.Lock()
 	a.cfg.Auth.SessionIdleTTLHours = req.IdleTTLHours
 	a.cfg.Auth.SessionAbsoluteTTLDays = req.AbsoluteTTLDays
+	a.cfg.Unlock()
 
 	if a.cfg.ConfigPath != "" {
 		if err := config.Save(a.cfg.ConfigPath, a.cfg); err != nil {

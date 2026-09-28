@@ -345,13 +345,20 @@ func printUsage(w io.Writer) {
 // cfg.Auth.PasswordHash синхронизируется тем же вызовом (через колбэк apply),
 // чтобы следующее сохранение настроек из веб-UI не затёрло свежий пароль
 // старым значением, оставшимся в памяти демона.
+//
+// apply берёт cfg.Lock() перед записью поля: cfg — это тот же *config.Config,
+// что хендлеры HTTP-сервера читают/пишут в своих горутинах и передают в
+// config.Save (сериализация через reflection), поэтому запись без блокировки
+// гонит с ними за одну и ту же строку в памяти (134-REVIEW CR-01).
 func reloadAuthFromConfig(configPath string, cfg *config.Config, authSvc *auth.AuthService) error {
 	newCfg, err := config.Load(configPath)
 	if err != nil {
 		return err
 	}
 	authSvc.ReloadPasswordHash(newCfg.Auth.PasswordHash, func(hash string) {
+		cfg.Lock()
 		cfg.Auth.PasswordHash = hash
+		cfg.Unlock()
 	})
 	return nil
 }
