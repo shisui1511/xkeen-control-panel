@@ -76,8 +76,6 @@ func TestMaxBytesMiddleware_ExceptionLimit(t *testing.T) {
 
 	paths := []string{
 		"/api/snapshots/upload",
-		"/api/outbound/import",
-		"/api/outbound/import-bulk",
 	}
 
 	for _, path := range paths {
@@ -102,6 +100,34 @@ func TestMaxBytesMiddleware_ExceptionLimit(t *testing.T) {
 
 			if rr.Code != http.StatusRequestEntityTooLarge {
 				t.Errorf("path %s: expected 413, got %d", path, rr.Code)
+			}
+		})
+	}
+}
+
+// Removed node-import endpoints no longer have the 10 MB exception:
+// the default 2 MB limit applies to the former paths.
+func TestMaxBytesMiddleware_RemovedImportPathsUseDefaultLimit(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.ReadAll(r.Body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mw := MaxBytes(handler)
+
+	for _, path := range []string{"/api/outbound/import", "/api/outbound/import-bulk"} {
+		t.Run(path, func(t *testing.T) {
+			body := make([]byte, 3*1024*1024) // 3 MB > default 2 MB limit
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+			rr := httptest.NewRecorder()
+
+			mw.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusRequestEntityTooLarge {
+				t.Errorf("path %s: expected 413 under the default limit, got %d", path, rr.Code)
 			}
 		})
 	}

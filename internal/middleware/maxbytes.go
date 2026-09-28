@@ -88,18 +88,16 @@ func (m *maxBytesReader) Close() error {
 
 // MaxBytes returns a middleware that limits the request body size.
 // The default limit is 2 MB.
-// For specific endpoints, the limit is increased to 10 MB:
+// For a specific endpoint, the limit is increased to 10 MB:
 // - POST /api/snapshots/upload
-// - POST /api/outbound/import
-// - POST /api/outbound/import-bulk
 func MaxBytes(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limit := int64(2 * 1024 * 1024) // 2 MB by default
 
-		// Exceptions with 10 MB limit for backup and import/restore operations
+		// Exception with 10 MB limit for the backup restore upload
 		if r.Method == http.MethodPost {
 			switch r.URL.Path {
-			case "/api/snapshots/upload", "/api/outbound/import", "/api/outbound/import-bulk":
+			case "/api/snapshots/upload":
 				limit = 10 * 1024 * 1024 // 10 MB
 			}
 		}
