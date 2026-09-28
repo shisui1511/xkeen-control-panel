@@ -1815,11 +1815,6 @@
     color: var(--fg-primary);
   }
 
-  .panel-reconnect-banner .btn-sm {
-    padding: 6px 12px;
-    font-size: 12px;
-  }
-
   /* Fullscreen editor layout geometry (.dashboard-layout.editor-active,
      .main-content.editor-active) lives solely in global.css to avoid
      maintaining two out-of-sync copies of the same !important rules. */

@@ -74,9 +74,4 @@
     gap: 8px;
     flex-shrink: 0;
   }
-
-  .btn-sm {
-    padding: 6px 12px;
-    font-size: 12px;
-  }
 </style>

@@ -1857,11 +1857,6 @@
     overflow-wrap: anywhere;
   }
 
-  .btn-sm {
-    padding: 6px 12px;
-    font-size: 12px;
-  }
-
   .backup-dropzone:hover {
     border-color: var(--accent);
     background: var(--accent-soft);
