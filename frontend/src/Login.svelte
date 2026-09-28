@@ -181,11 +181,6 @@
     background: var(--surface-tint);
   }
 
-  .btn-sm {
-    padding: 6px 12px;
-    font-size: 12px;
-  }
-
   .remember-me {
     display: flex;
     align-items: center;

@@ -574,6 +574,11 @@ h2.card-title {
   color: #fff;
 }
 
+.btn-sm {
+  padding: 0 var(--spacing-3);
+  font-size: var(--font-size-xs);
+}
+
 /* ------------ Spinner ------------- */
 @keyframes spin {
   to {

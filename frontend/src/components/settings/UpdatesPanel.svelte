@@ -722,11 +722,6 @@
     color: var(--fg-dim);
   }
 
-  .btn-sm {
-    padding: 6px 12px;
-    font-size: 12px;
-  }
-
   .update-state {
     margin-top: 14px;
     padding: 10px 12px;

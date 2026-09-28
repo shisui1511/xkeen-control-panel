@@ -1551,10 +1551,14 @@
       <div class="field-group sessions-list">
         {#if sessionsLoading}
           {#each { length: 3 } as _, i (i)}
-            <div class="field-row session-skeleton-row">
-              <div class="session-skeleton-lines">
-                <Skeleton type="text-line" width="55%" height="14px" />
-                <Skeleton type="text-line" width="75%" height="12px" />
+            <div class="field-row">
+              <div class="session-info">
+                <div class="field-row-name session-skeleton-line">
+                  <Skeleton type="text-line" width="55%" height="14px" />
+                </div>
+                <div class="field-row-desc session-skeleton-line">
+                  <Skeleton type="text-line" width="75%" height="12px" />
+                </div>
               </div>
             </div>
           {/each}
@@ -1857,11 +1861,6 @@
     overflow-wrap: anywhere;
   }
 
-  .btn-sm {
-    padding: 6px 12px;
-    font-size: 12px;
-  }
-
   .backup-dropzone:hover {
     border-color: var(--accent);
     background: var(--accent-soft);
@@ -1890,15 +1889,12 @@
     background: transparent;
   }
 
-  .session-skeleton-row {
-    display: block;
-  }
-
-  .session-skeleton-lines {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    width: 100%;
+  /* Полоса скелетона занимает строку текста той же высоты, что имя и описание
+     реальной сессии, — без сдвига вёрстки при приходе данных. */
+  .session-skeleton-line :global(.skeleton) {
+    display: inline-block;
+    vertical-align: middle;
+    margin-bottom: 0;
   }
 
   .session-info {
