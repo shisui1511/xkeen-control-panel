@@ -3,6 +3,7 @@
   import { t } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
   import { activateRestartGrace } from '../../lib/serviceGrace';
+  import { notifyApplyOutcome, type ApplyOutcome } from '../../lib/serviceApply';
   import { showConfirm, showToast, editorOpenRequest } from '../../stores';
   import Button from '../Button.svelte';
   import Skeleton from '../Skeleton.svelte';
@@ -25,6 +26,8 @@
     restarted: boolean;
     rolled_back: boolean;
     error?: string;
+    /** Set when the profile is saved but the core was not restarted (stopped or inactive). */
+    outcome?: string;
   }
 
   interface Props {
@@ -115,6 +118,16 @@
         showToast('error', $t('profiles.rolled_back', { error: res.error }), 10000);
       } else if (res.error) {
         showToast('error', $t('profiles.invalid', { error: res.error }), 10000);
+      } else if (
+        res.outcome === 'saved_kernel_stopped' ||
+        res.outcome === 'saved_kernel_inactive'
+      ) {
+        notifyApplyOutcome({
+          outcome: res.outcome as ApplyOutcome,
+          kernel: 'mihomo',
+          active_kernel: '',
+          active_running: false
+        });
       } else {
         showToast('success', $t('profiles.activated', { name: res.active }));
       }
