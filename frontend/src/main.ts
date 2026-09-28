@@ -2,6 +2,7 @@ import { mount } from 'svelte';
 import './styles/fonts.css';
 import App from './App.svelte';
 import { initDensity } from './stores';
+import { registerServiceWorker } from './sw-register';
 
 function initTheme() {
   let saved = '';
@@ -35,6 +36,7 @@ function initAccent() {
 initTheme();
 initAccent();
 initDensity();
+registerServiceWorker();
 
 const app = mount(App, {
   target: document.getElementById('app')!
