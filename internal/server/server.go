@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -20,6 +22,37 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/i18n"
 	"github.com/shisui1511/xkeen-control-panel/internal/middleware"
 )
+
+// loopbackAllowedPaths — allowlist служебных путей, обслуживаемых на
+// 127.0.0.1:<LoopbackPort> (D-14). Всё остальное, включая вход, setup и
+// /api/auth/me, получает 403 без обращения к s.mux — список переживает
+// появление новых auth-эндпоинтов без новой дыры: путь недоступен с
+// loopback, пока явно не добавлен сюда.
+var loopbackAllowedPaths = map[string]bool{
+	"/api/provider.yaml":         true,
+	"/mihomo/provider.yaml":      true,
+	"/mihomo/hwid/provider.yaml": true,
+	"/api/version":               true,
+}
+
+// noCookieWriter удаляет заголовок Set-Cookie перед отправкой ответа —
+// защита на случай, если обработчик из allowlist когда-либо начнёт
+// выставлять cookie (T-134-35); сегодня ни один из четырёх путей этого не
+// делает, но loopback-поверхность не должна зависеть от будущей дисциплины
+// авторов обработчиков.
+type noCookieWriter struct {
+	http.ResponseWriter
+}
+
+func (w *noCookieWriter) WriteHeader(statusCode int) {
+	w.Header().Del("Set-Cookie")
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *noCookieWriter) Write(b []byte) (int, error) {
+	w.Header().Del("Set-Cookie")
+	return w.ResponseWriter.Write(b)
+}
 
 type Server struct {
 	cfg         *Config
@@ -135,6 +168,38 @@ func (s *Server) BuildHandler() http.Handler {
 	return handler
 }
 
+// BuildLoopbackHandler constructs the HTTP handler for the 127.0.0.1
+// loopback listener (D-14, T-134-34). Unlike BuildHandler, this handler only
+// forwards requests whose cleaned path is in loopbackAllowedPaths to s.mux —
+// everything else (in particular login, setup and /api/auth/me) gets a 403
+// JSON response without ever reaching the mux, so no cookie-issuing or
+// auth-checking code path is reachable from an unauthenticated local
+// process. Allowed responses are wrapped in noCookieWriter as defense in
+// depth against a future allowlisted handler issuing a cookie.
+func (s *Server) BuildLoopbackHandler() http.Handler {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cleanPath := path.Clean(r.URL.Path)
+		if !loopbackAllowedPaths[cleanPath] {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "not available on loopback",
+			})
+			return
+		}
+		s.mux.ServeHTTP(&noCookieWriter{ResponseWriter: w}, r)
+	})
+
+	var handler http.Handler = inner
+	handler = i18n.Middleware(handler)
+	handler = auth.SecurityHeaders(handler)
+	handler = middleware.Recovery(handler)
+	handler = middleware.MaxBytes(handler)
+	handler = middleware.Logging(handler)
+	return handler
+}
+
 func (s *Server) Start() error {
 	handler := s.BuildHandler()
 
@@ -185,11 +250,13 @@ func (s *Server) Start() error {
 	listener := tls.NewListener(newSniffListener(raw, sniffPeekTimeout), tlsConfig)
 	defer listener.Close()
 
-	// Start HTTP loopback server on localhost (127.0.0.1) only
+	// Start HTTP loopback server on localhost (127.0.0.1) only. D-14: the
+	// loopback listener uses its own allowlist-only handler, NOT the public
+	// handler — login/setup/me must not be reachable over plain HTTP.
 	loopbackAddr := fmt.Sprintf("127.0.0.1:%d", s.cfg.LoopbackPort)
 	loopbackSrv := &http.Server{
 		Addr:              loopbackAddr,
-		Handler:           handler,
+		Handler:           s.BuildLoopbackHandler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       120 * time.Second,
