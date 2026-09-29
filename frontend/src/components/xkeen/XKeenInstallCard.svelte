@@ -16,11 +16,32 @@
     /** Окно установки открыто или закрыто: пока оно открыто, родитель не
      *  должен убирать карточку, иначе сессия установщика оборвётся */
     onopenchange?: (open: boolean) => void;
+    /** Последняя стабильная версия Xray (например, v26.3.27); null, пока неизвестна */
+    stableXrayVersion?: string | null;
+    /** Канал обновлений Xray на странице: версию подсказываем только для «stable» */
+    xrayChannel?: string;
   }
 
-  let { available, incomplete = false, onfinished, onopenchange }: Props = $props();
+  let {
+    available,
+    incomplete = false,
+    onfinished,
+    onopenchange,
+    stableXrayVersion = null,
+    xrayChannel = 'stable'
+  }: Props = $props();
 
   let channel = $state<'stable' | 'beta'>('stable');
+
+  // Подсказка при выборе «Стабильная»: внутри установщика панель список версий
+  // не меняет, поэтому подсказываем, какой Xray брать. Для «Бета» подсказки нет
+  const stableHint = $derived(
+    channel !== 'stable'
+      ? null
+      : xrayChannel === 'stable' && stableXrayVersion
+        ? $t('xkinst.stable_hint', { version: stableXrayVersion })
+        : $t('xkinst.stable_hint_generic')
+  );
   let isOpen = $state(false);
   let running = $state(false);
   let exitCode = $state<number | null>(null);
@@ -83,6 +104,9 @@
       </Button>
     </div>
     <p class="install-hint">{$t('xkinst.hint')}</p>
+    {#if stableHint}
+      <p class="install-hint" data-testid="xkeen-install-stable-hint">{stableHint}</p>
+    {/if}
   {:else}
     <p class="install-hint warn">{$t('xkinst.no_entware')}</p>
   {/if}
@@ -98,6 +122,9 @@
   <div class="install-modal">
     {#if exitCode === null}
       <p class="install-hint">{$t('xkinst.modal_hint')}</p>
+      {#if stableHint}
+        <p class="install-hint" data-testid="xkeen-install-stable-hint-modal">{stableHint}</p>
+      {/if}
     {:else if exitCode === 0}
       <p class="install-result ok">{$t('xkinst.done')}</p>
     {:else}

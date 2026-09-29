@@ -159,3 +159,46 @@ test.describe('Services page — kernel status polling', () => {
     expect(counters.kernelStatus['xray']).toBeLessThanOrEqual(2);
   });
 });
+
+test.describe('Services page — status age badge', () => {
+  const badge = (page: Page) => page.getByTestId('status-stale-badge');
+
+  test('возраст 45 с показывает тихий бейдж «данные от HH:MM»', async ({ page }) => {
+    await mockRoutes(page, {
+      kernels: kernelsFixture('xray'),
+      serviceStatus: { stale: true, age_seconds: 45 }
+    });
+    await page.goto('/#/services');
+    await expect(badge(page)).toBeVisible();
+    await expect(badge(page)).toContainText(/^\s*(данные от|as of) \d{2}:\d{2}\s*$/);
+  });
+
+  test('граница: 30 с и отсутствие возраста бейджа не показывают', async ({ page }) => {
+    const state: MockState = {
+      kernels: kernelsFixture('xray'),
+      serviceStatus: { stale: true, age_seconds: 30 }
+    };
+    await mockRoutes(page, state);
+    await page.goto('/#/services');
+    await expect(page.locator('.hero-card')).toBeVisible();
+    await expect(badge(page)).toHaveCount(0);
+
+    // Без поля возраста (свежий ответ) бейджа тоже нет
+    state.serviceStatus = { stale: false };
+    await page.reload();
+    await expect(page.locator('.hero-card')).toBeVisible();
+    await expect(badge(page)).toHaveCount(0);
+  });
+
+  test('холодный кэш показывает «Неизвестно», а не «остановлено»', async ({ page }) => {
+    await mockRoutes(page, {
+      kernels: kernelsFixture('xray', { xray: { process_status: 'stopped' } }),
+      serviceStatus: { is_running: false, stale: true, raw: '' }
+    });
+    await page.goto('/#/services');
+    const hero = page.locator('.hero-status');
+    await expect(hero.getByTestId('status-xkeen-unknown')).toContainText(/Неизвестно|Unknown/);
+    await expect(hero).not.toContainText(/остановлен|stopped/i);
+    await expect(badge(page)).toHaveCount(0);
+  });
+});

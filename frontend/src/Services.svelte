@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
   import {
     showToast,
@@ -23,6 +23,12 @@
     showInstallStable,
     type KernelLike
   } from './lib/kernelView';
+  import {
+    parseServiceStatus,
+    staleBadgeVisible,
+    snapshotTimeLabel,
+    isColdUnknown
+  } from './lib/serviceStatus';
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
@@ -69,6 +75,17 @@
   });
 
   let xkeenStatus = $state('');
+  // Возраст кэша статуса XKeen (null — свежий или неизвестен) и «холодный» кэш,
+  // когда состояние ещё не определено: не выдаём его за «остановлено»
+  let statusAgeSeconds = $state<number | null>(null);
+  let statusCold = $state(false);
+  const staleBadge = $derived(
+    statusAgeSeconds !== null &&
+      staleBadgeVisible({ is_running: false, stale: true, age_seconds: statusAgeSeconds })
+  );
+  const staleTimeLabel = $derived(
+    statusAgeSeconds === null ? '' : snapshotTimeLabel(statusAgeSeconds, Date.now(), $currentLang)
+  );
   // null — статус ещё не получен: карточку установки не показываем заранее
   let xkeenInstalled = $state<boolean | null>(null);
   // Окно установщика открыто: бинарник xkeen появляется до конца установки,
@@ -229,27 +246,31 @@
         statusPollError = false;
         const text = await res.text();
         try {
-          const parsed = JSON.parse(text);
-          if (parsed && parsed.success && parsed.data) {
-            if (parsed.data.watchdog !== undefined) {
-              watchdogStatus = parsed.data.watchdog;
+          const d = parseServiceStatus(JSON.parse(text));
+          if (d) {
+            if (d.watchdog !== undefined) {
+              watchdogStatus = d.watchdog as WatchdogStatus;
             }
-            if (typeof parsed.data.xkeen_installed === 'boolean') {
-              xkeenInstalled = parsed.data.xkeen_installed;
+            if (typeof d.xkeen_installed === 'boolean') {
+              xkeenInstalled = d.xkeen_installed;
             }
-            xkeenInstallerAvailable = parsed.data.xkeen_installer_available === true;
-            xkeenSetupIncomplete = parsed.data.xkeen_setup_incomplete === true;
+            xkeenInstallerAvailable = d.xkeen_installer_available === true;
+            xkeenSetupIncomplete = d.xkeen_setup_incomplete === true;
+            statusAgeSeconds = typeof d.age_seconds === 'number' ? d.age_seconds : null;
+            statusCold = isColdUnknown(d);
             xkeenInfo = {
-              isRunning: parsed.data.is_running,
-              activeKernel: parsed.data.active_kernel || '',
-              pid: parsed.data.pid || 0,
-              uptime: parsed.data.uptime || '',
-              binaryPath: parsed.data.binary_path || '',
-              raw: parsed.data.raw || ''
+              isRunning: d.is_running,
+              activeKernel: d.active_kernel || '',
+              pid: d.pid || 0,
+              uptime: d.uptime || '',
+              binaryPath: d.binary_path || '',
+              raw: d.raw || ''
             };
 
             const lower = xkeenInfo.raw.toLowerCase();
-            if (
+            if (statusCold && !d.is_running) {
+              xkeenStatus = $t('kernel.status.unknown');
+            } else if (
               /[\u043D][\u0435]\s*[\u0437][\u0430][\u043F][\u0443][\u0449][\u0435][\u043D]/.test(
                 lower
               ) ||
@@ -734,6 +755,27 @@
 
   let switchingKernelTo = $state<string | null>(null);
 
+  // Подсказка установщика XKeen называет стабильную версию Xray. Если на
+  // канале «Стабильный» она ещё неизвестна, проверка запускается один раз за
+  // жизнь страницы; до ответа установщик показывает общую подсказку
+  let stableCheckRequested = false;
+  const installerShown = $derived(
+    xkeenInstalled === false || xkeenSetupIncomplete || xkeenInstallOpen
+  );
+  $effect(() => {
+    if (
+      installerShown &&
+      xray &&
+      xray.channel === 'stable' &&
+      !xray.latest_version &&
+      !isTransitionalStatus(xray.status) &&
+      !stableCheckRequested
+    ) {
+      stableCheckRequested = true;
+      untrack(() => checkKernelUpdate('xray'));
+    }
+  });
+
   onMount(() => {
     fetchRestartLog();
     const kernelPoller = usePoller((signal) => fetchKernels(signal), 5000);
@@ -792,11 +834,15 @@
     </Button>
   </PageHeader>
 
-  {#if xkeenInstalled === false || xkeenSetupIncomplete || xkeenInstallOpen}
+  {#if installerShown}
     <XKeenInstallCard
       available={xkeenInstallerAvailable}
       incomplete={xkeenSetupIncomplete}
       onopenchange={(open) => (xkeenInstallOpen = open)}
+      stableXrayVersion={xray?.channel === 'stable' && xray?.latest_version
+        ? formatKernelVersion(xray.latest_version)
+        : null}
+      xrayChannel={xray?.channel ?? 'stable'}
       onfinished={() => {
         fetchStatus();
         fetchKernels();
@@ -823,10 +869,27 @@
           </div>
         </div>
         <div class="hero-status">
-          <StatusBadge
-            variant={isRunning ? 'running' : 'stopped'}
-            label={isRunning ? $t('svc.running') : $t('svc.stopped')}
-          />
+          {#if statusCold && !isRunning}
+            <span data-testid="status-xkeen-unknown">
+              <StatusBadge variant="idle" label={$t('kernel.status.unknown')} />
+            </span>
+          {:else}
+            <StatusBadge
+              variant={isRunning ? 'running' : 'stopped'}
+              label={isRunning ? $t('svc.running') : $t('svc.stopped')}
+            />
+          {/if}
+          {#if staleBadge}
+            <span
+              data-testid="status-stale-badge"
+              title={$t('svc.status_stale_title', { seconds: String(statusAgeSeconds) })}
+            >
+              <StatusBadge
+                variant="idle"
+                label={$t('svc.status_stale', { time: staleTimeLabel })}
+              />
+            </span>
+          {/if}
           {#if watchdogBadge}
             <StatusBadge variant={watchdogBadge.variant} label={$t(watchdogBadge.labelKey)} />
           {/if}
