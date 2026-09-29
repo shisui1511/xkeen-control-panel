@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -78,6 +81,11 @@ func newKernelTestAPI(t *testing.T) (*API, string) {
 	}))
 	t.Cleanup(releases.Close)
 	kernelSvc.SetReleaseSource(releases.URL, releases.Client())
+	// Установка тоже не ходит в сеть: на amd64 у ядер нет ассетов, а загрузка
+	// в тестах должна быть управляемой. Тесты, которым нужна своя, вызывают SetInstallSource.
+	kernelSvc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		return errors.New("network is disabled in tests")
+	})
 
 	return &API{
 		cfg:       cfg,
@@ -131,6 +139,107 @@ func TestKernelInstall(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
+}
+
+// kernelStatusOf запрашивает GET /api/kernels/{name}/status и возвращает ядро.
+func kernelStatusOf(t *testing.T, api *API, name string) services.KernelInfo {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/kernels/"+name+"/status", nil)
+	rr := httptest.NewRecorder()
+	api.KernelStatus(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data services.KernelInfo `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp.Data
+}
+
+func postKernelInstall(api *API, name string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/api/kernels/"+name+"/install", nil)
+	rr := httptest.NewRecorder()
+	api.KernelInstall(rr, req)
+	return rr
+}
+
+// blockingInstall подменяет загрузку: она ждёт release и завершается ошибкой.
+func blockingInstall(api *API) (release func()) {
+	gate := make(chan struct{})
+	api.kernelSvc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		<-gate
+		return errors.New("stop")
+	})
+	return func() { close(gate) }
+}
+
+func waitKernelFailed(t *testing.T, api *API, name string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if k := kernelStatusOf(t, api, name); k.Status == "failed" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("kernel did not reach status failed in 5s")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestKernelInstall_StageVisibleImmediately: 200 отдаётся, когда статус уже
+// переходный, и первый же GET status не видит idle (KERN-02, D-09).
+func TestKernelInstall_StageVisibleImmediately(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+	release := blockingInstall(api)
+
+	rr := postKernelInstall(api, "xray")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Data["status"] != "downloading" || resp.Data["stage"] != "starting" {
+		t.Errorf("response data = %v, want status downloading and stage starting", resp.Data)
+	}
+
+	k := kernelStatusOf(t, api, "xray")
+	if k.Status != "downloading" {
+		t.Errorf("status right after POST = %q, want downloading", k.Status)
+	}
+	if k.Stage != "starting" && k.Stage != "downloading" {
+		t.Errorf("stage right after POST = %q, want starting or downloading", k.Stage)
+	}
+
+	release()
+	waitKernelFailed(t, api, "xray")
+}
+
+// TestKernelInstall_Conflict409: второй POST при идущей установке — 409.
+func TestKernelInstall_Conflict409(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+	release := blockingInstall(api)
+
+	if rr := postKernelInstall(api, "xray"); rr.Code != http.StatusOK {
+		t.Fatalf("first install: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	rr := postKernelInstall(api, "xray")
+	if rr.Code != http.StatusConflict {
+		t.Errorf("second install: expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "install already in progress") {
+		t.Errorf("unexpected 409 body: %s", rr.Body.String())
+	}
+
+	release()
+	waitKernelFailed(t, api, "xray")
 }
 
 func TestKernelStatus(t *testing.T) {

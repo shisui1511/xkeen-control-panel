@@ -3,7 +3,9 @@ package services
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -1288,5 +1290,308 @@ func TestRefreshInstalledVersion(t *testing.T) {
 	svc.refreshInstalledVersion(k)
 	if k.CurrentVersion != "26.9.9" || k.HasUpdate {
 		t.Errorf("after install: current=%q hasUpdate=%v, want 26.9.9/false", k.CurrentVersion, k.HasUpdate)
+	}
+}
+
+// --- Установка ядра (KERN-02, D-09/D-10) ---
+
+// mihomoScript — stub бинарника mihomo с версией ver (формат вывода как у `mihomo -v`).
+func mihomoScript(ver string) []byte {
+	return []byte("#!/bin/sh\necho \"Mihomo Version v" + ver + "\"\n")
+}
+
+// gzBytes упаковывает content в gz-архив (ассет mihomo).
+func gzBytes(t *testing.T, content []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// newInstallTestService — сервис с mihomo в t.TempDir() (внутри разрешённого корня),
+// без сети и без системных бинарников: PATH пуст, пробные пути ведут в каталог теста.
+// installedVersion == "" — бинарника нет. Возвращает сервис и путь бинарника.
+func newInstallTestService(t *testing.T, installedVersion string) (*KernelService, string) {
+	t.Helper()
+	dir := t.TempDir()
+	binPath := filepath.Join(dir, "mihomo")
+	if installedVersion != "" {
+		if err := os.WriteFile(binPath, mihomoScript(installedVersion), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	origProbe := mihomoProbePaths
+	mihomoProbePaths = []string{binPath}
+	t.Cleanup(func() { mihomoProbePaths = origProbe })
+	t.Setenv("PATH", t.TempDir())
+
+	svc := NewKernelService(t.TempDir())
+	svc.mu.Lock()
+	k := svc.kernels["mihomo"]
+	k.BinaryPath = binPath
+	k.binaryPathCachedAt = time.Now()
+	k.LatestVersion = "1.19.0"
+	svc.mu.Unlock()
+	return svc, binPath
+}
+
+// writeGzDownload — шов загрузки: кладёт в dest gz-архив со stub-mihomo версии ver.
+func writeGzDownload(t *testing.T, ver string) func(ctx context.Context, url, dest string) error {
+	t.Helper()
+	data := gzBytes(t, mihomoScript(ver))
+	return func(_ context.Context, _, dest string) error {
+		return os.WriteFile(dest, data, 0644)
+	}
+}
+
+// stageRecorder собирает последовательность (status/stage) из хука установки.
+type stageRecorder struct {
+	mu   sync.Mutex
+	list []string
+}
+
+func (r *stageRecorder) hook(status, stage string) {
+	r.mu.Lock()
+	r.list = append(r.list, status+"/"+stage)
+	r.mu.Unlock()
+}
+
+func (r *stageRecorder) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.list...)
+}
+
+func waitKernelStatus(t *testing.T, svc *KernelService, name, want string) *KernelInfo {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		k := svc.Get(name)
+		if k.Status == want {
+			return k
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status %q not reached in 5s; last: status=%q stage=%q msg=%q", want, k.Status, k.Stage, k.Message)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestInstall_StagesAndResult: этапы идут starting → downloading → extracting →
+// replacing → done; проверка релиза внутри установки тихая и не возвращает статус
+// в idle; итог несёт result_kind и result_version.
+func TestInstall_StagesAndResult(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+
+	// Версия релиза неизвестна: установка сама спросит релиз (quiet), а не сбросит статус.
+	server := newReleaseServer(t, http.StatusOK, `{"tag_name":"v1.19.0"}`)
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.mu.Lock()
+	svc.kernels["mihomo"].LatestVersion = ""
+	svc.mu.Unlock()
+
+	rec := &stageRecorder{}
+	release := make(chan struct{})
+	gz := writeGzDownload(t, "1.19.0")
+	svc.mu.Lock()
+	svc.stageHook = rec.hook
+	svc.mu.Unlock()
+	svc.SetInstallSource("arm64", func(ctx context.Context, url, dest string) error {
+		<-release
+		return gz(ctx, url, dest)
+	})
+
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+
+	// Пока загрузка держится, статус — переходный, а не idle.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		k := svc.Get("mihomo")
+		if k.Status != "downloading" {
+			t.Fatalf("status during download = %q, want downloading (stage %q)", k.Status, k.Stage)
+		}
+		if k.Stage == KernelStageDownloading {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stage downloading not reached; stage=%q", k.Stage)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("install failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("install did not finish in 5s")
+	}
+
+	want := []string{
+		"downloading/starting",
+		"downloading/downloading",
+		"installing/extracting",
+		"installing/replacing",
+		"done/",
+	}
+	got := rec.snapshot()
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("stages = %v, want %v", got, want)
+	}
+
+	k := svc.Get("mihomo")
+	if k.Status != "done" || k.Stage != "" {
+		t.Errorf("final status=%q stage=%q, want done/empty", k.Status, k.Stage)
+	}
+	if k.ResultKind != KernelResultUpdated || k.ResultVersion != "1.19.0" {
+		t.Errorf("result = %q/%q, want updated/1.19.0", k.ResultKind, k.ResultVersion)
+	}
+	if !strings.Contains(k.Message, "1.19.0") {
+		t.Errorf("message should stay English and carry the version: %q", k.Message)
+	}
+}
+
+// TestInstall_ResultKinds: installed (бинарника не было), updated (версия
+// изменилась), reinstalled (та же версия).
+func TestInstall_ResultKinds(t *testing.T) {
+	cases := []struct {
+		name      string
+		installed string
+		want      string
+	}{
+		{"нет бинарника", "", KernelResultInstalled},
+		{"другая версия", "1.18.0", KernelResultUpdated},
+		{"та же версия", "1.19.0", KernelResultReinstalled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, binPath := newInstallTestService(t, tc.installed)
+			svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+
+			if err := svc.Install("mihomo"); err != nil {
+				t.Fatalf("install: %v", err)
+			}
+			k := svc.Get("mihomo")
+			if k.Status != "done" || k.ResultKind != tc.want || k.ResultVersion != "1.19.0" {
+				t.Errorf("status=%q kind=%q version=%q, want done/%s/1.19.0", k.Status, k.ResultKind, k.ResultVersion, tc.want)
+			}
+			if k.CurrentVersion != "1.19.0" {
+				t.Errorf("current version = %q, want 1.19.0", k.CurrentVersion)
+			}
+			if _, err := os.Stat(binPath); err != nil {
+				t.Errorf("binary missing after install: %v", err)
+			}
+		})
+	}
+}
+
+// TestInstall_FailureKeepsBinary: ошибка загрузки — status failed без этапа,
+// рабочий бинарник не тронут.
+func TestInstall_FailureKeepsBinary(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		return errors.New("boom")
+	})
+	if err := svc.Install("mihomo"); err == nil {
+		t.Fatal("expected download error")
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "failed" || k.Stage != "" || !strings.Contains(k.Message, "Download failed") {
+		t.Errorf("status=%q stage=%q message=%q", k.Status, k.Stage, k.Message)
+	}
+	got, _ := os.ReadFile(binPath)
+	if string(got) != string(mihomoScript("1.18.0")) {
+		t.Error("binary must stay untouched after a failed download")
+	}
+}
+
+// TestBeginInstall_ReportsStartingSynchronously: сразу после BeginInstall статус
+// уже downloading со stage starting — первый же опрос клиента не видит idle.
+func TestBeginInstall_ReportsStartingSynchronously(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	var once sync.Once
+	svc.mu.Lock()
+	// Хук держит горутину установки на первом переходе, чтобы Get увидел starting.
+	svc.stageHook = func(status, stage string) {
+		if stage == KernelStageDownloading {
+			once.Do(func() { close(entered) })
+			<-release
+		}
+	}
+	svc.mu.Unlock()
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error { return errors.New("stop") })
+
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	k := svc.Get("mihomo")
+	if k.Status != "downloading" || k.Stage != KernelStageStarting {
+		t.Errorf("right after BeginInstall: status=%q stage=%q, want downloading/starting", k.Status, k.Stage)
+	}
+	close(release)
+	<-done
+}
+
+// TestBeginInstall_ConcurrentOnlyOneWins: из N одновременных запросов замок
+// берёт ровно один, остальные получают ErrKernelBusy (проверка идёт под -race).
+func TestBeginInstall_ConcurrentOnlyOneWins(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	release := make(chan struct{})
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		<-release
+		return errors.New("stop")
+	})
+
+	const n = 16
+	var wg sync.WaitGroup
+	results := make(chan error, n)
+	finished := make(chan error, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- svc.BeginInstall("mihomo", func(err error) { finished <- err })
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	wins, busy := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			wins++
+		case errors.Is(err, ErrKernelBusy):
+			busy++
+		default:
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+	if wins != 1 || busy != n-1 {
+		t.Fatalf("wins=%d busy=%d, want 1/%d", wins, busy, n-1)
+	}
+	close(release)
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("winning install did not finish")
 	}
 }

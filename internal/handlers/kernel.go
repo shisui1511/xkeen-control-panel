@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -80,27 +81,28 @@ func (a *API) KernelInstall(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/kernels/")
 	name = strings.TrimSuffix(name, "/install")
 
-	k := a.kernelSvc.Get(name)
-	if k == nil {
+	if a.kernelSvc.Get(name) == nil {
 		JSONError(w, http.StatusNotFound, "Kernel not found")
 		return
 	}
 
-	// Reject concurrent install requests: if this kernel is already downloading or installing,
-	// return HTTP 409 Conflict immediately.
-	if k.Status == "downloading" || k.Status == "installing" {
+	// Замок берёт и статус «Старт…» ставит сам сервис, до ответа: отдельной
+	// проверки статуса здесь нет (проверка-затем-действие давала гонку). Занят — 409.
+	err := a.kernelSvc.BeginInstall(name, func(error) {
+		a.ClearCapabilitiesCache()
+		a.invalidateXKeenStatus()
+	})
+	if errors.Is(err, services.ErrKernelBusy) {
 		JSONError(w, http.StatusConflict, "install already in progress")
 		return
 	}
-
-	// Run install in background
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	a.ClearCapabilitiesCache()
-	go func() {
-		_ = a.kernelSvc.Install(name)
-		a.ClearCapabilitiesCache()
-	}()
 
-	JSONSuccess(w, map[string]string{"status": "downloading"})
+	JSONSuccess(w, map[string]string{"status": "downloading", "stage": services.KernelStageStarting})
 }
 
 func (a *API) KernelStatus(w http.ResponseWriter, r *http.Request) {
