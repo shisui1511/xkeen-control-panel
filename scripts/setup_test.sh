@@ -681,6 +681,129 @@ else
 fi
 cleanup
 
+# --uninstall --purge без терминала удаляет и данные панели
+setup_uninstall_sandbox
+out=$(run_in_sandbox "ARG_PURGE=true; do_uninstall; echo rc=\$?" </dev/null 2>&1)
+if [ ! -e "$BIN_PATH" ] && [ ! -e "$INIT_SCRIPT" ] && [ ! -e "$INSTALL_DIR" ] \
+    && echo "$out" | grep -q "rc=0"; then
+    pass "uninstall --purge без TTY удаляет данные"
+else
+    fail "uninstall --purge без TTY удаляет данные (got: $out)"
+fi
+cleanup
+
+# Разбор аргументов: порядок флагов не важен
+setup_uninstall_sandbox
+out=$(run_in_sandbox "parse_args --purge --uninstall; echo \"\$ACTION \$ARG_PURGE\"" 2>&1) || true
+if [ "$out" = "uninstall true" ]; then
+    pass "parse_args: --purge --uninstall → ACTION=uninstall, ARG_PURGE=true"
+else
+    fail "parse_args: --purge --uninstall → ACTION=uninstall, ARG_PURGE=true (got: $out)"
+fi
+out=$(run_in_sandbox "parse_args --uninstall --purge; echo \"\$ACTION \$ARG_PURGE\"" 2>&1) || true
+if [ "$out" = "uninstall true" ]; then
+    pass "parse_args: --uninstall --purge → ACTION=uninstall, ARG_PURGE=true"
+else
+    fail "parse_args: --uninstall --purge → ACTION=uninstall, ARG_PURGE=true (got: $out)"
+fi
+cleanup
+
+# --purge без --uninstall — ошибка, ничего не удалено
+setup_uninstall_sandbox
+rc=0
+out=$(run_in_sandbox "parse_args --purge" 2>&1) || rc=$?
+if [ "$rc" -eq 1 ] && echo "$out" | grep -q "Флаг --purge работает только вместе с --uninstall" \
+    && [ -e "$BIN_PATH" ] && [ -e "$INIT_SCRIPT" ] && [ -f "$INSTALL_DIR/config.json" ]; then
+    pass "--purge без --uninstall — ошибка"
+else
+    fail "--purge без --uninstall — ошибка (rc=$rc, got: $out)"
+fi
+cleanup
+
+# purge_install_dir отказывается от пустого и системных путей (rm — mock)
+make_sandbox
+printf '#!/bin/sh\necho "$*" >> "%s/rm.log"\n' "$TMP" > "$MOCK_BIN/rm"
+chmod +x "$MOCK_BIN/rm"
+guard_ok=true
+for bad in "" "/" "/opt" "/opt/" "/opt/etc" "/opt/etc/"; do
+    rc=0
+    out=$(run_in_sandbox "INSTALL_DIR='$bad'; purge_install_dir" 2>&1) || rc=$?
+    if [ "$rc" -ne 1 ]; then
+        guard_ok=false
+        printf "    путь '%s': код %s вместо 1\n" "$bad" "$rc"
+    fi
+done
+if [ "$guard_ok" = "true" ] && [ ! -s "$TMP/rm.log" ]; then
+    pass "purge_install_dir отказывается от системных путей"
+else
+    fail "purge_install_dir отказывается от системных путей (rm.log: $(cat "$TMP/rm.log" 2>/dev/null))"
+fi
+cleanup
+
+# Обычный путь данных purge_install_dir удаляет
+setup_uninstall_sandbox
+out=$(run_in_sandbox "purge_install_dir; echo rc=\$?" 2>&1)
+if [ ! -e "$INSTALL_DIR" ] && echo "$out" | grep -q "rc=0"; then
+    pass "purge_install_dir удаляет обычный каталог данных"
+else
+    fail "purge_install_dir удаляет обычный каталог данных (got: $out)"
+fi
+cleanup
+
+# Интерактив (терминал = файл с ответами): «n» отменяет, ничего не удалено
+setup_uninstall_sandbox
+printf 'n\n' > "$TMP/tty"
+TTY_DEV_OVERRIDE="$TMP/tty"
+out=$(run_in_sandbox "ARG_PURGE=true; do_uninstall" 2>&1)
+unset TTY_DEV_OVERRIDE
+if echo "$out" | grep -q "Продолжить? \[y/N\]" && echo "$out" | grep -q "Отменено" \
+    && [ -e "$BIN_PATH" ] && [ -e "$INIT_SCRIPT" ] && [ -f "$INSTALL_DIR/config.json" ]; then
+    pass "интерактив: ответ n отменяет"
+else
+    fail "интерактив: ответ n отменяет (got: $out)"
+fi
+cleanup
+
+# Интерактив: «y» + --purge — второй вопрос не задаётся, данные удалены
+setup_uninstall_sandbox
+printf 'y\n' > "$TMP/tty"
+TTY_DEV_OVERRIDE="$TMP/tty"
+out=$(run_in_sandbox "ARG_PURGE=true; do_uninstall" 2>&1)
+unset TTY_DEV_OVERRIDE
+if [ ! -e "$BIN_PATH" ] && [ ! -e "$INIT_SCRIPT" ] && [ ! -e "$INSTALL_DIR" ] \
+    && ! echo "$out" | grep -q "Удалить директорию конфигов"; then
+    pass "интерактив: ответ y + purge"
+else
+    fail "интерактив: ответ y + purge (got: $out)"
+fi
+cleanup
+
+# Интерактив без --purge: второй вопрос задаётся как раньше, «y» удаляет данные, «n» — нет
+setup_uninstall_sandbox
+printf 'y\nn\n' > "$TMP/tty"
+TTY_DEV_OVERRIDE="$TMP/tty"
+out=$(run_in_sandbox "do_uninstall" 2>&1)
+unset TTY_DEV_OVERRIDE
+if [ ! -e "$BIN_PATH" ] && [ -f "$INSTALL_DIR/config.json" ] \
+    && echo "$out" | grep -q "Удалить директорию конфигов"; then
+    pass "интерактив: второй вопрос про конфиги, ответ n сохраняет данные"
+else
+    fail "интерактив: второй вопрос про конфиги, ответ n сохраняет данные (got: $out)"
+fi
+cleanup
+
+setup_uninstall_sandbox
+printf 'y\ny\n' > "$TMP/tty"
+TTY_DEV_OVERRIDE="$TMP/tty"
+out=$(run_in_sandbox "do_uninstall" 2>&1)
+unset TTY_DEV_OVERRIDE
+if [ ! -e "$BIN_PATH" ] && [ ! -e "$INSTALL_DIR" ]; then
+    pass "интерактив: второй вопрос, ответ y удаляет данные"
+else
+    fail "интерактив: второй вопрос, ответ y удаляет данные (got: $out)"
+fi
+cleanup
+
 # ---------------------------------------------------------------------------
 # Итог
 # ---------------------------------------------------------------------------
