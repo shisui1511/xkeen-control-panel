@@ -176,11 +176,11 @@
   .install-modal {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-3);
+    gap: var(--spacing-2);
   }
 
   .install-terminal {
-    height: min(60vh, 520px);
+    height: clamp(360px, calc(90dvh - 208px), 860px);
     display: flex;
     flex-direction: column;
   }
