@@ -497,7 +497,8 @@ test.describe('Services page — channel switch and pre-release on stable', () =
     await previewBtn.click();
 
     await expect(previewBtn).toHaveClass(/active/);
-    expect(kernelsGets).toBeGreaterThan(before);
+    // Перечитывание списка идёт асинхронно после ответа смены канала
+    await expect.poll(() => kernelsGets).toBeGreaterThan(before);
     await expect(page.locator('.channel-mismatch-hint')).toHaveCount(0);
   });
 
