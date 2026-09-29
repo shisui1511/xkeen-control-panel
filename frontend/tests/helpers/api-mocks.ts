@@ -109,6 +109,43 @@ export async function fulfillServiceControl(route: Route) {
   });
 }
 
+// ============================================================
+// Внешние сервисы определения IP клиента (src/lib/clientIp.ts)
+// ============================================================
+// Панель на дашборде и странице прокси спрашивает публичные сервисы
+// геолокации прямо из браузера. В e2e ходить в сеть нельзя: сервис
+// отвечает 429 без CORS-заголовков и пишет ошибку в консоль. Поэтому
+// все такие запросы закрываются моком с валидным ответом и CORS.
+export async function mockExternalGeoServices(page: Page): Promise<void> {
+  const cors = { 'access-control-allow-origin': '*' };
+  await page.route(
+    /^https:\/\/(ipinfo\.io|api\.my-ip\.io|api\.ipify\.org|api64\.ipify\.org|icanhazip\.com|ipapi\.co)(\/|\?|$)/,
+    async (route) => {
+      const url = route.request().url();
+      if (url.includes('icanhazip.com')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/plain',
+          headers: cors,
+          body: '198.51.100.42\n'
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: cors,
+        body: JSON.stringify({
+          ip: '198.51.100.42',
+          country: 'NL',
+          city: 'Amsterdam',
+          org: 'AS64500 Test Network'
+        })
+      });
+    }
+  );
+}
+
 /**
  * Устанавливает моки API и возвращает page готовую к навигации.
  * authMode управляет ответом /api/auth/me:
@@ -129,6 +166,8 @@ export async function setupMocks(
       configurable: true
     });
   });
+
+  await mockExternalGeoServices(page);
 
   await page.route('**/api/**', async (route) => {
     const url = route.request().url();
