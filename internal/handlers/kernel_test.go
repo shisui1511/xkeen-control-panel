@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -67,6 +70,23 @@ func newKernelTestAPI(t *testing.T) (*API, string) {
 
 	kernelSvc := services.NewKernelService(t.TempDir())
 
+	// Проверка релизов идёт на локальный сервер, а не в реальный GitHub.
+	releases := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/releases/latest") {
+			_, _ = w.Write([]byte(`{"tag_name":"v1.8.24"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"tag_name":"v1.9.0-rc1","prerelease":true}]`))
+	}))
+	t.Cleanup(releases.Close)
+	kernelSvc.SetReleaseSource(releases.URL, releases.Client())
+	// Установка тоже не ходит в сеть: на amd64 у ядер нет ассетов, а загрузка
+	// в тестах должна быть управляемой. Тесты, которым нужна своя, вызывают SetInstallSource.
+	kernelSvc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		return errors.New("network is disabled in tests")
+	})
+
 	return &API{
 		cfg:       cfg,
 		kernelSvc: kernelSvc,
@@ -121,6 +141,107 @@ func TestKernelInstall(t *testing.T) {
 	}
 }
 
+// kernelStatusOf запрашивает GET /api/kernels/{name}/status и возвращает ядро.
+func kernelStatusOf(t *testing.T, api *API, name string) services.KernelInfo {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/kernels/"+name+"/status", nil)
+	rr := httptest.NewRecorder()
+	api.KernelStatus(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data services.KernelInfo `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp.Data
+}
+
+func postKernelInstall(api *API, name string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/api/kernels/"+name+"/install", nil)
+	rr := httptest.NewRecorder()
+	api.KernelInstall(rr, req)
+	return rr
+}
+
+// blockingInstall подменяет загрузку: она ждёт release и завершается ошибкой.
+func blockingInstall(api *API) (release func()) {
+	gate := make(chan struct{})
+	api.kernelSvc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		<-gate
+		return errors.New("stop")
+	})
+	return func() { close(gate) }
+}
+
+func waitKernelFailed(t *testing.T, api *API, name string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if k := kernelStatusOf(t, api, name); k.Status == "failed" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("kernel did not reach status failed in 5s")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestKernelInstall_StageVisibleImmediately: 200 отдаётся, когда статус уже
+// переходный, и первый же GET status не видит idle (KERN-02, D-09).
+func TestKernelInstall_StageVisibleImmediately(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+	release := blockingInstall(api)
+
+	rr := postKernelInstall(api, "xray")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Data["status"] != "downloading" || resp.Data["stage"] != "starting" {
+		t.Errorf("response data = %v, want status downloading and stage starting", resp.Data)
+	}
+
+	k := kernelStatusOf(t, api, "xray")
+	if k.Status != "downloading" {
+		t.Errorf("status right after POST = %q, want downloading", k.Status)
+	}
+	if k.Stage != "starting" && k.Stage != "downloading" {
+		t.Errorf("stage right after POST = %q, want starting or downloading", k.Stage)
+	}
+
+	release()
+	waitKernelFailed(t, api, "xray")
+}
+
+// TestKernelInstall_Conflict409: второй POST при идущей установке — 409.
+func TestKernelInstall_Conflict409(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+	release := blockingInstall(api)
+
+	if rr := postKernelInstall(api, "xray"); rr.Code != http.StatusOK {
+		t.Fatalf("first install: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	rr := postKernelInstall(api, "xray")
+	if rr.Code != http.StatusConflict {
+		t.Errorf("second install: expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "install already in progress") {
+		t.Errorf("unexpected 409 body: %s", rr.Body.String())
+	}
+
+	release()
+	waitKernelFailed(t, api, "xray")
+}
+
 func TestKernelStatus(t *testing.T) {
 	api, _ := newKernelTestAPI(t)
 
@@ -148,15 +269,58 @@ func TestKernelChannel(t *testing.T) {
 	}
 }
 
+// TestKernelChannel_Recompute: смена канала синхронно перепроверяет релиз и
+// возвращает в ответе пересчитанное ядро (KERN-01, D-08).
+func TestKernelChannel_Recompute(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+
+	post := func(channel string) (string, string, string) {
+		t.Helper()
+		body := fmt.Sprintf(`{"channel": %q}`, channel)
+		req := httptest.NewRequest(http.MethodPost, "/api/kernels/xray/channel", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		api.KernelChannel(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Channel string `json:"channel"`
+				Kernel  struct {
+					LatestVersion string `json:"latest_version"`
+					Status        string `json:"status"`
+				} `json:"kernel"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		if !resp.Success {
+			t.Fatalf("expected success, got %s", rr.Body.String())
+		}
+		return resp.Data.Channel, resp.Data.Kernel.LatestVersion, resp.Data.Kernel.Status
+	}
+
+	ch, latest, status := post("preview")
+	if ch != "preview" || latest != "1.9.0-rc1" || status != "idle" {
+		t.Errorf("preview: channel=%q latest=%q status=%q", ch, latest, status)
+	}
+	ch, latest, status = post("stable")
+	if ch != "stable" || latest != "1.8.24" || status != "idle" {
+		t.Errorf("stable: channel=%q latest=%q status=%q", ch, latest, status)
+	}
+}
+
 func TestKernelRollback(t *testing.T) {
 	api, tmpDir := newKernelTestAPI(t)
 
-	// Create dummy backup
+	// Бэкап в формате с версией: xray.bak.<метка>.<версия>
 	backupDir := filepath.Join(tmpDir, ".backup")
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	backupPath := filepath.Join(backupDir, "kernel.bak.12345")
+	backupPath := filepath.Join(backupDir, "xray.bak.1759100000.1.8.24")
 	if err := os.WriteFile(backupPath, []byte("backup-content"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -167,8 +331,64 @@ func TestKernelRollback(t *testing.T) {
 	api.KernelRollback(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
+	if _, err := os.Stat(backupPath); err == nil {
+		t.Error("applied backup must be consumed")
+	}
+	if k := kernelStatusOf(t, api, "xray"); k.ResultKind != services.KernelResultRolledBack || k.Status != "done" {
+		t.Errorf("status=%q result_kind=%q, want done/rolled_back", k.Status, k.ResultKind)
+	}
+}
+
+// TestKernelRollback_NoBackup: без бэкапа откат — ошибка; чужой файл в .backup
+// бэкапом не считается.
+func TestKernelRollback_NoBackup(t *testing.T) {
+	api, tmpDir := newKernelTestAPI(t)
+	backupDir := filepath.Join(tmpDir, ".backup")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, "notes.txt"), []byte("not a backup"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	api.KernelRollback(rr, httptest.NewRequest(http.MethodPost, "/api/kernels/xray/rollback", nil))
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestKernelRollback_Conflict409: откат при идущей установке — 409, а не гонка.
+func TestKernelRollback_Conflict409(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+	release := blockingInstall(api)
+
+	if rr := postKernelInstall(api, "xray"); rr.Code != http.StatusOK {
+		t.Fatalf("install: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	rr := httptest.NewRecorder()
+	api.KernelRollback(rr, httptest.NewRequest(http.MethodPost, "/api/kernels/xray/rollback", nil))
+	if rr.Code != http.StatusConflict {
+		t.Errorf("rollback while installing: expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	body := &bytes.Buffer{}
+	w := multipart.NewWriter(body)
+	part, _ := w.CreateFormFile("file", "xray")
+	_, _ = part.Write([]byte("\x7fELF"))
+	_ = w.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/kernels/xray/upload", body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	api.KernelUpload(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("upload while installing: expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	release()
+	waitKernelFailed(t, api, "xray")
 }
 
 func TestKernelDownload_Error(t *testing.T) {

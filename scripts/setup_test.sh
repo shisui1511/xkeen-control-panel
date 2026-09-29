@@ -159,6 +159,7 @@ run_in_sandbox() {
     XCP_BIN_PATH="$BIN_PATH" \
     XCP_INIT_SCRIPT="$INIT_SCRIPT" \
     XCP_ELF_PROBE="${ELF_PROBE_FILE:-/nonexistent}" \
+    XCP_TTY_DEV="${TTY_DEV_OVERRIDE:-$TMP/no-tty}" \
     PATH="$MOCK_BIN:$PATH" \
     sh -c ". '$SETUP'; $1"
 }
@@ -650,6 +651,217 @@ else
     pass "offer_password_setup с заданным паролем не вызывает mock xcp"
 fi
 unset XCP_CALL_LOG
+cleanup
+
+# ---------------------------------------------------------------------------
+# do_uninstall — удаление без терминала и с ним (D-13)
+# ---------------------------------------------------------------------------
+echo ""
+echo "── do_uninstall ─────────────────────────────────────────────"
+
+# Песочница с установленной панелью: бинарник, init-скрипт и данные
+setup_uninstall_sandbox() {
+    make_sandbox
+    install_mock_binary "0.1.0"
+    mock_init_script
+    printf '{"auth":{"password_hash":"x"}}\n' > "$INSTALL_DIR/config.json"
+    mock_pgrep_not_running
+    mock_killall
+}
+
+setup_uninstall_sandbox
+out=$(run_in_sandbox "do_uninstall; echo rc=\$?" </dev/null 2>&1)
+if [ ! -e "$BIN_PATH" ] && [ ! -e "$INIT_SCRIPT" ] \
+    && [ -f "$INSTALL_DIR/config.json" ] \
+    && echo "$out" | grep -q "rc=0" \
+    && ! echo "$out" | grep -q "Отменено"; then
+    pass "uninstall без TTY сохраняет данные"
+else
+    fail "uninstall без TTY сохраняет данные (got: $out)"
+fi
+cleanup
+
+# --uninstall --purge без терминала удаляет и данные панели
+setup_uninstall_sandbox
+out=$(run_in_sandbox "ARG_PURGE=true; do_uninstall; echo rc=\$?" </dev/null 2>&1)
+if [ ! -e "$BIN_PATH" ] && [ ! -e "$INIT_SCRIPT" ] && [ ! -e "$INSTALL_DIR" ] \
+    && echo "$out" | grep -q "rc=0"; then
+    pass "uninstall --purge без TTY удаляет данные"
+else
+    fail "uninstall --purge без TTY удаляет данные (got: $out)"
+fi
+cleanup
+
+# Разбор аргументов: порядок флагов не важен
+setup_uninstall_sandbox
+out=$(run_in_sandbox "parse_args --purge --uninstall; echo \"\$ACTION \$ARG_PURGE\"" 2>&1) || true
+if [ "$out" = "uninstall true" ]; then
+    pass "parse_args: --purge --uninstall → ACTION=uninstall, ARG_PURGE=true"
+else
+    fail "parse_args: --purge --uninstall → ACTION=uninstall, ARG_PURGE=true (got: $out)"
+fi
+out=$(run_in_sandbox "parse_args --uninstall --purge; echo \"\$ACTION \$ARG_PURGE\"" 2>&1) || true
+if [ "$out" = "uninstall true" ]; then
+    pass "parse_args: --uninstall --purge → ACTION=uninstall, ARG_PURGE=true"
+else
+    fail "parse_args: --uninstall --purge → ACTION=uninstall, ARG_PURGE=true (got: $out)"
+fi
+cleanup
+
+# --purge без --uninstall — ошибка, ничего не удалено
+setup_uninstall_sandbox
+rc=0
+out=$(run_in_sandbox "parse_args --purge" 2>&1) || rc=$?
+if [ "$rc" -eq 1 ] && echo "$out" | grep -q "Флаг --purge работает только вместе с --uninstall" \
+    && [ -e "$BIN_PATH" ] && [ -e "$INIT_SCRIPT" ] && [ -f "$INSTALL_DIR/config.json" ]; then
+    pass "--purge без --uninstall — ошибка"
+else
+    fail "--purge без --uninstall — ошибка (rc=$rc, got: $out)"
+fi
+cleanup
+
+# purge_install_dir отказывается от пустого и системных путей (rm — mock)
+make_sandbox
+printf '#!/bin/sh\necho "$*" >> "%s/rm.log"\n' "$TMP" > "$MOCK_BIN/rm"
+chmod +x "$MOCK_BIN/rm"
+guard_ok=true
+for bad in "" "/" "/opt" "/opt/" "/opt/etc" "/opt/etc/"; do
+    rc=0
+    out=$(run_in_sandbox "INSTALL_DIR='$bad'; purge_install_dir" 2>&1) || rc=$?
+    if [ "$rc" -ne 1 ]; then
+        guard_ok=false
+        printf "    путь '%s': код %s вместо 1\n" "$bad" "$rc"
+    fi
+done
+if [ "$guard_ok" = "true" ] && [ ! -s "$TMP/rm.log" ]; then
+    pass "purge_install_dir отказывается от системных путей"
+else
+    fail "purge_install_dir отказывается от системных путей (rm.log: $(cat "$TMP/rm.log" 2>/dev/null))"
+fi
+cleanup
+
+# Обычный путь данных purge_install_dir удаляет
+setup_uninstall_sandbox
+out=$(run_in_sandbox "purge_install_dir; echo rc=\$?" 2>&1)
+if [ ! -e "$INSTALL_DIR" ] && echo "$out" | grep -q "rc=0"; then
+    pass "purge_install_dir удаляет обычный каталог данных"
+else
+    fail "purge_install_dir удаляет обычный каталог данных (got: $out)"
+fi
+cleanup
+
+# Интерактив (терминал = файл с ответами): «n» отменяет, ничего не удалено
+setup_uninstall_sandbox
+printf 'n\n' > "$TMP/tty"
+TTY_DEV_OVERRIDE="$TMP/tty"
+out=$(run_in_sandbox "ARG_PURGE=true; do_uninstall" 2>&1)
+unset TTY_DEV_OVERRIDE
+if echo "$out" | grep -q "Продолжить? \[y/N\]" && echo "$out" | grep -q "Отменено" \
+    && [ -e "$BIN_PATH" ] && [ -e "$INIT_SCRIPT" ] && [ -f "$INSTALL_DIR/config.json" ]; then
+    pass "интерактив: ответ n отменяет"
+else
+    fail "интерактив: ответ n отменяет (got: $out)"
+fi
+cleanup
+
+# Интерактив: «y» + --purge — второй вопрос не задаётся, данные удалены
+setup_uninstall_sandbox
+printf 'y\n' > "$TMP/tty"
+TTY_DEV_OVERRIDE="$TMP/tty"
+out=$(run_in_sandbox "ARG_PURGE=true; do_uninstall" 2>&1)
+unset TTY_DEV_OVERRIDE
+if [ ! -e "$BIN_PATH" ] && [ ! -e "$INIT_SCRIPT" ] && [ ! -e "$INSTALL_DIR" ] \
+    && ! echo "$out" | grep -q "Удалить директорию конфигов"; then
+    pass "интерактив: ответ y + purge"
+else
+    fail "интерактив: ответ y + purge (got: $out)"
+fi
+cleanup
+
+# Интерактив без --purge: второй вопрос задаётся как раньше. Файл-терминал
+# открывается заново при каждом чтении, поэтому разные ответы на два вопроса
+# подаёт заглушка read: построчно из файла ответов.
+write_read_stub() {
+    cat > "$TMP/read_stub.sh" <<'STUB'
+read() {
+    _n=$(cat "$STUB_DIR/n" 2>/dev/null || echo 0)
+    _n=$((_n+1))
+    echo "$_n" > "$STUB_DIR/n"
+    _ans=$(sed -n "${_n}p" "$STUB_DIR/answers")
+    eval "$1=\$_ans"
+}
+STUB
+}
+
+setup_uninstall_sandbox
+write_read_stub
+printf 'y\nn\n' > "$TMP/answers"
+printf 'stub\n' > "$TMP/tty"
+TTY_DEV_OVERRIDE="$TMP/tty"
+out=$(STUB_DIR="$TMP" run_in_sandbox ". '$TMP/read_stub.sh'; do_uninstall" 2>&1)
+unset TTY_DEV_OVERRIDE
+if [ ! -e "$BIN_PATH" ] && [ ! -e "$INIT_SCRIPT" ] && [ -f "$INSTALL_DIR/config.json" ] \
+    && echo "$out" | grep -q "Удалить директорию конфигов"; then
+    pass "интерактив: второй вопрос про конфиги, ответ n сохраняет данные"
+else
+    fail "интерактив: второй вопрос про конфиги, ответ n сохраняет данные (got: $out)"
+fi
+cleanup
+
+setup_uninstall_sandbox
+printf 'y\ny\n' > "$TMP/tty"
+TTY_DEV_OVERRIDE="$TMP/tty"
+out=$(run_in_sandbox "do_uninstall" 2>&1)
+unset TTY_DEV_OVERRIDE
+if [ ! -e "$BIN_PATH" ] && [ ! -e "$INSTALL_DIR" ]; then
+    pass "интерактив: второй вопрос, ответ y удаляет данные"
+else
+    fail "интерактив: второй вопрос, ответ y удаляет данные (got: $out)"
+fi
+cleanup
+
+# ---------------------------------------------------------------------------
+# Подсказка про пароль при первом входе (D-14)
+# ---------------------------------------------------------------------------
+echo ""
+echo "── подсказка первого входа ──────────────────────────────────"
+
+# Код выдан: адрес, код и слово про пароль
+make_sandbox
+install_mock_xcp_setup_code
+printf '{}\n' > "$INSTALL_DIR/config.json"
+out=$(run_in_sandbox "INTERACTIVE=false; offer_password_setup 8090 192.168.1.1" 2>&1)
+if echo "$out" | grep -q "https://192.168.1.1:8090" && echo "$out" | grep -q "A1B2C3D4" \
+    && echo "$out" | grep -q "пароль"; then
+    pass "подсказка первого входа с кодом настройки упоминает пароль"
+else
+    fail "подсказка первого входа с кодом настройки упоминает пароль (got: $out)"
+fi
+cleanup
+
+# xcp --setup-code упал без вывода: нет пустого «код настройки: »
+make_sandbox
+printf '#!/bin/sh\nexit 1\n' > "$BIN_PATH"
+chmod +x "$BIN_PATH"
+printf '{}\n' > "$INSTALL_DIR/config.json"
+out=$(run_in_sandbox "INTERACTIVE=false; offer_password_setup 8090 192.168.1.1" 2>&1)
+if echo "$out" | grep -q "пароль" && echo "$out" | grep -q "https://192.168.1.1:8090" \
+    && ! echo "$out" | grep -q 'код настройки: $'; then
+    pass "пустой код настройки не печатается пустым"
+else
+    fail "пустой код настройки не печатается пустым (got: $out)"
+fi
+cleanup
+
+# Путь неответившей панели: подсказка без кода
+make_sandbox
+out=$(run_in_sandbox "print_first_login_hint 8090 192.168.1.1 ''" 2>&1) || true
+if echo "$out" | grep -q "При первом входе задайте пароль" && echo "$out" | grep -q "xcp --setup-code" \
+    && echo "$out" | grep -q "https://192.168.1.1:8090" && ! echo "$out" | grep -q 'код настройки: $'; then
+    pass "подсказка первого входа при неответившей панели"
+else
+    fail "подсказка первого входа при неответившей панели (got: $out)"
+fi
 cleanup
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { mockExternalGeoServices } from './helpers/api-mocks';
 
 test.use({ locale: 'ru-RU' });
 
@@ -70,6 +71,8 @@ test.describe('Параллельный пинг групп и непрерыв�
         configurable: true
       });
     });
+
+    await mockExternalGeoServices(page);
 
     await page.route('**/api/**', async (route) => {
       const request = route.request();

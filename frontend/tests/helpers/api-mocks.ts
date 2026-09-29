@@ -10,6 +10,85 @@ import type { Page, Route } from '@playwright/test';
 export type KernelMode = 'mihomo' | 'xray';
 
 /**
+ * Ответ GET /api/kernels (поле data): всегда ровно два ядра в порядке xray, затем mihomo.
+ * Каждый вызов возвращает новый массив; overrides накладываются на объект своего ядра.
+ * Карточки в проверках искать по имени или data-testid, а не по индексу.
+ */
+export function kernelsFixture(
+  kernel: KernelMode = 'xray',
+  overrides: Partial<Record<'xray' | 'mihomo', Record<string, unknown>>> = {}
+): Record<string, unknown>[] {
+  return [
+    {
+      name: 'xray',
+      display_name: 'Xray-core',
+      binary_path: '/opt/bin/xray',
+      current_version: '1.8.4',
+      latest_version: '1.8.4',
+      has_update: false,
+      channel: 'stable',
+      status: 'idle',
+      process_status: kernel === 'xray' ? 'running' : 'stopped',
+      message: kernel === 'xray' ? 'running on background' : 'stopped',
+      ...overrides.xray
+    },
+    {
+      name: 'mihomo',
+      display_name: 'Mihomo',
+      binary_path: '/opt/bin/mihomo',
+      current_version: '1.18.0',
+      latest_version: '1.18.0',
+      has_update: false,
+      channel: 'stable',
+      status: 'idle',
+      process_status: kernel === 'mihomo' ? 'running' : 'stopped',
+      message: kernel === 'mihomo' ? 'running on background' : 'stopped',
+      ...overrides.mihomo
+    }
+  ];
+}
+
+/**
+ * Ответ GET /api/system/stats (без конверта success/data): полная форма,
+ * которую читают Dashboard.svelte и SystemResourcesWidget (load, uptime, disk, go_runtime).
+ */
+export function systemStatsFixture(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    memory: { total: 524288000, used: 131072000, free: 393216000 },
+    disk: { total: 536870912, used: 209715200, free: 327155712 },
+    ssl_cert_days: 10,
+    load: [0.5, 0.4, 0.3],
+    uptime: { seconds: 3600, days: 0, hours: 1, minutes: 0 },
+    go_runtime: {
+      goroutines: 10,
+      heap_alloc: 4194304,
+      heap_sys: 8388608,
+      num_gc: 5,
+      go_version: 'go1.21.0',
+      gomaxprocs: 4,
+      goarch: 'arm64'
+    },
+    router_model: 'Keenetic',
+    hostname: 'keenetic',
+    wan_status: 'connected',
+    default_gateway: '192.168.1.1',
+    dns_servers: ['8.8.8.8'],
+    dns_resolving: true,
+    invalid_config: false,
+    platform: 'linux',
+    kernel_version: '5.15',
+    ip_interface: 'eth0',
+    timezone: 'Europe/Moscow',
+    config_path: '/opt/etc/xray/config.json',
+    config_lines: 0,
+    boot_time: '2024-01-01T00:00:00Z',
+    ...overrides
+  };
+}
+
+/**
  * Ответ на POST /api/service/control: action=apply возвращает исход «перезапущено»
  * для ядра из запроса, остальные действия — простой успех.
  */
@@ -28,6 +107,42 @@ export async function fulfillServiceControl(route: Route) {
     contentType: 'application/json',
     body: JSON.stringify(body)
   });
+}
+
+// ============================================================
+// Внешние сервисы определения IP клиента (src/lib/clientIp.ts)
+// ============================================================
+// Панель на дашборде и странице прокси спрашивает публичные сервисы
+// геолокации прямо из браузера. В e2e ходить в сеть нельзя: сервис
+// отвечает 429 без CORS-заголовков и пишет ошибку в консоль. Поэтому
+// все такие запросы закрываются моком с валидным ответом и CORS.
+export async function mockExternalGeoServices(page: Page): Promise<void> {
+  const cors = { 'access-control-allow-origin': '*' };
+  await page.route(
+    /^https:\/\/(ipinfo\.io|api\.my-ip\.io|api\.ipify\.org|api64\.ipify\.org|icanhazip\.com|ipapi\.co)(\/|\?|$)/,
+    async (route) => {
+      if (new URL(route.request().url()).hostname === 'icanhazip.com') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/plain',
+          headers: cors,
+          body: '198.51.100.42\n'
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: cors,
+        body: JSON.stringify({
+          ip: '198.51.100.42',
+          country: 'NL',
+          city: 'Amsterdam',
+          org: 'AS64500 Test Network'
+        })
+      });
+    }
+  );
 }
 
 /**
@@ -50,6 +165,8 @@ export async function setupMocks(
       configurable: true
     });
   });
+
+  await mockExternalGeoServices(page);
 
   await page.route('**/api/**', async (route) => {
     const url = route.request().url();
@@ -130,35 +247,7 @@ export async function setupMocks(
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          data: [
-            {
-              name: 'xray',
-              display_name: 'Xray-core',
-              binary_path: '/opt/bin/xray',
-              current_version: '1.8.4',
-              latest_version: '1.8.4',
-              has_update: false,
-              channel: 'stable',
-              status: 'idle',
-              process_status: kernel === 'xray' ? 'running' : 'stopped',
-              message: kernel === 'xray' ? 'running on background' : 'stopped'
-            },
-            {
-              name: 'mihomo',
-              display_name: 'Mihomo',
-              binary_path: '/opt/bin/mihomo',
-              current_version: '1.18.0',
-              latest_version: '1.18.0',
-              has_update: false,
-              channel: 'stable',
-              status: 'idle',
-              process_status: kernel === 'mihomo' ? 'running' : 'stopped',
-              message: kernel === 'mihomo' ? 'running on background' : 'stopped'
-            }
-          ]
-        })
+        body: JSON.stringify({ success: true, data: kernelsFixture(kernel) })
       });
     } else if (url.includes('/api/settings')) {
       await route.fulfill({
@@ -184,36 +273,7 @@ export async function setupMocks(
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          memory: { total: 524288000, used: 131072000, free: 393216000 },
-          disk: { total: 536870912, used: 209715200, free: 327155712 },
-          ssl_cert_days: 10,
-          load: [0.5, 0.4, 0.3],
-          uptime: { seconds: 3600, days: 0, hours: 1, minutes: 0 },
-          go_runtime: {
-            goroutines: 10,
-            heap_alloc: 4194304,
-            heap_sys: 8388608,
-            num_gc: 5,
-            go_version: 'go1.21.0',
-            gomaxprocs: 4,
-            goarch: 'arm64'
-          },
-          router_model: 'Keenetic',
-          hostname: 'keenetic',
-          wan_status: 'connected',
-          default_gateway: '192.168.1.1',
-          dns_servers: ['8.8.8.8'],
-          dns_resolving: true,
-          invalid_config: false,
-          platform: 'linux',
-          kernel_version: '5.15',
-          ip_interface: 'eth0',
-          timezone: 'Europe/Moscow',
-          config_path: '/opt/etc/xray/config.json',
-          config_lines: 0,
-          boot_time: '2024-01-01T00:00:00Z'
-        })
+        body: JSON.stringify(systemStatsFixture())
       });
     } else if (url.includes('/api/subscriptions') || url.includes('/api/proxy-providers')) {
       // SubscriptionList возвращает сырой JSON-массив (не обёрнутый в {success,data})

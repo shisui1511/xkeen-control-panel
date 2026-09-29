@@ -249,6 +249,15 @@ func main() {
 
 	// API handlers
 	api := handlers.NewAPI(cfg, srv)
+
+	// Кэш статуса XKeen: единственный владелец опроса `xkeen -status` / `-v`,
+	// обработчики отвечают из его снимка
+	xkeenStatusCache := services.NewXKeenStatusCache(api.XKeenService())
+	xkeenStatusCache.Start()
+	api.SetXKeenStatusCache(xkeenStatusCache)
+	defer xkeenStatusCache.Stop()
+	// После start/stop/restart/switch кэш обновляется сразу, без ожидания 10 с
+	api.XKeenService().SetLifecycleHook(xkeenStatusCache.Invalidate)
 	srv.HandleProtected("/api/auth/change-password", api.ChangePassword)
 	srv.HandleProtected("/api/auth/sessions", api.AuthSessions)
 	srv.HandleProtected("/api/auth/sessions/terminate", api.AuthSessionTerminate)
@@ -401,6 +410,7 @@ func main() {
 	// Kernel service must exist before background services that query it
 	// (traffic quota liveness check) are started.
 	kernelSvc := services.NewKernelService(cfg.DataDir)
+	kernelSvc.SetMihomoConfigDir(cfg.MihomoConfigDir)
 	api.SetKernelService(kernelSvc)
 
 	// Start background services
@@ -430,15 +440,15 @@ func main() {
 	xrayGRPCSvc := services.NewXrayGRPCService(fmt.Sprintf("127.0.0.1:%d", cfg.XRayAPIPort))
 	xrayGRPCSvc.SetActiveKernelFunc(func() string {
 		if kSvc := api.KernelService(); kSvc != nil {
-			for _, info := range kSvc.List() {
-				if info.ProcessStatus == "running" {
-					return info.Name
+			for _, st := range kSvc.ProcessStates() {
+				if st.Status == "running" {
+					return st.Name
 				}
 			}
 		}
-		if xSvc := api.XKeenService(); xSvc != nil {
-			if status, err := xSvc.Status(); err == nil {
-				lower := strings.ToLower(status)
+		if c := api.XKeenStatusCache(); c != nil {
+			if raw := c.Snapshot().Raw; raw != "" {
+				lower := strings.ToLower(raw)
 				if strings.Contains(lower, "xray") {
 					return "xray"
 				} else if strings.Contains(lower, "mihomo") {

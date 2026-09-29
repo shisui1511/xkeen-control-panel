@@ -1,13 +1,15 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
   import {
     showToast,
     fetchCapabilities,
     showConfirm,
     isKernelChecking,
-    capabilities
+    capabilities,
+    lockNav
   } from './stores';
+  import { anyKernelInstalled } from './lib/navCaps';
   import { usePoller } from './lib/poller';
   import Skeleton from './components/Skeleton.svelte';
   import Button from './components/Button.svelte';
@@ -16,6 +18,23 @@
   import SegmentedControl from './components/SegmentedControl.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import { apiFetch } from './lib/api';
+  import {
+    isTransitionalStatus,
+    formatKernelVersion,
+    kernelBadge,
+    showInstallStable,
+    stageLabelKey,
+    resultMessage,
+    rollbackVisible,
+    rollbackLabel,
+    type KernelLike
+  } from './lib/kernelView';
+  import {
+    parseServiceStatus,
+    staleBadgeVisible,
+    snapshotTimeLabel,
+    isColdUnknown
+  } from './lib/serviceStatus';
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
@@ -26,7 +45,7 @@
 
   let showMihomoMigrateModal = $state(false);
 
-  interface Kernel {
+  interface Kernel extends KernelLike {
     name: string;
     display_name: string;
     binary_path: string;
@@ -62,6 +81,17 @@
   });
 
   let xkeenStatus = $state('');
+  // Возраст кэша статуса XKeen (null — свежий или неизвестен) и «холодный» кэш,
+  // когда состояние ещё не определено: не выдаём его за «остановлено»
+  let statusAgeSeconds = $state<number | null>(null);
+  let statusCold = $state(false);
+  const staleBadge = $derived(
+    statusAgeSeconds !== null &&
+      staleBadgeVisible({ is_running: false, stale: true, age_seconds: statusAgeSeconds })
+  );
+  const staleTimeLabel = $derived(
+    statusAgeSeconds === null ? '' : snapshotTimeLabel(statusAgeSeconds, Date.now(), $currentLang)
+  );
   // null — статус ещё не получен: карточку установки не показываем заранее
   let xkeenInstalled = $state<boolean | null>(null);
   // Окно установщика открыто: бинарник xkeen появляется до конца установки,
@@ -171,10 +201,10 @@
     return /^\d/.test(bare) ? `v${bare}` : bare;
   }
 
-  // Подсказка под строкой ядра: готовые статусы — переведённым текстом, ошибки — как есть
-  function kernelHint(k: { status: string; message: string; current_version: string }): string {
-    if (k.status === 'done')
-      return $t('svc.kernel_installed', { version: kernelVersion(k.current_version) });
+  // Подсказка под строкой ядра: ошибки — как есть. Итог завершённой операции
+  // (status done) показывается отдельно по коду result_kind, английский
+  // message бэкенда пользователю не выводится
+  function kernelHint(k: { status: string; message: string }): string {
     if (k.status === 'idle' && k.message.startsWith('No prerelease found'))
       return $t('svc.kernel_no_prerelease');
     return k.message;
@@ -222,27 +252,31 @@
         statusPollError = false;
         const text = await res.text();
         try {
-          const parsed = JSON.parse(text);
-          if (parsed && parsed.success && parsed.data) {
-            if (parsed.data.watchdog !== undefined) {
-              watchdogStatus = parsed.data.watchdog;
+          const d = parseServiceStatus(JSON.parse(text));
+          if (d) {
+            if (d.watchdog !== undefined) {
+              watchdogStatus = d.watchdog as WatchdogStatus;
             }
-            if (typeof parsed.data.xkeen_installed === 'boolean') {
-              xkeenInstalled = parsed.data.xkeen_installed;
+            if (typeof d.xkeen_installed === 'boolean') {
+              xkeenInstalled = d.xkeen_installed;
             }
-            xkeenInstallerAvailable = parsed.data.xkeen_installer_available === true;
-            xkeenSetupIncomplete = parsed.data.xkeen_setup_incomplete === true;
+            xkeenInstallerAvailable = d.xkeen_installer_available === true;
+            xkeenSetupIncomplete = d.xkeen_setup_incomplete === true;
+            statusAgeSeconds = typeof d.age_seconds === 'number' ? d.age_seconds : null;
+            statusCold = isColdUnknown(d);
             xkeenInfo = {
-              isRunning: parsed.data.is_running,
-              activeKernel: parsed.data.active_kernel || '',
-              pid: parsed.data.pid || 0,
-              uptime: parsed.data.uptime || '',
-              binaryPath: parsed.data.binary_path || '',
-              raw: parsed.data.raw || ''
+              isRunning: d.is_running,
+              activeKernel: d.active_kernel || '',
+              pid: d.pid || 0,
+              uptime: d.uptime || '',
+              binaryPath: d.binary_path || '',
+              raw: d.raw || ''
             };
 
             const lower = xkeenInfo.raw.toLowerCase();
-            if (
+            if (statusCold && !d.is_running) {
+              xkeenStatus = $t('kernel.status.unknown');
+            } else if (
               /[\u043D][\u0435]\s*[\u0437][\u0430][\u043F][\u0443][\u0449][\u0435][\u043D]/.test(
                 lower
               ) ||
@@ -323,10 +357,23 @@
       const res = await apiFetch('/api/kernels', { signal });
       if (res.ok) {
         const envelope = await res.json();
-        const list = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
-        kernels = list;
+        if (channelChanging) return;
+        const list = Array.isArray(envelope)
+          ? envelope
+          : Array.isArray(envelope?.data)
+            ? envelope.data
+            : [];
+        // Ядро с ещё не подтверждённым запуском установки сохраняет оптимистичное
+        // состояние: устаревший ответ списка не должен сбросить «Старт…»
+        kernels = list.map((k: Kernel) =>
+          installStarting[k.name] ? (kernels.find((o) => o.name === k.name) ?? k) : k
+        );
+        // Опрос статуса нужен только пока операция идёт: done и failed
+        // остаются на сервере навсегда и раньше зацикливали запросы
         kernels.forEach((k: (typeof kernels)[0]) => {
-          if (k.status !== 'idle' && !statusTimeouts[k.name]) {
+          if (isTransitionalStatus(k.status) && !statusTimeouts[k.name]) {
+            // Страница открылась во время идущей установки: меню тоже замораживаем
+            if (k.status !== 'checking') holdNavLock(k.name);
             startPolling(k.name);
           }
         });
@@ -341,6 +388,7 @@
   }
 
   async function controlService(action: string) {
+    if (action === 'start' && startBlockedReason) return;
     isKernelChecking.set(false);
     const key = `xkeen-${action}`;
     actionLoading[key] = true;
@@ -467,7 +515,45 @@
     }
   }
 
+  // Замок бокового меню на время установки ядра: пока идёт скачивание и замена,
+  // меню не перестраивается; после снятия последнего замка оно обновляется один раз.
+  // Проверка обновлений (checking) замок не берёт.
+  const navUnlocks: Record<string, () => void> = {};
+
+  function holdNavLock(name: string) {
+    if (!navUnlocks[name]) navUnlocks[name] = lockNav();
+  }
+
+  function releaseNavLock(name: string) {
+    const unlock = navUnlocks[name];
+    if (!unlock) return;
+    delete navUnlocks[name];
+    unlock();
+  }
+
+  // Ядра, у которых POST install отправлен, но ответа ещё нет
+  const installStarting: Record<string, boolean> = {};
+  // Ядро → «вид:версия» итога, о котором уже показан тост (защита от повтора)
+  const lastToastedResult: Record<string, string> = {};
+
   async function installKernel(name: string) {
+    // Оптимистичный старт: кнопка показывает «Старт…» сразу, до ответа POST;
+    // прежняя запись сохраняется для возврата при ошибке
+    const idx = kernels.findIndex((k) => k.name === name);
+    const previous = idx >= 0 ? kernels[idx] : null;
+    if (idx >= 0) {
+      kernels[idx] = {
+        ...kernels[idx],
+        status: 'downloading',
+        stage: 'starting',
+        result_kind: undefined,
+        result_version: undefined
+      };
+      kernels = [...kernels];
+    }
+    delete lastToastedResult[name];
+    installStarting[name] = true;
+    holdNavLock(name);
     try {
       const res = await apiFetch(`/api/kernels/${name}/install`, {
         method: 'POST'
@@ -475,8 +561,16 @@
       if (!res.ok) {
         throw new Error(await res.text());
       }
+      delete installStarting[name];
       startPolling(name);
     } catch (e: any) {
+      delete installStarting[name];
+      releaseNavLock(name);
+      const at = kernels.findIndex((k) => k.name === name);
+      if (at >= 0 && previous) {
+        kernels[at] = previous;
+        kernels = [...kernels];
+      }
       if (e?.status === 401) return;
       showToast('error', `${$t('svc.action_error')}: ${e.message || e}`);
     }
@@ -539,11 +633,11 @@
     }
   }
 
-  // Returns true on success. Callers are responsible for re-fetching kernel
-  // state once, after both kernels' channel requests have settled — this
-  // used to be pulled per-call, causing two redundant /api/kernels round
-  // trips per click and a mismatch window between them.
-  async function setKernelChannel(name: string, channel: string): Promise<boolean> {
+  // Возвращает состояние ядра из ответа бэкенда (он сам перепроверяет релиз
+  // на новом канале) или null, если запрос не удался либо ответ старого
+  // формата без kernel — тогда вызывающий перечитывает список ядер один раз,
+  // когда оба запроса завершились (раньше тянул по запросу на каждое ядро).
+  async function setKernelChannel(name: string, channel: string): Promise<Kernel | null> {
     try {
       const res = await apiFetch(`/api/kernels/${name}/channel`, {
         method: 'POST',
@@ -553,12 +647,63 @@
       if (!res.ok) {
         throw new Error(await res.text());
       }
-      return true;
+      const envelope = await res.json().catch(() => null);
+      const kernel = envelope?.data?.kernel;
+      return kernel && typeof kernel === 'object' && kernel.name === name ? kernel : null;
     } catch (e: any) {
-      if (e?.status === 401) return false;
+      if (e?.status === 401) return null;
       showToast('error', `${$t('svc.channel_error')} (${name}): ${e.message || e}`);
-      return false;
+      return null;
     }
+  }
+
+  // Пока идёт смена канала, опрос списка не перетирает карточки «проверяем…»
+  let channelChanging = false;
+
+  async function changeChannel(channel: string) {
+    channelChanging = true;
+    try {
+      // Старый статус («актуально» на прежнем канале) вводит в заблуждение:
+      // карточки сразу показывают «проверяем…» до ответа бэкенда
+      kernels = kernels.map((k) => ({
+        ...k,
+        status: 'checking',
+        latest_version: '',
+        has_update: false,
+        ahead_of_latest: false,
+        message: ''
+      }));
+      const results = await Promise.all([
+        setKernelChannel('xray', channel),
+        setKernelChannel('mihomo', channel)
+      ]);
+      const answered = results.filter((k): k is Kernel => k !== null);
+      const merged = answered.length === results.length && kernels.length > 0;
+      if (merged) {
+        kernels = kernels.map((k) => answered.find((a) => a.name === k.name) ?? k);
+      }
+      channelChanging = false;
+      if (!merged) await fetchKernels();
+    } finally {
+      channelChanging = false;
+    }
+  }
+
+  async function installStable(name: 'xray' | 'mihomo') {
+    const k = name === 'xray' ? xray : mihomo;
+    if (!k) return;
+    const displayName = name === 'xray' ? 'Xray' : 'Mihomo';
+    const version = formatKernelVersion(k.latest_version);
+    const ok = await showConfirm({
+      title: $t('svc.install_stable_confirm_title', { name: displayName }),
+      message: $t('svc.install_stable_confirm_msg', {
+        current: formatKernelVersion(k.current_version),
+        version
+      }),
+      confirmLabel: $t('svc.install_stable_confirm', { version }),
+      variant: 'warning'
+    });
+    if (ok) await installKernel(name);
   }
 
   function checkIfFinishedChecking() {
@@ -569,6 +714,27 @@
     }
   }
 
+  // Итог для строки ядра: по коду result_kind; ответ без кода (status done,
+  // прежний формат) — «Установлено: vX», английский message не показывается
+  function kernelResult(k: Kernel) {
+    return (
+      resultMessage(k) ??
+      (k.status === 'done'
+        ? { key: 'svc.kernel_installed', params: { version: kernelVersion(k.current_version) } }
+        : null)
+    );
+  }
+
+  // Один тост успеха на итог операции: тот же переведённый текст, что под строкой ядра
+  function toastKernelResult(k: Kernel) {
+    const r = resultMessage(k);
+    if (!r) return;
+    const key = `${k.result_kind}:${k.result_version ?? ''}`;
+    if (lastToastedResult[k.name] === key) return;
+    lastToastedResult[k.name] = key;
+    showToast('success', $t(r.key, r.params));
+  }
+
   async function fetchKernelStatus(name: string) {
     try {
       const res = await apiFetch(`/api/kernels/${name}/status`);
@@ -576,6 +742,7 @@
         const envelope = await res.json();
         const data = envelope.data ?? envelope;
         const idx = kernels.findIndex((k) => k.name === name);
+        const wasTransitional = idx >= 0 && isTransitionalStatus(kernels[idx].status);
         if (idx >= 0) {
           kernels[idx] = { ...kernels[idx], ...data };
           kernels = [...kernels];
@@ -583,6 +750,10 @@
         if (data.status === 'idle' || data.status === 'done' || data.status === 'failed') {
           clearTimeout(statusTimeouts[name]);
           delete statusTimeouts[name];
+          releaseNavLock(name);
+          if (wasTransitional && data.status === 'done' && idx >= 0) {
+            toastKernelResult(kernels[idx]);
+          }
           fetchKernels();
           checkIfFinishedChecking();
           if (data.status === 'done' && activeKernel === name && isRunning) {
@@ -592,6 +763,7 @@
       } else {
         clearTimeout(statusTimeouts[name]);
         delete statusTimeouts[name];
+        releaseNavLock(name);
         const idx = kernels.findIndex((k) => k.name === name);
         if (
           idx >= 0 &&
@@ -608,6 +780,7 @@
       if (e?.status === 401) return;
       clearTimeout(statusTimeouts[name]);
       delete statusTimeouts[name];
+      releaseNavLock(name);
       const idx = kernels.findIndex((k) => k.name === name);
       if (idx >= 0) {
         kernels[idx] = { ...kernels[idx], status: 'failed' };
@@ -669,6 +842,38 @@
 
   let switchingKernelTo = $state<string | null>(null);
 
+  // Причина, по которой «Запустить» недоступна: нет XKeen или ни одного ядра.
+  // Пока capabilities не загружены (null), кнопка не блокируется
+  const startBlockedReason = $derived.by(() => {
+    if (isRunning) return null;
+    if (xkeenInstalled === false || $capabilities?.xkeen_installed === false) {
+      return $t('svc.start_disabled_no_xkeen');
+    }
+    if (anyKernelInstalled($capabilities) === false) return $t('svc.start_disabled_no_kernel');
+    return null;
+  });
+
+  // Подсказка установщика XKeen называет стабильную версию Xray. Если на
+  // канале «Стабильный» она ещё неизвестна, проверка запускается один раз за
+  // жизнь страницы; до ответа установщик показывает общую подсказку
+  let stableCheckRequested = false;
+  const installerShown = $derived(
+    xkeenInstalled === false || xkeenSetupIncomplete || xkeenInstallOpen
+  );
+  $effect(() => {
+    if (
+      installerShown &&
+      xray &&
+      xray.channel === 'stable' &&
+      !xray.latest_version &&
+      !isTransitionalStatus(xray.status) &&
+      !stableCheckRequested
+    ) {
+      stableCheckRequested = true;
+      untrack(() => checkKernelUpdate('xray'));
+    }
+  });
+
   onMount(() => {
     fetchRestartLog();
     const kernelPoller = usePoller((signal) => fetchKernels(signal), 5000);
@@ -677,6 +882,7 @@
       kernelPoller.stop();
       statusPoller.stop();
       Object.values(statusTimeouts).forEach(clearTimeout);
+      Object.keys(navUnlocks).forEach(releaseNavLock);
     };
   });
 </script>
@@ -727,11 +933,15 @@
     </Button>
   </PageHeader>
 
-  {#if xkeenInstalled === false || xkeenSetupIncomplete || xkeenInstallOpen}
+  {#if installerShown}
     <XKeenInstallCard
       available={xkeenInstallerAvailable}
       incomplete={xkeenSetupIncomplete}
       onopenchange={(open) => (xkeenInstallOpen = open)}
+      stableXrayVersion={xray?.channel === 'stable' && xray?.latest_version
+        ? formatKernelVersion(xray.latest_version)
+        : null}
+      xrayChannel={xray?.channel ?? 'stable'}
       onfinished={() => {
         fetchStatus();
         fetchKernels();
@@ -758,10 +968,27 @@
           </div>
         </div>
         <div class="hero-status">
-          <StatusBadge
-            variant={isRunning ? 'running' : 'stopped'}
-            label={isRunning ? $t('svc.running') : $t('svc.stopped')}
-          />
+          {#if statusCold && !isRunning}
+            <span data-testid="status-xkeen-unknown">
+              <StatusBadge variant="idle" label={$t('kernel.status.unknown')} />
+            </span>
+          {:else}
+            <StatusBadge
+              variant={isRunning ? 'running' : 'stopped'}
+              label={isRunning ? $t('svc.running') : $t('svc.stopped')}
+            />
+          {/if}
+          {#if staleBadge}
+            <span
+              data-testid="status-stale-badge"
+              title={$t('svc.status_stale_title', { seconds: String(statusAgeSeconds) })}
+            >
+              <StatusBadge
+                variant="idle"
+                label={$t('svc.status_stale', { time: staleTimeLabel })}
+              />
+            </span>
+          {/if}
           {#if watchdogBadge}
             <StatusBadge variant={watchdogBadge.variant} label={$t(watchdogBadge.labelKey)} />
           {/if}
@@ -975,10 +1202,14 @@
         {:else}
           <button
             class="btn btn-primary"
+            data-testid="hero-start"
             onclick={() => controlService('start')}
-            disabled={actionLoading['xkeen-start']}
+            disabled={actionLoading['xkeen-start'] || !!startBlockedReason}
             class:btn-loading={actionLoading['xkeen-start']}
-            title={$t('svc.action_start')}
+            title={startBlockedReason ?? $t('svc.action_start')}
+            aria-label={startBlockedReason
+              ? `${$t('svc.action_start')}: ${startBlockedReason}`
+              : undefined}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"
               ><polygon points="5 3 19 12 5 21 5 3" /></svg
@@ -1061,10 +1292,7 @@
             { value: 'stable', label: $t('svc.channel_stable') },
             { value: 'preview', label: $t('svc.channel_preview') }
           ]}
-          onchange={async (v) => {
-            await Promise.all([setKernelChannel('xray', v), setKernelChannel('mihomo', v)]);
-            await fetchKernels();
-          }}
+          onchange={changeChannel}
         />
       </div>
       {#if channelMismatch}
@@ -1121,27 +1349,43 @@
                 <Skeleton type="text-line" width="70px" />
               {:else}
                 <span>{kernelVersion(mihomo?.current_version) || '—'}</span>
-                {#if mihomo?.status === 'failed'}
-                  <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
-                {:else if !mihomo?.current_version || mihomo.current_version === 'not installed'}
-                  <StatusBadge variant="stopped" label={$t('kernel.status.not_installed')} />
-                {:else if mihomo?.has_update}
-                  <StatusBadge
-                    variant="warning"
-                    label={`→ ${kernelVersion(mihomo.latest_version)}`}
-                  />
-                {:else}
-                  <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
-                {/if}
+                {@const badge = kernelBadge(mihomo ?? {})}
+                <StatusBadge
+                  variant={badge.variant}
+                  label={badge.label ?? $t(badge.key ?? '', badge.params)}
+                />
               {/if}
             </div>
-            {#if kernelsLoaded && mihomo?.message && (mihomo.status === 'failed' || mihomo.status === 'idle' || mihomo.status === 'done')}
+            {#if kernelsLoaded && mihomo?.message && (mihomo.status === 'failed' || mihomo.status === 'idle')}
               <p class="update-hint" class:update-hint-error={mihomo.status === 'failed'}>
                 {kernelHint(mihomo)}
               </p>
             {/if}
+            {#if kernelsLoaded && mihomo}
+              {@const result = kernelResult(mihomo)}
+              {#if result}
+                <p class="update-hint" data-testid="kernel-result-mihomo">
+                  {$t(result.key, result.params)}
+                </p>
+              {/if}
+            {/if}
+            {#if kernelsLoaded && mihomo?.status === 'checking'}
+              <p class="update-hint" data-testid="kernel-checking-hint-mihomo">
+                {$t('svc.kernel_checking_hint')}
+              </p>
+            {/if}
           </div>
           <div class="update-actions">
+            {#if mihomo && showInstallStable(mihomo)}
+              <button
+                class="btn btn-sm btn-secondary"
+                data-testid="install-stable-mihomo"
+                onclick={() => installStable('mihomo')}
+                title={$t('svc.install_stable')}
+              >
+                {$t('svc.install_stable')}
+              </button>
+            {/if}
             {#if mihomo?.has_update}
               <button
                 class="btn btn-sm btn-primary"
@@ -1149,9 +1393,7 @@
                 disabled={mihomo.status === 'downloading' || mihomo.status === 'installing'}
                 title={$t('svc.install_update')}
               >
-                {mihomo.status === 'downloading' || mihomo.status === 'installing'
-                  ? $t('kernels.installing')
-                  : $t('svc.install_update')}
+                {$t(stageLabelKey(mihomo) ?? 'svc.install_update')}
               </button>
             {:else if !mihomo?.current_version || mihomo.current_version === 'not installed'}
               <button
@@ -1160,17 +1402,17 @@
                 disabled={mihomo?.status === 'downloading' || mihomo?.status === 'installing'}
                 title={$t('svc.install_kernel')}
               >
-                {mihomo?.status === 'downloading' || mihomo?.status === 'installing'
-                  ? $t('kernels.installing')
-                  : $t('svc.install_kernel')}
+                {$t((mihomo ? stageLabelKey(mihomo) : null) ?? 'svc.install_kernel')}
               </button>
             {:else}
+              {@const busyLabel = stageLabelKey(mihomo)}
               <button
-                class="btn btn-sm btn-secondary btn-icon"
+                class="btn btn-sm btn-secondary"
+                class:btn-icon={!busyLabel}
                 onclick={() => installKernel('mihomo')}
                 disabled={mihomo?.status === 'downloading' || mihomo?.status === 'installing'}
-                title={$t('svc.reinstall_tooltip')}
-                aria-label={$t('svc.reinstall')}
+                title={$t(busyLabel ?? 'svc.reinstall_tooltip')}
+                aria-label={$t(busyLabel ?? 'svc.reinstall')}
               >
                 <svg
                   width="13"
@@ -1185,18 +1427,25 @@
                   <path d="M3 22v-6h6" />
                   <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
                 </svg>
+                {#if busyLabel}{$t(busyLabel)}{/if}
               </button>
             {/if}
 
-            {#if mihomo?.has_backup}
+            {#if mihomo && rollbackVisible(mihomo)}
+              {@const rollback = rollbackLabel(mihomo)}
               <button
-                class="btn btn-sm btn-secondary btn-icon"
+                class="btn btn-sm btn-secondary"
+                data-testid="rollback-mihomo"
                 onclick={() => rollbackKernel('mihomo')}
-                disabled={mihomo?.status === 'downloading' ||
-                  mihomo?.status === 'installing' ||
+                disabled={mihomo.status === 'downloading' ||
+                  mihomo.status === 'installing' ||
                   actionLoading['rollback-mihomo']}
-                title={$t('svc.rollback_tooltip')}
-                aria-label={$t('svc.rollback')}
+                title={mihomo.backup_version
+                  ? $t('svc.rollback_to_title', {
+                      version: formatKernelVersion(mihomo.backup_version)
+                    })
+                  : $t('svc.rollback_tooltip')}
+                aria-label={$t(rollback.key, rollback.params)}
               >
                 <svg
                   width="13"
@@ -1209,6 +1458,7 @@
                   <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                   <path d="M3 3v5h5" />
                 </svg>
+                {$t(rollback.key, rollback.params)}
               </button>
             {/if}
 
@@ -1253,27 +1503,43 @@
                 <Skeleton type="text-line" width="70px" />
               {:else}
                 <span>{kernelVersion(xray?.current_version) || '—'}</span>
-                {#if xray?.status === 'failed'}
-                  <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
-                {:else if !xray?.current_version || xray.current_version === 'not installed'}
-                  <StatusBadge variant="stopped" label={$t('kernel.status.not_installed')} />
-                {:else if xray?.has_update}
-                  <StatusBadge
-                    variant="warning"
-                    label={`→ ${kernelVersion(xray.latest_version)}`}
-                  />
-                {:else}
-                  <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
-                {/if}
+                {@const badge = kernelBadge(xray ?? {})}
+                <StatusBadge
+                  variant={badge.variant}
+                  label={badge.label ?? $t(badge.key ?? '', badge.params)}
+                />
               {/if}
             </div>
-            {#if kernelsLoaded && xray?.message && (xray.status === 'failed' || xray.status === 'idle' || xray.status === 'done')}
+            {#if kernelsLoaded && xray?.message && (xray.status === 'failed' || xray.status === 'idle')}
               <p class="update-hint" class:update-hint-error={xray.status === 'failed'}>
                 {kernelHint(xray)}
               </p>
             {/if}
+            {#if kernelsLoaded && xray}
+              {@const result = kernelResult(xray)}
+              {#if result}
+                <p class="update-hint" data-testid="kernel-result-xray">
+                  {$t(result.key, result.params)}
+                </p>
+              {/if}
+            {/if}
+            {#if kernelsLoaded && xray?.status === 'checking'}
+              <p class="update-hint" data-testid="kernel-checking-hint-xray">
+                {$t('svc.kernel_checking_hint')}
+              </p>
+            {/if}
           </div>
           <div class="update-actions">
+            {#if xray && showInstallStable(xray)}
+              <button
+                class="btn btn-sm btn-secondary"
+                data-testid="install-stable-xray"
+                onclick={() => installStable('xray')}
+                title={$t('svc.install_stable')}
+              >
+                {$t('svc.install_stable')}
+              </button>
+            {/if}
             {#if xray?.has_update}
               <button
                 class="btn btn-sm btn-primary"
@@ -1281,9 +1547,7 @@
                 disabled={xray.status === 'downloading' || xray.status === 'installing'}
                 title={$t('svc.install_update')}
               >
-                {xray.status === 'downloading' || xray.status === 'installing'
-                  ? $t('kernels.installing')
-                  : $t('svc.install_update')}
+                {$t(stageLabelKey(xray) ?? 'svc.install_update')}
               </button>
             {:else if !xray?.current_version || xray.current_version === 'not installed'}
               <button
@@ -1292,17 +1556,17 @@
                 disabled={xray?.status === 'downloading' || xray?.status === 'installing'}
                 title={$t('svc.install_kernel')}
               >
-                {xray?.status === 'downloading' || xray?.status === 'installing'
-                  ? $t('kernels.installing')
-                  : $t('svc.install_kernel')}
+                {$t((xray ? stageLabelKey(xray) : null) ?? 'svc.install_kernel')}
               </button>
             {:else}
+              {@const busyLabel = stageLabelKey(xray)}
               <button
-                class="btn btn-sm btn-secondary btn-icon"
+                class="btn btn-sm btn-secondary"
+                class:btn-icon={!busyLabel}
                 onclick={() => installKernel('xray')}
                 disabled={xray?.status === 'downloading' || xray?.status === 'installing'}
-                title={$t('svc.reinstall_tooltip')}
-                aria-label={$t('svc.reinstall')}
+                title={$t(busyLabel ?? 'svc.reinstall_tooltip')}
+                aria-label={$t(busyLabel ?? 'svc.reinstall')}
               >
                 <svg
                   width="13"
@@ -1317,18 +1581,25 @@
                   <path d="M3 22v-6h6" />
                   <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
                 </svg>
+                {#if busyLabel}{$t(busyLabel)}{/if}
               </button>
             {/if}
 
-            {#if xray?.has_backup}
+            {#if xray && rollbackVisible(xray)}
+              {@const rollback = rollbackLabel(xray)}
               <button
-                class="btn btn-sm btn-secondary btn-icon"
+                class="btn btn-sm btn-secondary"
+                data-testid="rollback-xray"
                 onclick={() => rollbackKernel('xray')}
-                disabled={xray?.status === 'downloading' ||
-                  xray?.status === 'installing' ||
+                disabled={xray.status === 'downloading' ||
+                  xray.status === 'installing' ||
                   actionLoading['rollback-xray']}
-                title={$t('svc.rollback_tooltip')}
-                aria-label={$t('svc.rollback')}
+                title={xray.backup_version
+                  ? $t('svc.rollback_to_title', {
+                      version: formatKernelVersion(xray.backup_version)
+                    })
+                  : $t('svc.rollback_tooltip')}
+                aria-label={$t(rollback.key, rollback.params)}
               >
                 <svg
                   width="13"
@@ -1341,6 +1612,7 @@
                   <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                   <path d="M3 3v5h5" />
                 </svg>
+                {$t(rollback.key, rollback.params)}
               </button>
             {/if}
 
@@ -1895,6 +2167,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 12px;
     padding: 12px 14px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -1920,6 +2194,7 @@
   .update-actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 6px;
   }
 

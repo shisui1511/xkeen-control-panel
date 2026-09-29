@@ -35,6 +35,15 @@
   import SystemStatusCapsule from './components/status/SystemStatusCapsule.svelte';
   import UpdateBanner from './components/dashboard/UpdateBanner.svelte';
   import { refreshUpdateState, detectPanelUpdate } from './lib/updateNotify';
+  import {
+    parseServiceStatus,
+    staleBadgeVisible,
+    snapshotTimeLabel,
+    type ServiceStatusData
+  } from './lib/serviceStatus';
+  import { xkeenState, xkeenCardStatus } from './lib/xkeenState';
+  import { nextStep, preflightConfigReady } from './lib/nextStep';
+  import { anyKernelInstalled } from './lib/navCaps';
   import { capsuleConfigStore } from './lib/capsuleSettings';
   import {
     isAnySourceDirty,
@@ -117,6 +126,25 @@
   });
   let statusError = $state(false);
   let statusLoading = $state(true);
+  // Последний разобранный ответ /api/service/status: из него и capabilities
+  // выводится единое состояние XKeen (не установлен / настройка не завершена /
+  // запущен / остановлен / неизвестно только при холодном кэше).
+  let svcSnapshot = $state<ServiceStatusData | null>(null);
+  const xkeenStateValue = $derived(xkeenState($capabilities, svcSnapshot));
+  // Возраст кэшированного статуса: бейдж «данные от HH:MM» только после порога
+  const statusAgeSeconds = $derived(svcSnapshot?.age_seconds);
+  const staleBadgeText = $derived(
+    svcSnapshot && staleBadgeVisible(svcSnapshot) && statusAgeSeconds !== undefined
+      ? $t('svc.status_stale', {
+          time: snapshotTimeLabel(statusAgeSeconds, Date.now(), $currentLang)
+        })
+      : null
+  );
+  const staleBadgeTitle = $derived(
+    statusAgeSeconds !== undefined
+      ? $t('svc.status_stale_title', { seconds: String(statusAgeSeconds) })
+      : ''
+  );
 
   interface WatchdogStatus {
     state: string;
@@ -235,9 +263,55 @@
   let subscriptionProxiesCount = $state(0);
   let statsLastFetched = $state('');
 
-  // XKeen не установлен: без него ядра не запустить, а ставятся они тем же
-  // установщиком — пункт про ядра в этом случае не показывается
-  const isXKeenMissing = $derived($capabilities?.xkeen_installed === false);
+  // Шаг «Настройте» определяется по preflight активного ядра. Запрос не чаще
+  // раза в минуту на ядро и только в состоянии «остановлено».
+  const PREFLIGHT_TTL_MS = 60_000;
+  let preflightCache = $state<{
+    kernel: 'xray' | 'mihomo';
+    ready: boolean | null;
+    at: number;
+  } | null>(null);
+
+  async function refreshPreflight(kernel: string | undefined, signal?: AbortSignal) {
+    if (kernel !== 'xray' && kernel !== 'mihomo') return;
+    const now = Date.now();
+    if (preflightCache?.kernel === kernel && now - preflightCache.at < PREFLIGHT_TTL_MS) return;
+    // Метка времени ставится до ответа: параллельные опросы не дублируют запрос.
+    const previous = preflightCache?.kernel === kernel ? preflightCache.ready : null;
+    preflightCache = { kernel, ready: previous, at: now };
+    let ready: boolean | null = null;
+    try {
+      const res = await apiFetch(`/api/config/preflight?kernel=${kernel}`, { signal });
+      if (res.ok) {
+        const body = await res.json();
+        const payload =
+          body && typeof body.data === 'object' && body.data !== null ? body.data : body;
+        ready = preflightConfigReady(kernel, payload);
+      }
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+    }
+    preflightCache = { kernel, ready, at: now };
+  }
+
+  // Один следующий шаг для чистой системы (лестница). Пока capabilities не
+  // загружены или статус неизвестен, шаг не выдаётся.
+  const currentNextStep = $derived(
+    $capabilities === null
+      ? null
+      : nextStep({
+          xkeen: xkeenStateValue,
+          kernelsInstalled: anyKernelInstalled($capabilities),
+          configReady:
+            preflightCache !== null && preflightCache.kernel === $capabilities.active_kernel
+              ? preflightCache.ready
+              : null,
+          isRunning: serviceStatus.xkeen === 'running'
+        })
+  );
+  const nextStepKernelName = $derived(
+    $capabilities?.active_kernel === 'mihomo' ? 'Mihomo' : 'Xray'
+  );
   const isKernelCrashed = $derived(
     serviceStatus.xkeen === 'running' &&
       $capabilities?.active_kernel &&
@@ -361,29 +435,27 @@
       // every individually-shielded fetch in this function makes unreachable).
       statusError = svcRes.status === 'rejected' && mihomoRes.status === 'rejected';
 
-      let isXkeenRunning = false;
-      let xkeenRaw = '';
+      let svcData: ServiceStatusData | null = null;
       if (svcRes.status === 'fulfilled' && svcRes.value.ok) {
         const text = await svcRes.value.text();
         try {
-          const parsed = JSON.parse(text);
-          if (parsed && parsed.success && parsed.data) {
-            isXkeenRunning = parsed.data.is_running;
-            xkeenRaw = parsed.data.raw || '';
-            if (parsed.data.watchdog) {
-              watchdogStatus = parsed.data.watchdog;
-            }
-          } else {
-            xkeenRaw = text;
-            isXkeenRunning = guessXkeenRunning(text);
-          }
+          svcData = parseServiceStatus(JSON.parse(text));
         } catch (_) {
-          xkeenRaw = text;
-          isXkeenRunning = guessXkeenRunning(text);
+          svcData = null;
+        }
+        if (svcData) {
+          if (svcData.watchdog) {
+            watchdogStatus = svcData.watchdog as WatchdogStatus;
+          }
+        } else {
+          // Не JSON-конверт: запасной разбор по тексту ответа
+          svcData = { is_running: guessXkeenRunning(text) };
         }
       } else {
         statusError = true;
       }
+      svcSnapshot = svcData;
+      const currentXkeenState = xkeenState($capabilities, svcData);
 
       const mihomoText =
         mihomoRes.status === 'fulfilled' && mihomoRes.value.ok ? await mihomoRes.value.text() : '';
@@ -429,13 +501,17 @@
       }
 
       serviceStatus = {
-        xkeen: isXkeenRunning ? 'running' : xkeenRaw || 'unknown',
+        xkeen: xkeenCardStatus(currentXkeenState),
         xray: xrayProcessStatus,
         mihomo: mihomoProcessStatus,
         connections: connCount,
         xrayVersion: xrayVer,
         mihomoVersion: mihomoVer
       };
+
+      if (currentXkeenState === 'stopped' && anyKernelInstalled($capabilities) === true) {
+        void refreshPreflight($capabilities?.active_kernel, signal);
+      }
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       if (e?.status === 401) return;
@@ -450,13 +526,14 @@
     try {
       const res = await apiFetch('/api/system/stats', { signal });
       if (res.ok) {
-        systemStats = await res.json();
-        if (systemStats) {
-          loadHistory = [...loadHistory, systemStats.load[0]].slice(-16);
-          const d = new Date();
-          const p = (n: number) => n.toString().padStart(2, '0');
-          statsLastFetched = `${p(d.getDate())}.${p(d.getMonth() + 1)}.${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
-        }
+        const next = await res.json();
+        // Неполный или чужой по форме ответ не затирает прежние данные и не роняет виджеты
+        if (!next || typeof next !== 'object' || !Array.isArray(next.load)) return;
+        systemStats = next as SystemStats;
+        loadHistory = [...loadHistory, next.load[0]].slice(-16);
+        const d = new Date();
+        const p = (n: number) => n.toString().padStart(2, '0');
+        statsLastFetched = `${p(d.getDate())}.${p(d.getMonth() + 1)}.${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
       }
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
@@ -1158,7 +1235,7 @@
           <UpdateBanner />
 
           <!-- Problems Panel (conditional) -->
-          {#if (systemStats && systemStats.invalid_config) || isXKeenMissing || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring || isWatchdogIncident}
+          {#if (systemStats && systemStats.invalid_config) || currentNextStep !== null || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring || isWatchdogIncident}
             <div style="margin-bottom: 18px;">
               <Card title={$t('dash.problems_panel')}>
                 <div class="problems-list">
@@ -1304,11 +1381,16 @@
                       </Button>
                     </div>
                   {/if}
-                  {#if isXKeenMissing}
-                    <div class="problem-item alert-error" data-testid="problem-xkeen-missing">
+                  {#if currentNextStep === 'install_xkeen'}
+                    <div
+                      class="problem-item alert-error"
+                      data-testid="problem-xkeen-missing"
+                      data-step="install_xkeen"
+                    >
                       <div class="problem-content">
                         <span class="problem-icon"><Icon name="warning" size={16} /></span>
                         <div>
+                          <span class="problem-step-label">{$t('dash.next_step_label')}</span>
                           <strong class="problem-title"
                             >{$t('dash.problems.xkeen_missing_title')}</strong
                           >
@@ -1319,11 +1401,38 @@
                         {$t('dash.problems.xkeen_missing_cta')}
                       </Button>
                     </div>
-                  {:else if $capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed}
-                    <div class="problem-item alert-error">
+                  {:else if currentNextStep === 'finish_xkeen_setup'}
+                    <div
+                      class="problem-item alert-warning"
+                      data-testid="problem-next-step"
+                      data-step="finish_xkeen_setup"
+                    >
                       <div class="problem-content">
                         <span class="problem-icon"><Icon name="warning" size={16} /></span>
                         <div>
+                          <span class="problem-step-label">{$t('dash.next_step_label')}</span>
+                          <strong class="problem-title"
+                            >{$t('dash.problems.xkeen_incomplete_title')}</strong
+                          >
+                          <div class="problem-desc">
+                            {$t('dash.problems.xkeen_incomplete_desc')}
+                          </div>
+                        </div>
+                      </div>
+                      <Button variant="secondary" onclick={() => switchTab('services')}>
+                        {$t('dash.problems.xkeen_incomplete_cta')}
+                      </Button>
+                    </div>
+                  {:else if currentNextStep === 'install_kernel'}
+                    <div
+                      class="problem-item alert-error"
+                      data-testid="problem-next-step"
+                      data-step="install_kernel"
+                    >
+                      <div class="problem-content">
+                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                        <div>
+                          <span class="problem-step-label">{$t('dash.next_step_label')}</span>
                           <strong class="problem-title"
                             >{$t('dash.problems.kernel_missing_title')}</strong
                           >
@@ -1332,6 +1441,51 @@
                       </div>
                       <Button variant="secondary" onclick={() => switchTab('services')}>
                         {$t('dash.problems.kernel_missing_cta')}
+                      </Button>
+                    </div>
+                  {:else if currentNextStep === 'configure'}
+                    <div
+                      class="problem-item alert-warning"
+                      data-testid="problem-next-step"
+                      data-step="configure"
+                    >
+                      <div class="problem-content">
+                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                        <div>
+                          <span class="problem-step-label">{$t('dash.next_step_label')}</span>
+                          <strong class="problem-title"
+                            >{$t('dash.problems.configure_title')}</strong
+                          >
+                          <div class="problem-desc">
+                            {$t('dash.problems.configure_desc', { kernel: nextStepKernelName })}
+                          </div>
+                        </div>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        onclick={() => {
+                          window.location.hash = '#/constructor';
+                        }}
+                      >
+                        {$t('dash.problems.configure_cta')}
+                      </Button>
+                    </div>
+                  {:else if currentNextStep === 'start'}
+                    <div
+                      class="problem-item alert-warning"
+                      data-testid="problem-next-step"
+                      data-step="start"
+                    >
+                      <div class="problem-content">
+                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                        <div>
+                          <span class="problem-step-label">{$t('dash.next_step_label')}</span>
+                          <strong class="problem-title">{$t('dash.problems.start_title')}</strong>
+                          <div class="problem-desc">{$t('dash.problems.start_desc')}</div>
+                        </div>
+                      </div>
+                      <Button variant="secondary" onclick={() => switchTab('services')}>
+                        {$t('dash.problems.start_cta')}
                       </Button>
                     </div>
                   {/if}
@@ -1381,6 +1535,8 @@
                         : ''}
                       {statusLoading}
                       {statusError}
+                      staleLabel={staleBadgeText}
+                      staleTitle={staleBadgeTitle}
                       onRefresh={fetchLiveStatus}
                       onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
                     />
@@ -1412,6 +1568,7 @@
                     {version}
                     {panelVersion}
                     {statsLastFetched}
+                    xkeenState={xkeenStateValue}
                     onOpenAbout={() => (showAboutModal = true)}
                   />
                 </div>
@@ -1787,6 +1944,13 @@
     margin-left: var(--spacing-1, 4px);
     color: var(--fg-dim);
     font-size: var(--font-size-xs, 12px);
+  }
+
+  .problem-step-label {
+    display: block;
+    font-size: var(--font-size-xs, 12px);
+    font-weight: 600;
+    color: var(--fg-dim);
   }
 
   .watchdog-error-detail {

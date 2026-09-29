@@ -6,7 +6,9 @@
   import Icon from '../../lib/components/Icon.svelte';
   import Button from '../Button.svelte';
   import Skeleton from '../Skeleton.svelte';
+  import StatusBadge from '../StatusBadge.svelte';
   import ServiceCard from './ServiceCard.svelte';
+  import { anyKernelInstalled } from '../../lib/navCaps';
 
   let {
     serviceStatus,
@@ -14,6 +16,8 @@
     xkeenVersion = '',
     statusLoading = false,
     statusError = false,
+    staleLabel = null,
+    staleTitle = '',
     onRefresh,
     onShowMihomoMigrateModal
   } = $props<{
@@ -29,6 +33,10 @@
     xkeenVersion?: string;
     statusLoading?: boolean;
     statusError?: boolean;
+    /** Текст бейджа «данные от HH:MM»; пусто — статус свежий, бейджа нет. */
+    staleLabel?: string | null;
+    /** Подсказка к бейджу: сколько секунд статус не обновлялся. */
+    staleTitle?: string;
     onRefresh?: () => Promise<void> | void;
     onShowMihomoMigrateModal?: () => void;
   }>();
@@ -206,6 +214,13 @@
       </Button>
     </div>
   {:else}
+    {#if staleLabel}
+      <div class="stale-row">
+        <span data-testid="status-stale-badge" title={staleTitle}>
+          <StatusBadge variant="idle" label={staleLabel} />
+        </span>
+      </div>
+    {/if}
     <div class="services-grid">
       <!-- XKeen Daemon -->
       <ServiceCard
@@ -215,6 +230,9 @@
         version={xkeenVersion}
         isActiveKernel={false}
         isInstalled={capabilities?.xkeen_installed !== false}
+        startDisabledReason={anyKernelInstalled(capabilities) === false
+          ? $t('svc.start_disabled_no_kernel')
+          : undefined}
         onRestart={restartXkeen}
         onStart={startXkeen}
         onStop={stopXkeen}
@@ -254,6 +272,12 @@
 <style>
   .service-status-container {
     width: 100%;
+  }
+
+  .stale-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
   }
 
   .services-grid {

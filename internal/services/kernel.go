@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -280,8 +281,12 @@ type KernelInfo struct {
 	LatestVersion  string `json:"latest_version"`
 	// LatestTag — тег релиза с LatestVersion. У плавающих pre-release (mihomo
 	// Prerelease-Alpha) он не совпадает с "v"+версия
-	LatestTag     string `json:"latest_tag,omitempty"`
-	HasUpdate     bool   `json:"has_update"`
+	LatestTag string `json:"latest_tag,omitempty"`
+	HasUpdate bool   `json:"has_update"`
+	// AheadOfLatest — установленная сборка новее последнего stable-релиза
+	// (например, pre-release на канале «Стабильный»): обновлений нет, но и
+	// «актуально» это не значит.
+	AheadOfLatest bool   `json:"ahead_of_latest"`
 	HasBackup     bool   `json:"has_backup"`
 	Channel       string `json:"channel"` // stable, preview
 	Repo          string `json:"repo"`
@@ -291,6 +296,19 @@ type KernelInfo struct {
 	PID           int    `json:"pid,omitempty"`
 	Uptime        string `json:"uptime,omitempty"`
 	APIAddr       string `json:"api_addr,omitempty"`
+
+	// Stage — этап установки внутри status downloading/installing: starting,
+	// downloading, extracting, replacing. Коды, а не текст: подписи переводит фронтенд.
+	Stage string `json:"stage,omitempty"`
+	// ResultKind и ResultVersion — итог последней операции (установка, откат,
+	// загрузка файла): installed, updated, reinstalled, rolled_back, uploaded и
+	// версия, которая теперь стоит. Message остаётся английским для логов.
+	ResultKind    string `json:"result_kind,omitempty"`
+	ResultVersion string `json:"result_version,omitempty"`
+	// BackupVersion — версия последнего бэкапа («Откатить на vX»). Читается из
+	// имени файла в .backup, без запуска бинарников; пусто, если версия в имени
+	// не закодирована.
+	BackupVersion string `json:"backup_version,omitempty"`
 
 	// binaryPathCachedAt records when BinaryPath was last resolved via auto-detection.
 	// Access must be protected by the KernelService mutex.
@@ -509,6 +527,27 @@ func formatUptimeRu(d time.Duration) string {
 	return fmt.Sprintf("%dм", minutes)
 }
 
+// Этапы установки ядра (KernelInfo.Stage).
+const (
+	KernelStageStarting    = "starting"
+	KernelStageDownloading = "downloading"
+	KernelStageExtracting  = "extracting"
+	KernelStageReplacing   = "replacing"
+)
+
+// Итоги операций над ядром (KernelInfo.ResultKind).
+const (
+	KernelResultInstalled   = "installed"
+	KernelResultUpdated     = "updated"
+	KernelResultReinstalled = "reinstalled"
+	KernelResultRolledBack  = "rolled_back"
+	KernelResultUploaded    = "uploaded"
+)
+
+// ErrKernelBusy — над ядром уже идёт установка, откат или загрузка файла.
+// Текст сохранён: на него смотрят обработчики и тесты.
+var ErrKernelBusy = errors.New("install already in progress")
+
 // KernelService manages proxy kernels (xray, mihomo)
 type KernelService struct {
 	kernels      map[string]*KernelInfo
@@ -522,6 +561,75 @@ type KernelService struct {
 
 	testClient    *http.Client
 	githubAPIBase string
+
+	// downloadFn и installArch подменяют загрузку ассета и архитектуру при
+	// установке (только тесты, через SetInstallSource); в продакшене пусты.
+	downloadFn  func(ctx context.Context, url, dest string) error
+	installArch string
+
+	// mihomoConfigDir — каталог конфигурации Mihomo, создаваемый при установке ядра.
+	mihomoConfigDir string
+
+	// stageHook (только тесты) зовётся перед каждой сменой статуса установки, вне s.mu.
+	stageHook func(status, stage string)
+}
+
+// SetReleaseSource подменяет источник релизов (базовый URL GitHub API и HTTP-клиент).
+// Нужен тестам, чтобы проверка релизов не ходила в реальную сеть; в продакшене
+// не вызывается.
+func (s *KernelService) SetReleaseSource(apiBase string, client *http.Client) {
+	s.mu.Lock()
+	s.githubAPIBase = apiBase
+	s.testClient = client
+	s.mu.Unlock()
+}
+
+// SetInstallSource подменяет загрузку ассета и архитектуру установки. Нужен
+// тестам: на amd64 у ядер нет ассетов, а сеть в тестах запрещена. Пустой arch
+// оставляет архитектуру по умолчанию, nil download — штатную загрузку.
+func (s *KernelService) SetInstallSource(arch string, download func(ctx context.Context, url, dest string) error) {
+	s.mu.Lock()
+	s.installArch = arch
+	s.downloadFn = download
+	s.mu.Unlock()
+}
+
+// SetMihomoConfigDir задаёт каталог конфигурации Mihomo, который создаётся
+// пустым после успешной установки ядра (D-11). Пустая строка — не создавать.
+func (s *KernelService) SetMihomoConfigDir(dir string) {
+	s.mu.Lock()
+	s.mihomoConfigDir = dir
+	s.mu.Unlock()
+}
+
+// ensureMihomoConfigDir создаёт пустой каталог конфигурации Mihomo (0755): у
+// свежей установки он должен существовать, но конфиг появляется только из
+// конструктора или Редактора, поэтому ничего в него не пишется. Путь идёт через
+// sanitizeKernelPath; отказ и ошибка создания логируются и установку не проваливают.
+func (s *KernelService) ensureMihomoConfigDir() {
+	s.mu.RLock()
+	dir := s.mihomoConfigDir
+	s.mu.RUnlock()
+	if dir == "" {
+		return
+	}
+	clean, err := sanitizeKernelPath(dir)
+	if err != nil {
+		log.Printf("Kernel: mihomo config dir rejected: %s", utils.SanitizeLogInput(dir))
+		return
+	}
+	_, statErr := os.Stat(clean)
+	if statErr == nil {
+		return
+	}
+	if err := os.MkdirAll(clean, 0755); err != nil {
+		log.Printf("Kernel: failed to create mihomo config dir %s: %v", utils.SanitizeLogInput(clean), err)
+		return
+	}
+	// umask не должен урезать права нового каталога.
+	if err := os.Chmod(clean, 0755); err != nil {
+		log.Printf("Kernel: failed to set mode of mihomo config dir %s: %v", utils.SanitizeLogInput(clean), err)
+	}
 }
 
 // kernelChannelStore is the on-disk format used to persist per-kernel update
@@ -542,7 +650,7 @@ func NewKernelService(dataDir string) *KernelService {
 	// Register known kernels with auto-detected binary paths
 	xrayPath := findKernelBinary("xray")
 	if xrayPath == "" {
-		log.Printf("WARNING: failed to auto-detect Xray binary. Checked paths: %s", strings.Join(xrayProbePaths, ", "))
+		log.Printf("Kernel: Xray binary not found (not installed yet); checked: %s", strings.Join(xrayProbePaths, ", "))
 		xrayPath = "/opt/sbin/xray" // fallback default for display and install
 	}
 	svc.kernels["xray"] = &KernelInfo{
@@ -557,7 +665,7 @@ func NewKernelService(dataDir string) *KernelService {
 
 	mihomoPath := findKernelBinary("mihomo")
 	if mihomoPath == "" {
-		log.Printf("WARNING: failed to auto-detect Mihomo binary. Checked paths: %s", strings.Join(mihomoProbePaths, ", "))
+		log.Printf("Kernel: Mihomo binary not found (not installed yet); checked: %s", strings.Join(mihomoProbePaths, ", "))
 		mihomoPath = "/opt/sbin/mihomo" // fallback default for display and install
 	}
 	svc.kernels["mihomo"] = &KernelInfo{
@@ -681,26 +789,16 @@ func (s *KernelService) List() []KernelInfo {
 		snapshots[i].ProcessStatus = status
 		snapshots[i].PID = pid
 		snapshots[i].Uptime = uptime
-		snapshots[i].HasBackup = s.hasBackup(snapshots[i].Name, snapshots[i].BinaryPath)
+		snapshots[i].fillBackup()
 	}
 	return snapshots
 }
 
-func (s *KernelService) hasBackup(name, binaryPath string) bool {
-	if binaryPath == "" {
-		return false
-	}
-	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
-	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if !e.IsDir() && (strings.HasPrefix(e.Name(), name+".bak.") || strings.HasPrefix(e.Name(), "kernel.bak.")) {
-			return true
-		}
-	}
-	return false
+// fillBackup заполняет HasBackup и BackupVersion по каталогу .backup (без exec).
+func (k *KernelInfo) fillBackup() {
+	_, version, ok := latestBackup(k.Name, k.BinaryPath)
+	k.HasBackup = ok
+	k.BackupVersion = version
 }
 
 func (s *KernelService) Get(name string) *KernelInfo {
@@ -723,7 +821,7 @@ func (s *KernelService) Get(name string) *KernelInfo {
 	snap.ProcessStatus = status
 	snap.PID = pid
 	snap.Uptime = uptime
-	snap.HasBackup = s.hasBackup(snap.Name, snap.BinaryPath)
+	snap.fillBackup()
 	return &snap
 }
 
@@ -750,6 +848,14 @@ func (s *KernelService) SetChannel(name, channel string) bool {
 		return false
 	}
 	k.Channel = channel
+	// Latest* принадлежали прежнему каналу: сбрасываем, пока перепроверка
+	// нового канала не вернёт результат.
+	k.LatestVersion = ""
+	k.LatestTag = ""
+	k.HasUpdate = false
+	k.AheadOfLatest = false
+	k.Message = ""
+	k.Status = "checking"
 	channels := make(map[string]string, len(s.kernels))
 	for n, kk := range s.kernels {
 		channels[n] = kk.Channel
@@ -761,6 +867,10 @@ func (s *KernelService) SetChannel(name, channel string) bool {
 	}
 	return true
 }
+
+// kernelVersionTimeout — предел ожидания `<ядро> version`. Пакетная переменная:
+// тест понижает её, чтобы не ждать секунды.
+var kernelVersionTimeout = 5 * time.Second
 
 // versionCacheTTL is the duration for which a detected version string is considered valid.
 const versionCacheTTL = 60 * time.Second
@@ -782,15 +892,22 @@ func (s *KernelService) detectVersion(k *KernelInfo) string {
 		return "not installed"
 	}
 
+	// Зависший бинарник не должен держать List()/Get() (и мьютекс версии) бесконечно.
+	ctx, cancel := context.WithTimeout(context.Background(), kernelVersionTimeout)
+	defer cancel()
+
 	var cmd *exec.Cmd
 	switch k.Name {
 	case "xray":
-		cmd = exec.Command(k.BinaryPath, "version")
+		cmd = exec.CommandContext(ctx, k.BinaryPath, "version")
 	case "mihomo":
-		cmd = exec.Command(k.BinaryPath, "-v")
+		cmd = exec.CommandContext(ctx, k.BinaryPath, "-v")
 	default:
 		return "unknown"
 	}
+	// Пайп вывода может унаследовать внук процесса: без WaitDelay CombinedOutput
+	// ждал бы его закрытия даже после убийства бинарника по таймауту.
+	cmd.WaitDelay = time.Second
 
 	out, err := cmd.CombinedOutput()
 	output := utils.StripANSI(string(out))
@@ -891,6 +1008,17 @@ func kernelHasUpdate(latest, current string) bool {
 	}
 }
 
+// kernelAheadOfLatest — установленная сборка новее последнего stable-релиза.
+// Только для канала stable и только для semver: у плавающих alpha-сборок нет
+// порядка версий, а на preview «новее latest» — это просто другая ветка релизов.
+func kernelAheadOfLatest(channel, latest, current string) bool {
+	return channel == "stable" &&
+		latest != "" &&
+		!isRollingBuild(latest) &&
+		isValidSemver(current) &&
+		compareSemver(current, latest) > 0
+}
+
 // refreshInstalledVersion перечитывает версию после замены бинарника (установка,
 // откат, загрузка) и пересчитывает HasUpdate. Кеш версии сбрасывается: он
 // держит версию прежнего бинарника до 60 с, и новое ядро считалось старым —
@@ -899,28 +1027,58 @@ func (s *KernelService) refreshInstalledVersion(kk *KernelInfo) {
 	kk.verCache = &versionCache{}
 	kk.CurrentVersion = s.detectVersion(kk)
 	kk.HasUpdate = kernelHasUpdate(kk.LatestVersion, kk.CurrentVersion)
+	kk.AheadOfLatest = kernelAheadOfLatest(kk.Channel, kk.LatestVersion, kk.CurrentVersion)
 }
+
+// githubReleaseBodyLimit — предел тела ответа GitHub: с запасом для списка 30
+// релизов со всеми ассетами (обрезанный JSON дал бы ошибку разбора, а не «актуально»).
+const githubReleaseBodyLimit = 16 << 20
 
 // CheckLatest queries GitHub API for latest release.
 // ctx is used to cancel the HTTP request (e.g. on service shutdown).
 func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
+	return s.checkLatest(ctx, name, false)
+}
+
+// checkLatest — проверка последнего релиза. При quiet=true Status и Message не
+// меняются ни при старте, ни при ошибке, ни при успехе (вызов из установки, где
+// статус ведёт сам установщик); Latest*, HasUpdate и AheadOfLatest пишутся как обычно.
+func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool) error {
 	s.mu.Lock()
 	k := s.kernels[name]
 	if k == nil {
 		s.mu.Unlock()
 		return fmt.Errorf("kernel not found: %s", name)
 	}
-	k.Status = "checking"
-	k.Message = "Checking for updates..."
+	if !quiet {
+		k.Status = "checking"
+		k.Message = "Checking for updates..."
+	}
 	// Snapshot fields needed for the HTTP call
 	repo := k.Repo
 	channel := k.Channel
-	currentVersion := k.CurrentVersion
+	apiBase := s.githubAPIBase
+	testClient := s.testClient
 	s.mu.Unlock()
 
+	// fail фиксирует ошибку проверки в статусе ядра, если канал не сменился
+	// (результат устаревшей проверки не должен портить состояние нового канала).
+	fail := func(message string, err error) error {
+		if quiet {
+			return err
+		}
+		s.mu.Lock()
+		if kk := s.kernels[name]; kk != nil && kk.Channel == channel {
+			kk.Status = "failed"
+			kk.Message = message
+		}
+		s.mu.Unlock()
+		return err
+	}
+
 	githubBase := "https://api.github.com"
-	if s.githubAPIBase != "" {
-		githubBase = s.githubAPIBase
+	if apiBase != "" {
+		githubBase = apiBase
 	}
 
 	// previewReleaseWindow bounds how many recent releases are scanned for a
@@ -935,59 +1093,44 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	}
 
 	var client *http.Client
-	if s.testClient != nil {
-		client = s.testClient
+	if testClient != nil {
+		client = testClient
 	} else {
 		client = utils.SafeHTTPClient(15 * time.Second)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
-		s.mu.Lock()
-		if kk := s.kernels[name]; kk != nil {
-			kk.Status = "failed"
-			kk.Message = "Request error: " + err.Error()
-		}
-		s.mu.Unlock()
-		return err
+		return fail("Request error: "+err.Error(), err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		s.mu.Lock()
-		if kk := s.kernels[name]; kk != nil {
-			kk.Status = "failed"
-			kk.Message = "GitHub API error: " + err.Error()
-		}
-		s.mu.Unlock()
-		return err
+		return fail("GitHub API error: "+err.Error(), err)
 	}
 	defer resp.Body.Close()
+
+	// Лимит анонимного API (403), 404 и прочие статусы — ошибка проверки, а не «актуально».
+	if resp.StatusCode != http.StatusOK {
+		return fail(fmt.Sprintf("GitHub API HTTP %d", resp.StatusCode), fmt.Errorf("github api: HTTP %d", resp.StatusCode))
+	}
+	body := io.LimitReader(resp.Body, githubReleaseBodyLimit)
 
 	var latestVersion, latestTag string
 	if channel == "stable" {
 		var release struct {
 			TagName string `json:"tag_name"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-			s.mu.Lock()
-			if kk := s.kernels[name]; kk != nil {
-				kk.Status = "failed"
-				kk.Message = "Parse error: " + err.Error()
-			}
-			s.mu.Unlock()
-			return err
+		if err := json.NewDecoder(body).Decode(&release); err != nil {
+			return fail("Parse error: "+err.Error(), err)
+		}
+		if release.TagName == "" {
+			return fail("GitHub API: empty release tag", errors.New("github api: empty release tag"))
 		}
 		latestVersion = strings.TrimPrefix(release.TagName, "v")
 		latestTag = release.TagName
 	} else {
 		var releases []githubKernelRelease
-		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-			s.mu.Lock()
-			if kk := s.kernels[name]; kk != nil {
-				kk.Status = "failed"
-				kk.Message = "Parse error: " + err.Error()
-			}
-			s.mu.Unlock()
-			return err
+		if err := json.NewDecoder(body).Decode(&releases); err != nil {
+			return fail("Parse error: "+err.Error(), err)
 		}
 		for _, rel := range releases {
 			if channel == "preview" && rel.Prerelease {
@@ -1008,25 +1151,82 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	}
 
 	s.mu.Lock()
-	if kk := s.kernels[name]; kk != nil {
+	// Канал сменился, пока шёл запрос: результат относится к прежнему каналу.
+	if kk := s.kernels[name]; kk != nil && kk.Channel == channel {
 		kk.LatestVersion = latestVersion
 		kk.LatestTag = latestTag
-		kk.HasUpdate = kernelHasUpdate(latestVersion, currentVersion)
-		kk.Status = "idle"
-		kk.Message = resultMessage
+		kk.HasUpdate = kernelHasUpdate(latestVersion, kk.CurrentVersion)
+		kk.AheadOfLatest = kernelAheadOfLatest(channel, latestVersion, kk.CurrentVersion)
+		if !quiet {
+			kk.Status = "idle"
+			kk.Message = resultMessage
+		}
 	}
 	s.mu.Unlock()
 	return nil
 }
 
-// Install downloads and installs the kernel
-func (s *KernelService) Install(name string) error {
+// lockKernel берёт замок операций над ядром (установка, откат, загрузка файла).
+// Занят — ErrKernelBusy. Единственный вход в замок: проверка «идёт ли операция»
+// отдельно от захвата давала гонку.
+func (s *KernelService) lockKernel(name string) (*sync.Mutex, error) {
+	actual, _ := s.installLocks.LoadOrStore(name, &sync.Mutex{})
+	installMu := actual.(*sync.Mutex)
+	if !installMu.TryLock() {
+		return nil, ErrKernelBusy
+	}
+	return installMu, nil
+}
+
+// setStage обновляет статус, этап и сообщение ядра под замком s.mu.
+func (s *KernelService) setStage(name, status, stage, message string) {
+	s.notifyStage(status, stage)
+	s.mu.Lock()
+	if kk := s.kernels[name]; kk != nil {
+		kk.Status = status
+		kk.Stage = stage
+		kk.Message = message
+	}
+	s.mu.Unlock()
+}
+
+// notifyStage сообщает тестовому хуку о предстоящей смене статуса (вне s.mu).
+func (s *KernelService) notifyStage(status, stage string) {
+	s.mu.RLock()
+	hook := s.stageHook
+	s.mu.RUnlock()
+	if hook != nil {
+		hook(status, stage)
+	}
+}
+
+// beginInstallLocked синхронно переводит ядро в «Старт…». Вызывается с уже
+// взятым замком ядра: ответ клиенту уходит только после этого, поэтому первый же
+// опрос статуса видит переходное состояние, а не прежний idle.
+func (s *KernelService) beginInstallLocked(name string) error {
+	s.notifyStage("downloading", KernelStageStarting)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kk := s.kernels[name]
+	if kk == nil {
+		return fmt.Errorf("kernel not found: %s", name)
+	}
+	kk.Status = "downloading"
+	kk.Stage = KernelStageStarting
+	kk.ResultKind = ""
+	kk.ResultVersion = ""
+	kk.Message = "Starting..."
+	return nil
+}
+
+// BeginInstall запускает установку ядра в фоне. Замок берётся и статус
+// downloading/starting выставляется синхронно, до возврата: при занятом замке —
+// ErrKernelBusy. onDone (если задан) вызывается по завершении с итоговой ошибкой.
+func (s *KernelService) BeginInstall(name string, onDone func(error)) error {
 	name, err := canonicalKernelName(name)
 	if err != nil {
 		return err
 	}
-
-	// Verify kernel exists first
 	s.mu.RLock()
 	_, kernelExists := s.kernels[name]
 	s.mu.RUnlock()
@@ -1034,24 +1234,68 @@ func (s *KernelService) Install(name string) error {
 		return fmt.Errorf("kernel not found: %s", name)
 	}
 
-	// Acquire per-kernel install lock using TryLock; return 409-style error if already in progress
-	mu := &sync.Mutex{}
-	actual, _ := s.installLocks.LoadOrStore(name, mu)
-	installMu := actual.(*sync.Mutex)
-	if !installMu.TryLock() {
-		return fmt.Errorf("install already in progress")
+	installMu, err := s.lockKernel(name)
+	if err != nil {
+		return err
+	}
+	if err := s.beginInstallLocked(name); err != nil {
+		installMu.Unlock()
+		return err
+	}
+
+	go func() {
+		defer installMu.Unlock()
+		err := s.runInstall(name)
+		if onDone != nil {
+			onDone(err)
+		}
+	}()
+	return nil
+}
+
+// Install — синхронная установка ядра (BeginInstall без фона).
+func (s *KernelService) Install(name string) error {
+	name, err := canonicalKernelName(name)
+	if err != nil {
+		return err
+	}
+	s.mu.RLock()
+	_, kernelExists := s.kernels[name]
+	s.mu.RUnlock()
+	if !kernelExists {
+		return fmt.Errorf("kernel not found: %s", name)
+	}
+
+	installMu, err := s.lockKernel(name)
+	if err != nil {
+		return err
 	}
 	defer installMu.Unlock()
-
-	// helper to update kernel status under the global lock
-	setStatus := func(status, message string) {
-		s.mu.Lock()
-		if kk := s.kernels[name]; kk != nil {
-			kk.Status = status
-			kk.Message = message
-		}
-		s.mu.Unlock()
+	if err := s.beginInstallLocked(name); err != nil {
+		return err
 	}
+	return s.runInstall(name)
+}
+
+// knownKernelVersion — версия, которую удалось определить (не служебная строка).
+func knownKernelVersion(v string) bool {
+	switch v {
+	case "", "error", "unknown", "not installed":
+		return false
+	}
+	return true
+}
+
+// runInstall — исполняющая часть установки; вызывается с уже взятым замком ядра.
+// Порядок: скачивание → распаковка → бэкап → замена. Проверка релиза внутри —
+// тихая (checkLatest quiet): она не возвращает статус в idle посреди скачивания.
+func (s *KernelService) runInstall(name string) error {
+	fail := func(message string, err error) error {
+		s.setStage(name, "failed", "", message)
+		return err
+	}
+
+	s.setStage(name, "downloading", KernelStageDownloading, "Downloading...")
 
 	s.mu.Lock()
 	k := s.kernels[name]
@@ -1059,28 +1303,35 @@ func (s *KernelService) Install(name string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("kernel not found: %s", name)
 	}
-	k.Status = "downloading"
+	s.resolveBinaryPath(k)
 	binaryPath := k.BinaryPath
 	latestVersion := k.LatestVersion
+	arch := s.installArch
+	download := s.downloadFn
 	s.mu.Unlock()
 
 	// If latestVersion is unknown, check latest or fallback to current version for reinstall
 	if latestVersion == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = s.CheckLatest(ctx, name)
+		_ = s.checkLatest(ctx, name, true)
 		cancel()
-		s.mu.RLock()
-		if s.kernels[name] != nil {
-			latestVersion = s.kernels[name].LatestVersion
-			if latestVersion == "" && s.kernels[name].CurrentVersion != "" && s.kernels[name].CurrentVersion != "not installed" {
-				latestVersion = strings.TrimPrefix(s.kernels[name].CurrentVersion, "v")
-				s.kernels[name].LatestVersion = latestVersion
+		s.mu.Lock()
+		if kk := s.kernels[name]; kk != nil {
+			latestVersion = kk.LatestVersion
+			if latestVersion == "" && knownKernelVersion(kk.CurrentVersion) {
+				latestVersion = strings.TrimPrefix(kk.CurrentVersion, "v")
+				kk.LatestVersion = latestVersion
 			}
 		}
-		s.mu.RUnlock()
+		s.mu.Unlock()
 	}
 
-	arch := kernelAssetArch(runtime.GOARCH)
+	if arch == "" {
+		arch = kernelAssetArch(runtime.GOARCH)
+	}
+	if download == nil {
+		download = s.downloadFile
+	}
 
 	// Build a temporary KernelInfo for buildDownloadURL (only needs Name, Repo, LatestVersion, Channel)
 	s.mu.RLock()
@@ -1090,62 +1341,33 @@ func (s *KernelService) Install(name string) error {
 
 	downloadURL, filename := s.buildDownloadURL(&snap, arch)
 	if downloadURL == "" {
-		setStatus("failed", "Unsupported architecture: "+arch)
-		return fmt.Errorf("unsupported architecture: %s", arch)
+		return fail("Unsupported architecture: "+arch, fmt.Errorf("unsupported architecture: %s", arch))
 	}
 
 	tempFile, err := safeTempPath(filename)
 	if err != nil {
-		setStatus("failed", "Invalid filename: "+err.Error())
-		return err
+		return fail("Invalid filename: "+err.Error(), err)
 	}
 	defer os.Remove(tempFile) // Cleanup archive after extraction
 
-	if err := s.downloadFile(context.Background(), downloadURL, tempFile); err != nil {
-		setStatus("failed", "Download failed: "+err.Error())
-		return err
-	}
-
-	// Backup current binary
-	setStatus("installing", "Creating backup...")
-
-	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
-		setStatus("failed", "Backup dir failed: "+err.Error())
-		return err
-	}
-	// Use name and timestamp in backup name to prevent cross-kernel backup collisions
-	backupName := fmt.Sprintf("%s.bak.%d", name, time.Now().Unix())
-	backupPath, err := sanitizeKernelPath(filepath.Join(backupDir, backupName))
-	if err != nil {
-		setStatus("failed", "Invalid backup path: "+err.Error())
-		return err
-	}
-
-	if _, err := os.Stat(binaryPath); err == nil {
-		// Копия с правами оригинала: откат на неё должен дать запускаемое ядро
-		if err := copyKernelFile(binaryPath, backupPath); err != nil {
-			setStatus("failed", "Backup failed: "+err.Error())
-			return err
-		}
+	if err := download(context.Background(), downloadURL, tempFile); err != nil {
+		return fail("Download failed: "+err.Error(), err)
 	}
 
 	// Extract if needed
 	extractedPath := tempFile
 	if strings.HasSuffix(tempFile, ".zip") {
-		setStatus("installing", "Extracting...")
+		s.setStage(name, "installing", KernelStageExtracting, "Extracting...")
 		extracted, err := s.extractZip(tempFile, name)
 		if err != nil {
-			setStatus("failed", "Extract failed: "+err.Error())
-			return err
+			return fail("Extract failed: "+err.Error(), err)
 		}
 		extractedPath = extracted
 	} else if strings.HasSuffix(tempFile, ".gz") {
-		setStatus("installing", "Extracting...")
+		s.setStage(name, "installing", KernelStageExtracting, "Extracting...")
 		extracted, err := s.extractGz(tempFile)
 		if err != nil {
-			setStatus("failed", "Extract failed: "+err.Error())
-			return err
+			return fail("Extract failed: "+err.Error(), err)
 		}
 		extractedPath = extracted
 	}
@@ -1155,44 +1377,53 @@ func (s *KernelService) Install(name string) error {
 		defer os.Remove(extractedPath)
 	}
 
+	s.setStage(name, "installing", KernelStageReplacing, "Replacing...")
+
+	safeBinaryPath, err := sanitizeKernelPath(binaryPath)
+	if err != nil {
+		return fail("Invalid binary path: "+err.Error(), err)
+	}
+
+	// Итог считается до замены: был ли бинарник и какой версии.
+	hadBinary, prevVersion := s.inspectInstalled(name, safeBinaryPath)
+
+	// Бэкап прежнего бинарника. Не удался — замены нет: без копии откат невозможен.
+	if hadBinary {
+		if err := backupKernelBinary(name, safeBinaryPath, prevVersion); err != nil {
+			return fail("Backup failed: "+err.Error(), err)
+		}
+	}
+
 	// Make executable and replace
 	safeExtracted, err := sanitizeKernelPath(extractedPath)
 	if err != nil {
-		setStatus("failed", "Invalid extracted path: "+err.Error())
-		return err
+		return fail("Invalid extracted path: "+err.Error(), err)
 	}
 	if err := os.Chmod(safeExtracted, 0755); err != nil {
-		setStatus("failed", "Chmod failed: "+err.Error())
-		return err
+		return fail("Chmod failed: "+err.Error(), err)
 	}
 
 	// Atomic replace
-	tempDest, err := sanitizeKernelPath(filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new"))
+	tempDest, err := sanitizeKernelPath(filepath.Join(filepath.Dir(safeBinaryPath), filepath.Base(safeBinaryPath)+".new"))
 	if err != nil {
-		setStatus("failed", "Invalid temp dest path: "+err.Error())
-		return err
-	}
-	safeBinaryPath, err := sanitizeKernelPath(binaryPath)
-	if err != nil {
-		setStatus("failed", "Invalid binary path: "+err.Error())
-		return err
+		return fail("Invalid temp dest path: "+err.Error(), err)
 	}
 	if err := moveKernelFile(safeExtracted, tempDest); err != nil {
-		setStatus("failed", "Replace failed: "+err.Error())
-		return err
+		return fail("Replace failed: "+err.Error(), err)
 	}
 	if err := os.Rename(tempDest, safeBinaryPath); err != nil {
 		// Rename в пределах каталога атомарен: при ошибке рабочее ядро не
 		// тронуто, откатывать нечего — убрать только недоустановленный файл
 		_ = os.Remove(tempDest)
-		setStatus("failed", "Replace failed: "+err.Error())
-		return err
+		return fail("Replace failed: "+err.Error(), err)
 	}
 
-	// Prune old backups — keep at most 3 most recent for this kernel
-	_ = pruneBackups(backupDir, name+".bak.", 3)
+	if name == "mihomo" {
+		s.ensureMihomoConfigDir()
+	}
 
 	// Verify new version and update metadata under lock
+	s.notifyStage("done", "")
 	s.mu.Lock()
 	if kk := s.kernels[name]; kk != nil {
 		// Reset binary path cache so the next List/Get call re-detects the actual install location
@@ -1200,144 +1431,281 @@ func (s *KernelService) Install(name string) error {
 		// Re-resolve path immediately so we report the correct location
 		s.resolveBinaryPath(kk)
 		s.refreshInstalledVersion(kk)
+		var kind, message string
+		switch {
+		case !hadBinary:
+			kind, message = KernelResultInstalled, "Installed "+kk.CurrentVersion
+		case knownKernelVersion(prevVersion) && prevVersion == kk.CurrentVersion:
+			kind, message = KernelResultReinstalled, "Reinstalled "+kk.CurrentVersion
+		default:
+			kind, message = KernelResultUpdated, "Updated to "+kk.CurrentVersion
+		}
 		kk.Status = "done"
-		kk.Message = "Updated to " + kk.CurrentVersion
-		kk.HasBackup = true
+		kk.Stage = ""
+		kk.ResultKind = kind
+		kk.ResultVersion = kk.CurrentVersion
+		kk.Message = message
 	}
 	s.mu.Unlock()
 
 	return nil
 }
 
-// Rollback restores the kernel binary from the latest backup.
+// backupsKept — сколько последних бэкапов хранится на ядро.
+const backupsKept = 3
+
+// backupVersionMaxLen — предел длины версии в имени бэкапа.
+const backupVersionMaxLen = 64
+
+// backupVersionRe — допустимая версия в имени бэкапа: semver или alpha-<hex>,
+// только символы [0-9A-Za-z.-]. Имя файла попадает в путь, поэтому всё прочее
+// («error», «unknown», обход пути, произвольный текст) в него не пускается.
+var backupVersionRe = regexp.MustCompile(`^(?:\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?|alpha-[0-9a-f]+)$`)
+
+// validBackupVersion возвращает версию, если её можно записать в имя бэкапа, иначе "".
+func validBackupVersion(v string) string {
+	if len(v) > backupVersionMaxLen || !backupVersionRe.MatchString(v) {
+		return ""
+	}
+	return v
+}
+
+// backupFileName — имя бэкапа `<ядро>.bak.<unix>[.<версия>]`. Версия — после
+// десятизначной метки, поэтому порядок по метке не зависит от неё.
+func backupFileName(kernel string, ts int64, version string) string {
+	name := fmt.Sprintf("%s.bak.%d", kernel, ts)
+	if v := validBackupVersion(version); v != "" {
+		name += "." + v
+	}
+	return name
+}
+
+// parseBackupName разбирает имя бэкапа. Невалидная версия отбрасывается (файл
+// остаётся бэкапом без версии); чужое ядро и нечисловая метка — ok=false.
+func parseBackupName(fileName, kernel string) (ts int64, version string, ok bool) {
+	prefix := kernel + ".bak."
+	if !strings.HasPrefix(fileName, prefix) {
+		return 0, "", false
+	}
+	tsPart, verPart := fileName[len(prefix):], ""
+	if i := strings.IndexByte(tsPart, '.'); i >= 0 {
+		tsPart, verPart = tsPart[:i], tsPart[i+1:]
+	}
+	if tsPart == "" || len(tsPart) > 18 {
+		return 0, "", false
+	}
+	for _, r := range tsPart {
+		if r < '0' || r > '9' {
+			return 0, "", false
+		}
+	}
+	ts, err := strconv.ParseInt(tsPart, 10, 64)
+	if err != nil {
+		return 0, "", false
+	}
+	return ts, validBackupVersion(verPart), true
+}
+
+// kernelBackup — бэкап ядра в каталоге .backup рядом с бинарником.
+type kernelBackup struct {
+	path    string
+	version string
+	ts      int64
+}
+
+// kernelBackups читает каталог .backup рядом с binaryPath, без exec. Учитываются
+// только обычные файлы с корректно разобранным именем этого ядра. Порядок —
+// от старых к новым (по метке, при равенстве — по имени).
+func kernelBackups(name, binaryPath string) []kernelBackup {
+	if binaryPath == "" {
+		return nil
+	}
+	dir, err := sanitizeKernelPath(filepath.Join(filepath.Dir(binaryPath), ".backup"))
+	if err != nil {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var backups []kernelBackup
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		ts, version, ok := parseBackupName(e.Name(), name)
+		if !ok {
+			continue
+		}
+		path, err := sanitizeKernelPath(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		backups = append(backups, kernelBackup{path: path, version: version, ts: ts})
+	}
+	sort.Slice(backups, func(i, j int) bool {
+		if backups[i].ts != backups[j].ts {
+			return backups[i].ts < backups[j].ts
+		}
+		return backups[i].path < backups[j].path
+	})
+	return backups
+}
+
+// latestBackupEntry — самый новый бэкап ядра.
+func latestBackupEntry(name, binaryPath string) (kernelBackup, bool) {
+	backups := kernelBackups(name, binaryPath)
+	if len(backups) == 0 {
+		return kernelBackup{}, false
+	}
+	return backups[len(backups)-1], true
+}
+
+// latestBackup — путь и версия последнего бэкапа ядра (версия может быть пустой).
+func latestBackup(name, binaryPath string) (path, version string, ok bool) {
+	b, ok := latestBackupEntry(name, binaryPath)
+	return b.path, b.version, ok
+}
+
+// inspectInstalled определяет, стоит ли бинарник ядра, и его версию. Версия — свежим
+// запуском, в обход кеша: кеш мог пережить замену файла извне.
+func (s *KernelService) inspectInstalled(name, safeBinaryPath string) (bool, string) {
+	if _, err := os.Stat(safeBinaryPath); err != nil {
+		return false, ""
+	}
+	s.mu.RLock()
+	var probe KernelInfo
+	if k := s.kernels[name]; k != nil {
+		probe = *k
+	}
+	s.mu.RUnlock()
+	probe.Name = name
+	probe.BinaryPath = safeBinaryPath
+	probe.verCache = &versionCache{}
+	return true, s.detectVersion(&probe)
+}
+
+// backupKernelBinary копирует действующий бинарник в .backup рядом с ним: имя
+// несёт версию (D-12), права копии — как у оригинала. Копия не создаётся, если
+// последний бэкап уже той же известной версии. Хранятся backupsKept последних.
+// Ошибка означает, что бинарник заменять нельзя. Вызывается под замком ядра.
+func backupKernelBinary(name, safeBinaryPath, prevVersion string) error {
+	version := validBackupVersion(prevVersion)
+	last, hasLast := latestBackupEntry(name, safeBinaryPath)
+	if hasLast && version != "" && last.version == version {
+		return nil
+	}
+	backupDir, err := sanitizeKernelPath(filepath.Join(filepath.Dir(safeBinaryPath), ".backup"))
+	if err != nil {
+		return fmt.Errorf("invalid backup dir: %w", err)
+	}
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		return fmt.Errorf("backup dir: %w", err)
+	}
+	// Метка строго растёт: две замены в одну секунду не должны смешать порядок.
+	ts := time.Now().Unix()
+	if hasLast && ts <= last.ts {
+		ts = last.ts + 1
+	}
+	backupPath, err := sanitizeKernelPath(filepath.Join(backupDir, backupFileName(name, ts, version)))
+	if err != nil {
+		return fmt.Errorf("invalid backup path: %w", err)
+	}
+	if err := copyKernelFile(safeBinaryPath, backupPath); err != nil {
+		return err
+	}
+	pruneBackups(name, safeBinaryPath, backupsKept)
+	return nil
+}
+
+// Rollback восстанавливает бинарник из последнего бэкапа. Берёт тот же замок, что
+// установка и загрузка файла (занят — ErrKernelBusy). Применённый бэкап
+// расходуется: следующий откат идёт к более старой копии.
 func (s *KernelService) Rollback(name string) error {
 	name, err := canonicalKernelName(name)
 	if err != nil {
 		return err
 	}
-
-	s.mu.Lock()
-	k, ok := s.kernels[name]
-	if !ok {
-		s.mu.Unlock()
+	s.mu.RLock()
+	_, kernelExists := s.kernels[name]
+	s.mu.RUnlock()
+	if !kernelExists {
 		return fmt.Errorf("kernel not found: %s", name)
 	}
+
+	// lockKernel делает TryLock(): при идущей установке — сразу ErrKernelBusy, без ожидания.
+	installMu, err := s.lockKernel(name)
+	if err != nil {
+		return err
+	}
+	defer installMu.Unlock()
+
+	s.mu.Lock()
+	k := s.kernels[name]
 	s.resolveBinaryPath(k)
 	binaryPath := k.BinaryPath
 	s.mu.Unlock()
 
-	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
-	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		return fmt.Errorf("read backup dir: %w", err)
-	}
-
-	var backups []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), name+".bak.") {
-			backups = append(backups, filepath.Join(backupDir, e.Name()))
-		}
-	}
-
-	// Fallback to legacy format "kernel.bak." only if no new backups exist
-	if len(backups) == 0 {
-		log.Printf("[Kernel] No backups found with prefix %s.bak., trying legacy format kernel.bak.", utils.SanitizeLogInput(name))
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasPrefix(e.Name(), "kernel.bak.") {
-				backups = append(backups, filepath.Join(backupDir, e.Name()))
-			}
-		}
-	}
-
-	if len(backups) == 0 {
+	backup, ok := latestBackupEntry(name, binaryPath)
+	if !ok {
 		return fmt.Errorf("no backup found for kernel %s", name)
 	}
 
-	// Latest backup is the last one (since names contain timestamps and os.ReadDir sorts by name)
-	latestBackup := backups[len(backups)-1]
-
+	safeBinaryPath, err := sanitizeKernelPath(binaryPath)
+	if err != nil {
+		return fmt.Errorf("invalid binary path: %w", err)
+	}
 	// Atomic replace
-	tempDest, err := sanitizeKernelPath(filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new"))
+	tempDest, err := sanitizeKernelPath(filepath.Join(filepath.Dir(safeBinaryPath), filepath.Base(safeBinaryPath)+".new"))
 	if err != nil {
 		return err
 	}
-
-	src, err := os.Open(latestBackup)
-	if err != nil {
-		return fmt.Errorf("open backup file: %w", err)
-	}
-	defer src.Close()
-
-	dst, err := os.Create(tempDest)
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, src); err != nil {
+	if err := copyKernelFile(backup.path, tempDest); err != nil {
+		_ = os.Remove(tempDest)
 		return fmt.Errorf("copy backup: %w", err)
 	}
-
-	if err := dst.Close(); err != nil {
-		return err
-	}
-	if err := src.Close(); err != nil {
-		return err
-	}
-
 	if err := os.Chmod(tempDest, 0755); err != nil {
+		_ = os.Remove(tempDest)
 		return fmt.Errorf("chmod temp file: %w", err)
 	}
-
-	if err := os.Rename(tempDest, binaryPath); err != nil {
+	if err := os.Rename(tempDest, safeBinaryPath); err != nil {
+		_ = os.Remove(tempDest)
 		return fmt.Errorf("rename to target path: %w", err)
 	}
+	// Применённая копия израсходована: повторный откат не вернёт ту же версию.
+	if err := os.Remove(backup.path); err != nil {
+		log.Printf("Kernel: failed to remove applied backup %s: %v", utils.SanitizeLogInput(backup.path), err)
+	}
 
-	// Reset cache under lock
 	s.mu.Lock()
 	if kk := s.kernels[name]; kk != nil {
 		kk.binaryPathCachedAt = time.Time{}
 		s.resolveBinaryPath(kk)
 		s.refreshInstalledVersion(kk)
-		kk.Status = "idle"
-		kk.Message = "Rolled back to backup"
-		kk.HasBackup = s.hasBackup(name, kk.BinaryPath)
+		kk.Status = "done"
+		kk.Stage = ""
+		kk.ResultKind = KernelResultRolledBack
+		kk.ResultVersion = kk.CurrentVersion
+		kk.Message = "Rolled back to " + kk.CurrentVersion
 	}
 	s.mu.Unlock()
 
 	return nil
 }
 
-// pruneBackups removes oldest backup files in dir with the given prefix, keeping only the `keep` most recent.
-// Files are sorted by name (timestamp suffix ensures lexicographic order = chronological order).
-// Errors are logged but do not fail the caller.
-func pruneBackups(dir string, prefix string, keep int) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-
-	// Filter to backup files only
-	var backups []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
-			backups = append(backups, filepath.Join(dir, e.Name()))
-		}
-	}
-
-	// Sort ascending by name (oldest first) — names use Unix timestamp suffix
-	// so lexicographic order equals chronological order.
-	// os.ReadDir already returns entries sorted by name.
+// pruneBackups удаляет самые старые бэкапы ядра, оставляя keep последних. Порядок
+// — по метке из имени, а не по строке имени: версия в имени его не определяет.
+// Ошибки удаления логируются и не проваливают вызывающего.
+func pruneBackups(name, binaryPath string, keep int) {
+	backups := kernelBackups(name, binaryPath)
 	if len(backups) <= keep {
-		return nil
+		return
 	}
-
 	for _, old := range backups[:len(backups)-keep] {
-		if err := os.Remove(old); err != nil {
-			log.Printf("pruneBackups: failed to remove %s: %v", old, err)
+		if err := os.Remove(old.path); err != nil {
+			log.Printf("pruneBackups: failed to remove %s: %v", utils.SanitizeLogInput(old.path), err)
 		}
 	}
-	return nil
 }
 
 // kernelAssetArch переводит GOARCH панели в суффикс архитектуры релизных
@@ -1723,11 +2091,9 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		return fmt.Errorf("kernel not found: %s", name)
 	}
 
-	mu := &sync.Mutex{}
-	actual, _ := s.installLocks.LoadOrStore(name, mu)
-	installMu := actual.(*sync.Mutex)
-	if !installMu.TryLock() {
-		return fmt.Errorf("install already in progress")
+	installMu, err := s.lockKernel(name)
+	if err != nil {
+		return err
 	}
 	defer installMu.Unlock()
 
@@ -1778,22 +2144,17 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		return fmt.Errorf("uploaded file is not a valid Linux ELF binary")
 	}
 
-	// Backup current binary if exists
-	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
-	_ = os.MkdirAll(backupDir, 0755)
-	backupName := fmt.Sprintf("%s.bak.%d", name, time.Now().Unix())
-	backupPath, err := sanitizeKernelPath(filepath.Join(backupDir, backupName))
-	if err != nil {
-		return fmt.Errorf("invalid backup path: %w", err)
-	}
 	safeBinaryPath, err := sanitizeKernelPath(binaryPath)
 	if err != nil {
 		return fmt.Errorf("invalid binary path: %w", err)
 	}
 
-	if _, err := os.Stat(safeBinaryPath); err == nil {
-		if err := copyKernelFile(safeBinaryPath, backupPath); err == nil {
-			_ = pruneBackups(backupDir, name+".bak.", 3)
+	// Backup current binary if exists. Ошибка копирования прерывает замену: без
+	// копии откат невозможен (так же, как при установке).
+	hadBinary, prevVersion := s.inspectInstalled(name, safeBinaryPath)
+	if hadBinary {
+		if err := backupKernelBinary(name, safeBinaryPath, prevVersion); err != nil {
+			return fmt.Errorf("backup failed: %w", err)
 		}
 	}
 
@@ -1819,14 +2180,20 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		return fmt.Errorf("final replace failed: %w", err)
 	}
 
+	if name == "mihomo" {
+		s.ensureMihomoConfigDir()
+	}
+
 	s.mu.Lock()
 	if kk := s.kernels[name]; kk != nil {
 		kk.binaryPathCachedAt = time.Time{}
 		s.resolveBinaryPath(kk)
 		s.refreshInstalledVersion(kk)
 		kk.Status = "done"
-		kk.Message = "Installed: " + kk.CurrentVersion
-		kk.HasBackup = true
+		kk.Stage = ""
+		kk.ResultKind = KernelResultUploaded
+		kk.ResultVersion = kk.CurrentVersion
+		kk.Message = "Uploaded " + kk.CurrentVersion
 	}
 	s.mu.Unlock()
 

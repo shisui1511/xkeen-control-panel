@@ -38,6 +38,7 @@ type API struct {
 	xrayAccessLogSvc      *services.XrayAccessLogService
 	trafficQuotaSvc       *services.TrafficQuotaService
 	watchdogSvc           *services.WatchdogService
+	xkeenStatus           *services.XKeenStatusCache
 	updateScheduler       *UpdateScheduler
 	xrayGRPCSvc           *services.XrayGRPCService
 	datSvc                *services.DATManagerService
@@ -103,6 +104,67 @@ func (a *API) SetWatchdogService(svc *services.WatchdogService) {
 
 func (a *API) WatchdogService() *services.WatchdogService {
 	return a.watchdogSvc
+}
+
+// SetXKeenStatusCache подключает кэш статуса XKeen; создаётся и останавливается в main.
+func (a *API) SetXKeenStatusCache(c *services.XKeenStatusCache) {
+	a.xkeenStatus = c
+}
+
+func (a *API) XKeenStatusCache() *services.XKeenStatusCache {
+	return a.xkeenStatus
+}
+
+// xkeenStatusSnapshot — последнее известное состояние XKeen. Без кэша (тестовые
+// сборки API) делает один прямой опрос: это запасной путь, а не ленивая
+// инициализация сервиса.
+func (a *API) xkeenStatusSnapshot() services.XKeenStatusSnapshot {
+	if a.xkeenStatus != nil {
+		return a.xkeenStatus.Snapshot()
+	}
+	if a.xkeenSvc == nil {
+		return services.XKeenStatusSnapshot{Stale: true}
+	}
+	out, err := a.xkeenSvc.Status()
+	if err != nil {
+		return services.XKeenStatusSnapshot{Stale: true, LastErr: err.Error()}
+	}
+	return services.XKeenStatusSnapshot{Raw: out, UpdatedAt: time.Now()}
+}
+
+// xkeenStatusAge — возраст снимка по часам кэша (или системным без кэша).
+func (a *API) xkeenStatusAge(snap services.XKeenStatusSnapshot) (int, bool) {
+	if a.xkeenStatus != nil {
+		return a.xkeenStatus.AgeSeconds(snap)
+	}
+	return snap.AgeSeconds(time.Now())
+}
+
+// xkeenVersion — версия XKeen из кэша (без запуска xkeen на запросе);
+// без кэша — прямое чтение `xkeen -v`.
+func (a *API) xkeenVersion() string {
+	if a.xkeenStatus != nil {
+		if v := a.xkeenStatus.Snapshot().Version; v != "" {
+			return v
+		}
+		return "unknown"
+	}
+	return a.xkeenSvc.GetVersion()
+}
+
+// invalidateXKeenVersion помечает устаревшими статус и версию XKeen
+// (после установщика XKeen); nil-безопасно.
+func (a *API) invalidateXKeenVersion() {
+	if a.xkeenStatus != nil {
+		a.xkeenStatus.InvalidateVersion()
+	}
+}
+
+// invalidateXKeenStatus помечает кэш статуса устаревшим (nil-безопасно).
+func (a *API) invalidateXKeenStatus() {
+	if a.xkeenStatus != nil {
+		a.xkeenStatus.Invalidate()
+	}
 }
 
 func (a *API) SetXrayGRPCService(svc *services.XrayGRPCService) {
@@ -290,7 +352,7 @@ func (a *API) getActiveKernelName() string {
 		}
 	}
 	if active == "" && a.xkeenSvc != nil {
-		if status, err := a.xkeenSvc.Status(); err == nil {
+		if status := a.xkeenStatusSnapshot().Raw; status != "" {
 			lower := strings.ToLower(status)
 			if strings.Contains(lower, "xray") && strings.Contains(lower, "mihomo") {
 				active = "both"

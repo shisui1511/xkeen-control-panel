@@ -3,9 +3,12 @@ package services
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -274,6 +277,73 @@ func TestKernelService_DetectVersion_Mihomo(t *testing.T) {
 	v := svc.detectVersion(svc.kernels["mihomo"])
 	if v != "1.18.0" {
 		t.Fatalf("expected version 1.18.0, got %s", v)
+	}
+}
+
+// TestDetectVersion_Timeout: зависший бинарник не держит detectVersion дольше
+// таймаута, а результат-ошибка не кэшируется.
+func TestDetectVersion_Timeout(t *testing.T) {
+	origTimeout := kernelVersionTimeout
+	kernelVersionTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { kernelVersionTimeout = origTimeout })
+
+	tmpDir := t.TempDir()
+	xrayPath := filepath.Join(tmpDir, "xray")
+	// sleep наследует пайп вывода — проверяем и убийство процесса, и WaitDelay
+	if err := os.WriteFile(xrayPath, []byte("#!/bin/sh\nexec sleep 5\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewKernelService(t.TempDir())
+	svc.kernels["xray"].BinaryPath = xrayPath
+
+	for i := 0; i < 2; i++ {
+		start := time.Now()
+		v := svc.detectVersion(svc.kernels["xray"])
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("call %d: detectVersion took %v, want < 2s", i, elapsed)
+		}
+		if v != "error" {
+			t.Fatalf("call %d: version = %q, want error", i, v)
+		}
+	}
+
+	// Ошибка не кэшируется: после починки бинарника версия читается сразу.
+	if err := os.WriteFile(xrayPath, []byte("#!/bin/sh\necho \"Xray 1.8.24 (Xray, Penetrates Everything.)\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if v := svc.detectVersion(svc.kernels["xray"]); v != "1.8.24" {
+		t.Fatalf("after fix: version = %q, want 1.8.24 (error must not be cached)", v)
+	}
+}
+
+// TestNewKernelService_NoWarningWhenNotInstalled: отсутствие ядер на чистой
+// системе — штатная ситуация, в логе это info без слова WARNING.
+func TestNewKernelService_NoWarningWhenNotInstalled(t *testing.T) {
+	origXray, origMihomo := xrayProbePaths, mihomoProbePaths
+	xrayProbePaths = []string{"/nonexistent/xray-does-not-exist"}
+	mihomoProbePaths = []string{"/nonexistent/mihomo-does-not-exist"}
+	t.Setenv("PATH", t.TempDir())
+
+	var buf bytes.Buffer
+	origOut, origFlags := log.Writer(), log.Flags()
+	log.SetOutput(&buf)
+	t.Cleanup(func() {
+		log.SetOutput(origOut)
+		log.SetFlags(origFlags)
+		xrayProbePaths, mihomoProbePaths = origXray, origMihomo
+	})
+
+	NewKernelService(t.TempDir())
+
+	out := buf.String()
+	if strings.Contains(out, "WARNING") {
+		t.Errorf("лог содержит WARNING про отсутствующие ядра: %q", out)
+	}
+	for _, want := range []string{"Xray binary not found (not installed yet)", "Mihomo binary not found (not installed yet)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("в логе нет %q: %q", want, out)
+		}
 	}
 }
 
@@ -599,6 +669,9 @@ func TestCheckLatest_SemverHasUpdate(t *testing.T) {
 	if svc.kernels["xray"].HasUpdate {
 		t.Errorf("expected HasUpdate = false for current 1.18.1 and latest 1.18.0")
 	}
+	if !svc.kernels["xray"].AheadOfLatest {
+		t.Errorf("expected AheadOfLatest = true for current 1.18.1 and latest 1.18.0")
+	}
 
 	// Scenario 2: CurrentVersion = "1.17.0", latestVersion = "1.18.0" -> HasUpdate == true
 	svc = NewKernelService(t.TempDir())
@@ -630,6 +703,216 @@ func TestCheckLatest_SemverHasUpdate(t *testing.T) {
 	}
 	if !svc.kernels["xray"].HasUpdate {
 		t.Errorf("expected HasUpdate = true for current 'not installed' and latest 1.18.0")
+	}
+}
+
+// newReleaseServer поднимает httptest-сервер, отвечающий на любые запросы
+// фиксированным статусом и телом.
+func newReleaseServer(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// newCheckLatestService — сервис с подключённым локальным источником релизов.
+func newCheckLatestService(t *testing.T, server *httptest.Server, channel, current string) *KernelService {
+	t.Helper()
+	svc := NewKernelService(t.TempDir())
+	svc.SetReleaseSource(server.URL, server.Client())
+	k := svc.kernels["xray"]
+	k.CurrentVersion = current
+	k.Channel = channel
+	k.Repo = "some/repo"
+	return svc
+}
+
+// TestCheckLatest_Ahead: третье состояние «установлена новее последнего stable».
+func TestCheckLatest_Ahead(t *testing.T) {
+	cases := []struct {
+		name       string
+		kernel     string
+		channel    string
+		body       string
+		current    string
+		wantUpdate bool
+		wantAhead  bool
+	}{
+		{"stable, установлена новее latest", "xray", "stable", `{"tag_name":"v26.3.27"}`, "26.9.8", false, true},
+		{"stable, версии равны", "xray", "stable", `{"tag_name":"v26.3.27"}`, "26.3.27", false, false},
+		{"stable, установлена старее", "xray", "stable", `{"tag_name":"v26.3.27"}`, "26.1.1", true, false},
+		{"preview, установлена новее latest", "xray", "preview", `[{"tag_name":"v26.9.9","prerelease":true}]`, "26.9.10", false, false},
+		{"preview, плавающая alpha-сборка", "mihomo", "preview", `[{"tag_name":"Prerelease-Alpha","prerelease":true,"assets":[{"name":"mihomo-linux-arm64-alpha-abc1234.gz"}]}]`, "1.19.0", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newReleaseServer(t, http.StatusOK, tc.body)
+			svc := newCheckLatestService(t, server, tc.channel, tc.current)
+			name := tc.kernel
+			if name != "xray" {
+				svc.kernels[name].CurrentVersion = tc.current
+				svc.kernels[name].Channel = tc.channel
+				svc.kernels[name].Repo = "some/repo"
+			}
+			if err := svc.CheckLatest(context.Background(), name); err != nil {
+				t.Fatalf("CheckLatest error: %v", err)
+			}
+			k := svc.kernels[name]
+			if k.HasUpdate != tc.wantUpdate {
+				t.Errorf("HasUpdate = %v, want %v", k.HasUpdate, tc.wantUpdate)
+			}
+			if k.AheadOfLatest != tc.wantAhead {
+				t.Errorf("AheadOfLatest = %v, want %v", k.AheadOfLatest, tc.wantAhead)
+			}
+			if k.Status != "idle" {
+				t.Errorf("Status = %q, want idle", k.Status)
+			}
+		})
+	}
+}
+
+// TestCheckLatest_HTTPError: ответ GitHub с HTTP != 200 — это failed, а не «актуально».
+func TestCheckLatest_HTTPError(t *testing.T) {
+	for _, code := range []int{http.StatusForbidden, http.StatusNotFound} {
+		t.Run(fmt.Sprintf("HTTP %d", code), func(t *testing.T) {
+			server := newReleaseServer(t, code, `{"message":"rate limit exceeded"}`)
+			svc := newCheckLatestService(t, server, "stable", "1.17.0")
+
+			if err := svc.CheckLatest(context.Background(), "xray"); err == nil {
+				t.Fatal("expected error for non-200 GitHub response")
+			}
+			k := svc.kernels["xray"]
+			if want := fmt.Sprintf("GitHub API HTTP %d", code); k.Status != "failed" || k.Message != want {
+				t.Errorf("Status=%q Message=%q, want failed / %q", k.Status, k.Message, want)
+			}
+			if k.LatestVersion != "" || k.HasUpdate || k.AheadOfLatest {
+				t.Errorf("Latest* must stay empty on error: latest=%q has_update=%v ahead=%v", k.LatestVersion, k.HasUpdate, k.AheadOfLatest)
+			}
+		})
+	}
+}
+
+// TestCheckLatest_EmptyStableTag: пустой tag_name на stable — ошибка, а не «актуально».
+func TestCheckLatest_EmptyStableTag(t *testing.T) {
+	server := newReleaseServer(t, http.StatusOK, `{"tag_name":""}`)
+	svc := newCheckLatestService(t, server, "stable", "1.17.0")
+
+	if err := svc.CheckLatest(context.Background(), "xray"); err == nil {
+		t.Fatal("expected error for empty release tag")
+	}
+	k := svc.kernels["xray"]
+	if k.Status != "failed" || k.Message != "GitHub API: empty release tag" {
+		t.Errorf("Status=%q Message=%q, want failed / empty release tag", k.Status, k.Message)
+	}
+}
+
+// TestCheckLatest_QuietKeepsStatus: тихая проверка (шов для установки) не трогает
+// Status и Message ни при успехе, ни при ошибке GitHub.
+func TestCheckLatest_QuietKeepsStatus(t *testing.T) {
+	t.Run("успех", func(t *testing.T) {
+		server := newReleaseServer(t, http.StatusOK, `{"tag_name":"v1.18.0"}`)
+		svc := newCheckLatestService(t, server, "stable", "1.17.0")
+		svc.kernels["xray"].Status = "downloading"
+		svc.kernels["xray"].Message = "Downloading..."
+
+		if err := svc.checkLatest(context.Background(), "xray", true); err != nil {
+			t.Fatalf("checkLatest error: %v", err)
+		}
+		k := svc.kernels["xray"]
+		if k.Status != "downloading" || k.Message != "Downloading..." {
+			t.Errorf("Status=%q Message=%q changed by quiet check", k.Status, k.Message)
+		}
+		if k.LatestVersion != "1.18.0" || !k.HasUpdate {
+			t.Errorf("Latest* not recorded: latest=%q has_update=%v", k.LatestVersion, k.HasUpdate)
+		}
+	})
+	t.Run("ошибка 403", func(t *testing.T) {
+		server := newReleaseServer(t, http.StatusForbidden, `{}`)
+		svc := newCheckLatestService(t, server, "stable", "1.17.0")
+		svc.kernels["xray"].Status = "downloading"
+		svc.kernels["xray"].Message = "Downloading..."
+
+		if err := svc.checkLatest(context.Background(), "xray", true); err == nil {
+			t.Fatal("expected error")
+		}
+		k := svc.kernels["xray"]
+		if k.Status != "downloading" || k.Message != "Downloading..." {
+			t.Errorf("Status=%q Message=%q changed by quiet check", k.Status, k.Message)
+		}
+	})
+}
+
+// TestCheckLatest_DropsResultAfterChannelSwitch: результат проверки, начатой до
+// смены канала, не перезаписывает Latest* нового канала.
+func TestCheckLatest_DropsResultAfterChannelSwitch(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tag_name":"v1.18.0"}`))
+	}))
+	defer server.Close()
+
+	svc := newCheckLatestService(t, server, "stable", "1.17.0")
+
+	done := make(chan error, 1)
+	go func() { done <- svc.CheckLatest(context.Background(), "xray") }()
+
+	<-started
+	if !svc.SetChannel("xray", "preview") {
+		t.Fatal("SetChannel returned false")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+
+	k := svc.Get("xray")
+	if k.LatestVersion != "" || k.LatestTag != "" || k.HasUpdate {
+		t.Errorf("устаревший результат записан: latest=%q tag=%q has_update=%v", k.LatestVersion, k.LatestTag, k.HasUpdate)
+	}
+}
+
+// TestSetChannel_Recompute: смена канала сбрасывает результаты проверки прежнего
+// канала до перепроверки нового.
+func TestSetChannel_Recompute(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tag_name":"v1.18.0"}`))
+	}))
+	defer server.Close()
+
+	svc := NewKernelService(t.TempDir())
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.kernels["xray"].CurrentVersion = "1.17.0"
+	svc.kernels["xray"].Channel = "stable"
+	svc.kernels["xray"].Repo = "some/repo"
+
+	if err := svc.CheckLatest(context.Background(), "xray"); err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+	if got := svc.Get("xray"); got.LatestVersion != "1.18.0" || !got.HasUpdate {
+		t.Fatalf("precondition: latest=%q has_update=%v", got.LatestVersion, got.HasUpdate)
+	}
+
+	if !svc.SetChannel("xray", "preview") {
+		t.Fatal("SetChannel returned false")
+	}
+	got := svc.Get("xray")
+	if got.LatestVersion != "" || got.LatestTag != "" || got.HasUpdate {
+		t.Errorf("Latest* not reset: latest=%q tag=%q has_update=%v", got.LatestVersion, got.LatestTag, got.HasUpdate)
+	}
+	if got.Status != "checking" {
+		t.Errorf("status = %q, want checking", got.Status)
+	}
+	if got.Channel != "preview" {
+		t.Errorf("channel = %q, want preview", got.Channel)
 	}
 }
 
@@ -1008,4 +1291,776 @@ func TestRefreshInstalledVersion(t *testing.T) {
 	if k.CurrentVersion != "26.9.9" || k.HasUpdate {
 		t.Errorf("after install: current=%q hasUpdate=%v, want 26.9.9/false", k.CurrentVersion, k.HasUpdate)
 	}
+}
+
+// --- Установка ядра (KERN-02, D-09/D-10) ---
+
+// mihomoScript — stub бинарника mihomo с версией ver (формат вывода как у `mihomo -v`).
+func mihomoScript(ver string) []byte {
+	return []byte("#!/bin/sh\necho \"Mihomo Version v" + ver + "\"\n")
+}
+
+// gzBytes упаковывает content в gz-архив (ассет mihomo).
+func gzBytes(t *testing.T, content []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// newInstallTestService — сервис с mihomo в t.TempDir() (внутри разрешённого корня),
+// без сети и без системных бинарников: PATH пуст, пробные пути ведут в каталог теста.
+// installedVersion == "" — бинарника нет. Возвращает сервис и путь бинарника.
+func newInstallTestService(t *testing.T, installedVersion string) (*KernelService, string) {
+	t.Helper()
+	dir := t.TempDir()
+	binPath := filepath.Join(dir, "mihomo")
+	if installedVersion != "" {
+		if err := os.WriteFile(binPath, mihomoScript(installedVersion), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	origProbe := mihomoProbePaths
+	mihomoProbePaths = []string{binPath}
+	t.Cleanup(func() { mihomoProbePaths = origProbe })
+	t.Setenv("PATH", t.TempDir())
+
+	svc := NewKernelService(t.TempDir())
+	svc.mu.Lock()
+	k := svc.kernels["mihomo"]
+	k.BinaryPath = binPath
+	k.binaryPathCachedAt = time.Now()
+	k.LatestVersion = "1.19.0"
+	svc.mu.Unlock()
+	return svc, binPath
+}
+
+// writeGzDownload — шов загрузки: кладёт в dest gz-архив со stub-mihomo версии ver.
+func writeGzDownload(t *testing.T, ver string) func(ctx context.Context, url, dest string) error {
+	t.Helper()
+	data := gzBytes(t, mihomoScript(ver))
+	return func(_ context.Context, _, dest string) error {
+		return os.WriteFile(dest, data, 0644)
+	}
+}
+
+// stageRecorder собирает последовательность (status/stage) из хука установки.
+type stageRecorder struct {
+	mu   sync.Mutex
+	list []string
+}
+
+func (r *stageRecorder) hook(status, stage string) {
+	r.mu.Lock()
+	r.list = append(r.list, status+"/"+stage)
+	r.mu.Unlock()
+}
+
+func (r *stageRecorder) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.list...)
+}
+
+// TestInstall_StagesAndResult: этапы идут starting → downloading → extracting →
+// replacing → done; проверка релиза внутри установки тихая и не возвращает статус
+// в idle; итог несёт result_kind и result_version.
+func TestInstall_StagesAndResult(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+
+	// Версия релиза неизвестна: установка сама спросит релиз (quiet), а не сбросит статус.
+	server := newReleaseServer(t, http.StatusOK, `{"tag_name":"v1.19.0"}`)
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.mu.Lock()
+	svc.kernels["mihomo"].LatestVersion = ""
+	svc.mu.Unlock()
+
+	rec := &stageRecorder{}
+	release := make(chan struct{})
+	gz := writeGzDownload(t, "1.19.0")
+	svc.mu.Lock()
+	svc.stageHook = rec.hook
+	svc.mu.Unlock()
+	svc.SetInstallSource("arm64", func(ctx context.Context, url, dest string) error {
+		<-release
+		return gz(ctx, url, dest)
+	})
+
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+
+	// Пока загрузка держится, статус — переходный, а не idle.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		k := svc.Get("mihomo")
+		if k.Status != "downloading" {
+			t.Fatalf("status during download = %q, want downloading (stage %q)", k.Status, k.Stage)
+		}
+		if k.Stage == KernelStageDownloading {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stage downloading not reached; stage=%q", k.Stage)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("install failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("install did not finish in 5s")
+	}
+
+	want := []string{
+		"downloading/starting",
+		"downloading/downloading",
+		"installing/extracting",
+		"installing/replacing",
+		"done/",
+	}
+	got := rec.snapshot()
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("stages = %v, want %v", got, want)
+	}
+
+	k := svc.Get("mihomo")
+	if k.Status != "done" || k.Stage != "" {
+		t.Errorf("final status=%q stage=%q, want done/empty", k.Status, k.Stage)
+	}
+	if k.ResultKind != KernelResultUpdated || k.ResultVersion != "1.19.0" {
+		t.Errorf("result = %q/%q, want updated/1.19.0", k.ResultKind, k.ResultVersion)
+	}
+	if !strings.Contains(k.Message, "1.19.0") {
+		t.Errorf("message should stay English and carry the version: %q", k.Message)
+	}
+}
+
+// TestInstall_ResultKinds: installed (бинарника не было), updated (версия
+// изменилась), reinstalled (та же версия).
+func TestInstall_ResultKinds(t *testing.T) {
+	cases := []struct {
+		name      string
+		installed string
+		want      string
+	}{
+		{"нет бинарника", "", KernelResultInstalled},
+		{"другая версия", "1.18.0", KernelResultUpdated},
+		{"та же версия", "1.19.0", KernelResultReinstalled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, binPath := newInstallTestService(t, tc.installed)
+			svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+
+			if err := svc.Install("mihomo"); err != nil {
+				t.Fatalf("install: %v", err)
+			}
+			k := svc.Get("mihomo")
+			if k.Status != "done" || k.ResultKind != tc.want || k.ResultVersion != "1.19.0" {
+				t.Errorf("status=%q kind=%q version=%q, want done/%s/1.19.0", k.Status, k.ResultKind, k.ResultVersion, tc.want)
+			}
+			if k.CurrentVersion != "1.19.0" {
+				t.Errorf("current version = %q, want 1.19.0", k.CurrentVersion)
+			}
+			if _, err := os.Stat(binPath); err != nil {
+				t.Errorf("binary missing after install: %v", err)
+			}
+		})
+	}
+}
+
+// TestInstall_FailureKeepsBinary: ошибка загрузки — status failed без этапа,
+// рабочий бинарник не тронут.
+func TestInstall_FailureKeepsBinary(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		return errors.New("boom")
+	})
+	if err := svc.Install("mihomo"); err == nil {
+		t.Fatal("expected download error")
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "failed" || k.Stage != "" || !strings.Contains(k.Message, "Download failed") {
+		t.Errorf("status=%q stage=%q message=%q", k.Status, k.Stage, k.Message)
+	}
+	got, _ := os.ReadFile(binPath)
+	if string(got) != string(mihomoScript("1.18.0")) {
+		t.Error("binary must stay untouched after a failed download")
+	}
+}
+
+// TestBeginInstall_ReportsStartingSynchronously: сразу после BeginInstall статус
+// уже downloading со stage starting — первый же опрос клиента не видит idle.
+func TestBeginInstall_ReportsStartingSynchronously(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	var once sync.Once
+	svc.mu.Lock()
+	// Хук держит горутину установки на первом переходе, чтобы Get увидел starting.
+	svc.stageHook = func(status, stage string) {
+		if stage == KernelStageDownloading {
+			once.Do(func() { close(entered) })
+			<-release
+		}
+	}
+	svc.mu.Unlock()
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error { return errors.New("stop") })
+
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	k := svc.Get("mihomo")
+	if k.Status != "downloading" || k.Stage != KernelStageStarting {
+		t.Errorf("right after BeginInstall: status=%q stage=%q, want downloading/starting", k.Status, k.Stage)
+	}
+	close(release)
+	<-done
+}
+
+// TestBeginInstall_ConcurrentOnlyOneWins: из N одновременных запросов замок
+// берёт ровно один, остальные получают ErrKernelBusy (проверка идёт под -race).
+func TestBeginInstall_ConcurrentOnlyOneWins(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	release := make(chan struct{})
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		<-release
+		return errors.New("stop")
+	})
+
+	const n = 16
+	var wg sync.WaitGroup
+	results := make(chan error, n)
+	finished := make(chan error, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- svc.BeginInstall("mihomo", func(err error) { finished <- err })
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	wins, busy := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			wins++
+		case errors.Is(err, ErrKernelBusy):
+			busy++
+		default:
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+	if wins != 1 || busy != n-1 {
+		t.Fatalf("wins=%d busy=%d, want 1/%d", wins, busy, n-1)
+	}
+	close(release)
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("winning install did not finish")
+	}
+}
+
+// --- Бэкапы с версией и откат (KERN-02, D-12) ---
+
+// backupFiles — имена файлов в .backup рядом с бинарником (отсортированы).
+func backupFiles(t *testing.T, binPath string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(filepath.Dir(binPath), ".backup"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// installVersion ставит mihomo версии ver поверх текущего бинарника.
+func installVersion(t *testing.T, svc *KernelService, ver string) {
+	t.Helper()
+	svc.mu.Lock()
+	svc.kernels["mihomo"].LatestVersion = ver
+	svc.mu.Unlock()
+	svc.SetInstallSource("arm64", writeGzDownload(t, ver))
+	if err := svc.Install("mihomo"); err != nil {
+		t.Fatalf("install %s: %v", ver, err)
+	}
+}
+
+func TestParseBackupName(t *testing.T) {
+	cases := []struct {
+		file, kernel string
+		ts           int64
+		version      string
+		ok           bool
+	}{
+		{"xray.bak.1759100000.26.9.8", "xray", 1759100000, "26.9.8", true},
+		{"xray.bak.1759100000", "xray", 1759100000, "", true},
+		{"xray.bak.1759100000.1.8.24-rc1", "xray", 1759100000, "1.8.24-rc1", true},
+		{"mihomo.bak.1759100000.alpha-f103639", "mihomo", 1759100000, "alpha-f103639", true},
+		{"mihomo.bak.1759100000.1.19.1", "xray", 0, "", false},
+		{"xray.bak.abc", "xray", 0, "", false},
+		{"xray.bak.", "xray", 0, "", false},
+		{"kernel.bak.12345", "xray", 0, "", false},
+		{"xray.bak.1759100000.../../x", "xray", 1759100000, "", true},
+		{"xray.bak.1759100000.1.2.3/../../x", "xray", 1759100000, "", true},
+		{"xray.bak.1759100000." + strings.Repeat("1", 70), "xray", 1759100000, "", true},
+		{"xray.bak.1759100000.error", "xray", 1759100000, "", true},
+	}
+	for _, tc := range cases {
+		ts, version, ok := parseBackupName(tc.file, tc.kernel)
+		if ts != tc.ts || version != tc.version || ok != tc.ok {
+			t.Errorf("parseBackupName(%q, %q) = (%d, %q, %v), want (%d, %q, %v)",
+				tc.file, tc.kernel, ts, version, ok, tc.ts, tc.version, tc.ok)
+		}
+	}
+}
+
+// TestBackup_NameCarriesVersion: версия кодируется в имени только допустимого вида.
+func TestBackup_NameCarriesVersion(t *testing.T) {
+	if got := backupFileName("xray", 1759100000, "26.9.8"); got != "xray.bak.1759100000.26.9.8" {
+		t.Errorf("backupFileName = %q", got)
+	}
+	for _, bad := range []string{"error", "unknown", "not installed", "1.2.3/../../x", "1.2.3 x", strings.Repeat("1", 65), ""} {
+		if got := backupFileName("xray", 1759100000, bad); got != "xray.bak.1759100000" {
+			t.Errorf("backupFileName(%q) = %q, want no version suffix", bad, got)
+		}
+	}
+
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	installVersion(t, svc, "1.19.0")
+
+	files := backupFiles(t, binPath)
+	if len(files) != 1 {
+		t.Fatalf("backups = %v, want exactly one", files)
+	}
+	if _, v, ok := parseBackupName(files[0], "mihomo"); !ok || v != "1.18.0" {
+		t.Errorf("backup %q parsed as version %q ok=%v, want 1.18.0", files[0], v, ok)
+	}
+	k := svc.Get("mihomo")
+	if !k.HasBackup || k.BackupVersion != "1.18.0" {
+		t.Errorf("HasBackup=%v BackupVersion=%q, want true/1.18.0", k.HasBackup, k.BackupVersion)
+	}
+}
+
+// TestBackup_UnknownVersionHasNoSuffix: версию прежнего бинарника определить не
+// удалось — бэкап всё равно есть, без суффикса версии, итог updated.
+func TestBackup_UnknownVersionHasNoSuffix(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "")
+	if err := os.WriteFile(binPath, []byte("#!/bin/sh\necho garbage\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	installVersion(t, svc, "1.19.0")
+
+	files := backupFiles(t, binPath)
+	if len(files) != 1 {
+		t.Fatalf("backups = %v, want one", files)
+	}
+	if _, v, ok := parseBackupName(files[0], "mihomo"); !ok || v != "" {
+		t.Errorf("backup %q: version %q ok=%v, want empty version", files[0], v, ok)
+	}
+	k := svc.Get("mihomo")
+	if k.ResultKind != KernelResultUpdated || !k.HasBackup || k.BackupVersion != "" {
+		t.Errorf("kind=%q hasBackup=%v backupVersion=%q, want updated/true/empty", k.ResultKind, k.HasBackup, k.BackupVersion)
+	}
+}
+
+// TestBackup_SkipsDuplicateVersion: переустановка версии, что уже лежит в
+// последнем бэкапе, новую копию не создаёт.
+func TestBackup_SkipsDuplicateVersion(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.19.0")
+	backupDir := filepath.Join(filepath.Dir(binPath), ".backup")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(backupDir, "mihomo.bak.1759100000.1.19.0")
+	if err := os.WriteFile(existing, mihomoScript("1.19.0"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	installVersion(t, svc, "1.19.0")
+
+	files := backupFiles(t, binPath)
+	if len(files) != 1 || files[0] != "mihomo.bak.1759100000.1.19.0" {
+		t.Fatalf("backups = %v, want only the existing one", files)
+	}
+	if k := svc.Get("mihomo"); k.ResultKind != KernelResultReinstalled {
+		t.Errorf("kind = %q, want reinstalled", k.ResultKind)
+	}
+}
+
+// TestBackup_KeepsThree: хранятся 3 последних бэкапа, самый старый удаляется.
+func TestBackup_KeepsThree(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.0.0")
+	for _, v := range []string{"1.1.0", "1.2.0", "1.3.0", "1.4.0"} {
+		installVersion(t, svc, v)
+	}
+
+	files := backupFiles(t, binPath)
+	if len(files) != 3 {
+		t.Fatalf("backups = %v, want 3", files)
+	}
+	var versions []string
+	for _, f := range files {
+		_, v, ok := parseBackupName(f, "mihomo")
+		if !ok {
+			t.Fatalf("unparsable backup %q", f)
+		}
+		versions = append(versions, v)
+	}
+	// Порядок файлов не гарантирован: проверяем множество.
+	joined := "," + strings.Join(versions, ",") + ","
+	for _, want := range []string{"1.1.0", "1.2.0", "1.3.0"} {
+		if !strings.Contains(joined, ","+want+",") {
+			t.Errorf("versions %v miss %s", versions, want)
+		}
+	}
+	if strings.Contains(joined, ",1.0.0,") {
+		t.Errorf("oldest backup 1.0.0 must be pruned: %v", versions)
+	}
+	if k := svc.Get("mihomo"); k.BackupVersion != "1.3.0" {
+		t.Errorf("BackupVersion = %q, want the newest backup 1.3.0", k.BackupVersion)
+	}
+}
+
+// TestRollback_ConsumesAppliedBackup: откат восстанавливает последний бэкап,
+// удаляет применённую копию, следующий откат идёт глубже.
+func TestRollback_ConsumesAppliedBackup(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	installVersion(t, svc, "1.19.0")
+	installVersion(t, svc, "1.20.0")
+
+	if k := svc.Get("mihomo"); k.BackupVersion != "1.19.0" || k.CurrentVersion != "1.20.0" {
+		t.Fatalf("before rollback: backup=%q current=%q", k.BackupVersion, k.CurrentVersion)
+	}
+
+	if err := svc.Rollback("mihomo"); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "done" || k.Stage != "" || k.ResultKind != KernelResultRolledBack || k.ResultVersion != "1.19.0" {
+		t.Errorf("after rollback: status=%q stage=%q kind=%q version=%q", k.Status, k.Stage, k.ResultKind, k.ResultVersion)
+	}
+	if k.CurrentVersion != "1.19.0" {
+		t.Errorf("current = %q, want 1.19.0", k.CurrentVersion)
+	}
+	if k.BackupVersion != "1.18.0" || !k.HasBackup {
+		t.Errorf("next backup = %q hasBackup=%v, want 1.18.0/true", k.BackupVersion, k.HasBackup)
+	}
+	if len(backupFiles(t, binPath)) != 1 {
+		t.Errorf("applied backup must be consumed: %v", backupFiles(t, binPath))
+	}
+
+	if err := svc.Rollback("mihomo"); err != nil {
+		t.Fatalf("second rollback: %v", err)
+	}
+	k = svc.Get("mihomo")
+	if k.CurrentVersion != "1.18.0" || k.HasBackup || k.BackupVersion != "" {
+		t.Errorf("after second rollback: current=%q hasBackup=%v backupVersion=%q", k.CurrentVersion, k.HasBackup, k.BackupVersion)
+	}
+
+	err := svc.Rollback("mihomo")
+	if err == nil || !strings.Contains(err.Error(), "no backup found") {
+		t.Errorf("third rollback: got %v, want 'no backup found'", err)
+	}
+}
+
+// TestRollback_BusyWhileInstalling: откат и загрузка файла берут тот же замок,
+// что и установка.
+func TestRollback_BusyWhileInstalling(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	release := make(chan struct{})
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		<-release
+		return errors.New("stop")
+	})
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Rollback("mihomo"); !errors.Is(err, ErrKernelBusy) {
+		t.Errorf("rollback while installing: got %v, want ErrKernelBusy", err)
+	}
+	if err := svc.UploadBinary("mihomo", strings.NewReader("\x7fELF"), "mihomo"); !errors.Is(err, ErrKernelBusy) {
+		t.Errorf("upload while installing: got %v, want ErrKernelBusy", err)
+	}
+	close(release)
+	<-done
+
+	// После завершения замок свободен.
+	if err := svc.Rollback("mihomo"); errors.Is(err, ErrKernelBusy) {
+		t.Errorf("rollback after install finished must not be busy: %v", err)
+	}
+}
+
+// TestRollback_IgnoresForeignAndLegacyFiles: общий префикс старого формата и
+// бэкапы другого ядра в том же каталоге бэкапом этого ядра не считаются.
+func TestRollback_IgnoresForeignAndLegacyFiles(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	backupDir := filepath.Join(filepath.Dir(binPath), ".backup")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"kernel.bak.12345", "xray.bak.1759100000.1.8.24", "mihomo.bak.abc"} {
+		if err := os.WriteFile(filepath.Join(backupDir, name), []byte("x"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Бэкап-каталог с тем же именем — не файл.
+	if err := os.Mkdir(filepath.Join(backupDir, "mihomo.bak.1759100001"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if k := svc.Get("mihomo"); k.HasBackup {
+		t.Errorf("HasBackup must be false, BackupVersion=%q", k.BackupVersion)
+	}
+	err := svc.Rollback("mihomo")
+	if err == nil || !strings.Contains(err.Error(), "no backup found") {
+		t.Errorf("rollback: got %v, want 'no backup found'", err)
+	}
+	got, _ := os.ReadFile(binPath)
+	if string(got) != string(mihomoScript("1.18.0")) {
+		t.Error("binary must stay untouched")
+	}
+}
+
+// TestBackup_ListDoesNotExecBackups: версия бэкапа читается из имени файла, а
+// не запуском бинарников из .backup.
+func TestBackup_ListDoesNotExecBackups(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	backupDir := filepath.Join(filepath.Dir(binPath), ".backup")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "executed")
+	script := "#!/bin/sh\necho ran > " + marker + "\necho \"Mihomo Version v9.9.9\"\n"
+	if err := os.WriteFile(filepath.Join(backupDir, "mihomo.bak.1759100000.1.17.0"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.List()
+	k := svc.Get("mihomo")
+	if k.BackupVersion != "1.17.0" || !k.HasBackup {
+		t.Errorf("BackupVersion=%q HasBackup=%v, want 1.17.0/true", k.BackupVersion, k.HasBackup)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("backup binary must not be executed on List/Get")
+	}
+}
+
+// elfLike — содержимое, проходящее проверку isELF (заголовок), для тестов загрузки.
+func elfLike(ver string) []byte {
+	return append([]byte{0x7f, 'E', 'L', 'F'}, []byte("\n#!/bin/sh\necho 'Mihomo Version v"+ver+"'\n")...)
+}
+
+// TestUploadBinary_BackupFailureAborts: ошибка копирования бэкапа прерывает
+// замену — прежний бинарник остаётся на месте.
+func TestUploadBinary_BackupFailureAborts(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	// .backup — обычный файл: создать в нём копию невозможно.
+	if err := os.WriteFile(filepath.Join(filepath.Dir(binPath), ".backup"), []byte("not a dir"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := svc.UploadBinary("mihomo", bytes.NewReader(elfLike("1.21.0")), "mihomo")
+	if err == nil {
+		t.Fatal("upload must fail when the backup cannot be created")
+	}
+	got, _ := os.ReadFile(binPath)
+	if string(got) != string(mihomoScript("1.18.0")) {
+		t.Error("binary must not be replaced when backup failed")
+	}
+}
+
+// TestUploadBinary_ResultUploaded: успешная загрузка — result_kind uploaded и
+// бэкап прежнего бинарника с версией.
+func TestUploadBinary_ResultUploaded(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+
+	if err := svc.UploadBinary("mihomo", bytes.NewReader(elfLike("1.21.0")), "mihomo"); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "done" || k.Stage != "" || k.ResultKind != KernelResultUploaded {
+		t.Errorf("status=%q stage=%q kind=%q, want done/empty/uploaded", k.Status, k.Stage, k.ResultKind)
+	}
+	if k.ResultVersion != k.CurrentVersion {
+		t.Errorf("ResultVersion=%q, CurrentVersion=%q", k.ResultVersion, k.CurrentVersion)
+	}
+	if !k.HasBackup || k.BackupVersion != "1.18.0" {
+		t.Errorf("HasBackup=%v BackupVersion=%q, want true/1.18.0", k.HasBackup, k.BackupVersion)
+	}
+	if len(backupFiles(t, binPath)) != 1 {
+		t.Errorf("backups = %v", backupFiles(t, binPath))
+	}
+}
+
+// --- Каталог конфигурации Mihomo (KERN-02, D-11) ---
+
+// TestInstall_CreatesMihomoConfigDir: успешная установка mihomo создаёт пустой
+// каталог конфигурации 0755 и не пишет в него config.yaml.
+func TestInstall_CreatesMihomoConfigDir(t *testing.T) {
+	t.Run("создаёт пустой каталог 0755", func(t *testing.T) {
+		svc, _ := newInstallTestService(t, "")
+		cfgDir := filepath.Join(t.TempDir(), "mihomo")
+		svc.SetMihomoConfigDir(cfgDir)
+		svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+
+		if err := svc.Install("mihomo"); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		info, err := os.Stat(cfgDir)
+		if err != nil {
+			t.Fatalf("config dir must exist after install: %v", err)
+		}
+		if !info.IsDir() || info.Mode().Perm() != 0755 {
+			t.Errorf("config dir mode = %v, want directory 0755", info.Mode())
+		}
+		entries, _ := os.ReadDir(cfgDir)
+		if len(entries) != 0 {
+			t.Errorf("config dir must stay empty (no seeded config): %v", entries)
+		}
+	})
+
+	t.Run("существующий каталог не трогается", func(t *testing.T) {
+		svc, _ := newInstallTestService(t, "1.18.0")
+		cfgDir := filepath.Join(t.TempDir(), "mihomo")
+		if err := os.MkdirAll(cfgDir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		keep := filepath.Join(cfgDir, "config.yaml")
+		if err := os.WriteFile(keep, []byte("mixed-port: 1\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		svc.SetMihomoConfigDir(cfgDir)
+		svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+		if err := svc.Install("mihomo"); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		if data, _ := os.ReadFile(keep); string(data) != "mixed-port: 1\n" {
+			t.Errorf("existing config must be untouched, got %q", data)
+		}
+		if info, _ := os.Stat(cfgDir); info.Mode().Perm() != 0700 {
+			t.Errorf("existing dir mode changed to %v", info.Mode().Perm())
+		}
+	})
+
+	t.Run("пустой путь ничего не создаёт", func(t *testing.T) {
+		svc, _ := newInstallTestService(t, "")
+		parent := t.TempDir()
+		svc.SetMihomoConfigDir("")
+		svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+		if err := svc.Install("mihomo"); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		if entries, _ := os.ReadDir(parent); len(entries) != 0 {
+			t.Errorf("nothing must be created: %v", entries)
+		}
+	})
+
+	t.Run("путь вне разрешённых корней отклоняется, установка проходит", func(t *testing.T) {
+		svc, _ := newInstallTestService(t, "")
+		outside := "/etc/xcp-test-mihomo-dir"
+		svc.SetMihomoConfigDir(outside)
+		svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+
+		var logBuf bytes.Buffer
+		log.SetOutput(&logBuf)
+		t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+		if err := svc.Install("mihomo"); err != nil {
+			t.Fatalf("install must succeed despite a rejected dir: %v", err)
+		}
+		if _, err := os.Stat(outside); err == nil {
+			_ = os.Remove(outside)
+			t.Fatal("dir outside allowed roots must not be created")
+		}
+		if !strings.Contains(logBuf.String(), "mihomo config dir rejected") {
+			t.Errorf("rejection must be logged, log: %q", logBuf.String())
+		}
+		if k := svc.Get("mihomo"); k.Status != "done" {
+			t.Errorf("status = %q, want done", k.Status)
+		}
+	})
+
+	t.Run("загрузка файла mihomo тоже создаёт каталог", func(t *testing.T) {
+		svc, _ := newInstallTestService(t, "1.18.0")
+		cfgDir := filepath.Join(t.TempDir(), "mihomo")
+		svc.SetMihomoConfigDir(cfgDir)
+		if err := svc.UploadBinary("mihomo", bytes.NewReader(elfLike("1.21.0")), "mihomo"); err != nil {
+			t.Fatalf("upload: %v", err)
+		}
+		if info, err := os.Stat(cfgDir); err != nil || !info.IsDir() {
+			t.Errorf("config dir must exist after upload: %v", err)
+		}
+	})
+
+	t.Run("установка xray каталог mihomo не создаёт", func(t *testing.T) {
+		dir := t.TempDir()
+		binPath := filepath.Join(dir, "xray")
+		origProbe := xrayProbePaths
+		xrayProbePaths = []string{binPath}
+		t.Cleanup(func() { xrayProbePaths = origProbe })
+		t.Setenv("PATH", t.TempDir())
+
+		svc := NewKernelService(t.TempDir())
+		svc.mu.Lock()
+		k := svc.kernels["xray"]
+		k.BinaryPath = binPath
+		k.binaryPathCachedAt = time.Now()
+		k.LatestVersion = "26.9.9"
+		svc.mu.Unlock()
+		cfgDir := filepath.Join(t.TempDir(), "mihomo")
+		svc.SetMihomoConfigDir(cfgDir)
+
+		var zipBuf bytes.Buffer
+		zw := zip.NewWriter(&zipBuf)
+		w, err := zw.Create("xray")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte("#!/bin/sh\necho \"Xray 26.9.9 (Xray, Penetrates Everything.)\"\n"))
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		svc.SetInstallSource("arm64", func(_ context.Context, _, dest string) error {
+			return os.WriteFile(dest, zipBuf.Bytes(), 0644)
+		})
+
+		if err := svc.Install("xray"); err != nil {
+			t.Fatalf("install xray: %v", err)
+		}
+		if k := svc.Get("xray"); k.ResultKind != KernelResultInstalled || k.ResultVersion != "26.9.9" {
+			t.Errorf("kind=%q version=%q, want installed/26.9.9", k.ResultKind, k.ResultVersion)
+		}
+		if _, err := os.Stat(cfgDir); err == nil {
+			t.Error("xray install must not create the mihomo config dir")
+		}
+	})
 }

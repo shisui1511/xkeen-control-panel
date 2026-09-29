@@ -9,11 +9,29 @@ export default defineConfig({
     // (D-18); включение сюда лишь стабилизирует dev-сервер Vite при первом
     // ленивом импорте (без этого он перезагружает страницу посреди
     // Playwright-теста) — на состав production-сборки не влияет.
+    // CodeMirror, markdown-it и xterm тоже подгружаются только через import()
+    // в шаблонах Svelte, сканер Vite их не видит, и первый заход на редактор
+    // или терминал перезагружал страницу посреди теста.
     include: [
       '@zxcvbn-ts/core',
       '@zxcvbn-ts/language-common',
       '@zxcvbn-ts/language-en',
-      '@zxcvbn-ts/language-ru'
+      '@zxcvbn-ts/language-ru',
+      '@xterm/xterm',
+      '@xterm/addon-fit',
+      '@codemirror/state',
+      '@codemirror/view',
+      '@codemirror/autocomplete',
+      '@codemirror/commands',
+      '@codemirror/lang-json',
+      '@codemirror/lang-yaml',
+      '@codemirror/language',
+      '@codemirror/lint',
+      '@codemirror/search',
+      '@lezer/highlight',
+      'codemirror-json-schema',
+      'codemirror-json-schema/yaml',
+      'markdown-it'
     ]
   },
   build: {

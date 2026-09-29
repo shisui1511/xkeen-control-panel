@@ -181,6 +181,22 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 
 ## Удаление
 
+Скриптом установки. Без терминала (например, `ssh` без `-t`) вопросы не задаются: флаг `--uninstall` считается подтверждением, панель и init-скрипт удаляются, а данные панели в `/opt/etc/xcp` (пароль, TLS-сертификат, сессии) сохраняются:
+
+```bash
+curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/scripts/setup.sh | sh -s -- --uninstall
+```
+
+Чтобы удалить и данные панели, добавьте `--purge` (необратимо; работает только вместе с `--uninstall`):
+
+```bash
+curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/scripts/setup.sh | sh -s -- --uninstall --purge
+```
+
+В терминале скрипт по-прежнему задаёт два вопроса: подтверждение удаления и удаление каталога конфигов.
+
+Вручную:
+
 ```bash
 /opt/etc/init.d/S99xcp stop
 rm -f /opt/sbin/xcp

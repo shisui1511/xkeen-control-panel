@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { kernelsFixture, systemStatsFixture } from './helpers/api-mocks';
 
 // Карточка «Установка XKeen» на странице служб: видна только без XKeen,
 // запускает официальный установщик в терминале с выбранным каналом и
@@ -7,7 +8,15 @@ import { test, expect } from '@playwright/test';
 async function mockCommonRoutes(
   page: import('@playwright/test').Page,
   // Объект читается при каждом запросе: тест может менять статус по ходу
-  status: { installed: boolean; available: boolean; incomplete?: boolean }
+  status: {
+    installed: boolean;
+    available: boolean;
+    incomplete?: boolean;
+    // Поля ядра Xray в /api/kernels поверх фикстуры; читаются при каждом запросе
+    xray?: Record<string, unknown>;
+    // Число POST /api/kernels/xray/check (заполняет мок)
+    checkCalls?: number;
+  }
 ) {
   await page.addInitScript(() => {
     Object.defineProperty(window.navigator, 'serviceWorker', {
@@ -84,6 +93,32 @@ async function mockCommonRoutes(
           }
         })
       });
+    } else if (url.includes('/api/kernels')) {
+      const kernels = kernelsFixture('xray', { xray: status.xray });
+      const path = new URL(url).pathname;
+      const method = route.request().method();
+      let data: unknown = kernels;
+      if (path === '/api/kernels/xray/check' && method === 'POST') {
+        status.checkCalls = (status.checkCalls ?? 0) + 1;
+        // Проверка завершилась: латест-версия стала известна
+        status.xray = { ...status.xray, latest_version: '26.3.27' };
+        data = {};
+      } else if (path === '/api/kernels/xray/status') {
+        data = kernelsFixture('xray', { xray: status.xray })[0];
+      }
+      // Services.svelte ждёт массив ядер — универсальный { data: {} } ломал fetchKernels
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data })
+      });
+    } else if (url.includes('/api/system/stats')) {
+      // Dashboard.svelte читает load[0] и uptime без разворачивания конверта
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(systemStatsFixture())
+      });
     } else {
       await route.fulfill({
         status: 200,
@@ -130,6 +165,7 @@ test.describe('Services page — XKeen installer card', () => {
     });
 
     await page.goto('/#/services');
+    await expect(page.locator('.hero-card')).toBeVisible();
     const card = page.getByTestId('xkeen-install-card');
     await expect(card).toBeVisible();
     await card.getByRole('button', { name: /^(Бета|Beta)$/ }).click();
@@ -155,6 +191,7 @@ test.describe('Services page — XKeen installer card', () => {
 
     await page.clock.install();
     await page.goto('/#/services');
+    await expect(page.locator('.hero-card')).toBeVisible();
     await page.getByTestId('xkeen-install-start').click();
     const modal = page.getByTestId('xkeen-install-modal');
     await expect(modal).toBeVisible();
@@ -209,6 +246,7 @@ test.describe('Services page — XKeen installer card', () => {
 
     await page.clock.install();
     await page.goto('/#/services');
+    await expect(page.locator('.hero-card')).toBeVisible();
     await expect.poll(() => settingsCalls).toBe(1);
     await page.getByTestId('xkeen-install-start').click();
     await expect.poll(() => socket !== null).toBe(true);
@@ -228,6 +266,7 @@ test.describe('Services page — XKeen installer card', () => {
     });
 
     await page.goto('/#/services');
+    await expect(page.locator('.hero-card')).toBeVisible();
     await page.getByTestId('xkeen-install-start').click();
     const result = page.getByTestId('xkeen-install-modal').locator('.install-result.fail');
     await expect(result).toContainText('3');
@@ -241,5 +280,66 @@ test.describe('Services page — XKeen installer card', () => {
     await problem.getByRole('button').click();
     await expect(page).toHaveURL(/#\/services/);
     await expect(page.getByTestId('xkeen-install-card')).toBeVisible();
+  });
+
+  test.describe('подсказка версии Xray над установщиком', () => {
+    test('стабильная: версия Xray в карточке и в окне установщика', async ({ page }) => {
+      await mockCommonRoutes(page, {
+        installed: false,
+        available: true,
+        xray: { latest_version: '26.3.27', channel: 'stable' }
+      });
+      await page.routeWebSocket(/\/api\/terminal\/ws/, () => {});
+
+      await page.goto('/#/services');
+      const hint = page.getByTestId('xkeen-install-stable-hint');
+      await expect(hint).toContainText('Xray v26.3.27');
+
+      await page.getByTestId('xkeen-install-start').click();
+      await expect(page.getByTestId('xkeen-install-stable-hint-modal')).toContainText(
+        'Xray v26.3.27'
+      );
+    });
+
+    test('Xray на предварительном канале: общая подсказка без версии, у «Бета» подсказки нет', async ({
+      page
+    }) => {
+      await mockCommonRoutes(page, {
+        installed: false,
+        available: true,
+        xray: { latest_version: '26.9.9', channel: 'preview' }
+      });
+
+      await page.goto('/#/services');
+      const hint = page.getByTestId('xkeen-install-stable-hint');
+      await expect(hint).toContainText(
+        /последний стабильный релиз Xray|latest stable Xray release/
+      );
+      await expect(hint).not.toContainText('26.9.9');
+
+      await page
+        .getByTestId('xkeen-install-card')
+        .getByRole('button', { name: /^(Бета|Beta)$/ })
+        .click();
+      await expect(hint).toHaveCount(0);
+    });
+
+    test('неизвестная стабильная версия запрашивается один раз', async ({ page }) => {
+      const status = {
+        installed: false,
+        available: true,
+        checkCalls: 0,
+        xray: { latest_version: '', channel: 'stable' }
+      };
+      await mockCommonRoutes(page, status);
+
+      await page.goto('/#/services');
+      const hint = page.getByTestId('xkeen-install-stable-hint');
+      await expect(hint).toBeVisible();
+      await expect.poll(() => status.checkCalls).toBe(1);
+      // После ответа проверки версия появляется в подсказке, повторных проверок нет
+      await expect(hint).toContainText('Xray v26.3.27');
+      expect(status.checkCalls).toBe(1);
+    });
   });
 });

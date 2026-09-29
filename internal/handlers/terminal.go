@@ -73,6 +73,14 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 			// Ошибка уже показана в терминале
 			return
 		}
+		if err == nil {
+			// Установщик мог поставить XKeen: версия, статус и возможности
+			// перечитываются сразу по завершении терминала
+			defer func() {
+				a.invalidateXKeenVersion()
+				a.ClearCapabilitiesCache()
+			}()
+		}
 	} else {
 		session, err = a.ptySvc.StartSession(cols, rows)
 	}

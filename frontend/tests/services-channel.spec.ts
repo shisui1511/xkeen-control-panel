@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { kernelsFixture } from './helpers/api-mocks';
 
 // Covers the "Канал и обновления" card on the Services page: a failed
 // update check must be visible (not indistinguishable from "up to date"),
@@ -390,5 +391,194 @@ test.describe('Services page — channel & updates card', () => {
     // 5. Clicking rollback triggers confirmation dialog and POST /api/kernels/mihomo/rollback
     await mihomoRollbackBtn.click();
     await expect.poll(() => rollbackTriggered).toBe(true);
+  });
+});
+
+test.describe('Services page — channel switch and pre-release on stable', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockCommonRoutes(page);
+  });
+
+  test('смена канала сразу показывает «проверяем…» и данные ответа без запроса /check', async ({
+    page
+  }) => {
+    let channel = 'stable';
+    let kernelsGets = 0;
+    let checkCalls = 0;
+    await page.route('**/api/kernels', async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      kernelsGets++;
+      await route.fulfill({
+        json: {
+          success: true,
+          data: kernelsFixture('xray', {
+            xray: { channel },
+            mihomo: { channel }
+          })
+        }
+      });
+    });
+    await page.route('**/api/kernels/*/check', async (route) => {
+      checkCalls++;
+      await route.fulfill({ json: { success: true, data: {} } });
+    });
+
+    // Ответы на смену канала удерживаются, пока тест не проверит «проверяем…»
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const kernelAfter = (name: 'xray' | 'mihomo', latest: string) =>
+      kernelsFixture('xray', {
+        [name]: { channel: 'preview', latest_version: latest, has_update: true }
+      }).find((k) => k.name === name);
+    await page.route('**/api/kernels/xray/channel', async (route) => {
+      await gate;
+      channel = 'preview';
+      await route.fulfill({
+        json: { success: true, data: { channel: 'preview', kernel: kernelAfter('xray', '26.9.9') } }
+      });
+    });
+    await page.route('**/api/kernels/mihomo/channel', async (route) => {
+      await gate;
+      await route.fulfill({
+        json: {
+          success: true,
+          data: { channel: 'preview', kernel: kernelAfter('mihomo', 'alpha-abc1234') }
+        }
+      });
+    });
+
+    await page.goto('/#/services');
+    const xrayItem = page.locator('.update-item', { hasText: 'Xray' });
+    const mihomoItem = page.locator('.update-item', { hasText: 'Mihomo' });
+    await expect(xrayItem.locator('.status-badge')).toContainText(/актуально|up to date/i);
+
+    const channelGroup = page.getByRole('group', { name: /update channel|канал обновлений/i });
+    await channelGroup.getByRole('button', { name: /^(preview|предварительный)$/i }).click();
+
+    await expect(xrayItem.locator('.status-badge')).toContainText(/проверяем|checking/i);
+    await expect(mihomoItem.locator('.status-badge')).toContainText(/проверяем|checking/i);
+
+    release();
+    await expect(xrayItem.locator('.status-badge')).toContainText('→ v26.9.9');
+    await expect(mihomoItem.locator('.status-badge')).toContainText('→ alpha-abc1234');
+    expect(checkCalls).toBe(0);
+    // Ответ уже содержит ядро: список заново не перечитывается сразу после смены
+    expect(kernelsGets).toBeGreaterThanOrEqual(1);
+  });
+
+  test('ответ смены канала без ядра приводит к перечитыванию списка', async ({ page }) => {
+    let channel = 'stable';
+    let kernelsGets = 0;
+    await page.route('**/api/kernels', async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      kernelsGets++;
+      await route.fulfill({
+        json: {
+          success: true,
+          data: kernelsFixture('xray', {
+            xray: { channel },
+            mihomo: { channel }
+          })
+        }
+      });
+    });
+    for (const name of ['xray', 'mihomo']) {
+      await page.route(`**/api/kernels/${name}/channel`, async (route) => {
+        channel = 'preview';
+        await route.fulfill({ json: { success: true, data: { channel: 'preview' } } });
+      });
+    }
+
+    await page.goto('/#/services');
+    await expect(page.locator('.update-item', { hasText: 'Xray' })).toBeVisible();
+    const before = kernelsGets;
+    const channelGroup = page.getByRole('group', { name: /update channel|канал обновлений/i });
+    const previewBtn = channelGroup.getByRole('button', { name: /^(preview|предварительный)$/i });
+    await previewBtn.click();
+
+    await expect(previewBtn).toHaveClass(/active/);
+    // Перечитывание списка идёт асинхронно после ответа смены канала
+    await expect.poll(() => kernelsGets).toBeGreaterThan(before);
+    await expect(page.locator('.channel-mismatch-hint')).toHaveCount(0);
+  });
+
+  test('pre-release на стабильном: бейдж и «Поставить стабильную» только с подтверждением', async ({
+    page
+  }) => {
+    let installPosts = 0;
+    await page.route('**/api/kernels', async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      await route.fulfill({
+        json: {
+          success: true,
+          data: kernelsFixture('xray', {
+            xray: {
+              current_version: '26.9.8',
+              latest_version: '26.3.27',
+              has_update: false,
+              ahead_of_latest: true,
+              channel: 'stable'
+            }
+          })
+        }
+      });
+    });
+    await page.route('**/api/kernels/xray/install', async (route) => {
+      installPosts++;
+      await route.fulfill({ json: { success: true, data: {} } });
+    });
+
+    await page.goto('/#/services');
+    const xrayItem = page.locator('.update-item', { hasText: 'Xray' });
+    await expect(xrayItem.locator('.status-badge')).toContainText(
+      /Установлена pre-release, стабильная — v26\.3\.27|Pre-release installed, stable is v26\.3\.27/
+    );
+    await expect(xrayItem).not.toContainText(/актуально|up to date/i);
+    const stableBtn = page.getByTestId('install-stable-xray');
+    await expect(stableBtn).toBeVisible();
+    await expect(page.getByTestId('install-stable-mihomo')).toHaveCount(0);
+
+    // «Отмена» не отправляет установку
+    await stableBtn.click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText(/Поставить v26\.3\.27|Install v26\.3\.27/);
+    await dialog.getByRole('button', { name: /^(Отмена|Cancel)$/ }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(installPosts).toBe(0);
+
+    // Подтверждение отправляет ровно один запрос установки
+    await stableBtn.click();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: /Поставить v26\.3\.27|Install v26\.3\.27/ })
+      .click();
+    await expect.poll(() => installPosts).toBe(1);
+  });
+
+  test('на канале preview установленная версия новее latest остаётся «актуально»', async ({
+    page
+  }) => {
+    await page.route('**/api/kernels', async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      await route.fulfill({
+        json: {
+          success: true,
+          data: kernelsFixture('xray', {
+            xray: {
+              current_version: '26.9.8',
+              latest_version: '26.9.8',
+              ahead_of_latest: false,
+              channel: 'preview'
+            },
+            mihomo: { channel: 'preview' }
+          })
+        }
+      });
+    });
+
+    await page.goto('/#/services');
+    const xrayItem = page.locator('.update-item', { hasText: 'Xray' });
+    await expect(xrayItem.locator('.status-badge')).toContainText(/актуально|up to date/i);
+    await expect(page.getByTestId('install-stable-xray')).toHaveCount(0);
   });
 });

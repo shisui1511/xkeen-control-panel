@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '../../i18n';
-  import { showConfirm, showToast } from '../../stores';
+  import { lockNav, showConfirm, showToast } from '../../stores';
   import Button from '../Button.svelte';
   import Modal from '../Modal.svelte';
   import SegmentedControl from '../SegmentedControl.svelte';
@@ -16,14 +16,44 @@
     /** Окно установки открыто или закрыто: пока оно открыто, родитель не
      *  должен убирать карточку, иначе сессия установщика оборвётся */
     onopenchange?: (open: boolean) => void;
+    /** Последняя стабильная версия Xray (например, v26.3.27); null, пока неизвестна */
+    stableXrayVersion?: string | null;
+    /** Канал обновлений Xray на странице: версию подсказываем только для «stable» */
+    xrayChannel?: string;
   }
 
-  let { available, incomplete = false, onfinished, onopenchange }: Props = $props();
+  let {
+    available,
+    incomplete = false,
+    onfinished,
+    onopenchange,
+    stableXrayVersion = null,
+    xrayChannel = 'stable'
+  }: Props = $props();
 
   let channel = $state<'stable' | 'beta'>('stable');
+
+  // Подсказка при выборе «Стабильная»: внутри установщика панель список версий
+  // не меняет, поэтому подсказываем, какой Xray брать. Для «Бета» подсказки нет
+  const stableHint = $derived(
+    channel !== 'stable'
+      ? null
+      : xrayChannel === 'stable' && stableXrayVersion
+        ? $t('xkinst.stable_hint', { version: stableXrayVersion })
+        : $t('xkinst.stable_hint_generic')
+  );
   let isOpen = $state(false);
   let running = $state(false);
   let exitCode = $state<number | null>(null);
+
+  // Пока окно установщика открыто, боковое меню не перестраивается: XKeen
+  // кладёт бинарник и ядра посреди установки, capabilities меняются на глазах.
+  // Замок снимает cleanup эффекта — и при закрытии окна, и при размонтировании
+  $effect(() => {
+    if (!isOpen) return;
+    const unlock = lockNav();
+    return unlock;
+  });
 
   function start() {
     exitCode = null;
@@ -83,6 +113,9 @@
       </Button>
     </div>
     <p class="install-hint">{$t('xkinst.hint')}</p>
+    {#if stableHint}
+      <p class="install-hint" data-testid="xkeen-install-stable-hint">{stableHint}</p>
+    {/if}
   {:else}
     <p class="install-hint warn">{$t('xkinst.no_entware')}</p>
   {/if}
@@ -98,6 +131,9 @@
   <div class="install-modal">
     {#if exitCode === null}
       <p class="install-hint">{$t('xkinst.modal_hint')}</p>
+      {#if stableHint}
+        <p class="install-hint" data-testid="xkeen-install-stable-hint-modal">{stableHint}</p>
+      {/if}
     {:else if exitCode === 0}
       <p class="install-result ok">{$t('xkinst.done')}</p>
     {:else}
@@ -149,11 +185,11 @@
   .install-modal {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-3);
+    gap: var(--spacing-2);
   }
 
   .install-terminal {
-    height: min(60vh, 520px);
+    height: clamp(360px, calc(90dvh - 208px), 860px);
     display: flex;
     flex-direction: column;
   }

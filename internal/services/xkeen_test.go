@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -569,5 +570,91 @@ func TestXKeenService_ConfiguredKernel(t *testing.T) {
 	}
 	if got := (&XKeenService{InitScript: filepath.Join(dir, "missing")}).ConfiguredKernel(); got != "" {
 		t.Errorf("missing script: got %q", got)
+	}
+}
+
+// TestXKeenService_LifecycleHook: хук вызывается ровно один раз после каждого
+// Start/Stop/Restart/SwitchKernel при любом исходе и вне stateMu.
+func TestXKeenService_LifecycleHook(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	script := `#!/bin/sh
+case "$1" in
+	-status) echo "XKeen is not running"; exit 0;;
+	-stop|-restart) exit 1;;
+esac
+exit 0
+`
+	if err := os.WriteFile(dummy, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewXKeenService(dummy, tmpDir)
+
+	calls := 0
+	svc.SetLifecycleHook(func() {
+		calls++
+		// Вызов методов сервиса из хука не должен блокироваться
+		_ = svc.IntentionalStop()
+		_ = svc.InRestart()
+	})
+
+	steps := []struct {
+		name    string
+		run     func() error
+		wantErr bool
+	}{
+		{"Start ok", func() error { _, err := svc.Start(); return err }, false},
+		{"Stop fail", func() error { _, err := svc.Stop(); return err }, true},
+		{"Restart fail", func() error { _, err := svc.Restart(); return err }, true},
+		{"SwitchKernel ok", func() error { _, err := svc.SwitchKernel("xray"); return err }, false},
+	}
+	for i, st := range steps {
+		done := make(chan error, 1)
+		go func() { done <- st.run() }()
+		select {
+		case err := <-done:
+			if (err != nil) != st.wantErr {
+				t.Fatalf("%s: err = %v, wantErr = %v", st.name, err, st.wantErr)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s завис (дедлок хука?)", st.name)
+		}
+		if calls != i+1 {
+			t.Fatalf("%s: хук вызван %d раз, want %d", st.name, calls, i+1)
+		}
+	}
+}
+
+// TestXKeenService_StatusSerialized: параллельные Status() не пересекаются во
+// времени — второй процесс xkeen -status не стартует, пока не завершился первый.
+func TestXKeenService_StatusSerialized(t *testing.T) {
+	tmpDir := t.TempDir()
+	lock := filepath.Join(tmpDir, "lock")
+	overlap := filepath.Join(tmpDir, "overlap")
+	dummy := filepath.Join(tmpDir, "xkeen")
+	script := "#!/bin/sh\n" +
+		"mkdir \"" + lock + "\" || echo overlap >> \"" + overlap + "\"\n" +
+		"sleep 0.1\n" +
+		"rmdir \"" + lock + "\"\n" +
+		"echo \"XKeen is running\"\n"
+	if err := os.WriteFile(dummy, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewXKeenService(dummy, tmpDir)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if out, err := svc.Status(); err != nil || out != "XKeen is running" {
+				t.Errorf("Status() = %q, %v", out, err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if _, err := os.Stat(overlap); err == nil {
+		t.Error("процессы xkeen -status пересеклись во времени")
 	}
 }

@@ -302,7 +302,13 @@
   });
 </script>
 
-<div class="terminal-card" class:fullscreen={isFullscreen}>
+<div
+  class="terminal-card"
+  class:fullscreen={isFullscreen}
+  class:compact={isInstaller}
+  data-cols={currentCols}
+  data-rows={currentRows}
+>
   <!-- Top Toolbar Header -->
   <div class="terminal-header">
     <div class="header-left">
@@ -416,33 +422,37 @@
     <div class="xterm-mount" bind:this={terminalContainer}></div>
   </div>
 
-  <!-- Status Bar Footer -->
-  <div class="terminal-footer">
-    <div class="footer-hints">
-      <span class="hint">
-        <kbd class="kbd">Ctrl+C</kbd>
-        <span class="hint-text">{$t('console.terminal_hint_ctrl_c')}</span>
-      </span>
-      <span class="hint">
-        <kbd class="kbd">Ctrl+L</kbd>
-        <span class="hint-text">{$t('console.terminal_hint_ctrl_l')}</span>
-      </span>
-      <span class="hint">
-        <kbd class="kbd">Tab</kbd>
-        <span class="hint-text">{$t('console.terminal_hint_tab')}</span>
-      </span>
-    </div>
-
-    <div class="footer-meta">
-      {#if isFullscreen}
+  <!-- Подсказки горячих клавиш и бейдж размера нужны только обычной консоли:
+       установщику высота важнее, размер виден в data-cols/data-rows -->
+  {#if !isInstaller}
+    <!-- Status Bar Footer -->
+    <div class="terminal-footer">
+      <div class="footer-hints">
         <span class="hint">
-          <kbd class="kbd">Esc</kbd>
-          <span class="hint-text">{$t('console.terminal_exit_fullscreen')}</span>
+          <kbd class="kbd">Ctrl+C</kbd>
+          <span class="hint-text">{$t('console.terminal_hint_ctrl_c')}</span>
         </span>
-      {/if}
-      <span class="geo-badge">{currentCols} × {currentRows}</span>
+        <span class="hint">
+          <kbd class="kbd">Ctrl+L</kbd>
+          <span class="hint-text">{$t('console.terminal_hint_ctrl_l')}</span>
+        </span>
+        <span class="hint">
+          <kbd class="kbd">Tab</kbd>
+          <span class="hint-text">{$t('console.terminal_hint_tab')}</span>
+        </span>
+      </div>
+
+      <div class="footer-meta">
+        {#if isFullscreen}
+          <span class="hint">
+            <kbd class="kbd">Esc</kbd>
+            <span class="hint-text">{$t('console.terminal_exit_fullscreen')}</span>
+          </span>
+        {/if}
+        <span class="geo-badge">{currentCols} × {currentRows}</span>
+      </div>
     </div>
-  </div>
+  {/if}
 </div>
 
 <style>
@@ -469,6 +479,15 @@
     border: none;
     box-shadow: none;
     min-height: 100vh;
+  }
+
+  .terminal-card.compact .terminal-header {
+    padding: var(--spacing-1) var(--spacing-3);
+    gap: var(--spacing-2);
+  }
+
+  .terminal-card.compact .terminal-screen {
+    padding: var(--spacing-1) var(--spacing-2);
   }
 
   .terminal-header {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
   import { showToast, showConfirm, capabilities, fetchCapabilities } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
@@ -483,17 +483,27 @@
     }
   }
 
+  // Примитив, а не весь объект capabilities: опрос раз в 10 с кладёт в стор новый объект
+  // с теми же значениями, и эффект, читающий стор целиком, перезапускался бы на каждом
+  // опросе — cleanup обнулял бы xrayStatsError и прятал предупреждение WR-06.
+  const isXrayStatsActive = $derived(
+    $capabilities?.active_kernel === 'xray' && $capabilities?.xray?.grpc_ready === true
+  );
+
   $effect(() => {
-    const isXray = $capabilities?.active_kernel === 'xray';
-    const isGrpc = $capabilities?.xray?.grpc_ready;
-    if (isXray && isGrpc) {
-      startXrayStatsPolling();
-    } else {
-      stopXrayStatsPolling();
-      xrayOutbounds = [];
-      xrayInbounds = [];
-      xrayUsers = [];
-    }
+    const active = isXrayStatsActive;
+    // start/stop сами читают $capabilities (проверка в fetchXrayStats): вне untrack эти
+    // чтения стали бы зависимостями эффекта и вернули перезапуск на каждом опросе
+    untrack(() => {
+      if (active) {
+        startXrayStatsPolling();
+      } else {
+        stopXrayStatsPolling();
+        xrayOutbounds = [];
+        xrayInbounds = [];
+        xrayUsers = [];
+      }
+    });
     return () => {
       stopXrayStatsPolling();
     };
