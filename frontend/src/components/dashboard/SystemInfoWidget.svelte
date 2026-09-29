@@ -5,14 +5,29 @@
   import Button from '../Button.svelte';
   import Skeleton from '../Skeleton.svelte';
   import type { SystemStats } from './SystemResourcesWidget.svelte';
+  import { xkeenVersionLabel, type XKeenState } from '../../lib/xkeenState';
 
-  let { systemStats, version, panelVersion, statsLastFetched, onOpenAbout } = $props<{
+  let {
+    systemStats,
+    version,
+    panelVersion,
+    statsLastFetched,
+    xkeenState = 'unknown',
+    onOpenAbout
+  } = $props<{
     systemStats: SystemStats | null;
     version: string;
     panelVersion: string;
     statsLastFetched: string;
+    /** Состояние XKeen: без установки вместо версии — «не установлен», вместо unknown — «—». */
+    xkeenState?: XKeenState;
     onOpenAbout?: () => void;
   }>();
+
+  const versionText = $derived.by(() => {
+    const label = xkeenVersionLabel(xkeenState, version);
+    return label.key ? $t(label.key) : (label.text ?? '');
+  });
 </script>
 
 <div class="system-info-widget">
@@ -29,7 +44,7 @@
     <div class="info-rows">
       <div class="info-row">
         <div class="lbl">{$t('dash.info_version')}</div>
-        <div class="val mono" title={version}>{version}</div>
+        <div class="val mono" title={versionText}>{versionText}</div>
       </div>
 
       <div class="info-row">

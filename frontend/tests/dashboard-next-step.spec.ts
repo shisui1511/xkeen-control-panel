@@ -18,7 +18,7 @@ interface MockState {
   /** Ответ /api/system/stats целиком */
   stats: unknown;
   /** Ответ /api/version (поле data) */
-  version: unknown;
+  version: { version: string; panel_version: string };
 }
 
 interface Counters {
@@ -38,7 +38,7 @@ function baseState(overrides: Partial<MockState> = {}): MockState {
     },
     preflight: { valid: true, errors: [], warnings: [] },
     stats: systemStatsFixture(),
-    version: '2.0 Beta',
+    version: { version: '2.0 Beta', panel_version: 'v0.25.0' },
     ...overrides
   };
 }
@@ -232,5 +232,88 @@ test.describe('Dashboard — лестница следующего шага', ()
     await expect(xkeenCard(page)).toContainText('Неизвестно');
     await expect(step(page)).toHaveCount(0);
     expect(counters.preflight).toEqual([]);
+  });
+});
+
+test.describe('Dashboard — версия XKeen, возраст статуса, неполная статистика', () => {
+  const versionValue = (page: Page) =>
+    page
+      .locator('.info-row')
+      .filter({ has: page.locator('.lbl', { hasText: /^Версия XKeen$/ }) })
+      .locator('.val');
+
+  test('XKeen не установлен, версия unknown: «не установлен»', async ({ page }) => {
+    await mockRoutes(
+      page,
+      baseState({
+        xkeenInstalled: false,
+        service: { is_running: false, xkeen_installed: false },
+        version: { version: 'unknown', panel_version: 'v0.25.0' }
+      })
+    );
+    await page.goto('/#/dashboard');
+    await expect(versionValue(page)).toHaveText('не установлен');
+  });
+
+  test('XKeen установлен, версия unknown: «—»', async ({ page }) => {
+    await mockRoutes(
+      page,
+      baseState({ version: { version: 'unknown', panel_version: 'v0.25.0' } })
+    );
+    await page.goto('/#/dashboard');
+    await expect(versionValue(page)).toHaveText('—');
+  });
+
+  test('XKeen установлен, версия известна: показывается как есть', async ({ page }) => {
+    await mockRoutes(page, baseState());
+    await page.goto('/#/dashboard');
+    await expect(versionValue(page)).toHaveText('2.0 Beta');
+  });
+
+  for (const [label, service, visible] of [
+    ['возраст 45 с', { age_seconds: 45 }, true],
+    ['возраст 30 с', { age_seconds: 30 }, false],
+    ['возраста нет', {}, false]
+  ] as const) {
+    test(`бейдж «данные от»: ${label} — ${visible ? 'виден' : 'нет'}`, async ({ page }) => {
+      await mockRoutes(
+        page,
+        baseState({
+          service: {
+            is_running: true,
+            xkeen_installed: true,
+            xkeen_setup_incomplete: false,
+            ...service
+          }
+        })
+      );
+      await page.goto('/#/dashboard');
+      await expect(xkeenCard(page)).toContainText('Работает');
+      const badge = page.getByTestId('status-stale-badge');
+      if (visible) {
+        await expect(badge).toBeVisible();
+        await expect(badge).toContainText(/^\s*данные от \d{2}:\d{2}/);
+      } else {
+        await expect(badge).toHaveCount(0);
+      }
+    });
+  }
+
+  test('системная статистика без load не роняет дашборд', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await mockRoutes(page, baseState({ stats: { success: true, data: {} } }));
+    await page.goto('/#/dashboard');
+    await expect(xkeenCard(page)).toBeVisible();
+    // Дать пройти нескольким опросам статистики
+    await page.waitForTimeout(600);
+    expect(errors.filter((e) => e.includes("reading '0'"))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  test('валидная статистика по-прежнему заполняет «О системе»', async ({ page }) => {
+    await mockRoutes(page, baseState());
+    await page.goto('/#/dashboard');
+    await expect(page.locator('.info-row', { hasText: 'keenetic' }).first()).toBeVisible();
   });
 });

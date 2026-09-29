@@ -35,7 +35,12 @@
   import SystemStatusCapsule from './components/status/SystemStatusCapsule.svelte';
   import UpdateBanner from './components/dashboard/UpdateBanner.svelte';
   import { refreshUpdateState, detectPanelUpdate } from './lib/updateNotify';
-  import { parseServiceStatus, type ServiceStatusData } from './lib/serviceStatus';
+  import {
+    parseServiceStatus,
+    staleBadgeVisible,
+    snapshotTimeLabel,
+    type ServiceStatusData
+  } from './lib/serviceStatus';
   import { xkeenState, xkeenCardStatus } from './lib/xkeenState';
   import { nextStep, preflightConfigReady } from './lib/nextStep';
   import { anyKernelInstalled } from './lib/navCaps';
@@ -126,6 +131,20 @@
   // запущен / остановлен / неизвестно только при холодном кэше).
   let svcSnapshot = $state<ServiceStatusData | null>(null);
   const xkeenStateValue = $derived(xkeenState($capabilities, svcSnapshot));
+  // Возраст кэшированного статуса: бейдж «данные от HH:MM» только после порога
+  const statusAgeSeconds = $derived(svcSnapshot?.age_seconds);
+  const staleBadgeText = $derived(
+    svcSnapshot && staleBadgeVisible(svcSnapshot) && statusAgeSeconds !== undefined
+      ? $t('svc.status_stale', {
+          time: snapshotTimeLabel(statusAgeSeconds, Date.now(), $currentLang)
+        })
+      : null
+  );
+  const staleBadgeTitle = $derived(
+    statusAgeSeconds !== undefined
+      ? $t('svc.status_stale_title', { seconds: String(statusAgeSeconds) })
+      : ''
+  );
 
   interface WatchdogStatus {
     state: string;
@@ -507,13 +526,14 @@
     try {
       const res = await apiFetch('/api/system/stats', { signal });
       if (res.ok) {
-        systemStats = await res.json();
-        if (systemStats) {
-          loadHistory = [...loadHistory, systemStats.load[0]].slice(-16);
-          const d = new Date();
-          const p = (n: number) => n.toString().padStart(2, '0');
-          statsLastFetched = `${p(d.getDate())}.${p(d.getMonth() + 1)}.${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
-        }
+        const next = await res.json();
+        // Неполный или чужой по форме ответ не затирает прежние данные и не роняет виджеты
+        if (!next || typeof next !== 'object' || !Array.isArray(next.load)) return;
+        systemStats = next as SystemStats;
+        loadHistory = [...loadHistory, next.load[0]].slice(-16);
+        const d = new Date();
+        const p = (n: number) => n.toString().padStart(2, '0');
+        statsLastFetched = `${p(d.getDate())}.${p(d.getMonth() + 1)}.${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
       }
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
@@ -1515,6 +1535,8 @@
                         : ''}
                       {statusLoading}
                       {statusError}
+                      staleLabel={staleBadgeText}
+                      staleTitle={staleBadgeTitle}
                       onRefresh={fetchLiveStatus}
                       onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
                     />
@@ -1546,6 +1568,7 @@
                     {version}
                     {panelVersion}
                     {statsLastFetched}
+                    xkeenState={xkeenStateValue}
                     onOpenAbout={() => (showAboutModal = true)}
                   />
                 </div>
