@@ -12,6 +12,15 @@ import { fulfillServiceControl } from './helpers/api-mocks';
 
 test.use({ locale: 'ru-RU' });
 
+// Переход на #/constructor в dev-режиме Vite тянет сотни отдельных модулей
+// (Editor → CodeMirror → Constructor → XrayRoutingConstructor). Под нагрузкой
+// (4 воркера на 4 ядрах, load average > 10) в трассе первая отрисовка
+// занимала 11 с и более, поэтому 5 с на появление ленивого содержимого были
+// ниже реального разброса загрузки, а не проверкой поведения. Предел
+// относится только к ожиданию первой отрисовки; остальные проверки — 3 с.
+// Обрывы запросов Chromium (net::ERR_NETWORK_CHANGED) этим не лечатся.
+const LAZY_LOAD_TIMEOUT = 20_000;
+
 // ---------------------------------------------------------------------------
 // Мок-данные для 6 файлов Xray + manual outbounds
 // ---------------------------------------------------------------------------
@@ -170,11 +179,13 @@ test.describe('Xray Constructor integration test suite', () => {
 
     // Переключиться на Xray-конструктор
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     // Конструктор должен показать вкладки разделов Xray (D-03)
-    await expect(page.locator('[data-testid="xray-section-tabs"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid="xray-section-tabs"]')).toBeVisible({
+      timeout: LAZY_LOAD_TIMEOUT
+    });
 
     // Вкладка Routing должна быть видима и активна по умолчанию
     const routingTab = page
@@ -187,11 +198,11 @@ test.describe('Xray Constructor integration test suite', () => {
     await page.goto('/#/constructor');
 
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     const tabs = page.locator('[data-testid="xray-section-tabs"]');
-    await expect(tabs).toBeVisible({ timeout: 5000 });
+    await expect(tabs).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
 
     // Все 6 разделов должны быть доступны: Log, DNS, Inbounds, Outbounds, Routing, Policy
     for (const tab of ['log', 'dns', 'inbounds', 'outbounds', 'routing', 'policy']) {
@@ -208,12 +219,12 @@ test.describe('Xray Constructor integration test suite', () => {
     await page.goto('/#/constructor');
 
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     // Нажать кнопку Apply Changes
     const applyBtn = page.locator('[data-testid="apply-changes-btn"]');
-    await expect(applyBtn).toBeVisible({ timeout: 5000 });
+    await expect(applyBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await applyBtn.click();
 
     // Должен появиться confirm-диалог (D-19)
@@ -237,12 +248,12 @@ test.describe('Xray Constructor integration test suite', () => {
     await page.goto('/#/constructor');
 
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     // Нажать Apply Changes — должен открыться диалог, НЕ запустить restart
     const applyBtn = page.locator('[data-testid="apply-changes-btn"]');
-    await expect(applyBtn).toBeVisible({ timeout: 5000 });
+    await expect(applyBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await applyBtn.click();
 
     // Диалог открылся
@@ -266,7 +277,7 @@ test.describe('Xray Constructor integration test suite', () => {
     await page.goto('/#/constructor');
 
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     // Перейти на вкладку Outbounds
@@ -275,7 +286,7 @@ test.describe('Xray Constructor integration test suite', () => {
         '[data-testid="xray-section-tabs"] button:has-text("Outbounds"), [data-tab="outbounds"]'
       )
       .first();
-    await expect(outboundsTab).toBeVisible({ timeout: 5000 });
+    await expect(outboundsTab).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await outboundsTab.click();
 
     // Теги из mock (direct, block, dns-out, my-proxy) должны присутствовать в списке
@@ -303,11 +314,11 @@ test.describe('Xray Constructor integration test suite', () => {
 
     await page.goto('/#/constructor');
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     const panel = page.locator('[data-testid="test-route-panel"]');
-    await expect(panel).toBeVisible({ timeout: 5000 });
+    await expect(panel).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
 
     await page.locator('[data-testid="test-route-domain"]').fill('example.com');
     await page.locator('[data-testid="test-route-submit-btn"]').click();
@@ -336,7 +347,7 @@ test.describe('Xray Constructor integration test suite', () => {
 
     await page.goto('/#/constructor');
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     await page.locator('[data-testid="test-route-domain"]').fill('unknown-target.org');
@@ -358,7 +369,7 @@ test.describe('Xray Constructor integration test suite', () => {
 
     await page.goto('/#/constructor');
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     await page.locator('[data-testid="test-route-domain"]').fill('example.com');
@@ -387,7 +398,7 @@ test.describe('Xray Constructor integration test suite', () => {
 
     await page.goto('/#/constructor');
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     await expect(page.locator('[data-testid="test-route-panel"]')).toHaveCount(0);
@@ -406,11 +417,11 @@ test.describe('Xray Constructor integration test suite', () => {
 
     await page.goto('/#/constructor');
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     const restartBtn = page.locator('[data-testid="restart-logger-btn"]');
-    await expect(restartBtn).toBeVisible({ timeout: 5000 });
+    await expect(restartBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await restartBtn.click();
 
     expect(restartLoggerCalled).toBe(true);
@@ -443,7 +454,7 @@ test.describe('Xray Constructor integration test suite', () => {
 
     await page.goto('/#/constructor');
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     // Перейти во вкладку Outbounds
@@ -492,7 +503,7 @@ test.describe('Xray Constructor integration test suite', () => {
 
     await page.goto('/#/constructor');
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     const outboundsTab = page
@@ -518,7 +529,7 @@ test.describe('Xray Constructor integration test suite', () => {
   }) => {
     await page.goto('/#/constructor');
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
 
     const outboundsTab = page
