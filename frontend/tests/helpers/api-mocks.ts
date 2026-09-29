@@ -121,8 +121,7 @@ export async function mockExternalGeoServices(page: Page): Promise<void> {
   await page.route(
     /^https:\/\/(ipinfo\.io|api\.my-ip\.io|api\.ipify\.org|api64\.ipify\.org|icanhazip\.com|ipapi\.co)(\/|\?|$)/,
     async (route) => {
-      const url = route.request().url();
-      if (url.includes('icanhazip.com')) {
+      if (new URL(route.request().url()).hostname === 'icanhazip.com') {
         await route.fulfill({
           status: 200,
           contentType: 'text/plain',
