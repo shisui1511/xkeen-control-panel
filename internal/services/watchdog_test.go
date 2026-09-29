@@ -618,6 +618,10 @@ COMMIT
 
 func TestEnsureDefaultMihomoConfig_CreatesWhenMissing(t *testing.T) {
 	tmpDir := t.TempDir()
+	// Каталог не пуст (есть посторонний файл), но конфиг пропал: STAB-04 восстанавливает его.
+	if err := os.WriteFile(filepath.Join(tmpDir, "cache.db"), []byte("cache"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := EnsureDefaultMihomoConfig(tmpDir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -629,6 +633,23 @@ func TestEnsureDefaultMihomoConfig_CreatesWhenMissing(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Fatal("expected non-empty default config.yaml")
+	}
+}
+
+// TestEnsureDefaultMihomoConfig_NoOpWhenDirEmpty: пустой каталог — свежая установка
+// ядра (D-11), а не пропавший конфиг: config.yaml не создаётся.
+func TestEnsureDefaultMihomoConfig_NoOpWhenDirEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	if err := EnsureDefaultMihomoConfig(tmpDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected the empty directory to stay empty, got %v", entries)
 	}
 }
 

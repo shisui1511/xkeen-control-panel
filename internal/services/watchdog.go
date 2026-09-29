@@ -956,14 +956,21 @@ rules:
 // EnsureDefaultMihomoConfig writes a minimal, valid config.yaml into
 // mihomoDir when neither config.yaml nor config.yml already exists there
 // (STAB-04). It is a no-op — and returns nil — if a config file is already
-// present, or if mihomoDir itself does not exist (e.g. Mihomo isn't
-// installed on this system), so it never surprises a working installation.
+// present, if mihomoDir itself does not exist (e.g. Mihomo isn't installed on
+// this system), or if mihomoDir is empty (a fresh kernel install), so it never
+// surprises a working installation.
 func EnsureDefaultMihomoConfig(mihomoDir string) error {
 	if mihomoDir == "" {
 		return nil
 	}
 	if _, err := os.Stat(mihomoDir); err != nil {
 		// Directory doesn't exist — Mihomo likely isn't installed; nothing to recover.
+		return nil
+	}
+	// Пустой каталог — свежая установка ядра (D-11): установщик создаёт его пустым,
+	// конфиг появится из конструктора или Редактора. STAB-04 восстанавливает
+	// только пропавший конфиг в каталоге, где уже есть другие файлы.
+	if entries, err := os.ReadDir(mihomoDir); err == nil && len(entries) == 0 {
 		return nil
 	}
 

@@ -1935,3 +1935,147 @@ func TestUploadBinary_ResultUploaded(t *testing.T) {
 		t.Errorf("backups = %v", backupFiles(t, binPath))
 	}
 }
+
+// --- Каталог конфигурации Mihomo (KERN-02, D-11) ---
+
+// TestInstall_CreatesMihomoConfigDir: успешная установка mihomo создаёт пустой
+// каталог конфигурации 0755 и не пишет в него config.yaml.
+func TestInstall_CreatesMihomoConfigDir(t *testing.T) {
+	t.Run("создаёт пустой каталог 0755", func(t *testing.T) {
+		svc, _ := newInstallTestService(t, "")
+		cfgDir := filepath.Join(t.TempDir(), "mihomo")
+		svc.SetMihomoConfigDir(cfgDir)
+		svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+
+		if err := svc.Install("mihomo"); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		info, err := os.Stat(cfgDir)
+		if err != nil {
+			t.Fatalf("config dir must exist after install: %v", err)
+		}
+		if !info.IsDir() || info.Mode().Perm() != 0755 {
+			t.Errorf("config dir mode = %v, want directory 0755", info.Mode())
+		}
+		entries, _ := os.ReadDir(cfgDir)
+		if len(entries) != 0 {
+			t.Errorf("config dir must stay empty (no seeded config): %v", entries)
+		}
+	})
+
+	t.Run("существующий каталог не трогается", func(t *testing.T) {
+		svc, _ := newInstallTestService(t, "1.18.0")
+		cfgDir := filepath.Join(t.TempDir(), "mihomo")
+		if err := os.MkdirAll(cfgDir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		keep := filepath.Join(cfgDir, "config.yaml")
+		if err := os.WriteFile(keep, []byte("mixed-port: 1\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		svc.SetMihomoConfigDir(cfgDir)
+		svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+		if err := svc.Install("mihomo"); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		if data, _ := os.ReadFile(keep); string(data) != "mixed-port: 1\n" {
+			t.Errorf("existing config must be untouched, got %q", data)
+		}
+		if info, _ := os.Stat(cfgDir); info.Mode().Perm() != 0700 {
+			t.Errorf("existing dir mode changed to %v", info.Mode().Perm())
+		}
+	})
+
+	t.Run("пустой путь ничего не создаёт", func(t *testing.T) {
+		svc, _ := newInstallTestService(t, "")
+		parent := t.TempDir()
+		svc.SetMihomoConfigDir("")
+		svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+		if err := svc.Install("mihomo"); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		if entries, _ := os.ReadDir(parent); len(entries) != 0 {
+			t.Errorf("nothing must be created: %v", entries)
+		}
+	})
+
+	t.Run("путь вне разрешённых корней отклоняется, установка проходит", func(t *testing.T) {
+		svc, _ := newInstallTestService(t, "")
+		outside := "/etc/xcp-test-mihomo-dir"
+		svc.SetMihomoConfigDir(outside)
+		svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+
+		var logBuf bytes.Buffer
+		log.SetOutput(&logBuf)
+		t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+		if err := svc.Install("mihomo"); err != nil {
+			t.Fatalf("install must succeed despite a rejected dir: %v", err)
+		}
+		if _, err := os.Stat(outside); err == nil {
+			_ = os.Remove(outside)
+			t.Fatal("dir outside allowed roots must not be created")
+		}
+		if !strings.Contains(logBuf.String(), "mihomo config dir rejected") {
+			t.Errorf("rejection must be logged, log: %q", logBuf.String())
+		}
+		if k := svc.Get("mihomo"); k.Status != "done" {
+			t.Errorf("status = %q, want done", k.Status)
+		}
+	})
+
+	t.Run("загрузка файла mihomo тоже создаёт каталог", func(t *testing.T) {
+		svc, _ := newInstallTestService(t, "1.18.0")
+		cfgDir := filepath.Join(t.TempDir(), "mihomo")
+		svc.SetMihomoConfigDir(cfgDir)
+		if err := svc.UploadBinary("mihomo", bytes.NewReader(elfLike("1.21.0")), "mihomo"); err != nil {
+			t.Fatalf("upload: %v", err)
+		}
+		if info, err := os.Stat(cfgDir); err != nil || !info.IsDir() {
+			t.Errorf("config dir must exist after upload: %v", err)
+		}
+	})
+
+	t.Run("установка xray каталог mihomo не создаёт", func(t *testing.T) {
+		dir := t.TempDir()
+		binPath := filepath.Join(dir, "xray")
+		origProbe := xrayProbePaths
+		xrayProbePaths = []string{binPath}
+		t.Cleanup(func() { xrayProbePaths = origProbe })
+		t.Setenv("PATH", t.TempDir())
+
+		svc := NewKernelService(t.TempDir())
+		svc.mu.Lock()
+		k := svc.kernels["xray"]
+		k.BinaryPath = binPath
+		k.binaryPathCachedAt = time.Now()
+		k.LatestVersion = "26.9.9"
+		svc.mu.Unlock()
+		cfgDir := filepath.Join(t.TempDir(), "mihomo")
+		svc.SetMihomoConfigDir(cfgDir)
+
+		var zipBuf bytes.Buffer
+		zw := zip.NewWriter(&zipBuf)
+		w, err := zw.Create("xray")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte("#!/bin/sh\necho \"Xray 26.9.9 (Xray, Penetrates Everything.)\"\n"))
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		svc.SetInstallSource("arm64", func(_ context.Context, _, dest string) error {
+			return os.WriteFile(dest, zipBuf.Bytes(), 0644)
+		})
+
+		if err := svc.Install("xray"); err != nil {
+			t.Fatalf("install xray: %v", err)
+		}
+		if k := svc.Get("xray"); k.ResultKind != KernelResultInstalled || k.ResultVersion != "26.9.9" {
+			t.Errorf("kind=%q version=%q, want installed/26.9.9", k.ResultKind, k.ResultVersion)
+		}
+		if _, err := os.Stat(cfgDir); err == nil {
+			t.Error("xray install must not create the mihomo config dir")
+		}
+	})
+}

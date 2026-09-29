@@ -410,6 +410,7 @@ func main() {
 	// Kernel service must exist before background services that query it
 	// (traffic quota liveness check) are started.
 	kernelSvc := services.NewKernelService(cfg.DataDir)
+	kernelSvc.SetMihomoConfigDir(cfg.MihomoConfigDir)
 	api.SetKernelService(kernelSvc)
 
 	// Start background services

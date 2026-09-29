@@ -567,6 +567,9 @@ type KernelService struct {
 	downloadFn  func(ctx context.Context, url, dest string) error
 	installArch string
 
+	// mihomoConfigDir — каталог конфигурации Mihomo, создаваемый при установке ядра.
+	mihomoConfigDir string
+
 	// stageHook (только тесты) зовётся перед каждой сменой статуса установки, вне s.mu.
 	stageHook func(status, stage string)
 }
@@ -589,6 +592,44 @@ func (s *KernelService) SetInstallSource(arch string, download func(ctx context.
 	s.installArch = arch
 	s.downloadFn = download
 	s.mu.Unlock()
+}
+
+// SetMihomoConfigDir задаёт каталог конфигурации Mihomo, который создаётся
+// пустым после успешной установки ядра (D-11). Пустая строка — не создавать.
+func (s *KernelService) SetMihomoConfigDir(dir string) {
+	s.mu.Lock()
+	s.mihomoConfigDir = dir
+	s.mu.Unlock()
+}
+
+// ensureMihomoConfigDir создаёт пустой каталог конфигурации Mihomo (0755): у
+// свежей установки он должен существовать, но конфиг появляется только из
+// конструктора или Редактора, поэтому ничего в него не пишется. Путь идёт через
+// sanitizeKernelPath; отказ и ошибка создания логируются и установку не проваливают.
+func (s *KernelService) ensureMihomoConfigDir() {
+	s.mu.RLock()
+	dir := s.mihomoConfigDir
+	s.mu.RUnlock()
+	if dir == "" {
+		return
+	}
+	clean, err := sanitizeKernelPath(dir)
+	if err != nil {
+		log.Printf("Kernel: mihomo config dir rejected: %s", utils.SanitizeLogInput(dir))
+		return
+	}
+	_, statErr := os.Stat(clean)
+	if statErr == nil {
+		return
+	}
+	if err := os.MkdirAll(clean, 0755); err != nil {
+		log.Printf("Kernel: failed to create mihomo config dir %s: %v", utils.SanitizeLogInput(clean), err)
+		return
+	}
+	// umask не должен урезать права нового каталога.
+	if err := os.Chmod(clean, 0755); err != nil {
+		log.Printf("Kernel: failed to set mode of mihomo config dir %s: %v", utils.SanitizeLogInput(clean), err)
+	}
 }
 
 // kernelChannelStore is the on-disk format used to persist per-kernel update
@@ -1377,6 +1418,10 @@ func (s *KernelService) runInstall(name string) error {
 		return fail("Replace failed: "+err.Error(), err)
 	}
 
+	if name == "mihomo" {
+		s.ensureMihomoConfigDir()
+	}
+
 	// Verify new version and update metadata under lock
 	s.notifyStage("done", "")
 	s.mu.Lock()
@@ -2133,6 +2178,10 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		// Рабочее ядро не тронуто (rename атомарен) — убрать только .new
 		_ = os.Remove(tempDest)
 		return fmt.Errorf("final replace failed: %w", err)
+	}
+
+	if name == "mihomo" {
+		s.ensureMihomoConfigDir()
 	}
 
 	s.mu.Lock()
