@@ -1,5 +1,5 @@
 // e2e-pages: services, console
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type WebSocketRoute } from '@playwright/test';
 import { setupMocks } from './helpers/api-mocks';
 
 // Окно установщика XKeen: терминал вмещает вывод (строк не меньше порога на
@@ -11,6 +11,8 @@ import { setupMocks } from './helpers/api-mocks';
 interface MockState {
   /** active_kernel в ответах /api/capabilities */
   activeKernel: string;
+  /** Последний открытый сокет терминала (заполняет мок) */
+  socket?: WebSocketRoute;
 }
 
 async function mockInstallerPage(page: Page, state: MockState = { activeKernel: 'xray' }) {
@@ -62,8 +64,11 @@ async function mockInstallerPage(page: Page, state: MockState = { activeKernel: 
       })
     });
   });
-  // Сервер терминала не нужен: сокет принимается и молчит
-  await page.routeWebSocket(/\/api\/terminal\/ws/, () => {});
+  // Сервер терминала не нужен: сокет принимается и молчит; ссылка нужна,
+  // чтобы завершить установщик из теста
+  await page.routeWebSocket(/\/api\/terminal\/ws/, (ws) => {
+    state.socket = ws;
+  });
 }
 
 async function readRows(page: Page): Promise<number> {
@@ -167,5 +172,67 @@ test.describe('обычная консоль', () => {
     await expect(card.locator('.footer-hints kbd')).toHaveCount(3);
     await expect(card.locator('.geo-badge')).toBeVisible();
     await expect(card.locator('.geo-badge')).toContainText('×');
+  });
+});
+
+test.describe('замок меню, пока открыто окно установщика', () => {
+  const XRAY_GROUPS = 4;
+  const groups = (page: Page) => page.locator('.sidebar-nav .nav-group');
+
+  test('меню не перестраивается при открытом окне и обновляется после закрытия', async ({
+    page
+  }) => {
+    const state: MockState = { activeKernel: 'xray' };
+    await mockInstallerPage(page, state);
+    await page.clock.install();
+    await page.goto('/#/services');
+    await expect(page.locator('.hero-card')).toBeVisible();
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS);
+
+    await page.getByTestId('xkeen-install-start').click();
+    await expect(page.getByTestId('xkeen-install-modal')).toBeVisible();
+    await expect.poll(() => state.socket !== undefined).toBe(true);
+
+    // Ядро сменилось на сервере, опрос capabilities приносит новый active_kernel
+    state.activeKernel = 'mihomo';
+    const polled = page.waitForResponse((r) => r.url().includes('/api/capabilities'));
+    await page.clock.runFor(10_500);
+    await polled;
+    await page.waitForTimeout(300);
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS);
+    await expect(page.locator('a[href="#/proxies"]')).toHaveCount(0);
+
+    // Установщик завершился, окно ещё открыто: замок держится
+    state.socket!.send(JSON.stringify({ type: 'exit', code: 0 }));
+    const modal = page.getByTestId('xkeen-install-modal');
+    await expect(modal.locator('.install-result.ok')).toBeVisible();
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS);
+
+    // Окно закрыто: меню обновляется по актуальным capabilities
+    await modal.locator('.install-actions button').click();
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS + 2);
+    await expect(page.locator('a[href="#/proxies"]')).toBeVisible();
+  });
+
+  test('уход со страницы при открытом окне снимает замок', async ({ page }) => {
+    const state: MockState = { activeKernel: 'xray' };
+    await mockInstallerPage(page, state);
+    await page.clock.install();
+    await page.goto('/#/services');
+    await expect(page.locator('.hero-card')).toBeVisible();
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS);
+
+    await page.getByTestId('xkeen-install-start').click();
+    await expect(page.getByTestId('xkeen-install-modal')).toBeVisible();
+    state.activeKernel = 'mihomo';
+
+    // Компонент размонтируется вместе со страницей — замок должен сняться
+    await page.evaluate(() => {
+      window.location.hash = '#/dashboard';
+    });
+    await expect(page.getByTestId('xkeen-install-modal')).toHaveCount(0);
+    await page.clock.runFor(10_500);
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS + 2);
+    await expect(page.locator('a[href="#/proxies"]')).toBeVisible();
   });
 });

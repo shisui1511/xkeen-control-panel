@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '../../i18n';
-  import { showConfirm, showToast } from '../../stores';
+  import { lockNav, showConfirm, showToast } from '../../stores';
   import Button from '../Button.svelte';
   import Modal from '../Modal.svelte';
   import SegmentedControl from '../SegmentedControl.svelte';
@@ -45,6 +45,15 @@
   let isOpen = $state(false);
   let running = $state(false);
   let exitCode = $state<number | null>(null);
+
+  // Пока окно установщика открыто, боковое меню не перестраивается: XKeen
+  // кладёт бинарник и ядра посреди установки, capabilities меняются на глазах.
+  // Замок снимает cleanup эффекта — и при закрытии окна, и при размонтировании
+  $effect(() => {
+    if (!isOpen) return;
+    const unlock = lockNav();
+    return unlock;
+  });
 
   function start() {
     exitCode = null;
