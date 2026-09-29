@@ -1,5 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
+  import Icon from '../Icon.svelte';
+  import { matchXKeenStoplist } from '../../lib/xkeenStoplist';
 
   interface ConfigFileInfo {
     name: string;
@@ -162,6 +164,7 @@
       <div class="file-list">
         {#each filteredXrayFiles as file (file.path)}
           {@const fmt = getFormatBadge(file.name)}
+          {@const stopWord = matchXKeenStoplist(file.name)}
           {@const activeConfig = isActiveRunningConfig(file)}
           <button
             class="file-row"
@@ -176,6 +179,12 @@
                 <span class="active-dot" title={$t('editor.active_config')}></span>
               {/if}
               <span class="fr-name file-name" title={file.name}>{file.name}</span>
+              {#if stopWord}
+                {@const markTitle = $t('stoplist.badge_title', { word: stopWord })}
+                <span class="stoplist-mark" title={markTitle} aria-label={markTitle}>
+                  <Icon name="alert-triangle" size={12} />
+                </span>
+              {/if}
             </div>
             <span class="fr-meta">{formatBytes(file.size)}</span>
           </button>
@@ -228,7 +237,7 @@
   </div>
 </div>
 
-<!-- Context Menu (EDIT-03) -->
+<!-- Context Menu (EDIT-03). Обработчик вызывается до closeContextMenu(): после закрытия f обнуляется. -->
 {#if ctxMenu.visible && ctxMenu.file}
   {@const f = ctxMenu.file}
   <div
@@ -244,8 +253,8 @@
       class="ctx-item"
       role="menuitem"
       onclick={() => {
-        closeContextMenu();
         onRenameFile(f);
+        closeContextMenu();
       }}
     >
       <svg
@@ -265,8 +274,8 @@
       class="ctx-item"
       role="menuitem"
       onclick={() => {
-        closeContextMenu();
         onDuplicateFile(f);
+        closeContextMenu();
       }}
     >
       <svg
@@ -286,8 +295,8 @@
       class="ctx-item"
       role="menuitem"
       onclick={() => {
-        closeContextMenu();
         onDownloadFile(f);
+        closeContextMenu();
       }}
     >
       <svg
@@ -307,8 +316,8 @@
       class="ctx-item"
       role="menuitem"
       onclick={() => {
-        closeContextMenu();
         onViewBackups(f);
+        closeContextMenu();
       }}
     >
       <svg
@@ -327,8 +336,8 @@
       class="ctx-item ctx-danger"
       role="menuitem"
       onclick={() => {
-        closeContextMenu();
         onDeleteFile(f);
+        closeContextMenu();
       }}
     >
       <svg
@@ -571,6 +580,13 @@
     background: var(--success);
     box-shadow: 0 0 5px color-mix(in srgb, var(--success) 80%, transparent);
     flex-shrink: 0;
+  }
+
+  .stoplist-mark {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    color: var(--warning);
   }
 
   .sb-empty {

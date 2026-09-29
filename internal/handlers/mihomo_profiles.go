@@ -18,16 +18,28 @@ import (
 // waits for the Mihomo process to come back.
 func (a *API) SetMihomoProfileService(svc *services.MihomoProfileService) {
 	svc.Validate = a.validateMihomoProfile
+	// Перезапуск после активации профиля решает KernelApplier: Mihomo должен
+	// быть активным ядром, а его процесс — мочь работать (unknown считается
+	// запущенным). Логика отката в Activate остаётся прежней.
 	svc.CoreActive = func() bool {
-		k := a.getActiveKernelName()
-		return k == "mihomo" || k == "both"
+		return a.kernelApplier != nil && a.kernelApplier.WillRestart("mihomo")
 	}
+	// Сам рестарт идёт через KernelApplier.Apply: под тем же мьютексом, что и
+	// остальные применения, и с решением по свежему статусу после захвата.
+	// CoreActive выше — лишь предварительная проверка без замка.
 	svc.Restart = func() error {
-		if a.xkeenSvc == nil {
-			return errors.New("xkeen service unavailable")
+		if a.kernelApplier == nil {
+			return errors.New("kernel applier is not configured")
 		}
-		_, err := a.xkeenSvc.Restart()
-		return err
+		res := a.kernelApplier.Apply("mihomo")
+		switch res.Outcome {
+		case services.ApplyRestarted:
+			return nil
+		case services.ApplyRestartFailed:
+			return errors.New(res.Error)
+		default:
+			return services.ErrRestartSkipped
+		}
 	}
 	svc.Healthy = a.waitMihomoRunning
 	a.mihomoProfileSvc = svc
@@ -73,6 +85,30 @@ func (a *API) waitMihomoRunning() bool {
 		}
 	}
 	return false
+}
+
+// profileActivationResponse — ответ активации профиля: результат сервиса и
+// исход применения. Outcome заполняется, только когда профиль записан, но ядро
+// не перезапускалось (остановлено или неактивно): по нему карточка профилей
+// показывает, когда профиль вступит в силу.
+type profileActivationResponse struct {
+	*services.ActivationResult
+	Outcome string `json:"outcome,omitempty"`
+}
+
+// profileActivationResult дополняет результат активации исходом применения.
+func (a *API) profileActivationResult(res *services.ActivationResult) profileActivationResponse {
+	out := profileActivationResponse{ActivationResult: res}
+	if res == nil || res.Restarted || res.Error != "" || a.kernelApplier == nil {
+		return out
+	}
+	// Исход restarted в предпросмотре значит «Activate не перезапускал»: профиль
+	// уже был активным, исход в ответ не попадает.
+	switch preview := a.kernelApplier.Preview("mihomo").Outcome; preview {
+	case services.ApplySavedKernelStopped, services.ApplySavedKernelInactive:
+		out.Outcome = string(preview)
+	}
+	return out
 }
 
 type mihomoProfileRequest struct {
@@ -134,7 +170,7 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 		res, err = svc.Activate(req.Name)
 		if err == nil {
 			a.ClearCapabilitiesCache()
-			result = res
+			result = a.profileActivationResult(res)
 		}
 	default:
 		JSONError(w, http.StatusNotFound, "unknown action")

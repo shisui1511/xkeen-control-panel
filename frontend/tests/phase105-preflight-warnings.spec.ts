@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { setupMocks } from './helpers/api-mocks';
+import { setupMocks, fulfillServiceControl } from './helpers/api-mocks';
 
 test.use({ locale: 'ru-RU' });
 
@@ -111,13 +111,7 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
       });
     });
 
-    await page.route('**/api/service/control**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true })
-      });
-    });
+    await page.route('**/api/service/control**', fulfillServiceControl);
 
     await page.goto('/#/editor');
 
@@ -201,13 +195,7 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
       });
     });
 
-    await page.route('**/api/service/control**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true })
-      });
-    });
+    await page.route('**/api/service/control**', fulfillServiceControl);
 
     await page.goto('/#/editor');
 
@@ -307,13 +295,7 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
       });
     });
 
-    await page.route('**/api/service/control**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true })
-      });
-    });
+    await page.route('**/api/service/control**', fulfillServiceControl);
 
     // Переход в конструктор: пустой rules в 05_routing.json — заготовка, шаблон
     // применяется кнопкой баннера
@@ -379,13 +361,7 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
       });
     });
 
-    await page.route('**/api/service/control**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true })
-      });
-    });
+    await page.route('**/api/service/control**', fulfillServiceControl);
 
     await page.goto('/#/editor');
 
@@ -445,13 +421,7 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
       });
     });
 
-    await page.route('**/api/service/control**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true })
-      });
-    });
+    await page.route('**/api/service/control**', fulfillServiceControl);
 
     await page.goto('/#/editor');
 
@@ -531,13 +501,7 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
       });
     });
 
-    await page.route('**/api/service/control**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true })
-      });
-    });
+    await page.route('**/api/service/control**', fulfillServiceControl);
 
     await page.goto('/#/editor');
 

@@ -1003,6 +1003,11 @@ func sanitizeProviderName(s string) string {
 }
 
 func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, sub *Subscription) ([]SubscriptionNode, error) {
+	// Имя из стоп-списка XKeen отменило бы запуск Xray: файл не пишем (D-13).
+	if err := guardXrayRootName(path); err != nil {
+		return nil, err
+	}
+
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {

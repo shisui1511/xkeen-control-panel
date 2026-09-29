@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t } from '../../i18n';
+  import { t, currentLang } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
-  import { activateRestartGrace } from '../../lib/serviceGrace';
+  import { parseValidationError } from '../../lib/errorParser';
+  import { applyToKernel, notifyApplyOutcome, type ApplyResult } from '../../lib/serviceApply';
   import { showToast } from '../../stores';
   import Button from '../Button.svelte';
   import SegmentedControl from '../SegmentedControl.svelte';
@@ -155,11 +156,28 @@
       delete liveEntries[kind];
 
       if (restart) {
-        activateRestartGrace(6000);
-        const r = await apiFetch('/api/service/control?action=restart', { method: 'POST' });
-        if (!r.ok) throw new Error(await r.text());
-        showToast('success', $t('xkeen_settings.saved_restarted'));
-        onrestarted?.();
+        // Файл уже записан: сервер сам решает, перезапускать ли активное ядро
+        let result: ApplyResult;
+        try {
+          result = await applyToKernel({ kernel: 'active' });
+        } catch (applyErr: any) {
+          if (applyErr?.status === 401) return;
+          const reason =
+            parseValidationError(applyErr?.message || '', $currentLang) || applyErr?.message;
+          showToast('error', $t('apply.restart_failed', { reason }), 10000, {
+            label: $t('apply.open_logs'),
+            onClick: () => {
+              window.location.hash = '#/logs';
+            }
+          });
+          return;
+        }
+        if (result.outcome === 'restarted') {
+          showToast('success', $t('xkeen_settings.saved_restarted'));
+          onrestarted?.();
+        } else {
+          notifyApplyOutcome(result);
+        }
       } else {
         showToast('success', $t('xkeen_settings.saved'));
       }

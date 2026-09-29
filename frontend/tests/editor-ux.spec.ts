@@ -31,9 +31,13 @@ proxies:
 `;
 
   let statusChecksCount = 0;
+  let applyBody: Record<string, unknown> = {};
+  let controlRequests: string[] = [];
 
   test.beforeEach(async ({ page }) => {
     statusChecksCount = 0;
+    applyBody = { outcome: 'restarted', kernel: 'mihomo' };
+    controlRequests = [];
 
     // Включаем логирование консоли браузера для отладки
     page.on('console', (msg) => {
@@ -160,11 +164,12 @@ proxies:
           contentType: 'application/json',
           body: JSON.stringify({ valid: true })
         });
-      } else if (url.includes('/api/service/control') && url.includes('action=restart')) {
+      } else if (url.includes('/api/service/control')) {
+        controlRequests.push(url);
         await route.fulfill({
           status: 200,
-          contentType: 'text/plain',
-          body: 'OK'
+          contentType: 'application/json',
+          body: JSON.stringify(url.includes('action=apply') ? applyBody : {})
         });
       } else if (url.includes('/api/service/status')) {
         statusChecksCount++;
@@ -336,5 +341,35 @@ proxies:
     // Ждем, пока кнопка разблокируется и исчезнет индикатор применения
     await expect(applyBtn).toBeEnabled();
     await expect(statusText).not.toBeVisible();
+  });
+
+  test('Save & Apply файла неактивного ядра не перезапускает службу', async ({ page }) => {
+    applyBody = { outcome: 'saved_kernel_inactive', kernel: 'mihomo', active_kernel: 'xray' };
+
+    await page.goto('/#/editor');
+    await page.locator('.file-row:has-text("config.yaml")').click();
+    await expect(page.locator('.editor-tab:has-text("config.yaml")')).toBeVisible();
+
+    const cmContent = page.locator('.cm-content');
+    await expect(cmContent).toBeVisible();
+    await cmContent.focus();
+    await page.keyboard.type('\n# edited line\n');
+
+    const applyBtn = page.locator('button.btn-accent[title="Сохранить и применить"]');
+    await expect(applyBtn).toBeVisible();
+    await applyBtn.click();
+
+    // Тост по исходу: файл сохранён, вступит в силу после переключения на Mihomo
+    await expect(
+      page.locator('.toast', { hasText: 'Вступит в силу после переключения на Mihomo' })
+    ).toBeVisible();
+    await expect(applyBtn).toBeEnabled();
+    await expect(page.locator('.status-apply-indicator')).not.toBeVisible();
+
+    expect(controlRequests.some((u) => u.includes('action=apply'))).toBe(true);
+    expect(controlRequests.some((u) => u.includes('path=') && u.includes('config.yaml'))).toBe(
+      true
+    );
+    expect(controlRequests.some((u) => u.includes('action=restart'))).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
 
 // ============================================================
 // Общий хелпер API-моков и навигации для e2e-тестов панели.
@@ -8,6 +8,27 @@ import type { Page } from '@playwright/test';
 // ============================================================
 
 export type KernelMode = 'mihomo' | 'xray';
+
+/**
+ * Ответ на POST /api/service/control: action=apply возвращает исход «перезапущено»
+ * для ядра из запроса, остальные действия — простой успех.
+ */
+export async function fulfillServiceControl(route: Route) {
+  const params = new URL(route.request().url()).searchParams;
+  const kernel = params.get('kernel') || 'mihomo';
+  const body =
+    params.get('action') === 'apply'
+      ? {
+          success: true,
+          data: { outcome: 'restarted', kernel, active_kernel: kernel, active_running: true }
+        }
+      : { success: true };
+  await route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(body)
+  });
+}
 
 /**
  * Устанавливает моки API и возвращает page готовую к навигации.

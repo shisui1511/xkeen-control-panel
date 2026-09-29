@@ -120,3 +120,61 @@ func TestCapabilities_ActiveKernelWhenStopped(t *testing.T) {
 		t.Errorf("active_kernel = %q, want xray", envelope.Data.ActiveKernel)
 	}
 }
+
+// TestCapabilities_ApplyRestarts: предсказание рестарта при применении берётся
+// у того же KernelApplier, что и решает при apply.
+func TestCapabilities_ApplyRestarts(t *testing.T) {
+	get := func(t *testing.T, statuses map[string]string) CapabilitiesResponse {
+		t.Helper()
+		xk := services.NewXKeenService(buildStubBinary(t, "XKeen is not running", 0), t.TempDir())
+		api := &API{
+			cfg:      &config.Config{MihomoAPIURL: "http://127.0.0.1:1"},
+			xkeenSvc: xk,
+			kernelApplier: services.NewKernelApplierFunc(
+				func(name string) string { return statuses[name] },
+				func() string { return "xray" },
+				func() (string, error) {
+					t.Error("рестарт не должен вызываться из capabilities")
+					return "", nil
+				},
+			),
+		}
+		rr := httptest.NewRecorder()
+		api.Capabilities(rr, httptest.NewRequest(http.MethodGet, "/api/capabilities", nil))
+		var envelope struct {
+			Data CapabilitiesResponse `json:"data"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&envelope); err != nil {
+			t.Fatal(err)
+		}
+		return envelope.Data
+	}
+
+	running := get(t, map[string]string{"xray": "running", "mihomo": "running"})
+	if !running.ApplyRestarts["xray"] || running.ApplyRestarts["mihomo"] {
+		t.Errorf("xray running: apply_restarts = %v, want xray:true mihomo:false", running.ApplyRestarts)
+	}
+
+	stopped := get(t, map[string]string{"xray": "stopped", "mihomo": "stopped"})
+	if stopped.ApplyRestarts["xray"] || stopped.ApplyRestarts["mihomo"] {
+		t.Errorf("all stopped: apply_restarts = %v, want both false", stopped.ApplyRestarts)
+	}
+}
+
+// TestCapabilities_ApplyRestartsWithoutApplier: без KernelApplier поле
+// отсутствует, паники нет.
+func TestCapabilities_ApplyRestartsWithoutApplier(t *testing.T) {
+	xk := services.NewXKeenService(buildStubBinary(t, "XKeen is not running", 0), t.TempDir())
+	api := &API{cfg: &config.Config{MihomoAPIURL: "http://127.0.0.1:1"}, xkeenSvc: xk}
+	rr := httptest.NewRecorder()
+	api.Capabilities(rr, httptest.NewRequest(http.MethodGet, "/api/capabilities", nil))
+	var envelope struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := envelope.Data["apply_restarts"]; ok {
+		t.Errorf("apply_restarts присутствует без applier: %s", envelope.Data["apply_restarts"])
+	}
+}

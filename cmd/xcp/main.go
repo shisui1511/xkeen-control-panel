@@ -354,8 +354,6 @@ func main() {
 
 	// Subscription endpoints
 	srv.HandleProtected("/api/outbound/parse", api.OutboundParse)
-	srv.HandleProtected("/api/outbound/import", api.OutboundImport)
-	srv.HandleProtected("/api/outbound/import-bulk", api.OutboundImportBulk)
 	srv.HandleProtected("/api/subscriptions", api.SubscriptionList)
 	srv.HandleProtected("/api/subscriptions/add", api.SubscriptionAdd)
 	srv.HandleProtected("/api/subscriptions/update", api.SubscriptionUpdate)
@@ -488,6 +486,7 @@ func main() {
 		xkeenDir,
 		cfg.DataDir,
 	})
+	snapshotSvc.SetXrayRoot(cfg.XRayConfigDir)
 	api.SetSnapshotService(snapshotSvc)
 	srv.HandleProtected("/api/snapshots/list", api.SnapshotList)
 	srv.HandleProtected("/api/snapshots/create", api.SnapshotCreate)
@@ -543,7 +542,7 @@ func main() {
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
 	subscriptionSvc.SetPanelAddress(cfg.Port, cfg.HTTPS.Enabled, cfg.LoopbackPort)
-	subscriptionSvc.SetConsoleService(consoleSvc)
+	subscriptionSvc.SetKernelApplier(api.KernelApplier())
 	subscriptionSvc.SetMihomoService(api.MihomoService())
 	subscriptionSvc.SetMihomoAPI(cfg.MihomoAPIURL, cfg.MihomoSecret)
 	// Fallback-резолвер секрета Clash API: при пустом MihomoSecret в конфиге

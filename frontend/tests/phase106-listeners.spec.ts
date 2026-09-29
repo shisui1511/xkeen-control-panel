@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { setupMocks } from './helpers/api-mocks';
+import { setupMocks, fulfillServiceControl } from './helpers/api-mocks';
 
 test.use({ locale: 'ru-RU' });
 
@@ -167,13 +167,7 @@ test.describe('Phase 106: вкладка слушателей Mihomo (MIHO-07)',
       });
     });
 
-    await page.route('**/api/service/control**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true })
-      });
-    });
+    await page.route('**/api/service/control**', fulfillServiceControl);
 
     await page.goto('/#/constructor');
 
@@ -267,13 +261,7 @@ proxies:
       });
     });
 
-    await page.route('**/api/service/control**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true })
-      });
-    });
+    await page.route('**/api/service/control**', fulfillServiceControl);
 
     await page.goto('/#/constructor');
 

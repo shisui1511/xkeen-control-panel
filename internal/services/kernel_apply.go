@@ -1,0 +1,280 @@
+package services
+
+import (
+	"errors"
+	"strings"
+	"sync"
+	"unicode/utf8"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
+)
+
+// ApplyOutcome — исход применения записанной конфигурации к ядру.
+type ApplyOutcome string
+
+const (
+	// ApplyRestarted — целевое ядро было запущено и перезапущено.
+	ApplyRestarted ApplyOutcome = "restarted"
+	// ApplySavedKernelStopped — целевое ядро остановлено: файлы записаны,
+	// ядро не запускалось (его остановил пользователь).
+	ApplySavedKernelStopped ApplyOutcome = "saved_kernel_stopped"
+	// ApplySavedKernelInactive — целевое ядро не является активным: файлы
+	// записаны, активное ядро не тронуто.
+	ApplySavedKernelInactive ApplyOutcome = "saved_kernel_inactive"
+	// ApplyRestartFailed — рестарт запущенного ядра завершился ошибкой;
+	// файлы остаются записанными.
+	ApplyRestartFailed ApplyOutcome = "restart_failed"
+)
+
+// ApplyTargetActive — цель «активное ядро»: name_client из init-скрипта XKeen,
+// иначе запущенное ядро.
+const ApplyTargetActive = "active"
+
+// applyErrorMaxBytes — предел поля Error исхода restart_failed.
+const applyErrorMaxBytes = 500
+
+// applyErrorMaxLines — сколько последних непустых строк вывода xkeen попадает
+// в Error.
+const applyErrorMaxLines = 5
+
+// ApplyResult — структурированный исход применения: по нему UI выбирает тост.
+type ApplyResult struct {
+	Outcome ApplyOutcome `json:"outcome"`
+	// Kernel — ядро, к которому относилось применение.
+	Kernel string `json:"kernel"`
+	// ActiveKernel — ядро, которое сейчас считается активным.
+	ActiveKernel string `json:"active_kernel"`
+	// ActiveRunning — активное ядро может работать (статус не stopped и не
+	// not_installed).
+	ActiveRunning bool `json:"active_running"`
+	// Error — причина для restart_failed: последние строки вывода xkeen.
+	Error string `json:"error,omitempty"`
+}
+
+// KernelMayRun — ядро считается «может работать» для любого статуса, кроме
+// stopped и not_installed. unknown и not_accessible относятся к «может
+// работать»: лучше перезапустить и получить рабочий конфиг, чем оставить
+// применённый конфиг без эффекта.
+func KernelMayRun(processStatus string) bool {
+	switch processStatus {
+	case "stopped", "not_installed":
+		return false
+	default:
+		return true
+	}
+}
+
+// KernelApplier решает, нужно ли перезапускать целевое ядро после записи
+// конфигурации, и выполняет рестарт. Единственный источник этого решения для
+// всех мест «записал → перезапустил»: остановленное пользователем ядро не
+// запускается, чужое ядро не перезапускается.
+type KernelApplier struct {
+	// mu сериализует Apply: одновременно идёт не больше одного рестарта, а
+	// решение каждого вызова принимается по свежему статусу после захвата.
+	mu         sync.Mutex
+	status     func(string) string
+	configured func() string
+	restart    func() (string, error)
+}
+
+// NewKernelApplier собирает KernelApplier из сервиса ядер и XKeen.
+func NewKernelApplier(kernels KernelStatusProvider, xkeen *XKeenService) *KernelApplier {
+	status := func(name string) string {
+		if kernels == nil {
+			return "not_installed"
+		}
+		info := kernels.Get(name)
+		if info == nil {
+			return "not_installed"
+		}
+		return info.ProcessStatus
+	}
+	configured := func() string { return "" }
+	restart := func() (string, error) { return "", errors.New("xkeen service is not available") }
+	if xkeen != nil {
+		configured = xkeen.ConfiguredKernel
+		// `xkeen -restart` = остановка и запуск; горячей перезагрузки конфига
+		// у Mihomo в панели нет.
+		restart = xkeen.Restart
+	}
+	return NewKernelApplierFunc(status, configured, restart)
+}
+
+// NewKernelApplierFunc собирает KernelApplier из функций (тесты и места, где
+// перезапуск идёт не через XKeenService).
+func NewKernelApplierFunc(status func(string) string, configured func() string, restart func() (string, error)) *KernelApplier {
+	return &KernelApplier{status: status, configured: configured, restart: restart}
+}
+
+// applyDecision — результат decide: исход без побочных эффектов.
+type applyDecision struct {
+	result ApplyResult
+	// restart — целевое ядро нужно перезапустить.
+	restart bool
+}
+
+func isApplyKernelName(name string) bool {
+	return name == "xray" || name == "mihomo"
+}
+
+// activeKernel — активное ядро: name_client из init-скрипта XKeen, иначе первое
+// запущенное. Пусто, если определить нельзя.
+func (k *KernelApplier) activeKernel() string {
+	if name := k.configured(); isApplyKernelName(name) {
+		return name
+	}
+	for _, name := range []string{"xray", "mihomo"} {
+		if k.status(name) == "running" {
+			return name
+		}
+	}
+	return ""
+}
+
+// decide не имеет побочных эффектов: только читает статусы.
+func (k *KernelApplier) decide(targets []string) applyDecision {
+	active := k.activeKernel()
+
+	// concrete — конкретные цели без дублей; wantsActive — среди целей есть
+	// «активное».
+	var concrete []string
+	wantsActive := len(targets) == 0
+	for _, t := range targets {
+		switch {
+		case t == ApplyTargetActive:
+			wantsActive = true
+		case isApplyKernelName(t):
+			dup := false
+			for _, c := range concrete {
+				if c == t {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				concrete = append(concrete, t)
+			}
+		}
+	}
+
+	if len(concrete) == 0 && !wantsActive {
+		// Только неизвестные имена: применять не к чему, ядро не трогаем.
+		res := ApplyResult{Outcome: ApplySavedKernelInactive, ActiveKernel: active}
+		if active != "" {
+			res.ActiveRunning = KernelMayRun(k.status(active))
+		}
+		return applyDecision{result: res}
+	}
+
+	if active == "" {
+		if len(concrete) == 0 {
+			// «Активное» без активного ядра: применять не к чему.
+			return applyDecision{result: ApplyResult{Outcome: ApplySavedKernelStopped}}
+		}
+		// Активное ядро не определить: считаем им первую цель.
+		active = concrete[0]
+	}
+	if wantsActive {
+		found := false
+		for _, c := range concrete {
+			if c == active {
+				found = true
+				break
+			}
+		}
+		if !found {
+			concrete = append(concrete, active)
+		}
+	}
+
+	activeRunning := KernelMayRun(k.status(active))
+	res := ApplyResult{Kernel: active, ActiveKernel: active, ActiveRunning: activeRunning}
+
+	touched := false
+	for _, c := range concrete {
+		if c == active {
+			touched = true
+			break
+		}
+	}
+	switch {
+	case !touched:
+		// Другое ядро не трогаем.
+		res.Kernel = concrete[0]
+		res.Outcome = ApplySavedKernelInactive
+		return applyDecision{result: res}
+	case !activeRunning:
+		res.Outcome = ApplySavedKernelStopped
+		return applyDecision{result: res}
+	default:
+		res.Outcome = ApplyRestarted
+		return applyDecision{result: res, restart: true}
+	}
+}
+
+// Preview — что произойдёт при Apply, без рестарта. Исход restarted значит
+// «будет перезапущено». Мьютекс не берёт: предсказание не должно ждать
+// идущего рестарта.
+func (k *KernelApplier) Preview(targets ...string) ApplyResult {
+	return k.decide(targets).result
+}
+
+// WillRestart — применение к target перезапустит ядро.
+func (k *KernelApplier) WillRestart(target string) bool {
+	return k.Preview(target).Outcome == ApplyRestarted
+}
+
+// Apply решает по свежему статусу и при необходимости перезапускает ядро.
+// Откат записанных файлов не делается: при restart_failed конфиг остаётся.
+func (k *KernelApplier) Apply(targets ...string) ApplyResult {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	d := k.decide(targets)
+	if !d.restart {
+		return d.result
+	}
+	out, err := k.restart()
+	if err != nil {
+		d.result.Outcome = ApplyRestartFailed
+		d.result.Error = restartErrorReason(out, err)
+	}
+	return d.result
+}
+
+// restartErrorReason — последние непустые строки вывода xkeen без ANSI, не
+// длиннее applyErrorMaxBytes; пустой вывод заменяется текстом ошибки.
+func restartErrorReason(out string, err error) string {
+	var lines []string
+	for _, line := range strings.Split(utils.StripANSI(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) > applyErrorMaxLines {
+		lines = lines[len(lines)-applyErrorMaxLines:]
+	}
+	reason := strings.Join(lines, "\n")
+	if reason == "" {
+		if err != nil {
+			reason = strings.TrimSpace(utils.StripANSI(err.Error()))
+		}
+		if reason == "" {
+			reason = "restart failed"
+		}
+	}
+	return truncateTailBytes(reason, applyErrorMaxBytes)
+}
+
+// truncateTailBytes оставляет не больше max последних байт, не разрезая
+// UTF-8-символ.
+func truncateTailBytes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	s = s[len(s)-max:]
+	for len(s) > 0 && !utf8.RuneStart(s[0]) {
+		s = s[1:]
+	}
+	return s
+}

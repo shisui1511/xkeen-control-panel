@@ -16,6 +16,7 @@
     applyDensity
   } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import { notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import { capsuleConfigStore, updateCapsuleConfig } from './lib/capsuleSettings';
   import PingTargetSettingsCard from './components/PingTargetSettingsCard.svelte';
@@ -237,10 +238,21 @@
       return;
     restoringSnapshot = id;
     try {
-      await apiFetchJSON(`/api/snapshots/${id}/restore`, {
-        method: 'POST'
-      });
-      showToast('success', $t('settings.snapshot_restored'));
+      const result = await apiFetchJSON<ApplyResult & { skipped_stoplist?: string[] }>(
+        `/api/snapshots/${id}/restore`,
+        { method: 'POST' }
+      );
+      notifyApplyOutcome(result, { restartedMessage: $t('settings.snapshot_restored') });
+      // Файлы со стоп-словами XKeen в корне каталога Xray не восстанавливаются:
+      // иначе XKeen откажется запускать Xray.
+      const skipped = result.skipped_stoplist ?? [];
+      if (skipped.length > 0) {
+        showToast(
+          'warning',
+          $t('settings.snapshot_restore_skipped', { files: skipped.join(', ') }),
+          10000
+        );
+      }
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', e.message);

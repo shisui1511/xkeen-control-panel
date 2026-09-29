@@ -191,10 +191,21 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 
 	var backupData []byte
 	var backupExists bool
+	fileExisted := false
 	if _, statErr := os.Stat(cleanPath); statErr == nil {
+		fileExisted = true
 		if d, readErr := os.ReadFile(cleanPath); readErr == nil {
 			backupData = d
 			backupExists = true
+		}
+	}
+
+	// Стоп-список XKeen проверяется только для нового файла: сохранение уже
+	// существующего на том же месте не блокируется.
+	if !fileExisted {
+		if word, blocked := a.xkeenStoplistBlock(r, cleanPath); blocked {
+			a.stoplistConflict(w, r, cleanPath, word)
+			return
 		}
 	}
 
@@ -248,6 +259,38 @@ func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
 	a.jsonResponse(w, backups)
 }
 
+// xrayRootDir возвращает каталог конфигураций Xray в каноническом виде
+// (Clean + EvalSymlinks, при ошибке — только Clean).
+func (a *API) xrayRootDir() string {
+	dir := filepath.Clean(a.cfg.XRayConfigDir)
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		return resolved
+	}
+	return dir
+}
+
+// xkeenStoplistBlock сообщает, что запись файла cleanPath отменит запуск Xray в
+// XKeen: файл лежит в корне каталога Xray (XKeen смотрит только его, без
+// подкаталогов), его имя входит в стоп-список, а клиент не подтвердил риск
+// параметром confirm_stoplist=1. Гейт не хранит состояния.
+func (a *API) xkeenStoplistBlock(r *http.Request, cleanPath string) (word string, blocked bool) {
+	if r.URL.Query().Get("confirm_stoplist") == "1" {
+		return "", false
+	}
+	dir := filepath.Dir(cleanPath)
+	if dir != a.xrayRootDir() && dir != filepath.Clean(a.cfg.XRayConfigDir) {
+		return "", false
+	}
+	return utils.XKeenStoplistMatch(filepath.Base(cleanPath))
+}
+
+// stoplistConflict отвечает 409 xkeen_stoplist_name: в тексте только базовое
+// имя файла и совпавшее слово, без абсолютного пути.
+func (a *API) stoplistConflict(w http.ResponseWriter, r *http.Request, cleanPath, word string) {
+	JSONErrorCode(w, http.StatusConflict, "xkeen_stoplist_name",
+		fmt.Sprintf(a.t(r, "config.xkeen_stoplist_name"), filepath.Base(cleanPath), word))
+}
+
 func (a *API) ConfigCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -259,6 +302,13 @@ func (a *API) ConfigCreate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
+	}
+
+	if _, statErr := os.Stat(cleanPath); os.IsNotExist(statErr) {
+		if word, blocked := a.xkeenStoplistBlock(r, cleanPath); blocked {
+			a.stoplistConflict(w, r, cleanPath, word)
+			return
+		}
 	}
 
 	if err := a.configSvc.Create(cleanPath); err != nil {
@@ -316,6 +366,13 @@ func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 	cleanNewPath, err := a.pathVal.Validate(newPath)
 	if err != nil {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	// Проверяется только новое имя: переименование проблемного файла в
+	// безопасное имя — путь исправления и не блокируется.
+	if word, blocked := a.xkeenStoplistBlock(r, cleanNewPath); blocked {
+		a.stoplistConflict(w, r, cleanNewPath, word)
 		return
 	}
 

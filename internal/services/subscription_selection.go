@@ -298,6 +298,9 @@ func (w selectionFileWrite) apply() error {
 		}
 		return nil
 	}
+	if err := guardXrayRootName(w.path); err != nil {
+		return err
+	}
 	return utils.AtomicWriteFile(w.path, w.newData, 0600)
 }
 

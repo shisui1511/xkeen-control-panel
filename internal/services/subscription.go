@@ -535,7 +535,7 @@ type SubscriptionService struct {
 	retries         sync.Map   // ID -> *retryState for exponential backoff
 	fetchFlight     singleflightGroup
 	httpClient      *http.Client
-	consoleSvc      *ConsoleService
+	applier         *KernelApplier       // рестарт ядра после записи фрагментов
 	kernelSvc       KernelStatusProvider // для получения реальных версий ядер
 	hwid            string               // постоянный UUID устройства, передаётся как x-hwid
 	deviceInfo      *DeviceInfo          // модель/ОС роутера для x-device-* заголовков (см. task 60-01-05)

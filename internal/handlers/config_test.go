@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -887,5 +888,226 @@ func TestConfig_MissingDirectory(t *testing.T) {
 	}
 	if data, err := os.ReadFile(path); err != nil || string(data) != "mode: rule\n" {
 		t.Errorf("saved file: %q, %v", data, err)
+	}
+}
+
+// stoplistResponse разбирает ответ обработчика конфигов в APIResponse.
+func stoplistResponse(t *testing.T, rr *httptest.ResponseRecorder) APIResponse {
+	t.Helper()
+	var resp APIResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return resp
+}
+
+func postConfigCreate(api *API, path, extraQuery string) *httptest.ResponseRecorder {
+	rr := httptest.NewRecorder()
+	api.ConfigCreate(rr, httptest.NewRequest(http.MethodPost, "/api/config/create?path="+path+extraQuery, nil))
+	return rr
+}
+
+// TestConfigCreate_Stoplist: создание файла с именем из стоп-списка XKeen в
+// корне каталога Xray требует confirm_stoplist=1; подкаталоги и безопасные
+// имена не затрагиваются.
+func TestConfigCreate_Stoplist(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	bak := filepath.Join(tmpDir, "04_outbounds.bak.json")
+	rr := postConfigCreate(api, bak, "")
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("без флага: ожидался 409, получен %d: %s", rr.Code, rr.Body.String())
+	}
+	resp := stoplistResponse(t, rr)
+	if resp.Code != "xkeen_stoplist_name" {
+		t.Errorf("code = %q, want xkeen_stoplist_name", resp.Code)
+	}
+	if !strings.Contains(resp.Error, "04_outbounds.bak.json") || !strings.Contains(resp.Error, "bak") {
+		t.Errorf("в тексте нужны имя файла и слово: %q", resp.Error)
+	}
+	if strings.Contains(resp.Error, tmpDir) {
+		t.Errorf("в тексте не должно быть абсолютного пути: %q", resp.Error)
+	}
+	if _, err := os.Stat(bak); !os.IsNotExist(err) {
+		t.Fatalf("файл не должен быть создан без подтверждения: %v", err)
+	}
+
+	if rr := postConfigCreate(api, bak, "&confirm_stoplist=1"); rr.Code != http.StatusOK {
+		t.Fatalf("с флагом: ожидался 200, получен %d: %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(bak); err != nil {
+		t.Fatalf("файл должен быть создан с подтверждением: %v", err)
+	}
+
+	rr = postConfigCreate(api, bak, "&confirm_stoplist=1")
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("повтор с флагом: ожидался 409, получен %d", rr.Code)
+	}
+	if code := stoplistResponse(t, rr).Code; code == "xkeen_stoplist_name" {
+		t.Errorf("повтор по существующему файлу должен быть file_exists, а не стоп-список")
+	}
+
+	if err := os.Mkdir(filepath.Join(tmpDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if rr := postConfigCreate(api, filepath.Join(tmpDir, "sub", "04_outbounds.bak.json"), ""); rr.Code != http.StatusOK {
+		t.Errorf("подкаталог не проверяется: ожидался 200, получен %d: %s", rr.Code, rr.Body.String())
+	}
+	if rr := postConfigCreate(api, filepath.Join(tmpDir, "routing.json"), ""); rr.Code != http.StatusOK {
+		t.Errorf("безопасное имя: ожидался 200, получен %d: %s", rr.Code, rr.Body.String())
+	}
+
+	rr = postConfigCreate(api, filepath.Join(tmpDir, "Gold.json"), "")
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("Gold.json: ожидался 409, получен %d", rr.Code)
+	}
+	if !strings.Contains(stoplistResponse(t, rr).Error, "old") {
+		t.Error("Gold.json должен совпасть со словом old")
+	}
+}
+
+func postConfigRename(api *API, oldPath, newPath, extraQuery string) *httptest.ResponseRecorder {
+	rr := httptest.NewRecorder()
+	api.ConfigRename(rr, httptest.NewRequest(http.MethodPost, "/api/config/rename?old="+oldPath+"&new="+newPath+extraQuery, nil))
+	return rr
+}
+
+func postConfigSave(api *API, path, extraQuery, body string) *httptest.ResponseRecorder {
+	rr := httptest.NewRecorder()
+	api.ConfigSave(rr, httptest.NewRequest(http.MethodPost, "/api/config/save?path="+path+extraQuery, strings.NewReader(body)))
+	return rr
+}
+
+func writeStoplistFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestConfigRename_Stoplist: переименование в стоп-имя в корне Xray требует
+// подтверждения; исправляющее переименование проблемного файла проходит.
+func TestConfigRename_Stoplist(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	a := filepath.Join(tmpDir, "a.json")
+	writeStoplistFile(t, a)
+	target := filepath.Join(tmpDir, "a.old.json")
+
+	rr := postConfigRename(api, a, target, "")
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("без флага: ожидался 409, получен %d: %s", rr.Code, rr.Body.String())
+	}
+	resp := stoplistResponse(t, rr)
+	if resp.Code != "xkeen_stoplist_name" || !strings.Contains(resp.Error, "a.old.json") || !strings.Contains(resp.Error, "old") {
+		t.Errorf("неожиданный ответ: %+v", resp)
+	}
+	if _, err := os.Stat(a); err != nil {
+		t.Fatalf("a.json должен остаться на месте: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("целевой файл не должен появиться: %v", err)
+	}
+
+	if rr := postConfigRename(api, a, target, "&confirm_stoplist=1"); rr.Code != http.StatusOK {
+		t.Fatalf("с флагом: ожидался 200, получен %d: %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("файл должен быть переименован: %v", err)
+	}
+
+	// Исправление имени: x.bak.json -> x.json не блокируется без флага.
+	bad := filepath.Join(tmpDir, "x.bak.json")
+	writeStoplistFile(t, bad)
+	if rr := postConfigRename(api, bad, filepath.Join(tmpDir, "x.json"), ""); rr.Code != http.StatusOK {
+		t.Fatalf("исправляющее переименование: ожидался 200, получен %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Подкаталог гейтом не проверяется.
+	if err := os.Mkdir(filepath.Join(tmpDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if rr := postConfigRename(api, filepath.Join(tmpDir, "x.json"), filepath.Join(tmpDir, "sub", "x.tmp.json"), ""); rr.Code != http.StatusOK {
+		t.Fatalf("подкаталог: ожидался 200, получен %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestConfigSave_StoplistNewFileOnly: гейт срабатывает только для файла,
+// которого ещё нет; сохранение существующего на том же месте не блокируется.
+func TestConfigSave_StoplistNewFileOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	fresh := filepath.Join(tmpDir, "new.tmp.json")
+	rr := postConfigSave(api, fresh, "", "{}")
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("новый файл без флага: ожидался 409, получен %d: %s", rr.Code, rr.Body.String())
+	}
+	if code := stoplistResponse(t, rr).Code; code != "xkeen_stoplist_name" {
+		t.Errorf("code = %q, want xkeen_stoplist_name", code)
+	}
+	if _, err := os.Stat(fresh); !os.IsNotExist(err) {
+		t.Fatalf("файл не должен быть создан: %v", err)
+	}
+
+	if rr := postConfigSave(api, fresh, "&confirm_stoplist=1", "{}"); rr.Code != http.StatusOK {
+		t.Fatalf("с флагом: ожидался 200, получен %d: %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("файл должен быть создан с подтверждением: %v", err)
+	}
+
+	legacy := filepath.Join(tmpDir, "legacy.bak.json")
+	writeStoplistFile(t, legacy)
+	if rr := postConfigSave(api, legacy, "", `{"a":1}`); rr.Code != http.StatusOK {
+		t.Fatalf("существующий файл: ожидался 200, получен %d: %s", rr.Code, rr.Body.String())
+	}
+
+	if err := os.Mkdir(filepath.Join(tmpDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if rr := postConfigSave(api, filepath.Join(tmpDir, "sub", "new.tmp.json"), "", "{}"); rr.Code != http.StatusOK {
+		t.Fatalf("подкаталог: ожидался 200, получен %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Вне каталога Xray (но в разрешённом корне) гейт не действует.
+	xrayDir := filepath.Join(tmpDir, "xray")
+	if err := os.Mkdir(xrayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	api.cfg.XRayConfigDir = xrayDir
+	if rr := postConfigSave(api, filepath.Join(tmpDir, "outside.tmp.json"), "", "{}"); rr.Code != http.StatusOK {
+		t.Fatalf("вне каталога Xray: ожидался 200, получен %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestConfigStoplist_Concurrent: гейт не хранит состояния — параллельные
+// create одного стоп-имени без флага получают 409 каждый (запуск с -race).
+func TestConfigStoplist_Concurrent(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+	path := filepath.Join(tmpDir, "a.copy.json")
+
+	const workers = 20
+	codes := make(chan int, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes <- postConfigCreate(api, path, "").Code
+		}()
+	}
+	wg.Wait()
+	close(codes)
+	for code := range codes {
+		if code != http.StatusConflict {
+			t.Errorf("ожидался 409, получен %d", code)
+		}
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("файл не должен быть создан: %v", err)
 	}
 }

@@ -19,6 +19,10 @@ type CapabilitiesResponse struct {
 	// XKeenInstalled — бинарник XKeen найден (без него ядра не запустить)
 	XKeenInstalled bool   `json:"xkeen_installed"`
 	GlobalHwid     string `json:"global_hwid,omitempty"`
+	// ApplyRestarts — перезапустит ли применение конфигурации целевое ядро
+	// (по ключу xray/mihomo). Предсказание того же KernelApplier, что решает
+	// при apply: по нему UI подписывает кнопки «Применить».
+	ApplyRestarts map[string]bool `json:"apply_restarts,omitempty"`
 }
 
 // XRayCapability describes XRay confdir setup status.
@@ -155,6 +159,14 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 		activeKernel = "none"
 	}
 	resp.ActiveKernel = activeKernel
+
+	// Предсказание рестарта при применении: то же решение, что примет Apply.
+	if a.kernelApplier != nil {
+		resp.ApplyRestarts = map[string]bool{
+			"xray":   a.kernelApplier.WillRestart("xray"),
+			"mihomo": a.kernelApplier.WillRestart("mihomo"),
+		}
+	}
 
 	// XRay confdir capability
 	resp.XRay.ConfDir = a.cfg.XRayConfigDir

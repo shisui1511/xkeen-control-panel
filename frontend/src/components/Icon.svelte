@@ -1,6 +1,6 @@
 <script lang="ts">
   interface Props {
-    name: 'edit' | 'copy' | 'close' | 'chevron-up' | 'chevron-down' | 'refresh';
+    name: 'edit' | 'copy' | 'close' | 'chevron-up' | 'chevron-down' | 'refresh' | 'alert-triangle';
     size?: number;
   }
 
@@ -35,5 +35,11 @@
     <polyline points="23 4 23 10 17 10" />
     <polyline points="1 20 1 14 7 14" />
     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+  {:else if name === 'alert-triangle'}
+    <path
+      d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+    />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
   {/if}
 </svg>

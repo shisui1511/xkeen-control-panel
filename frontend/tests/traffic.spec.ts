@@ -419,6 +419,102 @@ test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
     await expect(toast.first()).toContainText(/10085|already in use|конфликт/i);
   });
 
+  // WR-03: исход применения из ответа переключателя мониторинга определяет тост.
+  const monitoringApplyCases: {
+    name: string;
+    apply: Record<string, unknown>;
+    toast: RegExp;
+    notToast?: RegExp;
+  }[] = [
+    {
+      name: 'перезапуск удался: тост о включении мониторинга',
+      apply: { outcome: 'restarted', kernel: 'xray', active_kernel: 'xray', active_running: true },
+      toast: /gRPC-мониторинг включен|gRPC monitoring enabled/i
+    },
+    {
+      name: 'перезапуск не удался: тост об ошибке с причиной, а не «мониторинг включен»',
+      apply: {
+        outcome: 'restart_failed',
+        kernel: 'xray',
+        active_kernel: 'xray',
+        active_running: true,
+        error: 'xray failed to start'
+      },
+      toast: /xray failed to start/i,
+      notToast: /gRPC-мониторинг включен|gRPC monitoring enabled/i
+    },
+    {
+      name: 'ядро остановлено: тост «сохранено, вступит в силу при запуске»',
+      apply: {
+        outcome: 'saved_kernel_stopped',
+        kernel: 'xray',
+        active_kernel: 'xray',
+        active_running: false
+      },
+      toast: /Ядро остановлено|core is stopped/i,
+      notToast: /gRPC-мониторинг включен|gRPC monitoring enabled/i
+    }
+  ];
+
+  for (const tc of monitoringApplyCases) {
+    test(`переключение мониторинга: ${tc.name}`, async ({ page }) => {
+      await disableServiceWorker(page);
+
+      await page.route('**/api/**', async (route: Route) => {
+        const url = route.request().url();
+        if (url.includes('/api/auth/me')) {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ authenticated: true, csrf_token: 'mock-csrf' })
+          });
+        } else if (url.includes('/api/capabilities')) {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              success: true,
+              data: {
+                kernels: { xray: { installed: true } },
+                active_kernel: 'xray',
+                xray: { conf_dir: '/opt/etc/xray', conf_dir_exists: true, grpc_ready: false }
+              }
+            })
+          });
+        } else if (url.includes('/api/xray/grpc/monitoring')) {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ success: true, data: { enabled: true, apply: tc.apply } })
+          });
+        } else {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ success: true, data: {} })
+          });
+        }
+      });
+
+      await page.routeWebSocket('**/api/traffic/ws', async (ws) => {});
+
+      await page.goto('/#/traffic');
+
+      const toggleBtn = page.locator('[data-testid="xray-grpc-toggle-btn"]');
+      await expect(toggleBtn).toBeVisible({ timeout: 5000 });
+      await toggleBtn.click();
+
+      const toast = page.locator('.toast, [role="alert"]');
+      await expect(toast.first()).toBeVisible({ timeout: 3000 });
+      await expect(toast.first()).toContainText(tc.toast);
+      if (tc.notToast) {
+        await expect(
+          page.locator('.toast, [role="alert"]').filter({ hasText: tc.notToast })
+        ).toHaveCount(0);
+      }
+    });
+  }
+
   test('ошибка опроса статистики при включенном мониторинге отображает предупреждение (WR-06)', async ({
     page
   }) => {

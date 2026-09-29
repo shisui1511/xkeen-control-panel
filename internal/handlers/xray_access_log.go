@@ -62,7 +62,8 @@ func (a *API) XrayAccessLog(w http.ResponseWriter, r *http.Request) {
 }
 
 // XrayAccessLogToggle handles POST /api/xray/access-log/toggle {"enabled": bool}.
-// Xray has to be restarted for the change to apply.
+// The handler only writes the config; whether Xray is restarted is decided
+// by the apply action (POST /api/service/control?action=apply).
 func (a *API) XrayAccessLogToggle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -88,9 +89,5 @@ func (a *API) XrayAccessLogToggle(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	k := a.getActiveKernelName()
-	JSONSuccess(w, map[string]interface{}{
-		"status":           status,
-		"restart_required": k == "xray" || k == "both",
-	})
+	JSONSuccess(w, map[string]interface{}{"status": status})
 }

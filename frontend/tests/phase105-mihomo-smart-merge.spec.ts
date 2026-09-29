@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { setupMocks } from './helpers/api-mocks';
+import { setupMocks, fulfillServiceControl } from './helpers/api-mocks';
 
 test.describe('Phase 105: Mihomo Smart Merge Integration', () => {
   test('Applies configuration via /api/config/smart-merge with template_owns_nodes and saves', async ({
@@ -62,13 +62,7 @@ test.describe('Phase 105: Mihomo Smart Merge Integration', () => {
       });
     });
 
-    await page.route('**/api/service/control**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true })
-      });
-    });
+    await page.route('**/api/service/control**', fulfillServiceControl);
 
     await page.goto('/#/editor');
 

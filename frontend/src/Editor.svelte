@@ -31,7 +31,7 @@
   import Tabs, { type TabItem } from './components/Tabs.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
-  import { activateRestartGrace } from './lib/serviceGrace';
+  import { applyToKernel, notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
   import PreflightWarnings, {
     type PreflightWarning
   } from './components/editor/PreflightWarnings.svelte';
@@ -50,8 +50,12 @@
     renameConfigFile,
     listConfigFiles,
     formatBytes,
-    type ConfigFileInfo
+    ConfigOpError,
+    nextDuplicateName,
+    type ConfigFileInfo,
+    type ConfigOpOptions
   } from './components/editor/fileOps';
+  import { isXrayRootPath, matchXKeenStoplist } from './lib/xkeenStoplist';
 
   interface EditorTab {
     path: string;
@@ -733,18 +737,36 @@
 
       await loadBackups(selectedFile);
 
-      // 2. POST /api/service/control?action=restart
-      activateRestartGrace(6000);
+      // 2. Применение к ядру каталога файла: сервер сам решает, нужен ли рестарт
       backgroundStatusText = $t('editor.restarting');
-      const restartRes = await apiFetch('/api/service/control?action=restart', {
-        method: 'POST'
-      });
+      let result: ApplyResult;
+      try {
+        result = await applyToKernel({ path: selectedFile });
+      } catch (applyErr: any) {
+        if (applyErr?.status === 401) return;
+        // Файл уже записан: это не ошибка сохранения
+        console.error('handleSaveAndApply apply error:', applyErr);
+        const reason =
+          parseValidationError(applyErr?.message || '', $currentLang) || applyErr?.message;
+        showToast('error', $t('apply.restart_failed', { reason }), 10000, {
+          label: $t('apply.open_logs'),
+          onClick: () => {
+            window.location.hash = '#/logs';
+          }
+        });
+        applyLoading = false;
+        backgroundStatusText = '';
+        return;
+      }
 
-      const restartText = await restartRes.text();
-      if (!restartRes.ok) throw new Error(restartText || 'Failed to restart service');
-
-      // 3. Status polling
-      startBackgroundStatusCheck();
+      if (result.outcome === 'restarted') {
+        // 3. Опрос статуса — только после реального рестарта
+        startBackgroundStatusCheck();
+      } else {
+        notifyApplyOutcome(result);
+        applyLoading = false;
+        backgroundStatusText = '';
+      }
     } catch (e: any) {
       if (e?.status === 401) return;
       console.error('handleSaveAndApply error:', e);
@@ -824,16 +846,71 @@
     }
   }
 
+  /**
+   * Подтверждение имени из стоп-списка XKeen: пока такой файл лежит в корне
+   * каталога Xray, XKeen отменяет запуск Xray. `serverMessage` — текст ответа
+   * сервера, если имя предсказала не клиентская проверка, а 409.
+   */
+  async function confirmStoplistName(
+    name: string,
+    word: string,
+    confirmLabelKey: string,
+    serverMessage?: string
+  ): Promise<boolean> {
+    return await showConfirm({
+      title: $t('stoplist.confirm_title'),
+      objectName: name,
+      consequence: serverMessage || $t('stoplist.confirm_consequence', { word }),
+      variant: 'warning',
+      confirmLabel: $t(confirmLabelKey),
+      cancelLabel: $t('app.cancel')
+    });
+  }
+
+  const STOPLIST_CANCELLED = Symbol('stoplist-cancelled');
+
+  /**
+   * Выполняет операцию с файлом в каталоге: имя из стоп-списка в корне Xray
+   * подтверждается до запроса; 409 xkeen_stoplist_name, которого не предсказало
+   * зеркало, приводит к тому же диалогу и повтору с флагом.
+   */
+  async function withStoplistConfirm<T>(
+    name: string,
+    targetPath: string,
+    confirmLabelKey: string,
+    run: (opts: ConfigOpOptions) => Promise<T>
+  ): Promise<T | typeof STOPLIST_CANCELLED> {
+    const word = isXrayRootPath(targetPath, xrayDir) ? matchXKeenStoplist(name) : null;
+    if (word) {
+      if (!(await confirmStoplistName(name, word, confirmLabelKey))) return STOPLIST_CANCELLED;
+      return await run({ confirmStoplist: true });
+    }
+    try {
+      return await run({});
+    } catch (e) {
+      if (e instanceof ConfigOpError && e.code === 'xkeen_stoplist_name') {
+        if (!(await confirmStoplistName(name, '', confirmLabelKey, e.message))) {
+          return STOPLIST_CANCELLED;
+        }
+        return await run({ confirmStoplist: true });
+      }
+      throw e;
+    }
+  }
+
   async function createFile(fileName?: string) {
     const name = fileName || newFileName;
     if (!name) return;
 
     const path = selectedFile
       ? selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + name
-      : '/opt/etc/xray/configs/' + name;
+      : xrayDir + '/' + name;
 
     try {
-      await createConfigFile(path);
+      const outcome = await withStoplistConfirm(name, path, 'stoplist.confirm_create', (opts) =>
+        createConfigFile(path, opts)
+      );
+      if (outcome === STOPLIST_CANCELLED) return;
       showToast('success', $t('editor.create_file'));
       showCreateModal = false;
       newFileName = '';
@@ -872,10 +949,17 @@
     const target = newName || renameTarget;
     if (!target || !selectedFile) return;
 
-    const newPath = selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + target;
+    const oldPath = selectedFile;
+    const newPath = oldPath.substring(0, oldPath.lastIndexOf('/') + 1) + target;
 
     try {
-      await renameConfigFile(selectedFile, newPath);
+      const outcome = await withStoplistConfirm(
+        target,
+        newPath,
+        'stoplist.confirm_rename',
+        (opts) => renameConfigFile(oldPath, newPath, opts)
+      );
+      if (outcome === STOPLIST_CANCELLED) return;
       showToast('success', $t('app.rename'));
       showRenameModal = false;
       renameTarget = '';
@@ -888,12 +972,23 @@
   }
 
   async function duplicateFile(file: ConfigFileInfo) {
+    const dir = file.path.substring(0, file.path.lastIndexOf('/'));
+    const siblings = (dir === mihomoDir ? mihomoFiles : xrayFiles).map((f) => f.name);
+    const copyName = nextDuplicateName(file.name, siblings);
+    const copyPath = `${dir}/${copyName}`;
     try {
-      const newPath = await duplicateConfigFile(file);
+      const outcome = await withStoplistConfirm(
+        copyName,
+        copyPath,
+        'stoplist.confirm_duplicate',
+        (opts) => duplicateConfigFile(file, siblings, opts)
+      );
+      if (outcome === STOPLIST_CANCELLED) return;
       showToast('success', $t('editor.duplicate_file'));
       await loadFiles();
-      await loadFile(newPath);
+      await loadFile(outcome);
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e?.message || 'Failed to duplicate file');
     }
   }
@@ -1418,6 +1513,9 @@
   createOpen={showCreateModal}
   renameOpen={showRenameModal}
   initialRenameValue={renameTarget}
+  {xrayDir}
+  createDir={selectedFile ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : xrayDir}
+  renameDir={selectedFile ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : ''}
   onCreate={createFile}
   onRename={renameFile}
   onCloseCreate={() => (showCreateModal = false)}

@@ -123,6 +123,33 @@ func TestProfiles_ActivateAndRollback(t *testing.T) {
 	}
 }
 
+// Restart вернул ErrRestartSkipped (ядро остановили между CoreActive и
+// рестартом): профиль остаётся активным, без отката и без Healthy.
+func TestProfiles_ActivateRestartSkipped(t *testing.T) {
+	svc, dir := newProfilesFixture(t, true)
+	if err := os.WriteFile(filepath.Join(dir, "profiles", "good.yaml"), []byte("mode: global\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restarts, healthChecks := 0, 0
+	svc.CoreActive = func() bool { return true }
+	svc.Restart = func() error { restarts++; return ErrRestartSkipped }
+	svc.Healthy = func() bool { healthChecks++; return false }
+
+	res, err := svc.Activate("good")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Active != "good" || res.Restarted || res.RolledBack || res.Error != "" {
+		t.Fatalf("got %+v, want active good without restart/rollback", res)
+	}
+	if readConfig(t, dir) != "mode: global\n" {
+		t.Error("config.yaml не указывает на активированный профиль")
+	}
+	if restarts != 1 || healthChecks != 0 {
+		t.Errorf("restarts=%d healthChecks=%d, want 1/0", restarts, healthChecks)
+	}
+}
+
 func TestProfiles_AdoptPlainConfig(t *testing.T) {
 	svc, dir := newProfilesFixture(t, false)
 	st, _ := svc.List()
