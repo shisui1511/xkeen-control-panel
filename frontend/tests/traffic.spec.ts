@@ -564,4 +564,110 @@ test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
     await expect(alert).toBeVisible({ timeout: 5000 });
     await expect(alert).toContainText(/gRPC|потеряно|Connection/i);
   });
+
+  // Опрос capabilities (раз в 10 с) каждый раз кладёт в стор НОВЫЙ объект. Эффект опроса
+  // gRPC-статистики читает только примитив и не должен перезапускаться от такой подмены:
+  // перезапуск обнулял ошибку и прятал предупреждение WR-06.
+  async function mockXrayStatsPage(page: Page, state: { grpcReady: boolean; capsCalls: number }) {
+    await disableServiceWorker(page);
+    // Все запросы статистики после первого «зависают» до конца теста
+    let releaseStats: () => void = () => {};
+    const hangStats = new Promise<void>((resolve) => {
+      releaseStats = resolve;
+    });
+    let statsCalls = 0;
+
+    await page.route('**/api/**', async (route: Route) => {
+      const url = route.request().url();
+      if (url.includes('/api/auth/me')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ authenticated: true, csrf_token: 'mock-csrf' })
+        });
+      } else if (url.includes('/api/capabilities')) {
+        state.capsCalls++;
+        // Каждый ответ — новый JSON: клиент получает новый объект с теми же значениями
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              kernels: { xray: { installed: true } },
+              active_kernel: 'xray',
+              xray: {
+                conf_dir: '/opt/etc/xray',
+                conf_dir_exists: true,
+                grpc_ready: state.grpcReady
+              }
+            }
+          })
+        });
+      } else if (url.includes('/api/xray/stats')) {
+        statsCalls++;
+        if (statsCalls === 1) {
+          await route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: 'gRPC stats service unreachable' })
+          });
+        } else {
+          await hangStats;
+          await route.abort().catch(() => {});
+        }
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: {} })
+        });
+      }
+    });
+
+    await page.routeWebSocket('**/api/traffic/ws', async () => {});
+    return releaseStats;
+  }
+
+  test('повторный опрос capabilities не прячет предупреждение WR-06', async ({ page }) => {
+    const state = { grpcReady: true, capsCalls: 0 };
+    const releaseStats = await mockXrayStatsPage(page, state);
+
+    await page.clock.install();
+    await page.goto('/#/traffic');
+
+    const alert = page.locator('[data-testid="xray-stats-error-alert"]');
+    await expect(alert).toBeVisible({ timeout: 5000 });
+    await expect.poll(() => state.capsCalls).toBeGreaterThan(0);
+    const before = state.capsCalls;
+
+    // Дашборд опрашивает capabilities раз в 10 с: приходит новый объект с теми же значениями
+    await page.clock.runFor(10_500);
+    await expect.poll(() => state.capsCalls).toBeGreaterThan(before);
+
+    await expect(alert).toBeVisible();
+    releaseStats();
+  });
+
+  test('реальная смена grpc_ready на false останавливает опрос и скрывает предупреждение', async ({
+    page
+  }) => {
+    const state = { grpcReady: true, capsCalls: 0 };
+    const releaseStats = await mockXrayStatsPage(page, state);
+
+    await page.clock.install();
+    await page.goto('/#/traffic');
+
+    const alert = page.locator('[data-testid="xray-stats-error-alert"]');
+    await expect(alert).toBeVisible({ timeout: 5000 });
+    await expect.poll(() => state.capsCalls).toBeGreaterThan(0);
+    const before = state.capsCalls;
+
+    state.grpcReady = false;
+    await page.clock.runFor(10_500);
+    await expect.poll(() => state.capsCalls).toBeGreaterThan(before);
+
+    await expect(alert).toHaveCount(0);
+    releaseStats();
+  });
 });
