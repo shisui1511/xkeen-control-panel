@@ -1368,21 +1368,6 @@ func (r *stageRecorder) snapshot() []string {
 	return append([]string(nil), r.list...)
 }
 
-func waitKernelStatus(t *testing.T, svc *KernelService, name, want string) *KernelInfo {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		k := svc.Get(name)
-		if k.Status == want {
-			return k
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("status %q not reached in 5s; last: status=%q stage=%q msg=%q", want, k.Status, k.Stage, k.Message)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
 // TestInstall_StagesAndResult: этапы идут starting → downloading → extracting →
 // replacing → done; проверка релиза внутри установки тихая и не возвращает статус
 // в idle; итог несёт result_kind и result_version.
