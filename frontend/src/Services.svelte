@@ -16,6 +16,7 @@
   import SegmentedControl from './components/SegmentedControl.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import { apiFetch } from './lib/api';
+  import { isTransitionalStatus } from './lib/kernelView';
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
@@ -323,10 +324,16 @@
       const res = await apiFetch('/api/kernels', { signal });
       if (res.ok) {
         const envelope = await res.json();
-        const list = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
+        const list = Array.isArray(envelope)
+          ? envelope
+          : Array.isArray(envelope?.data)
+            ? envelope.data
+            : [];
         kernels = list;
+        // Опрос статуса нужен только пока операция идёт: done и failed
+        // остаются на сервере навсегда и раньше зацикливали запросы
         kernels.forEach((k: (typeof kernels)[0]) => {
-          if (k.status !== 'idle' && !statusTimeouts[k.name]) {
+          if (isTransitionalStatus(k.status) && !statusTimeouts[k.name]) {
             startPolling(k.name);
           }
         });
