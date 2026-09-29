@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { kernelsFixture, systemStatsFixture } from './helpers/api-mocks';
 
 // Карточка «Установка XKeen» на странице служб: видна только без XKeen,
 // запускает официальный установщик в терминале с выбранным каналом и
@@ -84,6 +85,20 @@ async function mockCommonRoutes(
           }
         })
       });
+    } else if (url.includes('/api/kernels')) {
+      // Services.svelte ждёт массив ядер — универсальный { data: {} } ломал fetchKernels
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: kernelsFixture('xray') })
+      });
+    } else if (url.includes('/api/system/stats')) {
+      // Dashboard.svelte читает load[0] и uptime без разворачивания конверта
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(systemStatsFixture())
+      });
     } else {
       await route.fulfill({
         status: 200,
@@ -130,6 +145,7 @@ test.describe('Services page — XKeen installer card', () => {
     });
 
     await page.goto('/#/services');
+    await expect(page.locator('.hero-card')).toBeVisible();
     const card = page.getByTestId('xkeen-install-card');
     await expect(card).toBeVisible();
     await card.getByRole('button', { name: /^(Бета|Beta)$/ }).click();
@@ -155,6 +171,7 @@ test.describe('Services page — XKeen installer card', () => {
 
     await page.clock.install();
     await page.goto('/#/services');
+    await expect(page.locator('.hero-card')).toBeVisible();
     await page.getByTestId('xkeen-install-start').click();
     const modal = page.getByTestId('xkeen-install-modal');
     await expect(modal).toBeVisible();
@@ -209,6 +226,7 @@ test.describe('Services page — XKeen installer card', () => {
 
     await page.clock.install();
     await page.goto('/#/services');
+    await expect(page.locator('.hero-card')).toBeVisible();
     await expect.poll(() => settingsCalls).toBe(1);
     await page.getByTestId('xkeen-install-start').click();
     await expect.poll(() => socket !== null).toBe(true);
@@ -228,6 +246,7 @@ test.describe('Services page — XKeen installer card', () => {
     });
 
     await page.goto('/#/services');
+    await expect(page.locator('.hero-card')).toBeVisible();
     await page.getByTestId('xkeen-install-start').click();
     const result = page.getByTestId('xkeen-install-modal').locator('.install-result.fail');
     await expect(result).toContainText('3');
