@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import { t } from '../../i18n';
-  import { showToast, showConfirm, fetchCapabilities } from '../../stores';
+  import { showToast, showConfirm, fetchCapabilities, capabilities } from '../../stores';
+  import { anyKernelInstalled } from '../../lib/navCaps';
   import { apiFetch } from '../../lib/api';
   import { activateRestartGrace } from '../../lib/serviceGrace';
   import Icon from '../../lib/components/Icon.svelte';
@@ -22,6 +23,18 @@
     onClose: () => void;
     onSwitchTab: (tab: string) => void;
   }>();
+
+  // Запуск службы недоступен без XKeen и без ядер. Пока capabilities не
+  // загружены (null), кнопка не блокируется: это не «нет ядер».
+  const startBlockedReason = $derived(
+    isXkeenRunning
+      ? null
+      : $capabilities?.xkeen_installed === false
+        ? $t('svc.start_disabled_no_xkeen')
+        : anyKernelInstalled($capabilities) === false
+          ? $t('svc.start_disabled_no_kernel')
+          : null
+  );
 
   let isRestartingKernel = $state(false);
   let isRestartingXkeen = $state(false);
@@ -126,6 +139,7 @@
 
   async function handleToggleService() {
     if (isTogglingService) return;
+    if (!isXkeenRunning && startBlockedReason) return;
 
     if (isXkeenRunning) {
       const ok = await showConfirm({
@@ -266,7 +280,8 @@
         class:danger-btn={isXkeenRunning}
         class:success-btn={!isXkeenRunning}
         onclick={handleToggleService}
-        disabled={isTogglingService}
+        disabled={isTogglingService || !!startBlockedReason}
+        title={startBlockedReason ?? undefined}
       >
         <span class="item-icon">
           {#if isXkeenRunning}

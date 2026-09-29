@@ -8,6 +8,7 @@
   import Skeleton from '../Skeleton.svelte';
   import StatusBadge from '../StatusBadge.svelte';
   import ServiceCard from './ServiceCard.svelte';
+  import { anyKernelInstalled } from '../../lib/navCaps';
 
   let {
     serviceStatus,
@@ -229,6 +230,9 @@
         version={xkeenVersion}
         isActiveKernel={false}
         isInstalled={capabilities?.xkeen_installed !== false}
+        startDisabledReason={anyKernelInstalled(capabilities) === false
+          ? $t('svc.start_disabled_no_kernel')
+          : undefined}
         onRestart={restartXkeen}
         onStart={startXkeen}
         onStop={stopXkeen}

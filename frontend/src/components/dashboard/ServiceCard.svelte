@@ -11,6 +11,7 @@
     isActiveKernel = false,
     isInstalled = true,
     isInsecureLan = false,
+    startDisabledReason = '',
     onRestart,
     onStart,
     onStop,
@@ -23,6 +24,8 @@
     isActiveKernel?: boolean;
     isInstalled?: boolean;
     isInsecureLan?: boolean;
+    /** Причина, по которой «Запустить» неактивна (например, не установлено ни одно ядро); пусто — кнопка доступна. */
+    startDisabledReason?: string;
     onRestart?: () => Promise<void> | void;
     onStart?: () => Promise<void> | void;
     onStop?: () => Promise<void> | void;
@@ -87,7 +90,7 @@
   }
 
   async function handleStart() {
-    if (isBusy || !onStart) return;
+    if (isBusy || !onStart || startDisabledReason) return;
     isStarting = true;
     try {
       await onStart();
@@ -184,9 +187,12 @@
           <Button
             variant="secondary"
             onclick={handleStart}
-            disabled={isBusy}
+            disabled={isBusy || !!startDisabledReason}
             loading={isStarting}
-            title={$t('app.start')}
+            title={startDisabledReason || $t('app.start')}
+            ariaLabel={startDisabledReason
+              ? `${$t('app.start')}: ${startDisabledReason}`
+              : undefined}
           >
             <Icon name="play" size={13} color="var(--success, #46d18a)" />
             <span>{$t('app.start')}</span>
