@@ -23,6 +23,8 @@
     showInstallStable,
     stageLabelKey,
     resultMessage,
+    rollbackVisible,
+    rollbackLabel,
     type KernelLike
   } from './lib/kernelView';
   import {
@@ -1387,15 +1389,21 @@
               </button>
             {/if}
 
-            {#if mihomo?.has_backup}
+            {#if mihomo && rollbackVisible(mihomo)}
+              {@const rollback = rollbackLabel(mihomo)}
               <button
-                class="btn btn-sm btn-secondary btn-icon"
+                class="btn btn-sm btn-secondary"
+                data-testid="rollback-mihomo"
                 onclick={() => rollbackKernel('mihomo')}
-                disabled={mihomo?.status === 'downloading' ||
-                  mihomo?.status === 'installing' ||
+                disabled={mihomo.status === 'downloading' ||
+                  mihomo.status === 'installing' ||
                   actionLoading['rollback-mihomo']}
-                title={$t('svc.rollback_tooltip')}
-                aria-label={$t('svc.rollback')}
+                title={mihomo.backup_version
+                  ? $t('svc.rollback_to_title', {
+                      version: formatKernelVersion(mihomo.backup_version)
+                    })
+                  : $t('svc.rollback_tooltip')}
+                aria-label={$t(rollback.key, rollback.params)}
               >
                 <svg
                   width="13"
@@ -1408,6 +1416,7 @@
                   <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                   <path d="M3 3v5h5" />
                 </svg>
+                {$t(rollback.key, rollback.params)}
               </button>
             {/if}
 
@@ -1534,15 +1543,21 @@
               </button>
             {/if}
 
-            {#if xray?.has_backup}
+            {#if xray && rollbackVisible(xray)}
+              {@const rollback = rollbackLabel(xray)}
               <button
-                class="btn btn-sm btn-secondary btn-icon"
+                class="btn btn-sm btn-secondary"
+                data-testid="rollback-xray"
                 onclick={() => rollbackKernel('xray')}
-                disabled={xray?.status === 'downloading' ||
-                  xray?.status === 'installing' ||
+                disabled={xray.status === 'downloading' ||
+                  xray.status === 'installing' ||
                   actionLoading['rollback-xray']}
-                title={$t('svc.rollback_tooltip')}
-                aria-label={$t('svc.rollback')}
+                title={xray.backup_version
+                  ? $t('svc.rollback_to_title', {
+                      version: formatKernelVersion(xray.backup_version)
+                    })
+                  : $t('svc.rollback_tooltip')}
+                aria-label={$t(rollback.key, rollback.params)}
               >
                 <svg
                   width="13"
@@ -1555,6 +1570,7 @@
                   <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                   <path d="M3 3v5h5" />
                 </svg>
+                {$t(rollback.key, rollback.params)}
               </button>
             {/if}
 
@@ -2109,6 +2125,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 12px;
     padding: 12px 14px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -2134,6 +2152,7 @@
   .update-actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 6px;
   }
 

@@ -13,16 +13,24 @@ interface MockState {
   install?: { status?: number; body?: string; gate?: Promise<void> };
   /** Очередь ответов GET status по ядру: по одному элементу на запрос, поверх записи в kernels. */
   statusQueue?: Record<string, Record<string, unknown>[]>;
+  /** Поля записи ядра после успешного POST /api/kernels/{k}/rollback. */
+  rollbackPatch?: Record<string, Record<string, unknown>>;
 }
 
 interface Counters {
   kernelsList: number;
   kernelStatus: Record<string, number>;
   installPosts: number;
+  rollbackPosts: string[];
 }
 
 async function mockRoutes(page: Page, state: MockState): Promise<Counters> {
-  const counters: Counters = { kernelsList: 0, kernelStatus: {}, installPosts: 0 };
+  const counters: Counters = {
+    kernelsList: 0,
+    kernelStatus: {},
+    installPosts: 0,
+    rollbackPosts: []
+  };
 
   await page.addInitScript(() => {
     window.localStorage.setItem('lang', 'ru');
@@ -91,6 +99,17 @@ async function mockRoutes(page: Page, state: MockState): Promise<Counters> {
         });
       }
       return json({ status: 'downloading', stage: 'starting' });
+    }
+
+    const rollbackMatch = path.match(/^\/api\/kernels\/([^/]+)\/rollback$/);
+    if (rollbackMatch && req.method() === 'POST') {
+      const name = rollbackMatch[1];
+      counters.rollbackPosts.push(name);
+      const list = Array.isArray(state.kernels) ? (state.kernels as { name: string }[]) : [];
+      const entry = list.find((k) => k.name === name);
+      const patch = state.rollbackPatch?.[name];
+      if (entry && patch) Object.assign(entry, patch);
+      return json({ status: 'rolled_back' });
     }
 
     const statusMatch = path.match(/^\/api\/kernels\/([^/]+)\/status$/);
@@ -368,5 +387,89 @@ test.describe('Services page — kernel install progress', () => {
     await page.clock.runFor(4_000);
     await page.waitForTimeout(300);
     expect(counters.kernelStatus['xray'] ?? 0).toBe(0);
+  });
+});
+
+test.describe('Services page — rollback label', () => {
+  const rollbackButton = (page: Page, name: string) => page.getByTestId(`rollback-${name}`);
+
+  test('откат подписан версией резервной копии у обоих ядер, aria-подпись начинается с «Откатить»', async ({
+    page
+  }) => {
+    await mockRoutes(page, {
+      kernels: kernelsFixture('xray', {
+        xray: { current_version: '26.9.8', has_backup: true, backup_version: '26.3.27' },
+        mihomo: { has_backup: true, backup_version: '1.17.0' }
+      })
+    });
+    await page.goto('/#/services');
+    await expect(rollbackButton(page, 'xray')).toHaveText('Откатить на v26.3.27');
+    await expect(rollbackButton(page, 'xray')).toHaveAttribute('aria-label', /^Откатить/);
+    await expect(rollbackButton(page, 'mihomo')).toHaveText('Откатить на v1.17.0');
+    await expect(rollbackButton(page, 'mihomo')).toHaveAttribute('aria-label', /^Откатить/);
+  });
+
+  test('без backup_version — «Откатить», без бэкапа — кнопки нет', async ({ page }) => {
+    await mockRoutes(page, {
+      kernels: kernelsFixture('xray', {
+        xray: { has_backup: true },
+        mihomo: { has_backup: false }
+      })
+    });
+    await page.goto('/#/services');
+    await expect(rollbackButton(page, 'xray')).toHaveText('Откатить');
+    await expect(page.locator('.update-item', { hasText: 'Mihomo' })).toBeVisible();
+    await expect(rollbackButton(page, 'mihomo')).toHaveCount(0);
+  });
+
+  test('бэкап той же версии, что установлена, кнопку не показывает', async ({ page }) => {
+    await mockRoutes(page, {
+      kernels: kernelsFixture('xray', {
+        xray: { current_version: '26.9.8', has_backup: true, backup_version: '26.9.8' }
+      })
+    });
+    await page.goto('/#/services');
+    await expect(page.locator('.update-item', { hasText: 'Xray' })).toBeVisible();
+    await expect(rollbackButton(page, 'xray')).toHaveCount(0);
+  });
+
+  test('подтверждённый откат шлёт POST и показывает итог «Откачено на vX»', async ({ page }) => {
+    const counters = await mockRoutes(page, {
+      kernels: kernelsFixture('xray', {
+        xray: { current_version: '26.9.8', has_backup: true, backup_version: '26.3.27' }
+      }),
+      rollbackPatch: {
+        xray: {
+          current_version: '26.3.27',
+          has_backup: false,
+          backup_version: '',
+          status: 'done',
+          result_kind: 'rolled_back',
+          result_version: '26.3.27',
+          message: 'Rolled back'
+        }
+      }
+    });
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.goto('/#/services');
+    await rollbackButton(page, 'xray').click();
+
+    await expect(page.getByTestId('kernel-result-xray')).toContainText('Откачено на v26.3.27');
+    await expect(rollbackButton(page, 'xray')).toHaveCount(0);
+    expect(counters.rollbackPosts).toEqual(['xray']);
+    await expect(page.getByText('Rolled back')).toHaveCount(0);
+  });
+
+  test('отклонённое подтверждение не шлёт POST', async ({ page }) => {
+    const counters = await mockRoutes(page, {
+      kernels: kernelsFixture('xray', {
+        xray: { current_version: '26.9.8', has_backup: true, backup_version: '26.3.27' }
+      })
+    });
+    page.on('dialog', (dialog) => dialog.dismiss());
+    await page.goto('/#/services');
+    await rollbackButton(page, 'xray').click();
+    await page.waitForTimeout(300);
+    expect(counters.rollbackPosts).toEqual([]);
   });
 });
