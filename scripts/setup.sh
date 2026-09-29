@@ -608,10 +608,31 @@ password_is_set() {
   grep -qE '"password_hash"[[:space:]]*:[[:space:]]*"[^"]+"' "$INSTALL_DIR/config.json" 2>/dev/null
 }
 
+# Подсказка первого входа: пароль администратора задаётся при первом входе.
+# code — одноразовый код настройки (xcp --setup-code); пустой, если xcp его не
+# выдал — тогда вместо пустого «код настройки: » печатается, где его взять.
+print_first_login_hint() {
+  local port
+  local ip
+  local code
+  port="$1"
+  ip="$2"
+  code="$3"
+
+  printf "При первом входе задайте пароль администратора.\n"
+  if [ -n "$code" ]; then
+    printf "Откройте https://%s:%s и введите код настройки: %s\n" "$ip" "$port" "$code"
+  else
+    printf "Откройте https://%s:%s — панель попросит задать пароль администратора (код настройки: xcp --setup-code)\n" "$ip" "$port"
+  fi
+  printf "Показать код снова: xcp --setup-code\n"
+  printf "Задать пароль по SSH: xcp --reset-password\n"
+}
+
 # Предлагает задать пароль администратора сразу после установки (D-25): при
 # наличии терминала — интерактивный xcp --reset-password по SSH; при отказе,
-# ошибке команды или неинтерактивном запуске — https-адрес панели и
-# одноразовый код первичной настройки (xcp --setup-code).
+# ошибке команды или неинтерактивном запуске — подсказка первого входа с
+# https-адресом панели и одноразовым кодом первичной настройки.
 offer_password_setup() {
   local port
   local ip
@@ -624,13 +645,13 @@ offer_password_setup() {
     return 0
   fi
 
-  if [ "$INTERACTIVE" = "true" ] && [ -r /dev/tty ]; then
+  if [ "$INTERACTIVE" = "true" ] && has_tty; then
     printf "Задать пароль администратора сейчас? [Y/n]: "
-    read response < /dev/tty
+    read response < "$TTY_DEV"
     case "$response" in
       [Nn]*) ;;
       *)
-        if "$BIN_PATH" --reset-password -config "$INSTALL_DIR/config.json" < /dev/tty; then
+        if "$BIN_PATH" --reset-password -config "$INSTALL_DIR/config.json" < "$TTY_DEV"; then
           ok "Пароль задан. Вход: https://${ip}:${port}"
           return 0
         else
@@ -640,10 +661,8 @@ offer_password_setup() {
     esac
   fi
 
-  code=$("$BIN_PATH" --setup-code -config "$INSTALL_DIR/config.json" 2>/dev/null)
-  printf "Откройте https://%s:%s и введите код настройки: %s\n" "$ip" "$port" "$code"
-  printf "Показать код снова: xcp --setup-code\n"
-  printf "Задать пароль по SSH: xcp --reset-password\n"
+  code=$("$BIN_PATH" --setup-code -config "$INSTALL_DIR/config.json" 2>/dev/null) || code=""
+  print_first_login_hint "$port" "$ip" "$code"
 }
 
 # Верификация, chmod, mv — общая часть после успешной загрузки
@@ -760,11 +779,15 @@ do_install() {
     start_service
   fi
   
-  poll_api "$chosen_port" || return 1
-
   local _ip
   _ip=$(ip -4 a s br0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p')
   _ip=${_ip:-"<IP-роутера>"}
+
+  if ! poll_api "$chosen_port"; then
+    warn "Панель не ответила после запуска — проверьте лог /opt/var/log/xcp.log"
+    password_is_set || print_first_login_hint "$chosen_port" "$_ip" ""
+    return 1
+  fi
 
   printf "\n${GREEN}${BOLD}========================================${NC}\n"
   printf "${GREEN}  Установка завершена!${NC}\n"
