@@ -315,12 +315,12 @@ func TestKernelChannel_Recompute(t *testing.T) {
 func TestKernelRollback(t *testing.T) {
 	api, tmpDir := newKernelTestAPI(t)
 
-	// Create dummy backup
+	// Бэкап в формате с версией: xray.bak.<метка>.<версия>
 	backupDir := filepath.Join(tmpDir, ".backup")
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	backupPath := filepath.Join(backupDir, "kernel.bak.12345")
+	backupPath := filepath.Join(backupDir, "xray.bak.1759100000.1.8.24")
 	if err := os.WriteFile(backupPath, []byte("backup-content"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -331,8 +331,64 @@ func TestKernelRollback(t *testing.T) {
 	api.KernelRollback(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
+	if _, err := os.Stat(backupPath); err == nil {
+		t.Error("applied backup must be consumed")
+	}
+	if k := kernelStatusOf(t, api, "xray"); k.ResultKind != services.KernelResultRolledBack || k.Status != "done" {
+		t.Errorf("status=%q result_kind=%q, want done/rolled_back", k.Status, k.ResultKind)
+	}
+}
+
+// TestKernelRollback_NoBackup: без бэкапа откат — ошибка; чужой файл в .backup
+// бэкапом не считается.
+func TestKernelRollback_NoBackup(t *testing.T) {
+	api, tmpDir := newKernelTestAPI(t)
+	backupDir := filepath.Join(tmpDir, ".backup")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, "notes.txt"), []byte("not a backup"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	api.KernelRollback(rr, httptest.NewRequest(http.MethodPost, "/api/kernels/xray/rollback", nil))
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestKernelRollback_Conflict409: откат при идущей установке — 409, а не гонка.
+func TestKernelRollback_Conflict409(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+	release := blockingInstall(api)
+
+	if rr := postKernelInstall(api, "xray"); rr.Code != http.StatusOK {
+		t.Fatalf("install: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	rr := httptest.NewRecorder()
+	api.KernelRollback(rr, httptest.NewRequest(http.MethodPost, "/api/kernels/xray/rollback", nil))
+	if rr.Code != http.StatusConflict {
+		t.Errorf("rollback while installing: expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	body := &bytes.Buffer{}
+	w := multipart.NewWriter(body)
+	part, _ := w.CreateFormFile("file", "xray")
+	_, _ = part.Write([]byte("\x7fELF"))
+	_ = w.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/kernels/xray/upload", body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	api.KernelUpload(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("upload while installing: expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	release()
+	waitKernelFailed(t, api, "xray")
 }
 
 func TestKernelDownload_Error(t *testing.T) {

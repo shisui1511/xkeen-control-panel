@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -304,6 +305,10 @@ type KernelInfo struct {
 	// версия, которая теперь стоит. Message остаётся английским для логов.
 	ResultKind    string `json:"result_kind,omitempty"`
 	ResultVersion string `json:"result_version,omitempty"`
+	// BackupVersion — версия последнего бэкапа («Откатить на vX»). Читается из
+	// имени файла в .backup, без запуска бинарников; пусто, если версия в имени
+	// не закодирована.
+	BackupVersion string `json:"backup_version,omitempty"`
 
 	// binaryPathCachedAt records when BinaryPath was last resolved via auto-detection.
 	// Access must be protected by the KernelService mutex.
@@ -743,26 +748,16 @@ func (s *KernelService) List() []KernelInfo {
 		snapshots[i].ProcessStatus = status
 		snapshots[i].PID = pid
 		snapshots[i].Uptime = uptime
-		snapshots[i].HasBackup = s.hasBackup(snapshots[i].Name, snapshots[i].BinaryPath)
+		snapshots[i].fillBackup()
 	}
 	return snapshots
 }
 
-func (s *KernelService) hasBackup(name, binaryPath string) bool {
-	if binaryPath == "" {
-		return false
-	}
-	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
-	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if !e.IsDir() && (strings.HasPrefix(e.Name(), name+".bak.") || strings.HasPrefix(e.Name(), "kernel.bak.")) {
-			return true
-		}
-	}
-	return false
+// fillBackup заполняет HasBackup и BackupVersion по каталогу .backup (без exec).
+func (k *KernelInfo) fillBackup() {
+	_, version, ok := latestBackup(k.Name, k.BinaryPath)
+	k.HasBackup = ok
+	k.BackupVersion = version
 }
 
 func (s *KernelService) Get(name string) *KernelInfo {
@@ -785,7 +780,7 @@ func (s *KernelService) Get(name string) *KernelInfo {
 	snap.ProcessStatus = status
 	snap.PID = pid
 	snap.Uptime = uptime
-	snap.HasBackup = s.hasBackup(snap.Name, snap.BinaryPath)
+	snap.fillBackup()
 	return &snap
 }
 
@@ -1349,35 +1344,13 @@ func (s *KernelService) runInstall(name string) error {
 	}
 
 	// Итог считается до замены: был ли бинарник и какой версии.
-	_, statErr := os.Stat(safeBinaryPath)
-	hadBinary := statErr == nil
-	prevVersion := ""
-	if hadBinary {
-		// Свежее определение: кеш версии мог пережить замену файла извне.
-		prev := snap
-		prev.BinaryPath = safeBinaryPath
-		prev.verCache = &versionCache{}
-		prevVersion = s.detectVersion(&prev)
-	}
+	hadBinary, prevVersion := s.inspectInstalled(name, safeBinaryPath)
 
-	// Backup current binary
+	// Бэкап прежнего бинарника. Не удался — замены нет: без копии откат невозможен.
 	if hadBinary {
-		backupDir := filepath.Join(filepath.Dir(safeBinaryPath), ".backup")
-		if err := os.MkdirAll(backupDir, 0755); err != nil {
-			return fail("Backup dir failed: "+err.Error(), err)
-		}
-		// Use name and timestamp in backup name to prevent cross-kernel backup collisions
-		backupName := fmt.Sprintf("%s.bak.%d", name, time.Now().Unix())
-		backupPath, err := sanitizeKernelPath(filepath.Join(backupDir, backupName))
-		if err != nil {
-			return fail("Invalid backup path: "+err.Error(), err)
-		}
-		// Копия с правами оригинала: откат на неё должен дать запускаемое ядро
-		if err := copyKernelFile(safeBinaryPath, backupPath); err != nil {
+		if err := backupKernelBinary(name, safeBinaryPath, prevVersion); err != nil {
 			return fail("Backup failed: "+err.Error(), err)
 		}
-		// Prune old backups — keep at most 3 most recent for this kernel
-		_ = pruneBackups(backupDir, name+".bak.", 3)
 	}
 
 	// Make executable and replace
@@ -1433,135 +1406,261 @@ func (s *KernelService) runInstall(name string) error {
 	return nil
 }
 
-// Rollback restores the kernel binary from the latest backup.
+// backupsKept — сколько последних бэкапов хранится на ядро.
+const backupsKept = 3
+
+// backupVersionMaxLen — предел длины версии в имени бэкапа.
+const backupVersionMaxLen = 64
+
+// backupVersionRe — допустимая версия в имени бэкапа: semver или alpha-<hex>,
+// только символы [0-9A-Za-z.-]. Имя файла попадает в путь, поэтому всё прочее
+// («error», «unknown», обход пути, произвольный текст) в него не пускается.
+var backupVersionRe = regexp.MustCompile(`^(?:\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?|alpha-[0-9a-f]+)$`)
+
+// validBackupVersion возвращает версию, если её можно записать в имя бэкапа, иначе "".
+func validBackupVersion(v string) string {
+	if len(v) > backupVersionMaxLen || !backupVersionRe.MatchString(v) {
+		return ""
+	}
+	return v
+}
+
+// backupFileName — имя бэкапа `<ядро>.bak.<unix>[.<версия>]`. Версия — после
+// десятизначной метки, поэтому порядок по метке не зависит от неё.
+func backupFileName(kernel string, ts int64, version string) string {
+	name := fmt.Sprintf("%s.bak.%d", kernel, ts)
+	if v := validBackupVersion(version); v != "" {
+		name += "." + v
+	}
+	return name
+}
+
+// parseBackupName разбирает имя бэкапа. Невалидная версия отбрасывается (файл
+// остаётся бэкапом без версии); чужое ядро и нечисловая метка — ok=false.
+func parseBackupName(fileName, kernel string) (ts int64, version string, ok bool) {
+	prefix := kernel + ".bak."
+	if !strings.HasPrefix(fileName, prefix) {
+		return 0, "", false
+	}
+	tsPart, verPart := fileName[len(prefix):], ""
+	if i := strings.IndexByte(tsPart, '.'); i >= 0 {
+		tsPart, verPart = tsPart[:i], tsPart[i+1:]
+	}
+	if tsPart == "" || len(tsPart) > 18 {
+		return 0, "", false
+	}
+	for _, r := range tsPart {
+		if r < '0' || r > '9' {
+			return 0, "", false
+		}
+	}
+	ts, err := strconv.ParseInt(tsPart, 10, 64)
+	if err != nil {
+		return 0, "", false
+	}
+	return ts, validBackupVersion(verPart), true
+}
+
+// kernelBackup — бэкап ядра в каталоге .backup рядом с бинарником.
+type kernelBackup struct {
+	path    string
+	version string
+	ts      int64
+}
+
+// kernelBackups читает каталог .backup рядом с binaryPath, без exec. Учитываются
+// только обычные файлы с корректно разобранным именем этого ядра. Порядок —
+// от старых к новым (по метке, при равенстве — по имени).
+func kernelBackups(name, binaryPath string) []kernelBackup {
+	if binaryPath == "" {
+		return nil
+	}
+	dir, err := sanitizeKernelPath(filepath.Join(filepath.Dir(binaryPath), ".backup"))
+	if err != nil {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var backups []kernelBackup
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		ts, version, ok := parseBackupName(e.Name(), name)
+		if !ok {
+			continue
+		}
+		path, err := sanitizeKernelPath(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		backups = append(backups, kernelBackup{path: path, version: version, ts: ts})
+	}
+	sort.Slice(backups, func(i, j int) bool {
+		if backups[i].ts != backups[j].ts {
+			return backups[i].ts < backups[j].ts
+		}
+		return backups[i].path < backups[j].path
+	})
+	return backups
+}
+
+// latestBackupEntry — самый новый бэкап ядра.
+func latestBackupEntry(name, binaryPath string) (kernelBackup, bool) {
+	backups := kernelBackups(name, binaryPath)
+	if len(backups) == 0 {
+		return kernelBackup{}, false
+	}
+	return backups[len(backups)-1], true
+}
+
+// latestBackup — путь и версия последнего бэкапа ядра (версия может быть пустой).
+func latestBackup(name, binaryPath string) (path, version string, ok bool) {
+	b, ok := latestBackupEntry(name, binaryPath)
+	return b.path, b.version, ok
+}
+
+// inspectInstalled определяет, стоит ли бинарник ядра, и его версию. Версия — свежим
+// запуском, в обход кеша: кеш мог пережить замену файла извне.
+func (s *KernelService) inspectInstalled(name, safeBinaryPath string) (bool, string) {
+	if _, err := os.Stat(safeBinaryPath); err != nil {
+		return false, ""
+	}
+	s.mu.RLock()
+	var probe KernelInfo
+	if k := s.kernels[name]; k != nil {
+		probe = *k
+	}
+	s.mu.RUnlock()
+	probe.Name = name
+	probe.BinaryPath = safeBinaryPath
+	probe.verCache = &versionCache{}
+	return true, s.detectVersion(&probe)
+}
+
+// backupKernelBinary копирует действующий бинарник в .backup рядом с ним: имя
+// несёт версию (D-12), права копии — как у оригинала. Копия не создаётся, если
+// последний бэкап уже той же известной версии. Хранятся backupsKept последних.
+// Ошибка означает, что бинарник заменять нельзя. Вызывается под замком ядра.
+func backupKernelBinary(name, safeBinaryPath, prevVersion string) error {
+	version := validBackupVersion(prevVersion)
+	last, hasLast := latestBackupEntry(name, safeBinaryPath)
+	if hasLast && version != "" && last.version == version {
+		return nil
+	}
+	backupDir, err := sanitizeKernelPath(filepath.Join(filepath.Dir(safeBinaryPath), ".backup"))
+	if err != nil {
+		return fmt.Errorf("invalid backup dir: %w", err)
+	}
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		return fmt.Errorf("backup dir: %w", err)
+	}
+	// Метка строго растёт: две замены в одну секунду не должны смешать порядок.
+	ts := time.Now().Unix()
+	if hasLast && ts <= last.ts {
+		ts = last.ts + 1
+	}
+	backupPath, err := sanitizeKernelPath(filepath.Join(backupDir, backupFileName(name, ts, version)))
+	if err != nil {
+		return fmt.Errorf("invalid backup path: %w", err)
+	}
+	if err := copyKernelFile(safeBinaryPath, backupPath); err != nil {
+		return err
+	}
+	pruneBackups(name, safeBinaryPath, backupsKept)
+	return nil
+}
+
+// Rollback восстанавливает бинарник из последнего бэкапа. Берёт тот же замок, что
+// установка и загрузка файла (занят — ErrKernelBusy). Применённый бэкап
+// расходуется: следующий откат идёт к более старой копии.
 func (s *KernelService) Rollback(name string) error {
 	name, err := canonicalKernelName(name)
 	if err != nil {
 		return err
 	}
-
-	s.mu.Lock()
-	k, ok := s.kernels[name]
-	if !ok {
-		s.mu.Unlock()
+	s.mu.RLock()
+	_, kernelExists := s.kernels[name]
+	s.mu.RUnlock()
+	if !kernelExists {
 		return fmt.Errorf("kernel not found: %s", name)
 	}
+
+	// lockKernel делает TryLock(): при идущей установке — сразу ErrKernelBusy, без ожидания.
+	installMu, err := s.lockKernel(name)
+	if err != nil {
+		return err
+	}
+	defer installMu.Unlock()
+
+	s.mu.Lock()
+	k := s.kernels[name]
 	s.resolveBinaryPath(k)
 	binaryPath := k.BinaryPath
 	s.mu.Unlock()
 
-	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
-	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		return fmt.Errorf("read backup dir: %w", err)
-	}
-
-	var backups []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), name+".bak.") {
-			backups = append(backups, filepath.Join(backupDir, e.Name()))
-		}
-	}
-
-	// Fallback to legacy format "kernel.bak." only if no new backups exist
-	if len(backups) == 0 {
-		log.Printf("[Kernel] No backups found with prefix %s.bak., trying legacy format kernel.bak.", utils.SanitizeLogInput(name))
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasPrefix(e.Name(), "kernel.bak.") {
-				backups = append(backups, filepath.Join(backupDir, e.Name()))
-			}
-		}
-	}
-
-	if len(backups) == 0 {
+	backup, ok := latestBackupEntry(name, binaryPath)
+	if !ok {
 		return fmt.Errorf("no backup found for kernel %s", name)
 	}
 
-	// Latest backup is the last one (since names contain timestamps and os.ReadDir sorts by name)
-	latestBackup := backups[len(backups)-1]
-
+	safeBinaryPath, err := sanitizeKernelPath(binaryPath)
+	if err != nil {
+		return fmt.Errorf("invalid binary path: %w", err)
+	}
 	// Atomic replace
-	tempDest, err := sanitizeKernelPath(filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new"))
+	tempDest, err := sanitizeKernelPath(filepath.Join(filepath.Dir(safeBinaryPath), filepath.Base(safeBinaryPath)+".new"))
 	if err != nil {
 		return err
 	}
-
-	src, err := os.Open(latestBackup)
-	if err != nil {
-		return fmt.Errorf("open backup file: %w", err)
-	}
-	defer src.Close()
-
-	dst, err := os.Create(tempDest)
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, src); err != nil {
+	if err := copyKernelFile(backup.path, tempDest); err != nil {
+		_ = os.Remove(tempDest)
 		return fmt.Errorf("copy backup: %w", err)
 	}
-
-	if err := dst.Close(); err != nil {
-		return err
-	}
-	if err := src.Close(); err != nil {
-		return err
-	}
-
 	if err := os.Chmod(tempDest, 0755); err != nil {
+		_ = os.Remove(tempDest)
 		return fmt.Errorf("chmod temp file: %w", err)
 	}
-
-	if err := os.Rename(tempDest, binaryPath); err != nil {
+	if err := os.Rename(tempDest, safeBinaryPath); err != nil {
+		_ = os.Remove(tempDest)
 		return fmt.Errorf("rename to target path: %w", err)
 	}
+	// Применённая копия израсходована: повторный откат не вернёт ту же версию.
+	if err := os.Remove(backup.path); err != nil {
+		log.Printf("Kernel: failed to remove applied backup %s: %v", utils.SanitizeLogInput(backup.path), err)
+	}
 
-	// Reset cache under lock
 	s.mu.Lock()
 	if kk := s.kernels[name]; kk != nil {
 		kk.binaryPathCachedAt = time.Time{}
 		s.resolveBinaryPath(kk)
 		s.refreshInstalledVersion(kk)
-		kk.Status = "idle"
-		kk.Message = "Rolled back to backup"
-		kk.HasBackup = s.hasBackup(name, kk.BinaryPath)
+		kk.Status = "done"
+		kk.Stage = ""
+		kk.ResultKind = KernelResultRolledBack
+		kk.ResultVersion = kk.CurrentVersion
+		kk.Message = "Rolled back to " + kk.CurrentVersion
 	}
 	s.mu.Unlock()
 
 	return nil
 }
 
-// pruneBackups removes oldest backup files in dir with the given prefix, keeping only the `keep` most recent.
-// Files are sorted by name (timestamp suffix ensures lexicographic order = chronological order).
-// Errors are logged but do not fail the caller.
-func pruneBackups(dir string, prefix string, keep int) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-
-	// Filter to backup files only
-	var backups []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
-			backups = append(backups, filepath.Join(dir, e.Name()))
-		}
-	}
-
-	// Sort ascending by name (oldest first) — names use Unix timestamp suffix
-	// so lexicographic order equals chronological order.
-	// os.ReadDir already returns entries sorted by name.
+// pruneBackups удаляет самые старые бэкапы ядра, оставляя keep последних. Порядок
+// — по метке из имени, а не по строке имени: версия в имени его не определяет.
+// Ошибки удаления логируются и не проваливают вызывающего.
+func pruneBackups(name, binaryPath string, keep int) {
+	backups := kernelBackups(name, binaryPath)
 	if len(backups) <= keep {
-		return nil
+		return
 	}
-
 	for _, old := range backups[:len(backups)-keep] {
-		if err := os.Remove(old); err != nil {
-			log.Printf("pruneBackups: failed to remove %s: %v", old, err)
+		if err := os.Remove(old.path); err != nil {
+			log.Printf("pruneBackups: failed to remove %s: %v", utils.SanitizeLogInput(old.path), err)
 		}
 	}
-	return nil
 }
 
 // kernelAssetArch переводит GOARCH панели в суффикс архитектуры релизных
@@ -1947,11 +2046,9 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		return fmt.Errorf("kernel not found: %s", name)
 	}
 
-	mu := &sync.Mutex{}
-	actual, _ := s.installLocks.LoadOrStore(name, mu)
-	installMu := actual.(*sync.Mutex)
-	if !installMu.TryLock() {
-		return fmt.Errorf("install already in progress")
+	installMu, err := s.lockKernel(name)
+	if err != nil {
+		return err
 	}
 	defer installMu.Unlock()
 
@@ -2002,22 +2099,17 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		return fmt.Errorf("uploaded file is not a valid Linux ELF binary")
 	}
 
-	// Backup current binary if exists
-	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
-	_ = os.MkdirAll(backupDir, 0755)
-	backupName := fmt.Sprintf("%s.bak.%d", name, time.Now().Unix())
-	backupPath, err := sanitizeKernelPath(filepath.Join(backupDir, backupName))
-	if err != nil {
-		return fmt.Errorf("invalid backup path: %w", err)
-	}
 	safeBinaryPath, err := sanitizeKernelPath(binaryPath)
 	if err != nil {
 		return fmt.Errorf("invalid binary path: %w", err)
 	}
 
-	if _, err := os.Stat(safeBinaryPath); err == nil {
-		if err := copyKernelFile(safeBinaryPath, backupPath); err == nil {
-			_ = pruneBackups(backupDir, name+".bak.", 3)
+	// Backup current binary if exists. Ошибка копирования прерывает замену: без
+	// копии откат невозможен (так же, как при установке).
+	hadBinary, prevVersion := s.inspectInstalled(name, safeBinaryPath)
+	if hadBinary {
+		if err := backupKernelBinary(name, safeBinaryPath, prevVersion); err != nil {
+			return fmt.Errorf("backup failed: %w", err)
 		}
 	}
 
@@ -2049,8 +2141,10 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		s.resolveBinaryPath(kk)
 		s.refreshInstalledVersion(kk)
 		kk.Status = "done"
-		kk.Message = "Installed: " + kk.CurrentVersion
-		kk.HasBackup = true
+		kk.Stage = ""
+		kk.ResultKind = KernelResultUploaded
+		kk.ResultVersion = kk.CurrentVersion
+		kk.Message = "Uploaded " + kk.CurrentVersion
 	}
 	s.mu.Unlock()
 

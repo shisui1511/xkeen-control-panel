@@ -1595,3 +1595,343 @@ func TestBeginInstall_ConcurrentOnlyOneWins(t *testing.T) {
 		t.Fatal("winning install did not finish")
 	}
 }
+
+// --- Бэкапы с версией и откат (KERN-02, D-12) ---
+
+// backupFiles — имена файлов в .backup рядом с бинарником (отсортированы).
+func backupFiles(t *testing.T, binPath string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(filepath.Dir(binPath), ".backup"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// installVersion ставит mihomo версии ver поверх текущего бинарника.
+func installVersion(t *testing.T, svc *KernelService, ver string) {
+	t.Helper()
+	svc.mu.Lock()
+	svc.kernels["mihomo"].LatestVersion = ver
+	svc.mu.Unlock()
+	svc.SetInstallSource("arm64", writeGzDownload(t, ver))
+	if err := svc.Install("mihomo"); err != nil {
+		t.Fatalf("install %s: %v", ver, err)
+	}
+}
+
+func TestParseBackupName(t *testing.T) {
+	cases := []struct {
+		file, kernel string
+		ts           int64
+		version      string
+		ok           bool
+	}{
+		{"xray.bak.1759100000.26.9.8", "xray", 1759100000, "26.9.8", true},
+		{"xray.bak.1759100000", "xray", 1759100000, "", true},
+		{"xray.bak.1759100000.1.8.24-rc1", "xray", 1759100000, "1.8.24-rc1", true},
+		{"mihomo.bak.1759100000.alpha-f103639", "mihomo", 1759100000, "alpha-f103639", true},
+		{"mihomo.bak.1759100000.1.19.1", "xray", 0, "", false},
+		{"xray.bak.abc", "xray", 0, "", false},
+		{"xray.bak.", "xray", 0, "", false},
+		{"kernel.bak.12345", "xray", 0, "", false},
+		{"xray.bak.1759100000.../../x", "xray", 1759100000, "", true},
+		{"xray.bak.1759100000.1.2.3/../../x", "xray", 1759100000, "", true},
+		{"xray.bak.1759100000." + strings.Repeat("1", 70), "xray", 1759100000, "", true},
+		{"xray.bak.1759100000.error", "xray", 1759100000, "", true},
+	}
+	for _, tc := range cases {
+		ts, version, ok := parseBackupName(tc.file, tc.kernel)
+		if ts != tc.ts || version != tc.version || ok != tc.ok {
+			t.Errorf("parseBackupName(%q, %q) = (%d, %q, %v), want (%d, %q, %v)",
+				tc.file, tc.kernel, ts, version, ok, tc.ts, tc.version, tc.ok)
+		}
+	}
+}
+
+// TestBackup_NameCarriesVersion: версия кодируется в имени только допустимого вида.
+func TestBackup_NameCarriesVersion(t *testing.T) {
+	if got := backupFileName("xray", 1759100000, "26.9.8"); got != "xray.bak.1759100000.26.9.8" {
+		t.Errorf("backupFileName = %q", got)
+	}
+	for _, bad := range []string{"error", "unknown", "not installed", "1.2.3/../../x", "1.2.3 x", strings.Repeat("1", 65), ""} {
+		if got := backupFileName("xray", 1759100000, bad); got != "xray.bak.1759100000" {
+			t.Errorf("backupFileName(%q) = %q, want no version suffix", bad, got)
+		}
+	}
+
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	installVersion(t, svc, "1.19.0")
+
+	files := backupFiles(t, binPath)
+	if len(files) != 1 {
+		t.Fatalf("backups = %v, want exactly one", files)
+	}
+	if _, v, ok := parseBackupName(files[0], "mihomo"); !ok || v != "1.18.0" {
+		t.Errorf("backup %q parsed as version %q ok=%v, want 1.18.0", files[0], v, ok)
+	}
+	k := svc.Get("mihomo")
+	if !k.HasBackup || k.BackupVersion != "1.18.0" {
+		t.Errorf("HasBackup=%v BackupVersion=%q, want true/1.18.0", k.HasBackup, k.BackupVersion)
+	}
+}
+
+// TestBackup_UnknownVersionHasNoSuffix: версию прежнего бинарника определить не
+// удалось — бэкап всё равно есть, без суффикса версии, итог updated.
+func TestBackup_UnknownVersionHasNoSuffix(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "")
+	if err := os.WriteFile(binPath, []byte("#!/bin/sh\necho garbage\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	installVersion(t, svc, "1.19.0")
+
+	files := backupFiles(t, binPath)
+	if len(files) != 1 {
+		t.Fatalf("backups = %v, want one", files)
+	}
+	if _, v, ok := parseBackupName(files[0], "mihomo"); !ok || v != "" {
+		t.Errorf("backup %q: version %q ok=%v, want empty version", files[0], v, ok)
+	}
+	k := svc.Get("mihomo")
+	if k.ResultKind != KernelResultUpdated || !k.HasBackup || k.BackupVersion != "" {
+		t.Errorf("kind=%q hasBackup=%v backupVersion=%q, want updated/true/empty", k.ResultKind, k.HasBackup, k.BackupVersion)
+	}
+}
+
+// TestBackup_SkipsDuplicateVersion: переустановка версии, что уже лежит в
+// последнем бэкапе, новую копию не создаёт.
+func TestBackup_SkipsDuplicateVersion(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.19.0")
+	backupDir := filepath.Join(filepath.Dir(binPath), ".backup")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(backupDir, "mihomo.bak.1759100000.1.19.0")
+	if err := os.WriteFile(existing, mihomoScript("1.19.0"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	installVersion(t, svc, "1.19.0")
+
+	files := backupFiles(t, binPath)
+	if len(files) != 1 || files[0] != "mihomo.bak.1759100000.1.19.0" {
+		t.Fatalf("backups = %v, want only the existing one", files)
+	}
+	if k := svc.Get("mihomo"); k.ResultKind != KernelResultReinstalled {
+		t.Errorf("kind = %q, want reinstalled", k.ResultKind)
+	}
+}
+
+// TestBackup_KeepsThree: хранятся 3 последних бэкапа, самый старый удаляется.
+func TestBackup_KeepsThree(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.0.0")
+	for _, v := range []string{"1.1.0", "1.2.0", "1.3.0", "1.4.0"} {
+		installVersion(t, svc, v)
+	}
+
+	files := backupFiles(t, binPath)
+	if len(files) != 3 {
+		t.Fatalf("backups = %v, want 3", files)
+	}
+	var versions []string
+	for _, f := range files {
+		_, v, ok := parseBackupName(f, "mihomo")
+		if !ok {
+			t.Fatalf("unparsable backup %q", f)
+		}
+		versions = append(versions, v)
+	}
+	// Порядок файлов не гарантирован: проверяем множество.
+	joined := "," + strings.Join(versions, ",") + ","
+	for _, want := range []string{"1.1.0", "1.2.0", "1.3.0"} {
+		if !strings.Contains(joined, ","+want+",") {
+			t.Errorf("versions %v miss %s", versions, want)
+		}
+	}
+	if strings.Contains(joined, ",1.0.0,") {
+		t.Errorf("oldest backup 1.0.0 must be pruned: %v", versions)
+	}
+	if k := svc.Get("mihomo"); k.BackupVersion != "1.3.0" {
+		t.Errorf("BackupVersion = %q, want the newest backup 1.3.0", k.BackupVersion)
+	}
+}
+
+// TestRollback_ConsumesAppliedBackup: откат восстанавливает последний бэкап,
+// удаляет применённую копию, следующий откат идёт глубже.
+func TestRollback_ConsumesAppliedBackup(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	installVersion(t, svc, "1.19.0")
+	installVersion(t, svc, "1.20.0")
+
+	if k := svc.Get("mihomo"); k.BackupVersion != "1.19.0" || k.CurrentVersion != "1.20.0" {
+		t.Fatalf("before rollback: backup=%q current=%q", k.BackupVersion, k.CurrentVersion)
+	}
+
+	if err := svc.Rollback("mihomo"); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "done" || k.Stage != "" || k.ResultKind != KernelResultRolledBack || k.ResultVersion != "1.19.0" {
+		t.Errorf("after rollback: status=%q stage=%q kind=%q version=%q", k.Status, k.Stage, k.ResultKind, k.ResultVersion)
+	}
+	if k.CurrentVersion != "1.19.0" {
+		t.Errorf("current = %q, want 1.19.0", k.CurrentVersion)
+	}
+	if k.BackupVersion != "1.18.0" || !k.HasBackup {
+		t.Errorf("next backup = %q hasBackup=%v, want 1.18.0/true", k.BackupVersion, k.HasBackup)
+	}
+	if len(backupFiles(t, binPath)) != 1 {
+		t.Errorf("applied backup must be consumed: %v", backupFiles(t, binPath))
+	}
+
+	if err := svc.Rollback("mihomo"); err != nil {
+		t.Fatalf("second rollback: %v", err)
+	}
+	k = svc.Get("mihomo")
+	if k.CurrentVersion != "1.18.0" || k.HasBackup || k.BackupVersion != "" {
+		t.Errorf("after second rollback: current=%q hasBackup=%v backupVersion=%q", k.CurrentVersion, k.HasBackup, k.BackupVersion)
+	}
+
+	err := svc.Rollback("mihomo")
+	if err == nil || !strings.Contains(err.Error(), "no backup found") {
+		t.Errorf("third rollback: got %v, want 'no backup found'", err)
+	}
+}
+
+// TestRollback_BusyWhileInstalling: откат и загрузка файла берут тот же замок,
+// что и установка.
+func TestRollback_BusyWhileInstalling(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	release := make(chan struct{})
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		<-release
+		return errors.New("stop")
+	})
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Rollback("mihomo"); !errors.Is(err, ErrKernelBusy) {
+		t.Errorf("rollback while installing: got %v, want ErrKernelBusy", err)
+	}
+	if err := svc.UploadBinary("mihomo", strings.NewReader("\x7fELF"), "mihomo"); !errors.Is(err, ErrKernelBusy) {
+		t.Errorf("upload while installing: got %v, want ErrKernelBusy", err)
+	}
+	close(release)
+	<-done
+
+	// После завершения замок свободен.
+	if err := svc.Rollback("mihomo"); errors.Is(err, ErrKernelBusy) {
+		t.Errorf("rollback after install finished must not be busy: %v", err)
+	}
+}
+
+// TestRollback_IgnoresForeignAndLegacyFiles: общий префикс старого формата и
+// бэкапы другого ядра в том же каталоге бэкапом этого ядра не считаются.
+func TestRollback_IgnoresForeignAndLegacyFiles(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	backupDir := filepath.Join(filepath.Dir(binPath), ".backup")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"kernel.bak.12345", "xray.bak.1759100000.1.8.24", "mihomo.bak.abc"} {
+		if err := os.WriteFile(filepath.Join(backupDir, name), []byte("x"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Бэкап-каталог с тем же именем — не файл.
+	if err := os.Mkdir(filepath.Join(backupDir, "mihomo.bak.1759100001"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if k := svc.Get("mihomo"); k.HasBackup {
+		t.Errorf("HasBackup must be false, BackupVersion=%q", k.BackupVersion)
+	}
+	err := svc.Rollback("mihomo")
+	if err == nil || !strings.Contains(err.Error(), "no backup found") {
+		t.Errorf("rollback: got %v, want 'no backup found'", err)
+	}
+	got, _ := os.ReadFile(binPath)
+	if string(got) != string(mihomoScript("1.18.0")) {
+		t.Error("binary must stay untouched")
+	}
+}
+
+// TestBackup_ListDoesNotExecBackups: версия бэкапа читается из имени файла, а
+// не запуском бинарников из .backup.
+func TestBackup_ListDoesNotExecBackups(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	backupDir := filepath.Join(filepath.Dir(binPath), ".backup")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "executed")
+	script := "#!/bin/sh\necho ran > " + marker + "\necho \"Mihomo Version v9.9.9\"\n"
+	if err := os.WriteFile(filepath.Join(backupDir, "mihomo.bak.1759100000.1.17.0"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.List()
+	k := svc.Get("mihomo")
+	if k.BackupVersion != "1.17.0" || !k.HasBackup {
+		t.Errorf("BackupVersion=%q HasBackup=%v, want 1.17.0/true", k.BackupVersion, k.HasBackup)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("backup binary must not be executed on List/Get")
+	}
+}
+
+// elfLike — содержимое, проходящее проверку isELF (заголовок), для тестов загрузки.
+func elfLike(ver string) []byte {
+	return append([]byte{0x7f, 'E', 'L', 'F'}, []byte("\n#!/bin/sh\necho 'Mihomo Version v"+ver+"'\n")...)
+}
+
+// TestUploadBinary_BackupFailureAborts: ошибка копирования бэкапа прерывает
+// замену — прежний бинарник остаётся на месте.
+func TestUploadBinary_BackupFailureAborts(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+	// .backup — обычный файл: создать в нём копию невозможно.
+	if err := os.WriteFile(filepath.Join(filepath.Dir(binPath), ".backup"), []byte("not a dir"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := svc.UploadBinary("mihomo", bytes.NewReader(elfLike("1.21.0")), "mihomo")
+	if err == nil {
+		t.Fatal("upload must fail when the backup cannot be created")
+	}
+	got, _ := os.ReadFile(binPath)
+	if string(got) != string(mihomoScript("1.18.0")) {
+		t.Error("binary must not be replaced when backup failed")
+	}
+}
+
+// TestUploadBinary_ResultUploaded: успешная загрузка — result_kind uploaded и
+// бэкап прежнего бинарника с версией.
+func TestUploadBinary_ResultUploaded(t *testing.T) {
+	svc, binPath := newInstallTestService(t, "1.18.0")
+
+	if err := svc.UploadBinary("mihomo", bytes.NewReader(elfLike("1.21.0")), "mihomo"); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "done" || k.Stage != "" || k.ResultKind != KernelResultUploaded {
+		t.Errorf("status=%q stage=%q kind=%q, want done/empty/uploaded", k.Status, k.Stage, k.ResultKind)
+	}
+	if k.ResultVersion != k.CurrentVersion {
+		t.Errorf("ResultVersion=%q, CurrentVersion=%q", k.ResultVersion, k.CurrentVersion)
+	}
+	if !k.HasBackup || k.BackupVersion != "1.18.0" {
+		t.Errorf("HasBackup=%v BackupVersion=%q, want true/1.18.0", k.HasBackup, k.BackupVersion)
+	}
+	if len(backupFiles(t, binPath)) != 1 {
+		t.Errorf("backups = %v", backupFiles(t, binPath))
+	}
+}

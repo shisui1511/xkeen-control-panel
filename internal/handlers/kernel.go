@@ -195,10 +195,15 @@ func (a *API) KernelRollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.kernelSvc.Rollback(name); err != nil {
+		if errors.Is(err, services.ErrKernelBusy) {
+			JSONError(w, http.StatusConflict, "install already in progress")
+			return
+		}
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	a.ClearCapabilitiesCache()
+	a.invalidateXKeenStatus()
 
 	JSONSuccess(w, map[string]string{"status": "rolled_back"})
 }
@@ -277,10 +282,15 @@ func (a *API) KernelUpload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	if err := a.kernelSvc.UploadBinary(name, file, header.Filename); err != nil {
+		if errors.Is(err, services.ErrKernelBusy) {
+			JSONError(w, http.StatusConflict, "install already in progress")
+			return
+		}
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	a.ClearCapabilitiesCache()
+	a.invalidateXKeenStatus()
 
 	kUpdated := a.kernelSvc.Get(name)
 	JSONSuccess(w, kUpdated)
