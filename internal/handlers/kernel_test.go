@@ -67,6 +67,18 @@ func newKernelTestAPI(t *testing.T) (*API, string) {
 
 	kernelSvc := services.NewKernelService(t.TempDir())
 
+	// Проверка релизов идёт на локальный сервер, а не в реальный GitHub.
+	releases := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/releases/latest") {
+			_, _ = w.Write([]byte(`{"tag_name":"v1.8.24"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"tag_name":"v1.9.0-rc1","prerelease":true}]`))
+	}))
+	t.Cleanup(releases.Close)
+	kernelSvc.SetReleaseSource(releases.URL, releases.Client())
+
 	return &API{
 		cfg:       cfg,
 		kernelSvc: kernelSvc,
@@ -145,6 +157,49 @@ func TestKernelChannel(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestKernelChannel_Recompute: смена канала синхронно перепроверяет релиз и
+// возвращает в ответе пересчитанное ядро (KERN-01, D-08).
+func TestKernelChannel_Recompute(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+
+	post := func(channel string) (string, string, string) {
+		t.Helper()
+		body := fmt.Sprintf(`{"channel": %q}`, channel)
+		req := httptest.NewRequest(http.MethodPost, "/api/kernels/xray/channel", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		api.KernelChannel(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Channel string `json:"channel"`
+				Kernel  struct {
+					LatestVersion string `json:"latest_version"`
+					Status        string `json:"status"`
+				} `json:"kernel"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		if !resp.Success {
+			t.Fatalf("expected success, got %s", rr.Body.String())
+		}
+		return resp.Data.Channel, resp.Data.Kernel.LatestVersion, resp.Data.Kernel.Status
+	}
+
+	ch, latest, status := post("preview")
+	if ch != "preview" || latest != "1.9.0-rc1" || status != "idle" {
+		t.Errorf("preview: channel=%q latest=%q status=%q", ch, latest, status)
+	}
+	ch, latest, status = post("stable")
+	if ch != "stable" || latest != "1.8.24" || status != "idle" {
+		t.Errorf("stable: channel=%q latest=%q status=%q", ch, latest, status)
 	}
 }
 

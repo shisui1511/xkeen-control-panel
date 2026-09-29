@@ -524,6 +524,16 @@ type KernelService struct {
 	githubAPIBase string
 }
 
+// SetReleaseSource подменяет источник релизов (базовый URL GitHub API и HTTP-клиент).
+// Нужен тестам, чтобы проверка релизов не ходила в реальную сеть; в продакшене
+// не вызывается.
+func (s *KernelService) SetReleaseSource(apiBase string, client *http.Client) {
+	s.mu.Lock()
+	s.githubAPIBase = apiBase
+	s.testClient = client
+	s.mu.Unlock()
+}
+
 // kernelChannelStore is the on-disk format used to persist per-kernel update
 // channel selection (SRV channel setting survives xcp restarts/deploys).
 type kernelChannelStore struct {
@@ -750,6 +760,13 @@ func (s *KernelService) SetChannel(name, channel string) bool {
 		return false
 	}
 	k.Channel = channel
+	// Latest* принадлежали прежнему каналу: сбрасываем, пока перепроверка
+	// нового канала не вернёт результат.
+	k.LatestVersion = ""
+	k.LatestTag = ""
+	k.HasUpdate = false
+	k.Message = ""
+	k.Status = "checking"
 	channels := make(map[string]string, len(s.kernels))
 	for n, kk := range s.kernels {
 		channels[n] = kk.Channel
@@ -916,11 +933,13 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	repo := k.Repo
 	channel := k.Channel
 	currentVersion := k.CurrentVersion
+	apiBase := s.githubAPIBase
+	testClient := s.testClient
 	s.mu.Unlock()
 
 	githubBase := "https://api.github.com"
-	if s.githubAPIBase != "" {
-		githubBase = s.githubAPIBase
+	if apiBase != "" {
+		githubBase = apiBase
 	}
 
 	// previewReleaseWindow bounds how many recent releases are scanned for a
@@ -935,8 +954,8 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	}
 
 	var client *http.Client
-	if s.testClient != nil {
-		client = s.testClient
+	if testClient != nil {
+		client = testClient
 	} else {
 		client = utils.SafeHTTPClient(15 * time.Second)
 	}

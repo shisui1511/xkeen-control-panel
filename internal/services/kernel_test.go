@@ -633,6 +633,43 @@ func TestCheckLatest_SemverHasUpdate(t *testing.T) {
 	}
 }
 
+// TestSetChannel_Recompute: смена канала сбрасывает результаты проверки прежнего
+// канала до перепроверки нового.
+func TestSetChannel_Recompute(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tag_name":"v1.18.0"}`))
+	}))
+	defer server.Close()
+
+	svc := NewKernelService(t.TempDir())
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.kernels["xray"].CurrentVersion = "1.17.0"
+	svc.kernels["xray"].Channel = "stable"
+	svc.kernels["xray"].Repo = "some/repo"
+
+	if err := svc.CheckLatest(context.Background(), "xray"); err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+	if got := svc.Get("xray"); got.LatestVersion != "1.18.0" || !got.HasUpdate {
+		t.Fatalf("precondition: latest=%q has_update=%v", got.LatestVersion, got.HasUpdate)
+	}
+
+	if !svc.SetChannel("xray", "preview") {
+		t.Fatal("SetChannel returned false")
+	}
+	got := svc.Get("xray")
+	if got.LatestVersion != "" || got.LatestTag != "" || got.HasUpdate {
+		t.Errorf("Latest* not reset: latest=%q tag=%q has_update=%v", got.LatestVersion, got.LatestTag, got.HasUpdate)
+	}
+	if got.Status != "checking" {
+		t.Errorf("status = %q, want checking", got.Status)
+	}
+	if got.Channel != "preview" {
+		t.Errorf("channel = %q, want preview", got.Channel)
+	}
+}
+
 // TestCheckLatest_PreviewNoPrereleaseFound verifies that when the "preview"
 // channel finds no prerelease tag in the scanned release window, this is
 // reported via Message rather than silently looking identical to "up to date".

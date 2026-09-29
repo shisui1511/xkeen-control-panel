@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 // kernelCheckSemaphore limits the number of concurrent background release-check
@@ -131,6 +133,12 @@ func (a *API) KernelStatus(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, k)
 }
 
+// kernelChannelResponse — ответ смены канала: выбранный канал и пересчитанное ядро.
+type kernelChannelResponse struct {
+	Channel string               `json:"channel"`
+	Kernel  *services.KernelInfo `json:"kernel"`
+}
+
 func (a *API) KernelChannel(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -157,9 +165,16 @@ func (a *API) KernelChannel(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusNotFound, "Kernel not found")
 		return
 	}
+
+	// Синхронно перепроверяем релиз нового канала: ответ сразу несёт пересчитанные
+	// статусы. Ошибка проверки уже записана в статус ядра (status "failed"), поэтому
+	// сам запрос остаётся успешным.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	_ = a.kernelSvc.CheckLatest(ctx, name)
+	cancel()
 	a.ClearCapabilitiesCache()
 
-	JSONSuccess(w, map[string]string{"channel": req.Channel})
+	JSONSuccess(w, kernelChannelResponse{Channel: req.Channel, Kernel: a.kernelSvc.Get(name)})
 }
 
 func (a *API) KernelRollback(w http.ResponseWriter, r *http.Request) {
