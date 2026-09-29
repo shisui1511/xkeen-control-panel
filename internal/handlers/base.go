@@ -152,6 +152,14 @@ func (a *API) xkeenVersion() string {
 	return a.xkeenSvc.GetVersion()
 }
 
+// invalidateXKeenVersion помечает устаревшими статус и версию XKeen
+// (после установщика XKeen); nil-безопасно.
+func (a *API) invalidateXKeenVersion() {
+	if a.xkeenStatus != nil {
+		a.xkeenStatus.InvalidateVersion()
+	}
+}
+
 // invalidateXKeenStatus помечает кэш статуса устаревшим (nil-безопасно).
 func (a *API) invalidateXKeenStatus() {
 	if a.xkeenStatus != nil {

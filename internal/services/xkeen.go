@@ -46,7 +46,10 @@ type XKeenService struct {
 	intentionalStop   bool
 	inRestartUntil    time.Time
 	kernelStartedHook func()
-	now               func() time.Time
+	// lifecycleHook вызывается после любого Start/Stop/Restart/SwitchKernel
+	// (при любом исходе): кэш статуса помечается устаревшим
+	lifecycleHook func()
+	now           func() time.Time
 
 	// statusRunMu сериализует `xkeen -status` во всём процессе: цикл кэша,
 	// сторожевой таймер и пост-проверки start/restart не порождают второй
@@ -194,6 +197,7 @@ func (s *XKeenService) Start() (string, error) {
 
 	out, err := s.runWithTimeout("-start", 30*time.Second)
 	s.RecordAction("start", out, err)
+	s.runLifecycleHook()
 	if err == nil && hook != nil {
 		hook()
 	}
@@ -207,6 +211,7 @@ func (s *XKeenService) Stop() (string, error) {
 
 	out, err := s.runWithTimeout("-stop", 30*time.Second)
 	s.RecordAction("stop", out, err)
+	s.runLifecycleHook()
 	return out, err
 }
 
@@ -218,6 +223,7 @@ func (s *XKeenService) Restart() (string, error) {
 
 	out, err := s.runWithTimeout("-restart", 45*time.Second)
 	s.RecordAction("restart", out, err)
+	s.runLifecycleHook()
 	return out, err
 }
 
@@ -240,6 +246,7 @@ func (s *XKeenService) SwitchKernel(name string) (string, error) {
 		out, err = s.runWithTimeout("-mihomo", 30*time.Second)
 	}
 	s.RecordAction("switch_kernel:"+name, out, err)
+	s.runLifecycleHook()
 	if err == nil && name == "mihomo" && hook != nil {
 		hook()
 	}
@@ -253,6 +260,24 @@ func (s *XKeenService) SetKernelStartedHook(fn func()) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	s.kernelStartedHook = fn
+}
+
+// SetLifecycleHook задаёт колбэк, вызываемый после Start, Stop, Restart и
+// SwitchKernel независимо от результата (SetDNSProxying покрывается через
+// внутренний Restart). Колбэк вызывается вне stateMu.
+func (s *XKeenService) SetLifecycleHook(fn func()) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.lifecycleHook = fn
+}
+
+func (s *XKeenService) runLifecycleHook() {
+	s.stateMu.Lock()
+	hook := s.lifecycleHook
+	s.stateMu.Unlock()
+	if hook != nil {
+		hook()
+	}
 }
 
 // IntentionalStop reports whether the kernel was stopped intentionally via panel Stop() (D-01).

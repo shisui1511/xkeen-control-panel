@@ -183,3 +183,148 @@ func TestXKeenStatusCache_ColdStart(t *testing.T) {
 		t.Error("AgeSeconds ok=true на холодном старте")
 	}
 }
+
+// TestXKeenStatusCache_InvalidateRefreshes: Invalidate помечает снимок
+// устаревшим сразу и обновляет его внеочередным опросом, не дожидаясь
+// интервала (в тесте он 10 с).
+func TestXKeenStatusCache_InvalidateRefreshes(t *testing.T) {
+	var raw atomic.Value
+	raw.Store("XKeen is running")
+	var blocking atomic.Bool
+	gate := make(chan struct{})
+	c := newXKeenStatusCacheFunc(func(ctx context.Context) (string, error) {
+		if blocking.Load() {
+			select {
+			case <-gate:
+			case <-ctx.Done():
+			}
+		}
+		return raw.Load().(string), nil
+	}, nil, nil, XKeenStatusPollInterval)
+	c.Start()
+	defer c.Stop()
+
+	ctx, cancel := refreshCtx(t)
+	defer cancel()
+	first := c.RefreshNow(ctx)
+	if first.Raw != "XKeen is running" || first.Stale {
+		t.Fatalf("первый снимок: raw=%q stale=%v", first.Raw, first.Stale)
+	}
+
+	// Пока внеочередной опрос держится на замке, снимок уже помечен устаревшим
+	blocking.Store(true)
+	raw.Store("XKeen is not running")
+	c.Invalidate()
+	if !c.Snapshot().Stale {
+		t.Error("stale = false сразу после Invalidate")
+	}
+
+	start := time.Now()
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		close(gate)
+	}()
+	rctx, rcancel := context.WithTimeout(context.Background(), time.Second)
+	defer rcancel()
+	got := c.RefreshNow(rctx)
+	if got.Raw != "XKeen is not running" {
+		t.Errorf("raw = %q, want обновлённый вывод", got.Raw)
+	}
+	if got.Stale {
+		t.Error("stale = true после успешного внеочередного опроса")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("обновление заняло %v, интервал 10 с ждать не должно", elapsed)
+	}
+}
+
+// TestXKeenStatusCache_VersionRefresh: версия перечитывается не чаще раза в
+// 10 минут, а после InvalidateVersion — сразу; "unknown" прежнюю версию не затирает.
+func TestXKeenStatusCache_VersionRefresh(t *testing.T) {
+	clock := newFakeClock()
+	var calls atomic.Int32
+	var ver atomic.Value
+	ver.Store("2.0 Beta")
+	c := newXKeenStatusCacheFunc(
+		func(context.Context) (string, error) { return "XKeen is running", nil },
+		func(context.Context) string {
+			calls.Add(1)
+			return ver.Load().(string)
+		},
+		clock.Now, time.Hour,
+	)
+	c.Start()
+	defer c.Stop()
+	ctx, cancel := refreshCtx(t)
+	defer cancel()
+
+	if got := c.RefreshNow(ctx); got.Version != "2.0 Beta" {
+		t.Fatalf("version = %q, want 2.0 Beta", got.Version)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("после первых опросов runVersion вызван %d раз, want 1", n)
+	}
+
+	clock.Advance(9 * time.Minute)
+	c.RefreshNow(ctx)
+	if n := calls.Load(); n != 1 {
+		t.Errorf("через 9 минут runVersion вызван %d раз, want 1", n)
+	}
+
+	clock.Advance(2 * time.Minute)
+	c.RefreshNow(ctx)
+	if n := calls.Load(); n != 2 {
+		t.Errorf("через 11 минут runVersion вызван %d раз, want 2", n)
+	}
+
+	c.InvalidateVersion()
+	c.RefreshNow(ctx)
+	if n := calls.Load(); n != 3 {
+		t.Errorf("после InvalidateVersion runVersion вызван %d раз, want 3", n)
+	}
+
+	ver.Store("unknown")
+	c.InvalidateVersion()
+	got := c.RefreshNow(ctx)
+	if got.Version != "2.0 Beta" {
+		t.Errorf("version = %q, want прежняя 2.0 Beta (unknown не затирает)", got.Version)
+	}
+}
+
+// TestXKeenStatusCache_StopIdempotent: Stop без Start не виснет, повторный
+// Stop безопасен, RefreshNow после остановки возвращается сразу.
+func TestXKeenStatusCache_StopIdempotent(t *testing.T) {
+	newCache := func() *XKeenStatusCache {
+		return newXKeenStatusCacheFunc(func(context.Context) (string, error) {
+			return "XKeen is running", nil
+		}, nil, nil, 10*time.Millisecond)
+	}
+	within := func(name string, fn func()) {
+		t.Helper()
+		done := make(chan struct{})
+		go func() {
+			fn()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s завис", name)
+		}
+	}
+
+	within("Stop без Start", func() { newCache().Stop() })
+
+	c := newCache()
+	c.Start()
+	c.Start() // повторный Start не запускает второй цикл
+	within("двойной Stop", func() {
+		c.Stop()
+		c.Stop()
+	})
+	within("RefreshNow после Stop", func() {
+		ctx, cancel := refreshCtx(t)
+		defer cancel()
+		c.RefreshNow(ctx)
+	})
+}

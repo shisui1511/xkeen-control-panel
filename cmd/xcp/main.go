@@ -256,6 +256,8 @@ func main() {
 	xkeenStatusCache.Start()
 	api.SetXKeenStatusCache(xkeenStatusCache)
 	defer xkeenStatusCache.Stop()
+	// После start/stop/restart/switch кэш обновляется сразу, без ожидания 10 с
+	api.XKeenService().SetLifecycleHook(xkeenStatusCache.Invalidate)
 	srv.HandleProtected("/api/auth/change-password", api.ChangePassword)
 	srv.HandleProtected("/api/auth/sessions", api.AuthSessions)
 	srv.HandleProtected("/api/auth/sessions/terminate", api.AuthSessionTerminate)
