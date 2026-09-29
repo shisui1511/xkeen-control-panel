@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -274,6 +275,73 @@ func TestKernelService_DetectVersion_Mihomo(t *testing.T) {
 	v := svc.detectVersion(svc.kernels["mihomo"])
 	if v != "1.18.0" {
 		t.Fatalf("expected version 1.18.0, got %s", v)
+	}
+}
+
+// TestDetectVersion_Timeout: зависший бинарник не держит detectVersion дольше
+// таймаута, а результат-ошибка не кэшируется.
+func TestDetectVersion_Timeout(t *testing.T) {
+	origTimeout := kernelVersionTimeout
+	kernelVersionTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { kernelVersionTimeout = origTimeout })
+
+	tmpDir := t.TempDir()
+	xrayPath := filepath.Join(tmpDir, "xray")
+	// sleep наследует пайп вывода — проверяем и убийство процесса, и WaitDelay
+	if err := os.WriteFile(xrayPath, []byte("#!/bin/sh\nexec sleep 5\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewKernelService(t.TempDir())
+	svc.kernels["xray"].BinaryPath = xrayPath
+
+	for i := 0; i < 2; i++ {
+		start := time.Now()
+		v := svc.detectVersion(svc.kernels["xray"])
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("call %d: detectVersion took %v, want < 2s", i, elapsed)
+		}
+		if v != "error" {
+			t.Fatalf("call %d: version = %q, want error", i, v)
+		}
+	}
+
+	// Ошибка не кэшируется: после починки бинарника версия читается сразу.
+	if err := os.WriteFile(xrayPath, []byte("#!/bin/sh\necho \"Xray 1.8.24 (Xray, Penetrates Everything.)\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if v := svc.detectVersion(svc.kernels["xray"]); v != "1.8.24" {
+		t.Fatalf("after fix: version = %q, want 1.8.24 (error must not be cached)", v)
+	}
+}
+
+// TestNewKernelService_NoWarningWhenNotInstalled: отсутствие ядер на чистой
+// системе — штатная ситуация, в логе это info без слова WARNING.
+func TestNewKernelService_NoWarningWhenNotInstalled(t *testing.T) {
+	origXray, origMihomo := xrayProbePaths, mihomoProbePaths
+	xrayProbePaths = []string{"/nonexistent/xray-does-not-exist"}
+	mihomoProbePaths = []string{"/nonexistent/mihomo-does-not-exist"}
+	t.Setenv("PATH", t.TempDir())
+
+	var buf bytes.Buffer
+	origOut, origFlags := log.Writer(), log.Flags()
+	log.SetOutput(&buf)
+	t.Cleanup(func() {
+		log.SetOutput(origOut)
+		log.SetFlags(origFlags)
+		xrayProbePaths, mihomoProbePaths = origXray, origMihomo
+	})
+
+	NewKernelService(t.TempDir())
+
+	out := buf.String()
+	if strings.Contains(out, "WARNING") {
+		t.Errorf("лог содержит WARNING про отсутствующие ядра: %q", out)
+	}
+	for _, want := range []string{"Xray binary not found (not installed yet)", "Mihomo binary not found (not installed yet)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("в логе нет %q: %q", want, out)
+		}
 	}
 }
 

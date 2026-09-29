@@ -556,7 +556,7 @@ func NewKernelService(dataDir string) *KernelService {
 	// Register known kernels with auto-detected binary paths
 	xrayPath := findKernelBinary("xray")
 	if xrayPath == "" {
-		log.Printf("WARNING: failed to auto-detect Xray binary. Checked paths: %s", strings.Join(xrayProbePaths, ", "))
+		log.Printf("Kernel: Xray binary not found (not installed yet); checked: %s", strings.Join(xrayProbePaths, ", "))
 		xrayPath = "/opt/sbin/xray" // fallback default for display and install
 	}
 	svc.kernels["xray"] = &KernelInfo{
@@ -571,7 +571,7 @@ func NewKernelService(dataDir string) *KernelService {
 
 	mihomoPath := findKernelBinary("mihomo")
 	if mihomoPath == "" {
-		log.Printf("WARNING: failed to auto-detect Mihomo binary. Checked paths: %s", strings.Join(mihomoProbePaths, ", "))
+		log.Printf("Kernel: Mihomo binary not found (not installed yet); checked: %s", strings.Join(mihomoProbePaths, ", "))
 		mihomoPath = "/opt/sbin/mihomo" // fallback default for display and install
 	}
 	svc.kernels["mihomo"] = &KernelInfo{
@@ -784,6 +784,10 @@ func (s *KernelService) SetChannel(name, channel string) bool {
 	return true
 }
 
+// kernelVersionTimeout — предел ожидания `<ядро> version`. Пакетная переменная:
+// тест понижает её, чтобы не ждать секунды.
+var kernelVersionTimeout = 5 * time.Second
+
 // versionCacheTTL is the duration for which a detected version string is considered valid.
 const versionCacheTTL = 60 * time.Second
 
@@ -804,15 +808,22 @@ func (s *KernelService) detectVersion(k *KernelInfo) string {
 		return "not installed"
 	}
 
+	// Зависший бинарник не должен держать List()/Get() (и мьютекс версии) бесконечно.
+	ctx, cancel := context.WithTimeout(context.Background(), kernelVersionTimeout)
+	defer cancel()
+
 	var cmd *exec.Cmd
 	switch k.Name {
 	case "xray":
-		cmd = exec.Command(k.BinaryPath, "version")
+		cmd = exec.CommandContext(ctx, k.BinaryPath, "version")
 	case "mihomo":
-		cmd = exec.Command(k.BinaryPath, "-v")
+		cmd = exec.CommandContext(ctx, k.BinaryPath, "-v")
 	default:
 		return "unknown"
 	}
+	// Пайп вывода может унаследовать внук процесса: без WaitDelay CombinedOutput
+	// ждал бы его закрытия даже после убийства бинарника по таймауту.
+	cmd.WaitDelay = time.Second
 
 	out, err := cmd.CombinedOutput()
 	output := utils.StripANSI(string(out))
