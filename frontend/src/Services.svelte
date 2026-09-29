@@ -6,8 +6,10 @@
     fetchCapabilities,
     showConfirm,
     isKernelChecking,
-    capabilities
+    capabilities,
+    lockNav
   } from './stores';
+  import { anyKernelInstalled } from './lib/navCaps';
   import { usePoller } from './lib/poller';
   import Skeleton from './components/Skeleton.svelte';
   import Button from './components/Button.svelte';
@@ -370,6 +372,8 @@
         // остаются на сервере навсегда и раньше зацикливали запросы
         kernels.forEach((k: (typeof kernels)[0]) => {
           if (isTransitionalStatus(k.status) && !statusTimeouts[k.name]) {
+            // Страница открылась во время идущей установки: меню тоже замораживаем
+            if (k.status !== 'checking') holdNavLock(k.name);
             startPolling(k.name);
           }
         });
@@ -384,6 +388,7 @@
   }
 
   async function controlService(action: string) {
+    if (action === 'start' && startBlockedReason) return;
     isKernelChecking.set(false);
     const key = `xkeen-${action}`;
     actionLoading[key] = true;
@@ -510,6 +515,22 @@
     }
   }
 
+  // Замок бокового меню на время установки ядра: пока идёт скачивание и замена,
+  // меню не перестраивается; после снятия последнего замка оно обновляется один раз.
+  // Проверка обновлений (checking) замок не берёт.
+  const navUnlocks: Record<string, () => void> = {};
+
+  function holdNavLock(name: string) {
+    if (!navUnlocks[name]) navUnlocks[name] = lockNav();
+  }
+
+  function releaseNavLock(name: string) {
+    const unlock = navUnlocks[name];
+    if (!unlock) return;
+    delete navUnlocks[name];
+    unlock();
+  }
+
   // Ядра, у которых POST install отправлен, но ответа ещё нет
   const installStarting: Record<string, boolean> = {};
   // Ядро → «вид:версия» итога, о котором уже показан тост (защита от повтора)
@@ -532,6 +553,7 @@
     }
     delete lastToastedResult[name];
     installStarting[name] = true;
+    holdNavLock(name);
     try {
       const res = await apiFetch(`/api/kernels/${name}/install`, {
         method: 'POST'
@@ -543,6 +565,7 @@
       startPolling(name);
     } catch (e: any) {
       delete installStarting[name];
+      releaseNavLock(name);
       const at = kernels.findIndex((k) => k.name === name);
       if (at >= 0 && previous) {
         kernels[at] = previous;
@@ -727,6 +750,7 @@
         if (data.status === 'idle' || data.status === 'done' || data.status === 'failed') {
           clearTimeout(statusTimeouts[name]);
           delete statusTimeouts[name];
+          releaseNavLock(name);
           if (wasTransitional && data.status === 'done' && idx >= 0) {
             toastKernelResult(kernels[idx]);
           }
@@ -739,6 +763,7 @@
       } else {
         clearTimeout(statusTimeouts[name]);
         delete statusTimeouts[name];
+        releaseNavLock(name);
         const idx = kernels.findIndex((k) => k.name === name);
         if (
           idx >= 0 &&
@@ -755,6 +780,7 @@
       if (e?.status === 401) return;
       clearTimeout(statusTimeouts[name]);
       delete statusTimeouts[name];
+      releaseNavLock(name);
       const idx = kernels.findIndex((k) => k.name === name);
       if (idx >= 0) {
         kernels[idx] = { ...kernels[idx], status: 'failed' };
@@ -816,6 +842,17 @@
 
   let switchingKernelTo = $state<string | null>(null);
 
+  // Причина, по которой «Запустить» недоступна: нет XKeen или ни одного ядра.
+  // Пока capabilities не загружены (null), кнопка не блокируется
+  const startBlockedReason = $derived.by(() => {
+    if (isRunning) return null;
+    if (xkeenInstalled === false || $capabilities?.xkeen_installed === false) {
+      return $t('svc.start_disabled_no_xkeen');
+    }
+    if (anyKernelInstalled($capabilities) === false) return $t('svc.start_disabled_no_kernel');
+    return null;
+  });
+
   // Подсказка установщика XKeen называет стабильную версию Xray. Если на
   // канале «Стабильный» она ещё неизвестна, проверка запускается один раз за
   // жизнь страницы; до ответа установщик показывает общую подсказку
@@ -845,6 +882,7 @@
       kernelPoller.stop();
       statusPoller.stop();
       Object.values(statusTimeouts).forEach(clearTimeout);
+      Object.keys(navUnlocks).forEach(releaseNavLock);
     };
   });
 </script>
@@ -1164,10 +1202,14 @@
         {:else}
           <button
             class="btn btn-primary"
+            data-testid="hero-start"
             onclick={() => controlService('start')}
-            disabled={actionLoading['xkeen-start']}
+            disabled={actionLoading['xkeen-start'] || !!startBlockedReason}
             class:btn-loading={actionLoading['xkeen-start']}
-            title={$t('svc.action_start')}
+            title={startBlockedReason ?? $t('svc.action_start')}
+            aria-label={startBlockedReason
+              ? `${$t('svc.action_start')}: ${startBlockedReason}`
+              : undefined}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"
               ><polygon points="5 3 19 12 5 21 5 3" /></svg

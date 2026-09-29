@@ -185,3 +185,73 @@ test.describe('Кнопка «Запустить» без ядер', () => {
     await expect(cardBtn).toBeDisabled();
   });
 });
+
+test.describe('Сервисы: «Запустить» без ядер', () => {
+  const heroStart = (page: Page) => page.getByTestId('hero-start');
+
+  test('нет ядер: кнопка неактивна с подсказкой, POST не уходит', async ({ page }) => {
+    const counters = await mockRoutes(page, {
+      xkeenInstalled: true,
+      xrayInstalled: false,
+      mihomoInstalled: false
+    });
+    await page.goto('/#/services');
+
+    await expect(heroStart(page)).toBeDisabled();
+    await expect(heroStart(page)).toHaveAttribute('title', NO_KERNEL);
+    await expect(heroStart(page)).toHaveAttribute('aria-label', new RegExp(NO_KERNEL));
+    await heroStart(page).dispatchEvent('click');
+    await page.waitForTimeout(300);
+    expect(counters.control).toEqual([]);
+  });
+
+  test('одно ядро установлено: кнопка активна и запускает службу', async ({ page }) => {
+    const counters = await mockRoutes(page, {
+      xkeenInstalled: true,
+      xrayInstalled: false,
+      mihomoInstalled: true
+    });
+    await page.goto('/#/services');
+
+    await expect(heroStart(page)).toBeEnabled();
+    await heroStart(page).click();
+    await expect.poll(() => counters.control.length).toBe(1);
+    expect(counters.control[0]).toContain('action=start');
+  });
+
+  test('XKeen не установлен: подсказка про XKeen', async ({ page }) => {
+    const counters = await mockRoutes(page, {
+      xkeenInstalled: false,
+      xrayInstalled: false,
+      mihomoInstalled: false
+    });
+    await page.goto('/#/services');
+
+    await expect(heroStart(page)).toBeDisabled();
+    await expect(heroStart(page)).toHaveAttribute('title', NO_XKEEN);
+    await heroStart(page).dispatchEvent('click');
+    await page.waitForTimeout(300);
+    expect(counters.control).toEqual([]);
+  });
+
+  test('capabilities ещё не загружены: кнопка не блокируется', async ({ page }) => {
+    let release: () => void = () => {};
+    const capsGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await mockRoutes(page, {
+      xkeenInstalled: true,
+      xrayInstalled: false,
+      mihomoInstalled: false,
+      capsGate
+    });
+    await page.goto('/#/services');
+
+    await expect(heroStart(page)).toBeVisible();
+    await expect(heroStart(page)).toBeEnabled();
+    await expect(heroStart(page)).not.toHaveAttribute('title', NO_KERNEL);
+
+    release();
+    await expect(heroStart(page)).toBeDisabled();
+  });
+});

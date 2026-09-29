@@ -13,6 +13,8 @@ interface MockState {
   install?: { status?: number; body?: string; gate?: Promise<void> };
   /** Очередь ответов GET status по ядру: по одному элементу на запрос, поверх записи в kernels. */
   statusQueue?: Record<string, Record<string, unknown>[]>;
+  /** Активное ядро в ответе /api/capabilities (по умолчанию xray); читается при каждом запросе. */
+  activeKernel?: string;
   /** Поля записи ядра после успешного POST /api/kernels/{k}/rollback. */
   rollbackPatch?: Record<string, Record<string, unknown>>;
 }
@@ -58,7 +60,7 @@ async function mockRoutes(page: Page, state: MockState): Promise<Counters> {
             xray: { installed: true, version: '1.8.4', channel: 'stable' },
             mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
           },
-          active_kernel: 'xray',
+          active_kernel: state.activeKernel ?? 'xray',
           xkeen_installed: true,
           mihomo: { reachable: true, process_running: false, api_reachable: false }
         }
@@ -471,5 +473,128 @@ test.describe('Services page — rollback label', () => {
     await rollbackButton(page, 'xray').click();
     await page.waitForTimeout(300);
     expect(counters.rollbackPosts).toEqual([]);
+  });
+});
+
+test.describe('Services page — nav lock during kernel install', () => {
+  const XRAY_GROUPS = 4;
+  const groups = (page: Page) => page.locator('.sidebar-nav .nav-group');
+  const restart = (page: Page) => page.getByRole('button', { name: 'Перезапустить' });
+  const holdingStatus = { status: 'downloading', stage: 'downloading' };
+
+  test('пока идёт установка, меню не перестраивается; после done обновляется один раз', async ({
+    page
+  }) => {
+    const state: MockState = {
+      kernels: kernelsFixture('xray', {
+        xray: { current_version: '26.9.8', latest_version: '26.9.9', has_update: true }
+      }),
+      // Пять «downloading» подряд, затем done
+      statusQueue: {
+        xray: [
+          ...Array.from({ length: 6 }, () => ({ ...holdingStatus })),
+          {
+            status: 'done',
+            stage: '',
+            has_update: false,
+            current_version: '26.9.9',
+            result_kind: 'updated',
+            result_version: '26.9.9'
+          }
+        ]
+      }
+    };
+    await mockRoutes(page, state);
+    await page.clock.install();
+    await page.goto('/#/services');
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS);
+
+    await page
+      .locator('.update-item', { hasText: 'Xray' })
+      .getByRole('button', { name: 'Обновить' })
+      .click();
+    await expect(
+      page.locator('.update-item', { hasText: 'Xray' }).locator('.update-actions .btn-primary')
+    ).toHaveText('Скачивание…');
+
+    // Ядро сменилось на сервере, capabilities запрошены во время установки
+    state.activeKernel = 'mihomo';
+    await restart(page).click();
+    await page.clock.runFor(4_000);
+    await page.waitForTimeout(300);
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS);
+    await expect(page.locator('a[href="#/proxies"]')).toHaveCount(0);
+
+    // Терминальный статус снимает замок: меню обновляется
+    await page.clock.runFor(10_000);
+    await expect(page.getByTestId('kernel-result-xray')).toBeVisible();
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS + 2);
+    await expect(page.locator('a[href="#/proxies"]')).toBeVisible();
+  });
+
+  test('ошибка POST install снимает замок', async ({ page }) => {
+    const state: MockState = {
+      kernels: kernelsFixture('xray', {
+        xray: { current_version: '26.9.8', latest_version: '26.9.9', has_update: true }
+      }),
+      install: { status: 500, body: 'download failed' }
+    };
+    await mockRoutes(page, state);
+    await page.clock.install();
+    await page.goto('/#/services');
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS);
+
+    state.activeKernel = 'mihomo';
+    await page
+      .locator('.update-item', { hasText: 'Xray' })
+      .getByRole('button', { name: 'Обновить' })
+      .click();
+    await expect(page.locator('.toast--error', { hasText: 'download failed' })).toBeVisible();
+    // Замок снят: последнее снятие тихо перечитывает capabilities
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS + 2);
+  });
+
+  test('уход со страницы во время установки снимает замок', async ({ page }) => {
+    const state: MockState = {
+      kernels: kernelsFixture('xray', {
+        xray: { current_version: '26.9.8', latest_version: '26.9.9', has_update: true }
+      }),
+      statusQueue: { xray: Array.from({ length: 20 }, () => ({ ...holdingStatus })) }
+    };
+    await mockRoutes(page, state);
+    await page.clock.install();
+    await page.goto('/#/services');
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS);
+
+    await page
+      .locator('.update-item', { hasText: 'Xray' })
+      .getByRole('button', { name: 'Обновить' })
+      .click();
+    await expect(
+      page.locator('.update-item', { hasText: 'Xray' }).locator('.update-actions .btn-primary')
+    ).toHaveText('Скачивание…');
+    state.activeKernel = 'mihomo';
+    await page.locator('a[href="#/dashboard"]').first().click();
+
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS + 2);
+  });
+
+  test('проверка обновлений (checking) замок не берёт', async ({ page }) => {
+    const state: MockState = {
+      kernels: kernelsFixture('xray', { xray: { status: 'checking' } }),
+      statusQueue: {
+        xray: Array.from({ length: 3 }, () => ({ status: 'checking' }))
+      }
+    };
+    await mockRoutes(page, state);
+    await page.clock.install();
+    await page.goto('/#/services');
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS);
+    await expect(page.getByTestId('kernel-checking-hint-xray')).toBeVisible();
+
+    // Смена ядра при идущей проверке доходит до меню сразу: замка нет
+    state.activeKernel = 'mihomo';
+    await restart(page).click();
+    await expect(groups(page)).toHaveCount(XRAY_GROUPS + 2);
   });
 });
