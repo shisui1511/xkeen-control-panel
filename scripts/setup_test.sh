@@ -778,13 +778,29 @@ else
 fi
 cleanup
 
-# Интерактив без --purge: второй вопрос задаётся как раньше, «y» удаляет данные, «n» — нет
+# Интерактив без --purge: второй вопрос задаётся как раньше. Файл-терминал
+# открывается заново при каждом чтении, поэтому разные ответы на два вопроса
+# подаёт заглушка read: построчно из файла ответов.
+write_read_stub() {
+    cat > "$TMP/read_stub.sh" <<'STUB'
+read() {
+    _n=$(cat "$STUB_DIR/n" 2>/dev/null || echo 0)
+    _n=$((_n+1))
+    echo "$_n" > "$STUB_DIR/n"
+    _ans=$(sed -n "${_n}p" "$STUB_DIR/answers")
+    eval "$1=\$_ans"
+}
+STUB
+}
+
 setup_uninstall_sandbox
-printf 'y\nn\n' > "$TMP/tty"
+write_read_stub
+printf 'y\nn\n' > "$TMP/answers"
+printf 'stub\n' > "$TMP/tty"
 TTY_DEV_OVERRIDE="$TMP/tty"
-out=$(run_in_sandbox "do_uninstall" 2>&1)
+out=$(STUB_DIR="$TMP" run_in_sandbox ". '$TMP/read_stub.sh'; do_uninstall" 2>&1)
 unset TTY_DEV_OVERRIDE
-if [ ! -e "$BIN_PATH" ] && [ -f "$INSTALL_DIR/config.json" ] \
+if [ ! -e "$BIN_PATH" ] && [ ! -e "$INIT_SCRIPT" ] && [ -f "$INSTALL_DIR/config.json" ] \
     && echo "$out" | grep -q "Удалить директорию конфигов"; then
     pass "интерактив: второй вопрос про конфиги, ответ n сохраняет данные"
 else

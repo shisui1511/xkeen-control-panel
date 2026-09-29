@@ -851,10 +851,25 @@ do_update() {
   fi
 }
 
+# Удаление каталога данных панели (пароль, TLS, сессии) — необратимо, только
+# по явному подтверждению. Пустой и системные пути отвергаются: подменённый
+# или незаданный XCP_INSTALL_DIR не должен снести /opt целиком.
+purge_install_dir() {
+  case "$INSTALL_DIR" in
+    ""|"/"|"/opt"|"/opt/"|"/opt/etc"|"/opt/etc/")
+      error "Отказ удалять каталог данных: $INSTALL_DIR"
+      return 1
+      ;;
+  esac
+  rm -rf -- "$INSTALL_DIR"
+  ok "Данные панели удалены"
+}
+
 # Удаление. С терминалом — два вопроса (подтверждение и судьба конфигов).
 # Без терминала (ssh без -t, автоматизация) явный флаг --uninstall считается
-# подтверждением, а данные панели сохраняются: чтение из недоступного
-# терминала раньше давало пустой ответ и молчаливое «Отменено».
+# подтверждением, а данные панели сохраняются, если не задан --purge:
+# чтение из недоступного терминала раньше давало пустой ответ и молчаливое
+# «Отменено».
 do_uninstall() {
   if [ ! -f "$BIN_PATH" ] && [ ! -f "$INIT_SCRIPT" ]; then
     error "Панель не установлена."
@@ -863,7 +878,9 @@ do_uninstall() {
 
   local response
   local interactive_tty
+  local purge
   interactive_tty="false"
+  purge="${ARG_PURGE:-false}"
   if has_tty; then
     interactive_tty="true"
     printf "\n${RED}${BOLD}Будет удалена панель и все её файлы.${NC}\n"
@@ -873,8 +890,10 @@ do_uninstall() {
       [Yy]) ;;
       *) info "Отменено"; return 0 ;;
     esac
+  elif [ "$purge" = "true" ]; then
+    info "Неинтерактивное удаление: панель, init-скрипт и данные в $INSTALL_DIR по флагу --purge"
   else
-    info "Неинтерактивное удаление: панель и init-скрипт; данные в $INSTALL_DIR сохраняются (для удаления данных — --purge)"
+    info "Неинтерактивное удаление: панель и init-скрипт; данные в $INSTALL_DIR сохраняются, для их удаления нужен флаг --purge"
   fi
 
   stop_service
@@ -883,11 +902,13 @@ do_uninstall() {
   rm -f "$INIT_SCRIPT"
   rm -f "${INIT_SCRIPT}.bak"
 
-  if [ "$interactive_tty" = "true" ]; then
+  if [ "$purge" = "true" ]; then
+    purge_install_dir || return 1
+  elif [ "$interactive_tty" = "true" ]; then
     printf "\nУдалить директорию конфигов (%s)? [y/N]: " "$INSTALL_DIR"
     read response < "$TTY_DEV"
     case "$response" in
-      [Yy]) rm -rf "$INSTALL_DIR"; ok "Конфиги удалены" ;;
+      [Yy]) purge_install_dir || return 1 ;;
       *) ok "Конфиги сохранены" ;;
     esac
   else
@@ -1106,6 +1127,10 @@ parse_args() {
         ACTION="status"
         shift
         ;;
+      --purge)
+        ARG_PURGE="true"
+        shift
+        ;;
       --channel|-c)
         if [ -n "$2" ]; then
           CHANNEL="$2"
@@ -1131,6 +1156,7 @@ parse_args() {
         printf "  -i, --install      Установка панели (неинтерактивно)\n"
         printf "  -u, --update       Обновление панели\n"
         printf "  -d, --uninstall    Удаление панели\n"
+        printf "      --purge        С --uninstall: удалить и данные панели (пароль, TLS, сессии)\n"
         printf "  -r, --restart      Перезапуск службы панели\n"
         printf "  -s, --status       Проверить статус службы\n"
         printf "  -c, --channel CH   Канал обновления (stable/prerelease)\n"
@@ -1144,6 +1170,11 @@ parse_args() {
         ;;
     esac
   done
+
+  if [ "${ARG_PURGE:-false}" = "true" ] && [ "${ACTION:-}" != "uninstall" ]; then
+    error "Флаг --purge работает только вместе с --uninstall"
+    exit 1
+  fi
 }
 
 # ===== Главный цикл =====
@@ -1154,6 +1185,7 @@ parse_args() {
 INTERACTIVE="true"
 CHANNEL="stable"
 ARG_PORT=""
+ARG_PURGE="false"
 
 # Считываем сохраненный канал обновлений, если файл существует
 if [ -f "$INSTALL_DIR/channel" ]; then
