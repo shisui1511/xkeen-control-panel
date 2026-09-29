@@ -821,6 +821,50 @@ fi
 cleanup
 
 # ---------------------------------------------------------------------------
+# Подсказка про пароль при первом входе (D-14)
+# ---------------------------------------------------------------------------
+echo ""
+echo "── подсказка первого входа ──────────────────────────────────"
+
+# Код выдан: адрес, код и слово про пароль
+make_sandbox
+install_mock_xcp_setup_code
+printf '{}\n' > "$INSTALL_DIR/config.json"
+out=$(run_in_sandbox "INTERACTIVE=false; offer_password_setup 8090 192.168.1.1" 2>&1)
+if echo "$out" | grep -q "https://192.168.1.1:8090" && echo "$out" | grep -q "A1B2C3D4" \
+    && echo "$out" | grep -q "пароль"; then
+    pass "подсказка первого входа с кодом настройки упоминает пароль"
+else
+    fail "подсказка первого входа с кодом настройки упоминает пароль (got: $out)"
+fi
+cleanup
+
+# xcp --setup-code упал без вывода: нет пустого «код настройки: »
+make_sandbox
+printf '#!/bin/sh\nexit 1\n' > "$BIN_PATH"
+chmod +x "$BIN_PATH"
+printf '{}\n' > "$INSTALL_DIR/config.json"
+out=$(run_in_sandbox "INTERACTIVE=false; offer_password_setup 8090 192.168.1.1" 2>&1)
+if echo "$out" | grep -q "пароль" && echo "$out" | grep -q "https://192.168.1.1:8090" \
+    && ! echo "$out" | grep -q 'код настройки: $'; then
+    pass "пустой код настройки не печатается пустым"
+else
+    fail "пустой код настройки не печатается пустым (got: $out)"
+fi
+cleanup
+
+# Путь неответившей панели: подсказка без кода
+make_sandbox
+out=$(run_in_sandbox "print_first_login_hint 8090 192.168.1.1 ''" 2>&1) || true
+if echo "$out" | grep -q "При первом входе задайте пароль" && echo "$out" | grep -q "xcp --setup-code" \
+    && echo "$out" | grep -q "https://192.168.1.1:8090" && ! echo "$out" | grep -q 'код настройки: $'; then
+    pass "подсказка первого входа при неответившей панели"
+else
+    fail "подсказка первого входа при неответившей панели (got: $out)"
+fi
+cleanup
+
+# ---------------------------------------------------------------------------
 # Итог
 # ---------------------------------------------------------------------------
 echo ""
