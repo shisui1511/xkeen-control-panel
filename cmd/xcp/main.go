@@ -249,6 +249,13 @@ func main() {
 
 	// API handlers
 	api := handlers.NewAPI(cfg, srv)
+
+	// Кэш статуса XKeen: единственный владелец опроса `xkeen -status` / `-v`,
+	// обработчики отвечают из его снимка
+	xkeenStatusCache := services.NewXKeenStatusCache(api.XKeenService())
+	xkeenStatusCache.Start()
+	api.SetXKeenStatusCache(xkeenStatusCache)
+	defer xkeenStatusCache.Stop()
 	srv.HandleProtected("/api/auth/change-password", api.ChangePassword)
 	srv.HandleProtected("/api/auth/sessions", api.AuthSessions)
 	srv.HandleProtected("/api/auth/sessions/terminate", api.AuthSessionTerminate)

@@ -47,7 +47,16 @@ type XKeenService struct {
 	inRestartUntil    time.Time
 	kernelStartedHook func()
 	now               func() time.Time
+
+	// statusRunMu сериализует `xkeen -status` во всём процессе: цикл кэша,
+	// сторожевой таймер и пост-проверки start/restart не порождают второй
+	// процесс, пока предыдущий не завершился. Под замком не вызывать ничего,
+	// что снова зовёт Status.
+	statusRunMu sync.Mutex
 }
+
+// ErrXKeenNotInstalled — бинарник XKeen не найден, `xkeen -status` не запускался.
+var ErrXKeenNotInstalled = errors.New("xkeen is not installed")
 
 func NewXKeenService(binary, dataDir string) *XKeenService {
 	svc := &XKeenService{
@@ -158,8 +167,18 @@ func (s *XKeenService) GetVersion() string {
 	return strings.TrimSpace(firstLine)
 }
 
+// Status запускает `xkeen -status` с таймаутом 5 с (сторожевой таймер и
+// пост-проверки start/restart).
 func (s *XKeenService) Status() (string, error) {
-	out, err := s.runWithTimeout("-status", 5*time.Second)
+	return s.StatusWithTimeout(5 * time.Second)
+}
+
+// StatusWithTimeout запускает `xkeen -status` с заданным таймаутом. Одновременно
+// выполняется не больше одного такого процесса: остальные вызовы ждут замок.
+func (s *XKeenService) StatusWithTimeout(d time.Duration) (string, error) {
+	s.statusRunMu.Lock()
+	defer s.statusRunMu.Unlock()
+	out, err := s.runWithTimeout("-status", d)
 	output := utils.StripANSI(out)
 	if err != nil {
 		return output, err

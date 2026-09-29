@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -586,4 +587,74 @@ func TestServiceControl_ApplyByPath(t *testing.T) {
 	if got := atomic.LoadInt32(restarts); got != 1 {
 		t.Errorf("restart calls after rejected paths = %d, want 1", got)
 	}
+}
+
+// decodeServiceStatus разбирает ответ /api/service/status.
+func decodeServiceStatus(t *testing.T, rr *httptest.ResponseRecorder) ServiceStatusResponse {
+	t.Helper()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data ServiceStatusResponse `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp.Data
+}
+
+// TestServiceStatus_FromCache: `xkeen -status` начал падать после одного успеха —
+// ответ 200 из кэша: прежний raw, stale=true и возраст последнего успеха.
+func TestServiceStatus_FromCache(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+
+	var offset atomic.Int64 // секунды сдвига часов кэша
+	base := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	var fail atomic.Bool
+	cache := services.NewXKeenStatusCacheFunc(
+		func(context.Context) (string, error) {
+			if fail.Load() {
+				return "", errors.New("timeout exceeded")
+			}
+			return "XKeen is running", nil
+		},
+		nil,
+		func() time.Time { return base.Add(time.Duration(offset.Load()) * time.Second) },
+		time.Hour,
+	)
+	cache.Start()
+	defer cache.Stop()
+	api.SetXKeenStatusCache(cache)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cache.RefreshNow(ctx)
+
+	fresh := decodeServiceStatus(t, serveStatus(api))
+	if fresh.Stale || fresh.Raw != "XKeen is running" || fresh.AgeSeconds == nil || *fresh.AgeSeconds != 0 {
+		t.Fatalf("свежий снимок: stale=%v raw=%q age=%v", fresh.Stale, fresh.Raw, fresh.AgeSeconds)
+	}
+
+	fail.Store(true)
+	offset.Store(45)
+	cache.RefreshNow(ctx)
+
+	rr := serveStatus(api)
+	got := decodeServiceStatus(t, rr)
+	if !got.Stale {
+		t.Error("stale = false при падающем xkeen -status")
+	}
+	if got.Raw != "XKeen is running" {
+		t.Errorf("raw = %q, want прежний вывод", got.Raw)
+	}
+	if got.AgeSeconds == nil || *got.AgeSeconds != 45 {
+		t.Errorf("age_seconds = %v, want 45", got.AgeSeconds)
+	}
+}
+
+func serveStatus(api *API) *httptest.ResponseRecorder {
+	rr := httptest.NewRecorder()
+	api.ServiceStatus(rr, httptest.NewRequest(http.MethodGet, "/api/service/status", nil))
+	return rr
 }

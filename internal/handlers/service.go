@@ -13,13 +13,17 @@ import (
 )
 
 type ServiceStatusResponse struct {
-	IsRunning    bool                    `json:"is_running"`
-	ActiveKernel string                  `json:"active_kernel"`
-	PID          int                     `json:"pid"`
-	Uptime       string                  `json:"uptime"`
-	BinaryPath   string                  `json:"binary_path"`
-	Raw          string                  `json:"raw"`
-	Watchdog     *WatchdogStatusResponse `json:"watchdog,omitempty"`
+	IsRunning    bool   `json:"is_running"`
+	ActiveKernel string `json:"active_kernel"`
+	PID          int    `json:"pid"`
+	Uptime       string `json:"uptime"`
+	BinaryPath   string `json:"binary_path"`
+	Raw          string `json:"raw"`
+	// Stale — Raw нельзя считать свежим (опрос xkeen не удался или устарел);
+	// AgeSeconds — возраст последнего успешного опроса, нет на холодном старте
+	Stale      bool                    `json:"stale"`
+	AgeSeconds *int                    `json:"age_seconds,omitempty"`
+	Watchdog   *WatchdogStatusResponse `json:"watchdog,omitempty"`
 	// XKeenInstalled — бинарник XKeen найден; XKeenInstallerAvailable —
 	// панель может установить XKeen (есть Entware)
 	XKeenInstalled          bool `json:"xkeen_installed"`
@@ -49,18 +53,20 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	out, err := a.xkeenSvc.Status()
-	if err != nil {
-		JSONError(w, http.StatusInternalServerError, out)
-		return
-	}
+	// Статус берётся из кэша: медленный или упавший `xkeen -status` под
+	// нагрузкой больше не превращается в 500, ответ помечается stale
+	snap := a.xkeenStatusSnapshot()
 
 	resp := ServiceStatusResponse{
 		BinaryPath:              a.cfg.XKeenBinary,
-		Raw:                     out,
+		Raw:                     snap.Raw,
+		Stale:                   snap.Stale,
 		XKeenInstalled:          a.xkeenSvc.Installed(),
 		XKeenInstallerAvailable: a.xkeenInstaller != nil && a.xkeenInstaller.Available(),
 		XKeenSetupIncomplete:    a.xkeenSetupIncomplete(),
+	}
+	if age, ok := a.xkeenStatusAge(snap); ok {
+		resp.AgeSeconds = &age
 	}
 
 	// Detect which kernel is running and get its PID/Uptime
@@ -78,7 +84,7 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Fallback to checking raw output if kernelSvc list is empty or doesn't find running
 	if !resp.IsRunning {
-		if services.IsKernelStatusHealthy(out) {
+		if !snap.Stale && services.IsKernelStatusHealthy(snap.Raw) {
 			resp.IsRunning = true
 		}
 	}
