@@ -5,6 +5,9 @@ BINARY="xcp"
 INSTALL_DIR="${XCP_INSTALL_DIR:-/opt/etc/xcp}"
 BIN_PATH="${XCP_BIN_PATH:-/opt/sbin/xcp}"
 INIT_SCRIPT="${XCP_INIT_SCRIPT:-/opt/etc/init.d/S99xcp}"
+# Устройство управляющего терминала; переопределяется в тестах (несуществующий
+# путь — терминала нет, файл с ответами — интерактивный сценарий)
+TTY_DEV="${XCP_TTY_DEV:-/dev/tty}"
 DEFAULT_PORT=8090
 
 # Цвета
@@ -261,6 +264,13 @@ get_asset_digest() {
   echo "$json" | tr ',{}' '\n\n\n' | awk -v n="\"$name\"" '
     /"name"[[:space:]]*:/ { v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); hit=(v==n); next }
     hit && /"digest"[[:space:]]*:/ { v=$0; sub(/^[^:]*:[[:space:]]*"sha256:/, "", v); sub(/".*/, "", v); print v; exit }'
+}
+
+# Есть ли рабочий управляющий терминал. [ -r /dev/tty ] истинно и без
+# терминала (узел устройства существует), поэтому устройство реально
+# открывается в подоболочке; ошибку открытия она гасит, не завершая скрипт.
+has_tty() {
+  ( true < "$TTY_DEV" ) 2>/dev/null
 }
 
 # Трехфазная остановка сервиса
@@ -841,21 +851,31 @@ do_update() {
   fi
 }
 
-# Удаление
+# Удаление. С терминалом — два вопроса (подтверждение и судьба конфигов).
+# Без терминала (ssh без -t, автоматизация) явный флаг --uninstall считается
+# подтверждением, а данные панели сохраняются: чтение из недоступного
+# терминала раньше давало пустой ответ и молчаливое «Отменено».
 do_uninstall() {
   if [ ! -f "$BIN_PATH" ] && [ ! -f "$INIT_SCRIPT" ]; then
     error "Панель не установлена."
     return
   fi
 
-  printf "\n${RED}${BOLD}Будет удалена панель и все её файлы.${NC}\n"
-  printf "Продолжить? [y/N]: "
   local response
-  read response < /dev/tty
-  case "$response" in
-    [Yy]) ;;
-    *) info "Отменено"; return ;;
-  esac
+  local interactive_tty
+  interactive_tty="false"
+  if has_tty; then
+    interactive_tty="true"
+    printf "\n${RED}${BOLD}Будет удалена панель и все её файлы.${NC}\n"
+    printf "Продолжить? [y/N]: "
+    read response < "$TTY_DEV"
+    case "$response" in
+      [Yy]) ;;
+      *) info "Отменено"; return 0 ;;
+    esac
+  else
+    info "Неинтерактивное удаление: панель и init-скрипт; данные в $INSTALL_DIR сохраняются (для удаления данных — --purge)"
+  fi
 
   stop_service
   rm -f "$BIN_PATH"
@@ -863,14 +883,19 @@ do_uninstall() {
   rm -f "$INIT_SCRIPT"
   rm -f "${INIT_SCRIPT}.bak"
 
-  printf "\nУдалить директорию конфигов (%s)? [y/N]: " "$INSTALL_DIR"
-  read response < /dev/tty
-  case "$response" in
-    [Yy]) rm -rf "$INSTALL_DIR"; ok "Конфиги удалены" ;;
-    *) ok "Конфиги сохранены" ;;
-  esac
+  if [ "$interactive_tty" = "true" ]; then
+    printf "\nУдалить директорию конфигов (%s)? [y/N]: " "$INSTALL_DIR"
+    read response < "$TTY_DEV"
+    case "$response" in
+      [Yy]) rm -rf "$INSTALL_DIR"; ok "Конфиги удалены" ;;
+      *) ok "Конфиги сохранены" ;;
+    esac
+  else
+    ok "Конфиги сохранены"
+  fi
 
   ok "Удаление завершено"
+  return 0
 }
 
 # Проверки состояния для TUI

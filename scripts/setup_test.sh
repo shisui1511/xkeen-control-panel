@@ -159,6 +159,7 @@ run_in_sandbox() {
     XCP_BIN_PATH="$BIN_PATH" \
     XCP_INIT_SCRIPT="$INIT_SCRIPT" \
     XCP_ELF_PROBE="${ELF_PROBE_FILE:-/nonexistent}" \
+    XCP_TTY_DEV="${TTY_DEV_OVERRIDE:-$TMP/no-tty}" \
     PATH="$MOCK_BIN:$PATH" \
     sh -c ". '$SETUP'; $1"
 }
@@ -650,6 +651,34 @@ else
     pass "offer_password_setup с заданным паролем не вызывает mock xcp"
 fi
 unset XCP_CALL_LOG
+cleanup
+
+# ---------------------------------------------------------------------------
+# do_uninstall — удаление без терминала и с ним (D-13)
+# ---------------------------------------------------------------------------
+echo ""
+echo "── do_uninstall ─────────────────────────────────────────────"
+
+# Песочница с установленной панелью: бинарник, init-скрипт и данные
+setup_uninstall_sandbox() {
+    make_sandbox
+    install_mock_binary "0.1.0"
+    mock_init_script
+    printf '{"auth":{"password_hash":"x"}}\n' > "$INSTALL_DIR/config.json"
+    mock_pgrep_not_running
+    mock_killall
+}
+
+setup_uninstall_sandbox
+out=$(run_in_sandbox "do_uninstall; echo rc=\$?" </dev/null 2>&1)
+if [ ! -e "$BIN_PATH" ] && [ ! -e "$INIT_SCRIPT" ] \
+    && [ -f "$INSTALL_DIR/config.json" ] \
+    && echo "$out" | grep -q "rc=0" \
+    && ! echo "$out" | grep -q "Отменено"; then
+    pass "uninstall без TTY сохраняет данные"
+else
+    fail "uninstall без TTY сохраняет данные (got: $out)"
+fi
 cleanup
 
 # ---------------------------------------------------------------------------
