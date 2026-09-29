@@ -207,4 +207,58 @@ test.describe('Sidebar: кэш capabilities и скелетон', () => {
       xkeen_installed: true
     });
   });
+
+  test('none при известном кэше не меняет меню', async ({ page }) => {
+    const { gate, open } = makeGate();
+    await mockCapabilities(page, { activeKernel: 'none', gate, calls: 0 });
+    await seedNavCaps(
+      page,
+      JSON.stringify({ v: 1, active_kernel: 'xray', kernels: { xray: true, mihomo: true } })
+    );
+    await recordNavFrames(page);
+
+    await page.goto('/#/dashboard');
+    await expect(page.locator('.sidebar-nav .nav-group')).toHaveCount(XRAY_GROUPS);
+
+    const responded = page.waitForResponse('**/api/capabilities');
+    open();
+    await responded;
+    await page.evaluate(
+      () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+    );
+
+    await expect(page.locator('.sidebar-nav .nav-group')).toHaveCount(XRAY_GROUPS);
+    expect(await navFrames(page)).toEqual([`${XRAY_GROUPS}:false`]);
+  });
+
+  test('none без кэша показывает группы Mihomo, как на чистой системе', async ({ page }) => {
+    const { gate, open } = makeGate();
+    await mockCapabilities(page, { activeKernel: 'none', gate, calls: 0 });
+
+    await page.goto('/#/dashboard');
+    await expect(page.getByTestId('nav-skeleton')).toBeVisible();
+
+    open();
+    await expect(page.getByTestId('nav-skeleton')).toHaveCount(0);
+    await expect(page.locator('.sidebar-nav .nav-group')).toHaveCount(XRAY_GROUPS + 2);
+    await expect(page.locator('a[href="#/proxies"]')).toBeVisible();
+  });
+
+  // Базовая линия для замка меню: без замка настоящая смена ядра доходит до меню
+  // со следующим опросом (Dashboard опрашивает capabilities каждые 10 с).
+  test('без замка смена ядра xray → mihomo меняет меню после опроса', async ({ page }) => {
+    const state: CapsState = { activeKernel: 'xray', calls: 0 };
+    await mockCapabilities(page, state);
+    await page.clock.install();
+
+    await page.goto('/#/dashboard');
+    await expect(page.locator('.sidebar-nav .nav-group')).toHaveCount(XRAY_GROUPS);
+    await expect(page.locator('a[href="#/proxies"]')).toHaveCount(0);
+
+    state.activeKernel = 'mihomo';
+    await page.clock.runFor(10_500);
+
+    await expect(page.locator('.sidebar-nav .nav-group')).toHaveCount(XRAY_GROUPS + 2);
+    await expect(page.locator('a[href="#/proxies"]')).toBeVisible();
+  });
 });

@@ -68,6 +68,28 @@ function writeNavCaps(v: NavCaps): void {
 
 export const navCaps = writable<NavCaps | null>(readNavCaps());
 
+// Число взятых замков меню. Пока оно больше нуля, ответы capabilities не меняют
+// navCaps (стор capabilities обновляется как обычно): во время установки пункты
+// меню не скрываются и не появляются скачком (D-16).
+export const navLockCount = writable(0);
+
+/**
+ * Замораживает обновление бокового меню. Брать на время установки XKeen или
+ * ядра, снимать в finally или при размонтировании компонента. Возвращает
+ * идемпотентную функцию снятия; после снятия последнего замка выполняется
+ * одно тихое обновление capabilities.
+ */
+export function lockNav(): () => void {
+  navLockCount.update((n) => n + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    navLockCount.update((n) => Math.max(0, n - 1));
+    if (get(navLockCount) === 0) void fetchCapabilities();
+  };
+}
+
 let lastValidActiveKernel = '';
 let consecutiveCapabilitiesFailures = 0;
 
@@ -100,15 +122,18 @@ export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
       capabilities.set(data);
     }
 
-    const next = toNavCaps(data);
-    if (next) {
-      const merged = mergeNavCaps(get(navCaps), next);
-      navCaps.set(merged);
-      writeNavCaps(merged);
-    } else if (get(navCaps) === null) {
-      // Ответ без пригодного активного ядра и кэша нет: скелетон не должен
-      // висеть вечно. Как «ядро не определилось» — группы Mihomo, без записи в кэш.
-      navCaps.set({ v: 1, active_kernel: 'none', kernels: { xray: false, mihomo: false } });
+    // Меню заморожено на время установки: срез применится после снятия замка
+    if (get(navLockCount) === 0) {
+      const next = toNavCaps(data);
+      if (next) {
+        const merged = mergeNavCaps(get(navCaps), next);
+        navCaps.set(merged);
+        writeNavCaps(merged);
+      } else if (get(navCaps) === null) {
+        // Ответ без пригодного активного ядра и кэша нет: скелетон не должен
+        // висеть вечно. Как «ядро не определилось» — группы Mihomo, без записи в кэш.
+        navCaps.set({ v: 1, active_kernel: 'none', kernels: { xray: false, mihomo: false } });
+      }
     }
 
     // Update Mihomo API availability store unconditionally on every successful fetch.
