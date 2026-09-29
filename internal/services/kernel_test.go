@@ -599,6 +599,9 @@ func TestCheckLatest_SemverHasUpdate(t *testing.T) {
 	if svc.kernels["xray"].HasUpdate {
 		t.Errorf("expected HasUpdate = false for current 1.18.1 and latest 1.18.0")
 	}
+	if !svc.kernels["xray"].AheadOfLatest {
+		t.Errorf("expected AheadOfLatest = true for current 1.18.1 and latest 1.18.0")
+	}
 
 	// Scenario 2: CurrentVersion = "1.17.0", latestVersion = "1.18.0" -> HasUpdate == true
 	svc = NewKernelService(t.TempDir())
@@ -630,6 +633,179 @@ func TestCheckLatest_SemverHasUpdate(t *testing.T) {
 	}
 	if !svc.kernels["xray"].HasUpdate {
 		t.Errorf("expected HasUpdate = true for current 'not installed' and latest 1.18.0")
+	}
+}
+
+// newReleaseServer поднимает httptest-сервер, отвечающий на любые запросы
+// фиксированным статусом и телом.
+func newReleaseServer(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// newCheckLatestService — сервис с подключённым локальным источником релизов.
+func newCheckLatestService(t *testing.T, server *httptest.Server, channel, current string) *KernelService {
+	t.Helper()
+	svc := NewKernelService(t.TempDir())
+	svc.SetReleaseSource(server.URL, server.Client())
+	k := svc.kernels["xray"]
+	k.CurrentVersion = current
+	k.Channel = channel
+	k.Repo = "some/repo"
+	return svc
+}
+
+// TestCheckLatest_Ahead: третье состояние «установлена новее последнего stable».
+func TestCheckLatest_Ahead(t *testing.T) {
+	cases := []struct {
+		name       string
+		kernel     string
+		channel    string
+		body       string
+		current    string
+		wantUpdate bool
+		wantAhead  bool
+	}{
+		{"stable, установлена новее latest", "xray", "stable", `{"tag_name":"v26.3.27"}`, "26.9.8", false, true},
+		{"stable, версии равны", "xray", "stable", `{"tag_name":"v26.3.27"}`, "26.3.27", false, false},
+		{"stable, установлена старее", "xray", "stable", `{"tag_name":"v26.3.27"}`, "26.1.1", true, false},
+		{"preview, установлена новее latest", "xray", "preview", `[{"tag_name":"v26.9.9","prerelease":true}]`, "26.9.10", false, false},
+		{"preview, плавающая alpha-сборка", "mihomo", "preview", `[{"tag_name":"Prerelease-Alpha","prerelease":true,"assets":[{"name":"mihomo-linux-arm64-alpha-abc1234.gz"}]}]`, "1.19.0", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newReleaseServer(t, http.StatusOK, tc.body)
+			svc := newCheckLatestService(t, server, tc.channel, tc.current)
+			name := tc.kernel
+			if name != "xray" {
+				svc.kernels[name].CurrentVersion = tc.current
+				svc.kernels[name].Channel = tc.channel
+				svc.kernels[name].Repo = "some/repo"
+			}
+			if err := svc.CheckLatest(context.Background(), name); err != nil {
+				t.Fatalf("CheckLatest error: %v", err)
+			}
+			k := svc.kernels[name]
+			if k.HasUpdate != tc.wantUpdate {
+				t.Errorf("HasUpdate = %v, want %v", k.HasUpdate, tc.wantUpdate)
+			}
+			if k.AheadOfLatest != tc.wantAhead {
+				t.Errorf("AheadOfLatest = %v, want %v", k.AheadOfLatest, tc.wantAhead)
+			}
+			if k.Status != "idle" {
+				t.Errorf("Status = %q, want idle", k.Status)
+			}
+		})
+	}
+}
+
+// TestCheckLatest_HTTPError: ответ GitHub с HTTP != 200 — это failed, а не «актуально».
+func TestCheckLatest_HTTPError(t *testing.T) {
+	for _, code := range []int{http.StatusForbidden, http.StatusNotFound} {
+		t.Run(fmt.Sprintf("HTTP %d", code), func(t *testing.T) {
+			server := newReleaseServer(t, code, `{"message":"rate limit exceeded"}`)
+			svc := newCheckLatestService(t, server, "stable", "1.17.0")
+
+			if err := svc.CheckLatest(context.Background(), "xray"); err == nil {
+				t.Fatal("expected error for non-200 GitHub response")
+			}
+			k := svc.kernels["xray"]
+			if want := fmt.Sprintf("GitHub API HTTP %d", code); k.Status != "failed" || k.Message != want {
+				t.Errorf("Status=%q Message=%q, want failed / %q", k.Status, k.Message, want)
+			}
+			if k.LatestVersion != "" || k.HasUpdate || k.AheadOfLatest {
+				t.Errorf("Latest* must stay empty on error: latest=%q has_update=%v ahead=%v", k.LatestVersion, k.HasUpdate, k.AheadOfLatest)
+			}
+		})
+	}
+}
+
+// TestCheckLatest_EmptyStableTag: пустой tag_name на stable — ошибка, а не «актуально».
+func TestCheckLatest_EmptyStableTag(t *testing.T) {
+	server := newReleaseServer(t, http.StatusOK, `{"tag_name":""}`)
+	svc := newCheckLatestService(t, server, "stable", "1.17.0")
+
+	if err := svc.CheckLatest(context.Background(), "xray"); err == nil {
+		t.Fatal("expected error for empty release tag")
+	}
+	k := svc.kernels["xray"]
+	if k.Status != "failed" || k.Message != "GitHub API: empty release tag" {
+		t.Errorf("Status=%q Message=%q, want failed / empty release tag", k.Status, k.Message)
+	}
+}
+
+// TestCheckLatest_QuietKeepsStatus: тихая проверка (шов для установки) не трогает
+// Status и Message ни при успехе, ни при ошибке GitHub.
+func TestCheckLatest_QuietKeepsStatus(t *testing.T) {
+	t.Run("успех", func(t *testing.T) {
+		server := newReleaseServer(t, http.StatusOK, `{"tag_name":"v1.18.0"}`)
+		svc := newCheckLatestService(t, server, "stable", "1.17.0")
+		svc.kernels["xray"].Status = "downloading"
+		svc.kernels["xray"].Message = "Downloading..."
+
+		if err := svc.checkLatest(context.Background(), "xray", true); err != nil {
+			t.Fatalf("checkLatest error: %v", err)
+		}
+		k := svc.kernels["xray"]
+		if k.Status != "downloading" || k.Message != "Downloading..." {
+			t.Errorf("Status=%q Message=%q changed by quiet check", k.Status, k.Message)
+		}
+		if k.LatestVersion != "1.18.0" || !k.HasUpdate {
+			t.Errorf("Latest* not recorded: latest=%q has_update=%v", k.LatestVersion, k.HasUpdate)
+		}
+	})
+	t.Run("ошибка 403", func(t *testing.T) {
+		server := newReleaseServer(t, http.StatusForbidden, `{}`)
+		svc := newCheckLatestService(t, server, "stable", "1.17.0")
+		svc.kernels["xray"].Status = "downloading"
+		svc.kernels["xray"].Message = "Downloading..."
+
+		if err := svc.checkLatest(context.Background(), "xray", true); err == nil {
+			t.Fatal("expected error")
+		}
+		k := svc.kernels["xray"]
+		if k.Status != "downloading" || k.Message != "Downloading..." {
+			t.Errorf("Status=%q Message=%q changed by quiet check", k.Status, k.Message)
+		}
+	})
+}
+
+// TestCheckLatest_DropsResultAfterChannelSwitch: результат проверки, начатой до
+// смены канала, не перезаписывает Latest* нового канала.
+func TestCheckLatest_DropsResultAfterChannelSwitch(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tag_name":"v1.18.0"}`))
+	}))
+	defer server.Close()
+
+	svc := newCheckLatestService(t, server, "stable", "1.17.0")
+
+	done := make(chan error, 1)
+	go func() { done <- svc.CheckLatest(context.Background(), "xray") }()
+
+	<-started
+	if !svc.SetChannel("xray", "preview") {
+		t.Fatal("SetChannel returned false")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+
+	k := svc.Get("xray")
+	if k.LatestVersion != "" || k.LatestTag != "" || k.HasUpdate {
+		t.Errorf("устаревший результат записан: latest=%q tag=%q has_update=%v", k.LatestVersion, k.LatestTag, k.HasUpdate)
 	}
 }
 

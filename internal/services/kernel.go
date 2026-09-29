@@ -280,8 +280,12 @@ type KernelInfo struct {
 	LatestVersion  string `json:"latest_version"`
 	// LatestTag — тег релиза с LatestVersion. У плавающих pre-release (mihomo
 	// Prerelease-Alpha) он не совпадает с "v"+версия
-	LatestTag     string `json:"latest_tag,omitempty"`
-	HasUpdate     bool   `json:"has_update"`
+	LatestTag string `json:"latest_tag,omitempty"`
+	HasUpdate bool   `json:"has_update"`
+	// AheadOfLatest — установленная сборка новее последнего stable-релиза
+	// (например, pre-release на канале «Стабильный»): обновлений нет, но и
+	// «актуально» это не значит.
+	AheadOfLatest bool   `json:"ahead_of_latest"`
 	HasBackup     bool   `json:"has_backup"`
 	Channel       string `json:"channel"` // stable, preview
 	Repo          string `json:"repo"`
@@ -765,6 +769,7 @@ func (s *KernelService) SetChannel(name, channel string) bool {
 	k.LatestVersion = ""
 	k.LatestTag = ""
 	k.HasUpdate = false
+	k.AheadOfLatest = false
 	k.Message = ""
 	k.Status = "checking"
 	channels := make(map[string]string, len(s.kernels))
@@ -908,6 +913,17 @@ func kernelHasUpdate(latest, current string) bool {
 	}
 }
 
+// kernelAheadOfLatest — установленная сборка новее последнего stable-релиза.
+// Только для канала stable и только для semver: у плавающих alpha-сборок нет
+// порядка версий, а на preview «новее latest» — это просто другая ветка релизов.
+func kernelAheadOfLatest(channel, latest, current string) bool {
+	return channel == "stable" &&
+		latest != "" &&
+		!isRollingBuild(latest) &&
+		isValidSemver(current) &&
+		compareSemver(current, latest) > 0
+}
+
 // refreshInstalledVersion перечитывает версию после замены бинарника (установка,
 // откат, загрузка) и пересчитывает HasUpdate. Кеш версии сбрасывается: он
 // держит версию прежнего бинарника до 60 с, и новое ядро считалось старым —
@@ -916,26 +932,54 @@ func (s *KernelService) refreshInstalledVersion(kk *KernelInfo) {
 	kk.verCache = &versionCache{}
 	kk.CurrentVersion = s.detectVersion(kk)
 	kk.HasUpdate = kernelHasUpdate(kk.LatestVersion, kk.CurrentVersion)
+	kk.AheadOfLatest = kernelAheadOfLatest(kk.Channel, kk.LatestVersion, kk.CurrentVersion)
 }
+
+// githubReleaseBodyLimit — предел тела ответа GitHub: с запасом для списка 30
+// релизов со всеми ассетами (обрезанный JSON дал бы ошибку разбора, а не «актуально»).
+const githubReleaseBodyLimit = 16 << 20
 
 // CheckLatest queries GitHub API for latest release.
 // ctx is used to cancel the HTTP request (e.g. on service shutdown).
 func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
+	return s.checkLatest(ctx, name, false)
+}
+
+// checkLatest — проверка последнего релиза. При quiet=true Status и Message не
+// меняются ни при старте, ни при ошибке, ни при успехе (вызов из установки, где
+// статус ведёт сам установщик); Latest*, HasUpdate и AheadOfLatest пишутся как обычно.
+func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool) error {
 	s.mu.Lock()
 	k := s.kernels[name]
 	if k == nil {
 		s.mu.Unlock()
 		return fmt.Errorf("kernel not found: %s", name)
 	}
-	k.Status = "checking"
-	k.Message = "Checking for updates..."
+	if !quiet {
+		k.Status = "checking"
+		k.Message = "Checking for updates..."
+	}
 	// Snapshot fields needed for the HTTP call
 	repo := k.Repo
 	channel := k.Channel
-	currentVersion := k.CurrentVersion
 	apiBase := s.githubAPIBase
 	testClient := s.testClient
 	s.mu.Unlock()
+
+	// fail фиксирует ошибку проверки в статусе ядра, если канал не сменился
+	// (результат устаревшей проверки не должен портить состояние нового канала).
+	fail := func(message string, err error) error {
+		if quiet {
+			return err
+		}
+		s.mu.Lock()
+		if kk := s.kernels[name]; kk != nil && kk.Channel == channel {
+			kk.Status = "failed"
+			kk.Message = message
+		}
+		s.mu.Unlock()
+		return err
+	}
 
 	githubBase := "https://api.github.com"
 	if apiBase != "" {
@@ -961,52 +1005,37 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
-		s.mu.Lock()
-		if kk := s.kernels[name]; kk != nil {
-			kk.Status = "failed"
-			kk.Message = "Request error: " + err.Error()
-		}
-		s.mu.Unlock()
-		return err
+		return fail("Request error: "+err.Error(), err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		s.mu.Lock()
-		if kk := s.kernels[name]; kk != nil {
-			kk.Status = "failed"
-			kk.Message = "GitHub API error: " + err.Error()
-		}
-		s.mu.Unlock()
-		return err
+		return fail("GitHub API error: "+err.Error(), err)
 	}
 	defer resp.Body.Close()
+
+	// Лимит анонимного API (403), 404 и прочие статусы — ошибка проверки, а не «актуально».
+	if resp.StatusCode != http.StatusOK {
+		return fail(fmt.Sprintf("GitHub API HTTP %d", resp.StatusCode), fmt.Errorf("github api: HTTP %d", resp.StatusCode))
+	}
+	body := io.LimitReader(resp.Body, githubReleaseBodyLimit)
 
 	var latestVersion, latestTag string
 	if channel == "stable" {
 		var release struct {
 			TagName string `json:"tag_name"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-			s.mu.Lock()
-			if kk := s.kernels[name]; kk != nil {
-				kk.Status = "failed"
-				kk.Message = "Parse error: " + err.Error()
-			}
-			s.mu.Unlock()
-			return err
+		if err := json.NewDecoder(body).Decode(&release); err != nil {
+			return fail("Parse error: "+err.Error(), err)
+		}
+		if release.TagName == "" {
+			return fail("GitHub API: empty release tag", errors.New("github api: empty release tag"))
 		}
 		latestVersion = strings.TrimPrefix(release.TagName, "v")
 		latestTag = release.TagName
 	} else {
 		var releases []githubKernelRelease
-		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-			s.mu.Lock()
-			if kk := s.kernels[name]; kk != nil {
-				kk.Status = "failed"
-				kk.Message = "Parse error: " + err.Error()
-			}
-			s.mu.Unlock()
-			return err
+		if err := json.NewDecoder(body).Decode(&releases); err != nil {
+			return fail("Parse error: "+err.Error(), err)
 		}
 		for _, rel := range releases {
 			if channel == "preview" && rel.Prerelease {
@@ -1027,12 +1056,16 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	}
 
 	s.mu.Lock()
-	if kk := s.kernels[name]; kk != nil {
+	// Канал сменился, пока шёл запрос: результат относится к прежнему каналу.
+	if kk := s.kernels[name]; kk != nil && kk.Channel == channel {
 		kk.LatestVersion = latestVersion
 		kk.LatestTag = latestTag
-		kk.HasUpdate = kernelHasUpdate(latestVersion, currentVersion)
-		kk.Status = "idle"
-		kk.Message = resultMessage
+		kk.HasUpdate = kernelHasUpdate(latestVersion, kk.CurrentVersion)
+		kk.AheadOfLatest = kernelAheadOfLatest(channel, latestVersion, kk.CurrentVersion)
+		if !quiet {
+			kk.Status = "idle"
+			kk.Message = resultMessage
+		}
 	}
 	s.mu.Unlock()
 	return nil
