@@ -16,7 +16,13 @@
   import SegmentedControl from './components/SegmentedControl.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import { apiFetch } from './lib/api';
-  import { isTransitionalStatus } from './lib/kernelView';
+  import {
+    isTransitionalStatus,
+    formatKernelVersion,
+    kernelBadge,
+    showInstallStable,
+    type KernelLike
+  } from './lib/kernelView';
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
@@ -27,7 +33,7 @@
 
   let showMihomoMigrateModal = $state(false);
 
-  interface Kernel {
+  interface Kernel extends KernelLike {
     name: string;
     display_name: string;
     binary_path: string;
@@ -324,6 +330,7 @@
       const res = await apiFetch('/api/kernels', { signal });
       if (res.ok) {
         const envelope = await res.json();
+        if (channelChanging) return;
         const list = Array.isArray(envelope)
           ? envelope
           : Array.isArray(envelope?.data)
@@ -546,11 +553,11 @@
     }
   }
 
-  // Returns true on success. Callers are responsible for re-fetching kernel
-  // state once, after both kernels' channel requests have settled — this
-  // used to be pulled per-call, causing two redundant /api/kernels round
-  // trips per click and a mismatch window between them.
-  async function setKernelChannel(name: string, channel: string): Promise<boolean> {
+  // Возвращает состояние ядра из ответа бэкенда (он сам перепроверяет релиз
+  // на новом канале) или null, если запрос не удался либо ответ старого
+  // формата без kernel — тогда вызывающий перечитывает список ядер один раз,
+  // когда оба запроса завершились (раньше тянул по запросу на каждое ядро).
+  async function setKernelChannel(name: string, channel: string): Promise<Kernel | null> {
     try {
       const res = await apiFetch(`/api/kernels/${name}/channel`, {
         method: 'POST',
@@ -560,12 +567,63 @@
       if (!res.ok) {
         throw new Error(await res.text());
       }
-      return true;
+      const envelope = await res.json().catch(() => null);
+      const kernel = envelope?.data?.kernel;
+      return kernel && typeof kernel === 'object' && kernel.name === name ? kernel : null;
     } catch (e: any) {
-      if (e?.status === 401) return false;
+      if (e?.status === 401) return null;
       showToast('error', `${$t('svc.channel_error')} (${name}): ${e.message || e}`);
-      return false;
+      return null;
     }
+  }
+
+  // Пока идёт смена канала, опрос списка не перетирает карточки «проверяем…»
+  let channelChanging = false;
+
+  async function changeChannel(channel: string) {
+    channelChanging = true;
+    try {
+      // Старый статус («актуально» на прежнем канале) вводит в заблуждение:
+      // карточки сразу показывают «проверяем…» до ответа бэкенда
+      kernels = kernels.map((k) => ({
+        ...k,
+        status: 'checking',
+        latest_version: '',
+        has_update: false,
+        ahead_of_latest: false,
+        message: ''
+      }));
+      const results = await Promise.all([
+        setKernelChannel('xray', channel),
+        setKernelChannel('mihomo', channel)
+      ]);
+      const answered = results.filter((k): k is Kernel => k !== null);
+      const merged = answered.length === results.length && kernels.length > 0;
+      if (merged) {
+        kernels = kernels.map((k) => answered.find((a) => a.name === k.name) ?? k);
+      }
+      channelChanging = false;
+      if (!merged) await fetchKernels();
+    } finally {
+      channelChanging = false;
+    }
+  }
+
+  async function installStable(name: 'xray' | 'mihomo') {
+    const k = name === 'xray' ? xray : mihomo;
+    if (!k) return;
+    const displayName = name === 'xray' ? 'Xray' : 'Mihomo';
+    const version = formatKernelVersion(k.latest_version);
+    const ok = await showConfirm({
+      title: $t('svc.install_stable_confirm_title', { name: displayName }),
+      message: $t('svc.install_stable_confirm_msg', {
+        current: formatKernelVersion(k.current_version),
+        version
+      }),
+      confirmLabel: $t('svc.install_stable_confirm', { version }),
+      variant: 'warning'
+    });
+    if (ok) await installKernel(name);
   }
 
   function checkIfFinishedChecking() {
@@ -1068,10 +1126,7 @@
             { value: 'stable', label: $t('svc.channel_stable') },
             { value: 'preview', label: $t('svc.channel_preview') }
           ]}
-          onchange={async (v) => {
-            await Promise.all([setKernelChannel('xray', v), setKernelChannel('mihomo', v)]);
-            await fetchKernels();
-          }}
+          onchange={changeChannel}
         />
       </div>
       {#if channelMismatch}
@@ -1128,18 +1183,11 @@
                 <Skeleton type="text-line" width="70px" />
               {:else}
                 <span>{kernelVersion(mihomo?.current_version) || '—'}</span>
-                {#if mihomo?.status === 'failed'}
-                  <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
-                {:else if !mihomo?.current_version || mihomo.current_version === 'not installed'}
-                  <StatusBadge variant="stopped" label={$t('kernel.status.not_installed')} />
-                {:else if mihomo?.has_update}
-                  <StatusBadge
-                    variant="warning"
-                    label={`→ ${kernelVersion(mihomo.latest_version)}`}
-                  />
-                {:else}
-                  <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
-                {/if}
+                {@const badge = kernelBadge(mihomo ?? {})}
+                <StatusBadge
+                  variant={badge.variant}
+                  label={badge.label ?? $t(badge.key ?? '', badge.params)}
+                />
               {/if}
             </div>
             {#if kernelsLoaded && mihomo?.message && (mihomo.status === 'failed' || mihomo.status === 'idle' || mihomo.status === 'done')}
@@ -1147,8 +1195,23 @@
                 {kernelHint(mihomo)}
               </p>
             {/if}
+            {#if kernelsLoaded && mihomo?.status === 'checking'}
+              <p class="update-hint" data-testid="kernel-checking-hint-mihomo">
+                {$t('svc.kernel_checking_hint')}
+              </p>
+            {/if}
           </div>
           <div class="update-actions">
+            {#if mihomo && showInstallStable(mihomo)}
+              <button
+                class="btn btn-sm btn-secondary"
+                data-testid="install-stable-mihomo"
+                onclick={() => installStable('mihomo')}
+                title={$t('svc.install_stable')}
+              >
+                {$t('svc.install_stable')}
+              </button>
+            {/if}
             {#if mihomo?.has_update}
               <button
                 class="btn btn-sm btn-primary"
@@ -1260,18 +1323,11 @@
                 <Skeleton type="text-line" width="70px" />
               {:else}
                 <span>{kernelVersion(xray?.current_version) || '—'}</span>
-                {#if xray?.status === 'failed'}
-                  <StatusBadge variant="stopped" label={$t('svc.kernel_error_badge')} />
-                {:else if !xray?.current_version || xray.current_version === 'not installed'}
-                  <StatusBadge variant="stopped" label={$t('kernel.status.not_installed')} />
-                {:else if xray?.has_update}
-                  <StatusBadge
-                    variant="warning"
-                    label={`→ ${kernelVersion(xray.latest_version)}`}
-                  />
-                {:else}
-                  <StatusBadge variant="idle" label={$t('svc.actual_badge')} />
-                {/if}
+                {@const badge = kernelBadge(xray ?? {})}
+                <StatusBadge
+                  variant={badge.variant}
+                  label={badge.label ?? $t(badge.key ?? '', badge.params)}
+                />
               {/if}
             </div>
             {#if kernelsLoaded && xray?.message && (xray.status === 'failed' || xray.status === 'idle' || xray.status === 'done')}
@@ -1279,8 +1335,23 @@
                 {kernelHint(xray)}
               </p>
             {/if}
+            {#if kernelsLoaded && xray?.status === 'checking'}
+              <p class="update-hint" data-testid="kernel-checking-hint-xray">
+                {$t('svc.kernel_checking_hint')}
+              </p>
+            {/if}
           </div>
           <div class="update-actions">
+            {#if xray && showInstallStable(xray)}
+              <button
+                class="btn btn-sm btn-secondary"
+                data-testid="install-stable-xray"
+                onclick={() => installStable('xray')}
+                title={$t('svc.install_stable')}
+              >
+                {$t('svc.install_stable')}
+              </button>
+            {/if}
             {#if xray?.has_update}
               <button
                 class="btn btn-sm btn-primary"
