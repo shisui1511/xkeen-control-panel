@@ -1,6 +1,14 @@
 <script lang="ts">
   import { t } from '../i18n';
-  import { isSidebarOpen, isSidebarCollapsed, capabilities, mihomoApiAvailable } from '../stores';
+  import {
+    isSidebarOpen,
+    isSidebarCollapsed,
+    capabilities,
+    navCaps,
+    mihomoApiAvailable
+  } from '../stores';
+  import { showMihomoNavFor } from '../lib/navCaps';
+  import Skeleton from './Skeleton.svelte';
   import { capsuleConfigStore } from '../lib/capsuleSettings';
   import Icon from '../lib/components/Icon.svelte';
   import SystemStatusCapsule from './status/SystemStatusCapsule.svelte';
@@ -129,7 +137,9 @@
   // Single source of truth for "does this nav item/group belong to the Mihomo
   // kernel" gating — hoisted so the group-level and item-level checks can
   // never drift apart (WR-01 / IN-05).
-  const showMihomoNav = $derived($capabilities === null || $capabilities.active_kernel !== 'xray');
+  // Строится по кэшированному срезу navCaps (D-16): true — показать, false — скрыть,
+  // null — срез неизвестен (холодный первый вход), вместо групп рисуется скелетон.
+  const showMihomoNav = $derived(showMihomoNavFor($navCaps));
 
   // Same hoist for the "Mihomo API unreachable" nav-item badge (72-REVIEW WR-05)
   // — was copy-pasted verbatim at 3 call sites, risking condition drift.
@@ -285,7 +295,19 @@
   </details>
 
   <!-- Proxies & Subscriptions group -->
-  {#if showMihomoNav}
+  {#if showMihomoNav === null}
+    <div
+      class="nav-skeleton"
+      data-testid="nav-skeleton"
+      role="status"
+      aria-label={$t('nav.loading_menu')}
+    >
+      <Skeleton type="text-line" width="70%" />
+      <Skeleton type="text-line" width="55%" />
+      <Skeleton type="text-line" width="62%" />
+    </div>
+  {/if}
+  {#if showMihomoNav === true}
     <details class="nav-group" bind:open={groupOpen.proxy_subs}>
       <summary>
         <span class="group-ttl">
@@ -338,7 +360,7 @@
   {/if}
 
   <!-- Routing group -->
-  {#if showMihomoNav}
+  {#if showMihomoNav === true}
     <details class="nav-group" bind:open={groupOpen.routing}>
       <summary>
         <span class="group-ttl">
@@ -403,7 +425,7 @@
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
-    {#if showMihomoNav}
+    {#if showMihomoNav === true}
       <a
         href="#/connections"
         class="nav-item"
@@ -423,7 +445,7 @@
         {/if}
       </a>
     {/if}
-    {#if showMihomoNav}
+    {#if showMihomoNav === true}
       <a
         href="#/traffic"
         class="nav-item"
@@ -660,6 +682,11 @@
   }
   :global(.collapse-toggle-icon.is-expanded) {
     transform: rotate(180deg);
+  }
+
+  /* Холодный первый вход: место переменной части меню до ответа capabilities. */
+  .nav-skeleton {
+    padding: var(--spacing-2) var(--spacing-3);
   }
 
   .sidebar-nav {
