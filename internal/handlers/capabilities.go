@@ -141,8 +141,8 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if activeKernel == "" && a.xkeenSvc != nil {
-		// Fallback to checking from xkeen -status raw output
-		if status, err := a.xkeenSvc.Status(); err == nil {
+		// Запасной путь: последний известный вывод xkeen -status из кэша
+		if status := a.xkeenStatusSnapshot().Raw; status != "" {
 			lower := strings.ToLower(status)
 			if strings.Contains(lower, "xray") {
 				activeKernel = "xray"

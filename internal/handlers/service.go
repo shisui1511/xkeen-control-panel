@@ -71,12 +71,12 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Detect which kernel is running and get its PID/Uptime
 	if a.kernelSvc != nil {
-		for _, info := range a.kernelSvc.List() {
-			if info.ProcessStatus == "running" {
+		for _, st := range a.kernelSvc.ProcessStates() {
+			if st.Status == "running" {
 				resp.IsRunning = true
-				resp.ActiveKernel = info.Name
-				resp.PID = info.PID
-				resp.Uptime = info.Uptime
+				resp.ActiveKernel = st.Name
+				resp.PID = st.PID
+				resp.Uptime = st.Uptime
 				break
 			}
 		}

@@ -140,6 +140,18 @@ func (a *API) xkeenStatusAge(snap services.XKeenStatusSnapshot) (int, bool) {
 	return snap.AgeSeconds(time.Now())
 }
 
+// xkeenVersion — версия XKeen из кэша (без запуска xkeen на запросе);
+// без кэша — прямое чтение `xkeen -v`.
+func (a *API) xkeenVersion() string {
+	if a.xkeenStatus != nil {
+		if v := a.xkeenStatus.Snapshot().Version; v != "" {
+			return v
+		}
+		return "unknown"
+	}
+	return a.xkeenSvc.GetVersion()
+}
+
 // invalidateXKeenStatus помечает кэш статуса устаревшим (nil-безопасно).
 func (a *API) invalidateXKeenStatus() {
 	if a.xkeenStatus != nil {
@@ -332,7 +344,7 @@ func (a *API) getActiveKernelName() string {
 		}
 	}
 	if active == "" && a.xkeenSvc != nil {
-		if status, err := a.xkeenSvc.Status(); err == nil {
+		if status := a.xkeenStatusSnapshot().Raw; status != "" {
 			lower := strings.ToLower(status)
 			if strings.Contains(lower, "xray") && strings.Contains(lower, "mihomo") {
 				active = "both"

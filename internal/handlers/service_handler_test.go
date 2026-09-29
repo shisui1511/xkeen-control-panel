@@ -658,3 +658,64 @@ func serveStatus(api *API) *httptest.ResponseRecorder {
 	api.ServiceStatus(rr, httptest.NewRequest(http.MethodGet, "/api/service/status", nil))
 	return rr
 }
+
+// TestServiceStatus_ColdCacheNever500: ни одного успешного опроса — 200,
+// stale=true, без age_seconds, «остановлено» по ошибке опроса не выставляется,
+// активное ядро берётся из настройки XKeen.
+func TestServiceStatus_ColdCacheNever500(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+	api.kernelSvc = nil // процессов ядер на машине разработчика не опрашиваем
+	initScript := filepath.Join(t.TempDir(), "S05xkeen")
+	if err := os.WriteFile(initScript, []byte("name_client=\"mihomo\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api.xkeenSvc.InitScript = initScript
+
+	cache := services.NewXKeenStatusCacheFunc(
+		func(context.Context) (string, error) { return "", errors.New("timeout exceeded") },
+		nil, nil, time.Hour,
+	)
+	cache.Start()
+	defer cache.Stop()
+	api.SetXKeenStatusCache(cache)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cache.RefreshNow(ctx)
+
+	rr := serveStatus(api)
+	got := decodeServiceStatus(t, rr)
+	if !got.Stale {
+		t.Error("stale = false на холодном кэше")
+	}
+	if got.AgeSeconds != nil {
+		t.Errorf("age_seconds = %d, want отсутствует", *got.AgeSeconds)
+	}
+	if got.Raw != "" {
+		t.Errorf("raw = %q, want пусто", got.Raw)
+	}
+	if got.IsRunning {
+		t.Error("is_running = true без запущенных процессов")
+	}
+	if got.ActiveKernel != "mihomo" {
+		t.Errorf("active_kernel = %q, want mihomo (ConfiguredKernel)", got.ActiveKernel)
+	}
+	if bytes.Contains(rr.Body.Bytes(), []byte(`"age_seconds"`)) {
+		t.Errorf("поле age_seconds попало в JSON: %s", rr.Body.String())
+	}
+}
+
+// TestServiceStatus_StatusErrorNoCacheNever500: без кэша и с падающим
+// xkeen -status ответ всё равно 200 со stale=true.
+func TestServiceStatus_StatusErrorNoCacheNever500(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "broken", 1))
+	api.kernelSvc = nil
+
+	got := decodeServiceStatus(t, serveStatus(api))
+	if !got.Stale {
+		t.Error("stale = false при падающем xkeen -status")
+	}
+	if got.IsRunning {
+		t.Error("is_running = true по устаревшему выводу")
+	}
+}

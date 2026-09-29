@@ -8,7 +8,7 @@ func (a *API) Version(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.jsonResponse(w, map[string]string{
-		"version":       a.xkeenSvc.GetVersion(),
+		"version":       a.xkeenVersion(),
 		"panel_version": a.srv.GetVersion(),
 	})
 }

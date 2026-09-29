@@ -437,15 +437,15 @@ func main() {
 	xrayGRPCSvc := services.NewXrayGRPCService(fmt.Sprintf("127.0.0.1:%d", cfg.XRayAPIPort))
 	xrayGRPCSvc.SetActiveKernelFunc(func() string {
 		if kSvc := api.KernelService(); kSvc != nil {
-			for _, info := range kSvc.List() {
-				if info.ProcessStatus == "running" {
-					return info.Name
+			for _, st := range kSvc.ProcessStates() {
+				if st.Status == "running" {
+					return st.Name
 				}
 			}
 		}
-		if xSvc := api.XKeenService(); xSvc != nil {
-			if status, err := xSvc.Status(); err == nil {
-				lower := strings.ToLower(status)
+		if c := api.XKeenStatusCache(); c != nil {
+			if raw := c.Snapshot().Raw; raw != "" {
+				lower := strings.ToLower(raw)
 				if strings.Contains(lower, "xray") {
 					return "xray"
 				} else if strings.Contains(lower, "mihomo") {
