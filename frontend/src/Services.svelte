@@ -21,6 +21,8 @@
     formatKernelVersion,
     kernelBadge,
     showInstallStable,
+    stageLabelKey,
+    resultMessage,
     type KernelLike
   } from './lib/kernelView';
   import {
@@ -195,10 +197,10 @@
     return /^\d/.test(bare) ? `v${bare}` : bare;
   }
 
-  // Подсказка под строкой ядра: готовые статусы — переведённым текстом, ошибки — как есть
-  function kernelHint(k: { status: string; message: string; current_version: string }): string {
-    if (k.status === 'done')
-      return $t('svc.kernel_installed', { version: kernelVersion(k.current_version) });
+  // Подсказка под строкой ядра: ошибки — как есть. Итог завершённой операции
+  // (status done) показывается отдельно по коду result_kind, английский
+  // message бэкенда пользователю не выводится
+  function kernelHint(k: { status: string; message: string }): string {
     if (k.status === 'idle' && k.message.startsWith('No prerelease found'))
       return $t('svc.kernel_no_prerelease');
     return k.message;
@@ -357,7 +359,11 @@
           : Array.isArray(envelope?.data)
             ? envelope.data
             : [];
-        kernels = list;
+        // Ядро с ещё не подтверждённым запуском установки сохраняет оптимистичное
+        // состояние: устаревший ответ списка не должен сбросить «Старт…»
+        kernels = list.map((k: Kernel) =>
+          installStarting[k.name] ? (kernels.find((o) => o.name === k.name) ?? k) : k
+        );
         // Опрос статуса нужен только пока операция идёт: done и failed
         // остаются на сервере навсегда и раньше зацикливали запросы
         kernels.forEach((k: (typeof kernels)[0]) => {
@@ -502,7 +508,28 @@
     }
   }
 
+  // Ядра, у которых POST install отправлен, но ответа ещё нет
+  const installStarting: Record<string, boolean> = {};
+  // Ядро → «вид:версия» итога, о котором уже показан тост (защита от повтора)
+  const lastToastedResult: Record<string, string> = {};
+
   async function installKernel(name: string) {
+    // Оптимистичный старт: кнопка показывает «Старт…» сразу, до ответа POST;
+    // прежняя запись сохраняется для возврата при ошибке
+    const idx = kernels.findIndex((k) => k.name === name);
+    const previous = idx >= 0 ? kernels[idx] : null;
+    if (idx >= 0) {
+      kernels[idx] = {
+        ...kernels[idx],
+        status: 'downloading',
+        stage: 'starting',
+        result_kind: undefined,
+        result_version: undefined
+      };
+      kernels = [...kernels];
+    }
+    delete lastToastedResult[name];
+    installStarting[name] = true;
     try {
       const res = await apiFetch(`/api/kernels/${name}/install`, {
         method: 'POST'
@@ -510,8 +537,15 @@
       if (!res.ok) {
         throw new Error(await res.text());
       }
+      delete installStarting[name];
       startPolling(name);
     } catch (e: any) {
+      delete installStarting[name];
+      const at = kernels.findIndex((k) => k.name === name);
+      if (at >= 0 && previous) {
+        kernels[at] = previous;
+        kernels = [...kernels];
+      }
       if (e?.status === 401) return;
       showToast('error', `${$t('svc.action_error')}: ${e.message || e}`);
     }
@@ -655,6 +689,27 @@
     }
   }
 
+  // Итог для строки ядра: по коду result_kind; ответ без кода (status done,
+  // прежний формат) — «Установлено: vX», английский message не показывается
+  function kernelResult(k: Kernel) {
+    return (
+      resultMessage(k) ??
+      (k.status === 'done'
+        ? { key: 'svc.kernel_installed', params: { version: kernelVersion(k.current_version) } }
+        : null)
+    );
+  }
+
+  // Один тост успеха на итог операции: тот же переведённый текст, что под строкой ядра
+  function toastKernelResult(k: Kernel) {
+    const r = resultMessage(k);
+    if (!r) return;
+    const key = `${k.result_kind}:${k.result_version ?? ''}`;
+    if (lastToastedResult[k.name] === key) return;
+    lastToastedResult[k.name] = key;
+    showToast('success', $t(r.key, r.params));
+  }
+
   async function fetchKernelStatus(name: string) {
     try {
       const res = await apiFetch(`/api/kernels/${name}/status`);
@@ -662,6 +717,7 @@
         const envelope = await res.json();
         const data = envelope.data ?? envelope;
         const idx = kernels.findIndex((k) => k.name === name);
+        const wasTransitional = idx >= 0 && isTransitionalStatus(kernels[idx].status);
         if (idx >= 0) {
           kernels[idx] = { ...kernels[idx], ...data };
           kernels = [...kernels];
@@ -669,6 +725,9 @@
         if (data.status === 'idle' || data.status === 'done' || data.status === 'failed') {
           clearTimeout(statusTimeouts[name]);
           delete statusTimeouts[name];
+          if (wasTransitional && data.status === 'done' && idx >= 0) {
+            toastKernelResult(kernels[idx]);
+          }
           fetchKernels();
           checkIfFinishedChecking();
           if (data.status === 'done' && activeKernel === name && isRunning) {
@@ -1253,10 +1312,18 @@
                 />
               {/if}
             </div>
-            {#if kernelsLoaded && mihomo?.message && (mihomo.status === 'failed' || mihomo.status === 'idle' || mihomo.status === 'done')}
+            {#if kernelsLoaded && mihomo?.message && (mihomo.status === 'failed' || mihomo.status === 'idle')}
               <p class="update-hint" class:update-hint-error={mihomo.status === 'failed'}>
                 {kernelHint(mihomo)}
               </p>
+            {/if}
+            {#if kernelsLoaded && mihomo}
+              {@const result = kernelResult(mihomo)}
+              {#if result}
+                <p class="update-hint" data-testid="kernel-result-mihomo">
+                  {$t(result.key, result.params)}
+                </p>
+              {/if}
             {/if}
             {#if kernelsLoaded && mihomo?.status === 'checking'}
               <p class="update-hint" data-testid="kernel-checking-hint-mihomo">
@@ -1282,9 +1349,7 @@
                 disabled={mihomo.status === 'downloading' || mihomo.status === 'installing'}
                 title={$t('svc.install_update')}
               >
-                {mihomo.status === 'downloading' || mihomo.status === 'installing'
-                  ? $t('kernels.installing')
-                  : $t('svc.install_update')}
+                {$t(stageLabelKey(mihomo) ?? 'svc.install_update')}
               </button>
             {:else if !mihomo?.current_version || mihomo.current_version === 'not installed'}
               <button
@@ -1293,17 +1358,17 @@
                 disabled={mihomo?.status === 'downloading' || mihomo?.status === 'installing'}
                 title={$t('svc.install_kernel')}
               >
-                {mihomo?.status === 'downloading' || mihomo?.status === 'installing'
-                  ? $t('kernels.installing')
-                  : $t('svc.install_kernel')}
+                {$t((mihomo ? stageLabelKey(mihomo) : null) ?? 'svc.install_kernel')}
               </button>
             {:else}
+              {@const busyLabel = stageLabelKey(mihomo)}
               <button
-                class="btn btn-sm btn-secondary btn-icon"
+                class="btn btn-sm btn-secondary"
+                class:btn-icon={!busyLabel}
                 onclick={() => installKernel('mihomo')}
                 disabled={mihomo?.status === 'downloading' || mihomo?.status === 'installing'}
-                title={$t('svc.reinstall_tooltip')}
-                aria-label={$t('svc.reinstall')}
+                title={$t(busyLabel ?? 'svc.reinstall_tooltip')}
+                aria-label={$t(busyLabel ?? 'svc.reinstall')}
               >
                 <svg
                   width="13"
@@ -1318,6 +1383,7 @@
                   <path d="M3 22v-6h6" />
                   <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
                 </svg>
+                {#if busyLabel}{$t(busyLabel)}{/if}
               </button>
             {/if}
 
@@ -1393,10 +1459,18 @@
                 />
               {/if}
             </div>
-            {#if kernelsLoaded && xray?.message && (xray.status === 'failed' || xray.status === 'idle' || xray.status === 'done')}
+            {#if kernelsLoaded && xray?.message && (xray.status === 'failed' || xray.status === 'idle')}
               <p class="update-hint" class:update-hint-error={xray.status === 'failed'}>
                 {kernelHint(xray)}
               </p>
+            {/if}
+            {#if kernelsLoaded && xray}
+              {@const result = kernelResult(xray)}
+              {#if result}
+                <p class="update-hint" data-testid="kernel-result-xray">
+                  {$t(result.key, result.params)}
+                </p>
+              {/if}
             {/if}
             {#if kernelsLoaded && xray?.status === 'checking'}
               <p class="update-hint" data-testid="kernel-checking-hint-xray">
@@ -1422,9 +1496,7 @@
                 disabled={xray.status === 'downloading' || xray.status === 'installing'}
                 title={$t('svc.install_update')}
               >
-                {xray.status === 'downloading' || xray.status === 'installing'
-                  ? $t('kernels.installing')
-                  : $t('svc.install_update')}
+                {$t(stageLabelKey(xray) ?? 'svc.install_update')}
               </button>
             {:else if !xray?.current_version || xray.current_version === 'not installed'}
               <button
@@ -1433,17 +1505,17 @@
                 disabled={xray?.status === 'downloading' || xray?.status === 'installing'}
                 title={$t('svc.install_kernel')}
               >
-                {xray?.status === 'downloading' || xray?.status === 'installing'
-                  ? $t('kernels.installing')
-                  : $t('svc.install_kernel')}
+                {$t((xray ? stageLabelKey(xray) : null) ?? 'svc.install_kernel')}
               </button>
             {:else}
+              {@const busyLabel = stageLabelKey(xray)}
               <button
-                class="btn btn-sm btn-secondary btn-icon"
+                class="btn btn-sm btn-secondary"
+                class:btn-icon={!busyLabel}
                 onclick={() => installKernel('xray')}
                 disabled={xray?.status === 'downloading' || xray?.status === 'installing'}
-                title={$t('svc.reinstall_tooltip')}
-                aria-label={$t('svc.reinstall')}
+                title={$t(busyLabel ?? 'svc.reinstall_tooltip')}
+                aria-label={$t(busyLabel ?? 'svc.reinstall')}
               >
                 <svg
                   width="13"
@@ -1458,6 +1530,7 @@
                   <path d="M3 22v-6h6" />
                   <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
                 </svg>
+                {#if busyLabel}{$t(busyLabel)}{/if}
               </button>
             {/if}
 

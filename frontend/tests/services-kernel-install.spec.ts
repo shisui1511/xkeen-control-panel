@@ -9,17 +9,23 @@ interface MockState {
   kernels: unknown;
   /** Поля data ответа /api/service/status поверх базовых. */
   serviceStatus?: Record<string, unknown>;
+  /** Ответ POST /api/kernels/{k}/install; gate удерживает ответ до решения промиса. */
+  install?: { status?: number; body?: string; gate?: Promise<void> };
+  /** Очередь ответов GET status по ядру: по одному элементу на запрос, поверх записи в kernels. */
+  statusQueue?: Record<string, Record<string, unknown>[]>;
 }
 
 interface Counters {
   kernelsList: number;
   kernelStatus: Record<string, number>;
+  installPosts: number;
 }
 
 async function mockRoutes(page: Page, state: MockState): Promise<Counters> {
-  const counters: Counters = { kernelsList: 0, kernelStatus: {} };
+  const counters: Counters = { kernelsList: 0, kernelStatus: {}, installPosts: 0 };
 
   await page.addInitScript(() => {
+    window.localStorage.setItem('lang', 'ru');
     Object.defineProperty(window.navigator, 'serviceWorker', {
       value: undefined,
       writable: false,
@@ -72,12 +78,30 @@ async function mockRoutes(page: Page, state: MockState): Promise<Counters> {
     }
     if (path === '/api/system/stats') return json(systemStatsFixture());
 
+    const installMatch = path.match(/^\/api\/kernels\/([^/]+)\/install$/);
+    if (installMatch && req.method() === 'POST') {
+      counters.installPosts++;
+      if (state.install?.gate) await state.install.gate;
+      const status = state.install?.status ?? 200;
+      if (status !== 200) {
+        return route.fulfill({
+          status,
+          contentType: 'text/plain',
+          body: state.install?.body ?? 'error'
+        });
+      }
+      return json({ status: 'downloading', stage: 'starting' });
+    }
+
     const statusMatch = path.match(/^\/api\/kernels\/([^/]+)\/status$/);
     if (statusMatch && req.method() === 'GET') {
       const name = statusMatch[1];
       counters.kernelStatus[name] = (counters.kernelStatus[name] ?? 0) + 1;
       const list = Array.isArray(state.kernels) ? (state.kernels as { name: string }[]) : [];
-      return json({ success: true, data: list.find((k) => k.name === name) ?? {} });
+      const patch = state.statusQueue?.[name]?.shift();
+      const entry = list.find((k) => k.name === name);
+      if (patch && entry) Object.assign(entry, patch);
+      return json({ success: true, data: entry ?? {} });
     }
     if (path === '/api/kernels' && req.method() === 'GET') {
       counters.kernelsList++;
@@ -200,5 +224,149 @@ test.describe('Services page — status age badge', () => {
     await expect(hero.getByTestId('status-xkeen-unknown')).toContainText(/Неизвестно|Unknown/);
     await expect(hero).not.toContainText(/остановлен|stopped/i);
     await expect(badge(page)).toHaveCount(0);
+  });
+});
+
+test.describe('Services page — kernel install progress', () => {
+  const xrayRow = (page: Page) => page.locator('.update-item', { hasText: 'Xray' });
+  const updatable = () =>
+    kernelsFixture('xray', {
+      xray: { current_version: '26.9.8', latest_version: '26.9.9', has_update: true }
+    });
+
+  test('«Старт…» сразу после клика, затем этапы и переведённый итог с одним тостом', async ({
+    page
+  }) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const state: MockState = {
+      kernels: updatable(),
+      install: { gate },
+      statusQueue: {
+        xray: [
+          { status: 'downloading', stage: 'downloading' },
+          { status: 'installing', stage: 'extracting' },
+          { status: 'installing', stage: 'replacing' },
+          {
+            status: 'done',
+            stage: '',
+            has_update: false,
+            current_version: '26.9.9',
+            result_kind: 'updated',
+            result_version: '26.9.9',
+            message: 'Updated to 26.9.9'
+          }
+        ]
+      }
+    };
+    const counters = await mockRoutes(page, state);
+    await page.addInitScript(() => {
+      const seen: string[] = [];
+      (window as unknown as { __toasts: string[] }).__toasts = seen;
+      new MutationObserver((records) => {
+        for (const r of records) {
+          r.addedNodes.forEach((n) => {
+            if (!(n instanceof HTMLElement)) return;
+            const toasts = n.matches('.toast') ? [n] : Array.from(n.querySelectorAll('.toast'));
+            toasts.forEach((el) => {
+              if (el.textContent?.includes('Обновлено до v26.9.9')) seen.push(el.textContent);
+            });
+          });
+        }
+      }).observe(document, { childList: true, subtree: true });
+    });
+    await page.clock.install();
+    await page.goto('/#/services');
+    const button = xrayRow(page).getByRole('button', { name: 'Обновить' });
+    await expect(button).toBeVisible();
+
+    await button.click();
+    // Ответ POST ещё не пришёл: кнопка уже занята и подписана
+    const busy = xrayRow(page).locator('.update-actions .btn-primary');
+    await expect(busy).toHaveText('Старт…');
+    await expect(busy).toBeDisabled();
+    expect(counters.kernelStatus['xray'] ?? 0).toBe(0);
+
+    release();
+    await expect(busy).toHaveText('Скачивание…');
+    await page.clock.runFor(2_000);
+    await expect(busy).toHaveText('Распаковка…');
+    await page.clock.runFor(2_000);
+    await expect(busy).toHaveText('Замена…');
+    await page.clock.runFor(2_000);
+
+    const result = page.getByTestId('kernel-result-xray');
+    await expect(result).toContainText('Обновлено до v26.9.9');
+    await expect(page.locator('.toast', { hasText: 'Обновлено до v26.9.9' })).toHaveCount(1);
+    await expect(page.getByText('Updated to')).toHaveCount(0);
+
+    // Дальнейшие опросы не дают повторного тоста (тосты считаются по всем кадрам)
+    await page.clock.runFor(6_000);
+    await page.waitForTimeout(300);
+    const shown = await page.evaluate(
+      () => (window as unknown as { __toasts: string[] }).__toasts.length
+    );
+    expect(shown).toBe(1);
+  });
+
+  for (const [kind, text] of [
+    ['installed', 'Установлено v26.9.9'],
+    ['reinstalled', 'Переустановлено v26.9.9']
+  ] as const) {
+    test(`итог ${kind} переводится по коду`, async ({ page }) => {
+      await mockRoutes(page, {
+        kernels: kernelsFixture('xray', {
+          xray: {
+            current_version: '26.9.9',
+            latest_version: '26.9.9',
+            status: 'done',
+            result_kind: kind,
+            result_version: '26.9.9',
+            message: 'Installed 26.9.9'
+          }
+        })
+      });
+      await page.goto('/#/services');
+      await expect(page.getByTestId('kernel-result-xray')).toContainText(text);
+      await expect(page.getByText('Installed 26.9.9')).toHaveCount(0);
+    });
+  }
+
+  test('ошибка POST 500 возвращает кнопку и показывает тост без опроса статуса', async ({
+    page
+  }) => {
+    const counters = await mockRoutes(page, {
+      kernels: updatable(),
+      install: { status: 500, body: 'download failed' }
+    });
+    await page.clock.install();
+    await page.goto('/#/services');
+    const button = xrayRow(page).getByRole('button', { name: 'Обновить' });
+    await button.click();
+
+    await expect(page.locator('.toast--error', { hasText: 'download failed' })).toBeVisible();
+    await expect(xrayRow(page).getByRole('button', { name: 'Обновить' })).toBeEnabled();
+    await page.clock.runFor(6_000);
+    await page.waitForTimeout(300);
+    expect(counters.installPosts).toBe(1);
+    expect(counters.kernelStatus['xray'] ?? 0).toBe(0);
+  });
+
+  test('ответ 409 показывает тост и не запускает опрос статуса', async ({ page }) => {
+    const counters = await mockRoutes(page, {
+      kernels: updatable(),
+      install: { status: 409, body: 'install already in progress' }
+    });
+    await page.clock.install();
+    await page.goto('/#/services');
+    await xrayRow(page).getByRole('button', { name: 'Обновить' }).click();
+
+    await expect(
+      page.locator('.toast--error', { hasText: 'install already in progress' })
+    ).toBeVisible();
+    await expect(xrayRow(page).getByRole('button', { name: 'Обновить' })).toBeEnabled();
+    await page.clock.runFor(4_000);
+    await page.waitForTimeout(300);
+    expect(counters.kernelStatus['xray'] ?? 0).toBe(0);
   });
 });
