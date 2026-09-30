@@ -2173,3 +2173,96 @@ func TestKernelService_BusyCounterAcrossKernels(t *testing.T) {
 	}
 	rel()
 }
+
+// TestKernelHasUpdate_UnknownCurrent: нераспознанная версия не превращается в
+// предложение обновления (G2), «не установлено» — по-прежнему «есть что поставить».
+func TestKernelHasUpdate_UnknownCurrent(t *testing.T) {
+	cases := []struct {
+		latest, current string
+		want            bool
+	}{
+		{"26.3.27", "error", false},
+		{"26.3.27", "unknown", false},
+		{"26.3.27", "", false},
+		{"26.3.27", "not installed", true},
+		{"26.3.27", "26.9.9", false},
+		{"26.3.27", "26.1.1", true},
+	}
+	for _, tc := range cases {
+		if got := kernelHasUpdate(tc.latest, tc.current); got != tc.want {
+			t.Errorf("kernelHasUpdate(%q, %q) = %v, want %v", tc.latest, tc.current, got, tc.want)
+		}
+	}
+}
+
+// TestList_FlagsFromFreshVersion: List и Get считают флаги по свежей версии
+// снимка, а не по хранимой (после таймаута при старте там лежит "error").
+func TestList_FlagsFromFreshVersion(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.19.5")
+	svc.mu.Lock()
+	k := svc.kernels["mihomo"]
+	k.CurrentVersion = "error"
+	k.LatestVersion = "1.19.0"
+	k.Channel = "stable"
+	k.HasUpdate = true
+	svc.mu.Unlock()
+
+	var got *KernelInfo
+	for _, ki := range svc.List() {
+		if ki.Name == "mihomo" {
+			ki := ki
+			got = &ki
+		}
+	}
+	if got == nil {
+		t.Fatal("mihomo отсутствует в List()")
+	}
+	check := func(label string, ki *KernelInfo) {
+		t.Helper()
+		if ki.CurrentVersion != "1.19.5" {
+			t.Errorf("%s: CurrentVersion = %q, want 1.19.5", label, ki.CurrentVersion)
+		}
+		if ki.HasUpdate {
+			t.Errorf("%s: HasUpdate = true, want false", label)
+		}
+		if !ki.AheadOfLatest {
+			t.Errorf("%s: AheadOfLatest = false, want true", label)
+		}
+	}
+	check("List", got)
+	check("Get", svc.Get("mihomo"))
+}
+
+// TestClaimLatestCheck_TTL: автопроверка занимается атомарно, не чаще раза за ttl
+// и только для пустого latest.
+func TestClaimLatestCheck_TTL(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.19.5")
+	svc.mu.Lock()
+	svc.kernels["mihomo"].LatestVersion = ""
+	svc.mu.Unlock()
+	const ttl = 10 * time.Minute
+
+	if !svc.ClaimLatestCheck("mihomo", ttl) {
+		t.Fatal("первый вызов должен занять проверку")
+	}
+	if svc.ClaimLatestCheck("mihomo", ttl) {
+		t.Fatal("повторный вызов в пределах ttl не должен занимать проверку")
+	}
+	svc.mu.Lock()
+	svc.kernels["mihomo"].latestCheckedAt = time.Now().Add(-ttl - time.Second)
+	svc.mu.Unlock()
+	if !svc.ClaimLatestCheck("mihomo", ttl) {
+		t.Fatal("после истечения ttl проверку можно занять снова")
+	}
+
+	svc.mu.Lock()
+	svc.kernels["mihomo"].LatestVersion = "1.19.0"
+	svc.kernels["mihomo"].latestCheckedAt = time.Time{}
+	svc.mu.Unlock()
+	if svc.ClaimLatestCheck("mihomo", ttl) {
+		t.Fatal("при известном latest автопроверка не нужна")
+	}
+	if svc.ClaimLatestCheck("nope", ttl) {
+		t.Fatal("неизвестное ядро занять нельзя")
+	}
+}
