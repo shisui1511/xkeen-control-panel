@@ -1104,6 +1104,9 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 	channel := k.Channel
 	apiBase := s.githubAPIBase
 	testClient := s.testClient
+	// Копия записи и указатель кэша версии: свежую версию читаем вне s.mu.
+	verSnap := *k
+	verCacheAtStart := k.verCache
 	s.mu.Unlock()
 
 	// fail фиксирует ошибку проверки в статусе ядра, если канал не сменился
@@ -1195,9 +1198,19 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 		resultMessage = fmt.Sprintf("No prerelease found in the last %d releases of %s", previewReleaseWindow, repo)
 	}
 
+	// Свежая версия бинарника вне s.mu: хранимая могла остаться нераспознанной
+	// (error после таймаута при старте), и флаги по ней ложны (G2).
+	freshVersion := s.detectVersion(&verSnap)
+
 	s.mu.Lock()
 	// Канал сменился, пока шёл запрос: результат относится к прежнему каналу.
 	if kk := s.kernels[name]; kk != nil && kk.Channel == channel {
+		// Указатель verCache меняет только refreshInstalledVersion (установка,
+		// откат, загрузка): совпадение значит «бинарник не менялся за время
+		// проверки», и прочитанная до замены версия не затрёт новую.
+		if knownKernelVersion(freshVersion) && kk.verCache == verCacheAtStart {
+			kk.CurrentVersion = freshVersion
+		}
 		kk.LatestVersion = latestVersion
 		kk.LatestTag = latestTag
 		kk.HasUpdate = kernelHasUpdate(latestVersion, kk.CurrentVersion)
