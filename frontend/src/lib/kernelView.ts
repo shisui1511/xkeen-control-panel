@@ -20,6 +20,9 @@ export interface KernelLike {
   stage?: string;
   result_kind?: string;
   result_version?: string;
+  /** Код причины status=failed от бэкенда; перевод собирает фронтенд. */
+  error_kind?: string;
+  message?: string;
 }
 
 export interface KernelBadge {
@@ -36,6 +39,9 @@ export interface I18nRef {
 
 /** Статусы, пока которые карточка опрашивается и действия недоступны. */
 export const TRANSITIONAL_KERNEL_STATUSES = ['checking', 'downloading', 'installing'] as const;
+
+/** Виды ошибки проверки релиза, которые бэкенд отдаёт в error_kind при status=failed. */
+export const ERROR_KINDS = ['release_lookup_failed', 'no_release', 'unsupported_arch'] as const;
 
 const STAGES: readonly string[] = ['starting', 'downloading', 'extracting', 'replacing'];
 const RESULT_KINDS: readonly string[] = [
@@ -74,7 +80,25 @@ export function resultMessage(k: KernelLike): I18nRef | null {
   if (k.status !== 'done') return null;
   if (!k.result_kind || !RESULT_KINDS.includes(k.result_kind)) return null;
   const version = formatKernelVersion(k.result_version || k.current_version);
+  // Без версии («Установлено {version}» оставило бы висячий пробел) — фраза без параметра
+  if (!version) return { key: `svc.kernel_result_${k.result_kind}_plain` };
   return { key: `svc.kernel_result_${k.result_kind}`, params: { version } };
+}
+
+/**
+ * Перевод причины неудачи по error_kind; null, когда статус не failed или вид
+ * неизвестен — вызывающий показывает прежний message. Деталь — часть message
+ * после первого «: » (текст ошибки запроса или архитектура); у no_release её нет.
+ */
+export function failureMessage(k: KernelLike): I18nRef | null {
+  if (k.status !== 'failed') return null;
+  const kind = k.error_kind;
+  if (!kind || !(ERROR_KINDS as readonly string[]).includes(kind)) return null;
+  const key = `svc.kernel_error_${kind}`;
+  if (kind === 'no_release') return { key };
+  const message = k.message ?? '';
+  const sep = message.indexOf(': ');
+  return { key, params: { detail: sep >= 0 ? message.slice(sep + 2).trim() : '' } };
 }
 
 /** Значения current_version, когда версия не определилась (сбой запуска бинарника). */

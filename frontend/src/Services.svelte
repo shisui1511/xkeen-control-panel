@@ -20,6 +20,7 @@
   import { apiFetch } from './lib/api';
   import {
     isTransitionalStatus,
+    failureMessage,
     formatKernelVersion,
     kernelBadge,
     showInstallStable,
@@ -201,10 +202,13 @@
     return /^\d/.test(bare) ? `v${bare}` : bare;
   }
 
-  // Подсказка под строкой ядра: ошибки — как есть. Итог завершённой операции
-  // (status done) показывается отдельно по коду result_kind, английский
-  // message бэкенда пользователю не выводится
-  function kernelHint(k: { status: string; message: string }): string {
+  // Подсказка под строкой ядра: причина неудачи с известным error_kind — переводом,
+  // прочие ошибки — как есть. Итог завершённой операции (status done)
+  // показывается отдельно по коду result_kind, английский message бэкенда
+  // пользователю не выводится
+  function kernelHint(k: Kernel): string {
+    const failure = failureMessage(k);
+    if (failure) return $t(failure.key, failure.params).trim();
     if (k.status === 'idle' && k.message.startsWith('No prerelease found'))
       return $t('svc.kernel_no_prerelease');
     return k.message;
@@ -219,7 +223,8 @@
       start: $t('svc.log_action_start'),
       stop: $t('svc.log_action_stop'),
       restart: $t('svc.log_action_restart'),
-      watchdog_reset: $t('svc.log_action_watchdog_reset')
+      watchdog_reset: $t('svc.log_action_watchdog_reset'),
+      watchdog_rearm: $t('svc.log_action_watchdog_rearm')
     };
     if (action.startsWith('switch_kernel:')) {
       return $t('svc.log_action_switch') + ' ' + action.split(':')[1];
