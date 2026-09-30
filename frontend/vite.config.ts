@@ -46,6 +46,22 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Лениво загружаемые страницы и разделы конструктора грузятся через
+    // {#await import(...)}, поэтому Vite видит их только при первом заходе
+    // браузера: на холодном dev-сервере 4 параллельных воркера Playwright
+    // одновременно трансформируют сотни модулей, и первая отрисовка
+    // не укладывается в 20 с (стресс 136-17). Предварительная трансформация
+    // при старте переносит эту работу до первого теста.
+    warmup: {
+      clientFiles: [
+        './src/Editor.svelte',
+        './src/Constructor.svelte',
+        './src/XrayRoutingConstructor.svelte',
+        './src/MihomoGenerator.svelte',
+        './src/Services.svelte',
+        './src/Traffic.svelte'
+      ]
+    },
     proxy: {
       // D-12: панель отвечает только по HTTPS (134-06); dev-сервер на ПК не
       // запускается (CLAUDE.md — службы только на роутере), правка нужна
