@@ -176,7 +176,8 @@ test.describe('Sidebar: кэш capabilities и скелетон', () => {
     await expect(page.getByTestId('nav-skeleton')).toBeVisible();
 
     await expect(page.getByTestId('nav-skeleton')).toHaveCount(0, { timeout: 25_000 });
-    await expect(page.locator('.sidebar-nav .nav-group')).toHaveCount(XRAY_GROUPS);
+    // Ядро не определилось (none): к статическим группам добавляются группы Mihomo
+    await expect(page.locator('.sidebar-nav .nav-group')).toHaveCount(XRAY_GROUPS + 2);
     expect(state.calls).toBeGreaterThanOrEqual(2);
     // Дефолт меню не записывается в кэш: он не подтверждён сервером
     expect(await page.evaluate((k) => localStorage.getItem(k), NAV_KEY)).toBeNull();
