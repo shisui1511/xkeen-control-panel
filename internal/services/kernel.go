@@ -567,12 +567,23 @@ const (
 // Текст сохранён: на него смотрят обработчики и тесты.
 var ErrKernelBusy = errors.New("install already in progress")
 
+// ErrKernelNotFound — ядра с таким именем нет.
+var ErrKernelNotFound = errors.New("kernel not found")
+
+// ErrInvalidChannel — канал обновлений не stable и не preview.
+var ErrInvalidChannel = errors.New("invalid channel: must be 'stable' or 'preview'")
+
 // KernelService manages proxy kernels (xray, mihomo)
 type KernelService struct {
 	kernels      map[string]*KernelInfo
 	mu           sync.RWMutex
 	installLocks sync.Map // per-kernel install lock; key: string, value: *sync.Mutex
 	dataDir      string
+
+	// persistMu сериализует сохранение каналов: снимок каналов снимается внутри
+	// него, поэтому запись со старым снимком не затирает более новую.
+	// Порядок замков: persistMu → s.mu; обратного порядка в коде нет.
+	persistMu sync.Mutex
 
 	// opsActive — число идущих операций над ядрами (установка, откат, загрузка
 	// файла) по всем ядрам; читается без замков (Busy). busyKernels — те же
@@ -870,18 +881,23 @@ func (s *KernelService) GetActiveKernel() string {
 	return ""
 }
 
-// SetChannel switches a kernel's update channel (stable/preview) and persists
-// the selection to disk so it survives xcp restarts (T-CH-02). Returns false
-// if the channel value is invalid or the kernel is unknown.
-func (s *KernelService) SetChannel(name, channel string) bool {
+// SetChannel переключает канал обновлений ядра (stable/preview) и сохраняет выбор
+// на диск, чтобы он пережил рестарт xcp (T-CH-02). Ошибки: ErrInvalidChannel,
+// ErrKernelNotFound, ErrKernelBusy (над ядром идёт установка, откат или загрузка
+// файла: URL скачивания строится из канала, смена дала бы сборку другого канала).
+func (s *KernelService) SetChannel(name, channel string) error {
 	if channel != "stable" && channel != "preview" {
-		return false
+		return ErrInvalidChannel
 	}
 	s.mu.Lock()
 	k, ok := s.kernels[name]
 	if !ok {
 		s.mu.Unlock()
-		return false
+		return ErrKernelNotFound
+	}
+	if s.busyLocked(name) {
+		s.mu.Unlock()
+		return ErrKernelBusy
 	}
 	k.Channel = channel
 	// Latest* принадлежали прежнему каналу: сбрасываем, пока перепроверка
@@ -893,16 +909,23 @@ func (s *KernelService) SetChannel(name, channel string) bool {
 	k.Message = ""
 	k.ErrorKind = ""
 	k.Status = "checking"
+	s.mu.Unlock()
+
+	// Снимок каналов снимается внутри persistMu: иначе поздняя запись со старым
+	// снимком затёрла бы выбор, сделанный параллельным SetChannel.
+	s.persistMu.Lock()
+	s.mu.RLock()
 	channels := make(map[string]string, len(s.kernels))
 	for n, kk := range s.kernels {
 		channels[n] = kk.Channel
 	}
-	s.mu.Unlock()
-
-	if err := s.persistChannels(channels); err != nil {
+	s.mu.RUnlock()
+	err := s.persistChannels(channels)
+	s.persistMu.Unlock()
+	if err != nil {
 		log.Printf("WARNING: failed to persist kernel channel selection: %v", err)
 	}
-	return true
+	return nil
 }
 
 // kernelVersionTimeout — предел ожидания `<ядро> version`. Пакетная переменная:
@@ -1110,7 +1133,8 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 		return fmt.Errorf("kernel not found: %s", name)
 	}
 	k.latestCheckedAt = time.Now()
-	if !quiet {
+	// Занятому ядру статус не меняем: им управляет установщик (G5-WR01).
+	if !quiet && !s.busyLocked(name) {
 		k.Status = "checking"
 		k.Message = "Checking for updates..."
 		k.ErrorKind = ""
@@ -1132,7 +1156,7 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 			return err
 		}
 		s.mu.Lock()
-		if kk := s.kernels[name]; kk != nil && kk.Channel == channel {
+		if kk := s.kernels[name]; kk != nil && kk.Channel == channel && !s.busyLocked(name) {
 			kk.Status = "failed"
 			kk.Message = message
 			kk.ErrorKind = ""
@@ -1232,7 +1256,7 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 		kk.LatestTag = latestTag
 		kk.HasUpdate = kernelHasUpdate(latestVersion, kk.CurrentVersion)
 		kk.AheadOfLatest = kernelAheadOfLatest(channel, latestVersion, kk.CurrentVersion)
-		if !quiet {
+		if !quiet && !s.busyLocked(name) {
 			kk.Status = "idle"
 			kk.Message = resultMessage
 			kk.ErrorKind = ""

@@ -177,8 +177,17 @@ func (a *API) KernelChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !a.kernelSvc.SetChannel(name, req.Channel) {
-		JSONError(w, http.StatusNotFound, "Kernel not found")
+	if err := a.kernelSvc.SetChannel(name, req.Channel); err != nil {
+		switch {
+		case errors.Is(err, services.ErrKernelNotFound):
+			JSONError(w, http.StatusNotFound, "Kernel not found")
+		case errors.Is(err, services.ErrKernelBusy):
+			JSONError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, services.ErrInvalidChannel):
+			JSONError(w, http.StatusBadRequest, err.Error())
+		default:
+			JSONError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 
