@@ -141,12 +141,16 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if activeKernel == "" && a.xkeenSvc != nil {
-		// Запасной путь: последний известный вывод xkeen -status из кэша
-		if status := a.xkeenStatusSnapshot().Raw; status != "" {
-			lower := strings.ToLower(status)
-			if strings.Contains(lower, "xray") {
+		// Запасной путь: вывод xkeen -status из кэша, но только свежий —
+		// устаревший снимок (после switch_kernel или при зависшем опросе)
+		// хранит прежнее ядро. Если в выводе оба слова, ядро по Raw не выбирается.
+		if snap := a.xkeenStatusSnapshot(); !snap.Stale && snap.Raw != "" {
+			lower := strings.ToLower(snap.Raw)
+			hasXray := strings.Contains(lower, "xray")
+			hasMihomo := strings.Contains(lower, "mihomo")
+			if hasXray && !hasMihomo {
 				activeKernel = "xray"
-			} else if strings.Contains(lower, "mihomo") {
+			} else if hasMihomo && !hasXray {
 				activeKernel = "mihomo"
 			}
 		}

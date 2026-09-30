@@ -446,14 +446,24 @@ func main() {
 				}
 			}
 		}
+		// Вывод xkeen -status годится только свежий: устаревший снимок хранит
+		// прежнее ядро (G5-WR04). Если в выводе оба слова, ядро по Raw не выбирается.
 		if c := api.XKeenStatusCache(); c != nil {
-			if raw := c.Snapshot().Raw; raw != "" {
-				lower := strings.ToLower(raw)
-				if strings.Contains(lower, "xray") {
+			if snap := c.Snapshot(); !snap.Stale && snap.Raw != "" {
+				lower := strings.ToLower(snap.Raw)
+				hasXray := strings.Contains(lower, "xray")
+				hasMihomo := strings.Contains(lower, "mihomo")
+				if hasXray && !hasMihomo {
 					return "xray"
-				} else if strings.Contains(lower, "mihomo") {
+				} else if hasMihomo && !hasXray {
 					return "mihomo"
 				}
+			}
+		}
+		// Ни одно ядро не запущено, статус неизвестен: ядро, которое запустит XKeen.
+		if xSvc := api.XKeenService(); xSvc != nil {
+			if k := xSvc.ConfiguredKernel(); k == "xray" || k == "mihomo" {
+				return k
 			}
 		}
 		return "xray"

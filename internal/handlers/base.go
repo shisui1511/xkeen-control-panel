@@ -352,8 +352,9 @@ func (a *API) getActiveKernelName() string {
 		}
 	}
 	if active == "" && a.xkeenSvc != nil {
-		if status := a.xkeenStatusSnapshot().Raw; status != "" {
-			lower := strings.ToLower(status)
+		// Устаревший снимок не выдаётся за факт о запущенном ядре.
+		if snap := a.xkeenStatusSnapshot(); !snap.Stale && snap.Raw != "" {
+			lower := strings.ToLower(snap.Raw)
 			if strings.Contains(lower, "xray") && strings.Contains(lower, "mihomo") {
 				active = "both"
 			} else if strings.Contains(lower, "xray") {
