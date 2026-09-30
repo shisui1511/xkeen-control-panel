@@ -2387,3 +2387,158 @@ COMMIT
 		t.Fatalf("состояние не должно быть %q", WatchdogStateDisarmed)
 	}
 }
+
+// busyWatchdogEnv — стенд для проверок паузы на время операции над ядром:
+// фейковый xkeen «не работает» с журналом вызовов, фейковые iptables с
+// TPROXY-правилом, фейковые часы.
+type busyWatchdogEnv struct {
+	w         *WatchdogService
+	xkeenSvc  *XKeenService
+	simTime   time.Time
+	statusLog string
+	delLog    string
+	busy      bool
+}
+
+func newBusyWatchdogEnv(t *testing.T) *busyWatchdogEnv {
+	t.Helper()
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	env := &busyWatchdogEnv{
+		simTime:   time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC),
+		statusLog: filepath.Join(tmpDir, "status.log"),
+	}
+	dummy := filepath.Join(tmpDir, "xkeen")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %q\necho \"XKeen is not running\"\nexit 1\n", env.statusLog)
+	if err := os.WriteFile(dummy, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, delLog := installFakeIptables(t, ruleOutput)
+	env.delLog = delLog
+
+	env.xkeenSvc = NewXKeenService(dummy, tmpDir)
+	env.xkeenSvc.now = func() time.Time { return env.simTime }
+	env.w = NewWatchdogService(env.xkeenSvc, tmpDir, tmpDir)
+	env.w.now = func() time.Time { return env.simTime }
+	env.w.iptablesSaveBin = saveBin
+	env.w.iptablesBin = delBin
+	env.w.ip6tablesSaveBin = saveBin
+	env.w.ip6tablesBin = delBin
+	env.w.SetKernelBusyFunc(func() bool { return env.busy })
+	return env
+}
+
+func (e *busyWatchdogEnv) statusCalls() int {
+	data, err := os.ReadFile(e.statusLog)
+	if err != nil {
+		return 0
+	}
+	return len(strings.Fields(strings.TrimSpace(string(data))))
+}
+
+// TestWatchdogService_KernelBusyResetsFailures: при входе в операцию над ядром
+// счётчик, меньший watchdogMaxFailures, обнуляется; достигший порога — не трогается.
+func TestWatchdogService_KernelBusyResetsFailures(t *testing.T) {
+	env := newBusyWatchdogEnv(t)
+
+	for i := 1; i <= 2; i++ {
+		env.simTime = env.simTime.Add(watchdogCheckInterval)
+		env.w.CheckHealth()
+		if got := env.w.ConsecutiveFailures(); got != i {
+			t.Fatalf("проверка %d: ConsecutiveFailures = %d, want %d", i, got, i)
+		}
+	}
+
+	env.busy = true
+	env.simTime = env.simTime.Add(watchdogCheckInterval)
+	env.w.CheckHealth()
+	if got := env.w.ConsecutiveFailures(); got != 0 {
+		t.Fatalf("вход в операцию должен обнулить счётчик, got %d", got)
+	}
+
+	// Счётчик, достигший порога, вход в операцию не обнуляет.
+	env.w.mu.Lock()
+	env.w.busyActive = false
+	env.w.consecutiveFailures = watchdogMaxFailures
+	env.w.mu.Unlock()
+	env.simTime = env.simTime.Add(watchdogCheckInterval)
+	env.w.CheckHealth()
+	if got := env.w.ConsecutiveFailures(); got != watchdogMaxFailures {
+		t.Fatalf("счётчик на пороге не должен обнуляться, got %d", got)
+	}
+}
+
+// TestWatchdogService_KernelBusyGrace: 60 с после последней замеченной операции
+// проверки ничего не считают и не запускают xkeen; потом считают провалы снова.
+func TestWatchdogService_KernelBusyGrace(t *testing.T) {
+	env := newBusyWatchdogEnv(t)
+
+	env.busy = true
+	env.w.CheckHealth() // замечена операция: lastBusyAt = simTime
+	env.busy = false
+
+	base := env.simTime
+	for _, off := range []time.Duration{10 * time.Second, 30 * time.Second, 59 * time.Second} {
+		env.simTime = base.Add(off)
+		env.w.CheckHealth()
+		if got := env.w.ConsecutiveFailures(); got != 0 {
+			t.Fatalf("через %v после операции ConsecutiveFailures = %d, want 0", off, got)
+		}
+		if got := env.statusCalls(); got != 0 {
+			t.Fatalf("через %v после операции xkeen -status вызван %d раз", off, got)
+		}
+	}
+
+	env.simTime = base.Add(61 * time.Second)
+	env.w.CheckHealth()
+	if got := env.w.ConsecutiveFailures(); got != 1 {
+		t.Fatalf("через 61 с после операции провал должен считаться, got %d", got)
+	}
+	if got := env.statusCalls(); got != 1 {
+		t.Fatalf("xkeen -status должен быть вызван 1 раз, got %d", got)
+	}
+}
+
+// TestWatchdogService_StatusTimeoutFromVariable: таймаут `xkeen -status` берётся
+// из watchdogStatusTimeout, а не из фиксированных 5 с.
+func TestWatchdogService_StatusTimeoutFromVariable(t *testing.T) {
+	xtables.ResetForTest()
+
+	if watchdogStatusTimeout != 15*time.Second {
+		t.Fatalf("watchdogStatusTimeout = %v, want 15s", watchdogStatusTimeout)
+	}
+
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\nexec sleep 2\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ruleOutput := "*mangle\n:PREROUTING ACCEPT [0:0]\n-A PREROUTING -p tcp -j TPROXY --on-port 7892 --tproxy-mark 0x1/0x1\nCOMMIT\n"
+	saveBin, delBin, _ := installFakeIptables(t, ruleOutput)
+
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	orig := watchdogStatusTimeout
+	watchdogStatusTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { watchdogStatusTimeout = orig })
+
+	start := time.Now()
+	w.CheckHealth()
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("проверка должна оборваться по watchdogStatusTimeout, заняла %v", elapsed)
+	}
+	if got := w.ConsecutiveFailures(); got != 1 {
+		t.Fatalf("оборванный по таймауту статус — провал, got %d", got)
+	}
+}
