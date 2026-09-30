@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { LAZY_LOAD_TIMEOUT } from './helpers/timeouts';
 
 test.use({ locale: 'ru-RU' });
 
@@ -215,7 +216,7 @@ test.describe('Phase 105: Xray Constructor Smart-Merge (TMPL-01, TMPL-07)', () =
 
     // Переключиться на Xray-конструктор
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
     await page
       .getByTestId('xray-stub-banner')
@@ -336,7 +337,7 @@ test.describe('Phase 105: Xray Constructor Smart-Merge (TMPL-01, TMPL-07)', () =
     await page.goto('/#/constructor');
 
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
-    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await xrayBtn.click();
     await page
       .getByTestId('xray-stub-banner')
@@ -439,7 +440,7 @@ test('заготовка XKeen: без согласия файлы не пишу
   await page.goto('/#/constructor');
   await page.locator('.constructor-kernel-toggle button:has-text("Xray")').click();
   const banner = page.getByTestId('xray-stub-banner');
-  await expect(banner).toBeVisible();
+  await expect(banner).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
   await page.waitForTimeout(1000);
   expect(writes.filter((u) => u.includes('/api/config/save'))).toEqual([]);
   await banner.getByRole('button', { name: /Не сейчас|Not now/ }).click();
