@@ -2266,3 +2266,113 @@ func TestClaimLatestCheck_TTL(t *testing.T) {
 		t.Fatal("неизвестное ядро занять нельзя")
 	}
 }
+
+// TestCheckLatest_WritesFreshKnownVersion: хранимая нераспознанная версия
+// «вылечивается» при проверке релиза, флаги считаются по свежей (G2).
+func TestCheckLatest_WritesFreshKnownVersion(t *testing.T) {
+	server := newReleaseServer(t, http.StatusOK, `{"tag_name":"v1.19.0"}`)
+	svc, _ := newInstallTestService(t, "1.19.5")
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.mu.Lock()
+	k := svc.kernels["mihomo"]
+	k.verCache = &versionCache{}
+	k.CurrentVersion = "error"
+	k.LatestVersion = ""
+	k.Channel = "stable"
+	k.Repo = "some/repo"
+	svc.mu.Unlock()
+
+	if err := svc.CheckLatest(context.Background(), "mihomo"); err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if k.CurrentVersion != "1.19.5" {
+		t.Errorf("CurrentVersion = %q, want 1.19.5", k.CurrentVersion)
+	}
+	if k.HasUpdate || !k.AheadOfLatest {
+		t.Errorf("has_update=%v ahead=%v, want false/true", k.HasUpdate, k.AheadOfLatest)
+	}
+	if k.Status != "idle" {
+		t.Errorf("Status = %q, want idle", k.Status)
+	}
+}
+
+// TestCheckLatest_FreshUnknownKeepsStoredVersion: свежая нераспознанная версия
+// (error) не затирает хранимую распознанную.
+func TestCheckLatest_FreshUnknownKeepsStoredVersion(t *testing.T) {
+	server := newReleaseServer(t, http.StatusOK, `{"tag_name":"v1.19.0"}`)
+	svc, binPath := newInstallTestService(t, "1.19.5")
+	if err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.mu.Lock()
+	k := svc.kernels["mihomo"]
+	k.verCache = &versionCache{}
+	k.CurrentVersion = "1.18.0"
+	k.LatestVersion = ""
+	k.Channel = "stable"
+	k.Repo = "some/repo"
+	svc.mu.Unlock()
+
+	if err := svc.CheckLatest(context.Background(), "mihomo"); err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if k.CurrentVersion != "1.18.0" {
+		t.Errorf("CurrentVersion = %q, want прежняя 1.18.0", k.CurrentVersion)
+	}
+	if !k.HasUpdate || k.AheadOfLatest {
+		t.Errorf("has_update=%v ahead=%v, want true/false по хранимой 1.18.0", k.HasUpdate, k.AheadOfLatest)
+	}
+}
+
+// TestCheckLatest_KeepsVersionReplacedDuringCheck: установка, прошедшая во время
+// проверки релиза, не откатывается к версии, прочитанной до неё.
+func TestCheckLatest_KeepsVersionReplacedDuringCheck(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tag_name":"v1.19.0"}`))
+	}))
+	defer server.Close()
+
+	svc, _ := newInstallTestService(t, "1.19.5")
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.mu.Lock()
+	k := svc.kernels["mihomo"]
+	k.verCache = &versionCache{}
+	k.CurrentVersion = "error"
+	k.LatestVersion = ""
+	k.Channel = "stable"
+	k.Repo = "some/repo"
+	svc.mu.Unlock()
+
+	done := make(chan error, 1)
+	go func() { done <- svc.CheckLatest(context.Background(), "mihomo") }()
+
+	<-started
+	// Имитация установки посреди проверки: новый verCache и новая версия.
+	svc.mu.Lock()
+	k.verCache = &versionCache{}
+	k.CurrentVersion = "1.19.9"
+	svc.mu.Unlock()
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if k.CurrentVersion != "1.19.9" {
+		t.Errorf("CurrentVersion = %q, want 1.19.9 (версия установки)", k.CurrentVersion)
+	}
+	if k.HasUpdate || !k.AheadOfLatest {
+		t.Errorf("has_update=%v ahead=%v, want false/true по 1.19.9", k.HasUpdate, k.AheadOfLatest)
+	}
+}
