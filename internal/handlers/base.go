@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -164,6 +165,14 @@ func (a *API) invalidateXKeenVersion() {
 func (a *API) invalidateXKeenStatus() {
 	if a.xkeenStatus != nil {
 		a.xkeenStatus.Invalidate()
+	}
+}
+
+// refreshXKeenStatus — внеочередной опрос кэша статуса: ждёт его завершения или
+// ctx. Без кэша ничего не делает (прямой Status() здесь не нужен).
+func (a *API) refreshXKeenStatus(ctx context.Context) {
+	if a.xkeenStatus != nil {
+		a.xkeenStatus.RefreshNow(ctx)
 	}
 }
 

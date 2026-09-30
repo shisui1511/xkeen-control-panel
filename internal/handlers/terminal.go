@@ -63,6 +63,7 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var session *services.PTYSession
+	xkeenInstall := false
 	if r.URL.Query().Get("mode") == "xkeen-install" {
 		var release func()
 		session, release, err = a.startXKeenInstall(r, conn, cols, rows)
@@ -74,8 +75,10 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err == nil {
-			// Установщик мог поставить XKeen: версия, статус и возможности
-			// перечитываются сразу по завершении терминала
+			xkeenInstall = true
+			// Страховка: основное обновление кэшей выполняет читатель вывода
+			// до кадра exit (refreshAfterXKeenInstall); здесь оно повторяется
+			// на случай закрытия соединения без exit (двойная инвалидация безвредна)
 			defer func() {
 				a.invalidateXKeenVersion()
 				a.ClearCapabilitiesCache()
@@ -183,6 +186,11 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				var pathErr *os.PathError
 				if errors.Is(err, io.EOF) || errors.Is(err, os.ErrClosed) || errors.Is(err, syscall.EIO) || (errors.As(err, &pathErr) && errors.Is(pathErr.Err, syscall.EIO)) {
+					if xkeenInstall {
+						// Первый запрос фронтенда после exit должен увидеть
+						// свежие статус и версию XKeen, а не устаревший кэш
+						a.refreshAfterXKeenInstall()
+					}
 					_ = safeWriteJSON(map[string]interface{}{
 						"type": "exit",
 						"code": session.ExitCode(2 * time.Second),
@@ -297,4 +305,19 @@ func (a *API) startXKeenInstall(r *http.Request, conn *websocket.Conn, cols, row
 		return nil, release, err
 	}
 	return session, release, nil
+}
+
+// xkeenInstallRefreshTimeout — предел ожидания внеочередного опроса статуса
+// перед кадром exit терминала установщика XKeen.
+const xkeenInstallRefreshTimeout = 10 * time.Second
+
+// refreshAfterXKeenInstall помечает версию и статус XKeen устаревшими, сбрасывает
+// кэш capabilities и синхронно обновляет кэш статуса (не дольше
+// xkeenInstallRefreshTimeout); вызывается до отправки кадра exit установщика.
+func (a *API) refreshAfterXKeenInstall() {
+	a.invalidateXKeenVersion()
+	a.ClearCapabilitiesCache()
+	ctx, cancel := context.WithTimeout(context.Background(), xkeenInstallRefreshTimeout)
+	defer cancel()
+	a.refreshXKeenStatus(ctx)
 }
