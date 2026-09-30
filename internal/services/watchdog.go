@@ -38,6 +38,15 @@ const disarmedRecheckInterval = 5
 // watchdogResetCooldown is the minimum interval between manual watchdog resets.
 const watchdogResetCooldown = 5 * time.Second
 
+// watchdogKernelBusyGrace — пауза проверок после последней замеченной операции
+// над ядром: хвост нагрузки от замены бинарника не должен считаться провалом.
+const watchdogKernelBusyGrace = 60 * time.Second
+
+// watchdogStatusTimeout — предел ожидания `xkeen -status` в проверке здоровья.
+// Пакетная переменная: тест понижает её, как kernelVersionTimeout в kernel.go.
+// 15 с вместо 5: медленный ответ под нагрузкой не считается провалом ядра.
+var watchdogStatusTimeout = 15 * time.Second
+
 // watchdogBackoffGrid defines the retry backoff sequence after failed disarm attempts (D-10, D-35).
 var watchdogBackoffGrid = []time.Duration{
 	30 * time.Second,
@@ -126,6 +135,7 @@ type WatchdogService struct {
 	// последней замеченной операции (для паузы после неё).
 	kernelBusy func() bool
 	lastBusyAt time.Time
+	busyActive bool
 
 	iptablesSaveBin  string
 	iptablesBin      string
@@ -254,9 +264,11 @@ func isKernelStatusHealthy(status string) bool {
 }
 
 // CheckHealth polls XKeen's current status and updates the failure counter.
-// XKeenService.Status() already wraps the underlying `xkeen -status` call
-// with a 5s timeout (STAB-01), so a hung/unresponsive kernel process
-// surfaces here as an error/timeout rather than blocking this goroutine.
+// The underlying `xkeen -status` call is wrapped with watchdogStatusTimeout
+// (15s, STAB-01), so a hung/unresponsive kernel process surfaces here as an
+// error/timeout rather than blocking this goroutine. Live output is used
+// instead of XKeenStatusCache: the cache may serve a stale Raw, and the
+// watchdog needs a real answer; statusRunMu still serialises `xkeen -status`.
 func (w *WatchdogService) CheckHealth() {
 	if w.xkeenSvc == nil {
 		return
@@ -269,18 +281,36 @@ func (w *WatchdogService) CheckHealth() {
 
 	// 1а. Операция над ядром (G1): замена бинарника под нагрузкой замедляет
 	// `xkeen -status`, и провалы проверки не означают падение ядра. Пока операция
-	// идёт, статус не запрашивается, счётчики не меняются.
+	// идёт и watchdogKernelBusyGrace после неё, статус не запрашивается, счётчики
+	// не растут (семантика как у окна InRestart).
 	w.mu.Lock()
 	busyFn := w.kernelBusy
 	w.mu.Unlock()
-	if busyFn != nil && busyFn() {
-		w.mu.Lock()
+	busy := busyFn != nil && busyFn()
+
+	w.mu.Lock()
+	if busy {
 		w.lastBusyAt = w.now()
+		if !w.busyActive {
+			w.busyActive = true
+			// Накопленные до операции провалы (ниже порога) к ней не относятся:
+			// сбрасываем, чтобы хвост нагрузки не добил счётчик до снятия TPROXY.
+			if w.consecutiveFailures < watchdogMaxFailures {
+				w.consecutiveFailures = 0
+			}
+			log.Printf("Watchdog: kernel operation in progress — health checks paused")
+		}
 		w.mu.Unlock()
 		return
 	}
+	w.busyActive = false
+	if !w.lastBusyAt.IsZero() && w.now().Sub(w.lastBusyAt) < watchdogKernelBusyGrace {
+		w.mu.Unlock()
+		return
+	}
+	w.mu.Unlock()
 
-	status, err := w.xkeenSvc.Status()
+	status, err := w.xkeenSvc.StatusWithTimeout(watchdogStatusTimeout)
 	healthy := err == nil && isKernelStatusHealthy(status)
 
 	if healthy {
