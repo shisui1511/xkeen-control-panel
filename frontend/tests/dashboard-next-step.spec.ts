@@ -15,6 +15,8 @@ interface MockState {
   service: Record<string, unknown>;
   /** Ответ /api/config/preflight (без конверта) */
   preflight: Record<string, unknown>;
+  /** Если задан, /api/config/preflight отвечает этим кодом ошибки */
+  preflightStatus?: number;
   /** Ответ /api/system/stats целиком */
   stats: unknown;
   /** Ответ /api/version (поле data) */
@@ -85,6 +87,13 @@ async function mockRoutes(page: Page, state: MockState): Promise<Counters> {
     if (path === '/api/service/status') return json({ success: true, data: state.service });
     if (path === '/api/config/preflight') {
       counters.preflight.push(url.searchParams.get('kernel') ?? '');
+      if (state.preflightStatus) {
+        return route.fulfill({
+          status: state.preflightStatus,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: false, error: 'mock failure' })
+        });
+      }
       return json(state.preflight);
     }
     if (path === '/api/kernels' && req.method() === 'GET') {
@@ -202,6 +211,41 @@ test.describe('Dashboard — лестница следующего шага', ()
 
     await item.getByRole('button').click();
     await expect(page).toHaveURL(/#\/services/);
+  });
+
+  test('preflight отвечает 500: шага «Запустите» нет, пока конфигурация неизвестна', async ({
+    page
+  }) => {
+    const counters = await mockRoutes(page, baseState({ preflightStatus: 500 }));
+    await page.goto('/#/dashboard');
+
+    await expect(xkeenCard(page)).toContainText('Остановлено');
+    await expect.poll(() => counters.preflight.length).toBeGreaterThan(0);
+    await expect(step(page)).toHaveCount(0);
+    await expect(page.getByTestId('problem-next-step')).toHaveCount(0);
+  });
+
+  test('после создания конфигурации шаг «Настройте» сменяется на «Запустите» за один-два опроса', async ({
+    page
+  }) => {
+    // Неготовый preflight кэшируется на 10 с, а не на минуту: шаг обновляется на втором опросе
+    test.setTimeout(60_000);
+    const state = baseState({
+      preflight: {
+        valid: true,
+        errors: [],
+        warnings: [{ code: 'no_real_outbounds', message: 'no outbounds' }]
+      }
+    });
+    await mockRoutes(page, state);
+    await page.goto('/#/dashboard');
+
+    const item = page.getByTestId('problem-next-step');
+    await expect(item).toHaveAttribute('data-step', 'configure');
+
+    state.preflight = { valid: true, errors: [], warnings: [] };
+    await expect(item).toHaveAttribute('data-step', 'start', { timeout: 30_000 });
+    await expect(item).toContainText('Запустите XKeen');
   });
 
   test('запущено: шага нет', async ({ page }) => {

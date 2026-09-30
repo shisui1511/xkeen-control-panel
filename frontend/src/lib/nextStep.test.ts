@@ -40,8 +40,12 @@ describe('nextStep', () => {
     expect(nextStep({ ...ready, xkeen: 'unknown', kernelsInstalled: false })).toBeNull();
   });
 
-  it('configReady неизвестен → configure не выдаётся', () => {
-    expect(nextStep({ ...ready, configReady: null })).not.toBe('configure');
+  it('configReady неизвестен → шаг не выдаётся (ни configure, ни start)', () => {
+    expect(nextStep({ ...ready, configReady: null })).toBeNull();
+  });
+
+  it('configReady === true → start', () => {
+    expect(nextStep({ ...ready, configReady: true })).toBe('start');
   });
 
   it('kernelsInstalled неизвестен → install_kernel не выдаётся', () => {
