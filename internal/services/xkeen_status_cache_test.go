@@ -328,3 +328,42 @@ func TestXKeenStatusCache_StopIdempotent(t *testing.T) {
 		c.RefreshNow(ctx)
 	})
 }
+
+// TestXKeenStatusCache_VersionRetryIntervalAfterInvalidate: при постоянном
+// отказе `xkeen -v` после InvalidateVersion версия перечитывается не на каждом
+// опросе, а раз в xkeenVersionRetryInterval (IN-03).
+func TestXKeenStatusCache_VersionRetryIntervalAfterInvalidate(t *testing.T) {
+	clock := newFakeClock()
+	var calls atomic.Int32
+	c := newXKeenStatusCacheFunc(
+		func(context.Context) (string, error) { return "XKeen is running", nil },
+		func(context.Context) string {
+			calls.Add(1)
+			return ""
+		},
+		clock.Now, time.Hour,
+	)
+	c.Start()
+	defer c.Stop()
+	ctx, cancel := refreshCtx(t)
+	defer cancel()
+
+	c.RefreshNow(ctx) // первая попытка чтения версии
+	c.InvalidateVersion()
+	c.RefreshNow(ctx) // гарантирует, что опрос по инвалидации завершён
+	base := calls.Load()
+
+	for i := 0; i < 5; i++ {
+		clock.Advance(10 * time.Second)
+		c.RefreshNow(ctx)
+	}
+	if n := calls.Load(); n != base {
+		t.Errorf("за 50 с отказа runVersion вызван ещё %d раз, want 0 (повтор раз в минуту)", n-base)
+	}
+
+	clock.Advance(xkeenVersionRetryInterval)
+	c.RefreshNow(ctx)
+	if n := calls.Load(); n != base+1 {
+		t.Errorf("через xkeenVersionRetryInterval runVersion вызван %d раз, want %d", n, base+1)
+	}
+}
