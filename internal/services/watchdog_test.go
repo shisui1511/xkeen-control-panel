@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2540,5 +2541,239 @@ func TestWatchdogService_StatusTimeoutFromVariable(t *testing.T) {
 	}
 	if got := w.ConsecutiveFailures(); got != 1 {
 		t.Fatalf("оборванный по таймауту статус — провал, got %d", got)
+	}
+}
+
+// rearmEnv — стенд для проверок возврата перехвата: xkeen управляется файлом
+// статуса, фейковые iptables показывают правило, пока в журнале нет -D,
+// часы фейковые, функция возврата считает вызовы.
+type rearmEnv struct {
+	t          *testing.T
+	w          *WatchdogService
+	xkeenSvc   *XKeenService
+	simTime    time.Time
+	statusFile string
+	delLog     string
+	rearmCalls atomic.Int32
+}
+
+func newRearmEnv(t *testing.T) *rearmEnv {
+	t.Helper()
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	env := &rearmEnv{
+		t:          t,
+		simTime:    time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC),
+		statusFile: filepath.Join(tmpDir, "status.txt"),
+	}
+	env.setHealthy(false)
+	scriptBin := filepath.Join(tmpDir, "xkeen")
+	wrapper := fmt.Sprintf("#!/bin/sh\ncat %s\nif grep -q 'running' %s; then exit 0; else exit 1; fi\n", env.statusFile, env.statusFile)
+	if err := os.WriteFile(scriptBin, []byte(wrapper), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, delLog := installFakeIptables(t, ruleOutput)
+	env.delLog = delLog
+
+	env.xkeenSvc = NewXKeenService(scriptBin, tmpDir)
+	env.xkeenSvc.now = func() time.Time { return env.simTime }
+	env.w = NewWatchdogService(env.xkeenSvc, tmpDir, tmpDir)
+	env.w.now = func() time.Time { return env.simTime }
+	env.w.iptablesSaveBin = saveBin
+	env.w.iptablesBin = delBin
+	env.w.ip6tablesSaveBin = saveBin
+	env.w.ip6tablesBin = delBin
+	env.w.SetRearmFunc(func() error {
+		env.rearmCalls.Add(1)
+		return nil
+	})
+	return env
+}
+
+func (e *rearmEnv) setHealthy(healthy bool) {
+	e.t.Helper()
+	text := "XKeen is not running"
+	if healthy {
+		text = "XKeen is running"
+	}
+	if err := os.WriteFile(e.statusFile, []byte(text), 0644); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// check делает одну проверку здоровья через 10 с фейковых часов и ждёт фоновые горутины.
+func (e *rearmEnv) check() {
+	e.t.Helper()
+	e.simTime = e.simTime.Add(10 * time.Second)
+	e.w.CheckHealth()
+	e.w.wg.Wait()
+}
+
+// tripDisarm доводит эпизод до аварийного снятия (три провала при правиле в mangle).
+func (e *rearmEnv) tripDisarm() {
+	e.t.Helper()
+	e.setHealthy(false)
+	for i := 0; i < watchdogMaxFailures; i++ {
+		e.check()
+	}
+	waitDisarmSettled(e.t, e.w)
+	e.w.wg.Wait()
+	if snap := e.w.Snapshot(); snap.State != WatchdogStateDisarmed {
+		e.t.Fatalf("ожидалось состояние %q после трёх провалов, got %q", WatchdogStateDisarmed, snap.State)
+	}
+}
+
+func (e *rearmEnv) rearmLogged() bool {
+	for _, entry := range e.xkeenSvc.GetRestartLog() {
+		if entry.Action == "watchdog_rearm" {
+			return true
+		}
+	}
+	return false
+}
+
+// TestWatchdogService_RearmAfterRecoveryOnce: после снятия TPROXY и восстановления
+// ядра перехват возвращается ровно один раз, действие попадает в журнал.
+func TestWatchdogService_RearmAfterRecoveryOnce(t *testing.T) {
+	env := newRearmEnv(t)
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	env.tripDisarm()
+	if got := env.rearmCalls.Load(); got != 0 {
+		t.Fatalf("возврат до восстановления ядра: %d вызовов", got)
+	}
+
+	env.setHealthy(true)
+	env.check()
+	if got := env.rearmCalls.Load(); got != 1 {
+		t.Fatalf("после восстановления возврат должен быть вызван 1 раз, got %d", got)
+	}
+	env.check()
+	env.check()
+	if got := env.rearmCalls.Load(); got != 1 {
+		t.Fatalf("повторные healthy-проверки не должны вызывать возврат, got %d", got)
+	}
+	if !env.rearmLogged() {
+		t.Fatal("в restart_log ожидалось действие watchdog_rearm")
+	}
+	if !strings.Contains(logBuf.String(), "rules restored after recovery") {
+		t.Fatalf("ожидалась строка лога 'rules restored after recovery', got:\n%s", logBuf.String())
+	}
+}
+
+// TestWatchdogService_RearmSkippedWhenRulesPresent: если правила уже в mangle,
+// возврат пропускается.
+func TestWatchdogService_RearmSkippedWhenRulesPresent(t *testing.T) {
+	env := newRearmEnv(t)
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	env.tripDisarm()
+	// Правила «вернулись» сами: журнал удалений очищен, фейковый iptables-save снова их показывает.
+	if err := os.Remove(env.delLog); err != nil {
+		t.Fatal(err)
+	}
+
+	env.setHealthy(true)
+	env.check()
+	if got := env.rearmCalls.Load(); got != 0 {
+		t.Fatalf("при наличии правил возврат не нужен, got %d вызовов", got)
+	}
+	if !strings.Contains(logBuf.String(), "rearm skipped") {
+		t.Fatalf("ожидалась строка лога о пропуске возврата, got:\n%s", logBuf.String())
+	}
+}
+
+// TestWatchdogService_RearmRateLimited: второй эпизод раньше watchdogRearmMinInterval
+// возврат не запускает, признак ожидания сохраняется; после интервала — запускает.
+func TestWatchdogService_RearmRateLimited(t *testing.T) {
+	env := newRearmEnv(t)
+
+	env.tripDisarm()
+	env.setHealthy(true)
+	env.check()
+	if got := env.rearmCalls.Load(); got != 1 {
+		t.Fatalf("первый возврат: got %d, want 1", got)
+	}
+	firstRearmAt := env.simTime
+
+	// Второй эпизод: правило снова появилось, ядро снова упало и было снято.
+	if err := os.Remove(env.delLog); err != nil {
+		t.Fatal(err)
+	}
+	env.tripDisarm()
+	env.setHealthy(true)
+	env.check()
+	if env.simTime.Sub(firstRearmAt) >= watchdogRearmMinInterval {
+		t.Fatalf("сценарий некорректен: прошло %v, нужно меньше %v", env.simTime.Sub(firstRearmAt), watchdogRearmMinInterval)
+	}
+	if got := env.rearmCalls.Load(); got != 1 {
+		t.Fatalf("возврат раньше watchdogRearmMinInterval недопустим, got %d вызовов", got)
+	}
+	env.w.mu.Lock()
+	pending := env.w.rearmPending
+	env.w.mu.Unlock()
+	if !pending {
+		t.Fatal("признак ожидания возврата должен сохраняться при ограничении частоты")
+	}
+
+	env.simTime = firstRearmAt.Add(watchdogRearmMinInterval)
+	env.w.CheckHealth()
+	env.w.wg.Wait()
+	if got := env.rearmCalls.Load(); got != 2 {
+		t.Fatalf("после интервала возврат должен быть вызван, got %d вызовов", got)
+	}
+}
+
+// TestWatchdogService_RearmAfterDiscardedInFlightDisarm: ядро восстановилось,
+// пока снятие ещё шло; исход отброшен по эпохе, но правила удалены — следующая
+// healthy-проверка возвращает перехват.
+func TestWatchdogService_RearmAfterDiscardedInFlightDisarm(t *testing.T) {
+	env := newRearmEnv(t)
+
+	// Медленный iptables-save: снятие успевает застать восстановление ядра.
+	binDir := t.TempDir()
+	slowSave := filepath.Join(binDir, "iptables-save")
+	ruleOutput := "*mangle\n:PREROUTING ACCEPT [0:0]\n-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1\nCOMMIT\n"
+	script := fmt.Sprintf("#!/bin/sh\nsleep 0.1\nif [ -f %q ] && grep -q -- '-D' %q; then\n  printf '*mangle\\nCOMMIT\\n'\nelse\n  cat <<'EOF'\n%sEOF\nfi\n", env.delLog, env.delLog, ruleOutput)
+	if err := os.WriteFile(slowSave, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	env.w.iptablesSaveBin = slowSave
+	env.w.ip6tablesSaveBin = slowSave
+
+	env.setHealthy(false)
+	for i := 0; i < watchdogMaxFailures; i++ {
+		env.simTime = env.simTime.Add(10 * time.Second)
+		env.w.CheckHealth()
+	}
+	env.w.mu.Lock()
+	inFlight := env.w.disarmInFlight
+	env.w.mu.Unlock()
+	if !inFlight {
+		t.Fatal("ожидалось disarmInFlight=true после трёх провалов")
+	}
+
+	// Ядро восстанавливается, пока снятие идёт.
+	env.setHealthy(true)
+	env.simTime = env.simTime.Add(10 * time.Second)
+	env.w.CheckHealth()
+	env.w.wg.Wait() // снятие завершилось, исход отброшен по эпохе
+	if got := env.rearmCalls.Load(); got != 0 {
+		t.Fatalf("возврат до завершения снятия: %d вызовов", got)
+	}
+
+	env.check()
+	if got := env.rearmCalls.Load(); got != 1 {
+		t.Fatalf("после отброшенного исхода правила удалены — возврат обязан быть вызван, got %d", got)
 	}
 }
