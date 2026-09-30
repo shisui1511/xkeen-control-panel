@@ -155,6 +155,44 @@ describe('kernelBadge', () => {
   it('иначе актуально', () => {
     expect(kernelBadge(base)).toEqual({ variant: 'idle', key: 'svc.actual_badge' });
   });
+
+  describe('нераспознанная версия', () => {
+    const unknown = { variant: 'warning', key: 'svc.version_unknown_badge' };
+
+    it('error и unknown → «версия не определена», а не «актуально»', () => {
+      expect(kernelBadge({ ...base, current_version: 'error' })).toEqual(unknown);
+      expect(kernelBadge({ current_version: 'unknown' })).toEqual(unknown);
+    });
+
+    it('приоритеты: не установлено, checking и failed важнее', () => {
+      expect(kernelBadge({ ...base, current_version: 'not installed' }).key).toBe(
+        'kernel.status.not_installed'
+      );
+      expect(kernelBadge({ ...base, current_version: 'error', status: 'checking' }).key).toBe(
+        'svc.channel_checking'
+      );
+      expect(kernelBadge({ ...base, current_version: 'error', status: 'failed' }).key).toBe(
+        'svc.kernel_error_badge'
+      );
+    });
+
+    it('has_update при нераспознанной версии «→ vX» не даёт', () => {
+      expect(
+        kernelBadge({
+          ...base,
+          current_version: 'error',
+          has_update: true,
+          latest_version: '26.9.9'
+        })
+      ).toEqual(unknown);
+    });
+
+    it('ru-текст ключа непустой и отличается от «актуально»', () => {
+      const text = render('svc.version_unknown_badge');
+      expect(text).not.toBe('');
+      expect(text).not.toBe(render('svc.actual_badge'));
+    });
+  });
 });
 
 describe('откат', () => {
