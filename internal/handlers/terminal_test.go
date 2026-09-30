@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -212,6 +214,13 @@ func TestTerminalWebSocket_MaxSessions(t *testing.T) {
 // возвращает весь вывод и код из кадра exit.
 func runXKeenInstallWS(t *testing.T, api *API, query string) (string, int) {
 	t.Helper()
+	return runXKeenInstallWSOnExit(t, api, query, nil)
+}
+
+// runXKeenInstallWSOnExit — как runXKeenInstallWS, но onExit вызывается в
+// момент получения кадра exit, до закрытия соединения.
+func runXKeenInstallWSOnExit(t *testing.T, api *API, query string, onExit func()) (string, int) {
+	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(api.TerminalWebSocket))
 	defer ts.Close()
 	header := http.Header{}
@@ -235,6 +244,9 @@ func runXKeenInstallWS(t *testing.T, api *API, query string) (string, int) {
 				Code int    `json:"code"`
 			}
 			if json.Unmarshal(p, &msg) == nil && msg.Type == "exit" {
+				if onExit != nil {
+					onExit()
+				}
 				return out.String(), msg.Code
 			}
 		}
@@ -303,5 +315,134 @@ func TestTerminalWebSocket_XKeenInstallNoEntware(t *testing.T) {
 	}
 	if downloaded {
 		t.Error("installer must not be downloaded without Entware")
+	}
+}
+
+// TestTerminalWebSocket_XKeenInstallRefreshesBeforeExit: кэши статуса, версии и
+// возможностей обновляются ДО кадра exit установщика — первый запрос фронтенда
+// после exit видит свежие данные (IN-02).
+func TestTerminalWebSocket_XKeenInstallRefreshesBeforeExit(t *testing.T) {
+	installer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("#!/bin/sh\n# jameszeroX/XKeen\necho INSTALLER\nexit 7\n"))
+	}))
+	defer installer.Close()
+
+	var statusCalls, versionCalls atomic.Int32
+	cache := services.NewXKeenStatusCacheFunc(
+		func(context.Context) (string, error) {
+			if statusCalls.Add(1) > 1 {
+				time.Sleep(150 * time.Millisecond) // опрос под нагрузкой роутера
+			}
+			return "XKeen is running", nil
+		},
+		func(context.Context) string {
+			// до установки XKeen версии нет, после — есть
+			if versionCalls.Add(1) == 1 {
+				return ""
+			}
+			time.Sleep(150 * time.Millisecond)
+			return "2.0.1 Beta"
+		},
+		nil, time.Hour,
+	)
+	cache.Start()
+	defer cache.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if v := cache.RefreshNow(ctx).Version; v != "" {
+		t.Fatalf("до установки версия = %q, want пусто", v)
+	}
+
+	ptySvc := services.NewPTYService()
+	defer ptySvc.CloseAll()
+	api := &API{cfg: config.Default()}
+	api.SetPTYService(ptySvc)
+	api.SetXKeenStatusCache(cache)
+	api.SetXKeenInstaller(&services.XKeenInstaller{
+		URL:     installer.URL + "/install.sh",
+		Mirrors: []string{""},
+		Client:  installer.Client(),
+		Dir:     t.TempDir(),
+		InitDir: t.TempDir(),
+	})
+	api.capsCacheMutex.Lock()
+	api.capsCache = &CapabilitiesResponse{}
+	api.capsCacheTime = time.Now()
+	api.capsCacheMutex.Unlock()
+	statusBefore := statusCalls.Load()
+
+	var version string
+	var statusAfter int32
+	var capsDropped bool
+	out, code := runXKeenInstallWSOnExit(t, api, "channel=beta", func() {
+		version = cache.Snapshot().Version
+		statusAfter = statusCalls.Load()
+		api.capsCacheMutex.Lock()
+		capsDropped = api.capsCache == nil
+		api.capsCacheMutex.Unlock()
+	})
+	// после успешного выхода обёртка запускает xkeen, которого в тесте нет,
+	// поэтому установщик завершается с 7: обновление кэшей от кода не зависит
+	if code != 7 {
+		t.Fatalf("exit code = %d, want 7, output %q", code, out)
+	}
+	if version != "2.0.1 Beta" {
+		t.Errorf("версия в момент кадра exit = %q, want 2.0.1 Beta", version)
+	}
+	if statusAfter <= statusBefore {
+		t.Errorf("опросов статуса к кадру exit: было %d, стало %d — внеочередной опрос не выполнен", statusBefore, statusAfter)
+	}
+	if !capsDropped {
+		t.Error("кэш capabilities к кадру exit не сброшен")
+	}
+}
+
+// TestTerminalWebSocket_PlainSessionDoesNotRefreshStatus: обычная сессия
+// терминала (не установщик) опрос статуса XKeen не запускает.
+func TestTerminalWebSocket_PlainSessionDoesNotRefreshStatus(t *testing.T) {
+	var statusCalls atomic.Int32
+	cache := services.NewXKeenStatusCacheFunc(
+		func(context.Context) (string, error) {
+			statusCalls.Add(1)
+			return "XKeen is running", nil
+		},
+		nil, nil, time.Hour,
+	)
+	cache.Start()
+	defer cache.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cache.RefreshNow(ctx)
+	before := statusCalls.Load()
+
+	ptySvc := services.NewPTYService()
+	defer ptySvc.CloseAll()
+	api := &API{cfg: config.Default()}
+	api.SetPTYService(ptySvc)
+	api.SetXKeenStatusCache(cache)
+
+	ts := httptest.NewServer(http.HandlerFunc(api.TerminalWebSocket))
+	defer ts.Close()
+	header := http.Header{}
+	header.Set("Origin", ts.URL)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+ts.URL[4:]+"?cols=80&rows=24", header)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	msg, _ := json.Marshal(TerminalClientMessage{Type: "stdin", Data: "exit\n"})
+	_ = conn.WriteMessage(websocket.TextMessage, msg)
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		mt, p, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("нет кадра exit: %v", err)
+		}
+		if mt == websocket.TextMessage && strings.Contains(string(p), `"exit"`) {
+			break
+		}
+	}
+	_ = conn.Close()
+	if n := statusCalls.Load(); n != before {
+		t.Errorf("обычная сессия запустила опрос статуса: %d -> %d", before, n)
 	}
 }
