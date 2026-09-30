@@ -306,6 +306,10 @@ type KernelInfo struct {
 	// версия, которая теперь стоит. Message остаётся английским для логов.
 	ResultKind    string `json:"result_kind,omitempty"`
 	ResultVersion string `json:"result_version,omitempty"`
+	// ErrorKind — код вида ошибки установки при status failed (D-10): по нему
+	// фронтенд подбирает перевод. Пусто вне failed и для сбоев без своего кода
+	// (скачивание, распаковка, замена) — их показывает текст Message.
+	ErrorKind string `json:"error_kind,omitempty"`
 	// BackupVersion — версия последнего бэкапа («Откатить на vX»). Читается из
 	// имени файла в .backup, без запуска бинарников; пусто, если версия в имени
 	// не закодирована.
@@ -547,6 +551,16 @@ const (
 	KernelResultReinstalled = "reinstalled"
 	KernelResultRolledBack  = "rolled_back"
 	KernelResultUploaded    = "uploaded"
+)
+
+// Виды ошибки установки (KernelInfo.ErrorKind, D-10).
+const (
+	// KernelErrorReleaseLookup — проверка релиза не удалась (лимит GitHub, таймаут, блокировка).
+	KernelErrorReleaseLookup = "release_lookup_failed"
+	// KernelErrorNoRelease — проверка прошла, но релиза для канала нет.
+	KernelErrorNoRelease = "no_release"
+	// KernelErrorUnsupportedArch — версия известна, а сборки для архитектуры нет.
+	KernelErrorUnsupportedArch = "unsupported_arch"
 )
 
 // ErrKernelBusy — над ядром уже идёт установка, откат или загрузка файла.
@@ -877,6 +891,7 @@ func (s *KernelService) SetChannel(name, channel string) bool {
 	k.HasUpdate = false
 	k.AheadOfLatest = false
 	k.Message = ""
+	k.ErrorKind = ""
 	k.Status = "checking"
 	channels := make(map[string]string, len(s.kernels))
 	for n, kk := range s.kernels {
@@ -1098,6 +1113,7 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 	if !quiet {
 		k.Status = "checking"
 		k.Message = "Checking for updates..."
+		k.ErrorKind = ""
 	}
 	// Snapshot fields needed for the HTTP call
 	repo := k.Repo
@@ -1119,6 +1135,7 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 		if kk := s.kernels[name]; kk != nil && kk.Channel == channel {
 			kk.Status = "failed"
 			kk.Message = message
+			kk.ErrorKind = ""
 		}
 		s.mu.Unlock()
 		return err
@@ -1218,6 +1235,7 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 		if !quiet {
 			kk.Status = "idle"
 			kk.Message = resultMessage
+			kk.ErrorKind = ""
 		}
 	}
 	s.mu.Unlock()
@@ -1281,6 +1299,21 @@ func (s *KernelService) setStage(name, status, stage, message string) {
 		kk.Status = status
 		kk.Stage = stage
 		kk.Message = message
+		kk.ErrorKind = ""
+	}
+	s.mu.Unlock()
+}
+
+// setFailed переводит ядро в failed с сообщением и видом ошибки (пустой вид —
+// сбой без собственного кода, см. KernelInfo.ErrorKind).
+func (s *KernelService) setFailed(name, message, kind string) {
+	s.notifyStage("failed", "")
+	s.mu.Lock()
+	if kk := s.kernels[name]; kk != nil {
+		kk.Status = "failed"
+		kk.Stage = ""
+		kk.Message = message
+		kk.ErrorKind = kind
 	}
 	s.mu.Unlock()
 }
@@ -1310,6 +1343,7 @@ func (s *KernelService) beginInstallLocked(name string) error {
 	kk.Stage = KernelStageStarting
 	kk.ResultKind = ""
 	kk.ResultVersion = ""
+	kk.ErrorKind = ""
 	kk.Message = "Starting..."
 	return nil
 }
@@ -1386,7 +1420,12 @@ func knownKernelVersion(v string) bool {
 // тихая (checkLatest quiet): она не возвращает статус в idle посреди скачивания.
 func (s *KernelService) runInstall(name string) error {
 	fail := func(message string, err error) error {
-		s.setStage(name, "failed", "", message)
+		s.setFailed(name, message, "")
+		return err
+	}
+	// failKind — сбой с кодом вида: фронтенд переводит его по error_kind.
+	failKind := func(message, kind string, err error) error {
+		s.setFailed(name, message, kind)
 		return err
 	}
 
@@ -1406,9 +1445,10 @@ func (s *KernelService) runInstall(name string) error {
 	s.mu.Unlock()
 
 	// If latestVersion is unknown, check latest or fallback to current version for reinstall
+	var checkErr error
 	if latestVersion == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = s.checkLatest(ctx, name, true)
+		checkErr = s.checkLatest(ctx, name, true)
 		cancel()
 		s.mu.Lock()
 		if kk := s.kernels[name]; kk != nil {
@@ -1419,6 +1459,18 @@ func (s *KernelService) runInstall(name string) error {
 			}
 		}
 		s.mu.Unlock()
+	}
+	// Версии нет: причина — сбой проверки релиза или отсутствие релиза канала,
+	// а не архитектура (G5-WR02).
+	if latestVersion == "" {
+		s.mu.RLock()
+		channel := s.kernels[name].Channel
+		s.mu.RUnlock()
+		if checkErr != nil {
+			return failKind("Release lookup failed: "+checkErr.Error(), KernelErrorReleaseLookup, checkErr)
+		}
+		return failKind("No release found for channel "+channel, KernelErrorNoRelease,
+			fmt.Errorf("no release found for channel %s", channel))
 	}
 
 	if arch == "" {
@@ -1436,7 +1488,7 @@ func (s *KernelService) runInstall(name string) error {
 
 	downloadURL, filename := s.buildDownloadURL(&snap, arch)
 	if downloadURL == "" {
-		return fail("Unsupported architecture: "+arch, fmt.Errorf("unsupported architecture: %s", arch))
+		return failKind("Unsupported architecture: "+arch, KernelErrorUnsupportedArch, fmt.Errorf("unsupported architecture: %s", arch))
 	}
 
 	tempFile, err := safeTempPath(filename)
@@ -1539,6 +1591,7 @@ func (s *KernelService) runInstall(name string) error {
 		kk.Stage = ""
 		kk.ResultKind = kind
 		kk.ResultVersion = kk.CurrentVersion
+		kk.ErrorKind = ""
 		kk.Message = message
 	}
 	s.mu.Unlock()
@@ -1781,6 +1834,7 @@ func (s *KernelService) Rollback(name string) error {
 		kk.Stage = ""
 		kk.ResultKind = KernelResultRolledBack
 		kk.ResultVersion = kk.CurrentVersion
+		kk.ErrorKind = ""
 		kk.Message = "Rolled back to " + kk.CurrentVersion
 	}
 	s.mu.Unlock()
@@ -2288,6 +2342,7 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		kk.Stage = ""
 		kk.ResultKind = KernelResultUploaded
 		kk.ResultVersion = kk.CurrentVersion
+		kk.ErrorKind = ""
 		kk.Message = "Uploaded " + kk.CurrentVersion
 	}
 	s.mu.Unlock()
