@@ -41,10 +41,8 @@ describe('SegmentedControl', () => {
     const { body } = render(SegmentedControl, {
       props: { items, value: '', partial: ['stable', 'preview'] }
     });
-    expect(body).toMatch(/class="seg-item\s+partial"[^>]*data-value="stable" aria-pressed="mixed"/);
-    expect(body).toMatch(
-      /class="seg-item\s+partial"[^>]*data-value="preview" aria-pressed="mixed"/
-    );
+    expect(body).toMatch(/class="[^"]*\bpartial\b[^"]*" data-value="stable" aria-pressed="mixed"/);
+    expect(body).toMatch(/class="[^"]*\bpartial\b[^"]*" data-value="preview" aria-pressed="mixed"/);
   });
 
   it('keeps aria-pressed true/false without partial', () => {

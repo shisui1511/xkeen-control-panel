@@ -1317,6 +1317,7 @@
         <SegmentedControl
           ariaLabel={$t('svc.channel_label')}
           value={sharedChannel}
+          partial={channelMismatch ? ['stable', 'preview'] : []}
           items={[
             { value: 'stable', label: $t('svc.channel_stable') },
             { value: 'preview', label: $t('svc.channel_preview') }
@@ -2110,7 +2111,9 @@
     gap: 16px;
   }
 
-  .card-title {
+  /* Специфичность выше глобальных `.card .card-title` (в том числе мобильной
+     версии), иначе их padding сдвигает текст заголовка относительно подзаголовка. */
+  .updates-header .card-title {
     display: block;
     margin: 0;
     padding: 0;

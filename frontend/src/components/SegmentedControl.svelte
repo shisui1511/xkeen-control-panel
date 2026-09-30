@@ -26,9 +26,16 @@
     value: string;
     ariaLabel?: string;
     onchange?: (value: string) => void;
+    /** Значения, показываемые в частично выбранном виде (aria-pressed="mixed"). */
+    partial?: string[];
   }
 
-  let { items, value = $bindable(), ariaLabel, onchange }: Props = $props();
+  let { items, value = $bindable(), ariaLabel, onchange, partial = [] }: Props = $props();
+
+  function pressedState(item: SegmentItem): boolean | 'mixed' {
+    if (item.value === value) return true;
+    return partial.includes(item.value) ? 'mixed' : false;
+  }
 
   function handleClick(item: SegmentItem) {
     const next = resolveSegmentValue(item);
@@ -44,8 +51,9 @@
       type="button"
       class="seg-item {item.class ?? ''}"
       class:active={item.value === value}
+      class:partial={item.value !== value && partial.includes(item.value)}
       data-value={item.value}
-      aria-pressed={item.value === value}
+      aria-pressed={pressedState(item)}
       onclick={() => handleClick(item)}
     >
       {#if item.icon}
@@ -88,12 +96,18 @@
       color var(--transition-fast);
   }
 
-  .seg-item:hover:not(.active) {
+  .seg-item:hover:not(.active):not(.partial) {
     color: var(--fg-primary);
   }
 
   .seg-item.active {
     background: var(--accent);
     color: var(--btn-primary-text);
+  }
+
+  .seg-item.partial {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+    color: var(--fg-primary);
   }
 </style>
