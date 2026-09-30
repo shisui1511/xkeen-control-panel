@@ -248,6 +248,24 @@ get_latest_prerelease_version() {
   pick_prerelease "$rc" "$stable"
 }
 
+# ver_ge A B — код 0, если версия A (vX.Y.Z или X.Y.Z) не меньше B по
+# major/minor/patch числом, иначе 1. Только awk: sort роутера не годится.
+ver_ge() {
+  awk -v a="$1" -v b="$2" '
+    BEGIN {
+      sub(/^v/, "", a)
+      sub(/^v/, "", b)
+      split(a, x, ".")
+      split(b, y, ".")
+      for (i = 1; i <= 3; i++) {
+        if (x[i] + 0 > y[i] + 0) exit 0
+        if (x[i] + 0 < y[i] + 0) exit 1
+      }
+      exit 0
+    }
+  '
+}
+
 # pick_prerelease RC STABLE — RC, если его базовая версия новее stable, иначе stable
 pick_prerelease() {
   local rc stable base
@@ -258,7 +276,7 @@ pick_prerelease() {
     return
   fi
   base="${rc%-rc.*}"
-  if [ -n "$stable" ] && [ "$(printf '%s\n%s\n' "${base#v}" "${stable#v}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)" = "${stable#v}" ]; then
+  if [ -n "$stable" ] && ver_ge "$stable" "$base"; then
     echo "$stable"
   else
     echo "$rc"
