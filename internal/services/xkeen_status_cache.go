@@ -239,8 +239,11 @@ func (c *XKeenStatusCache) pollOnce() {
 		if v != "" && v != "unknown" {
 			c.snap.Version = v
 			c.snap.VersionUpdatedAt = now
-			c.versionCleanGen = vGen
 		}
+		// Поколение фиксируется после любой попытки: при постоянном отказе
+		// `xkeen -v` повтор регулирует versionTriedAt (раз в xkeenVersionRetryInterval),
+		// а не инвалидация, которая иначе срабатывала бы на каждом опросе.
+		c.versionCleanGen = vGen
 		c.mu.Unlock()
 	}
 
