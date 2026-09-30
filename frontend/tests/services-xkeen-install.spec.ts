@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { kernelsFixture, systemStatsFixture } from './helpers/api-mocks';
+import { LAZY_LOAD_TIMEOUT } from './helpers/timeouts';
 
 // Карточка «Установка XKeen» на странице служб: видна только без XKeen,
 // запускает официальный установщик в терминале с выбранным каналом и
@@ -133,7 +134,7 @@ test.describe('Services page — XKeen installer card', () => {
   test('hidden when XKeen is installed', async ({ page }) => {
     await mockCommonRoutes(page, { installed: true, available: true });
     await page.goto('/#/services');
-    await expect(page.locator('.hero-card')).toBeVisible();
+    await expect(page.locator('.hero-card')).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await expect(page.getByTestId('xkeen-install-card')).toHaveCount(0);
   });
 
@@ -141,7 +142,7 @@ test.describe('Services page — XKeen installer card', () => {
     await mockCommonRoutes(page, { installed: true, available: true, incomplete: true });
     await page.goto('/#/services');
     const card = page.getByTestId('xkeen-install-card');
-    await expect(card).toBeVisible();
+    await expect(card).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await expect(card).toContainText(/не до конца|partly installed/);
     await expect(page.getByTestId('xkeen-install-start')).toBeVisible();
   });
@@ -150,7 +151,7 @@ test.describe('Services page — XKeen installer card', () => {
     await mockCommonRoutes(page, { installed: false, available: false });
     await page.goto('/#/services');
     const card = page.getByTestId('xkeen-install-card');
-    await expect(card).toBeVisible();
+    await expect(card).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await expect(card).toContainText(/Entware/);
     await expect(page.getByTestId('xkeen-install-start')).toHaveCount(0);
   });
@@ -165,7 +166,7 @@ test.describe('Services page — XKeen installer card', () => {
     });
 
     await page.goto('/#/services');
-    await expect(page.locator('.hero-card')).toBeVisible();
+    await expect(page.locator('.hero-card')).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     const card = page.getByTestId('xkeen-install-card');
     await expect(card).toBeVisible();
     await card.getByRole('button', { name: /^(Бета|Beta)$/ }).click();
@@ -191,7 +192,7 @@ test.describe('Services page — XKeen installer card', () => {
 
     await page.clock.install();
     await page.goto('/#/services');
-    await expect(page.locator('.hero-card')).toBeVisible();
+    await expect(page.locator('.hero-card')).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await page.getByTestId('xkeen-install-start').click();
     const modal = page.getByTestId('xkeen-install-modal');
     await expect(modal).toBeVisible();
@@ -246,7 +247,7 @@ test.describe('Services page — XKeen installer card', () => {
 
     await page.clock.install();
     await page.goto('/#/services');
-    await expect(page.locator('.hero-card')).toBeVisible();
+    await expect(page.locator('.hero-card')).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await expect.poll(() => settingsCalls).toBe(1);
     await page.getByTestId('xkeen-install-start').click();
     await expect.poll(() => socket !== null).toBe(true);
@@ -266,7 +267,7 @@ test.describe('Services page — XKeen installer card', () => {
     });
 
     await page.goto('/#/services');
-    await expect(page.locator('.hero-card')).toBeVisible();
+    await expect(page.locator('.hero-card')).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await page.getByTestId('xkeen-install-start').click();
     const result = page.getByTestId('xkeen-install-modal').locator('.install-result.fail');
     await expect(result).toContainText('3');
@@ -276,10 +277,12 @@ test.describe('Services page — XKeen installer card', () => {
     await mockCommonRoutes(page, { installed: false, available: true });
     await page.goto('/#/');
     const problem = page.getByTestId('problem-xkeen-missing');
-    await expect(problem).toBeVisible();
+    await expect(problem).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await problem.getByRole('button').click();
     await expect(page).toHaveURL(/#\/services/);
-    await expect(page.getByTestId('xkeen-install-card')).toBeVisible();
+    await expect(page.getByTestId('xkeen-install-card')).toBeVisible({
+      timeout: LAZY_LOAD_TIMEOUT
+    });
   });
 
   test.describe('подсказка версии Xray над установщиком', () => {
@@ -293,7 +296,7 @@ test.describe('Services page — XKeen installer card', () => {
 
       await page.goto('/#/services');
       const hint = page.getByTestId('xkeen-install-stable-hint');
-      await expect(hint).toContainText('Xray v26.3.27');
+      await expect(hint).toContainText('Xray v26.3.27', { timeout: LAZY_LOAD_TIMEOUT });
 
       await page.getByTestId('xkeen-install-start').click();
       await expect(page.getByTestId('xkeen-install-stable-hint-modal')).toContainText(
@@ -313,7 +316,8 @@ test.describe('Services page — XKeen installer card', () => {
       await page.goto('/#/services');
       const hint = page.getByTestId('xkeen-install-stable-hint');
       await expect(hint).toContainText(
-        /последний стабильный релиз Xray|latest stable Xray release/
+        /последний стабильный релиз Xray|latest stable Xray release/,
+        { timeout: LAZY_LOAD_TIMEOUT }
       );
       await expect(hint).not.toContainText('26.9.9');
 
@@ -335,7 +339,7 @@ test.describe('Services page — XKeen installer card', () => {
 
       await page.goto('/#/services');
       const hint = page.getByTestId('xkeen-install-stable-hint');
-      await expect(hint).toBeVisible();
+      await expect(hint).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
       await expect.poll(() => status.checkCalls).toBe(1);
       // После ответа проверки версия появляется в подсказке, повторных проверок нет
       await expect(hint).toContainText('Xray v26.3.27');

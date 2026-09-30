@@ -95,6 +95,10 @@ const TRAFFIC_FRAME = JSON.stringify({
 
 test.describe('Traffic page test suite', () => {
   test.beforeEach(async ({ page }) => {
+    // beforeEach ждёт первую отрисовку страницы (до 20 с) и входит в таймаут
+    // теста: без запаса остаток не хватает на сам тест. Утроение таймаута
+    // теста, таймауты expect не меняются.
+    test.slow();
     await disableServiceWorker(page);
     await setupRestMocks(page, true);
 

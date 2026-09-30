@@ -78,6 +78,10 @@ function getMockXrayFile(path: string): string {
 // ---------------------------------------------------------------------------
 test.describe('Xray Constructor integration test suite', () => {
   test.beforeEach(async ({ page }) => {
+    // Тест ждёт первую отрисовку конструктора и затем ещё один ленивый раздел
+    // (до 20 с каждое): две загрузки под нагрузкой не укладываются в 30 с теста.
+    // Утроение таймаута теста, а не реакций UI: таймауты expect не меняются.
+    test.slow();
     // 1. Отключить Service Worker
     await page.addInitScript(() => {
       Object.defineProperty(window.navigator, 'serviceWorker', {
