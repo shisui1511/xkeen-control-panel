@@ -542,6 +542,7 @@
   "svc.check_updates": "Проверить обновления",
   "svc.channel_prefix": "канал",
   "svc.actual_badge": "актуально",
+  "svc.version_unknown_badge": "версия не определена",
   "svc.kernel_installed": "Установлено: {version}",
   "svc.kernel_no_prerelease": "Среди последних 30 релизов нет предварительной версии",
   "svc.kernel_error_badge": "ошибка",

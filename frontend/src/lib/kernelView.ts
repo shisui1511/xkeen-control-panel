@@ -77,12 +77,18 @@ export function resultMessage(k: KernelLike): I18nRef | null {
   return { key: `svc.kernel_result_${k.result_kind}`, params: { version } };
 }
 
+/** Значения current_version, когда версия не определилась (сбой запуска бинарника). */
+const UNKNOWN_KERNEL_VERSIONS = ['error', 'unknown'];
+
 export function kernelBadge(k: KernelLike): KernelBadge {
   if (!formatKernelVersion(k.current_version)) {
     return { variant: 'stopped', key: 'kernel.status.not_installed' };
   }
   if (k.status === 'checking') return { variant: 'idle', key: 'svc.channel_checking' };
   if (k.status === 'failed') return { variant: 'stopped', key: 'svc.kernel_error_badge' };
+  if (UNKNOWN_KERNEL_VERSIONS.includes(k.current_version ?? '')) {
+    return { variant: 'warning', key: 'svc.version_unknown_badge' };
+  }
   if (k.has_update) {
     return { variant: 'warning', label: `→ ${formatKernelVersion(k.latest_version)}` };
   }
