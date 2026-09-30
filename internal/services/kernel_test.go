@@ -1501,6 +1501,118 @@ func TestInstall_FailureKeepsBinary(t *testing.T) {
 	}
 }
 
+// newLookupFailService — сервис без установленного ядра и без известного latest:
+// источник релизов отвечает handler, установка берёт версию только из проверки.
+func newLookupFailService(t *testing.T, handler http.HandlerFunc) *KernelService {
+	t.Helper()
+	svc, _ := newInstallTestService(t, "")
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+	svc.mu.Lock()
+	svc.kernels["mihomo"].LatestVersion = ""
+	svc.kernels["mihomo"].LatestTag = ""
+	svc.mu.Unlock()
+	return svc
+}
+
+// TestInstall_ReleaseLookupFailedMessage: на чистой системе ошибка проверки релиза
+// (403 лимита GitHub) — это «Release lookup failed», а не «Unsupported architecture»
+// (G5-WR02, KERN-02, D-10).
+func TestInstall_ReleaseLookupFailedMessage(t *testing.T) {
+	svc := newLookupFailService(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "rate limit exceeded", http.StatusForbidden)
+	})
+
+	if err := svc.Install("mihomo"); err == nil {
+		t.Fatal("expected install error when release lookup fails")
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "failed" {
+		t.Fatalf("status = %q, want failed", k.Status)
+	}
+	if !strings.HasPrefix(k.Message, "Release lookup failed:") || !strings.Contains(k.Message, "HTTP 403") {
+		t.Errorf("message = %q, want prefix %q and HTTP 403", k.Message, "Release lookup failed:")
+	}
+	if strings.Contains(k.Message, "Unsupported architecture") {
+		t.Errorf("message must not claim unsupported architecture: %q", k.Message)
+	}
+	if k.ErrorKind != KernelErrorReleaseLookup {
+		t.Errorf("error_kind = %q, want %q", k.ErrorKind, KernelErrorReleaseLookup)
+	}
+}
+
+// TestInstall_NoReleaseForChannel: проверка прошла, но релиза канала нет.
+func TestInstall_NoReleaseForChannel(t *testing.T) {
+	svc := newLookupFailService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"tag_name":"v1.19.0","prerelease":false}]`))
+	})
+	svc.mu.Lock()
+	svc.kernels["mihomo"].Channel = "preview"
+	svc.mu.Unlock()
+
+	if err := svc.Install("mihomo"); err == nil {
+		t.Fatal("expected install error when no release exists for the channel")
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "failed" || k.Message != "No release found for channel preview" {
+		t.Errorf("status=%q message=%q", k.Status, k.Message)
+	}
+	if k.ErrorKind != KernelErrorNoRelease {
+		t.Errorf("error_kind = %q, want %q", k.ErrorKind, KernelErrorNoRelease)
+	}
+}
+
+// TestInstall_UnsupportedArchKind: версия известна, а URL для архитектуры не построен.
+func TestInstall_UnsupportedArchKind(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	svc.SetInstallSource("riscv64", writeGzDownload(t, "1.19.0"))
+
+	if err := svc.Install("mihomo"); err == nil {
+		t.Fatal("expected install error for unsupported architecture")
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "failed" || k.Message != "Unsupported architecture: riscv64" {
+		t.Errorf("status=%q message=%q", k.Status, k.Message)
+	}
+	if k.ErrorKind != KernelErrorUnsupportedArch {
+		t.Errorf("error_kind = %q, want %q", k.ErrorKind, KernelErrorUnsupportedArch)
+	}
+}
+
+// TestInstall_ErrorKindResetOnNextInstall: прежний вид ошибки не переживает новый
+// старт установки, а для прочих сбоев (скачивание) вид не задаётся.
+func TestInstall_ErrorKindResetOnNextInstall(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	svc.SetInstallSource("riscv64", writeGzDownload(t, "1.19.0"))
+	_ = svc.Install("mihomo")
+	if got := svc.Get("mihomo").ErrorKind; got != KernelErrorUnsupportedArch {
+		t.Fatalf("precondition: error_kind = %q", got)
+	}
+
+	release := make(chan struct{})
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		<-release
+		return errors.New("boom")
+	})
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	k := svc.Get("mihomo")
+	if k.ErrorKind != "" || k.Status != "downloading" {
+		t.Errorf("during install: status=%q error_kind=%q, want downloading and empty", k.Status, k.ErrorKind)
+	}
+	close(release)
+	<-done
+	k = svc.Get("mihomo")
+	if k.Status != "failed" || k.ErrorKind != "" {
+		t.Errorf("download failure: status=%q error_kind=%q, want failed and empty", k.Status, k.ErrorKind)
+	}
+}
+
 // TestBeginInstall_ReportsStartingSynchronously: сразу после BeginInstall статус
 // уже downloading со stage starting — первый же опрос клиента не видит idle.
 func TestBeginInstall_ReportsStartingSynchronously(t *testing.T) {

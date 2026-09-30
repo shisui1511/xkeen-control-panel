@@ -242,6 +242,33 @@ func TestKernelInstall_StageVisibleImmediately(t *testing.T) {
 	waitKernelFailed(t, api, "xray")
 }
 
+// TestKernelInstall_ReleaseLookupFailed: ядро без распознанной версии, источник
+// релизов отвечает 403 — статус failed несёт error_kind release_lookup_failed,
+// а не «Unsupported architecture» (G5-WR02, KERN-02).
+func TestKernelInstall_ReleaseLookupFailed(t *testing.T) {
+	// Заглушка xray, чья версия не распознаётся: запасного пути «переустановить
+	// текущую версию» нет, версию может дать только проверка релиза.
+	api, _ := newKernelTestAPIWith(t, "#!/bin/sh\nexit 1\n", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "rate limit exceeded", http.StatusForbidden)
+	})
+
+	if rr := postKernelInstall(api, "xray"); rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	waitKernelFailed(t, api, "xray")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/kernels/xray/status", nil)
+	rr := httptest.NewRecorder()
+	api.KernelStatus(rr, req)
+	body := rr.Body.String()
+	if !strings.Contains(body, `"error_kind":"release_lookup_failed"`) {
+		t.Errorf("status JSON lacks error_kind release_lookup_failed: %s", body)
+	}
+	if strings.Contains(body, "Unsupported architecture") {
+		t.Errorf("message must not claim unsupported architecture: %s", body)
+	}
+}
+
 // TestKernelInstall_Conflict409: второй POST при идущей установке — 409.
 func TestKernelInstall_Conflict409(t *testing.T) {
 	api, _ := newKernelTestAPI(t)
