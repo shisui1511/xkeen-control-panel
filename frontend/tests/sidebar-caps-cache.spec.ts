@@ -13,6 +13,8 @@ interface CapsState {
   activeKernel: string;
   /** Пока промис не разрешён, ответ /api/capabilities удерживается. */
   gate?: Promise<void>;
+  /** Если задан, /api/capabilities отвечает этим кодом ошибки вместо среза. */
+  failStatus?: number;
   calls: number;
 }
 
@@ -23,6 +25,14 @@ async function mockCapabilities(page: Page, state: CapsState) {
   await page.route('**/api/capabilities', async (route) => {
     state.calls++;
     if (state.gate) await state.gate;
+    if (state.failStatus) {
+      await route.fulfill({
+        status: state.failStatus,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: false, error: 'mock failure' })
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -151,6 +161,26 @@ test.describe('Sidebar: кэш capabilities и скелетон', () => {
     // Группы Mihomo не вспыхивали ни на один кадр
     const frames = await navFrames(page);
     expect(frames.every((f) => f.startsWith(`${XRAY_GROUPS}:`))).toBe(true);
+  });
+
+  test('без кэша и при 500 от capabilities меню не висит скелетоном', async ({ page }) => {
+    // Два опроса capabilities с интервалом 10 с: дефолт ставится на втором сбое
+    test.setTimeout(60_000);
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+
+    const state: CapsState = { activeKernel: 'xray', failStatus: 500, calls: 0 };
+    await mockCapabilities(page, state);
+
+    await page.goto('/#/dashboard');
+    await expect(page.getByTestId('nav-skeleton')).toBeVisible();
+
+    await expect(page.getByTestId('nav-skeleton')).toHaveCount(0, { timeout: 25_000 });
+    await expect(page.locator('.sidebar-nav .nav-group')).toHaveCount(XRAY_GROUPS);
+    expect(state.calls).toBeGreaterThanOrEqual(2);
+    // Дефолт меню не записывается в кэш: он не подтверждён сервером
+    expect(await page.evaluate((k) => localStorage.getItem(k), NAV_KEY)).toBeNull();
+    expect(errors).toEqual([]);
   });
 
   for (const [title, raw] of [

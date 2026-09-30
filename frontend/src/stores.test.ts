@@ -186,6 +186,53 @@ describe('navCaps и lockNav', () => {
     expect(get(navCaps)).not.toBeNull();
   });
 
+  const httpError = (status: number) => Object.assign(new Error(`HTTP ${status}`), { status });
+
+  it('холодный кэш, два сбоя подряд → дефолт none без записи в кэш', async () => {
+    const { fetchCapabilities, navCaps } = await load();
+    const setItem = (globalThis.localStorage as unknown as { setItem: ReturnType<typeof vi.fn> })
+      .setItem;
+    apiFetchJSON.mockRejectedValue(httpError(500));
+
+    await fetchCapabilities();
+    expect(get(navCaps)).toBeNull();
+
+    await fetchCapabilities();
+    expect(get(navCaps)?.active_kernel).toBe('none');
+    expect(setItem.mock.calls.filter((c) => c[0] === 'xcp_nav_caps')).toHaveLength(0);
+  });
+
+  it('401 и AbortError не считаются сбоем', async () => {
+    const { fetchCapabilities, navCaps } = await load();
+    apiFetchJSON.mockRejectedValue(httpError(401));
+    await fetchCapabilities();
+    await fetchCapabilities();
+    expect(get(navCaps)).toBeNull();
+
+    apiFetchJSON.mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    await fetchCapabilities();
+    await fetchCapabilities();
+    expect(get(navCaps)).toBeNull();
+  });
+
+  it('при замке меню два сбоя дефолт не ставят', async () => {
+    const { fetchCapabilities, navCaps, lockNav } = await load();
+    lockNav();
+    apiFetchJSON.mockRejectedValue(httpError(500));
+    await fetchCapabilities();
+    await fetchCapabilities();
+    expect(get(navCaps)).toBeNull();
+  });
+
+  it('с кэшем сбои ничего не меняют', async () => {
+    const { fetchCapabilities, navCaps } = await load(xrayCache);
+    apiFetchJSON.mockRejectedValue(httpError(500));
+    await fetchCapabilities();
+    await fetchCapabilities();
+    await fetchCapabilities();
+    expect(get(navCaps)?.active_kernel).toBe('xray');
+  });
+
   it('localStorage.getItem бросает — readNavCaps возвращает null', async () => {
     vi.doMock('./lib/api', () => ({ apiFetchJSON }));
     vi.stubGlobal('localStorage', {
