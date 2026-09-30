@@ -235,3 +235,17 @@ func TestSetupXrayCmdEnv_And_GetActiveKernelName(t *testing.T) {
 		t.Errorf("unexpected active kernel: %s", active)
 	}
 }
+
+// TestGetActiveKernelName_StaleRawIgnored: «что запущено сейчас» не выводится
+// из устаревшего снимка статуса; по свежему — выводится (G5-WR04).
+func TestGetActiveKernelName_StaleRawIgnored(t *testing.T) {
+	api := newConfiguredKernelAPI(t, "xray", newRawStatusCache(t, "mihomo running", true))
+	if got := api.getActiveKernelName(); got != "none" {
+		t.Errorf("getActiveKernelName при устаревшем снимке = %q, want none", got)
+	}
+
+	api = newConfiguredKernelAPI(t, "xray", newRawStatusCache(t, "mihomo running", false))
+	if got := api.getActiveKernelName(); got != "mihomo" {
+		t.Errorf("getActiveKernelName по свежему снимку = %q, want mihomo", got)
+	}
+}

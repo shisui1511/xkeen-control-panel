@@ -1,12 +1,16 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -176,5 +180,89 @@ func TestCapabilities_ApplyRestartsWithoutApplier(t *testing.T) {
 	}
 	if _, ok := envelope.Data["apply_restarts"]; ok {
 		t.Errorf("apply_restarts присутствует без applier: %s", envelope.Data["apply_restarts"])
+	}
+}
+
+// newRawStatusCache — кэш статуса XKeen с заданным Raw. stale=true: второй
+// опрос падает, снимок остаётся с прежним Raw, но помечен устаревшим.
+func newRawStatusCache(t *testing.T, raw string, stale bool) *services.XKeenStatusCache {
+	t.Helper()
+	var calls atomic.Int32
+	cache := services.NewXKeenStatusCacheFunc(
+		func(context.Context) (string, error) {
+			if calls.Add(1) > 1 {
+				return "", errors.New("timeout exceeded")
+			}
+			return raw, nil
+		},
+		nil, nil, time.Hour,
+	)
+	cache.Start()
+	t.Cleanup(cache.Stop)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cache.RefreshNow(ctx)
+	if stale {
+		cache.RefreshNow(ctx)
+	}
+	if got := cache.Snapshot(); got.Stale != stale || got.Raw != raw {
+		t.Fatalf("подготовка снимка: stale=%v raw=%q", got.Stale, got.Raw)
+	}
+	return cache
+}
+
+// newConfiguredKernelAPI — API без запущенных процессов ядер, у XKeen
+// настроенное ядро configured (name_client init-скрипта), статус — из кэша.
+func newConfiguredKernelAPI(t *testing.T, configured string, cache *services.XKeenStatusCache) *API {
+	t.Helper()
+	initScript := filepath.Join(t.TempDir(), "S05xkeen")
+	if err := os.WriteFile(initScript, []byte("name_client=\""+configured+"\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	xk := services.NewXKeenService(buildStubBinary(t, "XKeen is not running", 0), t.TempDir())
+	xk.InitScript = initScript
+	api := &API{cfg: &config.Config{MihomoAPIURL: "http://127.0.0.1:1"}, xkeenSvc: xk}
+	api.SetXKeenStatusCache(cache)
+	return api
+}
+
+func capabilitiesActiveKernel(t *testing.T, api *API) string {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	api.Capabilities(rr, httptest.NewRequest(http.MethodGet, "/api/capabilities", nil))
+	var envelope struct {
+		Data CapabilitiesResponse `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	return envelope.Data.ActiveKernel
+}
+
+// TestCapabilities_StaleRawIgnored: устаревший снимок `xkeen -status` не
+// определяет активное ядро (после switch_kernel в нём ещё прежнее ядро) —
+// берётся настроенное (G5-WR04).
+func TestCapabilities_StaleRawIgnored(t *testing.T) {
+	api := newConfiguredKernelAPI(t, "mihomo", newRawStatusCache(t, "xray is running", true))
+	if got := capabilitiesActiveKernel(t, api); got != "mihomo" {
+		t.Errorf("active_kernel = %q, want mihomo (устаревший Raw игнорируется)", got)
+	}
+}
+
+// TestCapabilities_FreshRawUsed: свежий Raw без процессов определяет ядро
+// раньше настроенного (запасной путь работает для свежих данных).
+func TestCapabilities_FreshRawUsed(t *testing.T) {
+	api := newConfiguredKernelAPI(t, "mihomo", newRawStatusCache(t, "xray is running", false))
+	if got := capabilitiesActiveKernel(t, api); got != "xray" {
+		t.Errorf("active_kernel = %q, want xray по свежему Raw", got)
+	}
+}
+
+// TestCapabilities_BothWordsFallsBackToConfigured: в свежем Raw оба ядра —
+// xray не выигрывает по порядку веток, решает настроенное ядро (G5-WR04).
+func TestCapabilities_BothWordsFallsBackToConfigured(t *testing.T) {
+	api := newConfiguredKernelAPI(t, "mihomo", newRawStatusCache(t, "xray and mihomo are running", false))
+	if got := capabilitiesActiveKernel(t, api); got != "mihomo" {
+		t.Errorf("active_kernel = %q, want mihomo (ConfiguredKernel при обоих словах)", got)
 	}
 }
