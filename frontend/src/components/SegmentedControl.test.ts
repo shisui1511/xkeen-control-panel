@@ -32,4 +32,42 @@ describe('SegmentedControl', () => {
     expect(body).toMatch(/data-value="a" aria-pressed="true"/);
     expect(body).toMatch(/data-value="b" aria-pressed="false"/);
   });
+
+  it('renders partial segments with class partial and aria-pressed="mixed"', () => {
+    const items = [
+      { value: 'stable', label: 'Stable' },
+      { value: 'preview', label: 'Preview' }
+    ];
+    const { body } = render(SegmentedControl, {
+      props: { items, value: '', partial: ['stable', 'preview'] }
+    });
+    expect(body).toMatch(/class="seg-item\s+partial"[^>]*data-value="stable" aria-pressed="mixed"/);
+    expect(body).toMatch(
+      /class="seg-item\s+partial"[^>]*data-value="preview" aria-pressed="mixed"/
+    );
+  });
+
+  it('keeps aria-pressed true/false without partial', () => {
+    const items = [
+      { value: 'stable', label: 'Stable' },
+      { value: 'preview', label: 'Preview' }
+    ];
+    const { body } = render(SegmentedControl, { props: { items, value: 'stable' } });
+    expect(body).not.toMatch(/mixed/);
+    expect(body).not.toMatch(/partial/);
+    expect(body).toMatch(/data-value="stable" aria-pressed="true"/);
+    expect(body).toMatch(/data-value="preview" aria-pressed="false"/);
+  });
+
+  it('prefers active over partial when the value matches a partial segment', () => {
+    const items = [
+      { value: 'stable', label: 'Stable' },
+      { value: 'preview', label: 'Preview' }
+    ];
+    const { body } = render(SegmentedControl, {
+      props: { items, value: 'stable', partial: ['stable', 'preview'] }
+    });
+    expect(body).toMatch(/data-value="stable" aria-pressed="true"/);
+    expect(body).toMatch(/data-value="preview" aria-pressed="mixed"/);
+  });
 });

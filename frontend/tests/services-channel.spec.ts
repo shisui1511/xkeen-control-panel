@@ -240,6 +240,40 @@ test.describe('Services page — channel & updates card', () => {
     const previewBtn = channelGroup.getByRole('button', { name: /^(preview|предварительный)$/i });
     await expect(stableBtn).not.toHaveClass(/active/);
     await expect(previewBtn).not.toHaveClass(/active/);
+    // ...but they must read as "partially selected", not as "nothing chosen".
+    await expect(stableBtn).toHaveClass(/partial/);
+    await expect(previewBtn).toHaveClass(/partial/);
+    await expect(stableBtn).toHaveAttribute('aria-pressed', 'mixed');
+    await expect(previewBtn).toHaveAttribute('aria-pressed', 'mixed');
+  });
+
+  test('aligns the updates card title with its subtitle on a 393px viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 393, height: 852 });
+    await page.route('**/api/kernels', async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: kernelsFixture('xray') })
+      });
+    });
+
+    await page.goto('/#/services');
+
+    const title = page.locator('.updates-card h2.card-title');
+    await expect(title).toBeVisible();
+    // Compare where the text starts, not the element box: a leftover global
+    // padding shifts the glyphs while the box stays put.
+    const textLeft = (selector: string) =>
+      page.evaluate((sel) => {
+        const el = document.querySelector(sel)!;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return range.getBoundingClientRect().left;
+      }, selector);
+    const titleX = await textLeft('.updates-card h2.card-title');
+    const subtitleX = await textLeft('.updates-card .card-subtitle');
+    expect(Math.abs(titleX - subtitleX)).toBeLessThanOrEqual(2);
   });
 
   test('shows an error toast when changing the channel fails on the backend', async ({ page }) => {
