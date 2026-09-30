@@ -390,6 +390,34 @@ test.describe('Services page — kernel install progress', () => {
     await page.waitForTimeout(300);
     expect(counters.kernelStatus['xray'] ?? 0).toBe(0);
   });
+
+  test('ошибка проверки релиза по error_kind показана по-русски с причиной', async ({ page }) => {
+    await mockRoutes(page, {
+      kernels: kernelsFixture('xray', {
+        xray: {
+          current_version: 'not installed',
+          latest_version: '',
+          status: 'failed',
+          error_kind: 'release_lookup_failed',
+          message: 'Release lookup failed: github api: HTTP 403'
+        }
+      })
+    });
+    await page.goto('/#/services');
+    const hint = xrayRow(page).locator('.update-hint-error');
+    await expect(hint).toContainText('HTTP 403');
+    await expect(hint).not.toContainText('Release lookup failed');
+  });
+
+  test('ошибка без известного error_kind показывает прежний текст message', async ({ page }) => {
+    await mockRoutes(page, {
+      kernels: kernelsFixture('xray', {
+        xray: { status: 'failed', message: 'download failed' }
+      })
+    });
+    await page.goto('/#/services');
+    await expect(xrayRow(page).locator('.update-hint-error')).toHaveText('download failed');
+  });
 });
 
 test.describe('Services page — rollback label', () => {

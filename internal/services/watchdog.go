@@ -38,6 +38,15 @@ const disarmedRecheckInterval = 5
 // watchdogResetCooldown is the minimum interval between manual watchdog resets.
 const watchdogResetCooldown = 5 * time.Second
 
+// watchdogKernelBusyGrace — пауза проверок после последней замеченной операции
+// над ядром: хвост нагрузки от замены бинарника не должен считаться провалом.
+const watchdogKernelBusyGrace = 60 * time.Second
+
+// watchdogStatusTimeout — предел ожидания `xkeen -status` в проверке здоровья.
+// Пакетная переменная: тест понижает её, как kernelVersionTimeout в kernel.go.
+// 15 с вместо 5: медленный ответ под нагрузкой не считается провалом ядра.
+var watchdogStatusTimeout = 15 * time.Second
+
 // watchdogBackoffGrid defines the retry backoff sequence after failed disarm attempts (D-10, D-35).
 var watchdogBackoffGrid = []time.Duration{
 	30 * time.Second,
@@ -58,6 +67,10 @@ const (
 
 	// watchdogDisarmTimeout is the overall context timeout for an EmergencyDisarmTProxy operation (D-14).
 	watchdogDisarmTimeout = 20 * time.Second
+
+	// watchdogRearmMinInterval — минимальный интервал между возвратами перехвата
+	// после восстановления ядра: цикл перезапусков XKeen роняет трафик.
+	watchdogRearmMinInterval = watchdogStartGracePeriod
 )
 
 // Sentinel errors returned by TryReset.
@@ -121,6 +134,21 @@ type WatchdogService struct {
 	lastDisarmError        string
 	lastRoutingIssues      string
 
+	// kernelBusy сообщает, идёт ли операция над ядром (установка, откат, загрузка
+	// файла); пока идёт, проверки здоровья приостановлены. lastBusyAt — момент
+	// последней замеченной операции (для паузы после неё).
+	kernelBusy func() bool
+	lastBusyAt time.Time
+	busyActive bool
+
+	// rearmFn возвращает перехват (перезапуск XKeen); nil — возврат отключён.
+	// rearmPending: в эпизоде аварийное снятие действительно удалило правила
+	// (DisarmDisarmed, в том числе отброшенное по эпохе), возврат ещё не сделан.
+	// lastRearmAt — момент последнего решения о возврате (ограничение частоты).
+	rearmFn      func() error
+	rearmPending bool
+	lastRearmAt  time.Time
+
 	iptablesSaveBin  string
 	iptablesBin      string
 	ip6tablesSaveBin string
@@ -140,6 +168,22 @@ func NewWatchdogService(xkeenSvc *XKeenService, mihomoDir, xrayDir string) *Watc
 		stopCh:    make(chan struct{}),
 		now:       time.Now,
 	}
+}
+
+// SetKernelBusyFunc подключает признак «идёт операция над ядром» (в main.go —
+// KernelService.Busy). До Start(); nil отключает приостановку.
+func (w *WatchdogService) SetKernelBusyFunc(fn func() bool) {
+	w.mu.Lock()
+	w.kernelBusy = fn
+	w.mu.Unlock()
+}
+
+// SetRearmFunc подключает функцию возврата перехвата после аварийного снятия
+// (в main.go — перезапуск XKeen). До Start(); nil отключает возврат.
+func (w *WatchdogService) SetRearmFunc(fn func() error) {
+	w.mu.Lock()
+	w.rearmFn = fn
+	w.mu.Unlock()
 }
 
 // inGraceLocked reports whether the service is within its start grace period.
@@ -240,9 +284,11 @@ func isKernelStatusHealthy(status string) bool {
 }
 
 // CheckHealth polls XKeen's current status and updates the failure counter.
-// XKeenService.Status() already wraps the underlying `xkeen -status` call
-// with a 5s timeout (STAB-01), so a hung/unresponsive kernel process
-// surfaces here as an error/timeout rather than blocking this goroutine.
+// The underlying `xkeen -status` call is wrapped with watchdogStatusTimeout
+// (15s, STAB-01), so a hung/unresponsive kernel process surfaces here as an
+// error/timeout rather than blocking this goroutine. Live output is used
+// instead of XKeenStatusCache: the cache may serve a stale Raw, and the
+// watchdog needs a real answer; statusRunMu still serialises `xkeen -status`.
 func (w *WatchdogService) CheckHealth() {
 	if w.xkeenSvc == nil {
 		return
@@ -253,13 +299,55 @@ func (w *WatchdogService) CheckHealth() {
 		return
 	}
 
-	status, err := w.xkeenSvc.Status()
+	// 1а. Операция над ядром (G1): замена бинарника под нагрузкой замедляет
+	// `xkeen -status`, и провалы проверки не означают падение ядра. Пока операция
+	// идёт и watchdogKernelBusyGrace после неё, статус не запрашивается, счётчики
+	// не растут (семантика как у окна InRestart).
+	w.mu.Lock()
+	busyFn := w.kernelBusy
+	w.mu.Unlock()
+	busy := busyFn != nil && busyFn()
+
+	w.mu.Lock()
+	if busy {
+		w.lastBusyAt = w.now()
+		if !w.busyActive {
+			w.busyActive = true
+			// Накопленные до операции провалы (ниже порога) к ней не относятся:
+			// сбрасываем, чтобы хвост нагрузки не добил счётчик до снятия TPROXY.
+			if w.consecutiveFailures < watchdogMaxFailures {
+				w.consecutiveFailures = 0
+			}
+			log.Printf("Watchdog: kernel operation in progress — health checks paused")
+		}
+		w.mu.Unlock()
+		return
+	}
+	w.busyActive = false
+	if !w.lastBusyAt.IsZero() && w.now().Sub(w.lastBusyAt) < watchdogKernelBusyGrace {
+		w.mu.Unlock()
+		return
+	}
+	w.mu.Unlock()
+
+	status, err := w.xkeenSvc.StatusWithTimeout(watchdogStatusTimeout)
 	healthy := err == nil && isKernelStatusHealthy(status)
 
 	if healthy {
 		w.xkeenSvc.ClearIntentionalStop()
 
 		w.mu.Lock()
+		// Возврат перехвата (G1): правила были действительно удалены аварийным
+		// снятием, ядро восстановилось. Не чаще watchdogRearmMinInterval; само
+		// выполнение — ниже, вне w.mu.
+		var rearmFn func() error
+		if w.rearmPending && w.rearmFn != nil &&
+			(w.lastRearmAt.IsZero() || w.now().Sub(w.lastRearmAt) >= watchdogRearmMinInterval) {
+			rearmFn = w.rearmFn
+			w.rearmPending = false
+			w.lastRearmAt = w.now()
+			w.wg.Add(1)
+		}
 		wasDegraded := !w.degradedAt.IsZero()
 		wasIdle := w.idle
 		if wasDegraded {
@@ -282,6 +370,10 @@ func (w *WatchdogService) CheckHealth() {
 		w.degradedAt = time.Time{}
 		w.lastDisarmError = ""
 		w.mu.Unlock()
+
+		if rearmFn != nil {
+			go w.rearmInterception(rearmFn)
+		}
 		return
 	}
 
@@ -408,6 +500,11 @@ func (w *WatchdogService) CheckHealth() {
 			outcome := w.EmergencyDisarmTProxy()
 			w.mu.Lock()
 			w.disarmInFlight = false
+			// Правила удалены в любом случае — и когда исход учтён, и когда
+			// отброшен по эпохе: после восстановления ядра их надо вернуть.
+			if outcome == DisarmDisarmed {
+				w.rearmPending = true
+			}
 			// Latch only if the epoch has not changed while the disarm was in flight.
 			// If the kernel recovered and subsequently failed again, this previous attempt's
 			// outcome is stale and must not block the new failure cycle from disarming (CR-01).
@@ -441,6 +538,28 @@ func (w *WatchdogService) CheckHealth() {
 		}()
 	}
 	w.mu.Unlock()
+}
+
+// rearmInterception возвращает перехват после восстановления ядра, если правил
+// TPROXY в mangle нет. Вызывается в горутине под w.wg (Add сделан вызывающим),
+// вне w.mu: перезапуск XKeen долгий.
+func (w *WatchdogService) rearmInterception(fn func() error) {
+	defer w.wg.Done()
+
+	if v4, v6 := w.tproxyInterceptionFamilies(); v4 || v6 {
+		log.Printf("Watchdog: TPROXY rules already present after recovery — rearm skipped")
+		return
+	}
+
+	err := fn()
+	if err != nil {
+		log.Printf("Watchdog: failed to restore TPROXY interception after recovery: %v", err)
+	} else {
+		log.Printf("Watchdog: TPROXY interception rules restored after recovery")
+	}
+	if w.xkeenSvc != nil {
+		w.xkeenSvc.RecordAction("watchdog_rearm", "", err)
+	}
 }
 
 // ConsecutiveFailures returns the current failure streak (for diagnostics/tests).

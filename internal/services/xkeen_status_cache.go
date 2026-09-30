@@ -239,8 +239,11 @@ func (c *XKeenStatusCache) pollOnce() {
 		if v != "" && v != "unknown" {
 			c.snap.Version = v
 			c.snap.VersionUpdatedAt = now
-			c.versionCleanGen = vGen
 		}
+		// Поколение фиксируется после любой попытки: при постоянном отказе
+		// `xkeen -v` повтор регулирует versionTriedAt (раз в xkeenVersionRetryInterval),
+		// а не инвалидация, которая иначе срабатывала бы на каждом опросе.
+		c.versionCleanGen = vGen
 		c.mu.Unlock()
 	}
 
@@ -316,6 +319,9 @@ func (c *XKeenStatusCache) InvalidateVersion() {
 }
 
 // RefreshNow запрашивает внеочередной опрос и ждёт его завершения (или ctx).
+// Продакшен-потребитель — обновление кэшей перед кадром exit терминала
+// установщика XKeen (handlers.refreshAfterXKeenInstall); механизм waiters
+// оставлен осознанно, им же синхронизируются тесты пакетов handlers и services.
 func (c *XKeenStatusCache) RefreshNow(ctx context.Context) XKeenStatusSnapshot {
 	w := make(chan struct{})
 	c.mu.Lock()

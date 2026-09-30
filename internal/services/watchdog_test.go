@@ -3,11 +3,13 @@ package services
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2314,5 +2316,464 @@ func TestWatchdogService_ReportRoutingIssues_LogsOnlyOnChange(t *testing.T) {
 		if st.wantLog != "" && !strings.Contains(got, st.wantLog) {
 			t.Errorf("step %d: expected log containing %q, got %q", i, st.wantLog, got)
 		}
+	}
+}
+
+// TestWatchdog_KernelInstallSuppressesDisarm (G1): пока над ядром идёт установка,
+// проверка здоровья не запускает `xkeen -status`, не копит провалы и не снимает TPROXY.
+func TestWatchdog_KernelInstallSuppressesDisarm(t *testing.T) {
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	statusLog := filepath.Join(tmpDir, "status.log")
+	dummy := filepath.Join(tmpDir, "xkeen")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %q\necho \"XKeen is not running\"\nexit 1\n", statusLog)
+	if err := os.WriteFile(dummy, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, delLog := installFakeIptables(t, ruleOutput)
+
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	simTime := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	xkeenSvc.now = func() time.Time { return simTime }
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.now = func() time.Time { return simTime }
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	ks, _ := newInstallTestService(t, "1.18.0")
+	inDownload := make(chan struct{})
+	release := make(chan struct{})
+	ks.SetInstallSource("arm64", func(context.Context, string, string) error {
+		close(inDownload)
+		<-release
+		return errors.New("stop")
+	})
+	done := make(chan error, 1)
+	if err := ks.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	<-inDownload
+	defer func() {
+		close(release)
+		<-done
+	}()
+
+	w.SetKernelBusyFunc(ks.Busy)
+
+	for i := 0; i < 5; i++ {
+		simTime = simTime.Add(watchdogCheckInterval)
+		w.CheckHealth()
+		if got := w.ConsecutiveFailures(); got != 0 {
+			t.Fatalf("шаг %d: ConsecutiveFailures = %d, want 0", i, got)
+		}
+	}
+	// Дать возможной горутине снятия (при ошибке реализации) отработать.
+	time.Sleep(100 * time.Millisecond)
+
+	if data, err := os.ReadFile(delLog); err == nil && strings.TrimSpace(string(data)) != "" {
+		t.Fatalf("TPROXY не должен сниматься во время установки ядра, журнал iptables:\n%s", data)
+	}
+	if data, err := os.ReadFile(statusLog); err == nil && strings.TrimSpace(string(data)) != "" {
+		t.Fatalf("xkeen -status не должен запускаться во время установки ядра, журнал:\n%s", data)
+	}
+	if snap := w.Snapshot(); snap.State == WatchdogStateDisarmed {
+		t.Fatalf("состояние не должно быть %q", WatchdogStateDisarmed)
+	}
+}
+
+// busyWatchdogEnv — стенд для проверок паузы на время операции над ядром:
+// фейковый xkeen «не работает» с журналом вызовов, фейковые iptables с
+// TPROXY-правилом, фейковые часы.
+type busyWatchdogEnv struct {
+	w         *WatchdogService
+	xkeenSvc  *XKeenService
+	simTime   time.Time
+	statusLog string
+	delLog    string
+	busy      bool
+}
+
+func newBusyWatchdogEnv(t *testing.T) *busyWatchdogEnv {
+	t.Helper()
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	env := &busyWatchdogEnv{
+		simTime:   time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC),
+		statusLog: filepath.Join(tmpDir, "status.log"),
+	}
+	dummy := filepath.Join(tmpDir, "xkeen")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %q\necho \"XKeen is not running\"\nexit 1\n", env.statusLog)
+	if err := os.WriteFile(dummy, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, delLog := installFakeIptables(t, ruleOutput)
+	env.delLog = delLog
+
+	env.xkeenSvc = NewXKeenService(dummy, tmpDir)
+	env.xkeenSvc.now = func() time.Time { return env.simTime }
+	env.w = NewWatchdogService(env.xkeenSvc, tmpDir, tmpDir)
+	env.w.now = func() time.Time { return env.simTime }
+	env.w.iptablesSaveBin = saveBin
+	env.w.iptablesBin = delBin
+	env.w.ip6tablesSaveBin = saveBin
+	env.w.ip6tablesBin = delBin
+	env.w.SetKernelBusyFunc(func() bool { return env.busy })
+	return env
+}
+
+func (e *busyWatchdogEnv) statusCalls() int {
+	data, err := os.ReadFile(e.statusLog)
+	if err != nil {
+		return 0
+	}
+	return len(strings.Fields(strings.TrimSpace(string(data))))
+}
+
+// TestWatchdogService_KernelBusyResetsFailures: при входе в операцию над ядром
+// счётчик, меньший watchdogMaxFailures, обнуляется; достигший порога — не трогается.
+func TestWatchdogService_KernelBusyResetsFailures(t *testing.T) {
+	env := newBusyWatchdogEnv(t)
+
+	for i := 1; i <= 2; i++ {
+		env.simTime = env.simTime.Add(watchdogCheckInterval)
+		env.w.CheckHealth()
+		if got := env.w.ConsecutiveFailures(); got != i {
+			t.Fatalf("проверка %d: ConsecutiveFailures = %d, want %d", i, got, i)
+		}
+	}
+
+	env.busy = true
+	env.simTime = env.simTime.Add(watchdogCheckInterval)
+	env.w.CheckHealth()
+	if got := env.w.ConsecutiveFailures(); got != 0 {
+		t.Fatalf("вход в операцию должен обнулить счётчик, got %d", got)
+	}
+
+	// Счётчик, достигший порога, вход в операцию не обнуляет.
+	env.w.mu.Lock()
+	env.w.busyActive = false
+	env.w.consecutiveFailures = watchdogMaxFailures
+	env.w.mu.Unlock()
+	env.simTime = env.simTime.Add(watchdogCheckInterval)
+	env.w.CheckHealth()
+	if got := env.w.ConsecutiveFailures(); got != watchdogMaxFailures {
+		t.Fatalf("счётчик на пороге не должен обнуляться, got %d", got)
+	}
+}
+
+// TestWatchdogService_KernelBusyGrace: 60 с после последней замеченной операции
+// проверки ничего не считают и не запускают xkeen; потом считают провалы снова.
+func TestWatchdogService_KernelBusyGrace(t *testing.T) {
+	env := newBusyWatchdogEnv(t)
+
+	env.busy = true
+	env.w.CheckHealth() // замечена операция: lastBusyAt = simTime
+	env.busy = false
+
+	base := env.simTime
+	for _, off := range []time.Duration{10 * time.Second, 30 * time.Second, 59 * time.Second} {
+		env.simTime = base.Add(off)
+		env.w.CheckHealth()
+		if got := env.w.ConsecutiveFailures(); got != 0 {
+			t.Fatalf("через %v после операции ConsecutiveFailures = %d, want 0", off, got)
+		}
+		if got := env.statusCalls(); got != 0 {
+			t.Fatalf("через %v после операции xkeen -status вызван %d раз", off, got)
+		}
+	}
+
+	env.simTime = base.Add(61 * time.Second)
+	env.w.CheckHealth()
+	if got := env.w.ConsecutiveFailures(); got != 1 {
+		t.Fatalf("через 61 с после операции провал должен считаться, got %d", got)
+	}
+	if got := env.statusCalls(); got != 1 {
+		t.Fatalf("xkeen -status должен быть вызван 1 раз, got %d", got)
+	}
+}
+
+// TestWatchdogService_StatusTimeoutFromVariable: таймаут `xkeen -status` берётся
+// из watchdogStatusTimeout, а не из фиксированных 5 с.
+func TestWatchdogService_StatusTimeoutFromVariable(t *testing.T) {
+	xtables.ResetForTest()
+
+	if watchdogStatusTimeout != 15*time.Second {
+		t.Fatalf("watchdogStatusTimeout = %v, want 15s", watchdogStatusTimeout)
+	}
+
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\nexec sleep 2\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ruleOutput := "*mangle\n:PREROUTING ACCEPT [0:0]\n-A PREROUTING -p tcp -j TPROXY --on-port 7892 --tproxy-mark 0x1/0x1\nCOMMIT\n"
+	saveBin, delBin, _ := installFakeIptables(t, ruleOutput)
+
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	orig := watchdogStatusTimeout
+	watchdogStatusTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { watchdogStatusTimeout = orig })
+
+	start := time.Now()
+	w.CheckHealth()
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("проверка должна оборваться по watchdogStatusTimeout, заняла %v", elapsed)
+	}
+	if got := w.ConsecutiveFailures(); got != 1 {
+		t.Fatalf("оборванный по таймауту статус — провал, got %d", got)
+	}
+}
+
+// rearmEnv — стенд для проверок возврата перехвата: xkeen управляется файлом
+// статуса, фейковые iptables показывают правило, пока в журнале нет -D,
+// часы фейковые, функция возврата считает вызовы.
+type rearmEnv struct {
+	t          *testing.T
+	w          *WatchdogService
+	xkeenSvc   *XKeenService
+	simTime    time.Time
+	statusFile string
+	delLog     string
+	rearmCalls atomic.Int32
+}
+
+func newRearmEnv(t *testing.T) *rearmEnv {
+	t.Helper()
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	env := &rearmEnv{
+		t:          t,
+		simTime:    time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC),
+		statusFile: filepath.Join(tmpDir, "status.txt"),
+	}
+	env.setHealthy(false)
+	scriptBin := filepath.Join(tmpDir, "xkeen")
+	wrapper := fmt.Sprintf("#!/bin/sh\ncat %s\nif grep -q 'running' %s; then exit 0; else exit 1; fi\n", env.statusFile, env.statusFile)
+	if err := os.WriteFile(scriptBin, []byte(wrapper), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, delLog := installFakeIptables(t, ruleOutput)
+	env.delLog = delLog
+
+	env.xkeenSvc = NewXKeenService(scriptBin, tmpDir)
+	env.xkeenSvc.now = func() time.Time { return env.simTime }
+	env.w = NewWatchdogService(env.xkeenSvc, tmpDir, tmpDir)
+	env.w.now = func() time.Time { return env.simTime }
+	env.w.iptablesSaveBin = saveBin
+	env.w.iptablesBin = delBin
+	env.w.ip6tablesSaveBin = saveBin
+	env.w.ip6tablesBin = delBin
+	env.w.SetRearmFunc(func() error {
+		env.rearmCalls.Add(1)
+		return nil
+	})
+	return env
+}
+
+func (e *rearmEnv) setHealthy(healthy bool) {
+	e.t.Helper()
+	text := "XKeen is not running"
+	if healthy {
+		text = "XKeen is running"
+	}
+	if err := os.WriteFile(e.statusFile, []byte(text), 0644); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// check делает одну проверку здоровья через 10 с фейковых часов и ждёт фоновые горутины.
+func (e *rearmEnv) check() {
+	e.t.Helper()
+	e.simTime = e.simTime.Add(10 * time.Second)
+	e.w.CheckHealth()
+	e.w.wg.Wait()
+}
+
+// tripDisarm доводит эпизод до аварийного снятия (три провала при правиле в mangle).
+func (e *rearmEnv) tripDisarm() {
+	e.t.Helper()
+	e.setHealthy(false)
+	for i := 0; i < watchdogMaxFailures; i++ {
+		e.check()
+	}
+	waitDisarmSettled(e.t, e.w)
+	e.w.wg.Wait()
+	if snap := e.w.Snapshot(); snap.State != WatchdogStateDisarmed {
+		e.t.Fatalf("ожидалось состояние %q после трёх провалов, got %q", WatchdogStateDisarmed, snap.State)
+	}
+}
+
+func (e *rearmEnv) rearmLogged() bool {
+	for _, entry := range e.xkeenSvc.GetRestartLog() {
+		if entry.Action == "watchdog_rearm" {
+			return true
+		}
+	}
+	return false
+}
+
+// TestWatchdogService_RearmAfterRecoveryOnce: после снятия TPROXY и восстановления
+// ядра перехват возвращается ровно один раз, действие попадает в журнал.
+func TestWatchdogService_RearmAfterRecoveryOnce(t *testing.T) {
+	env := newRearmEnv(t)
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	env.tripDisarm()
+	if got := env.rearmCalls.Load(); got != 0 {
+		t.Fatalf("возврат до восстановления ядра: %d вызовов", got)
+	}
+
+	env.setHealthy(true)
+	env.check()
+	if got := env.rearmCalls.Load(); got != 1 {
+		t.Fatalf("после восстановления возврат должен быть вызван 1 раз, got %d", got)
+	}
+	env.check()
+	env.check()
+	if got := env.rearmCalls.Load(); got != 1 {
+		t.Fatalf("повторные healthy-проверки не должны вызывать возврат, got %d", got)
+	}
+	if !env.rearmLogged() {
+		t.Fatal("в restart_log ожидалось действие watchdog_rearm")
+	}
+	if !strings.Contains(logBuf.String(), "rules restored after recovery") {
+		t.Fatalf("ожидалась строка лога 'rules restored after recovery', got:\n%s", logBuf.String())
+	}
+}
+
+// TestWatchdogService_RearmSkippedWhenRulesPresent: если правила уже в mangle,
+// возврат пропускается.
+func TestWatchdogService_RearmSkippedWhenRulesPresent(t *testing.T) {
+	env := newRearmEnv(t)
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	env.tripDisarm()
+	// Правила «вернулись» сами: журнал удалений очищен, фейковый iptables-save снова их показывает.
+	if err := os.Remove(env.delLog); err != nil {
+		t.Fatal(err)
+	}
+
+	env.setHealthy(true)
+	env.check()
+	if got := env.rearmCalls.Load(); got != 0 {
+		t.Fatalf("при наличии правил возврат не нужен, got %d вызовов", got)
+	}
+	if !strings.Contains(logBuf.String(), "rearm skipped") {
+		t.Fatalf("ожидалась строка лога о пропуске возврата, got:\n%s", logBuf.String())
+	}
+}
+
+// TestWatchdogService_RearmRateLimited: второй эпизод раньше watchdogRearmMinInterval
+// возврат не запускает, признак ожидания сохраняется; после интервала — запускает.
+func TestWatchdogService_RearmRateLimited(t *testing.T) {
+	env := newRearmEnv(t)
+
+	env.tripDisarm()
+	env.setHealthy(true)
+	env.check()
+	if got := env.rearmCalls.Load(); got != 1 {
+		t.Fatalf("первый возврат: got %d, want 1", got)
+	}
+	firstRearmAt := env.simTime
+
+	// Второй эпизод: правило снова появилось, ядро снова упало и было снято.
+	if err := os.Remove(env.delLog); err != nil {
+		t.Fatal(err)
+	}
+	env.tripDisarm()
+	env.setHealthy(true)
+	env.check()
+	if env.simTime.Sub(firstRearmAt) >= watchdogRearmMinInterval {
+		t.Fatalf("сценарий некорректен: прошло %v, нужно меньше %v", env.simTime.Sub(firstRearmAt), watchdogRearmMinInterval)
+	}
+	if got := env.rearmCalls.Load(); got != 1 {
+		t.Fatalf("возврат раньше watchdogRearmMinInterval недопустим, got %d вызовов", got)
+	}
+	env.w.mu.Lock()
+	pending := env.w.rearmPending
+	env.w.mu.Unlock()
+	if !pending {
+		t.Fatal("признак ожидания возврата должен сохраняться при ограничении частоты")
+	}
+
+	env.simTime = firstRearmAt.Add(watchdogRearmMinInterval)
+	env.w.CheckHealth()
+	env.w.wg.Wait()
+	if got := env.rearmCalls.Load(); got != 2 {
+		t.Fatalf("после интервала возврат должен быть вызван, got %d вызовов", got)
+	}
+}
+
+// TestWatchdogService_RearmAfterDiscardedInFlightDisarm: ядро восстановилось,
+// пока снятие ещё шло; исход отброшен по эпохе, но правила удалены — следующая
+// healthy-проверка возвращает перехват.
+func TestWatchdogService_RearmAfterDiscardedInFlightDisarm(t *testing.T) {
+	env := newRearmEnv(t)
+
+	// Медленный iptables-save: снятие успевает застать восстановление ядра.
+	binDir := t.TempDir()
+	slowSave := filepath.Join(binDir, "iptables-save")
+	ruleOutput := "*mangle\n:PREROUTING ACCEPT [0:0]\n-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1\nCOMMIT\n"
+	script := fmt.Sprintf("#!/bin/sh\nsleep 0.1\nif [ -f %q ] && grep -q -- '-D' %q; then\n  printf '*mangle\\nCOMMIT\\n'\nelse\n  cat <<'EOF'\n%sEOF\nfi\n", env.delLog, env.delLog, ruleOutput)
+	if err := os.WriteFile(slowSave, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	env.w.iptablesSaveBin = slowSave
+	env.w.ip6tablesSaveBin = slowSave
+
+	env.setHealthy(false)
+	for i := 0; i < watchdogMaxFailures; i++ {
+		env.simTime = env.simTime.Add(10 * time.Second)
+		env.w.CheckHealth()
+	}
+	env.w.mu.Lock()
+	inFlight := env.w.disarmInFlight
+	env.w.mu.Unlock()
+	if !inFlight {
+		t.Fatal("ожидалось disarmInFlight=true после трёх провалов")
+	}
+
+	// Ядро восстанавливается, пока снятие идёт.
+	env.setHealthy(true)
+	env.simTime = env.simTime.Add(10 * time.Second)
+	env.w.CheckHealth()
+	env.w.wg.Wait() // снятие завершилось, исход отброшен по эпохе
+	if got := env.rearmCalls.Load(); got != 0 {
+		t.Fatalf("возврат до завершения снятия: %d вызовов", got)
+	}
+
+	env.check()
+	if got := env.rearmCalls.Load(); got != 1 {
+		t.Fatalf("после отброшенного исхода правила удалены — возврат обязан быть вызван, got %d", got)
 	}
 }

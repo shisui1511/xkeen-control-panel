@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -305,6 +306,10 @@ type KernelInfo struct {
 	// версия, которая теперь стоит. Message остаётся английским для логов.
 	ResultKind    string `json:"result_kind,omitempty"`
 	ResultVersion string `json:"result_version,omitempty"`
+	// ErrorKind — код вида ошибки установки при status failed (D-10): по нему
+	// фронтенд подбирает перевод. Пусто вне failed и для сбоев без своего кода
+	// (скачивание, распаковка, замена) — их показывает текст Message.
+	ErrorKind string `json:"error_kind,omitempty"`
 	// BackupVersion — версия последнего бэкапа («Откатить на vX»). Читается из
 	// имени файла в .backup, без запуска бинарников; пусто, если версия в имени
 	// не закодирована.
@@ -313,6 +318,10 @@ type KernelInfo struct {
 	// binaryPathCachedAt records when BinaryPath was last resolved via auto-detection.
 	// Access must be protected by the KernelService mutex.
 	binaryPathCachedAt time.Time
+
+	// latestCheckedAt — когда последний раз запускалась проверка релиза (ручная
+	// или автоматическая из списка ядер). Не сериализуется; доступ под s.mu.
+	latestCheckedAt time.Time
 
 	// verCache caches the result of detectVersion for 60 seconds to avoid
 	// repeatedly spawning a subprocess on every status poll.
@@ -544,9 +553,25 @@ const (
 	KernelResultUploaded    = "uploaded"
 )
 
+// Виды ошибки установки (KernelInfo.ErrorKind, D-10).
+const (
+	// KernelErrorReleaseLookup — проверка релиза не удалась (лимит GitHub, таймаут, блокировка).
+	KernelErrorReleaseLookup = "release_lookup_failed"
+	// KernelErrorNoRelease — проверка прошла, но релиза для канала нет.
+	KernelErrorNoRelease = "no_release"
+	// KernelErrorUnsupportedArch — версия известна, а сборки для архитектуры нет.
+	KernelErrorUnsupportedArch = "unsupported_arch"
+)
+
 // ErrKernelBusy — над ядром уже идёт установка, откат или загрузка файла.
 // Текст сохранён: на него смотрят обработчики и тесты.
 var ErrKernelBusy = errors.New("install already in progress")
+
+// ErrKernelNotFound — ядра с таким именем нет.
+var ErrKernelNotFound = errors.New("kernel not found")
+
+// ErrInvalidChannel — канал обновлений не stable и не preview.
+var ErrInvalidChannel = errors.New("invalid channel: must be 'stable' or 'preview'")
 
 // KernelService manages proxy kernels (xray, mihomo)
 type KernelService struct {
@@ -554,6 +579,17 @@ type KernelService struct {
 	mu           sync.RWMutex
 	installLocks sync.Map // per-kernel install lock; key: string, value: *sync.Mutex
 	dataDir      string
+
+	// persistMu сериализует сохранение каналов: снимок каналов снимается внутри
+	// него, поэтому запись со старым снимком не затирает более новую.
+	// Порядок замков: persistMu → s.mu; обратного порядка в коде нет.
+	persistMu sync.Mutex
+
+	// opsActive — число идущих операций над ядрами (установка, откат, загрузка
+	// файла) по всем ядрам; читается без замков (Busy). busyKernels — те же
+	// операции по именам ядер, под s.mu.
+	opsActive   atomic.Int32
+	busyKernels map[string]bool
 
 	// statFunc is used to check if a file exists; defaults to os.Stat.
 	// Overridable in tests to verify TTL caching without touching the filesystem.
@@ -640,9 +676,10 @@ type kernelChannelStore struct {
 
 func NewKernelService(dataDir string) *KernelService {
 	svc := &KernelService{
-		kernels:  make(map[string]*KernelInfo),
-		statFunc: os.Stat,
-		dataDir:  dataDir,
+		kernels:     make(map[string]*KernelInfo),
+		busyKernels: make(map[string]bool),
+		statFunc:    os.Stat,
+		dataDir:     dataDir,
 	}
 
 	now := time.Now()
@@ -785,6 +822,7 @@ func (s *KernelService) List() []KernelInfo {
 	// Resolve live data outside the global lock to avoid blocking Install/CheckLatest
 	for i := range snapshots {
 		snapshots[i].CurrentVersion = s.detectVersion(&snapshots[i])
+		snapshots[i].recomputeUpdateFlags()
 		status, pid, uptime := kernelProcessStatusDetailed(snapshots[i].BinaryPath)
 		snapshots[i].ProcessStatus = status
 		snapshots[i].PID = pid
@@ -792,6 +830,14 @@ func (s *KernelService) List() []KernelInfo {
 		snapshots[i].fillBackup()
 	}
 	return snapshots
+}
+
+// recomputeUpdateFlags пересчитывает HasUpdate и AheadOfLatest по полям снимка.
+// Вызывается после detectVersion: хранимая версия могла остаться нераспознанной
+// (error после таймаута при старте), и флаги, посчитанные по ней, устарели.
+func (k *KernelInfo) recomputeUpdateFlags() {
+	k.HasUpdate = kernelHasUpdate(k.LatestVersion, k.CurrentVersion)
+	k.AheadOfLatest = kernelAheadOfLatest(k.Channel, k.LatestVersion, k.CurrentVersion)
 }
 
 // fillBackup заполняет HasBackup и BackupVersion по каталогу .backup (без exec).
@@ -817,6 +863,7 @@ func (s *KernelService) Get(name string) *KernelInfo {
 	}
 	// Refresh version and process status outside global lock
 	snap.CurrentVersion = s.detectVersion(&snap)
+	snap.recomputeUpdateFlags()
 	status, pid, uptime := kernelProcessStatusDetailed(snap.BinaryPath)
 	snap.ProcessStatus = status
 	snap.PID = pid
@@ -834,18 +881,23 @@ func (s *KernelService) GetActiveKernel() string {
 	return ""
 }
 
-// SetChannel switches a kernel's update channel (stable/preview) and persists
-// the selection to disk so it survives xcp restarts (T-CH-02). Returns false
-// if the channel value is invalid or the kernel is unknown.
-func (s *KernelService) SetChannel(name, channel string) bool {
+// SetChannel переключает канал обновлений ядра (stable/preview) и сохраняет выбор
+// на диск, чтобы он пережил рестарт xcp (T-CH-02). Ошибки: ErrInvalidChannel,
+// ErrKernelNotFound, ErrKernelBusy (над ядром идёт установка, откат или загрузка
+// файла: URL скачивания строится из канала, смена дала бы сборку другого канала).
+func (s *KernelService) SetChannel(name, channel string) error {
 	if channel != "stable" && channel != "preview" {
-		return false
+		return ErrInvalidChannel
 	}
 	s.mu.Lock()
 	k, ok := s.kernels[name]
 	if !ok {
 		s.mu.Unlock()
-		return false
+		return ErrKernelNotFound
+	}
+	if s.busyLocked(name) {
+		s.mu.Unlock()
+		return ErrKernelBusy
 	}
 	k.Channel = channel
 	// Latest* принадлежали прежнему каналу: сбрасываем, пока перепроверка
@@ -855,17 +907,25 @@ func (s *KernelService) SetChannel(name, channel string) bool {
 	k.HasUpdate = false
 	k.AheadOfLatest = false
 	k.Message = ""
+	k.ErrorKind = ""
 	k.Status = "checking"
+	s.mu.Unlock()
+
+	// Снимок каналов снимается внутри persistMu: иначе поздняя запись со старым
+	// снимком затёрла бы выбор, сделанный параллельным SetChannel.
+	s.persistMu.Lock()
+	s.mu.RLock()
 	channels := make(map[string]string, len(s.kernels))
 	for n, kk := range s.kernels {
 		channels[n] = kk.Channel
 	}
-	s.mu.Unlock()
-
-	if err := s.persistChannels(channels); err != nil {
+	s.mu.RUnlock()
+	err := s.persistChannels(channels)
+	s.persistMu.Unlock()
+	if err != nil {
 		log.Printf("WARNING: failed to persist kernel channel selection: %v", err)
 	}
-	return true
+	return nil
 }
 
 // kernelVersionTimeout — предел ожидания `<ядро> version`. Пакетная переменная:
@@ -999,6 +1059,10 @@ func kernelHasUpdate(latest, current string) bool {
 	switch {
 	case latest == "":
 		return false
+	case current == "error" || current == "unknown" || current == "":
+		// Нераспознанная версия не должна превращаться в предложение обновления:
+		// установленная pre-release при таймауте старта выглядела бы «старой» (G2).
+		return false
 	case isRollingBuild(latest):
 		return latest != current
 	case isValidSemver(current):
@@ -1034,6 +1098,24 @@ func (s *KernelService) refreshInstalledVersion(kk *KernelInfo) {
 // релизов со всеми ассетами (обрезанный JSON дал бы ошибку разбора, а не «актуально»).
 const githubReleaseBodyLimit = 16 << 20
 
+// ClaimLatestCheck атомарно занимает автоматическую проверку релиза: true, если
+// ядро известно, latest пуст и проверка не запускалась дольше ttl. Метка времени
+// ставится сразу, поэтому параллельные и повторные вызовы в пределах ttl не
+// порождают лишних запросов к GitHub (лимит анонимного API).
+func (s *KernelService) ClaimLatestCheck(name string, ttl time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := s.kernels[name]
+	if k == nil || k.LatestVersion != "" {
+		return false
+	}
+	if !k.latestCheckedAt.IsZero() && time.Since(k.latestCheckedAt) < ttl {
+		return false
+	}
+	k.latestCheckedAt = time.Now()
+	return true
+}
+
 // CheckLatest queries GitHub API for latest release.
 // ctx is used to cancel the HTTP request (e.g. on service shutdown).
 func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
@@ -1050,15 +1132,21 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 		s.mu.Unlock()
 		return fmt.Errorf("kernel not found: %s", name)
 	}
-	if !quiet {
+	k.latestCheckedAt = time.Now()
+	// Занятому ядру статус не меняем: им управляет установщик (G5-WR01).
+	if !quiet && !s.busyLocked(name) {
 		k.Status = "checking"
 		k.Message = "Checking for updates..."
+		k.ErrorKind = ""
 	}
 	// Snapshot fields needed for the HTTP call
 	repo := k.Repo
 	channel := k.Channel
 	apiBase := s.githubAPIBase
 	testClient := s.testClient
+	// Копия записи и указатель кэша версии: свежую версию читаем вне s.mu.
+	verSnap := *k
+	verCacheAtStart := k.verCache
 	s.mu.Unlock()
 
 	// fail фиксирует ошибку проверки в статусе ядра, если канал не сменился
@@ -1068,9 +1156,10 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 			return err
 		}
 		s.mu.Lock()
-		if kk := s.kernels[name]; kk != nil && kk.Channel == channel {
+		if kk := s.kernels[name]; kk != nil && kk.Channel == channel && !s.busyLocked(name) {
 			kk.Status = "failed"
 			kk.Message = message
+			kk.ErrorKind = ""
 		}
 		s.mu.Unlock()
 		return err
@@ -1150,16 +1239,27 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 		resultMessage = fmt.Sprintf("No prerelease found in the last %d releases of %s", previewReleaseWindow, repo)
 	}
 
+	// Свежая версия бинарника вне s.mu: хранимая могла остаться нераспознанной
+	// (error после таймаута при старте), и флаги по ней ложны (G2).
+	freshVersion := s.detectVersion(&verSnap)
+
 	s.mu.Lock()
 	// Канал сменился, пока шёл запрос: результат относится к прежнему каналу.
 	if kk := s.kernels[name]; kk != nil && kk.Channel == channel {
+		// Указатель verCache меняет только refreshInstalledVersion (установка,
+		// откат, загрузка): совпадение значит «бинарник не менялся за время
+		// проверки», и прочитанная до замены версия не затрёт новую.
+		if knownKernelVersion(freshVersion) && kk.verCache == verCacheAtStart {
+			kk.CurrentVersion = freshVersion
+		}
 		kk.LatestVersion = latestVersion
 		kk.LatestTag = latestTag
 		kk.HasUpdate = kernelHasUpdate(latestVersion, kk.CurrentVersion)
 		kk.AheadOfLatest = kernelAheadOfLatest(channel, latestVersion, kk.CurrentVersion)
-		if !quiet {
+		if !quiet && !s.busyLocked(name) {
 			kk.Status = "idle"
 			kk.Message = resultMessage
+			kk.ErrorKind = ""
 		}
 	}
 	s.mu.Unlock()
@@ -1168,14 +1268,51 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 
 // lockKernel берёт замок операций над ядром (установка, откат, загрузка файла).
 // Занят — ErrKernelBusy. Единственный вход в замок: проверка «идёт ли операция»
-// отдельно от захвата давала гонку.
-func (s *KernelService) lockKernel(name string) (*sync.Mutex, error) {
+// отдельно от захвата давала гонку. Возвращает release — идемпотентную функцию
+// снятия замка (sync.Once): повторный вызов не уводит счётчик Busy() ниже нуля.
+//
+// Порядок замков: мьютекс ядра берётся через TryLock до s.mu и отпускается после
+// снятия отметки под s.mu, поэтому взаимоблокировки между ними нет.
+func (s *KernelService) lockKernel(name string) (release func(), err error) {
 	actual, _ := s.installLocks.LoadOrStore(name, &sync.Mutex{})
 	installMu := actual.(*sync.Mutex)
 	if !installMu.TryLock() {
 		return nil, ErrKernelBusy
 	}
-	return installMu, nil
+
+	s.mu.Lock()
+	s.busyKernels[name] = true
+	s.mu.Unlock()
+	s.opsActive.Add(1)
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			delete(s.busyKernels, name)
+			s.mu.Unlock()
+			s.opsActive.Add(-1)
+			installMu.Unlock()
+		})
+	}, nil
+}
+
+// Busy сообщает, идёт ли хоть одна операция над ядрами (установка, откат,
+// загрузка файла). Без замков: вызывается сторожевым таймером на каждой проверке.
+func (s *KernelService) Busy() bool {
+	return s.opsActive.Load() > 0
+}
+
+// KernelBusy сообщает, идёт ли операция над конкретным ядром.
+func (s *KernelService) KernelBusy(name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.busyLocked(name)
+}
+
+// busyLocked — то же, что KernelBusy, для вызывающих, уже держащих s.mu.
+func (s *KernelService) busyLocked(name string) bool {
+	return s.busyKernels[name]
 }
 
 // setStage обновляет статус, этап и сообщение ядра под замком s.mu.
@@ -1186,6 +1323,21 @@ func (s *KernelService) setStage(name, status, stage, message string) {
 		kk.Status = status
 		kk.Stage = stage
 		kk.Message = message
+		kk.ErrorKind = ""
+	}
+	s.mu.Unlock()
+}
+
+// setFailed переводит ядро в failed с сообщением и видом ошибки (пустой вид —
+// сбой без собственного кода, см. KernelInfo.ErrorKind).
+func (s *KernelService) setFailed(name, message, kind string) {
+	s.notifyStage("failed", "")
+	s.mu.Lock()
+	if kk := s.kernels[name]; kk != nil {
+		kk.Status = "failed"
+		kk.Stage = ""
+		kk.Message = message
+		kk.ErrorKind = kind
 	}
 	s.mu.Unlock()
 }
@@ -1215,6 +1367,7 @@ func (s *KernelService) beginInstallLocked(name string) error {
 	kk.Stage = KernelStageStarting
 	kk.ResultKind = ""
 	kk.ResultVersion = ""
+	kk.ErrorKind = ""
 	kk.Message = "Starting..."
 	return nil
 }
@@ -1234,17 +1387,17 @@ func (s *KernelService) BeginInstall(name string, onDone func(error)) error {
 		return fmt.Errorf("kernel not found: %s", name)
 	}
 
-	installMu, err := s.lockKernel(name)
+	release, err := s.lockKernel(name)
 	if err != nil {
 		return err
 	}
 	if err := s.beginInstallLocked(name); err != nil {
-		installMu.Unlock()
+		release()
 		return err
 	}
 
 	go func() {
-		defer installMu.Unlock()
+		defer release()
 		err := s.runInstall(name)
 		if onDone != nil {
 			onDone(err)
@@ -1266,11 +1419,11 @@ func (s *KernelService) Install(name string) error {
 		return fmt.Errorf("kernel not found: %s", name)
 	}
 
-	installMu, err := s.lockKernel(name)
+	release, err := s.lockKernel(name)
 	if err != nil {
 		return err
 	}
-	defer installMu.Unlock()
+	defer release()
 	if err := s.beginInstallLocked(name); err != nil {
 		return err
 	}
@@ -1291,7 +1444,12 @@ func knownKernelVersion(v string) bool {
 // тихая (checkLatest quiet): она не возвращает статус в idle посреди скачивания.
 func (s *KernelService) runInstall(name string) error {
 	fail := func(message string, err error) error {
-		s.setStage(name, "failed", "", message)
+		s.setFailed(name, message, "")
+		return err
+	}
+	// failKind — сбой с кодом вида: фронтенд переводит его по error_kind.
+	failKind := func(message, kind string, err error) error {
+		s.setFailed(name, message, kind)
 		return err
 	}
 
@@ -1311,9 +1469,10 @@ func (s *KernelService) runInstall(name string) error {
 	s.mu.Unlock()
 
 	// If latestVersion is unknown, check latest or fallback to current version for reinstall
+	var checkErr error
 	if latestVersion == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = s.checkLatest(ctx, name, true)
+		checkErr = s.checkLatest(ctx, name, true)
 		cancel()
 		s.mu.Lock()
 		if kk := s.kernels[name]; kk != nil {
@@ -1324,6 +1483,18 @@ func (s *KernelService) runInstall(name string) error {
 			}
 		}
 		s.mu.Unlock()
+	}
+	// Версии нет: причина — сбой проверки релиза или отсутствие релиза канала,
+	// а не архитектура (G5-WR02).
+	if latestVersion == "" {
+		s.mu.RLock()
+		channel := s.kernels[name].Channel
+		s.mu.RUnlock()
+		if checkErr != nil {
+			return failKind("Release lookup failed: "+checkErr.Error(), KernelErrorReleaseLookup, checkErr)
+		}
+		return failKind("No release found for channel "+channel, KernelErrorNoRelease,
+			fmt.Errorf("no release found for channel %s", channel))
 	}
 
 	if arch == "" {
@@ -1341,7 +1512,7 @@ func (s *KernelService) runInstall(name string) error {
 
 	downloadURL, filename := s.buildDownloadURL(&snap, arch)
 	if downloadURL == "" {
-		return fail("Unsupported architecture: "+arch, fmt.Errorf("unsupported architecture: %s", arch))
+		return failKind("Unsupported architecture: "+arch, KernelErrorUnsupportedArch, fmt.Errorf("unsupported architecture: %s", arch))
 	}
 
 	tempFile, err := safeTempPath(filename)
@@ -1444,6 +1615,7 @@ func (s *KernelService) runInstall(name string) error {
 		kk.Stage = ""
 		kk.ResultKind = kind
 		kk.ResultVersion = kk.CurrentVersion
+		kk.ErrorKind = ""
 		kk.Message = message
 	}
 	s.mu.Unlock()
@@ -1634,11 +1806,11 @@ func (s *KernelService) Rollback(name string) error {
 	}
 
 	// lockKernel делает TryLock(): при идущей установке — сразу ErrKernelBusy, без ожидания.
-	installMu, err := s.lockKernel(name)
+	release, err := s.lockKernel(name)
 	if err != nil {
 		return err
 	}
-	defer installMu.Unlock()
+	defer release()
 
 	s.mu.Lock()
 	k := s.kernels[name]
@@ -1686,6 +1858,7 @@ func (s *KernelService) Rollback(name string) error {
 		kk.Stage = ""
 		kk.ResultKind = KernelResultRolledBack
 		kk.ResultVersion = kk.CurrentVersion
+		kk.ErrorKind = ""
 		kk.Message = "Rolled back to " + kk.CurrentVersion
 	}
 	s.mu.Unlock()
@@ -2091,11 +2264,11 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		return fmt.Errorf("kernel not found: %s", name)
 	}
 
-	installMu, err := s.lockKernel(name)
+	release, err := s.lockKernel(name)
 	if err != nil {
 		return err
 	}
-	defer installMu.Unlock()
+	defer release()
 
 	s.mu.Lock()
 	s.resolveBinaryPath(k)
@@ -2193,6 +2366,7 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		kk.Stage = ""
 		kk.ResultKind = KernelResultUploaded
 		kk.ResultVersion = kk.CurrentVersion
+		kk.ErrorKind = ""
 		kk.Message = "Uploaded " + kk.CurrentVersion
 	}
 	s.mu.Unlock()

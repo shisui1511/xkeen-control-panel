@@ -206,6 +206,36 @@ get_latest_stable_version() {
   fi
 }
 
+# latest_rc_tag — читает теги vX.Y.Z-rc.N со stdin, печатает максимальный по
+# кортежу (major, minor, patch, номер RC) числовым сравнением. Не использует
+# утилиту сортировки: busybox роутера сравнивает ключи строкой (rc.9 > rc.28).
+# Пустой вход — пустой вывод.
+latest_rc_tag() {
+  awk '
+    /^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$/ {
+      s = $0
+      sub(/^v/, "", s)
+      sub(/-rc\./, ".", s)
+      if (split(s, p, ".") != 4) next
+      newer = 0
+      if (!have) {
+        newer = 1
+      } else {
+        for (i = 1; i <= 4; i++) {
+          if (p[i] + 0 > b[i]) { newer = 1; break }
+          if (p[i] + 0 < b[i]) break
+        }
+      }
+      if (newer) {
+        have = 1
+        for (i = 1; i <= 4; i++) b[i] = p[i] + 0
+        best = $0
+      }
+    }
+    END { if (have) print best }
+  '
+}
+
 # Получить latest pre-release версию: последний release candidate, а если после
 # него уже вышел stable той же или более новой версии — stable (как канал beta в панели)
 get_latest_prerelease_version() {
@@ -213,10 +243,27 @@ get_latest_prerelease_version() {
   json=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases?per_page=30" || echo "")
   [ -n "$json" ] || { echo ""; return; }
   rc=$(echo "$json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' \
-    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' | sed 's/^v//' \
-    | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -1 | sed 's/^./v&/')
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' | latest_rc_tag)
   stable=$(get_latest_stable_version)
   pick_prerelease "$rc" "$stable"
+}
+
+# ver_ge A B — код 0, если версия A (vX.Y.Z или X.Y.Z) не меньше B по
+# major/minor/patch числом, иначе 1. Только awk: sort роутера не годится.
+ver_ge() {
+  awk -v a="$1" -v b="$2" '
+    BEGIN {
+      sub(/^v/, "", a)
+      sub(/^v/, "", b)
+      split(a, x, ".")
+      split(b, y, ".")
+      for (i = 1; i <= 3; i++) {
+        if (x[i] + 0 > y[i] + 0) exit 0
+        if (x[i] + 0 < y[i] + 0) exit 1
+      }
+      exit 0
+    }
+  '
 }
 
 # pick_prerelease RC STABLE — RC, если его базовая версия новее stable, иначе stable
@@ -229,7 +276,7 @@ pick_prerelease() {
     return
   fi
   base="${rc%-rc.*}"
-  if [ -n "$stable" ] && [ "$(printf '%s\n%s\n' "${base#v}" "${stable#v}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)" = "${stable#v}" ]; then
+  if [ -n "$stable" ] && ver_ge "$stable" "$base"; then
     echo "$stable"
   else
     echo "$rc"
@@ -875,17 +922,21 @@ do_update() {
 }
 
 # Удаление каталога данных панели (пароль, TLS, сессии) — необратимо, только
-# по явному подтверждению. Пустой и системные пути отвергаются: подменённый
-# или незаданный XCP_INSTALL_DIR не должен снести /opt целиком.
+# по явному подтверждению. Белый список: путь абсолютный, без `..`, `//`, `/./`,
+# завершающих `/.` и `/`, а последний компонент — xcp (штатно /opt/etc/xcp).
+# Шаблон вида /opt/etc/* был бы шире: пропустил бы /opt/etc/init.d и
+# /opt/etc/xkeen. Подменённый или незаданный XCP_INSTALL_DIR до rm -rf не дойдёт.
 purge_install_dir() {
   case "$INSTALL_DIR" in
-    ""|"/"|"/opt"|"/opt/"|"/opt/etc"|"/opt/etc/")
-      error "Отказ удалять каталог данных: $INSTALL_DIR"
-      return 1
+    *..*|*//*|*/./*|*/.|*/) ;;
+    /*/xcp)
+      rm -rf -- "$INSTALL_DIR"
+      ok "Данные панели удалены"
+      return 0
       ;;
   esac
-  rm -rf -- "$INSTALL_DIR"
-  ok "Данные панели удалены"
+  error "Отказ удалять каталог данных: $INSTALL_DIR"
+  return 1
 }
 
 # Удаление. С терминалом — два вопроса (подтверждение и судьба конфигов).

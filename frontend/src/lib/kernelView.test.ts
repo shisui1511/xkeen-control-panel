@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import ru from '../locales/ru.json';
+import en from '../locales/en.json';
 import {
+  ERROR_KINDS,
   TRANSITIONAL_KERNEL_STATUSES,
+  failureMessage,
   formatKernelVersion,
   isTransitionalStatus,
   kernelBadge,
@@ -52,6 +55,30 @@ describe('resultMessage', () => {
     }
   });
 
+  it('итог без версии → ключ _plain без params, ru-текст без висячего пробела', () => {
+    const expected: Record<string, string> = {
+      installed: 'Установлено',
+      updated: 'Обновлено',
+      reinstalled: 'Переустановлено',
+      rolled_back: 'Откат выполнен',
+      uploaded: 'Загружено'
+    };
+    for (const [kind, text] of Object.entries(expected)) {
+      const m = resultMessage({
+        status: 'done',
+        result_kind: kind,
+        result_version: '',
+        current_version: 'not installed'
+      });
+      expect(m).toEqual({ key: `svc.kernel_result_${kind}_plain` });
+      expect(m).not.toHaveProperty('params');
+      const rendered = render(m!.key);
+      expect(rendered).toBe(text);
+      expect(rendered.endsWith(' ')).toBe(false);
+      expect((en as Record<string, string>)[m!.key], `en: ${m!.key}`).toBeTypeOf('string');
+    }
+  });
+
   it('неизвестный result_kind → null', () => {
     expect(resultMessage({ status: 'done', result_kind: 'bogus', result_version: '1' })).toBeNull();
   });
@@ -59,6 +86,77 @@ describe('resultMessage', () => {
   it('не done → null', () => {
     expect(resultMessage({ status: 'idle', result_kind: 'installed' })).toBeNull();
     expect(resultMessage({ status: 'installing', result_kind: 'installed' })).toBeNull();
+  });
+});
+
+describe('failureMessage', () => {
+  it('release_lookup_failed: деталь — всё после первого «: », ru-текст содержит HTTP 403', () => {
+    const m = failureMessage({
+      status: 'failed',
+      error_kind: 'release_lookup_failed',
+      message: 'Release lookup failed: github api: HTTP 403'
+    });
+    expect(m).toEqual({
+      key: 'svc.kernel_error_release_lookup_failed',
+      params: { detail: 'github api: HTTP 403' }
+    });
+    const text = render(m!.key, m!.params);
+    expect(text).toContain('HTTP 403');
+    expect(text).not.toContain('Release lookup failed');
+  });
+
+  it('release_lookup_failed без детали: detail пустой, фраза читается и без неё', () => {
+    const m = failureMessage({
+      status: 'failed',
+      error_kind: 'release_lookup_failed',
+      message: 'Release lookup failed'
+    });
+    expect(m).toEqual({
+      key: 'svc.kernel_error_release_lookup_failed',
+      params: { detail: '' }
+    });
+    const text = render(m!.key, m!.params).trim();
+    expect(text).not.toBe('');
+    expect(text).not.toContain('{');
+    expect(text).not.toMatch(/[:(—-]$/);
+  });
+
+  it('no_release: ключ без params', () => {
+    const m = failureMessage({
+      status: 'failed',
+      error_kind: 'no_release',
+      message: 'No release found for channel stable'
+    });
+    expect(m).toEqual({ key: 'svc.kernel_error_no_release' });
+    expect(render(m!.key)).not.toContain('No release');
+  });
+
+  it('unsupported_arch: detail — архитектура', () => {
+    const m = failureMessage({
+      status: 'failed',
+      error_kind: 'unsupported_arch',
+      message: 'Unsupported architecture: mips64'
+    });
+    expect(m).toEqual({
+      key: 'svc.kernel_error_unsupported_arch',
+      params: { detail: 'mips64' }
+    });
+    expect(render(m!.key, m!.params)).toContain('mips64');
+  });
+
+  it('не failed или неизвестный/пустой error_kind → null', () => {
+    expect(
+      failureMessage({ status: 'idle', error_kind: 'no_release', message: 'x' } as never)
+    ).toBeNull();
+    expect(failureMessage({ status: 'failed', error_kind: 'bogus' })).toBeNull();
+    expect(failureMessage({ status: 'failed' })).toBeNull();
+  });
+
+  it('у каждого вида ошибки есть ключ в ru и en', () => {
+    for (const kind of ERROR_KINDS) {
+      expect((ru as Record<string, string>)[`svc.kernel_error_${kind}`]).toBeTypeOf('string');
+      expect((en as Record<string, string>)[`svc.kernel_error_${kind}`]).toBeTypeOf('string');
+    }
   });
 });
 
@@ -154,6 +252,44 @@ describe('kernelBadge', () => {
 
   it('иначе актуально', () => {
     expect(kernelBadge(base)).toEqual({ variant: 'idle', key: 'svc.actual_badge' });
+  });
+
+  describe('нераспознанная версия', () => {
+    const unknown = { variant: 'warning', key: 'svc.version_unknown_badge' };
+
+    it('error и unknown → «версия не определена», а не «актуально»', () => {
+      expect(kernelBadge({ ...base, current_version: 'error' })).toEqual(unknown);
+      expect(kernelBadge({ current_version: 'unknown' })).toEqual(unknown);
+    });
+
+    it('приоритеты: не установлено, checking и failed важнее', () => {
+      expect(kernelBadge({ ...base, current_version: 'not installed' }).key).toBe(
+        'kernel.status.not_installed'
+      );
+      expect(kernelBadge({ ...base, current_version: 'error', status: 'checking' }).key).toBe(
+        'svc.channel_checking'
+      );
+      expect(kernelBadge({ ...base, current_version: 'error', status: 'failed' }).key).toBe(
+        'svc.kernel_error_badge'
+      );
+    });
+
+    it('has_update при нераспознанной версии «→ vX» не даёт', () => {
+      expect(
+        kernelBadge({
+          ...base,
+          current_version: 'error',
+          has_update: true,
+          latest_version: '26.9.9'
+        })
+      ).toEqual(unknown);
+    });
+
+    it('ru-текст ключа непустой и отличается от «актуально»', () => {
+      const text = render('svc.version_unknown_badge');
+      expect(text).not.toBe('');
+      expect(text).not.toBe(render('svc.actual_badge'));
+    });
   });
 });
 

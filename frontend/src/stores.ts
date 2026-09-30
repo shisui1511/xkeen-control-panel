@@ -68,6 +68,14 @@ function writeNavCaps(v: NavCaps): void {
 
 export const navCaps = writable<NavCaps | null>(readNavCaps());
 
+// Безопасный срез «ядро не определилось»: группы Mihomo не рисуются. Ставится, когда
+// кэша нет, а сервер не дал пригодного ответа; в localStorage не записывается.
+const SAFE_NAV_CAPS: NavCaps = {
+  v: 1,
+  active_kernel: 'none',
+  kernels: { xray: false, mihomo: false }
+};
+
 // Число взятых замков меню. Пока оно больше нуля, ответы capabilities не меняют
 // navCaps (стор capabilities обновляется как обычно): во время установки пункты
 // меню не скрываются и не появляются скачком (D-16).
@@ -132,7 +140,7 @@ export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
       } else if (get(navCaps) === null) {
         // Ответ без пригодного активного ядра и кэша нет: скелетон не должен
         // висеть вечно. Как «ядро не определилось» — группы Mihomo, без записи в кэш.
-        navCaps.set({ v: 1, active_kernel: 'none', kernels: { xray: false, mihomo: false } });
+        navCaps.set(SAFE_NAV_CAPS);
       }
     }
 
@@ -152,6 +160,14 @@ export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
     // do not instantly set mihomoApiAvailable to false to avoid UI flickering.
     if (!get(isServiceRestarting) && consecutiveCapabilitiesFailures >= 2) {
       mihomoApiAvailable.set(false);
+    }
+
+    // Холодный вход и API недоступен: без кэша скелетон меню висел бы вечно.
+    // После двух сбоев подряд (тот же порог дребезга) показываем безопасный дефолт.
+    // В localStorage он не пишется: кэш хранит только срез, подтверждённый
+    // сервером (D-16), а первый успешный ответ заменит дефолт настоящим срезом.
+    if (get(navCaps) === null && consecutiveCapabilitiesFailures >= 2 && get(navLockCount) === 0) {
+      navCaps.set(SAFE_NAV_CAPS);
     }
   }
 }

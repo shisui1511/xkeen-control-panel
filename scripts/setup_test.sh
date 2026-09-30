@@ -65,6 +65,47 @@ EOF
     chmod +x "$MOCK_BIN/curl"
 }
 
+# sort в песочнице, как у busybox роутера: числовой модификатор у ключа (-k4,4n)
+# игнорируется, ключи сравниваются строкой (rc.10 < rc.28 < rc.9). Одиночный -n
+# и прочие аргументы передаются без изменений. Вызывать до подмены PATH.
+mock_busybox_sort() {
+    local real
+    real=$(command -v sort)
+    cat > "$MOCK_BIN/sort" <<EOF
+#!/bin/sh
+for a; do
+    case "\$a" in
+        -k*n) a="\${a%n}" ;;
+    esac
+    set -- "\$@" "\$a"
+    shift
+done
+LC_ALL=C exec "$real" "\$@"
+EOF
+    chmod +x "$MOCK_BIN/sort"
+}
+
+# curl со списком релизов: на releases?per_page — массив тегов из аргументов,
+# на releases/latest — {"tag_name":"<stable>"}
+mock_curl_releases() {
+    local stable="$1"
+    shift
+    local list="" t
+    for t in "$@"; do
+        list="${list}{\"tag_name\":\"$t\"},"
+    done
+    list="[${list%,}]"
+    cat > "$MOCK_BIN/curl" <<EOF
+#!/bin/sh
+for arg; do url="\$arg"; done
+case "\$url" in
+    *releases?per_page*) printf '%s\n' '$list' ;;
+    *) printf '{"tag_name":"%s"}\n' "$stable" ;;
+esac
+EOF
+    chmod +x "$MOCK_BIN/curl"
+}
+
 # pgrep qui renvoie 0 (process running) pendant N appels, puis 1
 mock_pgrep_running_then_stops() {
     local calls="$1"   # how many times to report running (0 = never running)
@@ -473,19 +514,114 @@ cleanup
 # pick_prerelease — канал prerelease: последний RC, если нет более нового stable
 # ---------------------------------------------------------------------------
 echo ""
+echo "── ver_ge ───────────────────────────────────────────────────"
+make_sandbox
+mock_busybox_sort
+for case in "v0.29.10 v0.29.9 0" "0.29.9 0.29.10 1" "v0.29.0 v0.29.0 0" \
+            "v1.0.0 v0.99.99 0" "v0.9.5 v0.10.0 1"; do
+    set -- $case
+    rc=0
+    run_in_sandbox "ver_ge '$1' '$2'" >/dev/null 2>&1 || rc=$?
+    if [ "$rc" -eq "$3" ]; then
+        pass "ver_ge $1 $2 → код $3"
+    else
+        fail "ver_ge $1 $2 → код $3 (got: $rc)"
+    fi
+done
+cleanup
+
+echo ""
 echo "── pick_prerelease ──────────────────────────────────────────"
 make_sandbox
+mock_busybox_sort
 for case in "v0.29.0-rc.9 v0.28.0 v0.29.0-rc.9" "v0.29.0-rc.9 v0.29.0 v0.29.0" \
-            "v0.29.0-rc.2 v0.30.1 v0.30.1" " v0.28.0 v0.28.0" "v0.10.0-rc.1 v0.9.5 v0.10.0-rc.1"; do
+            "v0.29.0-rc.2 v0.30.1 v0.30.1" " v0.28.0 v0.28.0" "v0.10.0-rc.1 v0.9.5 v0.10.0-rc.1" \
+            "v0.29.10-rc.1 v0.29.9 v0.29.10-rc.1" "v0.29.9-rc.1 v0.29.10 v0.29.10" \
+            "v0.29.0-rc.28 v0.29.0 v0.29.0"; do
     set -- $case
     if [ $# -eq 2 ]; then rc=""; stable="$1"; want="$2"; else rc="$1"; stable="$2"; want="$3"; fi
-    got=$(run_in_sandbox "pick_prerelease '$rc' '$stable'")
+    got=$(run_in_sandbox "pick_prerelease '$rc' '$stable'") || true
     if [ "$got" = "$want" ]; then
         pass "pick_prerelease '${rc}' '${stable}' → ${want}"
     else
         fail "pick_prerelease '${rc}' '${stable}' → ${want} (got: $got)"
     fi
 done
+got=$(run_in_sandbox "pick_prerelease 'v0.29.0-rc.28' ''") || true
+if [ "$got" = "v0.29.0-rc.28" ]; then
+    pass "pick_prerelease 'v0.29.0-rc.28' '' → v0.29.0-rc.28"
+else
+    fail "pick_prerelease 'v0.29.0-rc.28' '' → v0.29.0-rc.28 (got: $got)"
+fi
+cleanup
+
+# ---------------------------------------------------------------------------
+# latest_rc_tag / get_latest_prerelease_version — выбор RC на busybox sort
+# ---------------------------------------------------------------------------
+echo ""
+echo "── latest_rc_tag / prerelease (busybox sort) ────────────────"
+make_sandbox
+mock_busybox_sort
+# Контроль имитации: прежний приём сортировки по ключам на этом sort ставит rc.9 последним
+ctl=$(printf '0.29.0-rc.9\n0.29.0-rc.28\n0.29.0-rc.10\n' | PATH="$MOCK_BIN:$PATH" sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -1)
+if [ "$ctl" = "0.29.0-rc.9" ]; then
+    pass "mock_busybox_sort воспроизводит строковое сравнение ключей (rc.9 последним)"
+else
+    fail "mock_busybox_sort не воспроизводит busybox (got: $ctl)"
+fi
+mock_curl_releases "v0.28.3" "v0.29.0-rc.9" "v0.29.0-rc.28" "v0.29.0-rc.10" "v0.28.3"
+got=$(run_in_sandbox "get_latest_prerelease_version" 2>&1) || true
+if [ "$got" = "v0.29.0-rc.28" ]; then
+    pass "get_latest_prerelease_version при busybox sort → v0.29.0-rc.28"
+else
+    fail "get_latest_prerelease_version при busybox sort → v0.29.0-rc.28 (got: $got)"
+fi
+# Порядок тегов в ответе не важен
+mock_curl_releases "v0.28.3" "v0.29.0-rc.28" "v0.29.0-rc.10" "v0.29.0-rc.9"
+got=$(run_in_sandbox "get_latest_prerelease_version" 2>&1) || true
+if [ "$got" = "v0.29.0-rc.28" ]; then
+    pass "get_latest_prerelease_version не зависит от порядка тегов"
+else
+    fail "get_latest_prerelease_version не зависит от порядка тегов (got: $got)"
+fi
+# Нет RC-тегов → stable
+mock_curl_releases "v0.28.3" "v0.28.3" "v0.28.2"
+got=$(run_in_sandbox "get_latest_prerelease_version" 2>&1) || true
+if [ "$got" = "v0.28.3" ]; then
+    pass "get_latest_prerelease_version без RC → stable"
+else
+    fail "get_latest_prerelease_version без RC → stable (got: $got)"
+fi
+# Пустой ответ API → пустая строка, без падения
+printf '#!/bin/sh\nexit 0\n' > "$MOCK_BIN/curl"
+chmod +x "$MOCK_BIN/curl"
+rc=0
+got=$(run_in_sandbox "get_latest_prerelease_version" 2>&1) || rc=$?
+if [ "$rc" -eq 0 ] && [ -z "$got" ]; then
+    pass "get_latest_prerelease_version при пустом ответе API → пусто, код 0"
+else
+    fail "get_latest_prerelease_version при пустом ответе API → пусто (rc=$rc, got: $got)"
+fi
+# latest_rc_tag напрямую: числовое сравнение кортежа (major, minor, patch, rc)
+for case in "v0.29.0-rc.9 v0.29.0-rc.28 v0.29.0-rc.10|v0.29.0-rc.28" \
+            "v0.29.9-rc.3 v0.29.10-rc.1|v0.29.10-rc.1" \
+            "v0.29.0-rc.7|v0.29.0-rc.7"; do
+    tags="${case%%|*}"
+    want="${case##*|}"
+    got=$(run_in_sandbox "printf '%s\n' $tags | latest_rc_tag" 2>&1) || true
+    if [ "$got" = "$want" ]; then
+        pass "latest_rc_tag '${tags}' → ${want}"
+    else
+        fail "latest_rc_tag '${tags}' → ${want} (got: $got)"
+    fi
+done
+rc=0
+got=$(run_in_sandbox "printf '' | latest_rc_tag" 2>&1) || rc=$?
+if [ "$rc" -eq 0 ] && [ -z "$got" ]; then
+    pass "latest_rc_tag на пустом входе → пусто, код 0"
+else
+    fail "latest_rc_tag на пустом входе → пусто (rc=$rc, got: $got)"
+fi
 cleanup
 
 # ---------------------------------------------------------------------------
@@ -720,23 +856,37 @@ else
 fi
 cleanup
 
-# purge_install_dir отказывается от пустого и системных путей (rm — mock)
+# purge_install_dir — белый список: только абсолютный путь с последним компонентом xcp (rm — mock)
 make_sandbox
 printf '#!/bin/sh\necho "$*" >> "%s/rm.log"\n' "$TMP" > "$MOCK_BIN/rm"
 chmod +x "$MOCK_BIN/rm"
 guard_ok=true
-for bad in "" "/" "/opt" "/opt/" "/opt/etc" "/opt/etc/"; do
+for bad in "" "/" "//" "/opt" "/opt/" "/opt//" "/opt/etc" "/opt/etc/" "/opt/etc/." "/opt/etc/.." \
+           "/opt/etc/init.d" "/opt/sbin" "/home" "relative/dir" "xcp" "/opt/etc//xcp" \
+           "/opt/etc/xcp/.." "/opt/etc/xcp/" "/opt/etc/./xcp"; do
     rc=0
     out=$(run_in_sandbox "INSTALL_DIR='$bad'; purge_install_dir" 2>&1) || rc=$?
     if [ "$rc" -ne 1 ]; then
         guard_ok=false
         printf "    путь '%s': код %s вместо 1\n" "$bad" "$rc"
     fi
+    if ! echo "$out" | grep -q "Отказ удалять каталог данных"; then
+        guard_ok=false
+        printf "    путь '%s': нет сообщения об отказе\n" "$bad"
+    fi
 done
 if [ "$guard_ok" = "true" ] && [ ! -s "$TMP/rm.log" ]; then
-    pass "purge_install_dir отказывается от системных путей"
+    pass "purge_install_dir отказывается от 19 недопустимых путей без вызова rm"
 else
-    fail "purge_install_dir отказывается от системных путей (rm.log: $(cat "$TMP/rm.log" 2>/dev/null))"
+    fail "purge_install_dir отказывается от недопустимых путей (rm.log: $(cat "$TMP/rm.log" 2>/dev/null))"
+fi
+# Штатный путь проходит белый список: rm вызван ровно с -rf -- /opt/etc/xcp
+rc=0
+run_in_sandbox "INSTALL_DIR='/opt/etc/xcp'; purge_install_dir" >/dev/null 2>&1 || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$TMP/rm.log" 2>/dev/null)" = "-rf -- /opt/etc/xcp" ]; then
+    pass "purge_install_dir /opt/etc/xcp → rm -rf -- /opt/etc/xcp"
+else
+    fail "purge_install_dir /opt/etc/xcp → rm -rf -- /opt/etc/xcp (rc=$rc, rm.log: $(cat "$TMP/rm.log" 2>/dev/null))"
 fi
 cleanup
 

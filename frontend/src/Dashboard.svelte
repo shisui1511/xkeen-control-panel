@@ -264,8 +264,11 @@
   let statsLastFetched = $state('');
 
   // Шаг «Настройте» определяется по preflight активного ядра. Запрос не чаще
-  // раза в минуту на ядро и только в состоянии «остановлено».
+  // раза в минуту на ядро и только в состоянии «остановлено». Ответ «не готово»
+  // или неизвестный (ошибка, не та форма) держится короче: шаг «Настройте»
+  // должен смениться после создания конфигурации без минутной задержки.
   const PREFLIGHT_TTL_MS = 60_000;
+  const PREFLIGHT_RETRY_MS = 10_000;
   let preflightCache = $state<{
     kernel: 'xray' | 'mihomo';
     ready: boolean | null;
@@ -275,7 +278,10 @@
   async function refreshPreflight(kernel: string | undefined, signal?: AbortSignal) {
     if (kernel !== 'xray' && kernel !== 'mihomo') return;
     const now = Date.now();
-    if (preflightCache?.kernel === kernel && now - preflightCache.at < PREFLIGHT_TTL_MS) return;
+    if (preflightCache?.kernel === kernel) {
+      const ttl = preflightCache.ready === true ? PREFLIGHT_TTL_MS : PREFLIGHT_RETRY_MS;
+      if (now - preflightCache.at < ttl) return;
+    }
     // Метка времени ставится до ответа: параллельные опросы не дублируют запрос.
     const previous = preflightCache?.kernel === kernel ? preflightCache.ready : null;
     preflightCache = { kernel, ready: previous, at: now };

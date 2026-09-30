@@ -198,9 +198,8 @@ func TestKernelService_Get_Unknown(t *testing.T) {
 func TestKernelService_SetChannel(t *testing.T) {
 	svc := NewKernelService(t.TempDir())
 
-	ok := svc.SetChannel("xray", "preview")
-	if !ok {
-		t.Fatal("expected SetChannel to succeed")
+	if err := svc.SetChannel("xray", "preview"); err != nil {
+		t.Fatalf("expected SetChannel to succeed: %v", err)
 	}
 
 	k := svc.Get("xray")
@@ -208,9 +207,8 @@ func TestKernelService_SetChannel(t *testing.T) {
 		t.Fatalf("expected channel 'preview', got %s", k.Channel)
 	}
 
-	ok = svc.SetChannel("unknown", "preview")
-	if ok {
-		t.Fatal("expected SetChannel to fail for unknown kernel")
+	if err := svc.SetChannel("unknown", "preview"); !errors.Is(err, ErrKernelNotFound) {
+		t.Fatalf("expected ErrKernelNotFound for unknown kernel, got %v", err)
 	}
 }
 
@@ -222,8 +220,8 @@ func TestKernelService_ChannelPersistsAcrossRestart(t *testing.T) {
 	dataDir := t.TempDir()
 
 	svc := NewKernelService(dataDir)
-	if !svc.SetChannel("mihomo", "preview") {
-		t.Fatal("expected SetChannel to succeed")
+	if err := svc.SetChannel("mihomo", "preview"); err != nil {
+		t.Fatalf("expected SetChannel to succeed: %v", err)
 	}
 
 	restarted := NewKernelService(dataDir)
@@ -395,20 +393,17 @@ func TestValidateKernelPath(t *testing.T) {
 	}
 }
 
-// TestSetChannel_InvalidValue: invalid channel name returns false.
+// TestSetChannel_InvalidValue: неверное имя канала даёт ErrInvalidChannel.
 func TestSetChannel_InvalidValue(t *testing.T) {
 	svc := NewKernelService(t.TempDir())
-	ok := svc.SetChannel("xray", "nightly")
-	if ok {
-		t.Error("expected SetChannel to return false for invalid channel 'nightly'")
+	if err := svc.SetChannel("xray", "nightly"); !errors.Is(err, ErrInvalidChannel) {
+		t.Errorf("channel 'nightly': got %v, want ErrInvalidChannel", err)
 	}
-	ok = svc.SetChannel("xray", "")
-	if ok {
-		t.Error("expected SetChannel to return false for empty channel")
+	if err := svc.SetChannel("xray", ""); !errors.Is(err, ErrInvalidChannel) {
+		t.Errorf("empty channel: got %v, want ErrInvalidChannel", err)
 	}
-	ok = svc.SetChannel("xray", "stable")
-	if !ok {
-		t.Error("expected SetChannel to return true for 'stable'")
+	if err := svc.SetChannel("xray", "stable"); err != nil {
+		t.Errorf("channel 'stable': got %v, want nil", err)
 	}
 }
 
@@ -865,8 +860,8 @@ func TestCheckLatest_DropsResultAfterChannelSwitch(t *testing.T) {
 	go func() { done <- svc.CheckLatest(context.Background(), "xray") }()
 
 	<-started
-	if !svc.SetChannel("xray", "preview") {
-		t.Fatal("SetChannel returned false")
+	if err := svc.SetChannel("xray", "preview"); err != nil {
+		t.Fatalf("SetChannel: %v", err)
 	}
 	close(release)
 	if err := <-done; err != nil {
@@ -901,8 +896,8 @@ func TestSetChannel_Recompute(t *testing.T) {
 		t.Fatalf("precondition: latest=%q has_update=%v", got.LatestVersion, got.HasUpdate)
 	}
 
-	if !svc.SetChannel("xray", "preview") {
-		t.Fatal("SetChannel returned false")
+	if err := svc.SetChannel("xray", "preview"); err != nil {
+		t.Fatalf("SetChannel: %v", err)
 	}
 	got := svc.Get("xray")
 	if got.LatestVersion != "" || got.LatestTag != "" || got.HasUpdate {
@@ -1501,6 +1496,118 @@ func TestInstall_FailureKeepsBinary(t *testing.T) {
 	}
 }
 
+// newLookupFailService — сервис без установленного ядра и без известного latest:
+// источник релизов отвечает handler, установка берёт версию только из проверки.
+func newLookupFailService(t *testing.T, handler http.HandlerFunc) *KernelService {
+	t.Helper()
+	svc, _ := newInstallTestService(t, "")
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.SetInstallSource("arm64", writeGzDownload(t, "1.19.0"))
+	svc.mu.Lock()
+	svc.kernels["mihomo"].LatestVersion = ""
+	svc.kernels["mihomo"].LatestTag = ""
+	svc.mu.Unlock()
+	return svc
+}
+
+// TestInstall_ReleaseLookupFailedMessage: на чистой системе ошибка проверки релиза
+// (403 лимита GitHub) — это «Release lookup failed», а не «Unsupported architecture»
+// (G5-WR02, KERN-02, D-10).
+func TestInstall_ReleaseLookupFailedMessage(t *testing.T) {
+	svc := newLookupFailService(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "rate limit exceeded", http.StatusForbidden)
+	})
+
+	if err := svc.Install("mihomo"); err == nil {
+		t.Fatal("expected install error when release lookup fails")
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "failed" {
+		t.Fatalf("status = %q, want failed", k.Status)
+	}
+	if !strings.HasPrefix(k.Message, "Release lookup failed:") || !strings.Contains(k.Message, "HTTP 403") {
+		t.Errorf("message = %q, want prefix %q and HTTP 403", k.Message, "Release lookup failed:")
+	}
+	if strings.Contains(k.Message, "Unsupported architecture") {
+		t.Errorf("message must not claim unsupported architecture: %q", k.Message)
+	}
+	if k.ErrorKind != KernelErrorReleaseLookup {
+		t.Errorf("error_kind = %q, want %q", k.ErrorKind, KernelErrorReleaseLookup)
+	}
+}
+
+// TestInstall_NoReleaseForChannel: проверка прошла, но релиза канала нет.
+func TestInstall_NoReleaseForChannel(t *testing.T) {
+	svc := newLookupFailService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"tag_name":"v1.19.0","prerelease":false}]`))
+	})
+	svc.mu.Lock()
+	svc.kernels["mihomo"].Channel = "preview"
+	svc.mu.Unlock()
+
+	if err := svc.Install("mihomo"); err == nil {
+		t.Fatal("expected install error when no release exists for the channel")
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "failed" || k.Message != "No release found for channel preview" {
+		t.Errorf("status=%q message=%q", k.Status, k.Message)
+	}
+	if k.ErrorKind != KernelErrorNoRelease {
+		t.Errorf("error_kind = %q, want %q", k.ErrorKind, KernelErrorNoRelease)
+	}
+}
+
+// TestInstall_UnsupportedArchKind: версия известна, а URL для архитектуры не построен.
+func TestInstall_UnsupportedArchKind(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	svc.SetInstallSource("riscv64", writeGzDownload(t, "1.19.0"))
+
+	if err := svc.Install("mihomo"); err == nil {
+		t.Fatal("expected install error for unsupported architecture")
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "failed" || k.Message != "Unsupported architecture: riscv64" {
+		t.Errorf("status=%q message=%q", k.Status, k.Message)
+	}
+	if k.ErrorKind != KernelErrorUnsupportedArch {
+		t.Errorf("error_kind = %q, want %q", k.ErrorKind, KernelErrorUnsupportedArch)
+	}
+}
+
+// TestInstall_ErrorKindResetOnNextInstall: прежний вид ошибки не переживает новый
+// старт установки, а для прочих сбоев (скачивание) вид не задаётся.
+func TestInstall_ErrorKindResetOnNextInstall(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	svc.SetInstallSource("riscv64", writeGzDownload(t, "1.19.0"))
+	_ = svc.Install("mihomo")
+	if got := svc.Get("mihomo").ErrorKind; got != KernelErrorUnsupportedArch {
+		t.Fatalf("precondition: error_kind = %q", got)
+	}
+
+	release := make(chan struct{})
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		<-release
+		return errors.New("boom")
+	})
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	k := svc.Get("mihomo")
+	if k.ErrorKind != "" || k.Status != "downloading" {
+		t.Errorf("during install: status=%q error_kind=%q, want downloading and empty", k.Status, k.ErrorKind)
+	}
+	close(release)
+	<-done
+	k = svc.Get("mihomo")
+	if k.Status != "failed" || k.ErrorKind != "" {
+		t.Errorf("download failure: status=%q error_kind=%q, want failed and empty", k.Status, k.ErrorKind)
+	}
+}
+
 // TestBeginInstall_ReportsStartingSynchronously: сразу после BeginInstall статус
 // уже downloading со stage starting — первый же опрос клиента не видит idle.
 func TestBeginInstall_ReportsStartingSynchronously(t *testing.T) {
@@ -2063,4 +2170,422 @@ func TestInstall_CreatesMihomoConfigDir(t *testing.T) {
 			t.Error("xray install must not create the mihomo config dir")
 		}
 	})
+}
+
+// TestKernelService_BusyLifecycle: Busy()/KernelBusy() отражают идущие операции
+// над ядрами (установка, откат, загрузка файла) и возвращаются в false после них.
+func TestKernelService_BusyLifecycle(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	if svc.Busy() {
+		t.Fatal("Busy() до любой операции должен быть false")
+	}
+
+	inDownload := make(chan struct{})
+	release := make(chan struct{})
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		close(inDownload)
+		<-release
+		return errors.New("stop")
+	})
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	<-inDownload
+
+	if !svc.Busy() {
+		t.Error("Busy() во время загрузки должен быть true")
+	}
+	if !svc.KernelBusy("mihomo") {
+		t.Error("KernelBusy(mihomo) во время установки должен быть true")
+	}
+	if svc.KernelBusy("xray") {
+		t.Error("KernelBusy(xray) должен быть false: установка идёт над mihomo")
+	}
+	svc.mu.RLock()
+	busyLocked := svc.busyLocked("mihomo")
+	svc.mu.RUnlock()
+	if !busyLocked {
+		t.Error("busyLocked(mihomo) должен быть true")
+	}
+
+	close(release)
+	<-done
+	// release замка вызывается после onDone, поэтому ждём опросом.
+	deadline := time.Now().Add(2 * time.Second)
+	for svc.Busy() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if svc.Busy() || svc.KernelBusy("mihomo") {
+		t.Fatal("после завершения установки Busy()/KernelBusy() должны быть false")
+	}
+
+	// Откат и загрузка файла держат Busy() только на время вызова.
+	_ = svc.Rollback("mihomo")
+	if svc.Busy() {
+		t.Error("Busy() после Rollback должен быть false")
+	}
+	_ = svc.UploadBinary("mihomo", strings.NewReader("not an elf"), "mihomo")
+	if svc.Busy() {
+		t.Error("Busy() после UploadBinary должен быть false")
+	}
+}
+
+// TestKernelService_BusyCounterAcrossKernels: счётчик общий для всех ядер,
+// release идемпотентен и не уводит счётчик ниже нуля.
+func TestKernelService_BusyCounterAcrossKernels(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+
+	relX, err := svc.lockKernel("xray")
+	if err != nil {
+		t.Fatal(err)
+	}
+	relM, err := svc.lockKernel("mihomo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.lockKernel("xray"); !errors.Is(err, ErrKernelBusy) {
+		t.Fatalf("повторный замок xray: got %v, want ErrKernelBusy", err)
+	}
+	// Неудачный захват не должен менять счётчик.
+	if got := svc.opsActive.Load(); got != 2 {
+		t.Fatalf("opsActive = %d, want 2", got)
+	}
+
+	relX()
+	if !svc.Busy() {
+		t.Error("Busy() должен оставаться true, пока идёт операция над mihomo")
+	}
+	if svc.KernelBusy("xray") {
+		t.Error("KernelBusy(xray) должен быть false после release")
+	}
+	relX() // повторный вызов — no-op
+	if got := svc.opsActive.Load(); got != 1 {
+		t.Fatalf("после повторного release opsActive = %d, want 1", got)
+	}
+
+	relM()
+	relM()
+	if svc.Busy() {
+		t.Error("Busy() должен быть false после release обоих ядер")
+	}
+	if got := svc.opsActive.Load(); got != 0 {
+		t.Fatalf("opsActive = %d, want 0 (не ниже нуля)", got)
+	}
+
+	// Замок снова свободен.
+	rel, err := svc.lockKernel("xray")
+	if err != nil {
+		t.Fatalf("замок xray после release должен быть свободен: %v", err)
+	}
+	rel()
+}
+
+// TestKernelHasUpdate_UnknownCurrent: нераспознанная версия не превращается в
+// предложение обновления (G2), «не установлено» — по-прежнему «есть что поставить».
+func TestKernelHasUpdate_UnknownCurrent(t *testing.T) {
+	cases := []struct {
+		latest, current string
+		want            bool
+	}{
+		{"26.3.27", "error", false},
+		{"26.3.27", "unknown", false},
+		{"26.3.27", "", false},
+		{"26.3.27", "not installed", true},
+		{"26.3.27", "26.9.9", false},
+		{"26.3.27", "26.1.1", true},
+	}
+	for _, tc := range cases {
+		if got := kernelHasUpdate(tc.latest, tc.current); got != tc.want {
+			t.Errorf("kernelHasUpdate(%q, %q) = %v, want %v", tc.latest, tc.current, got, tc.want)
+		}
+	}
+}
+
+// TestList_FlagsFromFreshVersion: List и Get считают флаги по свежей версии
+// снимка, а не по хранимой (после таймаута при старте там лежит "error").
+func TestList_FlagsFromFreshVersion(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.19.5")
+	svc.mu.Lock()
+	k := svc.kernels["mihomo"]
+	k.CurrentVersion = "error"
+	k.LatestVersion = "1.19.0"
+	k.Channel = "stable"
+	k.HasUpdate = true
+	svc.mu.Unlock()
+
+	var got *KernelInfo
+	for _, ki := range svc.List() {
+		if ki.Name == "mihomo" {
+			ki := ki
+			got = &ki
+		}
+	}
+	if got == nil {
+		t.Fatal("mihomo отсутствует в List()")
+	}
+	check := func(label string, ki *KernelInfo) {
+		t.Helper()
+		if ki.CurrentVersion != "1.19.5" {
+			t.Errorf("%s: CurrentVersion = %q, want 1.19.5", label, ki.CurrentVersion)
+		}
+		if ki.HasUpdate {
+			t.Errorf("%s: HasUpdate = true, want false", label)
+		}
+		if !ki.AheadOfLatest {
+			t.Errorf("%s: AheadOfLatest = false, want true", label)
+		}
+	}
+	check("List", got)
+	check("Get", svc.Get("mihomo"))
+}
+
+// TestClaimLatestCheck_TTL: автопроверка занимается атомарно, не чаще раза за ttl
+// и только для пустого latest.
+func TestClaimLatestCheck_TTL(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.19.5")
+	svc.mu.Lock()
+	svc.kernels["mihomo"].LatestVersion = ""
+	svc.mu.Unlock()
+	const ttl = 10 * time.Minute
+
+	if !svc.ClaimLatestCheck("mihomo", ttl) {
+		t.Fatal("первый вызов должен занять проверку")
+	}
+	if svc.ClaimLatestCheck("mihomo", ttl) {
+		t.Fatal("повторный вызов в пределах ttl не должен занимать проверку")
+	}
+	svc.mu.Lock()
+	svc.kernels["mihomo"].latestCheckedAt = time.Now().Add(-ttl - time.Second)
+	svc.mu.Unlock()
+	if !svc.ClaimLatestCheck("mihomo", ttl) {
+		t.Fatal("после истечения ttl проверку можно занять снова")
+	}
+
+	svc.mu.Lock()
+	svc.kernels["mihomo"].LatestVersion = "1.19.0"
+	svc.kernels["mihomo"].latestCheckedAt = time.Time{}
+	svc.mu.Unlock()
+	if svc.ClaimLatestCheck("mihomo", ttl) {
+		t.Fatal("при известном latest автопроверка не нужна")
+	}
+	if svc.ClaimLatestCheck("nope", ttl) {
+		t.Fatal("неизвестное ядро занять нельзя")
+	}
+}
+
+// TestCheckLatest_WritesFreshKnownVersion: хранимая нераспознанная версия
+// «вылечивается» при проверке релиза, флаги считаются по свежей (G2).
+func TestCheckLatest_WritesFreshKnownVersion(t *testing.T) {
+	server := newReleaseServer(t, http.StatusOK, `{"tag_name":"v1.19.0"}`)
+	svc, _ := newInstallTestService(t, "1.19.5")
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.mu.Lock()
+	k := svc.kernels["mihomo"]
+	k.verCache = &versionCache{}
+	k.CurrentVersion = "error"
+	k.LatestVersion = ""
+	k.Channel = "stable"
+	k.Repo = "some/repo"
+	svc.mu.Unlock()
+
+	if err := svc.CheckLatest(context.Background(), "mihomo"); err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if k.CurrentVersion != "1.19.5" {
+		t.Errorf("CurrentVersion = %q, want 1.19.5", k.CurrentVersion)
+	}
+	if k.HasUpdate || !k.AheadOfLatest {
+		t.Errorf("has_update=%v ahead=%v, want false/true", k.HasUpdate, k.AheadOfLatest)
+	}
+	if k.Status != "idle" {
+		t.Errorf("Status = %q, want idle", k.Status)
+	}
+}
+
+// TestCheckLatest_FreshUnknownKeepsStoredVersion: свежая нераспознанная версия
+// (error) не затирает хранимую распознанную.
+func TestCheckLatest_FreshUnknownKeepsStoredVersion(t *testing.T) {
+	server := newReleaseServer(t, http.StatusOK, `{"tag_name":"v1.19.0"}`)
+	svc, binPath := newInstallTestService(t, "1.19.5")
+	if err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.mu.Lock()
+	k := svc.kernels["mihomo"]
+	k.verCache = &versionCache{}
+	k.CurrentVersion = "1.18.0"
+	k.LatestVersion = ""
+	k.Channel = "stable"
+	k.Repo = "some/repo"
+	svc.mu.Unlock()
+
+	if err := svc.CheckLatest(context.Background(), "mihomo"); err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if k.CurrentVersion != "1.18.0" {
+		t.Errorf("CurrentVersion = %q, want прежняя 1.18.0", k.CurrentVersion)
+	}
+	if !k.HasUpdate || k.AheadOfLatest {
+		t.Errorf("has_update=%v ahead=%v, want true/false по хранимой 1.18.0", k.HasUpdate, k.AheadOfLatest)
+	}
+}
+
+// TestCheckLatest_KeepsVersionReplacedDuringCheck: установка, прошедшая во время
+// проверки релиза, не откатывается к версии, прочитанной до неё.
+func TestCheckLatest_KeepsVersionReplacedDuringCheck(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tag_name":"v1.19.0"}`))
+	}))
+	defer server.Close()
+
+	svc, _ := newInstallTestService(t, "1.19.5")
+	svc.SetReleaseSource(server.URL, server.Client())
+	svc.mu.Lock()
+	k := svc.kernels["mihomo"]
+	k.verCache = &versionCache{}
+	k.CurrentVersion = "error"
+	k.LatestVersion = ""
+	k.Channel = "stable"
+	k.Repo = "some/repo"
+	svc.mu.Unlock()
+
+	done := make(chan error, 1)
+	go func() { done <- svc.CheckLatest(context.Background(), "mihomo") }()
+
+	<-started
+	// Имитация установки посреди проверки: новый verCache и новая версия.
+	svc.mu.Lock()
+	k.verCache = &versionCache{}
+	k.CurrentVersion = "1.19.9"
+	svc.mu.Unlock()
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if k.CurrentVersion != "1.19.9" {
+		t.Errorf("CurrentVersion = %q, want 1.19.9 (версия установки)", k.CurrentVersion)
+	}
+	if k.HasUpdate || !k.AheadOfLatest {
+		t.Errorf("has_update=%v ahead=%v, want false/true по 1.19.9", k.HasUpdate, k.AheadOfLatest)
+	}
+}
+
+// TestSetChannel_BusyKernel: смена канала ядра, над которым идёт установка,
+// отклоняется без изменений; другое ядро меняется свободно (G5-WR01, D-08).
+func TestSetChannel_BusyKernel(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	release := make(chan struct{})
+	reached := make(chan struct{})
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		close(reached)
+		<-release
+		return errors.New("stop")
+	})
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	<-reached
+
+	err := svc.SetChannel("mihomo", "preview")
+	if !errors.Is(err, ErrKernelBusy) {
+		t.Errorf("SetChannel busy: got %v, want ErrKernelBusy", err)
+	}
+	k := svc.Get("mihomo")
+	if k.Channel != "stable" || k.Status != "downloading" || k.Stage != KernelStageDownloading || k.LatestVersion != "1.19.0" {
+		t.Errorf("busy kernel changed: channel=%q status=%q stage=%q latest=%q", k.Channel, k.Status, k.Stage, k.LatestVersion)
+	}
+	if err := svc.SetChannel("xray", "preview"); err != nil {
+		t.Errorf("SetChannel of a free kernel: %v", err)
+	}
+	close(release)
+	<-done
+}
+
+// TestCheckLatest_BusyKeepsInstallStatus: проверка релиза (неquiet) занятого
+// ядра пишет только Latest*, статус установки не трогает (G5-WR01).
+func TestCheckLatest_BusyKeepsInstallStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tag_name":"v1.20.0"}`))
+	}))
+	defer server.Close()
+
+	svc, _ := newInstallTestService(t, "1.18.0")
+	svc.SetReleaseSource(server.URL, server.Client())
+	release := make(chan struct{})
+	reached := make(chan struct{})
+	svc.SetInstallSource("arm64", func(_ context.Context, _, dest string) error {
+		close(reached)
+		<-release
+		return writeGzDownload(t, "1.20.0")(context.Background(), "", dest)
+	})
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	<-reached
+
+	if err := svc.CheckLatest(context.Background(), "mihomo"); err != nil {
+		t.Fatalf("CheckLatest: %v", err)
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "downloading" || k.Stage != KernelStageDownloading {
+		t.Errorf("install status changed by check: status=%q stage=%q", k.Status, k.Stage)
+	}
+	if k.LatestVersion != "1.20.0" {
+		t.Errorf("LatestVersion = %q, want 1.20.0", k.LatestVersion)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if k := svc.Get("mihomo"); k.Status != "done" {
+		t.Errorf("status after install = %q, want done", k.Status)
+	}
+}
+
+// TestSetChannel_ConcurrentPersist: одновременная смена каналов двух ядер не
+// теряет ни одного значения в channels.json (G5-WR03, KERN-01).
+func TestSetChannel_ConcurrentPersist(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		dataDir := t.TempDir()
+		svc := NewKernelService(dataDir)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for _, name := range []string{"xray", "mihomo"} {
+			wg.Add(1)
+			go func(name string) {
+				defer wg.Done()
+				<-start
+				if err := svc.SetChannel(name, "preview"); err != nil {
+					t.Errorf("SetChannel(%s): %v", name, err)
+				}
+			}(name)
+		}
+		close(start)
+		wg.Wait()
+
+		restarted := NewKernelService(dataDir)
+		for _, name := range []string{"xray", "mihomo"} {
+			if got := restarted.Get(name).Channel; got != "preview" {
+				t.Fatalf("итерация %d: канал %s после рестарта = %q, want preview", i, name, got)
+			}
+		}
+	}
 }

@@ -20,6 +20,7 @@
   import { apiFetch } from './lib/api';
   import {
     isTransitionalStatus,
+    failureMessage,
     formatKernelVersion,
     kernelBadge,
     showInstallStable,
@@ -201,10 +202,13 @@
     return /^\d/.test(bare) ? `v${bare}` : bare;
   }
 
-  // Подсказка под строкой ядра: ошибки — как есть. Итог завершённой операции
-  // (status done) показывается отдельно по коду result_kind, английский
-  // message бэкенда пользователю не выводится
-  function kernelHint(k: { status: string; message: string }): string {
+  // Подсказка под строкой ядра: причина неудачи с известным error_kind — переводом,
+  // прочие ошибки — как есть. Итог завершённой операции (status done)
+  // показывается отдельно по коду result_kind, английский message бэкенда
+  // пользователю не выводится
+  function kernelHint(k: Kernel): string {
+    const failure = failureMessage(k);
+    if (failure) return $t(failure.key, failure.params).trim();
     if (k.status === 'idle' && k.message.startsWith('No prerelease found'))
       return $t('svc.kernel_no_prerelease');
     return k.message;
@@ -219,7 +223,8 @@
       start: $t('svc.log_action_start'),
       stop: $t('svc.log_action_stop'),
       restart: $t('svc.log_action_restart'),
-      watchdog_reset: $t('svc.log_action_watchdog_reset')
+      watchdog_reset: $t('svc.log_action_watchdog_reset'),
+      watchdog_rearm: $t('svc.log_action_watchdog_rearm')
     };
     if (action.startsWith('switch_kernel:')) {
       return $t('svc.log_action_switch') + ' ' + action.split(':')[1];
@@ -489,7 +494,14 @@
     }
   }
 
+  // Идущая установка (downloading/installing) не перезаписывается «проверяем…»:
+  // карточка сохраняет этап, а замок меню и кнопка установки остаются на месте
+  function isInstalling(k: { status?: string } | undefined): boolean {
+    return !!k && isTransitionalStatus(k.status) && k.status !== 'checking';
+  }
+
   async function checkKernelUpdate(name: string) {
+    if (isInstalling(kernels.find((k) => k.name === name))) return;
     isKernelChecking.set(true);
     const idx = kernels.findIndex((k) => k.name === name);
     if (idx >= 0) {
@@ -634,16 +646,21 @@
   }
 
   // Возвращает состояние ядра из ответа бэкенда (он сам перепроверяет релиз
-  // на новом канале) или null, если запрос не удался либо ответ старого
-  // формата без kernel — тогда вызывающий перечитывает список ядер один раз,
-  // когда оба запроса завершились (раньше тянул по запросу на каждое ядро).
-  async function setKernelChannel(name: string, channel: string): Promise<Kernel | null> {
+  // на новом канале); 'busy' — ядро занято установкой (409), канал не изменён;
+  // null, если запрос не удался либо ответ старого формата без kernel — тогда
+  // вызывающий перечитывает список ядер один раз, когда оба запроса
+  // завершились (раньше тянул по запросу на каждое ядро).
+  async function setKernelChannel(name: string, channel: string): Promise<Kernel | 'busy' | null> {
     try {
       const res = await apiFetch(`/api/kernels/${name}/channel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channel })
       });
+      if (res.status === 409) {
+        showToast('warning', $t('svc.channel_busy', { name: name === 'xray' ? 'Xray' : 'Mihomo' }));
+        return 'busy';
+      }
       if (!res.ok) {
         throw new Error(await res.text());
       }
@@ -664,26 +681,38 @@
     channelChanging = true;
     try {
       // Старый статус («актуально» на прежнем канале) вводит в заблуждение:
-      // карточки сразу показывают «проверяем…» до ответа бэкенда
-      kernels = kernels.map((k) => ({
-        ...k,
-        status: 'checking',
-        latest_version: '',
-        has_update: false,
-        ahead_of_latest: false,
-        message: ''
-      }));
-      const results = await Promise.all([
-        setKernelChannel('xray', channel),
-        setKernelChannel('mihomo', channel)
-      ]);
-      const answered = results.filter((k): k is Kernel => k !== null);
-      const merged = answered.length === results.length && kernels.length > 0;
+      // свободные карточки сразу показывают «проверяем…» до ответа бэкенда.
+      // Ядро с идущей установкой не трогаем: иначе UI выдаст установку за
+      // завершённую, снимет замок меню и включит кнопку «Установить»
+      kernels = kernels.map((k) =>
+        isInstalling(k)
+          ? k
+          : {
+              ...k,
+              status: 'checking',
+              latest_version: '',
+              has_update: false,
+              ahead_of_latest: false,
+              message: ''
+            }
+      );
+      const names = ['xray', 'mihomo'];
+      const results = await Promise.all(names.map((n) => setKernelChannel(n, channel)));
+      const answered = results.filter((k): k is Kernel => k !== null && k !== 'busy');
+      // Занятое ядро (409) сохраняет карточку как есть и ответом считается;
+      // его состояние ведёт опрос установки
+      const complete = results.every((k) => k !== null);
+      const merged = complete && kernels.length > 0;
       if (merged) {
         kernels = kernels.map((k) => answered.find((a) => a.name === k.name) ?? k);
       }
+      // Ядро, которому 409 пришёл на «проверяем…» (установка началась только
+      // что), вернётся к серверному состоянию через перечитывание списка
+      const staleChecking = results.some(
+        (r, i) => r === 'busy' && kernels.find((k) => k.name === names[i])?.status === 'checking'
+      );
       channelChanging = false;
-      if (!merged) await fetchKernels();
+      if (!merged || staleChecking) await fetchKernels();
     } finally {
       channelChanging = false;
     }
@@ -1288,6 +1317,7 @@
         <SegmentedControl
           ariaLabel={$t('svc.channel_label')}
           value={sharedChannel}
+          partial={channelMismatch ? ['stable', 'preview'] : []}
           items={[
             { value: 'stable', label: $t('svc.channel_stable') },
             { value: 'preview', label: $t('svc.channel_preview') }
@@ -2081,7 +2111,9 @@
     gap: 16px;
   }
 
-  .card-title {
+  /* Специфичность выше глобальных `.card .card-title` (в том числе мобильной
+     версии), иначе их padding сдвигает текст заголовка относительно подзаголовка. */
+  .updates-header .card-title {
     display: block;
     margin: 0;
     padding: 0;

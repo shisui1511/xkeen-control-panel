@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
+import { LAZY_LOAD_TIMEOUT } from './helpers/timeouts';
 
 // Вспомогательная функция: настройка REST-моков
 async function setupRestMocks(page: Page, mihomoReachable = true) {
@@ -94,6 +95,10 @@ const TRAFFIC_FRAME = JSON.stringify({
 
 test.describe('Traffic page test suite', () => {
   test.beforeEach(async ({ page }) => {
+    // beforeEach ждёт первую отрисовку страницы (до 20 с) и входит в таймаут
+    // теста: без запаса остаток не хватает на сам тест. Утроение таймаута
+    // теста, таймауты expect не меняются.
+    test.slow();
     await disableServiceWorker(page);
     await setupRestMocks(page, true);
 
@@ -107,7 +112,7 @@ test.describe('Traffic page test suite', () => {
 
     await page.goto('/#/traffic');
     // Ждем появления статуса live
-    await page.waitForSelector('.badge-live-indicator.is-live', { timeout: 5000 });
+    await page.waitForSelector('.badge-live-indicator.is-live', { timeout: LAZY_LOAD_TIMEOUT });
   });
 
   test('live indicator appears when WS connects', async ({ page }) => {
@@ -289,7 +294,7 @@ test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
     await page.goto('/#/traffic');
 
     const section = page.locator('[data-testid="xray-stats-section"]');
-    await expect(section).toBeVisible({ timeout: 5000 });
+    await expect(section).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
 
     const table = page.locator('[data-testid="xray-stats-table"]');
     await expect(table).toBeVisible({ timeout: 5000 });
@@ -356,7 +361,7 @@ test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
     await page.goto('/#/traffic');
 
     const hint = page.locator('[data-testid="xray-stats-disabled-hint"]');
-    await expect(hint).toBeVisible({ timeout: 5000 });
+    await expect(hint).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await expect(page.locator('[data-testid="xray-stats-table"]')).toHaveCount(0);
 
     // Wait a short moment to ensure interval isn't polling
@@ -410,7 +415,7 @@ test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
     await page.goto('/#/traffic');
 
     const toggleBtn = page.locator('[data-testid="xray-grpc-toggle-btn"]');
-    await expect(toggleBtn).toBeVisible({ timeout: 5000 });
+    await expect(toggleBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await toggleBtn.click();
 
     // Toast должен появиться с текстом ошибки
@@ -501,7 +506,7 @@ test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
       await page.goto('/#/traffic');
 
       const toggleBtn = page.locator('[data-testid="xray-grpc-toggle-btn"]');
-      await expect(toggleBtn).toBeVisible({ timeout: 5000 });
+      await expect(toggleBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
       await toggleBtn.click();
 
       const toast = page.locator('.toast, [role="alert"]');
@@ -561,7 +566,7 @@ test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
     await page.goto('/#/traffic');
 
     const alert = page.locator('[data-testid="xray-stats-error-alert"]');
-    await expect(alert).toBeVisible({ timeout: 5000 });
+    await expect(alert).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await expect(alert).toContainText(/gRPC|потеряно|Connection/i);
   });
 
@@ -637,7 +642,7 @@ test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
     await page.goto('/#/traffic');
 
     const alert = page.locator('[data-testid="xray-stats-error-alert"]');
-    await expect(alert).toBeVisible({ timeout: 5000 });
+    await expect(alert).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await expect.poll(() => state.capsCalls).toBeGreaterThan(0);
     const before = state.capsCalls;
 
@@ -659,7 +664,7 @@ test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
     await page.goto('/#/traffic');
 
     const alert = page.locator('[data-testid="xray-stats-error-alert"]');
-    await expect(alert).toBeVisible({ timeout: 5000 });
+    await expect(alert).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
     await expect.poll(() => state.capsCalls).toBeGreaterThan(0);
     const before = state.capsCalls;
 

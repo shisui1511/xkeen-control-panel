@@ -9,17 +9,9 @@
 
 import { test, expect } from '@playwright/test';
 import { fulfillServiceControl } from './helpers/api-mocks';
+import { LAZY_LOAD_TIMEOUT } from './helpers/timeouts';
 
 test.use({ locale: 'ru-RU' });
-
-// Переход на #/constructor в dev-режиме Vite тянет сотни отдельных модулей
-// (Editor → CodeMirror → Constructor → XrayRoutingConstructor). Под нагрузкой
-// (4 воркера на 4 ядрах, load average > 10) в трассе первая отрисовка
-// занимала 11 с и более, поэтому 5 с на появление ленивого содержимого были
-// ниже реального разброса загрузки, а не проверкой поведения. Предел
-// относится только к ожиданию первой отрисовки; остальные проверки — 3 с.
-// Обрывы запросов Chromium (net::ERR_NETWORK_CHANGED) этим не лечатся.
-const LAZY_LOAD_TIMEOUT = 20_000;
 
 // ---------------------------------------------------------------------------
 // Мок-данные для 6 файлов Xray + manual outbounds
@@ -86,6 +78,10 @@ function getMockXrayFile(path: string): string {
 // ---------------------------------------------------------------------------
 test.describe('Xray Constructor integration test suite', () => {
   test.beforeEach(async ({ page }) => {
+    // Тест ждёт первую отрисовку конструктора и затем ещё один ленивый раздел
+    // (до 20 с каждое): две загрузки под нагрузкой не укладываются в 30 с теста.
+    // Утроение таймаута теста, а не реакций UI: таймауты expect не меняются.
+    test.slow();
     // 1. Отключить Service Worker
     await page.addInitScript(() => {
       Object.defineProperty(window.navigator, 'serviceWorker', {

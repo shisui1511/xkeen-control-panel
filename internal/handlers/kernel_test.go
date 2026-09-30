@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,9 +36,32 @@ func buildKernelStubBinary(t *testing.T, name, output string) string {
 
 func newKernelTestAPI(t *testing.T) (*API, string) {
 	t.Helper()
+	return newKernelTestAPIWith(t, "", nil)
+}
+
+// defaultKernelReleases — локальный источник релизов по умолчанию.
+func defaultKernelReleases(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if strings.HasSuffix(r.URL.Path, "/releases/latest") {
+		_, _ = w.Write([]byte(`{"tag_name":"v1.8.24"}`))
+		return
+	}
+	_, _ = w.Write([]byte(`[{"tag_name":"v1.9.0-rc1","prerelease":true}]`))
+}
+
+// newKernelTestAPIWith — newKernelTestAPI с управляемой заглушкой xray и
+// источником релизов. xrayScript == "" — заглушка по умолчанию (Xray 1.8.24);
+// releases == nil — defaultKernelReleases.
+func newKernelTestAPIWith(t *testing.T, xrayScript string, releases http.HandlerFunc) (*API, string) {
+	t.Helper()
 
 	// Build xray and mihomo stub binaries
 	xrayBin := buildKernelStubBinary(t, "xray", "Xray 1.8.24 (Xray, Penetrates Everything.)")
+	if xrayScript != "" {
+		if err := os.WriteFile(xrayBin, []byte(xrayScript), 0755); err != nil {
+			t.Fatalf("write xray stub: %v", err)
+		}
+	}
 	mihomoBin := buildKernelStubBinary(t, "mihomo", "Mihomo Version: v1.18.0")
 
 	// Set PATH to find our stubs first
@@ -71,16 +95,12 @@ func newKernelTestAPI(t *testing.T) (*API, string) {
 	kernelSvc := services.NewKernelService(t.TempDir())
 
 	// Проверка релизов идёт на локальный сервер, а не в реальный GitHub.
-	releases := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if strings.HasSuffix(r.URL.Path, "/releases/latest") {
-			_, _ = w.Write([]byte(`{"tag_name":"v1.8.24"}`))
-			return
-		}
-		_, _ = w.Write([]byte(`[{"tag_name":"v1.9.0-rc1","prerelease":true}]`))
-	}))
-	t.Cleanup(releases.Close)
-	kernelSvc.SetReleaseSource(releases.URL, releases.Client())
+	if releases == nil {
+		releases = defaultKernelReleases
+	}
+	releaseSrv := httptest.NewServer(releases)
+	t.Cleanup(releaseSrv.Close)
+	kernelSvc.SetReleaseSource(releaseSrv.URL, releaseSrv.Client())
 	// Установка тоже не ходит в сеть: на amd64 у ядер нет ассетов, а загрузка
 	// в тестах должна быть управляемой. Тесты, которым нужна своя, вызывают SetInstallSource.
 	kernelSvc.SetInstallSource("arm64", func(context.Context, string, string) error {
@@ -222,6 +242,33 @@ func TestKernelInstall_StageVisibleImmediately(t *testing.T) {
 	waitKernelFailed(t, api, "xray")
 }
 
+// TestKernelInstall_ReleaseLookupFailed: ядро без распознанной версии, источник
+// релизов отвечает 403 — статус failed несёт error_kind release_lookup_failed,
+// а не «Unsupported architecture» (G5-WR02, KERN-02).
+func TestKernelInstall_ReleaseLookupFailed(t *testing.T) {
+	// Заглушка xray, чья версия не распознаётся: запасного пути «переустановить
+	// текущую версию» нет, версию может дать только проверка релиза.
+	api, _ := newKernelTestAPIWith(t, "#!/bin/sh\nexit 1\n", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "rate limit exceeded", http.StatusForbidden)
+	})
+
+	if rr := postKernelInstall(api, "xray"); rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	waitKernelFailed(t, api, "xray")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/kernels/xray/status", nil)
+	rr := httptest.NewRecorder()
+	api.KernelStatus(rr, req)
+	body := rr.Body.String()
+	if !strings.Contains(body, `"error_kind":"release_lookup_failed"`) {
+		t.Errorf("status JSON lacks error_kind release_lookup_failed: %s", body)
+	}
+	if strings.Contains(body, "Unsupported architecture") {
+		t.Errorf("message must not claim unsupported architecture: %s", body)
+	}
+}
+
 // TestKernelInstall_Conflict409: второй POST при идущей установке — 409.
 func TestKernelInstall_Conflict409(t *testing.T) {
 	api, _ := newKernelTestAPI(t)
@@ -267,6 +314,42 @@ func TestKernelChannel(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
+}
+
+// TestKernelChannel_Busy409: смена канала занятого ядра — 409, неизвестное
+// ядро — 404, неверный канал — 400 (G5-WR01, T-136-45).
+func TestKernelChannel_Busy409(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+	release := blockingInstall(api)
+
+	if rr := postKernelInstall(api, "xray"); rr.Code != http.StatusOK {
+		t.Fatalf("install: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	post := func(kernel, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/kernels/"+kernel+"/channel", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		api.KernelChannel(rr, req)
+		return rr
+	}
+
+	rr := post("xray", `{"channel": "preview"}`)
+	if rr.Code != http.StatusConflict {
+		t.Errorf("busy kernel: expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "install already in progress") {
+		t.Errorf("unexpected 409 body: %s", rr.Body.String())
+	}
+	if ch := api.kernelSvc.Get("xray").Channel; ch != "stable" {
+		t.Errorf("channel of busy kernel changed to %q", ch)
+	}
+	if rr := post("nope", `{"channel": "preview"}`); rr.Code != http.StatusNotFound {
+		t.Errorf("unknown kernel: expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if rr := post("xray", `{"channel": "nightly"}`); rr.Code != http.StatusBadRequest {
+		t.Errorf("invalid channel: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	release()
 }
 
 // TestKernelChannel_Recompute: смена канала синхронно перепроверяет релиз и
@@ -604,5 +687,113 @@ func TestKernelUpload_SuccessAndValidation(t *testing.T) {
 	}
 	if resp.Data.Status != "done" {
 		t.Errorf("expected Status=done, got %s", resp.Data.Status)
+	}
+}
+
+// kernelListOf запрашивает GET /api/kernels и возвращает ядра по имени.
+func kernelListOf(t *testing.T, api *API) map[string]services.KernelInfo {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/kernels", nil)
+	rr := httptest.NewRecorder()
+	api.KernelList(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Data []services.KernelInfo `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	out := make(map[string]services.KernelInfo, len(resp.Data))
+	for _, k := range resp.Data {
+		out[k.Name] = k
+	}
+	return out
+}
+
+// waitKernelLatest опрашивает список, пока у ядра не появится latest_version.
+func waitKernelLatest(t *testing.T, api *API, name string) services.KernelInfo {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		k := kernelListOf(t, api)[name]
+		if k.LatestVersion != "" {
+			return k
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("latest_version у %s не появился за 5 с (автопроверка релиза не запущена)", name)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestKernelList_StaleStartVersionNoDowngradeOffer: симптом с роутера (G2) —
+// при старте процесса версия не определилась (error), а установлена pre-release
+// новее stable. Список сам получает релиз и не предлагает понижение.
+func TestKernelList_StaleStartVersionNoDowngradeOffer(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "started")
+	script := fmt.Sprintf("#!/bin/sh\nif [ ! -e %q ]; then : > %q; exit 1; fi\necho 'Xray 26.9.9 (Xray, Penetrates Everything.)'\n", marker, marker)
+	releases := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/releases/latest") {
+			_, _ = w.Write([]byte(`{"tag_name":"v26.3.27"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}
+	api, _ := newKernelTestAPIWith(t, script, releases)
+
+	first := kernelListOf(t, api)["xray"]
+	if first.HasUpdate {
+		t.Errorf("первый ответ: has_update = true при пустом latest")
+	}
+	x := waitKernelLatest(t, api, "xray")
+	if x.LatestVersion != "26.3.27" {
+		t.Errorf("latest_version = %q, want 26.3.27", x.LatestVersion)
+	}
+	if x.CurrentVersion != "26.9.9" {
+		t.Errorf("current_version = %q, want 26.9.9", x.CurrentVersion)
+	}
+	if x.HasUpdate {
+		t.Errorf("has_update = true: предложено понижение pre-release на stable")
+	}
+	if !x.AheadOfLatest {
+		t.Errorf("ahead_of_latest = false, want true")
+	}
+}
+
+// TestKernelList_AutoCheckOncePerTTL: повторные GET в пределах TTL не порождают
+// новых запросов к источнику релизов (лимит анонимного API).
+func TestKernelList_AutoCheckOncePerTTL(t *testing.T) {
+	var xrayHits, mihomoHits atomic.Int32
+	releases := func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "Xray-core"):
+			xrayHits.Add(1)
+		case strings.Contains(r.URL.Path, "mihomo"):
+			mihomoHits.Add(1)
+		}
+		defaultKernelReleases(w, r)
+	}
+	api, _ := newKernelTestAPIWith(t, "", releases)
+
+	for i := 0; i < 3; i++ {
+		kernelListOf(t, api)
+	}
+	x := waitKernelLatest(t, api, "xray")
+	m := waitKernelLatest(t, api, "mihomo")
+	if x.LatestVersion == "" || m.LatestVersion == "" {
+		t.Fatalf("latest_version не заполнен: xray=%q mihomo=%q", x.LatestVersion, m.LatestVersion)
+	}
+	// Дать возможным лишним проверкам дойти до сервера.
+	time.Sleep(300 * time.Millisecond)
+	kernelListOf(t, api)
+	time.Sleep(100 * time.Millisecond)
+	if n := xrayHits.Load(); n != 1 {
+		t.Errorf("запросов релиза xray = %d, want 1", n)
+	}
+	if n := mihomoHits.Load(); n != 1 {
+		t.Errorf("запросов релиза mihomo = %d, want 1", n)
 	}
 }

@@ -29,7 +29,8 @@ export function nextStep(input: NextStepInput): NextStep | null {
   if (input.kernelsInstalled === false) return 'install_kernel';
   if (input.xkeen === 'running' || input.isRunning) return null;
   if (input.configReady === false) return 'configure';
-  return 'start';
+  // «Запустите» только когда известно, что в конфигурации есть подключения
+  return input.configReady === true ? 'start' : null;
 }
 
 const NO_CONNECTIONS_CODE: Record<string, string> = {
