@@ -16,6 +16,28 @@ import (
 // could accumulate unbounded goroutines making outbound GitHub API calls (STAB-01).
 var kernelCheckSemaphore = make(chan struct{}, 2)
 
+// kernelLatestAutoCheckTTL — не чаще раза за этот срок KernelList сам запускает
+// проверку релиза для ядра с пустым latest_version. Худший случай — 2 ядра × 6
+// проверок в час, ниже лимита анонимного API GitHub (60/ч).
+const kernelLatestAutoCheckTTL = 10 * time.Minute
+
+// runKernelCheck запускает проверку релиза в фоне: не больше двух одновременно
+// (kernelCheckSemaphore, без очереди), жёсткий таймаут 10 с (STAB-01).
+func (a *API) runKernelCheck(name string) {
+	go func() {
+		select {
+		case kernelCheckSemaphore <- struct{}{}:
+			defer func() { <-kernelCheckSemaphore }()
+		default:
+			// Уже идут две проверки: эту отбрасываем, а не копим в очереди.
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = a.kernelSvc.CheckLatest(ctx, name)
+	}()
+}
+
 func (a *API) KernelList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -33,6 +55,11 @@ func (a *API) KernelList(w http.ResponseWriter, r *http.Request) {
 			addr = strings.TrimPrefix(addr, "http://")
 			addr = strings.TrimPrefix(addr, "https://")
 			list[i].APIAddr = addr
+		}
+		// Сведения о релизе без ручной «Проверить»: после старта latest пуст, и
+		// без него флаги обновления ничего не говорят (G2). Ответ не ждёт проверки.
+		if a.kernelSvc.ClaimLatestCheck(list[i].Name, kernelLatestAutoCheckTTL) {
+			a.runKernelCheck(list[i].Name)
 		}
 	}
 	JSONSuccess(w, list)
@@ -53,21 +80,8 @@ func (a *API) KernelCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run check in background so response is immediate.
-	// Bounded by kernelCheckSemaphore (max 2 concurrent) and a hard 10s timeout
-	// so a slow/unresponsive GitHub API cannot accumulate goroutines (STAB-01).
-	go func() {
-		select {
-		case kernelCheckSemaphore <- struct{}{}:
-			defer func() { <-kernelCheckSemaphore }()
-		default:
-			// Already 2 checks in flight; drop this one rather than queue indefinitely.
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = a.kernelSvc.CheckLatest(ctx, name)
-	}()
+	// Проверка идёт в фоне, чтобы ответ был мгновенным.
+	a.runKernelCheck(name)
 
 	JSONSuccess(w, map[string]string{"status": "checking"})
 }

@@ -315,6 +315,10 @@ type KernelInfo struct {
 	// Access must be protected by the KernelService mutex.
 	binaryPathCachedAt time.Time
 
+	// latestCheckedAt — когда последний раз запускалась проверка релиза (ручная
+	// или автоматическая из списка ядер). Не сериализуется; доступ под s.mu.
+	latestCheckedAt time.Time
+
 	// verCache caches the result of detectVersion for 60 seconds to avoid
 	// repeatedly spawning a subprocess on every status poll.
 	// Must be a pointer so that copying KernelInfo does not copy the embedded mutex.
@@ -793,6 +797,7 @@ func (s *KernelService) List() []KernelInfo {
 	// Resolve live data outside the global lock to avoid blocking Install/CheckLatest
 	for i := range snapshots {
 		snapshots[i].CurrentVersion = s.detectVersion(&snapshots[i])
+		snapshots[i].recomputeUpdateFlags()
 		status, pid, uptime := kernelProcessStatusDetailed(snapshots[i].BinaryPath)
 		snapshots[i].ProcessStatus = status
 		snapshots[i].PID = pid
@@ -800,6 +805,14 @@ func (s *KernelService) List() []KernelInfo {
 		snapshots[i].fillBackup()
 	}
 	return snapshots
+}
+
+// recomputeUpdateFlags пересчитывает HasUpdate и AheadOfLatest по полям снимка.
+// Вызывается после detectVersion: хранимая версия могла остаться нераспознанной
+// (error после таймаута при старте), и флаги, посчитанные по ней, устарели.
+func (k *KernelInfo) recomputeUpdateFlags() {
+	k.HasUpdate = kernelHasUpdate(k.LatestVersion, k.CurrentVersion)
+	k.AheadOfLatest = kernelAheadOfLatest(k.Channel, k.LatestVersion, k.CurrentVersion)
 }
 
 // fillBackup заполняет HasBackup и BackupVersion по каталогу .backup (без exec).
@@ -825,6 +838,7 @@ func (s *KernelService) Get(name string) *KernelInfo {
 	}
 	// Refresh version and process status outside global lock
 	snap.CurrentVersion = s.detectVersion(&snap)
+	snap.recomputeUpdateFlags()
 	status, pid, uptime := kernelProcessStatusDetailed(snap.BinaryPath)
 	snap.ProcessStatus = status
 	snap.PID = pid
@@ -1007,6 +1021,10 @@ func kernelHasUpdate(latest, current string) bool {
 	switch {
 	case latest == "":
 		return false
+	case current == "error" || current == "unknown" || current == "":
+		// Нераспознанная версия не должна превращаться в предложение обновления:
+		// установленная pre-release при таймауте старта выглядела бы «старой» (G2).
+		return false
 	case isRollingBuild(latest):
 		return latest != current
 	case isValidSemver(current):
@@ -1042,6 +1060,24 @@ func (s *KernelService) refreshInstalledVersion(kk *KernelInfo) {
 // релизов со всеми ассетами (обрезанный JSON дал бы ошибку разбора, а не «актуально»).
 const githubReleaseBodyLimit = 16 << 20
 
+// ClaimLatestCheck атомарно занимает автоматическую проверку релиза: true, если
+// ядро известно, latest пуст и проверка не запускалась дольше ttl. Метка времени
+// ставится сразу, поэтому параллельные и повторные вызовы в пределах ttl не
+// порождают лишних запросов к GitHub (лимит анонимного API).
+func (s *KernelService) ClaimLatestCheck(name string, ttl time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := s.kernels[name]
+	if k == nil || k.LatestVersion != "" {
+		return false
+	}
+	if !k.latestCheckedAt.IsZero() && time.Since(k.latestCheckedAt) < ttl {
+		return false
+	}
+	k.latestCheckedAt = time.Now()
+	return true
+}
+
 // CheckLatest queries GitHub API for latest release.
 // ctx is used to cancel the HTTP request (e.g. on service shutdown).
 func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
@@ -1058,6 +1094,7 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 		s.mu.Unlock()
 		return fmt.Errorf("kernel not found: %s", name)
 	}
+	k.latestCheckedAt = time.Now()
 	if !quiet {
 		k.Status = "checking"
 		k.Message = "Checking for updates..."
