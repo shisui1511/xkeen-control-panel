@@ -316,6 +316,42 @@ func TestKernelChannel(t *testing.T) {
 	}
 }
 
+// TestKernelChannel_Busy409: смена канала занятого ядра — 409, неизвестное
+// ядро — 404, неверный канал — 400 (G5-WR01, T-136-45).
+func TestKernelChannel_Busy409(t *testing.T) {
+	api, _ := newKernelTestAPI(t)
+	release := blockingInstall(api)
+
+	if rr := postKernelInstall(api, "xray"); rr.Code != http.StatusOK {
+		t.Fatalf("install: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	post := func(kernel, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/kernels/"+kernel+"/channel", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		api.KernelChannel(rr, req)
+		return rr
+	}
+
+	rr := post("xray", `{"channel": "preview"}`)
+	if rr.Code != http.StatusConflict {
+		t.Errorf("busy kernel: expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "install already in progress") {
+		t.Errorf("unexpected 409 body: %s", rr.Body.String())
+	}
+	if ch := api.kernelSvc.Get("xray").Channel; ch != "stable" {
+		t.Errorf("channel of busy kernel changed to %q", ch)
+	}
+	if rr := post("nope", `{"channel": "preview"}`); rr.Code != http.StatusNotFound {
+		t.Errorf("unknown kernel: expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if rr := post("xray", `{"channel": "nightly"}`); rr.Code != http.StatusBadRequest {
+		t.Errorf("invalid channel: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	release()
+}
+
 // TestKernelChannel_Recompute: смена канала синхронно перепроверяет релиз и
 // возвращает в ответе пересчитанное ядро (KERN-01, D-08).
 func TestKernelChannel_Recompute(t *testing.T) {

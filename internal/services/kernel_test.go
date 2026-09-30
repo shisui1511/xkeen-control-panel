@@ -198,9 +198,8 @@ func TestKernelService_Get_Unknown(t *testing.T) {
 func TestKernelService_SetChannel(t *testing.T) {
 	svc := NewKernelService(t.TempDir())
 
-	ok := svc.SetChannel("xray", "preview")
-	if !ok {
-		t.Fatal("expected SetChannel to succeed")
+	if err := svc.SetChannel("xray", "preview"); err != nil {
+		t.Fatalf("expected SetChannel to succeed: %v", err)
 	}
 
 	k := svc.Get("xray")
@@ -208,9 +207,8 @@ func TestKernelService_SetChannel(t *testing.T) {
 		t.Fatalf("expected channel 'preview', got %s", k.Channel)
 	}
 
-	ok = svc.SetChannel("unknown", "preview")
-	if ok {
-		t.Fatal("expected SetChannel to fail for unknown kernel")
+	if err := svc.SetChannel("unknown", "preview"); !errors.Is(err, ErrKernelNotFound) {
+		t.Fatalf("expected ErrKernelNotFound for unknown kernel, got %v", err)
 	}
 }
 
@@ -222,8 +220,8 @@ func TestKernelService_ChannelPersistsAcrossRestart(t *testing.T) {
 	dataDir := t.TempDir()
 
 	svc := NewKernelService(dataDir)
-	if !svc.SetChannel("mihomo", "preview") {
-		t.Fatal("expected SetChannel to succeed")
+	if err := svc.SetChannel("mihomo", "preview"); err != nil {
+		t.Fatalf("expected SetChannel to succeed: %v", err)
 	}
 
 	restarted := NewKernelService(dataDir)
@@ -395,20 +393,17 @@ func TestValidateKernelPath(t *testing.T) {
 	}
 }
 
-// TestSetChannel_InvalidValue: invalid channel name returns false.
+// TestSetChannel_InvalidValue: неверное имя канала даёт ErrInvalidChannel.
 func TestSetChannel_InvalidValue(t *testing.T) {
 	svc := NewKernelService(t.TempDir())
-	ok := svc.SetChannel("xray", "nightly")
-	if ok {
-		t.Error("expected SetChannel to return false for invalid channel 'nightly'")
+	if err := svc.SetChannel("xray", "nightly"); !errors.Is(err, ErrInvalidChannel) {
+		t.Errorf("channel 'nightly': got %v, want ErrInvalidChannel", err)
 	}
-	ok = svc.SetChannel("xray", "")
-	if ok {
-		t.Error("expected SetChannel to return false for empty channel")
+	if err := svc.SetChannel("xray", ""); !errors.Is(err, ErrInvalidChannel) {
+		t.Errorf("empty channel: got %v, want ErrInvalidChannel", err)
 	}
-	ok = svc.SetChannel("xray", "stable")
-	if !ok {
-		t.Error("expected SetChannel to return true for 'stable'")
+	if err := svc.SetChannel("xray", "stable"); err != nil {
+		t.Errorf("channel 'stable': got %v, want nil", err)
 	}
 }
 
@@ -865,8 +860,8 @@ func TestCheckLatest_DropsResultAfterChannelSwitch(t *testing.T) {
 	go func() { done <- svc.CheckLatest(context.Background(), "xray") }()
 
 	<-started
-	if !svc.SetChannel("xray", "preview") {
-		t.Fatal("SetChannel returned false")
+	if err := svc.SetChannel("xray", "preview"); err != nil {
+		t.Fatalf("SetChannel: %v", err)
 	}
 	close(release)
 	if err := <-done; err != nil {
@@ -901,8 +896,8 @@ func TestSetChannel_Recompute(t *testing.T) {
 		t.Fatalf("precondition: latest=%q has_update=%v", got.LatestVersion, got.HasUpdate)
 	}
 
-	if !svc.SetChannel("xray", "preview") {
-		t.Fatal("SetChannel returned false")
+	if err := svc.SetChannel("xray", "preview"); err != nil {
+		t.Fatalf("SetChannel: %v", err)
 	}
 	got := svc.Get("xray")
 	if got.LatestVersion != "" || got.LatestTag != "" || got.HasUpdate {
@@ -2486,5 +2481,111 @@ func TestCheckLatest_KeepsVersionReplacedDuringCheck(t *testing.T) {
 	}
 	if k.HasUpdate || !k.AheadOfLatest {
 		t.Errorf("has_update=%v ahead=%v, want false/true по 1.19.9", k.HasUpdate, k.AheadOfLatest)
+	}
+}
+
+// TestSetChannel_BusyKernel: смена канала ядра, над которым идёт установка,
+// отклоняется без изменений; другое ядро меняется свободно (G5-WR01, D-08).
+func TestSetChannel_BusyKernel(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	release := make(chan struct{})
+	reached := make(chan struct{})
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		close(reached)
+		<-release
+		return errors.New("stop")
+	})
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	<-reached
+
+	err := svc.SetChannel("mihomo", "preview")
+	if !errors.Is(err, ErrKernelBusy) {
+		t.Errorf("SetChannel busy: got %v, want ErrKernelBusy", err)
+	}
+	k := svc.Get("mihomo")
+	if k.Channel != "stable" || k.Status != "downloading" || k.Stage != KernelStageDownloading || k.LatestVersion != "1.19.0" {
+		t.Errorf("busy kernel changed: channel=%q status=%q stage=%q latest=%q", k.Channel, k.Status, k.Stage, k.LatestVersion)
+	}
+	if err := svc.SetChannel("xray", "preview"); err != nil {
+		t.Errorf("SetChannel of a free kernel: %v", err)
+	}
+	close(release)
+	<-done
+}
+
+// TestCheckLatest_BusyKeepsInstallStatus: проверка релиза (неquiet) занятого
+// ядра пишет только Latest*, статус установки не трогает (G5-WR01).
+func TestCheckLatest_BusyKeepsInstallStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tag_name":"v1.20.0"}`))
+	}))
+	defer server.Close()
+
+	svc, _ := newInstallTestService(t, "1.18.0")
+	svc.SetReleaseSource(server.URL, server.Client())
+	release := make(chan struct{})
+	reached := make(chan struct{})
+	svc.SetInstallSource("arm64", func(_ context.Context, _, dest string) error {
+		close(reached)
+		<-release
+		return writeGzDownload(t, "1.20.0")(context.Background(), "", dest)
+	})
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	<-reached
+
+	if err := svc.CheckLatest(context.Background(), "mihomo"); err != nil {
+		t.Fatalf("CheckLatest: %v", err)
+	}
+	k := svc.Get("mihomo")
+	if k.Status != "downloading" || k.Stage != KernelStageDownloading {
+		t.Errorf("install status changed by check: status=%q stage=%q", k.Status, k.Stage)
+	}
+	if k.LatestVersion != "1.20.0" {
+		t.Errorf("LatestVersion = %q, want 1.20.0", k.LatestVersion)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if k := svc.Get("mihomo"); k.Status != "done" {
+		t.Errorf("status after install = %q, want done", k.Status)
+	}
+}
+
+// TestSetChannel_ConcurrentPersist: одновременная смена каналов двух ядер не
+// теряет ни одного значения в channels.json (G5-WR03, KERN-01).
+func TestSetChannel_ConcurrentPersist(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		dataDir := t.TempDir()
+		svc := NewKernelService(dataDir)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for _, name := range []string{"xray", "mihomo"} {
+			wg.Add(1)
+			go func(name string) {
+				defer wg.Done()
+				<-start
+				if err := svc.SetChannel(name, "preview"); err != nil {
+					t.Errorf("SetChannel(%s): %v", name, err)
+				}
+			}(name)
+		}
+		close(start)
+		wg.Wait()
+
+		restarted := NewKernelService(dataDir)
+		for _, name := range []string{"xray", "mihomo"} {
+			if got := restarted.Get(name).Channel; got != "preview" {
+				t.Fatalf("итерация %d: канал %s после рестарта = %q, want preview", i, name, got)
+			}
+		}
 	}
 }
