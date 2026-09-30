@@ -514,19 +514,45 @@ cleanup
 # pick_prerelease — канал prerelease: последний RC, если нет более нового stable
 # ---------------------------------------------------------------------------
 echo ""
+echo "── ver_ge ───────────────────────────────────────────────────"
+make_sandbox
+mock_busybox_sort
+for case in "v0.29.10 v0.29.9 0" "0.29.9 0.29.10 1" "v0.29.0 v0.29.0 0" \
+            "v1.0.0 v0.99.99 0" "v0.9.5 v0.10.0 1"; do
+    set -- $case
+    rc=0
+    run_in_sandbox "ver_ge '$1' '$2'" >/dev/null 2>&1 || rc=$?
+    if [ "$rc" -eq "$3" ]; then
+        pass "ver_ge $1 $2 → код $3"
+    else
+        fail "ver_ge $1 $2 → код $3 (got: $rc)"
+    fi
+done
+cleanup
+
+echo ""
 echo "── pick_prerelease ──────────────────────────────────────────"
 make_sandbox
+mock_busybox_sort
 for case in "v0.29.0-rc.9 v0.28.0 v0.29.0-rc.9" "v0.29.0-rc.9 v0.29.0 v0.29.0" \
-            "v0.29.0-rc.2 v0.30.1 v0.30.1" " v0.28.0 v0.28.0" "v0.10.0-rc.1 v0.9.5 v0.10.0-rc.1"; do
+            "v0.29.0-rc.2 v0.30.1 v0.30.1" " v0.28.0 v0.28.0" "v0.10.0-rc.1 v0.9.5 v0.10.0-rc.1" \
+            "v0.29.10-rc.1 v0.29.9 v0.29.10-rc.1" "v0.29.9-rc.1 v0.29.10 v0.29.10" \
+            "v0.29.0-rc.28 v0.29.0 v0.29.0"; do
     set -- $case
     if [ $# -eq 2 ]; then rc=""; stable="$1"; want="$2"; else rc="$1"; stable="$2"; want="$3"; fi
-    got=$(run_in_sandbox "pick_prerelease '$rc' '$stable'")
+    got=$(run_in_sandbox "pick_prerelease '$rc' '$stable'") || true
     if [ "$got" = "$want" ]; then
         pass "pick_prerelease '${rc}' '${stable}' → ${want}"
     else
         fail "pick_prerelease '${rc}' '${stable}' → ${want} (got: $got)"
     fi
 done
+got=$(run_in_sandbox "pick_prerelease 'v0.29.0-rc.28' ''") || true
+if [ "$got" = "v0.29.0-rc.28" ]; then
+    pass "pick_prerelease 'v0.29.0-rc.28' '' → v0.29.0-rc.28"
+else
+    fail "pick_prerelease 'v0.29.0-rc.28' '' → v0.29.0-rc.28 (got: $got)"
+fi
 cleanup
 
 # ---------------------------------------------------------------------------
