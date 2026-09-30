@@ -470,6 +470,14 @@ func main() {
 	// Пока идёт установка, откат или загрузка ядра, проверки здоровья
 	// приостановлены: замена бинарника под нагрузкой не должна снимать TPROXY (KERN-03).
 	watchdogSvc.SetKernelBusyFunc(kernelSvc.Busy)
+	// Если аварийное снятие удалило правила перехвата, после восстановления ядра
+	// watchdog один раз возвращает их перезапуском XKeen (KERN-03).
+	if xSvc := api.XKeenService(); xSvc != nil {
+		watchdogSvc.SetRearmFunc(func() error {
+			_, err := xSvc.Restart()
+			return err
+		})
+	}
 	watchdogSvc.Start()
 	api.SetWatchdogService(watchdogSvc)
 	defer watchdogSvc.Stop()
