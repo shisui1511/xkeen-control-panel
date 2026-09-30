@@ -121,6 +121,12 @@ type WatchdogService struct {
 	lastDisarmError        string
 	lastRoutingIssues      string
 
+	// kernelBusy сообщает, идёт ли операция над ядром (установка, откат, загрузка
+	// файла); пока идёт, проверки здоровья приостановлены. lastBusyAt — момент
+	// последней замеченной операции (для паузы после неё).
+	kernelBusy func() bool
+	lastBusyAt time.Time
+
 	iptablesSaveBin  string
 	iptablesBin      string
 	ip6tablesSaveBin string
@@ -140,6 +146,14 @@ func NewWatchdogService(xkeenSvc *XKeenService, mihomoDir, xrayDir string) *Watc
 		stopCh:    make(chan struct{}),
 		now:       time.Now,
 	}
+}
+
+// SetKernelBusyFunc подключает признак «идёт операция над ядром» (в main.go —
+// KernelService.Busy). До Start(); nil отключает приостановку.
+func (w *WatchdogService) SetKernelBusyFunc(fn func() bool) {
+	w.mu.Lock()
+	w.kernelBusy = fn
+	w.mu.Unlock()
 }
 
 // inGraceLocked reports whether the service is within its start grace period.
@@ -250,6 +264,19 @@ func (w *WatchdogService) CheckHealth() {
 
 	// 1. Окно штатного рестарта (D-06).
 	if w.xkeenSvc.InRestart() {
+		return
+	}
+
+	// 1а. Операция над ядром (G1): замена бинарника под нагрузкой замедляет
+	// `xkeen -status`, и провалы проверки не означают падение ядра. Пока операция
+	// идёт, статус не запрашивается, счётчики не меняются.
+	w.mu.Lock()
+	busyFn := w.kernelBusy
+	w.mu.Unlock()
+	if busyFn != nil && busyFn() {
+		w.mu.Lock()
+		w.lastBusyAt = w.now()
+		w.mu.Unlock()
 		return
 	}
 

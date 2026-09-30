@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -555,6 +556,12 @@ type KernelService struct {
 	installLocks sync.Map // per-kernel install lock; key: string, value: *sync.Mutex
 	dataDir      string
 
+	// opsActive — число идущих операций над ядрами (установка, откат, загрузка
+	// файла) по всем ядрам; читается без замков (Busy). busyKernels — те же
+	// операции по именам ядер, под s.mu.
+	opsActive   atomic.Int32
+	busyKernels map[string]bool
+
 	// statFunc is used to check if a file exists; defaults to os.Stat.
 	// Overridable in tests to verify TTL caching without touching the filesystem.
 	statFunc func(string) (os.FileInfo, error)
@@ -640,9 +647,10 @@ type kernelChannelStore struct {
 
 func NewKernelService(dataDir string) *KernelService {
 	svc := &KernelService{
-		kernels:  make(map[string]*KernelInfo),
-		statFunc: os.Stat,
-		dataDir:  dataDir,
+		kernels:     make(map[string]*KernelInfo),
+		busyKernels: make(map[string]bool),
+		statFunc:    os.Stat,
+		dataDir:     dataDir,
 	}
 
 	now := time.Now()
@@ -1168,14 +1176,51 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 
 // lockKernel берёт замок операций над ядром (установка, откат, загрузка файла).
 // Занят — ErrKernelBusy. Единственный вход в замок: проверка «идёт ли операция»
-// отдельно от захвата давала гонку.
-func (s *KernelService) lockKernel(name string) (*sync.Mutex, error) {
+// отдельно от захвата давала гонку. Возвращает release — идемпотентную функцию
+// снятия замка (sync.Once): повторный вызов не уводит счётчик Busy() ниже нуля.
+//
+// Порядок замков: мьютекс ядра берётся через TryLock до s.mu и отпускается после
+// снятия отметки под s.mu, поэтому взаимоблокировки между ними нет.
+func (s *KernelService) lockKernel(name string) (release func(), err error) {
 	actual, _ := s.installLocks.LoadOrStore(name, &sync.Mutex{})
 	installMu := actual.(*sync.Mutex)
 	if !installMu.TryLock() {
 		return nil, ErrKernelBusy
 	}
-	return installMu, nil
+
+	s.mu.Lock()
+	s.busyKernels[name] = true
+	s.mu.Unlock()
+	s.opsActive.Add(1)
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			delete(s.busyKernels, name)
+			s.mu.Unlock()
+			s.opsActive.Add(-1)
+			installMu.Unlock()
+		})
+	}, nil
+}
+
+// Busy сообщает, идёт ли хоть одна операция над ядрами (установка, откат,
+// загрузка файла). Без замков: вызывается сторожевым таймером на каждой проверке.
+func (s *KernelService) Busy() bool {
+	return s.opsActive.Load() > 0
+}
+
+// KernelBusy сообщает, идёт ли операция над конкретным ядром.
+func (s *KernelService) KernelBusy(name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.busyLocked(name)
+}
+
+// busyLocked — то же, что KernelBusy, для вызывающих, уже держащих s.mu.
+func (s *KernelService) busyLocked(name string) bool {
+	return s.busyKernels[name]
 }
 
 // setStage обновляет статус, этап и сообщение ядра под замком s.mu.
@@ -1234,17 +1279,17 @@ func (s *KernelService) BeginInstall(name string, onDone func(error)) error {
 		return fmt.Errorf("kernel not found: %s", name)
 	}
 
-	installMu, err := s.lockKernel(name)
+	release, err := s.lockKernel(name)
 	if err != nil {
 		return err
 	}
 	if err := s.beginInstallLocked(name); err != nil {
-		installMu.Unlock()
+		release()
 		return err
 	}
 
 	go func() {
-		defer installMu.Unlock()
+		defer release()
 		err := s.runInstall(name)
 		if onDone != nil {
 			onDone(err)
@@ -1266,11 +1311,11 @@ func (s *KernelService) Install(name string) error {
 		return fmt.Errorf("kernel not found: %s", name)
 	}
 
-	installMu, err := s.lockKernel(name)
+	release, err := s.lockKernel(name)
 	if err != nil {
 		return err
 	}
-	defer installMu.Unlock()
+	defer release()
 	if err := s.beginInstallLocked(name); err != nil {
 		return err
 	}
@@ -1634,11 +1679,11 @@ func (s *KernelService) Rollback(name string) error {
 	}
 
 	// lockKernel делает TryLock(): при идущей установке — сразу ErrKernelBusy, без ожидания.
-	installMu, err := s.lockKernel(name)
+	release, err := s.lockKernel(name)
 	if err != nil {
 		return err
 	}
-	defer installMu.Unlock()
+	defer release()
 
 	s.mu.Lock()
 	k := s.kernels[name]
@@ -2091,11 +2136,11 @@ func (s *KernelService) UploadBinary(requestedName string, src io.Reader, filena
 		return fmt.Errorf("kernel not found: %s", name)
 	}
 
-	installMu, err := s.lockKernel(name)
+	release, err := s.lockKernel(name)
 	if err != nil {
 		return err
 	}
-	defer installMu.Unlock()
+	defer release()
 
 	s.mu.Lock()
 	s.resolveBinaryPath(k)

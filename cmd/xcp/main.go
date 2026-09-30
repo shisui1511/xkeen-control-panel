@@ -467,6 +467,9 @@ func main() {
 	// failed health checks, so a wedged proxy kernel doesn't leave the LAN
 	// without internet access.
 	watchdogSvc := services.NewWatchdogService(api.XKeenService(), cfg.MihomoConfigDir, cfg.XRayConfigDir)
+	// Пока идёт установка, откат или загрузка ядра, проверки здоровья
+	// приостановлены: замена бинарника под нагрузкой не должна снимать TPROXY (KERN-03).
+	watchdogSvc.SetKernelBusyFunc(kernelSvc.Busy)
 	watchdogSvc.Start()
 	api.SetWatchdogService(watchdogSvc)
 	defer watchdogSvc.Stop()
