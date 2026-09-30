@@ -2395,11 +2395,11 @@ a.chip:hover {
     flex-direction: column;
     overflow: hidden;
     transform: translateX(-100%);
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
   }
 
   .sidebar.sidebar-open {
     transform: translateX(0);
+    box-shadow: var(--shadow-md);
   }
 
   .sidebar-nav {
