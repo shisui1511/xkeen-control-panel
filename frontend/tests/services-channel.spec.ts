@@ -301,6 +301,88 @@ test.describe('Services page — channel & updates card', () => {
     await expect(toast.first()).toContainText(/канал|channel/i);
   });
 
+  test('смена канала во время установки: карточка Xray не сбрасывается, 409 объяснён тостом', async ({
+    page
+  }) => {
+    await page.addInitScript(() => window.localStorage.setItem('lang', 'ru'));
+    const channelPosts: string[] = [];
+    await page.route('**/api/kernels', async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: kernelsFixture('xray', {
+            xray: { status: 'downloading', stage: 'downloading', message: '' },
+            mihomo: { message: '' }
+          })
+        })
+      });
+    });
+    await page.route('**/api/kernels/xray/status', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: { status: 'downloading', stage: 'downloading' }
+        })
+      });
+    });
+    await page.route('**/api/kernels/xray/channel', async (route) => {
+      channelPosts.push('xray');
+      await route.fulfill({
+        status: 409,
+        contentType: 'text/plain',
+        body: 'install already in progress'
+      });
+    });
+    await page.route('**/api/kernels/mihomo/channel', async (route) => {
+      channelPosts.push('mihomo');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            channel: 'preview',
+            kernel: {
+              name: 'mihomo',
+              display_name: 'Mihomo',
+              binary_path: '/opt/bin/mihomo',
+              current_version: '1.18.0',
+              latest_version: '1.19.5',
+              has_update: true,
+              channel: 'preview',
+              status: 'idle',
+              process_status: 'stopped',
+              message: ''
+            }
+          }
+        })
+      });
+    });
+
+    await page.goto('/#/services');
+    const xrayItem = page.locator('.update-item', { hasText: 'Xray' });
+    const mihomoItem = page.locator('.update-item', { hasText: 'Mihomo' });
+    await expect(xrayItem).toContainText('Скачивание…');
+
+    const channelGroup = page.getByRole('group', { name: /update channel|канал обновлений/i });
+    await channelGroup.getByRole('button', { name: /^(preview|предварительный)$/i }).click();
+
+    const toast = page.locator('.toast--warning');
+    await expect(toast).toContainText('Xray: идёт установка — канал не изменён');
+    // Карточка устанавливаемого ядра осталась в статусе установки
+    await expect(xrayItem).toContainText('Скачивание…');
+    await expect(xrayItem).not.toContainText('проверяем');
+    await expect(page.getByTestId('kernel-checking-hint-xray')).toHaveCount(0);
+    // Свободное ядро получило данные ответа нового канала
+    await expect(mihomoItem).toContainText('v1.19.5');
+    expect(channelPosts.sort()).toEqual(['mihomo', 'xray']);
+  });
+
   test('shows reinstall, rollback, and upload buttons and does not offer browser download', async ({
     page
   }) => {
