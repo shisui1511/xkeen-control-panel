@@ -856,23 +856,37 @@ else
 fi
 cleanup
 
-# purge_install_dir отказывается от пустого и системных путей (rm — mock)
+# purge_install_dir — белый список: только абсолютный путь с последним компонентом xcp (rm — mock)
 make_sandbox
 printf '#!/bin/sh\necho "$*" >> "%s/rm.log"\n' "$TMP" > "$MOCK_BIN/rm"
 chmod +x "$MOCK_BIN/rm"
 guard_ok=true
-for bad in "" "/" "/opt" "/opt/" "/opt/etc" "/opt/etc/"; do
+for bad in "" "/" "//" "/opt" "/opt/" "/opt//" "/opt/etc" "/opt/etc/" "/opt/etc/." "/opt/etc/.." \
+           "/opt/etc/init.d" "/opt/sbin" "/home" "relative/dir" "xcp" "/opt/etc//xcp" \
+           "/opt/etc/xcp/.." "/opt/etc/xcp/" "/opt/etc/./xcp"; do
     rc=0
     out=$(run_in_sandbox "INSTALL_DIR='$bad'; purge_install_dir" 2>&1) || rc=$?
     if [ "$rc" -ne 1 ]; then
         guard_ok=false
         printf "    путь '%s': код %s вместо 1\n" "$bad" "$rc"
     fi
+    if ! echo "$out" | grep -q "Отказ удалять каталог данных"; then
+        guard_ok=false
+        printf "    путь '%s': нет сообщения об отказе\n" "$bad"
+    fi
 done
 if [ "$guard_ok" = "true" ] && [ ! -s "$TMP/rm.log" ]; then
-    pass "purge_install_dir отказывается от системных путей"
+    pass "purge_install_dir отказывается от 19 недопустимых путей без вызова rm"
 else
-    fail "purge_install_dir отказывается от системных путей (rm.log: $(cat "$TMP/rm.log" 2>/dev/null))"
+    fail "purge_install_dir отказывается от недопустимых путей (rm.log: $(cat "$TMP/rm.log" 2>/dev/null))"
+fi
+# Штатный путь проходит белый список: rm вызван ровно с -rf -- /opt/etc/xcp
+rc=0
+run_in_sandbox "INSTALL_DIR='/opt/etc/xcp'; purge_install_dir" >/dev/null 2>&1 || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$TMP/rm.log" 2>/dev/null)" = "-rf -- /opt/etc/xcp" ]; then
+    pass "purge_install_dir /opt/etc/xcp → rm -rf -- /opt/etc/xcp"
+else
+    fail "purge_install_dir /opt/etc/xcp → rm -rf -- /opt/etc/xcp (rc=$rc, rm.log: $(cat "$TMP/rm.log" 2>/dev/null))"
 fi
 cleanup
 
