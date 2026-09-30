@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -2314,5 +2315,75 @@ func TestWatchdogService_ReportRoutingIssues_LogsOnlyOnChange(t *testing.T) {
 		if st.wantLog != "" && !strings.Contains(got, st.wantLog) {
 			t.Errorf("step %d: expected log containing %q, got %q", i, st.wantLog, got)
 		}
+	}
+}
+
+// TestWatchdog_KernelInstallSuppressesDisarm (G1): пока над ядром идёт установка,
+// проверка здоровья не запускает `xkeen -status`, не копит провалы и не снимает TPROXY.
+func TestWatchdog_KernelInstallSuppressesDisarm(t *testing.T) {
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	statusLog := filepath.Join(tmpDir, "status.log")
+	dummy := filepath.Join(tmpDir, "xkeen")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %q\necho \"XKeen is not running\"\nexit 1\n", statusLog)
+	if err := os.WriteFile(dummy, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, delLog := installFakeIptables(t, ruleOutput)
+
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	simTime := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	xkeenSvc.now = func() time.Time { return simTime }
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.now = func() time.Time { return simTime }
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	ks, _ := newInstallTestService(t, "1.18.0")
+	inDownload := make(chan struct{})
+	release := make(chan struct{})
+	ks.SetInstallSource("arm64", func(context.Context, string, string) error {
+		close(inDownload)
+		<-release
+		return errors.New("stop")
+	})
+	done := make(chan error, 1)
+	if err := ks.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	<-inDownload
+	defer func() {
+		close(release)
+		<-done
+	}()
+
+	w.SetKernelBusyFunc(ks.Busy)
+
+	for i := 0; i < 5; i++ {
+		simTime = simTime.Add(watchdogCheckInterval)
+		w.CheckHealth()
+		if got := w.ConsecutiveFailures(); got != 0 {
+			t.Fatalf("шаг %d: ConsecutiveFailures = %d, want 0", i, got)
+		}
+	}
+	// Дать возможной горутине снятия (при ошибке реализации) отработать.
+	time.Sleep(100 * time.Millisecond)
+
+	if data, err := os.ReadFile(delLog); err == nil && strings.TrimSpace(string(data)) != "" {
+		t.Fatalf("TPROXY не должен сниматься во время установки ядра, журнал iptables:\n%s", data)
+	}
+	if data, err := os.ReadFile(statusLog); err == nil && strings.TrimSpace(string(data)) != "" {
+		t.Fatalf("xkeen -status не должен запускаться во время установки ядра, журнал:\n%s", data)
+	}
+	if snap := w.Snapshot(); snap.State == WatchdogStateDisarmed {
+		t.Fatalf("состояние не должно быть %q", WatchdogStateDisarmed)
 	}
 }

@@ -2064,3 +2064,112 @@ func TestInstall_CreatesMihomoConfigDir(t *testing.T) {
 		}
 	})
 }
+
+// TestKernelService_BusyLifecycle: Busy()/KernelBusy() отражают идущие операции
+// над ядрами (установка, откат, загрузка файла) и возвращаются в false после них.
+func TestKernelService_BusyLifecycle(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+	if svc.Busy() {
+		t.Fatal("Busy() до любой операции должен быть false")
+	}
+
+	inDownload := make(chan struct{})
+	release := make(chan struct{})
+	svc.SetInstallSource("arm64", func(context.Context, string, string) error {
+		close(inDownload)
+		<-release
+		return errors.New("stop")
+	})
+	done := make(chan error, 1)
+	if err := svc.BeginInstall("mihomo", func(err error) { done <- err }); err != nil {
+		t.Fatal(err)
+	}
+	<-inDownload
+
+	if !svc.Busy() {
+		t.Error("Busy() во время загрузки должен быть true")
+	}
+	if !svc.KernelBusy("mihomo") {
+		t.Error("KernelBusy(mihomo) во время установки должен быть true")
+	}
+	if svc.KernelBusy("xray") {
+		t.Error("KernelBusy(xray) должен быть false: установка идёт над mihomo")
+	}
+	svc.mu.RLock()
+	busyLocked := svc.busyLocked("mihomo")
+	svc.mu.RUnlock()
+	if !busyLocked {
+		t.Error("busyLocked(mihomo) должен быть true")
+	}
+
+	close(release)
+	<-done
+	// release замка вызывается после onDone, поэтому ждём опросом.
+	deadline := time.Now().Add(2 * time.Second)
+	for svc.Busy() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if svc.Busy() || svc.KernelBusy("mihomo") {
+		t.Fatal("после завершения установки Busy()/KernelBusy() должны быть false")
+	}
+
+	// Откат и загрузка файла держат Busy() только на время вызова.
+	_ = svc.Rollback("mihomo")
+	if svc.Busy() {
+		t.Error("Busy() после Rollback должен быть false")
+	}
+	_ = svc.UploadBinary("mihomo", strings.NewReader("not an elf"), "mihomo")
+	if svc.Busy() {
+		t.Error("Busy() после UploadBinary должен быть false")
+	}
+}
+
+// TestKernelService_BusyCounterAcrossKernels: счётчик общий для всех ядер,
+// release идемпотентен и не уводит счётчик ниже нуля.
+func TestKernelService_BusyCounterAcrossKernels(t *testing.T) {
+	svc, _ := newInstallTestService(t, "1.18.0")
+
+	relX, err := svc.lockKernel("xray")
+	if err != nil {
+		t.Fatal(err)
+	}
+	relM, err := svc.lockKernel("mihomo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.lockKernel("xray"); !errors.Is(err, ErrKernelBusy) {
+		t.Fatalf("повторный замок xray: got %v, want ErrKernelBusy", err)
+	}
+	// Неудачный захват не должен менять счётчик.
+	if got := svc.opsActive.Load(); got != 2 {
+		t.Fatalf("opsActive = %d, want 2", got)
+	}
+
+	relX()
+	if !svc.Busy() {
+		t.Error("Busy() должен оставаться true, пока идёт операция над mihomo")
+	}
+	if svc.KernelBusy("xray") {
+		t.Error("KernelBusy(xray) должен быть false после release")
+	}
+	relX() // повторный вызов — no-op
+	if got := svc.opsActive.Load(); got != 1 {
+		t.Fatalf("после повторного release opsActive = %d, want 1", got)
+	}
+
+	relM()
+	relM()
+	if svc.Busy() {
+		t.Error("Busy() должен быть false после release обоих ядер")
+	}
+	if got := svc.opsActive.Load(); got != 0 {
+		t.Fatalf("opsActive = %d, want 0 (не ниже нуля)", got)
+	}
+
+	// Замок снова свободен.
+	rel, err := svc.lockKernel("xray")
+	if err != nil {
+		t.Fatalf("замок xray после release должен быть свободен: %v", err)
+	}
+	rel()
+}
