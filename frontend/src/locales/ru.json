@@ -564,6 +564,7 @@
   "svc.install_stable_confirm": "Поставить {version}",
   "svc.channel_checking": "проверяем…",
   "svc.kernel_checking_hint": "Проверяем обновления на новом канале…",
+  "svc.channel_busy": "{name}: идёт установка — канал не изменён",
   "svc.channel_error": "Не удалось изменить канал",
   "svc.channel_mismatch_hint": "Каналы ядер различаются: Xray — {xray}, Mihomo — {mihomo}. Нажмите канал ещё раз, чтобы синхронизировать.",
   "svc.mihomo_api_unavailable": "⚠ API недоступен — Исправить",

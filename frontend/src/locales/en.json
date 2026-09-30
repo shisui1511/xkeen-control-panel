@@ -567,6 +567,7 @@
   "svc.install_stable_confirm": "Install {version}",
   "svc.channel_checking": "checking…",
   "svc.kernel_checking_hint": "Checking for updates on the new channel…",
+  "svc.channel_busy": "{name}: installation in progress — channel not changed",
   "svc.channel_error": "Failed to change channel",
   "svc.channel_mismatch_hint": "Kernel channels differ: Xray — {xray}, Mihomo — {mihomo}. Click the channel again to sync.",
   "svc.mihomo_api_unavailable": "⚠ API unavailable — Fix",
