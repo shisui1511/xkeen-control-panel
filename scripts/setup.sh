@@ -206,6 +206,36 @@ get_latest_stable_version() {
   fi
 }
 
+# latest_rc_tag — читает теги vX.Y.Z-rc.N со stdin, печатает максимальный по
+# кортежу (major, minor, patch, номер RC) числовым сравнением. Не использует
+# утилиту сортировки: busybox роутера сравнивает ключи строкой (rc.9 > rc.28).
+# Пустой вход — пустой вывод.
+latest_rc_tag() {
+  awk '
+    /^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$/ {
+      s = $0
+      sub(/^v/, "", s)
+      sub(/-rc\./, ".", s)
+      if (split(s, p, ".") != 4) next
+      newer = 0
+      if (!have) {
+        newer = 1
+      } else {
+        for (i = 1; i <= 4; i++) {
+          if (p[i] + 0 > b[i]) { newer = 1; break }
+          if (p[i] + 0 < b[i]) break
+        }
+      }
+      if (newer) {
+        have = 1
+        for (i = 1; i <= 4; i++) b[i] = p[i] + 0
+        best = $0
+      }
+    }
+    END { if (have) print best }
+  '
+}
+
 # Получить latest pre-release версию: последний release candidate, а если после
 # него уже вышел stable той же или более новой версии — stable (как канал beta в панели)
 get_latest_prerelease_version() {
@@ -213,8 +243,7 @@ get_latest_prerelease_version() {
   json=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases?per_page=30" || echo "")
   [ -n "$json" ] || { echo ""; return; }
   rc=$(echo "$json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' \
-    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' | sed 's/^v//' \
-    | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -1 | sed 's/^./v&/')
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' | latest_rc_tag)
   stable=$(get_latest_stable_version)
   pick_prerelease "$rc" "$stable"
 }
