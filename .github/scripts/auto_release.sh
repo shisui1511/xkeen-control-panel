@@ -148,7 +148,7 @@ promote() {
     return
   fi
   if release_worthy "$rc..HEAD"; then
-    echo "none после $rc есть новые изменения, ждём следующий RC"
+    echo "none $rc не продвигается в stable: после него есть новые изменения, будет новый RC"
     return
   fi
   age=$((NOW - $(tag_time "$rc")))
@@ -253,10 +253,12 @@ run() {
   local decision kind tag rc main_sha state
   heal_tags
 
+  # «Нечего продвигать» — штатный ответ почти каждого запуска; в журнал он идёт
+  # только вместе с итоговым решением, а не в каждом из промежуточных прогонов
   decision=$(promote)
-  log "promote: $decision"
   read -r kind tag rc <<<"$decision"
   if [ "$kind" = stable ]; then
+    log "promote: $decision"
     publish "$tag" "$(git rev-list -n1 "$rc")"
   fi
 
@@ -273,10 +275,11 @@ run() {
       return
       ;;
     2)
-      log "CI для ${main_sha:0:8} ещё идёт"
+      log "ждём остальные прогоны CI для ${main_sha:0:8}: решение примет последний из них"
       return
       ;;
   esac
+  [ "$kind" = stable ] || log "promote: ${decision#none }"
 
   decision=$(plan)
   log "plan: $decision"
