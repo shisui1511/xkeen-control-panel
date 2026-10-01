@@ -138,12 +138,12 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 
 	releases, err := releasesFetcher()
 	if err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_check_failed", a.t(r, "update.check_failed"), err.Error())
 		return
 	}
 	info, err := pickLatestRelease(releases, channel)
 	if err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_check_failed", a.t(r, "update.check_failed"), err.Error())
 		return
 	}
 
@@ -175,13 +175,13 @@ func (a *API) UpdateChangelog(w http.ResponseWriter, r *http.Request) {
 	}
 	version := r.URL.Query().Get("version")
 	if version == "" {
-		a.errorResponse(w, "Version required", http.StatusBadRequest)
+		JSONErrorCode(w, http.StatusBadRequest, "update_version_required", a.t(r, "update.version_required"))
 		return
 	}
 
 	changelog, err := fetchChangelog(version)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_changelog_failed", a.t(r, "update.changelog_failed"), err.Error())
 		return
 	}
 
@@ -240,13 +240,13 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.ContentLength != 0 {
 		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			JSONError(w, http.StatusBadRequest, "invalid request body")
+			JSONErrorCode(w, http.StatusBadRequest, "invalid_request_body", a.t(r, "error.invalid_request"))
 			return
 		}
 	}
 	latestBackup, err := resolveBackup(backupDir, req.Backup)
 	if err != nil {
-		JSONError(w, http.StatusNotFound, "No backup found")
+		JSONErrorCode(w, http.StatusNotFound, "update_no_backup", a.t(r, "update.no_backup"))
 		return
 	}
 
@@ -264,7 +264,7 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 	if err := copyFile(latestBackup, tempBinPath); err != nil {
 		msg := "Rollback failed: " + err.Error()
 		setUpdateStep("failed", 0, "rollback_failed", map[string]string{"detail": err.Error()}, msg)
-		JSONError(w, http.StatusInternalServerError, msg)
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_rollback_failed", a.t(r, "update.rollback_failed"), err.Error())
 		return
 	}
 	if err := os.Chmod(tempBinPath, 0755); err != nil {
@@ -275,7 +275,7 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 		_ = os.Remove(tempBinPath)
 		msg := "Rollback failed: " + err.Error()
 		setUpdateStep("failed", 0, "rollback_failed", map[string]string{"detail": err.Error()}, msg)
-		JSONError(w, http.StatusInternalServerError, msg)
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_rollback_failed", a.t(r, "update.rollback_failed"), err.Error())
 		return
 	}
 

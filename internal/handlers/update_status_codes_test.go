@@ -278,3 +278,79 @@ func TestUpdateErrors_InProgress(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateErrors(t *testing.T) {
+	type tc struct {
+		name       string
+		call       func(api *API) http.HandlerFunc
+		method     string
+		target     string
+		body       string
+		prepare    func(t *testing.T)
+		status     int
+		code       string
+		key        string
+		detail     string
+		wantDetail bool
+	}
+	cases := []tc{
+		{
+			name: "rollback: bad body", method: http.MethodPost, target: "/api/update/rollback", body: "{bad",
+			call:   func(a *API) http.HandlerFunc { return a.UpdateRollback },
+			status: http.StatusBadRequest, code: "invalid_request_body", key: "error.invalid_request",
+		},
+		{
+			name: "rollback: no backup", method: http.MethodPost, target: "/api/update/rollback",
+			call:   func(a *API) http.HandlerFunc { return a.UpdateRollback },
+			status: http.StatusNotFound, code: "update_no_backup", key: "update.no_backup",
+		},
+		{
+			name: "changelog: version required", method: http.MethodGet, target: "/api/update/changelog",
+			call:   func(a *API) http.HandlerFunc { return a.UpdateChangelog },
+			status: http.StatusBadRequest, code: "update_version_required", key: "update.version_required",
+		},
+		{
+			name: "check: fetch failed carries detail", method: http.MethodGet, target: "/api/update/check",
+			call: func(a *API) http.HandlerFunc { return a.UpdateCheck },
+			prepare: func(t *testing.T) {
+				releasesFetcher = func() ([]githubRelease, error) { return nil, errors.New("GitHub API: 403 rate limit") }
+			},
+			status: http.StatusInternalServerError, code: "update_check_failed", key: "update.check_failed",
+			detail: "GitHub API: 403 rate limit", wantDetail: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := stubUpdateSeams(t)
+			api := newUpdateTestAPI(t, dir)
+			if c.prepare != nil {
+				c.prepare(t)
+			}
+			for _, lang := range []string{"ru", "en"} {
+				status, env := callUpdateHandler(t, c.call(api), c.method, c.target, c.body, lang)
+				if status != c.status {
+					t.Fatalf("%s: status = %d, want %d", lang, status, c.status)
+				}
+				if env.Success || env.Code != c.code {
+					t.Fatalf("%s: unexpected envelope %+v", lang, env)
+				}
+				if want := i18n.T(lang, c.key); env.Error != want {
+					t.Fatalf("%s: error = %q, want %q", lang, env.Error, want)
+				}
+				if c.wantDetail {
+					if env.Detail != c.detail {
+						t.Fatalf("%s: detail = %q, want %q", lang, env.Detail, c.detail)
+					}
+					if strings.Contains(env.Error, c.detail) {
+						t.Fatalf("%s: error must not contain the technical detail: %q", lang, env.Error)
+					}
+				} else if env.Detail != "" {
+					t.Fatalf("%s: unexpected detail %q", lang, env.Detail)
+				}
+			}
+			if i18n.T("ru", c.key) == i18n.T("en", c.key) {
+				t.Fatalf("ru and en texts of %s must differ", c.key)
+			}
+		})
+	}
+}

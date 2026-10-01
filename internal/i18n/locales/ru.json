@@ -51,6 +51,8 @@
   "update.rollback_failed": "Ошибка отката",
   "update.no_backup": "Резервная копия не найдена",
   "update.in_progress": "Обновление уже выполняется",
+  "update.version_required": "Не указана версия",
+  "update.changelog_failed": "Не удалось получить описание изменений",
   "update.complete": "Обновление завершено",
   "update.health_check_failed": "Проверка работоспособности не пройдена, требуется откат",
 

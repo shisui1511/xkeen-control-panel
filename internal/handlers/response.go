@@ -15,6 +15,10 @@ type APIResponse struct {
 	// человекочитаемому Error — фронтенд различает конкретные отказы без
 	// парсинга текста сообщения.
 	Code string `json:"code,omitempty"`
+	// Detail — технический текст ошибки (ошибка ФС, сети, парсера), отдельно
+	// от переведённого Error: перевод остаётся на языке запроса, а деталь
+	// фронтенд показывает под ним как есть.
+	Detail string `json:"detail,omitempty"`
 }
 
 // JSONSuccess writes a successful JSON response with the given data payload.
@@ -40,4 +44,12 @@ func JSONErrorCode(w http.ResponseWriter, status int, code, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: msg, Code: code})
+}
+
+// JSONErrorCodeDetail is like JSONErrorCode but also carries the technical
+// error text in Detail, kept apart from the translated msg.
+func JSONErrorCodeDetail(w http.ResponseWriter, status int, code, msg, detail string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: msg, Code: code, Detail: detail})
 }

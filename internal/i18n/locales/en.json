@@ -51,6 +51,8 @@
   "update.rollback_failed": "Rollback failed",
   "update.no_backup": "No backup found",
   "update.in_progress": "Update already in progress",
+  "update.version_required": "Version is required",
+  "update.changelog_failed": "Failed to load release notes",
   "update.complete": "Update complete",
   "update.health_check_failed": "Health check failed, rollback required",
 
