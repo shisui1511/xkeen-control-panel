@@ -379,13 +379,13 @@ func (a *API) UpdateChannelSet(w http.ResponseWriter, r *http.Request) {
 		Channel string `json:"channel"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		a.errorResponse(w, "invalid JSON", http.StatusBadRequest)
+		JSONErrorCode(w, http.StatusBadRequest, "invalid_request_body", a.t(r, "error.invalid_request"))
 		return
 	}
 	switch body.Channel {
 	case "stable", "beta":
 	default:
-		a.errorResponse(w, "channel must be stable or beta", http.StatusBadRequest)
+		JSONErrorCode(w, http.StatusBadRequest, "update_channel_invalid", a.t(r, "update.channel_invalid"))
 		return
 	}
 	// Lock/Unlock bracket only the field write (134-REVIEW CR-01);
@@ -395,7 +395,7 @@ func (a *API) UpdateChannelSet(w http.ResponseWriter, r *http.Request) {
 	a.cfg.UpdateChannel = body.Channel
 	a.cfg.Unlock()
 	if err := config.Save(a.cfg.ConfigPath, a.cfg); err != nil {
-		a.errorResponse(w, "failed to save config: "+err.Error(), http.StatusInternalServerError)
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_save_failed", a.t(r, "update.save_failed"), err.Error())
 		return
 	}
 	JSONSuccess(w, map[string]string{"channel": body.Channel})

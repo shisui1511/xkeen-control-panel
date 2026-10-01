@@ -279,6 +279,26 @@ func TestUpdateErrors_InProgress(t *testing.T) {
 	}
 }
 
+// unwritableConfigPath — путь, родитель которого обычный файл: config.Save
+// на нём гарантированно падает.
+func unwritableConfigPath(t *testing.T) string {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(file, "config.json")
+}
+
+// windowErrorText — текст ошибки parseInstallWindow, который уходит в detail.
+func windowErrorText(window string) string {
+	_, _, err := parseInstallWindow(window)
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 func TestUpdateErrors(t *testing.T) {
 	type tc struct {
 		name       string
@@ -287,6 +307,7 @@ func TestUpdateErrors(t *testing.T) {
 		target     string
 		body       string
 		prepare    func(t *testing.T)
+		cfgPath    func(t *testing.T) string
 		status     int
 		code       string
 		key        string
@@ -318,6 +339,41 @@ func TestUpdateErrors(t *testing.T) {
 			status: http.StatusInternalServerError, code: "update_check_failed", key: "update.check_failed",
 			detail: "GitHub API: 403 rate limit", wantDetail: true,
 		},
+		{
+			name: "channel: bad body", method: http.MethodPost, target: "/api/update/channel", body: "{invalid",
+			call:   func(a *API) http.HandlerFunc { return a.UpdateChannelSet },
+			status: http.StatusBadRequest, code: "invalid_request_body", key: "error.invalid_request",
+		},
+		{
+			name: "channel: not in the whitelist", method: http.MethodPost, target: "/api/update/channel", body: `{"channel":"alpha"}`,
+			call:   func(a *API) http.HandlerFunc { return a.UpdateChannelSet },
+			status: http.StatusBadRequest, code: "update_channel_invalid", key: "update.channel_invalid",
+		},
+		{
+			name: "channel: save failed carries detail", method: http.MethodPost, target: "/api/update/channel", body: `{"channel":"beta"}`,
+			call:    func(a *API) http.HandlerFunc { return a.UpdateChannelSet },
+			cfgPath: unwritableConfigPath,
+			status:  http.StatusInternalServerError, code: "update_save_failed", key: "update.save_failed",
+			wantDetail: true,
+		},
+		{
+			name: "settings: bad body", method: http.MethodPost, target: "/api/update/settings", body: "{x",
+			call:   func(a *API) http.HandlerFunc { return a.UpdateSettingsHandler },
+			status: http.StatusBadRequest, code: "invalid_request_body", key: "error.invalid_request",
+		},
+		{
+			name: "settings: invalid window carries detail", method: http.MethodPost, target: "/api/update/settings", body: `{"install_window":"25:00-01:00"}`,
+			call:   func(a *API) http.HandlerFunc { return a.UpdateSettingsHandler },
+			status: http.StatusBadRequest, code: "update_window_invalid", key: "update.window_invalid",
+			detail: windowErrorText("25:00-01:00"), wantDetail: true,
+		},
+		{
+			name: "settings: save failed carries detail", method: http.MethodPost, target: "/api/update/settings", body: `{"auto_check":true}`,
+			call:    func(a *API) http.HandlerFunc { return a.UpdateSettingsHandler },
+			cfgPath: unwritableConfigPath,
+			status:  http.StatusInternalServerError, code: "update_save_failed", key: "update.save_failed",
+			wantDetail: true,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -325,6 +381,9 @@ func TestUpdateErrors(t *testing.T) {
 			api := newUpdateTestAPI(t, dir)
 			if c.prepare != nil {
 				c.prepare(t)
+			}
+			if c.cfgPath != nil {
+				api.cfg.ConfigPath = c.cfgPath(t)
 			}
 			for _, lang := range []string{"ru", "en"} {
 				status, env := callUpdateHandler(t, c.call(api), c.method, c.target, c.body, lang)
@@ -338,10 +397,13 @@ func TestUpdateErrors(t *testing.T) {
 					t.Fatalf("%s: error = %q, want %q", lang, env.Error, want)
 				}
 				if c.wantDetail {
-					if env.Detail != c.detail {
+					if c.detail != "" && env.Detail != c.detail {
 						t.Fatalf("%s: detail = %q, want %q", lang, env.Detail, c.detail)
 					}
-					if strings.Contains(env.Error, c.detail) {
+					if env.Detail == "" {
+						t.Fatalf("%s: detail must not be empty", lang)
+					}
+					if strings.Contains(env.Error, env.Detail) {
 						t.Fatalf("%s: error must not contain the technical detail: %q", lang, env.Error)
 					}
 				} else if env.Detail != "" {

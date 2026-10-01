@@ -53,6 +53,9 @@
   "update.in_progress": "Обновление уже выполняется",
   "update.version_required": "Не указана версия",
   "update.changelog_failed": "Не удалось получить описание изменений",
+  "update.channel_invalid": "Канал обновлений должен быть stable или beta",
+  "update.save_failed": "Не удалось сохранить настройки обновлений",
+  "update.window_invalid": "Неверное окно установки, формат ЧЧ:ММ-ЧЧ:ММ",
   "update.complete": "Обновление завершено",
   "update.health_check_failed": "Проверка работоспособности не пройдена, требуется откат",
 

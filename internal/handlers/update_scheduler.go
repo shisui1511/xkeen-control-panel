@@ -387,12 +387,12 @@ func (a *API) UpdateSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		InstallWindow *string `json:"install_window"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
-		JSONError(w, http.StatusBadRequest, "invalid JSON")
+		JSONErrorCode(w, http.StatusBadRequest, "invalid_request_body", a.t(r, "error.invalid_request"))
 		return
 	}
 	if body.InstallWindow != nil {
 		if _, _, err := parseInstallWindow(*body.InstallWindow); err != nil {
-			JSONError(w, http.StatusBadRequest, err.Error())
+			JSONErrorCodeDetail(w, http.StatusBadRequest, "update_window_invalid", a.t(r, "update.window_invalid"), err.Error())
 			return
 		}
 	}
@@ -411,7 +411,7 @@ func (a *API) UpdateSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	a.cfg.Unlock()
 	if err := config.Save(a.cfg.ConfigPath, a.cfg); err != nil {
-		JSONError(w, http.StatusInternalServerError, "failed to save config: "+err.Error())
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_save_failed", a.t(r, "update.save_failed"), err.Error())
 		return
 	}
 	JSONSuccess(w, a.updateCheckState())
