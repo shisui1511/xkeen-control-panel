@@ -29,9 +29,10 @@
     defaultHighlightStyle,
     HighlightStyle,
     bracketMatching,
-    foldKeymap
+    foldKeymap,
+    ensureSyntaxTree
   } from '@codemirror/language';
-  import { lintKeymap, linter } from '@codemirror/lint';
+  import { lintKeymap, linter, type Diagnostic } from '@codemirror/lint';
   import { json, jsonParseLinter, jsonLanguage } from '@codemirror/lang-json';
   import { yaml, yamlLanguage } from '@codemirror/lang-yaml';
   import { hoverTooltip } from '@codemirror/view';
@@ -43,7 +44,8 @@
     jsonSchemaHover,
     jsonCompletion,
     stateExtensions,
-    handleRefresh
+    handleRefresh,
+    parseJSONDocumentState
   } from 'codemirror-json-schema';
   import { yamlSchemaLinter, yamlSchemaHover, yamlCompletion } from 'codemirror-json-schema/yaml';
   import { createSchemaHoverOptions, createEnhancedTooltip } from './schemaTooltip';
@@ -52,6 +54,7 @@
   import { xraySchema } from '../../schemas/xray';
   import { mihomoSchema } from '../../schemas/mihomo';
   import { localizeSchema } from '../../schemas/localize';
+  import { blankJsonComments } from '../../lib/constructors/xrayRouting';
   import { xraySnippetSource, mihomoSnippetSource } from '../../lib/snippets';
 
   const customHighlightStyle = HighlightStyle.define([
@@ -93,6 +96,60 @@
   const schemaCompartment = new Compartment();
   let lastPath = '';
 
+  // Copy of the document with comments blanked out (same length, same line
+  // breaks), parsed by the JSON grammar: positions match the real document.
+  function blankedJsonState(state: EditorState) {
+    return EditorState.create({
+      doc: blankJsonComments(state.doc.toString()),
+      extensions: [json()]
+    });
+  }
+
+  /**
+   * Linter for JSONC (files Xray reads with comments). Same as the strict
+   * jsonParseLinter, but parses the text with comments blanked out, so error
+   * positions point at the original text. Newer engines do not put a position
+   * into the JSON.parse message; then the first error node of the syntax tree
+   * is used.
+   */
+  function jsoncParseLinter() {
+    return (view: EditorView): Diagnostic[] => {
+      const doc = view.state.doc;
+      const blanked = blankedJsonState(view.state);
+      try {
+        JSON.parse(blanked.doc.toString());
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) throw e;
+        let pos: number | null = null;
+        let m: RegExpMatchArray | null;
+        if ((m = e.message.match(/at position (\d+)/))) {
+          pos = Math.min(+m[1], doc.length);
+        } else if ((m = e.message.match(/at line (\d+) column (\d+)/))) {
+          pos = Math.min(doc.line(Math.min(+m[1], doc.lines)).from + +m[2] - 1, doc.length);
+        } else {
+          ensureSyntaxTree(blanked, blanked.doc.length, 200)?.iterate({
+            enter(node) {
+              if (pos !== null) return false;
+              if (node.type.isError) {
+                pos = Math.min(node.from, doc.length);
+                return false;
+              }
+            }
+          });
+        }
+        const at = pos ?? 0;
+        return [{ from: at, to: at, severity: 'error', message: e.message }];
+      }
+      return [];
+    };
+  }
+
+  // Document parser for the schema linter: comments are blanked in a copy of
+  // the state, so pointers (positions) still match the real document.
+  function jsoncDocumentParser(state: EditorState) {
+    return parseJSONDocumentState(blankedJsonState(state));
+  }
+
   function getSchemaExtensions(filePath: string, expert: boolean = false, lang: Lang = 'ru') {
     if (!schemaEnabled) return [];
 
@@ -127,9 +184,14 @@
     };
 
     if (isJson) {
+      // Xray reads JSONC: comments are not errors there; other JSON stays strict
+      const parseLinter = isXray ? jsoncParseLinter() : jsonParseLinter();
+      const schemaLinter = isXray
+        ? jsonSchemaLinter({ jsonParser: jsoncDocumentParser })
+        : jsonSchemaLinter();
       if (expert) {
         return [
-          linter(jsonParseLinter(), { delay: 300 }),
+          linter(parseLinter, { delay: 300 }),
           jsonLanguage.data.of({ autocomplete: jsonCompletion() }),
           jsonLanguage.data.of({ autocomplete: snippetSource }),
           hoverTooltip(enhancedJsonHover),
@@ -137,8 +199,8 @@
         ];
       }
       return [
-        linter(jsonParseLinter(), { delay: 300 }),
-        linter(jsonSchemaLinter(), { needsRefresh: handleRefresh }),
+        linter(parseLinter, { delay: 300 }),
+        linter(schemaLinter, { needsRefresh: handleRefresh }),
         jsonLanguage.data.of({ autocomplete: jsonCompletion() }),
         jsonLanguage.data.of({ autocomplete: snippetSource }),
         hoverTooltip(enhancedJsonHover),

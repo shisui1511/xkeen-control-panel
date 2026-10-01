@@ -373,3 +373,86 @@ proxies:
     expect(controlRequests.some((u) => u.includes('action=restart'))).toBe(false);
   });
 });
+
+// UPDUI-04 (D-16): файлы Xray проверяются как JSONC, остальной JSON — строгий
+test.describe('Editor JSONC lint for Xray files', () => {
+  const files: Record<string, string> = {
+    '/opt/etc/xray/configs/05_routing.json': '{\n// comment\n}\n',
+    '/opt/etc/xray/configs/04_outbounds.json': '{\n// c\n  "a": \n}\n',
+    '/opt/etc/mihomo/rules.json': '{\n// comment\n}\n'
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window.navigator, 'serviceWorker', {
+        value: undefined,
+        writable: false,
+        configurable: true
+      });
+    });
+    await page.route('**/api/**', async (route) => {
+      const url = new URL(route.request().url());
+      const json = (body: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(body)
+        });
+      if (url.pathname === '/api/auth/me') {
+        await json({ authenticated: true, setup_required: false, csrf_token: 'mock-csrf' });
+      } else if (url.pathname === '/api/config/list') {
+        const dir = url.searchParams.get('dir') || '';
+        await json(
+          Object.keys(files)
+            .filter((p) => p.startsWith(dir + '/'))
+            .map((p) => ({ name: p.split('/').pop(), path: p, size: files[p].length }))
+        );
+      } else if (url.pathname === '/api/config/read') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/plain',
+          body: files[url.searchParams.get('path') || ''] ?? ''
+        });
+      } else if (url.pathname === '/api/service/status') {
+        await json({ success: true, data: { is_running: true, active_kernel: 'xray' } });
+      } else {
+        await json({ success: true, data: {} });
+      }
+    });
+  });
+
+  async function openFile(page: import('@playwright/test').Page, name: string) {
+    await page.goto('/#/editor');
+    await page.locator(`.file-row:has-text("${name}")`).first().click();
+    await expect(page.locator(`.editor-tab:has-text("${name}")`)).toBeVisible();
+    await expect(page.locator('.cm-content')).toBeVisible();
+  }
+
+  test('comments in an Xray file are not lint errors', async ({ page }) => {
+    await openFile(page, '05_routing.json');
+    // линтер срабатывает с задержкой 300 мс
+    await page.waitForTimeout(1000);
+    await expect(page.locator('.cm-content [class*="cm-lint"]')).toHaveCount(0);
+  });
+
+  test('a real syntax error in an Xray file is flagged on its own line', async ({ page }) => {
+    await openFile(page, '04_outbounds.json');
+    // диагностика нулевой ширины — точка без размера, поэтому toBeAttached
+    await expect(page.locator('.cm-content [class*="cm-lint"]').first()).toBeAttached({
+      timeout: 5000
+    });
+    const lines = page.locator('.cm-line');
+    const flagged = await lines.evaluateAll((els) =>
+      els.map((el) => !!el.querySelector('[class*="cm-lint"]') || /cm-lint/.test(el.className))
+    );
+    const idx = flagged.indexOf(true);
+    expect(idx).toBeGreaterThanOrEqual(2); // строка 3 или 4, не 1
+  });
+
+  test('a comment in a non-Xray JSON file stays a lint error (strict JSON)', async ({ page }) => {
+    await openFile(page, 'rules.json');
+    await expect(page.locator('.cm-content [class*="cm-lint"]').first()).toBeAttached({
+      timeout: 5000
+    });
+  });
+});
