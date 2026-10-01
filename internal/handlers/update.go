@@ -199,7 +199,7 @@ func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
 		channel = "stable"
 	}
 	if !a.startUpdate(channel) {
-		JSONError(w, http.StatusConflict, "Update already in progress")
+		JSONErrorCode(w, http.StatusConflict, "update_in_progress", a.t(r, "update.in_progress"))
 		return
 	}
 	JSONSuccess(w, getUpdateState())
@@ -230,7 +230,7 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 	binPath := binaryPathFn()
 
 	if st := getUpdateState(); st.Status != "idle" && st.Status != "failed" && st.Status != "done" {
-		JSONError(w, http.StatusConflict, "Update already in progress")
+		JSONErrorCode(w, http.StatusConflict, "update_in_progress", a.t(r, "update.in_progress"))
 		return
 	}
 
