@@ -142,6 +142,33 @@ describe('apiFetch', () => {
     await expect(apiFetchJSON('/api/fail')).rejects.toThrow('boom');
   });
 
+  it('scenario 5b: apiFetchJSON keeps code and detail of the error envelope', async () => {
+    const { apiFetchJSON } = await loadFreshApi();
+
+    fetchMock.mockResolvedValueOnce(
+      makeResponse(404, { success: false, error: 'x', code: 'update_no_backup', detail: 'd' })
+    );
+    await expect(apiFetchJSON('/api/rollback')).rejects.toMatchObject({
+      message: 'x',
+      status: 404,
+      code: 'update_no_backup',
+      detail: 'd'
+    });
+
+    fetchMock.mockResolvedValueOnce(makeResponse(500, { success: false, error: 'plain' }));
+    const plain: any = await apiFetchJSON('/api/plain').catch((e) => e);
+    expect(plain.message).toBe('plain');
+    expect(plain.code).toBeUndefined();
+    expect(plain.detail).toBeUndefined();
+
+    fetchMock.mockResolvedValueOnce(makeResponse(200, { success: false, error: 'y', code: 'c' }));
+    await expect(apiFetchJSON('/api/soft')).rejects.toMatchObject({
+      message: 'y',
+      status: 200,
+      code: 'c'
+    });
+  });
+
   it('scenario 6: apiFetchJSON handles raw non-enveloped JSON, non-JSON errors, and non-ok statuses', async () => {
     const { apiFetchJSON } = await loadFreshApi();
 

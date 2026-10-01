@@ -27,6 +27,16 @@ interface MockOptions {
   backups?: unknown[];
   state?: Record<string, unknown>;
   version?: string;
+  /** Ответ /api/update/status (по умолчанию idle). */
+  status?: Record<string, unknown>;
+  /** Событие SSE /api/update/events: одна строка data. */
+  events?: Record<string, unknown>;
+  /** HTTP-статус /api/version; 503 не даёт циклу переподключения перезагрузить страницу. */
+  versionStatus?: number;
+  /** Тело ответа GET /api/update/check при checkStatus >= 400 (по умолчанию ошибка без кода). */
+  checkBody?: unknown;
+  /** Ответ на POST /api/update/install (по умолчанию успех). */
+  installResponse?: { status: number; body: unknown };
   onSettings?: (body: Record<string, unknown>) => void;
 }
 
@@ -65,13 +75,27 @@ async function mockApi(page: Page, opts: MockOptions = {}) {
     } else if (url.includes('/api/update/channel')) {
       await route.fulfill(json({ channel: 'beta' }));
     } else if (url.includes('/api/version')) {
-      await route.fulfill(json({ panel_version: opts.version ?? 'v0.28.0' }));
+      await route.fulfill(
+        json({ panel_version: opts.version ?? 'v0.28.0' }, opts.versionStatus ?? 200)
+      );
+    } else if (url.includes('/api/update/events')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: opts.events ? `data: ${JSON.stringify(opts.events)}\n\n` : ''
+      });
     } else if (url.includes('/api/update/status')) {
-      await route.fulfill(json({ status: 'idle', message: '', progress: 0 }));
+      await route.fulfill(json(opts.status ?? { status: 'idle', message: '', progress: 0 }));
+    } else if (url.includes('/api/update/install')) {
+      const r = opts.installResponse ?? { status: 200, body: { success: true, data: {} } };
+      await route.fulfill(json(r.body, r.status));
     } else if (url.includes('/api/update/check')) {
       if (opts.checkStatus && opts.checkStatus >= 400) {
         await route.fulfill(
-          json({ success: false, error: 'GitHub API: 403 rate limit' }, opts.checkStatus)
+          json(
+            opts.checkBody ?? { success: false, error: 'GitHub API: 403 rate limit' },
+            opts.checkStatus
+          )
         );
       } else {
         await route.fulfill(json({ success: true, data: opts.check ?? {} }));
@@ -245,6 +269,158 @@ test.describe('Settings updates tab', () => {
       .click();
     await expect.poll(() => saved).toContainEqual({ auto_install: true });
     await expect(page.getByLabel('Окно установки')).toBeVisible();
+  });
+});
+
+test.describe('Update progress labels', () => {
+  const DOWNLOADING = {
+    status: 'downloading',
+    message: 'Downloading update...',
+    message_code: 'downloading',
+    params: { version: '0.29.0-rc.30' },
+    progress: 30
+  };
+
+  test('shows the download step in the interface language', async ({ page }) => {
+    await mockApi(page, { status: DOWNLOADING, events: DOWNLOADING, versionStatus: 503 });
+    await openUpdatesTab(page);
+
+    await expect(page.getByText('Скачиваем версию 0.29.0-rc.30')).toBeVisible();
+    await expect(page.getByText('Downloading update...')).toHaveCount(0);
+  });
+
+  test('shows the failure reason and the technical detail', async ({ page }) => {
+    const failed = {
+      status: 'failed',
+      message: 'Checksum verification failed: sha mismatch',
+      message_code: 'checksum_failed',
+      params: { detail: 'sha mismatch' },
+      progress: 0
+    };
+    await mockApi(page, { status: failed, versionStatus: 503 });
+    await openUpdatesTab(page);
+
+    await expect(page.getByText('Контрольная сумма не совпала')).toBeVisible();
+    await expect(page.locator('.progress-detail')).toHaveText('sha mismatch');
+    await expect(page.getByText('Checksum verification failed')).toHaveCount(0);
+  });
+
+  test('falls back to the backend message for an unknown code', async ({ page }) => {
+    const failed = {
+      status: 'failed',
+      message: 'Something new',
+      message_code: 'future_code',
+      progress: 0
+    };
+    await mockApi(page, { status: failed, versionStatus: 503 });
+    await openUpdatesTab(page);
+
+    await expect(page.getByText('Something new')).toBeVisible();
+    await expect(page.locator('.progress-detail')).toHaveCount(0);
+  });
+});
+
+test.describe('Update progress labels (en)', () => {
+  test.use({ locale: 'en-US' });
+
+  test('shows the download step in English', async ({ page }) => {
+    const downloading = {
+      status: 'downloading',
+      message: 'Downloading update...',
+      message_code: 'downloading',
+      params: { version: '0.29.0-rc.30' },
+      progress: 30
+    };
+    await mockApi(page, { status: downloading, events: downloading, versionStatus: 503 });
+    await page.goto('/#/settings?tab=updates');
+
+    await expect(page.getByText('Downloading version 0.29.0-rc.30')).toBeVisible();
+  });
+});
+
+test.describe('Update API errors by code', () => {
+  test('translates the in-progress answer by code', async ({ page }) => {
+    await mockApi(page, {
+      check: {
+        current_version: '0.28.0',
+        latest_version: '0.29.0',
+        has_update: true,
+        channel: 'beta',
+        download_size: 7_300_000
+      },
+      // Бэкенд ответил по-английски: язык панели хранится в localStorage и ему не передаётся
+      installResponse: {
+        status: 409,
+        body: { success: false, error: 'Update already in progress', code: 'update_in_progress' }
+      }
+    });
+    await openUpdatesTab(page);
+
+    await page.getByRole('button', { name: 'Установить' }).click();
+    await page.getByRole('button', { name: 'Обновить панель' }).click();
+
+    await expect(page.getByText('Обновление уже выполняется')).toBeVisible();
+    await expect(page.getByText('Update already in progress')).toHaveCount(0);
+  });
+});
+
+test.describe('Update check errors by code', () => {
+  test('shows the translated phrase with the technical detail apart', async ({ page }) => {
+    await mockApi(page, {
+      checkStatus: 500,
+      checkBody: {
+        success: false,
+        error: 'Failed to check for updates',
+        code: 'update_check_failed',
+        detail: 'GitHub API: 403 rate limit'
+      }
+    });
+    await openUpdatesTab(page);
+
+    const block = page.locator('.update-state.state-error');
+    await expect(block).toContainText('Не удалось проверить обновления');
+    await expect(block.locator('.progress-detail')).toHaveText('GitHub API: 403 rate limit');
+    await expect(page.getByText('Failed to check for updates')).toHaveCount(0);
+  });
+
+  test('background scheduler error: phrase plus detail element', async ({ page }) => {
+    await mockApi(page, {
+      check: { current_version: '0.28.0', latest_version: '0.28.0', has_update: false },
+      state: { checked_at: 1790400000, error: 'GitHub API: 403 rate limit' }
+    });
+    await page.goto('/#/settings?tab=updates');
+
+    const line = page.locator('.auto-checked');
+    await expect(line.locator('.auto-error')).toHaveText('Не удалось проверить обновления');
+    await expect(line.locator('.progress-detail')).toHaveText('GitHub API: 403 rate limit');
+  });
+});
+
+test.describe('Update API errors by code (en)', () => {
+  test.use({ locale: 'en-US' });
+
+  test('shows the in-progress toast in English', async ({ page }) => {
+    await mockApi(page, {
+      check: {
+        current_version: '0.28.0',
+        latest_version: '0.29.0',
+        has_update: true,
+        channel: 'beta',
+        download_size: 7_300_000
+      },
+      // Бэкенд ответил по-русски: перевод берётся по коду на языке панели
+      installResponse: {
+        status: 409,
+        body: { success: false, error: 'Обновление уже выполняется', code: 'update_in_progress' }
+      }
+    });
+    await page.goto('/#/settings?tab=updates');
+
+    await page.getByRole('button', { name: 'Install' }).click();
+    await page.getByRole('button', { name: 'Update panel' }).click();
+
+    await expect(page.getByText('Update already in progress')).toBeVisible();
+    await expect(page.getByText('Обновление уже выполняется')).toHaveCount(0);
   });
 });
 

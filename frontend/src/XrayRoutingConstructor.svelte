@@ -8,7 +8,14 @@
   import { applyToKernel, notifyApplyOutcome, willRestartOnApply } from './lib/serviceApply';
   import { currentLang, t, tp } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
-  import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
+  import { syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
+  import {
+    splitOutbounds,
+    mergeOutbounds,
+    uniqueTags,
+    dedupeByTag,
+    type PlacedOutbound
+  } from './lib/constructors/xrayOutbounds';
   import {
     adaptDnsServers,
     adaptPresetRules,
@@ -27,7 +34,7 @@
     rulesToConfig,
     cleanBalancer,
     observatoryFor,
-    parseJsonc,
+    parseXrayFileText,
     lineDiff,
     hasJsonComments,
     dnsOverProxyRules,
@@ -88,17 +95,22 @@
   let inbounds = $state<XrayInbound[]>([]);
 
   // Outbound Management & Reactivity
+  // direct/block/dns-out из 04_outbounds.json хранятся отдельно от редактируемых записей и
+  // возвращаются на свои места при записи файла (показываются в блоке «только чтение»).
+  let systemOutbounds = $state<PlacedOutbound[]>([]);
   let customOutbounds = $state<any[]>([]);
   let subscriptionOutbounds = $state<any[]>([]);
   let outboundTagsLoading = $state(false);
 
-  let outboundTags = $derived([
-    'direct',
-    'block',
-    'dns-out',
-    ...customOutbounds.map((o) => o.tag).filter(Boolean),
-    ...subscriptionOutbounds.map((o) => o.tag).filter(Boolean)
-  ]);
+  let outboundTags = $derived(
+    uniqueTags([
+      'direct',
+      'block',
+      'dns-out',
+      ...customOutbounds.map((o) => o.tag).filter(Boolean),
+      ...subscriptionOutbounds.map((o) => o.tag).filter(Boolean)
+    ])
+  );
 
   let outboundDetails = $derived.by<OutboundDetail[]>(() => {
     const list: OutboundDetail[] = [
@@ -283,7 +295,7 @@
     };
 
     const outboundsObj = {
-      outbounds: customOutbounds
+      outbounds: mergeOutbounds(systemOutbounds, customOutbounds)
     };
 
     const dnsObj = {
@@ -366,8 +378,8 @@
         if (!res.ok) return;
         const text = await res.text();
         xrayRawFiles[name] = text;
-        const data = parseJsonc(text);
-        if (data === undefined && text.trim()) {
+        const { data, unparsed } = parseXrayFileText(text);
+        if (unparsed) {
           unparsedFiles = [...unparsedFiles, name];
         }
         xrayFiles[name] = data ?? {};
@@ -419,7 +431,9 @@
     if (files['04_outbounds.json']?.outbounds) {
       // Копия, а не тот же массив: правки черновика (импорт, ручной узел, удаление) не должны
       // менять загруженный с роутера исходник, иначе сравнение перед записью видит «без изменений».
-      customOutbounds = $state.snapshot(files['04_outbounds.json'].outbounds);
+      const split = splitOutbounds($state.snapshot(files['04_outbounds.json'].outbounds));
+      systemOutbounds = split.system;
+      customOutbounds = split.custom;
     }
 
     if (files['05_routing.json']?.routing) {
@@ -714,12 +728,14 @@
     try {
       const outboundsPath = `${XRAY_DIR}/04_outbounds.json`;
       const existingOutbounds = (xrayFiles['04_outbounds.json']?.outbounds || []) as any[];
+      // direct/block даёт шаблон; dns-out из файла остаётся (на него могут ссылаться правила),
+      // повторы тегов убирает dedupeByTag
       const custom = existingOutbounds.filter(
         (o: any) => o && o.tag !== 'direct' && o.tag !== 'block'
       );
       const templateOutbounds = (getOutboundsForTemplate(templateId) as any).outbounds || [];
       const mergedOutbounds = {
-        outbounds: [...templateOutbounds, ...custom]
+        outbounds: dedupeByTag([...templateOutbounds, ...custom])
       };
 
       const saveOutboundsRes = await apiFetch(

@@ -9,6 +9,9 @@
     fetchCapabilities,
     showToast,
     mihomoApiAvailable,
+    mihomoApiReady,
+    mihomoApiState,
+    mihomoOfflineReason,
     panelUnreachable
   } from './stores';
   import { usePoller } from './lib/poller';
@@ -45,6 +48,7 @@
   import { nextStep, preflightConfigReady } from './lib/nextStep';
   import { anyKernelInstalled } from './lib/navCaps';
   import { capsuleConfigStore } from './lib/capsuleSettings';
+  import { tabFromHash, legacyRedirectHash } from './lib/tabFromHash';
   import {
     isAnySourceDirty,
     getDirtySources,
@@ -62,8 +66,10 @@
   let pendingTargetHash = $state<string | null>(null);
   let isSavingAndNavigating = $state(false);
   let dirtySourceNames = $state<string[]>([]);
-  let currentTab = $state('dashboard');
-  let currentHash = $state(typeof window !== 'undefined' ? window.location.hash : '');
+  // Маршрут берётся из адреса при создании, чтобы первый кадр сразу рисовал нужную страницу
+  const initialHash = typeof window !== 'undefined' ? window.location.hash : '';
+  let currentTab = $state(tabFromHash(initialHash));
+  let currentHash = $state(initialHash);
 
   function checkIsConstructorHash(hash: string): boolean {
     if (!hash) return false;
@@ -111,7 +117,6 @@
     xkeen: string;
     xray: string;
     mihomo: string;
-    connections: number;
     xrayVersion: string;
     mihomoVersion: string;
   }
@@ -120,7 +125,6 @@
     xkeen: 'loading',
     xray: 'loading',
     mihomo: 'loading',
-    connections: 0,
     xrayVersion: '',
     mihomoVersion: ''
   });
@@ -254,13 +258,13 @@
 
   let systemStats = $state<SystemStats | null>(null);
   let loadHistory = $state<number[]>([]);
-  let totalSubsCount = $state(0);
-  let hasSubscription = $state(false);
-  let subsLastUpdated = $state('');
+  // Подписка есть, если заведена в панели либо объявлена в config.yaml как HTTP
+  // proxy-provider ядра. coreProviderPresent при падении API не сбрасывается:
+  // быстрый старт не мигает.
+  let panelSubsPresent = $state(false);
+  let coreProviderPresent = $state(false);
+  const hasSubscription = $derived(panelSubsPresent || coreProviderPresent);
   let subsSummaryLoaded = $state(false);
-  let totalProxiesCount = $state(0);
-  let activeProxiesCount = $state(0);
-  let subscriptionProxiesCount = $state(0);
   let statsLastFetched = $state('');
 
   // Шаг «Настройте» определяется по preflight активного ядра. Запрос не чаще
@@ -336,54 +340,13 @@
     systemStats !== null && systemStats.ssl_cert_days >= 0 && systemStats.ssl_cert_days < 7
   );
 
-  /**
-   * A subscription may be declared directly in config.yaml as an HTTP
-   * proxy-provider (not managed by the panel); it counts for the quick start.
-   */
-  async function hasCoreProxyProvider(signal?: AbortSignal): Promise<boolean> {
-    try {
-      const res = await apiFetch('/api/mihomo/proxy/providers/proxies', { signal });
-      if (!res.ok) return false;
-      const data = await res.json();
-      return Object.values(data?.providers ?? {}).some(
-        (p: any) =>
-          String(p?.vehicleType).toUpperCase() === 'HTTP' &&
-          Array.isArray(p?.proxies) &&
-          p.proxies.length > 0
-      );
-    } catch {
-      return false;
-    }
-  }
-
   async function fetchSubscriptionSummary(signal?: AbortSignal) {
     try {
       const res = await apiFetch('/api/subscriptions', { signal });
       if (res.ok) {
         const envelope = await res.json();
         const rawList = Array.isArray(envelope) ? envelope : (envelope?.data ?? []);
-        const subs = Array.isArray(rawList) ? rawList : [];
-        totalSubsCount = subs.length;
-        hasSubscription = subs.length > 0 || (await hasCoreProxyProvider(signal));
-        subscriptionProxiesCount = subs.reduce(
-          (acc: number, s: any) => acc + (s.proxy_count || 0),
-          0
-        );
-        // Find most recent update
-        const dates = subs.map((s: any) => s.last_updated || s.updated_at || '').filter(Boolean);
-        if (dates.length > 0) {
-          const latest = dates.sort().reverse()[0];
-          const d = new Date(latest);
-          const today = new Date();
-          if (d.toDateString() === today.toDateString()) {
-            subsLastUpdated = $t('dash.updated_today');
-          } else {
-            subsLastUpdated = d.toLocaleDateString($currentLang === 'ru' ? 'ru-RU' : 'en-US', {
-              day: '2-digit',
-              month: '2-digit'
-            });
-          }
-        }
+        panelSubsPresent = Array.isArray(rawList) && rawList.length > 0;
       }
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
@@ -394,23 +357,25 @@
     }
   }
 
-  async function fetchProxySummary(signal?: AbortSignal) {
+  /**
+   * A subscription may be declared directly in config.yaml as an HTTP
+   * proxy-provider (not managed by the panel); it counts for the quick start.
+   * Polled only while the Mihomo API answers (enabledWhen: mihomoApiReady).
+   */
+  async function refreshCoreProxyProvider(signal?: AbortSignal) {
     try {
-      const res = await apiFetch('/api/mihomo/proxy/proxies', { signal });
-      if (res.ok) {
-        const data = await res.json();
-        const proxies = data.proxies || {};
-        const keys = Object.keys(proxies);
-        const nodeKeys = keys.filter(
-          (k) => proxies[k].type !== 'Selector' && proxies[k].type !== 'URLTest'
-        );
-        totalProxiesCount = nodeKeys.length;
-        activeProxiesCount = nodeKeys.filter((k) => proxies[k].alive !== false).length;
-      }
+      const res = await apiFetch('/api/mihomo/proxy/providers/proxies', { signal });
+      if (!res.ok) return;
+      const data = await res.json();
+      coreProviderPresent = Object.values(data?.providers ?? {}).some(
+        (p: any) =>
+          String(p?.vehicleType).toUpperCase() === 'HTTP' &&
+          Array.isArray(p?.proxies) &&
+          p.proxies.length > 0
+      );
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       if (e?.status === 401) return;
-      console.error('fetchProxySummary failed:', e);
     }
   }
 
@@ -466,18 +431,6 @@
       const mihomoText =
         mihomoRes.status === 'fulfilled' && mihomoRes.value.ok ? await mihomoRes.value.text() : '';
 
-      // Try to get connection count from mihomo
-      let connCount = 0;
-      try {
-        const connRes = await apiFetch('/api/mihomo/proxy/connections?limit=1', { signal });
-        if (connRes.ok) {
-          const connData = await connRes.json();
-          connCount = connData?.connections?.length ?? 0;
-        }
-      } catch (e: any) {
-        if (e?.status === 401) return;
-      }
-
       // Get kernel versions and process_status from /api/kernels
       let xrayVer = '';
       let mihomoVer = '';
@@ -510,7 +463,6 @@
         xkeen: xkeenCardStatus(currentXkeenState),
         xray: xrayProcessStatus,
         mihomo: mihomoProcessStatus,
-        connections: connCount,
         xrayVersion: xrayVer,
         mihomoVersion: mihomoVer
       };
@@ -642,33 +594,19 @@
     }
   }
 
-  function getTabFromHash(): string {
-    const hash = window.location.hash;
-    if (hash && hash.startsWith('#/')) {
-      const path = hash.slice(2);
-      const queryIdx = path.indexOf('?');
-      const basePath = queryIdx !== -1 ? path.slice(0, queryIdx) : path;
-
-      if (basePath.startsWith('subscriptions/')) {
-        const id = basePath.slice('subscriptions/'.length);
-        window.location.hash = `#/proxies?tab=providers&expand=${id}`;
-        return 'proxies';
-      }
-      if (basePath === 'subscriptions') {
-        window.location.hash = '#/proxies?tab=providers';
-        return 'proxies';
-      }
-      if (basePath === 'mihomo-gen' || basePath === 'constructor') {
-        return 'editor';
-      }
-      return basePath || 'dashboard';
-    }
-    return 'dashboard';
+  // Устаревшие адреса подписок переводятся на вкладку провайдеров прокси.
+  // Возвращает true, если хэш был переписан (вкладку выставит следующий hashchange).
+  function applyLegacyRedirect(): boolean {
+    const redirect = legacyRedirectHash(window.location.hash);
+    if (redirect === null) return false;
+    window.location.hash = redirect;
+    return true;
   }
 
   function handleHashChange() {
+    if (applyLegacyRedirect()) return;
     currentHash = window.location.hash;
-    const targetTab = getTabFromHash();
+    const targetTab = tabFromHash(window.location.hash);
     if (targetTab !== currentTab && isAnySourceDirty()) {
       pendingTargetTab = targetTab;
       pendingTargetHash = window.location.hash;
@@ -904,10 +842,10 @@
 
   onMount(() => {
     fetchVersion();
-    fetchProxySummary();
 
+    applyLegacyRedirect();
     currentHash = window.location.hash;
-    currentTab = getTabFromHash();
+    currentTab = tabFromHash(window.location.hash);
     window.addEventListener('hashchange', handleHashChange);
     if (!window.location.hash) {
       window.location.hash = '#/' + currentTab;
@@ -926,7 +864,10 @@
     usePoller((signal) => fetchSystemStats(signal), 5000);
     usePoller((signal) => fetchCapabilities(signal), 10000);
     usePoller((signal) => fetchSubscriptionSummary(signal), 30000);
-    usePoller((signal) => fetchProxySummary(signal), 30000);
+    // Проверка proxy-provider ядра идёт только пока API Mihomo отвечает
+    usePoller((signal) => refreshCoreProxyProvider(signal), 30000, {
+      enabledWhen: mihomoApiReady
+    });
     // Результат фоновой проверки обновлений: бэкенд проверяет раз в 6 ч
     usePoller((signal) => refreshUpdateState(signal), 30 * 60 * 1000);
     const handleBeforeInstallPrompt = (e: Event) => {
@@ -1075,7 +1016,7 @@
 
     {#key chunkReloadKey}
       {#if currentTab === 'dashboard'}
-        <div class="container" transition:fade={{ duration: 150 }}>
+        <div class="container" data-testid="dashboard-page" transition:fade={{ duration: 150 }}>
           <!-- Page header -->
           <PageHeader
             title={$t('dash.title')}
@@ -1182,6 +1123,11 @@
                       {$mihomoApiAvailable
                         ? $t('dash.quickstart.step3_done')
                         : $t('dash.quickstart.step3_label')}
+                      {#if $mihomoApiState === 'down' && $mihomoOfflineReason}
+                        <span class="qs-reason" data-testid="qs-step3-reason">
+                          {$t(`dash.mihomo_offline_${$mihomoOfflineReason}`)}
+                        </span>
+                      {/if}
                     </span>
                     {#if !$mihomoApiAvailable}
                       <a
@@ -1922,6 +1868,12 @@
     flex: 1;
   }
 
+  .qs-reason {
+    display: block;
+    font-size: 12px;
+    color: var(--fg-secondary);
+  }
+
   .qs-step--done .qs-text {
     color: var(--fg-secondary);
   }
@@ -1952,11 +1904,98 @@
     font-size: var(--font-size-xs, 12px);
   }
 
+  /* Problems panel: a tinted row with an icon chip, a text column and the
+     action on the right (wraps below the text on narrow widths). The tone
+     comes from the .alert-* modifier; text stays on neutral foreground
+     tokens so only the stripe, chip and step label carry the colour. */
+  .problems-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3, 12px);
+  }
+
+  .problem-item {
+    --tone: var(--warning);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-3, 12px) var(--spacing-4, 16px);
+    padding: var(--spacing-4, 16px) var(--spacing-5, 20px);
+    border: 1px solid color-mix(in srgb, var(--tone) 28%, var(--border));
+    border-left: 3px solid var(--tone);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--tone) 7%, var(--bg-card));
+    color: var(--fg-primary);
+  }
+
+  .problem-item.alert-error {
+    --tone: var(--danger);
+  }
+
+  .problem-content {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-3, 12px);
+    flex: 1 1 320px;
+    min-width: 0;
+  }
+
+  .problem-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--tone) 16%, transparent);
+    color: var(--tone);
+  }
+
+  .problem-content > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    max-width: 68ch;
+  }
+
   .problem-step-label {
     display: block;
     font-size: var(--font-size-xs, 12px);
     font-weight: 600;
-    color: var(--fg-dim);
+    line-height: 1.3;
+    color: var(--tone);
+  }
+
+  .problem-title {
+    font-size: var(--font-size-lg, 16px);
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--fg-primary);
+  }
+
+  .problem-desc {
+    font-size: var(--font-size-base, 14px);
+    line-height: 1.5;
+    color: var(--fg-secondary);
+  }
+
+  .problem-item > :global(.btn),
+  .problem-item > :global(button) {
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 640px) {
+    .problem-item {
+      padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
+    }
+
+    .problem-item > :global(.btn),
+    .problem-item > :global(button) {
+      width: 100%;
+    }
   }
 
   .watchdog-error-detail {

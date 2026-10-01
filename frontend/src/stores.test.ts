@@ -282,3 +282,98 @@ describe('navCaps и lockNav', () => {
     ]);
   });
 });
+
+describe('mihomoApiState (tri-state гейт опросов)', () => {
+  const apiFetchJSON = vi.fn();
+
+  const caps = (api: boolean, running: boolean) => ({
+    kernels: { xray: { installed: true }, mihomo: { installed: true } },
+    active_kernel: 'mihomo',
+    xkeen_installed: true,
+    mihomo: { reachable: api, process_running: running, api_reachable: api }
+  });
+
+  async function load() {
+    vi.doMock('./lib/api', () => ({ apiFetchJSON }));
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn().mockReturnValue(null),
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    });
+    return await import('./stores');
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    apiFetchJSON.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.doUnmock('./lib/api');
+  });
+
+  it('до первого ответа состояние unknown и гейт закрыт', async () => {
+    const { mihomoApiState, mihomoApiReady, mihomoOfflineReason } = await load();
+    expect(get(mihomoApiState)).toBe('unknown');
+    expect(get(mihomoApiReady)).toBe(false);
+    expect(get(mihomoOfflineReason)).toBeNull();
+  });
+
+  it('api_reachable true -> up, false -> down', async () => {
+    const { fetchCapabilities, mihomoApiState, mihomoApiReady, mihomoApiAvailable } = await load();
+    apiFetchJSON.mockResolvedValue(caps(true, true));
+    await fetchCapabilities();
+    expect(get(mihomoApiState)).toBe('up');
+    expect(get(mihomoApiReady)).toBe(true);
+    expect(get(mihomoApiAvailable)).toBe(true);
+
+    apiFetchJSON.mockResolvedValue(caps(false, false));
+    await fetchCapabilities();
+    expect(get(mihomoApiState)).toBe('down');
+    expect(get(mihomoApiReady)).toBe(false);
+    expect(get(mihomoApiAvailable)).toBe(false);
+  });
+
+  it('из up один сбой не меняет состояние, второй подряд -> down', async () => {
+    const { fetchCapabilities, mihomoApiState } = await load();
+    apiFetchJSON.mockResolvedValue(caps(true, true));
+    await fetchCapabilities();
+    expect(get(mihomoApiState)).toBe('up');
+
+    apiFetchJSON.mockRejectedValue(new Error('network'));
+    await fetchCapabilities();
+    expect(get(mihomoApiState)).toBe('up');
+    await fetchCapabilities();
+    expect(get(mihomoApiState)).toBe('down');
+  });
+
+  it('два сбоя подряд во время перезапуска службы не роняют состояние в down', async () => {
+    const { fetchCapabilities, mihomoApiState } = await load();
+    const { activateRestartGrace, clearRestartGrace } = await import('./lib/serviceGrace');
+    apiFetchJSON.mockResolvedValue(caps(true, true));
+    await fetchCapabilities();
+
+    activateRestartGrace(60_000);
+    apiFetchJSON.mockRejectedValue(new Error('network'));
+    await fetchCapabilities();
+    await fetchCapabilities();
+    expect(get(mihomoApiState)).toBe('up');
+    clearRestartGrace();
+  });
+
+  it('mihomoOfflineReason: up/unknown -> null, down по процессу', async () => {
+    const { fetchCapabilities, mihomoOfflineReason } = await load();
+    apiFetchJSON.mockResolvedValue(caps(true, true));
+    await fetchCapabilities();
+    expect(get(mihomoOfflineReason)).toBeNull();
+
+    apiFetchJSON.mockResolvedValue(caps(false, false));
+    await fetchCapabilities();
+    expect(get(mihomoOfflineReason)).toBe('not_running');
+
+    apiFetchJSON.mockResolvedValue(caps(false, true));
+    await fetchCapabilities();
+    expect(get(mihomoOfflineReason)).toBe('api_down');
+  });
+});

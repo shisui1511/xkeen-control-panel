@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
-  import { showToast, showConfirm } from '../../stores';
+  import { showToast, showConfirm, mihomoApiReady, mihomoOfflineReason } from '../../stores';
   import Icon from '../../lib/components/Icon.svelte';
   import Card from '../Card.svelte';
   import { summarizeGroupDelay } from '../../lib/groupDelay';
@@ -14,6 +14,12 @@
   let isTestingLatency = $state(false);
   let isResettingSessions = $state(false);
   let isCreatingBackup = $state(false);
+
+  // Тест задержки и сброс сессий ходят в API Mihomo: пока он не отвечает, кнопки неактивны,
+  // а title объясняет причину. Подписки и резервная копия от API ядра не зависят.
+  const offlineTitle = $derived(
+    $mihomoOfflineReason ? $t(`dash.mihomo_offline_${$mihomoOfflineReason}`) : null
+  );
 
   async function handleRefreshSubs() {
     if (isRefreshingSubs) return;
@@ -172,8 +178,8 @@
         type="button"
         class="qa-btn"
         onclick={handleLatencyTest}
-        disabled={isTestingLatency}
-        title={$t('dash.qa_latency_test_sub')}
+        disabled={isTestingLatency || !$mihomoApiReady}
+        title={offlineTitle ?? $t('dash.qa_latency_test_sub')}
       >
         <div class="qa-icon-wrap" class:is-loading={isTestingLatency}>
           {#if isTestingLatency}
@@ -193,8 +199,8 @@
         type="button"
         class="qa-btn qa-btn-destructive"
         onclick={handleResetSessions}
-        disabled={isResettingSessions}
-        title={$t('dash.qa_reset_sessions_sub')}
+        disabled={isResettingSessions || !$mihomoApiReady}
+        title={offlineTitle ?? $t('dash.qa_reset_sessions_sub')}
       >
         <div class="qa-icon-wrap icon-wrap-danger" class:is-loading={isResettingSessions}>
           {#if isResettingSessions}

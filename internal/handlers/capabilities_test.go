@@ -266,3 +266,59 @@ func TestCapabilities_BothWordsFallsBackToConfigured(t *testing.T) {
 		t.Errorf("active_kernel = %q, want mihomo (ConfiguredKernel при обоих словах)", got)
 	}
 }
+
+// TestCapabilities_XrayAPIAddr: при активном Xray и api-блоке в конфиге
+// capabilities отдаёт адрес API (127.0.0.1:<порт>), иначе поле пусто.
+func TestCapabilities_XrayAPIAddr(t *testing.T) {
+	get := func(t *testing.T, confDir string, port int) XRayCapability {
+		t.Helper()
+		init := filepath.Join(t.TempDir(), "S05xkeen")
+		if err := os.WriteFile(init, []byte("name_client=\"xray\"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		xk := services.NewXKeenService(buildStubBinary(t, "XKeen is not running", 0), t.TempDir())
+		xk.InitScript = init
+		api := &API{
+			cfg:      &config.Config{MihomoAPIURL: "http://127.0.0.1:1", XRayConfigDir: confDir, XRayAPIPort: port},
+			xkeenSvc: xk,
+		}
+		rr := httptest.NewRecorder()
+		api.Capabilities(rr, httptest.NewRequest(http.MethodGet, "/api/capabilities", nil))
+		var envelope struct {
+			Data CapabilitiesResponse `json:"data"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&envelope); err != nil {
+			t.Fatal(err)
+		}
+		return envelope.Data.XRay
+	}
+
+	withAPI := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		body := `{"inbounds":[{"tag":"api","port":10085,"protocol":"dokodemo-door"}]}`
+		if err := os.WriteFile(filepath.Join(dir, "03_inbounds.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+
+	t.Run("default port", func(t *testing.T) {
+		x := get(t, withAPI(t), 0)
+		if !x.GRPCReady || x.APIAddr != "127.0.0.1:10085" {
+			t.Errorf("grpc_ready=%v api_addr=%q, want true 127.0.0.1:10085", x.GRPCReady, x.APIAddr)
+		}
+	})
+	t.Run("configured port", func(t *testing.T) {
+		x := get(t, withAPI(t), 10090)
+		if !x.GRPCReady || x.APIAddr != "127.0.0.1:10090" {
+			t.Errorf("grpc_ready=%v api_addr=%q, want true 127.0.0.1:10090", x.GRPCReady, x.APIAddr)
+		}
+	})
+	t.Run("no api inbound", func(t *testing.T) {
+		x := get(t, t.TempDir(), 10085)
+		if x.GRPCReady || x.APIAddr != "" {
+			t.Errorf("grpc_ready=%v api_addr=%q, want false empty", x.GRPCReady, x.APIAddr)
+		}
+	})
+}

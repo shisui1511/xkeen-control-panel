@@ -1,4 +1,4 @@
-import { writable, get } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { apiFetchJSON } from './lib/api';
 import { isServiceRestarting, clearRestartGrace } from './lib/serviceGrace';
 import { NAV_CAPS_KEY, parseNavCaps, toNavCaps, mergeNavCaps, type NavCaps } from './lib/navCaps';
@@ -31,6 +31,8 @@ export interface CapabilitiesData {
     conf_dir: string;
     conf_dir_exists: boolean;
     grpc_ready?: boolean;
+    /** Адрес gRPC API Xray, которым пользуется панель (127.0.0.1:<порт>). */
+    api_addr?: string;
   };
   global_hwid?: string;
   /** Prediction of "will Apply restart this kernel" per kernel (button labels). */
@@ -40,10 +42,24 @@ export interface CapabilitiesData {
 export const capabilities = writable<CapabilitiesData | null>(null);
 export const isKernelChecking = writable(false);
 
-// --- Mihomo API availability store ---
-// Updated by fetchCapabilities on every poll cycle (10 s interval).
-// Sidebar reads this store reactively to show/hide the badge on Proxy/Rules/Connections nav items.
-export const mihomoApiAvailable = writable<boolean>(false);
+// --- Состояние API Mihomo (tri-state) ---
+// unknown — ответа capabilities ещё не было (опросы не идут, оффлайн не показываем);
+// up / down — по api_reachable последнего ответа. fetchCapabilities обновляет его на
+// каждом такте (10 с). Общий гейт опросов: usePoller(..., { enabledWhen: mihomoApiReady }).
+export type MihomoApiState = 'unknown' | 'up' | 'down';
+export const mihomoApiState = writable<MihomoApiState>('unknown');
+export const mihomoApiReady = derived(mihomoApiState, (s) => s === 'up');
+// Совместимость с Sidebar и быстрым стартом дашборда: прежний boolean по смыслу «up».
+export const mihomoApiAvailable = derived(mihomoApiState, (s) => s === 'up');
+// Причина «оффлайн» для подписей: null пока API работает или состояние неизвестно.
+export type MihomoOfflineReason = 'not_running' | 'api_down' | null;
+export const mihomoOfflineReason = derived(
+  [mihomoApiState, capabilities],
+  ([$state, $caps]): MihomoOfflineReason => {
+    if ($state !== 'down') return null;
+    return $caps?.mihomo?.process_running ? 'api_down' : 'not_running';
+  }
+);
 
 // --- Срез capabilities для бокового меню ---
 // Последний известный срез хранится в localStorage: первый кадр меню рисуется
@@ -144,9 +160,9 @@ export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
       }
     }
 
-    // Update Mihomo API availability store unconditionally on every successful fetch.
-    // Sidebar and Dashboard checklist both subscribe to this store reactively (D-12, D-13).
-    mihomoApiAvailable.set(data.mihomo?.api_reachable ?? false);
+    // Состояние API Mihomo обновляется на каждом успешном ответе. Опросы прокси ядра,
+    // Sidebar и быстрый старт дашборда подписаны на него реактивно (D-08, D-09).
+    mihomoApiState.set(data.mihomo?.api_reachable ? 'up' : 'down');
   } catch (e: any) {
     // Cancelled poll: no state change.
     if (e?.name === 'AbortError') return;
@@ -157,9 +173,9 @@ export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
 
     consecutiveCapabilitiesFailures++;
     // Debounce network blips: during active service restart or for a single intermittent failure,
-    // do not instantly set mihomoApiAvailable to false to avoid UI flickering.
+    // do not instantly set mihomoApiState to down to avoid UI flickering.
     if (!get(isServiceRestarting) && consecutiveCapabilitiesFailures >= 2) {
-      mihomoApiAvailable.set(false);
+      mihomoApiState.set('down');
     }
 
     // Холодный вход и API недоступен: без кэша скелетон меню висел бы вечно.

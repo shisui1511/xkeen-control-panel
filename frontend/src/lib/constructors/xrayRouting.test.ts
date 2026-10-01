@@ -6,7 +6,9 @@ import {
   observatoryFor,
   cleanBalancer,
   lineDiff,
-  hasJsonComments
+  hasJsonComments,
+  parseXrayFileText,
+  blankJsonComments
 } from './xrayRouting';
 
 describe('xray routing model', () => {
@@ -141,5 +143,64 @@ describe('dns over proxy rules', () => {
     expect(enabled).toBe(true);
     expect(rest.map((r) => r.port)).toEqual(['53']);
     expect(takeDnsOverProxyRules(rest).enabled).toBe(false);
+  });
+});
+
+describe('parseXrayFileText', () => {
+  it('treats a comment-only file without braces as an empty stub', () => {
+    expect(parseXrayFileText('// Создайте файл по ссылке\n')).toEqual({
+      data: undefined,
+      unparsed: false
+    });
+  });
+
+  it('treats a braces-with-comment stub as an empty object', () => {
+    expect(parseXrayFileText('{\n// comment\n}')).toEqual({ data: {}, unparsed: false });
+  });
+
+  it('treats empty and whitespace-only text as not unparsed', () => {
+    expect(parseXrayFileText('').unparsed).toBe(false);
+    expect(parseXrayFileText('   \n').unparsed).toBe(false);
+  });
+
+  it('keeps a real syntax error as unparsed', () => {
+    expect(parseXrayFileText('{ "routing": ')).toEqual({ data: undefined, unparsed: true });
+  });
+
+  it('parses a file with leading block comment', () => {
+    expect(parseXrayFileText('/* a */ { "x": 1 }')).toEqual({ data: { x: 1 }, unparsed: false });
+  });
+});
+
+describe('blankJsonComments', () => {
+  it('keeps length and line breaks while making comments parseable', () => {
+    const text = '{ // c\n "a": 1 }';
+    const out = blankJsonComments(text);
+    expect(out.length).toBe(text.length);
+    expect(out.indexOf('\n')).toBe(text.indexOf('\n'));
+    expect(JSON.parse(out)).toEqual({ a: 1 });
+  });
+
+  it('leaves comment-like text inside strings untouched', () => {
+    const text = '{"u":"http://x//y"}';
+    expect(blankJsonComments(text)).toBe(text);
+  });
+
+  it('blanks block comments across lines, keeping the line breaks', () => {
+    const text = '/* a\nb */{}';
+    const out = blankJsonComments(text);
+    expect(out.length).toBe(text.length);
+    expect(out.indexOf('\n')).toBe(text.indexOf('\n'));
+    expect(JSON.parse(out)).toEqual({});
+  });
+
+  it('returns text without comments unchanged', () => {
+    const text = '{\n  "a": [1, 2]\n}';
+    expect(blankJsonComments(text)).toBe(text);
+  });
+
+  it('handles an unterminated block comment without throwing', () => {
+    const text = '{} /* open';
+    expect(blankJsonComments(text).length).toBe(text.length);
   });
 });

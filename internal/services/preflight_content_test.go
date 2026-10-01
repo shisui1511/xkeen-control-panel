@@ -52,6 +52,42 @@ func TestValidateConfigContent_Syntax(t *testing.T) {
 	}
 }
 
+func TestValidateConfigContent_XrayComments(t *testing.T) {
+	// Stub with a comment inside braces: Xray accepts it, no false syntax warning.
+	res := ValidateConfigContent("xray", "05_routing.json", "{\n// comment\n}")
+	if hasWarningCode(res, "preflight.syntax") {
+		t.Errorf("comment inside braces must not give preflight.syntax, got %+v", res.Warnings)
+	}
+
+	// A block comment between members.
+	res = ValidateConfigContent("xray", "x.json", "{ /* c */ \"log\": {} }")
+	if hasWarningCode(res, "preflight.syntax") {
+		t.Errorf("block comment must not give preflight.syntax, got %+v", res.Warnings)
+	}
+
+	// Comment markers inside a string are data, not comments.
+	res = ValidateConfigContent("xray", "x.json", `{ "u": "http://x//y" }`)
+	if hasWarningCode(res, "preflight.syntax") {
+		t.Errorf("// inside a string must not give preflight.syntax, got %+v", res.Warnings)
+	}
+
+	// A comment-only file is not a configuration: behaviour unchanged.
+	res = ValidateConfigContent("xray", "05_routing.json", "// comment only\n")
+	if !hasWarningCode(res, "preflight.syntax") {
+		t.Errorf("comment-only content must still give preflight.syntax")
+	}
+
+	// A real syntax error is still caught after stripping comments.
+	res = ValidateConfigContent("xray", "05_routing.json", "{ \"routing\": ")
+	if !hasWarningCode(res, "preflight.syntax") {
+		t.Errorf("broken JSON must still give preflight.syntax")
+	}
+	res = ValidateConfigContent("xray", "05_routing.json", "{ // c\n \"a\": }")
+	if !hasWarningCode(res, "preflight.syntax") {
+		t.Errorf("broken JSON with a comment must still give preflight.syntax")
+	}
+}
+
 func TestValidateConfigContent_RemnawaveHeaders(t *testing.T) {
 	// String header - should warn
 	badConfig := `

@@ -62,6 +62,29 @@ function checkNoExternalResources(html) {
   return violations;
 }
 
+// Проверка D-02: CSP `script-src 'self'` запрещает inline-скрипты, поэтому каждый
+// <script> обязан иметь src и пустое тело. Возвращает фрагменты-нарушения.
+function checkNoInlineScripts(html) {
+  const violations = [];
+  const scriptRegex = /<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi;
+  let match;
+  while ((match = scriptRegex.exec(html)) !== null) {
+    const hasSrc = /\bsrc\s*=/i.test(match[1]);
+    if (!hasSrc || match[2].trim() !== '') {
+      violations.push(match[0].slice(0, 80));
+    }
+  }
+  return violations;
+}
+
+// Проверка D-02: в dist лежит theme-init.js, и index.html подключает его.
+function checkThemeInitPresent(distDir) {
+  const scriptPath = path.join(distDir, 'theme-init.js');
+  const htmlPath = path.join(distDir, 'index.html');
+  if (!fs.existsSync(scriptPath) || !fs.existsSync(htmlPath)) return false;
+  return fs.readFileSync(htmlPath, 'utf8').includes('theme-init.js');
+}
+
 // Проверка D-05: в @font-face блоках src должен ссылаться только на .woff2.
 function checkWoff2Only(css) {
   const violations = [];
@@ -197,6 +220,29 @@ function main(argv) {
       failed = true;
     }
 
+    // Группа (D-02): без inline-скриптов (CSP) и с head-скриптом темы в dist.
+    console.log('🔄 Проверка inline-скриптов и head-скрипта темы (D-02)...');
+    let themeOk = true;
+    for (const [label, file] of [
+      ['index.html', SRC_INDEX_HTML_PATH],
+      ['dist/index.html', DIST_INDEX_HTML_PATH]
+    ]) {
+      if (!fs.existsSync(file)) continue;
+      for (const violation of checkNoInlineScripts(fs.readFileSync(file, 'utf8'))) {
+        console.error(`❌ Inline-скрипт в ${label}: ${violation}`);
+        themeOk = false;
+      }
+    }
+    if (!checkThemeInitPresent(DIST_DIR)) {
+      console.error('❌ В dist нет theme-init.js или index.html его не подключает');
+      themeOk = false;
+    }
+    if (themeOk) {
+      console.log('✅ PASS: inline-скриптов нет, theme-init.js подключён');
+    } else {
+      failed = true;
+    }
+
     // Группа 3 (D-05): все @font-face в fonts.css ссылаются только на .woff2.
     console.log('🔄 Проверка woff2-only политики шрифтов (D-05)...');
     let fontsOk = true;
@@ -280,6 +326,8 @@ module.exports = {
   gzipSize,
   formatKb,
   checkNoExternalResources,
+  checkNoInlineScripts,
+  checkThemeInitPresent,
   checkWoff2Only,
   checkSwCacheVersioned,
   checkApiBranchUncached

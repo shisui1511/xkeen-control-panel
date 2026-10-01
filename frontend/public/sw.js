@@ -37,12 +37,15 @@ self.addEventListener('fetch', (event) => {
   // only when the network is unavailable (offline support). /manifest.json
   // is included because it ships unhashed from public/ and can change
   // between deploys (icons, theme_color, name) — unlike the hashed static
-  // assets handled by the cache-first branch below.
+  // assets handled by the cache-first branch below. /theme-init.js is the
+  // same case: a file from public/ without a hash in its name, so it must
+  // not get stuck in the cache between releases.
   const isAppShell =
     event.request.mode === 'navigate' ||
     url.pathname === '/' ||
     url.pathname === '/index.html' ||
-    url.pathname === '/manifest.json';
+    url.pathname === '/manifest.json' ||
+    url.pathname === '/theme-init.js';
   if (isAppShell) {
     event.respondWith(
       fetch(event.request)

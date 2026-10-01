@@ -2,6 +2,7 @@ package i18n
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -237,5 +238,39 @@ func TestMiddleware_And_LangFromContext(t *testing.T) {
 	emptyContextLang := LangFromContext(context.Background())
 	if emptyContextLang != "en" {
 		t.Errorf("expected empty context to return 'en', got %q", emptyContextLang)
+	}
+}
+
+// TestLocales_KeyParity: словари ru и en содержат одинаковый набор ключей,
+// ни одно значение не пустое.
+func TestLocales_KeyParity(t *testing.T) {
+	load := func(lang string) map[string]string {
+		data, err := localesFS.ReadFile("locales/" + lang + ".json")
+		if err != nil {
+			t.Fatalf("read %s: %v", lang, err)
+		}
+		var dict map[string]string
+		if err := json.Unmarshal(data, &dict); err != nil {
+			t.Fatalf("parse %s: %v", lang, err)
+		}
+		return dict
+	}
+	ru, en := load("ru"), load("en")
+
+	for key, val := range ru {
+		if _, ok := en[key]; !ok {
+			t.Errorf("key %q is in ru.json but missing in en.json", key)
+		}
+		if strings.TrimSpace(val) == "" {
+			t.Errorf("ru.json: empty value for %q", key)
+		}
+	}
+	for key, val := range en {
+		if _, ok := ru[key]; !ok {
+			t.Errorf("key %q is in en.json but missing in ru.json", key)
+		}
+		if strings.TrimSpace(val) == "" {
+			t.Errorf("en.json: empty value for %q", key)
+		}
 	}
 }

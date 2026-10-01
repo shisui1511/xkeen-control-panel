@@ -2,7 +2,15 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { t, tp, currentLang } from './i18n';
   import { usePoller } from './lib/poller';
-  import { capabilities, fetchCapabilities, showToast, devMode, showConfirm } from './stores';
+  import {
+    capabilities,
+    fetchCapabilities,
+    showToast,
+    devMode,
+    showConfirm,
+    mihomoApiReady,
+    mihomoApiState
+  } from './stores';
   import { apiFetch, apiFetchJSON, startMihomo } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Skeleton from './components/Skeleton.svelte';
@@ -138,7 +146,10 @@
   let quickSelect = $state<{ groupName: string; anchor: HTMLElement } | null>(null);
 
   // Batch testing & latency history state
-  let poller = $state<PollerControls | null>(null);
+  // proxiesPoller опрашивает прокси ядра и идёт только пока API Mihomo отвечает;
+  // providersPoller тянет подписки панели и работает и при остановленном ядре.
+  let proxiesPoller = $state<PollerControls | null>(null);
+  let providersPoller = $state<PollerControls | null>(null);
   const batchTester = new BatchLatencyTester();
   let batchProgress = $state<BatchProgressState | null>(null);
   let activePopover = $state<{
@@ -854,12 +865,10 @@
       await startMihomo();
       safeTimeout(async () => {
         await fetchCapabilities();
-        await fetchProxies();
         mihomoLaunching = false;
       }, 1500);
       safeTimeout(async () => {
         await fetchCapabilities();
-        await fetchProxies();
       }, 4000);
     } catch (e: any) {
       if (e?.status === 401) return;
@@ -910,8 +919,11 @@
       activeTab = 'providers';
     }
 
-    poller = usePoller(async (signal) => {
-      await fetchProxies(signal);
+    // Переход в up возобновляет опрос сразу (usePoller.enabledWhen), поэтому после
+    // запуска ядра прямой fetchProxies() не нужен: при ещё не поднявшемся API он
+    // давал бы лишний 502.
+    proxiesPoller = usePoller(fetchProxies, 10000, { enabledWhen: mihomoApiReady });
+    providersPoller = usePoller(async (signal) => {
       await providers.loadSubscriptions(signal, Object.keys(proxies).length > 0);
       providers.checkAutoExpand();
     }, 10000);
@@ -928,7 +940,8 @@
     window.addEventListener('hashchange', handleHashChange);
 
     return () => {
-      poller?.stop();
+      proxiesPoller?.stop();
+      providersPoller?.stop();
       batchTester.cancel();
       if (popoverHoverTimeout) clearTimeout(popoverHoverTimeout);
       if (loadTimeoutId) clearTimeout(loadTimeoutId);
@@ -938,7 +951,8 @@
   });
 
   onDestroy(() => {
-    poller?.stop();
+    proxiesPoller?.stop();
+    providersPoller?.stop();
     batchTester.cancel();
     if (popoverHoverTimeout) clearTimeout(popoverHoverTimeout);
     if (loadTimeoutId) clearTimeout(loadTimeoutId);
@@ -1049,7 +1063,7 @@
       {/if}
 
       <!-- Groups Grid -->
-      {#if loading && groups.length === 0}
+      {#if (loading || $mihomoApiState === 'unknown') && groups.length === 0}
         <div class="group-grid">
           {#each Array(4) as _, i (i)}
             <div class="group-card skeleton-card">

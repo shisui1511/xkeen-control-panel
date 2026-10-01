@@ -3,6 +3,7 @@
   import { trafficStream, formatTrafficSpeed, type TrafficState } from '../../lib/trafficStream';
   import Icon from '../../lib/components/Icon.svelte';
   import Card from '../Card.svelte';
+  import { capabilities, mihomoApiState, mihomoOfflineReason } from '../../stores';
 
   let { onSwitchTab } = $props<{
     onSwitchTab?: (tab: string) => void;
@@ -21,6 +22,15 @@
 
   const formattedDown = $derived(formatTrafficSpeed(traffic.down));
   const formattedUp = $derived(formatTrafficSpeed(traffic.up));
+
+  // Число подключений даёт только Mihomo: пока его API не отвечает, ноль был бы не данными,
+  // а отсутствием источника. Подпись причины — только когда активно именно ядро Mihomo.
+  const connectionsLive = $derived($mihomoApiState === 'up');
+  const offlineReasonKey = $derived(
+    $capabilities?.active_kernel === 'mihomo' && $mihomoOfflineReason
+      ? `dash.mihomo_offline_${$mihomoOfflineReason}`
+      : null
+  );
 
   function handleTrafficClick() {
     if (onSwitchTab) onSwitchTab('traffic');
@@ -96,15 +106,25 @@
           </span>
           <span class="box-label">{$t('dash.connections')}</span>
         </div>
-        <div class="box-value tabular-nums">
-          {traffic.connections}
+        <div class="box-value tabular-nums" data-testid="dash-connections-value">
+          {connectionsLive ? traffic.connections : '—'}
         </div>
-        <div
-          class="box-sub tabular-nums"
-          title="TCP {traffic.tcp_connections} · UDP {traffic.udp_connections}"
-        >
-          TCP {traffic.tcp_connections} · UDP {traffic.udp_connections}
-        </div>
+        {#if connectionsLive}
+          <div
+            class="box-sub tabular-nums"
+            title="TCP {traffic.tcp_connections} · UDP {traffic.udp_connections}"
+          >
+            TCP {traffic.tcp_connections} · UDP {traffic.udp_connections}
+          </div>
+        {:else}
+          <div
+            class="box-sub"
+            data-testid={offlineReasonKey ? 'dash-connections-offline' : undefined}
+            title={offlineReasonKey ? $t(offlineReasonKey) : undefined}
+          >
+            {offlineReasonKey ? $t(offlineReasonKey) : '\u00a0'}
+          </div>
+        {/if}
       </button>
     </div>
   </Card>

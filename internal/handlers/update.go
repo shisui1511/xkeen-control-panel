@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -56,12 +57,17 @@ type ReleaseNote struct {
 }
 
 type UpdateStatus struct {
-	Status     string `json:"status"` // idle, checking, downloading, installing, restarting, restoring, done, failed
-	Message    string `json:"message"`
-	Progress   int    `json:"progress"` // 0-100
-	Downloaded int64  `json:"downloaded,omitempty"`
-	Total      int64  `json:"total,omitempty"`
-	Timestamp  int64  `json:"timestamp"`
+	Status string `json:"status"` // idle, checking, downloading, installing, restarting, restoring, done, failed
+	// Message — для логов; UI переводит по MessageCode.
+	Message string `json:"message"`
+	// MessageCode — машинный код шага или сбоя из закрытого перечня; Params —
+	// плоские параметры подписи (version, detail).
+	MessageCode string            `json:"message_code,omitempty"`
+	Params      map[string]string `json:"params,omitempty"`
+	Progress    int               `json:"progress"` // 0-100
+	Downloaded  int64             `json:"downloaded,omitempty"`
+	Total       int64             `json:"total,omitempty"`
+	Timestamp   int64             `json:"timestamp"`
 }
 
 var (
@@ -81,6 +87,43 @@ func setUpdateState(s UpdateStatus) {
 	updateState = s
 }
 
+// Швы для тестов, в продакшене не меняются: сеть и путь к бинарнику панели.
+var (
+	releasesFetcher  = fetchReleases
+	downloadBinaryFn = downloadBinary
+	verifyChecksumFn = verifyFileChecksum
+	binaryPathFn     = func() string {
+		binPath := "/opt/sbin/xcp"
+		if exe, err := os.Executable(); err == nil {
+			if realPath, err := filepath.EvalSymlinks(exe); err == nil {
+				binPath = realPath
+			} else {
+				binPath = exe
+			}
+		}
+		return binPath
+	}
+)
+
+// setUpdateStep публикует шаг обновления целиком: статус, прогресс, код и
+// параметры подписи. Карта params копируется и после публикации не мутируется
+// (getUpdateState копирует структуру, но не карту), поэтому код и параметры
+// прошлого шага не переходят в следующий.
+func setUpdateStep(status string, progress int, code string, params map[string]string, message string) {
+	var p map[string]string
+	if len(params) > 0 {
+		p = maps.Clone(params)
+	}
+	setUpdateState(UpdateStatus{
+		Status:      status,
+		Message:     message,
+		MessageCode: code,
+		Params:      p,
+		Progress:    progress,
+		Timestamp:   time.Now().Unix(),
+	})
+}
+
 func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -93,14 +136,14 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 
 	currentVersion := strings.TrimPrefix(a.srv.GetVersion(), "v")
 
-	releases, err := fetchReleases()
+	releases, err := releasesFetcher()
 	if err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_check_failed", a.t(r, "update.check_failed"), err.Error())
 		return
 	}
 	info, err := pickLatestRelease(releases, channel)
 	if err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_check_failed", a.t(r, "update.check_failed"), err.Error())
 		return
 	}
 
@@ -132,13 +175,13 @@ func (a *API) UpdateChangelog(w http.ResponseWriter, r *http.Request) {
 	}
 	version := r.URL.Query().Get("version")
 	if version == "" {
-		a.errorResponse(w, "Version required", http.StatusBadRequest)
+		JSONErrorCode(w, http.StatusBadRequest, "update_version_required", a.t(r, "update.version_required"))
 		return
 	}
 
 	changelog, err := fetchChangelog(version)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_changelog_failed", a.t(r, "update.changelog_failed"), err.Error())
 		return
 	}
 
@@ -156,7 +199,7 @@ func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
 		channel = "stable"
 	}
 	if !a.startUpdate(channel) {
-		JSONError(w, http.StatusConflict, "Update already in progress")
+		JSONErrorCode(w, http.StatusConflict, "update_in_progress", a.t(r, "update.in_progress"))
 		return
 	}
 	JSONSuccess(w, getUpdateState())
@@ -171,7 +214,7 @@ func (a *API) startUpdate(channel string) bool {
 		updateStateMu.Unlock()
 		return false
 	}
-	updateState = UpdateStatus{Status: "checking", Progress: 5, Timestamp: time.Now().Unix()}
+	updateState = UpdateStatus{Status: "checking", MessageCode: "checking", Progress: 5, Timestamp: time.Now().Unix()}
 	updateStateMu.Unlock()
 
 	go a.performUpdate(channel)
@@ -184,17 +227,10 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	backupDir := filepath.Join(a.cfg.DataDir, "backup")
-	binPath := "/opt/sbin/xcp"
-	if exe, err := os.Executable(); err == nil {
-		if realPath, err := filepath.EvalSymlinks(exe); err == nil {
-			binPath = realPath
-		} else {
-			binPath = exe
-		}
-	}
+	binPath := binaryPathFn()
 
 	if st := getUpdateState(); st.Status != "idle" && st.Status != "failed" && st.Status != "done" {
-		JSONError(w, http.StatusConflict, "Update already in progress")
+		JSONErrorCode(w, http.StatusConflict, "update_in_progress", a.t(r, "update.in_progress"))
 		return
 	}
 
@@ -204,32 +240,31 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.ContentLength != 0 {
 		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			JSONError(w, http.StatusBadRequest, "invalid request body")
+			JSONErrorCode(w, http.StatusBadRequest, "invalid_request_body", a.t(r, "error.invalid_request"))
 			return
 		}
 	}
 	latestBackup, err := resolveBackup(backupDir, req.Backup)
 	if err != nil {
-		JSONError(w, http.StatusNotFound, "No backup found")
+		JSONErrorCode(w, http.StatusNotFound, "update_no_backup", a.t(r, "update.no_backup"))
 		return
 	}
 
-	// Stop current binary
-	st := UpdateStatus{
-		Status:    "restoring",
-		Progress:  10,
-		Timestamp: time.Now().Unix(),
+	// Версия копии — вторая группа имени xcp.bak.<unix>[.<версия>]
+	versionParams := map[string]string{}
+	if m := backupNameRe.FindStringSubmatch(filepath.Base(latestBackup)); m != nil && m[2] != "" {
+		versionParams["version"] = m[2]
 	}
-	setUpdateState(st)
+
+	// Stop current binary
+	setUpdateStep("restoring", 10, "rollback_restoring", versionParams, "")
 
 	// Replace with backup via temporary file to preserve backup on disk and set executable permissions
 	tempBinPath := binPath + ".rollback"
 	if err := copyFile(latestBackup, tempBinPath); err != nil {
-		st = getUpdateState()
-		st.Status = "failed"
-		st.Message = "Rollback failed: " + err.Error()
-		setUpdateState(st)
-		JSONError(w, http.StatusInternalServerError, st.Message)
+		msg := "Rollback failed: " + err.Error()
+		setUpdateStep("failed", 0, "rollback_failed", map[string]string{"detail": err.Error()}, msg)
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_rollback_failed", a.t(r, "update.rollback_failed"), err.Error())
 		return
 	}
 	if err := os.Chmod(tempBinPath, 0755); err != nil {
@@ -238,19 +273,14 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 
 	if err := os.Rename(tempBinPath, binPath); err != nil {
 		_ = os.Remove(tempBinPath)
-		st = getUpdateState()
-		st.Status = "failed"
-		st.Message = "Rollback failed: " + err.Error()
-		setUpdateState(st)
-		JSONError(w, http.StatusInternalServerError, st.Message)
+		msg := "Rollback failed: " + err.Error()
+		setUpdateStep("failed", 0, "rollback_failed", map[string]string{"detail": err.Error()}, msg)
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_rollback_failed", a.t(r, "update.rollback_failed"), err.Error())
 		return
 	}
 
 	// Restart
-	st = getUpdateState()
-	st.Status = "restarting"
-	st.Progress = 90
-	setUpdateState(st)
+	setUpdateStep("restarting", 90, "restarting", versionParams, "Restarting...")
 
 	go a.restartProcess(binPath, latestBackup, a.cfg.DataDir, "")
 
@@ -296,7 +326,8 @@ func (a *API) UpdateEventsSSE(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ticker.C:
 			currentState := getUpdateState()
-			if currentState.Status != lastState.Status || currentState.Progress != lastState.Progress || currentState.Message != lastState.Message {
+			if currentState.Status != lastState.Status || currentState.Progress != lastState.Progress || currentState.Message != lastState.Message ||
+				currentState.MessageCode != lastState.MessageCode || !maps.Equal(currentState.Params, lastState.Params) {
 				data, err := json.Marshal(currentState)
 				if err == nil {
 					fmt.Fprintf(w, "data: %s\n\n", data)
@@ -348,13 +379,13 @@ func (a *API) UpdateChannelSet(w http.ResponseWriter, r *http.Request) {
 		Channel string `json:"channel"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		a.errorResponse(w, "invalid JSON", http.StatusBadRequest)
+		JSONErrorCode(w, http.StatusBadRequest, "invalid_request_body", a.t(r, "error.invalid_request"))
 		return
 	}
 	switch body.Channel {
 	case "stable", "beta":
 	default:
-		a.errorResponse(w, "channel must be stable or beta", http.StatusBadRequest)
+		JSONErrorCode(w, http.StatusBadRequest, "update_channel_invalid", a.t(r, "update.channel_invalid"))
 		return
 	}
 	// Lock/Unlock bracket only the field write (134-REVIEW CR-01);
@@ -364,7 +395,7 @@ func (a *API) UpdateChannelSet(w http.ResponseWriter, r *http.Request) {
 	a.cfg.UpdateChannel = body.Channel
 	a.cfg.Unlock()
 	if err := config.Save(a.cfg.ConfigPath, a.cfg); err != nil {
-		a.errorResponse(w, "failed to save config: "+err.Error(), http.StatusInternalServerError)
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "update_save_failed", a.t(r, "update.save_failed"), err.Error())
 		return
 	}
 	JSONSuccess(w, map[string]string{"channel": body.Channel})
@@ -373,58 +404,30 @@ func (a *API) UpdateChannelSet(w http.ResponseWriter, r *http.Request) {
 func (a *API) performUpdate(channel string) {
 	defer func() {
 		if r := recover(); r != nil {
-			setUpdateState(UpdateStatus{
-				Status:    "failed",
-				Message:   fmt.Sprintf("Panic: %v", r),
-				Timestamp: time.Now().Unix(),
-			})
+			setUpdateStep("failed", 0, "panic", map[string]string{"detail": fmt.Sprint(r)}, fmt.Sprintf("Panic: %v", r))
 		}
 	}()
 
 	// Step 1: Check latest release
-	setUpdateState(UpdateStatus{
-		Status:   "checking",
-		Progress: 10,
-		Message:  "Checking for updates...",
-	})
+	setUpdateStep("checking", 10, "checking", nil, "Checking for updates...")
 
 	info, err := fetchLatestRelease(channel)
 	if err != nil {
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Failed to check updates: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, "check_failed", map[string]string{"detail": err.Error()}, "Failed to check updates: "+err.Error())
 		return
 	}
 
 	currentVersion := strings.TrimPrefix(a.srv.GetVersion(), "v")
 	if !updateAvailable(info.LatestVersion, currentVersion) {
-		setUpdateState(UpdateStatus{
-			Status:    "done",
-			Progress:  100,
-			Message:   "Already up to date",
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("done", 100, "up_to_date", nil, "Already up to date")
 		return
 	}
 
 	// Determine binary path early so temp file is on the same filesystem
-	binPath := "/opt/sbin/xcp"
-	if exe, err := os.Executable(); err == nil {
-		if realPath, err := filepath.EvalSymlinks(exe); err == nil {
-			binPath = realPath
-		} else {
-			binPath = exe
-		}
-	}
+	binPath := binaryPathFn()
 
 	// Step 2: Download
-	setUpdateState(UpdateStatus{
-		Status:   "downloading",
-		Progress: 30,
-		Message:  "Downloading update...",
-	})
+	setUpdateStep("downloading", 30, "downloading", map[string]string{"version": info.LatestVersion}, "Downloading update...")
 
 	arch := releaseArch()
 	downloadURL := fmt.Sprintf("%s/v%s/xcp_v%s_%s",
@@ -432,70 +435,43 @@ func (a *API) performUpdate(channel string) {
 
 	// Download to the same directory as the binary to avoid cross-device rename
 	tempFile := filepath.Join(filepath.Dir(binPath), "xcp.new")
-	if err := downloadBinary(downloadURL, tempFile, reportDownloadProgress); err != nil {
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Download failed: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+	if err := downloadBinaryFn(downloadURL, tempFile, reportDownloadProgress); err != nil {
+		setUpdateStep("failed", 0, "download_failed", map[string]string{"detail": err.Error()}, "Download failed: "+err.Error())
 		return
 	}
 
 	// Step 2b: Verify SHA-256 against the release's per-asset .sha256 file.
 	// Без подтверждённой контрольной суммы бинарник не устанавливается.
 	binaryName := fmt.Sprintf("xcp_v%s_%s", info.LatestVersion, arch)
-	if err := verifyFileChecksum(tempFile, binaryName, downloadURL+".sha256"); err != nil {
+	if err := verifyChecksumFn(tempFile, binaryName, downloadURL+".sha256"); err != nil {
 		_ = os.Remove(tempFile)
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Checksum verification failed: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, "checksum_failed", map[string]string{"detail": err.Error()}, "Checksum verification failed: "+err.Error())
 		return
 	}
 
 	if err := os.Chmod(tempFile, 0755); err != nil {
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Failed to set permissions: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, "chmod_failed", map[string]string{"detail": err.Error()}, "Failed to set permissions: "+err.Error())
 		return
 	}
 
 	// Step 3: Backup current binary
-	setUpdateState(UpdateStatus{
-		Status:   "installing",
-		Progress: 60,
-		Message:  "Creating backup...",
-	})
+	setUpdateStep("installing", 60, "backup_creating", map[string]string{"version": currentVersion}, "Creating backup...")
 	backupDir := filepath.Join(a.cfg.DataDir, "backup")
 	_ = os.MkdirAll(backupDir, 0755)
 
 	backupPath := filepath.Join(backupDir, backupFileName(time.Now(), currentVersion))
 	if err := copyFile(binPath, backupPath); err != nil {
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Backup failed: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, "backup_failed", map[string]string{"detail": err.Error()}, "Backup failed: "+err.Error())
 		return
 	}
 
 	// Step 4: Atomic replace
-	st := getUpdateState()
-	st.Progress = 75
-	st.Message = "Installing update..."
-	setUpdateState(st)
+	setUpdateStep("installing", 75, "installing", map[string]string{"version": info.LatestVersion}, "Installing update...")
 
 	if err := os.Rename(tempFile, binPath); err != nil {
 		// Try to restore backup
 		os.Rename(backupPath, binPath)
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Install failed: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, "install_failed", map[string]string{"detail": err.Error()}, "Install failed: "+err.Error())
 		return
 	}
 
@@ -505,12 +481,7 @@ func (a *API) performUpdate(channel string) {
 	}
 
 	// Step 5: Restart
-	setUpdateState(UpdateStatus{
-		Status:    "restarting",
-		Progress:  90,
-		Message:   "Restarting...",
-		Timestamp: time.Now().Unix(),
-	})
+	setUpdateStep("restarting", 90, "restarting", map[string]string{"version": info.LatestVersion}, "Restarting...")
 
 	// Give time for response to be sent
 	time.Sleep(500 * time.Millisecond)
@@ -545,20 +516,20 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 	if err := cmd.Start(); err != nil {
 		// If starting the new binary fails, rollback immediately
 		msg := "Restart failed: " + err.Error()
+		code := "restart_failed"
+		params := map[string]string{"detail": err.Error()}
 		if backupPath != "" {
 			if err := copyFile(backupPath, binPath); err == nil {
 				// Start the backup binary to restore the server
 				rollbackCmd := exec.Command(binPath, "-config", configPath)
 				rollbackCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 				_ = rollbackCmd.Start()
-				msg = "Проверка не удалась, выполнен авто-откат на резервную копию."
+				msg = "Restart failed, automatic rollback to the backup performed"
+				code = "auto_rollback_done"
+				params = nil
 			}
 		}
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   msg,
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, code, params, msg)
 		time.Sleep(1 * time.Second)
 		os.Exit(1)
 	}
@@ -594,12 +565,11 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 			}
 			resp.Body.Close()
 			if ok {
-				setUpdateState(UpdateStatus{
-					Status:    "done",
-					Progress:  100,
-					Message:   "Update complete",
-					Timestamp: time.Now().Unix(),
-				})
+				var doneParams map[string]string
+				if expectedVersion != "" {
+					doneParams = map[string]string{"version": expectedVersion}
+				}
+				setUpdateStep("done", 100, "complete", doneParams, "Update complete")
 				time.Sleep(1 * time.Second)
 				os.Exit(0)
 			}
@@ -614,27 +584,30 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 		_ = cmd.Process.Kill()
 	}
 
-	msg := "Проверка работоспособности не удалась."
+	msg := "Health check failed"
+	code := "health_check_failed"
+	var params map[string]string
 	if backupPath != "" {
 		if err := copyFile(backupPath, binPath); err != nil {
-			msg = "Проверка не удалась. Откат завершился ошибкой: " + err.Error()
+			msg = "Health check failed, rollback failed: " + err.Error()
+			code = "auto_rollback_failed"
+			params = map[string]string{"detail": err.Error()}
 		} else {
 			// Start the backup binary to restore the server
 			rollbackCmd := exec.Command(binPath, "-config", configPath)
 			rollbackCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 			if err := rollbackCmd.Start(); err == nil {
-				msg = "Проверка не удалась, выполнен авто-откат на резервную копию."
+				msg = "Health check failed, automatic rollback to the backup performed"
+				code = "auto_rollback_done"
 			} else {
-				msg = "Проверка не удалась, авто-откат не смог запуститься: " + err.Error()
+				msg = "Health check failed, automatic rollback could not start: " + err.Error()
+				code = "auto_rollback_start_failed"
+				params = map[string]string{"detail": err.Error()}
 			}
 		}
 	}
 
-	setUpdateState(UpdateStatus{
-		Status:    "failed",
-		Message:   msg,
-		Timestamp: time.Now().Unix(),
-	})
+	setUpdateStep("failed", 0, code, params, msg)
 	time.Sleep(1 * time.Second)
 	os.Exit(1)
 }
@@ -723,7 +696,7 @@ type githubRelease struct {
 }
 
 func fetchLatestRelease(channel string) (*UpdateInfo, error) {
-	releases, err := fetchReleases()
+	releases, err := releasesFetcher()
 	if err != nil {
 		return nil, err
 	}

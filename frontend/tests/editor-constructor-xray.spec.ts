@@ -7,7 +7,7 @@
  *   D-19  — restart не вызывается без подтверждения диалога
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { fulfillServiceControl } from './helpers/api-mocks';
 import { LAZY_LOAD_TIMEOUT } from './helpers/timeouts';
 
@@ -71,6 +71,41 @@ function getMockXrayFile(path: string): string {
     });
   }
   return JSON.stringify({});
+}
+
+// Подменяет содержимое 04_outbounds.json (маршрут добавляется после общего мока и перехватывает раньше)
+async function mockOutboundsFile(page: Page, outbounds: unknown[]) {
+  await page.route('**/api/config/read**', async (route) => {
+    const path = new URL(route.request().url()).searchParams.get('path') || '';
+    if (route.request().method() === 'GET' && path.endsWith('/04_outbounds.json')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ outbounds })
+      });
+      return;
+    }
+    await route.fallback();
+  });
+}
+
+// Подменяет содержимое 05_routing.json произвольным текстом (в т.ч. не JSON)
+async function mockRoutingText(page: Page, text: string) {
+  await page.route('**/api/config/read**', async (route) => {
+    const path = new URL(route.request().url()).searchParams.get('path') || '';
+    if (route.request().method() === 'GET' && path.endsWith('/05_routing.json')) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: text });
+      return;
+    }
+    await route.fallback();
+  });
+}
+
+async function openXrayConstructor(page: Page) {
+  await page.goto('/#/constructor');
+  const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+  await expect(xrayBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
+  await xrayBtn.click();
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +299,95 @@ test.describe('Xray Constructor integration test suite', () => {
 
     // service/control НЕ должен был быть вызван
     expect(serviceControlCalled).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // UPDUI-04 (D-19): системные исходящие не дублируются в файле и на экране
+  // -------------------------------------------------------------------------
+  test('Apply writes 04_outbounds.json without duplicate tags', async ({ page }) => {
+    const direct = { tag: 'direct', protocol: 'freedom', settings: { domainStrategy: 'UseIP' } };
+    const block = { tag: 'block', protocol: 'blackhole' };
+    const proxyA = { tag: 'proxyA', protocol: 'vless' };
+    await mockOutboundsFile(page, [direct, block, { ...direct }, { ...block }, proxyA]);
+
+    const saved: Record<string, string> = {};
+    await page.route('**/api/config/save**', async (route) => {
+      const path = new URL(route.request().url()).searchParams.get('path') || '';
+      saved[path] = route.request().postData() || '';
+      await route.fallback();
+    });
+
+    await openXrayConstructor(page);
+    const applyBtn = page.locator('[data-testid="apply-changes-btn"]');
+    await expect(applyBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
+    await applyBtn.click();
+
+    const dialog = page.locator('[data-testid="apply-confirm-dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 3000 });
+    await dialog.locator('button.btn-primary').click();
+
+    await expect
+      .poll(() => Object.keys(saved).some((k) => k.endsWith('/04_outbounds.json')), {
+        timeout: 5000
+      })
+      .toBe(true);
+    const key = Object.keys(saved).find((k) => k.endsWith('/04_outbounds.json'))!;
+    const body = JSON.parse(saved[key]);
+    expect(body.outbounds.map((o: any) => o.tag)).toEqual(['direct', 'block', 'proxyA']);
+    // настройки системной записи из файла не потеряны
+    expect(body.outbounds[0]).toEqual(direct);
+  });
+
+  test('each system outbound is shown once', async ({ page }) => {
+    await mockOutboundsFile(page, [
+      { tag: 'direct', protocol: 'freedom' },
+      { tag: 'block', protocol: 'blackhole' },
+      { tag: 'proxyA', protocol: 'vless' }
+    ]);
+    await openXrayConstructor(page);
+
+    const outboundsTab = page.locator('[data-testid="xray-section-tabs"] [data-tab="outbounds"]');
+    await expect(outboundsTab).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
+    await outboundsTab.click();
+
+    const editable = page.locator('.outbounds-list .tag-card:has(.btn-del)');
+    await expect(editable).toHaveCount(1, { timeout: LAZY_LOAD_TIMEOUT });
+    await expect(editable.first().locator('.badge-tag')).toHaveText('proxyA');
+
+    const badges = page.locator('.outbounds-list .badge-tag');
+    await expect(badges.filter({ hasText: /^direct$/ })).toHaveCount(1);
+    await expect(badges.filter({ hasText: /^block$/ })).toHaveCount(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // UPDUI-04 (D-15): заготовка XKeen из одних комментариев — не «не разобран»
+  // -------------------------------------------------------------------------
+  test('comment-only routing stub shows the starter banner', async ({ page }) => {
+    await mockRoutingText(page, '// Создайте файл по ссылке на генератор маршрутизации\n');
+    const posts: string[] = [];
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && req.url().includes('/api/config/save')) posts.push(req.url());
+    });
+
+    await openXrayConstructor(page);
+    await expect(page.locator('[data-testid="xray-stub-banner"]')).toBeVisible({
+      timeout: LAZY_LOAD_TIMEOUT
+    });
+    expect(posts).toEqual([]);
+  });
+
+  test('broken routing file shows no starter banner', async ({ page }) => {
+    await mockRoutingText(page, '{ "routing": ');
+    const posts: string[] = [];
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && req.url().includes('/api/config/save')) posts.push(req.url());
+    });
+
+    await openXrayConstructor(page);
+    const outboundsTab = page.locator('[data-testid="xray-section-tabs"] [data-tab="outbounds"]');
+    await expect(outboundsTab).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
+    await expect(page.locator('[data-testid="xray-stub-banner"]')).toHaveCount(0);
+    expect(posts).toEqual([]);
   });
 
   // -------------------------------------------------------------------------

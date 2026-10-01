@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { writable } from 'svelte/store';
 import { usePoller } from './poller';
 
 describe('usePoller', () => {
@@ -136,5 +137,69 @@ describe('usePoller', () => {
     expect(pollFn).toHaveBeenCalledTimes(3);
 
     poller.stop();
+  });
+  describe('enabledWhen', () => {
+    it('со стором false стартует на паузе: pollFn не вызывается и по таймеру', async () => {
+      const enabledWhen = writable(false);
+      const pollFn = vi.fn().mockResolvedValue(undefined);
+      const poller = usePoller(pollFn, 1000, { enabledWhen });
+
+      expect(pollFn).not.toHaveBeenCalled();
+      expect(poller.isPaused()).toBe(true);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(pollFn).not.toHaveBeenCalled();
+      poller.stop();
+    });
+
+    it('false -> true даёт ровно один немедленный вызов, дальше по интервалу', async () => {
+      const enabledWhen = writable(false);
+      const pollFn = vi.fn().mockResolvedValue(undefined);
+      const poller = usePoller(pollFn, 1000, { enabledWhen });
+
+      enabledWhen.set(true);
+      expect(pollFn).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(pollFn).toHaveBeenCalledTimes(2);
+      poller.stop();
+    });
+
+    it('со стором true стартует сразу, как без опции', () => {
+      const enabledWhen = writable(true);
+      const pollFn = vi.fn().mockResolvedValue(undefined);
+      const poller = usePoller(pollFn, 1000, { enabledWhen });
+
+      expect(pollFn).toHaveBeenCalledTimes(1);
+      poller.stop();
+    });
+
+    it('true -> false прекращает вызовы и обрывает запрос в полёте', async () => {
+      const enabledWhen = writable(true);
+      let captured: AbortSignal | undefined;
+      const pollFn = vi.fn((signal: AbortSignal) => {
+        captured = signal;
+        return new Promise<void>(() => {});
+      });
+      const poller = usePoller(pollFn, 1000, { enabledWhen });
+
+      expect(pollFn).toHaveBeenCalledTimes(1);
+      expect(captured?.aborted).toBe(false);
+
+      enabledWhen.set(false);
+      expect(captured?.aborted).toBe(true);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(pollFn).toHaveBeenCalledTimes(1);
+      poller.stop();
+    });
+
+    it('после stop() переключение стора не вызывает pollFn', async () => {
+      const enabledWhen = writable(false);
+      const pollFn = vi.fn().mockResolvedValue(undefined);
+      const poller = usePoller(pollFn, 1000, { enabledWhen });
+
+      poller.stop();
+      enabledWhen.set(true);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(pollFn).not.toHaveBeenCalled();
+    });
   });
 });

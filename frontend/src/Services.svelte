@@ -859,6 +859,16 @@
     return xkeenInfo.activeKernel || 'none';
   });
 
+  // Адрес API берётся только из реальных данных: сокет/адрес контроллера Mihomo
+  // или gRPC-адрес Xray при наличии api-блока в конфиге; иначе «—».
+  let apiSocketLabel = $derived.by(() => {
+    if (activeKernel === 'mihomo') return mihomo?.api_addr || '—';
+    if (activeKernel === 'xray') {
+      return ($capabilities?.xray?.grpc_ready && $capabilities.xray.api_addr) || '—';
+    }
+    return '—';
+  });
+
   let activeKernelObj = $derived(
     activeKernel === 'xray' ? xray : activeKernel === 'mihomo' ? mihomo : undefined
   );
@@ -1018,7 +1028,7 @@
               />
             </span>
           {/if}
-          {#if watchdogBadge}
+          {#if watchdogBadge && watchdogStatus?.state !== 'idle'}
             <StatusBadge variant={watchdogBadge.variant} label={$t(watchdogBadge.labelKey)} />
           {/if}
         </div>
@@ -1174,13 +1184,7 @@
         <div class="meta-item">
           <span class="meta-lbl">API / Socket:</span>
           <span class="meta-val monospace">
-            {#if activeKernel === 'mihomo'}
-              {mihomo?.api_addr || '/opt/etc/mihomo/mihomo-api.sock'}
-            {:else if activeKernel === 'xray'}
-              {xray?.binary_path || '/opt/bin/xray'}
-            {:else}
-              —
-            {/if}
+            {apiSocketLabel}
           </span>
         </div>
       </div>
@@ -1711,6 +1715,9 @@
         <h2 class="card-title">{$t('watchdog.section_title')}</h2>
         {#if statusPollError}
           <p class="card-subtitle watchdog-stale-text">{$t('watchdog.stale_note')}</p>
+        {/if}
+        {#if watchdogStatus?.state === 'idle'}
+          <p class="card-subtitle">{$t('watchdog.state_idle_hint')}</p>
         {/if}
       </div>
       {#if watchdogBadge}

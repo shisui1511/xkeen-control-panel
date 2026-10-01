@@ -14,6 +14,12 @@
   import Modal from '../Modal.svelte';
   import Select from '../Select.svelte';
   import { updateState, refreshUpdateState, type UpdateCheckState } from '../../lib/updateNotify';
+  import {
+    stepLabel,
+    failureView,
+    apiErrorView,
+    type UpdateStatusPayload
+  } from '../../lib/updateStatusView';
 
   interface ReleaseNote {
     version: string;
@@ -35,14 +41,6 @@
     releases?: ReleaseNote[];
   }
 
-  interface UpdateStatus {
-    status: string;
-    message: string;
-    progress: number;
-    downloaded?: number;
-    total?: number;
-  }
-
   interface Backup {
     name: string;
     version?: string;
@@ -57,9 +55,12 @@
   let channel = $state<Channel>('stable');
   let info = $state<UpdateInfo | null>(null);
   let checkError = $state('');
+  let checkErrorDetail = $state('');
   let checkedAt = $state<Date | null>(null);
   let checking = $state(false);
-  let status = $state<UpdateStatus | null>(null);
+  let status = $state<UpdateStatusPayload | null>(null);
+  const stepRef = $derived(status ? stepLabel(status) : null);
+  const failure = $derived(status ? failureView(status) : null);
   let installing = $state(false);
   let backups = $state<Backup[]>([]);
   let showConfirmInstall = $state(false);
@@ -126,7 +127,8 @@
     } catch (e: any) {
       await refreshUpdateState();
       if (e?.status === 401) return;
-      showToast('error', e instanceof Error ? e.message : String(e));
+      const view = apiErrorView(e);
+      showToast('error', view ? $t(view.key) : e instanceof Error ? e.message : String(e));
     } finally {
       savingAuto = false;
     }
@@ -187,13 +189,15 @@
     } catch (e: any) {
       channel = prev;
       if (e?.status === 401) return;
-      showToast('error', e instanceof Error ? e.message : String(e));
+      const view = apiErrorView(e);
+      showToast('error', view ? $t(view.key) : e instanceof Error ? e.message : String(e));
     }
   }
 
   async function checkUpdate() {
     checking = true;
     checkError = '';
+    checkErrorDetail = '';
     try {
       info = await apiFetchJSON<UpdateInfo>(`/api/update/check?channel=${channel}`);
       checkedAt = new Date();
@@ -201,7 +205,9 @@
       refreshUpdateState();
     } catch (e: any) {
       if (e?.status === 401) return;
-      checkError = e instanceof Error ? e.message : String(e);
+      const view = apiErrorView(e);
+      checkError = view ? $t(view.key) : e instanceof Error ? e.message : String(e);
+      checkErrorDetail = view?.detail ?? '';
     } finally {
       checking = false;
     }
@@ -217,7 +223,7 @@
 
   async function fetchStatus() {
     try {
-      status = await apiFetchJSON<UpdateStatus>('/api/update/status');
+      status = await apiFetchJSON<UpdateStatusPayload>('/api/update/status');
     } catch (_: any) {}
   }
 
@@ -275,7 +281,7 @@
     sseSource = new EventSource('/api/update/events');
     sseSource.onmessage = (event) => {
       try {
-        const state = JSON.parse(event.data) as UpdateStatus;
+        const state = JSON.parse(event.data) as UpdateStatusPayload;
         status = state;
         if (state.status === 'restarting') {
           closeSSE();
@@ -312,7 +318,8 @@
     } catch (e: any) {
       installing = false;
       if (e?.status === 401) return;
-      showToast('error', e instanceof Error ? e.message : String(e));
+      const view = apiErrorView(e);
+      showToast('error', view ? $t(view.key) : e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -336,7 +343,8 @@
     } catch (e: any) {
       installing = false;
       if (e?.status === 401) return;
-      showToast('error', e instanceof Error ? e.message : String(e));
+      const view = apiErrorView(e);
+      showToast('error', view ? $t(view.key) : e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -409,7 +417,14 @@
           ></div>
         </div>
       {/if}
-      {#if status.message}
+      {#if failure}
+        <span class="progress-text">{$t(failure.reason.key, failure.reason.params)}</span>
+        {#if failure.detail}
+          <span class="progress-detail">{failure.detail}</span>
+        {/if}
+      {:else if stepRef}
+        <span class="progress-text">{$t(stepRef.key, stepRef.params)}</span>
+      {:else if status.message}
         <span class="progress-text">{status.message}</span>
       {/if}
     </div>
@@ -426,7 +441,12 @@
     </div>
   {:else if !busy}
     {#if checkError}
-      <div class="update-state state-error">{checkError}</div>
+      <div class="update-state state-error">
+        {checkError}
+        {#if checkErrorDetail}
+          <span class="progress-detail">{checkErrorDetail}</span>
+        {/if}
+      </div>
     {:else if info?.has_update}
       {@const kind = releaseKind(info.latest_version)}
       <div class="update-available">
@@ -539,7 +559,9 @@
     {#if auto.checked_at}
       <div class="checked-at auto-checked">
         {$t('settings.update_auto_checked', { date: formatDate(auto.checked_at) })}
-        {#if auto.error}· <span class="auto-error">{auto.error}</span>{/if}
+        {#if auto.error}·
+          <span class="auto-error">{$t('settings.update_err_update_check_failed')}</span>
+          <span class="progress-detail">{auto.error}</span>{/if}
       </div>
     {/if}
   </div>
@@ -840,6 +862,15 @@
     font-size: 12px;
     color: var(--fg-secondary);
     word-break: break-word;
+  }
+
+  /* Технический текст ошибки Go под переведённой причиной сбоя */
+  .progress-detail {
+    display: block;
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    color: var(--fg-secondary);
+    overflow-wrap: anywhere;
   }
 
   .reconnect-overlay {
