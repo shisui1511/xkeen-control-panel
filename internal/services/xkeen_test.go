@@ -658,3 +658,46 @@ func TestXKeenService_StatusSerialized(t *testing.T) {
 		t.Error("процессы xkeen -status пересеклись во времени")
 	}
 }
+
+// TestRunWithTimeoutArgs_StartTimeoutWaitsForKernel: start не уложился в
+// таймаут, но ядро поднялось в фоне — окно ожидания статуса засчитывает запуск.
+func TestRunWithTimeoutArgs_StartTimeoutWaitsForKernel(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "up")
+	bin := filepath.Join(dir, "xkeen")
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"-status) if [ -f " + marker + " ]; then echo 'mihomo запущен'; else echo 'не запущен'; fi ;;\n" +
+		"-start) (sleep 1; touch " + marker + ") & sleep 10 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldW, oldI := startGraceWindow, startGraceInterval
+	startGraceWindow, startGraceInterval = 5*time.Second, 200*time.Millisecond
+	defer func() { startGraceWindow, startGraceInterval = oldW, oldI }()
+
+	svc := &XKeenService{BinaryPath: bin}
+	if _, err := svc.runWithTimeoutArgs(200*time.Millisecond, "-start"); err != nil {
+		t.Fatalf("ядро поднялось в окне ожидания, ждали успех: %v", err)
+	}
+}
+
+// TestRunWithTimeoutArgs_StartTimeoutKernelNeverUp: ядро так и не поднялось —
+// ошибка таймаута сохраняется после окна ожидания.
+func TestRunWithTimeoutArgs_StartTimeoutKernelNeverUp(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "xkeen")
+	script := "#!/bin/sh\ncase \"$1\" in\n-status) echo 'не запущен' ;;\n-start) sleep 10 ;;\nesac\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldW, oldI := startGraceWindow, startGraceInterval
+	startGraceWindow, startGraceInterval = 600*time.Millisecond, 200*time.Millisecond
+	defer func() { startGraceWindow, startGraceInterval = oldW, oldI }()
+
+	svc := &XKeenService{BinaryPath: bin}
+	if _, err := svc.runWithTimeoutArgs(200*time.Millisecond, "-start"); err == nil {
+		t.Fatal("ожидалась ошибка таймаута")
+	}
+}

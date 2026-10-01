@@ -540,6 +540,30 @@ func (s *XKeenService) isLocalhost() bool {
 	return false
 }
 
+// Окно ожидания после таймаута start/restart: на нагруженном роутере (сразу
+// после деплоя) скрипт XKeen укладывается в таймаут не всегда, а ядро при этом
+// поднимается в фоне. Одиночная проверка статуса в этот момент давала ложную ошибку.
+var (
+	startGraceWindow   = 20 * time.Second
+	startGraceInterval = 2 * time.Second
+)
+
+// waitKernelHealthy опрашивает `xkeen -status`, пока ядро не станет здоровым
+// или не истечёт window. Первая проверка выполняется сразу.
+func (s *XKeenService) waitKernelHealthy(window, interval time.Duration) bool {
+	deadline := time.Now().Add(window)
+	for {
+		status, _ := s.Status()
+		if IsKernelStatusHealthy(status) {
+			return true
+		}
+		if !time.Now().Add(interval).Before(deadline) {
+			return false
+		}
+		time.Sleep(interval)
+	}
+}
+
 func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string) (string, error) {
 	if s.isLocalhost() {
 		// For commands starting, stopping, or restarting services, return mock success
@@ -591,11 +615,8 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 				break
 			}
 		}
-		if isStart {
-			status, _ := s.Status()
-			if IsKernelStatusHealthy(status) {
-				return output, nil
-			}
+		if isStart && s.waitKernelHealthy(startGraceWindow, startGraceInterval) {
+			return output, nil
 		}
 		return output, fmt.Errorf("timeout exceeded")
 	case err := <-done:
