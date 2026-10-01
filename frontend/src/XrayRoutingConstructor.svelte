@@ -10,6 +10,12 @@
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
   import {
+    splitOutbounds,
+    mergeOutbounds,
+    uniqueTags,
+    type PlacedOutbound
+  } from './lib/constructors/xrayOutbounds';
+  import {
     adaptDnsServers,
     adaptPresetRules,
     geoAvailability,
@@ -88,17 +94,22 @@
   let inbounds = $state<XrayInbound[]>([]);
 
   // Outbound Management & Reactivity
+  // direct/block/dns-out из 04_outbounds.json хранятся отдельно от редактируемых записей и
+  // возвращаются на свои места при записи файла (показываются в блоке «только чтение»).
+  let systemOutbounds = $state<PlacedOutbound[]>([]);
   let customOutbounds = $state<any[]>([]);
   let subscriptionOutbounds = $state<any[]>([]);
   let outboundTagsLoading = $state(false);
 
-  let outboundTags = $derived([
-    'direct',
-    'block',
-    'dns-out',
-    ...customOutbounds.map((o) => o.tag).filter(Boolean),
-    ...subscriptionOutbounds.map((o) => o.tag).filter(Boolean)
-  ]);
+  let outboundTags = $derived(
+    uniqueTags([
+      'direct',
+      'block',
+      'dns-out',
+      ...customOutbounds.map((o) => o.tag).filter(Boolean),
+      ...subscriptionOutbounds.map((o) => o.tag).filter(Boolean)
+    ])
+  );
 
   let outboundDetails = $derived.by<OutboundDetail[]>(() => {
     const list: OutboundDetail[] = [
@@ -283,7 +294,7 @@
     };
 
     const outboundsObj = {
-      outbounds: customOutbounds
+      outbounds: mergeOutbounds(systemOutbounds, customOutbounds)
     };
 
     const dnsObj = {
@@ -419,7 +430,9 @@
     if (files['04_outbounds.json']?.outbounds) {
       // Копия, а не тот же массив: правки черновика (импорт, ручной узел, удаление) не должны
       // менять загруженный с роутера исходник, иначе сравнение перед записью видит «без изменений».
-      customOutbounds = $state.snapshot(files['04_outbounds.json'].outbounds);
+      const split = splitOutbounds($state.snapshot(files['04_outbounds.json'].outbounds));
+      systemOutbounds = split.system;
+      customOutbounds = split.custom;
     }
 
     if (files['05_routing.json']?.routing) {
