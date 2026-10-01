@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import checkBundleSize from '../scripts/check-bundle-size.cjs';
 import injectSwVersion from '../scripts/inject-sw-version.cjs';
 
@@ -8,6 +11,8 @@ const {
   gzipSize,
   formatKb,
   checkNoExternalResources,
+  checkNoInlineScripts,
+  checkThemeInitPresent,
   checkWoff2Only,
   checkSwCacheVersioned,
   checkApiBranchUncached
@@ -169,5 +174,34 @@ describe('Bundle Size Gate', () => {
 
   it('injectVersion throws when the CACHE_NAME declaration is missing', () => {
     expect(() => injectVersion('// no cache name here', '9.9.9')).toThrow();
+  });
+
+  it('checkNoInlineScripts accepts only scripts with src and an empty body', () => {
+    const ok =
+      '<script src="./theme-init.js"></script><script type="module" crossorigin src="./assets/index-x.js"></script>';
+    expect(checkNoInlineScripts(ok)).toEqual([]);
+  });
+
+  it('checkNoInlineScripts flags an inline script without src', () => {
+    expect(
+      checkNoInlineScripts('<script>document.documentElement.dataset.theme="dark"</script>')
+    ).toHaveLength(1);
+  });
+
+  it('checkNoInlineScripts flags a module script with an inline body', () => {
+    expect(checkNoInlineScripts('<script type="module">import "x"</script>')).toHaveLength(1);
+  });
+
+  it('checkThemeInitPresent requires theme-init.js and a reference to it in index.html', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'theme-init-'));
+    try {
+      expect(checkThemeInitPresent(dir)).toBe(false);
+      fs.writeFileSync(path.join(dir, 'index.html'), '<script src="/theme-init.js"></script>');
+      expect(checkThemeInitPresent(dir)).toBe(false);
+      fs.writeFileSync(path.join(dir, 'theme-init.js'), '');
+      expect(checkThemeInitPresent(dir)).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
