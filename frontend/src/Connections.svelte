@@ -1,7 +1,14 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { t, pluralize, currentLang } from './i18n';
-  import { capabilities, fetchCapabilities, showToast, showConfirm } from './stores';
+  import {
+    capabilities,
+    fetchCapabilities,
+    showToast,
+    showConfirm,
+    mihomoApiReady,
+    mihomoApiState
+  } from './stores';
   import { apiFetch, startMihomo } from './lib/api';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
@@ -368,9 +375,9 @@
       await startMihomo();
       launchTimer1 = setTimeout(async () => {
         if (destroyed) return;
+        // Поток подключит $effect по mihomoApiReady, когда capabilities покажут «API отвечает»
         await fetchCapabilities();
         if (destroyed) return;
-        connectWS();
         mihomoLaunching = false;
       }, 1500);
       launchTimer2 = setTimeout(async () => {
@@ -549,10 +556,23 @@
     loadClients();
     clientsRefreshTimer = setInterval(loadClients, 20000);
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    if ($capabilities === null || $capabilities.mihomo.reachable) {
-      loading = true;
-      connectWS();
-    }
+  });
+
+  // Поток подключений подчиняется тому же сигналу, что и опросы Mihomo: сокет не открывается,
+  // пока API не отвечает (в том числе до первого ответа capabilities), закрывается при уходе
+  // в down без цикла переподключений и открывается сам, когда API ответил.
+  $effect(() => {
+    const ready = $mihomoApiReady;
+    const unknown = $mihomoApiState === 'unknown';
+    untrack(() => {
+      if (ready) {
+        loading = true;
+        connectWS();
+      } else {
+        disconnectWS();
+        loading = unknown;
+      }
+    });
   });
 
   onDestroy(() => {

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { kernelsFixture, setupMocks, visitPage } from './helpers/api-mocks';
 
-// e2e-pages: #/ #/services #/proxies
+// e2e-pages: #/ #/services #/proxies #/connections
 
 // UPDUI-03: пока API Mihomo не отвечает (api_reachable: false), фронтенд не опрашивает
 // /api/mihomo/proxy/*. Каждый такой запрос при остановленном ядре — 502 и строка в логе
@@ -248,5 +248,35 @@ test.describe('Гейт опросов Mihomo (UPDUI-03)', () => {
     await expect(latency).toBeEnabled({ timeout: 14_000 });
     await expect(reset).toBeEnabled();
     await expect(page.getByTestId('qs-step3-reason')).toHaveCount(0);
+  });
+
+  test('connections websocket waits for the API', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    const flags: CapsFlags = { apiReachable: false, processRunning: false };
+    await mockCapabilities(page, flags);
+    // Перехваченный routeWebSocket сокет не попадает в page.on('websocket'): считаем в обработчике
+    const sockets: { closed: boolean }[] = [];
+    await page.routeWebSocket('**/api/mihomo/connections/ws', (ws) => {
+      const entry = { closed: false };
+      sockets.push(entry);
+      ws.onClose(() => (entry.closed = true));
+      ws.send(JSON.stringify({ connections: [] }));
+    });
+
+    await visitPage(page, '/#/connections');
+    await page.waitForTimeout(5000);
+    expect(sockets).toHaveLength(0);
+
+    // API ответил: сокет открывается сам на следующем опросе capabilities
+    flags.apiReachable = true;
+    flags.processRunning = true;
+    await expect.poll(() => sockets.length, { timeout: 14_000 }).toBe(1);
+
+    // API пропал: сокет закрывается, цикл переподключений не запускается (T-137-27)
+    flags.apiReachable = false;
+    flags.processRunning = false;
+    await expect.poll(() => sockets[0].closed, { timeout: 14_000 }).toBe(true);
+    await page.waitForTimeout(5000);
+    expect(sockets).toHaveLength(1);
   });
 });
