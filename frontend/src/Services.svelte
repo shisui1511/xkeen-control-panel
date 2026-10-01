@@ -1028,7 +1028,7 @@
               />
             </span>
           {/if}
-          {#if watchdogBadge}
+          {#if watchdogBadge && watchdogStatus?.state !== 'idle'}
             <StatusBadge variant={watchdogBadge.variant} label={$t(watchdogBadge.labelKey)} />
           {/if}
         </div>
@@ -1715,6 +1715,9 @@
         <h2 class="card-title">{$t('watchdog.section_title')}</h2>
         {#if statusPollError}
           <p class="card-subtitle watchdog-stale-text">{$t('watchdog.stale_note')}</p>
+        {/if}
+        {#if watchdogStatus?.state === 'idle'}
+          <p class="card-subtitle">{$t('watchdog.state_idle_hint')}</p>
         {/if}
       </div>
       {#if watchdogBadge}

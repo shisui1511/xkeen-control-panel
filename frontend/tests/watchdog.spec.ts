@@ -12,10 +12,12 @@ test.describe('Watchdog status badge, incident banner, detail card and reset act
     degraded_at: 1710000000
   };
 
+  let kernelRunning = true;
   let resetCallCount = 0;
   let lastResetHeaders: Record<string, string> = {};
 
   test.beforeEach(async ({ page }) => {
+    kernelRunning = true;
     resetCallCount = 0;
     lastResetHeaders = {};
     watchdogData = {
@@ -140,8 +142,8 @@ test.describe('Watchdog status badge, incident banner, detail card and reset act
                 has_update: false,
                 channel: 'stable',
                 status: 'idle',
-                process_status: 'running',
-                message: 'running on background'
+                process_status: kernelRunning ? 'running' : 'stopped',
+                message: kernelRunning ? 'running on background' : 'stopped'
               }
             ]
           })
@@ -196,12 +198,12 @@ test.describe('Watchdog status badge, incident banner, detail card and reset act
           body: JSON.stringify({
             success: true,
             data: {
-              is_running: true,
+              is_running: kernelRunning,
               active_kernel: 'xray',
               pid: 1234,
               uptime: '2h 15m',
               binary_path: '/opt/sbin/xkeen',
-              raw: 'Xray-core (running)\nXKeen is running',
+              raw: kernelRunning ? 'Xray-core (running)\nXKeen is running' : 'XKeen is not running',
               watchdog: { ...watchdogData }
             }
           })
@@ -256,6 +258,42 @@ test.describe('Watchdog status badge, incident banner, detail card and reset act
       .filter({ hasText: /В строю|Armed/ });
     await expect(armedBadge).toBeVisible();
     await expect(armedBadge).toContainText(/В строю|Armed/);
+  });
+
+  test('idle watchdog keeps a single stopped badge in the hero', async ({ page }) => {
+    kernelRunning = false;
+    watchdogData = {
+      state: 'idle',
+      consecutive_failures: 0,
+      disarm_attempts: 0,
+      last_disarm_error: '',
+      interception_active: false,
+      interception_family: '',
+      next_attempt_at: 0,
+      degraded_at: 0
+    };
+    await page.goto('/#/services');
+
+    const heroStatus = page.locator('.hero-status');
+    await expect(heroStatus).toBeVisible();
+    const stoppedBadges = heroStatus
+      .locator('.status-badge, .badge')
+      .filter({ hasText: /^\s*(Остановлено|Stopped)\s*$/ });
+    await expect(stoppedBadges).toHaveCount(1);
+    // The idle watchdog badge is not duplicated in the hero
+    await expect(
+      heroStatus.locator('.status-badge, .badge').filter({ hasText: /Ядро остановлено|Idle/ })
+    ).toHaveCount(0);
+
+    // The watchdog card keeps its own badge and explains the idle state
+    const card = page.locator('.watchdog-card');
+    await expect(card).toBeVisible();
+    await expect(
+      card.locator('.status-badge, .badge').filter({ hasText: /Ядро остановлено|Idle/ })
+    ).toBeVisible();
+    await expect(card).toContainText(
+      /Ядро остановлено — watchdog не отслеживает|Kernel is stopped — watchdog is not monitoring/
+    );
   });
 
   test('Dashboard shows incident banner with alert-error when degraded, and hides it when armed', async ({
