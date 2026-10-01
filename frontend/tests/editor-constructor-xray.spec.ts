@@ -89,6 +89,18 @@ async function mockOutboundsFile(page: Page, outbounds: unknown[]) {
   });
 }
 
+// Подменяет содержимое 05_routing.json произвольным текстом (в т.ч. не JSON)
+async function mockRoutingText(page: Page, text: string) {
+  await page.route('**/api/config/read**', async (route) => {
+    const path = new URL(route.request().url()).searchParams.get('path') || '';
+    if (route.request().method() === 'GET' && path.endsWith('/05_routing.json')) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: text });
+      return;
+    }
+    await route.fallback();
+  });
+}
+
 async function openXrayConstructor(page: Page) {
   await page.goto('/#/constructor');
   const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
@@ -345,6 +357,37 @@ test.describe('Xray Constructor integration test suite', () => {
     const badges = page.locator('.outbounds-list .badge-tag');
     await expect(badges.filter({ hasText: /^direct$/ })).toHaveCount(1);
     await expect(badges.filter({ hasText: /^block$/ })).toHaveCount(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // UPDUI-04 (D-15): заготовка XKeen из одних комментариев — не «не разобран»
+  // -------------------------------------------------------------------------
+  test('comment-only routing stub shows the starter banner', async ({ page }) => {
+    await mockRoutingText(page, '// Создайте файл по ссылке на генератор маршрутизации\n');
+    const posts: string[] = [];
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && req.url().includes('/api/config/save')) posts.push(req.url());
+    });
+
+    await openXrayConstructor(page);
+    await expect(page.locator('[data-testid="xray-stub-banner"]')).toBeVisible({
+      timeout: LAZY_LOAD_TIMEOUT
+    });
+    expect(posts).toEqual([]);
+  });
+
+  test('broken routing file shows no starter banner', async ({ page }) => {
+    await mockRoutingText(page, '{ "routing": ');
+    const posts: string[] = [];
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && req.url().includes('/api/config/save')) posts.push(req.url());
+    });
+
+    await openXrayConstructor(page);
+    const outboundsTab = page.locator('[data-testid="xray-section-tabs"] [data-tab="outbounds"]');
+    await expect(outboundsTab).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
+    await expect(page.locator('[data-testid="xray-stub-banner"]')).toHaveCount(0);
+    expect(posts).toEqual([]);
   });
 
   // -------------------------------------------------------------------------

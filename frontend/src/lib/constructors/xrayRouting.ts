@@ -233,6 +233,54 @@ export function parseJsonc(text: string): any {
   }
 }
 
+/**
+ * Parses an Xray config file text. A file with nothing but comments (the XKeen
+ * starter stub, with or without braces) is an empty stub, not a syntax error:
+ * `unparsed` is true only for non-empty text that fails to parse.
+ */
+export function parseXrayFileText(text: string): { data: any; unparsed: boolean } {
+  const data = parseJsonc(text);
+  const unparsed = data === undefined && stripJsonComments(text).trim() !== '';
+  return { data, unparsed };
+}
+
+/**
+ * Like stripJsonComments, but comment characters become spaces and every line
+ * break is kept, so the result has the same length as the input and error
+ * positions of a JSON parser still point at the original text.
+ */
+export function blankJsonComments(text: string): string {
+  let out = '';
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      out += c;
+      if (c === '\\' && i + 1 < text.length) out += text[++i];
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+    } else if (c === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') {
+        out += text[i] === '\r' ? '\r' : ' ';
+        i++;
+      }
+      if (i < text.length) out += '\n';
+    } else if (c === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end === -1 ? text.length : end + 2;
+      for (; i < stop; i++) out += text[i] === '\n' || text[i] === '\r' ? text[i] : ' ';
+      i--;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
 /** ruleTag of the routing rules the "DNS over proxy" switch manages. */
 export const DNS_OVER_PROXY_TAG = 'xcp-dns-over-proxy';
 

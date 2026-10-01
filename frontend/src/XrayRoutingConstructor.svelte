@@ -34,7 +34,7 @@
     rulesToConfig,
     cleanBalancer,
     observatoryFor,
-    parseJsonc,
+    parseXrayFileText,
     lineDiff,
     hasJsonComments,
     dnsOverProxyRules,
@@ -378,8 +378,8 @@
         if (!res.ok) return;
         const text = await res.text();
         xrayRawFiles[name] = text;
-        const data = parseJsonc(text);
-        if (data === undefined && text.trim()) {
+        const { data, unparsed } = parseXrayFileText(text);
+        if (unparsed) {
           unparsedFiles = [...unparsedFiles, name];
         }
         xrayFiles[name] = data ?? {};
