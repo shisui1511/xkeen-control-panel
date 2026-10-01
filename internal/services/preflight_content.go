@@ -106,7 +106,8 @@ func ValidateConfigContent(kernel string, filename string, content string, kerne
 			return result
 		}
 	} else if kernel == "xray" {
-		err := json.Unmarshal([]byte(content), &data)
+		// Xray reads its configs as JSONC: the syntax check must accept comments too.
+		err := json.Unmarshal([]byte(StripJSONComments(content)), &data)
 		if err != nil || data == nil {
 			result.Warnings = append(result.Warnings, PreflightIssue{
 				Code:    "preflight.syntax",
