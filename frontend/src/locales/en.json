@@ -806,6 +806,7 @@
   "settings.update_fail_auto_rollback_failed": "The new version failed the health check, rollback failed",
   "settings.update_fail_auto_rollback_start_failed": "The new version failed the health check, the backup did not start",
   "settings.update_fail_rollback_failed": "Could not roll the panel back",
+  "settings.update_err_update_in_progress": "Update already in progress",
   "settings.update_backups_title": "Panel backups",
   "settings.update_backups_hint": "Created before every update, the last five are kept",
   "settings.backup_unknown_version": "unknown version",

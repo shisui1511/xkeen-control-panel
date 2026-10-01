@@ -14,7 +14,12 @@
   import Modal from '../Modal.svelte';
   import Select from '../Select.svelte';
   import { updateState, refreshUpdateState, type UpdateCheckState } from '../../lib/updateNotify';
-  import { stepLabel, failureView, type UpdateStatusPayload } from '../../lib/updateStatusView';
+  import {
+    stepLabel,
+    failureView,
+    apiErrorView,
+    type UpdateStatusPayload
+  } from '../../lib/updateStatusView';
 
   interface ReleaseNote {
     version: string;
@@ -307,7 +312,8 @@
     } catch (e: any) {
       installing = false;
       if (e?.status === 401) return;
-      showToast('error', e instanceof Error ? e.message : String(e));
+      const view = apiErrorView(e);
+      showToast('error', view ? $t(view.key) : e instanceof Error ? e.message : String(e));
     }
   }
 

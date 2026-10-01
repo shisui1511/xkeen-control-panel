@@ -82,3 +82,30 @@ export function failureView(s: UpdateStatusPayload): { reason: I18nRef; detail: 
   if (!code || !(FAILURE_CODES as readonly string[]).includes(code)) return null;
   return { reason: { key: `settings.update_fail_${code}` }, detail: s.params?.detail ?? '' };
 }
+
+/** Машинные коды ошибок эндпоинтов обновления (контракт с бэкендом). */
+export const UPDATE_API_ERROR_CODES = [
+  'update_in_progress',
+  'update_no_backup',
+  'invalid_request_body',
+  'update_channel_invalid',
+  'update_version_required',
+  'update_save_failed',
+  'update_window_invalid',
+  'update_check_failed',
+  'update_changelog_failed',
+  'update_rollback_failed'
+] as const;
+
+/**
+ * Ключ перевода и техническая деталь для ошибки API обновления. null, когда кода
+ * нет или он не из перечня — вызывающий показывает текст ошибки как есть.
+ */
+export function apiErrorView(e: unknown): { key: string; detail: string } | null {
+  if (!e || typeof e !== 'object') return null;
+  const { code, detail } = e as { code?: unknown; detail?: unknown };
+  if (typeof code !== 'string' || !(UPDATE_API_ERROR_CODES as readonly string[]).includes(code)) {
+    return null;
+  }
+  return { key: `settings.update_err_${code}`, detail: typeof detail === 'string' ? detail : '' };
+}

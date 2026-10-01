@@ -33,6 +33,8 @@ interface MockOptions {
   events?: Record<string, unknown>;
   /** HTTP-статус /api/version; 503 не даёт циклу переподключения перезагрузить страницу. */
   versionStatus?: number;
+  /** Ответ на POST /api/update/install (по умолчанию успех). */
+  installResponse?: { status: number; body: unknown };
   onSettings?: (body: Record<string, unknown>) => void;
 }
 
@@ -82,6 +84,9 @@ async function mockApi(page: Page, opts: MockOptions = {}) {
       });
     } else if (url.includes('/api/update/status')) {
       await route.fulfill(json(opts.status ?? { status: 'idle', message: '', progress: 0 }));
+    } else if (url.includes('/api/update/install')) {
+      const r = opts.installResponse ?? { status: 200, body: { success: true, data: {} } };
+      await route.fulfill(json(r.body, r.status));
     } else if (url.includes('/api/update/check')) {
       if (opts.checkStatus && opts.checkStatus >= 400) {
         await route.fulfill(
@@ -325,6 +330,32 @@ test.describe('Update progress labels (en)', () => {
     await page.goto('/#/settings?tab=updates');
 
     await expect(page.getByText('Downloading version 0.29.0-rc.30')).toBeVisible();
+  });
+});
+
+test.describe('Update API errors by code', () => {
+  test('translates the in-progress answer by code', async ({ page }) => {
+    await mockApi(page, {
+      check: {
+        current_version: '0.28.0',
+        latest_version: '0.29.0',
+        has_update: true,
+        channel: 'beta',
+        download_size: 7_300_000
+      },
+      // Бэкенд ответил по-английски: язык панели хранится в localStorage и ему не передаётся
+      installResponse: {
+        status: 409,
+        body: { success: false, error: 'Update already in progress', code: 'update_in_progress' }
+      }
+    });
+    await openUpdatesTab(page);
+
+    await page.getByRole('button', { name: 'Установить' }).click();
+    await page.getByRole('button', { name: 'Обновить панель' }).click();
+
+    await expect(page.getByText('Обновление уже выполняется')).toBeVisible();
+    await expect(page.getByText('Update already in progress')).toHaveCount(0);
   });
 });
 
