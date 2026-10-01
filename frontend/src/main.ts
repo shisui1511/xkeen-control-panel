@@ -15,7 +15,8 @@ function initTheme() {
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const theme = saved || (prefersDark ? 'dark' : 'light');
+  // Белый список как в public/theme-init.js: произвольное значение не попадает в атрибут.
+  const theme = saved === 'light' || saved === 'dark' ? saved : prefersDark ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', theme);
 }
 
