@@ -1904,11 +1904,98 @@
     font-size: var(--font-size-xs, 12px);
   }
 
+  /* Problems panel: a tinted row with an icon chip, a text column and the
+     action on the right (wraps below the text on narrow widths). The tone
+     comes from the .alert-* modifier; text stays on neutral foreground
+     tokens so only the stripe, chip and step label carry the colour. */
+  .problems-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3, 12px);
+  }
+
+  .problem-item {
+    --tone: var(--warning);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-3, 12px) var(--spacing-4, 16px);
+    padding: var(--spacing-4, 16px) var(--spacing-5, 20px);
+    border: 1px solid color-mix(in srgb, var(--tone) 28%, var(--border));
+    border-left: 3px solid var(--tone);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--tone) 7%, var(--bg-card));
+    color: var(--fg-primary);
+  }
+
+  .problem-item.alert-error {
+    --tone: var(--danger);
+  }
+
+  .problem-content {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-3, 12px);
+    flex: 1 1 320px;
+    min-width: 0;
+  }
+
+  .problem-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--tone) 16%, transparent);
+    color: var(--tone);
+  }
+
+  .problem-content > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    max-width: 68ch;
+  }
+
   .problem-step-label {
     display: block;
     font-size: var(--font-size-xs, 12px);
     font-weight: 600;
-    color: var(--fg-dim);
+    line-height: 1.3;
+    color: var(--tone);
+  }
+
+  .problem-title {
+    font-size: var(--font-size-lg, 16px);
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--fg-primary);
+  }
+
+  .problem-desc {
+    font-size: var(--font-size-base, 14px);
+    line-height: 1.5;
+    color: var(--fg-secondary);
+  }
+
+  .problem-item > :global(.btn),
+  .problem-item > :global(button) {
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 640px) {
+    .problem-item {
+      padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
+    }
+
+    .problem-item > :global(.btn),
+    .problem-item > :global(button) {
+      width: 100%;
+    }
   }
 
   .watchdog-error-detail {
