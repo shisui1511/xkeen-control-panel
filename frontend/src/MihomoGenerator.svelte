@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import Modal from './components/Modal.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import Select from './components/Select.svelte';
@@ -193,12 +193,11 @@
     }
   }
 
-  let configLoadedForPath = '';
+  // Загрузка конфига мемоизируется по пути: $effect по selectedFile и onMount
+  // делят один промис, поэтому файл читается один раз. force перечитывает заново.
+  let configLoad: { path: string; promise: Promise<void> } | null = null;
 
-  async function loadConfig(path: string, force = false) {
-    if (!path) return;
-    if (configLoadedForPath === path && !force) return;
-    configLoadedForPath = path;
+  async function fetchConfig(path: string) {
     try {
       const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
       if (res.status === 404) {
@@ -216,6 +215,14 @@
       showToast('error', $t('mihomo.config_load_error', { err: e.message }));
     }
     await loadSubscriptions();
+  }
+
+  function loadConfig(path: string, force = false): Promise<void> {
+    if (!path) return Promise.resolve();
+    if (!force && configLoad?.path === path) return configLoad.promise;
+    const promise = fetchConfig(path);
+    configLoad = { path, promise };
+    return promise;
   }
 
   async function checkZkeenGeodata() {
@@ -272,7 +279,7 @@
 
   onMount(async () => {
     await loadSchema();
-    await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
+    await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml');
     await checkZkeenGeodata();
     checkUndo();
 
@@ -313,11 +320,14 @@
     }
   });
 
-  let prevInvalidateCache = false;
+  // invalidateCache, пришедший true уже при создании, не требует повторного чтения:
+  // свежесозданный компонент и так загружает конфиг (onMount / эффект по selectedFile).
+  // Принудительное перечитывание нужно только при переходе false -> true после монтирования.
+  let prevInvalidateCache = untrack(() => invalidateCache);
   $effect(() => {
     if (invalidateCache && !prevInvalidateCache) {
       prevInvalidateCache = true;
-      configLoadedForPath = '';
+      configLoad = null;
       loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
     } else if (!invalidateCache) {
       prevInvalidateCache = false;
