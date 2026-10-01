@@ -87,6 +87,24 @@ func setUpdateState(s UpdateStatus) {
 	updateState = s
 }
 
+// Швы для тестов, в продакшене не меняются: сеть и путь к бинарнику панели.
+var (
+	releasesFetcher  = fetchReleases
+	downloadBinaryFn = downloadBinary
+	verifyChecksumFn = verifyFileChecksum
+	binaryPathFn     = func() string {
+		binPath := "/opt/sbin/xcp"
+		if exe, err := os.Executable(); err == nil {
+			if realPath, err := filepath.EvalSymlinks(exe); err == nil {
+				binPath = realPath
+			} else {
+				binPath = exe
+			}
+		}
+		return binPath
+	}
+)
+
 // setUpdateStep публикует шаг обновления целиком: статус, прогресс, код и
 // параметры подписи. Карта params копируется и после публикации не мутируется
 // (getUpdateState копирует структуру, но не карту), поэтому код и параметры
@@ -118,7 +136,7 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 
 	currentVersion := strings.TrimPrefix(a.srv.GetVersion(), "v")
 
-	releases, err := fetchReleases()
+	releases, err := releasesFetcher()
 	if err != nil {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -209,14 +227,7 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	backupDir := filepath.Join(a.cfg.DataDir, "backup")
-	binPath := "/opt/sbin/xcp"
-	if exe, err := os.Executable(); err == nil {
-		if realPath, err := filepath.EvalSymlinks(exe); err == nil {
-			binPath = realPath
-		} else {
-			binPath = exe
-		}
-	}
+	binPath := binaryPathFn()
 
 	if st := getUpdateState(); st.Status != "idle" && st.Status != "failed" && st.Status != "done" {
 		JSONError(w, http.StatusConflict, "Update already in progress")
@@ -239,22 +250,21 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stop current binary
-	st := UpdateStatus{
-		Status:    "restoring",
-		Progress:  10,
-		Timestamp: time.Now().Unix(),
+	// Версия копии — вторая группа имени xcp.bak.<unix>[.<версия>]
+	versionParams := map[string]string{}
+	if m := backupNameRe.FindStringSubmatch(filepath.Base(latestBackup)); m != nil && m[2] != "" {
+		versionParams["version"] = m[2]
 	}
-	setUpdateState(st)
+
+	// Stop current binary
+	setUpdateStep("restoring", 10, "rollback_restoring", versionParams, "")
 
 	// Replace with backup via temporary file to preserve backup on disk and set executable permissions
 	tempBinPath := binPath + ".rollback"
 	if err := copyFile(latestBackup, tempBinPath); err != nil {
-		st = getUpdateState()
-		st.Status = "failed"
-		st.Message = "Rollback failed: " + err.Error()
-		setUpdateState(st)
-		JSONError(w, http.StatusInternalServerError, st.Message)
+		msg := "Rollback failed: " + err.Error()
+		setUpdateStep("failed", 0, "rollback_failed", map[string]string{"detail": err.Error()}, msg)
+		JSONError(w, http.StatusInternalServerError, msg)
 		return
 	}
 	if err := os.Chmod(tempBinPath, 0755); err != nil {
@@ -263,19 +273,14 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 
 	if err := os.Rename(tempBinPath, binPath); err != nil {
 		_ = os.Remove(tempBinPath)
-		st = getUpdateState()
-		st.Status = "failed"
-		st.Message = "Rollback failed: " + err.Error()
-		setUpdateState(st)
-		JSONError(w, http.StatusInternalServerError, st.Message)
+		msg := "Rollback failed: " + err.Error()
+		setUpdateStep("failed", 0, "rollback_failed", map[string]string{"detail": err.Error()}, msg)
+		JSONError(w, http.StatusInternalServerError, msg)
 		return
 	}
 
 	// Restart
-	st = getUpdateState()
-	st.Status = "restarting"
-	st.Progress = 90
-	setUpdateState(st)
+	setUpdateStep("restarting", 90, "restarting", versionParams, "Restarting...")
 
 	go a.restartProcess(binPath, latestBackup, a.cfg.DataDir, "")
 
@@ -399,11 +404,7 @@ func (a *API) UpdateChannelSet(w http.ResponseWriter, r *http.Request) {
 func (a *API) performUpdate(channel string) {
 	defer func() {
 		if r := recover(); r != nil {
-			setUpdateState(UpdateStatus{
-				Status:    "failed",
-				Message:   fmt.Sprintf("Panic: %v", r),
-				Timestamp: time.Now().Unix(),
-			})
+			setUpdateStep("failed", 0, "panic", map[string]string{"detail": fmt.Sprint(r)}, fmt.Sprintf("Panic: %v", r))
 		}
 	}()
 
@@ -412,34 +413,18 @@ func (a *API) performUpdate(channel string) {
 
 	info, err := fetchLatestRelease(channel)
 	if err != nil {
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Failed to check updates: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, "check_failed", map[string]string{"detail": err.Error()}, "Failed to check updates: "+err.Error())
 		return
 	}
 
 	currentVersion := strings.TrimPrefix(a.srv.GetVersion(), "v")
 	if !updateAvailable(info.LatestVersion, currentVersion) {
-		setUpdateState(UpdateStatus{
-			Status:    "done",
-			Progress:  100,
-			Message:   "Already up to date",
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("done", 100, "up_to_date", nil, "Already up to date")
 		return
 	}
 
 	// Determine binary path early so temp file is on the same filesystem
-	binPath := "/opt/sbin/xcp"
-	if exe, err := os.Executable(); err == nil {
-		if realPath, err := filepath.EvalSymlinks(exe); err == nil {
-			binPath = realPath
-		} else {
-			binPath = exe
-		}
-	}
+	binPath := binaryPathFn()
 
 	// Step 2: Download
 	setUpdateStep("downloading", 30, "downloading", map[string]string{"version": info.LatestVersion}, "Downloading update...")
@@ -450,70 +435,43 @@ func (a *API) performUpdate(channel string) {
 
 	// Download to the same directory as the binary to avoid cross-device rename
 	tempFile := filepath.Join(filepath.Dir(binPath), "xcp.new")
-	if err := downloadBinary(downloadURL, tempFile, reportDownloadProgress); err != nil {
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Download failed: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+	if err := downloadBinaryFn(downloadURL, tempFile, reportDownloadProgress); err != nil {
+		setUpdateStep("failed", 0, "download_failed", map[string]string{"detail": err.Error()}, "Download failed: "+err.Error())
 		return
 	}
 
 	// Step 2b: Verify SHA-256 against the release's per-asset .sha256 file.
 	// Без подтверждённой контрольной суммы бинарник не устанавливается.
 	binaryName := fmt.Sprintf("xcp_v%s_%s", info.LatestVersion, arch)
-	if err := verifyFileChecksum(tempFile, binaryName, downloadURL+".sha256"); err != nil {
+	if err := verifyChecksumFn(tempFile, binaryName, downloadURL+".sha256"); err != nil {
 		_ = os.Remove(tempFile)
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Checksum verification failed: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, "checksum_failed", map[string]string{"detail": err.Error()}, "Checksum verification failed: "+err.Error())
 		return
 	}
 
 	if err := os.Chmod(tempFile, 0755); err != nil {
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Failed to set permissions: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, "chmod_failed", map[string]string{"detail": err.Error()}, "Failed to set permissions: "+err.Error())
 		return
 	}
 
 	// Step 3: Backup current binary
-	setUpdateState(UpdateStatus{
-		Status:   "installing",
-		Progress: 60,
-		Message:  "Creating backup...",
-	})
+	setUpdateStep("installing", 60, "backup_creating", map[string]string{"version": currentVersion}, "Creating backup...")
 	backupDir := filepath.Join(a.cfg.DataDir, "backup")
 	_ = os.MkdirAll(backupDir, 0755)
 
 	backupPath := filepath.Join(backupDir, backupFileName(time.Now(), currentVersion))
 	if err := copyFile(binPath, backupPath); err != nil {
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Backup failed: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, "backup_failed", map[string]string{"detail": err.Error()}, "Backup failed: "+err.Error())
 		return
 	}
 
 	// Step 4: Atomic replace
-	st := getUpdateState()
-	st.Progress = 75
-	st.Message = "Installing update..."
-	setUpdateState(st)
+	setUpdateStep("installing", 75, "installing", map[string]string{"version": info.LatestVersion}, "Installing update...")
 
 	if err := os.Rename(tempFile, binPath); err != nil {
 		// Try to restore backup
 		os.Rename(backupPath, binPath)
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   "Install failed: " + err.Error(),
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, "install_failed", map[string]string{"detail": err.Error()}, "Install failed: "+err.Error())
 		return
 	}
 
@@ -523,12 +481,7 @@ func (a *API) performUpdate(channel string) {
 	}
 
 	// Step 5: Restart
-	setUpdateState(UpdateStatus{
-		Status:    "restarting",
-		Progress:  90,
-		Message:   "Restarting...",
-		Timestamp: time.Now().Unix(),
-	})
+	setUpdateStep("restarting", 90, "restarting", map[string]string{"version": info.LatestVersion}, "Restarting...")
 
 	// Give time for response to be sent
 	time.Sleep(500 * time.Millisecond)
@@ -563,20 +516,20 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 	if err := cmd.Start(); err != nil {
 		// If starting the new binary fails, rollback immediately
 		msg := "Restart failed: " + err.Error()
+		code := "restart_failed"
+		params := map[string]string{"detail": err.Error()}
 		if backupPath != "" {
 			if err := copyFile(backupPath, binPath); err == nil {
 				// Start the backup binary to restore the server
 				rollbackCmd := exec.Command(binPath, "-config", configPath)
 				rollbackCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 				_ = rollbackCmd.Start()
-				msg = "Проверка не удалась, выполнен авто-откат на резервную копию."
+				msg = "Restart failed, automatic rollback to the backup performed"
+				code = "auto_rollback_done"
+				params = nil
 			}
 		}
-		setUpdateState(UpdateStatus{
-			Status:    "failed",
-			Message:   msg,
-			Timestamp: time.Now().Unix(),
-		})
+		setUpdateStep("failed", 0, code, params, msg)
 		time.Sleep(1 * time.Second)
 		os.Exit(1)
 	}
@@ -612,12 +565,11 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 			}
 			resp.Body.Close()
 			if ok {
-				setUpdateState(UpdateStatus{
-					Status:    "done",
-					Progress:  100,
-					Message:   "Update complete",
-					Timestamp: time.Now().Unix(),
-				})
+				var doneParams map[string]string
+				if expectedVersion != "" {
+					doneParams = map[string]string{"version": expectedVersion}
+				}
+				setUpdateStep("done", 100, "complete", doneParams, "Update complete")
 				time.Sleep(1 * time.Second)
 				os.Exit(0)
 			}
@@ -632,27 +584,30 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 		_ = cmd.Process.Kill()
 	}
 
-	msg := "Проверка работоспособности не удалась."
+	msg := "Health check failed"
+	code := "health_check_failed"
+	var params map[string]string
 	if backupPath != "" {
 		if err := copyFile(backupPath, binPath); err != nil {
-			msg = "Проверка не удалась. Откат завершился ошибкой: " + err.Error()
+			msg = "Health check failed, rollback failed: " + err.Error()
+			code = "auto_rollback_failed"
+			params = map[string]string{"detail": err.Error()}
 		} else {
 			// Start the backup binary to restore the server
 			rollbackCmd := exec.Command(binPath, "-config", configPath)
 			rollbackCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 			if err := rollbackCmd.Start(); err == nil {
-				msg = "Проверка не удалась, выполнен авто-откат на резервную копию."
+				msg = "Health check failed, automatic rollback to the backup performed"
+				code = "auto_rollback_done"
 			} else {
-				msg = "Проверка не удалась, авто-откат не смог запуститься: " + err.Error()
+				msg = "Health check failed, automatic rollback could not start: " + err.Error()
+				code = "auto_rollback_start_failed"
+				params = map[string]string{"detail": err.Error()}
 			}
 		}
 	}
 
-	setUpdateState(UpdateStatus{
-		Status:    "failed",
-		Message:   msg,
-		Timestamp: time.Now().Unix(),
-	})
+	setUpdateStep("failed", 0, code, params, msg)
 	time.Sleep(1 * time.Second)
 	os.Exit(1)
 }
@@ -741,7 +696,7 @@ type githubRelease struct {
 }
 
 func fetchLatestRelease(channel string) (*UpdateInfo, error) {
-	releases, err := fetchReleases()
+	releases, err := releasesFetcher()
 	if err != nil {
 		return nil, err
 	}
