@@ -224,4 +224,29 @@ test.describe('Гейт опросов Mihomo (UPDUI-03)', () => {
     await expect(reason).toHaveText('Mihomo запущен, API не отвечает', { timeout: 14_000 });
     await expect(value).toContainText('—');
   });
+
+  test('quick actions are disabled while the API is down', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    const flags: CapsFlags = { apiReachable: false, processRunning: false };
+    await mockCapabilities(page, flags);
+
+    await visitPage(page, '/#/');
+    const qa = page.locator('.quick-actions-widget .qa-btn');
+    const latency = qa.filter({ hasText: 'Тест задержки' });
+    const reset = qa.filter({ hasText: 'Сбросить сессии' });
+    const refreshSubs = qa.filter({ hasText: 'Обновить подписки' });
+
+    await expect(latency).toBeDisabled();
+    await expect(reset).toBeDisabled();
+    await expect(refreshSubs).toBeEnabled();
+    await expect(latency).toHaveAttribute('title', 'Mihomo не запущен');
+    await expect(page.getByTestId('qs-step3-reason')).toHaveText('Mihomo не запущен');
+
+    // API поднялся: на следующем опросе capabilities кнопки оживают, подпись шага уходит
+    flags.apiReachable = true;
+    flags.processRunning = true;
+    await expect(latency).toBeEnabled({ timeout: 14_000 });
+    await expect(reset).toBeEnabled();
+    await expect(page.getByTestId('qs-step3-reason')).toHaveCount(0);
+  });
 });

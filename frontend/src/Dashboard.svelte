@@ -10,6 +10,8 @@
     showToast,
     mihomoApiAvailable,
     mihomoApiReady,
+    mihomoApiState,
+    mihomoOfflineReason,
     panelUnreachable
   } from './stores';
   import { usePoller } from './lib/poller';
@@ -1121,6 +1123,11 @@
                       {$mihomoApiAvailable
                         ? $t('dash.quickstart.step3_done')
                         : $t('dash.quickstart.step3_label')}
+                      {#if $mihomoApiState === 'down' && $mihomoOfflineReason}
+                        <span class="qs-reason" data-testid="qs-step3-reason">
+                          {$t(`dash.mihomo_offline_${$mihomoOfflineReason}`)}
+                        </span>
+                      {/if}
                     </span>
                     {#if !$mihomoApiAvailable}
                       <a
@@ -1859,6 +1866,12 @@
     font-size: 13px;
     color: var(--fg-primary);
     flex: 1;
+  }
+
+  .qs-reason {
+    display: block;
+    font-size: 12px;
+    color: var(--fg-secondary);
   }
 
   .qs-step--done .qs-text {
