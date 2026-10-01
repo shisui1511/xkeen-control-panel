@@ -33,6 +33,8 @@ interface MockOptions {
   events?: Record<string, unknown>;
   /** HTTP-статус /api/version; 503 не даёт циклу переподключения перезагрузить страницу. */
   versionStatus?: number;
+  /** Тело ответа GET /api/update/check при checkStatus >= 400 (по умолчанию ошибка без кода). */
+  checkBody?: unknown;
   /** Ответ на POST /api/update/install (по умолчанию успех). */
   installResponse?: { status: number; body: unknown };
   onSettings?: (body: Record<string, unknown>) => void;
@@ -90,7 +92,10 @@ async function mockApi(page: Page, opts: MockOptions = {}) {
     } else if (url.includes('/api/update/check')) {
       if (opts.checkStatus && opts.checkStatus >= 400) {
         await route.fulfill(
-          json({ success: false, error: 'GitHub API: 403 rate limit' }, opts.checkStatus)
+          json(
+            opts.checkBody ?? { success: false, error: 'GitHub API: 403 rate limit' },
+            opts.checkStatus
+          )
         );
       } else {
         await route.fulfill(json({ success: true, data: opts.check ?? {} }));
@@ -356,6 +361,66 @@ test.describe('Update API errors by code', () => {
 
     await expect(page.getByText('Обновление уже выполняется')).toBeVisible();
     await expect(page.getByText('Update already in progress')).toHaveCount(0);
+  });
+});
+
+test.describe('Update check errors by code', () => {
+  test('shows the translated phrase with the technical detail apart', async ({ page }) => {
+    await mockApi(page, {
+      checkStatus: 500,
+      checkBody: {
+        success: false,
+        error: 'Failed to check for updates',
+        code: 'update_check_failed',
+        detail: 'GitHub API: 403 rate limit'
+      }
+    });
+    await openUpdatesTab(page);
+
+    const block = page.locator('.update-state.state-error');
+    await expect(block).toContainText('Не удалось проверить обновления');
+    await expect(block.locator('.progress-detail')).toHaveText('GitHub API: 403 rate limit');
+    await expect(page.getByText('Failed to check for updates')).toHaveCount(0);
+  });
+
+  test('background scheduler error: phrase plus detail element', async ({ page }) => {
+    await mockApi(page, {
+      check: { current_version: '0.28.0', latest_version: '0.28.0', has_update: false },
+      state: { checked_at: 1790400000, error: 'GitHub API: 403 rate limit' }
+    });
+    await page.goto('/#/settings?tab=updates');
+
+    const line = page.locator('.auto-checked');
+    await expect(line.locator('.auto-error')).toHaveText('Не удалось проверить обновления');
+    await expect(line.locator('.progress-detail')).toHaveText('GitHub API: 403 rate limit');
+  });
+});
+
+test.describe('Update API errors by code (en)', () => {
+  test.use({ locale: 'en-US' });
+
+  test('shows the in-progress toast in English', async ({ page }) => {
+    await mockApi(page, {
+      check: {
+        current_version: '0.28.0',
+        latest_version: '0.29.0',
+        has_update: true,
+        channel: 'beta',
+        download_size: 7_300_000
+      },
+      // Бэкенд ответил по-русски: перевод берётся по коду на языке панели
+      installResponse: {
+        status: 409,
+        body: { success: false, error: 'Обновление уже выполняется', code: 'update_in_progress' }
+      }
+    });
+    await page.goto('/#/settings?tab=updates');
+
+    await page.getByRole('button', { name: 'Install' }).click();
+    await page.getByRole('button', { name: 'Update panel' }).click();
+
+    await expect(page.getByText('Update already in progress')).toBeVisible();
+    await expect(page.getByText('Обновление уже выполняется')).toHaveCount(0);
   });
 });
 

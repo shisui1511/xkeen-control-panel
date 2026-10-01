@@ -55,6 +55,7 @@
   let channel = $state<Channel>('stable');
   let info = $state<UpdateInfo | null>(null);
   let checkError = $state('');
+  let checkErrorDetail = $state('');
   let checkedAt = $state<Date | null>(null);
   let checking = $state(false);
   let status = $state<UpdateStatusPayload | null>(null);
@@ -126,7 +127,8 @@
     } catch (e: any) {
       await refreshUpdateState();
       if (e?.status === 401) return;
-      showToast('error', e instanceof Error ? e.message : String(e));
+      const view = apiErrorView(e);
+      showToast('error', view ? $t(view.key) : e instanceof Error ? e.message : String(e));
     } finally {
       savingAuto = false;
     }
@@ -187,13 +189,15 @@
     } catch (e: any) {
       channel = prev;
       if (e?.status === 401) return;
-      showToast('error', e instanceof Error ? e.message : String(e));
+      const view = apiErrorView(e);
+      showToast('error', view ? $t(view.key) : e instanceof Error ? e.message : String(e));
     }
   }
 
   async function checkUpdate() {
     checking = true;
     checkError = '';
+    checkErrorDetail = '';
     try {
       info = await apiFetchJSON<UpdateInfo>(`/api/update/check?channel=${channel}`);
       checkedAt = new Date();
@@ -201,7 +205,9 @@
       refreshUpdateState();
     } catch (e: any) {
       if (e?.status === 401) return;
-      checkError = e instanceof Error ? e.message : String(e);
+      const view = apiErrorView(e);
+      checkError = view ? $t(view.key) : e instanceof Error ? e.message : String(e);
+      checkErrorDetail = view?.detail ?? '';
     } finally {
       checking = false;
     }
@@ -337,7 +343,8 @@
     } catch (e: any) {
       installing = false;
       if (e?.status === 401) return;
-      showToast('error', e instanceof Error ? e.message : String(e));
+      const view = apiErrorView(e);
+      showToast('error', view ? $t(view.key) : e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -434,7 +441,12 @@
     </div>
   {:else if !busy}
     {#if checkError}
-      <div class="update-state state-error">{checkError}</div>
+      <div class="update-state state-error">
+        {checkError}
+        {#if checkErrorDetail}
+          <span class="progress-detail">{checkErrorDetail}</span>
+        {/if}
+      </div>
     {:else if info?.has_update}
       {@const kind = releaseKind(info.latest_version)}
       <div class="update-available">
@@ -547,7 +559,9 @@
     {#if auto.checked_at}
       <div class="checked-at auto-checked">
         {$t('settings.update_auto_checked', { date: formatDate(auto.checked_at) })}
-        {#if auto.error}· <span class="auto-error">{auto.error}</span>{/if}
+        {#if auto.error}·
+          <span class="auto-error">{$t('settings.update_err_update_check_failed')}</span>
+          <span class="progress-detail">{auto.error}</span>{/if}
       </div>
     {/if}
   </div>

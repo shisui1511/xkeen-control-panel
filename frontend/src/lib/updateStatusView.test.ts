@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import ru from '../locales/ru.json';
 import en from '../locales/en.json';
-import { FAILURE_CODES, STEP_CODES, failureView, stepLabel } from './updateStatusView';
+import {
+  FAILURE_CODES,
+  STEP_CODES,
+  UPDATE_API_ERROR_CODES,
+  apiErrorView,
+  failureView,
+  stepLabel
+} from './updateStatusView';
 
 const base = { message: 'x', progress: 30 };
 
@@ -92,5 +99,37 @@ describe('словари', () => {
   it.each(keys)('ключ %s есть в ru.json и en.json', (key) => {
     expect(ruDict[key], `ru: ${key}`).toBeTypeOf('string');
     expect(enDict[key], `en: ${key}`).toBeTypeOf('string');
+  });
+});
+
+describe('apiErrorView', () => {
+  it('каждый код из перечня → ключ settings.update_err_<код>', () => {
+    expect(UPDATE_API_ERROR_CODES).toHaveLength(10);
+    for (const code of UPDATE_API_ERROR_CODES) {
+      expect(apiErrorView({ code })).toEqual({ key: `settings.update_err_${code}`, detail: '' });
+    }
+  });
+
+  it('detail пробрасывается', () => {
+    expect(apiErrorView({ code: 'update_check_failed', detail: 'GitHub API: 403' })).toEqual({
+      key: 'settings.update_err_update_check_failed',
+      detail: 'GitHub API: 403'
+    });
+  });
+
+  it('неизвестный код, не-объект и null → null', () => {
+    expect(apiErrorView({ code: 'future_code' })).toBeNull();
+    expect(apiErrorView({ code: 42 })).toBeNull();
+    expect(apiErrorView(new Error('x'))).toBeNull();
+    expect(apiErrorView(null)).toBeNull();
+    expect(apiErrorView('update_in_progress')).toBeNull();
+  });
+
+  it('у каждого кода есть ключ в ru и en', () => {
+    for (const code of UPDATE_API_ERROR_CODES) {
+      const key = `settings.update_err_${code}`;
+      expect((ru as Record<string, string>)[key]).toBeTruthy();
+      expect((en as Record<string, string>)[key]).toBeTruthy();
+    }
   });
 });
