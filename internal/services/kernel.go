@@ -2210,8 +2210,15 @@ func copyKernelFile(src, dst string) (err error) {
 	if err != nil {
 		return err
 	}
+	// Повторная проверка корня на месте записи: анализатор не видит, что
+	// sanitizeKernelPath уже ограничил путь, а запись — самая опасная операция
+	if !strings.HasPrefix(safeDst, "/opt/sbin/") && !strings.HasPrefix(safeDst, "/opt/bin/") &&
+		!strings.HasPrefix(safeDst, "/opt/etc/") && !strings.HasPrefix(safeDst, os.TempDir()+"/") {
+		return fmt.Errorf("invalid dst path: %s is outside allowed directories", safeDst)
+	}
 	// Права источника (в т.ч. бит исполнения) переносятся на копию: иначе
 	// os.Create дал бы 0666 и скопированное ядро не запустилось бы
+	// codeql[go/path-injection] - safeDst прошёл sanitizeKernelPath (абсолютный, без "..", внутри allowedKernelRoots) и проверку корня выше.
 	d, err := os.OpenFile(safeDst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
 	if err != nil {
 		return err
