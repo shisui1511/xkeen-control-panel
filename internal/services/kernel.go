@@ -27,6 +27,10 @@ import (
 
 var procDir = "/proc"
 
+// kernelPathRegex — допустимые символы пути ядра: буквы и цифры любого алфавита
+// (имена временных каталогов бывают не ASCII), «_», «-», «.», «/», «+».
+var kernelPathRegex = regexp.MustCompile(`^[\p{L}\p{N}_\-./+]+$`)
+
 // allowedKernelRoots are the only directories where kernel binaries and backups may live.
 var allowedKernelRoots = []string{
 	"/opt/sbin/",
@@ -2210,15 +2214,18 @@ func copyKernelFile(src, dst string) (err error) {
 	if err != nil {
 		return err
 	}
-	// Повторная проверка корня на месте записи: анализатор не видит, что
-	// sanitizeKernelPath уже ограничил путь, а запись — самая опасная операция
+	// Те же проверки, что и в sanitizeKernelPath, повторены на месте записи:
+	// статический анализатор не переносит гарантию через границу функции, а
+	// запись — самая опасная операция. Порядок: «..», набор символов, корень.
+	if strings.Contains(safeDst, "..") || !kernelPathRegex.MatchString(safeDst) {
+		return fmt.Errorf("invalid dst path: %s", safeDst)
+	}
 	if !strings.HasPrefix(safeDst, "/opt/sbin/") && !strings.HasPrefix(safeDst, "/opt/bin/") &&
 		!strings.HasPrefix(safeDst, "/opt/etc/") && !strings.HasPrefix(safeDst, os.TempDir()+"/") {
 		return fmt.Errorf("invalid dst path: %s is outside allowed directories", safeDst)
 	}
 	// Права источника (в т.ч. бит исполнения) переносятся на копию: иначе
 	// os.Create дал бы 0666 и скопированное ядро не запустилось бы
-	// codeql[go/path-injection] - safeDst прошёл sanitizeKernelPath (абсолютный, без "..", внутри allowedKernelRoots) и проверку корня выше.
 	d, err := os.OpenFile(safeDst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
 	if err != nil {
 		return err
