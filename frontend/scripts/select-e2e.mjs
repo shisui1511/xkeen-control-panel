@@ -59,7 +59,7 @@ const IGNORE_PATTERNS = [
 // Файлы вне frontend/, изменение которых меняет e2e
 const REPO_ALL_PATTERNS = [/^\.github\/workflows\/ci\.yml$/];
 
-// Синонимы маршрутов — повторяют getTabFromHash() в Dashboard.svelte
+// Синонимы маршрутов — повторяют tabFromHash() в frontend/src/lib/tabFromHash.ts
 const ROUTE_ALIASES = {
   constructor: 'editor',
   'mihomo-gen': 'editor',

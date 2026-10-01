@@ -46,6 +46,7 @@
   import { nextStep, preflightConfigReady } from './lib/nextStep';
   import { anyKernelInstalled } from './lib/navCaps';
   import { capsuleConfigStore } from './lib/capsuleSettings';
+  import { tabFromHash, legacyRedirectHash } from './lib/tabFromHash';
   import {
     isAnySourceDirty,
     getDirtySources,
@@ -63,8 +64,10 @@
   let pendingTargetHash = $state<string | null>(null);
   let isSavingAndNavigating = $state(false);
   let dirtySourceNames = $state<string[]>([]);
-  let currentTab = $state('dashboard');
-  let currentHash = $state(typeof window !== 'undefined' ? window.location.hash : '');
+  // Маршрут берётся из адреса при создании, чтобы первый кадр сразу рисовал нужную страницу
+  const initialHash = typeof window !== 'undefined' ? window.location.hash : '';
+  let currentTab = $state(tabFromHash(initialHash));
+  let currentHash = $state(initialHash);
 
   function checkIsConstructorHash(hash: string): boolean {
     if (!hash) return false;
@@ -589,33 +592,19 @@
     }
   }
 
-  function getTabFromHash(): string {
-    const hash = window.location.hash;
-    if (hash && hash.startsWith('#/')) {
-      const path = hash.slice(2);
-      const queryIdx = path.indexOf('?');
-      const basePath = queryIdx !== -1 ? path.slice(0, queryIdx) : path;
-
-      if (basePath.startsWith('subscriptions/')) {
-        const id = basePath.slice('subscriptions/'.length);
-        window.location.hash = `#/proxies?tab=providers&expand=${id}`;
-        return 'proxies';
-      }
-      if (basePath === 'subscriptions') {
-        window.location.hash = '#/proxies?tab=providers';
-        return 'proxies';
-      }
-      if (basePath === 'mihomo-gen' || basePath === 'constructor') {
-        return 'editor';
-      }
-      return basePath || 'dashboard';
-    }
-    return 'dashboard';
+  // Устаревшие адреса подписок переводятся на вкладку провайдеров прокси.
+  // Возвращает true, если хэш был переписан (вкладку выставит следующий hashchange).
+  function applyLegacyRedirect(): boolean {
+    const redirect = legacyRedirectHash(window.location.hash);
+    if (redirect === null) return false;
+    window.location.hash = redirect;
+    return true;
   }
 
   function handleHashChange() {
+    if (applyLegacyRedirect()) return;
     currentHash = window.location.hash;
-    const targetTab = getTabFromHash();
+    const targetTab = tabFromHash(window.location.hash);
     if (targetTab !== currentTab && isAnySourceDirty()) {
       pendingTargetTab = targetTab;
       pendingTargetHash = window.location.hash;
@@ -852,8 +841,9 @@
   onMount(() => {
     fetchVersion();
 
+    applyLegacyRedirect();
     currentHash = window.location.hash;
-    currentTab = getTabFromHash();
+    currentTab = tabFromHash(window.location.hash);
     window.addEventListener('hashchange', handleHashChange);
     if (!window.location.hash) {
       window.location.hash = '#/' + currentTab;
@@ -1024,7 +1014,7 @@
 
     {#key chunkReloadKey}
       {#if currentTab === 'dashboard'}
-        <div class="container" transition:fade={{ duration: 150 }}>
+        <div class="container" data-testid="dashboard-page" transition:fade={{ duration: 150 }}>
           <!-- Page header -->
           <PageHeader
             title={$t('dash.title')}
