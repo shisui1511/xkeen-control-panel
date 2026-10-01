@@ -326,6 +326,27 @@ test.describe('Xray Constructor integration test suite', () => {
     expect(body.outbounds[0]).toEqual(direct);
   });
 
+  test('each system outbound is shown once', async ({ page }) => {
+    await mockOutboundsFile(page, [
+      { tag: 'direct', protocol: 'freedom' },
+      { tag: 'block', protocol: 'blackhole' },
+      { tag: 'proxyA', protocol: 'vless' }
+    ]);
+    await openXrayConstructor(page);
+
+    const outboundsTab = page.locator('[data-testid="xray-section-tabs"] [data-tab="outbounds"]');
+    await expect(outboundsTab).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
+    await outboundsTab.click();
+
+    const editable = page.locator('.outbounds-list .tag-card:has(.btn-del)');
+    await expect(editable).toHaveCount(1, { timeout: LAZY_LOAD_TIMEOUT });
+    await expect(editable.first().locator('.badge-tag')).toHaveText('proxyA');
+
+    const badges = page.locator('.outbounds-list .badge-tag');
+    await expect(badges.filter({ hasText: /^direct$/ })).toHaveCount(1);
+    await expect(badges.filter({ hasText: /^block$/ })).toHaveCount(1);
+  });
+
   // -------------------------------------------------------------------------
   // D-07: Вкладка Outbounds показывает read-only список тегов
   // -------------------------------------------------------------------------

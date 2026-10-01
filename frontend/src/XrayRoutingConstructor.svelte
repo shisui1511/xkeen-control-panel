@@ -8,11 +8,12 @@
   import { applyToKernel, notifyApplyOutcome, willRestartOnApply } from './lib/serviceApply';
   import { currentLang, t, tp } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
-  import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
+  import { syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
   import {
     splitOutbounds,
     mergeOutbounds,
     uniqueTags,
+    dedupeByTag,
     type PlacedOutbound
   } from './lib/constructors/xrayOutbounds';
   import {
@@ -727,12 +728,14 @@
     try {
       const outboundsPath = `${XRAY_DIR}/04_outbounds.json`;
       const existingOutbounds = (xrayFiles['04_outbounds.json']?.outbounds || []) as any[];
+      // direct/block даёт шаблон; dns-out из файла остаётся (на него могут ссылаться правила),
+      // повторы тегов убирает dedupeByTag
       const custom = existingOutbounds.filter(
         (o: any) => o && o.tag !== 'direct' && o.tag !== 'block'
       );
       const templateOutbounds = (getOutboundsForTemplate(templateId) as any).outbounds || [];
       const mergedOutbounds = {
-        outbounds: [...templateOutbounds, ...custom]
+        outbounds: dedupeByTag([...templateOutbounds, ...custom])
       };
 
       const saveOutboundsRes = await apiFetch(
