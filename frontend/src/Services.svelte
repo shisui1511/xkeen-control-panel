@@ -859,6 +859,16 @@
     return xkeenInfo.activeKernel || 'none';
   });
 
+  // Адрес API берётся только из реальных данных: сокет/адрес контроллера Mihomo
+  // или gRPC-адрес Xray при наличии api-блока в конфиге; иначе «—».
+  let apiSocketLabel = $derived.by(() => {
+    if (activeKernel === 'mihomo') return mihomo?.api_addr || '—';
+    if (activeKernel === 'xray') {
+      return ($capabilities?.xray?.grpc_ready && $capabilities.xray.api_addr) || '—';
+    }
+    return '—';
+  });
+
   let activeKernelObj = $derived(
     activeKernel === 'xray' ? xray : activeKernel === 'mihomo' ? mihomo : undefined
   );
@@ -1174,13 +1184,7 @@
         <div class="meta-item">
           <span class="meta-lbl">API / Socket:</span>
           <span class="meta-val monospace">
-            {#if activeKernel === 'mihomo'}
-              {mihomo?.api_addr || '/opt/etc/mihomo/mihomo-api.sock'}
-            {:else if activeKernel === 'xray'}
-              {xray?.binary_path || '/opt/bin/xray'}
-            {:else}
-              —
-            {/if}
+            {apiSocketLabel}
           </span>
         </div>
       </div>

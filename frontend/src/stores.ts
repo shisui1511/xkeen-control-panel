@@ -31,6 +31,8 @@ export interface CapabilitiesData {
     conf_dir: string;
     conf_dir_exists: boolean;
     grpc_ready?: boolean;
+    /** Адрес gRPC API Xray, которым пользуется панель (127.0.0.1:<порт>). */
+    api_addr?: string;
   };
   global_hwid?: string;
   /** Prediction of "will Apply restart this kernel" per kernel (button labels). */

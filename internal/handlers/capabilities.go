@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -34,6 +35,9 @@ type XRayCapability struct {
 	ConfDirExists bool `json:"conf_dir_exists"`
 	// GRPCReady — true если активное ядро Xray и в config.json есть api-блок.
 	GRPCReady bool `json:"grpc_ready"`
+	// APIAddr — адрес gRPC API Xray, которым пользуется панель
+	// (127.0.0.1:<порт>); заполняется вместе с GRPCReady.
+	APIAddr string `json:"api_addr,omitempty"`
 }
 
 // KernelCapability holds install status for a single kernel.
@@ -180,6 +184,13 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	if resp.ActiveKernel == "xray" && resp.XRay.ConfDirExists {
 		apiInfo := services.FindXrayAPIFragment(a.cfg.XRayConfigDir)
 		resp.XRay.GRPCReady = apiInfo.APIPresent
+		if apiInfo.APIPresent {
+			port := a.cfg.XRayAPIPort
+			if port == 0 {
+				port = 10085
+			}
+			resp.XRay.APIAddr = fmt.Sprintf("127.0.0.1:%d", port)
+		}
 	}
 
 	if a.xkeenSvc != nil {
