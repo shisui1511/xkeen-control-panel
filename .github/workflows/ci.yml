@@ -20,9 +20,55 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Job 0: что затронул PR — по этому решается, какие проверки нужны.
+  # Правка доков, скриптов и других workflow не запускает ни Go-, ни фронтенд-джобы;
+  # проверки правил коммитов и i18n (check-rules) идут всегда.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.scope.outputs.go }}
+      frontend: ${{ steps.scope.outputs.frontend }}
+      build: ${{ steps.scope.outputs.build }}
+      build_matrix: ${{ steps.scope.outputs.build_matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          files=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          echo "$files"
+          go=false; frontend=false
+          # Правка самого ci.yml проверяет всё
+          if echo "$files" | grep -qE '^(internal|cmd)/|\.go$|^go\.(mod|sum)$|^\.golangci|^\.github/workflows/ci\.yml$'; then go=true; fi
+          if echo "$files" | grep -qE '^frontend/|^\.github/workflows/ci\.yml$'; then frontend=true; fi
+          build=false
+          if [ "$go" = true ] || [ "$frontend" = true ]; then build=true; fi
+          # Go-код не менялся — достаточно одной архитектуры (размер встроенного фронтенда, запуск);
+          # все три собираются при правке Go и на теге
+          if [ "$go" = true ]; then
+            matrix='{"include":[{"GOARCH":"arm64","name":"arm64","qemu":"qemu-aarch64-static"},{"GOARCH":"mipsle","GOMIPS":"softfloat","name":"mipsle","qemu":"qemu-mipsel-static"},{"GOARCH":"mips","GOMIPS":"softfloat","name":"mips","qemu":"qemu-mips-static"}]}'
+          else
+            matrix='{"include":[{"GOARCH":"arm64","name":"arm64","qemu":"qemu-aarch64-static"}]}'
+          fi
+          {
+            echo "go=$go"
+            echo "frontend=$frontend"
+            echo "build=$build"
+            echo "build_matrix=$matrix"
+          } >> "$GITHUB_OUTPUT"
+
   # Job 1: Линтинг Go кода
   lint-go:
     name: Lint Go
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -61,6 +107,8 @@ jobs:
   # Job 2: Тестирование Go кода
   test-go:
     name: Test Go
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -98,6 +146,8 @@ jobs:
   # Job 3: Линтинг и сборка Frontend
   lint-frontend:
     name: Lint Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -254,33 +304,28 @@ jobs:
   # Job 5: Проверка сборки
   build-check:
     name: Build Check
-    needs: [lint-go, test-go, lint-frontend, e2e-plan, test-frontend, check-rules]
-    # test-frontend пропускается, если PR не затрагивает фронтенд
-    if: ${{ !cancelled() && !failure() }}
+    # Нужен только артефакт фронтенда, поэтому не ждёт тесты: сборка идёт параллельно с ними.
+    # Итог PR всё равно требует зелёных тестов — они отдельные обязательные проверки.
+    needs: [changes, lint-frontend]
+    if: ${{ !cancelled() && needs.changes.outputs.build == 'true' && needs.lint-frontend.result != 'failure' }}
     runs-on: ubuntu-latest
     strategy:
-      matrix:
-        include:
-          - GOARCH: arm64
-            name: arm64
-            qemu: qemu-aarch64-static
-          - GOARCH: mipsle
-            GOMIPS: softfloat
-            name: mipsle
-            qemu: qemu-mipsel-static
-          - GOARCH: mips
-            GOMIPS: softfloat
-            name: mips
-            qemu: qemu-mips-static
+      matrix: ${{ fromJSON(needs.changes.outputs.build_matrix) }}
 
     steps:
       - uses: actions/checkout@v7
 
+      # Фронтенд не менялся — lint-frontend пропущен, артефакта нет, достаточно заглушки для go:embed
       - name: Download frontend
+        if: needs.lint-frontend.result == 'success'
         uses: actions/download-artifact@v8
         with:
           name: frontend-dist
           path: frontend/dist
+
+      - name: Stub frontend for go:embed
+        if: needs.lint-frontend.result != 'success'
+        run: mkdir -p frontend/dist && echo '<!doctype html>' > frontend/dist/index.html
 
       - name: Set up Go
         uses: actions/setup-go@v7
