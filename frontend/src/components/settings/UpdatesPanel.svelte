@@ -14,6 +14,7 @@
   import Modal from '../Modal.svelte';
   import Select from '../Select.svelte';
   import { updateState, refreshUpdateState, type UpdateCheckState } from '../../lib/updateNotify';
+  import { stepLabel, type UpdateStatusPayload } from '../../lib/updateStatusView';
 
   interface ReleaseNote {
     version: string;
@@ -35,14 +36,6 @@
     releases?: ReleaseNote[];
   }
 
-  interface UpdateStatus {
-    status: string;
-    message: string;
-    progress: number;
-    downloaded?: number;
-    total?: number;
-  }
-
   interface Backup {
     name: string;
     version?: string;
@@ -59,7 +52,8 @@
   let checkError = $state('');
   let checkedAt = $state<Date | null>(null);
   let checking = $state(false);
-  let status = $state<UpdateStatus | null>(null);
+  let status = $state<UpdateStatusPayload | null>(null);
+  const stepRef = $derived(status ? stepLabel(status) : null);
   let installing = $state(false);
   let backups = $state<Backup[]>([]);
   let showConfirmInstall = $state(false);
@@ -217,7 +211,7 @@
 
   async function fetchStatus() {
     try {
-      status = await apiFetchJSON<UpdateStatus>('/api/update/status');
+      status = await apiFetchJSON<UpdateStatusPayload>('/api/update/status');
     } catch (_: any) {}
   }
 
@@ -275,7 +269,7 @@
     sseSource = new EventSource('/api/update/events');
     sseSource.onmessage = (event) => {
       try {
-        const state = JSON.parse(event.data) as UpdateStatus;
+        const state = JSON.parse(event.data) as UpdateStatusPayload;
         status = state;
         if (state.status === 'restarting') {
           closeSSE();
@@ -409,7 +403,9 @@
           ></div>
         </div>
       {/if}
-      {#if status.message}
+      {#if stepRef}
+        <span class="progress-text">{$t(stepRef.key, stepRef.params)}</span>
+      {:else if status.message}
         <span class="progress-text">{status.message}</span>
       {/if}
     </div>

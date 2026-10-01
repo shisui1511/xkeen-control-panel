@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -56,12 +57,17 @@ type ReleaseNote struct {
 }
 
 type UpdateStatus struct {
-	Status     string `json:"status"` // idle, checking, downloading, installing, restarting, restoring, done, failed
-	Message    string `json:"message"`
-	Progress   int    `json:"progress"` // 0-100
-	Downloaded int64  `json:"downloaded,omitempty"`
-	Total      int64  `json:"total,omitempty"`
-	Timestamp  int64  `json:"timestamp"`
+	Status string `json:"status"` // idle, checking, downloading, installing, restarting, restoring, done, failed
+	// Message — для логов; UI переводит по MessageCode.
+	Message string `json:"message"`
+	// MessageCode — машинный код шага или сбоя из закрытого перечня; Params —
+	// плоские параметры подписи (version, detail).
+	MessageCode string            `json:"message_code,omitempty"`
+	Params      map[string]string `json:"params,omitempty"`
+	Progress    int               `json:"progress"` // 0-100
+	Downloaded  int64             `json:"downloaded,omitempty"`
+	Total       int64             `json:"total,omitempty"`
+	Timestamp   int64             `json:"timestamp"`
 }
 
 var (
@@ -79,6 +85,25 @@ func setUpdateState(s UpdateStatus) {
 	updateStateMu.Lock()
 	defer updateStateMu.Unlock()
 	updateState = s
+}
+
+// setUpdateStep публикует шаг обновления целиком: статус, прогресс, код и
+// параметры подписи. Карта params копируется и после публикации не мутируется
+// (getUpdateState копирует структуру, но не карту), поэтому код и параметры
+// прошлого шага не переходят в следующий.
+func setUpdateStep(status string, progress int, code string, params map[string]string, message string) {
+	var p map[string]string
+	if len(params) > 0 {
+		p = maps.Clone(params)
+	}
+	setUpdateState(UpdateStatus{
+		Status:      status,
+		Message:     message,
+		MessageCode: code,
+		Params:      p,
+		Progress:    progress,
+		Timestamp:   time.Now().Unix(),
+	})
 }
 
 func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +196,7 @@ func (a *API) startUpdate(channel string) bool {
 		updateStateMu.Unlock()
 		return false
 	}
-	updateState = UpdateStatus{Status: "checking", Progress: 5, Timestamp: time.Now().Unix()}
+	updateState = UpdateStatus{Status: "checking", MessageCode: "checking", Progress: 5, Timestamp: time.Now().Unix()}
 	updateStateMu.Unlock()
 
 	go a.performUpdate(channel)
@@ -296,7 +321,8 @@ func (a *API) UpdateEventsSSE(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ticker.C:
 			currentState := getUpdateState()
-			if currentState.Status != lastState.Status || currentState.Progress != lastState.Progress || currentState.Message != lastState.Message {
+			if currentState.Status != lastState.Status || currentState.Progress != lastState.Progress || currentState.Message != lastState.Message ||
+				currentState.MessageCode != lastState.MessageCode || !maps.Equal(currentState.Params, lastState.Params) {
 				data, err := json.Marshal(currentState)
 				if err == nil {
 					fmt.Fprintf(w, "data: %s\n\n", data)
@@ -382,11 +408,7 @@ func (a *API) performUpdate(channel string) {
 	}()
 
 	// Step 1: Check latest release
-	setUpdateState(UpdateStatus{
-		Status:   "checking",
-		Progress: 10,
-		Message:  "Checking for updates...",
-	})
+	setUpdateStep("checking", 10, "checking", nil, "Checking for updates...")
 
 	info, err := fetchLatestRelease(channel)
 	if err != nil {
@@ -420,11 +442,7 @@ func (a *API) performUpdate(channel string) {
 	}
 
 	// Step 2: Download
-	setUpdateState(UpdateStatus{
-		Status:   "downloading",
-		Progress: 30,
-		Message:  "Downloading update...",
-	})
+	setUpdateStep("downloading", 30, "downloading", map[string]string{"version": info.LatestVersion}, "Downloading update...")
 
 	arch := releaseArch()
 	downloadURL := fmt.Sprintf("%s/v%s/xcp_v%s_%s",

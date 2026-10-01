@@ -27,6 +27,12 @@ interface MockOptions {
   backups?: unknown[];
   state?: Record<string, unknown>;
   version?: string;
+  /** Ответ /api/update/status (по умолчанию idle). */
+  status?: Record<string, unknown>;
+  /** Событие SSE /api/update/events: одна строка data. */
+  events?: Record<string, unknown>;
+  /** HTTP-статус /api/version; 503 не даёт циклу переподключения перезагрузить страницу. */
+  versionStatus?: number;
   onSettings?: (body: Record<string, unknown>) => void;
 }
 
@@ -65,9 +71,17 @@ async function mockApi(page: Page, opts: MockOptions = {}) {
     } else if (url.includes('/api/update/channel')) {
       await route.fulfill(json({ channel: 'beta' }));
     } else if (url.includes('/api/version')) {
-      await route.fulfill(json({ panel_version: opts.version ?? 'v0.28.0' }));
+      await route.fulfill(
+        json({ panel_version: opts.version ?? 'v0.28.0' }, opts.versionStatus ?? 200)
+      );
+    } else if (url.includes('/api/update/events')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: opts.events ? `data: ${JSON.stringify(opts.events)}\n\n` : ''
+      });
     } else if (url.includes('/api/update/status')) {
-      await route.fulfill(json({ status: 'idle', message: '', progress: 0 }));
+      await route.fulfill(json(opts.status ?? { status: 'idle', message: '', progress: 0 }));
     } else if (url.includes('/api/update/check')) {
       if (opts.checkStatus && opts.checkStatus >= 400) {
         await route.fulfill(
@@ -245,6 +259,24 @@ test.describe('Settings updates tab', () => {
       .click();
     await expect.poll(() => saved).toContainEqual({ auto_install: true });
     await expect(page.getByLabel('Окно установки')).toBeVisible();
+  });
+});
+
+test.describe('Update progress labels', () => {
+  const DOWNLOADING = {
+    status: 'downloading',
+    message: 'Downloading update...',
+    message_code: 'downloading',
+    params: { version: '0.29.0-rc.30' },
+    progress: 30
+  };
+
+  test('shows the download step in the interface language', async ({ page }) => {
+    await mockApi(page, { status: DOWNLOADING, events: DOWNLOADING, versionStatus: 503 });
+    await openUpdatesTab(page);
+
+    await expect(page.getByText('Скачиваем версию 0.29.0-rc.30')).toBeVisible();
+    await expect(page.getByText('Downloading update...')).toHaveCount(0);
   });
 });
 
