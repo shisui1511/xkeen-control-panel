@@ -18,10 +18,43 @@ export interface UpdateStatusPayload {
 }
 
 /** Коды шагов, для которых есть подпись. */
-export const STEP_CODES = ['checking', 'downloading'] as const;
+export const STEP_CODES = [
+  'checking',
+  'up_to_date',
+  'downloading',
+  'backup_creating',
+  'installing',
+  'restarting',
+  'complete',
+  'rollback_restoring'
+] as const;
+
+/** Коды сбоев (status=failed), для которых есть переведённая причина. */
+export const FAILURE_CODES = [
+  'panic',
+  'check_failed',
+  'download_failed',
+  'checksum_failed',
+  'chmod_failed',
+  'backup_failed',
+  'install_failed',
+  'restart_failed',
+  'health_check_failed',
+  'auto_rollback_done',
+  'auto_rollback_failed',
+  'auto_rollback_start_failed',
+  'rollback_failed'
+] as const;
 
 /** Коды шагов, в подписи которых есть версия; без неё берётся вариант `_plain`. */
-const VERSIONED_CODES: readonly string[] = ['downloading'];
+const VERSIONED_CODES: readonly string[] = [
+  'downloading',
+  'backup_creating',
+  'installing',
+  'restarting',
+  'complete',
+  'rollback_restoring'
+];
 
 /**
  * Подпись шага по коду; null, когда статус failed, кода нет или он неизвестен
@@ -36,4 +69,16 @@ export function stepLabel(s: UpdateStatusPayload): I18nRef | null {
   const version = s.params?.version;
   if (!version) return { key: `${key}_plain` };
   return { key, params: { version } };
+}
+
+/**
+ * Причина сбоя по коду плюс технический текст ошибки (params.detail, может быть
+ * пустым). null, когда статус не failed или код неизвестен — вызывающий
+ * показывает прежний message.
+ */
+export function failureView(s: UpdateStatusPayload): { reason: I18nRef; detail: string } | null {
+  if (s.status !== 'failed') return null;
+  const code = s.message_code;
+  if (!code || !(FAILURE_CODES as readonly string[]).includes(code)) return null;
+  return { reason: { key: `settings.update_fail_${code}` }, detail: s.params?.detail ?? '' };
 }

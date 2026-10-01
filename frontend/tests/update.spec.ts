@@ -278,6 +278,54 @@ test.describe('Update progress labels', () => {
     await expect(page.getByText('Скачиваем версию 0.29.0-rc.30')).toBeVisible();
     await expect(page.getByText('Downloading update...')).toHaveCount(0);
   });
+
+  test('shows the failure reason and the technical detail', async ({ page }) => {
+    const failed = {
+      status: 'failed',
+      message: 'Checksum verification failed: sha mismatch',
+      message_code: 'checksum_failed',
+      params: { detail: 'sha mismatch' },
+      progress: 0
+    };
+    await mockApi(page, { status: failed, versionStatus: 503 });
+    await openUpdatesTab(page);
+
+    await expect(page.getByText('Контрольная сумма не совпала')).toBeVisible();
+    await expect(page.locator('.progress-detail')).toHaveText('sha mismatch');
+    await expect(page.getByText('Checksum verification failed')).toHaveCount(0);
+  });
+
+  test('falls back to the backend message for an unknown code', async ({ page }) => {
+    const failed = {
+      status: 'failed',
+      message: 'Something new',
+      message_code: 'future_code',
+      progress: 0
+    };
+    await mockApi(page, { status: failed, versionStatus: 503 });
+    await openUpdatesTab(page);
+
+    await expect(page.getByText('Something new')).toBeVisible();
+    await expect(page.locator('.progress-detail')).toHaveCount(0);
+  });
+});
+
+test.describe('Update progress labels (en)', () => {
+  test.use({ locale: 'en-US' });
+
+  test('shows the download step in English', async ({ page }) => {
+    const downloading = {
+      status: 'downloading',
+      message: 'Downloading update...',
+      message_code: 'downloading',
+      params: { version: '0.29.0-rc.30' },
+      progress: 30
+    };
+    await mockApi(page, { status: downloading, events: downloading, versionStatus: 503 });
+    await page.goto('/#/settings?tab=updates');
+
+    await expect(page.getByText('Downloading version 0.29.0-rc.30')).toBeVisible();
+  });
 });
 
 test.describe('Update notifications', () => {

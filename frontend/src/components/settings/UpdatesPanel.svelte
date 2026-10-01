@@ -14,7 +14,7 @@
   import Modal from '../Modal.svelte';
   import Select from '../Select.svelte';
   import { updateState, refreshUpdateState, type UpdateCheckState } from '../../lib/updateNotify';
-  import { stepLabel, type UpdateStatusPayload } from '../../lib/updateStatusView';
+  import { stepLabel, failureView, type UpdateStatusPayload } from '../../lib/updateStatusView';
 
   interface ReleaseNote {
     version: string;
@@ -54,6 +54,7 @@
   let checking = $state(false);
   let status = $state<UpdateStatusPayload | null>(null);
   const stepRef = $derived(status ? stepLabel(status) : null);
+  const failure = $derived(status ? failureView(status) : null);
   let installing = $state(false);
   let backups = $state<Backup[]>([]);
   let showConfirmInstall = $state(false);
@@ -403,7 +404,12 @@
           ></div>
         </div>
       {/if}
-      {#if stepRef}
+      {#if failure}
+        <span class="progress-text">{$t(failure.reason.key, failure.reason.params)}</span>
+        {#if failure.detail}
+          <span class="progress-detail">{failure.detail}</span>
+        {/if}
+      {:else if stepRef}
         <span class="progress-text">{$t(stepRef.key, stepRef.params)}</span>
       {:else if status.message}
         <span class="progress-text">{status.message}</span>
@@ -836,6 +842,15 @@
     font-size: 12px;
     color: var(--fg-secondary);
     word-break: break-word;
+  }
+
+  /* Технический текст ошибки Go под переведённой причиной сбоя */
+  .progress-detail {
+    display: block;
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    color: var(--fg-secondary);
+    overflow-wrap: anywhere;
   }
 
   .reconnect-overlay {
