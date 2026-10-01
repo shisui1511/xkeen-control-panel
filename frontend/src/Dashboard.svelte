@@ -9,6 +9,7 @@
     fetchCapabilities,
     showToast,
     mihomoApiAvailable,
+    mihomoApiReady,
     panelUnreachable
   } from './stores';
   import { usePoller } from './lib/poller';
@@ -111,7 +112,6 @@
     xkeen: string;
     xray: string;
     mihomo: string;
-    connections: number;
     xrayVersion: string;
     mihomoVersion: string;
   }
@@ -120,7 +120,6 @@
     xkeen: 'loading',
     xray: 'loading',
     mihomo: 'loading',
-    connections: 0,
     xrayVersion: '',
     mihomoVersion: ''
   });
@@ -254,13 +253,13 @@
 
   let systemStats = $state<SystemStats | null>(null);
   let loadHistory = $state<number[]>([]);
-  let totalSubsCount = $state(0);
-  let hasSubscription = $state(false);
-  let subsLastUpdated = $state('');
+  // Подписка есть, если заведена в панели либо объявлена в config.yaml как HTTP
+  // proxy-provider ядра. coreProviderPresent при падении API не сбрасывается:
+  // быстрый старт не мигает.
+  let panelSubsPresent = $state(false);
+  let coreProviderPresent = $state(false);
+  const hasSubscription = $derived(panelSubsPresent || coreProviderPresent);
   let subsSummaryLoaded = $state(false);
-  let totalProxiesCount = $state(0);
-  let activeProxiesCount = $state(0);
-  let subscriptionProxiesCount = $state(0);
   let statsLastFetched = $state('');
 
   // Шаг «Настройте» определяется по preflight активного ядра. Запрос не чаще
@@ -336,54 +335,13 @@
     systemStats !== null && systemStats.ssl_cert_days >= 0 && systemStats.ssl_cert_days < 7
   );
 
-  /**
-   * A subscription may be declared directly in config.yaml as an HTTP
-   * proxy-provider (not managed by the panel); it counts for the quick start.
-   */
-  async function hasCoreProxyProvider(signal?: AbortSignal): Promise<boolean> {
-    try {
-      const res = await apiFetch('/api/mihomo/proxy/providers/proxies', { signal });
-      if (!res.ok) return false;
-      const data = await res.json();
-      return Object.values(data?.providers ?? {}).some(
-        (p: any) =>
-          String(p?.vehicleType).toUpperCase() === 'HTTP' &&
-          Array.isArray(p?.proxies) &&
-          p.proxies.length > 0
-      );
-    } catch {
-      return false;
-    }
-  }
-
   async function fetchSubscriptionSummary(signal?: AbortSignal) {
     try {
       const res = await apiFetch('/api/subscriptions', { signal });
       if (res.ok) {
         const envelope = await res.json();
         const rawList = Array.isArray(envelope) ? envelope : (envelope?.data ?? []);
-        const subs = Array.isArray(rawList) ? rawList : [];
-        totalSubsCount = subs.length;
-        hasSubscription = subs.length > 0 || (await hasCoreProxyProvider(signal));
-        subscriptionProxiesCount = subs.reduce(
-          (acc: number, s: any) => acc + (s.proxy_count || 0),
-          0
-        );
-        // Find most recent update
-        const dates = subs.map((s: any) => s.last_updated || s.updated_at || '').filter(Boolean);
-        if (dates.length > 0) {
-          const latest = dates.sort().reverse()[0];
-          const d = new Date(latest);
-          const today = new Date();
-          if (d.toDateString() === today.toDateString()) {
-            subsLastUpdated = $t('dash.updated_today');
-          } else {
-            subsLastUpdated = d.toLocaleDateString($currentLang === 'ru' ? 'ru-RU' : 'en-US', {
-              day: '2-digit',
-              month: '2-digit'
-            });
-          }
-        }
+        panelSubsPresent = Array.isArray(rawList) && rawList.length > 0;
       }
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
@@ -394,23 +352,25 @@
     }
   }
 
-  async function fetchProxySummary(signal?: AbortSignal) {
+  /**
+   * A subscription may be declared directly in config.yaml as an HTTP
+   * proxy-provider (not managed by the panel); it counts for the quick start.
+   * Polled only while the Mihomo API answers (enabledWhen: mihomoApiReady).
+   */
+  async function refreshCoreProxyProvider(signal?: AbortSignal) {
     try {
-      const res = await apiFetch('/api/mihomo/proxy/proxies', { signal });
-      if (res.ok) {
-        const data = await res.json();
-        const proxies = data.proxies || {};
-        const keys = Object.keys(proxies);
-        const nodeKeys = keys.filter(
-          (k) => proxies[k].type !== 'Selector' && proxies[k].type !== 'URLTest'
-        );
-        totalProxiesCount = nodeKeys.length;
-        activeProxiesCount = nodeKeys.filter((k) => proxies[k].alive !== false).length;
-      }
+      const res = await apiFetch('/api/mihomo/proxy/providers/proxies', { signal });
+      if (!res.ok) return;
+      const data = await res.json();
+      coreProviderPresent = Object.values(data?.providers ?? {}).some(
+        (p: any) =>
+          String(p?.vehicleType).toUpperCase() === 'HTTP' &&
+          Array.isArray(p?.proxies) &&
+          p.proxies.length > 0
+      );
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       if (e?.status === 401) return;
-      console.error('fetchProxySummary failed:', e);
     }
   }
 
@@ -466,18 +426,6 @@
       const mihomoText =
         mihomoRes.status === 'fulfilled' && mihomoRes.value.ok ? await mihomoRes.value.text() : '';
 
-      // Try to get connection count from mihomo
-      let connCount = 0;
-      try {
-        const connRes = await apiFetch('/api/mihomo/proxy/connections?limit=1', { signal });
-        if (connRes.ok) {
-          const connData = await connRes.json();
-          connCount = connData?.connections?.length ?? 0;
-        }
-      } catch (e: any) {
-        if (e?.status === 401) return;
-      }
-
       // Get kernel versions and process_status from /api/kernels
       let xrayVer = '';
       let mihomoVer = '';
@@ -510,7 +458,6 @@
         xkeen: xkeenCardStatus(currentXkeenState),
         xray: xrayProcessStatus,
         mihomo: mihomoProcessStatus,
-        connections: connCount,
         xrayVersion: xrayVer,
         mihomoVersion: mihomoVer
       };
@@ -904,7 +851,6 @@
 
   onMount(() => {
     fetchVersion();
-    fetchProxySummary();
 
     currentHash = window.location.hash;
     currentTab = getTabFromHash();
@@ -926,7 +872,10 @@
     usePoller((signal) => fetchSystemStats(signal), 5000);
     usePoller((signal) => fetchCapabilities(signal), 10000);
     usePoller((signal) => fetchSubscriptionSummary(signal), 30000);
-    usePoller((signal) => fetchProxySummary(signal), 30000);
+    // Проверка proxy-provider ядра идёт только пока API Mihomo отвечает
+    usePoller((signal) => refreshCoreProxyProvider(signal), 30000, {
+      enabledWhen: mihomoApiReady
+    });
     // Результат фоновой проверки обновлений: бэкенд проверяет раз в 6 ч
     usePoller((signal) => refreshUpdateState(signal), 30 * 60 * 1000);
     const handleBeforeInstallPrompt = (e: Event) => {

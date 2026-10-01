@@ -1,4 +1,5 @@
 import { onDestroy } from 'svelte';
+import { get, type Readable } from 'svelte/store';
 
 export interface PollerOptions {
   /**
@@ -15,6 +16,13 @@ export interface PollerOptions {
    * If true (default), triggers an immediate poll execution upon initialization.
    */
   immediate?: boolean;
+  /**
+   * Gate: the poller runs only while the store holds true. With the option set,
+   * the poller starts paused if the store is false; false -> true resumes with an
+   * immediate poll, true -> false pauses and aborts the in-flight request.
+   * Unsubscribed in stop(). Without the option the behaviour is unchanged.
+   */
+  enabledWhen?: Readable<boolean>;
 }
 
 export interface PollerControls {
@@ -40,7 +48,8 @@ export function usePoller(
   let inFlightController: AbortController | null = null;
   let backoffMs = activeIntervalMs;
   let isStopped = false;
-  let isPaused = false;
+  let unsubscribeGate: (() => void) | null = null;
+  let isPaused = options.enabledWhen ? !get(options.enabledWhen) : false;
 
   function clearTimer() {
     if (timer !== null) {
@@ -142,6 +151,23 @@ export function usePoller(
     if (typeof window !== 'undefined') {
       window.removeEventListener('visibilitychange', handleVisibilityChange);
     }
+    if (unsubscribeGate) {
+      unsubscribeGate();
+      unsubscribeGate = null;
+    }
+  }
+
+  if (options.enabledWhen) {
+    let first = true;
+    unsubscribeGate = options.enabledWhen.subscribe((enabled) => {
+      // The first synchronous call only mirrors the initial state (isPaused above).
+      if (first) {
+        first = false;
+        return;
+      }
+      if (enabled) resume();
+      else pause();
+    });
   }
 
   try {

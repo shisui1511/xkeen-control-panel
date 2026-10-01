@@ -25,7 +25,6 @@
       xkeen: string;
       xray: string;
       mihomo: string;
-      connections: number;
       xrayVersion: string;
       mihomoVersion: string;
     };
