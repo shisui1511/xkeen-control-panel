@@ -357,7 +357,9 @@ jobs:
         run: |
           ok=0
           for i in 1 2 3; do
-            sudo apt-get update && sudo apt-get install -y qemu-user-static && { ok=1; break; }
+            timeout 180 sudo apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=3 update \
+              && timeout 180 sudo apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=3 install -y qemu-user-static \
+              && { ok=1; break; }
             echo "apt-get failed, retry $i"; sleep 5
           done
           [ "$ok" = 1 ] || { echo "::error::apt-get failed after 3 attempts"; exit 1; }
