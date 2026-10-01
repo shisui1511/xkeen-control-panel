@@ -175,6 +175,8 @@
   "dash.xkeen_sub": "main module",
   "dash.xray_sub": "v2ray core",
   "dash.mihomo_sub": "Clash Meta core",
+  "dash.mihomo_offline_not_running": "Mihomo is not running",
+  "dash.mihomo_offline_api_down": "Mihomo is running, but its API is not responding",
   "dash.status_error": "Failed to load service status",
   "dash.info_version": "XKeen Version",
   "dash.info_version_panel": "Panel Version",

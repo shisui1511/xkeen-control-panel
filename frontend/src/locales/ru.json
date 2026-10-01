@@ -172,6 +172,8 @@
   "dash.xkeen_sub": "главный модуль",
   "dash.xray_sub": "ядро v2ray",
   "dash.mihomo_sub": "ядро Clash Meta",
+  "dash.mihomo_offline_not_running": "Mihomo не запущен",
+  "dash.mihomo_offline_api_down": "Mihomo запущен, API не отвечает",
   "dash.status_error": "Не удалось получить статус сервисов",
   "dash.info_version": "Версия XKeen",
   "dash.info_version_panel": "Версия панели",

@@ -207,4 +207,21 @@ test.describe('Гейт опросов Mihomo (UPDUI-03)', () => {
     await expect.poll(() => capsAfterPostAt, { timeout: 8000 }).toBeGreaterThan(0);
     expect(capsAfterPostAt - postDoneAt).toBeLessThan(2000);
   });
+
+  test('connections tile shows a dash and the reason', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    const flags: CapsFlags = { apiReachable: false, processRunning: false };
+    await mockCapabilities(page, flags);
+
+    await visitPage(page, '/#/');
+    const value = page.getByTestId('dash-connections-value');
+    const reason = page.getByTestId('dash-connections-offline');
+    await expect(value).toContainText('—');
+    await expect(reason).toHaveText('Mihomo не запущен');
+
+    // Процесс поднялся, API ещё нет: подпись меняется на следующем опросе capabilities
+    flags.processRunning = true;
+    await expect(reason).toHaveText('Mihomo запущен, API не отвечает', { timeout: 14_000 });
+    await expect(value).toContainText('—');
+  });
 });
