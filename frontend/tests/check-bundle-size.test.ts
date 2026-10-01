@@ -188,6 +188,11 @@ describe('Bundle Size Gate', () => {
     ).toHaveLength(1);
   });
 
+  it('checkNoInlineScripts flags an inline script whose end tag has a space or attributes', () => {
+    expect(checkNoInlineScripts('<script>alert(1)</script >')).toHaveLength(1);
+    expect(checkNoInlineScripts('<script>alert(1)</script foo="bar">')).toHaveLength(1);
+  });
+
   it('checkNoInlineScripts flags a module script with an inline body', () => {
     expect(checkNoInlineScripts('<script type="module">import "x"</script>')).toHaveLength(1);
   });

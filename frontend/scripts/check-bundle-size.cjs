@@ -66,7 +66,7 @@ function checkNoExternalResources(html) {
 // <script> обязан иметь src и пустое тело. Возвращает фрагменты-нарушения.
 function checkNoInlineScripts(html) {
   const violations = [];
-  const scriptRegex = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+  const scriptRegex = /<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi;
   let match;
   while ((match = scriptRegex.exec(html)) !== null) {
     const hasSrc = /\bsrc\s*=/i.test(match[1]);
