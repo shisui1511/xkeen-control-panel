@@ -165,3 +165,138 @@ describe('serviceAction', () => {
     expect(get(isServiceRestarting)).toBe(true);
   });
 });
+
+describe('switchKernel', () => {
+  const switched = {
+    outcome: 'switched',
+    old: 'xray',
+    new: 'mihomo',
+    old_running: false,
+    new_running: true,
+    output: ''
+  };
+
+  it('switched: результат и окно перезапуска включено до запроса', async () => {
+    let graceDuringRequest = false;
+    const { switchKernel, isServiceRestarting } = await load();
+    fetchMock.mockImplementation(async () => {
+      graceDuringRequest = get(isServiceRestarting);
+      return makeResponse(200, { success: true, data: switched });
+    });
+
+    const res = await switchKernel('mihomo');
+
+    expect(res).toMatchObject({
+      outcome: 'switched',
+      old: 'xray',
+      new: 'mihomo',
+      new_running: true
+    });
+    expect(graceDuringRequest).toBe(true);
+    expect(get(isServiceRestarting)).toBe(true);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/service/control?action=switch_kernel&kernel=mihomo'
+    );
+    // окно держится не меньше дедлайна бэкенда: через 19 с ещё активно, через 21 с снято
+    vi.advanceTimersByTime(19000);
+    expect(get(isServiceRestarting)).toBe(true);
+    vi.advanceTimersByTime(2000);
+    expect(get(isServiceRestarting)).toBe(false);
+  });
+
+  it('old_still_running и new_not_started: окно снимается сразу', async () => {
+    const { switchKernel, isServiceRestarting } = await load();
+    for (const outcome of ['old_still_running', 'new_not_started']) {
+      fetchMock.mockResolvedValue(
+        makeResponse(200, { success: true, data: { ...switched, outcome } })
+      );
+      const res = await switchKernel('mihomo');
+      expect(res.outcome).toBe(outcome);
+      expect(get(isServiceRestarting)).toBe(false);
+    }
+  });
+
+  it('неизвестный outcome: ошибка Invalid switch response, окно снято', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse(200, { success: true, data: { ...switched, outcome: 'weird' } })
+    );
+    const { switchKernel, isServiceRestarting } = await load();
+
+    await expect(switchKernel('mihomo')).rejects.toThrow('Invalid switch response');
+    expect(get(isServiceRestarting)).toBe(false);
+  });
+
+  it('ответ без data: ошибка Invalid switch response', async () => {
+    fetchMock.mockResolvedValue(makeResponse(200, { success: true }));
+    const { switchKernel } = await load();
+
+    await expect(switchKernel('mihomo')).rejects.toThrow('Invalid switch response');
+  });
+
+  it('409 kernel_conflict: переведённый текст, окно снято', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse(409, { success: false, error: 'both', code: 'kernel_conflict' })
+    );
+    const { switchKernel, isServiceRestarting, t } = await load();
+
+    await expect(switchKernel('mihomo')).rejects.toMatchObject({
+      message: get(t)('kernel.conflict_blocked_toast'),
+      code: 'kernel_conflict'
+    });
+    expect(get(isServiceRestarting)).toBe(false);
+  });
+
+  it('500 с выводом скрипта: текст ошибки из конверта', async () => {
+    fetchMock.mockResolvedValue(makeResponse(500, { success: false, error: 'script failed' }));
+    const { switchKernel } = await load();
+
+    await expect(switchKernel('xray')).rejects.toThrow('script failed');
+  });
+});
+
+describe('notifySwitchOutcome', () => {
+  const base = {
+    old: 'xray',
+    new: 'mihomo',
+    old_running: false,
+    new_running: true,
+    output: ''
+  } as const;
+
+  it('switched: success 4000', async () => {
+    const { notifySwitchOutcome, toastStore } = await load();
+    notifySwitchOutcome({ ...base, outcome: 'switched' });
+    const [toast] = get(toastStore);
+    expect(toast.type).toBe('success');
+    expect(toast.duration).toBe(4000);
+    expect(toast.message).toBe('Ядро переключено на Mihomo');
+  });
+
+  it('old_still_running: warning 10000 с именем прежнего ядра', async () => {
+    const { notifySwitchOutcome, toastStore } = await load();
+    notifySwitchOutcome({ ...base, outcome: 'old_still_running', old_running: true });
+    const [toast] = get(toastStore);
+    expect(toast.type).toBe('warning');
+    expect(toast.duration).toBe(10000);
+    expect(toast.message).toContain('Xray всё ещё работает');
+  });
+
+  it('new_not_started: error 10000 с действием «Логи»', async () => {
+    const { notifySwitchOutcome, toastStore, t } = await load();
+    notifySwitchOutcome({ ...base, outcome: 'new_not_started', new_running: false });
+    const [toast] = get(toastStore);
+    expect(toast.type).toBe('error');
+    expect(toast.duration).toBe(10000);
+    expect(toast.message).toContain('Ядро Mihomo не запустилось, Xray остановлен');
+    expect(toast.action?.label).toBe(get(t)('apply.open_logs'));
+    toast.action?.onClick();
+    expect((window as unknown as { location: { hash: string } }).location.hash).toBe('#/logs');
+  });
+
+  it('new_not_started при old=none: ключ _plain без прежнего ядра', async () => {
+    const { notifySwitchOutcome, toastStore, t } = await load();
+    notifySwitchOutcome({ ...base, old: 'none', outcome: 'new_not_started', new_running: false });
+    const [toast] = get(toastStore);
+    expect(toast.message).toBe(get(t)('kernel.switch_new_not_started_plain', { new: 'Mihomo' }));
+  });
+});

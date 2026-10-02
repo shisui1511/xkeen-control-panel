@@ -269,14 +269,6 @@ export async function flushFakeIP(): Promise<void> {
   }
 }
 
-/** Switches XKeen to Mihomo and starts it (the "launch Mihomo" buttons). */
-export async function startMihomo(): Promise<void> {
-  const res = await apiFetch('/api/service/control?action=switch_kernel&kernel=mihomo', {
-    method: 'POST'
-  });
-  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
-}
-
 /** Turns XKeen's DNS redirection into the proxy core on or off. */
 export async function setDNSRedirect(enabled: boolean): Promise<void> {
   const res = await apiFetch('/api/service/dns-redirect', {

@@ -9,9 +9,11 @@
     devMode,
     showConfirm,
     mihomoApiReady,
-    mihomoApiState
+    mihomoApiState,
+    isMihomo
   } from './stores';
-  import { apiFetch, apiFetchJSON, startMihomo } from './lib/api';
+  import { apiFetch, apiFetchJSON } from './lib/api';
+  import { switchKernel, notifySwitchOutcome } from './lib/serviceControl';
   import { parseValidationError } from './lib/errorParser';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
@@ -862,7 +864,8 @@
   async function launchMihomo() {
     mihomoLaunching = true;
     try {
-      await startMihomo();
+      const res = await switchKernel('mihomo');
+      if (res.outcome !== 'switched') notifySwitchOutcome(res);
       safeTimeout(async () => {
         await fetchCapabilities();
         mihomoLaunching = false;
@@ -1034,7 +1037,7 @@
     {:else if $capabilities !== null && !$capabilities.mihomo.reachable}
       <EmptyState
         title={$t('ds.empty.mihomo_offline_title')}
-        description={$capabilities?.active_kernel === 'mihomo'
+        description={$isMihomo
           ? $t('ds.empty.mihomo_offline_desc_actionable')
           : $t('ds.empty.mihomo_offline_desc')}
         icon={PlayIcon}

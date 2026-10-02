@@ -1,5 +1,7 @@
 import { get } from 'svelte/store';
-import { apiFetch, apiFetchJSON } from './api';
+import { apiFetchJSON } from './api';
+import { serviceAction } from './serviceControl';
+import { kernelLabel } from './kernelState';
 import { showToast, fetchCapabilities } from '../stores';
 import { activateRestartGrace } from './serviceGrace';
 import { parseValidationError } from './errorParser';
@@ -13,7 +15,12 @@ import { currentLang, t } from '../i18n';
  */
 
 export type ApplyOutcome =
-  'restarted' | 'saved_kernel_stopped' | 'saved_kernel_inactive' | 'restart_failed' | 'unknown';
+  | 'restarted'
+  | 'saved_kernel_stopped'
+  | 'saved_kernel_inactive'
+  | 'saved_kernel_conflict'
+  | 'restart_failed'
+  | 'unknown';
 
 export interface ApplyResult {
   outcome: ApplyOutcome;
@@ -29,17 +36,12 @@ const KNOWN_OUTCOMES: ReadonlySet<string> = new Set([
   'restarted',
   'saved_kernel_stopped',
   'saved_kernel_inactive',
+  'saved_kernel_conflict',
   'restart_failed'
 ]);
 
 function tr(key: string, params?: Record<string, string | number>): string {
   return get(t)(key, params);
-}
-
-export function kernelDisplayName(kernel: string): string {
-  if (kernel === 'xray') return 'Xray';
-  if (kernel === 'mihomo') return 'Mihomo';
-  return kernel;
 }
 
 /** Capabilities' prediction: true only when Apply will really restart the kernel. */
@@ -79,8 +81,7 @@ export async function applyToKernel(target: ApplyTarget): Promise<ApplyResult> {
 /** Explicit "start now" requested by the user from the toast action. */
 export async function startKernelNow(): Promise<void> {
   try {
-    const res = await apiFetch('/api/service/control?action=start', { method: 'POST' });
-    if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+    await serviceAction('start');
     await fetchCapabilities();
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
@@ -112,10 +113,10 @@ export function notifyApplyOutcome(
       });
       break;
     case 'saved_kernel_inactive':
-      showToast(
-        'info',
-        tr('apply.saved_kernel_inactive', { kernel: kernelDisplayName(result.kernel) })
-      );
+      showToast('info', tr('apply.saved_kernel_inactive', { kernel: kernelLabel(result.kernel) }));
+      break;
+    case 'saved_kernel_conflict':
+      showToast('error', tr('apply.saved_kernel_conflict'), 8000);
       break;
     case 'restart_failed':
       showToast(
