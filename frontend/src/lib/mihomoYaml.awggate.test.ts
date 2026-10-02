@@ -87,6 +87,28 @@ describe('generateYAML — AWG 3.1 emit gate on kernel capability (WR-02)', () =
     for (const k of KEYS_31) expect(yaml).not.toContain(k);
   });
 
+  it('emits 3.1-only keys on kernel conflict (ban only when Xray is the active kernel)', () => {
+    const yaml = generateYAML(
+      stateWith({
+        active_kernel: 'both',
+        kernel_conflict: true,
+        kernels: { mihomo: { version: '1.19.30' } }
+      })
+    );
+    for (const k of KEYS_31) expect(yaml).toContain(k);
+  });
+
+  it('skips 3.1-only keys on kernel conflict when mihomo is too old', () => {
+    const yaml = generateYAML(
+      stateWith({
+        active_kernel: 'both',
+        kernel_conflict: true,
+        kernels: { mihomo: { version: '1.18.0' } }
+      })
+    );
+    for (const k of KEYS_31) expect(yaml).not.toContain(k);
+  });
+
   it('skips 3.1-only keys when capabilities are unknown', () => {
     const yaml = generateYAML(stateWith(undefined));
     for (const k of KEYS_31) expect(yaml).not.toContain(k);

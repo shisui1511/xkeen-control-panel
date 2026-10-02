@@ -1,4 +1,5 @@
 import { isMihomoAwg31Supported } from './awgFields';
+import { kernelStateOf } from './kernelState';
 
 export interface Proxy {
   id: string;
@@ -799,15 +800,16 @@ export function slugifyProviderName(
 export function generateYAML(state: MihomoConfigState): string {
   const lines: string[] = [];
 
-  // AWG-05: гейт версии ядра для ключей AmneziaWG 3.1. Источник тот же, что у
-  // ProxyForm.isAwg31Allowed (активное ядро + версия mihomo). Если 3.1 не
-  // поддерживается (старое ядро / активен Xray / нет данных о ядре), 3.1-only
-  // ключи не эмитятся — иначе ядро не распарсит конфиг и служба не стартует.
-  // Classic/2.0-ключи эмитятся всегда, вывод для них байт-в-байт не меняется.
-  const awgCaps = state.capabilities;
-  const awgActiveKernel = awgCaps?.active_kernel || 'mihomo';
+  // AWG-05: гейт версии ядра для ключей AmneziaWG 3.1. Состояние ядра — из того же
+  // источника, что у ProxyForm.isAwg31Allowed (kernelStateOf), плюс версия mihomo.
+  // Если 3.1 не поддерживается (старое ядро / активен Xray / нет данных о версии),
+  // 3.1-only ключи не эмитятся — иначе ядро не распарсит конфиг и служба не
+  // стартует. Запрет только при активном Xray: при конфликте и без данных о ядре
+  // конфиг генерируется для Mihomo. Classic/2.0-ключи эмитятся всегда, вывод для
+  // них байт-в-байт не меняется.
+  const awgKernel = kernelStateOf(state.capabilities);
   const awg31Supported =
-    awgActiveKernel !== 'xray' && isMihomoAwg31Supported(awgCaps?.kernels?.mihomo?.version);
+    awgKernel !== 'xray' && isMihomoAwg31Supported(state.capabilities?.kernels?.mihomo?.version);
 
   // external-controller or external-controller-unix (defaults to Unix Domain Socket)
   if (state.externalControllerType === 'tcp' && state.externalControllerTarget) {

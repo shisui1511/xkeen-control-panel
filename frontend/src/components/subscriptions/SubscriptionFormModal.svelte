@@ -2,7 +2,7 @@
   import Modal from '../Modal.svelte';
   import SegmentedControl from '../SegmentedControl.svelte';
   import { t, currentLang } from '../../i18n';
-  import { capabilities } from '../../stores';
+  import { isXray } from '../../stores';
 
   interface Subscription {
     id: string;
@@ -251,7 +251,7 @@
           >{$t('subscr.modal.integrate_mihomo_groups')}</span
         >
 
-        {#if $capabilities?.active_kernel === 'xray'}
+        {#if $isXray}
           <div
             class="alert alert-warning"
             style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);"

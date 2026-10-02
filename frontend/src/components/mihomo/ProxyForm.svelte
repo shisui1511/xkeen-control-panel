@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '../../i18n';
-  import { capabilities } from '../../stores';
+  import { capabilities, activeKernelState } from '../../stores';
   import { isMihomoAwg31Supported } from '../../lib/awgFields';
   import Select from '../Select.svelte';
   import Icon from '../Icon.svelte';
@@ -59,8 +59,9 @@
   const CIPHERS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-poly1305', '2022-blake3-aes-256-gcm'];
 
   const mihomoVersion = $derived($capabilities?.kernels?.mihomo?.version || '');
-  const activeKernel = $derived($capabilities?.active_kernel || 'mihomo');
-  const isAwg31Allowed = $derived(activeKernel !== 'xray' && isMihomoAwg31Supported(mihomoVersion));
+  const isAwg31Allowed = $derived(
+    $activeKernelState !== 'xray' && isMihomoAwg31Supported(mihomoVersion)
+  );
 
   // Ограничения AmneziaWG (TMPL-08, AWG-01..05, AWGVAL-01..05):
   type HParsed = { ok: boolean; min: number; max: number; raw: string };
