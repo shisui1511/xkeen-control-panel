@@ -12,7 +12,8 @@
     mihomoApiReady,
     mihomoApiState,
     mihomoOfflineReason,
-    panelUnreachable
+    panelUnreachable,
+    conflictVisible
   } from './stores';
   import { usePoller } from './lib/poller';
   import { apiFetch, apiFetchJSON } from './lib/api';
@@ -25,6 +26,7 @@
   import Icon from './lib/components/Icon.svelte';
   import Skeleton from './components/Skeleton.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
+  import KernelConflictBanner from './components/KernelConflictBanner.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PageHeader from './PageHeader.svelte';
   import ServiceStatusGroup from './components/dashboard/ServiceStatusGroup.svelte';
@@ -1012,6 +1014,12 @@
         <span class="spinner"></span>
         <span>{$t('service.panel_unreachable')}</span>
       </div>
+    {/if}
+
+    <!-- Конфликт ядер (два запущенных процесса): над содержимым любой вкладки,
+         не в блоке mihomoDependentTabs; во время окна перезапуска не показывается. -->
+    {#if $conflictVisible}
+      <KernelConflictBanner />
     {/if}
 
     {#key chunkReloadKey}

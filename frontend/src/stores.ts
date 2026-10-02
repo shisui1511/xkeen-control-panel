@@ -2,6 +2,7 @@ import { writable, derived, get } from 'svelte/store';
 import { apiFetchJSON } from './lib/api';
 import { isServiceRestarting, clearRestartGrace } from './lib/serviceGrace';
 import { NAV_CAPS_KEY, parseNavCaps, toNavCaps, mergeNavCaps, type NavCaps } from './lib/navCaps';
+import { kernelStateOf, kernelNameOf, runningKernelsOf } from './lib/kernelState';
 
 // --- Capabilities store ---
 
@@ -13,7 +14,12 @@ export interface KernelCapability {
 
 export interface CapabilitiesData {
   kernels: Record<string, KernelCapability>;
+  /** xray | mihomo | none | both (оба ядра запущены — конфликт). */
   active_kernel: string;
+  /** Запущены оба ядра; интерфейс читает его через isConflict. */
+  kernel_conflict?: boolean;
+  /** Запущенные ядра в порядке xray, mihomo. */
+  running_kernels?: string[];
   xkeen_dns?: boolean;
   xkeen_installed?: boolean;
   mihomo: {
@@ -41,6 +47,22 @@ export interface CapabilitiesData {
 
 export const capabilities = writable<CapabilitiesData | null>(null);
 export const isKernelChecking = writable(false);
+
+// --- Единое состояние активного ядра (D-07) ---
+// Единственный источник «какое ядро активно / конфликт». Компоненты не читают
+// $capabilities.active_kernel напрямую. До ответа capabilities все булевы false,
+// kernelKnown false (страницы показывают скелетон, а не заглушку «ядро не запущено»).
+export const activeKernelState = derived(capabilities, kernelStateOf);
+export const kernelKnown = derived(capabilities, (c) => c !== null);
+export const isXray = derived(activeKernelState, (s) => s === 'xray');
+export const isMihomo = derived(activeKernelState, (s) => s === 'mihomo');
+export const isNone = derived(activeKernelState, (s) => s === 'none');
+export const isConflict = derived(activeKernelState, (s) => s === 'conflict');
+/** Имя единственного активного ядра; при конфликте и none — пустая строка. */
+export const activeKernelName = derived(activeKernelState, kernelNameOf);
+export const runningKernels = derived(capabilities, runningKernelsOf);
+/** Конфликт виден UI: не во время окна перезапуска (переходные процессы не конфликт). */
+export const conflictVisible = derived([isConflict, isServiceRestarting], ([c, r]) => c && !r);
 
 // --- Состояние API Mihomo (tri-state) ---
 // unknown — ответа capabilities ещё не было (опросы не идут, оффлайн не показываем);

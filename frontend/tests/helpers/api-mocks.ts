@@ -7,7 +7,7 @@ import type { Page, Route } from '@playwright/test';
 // могли переиспользовать одну и ту же логику моков.
 // ============================================================
 
-export type KernelMode = 'mihomo' | 'xray';
+export type KernelMode = 'mihomo' | 'xray' | 'conflict';
 
 /**
  * Ответ GET /api/kernels (поле data): всегда ровно два ядра в порядке xray, затем mihomo.
@@ -28,8 +28,8 @@ export function kernelsFixture(
       has_update: false,
       channel: 'stable',
       status: 'idle',
-      process_status: kernel === 'xray' ? 'running' : 'stopped',
-      message: kernel === 'xray' ? 'running on background' : 'stopped',
+      process_status: kernel === 'xray' || kernel === 'conflict' ? 'running' : 'stopped',
+      message: kernel === 'xray' || kernel === 'conflict' ? 'running on background' : 'stopped',
       ...overrides.xray
     },
     {
@@ -41,8 +41,8 @@ export function kernelsFixture(
       has_update: false,
       channel: 'stable',
       status: 'idle',
-      process_status: kernel === 'mihomo' ? 'running' : 'stopped',
-      message: kernel === 'mihomo' ? 'running on background' : 'stopped',
+      process_status: kernel === 'mihomo' || kernel === 'conflict' ? 'running' : 'stopped',
+      message: kernel === 'mihomo' || kernel === 'conflict' ? 'running on background' : 'stopped',
       ...overrides.mihomo
     }
   ];
@@ -233,12 +233,14 @@ export async function setupMocks(
               xray: { installed: true, version: '1.8.4', channel: 'stable' },
               mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
             },
-            active_kernel: kernel,
+            active_kernel: kernel === 'conflict' ? 'both' : kernel,
+            kernel_conflict: kernel === 'conflict',
+            running_kernels: kernel === 'conflict' ? ['xray', 'mihomo'] : [kernel],
             mihomo: {
               reachable: true,
-              process_running: kernel === 'mihomo',
-              api_reachable: kernel === 'mihomo',
-              api_authenticated: kernel === 'mihomo'
+              process_running: kernel === 'mihomo' || kernel === 'conflict',
+              api_reachable: kernel === 'mihomo' || kernel === 'conflict',
+              api_authenticated: kernel === 'mihomo' || kernel === 'conflict'
             }
           }
         })
