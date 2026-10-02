@@ -74,6 +74,12 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Восстановление файлов и рестарт — под общим замком жизненного цикла.
+	if !a.tryLifecycleLock(w, r) {
+		return
+	}
+	defer a.lifecycleMu.Unlock()
+
 	skipped, err := a.snapshotSvc.Restore(id)
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
@@ -83,7 +89,7 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 	// Снимок возвращает каталоги обоих ядер: применяем к активному. Остановленное
 	// ядро не запускается, сбой рестарта не откатывает восстановленные файлы и
 	// приходит исходом restart_failed (HTTP 200).
-	result := a.applyKernel(services.ApplyTargetActive)
+	result := a.applyKernelLocked(services.ApplyTargetActive)
 	a.ClearCapabilitiesCache()
 	JSONSuccess(w, snapshotRestoreResponse{ApplyResult: result, SkippedStoplist: skipped})
 }

@@ -118,6 +118,13 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Запись config.json и рестарт идут под общим замком жизненного цикла: при
+	// идущей операции — 409 до любой записи файлов.
+	if !a.tryLifecycleLock(w, r) {
+		return
+	}
+	defer a.lifecycleMu.Unlock()
+
 	info := services.FindXrayAPIFragment(a.cfg.XRayConfigDir)
 	if !info.FileExists && !info.HasAnyJSON {
 		a.errorResponse(w, "Xray configuration file not found or not readable", http.StatusServiceUnavailable)
@@ -176,7 +183,7 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		apply := a.applyKernel("xray")
+		apply := a.applyKernelLocked("xray")
 		JSONSuccess(w, map[string]interface{}{"enabled": true, "apply": apply})
 		return
 	}
@@ -223,7 +230,7 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apply := a.applyKernel("xray")
+	apply := a.applyKernelLocked("xray")
 	JSONSuccess(w, map[string]interface{}{"enabled": false, "apply": apply})
 }
 

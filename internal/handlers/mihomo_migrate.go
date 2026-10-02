@@ -39,7 +39,13 @@ func (a *API) MihomoMigrateSocket(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Apply migration
+		// Apply migration: запись config.yaml и рестарты (с откатами) внутри
+		// MigrateToSocket идут под общим замком жизненного цикла.
+		if !a.tryLifecycleLock(w, r) {
+			return
+		}
+		defer a.lifecycleMu.Unlock()
+
 		result, err := a.mihomoSvc.MigrateToSocket(a.xkeenSvc)
 		if err != nil {
 			a.errorResponse(w, err.Error(), http.StatusInternalServerError)
