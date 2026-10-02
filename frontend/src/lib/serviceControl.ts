@@ -84,7 +84,7 @@ export async function stopKernelProcess(kernel: KernelName): Promise<StopKernelR
  * Подтверждение остановки выбранного ядра в конфликте (D-02). Один и тот же диалог
  * для баннера и карточки дашборда; `true` — пользователь согласен.
  */
-export function confirmKernelStop(kernel: KernelName): Promise<boolean> {
+export async function confirmKernelStop(kernel: KernelName): Promise<boolean> {
   const tr = get(t);
   const label = kernelLabel(kernel);
   return showConfirm({
