@@ -1,8 +1,14 @@
 <script lang="ts">
   import { t } from '../../i18n';
-  import { apiFetch } from '../../lib/api';
-  import { activateRestartGrace } from '../../lib/serviceGrace';
-  import { fetchCapabilities, showToast } from '../../stores';
+  import {
+    notifySwitchOutcome,
+    serviceAction,
+    stopKernelProcess,
+    switchKernel,
+    type KernelName
+  } from '../../lib/serviceControl';
+  import { kernelLabel } from '../../lib/kernelState';
+  import { activeKernelName, fetchCapabilities, isConflict, showToast } from '../../stores';
   import Icon from '../../lib/components/Icon.svelte';
   import Button from '../Button.svelte';
   import Skeleton from '../Skeleton.svelte';
@@ -52,120 +58,82 @@
     }
   }
 
-  async function restartXkeen() {
-    activateRestartGrace(6000);
-    showToast('info', $t('capsule.toast_restarting_xkeen'));
+  /** Общая обёртка действий: ошибки (кроме 401) — текстом ошибки клиента, затем обновление статуса. */
+  async function runAction(action: () => Promise<void>, refreshDelay: number): Promise<void> {
     try {
-      const res = await apiFetch('/api/service/control?action=restart', { method: 'POST' });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt);
-      }
-      showToast('success', $t('app.restart') + ' XKeen: OK');
-      if (onRefresh) setTimeout(onRefresh, 2500);
+      await action();
+      if (onRefresh) setTimeout(onRefresh, refreshDelay);
       await fetchCapabilities();
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', e?.message || $t('app.error'));
     }
+  }
+
+  async function restartXkeen() {
+    showToast('info', $t('capsule.toast_restarting_xkeen'));
+    await runAction(async () => {
+      await serviceAction('restart');
+      showToast('success', $t('app.restart') + ' XKeen: OK');
+    }, 2500);
   }
 
   async function startXkeen() {
-    activateRestartGrace(6000);
     showToast('info', $t('capsule.start_service') + ' XKeen...');
-    try {
-      const res = await apiFetch('/api/service/control?action=start', { method: 'POST' });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt);
-      }
+    await runAction(async () => {
+      await serviceAction('start');
       showToast('success', $t('capsule.start_service') + ': OK');
-      if (onRefresh) setTimeout(onRefresh, 2000);
-      await fetchCapabilities();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e?.message || $t('app.error'));
-    }
+    }, 2000);
   }
 
   async function stopXkeen() {
-    try {
-      const res = await apiFetch('/api/service/control?action=stop', { method: 'POST' });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt);
-      }
+    await runAction(async () => {
+      await serviceAction('stop');
       showToast('warning', $t('capsule.stop_service') + ' XKeen');
-      if (onRefresh) setTimeout(onRefresh, 1500);
-      await fetchCapabilities();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e?.message || $t('app.error'));
-    }
+    }, 1500);
   }
 
-  async function restartKernel(kernel: 'mihomo' | 'xray') {
-    activateRestartGrace(6000);
-    const kernelLabel = kernel === 'mihomo' ? 'Mihomo' : 'Xray';
-    const isActive = capabilities?.active_kernel === kernel;
-
-    showToast('info', `${$t('app.restart')} ${kernelLabel}...`);
-    try {
-      const url = isActive
-        ? '/api/service/control?action=restart'
-        : `/api/service/control?action=switch_kernel&kernel=${kernel}`;
-      const res = await apiFetch(url, { method: 'POST' });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt);
+  async function restartKernel(kernel: KernelName) {
+    const label = kernelLabel(kernel);
+    showToast('info', `${$t('app.restart')} ${label}...`);
+    await runAction(async () => {
+      if (kernel === $activeKernelName) {
+        await serviceAction('restart');
+        showToast('success', `${label}: ${$t('app.restart')} OK`);
+      } else {
+        notifySwitchOutcome(await switchKernel(kernel));
       }
-      showToast('success', `${kernelLabel}: ${$t('app.restart')} OK`);
-      if (onRefresh) setTimeout(onRefresh, 2500);
-      await fetchCapabilities();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e?.message || $t('app.error'));
-    }
+    }, 2500);
   }
 
-  async function startKernel(kernel: 'mihomo' | 'xray') {
-    activateRestartGrace(6000);
-    const kernelLabel = kernel === 'mihomo' ? 'Mihomo' : 'Xray';
-    showToast('info', `${$t('app.start')} ${kernelLabel}...`);
-    try {
-      const url =
-        capabilities?.active_kernel === kernel
-          ? '/api/service/control?action=start'
-          : `/api/service/control?action=switch_kernel&kernel=${kernel}`;
-      const res = await apiFetch(url, { method: 'POST' });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt);
+  async function startKernel(kernel: KernelName) {
+    const label = kernelLabel(kernel);
+    showToast('info', `${$t('app.start')} ${label}...`);
+    await runAction(async () => {
+      if (kernel === $activeKernelName) {
+        await serviceAction('start');
+        showToast('success', `${label}: ${$t('app.start')} OK`);
+      } else {
+        notifySwitchOutcome(await switchKernel(kernel));
       }
-      showToast('success', `${kernelLabel}: ${$t('app.start')} OK`);
-      if (onRefresh) setTimeout(onRefresh, 2000);
-      await fetchCapabilities();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e?.message || $t('app.error'));
-    }
+    }, 2000);
   }
 
-  async function stopKernel(kernel: 'mihomo' | 'xray') {
-    const kernelLabel = kernel === 'mihomo' ? 'Mihomo' : 'Xray';
-    try {
-      const res = await apiFetch('/api/service/control?action=stop', { method: 'POST' });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt);
+  async function stopKernel(kernel: KernelName) {
+    const label = kernelLabel(kernel);
+    await runAction(async () => {
+      if ($isConflict) {
+        // В конфликте общий stop погасил бы всё через XKeen: гасим только выбранное ядро.
+        const result = await stopKernelProcess(kernel);
+        if (result.outcome === 'still_running') {
+          showToast('error', $t('kernel.stop_still_running', { kernel: label }), 10000);
+          return;
+        }
+      } else {
+        await serviceAction('stop');
       }
-      showToast('warning', `${$t('app.stop')} ${kernelLabel}`);
-      if (onRefresh) setTimeout(onRefresh, 1500);
-      await fetchCapabilities();
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e?.message || $t('app.error'));
-    }
+      showToast('warning', `${$t('app.stop')} ${label}`);
+    }, 1500);
   }
 
   const isMihomoInstalled = $derived(
@@ -175,7 +143,7 @@
     capabilities?.kernels?.xray?.installed ?? serviceStatus.xray !== 'not_installed'
   );
 
-  const activeKernel = $derived(capabilities?.active_kernel || 'none');
+  const mutationBlockedReason = $derived($isConflict ? $t('kernel.conflict_blocked') : '');
 </script>
 
 <div class="service-status-container">
@@ -232,6 +200,7 @@
         startDisabledReason={anyKernelInstalled(capabilities) === false
           ? $t('svc.start_disabled_no_kernel')
           : undefined}
+        {mutationBlockedReason}
         onRestart={restartXkeen}
         onStart={startXkeen}
         onStop={stopXkeen}
@@ -243,9 +212,10 @@
         serviceId="mihomo"
         status={serviceStatus.mihomo}
         version={serviceStatus.mihomoVersion}
-        isActiveKernel={activeKernel === 'mihomo'}
+        isActiveKernel={$activeKernelName === 'mihomo'}
         isInstalled={isMihomoInstalled}
         isInsecureLan={Boolean(capabilities?.mihomo?.is_insecure_lan)}
+        {mutationBlockedReason}
         onRestart={() => restartKernel('mihomo')}
         onStart={() => startKernel('mihomo')}
         onStop={() => stopKernel('mihomo')}
@@ -258,8 +228,9 @@
         serviceId="xray"
         status={serviceStatus.xray}
         version={serviceStatus.xrayVersion}
-        isActiveKernel={activeKernel === 'xray'}
+        isActiveKernel={$activeKernelName === 'xray'}
         isInstalled={isXrayInstalled}
+        {mutationBlockedReason}
         onRestart={() => restartKernel('xray')}
         onStart={() => startKernel('xray')}
         onStop={() => stopKernel('xray')}

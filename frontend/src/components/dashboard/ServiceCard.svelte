@@ -12,6 +12,7 @@
     isInstalled = true,
     isInsecureLan = false,
     startDisabledReason = '',
+    mutationBlockedReason = '',
     onRestart,
     onStart,
     onStop,
@@ -26,6 +27,8 @@
     isInsecureLan?: boolean;
     /** Причина, по которой «Запустить» неактивна (например, не установлено ни одно ядро); пусто — кнопка доступна. */
     startDisabledReason?: string;
+    /** Причина блокировки запуска и перезапуска, например конфликт ядер; пусто — доступны. */
+    mutationBlockedReason?: string;
     onRestart?: () => Promise<void> | void;
     onStart?: () => Promise<void> | void;
     onStop?: () => Promise<void> | void;
@@ -37,6 +40,9 @@
   let isStopping = $state(false);
 
   const isBusy = $derived(isRestarting || isStarting || isStopping);
+
+  // Блокировка запуска приоритетнее причины «нет ядра»: конфликт объясняет всё сразу.
+  const startBlocked = $derived(mutationBlockedReason || startDisabledReason);
 
   const isRunning = $derived(status === 'running');
   const isStopped = $derived(status === 'stopped');
@@ -80,7 +86,7 @@
   });
 
   async function handleRestart() {
-    if (isBusy || !onRestart) return;
+    if (isBusy || !onRestart || mutationBlockedReason) return;
     isRestarting = true;
     try {
       await onRestart();
@@ -90,7 +96,7 @@
   }
 
   async function handleStart() {
-    if (isBusy || !onStart || startDisabledReason) return;
+    if (isBusy || !onStart || startBlocked) return;
     isStarting = true;
     try {
       await onStart();
@@ -163,9 +169,12 @@
           <Button
             variant="secondary"
             onclick={handleRestart}
-            disabled={isBusy}
+            disabled={isBusy || !!mutationBlockedReason}
             loading={isRestarting}
-            title={$t('app.restart')}
+            title={mutationBlockedReason || $t('app.restart')}
+            ariaLabel={mutationBlockedReason
+              ? `${$t('app.restart')}: ${mutationBlockedReason}`
+              : undefined}
           >
             <Icon name="refresh" size={13} />
             <span>{$t('app.restart')}</span>
@@ -187,12 +196,10 @@
           <Button
             variant="secondary"
             onclick={handleStart}
-            disabled={isBusy || !!startDisabledReason}
+            disabled={isBusy || !!startBlocked}
             loading={isStarting}
-            title={startDisabledReason || $t('app.start')}
-            ariaLabel={startDisabledReason
-              ? `${$t('app.start')}: ${startDisabledReason}`
-              : undefined}
+            title={startBlocked || $t('app.start')}
+            ariaLabel={startBlocked ? `${$t('app.start')}: ${startBlocked}` : undefined}
           >
             <Icon name="play" size={13} color="var(--success, #46d18a)" />
             <span>{$t('app.start')}</span>

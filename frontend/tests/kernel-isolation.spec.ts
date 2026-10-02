@@ -198,3 +198,48 @@ test.describe('Конфликт ядер: остановка из баннера
     await expect(page.getByTestId('kernel-conflict-stop-xray')).toBeEnabled();
   });
 });
+
+// Карточки служб на дашборде (D-02): в конфликте запуск и перезапуск неактивны,
+// «Остановить» на карточке ядра гасит именно это ядро.
+function serviceCard(page: Page, name: 'XKeen' | 'Mihomo' | 'Xray') {
+  return page.locator('.service-card').filter({
+    has: page.locator('.service-name', { hasText: new RegExp(`^${name}$`) })
+  });
+}
+
+test.describe('Конфликт ядер: карточки служб на дашборде', () => {
+  test('конфликт: «Перезапустить» неактивна, «Остановить Mihomo» шлёт stop&kernel=mihomo', async ({
+    page
+  }) => {
+    const harness = await setupStopHarness(page, { stopOutcome: 'stopped', conflictCleared: true });
+    await visitPage(page, '/#/dashboard');
+    await expect(page.getByTestId('kernel-conflict-banner')).toBeVisible();
+
+    for (const name of ['Xray', 'Mihomo'] as const) {
+      const restart = serviceCard(page, name).getByRole('button', { name: /Перезапустить/ });
+      await expect(restart).toBeDisabled();
+      await expect(restart).toHaveAttribute('title', 'Недоступно, пока запущены оба ядра');
+    }
+
+    await serviceCard(page, 'Mihomo').getByRole('button', { name: 'Остановить' }).click();
+
+    await expect.poll(() => harness.stopRequests).toEqual(['stop&kernel=mihomo']);
+    expect(harness.allRequests.filter((u) => u.includes('action=restart'))).toHaveLength(0);
+  });
+
+  test('без конфликта «Перезапустить» на Xray активна и шлёт restart', async ({ page }) => {
+    const requests: string[] = [];
+    await setupMocks(page, 'xray');
+    await page.route('**/api/service/control**', async (route) => {
+      requests.push(new URL(route.request().url()).searchParams.get('action') ?? '');
+      await fulfillServiceControl(route);
+    });
+    await visitPage(page, '/#/dashboard');
+
+    const restart = serviceCard(page, 'Xray').getByRole('button', { name: /Перезапустить/ });
+    await expect(restart).toBeEnabled();
+    await restart.click();
+
+    await expect.poll(() => requests).toEqual(['restart']);
+  });
+});
