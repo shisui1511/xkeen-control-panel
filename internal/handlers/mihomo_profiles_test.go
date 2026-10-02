@@ -11,7 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -240,21 +239,14 @@ func newActivationFixture(t *testing.T) (dir, dataDir string) {
 	return dir, filepath.Join(root, "xcp")
 }
 
-// TestMihomoProfileActivate_RestartSerialisedByApplier (WR-02): рестарт при
-// активации профиля идёт через KernelApplier, то есть под его мьютексом и с
-// решением по свежему статусу. Пока другое применение держит рестарт,
-// активация не запускает второй xkeen -restart, а после освобождения видит
-// остановленное ядро и не перезапускает его (профиль остаётся активным).
-func TestMihomoProfileActivate_RestartSerialisedByApplier(t *testing.T) {
+// TestMihomoProfileActivate_BusyWhileOtherApply (WR-01): applier делит замок с
+// lifecycleMu. Пока чужое применение (например, обновление подписки) держит
+// рестарт, активация профиля получает 409 kernel_op_in_progress, не меняет
+// ссылку config.yaml и не запускает второй xkeen -restart.
+func TestMihomoProfileActivate_BusyWhileOtherApply(t *testing.T) {
 	dir, dataDir := newActivationFixture(t)
 
-	var (
-		statusMu     sync.Mutex
-		mihomoStatus = "running"
-		running      int32
-		maxRunning   int32
-		restarts     int32
-	)
+	var running, maxRunning, restarts int32
 	firstEntered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
@@ -262,10 +254,8 @@ func TestMihomoProfileActivate_RestartSerialisedByApplier(t *testing.T) {
 	api := &API{cfg: &config.Config{MihomoConfigDir: dir}}
 	api.kernelApplier = services.NewKernelApplierFunc(
 		func(name string) string {
-			statusMu.Lock()
-			defer statusMu.Unlock()
 			if name == "mihomo" {
-				return mihomoStatus
+				return "running"
 			}
 			return "not_installed"
 		},
@@ -286,22 +276,12 @@ func TestMihomoProfileActivate_RestartSerialisedByApplier(t *testing.T) {
 			atomic.AddInt32(&running, -1)
 			return "", nil
 		},
-	)
+	).WithLifecycleLock(&api.lifecycleMu)
 	svc := services.NewMihomoProfileService(dir, dataDir)
 	api.SetMihomoProfileService(svc)
 	svc.Validate = func(string) error { return nil }
 
-	// Лишь после предварительной проверки CoreActive активация упирается в
-	// мьютекс применения.
-	coreActive := svc.CoreActive
-	decided := make(chan struct{})
-	svc.CoreActive = func() bool {
-		ok := coreActive()
-		close(decided)
-		return ok
-	}
-
-	// Чужое применение (например, обновление подписки) уже держит рестарт.
+	// Чужое применение держит замок и рестарт.
 	otherDone := make(chan struct{})
 	go func() {
 		defer close(otherDone)
@@ -309,52 +289,30 @@ func TestMihomoProfileActivate_RestartSerialisedByApplier(t *testing.T) {
 	}()
 	<-firstEntered
 
-	var rec *httptest.ResponseRecorder
-	activated := make(chan struct{})
-	go func() {
-		defer close(activated)
-		rec = httptest.NewRecorder()
-		api.MihomoProfileAction(rec, httptest.NewRequest(http.MethodPost, "/api/mihomo/profiles/activate", strings.NewReader(`{"name":"work"}`)))
-	}()
-	<-decided
-	time.Sleep(50 * time.Millisecond)
+	rec := httptest.NewRecorder()
+	api.MihomoProfileAction(rec, httptest.NewRequest(http.MethodPost, "/api/mihomo/profiles/activate", strings.NewReader(`{"name":"work"}`)))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("activate: expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if env := decodeErrorResponse(t, rec); env.Code != "kernel_op_in_progress" || env.Error == "" {
+		t.Errorf("code=%q error=%q, want kernel_op_in_progress и текст", env.Code, env.Error)
+	}
 
-	// Ядро остановили, пока шёл чужой рестарт.
-	statusMu.Lock()
-	mihomoStatus = "stopped"
-	statusMu.Unlock()
 	close(release)
 	<-otherDone
-	<-activated
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("activate: %d %s", rec.Code, rec.Body.String())
+	target, err := os.Readlink(filepath.Join(dir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	var env struct {
-		Data struct {
-			Active     string `json:"active"`
-			Restarted  bool   `json:"restarted"`
-			RolledBack bool   `json:"rolled_back"`
-			Outcome    string `json:"outcome"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
-		t.Fatalf("decode: %v: %s", err, rec.Body.String())
+	if filepath.Base(target) != "default.yaml" {
+		t.Errorf("config.yaml -> %s, want default.yaml (профиль не переключался)", target)
 	}
 	if got := atomic.LoadInt32(&maxRunning); got != 1 {
 		t.Errorf("одновременных рестартов = %d, want 1", got)
 	}
 	if got := atomic.LoadInt32(&restarts); got != 1 {
-		t.Errorf("рестартов = %d, want 1 (только чужой: активация видит остановленное ядро)", got)
-	}
-	if env.Data.Restarted || env.Data.RolledBack {
-		t.Errorf("restarted=%t rolled_back=%t, want false/false", env.Data.Restarted, env.Data.RolledBack)
-	}
-	if env.Data.Active != "work" {
-		t.Errorf("active = %q, want work", env.Data.Active)
-	}
-	if env.Data.Outcome != "saved_kernel_stopped" {
-		t.Errorf("outcome = %q, want saved_kernel_stopped", env.Data.Outcome)
+		t.Errorf("рестартов = %d, want 1 (только чужой)", got)
 	}
 }
 

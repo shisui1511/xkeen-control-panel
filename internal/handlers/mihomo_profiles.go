@@ -24,14 +24,16 @@ func (a *API) SetMihomoProfileService(svc *services.MihomoProfileService) {
 	svc.CoreActive = func() bool {
 		return a.kernelApplier != nil && a.kernelApplier.WillRestart("mihomo")
 	}
-	// Сам рестарт идёт через KernelApplier.Apply: под тем же мьютексом, что и
-	// остальные применения, и с решением по свежему статусу после захвата.
-	// CoreActive выше — лишь предварительная проверка без замка.
+	// Сам рестарт идёт через KernelApplier.ApplyLocked с решением по свежему
+	// статусу. Activate — единственный вызывающий svc.Restart, и он идёт только из
+	// ветки activate в MihomoProfileAction под lifecycleMu (повторный захват
+	// недопустим: sync.Mutex не реентерабелен). CoreActive выше — лишь
+	// предварительная проверка.
 	svc.Restart = func() error {
 		if a.kernelApplier == nil {
 			return errors.New("kernel applier is not configured")
 		}
-		res := a.kernelApplier.Apply("mihomo")
+		res := a.kernelApplier.ApplyLocked("mihomo")
 		switch res.Outcome {
 		case services.ApplyRestarted:
 			return nil
@@ -166,6 +168,12 @@ func (a *API) MihomoProfileAction(w http.ResponseWriter, r *http.Request) {
 	case "adopt":
 		err = svc.Adopt(req.Name)
 	case "activate":
+		// Активация перезапускает ядро: под общим замком жизненного цикла, до
+		// переключения ссылки config.yaml. create/rename/delete/adopt ядро не трогают.
+		if !a.tryLifecycleLock(w, r) {
+			return
+		}
+		defer a.lifecycleMu.Unlock()
 		var res *services.ActivationResult
 		res, err = svc.Activate(req.Name)
 		if err == nil {

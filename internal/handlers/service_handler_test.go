@@ -1168,3 +1168,56 @@ func TestServiceStatus_StatusErrorNoCacheNever500(t *testing.T) {
 		t.Error("is_running = true по устаревшему выводу")
 	}
 }
+
+// TestServiceDNSRedirect_LifecycleBusy: при идущей операции жизненного цикла
+// переключение DNS-перехвата отвечает 409 и не вызывает скрипт XKeen; неверное
+// тело — 400 до замка.
+func TestServiceDNSRedirect_LifecycleBusy(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "DNS proxying updated", 0))
+	api.xkeenSvc.SetDNSProbe(func(context.Context) error { return nil })
+	api.lifecycleMu.Lock()
+	defer api.lifecycleMu.Unlock()
+
+	rr := httptest.NewRecorder()
+	api.ServiceDNSRedirect(rr, httptest.NewRequest(http.MethodPost, "/api/service/dns-redirect", strings.NewReader(`{"enabled": true}`)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if env := decodeErrorResponse(t, rr); env.Code != "kernel_op_in_progress" || env.Error == "" {
+		t.Errorf("code=%q error=%q, want kernel_op_in_progress и текст", env.Code, env.Error)
+	}
+	if log := api.xkeenSvc.GetRestartLog(); len(log) != 0 {
+		t.Errorf("скрипт XKeen вызван при занятом замке: %+v", log)
+	}
+
+	for _, body := range []string{"{invalid", `{}`} {
+		rr := httptest.NewRecorder()
+		api.ServiceDNSRedirect(rr, httptest.NewRequest(http.MethodPost, "/api/service/dns-redirect", strings.NewReader(body)))
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("body %q: expected 400 до замка, got %d: %s", body, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+// TestServiceControl_SwitchOldNoneWhenNothingRunning (WR-07): при нуле процессов
+// резолвер активного ядра отдаёт name_client, но «прежним» ядром оно не
+// считается: old = none.
+func TestServiceControl_SwitchOldNoneWhenNothingRunning(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+	stopped := []services.KernelProcessState{{Name: "xray", Status: "stopped"}, {Name: "mihomo", Status: "stopped"}}
+	mihomo := []services.KernelProcessState{{Name: "xray", Status: "stopped"}, {Name: "mihomo", Status: "running", PID: 11}}
+	// Первое чтение — определение прежнего ядра (процессов нет), дальше mihomo запущен.
+	api.kernelSvc.SetProcessStatesSource(stepStates(1, stopped, mihomo))
+	api.kernelSvc.SetActiveFallbacks(
+		func() (string, bool) { return "", false },
+		func() string { return "xray" },
+	)
+
+	rr := httptest.NewRecorder()
+	api.ServiceControl(rr, httptest.NewRequest(http.MethodPost, "/api/service/control?action=switch_kernel&kernel=mihomo", nil))
+
+	res := decodeSwitchResult(t, rr)
+	if res.Old != "none" || res.New != "mihomo" {
+		t.Errorf("result = %+v, want old=none new=mihomo", res)
+	}
+}

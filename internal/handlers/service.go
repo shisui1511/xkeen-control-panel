@@ -175,7 +175,14 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	case "restart":
 		out, err = a.xkeenSvc.Restart()
 	case "switch_kernel":
-		a.serviceSwitchKernel(w, targetKernel, st.Kernel)
+		// Прежнее ядро — только реально запущенное. При нуле процессов резолвер
+		// отдаёт ядро из name_client/снимка, но «остановленным» его считать нельзя:
+		// оно не работало (WR-07). Конфликт к этому месту уже отсечён guard'ом.
+		old := "none"
+		if len(st.Running) > 0 {
+			old = st.Kernel
+		}
+		a.serviceSwitchKernel(w, targetKernel, old)
 		return
 	}
 
@@ -324,22 +331,9 @@ func (a *API) serviceApply(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, result)
 }
 
-// applyKernel применяет конфигурацию к целевым ядрам через KernelApplier. Без
-// applier ничего не перезапускается.
-func (a *API) applyKernel(targets ...string) services.ApplyResult {
-	if a.kernelApplier == nil {
-		log.Printf("apply: kernel applier is not configured, restart skipped")
-		res := services.ApplyResult{Outcome: services.ApplySavedKernelStopped}
-		if len(targets) > 0 {
-			res.Kernel = targets[0]
-		}
-		return res
-	}
-	return a.kernelApplier.Apply(targets...)
-}
-
-// applyKernelLocked — то же, что applyKernel, но без повторного захвата замка:
-// только под lifecycleMu (sync.Mutex не реентерабелен).
+// applyKernelLocked применяет конфигурацию к целевым ядрам через KernelApplier
+// без повторного захвата замка: только под lifecycleMu (sync.Mutex не
+// реентерабелен). Без applier ничего не перезапускается.
 func (a *API) applyKernelLocked(targets ...string) services.ApplyResult {
 	if a.kernelApplier == nil {
 		log.Printf("apply: kernel applier is not configured, restart skipped")
@@ -415,6 +409,13 @@ func (a *API) ServiceDNSRedirect(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "error.bad_request"), http.StatusBadRequest)
 		return
 	}
+
+	// SetDNSProxying перезапускает XKeen (и откатывает при потере DNS): под
+	// общим замком жизненного цикла.
+	if !a.tryLifecycleLock(w, r) {
+		return
+	}
+	defer a.lifecycleMu.Unlock()
 
 	out, err := a.xkeenSvc.SetDNSProxying(*req.Enabled)
 	if errors.Is(err, services.ErrDNSRolledBack) {
