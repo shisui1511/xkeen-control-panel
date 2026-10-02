@@ -280,6 +280,22 @@ func (s *XKeenService) runLifecycleHook() {
 	}
 }
 
+// MarkIntentionalStop помечает остановку ядра намеренной без вызова `xkeen -stop`
+// (остановка конкретного ядра сигналом). Сторожевой таймер считает такую
+// остановку плановой, а при активных правилах TPROXY — инцидентом, как и после
+// Stop().
+func (s *XKeenService) MarkIntentionalStop() {
+	s.stateMu.Lock()
+	s.intentionalStop = true
+	s.stateMu.Unlock()
+}
+
+// NotifyLifecycle вызывает хук жизненного цикла (сброс кэшей статуса и активного
+// ядра) для действий, выполненных мимо Start/Stop/Restart/SwitchKernel.
+func (s *XKeenService) NotifyLifecycle() {
+	s.runLifecycleHook()
+}
+
 // IntentionalStop reports whether the kernel was stopped intentionally via panel Stop() (D-01).
 // Read by WatchdogService to distinguish planned downtime from crashes.
 func (s *XKeenService) IntentionalStop() bool {

@@ -130,6 +130,16 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// stop с kernel= — остановка конкретного ядра; имя только из белого списка.
+	stopKernel := ""
+	if action == "stop" {
+		stopKernel = r.URL.Query().Get("kernel")
+		if stopKernel != "" && stopKernel != "xray" && stopKernel != "mihomo" {
+			a.errorResponse(w, a.t(r, "service.invalid_kernel"), http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Одна операция жизненного цикла за раз (двойной клик, две вкладки).
 	if !a.lifecycleMu.TryLock() {
 		JSONErrorCode(w, http.StatusConflict, "kernel_op_in_progress", a.t(r, "kernel.op_in_progress"))
@@ -158,6 +168,10 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	case "start":
 		out, err = a.xkeenSvc.Start()
 	case "stop":
+		if stopKernel != "" {
+			a.serviceStopKernel(w, r, stopKernel)
+			return
+		}
 		out, err = a.xkeenSvc.Stop()
 	case "restart":
 		out, err = a.xkeenSvc.Restart()
@@ -212,6 +226,59 @@ func (a *API) serviceSwitchKernel(w http.ResponseWriter, target, old string) {
 	log.Printf("switch_kernel: old=%s new=%s outcome=%s",
 		utils.SanitizeLogInput(res.Old), utils.SanitizeLogInput(res.New), utils.SanitizeLogInput(string(res.Outcome)))
 
+	a.ClearCapabilitiesCache()
+	JSONSuccess(w, res)
+}
+
+// serviceStopKernel — action=stop&kernel=: остановить конкретное ядро. Если это
+// единственное запущенное ядро — штатный `xkeen -stop`; при конфликте (или когда
+// ядро не единственное) — SIGTERM по проверенному PID, без зависимости от того,
+// что делает `xkeen -stop` при двух ядрах. Принудительного завершения нет (D-04).
+func (a *API) serviceStopKernel(w http.ResponseWriter, r *http.Request, kernel string) {
+	if a.kernelSvc == nil {
+		a.errorResponse(w, "kernel service is not configured", http.StatusInternalServerError)
+		return
+	}
+
+	a.kernelSvc.InvalidateActiveState()
+	st := a.activeKernelState()
+
+	if !st.Conflict && len(st.Running) == 1 && st.Running[0] == kernel {
+		out, err := a.xkeenSvc.Stop()
+		if err != nil {
+			a.errorResponse(w, out, http.StatusInternalServerError)
+			return
+		}
+		outcome := services.KernelStopStopped
+		for _, ps := range a.kernelSvc.ProcessStates() {
+			if ps.Name == kernel && ps.Status == "running" {
+				outcome = services.KernelStopStillRunning
+			}
+		}
+		a.ClearCapabilitiesCache()
+		JSONSuccess(w, services.KernelStopResult{Kernel: kernel, Outcome: outcome, Method: services.KernelStopMethodXKeen})
+		return
+	}
+
+	res, err := a.kernelSvc.StopKernelProcess(kernel)
+	res.Method = services.KernelStopMethodSignal
+	summary := "kernel=" + kernel + " outcome=" + string(res.Outcome)
+	if err != nil {
+		summary = "kernel=" + kernel + " error=" + err.Error()
+	}
+	a.xkeenSvc.RecordAction("stop_kernel:"+kernel, summary, err)
+	if err != nil {
+		log.Printf("stop_kernel: kernel=%s error=%s", utils.SanitizeLogInput(kernel), utils.SanitizeLogInput(err.Error()))
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "kernel_stop_failed", a.t(r, "kernel.stop_failed"), err.Error())
+		return
+	}
+	log.Printf("stop_kernel: kernel=%s outcome=%s", utils.SanitizeLogInput(kernel), utils.SanitizeLogInput(string(res.Outcome)))
+
+	// Остановка настроенного ядра для сторожевого таймера — плановая, как после Stop().
+	if kernel == a.configuredKernel() {
+		a.xkeenSvc.MarkIntentionalStop()
+	}
+	a.xkeenSvc.NotifyLifecycle()
 	a.ClearCapabilitiesCache()
 	JSONSuccess(w, res)
 }

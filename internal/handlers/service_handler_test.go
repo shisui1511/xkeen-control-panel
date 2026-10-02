@@ -399,6 +399,146 @@ func TestServiceControl_LifecycleLockBusy(t *testing.T) {
 	}
 }
 
+// farPID — PID выше pid_max: в реальном /proc такого процесса нет, перепроверка
+// exe перед сигналом гарантированно не проходит.
+const (
+	farPIDXray   = 5_000_001
+	farPIDMihomo = 5_000_002
+)
+
+func stopKernelRequest(api *API, query string) *httptest.ResponseRecorder {
+	rr := httptest.NewRecorder()
+	api.ServiceControl(rr, httptest.NewRequest(http.MethodPost, "/api/service/control?"+query, nil))
+	return rr
+}
+
+func decodeStopResult(t *testing.T, rr *httptest.ResponseRecorder) services.KernelStopResult {
+	t.Helper()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var env struct {
+		Success bool                      `json:"success"`
+		Data    services.KernelStopResult `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode stop response: %v: %s", err, rr.Body.String())
+	}
+	if !env.Success {
+		t.Fatalf("success=false: %s", rr.Body.String())
+	}
+	return env.Data
+}
+
+// TestServiceControl_StopKernel_InvalidKernel: kernel= только из белого списка.
+func TestServiceControl_StopKernel_InvalidKernel(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+	api.kernelSvc.SetProcessStatesSource(bothKernelsRunning)
+
+	for _, bad := range []string{"v2ray", "../etc/passwd", "Xray", "xray%20", "1234"} {
+		rr := stopKernelRequest(api, "action=stop&kernel="+bad)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("kernel=%q: expected 400, got %d: %s", bad, rr.Code, rr.Body.String())
+		}
+	}
+	if log := api.xkeenSvc.GetRestartLog(); len(log) != 0 {
+		t.Errorf("скрипт XKeen вызван при неверном ядре: %+v", log)
+	}
+}
+
+// TestServiceControl_StopKernel_ConflictUsesSignal: при конфликте выбранное ядро
+// останавливается сигналом (не `xkeen -stop`), остановка попадает в журнал.
+func TestServiceControl_StopKernel_ConflictUsesSignal(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+	api.xkeenSvc.InitScript = filepath.Join(t.TempDir(), "missing")
+	api.kernelSvc.SetProcessStatesSource(func() []services.KernelProcessState {
+		return []services.KernelProcessState{
+			{Name: "xray", Status: "running", PID: farPIDXray},
+			{Name: "mihomo", Status: "running", PID: farPIDMihomo},
+		}
+	})
+
+	res := decodeStopResult(t, stopKernelRequest(api, "action=stop&kernel=mihomo"))
+	if res.Kernel != "mihomo" || res.Method != "signal" || res.Outcome != services.KernelStopStopped {
+		t.Errorf("result = %+v, want mihomo/signal/stopped (PID вне /proc: перепроверка не прошла, сигнала нет)", res)
+	}
+	log := api.xkeenSvc.GetRestartLog()
+	if len(log) != 1 || log[0].Action != "stop_kernel:mihomo" || !log[0].Success {
+		t.Errorf("restart log = %+v, want одна запись stop_kernel:mihomo (скрипт XKeen не вызывался)", log)
+	}
+	if api.xkeenSvc.IntentionalStop() {
+		t.Error("остановка не настроенного ядра не должна ставить намеренную остановку")
+	}
+}
+
+// TestServiceControl_StopKernel_SingleRunningUsesXKeen: единственное запущенное
+// ядро останавливается штатным `xkeen -stop`.
+func TestServiceControl_StopKernel_SingleRunningUsesXKeen(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "остановлено", 0))
+	running := []services.KernelProcessState{{Name: "xray", Status: "stopped"}, {Name: "mihomo", Status: "running", PID: farPIDMihomo}}
+	stopped := []services.KernelProcessState{{Name: "xray", Status: "stopped"}, {Name: "mihomo", Status: "stopped"}}
+	// Первое чтение — определение единственного запущенного ядра, затем «остановилось».
+	api.kernelSvc.SetProcessStatesSource(stepStates(1, running, stopped))
+
+	res := decodeStopResult(t, stopKernelRequest(api, "action=stop&kernel=mihomo"))
+	if res.Method != "xkeen" || res.Outcome != services.KernelStopStopped || res.Kernel != "mihomo" {
+		t.Errorf("result = %+v, want mihomo/xkeen/stopped", res)
+	}
+	if log := api.xkeenSvc.GetRestartLog(); len(log) != 1 || log[0].Action != "stop" {
+		t.Errorf("restart log = %+v, want одна запись stop (скрипт вызван)", log)
+	}
+}
+
+// TestServiceControl_StopKernel_SingleRunningStillRunning: процесс жив после
+// `xkeen -stop` — исход still_running, а не успех.
+func TestServiceControl_StopKernel_SingleRunningStillRunning(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+	api.kernelSvc.SetProcessStatesSource(func() []services.KernelProcessState {
+		return []services.KernelProcessState{{Name: "mihomo", Status: "running", PID: farPIDMihomo}}
+	})
+	res := decodeStopResult(t, stopKernelRequest(api, "action=stop&kernel=mihomo"))
+	if res.Method != "xkeen" || res.Outcome != services.KernelStopStillRunning {
+		t.Errorf("result = %+v, want xkeen/still_running", res)
+	}
+}
+
+// TestServiceControl_StopKernel_ConfiguredMarksIntentional: остановка настроенного
+// ядра (name_client) — плановая для сторожевого таймера; хук жизненного цикла вызван.
+func TestServiceControl_StopKernel_ConfiguredMarksIntentional(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+	initScript := filepath.Join(t.TempDir(), "S05xkeen")
+	if err := os.WriteFile(initScript, []byte("name_client=\"mihomo\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	api.xkeenSvc.InitScript = initScript
+	var hookCalls int32
+	api.xkeenSvc.SetLifecycleHook(func() { atomic.AddInt32(&hookCalls, 1) })
+	api.kernelSvc.SetProcessStatesSource(func() []services.KernelProcessState {
+		return []services.KernelProcessState{
+			{Name: "xray", Status: "running", PID: farPIDXray},
+			{Name: "mihomo", Status: "running", PID: farPIDMihomo},
+		}
+	})
+
+	// Останавливается не настроенное ядро — флаг не ставится.
+	decodeStopResult(t, stopKernelRequest(api, "action=stop&kernel=xray"))
+	if api.xkeenSvc.IntentionalStop() {
+		t.Error("остановка xray (настроено mihomo) не должна ставить намеренную остановку")
+	}
+	// Останавливается настроенное ядро — флаг ставится.
+	decodeStopResult(t, stopKernelRequest(api, "action=stop&kernel=mihomo"))
+	if !api.xkeenSvc.IntentionalStop() {
+		t.Error("IntentionalStop = false после остановки настроенного ядра")
+	}
+	if got := atomic.LoadInt32(&hookCalls); got != 2 {
+		t.Errorf("lifecycle hook calls = %d, want 2", got)
+	}
+	log := api.xkeenSvc.GetRestartLog()
+	if len(log) != 2 || log[0].Action != "stop_kernel:xray" || log[1].Action != "stop_kernel:mihomo" {
+		t.Errorf("restart log = %+v, want stop_kernel:xray, stop_kernel:mihomo", log)
+	}
+}
+
 // TestServiceControl_XKeenNotInstalled проверяет поведение когда бинарник XKeen отсутствует.
 // Хендлер должен вернуть 500, а не паниковать.
 func TestServiceControl_XKeenNotInstalled(t *testing.T) {
