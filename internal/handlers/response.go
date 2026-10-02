@@ -19,6 +19,11 @@ type APIResponse struct {
 	// от переведённого Error: перевод остаётся на языке запроса, а деталь
 	// фронтенд показывает под ним как есть.
 	Detail string `json:"detail,omitempty"`
+	// Required / Active — для code "kernel_inactive": какое ядро нужно маршруту
+	// ("xray" | "mihomo") и какое активно сейчас ("xray" | "mihomo" | "none" |
+	// "both"). Фронтенд по ним выбирает текст и заглушку.
+	Required string `json:"required,omitempty"`
+	Active   string `json:"active,omitempty"`
 }
 
 // JSONSuccess writes a successful JSON response with the given data payload.
@@ -52,4 +57,19 @@ func JSONErrorCodeDetail(w http.ResponseWriter, status int, code, msg, detail st
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: msg, Code: code, Detail: detail})
+}
+
+// JSONErrorKernelInactive — 409 «нужное ядро не активно»: живой маршрут ядра
+// вызван, когда активно другое ядро, оба сразу или ни одного. Отдаётся сразу,
+// без обращения к процессу ядра (иначе запрос висит до таймаута).
+func JSONErrorKernelInactive(w http.ResponseWriter, msg, required, active string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	json.NewEncoder(w).Encode(APIResponse{
+		Success:  false,
+		Error:    msg,
+		Code:     "kernel_inactive",
+		Required: required,
+		Active:   active,
+	})
 }

@@ -76,6 +76,9 @@ type Server struct {
 	mu          sync.RWMutex
 	httpSrv     *http.Server
 	loopbackSrv *http.Server
+	// protectedWrap оборачивает каждый защищённый обработчик при регистрации
+	// (гейт по активному ядру). Выполняется внутри RequireAuth.
+	protectedWrap func(pattern string, h http.HandlerFunc) http.HandlerFunc
 }
 
 type Config struct {
@@ -171,7 +174,18 @@ func (s *Server) Handle(pattern string, handler http.HandlerFunc) {
 	}
 }
 
+// SetProtectedWrapper задаёт обёртку, которая применяется ко всем защищённым
+// маршрутам при регистрации. Вызывать до первого HandleProtected: уже
+// зарегистрированные маршруты не переоборачиваются. Обёртка выполняется внутри
+// RequireAuth — неавторизованный запрос получает 401, а не сведения о ядре.
+func (s *Server) SetProtectedWrapper(fn func(pattern string, h http.HandlerFunc) http.HandlerFunc) {
+	s.protectedWrap = fn
+}
+
 func (s *Server) HandleProtected(pattern string, handler http.HandlerFunc) {
+	if s.protectedWrap != nil {
+		handler = s.protectedWrap(pattern, handler)
+	}
 	s.mux.HandleFunc(pattern, s.authService.RequireAuth(handler))
 }
 

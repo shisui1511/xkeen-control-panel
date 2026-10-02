@@ -249,6 +249,9 @@ func main() {
 
 	// API handlers
 	api := handlers.NewAPI(cfg, srv)
+	// Гейт по активному ядру для всех защищённых маршрутов ядер (таблица в
+	// handlers/kernel_gate.go); вызывать до регистрации защищённых маршрутов.
+	srv.SetProtectedWrapper(api.KernelRouteWrapper)
 
 	// Кэш статуса XKeen: единственный владелец опроса `xkeen -status` / `-v`,
 	// обработчики отвечают из его снимка
