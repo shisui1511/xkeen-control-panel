@@ -4,7 +4,7 @@
   import { apiFetch, apiFetchJSON } from '../../lib/api';
   import { activateRestartGrace } from '../../lib/serviceGrace';
   import { notifyApplyOutcome, type ApplyOutcome } from '../../lib/serviceApply';
-  import { showConfirm, showToast, editorOpenRequest } from '../../stores';
+  import { showConfirm, showToast, editorOpenRequest, isConflict } from '../../stores';
   import Button from '../Button.svelte';
   import Skeleton from '../Skeleton.svelte';
 
@@ -120,7 +120,8 @@
         showToast('error', $t('profiles.invalid', { error: res.error }), 10000);
       } else if (
         res.outcome === 'saved_kernel_stopped' ||
-        res.outcome === 'saved_kernel_inactive'
+        res.outcome === 'saved_kernel_inactive' ||
+        res.outcome === 'saved_kernel_conflict'
       ) {
         notifyApplyOutcome({
           outcome: res.outcome as ApplyOutcome,
@@ -248,7 +249,8 @@
                   variant="primary"
                   class="btn-sm"
                   loading={busy === `activate:${p.name}`}
-                  disabled={!!busy}
+                  disabled={!!busy || $isConflict}
+                  title={$isConflict ? $t('kernel.conflict_blocked') : undefined}
                   onclick={() => activate(p.name)}
                 >
                   {$t('profiles.activate')}

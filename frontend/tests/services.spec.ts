@@ -430,3 +430,117 @@ test.describe('Services hero: API / Socket field', () => {
     await expect(apiField(page)).not.toContainText('/opt/bin/xray');
   });
 });
+
+test.describe('Services: both kernels running (conflict)', () => {
+  const kernel = (name: string) => ({
+    name,
+    display_name: name,
+    binary_path: `/opt/bin/${name}`,
+    current_version: '1.18.0',
+    latest_version: '1.18.0',
+    has_update: false,
+    channel: 'stable',
+    status: 'idle',
+    process_status: 'running'
+  });
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window.navigator, 'serviceWorker', {
+        value: undefined,
+        writable: false,
+        configurable: true
+      });
+      window.localStorage.setItem('lang', 'ru');
+    });
+    const json = (data: unknown) => ({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data })
+    });
+    await page.route('**/api/**', async (route) => {
+      const url = route.request().url();
+      if (url.includes('/api/auth/me')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf-token'
+          })
+        });
+      } else if (url.includes('/api/capabilities')) {
+        await route.fulfill(
+          json({
+            kernels: {
+              xray: { installed: true, version: '1.8.4', channel: 'stable' },
+              mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
+            },
+            active_kernel: 'both',
+            kernel_conflict: true,
+            running_kernels: ['xray', 'mihomo'],
+            mihomo: {
+              reachable: true,
+              process_running: true,
+              api_reachable: true,
+              api_authenticated: true
+            }
+          })
+        );
+      } else if (url.includes('/api/service/restart-log')) {
+        await route.fulfill(
+          json([
+            {
+              timestamp: Math.floor(Date.now() / 1000),
+              action: 'stop_kernel:mihomo',
+              success: true,
+              exit_code: 0,
+              output: ''
+            }
+          ])
+        );
+      } else if (url.includes('/api/kernels')) {
+        await route.fulfill(json([kernel('xray'), kernel('mihomo')]));
+      } else if (url.includes('/api/service/status')) {
+        await route.fulfill(
+          json({ is_running: true, pid: 1234, uptime: '2h', binary_path: '/opt/sbin/xkeen' })
+        );
+      } else {
+        await route.fulfill(json({}));
+      }
+    });
+  });
+
+  test('no card is active, mutations are blocked, stop stays available', async ({ page }) => {
+    await page.goto('/#/services');
+    const cards = page.locator('.core-radio-card');
+    await expect(cards).toHaveCount(2);
+    await expect(page.locator('.core-radio-card.active')).toHaveCount(0);
+    for (const card of await cards.all()) {
+      await expect(card).toHaveAttribute('aria-disabled', 'true');
+      await expect(card).toHaveAttribute('aria-checked', 'false');
+    }
+
+    const blocked = 'Недоступно, пока запущены оба ядра';
+    const restart = page.locator('.hero-actions button', { hasText: 'Перезапустить' });
+    await expect(restart).toBeDisabled();
+    await expect(restart).toHaveAttribute('title', blocked);
+    await expect(page.locator('.hero-actions button', { hasText: 'Остановить' })).toBeEnabled();
+  });
+
+  test('click on a card does not open the switch confirmation', async ({ page }) => {
+    await page.goto('/#/services');
+    const card = page.locator('.core-radio-card:has-text("Mihomo")');
+    // aria-disabled: Playwright считает карточку недоступной, клик отправляем принудительно
+    await card.click({ force: true });
+    await card.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('button', { name: 'Сделать активным' })).toHaveCount(0);
+  });
+
+  test('restart log labels the stop of a kernel', async ({ page }) => {
+    await page.goto('/#/services');
+    await expect(page.locator('.log-action', { hasText: 'Остановка ядра Mihomo' })).toBeVisible();
+  });
+});

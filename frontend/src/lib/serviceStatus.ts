@@ -9,7 +9,6 @@ export const STALE_BADGE_AFTER_SECONDS = 30;
 
 export interface ServiceStatusData {
   is_running: boolean;
-  active_kernel?: string;
   pid?: number;
   uptime?: string;
   binary_path?: string;
