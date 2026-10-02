@@ -194,7 +194,9 @@ test.describe('XKeen settings card', () => {
       await expect(restartBtn).toHaveAttribute('title', 'Недоступно, пока запущены оба ядра');
     });
 
-    test('a gate refusal of the restart (409) is shown as a translated toast', async ({ page }) => {
+    test('a conflict refusal of the apply (409) is shown as saved-but-not-applied', async ({
+      page
+    }) => {
       await mockSettingsAndApply(page, {}, []);
       await page.route('**/api/service/control**', (route) =>
         route.fulfill({
@@ -204,8 +206,11 @@ test.describe('XKeen settings card', () => {
       );
       await saveAndRestart(page);
       await expect(
-        page.locator('.toast--error', { hasText: 'Действие заблокировано: запущены оба ядра' })
+        page.locator('.toast--error', {
+          hasText: 'Сохранено, но не применено: запущены оба ядра'
+        })
       ).toBeVisible();
+      await expect(page.getByText('перезапуск не удался', { exact: false })).toHaveCount(0);
     });
 
     test('save and restart with running kernel reports the restart', async ({ page }) => {
