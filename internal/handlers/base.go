@@ -32,6 +32,7 @@ type API struct {
 	subscriptionHealthSvc *services.SubscriptionHealthService
 	kernelSvc             *services.KernelService
 	kernelApplier         *services.KernelApplier
+	kernelSwitcher        *services.KernelSwitcher
 	networkSvc            *services.NetworkToolsService
 	smartProxySvc         *services.SmartProxyService
 	xkeenSettingsSvc      *services.XKeenSettingsService
@@ -254,12 +255,14 @@ func (a *API) SetKernelService(svc *services.KernelService) {
 	// старте, а не лениво в обработчике.
 	if svc == nil {
 		a.kernelApplier = nil
+		a.kernelSwitcher = nil
 		return
 	}
 	// Запасные источники активного ядра (когда процессов ядер нет): свежий снимок
 	// статуса XKeen и name_client init-скрипта.
 	svc.SetActiveFallbacks(a.freshKernelStatusRaw, a.configuredKernel)
 	a.kernelApplier = services.NewKernelApplier(svc, a.xkeenSvc)
+	a.kernelSwitcher = services.NewKernelSwitcher(svc)
 }
 
 // freshKernelStatusRaw — текст `xkeen -status` и его свежесть. Устаревший снимок

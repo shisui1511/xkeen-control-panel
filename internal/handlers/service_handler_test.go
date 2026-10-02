@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,7 +39,45 @@ func newServiceTestAPI(t *testing.T, binaryPath string) *API {
 	// который он собирает, тестам не нужен (кому нужен — ставит свой).
 	api.SetKernelService(services.NewKernelService(t.TempDir()))
 	api.kernelApplier = nil
+	// Подтверждение переключения идёт на фейковых часах: тесты не ждут реальные 15 с.
+	fakeNow, fakeSleep := fakeSwitchClock()
+	api.kernelSwitcher = services.NewKernelSwitcherFunc(
+		api.kernelSvc.ProcessStates, fakeNow, fakeSleep, 15*time.Second, 500*time.Millisecond)
 	return api
+}
+
+// fakeSwitchClock — часы, в которых sleep сдвигает время без реального ожидания.
+func fakeSwitchClock() (func() time.Time, func(time.Duration)) {
+	var mu sync.Mutex
+	cur := time.Unix(1_700_000_000, 0)
+	return func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			return cur
+		}, func(d time.Duration) {
+			mu.Lock()
+			cur = cur.Add(d)
+			mu.Unlock()
+		}
+}
+
+// decodeSwitchResult разбирает ответ switch_kernel: конверт data → SwitchResult.
+func decodeSwitchResult(t *testing.T, rr *httptest.ResponseRecorder) services.SwitchResult {
+	t.Helper()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var env struct {
+		Success bool                  `json:"success"`
+		Data    services.SwitchResult `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode switch response: %v: %s", err, rr.Body.String())
+	}
+	if !env.Success {
+		t.Fatalf("success=false: %s", rr.Body.String())
+	}
+	return env.Data
 }
 
 // serviceStatusData выполняет GET /api/service/status и разбирает data.
@@ -184,7 +224,76 @@ func TestServiceControl_SwitchKernel_ValidNames(t *testing.T) {
 		// Не должно быть 400 (ошибка валидации) или 405
 		if rr.Code == http.StatusBadRequest || rr.Code == http.StatusMethodNotAllowed {
 			t.Errorf("kernel=%q: unexpected validation error %d: %s", kernel, rr.Code, rr.Body.String())
+			continue
 		}
+		if res := decodeSwitchResult(t, rr); res.Outcome == "" || res.New != kernel {
+			t.Errorf("kernel=%q: outcome=%q new=%q, want непустой outcome и new=%q", kernel, res.Outcome, res.New, kernel)
+		}
+	}
+}
+
+// stepStates — источник состояний процессов: первые n чтений отдаёт before, затем after.
+func stepStates(n int, before, after []services.KernelProcessState) func() []services.KernelProcessState {
+	var calls int32
+	return func() []services.KernelProcessState {
+		if int(atomic.AddInt32(&calls, 1)) <= n {
+			return before
+		}
+		return after
+	}
+}
+
+// TestServiceControl_SwitchOutcomeSwitched: старое ядро остановилось, новое
+// работает — outcome switched, основание — процессы, а не код выхода скрипта.
+func TestServiceControl_SwitchOutcomeSwitched(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "\x1b[32mядро переключено\x1b[0m\n\nготово", 0))
+	xray := []services.KernelProcessState{{Name: "xray", Status: "running", PID: 10}, {Name: "mihomo", Status: "stopped"}}
+	mihomo := []services.KernelProcessState{{Name: "xray", Status: "stopped"}, {Name: "mihomo", Status: "running", PID: 11}}
+	// Первые чтения (определение старого ядра, затем первый такт опроса) — xray, дальше mihomo.
+	api.kernelSvc.SetProcessStatesSource(stepStates(2, xray, mihomo))
+
+	rr := httptest.NewRecorder()
+	api.ServiceControl(rr, httptest.NewRequest(http.MethodPost, "/api/service/control?action=switch_kernel&kernel=mihomo", nil))
+
+	res := decodeSwitchResult(t, rr)
+	if res.Outcome != services.SwitchSwitched || res.Old != "xray" || res.New != "mihomo" {
+		t.Errorf("result = %+v, want switched xray -> mihomo", res)
+	}
+	if res.OldRunning || !res.NewRunning {
+		t.Errorf("old_running=%v new_running=%v, want false/true", res.OldRunning, res.NewRunning)
+	}
+	if strings.Contains(res.Output, "\x1b") || !strings.Contains(res.Output, "ядро переключено") {
+		t.Errorf("output = %q, want текст скрипта без ANSI", res.Output)
+	}
+	if strings.Contains(res.Output, "\n\n") {
+		t.Errorf("output = %q, пустые строки должны быть отброшены", res.Output)
+	}
+}
+
+// TestServiceControl_SwitchOutcomeNewNotStarted: скрипт отработал с кодом 0, но
+// новое ядро не поднялось — 200 с исходом new_not_started, не успех.
+func TestServiceControl_SwitchOutcomeNewNotStarted(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+	api.kernelSvc.SetProcessStatesSource(func() []services.KernelProcessState {
+		return []services.KernelProcessState{{Name: "xray", Status: "stopped"}, {Name: "mihomo", Status: "stopped"}}
+	})
+
+	rr := httptest.NewRecorder()
+	api.ServiceControl(rr, httptest.NewRequest(http.MethodPost, "/api/service/control?action=switch_kernel&kernel=mihomo", nil))
+
+	res := decodeSwitchResult(t, rr)
+	if res.Outcome != services.SwitchNewNotStarted || res.NewRunning {
+		t.Errorf("result = %+v, want new_not_started", res)
+	}
+}
+
+// TestServiceControl_SwitchOutcomeScriptFailure: ошибка самого скрипта — 500 как раньше.
+func TestServiceControl_SwitchOutcomeScriptFailure(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "boom", 1))
+	rr := httptest.NewRecorder()
+	api.ServiceControl(rr, httptest.NewRequest(http.MethodPost, "/api/service/control?action=switch_kernel&kernel=mihomo", nil))
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 

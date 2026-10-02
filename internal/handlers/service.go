@@ -122,16 +122,8 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	var out string
 	var err error
 
-	// Determine kernel to monitor if restart or switch_kernel
 	var targetKernel string
-	if action == "restart" {
-		// Detect which kernel was running before restart
-		if k := a.kernelSvc.Get("xray"); k != nil && k.ProcessStatus == "running" {
-			targetKernel = "xray"
-		} else if k := a.kernelSvc.Get("mihomo"); k != nil && k.ProcessStatus == "running" {
-			targetKernel = "mihomo"
-		}
-	} else if action == "switch_kernel" {
+	if action == "switch_kernel" {
 		targetKernel = r.URL.Query().Get("kernel")
 		if targetKernel != "xray" && targetKernel != "mihomo" {
 			a.errorResponse(w, a.t(r, "service.invalid_kernel"), http.StatusBadRequest)
@@ -147,17 +139,8 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	case "restart":
 		out, err = a.xkeenSvc.Restart()
 	case "switch_kernel":
-		out, err = a.xkeenSvc.SwitchKernel(targetKernel)
-		if err == nil {
-			// После успешной смены ядра сразу запускаем XKeen
-			startOut, startErr := a.xkeenSvc.Start()
-			if startErr != nil {
-				out = out + "\n" + startOut
-				err = startErr
-			} else {
-				out = out + "\n" + startOut
-			}
-		}
+		a.serviceSwitchKernel(w, r, targetKernel)
+		return
 	default:
 		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
 		return
@@ -171,6 +154,62 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	a.ClearCapabilitiesCache()
 
 	w.Write([]byte(out))
+}
+
+// switchOutputLines — сколько последних строк вывода скрипта XKeen попадает в
+// ответ switch_kernel.
+const switchOutputLines = 20
+
+// serviceSwitchKernel — action=switch_kernel: скрипт XKeen, запуск и
+// подтверждение по процессам (D-03). Успех скрипта не означает успех
+// переключения, поэтому HTTP 200 несёт типизированный исход; ошибка самого
+// скрипта — по-прежнему 500. Принудительно процессы не завершаются (D-04).
+func (a *API) serviceSwitchKernel(w http.ResponseWriter, r *http.Request, target string) {
+	if a.kernelSwitcher == nil {
+		a.errorResponse(w, "kernel service is not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// Старое ядро фиксируется до скрипта по свежему чтению процессов.
+	a.kernelSvc.InvalidateActiveState()
+	old := a.activeKernelState().Kernel
+	if old == "" {
+		old = "none"
+	}
+
+	out, err := a.xkeenSvc.SwitchKernel(target)
+	if err == nil {
+		// После успешной смены ядра сразу запускаем XKeen
+		startOut, startErr := a.xkeenSvc.Start()
+		out = out + "\n" + startOut
+		err = startErr
+	}
+	if err != nil {
+		a.errorResponse(w, out, http.StatusInternalServerError)
+		return
+	}
+
+	res := a.kernelSwitcher.Await(old, target)
+	res.Output = lastNonEmptyLines(utils.StripANSI(out), switchOutputLines)
+	log.Printf("switch_kernel: old=%s new=%s outcome=%s",
+		utils.SanitizeLogInput(res.Old), utils.SanitizeLogInput(res.New), utils.SanitizeLogInput(string(res.Outcome)))
+
+	a.ClearCapabilitiesCache()
+	JSONSuccess(w, res)
+}
+
+// lastNonEmptyLines — последние n непустых строк текста.
+func lastNonEmptyLines(s string, n int) string {
+	var lines []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, strings.TrimRight(line, "\r"))
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // serviceApply — action=apply: применить записанную конфигурацию к ядру.
