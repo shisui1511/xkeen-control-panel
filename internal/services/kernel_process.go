@@ -19,11 +19,13 @@ type KernelProcessState struct {
 }
 
 // SetProcessStatesSource подменяет источник состояний процессов ядер.
-// Шов для тестов, в продакшене не вызывается.
+// Шов для тестов, в продакшене не вызывается. Сбрасывает кэш ActiveState.
 func (s *KernelService) SetProcessStatesSource(fn func() []KernelProcessState) {
 	s.mu.Lock()
 	s.processStatesFn = fn
 	s.mu.Unlock()
+	// Замки не вкладываются: кэш активного ядра сбрасывается отдельно от s.mu.
+	s.InvalidateActiveState()
 }
 
 // ProcessStates возвращает состояния процессов ядер в порядке [xray, mihomo].

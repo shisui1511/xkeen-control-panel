@@ -349,6 +349,9 @@ func isShortLivedOrHelperProcess(pidStr string) bool {
 		"-version":  true,
 		"-h":        true,
 		"--help":    true,
+		// Разовая конвертация MRS, которую панель сама запускает (route_matcher):
+		// не ядро и не должна давать ложный конфликт.
+		"convert-ruleset": true,
 	}
 	for _, arg := range args {
 		if blacklist[strings.TrimSpace(arg)] {
@@ -621,6 +624,13 @@ type KernelService struct {
 	// ядро из name_client init-скрипта. Подключаются SetActiveFallbacks.
 	freshRawFn   func() (string, bool)
 	configuredFn func() string
+	// Кэш ActiveState: activeCache действителен, пока activeFresh и не истёк
+	// activeStateTTL. activeGen растёт при сбросе, чтобы расчёт, начатый до
+	// сброса, не записал устаревшее состояние в кэш.
+	activeCache ActiveKernelState
+	activeAt    time.Time
+	activeFresh bool
+	activeGen   uint64
 	// processStatesFn подменяет ProcessStates (только тесты), под s.mu.
 	processStatesFn func() []KernelProcessState
 }

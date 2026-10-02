@@ -316,6 +316,10 @@ func (a *API) ClearCapabilitiesCache() {
 	a.capsCacheMutex.Lock()
 	defer a.capsCacheMutex.Unlock()
 	a.capsCache = nil
+	// Вместе с capabilities сбрасывается и кэш активного ядра.
+	if a.kernelSvc != nil {
+		a.kernelSvc.InvalidateActiveState()
+	}
 }
 
 // ResolveMihomoSecret возвращает секрет Clash API: сначала из конфига панели,

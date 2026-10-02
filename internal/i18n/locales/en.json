@@ -39,6 +39,11 @@
   "service.invalid_action": "Invalid action",
   "service.invalid_kernel": "Invalid kernel name",
 
+  "kernel.inactive": "Action unavailable: the required kernel is not active",
+  "kernel.conflict": "Both kernels are running: action blocked",
+  "kernel.op_in_progress": "A kernel operation is already in progress",
+  "kernel.stop_failed": "Failed to stop the kernel",
+
   "mihomo.not_running": "Mihomo is not running",
   "mihomo.api_error": "Mihomo API error",
   "mihomo.api_not_configured": "Mihomo API is not configured",

@@ -256,8 +256,6 @@ func main() {
 	xkeenStatusCache.Start()
 	api.SetXKeenStatusCache(xkeenStatusCache)
 	defer xkeenStatusCache.Stop()
-	// После start/stop/restart/switch кэш обновляется сразу, без ожидания 10 с
-	api.XKeenService().SetLifecycleHook(xkeenStatusCache.Invalidate)
 	srv.HandleProtected("/api/auth/change-password", api.ChangePassword)
 	srv.HandleProtected("/api/auth/sessions", api.AuthSessions)
 	srv.HandleProtected("/api/auth/sessions/terminate", api.AuthSessionTerminate)
@@ -412,6 +410,12 @@ func main() {
 	kernelSvc := services.NewKernelService(cfg.DataDir)
 	kernelSvc.SetMihomoConfigDir(cfg.MihomoConfigDir)
 	api.SetKernelService(kernelSvc)
+	// После start/stop/restart/switch кэш статуса и активного ядра обновляются
+	// сразу, без ожидания. Хук однослотовый, поэтому оба сброса — в одной функции.
+	api.XKeenService().SetLifecycleHook(func() {
+		xkeenStatusCache.Invalidate()
+		kernelSvc.InvalidateActiveState()
+	})
 
 	// Start background services
 	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, cfg.MihomoAPIURL)
@@ -438,36 +442,8 @@ func main() {
 	defer trafficQuotaSvc.Stop()
 
 	xrayGRPCSvc := services.NewXrayGRPCService(fmt.Sprintf("127.0.0.1:%d", cfg.XRayAPIPort))
-	xrayGRPCSvc.SetActiveKernelFunc(func() string {
-		if kSvc := api.KernelService(); kSvc != nil {
-			for _, st := range kSvc.ProcessStates() {
-				if st.Status == "running" {
-					return st.Name
-				}
-			}
-		}
-		// Вывод xkeen -status годится только свежий: устаревший снимок хранит
-		// прежнее ядро (G5-WR04). Если в выводе оба слова, ядро по Raw не выбирается.
-		if c := api.XKeenStatusCache(); c != nil {
-			if snap := c.Snapshot(); !snap.Stale && snap.Raw != "" {
-				lower := strings.ToLower(snap.Raw)
-				hasXray := strings.Contains(lower, "xray")
-				hasMihomo := strings.Contains(lower, "mihomo")
-				if hasXray && !hasMihomo {
-					return "xray"
-				} else if hasMihomo && !hasXray {
-					return "mihomo"
-				}
-			}
-		}
-		// Ни одно ядро не запущено, статус неизвестен: ядро, которое запустит XKeen.
-		if xSvc := api.XKeenService(); xSvc != nil {
-			if k := xSvc.ConfiguredKernel(); k == "xray" || k == "mihomo" {
-				return k
-			}
-		}
-		return "xray"
-	})
+	// Единый резолвер активного ядра; при конфликте Kernel пуст, и gRPC Xray не опрашивается.
+	xrayGRPCSvc.SetActiveKernelFunc(func() string { return kernelSvc.ActiveState().Kernel })
 	xrayGRPCSvc.Start()
 	api.SetXrayGRPCService(xrayGRPCSvc)
 	defer xrayGRPCSvc.Stop()
