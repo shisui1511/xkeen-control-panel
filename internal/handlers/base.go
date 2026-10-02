@@ -67,6 +67,10 @@ type API struct {
 	sslDaysCacheMutex     sync.Mutex
 	lastRestartLogger     time.Time
 	restartLoggerMutex    sync.Mutex
+
+	// lifecycleMu — одна операция жизненного цикла ядра за раз (start, stop,
+	// restart, switch_kernel, apply): вторая получает 409 kernel_op_in_progress.
+	lifecycleMu sync.Mutex
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {

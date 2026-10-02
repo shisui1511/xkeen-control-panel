@@ -297,6 +297,108 @@ func TestServiceControl_SwitchOutcomeScriptFailure(t *testing.T) {
 	}
 }
 
+// bothKernelsRunning — источник состояний процессов с запущенными обоими ядрами.
+func bothKernelsRunning() []services.KernelProcessState {
+	return []services.KernelProcessState{
+		{Name: "xray", Status: "running", PID: 10},
+		{Name: "mihomo", Status: "running", PID: 11},
+	}
+}
+
+// decodeErrorResponse разбирает ответ-ошибку: error и code.
+func decodeErrorResponse(t *testing.T, rr *httptest.ResponseRecorder) APIResponse {
+	t.Helper()
+	var env APIResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode error response: %v: %s", err, rr.Body.String())
+	}
+	return env
+}
+
+// TestServiceControl_ConflictBlocksMutations: при двух запущенных ядрах start,
+// restart, switch_kernel и apply отвечают 409 kernel_conflict и не запускают XKeen.
+func TestServiceControl_ConflictBlocksMutations(t *testing.T) {
+	for _, query := range []string{
+		"action=start",
+		"action=restart",
+		"action=switch_kernel&kernel=mihomo",
+		"action=apply&kernel=xray",
+	} {
+		t.Run(query, func(t *testing.T) {
+			api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
+			api.kernelSvc.SetProcessStatesSource(bothKernelsRunning)
+
+			rr := httptest.NewRecorder()
+			api.ServiceControl(rr, httptest.NewRequest(http.MethodPost, "/api/service/control?"+query, nil))
+
+			if rr.Code != http.StatusConflict {
+				t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
+			}
+			env := decodeErrorResponse(t, rr)
+			if env.Code != "kernel_conflict" || env.Error == "" {
+				t.Errorf("code=%q error=%q, want kernel_conflict и непустой переведённый текст", env.Code, env.Error)
+			}
+			if log := api.xkeenSvc.GetRestartLog(); len(log) != 0 {
+				t.Errorf("скрипт XKeen вызван при конфликте: %+v", log)
+			}
+		})
+	}
+}
+
+// TestServiceControl_StopAllowedInConflict: остановка разрешена всегда.
+func TestServiceControl_StopAllowedInConflict(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "остановлено", 0))
+	api.kernelSvc.SetProcessStatesSource(bothKernelsRunning)
+
+	rr := httptest.NewRecorder()
+	api.ServiceControl(rr, httptest.NewRequest(http.MethodPost, "/api/service/control?action=stop", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if log := api.xkeenSvc.GetRestartLog(); len(log) != 1 || log[0].Action != "stop" {
+		t.Errorf("restart log = %+v, want одна запись stop", log)
+	}
+}
+
+// TestServiceControl_LifecycleLockBusy: пока идёт другая операция жизненного
+// цикла, start/stop/restart/switch_kernel/apply получают 409 kernel_op_in_progress;
+// неизвестное действие и неверное ядро отвергаются до замка (400).
+func TestServiceControl_LifecycleLockBusy(t *testing.T) {
+	api, _ := newApplyTestAPI(t, "xray", map[string]string{"xray": "running"})
+	api.lifecycleMu.Lock()
+	defer api.lifecycleMu.Unlock()
+
+	for _, query := range []string{
+		"action=start",
+		"action=stop",
+		"action=restart",
+		"action=switch_kernel&kernel=mihomo",
+		"action=apply&kernel=xray",
+	} {
+		rr := httptest.NewRecorder()
+		api.ServiceControl(rr, httptest.NewRequest(http.MethodPost, "/api/service/control?"+query, nil))
+		if rr.Code != http.StatusConflict {
+			t.Errorf("%s: expected 409, got %d: %s", query, rr.Code, rr.Body.String())
+			continue
+		}
+		if env := decodeErrorResponse(t, rr); env.Code != "kernel_op_in_progress" || env.Error == "" {
+			t.Errorf("%s: code=%q error=%q, want kernel_op_in_progress и текст", query, env.Code, env.Error)
+		}
+	}
+	if log := api.xkeenSvc.GetRestartLog(); len(log) != 0 {
+		t.Errorf("скрипт XKeen вызван при занятом замке: %+v", log)
+	}
+
+	for _, query := range []string{"action=unknown", "action=switch_kernel&kernel=v2ray"} {
+		rr := httptest.NewRecorder()
+		api.ServiceControl(rr, httptest.NewRequest(http.MethodPost, "/api/service/control?"+query, nil))
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%s: expected 400 до замка, got %d: %s", query, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 // TestServiceControl_XKeenNotInstalled проверяет поведение когда бинарник XKeen отсутствует.
 // Хендлер должен вернуть 500, а не паниковать.
 func TestServiceControl_XKeenNotInstalled(t *testing.T) {

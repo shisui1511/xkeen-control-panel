@@ -114,14 +114,13 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	}
 	action := r.URL.Query().Get("action")
 
-	if action == "apply" {
-		a.serviceApply(w, r)
+	// Валидация до замка: неверный ввод не должен упираться в чужую операцию.
+	switch action {
+	case "start", "stop", "restart", "switch_kernel", "apply":
+	default:
+		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
 		return
 	}
-
-	var out string
-	var err error
-
 	var targetKernel string
 	if action == "switch_kernel" {
 		targetKernel = r.URL.Query().Get("kernel")
@@ -131,7 +130,31 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Одна операция жизненного цикла за раз (двойной клик, две вкладки).
+	if !a.lifecycleMu.TryLock() {
+		JSONErrorCode(w, http.StatusConflict, "kernel_op_in_progress", a.t(r, "kernel.op_in_progress"))
+		return
+	}
+	defer a.lifecycleMu.Unlock()
+
+	// Запуск, рестарт, переключение и применение при двух запущенных ядрах только
+	// усугубили бы конфликт (D-02); остановка разрешена всегда.
+	var st services.ActiveKernelState
+	if action != "stop" {
+		a.kernelSvc.InvalidateActiveState()
+		st = a.activeKernelState()
+		if st.Conflict {
+			JSONErrorCode(w, http.StatusConflict, "kernel_conflict", a.t(r, "kernel.conflict"))
+			return
+		}
+	}
+
+	var out string
+	var err error
 	switch action {
+	case "apply":
+		a.serviceApply(w, r)
+		return
 	case "start":
 		out, err = a.xkeenSvc.Start()
 	case "stop":
@@ -139,10 +162,7 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	case "restart":
 		out, err = a.xkeenSvc.Restart()
 	case "switch_kernel":
-		a.serviceSwitchKernel(w, r, targetKernel)
-		return
-	default:
-		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
+		a.serviceSwitchKernel(w, targetKernel, st.Kernel)
 		return
 	}
 
@@ -164,15 +184,13 @@ const switchOutputLines = 20
 // подтверждение по процессам (D-03). Успех скрипта не означает успех
 // переключения, поэтому HTTP 200 несёт типизированный исход; ошибка самого
 // скрипта — по-прежнему 500. Принудительно процессы не завершаются (D-04).
-func (a *API) serviceSwitchKernel(w http.ResponseWriter, r *http.Request, target string) {
+func (a *API) serviceSwitchKernel(w http.ResponseWriter, target, old string) {
 	if a.kernelSwitcher == nil {
 		a.errorResponse(w, "kernel service is not configured", http.StatusInternalServerError)
 		return
 	}
 
-	// Старое ядро фиксируется до скрипта по свежему чтению процессов.
-	a.kernelSvc.InvalidateActiveState()
-	old := a.activeKernelState().Kernel
+	// old — ядро до переключения по свежему чтению процессов (guard в ServiceControl).
 	if old == "" {
 		old = "none"
 	}
