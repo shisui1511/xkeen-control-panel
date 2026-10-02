@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { fulfillServiceControl, setupMocks, visitPage } from './helpers/api-mocks';
 
-// e2e-pages: #/dashboard #/proxies #/services
+// e2e-pages: #/dashboard #/proxies #/services #/connections #/rules #/traffic #/smartproxy #/trafficquotas #/dat #/constructor #/logs #/settings #/editor
 
 // Изоляция ядер (140.1): при двух запущенных ядрах над содержимым любой вкладки
 // виден баннер конфликта; без конфликта баннера нет.
@@ -26,6 +26,61 @@ test.describe('Конфликт ядер: баннер', () => {
 
     await expect(page.getByTestId('dashboard-page')).toBeVisible();
     await expect(page.getByTestId('kernel-conflict-banner')).toHaveCount(0);
+  });
+});
+
+// Вкладки ядра: в конфликте вместо страницы заглушка, сама страница не монтируется.
+const KERNEL_TABS = [
+  '#/proxies',
+  '#/connections',
+  '#/rules',
+  '#/traffic',
+  '#/smartproxy',
+  '#/trafficquotas',
+  '#/dat',
+  '#/constructor'
+];
+// Нейтральные вкладки: открываются со своим содержимым, баннер виден над ними.
+const NEUTRAL_TABS = ['#/dashboard', '#/services', '#/logs', '#/settings', '#/editor'];
+
+test.describe('Конфликт ядер: все вкладки', () => {
+  for (const tab of KERNEL_TABS) {
+    test(`вкладка ядра ${tab}: баннер и заглушка «Раздел недоступен»`, async ({ page }) => {
+      await setupMocks(page, 'conflict');
+      await visitPage(page, `/${tab}`);
+
+      await expect(page.getByTestId('kernel-conflict-banner')).toBeVisible();
+      const gate = page.getByTestId('kernel-conflict-gate');
+      await expect(gate).toBeVisible();
+      await expect(gate).toContainText('Раздел недоступен: запущены оба ядра');
+    });
+  }
+
+  for (const tab of NEUTRAL_TABS) {
+    test(`нейтральная вкладка ${tab}: баннер есть, заглушки нет`, async ({ page }) => {
+      await setupMocks(page, 'conflict');
+      await visitPage(page, `/${tab}`);
+
+      await expect(page.getByTestId('kernel-conflict-banner')).toBeVisible();
+      await expect(page.getByTestId('kernel-conflict-gate')).toHaveCount(0);
+      // страница действительно отрисована: в области содержимого есть не только баннер
+      await expect(
+        page.locator('.main-content .container, .main-content .page-header').first()
+      ).toBeVisible();
+    });
+  }
+
+  test('вкладка ядра в конфликте не опрашивает API Mihomo', async ({ page }) => {
+    const proxyRequests: string[] = [];
+    page.on('request', (req) => {
+      if (req.url().includes('/api/mihomo/proxy/')) proxyRequests.push(req.url());
+    });
+    await setupMocks(page, 'conflict');
+    await visitPage(page, '/#/proxies');
+    await expect(page.getByTestId('kernel-conflict-gate')).toBeVisible();
+    await page.waitForTimeout(5000);
+
+    expect(proxyRequests).toEqual([]);
   });
 });
 

@@ -4,6 +4,7 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { setupMocks } from './helpers/api-mocks';
 
 test.use({ locale: 'ru-RU' });
 
@@ -196,6 +197,43 @@ test.describe('Adaptive & Overflow Gate (AUDIT-06)', () => {
       // Close modal
       await cancelBtn.click();
       await expect(modalContainer).not.toBeVisible();
+    });
+  }
+
+  // Баннер конфликта ядер (140.1): без горизонтальной прокрутки, на узком экране
+  // кнопки во всю ширину под текстом.
+  for (const vp of viewports) {
+    test(`Kernel conflict banner overflow at ${vp.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await setupMocks(page, 'conflict');
+      await page.goto('/#/dashboard');
+
+      const banner = page.getByTestId('kernel-conflict-banner');
+      await expect(banner).toBeVisible();
+
+      const hasHScroll = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth + 2
+      );
+      expect(hasHScroll, `Page has horizontal overflow with banner on ${vp.name}`).toBe(false);
+
+      if (vp.width <= 640) {
+        const textBox = await banner.locator('.kernel-conflict__text').boundingBox();
+        const descBox = await banner.locator('.kernel-conflict__text p').boundingBox();
+        expect(textBox && descBox).toBeTruthy();
+        const buttons = banner.locator('.kernel-conflict__actions .btn');
+        const count = await buttons.count();
+        expect(count).toBeGreaterThan(0);
+        for (let i = 0; i < count; i++) {
+          const box = await buttons.nth(i).boundingBox();
+          expect(box).toBeTruthy();
+          expect(box!.width, `button ${i} width on ${vp.name}`).toBeGreaterThanOrEqual(
+            textBox!.width * 0.9
+          );
+          expect(box!.y, `button ${i} below text on ${vp.name}`).toBeGreaterThan(
+            descBox!.y + descBox!.height - 1
+          );
+        }
+      }
     });
   }
 });

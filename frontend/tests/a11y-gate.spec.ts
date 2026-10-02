@@ -82,3 +82,53 @@ test.describe('A11y automated gate (@axe-core)', () => {
     });
   }
 });
+
+// Баннер конфликта ядер (140.1): тот же скан, что и в основном сценарии, плюс
+// отдельная проверка контраста заголовка (--danger) и текста на фоне баннера.
+test.describe('A11y automated gate: конфликт ядер', () => {
+  const CONFLICT_ROUTES = [
+    { name: 'dashboard', path: '/#/dashboard' },
+    { name: 'services', path: '/#/services' }
+  ];
+
+  for (const theme of THEMES) {
+    for (const route of CONFLICT_ROUTES) {
+      test(`${route.name} в конфликте ядер проходит WCAG 2.1 AA (${theme})`, async ({ page }) => {
+        await setupMocks(page, 'conflict');
+        await page.addInitScript((t) => {
+          localStorage.setItem('theme', t);
+        }, theme);
+
+        await visitPage(page, route.path);
+        const banner = page.getByTestId('kernel-conflict-banner');
+        await expect(banner).toBeVisible({ timeout: 15000 });
+        await page.evaluate((t) => {
+          document.documentElement.setAttribute('data-theme', t);
+        }, theme);
+        await page.waitForLoadState('networkidle');
+
+        const scan = await new AxeBuilder({ page })
+          .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+          .exclude('.cm-editor')
+          .exclude('.xterm')
+          .analyze();
+        const severe = scan.violations.filter(
+          (v) => v.impact === 'critical' || v.impact === 'serious'
+        );
+        expect(
+          severe.map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target) })),
+          `Severe a11y violations on ${route.name} with kernel conflict (${theme})`
+        ).toEqual([]);
+
+        const contrast = await new AxeBuilder({ page })
+          .include('[data-testid="kernel-conflict-banner"]')
+          .withRules(['color-contrast'])
+          .analyze();
+        expect(
+          contrast.violations,
+          `Banner color-contrast violations on ${route.name} (${theme})`
+        ).toEqual([]);
+      });
+    }
+  }
+});
