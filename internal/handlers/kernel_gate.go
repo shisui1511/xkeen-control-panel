@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -132,6 +133,17 @@ var kernelRoutePolicies = map[string]KernelRoutePolicy{
 func KernelRoutePolicyFor(pattern string) (KernelRoutePolicy, bool) {
 	p, ok := kernelRoutePolicies[pattern]
 	return p, ok
+}
+
+// KernelRoutePolicyKeys возвращает шаблоны всех записей таблицы по алфавиту;
+// нужен тесту в cmd/xcp, чтобы найти записи без регистрации маршрута.
+func KernelRoutePolicyKeys() []string {
+	keys := make([]string, 0, len(kernelRoutePolicies))
+	for k := range kernelRoutePolicies {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // KernelGatedPrefixes возвращает копию списка префиксов, под которыми каждый
