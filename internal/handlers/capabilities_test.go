@@ -155,9 +155,15 @@ func TestCapabilities_ApplyRestarts(t *testing.T) {
 		return envelope.Data
 	}
 
-	running := get(t, map[string]string{"xray": "running", "mihomo": "running"})
+	running := get(t, map[string]string{"xray": "running", "mihomo": "stopped"})
 	if !running.ApplyRestarts["xray"] || running.ApplyRestarts["mihomo"] {
 		t.Errorf("xray running: apply_restarts = %v, want xray:true mihomo:false", running.ApplyRestarts)
+	}
+
+	// Оба запущены — конфликт: применение не перезапускает ни одно ядро.
+	both := get(t, map[string]string{"xray": "running", "mihomo": "running"})
+	if both.ApplyRestarts["xray"] || both.ApplyRestarts["mihomo"] {
+		t.Errorf("both running: apply_restarts = %v, want both false", both.ApplyRestarts)
 	}
 
 	stopped := get(t, map[string]string{"xray": "stopped", "mihomo": "stopped"})

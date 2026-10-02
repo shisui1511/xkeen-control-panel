@@ -461,15 +461,16 @@ func TestServiceControl_Apply(t *testing.T) {
 		},
 		{
 			name: "mihomo while xray runs", configured: "xray",
-			statuses: map[string]string{"xray": "running", "mihomo": "running"},
+			statuses: map[string]string{"xray": "running", "mihomo": "stopped"},
 			query:    "kernel=mihomo", wantCalls: 0,
 			want: services.ApplyResult{Outcome: services.ApplySavedKernelInactive, Kernel: "mihomo", ActiveKernel: "xray", ActiveRunning: true},
 		},
 		{
-			name: "mihomo while xray stopped", configured: "xray",
+			// Работающий процесс важнее name_client: mihomo — активное ядро.
+			name: "mihomo runs alone, running wins over configured", configured: "xray",
 			statuses: map[string]string{"xray": "stopped", "mihomo": "running"},
-			query:    "kernel=mihomo", wantCalls: 0,
-			want: services.ApplyResult{Outcome: services.ApplySavedKernelInactive, Kernel: "mihomo", ActiveKernel: "xray", ActiveRunning: false},
+			query:    "kernel=mihomo", wantCalls: 1,
+			want: services.ApplyResult{Outcome: services.ApplyRestarted, Kernel: "mihomo", ActiveKernel: "mihomo", ActiveRunning: true},
 		},
 		{
 			name: "active resolves to configured", configured: "mihomo",
@@ -497,12 +498,41 @@ func TestServiceControl_Apply(t *testing.T) {
 	}
 }
 
+// TestServiceControl_ApplyConflictOutcome: при двух запущенных ядрах применение
+// отдаёт исход saved_kernel_conflict и не перезапускает ни одно ядро.
+func TestServiceControl_ApplyConflictOutcome(t *testing.T) {
+	for _, query := range []string{"kernel=xray", "kernel=mihomo", "kernel=active"} {
+		t.Run(query, func(t *testing.T) {
+			api, restarts := newApplyTestAPI(t, "xray", map[string]string{"xray": "running", "mihomo": "running"})
+			req := httptest.NewRequest(http.MethodPost, "/api/service/control?action=apply&"+query, nil)
+			rr := httptest.NewRecorder()
+			api.ServiceControl(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+			}
+			got := decodeApplyResult(t, rr.Body.Bytes())
+			if got.Outcome != services.ApplySavedKernelConflict || got.ActiveKernel != "both" {
+				t.Errorf("result = %+v, want saved_kernel_conflict with active_kernel=both", got)
+			}
+			if n := atomic.LoadInt32(restarts); n != 0 {
+				t.Errorf("restart calls = %d, want 0", n)
+			}
+		})
+	}
+}
+
 // TestServiceControl_ApplyRestartFailed: ошибка рестарта — 200 и outcome
 // restart_failed с полем error.
 func TestServiceControl_ApplyRestartFailed(t *testing.T) {
 	api := newServiceTestAPI(t, buildStubBinary(t, "ok", 0))
 	api.kernelApplier = services.NewKernelApplierFunc(
-		func(string) string { return "running" },
+		// Только xray запущен: при двух запущенных ядрах рестарта нет (конфликт).
+		func(name string) string {
+			if name == "xray" {
+				return "running"
+			}
+			return "stopped"
+		},
 		func() string { return "xray" },
 		func() (string, error) { return "\x1b[31mboom\x1b[0m", errors.New("exit status 1") },
 	)
@@ -596,7 +626,7 @@ func applyPathTestAPI(t *testing.T, configured string, statuses map[string]strin
 
 // TestServiceControl_ApplyByPath: path=<файл> выбирает ядро по каталогу файла.
 func TestServiceControl_ApplyByPath(t *testing.T) {
-	statuses := map[string]string{"xray": "running", "mihomo": "running"}
+	statuses := map[string]string{"xray": "stopped", "mihomo": "running"} // активное ядро — работающий mihomo
 	api, xrayDir, mihomoDir, otherDir, restarts := applyPathTestAPI(t, "mihomo", statuses)
 
 	apply := func(path string) *httptest.ResponseRecorder {

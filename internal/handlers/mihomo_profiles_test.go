@@ -79,6 +79,7 @@ func TestMihomoProfileActivate_CoreActiveByApplier(t *testing.T) {
 	cases := []struct {
 		name         string
 		configured   string
+		xrayStatus   string
 		mihomoStatus string
 		healthy      bool
 		wantRestarts int32
@@ -87,11 +88,11 @@ func TestMihomoProfileActivate_CoreActiveByApplier(t *testing.T) {
 		wantRollback bool
 		wantActive   string
 	}{
-		{name: "mihomo running", configured: "mihomo", mihomoStatus: "running", healthy: true, wantRestarts: 1, wantRestart: true, wantActive: "work"},
-		{name: "mihomo unknown counts as running", configured: "mihomo", mihomoStatus: "unknown", healthy: true, wantRestarts: 1, wantRestart: true, wantActive: "work"},
-		{name: "mihomo stopped", configured: "mihomo", mihomoStatus: "stopped", healthy: true, wantOutcome: "saved_kernel_stopped", wantActive: "work"},
-		{name: "xray active", configured: "xray", mihomoStatus: "running", healthy: true, wantOutcome: "saved_kernel_inactive", wantActive: "work"},
-		{name: "unhealthy core rolls back", configured: "mihomo", mihomoStatus: "running", healthy: false, wantRestarts: 2, wantRestart: true, wantRollback: true, wantActive: "default"},
+		{name: "mihomo running", configured: "mihomo", xrayStatus: "stopped", mihomoStatus: "running", healthy: true, wantRestarts: 1, wantRestart: true, wantActive: "work"},
+		{name: "mihomo unknown counts as running", configured: "mihomo", xrayStatus: "stopped", mihomoStatus: "unknown", healthy: true, wantRestarts: 1, wantRestart: true, wantActive: "work"},
+		{name: "mihomo stopped", configured: "mihomo", xrayStatus: "stopped", mihomoStatus: "stopped", healthy: true, wantOutcome: "saved_kernel_stopped", wantActive: "work"},
+		{name: "xray active", configured: "xray", xrayStatus: "running", mihomoStatus: "stopped", healthy: true, wantOutcome: "saved_kernel_inactive", wantActive: "work"},
+		{name: "unhealthy core rolls back", configured: "mihomo", xrayStatus: "stopped", mihomoStatus: "running", healthy: false, wantRestarts: 2, wantRestart: true, wantRollback: true, wantActive: "default"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -116,7 +117,7 @@ func TestMihomoProfileActivate_CoreActiveByApplier(t *testing.T) {
 					case "mihomo":
 						return tc.mihomoStatus
 					case "xray":
-						return "running"
+						return tc.xrayStatus
 					}
 					return "not_installed"
 				},

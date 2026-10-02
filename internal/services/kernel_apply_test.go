@@ -61,6 +61,8 @@ func TestKernelMayRun(t *testing.T) {
 }
 
 func TestKernelApplier_Outcomes(t *testing.T) {
+	// Активное ядро — работающий процесс; name_client (xray) учитывается, только
+	// когда ничего не запущено. Оба running — конфликт: рестарта нет.
 	cases := []struct {
 		name       string
 		xray       string
@@ -68,16 +70,18 @@ func TestKernelApplier_Outcomes(t *testing.T) {
 		target     string
 		wantOut    ApplyOutcome
 		wantKernel string
-		wantActive bool
+		wantActive string
+		wantRun    bool
 		wantCalls  int32
 	}{
-		{"xray running", "running", "stopped", "xray", ApplyRestarted, "xray", true, 1},
-		{"xray unknown", "unknown", "stopped", "xray", ApplyRestarted, "xray", true, 1},
-		{"xray not_accessible", "not_accessible", "stopped", "xray", ApplyRestarted, "xray", true, 1},
-		{"xray stopped", "stopped", "stopped", "xray", ApplySavedKernelStopped, "xray", false, 0},
-		{"xray not_installed", "not_installed", "stopped", "xray", ApplySavedKernelStopped, "xray", false, 0},
-		{"mihomo target, xray running", "running", "running", "mihomo", ApplySavedKernelInactive, "mihomo", true, 0},
-		{"mihomo target, xray stopped", "stopped", "running", "mihomo", ApplySavedKernelInactive, "mihomo", false, 0},
+		{"xray running", "running", "stopped", "xray", ApplyRestarted, "xray", "xray", true, 1},
+		{"xray unknown", "unknown", "stopped", "xray", ApplyRestarted, "xray", "xray", true, 1},
+		{"xray not_accessible", "not_accessible", "stopped", "xray", ApplyRestarted, "xray", "xray", true, 1},
+		{"xray stopped", "stopped", "stopped", "xray", ApplySavedKernelStopped, "xray", "xray", false, 0},
+		{"xray not_installed", "not_installed", "stopped", "xray", ApplySavedKernelStopped, "xray", "xray", false, 0},
+		{"mihomo target, both running", "running", "running", "mihomo", ApplySavedKernelConflict, "mihomo", "both", true, 0},
+		{"mihomo target, xray stopped, mihomo running", "stopped", "running", "mihomo", ApplyRestarted, "mihomo", "mihomo", true, 1},
+		{"mihomo target, xray running only", "running", "stopped", "mihomo", ApplySavedKernelInactive, "mihomo", "xray", true, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,16 +93,68 @@ func TestKernelApplier_Outcomes(t *testing.T) {
 			if res.Kernel != tc.wantKernel {
 				t.Errorf("kernel = %q, want %q", res.Kernel, tc.wantKernel)
 			}
-			if res.ActiveKernel != "xray" {
-				t.Errorf("active_kernel = %q, want xray", res.ActiveKernel)
+			if res.ActiveKernel != tc.wantActive {
+				t.Errorf("active_kernel = %q, want %q", res.ActiveKernel, tc.wantActive)
 			}
-			if res.ActiveRunning != tc.wantActive {
-				t.Errorf("active_running = %v, want %v", res.ActiveRunning, tc.wantActive)
+			if res.ActiveRunning != tc.wantRun {
+				t.Errorf("active_running = %v, want %v", res.ActiveRunning, tc.wantRun)
 			}
 			if got := atomic.LoadInt32(&f.restarts); got != tc.wantCalls {
 				t.Errorf("restart calls = %d, want %d", got, tc.wantCalls)
 			}
 		})
+	}
+}
+
+// Два запущенных ядра: ни одна цель не приводит к рестарту, исход один и тот же.
+func TestKernelApplier_ConflictSavesWithoutRestart(t *testing.T) {
+	for _, target := range []string{"xray", "mihomo", ApplyTargetActive} {
+		t.Run(target, func(t *testing.T) {
+			f := &applyFake{configured: "xray", statuses: map[string]string{"xray": "running", "mihomo": "running"}}
+			a := f.applier(nil)
+			res := a.Apply(target)
+			if res.Outcome != ApplySavedKernelConflict {
+				t.Errorf("outcome = %q, want %q", res.Outcome, ApplySavedKernelConflict)
+			}
+			if res.ActiveKernel != "both" || !res.ActiveRunning {
+				t.Errorf("got %+v, want active_kernel=both, active_running=true", res)
+			}
+			if a.WillRestart(target) {
+				t.Error("WillRestart = true при конфликте")
+			}
+			if got := a.Preview(target).Outcome; got != ApplySavedKernelConflict {
+				t.Errorf("Preview outcome = %q, want %q", got, ApplySavedKernelConflict)
+			}
+			if got := atomic.LoadInt32(&f.restarts); got != 0 {
+				t.Errorf("restart calls = %d, want 0", got)
+			}
+		})
+	}
+	// Несколько целей за одно применение — тоже без рестарта.
+	f := &applyFake{configured: "mihomo", statuses: map[string]string{"xray": "running", "mihomo": "running"}}
+	if res := f.applier(nil).Apply("xray", "mihomo"); res.Outcome != ApplySavedKernelConflict || res.Kernel != "xray" {
+		t.Errorf("got %+v, want saved_kernel_conflict for the first target", res)
+	}
+	if got := atomic.LoadInt32(&f.restarts); got != 0 {
+		t.Errorf("restart calls = %d, want 0", got)
+	}
+}
+
+// Работающий процесс важнее name_client: настроенное, но остановленное ядро не
+// делает активным ядро, которого нет в процессах.
+func TestKernelApplier_RunningWinsOverConfigured(t *testing.T) {
+	f := &applyFake{configured: "xray", statuses: map[string]string{"xray": "stopped", "mihomo": "running"}}
+	a := f.applier(nil)
+	res := a.Apply("mihomo")
+	if res.Outcome != ApplyRestarted || res.Kernel != "mihomo" || res.ActiveKernel != "mihomo" {
+		t.Errorf("got %+v, want mihomo restarted as active", res)
+	}
+	if got := atomic.LoadInt32(&f.restarts); got != 1 {
+		t.Errorf("restart calls = %d, want 1", got)
+	}
+	// Остановленное «настроенное» ядро не запускается.
+	if res := a.Apply("xray"); res.Outcome != ApplySavedKernelInactive || res.ActiveKernel != "mihomo" {
+		t.Errorf("xray: got %+v, want saved_kernel_inactive with active mihomo", res)
 	}
 }
 
@@ -129,8 +185,16 @@ func TestKernelApplier_Idempotent(t *testing.T) {
 }
 
 func TestKernelApplier_ActiveResolution(t *testing.T) {
-	t.Run("configured wins", func(t *testing.T) {
+	t.Run("running wins over configured", func(t *testing.T) {
+		// Активное ядро — работающий процесс: name_client не перебивает его.
 		f := &applyFake{configured: "mihomo", statuses: map[string]string{"xray": "running", "mihomo": "stopped"}}
+		res := f.applier(nil).Apply(ApplyTargetActive)
+		if res.Kernel != "xray" || res.Outcome != ApplyRestarted {
+			t.Errorf("got %+v, want xray restarted", res)
+		}
+	})
+	t.Run("nothing running, configured wins", func(t *testing.T) {
+		f := &applyFake{configured: "mihomo", statuses: map[string]string{"xray": "stopped", "mihomo": "stopped"}}
 		res := f.applier(nil).Apply(ApplyTargetActive)
 		if res.Kernel != "mihomo" || res.Outcome != ApplySavedKernelStopped {
 			t.Errorf("got %+v, want mihomo saved_kernel_stopped", res)
@@ -226,7 +290,7 @@ func TestKernelApplier_MultiTarget(t *testing.T) {
 }
 
 func TestKernelApplier_PreviewMatchesApply(t *testing.T) {
-	f := &applyFake{configured: "xray", statuses: map[string]string{"xray": "running", "mihomo": "running"}}
+	f := &applyFake{configured: "xray", statuses: map[string]string{"xray": "running", "mihomo": "stopped"}}
 	a := f.applier(nil)
 	if !a.WillRestart("xray") {
 		t.Error("WillRestart(xray) = false, want true")
