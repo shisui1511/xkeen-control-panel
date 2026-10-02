@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { LAZY_LOAD_TIMEOUT } from './helpers/timeouts';
+import { setupMocks, visitPage } from './helpers/api-mocks';
 
 // Вспомогательная функция: настройка REST-моков
 async function setupRestMocks(page: Page, mihomoReachable = true) {
@@ -674,5 +675,41 @@ test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
 
     await expect(alert).toHaveCount(0);
     releaseStats();
+  });
+});
+
+// Страница «Трафик» держит собственный сокет: он живой у Mihomo и при другом активном ядре,
+// в конфликте или до ответа capabilities сервер ответил бы 409 (D-05/D-06). Гейт берётся из
+// единого состояния ядра (D-07).
+test.describe('Гейт WebSocket трафика по активному ядру', () => {
+  // Счётчик открытий сокета: обработчик routeWebSocket вызывается на каждое открытие,
+  // события page.on('websocket') дают URL всех сокетов страницы.
+  async function trackTrafficSocket(page: Page) {
+    const state = { opened: 0, closed: 0, urls: [] as string[] };
+    page.on('websocket', (ws) => state.urls.push(ws.url()));
+    await page.routeWebSocket('**/api/traffic/ws', (ws) => {
+      state.opened++;
+      ws.onClose(() => {
+        state.closed++;
+      });
+    });
+    return state;
+  }
+
+  const trafficUrls = (urls: string[]) => urls.filter((u) => u.includes('/api/traffic/ws'));
+
+  test('#/traffic при активном Xray не открывает /api/traffic/ws', async ({ page }) => {
+    const sockets = await trackTrafficSocket(page);
+    await setupMocks(page, 'xray');
+    await visitPage(page, '/#/traffic');
+
+    // страница смонтирована и capabilities получены
+    await expect(page.locator('[data-testid="xray-stats-section"]')).toBeVisible({
+      timeout: LAZY_LOAD_TIMEOUT
+    });
+    await page.waitForTimeout(2000);
+
+    expect(sockets.opened).toBe(0);
+    expect(trafficUrls(sockets.urls)).toHaveLength(0);
   });
 });

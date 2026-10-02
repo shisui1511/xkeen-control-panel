@@ -7,6 +7,8 @@
     capabilities,
     fetchCapabilities,
     isXray,
+    isMihomo,
+    mihomoApiReady,
     kernelKnown
   } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
@@ -195,7 +197,15 @@
   let reconnectDelay = 1000;
   const MAX_RECONNECT_DELAY = 16000;
 
+  // Сокет трафика живой у Mihomo: при другом активном ядре, в конфликте или пока API не
+  // отвечает сервер ответил бы 409 ещё до апгрейда, и страница бесконечно штурмовала бы
+  // маршрут с переподключениями. Условие берётся из единого состояния ядра (сторы), а не
+  // из сырых данных capabilities.
+  const trafficWsAllowed = $derived($isMihomo && $mihomoApiReady);
+
   function connect() {
+    if (!trafficWsAllowed) return;
+
     // Guard against overlapping connects: a visibilitychange firing while a
     // fresh reconnect attempt is still CONNECTING must not open a second
     // socket — the first one's handlers would stay attached and double up
@@ -545,8 +555,20 @@
     hoveredPoint = null;
   }
 
+  // Подключение и разрыв сокета ведёт гейт: он же закрывает сокет при смене Mihomo на другое
+  // ядро. Чтения внутри connect/disconnect уходят в untrack и не становятся зависимостями.
+  $effect(() => {
+    const allowed = trafficWsAllowed;
+    untrack(() => {
+      if (allowed) {
+        connect();
+      } else {
+        disconnect();
+      }
+    });
+  });
+
   onMount(() => {
-    connect();
     window.addEventListener('visibilitychange', handleVisibilityChange);
   });
 
