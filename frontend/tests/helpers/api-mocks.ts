@@ -89,19 +89,35 @@ export function systemStatsFixture(
 }
 
 /**
- * Ответ на POST /api/service/control: action=apply возвращает исход «перезапущено»
- * для ядра из запроса, остальные действия — простой успех.
+ * Ответ на POST /api/service/control (контракт ServiceControl, 140.1-05):
+ * apply — исход «перезапущено» для ядра из запроса; switch_kernel — исход
+ * `switched`; stop с kernel — `stopped` через сигнал; прочее — простой успех.
  */
 export async function fulfillServiceControl(route: Route) {
   const params = new URL(route.request().url()).searchParams;
+  const action = params.get('action');
   const kernel = params.get('kernel') || 'mihomo';
-  const body =
-    params.get('action') === 'apply'
-      ? {
-          success: true,
-          data: { outcome: 'restarted', kernel, active_kernel: kernel, active_running: true }
-        }
-      : { success: true };
+  let body: Record<string, unknown> = { success: true };
+  if (action === 'apply') {
+    body = {
+      success: true,
+      data: { outcome: 'restarted', kernel, active_kernel: kernel, active_running: true }
+    };
+  } else if (action === 'switch_kernel') {
+    body = {
+      success: true,
+      data: {
+        outcome: 'switched',
+        old: kernel === 'mihomo' ? 'xray' : 'mihomo',
+        new: kernel,
+        old_running: false,
+        new_running: true,
+        output: ''
+      }
+    };
+  } else if (action === 'stop' && params.get('kernel')) {
+    body = { success: true, data: { kernel, outcome: 'stopped', method: 'signal' } };
+  }
   await route.fulfill({
     status: 200,
     contentType: 'application/json',

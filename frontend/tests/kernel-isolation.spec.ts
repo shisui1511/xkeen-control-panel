@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { setupMocks, visitPage } from './helpers/api-mocks';
+import type { Page } from '@playwright/test';
+import { fulfillServiceControl, setupMocks, visitPage } from './helpers/api-mocks';
 
 // e2e-pages: #/dashboard #/proxies #/services
 
@@ -77,5 +78,123 @@ test.describe('Конфликт ядер: гейты оболочки', () => {
     await page.waitForTimeout(1500);
 
     expect(wsUrls.filter((u) => u.includes('/api/traffic/ws'))).toHaveLength(0);
+  });
+});
+
+// Остановка выбранного ядра из баннера (D-02): подтверждение, один запрос stop,
+// затем capabilities без конфликта.
+interface StopHarness {
+  stopRequests: string[];
+  allRequests: string[];
+}
+
+async function setupStopHarness(
+  page: Page,
+  opts: { stopOutcome: 'stopped' | 'still_running'; conflictCleared: boolean }
+): Promise<StopHarness> {
+  const harness: StopHarness = { stopRequests: [], allRequests: [] };
+  let stopped = false;
+
+  await setupMocks(page, 'conflict');
+  await page.route('**/api/capabilities**', async (route) => {
+    // до остановки (и когда она не помогает) отвечает мок режима conflict
+    if (!stopped || !opts.conflictCleared) return route.fallback();
+    await route.fulfill({
+      json: {
+        success: true,
+        data: {
+          kernels: {
+            xray: { installed: true, version: '1.8.4', channel: 'stable' },
+            mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
+          },
+          active_kernel: 'xray',
+          kernel_conflict: false,
+          running_kernels: ['xray'],
+          mihomo: {
+            reachable: true,
+            process_running: false,
+            api_reachable: false,
+            api_authenticated: false
+          }
+        }
+      }
+    });
+  });
+  await page.route('**/api/service/control**', async (route) => {
+    const url = route.request().url();
+    harness.allRequests.push(url);
+    const params = new URL(url).searchParams;
+    if (params.get('action') === 'stop') {
+      harness.stopRequests.push(`${params.get('action')}&kernel=${params.get('kernel')}`);
+      stopped = true;
+      if (opts.stopOutcome === 'still_running') {
+        await route.fulfill({
+          json: {
+            success: true,
+            data: { kernel: params.get('kernel'), outcome: 'still_running', method: 'signal' }
+          }
+        });
+        return;
+      }
+    }
+    await fulfillServiceControl(route);
+  });
+  return harness;
+}
+
+test.describe('Конфликт ядер: остановка из баннера', () => {
+  test('остановка Mihomo из баннера снимает конфликт', async ({ page }) => {
+    const harness = await setupStopHarness(page, { stopOutcome: 'stopped', conflictCleared: true });
+    await visitPage(page, '/#/dashboard');
+
+    const banner = page.getByTestId('kernel-conflict-banner');
+    await expect(banner.getByRole('button', { name: /Остановить Xray/ })).toBeVisible();
+    await expect(banner.getByRole('button', { name: /Остановить Mihomo/ })).toBeVisible();
+
+    await page.getByTestId('kernel-conflict-stop-mihomo').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('Остановить Mihomo?');
+    await dialog.getByRole('button', { name: 'Остановить Mihomo' }).click();
+
+    await expect.poll(() => harness.stopRequests).toEqual(['stop&kernel=mihomo']);
+    await expect(
+      page.locator('.toast', { hasText: 'Конфликт снят. Активное ядро: Xray' })
+    ).toBeVisible();
+    await expect(banner).toHaveCount(0);
+  });
+
+  test('отмена в подтверждении не отправляет остановку', async ({ page }) => {
+    const harness = await setupStopHarness(page, { stopOutcome: 'stopped', conflictCleared: true });
+    await visitPage(page, '/#/dashboard');
+
+    await page.getByTestId('kernel-conflict-stop-xray').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('Остановить Xray?');
+    await dialog.getByRole('button', { name: 'Отмена' }).click();
+
+    await expect(dialog).toHaveCount(0);
+    expect(harness.stopRequests).toHaveLength(0);
+    await expect(page.getByTestId('kernel-conflict-banner')).toBeVisible();
+  });
+
+  test('ядро не остановилось: error-тост, кнопки снова активны, баннер остаётся', async ({
+    page
+  }) => {
+    const harness = await setupStopHarness(page, {
+      stopOutcome: 'still_running',
+      conflictCleared: false
+    });
+    await visitPage(page, '/#/dashboard');
+
+    await page.getByTestId('kernel-conflict-stop-mihomo').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Остановить Mihomo' }).click();
+
+    await expect(
+      page.locator('.toast--error', { hasText: 'Mihomo не остановился за 10 секунд' })
+    ).toBeVisible();
+    expect(harness.stopRequests).toEqual(['stop&kernel=mihomo']);
+    await expect(page.getByTestId('kernel-conflict-banner')).toBeVisible();
+    await expect(page.getByTestId('kernel-conflict-stop-mihomo')).toBeEnabled();
+    await expect(page.getByTestId('kernel-conflict-stop-xray')).toBeEnabled();
   });
 });
