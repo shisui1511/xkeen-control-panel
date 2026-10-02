@@ -208,7 +208,16 @@ func newRawStatusCache(t *testing.T, raw string, stale bool) *services.XKeenStat
 	t.Cleanup(cache.Stop)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cache.RefreshNow(ctx)
+	// Цикл кэша сам делает первый опрос сразу после Start. Явный RefreshNow
+	// рядом с ним под нагрузкой мог занять второй вызов (он отдаёт ошибку) и
+	// дать stale=true вместо свежего снимка, поэтому первый опрос только ждём.
+	for cache.Snapshot().Raw != raw {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("подготовка снимка: первый опрос не завершился, raw=%q", cache.Snapshot().Raw)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
 	if stale {
 		cache.RefreshNow(ctx)
 	}
