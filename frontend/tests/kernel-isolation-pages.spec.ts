@@ -102,6 +102,50 @@ test.describe('Редактор при конфликте ядер', () => {
     ).toBeVisible();
     await expect(page.getByText('рестарт', { exact: false })).toHaveCount(0);
   });
+
+  test('409 kernel_conflict при применении — «Сохранено, но не применено», а не сбой рестарта', async ({
+    page
+  }) => {
+    await setupMocks(page, 'xray');
+    await mockEditorFiles(page);
+    await page.route('**/api/service/control?action=apply**', async (route) => {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: false, error: 'both', code: 'kernel_conflict' })
+      });
+    });
+    await openConfig(page);
+
+    await page.getByRole('button', { name: 'Сохранить и применить' }).click();
+
+    await expect(page.getByText('Сохранено, но не применено: запущены оба ядра')).toBeVisible();
+    await expect(page.getByText('перезапуск не удался', { exact: false })).toHaveCount(0);
+  });
+
+  test('409 kernel_op_in_progress при применении — «идёт другая операция с ядром»', async ({
+    page
+  }) => {
+    await setupMocks(page, 'xray');
+    await mockEditorFiles(page);
+    await page.route('**/api/service/control?action=apply**', async (route) => {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: false,
+          error: 'kernel operation in progress',
+          code: 'kernel_op_in_progress'
+        })
+      });
+    });
+    await openConfig(page);
+
+    await page.getByRole('button', { name: 'Сохранить и применить' }).click();
+
+    await expect(page.getByText('идёт другая операция с ядром', { exact: false })).toBeVisible();
+    await expect(page.getByText('перезапуск не удался', { exact: false })).toHaveCount(0);
+  });
 });
 
 test.describe('Страницы читают состояние ядра из стора', () => {

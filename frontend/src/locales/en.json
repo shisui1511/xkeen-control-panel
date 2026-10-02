@@ -2627,5 +2627,6 @@
   "kernel.stop_still_running": "{kernel} did not stop within 10 seconds. Try again or check the logs.",
   "kernel.state_conflict": "Both kernels",
   "apply.saved_kernel_conflict": "Saved but not applied: both kernels are running. Stop one of them.",
+  "apply.saved_op_in_progress": "Saved but not applied: another kernel operation is in progress. Apply again in a few seconds.",
   "svc.log_action_stop_kernel": "Kernel stop"
 }
