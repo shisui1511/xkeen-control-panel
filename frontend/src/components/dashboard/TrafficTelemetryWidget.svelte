@@ -3,7 +3,7 @@
   import { trafficStream, formatTrafficSpeed, type TrafficState } from '../../lib/trafficStream';
   import Icon from '../../lib/components/Icon.svelte';
   import Card from '../Card.svelte';
-  import { capabilities, mihomoApiState, mihomoOfflineReason } from '../../stores';
+  import { isMihomo, mihomoApiState, mihomoOfflineReason } from '../../stores';
 
   let { onSwitchTab } = $props<{
     onSwitchTab?: (tab: string) => void;
@@ -27,9 +27,7 @@
   // а отсутствием источника. Подпись причины — только когда активно именно ядро Mihomo.
   const connectionsLive = $derived($mihomoApiState === 'up');
   const offlineReasonKey = $derived(
-    $capabilities?.active_kernel === 'mihomo' && $mihomoOfflineReason
-      ? `dash.mihomo_offline_${$mihomoOfflineReason}`
-      : null
+    $isMihomo && $mihomoOfflineReason ? `dash.mihomo_offline_${$mihomoOfflineReason}` : null
   );
 
   function handleTrafficClick() {

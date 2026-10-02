@@ -234,3 +234,71 @@ test.describe('System Status and Quick Actions in Sidebar', () => {
     await expect(toggles.first()).toBeChecked();
   });
 });
+
+test.describe('Капсула статуса при конфликте ядер', () => {
+  test.use({ locale: 'ru-RU' });
+
+  test.beforeEach(async ({ page }) => {
+    await disableServiceWorker(page);
+    await setupMocks(page);
+    // позже зарегистрированный маршрут срабатывает первым
+    await page.route('**/api/capabilities**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            kernels: {
+              xray: { installed: true, version: '1.8.4', channel: 'stable' },
+              mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
+            },
+            active_kernel: 'both',
+            kernel_conflict: true,
+            running_kernels: ['xray', 'mihomo'],
+            mihomo: {
+              reachable: true,
+              process_running: true,
+              api_reachable: true,
+              api_authenticated: true
+            }
+          }
+        })
+      });
+    });
+  });
+
+  test('капсула показывает «Оба ядра» с красным индикатором, перезапуск в меню неактивен', async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/#/dashboard');
+
+    const kernelBtn = page.locator('.sidebar .sidebar-kernel-row');
+    await expect(kernelBtn).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.sidebar .kernel-name')).toHaveText('Оба ядра');
+    await expect(kernelBtn.locator('.led-dot')).toHaveClass(/led-red/);
+
+    await kernelBtn.click();
+    const quickMenu = page.locator('.system-quick-menu');
+    await expect(quickMenu).toBeVisible();
+
+    const actionBtns = quickMenu.locator('.action-btn');
+    await expect(actionBtns).toHaveCount(3);
+    const blocked = 'Недоступно, пока запущены оба ядра';
+    await expect(actionBtns.nth(0)).toBeDisabled();
+    await expect(actionBtns.nth(0)).toHaveAttribute('title', blocked);
+    await expect(actionBtns.nth(1)).toBeDisabled();
+    // остановка доступна: XKeen при конфликте запущен
+    await expect(actionBtns.nth(2)).toBeEnabled();
+  });
+
+  test('мобильная капсула показывает «Оба ядра»', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto('/#/dashboard');
+
+    const mobileCapsule = page.locator('.mobile-header .capsule-mobile');
+    await expect(mobileCapsule).toBeVisible({ timeout: 5000 });
+    await expect(mobileCapsule).toContainText('Оба ядра');
+  });
+});
