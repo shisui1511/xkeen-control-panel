@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { fade, slide } from 'svelte/transition';
   import { t, currentLang } from './i18n';
-  import { showToast, capabilities, showConfirm, editorOpenRequest } from './stores';
+  import { showToast, activeKernelName, showConfirm, editorOpenRequest } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
@@ -32,6 +32,7 @@
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { applyToKernel, notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
+  import { KERNEL_GATE_CODES } from './lib/kernelGateError';
   import PreflightWarnings, {
     type PreflightWarning
   } from './components/editor/PreflightWarnings.svelte';
@@ -746,6 +747,14 @@
         if (applyErr?.status === 401) return;
         // Файл уже записан: это не ошибка сохранения
         console.error('handleSaveAndApply apply error:', applyErr);
+        // Ответ гейта ядра ('kernel_conflict', 'kernel_inactive', 'kernel_op_in_progress'):
+        // текст уже переведён apiFetchJSON, это не сбой рестарта
+        if ((KERNEL_GATE_CODES as readonly string[]).includes(applyErr?.code)) {
+          showToast('error', applyErr.message);
+          applyLoading = false;
+          backgroundStatusText = '';
+          return;
+        }
         const reason =
           parseValidationError(applyErr?.message || '', $currentLang) || applyErr?.message;
         showToast('error', $t('apply.restart_failed', { reason }), 10000, {
@@ -1285,7 +1294,7 @@
         {xrayFiles}
         {mihomoFiles}
         {selectedFile}
-        activeKernel={$capabilities?.active_kernel || ''}
+        activeKernel={$activeKernelName}
         onLoadFile={loadFile}
         onCreateFile={() => {
           showCreateModal = true;
@@ -1377,7 +1386,7 @@
             {selectedFile}
             {hasDraft}
             {fileType}
-            activeKernel={$capabilities?.active_kernel}
+            activeKernel={$activeKernelName}
             onToggleSidebar={() => (showSidebar = !showSidebar)}
             onSwitchTab={switchTab}
             onPinTab={pinTab}
