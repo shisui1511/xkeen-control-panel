@@ -2,9 +2,14 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Proxy Kernels switching test suite', () => {
   let switchRequested = false;
+  type SwitchOutcome = 'switched' | 'old_still_running' | 'new_not_started';
+  let switchOutcome: SwitchOutcome = 'switched';
+  // После запроса переключения оба ядра живы: сервер не дождался остановки старого
+  const bothRunning = () => switchRequested && switchOutcome === 'old_still_running';
 
   test.beforeEach(async ({ page }) => {
     switchRequested = false;
+    switchOutcome = 'switched';
 
     // Disable Service Worker in tests so requests are intercepted
     await page.addInitScript(() => {
@@ -13,6 +18,7 @@ test.describe('Proxy Kernels switching test suite', () => {
         writable: false,
         configurable: true
       });
+      window.localStorage.setItem('lang', 'ru');
     });
 
     // Intercept API routes
@@ -40,7 +46,10 @@ test.describe('Proxy Kernels switching test suite', () => {
                 xray: { installed: true, version: '1.8.4', channel: 'stable' },
                 mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
               },
-              active_kernel: switchRequested ? 'mihomo' : 'xray',
+              active_kernel: bothRunning() ? 'both' : switchRequested ? 'mihomo' : 'xray',
+              ...(bothRunning()
+                ? { kernel_conflict: true, running_kernels: ['xray', 'mihomo'] }
+                : {}),
               mihomo: {
                 reachable: true,
                 process_running: switchRequested,
@@ -105,8 +114,8 @@ test.describe('Proxy Kernels switching test suite', () => {
                   has_update: false,
                   channel: 'stable',
                   status: 'idle',
-                  process_status: 'stopped',
-                  message: 'stopped'
+                  process_status: bothRunning() ? 'running' : 'stopped',
+                  message: bothRunning() ? 'running on background' : 'stopped'
                 },
                 {
                   name: 'mihomo',
@@ -181,8 +190,18 @@ test.describe('Proxy Kernels switching test suite', () => {
         await new Promise((resolve) => setTimeout(resolve, 500));
         await route.fulfill({
           status: 200,
-          contentType: 'text/plain',
-          body: 'Ядро успешно переключено на mihomo'
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              outcome: switchOutcome,
+              old: 'xray',
+              new: 'mihomo',
+              old_running: switchOutcome === 'old_still_running',
+              new_running: switchOutcome !== 'new_not_started',
+              output: ''
+            }
+          })
         });
       } else {
         await route.fulfill({
@@ -216,12 +235,55 @@ test.describe('Proxy Kernels switching test suite', () => {
     await expect(confirmBtn.first()).toBeVisible();
     await confirmBtn.first().click();
 
-    // 4. Wait for UI update
-    await page.waitForTimeout(1000);
+    // 4. Пока сервер ждёт смены процессов: aria-busy и подпись ожидания
+    await expect(page.getByRole('radiogroup')).toHaveAttribute('aria-busy', 'true');
+    await expect(mihomoRadio).toHaveClass(/switching/);
+    await expect(page.getByTestId('kernel-switching-wait')).toContainText(
+      'Ждём остановки Xray и запуска Mihomo'
+    );
 
     // 5. Check final state
     await expect(mihomoRadio).toHaveClass(/active/);
     await expect(xrayRadio).not.toHaveClass(/active/);
+    await expect(page.getByRole('radiogroup')).toHaveAttribute('aria-busy', 'false');
+    await expect(
+      page.locator('.toast--success', { hasText: 'Ядро переключено на Mihomo' })
+    ).toBeVisible();
+  });
+
+  async function confirmSwitchToMihomo(page: import('@playwright/test').Page) {
+    await page.goto('/#/services');
+    await expect(page.locator('.core-radio-card:has-text("Xray")')).toHaveClass(/active/);
+    await page.locator('.core-radio-card:has-text("Mihomo")').click();
+    await page.getByRole('button', { name: 'Сделать активным' }).click();
+  }
+
+  test('old kernel still running: warning toast and the "not stopped" badge on its card', async ({
+    page
+  }) => {
+    switchOutcome = 'old_still_running';
+    await confirmSwitchToMihomo(page);
+
+    await expect(
+      page.locator('.toast--warning', {
+        hasText: 'Переключение не завершено: Xray всё ещё работает'
+      })
+    ).toBeVisible();
+    await expect(
+      page.locator('.core-radio-card:has-text("Xray")').getByText('Не остановлено')
+    ).toBeVisible();
+    await expect(
+      page.locator('.core-radio-card:has-text("Mihomo")').getByText('Не остановлено')
+    ).toHaveCount(0);
+  });
+
+  test('new kernel did not start: error toast with the Logs action', async ({ page }) => {
+    switchOutcome = 'new_not_started';
+    await confirmSwitchToMihomo(page);
+
+    const toast = page.locator('.toast--error', { hasText: 'Ядро Mihomo не запустилось' });
+    await expect(toast).toBeVisible();
+    await expect(toast.getByRole('button', { name: 'Логи' })).toBeVisible();
   });
 });
 
