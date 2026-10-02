@@ -36,8 +36,21 @@ const SWITCH_OUTCOMES: ReadonlySet<string> = new Set([
 /**
  * Окно перезапуска на время переключения: не меньше дедлайна опроса бэкенда (15 с)
  * плюс запас, иначе баннер конфликта и ApiOffline вспыхнут посреди легального переключения.
+ * После исхода `switched` оно снимается (см. API_WARMUP_GRACE_MS), иначе конфликт,
+ * возникший сразу после переключения, был бы скрыт до 20 с.
  */
 const SWITCH_GRACE_MS = 20000;
+
+/**
+ * Окно прогрева API Mihomo после `switched`: процесс подтверждён по PID, осталось
+ * дождаться ответа API. `fetchCapabilities` снимет окно раньше при api_reachable.
+ */
+const API_WARMUP_GRACE_MS = 6000;
+
+/** 409 kernel_op_in_progress: окно принадлежит чужой идущей операции, его не трогаем. */
+function isOpInProgress(e: unknown): boolean {
+  return (e as { code?: unknown } | null)?.code === 'kernel_op_in_progress';
+}
 
 export type StopKernelOutcome = 'stopped' | 'not_running' | 'still_running';
 
@@ -98,16 +111,24 @@ export async function serviceAction(action: 'start' | 'stop' | 'restart'): Promi
     // Сервер перезапускает синхронно; фоновые опросы в это время не шумят.
     activateRestartGrace(6000);
   }
-  const res = await apiFetch(`/api/service/control?action=${action}`, { method: 'POST' });
-  if (!res.ok) throw await serviceErrorOf(res);
-  return await res.text();
+  try {
+    const res = await apiFetch(`/api/service/control?action=${action}`, { method: 'POST' });
+    if (!res.ok) throw await serviceErrorOf(res);
+    return await res.text();
+  } catch (e) {
+    // Отказ или сбой: перезапуска нет, переходного состояния скрывать не нужно
+    if (action !== 'stop' && !isOpInProgress(e)) clearRestartGrace();
+    throw e;
+  }
 }
 
 /**
  * Переключает XKeen на ядро и запускает его. Единственный клиент switch_kernel:
  * тип исхода приходит от сервера (D-04), текстовый ответ не поддерживается.
  * При исходе не `switched` и при ошибке окно перезапуска снимается, чтобы баннер
- * конфликта (old_still_running) появился сразу.
+ * конфликта (old_still_running) появился сразу; исключение — 409 kernel_op_in_progress
+ * (окно чужой операции). После `switched` окно снимается; для Mihomo вместо него
+ * открывается короткое окно прогрева API.
  */
 export async function switchKernel(kernel: KernelName): Promise<SwitchResult> {
   activateRestartGrace(SWITCH_GRACE_MS);
@@ -118,7 +139,8 @@ export async function switchKernel(kernel: KernelName): Promise<SwitchResult> {
     );
     const outcome = typeof data?.outcome === 'string' ? data.outcome : '';
     if (!data || !SWITCH_OUTCOMES.has(outcome)) throw new Error('Invalid switch response');
-    if (outcome !== 'switched') clearRestartGrace();
+    clearRestartGrace();
+    if (outcome === 'switched' && kernel === 'mihomo') activateRestartGrace(API_WARMUP_GRACE_MS);
     return {
       outcome: outcome as SwitchOutcome,
       old: typeof data.old === 'string' ? data.old : 'none',
@@ -128,7 +150,7 @@ export async function switchKernel(kernel: KernelName): Promise<SwitchResult> {
       output: typeof data.output === 'string' ? data.output : ''
     };
   } catch (e) {
-    clearRestartGrace();
+    if (!isOpInProgress(e)) clearRestartGrace();
     throw e;
   }
 }

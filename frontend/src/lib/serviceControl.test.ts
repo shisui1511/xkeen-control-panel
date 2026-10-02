@@ -8,6 +8,8 @@ async function load() {
   const mod = await import('./serviceControl');
   const stores = await import('../stores');
   const i18n = await import('../i18n');
+  // Словарь грузится асинхронно: без ожидания в нагруженном прогоне t() вернёт ключ
+  await i18n.i18nReady;
   const grace = await import('./serviceGrace');
   return {
     ...mod,
@@ -130,6 +132,36 @@ describe('serviceAction', () => {
     });
   });
 
+  it('409 kernel_conflict на restart: окно перезапуска снято', async () => {
+    fetchMock.mockResolvedValue(makeResponse(409, { code: 'kernel_conflict', error: 'both' }));
+    const { serviceAction, isServiceRestarting } = await load();
+
+    await expect(serviceAction('restart')).rejects.toMatchObject({ code: 'kernel_conflict' });
+    expect(get(isServiceRestarting)).toBe(false);
+  });
+
+  it('409 kernel_op_in_progress на restart: окно чужой операции не тронуто', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse(409, { success: false, error: 'busy', code: 'kernel_op_in_progress' })
+    );
+    const { serviceAction, isServiceRestarting } = await load();
+
+    await expect(serviceAction('restart')).rejects.toMatchObject({
+      code: 'kernel_op_in_progress'
+    });
+    expect(get(isServiceRestarting)).toBe(true);
+  });
+
+  it('ошибка stop окно не трогает', async () => {
+    fetchMock.mockResolvedValue(makeResponse(500, 'boom'));
+    const { serviceAction, isServiceRestarting } = await load();
+    const { activateRestartGrace } = await import('./serviceGrace');
+    activateRestartGrace(6000);
+
+    await expect(serviceAction('stop')).rejects.toThrow('boom');
+    expect(get(isServiceRestarting)).toBe(true);
+  });
+
   it('500 с текстом: текст ответа', async () => {
     fetchMock.mockResolvedValue(makeResponse(500, 'xkeen exploded'));
     const { serviceAction } = await load();
@@ -176,7 +208,7 @@ describe('switchKernel', () => {
     output: ''
   };
 
-  it('switched: результат и окно перезапуска включено до запроса', async () => {
+  it('switched на Mihomo: окно включено до запроса, затем окно прогрева API 6 с', async () => {
     let graceDuringRequest = false;
     const { switchKernel, isServiceRestarting } = await load();
     fetchMock.mockImplementation(async () => {
@@ -193,14 +225,29 @@ describe('switchKernel', () => {
       new_running: true
     });
     expect(graceDuringRequest).toBe(true);
-    expect(get(isServiceRestarting)).toBe(true);
     expect(fetchMock.mock.calls[0][0]).toBe(
       '/api/service/control?action=switch_kernel&kernel=mihomo'
     );
-    // окно держится не меньше дедлайна бэкенда: через 19 с ещё активно, через 21 с снято
-    vi.advanceTimersByTime(19000);
+    // 20-секундное окно заменено прогревом API: через 5 с активно, через 7 с снято
+    expect(get(isServiceRestarting)).toBe(true);
+    vi.advanceTimersByTime(5000);
     expect(get(isServiceRestarting)).toBe(true);
     vi.advanceTimersByTime(2000);
+    expect(get(isServiceRestarting)).toBe(false);
+  });
+
+  it('switched на Xray: окно снимается сразу', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse(200, {
+        success: true,
+        data: { ...switched, old: 'mihomo', new: 'xray' }
+      })
+    );
+    const { switchKernel, isServiceRestarting } = await load();
+
+    const res = await switchKernel('xray');
+
+    expect(res.outcome).toBe('switched');
     expect(get(isServiceRestarting)).toBe(false);
   });
 
@@ -244,6 +291,18 @@ describe('switchKernel', () => {
       code: 'kernel_conflict'
     });
     expect(get(isServiceRestarting)).toBe(false);
+  });
+
+  it('409 kernel_op_in_progress: окно чужой операции не снимается', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse(409, { success: false, error: 'busy', code: 'kernel_op_in_progress' })
+    );
+    const { switchKernel, isServiceRestarting } = await load();
+
+    await expect(switchKernel('mihomo')).rejects.toMatchObject({
+      code: 'kernel_op_in_progress'
+    });
+    expect(get(isServiceRestarting)).toBe(true);
   });
 
   it('500 с выводом скрипта: текст ошибки из конверта', async () => {
