@@ -47,12 +47,22 @@ test.describe('Редактор при конфликте ядер', () => {
     await mockEditorFiles(page);
     await openConfig(page);
 
-    const apply = page.getByRole('button', { name: 'Недоступно, пока запущены оба ядра' });
+    // exact: у кнопки перезапуска в виджете ядра подпись тоже содержит эту причину
+    const apply = page.getByRole('button', {
+      name: 'Недоступно, пока запущены оба ядра',
+      exact: true
+    });
     await expect(apply).toBeDisabled();
     await expect(apply).toHaveAttribute('title', 'Недоступно, пока запущены оба ядра');
     await expect(apply).toHaveAttribute('aria-label', 'Недоступно, пока запущены оба ядра');
 
     await expect(page.getByRole('button', { name: 'Сохранить', exact: true })).toBeEnabled();
+
+    // виджет ядра: «Оба ядра», перезапуск неактивен
+    const widget = page.locator('.editor-kernel-widget');
+    await expect(widget).toContainText('Оба ядра');
+    await expect(widget.locator('.led-dot')).toHaveClass(/led-red/);
+    await expect(widget.locator('.widget-restart-btn')).toBeDisabled();
   });
 
   test('с одним активным ядром «Сохранить и применить» доступна', async ({ page }) => {
