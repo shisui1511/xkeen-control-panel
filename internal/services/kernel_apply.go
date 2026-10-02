@@ -72,9 +72,12 @@ func KernelMayRun(processStatus string) bool {
 // всех мест «записал → перезапустил»: остановленное пользователем ядро не
 // запускается, чужое ядро не перезапускается.
 type KernelApplier struct {
-	// mu сериализует Apply: одновременно идёт не больше одного рестарта, а
-	// решение каждого вызова принимается по свежему статусу после захвата.
-	mu     sync.Mutex
+	// lock сериализует применения: одновременно идёт не больше одного рестарта, а
+	// решение каждого вызова принимается по свежему статусу после захвата. В
+	// production это замок жизненного цикла API (WithLifecycleLock): Apply ждёт его
+	// (фоновые вызывающие — подписки), а обработчики HTTP берут замок сами и
+	// вызывают ApplyLocked.
+	lock   *sync.Mutex
 	status func(string) string
 	// active — единое определение активного ядра (то же, что у capabilities):
 	// работающий процесс, name_client учитывается, только когда ничего не запущено.
@@ -105,7 +108,7 @@ func NewKernelApplier(kernels *KernelService, xkeen *XKeenService) *KernelApplie
 		// у Mihomo в панели нет.
 		restart = xkeen.Restart
 	}
-	return &KernelApplier{status: status, active: active, restart: restart}
+	return &KernelApplier{lock: &sync.Mutex{}, status: status, active: active, restart: restart}
 }
 
 // NewKernelApplierFunc собирает KernelApplier из функций (тесты и места, где
@@ -120,7 +123,7 @@ func NewKernelApplierFunc(status func(string) string, configured func() string, 
 		}
 		return ResolveActiveState(states, nil, configured)
 	}
-	return &KernelApplier{status: status, active: active, restart: restart}
+	return &KernelApplier{lock: &sync.Mutex{}, status: status, active: active, restart: restart}
 }
 
 // applyDecision — результат decide: исход без побочных эффектов.
@@ -240,12 +243,31 @@ func (k *KernelApplier) WillRestart(target string) bool {
 	return k.Preview(target).Outcome == ApplyRestarted
 }
 
-// Apply решает по свежему статусу и при необходимости перезапускает ядро.
-// Откат записанных файлов не делается: при restart_failed конфиг остаётся.
-func (k *KernelApplier) Apply(targets ...string) ApplyResult {
-	k.mu.Lock()
-	defer k.mu.Unlock()
+// WithLifecycleLock подменяет собственный замок applier общим замком жизненного
+// цикла ядра, чтобы применение конфигурации и операции start/stop/switch
+// сериализовались одним мьютексом. Вызывать только при сборке, до первого Apply.
+// При l == nil замок не меняется.
+func (k *KernelApplier) WithLifecycleLock(l *sync.Mutex) *KernelApplier {
+	if l != nil {
+		k.lock = l
+	}
+	return k
+}
 
+// Apply ждёт замок (блокирующе) и применяет конфигурацию по свежему статусу.
+// Для вызывающих, которые замок не держат (фоновое применение после обновления
+// подписки). Обработчики, уже взявшие замок жизненного цикла, вызывают ApplyLocked.
+func (k *KernelApplier) Apply(targets ...string) ApplyResult {
+	k.lock.Lock()
+	defer k.lock.Unlock()
+	return k.ApplyLocked(targets...)
+}
+
+// ApplyLocked решает по свежему статусу и при необходимости перезапускает ядро.
+// Вызывающий уже держит замок жизненного цикла, переданный в WithLifecycleLock:
+// sync.Mutex не реентерабелен, повторный захват заблокировал бы вызов навсегда.
+// Откат записанных файлов не делается: при restart_failed конфиг остаётся.
+func (k *KernelApplier) ApplyLocked(targets ...string) ApplyResult {
 	d := k.decide(targets)
 	if !d.restart {
 		return d.result

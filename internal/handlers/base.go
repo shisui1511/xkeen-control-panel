@@ -68,8 +68,12 @@ type API struct {
 	lastRestartLogger     time.Time
 	restartLoggerMutex    sync.Mutex
 
-	// lifecycleMu — одна операция жизненного цикла ядра за раз (start, stop,
-	// restart, switch_kernel, apply): вторая получает 409 kernel_op_in_progress.
+	// lifecycleMu — одна операция жизненного цикла ядра за раз. Один замок на все
+	// пути «перезапустить ядро»: ServiceControl (start, stop, restart,
+	// switch_kernel, apply) и обходные обработчики (gRPC-мониторинг Xray,
+	// снимки, профили Mihomo, миграция сокета, DNS-перехват) берут его через
+	// tryLifecycleLock (занят — 409 kernel_op_in_progress); KernelApplier.Apply
+	// для фоновых вызывающих (подписки) ждёт его блокирующе.
 	lifecycleMu sync.Mutex
 }
 
@@ -265,8 +269,19 @@ func (a *API) SetKernelService(svc *services.KernelService) {
 	// Запасные источники активного ядра (когда процессов ядер нет): свежий снимок
 	// статуса XKeen и name_client init-скрипта.
 	svc.SetActiveFallbacks(a.freshKernelStatusRaw, a.configuredKernel)
-	a.kernelApplier = services.NewKernelApplier(svc, a.xkeenSvc)
+	a.kernelApplier = services.NewKernelApplier(svc, a.xkeenSvc).WithLifecycleLock(&a.lifecycleMu)
 	a.kernelSwitcher = services.NewKernelSwitcher(svc)
+}
+
+// tryLifecycleLock берёт замок жизненного цикла без ожидания. Занят — пишет 409
+// kernel_op_in_progress и возвращает false; при успехе вызывающий делает
+// `defer a.lifecycleMu.Unlock()`.
+func (a *API) tryLifecycleLock(w http.ResponseWriter, r *http.Request) bool {
+	if !a.lifecycleMu.TryLock() {
+		JSONErrorCode(w, http.StatusConflict, "kernel_op_in_progress", a.t(r, "kernel.op_in_progress"))
+		return false
+	}
+	return true
 }
 
 // freshKernelStatusRaw — текст `xkeen -status` и его свежесть. Устаревший снимок

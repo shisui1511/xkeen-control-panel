@@ -410,3 +410,58 @@ func TestKernelApplier_FreshStatusAfterLock(t *testing.T) {
 		t.Errorf("restart calls = %d, want 1", got)
 	}
 }
+
+// Общий замок жизненного цикла: пока он удержан, Apply (фоновый вызов) ждёт и не
+// перезапускает ядро; после освобождения решает по свежему статусу.
+func TestKernelApplier_LifecycleLockShared(t *testing.T) {
+	lock := &sync.Mutex{}
+	f := &applyFake{configured: "xray", statuses: map[string]string{"xray": "running"}}
+	a := f.applier(nil).WithLifecycleLock(lock)
+
+	lock.Lock()
+	done := make(chan ApplyResult, 1)
+	go func() { done <- a.Apply("xray") }()
+
+	select {
+	case res := <-done:
+		t.Fatalf("Apply вернулся при удерживаемом замке: %+v", res)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if got := atomic.LoadInt32(&f.restarts); got != 0 {
+		t.Fatalf("рестартов при удерживаемом замке = %d, want 0", got)
+	}
+
+	lock.Unlock()
+	select {
+	case res := <-done:
+		if res.Outcome != ApplyRestarted {
+			t.Errorf("outcome = %q, want restarted", res.Outcome)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Apply не вернулся после освобождения замка")
+	}
+	if got := atomic.LoadInt32(&f.restarts); got != 1 {
+		t.Errorf("рестартов = %d, want 1", got)
+	}
+}
+
+// ApplyLocked замок не берёт: при удерживаемом замке (его держит вызывающий)
+// возвращается сразу.
+func TestKernelApplier_ApplyLockedDoesNotLock(t *testing.T) {
+	lock := &sync.Mutex{}
+	f := &applyFake{configured: "xray", statuses: map[string]string{"xray": "running"}}
+	a := f.applier(nil).WithLifecycleLock(lock)
+
+	lock.Lock()
+	defer lock.Unlock()
+	done := make(chan ApplyResult, 1)
+	go func() { done <- a.ApplyLocked("xray") }()
+	select {
+	case res := <-done:
+		if res.Outcome != ApplyRestarted {
+			t.Errorf("outcome = %q, want restarted", res.Outcome)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ApplyLocked блокируется на замке: самоблокировка")
+	}
+}

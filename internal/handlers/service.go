@@ -141,8 +141,7 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Одна операция жизненного цикла за раз (двойной клик, две вкладки).
-	if !a.lifecycleMu.TryLock() {
-		JSONErrorCode(w, http.StatusConflict, "kernel_op_in_progress", a.t(r, "kernel.op_in_progress"))
+	if !a.tryLifecycleLock(w, r) {
 		return
 	}
 	defer a.lifecycleMu.Unlock()
@@ -318,7 +317,7 @@ func (a *API) serviceApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result := a.applyKernel(target)
+	result := a.applyKernelLocked(target)
 	log.Printf("apply: target=%s active=%s outcome=%s",
 		utils.SanitizeLogInput(target), utils.SanitizeLogInput(result.ActiveKernel), utils.SanitizeLogInput(string(result.Outcome)))
 	a.ClearCapabilitiesCache()
@@ -337,6 +336,20 @@ func (a *API) applyKernel(targets ...string) services.ApplyResult {
 		return res
 	}
 	return a.kernelApplier.Apply(targets...)
+}
+
+// applyKernelLocked — то же, что applyKernel, но без повторного захвата замка:
+// только под lifecycleMu (sync.Mutex не реентерабелен).
+func (a *API) applyKernelLocked(targets ...string) services.ApplyResult {
+	if a.kernelApplier == nil {
+		log.Printf("apply: kernel applier is not configured, restart skipped")
+		res := services.ApplyResult{Outcome: services.ApplySavedKernelStopped}
+		if len(targets) > 0 {
+			res.Kernel = targets[0]
+		}
+		return res
+	}
+	return a.kernelApplier.ApplyLocked(targets...)
 }
 
 // kernelForConfigPath — ядро, которому принадлежит файл конфигурации: каталог
