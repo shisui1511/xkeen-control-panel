@@ -245,7 +245,7 @@ test.describe('Конфликт ядер: остановка из баннера
     await page.getByRole('dialog').getByRole('button', { name: 'Остановить Mihomo' }).click();
 
     await expect(
-      page.locator('.toast--error', { hasText: 'Mihomo не остановился за 10 секунд' })
+      page.locator('.toast--error', { hasText: 'Mihomo не остановился. Повторите попытку' })
     ).toBeVisible();
     expect(harness.stopRequests).toEqual(['stop&kernel=mihomo']);
     await expect(page.getByTestId('kernel-conflict-banner')).toBeVisible();
@@ -277,9 +277,30 @@ test.describe('Конфликт ядер: карточки служб на да�
     }
 
     await serviceCard(page, 'Mihomo').getByRole('button', { name: 'Остановить' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('Остановить Mihomo?');
+    await dialog.getByRole('button', { name: 'Остановить Mihomo' }).click();
 
     await expect.poll(() => harness.stopRequests).toEqual(['stop&kernel=mihomo']);
+    await expect(
+      page.locator('.toast', { hasText: 'Конфликт снят. Активное ядро: Xray' })
+    ).toBeVisible();
     expect(harness.allRequests.filter((u) => u.includes('action=restart'))).toHaveLength(0);
+  });
+
+  test('конфликт: отмена подтверждения на карточке не шлёт остановку', async ({ page }) => {
+    const harness = await setupStopHarness(page, { stopOutcome: 'stopped', conflictCleared: true });
+    await visitPage(page, '/#/dashboard');
+    await expect(page.getByTestId('kernel-conflict-banner')).toBeVisible();
+
+    await serviceCard(page, 'Mihomo').getByRole('button', { name: 'Остановить' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('Остановить Mihomo?');
+    await dialog.getByRole('button', { name: 'Отмена' }).click();
+
+    await expect(dialog).toHaveCount(0);
+    expect(harness.stopRequests).toHaveLength(0);
+    await expect(page.getByTestId('kernel-conflict-banner')).toBeVisible();
   });
 
   test('без конфликта «Перезапустить» на Xray активна и шлёт restart', async ({ page }) => {

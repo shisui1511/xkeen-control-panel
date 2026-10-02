@@ -9,8 +9,8 @@ import { get } from 'svelte/store';
 import { apiFetch, apiFetchJSON } from './api';
 import { activateRestartGrace, clearRestartGrace } from './serviceGrace';
 import { kernelGateMessage, readKernelGateMeta } from './kernelGateError';
-import { kernelLabel, type KernelName } from './kernelState';
-import { showToast } from '../stores';
+import { KERNEL_NAMES, kernelLabel, type KernelName } from './kernelState';
+import { activeKernelName, fetchCapabilities, isConflict, showConfirm, showToast } from '../stores';
 import { t } from '../i18n';
 
 export type { KernelName } from './kernelState';
@@ -78,6 +78,49 @@ export async function stopKernelProcess(kernel: KernelName): Promise<StopKernelR
     outcome: outcome as StopKernelOutcome,
     method: data?.method
   };
+}
+
+/**
+ * Подтверждение остановки выбранного ядра в конфликте (D-02). Один и тот же диалог
+ * для баннера и карточки дашборда; `true` — пользователь согласен.
+ */
+export function confirmKernelStop(kernel: KernelName): Promise<boolean> {
+  const tr = get(t);
+  const label = kernelLabel(kernel);
+  return showConfirm({
+    title: tr('kernel.conflict_stop_confirm_title', { kernel: label }),
+    message: tr('kernel.conflict_stop_confirm_msg', { kernel: label }),
+    objectName: label,
+    confirmLabel: tr('kernel.conflict_stop', { kernel: label }),
+    cancelLabel: tr('app.cancel'),
+    variant: 'warning'
+  });
+}
+
+/**
+ * Останавливает выбранное ядро в конфликте и сообщает проверенный итог тостом (D-04):
+ * после остановки перечитывает capabilities и по ним решает, снят ли конфликт.
+ * Не бросает: ошибка запроса (кроме 401, который обрабатывает общий клиент) — error-тост.
+ */
+export async function stopKernelAndReport(kernel: KernelName): Promise<void> {
+  const tr = get(t);
+  try {
+    const result = await stopKernelProcess(kernel);
+    await fetchCapabilities();
+    if (result.outcome === 'still_running') {
+      showToast('error', tr('kernel.stop_still_running', { kernel: kernelLabel(kernel) }), 10000);
+    } else if (!get(isConflict)) {
+      const other = KERNEL_NAMES.find((k) => k !== kernel) ?? kernel;
+      const active = get(activeKernelName) || other;
+      showToast('success', tr('kernel.conflict_resolved', { kernel: kernelLabel(active) }));
+    } else {
+      // Процесс остановлен, но второй снова виден: нужен повтор или логи.
+      showToast('error', tr('kernel.conflict_not_resolved'), 10000);
+    }
+  } catch (e: unknown) {
+    if ((e as { status?: number } | null)?.status === 401) return;
+    showToast('error', e instanceof Error ? e.message : String(e), 10000);
+  }
 }
 
 /** Ошибка из ответа без конверта apiFetchJSON: гейт ядра, поле error, текст, статус. */

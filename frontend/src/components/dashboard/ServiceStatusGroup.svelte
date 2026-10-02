@@ -1,9 +1,10 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import {
+    confirmKernelStop,
     notifySwitchOutcome,
     serviceAction,
-    stopKernelProcess,
+    stopKernelAndReport,
     switchKernel,
     type KernelName
   } from '../../lib/serviceControl';
@@ -120,18 +121,17 @@
   }
 
   async function stopKernel(kernel: KernelName) {
+    if ($isConflict) {
+      // В конфликте общий stop погасил бы всё через XKeen: гасим только выбранное ядро —
+      // с тем же подтверждением и проверенным итогом, что у баннера (D-02, D-04).
+      if (!(await confirmKernelStop(kernel))) return;
+      await stopKernelAndReport(kernel);
+      if (onRefresh) setTimeout(onRefresh, 1500);
+      return;
+    }
     const label = kernelLabel(kernel);
     await runAction(async () => {
-      if ($isConflict) {
-        // В конфликте общий stop погасил бы всё через XKeen: гасим только выбранное ядро.
-        const result = await stopKernelProcess(kernel);
-        if (result.outcome === 'still_running') {
-          showToast('error', $t('kernel.stop_still_running', { kernel: label }), 10000);
-          return;
-        }
-      } else {
-        await serviceAction('stop');
-      }
+      await serviceAction('stop');
       showToast('warning', `${$t('app.stop')} ${label}`);
     }, 1500);
   }
