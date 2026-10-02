@@ -612,6 +612,17 @@ type KernelService struct {
 
 	// stageHook (только тесты) зовётся перед каждой сменой статуса установки, вне s.mu.
 	stageHook func(status, stage string)
+
+	// activeMu защищает запасные источники активного ядра (ActiveState).
+	// Замки не вкладываются: ActiveState отпускает activeMu до вызова
+	// ProcessStates (он берёт s.mu), поэтому порядок activeMu/s.mu не важен.
+	activeMu sync.Mutex
+	// freshRawFn — свежий снимок `xkeen -status` (текст, свежесть); configuredFn —
+	// ядро из name_client init-скрипта. Подключаются SetActiveFallbacks.
+	freshRawFn   func() (string, bool)
+	configuredFn func() string
+	// processStatesFn подменяет ProcessStates (только тесты), под s.mu.
+	processStatesFn func() []KernelProcessState
 }
 
 // SetReleaseSource подменяет источник релизов (базовый URL GitHub API и HTTP-клиент).

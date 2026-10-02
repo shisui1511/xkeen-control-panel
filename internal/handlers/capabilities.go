@@ -12,11 +12,17 @@ import (
 
 // CapabilitiesResponse describes which backend features are available.
 type CapabilitiesResponse struct {
-	Kernels      map[string]KernelCapability `json:"kernels"`
-	Mihomo       MihomoCapability            `json:"mihomo"`
-	XRay         XRayCapability              `json:"xray"`
-	ActiveKernel string                      `json:"active_kernel"`
-	XKeenDNS     bool                        `json:"xkeen_dns"`
+	Kernels map[string]KernelCapability `json:"kernels"`
+	Mihomo  MihomoCapability            `json:"mihomo"`
+	XRay    XRayCapability              `json:"xray"`
+	// ActiveKernel — "xray" | "mihomo" | "none"; "both" при конфликте
+	// (запущены оба ядра).
+	ActiveKernel string `json:"active_kernel"`
+	// KernelConflict — запущены оба ядра; ядро по порядку не выбирается.
+	KernelConflict bool `json:"kernel_conflict"`
+	// RunningKernels — запущенные ядра в порядке [xray, mihomo].
+	RunningKernels []string `json:"running_kernels,omitempty"`
+	XKeenDNS       bool     `json:"xkeen_dns"`
 	// XKeenInstalled — бинарник XKeen найден (без него ядра не запустить)
 	XKeenInstalled bool   `json:"xkeen_installed"`
 	GlobalHwid     string `json:"global_hwid,omitempty"`
@@ -134,39 +140,12 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	resp.Mihomo.ControllerTarget = ctrlInfo.Target
 	resp.Mihomo.IsInsecureLAN = ctrlInfo.IsInsecure
 
-	// Detect which kernel is currently active
-	var activeKernel string
-	if a.kernelSvc != nil {
-		for _, info := range a.kernelSvc.List() {
-			if info.ProcessStatus == "running" {
-				activeKernel = info.Name
-				break
-			}
-		}
-	}
-	if activeKernel == "" && a.xkeenSvc != nil {
-		// Запасной путь: вывод xkeen -status из кэша, но только свежий —
-		// устаревший снимок (после switch_kernel или при зависшем опросе)
-		// хранит прежнее ядро. Если в выводе оба слова, ядро по Raw не выбирается.
-		if snap := a.xkeenStatusSnapshot(); !snap.Stale && snap.Raw != "" {
-			lower := strings.ToLower(snap.Raw)
-			hasXray := strings.Contains(lower, "xray")
-			hasMihomo := strings.Contains(lower, "mihomo")
-			if hasXray && !hasMihomo {
-				activeKernel = "xray"
-			} else if hasMihomo && !hasXray {
-				activeKernel = "mihomo"
-			}
-		}
-	}
-	if activeKernel == "" && a.xkeenSvc != nil {
-		// Ни одно ядро не запущено: активным считается то, что запустит XKeen
-		activeKernel = a.xkeenSvc.ConfiguredKernel()
-	}
-	if activeKernel == "" {
-		activeKernel = "none"
-	}
-	resp.ActiveKernel = activeKernel
+	// Активное ядро — единый резолвер по процессам; при запуске обоих ядер
+	// active_kernel = "both" и выставлен kernel_conflict.
+	st := a.activeKernelState()
+	resp.ActiveKernel = st.Label()
+	resp.KernelConflict = st.Conflict
+	resp.RunningKernels = st.Running
 
 	// Предсказание рестарта при применении: то же решение, что примет Apply.
 	if a.kernelApplier != nil {

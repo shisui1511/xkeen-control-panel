@@ -256,7 +256,38 @@ func (a *API) SetKernelService(svc *services.KernelService) {
 		a.kernelApplier = nil
 		return
 	}
+	// Запасные источники активного ядра (когда процессов ядер нет): свежий снимок
+	// статуса XKeen и name_client init-скрипта.
+	svc.SetActiveFallbacks(a.freshKernelStatusRaw, a.configuredKernel)
 	a.kernelApplier = services.NewKernelApplier(svc, a.xkeenSvc)
+}
+
+// freshKernelStatusRaw — текст `xkeen -status` и его свежесть. Устаревший снимок
+// (после switch_kernel или при зависшем опросе) хранит прежнее ядро и за факт не
+// принимается.
+func (a *API) freshKernelStatusRaw() (string, bool) {
+	if a.xkeenSvc == nil {
+		return "", false
+	}
+	snap := a.xkeenStatusSnapshot()
+	return snap.Raw, !snap.Stale && snap.Raw != ""
+}
+
+// configuredKernel — ядро из name_client init-скрипта XKeen; nil-безопасно.
+func (a *API) configuredKernel() string {
+	if a.xkeenSvc == nil {
+		return ""
+	}
+	return a.xkeenSvc.ConfiguredKernel()
+}
+
+// activeKernelState — единое определение активного ядра для обработчиков.
+// Без kernelSvc (тестовые сборки API) процессов нет: решают запасные источники.
+func (a *API) activeKernelState() services.ActiveKernelState {
+	if a.kernelSvc != nil {
+		return a.kernelSvc.ActiveState()
+	}
+	return services.ResolveActiveState(nil, a.freshKernelStatusRaw, a.configuredKernel)
 }
 
 // KernelApplier — общий исполнитель «применить конфиг к ядру»; nil до
