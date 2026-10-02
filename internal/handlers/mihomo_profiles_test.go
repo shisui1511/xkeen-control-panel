@@ -169,6 +169,58 @@ func TestMihomoProfileActivate_CoreActiveByApplier(t *testing.T) {
 	}
 }
 
+// TestMihomoProfileActivate_ConflictOutcome: при двух запущенных ядрах профиль
+// активируется, но ядро не перезапускается; ответ несёт исход
+// saved_kernel_conflict.
+func TestMihomoProfileActivate_ConflictOutcome(t *testing.T) {
+	dir, dataDir := newActivationFixture(t)
+	var applyRestarts int32
+	api := &API{cfg: &config.Config{MihomoConfigDir: dir}}
+	api.kernelApplier = services.NewKernelApplierFunc(
+		func(name string) string {
+			if name == "xray" || name == "mihomo" {
+				return "running"
+			}
+			return "not_installed"
+		},
+		func() string { return "mihomo" },
+		func() (string, error) {
+			atomic.AddInt32(&applyRestarts, 1)
+			return "", nil
+		},
+	)
+	svc := services.NewMihomoProfileService(dir, dataDir)
+	api.SetMihomoProfileService(svc)
+	svc.Validate = func(string) error { return nil }
+	svc.Healthy = func() bool { return true }
+
+	rec := httptest.NewRecorder()
+	api.MihomoProfileAction(rec, httptest.NewRequest(http.MethodPost, "/api/mihomo/profiles/activate", strings.NewReader(`{"name":"work"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("activate: %d %s", rec.Code, rec.Body.String())
+	}
+	var env struct {
+		Data struct {
+			Active     string `json:"active"`
+			Restarted  bool   `json:"restarted"`
+			RolledBack bool   `json:"rolled_back"`
+			Outcome    string `json:"outcome"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v: %s", err, rec.Body.String())
+	}
+	if env.Data.Outcome != "saved_kernel_conflict" {
+		t.Errorf("outcome = %q, want saved_kernel_conflict", env.Data.Outcome)
+	}
+	if env.Data.Active != "work" || env.Data.Restarted || env.Data.RolledBack {
+		t.Errorf("got %+v, want work activated without restart or rollback", env.Data)
+	}
+	if got := atomic.LoadInt32(&applyRestarts); got != 0 {
+		t.Errorf("restart calls = %d, want 0", got)
+	}
+}
+
 // newActivationFixture — каталог Mihomo с профилями default (активный) и work.
 func newActivationFixture(t *testing.T) (dir, dataDir string) {
 	t.Helper()

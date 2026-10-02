@@ -89,7 +89,7 @@ func (a *API) waitMihomoRunning() bool {
 
 // profileActivationResponse — ответ активации профиля: результат сервиса и
 // исход применения. Outcome заполняется, только когда профиль записан, но ядро
-// не перезапускалось (остановлено или неактивно): по нему карточка профилей
+// не перезапускалось (остановлено, неактивно или запущены оба ядра): по нему карточка профилей
 // показывает, когда профиль вступит в силу.
 type profileActivationResponse struct {
 	*services.ActivationResult
@@ -105,7 +105,7 @@ func (a *API) profileActivationResult(res *services.ActivationResult) profileAct
 	// Исход restarted в предпросмотре значит «Activate не перезапускал»: профиль
 	// уже был активным, исход в ответ не попадает.
 	switch preview := a.kernelApplier.Preview("mihomo").Outcome; preview {
-	case services.ApplySavedKernelStopped, services.ApplySavedKernelInactive:
+	case services.ApplySavedKernelStopped, services.ApplySavedKernelInactive, services.ApplySavedKernelConflict:
 		out.Outcome = string(preview)
 	}
 	return out

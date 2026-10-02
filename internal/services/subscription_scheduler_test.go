@@ -984,6 +984,47 @@ func TestRefreshXray_DoesNotRestartXray(t *testing.T) {
 	}
 }
 
+// При двух запущенных ядрах применение подписки не дописывает «-restart»: ядро
+// не перезапускается, исход saved_kernel_conflict.
+func TestRefreshXray_KernelConflictDoesNotRestart(t *testing.T) {
+	tmp := t.TempDir()
+
+	vmessJSON := `{"ps":"xray-node","add":"1.1.1.1","port":"443","id":"uuid","net":"tcp"}`
+	body := base64.StdEncoding.EncodeToString([]byte("vmess://" + base64.StdEncoding.EncodeToString([]byte(vmessJSON))))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	logFile := filepath.Join(tmp, "xkeen_calls.log")
+	xrayConfigDir := filepath.Join(tmp, "xray")
+	_ = os.MkdirAll(xrayConfigDir, 0755)
+
+	svc := NewSubscriptionService(tmp, xrayConfigDir, tmp)
+	svc.httpClient = srv.Client()
+	svc.SetKernelApplier(logRestartApplier(logFile, "xray", map[string]string{"xray": "running", "mihomo": "running"}))
+
+	sub := Subscription{
+		ID:         "xray-sub",
+		Name:       "Xray Sub Conflict",
+		URL:        srv.URL,
+		EnableXray: true,
+		Enabled:    true,
+		Interval:   1,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Refresh("xray-sub"); err != nil {
+		t.Fatalf("Refresh failed: %v", err)
+	}
+	calls, _ := os.ReadFile(logFile)
+	if strings.Contains(string(calls), "-restart") {
+		t.Errorf("при двух запущенных ядрах рестарта быть не должно, лог: %q", calls)
+	}
+}
+
 func TestSubscriptionService_MihomoAPIProviderReload(t *testing.T) {
 	var calledPath string
 	var calledMethod string
