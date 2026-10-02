@@ -124,7 +124,10 @@ func TestKernelService_Get(t *testing.T) {
 	}
 }
 
-func TestKernelService_GetActiveKernel(t *testing.T) {
+// TestKernelService_ActiveStateReplacesFirstRunning: активное ядро определяется
+// единым ActiveState, а не порядком перебора List(). Оба ядра запущены — конфликт,
+// а не «xray, потому что он первый».
+func TestKernelService_ActiveStateReplacesFirstRunning(t *testing.T) {
 	tmpDir := t.TempDir()
 	origProcDir := procDir
 	procDir = tmpDir
@@ -145,9 +148,9 @@ func TestKernelService_GetActiveKernel(t *testing.T) {
 	svc.kernels["xray"].BinaryPath = xrayBin
 
 	// Case 1: No running kernels
-	active := svc.GetActiveKernel()
-	if active != "" {
-		t.Errorf("expected no active kernel, got %q", active)
+	st := svc.ActiveState()
+	if st.Kernel != "none" || st.Conflict || len(st.Running) != 0 {
+		t.Errorf("expected none without conflict, got %+v", st)
 	}
 
 	// Case 2: Only mihomo is running
@@ -163,12 +166,14 @@ func TestKernelService_GetActiveKernel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	active = svc.GetActiveKernel()
-	if active != "mihomo" {
-		t.Errorf("expected active kernel 'mihomo', got %q", active)
+	svc.InvalidateActiveState()
+	st = svc.ActiveState()
+	if st.Kernel != "mihomo" || st.Conflict {
+		t.Errorf("expected active kernel 'mihomo', got %+v", st)
 	}
 
-	// Case 3: Both running (order is xray first in List() / GetActiveKernel)
+	// Case 3: Both running (файлов stat/uptime нет — возраст неизвестен, оба
+	// считаются установившимися): конфликт, ядро не выбирается по порядку.
 	pid2 := "1001"
 	pidDir2 := filepath.Join(tmpDir, pid2)
 	if err := os.MkdirAll(pidDir2, 0755); err != nil {
@@ -181,9 +186,13 @@ func TestKernelService_GetActiveKernel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	active = svc.GetActiveKernel()
-	if active != "xray" {
-		t.Errorf("expected active kernel 'xray', got %q", active)
+	svc.InvalidateActiveState()
+	st = svc.ActiveState()
+	if !st.Conflict || st.Label() != "both" || st.Kernel != "" {
+		t.Errorf("expected conflict (both), got %+v", st)
+	}
+	if len(st.Running) != 2 {
+		t.Errorf("expected both kernels in Running, got %v", st.Running)
 	}
 }
 

@@ -897,15 +897,6 @@ func (s *KernelService) Get(name string) *KernelInfo {
 	return &snap
 }
 
-func (s *KernelService) GetActiveKernel() string {
-	for _, info := range s.List() {
-		if info.ProcessStatus == "running" {
-			return info.Name
-		}
-	}
-	return ""
-}
-
 // SetChannel переключает канал обновлений ядра (stable/preview) и сохраняет выбор
 // на диск, чтобы он пережил рестарт xcp (T-CH-02). Ошибки: ErrInvalidChannel,
 // ErrKernelNotFound, ErrKernelBusy (над ядром идёт установка, откат или загрузка

@@ -159,7 +159,7 @@ func (s *SubscriptionService) Refresh(id string) error {
 		providerName := subCopy.GetProviderName()
 		activeKernel := ""
 		if s.kernelSvc != nil {
-			activeKernel = s.kernelSvc.GetActiveKernel()
+			activeKernel = s.kernelSvc.ActiveState().Label()
 		}
 		log.Printf("[Subscriptions] Mihomo reload triggered for provider %s (active kernel: %s)", providerName, activeKernel)
 		err := s.TriggerMihomoProviderReload(providerName)
