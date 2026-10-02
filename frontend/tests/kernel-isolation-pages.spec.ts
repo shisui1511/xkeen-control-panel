@@ -1,4 +1,4 @@
-// e2e-pages: editor
+// e2e-pages: editor traffic
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { setupMocks, visitPage } from './helpers/api-mocks';
@@ -91,5 +91,13 @@ test.describe('Редактор при конфликте ядер', () => {
       page.getByText('Действие недоступно: сейчас активно Xray, а нужно Mihomo.')
     ).toBeVisible();
     await expect(page.getByText('рестарт', { exact: false })).toHaveCount(0);
+  });
+});
+
+test.describe('Страницы читают состояние ядра из стора', () => {
+  test('«Трафик»: статистика Xray видна только при активном Xray', async ({ page }) => {
+    await setupMocks(page, 'xray');
+    await visitPage(page, '/#/traffic');
+    await expect(page.getByTestId('xray-stats-section')).toBeVisible();
   });
 });

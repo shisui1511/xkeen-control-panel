@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
-  import { showToast, capabilities } from './stores';
+  import { showToast, activeKernelName } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import PageHeader from './PageHeader.svelte';
   import Button from './components/Button.svelte';
@@ -491,12 +491,8 @@
     return formatDate(ts);
   }
 
-  // "none" — ни одно ядро не определено: фильтровать базы не по чему
-  let activeKernel = $derived(
-    $capabilities?.active_kernel && $capabilities.active_kernel !== 'none'
-      ? $capabilities.active_kernel
-      : null
-  );
+  // none и конфликт — единственное ядро не определено: фильтровать базы не по чему
+  let activeKernel = $derived($activeKernelName || null);
 
   // Filtered files in master column
   let displayedFiles = $derived(

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from './i18n';
-  import { capabilities, showToast } from './stores';
+  import { activeKernelName, showToast } from './stores';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
 
@@ -22,8 +22,8 @@
   let kernelInitialized = $state(false);
 
   $effect(() => {
-    const active = $capabilities?.active_kernel;
-    if (!kernelInitialized && (active === 'xray' || active === 'mihomo')) {
+    const active = $activeKernelName;
+    if (!kernelInitialized && active) {
       kernel = active;
       kernelInitialized = true;
     }

@@ -1,7 +1,14 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
-  import { showToast, showConfirm, capabilities, fetchCapabilities } from './stores';
+  import {
+    showToast,
+    showConfirm,
+    capabilities,
+    fetchCapabilities,
+    isXray,
+    kernelKnown
+  } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
   import PageHeader from './PageHeader.svelte';
@@ -66,11 +73,7 @@
   let ws: WebSocket | null = null;
   let connected = $state(false);
   // Mihomo feeds the chart; while its API is down no samples will ever arrive.
-  let coreOffline = $derived(
-    $capabilities !== null &&
-      $capabilities.active_kernel !== 'xray' &&
-      !$capabilities.mihomo?.reachable
-  );
+  let coreOffline = $derived($kernelKnown && !$isXray && !$capabilities?.mihomo?.reachable);
   let totalUp = $state(0);
   let totalDown = $state(0);
   let sessionUp = $state(0);
@@ -406,7 +409,7 @@
 
   async function fetchXrayStats() {
     if (typeof document !== 'undefined' && document.hidden) return;
-    if ($capabilities?.active_kernel !== 'xray' || !$capabilities?.xray?.grpc_ready) return;
+    if (!$isXray || !$capabilities?.xray?.grpc_ready) return;
 
     try {
       const res = await apiFetchJSON<any>('/api/xray/stats');
@@ -431,7 +434,7 @@
 
   function startXrayStatsPolling() {
     stopXrayStatsPolling();
-    if ($capabilities?.active_kernel === 'xray' && $capabilities?.xray?.grpc_ready) {
+    if ($isXray && $capabilities?.xray?.grpc_ready) {
       fetchXrayStats();
       xrayStatsInterval = setInterval(fetchXrayStats, 2000);
     }
@@ -486,13 +489,11 @@
   // Примитив, а не весь объект capabilities: опрос раз в 10 с кладёт в стор новый объект
   // с теми же значениями, и эффект, читающий стор целиком, перезапускался бы на каждом
   // опросе — cleanup обнулял бы xrayStatsError и прятал предупреждение WR-06.
-  const isXrayStatsActive = $derived(
-    $capabilities?.active_kernel === 'xray' && $capabilities?.xray?.grpc_ready === true
-  );
+  const isXrayStatsActive = $derived($isXray && $capabilities?.xray?.grpc_ready === true);
 
   $effect(() => {
     const active = isXrayStatsActive;
-    // start/stop сами читают $capabilities (проверка в fetchXrayStats): вне untrack эти
+    // start/stop сами читают $isXray и $capabilities (проверка в fetchXrayStats): вне untrack эти
     // чтения стали бы зависимостями эффекта и вернули перезапуск на каждом опросе
     untrack(() => {
       if (active) {
@@ -1123,7 +1124,7 @@
       {/if}
     </div>
 
-    {#if $capabilities?.active_kernel === 'xray'}
+    {#if $isXray}
       <!-- Xray Live Statistics Section (D-05, D-06) -->
       <div
         class="card analytics-section-card xray-stats-card"
