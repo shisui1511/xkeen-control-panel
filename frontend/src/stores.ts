@@ -153,14 +153,20 @@ export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
       clearRestartGrace();
     }
 
-    // «Последнее валидное» работает только для переходного none (или пустого поля):
-    // известное ядро не затирается. Конфликт ничем не маскируется и не запоминается —
-    // он должен быть виден немедленно (D-07).
+    // «Последнее валидное» работает только для переходного none и только в окне
+    // перезапуска: известное ядро не затирается, пока процесс поднимается. Вне окна
+    // none настоящий («ни одно ядро не запущено») — он виден как есть, а прежнее
+    // ядро забывается, чтобы следующий none не подменился устаревшим значением (D-07).
+    // Конфликт ничем не маскируется и не запоминается — он виден немедленно.
     const incomingState = kernelStateOf(data);
     if (incomingState === 'xray' || incomingState === 'mihomo') {
       lastValidActiveKernel = incomingState;
-    } else if (incomingState === 'none' && lastValidActiveKernel) {
-      data.active_kernel = lastValidActiveKernel;
+    } else if (incomingState === 'none') {
+      if (get(isServiceRestarting) && lastValidActiveKernel) {
+        data.active_kernel = lastValidActiveKernel;
+      } else {
+        lastValidActiveKernel = '';
+      }
     }
 
     if (get(isKernelChecking)) {

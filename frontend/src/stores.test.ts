@@ -443,13 +443,24 @@ describe('единое состояние ядра и конфликт', () => {
     expect(stores).toBeDefined();
   });
 
-  it('переходный none не затирает известное ядро; конфликт виден сразу; затем mihomo', async () => {
+  // Во время перезапуска API ещё недоступен: иначе fetchCapabilities сам снимет окно
+  const restartingNone = () =>
+    caps('none', { mihomo: { reachable: true, process_running: false, api_reachable: false } });
+
+  afterEach(async () => {
+    const { clearRestartGrace } = await import('./lib/serviceGrace');
+    clearRestartGrace();
+  });
+
+  it('переходный none в окне перезапуска не затирает известное ядро; конфликт виден сразу; затем mihomo', async () => {
     const { stores } = await load();
+    const { activateRestartGrace } = await import('./lib/serviceGrace');
     apiFetchJSON.mockResolvedValue(caps('xray'));
     await stores.fetchCapabilities();
     expect(get(stores.capabilities)?.active_kernel).toBe('xray');
 
-    apiFetchJSON.mockResolvedValue(caps('none'));
+    activateRestartGrace(60_000);
+    apiFetchJSON.mockResolvedValue(restartingNone());
     await stores.fetchCapabilities();
     expect(get(stores.capabilities)?.active_kernel).toBe('xray');
 
@@ -464,15 +475,48 @@ describe('единое состояние ядра и конфликт', () => {
     expect(get(stores.activeKernelName)).toBe('mihomo');
   });
 
-  it('конфликт не маскируется последним значением и после none не подменяется им', async () => {
+  it('none вне окна перезапуска виден как none и забывает прежнее ядро', async () => {
+    const { stores } = await load();
+    const { activateRestartGrace } = await import('./lib/serviceGrace');
+    apiFetchJSON.mockResolvedValue(caps('xray'));
+    await stores.fetchCapabilities();
+
+    apiFetchJSON.mockResolvedValue(restartingNone());
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('none');
+    expect(get(stores.isNone)).toBe(true);
+
+    // Следующий none уже в окне перезапуска: прежнее ядро забыто и не подставляется
+    activateRestartGrace(60_000);
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('none');
+  });
+
+  it('конфликт, затем none вне окна перезапуска: none, а не прежнее ядро', async () => {
     const { stores } = await load();
     apiFetchJSON.mockResolvedValue(caps('xray'));
     await stores.fetchCapabilities();
     apiFetchJSON.mockResolvedValue(conflictCaps());
     await stores.fetchCapabilities();
     expect(get(stores.activeKernelState)).toBe('conflict');
-    // none после конфликта: последнее валидное — xray (конфликт его не затёр и не стал им)
-    apiFetchJSON.mockResolvedValue(caps('none'));
+    expect(get(stores.conflictVisible)).toBe(true);
+
+    apiFetchJSON.mockResolvedValue(restartingNone());
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('none');
+  });
+
+  it('конфликт не маскируется последним значением и после none в окне не подменяется им', async () => {
+    const { stores } = await load();
+    const { activateRestartGrace } = await import('./lib/serviceGrace');
+    apiFetchJSON.mockResolvedValue(caps('xray'));
+    await stores.fetchCapabilities();
+    apiFetchJSON.mockResolvedValue(conflictCaps());
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('conflict');
+    // none после конфликта в окне: последнее валидное — xray (конфликт его не затёр и не стал им)
+    activateRestartGrace(60_000);
+    apiFetchJSON.mockResolvedValue(restartingNone());
     await stores.fetchCapabilities();
     expect(get(stores.capabilities)?.active_kernel).toBe('xray');
   });
