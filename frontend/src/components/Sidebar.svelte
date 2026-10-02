@@ -3,9 +3,11 @@
   import {
     isSidebarOpen,
     isSidebarCollapsed,
-    capabilities,
     navCaps,
-    mihomoApiAvailable
+    mihomoApiAvailable,
+    isConflict,
+    isMihomo,
+    activeKernelName
   } from '../stores';
   import { showMihomoNavFor } from '../lib/navCaps';
   import Skeleton from './Skeleton.svelte';
@@ -139,13 +141,12 @@
   // never drift apart (WR-01 / IN-05).
   // Строится по кэшированному срезу navCaps (D-16): true — показать, false — скрыть,
   // null — срез неизвестен (холодный первый вход), вместо групп рисуется скелетон.
-  const showMihomoNav = $derived(showMihomoNavFor($navCaps));
+  // В конфликте ядер группы Mihomo скрыты (нейтральные пункты и «Сервисы» остаются).
+  const showMihomoNav = $derived($isConflict ? false : showMihomoNavFor($navCaps));
 
   // Same hoist for the "Mihomo API unreachable" nav-item badge (72-REVIEW WR-05)
   // — was copy-pasted verbatim at 3 call sites, risking condition drift.
-  const showMihomoApiBadge = $derived(
-    $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable
-  );
+  const showMihomoApiBadge = $derived($isMihomo && !$mihomoApiAvailable);
 
   // CR-01: rail-mode (collapsed) nav-item labels used to rely on a CSS-only
   // `.nav-item::after` tooltip, which never rendered — `.sidebar` clips any
@@ -605,7 +606,7 @@
     <SystemStatusCapsule
       variant={$isSidebarCollapsed ? 'rail' : 'sidebar'}
       {systemStats}
-      activeKernel={$capabilities?.active_kernel}
+      activeKernel={$activeKernelName}
       {isXkeenRunning}
       {onSwitchTab}
     />

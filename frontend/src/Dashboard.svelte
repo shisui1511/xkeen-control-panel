@@ -13,7 +13,8 @@
     mihomoApiState,
     mihomoOfflineReason,
     panelUnreachable,
-    conflictVisible
+    conflictVisible,
+    isConflict
   } from './stores';
   import { usePoller } from './lib/poller';
   import { apiFetch, apiFetchJSON } from './lib/api';
@@ -24,6 +25,7 @@
   import Card from './components/Card.svelte';
   import Button from './components/Button.svelte';
   import Icon from './lib/components/Icon.svelte';
+  import Warning from './lib/components/icons/Warning.svelte';
   import Skeleton from './components/Skeleton.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
   import KernelConflictBanner from './components/KernelConflictBanner.svelte';
@@ -95,6 +97,13 @@
     'smartproxy',
     'trafficquotas'
   ];
+  // В конфликте ядер (оба процесса запущены) вкладки ядер и режим конструктора закрыты
+  // заглушкой под баннером; обычный редактор — правка файлов, данные — не гейтится.
+  const conflictGatedTabs = [...mihomoDependentTabs, 'dat'];
+  const conflictGateActive = $derived(
+    $conflictVisible &&
+      (conflictGatedTabs.includes(currentTab) || (currentTab === 'editor' && isConstructorMode))
+  );
   let theme = $state(document.documentElement.getAttribute('data-theme') || 'light');
   let pwaInstallPrompt = $state<any>(null);
 
@@ -975,7 +984,7 @@
     inert={drawerIsModal}
   >
     <!-- Mihomo offline warning banner / Restarting notice -->
-    {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities?.mihomo?.reachable}
+    {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities?.mihomo?.reachable && !$isConflict}
       {#if $isServiceRestarting}
         <div
           class="service-restarting-banner"
@@ -1023,7 +1032,16 @@
     {/if}
 
     {#key chunkReloadKey}
-      {#if currentTab === 'dashboard'}
+      {#if conflictGateActive}
+        <div class="container" data-testid="kernel-conflict-gate">
+          <EmptyState
+            plain
+            icon={Warning}
+            title={$t('kernel.conflict_empty_title')}
+            description={$t('kernel.conflict_empty_desc')}
+          />
+        </div>
+      {:else if currentTab === 'dashboard'}
         <div class="container" data-testid="dashboard-page" transition:fade={{ duration: 150 }}>
           <!-- Page header -->
           <PageHeader

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { writable } from 'svelte/store';
 import { trafficStream, formatTrafficSpeed, type TrafficState } from '../src/lib/trafficStream';
 
 class MockWebSocket {
@@ -37,6 +38,8 @@ describe('trafficStream', () => {
       }
     };
     trafficStream.resetForTesting();
+    // Боевой гейт (mihomoApiReady) закрыт без ответа capabilities — в тестах открываем свой
+    trafficStream.bindGate(writable(true));
   });
 
   afterEach(() => {
@@ -170,6 +173,59 @@ describe('trafficStream', () => {
       expect(trafficStream.getState().sessionUp).toBe(1000 * 2.5);
       expect(trafficStream.getState().sessionDown).toBe(2000 * 2.5);
 
+      unsub();
+    });
+  });
+
+  describe('гейт подключения (bindGate)', () => {
+    it('закрытый гейт: подписка не создаёт WebSocket', () => {
+      trafficStream.bindGate(writable(false));
+      const unsub = trafficStream.subscribe(() => {});
+      vi.advanceTimersByTime(20);
+      expect(MockWebSocket.instances.length).toBe(0);
+      unsub();
+    });
+
+    it('открытие гейта при подписчике подключает сокет', () => {
+      const gate = writable(false);
+      trafficStream.bindGate(gate);
+      const unsub = trafficStream.subscribe(() => {});
+      expect(MockWebSocket.instances.length).toBe(0);
+
+      gate.set(true);
+      vi.advanceTimersByTime(20);
+      expect(MockWebSocket.instances.length).toBe(1);
+      expect(MockWebSocket.instances[0].readyState).toBe(1);
+      unsub();
+    });
+
+    it('закрытие гейта закрывает сокет и не планирует переподключение', () => {
+      const gate = writable(true);
+      trafficStream.bindGate(gate);
+      const unsub = trafficStream.subscribe(() => {});
+      vi.advanceTimersByTime(20);
+      const ws = MockWebSocket.instances[0];
+      expect(ws.readyState).toBe(1);
+
+      gate.set(false);
+      expect(ws.readyState).toBe(3);
+      expect(trafficStream.getState().connected).toBe(false);
+
+      // Даже спустя максимальную задержку backoff новых сокетов нет
+      vi.advanceTimersByTime(60000);
+      expect(MockWebSocket.instances.length).toBe(1);
+      unsub();
+    });
+
+    it('повторное открытие гейта после закрытия подключает заново', () => {
+      const gate = writable(true);
+      trafficStream.bindGate(gate);
+      const unsub = trafficStream.subscribe(() => {});
+      vi.advanceTimersByTime(20);
+      gate.set(false);
+      gate.set(true);
+      vi.advanceTimersByTime(20);
+      expect(MockWebSocket.instances.length).toBe(2);
       unsub();
     });
   });

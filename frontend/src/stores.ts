@@ -70,7 +70,12 @@ export const conflictVisible = derived([isConflict, isServiceRestarting], ([c, r
 // каждом такте (10 с). Общий гейт опросов: usePoller(..., { enabledWhen: mihomoApiReady }).
 export type MihomoApiState = 'unknown' | 'up' | 'down';
 export const mihomoApiState = writable<MihomoApiState>('unknown');
-export const mihomoApiReady = derived(mihomoApiState, (s) => s === 'up');
+// В конфликте живые маршруты Mihomo отвечают 409 — опросы прокси и WebSocket трафика
+// не идут (гейт закрыт), даже если api_reachable истинен.
+export const mihomoApiReady = derived(
+  [mihomoApiState, activeKernelState],
+  ([s, k]) => s === 'up' && k !== 'conflict'
+);
 // Совместимость с Sidebar и быстрым стартом дашборда: прежний boolean по смыслу «up».
 export const mihomoApiAvailable = derived(mihomoApiState, (s) => s === 'up');
 // Причина «оффлайн» для подписей: null пока API работает или состояние неизвестно.
@@ -148,15 +153,20 @@ export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
       clearRestartGrace();
     }
 
-    if (data.active_kernel) {
-      lastValidActiveKernel = data.active_kernel;
-    } else if (lastValidActiveKernel) {
+    // «Последнее валидное» работает только для переходного none (или пустого поля):
+    // известное ядро не затирается. Конфликт ничем не маскируется и не запоминается —
+    // он должен быть виден немедленно (D-07).
+    const incomingState = kernelStateOf(data);
+    if (incomingState === 'xray' || incomingState === 'mihomo') {
+      lastValidActiveKernel = incomingState;
+    } else if (incomingState === 'none' && lastValidActiveKernel) {
       data.active_kernel = lastValidActiveKernel;
     }
 
     if (get(isKernelChecking)) {
       capabilities.update((current) => {
-        if (current) {
+        // Текущее значение сохраняется, только если ни старый, ни новый ответ не конфликтные
+        if (current && kernelStateOf(current) !== 'conflict' && incomingState !== 'conflict') {
           return {
             ...data,
             active_kernel: current.active_kernel
@@ -170,7 +180,8 @@ export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
 
     // Меню заморожено на время установки: срез применится после снятия замка
     if (get(navLockCount) === 0) {
-      const next = toNavCaps(data);
+      // Конфликт в кэш меню не пишется: безопасный дефолт после сбоев (136-18)
+      const next = incomingState === 'conflict' ? null : toNavCaps(data);
       if (next) {
         const merged = mergeNavCaps(get(navCaps), next);
         navCaps.set(merged);
