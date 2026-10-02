@@ -214,10 +214,14 @@ export function notifySwitchOutcome(result: SwitchResult): void {
       );
       break;
     case 'new_not_started': {
-      const message =
+      // Прежнее ядро могло пережить неудачный запуск нового: тогда оно не «остановлено» (WR-07)
+      const key =
         result.old === 'none'
-          ? tr('kernel.switch_new_not_started_plain', { new: target })
-          : tr('kernel.switch_new_not_started', { new: target, old: kernelLabel(result.old) });
+          ? 'kernel.switch_new_not_started_plain'
+          : result.old_running
+            ? 'kernel.switch_new_not_started_old_running'
+            : 'kernel.switch_new_not_started';
+      const message = tr(key, { new: target, old: kernelLabel(result.old) });
       showToast('error', message, 10000, {
         label: tr('apply.open_logs'),
         onClick: () => {

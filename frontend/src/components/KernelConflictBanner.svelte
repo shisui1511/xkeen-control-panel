@@ -1,43 +1,23 @@
 <script lang="ts">
-  import { get } from 'svelte/store';
   import { t } from '../i18n';
   import Warning from '../lib/components/icons/Warning.svelte';
   import Button from './Button.svelte';
-  import { fetchCapabilities, isConflict, runningKernels, showConfirm, showToast } from '../stores';
-  import { KERNEL_NAMES, kernelLabel } from '../lib/kernelState';
-  import { stopKernelProcess, type KernelName } from '../lib/serviceControl';
+  import { runningKernels } from '../stores';
+  import { kernelLabel } from '../lib/kernelState';
+  import { confirmKernelStop, stopKernelAndReport, type KernelName } from '../lib/serviceControl';
 
   // Ядро, которое останавливается сейчас; пока не null — обе кнопки неактивны.
   let stopping = $state<KernelName | null>(null);
 
+  // Подтверждение и итог (тосты, перечитывание capabilities) — в общих функциях
+  // serviceControl, одинаковых для баннера и карточки дашборда.
   async function stopKernel(kernel: KernelName) {
     if (stopping) return;
-    const label = kernelLabel(kernel);
-    const confirmed = await showConfirm({
-      title: $t('kernel.conflict_stop_confirm_title', { kernel: label }),
-      message: $t('kernel.conflict_stop_confirm_msg', { kernel: label }),
-      objectName: label,
-      confirmLabel: $t('kernel.conflict_stop', { kernel: label }),
-      cancelLabel: $t('app.cancel'),
-      variant: 'warning'
-    });
-    if (!confirmed) return;
+    if (!(await confirmKernelStop(kernel))) return;
 
     stopping = kernel;
     try {
-      await stopKernelProcess(kernel);
-      await fetchCapabilities();
-      if (!get(isConflict)) {
-        const other = KERNEL_NAMES.find((k) => k !== kernel) ?? kernel;
-        showToast('success', $t('kernel.conflict_resolved', { kernel: kernelLabel(other) }));
-      } else {
-        // Конфликт остался: процесс не остановился (still_running) либо второй
-        // процесс появился снова — в обоих случаях пользователю нужен повтор или логи.
-        showToast('error', $t('kernel.stop_still_running', { kernel: label }), 10000);
-      }
-    } catch (e: unknown) {
-      if ((e as { status?: number })?.status === 401) return;
-      showToast('error', e instanceof Error ? e.message : String(e), 10000);
+      await stopKernelAndReport(kernel);
     } finally {
       stopping = null;
     }
