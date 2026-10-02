@@ -302,6 +302,8 @@
   }
 
   function scheduleReconnect() {
+    // закрытый гейт: сервер ответит 409, таймер переподключения не нужен
+    if (!trafficWsAllowed) return;
     if (ws && ws.readyState !== WebSocket.CLOSED) return;
     if (reconnectTimeout) return;
 
@@ -324,6 +326,8 @@
       ws = null;
     }
     connected = false;
+    // накопленная задержка не должна задерживать первую попытку при повторном открытии гейта
+    reconnectDelay = 1000;
   }
 
   async function resetStatistics() {
@@ -523,7 +527,7 @@
   function handleVisibilityChange() {
     if (!document.hidden) {
       lastTickTime = 0; // avoid huge elapsedSec spike from messages dropped while hidden
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
+      if (trafficWsAllowed && (!ws || ws.readyState !== WebSocket.OPEN)) {
         connect();
       }
       startXrayStatsPolling();

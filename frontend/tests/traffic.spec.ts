@@ -712,4 +712,78 @@ test.describe('Гейт WebSocket трафика по активному ядр�
     expect(sockets.opened).toBe(0);
     expect(trafficUrls(sockets.urls)).toHaveLength(0);
   });
+
+  test('возврат на вкладку при активном Xray не открывает сокет', async ({ page }) => {
+    const sockets = await trackTrafficSocket(page);
+    await setupMocks(page, 'xray');
+    await visitPage(page, '/#/traffic');
+    await expect(page.locator('[data-testid="xray-stats-section"]')).toBeVisible({
+      timeout: LAZY_LOAD_TIMEOUT
+    });
+
+    // слушатель висит на window, document.hidden в headless ложен
+    await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForTimeout(1500);
+
+    expect(sockets.opened).toBe(0);
+    expect(trafficUrls(sockets.urls)).toHaveLength(0);
+  });
+
+  test('#/traffic в конфликте ядер не открывает сокет', async ({ page }) => {
+    const sockets = await trackTrafficSocket(page);
+    await setupMocks(page, 'conflict');
+    await visitPage(page, '/#/traffic');
+    await expect(page.locator('[data-testid="kernel-conflict-gate"]')).toBeVisible({
+      timeout: LAZY_LOAD_TIMEOUT
+    });
+    await page.waitForTimeout(2000);
+
+    expect(sockets.opened).toBe(0);
+    expect(trafficUrls(sockets.urls)).toHaveLength(0);
+  });
+
+  test('смена Mihomo → Xray на открытой странице закрывает сокет без переподключений', async ({
+    page
+  }) => {
+    test.slow();
+    const sockets = await trackTrafficSocket(page);
+    await setupMocks(page, 'mihomo');
+    // до явного переключения — ответ режима mihomo. Флаг ставит тест после первого открытия
+    // сокета: два параллельных начальных запроса capabilities иначе давали бы гонку, когда
+    // запоздавший ответ Mihomo переоткрывает уже закрытый гейт
+    let switchedToXray = false;
+    await page.route('**/api/capabilities**', async (route) => {
+      if (!switchedToXray) return route.fallback();
+      await route.fulfill({
+        json: {
+          success: true,
+          data: {
+            kernels: {
+              xray: { installed: true, version: '1.8.4', channel: 'stable' },
+              mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
+            },
+            active_kernel: 'xray',
+            kernel_conflict: false,
+            running_kernels: ['xray'],
+            mihomo: {
+              reachable: true,
+              process_running: false,
+              api_reachable: false,
+              api_authenticated: false
+            }
+          }
+        }
+      });
+    });
+    await visitPage(page, '/#/traffic');
+
+    // два сокета: общий поток оболочки дашборда и собственный сокет страницы «Трафик»
+    await expect.poll(() => sockets.opened, { timeout: LAZY_LOAD_TIMEOUT }).toBe(2);
+    switchedToXray = true;
+    // очередной опрос capabilities (раз в 10 с) закрывает гейт и рвёт оба сокета
+    await expect.poll(() => sockets.closed, { timeout: 20_000 }).toBe(2);
+    await page.waitForTimeout(3000);
+
+    expect(sockets.opened).toBe(2);
+  });
 });
