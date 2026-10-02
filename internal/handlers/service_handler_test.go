@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,11 +28,78 @@ func newServiceTestAPI(t *testing.T, binaryPath string) *API {
 		XKeenBinary:  binaryPath,
 		AllowedRoots: []string{tmpDir},
 	}
-	return &API{
-		cfg:       cfg,
-		xkeenSvc:  services.NewXKeenService(binaryPath, tmpDir),
-		kernelSvc: services.NewKernelService(t.TempDir()),
-		pathVal:   utils.NewPathValidator(cfg.AllowedRoots),
+	api := &API{
+		cfg:      cfg,
+		xkeenSvc: services.NewXKeenService(binaryPath, tmpDir),
+		pathVal:  utils.NewPathValidator(cfg.AllowedRoots),
+	}
+	// SetKernelService подключает запасные источники активного ядра; applier,
+	// который он собирает, тестам не нужен (кому нужен — ставит свой).
+	api.SetKernelService(services.NewKernelService(t.TempDir()))
+	api.kernelApplier = nil
+	return api
+}
+
+// serviceStatusData выполняет GET /api/service/status и разбирает data.
+func serviceStatusData(t *testing.T, api *API) ServiceStatusResponse {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	api.ServiceStatus(rr, httptest.NewRequest(http.MethodGet, "/api/service/status", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var envelope struct {
+		Data ServiceStatusResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	return envelope.Data
+}
+
+// TestServiceStatus_KernelConflict: оба процесса запущены — active_kernel "both",
+// kernel_conflict, running_kernels; PID и uptime пусты, ядро по порядку не выбирается.
+func TestServiceStatus_KernelConflict(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "XKeen is running", 0))
+	api.kernelSvc.SetProcessStatesSource(func() []services.KernelProcessState {
+		return []services.KernelProcessState{
+			{Name: "xray", Status: "running", PID: 10, Uptime: "5м"},
+			{Name: "mihomo", Status: "running", PID: 11, Uptime: "5м"},
+		}
+	})
+
+	resp := serviceStatusData(t, api)
+	if resp.ActiveKernel != "both" || !resp.KernelConflict {
+		t.Errorf("active_kernel=%q kernel_conflict=%v, want both/true", resp.ActiveKernel, resp.KernelConflict)
+	}
+	if want := []string{"xray", "mihomo"}; !reflect.DeepEqual(resp.RunningKernels, want) {
+		t.Errorf("running_kernels = %v, want %v", resp.RunningKernels, want)
+	}
+	if !resp.IsRunning {
+		t.Error("is_running = false, want true при конфликте")
+	}
+	if resp.PID != 0 || resp.Uptime != "" {
+		t.Errorf("pid=%d uptime=%q, при конфликте должны быть пусты", resp.PID, resp.Uptime)
+	}
+}
+
+// TestServiceStatus_SingleKernelRunning: один процесс — его PID и uptime, без конфликта.
+func TestServiceStatus_SingleKernelRunning(t *testing.T) {
+	api := newServiceTestAPI(t, buildStubBinary(t, "XKeen is running", 0))
+	api.kernelSvc.SetProcessStatesSource(func() []services.KernelProcessState {
+		return []services.KernelProcessState{
+			{Name: "xray", Status: "stopped"},
+			{Name: "mihomo", Status: "running", PID: 11, Uptime: "7м"},
+		}
+	})
+
+	resp := serviceStatusData(t, api)
+	if resp.ActiveKernel != "mihomo" || resp.KernelConflict || !resp.IsRunning {
+		t.Errorf("active_kernel=%q kernel_conflict=%v is_running=%v, want mihomo/false/true",
+			resp.ActiveKernel, resp.KernelConflict, resp.IsRunning)
+	}
+	if resp.PID != 11 || resp.Uptime != "7м" {
+		t.Errorf("pid=%d uptime=%q, want 11 / 7м", resp.PID, resp.Uptime)
 	}
 }
 

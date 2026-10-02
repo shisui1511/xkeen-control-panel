@@ -189,3 +189,83 @@ func TestUserRulesSave_RuntimeInjectionAndReload(t *testing.T) {
 		t.Errorf("config.yaml was not properly injected:\n%s", content)
 	}
 }
+
+// TestUserRulesSave_ConflictWritesBothWithoutReload: запущены оба ядра — правила
+// пишутся в конфиги обоих ядер, Mihomo не перезагружается, в ответе предупреждение
+// о конфликте.
+func TestUserRulesSave_ConflictWritesBothWithoutReload(t *testing.T) {
+	reloadCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			reloadCalls++
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	mihomoDir := t.TempDir()
+	xrayDir := t.TempDir()
+	hostPort := strings.TrimPrefix(server.URL, "http://")
+	mihomoCfg := filepath.Join(mihomoDir, "config.yaml")
+	if err := os.WriteFile(mihomoCfg, []byte("external-controller: "+hostPort+"\nrules:\n  - MATCH,DIRECT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	xrayRouting := filepath.Join(xrayDir, "05_routing.json")
+	if err := os.WriteFile(xrayRouting, []byte(`{"routing":{"rules":[]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	kernelSvc := services.NewKernelService(t.TempDir())
+	kernelSvc.SetProcessStatesSource(func() []services.KernelProcessState {
+		return []services.KernelProcessState{
+			{Name: "xray", Status: "running", PID: 10},
+			{Name: "mihomo", Status: "running", PID: 11},
+		}
+	})
+	api := &API{
+		cfg:          &config.Config{MihomoConfigDir: mihomoDir, XRayConfigDir: xrayDir},
+		userRulesSvc: services.NewUserRulesService(t.TempDir()),
+		mihomoSvc:    services.NewMihomoService("", "", mihomoDir),
+	}
+	api.SetKernelService(kernelSvc)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"rules": []services.UserRule{{ID: "rule-1", Type: "domain", Value: "injected.org", Target: "proxy", Enabled: true}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/rules/custom", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	api.UserRulesSave(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Data struct {
+			Applied  bool   `json:"applied"`
+			Reloaded bool   `json:"reloaded"`
+			Warning  string `json:"warning"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Data.Applied {
+		t.Error("applied = false, want true: правила должны быть записаны")
+	}
+	if resp.Data.Reloaded || reloadCalls != 0 {
+		t.Errorf("reloaded=%v, PUT-запросов к Mihomo=%d: при конфликте перезагрузки быть не должно", resp.Data.Reloaded, reloadCalls)
+	}
+	wantWarning := api.t(req, "kernel.conflict")
+	if wantWarning == "kernel.conflict" || resp.Data.Warning != wantWarning {
+		t.Errorf("warning = %q, want %q", resp.Data.Warning, wantWarning)
+	}
+
+	mihomoContent, _ := os.ReadFile(mihomoCfg)
+	if !strings.Contains(string(mihomoContent), "DOMAIN,injected.org") {
+		t.Errorf("правило не внедрено в config.yaml Mihomo:\n%s", mihomoContent)
+	}
+	xrayContent, _ := os.ReadFile(xrayRouting)
+	if !strings.Contains(string(xrayContent), "injected.org") {
+		t.Errorf("правило не внедрено в 05_routing.json Xray:\n%s", xrayContent)
+	}
+}

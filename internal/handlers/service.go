@@ -13,12 +13,17 @@ import (
 )
 
 type ServiceStatusResponse struct {
-	IsRunning    bool   `json:"is_running"`
+	IsRunning bool `json:"is_running"`
+	// ActiveKernel — "xray" | "mihomo" | "none"; "both" при конфликте.
 	ActiveKernel string `json:"active_kernel"`
-	PID          int    `json:"pid"`
-	Uptime       string `json:"uptime"`
-	BinaryPath   string `json:"binary_path"`
-	Raw          string `json:"raw"`
+	// KernelConflict — запущены оба ядра; PID и Uptime при этом пусты.
+	KernelConflict bool `json:"kernel_conflict"`
+	// RunningKernels — запущенные ядра в порядке [xray, mihomo].
+	RunningKernels []string `json:"running_kernels,omitempty"`
+	PID            int      `json:"pid"`
+	Uptime         string   `json:"uptime"`
+	BinaryPath     string   `json:"binary_path"`
+	Raw            string   `json:"raw"`
 	// Stale — Raw нельзя считать свежим (опрос xkeen не удался или устарел);
 	// AgeSeconds — возраст последнего успешного опроса, нет на холодном старте
 	Stale      bool                    `json:"stale"`
@@ -69,28 +74,29 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 		resp.AgeSeconds = &age
 	}
 
-	// Detect which kernel is running and get its PID/Uptime
-	if a.kernelSvc != nil {
-		for _, st := range a.kernelSvc.ProcessStates() {
-			if st.Status == "running" {
-				resp.IsRunning = true
-				resp.ActiveKernel = st.Name
-				resp.PID = st.PID
-				resp.Uptime = st.Uptime
+	// Активное ядро — единый резолвер по процессам (запасные источники — свежий
+	// снимок статуса и name_client — учтены внутри него).
+	st := a.activeKernelState()
+	resp.ActiveKernel = st.Label()
+	resp.KernelConflict = st.Conflict
+	resp.RunningKernels = st.Running
+	resp.IsRunning = len(st.Running) > 0
+	// PID и uptime — только когда активное ядро однозначно; при конфликте пусты.
+	if !st.Conflict && a.kernelSvc != nil && len(st.Running) > 0 {
+		for _, ps := range a.kernelSvc.ProcessStates() {
+			if ps.Name == st.Kernel && ps.Status == "running" {
+				resp.PID = ps.PID
+				resp.Uptime = ps.Uptime
 				break
 			}
 		}
 	}
 
-	// Fallback to checking raw output if kernelSvc list is empty or doesn't find running
+	// Запасной путь: ни одного процесса, но свежий вывод xkeen -status здоров
 	if !resp.IsRunning {
 		if !snap.Stale && services.IsKernelStatusHealthy(snap.Raw) {
 			resp.IsRunning = true
 		}
-	}
-	if resp.ActiveKernel == "" {
-		// Ядро остановлено: показываем то, которое запустит XKeen
-		resp.ActiveKernel = a.xkeenSvc.ConfiguredKernel()
 	}
 
 	if a.watchdogSvc != nil {
