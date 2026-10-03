@@ -184,7 +184,7 @@
   <div class="section-title">{$t('editor.xray_dns')}</div>
 
   <div class="dns-servers-list">
-    {#each dnsConfig.servers as srv, idx}
+    {#each dnsConfig.servers as srv, idx (typeof srv === 'string' ? `${srv}-${idx}` : `${srv.address}-${srv.port || 53}-${srv.tag || ''}-${idx}`)}
       <div class="item-row card" style="margin-bottom: 8px;">
         {#if typeof srv === 'string'}
           <span class="item-name">{srv}</span>
@@ -275,7 +275,7 @@
 
   <div class="section-title" style="margin-top: 16px;">Hosts</div>
   <div class="hosts-list">
-    {#each Object.entries(dnsConfig.hosts) as [domain, ip]}
+    {#each Object.entries(dnsConfig.hosts) as [domain, ip] (domain)}
       <div class="item-row card" style="margin-bottom: 8px;">
         <div style="flex: 1;">
           <code>{domain}</code> &rarr; <code>{ip}</code>

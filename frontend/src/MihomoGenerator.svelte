@@ -600,7 +600,7 @@
 
         {#if ctx.safeMergeEnabled}
           <div class="safe-merge-tags">
-            {#each ctx.safeMergeExpanded ? ctx.preservedKeys : ctx.preservedKeys.slice(0, 6) as key}
+            {#each ctx.safeMergeExpanded ? ctx.preservedKeys : ctx.preservedKeys.slice(0, 6) as key (key)}
               <span class="directive-tag"><code>{key}</code></span>
             {/each}
             {#if ctx.preservedKeys.length > 6}
@@ -715,7 +715,7 @@
 
         <!-- Section tabs -->
         <div class="sec-tabs">
-          {#each tabs as [id, label]}
+          {#each tabs as [id, label] (id)}
             <button
               class="sec-tab"
               class:active={ctx.activeSection === id}
