@@ -216,8 +216,6 @@ for (const theme of THEMES) {
   for (const width of WIDTHS) {
     for (const route of OFFLINE_ROUTES) {
       test(`API Mihomo оффлайн, ${route}: ${theme} ${width}px`, async ({ page }) => {
-        // B17: плашка ApiOffline шире окна на 20 px (воспроизводится на роутере)
-        test.fail(true, 'B17: ApiOffline даёт горизонтальную прокрутку');
         await prepare(page, theme, width);
         await page.route('**/api/capabilities', async (r) => {
           await r.fulfill({

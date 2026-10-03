@@ -2124,16 +2124,13 @@ pre.code-output {
     ),
     linear-gradient(180deg, var(--surface-overlay-from), var(--surface-overlay-to));
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
-  border-left: 0;
-  border-right: 0;
-  border-radius: 0;
+  border-radius: var(--radius-md);
   position: relative;
   font-size: 13px;
   color: var(--fg-primary);
-  /* extend full width regardless of container padding */
-  margin: 0 -36px;
-  padding-left: 36px;
-  padding-right: 36px;
+  /* Ширина — по обёртке страницы: отрицательные поля выпускали плашку за окно на 20 px */
+  margin: 0;
+  box-sizing: border-box;
   z-index: 10;
 }
 
@@ -2144,6 +2141,7 @@ pre.code-output {
   bottom: 0;
   left: 0;
   width: 3px;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
   background: var(--danger);
   box-shadow:
     0 0 12px var(--danger),
