@@ -38,6 +38,29 @@ var diagnosticCommands = map[string]diagCmd{
 	"__diag:nslookup": {binary: "nslookup", args: []string{"openai.com"}},
 }
 
+// kernelLifecycleCommands — команды xkeen, которые запускают, останавливают,
+// перезапускают или переключают ядро, меняют перехват DNS/IPv6/порты (скрипт
+// перезапускает прокси) либо заменяют бинарники ядер. Они не должны идти
+// параллельно с операциями жизненного цикла ядра из «Сервисов».
+var kernelLifecycleCommands = map[string]bool{
+	"-start":   true,
+	"-stop":    true,
+	"-restart": true,
+	"-xray":    true,
+	"-mihomo":  true,
+	"-dns":     true,
+	"-ipv6":    true,
+	"-tp":      true,
+	"-ux":      true,
+	"-um":      true,
+}
+
+// IsKernelLifecycleCommand сообщает, что команда меняет состояние ядер и
+// выполняется под общим замком жизненного цикла.
+func IsKernelLifecycleCommand(command string) bool {
+	return kernelLifecycleCommands[command]
+}
+
 // CommandResult represents the result of a command execution
 type CommandResult struct {
 	Success bool   `json:"success"`
