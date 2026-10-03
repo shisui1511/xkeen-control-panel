@@ -444,3 +444,65 @@ func TestLogsDownload_And_Validation(t *testing.T) {
 		t.Errorf("expected 405 for GET clear, got %d", recClearGet.Code)
 	}
 }
+
+// Запись B15 этапа 10: log_path (xkeen.log) на роутере нет, а xcp.log есть, —
+// полный лог всё равно скачивается из существующих источников.
+func TestLogsDownload_MissingPrimaryUsesOtherSources(t *testing.T) {
+	tmpDir := t.TempDir()
+	xkeenLog := filepath.Join(tmpDir, "xkeen.log")
+	xcpLog := filepath.Join(tmpDir, "xcp.log")
+	if err := os.WriteFile(xcpLog, []byte("xcp started\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api := &API{
+		cfg: &config.Config{
+			LogPath:      xkeenLog,
+			LogSources:   []string{xkeenLog, xcpLog},
+			AllowedRoots: []string{tmpDir},
+		},
+		pathVal: utils.NewPathValidator([]string{tmpDir}),
+	}
+
+	rec := httptest.NewRecorder()
+	api.LogsDownload(rec, httptest.NewRequest(http.MethodGet, "/api/logs/download", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "xcp started") {
+		t.Errorf("в выгрузке нет содержимого xcp.log: %q", body)
+	}
+	if !strings.Contains(body, "===== "+xcpLog+" =====") {
+		t.Errorf("нет заголовка с путём источника: %q", body)
+	}
+	if strings.Contains(body, xkeenLog) {
+		t.Errorf("отсутствующий xkeen.log попал в выгрузку: %q", body)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, "attachment") || !strings.Contains(cd, ".txt") {
+		t.Errorf("Content-Disposition = %q, want attachment с .txt", cd)
+	}
+}
+
+// Несколько существующих источников попадают в один файл по порядку.
+func TestLogsDownload_ConcatenatesSources(t *testing.T) {
+	tmpDir := t.TempDir()
+	first := filepath.Join(tmpDir, "a.log")
+	second := filepath.Join(tmpDir, "b.log")
+	if err := os.WriteFile(first, []byte("first-line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(second, []byte("second-line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api := &API{
+		cfg:     &config.Config{LogSources: []string{first, second}, AllowedRoots: []string{tmpDir}},
+		pathVal: utils.NewPathValidator([]string{tmpDir}),
+	}
+
+	rec := httptest.NewRecorder()
+	api.LogsDownload(rec, httptest.NewRequest(http.MethodGet, "/api/logs/download", nil))
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || strings.Index(body, "first-line") < 0 || strings.Index(body, "second-line") < strings.Index(body, "first-line") {
+		t.Errorf("ожидалась выгрузка обоих источников по порядку, code=%d body=%q", rec.Code, body)
+	}
+}

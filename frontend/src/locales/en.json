@@ -1762,6 +1762,7 @@
   "logs.copied": "Row copied",
   "logs.export_filtered": "Export current view",
   "logs.export_full": "Download full log",
+  "logs.export_full_failed": "Failed to download the full log: no log files found or they are not readable",
   "logs.paused_notice": "Stream paused (+{count} new lines)",
   "logs.scroll_to_bottom": "Scroll to bottom",
   "logs.disconnect": "Disconnect",

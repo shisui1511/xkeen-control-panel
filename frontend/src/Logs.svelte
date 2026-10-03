@@ -454,12 +454,32 @@
     URL.revokeObjectURL(url);
   }
 
-  function exportFull() {
-    const a = document.createElement('a');
-    a.href = '/api/logs/download';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  // Файл забирается запросом, а не переходом по ссылке: ответ с ошибкой (нет ни
+  // одного лога) не должен подменять страницу панели JSON-сообщением.
+  async function exportFull() {
+    try {
+      const res = await apiFetch('/api/logs/download');
+      if (!res.ok) {
+        showToast('error', $t('logs.export_full_failed'));
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') ?? '';
+      const fileName =
+        /filename="?([^";]+)"?/.exec(disposition)?.[1] ??
+        `xcp_logs_full_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.txt`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', $t('logs.export_full_failed'));
+    }
   }
 
   async function copyRow(entry: LogEntry) {
