@@ -7,6 +7,11 @@
   import { apiFetchJSON } from '../../lib/api';
   import { showToast } from '../../stores';
   import { parseImportLink, generateUniqueTag } from '../../lib/constructors/nodeParser';
+  import {
+    emptyOutboundForm,
+    formToOutbound,
+    outboundToForm
+  } from '../../lib/constructors/xrayOutboundForm';
 
   let {
     customOutbounds = $bindable([]),
@@ -66,263 +71,38 @@
     return '';
   }
 
+  // WireGuard хранит адрес и порт одной строкой endpoint, остальным узлам порт добавляется.
+  function getNodeEndpoint(node: any): string {
+    if (node?.protocol === 'wireguard') return getNodeServer(node);
+    return `${getNodeServer(node)}:${getNodePort(node)}`;
+  }
+
   function openAddOutbound() {
     editingOutboundIndex = null;
-    currentEditingOutbound = {
-      tag: '',
-      protocol: 'vless',
-      address: '',
-      port: 443,
-      uuid: '',
-      flow: 'none',
-      network: 'tcp',
-      security: 'none',
-      tlsServerName: '',
-      sni: '',
-      realityPublicKey: '',
-      realityShortId: '',
-      realitySpiderX: '',
-      wsPath: '',
-      wsHost: '',
-      grpcServiceName: '',
-      password: '',
-      method: 'aes-128-gcm',
-      wireguardSecretKey: '',
-      wireguardAddress: '',
-      wireguardMtu: 1420,
-      wireguardReserved: '',
-      dialerProxy: ''
-    };
+    currentEditingOutbound = emptyOutboundForm();
     showOutboundForm = true;
   }
 
   function openEditOutbound(idx: number) {
     if (idx < 0 || idx >= customOutbounds.length) return;
-    const item = customOutbounds[idx];
     editingOutboundIndex = idx;
-
-    const f: any = {
-      tag: item.tag || '',
-      protocol: item.protocol || 'vless',
-      address: '',
-      port: 443,
-      uuid: '',
-      flow: 'none',
-      network: 'tcp',
-      security: 'none',
-      tlsServerName: '',
-      sni: '',
-      realityPublicKey: '',
-      realityShortId: '',
-      realitySpiderX: '',
-      wsPath: '',
-      wsHost: '',
-      grpcServiceName: '',
-      password: '',
-      method: 'aes-128-gcm',
-      wireguardSecretKey: '',
-      wireguardAddress: '',
-      wireguardMtu: 1420,
-      wireguardReserved: '',
-      dialerProxy: ''
-    };
-
-    if (item.streamSettings?.sockopt?.dialerProxy) {
-      f.dialerProxy = item.streamSettings.sockopt.dialerProxy;
-    }
-
-    if (item.protocol === 'vless' || item.protocol === 'vmess') {
-      const vnext = item.settings?.vnext?.[0];
-      if (vnext) {
-        f.address = vnext.address || '';
-        f.port = vnext.port || 443;
-        const user = vnext.users?.[0];
-        if (user) {
-          f.uuid = user.id || '';
-          f.flow = user.flow || 'none';
-        }
-      }
-    } else if (item.protocol === 'trojan') {
-      const srv = item.settings?.servers?.[0];
-      if (srv) {
-        f.address = srv.address || '';
-        f.port = srv.port || 443;
-        f.password = srv.password || '';
-      }
-    } else if (item.protocol === 'shadowsocks') {
-      const srv = item.settings?.servers?.[0];
-      if (srv) {
-        f.address = srv.address || '';
-        f.port = srv.port || 443;
-        f.password = srv.password || '';
-        f.method = srv.method || 'aes-128-gcm';
-      }
-    } else if (item.protocol === 'wireguard') {
-      f.wireguardSecretKey = item.settings?.secretKey || '';
-      f.wireguardAddress = Array.isArray(item.settings?.address)
-        ? item.settings.address.join(', ')
-        : item.settings?.address || '';
-      f.wireguardMtu = item.settings?.mtu || 1420;
-      const peer = item.settings?.peers?.[0];
-      if (peer) {
-        const parts = (peer.endpoint || '').split(':');
-        f.address = parts[0] || '';
-        f.port = Number(parts[1]) || 51820;
-        f.password = peer.publicKey || '';
-      }
-      if (item.settings?.reserved) {
-        f.wireguardReserved = item.settings.reserved.join(', ');
-      }
-    }
-
-    if (item.streamSettings) {
-      f.network = item.streamSettings.network || 'tcp';
-      f.security = item.streamSettings.security || 'none';
-      if (item.streamSettings.tlsSettings) {
-        f.tlsServerName = item.streamSettings.tlsSettings.serverName || '';
-        f.sni = f.tlsServerName;
-      }
-      if (item.streamSettings.realitySettings) {
-        f.tlsServerName = item.streamSettings.realitySettings.serverName || '';
-        f.sni = f.tlsServerName;
-        f.realityPublicKey = item.streamSettings.realitySettings.publicKey || '';
-        f.realityShortId = item.streamSettings.realitySettings.shortId || '';
-        f.realitySpiderX = item.streamSettings.realitySettings.spiderX || '';
-      }
-      if (item.streamSettings.wsSettings) {
-        f.wsPath = item.streamSettings.wsSettings.path || '';
-        f.wsHost = item.streamSettings.wsSettings.headers?.Host || '';
-      }
-      if (item.streamSettings.grpcSettings) {
-        f.grpcServiceName = item.streamSettings.grpcSettings.serviceName || '';
-      }
-    }
-
-    currentEditingOutbound = f;
+    currentEditingOutbound = outboundToForm(customOutbounds[idx]);
     showOutboundForm = true;
   }
 
   function handleSaveOutbound() {
     if (!currentEditingOutbound.tag?.trim()) return;
 
-    const form = currentEditingOutbound;
-    const outbound: any = {
-      tag: form.tag.trim(),
-      protocol: form.protocol
-    };
-
-    if (form.protocol === 'vless' || form.protocol === 'vmess') {
-      outbound.settings = {
-        vnext: [
-          {
-            address: form.address.trim(),
-            port: Number(form.port) || 443,
-            users: [
-              {
-                id: (form.uuid || '').trim(),
-                flow:
-                  form.protocol === 'vless' && form.flow && form.flow !== 'none'
-                    ? form.flow
-                    : undefined,
-                encryption: form.protocol === 'vless' ? 'none' : undefined
-              }
-            ]
-          }
-        ]
-      };
-    } else if (form.protocol === 'trojan') {
-      outbound.settings = {
-        servers: [
-          {
-            address: form.address.trim(),
-            port: Number(form.port) || 443,
-            password: (form.password || '').trim()
-          }
-        ]
-      };
-    } else if (form.protocol === 'shadowsocks') {
-      outbound.settings = {
-        servers: [
-          {
-            address: form.address.trim(),
-            port: Number(form.port) || 443,
-            password: (form.password || '').trim(),
-            method: form.method
-          }
-        ]
-      };
-    } else if (form.protocol === 'wireguard') {
-      if (form.wireguardReserved && form.wireguardReserved.trim()) {
-        const parts = form.wireguardReserved
-          .split(',')
-          .map((s: string) => parseInt(s.trim(), 10))
-          .filter((n: number) => !isNaN(n) && n >= 0 && n <= 255);
-        if (parts.length !== 3) {
-          showToast('error', $t('xray.reserved_invalid'));
-          return;
-        }
-      }
-      outbound.settings = {
-        secretKey: (form.wireguardSecretKey || '').trim(),
-        address: (form.wireguardAddress || '')
-          .split(',')
-          .map((s: string) => s.trim())
-          .filter(Boolean),
-        mtu: Number(form.wireguardMtu) || 1420,
-        peers: [
-          {
-            publicKey: (form.password || '').trim(),
-            endpoint: `${form.address.trim()}:${form.port}`
-          }
-        ]
-      };
-      if (form.wireguardReserved && form.wireguardReserved.trim()) {
-        outbound.settings.reserved = form.wireguardReserved
-          .split(',')
-          .map((s: string) => parseInt(s.trim(), 10))
-          .filter((n: number) => !isNaN(n) && n >= 0 && n <= 255);
-      }
-    }
-
-    if (!['wireguard', 'freedom', 'blackhole'].includes(form.protocol)) {
-      const stream: any = {
-        network: form.network || 'tcp',
-        security: form.security || 'none'
-      };
-      if (form.security === 'tls') {
-        const sni = (form.sni || form.tlsServerName || '').trim();
-        stream.tlsSettings = {
-          serverName: sni || undefined
-        };
-      } else if (form.security === 'reality') {
-        const sni = (form.sni || form.tlsServerName || '').trim();
-        stream.realitySettings = {
-          serverName: sni || undefined,
-          publicKey: (form.realityPublicKey || '').trim() || undefined,
-          shortId: (form.realityShortId || '').trim() || undefined,
-          spiderX: (form.realitySpiderX || '').trim() || undefined
-        };
-      }
-      if (form.network === 'ws') {
-        stream.wsSettings = {
-          path: (form.wsPath || '').trim() || undefined,
-          headers: form.wsHost?.trim() ? { Host: form.wsHost.trim() } : undefined
-        };
-      } else if (form.network === 'grpc') {
-        stream.grpcSettings = {
-          serviceName: (form.grpcServiceName || '').trim() || undefined
-        };
-      }
-      if (form.dialerProxy) {
-        stream.sockopt = { dialerProxy: form.dialerProxy };
-      }
-      outbound.streamSettings = stream;
+    const result = formToOutbound(currentEditingOutbound);
+    if (!result.ok) {
+      showToast('error', $t('xray.reserved_invalid'));
+      return;
     }
 
     if (editingOutboundIndex !== null) {
-      customOutbounds[editingOutboundIndex] = outbound;
+      customOutbounds[editingOutboundIndex] = result.outbound;
     } else {
-      customOutbounds.push(outbound);
+      customOutbounds.push(result.outbound);
     }
 
     showOutboundForm = false;
@@ -472,7 +252,7 @@
         <div>
           <span class="badge badge-tag">{item.tag}</span>
           <span style="font-size: 0.75rem; color: var(--fg-secondary); margin-left: 8px;">
-            ({item.protocol} &bull; {getNodeServer(item)}:{getNodePort(item)})
+            ({item.protocol} &bull; {getNodeEndpoint(item)})
           </span>
         </div>
         <div style="display: flex; gap: 8px;">

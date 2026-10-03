@@ -461,7 +461,7 @@
         {#if outbound.network === 'ws'}
           <label class="form-label" for="outbound-path">{$t('xray.ws_path')}</label>
           <input id="outbound-path" class="form-input" bind:value={outbound.path} placeholder="/" />
-        {:else}
+        {:else if outbound.network === 'grpc'}
           <label class="form-label" for="outbound-service">
             {$t('xray.grpc_service_name')}
           </label>
