@@ -9,7 +9,8 @@
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
-  import { apiFetch } from './lib/api';
+  import { apiFetch, apiFetchJSON } from './lib/api';
+  import { pickZkeenGeositeFile, hasZkeenTags } from './lib/constructors/geodata';
   import { willRestartOnApply } from './lib/serviceApply';
   import { parseValidationError } from './lib/errorParser';
   import {
@@ -225,20 +226,22 @@
     return promise;
   }
 
+  // Имя файла базы берётся из списка установленных: у XKeen это geosite_zkeen.dat, а
+  // запрос тегов несуществующего файла отвечает 400 и пишет ошибку в консоль.
   async function checkZkeenGeodata() {
+    ctx.hasZkeenGeodata = false;
     try {
-      const res = await apiFetch('/api/dat/tags?name=geosite.dat');
-      if (res.ok) {
-        const json = await res.json();
-        const tags = json.tags || [];
-        const tagNames = tags.map((t: any) => t.tag.toLowerCase());
-        ctx.hasZkeenGeodata =
-          tagNames.includes('domains') &&
-          tagNames.includes('other') &&
-          tagNames.includes('politic');
-      }
-    } catch (e) {
-      console.error('Failed to load geosite.dat tags:', e);
+      const listRes = await apiFetch('/api/dat/list');
+      if (!listRes.ok) return;
+      const files = await listRes.json();
+      const name = pickZkeenGeositeFile(Array.isArray(files) ? files : []);
+      if (!name) return;
+      const res = await apiFetchJSON<any>(`/api/dat/tags?name=${encodeURIComponent(name)}`);
+      const tags = Array.isArray(res) ? res : res?.tags || [];
+      ctx.hasZkeenGeodata = hasZkeenTags(tags);
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      console.error('Failed to load zkeen geosite tags:', e);
       ctx.hasZkeenGeodata = false;
     }
   }
