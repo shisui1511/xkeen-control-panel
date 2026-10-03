@@ -319,3 +319,55 @@ for (const route of ['proxies', 'rules']) {
     await expect.poll(() => mihomoRequests.length, { timeout: 15000 }).toBeGreaterThan(0);
   });
 }
+
+// ============================================================
+// Прокси → Провайдеры: карточка подписки не шире окна (B18)
+// ============================================================
+
+function subscriptionFixture() {
+  const now = Math.floor(Date.now() / 1000);
+  return [
+    {
+      id: 'sub-1',
+      name: 'C-VPN ▮ Подписка',
+      url: 'https://example.invalid/sub',
+      enabled: true,
+      interval: 6,
+      use_provider_interval: false,
+      enable_xray: true,
+      enable_mihomo: true,
+      mihomo_integrated: false,
+      hwid_locked: false,
+      last_update: new Date(Date.now() - 49 * 60 * 1000).toISOString(),
+      proxy_count: 2,
+      upload: 120 * 1024 ** 3,
+      download: 164 * 1024 ** 3,
+      total: 0,
+      expire: now + 243 * 86400,
+      next_update: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      support_url: 'https://example.invalid/support',
+      announcement: 'Объявление',
+      mihomo_provider: null
+    }
+  ];
+}
+
+for (const theme of THEMES) {
+  for (const width of WIDTHS) {
+    test(`провайдеры: карточка подписки в окне, ${theme} ${width}px (B18)`, async ({ page }) => {
+      await prepare(page, theme, width);
+      await page.route(/\/api\/proxy-providers(\?.*)?$/, async (r) => {
+        await r.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(subscriptionFixture())
+        });
+      });
+      await page.goto('/#/proxies?tab=providers');
+      await expect(page.locator('.sub-card').first()).toBeVisible();
+      await expectCleanPage(page, theme);
+      const card = await page.locator('.sub-card').first().boundingBox();
+      expect(card!.x + card!.width).toBeLessThanOrEqual(width + 1);
+    });
+  }
+}
