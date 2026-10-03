@@ -164,3 +164,88 @@ for (const theme of THEMES) {
     });
   }
 }
+
+// ============================================================
+// Подтверждение опасной команды консоли: диалог виден и укладывается
+// в окно, «Отмена» не отправляет POST /api/console/execute
+// ============================================================
+
+for (const theme of THEMES) {
+  for (const width of WIDTHS) {
+    test(`опасная команда требует подтверждения, отмена не выполняет: ${theme} ${width}px`, async ({
+      page
+    }) => {
+      await prepare(page, theme, width);
+      const { errors } = attachConsoleCollectors(page);
+      const executeRequests: string[] = [];
+      page.on('request', (req) => {
+        if (req.url().includes('/api/console/execute')) executeRequests.push(req.method());
+      });
+      await page.goto('/#/console');
+      await page.getByRole('tab', { name: 'Быстрые команды' }).click();
+      await page.locator('.cmd-tile', { hasText: 'xkeen -xbr' }).click();
+
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible();
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      for (const name of ['Отмена', 'Подтвердить']) {
+        const box = await dialog.getByRole('button', { name }).boundingBox();
+        expect(box, `кнопка «${name}» не найдена`).not.toBeNull();
+        expect(box!.x).toBeGreaterThanOrEqual(0);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+        expect(box!.y + box!.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
+      }
+
+      await dialog.getByRole('button', { name: 'Отмена' }).click();
+      await expect(dialog).toBeHidden();
+      await page.waitForTimeout(400);
+      expect(executeRequests, 'после отмены не должно быть запросов выполнения').toHaveLength(0);
+      expect(errors, `ошибки консоли: ${JSON.stringify(errors)}`).toHaveLength(0);
+    });
+  }
+}
+
+// ============================================================
+// Mihomo запущен, API недоступен: плашка «API оффлайн» не должна
+// давать горизонтальную прокрутку ни на одной странице поверх REST
+// ============================================================
+
+const OFFLINE_ROUTES = ['proxies', 'proxies?tab=providers', 'rules', 'connections', 'traffic'];
+
+for (const theme of THEMES) {
+  for (const width of WIDTHS) {
+    for (const route of OFFLINE_ROUTES) {
+      test(`API Mihomo оффлайн, ${route}: ${theme} ${width}px`, async ({ page }) => {
+        // B17: плашка ApiOffline шире окна на 20 px (воспроизводится на роутере)
+        test.fail(true, 'B17: ApiOffline даёт горизонтальную прокрутку');
+        await prepare(page, theme, width);
+        await page.route('**/api/capabilities', async (r) => {
+          await r.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              success: true,
+              data: {
+                kernels: {
+                  xray: { installed: true, version: '1.8.4', channel: 'stable' },
+                  mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
+                },
+                active_kernel: 'mihomo',
+                kernel_conflict: false,
+                running_kernels: ['mihomo'],
+                mihomo: {
+                  reachable: false,
+                  process_running: true,
+                  api_reachable: false,
+                  api_authenticated: false
+                }
+              }
+            })
+          });
+        });
+        await page.goto(`/#/${route}`);
+        await expectCleanPage(page, theme);
+      });
+    }
+  }
+}
