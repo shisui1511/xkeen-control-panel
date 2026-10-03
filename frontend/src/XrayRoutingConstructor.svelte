@@ -417,9 +417,10 @@
     if (files['02_dns.json']?.dns) {
       const d = files['02_dns.json'].dns;
       dnsConfig.tag = d.tag || 'dns-in';
-      dnsConfig.servers = Array.isArray(d.servers) ? d.servers : [];
+      // Копия, чтобы мутации черновика не меняли исходник из xrayFiles (предотвращает ложное «без изменений»)
+      dnsConfig.servers = Array.isArray(d.servers) ? $state.snapshot(d.servers) : [];
       dnsConfig.queryStrategy = d.queryStrategy || 'UseIP';
-      dnsConfig.hosts = d.hosts || {};
+      dnsConfig.hosts = d.hosts ? $state.snapshot(d.hosts) : {};
     }
 
     if (files['03_inbounds.json']?.inbounds) {
@@ -451,8 +452,8 @@
       const { enabled: managedDns, rest: userRules } = takeDnsOverProxyRules(rulesFromConfig(r));
       routingRules = userRules;
       dnsOverVless = managedDns;
-      routingExtra = routingRest;
-      routingFileExtra = fileRest;
+      routingExtra = $state.snapshot(routingRest);
+      routingFileExtra = $state.snapshot(fileRest);
       const proxyRule = routingRules.find(
         (rule) =>
           rule.outboundTag &&
@@ -467,7 +468,7 @@
         ? loadedBalancers.map((b: any) => ({
             ...b,
             tag: String(b.tag ?? ''),
-            selector: Array.isArray(b.selector) ? b.selector : []
+            selector: Array.isArray(b.selector) ? $state.snapshot(b.selector) : []
           }))
         : [];
       if (observatory) {
@@ -480,10 +481,13 @@
 
     if (files['06_policy.json']?.policy) {
       const p = files['06_policy.json'].policy;
-      policyConfig.levels = p.levels || {
-        '0': { handshake: 4, connIdle: 300, uplinkOnly: 2, downlinkOnly: 5 }
-      };
-      policyConfig.system = p.system || {};
+      // Копия, чтобы мутации уровней политики или системных параметров не меняли исходник из xrayFiles
+      policyConfig.levels = p.levels
+        ? $state.snapshot(p.levels)
+        : {
+            '0': { handshake: 4, connIdle: 300, uplinkOnly: 2, downlinkOnly: 5 }
+          };
+      policyConfig.system = p.system ? $state.snapshot(p.system) : {};
     }
   }
 
@@ -1114,7 +1118,7 @@
           {:else if outboundTags.filter((t) => t !== 'direct' && t !== 'block' && t !== 'dns-out').length === 0}
             <option value="" disabled>{$t('editor.no_outbounds_configured')}</option>
           {:else}
-            {#each outboundTags.filter((t) => t !== 'direct' && t !== 'block' && t !== 'dns-out') as tag}
+            {#each outboundTags.filter((t) => t !== 'direct' && t !== 'block' && t !== 'dns-out') as tag (tag)}
               <option value={tag}>{tag}</option>
             {/each}
           {/if}
@@ -1123,7 +1127,7 @@
 
       <!-- Section tabs -->
       <div class="sec-tabs" data-testid="xray-section-tabs">
-        {#each [['routing', $t('xray.tab_routing')], ['inbounds', $t('xray.tab_inbounds')], ['dns', 'DNS'], ['outbounds', $t('xray.tab_outbounds')], ['log', $t('xray.tab_log')], ['policy', $t('xray.tab_policy')]] as [id, label]}
+        {#each [['routing', $t('xray.tab_routing')], ['inbounds', $t('xray.tab_inbounds')], ['dns', 'DNS'], ['outbounds', $t('xray.tab_outbounds')], ['log', $t('xray.tab_log')], ['policy', $t('xray.tab_policy')]] as [id, label] (id)}
           <button
             class="sec-tab"
             class:active={activeSection === id}

@@ -754,4 +754,37 @@ test.describe('Xray Constructor integration test suite', () => {
     await expect(page.locator('#outbound-wg-public-key')).toHaveValue('PEER-PUB-B29');
     await expect(page.locator('#outbound-wg-psk')).toHaveValue('PSK-B29');
   });
+
+  test('DNS-секция: добавление DNS-сервера детектирует изменения в 02_dns.json (без алиасинга объектов)', async ({
+    page
+  }) => {
+    await openXrayConstructor(page);
+    await page
+      .locator('[data-testid="xray-section-tabs"] button:has-text("DNS"), [data-tab="dns"]')
+      .first()
+      .click();
+
+    // Открываем форму добавления DNS-сервера
+    const addDnsBtn = page.locator('button.add-btn').filter({ hasText: /DNS/ }).first();
+    await expect(addDnsBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
+    await addDnsBtn.click();
+
+    // Заполняем адрес и сохраняем
+    await page.locator('#xray-new-dns-address').fill('1.1.1.1');
+    const createBtn = page.locator('.form-actions button.btn-primary');
+    await createBtn.click();
+
+    // Новый сервер отобразился в списке
+    await expect(page.locator('.dns-servers-list')).toContainText('1.1.1.1:53');
+
+    // Нажимаем кнопку Apply Changes
+    const applyBtn = page.locator('[data-testid="apply-changes-btn"]');
+    await expect(applyBtn).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
+    await applyBtn.click();
+
+    // Проверяем, что модалка подтверждения содержит 02_dns.json в списке изменённых файлов
+    const confirmDialog = page.locator('[data-testid="apply-confirm-dialog"]');
+    await expect(confirmDialog).toBeVisible({ timeout: 3000 });
+    await expect(confirmDialog.locator('.apply-plan-list')).toContainText('02_dns.json');
+  });
 });
