@@ -392,15 +392,8 @@ func convertSingBoxStreamSettings(sb *singBoxOutbound) map[string]interface{} {
 				}
 			}
 		case "http", "httpupgrade":
-			h := map[string]interface{}{}
-			if sb.Transport.Host != "" {
-				h["host"] = []string{sb.Transport.Host}
-			}
-			if sb.Transport.Path != "" {
-				h["path"] = sb.Transport.Path
-			}
-			if len(h) > 0 {
-				ss["httpSettings"] = h
+			if key, h := httpTransportSettings(network, sb.Transport.Host, sb.Transport.Path); len(h) > 0 {
+				ss[key] = h
 			}
 		}
 	}
