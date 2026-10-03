@@ -333,7 +333,7 @@ func (a *API) checkActiveConfigsInvalid() bool {
 	}
 
 	invalid := false
-	activeKernel := a.getActiveKernelName()
+	st := a.activeKernelState()
 
 	checkXray := func() bool {
 		xrayBin := a.getBinaryPath("xray")
@@ -366,13 +366,14 @@ func (a *API) checkActiveConfigsInvalid() bool {
 		return false
 	}
 
-	switch activeKernel {
-	case "xray":
-		invalid = checkXray()
-	case "mihomo":
-		invalid = checkMihomo()
-	case "both":
+	switch {
+	case st.Conflict:
+		// Запущены оба ядра: проверяются оба конфига
 		invalid = checkXray() || checkMihomo()
+	case st.Kernel == "xray":
+		invalid = checkXray()
+	case st.Kernel == "mihomo":
+		invalid = checkMihomo()
 	default:
 		// If no kernel is currently running, validate installed kernels that have configs
 		if _, err := os.Stat(a.cfg.MihomoConfigDir); err == nil {

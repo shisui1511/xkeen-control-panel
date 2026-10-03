@@ -7,6 +7,9 @@
     showConfirm,
     isKernelChecking,
     capabilities,
+    runningKernels,
+    activeKernelName,
+    isConflict,
     lockNav
   } from './stores';
   import { anyKernelInstalled } from './lib/navCaps';
@@ -36,7 +39,13 @@
     snapshotTimeLabel,
     isColdUnknown
   } from './lib/serviceStatus';
-  import { activateRestartGrace } from './lib/serviceGrace';
+  import {
+    serviceAction,
+    switchKernel as switchKernelClient,
+    notifySwitchOutcome,
+    type KernelName
+  } from './lib/serviceControl';
+  import { kernelLabel } from './lib/kernelState';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import XKeenSettingsCard from './components/xkeen/XKeenSettingsCard.svelte';
   import XKeenInstallCard from './components/xkeen/XKeenInstallCard.svelte';
@@ -65,7 +74,6 @@
 
   interface XKeenStatusInfo {
     isRunning: boolean;
-    activeKernel: string;
     pid: number;
     uptime: string;
     binaryPath: string;
@@ -74,7 +82,6 @@
 
   let xkeenInfo = $state<XKeenStatusInfo>({
     isRunning: false,
-    activeKernel: '',
     pid: 0,
     uptime: '',
     binaryPath: '',
@@ -229,6 +236,9 @@
     if (action.startsWith('switch_kernel:')) {
       return $t('svc.log_action_switch') + ' ' + action.split(':')[1];
     }
+    if (action.startsWith('stop_kernel:')) {
+      return $t('svc.log_action_stop_kernel') + ' ' + kernelLabel(action.split(':')[1]);
+    }
     return map[action] ?? action;
   }
 
@@ -271,7 +281,6 @@
             statusCold = isColdUnknown(d);
             xkeenInfo = {
               isRunning: d.is_running,
-              activeKernel: d.active_kernel || '',
               pid: d.pid || 0,
               uptime: d.uptime || '',
               binaryPath: d.binary_path || '',
@@ -302,7 +311,6 @@
         xkeenStatus = $t('app.error');
         xkeenInfo = {
           isRunning: false,
-          activeKernel: '',
           pid: 0,
           uptime: '',
           binaryPath: '',
@@ -316,7 +324,6 @@
       xkeenStatus = $t('app.unavailable');
       xkeenInfo = {
         isRunning: false,
-        activeKernel: '',
         pid: 0,
         uptime: '',
         binaryPath: '',
@@ -335,13 +342,6 @@
       /[\u0437][\u0430][\u043F][\u0443][\u0449][\u0435][\u043D]/.test(lower);
     xkeenInfo = {
       isRunning: isRunning,
-      activeKernel: isRunning
-        ? lower.includes('xray')
-          ? 'xray'
-          : lower.includes('mihomo')
-            ? 'mihomo'
-            : ''
-        : '',
       pid: 0,
       uptime: '',
       binaryPath: '',
@@ -392,22 +392,22 @@
     }
   }
 
-  async function controlService(action: string) {
+  // Тексты 409 гейта уже переведены клиентом (у ошибки есть code), прочие — с префиксом
+  function actionErrorText(e: any): string {
+    return e?.code ? e.message : `${$t('svc.action_error')}: ${e?.message ?? ''}`;
+  }
+
+  async function controlService(action: 'start' | 'stop' | 'restart') {
     if (action === 'start' && startBlockedReason) return;
+    // Запуск и перезапуск при двух ядрах сервер всё равно отклонит (409); остановка доступна
+    if (action !== 'stop' && $isConflict) return;
     isKernelChecking.set(false);
     const key = `xkeen-${action}`;
     actionLoading[key] = true;
     try {
       if (action === 'start') {
         // Pre-flight check: determine kernel to validate
-        const kernel =
-          activeKernel === 'xray' || activeKernel === 'mihomo'
-            ? activeKernel
-            : xray?.process_status === 'running'
-              ? 'xray'
-              : mihomo?.process_status === 'running'
-                ? 'mihomo'
-                : 'xray';
+        const kernel = $activeKernelName || 'xray';
         try {
           const pfRes = await apiFetch(`/api/config/preflight?kernel=${kernel}`, {
             signal: AbortSignal.timeout(3000)
@@ -437,29 +437,22 @@
           // Network/timeout error — fall through to silent start
         }
       }
-      if (action === 'restart' || action === 'switch_kernel' || action === 'start') {
-        activateRestartGrace(6000);
-      }
-      const res = await apiFetch(`/api/service/control?action=${action}`, {
-        method: 'POST'
-      });
-      const text = await res.text();
-      if (!res.ok) throw new Error(text);
+      await serviceAction(action);
       await fetchStatus();
       await fetchKernels();
       await fetchCapabilities();
       fetchRestartLog();
     } catch (e: any) {
       if (e?.status === 401) return;
-      showToast('error', `${$t('svc.action_error')}: ${e.message}`);
+      showToast('error', actionErrorText(e));
       fetchRestartLog();
     } finally {
       actionLoading[key] = false;
     }
   }
 
-  async function handleSwitchKernel(target: string) {
-    if (target === activeKernel || switchingKernelTo !== null) return;
+  async function handleSwitchKernel(target: KernelName) {
+    if (cardsLocked || target === activeKernel) return;
     const confirmed = await showConfirm(
       $t('svc.switch_confirm_title'),
       $t('svc.switch_confirm_msg', { from: activeKernel.toUpperCase(), to: target.toUpperCase() }),
@@ -470,24 +463,39 @@
     await switchKernel(target);
   }
 
-  async function switchKernel(kernel: string) {
+  // Ядро, которое после переключения не остановилось (old_still_running): бейдж
+  // «Не остановлено» держится, пока capabilities показывают его запущенным
+  let notStoppedKernel = $state<string | null>(null);
+  // Прежнее ядро на время переключения — для подписи ожидания
+  let switchingFrom = $state('');
+
+  $effect(() => {
+    if (notStoppedKernel && !$runningKernels.includes(notStoppedKernel as KernelName)) {
+      notStoppedKernel = null;
+    }
+  });
+
+  async function switchKernel(kernel: KernelName) {
     isKernelChecking.set(false);
+    switchingFrom = activeKernel;
     switchingKernelTo = kernel;
     actionLoading[`switch-${kernel}`] = true;
-    activateRestartGrace(6000);
     try {
-      const res = await apiFetch(`/api/service/control?action=switch_kernel&kernel=${kernel}`, {
-        method: 'POST'
-      });
-      const text = await res.text();
-      if (!res.ok) throw new Error(text);
-      await fetchStatus();
-      await fetchKernels();
-      await fetchCapabilities();
-      fetchRestartLog();
+      const result = await switchKernelClient(kernel);
+      notifySwitchOutcome(result);
+      await Promise.allSettled([
+        fetchStatus(),
+        fetchKernels(),
+        fetchCapabilities(),
+        fetchRestartLog()
+      ]);
+      // Бейдж ставится после перечитывания capabilities: иначе эффект выше снял бы его
+      // по ещё не обновлённому списку запущенных ядер
+      notStoppedKernel = result.outcome === 'old_still_running' ? result.old : null;
     } catch (e: any) {
       if (e?.status === 401) return;
-      showToast('error', `${$t('svc.action_error')}: ${e.message}`);
+      showToast('error', actionErrorText(e));
+      fetchRestartLog();
     } finally {
       actionLoading[`switch-${kernel}`] = false;
       switchingKernelTo = null;
@@ -847,17 +855,8 @@
   let isAnyKernelChecking = $derived(
     Array.isArray(kernels) ? kernels.some((k) => k.status === 'checking') : false
   );
-  let activeKernel = $derived.by(() => {
-    if (xray?.process_status === 'running') return 'xray';
-    if (mihomo?.process_status === 'running') return 'mihomo';
-    const lastSwitch = Array.isArray(restartLog)
-      ? restartLog.find((entry) => entry.action.startsWith('switch_kernel:') && entry.success)
-      : undefined;
-    if (lastSwitch) {
-      return lastSwitch.action.split(':')[1];
-    }
-    return xkeenInfo.activeKernel || 'none';
-  });
+  // Активное ядро — только из стора capabilities; в конфликте и без ядра — 'none'
+  let activeKernel = $derived($activeKernelName || 'none');
 
   // Адрес API берётся только из реальных данных: сокет/адрес контроллера Mihomo
   // или gRPC-адрес Xray при наличии api-блока в конфиге; иначе «—».
@@ -879,7 +878,9 @@
       xkeenInfo.isRunning
   );
 
-  let switchingKernelTo = $state<string | null>(null);
+  let switchingKernelTo = $state<KernelName | null>(null);
+  // Карточки-переключатели и запуск/перезапуск неактивны при конфликте и во время переключения
+  const cardsLocked = $derived($isConflict || switchingKernelTo !== null);
 
   // Причина, по которой «Запустить» недоступна: нет XKeen или ни одного ядра.
   // Пока capabilities не загружены (null), кнопка не блокируется
@@ -891,6 +892,10 @@
     if (anyKernelInstalled($capabilities) === false) return $t('svc.start_disabled_no_kernel');
     return null;
   });
+
+  const startDisabledReason = $derived(
+    $isConflict ? $t('kernel.conflict_blocked') : startBlockedReason
+  );
 
   // Подсказка установщика XKeen называет стабильную версию Xray. Если на
   // канале «Стабильный» она ещё неизвестна, проверка запускается один раз за
@@ -1035,132 +1040,171 @@
       </div>
 
       <!-- Mutual Exclusive Radio Selector (SRV-02) -->
-      <div class="core-radio-grid" role="radiogroup" aria-label={$t('svc.active_kernel_label')}>
-        <!-- Mihomo Option -->
+      <div class="core-radio-wrap">
         <div
-          role="radio"
-          aria-checked={activeKernel === 'mihomo'}
-          tabindex="0"
-          class="core-radio-card kernel-card"
-          class:active={activeKernel === 'mihomo'}
-          class:switching={switchingKernelTo === 'mihomo'}
-          onclick={() => handleSwitchKernel('mihomo')}
-          onkeydown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') handleSwitchKernel('mihomo');
-          }}
+          class="core-radio-grid"
+          role="radiogroup"
+          aria-label={$t('svc.active_kernel_label')}
+          aria-busy={switchingKernelTo !== null}
         >
-          <div class="radio-indicator">
-            <span class="radio-dot" class:checked={activeKernel === 'mihomo'}></span>
-          </div>
-          <div class="radio-body k-body">
-            <div class="radio-name">
-              <span>Mihomo</span>
-              {#if kernelVersion(mihomo?.current_version)}
-                <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
-                  >{kernelVersion(mihomo?.current_version)}</span
+          <!-- Mihomo Option -->
+          <div
+            role="radio"
+            aria-checked={activeKernel === 'mihomo'}
+            aria-disabled={cardsLocked}
+            title={$isConflict ? $t('kernel.conflict_blocked') : undefined}
+            tabindex="0"
+            class="core-radio-card kernel-card"
+            class:active={activeKernel === 'mihomo'}
+            class:switching={switchingKernelTo === 'mihomo'}
+            onclick={() => handleSwitchKernel('mihomo')}
+            onkeydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') handleSwitchKernel('mihomo');
+            }}
+          >
+            <div class="radio-indicator">
+              <span class="radio-dot" class:checked={activeKernel === 'mihomo'}></span>
+            </div>
+            <div class="radio-body k-body">
+              <div class="radio-name">
+                <span>Mihomo</span>
+                {#if kernelVersion(mihomo?.current_version)}
+                  <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
+                    >{kernelVersion(mihomo?.current_version)}</span
+                  >
+                {/if}
+                {#if activeKernel === 'mihomo'}
+                  <span class="active-pill">{$t('svc.active_label')}</span>
+                {/if}
+              </div>
+              <div class="radio-desc k-meta">
+                {#if !kernelsLoaded}
+                  <Skeleton type="text-line" width="90px" />
+                {:else}
+                  {mihomo?.process_status === 'running'
+                    ? `${$t('svc.running')} · PID ${mihomo?.pid || xkeenInfo.pid || '—'}`
+                    : kernelInstalled(mihomo?.current_version, 'mihomo')
+                      ? $t('svc.stopped')
+                      : $t('kernel.status.not_installed')}
+                {/if}
+              </div>
+              {#if notStoppedKernel === 'mihomo'}
+                <StatusBadge variant="warning" label={$t('kernel.badge_not_stopped')} />
+              {/if}
+              {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
+                <a
+                  href="#/editor"
+                  class="badge badge-warning mihomo-api-badge-link"
+                  title={$t('svc.mihomo_api_unavailable_title')}
+                  onclick={(e) => e.stopPropagation()}
                 >
-              {/if}
-              {#if activeKernel === 'mihomo'}
-                <span class="active-pill">{$t('svc.active_label')}</span>
-              {/if}
-            </div>
-            <div class="radio-desc k-meta">
-              {#if !kernelsLoaded}
-                <Skeleton type="text-line" width="90px" />
-              {:else}
-                {mihomo?.process_status === 'running'
-                  ? `${$t('svc.running')} · PID ${mihomo?.pid || xkeenInfo.pid || '—'}`
-                  : kernelInstalled(mihomo?.current_version, 'mihomo')
-                    ? $t('svc.stopped')
-                    : $t('kernel.status.not_installed')}
+                  <StatusBadge variant="warning" label={$t('svc.mihomo_api_unavailable')} />
+                </a>
               {/if}
             </div>
-            {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
-              <a
-                href="#/editor"
-                class="badge badge-warning mihomo-api-badge-link"
-                title={$t('svc.mihomo_api_unavailable_title')}
-                onclick={(e) => e.stopPropagation()}
+            {#if !isRunning && kernelInstalled(mihomo?.current_version, 'mihomo')}
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  controlService('start');
+                }}
+                disabled={cardsLocked}
+                title={$isConflict ? $t('kernel.conflict_blocked') : $t('svc.action_start')}
+                aria-label={$isConflict
+                  ? `${$t('svc.action_start')}: ${$t('kernel.conflict_blocked')}`
+                  : undefined}
               >
-                <StatusBadge variant="warning" label={$t('svc.mihomo_api_unavailable')} />
-              </a>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                {$t('svc.action_start')}
+              </button>
             {/if}
           </div>
-          {#if !isRunning && kernelInstalled(mihomo?.current_version, 'mihomo')}
-            <button
-              type="button"
-              class="btn btn-primary btn-sm"
-              onclick={(e) => {
-                e.stopPropagation();
-                controlService('start');
-              }}
-              title={$t('svc.action_start')}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
-              {$t('svc.action_start')}
-            </button>
-          {/if}
-        </div>
 
-        <!-- Xray Option -->
-        <div
-          role="radio"
-          aria-checked={activeKernel === 'xray'}
-          tabindex="0"
-          class="core-radio-card kernel-card"
-          class:active={activeKernel === 'xray'}
-          class:switching={switchingKernelTo === 'xray'}
-          onclick={() => handleSwitchKernel('xray')}
-          onkeydown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') handleSwitchKernel('xray');
-          }}
-        >
-          <div class="radio-indicator">
-            <span class="radio-dot" class:checked={activeKernel === 'xray'}></span>
-          </div>
-          <div class="radio-body k-body">
-            <div class="radio-name">
-              <span>Xray</span>
-              {#if kernelVersion(xray?.current_version)}
-                <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
-                  >{kernelVersion(xray?.current_version)}</span
-                >
-              {/if}
-              {#if activeKernel === 'xray'}
-                <span class="active-pill">{$t('svc.active_label')}</span>
+          <!-- Xray Option -->
+          <div
+            role="radio"
+            aria-checked={activeKernel === 'xray'}
+            aria-disabled={cardsLocked}
+            title={$isConflict ? $t('kernel.conflict_blocked') : undefined}
+            tabindex="0"
+            class="core-radio-card kernel-card"
+            class:active={activeKernel === 'xray'}
+            class:switching={switchingKernelTo === 'xray'}
+            onclick={() => handleSwitchKernel('xray')}
+            onkeydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') handleSwitchKernel('xray');
+            }}
+          >
+            <div class="radio-indicator">
+              <span class="radio-dot" class:checked={activeKernel === 'xray'}></span>
+            </div>
+            <div class="radio-body k-body">
+              <div class="radio-name">
+                <span>Xray</span>
+                {#if kernelVersion(xray?.current_version)}
+                  <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
+                    >{kernelVersion(xray?.current_version)}</span
+                  >
+                {/if}
+                {#if activeKernel === 'xray'}
+                  <span class="active-pill">{$t('svc.active_label')}</span>
+                {/if}
+              </div>
+              <div class="radio-desc k-meta">
+                {#if !kernelsLoaded}
+                  <Skeleton type="text-line" width="90px" />
+                {:else}
+                  {xray?.process_status === 'running'
+                    ? `${$t('svc.running')} · PID ${xray?.pid || xkeenInfo.pid || '—'}`
+                    : kernelInstalled(xray?.current_version, 'xray')
+                      ? $t('svc.stopped')
+                      : $t('kernel.status.not_installed')}
+                {/if}
+              </div>
+              {#if notStoppedKernel === 'xray'}
+                <StatusBadge variant="warning" label={$t('kernel.badge_not_stopped')} />
               {/if}
             </div>
-            <div class="radio-desc k-meta">
-              {#if !kernelsLoaded}
-                <Skeleton type="text-line" width="90px" />
-              {:else}
-                {xray?.process_status === 'running'
-                  ? `${$t('svc.running')} · PID ${xray?.pid || xkeenInfo.pid || '—'}`
-                  : kernelInstalled(xray?.current_version, 'xray')
-                    ? $t('svc.stopped')
-                    : $t('kernel.status.not_installed')}
-              {/if}
-            </div>
+            {#if !isRunning && kernelInstalled(xray?.current_version, 'xray')}
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  controlService('start');
+                }}
+                disabled={cardsLocked}
+                title={$isConflict ? $t('kernel.conflict_blocked') : $t('svc.action_start')}
+                aria-label={$isConflict
+                  ? `${$t('svc.action_start')}: ${$t('kernel.conflict_blocked')}`
+                  : undefined}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                {$t('svc.action_start')}
+              </button>
+            {/if}
           </div>
-          {#if !isRunning && kernelInstalled(xray?.current_version, 'xray')}
-            <button
-              type="button"
-              class="btn btn-primary btn-sm"
-              onclick={(e) => {
-                e.stopPropagation();
-                controlService('start');
-              }}
-              title={$t('svc.action_start')}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
-              {$t('svc.action_start')}
-            </button>
-          {/if}
         </div>
+        <p
+          class="switch-wait-note"
+          class:active={switchingKernelTo !== null}
+          data-testid="kernel-switching-wait"
+          aria-live="polite"
+        >
+          {#if switchingKernelTo !== null}
+            <span class="spinner" aria-hidden="true"></span>
+            {$t('kernel.switching_wait', {
+              old: kernelLabel(switchingFrom === 'none' ? '—' : switchingFrom),
+              new: kernelLabel(switchingKernelTo)
+            })}
+          {/if}
+        </p>
       </div>
 
       <!-- Process Metadata Panel -->
@@ -1195,7 +1239,7 @@
           <button
             class="btn btn-danger-soft"
             onclick={() => controlService('stop')}
-            disabled={actionLoading['xkeen-stop']}
+            disabled={actionLoading['xkeen-stop'] || switchingKernelTo !== null}
             title={$t('svc.action_stop')}
           >
             <svg
@@ -1218,9 +1262,12 @@
           <button
             class="btn btn-secondary"
             onclick={() => controlService('restart')}
-            disabled={actionLoading['xkeen-restart']}
+            disabled={actionLoading['xkeen-restart'] || cardsLocked}
             class:btn-loading={actionLoading['xkeen-restart']}
-            title={$t('svc.action_restart')}
+            title={$isConflict ? $t('kernel.conflict_blocked') : $t('svc.action_restart')}
+            aria-label={$isConflict
+              ? `${$t('svc.action_restart')}: ${$t('kernel.conflict_blocked')}`
+              : undefined}
           >
             <svg
               width="14"
@@ -1237,11 +1284,11 @@
             class="btn btn-primary"
             data-testid="hero-start"
             onclick={() => controlService('start')}
-            disabled={actionLoading['xkeen-start'] || !!startBlockedReason}
+            disabled={actionLoading['xkeen-start'] || !!startBlockedReason || cardsLocked}
             class:btn-loading={actionLoading['xkeen-start']}
-            title={startBlockedReason ?? $t('svc.action_start')}
-            aria-label={startBlockedReason
-              ? `${$t('svc.action_start')}: ${startBlockedReason}`
+            title={startDisabledReason ?? $t('svc.action_start')}
+            aria-label={startDisabledReason
+              ? `${$t('svc.action_start')}: ${startDisabledReason}`
               : undefined}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"
@@ -1365,7 +1412,8 @@
               await controlService('restart');
               pendingRestartKernel = null;
             }}
-            disabled={actionLoading['xkeen-restart']}
+            disabled={actionLoading['xkeen-restart'] || cardsLocked}
+            title={$isConflict ? $t('kernel.conflict_blocked') : undefined}
           >
             {$t('svc.restart_now')}
           </button>
@@ -1988,6 +2036,20 @@
   .core-radio-card.switching {
     opacity: 0.7;
     cursor: wait;
+  }
+
+  /* Подпись ожидания переключения: элемент с aria-live есть всегда, пустой он не занимает места */
+  .switch-wait-note {
+    margin: 0;
+    font-size: 12px;
+    color: var(--fg-secondary);
+  }
+
+  .switch-wait-note.active {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
   }
 
   .radio-indicator {

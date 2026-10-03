@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -154,9 +155,15 @@ func TestCapabilities_ApplyRestarts(t *testing.T) {
 		return envelope.Data
 	}
 
-	running := get(t, map[string]string{"xray": "running", "mihomo": "running"})
+	running := get(t, map[string]string{"xray": "running", "mihomo": "stopped"})
 	if !running.ApplyRestarts["xray"] || running.ApplyRestarts["mihomo"] {
 		t.Errorf("xray running: apply_restarts = %v, want xray:true mihomo:false", running.ApplyRestarts)
+	}
+
+	// Оба запущены — конфликт: применение не перезапускает ни одно ядро.
+	both := get(t, map[string]string{"xray": "running", "mihomo": "running"})
+	if both.ApplyRestarts["xray"] || both.ApplyRestarts["mihomo"] {
+		t.Errorf("both running: apply_restarts = %v, want both false", both.ApplyRestarts)
 	}
 
 	stopped := get(t, map[string]string{"xray": "stopped", "mihomo": "stopped"})
@@ -201,7 +208,16 @@ func newRawStatusCache(t *testing.T, raw string, stale bool) *services.XKeenStat
 	t.Cleanup(cache.Stop)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cache.RefreshNow(ctx)
+	// Цикл кэша сам делает первый опрос сразу после Start. Явный RefreshNow
+	// рядом с ним под нагрузкой мог занять второй вызов (он отдаёт ошибку) и
+	// дать stale=true вместо свежего снимка, поэтому первый опрос только ждём.
+	for cache.Snapshot().Raw != raw {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("подготовка снимка: первый опрос не завершился, raw=%q", cache.Snapshot().Raw)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
 	if stale {
 		cache.RefreshNow(ctx)
 	}
@@ -264,6 +280,66 @@ func TestCapabilities_BothWordsFallsBackToConfigured(t *testing.T) {
 	api := newConfiguredKernelAPI(t, "mihomo", newRawStatusCache(t, "xray and mihomo are running", false))
 	if got := capabilitiesActiveKernel(t, api); got != "mihomo" {
 		t.Errorf("active_kernel = %q, want mihomo (ConfiguredKernel при обоих словах)", got)
+	}
+}
+
+// capabilitiesData разбирает ответ /api/capabilities вместе с «сырыми» полями.
+func capabilitiesData(t *testing.T, api *API) (CapabilitiesResponse, map[string]json.RawMessage) {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	api.Capabilities(rr, httptest.NewRequest(http.MethodGet, "/api/capabilities", nil))
+	var typed struct {
+		Data CapabilitiesResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &typed); err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	return typed.Data, raw.Data
+}
+
+// TestCapabilities_KernelConflict: оба процесса запущены — active_kernel "both",
+// kernel_conflict true и running_kernels; один процесс — конфликта нет.
+func TestCapabilities_KernelConflict(t *testing.T) {
+	newAPI := func(states []services.KernelProcessState) *API {
+		ksvc := services.NewKernelService(t.TempDir())
+		ksvc.SetProcessStatesSource(func() []services.KernelProcessState { return states })
+		api := &API{cfg: &config.Config{MihomoAPIURL: "http://127.0.0.1:1"}}
+		api.SetKernelService(ksvc)
+		return api
+	}
+
+	both, raw := capabilitiesData(t, newAPI([]services.KernelProcessState{
+		{Name: "xray", Status: "running", PID: 10},
+		{Name: "mihomo", Status: "running", PID: 11},
+	}))
+	if both.ActiveKernel != "both" || !both.KernelConflict {
+		t.Errorf("оба running: active_kernel=%q kernel_conflict=%v, want both/true", both.ActiveKernel, both.KernelConflict)
+	}
+	if want := []string{"xray", "mihomo"}; !reflect.DeepEqual(both.RunningKernels, want) {
+		t.Errorf("running_kernels = %v, want %v", both.RunningKernels, want)
+	}
+	if string(raw["kernel_conflict"]) != "true" {
+		t.Errorf("kernel_conflict в JSON = %s, want true", raw["kernel_conflict"])
+	}
+	if both.XRay.GRPCReady {
+		t.Error("grpc_ready при конфликте должен быть ложным")
+	}
+
+	one, raw := capabilitiesData(t, newAPI([]services.KernelProcessState{
+		{Name: "xray", Status: "stopped"},
+		{Name: "mihomo", Status: "running", PID: 11},
+	}))
+	if one.ActiveKernel != "mihomo" || one.KernelConflict {
+		t.Errorf("один running: active_kernel=%q kernel_conflict=%v, want mihomo/false", one.ActiveKernel, one.KernelConflict)
+	}
+	if string(raw["kernel_conflict"]) != "false" {
+		t.Errorf("kernel_conflict всегда присутствует в JSON, got %s", raw["kernel_conflict"])
 	}
 }
 

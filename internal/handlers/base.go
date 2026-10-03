@@ -32,6 +32,7 @@ type API struct {
 	subscriptionHealthSvc *services.SubscriptionHealthService
 	kernelSvc             *services.KernelService
 	kernelApplier         *services.KernelApplier
+	kernelSwitcher        *services.KernelSwitcher
 	networkSvc            *services.NetworkToolsService
 	smartProxySvc         *services.SmartProxyService
 	xkeenSettingsSvc      *services.XKeenSettingsService
@@ -66,6 +67,14 @@ type API struct {
 	sslDaysCacheMutex     sync.Mutex
 	lastRestartLogger     time.Time
 	restartLoggerMutex    sync.Mutex
+
+	// lifecycleMu — одна операция жизненного цикла ядра за раз. Один замок на все
+	// пути «перезапустить ядро»: ServiceControl (start, stop, restart,
+	// switch_kernel, apply) и обходные обработчики (gRPC-мониторинг Xray,
+	// снимки, профили Mihomo, миграция сокета, DNS-перехват) берут его через
+	// tryLifecycleLock (занят — 409 kernel_op_in_progress); KernelApplier.Apply
+	// для фоновых вызывающих (подписки) ждёт его блокирующе.
+	lifecycleMu sync.Mutex
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
@@ -254,9 +263,53 @@ func (a *API) SetKernelService(svc *services.KernelService) {
 	// старте, а не лениво в обработчике.
 	if svc == nil {
 		a.kernelApplier = nil
+		a.kernelSwitcher = nil
 		return
 	}
-	a.kernelApplier = services.NewKernelApplier(svc, a.xkeenSvc)
+	// Запасные источники активного ядра (когда процессов ядер нет): свежий снимок
+	// статуса XKeen и name_client init-скрипта.
+	svc.SetActiveFallbacks(a.freshKernelStatusRaw, a.configuredKernel)
+	a.kernelApplier = services.NewKernelApplier(svc, a.xkeenSvc).WithLifecycleLock(&a.lifecycleMu)
+	a.kernelSwitcher = services.NewKernelSwitcher(svc)
+}
+
+// tryLifecycleLock берёт замок жизненного цикла без ожидания. Занят — пишет 409
+// kernel_op_in_progress и возвращает false; при успехе вызывающий делает
+// `defer a.lifecycleMu.Unlock()`.
+func (a *API) tryLifecycleLock(w http.ResponseWriter, r *http.Request) bool {
+	if !a.lifecycleMu.TryLock() {
+		JSONErrorCode(w, http.StatusConflict, "kernel_op_in_progress", a.t(r, "kernel.op_in_progress"))
+		return false
+	}
+	return true
+}
+
+// freshKernelStatusRaw — текст `xkeen -status` и его свежесть. Устаревший снимок
+// (после switch_kernel или при зависшем опросе) хранит прежнее ядро и за факт не
+// принимается.
+func (a *API) freshKernelStatusRaw() (string, bool) {
+	if a.xkeenSvc == nil {
+		return "", false
+	}
+	snap := a.xkeenStatusSnapshot()
+	return snap.Raw, !snap.Stale && snap.Raw != ""
+}
+
+// configuredKernel — ядро из name_client init-скрипта XKeen; nil-безопасно.
+func (a *API) configuredKernel() string {
+	if a.xkeenSvc == nil {
+		return ""
+	}
+	return a.xkeenSvc.ConfiguredKernel()
+}
+
+// activeKernelState — единое определение активного ядра для обработчиков.
+// Без kernelSvc (тестовые сборки API) процессов нет: решают запасные источники.
+func (a *API) activeKernelState() services.ActiveKernelState {
+	if a.kernelSvc != nil {
+		return a.kernelSvc.ActiveState()
+	}
+	return services.ResolveActiveState(nil, a.freshKernelStatusRaw, a.configuredKernel)
 }
 
 // KernelApplier — общий исполнитель «применить конфиг к ядру»; nil до
@@ -285,6 +338,10 @@ func (a *API) ClearCapabilitiesCache() {
 	a.capsCacheMutex.Lock()
 	defer a.capsCacheMutex.Unlock()
 	a.capsCache = nil
+	// Вместе с capabilities сбрасывается и кэш активного ядра.
+	if a.kernelSvc != nil {
+		a.kernelSvc.InvalidateActiveState()
+	}
 }
 
 // ResolveMihomoSecret возвращает секрет Clash API: сначала из конфига панели,
@@ -339,42 +396,4 @@ func setupXrayCmdEnv(cmd *exec.Cmd, configDir string) {
 		}
 	}
 	cmd.Env = env
-}
-
-// getActiveKernelName returns the name of the currently running active kernel ("mihomo", "xray", "both", or "none").
-func (a *API) getActiveKernelName() string {
-	var active string
-	if a.kernelSvc != nil {
-		var running []string
-		for _, info := range a.kernelSvc.List() {
-			if info.ProcessStatus == "running" {
-				running = append(running, info.Name)
-			}
-		}
-		switch len(running) {
-		case 0:
-			// fall through to the xkeenSvc fallback below
-		case 1:
-			active = running[0]
-		default:
-			active = "both"
-		}
-	}
-	if active == "" && a.xkeenSvc != nil {
-		// Устаревший снимок не выдаётся за факт о запущенном ядре.
-		if snap := a.xkeenStatusSnapshot(); !snap.Stale && snap.Raw != "" {
-			lower := strings.ToLower(snap.Raw)
-			if strings.Contains(lower, "xray") && strings.Contains(lower, "mihomo") {
-				active = "both"
-			} else if strings.Contains(lower, "xray") {
-				active = "xray"
-			} else if strings.Contains(lower, "mihomo") {
-				active = "mihomo"
-			}
-		}
-	}
-	if active == "" {
-		active = "none"
-	}
-	return active
 }

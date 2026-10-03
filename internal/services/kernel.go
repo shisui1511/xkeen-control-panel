@@ -349,6 +349,9 @@ func isShortLivedOrHelperProcess(pidStr string) bool {
 		"-version":  true,
 		"-h":        true,
 		"--help":    true,
+		// Разовая конвертация MRS, которую панель сама запускает (route_matcher):
+		// не ядро и не должна давать ложный конфликт.
+		"convert-ruleset": true,
 	}
 	for _, arg := range args {
 		if blacklist[strings.TrimSpace(arg)] {
@@ -612,6 +615,24 @@ type KernelService struct {
 
 	// stageHook (только тесты) зовётся перед каждой сменой статуса установки, вне s.mu.
 	stageHook func(status, stage string)
+
+	// activeMu защищает запасные источники активного ядра (ActiveState).
+	// Замки не вкладываются: ActiveState отпускает activeMu до вызова
+	// ProcessStates (он берёт s.mu), поэтому порядок activeMu/s.mu не важен.
+	activeMu sync.Mutex
+	// freshRawFn — свежий снимок `xkeen -status` (текст, свежесть); configuredFn —
+	// ядро из name_client init-скрипта. Подключаются SetActiveFallbacks.
+	freshRawFn   func() (string, bool)
+	configuredFn func() string
+	// Кэш ActiveState: activeCache действителен, пока activeFresh и не истёк
+	// activeStateTTL. activeGen растёт при сбросе, чтобы расчёт, начатый до
+	// сброса, не записал устаревшее состояние в кэш.
+	activeCache ActiveKernelState
+	activeAt    time.Time
+	activeFresh bool
+	activeGen   uint64
+	// processStatesFn подменяет ProcessStates (только тесты), под s.mu.
+	processStatesFn func() []KernelProcessState
 }
 
 // SetReleaseSource подменяет источник релизов (базовый URL GitHub API и HTTP-клиент).
@@ -874,15 +895,6 @@ func (s *KernelService) Get(name string) *KernelInfo {
 	snap.Uptime = uptime
 	snap.fillBackup()
 	return &snap
-}
-
-func (s *KernelService) GetActiveKernel() string {
-	for _, info := range s.List() {
-		if info.ProcessStatus == "running" {
-			return info.Name
-		}
-	}
-	return ""
 }
 
 // SetChannel переключает канал обновлений ядра (stable/preview) и сохраняет выбор

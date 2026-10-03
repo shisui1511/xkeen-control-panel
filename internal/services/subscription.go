@@ -480,9 +480,10 @@ type retryState struct {
 	nextRetry time.Time
 }
 
-// KernelStatusProvider defines active kernel detection seam.
+// KernelStatusProvider defines active kernel detection seam. Активное ядро —
+// единый резолвер ActiveState (работающий процесс, затем запасные источники).
 type KernelStatusProvider interface {
-	GetActiveKernel() string
+	ActiveState() ActiveKernelState
 	Get(name string) *KernelInfo
 }
 

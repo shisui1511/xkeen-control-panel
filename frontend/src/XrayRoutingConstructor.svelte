@@ -7,7 +7,7 @@
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { applyToKernel, notifyApplyOutcome, willRestartOnApply } from './lib/serviceApply';
   import { currentLang, t, tp } from './i18n';
-  import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
+  import { capabilities, showToast, fetchCapabilities, showConfirm, isXray } from './stores';
   import { syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
   import {
     splitOutbounds,
@@ -1148,7 +1148,7 @@
           bind:balancers
           bind:observatorySettings
           {outboundTags}
-          isXrayActive={$capabilities?.active_kernel === 'xray'}
+          isXrayActive={$isXray}
           bind:testRouteForm
           {testRouteRunning}
           {testRouteResult}

@@ -167,6 +167,52 @@ test.describe('XKeen settings card', () => {
       expect(controlRequests.some((u) => u.includes('action=start'))).toBe(false);
     });
 
+    test('save and restart is blocked while both kernels are running', async ({ page }) => {
+      await mockSettingsAndApply(page, {}, []);
+      await page.route('**/api/capabilities', (route) =>
+        route.fulfill({
+          json: {
+            success: true,
+            data: {
+              kernels: {
+                xray: { installed: true, version: '1.8.4' },
+                mihomo: { installed: true, version: '1.19.31' }
+              },
+              active_kernel: 'both',
+              kernel_conflict: true,
+              running_kernels: ['xray', 'mihomo']
+            }
+          }
+        })
+      );
+      await visitPage(page, '/#/services');
+      const card = page.locator('.xkeen-settings-card');
+      await expect(card).toBeVisible();
+      await card.locator('textarea').fill('80\n443\n');
+      const restartBtn = card.getByRole('button', { name: /Сохранить и перезапустить/ });
+      await expect(restartBtn).toBeDisabled();
+      await expect(restartBtn).toHaveAttribute('title', 'Недоступно, пока запущены оба ядра');
+    });
+
+    test('a conflict refusal of the apply (409) is shown as saved-but-not-applied', async ({
+      page
+    }) => {
+      await mockSettingsAndApply(page, {}, []);
+      await page.route('**/api/service/control**', (route) =>
+        route.fulfill({
+          status: 409,
+          json: { success: false, error: 'kernel conflict', code: 'kernel_conflict' }
+        })
+      );
+      await saveAndRestart(page);
+      await expect(
+        page.locator('.toast--error', {
+          hasText: 'Сохранено, но не применено: запущены оба ядра'
+        })
+      ).toBeVisible();
+      await expect(page.getByText('перезапуск не удался', { exact: false })).toHaveCount(0);
+    });
+
     test('save and restart with running kernel reports the restart', async ({ page }) => {
       const controlRequests: string[] = [];
       await mockSettingsAndApply(

@@ -1,7 +1,7 @@
 import { t, currentLang } from '../../i18n';
 import { apiFetch, apiFetchJSON } from '../../lib/api';
 import { parseValidationError } from '../../lib/errorParser';
-import { capabilities, showToast, showConfirm } from '../../stores';
+import { activeKernelState, showToast, showConfirm } from '../../stores';
 import { get } from 'svelte/store';
 
 function isSafeKey(key: unknown): key is string {
@@ -537,8 +537,8 @@ export class ProvidersState {
       return 'xray';
     }
     if (sub.enable_mihomo && sub.enable_xray) {
-      const active = get(capabilities)?.active_kernel;
-      return active === 'mihomo' ? 'mihomo' : 'xray';
+      // При Xray, none и конфликте узлы берутся у Xray — как до введения состояния конфликта
+      return get(activeKernelState) === 'mihomo' ? 'mihomo' : 'xray';
     }
     return 'xray';
   }

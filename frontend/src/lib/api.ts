@@ -4,6 +4,7 @@ import { t } from '../i18n';
 import { saveDraftsToSessionStorage } from './dirtyRegistry';
 import { claimUnauthorized, markLoggedOut } from './authState';
 import { confirmPanelReachable, reportPanelUnreachable } from './panelHealth';
+import { kernelGateMessage, readKernelGateMeta } from './kernelGateError';
 
 /**
  * APIResponse — standard envelope returned by migrated backend handlers.
@@ -122,6 +123,25 @@ function attachErrorMeta(err: any, payload: any): void {
   if (!payload || typeof payload !== 'object') return;
   if (typeof payload.code === 'string') err.code = payload.code;
   if (typeof payload.detail === 'string') err.detail = payload.detail;
+  // Поля ответа гейта ядра (409 kernel_inactive): в текст попадают только через kernelGateMessage
+  if (typeof payload.required === 'string') err.required = payload.required;
+  if (typeof payload.active === 'string') err.active = payload.active;
+}
+
+/**
+ * Прямые fetch-клиенты (без конверта apiFetchJSON): ответ 409 гейта ядра превращается
+ * в ошибку с переведённым текстом; остальные ответы идут прежним путём.
+ */
+async function throwIfKernelGate(res: Response): Promise<void> {
+  const meta = await readKernelGateMeta(res);
+  const message = kernelGateMessage(meta, get(t));
+  if (!meta || !message) return;
+  const err: any = new Error(message);
+  err.status = 409;
+  err.code = meta.code;
+  if (meta.required) err.required = meta.required;
+  if (meta.active) err.active = meta.active;
+  throw err;
 }
 
 /**
@@ -152,6 +172,8 @@ export async function apiFetchJSON<T = unknown>(
     const err: any = new Error(errorMsg);
     err.status = res.status;
     attachErrorMeta(err, payload);
+    const gate = kernelGateMessage(err, get(t));
+    if (gate) err.message = gate;
     throw err;
   }
 
@@ -160,6 +182,8 @@ export async function apiFetchJSON<T = unknown>(
       const err: any = new Error(payload.error ?? `HTTP ${res.status}`);
       err.status = res.status;
       attachErrorMeta(err, payload);
+      const gate = kernelGateMessage(err, get(t));
+      if (gate) err.message = gate;
       throw err;
     }
     return (payload.data !== undefined ? payload.data : payload) as T;
@@ -239,15 +263,10 @@ export async function flushFakeIP(): Promise<void> {
   const res = await apiFetch('/api/mihomo/cache/fakeip/flush', {
     method: 'POST'
   });
-  if (!res.ok) throw new Error('Failed to flush Fake-IP cache');
-}
-
-/** Switches XKeen to Mihomo and starts it (the "launch Mihomo" buttons). */
-export async function startMihomo(): Promise<void> {
-  const res = await apiFetch('/api/service/control?action=switch_kernel&kernel=mihomo', {
-    method: 'POST'
-  });
-  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+  if (!res.ok) {
+    await throwIfKernelGate(res);
+    throw new Error('Failed to flush Fake-IP cache');
+  }
 }
 
 /** Turns XKeen's DNS redirection into the proxy core on or off. */
@@ -264,12 +283,18 @@ export async function flushDNSCache(): Promise<void> {
   const res = await apiFetch('/api/mihomo/proxy/cache/dns/flush', {
     method: 'POST'
   });
-  if (!res.ok) throw new Error('Failed to flush DNS cache');
+  if (!res.ok) {
+    await throwIfKernelGate(res);
+    throw new Error('Failed to flush DNS cache');
+  }
 }
 
 export async function fetchRuleProviders(): Promise<RuleProvider[]> {
   const res = await apiFetch('/api/mihomo/proxy/providers/rules');
-  if (!res.ok) throw new Error('Failed to load rule providers');
+  if (!res.ok) {
+    await throwIfKernelGate(res);
+    throw new Error('Failed to load rule providers');
+  }
   const data = await res.json();
   const providersMap = data.providers || {};
   return Object.values(providersMap) as RuleProvider[];
@@ -280,6 +305,7 @@ export async function updateRuleProvider(name: string): Promise<void> {
     method: 'PUT'
   });
   if (!res.ok) {
+    await throwIfKernelGate(res);
     // Mihomo explains the failure, e.g. {"message":"404 Not Found"} for a dead URL.
     let reason = `HTTP ${res.status}`;
     try {

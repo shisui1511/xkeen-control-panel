@@ -4,7 +4,8 @@
   import { apiFetch, apiFetchJSON } from '../../lib/api';
   import { parseValidationError } from '../../lib/errorParser';
   import { applyToKernel, notifyApplyOutcome, type ApplyResult } from '../../lib/serviceApply';
-  import { showToast } from '../../stores';
+  import { showToast, isConflict } from '../../stores';
+  import { KERNEL_GATE_CODES } from '../../lib/kernelGateError';
   import Button from '../Button.svelte';
   import SegmentedControl from '../SegmentedControl.svelte';
   import Skeleton from '../Skeleton.svelte';
@@ -162,6 +163,11 @@
           result = await applyToKernel({ kernel: 'active' });
         } catch (applyErr: any) {
           if (applyErr?.status === 401) return;
+          // Отказ гейта ядра (409) уже переведён клиентом: показываем его как есть
+          if ((KERNEL_GATE_CODES as readonly string[]).includes(applyErr?.code)) {
+            showToast('error', applyErr.message);
+            return;
+          }
           const reason =
             parseValidationError(applyErr?.message || '', $currentLang) || applyErr?.message;
           showToast('error', $t('apply.restart_failed', { reason }), 10000, {
@@ -276,9 +282,11 @@
       </Button>
       <Button
         variant="primary"
-        disabled={!dirty || saving || errorCount > 0}
+        disabled={!dirty || saving || errorCount > 0 || $isConflict}
         loading={saving}
-        title={$t('xkeen_settings.save_restart_title')}
+        title={$isConflict
+          ? $t('kernel.conflict_blocked')
+          : $t('xkeen_settings.save_restart_title')}
         onclick={() => save(true)}
       >
         {$t('xkeen_settings.save_restart')}

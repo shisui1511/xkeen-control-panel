@@ -1,8 +1,8 @@
 <script lang="ts">
   import { t } from '../../i18n';
-  import { showToast, fetchCapabilities } from '../../stores';
-  import { apiFetch } from '../../lib/api';
-  import { isServiceRestarting, activateRestartGrace } from '../../lib/serviceGrace';
+  import { showToast, fetchCapabilities, isConflict } from '../../stores';
+  import { serviceAction } from '../../lib/serviceControl';
+  import { isServiceRestarting } from '../../lib/serviceGrace';
   import Icon from '../../lib/components/Icon.svelte';
 
   let { activeKernel = '', onRestart } = $props<{
@@ -14,44 +14,44 @@
 
   let ledClass = $derived.by(() => {
     if ($isServiceRestarting || isRestarting) return 'led-amber-pulse';
+    if ($isConflict) return 'led-red';
     if (activeKernel && activeKernel !== 'none') return 'led-green';
     return 'led-gray';
   });
 
   let kernelName = $derived.by(() => {
+    if ($isConflict) return $t('kernel.state_conflict');
     if (!activeKernel || activeKernel === 'none') return 'Core';
     return activeKernel.charAt(0).toUpperCase() + activeKernel.slice(1);
   });
 
   async function handleQuickRestart(e: MouseEvent) {
     e.stopPropagation();
-    if (isRestarting || $isServiceRestarting) return;
+    if (isRestarting || $isServiceRestarting || $isConflict) return;
 
     isRestarting = true;
-    activateRestartGrace(6000);
 
     showToast('info', $t('capsule.toast_restarting_kernel', { kernel: kernelName }));
     if (onRestart) onRestart();
 
     try {
-      const res = await apiFetch('/api/service/control?action=restart', {
-        method: 'POST'
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt);
-      }
+      await serviceAction('restart');
       await fetchCapabilities();
     } catch (e: any) {
       if (e?.status === 401) return;
-      showToast('error', e?.message || 'Error restarting kernel');
+      showToast('error', e?.message || $t('app.error'));
     } finally {
       isRestarting = false;
     }
   }
 </script>
 
-<div class="editor-kernel-widget" title={$t('capsule.restart_kernel', { kernel: kernelName })}>
+<div
+  class="editor-kernel-widget"
+  title={$isConflict
+    ? $t('kernel.conflict_blocked')
+    : $t('capsule.restart_kernel', { kernel: kernelName })}
+>
   <div class="widget-status">
     <span class="led-dot {ledClass}"></span>
     <span class="widget-name">{kernelName}</span>
@@ -60,8 +60,11 @@
     type="button"
     class="widget-restart-btn"
     onclick={handleQuickRestart}
-    disabled={isRestarting || $isServiceRestarting}
-    aria-label={$t('capsule.restart_kernel', { kernel: kernelName })}
+    disabled={isRestarting || $isServiceRestarting || $isConflict}
+    title={$isConflict ? $t('kernel.conflict_blocked') : undefined}
+    aria-label={$isConflict
+      ? `${$t('capsule.restart_kernel', { kernel: kernelName })}: ${$t('kernel.conflict_blocked')}`
+      : $t('capsule.restart_kernel', { kernel: kernelName })}
   >
     <span class="icon-wrap" class:spinning={isRestarting || $isServiceRestarting}>
       <Icon name="refresh" size={13} />
@@ -104,6 +107,11 @@
   .led-green {
     background-color: var(--success);
     box-shadow: 0 0 5px color-mix(in srgb, var(--success) 55%, transparent);
+  }
+
+  .led-red {
+    background-color: var(--danger);
+    box-shadow: 0 0 5px color-mix(in srgb, var(--danger) 55%, transparent);
   }
 
   .led-amber-pulse {

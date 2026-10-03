@@ -1,4 +1,5 @@
 import { writable, type Readable } from 'svelte/store';
+import { mihomoApiReady } from '../stores';
 
 export interface TrafficDataPoint {
   up: number;
@@ -66,6 +67,11 @@ export class TrafficStreamManager {
   private disconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly DISCONNECT_GRACE_MS = 5000;
 
+  // Гейт подключения: пока закрыт (ядро не Mihomo или конфликт ядер), сокет не открывается
+  // и не переподключается — иначе сервер заваливает отказами 409.
+  private gateOpen = true;
+  private gateUnsubscribe: (() => void) | null = null;
+
   private state: TrafficState = { ...initialTrafficState };
   private lastTickTime = 0;
 
@@ -103,8 +109,28 @@ export class TrafficStreamManager {
     };
   }
 
+  /**
+   * Привязывает гейт подключения. Закрытие гейта сразу рвёт сокет и таймеры без
+   * переподключения; открытие при наличии подписчиков подключает заново.
+   * Повторный вызов заменяет прежнюю привязку.
+   */
+  public bindGate(gate: Readable<boolean>): void {
+    this.gateUnsubscribe?.();
+    this.gateUnsubscribe = gate.subscribe((open) => {
+      const wasOpen = this.gateOpen;
+      this.gateOpen = open;
+      if (open === wasOpen) return;
+      if (!open) {
+        this.disconnect();
+      } else if (this.subscribers.size > 0) {
+        this.connect();
+      }
+    });
+  }
+
   private connect(): void {
     if (typeof window === 'undefined') return;
+    if (!this.gateOpen) return;
 
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
@@ -187,6 +213,7 @@ export class TrafficStreamManager {
   }
 
   private scheduleReconnect(): void {
+    if (!this.gateOpen) return;
     if (this.reconnectTimeout || this.subscribers.size === 0) return;
 
     this.reconnectTimeout = setTimeout(() => {
@@ -254,4 +281,7 @@ export class TrafficStreamManager {
 }
 
 export const trafficStream = new TrafficStreamManager();
+// WebSocket трафика отдаёт Mihomo: при активном Xray и в конфликте сокет не открывается.
+// Обратного импорта stores -> trafficStream нет, цикла не возникает.
+trafficStream.bindGate(mihomoApiReady);
 export const trafficSpeedStore = trafficStream.store;

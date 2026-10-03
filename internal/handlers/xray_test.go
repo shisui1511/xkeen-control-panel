@@ -408,17 +408,19 @@ func TestXrayGRPCMonitoring(t *testing.T) {
 // поле apply (WR-03): по нему UI показывает, что произошло с ядром.
 func TestXrayGRPCMonitoring_ApplyTarget(t *testing.T) {
 	cases := []struct {
-		name        string
-		configured  string
-		xrayStatus  string
-		restartFail bool
-		wantEach    int32 // рестартов на каждое из двух изменений
-		wantOutcome services.ApplyOutcome
+		name         string
+		configured   string
+		xrayStatus   string
+		mihomoStatus string
+		restartFail  bool
+		wantEach     int32 // рестартов на каждое из двух изменений
+		wantOutcome  services.ApplyOutcome
 	}{
 		{name: "xray stopped", configured: "xray", xrayStatus: "stopped", wantEach: 0, wantOutcome: services.ApplySavedKernelStopped},
 		{name: "xray running", configured: "xray", xrayStatus: "running", wantEach: 1, wantOutcome: services.ApplyRestarted},
 		{name: "xray unknown", configured: "xray", xrayStatus: "unknown", wantEach: 1, wantOutcome: services.ApplyRestarted},
-		{name: "mihomo active", configured: "mihomo", xrayStatus: "running", wantEach: 0, wantOutcome: services.ApplySavedKernelInactive},
+		{name: "mihomo active", configured: "mihomo", xrayStatus: "stopped", mihomoStatus: "running", wantEach: 0, wantOutcome: services.ApplySavedKernelInactive},
+		{name: "both running", configured: "xray", xrayStatus: "running", mihomoStatus: "running", wantEach: 0, wantOutcome: services.ApplySavedKernelConflict},
 		{name: "restart fails", configured: "xray", xrayStatus: "running", restartFail: true, wantEach: 1, wantOutcome: services.ApplyRestartFailed},
 	}
 	for _, tc := range cases {
@@ -446,6 +448,9 @@ func TestXrayGRPCMonitoring_ApplyTarget(t *testing.T) {
 						case "xray":
 							return tc.xrayStatus
 						case "mihomo":
+							if tc.mihomoStatus != "" {
+								return tc.mihomoStatus
+							}
 							return "stopped"
 						}
 						return "not_installed"

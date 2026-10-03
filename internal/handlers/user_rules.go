@@ -54,10 +54,15 @@ func (a *API) UserRulesSave(w http.ResponseWriter, r *http.Request) {
 	applied := false
 	reloaded := false
 	var warningMsg string
-	activeKernel := a.getActiveKernelName()
+	st := a.activeKernelState()
+	if st.Conflict {
+		// Запущены оба ядра: правила пишутся в оба конфига, но Mihomo панель не
+		// перезагружает (при конфликте она сама ядрами не управляет).
+		warningMsg = a.t(r, "kernel.conflict")
+	}
 
 	// Mihomo injection & reload
-	if activeKernel == "mihomo" || activeKernel == "both" || (activeKernel == "none" && a.cfg != nil && a.cfg.MihomoConfigDir != "") {
+	if st.Conflict || st.Kernel == "mihomo" || (st.Kernel == "none" && a.cfg != nil && a.cfg.MihomoConfigDir != "") {
 		if a.cfg != nil && a.cfg.MihomoConfigDir != "" {
 			configPath := filepath.Join(a.cfg.MihomoConfigDir, "config.yaml")
 			if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -69,7 +74,7 @@ func (a *API) UserRulesSave(w http.ResponseWriter, r *http.Request) {
 					warningMsg = "Failed to inject rules into Mihomo configuration"
 				} else {
 					applied = true
-					if a.mihomoSvc != nil {
+					if !st.Conflict && a.mihomoSvc != nil {
 						if err := a.mihomoSvc.ReloadConfig(configPath); err != nil {
 							log.Printf("[UserRules] Failed to reload Mihomo config %s: %v", configPath, err)
 							warningMsg = "Failed to reload Mihomo configuration"
@@ -83,7 +88,7 @@ func (a *API) UserRulesSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Xray injection
-	if activeKernel == "xray" || activeKernel == "both" {
+	if st.Conflict || st.Kernel == "xray" {
 		if a.cfg != nil && a.cfg.XRayConfigDir != "" {
 			routingPath := filepath.Join(a.cfg.XRayConfigDir, "05_routing.json")
 			if _, err := os.Stat(routingPath); err == nil {

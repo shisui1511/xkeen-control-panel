@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
-  import { showToast, showConfirm, capabilities } from './stores';
+  import { showToast, showConfirm, isXray } from './stores';
   import { apiFetch } from './lib/api';
   import { formatBytes } from './lib/format';
   import PageHeader from './PageHeader.svelte';
@@ -736,7 +736,7 @@
             </button>
           </div>
 
-          {#if $capabilities?.active_kernel === 'xray'}
+          {#if $isXray}
             <button
               type="button"
               class="btn btn-secondary btn-sm"

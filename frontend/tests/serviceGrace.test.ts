@@ -48,6 +48,30 @@ describe('serviceGrace', () => {
     expect(get(isServiceRestarting)).toBe(false);
   });
 
+  it('не укорачивает идущее окно новой короткой активацией', () => {
+    activateRestartGrace(20000);
+    vi.advanceTimersByTime(1000);
+
+    // Например, apply во время переключения ядра: 6 с короче оставшихся 19 с
+    activateRestartGrace(6000);
+    vi.advanceTimersByTime(18000); // 19 с с первой активации
+    expect(get(isServiceRestarting)).toBe(true);
+
+    vi.advanceTimersByTime(1100); // 20,1 с
+    expect(get(isServiceRestarting)).toBe(false);
+  });
+
+  it('после clearRestartGrace короткое окно работает', () => {
+    activateRestartGrace(20000);
+    clearRestartGrace();
+    expect(get(isServiceRestarting)).toBe(false);
+
+    activateRestartGrace(2000);
+    expect(get(isServiceRestarting)).toBe(true);
+    vi.advanceTimersByTime(2100);
+    expect(get(isServiceRestarting)).toBe(false);
+  });
+
   it('clears grace period immediately when clearRestartGrace is called', () => {
     activateRestartGrace(5000);
     expect(get(isServiceRestarting)).toBe(true);

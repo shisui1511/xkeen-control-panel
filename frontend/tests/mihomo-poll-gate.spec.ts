@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { kernelsFixture, setupMocks, visitPage } from './helpers/api-mocks';
+import { fulfillServiceControl, kernelsFixture, setupMocks, visitPage } from './helpers/api-mocks';
 
 // e2e-pages: #/ #/services #/proxies #/connections
 
@@ -132,11 +132,8 @@ test.describe('Гейт опросов Mihomo (UPDUI-03)', () => {
         flags.processRunning = true;
         launchedAt = Date.now();
       }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true })
-      });
+      // «Запустить Mihomo» = switch_kernel: клиент требует типизированный исход
+      await fulfillServiceControl(route);
     });
     const { hits } = trackProxyRequests(page);
 

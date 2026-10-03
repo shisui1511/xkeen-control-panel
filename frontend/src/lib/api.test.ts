@@ -312,3 +312,80 @@ describe('apiFetch', () => {
     }
   });
 });
+
+describe('ответы 409 гейта ядра (D-06)', () => {
+  it('apiFetchJSON: 409 kernel_inactive даёт переведённый текст и поля ошибки', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse(409, {
+        success: false,
+        error: 'server text',
+        code: 'kernel_inactive',
+        required: 'mihomo',
+        active: 'xray'
+      })
+    );
+    const { apiFetchJSON, t } = await loadFreshApi();
+    const err: any = await apiFetchJSON('/api/mihomo/x').catch((e) => e);
+    expect(err.status).toBe(409);
+    expect(err.code).toBe('kernel_inactive');
+    expect(err.required).toBe('mihomo');
+    expect(err.active).toBe('xray');
+    expect(err.message).toBe(
+      get(t)('kernel.inactive_wrong', { active: 'Xray', required: 'Mihomo' })
+    );
+    expect(err.message).not.toBe('server text');
+  });
+
+  it('apiFetchJSON: ветка success:false при статусе 200 тоже маппится по коду', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse(200, { success: false, error: 'server text', code: 'kernel_conflict' })
+    );
+    const { apiFetchJSON, t } = await loadFreshApi();
+    const err: any = await apiFetchJSON('/api/service/control').catch((e) => e);
+    expect(err.message).toBe(get(t)('kernel.conflict_blocked_toast'));
+  });
+
+  it('apiFetchJSON: 409 без кода и с чужим кодом идут прежним путём', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(409, { success: false, error: 'name taken' }));
+    const { apiFetchJSON } = await loadFreshApi();
+    const plain: any = await apiFetchJSON('/api/x').catch((e) => e);
+    expect(plain.message).toBe('name taken');
+    expect(plain.code).toBeUndefined();
+
+    fetchMock.mockResolvedValueOnce(
+      makeResponse(409, { success: false, error: 'busy', code: 'file_locked' })
+    );
+    const other: any = await apiFetchJSON('/api/x').catch((e) => e);
+    expect(other.message).toBe('busy');
+    expect(other.code).toBe('file_locked');
+  });
+
+  it('flushFakeIP: 409 kernel_inactive бросает переведённый текст вместо общего', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse(409, { code: 'kernel_inactive', required: 'mihomo', active: 'none' })
+    );
+    const { flushFakeIP, t } = await loadFreshApi();
+    await expect(flushFakeIP()).rejects.toMatchObject({
+      status: 409,
+      code: 'kernel_inactive',
+      message: get(t)('kernel.inactive_none', { required: 'Mihomo' })
+    });
+  });
+
+  it('flushFakeIP: прочие ошибки остаются прежними', async () => {
+    fetchMock.mockResolvedValue(makeResponse(500, { error: 'boom' }));
+    const { flushFakeIP } = await loadFreshApi();
+    await expect(flushFakeIP()).rejects.toThrow('Failed to flush Fake-IP cache');
+  });
+
+  it('прямые клиенты Mihomo: 409 гейта у flushDNSCache, fetchRuleProviders и updateRuleProvider', async () => {
+    const body = { code: 'kernel_inactive', required: 'mihomo', active: 'xray' };
+    const { flushDNSCache, fetchRuleProviders, updateRuleProvider, t } = await loadFreshApi();
+    const text = get(t)('kernel.inactive_wrong', { active: 'Xray', required: 'Mihomo' });
+
+    fetchMock.mockResolvedValue(makeResponse(409, body));
+    await expect(flushDNSCache()).rejects.toThrow(text);
+    await expect(fetchRuleProviders()).rejects.toThrow(text);
+    await expect(updateRuleProvider('geo')).rejects.toThrow(text);
+  });
+});

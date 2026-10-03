@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { fade } from 'svelte/transition';
   import { t, currentLang, pluralize } from './i18n';
   import {
@@ -12,19 +13,27 @@
     mihomoApiReady,
     mihomoApiState,
     mihomoOfflineReason,
-    panelUnreachable
+    panelUnreachable,
+    conflictVisible,
+    isConflict,
+    isMihomo,
+    activeKernelName
   } from './stores';
   import { usePoller } from './lib/poller';
   import { apiFetch, apiFetchJSON } from './lib/api';
-  import { isServiceRestarting, activateRestartGrace } from './lib/serviceGrace';
+  import { isServiceRestarting } from './lib/serviceGrace';
+  import { serviceAction } from './lib/serviceControl';
+  import { kernelLabel } from './lib/kernelState';
   import { panelNewVersion, rememberPanelVersion } from './lib/panelHealth';
   import Sidebar from './components/Sidebar.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import Card from './components/Card.svelte';
   import Button from './components/Button.svelte';
   import Icon from './lib/components/Icon.svelte';
+  import Warning from './lib/components/icons/Warning.svelte';
   import Skeleton from './components/Skeleton.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
+  import KernelConflictBanner from './components/KernelConflictBanner.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PageHeader from './PageHeader.svelte';
   import ServiceStatusGroup from './components/dashboard/ServiceStatusGroup.svelte';
@@ -93,6 +102,13 @@
     'smartproxy',
     'trafficquotas'
   ];
+  // В конфликте ядер (оба процесса запущены) вкладки ядер и режим конструктора закрыты
+  // заглушкой под баннером; обычный редактор — правка файлов, данные — не гейтится.
+  const conflictGatedTabs = [...mihomoDependentTabs, 'dat'];
+  const conflictGateActive = $derived(
+    $conflictVisible &&
+      (conflictGatedTabs.includes(currentTab) || (currentTab === 'editor' && isConstructorMode))
+  );
   let theme = $state(document.documentElement.getAttribute('data-theme') || 'light');
   let pwaInstallPrompt = $state<any>(null);
 
@@ -279,7 +295,7 @@
     at: number;
   } | null>(null);
 
-  async function refreshPreflight(kernel: string | undefined, signal?: AbortSignal) {
+  async function refreshPreflight(kernel: string, signal?: AbortSignal) {
     if (kernel !== 'xray' && kernel !== 'mihomo') return;
     const now = Date.now();
     if (preflightCache?.kernel === kernel) {
@@ -313,22 +329,19 @@
           xkeen: xkeenStateValue,
           kernelsInstalled: anyKernelInstalled($capabilities),
           configReady:
-            preflightCache !== null && preflightCache.kernel === $capabilities.active_kernel
+            preflightCache !== null && preflightCache.kernel === $activeKernelName
               ? preflightCache.ready
               : null,
           isRunning: serviceStatus.xkeen === 'running'
         })
   );
-  const nextStepKernelName = $derived(
-    $capabilities?.active_kernel === 'mihomo' ? 'Mihomo' : 'Xray'
-  );
+  const nextStepKernelName = $derived($isMihomo ? 'Mihomo' : 'Xray');
+  // Пустое имя (нет ядра, конфликт, ответа ещё не было) — «ядро упало» не показывается.
   const isKernelCrashed = $derived(
     serviceStatus.xkeen === 'running' &&
-      $capabilities?.active_kernel &&
-      $capabilities.active_kernel !== 'none' &&
-      (($capabilities.active_kernel === 'mihomo' &&
+      (($activeKernelName === 'mihomo' &&
         (serviceStatus.mihomo === 'stopped' || serviceStatus.mihomo === 'error')) ||
-        ($capabilities.active_kernel === 'xray' &&
+        ($activeKernelName === 'xray' &&
           (serviceStatus.xray === 'stopped' || serviceStatus.xray === 'error')))
   );
 
@@ -468,7 +481,7 @@
       };
 
       if (currentXkeenState === 'stopped' && anyKernelInstalled($capabilities) === true) {
-        void refreshPreflight($capabilities?.active_kernel, signal);
+        void refreshPreflight(get(activeKernelName), signal);
       }
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
@@ -528,7 +541,7 @@
   // Quickstart checklist reactive state
   const quickstartDoneCount = $derived(
     [
-      true, // step 1 always done when card is visible (active_kernel === 'mihomo')
+      true, // шаг 1 всегда выполнен, пока карточка видна (только при активном Mihomo)
       hasSubscription,
       $mihomoApiAvailable,
       serviceStatus.mihomo === 'running'
@@ -815,20 +828,13 @@
   }
 
   async function restartXkeen() {
-    activateRestartGrace(6000);
     try {
-      const res = await apiFetch('/api/service/control?action=restart', {
-        method: 'POST'
-      });
-      if (res.ok) {
-        showToast('success', $t('app.restart') + ' XKeen...');
-        setTimeout(fetchLiveStatus, 3000);
-      } else {
-        showToast('error', $t('app.error'));
-      }
+      await serviceAction('restart');
+      showToast('success', $t('app.restart') + ' XKeen...');
+      setTimeout(fetchLiveStatus, 3000);
     } catch (e: any) {
       if (e?.status === 401) return;
-      showToast('error', $t('app.error'));
+      showToast('error', e?.message || $t('app.error'));
     }
   }
 
@@ -920,7 +926,7 @@
       <SystemStatusCapsule
         variant="mobile"
         {systemStats}
-        activeKernel={$capabilities?.active_kernel}
+        activeKernel={$activeKernelName}
         isXkeenRunning={xkeenRunningForCapsule}
         onSwitchTab={switchTab}
       />
@@ -973,7 +979,7 @@
     inert={drawerIsModal}
   >
     <!-- Mihomo offline warning banner / Restarting notice -->
-    {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities?.mihomo?.reachable}
+    {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities?.mihomo?.reachable && !$isConflict}
       {#if $isServiceRestarting}
         <div
           class="service-restarting-banner"
@@ -1014,8 +1020,23 @@
       </div>
     {/if}
 
+    <!-- Конфликт ядер (два запущенных процесса): над содержимым любой вкладки,
+         не в блоке mihomoDependentTabs; во время окна перезапуска не показывается. -->
+    {#if $conflictVisible}
+      <KernelConflictBanner />
+    {/if}
+
     {#key chunkReloadKey}
-      {#if currentTab === 'dashboard'}
+      {#if conflictGateActive}
+        <div class="container" data-testid="kernel-conflict-gate">
+          <EmptyState
+            plain
+            icon={Warning}
+            title={$t('kernel.conflict_empty_title')}
+            description={$t('kernel.conflict_empty_desc')}
+          />
+        </div>
+      {:else if currentTab === 'dashboard'}
         <div class="container" data-testid="dashboard-page" transition:fade={{ duration: 150 }}>
           <!-- Page header -->
           <PageHeader
@@ -1037,11 +1058,11 @@
             </Button>
           </PageHeader>
 
-          <!-- Quickstart Checklist (Mihomo only, auto-hides when all steps complete).
+          <!-- Quickstart Checklist (карточка видна только при активном Mihomo, auto-hides when all steps complete).
                Gated on statusLoading/subsSummaryLoaded so it doesn't flash "incomplete"
                using each store's not-yet-fetched default before the first poll round
                of fetchLiveStatus/fetchSubscriptionSummary actually lands. -->
-          {#if $capabilities?.active_kernel === 'mihomo' && !statusLoading && subsSummaryLoaded && !allQuickstartComplete}
+          {#if $isMihomo && !statusLoading && subsSummaryLoaded && !allQuickstartComplete}
             <div style="margin-bottom: 18px;">
               <Card title={$t('dash.quickstart.title')}>
                 {#snippet actions()}
@@ -1247,7 +1268,7 @@
                           >
                           <div class="problem-desc">
                             {$t('dash.problems.kernel_crash_desc', {
-                              kernel: $capabilities?.active_kernel || ''
+                              kernel: kernelLabel($activeKernelName)
                             })}
                           </div>
                         </div>

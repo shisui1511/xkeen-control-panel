@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t } from '../../i18n';
-  import { capabilities, devMode } from '../../stores';
+  import { capabilities, devMode, isXray } from '../../stores';
   import SubscriptionList from '../subscriptions/SubscriptionList.svelte';
   import SubscriptionFormModal from '../subscriptions/SubscriptionFormModal.svelte';
   import type { ProvidersState } from './providersState.svelte';
@@ -23,7 +23,7 @@
 </script>
 
 <div class="providers-tab-root">
-  {#if $capabilities?.xray && !$capabilities.xray.conf_dir_exists && $capabilities.active_kernel === 'xray'}
+  {#if $capabilities?.xray && !$capabilities.xray.conf_dir_exists && $isXray}
     <div class="confdir-warning">
       <svg
         width="16"

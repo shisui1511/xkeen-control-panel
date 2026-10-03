@@ -2,10 +2,15 @@
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import { t } from '../../i18n';
-  import { showToast, showConfirm, fetchCapabilities, capabilities } from '../../stores';
+  import {
+    showToast,
+    showConfirm,
+    fetchCapabilities,
+    capabilities,
+    isConflict
+  } from '../../stores';
   import { anyKernelInstalled } from '../../lib/navCaps';
-  import { apiFetch } from '../../lib/api';
-  import { activateRestartGrace } from '../../lib/serviceGrace';
+  import { serviceAction } from '../../lib/serviceControl';
   import Icon from '../../lib/components/Icon.svelte';
 
   let {
@@ -29,11 +34,13 @@
   const startBlockedReason = $derived(
     isXkeenRunning
       ? null
-      : $capabilities?.xkeen_installed === false
-        ? $t('svc.start_disabled_no_xkeen')
-        : anyKernelInstalled($capabilities) === false
-          ? $t('svc.start_disabled_no_kernel')
-          : null
+      : $isConflict
+        ? $t('kernel.conflict_blocked')
+        : $capabilities?.xkeen_installed === false
+          ? $t('svc.start_disabled_no_xkeen')
+          : anyKernelInstalled($capabilities) === false
+            ? $t('svc.start_disabled_no_kernel')
+            : null
   );
 
   let isRestartingKernel = $state(false);
@@ -87,51 +94,37 @@
   });
 
   async function handleRestartKernel() {
-    if (isRestartingKernel) return;
+    if (isRestartingKernel || $isConflict) return;
     isRestartingKernel = true;
-    activateRestartGrace(6000);
 
     const kernelName = activeKernel || 'Core';
     showToast('info', $t('capsule.toast_restarting_kernel', { kernel: kernelName }));
     onClose();
 
     try {
-      const res = await apiFetch('/api/service/control?action=restart', {
-        method: 'POST'
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt);
-      }
+      await serviceAction('restart');
       await fetchCapabilities();
     } catch (e: any) {
       if (e?.status === 401) return;
-      showToast('error', e?.message || 'Error restarting kernel');
+      showToast('error', e?.message || $t('app.error'));
     } finally {
       isRestartingKernel = false;
     }
   }
 
   async function handleRestartXkeen() {
-    if (isRestartingXkeen) return;
+    if (isRestartingXkeen || $isConflict) return;
     isRestartingXkeen = true;
-    activateRestartGrace(6000);
 
     showToast('info', $t('capsule.toast_restarting_xkeen'));
     onClose();
 
     try {
-      const res = await apiFetch('/api/service/control?action=restart', {
-        method: 'POST'
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt);
-      }
+      await serviceAction('restart');
       await fetchCapabilities();
     } catch (e: any) {
       if (e?.status === 401) return;
-      showToast('error', e?.message || 'Error restarting XKeen');
+      showToast('error', e?.message || $t('app.error'));
     } finally {
       isRestartingXkeen = false;
     }
@@ -155,39 +148,26 @@
       onClose();
 
       try {
-        const res = await apiFetch('/api/service/control?action=stop', {
-          method: 'POST'
-        });
-        if (!res.ok) {
-          const txt = await res.text();
-          throw new Error(txt);
-        }
+        await serviceAction('stop');
         await fetchCapabilities();
         showToast('warning', $t('capsule.stop_service'));
       } catch (e: any) {
         if (e?.status === 401) return;
-        showToast('error', e?.message || 'Error stopping service');
+        showToast('error', e?.message || $t('app.error'));
       } finally {
         isTogglingService = false;
       }
     } else {
       isTogglingService = true;
-      activateRestartGrace(6000);
       onClose();
 
       try {
-        const res = await apiFetch('/api/service/control?action=start', {
-          method: 'POST'
-        });
-        if (!res.ok) {
-          const txt = await res.text();
-          throw new Error(txt);
-        }
+        await serviceAction('start');
         await fetchCapabilities();
         showToast('success', $t('capsule.start_service'));
       } catch (e: any) {
         if (e?.status === 401) return;
-        showToast('error', e?.message || 'Error starting service');
+        showToast('error', e?.message || $t('app.error'));
       } finally {
         isTogglingService = false;
       }
@@ -241,7 +221,9 @@
     <div class="menu-header">
       <div class="menu-title-row">
         <span class="menu-title">{$t('capsule.quick_actions')}</span>
-        {#if activeKernel}
+        {#if $isConflict}
+          <span class="badge-kernel">{$t('kernel.state_conflict')}</span>
+        {:else if activeKernel}
           <span class="badge-kernel">{activeKernel}</span>
         {/if}
       </div>
@@ -252,7 +234,8 @@
         type="button"
         class="menu-item action-btn"
         onclick={handleRestartKernel}
-        disabled={isRestartingKernel}
+        disabled={isRestartingKernel || $isConflict}
+        title={$isConflict ? $t('kernel.conflict_blocked') : undefined}
       >
         <span class="item-icon restart-icon" class:spinning={isRestartingKernel}>
           <Icon name="refresh" size={15} />
@@ -266,7 +249,8 @@
         type="button"
         class="menu-item action-btn"
         onclick={handleRestartXkeen}
-        disabled={isRestartingXkeen}
+        disabled={isRestartingXkeen || $isConflict}
+        title={$isConflict ? $t('kernel.conflict_blocked') : undefined}
       >
         <span class="item-icon" class:spinning={isRestartingXkeen}>
           <Icon name="services" size={15} />

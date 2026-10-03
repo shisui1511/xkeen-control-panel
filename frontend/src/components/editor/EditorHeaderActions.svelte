@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from '../../i18n';
+  import { isConflict } from '../../stores';
   import StatusBadge from '../StatusBadge.svelte';
   import LiveIndicator from '../LiveIndicator.svelte';
 
@@ -30,6 +31,11 @@
     onSaveFile,
     onSaveAndApply
   }: Props = $props();
+
+  // В конфликте ядер применять нечего: сохранение файла (данные) остаётся доступным.
+  const saveAndApplyLabel = $derived(
+    $isConflict ? $t('kernel.conflict_blocked') : $t('editor.save_and_apply')
+  );
 </script>
 
 <div class="eph-right">
@@ -78,8 +84,9 @@
     <button
       class="btn btn-accent btn-compact"
       onclick={onSaveAndApply}
-      disabled={saving || applyLoading}
-      title={$t('editor.save_and_apply')}
+      disabled={saving || applyLoading || $isConflict}
+      title={saveAndApplyLabel}
+      aria-label={saveAndApplyLabel}
     >
       {#if applyLoading}
         <span class="ks-dot-spin"

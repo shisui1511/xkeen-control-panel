@@ -22,8 +22,8 @@ type fakeKernelService struct {
 	active string
 }
 
-func (f *fakeKernelService) GetActiveKernel() string {
-	return f.active
+func (f *fakeKernelService) ActiveState() ActiveKernelState {
+	return ActiveKernelState{Kernel: f.active, Running: []string{f.active}}
 }
 
 func (f *fakeKernelService) Get(name string) *KernelInfo {
@@ -984,6 +984,47 @@ func TestRefreshXray_DoesNotRestartXray(t *testing.T) {
 	}
 }
 
+// При двух запущенных ядрах применение подписки не дописывает «-restart»: ядро
+// не перезапускается, исход saved_kernel_conflict.
+func TestRefreshXray_KernelConflictDoesNotRestart(t *testing.T) {
+	tmp := t.TempDir()
+
+	vmessJSON := `{"ps":"xray-node","add":"1.1.1.1","port":"443","id":"uuid","net":"tcp"}`
+	body := base64.StdEncoding.EncodeToString([]byte("vmess://" + base64.StdEncoding.EncodeToString([]byte(vmessJSON))))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	logFile := filepath.Join(tmp, "xkeen_calls.log")
+	xrayConfigDir := filepath.Join(tmp, "xray")
+	_ = os.MkdirAll(xrayConfigDir, 0755)
+
+	svc := NewSubscriptionService(tmp, xrayConfigDir, tmp)
+	svc.httpClient = srv.Client()
+	svc.SetKernelApplier(logRestartApplier(logFile, "xray", map[string]string{"xray": "running", "mihomo": "running"}))
+
+	sub := Subscription{
+		ID:         "xray-sub",
+		Name:       "Xray Sub Conflict",
+		URL:        srv.URL,
+		EnableXray: true,
+		Enabled:    true,
+		Interval:   1,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Refresh("xray-sub"); err != nil {
+		t.Fatalf("Refresh failed: %v", err)
+	}
+	calls, _ := os.ReadFile(logFile)
+	if strings.Contains(string(calls), "-restart") {
+		t.Errorf("при двух запущенных ядрах рестарта быть не должно, лог: %q", calls)
+	}
+}
+
 func TestSubscriptionService_MihomoAPIProviderReload(t *testing.T) {
 	var calledPath string
 	var calledMethod string
@@ -1199,7 +1240,9 @@ type statusKernelService struct {
 	status map[string]string
 }
 
-func (f *statusKernelService) GetActiveKernel() string { return "xray" }
+func (f *statusKernelService) ActiveState() ActiveKernelState {
+	return ActiveKernelState{Kernel: "xray", Running: []string{"xray"}}
+}
 
 func (f *statusKernelService) Get(name string) *KernelInfo {
 	st, ok := f.status[name]
@@ -1331,7 +1374,8 @@ func TestRestartTargets_XrayFragmentWithActiveMihomo(t *testing.T) {
 func TestRestartTargets_MihomoOnlyChangeKeepsXray(t *testing.T) {
 	// Активен и запущен Xray. Отключение Mihomo-интеграции его не касается;
 	// отключение Xray-интеграции перезапускает его ровно один раз.
-	svc, logFile := newBothKernelsService(t, "xray", map[string]string{"xray": "running", "mihomo": "running"})
+	// Mihomo остановлен: при двух запущенных ядрах рестарта нет (конфликт).
+	svc, logFile := newBothKernelsService(t, "xray", map[string]string{"xray": "running", "mihomo": "stopped"})
 	sub := Subscription{ID: "both", Name: "Both", URL: "https://example.com/sub", Enabled: true, EnableXray: true, EnableMihomo: true}
 	if err := svc.Add(&sub); err != nil {
 		t.Fatal(err)
@@ -1358,10 +1402,11 @@ func TestRestartTargets_MihomoOnlyChangeKeepsXray(t *testing.T) {
 
 func TestRestartTargets_DeleteBothKernels(t *testing.T) {
 	// Удаление подписки с обеими интеграциями перезапускает только активное
-	// ядро и только если оно запущено: остановленное не запускается.
+	// ядро и только если оно запущено: остановленное не запускается. Активное —
+	// работающий процесс, name_client учитывается, когда ничего не запущено.
 	sub := Subscription{ID: "both", Name: "Both", URL: "https://example.com/sub", Enabled: true, EnableXray: true, EnableMihomo: true}
 
-	stopped, stoppedLog := newBothKernelsService(t, "mihomo", map[string]string{"xray": "running", "mihomo": "stopped"})
+	stopped, stoppedLog := newBothKernelsService(t, "mihomo", map[string]string{"xray": "stopped", "mihomo": "stopped"})
 	first := sub
 	if err := stopped.Add(&first); err != nil {
 		t.Fatal(err)
@@ -1383,6 +1428,19 @@ func TestRestartTargets_DeleteBothKernels(t *testing.T) {
 	}
 	if got := countRestarts(t, runningLog); got != 1 {
 		t.Fatalf("delete with running active Mihomo must restart it once, restarts: %d", got)
+	}
+
+	// Запущены оба ядра — конфликт: ни одно не перезапускается.
+	conflict, conflictLog := newBothKernelsService(t, "mihomo", map[string]string{"xray": "running", "mihomo": "running"})
+	third := sub
+	if err := conflict.Add(&third); err != nil {
+		t.Fatal(err)
+	}
+	if err := conflict.Delete("both"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if got := countRestarts(t, conflictLog); got != 0 {
+		t.Fatalf("delete with both kernels running must not restart any, restarts: %d", got)
 	}
 }
 

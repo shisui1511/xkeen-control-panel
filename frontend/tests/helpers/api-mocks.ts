@@ -7,7 +7,7 @@ import type { Page, Route } from '@playwright/test';
 // могли переиспользовать одну и ту же логику моков.
 // ============================================================
 
-export type KernelMode = 'mihomo' | 'xray';
+export type KernelMode = 'mihomo' | 'xray' | 'conflict';
 
 /**
  * Ответ GET /api/kernels (поле data): всегда ровно два ядра в порядке xray, затем mihomo.
@@ -28,8 +28,8 @@ export function kernelsFixture(
       has_update: false,
       channel: 'stable',
       status: 'idle',
-      process_status: kernel === 'xray' ? 'running' : 'stopped',
-      message: kernel === 'xray' ? 'running on background' : 'stopped',
+      process_status: kernel === 'xray' || kernel === 'conflict' ? 'running' : 'stopped',
+      message: kernel === 'xray' || kernel === 'conflict' ? 'running on background' : 'stopped',
       ...overrides.xray
     },
     {
@@ -41,8 +41,8 @@ export function kernelsFixture(
       has_update: false,
       channel: 'stable',
       status: 'idle',
-      process_status: kernel === 'mihomo' ? 'running' : 'stopped',
-      message: kernel === 'mihomo' ? 'running on background' : 'stopped',
+      process_status: kernel === 'mihomo' || kernel === 'conflict' ? 'running' : 'stopped',
+      message: kernel === 'mihomo' || kernel === 'conflict' ? 'running on background' : 'stopped',
       ...overrides.mihomo
     }
   ];
@@ -89,19 +89,35 @@ export function systemStatsFixture(
 }
 
 /**
- * Ответ на POST /api/service/control: action=apply возвращает исход «перезапущено»
- * для ядра из запроса, остальные действия — простой успех.
+ * Ответ на POST /api/service/control (контракт ServiceControl, 140.1-05):
+ * apply — исход «перезапущено» для ядра из запроса; switch_kernel — исход
+ * `switched`; stop с kernel — `stopped` через сигнал; прочее — простой успех.
  */
 export async function fulfillServiceControl(route: Route) {
   const params = new URL(route.request().url()).searchParams;
+  const action = params.get('action');
   const kernel = params.get('kernel') || 'mihomo';
-  const body =
-    params.get('action') === 'apply'
-      ? {
-          success: true,
-          data: { outcome: 'restarted', kernel, active_kernel: kernel, active_running: true }
-        }
-      : { success: true };
+  let body: Record<string, unknown> = { success: true };
+  if (action === 'apply') {
+    body = {
+      success: true,
+      data: { outcome: 'restarted', kernel, active_kernel: kernel, active_running: true }
+    };
+  } else if (action === 'switch_kernel') {
+    body = {
+      success: true,
+      data: {
+        outcome: 'switched',
+        old: kernel === 'mihomo' ? 'xray' : 'mihomo',
+        new: kernel,
+        old_running: false,
+        new_running: true,
+        output: ''
+      }
+    };
+  } else if (action === 'stop' && params.get('kernel')) {
+    body = { success: true, data: { kernel, outcome: 'stopped', method: 'signal' } };
+  }
   await route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -233,12 +249,14 @@ export async function setupMocks(
               xray: { installed: true, version: '1.8.4', channel: 'stable' },
               mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
             },
-            active_kernel: kernel,
+            active_kernel: kernel === 'conflict' ? 'both' : kernel,
+            kernel_conflict: kernel === 'conflict',
+            running_kernels: kernel === 'conflict' ? ['xray', 'mihomo'] : [kernel],
             mihomo: {
               reachable: true,
-              process_running: kernel === 'mihomo',
-              api_reachable: kernel === 'mihomo',
-              api_authenticated: kernel === 'mihomo'
+              process_running: kernel === 'mihomo' || kernel === 'conflict',
+              api_reachable: kernel === 'mihomo' || kernel === 'conflict',
+              api_authenticated: kernel === 'mihomo' || kernel === 'conflict'
             }
           }
         })

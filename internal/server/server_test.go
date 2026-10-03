@@ -186,6 +186,59 @@ func TestServer_Handle_And_HandleProtected(t *testing.T) {
 	}
 }
 
+// TestHandleProtected_AppliesWrapperInsideAuth: обёртка получает шаблон маршрута
+// и выполняется внутри RequireAuth — без сессии 401, обёрнутый обработчик не
+// вызывается; с сессией обёртка срабатывает.
+func TestHandleProtected_AppliesWrapperInsideAuth(t *testing.T) {
+	cfg := &Config{AllowedRoots: []string{t.TempDir()}, DataDir: t.TempDir()}
+	srv, err := New(cfg, "v1.0.0", createTestMapFS())
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+	defer srv.GetAuthService().Stop()
+
+	var wrappedPatterns []string
+	wrapperRuns := 0
+	srv.SetProtectedWrapper(func(pattern string, h http.HandlerFunc) http.HandlerFunc {
+		wrappedPatterns = append(wrappedPatterns, pattern)
+		return func(w http.ResponseWriter, r *http.Request) {
+			wrapperRuns++
+			w.Header().Set("X-Wrapped", "yes")
+			h(w, r)
+		}
+	})
+	srv.HandleProtected("/api/wrapped", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("inner"))
+	})
+	if len(wrappedPatterns) != 1 || wrappedPatterns[0] != "/api/wrapped" {
+		t.Fatalf("обёртка вызвана с шаблонами %v, want [/api/wrapped]", wrappedPatterns)
+	}
+
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/wrapped", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("без сессии: status = %d, want 401", rec.Code)
+	}
+	if wrapperRuns != 0 || rec.Header().Get("X-Wrapped") != "" {
+		t.Errorf("обёртка выполнилась для неавторизованного запроса (runs=%d)", wrapperRuns)
+	}
+
+	session, err := srv.GetAuthService().CreateSession()
+	if err != nil {
+		t.Fatalf("failed to create test session: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/wrapped", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: session.Token})
+	rec = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "inner" {
+		t.Errorf("с сессией: status=%d body=%q, want 200/inner", rec.Code, rec.Body.String())
+	}
+	if wrapperRuns != 1 || rec.Header().Get("X-Wrapped") != "yes" {
+		t.Errorf("обёртка не выполнилась для авторизованного запроса (runs=%d)", wrapperRuns)
+	}
+}
+
 func TestServer_Start_And_Shutdown_HTTPS(t *testing.T) {
 	mapFS := createTestMapFS()
 	cfg := &Config{

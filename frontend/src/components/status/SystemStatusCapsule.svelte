@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { t } from '../../i18n';
   import { isServiceRestarting } from '../../lib/serviceGrace';
+  import { isConflict } from '../../stores';
   import { trafficStream, formatTrafficSpeed, type TrafficState } from '../../lib/trafficStream';
   import { capsuleConfigStore } from '../../lib/capsuleSettings';
   import Icon from '../../lib/components/Icon.svelte';
@@ -90,6 +91,7 @@
   // LED state
   let ledClass = $derived.by(() => {
     if ($isServiceRestarting) return 'led-amber-pulse';
+    if ($isConflict) return 'led-red';
     if (!isXkeenRunning) return 'led-red';
     if (activeKernel && activeKernel !== 'none') return 'led-green';
     return 'led-gray';
@@ -97,6 +99,7 @@
 
   let kernelDisplayName = $derived.by(() => {
     if ($isServiceRestarting) return $t('app.restarting');
+    if ($isConflict) return $t('kernel.state_conflict');
     if (!activeKernel || activeKernel === 'none') return $t('capsule.offline');
     return activeKernel.charAt(0).toUpperCase() + activeKernel.slice(1);
   });
@@ -150,7 +153,9 @@
       title={$t('capsule.quick_actions')}
     >
       <span class="led-dot {ledClass}"></span>
-      <span class="rail-code">{activeKernel ? activeKernel.slice(0, 3).toUpperCase() : 'OFF'}</span>
+      <span class="rail-code"
+        >{$isConflict ? 'X+M' : activeKernel ? activeKernel.slice(0, 3).toUpperCase() : 'OFF'}</span
+      >
     </button>
 
     <SystemQuickMenu

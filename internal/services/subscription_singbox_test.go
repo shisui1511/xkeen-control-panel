@@ -238,7 +238,9 @@ type stubKernelStatus struct {
 	version string
 }
 
-func (s stubKernelStatus) GetActiveKernel() string { return "mihomo" }
+func (s stubKernelStatus) ActiveState() ActiveKernelState {
+	return ActiveKernelState{Kernel: "mihomo", Running: []string{"mihomo"}}
+}
 
 func (s stubKernelStatus) Get(name string) *KernelInfo {
 	if name != "mihomo" {

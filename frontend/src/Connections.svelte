@@ -7,9 +7,11 @@
     showToast,
     showConfirm,
     mihomoApiReady,
-    mihomoApiState
+    mihomoApiState,
+    isMihomo
   } from './stores';
-  import { apiFetch, startMihomo } from './lib/api';
+  import { apiFetch } from './lib/api';
+  import { switchKernel, notifySwitchOutcome } from './lib/serviceControl';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PageHeader from './PageHeader.svelte';
@@ -372,7 +374,8 @@
   async function launchMihomo() {
     mihomoLaunching = true;
     try {
-      await startMihomo();
+      const res = await switchKernel('mihomo');
+      if (res.outcome !== 'switched') notifySwitchOutcome(res);
       launchTimer1 = setTimeout(async () => {
         if (destroyed) return;
         // Поток подключит $effect по mihomoApiReady, когда capabilities покажут «API отвечает»
@@ -670,7 +673,7 @@
   {:else if $capabilities !== null && !$capabilities.mihomo.reachable}
     <EmptyState
       title={$t('ds.empty.mihomo_offline_title')}
-      description={$capabilities?.active_kernel === 'mihomo'
+      description={$isMihomo
         ? $t('ds.empty.mihomo_offline_desc_actionable')
         : $t('ds.empty.mihomo_offline_desc')}
       icon={PlayIcon}

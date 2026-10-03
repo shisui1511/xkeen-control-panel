@@ -1,7 +1,16 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
-  import { showToast, showConfirm, capabilities, fetchCapabilities } from './stores';
+  import {
+    showToast,
+    showConfirm,
+    capabilities,
+    fetchCapabilities,
+    isXray,
+    isMihomo,
+    mihomoApiReady,
+    kernelKnown
+  } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
   import PageHeader from './PageHeader.svelte';
@@ -66,11 +75,7 @@
   let ws: WebSocket | null = null;
   let connected = $state(false);
   // Mihomo feeds the chart; while its API is down no samples will ever arrive.
-  let coreOffline = $derived(
-    $capabilities !== null &&
-      $capabilities.active_kernel !== 'xray' &&
-      !$capabilities.mihomo?.reachable
-  );
+  let coreOffline = $derived($kernelKnown && !$isXray && !$capabilities?.mihomo?.reachable);
   let totalUp = $state(0);
   let totalDown = $state(0);
   let sessionUp = $state(0);
@@ -192,7 +197,15 @@
   let reconnectDelay = 1000;
   const MAX_RECONNECT_DELAY = 16000;
 
+  // Сокет трафика живой у Mihomo: при другом активном ядре, в конфликте или пока API не
+  // отвечает сервер ответил бы 409 ещё до апгрейда, и страница бесконечно штурмовала бы
+  // маршрут с переподключениями. Условие берётся из единого состояния ядра (сторы), а не
+  // из сырых данных capabilities.
+  const trafficWsAllowed = $derived($isMihomo && $mihomoApiReady);
+
   function connect() {
+    if (!trafficWsAllowed) return;
+
     // Guard against overlapping connects: a visibilitychange firing while a
     // fresh reconnect attempt is still CONNECTING must not open a second
     // socket — the first one's handlers would stay attached and double up
@@ -289,6 +302,8 @@
   }
 
   function scheduleReconnect() {
+    // закрытый гейт: сервер ответит 409, таймер переподключения не нужен
+    if (!trafficWsAllowed) return;
     if (ws && ws.readyState !== WebSocket.CLOSED) return;
     if (reconnectTimeout) return;
 
@@ -311,6 +326,8 @@
       ws = null;
     }
     connected = false;
+    // накопленная задержка не должна задерживать первую попытку при повторном открытии гейта
+    reconnectDelay = 1000;
   }
 
   async function resetStatistics() {
@@ -406,7 +423,7 @@
 
   async function fetchXrayStats() {
     if (typeof document !== 'undefined' && document.hidden) return;
-    if ($capabilities?.active_kernel !== 'xray' || !$capabilities?.xray?.grpc_ready) return;
+    if (!$isXray || !$capabilities?.xray?.grpc_ready) return;
 
     try {
       const res = await apiFetchJSON<any>('/api/xray/stats');
@@ -431,7 +448,7 @@
 
   function startXrayStatsPolling() {
     stopXrayStatsPolling();
-    if ($capabilities?.active_kernel === 'xray' && $capabilities?.xray?.grpc_ready) {
+    if ($isXray && $capabilities?.xray?.grpc_ready) {
       fetchXrayStats();
       xrayStatsInterval = setInterval(fetchXrayStats, 2000);
     }
@@ -486,13 +503,11 @@
   // Примитив, а не весь объект capabilities: опрос раз в 10 с кладёт в стор новый объект
   // с теми же значениями, и эффект, читающий стор целиком, перезапускался бы на каждом
   // опросе — cleanup обнулял бы xrayStatsError и прятал предупреждение WR-06.
-  const isXrayStatsActive = $derived(
-    $capabilities?.active_kernel === 'xray' && $capabilities?.xray?.grpc_ready === true
-  );
+  const isXrayStatsActive = $derived($isXray && $capabilities?.xray?.grpc_ready === true);
 
   $effect(() => {
     const active = isXrayStatsActive;
-    // start/stop сами читают $capabilities (проверка в fetchXrayStats): вне untrack эти
+    // start/stop сами читают $isXray и $capabilities (проверка в fetchXrayStats): вне untrack эти
     // чтения стали бы зависимостями эффекта и вернули перезапуск на каждом опросе
     untrack(() => {
       if (active) {
@@ -512,7 +527,7 @@
   function handleVisibilityChange() {
     if (!document.hidden) {
       lastTickTime = 0; // avoid huge elapsedSec spike from messages dropped while hidden
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
+      if (trafficWsAllowed && (!ws || ws.readyState !== WebSocket.OPEN)) {
         connect();
       }
       startXrayStatsPolling();
@@ -544,8 +559,20 @@
     hoveredPoint = null;
   }
 
+  // Подключение и разрыв сокета ведёт гейт: он же закрывает сокет при смене Mihomo на другое
+  // ядро. Чтения внутри connect/disconnect уходят в untrack и не становятся зависимостями.
+  $effect(() => {
+    const allowed = trafficWsAllowed;
+    untrack(() => {
+      if (allowed) {
+        connect();
+      } else {
+        disconnect();
+      }
+    });
+  });
+
   onMount(() => {
-    connect();
     window.addEventListener('visibilitychange', handleVisibilityChange);
   });
 
@@ -1123,7 +1150,7 @@
       {/if}
     </div>
 
-    {#if $capabilities?.active_kernel === 'xray'}
+    {#if $isXray}
       <!-- Xray Live Statistics Section (D-05, D-06) -->
       <div
         class="card analytics-section-card xray-stats-card"

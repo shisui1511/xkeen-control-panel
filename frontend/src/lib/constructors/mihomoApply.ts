@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
-import { apiFetch, apiFetchJSON, startMihomo } from '../api';
+import { apiFetch, apiFetchJSON } from '../api';
 import { showToast, showConfirm, fetchCapabilities } from '../../stores';
-import { activateRestartGrace } from '../serviceGrace';
+import { switchKernel, notifySwitchOutcome } from '../serviceControl';
 import { applyToKernel, notifyApplyOutcome, type ApplyResult } from '../serviceApply';
 import { t, tp } from '../../i18n';
 import {
@@ -116,9 +116,12 @@ export async function finishMihomoApply(
       }))
     ) {
       try {
-        activateRestartGrace(6000);
-        await startMihomo();
-        showToast('success', successMessage ?? tr('apply.restarted'));
+        const res = await switchKernel('mihomo');
+        if (res.outcome === 'switched') {
+          showToast('success', successMessage ?? tr('apply.restarted'));
+        } else {
+          notifySwitchOutcome(res);
+        }
       } catch (e: any) {
         if (e?.status === 401) return;
         showToast(

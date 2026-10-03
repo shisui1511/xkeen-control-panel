@@ -24,10 +24,13 @@ const (
 	// ApplyRestartFailed — рестарт запущенного ядра завершился ошибкой;
 	// файлы остаются записанными.
 	ApplyRestartFailed ApplyOutcome = "restart_failed"
+	// ApplySavedKernelConflict — запущены оба ядра: файлы записаны, ни одно ядро
+	// не перезапускалось (панель сама ничего не трогает, пока конфликт не снят).
+	ApplySavedKernelConflict ApplyOutcome = "saved_kernel_conflict"
 )
 
-// ApplyTargetActive — цель «активное ядро»: name_client из init-скрипта XKeen,
-// иначе запущенное ядро.
+// ApplyTargetActive — цель «активное ядро»: работающее ядро, иначе name_client
+// init-скрипта XKeen.
 const ApplyTargetActive = "active"
 
 // applyErrorMaxBytes — предел поля Error исхода restart_failed.
@@ -69,41 +72,58 @@ func KernelMayRun(processStatus string) bool {
 // всех мест «записал → перезапустил»: остановленное пользователем ядро не
 // запускается, чужое ядро не перезапускается.
 type KernelApplier struct {
-	// mu сериализует Apply: одновременно идёт не больше одного рестарта, а
-	// решение каждого вызова принимается по свежему статусу после захвата.
-	mu         sync.Mutex
-	status     func(string) string
-	configured func() string
-	restart    func() (string, error)
+	// lock сериализует применения: одновременно идёт не больше одного рестарта, а
+	// решение каждого вызова принимается по свежему статусу после захвата. В
+	// production это замок жизненного цикла API (WithLifecycleLock): Apply ждёт его
+	// (фоновые вызывающие — подписки), а обработчики HTTP берут замок сами и
+	// вызывают ApplyLocked.
+	lock   *sync.Mutex
+	status func(string) string
+	// active — единое определение активного ядра (то же, что у capabilities):
+	// работающий процесс, name_client учитывается, только когда ничего не запущено.
+	active  func() ActiveKernelState
+	restart func() (string, error)
 }
 
-// NewKernelApplier собирает KernelApplier из сервиса ядер и XKeen.
-func NewKernelApplier(kernels KernelStatusProvider, xkeen *XKeenService) *KernelApplier {
-	status := func(name string) string {
-		if kernels == nil {
+// NewKernelApplier собирает KernelApplier из сервиса ядер и XKeen. Статус берётся
+// из лёгкого ProcessStates (без запуска бинарников), активное ядро — из
+// ActiveState с кэшем и запасными источниками.
+func NewKernelApplier(kernels *KernelService, xkeen *XKeenService) *KernelApplier {
+	status := func(string) string { return "not_installed" }
+	active := func() ActiveKernelState { return ActiveKernelState{Kernel: "none"} }
+	if kernels != nil {
+		status = func(name string) string {
+			for _, st := range kernels.ProcessStates() {
+				if st.Name == name {
+					return st.Status
+				}
+			}
 			return "not_installed"
 		}
-		info := kernels.Get(name)
-		if info == nil {
-			return "not_installed"
-		}
-		return info.ProcessStatus
+		active = kernels.ActiveState
 	}
-	configured := func() string { return "" }
 	restart := func() (string, error) { return "", errors.New("xkeen service is not available") }
 	if xkeen != nil {
-		configured = xkeen.ConfiguredKernel
 		// `xkeen -restart` = остановка и запуск; горячей перезагрузки конфига
 		// у Mihomo в панели нет.
 		restart = xkeen.Restart
 	}
-	return NewKernelApplierFunc(status, configured, restart)
+	return &KernelApplier{lock: &sync.Mutex{}, status: status, active: active, restart: restart}
 }
 
 // NewKernelApplierFunc собирает KernelApplier из функций (тесты и места, где
-// перезапуск идёт не через XKeenService).
+// перезапуск идёт не через XKeenService). Активное ядро выводится из status тем
+// же ResolveActiveState; возраст процессов неизвестен, поэтому два запущенных
+// ядра всегда считаются конфликтом.
 func NewKernelApplierFunc(status func(string) string, configured func() string, restart func() (string, error)) *KernelApplier {
-	return &KernelApplier{status: status, configured: configured, restart: restart}
+	active := func() ActiveKernelState {
+		states := []KernelProcessState{
+			{Name: "xray", Status: status("xray")},
+			{Name: "mihomo", Status: status("mihomo")},
+		}
+		return ResolveActiveState(states, nil, configured)
+	}
+	return &KernelApplier{lock: &sync.Mutex{}, status: status, active: active, restart: restart}
 }
 
 // applyDecision — результат decide: исход без побочных эффектов.
@@ -117,23 +137,9 @@ func isApplyKernelName(name string) bool {
 	return name == "xray" || name == "mihomo"
 }
 
-// activeKernel — активное ядро: name_client из init-скрипта XKeen, иначе первое
-// запущенное. Пусто, если определить нельзя.
-func (k *KernelApplier) activeKernel() string {
-	if name := k.configured(); isApplyKernelName(name) {
-		return name
-	}
-	for _, name := range []string{"xray", "mihomo"} {
-		if k.status(name) == "running" {
-			return name
-		}
-	}
-	return ""
-}
-
 // decide не имеет побочных эффектов: только читает статусы.
 func (k *KernelApplier) decide(targets []string) applyDecision {
-	active := k.activeKernel()
+	st := k.active()
 
 	// concrete — конкретные цели без дублей; wantsActive — среди целей есть
 	// «активное».
@@ -155,6 +161,19 @@ func (k *KernelApplier) decide(targets []string) applyDecision {
 				concrete = append(concrete, t)
 			}
 		}
+	}
+
+	// Запущены оба ядра: ни одно не перезапускаем, файлы уже записаны.
+	if st.Conflict {
+		res := ApplyResult{Outcome: ApplySavedKernelConflict, ActiveKernel: st.Label(), ActiveRunning: true}
+		if len(concrete) > 0 {
+			res.Kernel = concrete[0]
+		}
+		return applyDecision{result: res}
+	}
+	active := st.Kernel
+	if !isApplyKernelName(active) {
+		active = ""
 	}
 
 	if len(concrete) == 0 && !wantsActive {
@@ -224,12 +243,31 @@ func (k *KernelApplier) WillRestart(target string) bool {
 	return k.Preview(target).Outcome == ApplyRestarted
 }
 
-// Apply решает по свежему статусу и при необходимости перезапускает ядро.
-// Откат записанных файлов не делается: при restart_failed конфиг остаётся.
-func (k *KernelApplier) Apply(targets ...string) ApplyResult {
-	k.mu.Lock()
-	defer k.mu.Unlock()
+// WithLifecycleLock подменяет собственный замок applier общим замком жизненного
+// цикла ядра, чтобы применение конфигурации и операции start/stop/switch
+// сериализовались одним мьютексом. Вызывать только при сборке, до первого Apply.
+// При l == nil замок не меняется.
+func (k *KernelApplier) WithLifecycleLock(l *sync.Mutex) *KernelApplier {
+	if l != nil {
+		k.lock = l
+	}
+	return k
+}
 
+// Apply ждёт замок (блокирующе) и применяет конфигурацию по свежему статусу.
+// Для вызывающих, которые замок не держат (фоновое применение после обновления
+// подписки). Обработчики, уже взявшие замок жизненного цикла, вызывают ApplyLocked.
+func (k *KernelApplier) Apply(targets ...string) ApplyResult {
+	k.lock.Lock()
+	defer k.lock.Unlock()
+	return k.ApplyLocked(targets...)
+}
+
+// ApplyLocked решает по свежему статусу и при необходимости перезапускает ядро.
+// Вызывающий уже держит замок жизненного цикла, переданный в WithLifecycleLock:
+// sync.Mutex не реентерабелен, повторный захват заблокировал бы вызов навсегда.
+// Откат записанных файлов не делается: при restart_failed конфиг остаётся.
+func (k *KernelApplier) ApplyLocked(targets ...string) ApplyResult {
 	d := k.decide(targets)
 	if !d.restart {
 		return d.result

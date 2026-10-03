@@ -199,7 +199,7 @@ func TestTrafficHandlers_Extended(t *testing.T) {
 	}
 }
 
-func TestSetupXrayCmdEnv_And_GetActiveKernelName(t *testing.T) {
+func TestSetupXrayCmdEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	datDir := filepath.Join(tmpDir, "dat")
 	_ = os.MkdirAll(datDir, 0755)
@@ -225,27 +225,19 @@ func TestSetupXrayCmdEnv_And_GetActiveKernelName(t *testing.T) {
 	if !hasCustom {
 		t.Errorf("expected XRAY_LOCATION_ASSET=/custom/dat in cmd2.Env, got %+v", cmd2.Env)
 	}
-
-	// 3. getActiveKernelName
-	api := &API{
-		xkeenSvc: services.NewXKeenService("/bin/true", tmpDir),
-	}
-	active := api.getActiveKernelName()
-	if active != "" && active != "none" && active != "xray" && active != "mihomo" && active != "both" {
-		t.Errorf("unexpected active kernel: %s", active)
-	}
 }
 
-// TestGetActiveKernelName_StaleRawIgnored: «что запущено сейчас» не выводится
-// из устаревшего снимка статуса; по свежему — выводится (G5-WR04).
-func TestGetActiveKernelName_StaleRawIgnored(t *testing.T) {
+// TestActiveKernelState_StaleRawIgnored: «что запущено сейчас» не выводится из
+// устаревшего снимка статуса (берётся настроенное ядро); по свежему — выводится
+// (G5-WR04).
+func TestActiveKernelState_StaleRawIgnored(t *testing.T) {
 	api := newConfiguredKernelAPI(t, "xray", newRawStatusCache(t, "mihomo running", true))
-	if got := api.getActiveKernelName(); got != "none" {
-		t.Errorf("getActiveKernelName при устаревшем снимке = %q, want none", got)
+	if got := api.activeKernelState(); got.Kernel != "xray" || got.Conflict {
+		t.Errorf("activeKernelState при устаревшем снимке = %+v, want kernel=xray (настроенное)", got)
 	}
 
 	api = newConfiguredKernelAPI(t, "xray", newRawStatusCache(t, "mihomo running", false))
-	if got := api.getActiveKernelName(); got != "mihomo" {
-		t.Errorf("getActiveKernelName по свежему снимку = %q, want mihomo", got)
+	if got := api.activeKernelState(); got.Kernel != "mihomo" || got.Conflict {
+		t.Errorf("activeKernelState по свежему снимку = %+v, want kernel=mihomo", got)
 	}
 }

@@ -24,6 +24,8 @@ interface SetupOptions {
   /** Ответ action=apply (поле data). */
   applyData?: Record<string, unknown>;
   applyDelayMs?: number;
+  /** Ответ action=switch_kernel (поле data); по умолчанию исход `switched`. */
+  switchData?: Record<string, unknown>;
   /** Входящие в 03_inbounds.json, загруженном с роутера. */
   xrayInbounds?: unknown[];
 }
@@ -145,6 +147,19 @@ async function setup(page: Page, opts: SetupOptions = {}) {
             kernel: u.searchParams.get('kernel') ?? 'xray',
             active_kernel: activeKernel,
             active_running: true
+          }
+        });
+      }
+      if (action === 'switch_kernel') {
+        return json({
+          success: true,
+          data: opts.switchData ?? {
+            outcome: 'switched',
+            old: 'xray',
+            new: 'mihomo',
+            old_running: false,
+            new_running: true,
+            output: ''
           }
         });
       }
@@ -427,6 +442,32 @@ test.describe('Применение конструктора Mihomo', () => {
     await expect.poll(() => calls.filter((c) => c.action === 'switch_kernel').length).toBe(1);
     expect(calls.find((c) => c.action === 'switch_kernel')?.kernel).toBe('mihomo');
     expect(calls.filter((c) => c.action === 'restart')).toHaveLength(0);
+    await expect(page.locator('.toast--success').first()).toBeVisible();
+  });
+
+  test('переключение: старое ядро не остановилось — тост исхода, а не успеха', async ({ page }) => {
+    const { calls } = await setup(page, {
+      activeKernel: 'xray',
+      applyData: inactiveRunning,
+      switchData: {
+        outcome: 'old_still_running',
+        old: 'xray',
+        new: 'mihomo',
+        old_running: true,
+        new_running: true,
+        output: ''
+      }
+    });
+    await openMihomoConstructor(page);
+
+    await applyMihomo(page);
+    await expect(page.getByText(switchPrompt)).toBeVisible({ timeout: 5000 });
+    await page.getByRole('button', { name: 'Переключить и запустить' }).click();
+
+    await expect(page.locator('.toast--warning', { hasText: 'Xray всё ещё работает' })).toBeVisible(
+      { timeout: 5000 }
+    );
+    expect(calls.filter((c) => c.action === 'switch_kernel')).toHaveLength(1);
   });
 
   test('Xray не запущен: диалога нет, конфиг сохранён, без switch_kernel', async ({ page }) => {

@@ -13,12 +13,17 @@ import (
 )
 
 type ServiceStatusResponse struct {
-	IsRunning    bool   `json:"is_running"`
+	IsRunning bool `json:"is_running"`
+	// ActiveKernel — "xray" | "mihomo" | "none"; "both" при конфликте.
 	ActiveKernel string `json:"active_kernel"`
-	PID          int    `json:"pid"`
-	Uptime       string `json:"uptime"`
-	BinaryPath   string `json:"binary_path"`
-	Raw          string `json:"raw"`
+	// KernelConflict — запущены оба ядра; PID и Uptime при этом пусты.
+	KernelConflict bool `json:"kernel_conflict"`
+	// RunningKernels — запущенные ядра в порядке [xray, mihomo].
+	RunningKernels []string `json:"running_kernels,omitempty"`
+	PID            int      `json:"pid"`
+	Uptime         string   `json:"uptime"`
+	BinaryPath     string   `json:"binary_path"`
+	Raw            string   `json:"raw"`
 	// Stale — Raw нельзя считать свежим (опрос xkeen не удался или устарел);
 	// AgeSeconds — возраст последнего успешного опроса, нет на холодном старте
 	Stale      bool                    `json:"stale"`
@@ -69,28 +74,29 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 		resp.AgeSeconds = &age
 	}
 
-	// Detect which kernel is running and get its PID/Uptime
-	if a.kernelSvc != nil {
-		for _, st := range a.kernelSvc.ProcessStates() {
-			if st.Status == "running" {
-				resp.IsRunning = true
-				resp.ActiveKernel = st.Name
-				resp.PID = st.PID
-				resp.Uptime = st.Uptime
+	// Активное ядро — единый резолвер по процессам (запасные источники — свежий
+	// снимок статуса и name_client — учтены внутри него).
+	st := a.activeKernelState()
+	resp.ActiveKernel = st.Label()
+	resp.KernelConflict = st.Conflict
+	resp.RunningKernels = st.Running
+	resp.IsRunning = len(st.Running) > 0
+	// PID и uptime — только когда активное ядро однозначно; при конфликте пусты.
+	if !st.Conflict && a.kernelSvc != nil && len(st.Running) > 0 {
+		for _, ps := range a.kernelSvc.ProcessStates() {
+			if ps.Name == st.Kernel && ps.Status == "running" {
+				resp.PID = ps.PID
+				resp.Uptime = ps.Uptime
 				break
 			}
 		}
 	}
 
-	// Fallback to checking raw output if kernelSvc list is empty or doesn't find running
+	// Запасной путь: ни одного процесса, но свежий вывод xkeen -status здоров
 	if !resp.IsRunning {
 		if !snap.Stale && services.IsKernelStatusHealthy(snap.Raw) {
 			resp.IsRunning = true
 		}
-	}
-	if resp.ActiveKernel == "" {
-		// Ядро остановлено: показываем то, которое запустит XKeen
-		resp.ActiveKernel = a.xkeenSvc.ConfiguredKernel()
 	}
 
 	if a.watchdogSvc != nil {
@@ -108,24 +114,15 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	}
 	action := r.URL.Query().Get("action")
 
-	if action == "apply" {
-		a.serviceApply(w, r)
+	// Валидация до замка: неверный ввод не должен упираться в чужую операцию.
+	switch action {
+	case "start", "stop", "restart", "switch_kernel", "apply":
+	default:
+		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
 		return
 	}
-
-	var out string
-	var err error
-
-	// Determine kernel to monitor if restart or switch_kernel
 	var targetKernel string
-	if action == "restart" {
-		// Detect which kernel was running before restart
-		if k := a.kernelSvc.Get("xray"); k != nil && k.ProcessStatus == "running" {
-			targetKernel = "xray"
-		} else if k := a.kernelSvc.Get("mihomo"); k != nil && k.ProcessStatus == "running" {
-			targetKernel = "mihomo"
-		}
-	} else if action == "switch_kernel" {
+	if action == "switch_kernel" {
 		targetKernel = r.URL.Query().Get("kernel")
 		if targetKernel != "xray" && targetKernel != "mihomo" {
 			a.errorResponse(w, a.t(r, "service.invalid_kernel"), http.StatusBadRequest)
@@ -133,27 +130,59 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// stop с kernel= — остановка конкретного ядра; имя только из белого списка.
+	stopKernel := ""
+	if action == "stop" {
+		stopKernel = r.URL.Query().Get("kernel")
+		if stopKernel != "" && stopKernel != "xray" && stopKernel != "mihomo" {
+			a.errorResponse(w, a.t(r, "service.invalid_kernel"), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Одна операция жизненного цикла за раз (двойной клик, две вкладки).
+	if !a.tryLifecycleLock(w, r) {
+		return
+	}
+	defer a.lifecycleMu.Unlock()
+
+	// Запуск, рестарт, переключение и применение при двух запущенных ядрах только
+	// усугубили бы конфликт (D-02); остановка разрешена всегда.
+	var st services.ActiveKernelState
+	if action != "stop" {
+		a.kernelSvc.InvalidateActiveState()
+		st = a.activeKernelState()
+		if st.Conflict {
+			JSONErrorCode(w, http.StatusConflict, "kernel_conflict", a.t(r, "kernel.conflict"))
+			return
+		}
+	}
+
+	var out string
+	var err error
 	switch action {
+	case "apply":
+		a.serviceApply(w, r)
+		return
 	case "start":
 		out, err = a.xkeenSvc.Start()
 	case "stop":
+		if stopKernel != "" {
+			a.serviceStopKernel(w, r, stopKernel)
+			return
+		}
 		out, err = a.xkeenSvc.Stop()
 	case "restart":
 		out, err = a.xkeenSvc.Restart()
 	case "switch_kernel":
-		out, err = a.xkeenSvc.SwitchKernel(targetKernel)
-		if err == nil {
-			// После успешной смены ядра сразу запускаем XKeen
-			startOut, startErr := a.xkeenSvc.Start()
-			if startErr != nil {
-				out = out + "\n" + startOut
-				err = startErr
-			} else {
-				out = out + "\n" + startOut
-			}
+		// Прежнее ядро — только реально запущенное. При нуле процессов резолвер
+		// отдаёт ядро из name_client/снимка, но «остановленным» его считать нельзя:
+		// оно не работало (WR-07). Конфликт к этому месту уже отсечён guard'ом.
+		old := "none"
+		if len(st.Running) > 0 {
+			old = st.Kernel
 		}
-	default:
-		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
+		a.serviceSwitchKernel(w, targetKernel, old)
 		return
 	}
 
@@ -165,6 +194,113 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	a.ClearCapabilitiesCache()
 
 	w.Write([]byte(out))
+}
+
+// switchOutputLines — сколько последних строк вывода скрипта XKeen попадает в
+// ответ switch_kernel.
+const switchOutputLines = 20
+
+// serviceSwitchKernel — action=switch_kernel: скрипт XKeen, запуск и
+// подтверждение по процессам (D-03). Успех скрипта не означает успех
+// переключения, поэтому HTTP 200 несёт типизированный исход; ошибка самого
+// скрипта — по-прежнему 500. Принудительно процессы не завершаются (D-04).
+func (a *API) serviceSwitchKernel(w http.ResponseWriter, target, old string) {
+	if a.kernelSwitcher == nil {
+		a.errorResponse(w, "kernel service is not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// old — ядро до переключения по свежему чтению процессов (guard в ServiceControl).
+	if old == "" {
+		old = "none"
+	}
+
+	out, err := a.xkeenSvc.SwitchKernel(target)
+	if err == nil {
+		// После успешной смены ядра сразу запускаем XKeen
+		startOut, startErr := a.xkeenSvc.Start()
+		out = out + "\n" + startOut
+		err = startErr
+	}
+	if err != nil {
+		a.errorResponse(w, out, http.StatusInternalServerError)
+		return
+	}
+
+	res := a.kernelSwitcher.Await(old, target)
+	res.Output = lastNonEmptyLines(utils.StripANSI(out), switchOutputLines)
+	log.Printf("switch_kernel: old=%s new=%s outcome=%s",
+		utils.SanitizeLogInput(res.Old), utils.SanitizeLogInput(res.New), utils.SanitizeLogInput(string(res.Outcome)))
+
+	a.ClearCapabilitiesCache()
+	JSONSuccess(w, res)
+}
+
+// serviceStopKernel — action=stop&kernel=: остановить конкретное ядро. Если это
+// единственное запущенное ядро — штатный `xkeen -stop`; при конфликте (или когда
+// ядро не единственное) — SIGTERM по проверенному PID, без зависимости от того,
+// что делает `xkeen -stop` при двух ядрах. Принудительного завершения нет (D-04).
+func (a *API) serviceStopKernel(w http.ResponseWriter, r *http.Request, kernel string) {
+	if a.kernelSvc == nil {
+		a.errorResponse(w, "kernel service is not configured", http.StatusInternalServerError)
+		return
+	}
+
+	a.kernelSvc.InvalidateActiveState()
+	st := a.activeKernelState()
+
+	if !st.Conflict && len(st.Running) == 1 && st.Running[0] == kernel {
+		out, err := a.xkeenSvc.Stop()
+		if err != nil {
+			a.errorResponse(w, out, http.StatusInternalServerError)
+			return
+		}
+		outcome := services.KernelStopStopped
+		for _, ps := range a.kernelSvc.ProcessStates() {
+			if ps.Name == kernel && ps.Status == "running" {
+				outcome = services.KernelStopStillRunning
+			}
+		}
+		a.ClearCapabilitiesCache()
+		JSONSuccess(w, services.KernelStopResult{Kernel: kernel, Outcome: outcome, Method: services.KernelStopMethodXKeen})
+		return
+	}
+
+	res, err := a.kernelSvc.StopKernelProcess(kernel)
+	res.Method = services.KernelStopMethodSignal
+	summary := "kernel=" + kernel + " outcome=" + string(res.Outcome)
+	if err != nil {
+		summary = "kernel=" + kernel + " error=" + err.Error()
+	}
+	a.xkeenSvc.RecordAction("stop_kernel:"+kernel, summary, err)
+	if err != nil {
+		log.Printf("stop_kernel: kernel=%s error=%s", utils.SanitizeLogInput(kernel), utils.SanitizeLogInput(err.Error()))
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "kernel_stop_failed", a.t(r, "kernel.stop_failed"), err.Error())
+		return
+	}
+	log.Printf("stop_kernel: kernel=%s outcome=%s", utils.SanitizeLogInput(kernel), utils.SanitizeLogInput(string(res.Outcome)))
+
+	// Остановка настроенного ядра для сторожевого таймера — плановая, как после Stop().
+	if kernel == a.configuredKernel() {
+		a.xkeenSvc.MarkIntentionalStop()
+	}
+	a.xkeenSvc.NotifyLifecycle()
+	a.ClearCapabilitiesCache()
+	JSONSuccess(w, res)
+}
+
+// lastNonEmptyLines — последние n непустых строк текста.
+func lastNonEmptyLines(s string, n int) string {
+	var lines []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, strings.TrimRight(line, "\r"))
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // serviceApply — action=apply: применить записанную конфигурацию к ядру.
@@ -188,16 +324,17 @@ func (a *API) serviceApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result := a.applyKernel(target)
+	result := a.applyKernelLocked(target)
 	log.Printf("apply: target=%s active=%s outcome=%s",
 		utils.SanitizeLogInput(target), utils.SanitizeLogInput(result.ActiveKernel), utils.SanitizeLogInput(string(result.Outcome)))
 	a.ClearCapabilitiesCache()
 	JSONSuccess(w, result)
 }
 
-// applyKernel применяет конфигурацию к целевым ядрам через KernelApplier. Без
-// applier ничего не перезапускается.
-func (a *API) applyKernel(targets ...string) services.ApplyResult {
+// applyKernelLocked применяет конфигурацию к целевым ядрам через KernelApplier
+// без повторного захвата замка: только под lifecycleMu (sync.Mutex не
+// реентерабелен). Без applier ничего не перезапускается.
+func (a *API) applyKernelLocked(targets ...string) services.ApplyResult {
 	if a.kernelApplier == nil {
 		log.Printf("apply: kernel applier is not configured, restart skipped")
 		res := services.ApplyResult{Outcome: services.ApplySavedKernelStopped}
@@ -206,7 +343,7 @@ func (a *API) applyKernel(targets ...string) services.ApplyResult {
 		}
 		return res
 	}
-	return a.kernelApplier.Apply(targets...)
+	return a.kernelApplier.ApplyLocked(targets...)
 }
 
 // kernelForConfigPath — ядро, которому принадлежит файл конфигурации: каталог
@@ -272,6 +409,13 @@ func (a *API) ServiceDNSRedirect(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "error.bad_request"), http.StatusBadRequest)
 		return
 	}
+
+	// SetDNSProxying перезапускает XKeen (и откатывает при потере DNS): под
+	// общим замком жизненного цикла.
+	if !a.tryLifecycleLock(w, r) {
+		return
+	}
+	defer a.lifecycleMu.Unlock()
 
 	out, err := a.xkeenSvc.SetDNSProxying(*req.Enabled)
 	if errors.Is(err, services.ErrDNSRolledBack) {

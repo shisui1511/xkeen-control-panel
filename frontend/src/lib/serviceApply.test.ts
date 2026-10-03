@@ -7,16 +7,26 @@ import { get } from 'svelte/store';
 const apiFetchJSON = vi.fn();
 const apiFetch = vi.fn();
 
-const startMihomo = vi.fn();
+const switchKernel = vi.fn();
+const serviceAction = vi.fn();
 
 async function load() {
-  vi.doMock('./api', () => ({ apiFetch, apiFetchJSON, startMihomo }));
+  vi.doMock('./api', () => ({ apiFetch, apiFetchJSON }));
+  // switchKernel и serviceAction подменены; тосты исхода — настоящие
+  vi.doMock('./serviceControl', async () => {
+    const actual = await vi.importActual<typeof import('./serviceControl')>('./serviceControl');
+    return { ...actual, switchKernel, serviceAction };
+  });
   const mod = await import('./serviceApply');
   const stores = await import('../stores');
   const i18n = await import('../i18n');
+  // Словарь грузится асинхронно: без ожидания в нагруженном прогоне t() вернёт ключ
+  await i18n.i18nReady;
+  const grace = await import('./serviceGrace');
   const mihomo = await import('./constructors/mihomoApply');
   return {
     ...mod,
+    isServiceRestarting: grace.isServiceRestarting,
     finishMihomoApply: mihomo.finishMihomoApply,
     toastStore: stores.toastStore,
     confirmStore: stores.confirmStore,
@@ -29,7 +39,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   apiFetchJSON.mockReset();
   apiFetch.mockReset();
-  startMihomo.mockReset();
+  switchKernel.mockReset();
+  serviceAction.mockReset();
   // fetchCapabilities после исхода: ответ не важен, важно, что он не падает
   apiFetchJSON.mockResolvedValue({});
   vi.stubGlobal('localStorage', {
@@ -44,6 +55,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.doUnmock('./api');
+  vi.doUnmock('./serviceControl');
 });
 
 describe('notifyApplyOutcome', () => {
@@ -79,6 +91,25 @@ describe('notifyApplyOutcome', () => {
     expect(toast.type).toBe('info');
     expect(toast.message).toBe(get(t)('apply.saved_kernel_inactive', { kernel: 'Mihomo' }));
     expect(toast.message).toContain('Mihomo');
+    expect(toast.action).toBeUndefined();
+  });
+
+  it('saved_kernel_conflict: error без действия и без обещания перезапуска', async () => {
+    const { notifyApplyOutcome, toastStore, t } = await load();
+    notifyApplyOutcome({ outcome: 'saved_kernel_conflict', kernel: 'xray' });
+    const [toast] = get(toastStore);
+    expect(toast.type).toBe('error');
+    expect(toast.message).toBe(get(t)('apply.saved_kernel_conflict'));
+    expect(toast.action).toBeUndefined();
+  });
+
+  it('saved_op_in_progress: warning без действия и без «сбоя рестарта»', async () => {
+    const { notifyApplyOutcome, toastStore, t } = await load();
+    notifyApplyOutcome({ outcome: 'saved_op_in_progress', kernel: 'xray' });
+    const [toast] = get(toastStore);
+    expect(toast.type).toBe('warning');
+    expect(toast.message).toBe(get(t)('apply.saved_op_in_progress'));
+    expect(toast.message).toContain('идёт другая операция с ядром');
     expect(toast.action).toBeUndefined();
   });
 
@@ -134,6 +165,12 @@ describe('applyToKernel', () => {
     );
   });
 
+  it('saved_kernel_conflict распознаётся как известный исход', async () => {
+    apiFetchJSON.mockResolvedValue({ outcome: 'saved_kernel_conflict', kernel: 'xray' });
+    const { applyToKernel } = await load();
+    expect((await applyToKernel({ kernel: 'xray' })).outcome).toBe('saved_kernel_conflict');
+  });
+
   it('неизвестный или отсутствующий outcome даёт unknown', async () => {
     const { applyToKernel } = await load();
     apiFetchJSON.mockResolvedValueOnce({ outcome: 'exploded', kernel: 'xray' });
@@ -142,10 +179,85 @@ describe('applyToKernel', () => {
     expect((await applyToKernel({ kernel: 'xray' })).outcome).toBe('unknown');
   });
 
-  it('ошибка HTTP пробрасывается вызывающему', async () => {
+  it('ошибка HTTP пробрасывается вызывающему, окно перезапуска снято', async () => {
     apiFetchJSON.mockRejectedValue(new Error('HTTP 500'));
-    const { applyToKernel } = await load();
+    const { applyToKernel, isServiceRestarting } = await load();
     await expect(applyToKernel({ kernel: 'xray' })).rejects.toThrow('HTTP 500');
+    expect(get(isServiceRestarting)).toBe(false);
+  });
+
+  function gateError(code: string, status = 409) {
+    return Object.assign(new Error(code), { status, code });
+  }
+
+  it('409 kernel_conflict: исход saved_kernel_conflict, окно снято', async () => {
+    apiFetchJSON.mockRejectedValue(gateError('kernel_conflict'));
+    const { applyToKernel, isServiceRestarting } = await load();
+    const result = await applyToKernel({ kernel: 'xray' });
+    expect(result).toMatchObject({
+      outcome: 'saved_kernel_conflict',
+      kernel: 'xray',
+      active_kernel: 'both',
+      active_running: true
+    });
+    expect(get(isServiceRestarting)).toBe(false);
+  });
+
+  it('409 kernel_conflict для active и path: имя ядра пустое', async () => {
+    apiFetchJSON.mockRejectedValue(gateError('kernel_conflict'));
+    const { applyToKernel } = await load();
+    expect((await applyToKernel({ kernel: 'active' })).kernel).toBe('');
+    expect((await applyToKernel({ path: '/opt/etc/xray/a.json' })).kernel).toBe('');
+  });
+
+  it('409 kernel_op_in_progress: исход saved_op_in_progress, окно не снимается', async () => {
+    apiFetchJSON.mockRejectedValue(gateError('kernel_op_in_progress'));
+    const { applyToKernel, isServiceRestarting } = await load();
+    const result = await applyToKernel({ kernel: 'mihomo' });
+    expect(result).toMatchObject({ outcome: 'saved_op_in_progress', kernel: 'mihomo' });
+    expect(get(isServiceRestarting)).toBe(true);
+  });
+
+  it('409 с другим кодом (kernel_inactive) пробрасывается, окно снято', async () => {
+    apiFetchJSON.mockRejectedValue(gateError('kernel_inactive'));
+    const { applyToKernel, isServiceRestarting } = await load();
+    await expect(applyToKernel({ kernel: 'xray' })).rejects.toMatchObject({
+      code: 'kernel_inactive'
+    });
+    expect(get(isServiceRestarting)).toBe(false);
+  });
+
+  it('код kernel_conflict не со статусом 409 не превращается в исход', async () => {
+    apiFetchJSON.mockRejectedValue(gateError('kernel_conflict', 500));
+    const { applyToKernel } = await load();
+    await expect(applyToKernel({ kernel: 'xray' })).rejects.toThrow();
+  });
+
+  it('исход без рестарта снимает окно, restarted оставляет', async () => {
+    const { applyToKernel, isServiceRestarting } = await load();
+    apiFetchJSON.mockResolvedValueOnce({ outcome: 'saved_kernel_stopped', kernel: 'xray' });
+    await applyToKernel({ kernel: 'xray' });
+    expect(get(isServiceRestarting)).toBe(false);
+    apiFetchJSON.mockResolvedValueOnce({ outcome: 'restarted', kernel: 'xray' });
+    await applyToKernel({ kernel: 'xray' });
+    expect(get(isServiceRestarting)).toBe(true);
+  });
+});
+
+describe('startKernelNow', () => {
+  it('запускает ядро через serviceAction и обновляет capabilities', async () => {
+    serviceAction.mockResolvedValue('ok');
+    const { startKernelNow } = await load();
+    await startKernelNow();
+    expect(serviceAction).toHaveBeenCalledWith('start');
+    expect(apiFetchJSON).toHaveBeenCalledWith('/api/capabilities', expect.anything());
+  });
+
+  it('ошибка запуска: error-тост с текстом', async () => {
+    serviceAction.mockRejectedValue(new Error('no binary'));
+    const { startKernelNow, toastStore, t } = await load();
+    await startKernelNow();
+    expect(get(toastStore)[0].message).toBe(get(t)('apply.start_failed', { error: 'no binary' }));
   });
 });
 
@@ -174,6 +286,15 @@ describe('finishMihomoApply', () => {
     active_running: true
   };
 
+  const switchedResult = {
+    outcome: 'switched' as const,
+    old: 'xray',
+    new: 'mihomo' as const,
+    old_running: false,
+    new_running: true,
+    output: ''
+  };
+
   /** Ждёт диалог переключения и отвечает на него. */
   async function answer(confirmStore: any, value: boolean) {
     await vi.waitFor(() => expect(get(confirmStore)).not.toBeNull());
@@ -197,7 +318,7 @@ describe('finishMihomoApply', () => {
     const done = finishMihomoApply(inactiveRunning);
     await answer(confirmStore, false);
     await done;
-    expect(startMihomo).not.toHaveBeenCalled();
+    expect(switchKernel).not.toHaveBeenCalled();
     expect(apiFetch).not.toHaveBeenCalled();
     const toast = lastToast(toastStore);
     expect(toast.message).toBe(get(t)('apply.mihomo_saved_after_switch'));
@@ -205,19 +326,36 @@ describe('finishMihomoApply', () => {
   });
 
   it('согласие: ровно один switch_kernel и тост успеха', async () => {
-    startMihomo.mockResolvedValue(undefined);
+    switchKernel.mockResolvedValue(switchedResult);
     const { finishMihomoApply, confirmStore, toastStore } = await load();
     const done = finishMihomoApply(inactiveRunning, 'Готово');
     await answer(confirmStore, true);
     await done;
-    expect(startMihomo).toHaveBeenCalledTimes(1);
+    expect(switchKernel).toHaveBeenCalledTimes(1);
+    expect(switchKernel).toHaveBeenCalledWith('mihomo');
     const toast = lastToast(toastStore);
     expect(toast.type).toBe('success');
     expect(toast.message).toBe('Готово');
   });
 
+  it('исход old_still_running: тост исхода вместо успеха применения', async () => {
+    switchKernel.mockResolvedValue({
+      ...switchedResult,
+      outcome: 'old_still_running',
+      old_running: true
+    });
+    const { finishMihomoApply, confirmStore, toastStore, t } = await load();
+    const done = finishMihomoApply(inactiveRunning, 'Готово');
+    await answer(confirmStore, true);
+    await done;
+    const toast = lastToast(toastStore);
+    expect(toast.type).toBe('warning');
+    expect(toast.message).toBe(get(t)('kernel.switch_old_running', { old: 'Xray' }));
+    expect(switchKernel).toHaveBeenCalledTimes(1);
+  });
+
   it('ошибка переключения: тост apply.switch_failed с причиной', async () => {
-    startMihomo.mockRejectedValue(new Error('boom'));
+    switchKernel.mockRejectedValue(new Error('boom'));
     const { finishMihomoApply, confirmStore, toastStore, t } = await load();
     const done = finishMihomoApply(inactiveRunning);
     await answer(confirmStore, true);
@@ -231,8 +369,21 @@ describe('finishMihomoApply', () => {
     const { finishMihomoApply, confirmStore, toastStore, t } = await load();
     await finishMihomoApply({ ...inactiveRunning, active_running: false });
     expect(get(confirmStore)).toBeNull();
-    expect(startMihomo).not.toHaveBeenCalled();
+    expect(switchKernel).not.toHaveBeenCalled();
     expect(lastToast(toastStore).message).toBe(get(t)('apply.mihomo_saved_after_switch'));
+  });
+
+  it('нормализованный отказ конфликта: тост «не применено», не сбой рестарта', async () => {
+    apiFetchJSON.mockRejectedValueOnce(
+      Object.assign(new Error('both'), { status: 409, code: 'kernel_conflict' })
+    );
+    const { applyToKernel, finishMihomoApply, toastStore, t } = await load();
+    const result = await applyToKernel({ kernel: 'mihomo' });
+    await finishMihomoApply(result);
+    const toast = lastToast(toastStore);
+    expect(toast.message).toBe(get(t)('apply.saved_kernel_conflict'));
+    expect(toast.message).not.toContain(get(t)('apply.open_logs'));
+    expect(toast.action).toBeUndefined();
   });
 
   it('остальные исходы идут через общий тост без диалога', async () => {

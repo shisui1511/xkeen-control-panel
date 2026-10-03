@@ -377,3 +377,204 @@ describe('mihomoApiState (tri-state гейт опросов)', () => {
     expect(get(mihomoOfflineReason)).toBe('api_down');
   });
 });
+
+describe('единое состояние ядра и конфликт', () => {
+  const apiFetchJSON = vi.fn();
+
+  const caps = (active: string, extra: Record<string, unknown> = {}) => ({
+    kernels: { xray: { installed: true }, mihomo: { installed: true } },
+    active_kernel: active,
+    xkeen_installed: true,
+    mihomo: { reachable: true, process_running: true, api_reachable: true },
+    ...extra
+  });
+  const conflictCaps = () =>
+    caps('both', { kernel_conflict: true, running_kernels: ['xray', 'mihomo'] });
+
+  async function load() {
+    vi.doMock('./lib/api', () => ({ apiFetchJSON }));
+    const setItem = vi.fn();
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn().mockReturnValue(null),
+      setItem,
+      removeItem: vi.fn()
+    });
+    return { setItem, stores: await import('./stores') };
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    apiFetchJSON.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.doUnmock('./lib/api');
+  });
+
+  it('до ответа capabilities все булевы false и kernelKnown false', async () => {
+    const { stores } = await load();
+    expect(get(stores.activeKernelState)).toBeNull();
+    expect(get(stores.kernelKnown)).toBe(false);
+    for (const s of [stores.isXray, stores.isMihomo, stores.isNone, stores.isConflict]) {
+      expect(get(s)).toBe(false);
+    }
+  });
+
+  it('ровно один из isXray/isMihomo/isNone/isConflict true при известных capabilities', async () => {
+    const { stores } = await load();
+    for (const [input, expected] of [
+      [caps('xray'), 'xray'],
+      [caps('mihomo'), 'mihomo'],
+      [caps('none'), 'none'],
+      [conflictCaps(), 'conflict']
+    ] as const) {
+      vi.resetModules();
+      const fresh = (await load()).stores;
+      apiFetchJSON.mockResolvedValue(input);
+      await fresh.fetchCapabilities();
+      const flags = [fresh.isXray, fresh.isMihomo, fresh.isNone, fresh.isConflict].map((s) =>
+        get(s)
+      );
+      expect(flags.filter(Boolean)).toHaveLength(1);
+      expect(get(fresh.activeKernelState)).toBe(expected);
+      expect(get(fresh.kernelKnown)).toBe(true);
+    }
+    expect(stores).toBeDefined();
+  });
+
+  // Во время перезапуска API ещё недоступен: иначе fetchCapabilities сам снимет окно
+  const restartingNone = () =>
+    caps('none', { mihomo: { reachable: true, process_running: false, api_reachable: false } });
+
+  afterEach(async () => {
+    const { clearRestartGrace } = await import('./lib/serviceGrace');
+    clearRestartGrace();
+  });
+
+  it('переходный none в окне перезапуска не затирает известное ядро; конфликт виден сразу; затем mihomo', async () => {
+    const { stores } = await load();
+    const { activateRestartGrace } = await import('./lib/serviceGrace');
+    apiFetchJSON.mockResolvedValue(caps('xray'));
+    await stores.fetchCapabilities();
+    expect(get(stores.capabilities)?.active_kernel).toBe('xray');
+
+    activateRestartGrace(60_000);
+    apiFetchJSON.mockResolvedValue(restartingNone());
+    await stores.fetchCapabilities();
+    expect(get(stores.capabilities)?.active_kernel).toBe('xray');
+
+    apiFetchJSON.mockResolvedValue(conflictCaps());
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('conflict');
+    expect(get(stores.runningKernels)).toEqual(['xray', 'mihomo']);
+
+    apiFetchJSON.mockResolvedValue(caps('mihomo'));
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('mihomo');
+    expect(get(stores.activeKernelName)).toBe('mihomo');
+  });
+
+  it('none вне окна перезапуска виден как none и забывает прежнее ядро', async () => {
+    const { stores } = await load();
+    const { activateRestartGrace } = await import('./lib/serviceGrace');
+    apiFetchJSON.mockResolvedValue(caps('xray'));
+    await stores.fetchCapabilities();
+
+    apiFetchJSON.mockResolvedValue(restartingNone());
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('none');
+    expect(get(stores.isNone)).toBe(true);
+
+    // Следующий none уже в окне перезапуска: прежнее ядро забыто и не подставляется
+    activateRestartGrace(60_000);
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('none');
+  });
+
+  it('конфликт, затем none вне окна перезапуска: none, а не прежнее ядро', async () => {
+    const { stores } = await load();
+    apiFetchJSON.mockResolvedValue(caps('xray'));
+    await stores.fetchCapabilities();
+    apiFetchJSON.mockResolvedValue(conflictCaps());
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('conflict');
+    expect(get(stores.conflictVisible)).toBe(true);
+
+    apiFetchJSON.mockResolvedValue(restartingNone());
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('none');
+  });
+
+  it('конфликт не маскируется последним значением и после none в окне не подменяется им', async () => {
+    const { stores } = await load();
+    const { activateRestartGrace } = await import('./lib/serviceGrace');
+    apiFetchJSON.mockResolvedValue(caps('xray'));
+    await stores.fetchCapabilities();
+    apiFetchJSON.mockResolvedValue(conflictCaps());
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('conflict');
+    // none после конфликта в окне: последнее валидное — xray (конфликт его не затёр и не стал им)
+    activateRestartGrace(60_000);
+    apiFetchJSON.mockResolvedValue(restartingNone());
+    await stores.fetchCapabilities();
+    expect(get(stores.capabilities)?.active_kernel).toBe('xray');
+  });
+
+  it('при isKernelChecking конфликт не маскируется текущим ядром', async () => {
+    const { stores } = await load();
+    apiFetchJSON.mockResolvedValue(caps('xray'));
+    await stores.fetchCapabilities();
+
+    stores.isKernelChecking.set(true);
+    apiFetchJSON.mockResolvedValue(conflictCaps());
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('conflict');
+
+    // Обычная проверка: текущее значение сохраняется
+    apiFetchJSON.mockResolvedValue(caps('mihomo'));
+    await stores.fetchCapabilities();
+    expect(get(stores.activeKernelState)).toBe('mihomo');
+    apiFetchJSON.mockResolvedValue(caps('xray'));
+    await stores.fetchCapabilities();
+    expect(get(stores.capabilities)?.active_kernel).toBe('mihomo');
+  });
+
+  it('mihomoApiReady: api_reachable без конфликта true, в конфликте false', async () => {
+    const { stores } = await load();
+    apiFetchJSON.mockResolvedValue(caps('mihomo'));
+    await stores.fetchCapabilities();
+    expect(get(stores.mihomoApiReady)).toBe(true);
+
+    apiFetchJSON.mockResolvedValue(conflictCaps());
+    await stores.fetchCapabilities();
+    expect(get(stores.mihomoApiReady)).toBe(false);
+    // Индикатор доступности API остаётся по api_reachable
+    expect(get(stores.mihomoApiAvailable)).toBe(true);
+  });
+
+  it('конфликт не пишется в localStorage (navCaps)', async () => {
+    const { stores, setItem } = await load();
+    apiFetchJSON.mockResolvedValue(conflictCaps());
+    await stores.fetchCapabilities();
+    expect(setItem.mock.calls.filter((c) => c[0] === 'xcp_nav_caps')).toHaveLength(0);
+    expect(get(stores.navCaps)?.active_kernel).not.toBe('both');
+
+    // Даже если сервер прислал флаг при active_kernel xray
+    apiFetchJSON.mockResolvedValue(caps('xray', { kernel_conflict: true }));
+    await stores.fetchCapabilities();
+    expect(setItem.mock.calls.filter((c) => c[0] === 'xcp_nav_caps')).toHaveLength(0);
+  });
+
+  it('conflictVisible: конфликт виден, пока нет окна перезапуска', async () => {
+    const { stores } = await load();
+    const grace = await import('./lib/serviceGrace');
+    apiFetchJSON.mockResolvedValue(conflictCaps());
+    await stores.fetchCapabilities();
+    expect(get(stores.conflictVisible)).toBe(true);
+
+    grace.isServiceRestarting.set(true);
+    expect(get(stores.conflictVisible)).toBe(false);
+    grace.isServiceRestarting.set(false);
+  });
+});
