@@ -4,7 +4,9 @@ import {
   adaptDnsServers,
   adaptGeoValues,
   adaptPresetRules,
-  geoAvailability
+  geoAvailability,
+  pickZkeenGeositeFile,
+  hasZkeenTags
 } from './geodata';
 
 describe('geodata: ссылки пресетов под установленные базы', () => {
@@ -62,5 +64,42 @@ describe('geodata: ссылки пресетов под установленны
       port: 53,
       domains: ['ext:geosite_v2fly.dat:tld-ru']
     });
+  });
+});
+
+// Запись B25 этапа 10: база zkeen определяется по реальному файлу из списка баз.
+describe('pickZkeenGeositeFile', () => {
+  it('предпочитает geosite_zkeen.dat', () => {
+    expect(
+      pickZkeenGeositeFile([
+        { name: 'geosite.dat', exists: true },
+        { name: 'geosite_zkeen.dat', exists: true }
+      ])
+    ).toBe('geosite_zkeen.dat');
+  });
+
+  it('при отсутствии zkeen-файла берёт стандартное имя', () => {
+    expect(pickZkeenGeositeFile([{ name: 'geosite.dat' }])).toBe('geosite.dat');
+  });
+
+  it('не выбирает файл, которого нет на диске, и чужие базы', () => {
+    expect(
+      pickZkeenGeositeFile([
+        { name: 'geosite_zkeen.dat', exists: false },
+        { name: 'geosite_v2fly.dat', exists: true }
+      ])
+    ).toBeNull();
+    expect(pickZkeenGeositeFile([])).toBeNull();
+  });
+});
+
+describe('hasZkeenTags', () => {
+  it('узнаёт базу zkeen по тегам domains, other, politic без учёта регистра', () => {
+    expect(hasZkeenTags([{ tag: 'DOMAINS' }, { tag: 'other' }, { tag: 'Politic' }])).toBe(true);
+  });
+
+  it('не принимает базу без одного из тегов', () => {
+    expect(hasZkeenTags([{ tag: 'domains' }, { tag: 'other' }])).toBe(false);
+    expect(hasZkeenTags([])).toBe(false);
   });
 });

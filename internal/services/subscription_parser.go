@@ -340,6 +340,29 @@ func parseClashYAMLToXray(content string, sub *Subscription) ([]Outbound, []Skip
 	return outbounds, skipReasons, nil
 }
 
+// httpTransportSettings собирает настройки транспорта http и httpupgrade Xray и
+// возвращает ключ streamSettings. У http (h2) host — массив строк, у httpupgrade
+// — одна строка: массив в httpupgradeSettings.host Xray отвергает вместе со
+// всей конфигурацией.
+func httpTransportSettings(network, host, path string) (string, map[string]interface{}) {
+	settings := map[string]interface{}{}
+	key := "httpSettings"
+	if host != "" {
+		if network == "httpupgrade" {
+			settings["host"] = host
+		} else {
+			settings["host"] = []string{host}
+		}
+	}
+	if path != "" {
+		settings["path"] = path
+	}
+	if network == "httpupgrade" {
+		key = "httpupgradeSettings"
+	}
+	return key, settings
+}
+
 func convertSubscriptionNodeToOutbound(node *SubscriptionNode) *Outbound {
 	protocol := node.Protocol
 	if protocol == "ss" {
@@ -394,15 +417,8 @@ func convertSubscriptionNodeToOutbound(node *SubscriptionNode) *Outbound {
 			}
 		}
 	case "http", "httpupgrade":
-		h := map[string]interface{}{}
-		if node.ServerName != "" {
-			h["host"] = []string{node.ServerName}
-		}
-		if node.WSPath != "" {
-			h["path"] = node.WSPath
-		}
-		if len(h) > 0 {
-			streamSettings[network+"Settings"] = h
+		if key, h := httpTransportSettings(network, node.ServerName, node.WSPath); len(h) > 0 {
+			streamSettings[key] = h
 		}
 	}
 

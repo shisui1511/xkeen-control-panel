@@ -107,4 +107,45 @@ test.describe('System Logs Console test suite', () => {
     await resumeBtn.click();
     await expect(pauseBtn).toBeVisible();
   });
+  // Запись B15 этапа 10: полный лог скачивается через запрос, а ошибка сервера
+  // показывается уведомлением и не уводит со страницы на JSON ответа.
+  test('полный лог: ошибка 404 показывает уведомление и не уводит со страницы (B15)', async ({
+    page
+  }) => {
+    await page.route('**/api/logs/download', async (route) => {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: false, error: 'Log file does not exist' })
+      });
+    });
+    await page.goto('/#/logs');
+
+    const fullBtn = page.locator('.export-split button[aria-label]').first();
+    await expect(fullBtn).toBeVisible();
+    await fullBtn.click();
+
+    await expect(page.locator('.toast--error')).toBeVisible();
+    await expect(page).toHaveURL(/#\/logs/);
+    await expect(page.locator('.logs-toolbar')).toBeVisible();
+  });
+
+  test('полный лог: успешный ответ скачивается файлом с именем из заголовка (B15)', async ({
+    page
+  }) => {
+    await page.route('**/api/logs/download', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/plain; charset=utf-8',
+        headers: { 'Content-Disposition': 'attachment; filename=xcp_logs_full_test.txt' },
+        body: '===== /opt/var/log/xcp.log =====\nstarted\n'
+      });
+    });
+    await page.goto('/#/logs');
+
+    const fullBtn = page.locator('.export-split button[aria-label]').first();
+    await expect(fullBtn).toBeVisible();
+    const [download] = await Promise.all([page.waitForEvent('download'), fullBtn.click()]);
+    expect(download.suggestedFilename()).toBe('xcp_logs_full_test.txt');
+  });
 });

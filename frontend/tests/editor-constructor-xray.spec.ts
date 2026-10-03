@@ -667,4 +667,91 @@ test.describe('Xray Constructor integration test suite', () => {
     await page.locator('#outbound-address').fill('');
     await expect(page.locator('[data-testid="tls-ping-btn"]')).toBeDisabled();
   });
+  // -------------------------------------------------------------------------
+  // B29 (этап 10 аудита): введённые в форму исходящего значения попадают в узел
+  // -------------------------------------------------------------------------
+  test('форма исходящего: REALITY, WebSocket и сокет сохраняются в узле (B29)', async ({
+    page
+  }) => {
+    await openXrayConstructor(page);
+    await page
+      .locator(
+        '[data-testid="xray-section-tabs"] button:has-text("Outbounds"), [data-tab="outbounds"]'
+      )
+      .first()
+      .click();
+    await page.locator('button.add-btn:has-text("Добавить вручную")').first().click();
+
+    await page.locator('#outbound-tag').fill('b29-reality');
+    await page.locator('#outbound-address').fill('srv.example');
+    await page.locator('#outbound-uuid').fill('11111111-2222-3333-4444-555555555555');
+    await page.locator('#outbound-security').selectOption('reality');
+    await page.locator('#outbound-sni').fill('yahoo.com');
+    await page.locator('#outbound-pubkey').fill('PUBKEY-B29');
+    await page.locator('#outbound-shortid').fill('ab12cd');
+    await page.locator('#outbound-fingerprint').selectOption('firefox');
+    await page.locator('#outbound-network').selectOption('ws');
+    await page.locator('#outbound-path').fill('/b29-path');
+    await page.locator('.sockopt-summary').click();
+    await page.locator('#sockopt-mark').fill('255');
+    await page.locator('.modal-container button.btn-primary').click();
+
+    const card = page.locator('.outbounds-list .card', { hasText: 'b29-reality' });
+    await expect(card).toBeVisible();
+    await card.locator('button.btn-icon').first().click();
+
+    await expect(page.locator('#outbound-pubkey')).toHaveValue('PUBKEY-B29');
+    await expect(page.locator('#outbound-shortid')).toHaveValue('ab12cd');
+    await expect(page.locator('#outbound-fingerprint')).toHaveValue('firefox');
+    await expect(page.locator('#outbound-path')).toHaveValue('/b29-path');
+    await page.locator('.sockopt-summary').click();
+    await expect(page.locator('#sockopt-mark')).toHaveValue('255');
+  });
+
+  test('форма исходящего: Shadowsocks и WireGuard сохраняют введённые поля (B29)', async ({
+    page
+  }) => {
+    await openXrayConstructor(page);
+    await page
+      .locator(
+        '[data-testid="xray-section-tabs"] button:has-text("Outbounds"), [data-tab="outbounds"]'
+      )
+      .first()
+      .click();
+    const addBtn = page.locator('button.add-btn:has-text("Добавить вручную")').first();
+    const saveBtn = page.locator('.modal-container button.btn-primary');
+
+    await addBtn.click();
+    await page.locator('#outbound-protocol').selectOption('shadowsocks');
+    await page.locator('#outbound-tag').fill('b29-ss');
+    await page.locator('#outbound-ss-address').fill('ss.example');
+    await page.locator('#outbound-ss-cipher').selectOption('aes-256-gcm');
+    await page.locator('#outbound-ss-password').fill('ss-pass-b29');
+    await saveBtn.click();
+
+    await addBtn.click();
+    await page.locator('#outbound-protocol').selectOption('wireguard');
+    await page.locator('#outbound-tag').fill('b29-wg');
+    await page.locator('#outbound-wg-endpoint').fill('wg.example:51821');
+    await page.locator('#outbound-wg-secret-key').fill('a'.repeat(44));
+    await page.locator('#outbound-wg-public-key').fill('PEER-PUB-B29');
+    await page.locator('#outbound-wg-psk').fill('PSK-B29');
+    await saveBtn.click();
+
+    await page
+      .locator('.outbounds-list .card', { hasText: 'b29-ss' })
+      .locator('button.btn-icon')
+      .first()
+      .click();
+    await expect(page.locator('#outbound-ss-cipher')).toHaveValue('aes-256-gcm');
+    await expect(page.locator('#outbound-ss-password')).toHaveValue('ss-pass-b29');
+    await page.locator('.modal-container button.btn-secondary').click();
+
+    const wgCard = page.locator('.outbounds-list .card', { hasText: 'b29-wg' });
+    await expect(wgCard).toContainText('wg.example:51821');
+    await wgCard.locator('button.btn-icon').first().click();
+    await expect(page.locator('#outbound-wg-endpoint')).toHaveValue('wg.example:51821');
+    await expect(page.locator('#outbound-wg-public-key')).toHaveValue('PEER-PUB-B29');
+    await expect(page.locator('#outbound-wg-psk')).toHaveValue('PSK-B29');
+  });
 });

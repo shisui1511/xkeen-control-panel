@@ -1762,6 +1762,7 @@
   "logs.copied": "Строка скопирована",
   "logs.export_filtered": "Экспорт текущего вида",
   "logs.export_full": "Скачать полный лог",
+  "logs.export_full_failed": "Не удалось скачать полный лог: файлов логов нет или они недоступны",
   "logs.paused_notice": "Поток на паузе (новых строк: +{count})",
   "logs.scroll_to_bottom": "В конец",
   "logs.disconnect": "Отключить",

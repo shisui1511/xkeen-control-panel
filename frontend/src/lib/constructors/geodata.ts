@@ -120,3 +120,22 @@ export function adaptDnsServers<S>(servers: S[], avail: GeoAvailability): S[] {
   }
   return out;
 }
+
+/** Файлы геобазы zkeen в порядке предпочтения: свой файл XKeen, затем стандартное имя. */
+export const ZKEEN_GEOSITE_FILES = ['geosite_zkeen.dat', 'geosite.dat'];
+
+/**
+ * pickZkeenGeositeFile — установленный файл базы zkeen из списка /api/dat/list.
+ * Файлы, которых нет на диске (`exists === false`), не считаются; нет подходящего
+ * — null, и теги не запрашиваются.
+ */
+export function pickZkeenGeositeFile(files: { name: string; exists?: boolean }[]): string | null {
+  const present = new Set(files.filter((f) => f && f.exists !== false).map((f) => f.name));
+  return ZKEEN_GEOSITE_FILES.find((name) => present.has(name)) ?? null;
+}
+
+/** Набор тегов, по которому узнаётся база zkeen. */
+export function hasZkeenTags(tags: { tag: string }[]): boolean {
+  const names = new Set(tags.map((t) => String(t.tag).toLowerCase()));
+  return names.has('domains') && names.has('other') && names.has('politic');
+}

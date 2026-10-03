@@ -142,12 +142,7 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Стандартные логи ядер добавляются всегда: файл (и даже его каталог)
 	// может появиться уже после подключения — например, mihomo.log после
 	// переключения Xray → Mihomo
-	for _, df := range []string{
-		"/opt/var/log/xray/access.log",
-		"/opt/var/log/xray/error.log",
-		"/opt/var/log/xkeen-detached.log",
-		"/opt/var/log/mihomo.log",
-	} {
+	for _, df := range kernelLogFiles {
 		if !slices.Contains(sources, df) {
 			sources = append(sources, df)
 		}
@@ -394,38 +389,89 @@ func (a *API) LogsClear(w http.ResponseWriter, r *http.Request) {
 	a.jsonResponse(w, map[string]bool{"success": true})
 }
 
+// kernelLogFiles — стандартные логи ядер и XKeen: хвост WebSocket и полный
+// экспорт читают их всегда, даже когда файла в конфигурации нет.
+var kernelLogFiles = []string{
+	"/opt/var/log/xray/access.log",
+	"/opt/var/log/xray/error.log",
+	"/opt/var/log/xkeen-detached.log",
+	"/opt/var/log/mihomo.log",
+}
+
+// LogsDownload отдаёт полный лог одним текстовым файлом: все существующие
+// источники из конфигурации (xkeen.log, xcp.log, ...) и стандартные логи ядер,
+// каждый под строкой-заголовком с путём. Один log_path больше не обязан
+// существовать: на роутере xkeen.log часто нет, а остальные логи есть.
 func (a *API) LogsDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
-	if a.cfg.LogPath == "" {
+	configured := a.cfg.LogSources
+	if len(configured) == 0 && a.cfg.LogPath != "" {
+		configured = []string{a.cfg.LogPath}
+	}
+	if len(configured) == 0 {
 		a.errorResponse(w, "Log path is not configured", http.StatusBadRequest)
 		return
 	}
 
-	cleanPath, err := a.pathVal.Validate(a.cfg.LogPath)
-	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusForbidden)
-		return
+	var files []string
+	seen := map[string]bool{}
+	forbidden := false
+	add := func(src string, isConfigured bool) {
+		if src == "" {
+			return
+		}
+		cleanPath, err := a.pathVal.Validate(src)
+		if err != nil {
+			// Запрет по пути важен только для источников из конфигурации:
+			// стандартных логов ядер на этой машине может не быть вовсе.
+			if isConfigured {
+				forbidden = true
+			}
+			return
+		}
+		if seen[cleanPath] {
+			return
+		}
+		seen[cleanPath] = true
+		if st, err := os.Stat(cleanPath); err != nil || st.IsDir() {
+			return
+		}
+		files = append(files, cleanPath)
+	}
+	for _, src := range configured {
+		add(src, true)
+	}
+	for _, src := range kernelLogFiles {
+		add(src, false)
 	}
 
-	if _, err := os.Stat(cleanPath); os.IsNotExist(err) {
+	if len(files) == 0 {
+		if forbidden {
+			a.errorResponse(w, "Log path is not allowed", http.StatusForbidden)
+			return
+		}
 		a.errorResponse(w, "Log file does not exist", http.StatusNotFound)
 		return
 	}
 
-	f, err := os.Open(cleanPath)
-	if err != nil {
-		a.errorResponse(w, "Failed to read log file", http.StatusInternalServerError)
-		return
-	}
-	defer f.Close()
-
-	w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(cleanPath))
+	name := "xcp_logs_full_" + time.Now().Format("2006-01-02-15-04-05") + ".txt"
+	w.Header().Set("Content-Disposition", "attachment; filename="+name)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	redactedReader := services.NewRedactionReader(f)
-	_, _ = io.Copy(w, redactedReader)
+	for i, path := range files {
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		if i > 0 {
+			_, _ = io.WriteString(w, "\n")
+		}
+		_, _ = io.WriteString(w, "===== "+path+" =====\n")
+		_, _ = io.Copy(w, services.NewRedactionReader(f))
+		f.Close()
+	}
 }
 
 var validMihomoLogLevels = map[string]bool{

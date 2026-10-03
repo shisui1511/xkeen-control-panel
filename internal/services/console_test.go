@@ -78,3 +78,55 @@ func TestConsoleService_Execute_NonExistent(t *testing.T) {
 		t.Fatal("expected failure for non-existent binary")
 	}
 }
+
+// dangerousByCommand собирает флаг Dangerous по всем плиткам быстрых команд.
+func dangerousByCommand(svc *ConsoleService) map[string]bool {
+	out := map[string]bool{}
+	for _, cat := range svc.GetCommands() {
+		for _, c := range cat.Commands {
+			out[c.Command] = c.Dangerous
+		}
+	}
+	return out
+}
+
+// Запись B21 этапа 10: остановка прокси-клиента отключает LAN от прокси и
+// обязана идти через диалог подтверждения.
+func TestConsoleService_StopIsDangerous(t *testing.T) {
+	flags := dangerousByCommand(NewConsoleService("/bin/true"))
+	dangerous, ok := flags["-stop"]
+	if !ok {
+		t.Fatal("команда -stop отсутствует в списке")
+	}
+	if !dangerous {
+		t.Error("-stop должна быть помечена Dangerous: остановка выполняется без подтверждения")
+	}
+}
+
+// Запись G6 этапа 10: команды, меняющие состояние роутера (протокол IPv6,
+// перенаправление DNS, установка и обновление бинарников, смена канала),
+// выполняются только после подтверждения.
+func TestConsoleService_StateChangingCommandsAreDangerous(t *testing.T) {
+	flags := dangerousByCommand(NewConsoleService("/bin/true"))
+	for _, cmd := range []string{"-ipv6", "-dns", "-uk", "-ug", "-ux", "-um", "-channel"} {
+		dangerous, ok := flags[cmd]
+		if !ok {
+			t.Errorf("команда %s отсутствует в списке", cmd)
+			continue
+		}
+		if !dangerous {
+			t.Errorf("%s должна быть помечена Dangerous", cmd)
+		}
+	}
+}
+
+// Информационные команды подтверждения не требуют: диалог на каждый просмотр
+// версии или статуса приучил бы подтверждать не читая.
+func TestConsoleService_InfoCommandsNotDangerous(t *testing.T) {
+	flags := dangerousByCommand(NewConsoleService("/bin/true"))
+	for _, cmd := range []string{"-status", "-v", "-h", "-about", "-cp", "-cpe", "-diag"} {
+		if flags[cmd] {
+			t.Errorf("%s не должна быть помечена Dangerous", cmd)
+		}
+	}
+}

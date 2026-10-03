@@ -1730,6 +1730,22 @@
     padding-top: 0;
   }
 
+  /* Ряд «подпись + элементы управления» переносится на узком экране: поле выбора
+     файла с кнопкой и строки резервных копий не шире карточки */
+  .field-row:has(> .ctrl) {
+    flex-wrap: wrap;
+  }
+
+  .field-row > div:not(.ctrl) {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .field-row .ctrl {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
   .field-row-name {
     font-size: 14px;
     font-weight: 500;

@@ -38,6 +38,29 @@ var diagnosticCommands = map[string]diagCmd{
 	"__diag:nslookup": {binary: "nslookup", args: []string{"openai.com"}},
 }
 
+// kernelLifecycleCommands — команды xkeen, которые запускают, останавливают,
+// перезапускают или переключают ядро, меняют перехват DNS/IPv6/порты (скрипт
+// перезапускает прокси) либо заменяют бинарники ядер. Они не должны идти
+// параллельно с операциями жизненного цикла ядра из «Сервисов».
+var kernelLifecycleCommands = map[string]bool{
+	"-start":   true,
+	"-stop":    true,
+	"-restart": true,
+	"-xray":    true,
+	"-mihomo":  true,
+	"-dns":     true,
+	"-ipv6":    true,
+	"-tp":      true,
+	"-ux":      true,
+	"-um":      true,
+}
+
+// IsKernelLifecycleCommand сообщает, что команда меняет состояние ядер и
+// выполняется под общим замком жизненного цикла.
+func IsKernelLifecycleCommand(command string) bool {
+	return kernelLifecycleCommands[command]
+}
+
 // CommandResult represents the result of a command execution
 type CommandResult struct {
 	Success bool   `json:"success"`
@@ -64,7 +87,7 @@ func (s *ConsoleService) GetCommands() []CommandCategory {
 			Name: "service",
 			Commands: []CommandDef{
 				{Name: "Start", Description: "Запуск прокси-клиента", Command: "-start"},
-				{Name: "Stop", Description: "Остановка прокси-клиента", Command: "-stop"},
+				{Name: "Stop", Description: "Остановка прокси-клиента", Command: "-stop", Dangerous: true},
 				{Name: "Restart", Description: "Перезапуск прокси-клиента", Command: "-restart"},
 				{Name: "Status", Description: "Статус работы", Command: "-status"},
 				{Name: "Toggle Auto", Description: "Вкл/Выкл автозапуск", Command: "-auto"},
@@ -76,11 +99,11 @@ func (s *ConsoleService) GetCommands() []CommandCategory {
 		{
 			Name: "update",
 			Commands: []CommandDef{
-				{Name: "Update XKeen", Description: "Обновление XKeen", Command: "-uk"},
-				{Name: "Update Geo", Description: "Обновление GeoFile/GeoIPSET", Command: "-ug"},
-				{Name: "Update Xray", Description: "Обновление Xray", Command: "-ux"},
-				{Name: "Update Mihomo", Description: "Обновление Mihomo", Command: "-um"},
-				{Name: "Channel", Description: "Переключить канал (Stable/Dev)", Command: "-channel"},
+				{Name: "Update XKeen", Description: "Обновление XKeen", Command: "-uk", Dangerous: true},
+				{Name: "Update Geo", Description: "Обновление GeoFile/GeoIPSET", Command: "-ug", Dangerous: true},
+				{Name: "Update Xray", Description: "Обновление Xray", Command: "-ux", Dangerous: true},
+				{Name: "Update Mihomo", Description: "Обновление Mihomo", Command: "-um", Dangerous: true},
+				{Name: "Channel", Description: "Переключить канал (Stable/Dev)", Command: "-channel", Dangerous: true},
 			},
 		},
 		{
@@ -98,8 +121,8 @@ func (s *ConsoleService) GetCommands() []CommandCategory {
 			Name: "network",
 			Commands: []CommandDef{
 				{Name: "Ports & Gateway", Description: "Порты, шлюз и протокол", Command: "-tp"},
-				{Name: "Toggle IPv6", Description: "Вкл/Выкл протокол IPv6", Command: "-ipv6"},
-				{Name: "Toggle DNS", Description: "Вкл/Выкл перенаправление DNS", Command: "-dns"},
+				{Name: "Toggle IPv6", Description: "Вкл/Выкл протокол IPv6", Command: "-ipv6", Dangerous: true},
+				{Name: "Toggle DNS", Description: "Вкл/Выкл перенаправление DNS", Command: "-dns", Dangerous: true},
 				{Name: "View Ports", Description: "Посмотреть проксируемые порты", Command: "-cp"},
 				{Name: "View Excl. Ports", Description: "Посмотреть исключенные порты", Command: "-cpe"},
 			},

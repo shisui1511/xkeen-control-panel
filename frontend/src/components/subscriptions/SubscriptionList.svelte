@@ -805,7 +805,8 @@
 <style>
   .subscriptions-list {
     display: grid;
-    grid-template-columns: 1fr;
+    /* minmax(0, 1fr): иначе колонка растёт до min-content самой широкой строки карточки */
+    grid-template-columns: minmax(0, 1fr);
     gap: 14px;
   }
 
@@ -815,6 +816,7 @@
     flex-direction: column;
     gap: 12px;
     position: relative;
+    min-width: 0;
   }
 
   /* Хедер карточки */
@@ -1026,7 +1028,9 @@
   .sub-meta-left {
     display: flex;
     align-items: center;
-    gap: 6px;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    min-width: 0;
   }
 
   .meta-divider {
@@ -1334,10 +1338,19 @@
       flex-wrap: wrap;
       gap: 8px;
     }
+    /* Всплывающее объявление привязано к строке кнопок на всю её ширину: от кнопки
+       «Объявление» оно уходило за правый край окна и растягивало страницу */
+    .sub-actions-row {
+      position: relative;
+    }
+    .announcement-wrapper {
+      position: static;
+    }
     .announcement-popover {
-      width: calc(100vw - 64px);
-      max-width: 340px;
-      left: -20px;
+      left: 0;
+      right: 0;
+      width: auto;
+      max-width: none;
     }
     .announcement-popover::before {
       left: 50px;
