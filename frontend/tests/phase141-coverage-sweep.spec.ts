@@ -368,6 +368,23 @@ for (const theme of THEMES) {
 }
 
 // ============================================================
+// Конструктор: хлебные крошки переносятся и не выступают за окно (B24)
+// ============================================================
+
+for (const theme of THEMES) {
+  for (const kernel of ['mihomo', 'xray'] as const) {
+    test(`конструктор ${kernel}: крошки в окне на 390px, ${theme} (B24)`, async ({ page }) => {
+      await prepare(page, theme, 390, kernel);
+      await page.goto('/#/constructor');
+      await expect(page.locator('.breadcrumb-current').first()).toBeVisible();
+      await expectCleanPage(page, theme);
+      const box = await page.locator('.breadcrumb-current').first().boundingBox();
+      expect(box!.x + box!.width).toBeLessThanOrEqual(391);
+    });
+  }
+}
+
+// ============================================================
 // Настройки → Резервные копии: строки выбора файла и копий не шире карточки (B16)
 // ============================================================
 

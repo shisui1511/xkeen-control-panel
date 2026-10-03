@@ -1483,7 +1483,9 @@ body.drawer-locked {
 .breadcrumbs {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  /* Крошки переносятся на новую строку, а не выступают за окно на 390 px */
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
   margin-bottom: 0.75rem;
   font-size: 12px;
   letter-spacing: 0.06em;
