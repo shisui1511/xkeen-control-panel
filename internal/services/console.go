@@ -64,7 +64,7 @@ func (s *ConsoleService) GetCommands() []CommandCategory {
 			Name: "service",
 			Commands: []CommandDef{
 				{Name: "Start", Description: "Запуск прокси-клиента", Command: "-start"},
-				{Name: "Stop", Description: "Остановка прокси-клиента", Command: "-stop"},
+				{Name: "Stop", Description: "Остановка прокси-клиента", Command: "-stop", Dangerous: true},
 				{Name: "Restart", Description: "Перезапуск прокси-клиента", Command: "-restart"},
 				{Name: "Status", Description: "Статус работы", Command: "-status"},
 				{Name: "Toggle Auto", Description: "Вкл/Выкл автозапуск", Command: "-auto"},

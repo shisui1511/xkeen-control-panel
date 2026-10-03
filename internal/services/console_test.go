@@ -78,3 +78,27 @@ func TestConsoleService_Execute_NonExistent(t *testing.T) {
 		t.Fatal("expected failure for non-existent binary")
 	}
 }
+
+// dangerousByCommand собирает флаг Dangerous по всем плиткам быстрых команд.
+func dangerousByCommand(svc *ConsoleService) map[string]bool {
+	out := map[string]bool{}
+	for _, cat := range svc.GetCommands() {
+		for _, c := range cat.Commands {
+			out[c.Command] = c.Dangerous
+		}
+	}
+	return out
+}
+
+// Запись B21 этапа 10: остановка прокси-клиента отключает LAN от прокси и
+// обязана идти через диалог подтверждения.
+func TestConsoleService_StopIsDangerous(t *testing.T) {
+	flags := dangerousByCommand(NewConsoleService("/bin/true"))
+	dangerous, ok := flags["-stop"]
+	if !ok {
+		t.Fatal("команда -stop отсутствует в списке")
+	}
+	if !dangerous {
+		t.Error("-stop должна быть помечена Dangerous: остановка выполняется без подтверждения")
+	}
+}
