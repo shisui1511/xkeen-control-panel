@@ -102,3 +102,31 @@ func TestConsoleService_StopIsDangerous(t *testing.T) {
 		t.Error("-stop должна быть помечена Dangerous: остановка выполняется без подтверждения")
 	}
 }
+
+// Запись G6 этапа 10: команды, меняющие состояние роутера (протокол IPv6,
+// перенаправление DNS, установка и обновление бинарников, смена канала),
+// выполняются только после подтверждения.
+func TestConsoleService_StateChangingCommandsAreDangerous(t *testing.T) {
+	flags := dangerousByCommand(NewConsoleService("/bin/true"))
+	for _, cmd := range []string{"-ipv6", "-dns", "-uk", "-ug", "-ux", "-um", "-channel"} {
+		dangerous, ok := flags[cmd]
+		if !ok {
+			t.Errorf("команда %s отсутствует в списке", cmd)
+			continue
+		}
+		if !dangerous {
+			t.Errorf("%s должна быть помечена Dangerous", cmd)
+		}
+	}
+}
+
+// Информационные команды подтверждения не требуют: диалог на каждый просмотр
+// версии или статуса приучил бы подтверждать не читая.
+func TestConsoleService_InfoCommandsNotDangerous(t *testing.T) {
+	flags := dangerousByCommand(NewConsoleService("/bin/true"))
+	for _, cmd := range []string{"-status", "-v", "-h", "-about", "-cp", "-cpe", "-diag"} {
+		if flags[cmd] {
+			t.Errorf("%s не должна быть помечена Dangerous", cmd)
+		}
+	}
+}
