@@ -249,3 +249,75 @@ for (const theme of THEMES) {
     }
   }
 }
+
+// ============================================================
+// Прокси и Правила не обращаются к Mihomo, пока его API не отвечает:
+// при недоступном API, активном Xray и остановленном ядре (B19, B35).
+// Лишний запрос даёт 409/502 и ошибку в консоли браузера.
+// ============================================================
+
+type ApiState = 'api-down' | 'xray' | 'stopped' | 'up';
+
+async function setupApiState(page: Page, state: ApiState) {
+  await prepare(page, 'light', 1440, state === 'xray' ? 'xray' : 'mihomo');
+  if (state === 'api-down' || state === 'stopped') {
+    const stopped = state === 'stopped';
+    await page.route('**/api/capabilities', async (r) => {
+      await r.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            kernels: {
+              xray: { installed: true, version: '1.8.4', channel: 'stable' },
+              mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
+            },
+            active_kernel: stopped ? 'none' : 'mihomo',
+            kernel_conflict: false,
+            running_kernels: stopped ? [] : ['mihomo'],
+            mihomo: {
+              reachable: false,
+              process_running: !stopped,
+              api_reachable: false,
+              api_authenticated: false
+            }
+          }
+        })
+      });
+    });
+  }
+}
+
+for (const state of ['api-down', 'xray', 'stopped'] as const) {
+  for (const route of ['proxies', 'rules']) {
+    test(`${route}: без запросов к Mihomo при состоянии ${state} (B19, B35)`, async ({ page }) => {
+      await setupApiState(page, state);
+      const mihomoRequests: string[] = [];
+      page.on('request', (req) => {
+        if (req.url().includes('/api/mihomo/proxy/')) mihomoRequests.push(req.url());
+      });
+      const { errors } = attachConsoleCollectors(page);
+      await page.goto(`/#/${route}`);
+      await expect(page.locator('h1').first()).toBeVisible();
+      await page.waitForTimeout(2500);
+
+      expect(mihomoRequests, `запросы к API Mihomo: ${mihomoRequests.join(', ')}`).toEqual([]);
+      expect(errors, `ошибки консоли: ${JSON.stringify(errors)}`).toHaveLength(0);
+    });
+  }
+}
+
+for (const route of ['proxies', 'rules']) {
+  test(`${route}: при работающем API запросы к Mihomo идут (B19, B35: гейт открывается)`, async ({
+    page
+  }) => {
+    await setupApiState(page, 'up');
+    const mihomoRequests: string[] = [];
+    page.on('request', (req) => {
+      if (req.url().includes('/api/mihomo/proxy/')) mihomoRequests.push(req.url());
+    });
+    await page.goto(`/#/${route}`);
+    await expect.poll(() => mihomoRequests.length, { timeout: 15000 }).toBeGreaterThan(0);
+  });
+}

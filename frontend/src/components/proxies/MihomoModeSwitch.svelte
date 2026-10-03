@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import { t } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
-  import { showConfirm, showToast } from '../../stores';
+  import { showConfirm, showToast, mihomoApiReady } from '../../stores';
   import SegmentedControl from '../SegmentedControl.svelte';
 
   type Mode = 'rule' | 'global' | 'direct';
@@ -74,10 +74,14 @@
     }
   }
 
-  onMount(load);
+  // Режим читается, только когда API Mihomo отвечает: при Xray, остановленном ядре
+  // или недоступном API запрос давал 409/502 и ошибку в консоли браузера.
+  $effect(() => {
+    if ($mihomoApiReady) untrack(load);
+  });
 </script>
 
-{#if applied}
+{#if applied && $mihomoApiReady}
   <div class="mode-switch" class:is-busy={busy} title={$t('proxies.mode.hint')}>
     <SegmentedControl
       {items}

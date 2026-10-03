@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { t } from './i18n';
-  import { showToast } from './stores';
+  import { showToast, mihomoApiReady } from './stores';
   import {
     apiFetch,
     fetchCustomRules,
@@ -231,8 +231,17 @@
 
   onMount(() => {
     loadCustomRules();
-    loadProviders();
-    loadKernelRules().then(() => loadProxyGroups());
+  });
+
+  // Данные ядра (правила, провайдеры, группы) читаются, когда API Mihomo отвечает:
+  // при Xray, остановленном ядре или недоступном API запросы давали 409/502 и
+  // ошибки в консоли браузера. Возврат API в строй перечитывает данные.
+  $effect(() => {
+    if (!$mihomoApiReady) return;
+    untrack(() => {
+      loadProviders();
+      loadKernelRules().then(() => loadProxyGroups());
+    });
   });
 </script>
 
