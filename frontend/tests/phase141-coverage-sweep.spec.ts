@@ -117,3 +117,50 @@ for (const theme of THEMES) {
     });
   }
 }
+
+// ============================================================
+// Вкладки Настроек (режим Mihomo) и режим Xray
+// ============================================================
+
+const SETTINGS_TABS = ['general', 'updates', 'security', 'connection', 'backups', 'about'] as const;
+
+for (const theme of THEMES) {
+  for (const width of WIDTHS) {
+    test.describe(`настройки: ${theme} ${width}px`, () => {
+      for (const tab of SETTINGS_TABS) {
+        test(`вкладка ${tab}: ${theme} ${width}px`, async ({ page }) => {
+          // B16: вкладка «Резервные копии» на 390 px шире окна (воспроизводится и на роутере)
+          test.fail(
+            tab === 'backups' && width === 390,
+            'B16: переполнение вкладки backups на 390 px'
+          );
+          await prepare(page, theme, width);
+          const { errors } = attachConsoleCollectors(page);
+          await page.goto(`/#/settings?tab=${tab}`);
+          await expectCleanPage(page, theme);
+          expect(errors, `ошибки консоли: ${JSON.stringify(errors)}`).toHaveLength(0);
+        });
+      }
+    });
+
+    test.describe(`режим Xray: ${theme} ${width}px`, () => {
+      test(`быстрые команды в режиме Xray: ${theme} ${width}px`, async ({ page }) => {
+        await prepare(page, theme, width, 'xray');
+        const { errors } = attachConsoleCollectors(page);
+        await page.goto('/#/console');
+        await page.getByRole('tab', { name: 'Быстрые команды' }).click();
+        await expect(page.locator('.cmd-tile').first()).toBeVisible();
+        await expectCleanPage(page, theme);
+        expect(errors, `ошибки консоли: ${JSON.stringify(errors)}`).toHaveLength(0);
+      });
+
+      test(`настройки, подключение в режиме Xray: ${theme} ${width}px`, async ({ page }) => {
+        await prepare(page, theme, width, 'xray');
+        const { errors } = attachConsoleCollectors(page);
+        await page.goto('/#/settings?tab=connection');
+        await expectCleanPage(page, theme);
+        expect(errors, `ошибки консоли: ${JSON.stringify(errors)}`).toHaveLength(0);
+      });
+    });
+  }
+}
