@@ -129,11 +129,6 @@ for (const theme of THEMES) {
     test.describe(`настройки: ${theme} ${width}px`, () => {
       for (const tab of SETTINGS_TABS) {
         test(`вкладка ${tab}: ${theme} ${width}px`, async ({ page }) => {
-          // B16: вкладка «Резервные копии» на 390 px шире окна (воспроизводится и на роутере)
-          test.fail(
-            tab === 'backups' && width === 390,
-            'B16: переполнение вкладки backups на 390 px'
-          );
           await prepare(page, theme, width);
           const { errors } = attachConsoleCollectors(page);
           await page.goto(`/#/settings?tab=${tab}`);
@@ -368,6 +363,40 @@ for (const theme of THEMES) {
       await expectCleanPage(page, theme);
       const card = await page.locator('.sub-card').first().boundingBox();
       expect(card!.x + card!.width).toBeLessThanOrEqual(width + 1);
+    });
+  }
+}
+
+// ============================================================
+// Настройки → Резервные копии: строки выбора файла и копий не шире карточки (B16)
+// ============================================================
+
+for (const theme of THEMES) {
+  for (const width of WIDTHS) {
+    test(`резервные копии со списком копий: ${theme} ${width}px (B16)`, async ({ page }) => {
+      await prepare(page, theme, width);
+      await page.route('**/api/config/backups**', async (r) => {
+        await r.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            '/opt/etc/xcp/backups/config.json.backup-20261003-200909-with-a-rather-long-name'
+          ])
+        });
+      });
+      await page.goto('/#/settings?tab=backups');
+      await expect(page.locator('.field-row .ctrl').first()).toBeVisible();
+      await expectCleanPage(page, theme);
+      for (const sel of ['.field-row .ctrl', '.field-row .ctrl .btn']) {
+        for (const box of await page.locator(sel).evaluateAll((els) =>
+          els.map((e) => {
+            const r = e.getBoundingClientRect();
+            return { right: r.right, width: r.width };
+          })
+        )) {
+          if (box.width > 0) expect(box.right).toBeLessThanOrEqual(width + 1);
+        }
+      }
     });
   }
 }
