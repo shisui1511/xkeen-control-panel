@@ -260,11 +260,20 @@
 
     .chip-toggle {
       padding: 3px 6px;
+      min-width: 24px;
+      min-height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
     }
 
     .backups-toggle-btn {
       margin-left: 0;
       padding: 2px 6px;
+      min-width: 24px;
+      min-height: 24px;
+      box-sizing: border-box;
     }
 
     .status-apply-indicator {
