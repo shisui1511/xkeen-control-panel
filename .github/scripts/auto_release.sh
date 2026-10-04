@@ -6,8 +6,9 @@
 #                              "rc vX.Y.Z-rc.N"     — есть feat или ломающие изменения
 #                              "none <причина>"     — выпускать нечего
 #   auto_release.sh promote  какой RC пора сделать стабильным:
-#                              "stable vX.Y.Z vX.Y.Z-rc.N" — RC провисел в beta SOAK_HOURS, и после
-#                                                          него в main нет новых feat/fix
+#                              "stable vX.Y.Z vX.Y.Z-rc.N" — RC провисел в beta SOAK_HOURS (или выдержка
+#                                                          отменена для его версии, см. SOAK_WAIVED),
+#                                                          и после него в main нет новых feat/fix
 #                              "none <причина>"
 #   auto_release.sh heal     свежие (7 дней) теги релизов без опубликованного релиза:
 #                              "delete vX.Y.Z-rc.N" — RC вытеснен более новым тегом
@@ -23,6 +24,10 @@
 #
 # Окружение:
 #   SOAK_HOURS  сколько часов RC должен провисеть без замены (по умолчанию 24)
+#   SOAK_WAIVED версии vX.Y.Z (через пробел), для которых выдержка RC отменена: закрытая
+#               GitHub-веха vX.Y.Z (её закрывает хук после milestone.complete) или ручной
+#               запуск с promote_base. Остальные условия продвижения не отменяются.
+#   PROMOTE_BASE версия vX.Y.Z из ручного запуска auto-release.yml (promote_base)
 #   NOW         текущее время, unix (для тестов)
 #   DRY_RUN=1   run только печатает решения
 #   RUN_SHA     коммит, чей CI завершился (workflow_run); пусто — берётся main
@@ -135,6 +140,11 @@ plan() {
   esac
 }
 
+# Выдержка RC версии $1 отменена (SOAK_WAIVED — список vX.Y.Z через пробел)
+soak_waived() {
+  tr ' ' '\n' <<<"${SOAK_WAIVED:-}" | grep -qxF -- "$1"
+}
+
 promote() {
   local rc base age need
   rc=$(latest_rc)
@@ -149,6 +159,10 @@ promote() {
   fi
   if release_worthy "$rc..HEAD"; then
     echo "none $rc не продвигается в stable: после него есть новые изменения, будет новый RC"
+    return
+  fi
+  if soak_waived "$base"; then
+    echo "stable $base $rc"
     return
   fi
   age=$((NOW - $(tag_time "$rc")))
@@ -182,6 +196,22 @@ ci_state() {
     return 1
   fi
   return 0
+}
+
+# Версии, для которых выдержка RC отменена: закрытая GitHub-веха vX.Y.Z или ручной
+# запуск с promote_base. Отмена действует, только если RC этой версии уже опубликован
+# как релиз (не draft); так закрытая веха не выпустит stable из недособранного RC.
+waived_bases() {
+  local candidates title rc
+  candidates=$(gh api "repos/{owner}/{repo}/milestones?state=closed&per_page=100" --jq '.[].title' 2>/dev/null || true)
+  candidates="$candidates"$'\n'"${PROMOTE_BASE:-}"
+  for title in $(grep -E "$STABLE_RE" <<<"$candidates" | sort -u || true); do
+    rc=$(latest_rc "$title")
+    [ -n "$rc" ] || continue
+    if [ "$(gh release view "$rc" --json isDraft --jq .isDraft 2>/dev/null || true)" = false ]; then
+      echo "$title"
+    fi
+  done
 }
 
 # Ставит тег (если его нет) и запускает сборку. Идемпотентно: при опубликованном релизе
@@ -255,6 +285,9 @@ run() {
 
   # «Нечего продвигать» — штатный ответ почти каждого запуска; в журнал он идёт
   # только вместе с итоговым решением, а не в каждом из промежуточных прогонов
+  SOAK_WAIVED=$(waived_bases | tr '\n' ' ')
+  export SOAK_WAIVED
+  [ -z "${SOAK_WAIVED// /}" ] || log "выдержка RC отменена для: $SOAK_WAIVED"
   decision=$(promote)
   read -r kind tag rc <<<"$decision"
   if [ "$kind" = stable ]; then
