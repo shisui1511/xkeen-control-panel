@@ -214,6 +214,21 @@ waived_bases() {
   done
 }
 
+# Коммит для тега stable. Обычно это коммит RC (те же байты, что выдержал RC). GitHub не даёт
+# токену Actions создать тег на коммите, чьи workflow-файлы отличаются от main (нужен scope
+# workflows), поэтому при изменении .github/workflows после RC тег ставится на HEAD: после RC
+# там только chore/docs/test/ci (promote проверил, что feat/fix после него нет), бинарник
+# они не меняют.
+stable_sha() {
+  local sha
+  sha=$(git rev-list -n1 "$1")
+  if git diff --quiet "$sha" HEAD -- .github/workflows; then
+    echo "$sha"
+  else
+    git rev-parse HEAD
+  fi
+}
+
 # Ставит тег (если его нет) и запускает сборку. Идемпотентно: при опубликованном релизе
 # ничего не делает, при идущей сборке ждёт, после двух упавших сборок сдаётся.
 publish() {
@@ -292,7 +307,7 @@ run() {
   read -r kind tag rc <<<"$decision"
   if [ "$kind" = stable ]; then
     log "promote: $decision"
-    publish "$tag" "$(git rev-list -n1 "$rc")"
+    publish "$tag" "$(stable_sha "$rc")"
   fi
 
   main_sha=$(git rev-parse HEAD)
@@ -326,6 +341,7 @@ case "${1:-}" in
   plan) plan ;;
   promote) promote ;;
   heal) heal ;;
+  stable-sha) stable_sha "${2:?нужен тег RC}" ;;
   run) run ;;
   *)
     sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
