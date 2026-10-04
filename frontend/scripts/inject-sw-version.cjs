@@ -14,7 +14,11 @@ function injectVersion(source, version) {
 
 // The cache name follows the build version from scripts/version.sh (or
 // XCP_VERSION set by make/CI), so every build evicts caches of old assets.
-// package.json is only a fallback for trees without git.
+// Without git history (a shallow CI checkout, a source tarball) the version is
+// unknown: the placeholder below says so instead of posing as a real release.
+// Release builds always pass XCP_VERSION, so they never reach it.
+const UNKNOWN_VERSION = '0.0.0-nogit';
+
 function resolveVersion() {
   const fromEnv = (process.env.XCP_VERSION || '').trim();
   if (fromEnv) return fromEnv.replace(/^v/, '');
@@ -26,9 +30,12 @@ function resolveVersion() {
       .trim();
     if (out) return out.replace(/^v/, '');
   } catch {
-    // No git or no script (e.g. source tarball): fall back below.
+    // No git, no tags or no script: fall back below.
   }
-  return require('../package.json').version;
+  console.warn(
+    `⚠️ Версия сборки неизвестна (нет git-истории, XCP_VERSION не задан): ${UNKNOWN_VERSION}`
+  );
+  return UNKNOWN_VERSION;
 }
 
 function main() {

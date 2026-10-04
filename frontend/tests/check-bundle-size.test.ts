@@ -156,7 +156,7 @@ describe('Bundle Size Gate', () => {
     expect(violations.length).toBeGreaterThan(0);
   });
 
-  it('checkSwCacheVersioned returns a violation when the version does not match package.json', () => {
+  it('checkSwCacheVersioned returns a violation when the version does not match the build version', () => {
     const sw = "const CACHE_NAME = 'xcp-v0.20.0';";
     const violations = checkSwCacheVersioned(sw, '0.21.0');
     expect(violations.length).toBeGreaterThan(0);

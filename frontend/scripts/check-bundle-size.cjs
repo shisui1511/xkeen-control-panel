@@ -278,7 +278,7 @@ function main(argv) {
       failed = true;
     }
 
-    // Группа 5 (REQ-13): CACHE_NAME в dist/sw.js версионирован по package.json.
+    // Группа 5 (REQ-13): CACHE_NAME в dist/sw.js версионирован версией сборки (scripts/version.sh / XCP_VERSION).
     console.log('🔄 Проверка версии CACHE_NAME в dist/sw.js...');
     let swVersionOk = true;
     if (fs.existsSync(DIST_SW_PATH)) {
