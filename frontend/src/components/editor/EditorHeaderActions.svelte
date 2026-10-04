@@ -116,6 +116,8 @@
   .eph-right {
     display: inline-flex;
     align-items: center;
+    flex-wrap: wrap;
+    max-width: 100%;
     gap: 8px;
   }
 

@@ -104,6 +104,8 @@
     font-size: 12px;
     color: var(--fg-secondary);
     min-height: 30px;
+    flex-wrap: wrap;
+    gap: 4px 8px;
   }
 
   .sb-left {
@@ -116,6 +118,7 @@
     margin-left: auto;
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
   }
 
@@ -235,5 +238,24 @@
 
   .chevron-icon.rotated {
     transform: rotate(180deg);
+  }
+
+  @media (max-width: 768px) {
+    .editor-statusbar {
+      padding: 6px 10px;
+    }
+
+    .status-shortcut-tip {
+      display: none;
+    }
+
+    .backups-toggle-btn {
+      margin-left: 0;
+    }
+
+    .status-apply-indicator {
+      border-left: 0;
+      padding: 0;
+    }
   }
 </style>
