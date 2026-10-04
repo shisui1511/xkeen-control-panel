@@ -41,7 +41,9 @@
     try {
       if (typeof localStorage !== 'undefined') {
         const stored = Number(localStorage.getItem(storageKey));
-        if (stored) return stored;
+        if (Number.isFinite(stored) && stored > 0) {
+          return Math.max(minWidth, Math.min(maxWidth, stored));
+        }
       }
     } catch {
       // localStorage may be restricted
