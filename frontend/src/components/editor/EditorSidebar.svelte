@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import ResponsiveSidebarPanel from '../ResponsiveSidebarPanel.svelte';
   import FileTree from './FileTree.svelte';
-  import { t } from '../../i18n';
 
   export interface ConfigFileInfo {
     name: string;
@@ -28,7 +27,7 @@
   }
 
   let {
-    show,
+    show = $bindable(true),
     xrayFiles,
     mihomoFiles,
     selectedFile,
@@ -43,178 +42,28 @@
     onDeleteFile,
     onViewBackups
   }: Props = $props();
-
-  let fileTreeWidth = $state(
-    typeof localStorage !== 'undefined'
-      ? Number(localStorage.getItem('editor_filetree_width')) || 240
-      : 240
-  );
-  let isResizing = $state(false);
-  let activeCleanup: (() => void) | null = null;
-
-  onDestroy(() => {
-    if (activeCleanup) {
-      activeCleanup();
-      activeCleanup = null;
-    }
-  });
-
-  function startResize(e: PointerEvent) {
-    e.preventDefault();
-    if (activeCleanup) {
-      activeCleanup();
-    }
-    isResizing = true;
-    const startX = e.clientX;
-    const startWidth = fileTreeWidth;
-
-    function onMove(ev: PointerEvent) {
-      const newWidth = Math.max(160, Math.min(450, startWidth + (ev.clientX - startX)));
-      fileTreeWidth = newWidth;
-    }
-
-    function onUp() {
-      isResizing = false;
-      localStorage.setItem('editor_filetree_width', String(fileTreeWidth));
-      if (activeCleanup) {
-        activeCleanup();
-        activeCleanup = null;
-      }
-    }
-
-    activeCleanup = () => {
-      isResizing = false;
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-    };
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-  }
 </script>
 
-{#if show && overlay}
-  <button
-    type="button"
-    class="file-tree-backdrop"
-    aria-label={$t('app.close')}
-    tabindex="-1"
-    onclick={() => onClose?.()}
-  ></button>
-{/if}
-
-{#if show}
-  <div
-    class="file-tree-pane"
-    class:overlay
-    style={overlay ? undefined : `width: ${fileTreeWidth}px;`}
-  >
-    <FileTree
-      {xrayFiles}
-      {mihomoFiles}
-      {selectedFile}
-      {activeKernel}
-      {onLoadFile}
-      {onCreateFile}
-      {onRenameFile}
-      {onDuplicateFile}
-      {onDownloadFile}
-      {onDeleteFile}
-      {onViewBackups}
-    />
-  </div>
-  {#if !overlay}
-    <button
-      type="button"
-      class="editor-splitter"
-      class:active={isResizing}
-      aria-label={$t('editor.resize_sidebar')}
-      tabindex="-1"
-      onpointerdown={startResize}
-    ></button>
-  {/if}
-{/if}
-
-<style>
-  .file-tree-pane {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-    flex-shrink: 0;
-    overflow: hidden;
-    max-width: 42%;
-  }
-
-  .file-tree-pane.overlay {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 30;
-    width: min(85%, 320px);
-    max-width: none;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-md);
-  }
-
-  .file-tree-backdrop {
-    appearance: none;
-    -webkit-appearance: none;
-    position: absolute;
-    inset: 0;
-    z-index: 29;
-    border: 0;
-    padding: 0;
-    margin: 0;
-    background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
-    cursor: default;
-  }
-
-  .editor-splitter {
-    appearance: none;
-    -webkit-appearance: none;
-    border: 0;
-    padding: 0;
-    margin: 0 2px;
-    background: transparent;
-    box-sizing: border-box;
-    width: 10px;
-    flex-shrink: 0;
-    position: relative;
-    z-index: 10;
-    cursor: col-resize;
-    touch-action: none;
-  }
-
-  .editor-splitter::before {
-    content: '';
-    position: absolute;
-    inset: 0 auto;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 1px;
-    height: 100%;
-    background: var(--border);
-    border-radius: 1px;
-    transition:
-      width 0.15s ease,
-      background 0.15s ease;
-  }
-
-  .editor-splitter:hover::before,
-  .editor-splitter:active::before,
-  .editor-splitter.active::before {
-    width: 2px;
-    background: var(--accent);
-  }
-
-  .editor-splitter:focus-visible::before {
-    background: var(--accent);
-    width: 2px;
-  }
-</style>
+<ResponsiveSidebarPanel
+  bind:show
+  {overlay}
+  {onClose}
+  storageKey="editor_filetree_width"
+  defaultWidth={240}
+  minWidth={160}
+  maxWidth={450}
+>
+  <FileTree
+    {xrayFiles}
+    {mihomoFiles}
+    {selectedFile}
+    {activeKernel}
+    {onLoadFile}
+    {onCreateFile}
+    {onRenameFile}
+    {onDuplicateFile}
+    {onDownloadFile}
+    {onDeleteFile}
+    {onViewBackups}
+  />
+</ResponsiveSidebarPanel>
