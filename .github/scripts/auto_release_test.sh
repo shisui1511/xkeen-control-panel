@@ -72,9 +72,19 @@ check "fix после RC — следующий RC той же версии" "$(
 
 check "fix после RC прерывает выдержку, пока не выйдет новый RC" \
   "$(NOW=$((T0 + 30 * HOUR)) ar promote)" "none v0.2.0-rc.1 не продвигается в stable: после него есть новые изменения, будет новый RC"
+check "закрытая веха не продвигает RC, если после него есть fix" \
+  "$(NOW=$((T0 + 30 * HOUR)) SOAK_WAIVED=v0.2.0 ar promote)" "none v0.2.0-rc.1 не продвигается в stable: после него есть новые изменения, будет новый RC"
 atag v0.2.0-rc.2 $((T0 + 10 * HOUR))
 check "свежий RC ещё выдерживается" "$(NOW=$((T0 + 20 * HOUR)) ar promote)" "none v0.2.0-rc.2 в beta 10 ч из 24"
 check "RC провисел 24 ч — stable из его коммита" "$(NOW=$((T0 + 34 * HOUR)) ar promote)" "stable v0.2.0 v0.2.0-rc.2"
+check "закрытая веха отменяет выдержку свежего RC" \
+  "$(NOW=$((T0 + 11 * HOUR)) SOAK_WAIVED=v0.2.0 ar promote)" "stable v0.2.0 v0.2.0-rc.2"
+check "веха другой версии выдержку не отменяет" \
+  "$(NOW=$((T0 + 11 * HOUR)) SOAK_WAIVED=v0.9.0 ar promote)" "none v0.2.0-rc.2 в beta 1 ч из 24"
+check "из нескольких закрытых вех берётся нужная" \
+  "$(NOW=$((T0 + 11 * HOUR)) SOAK_WAIVED='v0.9.0 v0.2.0' ar promote)" "stable v0.2.0 v0.2.0-rc.2"
+check "пустой список отмен — прежнее поведение" \
+  "$(NOW=$((T0 + 11 * HOUR)) SOAK_WAIVED= ar promote)" "none v0.2.0-rc.2 в beta 1 ч из 24"
 commit "chore: после RC"
 check "chore после RC выдержку не прерывает" "$(NOW=$((T0 + 34 * HOUR)) ar promote)" "stable v0.2.0 v0.2.0-rc.2"
 
