@@ -72,7 +72,7 @@
   });
 </script>
 
-<div class="eph-right" bind:this={containerRef}>
+<div class="eph-right">
   {#if saveStatusState.kind === 'live'}
     <LiveIndicator live={true} label={saveStatusState.label} />
   {:else if selectedFile}
@@ -116,7 +116,7 @@
       {saving ? $t('app.loading') : $t('app.save')}
     </button>
 
-    <div class="overflow-wrap">
+    <div class="overflow-wrap" bind:this={containerRef}>
       <button
         type="button"
         class="btn btn-secondary btn-compact btn-overflow-trigger"
