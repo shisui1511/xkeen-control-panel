@@ -112,8 +112,15 @@
       align-items: flex-start;
     }
     .banner-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
       width: 100%;
-      justify-content: flex-end;
+    }
+    :global(.banner-actions .btn) {
+      width: 100%;
+      min-height: 38px;
+      justify-content: center;
     }
   }
 

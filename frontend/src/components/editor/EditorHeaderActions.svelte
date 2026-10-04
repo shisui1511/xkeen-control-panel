@@ -32,13 +32,47 @@
     onSaveAndApply
   }: Props = $props();
 
+  let showOverflowMenu = $state(false);
+  let containerRef = $state<HTMLElement | null>(null);
+
   // В конфликте ядер применять нечего: сохранение файла (данные) остаётся доступным.
   const saveAndApplyLabel = $derived(
     $isConflict ? $t('kernel.conflict_blocked') : $t('editor.save_and_apply')
   );
+
+  function toggleOverflowMenu(e: MouseEvent) {
+    e.stopPropagation();
+    showOverflowMenu = !showOverflowMenu;
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && showOverflowMenu) {
+      showOverflowMenu = false;
+    }
+  }
+
+  function handleClickOutside(e: MouseEvent) {
+    if (showOverflowMenu && containerRef && !containerRef.contains(e.target as Node)) {
+      showOverflowMenu = false;
+    }
+  }
+
+  $effect(() => {
+    if (showOverflowMenu) {
+      window.addEventListener('keydown', handleKeydown);
+      window.addEventListener('click', handleClickOutside);
+    } else {
+      window.removeEventListener('keydown', handleKeydown);
+      window.removeEventListener('click', handleClickOutside);
+    }
+    return () => {
+      window.removeEventListener('keydown', handleKeydown);
+      window.removeEventListener('click', handleClickOutside);
+    };
+  });
 </script>
 
-<div class="eph-right">
+<div class="eph-right" bind:this={containerRef}>
   {#if saveStatusState.kind === 'live'}
     <LiveIndicator live={true} label={saveStatusState.label} />
   {:else if selectedFile}
@@ -47,7 +81,7 @@
   {/if}
   {#if selectedFile}
     <button
-      class="btn btn-secondary btn-compact"
+      class="btn btn-secondary btn-compact btn-desktop-only"
       onclick={onReloadFile}
       disabled={loading}
       title={$t('editor.reload')}
@@ -63,7 +97,7 @@
       {$t('editor.reload')}
     </button>
     <button
-      class="btn btn-secondary btn-compact"
+      class="btn btn-secondary btn-compact btn-desktop-only"
       onclick={onSaveFile}
       disabled={saving || applyLoading}
       title={$t('app.save')}
@@ -81,6 +115,77 @@
       >
       {saving ? $t('app.loading') : $t('app.save')}
     </button>
+
+    <div class="overflow-wrap">
+      <button
+        type="button"
+        class="btn btn-secondary btn-compact btn-overflow-trigger"
+        onclick={toggleOverflowMenu}
+        aria-label={$t('editor.save_more_actions')}
+        title={$t('editor.save_more_actions')}
+        aria-haspopup="true"
+        aria-expanded={showOverflowMenu}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="12" cy="5" r="2" />
+          <circle cx="12" cy="12" r="2" />
+          <circle cx="12" cy="21" r="2" />
+        </svg>
+      </button>
+
+      {#if showOverflowMenu}
+        <div class="overflow-dropdown" role="menu">
+          <button
+            type="button"
+            class="dropdown-item"
+            role="menuitem"
+            onclick={() => {
+              showOverflowMenu = false;
+              onSaveFile();
+            }}
+            disabled={saving || applyLoading}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
+              <polyline points="17 21 17 13 7 13 7 21" />
+              <polyline points="7 3 7 8 15 8" />
+            </svg>
+            {saving ? $t('app.loading') : $t('app.save')}
+          </button>
+          <button
+            type="button"
+            class="dropdown-item"
+            role="menuitem"
+            onclick={() => {
+              showOverflowMenu = false;
+              onReloadFile();
+            }}
+            disabled={loading}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+              <path d="M21 3v5h-5" />
+            </svg>
+            {$t('editor.reload')}
+          </button>
+        </div>
+      {/if}
+    </div>
+
     <button
       class="btn btn-accent btn-compact"
       onclick={onSaveAndApply}
@@ -119,6 +224,60 @@
     flex-wrap: wrap;
     max-width: 100%;
     gap: 8px;
+    position: relative;
+  }
+
+  .overflow-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .btn-overflow-trigger {
+    display: none;
+    padding: 4px 8px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .overflow-dropdown {
+    position: absolute;
+    left: 0;
+    top: calc(100% + 4px);
+    z-index: 50;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    min-width: 180px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .dropdown-item:hover:not(:disabled) {
+    background: var(--hover);
+  }
+
+  .dropdown-item:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .btn-compact {
@@ -173,6 +332,15 @@
     }
     40% {
       transform: scale(1);
+    }
+  }
+
+  @media (max-width: 768px) {
+    .btn-desktop-only {
+      display: none !important;
+    }
+    .btn-overflow-trigger {
+      display: inline-flex !important;
     }
   }
 </style>

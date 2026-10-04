@@ -374,4 +374,23 @@
     justify-content: flex-end;
     flex-shrink: 0;
   }
+
+  @media (max-width: 640px) {
+    .templates-body-grid {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+
+    .templates-col-list {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      max-height: 280px;
+    }
+
+    .templates-col-preview {
+      min-height: 200px;
+    }
+  }
 </style>

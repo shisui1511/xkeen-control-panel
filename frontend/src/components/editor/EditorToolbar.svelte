@@ -67,9 +67,11 @@
 <div class="editor-subhead-bar">
   <button
     class="btn-sidebar-toggle"
+    class:active={showSidebar}
     onclick={() => onToggleSidebar?.()}
     title={showSidebar ? $t('editor.hide_sidebar') : $t('editor.show_sidebar')}
     aria-label={showSidebar ? $t('editor.hide_sidebar') : $t('editor.show_sidebar')}
+    aria-expanded={showSidebar}
   >
     {#if showSidebar}
       <svg
@@ -198,6 +200,11 @@
   .btn-sidebar-toggle:hover {
     background: var(--hover);
     color: var(--fg-primary);
+  }
+
+  .btn-sidebar-toggle.active {
+    color: var(--accent);
+    background: var(--surface-tint);
   }
 
   .subhead-tabs-container {
