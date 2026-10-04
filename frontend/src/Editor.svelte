@@ -111,7 +111,25 @@
   // Dual-panel sidebar file lists
   let xrayFiles = $state<ConfigFileInfo[]>([]);
   let mihomoFiles = $state<ConfigFileInfo[]>([]);
-  let showSidebar = $state(true);
+  // До 768 px панель файлов — выезжающий лист поверх редактора, а не колонка рядом
+  const NARROW_QUERY = '(max-width: 768px)';
+  const startsNarrow =
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia(NARROW_QUERY).matches;
+  let isNarrow = $state(startsNarrow);
+  let showSidebar = $state(!startsNarrow);
+
+  $effect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(NARROW_QUERY);
+    const onChange = (e: MediaQueryListEvent) => {
+      isNarrow = e.matches;
+      showSidebar = !e.matches;
+    };
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  });
 
   let isMac = $derived(
     typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
@@ -447,13 +465,13 @@
         selectedFile = '';
         originalContent = '';
         isDirty = false;
-        showSidebar = true;
+        showSidebar = !isNarrow;
       }
     }
 
     tabs = [...tabs];
     if (tabs.length === 0) {
-      showSidebar = true;
+      showSidebar = !isNarrow;
     }
   }
 
@@ -1295,7 +1313,12 @@
         {mihomoFiles}
         {selectedFile}
         activeKernel={$activeKernelName}
-        onLoadFile={loadFile}
+        overlay={isNarrow}
+        onClose={() => (showSidebar = false)}
+        onLoadFile={(path, isPreviewClick) => {
+          loadFile(path, isPreviewClick);
+          if (isNarrow) showSidebar = false;
+        }}
         onCreateFile={() => {
           showCreateModal = true;
           newFileName = '';
@@ -1308,7 +1331,10 @@
         onDuplicateFile={duplicateFile}
         onDownloadFile={downloadFileByName}
         onDeleteFile={deleteFileByInfo}
-        onViewBackups={openBackupsForFile}
+        onViewBackups={(file) => {
+          openBackupsForFile(file);
+          if (isNarrow) showSidebar = false;
+        }}
       />
 
       <!-- Main Editor Card -->
@@ -1484,6 +1510,7 @@
               {backupLoading}
               onSelectBackup={selectBackup}
               onRestoreBackup={restoreBackup}
+              onClose={() => (drawerOpen = false)}
             />
           {/if}
         </div>
@@ -1603,6 +1630,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     overflow: hidden;
+    position: relative;
   }
 
   .editor-empty-card {
@@ -1693,5 +1721,20 @@
   .editor-empty-shortcuts .shortcut-dot {
     color: var(--border);
     user-select: none;
+  }
+
+  @media (max-width: 768px) {
+    .editor-page-container {
+      height: calc(100dvh - 76px);
+    }
+
+    .editor-empty-card {
+      padding: 24px 16px;
+    }
+
+    .editor-empty-shortcuts {
+      flex-wrap: wrap;
+      margin-top: 24px;
+    }
   }
 </style>

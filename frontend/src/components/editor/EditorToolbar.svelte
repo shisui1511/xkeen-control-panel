@@ -294,4 +294,21 @@
     background: var(--border);
     margin: 4px 0;
   }
+
+  @media (max-width: 768px) {
+    .editor-subhead-bar {
+      padding-right: 6px;
+    }
+
+    /* Тип файла и виджет ядра есть в шапке и дереве файлов; на узком экране они вытесняют вкладки и меню */
+    .subhead-file-meta,
+    .subhead-meta-container :global(.editor-kernel-widget) {
+      display: none;
+    }
+
+    .subhead-meta-container {
+      margin-left: 6px;
+      gap: 6px;
+    }
+  }
 </style>

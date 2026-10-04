@@ -13,7 +13,8 @@
     diffGroups = [],
     backupLoading = false,
     onSelectBackup,
-    onRestoreBackup
+    onRestoreBackup,
+    onClose
   }: {
     backups: string[];
     selectedBackup: string;
@@ -21,6 +22,7 @@
     backupLoading: boolean;
     onSelectBackup: (backup: string) => void;
     onRestoreBackup: (backup: string) => void;
+    onClose?: () => void;
   } = $props();
 
   function formatBackupDate(backup: string): string {
@@ -43,10 +45,13 @@
 </script>
 
 <div class="editor-bottom-drawer" transition:slide={{ duration: 200 }}>
+  <button type="button" class="drawer-close-btn" onclick={() => onClose?.()}>
+    {$t('app.close')}
+  </button>
   <div class="drawer-layout">
     <!-- Список бэкапов слева -->
     <div class="drawer-sidebar">
-      {#each backups as backup}
+      {#each backups as backup (backup)}
         <div class="backup-item" class:active={selectedBackup === backup}>
           <button type="button" class="backup-select-btn" onclick={() => onSelectBackup(backup)}>
             <span class="backup-time">{formatBackupDate(backup)}</span>
@@ -77,19 +82,19 @@
                 <div class="spinner" style="--spinner-size: 24px;"></div>
               </div>
             {:else}
-              {#each diffGroups as group}
+              {#each diffGroups as group, gi (gi)}
                 {#if group.type === 'added'}
-                  {#each group.lines as line}
+                  {#each group.lines as line, li (li)}
                     <div class="diff-line diff-line-added">+ {line}</div>
                   {/each}
                 {:else if group.type === 'removed'}
-                  {#each group.lines as line}
+                  {#each group.lines as line, li (li)}
                     <div class="diff-line diff-line-removed">- {line}</div>
                   {/each}
                 {:else if group.type === 'collapsed'}
                   <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
                 {:else}
-                  {#each group.lines as line}
+                  {#each group.lines as line, li (li)}
                     <div class="diff-line diff-line-unchanged">{line}</div>
                   {/each}
                 {/if}
@@ -115,6 +120,10 @@
   .drawer-layout {
     display: flex;
     height: 100%;
+  }
+
+  .drawer-close-btn {
+    display: none;
   }
 
   .drawer-sidebar {
@@ -279,5 +288,56 @@
     height: 100%;
     color: var(--fg-faint);
     font-size: 12px;
+  }
+
+  /* Узкий экран: панель бэкапов — лист поверх редактора, список копий над сравнением */
+  @media (max-width: 768px) {
+    .editor-bottom-drawer {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 20;
+      height: min(75%, 480px);
+      display: flex;
+      flex-direction: column;
+      box-shadow: var(--shadow-md);
+    }
+
+    .drawer-close-btn {
+      display: block;
+      flex-shrink: 0;
+      margin: 6px 6px 0 auto;
+      padding: 4px 12px;
+      font-size: 12px;
+      background: var(--surface-tint);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--fg-secondary);
+      cursor: pointer;
+    }
+
+    .drawer-layout {
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+    }
+
+    .drawer-sidebar {
+      width: auto;
+      max-height: 40%;
+      flex-shrink: 0;
+      border-right: 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .drawer-main {
+      min-height: 0;
+    }
+
+    /* На сенсорном экране нет hover: «Восстановить» всегда видна */
+    .restore-inline-btn {
+      opacity: 1;
+    }
   }
 </style>

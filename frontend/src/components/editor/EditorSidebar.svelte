@@ -15,7 +15,10 @@
     mihomoFiles: ConfigFileInfo[];
     selectedFile: string;
     activeKernel?: string;
-    onLoadFile: (path: string) => void;
+    /** Узкий экран: панель выезжает листом поверх редактора, а не занимает колонку */
+    overlay?: boolean;
+    onClose?: () => void;
+    onLoadFile: (path: string, isPreviewClick: boolean) => void;
     onCreateFile: () => void;
     onRenameFile: (file: ConfigFileInfo) => void;
     onDuplicateFile: (file: ConfigFileInfo) => void;
@@ -30,6 +33,8 @@
     mihomoFiles,
     selectedFile,
     activeKernel = '',
+    overlay = false,
+    onClose,
     onLoadFile,
     onCreateFile,
     onRenameFile,
@@ -90,8 +95,22 @@
   }
 </script>
 
+{#if show && overlay}
+  <button
+    type="button"
+    class="file-tree-backdrop"
+    aria-label={$t('app.close')}
+    tabindex="-1"
+    onclick={() => onClose?.()}
+  ></button>
+{/if}
+
 {#if show}
-  <div class="file-tree-pane" style="width: {fileTreeWidth}px;">
+  <div
+    class="file-tree-pane"
+    class:overlay
+    style={overlay ? undefined : `width: ${fileTreeWidth}px;`}
+  >
     <FileTree
       {xrayFiles}
       {mihomoFiles}
@@ -106,14 +125,16 @@
       {onViewBackups}
     />
   </div>
-  <button
-    type="button"
-    class="editor-splitter"
-    class:active={isResizing}
-    aria-label={$t('editor.resize_sidebar')}
-    tabindex="-1"
-    onpointerdown={startResize}
-  ></button>
+  {#if !overlay}
+    <button
+      type="button"
+      class="editor-splitter"
+      class:active={isResizing}
+      aria-label={$t('editor.resize_sidebar')}
+      tabindex="-1"
+      onpointerdown={startResize}
+    ></button>
+  {/if}
 {/if}
 
 <style>
@@ -125,6 +146,33 @@
     flex-shrink: 0;
     overflow: hidden;
     max-width: 42%;
+  }
+
+  .file-tree-pane.overlay {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    width: min(85%, 320px);
+    max-width: none;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+  }
+
+  .file-tree-backdrop {
+    appearance: none;
+    -webkit-appearance: none;
+    position: absolute;
+    inset: 0;
+    z-index: 29;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+    cursor: default;
   }
 
   .editor-splitter {
