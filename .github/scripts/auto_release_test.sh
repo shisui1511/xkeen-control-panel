@@ -87,6 +87,13 @@ check "пустой список отмен — прежнее поведени�
   "$(NOW=$((T0 + 11 * HOUR)) SOAK_WAIVED= ar promote)" "none v0.2.0-rc.2 в beta 1 ч из 24"
 commit "chore: после RC"
 check "chore после RC выдержку не прерывает" "$(NOW=$((T0 + 34 * HOUR)) ar promote)" "stable v0.2.0 v0.2.0-rc.2"
+RC2_SHA=$(git -C "$REPO" rev-list -n1 v0.2.0-rc.2)
+check "stable_sha: workflow не менялись — коммит RC" "$(ar stable-sha v0.2.0-rc.2)" "$RC2_SHA"
+mkdir -p "$REPO/.github/workflows" && echo "name: x" >"$REPO/.github/workflows/x.yml"
+git -C "$REPO" add -f .github/workflows/x.yml
+git -C "$REPO" commit -q -m "chore(ci): правка workflow после RC"
+check "stable_sha: workflow изменились после RC — HEAD" "$(ar stable-sha v0.2.0-rc.2)" "$(git -C "$REPO" rev-parse HEAD)"
+check "правка workflow выдержку не прерывает" "$(NOW=$((T0 + 34 * HOUR)) ar promote)" "stable v0.2.0 v0.2.0-rc.2"
 
 git -C "$REPO" tag v0.2.0 v0.2.0-rc.2^{}
 check "после stable RC этой версии не продвигаются" "$(NOW=$((T0 + 99 * HOUR)) ar promote)" "none нет RC новее v0.2.0"
