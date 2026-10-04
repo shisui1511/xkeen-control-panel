@@ -652,4 +652,31 @@
     background: var(--border);
     margin: 3px 0;
   }
+
+  @media (max-width: 768px) {
+    .file-row {
+      min-height: 40px;
+      padding: 10px 12px;
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    .file-search-input {
+      height: 36px;
+      font-size: 13px;
+    }
+
+    .btn-new-file {
+      width: 36px;
+      height: 36px;
+    }
+
+    .file-tree-search-clear {
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+  }
 </style>

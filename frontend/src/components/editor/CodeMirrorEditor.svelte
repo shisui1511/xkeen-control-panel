@@ -804,5 +804,31 @@
     :global(.cm-gutters) {
       display: none !important;
     }
+    :global(.cm-panel.cm-search) {
+      padding: 8px;
+      gap: 6px;
+      flex-wrap: wrap;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+    }
+    :global(.cm-panel.cm-search input[name='search']),
+    :global(.cm-panel.cm-search input[name='replace']) {
+      width: 100% !important;
+      max-width: 100% !important;
+      font-size: 14px;
+      height: 32px;
+    }
+    :global(.cm-panel.cm-search button[name='close']) {
+      min-width: 36px;
+      min-height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    :global(.cm-tooltip) {
+      max-width: 90vw !important;
+      word-break: break-word !important;
+      z-index: 60;
+    }
   }
 </style>

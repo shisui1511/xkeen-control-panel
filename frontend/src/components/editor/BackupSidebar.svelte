@@ -298,18 +298,22 @@
       right: 0;
       bottom: 0;
       z-index: 20;
-      height: min(75%, 480px);
+      height: min(85vh, 520px);
       display: flex;
       flex-direction: column;
-      box-shadow: var(--shadow-md);
+      border-top: 1px solid var(--border);
+      box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.3));
     }
 
     .drawer-close-btn {
-      display: block;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       flex-shrink: 0;
-      margin: 6px 6px 0 auto;
-      padding: 4px 12px;
-      font-size: 12px;
+      margin: 6px 8px 4px auto;
+      padding: 6px 14px;
+      font-size: 13px;
+      min-height: 36px;
       background: var(--surface-tint);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -324,20 +328,37 @@
     }
 
     .drawer-sidebar {
-      width: auto;
-      max-height: 40%;
+      width: 100%;
+      max-height: 35%;
       flex-shrink: 0;
-      border-right: 0;
+      border-right: none;
       border-bottom: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 6px;
+    }
+
+    .backup-item {
+      min-height: 40px;
     }
 
     .drawer-main {
+      flex: 1;
       min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .diff-body {
+      overflow-x: auto;
+      white-space: pre;
     }
 
     /* На сенсорном экране нет hover: «Восстановить» всегда видна */
     .restore-inline-btn {
       opacity: 1;
+      min-height: 32px;
+      padding: 4px 10px;
     }
   }
 </style>

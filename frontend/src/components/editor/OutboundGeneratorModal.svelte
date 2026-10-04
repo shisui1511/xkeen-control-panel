@@ -87,10 +87,7 @@
     </Select>
   </div>
 
-  <div
-    class="form-grid"
-    style="margin-bottom: 12px; display: grid; grid-template-columns: 2fr 1fr; gap: 12px;"
-  >
+  <div class="gen-form-grid">
     <div class="form-group">
       <label
         for="gen-address"
@@ -150,10 +147,7 @@
       />
     </div>
 
-    <div
-      class="form-grid"
-      style="margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;"
-    >
+    <div class="gen-form-grid gen-form-grid-half">
       <div class="form-group">
         <label
           for="gen-security"
@@ -194,3 +188,24 @@
     </button>
   </div>
 </Modal>
+
+<style>
+  .gen-form-grid {
+    margin-bottom: 12px;
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 12px;
+  }
+
+  .gen-form-grid-half {
+    margin-bottom: 16px;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  @media (max-width: 480px) {
+    .gen-form-grid,
+    .gen-form-grid-half {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
