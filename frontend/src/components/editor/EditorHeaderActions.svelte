@@ -121,8 +121,8 @@
         type="button"
         class="btn btn-secondary btn-compact btn-overflow-trigger"
         onclick={toggleOverflowMenu}
-        aria-label={$t('editor.more_actions')}
-        title={$t('editor.more_actions')}
+        aria-label={$t('editor.save_more_actions')}
+        title={$t('editor.save_more_actions')}
         aria-haspopup="true"
         aria-expanded={showOverflowMenu}
       >

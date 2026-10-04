@@ -306,6 +306,7 @@
   "editor.hide_sidebar": "Hide sidebar",
   "editor.show_sidebar": "Show sidebar",
   "editor.more_actions": "More actions",
+  "editor.save_more_actions": "Save actions",
   "editor.download_file": "Download file",
   "editor.quick_fixes": "Quick fixes",
   "editor.duplicate_file": "Duplicate file",
