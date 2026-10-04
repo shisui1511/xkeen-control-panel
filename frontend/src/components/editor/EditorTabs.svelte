@@ -47,7 +47,7 @@
           onclick={() => onSwitchTab(tab.path)}
           ondblclick={() => onPinTab(tab.path)}
         >
-          <span class="tab-name">{tab.name}</span>
+          <span class="tab-name" title={tab.name}>{tab.name}</span>
           {#if tab.isDirty}
             <span class="tab-dirty-dot">●</span>
           {/if}
@@ -55,7 +55,10 @@
         <button
           type="button"
           class="tab-close-btn"
-          onclick={() => onCloseTab(tab.path)}
+          onclick={(e) => {
+            e.stopPropagation();
+            onCloseTab(tab.path);
+          }}
           title={$t('app.close')}
           aria-label={$t('app.close')}
         >
@@ -89,6 +92,7 @@
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
 
   .editor-tab-strip::-webkit-scrollbar {
@@ -105,6 +109,7 @@
     border-right: 1px solid var(--border);
     transition: all 0.15s ease;
     position: relative;
+    flex-shrink: 0;
   }
 
   .tab-main {
@@ -120,6 +125,10 @@
     font-size: 12px;
     font-weight: 500;
     cursor: pointer;
+  }
+
+  .tab-name {
+    display: inline-block;
   }
 
   .editor-tab:hover {
@@ -175,5 +184,30 @@
   .tab-close-btn:hover {
     background: var(--hover);
     color: var(--danger);
+  }
+
+  @media (max-width: 768px) {
+    .tab-name {
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tab-close-btn {
+      position: relative;
+    }
+
+    .tab-close-btn::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      min-height: 32px;
+    }
   }
 </style>

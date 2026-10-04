@@ -48,9 +48,10 @@
       onclick={onToggleSchema}
       type="button"
       title={$t(schemaEnabled ? 'editor.schema_on' : 'editor.schema_off')}
+      aria-label={$t(schemaEnabled ? 'editor.schema_on' : 'editor.schema_off')}
     >
       <span class="chip-dot"></span>
-      {$t(schemaEnabled ? 'editor.schema_on' : 'editor.schema_off')}
+      <span class="chip-text">{$t(schemaEnabled ? 'editor.schema_on' : 'editor.schema_off')}</span>
     </button>
     <button
       class="chip-toggle"
@@ -58,9 +59,10 @@
       onclick={onToggleExpertMode}
       type="button"
       title={$t(expertMode ? 'editor.expert_on' : 'editor.expert_off')}
+      aria-label={$t(expertMode ? 'editor.expert_on' : 'editor.expert_off')}
     >
       <span class="chip-dot"></span>
-      {$t(expertMode ? 'editor.expert_on' : 'editor.expert_off')}
+      <span class="chip-text">{$t(expertMode ? 'editor.expert_on' : 'editor.expert_off')}</span>
     </button>
 
     {#if applyLoading && backgroundStatusText}
@@ -95,31 +97,37 @@
 
 <style>
   .editor-statusbar {
-    padding: 6px 14px;
+    padding: 2px 10px;
     background: var(--surface-tint);
     border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
+    justify-content: space-between;
     font-family: var(--font-family-mono);
     font-size: 12px;
     color: var(--fg-secondary);
-    min-height: 30px;
-    flex-wrap: wrap;
-    gap: 4px 8px;
+    min-height: 26px;
+    height: 28px;
+    box-sizing: border-box;
+    overflow: hidden;
+    white-space: nowrap;
+    gap: 8px;
+    flex-wrap: nowrap;
   }
 
   .sb-left {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
+    flex-shrink: 0;
   }
 
   .sb-right {
     margin-left: auto;
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
+    flex-shrink: 0;
   }
 
   .status-shortcut-tip kbd {
@@ -173,7 +181,6 @@
     gap: 4px;
     margin-right: 6px;
   }
-
   .ks-dot {
     width: 6px;
     height: 6px;
@@ -181,11 +188,9 @@
     border-radius: 50%;
     animation: ks-dot-bounce 1.4s infinite ease-in-out both;
   }
-
   .ks-dot:nth-child(1) {
     animation-delay: -0.32s;
   }
-
   .ks-dot:nth-child(2) {
     animation-delay: -0.16s;
   }
@@ -220,11 +225,11 @@
     border-radius: var(--radius);
     color: var(--fg-secondary);
     font-size: 12px;
-    padding: 4px 10px;
+    padding: 3px 8px;
     cursor: pointer;
     font-family: var(--font-family-mono);
     transition: all 0.15s ease;
-    margin-left: 10px;
+    margin-left: 6px;
   }
 
   .backups-toggle-btn:hover {
@@ -242,20 +247,28 @@
 
   @media (max-width: 768px) {
     .editor-statusbar {
-      padding: 6px 10px;
+      padding: 2px 8px;
     }
 
     .status-shortcut-tip {
+      display: none !important;
+    }
+
+    .chip-toggle .chip-text {
       display: none;
+    }
+
+    .chip-toggle {
+      padding: 3px 6px;
     }
 
     .backups-toggle-btn {
       margin-left: 0;
+      padding: 2px 6px;
     }
 
     .status-apply-indicator {
-      border-left: 0;
-      padding: 0;
+      display: none;
     }
   }
 </style>
