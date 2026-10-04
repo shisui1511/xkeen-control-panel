@@ -85,6 +85,14 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape' && isOverlay && show) {
+      if (
+        typeof document !== 'undefined' &&
+        document.querySelector(
+          '.modal-backdrop, .confirm-modal-backdrop, [role="dialog"][aria-modal="true"]'
+        )
+      ) {
+        return;
+      }
       e.stopPropagation();
       e.preventDefault();
       handleClose();
@@ -188,10 +196,10 @@
       if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
         previouslyFocusedElement = document.activeElement;
       }
-      window.addEventListener('keydown', handleKeydown, true);
+      window.addEventListener('keydown', handleKeydown);
     } else {
       restoreBodyScroll();
-      window.removeEventListener('keydown', handleKeydown, true);
+      window.removeEventListener('keydown', handleKeydown);
       if (previouslyFocusedElement && typeof previouslyFocusedElement.focus === 'function') {
         previouslyFocusedElement.focus();
         previouslyFocusedElement = null;
@@ -201,7 +209,7 @@
     return () => {
       restoreBodyScroll();
       if (typeof window !== 'undefined') {
-        window.removeEventListener('keydown', handleKeydown, true);
+        window.removeEventListener('keydown', handleKeydown);
       }
     };
   });
@@ -213,7 +221,7 @@
     }
     restoreBodyScroll();
     if (typeof window !== 'undefined') {
-      window.removeEventListener('keydown', handleKeydown, true);
+      window.removeEventListener('keydown', handleKeydown);
     }
   });
 </script>
