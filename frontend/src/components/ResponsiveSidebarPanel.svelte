@@ -89,9 +89,7 @@
     if (e.key === 'Escape' && isOverlay && show) {
       if (
         typeof document !== 'undefined' &&
-        document.querySelector(
-          '.modal-backdrop, .confirm-modal-backdrop, [role="dialog"][aria-modal="true"]'
-        )
+        document.querySelector('.modal-backdrop, .confirm-modal-backdrop, .confirm-dialog-backdrop')
       ) {
         return;
       }
