@@ -241,7 +241,7 @@
 
   .overflow-dropdown {
     position: absolute;
-    right: 0;
+    left: 0;
     top: calc(100% + 4px);
     z-index: 50;
     background: var(--bg-card);

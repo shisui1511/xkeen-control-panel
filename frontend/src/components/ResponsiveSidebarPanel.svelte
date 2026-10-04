@@ -148,9 +148,13 @@
     touchCurrentY = e.touches[0].clientY;
   }
 
-  function onTouchEnd() {
+  function onTouchEnd(e: TouchEvent) {
     if (!isSwiping || !isOverlay) return;
     isSwiping = false;
+    if (e.changedTouches && e.changedTouches.length > 0) {
+      touchCurrentX = e.changedTouches[0].clientX;
+      touchCurrentY = e.changedTouches[0].clientY;
+    }
     const dx = touchCurrentX - touchStartX;
     const dy = touchCurrentY - touchStartY;
     const absDx = Math.abs(dx);
