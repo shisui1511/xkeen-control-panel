@@ -10,7 +10,9 @@ test.use({ locale: 'ru-RU', viewport: { width: 390, height: 844 }, hasTouch: tru
 
 const THEMES = ['dark', 'light'] as const;
 const MIHOMO_DIR = '/opt/etc/mihomo';
-const fileContent = 'port: 7890\nmode: Rule\nlog-level: info\n';
+const fileContent =
+  '# Подписка обновляется каждые шесть часов, адрес https://example.com/api/v1/client/subscribe?token=0123456789abcdef0123456789abcdef\n' +
+  'port: 7890\nmode: Rule\nlog-level: info\n';
 const backupContent = 'port: 7890\nmode: Global\nlog-level: debug\n';
 
 async function mockEditor(page: Page, theme: (typeof THEMES)[number]) {
@@ -558,6 +560,95 @@ for (const vp of [
       await more.click();
       await expect(page.locator('.overflow-dropdown')).toBeVisible();
     });
+
+    test('шапка без описания, пустое состояние для сенсорного экрана', async ({ page }) => {
+      await page.goto('/#/editor');
+      await expect(page.locator('.page-header h1')).toBeVisible();
+      await expect(page.locator('nav.breadcrumbs')).toBeVisible();
+      await expect(page.locator('.page-header-subtitle')).toBeHidden();
+      await expect(page.locator('.editor-empty-card')).toContainText(
+        'Откройте файл из списка или создайте новый'
+      );
+      await expect(page.locator('.editor-empty-shortcuts')).toHaveCount(0);
+    });
+
+    test('тап-цели переключателя и «На весь экран» ≥ 44 px', async ({ page }) => {
+      await page.goto('/#/editor');
+      const pill = '.page-header-actions .tabs-pill .tab-btn';
+      for (const idx of [0, 1]) {
+        const zone = await hitZone(page, pill, idx);
+        expect(zone.width, `переключатель ${idx}: ширина`).toBeGreaterThanOrEqual(44);
+        expect(zone.height, `переключатель ${idx}: высота`).toBeGreaterThanOrEqual(44);
+      }
+      expect((await page.locator(pill).first().boundingBox())!.height).toBeLessThanOrEqual(30);
+
+      await openFile(page);
+      const zone = await hitZone(page, '.editor-cm-tool-btn');
+      expect(zone.width, '«На весь экран»: ширина').toBeGreaterThanOrEqual(44);
+      expect(zone.height, '«На весь экран»: высота').toBeGreaterThanOrEqual(44);
+      const svg = (await page.locator('.editor-cm-tool-btn svg').boundingBox())!;
+      expect(svg.width).toBeLessThanOrEqual(15);
+    });
+
+    test('«На весь экран» не накрывает первые строки, перенос по словам', async ({ page }) => {
+      await page.goto('/#/editor');
+      await openFile(page);
+      await expect(page.locator('.cm-content > .cm-line').first()).toBeVisible();
+
+      const res = await page.evaluate(() => {
+        const toolbar = document.querySelector('.editor-cm-toolbar')!.getBoundingClientRect();
+        const btn = document.querySelector('.editor-cm-tool-btn')!.getBoundingClientRect();
+        const cx = btn.left + btn.width / 2;
+        const cy = btn.top + btn.height / 2;
+        const zone = {
+          left: Math.min(toolbar.left, cx - 22),
+          right: Math.max(toolbar.right, cx + 22),
+          top: Math.min(toolbar.top, cy - 22),
+          bottom: Math.max(toolbar.bottom, cy + 22)
+        };
+        const lines = Array.from(document.querySelectorAll('.cm-content > .cm-line')).slice(0, 2);
+        let overlaps = 0;
+        for (const line of lines) {
+          const range = document.createRange();
+          range.selectNodeContents(line);
+          for (const r of Array.from(range.getClientRects())) {
+            if (r.width === 0 || r.height === 0) continue;
+            if (
+              r.left < zone.right &&
+              r.right > zone.left &&
+              r.top < zone.bottom &&
+              r.bottom > zone.top
+            ) {
+              overlaps++;
+            }
+          }
+        }
+        // Слова первой строки не разорваны: у каждого слова ровно один client rect
+        const first = lines[0];
+        const walker = document.createTreeWalker(first, NodeFilter.SHOW_TEXT);
+        const words = ['Подписка', 'обновляется', 'каждые', 'шесть', 'часов,'];
+        const broken: string[] = [];
+        for (const w of words) {
+          let found = false;
+          walker.currentNode = first;
+          for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+            const text = n.textContent ?? '';
+            const at = text.indexOf(w);
+            if (at < 0) continue;
+            found = true;
+            const rg = document.createRange();
+            rg.setStart(n, at);
+            rg.setEnd(n, at + w.length);
+            if (rg.getClientRects().length !== 1) broken.push(w);
+            break;
+          }
+          if (!found) broken.push(`${w} (не найдено)`);
+        }
+        return { overlaps, broken };
+      });
+      expect(res.overlaps, 'кнопка не накрывает текст первых строк').toBe(0);
+      expect(res.broken, 'слова не разорваны').toEqual([]);
+    });
   });
 }
 
@@ -591,6 +682,16 @@ test.describe('Редактор на широком экране не меняе
     const name = page.locator(`.fr-name[title="${LONG_NAMES[0]}"]`);
     await expect(name).toBeVisible();
     await expect(name).toHaveCSS('white-space', 'nowrap');
+  });
+
+  test('на ПК шапка и пустое состояние прежние', async ({ page }) => {
+    await mockEditor(page, 'dark');
+    await page.goto('/#/editor');
+    await expect(page.locator('.page-header-subtitle')).toBeVisible();
+    await expect(page.locator('.editor-empty-card')).toContainText(
+      'Откройте файл из боковой панели слева'
+    );
+    await expect(page.locator('.editor-empty-shortcuts')).toBeVisible();
   });
 
   test('на ПК статус-бар остаётся компактным', async ({ page }) => {

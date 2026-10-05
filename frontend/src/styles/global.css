@@ -2678,11 +2678,23 @@ a.chip:hover {
 
 /* зона нажатия 44×44 без изменения визуального размера (§7 D-23) */
 @media (max-width: 768px), (pointer: coarse) {
-  .tap-zone-44 {
+  .tap-zone-44,
+  .editor-page-container .page-header-actions .tabs-pill .tab-btn {
     position: relative;
   }
 
-  .tap-zone-44::after {
+  /* у общего .tabs overflow-y: hidden обрезал бы зону; в пилюле два пункта, прокрутки нет */
+  .editor-page-container .page-header-actions .tabs-pill {
+    overflow: visible;
+  }
+
+  .editor-cm-toolbar:not(.is-fullscreen) {
+    top: 6px;
+    right: 6px;
+  }
+
+  .tap-zone-44::after,
+  .editor-page-container .page-header-actions .tabs-pill .tab-btn::after {
     content: '';
     position: absolute;
     left: 50%;

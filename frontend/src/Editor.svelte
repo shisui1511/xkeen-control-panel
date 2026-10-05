@@ -131,6 +131,25 @@
     return () => mql.removeEventListener('change', onChange);
   });
 
+  // Сенсорный экран или узкое окно: подсказки клавиатуры в пустом состоянии не нужны
+  const TOUCH_LAYOUT_QUERY = '(max-width: 768px), (pointer: coarse)';
+  let isTouchLayout = $state(
+    typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia(TOUCH_LAYOUT_QUERY).matches
+  );
+
+  $effect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(TOUCH_LAYOUT_QUERY);
+    const onChange = (e: MediaQueryListEvent) => {
+      isTouchLayout = e.matches;
+    };
+    isTouchLayout = mql.matches;
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  });
+
   let isMac = $derived(
     typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
   );
@@ -1343,7 +1362,9 @@
           <div class="editor-empty-content">
             <EmptyState
               title={$t('editor.select_file')}
-              description={$t('editor.empty_state_body')}
+              description={isTouchLayout
+                ? $t('editor.empty_state_body_touch')
+                : $t('editor.empty_state_body')}
               icon={EditorIcon}
               plain={true}
             />
@@ -1386,20 +1407,23 @@
               </button>
             </div>
 
-            <div class="editor-empty-shortcuts">
-              <span class="shortcut-item"
-                ><kbd>{isMac ? '⌘' : 'Ctrl'}+S</kbd> <span>{$t('editor.to_save')}</span></span
-              >
-              <span class="shortcut-dot">•</span>
-              <span class="shortcut-item"
-                ><kbd>{isMac ? '⌘' : 'Ctrl'}+F</kbd>
-                <span>{$t('editor.shortcut_search')}</span></span
-              >
-              <span class="shortcut-dot">•</span>
-              <span class="shortcut-item"
-                ><kbd>{isMac ? '⌘' : 'Ctrl'}+Z</kbd> <span>{$t('editor.shortcut_undo')}</span></span
-              >
-            </div>
+            {#if !isTouchLayout}
+              <div class="editor-empty-shortcuts">
+                <span class="shortcut-item"
+                  ><kbd>{isMac ? '⌘' : 'Ctrl'}+S</kbd> <span>{$t('editor.to_save')}</span></span
+                >
+                <span class="shortcut-dot">•</span>
+                <span class="shortcut-item"
+                  ><kbd>{isMac ? '⌘' : 'Ctrl'}+F</kbd>
+                  <span>{$t('editor.shortcut_search')}</span></span
+                >
+                <span class="shortcut-dot">•</span>
+                <span class="shortcut-item"
+                  ><kbd>{isMac ? '⌘' : 'Ctrl'}+Z</kbd>
+                  <span>{$t('editor.shortcut_undo')}</span></span
+                >
+              </div>
+            {/if}
           </div>
         </div>
       {:else}
@@ -1730,6 +1754,10 @@
 
     .editor-empty-card {
       padding: 24px 16px;
+    }
+
+    .editor-page-container :global(.page-header-subtitle) {
+      display: none;
     }
 
     .editor-empty-shortcuts {

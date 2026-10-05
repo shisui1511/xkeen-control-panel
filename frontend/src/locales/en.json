@@ -283,6 +283,7 @@
   "editor.backups": "Backups",
   "editor.select_file": "Select a file to edit",
   "editor.empty_state_body": "Open a file from the left sidebar or create a new config",
+  "editor.empty_state_body_touch": "Open a file from the list or create a new one",
   "editor.file_saved": "File saved",
   "editor.backup_restored": "Backup restored (don't forget to save)",
   "editor.restore_confirm": "Restore backup? Remember to save after restoring.",

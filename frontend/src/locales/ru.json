@@ -280,6 +280,7 @@
   "editor.backups": "Backups",
   "editor.select_file": "Выберите файл для редактирования",
   "editor.empty_state_body": "Откройте файл из боковой панели слева или создайте новый конфиг",
+  "editor.empty_state_body_touch": "Откройте файл из списка или создайте новый",
   "editor.file_saved": "Файл сохранён",
   "editor.backup_restored": "Backup восстановлен (не забудьте сохранить)",
   "editor.restore_confirm": "Восстановить backup? Не забудьте сохранить после восстановления.",
