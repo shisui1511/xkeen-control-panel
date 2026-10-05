@@ -83,6 +83,15 @@
     bodyLocked = false;
   }
 
+  function portalToBody(node: HTMLElement) {
+    document.body.appendChild(node);
+    return {
+      destroy() {
+        node.remove();
+      }
+    };
+  }
+
   function handleClose() {
     show = false;
     onClose?.();
@@ -229,28 +238,7 @@
   });
 </script>
 
-{#if show && isOverlay}
-  <button
-    type="button"
-    class="responsive-sidebar-backdrop file-tree-backdrop"
-    aria-label={$t('app.close')}
-    tabindex="-1"
-    onclick={handleClose}
-  ></button>
-{/if}
-
-{#if show}
-  {#if !isOverlay && side === 'right'}
-    <button
-      type="button"
-      class="editor-splitter splitter-right"
-      class:active={isResizing}
-      aria-label={$t('editor.resize_sidebar')}
-      tabindex="-1"
-      onpointerdown={startResize}
-    ></button>
-  {/if}
-
+{#snippet panel()}
   <div
     class="responsive-sidebar-panel file-tree-pane {containerClass}"
     class:overlay={isOverlay}
@@ -303,8 +291,35 @@
     {/if}
     {@render children()}
   </div>
+{/snippet}
 
-  {#if !isOverlay && side === 'left'}
+{#if show && isOverlay}
+  <!-- Оверлей выносится в body: предок с transform/filter (анимация страницы) ломает position: fixed и слои -->
+  <div class="responsive-sidebar-portal" use:portalToBody>
+    <button
+      type="button"
+      class="responsive-sidebar-backdrop file-tree-backdrop"
+      aria-label={$t('app.close')}
+      tabindex="-1"
+      onclick={handleClose}
+    ></button>
+    {@render panel()}
+  </div>
+{:else if show}
+  {#if side === 'right'}
+    <button
+      type="button"
+      class="editor-splitter splitter-right"
+      class:active={isResizing}
+      aria-label={$t('editor.resize_sidebar')}
+      tabindex="-1"
+      onpointerdown={startResize}
+    ></button>
+  {/if}
+
+  {@render panel()}
+
+  {#if side === 'left'}
     <button
       type="button"
       class="editor-splitter splitter-left"
@@ -326,6 +341,10 @@
     overflow: hidden;
     max-width: 42%;
     box-sizing: border-box;
+  }
+
+  .responsive-sidebar-portal {
+    display: contents;
   }
 
   .responsive-sidebar-panel.overlay {
