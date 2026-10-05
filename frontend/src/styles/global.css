@@ -2676,6 +2676,23 @@ a.chip:hover {
   color: var(--fg-primary);
 }
 
+/* зона нажатия 44×44 без изменения визуального размера (§7 D-23) */
+@media (max-width: 768px), (pointer: coarse) {
+  .tap-zone-44 {
+    position: relative;
+  }
+
+  .tap-zone-44::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+}
+
 .editor-main-card > .editor-tab-strip,
 .editor-main-card > .editor-breadcrumbs,
 .editor-main-card > .editor-toolbar,

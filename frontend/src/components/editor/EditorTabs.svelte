@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { t } from '../../i18n';
 
   export interface EditorTab {
@@ -22,6 +23,29 @@
     onCloseTab: (path: string) => void;
   } = $props();
 
+  let stripEl = $state<HTMLElement | null>(null);
+
+  // Активная вкладка всегда видна в полосе целиком (без scrollIntoView: он двигает и страницу)
+  $effect(() => {
+    const active = activeTabPath;
+    const count = tabs.length;
+    if (!stripEl || !active || count === 0) return;
+    const strip = stripEl;
+    void tick().then(() => {
+      const tabEl = Array.from(strip.querySelectorAll<HTMLElement>('.editor-tab')).find(
+        (el) => el.dataset.path === active
+      );
+      if (!tabEl) return;
+      const tabRect = tabEl.getBoundingClientRect();
+      const stripRect = strip.getBoundingClientRect();
+      if (tabRect.left < stripRect.left) {
+        strip.scrollLeft -= stripRect.left - tabRect.left;
+      } else if (tabRect.right > stripRect.right) {
+        strip.scrollLeft += tabRect.right - stripRect.right;
+      }
+    });
+  });
+
   function handleWheel(e: WheelEvent) {
     if (e.deltaY !== 0) {
       const el = e.currentTarget as HTMLElement;
@@ -32,10 +56,11 @@
 </script>
 
 {#if tabs.length > 0}
-  <div class="editor-tab-strip" role="tablist" onwheel={handleWheel}>
+  <div class="editor-tab-strip" role="tablist" bind:this={stripEl} onwheel={handleWheel}>
     {#each tabs as tab (tab.path)}
       <div
         class="editor-tab"
+        data-path={tab.path}
         class:active={tab.path === activeTabPath}
         class:preview={tab.isPreview}
       >
@@ -54,7 +79,7 @@
         </button>
         <button
           type="button"
-          class="tab-close-btn"
+          class="tab-close-btn tap-zone-44"
           onclick={(e) => {
             e.stopPropagation();
             onCloseTab(tab.path);
@@ -187,27 +212,34 @@
   }
 
   @media (max-width: 768px) {
+    .editor-tab {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .tab-main {
+      min-width: 0;
+      overflow: hidden;
+    }
+
     .tab-name {
+      display: block;
+      min-width: 0;
       max-width: 120px;
       overflow: hidden;
-      text-overflow: ellipsis;
       white-space: nowrap;
+      text-overflow: ellipsis;
     }
+  }
 
+  /* Зона × (по 15 px в стороны от кнопки 14 px) не накрывает имя и соседнюю вкладку */
+  @media (max-width: 768px), (pointer: coarse) {
     .tab-close-btn {
-      position: relative;
+      margin-left: 8px;
     }
 
-    .tab-close-btn::before {
-      content: '';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 32px;
-      height: 32px;
-      min-width: 32px;
-      min-height: 32px;
+    .editor-tab {
+      padding-right: 15px;
     }
   }
 </style>

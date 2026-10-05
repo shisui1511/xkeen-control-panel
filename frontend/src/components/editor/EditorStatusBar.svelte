@@ -43,7 +43,7 @@
 
   <div class="sb-right">
     <button
-      class="chip-toggle"
+      class="chip-toggle tap-zone-44"
       class:active={schemaEnabled}
       onclick={onToggleSchema}
       type="button"
@@ -54,7 +54,7 @@
       <span class="chip-text">{$t(schemaEnabled ? 'editor.schema_on' : 'editor.schema_off')}</span>
     </button>
     <button
-      class="chip-toggle"
+      class="chip-toggle tap-zone-44"
       class:active={expertMode}
       onclick={onToggleExpertMode}
       type="button"
@@ -76,7 +76,7 @@
     {/if}
 
     {#if backupCount > 0}
-      <button class="backups-toggle-btn" onclick={() => onToggleDrawer?.()}>
+      <button class="backups-toggle-btn tap-zone-44" onclick={() => onToggleDrawer?.()}>
         <svg
           width="10"
           height="10"
@@ -278,6 +278,23 @@
 
     .status-apply-indicator {
       display: none;
+    }
+  }
+
+  /* Сенсорная раскладка: одна строка 46 px, чтобы зоны 44 px не заходили на код (§7 D-23) */
+  @media (max-width: 768px), (pointer: coarse) {
+    .editor-statusbar {
+      height: 46px;
+      min-height: 46px;
+      overflow: visible;
+    }
+
+    .sb-right {
+      gap: 20px;
+    }
+
+    .backups-toggle-btn {
+      margin-left: 0;
     }
   }
 </style>

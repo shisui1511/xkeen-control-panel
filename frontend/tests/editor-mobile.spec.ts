@@ -108,6 +108,30 @@ async function expectNoHorizontalOverflow(page: Page) {
   expect(overflow, 'страница не шире окна').toBeLessThanOrEqual(0);
 }
 
+/** Размер реальной зоны нажатия: идём от центра элемента, пока elementFromPoint возвращает его самого или потомка */
+async function hitZone(page: Page, selector: string, index = 0) {
+  const loc = page.locator(selector).nth(index);
+  await loc.scrollIntoViewIfNeeded();
+  return loc.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const hits = (x: number, y: number) => {
+      const top = document.elementFromPoint(x, y);
+      return !!top && (top === el || el.contains(top));
+    };
+    const scan = (dx: number, dy: number) => {
+      let n = 0;
+      while (n < 60 && hits(cx + dx * (n + 1), cy + dy * (n + 1))) n++;
+      return n;
+    };
+    return {
+      width: scan(-1, 0) + scan(1, 0) + 1,
+      height: scan(0, -1) + scan(0, 1) + 1
+    };
+  });
+}
+
 async function openFile(page: Page, fileName = 'config.yaml', isPermanent = false) {
   const emptyBtn = page.locator('.editor-empty-actions .btn-secondary');
   const toggleBtn = page.locator('.btn-sidebar-toggle');
@@ -230,11 +254,17 @@ for (const theme of THEMES) {
       await expectInsideViewport(page, '.kebab-dropdown', 'выпадающее меню файла');
       await page.keyboard.press('Escape');
 
-      // Статус-бар: компактный, однострочный, подсказка Ctrl+S скрыта
+      // Статус-бар: однострочный (46 px под зоны нажатия), подсказка Ctrl+S скрыта
       const statusbar = page.locator('.editor-statusbar');
       await expect(statusbar).toBeVisible();
       const statusBox = await statusbar.boundingBox();
-      expect(statusBox!.height, 'высота статус-бара').toBeLessThanOrEqual(30);
+      expect(statusBox!.height, 'высота статус-бара').toBeLessThanOrEqual(48);
+      const leftBox = (await page.locator('.sb-left').boundingBox())!;
+      const rightBox = (await page.locator('.sb-right').boundingBox())!;
+      expect(
+        Math.abs(leftBox.y + leftBox.height / 2 - (rightBox.y + rightBox.height / 2)),
+        'статус-бар в одну строку'
+      ).toBeLessThanOrEqual(2);
       await expect(page.locator('.esb-tip')).toBeHidden();
       await expectInsideViewport(page, '.editor-statusbar .chip-toggle >> nth=1', '«Эксперт»');
       await expectInsideViewport(page, '.backups-toggle-btn', '«Backups»');
@@ -455,11 +485,85 @@ for (const vp of [
       await page.locator('.drawer-close-btn').click();
       await expect(drawer).toBeHidden();
     });
+
+    test('тап-цели вкладок и статус-бара ≥ 44 px, иконки прежнего размера', async ({ page }) => {
+      await page.goto('/#/editor');
+      await openFile(page, 'config.yaml', true);
+      await openFile(page, '04_outbounds.sub_provider_nodes.json');
+
+      const targets: Array<[string, number]> = [
+        ['.editor-tab.active .tab-close-btn', 0],
+        ['.btn-kebab', 0],
+        ['.editor-statusbar .chip-toggle', 0],
+        ['.editor-statusbar .chip-toggle', 1],
+        ['.backups-toggle-btn', 0]
+      ];
+      for (const [sel, idx] of targets) {
+        const zone = await hitZone(page, sel, idx);
+        expect(zone.width, `${sel}[${idx}]: ширина зоны`).toBeGreaterThanOrEqual(44);
+        expect(zone.height, `${sel}[${idx}]: высота зоны`).toBeGreaterThanOrEqual(44);
+      }
+
+      const svgBox = (await page.locator('.tab-close-btn svg').first().boundingBox())!;
+      expect(svgBox.width, 'иконка × прежнего размера').toBeLessThanOrEqual(9);
+      const kebabBox = (await page.locator('.btn-kebab').boundingBox())!;
+      expect(kebabBox.width).toBeLessThanOrEqual(27);
+      expect(kebabBox.height).toBeLessThanOrEqual(27);
+      const chipBox = (await page.locator('.editor-statusbar .chip-toggle').first().boundingBox())!;
+      expect(chipBox.height, 'чип визуально прежний').toBeLessThanOrEqual(26);
+    });
+
+    test('название вкладки — многоточие, активная вкладка видна целиком', async ({ page }) => {
+      await page.goto('/#/editor');
+      await openFile(page, 'config.yaml', true);
+      await openFile(page, 'default.yaml', true);
+      await openFile(page, LONG_NAMES[0]);
+
+      const name = page.locator('.editor-tab.active .tab-name');
+      await expect(name).toBeVisible();
+      await expect(name).toHaveCSS('text-overflow', 'ellipsis');
+      await expect(name).toHaveCSS('white-space', 'nowrap');
+      const m = await name.evaluate((el) => ({
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth
+      }));
+      expect(m.scrollWidth, 'имя обрезано').toBeGreaterThan(m.clientWidth);
+      expect((await name.boundingBox())!.width).toBeLessThanOrEqual(121);
+
+      await expect
+        .poll(async () => {
+          const tab = await page.locator('.editor-tab.active').boundingBox();
+          const strip = await page.locator('.editor-tab-strip').boundingBox();
+          if (!tab || !strip) return false;
+          return tab.x >= strip.x - 1 && tab.x + tab.width <= strip.x + strip.width + 1;
+        })
+        .toBe(true);
+    });
+
+    test('«Ещё» в шапке отличается от «⋮» вкладок', async ({ page }) => {
+      await page.goto('/#/editor');
+      await openFile(page);
+
+      const more = page.locator('.btn-overflow-trigger');
+      await expect(more).toContainText('Ещё');
+      await expect(more).toHaveAttribute('aria-label', 'Ещё: действия сохранения');
+      await expect(more.locator('circle')).toHaveCount(0);
+
+      const kebab = page.locator('.btn-kebab');
+      await expect(kebab).toHaveAttribute('aria-label', 'Действия с файлом');
+      await expect(kebab.locator('circle')).toHaveCount(3);
+
+      await expectInsideViewport(page, '.btn-overflow-trigger', '«Ещё»');
+      await expectInsideViewport(page, '.btn-kebab', '«⋮» вкладок');
+      await more.click();
+      await expect(page.locator('.overflow-dropdown')).toBeVisible();
+    });
   });
 }
 
 test.describe('Редактор на широком экране не меняется', () => {
-  test.use({ viewport: { width: 1280, height: 800 } });
+  // Мышь, а не касание: иначе (pointer: coarse) включит сенсорную раскладку
+  test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false });
 
   test('дерево файлов — колонка с разделителем, а не лист', async ({ page }) => {
     await mockEditor(page, 'dark');
@@ -487,5 +591,14 @@ test.describe('Редактор на широком экране не меняе
     const name = page.locator(`.fr-name[title="${LONG_NAMES[0]}"]`);
     await expect(name).toBeVisible();
     await expect(name).toHaveCSS('white-space', 'nowrap');
+  });
+
+  test('на ПК статус-бар остаётся компактным', async ({ page }) => {
+    await mockEditor(page, 'dark');
+    await page.goto('/#/editor');
+    await page.locator('.file-row:has-text("config.yaml")').click();
+    const statusbar = page.locator('.editor-statusbar');
+    await expect(statusbar).toBeVisible();
+    expect((await statusbar.boundingBox())!.height).toBeLessThanOrEqual(30);
   });
 });
