@@ -116,7 +116,12 @@
       <EditorKernelWidget {activeKernel} />
       <span class="subhead-file-meta">{fileType} • UTF‑8</span>
       <div class="kebab-wrap">
-        <button class="btn-kebab" onclick={toggleKebab} aria-label={$t('editor.more_actions')}>
+        <button
+          class="btn-kebab tap-zone-44"
+          onclick={toggleKebab}
+          aria-label={$t('editor.file_actions')}
+          title={$t('editor.file_actions')}
+        >
           <svg
             width="14"
             height="14"
@@ -316,6 +321,18 @@
     .subhead-meta-container {
       margin-left: 6px;
       gap: 6px;
+    }
+  }
+
+  /* Сенсорная раскладка: полоса вкладок ≥44 px внутренней высоты, зона «⋮» не обрезается карточкой */
+  @media (max-width: 768px), (pointer: coarse) {
+    .editor-subhead-bar {
+      min-height: 48px;
+      padding-right: 10px;
+    }
+
+    .subhead-meta-container {
+      margin-left: 10px;
     }
   }
 </style>

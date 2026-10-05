@@ -382,7 +382,7 @@
   <div class="editor-cm-toolbar" class:is-fullscreen={isFullscreen}>
     <button
       type="button"
-      class="editor-cm-tool-btn"
+      class="editor-cm-tool-btn tap-zone-44"
       onclick={toggleFullscreen}
       title={isFullscreen ? $translate('editor.exit_fullscreen') : $translate('editor.fullscreen')}
       aria-label={isFullscreen
@@ -829,6 +829,19 @@
       max-width: 90vw !important;
       word-break: break-word !important;
       z-index: 60;
+    }
+  }
+
+  /* Сенсорная раскладка: «На весь экран» не накрывает первые строки, перенос по границам слов (§7 D-28) */
+  @media (max-width: 768px), (pointer: coarse) {
+    :global(.cm-content > .cm-line:nth-child(-n + 2)) {
+      padding-right: 48px;
+    }
+
+    :global(.cm-content.cm-lineWrapping) {
+      white-space: break-spaces;
+      word-break: normal;
+      overflow-wrap: anywhere;
     }
   }
 </style>

@@ -126,10 +126,19 @@
         aria-haspopup="true"
         aria-expanded={showOverflowMenu}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="12" cy="5" r="2" />
-          <circle cx="12" cy="12" r="2" />
-          <circle cx="12" cy="21" r="2" />
+        <span>{$t('editor.more_short')}</span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="6 9 12 15 18 9" />
         </svg>
       </button>
 
@@ -234,7 +243,8 @@
 
   .btn-overflow-trigger {
     display: none;
-    padding: 4px 8px;
+    padding: 4px 10px;
+    gap: 4px;
     align-items: center;
     justify-content: center;
   }

@@ -114,9 +114,7 @@ test.describe('Templates modal integration test suite', () => {
     await fileRow.click();
     // Ждём появления kebab-кнопки (отображается только когда файл выбран)
     const kebabBtn = page
-      .locator(
-        'button[aria-label="Дополнительные действия"], button[title="Дополнительные действия"]'
-      )
+      .locator('button[aria-label="Действия с файлом"], button[title="Действия с файлом"]')
       .first();
     await expect(kebabBtn).toBeVisible({ timeout: 5000 });
     await kebabBtn.click();

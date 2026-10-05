@@ -31,7 +31,7 @@
     <div>
       <h1>{title}</h1>
       {#if subtitle}
-        <p class="text-secondary" style="margin: 6px 0 0;">{subtitle}</p>
+        <p class="text-secondary page-header-subtitle" style="margin: 6px 0 0;">{subtitle}</p>
       {/if}
     </div>
     {#if actions || children}
