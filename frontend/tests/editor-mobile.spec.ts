@@ -32,7 +32,17 @@ async function mockEditor(page: Page, theme: (typeof THEMES)[number]) {
             ? [
                 { name: 'config.yaml', path: `${MIHOMO_DIR}/config.yaml`, size: 1500 },
                 { name: 'default.yaml', path: `${MIHOMO_DIR}/default.yaml`, size: 800 },
-                { name: 'outbounds.json', path: `${MIHOMO_DIR}/outbounds.json`, size: 400 }
+                { name: 'outbounds.json', path: `${MIHOMO_DIR}/outbounds.json`, size: 400 },
+                {
+                  name: '04_outbounds.sub_provider_nodes.json',
+                  path: `${MIHOMO_DIR}/04_outbounds.sub_provider_nodes.json`,
+                  size: 2048
+                },
+                {
+                  name: '04_outbounds.zz_xcp_generated.json',
+                  path: `${MIHOMO_DIR}/04_outbounds.zz_xcp_generated.json`,
+                  size: 1024
+                }
               ]
             : []
         )
@@ -220,7 +230,7 @@ for (const theme of THEMES) {
       await expectInsideViewport(page, '.kebab-dropdown', 'выпадающее меню файла');
       await page.keyboard.press('Escape');
 
-      // Статус-бар: компактный, однострочный (высота <= 30px), подсказка Ctrl+S скрыта
+      // Статус-бар: компактный, однострочный, подсказка Ctrl+S скрыта
       const statusbar = page.locator('.editor-statusbar');
       await expect(statusbar).toBeVisible();
       const statusBox = await statusbar.boundingBox();
@@ -267,38 +277,6 @@ for (const theme of THEMES) {
       await expectNoHorizontalOverflow(page);
     });
 
-    test('панель бэкапов — лист поверх редактора: список виден, сравнение читается, закрывается', async ({
-      page
-    }) => {
-      await page.goto('/#/editor');
-      await openFile(page);
-
-      await page.locator('.backups-toggle-btn').click();
-      const drawer = page.locator('.editor-bottom-drawer');
-      await expect(drawer).toBeVisible();
-      await expectInsideViewport(page, '.editor-bottom-drawer', 'панель бэкапов');
-
-      // Список копий виден, «Восстановить» доступна без наведения
-      const firstItem = page.locator('.backup-item').first();
-      await expect(firstItem).toBeVisible();
-      await expectInsideViewport(page, '.backup-item .restore-inline-btn', '«Восстановить»');
-      await expect(page.locator('.backup-item .restore-inline-btn').first()).toHaveCSS(
-        'opacity',
-        '1'
-      );
-
-      await firstItem.locator('.backup-select-btn').click();
-      await expect(page.locator('.diff-viewer-container')).toBeVisible();
-      const diff = await page.locator('.diff-body').boundingBox();
-      expect(diff!.height, 'область сравнения читаема').toBeGreaterThan(80);
-      await expect(page.locator('.diff-line-removed').first()).toBeVisible();
-
-      await expectNoHorizontalOverflow(page);
-
-      await page.locator('.drawer-close-btn').click();
-      await expect(drawer).toBeHidden();
-    });
-
     test('модальные окна шаблонов и генератора адаптированы под 390px', async ({ page }) => {
       await page.goto('/#/editor');
       await openFile(page, 'config.yaml');
@@ -335,6 +313,151 @@ for (const theme of THEMES) {
   });
 }
 
+const LONG_NAMES = ['04_outbounds.sub_provider_nodes.json', '04_outbounds.zz_xcp_generated.json'];
+
+for (const vp of [
+  { label: '390', width: 390, height: 844 },
+  { label: '768', width: 768, height: 1024 }
+]) {
+  test.describe(`Редактор после проверки на роутере (${vp.label} px)`, () => {
+    test.use({ viewport: { width: vp.width, height: vp.height }, hasTouch: true });
+
+    test.beforeEach(async ({ page }) => {
+      await mockEditor(page, 'light');
+    });
+
+    test('шторка файлов — fixed на всю высоту окна с кнопкой «Закрыть»', async ({ page }) => {
+      await page.goto('/#/editor');
+      await page.locator('.editor-empty-actions .btn-secondary').click();
+      const pane = page.locator('.file-tree-pane.overlay');
+      await expect(pane).toBeVisible();
+
+      await expect(pane).toHaveCSS('position', 'fixed');
+      const paneBox = (await pane.boundingBox())!;
+      expect(paneBox.y, 'шторка от верхнего края').toBeLessThanOrEqual(1);
+      expect(paneBox.height, 'шторка на всю высоту').toBeGreaterThanOrEqual(vp.height - 1);
+
+      const backdropBox = (await page.locator('.file-tree-backdrop').boundingBox())!;
+      expect(Math.abs(backdropBox.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(backdropBox.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(backdropBox.width - vp.width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(backdropBox.height - vp.height)).toBeLessThanOrEqual(1);
+
+      // Затемнение накрывает и шапку страницы
+      const topClass = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x, y)?.className ?? '',
+        [vp.width - 10, 10]
+      );
+      expect(topClass).toContain('file-tree-backdrop');
+
+      const closeBtn = page.locator('.responsive-sidebar-close');
+      const closeBox = (await closeBtn.boundingBox())!;
+      expect(closeBox.width).toBeGreaterThanOrEqual(44);
+      expect(closeBox.height).toBeGreaterThanOrEqual(44);
+      await closeBtn.click();
+      await expect(pane).toBeHidden();
+
+      // Escape по-прежнему закрывает
+      await page.locator('.editor-empty-actions .btn-secondary').click();
+      await expect(pane).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(pane).toBeHidden();
+    });
+
+    test('имена файлов переносятся и различимы', async ({ page }) => {
+      await page.goto('/#/editor');
+      await page.locator('.editor-empty-actions .btn-secondary').click();
+      const pane = page.locator('.file-tree-pane.overlay');
+      await expect(pane).toBeVisible();
+
+      for (const name of LONG_NAMES) {
+        const row = pane.locator(`.file-row:has(.fr-name[title="${name}"])`);
+        await expect(row).toBeVisible();
+        const m = await row.locator('.fr-name').evaluate((el) => {
+          const cs = getComputedStyle(el);
+          return {
+            clientHeight: el.clientHeight,
+            scrollHeight: el.scrollHeight,
+            clientWidth: el.clientWidth,
+            scrollWidth: el.scrollWidth,
+            lineHeight: parseFloat(cs.lineHeight)
+          };
+        });
+        expect(m.clientHeight, `${name}: две строки`).toBeGreaterThanOrEqual(m.lineHeight * 1.6);
+        expect(m.scrollHeight, `${name}: высота не обрезана`).toBeLessThanOrEqual(
+          m.clientHeight + 1
+        );
+        expect(m.scrollWidth, `${name}: ширина не обрезана`).toBeLessThanOrEqual(m.clientWidth + 1);
+
+        const meta = row.locator('.fr-meta');
+        await expect(meta).toBeVisible();
+        const paneBox = (await pane.boundingBox())!;
+        const metaBox = (await meta.boundingBox())!;
+        expect(metaBox.x + metaBox.width, `${name}: размер внутри панели`).toBeLessThanOrEqual(
+          paneBox.x + paneBox.width + 0.5
+        );
+      }
+
+      const overflowing = await pane
+        .locator('.group-path')
+        .evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth + 1).length);
+      expect(overflowing, 'путь группы не обрезан').toBe(0);
+    });
+
+    test('лист Backups — список, затем сравнение на весь лист', async ({ page }) => {
+      await page.goto('/#/editor');
+      await openFile(page);
+
+      const stripBox = (await page.locator('.editor-tab-strip').boundingBox())!;
+      const stripCenter = [stripBox.x + stripBox.width / 2, stripBox.y + stripBox.height / 2];
+
+      await page.locator('.backups-toggle-btn').click();
+      const drawer = page.locator('.editor-bottom-drawer');
+      await expect(drawer).toBeVisible();
+
+      // Лист закрывает всю карточку редактора (идёт slide-переход, поэтому poll)
+      await expect
+        .poll(async () => {
+          const d = await drawer.boundingBox();
+          const c = await page.locator('.editor-main-card').boundingBox();
+          if (!d || !c) return false;
+          return Math.abs(d.y - c.y) <= 1 && Math.abs(d.height - c.height) <= 2;
+        })
+        .toBe(true);
+      const inside = await page.evaluate(
+        ([x, y]) => !!document.elementFromPoint(x, y)?.closest('.editor-bottom-drawer'),
+        stripCenter
+      );
+      expect(inside, 'полоса вкладок закрыта листом').toBe(true);
+
+      await expect(page.locator('.drawer-sidebar')).toBeVisible();
+      await expect(page.locator('.drawer-main')).toBeHidden();
+      await expect(page.getByText('Выберите резервную копию слева')).toBeHidden();
+      await expect(page.locator('.restore-inline-btn').first()).toBeHidden();
+
+      await page.locator('.backup-select-btn').first().click();
+      await expect(page.locator('.drawer-sidebar')).toBeHidden();
+      await expect(page.locator('.diff-viewer-container')).toBeVisible();
+      await expect(page.locator('.diff-line-removed').first()).toBeVisible();
+      const diff = (await page.locator('.diff-body').boundingBox())!;
+      expect(diff.height, 'сравнение на весь лист').toBeGreaterThan(250);
+
+      for (const sel of ['.drawer-back-btn', '.diff-restore-btn']) {
+        const box = (await page.locator(sel).boundingBox())!;
+        expect(box.height, `${sel}: высота`).toBeGreaterThanOrEqual(44);
+      }
+      await expectNoHorizontalOverflow(page);
+
+      await page.locator('.drawer-back-btn').click();
+      await expect(page.locator('.drawer-sidebar')).toBeVisible();
+      await expect(page.locator('.drawer-main')).toBeHidden();
+
+      await page.locator('.drawer-close-btn').click();
+      await expect(drawer).toBeHidden();
+    });
+  });
+}
+
 test.describe('Редактор на широком экране не меняется', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -351,5 +474,18 @@ test.describe('Редактор на широком экране не меняе
     await expect(page.locator('.editor-bottom-drawer')).toBeVisible();
     // Кнопка «Закрыть» нужна только на узком экране
     await expect(page.locator('.drawer-close-btn')).toBeHidden();
+    await expect(page.locator('.drawer-topbar')).toBeHidden();
+    // Список копий и подсказка рядом
+    await expect(page.locator('.drawer-sidebar')).toBeVisible();
+    await expect(page.locator('.drawer-main')).toBeVisible();
+    await expect(page.locator('.drawer-empty-state')).toBeVisible();
+  });
+
+  test('длинные имена файлов в одну строку', async ({ page }) => {
+    await mockEditor(page, 'dark');
+    await page.goto('/#/editor');
+    const name = page.locator(`.fr-name[title="${LONG_NAMES[0]}"]`);
+    await expect(name).toBeVisible();
+    await expect(name).toHaveCSS('white-space', 'nowrap');
   });
 });

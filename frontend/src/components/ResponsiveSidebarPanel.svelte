@@ -12,6 +12,8 @@
     overlay?: boolean;
     onClose?: () => void;
     containerClass?: string;
+    /** Заголовок шторки в режиме оверлея (рядом с кнопкой «Закрыть») */
+    title?: string;
     children: import('svelte').Snippet;
     header?: import('svelte').Snippet;
   }
@@ -26,6 +28,7 @@
     overlay,
     onClose,
     containerClass = '',
+    title,
     children,
     header
   }: ResponsiveSidebarProps = $props();
@@ -255,7 +258,7 @@
     class:side-right={side === 'right'}
     role={isOverlay ? 'dialog' : undefined}
     aria-modal={isOverlay ? 'true' : undefined}
-    aria-label={isOverlay ? $t('editor.sidebar_panel') : undefined}
+    aria-label={isOverlay ? (title ?? $t('editor.sidebar_panel')) : undefined}
     ontouchstart={onTouchStart}
     ontouchmove={onTouchMove}
     ontouchend={onTouchEnd}
@@ -264,6 +267,35 @@
     }}
     style={isOverlay ? undefined : `width: ${panelWidth}px;`}
   >
+    {#if isOverlay}
+      <div class="responsive-sidebar-overlay-header">
+        {#if title}
+          <span class="responsive-sidebar-title">{title}</span>
+        {/if}
+        <button
+          type="button"
+          class="responsive-sidebar-close"
+          aria-label={$t('app.close')}
+          title={$t('app.close')}
+          onclick={handleClose}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    {/if}
     {#if header}
       <div class="responsive-sidebar-header">
         {@render header()}
@@ -297,35 +329,83 @@
   }
 
   .responsive-sidebar-panel.overlay {
-    position: absolute;
+    position: fixed;
     top: 0;
     bottom: 0;
-    z-index: 30;
-    width: min(85%, 320px);
+    z-index: 250;
+    width: min(85vw, 320px);
     max-width: none;
+    height: auto;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
     background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    border: none;
     box-shadow: var(--shadow-md);
-    transition: transform 0.2s ease-out;
   }
 
   .responsive-sidebar-panel.overlay.side-left {
     left: 0;
     right: auto;
+    border-right: 1px solid var(--border);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
   }
 
   .responsive-sidebar-panel.overlay.side-right {
     right: 0;
     left: auto;
+    border-left: 1px solid var(--border);
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+  }
+
+  .responsive-sidebar-overlay-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 4px 4px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .responsive-sidebar-title {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .responsive-sidebar-close {
+    appearance: none;
+    -webkit-appearance: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin-left: auto;
+    padding: 0;
+    flex-shrink: 0;
+    border: 0;
+    background: transparent;
+    color: var(--fg-secondary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .responsive-sidebar-close:hover {
+    background: var(--hover);
+  }
+
+  .responsive-sidebar-close:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .responsive-sidebar-backdrop {
     appearance: none;
     -webkit-appearance: none;
-    position: absolute;
+    position: fixed;
     inset: 0;
-    z-index: 29;
+    z-index: 249;
     border: 0;
     padding: 0;
     margin: 0;

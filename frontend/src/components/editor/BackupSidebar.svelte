@@ -25,6 +25,9 @@
     onClose?: () => void;
   } = $props();
 
+  // Мобильный лист — два экрана: список копий → сравнение на весь лист
+  let mobileScreen = $state<'list' | 'diff'>('list');
+
   function formatBackupDate(backup: string): string {
     const parts = backup.split('.backup-');
     if (parts.length < 2) return backup;
@@ -45,15 +48,43 @@
 </script>
 
 <div class="editor-bottom-drawer" transition:slide={{ duration: 200 }}>
-  <button type="button" class="drawer-close-btn" onclick={() => onClose?.()}>
-    {$t('app.close')}
-  </button>
-  <div class="drawer-layout">
+  <div class="drawer-topbar">
+    {#if mobileScreen === 'diff'}
+      <button type="button" class="drawer-back-btn" onclick={() => (mobileScreen = 'list')}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+        {$t('app.back')}
+      </button>
+    {/if}
+    <span class="drawer-title">{$t('editor.backups')}</span>
+    <button type="button" class="drawer-close-btn" onclick={() => onClose?.()}>
+      {$t('app.close')}
+    </button>
+  </div>
+  <div class="drawer-layout" class:show-diff={mobileScreen === 'diff'}>
     <!-- Список бэкапов слева -->
     <div class="drawer-sidebar">
       {#each backups as backup (backup)}
         <div class="backup-item" class:active={selectedBackup === backup}>
-          <button type="button" class="backup-select-btn" onclick={() => onSelectBackup(backup)}>
+          <button
+            type="button"
+            class="backup-select-btn"
+            onclick={() => {
+              onSelectBackup(backup);
+              mobileScreen = 'diff';
+            }}
+          >
             <span class="backup-time">{formatBackupDate(backup)}</span>
           </button>
           <button
@@ -75,6 +106,13 @@
             <span
               >{$t('editor.compare_with_backup', { date: formatBackupDate(selectedBackup) })}</span
             >
+            <button
+              type="button"
+              class="btn btn-primary btn-sm diff-restore-btn"
+              onclick={() => onRestoreBackup(selectedBackup)}
+            >
+              {$t('settings.restore')}
+            </button>
           </div>
           <div class="diff-body">
             {#if backupLoading}
@@ -122,7 +160,8 @@
     height: 100%;
   }
 
-  .drawer-close-btn {
+  .drawer-topbar,
+  .diff-restore-btn {
     display: none;
   }
 
@@ -217,6 +256,10 @@
   }
 
   .diff-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     padding: 8px 14px;
     background: var(--surface-tint);
     border-bottom: 1px solid var(--border);
@@ -290,30 +333,45 @@
     font-size: 12px;
   }
 
-  /* Узкий экран: панель бэкапов — лист поверх редактора, список копий над сравнением */
+  /* Узкий экран: лист закрывает всю карточку редактора; два экрана — список копий, затем сравнение */
   @media (max-width: 768px) {
     .editor-bottom-drawer {
       position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 20;
-      height: min(85vh, 520px);
+      inset: 0;
+      height: auto;
+      z-index: 25;
       display: flex;
       flex-direction: column;
-      border-top: 1px solid var(--border);
-      box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.3));
+      border-top: none;
     }
 
+    .drawer-topbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 52px;
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .drawer-title {
+      flex: 1;
+      font-weight: 600;
+      color: var(--fg-primary);
+    }
+
+    .drawer-back-btn,
     .drawer-close-btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      gap: 4px;
       flex-shrink: 0;
-      margin: 6px 8px 4px auto;
+      min-height: 44px;
+      min-width: 44px;
       padding: 6px 14px;
       font-size: 13px;
-      min-height: 36px;
       background: var(--surface-tint);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -327,18 +385,30 @@
       flex-direction: column;
     }
 
+    .drawer-layout:not(.show-diff) .drawer-main {
+      display: none;
+    }
+
+    .drawer-layout.show-diff .drawer-sidebar {
+      display: none;
+    }
+
     .drawer-sidebar {
+      flex: 1;
       width: 100%;
-      max-height: 35%;
-      flex-shrink: 0;
-      border-right: none;
-      border-bottom: 1px solid var(--border);
+      max-height: none;
+      border: none;
       overflow-y: auto;
       padding: 6px;
     }
 
     .backup-item {
-      min-height: 40px;
+      min-height: 48px;
+    }
+
+    .backup-select-btn {
+      min-height: 44px;
+      font-size: 14px;
     }
 
     .drawer-main {
@@ -349,16 +419,28 @@
       overflow: hidden;
     }
 
+    /* Восстановление только с экрана сравнения: случайный тап по списку ничего не меняет */
+    .restore-inline-btn {
+      display: none;
+    }
+
+    .drawer-empty-state {
+      display: none;
+    }
+
+    .diff-header {
+      padding: 8px 12px;
+    }
+
+    .diff-restore-btn {
+      display: inline-flex;
+      min-height: 44px;
+      flex-shrink: 0;
+    }
+
     .diff-body {
       overflow-x: auto;
       white-space: pre;
-    }
-
-    /* На сенсорном экране нет hover: «Восстановить» всегда видна */
-    .restore-inline-btn {
-      opacity: 1;
-      min-height: 32px;
-      padding: 4px 10px;
     }
   }
 </style>

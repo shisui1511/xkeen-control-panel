@@ -1,6 +1,7 @@
 <script lang="ts">
   import ResponsiveSidebarPanel from '../ResponsiveSidebarPanel.svelte';
   import FileTree from './FileTree.svelte';
+  import { t } from '../../i18n';
 
   export interface ConfigFileInfo {
     name: string;
@@ -48,6 +49,7 @@
   bind:show
   {overlay}
   {onClose}
+  title={$t('editor.tab_files')}
   storageKey="editor_filetree_width"
   defaultWidth={240}
   minWidth={160}

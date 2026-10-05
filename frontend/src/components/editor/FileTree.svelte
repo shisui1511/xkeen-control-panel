@@ -48,6 +48,11 @@
   const xrayDir = '/opt/etc/xray/configs';
   const mihomoDir = '/opt/etc/mihomo';
 
+  /** Части имени для переноса строки после «.», «_», «-», «/» (разделитель остаётся в конце части) */
+  function breakableParts(name: string): string[] {
+    return name.split(/(?<=[._\-/])/);
+  }
+
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -157,7 +162,9 @@
           <span class="group-count">({filteredXrayFiles.length})</span>
         </div>
         <span class="group-path-wrap">
-          <span class="group-path" title={xrayDir}>{xrayDir}</span>
+          <span class="group-path" title={xrayDir}
+            >{#each breakableParts(xrayDir) as part, i (i)}{part}<wbr />{/each}</span
+          >
           <span class="nav-group-arrow">›</span>
         </span>
       </summary>
@@ -178,7 +185,9 @@
               {#if activeConfig}
                 <span class="active-dot" title={$t('editor.active_config')}></span>
               {/if}
-              <span class="fr-name file-name" title={file.name}>{file.name}</span>
+              <span class="fr-name file-name" title={file.name}
+                >{#each breakableParts(file.name) as part, i (i)}{part}<wbr />{/each}</span
+              >
               {#if stopWord}
                 {@const markTitle = $t('stoplist.badge_title', { word: stopWord })}
                 <span class="stoplist-mark" title={markTitle} aria-label={markTitle}>
@@ -205,7 +214,9 @@
           <span class="group-count">({filteredMihomoFiles.length})</span>
         </div>
         <span class="group-path-wrap">
-          <span class="group-path" title={mihomoDir}>{mihomoDir}</span>
+          <span class="group-path" title={mihomoDir}
+            >{#each breakableParts(mihomoDir) as part, i (i)}{part}<wbr />{/each}</span
+          >
           <span class="nav-group-arrow">›</span>
         </span>
       </summary>
@@ -225,7 +236,9 @@
               {#if activeConfig}
                 <span class="active-dot" title={$t('editor.active_config')}></span>
               {/if}
-              <span class="fr-name file-name" title={file.name}>{file.name}</span>
+              <span class="fr-name file-name" title={file.name}
+                >{#each breakableParts(file.name) as part, i (i)}{part}<wbr />{/each}</span
+              >
             </div>
             <span class="fr-meta">{formatBytes(file.size)}</span>
           </button>
@@ -659,6 +672,35 @@
       padding: 10px 12px;
       gap: 8px;
       font-size: 13px;
+    }
+
+    .fr-name {
+      white-space: normal;
+      overflow-wrap: anywhere;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      overflow: hidden;
+      line-height: 1.3;
+      min-width: 0;
+    }
+
+    .fr-meta {
+      align-self: center;
+    }
+
+    .group-path-wrap {
+      min-width: 0;
+      flex: 1;
+      justify-content: flex-end;
+    }
+
+    .group-path {
+      max-width: none;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      text-align: right;
     }
 
     .file-search-input {
