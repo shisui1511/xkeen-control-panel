@@ -38,6 +38,9 @@ type Store struct {
 	broker *Broker
 	// now — источник времени для имён копий состояния; в тестах подменяется.
 	now func() time.Time
+	// writeFile — запись файла состояния (nil — utils.AtomicWriteFile); в тестах
+	// подменяется, чтобы имитировать сбой диска.
+	writeFile func(path string, data []byte, perm os.FileMode) error
 }
 
 // OpenStore открывает (или создаёт) файл состояния в dataDir. broker может
@@ -133,7 +136,11 @@ func (s *Store) persist(st State) error {
 	if err != nil {
 		return fmt.Errorf("configlayer: encode state: %w", err)
 	}
-	if err := utils.AtomicWriteFile(s.path, data, 0o600); err != nil {
+	write := s.writeFile
+	if write == nil {
+		write = utils.AtomicWriteFile
+	}
+	if err := write(s.path, data, 0o600); err != nil {
 		return fmt.Errorf("configlayer: write state: %w", err)
 	}
 	return nil

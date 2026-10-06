@@ -3,6 +3,7 @@ package configlayer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"time"
@@ -338,7 +339,8 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 
 	// Манифест и применённое состояние фиксируются только после перезапуска (D-16):
 	// до этого прежнее состояние восстановимо из набора копий.
-	if _, err := p.runRestart(ctx, plan, out.Set); err != nil {
+	views, err := p.runRestart(ctx, plan, out.Set)
+	if err != nil {
 		res := ResultView{Code: ResultRestartFailed, Message: err.Error()}
 		var re *restartError
 		if errors.As(err, &re) {
@@ -353,13 +355,36 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		return p.finish(res)
 	}
 	if err := p.commitState(plan, src, req); err != nil {
-		rbErr := p.rollback(out.Set)
-		p.setStep(StepWrite, StepFailed, "", err.Error())
-		return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: rbErr == nil})
+		// Ядра уже перезапущены на новых файлах: вернуть одни файлы мало, ядра
+		// нужно поднять на прежних (WR-04).
+		return p.finish(p.rollbackAfterCommitFailure(ctx, out.Set, views, err))
 	}
 	// Ротация копий — после успешного применения; сбой уборки применение не отменяет.
 	_ = PruneBackups(p.d.DataDir, BackupRetention)
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
+}
+
+// rollbackAfterCommitFailure откатывает файлы после сбоя фиксации состояния и
+// перезапускает на прежних файлах ядра, которые к этому моменту уже работали на
+// новых; итог отражает, что из этого удалось.
+func (p *Pipeline) rollbackAfterCommitFailure(ctx context.Context, set *BackupSet, views []RestartView, cause error) ResultView {
+	p.setStep(StepWrite, StepFailed, "", cause.Error())
+	if rbErr := p.rollback(set); rbErr != nil {
+		return ResultView{Code: ResultRollbackFailed, Message: fmt.Sprintf("%v; откат файлов не удался: %v", cause, rbErr)}
+	}
+	res := ResultView{Code: ResultWriteFailed, Message: cause.Error(), RolledBack: true}
+	for _, v := range views {
+		switch v.Outcome {
+		case RestartOutcomeRestarted, RestartOutcomeHotReloaded, RestartOutcomeRestartedReload:
+		default:
+			continue
+		}
+		if rerr := p.recoverKernel(ctx, v.Kernel); rerr != nil {
+			res.Code, res.Kernel = ResultKernelNotRecovered, v.Kernel
+			res.Message = fmt.Sprintf("%v; повторный рестарт %s на прежних файлах: %v", cause, v.Kernel, rerr)
+		}
+	}
+	return res
 }
 
 // recoverPendingJournal возвращает файлы по журналу, оставшемуся от прерванной

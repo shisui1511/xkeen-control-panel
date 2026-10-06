@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Тесты правок по ревью фазы 144 (144-REVIEW.md): каждый назван по идентификатору находки.
@@ -387,5 +389,83 @@ func TestWR03_RunRecoversPendingJournalFirst(t *testing.T) {
 	}
 	if !st.Notices.RecoveredFromJournal {
 		t.Error("нет уведомления recovered_from_journal")
+	}
+}
+
+// commitFailEnv — Xray; рестарт проходит, а следующая запись файла состояния
+// (фиксация применения) падает.
+func commitFailEnv(t *testing.T, kernelRecovers bool) (*testEnv, *recoverApplier, *fileGen) {
+	t.Helper()
+	setRollbackTimings(t)
+	xrayBin := writeFakeKernel(t, t.TempDir(), "xray", 0, "", 0)
+	procs := newFakeProcs()
+	procs.set("xray", "running", 100)
+	var failNext atomic.Bool
+	var env *testEnv
+	pid := 100
+	base := newProcApplier(procs, func() (string, error) {
+		pid++
+		procs.set("xray", "running", pid)
+		if env != nil {
+			failNext.Store(true)
+		}
+		return "", nil
+	})
+	applier := &recoverApplier{procApplier: base}
+	applier.onForce = func(string) {
+		if kernelRecovers {
+			pid++
+			procs.set("xray", "running", pid)
+		} else {
+			procs.set("xray", "stopped", 0)
+		}
+	}
+	gen := newXrayGen("{}\n")
+	env = newTestPipeline(t, pipeOpts{
+		Bins: Binaries{Xray: xrayBin}, Generators: []Generator{gen},
+		Applier: applier, Procs: procs.states,
+	})
+	env.Store.writeFile = func(path string, data []byte, perm os.FileMode) error {
+		if failNext.CompareAndSwap(true, false) {
+			return errors.New("диск полон")
+		}
+		return utils.AtomicWriteFile(path, data, perm)
+	}
+	gen.set("{}\n")
+	env.setDraft(t, "note", `{"a":1}`)
+	return env, applier, gen
+}
+
+// WR-04: сбой фиксации состояния после успешного рестарта откатывает файлы и
+// перезапускает ядро на прежних, а не оставляет его на отменённом конфиге.
+func TestWR04_CommitFailureRestartsKernelOnOldFiles(t *testing.T) {
+	env, applier, _ := commitFailEnv(t, true)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != ResultWriteFailed || !r.RolledBack {
+		t.Fatalf("Result = %+v, want write_failed с RolledBack", r)
+	}
+	if len(applier.forced) != 1 || applier.forced[0] != KernelXray {
+		t.Errorf("RestartLocked вызван %v, want [xray]: ядро осталось бы на новых файлах", applier.forced)
+	}
+	if _, err := os.Stat(filepath.Join(env.Roots.Xray, "04_outbounds.xcp-a.tail.json")); err == nil {
+		t.Error("файл новой записи остался после отката")
+	}
+	if env.Store.Snapshot().Journal != nil {
+		t.Error("журнал не очищен")
+	}
+}
+
+// WR-04: ядро не поднялось на прежних файлах после сбоя фиксации — свой код.
+func TestWR04_CommitFailureKernelNotRecovered(t *testing.T) {
+	env, _, _ := commitFailEnv(t, false)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != ResultKernelNotRecovered || !r.RolledBack || r.Kernel != KernelXray {
+		t.Fatalf("Result = %+v, want kernel_not_recovered с RolledBack", r)
 	}
 }
