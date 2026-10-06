@@ -37,6 +37,10 @@ type ApplyRequest struct {
 	Trigger Trigger
 	Source  SourceKind
 	Only    []string
+	// Kernel ограничивает запуск одним ядром (фоновая сборка после его установки):
+	// файлы, записи манифеста и сироты других ядер не участвуют в плане и не
+	// трогаются. Пусто — все установленные ядра.
+	Kernel string
 }
 
 // StepID — шаг конвейера.
@@ -245,8 +249,19 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	installed := InstalledKernels{Xray: bins.Xray != "", Mihomo: bins.Mihomo != ""}
 
 	p.setStep(StepBuild, StepRunning, "", "")
+	// Дрейф проверяется здесь, под замками применения, а не только в StartApply:
+	// фоновые запуски (установка ядра, включение слоя) идут мимо кнопки и иначе
+	// молча перезаписали бы ручную правку (D-11). «Пересобрать» дрейф разрешает сам.
+	manifest := manifestOfScope(snap.Manifest, installed, req.Kernel)
+	if req.Trigger != TriggerRebuild {
+		if drift := driftKeys(p.d.Roots, manifest); len(drift) > 0 {
+			p.setStep(StepBuild, StepFailed, "", ErrDriftBlocked.Error())
+			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
+		}
+	}
 	files, err := p.d.Registry.Build(src, installed)
 	if err == nil {
+		files = filesOfScope(files, req.Kernel)
 		err = CheckGenerated(files, p.d.ForeignOwned)
 	}
 	var plan Plan
@@ -257,9 +272,10 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		}
 		// Записи манифеста неустановленного ядра не участвуют в плане: иначе при
 		// пустой генерации его файлы ушли бы в удаление. Они остаются нетронутыми.
-		plan, err = ComputePlan(p.d.Roots, files, manifestOfInstalled(snap.Manifest, installed), only, p.d.ForeignOwned)
-		// Каталог неустановленного ядра так же не трогается: его сирот не убираем.
-		plan.Orphans = orphansOfInstalled(plan.Orphans, installed)
+		plan, err = ComputePlan(p.d.Roots, files, manifest, only, p.d.ForeignOwned)
+		// Каталог неустановленного ядра (и ядра вне области запуска) так же не
+		// трогается: его сирот не убираем.
+		plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)
 	}
 	if err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
@@ -321,23 +337,55 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
 }
 
-// manifestOfInstalled оставляет записи манифеста только установленных ядер.
-func manifestOfInstalled(m map[string]ManifestEntry, installed InstalledKernels) map[string]ManifestEntry {
+// kernelInScope — ядро входит в область запуска: установлено и совпадает с
+// ограничением only (пусто — без ограничения).
+func kernelInScope(kernel string, installed InstalledKernels, only string) bool {
+	return installed.Has(kernel) && (only == "" || kernel == only)
+}
+
+// manifestOfScope оставляет записи манифеста только ядер из области запуска.
+func manifestOfScope(m map[string]ManifestEntry, installed InstalledKernels, only string) map[string]ManifestEntry {
 	out := make(map[string]ManifestEntry, len(m))
 	for k, e := range m {
-		if installed.Has(e.Kernel) {
+		if kernelInScope(e.Kernel, installed, only) {
 			out[k] = e
 		}
 	}
 	return out
 }
 
-// orphansOfInstalled оставляет сирот только установленных ядер.
-func orphansOfInstalled(orphans []OrphanFile, installed InstalledKernels) []OrphanFile {
+// orphansOfScope оставляет сирот только ядер из области запуска.
+func orphansOfScope(orphans []OrphanFile, installed InstalledKernels, only string) []OrphanFile {
 	var out []OrphanFile
 	for _, o := range orphans {
-		if installed.Has(o.Kernel) {
+		if kernelInScope(o.Kernel, installed, only) {
 			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// filesOfScope оставляет сгенерированные файлы только ядра only (пусто — все).
+func filesOfScope(files []GeneratedFile, only string) []GeneratedFile {
+	if only == "" {
+		return files
+	}
+	out := make([]GeneratedFile, 0, len(files))
+	for _, f := range files {
+		if f.Kernel == only {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// driftKeys — ключи записей манифеста с расхождением (диск не совпадает с тем,
+// что записала панель).
+func driftKeys(roots Roots, manifest map[string]ManifestEntry) []string {
+	var out []string
+	for _, c := range CheckManifest(roots, manifest) {
+		if c.State.IsDrift() {
+			out = append(out, c.Key)
 		}
 	}
 	return out

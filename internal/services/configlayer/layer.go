@@ -646,7 +646,9 @@ func (l *Layer) noteBuildResult(kernel string, view ApplyView) {
 }
 
 // OnKernelInstalled — хук установки ядра (D-18): в фоне собирает для него файлы
-// из применённого состояния. Ядро не запускается: решение о перезапуске принимает
+// из применённого состояния. Запуск ограничен этим ядром: файлы, сироты и
+// ручные правки другого ядра не трогаются, а нерешённый дрейф самого ядра
+// блокирует сборку (D-11). Ядро не запускается: решение о перезапуске принимает
 // тот же Preview конвейера, остановленное и неактивное ядро не трогается.
 // Неудача — уведомление build_failed:<ядро>.
 func (l *Layer) OnKernelInstalled(kernel string) {
@@ -661,7 +663,7 @@ func (l *Layer) OnKernelInstalled(kernel string) {
 			return
 		}
 		defer release()
-		view := l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerKernelInstalled, Source: SourceApplied})
+		view := l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerKernelInstalled, Source: SourceApplied, Kernel: kernel})
 		release()
 		l.invalidateVersions()
 		l.noteBuildResult(kernel, view)
