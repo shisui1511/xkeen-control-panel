@@ -1,6 +1,8 @@
 package configlayer
 
-import "strings"
+import (
+	"strings"
+)
 
 // Коды проблем сборки.
 const (
@@ -40,6 +42,15 @@ func (e *BuildError) Error() string {
 
 // CheckGenerated проверяет сгенерированные файлы до записи.
 func CheckGenerated(files []GeneratedFile, foreignOwned func(kernel, rel string) bool) error {
+	var issues []BuildIssue
+	for _, f := range files {
+		if err := ValidatePanelName(f.Kernel, f.RelPath); err != nil {
+			issues = append(issues, BuildIssue{Key: f.Key(), Code: IssueInvalidPanelName, Detail: err.Error()})
+		}
+	}
+	if len(issues) > 0 {
+		return &BuildError{Issues: issues}
+	}
 	return nil
 }
 
@@ -76,7 +87,7 @@ type Plan struct {
 
 // Empty — в плане нет ни записи, ни удаления, ни сирот.
 func (p Plan) Empty() bool {
-	return false
+	return len(p.Files) == 0 && len(p.Orphans) == 0
 }
 
 // Changes — у ядра есть действия плана (сироты считаются изменением ядра).
@@ -86,5 +97,23 @@ func (p Plan) Changes(kernel string) bool {
 
 // ComputePlan рассчитывает план записи.
 func ComputePlan(roots Roots, desired []GeneratedFile, manifest map[string]ManifestEntry, only map[string]bool, foreignOwned func(kernel, rel string) bool) (Plan, error) {
-	return Plan{}, nil
+	var plan Plan
+	for _, f := range desired {
+		abs, err := roots.Abs(f.Kernel, f.RelPath)
+		if err != nil {
+			return Plan{}, err
+		}
+		plan.Files = append(plan.Files, FilePlan{
+			Key:     f.Key(),
+			Kernel:  f.Kernel,
+			RelPath: f.RelPath,
+			AbsPath: abs,
+			Action:  ActionWrite,
+			Kind:    f.Kind,
+			Content: f.Content,
+			NewHash: HashContent(f.Content),
+			Expect:  f.Expect,
+		})
+	}
+	return plan, nil
 }

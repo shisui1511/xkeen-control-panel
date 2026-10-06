@@ -1,5 +1,10 @@
 package configlayer
 
+import (
+	"fmt"
+	"sort"
+)
+
 // Expectation — что должно быть видно в Mihomo после перезагрузки провайдера:
 // имя провайдера и число узлов или правил. Сверка идёт в конвейере (144-05).
 type Expectation struct {
@@ -62,7 +67,37 @@ func (r *Registry) Register(g Generator) {
 	r.generators = append(r.generators, g)
 }
 
-// Build вызывает генераторы и собирает желаемый набор файлов.
+// Build вызывает генераторы по порядку регистрации и собирает желаемый набор
+// файлов. Файлы ядер, которых нет в installed, отбрасываются. Один ключ у двух
+// файлов — ошибка duplicate_file (перезаписи нет), ошибка генератора — ошибка
+// generator_failed с ID генератора. Результат отсортирован по ключу: сборка
+// детерминирована, иначе каждое «Применить» переписывало бы файлы.
 func (r *Registry) Build(src Sections, installed InstalledKernels) ([]GeneratedFile, error) {
-	return nil, nil
+	var out []GeneratedFile
+	owner := make(map[string]string)
+	var issues []BuildIssue
+	for _, g := range r.generators {
+		files, err := g.Generate(src, installed)
+		if err != nil {
+			issues = append(issues, BuildIssue{Key: g.ID(), Code: IssueGeneratorFailed, Detail: fmt.Sprintf("%s: %v", g.ID(), err)})
+			continue
+		}
+		for _, f := range files {
+			if !installed.Has(f.Kernel) {
+				continue
+			}
+			key := f.Key()
+			if prev, dup := owner[key]; dup {
+				issues = append(issues, BuildIssue{Key: key, Code: IssueDuplicateFile, Detail: prev + ", " + g.ID()})
+				continue
+			}
+			owner[key] = g.ID()
+			out = append(out, f)
+		}
+	}
+	if len(issues) > 0 {
+		return nil, &BuildError{Issues: issues}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
+	return out, nil
 }
