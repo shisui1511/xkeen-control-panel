@@ -1,6 +1,9 @@
 package configlayer
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"strings"
 )
 
@@ -40,18 +43,60 @@ func (e *BuildError) Error() string {
 	return "сборка файлов отклонена: " + strings.Join(parts, "; ")
 }
 
-// CheckGenerated проверяет сгенерированные файлы до записи.
+// CheckGenerated проверяет сгенерированные файлы до записи и собирает все
+// проблемы в один BuildError (пользователь видит их сразу). Проверки: имя по
+// правилу панели и стоп-списку XKeen, имя не занято старым слоем
+// (foreignOwned, может быть nil), для Xray — ключ "transport": (XKeen при нём
+// выводит файл из работы), валидный JSON и объект на верхнем уровне, для
+// провайдеров Mihomo — YAML с обязательным ключом и непустым списком. Файл
+// не переименовывается и другое имя не подбирается.
 func CheckGenerated(files []GeneratedFile, foreignOwned func(kernel, rel string) bool) error {
 	var issues []BuildIssue
+	add := func(f GeneratedFile, code, detail string) {
+		issues = append(issues, BuildIssue{Key: f.Key(), Code: code, Detail: detail})
+	}
 	for _, f := range files {
 		if err := ValidatePanelName(f.Kernel, f.RelPath); err != nil {
-			issues = append(issues, BuildIssue{Key: f.Key(), Code: IssueInvalidPanelName, Detail: err.Error()})
+			code := IssueInvalidPanelName
+			if errors.Is(err, ErrStoplistName) {
+				code = IssueStoplistName
+			}
+			add(f, code, err.Error())
+		}
+		if foreignOwned != nil && foreignOwned(f.Kernel, f.RelPath) {
+			add(f, IssueNameTaken, "имя занято файлом старого слоя")
+		}
+		switch f.Kind {
+		case KindXrayJSON:
+			for _, is := range checkXrayContent(f.Content) {
+				add(f, is.Code, is.Detail)
+			}
+		case KindMihomoProxyProvider, KindMihomoRuleProvider:
+			if code := ProviderContentProblem(f.Kind, f.Content); code != "" {
+				add(f, code, "")
+			}
 		}
 	}
 	if len(issues) > 0 {
 		return &BuildError{Issues: issues}
 	}
 	return nil
+}
+
+// checkXrayContent проверяет байты файла Xray: ключ "transport": ищется
+// текстом (как у XKeen), затем JSON должен быть валидным объектом.
+func checkXrayContent(content []byte) []BuildIssue {
+	var out []BuildIssue
+	if HasForbiddenTransport(content) {
+		out = append(out, BuildIssue{Code: IssueTransportKeyForbidden, Detail: `ключ "transport": переименует файл в .obsolete`})
+	}
+	if !json.Valid(content) {
+		return append(out, BuildIssue{Code: IssueInvalidJSON})
+	}
+	if trimmed := bytes.TrimSpace(content); len(trimmed) == 0 || trimmed[0] != '{' {
+		out = append(out, BuildIssue{Code: IssueNotObject})
+	}
+	return out
 }
 
 // PlanAction — действие плана над файлом.
