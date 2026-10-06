@@ -539,3 +539,186 @@ func TestApply_RollbackUsesForcedRestart(t *testing.T) {
 		t.Error("файл новой записи остался после отката")
 	}
 }
+
+func TestApply_SingleFlight(t *testing.T) {
+	env := newTestPipeline(t, pipeOpts{Lifecycle: &sync.Mutex{}})
+
+	release, err := env.P.TryBegin(t.Context(), true)
+	if err != nil {
+		t.Fatalf("первый TryBegin: %v", err)
+	}
+	if _, err := env.P.TryBegin(t.Context(), true); !errors.Is(err, ErrApplyBusy) {
+		t.Errorf("второй TryBegin: err = %v, want ErrApplyBusy", err)
+	}
+	release()
+	release() // повторный вызов безопасен
+	again, err := env.P.TryBegin(t.Context(), true)
+	if err != nil {
+		t.Fatalf("TryBegin после release: %v", err)
+	}
+	again()
+}
+
+func TestApply_KernelBusyForUser(t *testing.T) {
+	var mu sync.Mutex
+	env := newTestPipeline(t, pipeOpts{Lifecycle: &mu})
+
+	mu.Lock()
+	if _, err := env.P.TryBegin(t.Context(), true); !errors.Is(err, ErrKernelBusy) {
+		t.Fatalf("TryBegin при занятом замке ядра: err = %v, want ErrKernelBusy", err)
+	}
+	mu.Unlock()
+
+	release, err := env.P.TryBegin(t.Context(), true)
+	if err != nil {
+		t.Fatalf("applyMu не освобождён после ErrKernelBusy: %v", err)
+	}
+	release()
+}
+
+func TestApply_BackgroundWaitsAndCancels(t *testing.T) {
+	old := LifecyclePollInterval
+	LifecyclePollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { LifecyclePollInterval = old })
+	var mu sync.Mutex
+	env := newTestPipeline(t, pipeOpts{Lifecycle: &mu})
+
+	type result struct {
+		release func()
+		err     error
+	}
+	begin := func(ctx context.Context) <-chan result {
+		ch := make(chan result, 1)
+		go func() {
+			rel, err := env.P.TryBegin(ctx, false)
+			ch <- result{rel, err}
+		}()
+		return ch
+	}
+
+	// Ждёт, пока замок занят, и получает его после Unlock.
+	mu.Lock()
+	ch := begin(t.Context())
+	select {
+	case r := <-ch:
+		t.Fatalf("фоновый TryBegin не дождался замка: %+v", r)
+	case <-time.After(60 * time.Millisecond):
+	}
+	mu.Unlock()
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			t.Fatalf("после Unlock: err = %v", r.err)
+		}
+		r.release()
+	case <-time.After(2 * time.Second):
+		t.Fatal("фоновый TryBegin не получил замок после Unlock")
+	}
+
+	// Отмена контекста во время ожидания освобождает applyMu.
+	mu.Lock()
+	ctx, cancel := context.WithCancel(t.Context())
+	ch = begin(ctx)
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	select {
+	case r := <-ch:
+		if !errors.Is(r.err, context.Canceled) {
+			t.Fatalf("после отмены: err = %v, want context.Canceled", r.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("TryBegin не вернулся после отмены контекста")
+	}
+	mu.Unlock()
+	release, err := env.P.TryBegin(t.Context(), true)
+	if err != nil {
+		t.Fatalf("applyMu не освобождён после отмены: %v", err)
+	}
+	release()
+}
+
+// Реальный sync.Mutex служит и замком Pipeline, и замком KernelApplier: Run
+// вызывает только ApplyLocked, взаимной блокировки нет.
+func TestApply_LifecycleNotReentrant(t *testing.T) {
+	fastRestartTimings(t)
+	var mu sync.Mutex
+	binDir := t.TempDir()
+	xray := writeFakeKernel(t, binDir, "xray", 0, "", 0)
+	procs := newFakeProcs()
+	procs.set("xray", "running", 100)
+	heldAtRestart := false
+	inner := services.NewKernelApplierFunc(procs.status, func() string { return "" }, func() (string, error) {
+		if heldAtRestart = !mu.TryLock(); !heldAtRestart {
+			mu.Unlock()
+		}
+		procs.set("xray", "running", 200)
+		return "", nil
+	}).WithLifecycleLock(&mu)
+	env := newTestPipeline(t, pipeOpts{
+		Bins: Binaries{Xray: xray}, DevMode: true,
+		Applier: &procApplier{inner: inner}, Procs: procs.states, Lifecycle: &mu,
+	})
+	writeDiagBoth(t, env)
+
+	release, err := env.P.TryBegin(t.Context(), true)
+	if err != nil {
+		t.Fatalf("TryBegin: %v", err)
+	}
+	done := make(chan ApplyView, 1)
+	go func() { done <- env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft}) }()
+	select {
+	case view := <-done:
+		if view.Result == nil || !view.Result.OK {
+			t.Fatalf("Result = %+v, want applied", view.Result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run завис: взаимная блокировка замка жизненного цикла")
+	}
+	release()
+	if !heldAtRestart {
+		t.Error("замок жизненного цикла не был взят на время рестарта")
+	}
+	if !mu.TryLock() {
+		t.Fatal("замок жизненного цикла не освобождён после release")
+	}
+	mu.Unlock()
+}
+
+func TestApply_IdempotentNoRestart(t *testing.T) {
+	fastRestartTimings(t)
+	binDir := t.TempDir()
+	xray := writeFakeKernel(t, binDir, "xray", 0, "", 0)
+	procs := newFakeProcs()
+	procs.set("xray", "running", 100)
+	restarts := 0
+	applier := newProcApplier(procs, func() (string, error) { restarts++; return "", nil })
+	env := newTestPipeline(t, pipeOpts{
+		Bins: Binaries{Xray: xray}, DevMode: true,
+		Applier: applier, Procs: procs.states, Lifecycle: &sync.Mutex{},
+	})
+	writeDiagBoth(t, env)
+
+	for i := 0; i < 2; i++ {
+		release, err := env.P.TryBegin(t.Context(), true)
+		if err != nil {
+			t.Fatalf("TryBegin #%d: %v", i, err)
+		}
+		view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+		release()
+		wantCode := ResultApplied
+		if i == 1 {
+			wantCode = ResultNothingToApply
+		}
+		if view.Result == nil || view.Result.Code != wantCode {
+			t.Fatalf("запуск #%d: Result = %+v, want %s", i, view.Result, wantCode)
+		}
+		if i == 1 {
+			if s := stepOf(t, view, StepRestart); s.State != StepSkipped {
+				t.Errorf("restart = %+v, want skipped при повторном применении", s)
+			}
+		}
+	}
+	if restarts != 1 {
+		t.Errorf("restart вызван %d раз, want 1 (только в первом запуске)", restarts)
+	}
+}

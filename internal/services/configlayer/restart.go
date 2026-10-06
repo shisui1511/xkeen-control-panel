@@ -410,3 +410,11 @@ func (p *Pipeline) confirmRunning(ctx context.Context, kernel string, wantPID in
 		}
 	}
 }
+
+// LifecyclePollInterval — как часто фоновый запуск пробует взять замок жизненного цикла.
+var LifecyclePollInterval = 250 * time.Millisecond
+
+// TryBegin — заготовка.
+func (p *Pipeline) TryBegin(ctx context.Context, user bool) (release func(), err error) {
+	return func() {}, nil
+}
