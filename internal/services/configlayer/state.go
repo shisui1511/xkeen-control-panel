@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -20,6 +21,9 @@ var ErrInvalidSection = errors.New("configlayer: invalid section name")
 
 // ErrUnknownNotice — неизвестный идентификатор уведомления.
 var ErrUnknownNotice = errors.New("configlayer: unknown notice id")
+
+// sectionNameRE — допустимое имя секции черновика.
+var sectionNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
 // Store — хранилище состояния слоя: структура в памяти под мьютексом и
 // JSON-файл в каталоге данных панели.
@@ -133,6 +137,10 @@ func draftEventOf(st State) DraftEvent {
 // При конфликте возвращается ErrDraftConflict, состояние и файл не меняются,
 // событие не публикуется.
 func (s *Store) EditDraft(baseRev int64, section string, value json.RawMessage) (DraftEvent, error) {
+	if !sectionNameRE.MatchString(section) {
+		return DraftEvent{}, fmt.Errorf("%w: %q", ErrInvalidSection, section)
+	}
+
 	s.mu.Lock()
 	if baseRev != s.st.DraftRevision {
 		s.mu.Unlock()
@@ -164,14 +172,87 @@ func (s *Store) EditDraft(baseRev int64, section string, value json.RawMessage) 
 	return ev, nil
 }
 
-// ResetDraft — заглушка RED-фазы.
-func (s *Store) ResetDraft(baseRev int64) (DraftEvent, error) { return DraftEvent{}, nil }
+// ResetDraft сбрасывает черновик к применённому состоянию, если baseRev
+// совпадает с текущей ревизией. Ревизия растёт, публикуется событие draft.
+func (s *Store) ResetDraft(baseRev int64) (DraftEvent, error) {
+	s.mu.Lock()
+	if baseRev != s.st.DraftRevision {
+		s.mu.Unlock()
+		return DraftEvent{}, ErrDraftConflict
+	}
 
-// Update — заглушка RED-фазы.
-func (s *Store) Update(fn func(st *State) error) error { return nil }
+	next := s.st.clone()
+	next.Draft = next.Applied.Clone()
+	next.DraftRevision++
 
-// DismissNotice — заглушка RED-фазы.
-func (s *Store) DismissNotice(id string) error { return nil }
+	if err := s.persist(next); err != nil {
+		s.mu.Unlock()
+		return DraftEvent{}, err
+	}
+	s.st = next
+	ev := draftEventOf(next)
+	s.mu.Unlock()
 
-// Reload — заглушка RED-фазы.
-func (s *Store) Reload() error { return nil }
+	s.broker.Publish(Event{Type: EventDraft, Data: ev})
+	return ev, nil
+}
+
+// Update применяет fn к глубокой копии состояния и сохраняет копию. Если fn
+// вернула ошибку или запись на диск не удалась, состояние в памяти и файл не
+// меняются. Событий Update не публикует: их рассылает вызывающий конвейер.
+func (s *Store) Update(fn func(st *State) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := s.st.clone()
+	if err := fn(&next); err != nil {
+		return err
+	}
+	next.normalize()
+	if err := s.persist(next); err != nil {
+		return err
+	}
+	s.st = next
+	return nil
+}
+
+// DismissNotice закрывает уведомление и сохраняет состояние. Допустимые id:
+// "schema_reset" и "recovered_from_journal".
+func (s *Store) DismissNotice(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := s.st.clone()
+	switch id {
+	case "schema_reset":
+		next.Notices.SchemaReset = false
+		next.Notices.SchemaResetBackup = ""
+	case "recovered_from_journal":
+		next.Notices.RecoveredFromJournal = false
+	default:
+		return fmt.Errorf("%w: %q", ErrUnknownNotice, id)
+	}
+	if err := s.persist(next); err != nil {
+		return err
+	}
+	s.st = next
+	return nil
+}
+
+// Reload перечитывает файл состояния по тем же правилам, что и OpenStore.
+//
+// Порядок замков: Reload берёт только замок Store и никогда не берёт замки
+// конвейера применения. Его вызывает обработчик восстановления снимка, который
+// уже держит замок жизненного цикла ядер, поэтому обратный порядок невозможен.
+// Если чтение не удалось, состояние в памяти не меняется.
+func (s *Store) Reload() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	st, err := s.readFile()
+	if err != nil {
+		return err
+	}
+	s.st = st
+	return nil
+}
