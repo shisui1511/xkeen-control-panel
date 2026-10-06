@@ -58,3 +58,6 @@ func (a *API) ConsoleExecute(w http.ResponseWriter, r *http.Request) {
 
 	a.jsonResponse(w, result)
 }
+
+// layerRequestCheck просит слой «Конфигурация» о внеочередной сверке дрейфа.
+func (a *API) layerRequestCheck() {}
