@@ -500,15 +500,3 @@ func (l *Layer) Enable() {}
 
 // Disable выключает слой: файлы панели уходят в набор копий.
 func (l *Layer) Disable(ctx context.Context) error { return errNotImplemented }
-
-// Diff — ожидаемое и фактическое содержимое файла.
-func (l *Layer) Diff(key string) (DiffView, error) { return DiffView{}, errNotImplemented }
-
-// DiffView — две стороны сравнения файла.
-type DiffView struct {
-	Key       string `json:"key"`
-	Expected  string `json:"expected"`
-	Actual    string `json:"actual"`
-	Missing   bool   `json:"missing"`
-	Truncated bool   `json:"truncated"`
-}
