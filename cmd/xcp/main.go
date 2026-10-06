@@ -663,6 +663,11 @@ func main() {
 			return reachable
 		},
 		Lifecycle: api.LifecycleLock(),
+		// Фрагменты существующих подписок ведёт старый слой: новый не считает их
+		// сиротами. Набор запрашивается при каждом обращении, подписки меняются.
+		ForeignOwned: func(kernel, rel string) bool {
+			return kernel == configlayer.KernelXray && subscriptionSvc.OwnedFileNames()[filepath.Base(rel)]
+		},
 	})
 	if err != nil {
 		log.Printf("Слой конфигурации не создан, маршруты /api/configlayer/* отвечают 404: %v", err)

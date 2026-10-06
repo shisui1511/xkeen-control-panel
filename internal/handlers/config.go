@@ -161,6 +161,10 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
+	// Файл панели под управлением слоя: отказ до чтения тела и до замков.
+	if a.rejectManagedPath(w, r, cleanPath) {
+		return
+	}
 
 	isMihomoConfig := a.isActiveMihomoConfig(cleanPath)
 
@@ -336,6 +340,10 @@ func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if a.rejectManagedPath(w, r, cleanPath) {
+		return
+	}
+
 	if err := a.configSvc.Delete(cleanPath); err != nil {
 		if os.IsNotExist(err) {
 			a.errorResponse(w, a.t(r, "config.file_not_found"), http.StatusNotFound)
@@ -366,6 +374,11 @@ func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 	cleanNewPath, err := a.pathVal.Validate(newPath)
 	if err != nil {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	// Файл панели нельзя ни переименовать, ни перезаписать переименованием.
+	if a.rejectManagedPath(w, r, cleanOldPath) || a.rejectManagedPath(w, r, cleanNewPath) {
 		return
 	}
 
@@ -856,7 +869,16 @@ func (a *API) ConfigSmartMerge(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// rejectManagedPath отвечает 409 file_managed, если файл управляется слоем.
+// rejectManagedPath отвечает 409 file_managed и возвращает true, если файл
+// управляется слоем «Конфигурация» (запись манифеста managed при включённом
+// флаге). Серверная защита обязательна: интерфейс лишь скрывает правку, а
+// вкладка с устаревшим состоянием иначе создала бы дрейф гонкой (D-12, T-144-38).
+// Путь уже прошёл PathValidator, IsManagedPath дополнительно разворачивает
+// симлинки каталога (T-144-39). Отпущенные и чужие файлы правятся как раньше.
 func (a *API) rejectManagedPath(w http.ResponseWriter, r *http.Request, cleanPath string) bool {
-	return false
+	if a.configLayer == nil || !a.configLayer.IsManagedPath(cleanPath) {
+		return false
+	}
+	JSONErrorCode(w, http.StatusConflict, "file_managed", a.t(r, "configlayer.file_managed"))
+	return true
 }
