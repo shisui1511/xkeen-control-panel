@@ -145,3 +145,41 @@ func TestValidateTimeout_Arch(t *testing.T) {
 		}
 	}
 }
+
+// Живой Xray перед отказом пишет десятки информационных строк (имена узлов
+// пользователя), причина стоит в конце. В сообщение для UI информационные
+// строки попадать не должны: блок вывода показывается с начала и причина
+// оказывалась за прокруткой (проверка на роутере, фаза 144).
+func TestSanitizeOutput_DropsInfoLogLines(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 200; i++ {
+		b.WriteString("2026/10/06 13:30:36.228640 [Info] infra/conf: [/opt/etc/xray/configs/04.json] appended outbound with tag: узел-")
+		b.WriteString(strings.Repeat("x", 20))
+		b.WriteString("\n")
+	}
+	b.WriteString("2026/10/06 13:30:36.235225 [Warning] common/errors: The feature gRPC transport is deprecated\n")
+	b.WriteString("Failed to start: main: failed to load config files: [a.json] > infra/conf: unknown config id: nope")
+
+	got := sanitizeOutput(b.String(), "", "/opt/etc/xray/configs")
+
+	if strings.Contains(got, "[Info]") {
+		t.Errorf("информационные строки остались в сообщении: %.200s", got)
+	}
+	if !strings.Contains(got, "unknown config id: nope") {
+		t.Errorf("причина отказа потеряна: %q", got)
+	}
+	if !strings.HasPrefix(got, "2026/10/06") && !strings.HasPrefix(got, "Failed to start") {
+		t.Errorf("сообщение начинается не с оставшихся строк: %.120s", got)
+	}
+	if len(got) > 600 {
+		t.Errorf("сообщение не сжато: %d байт", len(got))
+	}
+}
+
+// Вывод без информационных строк (Mihomo, простые отказы) остаётся как есть.
+func TestSanitizeOutput_KeepsPlainOutput(t *testing.T) {
+	in := "yaml: line 1: did not find expected ',' or ']'"
+	if got := sanitizeOutput(in, "", "/x"); got != in {
+		t.Errorf("sanitizeOutput(%q) = %q", in, got)
+	}
+}

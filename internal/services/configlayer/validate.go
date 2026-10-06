@@ -198,6 +198,7 @@ func sanitizeOutput(out, tmp, workRoot string) string {
 	if tmp != "" {
 		out = strings.ReplaceAll(out, tmp, workRoot)
 	}
+	out = dropInfoLines(out)
 	out = strings.TrimSpace(out)
 	if len(out) > maxMessageBytes {
 		out = out[len(out)-maxMessageBytes:]
@@ -206,6 +207,27 @@ func sanitizeOutput(out, tmp, workRoot string) string {
 		}
 	}
 	return out
+}
+
+// dropInfoLines убирает строки журнала уровней Info и Debug: перед отказом
+// Xray пишет по строке на каждый узел пользователя, а причина стоит в конце,
+// за прокруткой блока вывода. Если ничего кроме них нет, вывод остаётся целым.
+func dropInfoLines(out string) string {
+	if !strings.Contains(out, "[Info]") && !strings.Contains(out, "[Debug]") {
+		return out
+	}
+	lines := strings.Split(out, "\n")
+	kept := lines[:0:0]
+	for _, l := range lines {
+		if strings.Contains(l, " [Info] ") || strings.Contains(l, " [Debug] ") {
+			continue
+		}
+		kept = append(kept, l)
+	}
+	if len(strings.TrimSpace(strings.Join(kept, "\n"))) == 0 {
+		return out
+	}
+	return strings.Join(kept, "\n")
 }
 
 // hintFor подбирает код подсказки по известным формулировкам ядер.
