@@ -3,6 +3,7 @@
   import PageHeader from './PageHeader.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import DraftBar from './components/config/DraftBar.svelte';
+  import ManagedFiles from './components/config/ManagedFiles.svelte';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
@@ -35,6 +36,8 @@
     <div class="config-stack">
       <section class="config-notices" data-testid="config-notices"></section>
       <DraftBar />
+      <!-- config-progress (ход применения) добавляет план 144-13 перед файлами -->
+      <ManagedFiles />
     </div>
   {/if}
 </div>
