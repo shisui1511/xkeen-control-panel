@@ -2,6 +2,8 @@ package configlayer
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -192,5 +194,206 @@ func TestBuild_AllIssuesAtOnce(t *testing.T) {
 	var be *BuildError
 	if !errors.As(CheckGenerated(files, nil), &be) || len(be.Issues) != 2 {
 		t.Fatalf("ожидалось две проблемы разом, got %+v", be)
+	}
+}
+
+// planFixture — корни во временных каталогах и два желаемых файла (по одному
+// на ядро) с готовой записью манифеста.
+type planFixture struct {
+	roots   Roots
+	xray    GeneratedFile
+	mihomo  GeneratedFile
+	desired []GeneratedFile
+}
+
+func newPlanFixture(t *testing.T) planFixture {
+	t.Helper()
+	roots := Roots{Xray: t.TempDir(), Mihomo: t.TempDir()}
+	xray := xrayFile("04_outbounds.xcp-a.tail.json", "{\"outbounds\":[]}\n")
+	mihomo := providerFile("proxies:\n  - name: n\n    type: socks5\n    server: 127.0.0.1\n    port: 1\n")
+	return planFixture{roots: roots, xray: xray, mihomo: mihomo, desired: []GeneratedFile{xray, mihomo}}
+}
+
+// put записывает файл на диск (создавая каталоги) по пути из Roots.Abs.
+func (fx planFixture) put(t *testing.T, f GeneratedFile, content string) string {
+	t.Helper()
+	abs, err := fx.roots.Abs(f.Kernel, f.RelPath)
+	if err != nil {
+		t.Fatalf("Abs: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return abs
+}
+
+func entryFor(f GeneratedFile, status EntryStatus) ManifestEntry {
+	return ManifestEntry{Kernel: f.Kernel, RelPath: f.RelPath, Kind: f.Kind, Hash: HashContent(f.Content), Status: status}
+}
+
+func findFile(p Plan, key string) (FilePlan, bool) {
+	for _, fp := range p.Files {
+		if fp.Key == key {
+			return fp, true
+		}
+	}
+	return FilePlan{}, false
+}
+
+func TestComputePlan_Idempotent(t *testing.T) {
+	fx := newPlanFixture(t)
+	fx.put(t, fx.xray, string(fx.xray.Content))
+	fx.put(t, fx.mihomo, string(fx.mihomo.Content))
+	manifest := map[string]ManifestEntry{
+		fx.xray.Key():   entryFor(fx.xray, StatusManaged),
+		fx.mihomo.Key(): entryFor(fx.mihomo, StatusManaged),
+	}
+	plan, err := ComputePlan(fx.roots, fx.desired, manifest, nil, nil)
+	if err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	if !plan.Empty() {
+		t.Fatalf("повторное применение без изменений дало непустой план: %+v", plan)
+	}
+}
+
+func TestComputePlan_ReleasedSkipped(t *testing.T) {
+	fx := newPlanFixture(t)
+	fx.put(t, fx.xray, "{\"edited\":true}\n")
+	manifest := map[string]ManifestEntry{fx.xray.Key(): entryFor(fx.xray, StatusReleased)}
+
+	plan, err := ComputePlan(fx.roots, []GeneratedFile{fx.xray}, manifest, nil, nil)
+	if err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	fp, ok := findFile(plan, fx.xray.Key())
+	if !ok || fp.Action != ActionSkipReleased {
+		t.Fatalf("отпущенный файл: %+v (found=%v), want %q", fp, ok, ActionSkipReleased)
+	}
+	if !plan.Empty() {
+		t.Errorf("skip_released не должен считаться действием: %+v", plan)
+	}
+
+	plan, err = ComputePlan(fx.roots, []GeneratedFile{fx.xray}, manifest, map[string]bool{fx.xray.Key(): true}, nil)
+	if err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	fp, ok = findFile(plan, fx.xray.Key())
+	if !ok || fp.Action != ActionWrite || !fp.WasReleased {
+		t.Fatalf("«Пересобрать» по ключу: %+v (found=%v), want write с WasReleased", fp, ok)
+	}
+}
+
+func TestComputePlan_StaleDeleted(t *testing.T) {
+	fx := newPlanFixture(t)
+	fx.put(t, fx.xray, string(fx.xray.Content))
+	manifest := map[string]ManifestEntry{
+		fx.xray.Key():   entryFor(fx.xray, StatusManaged),
+		fx.mihomo.Key(): entryFor(fx.mihomo, StatusReleased),
+	}
+	plan, err := ComputePlan(fx.roots, nil, manifest, nil, nil)
+	if err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	fp, ok := findFile(plan, fx.xray.Key())
+	if !ok || fp.Action != ActionDelete {
+		t.Fatalf("запись без генерации: %+v (found=%v), want %q", fp, ok, ActionDelete)
+	}
+	if fp.AbsPath == "" {
+		t.Error("у удаления пустой AbsPath")
+	}
+	if _, ok := findFile(plan, fx.mihomo.Key()); ok {
+		t.Error("отпущенная запись без генерации не должна попадать в план")
+	}
+}
+
+func TestComputePlan_RenamedRemovesObsolete(t *testing.T) {
+	fx := newPlanFixture(t)
+	abs := fx.put(t, fx.xray, string(fx.xray.Content))
+	if err := os.Rename(abs, abs+".obsolete"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	manifest := map[string]ManifestEntry{fx.xray.Key(): entryFor(fx.xray, StatusManaged)}
+	plan, err := ComputePlan(fx.roots, []GeneratedFile{fx.xray}, manifest, nil, nil)
+	if err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	fp, ok := findFile(plan, fx.xray.Key())
+	if !ok || fp.Action != ActionWrite || !fp.RemoveObsolete {
+		t.Fatalf("переименованный в .obsolete: %+v (found=%v), want write с RemoveObsolete", fp, ok)
+	}
+}
+
+func TestComputePlan_OverwriteUnmanifestedDesired(t *testing.T) {
+	fx := newPlanFixture(t)
+	fx.put(t, fx.xray, "{\"old\":1}\n")
+	plan, err := ComputePlan(fx.roots, []GeneratedFile{fx.xray}, map[string]ManifestEntry{}, nil, nil)
+	if err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	fp, ok := findFile(plan, fx.xray.Key())
+	if !ok || fp.Action != ActionWrite {
+		t.Fatalf("файл панели вне манифеста, но генерируемый: %+v (found=%v), want write", fp, ok)
+	}
+	if len(plan.Orphans) != 0 {
+		t.Errorf("генерируемый файл попал в сироты: %+v", plan.Orphans)
+	}
+}
+
+func TestComputePlan_Orphans(t *testing.T) {
+	fx := newPlanFixture(t)
+	fx.put(t, xrayFile("xcp-orphan.json", ""), "{}\n")
+	fx.put(t, xrayFile("04_outbounds.zz_xcp_selected.tail.json", ""), "{}\n")
+	plan, err := ComputePlan(fx.roots, nil, map[string]ManifestEntry{}, nil, nil)
+	if err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	if len(plan.Orphans) != 1 || plan.Orphans[0].Key != ManifestKey(KernelXray, "xcp-orphan.json") {
+		t.Fatalf("Orphans = %+v, want только xcp-orphan.json", plan.Orphans)
+	}
+	if plan.Empty() {
+		t.Error("план с сиротой не должен быть пустым")
+	}
+}
+
+func TestComputePlan_OnlyRestricts(t *testing.T) {
+	fx := newPlanFixture(t)
+	fx.put(t, xrayFile("xcp-orphan.json", ""), "{}\n")
+	only := map[string]bool{fx.xray.Key(): true}
+	manifest := map[string]ManifestEntry{
+		ManifestKey(KernelMihomo, "proxy_providers/xcp-gone.yaml"): {Kernel: KernelMihomo, RelPath: "proxy_providers/xcp-gone.yaml", Kind: KindMihomoProxyProvider, Status: StatusManaged},
+	}
+	plan, err := ComputePlan(fx.roots, fx.desired, manifest, only, nil)
+	if err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	if len(plan.Files) != 1 || plan.Files[0].Key != fx.xray.Key() {
+		t.Fatalf("Only не сузил план до названного файла: %+v", plan.Files)
+	}
+	if len(plan.Orphans) != 0 {
+		t.Errorf("при Only сироты не собираются: %+v", plan.Orphans)
+	}
+}
+
+func TestComputePlan_Changes(t *testing.T) {
+	fx := newPlanFixture(t)
+	plan, err := ComputePlan(fx.roots, []GeneratedFile{fx.xray}, map[string]ManifestEntry{}, nil, nil)
+	if err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	if !plan.Changes(KernelXray) || plan.Changes(KernelMihomo) {
+		t.Errorf("Changes: xray=%v mihomo=%v, want true/false", plan.Changes(KernelXray), plan.Changes(KernelMihomo))
+	}
+
+	fx.put(t, GeneratedFile{Kernel: KernelMihomo, RelPath: "proxy_providers/xcp-stray.yaml"}, "proxies: []\n")
+	plan, err = ComputePlan(fx.roots, nil, map[string]ManifestEntry{}, nil, nil)
+	if err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	if plan.Changes(KernelXray) || !plan.Changes(KernelMihomo) {
+		t.Errorf("сирота Mihomo: xray=%v mihomo=%v, want false/true", plan.Changes(KernelXray), plan.Changes(KernelMihomo))
 	}
 }
