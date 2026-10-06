@@ -11,6 +11,9 @@ type FileView struct {
 	Owner        string    `json:"owner"`
 	State        FileState `json:"state"`
 	ObsoleteName string    `json:"obsolete_name,omitempty"`
+	// AliasPaths — другие пути, которые разрешаются в этот файл (config.yaml —
+	// симлинк на профиль панели): Редактор защищает их так же, как Path.
+	AliasPaths []string `json:"alias_paths,omitempty"`
 }
 
 // NoticeView — уведомление слоя. ID: schema_reset, recovered_from_journal,

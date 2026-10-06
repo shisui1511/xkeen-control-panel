@@ -886,3 +886,53 @@ func TestFollowupWR03_JournalNotClearedStillRestartsKernel(t *testing.T) {
 		t.Error("журнал снят, хотя запись состояния отказывает")
 	}
 }
+
+// Review-fix WR-05: файл ядра без бинарника сервер не защищает (интерфейс его не
+// показывает), а установленного ядра — защищает.
+func TestFollowupWR05_IsManagedPathIgnoresUninstalledKernel(t *testing.T) {
+	mihomoBin := writeFakeKernel(t, t.TempDir(), "mihomo", 0, "", 0)
+	env, _ := newApplyLayer(t, layerOpts{MihomoStatus: "stopped", Bins: Binaries{Mihomo: mihomoBin}})
+	if !env.L.IsManagedPath(env.diagMihomoPath()) {
+		t.Fatal("файл установленного ядра не защищён")
+	}
+
+	env.setBins(Binaries{Xray: env.getBins().Xray})
+
+	if env.L.IsManagedPath(env.diagMihomoPath()) {
+		t.Error("файл ядра без бинарника защищён, хотя в интерфейсе его нет")
+	}
+	if !env.L.IsManagedPath(env.diagXrayPath()) {
+		t.Error("файл установленного ядра перестал быть защищённым")
+	}
+}
+
+// Review-fix WR-05: config.yaml — симлинк на панельный профиль Mihomo: снимок
+// отдаёт его путь как alias файла, чтобы интерфейс защитил Редактор так же,
+// как сервер (IsManagedPath).
+func TestFollowupWR05_SnapshotAliasForConfigSymlink(t *testing.T) {
+	mihomoBin := writeFakeKernel(t, t.TempDir(), "mihomo", 0, "", 0)
+	env, _ := newApplyLayer(t, layerOpts{MihomoStatus: "stopped", Bins: Binaries{Mihomo: mihomoBin}})
+	cfg := filepath.Join(env.Roots.Mihomo, "config.yaml")
+	if err := os.Remove(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(DiagMihomoRel, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := env.L.Snapshot()
+
+	fv, ok := findFileView(snap.Files, ManifestKey(KernelMihomo, DiagMihomoRel))
+	if !ok {
+		t.Fatal("файл Mihomo не найден в снимке")
+	}
+	if len(fv.AliasPaths) != 1 || fv.AliasPaths[0] != cfg {
+		t.Errorf("AliasPaths = %v, want [%s]", fv.AliasPaths, cfg)
+	}
+	if !env.L.IsManagedPath(cfg) {
+		t.Error("config.yaml не защищён сервером")
+	}
+	if xf, ok := findFileView(snap.Files, ManifestKey(KernelXray, DiagXrayRel)); ok && len(xf.AliasPaths) != 0 {
+		t.Errorf("у файла Xray есть alias: %v", xf.AliasPaths)
+	}
+}

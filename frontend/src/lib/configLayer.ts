@@ -26,6 +26,8 @@ export interface LayerFile {
   owner: 'panel' | 'manual';
   state: FileState;
   obsolete_name?: string;
+  /** Другие пути, разрешающиеся в этот файл (config.yaml — симлинк на профиль панели). */
+  alias_paths?: string[];
 }
 
 export interface LayerKernel {
@@ -140,7 +142,11 @@ export const navBadgeCount: Readable<string> = derived(draftChanges, (n) => form
 
 export const filesByPath: Readable<Map<string, LayerFile>> = derived(layerSnapshot, (s) => {
   const map = new Map<string, LayerFile>();
-  for (const f of s?.files ?? []) map.set(f.path, f);
+  for (const f of s?.files ?? []) {
+    map.set(f.path, f);
+    // Симлинк на файл панели открывается в Редакторе под своим путём, но защищён так же
+    for (const alias of f.alias_paths ?? []) map.set(alias, f);
+  }
   return map;
 });
 
@@ -468,6 +474,13 @@ export function handleLayerError(err: unknown): void {
   }
   if (code === 'apply_busy') {
     showToast('info', tr('cfg.toast.apply_busy'));
+    return;
+  }
+  if (code === 'file_managed') {
+    // Редактор мог показать файл как свободный: перечитываем состояние слоя, и баннер
+    // «Отпустить управление» появится
+    showToast('warning', err instanceof Error ? err.message : tr('editor.managed_readonly_hint'));
+    void refetchLayerState();
     return;
   }
   showToast('error', err instanceof Error ? err.message : String(err));

@@ -209,6 +209,26 @@ describe('производные сторы', () => {
     expect(get(navBadgeCount)).toBe('99+');
     expect(get(filesByPath).get('/opt/etc/xray/configs/xcp-a.json')?.key).toBe('xray:a');
   });
+
+  it('filesByPath отдаёт файл и по alias-пути симлинка', () => {
+    layerSnapshot.set(
+      snapshot({
+        files: [
+          {
+            key: 'mihomo:p',
+            kernel: 'mihomo',
+            path: '/opt/etc/mihomo/profiles/xcp-a.yaml',
+            alias_paths: ['/opt/etc/mihomo/config.yaml'],
+            owner: 'panel',
+            state: 'ok'
+          }
+        ]
+      })
+    );
+    const map = get(filesByPath);
+    expect(map.get('/opt/etc/mihomo/config.yaml')?.key).toBe('mihomo:p');
+    expect(map.get('/opt/etc/mihomo/profiles/xcp-a.yaml')?.key).toBe('mihomo:p');
+  });
 });
 
 describe('API-клиент', () => {
@@ -284,6 +304,16 @@ describe('handleLayerError', () => {
     expect(toasts[0].type).toBe('info');
     expect(toasts[0].message).toBe(get(t)('cfg.toast.apply_busy'));
     expect(apiMock).not.toHaveBeenCalled();
+  });
+
+  it('file_managed — предупреждение и перечитывание состояния слоя', async () => {
+    apiMock.mockResolvedValueOnce(snapshot({ draft_revision: 11 }));
+    handleLayerError(Object.assign(new Error('Файл панели'), { code: 'file_managed' }));
+    const toasts = get(toastStore);
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].type).toBe('warning');
+    expect(toasts[0].message).toBe('Файл панели');
+    await vi.waitFor(() => expect(apiMock).toHaveBeenCalledWith('/api/configlayer/state'));
   });
 
   it('прочие ошибки — тост с текстом сервера', () => {

@@ -9,7 +9,7 @@
     editorOpenRequest,
     configLayerEnabled
   } from './stores';
-  import { filesByPath } from './lib/configLayer';
+  import { filesByPath, handleLayerError } from './lib/configLayer';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
@@ -740,7 +740,9 @@
     } catch (e: any) {
       if (e?.status === 401) return;
       saveError = true;
-      showToast('error', $t('editor.save_error') + ': ' + e.message);
+      // 409 file_managed: файл под управлением слоя, вкладка об этом не знала
+      if (e?.code === 'file_managed') handleLayerError(e);
+      else showToast('error', $t('editor.save_error') + ': ' + e.message);
     } finally {
       saving = false;
     }
@@ -835,7 +837,8 @@
       if (e?.status === 401) return;
       console.error('handleSaveAndApply error:', e);
       saveError = true;
-      showToast('error', $t('editor.save_error') + ': ' + e.message);
+      if (e?.code === 'file_managed') handleLayerError(e);
+      else showToast('error', $t('editor.save_error') + ': ' + e.message);
       applyLoading = false;
       backgroundStatusText = '';
     }

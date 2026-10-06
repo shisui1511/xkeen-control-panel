@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -330,6 +331,9 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	files := make([]FileView, 0, len(checks))
 	index := make(map[string]int, len(checks))
 	drift := 0
+	// config.yaml Mihomo — симлинк на профиль панели: Редактор открывает его под
+	// своим путём, и защита должна совпадать с серверной (IsManagedPath, WR-05).
+	cfgPath, cfgResolved := l.mihomoConfigAlias()
 	for _, c := range checks {
 		fv := FileView{Key: c.Key, Kernel: c.Kernel, Path: c.AbsPath, Owner: "panel", State: c.State, ObsoleteName: c.ObsoleteName}
 		if c.State == StateReleased {
@@ -339,6 +343,9 @@ func (l *Layer) evaluate(st State) FilesEvent {
 			if abs, err := l.opts.Roots.Abs(c.Kernel, c.RelPath); err == nil {
 				fv.Path = abs
 			}
+		}
+		if cfgPath != "" && c.Kernel == KernelMihomo && fv.Path != cfgPath && resolveFullSymlinks(fv.Path) == cfgResolved {
+			fv.AliasPaths = []string{cfgPath}
 		}
 		if c.State.IsDrift() {
 			drift++
@@ -369,6 +376,23 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	}
 	sortFileViews(files)
 	return FilesEvent{Files: files, DriftCount: drift}
+}
+
+// mihomoConfigAlias — путь config.yaml Mihomo и файл, в который он разрешается,
+// если config.yaml — симлинк; иначе пустая строка.
+func (l *Layer) mihomoConfigAlias() (path, resolved string) {
+	abs, err := l.opts.Roots.Abs(KernelMihomo, "config.yaml")
+	if err != nil {
+		return "", ""
+	}
+	target, err := filepath.EvalSymlinks(abs)
+	if err != nil || target == abs {
+		return "", ""
+	}
+	if st, err := os.Lstat(abs); err != nil || st.Mode()&os.ModeSymlink == 0 {
+		return "", ""
+	}
+	return abs, target
 }
 
 // Snapshot — состояние слоя целиком. Выключенный слой диск и ядра не опрашивает.
@@ -699,7 +723,10 @@ func (l *Layer) IsManagedPath(absPath string) bool {
 		return false
 	}
 	target := resolveFullSymlinks(absPath)
-	for _, e := range l.store.Snapshot().Manifest {
+	// Как в evaluate и конвейере: записи ядра без бинарника не учитываются,
+	// иначе файл защищён, а интерфейс его не показывает (WR-05).
+	manifest := manifestOfScope(l.store.Snapshot().Manifest, l.installed(), "")
+	for _, e := range manifest {
 		if e.Status != StatusManaged {
 			continue
 		}
