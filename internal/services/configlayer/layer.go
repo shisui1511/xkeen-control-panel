@@ -602,9 +602,3 @@ func (l *Layer) IsManagedPath(absPath string) bool { return false }
 
 // ReloadFromDisk перечитывает файл состояния после восстановления снимка.
 func (l *Layer) ReloadFromDisk() error { return errNotImplemented }
-
-// Enable запускает сборку файлов после включения слоя.
-func (l *Layer) Enable() {}
-
-// Disable выключает слой: файлы панели уходят в набор копий.
-func (l *Layer) Disable(ctx context.Context) error { return errNotImplemented }

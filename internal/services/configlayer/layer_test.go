@@ -1,6 +1,8 @@
 package configlayer
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +25,7 @@ type layerOpts struct {
 	// NoStart — не вызывать Start (тест сам решает, когда запускать слой).
 	NoStart bool
 	// Restart подменяет рестарт ядра (nil — все запущенные ядра получают новый PID).
-	Restart func() (string, error)
+	Restart func(e *layerEnv) (string, error)
 }
 
 // layerEnv — слой на фейковых ядрах и временных каталогах.
@@ -79,7 +81,7 @@ func newTestLayer(t *testing.T, lo layerOpts) *layerEnv {
 	}
 	restart := lo.Restart
 	if restart == nil {
-		restart = func() (string, error) {
+		restart = func(*layerEnv) (string, error) {
 			for _, st := range env.Procs.states() {
 				if st.Status == "running" {
 					env.Procs.set(st.Name, "running", st.PID+1)
@@ -90,7 +92,7 @@ func newTestLayer(t *testing.T, lo layerOpts) *layerEnv {
 	}
 	env.Applier = newProcApplier(env.Procs, func() (string, error) {
 		env.restarts.Add(1)
-		return restart()
+		return restart(env)
 	})
 
 	opts := Options{
@@ -668,5 +670,209 @@ func TestLayer_DiffExpectedActual(t *testing.T) {
 	}
 	if _, err := env.L.Diff(diagXrayKey); err != ErrFileReleased {
 		t.Errorf("Diff(released) = %v, want ErrFileReleased", err)
+	}
+}
+
+// --- задача 3: установка ядра, уведомления, пути Редактора, перечитывание ---
+
+func hasNotice(ns []NoticeView, id string) (NoticeView, bool) {
+	for _, n := range ns {
+		if n.ID == id {
+			return n, true
+		}
+	}
+	return NoticeView{}, false
+}
+
+func TestLayer_OnKernelInstalledBackgroundBuild(t *testing.T) {
+	env, events := newApplyLayer(t, layerOpts{MihomoStatus: "stopped"})
+	binDir := t.TempDir()
+	mihomoPath := filepath.Join(env.Roots.Mihomo, DiagMihomoRel)
+	if _, err := os.Stat(mihomoPath); err == nil {
+		t.Fatal("файл Mihomo записан до установки ядра")
+	}
+	restartsBefore := env.restarts.Load()
+
+	env.setBins(Binaries{Xray: env.getBins().Xray, Mihomo: writeFakeKernel(t, binDir, "mihomo", 0, "", 0)})
+	env.L.OnKernelInstalled("mihomo")
+	view := env.settleApply(t, events)
+
+	if view.Trigger != TriggerKernelInstalled || view.Result == nil || !view.Result.OK {
+		t.Fatalf("запуск = %+v, want kernel_installed, ok", view)
+	}
+	if got := mustReadFile(t, mihomoPath); got != diagMihomoProvider {
+		t.Errorf("файл Mihomo = %q", got)
+	}
+	if env.restarts.Load() != restartsBefore {
+		t.Error("ядро перезапущено после фоновой сборки")
+	}
+	if _, ok := hasNotice(env.L.Snapshot().Notices, "build_failed:mihomo"); ok {
+		t.Error("уведомление build_failed при успешной сборке")
+	}
+}
+
+func TestLayer_OnKernelInstalledBuildFailed(t *testing.T) {
+	env, events := newApplyLayer(t, layerOpts{MihomoStatus: "stopped"})
+	binDir := t.TempDir()
+	env.setBins(Binaries{Xray: env.getBins().Xray, Mihomo: writeFakeKernel(t, binDir, "mihomo", 1, "bad provider", 0)})
+
+	env.L.OnKernelInstalled("mihomo")
+	ev := waitEvent(t, events, EventNotices, 10*time.Second, nil)
+
+	ne, ok := ev.Data.(NoticesEvent)
+	if !ok {
+		t.Fatalf("notices: данные %T", ev.Data)
+	}
+	n, ok := hasNotice(ne.Notices, "build_failed:mihomo")
+	if !ok || n.Kind != "error" || n.Kernel != KernelMihomo || n.Reason == "" {
+		t.Errorf("уведомление = %+v (found %v), want error, mihomo, с причиной", n, ok)
+	}
+	if _, err := os.Stat(filepath.Join(env.Roots.Mihomo, DiagMihomoRel)); err == nil {
+		t.Error("файл Mihomo записан при неудачной проверке")
+	}
+	if _, ok := hasNotice(env.L.Snapshot().Notices, "build_failed:mihomo"); !ok {
+		t.Error("уведомления нет в снимке")
+	}
+}
+
+func TestLayer_Notices(t *testing.T) {
+	env := newTestLayer(t, layerOpts{Enabled: true})
+	events, cancel, err := env.L.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	if err := env.L.store.Update(func(st *State) error {
+		st.Notices.SchemaReset = true
+		st.Notices.RecoveredFromJournal = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	env.L.mu.Lock()
+	env.L.failed["build_failed:mihomo"] = NoticeView{ID: "build_failed:mihomo", Kind: "error", Kernel: "mihomo", Reason: "x"}
+	env.L.mu.Unlock()
+
+	ns := env.L.Snapshot().Notices
+	if n, ok := hasNotice(ns, "schema_reset"); !ok || n.Kind != "warning" {
+		t.Errorf("schema_reset: %+v (found %v)", n, ok)
+	}
+	if n, ok := hasNotice(ns, "recovered_from_journal"); !ok || n.Kind != "warning" {
+		t.Errorf("recovered_from_journal: %+v (found %v)", n, ok)
+	}
+
+	got, err := env.L.DismissNotice("schema_reset")
+	if err != nil {
+		t.Fatalf("DismissNotice(schema_reset): %v", err)
+	}
+	if _, ok := hasNotice(got, "schema_reset"); ok {
+		t.Errorf("schema_reset остался в ответе: %+v", got)
+	}
+	ev := waitEvent(t, events, EventNotices, time.Second, nil)
+	if _, ok := hasNotice(ev.Data.(NoticesEvent).Notices, "schema_reset"); ok {
+		t.Error("событие notices содержит закрытое уведомление")
+	}
+	var onDisk State
+	if err := json.Unmarshal([]byte(mustReadFile(t, filepath.Join(env.DataDir, StateFileName))), &onDisk); err != nil {
+		t.Fatal(err)
+	}
+	if onDisk.Notices.SchemaReset || !onDisk.Notices.RecoveredFromJournal {
+		t.Errorf("на диске Notices = %+v, want закрыт только schema_reset", onDisk.Notices)
+	}
+
+	got, err = env.L.DismissNotice("build_failed:mihomo")
+	if err != nil {
+		t.Fatalf("DismissNotice(build_failed:mihomo): %v", err)
+	}
+	if _, ok := hasNotice(got, "build_failed:mihomo"); ok {
+		t.Errorf("build_failed остался: %+v", got)
+	}
+	if _, err := env.L.DismissNotice("bogus"); !errors.Is(err, ErrUnknownNotice) {
+		t.Errorf("DismissNotice(bogus) = %v, want ErrUnknownNotice", err)
+	}
+}
+
+func TestLayer_IsManagedPath(t *testing.T) {
+	gen := newXrayGen("{\"a\":1}\n")
+	env, _ := newApplyLayer(t, layerOpts{Generators: []Generator{gen}})
+	if _, err := env.L.Release(ManifestKey(KernelXray, gen.rel)); err != nil {
+		t.Fatal(err)
+	}
+
+	if !env.L.IsManagedPath(env.diagXrayPath()) {
+		t.Error("managed-файл не распознан")
+	}
+	if env.L.IsManagedPath(filepath.Join(env.Roots.Xray, gen.rel)) {
+		t.Error("отпущенный файл считается управляемым")
+	}
+	if env.L.IsManagedPath(filepath.Join(env.Roots.Xray, "01_log.json")) {
+		t.Error("посторонний файл считается управляемым")
+	}
+	link := filepath.Join(t.TempDir(), "xraylink")
+	if err := os.Symlink(env.Roots.Xray, link); err != nil {
+		t.Fatal(err)
+	}
+	if !env.L.IsManagedPath(filepath.Join(link, DiagXrayRel)) {
+		t.Error("путь через симлинк-каталог на корень Xray не распознан")
+	}
+	if !env.L.IsManagedPath(filepath.Join(env.Roots.Xray, "sub", "..", DiagXrayRel)) {
+		t.Error("путь с .. не нормализован")
+	}
+	env.enabled.Store(false)
+	if env.L.IsManagedPath(env.diagXrayPath()) {
+		t.Error("выключенный слой считает файл управляемым")
+	}
+}
+
+func TestLayer_ReloadFromDisk(t *testing.T) {
+	env := newTestLayer(t, layerOpts{Enabled: true, DevMode: true})
+	events, cancel, err := env.L.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	if _, err := env.L.Diag(0, "add"); err != nil {
+		t.Fatal(err)
+	}
+	drain(events)
+
+	statePath := filepath.Join(env.DataDir, StateFileName)
+	var st State
+	if err := json.Unmarshal([]byte(mustReadFile(t, statePath)), &st); err != nil {
+		t.Fatal(err)
+	}
+	st.DraftRevision = 7
+	st.Draft = Sections{DiagSection: json.RawMessage(`{"enabled":true,"broken_xray":true}`)}
+	data, err := json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Обработчик снимка держит замок жизненного цикла; applyMu слой не ждёт.
+	rel, err := env.L.pipeline.TryBegin(t.Context(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rel()
+	done := make(chan error, 1)
+	go func() { done <- env.L.ReloadFromDisk() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ReloadFromDisk: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReloadFromDisk завис при занятых замках применения")
+	}
+
+	if snap := env.L.Snapshot(); snap.DraftRevision != 7 {
+		t.Errorf("draft_revision = %d, want 7", snap.DraftRevision)
+	}
+	ev := waitEvent(t, events, EventSnapshot, time.Second, nil)
+	if sv, ok := ev.Data.(SnapshotView); !ok || sv.DraftRevision != 7 {
+		t.Errorf("snapshot: %+v", ev.Data)
 	}
 }
