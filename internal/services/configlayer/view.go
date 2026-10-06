@@ -1,5 +1,7 @@
 package configlayer
 
+import "sort"
+
 // FileView — файл слоя для снимка и события files. Owner: "panel" (managed и
 // pending) или "manual" (released).
 type FileView struct {
@@ -47,4 +49,29 @@ type SnapshotView struct {
 
 // sortFileViews упорядочивает файлы для UI: drift, pending, ok, released;
 // внутри группы — по пути, затем по ключу.
-func sortFileViews(files []FileView) {}
+func sortFileViews(files []FileView) {
+	sort.SliceStable(files, func(i, j int) bool {
+		ri, rj := fileStateRank(files[i].State), fileStateRank(files[j].State)
+		if ri != rj {
+			return ri < rj
+		}
+		if files[i].Path != files[j].Path {
+			return files[i].Path < files[j].Path
+		}
+		return files[i].Key < files[j].Key
+	})
+}
+
+// fileStateRank — место состояния в списке: drift_*, pending, ok, released.
+func fileStateRank(s FileState) int {
+	switch {
+	case s.IsDrift():
+		return 0
+	case s == StatePending:
+		return 1
+	case s == StateOK:
+		return 2
+	default:
+		return 3
+	}
+}
