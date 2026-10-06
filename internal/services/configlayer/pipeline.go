@@ -250,6 +250,12 @@ func (p *Pipeline) binaries() Binaries {
 // Файлы пишутся только если оба ядра приняли конфигурацию.
 func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	p.begin(req)
+	// Журнал прошлой неудавшейся записи или отката нельзя перезаписать новым
+	// набором: сначала возвращаем файлы по нему (WR-03).
+	if err := p.recoverPendingJournal(); err != nil {
+		p.setStep(StepBuild, StepFailed, "", err.Error())
+		return p.finish(ResultView{Code: ResultRollbackFailed, Message: err.Error()})
+	}
 	snap := p.d.Store.Snapshot()
 	src := snap.Draft
 	if req.Source == SourceApplied {
@@ -354,6 +360,20 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	// Ротация копий — после успешного применения; сбой уборки применение не отменяет.
 	_ = PruneBackups(p.d.DataDir, BackupRetention)
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
+}
+
+// recoverPendingJournal возвращает файлы по журналу, оставшемуся от прерванной
+// записи или неудавшегося отката (под замками применения). Журнала нет — ничего
+// не делает. Журнал очищается всегда (см. RecoverJournal), поэтому ошибку
+// возвращённых не до конца файлов видит вызывающий, а не следующий запуск.
+func (p *Pipeline) recoverPendingJournal() error {
+	if p.d.Store.Snapshot().Journal == nil {
+		return nil
+	}
+	if _, err := RecoverJournal(p.d.Store, p.d.Roots); err != nil {
+		return err
+	}
+	return nil
 }
 
 // kernelInScope — ядро входит в область запуска: установлено и совпадает с

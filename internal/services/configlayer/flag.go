@@ -29,6 +29,10 @@ func (l *Layer) Disable(ctx context.Context, commitFlag func() error) error {
 	}
 	defer release()
 
+	// Журнал прошлой неудавшейся записи не перезаписывается набором выключения.
+	if err := l.pipeline.recoverPendingJournal(); err != nil {
+		return err
+	}
 	st := l.store.Snapshot()
 	keys := make([]string, 0, len(st.Manifest))
 	for key, e := range st.Manifest {

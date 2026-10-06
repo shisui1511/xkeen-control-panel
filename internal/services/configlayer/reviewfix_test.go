@@ -333,3 +333,59 @@ func TestWR02_DisableCommitFlagErrors(t *testing.T) {
 		t.Error("commitFlag вызван после неудачного переноса: флаг снялся бы при оставшихся файлах")
 	}
 }
+
+// pendingJournalEnv оставляет в состоянии журнал неудавшегося отката: файл
+// 99_user.json на диске содержит NEW, а набор копий хранит OLD.
+func pendingJournalEnv(t *testing.T) (*testEnv, string) {
+	t.Helper()
+	xray := writeFakeKernel(t, t.TempDir(), "xray", 0, "", 0)
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Xray: xray}, DevMode: true})
+	const rel = "99_user.json"
+	abs := filepath.Join(env.Roots.Xray, rel)
+	writeTestFile(t, abs, "NEW")
+	set, err := NewBackupSet(env.DataDir, time.Now(), string(TriggerUser))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.writeCopy(KernelXray, rel, []byte("OLD")); err != nil {
+		t.Fatal(err)
+	}
+	set.Meta.Files = append(set.Meta.Files, BackupFileMeta{
+		Key: ManifestKey(KernelXray, rel), Kernel: KernelXray, RelPath: rel, Existed: true, Reason: ReasonOverwrite,
+	})
+	if err := set.WriteMeta(); err != nil {
+		t.Fatal(err)
+	}
+	err = env.Store.Update(func(st *State) error {
+		st.Journal = &Journal{BackupDir: set.Dir, Trigger: string(TriggerUser), StartedAt: time.Now().UTC(),
+			Files: []JournalFile{{Key: ManifestKey(KernelXray, rel), Existed: true}}}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env, abs
+}
+
+// WR-03: следующее применение сначала возвращает файлы по журналу, а не
+// перезаписывает его новым набором.
+func TestWR03_RunRecoversPendingJournalFirst(t *testing.T) {
+	env, abs := pendingJournalEnv(t)
+	writeDiagBoth(t, env)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	if view.Result == nil || !view.Result.OK {
+		t.Fatalf("Result = %+v, want ok", view.Result)
+	}
+	if got := mustRead(t, abs); got != "OLD" {
+		t.Errorf("файл по журналу = %q, want OLD (откат до нового применения)", got)
+	}
+	st := env.Store.Snapshot()
+	if st.Journal != nil {
+		t.Errorf("журнал не очищен: %+v", st.Journal)
+	}
+	if !st.Notices.RecoveredFromJournal {
+		t.Error("нет уведомления recovered_from_journal")
+	}
+}
