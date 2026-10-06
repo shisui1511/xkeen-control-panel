@@ -241,10 +241,20 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		for _, k := range req.Only {
 			only[k] = true
 		}
-		plan, err = ComputePlan(p.d.Roots, files, snap.Manifest, only, p.d.ForeignOwned)
+		// Записи манифеста неустановленного ядра не участвуют в плане: иначе при
+		// пустой генерации его файлы ушли бы в удаление. Они остаются нетронутыми.
+		plan, err = ComputePlan(p.d.Roots, files, manifestOfInstalled(snap.Manifest, installed), only, p.d.ForeignOwned)
+		// Сирот убирает 144-06; здесь они в план не входят.
+		plan.Orphans = nil
 	}
 	if err != nil {
-		return p.finish(ResultView{Code: ResultBuildFailed, Message: err.Error()})
+		p.setStep(StepBuild, StepFailed, "", err.Error())
+		res := ResultView{Code: ResultBuildFailed, Message: err.Error()}
+		var be *BuildError
+		if errors.As(err, &be) {
+			res.Issues = be.Issues
+		}
+		return p.finish(res)
 	}
 	p.setStep(StepBuild, StepDone, "", "")
 
@@ -260,6 +270,14 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		return p.finish(res)
 	}
 
+	if plan.Empty() {
+		p.setStep(StepWrite, StepSkipped, NoteNoChanges, "")
+		if err := p.syncApplied(snap, src, req); err != nil {
+			return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: true})
+		}
+		return p.finish(ResultView{OK: true, Code: ResultNothingToApply})
+	}
+
 	p.setStep(StepWrite, StepRunning, "", "")
 	written, err := p.commit(plan, snap, src, req)
 	if err != nil {
@@ -268,6 +286,33 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	}
 	p.setStep(StepWrite, StepDone, "", "")
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: written})
+}
+
+// manifestOfInstalled оставляет записи манифеста только установленных ядер.
+func manifestOfInstalled(m map[string]ManifestEntry, installed InstalledKernels) map[string]ManifestEntry {
+	out := make(map[string]ManifestEntry, len(m))
+	for k, e := range m {
+		if installed.Has(e.Kernel) {
+			out[k] = e
+		}
+	}
+	return out
+}
+
+// syncApplied фиксирует применённое состояние из снимка источника, когда файлов
+// писать не нужно (пустой план). Для пересборки по ключам и из applied ничего
+// не меняется; без расхождений файл состояния не переписывается.
+func (p *Pipeline) syncApplied(snap State, src Sections, req ApplyRequest) error {
+	if req.Source != SourceDraft || len(req.Only) > 0 {
+		return nil
+	}
+	if draftChanges(State{Draft: src, Applied: snap.Applied}) == 0 {
+		return nil
+	}
+	return p.d.Store.Update(func(st *State) error {
+		st.Applied = src.Clone()
+		return nil
+	})
 }
 
 // afterValidation отражает итог проверки в шаге; failed=true — применение

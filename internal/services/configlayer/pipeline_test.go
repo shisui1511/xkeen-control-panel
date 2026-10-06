@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 func stepOf(t *testing.T, v ApplyView, id StepID) StepView {
@@ -383,4 +385,32 @@ func TestApply_NothingToApply(t *testing.T) {
 	if _, ok := env.Store.Snapshot().Applied["note"]; !ok {
 		t.Error("Applied не догнал черновик при nothing_to_apply")
 	}
+}
+
+// Сбой записи второго файла возвращает диск и состояние к прежнему.
+func TestApply_WriteFailureRestoresPrevious(t *testing.T) {
+	binDir := t.TempDir()
+	xray := writeFakeKernel(t, binDir, "xray", 0, "", 0)
+	mihomo := writeFakeKernel(t, binDir, "mihomo", 0, "", 0)
+	calls := 0
+	failing := func(path string, data []byte) error {
+		calls++
+		if calls == 2 {
+			return os.ErrPermission
+		}
+		return utils.AtomicReplaceFile(path, data)
+	}
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Xray: xray, Mihomo: mihomo}, DevMode: true, WriteFile: failing})
+	writeDiagBoth(t, env)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != ResultWriteFailed || !r.RolledBack {
+		t.Fatalf("Result = %+v, want write_failed_rolled_back с RolledBack", r)
+	}
+	if s := stepOf(t, view, StepWrite); s.State != StepFailed {
+		t.Errorf("write = %+v, want failed", s)
+	}
+	requireNothingWritten(t, env)
 }

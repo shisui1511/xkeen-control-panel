@@ -16,7 +16,15 @@ import (
 )
 
 // defaultValidateTimeout — время на проверку одним ядром для платформы.
+//
+// На MIPS (mips, mipsle) проверка с большими geosite/geoip идёт заметно дольше,
+// поэтому там 180 с, на остальных платформах 60 с (допущение A1 не проверено на
+// железе: значения подкручиваются через ValidateTimeout).
 func defaultValidateTimeout(goarch string) time.Duration {
+	switch goarch {
+	case "mips", "mipsle":
+		return 180 * time.Second
+	}
 	return 60 * time.Second
 }
 
@@ -164,6 +172,17 @@ const maxMessageBytes = 4000
 func finishValidation(kernel string, cctx context.Context, runErr error, out []byte, tmp, workRoot string) ValidationResult {
 	if runErr == nil {
 		return ValidationResult{Kernel: kernel, OK: true}
+	}
+	// Таймаут — не «конфиг неверен»: у него свой код, и файлы не пишутся.
+	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
+		return ValidationResult{
+			Kernel:  kernel,
+			Code:    CodeValidationTimeout,
+			Message: fmt.Sprintf("проверка не уложилась в %d с", int(ValidateTimeout.Seconds())),
+		}
+	}
+	if cctx.Err() != nil {
+		return ValidationResult{Kernel: kernel, Code: CodeValidationNotRun, Message: "проверка отменена"}
 	}
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
