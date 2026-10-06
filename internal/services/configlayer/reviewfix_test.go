@@ -1,6 +1,7 @@
 package configlayer
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -467,5 +468,60 @@ func TestWR04_CommitFailureKernelNotRecovered(t *testing.T) {
 	r := view.Result
 	if r == nil || r.OK || r.Code != ResultKernelNotRecovered || !r.RolledBack || r.Kernel != KernelXray {
 		t.Fatalf("Result = %+v, want kernel_not_recovered с RolledBack", r)
+	}
+}
+
+// cancelMihomo отменяет контекст запуска в момент горячей перезагрузки и
+// возвращает ошибку: так выглядит остановка панели посреди применения.
+type cancelMihomo struct {
+	*fakeMihomo
+	cancel func()
+}
+
+func (m *cancelMihomo) ReloadConfig(path string) error {
+	m.cancel()
+	return errors.New("контекст отменён")
+}
+
+// WR-05: отмена контекста посреди перезапуска не откатывает применение и не
+// перезапускает ядро повторно: журнал остаётся для RecoverJournal.
+func TestWR05_CancelDuringRestartKeepsJournalNoRollback(t *testing.T) {
+	setRollbackTimings(t)
+	mihomoBin := writeFakeKernel(t, t.TempDir(), "mihomo", 0, "", 0)
+	procs := newFakeProcs()
+	procs.set("mihomo", "running", 100)
+	base := newProcApplier(procs, func() (string, error) { procs.set("mihomo", "running", 101); return "", nil })
+	applier := &recoverApplier{procApplier: base, onForce: func(string) { procs.set("mihomo", "running", 102) }}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	gen := newMihomoGen(providerV1, nil)
+	env := newTestPipeline(t, pipeOpts{
+		Bins: Binaries{Mihomo: mihomoBin}, Generators: []Generator{gen},
+		Applier: applier, Procs: procs.states,
+		Mihomo:   &cancelMihomo{fakeMihomo: &fakeMihomo{}, cancel: cancel},
+		APIReady: func() bool { return true },
+	})
+	env.setDraft(t, "note", `{"a":1}`)
+
+	view := env.P.Run(ctx, ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	if r := view.Result; r == nil || r.OK || r.Code != ResultInterrupted {
+		t.Fatalf("Result = %+v, want interrupted", r)
+	}
+	if calls := base.applyCalls(); len(calls) != 0 {
+		t.Errorf("ApplyLocked вызван %v после отмены контекста", calls)
+	}
+	if len(applier.forced) != 0 {
+		t.Errorf("RestartLocked вызван %v после отмены контекста", applier.forced)
+	}
+	if got := mustRead(t, filepath.Join(env.Roots.Mihomo, "proxy_providers/xcp-a.yaml")); got != providerV1 {
+		t.Errorf("файл откачен при остановке панели: %q", got)
+	}
+	st := env.Store.Snapshot()
+	if st.Journal == nil {
+		t.Error("журнал снят: RecoverJournal не сможет вернуть файлы при старте")
+	}
+	if len(st.Manifest) != 0 {
+		t.Errorf("манифест зафиксирован при прерванном применении: %+v", st.Manifest)
 	}
 }

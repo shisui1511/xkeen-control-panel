@@ -97,6 +97,9 @@ const (
 	ResultRestartFailed = "restart_failed"
 	// ResultKernelNotRecovered — прежние файлы возвращены, но ядро на них не поднялось.
 	ResultKernelNotRecovered = "kernel_not_recovered"
+	// ResultInterrupted — запуск прерван остановкой панели; журнал остался, файлы
+	// вернёт RecoverJournal при следующем старте.
+	ResultInterrupted = "interrupted"
 	// ResultRollbackFailed — вернуть прежние файлы не удалось: журнал остался,
 	// откат повторится при следующем запуске панели.
 	ResultRollbackFailed = "rollback_failed"
@@ -341,6 +344,9 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	// до этого прежнее состояние восстановимо из набора копий.
 	views, err := p.runRestart(ctx, plan, out.Set)
 	if err != nil {
+		if errors.Is(err, errInterrupted) {
+			return p.finish(ResultView{Code: ResultInterrupted, Message: err.Error()})
+		}
 		res := ResultView{Code: ResultRestartFailed, Message: err.Error()}
 		var re *restartError
 		if errors.As(err, &re) {

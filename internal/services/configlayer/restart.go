@@ -73,6 +73,19 @@ const (
 	NoteRestartNotConfigured = "restart_not_configured"
 )
 
+// errInterrupted — запуск прерван отменой контекста (остановка панели). Откат и
+// повторные рестарты при этом не выполняются: журнал остаётся, и RecoverJournal
+// вернёт файлы при следующем старте панели.
+var errInterrupted = errors.New("применение прервано остановкой панели")
+
+// interrupted — ошибка прерывания, если контекст отменён, иначе nil.
+func interrupted(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %v", errInterrupted, err)
+	}
+	return nil
+}
+
 // restartError — перезапуск не удался. Kernel — ядро, на котором остановились.
 // RolledBack — прежние файлы возвращены; Recovered — ядро снова работает на них.
 type restartError struct {
@@ -159,6 +172,9 @@ func (p *Pipeline) restartKernels(ctx context.Context, plan Plan, set *BackupSet
 		if !plan.Changes(kernel) {
 			continue
 		}
+		if err := interrupted(ctx); err != nil {
+			return views, err
+		}
 		rv, err := p.restartKernel(ctx, kernel, plan, set)
 		views = append(views, rv)
 		p.setRestartViews(views)
@@ -205,6 +221,10 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 		if hotErr = p.hotReloadMihomo(ctx, plan); hotErr == nil {
 			return RestartView{Kernel: kernel, Outcome: RestartOutcomeHotReloaded}, nil
 		}
+		// Остановка панели посреди горячей перезагрузки: полный рестарт не нужен.
+		if err := interrupted(ctx); err != nil {
+			return RestartView{Kernel: kernel}, err
+		}
 		// Мягкий путь не удался: обычный рестарт Mihomo.
 		p.setStep(StepRestart, StepRunning, NoteHotReloadFailed, "")
 		outcome = RestartOutcomeRestartedReload
@@ -214,6 +234,10 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 		err = p.confirmMihomoAfterRestart(ctx, plan)
 	}
 	if err != nil {
+		// Отмена контекста — не неудача ядра: не откатываем и не перезапускаем ещё раз.
+		if ierr := interrupted(ctx); ierr != nil {
+			return RestartView{Kernel: kernel}, ierr
+		}
 		if hotErr != nil {
 			err = fmt.Errorf("перезагрузка конфигурации: %v; перезапуск: %w", hotErr, err)
 		}
@@ -344,6 +368,9 @@ func (p *Pipeline) rollbackAndRestart(ctx context.Context, kernel string, set *B
 // только что уронили, остановлено не пользователем, поэтому, если applier умеет,
 // запускается принудительный рестарт (ApplyLocked не запускает остановленное).
 func (p *Pipeline) recoverKernel(ctx context.Context, kernel string) error {
+	if err := interrupted(ctx); err != nil {
+		return err
+	}
 	var res services.ApplyResult
 	if r, ok := p.d.Applier.(kernelRestarter); ok {
 		res = r.RestartLocked(kernel)
@@ -363,6 +390,9 @@ func (p *Pipeline) recoverKernel(ctx context.Context, kernel string) error {
 // restartAndConfirm перезапускает ядро через ApplyLocked и подтверждает успех по
 // процессу ядра: код выхода xkeen -restart всегда 0 и о запуске ничего не говорит.
 func (p *Pipeline) restartAndConfirm(ctx context.Context, kernel string) error {
+	if err := interrupted(ctx); err != nil {
+		return err
+	}
 	res := p.d.Applier.ApplyLocked(kernel)
 	if res.Outcome == services.ApplyRestartFailed {
 		return errors.New(res.Error)
