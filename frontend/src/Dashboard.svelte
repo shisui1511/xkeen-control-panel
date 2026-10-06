@@ -17,8 +17,12 @@
     conflictVisible,
     isConflict,
     isMihomo,
-    activeKernelName
+    activeKernelName,
+    fetchSettingsFlags,
+    configLayerEnabled,
+    configLayerFlagKnown
   } from './stores';
+  import { startConfigLayer, stopConfigLayer } from './lib/configLayer';
   import { usePoller } from './lib/poller';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { isServiceRestarting } from './lib/serviceGrace';
@@ -846,8 +850,23 @@
     return 'warning'; // unknown
   }
 
+  // Слой «Конфигурация» (D-02, D-06): одно SSE-соединение на вкладку живёт, пока включён флаг
+  $effect(() => {
+    if (!$configLayerEnabled) return;
+    startConfigLayer();
+    return () => stopConfigLayer();
+  });
+
+  // Флаг выключен — маршрута #/config нет, как до включения слоя
+  $effect(() => {
+    if ($configLayerFlagKnown && !$configLayerEnabled && currentTab === 'config') {
+      window.location.hash = '#/dashboard';
+    }
+  });
+
   onMount(() => {
     fetchVersion();
+    void fetchSettingsFlags();
 
     applyLegacyRedirect();
     currentHash = window.location.hash;
@@ -1758,6 +1777,27 @@
             />
           </div>
         {/await}
+      {:else if currentTab === 'config'}
+        {#if !$configLayerFlagKnown}
+          <Skeleton type="card" height="60vh" />
+        {:else if $configLayerEnabled}
+          {#await import('./Config.svelte')}
+            <Skeleton type="card" height="60vh" />
+          {:then { default: Config }}
+            <div transition:fade={{ duration: 150 }}>
+              <Config onSwitchTab={switchTab} />
+            </div>
+          {:catch err}
+            <div use:reportChunkErrorAction={err}>
+              <EmptyState
+                title={$t('app.chunk_load_failed')}
+                description=""
+                ctaText={$t('app.retry')}
+                oncta={retryChunkLoad}
+              />
+            </div>
+          {/await}
+        {/if}
       {:else if currentTab === 'settings'}
         {#await import('./Settings.svelte')}
           <Skeleton type="card" height="60vh" />

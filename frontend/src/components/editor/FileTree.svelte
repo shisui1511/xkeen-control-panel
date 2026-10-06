@@ -2,6 +2,8 @@
   import { t } from '../../i18n';
   import Icon from '../Icon.svelte';
   import { matchXKeenStoplist } from '../../lib/xkeenStoplist';
+  import { configLayerEnabled } from '../../stores';
+  import { filesByPath } from '../../lib/configLayer';
 
   interface ConfigFileInfo {
     name: string;
@@ -44,6 +46,15 @@
   let filteredMihomoFiles = $derived(
     mihomoFiles.filter((file) => file.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
   );
+
+  // Слой «Конфигурация»: файл манифеста — «панель» (под управлением) или «ручной» (отпущен).
+  // Файлы вне манифеста и выключенный флаг — без бейджа, как до включения слоя.
+  function layerBadge(path: string): 'managed' | 'manual' | null {
+    if (!$configLayerEnabled) return null;
+    const f = $filesByPath.get(path);
+    if (!f) return null;
+    return f.state === 'released' ? 'manual' : 'managed';
+  }
 
   const xrayDir = '/opt/etc/xray/configs';
   const mihomoDir = '/opt/etc/mihomo';
@@ -194,6 +205,15 @@
                   <Icon name="alert-triangle" size={12} />
                 </span>
               {/if}
+              {#if layerBadge(file.path) === 'managed'}
+                <span class="badge badge-info layer-badge" data-testid="layer-badge"
+                  >{$t('editor.managed_badge')}</span
+                >
+              {:else if layerBadge(file.path) === 'manual'}
+                <span class="badge layer-badge" data-testid="layer-badge"
+                  >{$t('editor.manual_badge')}</span
+                >
+              {/if}
             </div>
             <span class="fr-meta">{formatBytes(file.size)}</span>
           </button>
@@ -239,6 +259,15 @@
               <span class="fr-name file-name" title={file.name}
                 >{#each breakableParts(file.name) as part, i (i)}{part}<wbr />{/each}</span
               >
+              {#if layerBadge(file.path) === 'managed'}
+                <span class="badge badge-info layer-badge" data-testid="layer-badge"
+                  >{$t('editor.managed_badge')}</span
+                >
+              {:else if layerBadge(file.path) === 'manual'}
+                <span class="badge layer-badge" data-testid="layer-badge"
+                  >{$t('editor.manual_badge')}</span
+                >
+              {/if}
             </div>
             <span class="fr-meta">{formatBytes(file.size)}</span>
           </button>
@@ -593,6 +622,18 @@
     background: var(--success);
     box-shadow: 0 0 5px color-mix(in srgb, var(--success) 80%, transparent);
     flex-shrink: 0;
+  }
+
+  .layer-badge {
+    flex-shrink: 0;
+    padding: 0 4px;
+    line-height: 1.4;
+  }
+
+  /* Подложка бейджа поверх выбранной строки (--accent-soft) складывалась бы с собственной:
+     контраст ниже 4.5:1. Плотная подложка карточки держит его в норме в обеих темах. */
+  .file-row.active .layer-badge {
+    background: var(--bg-card);
   }
 
   .stoplist-mark {

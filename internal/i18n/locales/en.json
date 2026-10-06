@@ -77,5 +77,17 @@
   "error.invalid_request": "Invalid request",
   "auth.wrong_password": "Current password is incorrect",
   "preflight.awg_version_incompatible": "AmneziaWG 3.1 options require Mihomo core version 1.19.30 or higher",
-  "dns.redirect_rolled_back": "DNS redirection was undone: after switching it on the router stopped resolving names. Check the DNS servers in the core configuration."
+  "dns.redirect_rolled_back": "DNS redirection was undone: after switching it on the router stopped resolving names. Check the DNS servers in the core configuration.",
+  "configlayer.disabled": "Configuration layer is disabled",
+  "configlayer.draft_conflict": "The draft was changed in another tab",
+  "configlayer.apply_busy": "An apply is already running",
+  "configlayer.drift_blocked": "Some files have drifted: resolve them before applying",
+  "configlayer.unknown_key": "Unknown configuration layer file",
+  "configlayer.unknown_notice": "Unknown notice",
+  "configlayer.dev_mode_required": "This action is available in developer mode only",
+  "configlayer.invalid_request": "Invalid configuration layer request",
+  "configlayer.file_released": "The file is released: the panel does not track it",
+  "configlayer.disable_failed": "Could not disable the configuration layer: files were restored and the flag stays on",
+  "configlayer.file_managed": "Panel file: editing is available after \"Release control\"",
+  "configlayer.too_many_subscribers": "Too many open panel tabs: close some and retry"
 }

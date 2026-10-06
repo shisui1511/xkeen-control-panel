@@ -465,3 +465,43 @@ func TestKernelApplier_ApplyLockedDoesNotLock(t *testing.T) {
 		t.Fatal("ApplyLocked блокируется на замке: самоблокировка")
 	}
 }
+
+func TestKernelApplier_RestartLockedIgnoresStopped(t *testing.T) {
+	f := &applyFake{statuses: map[string]string{"xray": "stopped"}, configured: "xray"}
+	a := f.applier(nil)
+
+	if got := a.ApplyLocked("xray"); got.Outcome != ApplySavedKernelStopped {
+		t.Fatalf("ApplyLocked = %q, want saved_kernel_stopped", got.Outcome)
+	}
+	if n := atomic.LoadInt32(&f.restarts); n != 0 {
+		t.Fatalf("ApplyLocked перезапустил остановленное ядро: %d", n)
+	}
+	got := a.RestartLocked("xray")
+	if got.Outcome != ApplyRestarted || got.Kernel != "xray" {
+		t.Errorf("RestartLocked = %+v, want restarted xray", got)
+	}
+	if n := atomic.LoadInt32(&f.restarts); n != 1 {
+		t.Errorf("restart вызван %d раз, want 1", n)
+	}
+}
+
+func TestKernelApplier_RestartLockedError(t *testing.T) {
+	f := &applyFake{statuses: map[string]string{"mihomo": "stopped"}, configured: "mihomo"}
+	a := f.applier(func() (string, error) { return "boom\n", errors.New("exit 1") })
+	got := a.RestartLocked("mihomo")
+	if got.Outcome != ApplyRestartFailed || !strings.Contains(got.Error, "boom") {
+		t.Errorf("RestartLocked = %+v, want restart_failed с текстом boom", got)
+	}
+}
+
+func TestKernelApplier_RestartLockedConflictUntouched(t *testing.T) {
+	f := &applyFake{statuses: map[string]string{"xray": "running", "mihomo": "running"}, configured: "xray"}
+	a := f.applier(nil)
+	got := a.RestartLocked("xray")
+	if got.Outcome != ApplySavedKernelConflict {
+		t.Errorf("RestartLocked = %+v, want saved_kernel_conflict", got)
+	}
+	if n := atomic.LoadInt32(&f.restarts); n != 0 {
+		t.Errorf("при конфликте рестарт вызван %d раз", n)
+	}
+}

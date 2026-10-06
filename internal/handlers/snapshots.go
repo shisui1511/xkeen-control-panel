@@ -80,11 +80,28 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	defer a.lifecycleMu.Unlock()
 
-	skipped, err := a.snapshotSvc.Restore(id)
+	// Снимок содержит каталог данных панели вместе с файлом состояния слоя, а слой
+	// держит состояние в памяти: восстановление идёт под замком хранилища слоя,
+	// иначе правка черновика между восстановлением и перечитыванием затёрла бы
+	// восстановленный файл. Слой не берёт замок применения (порядок applyMu ->
+	// lifecycleMu, lifecycleMu уже у нас) и сам просит сверку дрейфа.
+	var skipped []string
+	restore := func() error {
+		var rerr error
+		skipped, rerr = a.snapshotSvc.Restore(id)
+		return rerr
+	}
+	var err error
+	if a.configLayer != nil {
+		err = a.configLayer.RestoreExternally(restore)
+	} else {
+		err = restore()
+	}
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	a.layerRequestCheck()
 
 	// Снимок возвращает каталоги обоих ядер: применяем к активному. Остановленное
 	// ядро не запускается, сбой рестарта не откатывает восстановленные файлы и

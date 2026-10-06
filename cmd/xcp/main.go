@@ -23,6 +23,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/handlers"
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -303,6 +304,7 @@ func main() {
 	srv.HandleProtected("/api/config/mihomo-migrate-socket", api.MihomoMigrateSocket)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/dev-mode", api.SettingsDevMode)
+	srv.HandleProtected("/api/settings/config-layer", api.SettingsConfigLayer)
 	srv.HandleProtected("/api/settings/session", api.SessionSettings)
 
 	// XKeen own settings: proxied/excluded ports, excluded IPs, xkeen.json
@@ -611,6 +613,80 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/upload", api.KernelUpload)
 	srv.HandleProtected("/api/kernels/{name}/download", api.KernelDownload)
 
+	// Слой «Конфигурация» (фаза 144): создаётся и запускается здесь, Stop — через
+	// defer. Замок жизненного цикла — тот же, что у KernelApplier и обработчиков.
+	// Не создался — слой не подключается, маршруты отвечают 404.
+	configLayer, err := configlayer.New(configlayer.Options{
+		DataDir: cfg.DataDir,
+		Roots:   configlayer.Roots{Xray: cfg.XRayConfigDir, Mihomo: cfg.MihomoConfigDir},
+		Enabled: func() bool {
+			cfg.RLock()
+			defer cfg.RUnlock()
+			return cfg.ConfigLayer
+		},
+		DevMode: func() bool {
+			cfg.RLock()
+			defer cfg.RUnlock()
+			return cfg.DevMode
+		},
+		Binaries: func() configlayer.Binaries {
+			return configlayer.Binaries{
+				Xray:   installedKernelBinary(kernelSvc, "xray"),
+				Mihomo: installedKernelBinary(kernelSvc, "mihomo"),
+			}
+		},
+		XrayEnv: func(dir string) []string { return utils.XrayAssetEnv(os.Environ(), dir) },
+		KernelVersions: func() []configlayer.KernelVersionInput {
+			cfg.RLock()
+			xkeenBin := cfg.XKeenBinary
+			cfg.RUnlock()
+			_, statErr := os.Stat(xkeenBin)
+			inputs := []configlayer.KernelVersionInput{{
+				Name:      "xkeen",
+				Installed: xkeenBin != "" && statErr == nil,
+				Version:   xkeenStatusCache.Snapshot().Version,
+			}}
+			for _, info := range kernelSvc.List() {
+				inputs = append(inputs, configlayer.KernelVersionInput{
+					Name:      info.Name,
+					Installed: info.ProcessStatus != "not_installed",
+					Version:   info.CurrentVersion,
+				})
+			}
+			return inputs
+		},
+		Applier:       api.KernelApplier(),
+		ProcessStates: kernelSvc.ProcessStates,
+		Mihomo:        api.MihomoService(),
+		MihomoAPIReady: func() bool {
+			reachable, _ := api.MihomoService().ProbeAPI(api.ResolveMihomoSecret())
+			return reachable
+		},
+		Lifecycle: api.LifecycleLock(),
+		// Фрагменты существующих подписок ведёт старый слой: новый не считает их
+		// сиротами. Набор запрашивается при каждом обращении, подписки меняются.
+		ForeignOwned: func(kernel, rel string) bool {
+			return kernel == configlayer.KernelXray && subscriptionSvc.OwnedFileNames()[filepath.Base(rel)]
+		},
+	})
+	if err != nil {
+		log.Printf("Слой конфигурации не создан, маршруты /api/configlayer/* отвечают 404: %v", err)
+	} else {
+		configLayer.Start()
+		api.SetConfigLayer(configLayer)
+		defer configLayer.Stop()
+	}
+	srv.HandleProtected("/api/configlayer/state", api.ConfigLayerState)
+	srv.HandleProtected("/api/configlayer/events", api.ConfigLayerEvents)
+	srv.HandleProtected("/api/configlayer/draft", api.ConfigLayerDraft)
+	srv.HandleProtected("/api/configlayer/draft/reset", api.ConfigLayerDraftReset)
+	srv.HandleProtected("/api/configlayer/apply", api.ConfigLayerApply)
+	srv.HandleProtected("/api/configlayer/files/rebuild", api.ConfigLayerFilesRebuild)
+	srv.HandleProtected("/api/configlayer/files/release", api.ConfigLayerFilesRelease)
+	srv.HandleProtected("/api/configlayer/files/diff", api.ConfigLayerFilesDiff)
+	srv.HandleProtected("/api/configlayer/notices/dismiss", api.ConfigLayerNoticesDismiss)
+	srv.HandleProtected("/api/configlayer/diag", api.ConfigLayerDiag)
+
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
 		strings.TrimPrefix(Version, "v"), runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
 	if cfg.Auth.PasswordHash == "" {
@@ -647,4 +723,17 @@ func main() {
 		log.Printf("Received signal %s during restart, exiting...", sig)
 	}
 	log.Println("Server stopped.")
+}
+
+// installedKernelBinary — путь бинарника ядра, если он есть на диске; иначе
+// пустая строка (ядро не установлено).
+func installedKernelBinary(kernelSvc *services.KernelService, name string) string {
+	info := kernelSvc.Get(name)
+	if info == nil || info.BinaryPath == "" {
+		return ""
+	}
+	if _, err := os.Stat(info.BinaryPath); err != nil {
+		return ""
+	}
+	return info.BinaryPath
 }

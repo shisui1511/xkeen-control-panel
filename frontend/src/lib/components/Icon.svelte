@@ -37,6 +37,7 @@
   import Eye from './icons/Eye.svelte';
   import EyeOff from './icons/EyeOff.svelte';
   import Copy from './icons/Copy.svelte';
+  import ConfigIcon from './icons/Config.svelte';
 
   let {
     name,
@@ -53,6 +54,8 @@
 
 {#if name === 'dashboard'}
   <Dashboard {size} {color} class={className} />
+{:else if name === 'config'}
+  <ConfigIcon {size} {color} class={className} />
 {:else if name === 'services'}
   <Services {size} {color} class={className} />
 {:else if name === 'editor'}

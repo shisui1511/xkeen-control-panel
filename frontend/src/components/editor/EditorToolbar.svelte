@@ -25,6 +25,8 @@
     onOpenGenerator?: () => void;
     onApplyQuickFixes?: () => void;
     onDeleteFile?: () => void;
+    /** Файл панели под управлением слоя: правящие действия недоступны (D-12) */
+    managedReadOnly?: boolean;
   }
 
   let {
@@ -46,8 +48,12 @@
     onOpenTemplates,
     onOpenGenerator,
     onApplyQuickFixes,
-    onDeleteFile
+    onDeleteFile,
+    managedReadOnly = false
   }: Props = $props();
+
+  // Навигация, скачивание и поиск остаются доступными; всё, что меняет файл, — нет
+  const readOnlyHint = $derived(managedReadOnly ? $t('editor.managed_readonly_hint') : undefined);
 
   let showKebabMenu = $state(false);
 
@@ -143,26 +149,51 @@
               <Icon name="download" size={14} />
               {$t('editor.download_file')}
             </button>
-            <button class="kebab-item" onclick={() => onRenameFile?.()}>
+            <button
+              class="kebab-item"
+              onclick={() => onRenameFile?.()}
+              disabled={managedReadOnly}
+              title={readOnlyHint}
+            >
               <Icon name="edit" size={14} />
               {$t('app.rename')}
             </button>
-            <button class="kebab-item" onclick={() => onOpenTemplates?.()}>
+            <button
+              class="kebab-item"
+              onclick={() => onOpenTemplates?.()}
+              disabled={managedReadOnly}
+              title={readOnlyHint}
+            >
               <Icon name="settings" size={14} />
               {$t('editor.templates')}
             </button>
             {#if fileType === 'JSON'}
-              <button class="kebab-item" onclick={() => onOpenGenerator?.()}>
+              <button
+                class="kebab-item"
+                onclick={() => onOpenGenerator?.()}
+                disabled={managedReadOnly}
+                title={readOnlyHint}
+              >
                 <Icon name="settings" size={14} />
                 {$t('editor.generator')}
               </button>
             {/if}
-            <button class="kebab-item" onclick={() => onApplyQuickFixes?.()}>
+            <button
+              class="kebab-item"
+              onclick={() => onApplyQuickFixes?.()}
+              disabled={managedReadOnly}
+              title={readOnlyHint}
+            >
               <Icon name="settings" size={14} />
               {$t('editor.quick_fixes')}
             </button>
             <div class="kebab-divider"></div>
-            <button class="kebab-item danger" onclick={() => onDeleteFile?.()}>
+            <button
+              class="kebab-item danger"
+              onclick={() => onDeleteFile?.()}
+              disabled={managedReadOnly}
+              title={readOnlyHint}
+            >
               <Icon name="trash" size={14} />
               {$t('app.delete')}
             </button>
@@ -293,8 +324,13 @@
     transition: background 0.15s;
   }
 
-  .kebab-item:hover {
+  .kebab-item:hover:not(:disabled) {
     background: var(--hover);
+  }
+
+  .kebab-item:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .kebab-item.danger {

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { t } from '../../i18n';
+  import { configLayerEnabled } from '../../stores';
+  import { filesByPath } from '../../lib/configLayer';
 
   export interface EditorTab {
     path: string;
@@ -24,6 +26,14 @@
   } = $props();
 
   let stripEl = $state<HTMLElement | null>(null);
+
+  // Слой «Конфигурация»: «панель» для файла под управлением, «ручной» для отпущенного
+  function layerBadge(path: string): 'managed' | 'manual' | null {
+    if (!$configLayerEnabled) return null;
+    const f = $filesByPath.get(path);
+    if (!f) return null;
+    return f.state === 'released' ? 'manual' : 'managed';
+  }
 
   // Активная вкладка всегда видна в полосе целиком (без scrollIntoView: он двигает и страницу)
   $effect(() => {
@@ -73,6 +83,15 @@
           ondblclick={() => onPinTab(tab.path)}
         >
           <span class="tab-name" title={tab.name}>{tab.name}</span>
+          {#if layerBadge(tab.path) === 'managed'}
+            <span class="badge badge-info layer-badge" data-testid="layer-badge"
+              >{$t('editor.managed_badge')}</span
+            >
+          {:else if layerBadge(tab.path) === 'manual'}
+            <span class="badge layer-badge" data-testid="layer-badge"
+              >{$t('editor.manual_badge')}</span
+            >
+          {/if}
           {#if tab.isDirty}
             <span class="tab-dirty-dot">●</span>
           {/if}
@@ -154,6 +173,14 @@
 
   .tab-name {
     display: inline-block;
+  }
+
+  /* Имя усекается, бейдж не сжимается */
+  .layer-badge {
+    flex-shrink: 0;
+    padding: 0 4px;
+    line-height: 1.4;
+    font-weight: 600;
   }
 
   .editor-tab:hover {

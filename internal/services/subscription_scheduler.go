@@ -888,3 +888,23 @@ const warningSelectedNodeLost = "selected_node_lost"
 // пропал из подписки, а рабочих узлов (не заглушка, разрешённый Xray
 // протокол), чтобы его заменить, не осталось (IN-01 из код-ревью фазы 133).
 const warningSelectedNodeGone = "selected_node_gone"
+
+// OwnedFileNames — базовые имена файлов каталога Xray, которыми владеют
+// существующие подписки: фрагмент outbounds, прежний фрагмент (без tail) и
+// фрагмент роутинга. Слой «Конфигурация» не считает их сиротами (D-13): эти
+// файлы ведёт старый слой подписок. Набор строится заново при каждом вызове,
+// подписки меняются в процессе работы.
+func (s *SubscriptionService) OwnedFileNames() map[string]bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	names := make(map[string]bool, len(s.subscriptions)*3)
+	for i := range s.subscriptions {
+		sub := &s.subscriptions[i]
+		names[filepath.Base(s.getFragmentPath(sub))] = true
+		if legacy := s.legacyFragmentPath(sub); legacy != "" {
+			names[filepath.Base(legacy)] = true
+		}
+		names[filepath.Base(s.getRoutingFragmentPath(sub))] = true
+	}
+	return names
+}

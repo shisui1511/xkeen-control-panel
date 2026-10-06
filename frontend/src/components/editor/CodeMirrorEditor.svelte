@@ -77,6 +77,7 @@
     path = '',
     expertMode = false,
     schemaEnabled = true,
+    readOnly = false,
     view = $bindable(null),
     onContentChange,
     onCursorChange,
@@ -86,6 +87,8 @@
     path: string;
     expertMode: boolean;
     schemaEnabled: boolean;
+    /** Файл панели: ввод с клавиатуры, вставка и перетаскивание не меняют документ */
+    readOnly?: boolean;
     view: EditorView | null;
     onContentChange: (newContent: string) => void;
     onCursorChange: (line: number, col: number, pos: number, state: EditorState) => void;
@@ -94,6 +97,7 @@
 
   let editorContainer: HTMLDivElement | null = $state(null);
   const schemaCompartment = new Compartment();
+  const readOnlyCompartment = new Compartment();
   let lastPath = '';
 
   // Copy of the document with comments blanked out (same length, same line
@@ -229,6 +233,12 @@
     return [];
   }
 
+  // readOnly: EditorState.readOnly отклоняет изменения документа от ввода, а
+  // EditorView.editable выключает contenteditable (нет каретки и экранной клавиатуры).
+  function readOnlyExtensions(ro: boolean) {
+    return [EditorState.readOnly.of(ro), EditorView.editable.of(!ro)];
+  }
+
   // Create or update the EditorState / EditorView when parameters change
   $effect(() => {
     if (!editorContainer || !path) return;
@@ -300,7 +310,8 @@
             onCursorChange(line.number, pos - line.from + 1, pos, update.state);
           }
         }),
-        schemaCompartment.of(schemaExts)
+        schemaCompartment.of(schemaExts),
+        readOnlyCompartment.of(readOnlyExtensions(untrack(() => readOnly)))
       ]
     });
 
@@ -314,6 +325,13 @@
     } else {
       view = new EditorView({ state, parent: editorContainer });
     }
+  });
+
+  // Смена readOnly без пересоздания состояния (как у schemaCompartment): история и курсор целы
+  $effect(() => {
+    const ro = readOnly;
+    if (!view || !view.dom.isConnected) return;
+    view.dispatch({ effects: readOnlyCompartment.reconfigure(readOnlyExtensions(ro)) });
   });
 
   // Keep editor content in sync with external updates if path is unchanged

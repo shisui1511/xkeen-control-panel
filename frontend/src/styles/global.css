@@ -1782,6 +1782,11 @@ td.mono,
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+/* Светлая тема: при 10% подложки контраст акцентного текста 4.4:1 — ниже порога AA */
+[data-theme='light'] .status-badge.info {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
 /* version chip */
 .version-tag {
   font-size: 12px;

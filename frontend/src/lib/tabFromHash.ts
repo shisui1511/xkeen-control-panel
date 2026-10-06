@@ -19,6 +19,10 @@ export function tabFromHash(hash: string): string {
   if (basePath === 'mihomo-gen' || basePath === 'constructor') {
     return 'editor';
   }
+  // Резерв под подразделы раздела «Конфигурация» (#/config/<раздел>)
+  if (basePath.startsWith('config/')) {
+    return 'config';
+  }
   return basePath || 'dashboard';
 }
 

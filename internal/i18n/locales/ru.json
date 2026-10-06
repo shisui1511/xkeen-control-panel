@@ -77,5 +77,17 @@
   "error.invalid_request": "Некорректный запрос",
   "auth.wrong_password": "Текущий пароль неверен",
   "preflight.awg_version_incompatible": "Опции AmneziaWG 3.1 требуют ядро Mihomo версии 1.19.30 или выше",
-  "dns.redirect_rolled_back": "Перехват DNS отменён: после включения роутер перестал разрешать имена. Проверьте DNS-серверы в конфигурации ядра."
+  "dns.redirect_rolled_back": "Перехват DNS отменён: после включения роутер перестал разрешать имена. Проверьте DNS-серверы в конфигурации ядра.",
+  "configlayer.disabled": "Слой конфигурации выключен",
+  "configlayer.draft_conflict": "Черновик изменён в другой вкладке",
+  "configlayer.apply_busy": "Применение уже выполняется",
+  "configlayer.drift_blocked": "Есть файлы с расхождением: решите их судьбу перед применением",
+  "configlayer.unknown_key": "Неизвестный файл слоя конфигурации",
+  "configlayer.unknown_notice": "Неизвестное уведомление",
+  "configlayer.dev_mode_required": "Действие доступно только в режиме разработчика",
+  "configlayer.invalid_request": "Некорректный запрос к слою конфигурации",
+  "configlayer.file_released": "Файл отпущен: панель его не сверяет",
+  "configlayer.disable_failed": "Не удалось выключить слой конфигурации: файлы возвращены, флаг остаётся включённым",
+  "configlayer.file_managed": "Файл панели: правка доступна после «Отпустить управление»",
+  "configlayer.too_many_subscribers": "Слишком много открытых вкладок с панелью: закройте лишние и повторите"
 }

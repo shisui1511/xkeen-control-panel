@@ -102,9 +102,8 @@ func (a *API) KernelInstall(w http.ResponseWriter, r *http.Request) {
 
 	// Замок берёт и статус «Старт…» ставит сам сервис, до ответа: отдельной
 	// проверки статуса здесь нет (проверка-затем-действие давала гонку). Занят — 409.
-	err := a.kernelSvc.BeginInstall(name, func(error) {
-		a.ClearCapabilitiesCache()
-		a.invalidateXKeenStatus()
+	err := a.kernelSvc.BeginInstall(name, func(installErr error) {
+		a.onKernelInstallDone(name, installErr)
 	})
 	if errors.Is(err, services.ErrKernelBusy) {
 		JSONError(w, http.StatusConflict, "install already in progress")
@@ -317,4 +316,15 @@ func (a *API) KernelUpload(w http.ResponseWriter, r *http.Request) {
 
 	kUpdated := a.kernelSvc.Get(name)
 	JSONSuccess(w, kUpdated)
+}
+
+// onKernelInstallDone — действия панели после завершения установки ядра: сброс
+// кэшей и, при успехе, фоновая сборка файлов слоя «Конфигурация» для нового ядра
+// из применённого состояния (D-18). Ядро при этом не запускается.
+func (a *API) onKernelInstallDone(name string, err error) {
+	a.ClearCapabilitiesCache()
+	a.invalidateXKeenStatus()
+	if err == nil && a.configLayer != nil {
+		a.configLayer.OnKernelInstalled(name)
+	}
 }
