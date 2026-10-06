@@ -1,22 +1,159 @@
 package configlayer
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
 
-// Store — заглушка RED-фазы.
-type Store struct{ st State }
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
+)
 
-// OpenStore — заглушка RED-фазы.
-func OpenStore(dataDir string, broker *Broker) (*Store, error) {
-	return &Store{st: emptyState()}, nil
+// ErrDraftConflict — правка черновика сделана на устаревшей ревизии.
+var ErrDraftConflict = errors.New("configlayer: draft revision conflict")
+
+// Store — хранилище состояния слоя: структура в памяти под мьютексом и
+// JSON-файл в каталоге данных панели.
+//
+// Все мутации идут по схеме «копия → запись на диск → подмена в памяти», поэтому
+// ошибка записи не оставляет в памяти изменений, которых нет на диске.
+type Store struct {
+	mu     sync.RWMutex
+	path   string
+	st     State
+	broker *Broker
 }
 
-// Snapshot — заглушка RED-фазы.
-func (s *Store) Snapshot() State { return s.st.clone() }
+// OpenStore открывает (или создаёт) файл состояния в dataDir. broker может
+// быть nil — тогда события не публикуются.
+func OpenStore(dataDir string, broker *Broker) (*Store, error) {
+	s := &Store{
+		path:   filepath.Join(dataDir, StateFileName),
+		broker: broker,
+	}
+	st, err := s.readFile()
+	if err != nil {
+		return nil, err
+	}
+	s.st = st
+	return s, nil
+}
 
-// DraftRevision — заглушка RED-фазы.
-func (s *Store) DraftRevision() int64 { return s.st.DraftRevision }
+// readFile читает файл состояния; если файла нет — создаёт пустое состояние.
+func (s *Store) readFile() (State, error) {
+	data, err := os.ReadFile(s.path)
+	if errors.Is(err, os.ErrNotExist) {
+		st := emptyState()
+		if err := s.persist(st); err != nil {
+			return State{}, err
+		}
+		return st, nil
+	}
+	if err != nil {
+		return State{}, fmt.Errorf("configlayer: read state: %w", err)
+	}
 
-// EditDraft — заглушка RED-фазы.
+	var st State
+	if err := json.Unmarshal(data, &st); err != nil {
+		return State{}, fmt.Errorf("configlayer: parse state: %w", err)
+	}
+	if st.SchemaVersion != SchemaVersion {
+		return State{}, fmt.Errorf("configlayer: unsupported schema_version %d", st.SchemaVersion)
+	}
+	st.normalize()
+	return st, nil
+}
+
+// persist сохраняет состояние на диск (права 0600).
+func (s *Store) persist(st State) error {
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return fmt.Errorf("configlayer: encode state: %w", err)
+	}
+	if err := utils.AtomicWriteFile(s.path, data, 0o600); err != nil {
+		return fmt.Errorf("configlayer: write state: %w", err)
+	}
+	return nil
+}
+
+// Snapshot возвращает глубокую копию текущего состояния.
+func (s *Store) Snapshot() State {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.st.clone()
+}
+
+// DraftRevision возвращает текущую ревизию черновика.
+func (s *Store) DraftRevision() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.st.DraftRevision
+}
+
+// DraftChanges возвращает число неприменённых изменений черновика.
+func (s *Store) DraftChanges() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return draftChanges(s.st)
+}
+
+// draftChanges считает секции, чей черновик отличается от применённого
+// состояния: ключ есть только с одной стороны или значения не равны.
+func draftChanges(st State) int {
+	n := 0
+	for k, d := range st.Draft {
+		a, ok := st.Applied[k]
+		if !ok || !SectionEqual(d, a) {
+			n++
+		}
+	}
+	for k := range st.Applied {
+		if _, ok := st.Draft[k]; !ok {
+			n++
+		}
+	}
+	return n
+}
+
+func draftEventOf(st State) DraftEvent {
+	return DraftEvent{DraftRevision: st.DraftRevision, DraftChanges: draftChanges(st)}
+}
+
+// EditDraft меняет секцию черновика, если baseRev совпадает с текущей
+// ревизией (сравнить и записать). Значение nil или JSON null удаляет секцию.
+// При конфликте возвращается ErrDraftConflict, состояние и файл не меняются,
+// событие не публикуется.
 func (s *Store) EditDraft(baseRev int64, section string, value json.RawMessage) (DraftEvent, error) {
-	return DraftEvent{}, nil
+	s.mu.Lock()
+	if baseRev != s.st.DraftRevision {
+		s.mu.Unlock()
+		return DraftEvent{}, ErrDraftConflict
+	}
+
+	next := s.st.clone()
+	if len(value) == 0 || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		delete(next.Draft, section)
+	} else {
+		compact, err := compactRaw(value)
+		if err != nil {
+			s.mu.Unlock()
+			return DraftEvent{}, fmt.Errorf("configlayer: section value is not valid JSON: %w", err)
+		}
+		next.Draft[section] = compact
+	}
+	next.DraftRevision++
+
+	if err := s.persist(next); err != nil {
+		s.mu.Unlock()
+		return DraftEvent{}, err
+	}
+	s.st = next
+	ev := draftEventOf(next)
+	s.mu.Unlock()
+
+	s.broker.Publish(Event{Type: EventDraft, Data: ev})
+	return ev, nil
 }
