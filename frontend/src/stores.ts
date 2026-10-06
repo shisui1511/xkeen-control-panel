@@ -370,6 +370,41 @@ export async function setDevMode(enabled: boolean): Promise<void> {
   }
 }
 
+// --- Config layer flag (144, D-01) ---
+
+/** Флаг слоя «Конфигурация» (config_layer в настройках). По умолчанию выключен. */
+export const configLayerEnabled = writable(false);
+/** Флаг уже прочитан с сервера: до этого маршрут #/config не считается выключенным. */
+export const configLayerFlagKnown = writable(false);
+
+/** Читает флаги настроек (dev_mode и config_layer); при ошибке «известность» флага не меняется. */
+export async function fetchSettingsFlags(): Promise<void> {
+  try {
+    const data = await apiFetchJSON<{ dev_mode?: boolean; config_layer?: boolean }>(
+      '/api/settings'
+    );
+    devMode.set(data.dev_mode ?? false);
+    configLayerEnabled.set(data.config_layer ?? false);
+    configLayerFlagKnown.set(true);
+  } catch (_) {
+    // ignore
+  }
+}
+
+/**
+ * Включает или выключает слой на сервере. При успехе стор берёт значение из
+ * ответа; при ошибке бросает её дальше — откат переключателя и тост делает компонент.
+ */
+export async function setConfigLayerEnabled(enabled: boolean): Promise<void> {
+  const res = await apiFetchJSON<{ config_layer?: boolean }>('/api/settings/config-layer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled })
+  });
+  configLayerEnabled.set(res?.config_layer ?? enabled);
+  configLayerFlagKnown.set(true);
+}
+
 // --- Theme density store (DENS-01) ---
 
 export type ThemeDensity = 'auto' | 'comfortable' | 'compact';
