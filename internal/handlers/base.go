@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +14,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/assets"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -75,6 +74,9 @@ type API struct {
 	// tryLifecycleLock (занят — 409 kernel_op_in_progress); KernelApplier.Apply
 	// для фоновых вызывающих (подписки) ждёт его блокирующе.
 	lifecycleMu sync.Mutex
+
+	// configLayer — слой «Конфигурация» (D-01); nil, пока main.go его не подключил.
+	configLayer *configlayer.Layer
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
@@ -273,6 +275,24 @@ func (a *API) SetKernelService(svc *services.KernelService) {
 	a.kernelSwitcher = services.NewKernelSwitcher(svc)
 }
 
+// SetConfigLayer подключает слой «Конфигурация»; создаётся, запускается и
+// останавливается в main.go.
+func (a *API) SetConfigLayer(l *configlayer.Layer) {
+	a.configLayer = l
+}
+
+// ConfigLayer — слой «Конфигурация»; nil, если не подключён.
+func (a *API) ConfigLayer() *configlayer.Layer {
+	return a.configLayer
+}
+
+// LifecycleLock — тот же замок жизненного цикла ядра, что берут обработчики и
+// KernelApplier; main.go отдаёт его слою (Options.Lifecycle). Порядок замков в
+// слое: applyMu, затем lifecycleMu.
+func (a *API) LifecycleLock() *sync.Mutex {
+	return &a.lifecycleMu
+}
+
 // tryLifecycleLock берёт замок жизненного цикла без ожидания. Занят — пишет 409
 // kernel_op_in_progress и возвращает false; при успехе вызывающий делает
 // `defer a.lifecycleMu.Unlock()`.
@@ -374,26 +394,5 @@ func (a *API) errorResponse(w http.ResponseWriter, message string, status int) {
 // setupXrayCmdEnv configures XRAY_LOCATION_ASSET environment variable for xray -test commands
 // to ensure Xray can find geodata (.dat) files during syntax validation.
 func setupXrayCmdEnv(cmd *exec.Cmd, configDir string) {
-	env := os.Environ()
-	for _, e := range env {
-		if strings.HasPrefix(e, "XRAY_LOCATION_ASSET=") {
-			cmd.Env = env
-			return
-		}
-	}
-	candidates := []string{
-		"/opt/etc/xray/dat",
-		"/opt/share/xray",
-		"/opt/etc/xray",
-	}
-	if configDir != "" {
-		candidates = append(candidates, filepath.Dir(configDir), configDir)
-	}
-	for _, dir := range candidates {
-		if st, err := os.Stat(dir); err == nil && st.IsDir() {
-			cmd.Env = append(env, "XRAY_LOCATION_ASSET="+dir)
-			return
-		}
-	}
-	cmd.Env = env
+	cmd.Env = utils.XrayAssetEnv(os.Environ(), configDir)
 }
