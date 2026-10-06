@@ -57,6 +57,10 @@ func OpenStore(dataDir string, broker *Broker) (*Store, error) {
 }
 
 // readFile читает файл состояния; если файла нет — создаёт пустое состояние.
+//
+// Файл с чужим schema_version или нечитаемым JSON не разбирается: его байты
+// копируются в backup/config-layer/state, после чего создаётся пустое
+// состояние с уведомлением schema_reset (D-08). Миграций нет.
 func (s *Store) readFile() (State, error) {
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -71,14 +75,56 @@ func (s *Store) readFile() (State, error) {
 	}
 
 	var st State
-	if err := json.Unmarshal(data, &st); err != nil {
-		return State{}, fmt.Errorf("configlayer: parse state: %w", err)
-	}
-	if st.SchemaVersion != SchemaVersion {
-		return State{}, fmt.Errorf("configlayer: unsupported schema_version %d", st.SchemaVersion)
+	if err := json.Unmarshal(data, &st); err != nil || st.SchemaVersion != SchemaVersion {
+		return s.resetState(data)
 	}
 	st.normalize()
 	return st, nil
+}
+
+// resetState сохраняет исходные байты файла состояния в каталоге копий и
+// записывает пустое состояние. Если копию сделать не удалось, возвращается
+// ошибка и прежний файл остаётся нетронутым: байты старого состояния не
+// теряются.
+func (s *Store) resetState(original []byte) (State, error) {
+	backupPath, err := s.backupOriginal(original)
+	if err != nil {
+		return State{}, err
+	}
+	st := emptyState()
+	st.Notices.SchemaReset = true
+	st.Notices.SchemaResetBackup = backupPath
+	if err := s.persist(st); err != nil {
+		return State{}, err
+	}
+	return st, nil
+}
+
+// backupOriginal пишет копию state.<unix>.json (0600) в каталог 0700. Если файл
+// с таким именем уже есть (два сброса в одну секунду), добавляется суффикс.
+func (s *Store) backupOriginal(original []byte) (string, error) {
+	dir := filepath.Join(filepath.Dir(s.path), "backup", "config-layer", "state")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("configlayer: create state backup dir: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return "", fmt.Errorf("configlayer: chmod state backup dir: %w", err)
+	}
+
+	unix := s.now().Unix()
+	path := filepath.Join(dir, fmt.Sprintf("state.%d.json", unix))
+	for n := 1; ; n++ {
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+			break
+		} else if err != nil {
+			return "", fmt.Errorf("configlayer: check state backup: %w", err)
+		}
+		path = filepath.Join(dir, fmt.Sprintf("state.%d.%d.json", unix, n))
+	}
+	if err := utils.AtomicWriteFile(path, original, 0o600); err != nil {
+		return "", fmt.Errorf("configlayer: write state backup: %w", err)
+	}
+	return path, nil
 }
 
 // persist сохраняет состояние на диск (права 0600).
