@@ -103,7 +103,11 @@ const (
 	// ResultRollbackFailed — вернуть прежние файлы не удалось: журнал остался,
 	// откат повторится при следующем запуске панели.
 	ResultRollbackFailed = "rollback_failed"
-	ResultDriftBlocked   = "drift_blocked"
+	// ResultJournalRecoveryFailed — журнал прошлой прерванной записи вернуть до
+	// конца не удалось. Журнал уже снят (RecoverJournal снимает его всегда), поэтому
+	// повторного возврата не будет: файлы нужно проверить вручную.
+	ResultJournalRecoveryFailed = "journal_recovery_failed"
+	ResultDriftBlocked          = "drift_blocked"
 )
 
 // ResultView — итог запуска.
@@ -267,7 +271,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	// набором: сначала возвращаем файлы по нему (WR-03).
 	if err := p.recoverPendingJournal(); err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
-		return p.finish(ResultView{Code: ResultRollbackFailed, Message: err.Error()})
+		return p.finish(ResultView{Code: ResultJournalRecoveryFailed, Message: err.Error()})
 	}
 	snap := p.d.Store.Snapshot()
 	src := snap.Draft

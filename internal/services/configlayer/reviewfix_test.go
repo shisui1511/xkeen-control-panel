@@ -936,3 +936,45 @@ func TestFollowupWR05_SnapshotAliasForConfigSymlink(t *testing.T) {
 		t.Errorf("у файла Xray есть alias: %v", xf.AliasPaths)
 	}
 }
+
+// Review-fix IN-01: журнал прошлой записи не восстановился (набор копий пропал):
+// отдельный код без обещания повтора, файлы не пишутся.
+func TestFollowupIN01_RunJournalRecoveryFailedCode(t *testing.T) {
+	env, abs := pendingJournalEnv(t)
+	err := env.Store.Update(func(st *State) error {
+		st.Journal.BackupDir = filepath.Join(env.DataDir, "backup", "config-layer", "apply-404")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	if r := view.Result; r == nil || r.OK || r.Code != ResultJournalRecoveryFailed {
+		t.Fatalf("Result = %+v, want journal_recovery_failed", r)
+	}
+	if got := mustRead(t, abs); got != "NEW" {
+		t.Errorf("файл = %q, want нетронутый NEW", got)
+	}
+}
+
+// Review-fix IN-01: после запуска, восстановившего файлы по журналу, слой публикует
+// уведомления: «перезапустите ядро» появляется без перечитывания снимка.
+func TestFollowupIN01_AfterRunPublishesNotices(t *testing.T) {
+	env, events := newApplyLayer(t, layerOpts{})
+	drain(events)
+
+	env.L.afterRun()
+
+	for {
+		select {
+		case ev := <-events:
+			if ev.Type == EventNotices {
+				return
+			}
+		default:
+			t.Fatal("afterRun не опубликовал notices")
+		}
+	}
+}

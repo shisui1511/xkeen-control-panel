@@ -544,9 +544,12 @@ func (l *Layer) StartApply(user bool) error {
 }
 
 // afterRun — действия после запуска конвейера: число изменений черновика после
-// коммита и внеочередная сверка.
+// коммита, уведомления (запуск мог восстановить файлы по журналу) и внеочередная
+// сверка.
 func (l *Layer) afterRun() {
-	l.broker.Publish(Event{Type: EventDraft, Data: draftEventOf(l.store.Snapshot())})
+	st := l.store.Snapshot()
+	l.broker.Publish(Event{Type: EventDraft, Data: draftEventOf(st)})
+	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(st)}})
 	l.checkNow(true)
 }
 

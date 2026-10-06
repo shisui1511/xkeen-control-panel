@@ -2671,6 +2671,7 @@
   "cfg.result.rolled_back": "Apply failed. Panel files were restored from the backup, the kernel keeps running on the previous config.",
   "cfg.result.rollback_failed": "Apply failed, and the previous files could not be restored either. Some panel files may stay changed. The panel will retry the restore on its next start. Check the kernel and the files in the list.",
   "cfg.result.kernel_not_recovered": "Apply failed. Panel files were restored from the backup, but {kernel} did not start on them. Start the kernel manually in Services.",
+  "cfg.result.journal_recovery_failed": "Could not fully restore the files after an earlier interrupted write. The journal is already cleared and the restore will not be retried. Check the panel files in the list and rebuild them if needed.",
   "cfg.result.interrupted": "Apply was interrupted by the panel stopping. The unfinished write will be undone on the next panel start.",
   "cfg.result.success": "Applied: files written — {n}",
   "cfg.result.orphans": "Foreign panel files removed: {list}",

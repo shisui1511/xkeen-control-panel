@@ -120,6 +120,8 @@
         return $t('cfg.result.kernel_not_recovered', { kernel });
       case 'rollback_failed':
         return $t('cfg.result.rollback_failed');
+      case 'journal_recovery_failed':
+        return $t('cfg.result.journal_recovery_failed');
       case 'interrupted':
         return $t('cfg.result.interrupted');
       case 'drift_blocked':
