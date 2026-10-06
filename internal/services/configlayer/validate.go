@@ -10,6 +10,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // defaultValidateTimeout — время на проверку одним ядром для платформы.
@@ -92,10 +95,15 @@ func ValidateXray(ctx context.Context, tmpBase string, roots Roots, bin string, 
 	}
 	cmd.WaitDelay = ValidateWaitDelay
 	out, runErr := cmd.CombinedOutput()
-	return finishValidation(KernelXray, cctx, runErr, out)
+	return finishValidation(KernelXray, cctx, runErr, out, tmp, roots.Xray)
 }
 
-// ValidateMihomo проверяет план ядром Mihomo по копии каталога.
+// ValidateMihomo проверяет план ядром Mihomo: `<mihomo> -t -d <tmp> -f
+// <tmp>/config.yaml` по копии каталога Mihomo. config.yaml в копии — обычный
+// файл с содержимым разрешённого симлинка, остальные конфигурации верхнего
+// уровня копируются, geodata (*.dat, *.metadb, *.mmdb) и файлы подкаталогов
+// (кроме profiles и backups) подключаются симлинками. Нет config.yaml — проверка
+// пропущена (no_config).
 func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string, plan Plan) ValidationResult {
 	if bin == "" {
 		return skippedResult(KernelMihomo, NoteKernelNotInstalled)
@@ -103,7 +111,32 @@ func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string
 	if !plan.Changes(KernelMihomo) {
 		return skippedResult(KernelMihomo, NoteNoChanges)
 	}
-	return ValidationResult{Kernel: KernelMihomo, Code: CodeValidationNotRun, Message: "проверка Mihomo не реализована"}
+	cfg, err := filepath.EvalSymlinks(filepath.Join(roots.Mihomo, "config.yaml"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return skippedResult(KernelMihomo, NoteNoConfig)
+		}
+		return notRun(KernelMihomo, err)
+	}
+	tmp, err := makeTmp(tmpBase)
+	if err != nil {
+		return notRun(KernelMihomo, err)
+	}
+	defer os.RemoveAll(tmp)
+
+	if err := mirrorMihomo(roots.Mihomo, cfg, tmp); err != nil {
+		return notRun(KernelMihomo, err)
+	}
+	if err := overlayPlan(tmp, plan, KernelMihomo); err != nil {
+		return notRun(KernelMihomo, err)
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, ValidateTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, bin, "-t", "-d", tmp, "-f", filepath.Join(tmp, "config.yaml"))
+	cmd.WaitDelay = ValidateWaitDelay
+	out, runErr := cmd.CombinedOutput()
+	return finishValidation(KernelMihomo, cctx, runErr, out, tmp, roots.Mihomo)
 }
 
 // makeTmp создаёт каталог проверки <tmpBase>/apply-* с правами 0700.
@@ -122,16 +155,58 @@ func notRun(kernel string, err error) ValidationResult {
 	return ValidationResult{Kernel: kernel, Code: CodeValidationNotRun, Message: err.Error()}
 }
 
-// finishValidation превращает итог запуска ядра в ValidationResult.
-func finishValidation(kernel string, cctx context.Context, runErr error, out []byte) ValidationResult {
+// maxMessageBytes — предел длины сообщения ядра (хвост, где обычно причина).
+const maxMessageBytes = 4000
+
+// finishValidation превращает итог запуска ядра в ValidationResult. Сообщение
+// очищается: без ANSI, путь временного каталога заменён рабочим корнем, длина
+// ограничена.
+func finishValidation(kernel string, cctx context.Context, runErr error, out []byte, tmp, workRoot string) ValidationResult {
 	if runErr == nil {
 		return ValidationResult{Kernel: kernel, OK: true}
 	}
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
-		return ValidationResult{Kernel: kernel, Code: CodeValidationFailed, Message: string(out)}
+		msg := sanitizeOutput(string(out), tmp, workRoot)
+		return ValidationResult{Kernel: kernel, Code: CodeValidationFailed, Message: msg, HintCode: hintFor(kernel, msg)}
 	}
 	return notRun(kernel, runErr)
+}
+
+// sanitizeOutput готовит вывод ядра к показу в UI.
+func sanitizeOutput(out, tmp, workRoot string) string {
+	out = utils.StripANSI(out)
+	if tmp != "" {
+		out = strings.ReplaceAll(out, tmp, workRoot)
+	}
+	out = strings.TrimSpace(out)
+	if len(out) > maxMessageBytes {
+		out = out[len(out)-maxMessageBytes:]
+		for len(out) > 0 && !utf8.RuneStart(out[0]) {
+			out = out[1:]
+		}
+	}
+	return out
+}
+
+// hintFor подбирает код подсказки по известным формулировкам ядер.
+func hintFor(kernel, out string) string {
+	switch kernel {
+	case KernelXray:
+		switch {
+		case strings.Contains(out, "unknown config id"):
+			return "xray_unknown_protocol"
+		case strings.Contains(out, "invalid character"),
+			strings.Contains(out, "unexpected end of JSON"),
+			strings.Contains(out, "failed to load config files"):
+			return "xray_json_syntax"
+		}
+	case KernelMihomo:
+		if strings.Contains(out, "yaml:") {
+			return "mihomo_yaml_syntax"
+		}
+	}
+	return ""
 }
 
 // mirrorXray копирует *.json верхнего уровня корня Xray во временный каталог.
@@ -183,6 +258,91 @@ func overlayPlan(tmp string, plan Plan, kernel string) error {
 			if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// mirrorMihomo строит зеркало каталога Mihomo (см. ValidateMihomo).
+func mirrorMihomo(root, resolvedConfig, tmp string) error {
+	data, err := os.ReadFile(resolvedConfig)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "config.yaml"), data, 0o644); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("каталог Mihomo: %w", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name == "config.yaml" {
+			continue
+		}
+		src := filepath.Join(root, name)
+		st, err := os.Stat(src)
+		if err != nil {
+			continue // оборванный симлинк
+		}
+		if st.IsDir() {
+			if name == "profiles" || name == "backups" {
+				continue
+			}
+			if err := linkDir(src, filepath.Join(tmp, name), 0); err != nil {
+				return err
+			}
+			continue
+		}
+		dst := filepath.Join(tmp, name)
+		switch strings.ToLower(filepath.Ext(name)) {
+		case ".yaml", ".yml", ".json":
+			b, err := os.ReadFile(src)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(dst, b, 0o644); err != nil {
+				return err
+			}
+		case ".dat", ".metadb", ".mmdb":
+			if err := os.Symlink(src, dst); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// maxMirrorDepth — предел вложенности зеркала подкаталогов (защита от петель).
+const maxMirrorDepth = 8
+
+// linkDir создаёт каталог dst с симлинками на файлы каталога src, рекурсивно.
+func linkDir(src, dst string, depth int) error {
+	if depth > maxMirrorDepth {
+		return nil
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		s := filepath.Join(src, e.Name())
+		st, err := os.Stat(s)
+		if err != nil {
+			continue
+		}
+		if st.IsDir() {
+			if err := linkDir(s, filepath.Join(dst, e.Name()), depth+1); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.Symlink(s, filepath.Join(dst, e.Name())); err != nil {
+			return err
 		}
 	}
 	return nil
