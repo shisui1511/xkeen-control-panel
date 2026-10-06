@@ -111,3 +111,86 @@ func TestPipeline_TracerApplyDiag(t *testing.T) {
 		t.Errorf("Current().Result = %+v", cur.Result)
 	}
 }
+
+func writeDiagBoth(t *testing.T, env *testEnv) {
+	t.Helper()
+	env.setDraft(t, DiagSection, `{"enabled":true}`)
+}
+
+func requireNothingWritten(t *testing.T, env *testEnv) {
+	t.Helper()
+	for _, p := range []string{
+		filepath.Join(env.Roots.Xray, DiagXrayRel),
+		filepath.Join(env.Roots.Mihomo, DiagMihomoRel),
+	} {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("файл записан: %s", p)
+		}
+	}
+	st := env.Store.Snapshot()
+	if len(st.Manifest) != 0 {
+		t.Errorf("манифест не пуст: %+v", st.Manifest)
+	}
+	if len(st.Applied) != 0 {
+		t.Errorf("Applied не пуст: %v", st.Applied)
+	}
+	if len(st.Draft) == 0 {
+		t.Error("черновик тронут")
+	}
+	requireNoApplyDirs(t, env.DataDir)
+}
+
+func TestApply_BothValidatedBeforeWrite(t *testing.T) {
+	binDir := t.TempDir()
+	xray := writeFakeKernel(t, binDir, "xray", 0, "", 0)
+	mihomo := writeFakeKernel(t, binDir, "mihomo", 1, "yaml: line 2: did not find expected key", 0)
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Xray: xray, Mihomo: mihomo}, DevMode: true})
+	writeDiagBoth(t, env)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != "validation_failed" || r.Kernel != KernelMihomo || r.HintCode != "mihomo_yaml_syntax" {
+		t.Fatalf("Result = %+v, want validation_failed mihomo mihomo_yaml_syntax", r)
+	}
+	if got := len(readArgsLog(t, binDir, "xray")); got != 1 {
+		t.Errorf("xray запущен %d раз, want 1 (обе проверки до записи)", got)
+	}
+	requireNothingWritten(t, env)
+	if s := stepOf(t, view, StepValidateXray); s.State != StepDone {
+		t.Errorf("validate_xray = %+v, want done", s)
+	}
+	if s := stepOf(t, view, StepValidateMihomo); s.State != StepFailed {
+		t.Errorf("validate_mihomo = %+v, want failed", s)
+	}
+	if s := stepOf(t, view, StepWrite); s.State != StepPending {
+		t.Errorf("write = %+v, want pending", s)
+	}
+}
+
+func TestApply_ValidationFailsNothingWritten(t *testing.T) {
+	binDir := t.TempDir()
+	xray := writeFakeKernelScript(t, binDir, "xray", strings.Join([]string{
+		`echo "Failed to start: main: failed to load config files: [$4/01_log.json $4/04_outbounds.xcp-diag.tail.json] > infra/conf: unknown config id: nope"`,
+		`exit 23`,
+	}, "\n"))
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Xray: xray}, DevMode: true})
+	writeDiagBoth(t, env)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != "validation_failed" || r.Kernel != KernelXray {
+		t.Fatalf("Result = %+v, want validation_failed xray", r)
+	}
+	if r.HintCode != "xray_unknown_protocol" {
+		t.Errorf("HintCode = %q, want xray_unknown_protocol", r.HintCode)
+	}
+	if !strings.Contains(r.Message, env.Roots.Xray) {
+		t.Errorf("Message = %q, want путь рабочего корня %s", r.Message, env.Roots.Xray)
+	}
+	if strings.Contains(r.Message, filepath.Join(env.DataDir, "tmp")) {
+		t.Errorf("Message выдаёт путь временного каталога: %q", r.Message)
+	}
+	requireNothingWritten(t, env)
+}
