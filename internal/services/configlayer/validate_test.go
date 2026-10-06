@@ -202,3 +202,52 @@ func TestSanitizeOutput_CollapsesRepeatedWarnings(t *testing.T) {
 		t.Errorf("причина отказа не в конце: %q", got)
 	}
 }
+
+// Review-fix WR-04: корень каталога Mihomo — симлинк: проверка берёт байты плана,
+// а не старый профиль с диска.
+func TestFollowupWR04_MihomoRootSymlinkUsesPlannedProfile(t *testing.T) {
+	real := t.TempDir()
+	writeTestFile(t, filepath.Join(real, "profiles", "xcp-a.yaml"), "mixed-port: 1\n")
+	if err := os.Symlink(filepath.Join("profiles", "xcp-a.yaml"), filepath.Join(real, "config.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "mihomo")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	dump := filepath.Join(binDir, "config.dump")
+	bin := writeFakeKernelScript(t, binDir, "mihomo", `cat "$3/config.yaml" > `+shellQuote(dump)+"\nexit 0")
+	plan := mihomoPlanWrite("profiles/xcp-a.yaml", "mixed-port: 2\n")
+	plan.Files[0].Kind = KindMihomoProfile
+
+	res := ValidateMihomo(context.Background(), filepath.Join(t.TempDir(), "tmp"), Roots{Mihomo: link}, bin, plan)
+
+	if !res.OK {
+		t.Fatalf("результат = %+v, want OK", res)
+	}
+	if got := mustRead(t, dump); got != "mixed-port: 2\n" {
+		t.Errorf("проверен профиль %q, want байты плана", got)
+	}
+}
+
+// Review-fix WR-04: план удаляет файл, на который указывает config.yaml: отказ
+// проверки, а не проверка по старым байтам.
+func TestFollowupWR04_MihomoConfigTargetDeletedFails(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "profiles", "xcp-a.yaml"), "mixed-port: 1\n")
+	if err := os.Symlink(filepath.Join("profiles", "xcp-a.yaml"), filepath.Join(root, "config.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	bin := writeFakeKernel(t, t.TempDir(), "mihomo", 0, "", 0)
+	plan := Plan{Files: []FilePlan{{
+		Key: ManifestKey(KernelMihomo, "profiles/xcp-a.yaml"), Kernel: KernelMihomo,
+		RelPath: "profiles/xcp-a.yaml", Action: ActionDelete,
+	}}}
+
+	res := ValidateMihomo(context.Background(), filepath.Join(t.TempDir(), "tmp"), Roots{Mihomo: root}, bin, plan)
+
+	if res.OK || res.Code != CodeValidationFailed {
+		t.Fatalf("результат = %+v, want validation_failed", res)
+	}
+}

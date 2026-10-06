@@ -135,7 +135,15 @@ func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string
 	}
 	defer os.RemoveAll(tmp)
 
-	if err := mirrorMihomo(roots.Mihomo, cfg, plannedContent(roots.Mihomo, cfg, plan), tmp); err != nil {
+	override, deleted := plannedContent(roots.Mihomo, cfg, plan)
+	if deleted {
+		return ValidationResult{
+			Kernel:  KernelMihomo,
+			Code:    CodeValidationFailed,
+			Message: "config.yaml указывает на файл, который удаляет применение",
+		}
+	}
+	if err := mirrorMihomo(roots.Mihomo, cfg, override, tmp); err != nil {
 		return notRun(KernelMihomo, err)
 	}
 	if err := overlayPlan(tmp, plan, KernelMihomo); err != nil {
@@ -331,20 +339,33 @@ func overlayPlan(tmp string, plan Plan, kernel string) error {
 // plannedContent возвращает байты из плана, если разрешённый путь config.yaml
 // указывает на файл Mihomo, который план записывает (config.yaml → profiles/…);
 // иначе nil. Без этого ядро проверяло бы старый профиль с диска (D-14).
-func plannedContent(root, resolvedConfig string, plan Plan) []byte {
-	for _, base := range []string{root, resolveDirSymlinks(root)} {
+// deleted — план удаляет файл, на который указывает config.yaml: после записи
+// config.yaml остался бы оборванным симлинком. Корень каталога Mihomo сравнивается
+// и в исходном, и в полностью развёрнутом виде (сам корень может быть симлинком).
+func plannedContent(root, resolvedConfig string, plan Plan) (data []byte, deleted bool) {
+	bases := []string{filepath.Clean(root), resolveDirSymlinks(root)}
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		bases = append(bases, r)
+	}
+	for _, base := range bases {
 		rel, err := filepath.Rel(filepath.Clean(base), resolvedConfig)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			continue
 		}
 		rel = filepath.ToSlash(rel)
 		for _, fp := range plan.Files {
-			if fp.Kernel == KernelMihomo && fp.Action == ActionWrite && fp.RelPath == rel {
-				return fp.Content
+			if fp.Kernel != KernelMihomo || fp.RelPath != rel {
+				continue
+			}
+			switch fp.Action {
+			case ActionWrite:
+				return fp.Content, false
+			case ActionDelete:
+				return nil, true
 			}
 		}
 	}
-	return nil
+	return nil, false
 }
 
 // mirrorMihomo строит зеркало каталога Mihomo (см. ValidateMihomo). override
