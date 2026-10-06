@@ -624,3 +624,42 @@ func TestWR07_BackgroundTryBeginCancelWhileApplyBusy(t *testing.T) {
 		t.Fatal("TryBegin не вернулся после отмены")
 	}
 }
+
+// WR-08: config.yaml — симлинк на панельный профиль: Редактор не должен писать
+// сквозь него в файл панели.
+func TestWR08_IsManagedPathThroughFileSymlink(t *testing.T) {
+	env, _ := newApplyLayer(t, layerOpts{})
+	link := filepath.Join(env.Roots.Xray, "99_link.json")
+	if err := os.Symlink(DiagXrayRel, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if !env.L.IsManagedPath(link) {
+		t.Error("симлинк на панельный файл не распознан как управляемый: запись прошла бы сквозь него")
+	}
+	if env.L.IsManagedPath(filepath.Join(env.Roots.Xray, "01_log.json")) {
+		t.Error("посторонний файл считается управляемым")
+	}
+}
+
+// WR-08: каталог панели — симлинк на каталог вне корней: запись отклоняется до
+// первой записи, внешний каталог не тронут.
+func TestWR08_SymlinkedPanelDirOutsideRootRejected(t *testing.T) {
+	mihomo := writeFakeKernel(t, t.TempDir(), "mihomo", 0, "", 0)
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Mihomo: mihomo}, DevMode: true})
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(env.Roots.Mihomo, "proxy_providers")); err != nil {
+		t.Fatal(err)
+	}
+	writeDiagBoth(t, env)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != ResultWriteFailed || !strings.Contains(r.Message, ErrSymlinkOutsideRoot.Error()) {
+		t.Fatalf("Result = %+v, want write_failed с ErrSymlinkOutsideRoot", r)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("запись ушла за пределы корней: %v", entries)
+	}
+}

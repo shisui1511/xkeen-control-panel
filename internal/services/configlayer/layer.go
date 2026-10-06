@@ -678,15 +678,16 @@ func (l *Layer) OnKernelInstalled(kernel string) {
 // --- защита путей Редактора и перечитывание ---
 
 // IsManagedPath — абсолютный путь указывает на файл, которым владеет панель
-// (запись манифеста managed). Каталог пути приводится через EvalSymlinks, чтобы
-// путь через симлинк-каталог на корень ядра распознавался; отпущенные файлы и
+// (запись манифеста managed). Пути сравниваются после полного разворачивания
+// симлинков: путь через симлинк-каталог на корень ядра и симлинк на панельный
+// файл (config.yaml → profiles/xcp-*.yaml) распознаются; отпущенные файлы и
 // выключенный слой дают false. Нужен Редактору (D-12): панельные файлы там только
 // на чтение.
 func (l *Layer) IsManagedPath(absPath string) bool {
 	if !l.Enabled() || !filepath.IsAbs(absPath) {
 		return false
 	}
-	target := resolveDirSymlinks(absPath)
+	target := resolveFullSymlinks(absPath)
 	for _, e := range l.store.Snapshot().Manifest {
 		if e.Status != StatusManaged {
 			continue
@@ -695,11 +696,20 @@ func (l *Layer) IsManagedPath(absPath string) bool {
 		if err != nil {
 			continue
 		}
-		if resolveDirSymlinks(abs) == target {
+		if resolveFullSymlinks(abs) == target {
 			return true
 		}
 	}
 	return false
+}
+
+// resolveFullSymlinks разворачивает симлинки пути целиком, включая сам файл;
+// файла нет — как resolveDirSymlinks.
+func resolveFullSymlinks(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return resolveDirSymlinks(p)
 }
 
 // resolveDirSymlinks нормализует путь и разворачивает симлинки в его каталоге

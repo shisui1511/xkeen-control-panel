@@ -133,9 +133,10 @@ func (p *Pipeline) writePlan(plan Plan, trigger Trigger) (writeOutcome, error) {
 }
 
 // checkSymlinks отказывает до первой записи, если файл панели — симлинк, цель
-// которого лежит за пределами корней ядер: AtomicReplaceFile следует симлинку и
-// перезаписал бы чужой файл (T-144-18). Симлинк внутри корней (config.yaml на
-// профиль) допустим.
+// которого лежит за пределами корней ядер, или если его каталог (например,
+// proxy_providers) — симлинк на каталог вне корней: AtomicReplaceFile следует
+// симлинку и записал бы или удалил чужой файл (T-144-18). Симлинк внутри корней
+// (config.yaml на профиль) допустим.
 func (p *Pipeline) checkSymlinks(plan Plan) error {
 	var roots []string
 	for _, r := range []string{p.d.Roots.Xray, p.d.Roots.Mihomo} {
@@ -147,7 +148,18 @@ func (p *Pipeline) checkSymlinks(plan Plan) error {
 		}
 		roots = append(roots, filepath.Clean(r))
 	}
+	for _, o := range plan.Orphans {
+		if !dirWithinRoots(o.AbsPath, roots) {
+			return fmt.Errorf("%s: %w", o.Key, ErrSymlinkOutsideRoot)
+		}
+	}
 	for _, fp := range plan.Files {
+		if fp.Action != ActionWrite && fp.Action != ActionDelete {
+			continue
+		}
+		if !dirWithinRoots(fp.AbsPath, roots) {
+			return fmt.Errorf("%s: %w", fp.Key, ErrSymlinkOutsideRoot)
+		}
 		if fp.Action != ActionWrite {
 			continue
 		}
@@ -168,6 +180,26 @@ func (p *Pipeline) checkSymlinks(plan Plan) error {
 		}
 	}
 	return nil
+}
+
+// dirWithinRoots — каталог файла после разворачивания симлинков лежит внутри
+// корней. Каталога может ещё не быть: берётся ближайший существующий предок.
+func dirWithinRoots(abs string, roots []string) bool {
+	dir := filepath.Dir(filepath.Clean(abs))
+	for {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			return withinAnyRoot(resolved, roots)
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return false
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }
 
 func withinAnyRoot(path string, roots []string) bool {
