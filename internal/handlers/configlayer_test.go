@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,6 +81,9 @@ type layerHarnessOpts struct {
 	XrayRunning bool
 	// NoLayer — API без слоя (main.go его не подключил).
 	NoLayer bool
+	// XraySleepSec — сколько секунд фейковый xray «проверяет» конфигурацию
+	// (держит применение занятым).
+	XraySleepSec int
 	// Restart подменяет перезапуск ядра (nil — все запущенные ядра получают новый PID).
 	Restart func(h *layerHarness) (string, error)
 }
@@ -137,7 +141,11 @@ func newLayerHarness(t *testing.T, ho layerHarnessOpts) *layerHarness {
 	if ho.XrayRunning {
 		xrayBin = filepath.Join(t.TempDir(), "xray")
 		// Фейковый xray: проверка конфигурации всегда успешна, настоящий не запускается.
-		if err := os.WriteFile(xrayBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		script := "#!/bin/sh\nexit 0\n"
+		if ho.XraySleepSec > 0 {
+			script = fmt.Sprintf("#!/bin/sh\nsleep %d\nexit 0\n", ho.XraySleepSec)
+		}
+		if err := os.WriteFile(xrayBin, []byte(script), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		h.procs.set("xray", "running", 100)
@@ -456,5 +464,252 @@ func TestHandler_DisabledReturns404(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// layerFileKey возвращает ключ единственного (первого) файла слоя из снимка.
+func (h *layerHarness) layerFileKey(t *testing.T) string {
+	t.Helper()
+	env := h.do(t, http.MethodGet, "/api/configlayer/state", "")
+	var files []struct {
+		Key   string `json:"key"`
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(env.data(t)["files"], &files); err != nil || len(files) == 0 {
+		t.Fatalf("в снимке нет файлов: %v; %s", err, env.Raw)
+	}
+	return files[0].Key
+}
+
+// applyDiagAndWait кладёт диагностический файл в черновик, применяет и ждёт apply_done.
+func (h *layerHarness) applyDiagAndWait(t *testing.T, c *sseClient) {
+	t.Helper()
+	env := h.do(t, http.MethodPost, "/api/configlayer/diag", `{"revision":0,"action":"add"}`)
+	if env.Status != http.StatusOK {
+		t.Fatalf("diag add: %d %s", env.Status, env.Raw)
+	}
+	env = h.do(t, http.MethodPost, "/api/configlayer/apply", `{}`)
+	if env.Status != http.StatusOK {
+		t.Fatalf("apply: %d %s", env.Status, env.Raw)
+	}
+	done := c.wait(t, "apply_done", 15*time.Second, nil)
+	if !strings.Contains(done.Data, `"applied"`) {
+		t.Fatalf("применение не завершилось успехом: %s", done.Data)
+	}
+}
+
+func TestHandler_ApplyStarted(t *testing.T) {
+	h := newLayerHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true})
+	c := h.subscribe(t)
+	c.wait(t, "snapshot", 5*time.Second, nil)
+
+	if env := h.do(t, http.MethodPost, "/api/configlayer/diag", `{"revision":0,"action":"add"}`); env.Status != http.StatusOK {
+		t.Fatalf("diag: %d %s", env.Status, env.Raw)
+	}
+	env := h.do(t, http.MethodPost, "/api/configlayer/apply", `{}`)
+	if env.Status != http.StatusOK || string(env.data(t)["started"]) != "true" {
+		t.Fatalf("apply: %d %s", env.Status, env.Raw)
+	}
+	c.wait(t, "apply_step", 15*time.Second, nil)
+	done := c.wait(t, "apply_done", 15*time.Second, nil)
+	if !strings.Contains(done.Data, `"applied"`) {
+		t.Errorf("apply_done: %s", done.Data)
+	}
+}
+
+func TestHandler_ApplyCodes(t *testing.T) {
+	t.Run("apply_busy", func(t *testing.T) {
+		h := newLayerHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true, XraySleepSec: 1})
+		c := h.subscribe(t)
+		c.wait(t, "snapshot", 5*time.Second, nil)
+		h.do(t, http.MethodPost, "/api/configlayer/diag", `{"revision":0,"action":"add"}`)
+		if env := h.do(t, http.MethodPost, "/api/configlayer/apply", `{}`); env.Status != http.StatusOK {
+			t.Fatalf("первый apply: %d %s", env.Status, env.Raw)
+		}
+		env := h.do(t, http.MethodPost, "/api/configlayer/apply", `{}`)
+		if env.Status != http.StatusConflict || env.Code != "apply_busy" {
+			t.Fatalf("второй apply: %d code=%q %s", env.Status, env.Code, env.Raw)
+		}
+		c.wait(t, "apply_done", 15*time.Second, nil)
+	})
+	t.Run("kernel_op_in_progress", func(t *testing.T) {
+		h := newLayerHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true})
+		lock := h.api.LifecycleLock()
+		lock.Lock()
+		defer lock.Unlock()
+		env := h.do(t, http.MethodPost, "/api/configlayer/apply", `{}`)
+		if env.Status != http.StatusConflict || env.Code != "kernel_op_in_progress" {
+			t.Fatalf("apply при занятом замке: %d code=%q %s", env.Status, env.Code, env.Raw)
+		}
+	})
+	t.Run("drift_blocked", func(t *testing.T) {
+		h := newLayerHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true})
+		c := h.subscribe(t)
+		c.wait(t, "snapshot", 5*time.Second, nil)
+		h.applyDiagAndWait(t, c)
+		before := h.restarts.Load()
+
+		// Ручная правка файла панели в обход слоя.
+		path := filepath.Join(h.roots.Xray, configlayer.DiagXrayRel)
+		if err := os.WriteFile(path, []byte(`{"manual":true}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		env := h.do(t, http.MethodPost, "/api/configlayer/apply", `{}`)
+		if env.Status != http.StatusConflict || env.Code != "drift_blocked" {
+			t.Fatalf("apply при дрейфе: %d code=%q %s", env.Status, env.Code, env.Raw)
+		}
+		if h.restarts.Load() != before {
+			t.Error("при дрейфе ядро не должно перезапускаться")
+		}
+	})
+}
+
+func TestHandler_FilesActions(t *testing.T) {
+	h := newLayerHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true})
+	c := h.subscribe(t)
+	c.wait(t, "snapshot", 5*time.Second, nil)
+	h.applyDiagAndWait(t, c)
+	key := h.layerFileKey(t)
+
+	// Принять правку.
+	env := h.do(t, http.MethodPost, "/api/configlayer/files/release", fmt.Sprintf(`{"key":%q}`, key))
+	if env.Status != http.StatusOK {
+		t.Fatalf("release: %d %s", env.Status, env.Raw)
+	}
+	data := env.data(t)
+	if _, ok := data["files"]; !ok {
+		t.Errorf("в ответе release нет files: %s", env.Raw)
+	}
+	if _, ok := data["drift_count"]; !ok {
+		t.Errorf("в ответе release нет drift_count: %s", env.Raw)
+	}
+	if !strings.Contains(string(data["files"]), "released") {
+		t.Errorf("файл не стал released: %s", env.Raw)
+	}
+
+	// diff отпущенного файла — 409.
+	env = h.do(t, http.MethodGet, "/api/configlayer/files/diff?key="+url.QueryEscape(key), "")
+	if env.Status != http.StatusConflict || env.Code != "file_released" {
+		t.Errorf("diff released: %d code=%q %s", env.Status, env.Code, env.Raw)
+	}
+
+	// Пересобрать по ключу возвращает файл под управление.
+	env = h.do(t, http.MethodPost, "/api/configlayer/files/rebuild", fmt.Sprintf(`{"keys":[%q]}`, key))
+	if env.Status != http.StatusOK || string(env.data(t)["started"]) != "true" {
+		t.Fatalf("rebuild по ключу: %d %s", env.Status, env.Raw)
+	}
+	c.wait(t, "apply_done", 15*time.Second, nil)
+
+	// diff управляемого файла — обе стороны.
+	env = h.do(t, http.MethodGet, "/api/configlayer/files/diff?key="+url.QueryEscape(key), "")
+	if env.Status != http.StatusOK {
+		t.Fatalf("diff: %d %s", env.Status, env.Raw)
+	}
+	for _, field := range []string{"key", "expected", "actual", "missing", "truncated"} {
+		if _, ok := env.data(t)[field]; !ok {
+			t.Errorf("в ответе diff нет поля %q: %s", field, env.Raw)
+		}
+	}
+
+	// «Пересобрать всё» без дрейфа и неизвестные ключи — 404 unknown_key.
+	cases := []struct{ name, method, path, body string }{
+		{"rebuild all без дрейфа", http.MethodPost, "/api/configlayer/files/rebuild", `{"all":true}`},
+		{"rebuild неизвестный ключ", http.MethodPost, "/api/configlayer/files/rebuild", `{"keys":["nope"]}`},
+		{"release неизвестный ключ", http.MethodPost, "/api/configlayer/files/release", `{"key":"nope"}`},
+		{"diff неизвестный ключ", http.MethodGet, "/api/configlayer/files/diff?key=nope", ""},
+		{"diff путь вместо ключа", http.MethodGet, "/api/configlayer/files/diff?key=" + url.QueryEscape("../../etc/passwd"), ""},
+	}
+	for _, tc := range cases {
+		env := h.do(t, tc.method, tc.path, tc.body)
+		if env.Status != http.StatusNotFound || env.Code != "unknown_key" {
+			t.Errorf("%s: %d code=%q %s", tc.name, env.Status, env.Code, env.Raw)
+		}
+	}
+}
+
+func TestHandler_NoticesDismiss(t *testing.T) {
+	h := newLayerHarness(t, layerHarnessOpts{Enabled: true})
+	env := h.do(t, http.MethodPost, "/api/configlayer/notices/dismiss", `{"id":"nope"}`)
+	if env.Status != http.StatusNotFound || env.Code != "unknown_notice" {
+		t.Fatalf("неизвестное уведомление: %d code=%q %s", env.Status, env.Code, env.Raw)
+	}
+}
+
+func TestHandler_DiagRequiresDevMode(t *testing.T) {
+	h := newLayerHarness(t, layerHarnessOpts{Enabled: true, DevMode: false})
+	env := h.do(t, http.MethodPost, "/api/configlayer/diag", `{"revision":0,"action":"add"}`)
+	if env.Status != http.StatusForbidden || env.Code != "dev_mode_required" {
+		t.Fatalf("diag вне dev_mode: %d code=%q %s", env.Status, env.Code, env.Raw)
+	}
+
+	h.cfg.Lock()
+	h.cfg.DevMode = true
+	h.cfg.Unlock()
+	env = h.do(t, http.MethodPost, "/api/configlayer/diag", `{"revision":7,"action":"add"}`)
+	if env.Status != http.StatusConflict || env.Code != "draft_conflict" {
+		t.Fatalf("diag с устаревшей ревизией: %d code=%q %s", env.Status, env.Code, env.Raw)
+	}
+	env = h.do(t, http.MethodPost, "/api/configlayer/diag", `{"revision":0,"action":"unknown"}`)
+	if env.Status != http.StatusBadRequest || env.Code != "invalid_request" {
+		t.Fatalf("неизвестное действие: %d code=%q %s", env.Status, env.Code, env.Raw)
+	}
+	env = h.do(t, http.MethodPost, "/api/configlayer/diag", `{"revision":0,"action":"add"}`)
+	if env.Status != http.StatusOK {
+		t.Fatalf("diag в dev_mode: %d %s", env.Status, env.Raw)
+	}
+	if string(env.data(t)["draft_revision"]) != "1" {
+		t.Errorf("ответ diag: %s", env.Raw)
+	}
+}
+
+func TestHandler_DraftReset(t *testing.T) {
+	h := newLayerHarness(t, layerHarnessOpts{Enabled: true})
+	h.do(t, http.MethodPost, "/api/configlayer/draft", `{"revision":0,"section":"diag","value":{"enabled":true}}`)
+	env := h.do(t, http.MethodPost, "/api/configlayer/draft/reset", `{"revision":0}`)
+	if env.Status != http.StatusConflict || env.Code != "draft_conflict" {
+		t.Fatalf("reset со старой ревизией: %d code=%q %s", env.Status, env.Code, env.Raw)
+	}
+	env = h.do(t, http.MethodPost, "/api/configlayer/draft/reset", `{"revision":1}`)
+	if env.Status != http.StatusOK || string(env.data(t)["draft_changes"]) != "0" {
+		t.Fatalf("reset: %d %s", env.Status, env.Raw)
+	}
+}
+
+func TestHandler_MethodNotAllowed(t *testing.T) {
+	h := newLayerHarness(t, layerHarnessOpts{Enabled: true})
+	routes := []struct{ method, path string }{
+		{http.MethodPost, "/api/configlayer/state"},
+		{http.MethodPost, "/api/configlayer/events"},
+		{http.MethodGet, "/api/configlayer/draft"},
+		{http.MethodGet, "/api/configlayer/draft/reset"},
+		{http.MethodGet, "/api/configlayer/apply"},
+		{http.MethodGet, "/api/configlayer/files/rebuild"},
+		{http.MethodGet, "/api/configlayer/files/release"},
+		{http.MethodPost, "/api/configlayer/files/diff"},
+		{http.MethodGet, "/api/configlayer/notices/dismiss"},
+		{http.MethodGet, "/api/configlayer/diag"},
+	}
+	for _, rt := range routes {
+		body := ""
+		if rt.method == http.MethodPost {
+			body = `{}`
+		}
+		if env := h.do(t, rt.method, rt.path, body); env.Status != http.StatusMethodNotAllowed {
+			t.Errorf("%s %s: статус %d, нужен 405", rt.method, rt.path, env.Status)
+		}
+	}
+}
+
+func TestHandler_BodyLimit(t *testing.T) {
+	h := newLayerHarness(t, layerHarnessOpts{Enabled: true})
+	body := `{"revision":0,"section":"diag","value":"` + strings.Repeat("x", 2<<20) + `"}`
+	env := h.do(t, http.MethodPost, "/api/configlayer/draft", body)
+	if env.Status != http.StatusBadRequest && env.Status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("тело больше 1 МБ: статус %d, нужен 400 или 413", env.Status)
+	}
+	// Слой остался рабочим: черновик не изменился.
+	state := h.do(t, http.MethodGet, "/api/configlayer/state", "")
+	if string(state.data(t)["draft_revision"]) != "0" {
+		t.Errorf("черновик изменился после отказа: %s", state.Raw)
 	}
 }
