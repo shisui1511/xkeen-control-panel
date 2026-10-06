@@ -24,8 +24,6 @@ var (
 	ErrDevModeRequired = errors.New("действие доступно только в режиме разработчика")
 	ErrFileReleased    = errors.New("файл отпущен: панель его не сверяет")
 	ErrStopped         = errors.New("слой остановлен")
-
-	errNotImplemented = errors.New("configlayer: not implemented")
 )
 
 // Значения по умолчанию и пределы.
