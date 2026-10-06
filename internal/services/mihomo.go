@@ -579,8 +579,129 @@ func (s *MihomoService) ReloadConfig(configPath string) error {
 // ErrProviderEmpty — Mihomo ответил 204: набор провайдера пуст.
 var ErrProviderEmpty = errors.New("mihomo: провайдер пуст")
 
+const (
+	// providerErrBodyMax — сколько байт тела ошибки Clash API попадает в сообщение.
+	providerErrBodyMax = 300
+	// providerBodyMax — предел разбираемого ответа (список узлов бывает большим).
+	providerBodyMax = 16 << 20
+)
+
+// controllerBaseURL — базовый адрес Clash API по описанию контроллера.
+func controllerBaseURL(info ControllerInfo) (string, error) {
+	switch {
+	case info.Type == "unix":
+		return "http://localhost", nil
+	case info.Type == "tcp" && info.Target != "":
+		target := info.Target
+		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+			target = "http://" + target
+		}
+		return strings.TrimRight(target, "/"), nil
+	}
+	return "", fmt.Errorf("mihomo controller is not configured")
+}
+
+// providerGet выполняет GET к Clash API и возвращает код ответа и тело.
+func (s *MihomoService) providerGet(ctx context.Context, info ControllerInfo, reqURL string) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	if info.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+info.Secret)
+	}
+	resp, err := s.GetHTTPClient().Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, providerBodyMax))
+	return resp.StatusCode, body, err
+}
+
+// providerStatusError — ошибка по коду ответа; тело обрезается до 300 байт.
+func providerStatusError(status int, body []byte) error {
+	if len(body) > providerErrBodyMax {
+		body = body[:providerErrBodyMax]
+	}
+	return fmt.Errorf("mihomo providers: status %d: %s", status, strings.ToValidUTF8(strings.TrimSpace(string(body)), ""))
+}
+
 // ProviderCount возвращает число узлов (providerType "proxies") или правил
-// ("rules") провайдера по данным Clash API.
+// ("rules") провайдера по данным Clash API. Ответ 204 — ErrProviderEmpty: набор
+// пуст, и это ошибка применения, а не ноль. Имя провайдера экранируется.
 func (s *MihomoService) ProviderCount(ctx context.Context, providerType, name string) (int, error) {
-	return 0, nil
+	if providerType != "proxies" && providerType != "rules" {
+		return 0, fmt.Errorf("mihomo providers: неизвестный тип провайдера %q", providerType)
+	}
+	info, err := s.ParseControllerConfig()
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse controller config: %w", err)
+	}
+	base, err := controllerBaseURL(info)
+	if err != nil {
+		return 0, err
+	}
+	status, body, err := s.providerGet(ctx, info, base+"/providers/"+providerType+"/"+url.PathEscape(name))
+	if err != nil {
+		return 0, err
+	}
+	if providerType == "rules" && (status == http.StatusNotFound || status == http.StatusMethodNotAllowed) {
+		// Точечного GET у rule-провайдера в Clash API может не быть: читаем список.
+		return s.ruleCountFromList(ctx, info, base, name)
+	}
+	switch status {
+	case http.StatusOK:
+	case http.StatusNoContent:
+		return 0, ErrProviderEmpty
+	default:
+		return 0, providerStatusError(status, body)
+	}
+	if providerType == "proxies" {
+		var doc struct {
+			Proxies []json.RawMessage `json:"proxies"`
+		}
+		if err := json.Unmarshal(body, &doc); err != nil {
+			return 0, fmt.Errorf("mihomo providers: разбор ответа: %w", err)
+		}
+		return len(doc.Proxies), nil
+	}
+	var doc struct {
+		RuleCount *int `json:"ruleCount"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return 0, fmt.Errorf("mihomo providers: разбор ответа: %w", err)
+	}
+	if doc.RuleCount == nil {
+		return 0, errors.New("mihomo providers: в ответе нет ruleCount")
+	}
+	return *doc.RuleCount, nil
+}
+
+// ruleCountFromList читает ruleCount провайдера из GET /providers/rules.
+func (s *MihomoService) ruleCountFromList(ctx context.Context, info ControllerInfo, base, name string) (int, error) {
+	status, body, err := s.providerGet(ctx, info, base+"/providers/rules")
+	if err != nil {
+		return 0, err
+	}
+	switch status {
+	case http.StatusOK:
+	case http.StatusNoContent:
+		return 0, ErrProviderEmpty
+	default:
+		return 0, providerStatusError(status, body)
+	}
+	var doc struct {
+		Providers map[string]struct {
+			RuleCount int `json:"ruleCount"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return 0, fmt.Errorf("mihomo providers: разбор ответа: %w", err)
+	}
+	p, ok := doc.Providers[name]
+	if !ok {
+		return 0, fmt.Errorf("mihomo providers: провайдер правил %q не найден", name)
+	}
+	return p.RuleCount, nil
 }

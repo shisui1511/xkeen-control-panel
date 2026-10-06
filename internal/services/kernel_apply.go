@@ -318,7 +318,18 @@ func truncateTailBytes(s string, max int) string {
 }
 
 // RestartLocked перезапускает ядро, которое панель сама только что уронила
-// неудачным применением, не спрашивая «остановлено ли оно пользователем».
+// неудачным применением: решение «остановлено — не запускать» здесь не
+// применяется, ведь остановил его не пользователь. Единственное исключение —
+// конфликт (запущены оба ядра): панель ничего не трогает, пока он не снят.
+// Вызывающий уже держит замок жизненного цикла (см. ApplyLocked).
 func (k *KernelApplier) RestartLocked(kernel string) ApplyResult {
-	return ApplyResult{}
+	if st := k.active(); st.Conflict {
+		return ApplyResult{Outcome: ApplySavedKernelConflict, Kernel: kernel, ActiveKernel: st.Label(), ActiveRunning: true}
+	}
+	res := ApplyResult{Outcome: ApplyRestarted, Kernel: kernel, ActiveKernel: kernel, ActiveRunning: true}
+	if out, err := k.restart(); err != nil {
+		res.Outcome = ApplyRestartFailed
+		res.Error = restartErrorReason(out, err)
+	}
+	return res
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -35,6 +36,9 @@ var (
 	RestartConfirmTimeout = 90 * time.Second
 	RestartPollInterval   = 500 * time.Millisecond
 	RestartStableWindow   = 5 * time.Second
+	// RestartExpectTimeout — сколько после рестарта Mihomo ждать готовности API и
+	// совпадения числа узлов и правил провайдеров с ожидаемым.
+	RestartExpectTimeout = 15 * time.Second
 )
 
 // Ошибки TryBegin.
@@ -93,7 +97,12 @@ func (p *Pipeline) runRestart(ctx context.Context, plan Plan, set *BackupSet) ([
 	p.setStep(StepRestart, StepRunning, "", "")
 	views, err := p.restartKernels(ctx, plan, set)
 	if err != nil {
-		p.setStep(StepRestart, StepFailed, "", err.Error())
+		note := ""
+		var re *restartError
+		if errors.As(err, &re) {
+			note = NoteRestartFailedRolling
+		}
+		p.setStep(StepRestart, StepFailed, note, err.Error())
 		return views, err
 	}
 	state, note := restartStepState(views)
@@ -163,7 +172,15 @@ func untouchedView(kernel string, outcome services.ApplyOutcome) (RestartView, b
 	return RestartView{}, false
 }
 
-func (p *Pipeline) restartKernel(ctx context.Context, kernel string, _ Plan, _ *BackupSet) (RestartView, error) {
+// kernelRestarter — необязательная возможность applier'а: принудительный
+// рестарт ядра, которое панель сама уронила (*services.KernelApplier).
+type kernelRestarter interface {
+	RestartLocked(kernel string) services.ApplyResult
+}
+
+// restartKernel перезапускает одно ядро с изменениями. Неудача любого пути —
+// откат файлов панели и повторный рестарт на прежних файлах (D-17, A3).
+func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, set *BackupSet) (RestartView, error) {
 	pr := p.d.Applier.Preview(kernel)
 	if pr.Outcome != services.ApplyRestarted {
 		if v, ok := untouchedView(kernel, pr.Outcome); ok {
@@ -171,11 +188,161 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, _ Plan, _ *
 		}
 		return RestartView{Kernel: kernel, Outcome: RestartOutcomeUntouchedIdle, NoteCode: NoteKernelInactive}, nil
 	}
-	if err := p.restartAndConfirm(ctx, kernel); err != nil {
-		return RestartView{Kernel: kernel, Outcome: RestartOutcomeFailedRolledBack, NoteCode: NoteRestartFailedRolling},
-			&restartError{Kernel: kernel, Err: err}
+
+	outcome := RestartOutcomeRestarted
+	var hotErr error
+	if kernel == KernelMihomo && p.d.Mihomo != nil {
+		if hotErr = p.hotReloadMihomo(ctx, plan); hotErr == nil {
+			return RestartView{Kernel: kernel, Outcome: RestartOutcomeHotReloaded}, nil
+		}
+		// Мягкий путь не удался: обычный рестарт Mihomo.
+		p.setStep(StepRestart, StepRunning, NoteHotReloadFailed, "")
+		outcome = RestartOutcomeRestartedReload
 	}
-	return RestartView{Kernel: kernel, Outcome: RestartOutcomeRestarted}, nil
+	err := p.restartAndConfirm(ctx, kernel)
+	if err == nil && kernel == KernelMihomo {
+		err = p.confirmMihomoAfterRestart(ctx, plan)
+	}
+	if err != nil {
+		if hotErr != nil {
+			err = fmt.Errorf("перезагрузка конфигурации: %v; перезапуск: %w", hotErr, err)
+		}
+		return p.rollbackAndRestart(ctx, kernel, set, err)
+	}
+	return RestartView{Kernel: kernel, Outcome: outcome}, nil
+}
+
+// hotReloadMihomo перечитывает конфиг Mihomo без смены PID (PUT /configs?force=true),
+// сверяет провайдеры с Expect и подтверждает, что процесс остался прежним.
+func (p *Pipeline) hotReloadMihomo(ctx context.Context, plan Plan) error {
+	prev := 0
+	if st, ok := p.processState(KernelMihomo); ok {
+		prev = st.PID
+	}
+	if err := p.d.Mihomo.ReloadConfig(filepath.Join(p.d.Roots.Mihomo, "config.yaml")); err != nil {
+		return err
+	}
+	if err := p.checkExpect(ctx, plan, false); err != nil {
+		return err
+	}
+	if err := p.confirmRunning(ctx, KernelMihomo, prev); err != nil {
+		return err
+	}
+	if p.d.MihomoAPIReady != nil && !p.d.MihomoAPIReady() {
+		return errors.New("API Mihomo не отвечает после перезагрузки")
+	}
+	return nil
+}
+
+// confirmMihomoAfterRestart ждёт готовности API Mihomo после рестарта и сверяет
+// провайдеры с Expect (API поднимается не сразу после старта процесса).
+func (p *Pipeline) confirmMihomoAfterRestart(ctx context.Context, plan Plan) error {
+	if p.d.MihomoAPIReady != nil {
+		if err := pollUntil(ctx, RestartExpectTimeout, p.d.MihomoAPIReady); err != nil {
+			return errors.New("API Mihomo не ответил после перезапуска")
+		}
+	}
+	return p.checkExpect(ctx, plan, true)
+}
+
+// pollUntil вызывает ok каждые RestartPollInterval до true или таймаута.
+func pollUntil(ctx context.Context, timeout time.Duration, ok func() bool) error {
+	deadline := time.Now().Add(timeout)
+	tick := time.NewTicker(RestartPollInterval)
+	defer tick.Stop()
+	for !ok() {
+		if time.Now().After(deadline) {
+			return errors.New("таймаут")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+		}
+	}
+	return nil
+}
+
+// checkExpect сверяет число узлов и правил провайдеров записанных файлов Mihomo
+// с ожидаемым: file-провайдер с битым содержимым молча даёт 0 (143-FINDINGS Q3).
+// wait=true повторяет сверку до RestartExpectTimeout.
+func (p *Pipeline) checkExpect(ctx context.Context, plan Plan, wait bool) error {
+	if p.d.Mihomo == nil {
+		return nil
+	}
+	for _, fp := range plan.Files {
+		if fp.Kernel != KernelMihomo || fp.Action != ActionWrite || fp.Expect == nil {
+			continue
+		}
+		exp := fp.Expect
+		var last error
+		matched := func() bool {
+			n, err := p.d.Mihomo.ProviderCount(ctx, exp.ProviderType, exp.ProviderName)
+			switch {
+			case err == nil && n == exp.Count:
+				return true
+			case errors.Is(err, services.ErrProviderEmpty) && exp.Count == 0:
+				return true
+			case err != nil:
+				last = fmt.Errorf("провайдер %s: %w", exp.ProviderName, err)
+			default:
+				last = fmt.Errorf("провайдер %s: ожидалось %d, получено %d", exp.ProviderName, exp.Count, n)
+			}
+			return false
+		}
+		if !wait {
+			if !matched() {
+				return last
+			}
+			continue
+		}
+		if err := pollUntil(ctx, RestartExpectTimeout, matched); err != nil {
+			if last != nil {
+				return last
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// rollbackAndRestart возвращает файлы панели из набора копий и перезапускает ядро
+// на прежних файлах. Манифест, Applied и черновик не меняются (D-07). Пока идёт
+// откат, остальные ядра не перезапускаются: вызывающий прекращает обход.
+func (p *Pipeline) rollbackAndRestart(ctx context.Context, kernel string, set *BackupSet, cause error) (RestartView, error) {
+	p.setStep(StepRestart, StepRunning, NoteRestartFailedRolling, "")
+	view := RestartView{Kernel: kernel, Outcome: RestartOutcomeFailedRolledBack, NoteCode: NoteRestartFailedRolling}
+	re := &restartError{Kernel: kernel, Err: cause}
+	if rbErr := p.rollback(set); rbErr != nil {
+		// Журнал остаётся: RecoverJournal повторит откат при старте панели.
+		re.Err = fmt.Errorf("%w; откат файлов не удался: %v", cause, rbErr)
+		return view, re
+	}
+	re.RolledBack = true
+	if rerr := p.recoverKernel(ctx, kernel); rerr != nil {
+		re.Err = fmt.Errorf("%w; повторный рестарт на прежних файлах: %v", cause, rerr)
+	}
+	return view, re
+}
+
+// recoverKernel поднимает ядро на прежних файлах после отката. Ядро, которое мы
+// только что уронили, остановлено не пользователем, поэтому, если applier умеет,
+// запускается принудительный рестарт (ApplyLocked не запускает остановленное).
+func (p *Pipeline) recoverKernel(ctx context.Context, kernel string) error {
+	var res services.ApplyResult
+	if r, ok := p.d.Applier.(kernelRestarter); ok {
+		res = r.RestartLocked(kernel)
+	} else {
+		res = p.d.Applier.ApplyLocked(kernel)
+	}
+	switch res.Outcome {
+	case services.ApplyRestarted:
+	case services.ApplyRestartFailed:
+		return errors.New(res.Error)
+	default:
+		return fmt.Errorf("ядро не запущено: %s", res.Outcome)
+	}
+	return p.confirmRunning(ctx, kernel, 0)
 }
 
 // restartAndConfirm перезапускает ядро через ApplyLocked и подтверждает успех по
