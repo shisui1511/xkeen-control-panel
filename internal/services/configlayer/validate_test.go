@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mihomoPlanWrite — план с записью одного файла Mihomo.
@@ -125,5 +126,22 @@ func TestValidate_MihomoNoConfig(t *testing.T) {
 		mihomoPlanWrite(DiagMihomoRel, "proxies:\n  - name: x\n"))
 	if !res.Skipped || res.NoteCode != NoteNoConfig {
 		t.Errorf("результат = %+v, want skipped no_config", res)
+	}
+}
+
+func TestValidateTimeout_Arch(t *testing.T) {
+	cases := []struct {
+		goarch string
+		want   time.Duration
+	}{
+		{"mipsle", 180 * time.Second},
+		{"mips", 180 * time.Second},
+		{"arm64", 60 * time.Second},
+		{"amd64", 60 * time.Second},
+	}
+	for _, c := range cases {
+		if got := defaultValidateTimeout(c.goarch); got != c.want {
+			t.Errorf("defaultValidateTimeout(%q) = %v, want %v", c.goarch, got, c.want)
+		}
 	}
 }

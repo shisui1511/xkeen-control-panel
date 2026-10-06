@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func stepOf(t *testing.T, v ApplyView, id StepID) StepView {
@@ -193,4 +194,193 @@ func TestApply_ValidationFailsNothingWritten(t *testing.T) {
 		t.Errorf("Message выдаёт путь временного каталога: %q", r.Message)
 	}
 	requireNothingWritten(t, env)
+}
+
+// setValidateTimeout понижает таймаут проверки на время теста.
+func setValidateTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := ValidateTimeout
+	ValidateTimeout = d
+	t.Cleanup(func() { ValidateTimeout = old })
+}
+
+func TestApply_ValidationTimeout(t *testing.T) {
+	setValidateTimeout(t, 300*time.Millisecond)
+	binDir := t.TempDir()
+	xray := writeFakeKernel(t, binDir, "xray", 0, "", 5*time.Second)
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Xray: xray}, DevMode: true})
+	writeDiagBoth(t, env)
+
+	start := time.Now()
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Errorf("Run занял %v, want < 4s (WaitDelay не должен давать зависнуть на внуке)", elapsed)
+	}
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != "validation_timeout" || r.Kernel != KernelXray {
+		t.Fatalf("Result = %+v, want validation_timeout xray", r)
+	}
+	if r.Code == "validation_failed" {
+		t.Error("таймаут выдан как «конфиг неверен»")
+	}
+	requireNothingWritten(t, env)
+}
+
+func TestApply_ValidationNotRun(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nodir", "xray")
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Xray: missing}, DevMode: true})
+	writeDiagBoth(t, env)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != "validation_not_run" || r.Kernel != KernelXray {
+		t.Fatalf("Result = %+v, want validation_not_run xray", r)
+	}
+	requireNothingWritten(t, env)
+}
+
+func TestApply_KernelNotInstalledSkipped(t *testing.T) {
+	binDir := t.TempDir()
+	mihomo := writeFakeKernel(t, binDir, "mihomo", 0, "", 0)
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Mihomo: mihomo}, DevMode: true})
+	writeDiagBoth(t, env)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	if view.Result == nil || view.Result.Code != ResultApplied || view.Result.Written != 1 {
+		t.Fatalf("Result = %+v, want applied, Written 1", view.Result)
+	}
+	if s := stepOf(t, view, StepValidateXray); s.State != StepSkipped || s.NoteCode != "kernel_not_installed" {
+		t.Errorf("validate_xray = %+v, want skipped kernel_not_installed", s)
+	}
+	if _, err := os.Stat(filepath.Join(env.Roots.Xray, DiagXrayRel)); err == nil {
+		t.Error("файл Xray записан, хотя ядро не установлено")
+	}
+	if _, err := os.Stat(filepath.Join(env.Roots.Mihomo, DiagMihomoRel)); err != nil {
+		t.Errorf("файл Mihomo не записан: %v", err)
+	}
+}
+
+// Записи манифеста неустановленного ядра не уходят в удаление: файлы такого
+// ядра остаются нетронутыми, пока ядро не вернётся.
+func TestApply_UninstalledKernelManifestUntouched(t *testing.T) {
+	binDir := t.TempDir()
+	mihomo := writeFakeKernel(t, binDir, "mihomo", 0, "", 0)
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Mihomo: mihomo}})
+
+	xrayRel := "04_outbounds.xcp-keep.tail.json"
+	xrayAbs := filepath.Join(env.Roots.Xray, xrayRel)
+	writeTestFile(t, xrayAbs, "{}\n")
+	key := ManifestKey(KernelXray, xrayRel)
+	entry := ManifestEntry{Kernel: KernelXray, RelPath: xrayRel, Kind: KindXrayJSON,
+		Hash: HashContent([]byte("{}\n")), Status: StatusManaged}
+	if err := env.Store.Update(func(st *State) error {
+		st.Manifest[key] = entry
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	if view.Result == nil || !view.Result.OK || view.Result.Code != ResultNothingToApply {
+		t.Fatalf("Result = %+v, want nothing_to_apply", view.Result)
+	}
+	if got := mustRead(t, xrayAbs); got != "{}\n" {
+		t.Errorf("файл неустановленного ядра изменён: %q", got)
+	}
+	if got, ok := env.Store.Snapshot().Manifest[key]; !ok || got.Hash != entry.Hash {
+		t.Errorf("запись манифеста потеряна или изменена: %+v", got)
+	}
+	if got := len(readArgsLog(t, binDir, "mihomo")); got != 0 {
+		t.Errorf("mihomo запущен %d раз без изменений", got)
+	}
+}
+
+func TestApply_BuildFailed(t *testing.T) {
+	binDir := t.TempDir()
+	xray := writeFakeKernel(t, binDir, "xray", 0, "", 0)
+	mihomo := writeFakeKernel(t, binDir, "mihomo", 0, "", 0)
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Xray: xray, Mihomo: mihomo}, DevMode: true})
+	env.setDraft(t, DiagSection, `{"enabled":true,"broken_mihomo":true}`)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != ResultBuildFailed {
+		t.Fatalf("Result = %+v, want build_failed", r)
+	}
+	if len(r.Issues) == 0 || r.Issues[0].Code != "provider_yaml_invalid" {
+		t.Errorf("Issues = %+v, want provider_yaml_invalid первой", r.Issues)
+	}
+	if s := stepOf(t, view, StepBuild); s.State != StepFailed {
+		t.Errorf("build = %+v, want failed", s)
+	}
+	if s := stepOf(t, view, StepWrite); s.State != StepPending {
+		t.Errorf("write = %+v, want pending", s)
+	}
+	if got := len(readArgsLog(t, binDir, "xray")); got != 0 {
+		t.Errorf("xray запущен %d раз при ошибке сборки", got)
+	}
+	requireNothingWritten(t, env)
+}
+
+func TestApply_NothingToApply(t *testing.T) {
+	binDir := t.TempDir()
+	xray := writeFakeKernel(t, binDir, "xray", 0, "", 0)
+	mihomo := writeFakeKernel(t, binDir, "mihomo", 0, "", 0)
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Xray: xray, Mihomo: mihomo}, DevMode: true})
+	writeDiagBoth(t, env)
+
+	first := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+	if first.Result == nil || first.Result.Code != ResultApplied || first.Result.Written != 2 {
+		t.Fatalf("первый запуск = %+v, want applied, Written 2", first.Result)
+	}
+	paths := []string{
+		filepath.Join(env.Roots.Xray, DiagXrayRel),
+		filepath.Join(env.Roots.Mihomo, DiagMihomoRel),
+	}
+	before := make([]os.FileInfo, len(paths))
+	for i, p := range paths {
+		st, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[i] = st
+	}
+	runsXray, runsMihomo := len(readArgsLog(t, binDir, "xray")), len(readArgsLog(t, binDir, "mihomo"))
+
+	// Секция без файлов: Applied должен догнать черновик и без записи.
+	env.setDraft(t, "note", `{"a":1}`)
+	second := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := second.Result
+	if r == nil || !r.OK || r.Code != ResultNothingToApply || r.Written != 0 {
+		t.Fatalf("второй запуск = %+v, want nothing_to_apply", r)
+	}
+	for i, p := range paths {
+		st, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !os.SameFile(before[i], st) || !st.ModTime().Equal(before[i].ModTime()) {
+			t.Errorf("%s перезаписан", p)
+		}
+	}
+	for _, id := range []StepID{StepValidateXray, StepValidateMihomo, StepWrite} {
+		if s := stepOf(t, second, id); s.State != StepSkipped || s.NoteCode != "no_changes" {
+			t.Errorf("%s = %+v, want skipped no_changes", id, s)
+		}
+	}
+	if got := len(readArgsLog(t, binDir, "xray")); got != runsXray {
+		t.Errorf("xray запущен повторно: %d -> %d", runsXray, got)
+	}
+	if got := len(readArgsLog(t, binDir, "mihomo")); got != runsMihomo {
+		t.Errorf("mihomo запущен повторно: %d -> %d", runsMihomo, got)
+	}
+	if _, ok := env.Store.Snapshot().Applied["note"]; !ok {
+		t.Error("Applied не догнал черновик при nothing_to_apply")
+	}
 }
