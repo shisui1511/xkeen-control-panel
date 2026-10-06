@@ -103,7 +103,14 @@ const (
 	// ResultRollbackFailed — вернуть прежние файлы не удалось: журнал остался,
 	// откат повторится при следующем запуске панели.
 	ResultRollbackFailed = "rollback_failed"
-	ResultDriftBlocked   = "drift_blocked"
+	// ResultJournalRecoveryFailed — журнал прошлой прерванной записи вернуть до
+	// конца не удалось. Журнал уже снят (RecoverJournal снимает его всегда), поэтому
+	// повторного возврата не будет: файлы нужно проверить вручную.
+	ResultJournalRecoveryFailed = "journal_recovery_failed"
+	// ResultStateWriteFailed — применять было нечего, но файл состояния не записался;
+	// файлы на диске не менялись, возвращать нечего.
+	ResultStateWriteFailed = "state_write_failed"
+	ResultDriftBlocked     = "drift_blocked"
 )
 
 // ResultView — итог запуска.
@@ -140,6 +147,9 @@ type PipelineDeps struct {
 	ForeignOwned func(kernel, rel string) bool
 	WriteFile    func(path string, data []byte) error
 	Now          func() time.Time
+	// Enabled — включён ли слой. Run перепроверяет его под замками применения:
+	// фоновый запуск мог ждать замок, пока Disable снимал флаг. nil — всегда включён.
+	Enabled func() bool
 
 	// Шаг перезапуска (144-07). Applier == nil — шаг пропускается.
 	Applier        KernelApplier
@@ -254,11 +264,17 @@ func (p *Pipeline) binaries() Binaries {
 // Файлы пишутся только если оба ядра приняли конфигурацию.
 func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	p.begin(req)
+	// Решение «слой включён» принимается под замками, которые держит и Disable:
+	// запуск, дождавшийся замка после выключения, файлов не пишет (D-04, FND-01).
+	if p.d.Enabled != nil && !p.d.Enabled() {
+		p.setStep(StepBuild, StepSkipped, NoteNoChanges, "")
+		return p.finish(ResultView{OK: true, Code: ResultNothingToApply})
+	}
 	// Журнал прошлой неудавшейся записи или отката нельзя перезаписать новым
 	// набором: сначала возвращаем файлы по нему (WR-03).
 	if err := p.recoverPendingJournal(); err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
-		return p.finish(ResultView{Code: ResultRollbackFailed, Message: err.Error()})
+		return p.finish(ResultView{Code: ResultJournalRecoveryFailed, Message: err.Error()})
 	}
 	snap := p.d.Store.Snapshot()
 	src := snap.Draft
@@ -274,7 +290,13 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	// молча перезаписали бы ручную правку (D-11). «Пересобрать» дрейф разрешает сам.
 	manifest := manifestOfScope(snap.Manifest, installed, req.Kernel)
 	if req.Trigger != TriggerRebuild {
-		if drift := driftKeys(p.d.Roots, manifest); len(drift) > 0 {
+		drift := driftKeys
+		if req.Trigger == TriggerKernelInstalled {
+			// Переустановленное ядро с пропавшими файлами: перезаписывать нечего,
+			// ручной правки там нет, поэтому сборка их восстанавливает (D-18).
+			drift = driftKeysExceptMissing
+		}
+		if len(drift(p.d.Roots, manifest)) > 0 {
 			p.setStep(StepBuild, StepFailed, "", ErrDriftBlocked.Error())
 			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
 		}
@@ -324,7 +346,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		p.setStep(StepWrite, StepSkipped, NoteNoChanges, "")
 		p.setStep(StepRestart, StepSkipped, NoteNoChanges, "")
 		if err := p.syncApplied(snap, src, req); err != nil {
-			return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: true})
+			return p.finish(ResultView{Code: ResultStateWriteFailed, Message: err.Error()})
 		}
 		return p.finish(ResultView{OK: true, Code: ResultNothingToApply})
 	}
@@ -375,10 +397,16 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 // новых; итог отражает, что из этого удалось.
 func (p *Pipeline) rollbackAfterCommitFailure(ctx context.Context, set *BackupSet, views []RestartView, cause error) ResultView {
 	p.setStep(StepWrite, StepFailed, "", cause.Error())
-	if rbErr := p.rollback(set); rbErr != nil {
+	rbErr := p.rollback(set)
+	if !filesRestored(rbErr) {
 		return ResultView{Code: ResultRollbackFailed, Message: fmt.Sprintf("%v; откат файлов не удался: %v", cause, rbErr)}
 	}
 	res := ResultView{Code: ResultWriteFailed, Message: cause.Error(), RolledBack: true}
+	if rbErr != nil {
+		// Файлы вернулись, не снялся только журнал (тот же отказ записи состояния):
+		// ядра всё равно поднимаются на прежних файлах, журнал вернёт RecoverJournal.
+		res.Message = fmt.Sprintf("%v; журнал отката не снят: %v", cause, rbErr)
+	}
 	for _, v := range views {
 		switch v.Outcome {
 		case RestartOutcomeRestarted, RestartOutcomeHotReloaded, RestartOutcomeRestartedReload:
@@ -387,7 +415,7 @@ func (p *Pipeline) rollbackAfterCommitFailure(ctx context.Context, set *BackupSe
 		}
 		if rerr := p.recoverKernel(ctx, v.Kernel); rerr != nil {
 			res.Code, res.Kernel = ResultKernelNotRecovered, v.Kernel
-			res.Message = fmt.Sprintf("%v; повторный рестарт %s на прежних файлах: %v", cause, v.Kernel, rerr)
+			res.Message = fmt.Sprintf("%v; повторный рестарт %s на прежних файлах: %v", res.Message, v.Kernel, rerr)
 		}
 	}
 	return res
@@ -455,6 +483,18 @@ func driftKeys(roots Roots, manifest map[string]ManifestEntry) []string {
 	var out []string
 	for _, c := range CheckManifest(roots, manifest) {
 		if c.State.IsDrift() {
+			out = append(out, c.Key)
+		}
+	}
+	return out
+}
+
+// driftKeysExceptMissing — как driftKeys, но без записей, чей файл просто пропал
+// (drift_missing): их сборка создаёт заново, ручной правки они не хранят.
+func driftKeysExceptMissing(roots Roots, manifest map[string]ManifestEntry) []string {
+	var out []string
+	for _, c := range CheckManifest(roots, manifest) {
+		if c.State.IsDrift() && c.State != StateDriftMissing {
 			out = append(out, c.Key)
 		}
 	}

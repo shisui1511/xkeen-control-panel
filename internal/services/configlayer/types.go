@@ -120,6 +120,9 @@ type Notices struct {
 	SchemaReset          bool   `json:"schema_reset,omitempty"`
 	SchemaResetBackup    string `json:"schema_reset_backup,omitempty"`
 	RecoveredFromJournal bool   `json:"recovered_from_journal,omitempty"`
+	// JournalRecoveryFailed — журнал прерванной записи снят, но файлы по нему не
+	// вернулись (набор копий не читается): часть файлов может быть записана не до конца.
+	JournalRecoveryFailed bool `json:"journal_recovery_failed,omitempty"`
 }
 
 // State — содержимое файла состояния.

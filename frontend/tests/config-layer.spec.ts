@@ -32,6 +32,36 @@ test.describe('Слой «Конфигурация»: черновик с сер
   });
 });
 
+test.describe('Слой «Конфигурация»: сбой чтения настроек', () => {
+  test('GET /api/settings упал: вместо вечного скелетона — «Повторить», повтор открывает раздел', async ({
+    page
+  }) => {
+    await mockConfigLayer(page);
+    let failures = 1;
+    // Позже зарегистрированный маршрут срабатывает первым: первый ответ — 500, дальше мок слоя
+    await page.route('**/api/settings', async (route) => {
+      if (route.request().method() === 'GET' && failures > 0) {
+        failures -= 1;
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'boom' })
+        });
+        return;
+      }
+      await route.fallback();
+    });
+    await visitPage(page, '/#/config');
+
+    const retry = page.getByRole('button', { name: 'Повторить' });
+    await expect(retry).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
+    await expect(page.getByText('Не удалось загрузить настройки панели')).toBeVisible();
+
+    await retry.click();
+    await expect(page.getByTestId('config-draftbar')).toBeVisible({ timeout: LAZY_LOAD_TIMEOUT });
+  });
+});
+
 test.describe('Слой «Конфигурация»: состояния полосы черновика', () => {
   test('dirty + drift: применение заблокировано, сброс доступен', async ({ page }) => {
     await mockConfigLayer(page, { snapshot: { draft_changes: 3, drift_count: 2 } });

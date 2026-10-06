@@ -511,6 +511,15 @@ test.describe('Уведомления раздела', () => {
     await expect(notices.locator('.alert-warning')).toHaveCount(1);
   });
 
+  test('journal_recovery_failed — alert-error без обещания возврата файлов', async ({ page }) => {
+    await openConfig(page, {
+      snapshot: { notices: [{ id: 'journal_recovery_failed', kind: 'error' }] }
+    });
+    await expect(page.getByTestId('config-notices').locator('.alert-error')).toContainText(
+      'Файлы прерванного ранее применения вернуть не удалось'
+    );
+  });
+
   test('без уведомлений секция не занимает места', async ({ page }) => {
     await openConfig(page);
     const box = await page.getByTestId('config-notices').boundingBox();

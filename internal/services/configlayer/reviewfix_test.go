@@ -398,6 +398,13 @@ func TestWR03_RunRecoversPendingJournalFirst(t *testing.T) {
 // (фиксация применения) падает.
 func commitFailEnv(t *testing.T, kernelRecovers bool) (*testEnv, *recoverApplier, *fileGen) {
 	t.Helper()
+	return commitFailEnvMode(t, kernelRecovers, false)
+}
+
+// commitFailEnvMode — как commitFailEnv; persistent: после рестарта отказывают все
+// записи файла состояния (диск полон), а не одна.
+func commitFailEnvMode(t *testing.T, kernelRecovers, persistent bool) (*testEnv, *recoverApplier, *fileGen) {
+	t.Helper()
 	setRollbackTimings(t)
 	xrayBin := writeFakeKernel(t, t.TempDir(), "xray", 0, "", 0)
 	procs := newFakeProcs()
@@ -428,6 +435,9 @@ func commitFailEnv(t *testing.T, kernelRecovers bool) (*testEnv, *recoverApplier
 		Applier: applier, Procs: procs.states,
 	})
 	env.Store.writeFile = func(path string, data []byte, perm os.FileMode) error {
+		if persistent && failNext.Load() {
+			return errors.New("диск полон")
+		}
 		if failNext.CompareAndSwap(true, false) {
 			return errors.New("диск полон")
 		}
@@ -508,6 +518,9 @@ func TestWR05_CancelDuringRestartKeepsJournalNoRollback(t *testing.T) {
 
 	if r := view.Result; r == nil || r.OK || r.Code != ResultInterrupted {
 		t.Fatalf("Result = %+v, want interrupted", r)
+	}
+	if len(view.Restart) != 1 || view.Restart[0].Outcome != RestartOutcomeInterrupted {
+		t.Errorf("Restart = %+v, want один итог interrupted (не пустой исход)", view.Restart)
 	}
 	if calls := base.applyCalls(); len(calls) != 0 {
 		t.Errorf("ApplyLocked вызван %v после отмены контекста", calls)
@@ -671,8 +684,8 @@ func TestWR09_DisabledLayerWritesNothing(t *testing.T) {
 
 	env.L.Snapshot()
 	env.L.RequestCheck()
-	if err := env.L.ReloadFromDisk(); err != nil {
-		t.Fatalf("ReloadFromDisk: %v", err)
+	if err := env.L.RestoreExternally(func() error { return nil }); err != nil {
+		t.Fatalf("RestoreExternally: %v", err)
 	}
 
 	entries, err := os.ReadDir(env.DataDir)
@@ -690,8 +703,8 @@ func TestWR09_DisabledReloadKeepsCorruptState(t *testing.T) {
 	statePath := filepath.Join(env.DataDir, StateFileName)
 	mustWriteFile(t, statePath, "{not json")
 
-	if err := env.L.ReloadFromDisk(); err != nil {
-		t.Fatalf("ReloadFromDisk: %v", err)
+	if err := env.L.RestoreExternally(func() error { return nil }); err != nil {
+		t.Fatalf("RestoreExternally: %v", err)
 	}
 
 	if got := mustReadFile(t, statePath); got != "{not json" {
@@ -795,4 +808,245 @@ func TestWR11_RestartExpectTimeoutPerPlatform(t *testing.T) {
 			t.Errorf("%s = %v, want 60s", arch, got)
 		}
 	}
+}
+
+// Review-fix WR-01: истёкший контекст при выключении слоя считается прерыванием:
+// файлы не возвращаются и ядро повторно не перезапускается, журнал остаётся
+// для RecoverJournal (как у Run).
+func TestFollowupWR01_DisableInterruptedKeepsJournal(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var restarts atomic.Int32
+	var armed atomic.Bool
+	env, _ := newApplyLayer(t, layerOpts{Restart: func(e *layerEnv) (string, error) {
+		if !armed.Load() {
+			e.Procs.set("xray", "running", 101)
+			return "", nil
+		}
+		restarts.Add(1)
+		cancel()
+		return "", errors.New("контекст отменён")
+	}})
+	armed.Store(true)
+
+	err := env.L.Disable(ctx, nil)
+
+	if !errors.Is(err, errInterrupted) {
+		t.Fatalf("Disable = %v, want errInterrupted", err)
+	}
+	if got := restarts.Load(); got != 1 {
+		t.Errorf("рестартов = %d, want 1 (повторного рестарта после отмены быть не должно)", got)
+	}
+	if env.L.store.Snapshot().Journal == nil {
+		t.Error("журнал снят: RecoverJournal не сможет вернуть файлы")
+	}
+	if _, statErr := os.Stat(env.diagXrayPath()); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("файл возвращён при прерывании: %v", statErr)
+	}
+}
+
+// Review-fix WR-02: Run перепроверяет флаг под замками: запуск, дождавшийся замка
+// после выключения слоя, файлов не пишет.
+func TestFollowupWR02_RunSkipsWhenLayerDisabled(t *testing.T) {
+	env, _ := newApplyLayer(t, layerOpts{})
+	if err := os.Remove(env.diagXrayPath()); err != nil {
+		t.Fatal(err)
+	}
+	env.enabled.Store(false)
+
+	view := env.L.pipeline.Run(t.Context(), ApplyRequest{Trigger: TriggerRebuild, Source: SourceApplied})
+
+	if r := view.Result; r == nil || !r.OK || r.Code != ResultNothingToApply {
+		t.Fatalf("Result = %+v, want nothing_to_apply", r)
+	}
+	if _, err := os.Stat(env.diagXrayPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("файл записан при выключенном слое: %v", err)
+	}
+}
+
+// Review-fix WR-03: отказ записи состояния валит и фиксацию, и очистку журнала:
+// файлы всё равно возвращены, поэтому ядро поднимается на прежних файлах, а журнал
+// остаётся для RecoverJournal.
+func TestFollowupWR03_JournalNotClearedStillRestartsKernel(t *testing.T) {
+	env, applier, _ := commitFailEnvMode(t, true, true)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != ResultWriteFailed || !r.RolledBack {
+		t.Fatalf("Result = %+v, want write_failed с RolledBack", r)
+	}
+	if len(applier.forced) != 1 || applier.forced[0] != KernelXray {
+		t.Errorf("RestartLocked вызван %v, want [xray]: ядро осталось бы на новых файлах", applier.forced)
+	}
+	if _, err := os.Stat(filepath.Join(env.Roots.Xray, "04_outbounds.xcp-a.tail.json")); err == nil {
+		t.Error("файл новой записи остался после отката")
+	}
+	if !strings.Contains(r.Message, "журнал отката не снят") {
+		t.Errorf("Message = %q, want упоминание неснятого журнала", r.Message)
+	}
+	if env.Store.Snapshot().Journal == nil {
+		t.Error("журнал снят, хотя запись состояния отказывает")
+	}
+}
+
+// Review-fix WR-05: файл ядра без бинарника сервер не защищает (интерфейс его не
+// показывает), а установленного ядра — защищает.
+func TestFollowupWR05_IsManagedPathIgnoresUninstalledKernel(t *testing.T) {
+	mihomoBin := writeFakeKernel(t, t.TempDir(), "mihomo", 0, "", 0)
+	env, _ := newApplyLayer(t, layerOpts{MihomoStatus: "stopped", Bins: Binaries{Mihomo: mihomoBin}})
+	if !env.L.IsManagedPath(env.diagMihomoPath()) {
+		t.Fatal("файл установленного ядра не защищён")
+	}
+
+	env.setBins(Binaries{Xray: env.getBins().Xray})
+
+	if env.L.IsManagedPath(env.diagMihomoPath()) {
+		t.Error("файл ядра без бинарника защищён, хотя в интерфейсе его нет")
+	}
+	if !env.L.IsManagedPath(env.diagXrayPath()) {
+		t.Error("файл установленного ядра перестал быть защищённым")
+	}
+}
+
+// Review-fix WR-05: config.yaml — симлинк на панельный профиль Mihomo: снимок
+// отдаёт его путь как alias файла, чтобы интерфейс защитил Редактор так же,
+// как сервер (IsManagedPath).
+func TestFollowupWR05_SnapshotAliasForConfigSymlink(t *testing.T) {
+	mihomoBin := writeFakeKernel(t, t.TempDir(), "mihomo", 0, "", 0)
+	env, _ := newApplyLayer(t, layerOpts{MihomoStatus: "stopped", Bins: Binaries{Mihomo: mihomoBin}})
+	cfg := filepath.Join(env.Roots.Mihomo, "config.yaml")
+	if err := os.Remove(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(DiagMihomoRel, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := env.L.Snapshot()
+
+	fv, ok := findFileView(snap.Files, ManifestKey(KernelMihomo, DiagMihomoRel))
+	if !ok {
+		t.Fatal("файл Mihomo не найден в снимке")
+	}
+	if len(fv.AliasPaths) != 1 || fv.AliasPaths[0] != cfg {
+		t.Errorf("AliasPaths = %v, want [%s]", fv.AliasPaths, cfg)
+	}
+	if !env.L.IsManagedPath(cfg) {
+		t.Error("config.yaml не защищён сервером")
+	}
+	if xf, ok := findFileView(snap.Files, ManifestKey(KernelXray, DiagXrayRel)); ok && len(xf.AliasPaths) != 0 {
+		t.Errorf("у файла Xray есть alias: %v", xf.AliasPaths)
+	}
+}
+
+// Review-fix IN-01: журнал прошлой записи не восстановился (набор копий пропал):
+// отдельный код без обещания повтора, файлы не пишутся.
+func TestFollowupIN01_RunJournalRecoveryFailedCode(t *testing.T) {
+	env, abs := pendingJournalEnv(t)
+	err := env.Store.Update(func(st *State) error {
+		st.Journal.BackupDir = filepath.Join(env.DataDir, "backup", "config-layer", "apply-404")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	if r := view.Result; r == nil || r.OK || r.Code != ResultJournalRecoveryFailed {
+		t.Fatalf("Result = %+v, want journal_recovery_failed", r)
+	}
+	if got := mustRead(t, abs); got != "NEW" {
+		t.Errorf("файл = %q, want нетронутый NEW", got)
+	}
+}
+
+// Review-fix IN-01: после запуска, восстановившего файлы по журналу, слой публикует
+// уведомления: «перезапустите ядро» появляется без перечитывания снимка.
+func TestFollowupIN01_AfterRunPublishesNotices(t *testing.T) {
+	env, events := newApplyLayer(t, layerOpts{})
+	drain(events)
+
+	env.L.afterRun()
+
+	for {
+		select {
+		case ev := <-events:
+			if ev.Type == EventNotices {
+				return
+			}
+		default:
+			t.Fatal("afterRun не опубликовал notices")
+		}
+	}
+}
+
+// Review-fix IN-02: пустой план и отказ записи файла состояния — отдельный код без
+// RolledBack: файлы не менялись, возвращать нечего.
+func TestFollowupIN02_EmptyPlanStateWriteFailure(t *testing.T) {
+	xray := writeFakeKernel(t, t.TempDir(), "xray", 0, "", 0)
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Xray: xray}})
+	env.setDraft(t, "note", `{"a":1}`)
+	env.Store.writeFile = func(string, []byte, os.FileMode) error { return errors.New("диск полон") }
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != ResultStateWriteFailed || r.RolledBack {
+		t.Fatalf("Result = %+v, want state_write_failed без RolledBack", r)
+	}
+}
+
+// Review-fix IN-05: переустановленное ядро с пропавшими файлами собирается заново,
+// а не блокируется как дрейф (файл просто отсутствует, ручной правки в нём нет).
+func TestFollowupIN05_KernelInstalledRestoresMissingFiles(t *testing.T) {
+	mihomoBin := writeFakeKernel(t, t.TempDir(), "mihomo", 0, "", 0)
+	env, events := newApplyLayer(t, layerOpts{MihomoStatus: "stopped", Bins: Binaries{Mihomo: mihomoBin}})
+	env.setBins(Binaries{Xray: env.getBins().Xray})
+	if err := os.Remove(env.diagMihomoPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	env.installMihomo(t)
+	env.L.OnKernelInstalled("mihomo")
+	view := env.settleApply(t, events)
+
+	if view.Trigger != TriggerKernelInstalled || view.Result == nil || !view.Result.OK {
+		t.Fatalf("запуск = %+v, want kernel_installed, ok (а не drift_blocked)", view)
+	}
+	if got := mustReadFile(t, env.diagMihomoPath()); got != diagMihomoProvider {
+		t.Errorf("пропавший файл Mihomo не восстановлен: %q", got)
+	}
+}
+
+// Review-fix IN-07: KernelVersions (может запускать бинарники ядер) вызывается без
+// l.mu: пока он занят, уведомления и остальные пути слоя не ждут.
+func TestFollowupIN07_VersionsDoNotHoldLayerLock(t *testing.T) {
+	env := newTestLayer(t, layerOpts{Enabled: true})
+	entered, release := make(chan struct{}), make(chan struct{})
+	env.L.opts.KernelVersions = func() []KernelVersionInput {
+		close(entered)
+		<-release
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		env.L.versions()
+		close(done)
+	}()
+	<-entered
+
+	got := make(chan struct{})
+	go func() {
+		env.L.noticeViews(env.L.store.Snapshot())
+		close(got)
+	}()
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Error("noticeViews ждёт l.mu, пока KernelVersions занят")
+	}
+	close(release)
+	<-done
 }

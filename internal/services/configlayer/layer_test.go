@@ -829,7 +829,7 @@ func TestLayer_IsManagedPath(t *testing.T) {
 	}
 }
 
-func TestLayer_ReloadFromDisk(t *testing.T) {
+func TestLayer_RestoreExternallyReloadsState(t *testing.T) {
 	env := newTestLayer(t, layerOpts{Enabled: true, DevMode: true})
 	events, cancel, err := env.L.Subscribe()
 	if err != nil {
@@ -852,9 +852,6 @@ func TestLayer_ReloadFromDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(statePath, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
 
 	// Обработчик снимка держит замок жизненного цикла; applyMu слой не ждёт.
 	rel, err := env.L.pipeline.TryBegin(t.Context(), true)
@@ -863,14 +860,16 @@ func TestLayer_ReloadFromDisk(t *testing.T) {
 	}
 	defer rel()
 	done := make(chan error, 1)
-	go func() { done <- env.L.ReloadFromDisk() }()
+	go func() {
+		done <- env.L.RestoreExternally(func() error { return os.WriteFile(statePath, data, 0o600) })
+	}()
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("ReloadFromDisk: %v", err)
+			t.Fatalf("RestoreExternally: %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("ReloadFromDisk завис при занятых замках применения")
+		t.Fatal("RestoreExternally завис при занятых замках применения")
 	}
 
 	if snap := env.L.Snapshot(); snap.DraftRevision != 7 {

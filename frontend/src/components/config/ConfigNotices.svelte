@@ -20,6 +20,9 @@
     if (n.id === 'recovered_from_journal') {
       return { notice: n, tone: 'warning', text: $t('cfg.notice.recovered_from_journal') };
     }
+    if (n.id === 'journal_recovery_failed') {
+      return { notice: n, tone: 'error', text: $t('cfg.notice.journal_recovery_failed') };
+    }
     if (n.id.startsWith('build_failed')) {
       const raw = n.kernel ?? n.id.split(':')[1] ?? '';
       return {

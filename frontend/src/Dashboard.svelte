@@ -20,7 +20,8 @@
     activeKernelName,
     fetchSettingsFlags,
     configLayerEnabled,
-    configLayerFlagKnown
+    configLayerFlagKnown,
+    configLayerFlagFailed
   } from './stores';
   import { startConfigLayer, stopConfigLayer } from './lib/configLayer';
   import { usePoller } from './lib/poller';
@@ -1778,7 +1779,14 @@
           </div>
         {/await}
       {:else if currentTab === 'config'}
-        {#if !$configLayerFlagKnown}
+        {#if !$configLayerFlagKnown && $configLayerFlagFailed}
+          <EmptyState
+            title={$t('cfg.flag_load_failed')}
+            description=""
+            ctaText={$t('app.retry')}
+            oncta={() => void fetchSettingsFlags()}
+          />
+        {:else if !$configLayerFlagKnown}
           <Skeleton type="card" height="60vh" />
         {:else if $configLayerEnabled}
           {#await import('./Config.svelte')}

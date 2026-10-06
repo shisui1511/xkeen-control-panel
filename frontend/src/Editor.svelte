@@ -9,7 +9,7 @@
     editorOpenRequest,
     configLayerEnabled
   } from './stores';
-  import { filesByPath } from './lib/configLayer';
+  import { filesByPath, handleLayerError } from './lib/configLayer';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
@@ -96,7 +96,10 @@
   // «Отпустить управление». Статус берётся из стора слоя — отдельного запроса нет;
   // с выключенным флагом всё как до включения слоя.
   const managedFile = $derived($configLayerEnabled ? $filesByPath.get(selectedFile) : undefined);
-  const isManagedReadOnly = $derived(managedFile !== undefined && managedFile.state !== 'released');
+  // pending — файла ещё нет в манифесте: сервер его не защищает, а «Отпустить» ответил бы 404
+  const isManagedReadOnly = $derived(
+    managedFile !== undefined && managedFile.state !== 'released' && managedFile.state !== 'pending'
+  );
   let loading = $state(false);
   let loadingPath = $state<string | null>(null);
   let templateLoading = $state(false);
@@ -740,7 +743,9 @@
     } catch (e: any) {
       if (e?.status === 401) return;
       saveError = true;
-      showToast('error', $t('editor.save_error') + ': ' + e.message);
+      // 409 file_managed: файл под управлением слоя, вкладка об этом не знала
+      if (e?.code === 'file_managed') handleLayerError(e);
+      else showToast('error', $t('editor.save_error') + ': ' + e.message);
     } finally {
       saving = false;
     }
@@ -835,7 +840,8 @@
       if (e?.status === 401) return;
       console.error('handleSaveAndApply error:', e);
       saveError = true;
-      showToast('error', $t('editor.save_error') + ': ' + e.message);
+      if (e?.code === 'file_managed') handleLayerError(e);
+      else showToast('error', $t('editor.save_error') + ': ' + e.message);
       applyLoading = false;
       backgroundStatusText = '';
     }

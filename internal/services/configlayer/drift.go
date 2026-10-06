@@ -17,13 +17,6 @@ import (
 // выводя его из работы: xcp-a.json → xcp-a.json.obsolete (D-09).
 const obsoleteSuffix = ".obsolete"
 
-// Коды проблем содержимого провайдера Mihomo.
-const (
-	problemYAMLInvalid = "provider_yaml_invalid"
-	problemMissingKey  = "provider_missing_key"
-	problemEmpty       = "provider_empty"
-)
-
 // FileState — результат сверки записи манифеста с диском.
 type FileState string
 
@@ -88,26 +81,26 @@ func ProviderContentProblem(kind FileKind, content []byte) string {
 		return ""
 	}
 	if len(bytes.TrimSpace(content)) == 0 {
-		return problemEmpty
+		return IssueProviderEmpty
 	}
 	var doc map[string]any
 	if err := yaml.Unmarshal(content, &doc); err != nil {
-		return problemYAMLInvalid
+		return IssueProviderYAMLInvalid
 	}
 	value, present := doc[key]
 	if !present {
-		return problemMissingKey
+		return IssueProviderMissingKey
 	}
 	switch v := value.(type) {
 	case nil:
-		return problemEmpty
+		return IssueProviderEmpty
 	case []any:
 		if len(v) == 0 {
-			return problemEmpty
+			return IssueProviderEmpty
 		}
 		return ""
 	default:
-		return problemYAMLInvalid
+		return IssueProviderYAMLInvalid
 	}
 }
 

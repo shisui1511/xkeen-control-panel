@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -105,7 +106,10 @@ type Layer struct {
 	// failed — уведомления build_failed:<ядро> (только в памяти).
 	failed map[string]NoticeView
 	// Кэш версий ядер.
-	verAt       time.Time
+	verAt time.Time
+	// verGen растёт при каждом сбросе кэша: результат вычисления, начатого до
+	// сброса, в кэш не попадает.
+	verGen      uint64
 	verKernels  []KernelVersionView
 	verFeatures map[Feature]Availability
 }
@@ -143,6 +147,7 @@ func New(opts Options) (*Layer, error) {
 		XrayEnv:        opts.XrayEnv,
 		ForeignOwned:   opts.ForeignOwned,
 		Now:            opts.Now,
+		Enabled:        opts.Enabled,
 		Applier:        opts.Applier,
 		ProcessStates:  opts.ProcessStates,
 		Mihomo:         opts.Mihomo,
@@ -268,6 +273,11 @@ func (l *Layer) RequestCheck() {
 	}
 }
 
+// Context — контекст жизни слоя: отменяется только Stop. Длинные операции
+// (выключение слоя) выполняются под ним, а не под таймаутом: срок задают
+// таймауты самих ядер, а истёкший дедлайн не должен выглядеть остановкой панели.
+func (l *Layer) Context() context.Context { return l.ctx }
+
 // Stop останавливает слой: отменяет контекст, дожидается всех горутин и
 // закрывает шину. Безопасен при повторном вызове.
 func (l *Layer) Stop() {
@@ -324,6 +334,9 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	files := make([]FileView, 0, len(checks))
 	index := make(map[string]int, len(checks))
 	drift := 0
+	// config.yaml Mihomo — симлинк на профиль панели: Редактор открывает его под
+	// своим путём, и защита должна совпадать с серверной (IsManagedPath, WR-05).
+	cfgPath, cfgResolved := l.mihomoConfigAlias()
 	for _, c := range checks {
 		fv := FileView{Key: c.Key, Kernel: c.Kernel, Path: c.AbsPath, Owner: "panel", State: c.State, ObsoleteName: c.ObsoleteName}
 		if c.State == StateReleased {
@@ -333,6 +346,9 @@ func (l *Layer) evaluate(st State) FilesEvent {
 			if abs, err := l.opts.Roots.Abs(c.Kernel, c.RelPath); err == nil {
 				fv.Path = abs
 			}
+		}
+		if cfgPath != "" && c.Kernel == KernelMihomo && fv.Path != cfgPath && resolveFullSymlinks(fv.Path) == cfgResolved {
+			fv.AliasPaths = []string{cfgPath}
 		}
 		if c.State.IsDrift() {
 			drift++
@@ -365,6 +381,23 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	return FilesEvent{Files: files, DriftCount: drift}
 }
 
+// mihomoConfigAlias — путь config.yaml Mihomo и файл, в который он разрешается,
+// если config.yaml — симлинк; иначе пустая строка.
+func (l *Layer) mihomoConfigAlias() (path, resolved string) {
+	abs, err := l.opts.Roots.Abs(KernelMihomo, "config.yaml")
+	if err != nil {
+		return "", ""
+	}
+	target, err := filepath.EvalSymlinks(abs)
+	if err != nil || target == abs {
+		return "", ""
+	}
+	if st, err := os.Lstat(abs); err != nil || st.Mode()&os.ModeSymlink == 0 {
+		return "", ""
+	}
+	return abs, target
+}
+
 // Snapshot — состояние слоя целиком. Выключенный слой диск и ядра не опрашивает.
 func (l *Layer) Snapshot() SnapshotView {
 	enabled := l.Enabled()
@@ -393,27 +426,40 @@ func (l *Layer) Snapshot() SnapshotView {
 }
 
 // versions возвращает строки версий и карту функций с кэшем на versionsCacheTTL.
+// KernelVersions может запускать бинарники ядер, поэтому вызывается без l.mu:
+// иначе всё это время ждали бы spawn, noticeViews, noteBuildResult и checkNow.
 func (l *Layer) versions() ([]KernelVersionView, map[Feature]Availability) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	now := l.opts.Now()
 	if l.verKernels != nil && now.Sub(l.verAt) < versionsCacheTTL {
-		return l.verKernels, l.verFeatures
+		kernels, features := l.verKernels, l.verFeatures
+		l.mu.Unlock()
+		return kernels, features
 	}
+	gen := l.verGen
+	l.mu.Unlock()
+
 	var inputs []KernelVersionInput
 	if l.opts.KernelVersions != nil {
 		inputs = l.opts.KernelVersions()
 	}
-	l.verKernels = KernelVersionViews(inputs)
-	l.verFeatures = FeatureMap(inputs)
-	l.verAt = now
-	return l.verKernels, l.verFeatures
+	kernels, features := KernelVersionViews(inputs), FeatureMap(inputs)
+
+	l.mu.Lock()
+	// Кэш сбросили, пока считали (установка ядра): результат устарел, отдаём его
+	// вызывающему, но не запоминаем.
+	if l.verGen == gen {
+		l.verKernels, l.verFeatures, l.verAt = kernels, features, now
+	}
+	l.mu.Unlock()
+	return kernels, features
 }
 
 // invalidateVersions сбрасывает кэш версий (после установки ядра).
 func (l *Layer) invalidateVersions() {
 	l.mu.Lock()
 	l.verKernels, l.verFeatures = nil, nil
+	l.verGen++
 	l.mu.Unlock()
 }
 
@@ -425,6 +471,9 @@ func (l *Layer) noticeViews(st State) []NoticeView {
 	}
 	if st.Notices.RecoveredFromJournal {
 		out = append(out, NoticeView{ID: "recovered_from_journal", Kind: noticeWarning})
+	}
+	if st.Notices.JournalRecoveryFailed {
+		out = append(out, NoticeView{ID: "journal_recovery_failed", Kind: noticeError})
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -514,9 +563,12 @@ func (l *Layer) StartApply(user bool) error {
 }
 
 // afterRun — действия после запуска конвейера: число изменений черновика после
-// коммита и внеочередная сверка.
+// коммита, уведомления (запуск мог восстановить файлы по журналу) и внеочередная
+// сверка.
 func (l *Layer) afterRun() {
-	l.broker.Publish(Event{Type: EventDraft, Data: draftEventOf(l.store.Snapshot())})
+	st := l.store.Snapshot()
+	l.broker.Publish(Event{Type: EventDraft, Data: draftEventOf(st)})
+	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(st)}})
 	l.checkNow(true)
 }
 
@@ -603,13 +655,13 @@ func (l *Layer) Release(key string) (FilesEvent, error) {
 
 // --- уведомления ---
 
-// DismissNotice закрывает уведомление: schema_reset и recovered_from_journal
-// сохраняются в файле состояния, build_failed:<ядро> живёт только в памяти.
+// DismissNotice закрывает уведомление: schema_reset, recovered_from_journal и
+// journal_recovery_failed сохраняются в файле состояния, build_failed:<ядро> живёт только в памяти.
 // Неизвестный идентификатор — ErrUnknownNotice. Возвращает оставшиеся
 // уведомления и публикует событие notices.
 func (l *Layer) DismissNotice(id string) ([]NoticeView, error) {
 	switch {
-	case id == "schema_reset" || id == "recovered_from_journal":
+	case id == "schema_reset" || id == "recovered_from_journal" || id == "journal_recovery_failed":
 		if err := l.store.DismissNotice(id); err != nil {
 			return nil, err
 		}
@@ -693,7 +745,10 @@ func (l *Layer) IsManagedPath(absPath string) bool {
 		return false
 	}
 	target := resolveFullSymlinks(absPath)
-	for _, e := range l.store.Snapshot().Manifest {
+	// Как в evaluate и конвейере: записи ядра без бинарника не учитываются,
+	// иначе файл защищён, а интерфейс его не показывает (WR-05).
+	manifest := manifestOfScope(l.store.Snapshot().Manifest, l.installed(), "")
+	for _, e := range manifest {
 		if e.Status != StatusManaged {
 			continue
 		}
@@ -734,8 +789,8 @@ func resolveDirSymlinks(p string) string {
 // После fn состояние перечитывается, рассылается snapshot и запрашивается сверка
 // дрейфа. Выключенный слой диск не читает: только забывает кэш в памяти.
 //
-// Как и ReloadFromDisk, applyMu не берёт: вызывающий уже держит замок жизненного
-// цикла (порядок applyMu → lifecycleMu нарушать нельзя).
+// applyMu не берётся: вызывающий уже держит замок жизненного цикла (порядок
+// applyMu → lifecycleMu нарушать нельзя).
 func (l *Layer) RestoreExternally(fn func() error) error {
 	if !l.Enabled() {
 		err := fn()
@@ -749,24 +804,4 @@ func (l *Layer) RestoreExternally(fn func() error) error {
 	l.broker.Publish(Event{Type: EventSnapshot, Data: l.Snapshot()})
 	l.RequestCheck()
 	return fnErr
-}
-
-// ReloadFromDisk перечитывает файл состояния после восстановления снимка панели
-// и рассылает событие snapshot.
-//
-// applyMu не берётся: обработчик восстановления уже держит замок жизненного
-// цикла, а порядок замков applyMu, затем lifecycleMu нарушать нельзя (иначе
-// взаимная блокировка с запущенным применением).
-func (l *Layer) ReloadFromDisk() error {
-	if !l.Enabled() {
-		// Выключенный слой диск не читает и не пишет: только забывает кэш в памяти.
-		l.store.Invalidate()
-		return nil
-	}
-	if err := l.store.Reload(); err != nil {
-		return err
-	}
-	l.broker.Publish(Event{Type: EventSnapshot, Data: l.Snapshot()})
-	l.RequestCheck()
-	return nil
 }
