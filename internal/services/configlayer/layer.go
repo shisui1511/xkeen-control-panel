@@ -317,7 +317,9 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 // evaluate сверяет манифест с диском и добавляет файлы, которые сгенерирует
 // текущий черновик (pending).
 func (l *Layer) evaluate(st State) FilesEvent {
-	checks := CheckManifest(l.opts.Roots, st.Manifest)
+	// Записи ядра, бинарник которого удалён, не сверяются: конвейер их не трогает,
+	// а их «пропавшие» файлы навсегда заблокировали бы «Применить» (WR-06).
+	checks := CheckManifest(l.opts.Roots, manifestOfScope(st.Manifest, l.installed(), ""))
 	files := make([]FileView, 0, len(checks))
 	index := make(map[string]int, len(checks))
 	drift := 0
@@ -524,8 +526,10 @@ func (l *Layer) Rebuild(keys []string, all bool) error {
 	}
 	st := l.store.Snapshot()
 	var only []string
+	// Файлы неустановленного ядра пересобирать нечем: ключи такого ядра — неизвестные.
+	manifest := manifestOfScope(st.Manifest, l.installed(), "")
 	if all {
-		for _, c := range CheckManifest(l.opts.Roots, st.Manifest) {
+		for _, c := range CheckManifest(l.opts.Roots, manifest) {
 			if c.State.IsDrift() {
 				only = append(only, c.Key)
 			}
@@ -533,7 +537,7 @@ func (l *Layer) Rebuild(keys []string, all bool) error {
 	} else {
 		seen := make(map[string]bool, len(keys))
 		for _, k := range keys {
-			if _, ok := st.Manifest[k]; !ok {
+			if _, ok := manifest[k]; !ok {
 				return ErrUnknownKey
 			}
 			if !seen[k] {

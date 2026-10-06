@@ -525,3 +525,45 @@ func TestWR05_CancelDuringRestartKeepsJournalNoRollback(t *testing.T) {
 		t.Errorf("манифест зафиксирован при прерванном применении: %+v", st.Manifest)
 	}
 }
+
+// WR-06: файлы ядра, которое удалили, не считаются дрейфом и не блокируют
+// «Применить»; пересобрать их нечем.
+func TestWR06_UninstalledKernelNoDrift(t *testing.T) {
+	mihomoBin := writeFakeKernel(t, t.TempDir(), "mihomo", 0, "", 0)
+	env, events := newApplyLayer(t, layerOpts{MihomoStatus: "stopped", Bins: Binaries{Mihomo: mihomoBin}})
+	mihomoKey := ManifestKey(KernelMihomo, DiagMihomoRel)
+	if _, ok := env.L.store.Snapshot().Manifest[mihomoKey]; !ok {
+		t.Fatal("файл Mihomo не попал в манифест")
+	}
+
+	env.setBins(Binaries{Xray: env.getBins().Xray})
+	if err := os.Remove(env.diagMihomoPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := env.L.Snapshot()
+	if snap.DriftCount != 0 {
+		t.Errorf("DriftCount = %d, want 0 (ядро Mihomo не установлено)", snap.DriftCount)
+	}
+	if _, ok := findFileView(snap.Files, mihomoKey); ok {
+		t.Error("файл неустановленного ядра показан в списке")
+	}
+	if err := env.L.Rebuild([]string{mihomoKey}, false); err != ErrUnknownKey {
+		t.Errorf("Rebuild по ключу неустановленного ядра = %v, want ErrUnknownKey", err)
+	}
+	if err := env.L.Rebuild(nil, true); err != ErrUnknownKey {
+		t.Errorf("Rebuild(all) без дрейфа = %v, want ErrUnknownKey", err)
+	}
+	env.setDraftNote(t)
+	if err := env.L.StartApply(true); err != nil {
+		t.Fatalf("StartApply = %v, want nil: дрейф неустановленного ядра не должен блокировать", err)
+	}
+	env.settleApply(t, events)
+}
+
+func (e *layerEnv) setDraftNote(t *testing.T) {
+	t.Helper()
+	if _, err := e.L.EditDraft(e.L.store.DraftRevision(), "note", []byte(`{"a":1}`)); err != nil {
+		t.Fatalf("EditDraft: %v", err)
+	}
+}
