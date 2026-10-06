@@ -15,6 +15,12 @@ import (
 // ErrDraftConflict — правка черновика сделана на устаревшей ревизии.
 var ErrDraftConflict = errors.New("configlayer: draft revision conflict")
 
+// ErrInvalidSection — недопустимое имя секции черновика.
+var ErrInvalidSection = errors.New("configlayer: invalid section name")
+
+// ErrUnknownNotice — неизвестный идентификатор уведомления.
+var ErrUnknownNotice = errors.New("configlayer: unknown notice id")
+
 // Store — хранилище состояния слоя: структура в памяти под мьютексом и
 // JSON-файл в каталоге данных панели.
 //
@@ -157,3 +163,15 @@ func (s *Store) EditDraft(baseRev int64, section string, value json.RawMessage) 
 	s.broker.Publish(Event{Type: EventDraft, Data: ev})
 	return ev, nil
 }
+
+// ResetDraft — заглушка RED-фазы.
+func (s *Store) ResetDraft(baseRev int64) (DraftEvent, error) { return DraftEvent{}, nil }
+
+// Update — заглушка RED-фазы.
+func (s *Store) Update(fn func(st *State) error) error { return nil }
+
+// DismissNotice — заглушка RED-фазы.
+func (s *Store) DismissNotice(id string) error { return nil }
+
+// Reload — заглушка RED-фазы.
+func (s *Store) Reload() error { return nil }
