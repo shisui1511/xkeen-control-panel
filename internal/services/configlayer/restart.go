@@ -456,15 +456,30 @@ func (p *Pipeline) confirmRunning(ctx context.Context, kernel string, wantPID in
 	}
 }
 
-// LifecyclePollInterval — как часто фоновый запуск пробует взять замок жизненного цикла.
+// waitFor вызывает try каждые LifecyclePollInterval, пока он не вернёт true;
+// отмена контекста прекращает ожидание и возвращает ctx.Err().
+func waitFor(ctx context.Context, try func() bool) error {
+	tick := time.NewTicker(LifecyclePollInterval)
+	defer tick.Stop()
+	for !try() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+		}
+	}
+	return nil
+}
+
+// LifecyclePollInterval — как часто фоновый запуск пробует взять замки применения и жизненного цикла.
 var LifecyclePollInterval = 250 * time.Millisecond
 
 // TryBegin берёт замки перед Run: сначала applyMu («одно применение за раз»), затем
 // замок жизненного цикла ядра. Порядок всегда applyMu → lifecycleMu; обратный
 // запрещён: обработчики HTTP, держащие lifecycleMu, applyMu не берут
-// (восстановление снимка — 144-10). Второе применение во время идущего получает
+// (восстановление снимка — 144-10). Второе применение по кнопке во время идущего получает
 // ErrApplyBusy. user=true (запуск по кнопке) при занятом замке ядра сразу получает
-// ErrKernelBusy; user=false (фоновый запуск) ждёт замок с паузой
+// ErrKernelBusy; user=false (фоновый запуск) ждёт оба замка (и applyMu) с паузой
 // LifecyclePollInterval и отменяется контекстом (тогда возвращается ctx.Err()).
 // release снимает замок ядра, затем applyMu; повторный вызов безопасен.
 //
@@ -472,7 +487,14 @@ var LifecyclePollInterval = 250 * time.Millisecond
 // Apply: sync.Mutex не реентерабелен.
 func (p *Pipeline) TryBegin(ctx context.Context, user bool) (release func(), err error) {
 	if !p.applyMu.TryLock() {
-		return nil, ErrApplyBusy
+		if user {
+			return nil, ErrApplyBusy
+		}
+		// Фоновый запуск (установка ядра, включение слоя) не должен теряться из-за
+		// идущего применения: ждёт его конца с тем же опросом, что и замок ядра.
+		if err := waitFor(ctx, p.applyMu.TryLock); err != nil {
+			return nil, err
+		}
 	}
 	lifecycle := p.d.Lifecycle
 	if lifecycle != nil {
@@ -483,15 +505,9 @@ func (p *Pipeline) TryBegin(ctx context.Context, user bool) (release func(), err
 				return nil, ErrKernelBusy
 			}
 		default:
-			tick := time.NewTicker(LifecyclePollInterval)
-			defer tick.Stop()
-			for !lifecycle.TryLock() {
-				select {
-				case <-ctx.Done():
-					p.applyMu.Unlock()
-					return nil, ctx.Err()
-				case <-tick.C:
-				}
+			if err := waitFor(ctx, lifecycle.TryLock); err != nil {
+				p.applyMu.Unlock()
+				return nil, err
 			}
 		}
 	}

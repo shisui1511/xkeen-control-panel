@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -565,5 +566,61 @@ func (e *layerEnv) setDraftNote(t *testing.T) {
 	t.Helper()
 	if _, err := e.L.EditDraft(e.L.store.DraftRevision(), "note", []byte(`{"a":1}`)); err != nil {
 		t.Fatalf("EditDraft: %v", err)
+	}
+}
+
+// WR-07: фоновая сборка при занятом applyMu ждёт его освобождения, а не
+// теряется с ErrApplyBusy.
+func TestWR07_OnKernelInstalledWaitsForRunningApply(t *testing.T) {
+	old := LifecyclePollInterval
+	LifecyclePollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { LifecyclePollInterval = old })
+	env, events := newApplyLayer(t, layerOpts{MihomoStatus: "stopped"})
+	release, err := env.L.pipeline.TryBegin(t.Context(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	env.installMihomo(t)
+	env.L.OnKernelInstalled("mihomo")
+	requireNoEvent(t, events, EventApplyDone, 150*time.Millisecond)
+	release()
+	view := env.settleApply(t, events)
+
+	if view.Trigger != TriggerKernelInstalled || view.Result == nil || !view.Result.OK {
+		t.Fatalf("запуск = %+v, want kernel_installed, ok", view)
+	}
+	if got := mustReadFile(t, env.diagMihomoPath()); got != diagMihomoProvider {
+		t.Errorf("файл Mihomo не собран после ожидания: %q", got)
+	}
+}
+
+// WR-07: ожидание applyMu прерывается отменой контекста.
+func TestWR07_BackgroundTryBeginCancelWhileApplyBusy(t *testing.T) {
+	old := LifecyclePollInterval
+	LifecyclePollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { LifecyclePollInterval = old })
+	env := newTestPipeline(t, pipeOpts{Lifecycle: &sync.Mutex{}})
+	release, err := env.P.TryBegin(t.Context(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	errc := make(chan error, 1)
+	go func() {
+		_, err := env.P.TryBegin(ctx, false)
+		errc <- err
+	}()
+	time.Sleep(40 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-errc:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("TryBegin = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("TryBegin не вернулся после отмены")
 	}
 }
