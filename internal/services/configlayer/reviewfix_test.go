@@ -398,6 +398,13 @@ func TestWR03_RunRecoversPendingJournalFirst(t *testing.T) {
 // (фиксация применения) падает.
 func commitFailEnv(t *testing.T, kernelRecovers bool) (*testEnv, *recoverApplier, *fileGen) {
 	t.Helper()
+	return commitFailEnvMode(t, kernelRecovers, false)
+}
+
+// commitFailEnvMode — как commitFailEnv; persistent: после рестарта отказывают все
+// записи файла состояния (диск полон), а не одна.
+func commitFailEnvMode(t *testing.T, kernelRecovers, persistent bool) (*testEnv, *recoverApplier, *fileGen) {
+	t.Helper()
 	setRollbackTimings(t)
 	xrayBin := writeFakeKernel(t, t.TempDir(), "xray", 0, "", 0)
 	procs := newFakeProcs()
@@ -428,6 +435,9 @@ func commitFailEnv(t *testing.T, kernelRecovers bool) (*testEnv, *recoverApplier
 		Applier: applier, Procs: procs.states,
 	})
 	env.Store.writeFile = func(path string, data []byte, perm os.FileMode) error {
+		if persistent && failNext.Load() {
+			return errors.New("диск полон")
+		}
 		if failNext.CompareAndSwap(true, false) {
 			return errors.New("диск полон")
 		}
@@ -848,5 +858,31 @@ func TestFollowupWR02_RunSkipsWhenLayerDisabled(t *testing.T) {
 	}
 	if _, err := os.Stat(env.diagXrayPath()); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("файл записан при выключенном слое: %v", err)
+	}
+}
+
+// Review-fix WR-03: отказ записи состояния валит и фиксацию, и очистку журнала:
+// файлы всё равно возвращены, поэтому ядро поднимается на прежних файлах, а журнал
+// остаётся для RecoverJournal.
+func TestFollowupWR03_JournalNotClearedStillRestartsKernel(t *testing.T) {
+	env, applier, _ := commitFailEnvMode(t, true, true)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != ResultWriteFailed || !r.RolledBack {
+		t.Fatalf("Result = %+v, want write_failed с RolledBack", r)
+	}
+	if len(applier.forced) != 1 || applier.forced[0] != KernelXray {
+		t.Errorf("RestartLocked вызван %v, want [xray]: ядро осталось бы на новых файлах", applier.forced)
+	}
+	if _, err := os.Stat(filepath.Join(env.Roots.Xray, "04_outbounds.xcp-a.tail.json")); err == nil {
+		t.Error("файл новой записи остался после отката")
+	}
+	if !strings.Contains(r.Message, "журнал отката не снят") {
+		t.Errorf("Message = %q, want упоминание неснятого журнала", r.Message)
+	}
+	if env.Store.Snapshot().Journal == nil {
+		t.Error("журнал снят, хотя запись состояния отказывает")
 	}
 }

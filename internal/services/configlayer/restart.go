@@ -363,13 +363,19 @@ func (p *Pipeline) rollbackAndRestart(ctx context.Context, kernel string, set *B
 	p.setStep(StepRestart, StepRunning, NoteRestartFailedRolling, "")
 	view := RestartView{Kernel: kernel, Outcome: RestartOutcomeFailedRolledBack, NoteCode: NoteRestartFailedRolling}
 	re := &restartError{Kernel: kernel, Err: cause}
-	if rbErr := p.rollback(set); rbErr != nil {
+	rbErr := p.rollback(set)
+	if !filesRestored(rbErr) {
 		// Журнал остаётся: RecoverJournal повторит откат при старте панели.
 		re.Err = fmt.Errorf("%w; откат файлов не удался: %v", cause, rbErr)
 		view.Outcome = RestartOutcomeFailedRollbackFailed
 		return view, re
 	}
 	re.RolledBack = true
+	if rbErr != nil {
+		// Файлы на месте, не снялся только журнал: ядро поднимаем на прежних файлах.
+		re.Err = fmt.Errorf("%w; журнал отката не снят: %v", cause, rbErr)
+		cause = re.Err
+	}
 	if rerr := p.recoverKernel(ctx, kernel); rerr != nil {
 		re.Err = fmt.Errorf("%w; повторный рестарт на прежних файлах: %v", cause, rerr)
 		view.Outcome = RestartOutcomeFailedKernelDown

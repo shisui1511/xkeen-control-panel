@@ -211,10 +211,23 @@ func withinAnyRoot(path string, roots []string) bool {
 	return false
 }
 
+// errJournalNotCleared — файлы набора возвращены, но журнал не снят (отказ записи
+// файла состояния). Журнал остаётся: RecoverJournal повторит возврат идемпотентно.
+var errJournalNotCleared = errors.New("configlayer: clear journal")
+
+// filesRestored — после rollback файлы набора на месте: либо откат прошёл
+// целиком, либо не удалась только очистка журнала. Ядро в этом случае можно
+// поднимать на прежних файлах.
+func filesRestored(rollbackErr error) bool {
+	return rollbackErr == nil || errors.Is(rollbackErr, errJournalNotCleared)
+}
+
 // rollback возвращает все файлы набора в прежнее состояние (в обратном порядке:
 // новые файлы удаляются) и очищает журнал. Вызывается после сбоя записи, а
 // также планом 144-07 после неудачного перезапуска. Если файл вернуть не
-// удалось, журнал остаётся для повторной попытки при старте.
+// удалось, журнал остаётся для повторной попытки при старте. Если файлы
+// вернулись, а журнал снять не удалось, ошибка оборачивает errJournalNotCleared
+// (filesRestored — true).
 func (p *Pipeline) rollback(set *BackupSet) error {
 	var errs []error
 	for i := len(set.Meta.Files) - 1; i >= 0; i-- {
@@ -230,7 +243,7 @@ func (p *Pipeline) rollback(set *BackupSet) error {
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("configlayer: clear journal: %w", err)
+		return fmt.Errorf("%w: %w", errJournalNotCleared, err)
 	}
 	return nil
 }

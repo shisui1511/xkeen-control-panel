@@ -384,10 +384,16 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 // новых; итог отражает, что из этого удалось.
 func (p *Pipeline) rollbackAfterCommitFailure(ctx context.Context, set *BackupSet, views []RestartView, cause error) ResultView {
 	p.setStep(StepWrite, StepFailed, "", cause.Error())
-	if rbErr := p.rollback(set); rbErr != nil {
+	rbErr := p.rollback(set)
+	if !filesRestored(rbErr) {
 		return ResultView{Code: ResultRollbackFailed, Message: fmt.Sprintf("%v; откат файлов не удался: %v", cause, rbErr)}
 	}
 	res := ResultView{Code: ResultWriteFailed, Message: cause.Error(), RolledBack: true}
+	if rbErr != nil {
+		// Файлы вернулись, не снялся только журнал (тот же отказ записи состояния):
+		// ядра всё равно поднимаются на прежних файлах, журнал вернёт RecoverJournal.
+		res.Message = fmt.Sprintf("%v; журнал отката не снят: %v", cause, rbErr)
+	}
 	for _, v := range views {
 		switch v.Outcome {
 		case RestartOutcomeRestarted, RestartOutcomeHotReloaded, RestartOutcomeRestartedReload:
@@ -396,7 +402,7 @@ func (p *Pipeline) rollbackAfterCommitFailure(ctx context.Context, set *BackupSe
 		}
 		if rerr := p.recoverKernel(ctx, v.Kernel); rerr != nil {
 			res.Code, res.Kernel = ResultKernelNotRecovered, v.Kernel
-			res.Message = fmt.Sprintf("%v; повторный рестарт %s на прежних файлах: %v", cause, v.Kernel, rerr)
+			res.Message = fmt.Sprintf("%v; повторный рестарт %s на прежних файлах: %v", res.Message, v.Kernel, rerr)
 		}
 	}
 	return res
