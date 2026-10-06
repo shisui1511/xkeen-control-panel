@@ -176,12 +176,84 @@ type KernelVersionView struct {
 	MinVersion string `json:"min_version"`
 }
 
-// KernelVersionViews — каркас: реализация в следующем коммите.
-func KernelVersionViews(inputs []KernelVersionInput) []KernelVersionView {
-	return nil
+// Статусы строки версий ядра в KernelVersionView.Status.
+const (
+	statusOK           = "ok"
+	statusBelowMin     = "below_min"
+	statusUndetermined = "undetermined"
+	statusNotInstalled = "not_installed"
+)
+
+// kernelOrder — фиксированный порядок строк версий в каркасе раздела.
+var kernelOrder = []string{kernelXKeen, kernelXray, kernelMihomo}
+
+// kernelMinVersion возвращает минимальную версию ядра (D-20).
+func kernelMinVersion(kernel string) string {
+	switch kernel {
+	case kernelXKeen:
+		return MinXKeenVersion
+	case kernelXray:
+		return MinXrayVersion
+	case kernelMihomo:
+		return MinMihomoVersion
+	}
+	return ""
 }
 
-// FeatureMap — каркас: реализация в следующем коммите.
+// KernelVersionViews формирует три строки версий — xkeen, xray, mihomo —
+// строго в этом порядке. Ядро, которого нет во входе или у которого
+// Installed=false, получает not_installed; нераспознанная версия (Alpha,
+// unknown, error) — undetermined; ниже минимума — below_min; иначе ok.
+// Version отдаётся сырой строкой без изменений.
+func KernelVersionViews(inputs []KernelVersionInput) []KernelVersionView {
+	byName := make(map[string]KernelVersionInput, len(inputs))
+	for _, in := range inputs {
+		byName[in.Name] = in
+	}
+	views := make([]KernelVersionView, 0, len(kernelOrder))
+	for _, name := range kernelOrder {
+		in, found := byName[name]
+		view := KernelVersionView{
+			Name:       name,
+			Installed:  found && in.Installed,
+			Version:    in.Version,
+			MinVersion: kernelMinVersion(name),
+		}
+		switch {
+		case !view.Installed:
+			view.Status = statusNotInstalled
+		default:
+			v, st := ParseKernelVersion(in.Version)
+			switch {
+			case st != VersionOK:
+				view.Status = statusUndetermined
+			case CompareVersions(v, mustParseConst(view.MinVersion)) < 0:
+				view.Status = statusBelowMin
+			default:
+				view.Status = statusOK
+			}
+		}
+		views = append(views, view)
+	}
+	return views
+}
+
+// FeatureMap возвращает доступность каждой функции из таблицы порогов.
+// Версия берётся из входа соответствующего ядра; ядро не установлено или
+// отсутствует во входе — unavailable.
 func FeatureMap(inputs []KernelVersionInput) map[Feature]Availability {
-	return nil
+	byName := make(map[string]KernelVersionInput, len(inputs))
+	for _, in := range inputs {
+		byName[in.Name] = in
+	}
+	result := make(map[Feature]Availability, len(featureThresholds))
+	for f, th := range featureThresholds {
+		in, found := byName[th.kernel]
+		if !found || !in.Installed {
+			result[f] = Unavailable
+			continue
+		}
+		result[f] = FeatureAvailable(th.kernel, in.Version, f)
+	}
+	return result
 }
