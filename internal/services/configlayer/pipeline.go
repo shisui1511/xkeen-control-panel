@@ -3,8 +3,6 @@ package configlayer
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -279,13 +277,18 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	}
 
 	p.setStep(StepWrite, StepRunning, "", "")
-	written, err := p.commit(plan, snap, src, req)
+	out, err := p.writePlan(plan, req.Trigger)
+	if err == nil {
+		if err = p.commitState(plan, src, req); err != nil {
+			out.RollbackErr = p.rollback(out.Set)
+		}
+	}
 	if err != nil {
 		p.setStep(StepWrite, StepFailed, "", err.Error())
-		return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: true})
+		return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: out.RollbackErr == nil})
 	}
 	p.setStep(StepWrite, StepDone, "", "")
-	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: written})
+	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
 }
 
 // manifestOfInstalled оставляет записи манифеста только установленных ядер.
@@ -330,65 +333,12 @@ func (p *Pipeline) afterValidation(id StepID, r ValidationResult) (ResultView, b
 	return ResultView{}, false
 }
 
-// preImage — состояние файла до записи, для отката при сбое.
-type preImage struct {
-	abs     string
-	existed bool
-	data    []byte
-}
-
-// commit пишет файлы плана и фиксирует манифест и применённое состояние. При
-// сбое записи или коммита возвращённые на диск прежние содержимое и отсутствие
-// файлов восстанавливаются (резервные копии с журналом добавляет 144-06).
-func (p *Pipeline) commit(plan Plan, snap State, src Sections, req ApplyRequest) (int, error) {
-	var done []preImage
-	rollback := func() {
-		for i := len(done) - 1; i >= 0; i-- {
-			pi := done[i]
-			if pi.existed {
-				_ = utils.AtomicReplaceFile(pi.abs, pi.data)
-			} else {
-				_ = os.Remove(pi.abs)
-			}
-		}
-	}
-	written := 0
-	for _, fp := range plan.Files {
-		if fp.Action != ActionWrite && fp.Action != ActionDelete {
-			continue
-		}
-		pi := preImage{abs: fp.AbsPath}
-		data, err := os.ReadFile(fp.AbsPath)
-		switch {
-		case err == nil:
-			pi.existed, pi.data = true, data
-		case !errors.Is(err, os.ErrNotExist):
-			rollback()
-			return 0, fmt.Errorf("%s: %w", fp.Key, err)
-		}
-		if fp.Action == ActionDelete {
-			if err := os.Remove(fp.AbsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-				rollback()
-				return 0, fmt.Errorf("%s: %w", fp.Key, err)
-			}
-			done = append(done, pi)
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(fp.AbsPath), 0o755); err != nil {
-			rollback()
-			return 0, fmt.Errorf("%s: %w", fp.Key, err)
-		}
-		done = append(done, pi)
-		if err := p.d.WriteFile(fp.AbsPath, fp.Content); err != nil {
-			rollback()
-			return 0, fmt.Errorf("%s: %w", fp.Key, err)
-		}
-		written++
-	}
-
+// commitState фиксирует манифест и применённое состояние в одной записи файла
+// состояния и очищает журнал записи (144-07 перенесёт вызов после перезапуска).
+func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest) error {
 	now := p.d.Now()
 	applyDraft := req.Source == SourceDraft && len(req.Only) == 0
-	err := p.d.Store.Update(func(st *State) error {
+	return p.d.Store.Update(func(st *State) error {
 		for _, fp := range plan.Files {
 			switch fp.Action {
 			case ActionWrite:
@@ -403,17 +353,7 @@ func (p *Pipeline) commit(plan Plan, snap State, src Sections, req ApplyRequest)
 		if applyDraft {
 			st.Applied = src.Clone()
 		}
+		st.Journal = nil
 		return nil
 	})
-	if err != nil {
-		rollback()
-		return 0, err
-	}
-	// Файл, переименованный в .obsolete, заменён свежей записью: метка лишняя.
-	for _, fp := range plan.Files {
-		if fp.Action == ActionWrite && fp.RemoveObsolete {
-			_ = os.Remove(fp.AbsPath + obsoleteSuffix)
-		}
-	}
-	return written, nil
 }
