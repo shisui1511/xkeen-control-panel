@@ -231,6 +231,15 @@ test.describe('Редактор: правящие действия панели 
     }
   });
 
+  test('файл в состоянии pending (ещё не в манифесте) правится без плашки', async ({ page }) => {
+    await openEditor(page, { snapshot: { files: [{ ...managedFile, state: 'pending' }] } });
+    await openFileRow(page, '04_outbounds.xcp-diag.tail.json');
+
+    await expect(page.getByTestId('managed-file-banner')).toHaveCount(0);
+    await expect(saveButton(page)).toBeEnabled();
+    await expect(saveAndApplyButton(page)).toBeEnabled();
+  });
+
   test('Ctrl+S на файле панели ничего не сохраняет', async ({ page }) => {
     const { rec } = await openEditor(page);
     await openFileRow(page, '04_outbounds.xcp-diag.tail.json');

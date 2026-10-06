@@ -96,7 +96,10 @@
   // «Отпустить управление». Статус берётся из стора слоя — отдельного запроса нет;
   // с выключенным флагом всё как до включения слоя.
   const managedFile = $derived($configLayerEnabled ? $filesByPath.get(selectedFile) : undefined);
-  const isManagedReadOnly = $derived(managedFile !== undefined && managedFile.state !== 'released');
+  // pending — файла ещё нет в манифесте: сервер его не защищает, а «Отпустить» ответил бы 404
+  const isManagedReadOnly = $derived(
+    managedFile !== undefined && managedFile.state !== 'released' && managedFile.state !== 'pending'
+  );
   let loading = $state(false);
   let loadingPath = $state<string | null>(null);
   let templateLoading = $state(false);
