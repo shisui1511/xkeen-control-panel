@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -231,4 +232,45 @@ func TestCR03_MihomoValidatesPlannedProfile(t *testing.T) {
 		t.Fatalf("исправный новый профиль отклонён: %+v", res)
 	}
 	requireNoApplyDirs(t, dataDir)
+}
+
+// WR-01: выключение слоя не публикует apply_step и не переписывает итог
+// последнего запуска: «фантомное» применение без apply_done заблокировало бы UI.
+func TestWR01_DisableDoesNotPublishApplySteps(t *testing.T) {
+	var failRestart atomic.Bool
+	env, events := newApplyLayer(t, layerOpts{Restart: func(e *layerEnv) (string, error) {
+		if failRestart.Load() {
+			e.Procs.set("xray", "stopped", 0)
+			return "", nil
+		}
+		e.Procs.set("xray", "running", 101)
+		return "", nil
+	}})
+	RestartConfirmTimeout = 300 * time.Millisecond
+	before := env.L.pipeline.Current()
+	drain(events)
+	failRestart.Store(true)
+
+	if err := env.L.Disable(t.Context()); err == nil {
+		t.Fatal("Disable вернул nil при неудачном рестарте")
+	}
+
+	for {
+		select {
+		case ev := <-events:
+			if ev.Type == EventApplyStep || ev.Type == EventApplyDone {
+				t.Fatalf("выключение опубликовало %s: %+v", ev.Type, ev.Data)
+			}
+			continue
+		default:
+		}
+		break
+	}
+	after := env.L.pipeline.Current()
+	if after.Running || after.Result == nil || after.Result.Code != ResultApplied {
+		t.Errorf("итог последнего запуска изменён: %+v", after)
+	}
+	if len(after.Restart) != len(before.Restart) {
+		t.Errorf("строки перезапуска переписаны выключением: было %+v, стало %+v", before.Restart, after.Restart)
+	}
 }

@@ -204,9 +204,15 @@ func (p *Pipeline) begin(req ApplyRequest) {
 	p.mu.Unlock()
 }
 
-// setStep меняет шаг и публикует apply_step.
+// setStep меняет шаг и публикует apply_step. Вне запуска (Running=false) шаги не
+// меняются и не публикуются: вызов из выключения слоя иначе открыл бы в UI
+// «фантомное» применение без apply_done и переписал итог прошлого запуска.
 func (p *Pipeline) setStep(id StepID, state StepState, note, msg string) {
 	p.mu.Lock()
+	if !p.view.Running {
+		p.mu.Unlock()
+		return
+	}
 	var sv StepView
 	for i := range p.view.Steps {
 		if p.view.Steps[i].ID == id {
@@ -216,8 +222,6 @@ func (p *Pipeline) setStep(id StepID, state StepState, note, msg string) {
 	}
 	p.mu.Unlock()
 	if sv.ID == "" {
-		// Шага нет в текущем запуске (шаг перезапуска вызван вне Run, например при
-		// выключении слоя): публиковать нечего.
 		return
 	}
 	p.d.Broker.Publish(Event{Type: EventApplyStep, Data: sv})

@@ -88,10 +88,13 @@ func (e *restartError) Error() string {
 
 func (e *restartError) Unwrap() error { return e.Err }
 
-// setRestartViews публикует накопленные итоги перезапуска в состоянии запуска.
+// setRestartViews сохраняет накопленные итоги перезапуска в состоянии запуска;
+// вне запуска итог прошлого применения не переписывается.
 func (p *Pipeline) setRestartViews(views []RestartView) {
 	p.mu.Lock()
-	p.view.Restart = append([]RestartView(nil), views...)
+	if p.view.Running {
+		p.view.Restart = append([]RestartView(nil), views...)
+	}
 	p.mu.Unlock()
 }
 
