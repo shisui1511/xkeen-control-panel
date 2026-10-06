@@ -158,3 +158,30 @@ func FeatureAvailable(kernel, rawVersion string, f Feature) Availability {
 	}
 	return Available
 }
+
+// KernelVersionInput — сырые данные об одном ядре от кэшей KernelService и
+// XKeenStatusCache.
+type KernelVersionInput struct {
+	Name      string
+	Installed bool
+	Version   string
+}
+
+// KernelVersionView — строка версий для каркаса раздела.
+type KernelVersionView struct {
+	Name       string `json:"name"`
+	Installed  bool   `json:"installed"`
+	Version    string `json:"version"`
+	Status     string `json:"status"`
+	MinVersion string `json:"min_version"`
+}
+
+// KernelVersionViews — каркас: реализация в следующем коммите.
+func KernelVersionViews(inputs []KernelVersionInput) []KernelVersionView {
+	return nil
+}
+
+// FeatureMap — каркас: реализация в следующем коммите.
+func FeatureMap(inputs []KernelVersionInput) map[Feature]Availability {
+	return nil
+}
