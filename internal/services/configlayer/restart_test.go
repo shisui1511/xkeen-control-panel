@@ -389,7 +389,7 @@ func requireRolledBack(t *testing.T, env *testEnv, view ApplyView, abs, wantCont
 	t.Helper()
 	r := view.Result
 	if r == nil || r.OK || r.Code != ResultRestartFailed || !r.RolledBack || r.Kernel != kernel {
-		t.Fatalf("Result = %+v, want restart_failed_rolled_back, RolledBack, kernel %s", r, kernel)
+		t.Fatalf("Result = %+v, want restart_failed, RolledBack, kernel %s", r, kernel)
 	}
 	if r.Message == "" {
 		t.Error("итог без сообщения")
@@ -424,7 +424,7 @@ func TestApply_MihomoFallbackRollback(t *testing.T) {
 	procs := newFakeProcs()
 	procs.set("mihomo", "running", 100)
 	failing := false
-	applier := newProcApplier(procs, func() (string, error) {
+	base := newProcApplier(procs, func() (string, error) {
 		if failing {
 			procs.set("mihomo", "stopped", 0)
 		} else {
@@ -432,6 +432,8 @@ func TestApply_MihomoFallbackRollback(t *testing.T) {
 		}
 		return "", nil
 	})
+	// Повторный рестарт на прежних файлах идёт принудительно и поднимает ядро.
+	applier := &recoverApplier{procApplier: base, onForce: func(string) { procs.set("mihomo", "running", 101) }}
 	mh := &fakeMihomo{}
 	gen := newMihomoGen(providerV1, nil)
 	env := newTestPipeline(t, pipeOpts{
@@ -448,8 +450,11 @@ func TestApply_MihomoFallbackRollback(t *testing.T) {
 	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
 
 	requireRolledBack(t, env, view, abs, providerV1, before, KernelMihomo)
-	if calls := applier.applyCalls(); len(calls) != 2 {
-		t.Errorf("ApplyLocked вызван %v, want дважды (рестарт и повтор на прежних файлах)", calls)
+	if calls := base.applyCalls(); len(calls) != 1 {
+		t.Errorf("ApplyLocked вызван %v, want один раз (неудачный рестарт)", calls)
+	}
+	if len(applier.forced) != 1 || applier.forced[0] != KernelMihomo {
+		t.Errorf("RestartLocked вызван %v, want [mihomo] (повтор на прежних файлах)", applier.forced)
 	}
 	if rv := restartOf(t, view, KernelMihomo); rv.Outcome != "failed_rolled_back" || rv.NoteCode != "restart_failed_rolling_back" {
 		t.Errorf("RestartView = %+v, want failed_rolled_back restart_failed_rolling_back", rv)
@@ -467,7 +472,7 @@ func TestApply_XrayRestartFailedRollsBack(t *testing.T) {
 	procs := newFakeProcs()
 	procs.set("xray", "running", 100)
 	failing := false
-	applier := newProcApplier(procs, func() (string, error) {
+	base := newProcApplier(procs, func() (string, error) {
 		if failing {
 			procs.set("xray", "stopped", 0)
 		} else {
@@ -475,6 +480,7 @@ func TestApply_XrayRestartFailedRollsBack(t *testing.T) {
 		}
 		return "", nil
 	})
+	applier := &recoverApplier{procApplier: base, onForce: func(string) { procs.set("xray", "running", 101) }}
 	gen := newXrayGen("{}\n")
 	env := newTestPipeline(t, pipeOpts{
 		Bins: Binaries{Xray: xrayBin}, Generators: []Generator{gen},
@@ -488,8 +494,11 @@ func TestApply_XrayRestartFailedRollsBack(t *testing.T) {
 	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
 
 	requireRolledBack(t, env, view, abs, "{}\n", before, KernelXray)
-	if calls := applier.applyCalls(); len(calls) != 3 {
-		t.Errorf("ApplyLocked вызван %v, want 3 раза (базовый, неудачный, повтор после отката)", calls)
+	if calls := base.applyCalls(); len(calls) != 2 {
+		t.Errorf("ApplyLocked вызван %v, want 2 раза (базовый и неудачный)", calls)
+	}
+	if len(applier.forced) != 1 {
+		t.Errorf("RestartLocked вызван %v, want один раз (повтор после отката)", applier.forced)
 	}
 }
 
@@ -498,10 +507,15 @@ func TestApply_XrayRestartFailedRollsBack(t *testing.T) {
 type recoverApplier struct {
 	*procApplier
 	forced []string
+	// onForce имитирует принудительный рестарт (nil — процесс не меняется).
+	onForce func(kernel string)
 }
 
 func (a *recoverApplier) RestartLocked(kernel string) services.ApplyResult {
 	a.forced = append(a.forced, kernel)
+	if a.onForce != nil {
+		a.onForce(kernel)
+	}
 	return services.ApplyResult{Outcome: services.ApplyRestarted, Kernel: kernel}
 }
 
@@ -515,7 +529,7 @@ func TestApply_RollbackUsesForcedRestart(t *testing.T) {
 		procs.set("xray", "stopped", 0)
 		return "", nil
 	})
-	applier := &recoverApplier{procApplier: base}
+	applier := &recoverApplier{procApplier: base, onForce: func(string) { procs.set("xray", "running", 101) }}
 	gen := newXrayGen("{}\n")
 	env := newTestPipeline(t, pipeOpts{
 		Bins: Binaries{Xray: xrayBin}, Generators: []Generator{gen},
@@ -527,7 +541,7 @@ func TestApply_RollbackUsesForcedRestart(t *testing.T) {
 	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
 
 	if view.Result == nil || view.Result.Code != ResultRestartFailed || !view.Result.RolledBack {
-		t.Fatalf("Result = %+v, want restart_failed_rolled_back", view.Result)
+		t.Fatalf("Result = %+v, want restart_failed с RolledBack", view.Result)
 	}
 	if calls := base.applyCalls(); len(calls) != 1 {
 		t.Errorf("ApplyLocked вызван %v, want один раз", calls)

@@ -248,7 +248,7 @@ test.describe('Ход применения: отказ и откат', () => {
       ],
       result: {
         ok: false,
-        code: 'restart_failed_rolled_back',
+        code: 'restart_failed',
         kernel: 'mihomo',
         message: 'ядро mihomo не поднялось после применения: timeout',
         written: 1,
@@ -266,6 +266,56 @@ test.describe('Ход применения: отказ и откат', () => {
     );
     // Живые заметки фолбэка после завершения не остаются
     await expect(note).toHaveCount(0);
+  });
+
+  test('неудавшийся откат не выдаётся за возврат файлов', async ({ page }) => {
+    const { mock, progress } = await startApply(page);
+    await mock.emit('apply_done', {
+      running: false,
+      steps: stepsDone([
+        { id: 'restart', state: 'failed', note_code: 'restart_failed_rolling_back' }
+      ]),
+      restart: [{ kernel: 'xray', outcome: 'failed_rollback_failed' }],
+      result: {
+        ok: false,
+        code: 'rollback_failed',
+        kernel: 'xray',
+        message: 'ядро xray не поднялось после применения: timeout; откат файлов не удался: диск',
+        written: 0
+      }
+    });
+    const failure = progress.getByTestId('config-apply-failure');
+    await expect(failure).toContainText('вернуть прежние файлы тоже не удалось');
+    await expect(failure).not.toContainText('ядро работает на прежнем конфиге');
+    await expect(failure).not.toContainText('Файлы на диске остались прежними');
+    await expect(progress.locator('.restart-row')).toHaveText(
+      'Xray не поднялся — прежние файлы вернуть не удалось'
+    );
+  });
+
+  test('файлы возвращены, но ядро не поднялось: об этом сказано прямо', async ({ page }) => {
+    const { mock, progress } = await startApply(page);
+    await mock.emit('apply_done', {
+      running: false,
+      steps: stepsDone([
+        { id: 'restart', state: 'failed', note_code: 'restart_failed_rolling_back' }
+      ]),
+      restart: [{ kernel: 'mihomo', outcome: 'failed_kernel_down' }],
+      result: {
+        ok: false,
+        code: 'kernel_not_recovered',
+        kernel: 'mihomo',
+        message: 'ядро mihomo не поднялось после применения: timeout',
+        written: 0,
+        rolled_back: true
+      }
+    });
+    const failure = progress.getByTestId('config-apply-failure');
+    await expect(failure).toContainText('Mihomo на них не запустился');
+    await expect(failure).not.toContainText('ядро работает на прежнем конфиге');
+    await expect(progress.locator('.restart-row')).toHaveText(
+      'Mihomo не поднялся — файлы возвращены, но ядро не запущено'
+    );
   });
 
   test('запрет применения из-за расхождений (drift_blocked) объяснён', async ({ page }) => {

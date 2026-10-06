@@ -67,7 +67,7 @@
       if (step.state !== 'running') return '';
       if (code === 'hot_reload_failed_restarting') return $t('cfg.restart_note.' + code);
       // Ядро известно, только когда его строка итога уже опубликована
-      const failed = restartRows.find((r) => r.outcome === 'failed_rolled_back');
+      const failed = restartRows.find((r) => r.outcome.startsWith('failed_'));
       return failed
         ? $t('cfg.restart_note.' + code, { kernel: kernelLabel(failed.kernel) })
         : $t('cfg.restart_note.rolling_back_generic');
@@ -87,9 +87,18 @@
 
   const otherTab = $derived(running && !$applyStartedHere);
   const failure = $derived(result && !result.ok ? result : null);
-  const rolledBack = $derived(
-    failure !== null && (failure.rolled_back === true || failure.code.endsWith('_rolled_back'))
-  );
+  // «Файлы возвращены» — только по флагу бэкенда, а не по имени кода: при неудачном откате
+  // и при ядре, не поднявшемся после отката, говорить об этом нельзя
+  const rolledBack = $derived(failure !== null && failure.rolled_back === true);
+  // Отказ до записи: файлы на диске не менялись
+  const FILES_UNTOUCHED = [
+    'validation_failed',
+    'validation_timeout',
+    'validation_not_run',
+    'build_failed',
+    'drift_blocked'
+  ];
+  const filesUntouched = $derived(failure !== null && FILES_UNTOUCHED.includes(failure.code));
 
   // Пояснение причины отказа по коду итога; вывод ядра идёт отдельным блоком
   const failureHeadline = $derived.by(() => {
@@ -104,9 +113,13 @@
         return $t('cfg.result.not_run', { kernel });
       case 'build_failed':
         return $t('cfg.result.build_failed');
-      case 'write_failed_rolled_back':
-      case 'restart_failed_rolled_back':
-        return $t('cfg.result.rolled_back');
+      case 'write_failed':
+      case 'restart_failed':
+        return rolledBack ? $t('cfg.result.rolled_back') : $t('cfg.result.rollback_failed');
+      case 'kernel_not_recovered':
+        return $t('cfg.result.kernel_not_recovered', { kernel });
+      case 'rollback_failed':
+        return $t('cfg.result.rollback_failed');
       case 'drift_blocked':
         return $t('cfg.result.drift_blocked');
       default:
@@ -198,7 +211,7 @@
               {/each}
             </ul>
           {/if}
-          {#if !rolledBack}
+          {#if filesUntouched}
             <span>{$t('cfg.result.reassurance')}</span>
           {/if}
         </div>

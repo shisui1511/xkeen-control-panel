@@ -55,7 +55,9 @@ export interface LayerRestart {
     | 'deferred'
     | 'untouched_inactive'
     | 'untouched_conflict'
-    | 'failed_rolled_back';
+    | 'failed_rolled_back'
+    | 'failed_rollback_failed'
+    | 'failed_kernel_down';
   note_code?: string;
 }
 

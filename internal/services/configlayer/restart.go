@@ -57,6 +57,10 @@ const (
 	RestartOutcomeUntouchedIdle    = "untouched_inactive"
 	RestartOutcomeUntouchedClash   = "untouched_conflict"
 	RestartOutcomeFailedRolledBack = "failed_rolled_back"
+	// Откат файлов не удался: журнал остался для повторной попытки при старте.
+	RestartOutcomeFailedRollbackFailed = "failed_rollback_failed"
+	// Файлы возвращены, но ядро на них не поднялось.
+	RestartOutcomeFailedKernelDown = "failed_kernel_down"
 )
 
 // Коды пояснений перезапуска (RestartView.NoteCode и StepView.NoteCode).
@@ -70,10 +74,12 @@ const (
 )
 
 // restartError — перезапуск не удался. Kernel — ядро, на котором остановились.
+// RolledBack — прежние файлы возвращены; Recovered — ядро снова работает на них.
 type restartError struct {
 	Kernel     string
 	Err        error
 	RolledBack bool
+	Recovered  bool
 }
 
 func (e *restartError) Error() string {
@@ -308,7 +314,8 @@ func (p *Pipeline) checkExpect(ctx context.Context, plan Plan, wait bool) error 
 }
 
 // rollbackAndRestart возвращает файлы панели из набора копий и перезапускает ядро
-// на прежних файлах. Манифест, Applied и черновик не меняются (D-07). Пока идёт
+// на прежних файлах; исход в RestartView и коды restartError отражают, что из
+// этого удалось (откат файлов, подъём ядра). Манифест, Applied и черновик не меняются (D-07). Пока идёт
 // откат, остальные ядра не перезапускаются: вызывающий прекращает обход.
 func (p *Pipeline) rollbackAndRestart(ctx context.Context, kernel string, set *BackupSet, cause error) (RestartView, error) {
 	p.setStep(StepRestart, StepRunning, NoteRestartFailedRolling, "")
@@ -317,12 +324,16 @@ func (p *Pipeline) rollbackAndRestart(ctx context.Context, kernel string, set *B
 	if rbErr := p.rollback(set); rbErr != nil {
 		// Журнал остаётся: RecoverJournal повторит откат при старте панели.
 		re.Err = fmt.Errorf("%w; откат файлов не удался: %v", cause, rbErr)
+		view.Outcome = RestartOutcomeFailedRollbackFailed
 		return view, re
 	}
 	re.RolledBack = true
 	if rerr := p.recoverKernel(ctx, kernel); rerr != nil {
 		re.Err = fmt.Errorf("%w; повторный рестарт на прежних файлах: %v", cause, rerr)
+		view.Outcome = RestartOutcomeFailedKernelDown
+		return view, re
 	}
+	re.Recovered = true
 	return view, re
 }
 

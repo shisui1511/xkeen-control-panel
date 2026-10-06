@@ -407,7 +407,7 @@ func TestApply_WriteFailureRestoresPrevious(t *testing.T) {
 
 	r := view.Result
 	if r == nil || r.OK || r.Code != ResultWriteFailed || !r.RolledBack {
-		t.Fatalf("Result = %+v, want write_failed_rolled_back с RolledBack", r)
+		t.Fatalf("Result = %+v, want write_failed с RolledBack", r)
 	}
 	if s := stepOf(t, view, StepWrite); s.State != StepFailed {
 		t.Errorf("write = %+v, want failed", s)

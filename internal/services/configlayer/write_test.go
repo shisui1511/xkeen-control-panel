@@ -96,7 +96,7 @@ func TestApply_WriteFailureRollsBack(t *testing.T) {
 
 	r := view.Result
 	if r == nil || r.OK || r.Code != ResultWriteFailed || !r.RolledBack {
-		t.Fatalf("Result = %+v, want write_failed_rolled_back с RolledBack", r)
+		t.Fatalf("Result = %+v, want write_failed с RolledBack", r)
 	}
 	if got := readFileString(t, xrayAbs); got != "OLD" {
 		t.Errorf("файл Xray = %q, want прежние байты %q", got, "OLD")
@@ -308,7 +308,7 @@ func TestWrite_SymlinkOutsideRootRejected(t *testing.T) {
 
 	r := view.Result
 	if r == nil || r.OK || r.Code != ResultWriteFailed || !r.RolledBack {
-		t.Fatalf("Result = %+v, want write_failed_rolled_back", r)
+		t.Fatalf("Result = %+v, want write_failed", r)
 	}
 	if !strings.Contains(r.Message, ErrSymlinkOutsideRoot.Error()) {
 		t.Errorf("Message = %q, want текст ErrSymlinkOutsideRoot", r.Message)

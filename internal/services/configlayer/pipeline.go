@@ -83,17 +83,23 @@ type RestartView struct {
 	NoteCode string `json:"note_code,omitempty"`
 }
 
-// Коды итога запуска.
+// Коды итога запуска. Код отказа не говорит, что откат удался: за это отвечает
+// RolledBack, а неудачный откат и ядро, не поднявшееся после отката, имеют свои коды.
 const (
-	ResultApplied          = "applied"
-	ResultNothingToApply   = "nothing_to_apply"
-	ResultBuildFailed      = "build_failed"
-	ResultValidationFailed = "validation_failed"
-	ResultValidationTimout = "validation_timeout"
-	ResultValidationNotRun = "validation_not_run"
-	ResultWriteFailed      = "write_failed_rolled_back"
-	ResultRestartFailed    = "restart_failed_rolled_back"
-	ResultDriftBlocked     = "drift_blocked"
+	ResultApplied        = "applied"
+	ResultNothingToApply = "nothing_to_apply"
+	ResultBuildFailed    = "build_failed"
+	// ResultWriteFailed — запись файлов не удалась; прежние файлы возвращены.
+	ResultWriteFailed = "write_failed"
+	// ResultRestartFailed — ядро не поднялось на новых файлах; прежние файлы
+	// возвращены, ядро снова работает на них.
+	ResultRestartFailed = "restart_failed"
+	// ResultKernelNotRecovered — прежние файлы возвращены, но ядро на них не поднялось.
+	ResultKernelNotRecovered = "kernel_not_recovered"
+	// ResultRollbackFailed — вернуть прежние файлы не удалось: журнал остался,
+	// откат повторится при следующем запуске панели.
+	ResultRollbackFailed = "rollback_failed"
+	ResultDriftBlocked   = "drift_blocked"
 )
 
 // ResultView — итог запуска.
@@ -313,7 +319,10 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	out, err := p.writePlan(plan, req.Trigger)
 	if err != nil {
 		p.setStep(StepWrite, StepFailed, "", err.Error())
-		return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: out.RollbackErr == nil})
+		if out.RollbackErr != nil {
+			return p.finish(ResultView{Code: ResultRollbackFailed, Message: err.Error()})
+		}
+		return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: true})
 	}
 	p.setStep(StepWrite, StepDone, "", "")
 
@@ -324,6 +333,12 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		var re *restartError
 		if errors.As(err, &re) {
 			res.Kernel, res.RolledBack = re.Kernel, re.RolledBack
+			switch {
+			case !re.RolledBack:
+				res.Code = ResultRollbackFailed
+			case !re.Recovered:
+				res.Code = ResultKernelNotRecovered
+			}
 		}
 		return p.finish(res)
 	}
