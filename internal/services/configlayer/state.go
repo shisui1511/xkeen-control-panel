@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
@@ -35,6 +36,8 @@ type Store struct {
 	path   string
 	st     State
 	broker *Broker
+	// now — источник времени для имён копий состояния; в тестах подменяется.
+	now func() time.Time
 }
 
 // OpenStore открывает (или создаёт) файл состояния в dataDir. broker может
@@ -43,6 +46,7 @@ func OpenStore(dataDir string, broker *Broker) (*Store, error) {
 	s := &Store{
 		path:   filepath.Join(dataDir, StateFileName),
 		broker: broker,
+		now:    time.Now,
 	}
 	st, err := s.readFile()
 	if err != nil {

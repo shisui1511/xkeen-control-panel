@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStore_DraftPersists(t *testing.T) {
@@ -366,4 +367,179 @@ func TestStore_FilePermissions(t *testing.T) {
 		t.Fatalf("EditDraft: %v", err)
 	}
 	check("after edit")
+}
+
+func backupDir(dataDir string) string {
+	return filepath.Join(dataDir, "backup", "config-layer", "state")
+}
+
+func listBackups(t *testing.T, dataDir string) []string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(backupDir(dataDir), "state.*.json"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	return files
+}
+
+// assertCleanStart проверяет чистый старт после сброса: копия с исходными
+// байтами, пустое состояние, флаг уведомления и новый файл схемы 1.
+func assertCleanStart(t *testing.T, dir string, s *Store, original []byte) {
+	t.Helper()
+	backups := listBackups(t, dir)
+	if len(backups) != 1 {
+		t.Fatalf("backups = %v, want exactly 1", backups)
+	}
+	copied, err := os.ReadFile(backups[0])
+	if err != nil {
+		t.Fatalf("read backup: %v", err)
+	}
+	if !bytes.Equal(copied, original) {
+		t.Fatalf("backup bytes differ from the original file")
+	}
+	base := filepath.Base(backups[0])
+	if !strings.HasPrefix(base, "state.") || !strings.HasSuffix(base, ".json") {
+		t.Fatalf("backup name = %q, want state.<unix>.json", base)
+	}
+
+	snap := s.Snapshot()
+	if len(snap.Draft) != 0 || len(snap.Applied) != 0 || len(snap.Manifest) != 0 || snap.DraftRevision != 0 {
+		t.Fatalf("state not empty after reset: %+v", snap)
+	}
+	if snap.SchemaVersion != SchemaVersion {
+		t.Fatalf("schema_version = %d, want %d", snap.SchemaVersion, SchemaVersion)
+	}
+	if !snap.Notices.SchemaReset || snap.Notices.SchemaResetBackup != backups[0] {
+		t.Fatalf("notices = %+v, want schema_reset with backup %q", snap.Notices, backups[0])
+	}
+
+	var onDisk State
+	if err := json.Unmarshal(readStateFile(t, dir), &onDisk); err != nil {
+		t.Fatalf("new state file is not valid JSON: %v", err)
+	}
+	if onDisk.SchemaVersion != SchemaVersion || !onDisk.Notices.SchemaReset {
+		t.Fatalf("new state file = %+v", onDisk)
+	}
+}
+
+const foreignSchemaState = `{
+  "schema_version": 999,
+  "draft_revision": 7,
+  "draft": {"a": {"x": 1}},
+  "applied": {"a": {"x": 0}},
+  "manifest": {"xray:a.json": {"kernel": "xray", "rel_path": "a.json"}},
+  "notices": {}
+}`
+
+func TestStore_SchemaMismatchResets(t *testing.T) {
+	dir := t.TempDir()
+	writeRawState(t, dir, foreignSchemaState)
+
+	s, err := OpenStore(dir, nil)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	assertCleanStart(t, dir, s, []byte(foreignSchemaState))
+}
+
+func TestStore_CorruptFileResets(t *testing.T) {
+	dir := t.TempDir()
+	const corrupt = "{ not json"
+	writeRawState(t, dir, corrupt)
+
+	s, err := OpenStore(dir, nil)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	assertCleanStart(t, dir, s, []byte(corrupt))
+}
+
+func TestStore_BackupDirPermissions(t *testing.T) {
+	dir := t.TempDir()
+	writeRawState(t, dir, foreignSchemaState)
+	if _, err := OpenStore(dir, nil); err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+
+	di, err := os.Stat(backupDir(dir))
+	if err != nil {
+		t.Fatalf("stat backup dir: %v", err)
+	}
+	if perm := di.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("backup dir perm = %o, want 700", perm)
+	}
+	backups := listBackups(t, dir)
+	if len(backups) != 1 {
+		t.Fatalf("backups = %v, want 1", backups)
+	}
+	fi, err := os.Stat(backups[0])
+	if err != nil {
+		t.Fatalf("stat backup: %v", err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("backup perm = %o, want 600", perm)
+	}
+}
+
+func TestStore_ReloadSchemaMismatch(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenStore(dir, nil)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	writeRawState(t, dir, foreignSchemaState)
+	if err := s.Reload(); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	assertCleanStart(t, dir, s, []byte(foreignSchemaState))
+}
+
+func TestStore_BackupWriteFailureKeepsOriginal(t *testing.T) {
+	dir := t.TempDir()
+	writeRawState(t, dir, foreignSchemaState)
+	// Каталог копий создать нельзя: на месте backup лежит обычный файл.
+	if err := os.WriteFile(filepath.Join(dir, "backup"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+
+	if _, err := OpenStore(dir, nil); err == nil {
+		t.Fatal("OpenStore succeeded, want error when backup cannot be written")
+	}
+	if got := readStateFile(t, dir); !bytes.Equal(got, []byte(foreignSchemaState)) {
+		t.Fatalf("original state file was modified: %s", got)
+	}
+}
+
+func TestStore_BackupNameCollision(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenStore(dir, nil)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	s.now = func() time.Time { return time.Unix(1700000000, 0) }
+
+	first := `{ broken one`
+	second := `{ broken two`
+	for _, raw := range []string{first, second} {
+		writeRawState(t, dir, raw)
+		if err := s.Reload(); err != nil {
+			t.Fatalf("Reload: %v", err)
+		}
+	}
+
+	backups := listBackups(t, dir)
+	if len(backups) != 2 {
+		t.Fatalf("backups = %v, want 2 (second reset in the same second must not overwrite the first)", backups)
+	}
+	seen := map[string]bool{}
+	for _, b := range backups {
+		data, err := os.ReadFile(b)
+		if err != nil {
+			t.Fatalf("read %s: %v", b, err)
+		}
+		seen[string(data)] = true
+	}
+	if !seen[first] || !seen[second] {
+		t.Fatalf("backup contents = %v, want both originals", seen)
+	}
 }
