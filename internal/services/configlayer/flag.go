@@ -124,6 +124,10 @@ func (l *Layer) moveManagedToBackup(ctx context.Context, plan Plan) error {
 	// При неудаче restartKernels сам возвращает файлы из набора и поднимает ядро на
 	// прежних файлах (D-17).
 	if _, err := l.pipeline.restartKernels(ctx, plan, set); err != nil {
+		// Остановка панели: журнал остаётся, файлы вернёт RecoverJournal (как в Run).
+		if errors.Is(err, errInterrupted) {
+			return err
+		}
 		var re *restartError
 		if !errors.As(err, &re) {
 			err = errors.Join(err, l.pipeline.rollback(set))

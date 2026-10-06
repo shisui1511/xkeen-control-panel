@@ -1,19 +1,14 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
-
-// configLayerDisableTimeout — предел выключения слоя: перенос файлов и рестарт ядра.
-const configLayerDisableTimeout = 3 * time.Minute
 
 type SettingsResponse struct {
 	Port    int                `json:"port"`
@@ -144,10 +139,9 @@ func (a *API) SettingsConfigLayer(w http.ResponseWriter, r *http.Request) {
 		return saveErr
 	}
 	if current && a.configLayer != nil {
-		// Перенос не обрывается закрытием вкладки: контекст отвязан от запроса.
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), configLayerDisableTimeout)
-		defer cancel()
-		if err := a.configLayer.Disable(ctx, commitFlag); err != nil {
+		// Перенос не обрывается закрытием вкладки и не ограничен дедлайном: он идёт
+		// под контекстом слоя, который отменяет только остановка панели.
+		if err := a.configLayer.Disable(a.configLayer.Context(), commitFlag); err != nil {
 			switch {
 			case saveErr != nil:
 				// Файлы уже перенесены, а ключ остался: возвращаем файлы слоя из applied.

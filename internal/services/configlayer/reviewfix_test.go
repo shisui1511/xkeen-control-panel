@@ -796,3 +796,38 @@ func TestWR11_RestartExpectTimeoutPerPlatform(t *testing.T) {
 		}
 	}
 }
+
+// Review-fix WR-01: истёкший контекст при выключении слоя считается прерыванием:
+// файлы не возвращаются и ядро повторно не перезапускается, журнал остаётся
+// для RecoverJournal (как у Run).
+func TestFollowupWR01_DisableInterruptedKeepsJournal(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var restarts atomic.Int32
+	var armed atomic.Bool
+	env, _ := newApplyLayer(t, layerOpts{Restart: func(e *layerEnv) (string, error) {
+		if !armed.Load() {
+			e.Procs.set("xray", "running", 101)
+			return "", nil
+		}
+		restarts.Add(1)
+		cancel()
+		return "", errors.New("контекст отменён")
+	}})
+	armed.Store(true)
+
+	err := env.L.Disable(ctx, nil)
+
+	if !errors.Is(err, errInterrupted) {
+		t.Fatalf("Disable = %v, want errInterrupted", err)
+	}
+	if got := restarts.Load(); got != 1 {
+		t.Errorf("рестартов = %d, want 1 (повторного рестарта после отмены быть не должно)", got)
+	}
+	if env.L.store.Snapshot().Journal == nil {
+		t.Error("журнал снят: RecoverJournal не сможет вернуть файлы")
+	}
+	if _, statErr := os.Stat(env.diagXrayPath()); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("файл возвращён при прерывании: %v", statErr)
+	}
+}
