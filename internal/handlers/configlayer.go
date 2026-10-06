@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // maxLayerBodyBytes — предел тела запросов слоя (T-144-34).
@@ -37,8 +38,24 @@ func (a *API) writeLayerError(w http.ResponseWriter, r *http.Request, err error)
 		JSONErrorCode(w, http.StatusConflict, "draft_conflict", a.t(r, "configlayer.draft_conflict"))
 	case errors.Is(err, configlayer.ErrInvalidSection), errors.Is(err, configlayer.ErrUnknownDiagAction):
 		JSONErrorCode(w, http.StatusBadRequest, "invalid_request", a.t(r, "configlayer.invalid_request"))
+	case errors.Is(err, configlayer.ErrApplyBusy):
+		JSONErrorCode(w, http.StatusConflict, "apply_busy", a.t(r, "configlayer.apply_busy"))
+	case errors.Is(err, configlayer.ErrKernelBusy):
+		JSONErrorCode(w, http.StatusConflict, "kernel_op_in_progress", a.t(r, "kernel.op_in_progress"))
+	case errors.Is(err, configlayer.ErrDriftBlocked):
+		JSONErrorCode(w, http.StatusConflict, "drift_blocked", a.t(r, "configlayer.drift_blocked"))
+	case errors.Is(err, configlayer.ErrUnknownKey):
+		JSONErrorCode(w, http.StatusNotFound, "unknown_key", a.t(r, "configlayer.unknown_key"))
+	case errors.Is(err, configlayer.ErrFileReleased):
+		JSONErrorCode(w, http.StatusConflict, "file_released", a.t(r, "configlayer.file_released"))
+	case errors.Is(err, configlayer.ErrUnknownNotice):
+		JSONErrorCode(w, http.StatusNotFound, "unknown_notice", a.t(r, "configlayer.unknown_notice"))
+	case errors.Is(err, configlayer.ErrDevModeRequired):
+		JSONErrorCode(w, http.StatusForbidden, "dev_mode_required", a.t(r, "configlayer.dev_mode_required"))
 	default:
-		JSONErrorCode(w, http.StatusInternalServerError, "internal", a.t(r, "error.internal"))
+		// Деталь — текст ошибки без управляющих ANSI-последовательностей; наружу
+		// идёт только он, внутренние структуры не раскрываются.
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "internal", a.t(r, "error.internal"), utils.StripANSI(err.Error()))
 	}
 }
 
@@ -160,22 +177,132 @@ func (a *API) ConfigLayerDraft(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, ev)
 }
 
-// Остальные действия слоя — в следующих коммитах плана.
-
-func (a *API) layerPending(w http.ResponseWriter, r *http.Request) {
-	if !a.requireLayer(w, r) {
+// ConfigLayerDraftReset — POST /api/configlayer/draft/reset {revision}.
+func (a *API) ConfigLayerDraftReset(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
 		return
 	}
-	JSONError(w, http.StatusNotImplemented, "not implemented")
+	var req struct {
+		Revision int64 `json:"revision"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.configLayer.ResetDraft(req.Revision)
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
 }
 
-func (a *API) ConfigLayerDraftReset(w http.ResponseWriter, r *http.Request)     { a.layerPending(w, r) }
-func (a *API) ConfigLayerApply(w http.ResponseWriter, r *http.Request)          { a.layerPending(w, r) }
-func (a *API) ConfigLayerFilesRebuild(w http.ResponseWriter, r *http.Request)   { a.layerPending(w, r) }
-func (a *API) ConfigLayerFilesRelease(w http.ResponseWriter, r *http.Request)   { a.layerPending(w, r) }
-func (a *API) ConfigLayerFilesDiff(w http.ResponseWriter, r *http.Request)      { a.layerPending(w, r) }
-func (a *API) ConfigLayerNoticesDismiss(w http.ResponseWriter, r *http.Request) { a.layerPending(w, r) }
-func (a *API) ConfigLayerDiag(w http.ResponseWriter, r *http.Request)           { a.layerPending(w, r) }
+// ConfigLayerApply — POST /api/configlayer/apply: запускает применение черновика
+// и отвечает сразу {started:true}; итог приходит событием apply_done.
+func (a *API) ConfigLayerApply(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+		return
+	}
+	// Тело не используется, но размер ограничен как у остальных запросов.
+	r.Body = http.MaxBytesReader(w, r.Body, maxLayerBodyBytes)
+	if err := a.configLayer.StartApply(true); err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, map[string]bool{"started": true})
+}
+
+// ConfigLayerFilesRebuild — POST /api/configlayer/files/rebuild {keys} или {all}.
+// Файлы адресуются только ключами манифеста.
+func (a *API) ConfigLayerFilesRebuild(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+		return
+	}
+	var req struct {
+		Keys []string `json:"keys"`
+		All  bool     `json:"all"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	if err := a.configLayer.Rebuild(req.Keys, req.All); err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, map[string]bool{"started": true})
+}
+
+// ConfigLayerFilesRelease — POST /api/configlayer/files/release {key}: «Принять правку».
+func (a *API) ConfigLayerFilesRelease(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+		return
+	}
+	var req struct {
+		Key string `json:"key"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.configLayer.Release(req.Key)
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigLayerFilesDiff — GET /api/configlayer/files/diff?key=: ожидаемое и
+// фактическое содержимое файла. Принимается ключ манифеста, а не путь (T-144-33).
+func (a *API) ConfigLayerFilesDiff(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
+		return
+	}
+	view, err := a.configLayer.Diff(r.URL.Query().Get("key"))
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, view)
+}
+
+// ConfigLayerNoticesDismiss — POST /api/configlayer/notices/dismiss {id}.
+func (a *API) ConfigLayerNoticesDismiss(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	notices, err := a.configLayer.DismissNotice(req.ID)
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, map[string]any{"notices": notices})
+}
+
+// ConfigLayerDiag — POST /api/configlayer/diag {revision, action}: диагностика
+// в черновик, только в режиме разработчика (D-19).
+func (a *API) ConfigLayerDiag(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireLayer(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64  `json:"revision"`
+		Action   string `json:"action"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.configLayer.Diag(req.Revision, req.Action)
+	if err != nil {
+		a.writeLayerError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
 
 // Переключатель флага — в задаче 3 плана.
 func (a *API) SettingsConfigLayer(w http.ResponseWriter, r *http.Request) {
