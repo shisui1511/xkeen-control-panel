@@ -57,12 +57,62 @@
     return $t('cfg.step_state.' + state);
   }
 
+  // Заметки фолбэка Mihomo (D-17) видны, только пока идёт перезапуск
+  const FALLBACK_NOTES = ['hot_reload_failed_restarting', 'restart_failed_rolling_back'];
+
   function stepNote(step: LayerStep): string {
-    if (!step.note_code) return '';
-    const key = 'cfg.step_note.' + step.note_code;
+    const code = step.note_code;
+    if (!code) return '';
+    if (FALLBACK_NOTES.includes(code)) {
+      if (step.state !== 'running') return '';
+      if (code === 'hot_reload_failed_restarting') return $t('cfg.restart_note.' + code);
+      // Ядро известно, только когда его строка итога уже опубликована
+      const failed = restartRows.find((r) => r.outcome === 'failed_rolled_back');
+      return failed
+        ? $t('cfg.restart_note.' + code, { kernel: kernelLabel(failed.kernel) })
+        : $t('cfg.restart_note.rolling_back_generic');
+    }
+    const key = 'cfg.step_note.' + code;
     const text = $t(key);
     return text === key ? '' : text;
   }
+
+  // Подсказка по коду; пустая строка, если для кода нет перевода
+  function hintText(code: string | undefined): string {
+    if (!code) return '';
+    const key = 'cfg.hint.' + code;
+    const text = $t(key);
+    return text === key ? '' : text;
+  }
+
+  const otherTab = $derived(running && !$applyStartedHere);
+  const failure = $derived(result && !result.ok ? result : null);
+  const rolledBack = $derived(
+    failure !== null && (failure.rolled_back === true || failure.code.endsWith('_rolled_back'))
+  );
+
+  // Пояснение причины отказа по коду итога; вывод ядра идёт отдельным блоком
+  const failureHeadline = $derived.by(() => {
+    if (!failure) return '';
+    const kernel = kernelLabel(failure.kernel ?? '');
+    switch (failure.code) {
+      case 'validation_failed':
+        return $t('cfg.result.validation', { kernel });
+      case 'validation_timeout':
+        return $t('cfg.result.timeout', { kernel });
+      case 'validation_not_run':
+        return $t('cfg.result.not_run', { kernel });
+      case 'build_failed':
+        return $t('cfg.result.build_failed');
+      case 'write_failed_rolled_back':
+      case 'restart_failed_rolled_back':
+        return $t('cfg.result.rolled_back');
+      case 'drift_blocked':
+        return $t('cfg.result.drift_blocked');
+      default:
+        return rolledBack ? $t('cfg.result.rolled_back') : '';
+    }
+  });
 
   const orphans = $derived(result?.orphans_removed ?? []);
 </script>
@@ -75,6 +125,10 @@
     bind:this={section}
   >
     <div class="card-title">{$t('cfg.progress_title')}</div>
+
+    {#if otherTab}
+      <span class="caption">{$t('cfg.step.other_tab')}</span>
+    {/if}
 
     <ol class="steps" aria-live="polite">
       {#each steps as step (step.id)}
@@ -113,6 +167,43 @@
         </li>
       {/each}
     </ol>
+
+    {#if failure}
+      <div class="alert alert-error result" role="alert" data-testid="config-apply-failure">
+        <Icon name="cross" size={16} />
+        <div class="result-body">
+          <strong>{$t('cfg.result.failed_title')}</strong>
+          {#if failureHeadline}
+            <span>{failureHeadline}</span>
+          {/if}
+          {#if failure.message}
+            <!-- Вывод ядра — только текстовый узел (T-144-48): разметка ядра не исполняется -->
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+            <pre
+              class="kernel-output"
+              role="region"
+              aria-label={$t('cfg.result.output_label')}
+              tabindex="0">{failure.message}</pre>
+          {/if}
+          {#if hintText(failure.hint_code)}
+            <span>{$t('cfg.result.fix_hint', { hint: hintText(failure.hint_code) })}</span>
+          {/if}
+          {#if failure.issues && failure.issues.length > 0}
+            <ul class="issues">
+              {#each failure.issues as issue, i (issue.key + ':' + issue.code + ':' + i)}
+                <li>
+                  <code class="issue-key">{issue.key}</code>
+                  <span>{hintText(issue.code) || issue.detail || issue.code}</span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          {#if !rolledBack}
+            <span>{$t('cfg.result.reassurance')}</span>
+          {/if}
+        </div>
+      </div>
+    {/if}
 
     {#if result?.ok}
       <div class="alert alert-success result" role="status" data-testid="config-apply-success">
@@ -251,6 +342,57 @@
     min-width: 0;
     overflow-wrap: anywhere;
     color: var(--fg-primary);
+  }
+
+  .caption {
+    font-size: var(--font-size-xs);
+    line-height: 1.4;
+    color: var(--fg-dim);
+  }
+
+  .kernel-output {
+    margin: 0;
+    padding: 8px 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 200px;
+    overflow: auto;
+    user-select: text;
+    scrollbar-width: thin;
+  }
+
+  .kernel-output::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .kernel-output::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .kernel-output::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .issues {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .issue-key {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+    margin-right: 4px;
   }
 
   .progress-actions {

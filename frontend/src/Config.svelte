@@ -5,6 +5,7 @@
   import DraftBar from './components/config/DraftBar.svelte';
   import ConfigNotices from './components/config/ConfigNotices.svelte';
   import ApplyProgress from './components/config/ApplyProgress.svelte';
+  import DevDiagnostics from './components/config/DevDiagnostics.svelte';
   import ManagedFiles from './components/config/ManagedFiles.svelte';
   import KernelVersions from './components/config/KernelVersions.svelte';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
@@ -43,6 +44,7 @@
       <ApplyProgress />
       <ManagedFiles />
       <KernelVersions />
+      <DevDiagnostics />
     </div>
   {/if}
 </div>
