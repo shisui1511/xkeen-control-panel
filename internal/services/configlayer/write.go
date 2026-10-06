@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // writeOutcome — итог записи плана. При ошибке откат уже выполнен: Set остаётся
@@ -24,6 +25,9 @@ type writeOutcome struct {
 // журнала. При успехе журнал остаётся: его очищает коммит состояния в той же
 // записи файла состояния, что и манифест.
 func (p *Pipeline) writePlan(plan Plan, trigger Trigger) (writeOutcome, error) {
+	if err := p.checkSymlinks(plan); err != nil {
+		return writeOutcome{}, err
+	}
 	set, err := NewBackupSet(p.d.DataDir, p.d.Now(), string(trigger))
 	if err != nil {
 		return writeOutcome{}, err
@@ -55,6 +59,19 @@ func (p *Pipeline) writePlan(plan Plan, trigger Trigger) (writeOutcome, error) {
 				return out, err
 			}
 		}
+	}
+	// Сироты уходят в набор, а не в никуда (D-13): имя панели проверяется ещё раз.
+	for _, o := range plan.Orphans {
+		if !IsPanelFileName(o.Kernel, o.RelPath) {
+			_ = os.RemoveAll(set.Dir)
+			return out, fmt.Errorf("%s: %w", o.Key, ErrInvalidPanelName)
+		}
+		m, err := set.Save(p.d.Roots, o.Key, o.Kernel, o.RelPath, ReasonOrphan)
+		if err != nil {
+			_ = os.RemoveAll(set.Dir)
+			return out, err
+		}
+		journal = append(journal, JournalFile{Key: o.Key, Existed: m.Existed})
 	}
 	if err := set.WriteMeta(); err != nil {
 		_ = os.RemoveAll(set.Dir)
@@ -103,7 +120,63 @@ func (p *Pipeline) writePlan(plan Plan, trigger Trigger) (writeOutcome, error) {
 			}
 		}
 	}
+	for _, o := range plan.Orphans {
+		if !IsPanelFileName(o.Kernel, o.RelPath) {
+			return fail(fmt.Errorf("%s: %w", o.Key, ErrInvalidPanelName))
+		}
+		if err := os.Remove(o.AbsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fail(fmt.Errorf("%s: %w", o.Key, err))
+		}
+		out.OrphansRemoved = append(out.OrphansRemoved, filepath.Base(o.RelPath))
+	}
 	return out, nil
+}
+
+// checkSymlinks отказывает до первой записи, если файл панели — симлинк, цель
+// которого лежит за пределами корней ядер: AtomicReplaceFile следует симлинку и
+// перезаписал бы чужой файл (T-144-18). Симлинк внутри корней (config.yaml на
+// профиль) допустим.
+func (p *Pipeline) checkSymlinks(plan Plan) error {
+	var roots []string
+	for _, r := range []string{p.d.Roots.Xray, p.d.Roots.Mihomo} {
+		if r == "" {
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(r); err == nil {
+			r = resolved
+		}
+		roots = append(roots, filepath.Clean(r))
+	}
+	for _, fp := range plan.Files {
+		if fp.Action != ActionWrite {
+			continue
+		}
+		fi, err := os.Lstat(fp.AbsPath)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("%s: %w", fp.Key, err)
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		// Оборванный симлинк не разрешается: отказ так же, как и за корнем.
+		target, err := filepath.EvalSymlinks(fp.AbsPath)
+		if err != nil || !withinAnyRoot(target, roots) {
+			return fmt.Errorf("%s: %w", fp.Key, ErrSymlinkOutsideRoot)
+		}
+	}
+	return nil
+}
+
+func withinAnyRoot(path string, roots []string) bool {
+	for _, r := range roots {
+		if path == r || strings.HasPrefix(path, r+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // rollback возвращает все файлы набора в прежнее состояние (в обратном порядке:

@@ -242,8 +242,8 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		// Записи манифеста неустановленного ядра не участвуют в плане: иначе при
 		// пустой генерации его файлы ушли бы в удаление. Они остаются нетронутыми.
 		plan, err = ComputePlan(p.d.Roots, files, manifestOfInstalled(snap.Manifest, installed), only, p.d.ForeignOwned)
-		// Сирот убирает 144-06; здесь они в план не входят.
-		plan.Orphans = nil
+		// Каталог неустановленного ядра так же не трогается: его сирот не убираем.
+		plan.Orphans = orphansOfInstalled(plan.Orphans, installed)
 	}
 	if err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
@@ -287,6 +287,8 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		p.setStep(StepWrite, StepFailed, "", err.Error())
 		return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: out.RollbackErr == nil})
 	}
+	// Ротация копий — после успешного применения; сбой уборки применение не отменяет.
+	_ = PruneBackups(p.d.DataDir, BackupRetention)
 	p.setStep(StepWrite, StepDone, "", "")
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
 }
@@ -297,6 +299,17 @@ func manifestOfInstalled(m map[string]ManifestEntry, installed InstalledKernels)
 	for k, e := range m {
 		if installed.Has(e.Kernel) {
 			out[k] = e
+		}
+	}
+	return out
+}
+
+// orphansOfInstalled оставляет сирот только установленных ядер.
+func orphansOfInstalled(orphans []OrphanFile, installed InstalledKernels) []OrphanFile {
+	var out []OrphanFile
+	for _, o := range orphans {
+		if installed.Has(o.Kernel) {
+			out = append(out, o)
 		}
 	}
 	return out

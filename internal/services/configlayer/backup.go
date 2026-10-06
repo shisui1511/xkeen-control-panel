@@ -7,6 +7,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -194,5 +197,40 @@ func LoadBackupSet(dir string) (*BackupSet, error) {
 	return &BackupSet{Dir: dir, Meta: meta}, nil
 }
 
-// PruneBackups оставляет keep новейших наборов apply-*.
-func PruneBackups(dataDir string, keep int) error { return nil }
+// PruneBackups оставляет keep новейших наборов apply-* в
+// <dataDir>/backup/config-layer. Трогает только каталоги с префиксом apply-:
+// каталог state и чужие каталоги в backup/ остаются на месте (T-144-21).
+// Отсутствие каталога копий ошибкой не считается.
+func PruneBackups(dataDir string, keep int) error {
+	root := filepath.Join(dataDir, backupDirName, backupLayerName)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("configlayer: read backup dir: %w", err)
+	}
+	var sets []string
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), backupSetPrefix) {
+			sets = append(sets, e.Name())
+		}
+	}
+	// Имя — время в наносекундах: сначала сравниваются числа, потом строки.
+	sort.Slice(sets, func(i, j int) bool {
+		a, errA := strconv.ParseInt(strings.TrimPrefix(sets[i], backupSetPrefix), 10, 64)
+		b, errB := strconv.ParseInt(strings.TrimPrefix(sets[j], backupSetPrefix), 10, 64)
+		if errA == nil && errB == nil && a != b {
+			return a < b
+		}
+		return sets[i] < sets[j]
+	})
+	var errs []error
+	for len(sets) > keep {
+		if err := os.RemoveAll(filepath.Join(root, sets[0])); err != nil {
+			errs = append(errs, err)
+		}
+		sets = sets[1:]
+	}
+	return errors.Join(errs...)
+}

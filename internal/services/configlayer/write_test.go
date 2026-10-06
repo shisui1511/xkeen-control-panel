@@ -347,3 +347,23 @@ func TestWrite_NonPanelNameNeverDeleted(t *testing.T) {
 		t.Errorf("03_inbounds.json = %q, want нетронутый", got)
 	}
 }
+
+func TestApply_OrphanOfUninstalledKernelKept(t *testing.T) {
+	bins := fakeBins(t)
+	bins.Mihomo = "" // Mihomo не установлен
+	env := newTestPipeline(t, pipeOpts{Bins: bins, DevMode: true})
+	orphan := filepath.Join(env.Roots.Mihomo, "proxy_providers", "xcp-orphan.yaml")
+	writeTestFile(t, orphan, "proxies: []\n")
+	xrayOrphan := filepath.Join(env.Roots.Xray, "xcp-orphan.json")
+	writeTestFile(t, xrayOrphan, "{}")
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	if r := view.Result; r == nil || !r.OK {
+		t.Fatalf("Result = %+v", view.Result)
+	}
+	if got := readFileString(t, orphan); got != "proxies: []\n" {
+		t.Errorf("сирота неустановленного ядра тронута: %q", got)
+	}
+	requireAbsent(t, xrayOrphan)
+}

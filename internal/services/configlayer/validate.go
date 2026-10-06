@@ -279,6 +279,16 @@ func overlayPlan(tmp string, plan Plan, kernel string) error {
 			}
 		}
 	}
+	// Сироты после применения исчезнут: в копии их тоже нет.
+	for _, o := range plan.Orphans {
+		if o.Kernel != kernel {
+			continue
+		}
+		dst := filepath.Join(tmp, filepath.FromSlash(o.RelPath))
+		if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
 	return nil
 }
 
