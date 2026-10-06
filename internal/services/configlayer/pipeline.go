@@ -139,9 +139,11 @@ type PipelineDeps struct {
 // запись, перезапуск, коммит манифеста. Run вызывается под замками вызывающего
 // (TryBegin): applyMu, затем замок жизненного цикла.
 type Pipeline struct {
-	d    PipelineDeps
-	mu   sync.Mutex
-	view ApplyView
+	d PipelineDeps
+	// applyMu — «одно применение за раз»; берётся в TryBegin раньше замка жизненного цикла.
+	applyMu sync.Mutex
+	mu      sync.Mutex
+	view    ApplyView
 }
 
 // NewPipeline создаёт конвейер; WriteFile и Now имеют значения по умолчанию

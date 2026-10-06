@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -414,7 +415,49 @@ func (p *Pipeline) confirmRunning(ctx context.Context, kernel string, wantPID in
 // LifecyclePollInterval — как часто фоновый запуск пробует взять замок жизненного цикла.
 var LifecyclePollInterval = 250 * time.Millisecond
 
-// TryBegin — заготовка.
+// TryBegin берёт замки перед Run: сначала applyMu («одно применение за раз»), затем
+// замок жизненного цикла ядра. Порядок всегда applyMu → lifecycleMu; обратный
+// запрещён: обработчики HTTP, держащие lifecycleMu, applyMu не берут
+// (восстановление снимка — 144-10). Второе применение во время идущего получает
+// ErrApplyBusy. user=true (запуск по кнопке) при занятом замке ядра сразу получает
+// ErrKernelBusy; user=false (фоновый запуск) ждёт замок с паузой
+// LifecyclePollInterval и отменяется контекстом (тогда возвращается ctx.Err()).
+// release снимает замок ядра, затем applyMu; повторный вызов безопасен.
+//
+// Run вызывается только под этими замками и внутри использует ApplyLocked, а не
+// Apply: sync.Mutex не реентерабелен.
 func (p *Pipeline) TryBegin(ctx context.Context, user bool) (release func(), err error) {
-	return func() {}, nil
+	if !p.applyMu.TryLock() {
+		return nil, ErrApplyBusy
+	}
+	lifecycle := p.d.Lifecycle
+	if lifecycle != nil {
+		switch {
+		case user:
+			if !lifecycle.TryLock() {
+				p.applyMu.Unlock()
+				return nil, ErrKernelBusy
+			}
+		default:
+			tick := time.NewTicker(LifecyclePollInterval)
+			defer tick.Stop()
+			for !lifecycle.TryLock() {
+				select {
+				case <-ctx.Done():
+					p.applyMu.Unlock()
+					return nil, ctx.Err()
+				case <-tick.C:
+				}
+			}
+		}
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			if lifecycle != nil {
+				lifecycle.Unlock()
+			}
+			p.applyMu.Unlock()
+		})
+	}, nil
 }
