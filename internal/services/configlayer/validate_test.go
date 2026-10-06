@@ -76,7 +76,7 @@ func TestValidate_MihomoMirrorAndArgs(t *testing.T) {
 		"F proxy_providers/xcp-diag.yaml proxies:|  - name: x|",
 		"L proxy_providers/sub.yaml",
 		"L rules/r.yaml",
-		"M profiles",
+		"E profiles",
 	}
 	if len(lines) != len(want) {
 		t.Fatalf("снимок = %q", lines)

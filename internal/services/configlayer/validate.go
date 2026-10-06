@@ -109,10 +109,12 @@ func ValidateXray(ctx context.Context, tmpBase string, roots Roots, bin string, 
 
 // ValidateMihomo проверяет план ядром Mihomo: `<mihomo> -t -d <tmp> -f
 // <tmp>/config.yaml` по копии каталога Mihomo. config.yaml в копии — обычный
-// файл с содержимым разрешённого симлинка, остальные конфигурации верхнего
-// уровня копируются, geodata (*.dat, *.metadb, *.mmdb) и файлы подкаталогов
-// (кроме profiles и backups) подключаются симлинками. Нет config.yaml — проверка
-// пропущена (no_config).
+// файл с содержимым разрешённого симлинка (если симлинк указывает на файл,
+// который пишет план, берутся байты из плана: проверяется то, что ядро прочтёт
+// после записи), остальные конфигурации верхнего уровня копируются, geodata
+// (*.dat, *.metadb, *.mmdb) и файлы подкаталогов (кроме backups) подключаются
+// симлинками, а overlayPlan заменяет в копии файлы плана. Нет config.yaml —
+// проверка пропущена (no_config).
 func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string, plan Plan) ValidationResult {
 	if bin == "" {
 		return skippedResult(KernelMihomo, NoteKernelNotInstalled)
@@ -133,7 +135,7 @@ func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string
 	}
 	defer os.RemoveAll(tmp)
 
-	if err := mirrorMihomo(roots.Mihomo, cfg, tmp); err != nil {
+	if err := mirrorMihomo(roots.Mihomo, cfg, plannedContent(roots.Mihomo, cfg, plan), tmp); err != nil {
 		return notRun(KernelMihomo, err)
 	}
 	if err := overlayPlan(tmp, plan, KernelMihomo); err != nil {
@@ -326,11 +328,34 @@ func overlayPlan(tmp string, plan Plan, kernel string) error {
 	return nil
 }
 
-// mirrorMihomo строит зеркало каталога Mihomo (см. ValidateMihomo).
-func mirrorMihomo(root, resolvedConfig, tmp string) error {
-	data, err := os.ReadFile(resolvedConfig)
-	if err != nil {
-		return err
+// plannedContent возвращает байты из плана, если разрешённый путь config.yaml
+// указывает на файл Mihomo, который план записывает (config.yaml → profiles/…);
+// иначе nil. Без этого ядро проверяло бы старый профиль с диска (D-14).
+func plannedContent(root, resolvedConfig string, plan Plan) []byte {
+	for _, base := range []string{root, resolveDirSymlinks(root)} {
+		rel, err := filepath.Rel(filepath.Clean(base), resolvedConfig)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		rel = filepath.ToSlash(rel)
+		for _, fp := range plan.Files {
+			if fp.Kernel == KernelMihomo && fp.Action == ActionWrite && fp.RelPath == rel {
+				return fp.Content
+			}
+		}
+	}
+	return nil
+}
+
+// mirrorMihomo строит зеркало каталога Mihomo (см. ValidateMihomo). override
+// (не nil) — содержимое config.yaml вместо файла на диске.
+func mirrorMihomo(root, resolvedConfig string, override []byte, tmp string) error {
+	data := override
+	if data == nil {
+		var err error
+		if data, err = os.ReadFile(resolvedConfig); err != nil {
+			return err
+		}
 	}
 	if err := os.WriteFile(filepath.Join(tmp, "config.yaml"), data, 0o644); err != nil {
 		return err
@@ -350,7 +375,9 @@ func mirrorMihomo(root, resolvedConfig, tmp string) error {
 			continue // оборванный симлинк
 		}
 		if st.IsDir() {
-			if name == "profiles" || name == "backups" {
+			// Резервные копии проверке не нужны; профили подключаются как остальные
+			// подкаталоги, чтобы overlayPlan подменил в копии нужный файл.
+			if name == "backups" {
 				continue
 			}
 			if err := linkDir(src, filepath.Join(tmp, name), 0); err != nil {

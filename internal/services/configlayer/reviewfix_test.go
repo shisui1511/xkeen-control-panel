@@ -3,6 +3,7 @@ package configlayer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -192,4 +193,42 @@ func TestCR02_RolledBackAndRecovered(t *testing.T) {
 	if rv := restartOf(t, view, KernelXray); rv.Outcome != RestartOutcomeFailedRolledBack {
 		t.Errorf("RestartView = %+v, want failed_rolled_back", rv)
 	}
+}
+
+// CR-03: config.yaml указывает на профиль панели — проверяется новый профиль из
+// плана, а не старые байты с диска.
+func TestCR03_MihomoValidatesPlannedProfile(t *testing.T) {
+	root := t.TempDir()
+	const rel = "profiles/xcp-p.yaml"
+	writeTestFile(t, filepath.Join(root, rel), "mixed-port: 7890\n")
+	if err := os.Symlink(filepath.Join("profiles", "xcp-p.yaml"), filepath.Join(root, "config.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	bin := writeFakeKernelScript(t, binDir, "mihomo", strings.Join([]string{
+		`if grep -q BAD "$5"; then echo "bad profile"; exit 1; fi`,
+		`exit 0`,
+	}, "\n"))
+	profilePlan := func(content string) Plan {
+		return Plan{Files: []FilePlan{{
+			Key: ManifestKey(KernelMihomo, rel), Kernel: KernelMihomo, RelPath: rel,
+			Action: ActionWrite, Kind: KindMihomoProfile, Content: []byte(content),
+		}}}
+	}
+	dataDir := t.TempDir()
+	tmpBase := filepath.Join(dataDir, "tmp")
+
+	res := ValidateMihomo(t.Context(), tmpBase, Roots{Mihomo: root}, bin, profilePlan("BAD: yaml\n"))
+	if res.OK || res.Code != CodeValidationFailed || !strings.Contains(res.Message, "bad profile") {
+		t.Fatalf("битый новый профиль прошёл проверку: %+v", res)
+	}
+	if got := mustRead(t, filepath.Join(root, rel)); got != "mixed-port: 7890\n" {
+		t.Errorf("рабочий профиль изменён проверкой: %q", got)
+	}
+
+	res = ValidateMihomo(t.Context(), tmpBase, Roots{Mihomo: root}, bin, profilePlan("mixed-port: 7891\n"))
+	if !res.OK {
+		t.Fatalf("исправный новый профиль отклонён: %+v", res)
+	}
+	requireNoApplyDirs(t, dataDir)
 }
