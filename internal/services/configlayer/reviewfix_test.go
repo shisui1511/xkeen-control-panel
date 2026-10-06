@@ -780,3 +780,19 @@ func TestWR10_DraftEditDuringRestoreDoesNotOverwriteRestoredState(t *testing.T) 
 		t.Error("восстановленный файл состояния затёрт")
 	}
 }
+
+// WR-11: ожидание API Mihomo после рестарта на MIPS длиннее, чем на остальных
+// платформах: иначе медленный старт приводит к ложному откату.
+func TestWR11_RestartExpectTimeoutPerPlatform(t *testing.T) {
+	if got := defaultRestartExpectTimeout("amd64"); got != 15*time.Second {
+		t.Errorf("amd64 = %v, want 15s", got)
+	}
+	if got := defaultRestartExpectTimeout("arm64"); got != 15*time.Second {
+		t.Errorf("arm64 = %v, want 15s", got)
+	}
+	for _, arch := range []string{"mips", "mipsle"} {
+		if got := defaultRestartExpectTimeout(arch); got != 60*time.Second {
+			t.Errorf("%s = %v, want 60s", arch, got)
+		}
+	}
+}

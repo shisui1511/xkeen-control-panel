@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -38,9 +39,23 @@ var (
 	RestartPollInterval   = 500 * time.Millisecond
 	RestartStableWindow   = 5 * time.Second
 	// RestartExpectTimeout — сколько после рестарта Mihomo ждать готовности API и
-	// совпадения числа узлов и правил провайдеров с ожидаемым.
-	RestartExpectTimeout = 15 * time.Second
+	// совпадения числа узлов и правил провайдеров с ожидаемым. Отсчёт идёт от
+	// подтверждения процесса ядра, а не от начала применения.
+	RestartExpectTimeout = defaultRestartExpectTimeout(runtime.GOARCH)
 )
+
+// defaultRestartExpectTimeout — время ожидания API и провайдеров Mihomo после
+// рестарта для платформы. На MIPS (mips, mipsle) Mihomo с geodata и rule-провайдерами
+// поднимает Clash API заметно дольше, поэтому там 60 с, иначе 15 с (допущение не
+// проверено на железе, как и defaultValidateTimeout: значение подкручивается через
+// RestartExpectTimeout).
+func defaultRestartExpectTimeout(goarch string) time.Duration {
+	switch goarch {
+	case "mips", "mipsle":
+		return 60 * time.Second
+	}
+	return 15 * time.Second
+}
 
 // Ошибки TryBegin.
 var (
