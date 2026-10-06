@@ -13,9 +13,10 @@
 
 <!--
   Каркас раздела «Конфигурация» (D-02): вертикальный стек независимых секций с
-  устойчивыми data-testid. Порядок: уведомления, DraftBar, расхождения
-  (config-drift), ход применения (config-progress), файлы (config-files),
-  ядра (config-kernels), диагностика (config-diag). Фаза 149 оборачивает секции
+  устойчивыми data-testid. Порядок: уведомления (config-notices), DraftBar
+  (config-draftbar), расхождения (config-drift) и файлы (config-files) внутри
+  ManagedFiles, ход применения (config-progress, план 144-13), ядра
+  (config-kernels), диагностика (config-diag). Фаза 149 оборачивает секции
   во вкладки, не переписывая их.
 -->
 <div class="container config-page" data-testid="config-page">
