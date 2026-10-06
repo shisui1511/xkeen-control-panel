@@ -12,9 +12,12 @@
     fetchDevMode,
     setDevMode,
     showConfirm,
+    configLayerEnabled,
+    setConfigLayerEnabled,
     type ThemeDensity,
     applyDensity
   } from './stores';
+  import { applyRunning } from './lib/configLayer';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { notifyApplyOutcome, type ApplyResult } from './lib/serviceApply';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
@@ -65,6 +68,40 @@
   }
 
   let activeTab = $state<SettingsTab>(tabFromHash());
+
+  // Переключатель слоя «Конфигурация» (D-01, D-04): на время запроса заблокирован
+  let configLayerPending = $state(false);
+
+  async function onToggleConfigLayer(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const enable = input.checked;
+    if (!enable) {
+      const confirmed = await showConfirm({
+        variant: 'warning',
+        title: $t('settings.config_layer_off_title'),
+        message: $t('settings.config_layer_off_message'),
+        consequence: $t('settings.config_layer_off_consequence'),
+        confirmLabel: $t('settings.config_layer_off_ok')
+      });
+      if (!confirmed) {
+        input.checked = true;
+        return;
+      }
+    }
+    configLayerPending = true;
+    try {
+      await setConfigLayerEnabled(enable);
+      showToast(
+        'success',
+        $t(enable ? 'settings.config_layer_on_toast' : 'settings.config_layer_off_toast')
+      );
+    } catch (err) {
+      input.checked = !enable;
+      showToast('error', err instanceof Error ? err.message : String(err));
+    } finally {
+      configLayerPending = false;
+    }
+  }
 
   const settingsTabItems = $derived<TabItem[]>([
     { value: 'general', label: $t('settings.tab_general') },
@@ -1042,6 +1079,30 @@
             />
             <span class="toggle-slider"></span>
           </label>
+        </div>
+        <div class="field-row" data-testid="config-layer-row">
+          <div>
+            <span class="field-row-name">{$t('settings.config_layer')}</span>
+            <div class="field-row-desc">{$t('settings.config_layer_desc')}</div>
+          </div>
+          <div class="ctrl">
+            {#if configLayerPending}
+              <span class="spinner" aria-hidden="true"></span>
+            {/if}
+            <label
+              class="toggle-switch"
+              title={$applyRunning ? $t('settings.config_layer_busy_hint') : undefined}
+            >
+              <input
+                type="checkbox"
+                aria-label={$t('settings.config_layer')}
+                checked={$configLayerEnabled}
+                disabled={configLayerPending || $applyRunning}
+                onchange={onToggleConfigLayer}
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
         </div>
       </div>
     </div>

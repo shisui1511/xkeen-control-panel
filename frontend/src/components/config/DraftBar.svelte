@@ -172,6 +172,8 @@
   @media (max-width: 768px) {
     .draft-bar {
       flex-wrap: wrap;
+      /* Липкая мобильная шапка (.mobile-header, 69 px + safe-area) иначе перекрыла бы полосу */
+      top: calc(69px + env(safe-area-inset-top));
     }
 
     .draft-bar-status {
