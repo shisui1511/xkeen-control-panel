@@ -126,11 +126,9 @@ func New(opts Options) (*Layer, error) {
 		opts.DebounceDelay = defaultDebounceDelay
 	}
 	broker := NewBroker()
-	store, err := OpenStore(opts.DataDir, broker)
-	if err != nil {
-		broker.Close()
-		return nil, err
-	}
+	// Файл состояния читается лениво, при первом обращении включённого слоя:
+	// выключенный слой ничего не читает и не пишет (FND-01).
+	store := NewStore(opts.DataDir, broker)
 	// Генератор диагностики зарегистрирован всегда, но вне dev_mode файлов не
 	// выдаёт (D-19): переключение dev_mode не требует перезапуска.
 	registry := NewRegistry()
@@ -215,12 +213,15 @@ func (l *Layer) bootstrap() {
 	}
 }
 
-// Start запускает слой. Включённый слой сначала откатывает прерванную запись и
-// убирает хвосты, затем берёт базовую сверку; выключенный ничего не читает и не
-// пишет. Повторный вызов безопасен.
+// Start запускает слой. Включённый слой сначала загружает состояние, откатывает
+// прерванную запись и убирает хвосты, затем берёт базовую сверку; выключенный
+// ничего не читает и не пишет. Повторный вызов безопасен.
 func (l *Layer) Start() {
 	l.startOnce.Do(func() {
 		if l.Enabled() {
+			if err := l.store.Load(); err != nil {
+				log.Printf("[configlayer] состояние слоя не загружено: %v", err)
+			}
 			l.bootstrap()
 			l.checkNow(false)
 		}
@@ -366,9 +367,13 @@ func (l *Layer) evaluate(st State) FilesEvent {
 
 // Snapshot — состояние слоя целиком. Выключенный слой диск и ядра не опрашивает.
 func (l *Layer) Snapshot() SnapshotView {
-	st := l.store.Snapshot()
+	enabled := l.Enabled()
+	st := emptyState()
+	if enabled {
+		st = l.store.Snapshot()
+	}
 	sv := SnapshotView{
-		Enabled:       l.Enabled(),
+		Enabled:       enabled,
 		DevMode:       l.devMode(),
 		DraftRevision: st.DraftRevision,
 		DraftChanges:  draftChanges(st),
@@ -730,6 +735,11 @@ func resolveDirSymlinks(p string) string {
 // цикла, а порядок замков applyMu, затем lifecycleMu нарушать нельзя (иначе
 // взаимная блокировка с запущенным применением).
 func (l *Layer) ReloadFromDisk() error {
+	if !l.Enabled() {
+		// Выключенный слой диск не читает и не пишет: только забывает кэш в памяти.
+		l.store.Invalidate()
+		return nil
+	}
 	if err := l.store.Reload(); err != nil {
 		return err
 	}

@@ -26,6 +26,8 @@ type layerOpts struct {
 	NoStart bool
 	// Restart подменяет рестарт ядра (nil — все запущенные ядра получают новый PID).
 	Restart func(e *layerEnv) (string, error)
+	// DataDir — готовый каталог данных (пусто — новый временный).
+	DataDir string
 }
 
 // layerEnv — слой на фейковых ядрах и временных каталогах.
@@ -70,6 +72,9 @@ func newTestLayer(t *testing.T, lo layerOpts) *layerEnv {
 		Mihomo:    &fakeMihomo{},
 		Lifecycle: &sync.Mutex{},
 		bins:      lo.Bins,
+	}
+	if lo.DataDir != "" {
+		env.DataDir = lo.DataDir
 	}
 	env.enabled.Store(lo.Enabled)
 	env.devMode.Store(lo.DevMode)

@@ -663,3 +663,64 @@ func TestWR08_SymlinkedPanelDirOutsideRootRejected(t *testing.T) {
 		t.Errorf("запись ушла за пределы корней: %v", entries)
 	}
 }
+
+// WR-09: выключенный слой ничего не читает и не пишет: файл состояния не создаётся
+// ни при New, ни при Start, ни при Snapshot.
+func TestWR09_DisabledLayerWritesNothing(t *testing.T) {
+	env := newTestLayer(t, layerOpts{Enabled: false})
+
+	env.L.Snapshot()
+	env.L.RequestCheck()
+	if err := env.L.ReloadFromDisk(); err != nil {
+		t.Fatalf("ReloadFromDisk: %v", err)
+	}
+
+	entries, err := os.ReadDir(env.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("выключенный слой создал файлы в каталоге данных: %v", entries)
+	}
+}
+
+// WR-09: нечитаемый файл состояния выключенный слой не сбрасывает и не копирует.
+func TestWR09_DisabledReloadKeepsCorruptState(t *testing.T) {
+	env := newTestLayer(t, layerOpts{Enabled: false})
+	statePath := filepath.Join(env.DataDir, StateFileName)
+	mustWriteFile(t, statePath, "{not json")
+
+	if err := env.L.ReloadFromDisk(); err != nil {
+		t.Fatalf("ReloadFromDisk: %v", err)
+	}
+
+	if got := mustReadFile(t, statePath); got != "{not json" {
+		t.Errorf("файл состояния переписан выключенным слоем: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(env.DataDir, "backup")); err == nil {
+		t.Error("выключенный слой создал каталог копий")
+	}
+}
+
+// WR-09: флаг включили без перезапуска — состояние загружается лениво и
+// сохранённые данные не теряются.
+func TestWR09_EnabledLaterLoadsExistingState(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := OpenStore(dataDir, NewBroker())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.EditDraft(0, "note", []byte(`{"a":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	env := newTestLayer(t, layerOpts{Enabled: false, DataDir: dataDir})
+
+	env.enabled.Store(true)
+
+	if got := env.L.Snapshot().DraftChanges; got != 1 {
+		t.Errorf("DraftChanges = %d, want 1: состояние не подхвачено после включения флага", got)
+	}
+	if _, err := env.L.EditDraft(1, "note", []byte(`{"a":2}`)); err != nil {
+		t.Errorf("правка черновика на загруженной ревизии: %v", err)
+	}
+}

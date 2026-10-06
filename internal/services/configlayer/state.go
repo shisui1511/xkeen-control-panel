@@ -31,10 +31,16 @@ var sectionNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 //
 // Все мутации идут по схеме «копия → запись на диск → подмена в памяти», поэтому
 // ошибка записи не оставляет в памяти изменений, которых нет на диске.
+//
+// Файл читается (или создаётся) лениво, при первом обращении включённого слоя
+// (Load): выключенный слой ничего не читает и не пишет (FND-01). Пока состояние
+// не загружено, мутации отказывают ошибкой загрузки, а чтение отдаёт пустое
+// состояние, поэтому незагруженное состояние не затирает файл.
 type Store struct {
 	mu     sync.RWMutex
 	path   string
 	st     State
+	loaded bool
 	broker *Broker
 	// now — источник времени для имён копий состояния; в тестах подменяется.
 	now func() time.Time
@@ -43,20 +49,54 @@ type Store struct {
 	writeFile func(path string, data []byte, perm os.FileMode) error
 }
 
-// OpenStore открывает (или создаёт) файл состояния в dataDir. broker может
-// быть nil — тогда события не публикуются.
-func OpenStore(dataDir string, broker *Broker) (*Store, error) {
-	s := &Store{
+// NewStore создаёт хранилище, не обращаясь к диску: файл состояния читается или
+// создаётся при первом Load (или первом чтении и мутации). broker может быть nil.
+func NewStore(dataDir string, broker *Broker) *Store {
+	return &Store{
 		path:   filepath.Join(dataDir, StateFileName),
 		broker: broker,
 		now:    time.Now,
 	}
-	st, err := s.readFile()
-	if err != nil {
+}
+
+// OpenStore открывает (или создаёт) файл состояния в dataDir сразу. broker может
+// быть nil — тогда события не публикуются.
+func OpenStore(dataDir string, broker *Broker) (*Store, error) {
+	s := NewStore(dataDir, broker)
+	if err := s.Load(); err != nil {
 		return nil, err
 	}
-	s.st = st
 	return s, nil
+}
+
+// Load загружает состояние с диска, если оно ещё не загружено (читает файл или
+// создаёт пустой). Повторный вызов после успеха ничего не делает.
+func (s *Store) Load() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadLocked()
+}
+
+// loadLocked — Load под замком записи.
+func (s *Store) loadLocked() error {
+	if s.loaded {
+		return nil
+	}
+	st, err := s.readFile()
+	if err != nil {
+		return err
+	}
+	s.st, s.loaded = st, true
+	return nil
+}
+
+// Invalidate сбрасывает состояние в памяти, не трогая диск: следующее обращение
+// включённого слоя прочитает файл заново. Нужен выключенному слою после
+// восстановления снимка панели.
+func (s *Store) Invalidate() {
+	s.mu.Lock()
+	s.st, s.loaded = State{}, false
+	s.mu.Unlock()
 }
 
 // readFile читает файл состояния; если файла нет — создаёт пустое состояние.
@@ -148,23 +188,44 @@ func (s *Store) persist(st State) error {
 
 // Snapshot возвращает глубокую копию текущего состояния.
 func (s *Store) Snapshot() State {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.st.clone()
+	var out State
+	s.read(func(st State) { out = st.clone() })
+	return out
 }
 
 // DraftRevision возвращает текущую ревизию черновика.
 func (s *Store) DraftRevision() int64 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.st.DraftRevision
+	var rev int64
+	s.read(func(st State) { rev = st.DraftRevision })
+	return rev
 }
 
 // DraftChanges возвращает число неприменённых изменений черновика.
 func (s *Store) DraftChanges() int {
+	var n int
+	s.read(func(st State) { n = draftChanges(st) })
+	return n
+}
+
+// read выполняет fn над состоянием под замком, загрузив его при необходимости.
+// Если загрузить не удалось, fn получает пустое состояние (мутации в этом случае
+// отказывают ошибкой загрузки и файл не затирают).
+func (s *Store) read(fn func(st State)) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return draftChanges(s.st)
+	if s.loaded {
+		fn(s.st)
+		s.mu.RUnlock()
+		return
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.loadLocked(); err != nil {
+		fn(emptyState())
+		return
+	}
+	fn(s.st)
 }
 
 // draftChanges считает секции, чей черновик отличается от применённого
@@ -199,6 +260,10 @@ func (s *Store) EditDraft(baseRev int64, section string, value json.RawMessage) 
 	}
 
 	s.mu.Lock()
+	if err := s.loadLocked(); err != nil {
+		s.mu.Unlock()
+		return DraftEvent{}, err
+	}
 	if baseRev != s.st.DraftRevision {
 		s.mu.Unlock()
 		return DraftEvent{}, ErrDraftConflict
@@ -233,6 +298,10 @@ func (s *Store) EditDraft(baseRev int64, section string, value json.RawMessage) 
 // совпадает с текущей ревизией. Ревизия растёт, публикуется событие draft.
 func (s *Store) ResetDraft(baseRev int64) (DraftEvent, error) {
 	s.mu.Lock()
+	if err := s.loadLocked(); err != nil {
+		s.mu.Unlock()
+		return DraftEvent{}, err
+	}
 	if baseRev != s.st.DraftRevision {
 		s.mu.Unlock()
 		return DraftEvent{}, ErrDraftConflict
@@ -260,6 +329,9 @@ func (s *Store) ResetDraft(baseRev int64) (DraftEvent, error) {
 func (s *Store) Update(fn func(st *State) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.loadLocked(); err != nil {
+		return err
+	}
 
 	next := s.st.clone()
 	if err := fn(&next); err != nil {
@@ -278,6 +350,9 @@ func (s *Store) Update(fn func(st *State) error) error {
 func (s *Store) DismissNotice(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.loadLocked(); err != nil {
+		return err
+	}
 
 	next := s.st.clone()
 	switch id {
@@ -310,6 +385,6 @@ func (s *Store) Reload() error {
 	if err != nil {
 		return err
 	}
-	s.st = st
+	s.st, s.loaded = st, true
 	return nil
 }
