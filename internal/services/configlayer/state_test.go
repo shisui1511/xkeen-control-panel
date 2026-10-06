@@ -12,6 +12,30 @@ import (
 	"time"
 )
 
+// OpenStore открывает (или создаёт) файл состояния в dataDir сразу: в продакшене
+// файл читается лениво (NewStore + Load), а тесты читают его сразу.
+func OpenStore(dataDir string, broker *Broker) (*Store, error) {
+	s := NewStore(dataDir, broker)
+	if err := s.Load(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// Reload перечитывает файл состояния по тем же правилам, что и Load. Если чтение
+// не удалось, состояние в памяти не меняется.
+func (s *Store) Reload() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	st, err := s.readFile()
+	if err != nil {
+		return err
+	}
+	s.st, s.loaded = st, true
+	return nil
+}
+
 func TestStore_DraftPersists(t *testing.T) {
 	dir := t.TempDir()
 

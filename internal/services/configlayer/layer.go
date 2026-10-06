@@ -770,8 +770,8 @@ func resolveDirSymlinks(p string) string {
 // После fn состояние перечитывается, рассылается snapshot и запрашивается сверка
 // дрейфа. Выключенный слой диск не читает: только забывает кэш в памяти.
 //
-// Как и ReloadFromDisk, applyMu не берёт: вызывающий уже держит замок жизненного
-// цикла (порядок applyMu → lifecycleMu нарушать нельзя).
+// applyMu не берётся: вызывающий уже держит замок жизненного цикла (порядок
+// applyMu → lifecycleMu нарушать нельзя).
 func (l *Layer) RestoreExternally(fn func() error) error {
 	if !l.Enabled() {
 		err := fn()
@@ -785,24 +785,4 @@ func (l *Layer) RestoreExternally(fn func() error) error {
 	l.broker.Publish(Event{Type: EventSnapshot, Data: l.Snapshot()})
 	l.RequestCheck()
 	return fnErr
-}
-
-// ReloadFromDisk перечитывает файл состояния после восстановления снимка панели
-// и рассылает событие snapshot.
-//
-// applyMu не берётся: обработчик восстановления уже держит замок жизненного
-// цикла, а порядок замков applyMu, затем lifecycleMu нарушать нельзя (иначе
-// взаимная блокировка с запущенным применением).
-func (l *Layer) ReloadFromDisk() error {
-	if !l.Enabled() {
-		// Выключенный слой диск не читает и не пишет: только забывает кэш в памяти.
-		l.store.Invalidate()
-		return nil
-	}
-	if err := l.store.Reload(); err != nil {
-		return err
-	}
-	l.broker.Publish(Event{Type: EventSnapshot, Data: l.Snapshot()})
-	l.RequestCheck()
-	return nil
 }

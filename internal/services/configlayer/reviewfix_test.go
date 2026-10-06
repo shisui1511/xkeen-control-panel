@@ -684,8 +684,8 @@ func TestWR09_DisabledLayerWritesNothing(t *testing.T) {
 
 	env.L.Snapshot()
 	env.L.RequestCheck()
-	if err := env.L.ReloadFromDisk(); err != nil {
-		t.Fatalf("ReloadFromDisk: %v", err)
+	if err := env.L.RestoreExternally(func() error { return nil }); err != nil {
+		t.Fatalf("RestoreExternally: %v", err)
 	}
 
 	entries, err := os.ReadDir(env.DataDir)
@@ -703,8 +703,8 @@ func TestWR09_DisabledReloadKeepsCorruptState(t *testing.T) {
 	statePath := filepath.Join(env.DataDir, StateFileName)
 	mustWriteFile(t, statePath, "{not json")
 
-	if err := env.L.ReloadFromDisk(); err != nil {
-		t.Fatalf("ReloadFromDisk: %v", err)
+	if err := env.L.RestoreExternally(func() error { return nil }); err != nil {
+		t.Fatalf("RestoreExternally: %v", err)
 	}
 
 	if got := mustReadFile(t, statePath); got != "{not json" {

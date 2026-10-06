@@ -59,16 +59,6 @@ func NewStore(dataDir string, broker *Broker) *Store {
 	}
 }
 
-// OpenStore открывает (или создаёт) файл состояния в dataDir сразу. broker может
-// быть nil — тогда события не публикуются.
-func OpenStore(dataDir string, broker *Broker) (*Store, error) {
-	s := NewStore(dataDir, broker)
-	if err := s.Load(); err != nil {
-		return nil, err
-	}
-	return s, nil
-}
-
 // Load загружает состояние с диска, если оно ещё не загружено (читает файл или
 // создаёт пустой). Повторный вызов после успеха ничего не делает.
 func (s *Store) Load() error {
@@ -368,24 +358,6 @@ func (s *Store) DismissNotice(id string) error {
 		return err
 	}
 	s.st = next
-	return nil
-}
-
-// Reload перечитывает файл состояния по тем же правилам, что и OpenStore.
-//
-// Порядок замков: Reload берёт только замок Store и никогда не берёт замки
-// конвейера применения. Его вызывает обработчик восстановления снимка, который
-// уже держит замок жизненного цикла ядер, поэтому обратный порядок невозможен.
-// Если чтение не удалось, состояние в памяти не меняется.
-func (s *Store) Reload() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	st, err := s.readFile()
-	if err != nil {
-		return err
-	}
-	s.st, s.loaded = st, true
 	return nil
 }
 
