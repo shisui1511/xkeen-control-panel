@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
+	"github.com/shisui1511/xkeen-control-panel/internal/i18n"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // fakeXKeenBinary создаёт скрипт вместо xkeen: печатает ok и завершается успешно.
@@ -131,4 +135,196 @@ func TestHook_SnapshotRestoreReloadsState(t *testing.T) {
 		t.Fatal("замок жизненного цикла остался занятым")
 	}
 	lock.Unlock()
+}
+
+// --- задача 2: защита файлов панели в Редакторе, установка ядра ---
+
+// editorHarness подключает к стенду слоя сервис конфигов и валидатор путей:
+// корни Xray, Mihomo и каталог данных (для симлинка) разрешены.
+func editorHarness(t *testing.T, ho layerHarnessOpts) *layerHarness {
+	t.Helper()
+	h := newLayerHarness(t, ho)
+	allowed := []string{h.roots.Xray, h.roots.Mihomo, h.dataDir}
+	h.cfg.MihomoConfigDir = h.roots.Mihomo
+	h.cfg.AllowedRoots = allowed
+	h.api.configSvc = services.NewConfigService(h.roots.Xray, allowed)
+	h.api.pathVal = utils.NewPathValidator(allowed)
+	return h
+}
+
+// editorCall вызывает обработчик Редактора напрямую.
+func editorCall(t *testing.T, api *API, handler http.HandlerFunc, target, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
+	req.Header.Set("Accept-Language", "ru")
+	rr := httptest.NewRecorder()
+	i18n.Middleware(handler).ServeHTTP(rr, req)
+	return rr
+}
+
+// managedDiagPath применяет диагностический файл и возвращает его абсолютный путь.
+func managedDiagPath(t *testing.T, h *layerHarness) string {
+	t.Helper()
+	c := h.subscribe(t)
+	c.wait(t, "snapshot", 5*time.Second, nil)
+	h.applyDiagAndWait(t, c)
+	path := filepath.Join(h.roots.Xray, configlayer.DiagXrayRel)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("файл панели не записан: %v", err)
+	}
+	return path
+}
+
+func assertFileManaged409(t *testing.T, rr *httptest.ResponseRecorder, what string) {
+	t.Helper()
+	var resp APIResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if rr.Code != http.StatusConflict || resp.Code != "file_managed" {
+		t.Fatalf("%s: статус %d code=%q тело %s, нужен 409 file_managed", what, rr.Code, resp.Code, rr.Body.String())
+	}
+	if resp.Error == "" || strings.HasPrefix(resp.Error, "configlayer.") {
+		t.Errorf("%s: сообщение не переведено: %q", what, resp.Error)
+	}
+}
+
+func TestConfigSave_ManagedFileRejected(t *testing.T) {
+	t.Run("managed_rejected_then_released", func(t *testing.T) {
+		h := editorHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true})
+		path := managedDiagPath(t, h)
+		before, _ := os.ReadFile(path)
+
+		rr := editorCall(t, h.api, h.api.ConfigSave, "/api/config/save?path="+path, `{"x":1}`)
+		assertFileManaged409(t, rr, "ConfigSave")
+		if after, _ := os.ReadFile(path); string(after) != string(before) {
+			t.Errorf("содержимое managed-файла изменилось: %q -> %q", before, after)
+		}
+
+		rr = editorCall(t, h.api, h.api.ConfigDelete, "/api/config/delete?path="+path, "")
+		assertFileManaged409(t, rr, "ConfigDelete")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("managed-файл удалён: %v", err)
+		}
+
+		other := filepath.Join(h.roots.Xray, "01_log.json")
+		rr = editorCall(t, h.api, h.api.ConfigRename, "/api/config/rename?old="+path+"&new="+filepath.Join(h.roots.Xray, "renamed.json"), "")
+		assertFileManaged409(t, rr, "ConfigRename старый путь managed")
+		rr = editorCall(t, h.api, h.api.ConfigRename, "/api/config/rename?old="+other+"&new="+path, "")
+		assertFileManaged409(t, rr, "ConfigRename новый путь managed")
+		if _, err := os.Stat(other); err != nil {
+			t.Errorf("чужой файл переименован вопреки отказу: %v", err)
+		}
+
+		// Чужой (не управляемый слоем) файл правится как раньше.
+		rr = editorCall(t, h.api, h.api.ConfigSave, "/api/config/save?path="+other, `{"log":{"loglevel":"warning"}}`)
+		if rr.Code != http.StatusOK {
+			t.Errorf("сохранение чужого файла: %d %s", rr.Code, rr.Body.String())
+		}
+
+		// «Отпустить управление»: файл становится ручным и правится.
+		key := h.layerFileKey(t)
+		if env := h.do(t, http.MethodPost, "/api/configlayer/files/release", `{"key":`+jsonString(key)+`}`); env.Status != http.StatusOK {
+			t.Fatalf("release: %d %s", env.Status, env.Raw)
+		}
+		rr = editorCall(t, h.api, h.api.ConfigSave, "/api/config/save?path="+path, `{"x":1}`)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("сохранение отпущенного файла: %d %s", rr.Code, rr.Body.String())
+		}
+		if after, _ := os.ReadFile(path); string(after) != `{"x":1}` {
+			t.Errorf("отпущенный файл не записан: %q", after)
+		}
+	})
+
+	t.Run("flag_off_unchanged", func(t *testing.T) {
+		h := editorHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true})
+		path := managedDiagPath(t, h)
+		h.cfg.Lock()
+		h.cfg.ConfigLayer = false
+		h.cfg.Unlock()
+
+		rr := editorCall(t, h.api, h.api.ConfigSave, "/api/config/save?path="+path, `{"x":2}`)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("сохранение при выключенном флаге: %d %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("no_layer_unchanged", func(t *testing.T) {
+		h := editorHarness(t, layerHarnessOpts{Enabled: true, NoLayer: true})
+		path := filepath.Join(h.roots.Xray, "01_log.json")
+		rr := editorCall(t, h.api, h.api.ConfigSave, "/api/config/save?path="+path, `{"log":{}}`)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("сохранение без слоя: %d %s", rr.Code, rr.Body.String())
+		}
+	})
+}
+
+// Путь к managed-файлу через симлинк-каталог на корень Xray распознаётся (T-144-39).
+func TestConfigSave_ManagedViaSymlinkDir(t *testing.T) {
+	h := editorHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true})
+	path := managedDiagPath(t, h)
+	before, _ := os.ReadFile(path)
+
+	link := filepath.Join(h.dataDir, "xray-link")
+	if err := os.Symlink(h.roots.Xray, link); err != nil {
+		t.Skipf("симлинки недоступны: %v", err)
+	}
+	viaLink := filepath.Join(link, configlayer.DiagXrayRel)
+
+	rr := editorCall(t, h.api, h.api.ConfigSave, "/api/config/save?path="+viaLink, `{"x":1}`)
+	assertFileManaged409(t, rr, "ConfigSave через симлинк")
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Errorf("содержимое managed-файла изменилось через симлинк: %q", after)
+	}
+}
+
+// После успешной установки ядра слой в фоне собирает для него файлы (D-18);
+// после неудачной установки сборки нет.
+func TestKernelInstall_TriggersLayerBuild(t *testing.T) {
+	t.Run("success_starts_build", func(t *testing.T) {
+		h := newLayerHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true})
+		c := h.subscribe(t)
+		c.wait(t, "snapshot", 5*time.Second, nil)
+
+		h.api.onKernelInstallDone("xray", nil)
+		c.wait(t, "apply_done", 10*time.Second, func(d string) bool { return strings.Contains(d, `"trigger":"kernel_installed"`) })
+	})
+
+	t.Run("failure_no_build", func(t *testing.T) {
+		h := newLayerHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true})
+		c := h.subscribe(t)
+		c.wait(t, "snapshot", 5*time.Second, nil)
+
+		h.api.onKernelInstallDone("xray", errors.New("download failed"))
+		select {
+		case f := <-c.frames:
+			if f.Event == "apply_done" || f.Event == "apply_step" {
+				t.Fatalf("после неудачной установки запущена сборка: %s %s", f.Event, f.Data)
+			}
+		case <-time.After(700 * time.Millisecond):
+		}
+	})
+
+	t.Run("no_layer_no_panic", func(t *testing.T) {
+		api := &API{cfg: &config.Config{}}
+		api.onKernelInstallDone("xray", nil)
+	})
+
+	t.Run("handler_failure_no_build", func(t *testing.T) {
+		h := newLayerHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true})
+		kapi, _ := newKernelTestAPI(t)
+		h.api.kernelSvc = kapi.kernelSvc // загрузка в нём всегда падает
+		c := h.subscribe(t)
+		c.wait(t, "snapshot", 5*time.Second, nil)
+
+		if rr := postKernelInstall(h.api, "xray"); rr.Code != http.StatusOK {
+			t.Fatalf("KernelInstall: %d %s", rr.Code, rr.Body.String())
+		}
+		waitKernelFailed(t, h.api, "xray")
+		select {
+		case f := <-c.frames:
+			if f.Event == "apply_done" {
+				t.Fatalf("неудачная установка запустила сборку: %s", f.Data)
+			}
+		case <-time.After(500 * time.Millisecond):
+		}
+	})
 }

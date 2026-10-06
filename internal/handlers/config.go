@@ -855,3 +855,8 @@ func (a *API) ConfigSmartMerge(w http.ResponseWriter, r *http.Request) {
 		"warnings": mapIssues(preflightRes.Warnings),
 	})
 }
+
+// rejectManagedPath отвечает 409 file_managed, если файл управляется слоем.
+func (a *API) rejectManagedPath(w http.ResponseWriter, r *http.Request, cleanPath string) bool {
+	return false
+}

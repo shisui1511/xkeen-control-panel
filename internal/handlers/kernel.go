@@ -318,3 +318,6 @@ func (a *API) KernelUpload(w http.ResponseWriter, r *http.Request) {
 	kUpdated := a.kernelSvc.Get(name)
 	JSONSuccess(w, kUpdated)
 }
+
+// onKernelInstallDone — действия панели после завершения установки ядра.
+func (a *API) onKernelInstallDone(name string, err error) {}

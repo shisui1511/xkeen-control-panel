@@ -888,3 +888,7 @@ const warningSelectedNodeLost = "selected_node_lost"
 // пропал из подписки, а рабочих узлов (не заглушка, разрешённый Xray
 // протокол), чтобы его заменить, не осталось (IN-01 из код-ревью фазы 133).
 const warningSelectedNodeGone = "selected_node_gone"
+
+// OwnedFileNames — базовые имена файлов каталога Xray, которыми владеют
+// подписки.
+func (s *SubscriptionService) OwnedFileNames() map[string]bool { return nil }
