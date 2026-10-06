@@ -72,7 +72,7 @@ type StepView struct {
 	Message  string    `json:"message,omitempty"`
 }
 
-// RestartView — итог перезапуска ядра (заполняет план 144-07).
+// RestartView — итог шага «Перезапуск» по одному ядру.
 type RestartView struct {
 	Kernel   string `json:"kernel"`
 	Outcome  string `json:"outcome"`
@@ -136,8 +136,8 @@ type PipelineDeps struct {
 }
 
 // Pipeline — конвейер «Применить»: сборка, проверка Xray, проверка Mihomo,
-// запись, коммит манифеста. Блокировок «одно применение за раз» и замка
-// жизненного цикла здесь нет: Run вызывается под замками вызывающего (144-07).
+// запись, перезапуск, коммит манифеста. Run вызывается под замками вызывающего
+// (TryBegin): applyMu, затем замок жизненного цикла.
 type Pipeline struct {
 	d    PipelineDeps
 	mu   sync.Mutex
@@ -186,6 +186,7 @@ func (p *Pipeline) begin(req ApplyRequest) {
 			{ID: StepValidateXray, State: StepPending},
 			{ID: StepValidateMihomo, State: StepPending},
 			{ID: StepWrite, State: StepPending},
+			{ID: StepRestart, State: StepPending},
 		},
 	}
 	p.mu.Unlock()
@@ -224,7 +225,7 @@ func (p *Pipeline) binaries() Binaries {
 }
 
 // Run выполняет один запуск: сборка, проверка Xray, проверка Mihomo (обе до
-// первой записи: D-14), запись, коммит манифеста и применённого состояния.
+// первой записи: D-14), запись, перезапуск ядер, коммит манифеста и применённого состояния.
 // Файлы пишутся только если оба ядра приняли конфигурацию.
 func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	p.begin(req)
@@ -278,6 +279,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 
 	if plan.Empty() {
 		p.setStep(StepWrite, StepSkipped, NoteNoChanges, "")
+		p.setStep(StepRestart, StepSkipped, NoteNoChanges, "")
 		if err := p.syncApplied(snap, src, req); err != nil {
 			return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: true})
 		}
@@ -286,18 +288,29 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 
 	p.setStep(StepWrite, StepRunning, "", "")
 	out, err := p.writePlan(plan, req.Trigger)
-	if err == nil {
-		if err = p.commitState(plan, src, req); err != nil {
-			out.RollbackErr = p.rollback(out.Set)
-		}
-	}
 	if err != nil {
 		p.setStep(StepWrite, StepFailed, "", err.Error())
 		return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: out.RollbackErr == nil})
 	}
+	p.setStep(StepWrite, StepDone, "", "")
+
+	// Манифест и применённое состояние фиксируются только после перезапуска (D-16):
+	// до этого прежнее состояние восстановимо из набора копий.
+	if _, err := p.runRestart(ctx, plan, out.Set); err != nil {
+		res := ResultView{Code: ResultRestartFailed, Message: err.Error()}
+		var re *restartError
+		if errors.As(err, &re) {
+			res.Kernel, res.RolledBack = re.Kernel, re.RolledBack
+		}
+		return p.finish(res)
+	}
+	if err := p.commitState(plan, src, req); err != nil {
+		rbErr := p.rollback(out.Set)
+		p.setStep(StepWrite, StepFailed, "", err.Error())
+		return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: rbErr == nil})
+	}
 	// Ротация копий — после успешного применения; сбой уборки применение не отменяет.
 	_ = PruneBackups(p.d.DataDir, BackupRetention)
-	p.setStep(StepWrite, StepDone, "", "")
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
 }
 
@@ -355,7 +368,7 @@ func (p *Pipeline) afterValidation(id StepID, r ValidationResult) (ResultView, b
 }
 
 // commitState фиксирует манифест и применённое состояние в одной записи файла
-// состояния и очищает журнал записи (144-07 перенесёт вызов после перезапуска).
+// состояния и очищает журнал записи; вызывается после шага перезапуска.
 func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest) error {
 	now := p.d.Now()
 	applyDraft := req.Source == SourceDraft && len(req.Only) == 0
