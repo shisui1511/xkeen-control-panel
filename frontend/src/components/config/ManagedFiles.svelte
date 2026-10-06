@@ -2,6 +2,8 @@
   import { t } from '../../i18n';
   import { showConfirm } from '../../stores';
   import StatusBadge from '../StatusBadge.svelte';
+  import EmptyState from '../EmptyState.svelte';
+  import Skeleton from '../Skeleton.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import DiffView from './DiffView.svelte';
   import {
@@ -55,6 +57,7 @@
   // Идёт запрос действия: повторные клики не нужны
   let acting = $state(false);
 
+  const loaded = $derived($layerSnapshot !== null);
   const locked = $derived($applyRunning || acting);
 
   const diffId = (key: string) => `config-diff-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
@@ -106,6 +109,18 @@
     await run(() => rebuildFiles([f.key]));
   }
 
+  async function onRebuildAll() {
+    const confirmed = await showConfirm({
+      variant: 'warning',
+      title: $t('cfg.confirm.rebuild_all_title'),
+      message: $t('cfg.confirm.rebuild_all_message'),
+      consequence: $t('cfg.confirm.rebuild_all_consequence'),
+      confirmLabel: $t('cfg.confirm.rebuild_all_ok')
+    });
+    if (!confirmed) return;
+    await run(() => rebuildFiles('all'));
+  }
+
   async function onRelease(f: LayerFile) {
     const confirmed = await showConfirm({
       variant: 'warning',
@@ -134,84 +149,113 @@
   <div class="card files-card">
     <h2 class="card-title">
       <span>{$t('cfg.files_title')}</span>
+      {#if $driftCount > 0}
+        <!-- Обёртка нужна: глобальные стили .ct-actions > button делают из кнопки значок -->
+        <span class="ct-actions">
+          <span>
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              disabled={locked}
+              onclick={() => void onRebuildAll()}
+            >
+              {$t('cfg.action.rebuild_all')}
+            </button>
+          </span>
+        </span>
+      {/if}
     </h2>
 
-    <ul class="file-list" role="list">
-      {#each files as f (f.key)}
-        {@const drift = isDrift(f)}
-        {@const note = detail(f)}
-        <li class="file-row" class:file-row-drift={drift} data-state={f.state}>
-          <div class="file-name">
-            <span class="file-path" title={f.path}>{f.path}</span>
-            {#if note}
-              <span class="file-detail">{note}</span>
+    {#if !loaded}
+      <div class="files-skeleton" data-testid="config-files-loading">
+        <Skeleton type="rect" height="44px" />
+        <Skeleton type="rect" height="44px" />
+        <Skeleton type="rect" height="44px" />
+      </div>
+    {:else if files.length === 0}
+      <EmptyState
+        plain
+        title={$t('cfg.files_empty_title')}
+        description={$t('cfg.files_empty_body')}
+      />
+    {:else}
+      <ul class="file-list" role="list">
+        {#each files as f (f.key)}
+          {@const drift = isDrift(f)}
+          {@const note = detail(f)}
+          <li class="file-row" class:file-row-drift={drift} data-state={f.state}>
+            <div class="file-name">
+              <span class="file-path" title={f.path}>{f.path}</span>
+              {#if note}
+                <span class="file-detail">{note}</span>
+              {/if}
+            </div>
+            <div class="file-meta">
+              <span class="badge">{f.kernel}</span>
+              <span class="file-owner">{$t(`cfg.owner.${f.owner}`)}</span>
+              <StatusBadge variant={BADGE[f.state]} label={$t(`cfg.state.${f.state}`)} />
+            </div>
+            {#if drift || f.state === 'released'}
+              <div class="file-actions">
+                {#if drift}
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    aria-expanded={opened[f.key] ? 'true' : 'false'}
+                    aria-controls={diffId(f.key)}
+                    aria-label={`${opened[f.key] ? $t('cfg.action.hide_diff') : $t('cfg.action.show_diff')}: ${f.path}`}
+                    onclick={() => void toggleDiff(f.key)}
+                  >
+                    <Icon name={opened[f.key] ? 'eye-off' : 'eye'} size={13} />
+                    {opened[f.key] ? $t('cfg.action.hide_diff') : $t('cfg.action.show_diff')}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    disabled={locked}
+                    aria-label={`${$t('cfg.action.rebuild')}: ${f.path}`}
+                    onclick={() => void onRebuild(f)}>{$t('cfg.action.rebuild')}</button
+                  >
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    disabled={locked}
+                    aria-label={`${$t('cfg.action.release')}: ${f.path}`}
+                    onclick={() => void onRelease(f)}>{$t('cfg.action.release')}</button
+                  >
+                {:else}
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    disabled={locked}
+                    aria-label={`${$t('cfg.action.return')}: ${f.path}`}
+                    onclick={() => void onRebuild(f)}>{$t('cfg.action.return')}</button
+                  >
+                {/if}
+              </div>
             {/if}
-          </div>
-          <div class="file-meta">
-            <span class="badge">{f.kernel}</span>
-            <span class="file-owner">{$t(`cfg.owner.${f.owner}`)}</span>
-            <StatusBadge variant={BADGE[f.state]} label={$t(`cfg.state.${f.state}`)} />
-          </div>
-          {#if drift || f.state === 'released'}
-            <div class="file-actions">
-              {#if drift}
-                <button
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  aria-expanded={opened[f.key] ? 'true' : 'false'}
-                  aria-controls={diffId(f.key)}
-                  aria-label={`${opened[f.key] ? $t('cfg.action.hide_diff') : $t('cfg.action.show_diff')}: ${f.path}`}
-                  onclick={() => void toggleDiff(f.key)}
-                >
-                  <Icon name={opened[f.key] ? 'eye-off' : 'eye'} size={13} />
-                  {opened[f.key] ? $t('cfg.action.hide_diff') : $t('cfg.action.show_diff')}
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  disabled={locked}
-                  aria-label={`${$t('cfg.action.rebuild')}: ${f.path}`}
-                  onclick={() => void onRebuild(f)}>{$t('cfg.action.rebuild')}</button
-                >
-                <button
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  disabled={locked}
-                  aria-label={`${$t('cfg.action.release')}: ${f.path}`}
-                  onclick={() => void onRelease(f)}>{$t('cfg.action.release')}</button
-                >
-              {:else}
-                <button
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  disabled={locked}
-                  aria-label={`${$t('cfg.action.return')}: ${f.path}`}
-                  onclick={() => void onRebuild(f)}>{$t('cfg.action.return')}</button
-                >
-              {/if}
-            </div>
-          {/if}
-          {#if drift && opened[f.key]}
-            <div class="file-diff">
-              {#if diffs[f.key]?.diff}
-                {@const d = diffs[f.key].diff!}
-                <DiffView
-                  id={diffId(f.key)}
-                  expected={d.expected}
-                  actual={d.actual}
-                  missing={d.missing}
-                  truncated={d.truncated}
-                />
-              {:else}
-                <div class="diff-loading" id={diffId(f.key)}>
-                  <span class="spinner" aria-hidden="true"></span>
-                </div>
-              {/if}
-            </div>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+            {#if drift && opened[f.key]}
+              <div class="file-diff">
+                {#if diffs[f.key]?.diff}
+                  {@const d = diffs[f.key].diff!}
+                  <DiffView
+                    id={diffId(f.key)}
+                    expected={d.expected}
+                    actual={d.actual}
+                    missing={d.missing}
+                    truncated={d.truncated}
+                  />
+                {:else}
+                  <div class="diff-loading" id={diffId(f.key)}>
+                    <span class="spinner" aria-hidden="true"></span>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
   </div>
 </section>
 
@@ -226,6 +270,11 @@
   .drift-alert {
     margin: 0;
     align-items: flex-start;
+  }
+
+  .drift-alert :global(svg) {
+    flex: none;
+    margin-top: 2px;
   }
 
   .drift-text {
@@ -323,6 +372,12 @@
   .file-diff {
     grid-column: 1 / -1;
     min-width: 0;
+  }
+
+  .files-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
   .diff-loading {

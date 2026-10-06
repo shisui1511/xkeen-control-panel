@@ -111,14 +111,15 @@
 
   .diff-line-added {
     background: color-mix(in srgb, var(--success) 12%, transparent);
-    color: var(--success);
+    /* Чистый --success на подложке 12% в светлой теме даёт 3.96:1; смесь с основным текстом проходит AA */
+    color: color-mix(in srgb, var(--success) 70%, var(--fg-primary));
     border-left: 3px solid var(--success);
     padding-left: 6px;
   }
 
   .diff-line-removed {
     background: color-mix(in srgb, var(--danger) 12%, transparent);
-    color: var(--danger);
+    color: color-mix(in srgb, var(--danger) 70%, var(--fg-primary));
     border-left: 3px solid var(--danger);
     padding-left: 6px;
   }
