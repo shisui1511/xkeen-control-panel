@@ -140,6 +140,9 @@ type PipelineDeps struct {
 	ForeignOwned func(kernel, rel string) bool
 	WriteFile    func(path string, data []byte) error
 	Now          func() time.Time
+	// Enabled — включён ли слой. Run перепроверяет его под замками применения:
+	// фоновый запуск мог ждать замок, пока Disable снимал флаг. nil — всегда включён.
+	Enabled func() bool
 
 	// Шаг перезапуска (144-07). Applier == nil — шаг пропускается.
 	Applier        KernelApplier
@@ -254,6 +257,12 @@ func (p *Pipeline) binaries() Binaries {
 // Файлы пишутся только если оба ядра приняли конфигурацию.
 func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	p.begin(req)
+	// Решение «слой включён» принимается под замками, которые держит и Disable:
+	// запуск, дождавшийся замка после выключения, файлов не пишет (D-04, FND-01).
+	if p.d.Enabled != nil && !p.d.Enabled() {
+		p.setStep(StepBuild, StepSkipped, NoteNoChanges, "")
+		return p.finish(ResultView{OK: true, Code: ResultNothingToApply})
+	}
 	// Журнал прошлой неудавшейся записи или отката нельзя перезаписать новым
 	// набором: сначала возвращаем файлы по нему (WR-03).
 	if err := p.recoverPendingJournal(); err != nil {

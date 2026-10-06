@@ -831,3 +831,22 @@ func TestFollowupWR01_DisableInterruptedKeepsJournal(t *testing.T) {
 		t.Errorf("файл возвращён при прерывании: %v", statErr)
 	}
 }
+
+// Review-fix WR-02: Run перепроверяет флаг под замками: запуск, дождавшийся замка
+// после выключения слоя, файлов не пишет.
+func TestFollowupWR02_RunSkipsWhenLayerDisabled(t *testing.T) {
+	env, _ := newApplyLayer(t, layerOpts{})
+	if err := os.Remove(env.diagXrayPath()); err != nil {
+		t.Fatal(err)
+	}
+	env.enabled.Store(false)
+
+	view := env.L.pipeline.Run(t.Context(), ApplyRequest{Trigger: TriggerRebuild, Source: SourceApplied})
+
+	if r := view.Result; r == nil || !r.OK || r.Code != ResultNothingToApply {
+		t.Fatalf("Result = %+v, want nothing_to_apply", r)
+	}
+	if _, err := os.Stat(env.diagXrayPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("файл записан при выключенном слое: %v", err)
+	}
+}

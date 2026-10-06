@@ -143,6 +143,7 @@ func New(opts Options) (*Layer, error) {
 		XrayEnv:        opts.XrayEnv,
 		ForeignOwned:   opts.ForeignOwned,
 		Now:            opts.Now,
+		Enabled:        opts.Enabled,
 		Applier:        opts.Applier,
 		ProcessStates:  opts.ProcessStates,
 		Mihomo:         opts.Mihomo,
