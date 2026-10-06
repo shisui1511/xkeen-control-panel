@@ -2659,6 +2659,7 @@
   "cfg.load_error_title": "Could not load the state",
   "cfg.load_error_body": "Check the connection to the panel and try again.",
   "cfg.load_error_retry": "Retry",
+  "cfg.flag_load_failed": "Could not load the panel settings",
   "cfg.notice.schema_reset": "The state was reset after the panel update. The old copy is kept in the backup folder; files of the previous state will be removed on the next apply.",
   "cfg.notice.recovered_from_journal": "The previous apply was interrupted. Panel files were restored from the backup. The kernel may already have started on the new files — restart it so it picks up the previous ones.",
   "cfg.notice.journal_recovery_failed": "The files of an earlier interrupted apply could not be restored: the backup is unreadable. Some panel files may have been written partially. Check them in the list and rebuild if needed.",

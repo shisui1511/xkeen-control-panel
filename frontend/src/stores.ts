@@ -376,9 +376,15 @@ export async function setDevMode(enabled: boolean): Promise<void> {
 export const configLayerEnabled = writable(false);
 /** Флаг уже прочитан с сервера: до этого маршрут #/config не считается выключенным. */
 export const configLayerFlagKnown = writable(false);
+/** Последнее чтение флагов настроек не удалось: раздел «Конфигурация» предлагает «Повторить». */
+export const configLayerFlagFailed = writable(false);
 
-/** Читает флаги настроек (dev_mode и config_layer); при ошибке «известность» флага не меняется. */
+/**
+ * Читает флаги настроек (dev_mode и config_layer); при ошибке «известность» флага не
+ * меняется, а configLayerFlagFailed поднимается, чтобы раздел не висел на скелетоне.
+ */
 export async function fetchSettingsFlags(): Promise<void> {
+  configLayerFlagFailed.set(false);
   try {
     const data = await apiFetchJSON<{ dev_mode?: boolean; config_layer?: boolean }>(
       '/api/settings'
@@ -387,7 +393,7 @@ export async function fetchSettingsFlags(): Promise<void> {
     configLayerEnabled.set(data.config_layer ?? false);
     configLayerFlagKnown.set(true);
   } catch (_) {
-    // ignore
+    configLayerFlagFailed.set(true);
   }
 }
 
