@@ -1471,6 +1471,7 @@
             onOpenGenerator={() => (showGeneratorModal = true)}
             onApplyQuickFixes={applyQuickFixes}
             onDeleteFile={deleteFile}
+            managedReadOnly={isManagedReadOnly}
           />
 
           <EditorBreadcrumbs {breadcrumbs} onJump={jumpToSegment} />
