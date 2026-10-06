@@ -77,6 +77,8 @@ type API struct {
 
 	// configLayer — слой «Конфигурация» (D-01); nil, пока main.go его не подключил.
 	configLayer *configlayer.Layer
+	// configLayerMu сериализует переключения флага слоя целиком (SettingsConfigLayer).
+	configLayerMu sync.Mutex
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {

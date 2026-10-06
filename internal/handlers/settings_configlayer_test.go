@@ -172,6 +172,33 @@ func TestSettings_ConfigLayerDisableFails(t *testing.T) {
 	}
 }
 
+// WR-02: ключ не сохранился при выключении — флаг остаётся включённым, а уже
+// перенесённые файлы слоя возвращаются сборкой из applied.
+func TestSettings_ConfigLayerDisableSaveFails(t *testing.T) {
+	h := newLayerHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true})
+	c := h.subscribe(t)
+	c.wait(t, "snapshot", 5*time.Second, nil)
+	h.applyDiagAndWait(t, c)
+	diagPath := filepath.Join(h.roots.Xray, configlayer.DiagXrayRel)
+	// Каталог вместо файла: config.json записать нельзя.
+	h.cfg.ConfigPath = t.TempDir()
+
+	env := h.do(t, http.MethodPost, "/api/settings/config-layer", `{"enabled":false}`)
+	if env.Status != http.StatusInternalServerError || env.Code != "internal" {
+		t.Fatalf("POST disable без сохранения ключа: %d code=%q %s", env.Status, env.Code, env.Raw)
+	}
+	h.cfg.RLock()
+	inMemory := h.cfg.ConfigLayer
+	h.cfg.RUnlock()
+	if !inMemory {
+		t.Error("флаг должен остаться включённым при несохранённом ключе")
+	}
+	c.wait(t, "apply_done", 10*time.Second, nil)
+	if _, err := os.Stat(diagPath); err != nil {
+		t.Errorf("файл слоя не возвращён после неудачного выключения: %v", err)
+	}
+}
+
 func TestSettings_ConfigLayerDisableBusy(t *testing.T) {
 	h := newLayerHarness(t, layerHarnessOpts{Enabled: true, DevMode: true, XrayRunning: true, XraySleepSec: 1})
 	c := h.subscribe(t)

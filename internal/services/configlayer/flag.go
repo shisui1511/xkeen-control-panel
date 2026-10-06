@@ -17,8 +17,12 @@ import (
 //
 // Disable берёт те же замки, что и применение: занятое применение — ErrApplyBusy
 // или ErrKernelBusy, диск не трогается (Pitfall 12). Ключ config_layer в
-// config.json сохраняет обработчик: выключение — сначала Disable, потом ключ.
-func (l *Layer) Disable(ctx context.Context) error {
+// config.json снимает commitFlag (nil — ничего не делать): он вызывается после
+// успешного переноса файлов, но до освобождения замков, поэтому между переносом
+// и снятием флага не успевает ни применение, ни фоновая сборка (D-04). Ошибка
+// commitFlag возвращается как есть; файлы к этому моменту уже перенесены, и
+// решение, вернуть ли их (Enable), остаётся за вызывающим.
+func (l *Layer) Disable(ctx context.Context, commitFlag func() error) error {
 	release, err := l.pipeline.TryBegin(ctx, true)
 	if err != nil {
 		return err
@@ -52,6 +56,11 @@ func (l *Layer) Disable(ctx context.Context) error {
 
 	if len(plan.Files) > 0 {
 		if err := l.moveManagedToBackup(ctx, plan); err != nil {
+			return err
+		}
+	}
+	if commitFlag != nil {
+		if err := commitFlag(); err != nil {
 			return err
 		}
 	}

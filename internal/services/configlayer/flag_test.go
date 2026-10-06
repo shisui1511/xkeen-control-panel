@@ -41,7 +41,7 @@ func TestLayer_DisableMovesFilesToBackup(t *testing.T) {
 	appliedBefore := env.L.store.Snapshot().Applied
 	callsBefore := applyLockedCount(env)
 
-	if err := env.L.Disable(t.Context()); err != nil {
+	if err := env.L.Disable(t.Context(), nil); err != nil {
 		t.Fatalf("Disable: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestLayer_DisableRestartFailureRollsBack(t *testing.T) {
 	callsBefore := applyLockedCount(env)
 	failRestart.Store(true)
 
-	err := env.L.Disable(t.Context())
+	err := env.L.Disable(t.Context(), nil)
 	if err == nil {
 		t.Fatal("Disable вернул nil при неудачном рестарте")
 	}
@@ -126,7 +126,7 @@ func TestLayer_DisableBusy(t *testing.T) {
 	}
 	defer rel()
 
-	if err := env.L.Disable(t.Context()); err != ErrApplyBusy {
+	if err := env.L.Disable(t.Context(), nil); err != ErrApplyBusy {
 		t.Fatalf("Disable = %v, want ErrApplyBusy", err)
 	}
 	if got := mustReadFile(t, env.diagXrayPath()); got != "{}\n" {
@@ -139,7 +139,7 @@ func TestLayer_DisableBusy(t *testing.T) {
 
 func TestLayer_EnableRebuildsFromApplied(t *testing.T) {
 	env, events := newApplyLayer(t, layerOpts{})
-	if err := env.L.Disable(t.Context()); err != nil {
+	if err := env.L.Disable(t.Context(), nil); err != nil {
 		t.Fatalf("Disable: %v", err)
 	}
 	drain(events)

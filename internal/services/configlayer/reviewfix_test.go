@@ -1,6 +1,7 @@
 package configlayer
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -251,7 +252,7 @@ func TestWR01_DisableDoesNotPublishApplySteps(t *testing.T) {
 	drain(events)
 	failRestart.Store(true)
 
-	if err := env.L.Disable(t.Context()); err == nil {
+	if err := env.L.Disable(t.Context(), nil); err == nil {
 		t.Fatal("Disable вернул nil при неудачном рестарте")
 	}
 
@@ -272,5 +273,63 @@ func TestWR01_DisableDoesNotPublishApplySteps(t *testing.T) {
 	}
 	if len(after.Restart) != len(before.Restart) {
 		t.Errorf("строки перезапуска переписаны выключением: было %+v, стало %+v", before.Restart, after.Restart)
+	}
+}
+
+// WR-02: снятие флага идёт под замками применения: пока commitFlag выполняется,
+// запуск применения получает ErrApplyBusy, а фоновая сборка не пишет файлы.
+func TestWR02_DisableCommitsFlagUnderLocks(t *testing.T) {
+	env, _ := newApplyLayer(t, layerOpts{})
+	var busyErr error
+	called := 0
+
+	err := env.L.Disable(t.Context(), func() error {
+		called++
+		_, busyErr = env.L.pipeline.TryBegin(t.Context(), true)
+		env.enabled.Store(false)
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if called != 1 {
+		t.Errorf("commitFlag вызван %d раз, want 1", called)
+	}
+	if busyErr != ErrApplyBusy {
+		t.Errorf("TryBegin внутри commitFlag = %v, want ErrApplyBusy (замки удержаны)", busyErr)
+	}
+	if _, statErr := os.Stat(env.diagXrayPath()); !os.IsNotExist(statErr) {
+		t.Errorf("managed-файл остался: %v", statErr)
+	}
+	waitIdle(t, env.L)
+}
+
+// WR-02: ошибка commitFlag возвращается вызывающему; при неудачном переносе
+// commitFlag не вызывается.
+func TestWR02_DisableCommitFlagErrors(t *testing.T) {
+	env, _ := newApplyLayer(t, layerOpts{})
+	boom := errors.New("диск полон")
+	if err := env.L.Disable(t.Context(), func() error { return boom }); !errors.Is(err, boom) {
+		t.Fatalf("Disable = %v, want ошибку commitFlag", err)
+	}
+
+	var failRestart atomic.Bool
+	env2, _ := newApplyLayer(t, layerOpts{Restart: func(e *layerEnv) (string, error) {
+		if failRestart.Load() {
+			e.Procs.set("xray", "stopped", 0)
+			return "", nil
+		}
+		e.Procs.set("xray", "running", 101)
+		return "", nil
+	}})
+	RestartConfirmTimeout = 300 * time.Millisecond
+	failRestart.Store(true)
+	called := false
+	if err := env2.L.Disable(t.Context(), func() error { called = true; return nil }); err == nil {
+		t.Fatal("Disable вернул nil при неудачном рестарте")
+	}
+	if called {
+		t.Error("commitFlag вызван после неудачного переноса: флаг снялся бы при оставшихся файлах")
 	}
 }

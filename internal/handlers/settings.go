@@ -107,6 +107,11 @@ func (a *API) SettingsConfigLayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Переключения не пересекаются: два встречных запроса иначе оставили бы флаг
+	// и диск в разных состояниях.
+	a.configLayerMu.Lock()
+	defer a.configLayerMu.Unlock()
+
 	a.cfg.RLock()
 	current := a.cfg.ConfigLayer
 	a.cfg.RUnlock()
@@ -126,12 +131,28 @@ func (a *API) SettingsConfigLayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Снятие ключа: с слоем — внутри Disable под замками применения (между
+	// переносом файлов и снятием флага не успевает записаться ни один файл, D-04),
+	// без слоя — сразу.
+	var saveErr error
+	commitFlag := func() error {
+		a.setConfigLayerFlag(false)
+		if saveErr = a.saveConfigLayerFlag(); saveErr != nil {
+			// Ключ не сохранился: флаг остаётся включённым.
+			a.setConfigLayerFlag(current)
+		}
+		return saveErr
+	}
 	if current && a.configLayer != nil {
 		// Перенос не обрывается закрытием вкладки: контекст отвязан от запроса.
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), configLayerDisableTimeout)
 		defer cancel()
-		if err := a.configLayer.Disable(ctx); err != nil {
+		if err := a.configLayer.Disable(ctx, commitFlag); err != nil {
 			switch {
+			case saveErr != nil:
+				// Файлы уже перенесены, а ключ остался: возвращаем файлы слоя из applied.
+				a.configLayer.Enable()
+				JSONErrorCodeDetail(w, http.StatusInternalServerError, "internal", a.t(r, "error.internal"), utils.StripANSI(err.Error()))
 			case errors.Is(err, configlayer.ErrApplyBusy):
 				JSONErrorCode(w, http.StatusConflict, "apply_busy", a.t(r, "configlayer.apply_busy"))
 			case errors.Is(err, configlayer.ErrKernelBusy):
@@ -142,14 +163,7 @@ func (a *API) SettingsConfigLayer(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-	}
-	a.setConfigLayerFlag(false)
-	if err := a.saveConfigLayerFlag(); err != nil {
-		// Ключ не сохранился: возвращаем флаг и файлы слоя из applied.
-		a.setConfigLayerFlag(current)
-		if current && a.configLayer != nil {
-			a.configLayer.Enable()
-		}
+	} else if err := commitFlag(); err != nil {
 		JSONErrorCodeDetail(w, http.StatusInternalServerError, "internal", a.t(r, "error.internal"), utils.StripANSI(err.Error()))
 		return
 	}
