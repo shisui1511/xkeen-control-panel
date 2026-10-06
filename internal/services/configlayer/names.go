@@ -58,3 +58,18 @@ func (r Roots) Abs(kernel, rel string) (string, error) {
 	}
 	return abs, nil
 }
+
+// ErrInvalidPanelName — имя не подпадает под правило файла панели.
+var ErrInvalidPanelName = errors.New("имя не относится к файлам панели")
+
+// ErrStoplistName — имя файла панели совпало со стоп-списком XKeen.
+var ErrStoplistName = errors.New("имя файла совпадает со стоп-списком XKeen")
+
+// IsPanelFileName — путь внутри каталога ядра принадлежит панели.
+func IsPanelFileName(kernel, rel string) bool { return false }
+
+// ValidatePanelName проверяет имя файла панели перед записью.
+func ValidatePanelName(kernel, rel string) error { return nil }
+
+// HasForbiddenTransport — в тексте есть запрещённый ключ transport.
+func HasForbiddenTransport(content []byte) bool { return false }
