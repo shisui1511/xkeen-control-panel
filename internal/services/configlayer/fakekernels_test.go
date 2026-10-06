@@ -93,6 +93,8 @@ type pipeOpts struct {
 	Mihomo    MihomoControl
 	APIReady  func() bool
 	Lifecycle LifecycleLocker
+	// Generators — дополнительные генераторы тестового реестра.
+	Generators []Generator
 }
 
 // testEnv — собранный тестовый конвейер с настоящими Store, Broker, Registry.
@@ -132,6 +134,9 @@ func newTestPipeline(t *testing.T, opts pipeOpts) *testEnv {
 
 	reg := NewRegistry()
 	reg.Register(NewDiagGenerator(func() bool { return opts.DevMode }))
+	for _, g := range opts.Generators {
+		reg.Register(g)
+	}
 	env.P = NewPipeline(PipelineDeps{
 		Store:        store,
 		Broker:       env.Broker,

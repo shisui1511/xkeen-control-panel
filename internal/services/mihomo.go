@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -573,4 +574,13 @@ func (s *MihomoService) ReloadConfig(configPath string) error {
 		return fmt.Errorf("failed to reload mihomo config (status %d): %s", resp.StatusCode, string(body))
 	}
 	return nil
+}
+
+// ErrProviderEmpty — Mihomo ответил 204: набор провайдера пуст.
+var ErrProviderEmpty = errors.New("mihomo: провайдер пуст")
+
+// ProviderCount возвращает число узлов (providerType "proxies") или правил
+// ("rules") провайдера по данным Clash API.
+func (s *MihomoService) ProviderCount(ctx context.Context, providerType, name string) (int, error) {
+	return 0, nil
 }

@@ -19,6 +19,7 @@ type KernelApplier interface {
 // MihomoControl — управление Mihomo через Clash API (*services.MihomoService).
 type MihomoControl interface {
 	ReloadConfig(configPath string) error
+	ProviderCount(ctx context.Context, providerType, name string) (int, error)
 }
 
 // LifecycleLocker — замок жизненного цикла ядра (*sync.Mutex подходит).

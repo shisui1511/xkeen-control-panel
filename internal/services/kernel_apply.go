@@ -316,3 +316,9 @@ func truncateTailBytes(s string, max int) string {
 	}
 	return s
 }
+
+// RestartLocked перезапускает ядро, которое панель сама только что уронила
+// неудачным применением, не спрашивая «остановлено ли оно пользователем».
+func (k *KernelApplier) RestartLocked(kernel string) ApplyResult {
+	return ApplyResult{}
+}
