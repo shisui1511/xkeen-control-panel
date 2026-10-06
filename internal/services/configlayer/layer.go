@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -93,6 +94,8 @@ type Layer struct {
 
 	// checkMu сериализует сверки: результаты публикуются в порядке вычисления.
 	checkMu sync.Mutex
+	// checkReq — запросы внеочередной сверки (буфер 1: повторные сливаются).
+	checkReq chan struct{}
 
 	mu      sync.Mutex
 	stopped bool
@@ -156,6 +159,7 @@ func New(opts Options) (*Layer, error) {
 		pipeline: pipeline,
 		ctx:      ctx,
 		cancel:   cancel,
+		checkReq: make(chan struct{}, 1),
 		failed:   make(map[string]NoticeView),
 	}, nil
 }
@@ -219,7 +223,47 @@ func (l *Layer) Start() {
 			l.bootstrap()
 			l.checkNow(false)
 		}
+		// Цикл работает и при выключенном флаге (его включают без перезапуска):
+		// выключенный слой сверку пропускает, не читая диск.
+		l.spawn(l.loop)
 	})
+}
+
+// loop — фоновая сверка дрейфа: по тикеру DriftInterval и по запросам
+// RequestCheck с дебаунсом DebounceDelay (повторные запросы сливаются).
+func (l *Layer) loop() {
+	ticker := time.NewTicker(l.opts.DriftInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-l.ctx.Done():
+			return
+		case <-ticker.C:
+			l.checkNow(true)
+		case <-l.checkReq:
+			timer := time.NewTimer(l.opts.DebounceDelay)
+			select {
+			case <-l.ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			select {
+			case <-l.checkReq:
+			default:
+			}
+			l.checkNow(true)
+		}
+	}
+}
+
+// RequestCheck просит внеочередную сверку дрейфа (после правки черновика, записи
+// файла в обход слоя и т. п.); запросы в пределах DebounceDelay сливаются.
+func (l *Layer) RequestCheck() {
+	select {
+	case l.checkReq <- struct{}{}:
+	default:
+	}
 }
 
 // Stop останавливает слой: отменяет контекст, дожидается всех горутин и
@@ -443,6 +487,12 @@ func (l *Layer) StartApply(user bool) error {
 	if err != nil {
 		return err
 	}
+	// Свежая сверка под замком применения: пока есть нерешённый дрейф, диск не
+	// трогается (D-11). «Пересобрать» по названным файлам этим не блокируется.
+	if l.checkNow(true).DriftCount > 0 {
+		release()
+		return ErrDriftBlocked
+	}
 	if !l.spawn(func() {
 		defer release()
 		l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
@@ -462,29 +512,87 @@ func (l *Layer) afterRun() {
 	l.checkNow(true)
 }
 
-// --- пока не реализовано (следующие задачи плана) ---
-
-// Rebuild пересобирает названные файлы из применённого состояния.
+// Rebuild — «Пересобрать»: полный конвейер, ограниченный названными файлами.
+// Источник — применённое состояние, а не черновик (D-10, D-11): ручная правка
+// заменяется тем, что панель применяла в прошлый раз. all=true берёт все файлы с
+// дрейфом (ключи keys игнорируются). Пустой набор или ключ вне манифеста —
+// ErrUnknownKey. Возврат сразу после запуска; итог приходит событием apply_done.
 func (l *Layer) Rebuild(keys []string, all bool) error {
 	if !l.Enabled() {
 		return ErrDisabled
 	}
-	return errNotImplemented
+	st := l.store.Snapshot()
+	var only []string
+	if all {
+		for _, c := range CheckManifest(l.opts.Roots, st.Manifest) {
+			if c.State.IsDrift() {
+				only = append(only, c.Key)
+			}
+		}
+	} else {
+		seen := make(map[string]bool, len(keys))
+		for _, k := range keys {
+			if _, ok := st.Manifest[k]; !ok {
+				return ErrUnknownKey
+			}
+			if !seen[k] {
+				seen[k] = true
+				only = append(only, k)
+			}
+		}
+		sort.Strings(only)
+	}
+	if len(only) == 0 {
+		return ErrUnknownKey
+	}
+	release, err := l.pipeline.TryBegin(l.ctx, true)
+	if err != nil {
+		return err
+	}
+	if !l.spawn(func() {
+		defer release()
+		l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerRebuild, Source: SourceApplied, Only: only})
+		release()
+		l.afterRun()
+	}) {
+		release()
+		return ErrStopped
+	}
+	return nil
 }
 
-// Release отпускает файл.
+// Release — «Принять правку»: запись манифеста становится released (D-10). Файл
+// не перезаписывается, не сверяется и не считается сиротой, пока пользователь не
+// нажмёт «Пересобрать» по его ключу. Файл не переименовывается.
 func (l *Layer) Release(key string) (FilesEvent, error) {
 	if !l.Enabled() {
 		return FilesEvent{}, ErrDisabled
 	}
-	return FilesEvent{}, errNotImplemented
+	if _, ok := l.store.Snapshot().Manifest[key]; !ok {
+		return FilesEvent{}, ErrUnknownKey
+	}
+	release, err := l.pipeline.TryBegin(l.ctx, true)
+	if err != nil {
+		return FilesEvent{}, err
+	}
+	defer release()
+	err = l.store.Update(func(st *State) error {
+		entry, ok := st.Manifest[key]
+		if !ok {
+			return ErrUnknownKey
+		}
+		entry.Status = StatusReleased
+		st.Manifest[key] = entry
+		return nil
+	})
+	if err != nil {
+		return FilesEvent{}, err
+	}
+	return l.checkNow(true), nil
 }
 
 // DismissNotice закрывает уведомление.
 func (l *Layer) DismissNotice(id string) ([]NoticeView, error) { return nil, errNotImplemented }
-
-// RequestCheck просит внеочередную сверку дрейфа.
-func (l *Layer) RequestCheck() {}
 
 // OnKernelInstalled собирает файлы для только что установленного ядра.
 func (l *Layer) OnKernelInstalled(kernel string) {}
