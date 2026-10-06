@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -125,6 +126,13 @@ type PipelineDeps struct {
 	ForeignOwned func(kernel, rel string) bool
 	WriteFile    func(path string, data []byte) error
 	Now          func() time.Time
+
+	// Шаг перезапуска (144-07). Applier == nil — шаг пропускается.
+	Applier        KernelApplier
+	ProcessStates  func() []services.KernelProcessState
+	Mihomo         MihomoControl
+	MihomoAPIReady func() bool
+	Lifecycle      LifecycleLocker
 }
 
 // Pipeline — конвейер «Применить»: сборка, проверка Xray, проверка Mihomo,

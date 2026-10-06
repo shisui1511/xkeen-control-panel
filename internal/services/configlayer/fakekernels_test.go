@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 // writeFakeKernelScript пишет исполняемый скрипт #!/bin/sh с произвольным
@@ -84,6 +86,13 @@ type pipeOpts struct {
 	WriteFile func(path string, data []byte) error
 	// Foreign — файлы старого слоя (nil — нет).
 	Foreign func(kernel, rel string) bool
+	// Applier, Procs, Mihomo, APIReady, Lifecycle — зависимости шага перезапуска
+	// (nil — шаг пропускается).
+	Applier   KernelApplier
+	Procs     func() []services.KernelProcessState
+	Mihomo    MihomoControl
+	APIReady  func() bool
+	Lifecycle LifecycleLocker
 }
 
 // testEnv — собранный тестовый конвейер с настоящими Store, Broker, Registry.
@@ -133,6 +142,12 @@ func newTestPipeline(t *testing.T, opts pipeOpts) *testEnv {
 		XrayEnv:      func(string) []string { return nil },
 		ForeignOwned: opts.Foreign,
 		WriteFile:    opts.WriteFile,
+
+		Applier:        opts.Applier,
+		ProcessStates:  opts.Procs,
+		Mihomo:         opts.Mihomo,
+		MihomoAPIReady: opts.APIReady,
+		Lifecycle:      opts.Lifecycle,
 	})
 	return env
 }
