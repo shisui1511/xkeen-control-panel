@@ -3,7 +3,9 @@
   import PageHeader from './PageHeader.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import DraftBar from './components/config/DraftBar.svelte';
+  import ConfigNotices from './components/config/ConfigNotices.svelte';
   import ManagedFiles from './components/config/ManagedFiles.svelte';
+  import KernelVersions from './components/config/KernelVersions.svelte';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
@@ -16,7 +18,7 @@
   ядра (config-kernels), диагностика (config-diag). Фаза 149 оборачивает секции
   во вкладки, не переписывая их.
 -->
-<div class="config-page" data-testid="config-page">
+<div class="container config-page" data-testid="config-page">
   <PageHeader
     title={$t('cfg.title')}
     subtitle={$t('cfg.subtitle')}
@@ -34,10 +36,11 @@
     />
   {:else}
     <div class="config-stack">
-      <section class="config-notices" data-testid="config-notices"></section>
+      <ConfigNotices />
       <DraftBar />
       <!-- config-progress (ход применения) добавляет план 144-13 перед файлами -->
       <ManagedFiles />
+      <KernelVersions />
     </div>
   {/if}
 </div>
@@ -47,9 +50,5 @@
     display: flex;
     flex-direction: column;
     gap: var(--grid-gap, 16px);
-  }
-
-  .config-notices:empty {
-    display: none;
   }
 </style>
