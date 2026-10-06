@@ -183,3 +183,22 @@ func TestSanitizeOutput_KeepsPlainOutput(t *testing.T) {
 		t.Errorf("sanitizeOutput(%q) = %q", in, got)
 	}
 }
+
+// Xray повторяет одно и то же предупреждение для каждого узла; в сообщении оно
+// остаётся один раз, иначе причина отказа тонет в повторах.
+func TestSanitizeOutput_CollapsesRepeatedWarnings(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 9; i++ {
+		b.WriteString("2026/10/06 13:32:26.10" + string(rune('0'+i)) + "039 [Warning] common/errors: The feature gRPC transport is deprecated\n")
+	}
+	b.WriteString("Failed to start: unknown config id: nope")
+
+	got := sanitizeOutput(b.String(), "", "/x")
+
+	if n := strings.Count(got, "gRPC transport is deprecated"); n != 1 {
+		t.Errorf("предупреждение встречается %d раз, нужно 1: %q", n, got)
+	}
+	if !strings.HasSuffix(got, "unknown config id: nope") {
+		t.Errorf("причина отказа не в конце: %q", got)
+	}
+}
