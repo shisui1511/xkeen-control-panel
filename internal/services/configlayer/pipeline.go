@@ -205,6 +205,11 @@ func (p *Pipeline) setStep(id StepID, state StepState, note, msg string) {
 		}
 	}
 	p.mu.Unlock()
+	if sv.ID == "" {
+		// Шага нет в текущем запуске (шаг перезапуска вызван вне Run, например при
+		// выключении слоя): публиковать нечего.
+		return
+	}
 	p.d.Broker.Publish(Event{Type: EventApplyStep, Data: sv})
 }
 

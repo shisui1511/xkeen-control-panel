@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -591,14 +594,132 @@ func (l *Layer) Release(key string) (FilesEvent, error) {
 	return l.checkNow(true), nil
 }
 
-// DismissNotice закрывает уведомление.
-func (l *Layer) DismissNotice(id string) ([]NoticeView, error) { return nil, errNotImplemented }
+// --- уведомления ---
 
-// OnKernelInstalled собирает файлы для только что установленного ядра.
-func (l *Layer) OnKernelInstalled(kernel string) {}
+// DismissNotice закрывает уведомление: schema_reset и recovered_from_journal
+// сохраняются в файле состояния, build_failed:<ядро> живёт только в памяти.
+// Неизвестный идентификатор — ErrUnknownNotice. Возвращает оставшиеся
+// уведомления и публикует событие notices.
+func (l *Layer) DismissNotice(id string) ([]NoticeView, error) {
+	switch {
+	case id == "schema_reset" || id == "recovered_from_journal":
+		if err := l.store.DismissNotice(id); err != nil {
+			return nil, err
+		}
+	case isBuildFailedID(id):
+		l.mu.Lock()
+		delete(l.failed, id)
+		l.mu.Unlock()
+	default:
+		return nil, fmt.Errorf("%w: %q", ErrUnknownNotice, id)
+	}
+	views := l.noticeViews(l.store.Snapshot())
+	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: views}})
+	return views, nil
+}
 
-// IsManagedPath — путь принадлежит файлу, которым владеет панель.
-func (l *Layer) IsManagedPath(absPath string) bool { return false }
+// isBuildFailedID — идентификатор вида build_failed:<ядро> известного ядра.
+func isBuildFailedID(id string) bool {
+	kernel, ok := strings.CutPrefix(id, noticeBuildFailedPrefix)
+	return ok && (kernel == KernelXray || kernel == KernelMihomo)
+}
 
-// ReloadFromDisk перечитывает файл состояния после восстановления снимка.
-func (l *Layer) ReloadFromDisk() error { return errNotImplemented }
+// noteBuildResult отражает итог фоновой сборки в уведомлениях: неудача ставит
+// build_failed:<ядро>, успех снимает прежнее. Событие notices — только при изменении.
+func (l *Layer) noteBuildResult(kernel string, view ApplyView) {
+	id := noticeBuildFailedPrefix + kernel
+	l.mu.Lock()
+	_, had := l.failed[id]
+	failed := view.Result != nil && !view.Result.OK
+	switch {
+	case failed:
+		reason := view.Result.Message
+		if reason == "" {
+			reason = view.Result.Code
+		}
+		l.failed[id] = NoticeView{ID: id, Kind: noticeError, Kernel: kernel, Reason: reason}
+	default:
+		delete(l.failed, id)
+	}
+	l.mu.Unlock()
+	if failed || had {
+		l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(l.store.Snapshot())}})
+	}
+}
+
+// OnKernelInstalled — хук установки ядра (D-18): в фоне собирает для него файлы
+// из применённого состояния. Ядро не запускается: решение о перезапуске принимает
+// тот же Preview конвейера, остановленное и неактивное ядро не трогается.
+// Неудача — уведомление build_failed:<ядро>.
+func (l *Layer) OnKernelInstalled(kernel string) {
+	if (kernel != KernelXray && kernel != KernelMihomo) || !l.Enabled() {
+		return
+	}
+	l.invalidateVersions()
+	l.spawn(func() {
+		release, err := l.pipeline.TryBegin(l.ctx, false)
+		if err != nil {
+			log.Printf("[configlayer] сборка после установки ядра %s не запущена: %v", kernel, err)
+			return
+		}
+		defer release()
+		view := l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerKernelInstalled, Source: SourceApplied})
+		release()
+		l.invalidateVersions()
+		l.noteBuildResult(kernel, view)
+		l.afterRun()
+	})
+}
+
+// --- защита путей Редактора и перечитывание ---
+
+// IsManagedPath — абсолютный путь указывает на файл, которым владеет панель
+// (запись манифеста managed). Каталог пути приводится через EvalSymlinks, чтобы
+// путь через симлинк-каталог на корень ядра распознавался; отпущенные файлы и
+// выключенный слой дают false. Нужен Редактору (D-12): панельные файлы там только
+// на чтение.
+func (l *Layer) IsManagedPath(absPath string) bool {
+	if !l.Enabled() || !filepath.IsAbs(absPath) {
+		return false
+	}
+	target := resolveDirSymlinks(absPath)
+	for _, e := range l.store.Snapshot().Manifest {
+		if e.Status != StatusManaged {
+			continue
+		}
+		abs, err := l.opts.Roots.Abs(e.Kernel, e.RelPath)
+		if err != nil {
+			continue
+		}
+		if resolveDirSymlinks(abs) == target {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveDirSymlinks нормализует путь и разворачивает симлинки в его каталоге
+// (сам файл может отсутствовать).
+func resolveDirSymlinks(p string) string {
+	dir, base := filepath.Split(filepath.Clean(p))
+	dir = filepath.Clean(dir)
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	return filepath.Join(dir, base)
+}
+
+// ReloadFromDisk перечитывает файл состояния после восстановления снимка панели
+// и рассылает событие snapshot.
+//
+// applyMu не берётся: обработчик восстановления уже держит замок жизненного
+// цикла, а порядок замков applyMu, затем lifecycleMu нарушать нельзя (иначе
+// взаимная блокировка с запущенным применением).
+func (l *Layer) ReloadFromDisk() error {
+	if err := l.store.Reload(); err != nil {
+		return err
+	}
+	l.broker.Publish(Event{Type: EventSnapshot, Data: l.Snapshot()})
+	l.RequestCheck()
+	return nil
+}
