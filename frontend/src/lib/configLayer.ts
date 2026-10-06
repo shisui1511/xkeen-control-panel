@@ -215,6 +215,9 @@ export function reduceLayerEvent(
       if (typeof data.draft_revision !== 'number' || typeof data.draft_changes !== 'number') {
         return state;
       }
+      // Устаревшая ревизия (ответ HTTP пришёл позже события из другой вкладки) не
+      // откатывает более новую: иначе следующая правка получила бы ложный draft_conflict
+      if (data.draft_revision < state.draft_revision) return state;
       return { ...state, draft_revision: data.draft_revision, draft_changes: data.draft_changes };
     }
     case 'files': {

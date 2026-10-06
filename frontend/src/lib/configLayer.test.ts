@@ -74,6 +74,13 @@ describe('reduceLayerEvent', () => {
     expect(next?.draft_changes).toBe(3);
   });
 
+  it('draft с устаревшей ревизией не откатывает более новую', () => {
+    const state = snapshot({ draft_revision: 9, draft_changes: 4 });
+    const next = reduceLayerEvent(state, 'draft', { draft_revision: 8, draft_changes: 1 });
+    expect(next).toBe(state);
+    expect(next?.draft_revision).toBe(9);
+  });
+
   it('files обновляет список файлов и счётчик расхождений', () => {
     const files = [
       {
