@@ -113,6 +113,15 @@ func TestRecoverJournal_MissingBackupDir(t *testing.T) {
 	if st.Notices.RecoveredFromJournal {
 		t.Error("уведомление recovered_from_journal выставлено без восстановления")
 	}
+	if !st.Notices.JournalRecoveryFailed {
+		t.Error("нет уведомления journal_recovery_failed: файлы могли остаться записанными не до конца")
+	}
+	if err := store.DismissNotice("journal_recovery_failed"); err != nil {
+		t.Fatalf("DismissNotice: %v", err)
+	}
+	if store.Snapshot().Notices.JournalRecoveryFailed {
+		t.Error("уведомление не закрылось")
+	}
 }
 
 func TestCleanupStale(t *testing.T) {

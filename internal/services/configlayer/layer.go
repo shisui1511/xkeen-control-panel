@@ -472,6 +472,9 @@ func (l *Layer) noticeViews(st State) []NoticeView {
 	if st.Notices.RecoveredFromJournal {
 		out = append(out, NoticeView{ID: "recovered_from_journal", Kind: noticeWarning})
 	}
+	if st.Notices.JournalRecoveryFailed {
+		out = append(out, NoticeView{ID: "journal_recovery_failed", Kind: noticeError})
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, kernel := range []string{KernelXray, KernelMihomo} {
@@ -652,13 +655,13 @@ func (l *Layer) Release(key string) (FilesEvent, error) {
 
 // --- уведомления ---
 
-// DismissNotice закрывает уведомление: schema_reset и recovered_from_journal
-// сохраняются в файле состояния, build_failed:<ядро> живёт только в памяти.
+// DismissNotice закрывает уведомление: schema_reset, recovered_from_journal и
+// journal_recovery_failed сохраняются в файле состояния, build_failed:<ядро> живёт только в памяти.
 // Неизвестный идентификатор — ErrUnknownNotice. Возвращает оставшиеся
 // уведомления и публикует событие notices.
 func (l *Layer) DismissNotice(id string) ([]NoticeView, error) {
 	switch {
-	case id == "schema_reset" || id == "recovered_from_journal":
+	case id == "schema_reset" || id == "recovered_from_journal" || id == "journal_recovery_failed":
 		if err := l.store.DismissNotice(id); err != nil {
 			return nil, err
 		}

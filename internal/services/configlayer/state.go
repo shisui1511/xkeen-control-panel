@@ -336,7 +336,7 @@ func (s *Store) Update(fn func(st *State) error) error {
 }
 
 // DismissNotice закрывает уведомление и сохраняет состояние. Допустимые id:
-// "schema_reset" и "recovered_from_journal".
+// "schema_reset", "recovered_from_journal" и "journal_recovery_failed".
 func (s *Store) DismissNotice(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -351,6 +351,8 @@ func (s *Store) DismissNotice(id string) error {
 		next.Notices.SchemaResetBackup = ""
 	case "recovered_from_journal":
 		next.Notices.RecoveredFromJournal = false
+	case "journal_recovery_failed":
+		next.Notices.JournalRecoveryFailed = false
 	default:
 		return fmt.Errorf("%w: %q", ErrUnknownNotice, id)
 	}

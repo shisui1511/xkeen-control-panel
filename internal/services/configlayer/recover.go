@@ -19,7 +19,8 @@ const (
 // RecoverJournal откатывает прерванную запись (обрыв питания посреди
 // применения): если в состоянии остался журнал, файлы возвращаются из его
 // набора копий, журнал очищается, выставляется уведомление
-// recovered_from_journal. Возвращает true, если откат выполнялся.
+// recovered_from_journal. Если набор копий не прочитался, файлы вернуть не из
+// чего: уведомление journal_recovery_failed. Возвращает true, если откат выполнялся.
 //
 // Журнал очищается всегда, даже если набор копий не прочитался или часть
 // файлов вернуть не удалось: иначе каждый старт повторял бы откат поверх более
@@ -30,11 +31,13 @@ func RecoverJournal(store *Store, roots Roots) (bool, error) {
 	if j == nil {
 		return false, nil
 	}
-	dropJournal := func(notice bool) error {
+	dropJournal := func(recovered bool) error {
 		return store.Update(func(st *State) error {
 			st.Journal = nil
-			if notice {
+			if recovered {
 				st.Notices.RecoveredFromJournal = true
+			} else {
+				st.Notices.JournalRecoveryFailed = true
 			}
 			return nil
 		})
