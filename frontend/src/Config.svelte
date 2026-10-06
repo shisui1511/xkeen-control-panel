@@ -4,6 +4,7 @@
   import EmptyState from './components/EmptyState.svelte';
   import DraftBar from './components/config/DraftBar.svelte';
   import ConfigNotices from './components/config/ConfigNotices.svelte';
+  import ApplyProgress from './components/config/ApplyProgress.svelte';
   import ManagedFiles from './components/config/ManagedFiles.svelte';
   import KernelVersions from './components/config/KernelVersions.svelte';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
@@ -39,7 +40,7 @@
     <div class="config-stack">
       <ConfigNotices />
       <DraftBar />
-      <!-- config-progress (ход применения) добавляет план 144-13 перед файлами -->
+      <ApplyProgress />
       <ManagedFiles />
       <KernelVersions />
     </div>
