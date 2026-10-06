@@ -303,8 +303,3 @@ func (a *API) ConfigLayerDiag(w http.ResponseWriter, r *http.Request) {
 	}
 	JSONSuccess(w, ev)
 }
-
-// Переключатель флага — в задаче 3 плана.
-func (a *API) SettingsConfigLayer(w http.ResponseWriter, r *http.Request) {
-	JSONError(w, http.StatusNotImplemented, "not implemented")
-}

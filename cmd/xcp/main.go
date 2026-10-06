@@ -304,6 +304,7 @@ func main() {
 	srv.HandleProtected("/api/config/mihomo-migrate-socket", api.MihomoMigrateSocket)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/dev-mode", api.SettingsDevMode)
+	srv.HandleProtected("/api/settings/config-layer", api.SettingsConfigLayer)
 	srv.HandleProtected("/api/settings/session", api.SessionSettings)
 
 	// XKeen own settings: proxied/excluded ports, excluded IPs, xkeen.json
