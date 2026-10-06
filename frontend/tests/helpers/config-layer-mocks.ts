@@ -43,12 +43,22 @@ export interface ConfigLayerMockOptions {
   applyBusy?: boolean;
   /** POST /api/settings/config-layer отвечает ошибкой (статус и код). */
   settingsError?: { status: number; code?: string; message?: string };
+  /** Ответы GET /files/diff по ключу файла (иначе — простой diff двух версий). */
+  diffs?: Record<string, MockDiff>;
   /** Задержка ответа POST /api/settings/config-layer, мс. */
   settingsDelayMs?: number;
 }
 
+export interface MockDiff {
+  expected: string;
+  actual: string;
+  missing?: boolean;
+  truncated?: boolean;
+}
+
 export interface ConfigLayerMock {
   calls: MockCall[];
+  diffs: Record<string, MockDiff>;
   snapshot: LayerSnapshotMock;
   /** Текущее значение флага на «сервере». */
   flag: boolean;
@@ -194,6 +204,7 @@ export async function mockConfigLayer(
 
   const mock: ConfigLayerMock = {
     calls: [],
+    diffs: opts.diffs ?? {},
     snapshot: defaultSnapshot({ dev_mode: opts.devMode ?? false, ...opts.snapshot }),
     flag: opts.flag ?? true,
     failState: opts.failState ?? false,
@@ -329,21 +340,29 @@ export async function mockConfigLayer(
       return;
     }
     if (path === '/files/release') {
+      // Как сервер: файл становится ручным, расхождений становится меньше
+      const key = (call.body as { key?: string } | null)?.key;
+      for (const f of mock.snapshot.files) {
+        if (f.key === key) {
+          f.owner = 'manual';
+          f.state = 'released';
+        }
+      }
+      mock.snapshot.drift_count = mock.snapshot.files.filter((f) =>
+        String(f.state).startsWith('drift_')
+      ).length;
       await route.fulfill(
         ok({ files: mock.snapshot.files, drift_count: mock.snapshot.drift_count })
       );
       return;
     }
     if (path === '/files/diff') {
-      await route.fulfill(
-        ok({
-          key: url.searchParams.get('key') ?? '',
-          expected: '{\n  "a": 1\n}\n',
-          actual: '{\n  "a": 2\n}\n',
-          missing: false,
-          truncated: false
-        })
-      );
+      const key = url.searchParams.get('key') ?? '';
+      const d = mock.diffs[key] ?? {
+        expected: '{\n  "a": 1\n}\n',
+        actual: '{\n  "a": 2\n}\n'
+      };
+      await route.fulfill(ok({ key, missing: false, truncated: false, ...d }));
       return;
     }
     if (path === '/notices/dismiss') {
