@@ -240,7 +240,7 @@ test.describe('Редактор: правящие действия панели 
   });
 });
 
-test.describe('Редактор: флаг выключен — как в v0.29.0', () => {
+test.describe('Редактор: флаг выключен — как до включения слоя', () => {
   test('ни плашки, ни бейджей, ни блокировок; сохранение доступно', async ({ page }) => {
     const { mock } = await openEditor(page, { flag: false });
     await openFileRow(page, '04_outbounds.xcp-diag.tail.json');

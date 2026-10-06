@@ -280,7 +280,7 @@ test.describe('Слой «Конфигурация»: флаг в настрой
     await expect(dialog).toContainText(
       'Файлы панели xcp-* будут перенесены в резервную копию. Запущенное ядро перезапустится.'
     );
-    await expect(dialog).toContainText('Панель вернётся к работе как в версии 0.29.');
+    await expect(dialog).toContainText('Панель вернётся к работе как до включения слоя.');
     await dialog.getByRole('button', { name: 'Выключить' }).click();
     await expect.poll(() => mock.callsTo('POST', '/settings/config-layer').length).toBe(1);
     expect(mock.callsTo('POST', '/settings/config-layer')[0].body).toEqual({ enabled: false });

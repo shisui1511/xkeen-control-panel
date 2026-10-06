@@ -2778,7 +2778,7 @@
   "settings.config_layer_busy_hint": "Дождитесь окончания применения",
   "settings.config_layer_off_title": "Выключить слой «Конфигурация»?",
   "settings.config_layer_off_message": "Файлы панели xcp-* будут перенесены в резервную копию. Запущенное ядро перезапустится.",
-  "settings.config_layer_off_consequence": "Панель вернётся к работе как в версии 0.29.",
+  "settings.config_layer_off_consequence": "Панель вернётся к работе как до включения слоя.",
   "settings.config_layer_off_ok": "Выключить",
   "editor.managed_strip": "Файл панели — только чтение. Панель пересоздаёт его при каждом применении.",
   "editor.managed_release": "Отпустить управление",

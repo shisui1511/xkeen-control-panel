@@ -94,7 +94,7 @@
 
   // Слой «Конфигурация» (D-12): файл панели под управлением правится только после
   // «Отпустить управление». Статус берётся из стора слоя — отдельного запроса нет;
-  // с выключенным флагом всё как в v0.29.0.
+  // с выключенным флагом всё как до включения слоя.
   const managedFile = $derived($configLayerEnabled ? $filesByPath.get(selectedFile) : undefined);
   const isManagedReadOnly = $derived(managedFile !== undefined && managedFile.state !== 'released');
   let loading = $state(false);

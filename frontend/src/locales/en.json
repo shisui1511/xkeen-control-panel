@@ -2778,7 +2778,7 @@
   "settings.config_layer_busy_hint": "Wait for the apply to finish",
   "settings.config_layer_off_title": "Turn off the “Configuration” layer?",
   "settings.config_layer_off_message": "Panel xcp-* files will be moved to a backup. The running kernel will restart.",
-  "settings.config_layer_off_consequence": "The panel will work as in version 0.29.",
+  "settings.config_layer_off_consequence": "The panel will work as it did before the layer was enabled.",
   "settings.config_layer_off_ok": "Turn off",
   "editor.managed_strip": "Panel file — read only. The panel recreates it on every apply.",
   "editor.managed_release": "Release management",

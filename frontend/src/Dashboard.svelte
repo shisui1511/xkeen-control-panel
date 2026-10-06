@@ -857,7 +857,7 @@
     return () => stopConfigLayer();
   });
 
-  // Флаг выключен — маршрута #/config нет, как в v0.29.0
+  // Флаг выключен — маршрута #/config нет, как до включения слоя
   $effect(() => {
     if ($configLayerFlagKnown && !$configLayerEnabled && currentTab === 'config') {
       window.location.hash = '#/dashboard';
