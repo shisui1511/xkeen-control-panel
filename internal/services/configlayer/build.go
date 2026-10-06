@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"sort"
 	"strings"
 )
 
@@ -130,35 +134,127 @@ type Plan struct {
 	Orphans []OrphanFile
 }
 
-// Empty — в плане нет ни записи, ни удаления, ни сирот.
+// Empty — в плане нет ни записи, ни удаления, ни сирот (skip_released
+// действием не считается).
 func (p Plan) Empty() bool {
-	return len(p.Files) == 0 && len(p.Orphans) == 0
+	if len(p.Orphans) > 0 {
+		return false
+	}
+	for _, fp := range p.Files {
+		if fp.Action == ActionWrite || fp.Action == ActionDelete {
+			return false
+		}
+	}
+	return true
 }
 
-// Changes — у ядра есть действия плана (сироты считаются изменением ядра).
+// Changes — у ядра есть действия плана: запись, удаление или сирота
+// (сироты считаются изменением своего ядра). skip_released действием не является.
 func (p Plan) Changes(kernel string) bool {
+	for _, fp := range p.Files {
+		if fp.Kernel == kernel && (fp.Action == ActionWrite || fp.Action == ActionDelete) {
+			return true
+		}
+	}
+	for _, o := range p.Orphans {
+		if o.Kernel == kernel {
+			return true
+		}
+	}
 	return false
 }
 
-// ComputePlan рассчитывает план записи.
+// ComputePlan рассчитывает план записи по желаемому набору файлов, манифесту и
+// диску. Файл попадает в запись, если его нет на диске, хэш диска или манифеста
+// отличается от нового, либо записи в манифесте нет; отпущенный файл (released)
+// пропускается, пока его ключ не назван в only («Пересобрать»). Запись манифеста
+// managed без генерации уходит в удаление, released без генерации не
+// трогается. Если файла нет, а рядом лежит <имя>.obsolete, запись помечается
+// RemoveObsolete. Сироты — файлы панели вне манифеста и вне генерации; при
+// непустом only (пересборка названных файлов) сироты не собираются, а все
+// остальные действия сужаются до ключей из only. Файлы отсортированы по ключу.
 func ComputePlan(roots Roots, desired []GeneratedFile, manifest map[string]ManifestEntry, only map[string]bool, foreignOwned func(kernel, rel string) bool) (Plan, error) {
+	restricted := len(only) > 0
+	selected := func(key string) bool { return !restricted || only[key] }
+
 	var plan Plan
+	desiredKeys := make(map[string]bool, len(desired))
 	for _, f := range desired {
+		key := f.Key()
+		desiredKeys[key] = true
+		if !selected(key) {
+			continue
+		}
 		abs, err := roots.Abs(f.Kernel, f.RelPath)
+		if err != nil {
+			return Plan{}, fmt.Errorf("%s: %w", key, err)
+		}
+		entry, inManifest := manifest[key]
+		released := inManifest && entry.Status == StatusReleased
+		fp := FilePlan{
+			Key:         key,
+			Kernel:      f.Kernel,
+			RelPath:     f.RelPath,
+			AbsPath:     abs,
+			Kind:        f.Kind,
+			Content:     f.Content,
+			NewHash:     HashContent(f.Content),
+			Expect:      f.Expect,
+			WasReleased: released,
+		}
+		if released && !only[key] {
+			fp.Action = ActionSkipReleased
+			plan.Files = append(plan.Files, fp)
+			continue
+		}
+		onDisk, err := os.ReadFile(abs)
+		exists := err == nil
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return Plan{}, fmt.Errorf("%s: %w", key, err)
+		}
+		needWrite := !exists || HashContent(onDisk) != fp.NewHash ||
+			!inManifest || entry.Hash != fp.NewHash || released
+		if !needWrite {
+			continue
+		}
+		fp.Action = ActionWrite
+		if !exists {
+			if _, statErr := os.Stat(abs + obsoleteSuffix); statErr == nil {
+				fp.RemoveObsolete = true
+			}
+		}
+		plan.Files = append(plan.Files, fp)
+	}
+
+	for key, entry := range manifest {
+		if desiredKeys[key] || entry.Status != StatusManaged || !selected(key) {
+			continue
+		}
+		abs, err := roots.Abs(entry.Kernel, entry.RelPath)
+		if err != nil {
+			return Plan{}, fmt.Errorf("%s: %w", key, err)
+		}
+		plan.Files = append(plan.Files, FilePlan{
+			Key:     key,
+			Kernel:  entry.Kernel,
+			RelPath: entry.RelPath,
+			AbsPath: abs,
+			Action:  ActionDelete,
+			Kind:    entry.Kind,
+		})
+	}
+	sort.Slice(plan.Files, func(i, j int) bool { return plan.Files[i].Key < plan.Files[j].Key })
+
+	if !restricted {
+		orphans, err := ScanOrphans(roots, manifest, foreignOwned)
 		if err != nil {
 			return Plan{}, err
 		}
-		plan.Files = append(plan.Files, FilePlan{
-			Key:     f.Key(),
-			Kernel:  f.Kernel,
-			RelPath: f.RelPath,
-			AbsPath: abs,
-			Action:  ActionWrite,
-			Kind:    f.Kind,
-			Content: f.Content,
-			NewHash: HashContent(f.Content),
-			Expect:  f.Expect,
-		})
+		for _, o := range orphans {
+			if !desiredKeys[o.Key] {
+				plan.Orphans = append(plan.Orphans, o)
+			}
+		}
 	}
 	return plan, nil
 }
