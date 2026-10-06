@@ -2,8 +2,14 @@ package configlayer
 
 import (
 	"errors"
+	"fmt"
+	"path"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // PanelPrefix — префикс имени файла, которым владеет панель. Через дефис:
@@ -65,11 +71,60 @@ var ErrInvalidPanelName = errors.New("имя не относится к файл
 // ErrStoplistName — имя файла панели совпало со стоп-списком XKeen.
 var ErrStoplistName = errors.New("имя файла совпадает со стоп-списком XKeen")
 
-// IsPanelFileName — путь внутри каталога ядра принадлежит панели.
-func IsPanelFileName(kernel, rel string) bool { return false }
+// Правила имён. Форма Xray проверена трассером 143: файл
+// 04_outbounds.xcp-<id>.tail.json принимается XKeen и подхватывается Xray;
+// сегменты NN_роль. и .tail необязательны. Имена старого слоя (zz_xcp_*)
+// под правило не попадают: после префикса обязателен дефис.
+var (
+	xrayPanelName   = regexp.MustCompile(`^(?:[0-9]{2}_[a-z0-9]+\.|[0-9]{2}_)?xcp-[a-z0-9][a-z0-9-]*(?:\.tail)?\.json$`)
+	mihomoPanelName = regexp.MustCompile(`^xcp-[a-z0-9][a-z0-9-]*\.yaml$`)
 
-// ValidatePanelName проверяет имя файла панели перед записью.
-func ValidatePanelName(kernel, rel string) error { return nil }
+	// forbiddenTransport — тот же шаблон, что у XKeen: он ищет ключ текстом
+	// (`grep -qE`, 02_install_xray.sh), JSON не разбирается.
+	forbiddenTransport = regexp.MustCompile(`"transport"[[:space:]]*:`)
+)
 
-// HasForbiddenTransport — в тексте есть запрещённый ключ transport.
-func HasForbiddenTransport(content []byte) bool { return false }
+// IsPanelFileName — путь внутри каталога ядра принадлежит панели: для Xray
+// имя в корне каталога конфигураций, для Mihomo имя в одном из каталогов
+// MihomoPanelDirs.
+func IsPanelFileName(kernel, rel string) bool {
+	switch kernel {
+	case KernelXray:
+		return !strings.Contains(rel, "/") && xrayPanelName.MatchString(rel)
+	case KernelMihomo:
+		dir, name := path.Split(rel)
+		if dir == "" || !slices.Contains(MihomoPanelDirs, strings.TrimSuffix(dir, "/")) {
+			return false
+		}
+		return mihomoPanelName.MatchString(name)
+	}
+	return false
+}
+
+// ValidatePanelName проверяет имя файла панели перед записью: оно должно
+// подпадать под правило панели и не совпадать со стоп-списком XKeen (иначе
+// XKeen отменит запуск Xray). Имя не заменяется и другое не подбирается:
+// совпадение со стоп-списком — ошибка сборки со словом.
+func ValidatePanelName(kernel, rel string) error {
+	if !IsPanelFileName(kernel, rel) {
+		return fmt.Errorf("%w: %s", ErrInvalidPanelName, rel)
+	}
+	base := path.Base(rel)
+	// Идентификаторы у ядер одинаковые, поэтому имя Mihomo проверяется как
+	// <основа>.json: так фрагмент Xray с тем же ID не нарушит стоп-список.
+	probe := base
+	if kernel == KernelMihomo {
+		probe = strings.TrimSuffix(base, ".yaml") + ".json"
+	}
+	if word, hit := utils.XKeenStoplistMatch(probe); hit {
+		return fmt.Errorf("%w: %s (%s)", ErrStoplistName, base, word)
+	}
+	return nil
+}
+
+// HasForbiddenTransport — в тексте есть ключ "transport" перед двоеточием
+// (пробелы допускаются, вложенность не важна). XKeen при таком ключе в корне
+// каталога конфигураций отменяет запуск Xray.
+func HasForbiddenTransport(content []byte) bool {
+	return forbiddenTransport.Match(content)
+}
