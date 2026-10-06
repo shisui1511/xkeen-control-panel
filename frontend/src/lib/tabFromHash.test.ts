@@ -20,6 +20,12 @@ describe('tabFromHash', () => {
     expect(tabFromHash('#/editor?tab=constructor')).toBe('editor');
   });
 
+  it('раздел «Конфигурация» и его подразделы', () => {
+    expect(tabFromHash('#/config')).toBe('config');
+    expect(tabFromHash('#/config/sources')).toBe('config');
+    expect(tabFromHash('#/config/sources?x=1')).toBe('config');
+  });
+
   it('устаревшие адреса подписок — прокси', () => {
     expect(tabFromHash('#/subscriptions')).toBe('proxies');
     expect(tabFromHash('#/subscriptions/abc')).toBe('proxies');
