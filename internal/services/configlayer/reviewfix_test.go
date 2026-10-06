@@ -519,6 +519,9 @@ func TestWR05_CancelDuringRestartKeepsJournalNoRollback(t *testing.T) {
 	if r := view.Result; r == nil || r.OK || r.Code != ResultInterrupted {
 		t.Fatalf("Result = %+v, want interrupted", r)
 	}
+	if len(view.Restart) != 1 || view.Restart[0].Outcome != RestartOutcomeInterrupted {
+		t.Errorf("Restart = %+v, want один итог interrupted (не пустой исход)", view.Restart)
+	}
 	if calls := base.applyCalls(); len(calls) != 0 {
 		t.Errorf("ApplyLocked вызван %v после отмены контекста", calls)
 	}

@@ -2723,6 +2723,7 @@
   "cfg.restart.failed_rolled_back": "{kernel} did not come up — previous files restored",
   "cfg.restart.failed_rollback_failed": "{kernel} did not come up — the previous files could not be restored",
   "cfg.restart.failed_kernel_down": "{kernel} did not come up — files restored, but the kernel is not running",
+  "cfg.restart.interrupted": "{kernel} — restart interrupted by the panel stopping",
   "cfg.restart_note.hot_reload_failed_restarting": "Hot reload failed — restarting Mihomo",
   "cfg.restart_note.restart_failed_rolling_back": "{kernel} did not come up — restoring previous files",
   "cfg.restart_note.rolling_back_generic": "The kernel did not come up — restoring previous files",

@@ -76,6 +76,8 @@ const (
 	RestartOutcomeFailedRollbackFailed = "failed_rollback_failed"
 	// Файлы возвращены, но ядро на них не поднялось.
 	RestartOutcomeFailedKernelDown = "failed_kernel_down"
+	// Перезапуск прерван остановкой панели: исход ядра неизвестен, журнал остался.
+	RestartOutcomeInterrupted = "interrupted"
 )
 
 // Коды пояснений перезапуска (RestartView.NoteCode и StepView.NoteCode).
@@ -99,6 +101,11 @@ func interrupted(ctx context.Context) error {
 		return fmt.Errorf("%w: %v", errInterrupted, err)
 	}
 	return nil
+}
+
+// interruptedView — итог перезапуска ядра, прерванного остановкой панели.
+func interruptedView(kernel string) RestartView {
+	return RestartView{Kernel: kernel, Outcome: RestartOutcomeInterrupted}
 }
 
 // restartError — перезапуск не удался. Kernel — ядро, на котором остановились.
@@ -238,7 +245,7 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 		}
 		// Остановка панели посреди горячей перезагрузки: полный рестарт не нужен.
 		if err := interrupted(ctx); err != nil {
-			return RestartView{Kernel: kernel}, err
+			return interruptedView(kernel), err
 		}
 		// Мягкий путь не удался: обычный рестарт Mihomo.
 		p.setStep(StepRestart, StepRunning, NoteHotReloadFailed, "")
@@ -251,7 +258,7 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 	if err != nil {
 		// Отмена контекста — не неудача ядра: не откатываем и не перезапускаем ещё раз.
 		if ierr := interrupted(ctx); ierr != nil {
-			return RestartView{Kernel: kernel}, ierr
+			return interruptedView(kernel), ierr
 		}
 		if hotErr != nil {
 			err = fmt.Errorf("перезагрузка конфигурации: %v; перезапуск: %w", hotErr, err)

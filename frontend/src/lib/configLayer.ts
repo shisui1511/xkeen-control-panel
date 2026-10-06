@@ -59,7 +59,8 @@ export interface LayerRestart {
     | 'untouched_conflict'
     | 'failed_rolled_back'
     | 'failed_rollback_failed'
-    | 'failed_kernel_down';
+    | 'failed_kernel_down'
+    | 'interrupted';
   note_code?: string;
 }
 
