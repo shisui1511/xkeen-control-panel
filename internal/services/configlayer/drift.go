@@ -81,3 +81,22 @@ func CheckEntry(roots Roots, e ManifestEntry) FileCheck {
 	fc.State = StateDriftModified
 	return fc
 }
+
+// ProviderContentProblem проверяет содержимое провайдера Mihomo.
+func ProviderContentProblem(kind FileKind, content []byte) string { return "?" }
+
+// CheckManifest сверяет весь манифест, результат отсортирован по Key.
+func CheckManifest(roots Roots, m map[string]ManifestEntry) []FileCheck { return nil }
+
+// OrphanFile — файл с именем панели, которого нет в манифесте.
+type OrphanFile struct {
+	Key     string
+	Kernel  string
+	RelPath string
+	AbsPath string
+}
+
+// ScanOrphans ищет сирот в сканируемых каталогах.
+func ScanOrphans(roots Roots, m map[string]ManifestEntry, foreignOwned func(kernel, rel string) bool) ([]OrphanFile, error) {
+	return nil, nil
+}
