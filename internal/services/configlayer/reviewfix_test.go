@@ -1019,3 +1019,34 @@ func TestFollowupIN05_KernelInstalledRestoresMissingFiles(t *testing.T) {
 		t.Errorf("пропавший файл Mihomo не восстановлен: %q", got)
 	}
 }
+
+// Review-fix IN-07: KernelVersions (может запускать бинарники ядер) вызывается без
+// l.mu: пока он занят, уведомления и остальные пути слоя не ждут.
+func TestFollowupIN07_VersionsDoNotHoldLayerLock(t *testing.T) {
+	env := newTestLayer(t, layerOpts{Enabled: true})
+	entered, release := make(chan struct{}), make(chan struct{})
+	env.L.opts.KernelVersions = func() []KernelVersionInput {
+		close(entered)
+		<-release
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		env.L.versions()
+		close(done)
+	}()
+	<-entered
+
+	got := make(chan struct{})
+	go func() {
+		env.L.noticeViews(env.L.store.Snapshot())
+		close(got)
+	}()
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Error("noticeViews ждёт l.mu, пока KernelVersions занят")
+	}
+	close(release)
+	<-done
+}

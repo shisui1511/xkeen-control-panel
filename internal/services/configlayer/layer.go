@@ -106,7 +106,10 @@ type Layer struct {
 	// failed — уведомления build_failed:<ядро> (только в памяти).
 	failed map[string]NoticeView
 	// Кэш версий ядер.
-	verAt       time.Time
+	verAt time.Time
+	// verGen растёт при каждом сбросе кэша: результат вычисления, начатого до
+	// сброса, в кэш не попадает.
+	verGen      uint64
 	verKernels  []KernelVersionView
 	verFeatures map[Feature]Availability
 }
@@ -423,27 +426,40 @@ func (l *Layer) Snapshot() SnapshotView {
 }
 
 // versions возвращает строки версий и карту функций с кэшем на versionsCacheTTL.
+// KernelVersions может запускать бинарники ядер, поэтому вызывается без l.mu:
+// иначе всё это время ждали бы spawn, noticeViews, noteBuildResult и checkNow.
 func (l *Layer) versions() ([]KernelVersionView, map[Feature]Availability) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	now := l.opts.Now()
 	if l.verKernels != nil && now.Sub(l.verAt) < versionsCacheTTL {
-		return l.verKernels, l.verFeatures
+		kernels, features := l.verKernels, l.verFeatures
+		l.mu.Unlock()
+		return kernels, features
 	}
+	gen := l.verGen
+	l.mu.Unlock()
+
 	var inputs []KernelVersionInput
 	if l.opts.KernelVersions != nil {
 		inputs = l.opts.KernelVersions()
 	}
-	l.verKernels = KernelVersionViews(inputs)
-	l.verFeatures = FeatureMap(inputs)
-	l.verAt = now
-	return l.verKernels, l.verFeatures
+	kernels, features := KernelVersionViews(inputs), FeatureMap(inputs)
+
+	l.mu.Lock()
+	// Кэш сбросили, пока считали (установка ядра): результат устарел, отдаём его
+	// вызывающему, но не запоминаем.
+	if l.verGen == gen {
+		l.verKernels, l.verFeatures, l.verAt = kernels, features, now
+	}
+	l.mu.Unlock()
+	return kernels, features
 }
 
 // invalidateVersions сбрасывает кэш версий (после установки ядра).
 func (l *Layer) invalidateVersions() {
 	l.mu.Lock()
 	l.verKernels, l.verFeatures = nil, nil
+	l.verGen++
 	l.mu.Unlock()
 }
 
