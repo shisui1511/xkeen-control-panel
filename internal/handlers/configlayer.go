@@ -28,8 +28,11 @@ func (a *API) requireLayer(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // writeLayerError переводит ошибку слоя в HTTP-ответ по таблице из контракта API.
-// Тексты — переведённые строки; внутренние пути и тексты ошибок ФС наружу не
-// уходят.
+// Сообщения — переведённые строки по коду ошибки. Для неклассифицированной ошибки
+// (500) текст самой ошибки без ANSI-последовательностей уходит в поле detail, как
+// в остальных обработчиках: по нему пользователь и поддержка видят причину сбоя
+// диска, не заглядывая в журнал. Текст может содержать путь к файлу под каталогами
+// панели; секретов в нём нет, внутренние структуры не раскрываются.
 func (a *API) writeLayerError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, configlayer.ErrDisabled):
@@ -53,8 +56,7 @@ func (a *API) writeLayerError(w http.ResponseWriter, r *http.Request, err error)
 	case errors.Is(err, configlayer.ErrDevModeRequired):
 		JSONErrorCode(w, http.StatusForbidden, "dev_mode_required", a.t(r, "configlayer.dev_mode_required"))
 	default:
-		// Деталь — текст ошибки без управляющих ANSI-последовательностей; наружу
-		// идёт только он, внутренние структуры не раскрываются.
+		// Деталь — текст ошибки без управляющих ANSI-последовательностей.
 		JSONErrorCodeDetail(w, http.StatusInternalServerError, "internal", a.t(r, "error.internal"), utils.StripANSI(err.Error()))
 	}
 }
