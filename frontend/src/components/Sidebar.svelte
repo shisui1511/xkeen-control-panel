@@ -7,8 +7,10 @@
     mihomoApiAvailable,
     isConflict,
     isMihomo,
-    activeKernelName
+    activeKernelName,
+    configLayerEnabled
   } from '../stores';
+  import { navBadgeCount, draftChanges } from '../lib/configLayer';
   import { showMihomoNavFor } from '../lib/navCaps';
   import Skeleton from './Skeleton.svelte';
   import { capsuleConfigStore } from '../lib/capsuleSettings';
@@ -293,6 +295,27 @@
       <Icon name="dashboard" size={16} />
       <span class="lbl">{$t('nav.dashboard')}</span>
     </a>
+    {#if $configLayerEnabled}
+      <a
+        href="#/config"
+        class="nav-item"
+        aria-current={currentTab === 'config' ? 'page' : undefined}
+        data-label={$t('nav.config')}
+        onclick={() => isSidebarOpen.set(false)}
+        title={$isSidebarCollapsed ? undefined : $t('nav.config')}
+      >
+        <Icon name="config" size={16} />
+        <span class="lbl">{$t('nav.config')}</span>
+        {#if $navBadgeCount}
+          <span
+            class="nav-badge-config"
+            class:dot={$isSidebarCollapsed}
+            role="img"
+            aria-label={$t('nav.config_badge_aria', { n: $draftChanges })}>{$navBadgeCount}</span
+          >
+        {/if}
+      </a>
+    {/if}
   </details>
 
   <!-- Proxies & Subscriptions group -->
@@ -760,6 +783,32 @@
     margin-left: auto;
     flex-shrink: 0;
     box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+
+  .nav-badge-config {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    color: var(--btn-primary-text);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    line-height: 1;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  /* Свёрнутое меню: вместо числа — точка, как у .nav-badge-update */
+  .nav-badge-config.dot {
+    min-width: 0;
+    width: 8px;
+    height: 8px;
+    padding: 0;
+    font-size: 0;
   }
 
   .nav-badge-warn {

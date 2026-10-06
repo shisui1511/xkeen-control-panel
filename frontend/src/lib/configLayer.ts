@@ -251,10 +251,18 @@ let retryDelay = RETRY_MIN_MS;
 // Растёт с каждым применённым событием SSE: ответ GET, начатый до события, не затирает его
 let eventSeq = 0;
 
+/** Флаг «запущено здесь» не переживает снимок, в котором применение не идёт (потерянный apply_done). */
+function syncStartedHere(): void {
+  if (get(layerSnapshot)?.apply.running === false) applyStartedHere.set(false);
+}
+
 function applyEvent(name: string, data: unknown): void {
   eventSeq++;
   layerSnapshot.update((s) => reduceLayerEvent(s, name, data));
-  if (name === 'snapshot') layerStatus.set('ready');
+  if (name === 'snapshot') {
+    layerStatus.set('ready');
+    syncStartedHere();
+  }
   if (name === 'apply_done') applyStartedHere.set(false);
 }
 
@@ -262,6 +270,7 @@ function setSnapshot(raw: unknown): void {
   if (!isObject(raw)) return;
   layerSnapshot.set(normalizeSnapshot(raw));
   layerStatus.set('ready');
+  syncStartedHere();
 }
 
 /** Читает снимок целиком. Сбой первой загрузки — статус error; позже состояние остаётся прежним. */
@@ -391,17 +400,26 @@ export async function resetDraft(): Promise<void> {
   applyDraftAck(ack);
 }
 
-export async function applyNow(): Promise<void> {
-  await post<{ started: boolean }>('/api/configlayer/apply', {});
+/**
+ * Запуск применения. Флаг «запущено здесь» ставится до запроса: итог может
+ * прийти по SSE раньше ответа, и тогда apply_done уже сбросил бы флаг.
+ */
+async function startRun(path: string, body: unknown): Promise<void> {
   applyStartedHere.set(true);
+  try {
+    await post<{ started: boolean }>(path, body);
+  } catch (err) {
+    applyStartedHere.set(false);
+    throw err;
+  }
 }
 
-export async function rebuildFiles(keys: string[] | 'all'): Promise<void> {
-  await post<{ started: boolean }>(
-    '/api/configlayer/files/rebuild',
-    keys === 'all' ? { all: true } : { keys }
-  );
-  applyStartedHere.set(true);
+export function applyNow(): Promise<void> {
+  return startRun('/api/configlayer/apply', {});
+}
+
+export function rebuildFiles(keys: string[] | 'all'): Promise<void> {
+  return startRun('/api/configlayer/files/rebuild', keys === 'all' ? { all: true } : { keys });
 }
 
 export async function releaseFile(key: string): Promise<void> {
