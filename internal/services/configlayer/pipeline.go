@@ -290,7 +290,13 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	// молча перезаписали бы ручную правку (D-11). «Пересобрать» дрейф разрешает сам.
 	manifest := manifestOfScope(snap.Manifest, installed, req.Kernel)
 	if req.Trigger != TriggerRebuild {
-		if drift := driftKeys(p.d.Roots, manifest); len(drift) > 0 {
+		drift := driftKeys
+		if req.Trigger == TriggerKernelInstalled {
+			// Переустановленное ядро с пропавшими файлами: перезаписывать нечего,
+			// ручной правки там нет, поэтому сборка их восстанавливает (D-18).
+			drift = driftKeysExceptMissing
+		}
+		if len(drift(p.d.Roots, manifest)) > 0 {
 			p.setStep(StepBuild, StepFailed, "", ErrDriftBlocked.Error())
 			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
 		}
@@ -477,6 +483,18 @@ func driftKeys(roots Roots, manifest map[string]ManifestEntry) []string {
 	var out []string
 	for _, c := range CheckManifest(roots, manifest) {
 		if c.State.IsDrift() {
+			out = append(out, c.Key)
+		}
+	}
+	return out
+}
+
+// driftKeysExceptMissing — как driftKeys, но без записей, чей файл просто пропал
+// (drift_missing): их сборка создаёт заново, ручной правки они не хранят.
+func driftKeysExceptMissing(roots Roots, manifest map[string]ManifestEntry) []string {
+	var out []string
+	for _, c := range CheckManifest(roots, manifest) {
+		if c.State.IsDrift() && c.State != StateDriftMissing {
 			out = append(out, c.Key)
 		}
 	}

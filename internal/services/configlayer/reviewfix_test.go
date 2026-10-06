@@ -997,3 +997,25 @@ func TestFollowupIN02_EmptyPlanStateWriteFailure(t *testing.T) {
 		t.Fatalf("Result = %+v, want state_write_failed без RolledBack", r)
 	}
 }
+
+// Review-fix IN-05: переустановленное ядро с пропавшими файлами собирается заново,
+// а не блокируется как дрейф (файл просто отсутствует, ручной правки в нём нет).
+func TestFollowupIN05_KernelInstalledRestoresMissingFiles(t *testing.T) {
+	mihomoBin := writeFakeKernel(t, t.TempDir(), "mihomo", 0, "", 0)
+	env, events := newApplyLayer(t, layerOpts{MihomoStatus: "stopped", Bins: Binaries{Mihomo: mihomoBin}})
+	env.setBins(Binaries{Xray: env.getBins().Xray})
+	if err := os.Remove(env.diagMihomoPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	env.installMihomo(t)
+	env.L.OnKernelInstalled("mihomo")
+	view := env.settleApply(t, events)
+
+	if view.Trigger != TriggerKernelInstalled || view.Result == nil || !view.Result.OK {
+		t.Fatalf("запуск = %+v, want kernel_installed, ok (а не drift_blocked)", view)
+	}
+	if got := mustReadFile(t, env.diagMihomoPath()); got != diagMihomoProvider {
+		t.Errorf("пропавший файл Mihomo не восстановлен: %q", got)
+	}
+}
