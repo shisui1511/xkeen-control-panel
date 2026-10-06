@@ -176,3 +176,174 @@ func TestWrite_JournalBeforeFirstWrite(t *testing.T) {
 		t.Errorf("Journal после успеха = %+v, want nil", j)
 	}
 }
+
+// metaOf возвращает запись набора для файла <ядро>/<путь> или ok=false.
+func metaOf(t *testing.T, setDir, kernel, rel string) (BackupFileMeta, bool) {
+	t.Helper()
+	set, err := LoadBackupSet(setDir)
+	if err != nil {
+		t.Fatalf("LoadBackupSet: %v", err)
+	}
+	for _, m := range set.Meta.Files {
+		if m.Kernel == kernel && m.RelPath == rel {
+			return m, true
+		}
+	}
+	return BackupFileMeta{}, false
+}
+
+func TestApply_OrphanMovedToBackup(t *testing.T) {
+	env := newTestPipeline(t, pipeOpts{Bins: fakeBins(t), DevMode: true})
+	orphan := filepath.Join(env.Roots.Xray, "xcp-orphan.json")
+	selected := filepath.Join(env.Roots.Xray, "04_outbounds.zz_xcp_selected.tail.json")
+	inbounds := filepath.Join(env.Roots.Xray, "03_inbounds.json")
+	link := filepath.Join(env.Roots.Mihomo, "config.yaml.xcp-link")
+	writeTestFile(t, orphan, `{"orphan":true}`)
+	writeTestFile(t, selected, `{"old":"layer"}`)
+	writeTestFile(t, inbounds, `{"inbounds":[]}`)
+	writeTestFile(t, link, "old-link\n")
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerRebuild, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || !r.OK || r.Code != ResultApplied {
+		t.Fatalf("Result = %+v, want applied", r)
+	}
+	if len(r.OrphansRemoved) != 1 || r.OrphansRemoved[0] != "xcp-orphan.json" {
+		t.Errorf("OrphansRemoved = %v, want [xcp-orphan.json]", r.OrphansRemoved)
+	}
+	requireAbsent(t, orphan)
+	sets := backupSets(t, env.DataDir)
+	if len(sets) != 1 {
+		t.Fatalf("наборов копий = %d, want 1", len(sets))
+	}
+	if got := readFileString(t, filepath.Join(sets[0], "xray", "xcp-orphan.json")); got != `{"orphan":true}` {
+		t.Errorf("копия сироты = %q", got)
+	}
+	if m, ok := metaOf(t, sets[0], KernelXray, "xcp-orphan.json"); !ok || m.Reason != ReasonOrphan || !m.Existed {
+		t.Errorf("запись меты сироты = %+v ok=%v, want reason orphan", m, ok)
+	}
+	// Старый слой и чужие файлы не тронуты никогда.
+	for path, want := range map[string]string{
+		selected: `{"old":"layer"}`,
+		inbounds: `{"inbounds":[]}`,
+		link:     "old-link\n",
+	} {
+		if got := readFileString(t, path); got != want {
+			t.Errorf("%s = %q, want прежние байты %q", path, got, want)
+		}
+	}
+	if st := env.Store.Snapshot(); st.Journal != nil {
+		t.Errorf("Journal = %+v, want nil", st.Journal)
+	}
+}
+
+func TestApply_StaleEntryDeleted(t *testing.T) {
+	env := newTestPipeline(t, pipeOpts{Bins: fakeBins(t), DevMode: true})
+	const rel = "04_outbounds.xcp-stale.tail.json"
+	abs := seedManagedXray(t, env, rel, `{"stale":1}`)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	if r := view.Result; r == nil || !r.OK || r.Code != ResultApplied {
+		t.Fatalf("Result = %+v, want applied", view.Result)
+	}
+	requireAbsent(t, abs)
+	if _, ok := env.Store.Snapshot().Manifest[ManifestKey(KernelXray, rel)]; ok {
+		t.Error("ключ остался в манифесте")
+	}
+	sets := backupSets(t, env.DataDir)
+	if len(sets) != 1 {
+		t.Fatalf("наборов копий = %d, want 1", len(sets))
+	}
+	if got := readFileString(t, filepath.Join(sets[0], "xray", rel)); got != `{"stale":1}` {
+		t.Errorf("копия = %q", got)
+	}
+	if m, ok := metaOf(t, sets[0], KernelXray, rel); !ok || m.Reason != ReasonDelete {
+		t.Errorf("запись меты = %+v ok=%v, want reason delete", m, ok)
+	}
+}
+
+func TestApply_RenamedObsoleteRemoved(t *testing.T) {
+	env := newTestPipeline(t, pipeOpts{Bins: fakeBins(t), DevMode: true})
+	abs := seedManagedXray(t, env, DiagXrayRel, "OLD")
+	// XKeen вывел файл из работы: <имя>.json.obsolete, самого файла нет.
+	if err := os.Rename(abs, abs+".obsolete"); err != nil {
+		t.Fatal(err)
+	}
+	env.setDraft(t, DiagSection, `{"enabled":true}`)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerRebuild, Source: SourceDraft})
+
+	if r := view.Result; r == nil || !r.OK || r.Code != ResultApplied {
+		t.Fatalf("Result = %+v, want applied", view.Result)
+	}
+	if got := readFileString(t, abs); got != diagXrayOK {
+		t.Errorf("файл = %q, want записанный заново %q", got, diagXrayOK)
+	}
+	requireAbsent(t, abs+".obsolete")
+	sets := backupSets(t, env.DataDir)
+	if len(sets) != 1 {
+		t.Fatalf("наборов копий = %d, want 1", len(sets))
+	}
+	if got := readFileString(t, filepath.Join(sets[0], "xray", DiagXrayRel+".obsolete")); got != "OLD" {
+		t.Errorf("копия .obsolete = %q, want OLD", got)
+	}
+	if m, ok := metaOf(t, sets[0], KernelXray, DiagXrayRel+".obsolete"); !ok || m.Reason != ReasonObsolete {
+		t.Errorf("запись меты .obsolete = %+v ok=%v, want reason obsolete", m, ok)
+	}
+}
+
+func TestWrite_SymlinkOutsideRootRejected(t *testing.T) {
+	env := newTestPipeline(t, pipeOpts{Bins: fakeBins(t), DevMode: true})
+	outside := filepath.Join(t.TempDir(), "secret.json")
+	writeTestFile(t, outside, "TARGET")
+	link := filepath.Join(env.Roots.Xray, DiagXrayRel)
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	env.setDraft(t, DiagSection, `{"enabled":true}`)
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != ResultWriteFailed || !r.RolledBack {
+		t.Fatalf("Result = %+v, want write_failed_rolled_back", r)
+	}
+	if !strings.Contains(r.Message, ErrSymlinkOutsideRoot.Error()) {
+		t.Errorf("Message = %q, want текст ErrSymlinkOutsideRoot", r.Message)
+	}
+	if got := readFileString(t, outside); got != "TARGET" {
+		t.Errorf("цель симлинка изменена: %q", got)
+	}
+	if st, err := os.Lstat(link); err != nil || st.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("симлинк заменён: %v", err)
+	}
+	// Отказ до первой записи: ни один файл не записан.
+	requireAbsent(t, filepath.Join(env.Roots.Mihomo, DiagMihomoRel))
+	if env.Store.Snapshot().Journal != nil {
+		t.Error("журнал не очищен")
+	}
+}
+
+func TestWrite_NonPanelNameNeverDeleted(t *testing.T) {
+	env := newTestPipeline(t, pipeOpts{Bins: fakeBins(t)})
+	inbounds := filepath.Join(env.Roots.Xray, "03_inbounds.json")
+	writeTestFile(t, inbounds, `{"inbounds":[]}`)
+	plan := Plan{Files: []FilePlan{{
+		Key: ManifestKey(KernelXray, "03_inbounds.json"), Kernel: KernelXray,
+		RelPath: "03_inbounds.json", AbsPath: inbounds, Action: ActionDelete,
+	}}}
+
+	out, err := env.P.writePlan(plan, TriggerUser)
+
+	if err == nil {
+		t.Fatal("writePlan удалил файл не по правилу панели без ошибки")
+	}
+	if out.RollbackErr != nil {
+		t.Errorf("RollbackErr = %v", out.RollbackErr)
+	}
+	if got := readFileString(t, inbounds); got != `{"inbounds":[]}` {
+		t.Errorf("03_inbounds.json = %q, want нетронутый", got)
+	}
+}

@@ -129,3 +129,6 @@ func (p *Pipeline) rollback(set *BackupSet) error {
 	}
 	return nil
 }
+
+// ErrSymlinkOutsideRoot — файл панели оказался симлинком за пределы корней ядер.
+var ErrSymlinkOutsideRoot = errors.New("файл панели — симлинк за пределами каталогов ядер")

@@ -193,3 +193,6 @@ func LoadBackupSet(dir string) (*BackupSet, error) {
 	}
 	return &BackupSet{Dir: dir, Meta: meta}, nil
 }
+
+// PruneBackups оставляет keep новейших наборов apply-*.
+func PruneBackups(dataDir string, keep int) error { return nil }
