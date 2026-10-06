@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -81,20 +80,26 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	defer a.lifecycleMu.Unlock()
 
-	skipped, err := a.snapshotSvc.Restore(id)
+	// Снимок содержит каталог данных панели вместе с файлом состояния слоя, а слой
+	// держит состояние в памяти: восстановление идёт под замком хранилища слоя,
+	// иначе правка черновика между восстановлением и перечитыванием затёрла бы
+	// восстановленный файл. Слой не берёт замок применения (порядок applyMu ->
+	// lifecycleMu, lifecycleMu уже у нас) и сам просит сверку дрейфа.
+	var skipped []string
+	restore := func() error {
+		var rerr error
+		skipped, rerr = a.snapshotSvc.Restore(id)
+		return rerr
+	}
+	var err error
+	if a.configLayer != nil {
+		err = a.configLayer.RestoreExternally(restore)
+	} else {
+		err = restore()
+	}
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-
-	// Снимок содержит каталог данных панели вместе с файлом состояния слоя, а слой
-	// держит состояние в памяти: без перечитывания оно затёрло бы восстановленный
-	// файл. ReloadFromDisk не берёт замок применения (порядок applyMu -> lifecycleMu,
-	// lifecycleMu уже у нас) и сам просит сверку дрейфа.
-	if a.configLayer != nil {
-		if rerr := a.configLayer.ReloadFromDisk(); rerr != nil {
-			log.Printf("snapshot restore: не удалось перечитать состояние слоя конфигурации: %v", rerr)
-		}
 	}
 	a.layerRequestCheck()
 

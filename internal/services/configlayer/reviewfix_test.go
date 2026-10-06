@@ -724,3 +724,59 @@ func TestWR09_EnabledLaterLoadsExistingState(t *testing.T) {
 		t.Errorf("правка черновика на загруженной ревизии: %v", err)
 	}
 }
+
+// WR-10: правка черновика, пришедшая посреди восстановления снимка, не затирает
+// восстановленный файл состояния и не применяется поверх него.
+func TestWR10_DraftEditDuringRestoreDoesNotOverwriteRestoredState(t *testing.T) {
+	// Состояние «из снимка»: ревизия 5 и секция b.
+	snapDir := t.TempDir()
+	snapStore, err := OpenStore(snapDir, NewBroker())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		if _, err := snapStore.EditDraft(int64(i), "pad", []byte(`1`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := snapStore.EditDraft(4, "b", []byte(`{"v":9}`)); err != nil {
+		t.Fatal(err)
+	}
+	restored := mustReadFile(t, filepath.Join(snapDir, StateFileName))
+
+	env := newTestLayer(t, layerOpts{Enabled: true})
+	if _, err := env.L.EditDraft(0, "note", []byte(`{"a":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(env.DataDir, StateFileName)
+
+	editErr := make(chan error, 1)
+	err = env.L.RestoreExternally(func() error {
+		// Правка на ревизии 1 стартует посреди восстановления.
+		go func() {
+			_, e := env.L.EditDraft(1, "note", []byte(`{"a":2}`))
+			editErr <- e
+		}()
+		time.Sleep(100 * time.Millisecond)
+		return os.WriteFile(statePath, []byte(restored), 0o600)
+	})
+	if err != nil {
+		t.Fatalf("RestoreExternally: %v", err)
+	}
+
+	select {
+	case e := <-editErr:
+		if !errors.Is(e, ErrDraftConflict) {
+			t.Errorf("правка посреди восстановления = %v, want ErrDraftConflict (ревизия уже восстановленная)", e)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("правка черновика не завершилась")
+	}
+	snap := env.L.store.Snapshot()
+	if snap.DraftRevision != 5 || !SectionEqual(snap.Draft["b"], []byte(`{"v":9}`)) {
+		t.Errorf("восстановленное состояние потеряно: rev=%d draft=%v", snap.DraftRevision, snap.Draft)
+	}
+	if got := mustReadFile(t, statePath); got != restored {
+		t.Error("восстановленный файл состояния затёрт")
+	}
+}

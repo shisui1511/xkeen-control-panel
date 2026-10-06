@@ -728,6 +728,29 @@ func resolveDirSymlinks(p string) string {
 	return filepath.Join(dir, base)
 }
 
+// RestoreExternally выполняет fn — подмену каталога данных панели (восстановление
+// снимка), — удерживая хранилище: правки черновика и запись конвейера ждут,
+// поэтому восстановленный файл состояния не будет затёрт состоянием из памяти.
+// После fn состояние перечитывается, рассылается snapshot и запрашивается сверка
+// дрейфа. Выключенный слой диск не читает: только забывает кэш в памяти.
+//
+// Как и ReloadFromDisk, applyMu не берёт: вызывающий уже держит замок жизненного
+// цикла (порядок applyMu → lifecycleMu нарушать нельзя).
+func (l *Layer) RestoreExternally(fn func() error) error {
+	if !l.Enabled() {
+		err := fn()
+		l.store.Invalidate()
+		return err
+	}
+	fnErr, reloadErr := l.store.ReplaceExternally(fn)
+	if reloadErr != nil {
+		log.Printf("[configlayer] не удалось перечитать состояние слоя после восстановления: %v", reloadErr)
+	}
+	l.broker.Publish(Event{Type: EventSnapshot, Data: l.Snapshot()})
+	l.RequestCheck()
+	return fnErr
+}
+
 // ReloadFromDisk перечитывает файл состояния после восстановления снимка панели
 // и рассылает событие snapshot.
 //
