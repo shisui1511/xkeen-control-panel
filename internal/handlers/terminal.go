@@ -112,6 +112,9 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer session.Close()
+	// Сессия закрыта: свободный ввод в PTY не разбирается, поэтому после любого
+	// терминала (обычного и установщика XKeen) слой сверяет дрейф (D-09).
+	defer a.layerRequestCheck()
 
 	conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
 	conn.SetPongHandler(func(string) error {
@@ -320,4 +323,6 @@ func (a *API) refreshAfterXKeenInstall() {
 	ctx, cancel := context.WithTimeout(context.Background(), xkeenInstallRefreshTimeout)
 	defer cancel()
 	a.refreshXKeenStatus(ctx)
+	// Установка XKeen перезаписывает файлы каталога Xray: слой сверяется сразу.
+	a.layerRequestCheck()
 }

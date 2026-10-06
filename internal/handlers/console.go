@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
@@ -51,6 +52,11 @@ func (a *API) ConsoleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := a.consoleSvc.Execute(req.Command)
+	// Команды XKeen (-xbr, -mbr, -uk и т. п.) делают манифест слоя недостоверным,
+	// в том числе при ненулевом коде выхода (частичное восстановление).
+	if !strings.HasPrefix(req.Command, "__diag:") {
+		a.layerRequestCheck()
+	}
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -59,5 +65,13 @@ func (a *API) ConsoleExecute(w http.ResponseWriter, r *http.Request) {
 	a.jsonResponse(w, result)
 }
 
-// layerRequestCheck просит слой «Конфигурация» о внеочередной сверке дрейфа.
-func (a *API) layerRequestCheck() {}
+// layerRequestCheck просит слой «Конфигурация» о внеочередной сверке дрейфа (D-09):
+// команды XKeen, терминал и восстановление снимка меняют файлы мимо слоя, и
+// сверка раз в минуту показала бы дрейф с опозданием. Безопасен без слоя; при
+// выключенном флаге слой запрос не обрабатывает.
+func (a *API) layerRequestCheck() {
+	if a.configLayer == nil {
+		return
+	}
+	a.configLayer.RequestCheck()
+}

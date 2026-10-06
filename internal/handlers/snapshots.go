@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -85,6 +86,17 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Снимок содержит каталог данных панели вместе с файлом состояния слоя, а слой
+	// держит состояние в памяти: без перечитывания оно затёрло бы восстановленный
+	// файл. ReloadFromDisk не берёт замок применения (порядок applyMu -> lifecycleMu,
+	// lifecycleMu уже у нас) и сам просит сверку дрейфа.
+	if a.configLayer != nil {
+		if rerr := a.configLayer.ReloadFromDisk(); rerr != nil {
+			log.Printf("snapshot restore: не удалось перечитать состояние слоя конфигурации: %v", rerr)
+		}
+	}
+	a.layerRequestCheck()
 
 	// Снимок возвращает каталоги обоих ядер: применяем к активному. Остановленное
 	// ядро не запускается, сбой рестарта не откатывает восстановленные файлы и
