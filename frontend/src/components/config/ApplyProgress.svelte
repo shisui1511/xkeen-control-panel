@@ -96,6 +96,7 @@
     'validation_timeout',
     'validation_not_run',
     'build_failed',
+    'state_write_failed',
     'drift_blocked'
   ];
   const filesUntouched = $derived(failure !== null && FILES_UNTOUCHED.includes(failure.code));
@@ -113,6 +114,8 @@
         return $t('cfg.result.not_run', { kernel });
       case 'build_failed':
         return $t('cfg.result.build_failed');
+      case 'state_write_failed':
+        return $t('cfg.result.state_write_failed');
       case 'write_failed':
       case 'restart_failed':
         return rolledBack ? $t('cfg.result.rolled_back') : $t('cfg.result.rollback_failed');

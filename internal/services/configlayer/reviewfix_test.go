@@ -978,3 +978,19 @@ func TestFollowupIN01_AfterRunPublishesNotices(t *testing.T) {
 		}
 	}
 }
+
+// Review-fix IN-02: пустой план и отказ записи файла состояния — отдельный код без
+// RolledBack: файлы не менялись, возвращать нечего.
+func TestFollowupIN02_EmptyPlanStateWriteFailure(t *testing.T) {
+	xray := writeFakeKernel(t, t.TempDir(), "xray", 0, "", 0)
+	env := newTestPipeline(t, pipeOpts{Bins: Binaries{Xray: xray}})
+	env.setDraft(t, "note", `{"a":1}`)
+	env.Store.writeFile = func(string, []byte, os.FileMode) error { return errors.New("диск полон") }
+
+	view := env.P.Run(t.Context(), ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+
+	r := view.Result
+	if r == nil || r.OK || r.Code != ResultStateWriteFailed || r.RolledBack {
+		t.Fatalf("Result = %+v, want state_write_failed без RolledBack", r)
+	}
+}

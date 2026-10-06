@@ -107,7 +107,10 @@ const (
 	// конца не удалось. Журнал уже снят (RecoverJournal снимает его всегда), поэтому
 	// повторного возврата не будет: файлы нужно проверить вручную.
 	ResultJournalRecoveryFailed = "journal_recovery_failed"
-	ResultDriftBlocked          = "drift_blocked"
+	// ResultStateWriteFailed — применять было нечего, но файл состояния не записался;
+	// файлы на диске не менялись, возвращать нечего.
+	ResultStateWriteFailed = "state_write_failed"
+	ResultDriftBlocked     = "drift_blocked"
 )
 
 // ResultView — итог запуска.
@@ -337,7 +340,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		p.setStep(StepWrite, StepSkipped, NoteNoChanges, "")
 		p.setStep(StepRestart, StepSkipped, NoteNoChanges, "")
 		if err := p.syncApplied(snap, src, req); err != nil {
-			return p.finish(ResultView{Code: ResultWriteFailed, Message: err.Error(), RolledBack: true})
+			return p.finish(ResultView{Code: ResultStateWriteFailed, Message: err.Error()})
 		}
 		return p.finish(ResultView{OK: true, Code: ResultNothingToApply})
 	}

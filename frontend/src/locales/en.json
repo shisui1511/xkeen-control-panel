@@ -2678,6 +2678,7 @@
   "cfg.result.timeout": "The {kernel} check timed out. The config was not applied — try again later.",
   "cfg.result.not_run": "Could not start the {kernel} check.",
   "cfg.result.build_failed": "The panel could not build the files.",
+  "cfg.result.state_write_failed": "The panel could not save its state file. No files were written.",
   "cfg.result.drift_blocked": "Applying is blocked: some files differ from the panel. Resolve them in the files list.",
   "cfg.result.output_label": "Kernel message",
   "cfg.hint.xray_unknown_protocol": "Check the protocol name in the node: Xray does not recognize it.",
