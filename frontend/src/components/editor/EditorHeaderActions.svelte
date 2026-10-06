@@ -19,6 +19,8 @@
     onReloadFile: () => void;
     onSaveFile: () => void;
     onSaveAndApply: () => void;
+    /** Файл панели под управлением слоя: сохранение недоступно (D-12) */
+    managedReadOnly?: boolean;
   }
 
   let {
@@ -29,7 +31,8 @@
     applyLoading = false,
     onReloadFile,
     onSaveFile,
-    onSaveAndApply
+    onSaveAndApply,
+    managedReadOnly = false
   }: Props = $props();
 
   let showOverflowMenu = $state(false);
@@ -38,6 +41,11 @@
   // В конфликте ядер применять нечего: сохранение файла (данные) остаётся доступным.
   const saveAndApplyLabel = $derived(
     $isConflict ? $t('kernel.conflict_blocked') : $t('editor.save_and_apply')
+  );
+
+  const saveTitle = $derived(managedReadOnly ? $t('editor.managed_readonly_hint') : $t('app.save'));
+  const saveAndApplyTitle = $derived(
+    managedReadOnly ? $t('editor.managed_readonly_hint') : saveAndApplyLabel
   );
 
   function toggleOverflowMenu(e: MouseEvent) {
@@ -99,8 +107,8 @@
     <button
       class="btn btn-secondary btn-compact btn-desktop-only"
       onclick={onSaveFile}
-      disabled={saving || applyLoading}
-      title={$t('app.save')}
+      disabled={saving || applyLoading || managedReadOnly}
+      title={saveTitle}
     >
       <svg
         width="13"
@@ -152,7 +160,8 @@
               showOverflowMenu = false;
               onSaveFile();
             }}
-            disabled={saving || applyLoading}
+            disabled={saving || applyLoading || managedReadOnly}
+            title={managedReadOnly ? $t('editor.managed_readonly_hint') : undefined}
           >
             <svg
               width="14"
@@ -198,8 +207,8 @@
     <button
       class="btn btn-accent btn-compact"
       onclick={onSaveAndApply}
-      disabled={saving || applyLoading || $isConflict}
-      title={saveAndApplyLabel}
+      disabled={saving || applyLoading || $isConflict || managedReadOnly}
+      title={saveAndApplyTitle}
       aria-label={saveAndApplyLabel}
     >
       {#if applyLoading}

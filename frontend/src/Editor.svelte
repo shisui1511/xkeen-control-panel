@@ -2,7 +2,14 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { fade, slide } from 'svelte/transition';
   import { t, currentLang } from './i18n';
-  import { showToast, activeKernelName, showConfirm, editorOpenRequest } from './stores';
+  import {
+    showToast,
+    activeKernelName,
+    showConfirm,
+    editorOpenRequest,
+    configLayerEnabled
+  } from './stores';
+  import { filesByPath } from './lib/configLayer';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
@@ -27,6 +34,7 @@
   import EditorToolbar from './components/editor/EditorToolbar.svelte';
   import EditorStatusBar from './components/editor/EditorStatusBar.svelte';
   import EditorBreadcrumbs from './components/editor/EditorBreadcrumbs.svelte';
+  import ManagedFileBanner from './components/editor/ManagedFileBanner.svelte';
   import PageHeader from './PageHeader.svelte';
   import Tabs, { type TabItem } from './components/Tabs.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
@@ -83,6 +91,12 @@
   // States using runes
   let files = $state<ConfigFileInfo[]>([]);
   let selectedFile = $state('');
+
+  // Слой «Конфигурация» (D-12): файл панели под управлением правится только после
+  // «Отпустить управление». Статус берётся из стора слоя — отдельного запроса нет;
+  // с выключенным флагом всё как в v0.29.0.
+  const managedFile = $derived($configLayerEnabled ? $filesByPath.get(selectedFile) : undefined);
+  const isManagedReadOnly = $derived(managedFile !== undefined && managedFile.state !== 'released');
   let loading = $state(false);
   let loadingPath = $state<string | null>(null);
   let templateLoading = $state(false);
@@ -276,6 +290,10 @@
   }
 
   async function handleInsertIntoEditor(yamlContent: string) {
+    if (isManagedReadOnly) {
+      showToast('warning', $t('editor.managed_readonly_hint'));
+      return;
+    }
     if (selectedFile) {
       if (editorView && editorView.dom.isConnected) {
         editorView.dispatch({
@@ -660,7 +678,7 @@
   }
 
   async function checkBeforeSave() {
-    if (!selectedFile || !editorView) return;
+    if (!selectedFile || !editorView || isManagedReadOnly) return;
     const content = editorView.state.doc.toString();
 
     diffChanges = getDiff(originalContent, content);
@@ -674,7 +692,7 @@
   }
 
   async function confirmSave() {
-    if (!selectedFile || !editorView) return;
+    if (!selectedFile || !editorView || isManagedReadOnly) return;
 
     saving = true;
     saveError = false;
@@ -729,7 +747,7 @@
   }
 
   async function handleSaveAndApply() {
-    if (!selectedFile || !editorView) return;
+    if (!selectedFile || !editorView || isManagedReadOnly) return;
     applyLoading = true;
     saveError = false;
     saveWarnings = [];
@@ -1071,7 +1089,7 @@
   }
 
   function applyQuickFixes() {
-    if (!editorView || !selectedFile) return;
+    if (!editorView || !selectedFile || isManagedReadOnly) return;
 
     try {
       const content = editorView.state.doc.toString();
@@ -1095,7 +1113,7 @@
   }
 
   async function applyTemplate(template: Template) {
-    if (!editorView) return;
+    if (!editorView || isManagedReadOnly) return;
     if (isDirty && !(await confirmUnsaved())) return;
     if (
       !(await showConfirm({
@@ -1311,6 +1329,7 @@
         onReloadFile={() => loadFile(selectedFile)}
         onSaveFile={checkBeforeSave}
         onSaveAndApply={handleSaveAndApply}
+        managedReadOnly={isManagedReadOnly}
       />
     {/if}
   </PageHeader>
@@ -1463,6 +1482,10 @@
             }}
           />
 
+          {#if managedFile && isManagedReadOnly}
+            <ManagedFileBanner file={managedFile} />
+          {/if}
+
           <!-- CodeMirror editor component -->
           <div style="flex: 1; min-height: 0; position:relative; background: var(--cm-bg);">
             {#if loading}
@@ -1479,6 +1502,7 @@
                   path={tab.path}
                   {expertMode}
                   {schemaEnabled}
+                  readOnly={isManagedReadOnly}
                   bind:view={editorView}
                   onContentChange={(newContent) => {
                     tab.currentContent = newContent;
