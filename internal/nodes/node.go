@@ -3,6 +3,7 @@ package nodes
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -156,5 +157,59 @@ func XrayTag(src, key string) string { return "xcp-" + src + "-" + Hash8(key) }
 // Ref — ссылка на узел для групп: <источник>/<8 hex>.
 func Ref(src, id8 string) string { return src + "/" + id8 }
 
-// Uniq — уникальные ключи узлов источника.
-func Uniq(src string, list []Node) (out []Keyed, collapsed int) { return nil, 0 }
+// transportFingerprint — отпечаток транспорта и TLS: различает узлы с одной
+// идентичностью (CDN-фронты с одним UUID и разными host/path).
+func transportFingerprint(n Node) string {
+	sni, pbk := "", ""
+	if n.TLS != nil {
+		sni = n.TLS.SNI
+	}
+	if n.Reality != nil {
+		pbk = n.Reality.PublicKey
+	}
+	t := n.Transport
+	return Hash8(t.Network + "|" + t.Path + "|" + t.Host + "|" + t.ServiceName + "|" + sni + "|" + pbk)
+}
+
+// Uniq присваивает узлам источника ключи. Полные дубли (та же идентичность и
+// тот же отпечаток транспорта) схлопываются, их число возвращается в collapsed.
+// Узлы с одной идентичностью, но разным транспортом/TLS не схлопываются: все,
+// кроме первого по отпечатку, получают суффикс "~" + 6 hex отпечатка. Результат
+// отсортирован по ключу и не зависит от порядка входа.
+func Uniq(src string, list []Node) (out []Keyed, collapsed int) {
+	type item struct {
+		fp   string
+		node Node
+	}
+	groups := map[string][]item{}
+	for _, n := range list {
+		id := n.Identity()
+		groups[id] = append(groups[id], item{fp: transportFingerprint(n), node: n})
+	}
+	for _, g := range groups {
+		sort.SliceStable(g, func(i, j int) bool {
+			if g[i].fp != g[j].fp {
+				return g[i].fp < g[j].fp
+			}
+			if g[i].node.Name != g[j].node.Name {
+				return g[i].node.Name < g[j].node.Name
+			}
+			return g[i].node.Text < g[j].node.Text
+		})
+		prev := ""
+		for i, it := range g {
+			if i > 0 && it.fp == prev {
+				collapsed++
+				continue
+			}
+			key := it.node.Key(src)
+			if i > 0 {
+				key += "~" + it.fp[:6]
+			}
+			out = append(out, Keyed{Key: key, Node: it.node})
+			prev = it.fp
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, collapsed
+}

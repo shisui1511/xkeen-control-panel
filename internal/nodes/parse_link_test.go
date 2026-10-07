@@ -175,6 +175,13 @@ func TestLink_Schemes(t *testing.T) {
 		})
 	}
 
+	t.Run("hysteria2_port_list", func(t *testing.T) {
+		n, err := ParseLink("hysteria2://hy2-pass@node5.example:443,20000-30000?sni=cdn.example#ports")
+		if err != nil || n.Port != 443 || n.Hy2 == nil || n.Hy2.Ports != "443,20000-30000" {
+			t.Fatalf("список портов: %v %+v %+v", err, n, n.Hy2)
+		}
+	})
+
 	t.Run("wg_alias", func(t *testing.T) {
 		line := strings.Replace(readLink(t, "wireguard"), "wireguard://", "wg://", 1)
 		n, err := ParseLink(line)
@@ -263,5 +270,24 @@ func TestLink_Errors(t *testing.T) {
 	_, err = ParseLink("wireguard://AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=@node10.example:51820?address=10.0.0.2%2F32")
 	if se := asCode(t, err); se.Code != CodeWGMissingKey {
 		t.Errorf("wireguard без publickey: %+v", se)
+	}
+}
+
+func TestLink_NoPanicOnGarbage(t *testing.T) {
+	garbage := []string{
+		"", "://", "vless://", "vmess://", "vmess://e30=", "ss://", "ss://@", "ss://:@:", "ss://Zm9v",
+		"trojan://@:", "hysteria2://@:0", "hy2://[::1", "tuic://:@h:1", "socks://", "http://", "wg://", "wireguard://@h:1?publickey=",
+		"vless://%zz@h:1", "vless://u@h:99999", "vless://u@h:1?extra={", "ss://" + strings.Repeat("A", 100),
+	}
+	for _, g := range garbage {
+		n, err := ParseLink(g)
+		if err == nil {
+			t.Errorf("%q: ожидалась ошибка, получен узел %+v", g, n)
+			continue
+		}
+		var se *SourceError
+		if !errors.As(err, &se) {
+			t.Errorf("%q: ошибка не *SourceError: %v", g, err)
+		}
 	}
 }
