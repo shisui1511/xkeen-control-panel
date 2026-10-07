@@ -1,0 +1,18 @@
+proxies:
+  - name: Имя
+    type: vless
+    server: node1.example
+    port: 443
+    alpn: [h2, http/1.1]
+    client-fingerprint: chrome
+    encryption: none
+    flow: xtls-rprx-vision
+    network: tcp
+    packet-encoding: xudp
+    reality-opts:
+      public-key: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ
+      short-id: 0a1b2c3d
+    servername: cdn.example
+    tls: true
+    udp: true
+    uuid: 11111111-1111-4111-8111-111111111111

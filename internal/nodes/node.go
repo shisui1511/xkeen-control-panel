@@ -1,5 +1,12 @@
 package nodes
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strconv"
+	"strings"
+)
+
 // Origin — откуда узел пришёл; от него зависит, отдавать ли ядру оригинал.
 type Origin string
 
@@ -107,20 +114,47 @@ type Keyed struct {
 	Node Node
 }
 
+// normProtocol приводит имя протокола к каноническому виду.
+func normProtocol(p string) string {
+	p = strings.ToLower(strings.TrimSpace(p))
+	switch p {
+	case "hy2":
+		return "hysteria2"
+	case "ss":
+		return "shadowsocks"
+	case "socks5":
+		return "socks"
+	case "wg":
+		return "wireguard"
+	}
+	return p
+}
+
 // Identity — протокол|адрес|порт|Hash8(учётные данные) без источника.
-func (n Node) Identity() string { return "" }
+// Имя узла в идентичность не входит: переименование у провайдера её не меняет.
+func (n Node) Identity() string {
+	priv := ""
+	if n.WG != nil {
+		priv = n.WG.PrivateKey
+	}
+	return normProtocol(n.Protocol) + "|" + strings.ToLower(n.Host) + "|" + strconv.Itoa(n.Port) +
+		"|" + Hash8(n.UUID+"|"+n.Password+"|"+priv)
+}
 
 // Key — src + "|" + Identity().
-func (n Node) Key(src string) string { return "" }
+func (n Node) Key(src string) string { return src + "|" + n.Identity() }
 
-// Hash8 — первые 8 hex sha256.
-func Hash8(s string) string { return "" }
+// Hash8 — первые 8 hex от sha256.
+func Hash8(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:4])
+}
 
-// XrayTag — тег Xray узла подписки.
-func XrayTag(src, key string) string { return "" }
+// XrayTag — тег Xray узла подписки: xcp-<источник>-<8 hex от sha256(ключа)>.
+func XrayTag(src, key string) string { return "xcp-" + src + "-" + Hash8(key) }
 
-// Ref — ссылка на узел для групп.
-func Ref(src, id8 string) string { return "" }
+// Ref — ссылка на узел для групп: <источник>/<8 hex>.
+func Ref(src, id8 string) string { return src + "/" + id8 }
 
 // Uniq — уникальные ключи узлов источника.
 func Uniq(src string, list []Node) (out []Keyed, collapsed int) { return nil, 0 }
