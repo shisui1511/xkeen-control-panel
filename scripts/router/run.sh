@@ -43,11 +43,9 @@ SUITE_NAME=${SUITE:-full}
 cd "$(rt_repo_root)"
 
 # Метки известных падений должны ссылаться на живые todo (D-13): до блокировки и деплоя.
-if [ -f "$SCRIPT_DIR/check-known.sh" ]; then
-  if ! sh "$SCRIPT_DIR/check-known.sh"; then
-    echo "router-test: красный — метки известных падений ссылаются на закрытые или несуществующие todo" >&2
-    exit 1
-  fi
+if ! sh "$SCRIPT_DIR/check-known.sh"; then
+  echo "router-test: красный — метки известных падений ссылаются на закрытые или несуществующие todo" >&2
+  exit 1
 fi
 
 rt_load_targets
