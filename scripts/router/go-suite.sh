@@ -11,6 +11,10 @@
 #      по маркерам `KNOWN-FAILURE slug=` и `XPASS slug=` (метки известных падений).
 # Рабочий каталог на устройстве удаляется после этапа при любом исходе.
 #
+# Тесты получают окружение XCP_RT_ARCH, XCP_RT_CORE, XCP_RT_WORKDIR, XCP_RT_PANEL (адрес
+# панели на loopback устройства), XCP_RT_SESSION_FILE (cookie и CSRF, права 600) и
+# XCP_RT_LINKS (данные share-ссылок internal/nodes/testdata/links).
+#
 # Окружение:
 #   RT_GO_PKGS    пакеты через пробел (по умолчанию все с роутерными тестами)
 #   RT_REPORT     каталог отчёта (если не задан, создаётся новый)
@@ -49,8 +53,19 @@ mkdir -p "$BIN_DIR"
 BAD=0
 LOST=0
 
-# Рабочий каталог на устройстве убирается целиком при любом исходе.
+URL=$(rt_get "$ID" URL)
+JAR="$RT_REPORT/$ID/.go-cookies"
+SESSION_LOCAL="$RT_REPORT/$ID/.go-session.env"
+CSRF=""
+
+# При любом исходе: сессия панели закрывается выходом с ПК (лимит 20 сессий),
+# файлы сессии на ПК удаляются, рабочий каталог на устройстве (в нём и session.env)
+# убирается целиком.
 cleanup() {
+  if [ -n "$CSRF" ] && [ -f "$JAR" ]; then
+    curl -sk --connect-timeout 10 --max-time 20 -b "$JAR" -X POST -H "X-CSRF-Token: $CSRF" -o /dev/null "$URL/api/auth/logout" || true
+  fi
+  rm -f "$JAR" "$SESSION_LOCAL"
   rt_ssh "$ID" "rm -rf $RWD" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -107,6 +122,62 @@ if [ "$rc" != 0 ]; then
   exit 1
 fi
 
+# --- сессия панели и данные ссылок -----------------------------------------------
+# Вход делается с ПК: пароль на устройство не передаётся, тело запроса строится через
+# JSON.stringify, пароль идёт через окружение и stdin. На устройство уходят только cookie
+# и CSRF-токен в файле с правами 600; тесты читают их из XCP_RT_SESSION_FILE.
+PORT=$(printf '%s' "$URL" | sed -n 's|^[a-z]*://[^/:]*:\([0-9]*\).*|\1|p')
+PANEL="https://127.0.0.1:${PORT:-8090}"
+SESSION_ENV=""
+rm -f "$JAR"
+body=$(RT_PW="$(rt_get "$ID" PASSWORD)" node -e 'process.stdout.write(JSON.stringify({ password: process.env.RT_PW }))' || true)
+lcode=$(printf '%s' "$body" | curl -sk --connect-timeout 10 --max-time 20 -c "$JAR" -H 'Content-Type: application/json' --data-binary @- -o /dev/null -w '%{http_code}' "$URL/api/auth/login" || true)
+body=""
+if [ "$lcode" = 200 ]; then
+  me=$(curl -sk --connect-timeout 10 --max-time 20 -b "$JAR" "$URL/api/auth/me" || true)
+  CSRF=$(printf '%s\n' "$me" | sed -n 's/.*"csrf_token" *: *"\([^"]*\)".*/\1/p' | head -n 1)
+  cookie=$(awk -F'\t' '$6 ~ /xcp_session/ {print $6 "=" $7; exit}' "$JAR")
+  if [ -n "$CSRF" ] && [ -n "$cookie" ]; then
+    (
+      umask 077
+      printf 'XCP_RT_COOKIE=%s\nXCP_RT_CSRF=%s\n' "$cookie" "$CSRF" >"$SESSION_LOCAL"
+    )
+    chmod 600 "$SESSION_LOCAL"
+    rc=0
+    rt_scp "$ID" "$SESSION_LOCAL" "$RWD/session.env" || rc=$?
+    if [ "$rc" = 0 ]; then
+      rt_ssh "$ID" "chmod 600 $RWD/session.env" || rc=$?
+    fi
+    if [ "$rc" = 0 ]; then
+      SESSION_ENV="XCP_RT_PANEL=$PANEL XCP_RT_SESSION_FILE=$RWD/session.env"
+    elif [ "$rc" = 3 ]; then
+      rt_result "$ID" FAIL reachable "нет связи"
+      exit 3
+    fi
+  fi
+  cookie=""
+fi
+if [ -z "$SESSION_ENV" ]; then
+  rt_result "$ID" FAIL "go:session" "сессия панели для Go-тестов не создана (вход: http ${lcode:--})"
+  BAD=$((BAD + 1))
+fi
+
+# Данные share-ссылок для тестов: одним копированием каталога.
+LINKS_ENV=""
+if [ -d "$ROOT/internal/nodes/testdata/links" ]; then
+  rc=0
+  scp -O -q -r -o BatchMode=yes -o ConnectTimeout=15 "$ROOT/internal/nodes/testdata/links" "$(rt_get "$ID" SSH):$RWD/links" || rc=$?
+  if [ "$rc" = 255 ]; then
+    rt_result "$ID" FAIL reachable "нет связи"
+    exit 3
+  elif [ "$rc" = 0 ]; then
+    LINKS_ENV="XCP_RT_LINKS=$RWD/links"
+  else
+    rt_result "$ID" FAIL "go:links" "копирование данных ссылок не удалось (код $rc)"
+    BAD=$((BAD + 1))
+  fi
+fi
+
 # --- пакеты --------------------------------------------------------------------
 for pkg in $PKGS; do
   name=$(printf '%s' "${pkg#internal/}" | tr '/' '-')
@@ -136,7 +207,7 @@ for pkg in $PKGS; do
   jsonl="$RT_REPORT/$ID/go-$name.jsonl"
   errlog="$RT_REPORT/$ID/go-$name.stderr"
   rc=0
-  rt_stage "$ID" "go-run-$name" rt_ssh "$ID" "cd $RWD && XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD ./$name.test -test.v=test2json -test.run '^TestRouter' -test.timeout 20m" >"$raw" 2>"$errlog" || rc=$?
+  rt_stage "$ID" "go-run-$name" rt_ssh "$ID" "cd $RWD && XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV ./$name.test -test.v=test2json -test.run '^TestRouter' -test.timeout 20m" >"$raw" 2>"$errlog" || rc=$?
   if [ "$rc" = 3 ]; then
     LOST=1
     rt_result "$ID" FAIL "go:$name" "связь потеряна во время запуска тестов"

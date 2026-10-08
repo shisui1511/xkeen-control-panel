@@ -1,0 +1,1 @@
+socks5://sock-user:sock-pass@node8.example:1080#Socks5

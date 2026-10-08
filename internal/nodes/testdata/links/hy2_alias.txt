@@ -1,0 +1,1 @@
+hy2://hy2-pass@node5.example:443?sni=cdn.example#Hy2%20alias

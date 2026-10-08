@@ -11,12 +11,17 @@ package routertest
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Target — цель, на которой запущен тест. Значения передаёт scripts/router/go-suite.sh.
@@ -124,4 +129,113 @@ func Exec(ctx context.Context, name string, args ...string) (stdout, stderr stri
 		}
 	}
 	return out.String(), errOut.String(), code
+}
+
+// Panel — клиент API панели, которая работает на этом же устройстве. Сессия
+// (cookie и CSRF-токен) создана на ПК и передана файлом с правами 600: пароль
+// панели на устройство не попадает.
+type Panel struct {
+	base   string
+	cookie string
+	csrf   string
+	client *http.Client
+}
+
+// NewPanel читает сессию из XCP_RT_SESSION_FILE (строки XCP_RT_COOKIE=<имя>=<значение>
+// и XCP_RT_CSRF=<токен>) и адрес панели из XCP_RT_PANEL.
+func NewPanel(t testing.TB) *Panel {
+	t.Helper()
+	base := os.Getenv("XCP_RT_PANEL")
+	file := os.Getenv("XCP_RT_SESSION_FILE")
+	if base == "" || file == "" {
+		t.Fatal("нет сессии панели: тест запускается только через make router-test")
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("файл сессии панели не читается: %v", err)
+	}
+	p := &Panel{
+		base: strings.TrimRight(base, "/"),
+		client: &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				// Сертификат панели самоподписанный: проверка цепочки невозможна.
+				// Клиент используется только тестами под тегом router и только
+				// для панели этого же устройства (loopback).
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		},
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		key, val, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "XCP_RT_COOKIE":
+			p.cookie = val
+		case "XCP_RT_CSRF":
+			p.csrf = val
+		}
+	}
+	if p.cookie == "" || p.csrf == "" {
+		t.Fatal("в файле сессии панели нет cookie или CSRF-токена")
+	}
+	return p
+}
+
+// GetJSON выполняет GET и разбирает ответ JSON в out (nil — тело не нужно).
+// Возвращает HTTP-статус; ошибка — только сетевая или разбора.
+func (p *Panel) GetJSON(path string, out any) (int, error) {
+	return p.do(http.MethodGet, path, nil, out)
+}
+
+// PostJSON выполняет POST с телом JSON (in; nil — без тела) и разбирает ответ в out.
+func (p *Panel) PostJSON(path string, in, out any) (int, error) {
+	return p.do(http.MethodPost, path, in, out)
+}
+
+func (p *Panel) do(method, path string, in, out any) (int, error) {
+	var body io.Reader
+	if in != nil {
+		raw, err := json.Marshal(in)
+		if err != nil {
+			return 0, fmt.Errorf("тело запроса: %w", err)
+		}
+		body = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequest(method, p.base+path, body)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Cookie", p.cookie)
+	req.Header.Set("X-CSRF-Token", p.csrf)
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return resp.StatusCode, err
+	}
+	if out != nil && len(raw) > 0 && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if err := json.Unmarshal(raw, out); err != nil {
+			return resp.StatusCode, fmt.Errorf("ответ %s не JSON: %w", path, err)
+		}
+	}
+	return resp.StatusCode, nil
+}
+
+// LinksDir — каталог с данными share-ссылок, скопированный на устройство.
+func LinksDir(t testing.TB) string {
+	t.Helper()
+	dir := os.Getenv("XCP_RT_LINKS")
+	if dir == "" {
+		t.Fatal("нет XCP_RT_LINKS: тест запускается только через make router-test")
+	}
+	return dir
 }
