@@ -284,3 +284,38 @@ rt_restore() {
   rt_result "$_id" PASS restore-verify "файлы, версии, ядро и xcp равны снимку"
   rt_ssh "$_id" "sh $RT_SNAP_DIR/snapshot.sh cleanup; rm -rf $RT_SNAP_DIR" >/dev/null 2>&1 || true
 }
+
+# Значение ключа из строк «ключ=значение»: rt_kv <ключ> (текст на stdin).
+rt_kv() {
+  sed -n "s/^$1=//p" | head -n 1
+}
+
+# Ждёт возврата цели после перезагрузки: ssh отвечает и панель отвечает 200 на /api/version.
+#   rt_wait_back <id> [boot_id_до]
+# С boot_id ждёт ещё и его смены: пока устройство не выключилось, ответ старой загрузки не
+# считается возвратом. Опрос раз в 10 с до RT_REBOOT_WAIT (по умолчанию 900; mipsle медленнее).
+# Итог: RT_BACK_SECS — сколько секунд прошло до возврата или до выхода срока;
+# код 0 — вернулась, 1 — срок вышел (D-17).
+rt_wait_back() {
+  _wb_id=$1
+  _wb_boot=${2:-}
+  _wb_max=${RT_REBOOT_WAIT:-900}
+  _wb_url=$(rt_get "$_wb_id" URL)
+  _wb_t0=$(date +%s)
+  RT_BACK_SECS=0
+  while :; do
+    _wb_bid=$(rt_ssh "$_wb_id" 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null) || _wb_bid=""
+    if [ -n "$_wb_bid" ] && { [ -z "$_wb_boot" ] || [ "$_wb_bid" != "$_wb_boot" ]; }; then
+      _wb_code=$(curl -sk --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code}' "$_wb_url/api/version" 2>/dev/null) || _wb_code=000
+      if [ "$_wb_code" = 200 ]; then
+        RT_BACK_SECS=$(($(date +%s) - _wb_t0))
+        return 0
+      fi
+    fi
+    RT_BACK_SECS=$(($(date +%s) - _wb_t0))
+    if [ "$RT_BACK_SECS" -ge "$_wb_max" ]; then
+      return 1
+    fi
+    sleep 10
+  done
+}

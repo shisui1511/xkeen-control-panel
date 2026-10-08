@@ -13,6 +13,11 @@
 #                дальше та же матрица ядер, что у полного, но go и pw — только выбранное.
 #                Ничего не затронуто — деплой и смоук (без снимка). Причины выбора —
 #                <отчёт>/select.txt и раздел «Выбор» отчёта.
+#   reboot       холодный старт (D-24): деплой, предполёт и снимок параллельно, затем
+#                по одной цели в порядке XCP_REBOOT_ORDER (нижестоящая цель каскада первой):
+#                перезагрузка, ожидание возврата, проверки автозапуска (xcp той же версии,
+#                XKeen, то же ядро, правила iptables), смоук, сверка со снимком. В конце
+#                все цели снова отвечают (reboot-reachable-end). Матрица ядер не применяется.
 #
 # Порядок: check-known.sh (метки известных падений) -> цели из локального конфига ->
 # блокировка на весь прогон -> отчёт -> проверка связи -> deploy.sh -> по целям
@@ -30,7 +35,10 @@
 #   RT_SMOKE_WINDOW=<с>  окно наблюдения смоука за перезапуском ядра (по умолчанию 120)
 #   RT_CORES="<ядра>"    ветви матрицы через пробел (по умолчанию «xray mihomo»); сужать
 #                        можно для ручной отладки, гейт перед PR — обе ветви на обеих целях
+#   RT_REBOOT_WAIT=<с>   ожидание возврата цели после перезагрузки (по умолчанию 900)
+#   XCP_REBOOT_ORDER     порядок перезагрузки (локальный конфиг, id через пробел)
 #   RT_BASE=<ref>        база сравнения набора changed (по умолчанию merge-base с origin/main)
+#   RT_FILES=<a,b,c>     набор changed: выбор для заданного списка файлов вместо git (отладка)
 #
 # Раскладка отчёта: результаты всех ветвей — в <отчёт>/<id>/results.tsv (ядро ветви — во
 # второй колонке), артефакты ветви (go-*.jsonl, pw/, pw-switch/) — в <отчёт>/<id>/<ядро>/.
@@ -45,9 +53,9 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 SUITE=${1:-}
 case "$SUITE" in
-  smoke | changed | '') ;;
+  smoke | changed | reboot | '') ;;
   *)
-    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed и полный (без SUITE)" >&2
+    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, reboot и полный (без SUITE)" >&2
     echo "router-test: пример: make router-test SUITE=smoke" >&2
     exit 2
     ;;
@@ -94,6 +102,7 @@ SEL_ANY=1
 if [ "$SUITE" = changed ]; then
   _sel_args=""
   [ -z "${RT_BASE:-}" ] || _sel_args="--base $RT_BASE"
+  [ -z "${RT_FILES:-}" ] || _sel_args="--files $RT_FILES"
   _sel_rc=0
   # shellcheck disable=SC2086
   _sel=$(node "$SCRIPT_DIR/select-changed.mjs" --explain $_sel_args 2>"$RT_REPORT/select.txt") || _sel_rc=$?
@@ -314,15 +323,270 @@ full_target() {
   exit 0
 }
 
-PIDS=""
-for t in ${DEPLOYED:-}; do
-  if [ -z "$SUITE" ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
-    (full_target "$t") &
-  else
-    sh "$SCRIPT_DIR/smoke.sh" "$t" "$EXPECT" &
+# --- набор reboot (D-24) -------------------------------------------------------------
+# Предполёт и снимок идут параллельно (D-23), перезагрузка — строго по одной цели в порядке
+# XCP_REBOOT_ORDER: перезагрузка вышестоящей цели каскада обрывает связь ПК и upstream
+# нижестоящей, параллельная перезагрузка дала бы ложные ошибки в xcp.log и недетерминированный
+# смоук (D-16). Проверки цели завершаются до перезагрузки следующей.
+
+RB_CHECKS="reboot-back reboot-xcp reboot-xkeen reboot-core reboot-iptables reboot-verify reboot-reachable-end"
+TAB=$(printf '\t')
+
+# Метка известного падения проверки перезагрузки: запись `reboot:<проверка>` в known-failures
+# (проверка — точно или по префиксу, селектор — по архитектуре и ядру цели). Печатает slug.
+rb_label() {
+  rb_arch=$(rt_get "$1" ARCH)
+  rb_core=-
+  [ ! -f "$RT_REPORT/$1/core" ] || rb_core=$(cat "$RT_REPORT/$1/core")
+  while IFS="$TAB" read -r rb_lc rb_ls rb_lslug || [ -n "$rb_lc" ]; do
+    case "$rb_lc" in reboot:?*) ;; *) continue ;; esac
+    rb_p=${rb_lc#reboot:}
+    case "$2" in "$rb_p"*) ;; *) continue ;; esac
+    rt_selector_match "$rb_ls" "$rb_arch" "$rb_core" || continue
+    printf '%s\n' "$rb_lslug"
+    return 0
+  done <"$SCRIPT_DIR/known-failures"
+  return 1
+}
+
+# Строка результата: rb_res <цель> <PASS|FAIL|SKIP> <проверка> <деталь>; FAIL с применимой
+# меткой становится KNOWN со slug.
+rb_res() {
+  if [ "$2" = FAIL ]; then
+    rb_slug=$(rb_label "$1" "$3") || rb_slug=""
+    if [ -n "$rb_slug" ]; then
+      rt_result "$1" KNOWN "$3" "$4 [известное падение: $rb_slug]"
+      return 0
+    fi
   fi
-  PIDS="$PIDS $!"
-done
+  rt_result "$1" "$2" "$3" "$4"
+}
+
+# Остальные проверки цели пропущены: rb_skip <цель> <причина> <проверки…>
+rb_skip() {
+  rb_sk_t=$1
+  rb_sk_why=$2
+  shift 2
+  for rb_sk_c in "$@"; do
+    rt_result "$rb_sk_t" SKIP "$rb_sk_c" "$rb_sk_why"
+  done
+}
+
+# Снимок на устройстве больше не нужен.
+rb_cleanup() {
+  rt_ssh "$1" "sh $RT_SNAP_DIR/snapshot.sh cleanup; rm -rf $RT_SNAP_DIR" >/dev/null 2>&1 || true
+}
+
+# Состояние автозапуска на устройстве (reboot-state.sh); печатает строки ключ=значение.
+# Сразу после холодного старта сеть может моргнуть, поэтому до трёх попыток; вывод считается
+# полным, если дошёл до последней строки (nat=). Ошибки ssh — в <отчёт>/<цель>/reboot-state.err.
+rb_state() {
+  rb_tries=0
+  while [ "$rb_tries" -lt 3 ]; do
+    rb_out=$(RT_SSH_STDIN=1 rt_ssh "$1" "sh -s${2:+ $2}" <"$SCRIPT_DIR/reboot-state.sh" 2>>"$RT_REPORT/$1/reboot-state.err") || rb_out=""
+    if printf '%s\n' "$rb_out" | grep -q '^nat='; then
+      printf '%s\n' "$rb_out"
+      return 0
+    fi
+    rb_tries=$((rb_tries + 1))
+    sleep 10
+  done
+  return 1
+}
+
+# Ожидание рабочего XKeen после холодного старта (settle.sh), время — в timings.tsv.
+rb_settle() {
+  rb_s0=$(date +%s)
+  RT_SSH_STDIN=1 rt_ssh "$1" "sh -s" <"$SCRIPT_DIR/settle.sh" >/dev/null 2>&1 || true
+  printf '%s\t%s\t%s\t%s\t%s\n' "$1" reboot-settle "$(($(date +%s) - rb_s0))" 0 "$rb_s0" >>"$RT_REPORT/timings.tsv"
+}
+
+# Полный цикл одной цели: состояние до -> перезагрузка -> возврат -> состояние после ->
+# смоук -> сверка со снимком.
+rb_one() {
+  rb_t=$1
+  rb_b=$(rb_state "$rb_t") || rb_b=""
+  printf '%s\n' "$rb_b" >"$RT_REPORT/$rb_t/reboot-state-before.txt"
+  rb_bid=$(printf '%s\n' "$rb_b" | rt_kv boot_id)
+  rb_bxcp=$(printf '%s\n' "$rb_b" | rt_kv xcp)
+  rb_bxk=$(printf '%s\n' "$rb_b" | rt_kv xkeen)
+  rb_bcore=$(printf '%s\n' "$rb_b" | rt_kv core)
+  rb_bm=$(printf '%s\n' "$rb_b" | rt_kv mangle)
+  rb_bn=$(printf '%s\n' "$rb_b" | rt_kv nat)
+  rb_start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if [ -z "$rb_bid" ] || [ -z "$rb_bxcp" ]; then
+    rb_res "$rb_t" FAIL reboot-back "не удалось снять состояние до перезагрузки"
+    rb_skip "$rb_t" "состояние до перезагрузки не снято" reboot-xcp reboot-xkeen reboot-core reboot-iptables reboot-verify
+    rb_cleanup "$rb_t"
+    printf '%s\t%s\t%s\t%s\n' "$rb_t" "$rb_start" - "$rb_start" >>"$RT_REPORT/reboot.tsv"
+    return 0
+  fi
+  printf '%s\n' "$rb_bcore" >"$RT_REPORT/$rb_t/core"
+
+  # Команда перезагрузки KeeneticOS из Entware; соединение обрывается — это ожидаемо (код 3)
+  rb_rc=0
+  rt_ssh "$rb_t" "ndmc -c 'system reboot'" >/dev/null 2>&1 || rb_rc=$?
+  if [ "$rb_rc" != 0 ] && [ "$rb_rc" != 3 ]; then
+    rb_res "$rb_t" FAIL reboot-back "команда перезагрузки не принята (код $rb_rc)"
+    rb_skip "$rb_t" "перезагрузка не выполнена" reboot-xcp reboot-xkeen reboot-core reboot-iptables reboot-verify
+    rb_cleanup "$rb_t"
+    printf '%s\t%s\t%s\t%s\n' "$rb_t" "$rb_start" - "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$RT_REPORT/reboot.tsv"
+    return 0
+  fi
+
+  rb_rc=0
+  rt_stage "$rb_t" reboot-wait rt_wait_back "$rb_t" "$rb_bid" || rb_rc=$?
+  rb_back=$RT_BACK_SECS
+  if [ "$rb_rc" != 0 ]; then
+    rb_res "$rb_t" FAIL reboot-back "нет связи после перезагрузки: за $rb_back с цель не вернулась (снимок остался на устройстве)"
+    rb_skip "$rb_t" "нет связи после перезагрузки" reboot-xcp reboot-xkeen reboot-core reboot-iptables reboot-verify
+    printf '%s\t%s\t%s\t%s\n' "$rb_t" "$rb_start" "$rb_back" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$RT_REPORT/reboot.tsv"
+    return 0
+  fi
+  rb_res "$rb_t" PASS reboot-back "вернулась за $rb_back с, загрузка новая"
+
+  [ "$rb_bxk" != 1 ] || rb_settle "$rb_t"
+  rb_a=$(rb_state "$rb_t" stable) || rb_a=""
+  printf '%s\n' "$rb_a" >"$RT_REPORT/$rb_t/reboot-state-after.txt"
+  rb_axcp=$(printf '%s\n' "$rb_a" | rt_kv xcp)
+  rb_apid=$(printf '%s\n' "$rb_a" | rt_kv xcp_pid)
+  rb_axk=$(printf '%s\n' "$rb_a" | rt_kv xkeen)
+  rb_acore=$(printf '%s\n' "$rb_a" | rt_kv core)
+  rb_am=$(printf '%s\n' "$rb_a" | rt_kv mangle)
+  rb_an=$(printf '%s\n' "$rb_a" | rt_kv nat)
+  if [ -z "$rb_a" ]; then
+    rb_res "$rb_t" FAIL reboot-xcp "не удалось снять состояние после перезагрузки"
+    rb_skip "$rb_t" "состояние после перезагрузки не снято" reboot-xkeen reboot-core reboot-iptables
+  else
+    # xcp запущен той же версии (S99xcp)
+    if [ -n "$rb_apid" ] && [ "$rb_axcp" = "$rb_bxcp" ]; then
+      rb_res "$rb_t" PASS reboot-xcp "xcp запущен автозапуском, версия $rb_axcp"
+    else
+      rb_res "$rb_t" FAIL reboot-xcp "после перезагрузки xcp: PID ${rb_apid:--}, версия ${rb_axcp:--}; до перезагрузки версия $rb_bxcp"
+    fi
+    # XKeen запущен, если был запущен
+    if [ "$rb_bxk" != 1 ]; then
+      rb_res "$rb_t" PASS reboot-xkeen "XKeen не работал до перезагрузки — не проверяется"
+    elif [ "$rb_axk" = 1 ]; then
+      rb_res "$rb_t" PASS reboot-xkeen "XKeen запущен автозапуском"
+    else
+      rb_res "$rb_t" FAIL reboot-xkeen "XKeen работал до перезагрузки и не запущен после"
+    fi
+    # то же ядро
+    if [ "$rb_acore" = "$rb_bcore" ]; then
+      rb_res "$rb_t" PASS reboot-core "ядро $rb_acore запущено, как до перезагрузки"
+    else
+      rb_res "$rb_t" FAIL reboot-core "после перезагрузки ядро ${rb_acore:--}, до перезагрузки $rb_bcore"
+    fi
+    # правила XKeen восстановлены
+    if [ "$((rb_bm + rb_bn))" = 0 ]; then
+      rb_res "$rb_t" PASS reboot-iptables "правил XKeen до перезагрузки не было — не проверяется"
+    elif [ "$rb_am" = "$rb_bm" ] && [ "$rb_an" = "$rb_bn" ]; then
+      rb_res "$rb_t" PASS reboot-iptables "правила XKeen на месте: mangle $rb_am, nat $rb_an"
+    else
+      rb_res "$rb_t" FAIL reboot-iptables "правил XKeen mangle ${rb_am:--}, nat ${rb_an:--}; до перезагрузки mangle $rb_bm, nat $rb_bn"
+    fi
+  fi
+
+  # смоук (D-34): строки лога — с баннера запуска после перезагрузки
+  sh "$SCRIPT_DIR/smoke.sh" "$rb_t" "$EXPECT" || true
+
+  # файлы стенда не изменились: сверка со снимком, расхождение — восстановление и падение
+  rb_rc=0
+  rt_stage "$rb_t" reboot-verify rt_snap_remote "$rb_t" verify >"$RT_REPORT/$rb_t/reboot-verify.log" 2>&1 || rb_rc=$?
+  if [ "$rb_rc" = 0 ]; then
+    rb_res "$rb_t" PASS reboot-verify "файлы, версии и ядро равны снимку"
+    rb_cleanup "$rb_t"
+  else
+    rb_res "$rb_t" FAIL reboot-verify "расхождение со снимком после перезагрузки (код $rb_rc): $(grep 'ОШИБКА' "$RT_REPORT/$rb_t/reboot-verify.log" | head -n 2)"
+    rt_restore "$rb_t" || true
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$rb_t" "$rb_start" "$rb_back" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$RT_REPORT/reboot.tsv"
+}
+
+reboot_suite() {
+  # 1. предполёт и снимок параллельно
+  for rb_t in ${DEPLOYED:-}; do
+    (
+      rb_rc=0
+      rt_snapshot "$rb_t" || rb_rc=$?
+      echo "$rb_rc" >"$RT_REPORT/$rb_t/snap.rc"
+    ) &
+  done
+  wait
+  rb_ready=""
+  for rb_t in $RT_TARGETS; do
+    if [ "$(cat "$RT_REPORT/$rb_t/snap.rc" 2>/dev/null || echo 1)" = 0 ]; then
+      rb_ready="$rb_ready $rb_t"
+    else
+      # shellcheck disable=SC2086
+      rb_skip "$rb_t" "цель не готова: нет связи, деплоя или снимка" $RB_CHECKS
+    fi
+  done
+
+  # 2. порядок: XCP_REBOOT_ORDER, затем цели набора, которых в нём нет
+  rb_order=""
+  if [ -n "${XCP_REBOOT_ORDER:-}" ]; then
+    for rb_o in $XCP_REBOOT_ORDER; do
+      case " $rb_ready " in
+        *" $rb_o "*) case " $rb_order " in *" $rb_o "*) ;; *) rb_order="$rb_order $rb_o" ;; esac ;;
+      esac
+    done
+  else
+    echo "XCP_REBOOT_ORDER не задан: порядок XCP_TARGETS (нижестоящая цель каскада должна идти первой)" >"$RT_REPORT/reboot-warn"
+  fi
+  for rb_o in $rb_ready; do
+    case " $rb_order " in *" $rb_o "*) ;; *) rb_order="$rb_order $rb_o" ;; esac
+  done
+  rb_order=${rb_order# }
+  printf '%s\n' "$rb_order" >"$RT_REPORT/reboot-order"
+  : >"$RT_REPORT/reboot.tsv"
+
+  # 3. строго по одной цели
+  for rb_t in $rb_order; do
+    rb_one "$rb_t"
+  done
+
+  # 4. в конце все цели снова отвечают (нижестоящая видна с ПК после перезагрузки вышестоящей)
+  for rb_t in $rb_order; do
+    rb_rc=0
+    rt_stage "$rb_t" reboot-end rt_wait_back "$rb_t" || rb_rc=$?
+    if [ "$rb_rc" = 0 ]; then
+      rb_res "$rb_t" PASS reboot-reachable-end "отвечает по ssh, панель отвечает (ожидание $RT_BACK_SECS с)"
+    else
+      rb_res "$rb_t" FAIL reboot-reachable-end "нет связи с целью в конце набора (ожидание $RT_BACK_SECS с)"
+    fi
+  done
+
+  # 5. метка reboot:* без падения проверки — XPASS (метка больше не нужна)
+  for rb_t in $rb_order; do
+    rb_arch=$(rt_get "$rb_t" ARCH)
+    rb_core=-
+    [ ! -f "$RT_REPORT/$rb_t/core" ] || rb_core=$(cat "$RT_REPORT/$rb_t/core")
+    while IFS="$TAB" read -r rb_lc rb_ls rb_lslug || [ -n "$rb_lc" ]; do
+      case "$rb_lc" in reboot:?*) ;; *) continue ;; esac
+      rt_selector_match "$rb_ls" "$rb_arch" "$rb_core" || continue
+      rb_p=${rb_lc#reboot:}
+      if awk -F'\t' -v p="$rb_p" 'index($3, p) == 1 { if ($1 == "PASS") ok = 1; if ($1 == "KNOWN") k = 1 } END { exit !(ok && !k) }' "$RT_REPORT/$rb_t/results.tsv"; then
+        rt_result "$rb_t" XPASS "known:$rb_p" "метка больше не нужна: снять и закрыть todo $rb_lslug"
+      fi
+    done <"$SCRIPT_DIR/known-failures"
+  done
+}
+
+PIDS=""
+if [ "$SUITE" = reboot ]; then
+  reboot_suite
+else
+  for t in ${DEPLOYED:-}; do
+    if [ -z "$SUITE" ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
+      (full_target "$t") &
+    else
+      sh "$SCRIPT_DIR/smoke.sh" "$t" "$EXPECT" &
+    fi
+    PIDS="$PIDS $!"
+  done
+fi
 # Фоновые подпроцессы игнорируют SIGINT, поэтому прерывание run.sh не обрывает
 # восстановление: wait, прерванный сигналом (код больше 128), повторяем, пока
 # подпроцесс не завершится (повторный wait завершённого даёт 127).
@@ -358,6 +622,16 @@ XPASSES=0
     echo '```'
     cat "$RT_REPORT/select.txt"
     echo '```'
+    echo
+  fi
+  if [ "$SUITE" = reboot ] && [ -f "$RT_REPORT/reboot-order" ]; then
+    echo "## Перезагрузки"
+    echo
+    echo "- Порядок (XCP_REBOOT_ORDER): $(cat "$RT_REPORT/reboot-order")"
+    [ ! -f "$RT_REPORT/reboot-warn" ] || echo "- Предупреждение: $(cat "$RT_REPORT/reboot-warn")"
+    if [ -s "$RT_REPORT/reboot.tsv" ]; then
+      awk -F'\t' '{printf "- %s: начало перезагрузки %s (UTC), возврат через %s с, конец проверок %s (UTC)\n", $1, $2, $3, $4}' "$RT_REPORT/reboot.tsv"
+    fi
     echo
   fi
   for t in $RT_TARGETS; do
