@@ -40,6 +40,9 @@ bin/golangci-lint
 # Playwright
 frontend/playwright-report/
 frontend/test-results/
+# Запасные пути роутерного конфига, если этап pw запущен вне pw-suite.sh
+frontend/test-results-router/
+frontend/test-results-router.json
 
 # Redesign folder from external designer
 /frontend-redesign/
