@@ -19,7 +19,7 @@ import { RT, T } from './lib/env';
 // пробельная правка (лишняя пустая строка в конце) даёт предупреждение, если в маршрутизации
 // стенда этого обхода нет. Для Mihomo то же даёт правка config.yaml без секции rules.
 
-const THEMES = ['light'] as const;
+const THEMES = ['light', 'dark'] as const;
 const VIEWPORT = { width: 390, height: 844 };
 
 const XRAY_DIR = '/opt/etc/xray/configs';
