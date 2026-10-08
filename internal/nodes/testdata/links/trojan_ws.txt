@@ -1,0 +1,1 @@
+trojan://trojan-pass@node3.example:443?security=tls&sni=cdn.example&type=ws&path=%2Ftr&host=cdn.example&allowInsecure=1&alpn=h2&fp=firefox#Trojan%20WS

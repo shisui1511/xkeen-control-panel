@@ -1,0 +1,1 @@
+hysteria://node6.example:443?auth=hy1-pass&peer=cdn.example&insecure=1&upmbps=10&downmbps=50&alpn=h3&obfs=xplus&obfsParam=obfs-v1#Hy1

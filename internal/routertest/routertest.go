@@ -1,0 +1,241 @@
+//go:build router
+
+// Package routertest — общие помощники Go-тестов, которые запускаются на самом
+// устройстве (тег сборки router, запуск через make router-test). Пакет не входит
+// в бинарник продукта: без тега он пуст.
+//
+// Источник истины в таких тестах — вердикт системы (iptables, ndmc, XKeen, ядро),
+// а не эталонный файл или таблица «вход → выход».
+package routertest
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+)
+
+// Target — цель, на которой запущен тест. Значения передаёт scripts/router/go-suite.sh.
+type Target struct {
+	// Arch — архитектура цели (arm64, mipsle).
+	Arch string
+	// Core — активное ядро цели (xray, mihomo).
+	Core string
+	// WorkDir — рабочий каталог теста на устройстве; всё временное — только в нём.
+	WorkDir string
+}
+
+// Current читает цель из окружения. Без переменных тест запущен мимо make router-test.
+func Current(t testing.TB) Target {
+	t.Helper()
+	tg := Target{
+		Arch:    os.Getenv("XCP_RT_ARCH"),
+		Core:    os.Getenv("XCP_RT_CORE"),
+		WorkDir: os.Getenv("XCP_RT_WORKDIR"),
+	}
+	if tg.Arch == "" || tg.WorkDir == "" {
+		t.Fatal("тест запускается только через make router-test")
+	}
+	return tg
+}
+
+// KnownMark — метка известного падения: селектор целей и slug todo.
+// Пустая метка не применяется ни к одной цели.
+type KnownMark struct {
+	Selector string
+	Slug     string
+}
+
+// Known создаёт метку известного падения. Селектор: «*», «<arch>», «<arch>/<ядро>»
+// или «*/<ядро>»; slug — имя файла todo в .planning/todos/pending без расширения.
+// Аргументы всегда строковые литералы: их ищет scripts/router/check-known.sh.
+func Known(selector, slug string) KnownMark {
+	return KnownMark{Selector: selector, Slug: slug}
+}
+
+// Applies сообщает, относится ли метка к цели. Грамматика селектора совпадает
+// с rt_selector_match в scripts/router/lib.sh.
+func (k KnownMark) Applies(tg Target) bool {
+	if k.Selector == "" || k.Slug == "" {
+		return false
+	}
+	sel := k.Selector
+	switch {
+	case sel == "*":
+		return true
+	case strings.HasPrefix(sel, "*/"):
+		return strings.TrimPrefix(sel, "*/") == tg.Core
+	case strings.Contains(sel, "/"):
+		arch, core, _ := strings.Cut(sel, "/")
+		return arch == tg.Arch && core == tg.Core
+	default:
+		return sel == tg.Arch
+	}
+}
+
+// Маркеры вывода, по которым go-suite.sh отличает KNOWN и XPASS от PASS и FAIL.
+const (
+	markerKnown = "KNOWN-FAILURE slug="
+	markerXPass = "XPASS slug="
+)
+
+// Verdict фиксирует итог утверждения с учётом метки известного падения.
+//   - метка не применяется: ok=false — провал теста;
+//   - метка применяется, ok=false — известное падение (KNOWN), тест не краснеет;
+//   - метка применяется, ok=true — XPASS: метка больше не нужна, тест краснеет.
+func Verdict(t *testing.T, ok bool, mark KnownMark, format string, args ...any) {
+	t.Helper()
+	msg := fmt.Sprintf(format, args...)
+	if !mark.Applies(Current(t)) {
+		if !ok {
+			t.Errorf("%s", msg)
+		}
+		return
+	}
+	if ok {
+		t.Errorf("%s%s: метка больше не нужна — снимите её и закройте todo", markerXPass, mark.Slug)
+		return
+	}
+	t.Logf("%s%s: %s", markerKnown, mark.Slug, msg)
+}
+
+// Exec запускает системную команду и возвращает её stdout, stderr и код выхода.
+// Код -1 — команда не запустилась (нет бинарника) или убита по контексту.
+func Exec(ctx context.Context, name string, args ...string) (stdout, stderr string, code int) {
+	var out, errOut bytes.Buffer
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		code = 0
+	case errors.As(err, &exitErr):
+		code = exitErr.ExitCode()
+	default:
+		code = -1
+		if errOut.Len() == 0 {
+			errOut.WriteString(err.Error())
+		}
+	}
+	return out.String(), errOut.String(), code
+}
+
+// Panel — клиент API панели, которая работает на этом же устройстве. Сессия
+// (cookie и CSRF-токен) создана на ПК и передана файлом с правами 600: пароль
+// панели на устройство не попадает.
+type Panel struct {
+	base   string
+	cookie string
+	csrf   string
+	client *http.Client
+}
+
+// NewPanel читает сессию из XCP_RT_SESSION_FILE (строки XCP_RT_COOKIE=<имя>=<значение>
+// и XCP_RT_CSRF=<токен>) и адрес панели из XCP_RT_PANEL.
+func NewPanel(t testing.TB) *Panel {
+	t.Helper()
+	base := os.Getenv("XCP_RT_PANEL")
+	file := os.Getenv("XCP_RT_SESSION_FILE")
+	if base == "" || file == "" {
+		t.Fatal("нет сессии панели: тест запускается только через make router-test")
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("файл сессии панели не читается: %v", err)
+	}
+	p := &Panel{
+		base: strings.TrimRight(base, "/"),
+		client: &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				// Сертификат панели самоподписанный: проверка цепочки невозможна.
+				// Клиент используется только тестами под тегом router и только
+				// для панели этого же устройства (loopback).
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		},
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		key, val, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "XCP_RT_COOKIE":
+			p.cookie = val
+		case "XCP_RT_CSRF":
+			p.csrf = val
+		}
+	}
+	if p.cookie == "" || p.csrf == "" {
+		t.Fatal("в файле сессии панели нет cookie или CSRF-токена")
+	}
+	return p
+}
+
+// GetJSON выполняет GET и разбирает ответ JSON в out (nil — тело не нужно).
+// Возвращает HTTP-статус; ошибка — только сетевая или разбора.
+func (p *Panel) GetJSON(path string, out any) (int, error) {
+	return p.do(http.MethodGet, path, nil, out)
+}
+
+// PostJSON выполняет POST с телом JSON (in; nil — без тела) и разбирает ответ в out.
+func (p *Panel) PostJSON(path string, in, out any) (int, error) {
+	return p.do(http.MethodPost, path, in, out)
+}
+
+func (p *Panel) do(method, path string, in, out any) (int, error) {
+	var body io.Reader
+	if in != nil {
+		raw, err := json.Marshal(in)
+		if err != nil {
+			return 0, fmt.Errorf("тело запроса: %w", err)
+		}
+		body = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequest(method, p.base+path, body)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Cookie", p.cookie)
+	req.Header.Set("X-CSRF-Token", p.csrf)
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return resp.StatusCode, err
+	}
+	if out != nil && len(raw) > 0 && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if err := json.Unmarshal(raw, out); err != nil {
+			return resp.StatusCode, fmt.Errorf("ответ %s не JSON: %w", path, err)
+		}
+	}
+	return resp.StatusCode, nil
+}
+
+// LinksDir — каталог с данными share-ссылок, скопированный на устройство.
+func LinksDir(t testing.TB) string {
+	t.Helper()
+	dir := os.Getenv("XCP_RT_LINKS")
+	if dir == "" {
+		t.Fatal("нет XCP_RT_LINKS: тест запускается только через make router-test")
+	}
+	return dir
+}

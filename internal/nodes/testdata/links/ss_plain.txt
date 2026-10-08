@@ -1,0 +1,1 @@
+ss://chacha20-ietf-poly1305:ss-pass-2@node4.example:8388#SS%20plain

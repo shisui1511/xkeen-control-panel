@@ -1,0 +1,1 @@
+vless://11111111-1111-4111-8111-111111111111@node1.example:443?security=tls&sni=cdn.example&alpn=h2%2Chttp%2F1.1&fp=hellochrome_131&type=tcp#VLESS%20TLS
