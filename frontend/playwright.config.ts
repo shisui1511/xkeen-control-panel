@@ -18,7 +18,8 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-      testIgnore: '**/mobile-shell.spec.ts'
+      // router/ — спеки против настоящей панели роутера (playwright.router.config.ts)
+      testIgnore: ['**/mobile-shell.spec.ts', '**/router/**']
     },
     {
       name: 'mobile',
