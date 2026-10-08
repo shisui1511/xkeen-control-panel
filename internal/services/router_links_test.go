@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -84,6 +85,11 @@ func rtKernelTimeout() time.Duration {
 	return 60 * time.Second
 }
 
+var (
+	rtIPv4Re = regexp.MustCompile(`\b\d{1,3}(?:\.\d{1,3}){3}\b`)
+	rtIPv6Re = regexp.MustCompile(`(?i)\b(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{0,4}\b`)
+)
+
 // rtSafeKeys — ключи outbound, значения которых не секретны (имена протоколов,
 // транспортов и шифров): их в выводе ядра оставляем, иначе текст ошибки нечитаем.
 var rtSafeKeys = map[string]bool{
@@ -113,7 +119,12 @@ func rtSecrets(v any, key string, out *[]string) {
 
 // rtRedactor возвращает функцию очистки вывода ядра от значений outbound.
 func rtRedactor(ob *Outbound) func(string) string {
-	raw, err := json.Marshal(ob)
+	return rtRedactorValue(ob)
+}
+
+// rtRedactorValue — то же для произвольного значения (узел из конфига ядра).
+func rtRedactorValue(v any) func(string) string {
+	raw, err := json.Marshal(v)
 	if err != nil {
 		return func(string) string { return "(вывод скрыт)" }
 	}
@@ -128,6 +139,13 @@ func rtRedactor(ob *Outbound) func(string) string {
 		for _, sec := range secrets {
 			s = strings.ReplaceAll(s, sec, "***")
 		}
+		s = rtIPv4Re.ReplaceAllStringFunc(s, func(ip string) string {
+			if ip == "127.0.0.1" || ip == "0.0.0.0" {
+				return ip
+			}
+			return "x.x.x.x"
+		})
+		s = rtIPv6Re.ReplaceAllString(s, "x:x")
 		s = strings.Join(strings.Fields(s), " ")
 		// Самое важное в выводе ядра — причина отказа: она идёт после маркера, всё до него
 		// (баннер, пути, предупреждения) для вердикта не нужно.
