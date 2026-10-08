@@ -18,6 +18,8 @@ export default defineConfig({
   workers: 1,
   // Повторов нет: любое падение — находка (метка известного падения или починка)
   retries: 0,
+  // Лимит теста учитывает медленные устройства (XCP_SLOW из локального конфига цели)
+  timeout: 90_000 * (Number(process.env.XCP_SLOW) > 0 ? Number(process.env.XCP_SLOW) : 1),
   forbidOnly: true,
   globalSetup: './tests/router/global-setup.ts',
   outputDir: process.env.XCP_PW_OUT || './test-results-router',

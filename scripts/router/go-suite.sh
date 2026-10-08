@@ -21,6 +21,9 @@
 #   RT_REPORT     каталог отчёта (если не задан, создаётся новый)
 #   ROUTERS       игнорируется: цель задана первым аргументом
 #
+# Артефакты этапа (go-<пакет>.jsonl, .build.log, .stderr, .parsed, .hwm) лежат в
+# <отчёт>/<id>/<ядро>/ (матрица ядер, D-20); строки результатов — в <отчёт>/<id>/results.tsv.
+#
 # Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, иначе 1.
 
 set -eu
@@ -43,6 +46,8 @@ export ROUTERS
 rt_load_targets
 [ -n "${RT_REPORT:-}" ] || rt_report_init
 mkdir -p "$RT_REPORT/$ID"
+ART="$RT_REPORT/$ID/${CORE:-unknown}"
+mkdir -p "$ART"
 RT_CORE=$CORE
 export RT_CORE
 
@@ -183,7 +188,7 @@ fi
 for pkg in $PKGS; do
   name=$(printf '%s' "${pkg#internal/}" | tr '/' '-')
   bin="$BIN_DIR/$name.test"
-  buildlog="$RT_REPORT/$ID/go-$name.build.log"
+  buildlog="$ART/go-$name.build.log"
 
   rc=0
   rt_stage "$ID" "go-build-$name" build_pkg "$pkg" "$bin" >"$buildlog" 2>&1 || rc=$?
@@ -204,9 +209,9 @@ for pkg in $PKGS; do
     continue
   fi
 
-  raw="$RT_REPORT/$ID/go-$name.raw"
-  jsonl="$RT_REPORT/$ID/go-$name.jsonl"
-  errlog="$RT_REPORT/$ID/go-$name.stderr"
+  raw="$ART/go-$name.raw"
+  jsonl="$ART/go-$name.jsonl"
+  errlog="$ART/go-$name.stderr"
   # Запуск идёт через небольшой скрипт: рядом с тестом работает опрос VmHWM (пиковая
   # память тестового бинарника), последняя строка попадает в go-<имя>.hwm отчёта.
   runner="$RT_REPORT/$ID/.go-run.sh"
@@ -238,15 +243,15 @@ EOF
   # stderr устройства: адреса и токены скрыты
   rt_redact <"$errlog" >"$errlog.red" && mv "$errlog.red" "$errlog"
 
-  rt_ssh "$ID" "cat $RWD/$name.hwm" >"$RT_REPORT/$ID/go-$name.hwm" 2>/dev/null || true
+  rt_ssh "$ID" "cat $RWD/$name.hwm" >"$ART/go-$name.hwm" 2>/dev/null || true
   go tool test2json -t -p "$pkg" <"$raw" >"$jsonl"
   found=0
-  parse_jsonl "$pkg" <"$jsonl" >"$RT_REPORT/$ID/go-$name.parsed"
+  parse_jsonl "$pkg" <"$jsonl" >"$ART/go-$name.parsed"
   while IFS="$TAB" read -r st chk det || [ -n "$st" ]; do
     found=$((found + 1))
     rt_result "$ID" "$st" "$chk" "$det"
     case "$st" in FAIL | XPASS) BAD=$((BAD + 1)) ;; esac
-  done <"$RT_REPORT/$ID/go-$name.parsed"
+  done <"$ART/go-$name.parsed"
   if [ "$found" = 0 ]; then
     rt_result "$ID" FAIL "go:$name" "тесты не найдены или бинарник не запустился (код $rc): $(tail -n 2 "$errlog" | tr '\n' ' ')"
     BAD=$((BAD + 1))
