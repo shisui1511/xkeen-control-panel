@@ -206,8 +206,29 @@ for pkg in $PKGS; do
   raw="$RT_REPORT/$ID/go-$name.raw"
   jsonl="$RT_REPORT/$ID/go-$name.jsonl"
   errlog="$RT_REPORT/$ID/go-$name.stderr"
+  # Запуск идёт через небольшой скрипт: рядом с тестом работает опрос VmHWM (пиковая
+  # память тестового бинарника), последняя строка попадает в go-<имя>.hwm отчёта.
+  runner="$RT_REPORT/$ID/.go-run.sh"
+  cat >"$runner" <<EOF
+cd $RWD
+XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV ./$name.test -test.v=test2json -test.run '^TestRouter' -test.timeout 20m &
+T=\$!
+( while kill -0 \$T 2>/dev/null; do grep VmHWM /proc/\$T/status > $RWD/$name.hwm 2>/dev/null; sleep 1; done ) &
+W=\$!
+wait \$T
+rc=\$?
+kill \$W 2>/dev/null
+exit \$rc
+EOF
   rc=0
-  rt_stage "$ID" "go-run-$name" rt_ssh "$ID" "cd $RWD && XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV ./$name.test -test.v=test2json -test.run '^TestRouter' -test.timeout 20m" >"$raw" 2>"$errlog" || rc=$?
+  rt_scp "$ID" "$runner" "$RWD/run-$name.sh" || rc=$?
+  rm -f "$runner"
+  if [ "$rc" = 3 ]; then
+    LOST=1
+    break
+  fi
+  rc=0
+  rt_stage "$ID" "go-run-$name" rt_ssh "$ID" "sh $RWD/run-$name.sh" >"$raw" 2>"$errlog" || rc=$?
   if [ "$rc" = 3 ]; then
     LOST=1
     rt_result "$ID" FAIL "go:$name" "связь потеряна во время запуска тестов"
@@ -216,6 +237,7 @@ for pkg in $PKGS; do
   # stderr устройства: адреса и токены скрыты
   rt_redact <"$errlog" >"$errlog.red" && mv "$errlog.red" "$errlog"
 
+  rt_ssh "$ID" "cat $RWD/$name.hwm" >"$RT_REPORT/$ID/go-$name.hwm" 2>/dev/null || true
   go tool test2json -t -p "$pkg" <"$raw" >"$jsonl"
   found=0
   parse_jsonl "$pkg" <"$jsonl" >"$RT_REPORT/$ID/go-$name.parsed"

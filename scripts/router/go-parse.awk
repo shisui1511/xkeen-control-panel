@@ -21,7 +21,10 @@ function field(re, skip, tail,    r) {
   p = index($0, "\"Output\":\"")
   if (p > 0) {
     text = substr($0, p + 10)
-    sub(/"\}$/, "", text)
+    # новые версии Go добавляют после Output поле OutputType
+    q = index(text, "\",\"OutputType\"")
+    if (q > 0) text = substr(text, 1, q - 1)
+    else sub(/"\}$/, "", text)
     text = unesc(text)
   }
   if (test == "") {
