@@ -204,7 +204,16 @@ deploy_one() {
       done
     fi
     mv -f $BIN_PATH.new $BIN_PATH
-    $INIT_SCRIPT start >/dev/null
+    # Запуск с ожиданием и одним повтором: на медленном устройстве первый запуск
+    # после подмены 26 МБ бинарника иногда не поднимает процесс (mipsle).
+    $INIT_SCRIPT start >/dev/null 2>&1 || true
+    i=0
+    while ! pidof xcp >/dev/null; do
+      i=\$((i + 1))
+      if [ \$i -eq 8 ]; then $INIT_SCRIPT start >/dev/null 2>&1 || true; fi
+      if [ \$i -ge 30 ]; then echo 'xcp не запустился' >&2; exit 1; fi
+      sleep 1
+    done
     sleep 2
     pidof xcp >/dev/null || { echo 'xcp не запустился' >&2; exit 1; }
   " || rc=$?

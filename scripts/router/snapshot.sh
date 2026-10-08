@@ -106,8 +106,9 @@ is_volatile() {
     /opt/etc/mihomo/*.dat | /opt/etc/mihomo/*.mmdb | /opt/etc/mihomo/*.metadb) return 0 ;;
     /opt/etc/xray/configs/04_outbounds.sub_*.tail.json | /opt/etc/xray/configs/04_outbounds.zz_xcp_*) return 0 ;;
     /opt/etc/xcp/*) return 0 ;;
-    # хук iptables XKeen перегенерируется при каждом старте ядра
-    /opt/etc/ndm/netfilter.d/proxy.sh) return 0 ;;
+    # хук iptables XKeen перегенерируется при каждом старте ядра; на время записи рядом
+    # лежит временный файл proxy.sh.tmp.<pid>
+    /opt/etc/ndm/netfilter.d/proxy.sh | /opt/etc/ndm/netfilter.d/proxy.sh.tmp.*) return 0 ;;
   esac
   return 1
 }
