@@ -17,6 +17,7 @@
 #
 # Окружение:
 #   RT_GO_PKGS    пакеты через пробел (по умолчанию все с роутерными тестами)
+#   RT_GO_RUN     регэксп -test.run (по умолчанию ^TestRouter): отладка одного теста
 #   RT_REPORT     каталог отчёта (если не задан, создаётся новый)
 #   ROUTERS       игнорируется: цель задана первым аргументом
 #
@@ -211,7 +212,7 @@ for pkg in $PKGS; do
   runner="$RT_REPORT/$ID/.go-run.sh"
   cat >"$runner" <<EOF
 cd $RWD
-XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV ./$name.test -test.v=test2json -test.run '^TestRouter' -test.timeout 20m &
+XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV ./$name.test -test.v=test2json -test.run '${RT_GO_RUN:-^TestRouter}' -test.timeout 20m &
 T=\$!
 ( while kill -0 \$T 2>/dev/null; do grep VmHWM /proc/\$T/status > $RWD/$name.hwm 2>/dev/null; sleep 1; done ) &
 W=\$!
