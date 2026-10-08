@@ -39,10 +39,29 @@ var mihomoGeneratorSkips = map[string]string{
 
 // rtLinkMarks — метки известных падений по шагам схем: ключ «схема/шаг».
 // Шаги: parse, xray, mihomo.
-var rtLinkMarks = map[string]routertest.KnownMark{}
+var rtLinkMarks = map[string]routertest.KnownMark{
+	// parse: панель не разбирает ссылку.
+	"http_proxy/parse": routertest.Known("*", "share-link-http-scheme-unparsed"),
+	"ss_legacy/parse":  routertest.Known("*", "share-link-ss-legacy-base64-unparsed"),
+	"vmess_grpc/parse": routertest.Known("*", "share-link-vmess-numeric-port-unparsed"),
 
-// rtLinkSchemes ограничивает прогон (пусто — все файлы каталога ссылок).
-var rtLinkSchemes = []string{"vless_reality"}
+	// xray: ядро отвергает outbound, который выпустила панель.
+	"hy2_alias/xray":   routertest.Known("*", "xray-hysteria2-outbound-rejected"),
+	"hysteria2/xray":   routertest.Known("*", "xray-hysteria2-outbound-rejected"),
+	"hysteria_v1/xray": routertest.Known("*", "xray-hysteria2-outbound-rejected"),
+	"tuic/xray":        routertest.Known("*", "xray-tuic-outbound-rejected"),
+	"vmess_h2/xray":    routertest.Known("*", "xray-vmess-h2-transport-removed"),
+	"wireguard/xray":   routertest.Known("mipsle", "xray-wireguard-outbound-crash-mipsle"),
+
+	// mihomo: ядро отвергает YAML, который выпустил генератор панели.
+	"ss_plain/mihomo":     routertest.Known("*", "mihomo-yaml-shadowsocks-type-name"),
+	"ss_plugin/mihomo":    routertest.Known("*", "mihomo-yaml-shadowsocks-type-name"),
+	"ss_sip002/mihomo":    routertest.Known("*", "mihomo-yaml-shadowsocks-type-name"),
+	"vmess_ws_tls/mihomo": routertest.Known("*", "mihomo-yaml-vmess-alterid-key"),
+	"vmess_h2/mihomo":     routertest.Known("*", "mihomo-yaml-vmess-alterid-key"),
+	"hysteria2/mihomo":    routertest.Known("*", "mihomo-yaml-hysteria2-obfs-map"),
+	"hysteria_v1/mihomo":  routertest.Known("*", "mihomo-yaml-hysteria2-obfs-map"),
+}
 
 type rtParseResponse struct {
 	Success bool               `json:"success"`
@@ -65,21 +84,29 @@ func rtKernelTimeout() time.Duration {
 	return 60 * time.Second
 }
 
+// rtSafeKeys — ключи outbound, значения которых не секретны (имена протоколов,
+// транспортов и шифров): их в выводе ядра оставляем, иначе текст ошибки нечитаем.
+var rtSafeKeys = map[string]bool{
+	"protocol": true, "network": true, "security": true, "method": true,
+	"flow": true, "fingerprint": true, "encryption": true, "type": true,
+	"headerType": true, "congestion": true,
+}
+
 // rtSecrets собирает строковые значения outbound (адреса, ключи, имена): их нельзя
-// выводить в отчёт, поэтому хвост вывода ядра очищается от них перед печатью.
-func rtSecrets(v any, out *[]string) {
+// выводить в отчёт, поэтому вывод ядра очищается от них перед печатью.
+func rtSecrets(v any, key string, out *[]string) {
 	switch x := v.(type) {
 	case string:
-		if len(x) >= 4 {
+		if len(x) >= 4 && !rtSafeKeys[key] {
 			*out = append(*out, x)
 		}
 	case map[string]any:
-		for _, e := range x {
-			rtSecrets(e, out)
+		for k, e := range x {
+			rtSecrets(e, k, out)
 		}
 	case []any:
 		for _, e := range x {
-			rtSecrets(e, out)
+			rtSecrets(e, key, out)
 		}
 	}
 }
@@ -95,15 +122,23 @@ func rtRedactor(ob *Outbound) func(string) string {
 		return func(string) string { return "(вывод скрыт)" }
 	}
 	var secrets []string
-	rtSecrets(generic, &secrets)
+	rtSecrets(generic, "", &secrets)
 	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
 	return func(s string) string {
 		for _, sec := range secrets {
 			s = strings.ReplaceAll(s, sec, "***")
 		}
 		s = strings.Join(strings.Fields(s), " ")
-		if len(s) > 400 {
-			s = s[len(s)-400:]
+		// Самое важное в выводе ядра — причина отказа: она идёт после маркера, всё до него
+		// (баннер, пути, предупреждения) для вердикта не нужно.
+		for _, marker := range []string{"panic:", "fatal error:", "Failed to start:", "level=error"} {
+			if i := strings.Index(s, marker); i >= 0 {
+				s = s[i:]
+				break
+			}
+		}
+		if r := []rune(s); len(r) > 600 {
+			s = string(r[:400]) + " … " + string(r[len(r)-200:])
 		}
 		return s
 	}
@@ -130,9 +165,6 @@ func TestRouterShareLinks(t *testing.T) {
 
 	for _, file := range files {
 		scheme := strings.TrimSuffix(filepath.Base(file), ".txt")
-		if len(rtLinkSchemes) > 0 && !rtContains(rtLinkSchemes, scheme) {
-			continue
-		}
 		t.Run(scheme, func(t *testing.T) {
 			raw, err := os.ReadFile(file)
 			if err != nil {
@@ -239,13 +271,4 @@ func TestRouterShareLinks(t *testing.T) {
 			t.Logf("mihomo -t: код %d", code)
 		})
 	}
-}
-
-func rtContains(list []string, s string) bool {
-	for _, e := range list {
-		if e == s {
-			return true
-		}
-	}
-	return false
 }
