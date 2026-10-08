@@ -545,29 +545,40 @@ func TestRouterTproxyRules(t *testing.T) {
 		t.Fatalf("в активном конфиге ядра %s нет tproxy/redirect-входящих", tg.Core)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	rulePorts := map[int]bool{}
+	// После перезапуска XKeen (предыдущие тесты) правила на медленном устройстве
+	// появляются не сразу: ждём их до трёх минут, затем вердикт по тому, что есть.
+	var rulePorts map[int]bool
 	var chains []string
-	for _, table := range []string{"mangle", "nat"} {
-		out, stderr, code := routertest.Exec(ctx, "iptables", "-w", "-t", table, "-S")
-		if code != 0 {
-			t.Fatalf("iptables -w -t %s -S: код %d: %s", table, code, strings.TrimSpace(stderr))
-		}
-		for _, line := range strings.Split(out, "\n") {
-			for _, re := range []*regexp.Regexp{rtOnPortRe, rtToPortsRe} {
-				if m := re.FindStringSubmatch(line); m != nil {
-					if p, err := strconv.Atoi(m[1]); err == nil {
-						rulePorts[p] = true
+	deadline := time.Now().Add(3 * time.Minute)
+	for {
+		rulePorts = map[int]bool{}
+		chains = nil
+		for _, table := range []string{"mangle", "nat"} {
+			out, stderr, code := routertest.Exec(ctx, "iptables", "-w", "-t", table, "-S")
+			if code != 0 {
+				t.Fatalf("iptables -w -t %s -S: код %d: %s", table, code, strings.TrimSpace(stderr))
+			}
+			for _, line := range strings.Split(out, "\n") {
+				for _, re := range []*regexp.Regexp{rtOnPortRe, rtToPortsRe} {
+					if m := re.FindStringSubmatch(line); m != nil {
+						if p, err := strconv.Atoi(m[1]); err == nil {
+							rulePorts[p] = true
+						}
 					}
 				}
 			}
-		}
-		for _, m := range rtChainNewRe.FindAllStringSubmatch(out, -1) {
-			if strings.Contains(strings.ToLower(m[1]), "xkeen") {
-				chains = append(chains, table+" "+m[1])
+			for _, m := range rtChainNewRe.FindAllStringSubmatch(out, -1) {
+				if strings.Contains(strings.ToLower(m[1]), "xkeen") {
+					chains = append(chains, table+" "+m[1])
+				}
 			}
 		}
+		if len(rulePorts) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(2 * time.Second)
 	}
 	if len(rulePorts) == 0 {
 		t.Fatal("в iptables нет правил TPROXY/REDIRECT: XKeen не поставил перехват")

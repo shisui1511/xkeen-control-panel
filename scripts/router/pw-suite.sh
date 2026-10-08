@@ -1,10 +1,15 @@
 #!/bin/sh
-# scripts/router/pw-suite.sh <id цели> <ядро> — Playwright против настоящей панели цели.
+# scripts/router/pw-suite.sh <id цели> [ядро] [--switch <ядро>] — Playwright против настоящей панели цели.
 #
 # Запускает frontend/playwright.router.config.ts (один воркер, без повторов): вход в
 # панель делает global-setup один раз, тесты работают с настоящим API и ядром. Каждая
 # цель идёт своим процессом (run.sh запускает цели параллельно, D-23), у каждой свой
 # каталог <отчёт>/<id>/<ядро>/pw/ (трассы, снимки, JSON-отчёт, журнал запуска).
+#
+# --switch <ядро>: вместо набора запускается только core-switch.spec.ts, который через
+# интерфейс панели («Службы») переключает устройство на это ядро (XCP_WANT_CORE, матрица
+# ядер, D-20). Артефакты — в <отчёт>/<id>/<ядро>/pw-switch/, результат — строка
+# pw:core-switch:<ядро>.
 #
 # Результаты: строки `pw:<название теста>` в <отчёт>/<id>/results.tsv:
 #   PASS, FAIL, SKIP, а также KNOWN (тест с меткой knownFailure упал, как ожидалось) и
@@ -14,9 +19,11 @@
 # (на них могут быть имена узлов): в PR и todo их не прикладывают.
 #
 # Окружение:
-#   RT_SPECS   спеки через пробел (по умолчанию все tests/router/**/*.spec.ts)
+#   RT_SPECS   спеки через пробел (по умолчанию все tests/router/**/*.spec.ts);
+#              при --switch не используется
 #   RT_REPORT  каталог отчёта (если не задан, создаётся новый)
-#   XCP_T_<id>_SLOW  множитель таймаутов цели (в локальном конфиге; по умолчанию 1)
+#   XCP_T_<id>_SLOW  множитель таймаутов цели (в локальном конфиге; по умолчанию 1,
+#                    для mipsle и mips — 2)
 #
 # Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, иначе 1.
 
@@ -26,12 +33,30 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib.sh"
 
-[ $# -ge 1 ] || {
-  echo "usage: pw-suite.sh <id цели> [ядро]" >&2
+usage() {
+  echo "usage: pw-suite.sh <id цели> [ядро] [--switch <ядро>]" >&2
   exit 2
 }
+[ $# -ge 1 ] || usage
 ID=$1
-CORE=${2:-}
+shift
+CORE=""
+SWITCH=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --switch)
+      [ $# -ge 2 ] || usage
+      SWITCH=$2
+      case "$SWITCH" in xray | mihomo) ;; *) usage ;; esac
+      shift 2
+      ;;
+    *)
+      [ -z "$CORE" ] || usage
+      CORE=$1
+      shift
+      ;;
+  esac
+done
 [ "$CORE" != "-" ] || CORE=""
 
 cd "$(rt_repo_root)"
@@ -46,10 +71,23 @@ ROOT=$(rt_repo_root)
 ARCH=$(rt_get "$ID" ARCH)
 URL=$(rt_get "$ID" URL)
 SLOW=$(rt_get "$ID" SLOW)
-[ -n "$SLOW" ] || SLOW=1
+# Множитель таймаутов по умолчанию: на mipsle диск и процессор заметно медленнее,
+# обход страниц иначе упирается в таймауты загрузки; локальный конфиг может переопределить.
+if [ -z "$SLOW" ]; then
+  case "$ARCH" in
+    mipsle | mips) SLOW=2 ;;
+    *) SLOW=1 ;;
+  esac
+fi
 
 CORE_DIR=${CORE:-unknown}
-PW_DIR="$RT_REPORT/$ID/$CORE_DIR/pw"
+PW_NAME=pw
+SPECS=${RT_SPECS:-}
+if [ -n "$SWITCH" ]; then
+  PW_NAME=pw-switch
+  SPECS=core-switch.spec.ts
+fi
+PW_DIR="$RT_REPORT/$ID/$CORE_DIR/$PW_NAME"
 mkdir -p "$PW_DIR"
 STATE="$PW_DIR/state.json"
 LOG="$PW_DIR/run.log"
@@ -74,6 +112,10 @@ fi
 rc=0
 (
   cd "$ROOT/frontend"
+  # core-switch.spec.ts регистрирует тест только при XCP_WANT_CORE: в обычном наборе
+  # переменная не должна просочиться из окружения вызывающего
+  unset XCP_WANT_CORE
+  [ -z "$SWITCH" ] || export XCP_WANT_CORE=$SWITCH
   XCP_URL=$URL \
     XCP_PASSWORD=$(rt_get "$ID" PASSWORD) \
     XCP_ARCH=$ARCH \
@@ -82,7 +124,7 @@ rc=0
     XCP_PW_STATE=$STATE \
     XCP_PW_OUT=$OUT \
     XCP_PW_JSON=$JSON \
-    "$PWBIN" test -c playwright.router.config.ts ${RT_SPECS:-}
+    "$PWBIN" test -c playwright.router.config.ts $SPECS
 ) >"$LOG" 2>&1 || rc=$?
 rt_redact <"$LOG" >"$LOG.red" && mv "$LOG.red" "$LOG"
 

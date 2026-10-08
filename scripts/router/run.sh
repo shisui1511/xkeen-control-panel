@@ -2,16 +2,18 @@
 # scripts/router/run.sh [SUITE] — проверка на роутерах (make router-test SUITE=...).
 #
 # Наборы:
-#   (без SUITE)  полный: деплой, снимок, смоук, Go-тесты на устройстве
-#                (go-suite.sh), Playwright против панели (pw-suite.sh),
-#                восстановление, сверка.
+#   (без SUITE)  полный: деплой, снимок, затем матрица ядер (D-20) — для каждого ядра
+#                из RT_CORES ветвь «переключение ядра через интерфейс панели
+#                (pw-suite.sh --switch) -> смоук по строкам лога после начала ветви ->
+#                Go-тесты на устройстве (go-suite.sh) -> Playwright против панели
+#                (pw-suite.sh)»; затем восстановление, сверка и проверка core-restored.
 #   smoke        деплой и смоук (только чтение, без снимка).
 # Остальные наборы появятся позже.
 #
 # Порядок: check-known.sh (метки известных падений) -> цели из локального конфига ->
 # блокировка на весь прогон -> отчёт -> проверка связи -> deploy.sh -> по целям
-# параллельно [preflight -> снимок -> смоук -> Go-тесты -> Playwright -> восстановление + сверка] ->
-# report.md и summary.md в build/router/<время>-<sha>/ (ссылка build/router/last).
+# параллельно [preflight -> снимок -> ветви ядер (переключение, смоук, Go-тесты, Playwright)
+# -> восстановление + сверка] -> report.md и summary.md в build/router/<время>-<sha>/ (ссылка build/router/last).
 # Восстановление стоит в trap подпроцесса цели сразу после снимка: оно выполняется
 # при любом исходе, в том числе при падении этапов посередине.
 #
@@ -22,6 +24,11 @@
 #                        проверки; снять раньше: touch <git-common-dir>/router-test.release
 #   RT_LOCK_WAIT=<с>     ожидание очереди на роутеры (по умолчанию 3600)
 #   RT_SMOKE_WINDOW=<с>  окно наблюдения смоука за перезапуском ядра (по умолчанию 120)
+#   RT_CORES="<ядра>"    ветви матрицы через пробел (по умолчанию «xray mihomo»); сужать
+#                        можно для ручной отладки, гейт перед PR — обе ветви на обеих целях
+#
+# Раскладка отчёта: результаты всех ветвей — в <отчёт>/<id>/results.tsv (ядро ветви — во
+# второй колонке), артефакты ветви (go-*.jsonl, pw/, pw-switch/) — в <отчёт>/<id>/<ядро>/.
 #
 # Код выхода: 0 — нет строк FAIL и XPASS, 2 — неизвестный набор, иначе 1.
 
@@ -41,6 +48,26 @@ case "$SUITE" in
     ;;
 esac
 SUITE_NAME=${SUITE:-full}
+
+# Ветви матрицы ядер: только xray и mihomo, без повторов.
+RT_CORES=${RT_CORES:-xray mihomo}
+_seen=""
+for _c in $RT_CORES; do
+  case "$_c" in
+    xray | mihomo) ;;
+    *)
+      echo "router-test: RT_CORES: неизвестное ядро '$_c' (допустимы xray и mihomo)" >&2
+      exit 2
+      ;;
+  esac
+  case " $_seen " in
+    *" $_c "*)
+      echo "router-test: RT_CORES: ядро '$_c' указано дважды" >&2
+      exit 2
+      ;;
+  esac
+  _seen="$_seen $_c"
+done
 
 cd "$(rt_repo_root)"
 
@@ -108,21 +135,26 @@ fi
 
 # --- смоук параллельно ------------------------------------------------------------
 
-# Полный набор на одной цели: preflight -> снимок -> смоук -> Go-тесты -> Playwright ->
-# восстановление + сверка.
+# Полный набор на одной цели: preflight -> снимок -> ветви ядер -> восстановление + сверка.
+# Ветвь ядра: переключение через интерфейс панели -> смоук -> Go-тесты -> Playwright.
 # Работает в подпроцессе. Восстановление — в EXIT-trap, который ставится сразу после
 # успешного снимка: оно выполняется при любом исходе, включая прерывание.
 full_target() {
   _t=$1
   _snapped=0
+  _orig=""
   _finish() {
     if [ "$_snapped" = 1 ]; then
       _snapped=0
+      # строки восстановления и сверки несут исходное ядро
+      RT_CORE=""
+      [ -z "$_orig" ] || printf '%s\n' "$_orig" >"$RT_REPORT/$_t/core"
       rt_restore "$_t" || true
       _after_restore "$_t"
     fi
   }
-  # Проверка после восстановления: xcp запущен и версия равна установленной деплоем.
+  # Проверка после восстановления: xcp запущен и версия равна установленной деплоем,
+  # активное ядро совпадает с исходным из снимка (core-restored, D-19).
   _after_restore() {
     _rc=0
     _out=$(rt_ssh "$1" "/opt/sbin/xcp -v; pidof xcp" 2>/dev/null) || _rc=$?
@@ -133,34 +165,99 @@ full_target() {
     else
       rt_result "$1" FAIL xcp-after-restore "после восстановления xcp не запущен или версия $_ver, ожидалась ${EXPECT:--}"
     fi
+    _rc=0
+    _now=$(rt_ssh "$1" 'x=$(pidof xray | cut -d" " -f1); m=$(pidof mihomo | cut -d" " -f1); if [ -n "$x" ] && [ -n "$m" ]; then echo both; elif [ -n "$x" ]; then echo xray; elif [ -n "$m" ]; then echo mihomo; else echo none; fi' 2>/dev/null) || _rc=$?
+    if [ -z "$_orig" ]; then
+      rt_result "$1" FAIL core-restored "исходное ядро не найдено в журнале снимка"
+    elif [ "$_rc" = 0 ] && [ "$_now" = "$_orig" ]; then
+      rt_result "$1" PASS core-restored "активное ядро $_now равно исходному"
+    else
+      rt_result "$1" FAIL core-restored "после восстановления ядро ${_now:--}, исходное $_orig"
+    fi
+  }
+  # Ожидание рабочего состояния стенда после разрушающих Go-тестов (остановка, запуск и
+  # перезапуск XKeen, D-04): на медленном устройстве перехват и статус XKeen приходят в норму
+  # не сразу, а Playwright должен начинать с рабочей панели. Результат — строка stand-ready.
+  _settle() {
+    _t0=$(date +%s)
+    _rc=0
+    RT_SSH_STDIN=1 rt_ssh "$1" "sh -s" <"$SCRIPT_DIR/settle.sh" >/dev/null 2>&1 || _rc=$?
+    _dt=$(($(date +%s) - _t0))
+    if [ "$_rc" = 0 ]; then
+      rt_result "$1" PASS stand-ready "после Go-тестов ядро запущено и перехват на месте за $_dt с"
+    else
+      rt_result "$1" FAIL stand-ready "после Go-тестов стенд не пришёл в рабочее состояние за $_dt с (код $_rc)"
+    fi
   }
   _sp=""
-  # сигнал: остановить смоук и выйти — EXIT-trap восстановит стенд
+  # сигнал: остановить текущий этап и выйти — EXIT-trap восстановит стенд
   _term() {
     [ -z "$_sp" ] || kill "$_sp" 2>/dev/null || true
     exit 130
+  }
+  # Этап ветви в фоне с ожиданием: код этапа попадает в _brc, сигнал прерывает этап.
+  _bg() {
+    "$@" &
+    _sp=$!
+    _brc=0
+    wait "$_sp" || _brc=$?
+    _sp=""
   }
   trap '_finish' EXIT
   trap '_term' INT TERM HUP
   rt_snapshot "$_t" || exit 1
   _snapped=1
-  sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" &
-  _sp=$!
-  wait "$_sp" || true
-  _sp=""
-  # Go-тесты на устройстве: ядро берётся из файла, который записал смоук.
-  _core="-"
-  [ -f "$RT_REPORT/$_t/core" ] && _core=$(cat "$RT_REPORT/$_t/core")
-  rt_stage "$_t" go sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_core" &
-  _sp=$!
-  wait "$_sp" || true
-  _sp=""
-  # Playwright против настоящей панели цели: цели идут параллельно своими процессами
-  # (D-23), внутри цели — один воркер.
-  rt_stage "$_t" pw sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_core" &
-  _sp=$!
-  wait "$_sp" || true
-  _sp=""
+  # Исходное ядро — из журнала снимка (строка core=…): к нему вернёт восстановление.
+  _orig=$(sed -n 's/^core=//p' "$RT_REPORT/$_t/snapshot.log" | tail -n 1)
+
+  _first=1
+  for _c in $RT_CORES; do
+    # Ядро ветви: колонка results.tsv и файл core (селекторы меток arch/core)
+    RT_CORE=$_c
+    export RT_CORE
+    printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
+    mkdir -p "$RT_REPORT/$_t/$_c"
+
+    # Номер последней строки xcp.log до начала ветви: смоук смотрит только строки после неё,
+    # поэтому ошибки, вызванные разрушающими тестами предыдущей ветви (D-04), не
+    # засчитываются этой ветви. В первой ветви смоук смотрит от баннера запуска.
+    _from=""
+    if [ "$_first" = 0 ]; then
+      _from=$(rt_ssh "$_t" 'wc -l </opt/var/log/xcp.log' 2>/dev/null | tr -dc '0-9') || _from=""
+    fi
+    _first=0
+
+    # 1. переключение ядра интерфейсом панели
+    rt_stage "$_t" "switch-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --switch "$_c"
+    _src=$_brc
+    if [ "$_src" != 0 ]; then
+      for _s in smoke go pw; do
+        rt_result "$_t" SKIP "$_s" "переключение на $_c не удалось"
+      done
+      continue
+    fi
+
+    # 2. смоук (только чтение; строки лога — после начала ветви)
+    if [ -n "$_from" ]; then
+      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from"
+    else
+      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT"
+    fi
+    # смоук записывает в core определённое им ядро: ветвь продолжается с ядром ветви
+    printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
+    [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$RT_REPORT/$_t/$_c/xcp-log-tail.txt"
+
+    # 3. Go-тесты на устройстве с этим ядром
+    rt_stage "$_t" "go-$_c" _bg sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c"
+
+    # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
+    _settle "$_t"
+
+    # 4. Playwright против настоящей панели: цели идут параллельно своими процессами
+    # (D-23), внутри цели — один воркер
+    rt_stage "$_t" "pw-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c"
+  done
+  RT_CORE=""
   exit 0
 }
 

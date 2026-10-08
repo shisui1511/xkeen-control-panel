@@ -95,6 +95,32 @@ func rtWaitHealthy(svc *XKeenService, want bool, limit time.Duration) (bool, str
 	}
 }
 
+// rtWaitRules ждёт, пока XKeen поставит перехват (правила TPROXY в mangle или REDIRECT
+// в nat): запуск возвращает управление раньше, а следующая команда XKeen, пришедшая
+// во время ещё идущего фонового запуска, на медленном устройстве не выполняется.
+func rtWaitRules(limit time.Duration) bool {
+	deadline := time.Now().Add(limit)
+	for {
+		for _, table := range []string{"mangle", "nat"} {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			out, _, code := routertest.Exec(ctx, "iptables", "-w", "-t", table, "-S")
+			cancel()
+			if code != 0 {
+				continue
+			}
+			for _, line := range strings.Split(out, "\n") {
+				if strings.Contains(line, "xkeen") && (strings.Contains(line, "-j TPROXY") || strings.Contains(line, "-j REDIRECT")) {
+					return true
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
 // rtShort обрезает вывод для сообщения о падении.
 func rtShort(s string) string {
 	s = strings.TrimSpace(s)
@@ -198,6 +224,8 @@ func TestRouterXKeenLifecycle(t *testing.T) {
 		healthy, st := rtWaitHealthy(svc, true, limit)
 		routertest.Verdict(t, healthy, routertest.KnownMark{},
 			"после Start панель считает XKeen неработающим: %s", rtShort(st))
+		// Перезапуск сразу после запуска пришёл бы во время фонового запуска XKeen
+		routertest.Verdict(t, rtWaitRules(limit), routertest.KnownMark{}, "после Start XKeen не поставил перехват")
 	})
 
 	t.Run("restart", func(t *testing.T) {

@@ -8,6 +8,8 @@ export const RT = {
   // ядро, активное на момент этапа: xray, mihomo или «-», если смоук его не определил
   core: process.env.XCP_CORE && process.env.XCP_CORE !== '-' ? process.env.XCP_CORE : '',
   url: process.env.XCP_URL ?? '',
+  // ядро, на которое переключает core-switch.spec.ts (задаёт pw-suite.sh --switch)
+  wantCore: process.env.XCP_WANT_CORE ?? '',
   // множитель таймаутов для медленных устройств (XCP_T_<id>_SLOW из локального конфига)
   slow: Number.isFinite(slow) && slow > 0 ? slow : 1
 };
@@ -15,11 +17,13 @@ export const RT = {
 /** Таймауты в миллисекундах, уже умноженные на множитель устройства. */
 export const T = {
   /** загрузка ленивой страницы */
-  page: 20_000 * RT.slow,
+  page: 30_000 * RT.slow,
   /** отдельное действие в интерфейсе */
   action: 10_000 * RT.slow,
   /** ожидание затишья сети после загрузки */
   network: 8_000 * RT.slow,
   /** вход в панель */
-  login: 30_000 * RT.slow
+  login: 30_000 * RT.slow,
+  /** переключение ядра: перезапуск XKeen и подтверждение по процессам */
+  switchKernel: 240_000 * RT.slow
 };

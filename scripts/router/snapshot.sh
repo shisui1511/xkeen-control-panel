@@ -106,8 +106,9 @@ is_volatile() {
     /opt/etc/mihomo/*.dat | /opt/etc/mihomo/*.mmdb | /opt/etc/mihomo/*.metadb) return 0 ;;
     /opt/etc/xray/configs/04_outbounds.sub_*.tail.json | /opt/etc/xray/configs/04_outbounds.zz_xcp_*) return 0 ;;
     /opt/etc/xcp/*) return 0 ;;
-    # хук iptables XKeen перегенерируется при каждом старте ядра
-    /opt/etc/ndm/netfilter.d/proxy.sh) return 0 ;;
+    # хук iptables XKeen перегенерируется при каждом старте ядра; на время записи рядом
+    # лежит временный файл proxy.sh.tmp.<pid>
+    /opt/etc/ndm/netfilter.d/proxy.sh | /opt/etc/ndm/netfilter.d/proxy.sh.tmp.*) return 0 ;;
   esac
   return 1
 }
@@ -182,6 +183,43 @@ wait_core_up() {
     sleep 1
   done
   return 0
+}
+
+# Ядро после xkeen -start должно продержаться с одним и тем же PID 30 с: XKeen на медленном
+# устройстве поднимает процесс, заменяет его и только потом выходит на рабочее состояние.
+# Если ядро исчезло и не вернулось за 40 с, запуск повторяется один раз.
+wait_core_stable() {
+  core=$1
+  last=""
+  same=0
+  gone=0
+  retried=0
+  t=0
+  while [ "$t" -lt 240 ]; do
+    p=$(pidof "$core" 2>/dev/null | cut -d' ' -f1)
+    if [ -n "$p" ]; then
+      gone=0
+      if [ "$p" = "$last" ]; then
+        same=$((same + 5))
+      else
+        last=$p
+        same=0
+      fi
+      [ "$same" -ge 30 ] && return 0
+    else
+      last=""
+      same=0
+      gone=$((gone + 5))
+      if [ "$gone" -ge 40 ] && [ "$retried" = 0 ]; then
+        say "ядро $core пропало после запуска — повторяю xkeen -start"
+        "$XKEEN" -start >/dev/null 2>&1
+        retried=1
+      fi
+    fi
+    sleep 5
+    t=$((t + 5))
+  done
+  return 1
 }
 
 # ---------- xcp ----------
@@ -402,6 +440,10 @@ cmd_restore() {
         "$XKEEN" -start >/dev/null 2>&1
         if ! wait_core_up "$want_core"; then
           say "ОШИБКА: ядро $want_core не поднялось за 120 с"
+          return 4
+        fi
+        if ! wait_core_stable "$want_core"; then
+          say "ОШИБКА: ядро $want_core не держится после запуска"
           return 4
         fi
         say "restore: ядро $want_core запущено"
