@@ -4,7 +4,7 @@ import type { ConsoleMessage, Page, Request, Response } from '@playwright/test';
 // ошибки не терялись, и собирает только нарушения:
 //   - console.error и pageerror;
 //   - ответы со статусом 5xx;
-//   - оборванные запросы (requestfailed).
+//   - оборванные запросы (requestfailed), кроме ERR_ABORTED после уже полученного ответа.
 // Предупреждения и 4xx не считаются (ожидаемые 409 от гейта ядра и подобные отказы).
 // Списков исключений нет: известное падение размечается меткой knownFailure с todo.
 //
@@ -27,7 +27,8 @@ export interface ConsoleGuard {
 function pathOf(url: string): string {
   try {
     const u = new URL(url);
-    return u.pathname + u.search;
+    // имя подписки или провайдера в адресе не должно попадать в отчёт (D-21)
+    return (u.pathname + u.search).replace(/(\/api\/proxy-providers\/)[^/?]+/, '$1<имя>');
   } catch {
     return url;
   }
@@ -35,6 +36,9 @@ function pathOf(url: string): string {
 
 export function attachConsoleGuard(page: Page): ConsoleGuard {
   const violations: string[] = [];
+  // Запросы, на которые ответ уже пришёл: Chromium может закрыть такой запрос с ERR_ABORTED
+  // сразу после заголовков (так бывает с ответом 204 без тела), это не отказ запроса
+  const answered = new WeakSet<Request>();
 
   const onConsole = (msg: ConsoleMessage) => {
     if (msg.type() !== 'error') return;
@@ -45,12 +49,14 @@ export function attachConsoleGuard(page: Page): ConsoleGuard {
     violations.push(`pageerror: ${err.message}`);
   };
   const onResponse = (res: Response) => {
+    answered.add(res.request());
     if (res.status() >= 500) {
       violations.push(`HTTP ${res.status()} ${res.request().method()} ${pathOf(res.url())}`);
     }
   };
   const onRequestFailed = (req: Request) => {
     const why = req.failure()?.errorText ?? 'без причины';
+    if (why === 'net::ERR_ABORTED' && answered.has(req)) return;
     violations.push(`requestfailed ${req.method()} ${pathOf(req.url())}: ${why}`);
   };
 
