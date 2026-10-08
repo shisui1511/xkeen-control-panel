@@ -12,3 +12,6 @@
 # todo. Шумное правило целиком не отключаем: только запись сюда с todo.
 #
 # Здесь нет ни адресов, ни имён роутеров: только архитектура и ядро.
+
+# Mihomo без external-controller (mipsle): служба квот каждые ~5 с пишет ошибки WS в xcp.log
+smoke:log-repeat:TrafficQuota: WS	mipsle/mihomo	quota-ws-retry-spam-no-api

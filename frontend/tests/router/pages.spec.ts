@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
+import { knownFailure } from './lib/known';
 import { routes } from './lib/pages';
 
 // Обход всех страниц настоящей панели цели (RT-05): две темы, ширины 1440 и 390 px.
@@ -35,6 +36,45 @@ const ALIAS: Record<string, string> = {
   'mihomo-gen': '#/constructor'
 };
 
+// Известные находки обхода (D-12): каждая размечена todo из pending и конкретной
+// комбинацией маршрута, темы, ширины и цели/ядра. Страница из обхода не исключается и
+// проверка axe не отключается: помеченный тест обязан падать, иначе XPASS (метка устарела).
+// Селектор: * | <arch> | <arch>/<ядро> | */<ядро>. Вызовы — со строковыми литералами:
+// их читает scripts/router/check-known.sh.
+function markKnown(route: string, theme: string, width: number): void {
+  const light = theme === 'light';
+  const dark = theme === 'dark';
+  const wide = width === 1440;
+
+  // Капсула состояния на узком экране: тёмный фон не зависит от темы, цвет текста — зависит
+  if (light && width === 390) {
+    knownFailure('*', 'status-capsule-mobile-traffic-contrast');
+  }
+
+  // Зелёный и синий текст на подкрашенном фоне в светлой теме: контраст 3.8–4.3 из 4.5
+  if (light && route === 'connections')
+    knownFailure('arm64/mihomo', 'light-tinted-badge-text-contrast');
+  if (light && route === 'console') knownFailure('*', 'light-tinted-badge-text-contrast');
+  if (light && wide && route === 'editor') knownFailure('*', 'light-tinted-badge-text-contrast');
+  if (light && route === 'logs') knownFailure('*', 'light-tinted-badge-text-contrast');
+  if (light && route === 'proxies') knownFailure('*', 'light-tinted-badge-text-contrast');
+  if (light && route === 'traffic') knownFailure('*', 'light-tinted-badge-text-contrast');
+
+  // Приглушённый текст мелких меток, счётчиков и подписей
+  if (dark && route === 'dat') knownFailure('*', 'muted-small-label-text-contrast');
+  if (light && wide && route === 'dat') knownFailure('*', 'muted-small-label-text-contrast');
+  if (light && route === 'logs') knownFailure('*', 'muted-small-label-text-contrast');
+  if (route === 'proxies') knownFailure('arm64/mihomo', 'muted-small-label-text-contrast');
+  if (light && route === 'services') knownFailure('*', 'muted-small-label-text-contrast');
+  if (route === 'smartproxy') knownFailure('*', 'muted-small-label-text-contrast');
+
+  // Строки DAT-файлов с вложенными интерактивными элементами (при Xray)
+  if (wide && route === 'dat') knownFailure('*/xray', 'dat-rows-nested-interactive');
+
+  // Конструктор Mihomo: подписи полей, прокручиваемая область, контраст вкладок и кнопок
+  if (route === 'mihomo-gen') knownFailure('*/mihomo', 'mihomo-constructor-a11y');
+}
+
 for (const route of routes()) {
   for (const theme of THEMES) {
     for (const vp of VIEWPORTS) {
@@ -42,6 +82,7 @@ for (const route of routes()) {
         // сборщики консоли и сети подключаются до перехода, чтобы ранние ошибки не терялись
         const guard = attachConsoleGuard(page);
         const problems: string[] = [];
+        markKnown(route, theme, vp.width);
 
         await page.setViewportSize({ width: vp.width, height: vp.height });
         await page.addInitScript((th) => {
