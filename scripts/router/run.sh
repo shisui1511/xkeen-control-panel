@@ -8,7 +8,11 @@
 #                Go-тесты на устройстве (go-suite.sh) -> Playwright против панели
 #                (pw-suite.sh)»; затем восстановление, сверка и проверка core-restored.
 #   smoke        деплой и смоук (только чтение, без снимка).
-# Остальные наборы появятся позже.
+#   changed      быстрый набор для каждой задачи (D-25): select-changed.mjs по diff от
+#                origin/main и незакоммиченным правкам выбирает Go-пакеты и роутерные спеки;
+#                дальше та же матрица ядер, что у полного, но go и pw — только выбранное.
+#                Ничего не затронуто — деплой и смоук (без снимка). Причины выбора —
+#                <отчёт>/select.txt и раздел «Выбор» отчёта.
 #
 # Порядок: check-known.sh (метки известных падений) -> цели из локального конфига ->
 # блокировка на весь прогон -> отчёт -> проверка связи -> deploy.sh -> по целям
@@ -26,6 +30,7 @@
 #   RT_SMOKE_WINDOW=<с>  окно наблюдения смоука за перезапуском ядра (по умолчанию 120)
 #   RT_CORES="<ядра>"    ветви матрицы через пробел (по умолчанию «xray mihomo»); сужать
 #                        можно для ручной отладки, гейт перед PR — обе ветви на обеих целях
+#   RT_BASE=<ref>        база сравнения набора changed (по умолчанию merge-base с origin/main)
 #
 # Раскладка отчёта: результаты всех ветвей — в <отчёт>/<id>/results.tsv (ядро ветви — во
 # второй колонке), артефакты ветви (go-*.jsonl, pw/, pw-switch/) — в <отчёт>/<id>/<ядро>/.
@@ -40,9 +45,9 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 SUITE=${1:-}
 case "$SUITE" in
-  smoke | '') ;;
+  smoke | changed | '') ;;
   *)
-    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke и полный (без SUITE)" >&2
+    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed и полный (без SUITE)" >&2
     echo "router-test: пример: make router-test SUITE=smoke" >&2
     exit 2
     ;;
@@ -81,6 +86,39 @@ rt_load_targets
 rt_lock
 rt_report_init
 echo "router-test: отчёт $RT_REPORT"
+
+# --- выбор проверок набора changed (D-25) ------------------------------------------
+# select-changed.mjs печатает четыре строки для eval; перед eval вывод проверяется по
+# строгому шаблону (T-144.1-23), при любом сомнении выбирается всё.
+SEL_ANY=1
+if [ "$SUITE" = changed ]; then
+  _sel_args=""
+  [ -z "${RT_BASE:-}" ] || _sel_args="--base $RT_BASE"
+  _sel_rc=0
+  # shellcheck disable=SC2086
+  _sel=$(node "$SCRIPT_DIR/select-changed.mjs" --explain $_sel_args 2>"$RT_REPORT/select.txt") || _sel_rc=$?
+  _q="'"
+  if [ "$_sel_rc" != 0 ] ||
+    [ "$(printf '%s\n' "$_sel" | wc -l)" != 4 ] ||
+    printf '%s\n' "$_sel" | grep -qvE "^(RT_SELECT_ALL=[01]|RT_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_PW_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q})\$"; then
+    echo "всё: выбор не удался или его вывод не прошёл проверку (код $_sel_rc)" >>"$RT_REPORT/select.txt"
+    RT_SELECT_ALL=1
+  else
+    eval "$_sel"
+  fi
+  if [ "$RT_SELECT_ALL" = 1 ]; then
+    # полный набор: списки не нужны, этапы go и pw берут значения по умолчанию
+    unset RT_GO_PKGS RT_SPECS RT_PW_GREP
+    echo "итог: полный набор" >>"$RT_REPORT/select.txt"
+  elif [ -z "$RT_GO_PKGS" ] && [ -z "$RT_SPECS" ]; then
+    SEL_ANY=0
+    echo "итог: затронутого нет — деплой и смоук" >>"$RT_REPORT/select.txt"
+  else
+    echo "итог: Go: ${RT_GO_PKGS:--}; спеки: ${RT_SPECS:--}" >>"$RT_REPORT/select.txt"
+    export RT_GO_PKGS RT_SPECS RT_PW_GREP
+  fi
+  echo "router-test: выбор — $(tail -n 1 "$RT_REPORT/select.txt")"
+fi
 
 # Проверки смоука, которые пропускаются, если цель недоступна или деплой не удался.
 SKIP_CHECKS="kernel-running iptables-rules api-version version xcp-pid api-me api-service-status log-panic log-error kernel-restart"
@@ -143,6 +181,13 @@ full_target() {
   _t=$1
   _snapped=0
   _orig=""
+  # набор changed: этап go или pw пропускается, если выбор его не затронул
+  _do_go=1
+  _do_pw=1
+  if [ "$SUITE" = changed ] && [ "${RT_SELECT_ALL:-1}" != 1 ]; then
+    [ -n "${RT_GO_PKGS:-}" ] || _do_go=0
+    [ -n "${RT_SPECS:-}" ] || _do_pw=0
+  fi
   _finish() {
     if [ "$_snapped" = 1 ]; then
       _snapped=0
@@ -248,14 +293,22 @@ full_target() {
     [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$RT_REPORT/$_t/$_c/xcp-log-tail.txt"
 
     # 3. Go-тесты на устройстве с этим ядром
-    rt_stage "$_t" "go-$_c" _bg sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c"
+    if [ "$_do_go" = 1 ]; then
+      rt_stage "$_t" "go-$_c" _bg sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c"
 
-    # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
-    _settle "$_t"
+      # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
+      _settle "$_t"
+    else
+      rt_result "$_t" SKIP go "роутерные Go-пакеты набора changed не затронуты"
+    fi
 
     # 4. Playwright против настоящей панели: цели идут параллельно своими процессами
     # (D-23), внутри цели — один воркер
-    rt_stage "$_t" "pw-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c"
+    if [ "$_do_pw" = 1 ]; then
+      rt_stage "$_t" "pw-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c"
+    else
+      rt_result "$_t" SKIP pw "роутерные спеки набора changed не затронуты"
+    fi
   done
   RT_CORE=""
   exit 0
@@ -263,7 +316,7 @@ full_target() {
 
 PIDS=""
 for t in ${DEPLOYED:-}; do
-  if [ -z "$SUITE" ]; then
+  if [ -z "$SUITE" ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
     (full_target "$t") &
   else
     sh "$SCRIPT_DIR/smoke.sh" "$t" "$EXPECT" &
@@ -299,6 +352,14 @@ XPASSES=0
   echo "- SHA: $SHA (незакоммиченные правки: $DIRTY)"
   [ -z "${RELEASE:-}" ] || echo "- Релиз: $RELEASE"
   echo
+  if [ "$SUITE" = changed ] && [ -f "$RT_REPORT/select.txt" ]; then
+    echo "## Выбор"
+    echo
+    echo '```'
+    cat "$RT_REPORT/select.txt"
+    echo '```'
+    echo
+  fi
   for t in $RT_TARGETS; do
     arch=$(rt_get "$t" ARCH)
     ver=""
