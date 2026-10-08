@@ -193,3 +193,93 @@ rt_redact() {
     -e 's/([Cc]ookie[^ =:]*[=:] *)[^ ;]*/\1***/g' \
     -e 's/([Cc][Ss][Rr][Ff][^ =:]*[=:] *)[^ ;]*/\1***/g'
 }
+
+# Сопоставление селектора метки известного падения с целью:
+#   rt_selector_match <селектор> <архитектура> <ядро>
+# Грамматика: * | <arch> | <arch>/<ядро> | */<ядро>. Код 0 — селектор подходит.
+rt_selector_match() {
+  _sel=$1
+  _arch=$2
+  _core=$3
+  case "$_sel" in
+    '*') return 0 ;;
+    '*/'*) [ "${_sel#*/}" = "$_core" ] ;;
+    */*) [ "${_sel%%/*}" = "$_arch" ] && [ "${_sel#*/}" = "$_core" ] ;;
+    *) [ "$_sel" = "$_arch" ] ;;
+  esac
+}
+
+# Каталог снимка на устройстве (создаёт и чистит snapshot.sh).
+RT_SNAP_DIR=/opt/tmp/xcp-rt-snap
+
+# Копирует snapshot.sh на устройство и вызывает подкоманду:
+#   rt_snap_remote <id> <подкоманда>
+# Код возврата — код подкоманды (3 — нет связи).
+rt_snap_remote() {
+  _id=$1
+  _sub=$2
+  rt_ssh "$_id" "mkdir -p $RT_SNAP_DIR" || return $?
+  rt_scp "$_id" "$(rt_repo_root)/scripts/router/snapshot.sh" "$RT_SNAP_DIR/snapshot.sh" || return $?
+  rt_ssh "$_id" "sh $RT_SNAP_DIR/snapshot.sh $_sub"
+}
+
+# Предполётная проверка и снимок цели. Пишет FAIL preflight / snapshot в results.tsv.
+# Коды: 0 — снимок снят, 1 — нет (прогон цели дальше не идёт), 3 — нет связи.
+rt_snapshot() {
+  _id=$1
+  mkdir -p "$RT_REPORT/$_id"
+  _log="$RT_REPORT/$_id/snapshot.log"
+  _rc=0
+  rt_stage "$_id" preflight rt_snap_remote "$_id" preflight >"$_log" 2>&1 || _rc=$?
+  case "$_rc" in
+    0) ;;
+    3)
+      rt_result "$_id" FAIL reachable "нет связи"
+      return 3
+      ;;
+    5 | 6 | 7)
+      rt_result "$_id" FAIL preflight "$(tail -n 1 "$_log")"
+      return 1
+      ;;
+    *)
+      rt_result "$_id" FAIL preflight "предполётная проверка завершилась с кодом $_rc"
+      return 1
+      ;;
+  esac
+  _rc=0
+  rt_stage "$_id" snapshot rt_snap_remote "$_id" snapshot >>"$_log" 2>&1 || _rc=$?
+  if [ "$_rc" = 3 ]; then
+    rt_result "$_id" FAIL reachable "нет связи"
+    return 3
+  elif [ "$_rc" != 0 ]; then
+    rt_result "$_id" FAIL snapshot "снимок не снят (код $_rc): $(grep 'ОШИБКА' "$_log" | head -n 2)"
+    return 1
+  fi
+  rt_result "$_id" PASS snapshot "$(grep '^снимок:' "$_log" | head -n 1)"
+}
+
+# Восстановление цели по снимку и сверка. Результат — строка restore-verify:
+# PASS, либо FAIL «расхождение после восстановления» (D-19). После успешной
+# сверки снимок на устройстве удаляется. Коды: 0 — равно снимку, 1 — нет.
+rt_restore() {
+  _id=$1
+  mkdir -p "$RT_REPORT/$_id"
+  _log="$RT_REPORT/$_id/restore.log"
+  _rc=0
+  rt_stage "$_id" restore rt_snap_remote "$_id" restore >"$_log" 2>&1 || _rc=$?
+  if [ "$_rc" = 3 ]; then
+    rt_result "$_id" FAIL restore-verify "нет связи, стенд не восстановлен"
+    return 1
+  elif [ "$_rc" != 0 ]; then
+    rt_result "$_id" FAIL restore-verify "расхождение после восстановления (код $_rc): $(grep 'ОШИБКА' "$_log" | head -n 2)"
+    return 1
+  fi
+  _rc=0
+  rt_stage "$_id" verify rt_snap_remote "$_id" verify >>"$_log" 2>&1 || _rc=$?
+  if [ "$_rc" != 0 ]; then
+    rt_result "$_id" FAIL restore-verify "расхождение после восстановления: $(grep 'ОШИБКА' "$_log" | head -n 2)"
+    return 1
+  fi
+  rt_result "$_id" PASS restore-verify "файлы, версии, ядро и xcp равны снимку"
+  rt_ssh "$_id" "sh $RT_SNAP_DIR/snapshot.sh cleanup; rm -rf $RT_SNAP_DIR" >/dev/null 2>&1 || true
+}
