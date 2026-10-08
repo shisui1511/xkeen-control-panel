@@ -105,9 +105,9 @@ if [ -f "$KF" ]; then
       continue
     fi
     case "$_f1" in
-      smoke:?*) ;;
+      smoke:?* | reboot:?*) ;;
       *)
-        echo "check-known: scripts/router/known-failures:$_n: проверка должна начинаться с smoke: ($_f1)" >&2
+        echo "check-known: scripts/router/known-failures:$_n: проверка должна начинаться с smoke: или reboot: ($_f1)" >&2
         BAD=1
         ;;
     esac

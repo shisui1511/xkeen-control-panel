@@ -21,6 +21,8 @@
 # Окружение:
 #   RT_SPECS   спеки через пробел (по умолчанию все tests/router/**/*.spec.ts);
 #              при --switch не используется
+#   RT_PW_GREP регулярное выражение --grep по названиям тестов (набор changed сужает им
+#              обход страниц до затронутых маршрутов); при --switch не используется
 #   RT_REPORT  каталог отчёта (если не задан, создаётся новый)
 #   XCP_T_<id>_SLOW  множитель таймаутов цели (в локальном конфиге; по умолчанию 1,
 #                    для mipsle и mips — 2)
@@ -116,6 +118,11 @@ rc=0
   # переменная не должна просочиться из окружения вызывающего
   unset XCP_WANT_CORE
   [ -z "$SWITCH" ] || export XCP_WANT_CORE=$SWITCH
+  # спеки и --grep собираются в позиционные параметры: выражение содержит пробелы и скобки
+  set --
+  # shellcheck disable=SC2086
+  [ -z "$SPECS" ] || set -- $SPECS
+  [ -n "${RT_PW_GREP:-}" ] && [ -z "$SWITCH" ] && set -- "$@" --grep "$RT_PW_GREP"
   XCP_URL=$URL \
     XCP_PASSWORD=$(rt_get "$ID" PASSWORD) \
     XCP_ARCH=$ARCH \
@@ -124,7 +131,7 @@ rc=0
     XCP_PW_STATE=$STATE \
     XCP_PW_OUT=$OUT \
     XCP_PW_JSON=$JSON \
-    "$PWBIN" test -c playwright.router.config.ts $SPECS
+    "$PWBIN" test -c playwright.router.config.ts "$@"
 ) >"$LOG" 2>&1 || rc=$?
 rt_redact <"$LOG" >"$LOG.red" && mv "$LOG.red" "$LOG"
 

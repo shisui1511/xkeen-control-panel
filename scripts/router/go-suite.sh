@@ -78,7 +78,12 @@ trap cleanup EXIT
 
 # Список пакетов: RT_GO_PKGS или все каталоги, где у _test.go первая строка `//go:build router`.
 if [ -n "${RT_GO_PKGS:-}" ]; then
-  PKGS=$RT_GO_PKGS
+  # select-changed.mjs выдаёт пути вида ./internal/pkg
+  PKGS=""
+  for d in $RT_GO_PKGS; do
+    PKGS="$PKGS ${d#./}"
+  done
+  PKGS=${PKGS# }
 else
   PKGS=""
   for f in $(find internal cmd -name '*_test.go' 2>/dev/null | sort); do
