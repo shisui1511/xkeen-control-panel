@@ -85,10 +85,6 @@ const FRONTEND_ALL = [
   /^frontend\/public\//
 ];
 
-function toPosix(p) {
-  return p.split(path.sep).join('/');
-}
-
 function git(args) {
   return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' });
 }
