@@ -101,9 +101,6 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend
-        env:
-          # Имя кэша Service Worker берётся из версии сборки
-          XCP_VERSION: ${{ steps.version.outputs.version }}
         run: |
           cd frontend
           npm ci

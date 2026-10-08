@@ -177,9 +177,9 @@ func (s *XrayAccessLogService) SetEnabled(enabled bool) (*XrayAccessLogStatus, e
 
 // Xray access log line, e.g.
 //
-//	2026/09/24 03:59:04.123456 from 172.16.0.136:52344 accepted tcp:www.google.com:443 [tproxy-in >> vless-reality] email: user@x
-//	2026/09/24 03:59:04 from tcp:172.16.0.5:5555 accepted udp:8.8.8.8:53 [dns-in -> dns-out]
-//	2026/09/24 03:59:04 from 172.16.0.5:5555 rejected  proxy/vless/encoding: invalid request user id
+//	2026/09/24 03:59:04.123456 from 192.0.2.10:52344 accepted tcp:www.google.com:443 [tproxy-in >> vless-reality] email: user@x
+//	2026/09/24 03:59:04 from tcp:192.0.2.20:5555 accepted udp:8.8.8.8:53 [dns-in -> dns-out]
+//	2026/09/24 03:59:04 from 192.0.2.20:5555 rejected  proxy/vless/encoding: invalid request user id
 var (
 	accessLineRe = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})(?:\.\d+)?\s+from\s+(?:(?:tcp|udp):)?(\[[0-9a-fA-F:.]+\]|[0-9.]+|[0-9a-fA-F:]+?):(\d+)\s+(accepted|rejected)\s+(.*)$`)
 	accessDestRe = regexp.MustCompile(`^(?:(tcp|udp):)?(\[[0-9a-fA-F:.]+\]|[^\s\[]+?)(?::(\d+))?(?:\s+\[([^\]]*)\])?(?:\s+email:\s*(\S+))?\s*$`)

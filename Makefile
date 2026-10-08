@@ -2,7 +2,7 @@
 
 BINARY_NAME=xcp
 # Single source of truth for the version: scripts/version.sh (git tags +
-# conventional commits). CI and the Service Worker cache name use it too.
+# conventional commits). CI uses it too.
 ifeq ($(origin VERSION),undefined)
   VERSION := $(shell sh scripts/version.sh)
 endif
