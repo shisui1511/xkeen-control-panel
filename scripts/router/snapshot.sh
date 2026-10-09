@@ -34,6 +34,11 @@ ESC=$(printf '\033')
 
 SNAP_PATHS="/opt/etc/xray /opt/etc/mihomo /opt/etc/xkeen /opt/etc/xcp /opt/etc/init.d /opt/etc/ndm /opt/sbin/xray /opt/sbin/mihomo /opt/sbin/xkeen /opt/sbin/.xkeen /opt/sbin/xcp /opt/var/spool/cron/crontabs"
 
+# Бинарники из архива исключены: в снимке на них жёсткие ссылки ($BASE/bin, тот же раздел),
+# архив остаётся маленьким, а запись на флешку — короткой. Замена файла переименованием
+# оставляет ссылке прежнее содержимое; запись «на месте» ловится сверкой md5 при восстановлении.
+BIN_PATHS="/opt/sbin/xray /opt/sbin/mihomo /opt/sbin/xcp"
+
 mkdir -p "$WORK" 2>/dev/null
 chmod 700 "$D" 2>/dev/null
 
@@ -50,13 +55,13 @@ existing_paths() {
 
 list_files() {
   for p in $(existing_paths); do
-    "$FIND" "$p" \( -type f -o -type l \) -print
+    "$FIND" "$p" ! -path '/opt/etc/xcp/backup/xcp.bak.*' \( -type f -o -type l \) -print
   done | LC_ALL=C sort
 }
 
 list_dirs() {
   for p in $(existing_paths); do
-    "$FIND" "$p" -type d -print
+    "$FIND" "$p" ! -path '/opt/etc/xcp/backup/xcp.bak.*' -type d -print
   done | LC_ALL=C sort
 }
 
@@ -83,7 +88,7 @@ make_md5() {
 # менялись, пока шёл tar (md5 считается один раз, а не до и после).
 make_sig() {
   for p in $(existing_paths); do
-    "$FIND" "$p" \( -type f -o -type l \) -printf '%p\t%s\t%T@\n'
+    "$FIND" "$p" ! -path '/opt/etc/xcp/backup/xcp.bak.*' \( -type f -o -type l \) -printf '%p\t%s\t%T@\n'
   done | LC_ALL=C sort
 }
 
@@ -292,6 +297,15 @@ start_xcp() {
   say "xcp запущен, версия $got"
 }
 
+# Бинарник из жёсткой ссылки снимка: копия рядом и переименование; содержимое ссылки
+# сверяется с md5 снимка (запись «на месте» испортила бы и ссылку — тогда восстановить нечем).
+restore_bin() {
+  src="$BASE/bin/$(basename "$1")"
+  want=$(grep "^$1$TAB" "$BASE/md5.txt" | head -1 | cut -f2)
+  [ -f "$src" ] && [ "$(hash_of "$src")" = "$want" ] || return 1
+  cp -p "$src" "$1.xcprt" && mv -f "$1.xcprt" "$1"
+}
+
 # ---------- подкоманды ----------
 
 cmd_preflight() {
@@ -323,6 +337,18 @@ cmd_snapshot() {
     stop_xcp || return 1
   fi
 
+  # исключения tar: резервные копии самообновления xcp и бинарники, взятые жёсткой ссылкой
+  mkdir -p "$BASE/bin"
+  printf '%s\n' 'opt/etc/xcp/backup/xcp.bak.*' >"$WORK/tar.exclude"
+  : >"$BASE/bin.list"
+  for b in $BIN_PATHS; do
+    [ -f "$b" ] && [ ! -L "$b" ] || continue
+    if ln "$b" "$BASE/bin/$(basename "$b")" 2>/dev/null; then
+      printf '%s\n' "$b" >>"$BASE/bin.list"
+      printf '%s\n' "${b#/}" >>"$WORK/tar.exclude"
+    fi
+  done
+
   ok=0
   try=0
   while [ "$try" -lt 3 ]; do
@@ -330,7 +356,7 @@ cmd_snapshot() {
     make_sig >"$WORK/sig.before"
     list_dirs >"$BASE/dirs.txt"
     rm -f "$BASE/baseline.tar.gz"
-    GZIP=-1 "$TAR" -C / -czpf "$BASE/baseline.tar.gz" $(existing_paths | sed 's#^/##') 2>"$WORK/tar.err"
+    GZIP=-1 "$TAR" -C / -czpf "$BASE/baseline.tar.gz" -X "$WORK/tar.exclude" $(existing_paths | sed 's#^/##') 2>"$WORK/tar.err"
     if [ ! -s "$BASE/baseline.tar.gz" ]; then
       say "ОШИБКА: tar не создал baseline.tar.gz:"
       head -5 "$WORK/tar.err"
@@ -409,9 +435,18 @@ cmd_restore() {
 
     # из архива берём только изменённые и пропавшие файлы и пропавшие каталоги: запись
     # всего архива на диск роутера занимает минуты, а остальное и так равно снимку
+    : >"$WORK/restore.list"
     diff_state "$WORK/md5.now" | while IFS="$TAB" read -r kind path; do
-      case "$kind" in CHANGED | MISSING) printf '%s\n' "${path#/}" ;; esac
-    done >"$WORK/restore.list"
+      case "$kind" in
+        CHANGED | MISSING)
+          if grep -qxF "$path" "$BASE/bin.list" 2>/dev/null; then
+            restore_bin "$path" || say "ОШИБКА: бинарник $path не восстановлен"
+          else
+            printf '%s\n' "${path#/}" >>"$WORK/restore.list"
+          fi
+          ;;
+      esac
+    done
     while IFS= read -r d; do
       [ -d "$d" ] || printf '%s\n' "${d#/}"
     done <"$BASE/dirs.txt" >>"$WORK/restore.list"
