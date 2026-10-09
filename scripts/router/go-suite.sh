@@ -13,7 +13,8 @@
 #
 # Тесты получают окружение XCP_RT_ARCH, XCP_RT_CORE, XCP_RT_WORKDIR, XCP_RT_PANEL (адрес
 # панели на loopback устройства), XCP_RT_SESSION_FILE (cookie и CSRF, права 600) и
-# XCP_RT_LINKS (данные share-ссылок internal/nodes/testdata/links).
+# XCP_RT_LINKS (данные share-ссылок internal/nodes/testdata/links) и XCP_RT_INPUTS
+# (входные тела ответов internal/nodes/testdata/inputs).
 #
 # Окружение:
 #   RT_GO_PKGS    пакеты через пробел (по умолчанию все с роутерными тестами)
@@ -189,6 +190,22 @@ if [ -d "$ROOT/internal/nodes/testdata/links" ]; then
   fi
 fi
 
+# Входные тела ответов (Clash YAML, Xray-JSON, sing-box, wg.conf) для тестов разбора.
+INPUTS_ENV=""
+if [ -d "$ROOT/internal/nodes/testdata/inputs" ]; then
+  rc=0
+  scp -O -q -r -o BatchMode=yes -o ConnectTimeout=15 "$ROOT/internal/nodes/testdata/inputs" "$(rt_get "$ID" SSH):$RWD/inputs" || rc=$?
+  if [ "$rc" = 255 ]; then
+    rt_result "$ID" FAIL reachable "нет связи"
+    exit 3
+  elif [ "$rc" = 0 ]; then
+    INPUTS_ENV="XCP_RT_INPUTS=$RWD/inputs"
+  else
+    rt_result "$ID" FAIL "go:inputs" "копирование входных данных не удалось (код $rc)"
+    BAD=$((BAD + 1))
+  fi
+fi
+
 # --- пакеты --------------------------------------------------------------------
 for pkg in $PKGS; do
   name=$(printf '%s' "${pkg#internal/}" | tr '/' '-')
@@ -222,7 +239,7 @@ for pkg in $PKGS; do
   runner="$RT_REPORT/$ID/.go-run.sh"
   cat >"$runner" <<EOF
 cd $RWD
-XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV ./$name.test -test.v=test2json -test.run '${RT_GO_RUN:-^TestRouter}' -test.timeout 20m &
+XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV $INPUTS_ENV ./$name.test -test.v=test2json -test.run '${RT_GO_RUN:-^TestRouter}' -test.timeout 20m &
 T=\$!
 ( while kill -0 \$T 2>/dev/null; do grep VmHWM /proc/\$T/status > $RWD/$name.hwm 2>/dev/null; sleep 1; done ) &
 W=\$!

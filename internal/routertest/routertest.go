@@ -239,3 +239,14 @@ func LinksDir(t testing.TB) string {
 	}
 	return dir
 }
+
+// InputsDir — каталог входных тел ответов (Clash YAML, Xray-JSON, sing-box,
+// wg.conf, подписки), скопированный на устройство.
+func InputsDir(t testing.TB) string {
+	t.Helper()
+	dir := os.Getenv("XCP_RT_INPUTS")
+	if dir == "" {
+		t.Fatal("нет XCP_RT_INPUTS: тест запускается только через make router-test")
+	}
+	return dir
+}
