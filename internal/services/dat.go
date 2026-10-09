@@ -1535,10 +1535,6 @@ func normalizeQueryInput(v string) (string, net.IP) {
 	return strings.ToLower(s), nil
 }
 
-func matchDomain(ruleDomain, targetDomain string) bool {
-	return matchDomainCached(ruleDomain, targetDomain, nil)
-}
-
 func matchDomainCached(ruleDomain, targetDomain string, cache map[string]*regexp.Regexp) bool {
 	cleanRule := strings.TrimSpace(ruleDomain)
 	target := strings.ToLower(strings.TrimSpace(targetDomain))

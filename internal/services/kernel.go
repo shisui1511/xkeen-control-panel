@@ -361,67 +361,6 @@ func isShortLivedOrHelperProcess(pidStr string) bool {
 	return false
 }
 
-// kernelProcessStatus detects whether the kernel process is running.
-// Method 1: scan procDir/*/exe readlinks for the binary basename.
-// Method 2 (fallback): run pidof <basename> if procDir appears empty.
-// Returns "not_installed", "not_accessible", "running", "stopped", or "unknown".
-func kernelProcessStatus(binaryPath string) string {
-	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		return "not_installed"
-	}
-
-	// Check if the binary is accessible (readable/executable)
-	f, err := os.Open(binaryPath)
-	if err != nil {
-		if errors.Is(err, os.ErrPermission) {
-			return "not_accessible"
-		}
-		return "not_accessible"
-	}
-	f.Close()
-
-	base := filepath.Base(binaryPath)
-
-	// Method 1: procDir/*/exe readlink (no external tools required)
-	matches, _ := filepath.Glob(filepath.Join(procDir, "*/exe"))
-	for _, link := range matches {
-		target, err := os.Readlink(link)
-		if err == nil {
-			target = strings.TrimSuffix(target, " (deleted)")
-			if filepath.Base(target) == base {
-				pidStr := filepath.Base(filepath.Dir(link))
-				if isShortLivedOrHelperProcess(pidStr) {
-					continue
-				}
-				return "running"
-			}
-		}
-	}
-
-	// Method 2: pidof fallback when procDir gives no entries
-	if len(matches) == 0 {
-		out, err := exec.Command("pidof", base).Output()
-		if err == nil {
-			pids := strings.Fields(strings.TrimSpace(string(out)))
-			hasRunning := false
-			for _, pidStr := range pids {
-				if !isShortLivedOrHelperProcess(pidStr) {
-					hasRunning = true
-					break
-				}
-			}
-			if hasRunning {
-				return "running"
-			}
-			return "stopped"
-		}
-		// pidof itself unavailable — cannot determine state
-		return "unknown"
-	}
-
-	return "stopped"
-}
-
 func kernelProcessStatusDetailed(binaryPath string) (status string, pid int, uptime string) {
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
 		return "not_installed", 0, ""

@@ -174,29 +174,6 @@ func (s *SubscriptionService) downloadWithUA(ctx context.Context, subURL string,
 	return body, headers, nil
 }
 
-func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL string, sub *Subscription) (outbounds []Outbound, skips []SkipReason, bodyBytes []byte, headers http.Header, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panic in parser: %v", r)
-			log.Printf("[Subscriptions] PANIC recovered: %v", r)
-		}
-	}()
-
-	body, headers, err := s.downloadWithUA(ctx, subURL, sub, subscriptionUserAgentXray)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	outs, skipReasons, err := parseSubscriptionBody(body, headers.Get("Content-Type"), sub)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	if sub != nil && !isHTMLResponse(body, headers.Get("Content-Type")) {
-		applySubscriptionHeaders(headers, sub)
-	}
-	return outs, skipReasons, body, headers, nil
-}
-
 // parseSubscriptionBody detects the format of a subscription response and parses it
 // into outbounds. It tries formats in priority order: sing-box JSON, xray JSON,
 // clash YAML, then base64/share-links.

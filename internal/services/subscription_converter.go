@@ -717,68 +717,6 @@ func writeTransportOpts(sb *strings.Builder, n SubscriptionNode) {
 	}
 }
 
-func (s *SubscriptionService) applyClashFilters(blocks []string, names []string, sub *Subscription) ([]string, []string) {
-	if sub.FilterName == "" && sub.FilterType == "" && sub.FilterTransport == "" && sub.ExcludeFilter == "" && sub.ExcludeType == "" {
-		return blocks, names
-	}
-
-	var nameRe *regexp.Regexp
-	if sub.FilterName != "" {
-		if r, err := regexp.Compile("(?i)" + sub.FilterName); err == nil {
-			nameRe = r
-		}
-	}
-
-	var excludeRe *regexp.Regexp
-	if sub.ExcludeFilter != "" {
-		if r, err := regexp.Compile("(?i)" + sub.ExcludeFilter); err == nil {
-			excludeRe = r
-		}
-	}
-
-	excludeTypes := parseExcludeTypes(sub.ExcludeType)
-
-	var filteredBlocks []string
-	var filteredNames []string
-
-	for idx, block := range blocks {
-		node := ParseClashProxyNode(block)
-		if node.Tag == "" {
-			continue
-		}
-
-		if nameRe != nil && !nameRe.MatchString(node.Tag) {
-			continue
-		}
-		if excludeRe != nil && excludeRe.MatchString(node.Tag) {
-			continue
-		}
-		if sub.FilterType != "" && !strings.EqualFold(node.Protocol, sub.FilterType) {
-			continue
-		}
-		if len(excludeTypes) > 0 {
-			matched := false
-			for _, et := range excludeTypes {
-				if strings.EqualFold(node.Protocol, et) {
-					matched = true
-					break
-				}
-			}
-			if matched {
-				continue
-			}
-		}
-		if sub.FilterTransport != "" && !strings.EqualFold(node.Transport, sub.FilterTransport) {
-			continue
-		}
-
-		filteredBlocks = append(filteredBlocks, block)
-		filteredNames = append(filteredNames, names[idx])
-	}
-
-	return filteredBlocks, filteredNames
-}
-
 func getVNextUserField(ob *Outbound, field string) string {
 	if ob.Settings == nil {
 		return ""
