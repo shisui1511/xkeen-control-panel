@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
@@ -389,7 +390,7 @@ func (s *Service) subscriptionFile(mode configlayer.SourceKind, kernel, id strin
 	if err != nil {
 		return nil, fmt.Errorf("источник %s, ядро %s: %w", id, kernel, err)
 	}
-	keyed := s.subscriptionNodes(id, list)
+	keyed := s.subscriptionNodes(id, excludeByName(list, cfg.Exclude))
 	var file *configlayer.GeneratedFile
 	switch kernel {
 	case kernelXray:
@@ -402,6 +403,34 @@ func (s *Service) subscriptionFile(mode configlayer.SourceKind, kernel, id strin
 	}
 	s.memoPut(key, memoFile{file: file})
 	return file, nil
+}
+
+// excludeByName убирает узлы, в имени которых есть любая из подстрок (без учёта
+// регистра): единственный фильтр источника (D-04). Пустые и состоящие из пробелов
+// шаблоны игнорируются. Фильтр действует до обоих ядер, потому что работает над
+// общим набором; «Мои узлы» им не пользуются.
+func excludeByName(list []nodes.Node, patterns []string) []nodes.Node {
+	var subs []string
+	for _, p := range patterns {
+		if p = strings.ToLower(strings.TrimSpace(p)); p != "" {
+			subs = append(subs, p)
+		}
+	}
+	if len(subs) == 0 {
+		return list
+	}
+	out := make([]nodes.Node, 0, len(list))
+next:
+	for _, n := range list {
+		name := strings.ToLower(displayName(n))
+		for _, p := range subs {
+			if strings.Contains(name, p) {
+				continue next
+			}
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 // subscriptionNodes присваивает узлам снимка ключи: полные дубли схлопываются,
