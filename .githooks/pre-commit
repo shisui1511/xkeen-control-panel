@@ -5,6 +5,7 @@
 # Проверяются только файлы из индекса:
 #   frontend/** → prettier --check (те же правила, что в CI/Lint Frontend)
 #   *.go        → gofmt -l
+#   весь индекс → scripts/check-no-simulations.js (тесты вне роутера запрещены)
 # Пропустить разово: git commit --no-verify.
 
 set -eu
@@ -37,6 +38,15 @@ if [ -n "$GO" ]; then
     printf "%s\n" "$UNFORMATTED" | sed "s/^/  /" >&2
     FAILED=1
   fi
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-commit: нужен node для проверки check-no-simulations.js" >&2
+  exit 1
+fi
+if ! node scripts/check-no-simulations.js; then
+  echo "pre-commit: тесты вне роутера запрещены (AGENTS.md, «Тестирование»)" >&2
+  FAILED=1
 fi
 
 exit "$FAILED"

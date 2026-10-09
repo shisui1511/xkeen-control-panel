@@ -72,15 +72,5 @@ export default defineConfig({
         secure: false
       }
     }
-  },
-  test: {
-    include: [
-      'src/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}',
-      'tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'
-    ],
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'json', 'html']
-    }
   }
 });

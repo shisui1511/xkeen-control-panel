@@ -24,11 +24,11 @@ permissions:
   contents: write
 
 jobs:
-  # Push в main: страховочный прогон тестов merge-коммита (PR мог отставать от main)
-  # и сигнал для auto-release. Сборки на push нет: RC и stable собираются по тегу,
-  # коммит к этому моменту уже зелёный, поэтому тесты там не повторяются.
-  test:
-    name: Test
+  # Push в main: статическая проверка merge-коммита (PR мог отставать от main)
+  # и сигнал для auto-release. Сборки на push нет: RC и stable собираются по тегу.
+  # Job нужен, чтобы push давал прогон «Build and Release» для workflow_run.
+  vet:
+    name: Vet
     runs-on: ubuntu-latest
     if: github.actor != 'dependabot[bot]' && github.event_name == 'push' && github.ref_type == 'branch'
     steps:
@@ -39,15 +39,12 @@ jobs:
         with:
           go-version: "1.27"
 
-      # go:embed требует frontend/dist; тестам сборка не нужна
+      # go:embed требует frontend/dist; go vet сборка не нужна
       - name: Stub frontend for go:embed
         run: mkdir -p frontend/dist && echo '<!doctype html>' > frontend/dist/index.html
 
       - name: Download Go dependencies
         run: go mod download
-
-      - name: Run Go tests
-        run: go test -v -race ./...
 
       - name: Run Go vet
         run: go vet ./...
@@ -122,15 +119,12 @@ jobs:
         include:
           - GOARCH: arm64
             name: arm64
-            qemu: qemu-aarch64-static
           - GOARCH: mipsle
             GOMIPS: softfloat
             name: mipsle
-            qemu: qemu-mipsel-static
           - GOARCH: mips
             GOMIPS: softfloat
             name: mips
-            qemu: qemu-mips-static
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
@@ -157,31 +151,10 @@ jobs:
           go build -ldflags="-s -w -X main.Version=${VERSION}" \
             -o build/xcp_${VERSION}_${{ matrix.name }} ./cmd/xcp
 
-      - name: Install QEMU and tools
-        run: |
-          ok=0
-          for i in 1 2 3; do
-            timeout 180 sudo apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=3 update \
-              && timeout 180 sudo apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=3 install -y qemu-user-static \
-              && { ok=1; break; }
-            echo "apt-get failed, retry $i"; sleep 5
-          done
-          [ "$ok" = 1 ] || { echo "::error::apt-get failed after 3 attempts"; exit 1; }
-
       - name: Verify static linkage
         run: |
           file "build/xcp_${VERSION}_${{ matrix.name }}"
           file "build/xcp_${VERSION}_${{ matrix.name }}" | grep -q "statically linked"
-
-      - name: Smoke test under QEMU
-        timeout-minutes: 1
-        run: |
-          ACTUAL=$(${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}" -v)
-          echo "xcp -v: ${ACTUAL}"
-          if [ "$ACTUAL" != "$VERSION" ]; then
-            echo "::error::Бинарник сообщает версию '${ACTUAL}', ожидалась '${VERSION}'"
-            exit 1
-          fi
 
       - name: Generate checksum
         run: |

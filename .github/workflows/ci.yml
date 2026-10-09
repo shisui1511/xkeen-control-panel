@@ -53,9 +53,9 @@ jobs:
           # Go-код не менялся — достаточно одной архитектуры (размер встроенного фронтенда, запуск);
           # все три собираются при правке Go и на теге
           if [ "$go" = true ]; then
-            matrix='{"include":[{"GOARCH":"arm64","name":"arm64","qemu":"qemu-aarch64-static"},{"GOARCH":"mipsle","GOMIPS":"softfloat","name":"mipsle","qemu":"qemu-mipsel-static"},{"GOARCH":"mips","GOMIPS":"softfloat","name":"mips","qemu":"qemu-mips-static"}]}'
+            matrix='{"include":[{"GOARCH":"arm64","name":"arm64"},{"GOARCH":"mipsle","GOMIPS":"softfloat","name":"mipsle"},{"GOARCH":"mips","GOMIPS":"softfloat","name":"mips"}]}'
           else
-            matrix='{"include":[{"GOARCH":"arm64","name":"arm64","qemu":"qemu-aarch64-static"}]}'
+            matrix='{"include":[{"GOARCH":"arm64","name":"arm64"}]}'
           fi
           {
             echo "go=$go"
@@ -73,7 +73,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # go:embed требует frontend/dist; линтеру и тестам сборка не нужна
+      # go:embed требует frontend/dist; линтеру сборка не нужна
       - name: Stub frontend for go:embed
         run: mkdir -p frontend/dist && echo '<!doctype html>' > frontend/dist/index.html
 
@@ -100,48 +100,7 @@ jobs:
           go-version-file: go.mod
           repo-checkout: false
           # Проверяется то, что попадает в бинарник: граф пакетов от cmd/.
-          # Тестовые хелперы (internal/xrayapi/testutil поднимает gRPC-сервер
-          # для моков) импортируются только из _test.go и в сборку не входят.
           go-package: ./cmd/...
-
-  # Job 2: Тестирование Go кода
-  test-go:
-    name: Test Go
-    needs: changes
-    if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      # go:embed требует frontend/dist; линтеру и тестам сборка не нужна
-      - name: Stub frontend for go:embed
-        run: mkdir -p frontend/dist && echo '<!doctype html>' > frontend/dist/index.html
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: "1.27"
-
-      - name: Download dependencies
-        env:
-          GOTOOLCHAIN: local
-        run: go mod download
-
-      - name: Run tests
-        run: go test -race -v -coverprofile=coverage.out ./...
-
-      - name: Verify test coverage thresholds
-        run: ./scripts/check-coverage.sh coverage.out
-
-      - name: Upload coverage to artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: go-coverage
-          path: coverage.out
-          retention-days: 7
-
-      - name: Display coverage
-        run: go tool cover -func=coverage.out
 
   # Job 3: Линтинг и сборка Frontend
   lint-frontend:
@@ -184,11 +143,6 @@ jobs:
           cd frontend
           npm run check:i18n
 
-      - name: Run frontend unit tests
-        run: |
-          cd frontend
-          npm run test:unit
-
       - name: Build frontend
         run: |
           cd frontend
@@ -216,96 +170,11 @@ jobs:
           strip-hash: "-[a-zA-Z0-9_-]{8}"
           build-script: "npm run build"
 
-  # Job 4a: Выбор e2e-спеков по изменённым файлам
-  # Граф импортов фронтенда строится заново (frontend/scripts/select-e2e.mjs):
-  # запускаются только спеки страниц, которые затрагивает PR. Изменения
-  # оболочки приложения, хелперов тестов и конфигов запускают все спеки.
-  e2e-plan:
-    name: E2E Plan
-    runs-on: ubuntu-latest
-    outputs:
-      mode: ${{ steps.plan.outputs.mode }}
-      specs: ${{ steps.plan.outputs.specs }}
-      shards: ${{ steps.plan.outputs.shards }}
-      shard_total: ${{ steps.plan.outputs.shard_total }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Select specs
-        id: plan
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          node frontend/scripts/select-e2e.mjs --base "$BASE_SHA" --head "$HEAD_SHA" --github-output
-
-  # Job 4b: Тестирование Frontend (E2E) — выбранные спеки, по шардам
-  test-frontend:
-    name: Test Frontend E2E (${{ matrix.shard }}/${{ needs.e2e-plan.outputs.shard_total }})
-    needs: e2e-plan
-    if: needs.e2e-plan.outputs.mode != 'none'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ${{ fromJSON(needs.e2e-plan.outputs.shards) }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        run: |
-          cd frontend
-          npm ci
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
-
-      - name: Install Playwright Browsers
-        run: |
-          cd frontend
-          npx playwright install chromium
-
-      # Бэкенд и сборка не нужны: спеки мокают API через page.route и
-      # работают через Vite dev-сервер (webServer в playwright.config.ts)
-      - name: Run Playwright tests
-        env:
-          SHARD: ${{ matrix.shard }}/${{ needs.e2e-plan.outputs.shard_total }}
-          # Имена файлов из PR — только через env, не подстановкой в скрипт
-          SPECS: ${{ needs.e2e-plan.outputs.specs }}
-        run: |
-          cd frontend
-          # shellcheck disable=SC2086 # SPECS — список через пробел
-          npx playwright test --shard="$SHARD" $SPECS
-
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: playwright-report-${{ matrix.shard }}
-          path: frontend/playwright-report/
-          retention-days: 30
-
   # Job 5: Проверка сборки
   build-check:
     name: Build Check
-    # Нужен только артефакт фронтенда, поэтому не ждёт тесты: сборка идёт параллельно с ними.
-    # Итог PR всё равно требует зелёных тестов — они отдельные обязательные проверки.
+    # Нужен только артефакт фронтенда от lint-frontend; остальные проверки идут параллельно.
+    # Итог PR всё равно требует зелёных обязательных проверок — они отдельные.
     needs: [changes, lint-frontend]
     if: ${{ !cancelled() && needs.changes.outputs.build == 'true' && needs.lint-frontend.result != 'failure' }}
     runs-on: ubuntu-latest
@@ -353,26 +222,10 @@ jobs:
             echo "::warning::Binary size is larger than 50MB: ${SIZE_MB}MB"
           fi
 
-      - name: Install QEMU and tools
-        run: |
-          ok=0
-          for i in 1 2 3; do
-            timeout 180 sudo apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=3 update \
-              && timeout 180 sudo apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=3 install -y qemu-user-static \
-              && { ok=1; break; }
-            echo "apt-get failed, retry $i"; sleep 5
-          done
-          [ "$ok" = 1 ] || { echo "::error::apt-get failed after 3 attempts"; exit 1; }
-
       - name: Verify static linkage
         run: |
           file "xcp-${{ matrix.name }}"
           file "xcp-${{ matrix.name }}" | grep -q "statically linked"
-
-      - name: Smoke test under QEMU
-        timeout-minutes: 1
-        run: |
-          ${{ matrix.qemu }} "./xcp-${{ matrix.name }}" -v
 
   # Job 6: Проверка правил коммитов и синхронизации локализации
   check-rules:
@@ -394,13 +247,38 @@ jobs:
       - name: Check frontend API calls against backend routes
         run: node scripts/check-api-routes.js
 
-      - name: Test version, release and setup scripts
+      - name: Show build version
         run: |
-          sh scripts/version_test.sh
-          bash .github/scripts/auto_release_test.sh
-          sh scripts/setup_test.sh
           echo "Build version: $(sh scripts/version.sh), next release: $(sh scripts/version.sh --next)"
 
       - name: Check commit messages
         run: |
           node scripts/check-commits.js "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+
+  # Job 7: Гейт «тесты только на роутере» и статические стражи.
+  # Без условий и needs: запускается в каждом PR, имя job — обязательная проверка ruleset.
+  check-no-simulations:
+    name: check-no-simulations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Check no simulations
+        run: node scripts/check-no-simulations.js
+
+      - name: Check kernel gate routes
+        run: node scripts/check-kernel-routes.js
+
+      - name: Check Xray protocols
+        run: node scripts/check-xray-protocols.js
+
+      - name: Check password blacklist
+        run: node scripts/check-password-blacklist.js
+
+      - name: Check kernel guard
+        run: node scripts/check-kernel-guard.js

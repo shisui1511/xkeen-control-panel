@@ -11,7 +11,7 @@ name: Auto Release
 # завершении каждого из них, последний видит полную картину. Cron добирает выдержку RC.
 on:
   workflow_run:
-    workflows: ["Build and Release", "E2E Full", "CodeQL"]
+    workflows: ["Build and Release", "CodeQL"]
     types: [completed]
     branches: [main]
   milestone:

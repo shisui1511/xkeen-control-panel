@@ -828,10 +828,6 @@ func fileFallbackSource(path string) string {
 	}
 }
 
-func (d *LogDispatcher) tailFile(path string) {
-	d.tailFileFrom(path, -1)
-}
-
 // tailFileFrom follows path starting at offset start; a negative start
 // shows the recent tail first.
 func (d *LogDispatcher) tailFileFrom(path string, start int64) {
@@ -1024,11 +1020,6 @@ func rciLogLine(e rciLogEntry) string {
 		line += " [" + ident + "]"
 	}
 	return line + " " + e.Message.Message
-}
-
-// pollRCILog ingests new Keenetic/Netcraze system log entries every interval.
-func (d *LogDispatcher) pollRCILog(rciURL string, interval time.Duration) {
-	d.pollRCILogFrom(rciURL, interval, -1)
 }
 
 // pollRCILogFrom polls the RCI log for entries newer than lastID; -1 starts
