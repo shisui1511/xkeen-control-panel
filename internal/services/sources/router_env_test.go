@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,6 +58,8 @@ type rtEnv struct {
 	dir   string
 	// installed — какие ядра видит сервис (и слой).
 	installed configlayer.InstalledKernels
+	// enabled — флаг config_layer, который опрашивает слой при каждом использовании.
+	enabled atomic.Bool
 }
 
 // rtLink читает ссылку из данных testdata/links по имени файла без расширения.
@@ -97,6 +100,13 @@ func rtNewEnv(t *testing.T, xray, mihomo bool) *rtEnv {
 // подсчётом настоящих запросов, свой HWID).
 func rtNewEnvWith(t *testing.T, xray, mihomo bool, mutate func(*Deps)) *rtEnv {
 	t.Helper()
+	return rtNewEnvOpts(t, xray, mihomo, true, mutate)
+}
+
+// rtNewEnvOpts — rtNewEnvWith с начальным значением флага config_layer: выключенный
+// слой при старте ничего не читает и не пишет.
+func rtNewEnvOpts(t *testing.T, xray, mihomo, enabled bool, mutate func(*Deps)) *rtEnv {
+	t.Helper()
 	tg := routertest.Current(t)
 	dir, err := os.MkdirTemp(tg.WorkDir, "src-")
 	if err != nil {
@@ -116,10 +126,17 @@ func rtNewEnvWith(t *testing.T, xray, mihomo bool, mutate func(*Deps)) *rtEnv {
 	if mihomo {
 		bins.Mihomo = rtMihomoBin
 	}
+	e := &rtEnv{
+		dir:       dir,
+		roots:     roots,
+		clock:     &rtClock{t: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)},
+		installed: configlayer.InstalledKernels{Xray: xray, Mihomo: mihomo},
+	}
+	e.enabled.Store(enabled)
 	layer, err := configlayer.New(configlayer.Options{
 		DataDir:       dir,
 		Roots:         roots,
-		Enabled:       func() bool { return true },
+		Enabled:       e.enabled.Load,
 		Binaries:      func() configlayer.Binaries { return bins },
 		DriftInterval: time.Hour,
 		DebounceDelay: 20 * time.Millisecond,
@@ -128,13 +145,7 @@ func rtNewEnvWith(t *testing.T, xray, mihomo bool, mutate func(*Deps)) *rtEnv {
 		t.Fatalf("configlayer.New: %v", err)
 	}
 	t.Cleanup(layer.Stop)
-	e := &rtEnv{
-		dir:       dir,
-		layer:     layer,
-		roots:     roots,
-		clock:     &rtClock{t: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)},
-		installed: configlayer.InstalledKernels{Xray: xray, Mihomo: mihomo},
-	}
+	e.layer = layer
 	deps := Deps{
 		DataDir:   dir,
 		Layer:     layer,
@@ -149,6 +160,8 @@ func rtNewEnvWith(t *testing.T, xray, mihomo bool, mutate func(*Deps)) *rtEnv {
 		t.Fatalf("sources.New: %v", err)
 	}
 	e.svc = svc
+	// Сервис останавливается раньше слоя (cleanup идёт в обратном порядке).
+	t.Cleanup(svc.Stop)
 	for _, g := range svc.Generators() {
 		if err := layer.RegisterGenerator(g); err != nil {
 			t.Fatalf("RegisterGenerator %s: %v", g.ID(), err)
@@ -156,6 +169,9 @@ func rtNewEnvWith(t *testing.T, xray, mihomo bool, mutate func(*Deps)) *rtEnv {
 	}
 	if err := layer.SetLiveCommitter(svc.CommitLive); err != nil {
 		t.Fatalf("SetLiveCommitter: %v", err)
+	}
+	if err := layer.OnDriftResolved(svc.OnDriftResolved); err != nil {
+		t.Fatalf("OnDriftResolved: %v", err)
 	}
 	layer.Start()
 	return e
