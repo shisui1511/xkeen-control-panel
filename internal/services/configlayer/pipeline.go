@@ -22,6 +22,9 @@ const (
 	TriggerKernelInstalled Trigger = "kernel_installed"
 	TriggerFlagOn          Trigger = "flag_on"
 	TriggerFlagOff         Trigger = "flag_off"
+	// TriggerSourceRefresh — фоновое обновление источника: сборка из применённого
+	// состояния с оверлеем живых данных, черновик не трогается (FND-06, U-04).
+	TriggerSourceRefresh Trigger = "source_refresh"
 )
 
 // SourceKind — из какого состояния собираются файлы.
@@ -42,6 +45,10 @@ type ApplyRequest struct {
 	// файлы, записи манифеста и сироты других ядер не участвуют в плане и не
 	// трогаются. Пусто — все установленные ядра.
 	Kernel string
+	// LiveOverlay — ключи, которые заменяют одноимённые ключи State.Live во входе
+	// генераторов этого запуска (кандидат фонового обновления источника). Сам State.Live
+	// оверлей не меняет: живые данные фиксирует хук PipelineDeps.CommitLive.
+	LiveOverlay Sections
 }
 
 // StepID — шаг конвейера.
@@ -75,6 +82,9 @@ type StepView struct {
 	State    StepState `json:"state"`
 	NoteCode string    `json:"note_code,omitempty"`
 	Message  string    `json:"message,omitempty"`
+	// Trigger — что запустило конвейер: по нему клиент отличает фоновое обновление
+	// источника (source_refresh) от «Применить».
+	Trigger Trigger `json:"trigger,omitempty"`
 }
 
 // RestartView — итог шага «Перезапуск» по одному ядру.
@@ -157,6 +167,15 @@ type PipelineDeps struct {
 	Mihomo         MihomoControl
 	MihomoAPIReady func() bool
 	Lifecycle      LifecycleLocker
+
+	// CommitLive — хук фиксации живых данных. Вызывается внутри той же записи файла
+	// состояния, что и манифест, после успешной записи файлов и перезапуска, а также
+	// когда план пуст; used — вход, из которого собраны файлы этого запуска. Ошибка
+	// хука отменяет запись состояния (файлы возвращаются). При отказе сборки,
+	// проверки, записи, перезапуска и при дрейфе хук не вызывается. Хук получает req:
+	// запуск, ограниченный одним ядром (req.Kernel), собрал файлы только этого ядра.
+	// nil — хука нет.
+	CommitLive func(st *State, req ApplyRequest, used Input) error
 }
 
 // Pipeline — конвейер «Применить»: сборка, проверка Xray, проверка Mihomo,
@@ -168,6 +187,9 @@ type Pipeline struct {
 	applyMu sync.Mutex
 	mu      sync.Mutex
 	view    ApplyView
+	// commitLive — хук фиксации живых данных (PipelineDeps.CommitLive), под mu:
+	// слой выставляет его после создания конвейера.
+	commitLive func(st *State, req ApplyRequest, used Input) error
 }
 
 // NewPipeline создаёт конвейер; WriteFile и Now имеют значения по умолчанию
@@ -179,7 +201,20 @@ func NewPipeline(d PipelineDeps) *Pipeline {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
-	return &Pipeline{d: d}
+	return &Pipeline{d: d, commitLive: d.CommitLive}
+}
+
+// setCommitLive подменяет хук фиксации живых данных (до Start слоя).
+func (p *Pipeline) setCommitLive(fn func(st *State, req ApplyRequest, used Input) error) {
+	p.mu.Lock()
+	p.commitLive = fn
+	p.mu.Unlock()
+}
+
+func (p *Pipeline) liveCommitter() func(st *State, req ApplyRequest, used Input) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.commitLive
 }
 
 func (v ApplyView) clone() ApplyView {
@@ -230,7 +265,7 @@ func (p *Pipeline) setStep(id StepID, state StepState, note, msg string) {
 	var sv StepView
 	for i := range p.view.Steps {
 		if p.view.Steps[i].ID == id {
-			p.view.Steps[i] = StepView{ID: id, State: state, NoteCode: note, Message: msg}
+			p.view.Steps[i] = StepView{ID: id, State: state, NoteCode: note, Message: msg, Trigger: p.view.Trigger}
 			sv = p.view.Steps[i]
 		}
 	}
@@ -301,7 +336,8 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
 		}
 	}
-	files, err := p.d.Registry.Build(Input{Sections: src, Live: snap.Live, Mode: req.Source}, installed)
+	used := Input{Sections: src, Live: liveWithOverlay(snap.Live, req.LiveOverlay), Mode: req.Source}
+	files, err := p.d.Registry.Build(used, installed)
 	if err == nil {
 		files = filesOfScope(files, req.Kernel)
 		err = CheckGenerated(files, p.d.ForeignOwned)
@@ -345,7 +381,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	if plan.Empty() {
 		p.setStep(StepWrite, StepSkipped, NoteNoChanges, "")
 		p.setStep(StepRestart, StepSkipped, NoteNoChanges, "")
-		if err := p.syncApplied(snap, src, req); err != nil {
+		if err := p.syncApplied(snap, src, req, used); err != nil {
 			return p.finish(ResultView{Code: ResultStateWriteFailed, Message: err.Error()})
 		}
 		return p.finish(ResultView{OK: true, Code: ResultNothingToApply})
@@ -382,7 +418,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		}
 		return p.finish(res)
 	}
-	if err := p.commitState(plan, src, req); err != nil {
+	if err := p.commitState(plan, src, req, used); err != nil {
 		// Ядра уже перезапущены на новых файлах: вернуть одни файлы мало, ядра
 		// нужно поднять на прежних (WR-04).
 		return p.finish(p.rollbackAfterCommitFailure(ctx, out.Set, views, err))
@@ -501,20 +537,36 @@ func driftKeysExceptMissing(roots Roots, manifest map[string]ManifestEntry) []st
 	return out
 }
 
-// syncApplied фиксирует применённое состояние из снимка источника, когда файлов
-// писать не нужно (пустой план). Для пересборки по ключам и из applied ничего
-// не меняется; без расхождений файл состояния не переписывается.
-func (p *Pipeline) syncApplied(snap State, src Sections, req ApplyRequest) error {
-	if req.Source != SourceDraft || len(req.Only) > 0 {
-		return nil
-	}
-	if draftChanges(State{Draft: src, Applied: snap.Applied}) == 0 {
+// syncApplied фиксирует применённое состояние из снимка источника и живые данные,
+// когда файлов писать не нужно (пустой план). Для пересборки по ключам и из applied
+// применённое состояние не меняется; без расхождений и без хука файл состояния не
+// переписывается. Хук и применённое состояние идут одной записью.
+func (p *Pipeline) syncApplied(snap State, src Sections, req ApplyRequest, used Input) error {
+	syncDraft := req.Source == SourceDraft && len(req.Only) == 0 &&
+		draftChanges(State{Draft: src, Applied: snap.Applied}) != 0
+	hook := p.liveCommitter()
+	if !syncDraft && hook == nil {
 		return nil
 	}
 	return p.d.Store.Update(func(st *State) error {
-		st.Applied = src.Clone()
+		if syncDraft {
+			st.Applied = src.Clone()
+		}
+		if hook != nil {
+			return hook(st, req, used)
+		}
 		return nil
 	})
+}
+
+// liveWithOverlay возвращает копию живых данных, в которой ключи оверлея заменяют
+// одноимённые; без оверлея — копию как есть. Состояние слоя не меняется.
+func liveWithOverlay(live, overlay Sections) Sections {
+	out := live.Clone()
+	for k, v := range overlay {
+		out[k] = cloneRaw(v)
+	}
+	return out
 }
 
 // afterValidation отражает итог проверки в шаге; failed=true — применение
@@ -532,10 +584,12 @@ func (p *Pipeline) afterValidation(id StepID, r ValidationResult) (ResultView, b
 	return ResultView{}, false
 }
 
-// commitState фиксирует манифест и применённое состояние в одной записи файла
-// состояния и очищает журнал записи; вызывается после шага перезапуска.
-func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest) error {
+// commitState фиксирует манифест, применённое состояние и (хуком) живые данные в
+// одной записи файла состояния и очищает журнал записи; вызывается после шага
+// перезапуска.
+func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest, used Input) error {
 	now := p.d.Now()
+	hook := p.liveCommitter()
 	applyDraft := req.Source == SourceDraft && len(req.Only) == 0
 	return p.d.Store.Update(func(st *State) error {
 		for _, fp := range plan.Files {
@@ -551,6 +605,13 @@ func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest) error 
 		}
 		if applyDraft {
 			st.Applied = src.Clone()
+		}
+		// Живые данные фиксируются в той же записи, что и манифест (RESEARCH
+		// Pitfall 3): отказ хука отменяет и манифест.
+		if hook != nil {
+			if err := hook(st, req, used); err != nil {
+				return err
+			}
 		}
 		st.Journal = nil
 		return nil

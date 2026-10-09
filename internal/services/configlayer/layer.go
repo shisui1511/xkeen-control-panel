@@ -109,6 +109,11 @@ type Layer struct {
 	started bool
 	// lastFiles — JSON последнего результата сверки; nil — базы нет.
 	lastFiles []byte
+	// lastDrift — число файлов с дрейфом по последней сверке; переход >0 → 0 будит
+	// onDriftResolved.
+	lastDrift int
+	// onDriftResolved — колбэк «дрейф решён» (сервис источников), до Start.
+	onDriftResolved func()
 	// failed — уведомления build_failed:<ядро> (только в памяти).
 	failed map[string]NoticeView
 	// Кэш версий ядер.
@@ -316,6 +321,7 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 	if !l.Enabled() {
 		l.mu.Lock()
 		l.lastFiles = nil
+		l.lastDrift = 0
 		l.mu.Unlock()
 		return FilesEvent{Files: []FileView{}}
 	}
@@ -327,9 +333,17 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 	l.mu.Lock()
 	changed := !bytes.Equal(l.lastFiles, data)
 	l.lastFiles = data
+	resolved := publish && l.lastDrift > 0 && ev.DriftCount == 0
+	l.lastDrift = ev.DriftCount
+	onResolved := l.onDriftResolved
 	l.mu.Unlock()
 	if publish && changed {
 		l.broker.Publish(Event{Type: EventFiles, Data: ev})
+	}
+	// Дрейф решён (Пересобрать, Принять правку, ручное исправление): будим сервис
+	// источников, чтобы отложенная запись состоялась. Горутина слоя, не под checkMu.
+	if resolved && onResolved != nil {
+		l.spawn(onResolved)
 	}
 	return ev
 }
@@ -580,6 +594,31 @@ func (l *Layer) RegisterGenerator(g Generator) error {
 	return nil
 }
 
+// SetLiveCommitter задаёт хук фиксации живых данных конвейера (см.
+// PipelineDeps.CommitLive). Допустим только до Start.
+func (l *Layer) SetLiveCommitter(fn func(st *State, req ApplyRequest, used Input) error) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	l.pipeline.setCommitLive(fn)
+	return nil
+}
+
+// OnDriftResolved регистрирует колбэк «дрейф решён»: вызывается, когда число
+// файлов с дрейфом по сверке становится 0 (Пересобрать, Принять правку, ручное
+// исправление файла). Допустим только до Start.
+func (l *Layer) OnDriftResolved(fn func()) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	l.onDriftResolved = fn
+	return nil
+}
+
 // ResetDraft сбрасывает черновик к применённому состоянию.
 func (l *Layer) ResetDraft(rev int64) (DraftEvent, error) {
 	if !l.Enabled() {
@@ -647,6 +686,40 @@ func (l *Layer) afterRun() {
 	l.broker.Publish(Event{Type: EventDraft, Data: draftEventOf(st)})
 	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(st)}})
 	l.checkNow(true)
+}
+
+// RunSourceRefresh — фоновое обновление источника (FND-06, U-04): тот же конвейер
+// (сборка, проверка обоих ядер, запись, перезапуск только запущенного, коммит), но
+// из применённого состояния с оверлеем живых данных. Черновик и его ревизия не
+// меняются; живые данные фиксирует хук SetLiveCommitter в той же записи, что и
+// манифест. Идущее «Применить» ждёт (параллельного применения нет). Нерешённый
+// дрейф — ErrDriftBlocked: файлы и ядро не тронуты. Вызов синхронный: горутину
+// запускает вызывающий сервис со своим wg.
+func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyView, error) {
+	if !l.Enabled() {
+		return ApplyView{}, ErrDisabled
+	}
+	l.mu.Lock()
+	stopped := l.stopped
+	l.mu.Unlock()
+	if stopped {
+		return ApplyView{}, ErrStopped
+	}
+	release, err := l.pipeline.TryBegin(ctx, false)
+	if err != nil {
+		if l.ctx.Err() != nil {
+			return ApplyView{}, ErrStopped
+		}
+		return ApplyView{}, err
+	}
+	defer release()
+	view := l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerSourceRefresh, Source: SourceApplied, LiveOverlay: overlay})
+	release()
+	l.afterRun()
+	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
+		return view, ErrDriftBlocked
+	}
+	return view, nil
 }
 
 // Rebuild — «Пересобрать»: полный конвейер, ограниченный названными файлами.
