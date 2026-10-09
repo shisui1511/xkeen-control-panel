@@ -309,6 +309,12 @@ if [ -z "$core" ]; then
 elif [ "$WINDOW" -le 0 ] 2>/dev/null; then
   chk SKIP kernel-restart "окно наблюдения отключено (RT_SMOKE_WINDOW=0)"
 else
+  # XKeen после запуска или переключения ядра на медленном устройстве заменяет процесс
+  # и выходит на рабочее состояние не сразу: окно начинается, когда у ядра один и тот же
+  # единственный PID продержался 30 с (не дольше 120 с; не дождались — окно покажет).
+  rc=0
+  rt_stage "$ID" smoke-settle rt_ssh "$ID" "i=0; last=; same=0; while [ \$i -lt 120 ]; do p=\$(pidof $core); case \"\$p\" in ''|*' '*) last=; same=0 ;; *) if [ \"\$p\" = \"\$last\" ]; then same=\$((same + 5)); else last=\$p; same=0; fi ;; esac; [ \$same -ge 30 ] && break; sleep 5; i=\$((i + 5)); done" || rc=$?
+  [ "$rc" != 3 ] || lost
   rc=0
   p0=$(rt_ssh "$ID" "pidof $core") || rc=$?
   [ "$rc" != 3 ] || lost
