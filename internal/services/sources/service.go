@@ -4,12 +4,17 @@ import (
 	"crypto/rand"
 	"errors"
 	"io"
+	"net/http"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Ошибки сервиса.
@@ -24,8 +29,8 @@ var (
 	ErrInvalidInput = errors.New("sources: недопустимый ввод")
 )
 
-// Deps — зависимости сервиса. Поля для сети, планировщика и вида добавляют
-// планы 145-08…145-10.
+// Deps — зависимости сервиса. Поля планировщика и вида добавляют планы
+// 145-09…145-10.
 type Deps struct {
 	// DataDir — каталог данных панели.
 	DataDir string
@@ -40,6 +45,19 @@ type Deps struct {
 	Now func() time.Time
 	// Rand — источник случайности для токенов и идентификаторов (nil — crypto/rand).
 	Rand io.Reader
+	// HWID — общий HWID роутера для запросов к провайдерам (nil — HWID из
+	// каталога данных, общий со старым слоем подписок). Вызывается только при
+	// запросе подписки: конструктор диска и сети не трогает.
+	HWID func() string
+	// Device — модель, ОС и версия ОС для заголовков устройства (nil — данные
+	// прошивки, определяются лениво при первом запросе).
+	Device func() (model, osName, osVersion string)
+	// Client — HTTP-клиент запросов к провайдерам (nil — utils.SafeHTTPClient с
+	// защитой от SSRF).
+	Client func(timeout time.Duration) *http.Client
+	// FetchTimeout — таймаут одного запроса к провайдеру (0 — 30 с, на
+	// mips/mipsle 60 с).
+	FetchTimeout time.Duration
 }
 
 // Service — сервис источников. Создаётся один раз в cmd/xcp/main.go.
@@ -60,6 +78,9 @@ type Service struct {
 	genOrder []string
 	// parses — сколько раз реально разбирался исходный текст записи.
 	parses atomic.Int64
+
+	// blobs — снимки наборов узлов подписок по хэшу.
+	blobs blobStore
 
 	xray   xrayGen
 	mihomo mihomoGen
@@ -82,11 +103,29 @@ func New(d Deps) (*Service, error) {
 	if d.Rand == nil {
 		d.Rand = rand.Reader
 	}
+	if d.HWID == nil {
+		dataDir := d.DataDir
+		d.HWID = func() string { return services.LoadOrGenerateHWID(dataDir) }
+	}
+	if d.Device == nil {
+		d.Device = services.NewDeviceInfo().Get
+	}
+	if d.Client == nil {
+		d.Client = utils.SafeHTTPClient
+	}
+	if d.FetchTimeout <= 0 {
+		d.FetchTimeout = defaultFetchTimeout
+		if runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" || runtime.GOARCH == "mips64" || runtime.GOARCH == "mips64le" {
+			d.FetchTimeout = slowFetchTimeout
+		}
+	}
+	// Конструктор диска и сети не трогает: каталог снимков создаёт первая запись.
 	s := &Service{
 		d:        d,
 		previews: map[string]*previewEntry{},
 		parsed:   map[string]parsedEntry{},
 		gens:     map[string]memoFile{},
+		blobs:    blobStore{dir: filepath.Join(d.DataDir, "config_layer", "snapshots")},
 	}
 	s.xray = xrayGen{s: s}
 	s.mihomo = mihomoGen{s: s}

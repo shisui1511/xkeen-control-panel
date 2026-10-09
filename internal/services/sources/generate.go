@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"regexp"
@@ -73,7 +74,12 @@ func (s *Service) generate(in configlayer.Input, installed configlayer.Installed
 	}
 	sort.Strings(names)
 
-	var out []configlayer.GeneratedFile
+	var (
+		out    []configlayer.GeneratedFile
+		live   LiveSources
+		cands  Candidates
+		loaded bool
+	)
 	for _, name := range names {
 		id, ok := sourceID(name)
 		if !ok {
@@ -96,8 +102,22 @@ func (s *Service) generate(in configlayer.Input, installed configlayer.Installed
 				return nil, err
 			}
 			s.memoPut(key, memoFile{file: file})
+		case KindSubscription:
+			if !loaded {
+				if live, err = readLive(in.Live); err != nil {
+					return nil, err
+				}
+				if cands, err = readCandidates(in.Live); err != nil {
+					return nil, err
+				}
+				loaded = true
+			}
+			file, err = s.subscriptionFile(in.Mode, kernel, id, raw, live, cands, caps, string(capsJSON))
+			if err != nil {
+				return nil, err
+			}
 		default:
-			// Подписки материализует 145-08; чужие виды секций пропускаются.
+			// Чужие виды секций пропускаются.
 			continue
 		}
 		if file != nil {
@@ -110,7 +130,7 @@ func (s *Service) generate(in configlayer.Input, installed configlayer.Installed
 // liveOf — живые данные источника из Live["sources"][id] (оверлей и снимки
 // провайдера); отсутствие — nil. Входят в ключ мемоизации.
 func liveOf(in configlayer.Input, id string) json.RawMessage {
-	raw, ok := in.Live["sources"]
+	raw, ok := in.Live[LiveKeySources]
 	if !ok {
 		return nil
 	}
@@ -126,7 +146,10 @@ type keyedNode struct {
 	entryID string
 	name    string
 	key     string
-	node    nodes.Node
+	// tag — тег Xray: xcp-<источник>-<id записи> у «Моих узлов», xcp-<источник>-<8 hex
+	// от ключа> у подписок; не зависит от имени узла.
+	tag  string
+	node nodes.Node
 }
 
 // myNodes разбирает записи «Моих узлов» в упорядоченный список. Запись, которая
@@ -152,7 +175,7 @@ func (s *Service) myNodes(cfg MySourceConfig) []keyedNode {
 		if name == "" {
 			name = displayName(n)
 		}
-		list = append(list, keyedNode{entryID: e.ID, name: name, key: n.Key(MySourceID), node: n})
+		list = append(list, keyedNode{entryID: e.ID, name: name, key: n.Key(MySourceID), tag: "xcp-" + MySourceID + "-" + e.ID, node: n})
 	}
 	sort.Slice(list, func(i, j int) bool {
 		if list[i].key != list[j].key {
@@ -191,10 +214,10 @@ func xrayFile(id string, list []keyedNode, caps nodes.Caps) (*configlayer.Genera
 		if !nodes.Support(k.node, kernelXray, caps).OK {
 			continue
 		}
-		ob, err := nodes.XrayOutbound(k.node, "xcp-"+id+"-"+k.entryID)
+		ob, err := nodes.XrayOutbound(k.node, k.tag)
 		if err != nil {
 			// Вердикт OK означает, что пробная эмиссия прошла; сюда не доходим.
-			log.Printf("[sources] узел %s не записан для Xray", k.entryID)
+			log.Printf("[sources] узел %s источника %s не записан для Xray", k.tag, id)
 			continue
 		}
 		outbounds = append(outbounds, ob)
@@ -227,7 +250,7 @@ func mihomoFile(id string, list []keyedNode, caps nodes.Caps) (*configlayer.Gene
 		name := uniqueName(k.name, used)
 		p, err := nodes.ClashProxy(k.node, name)
 		if err != nil {
-			log.Printf("[sources] узел %s не записан для Mihomo", k.entryID)
+			log.Printf("[sources] узел %s источника %s не записан для Mihomo", k.tag, id)
 			continue
 		}
 		proxies = append(proxies, p)
@@ -300,4 +323,100 @@ func (s *Service) memoPut(key string, m memoFile) {
 		}
 	}
 	s.gens[key] = m
+}
+
+// parseSubscription разбирает секцию src_<id> подписки.
+func parseSubscription(raw json.RawMessage) (SubscriptionConfig, error) {
+	var cfg SubscriptionConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return SubscriptionConfig{}, fmt.Errorf("%w: секция подписки: %v", ErrInvalidInput, err)
+	}
+	cfg.Kind = KindSubscription
+	return cfg, nil
+}
+
+// refFor выбирает снимок набора подписки для ядра. Черновик (Mode SourceDraft):
+// ожидающий снимок, иначе применённый. Применённое состояние (Mode SourceApplied):
+// кандидат запуска (оверлей), иначе применённый. nil — для ядра набора нет, файла
+// не будет.
+func refFor(mode configlayer.SourceKind, kl *KernelLive, cand *Ref) *Ref {
+	if mode == configlayer.SourceApplied {
+		if cand != nil {
+			return cand
+		}
+		if kl != nil {
+			return kl.Applied
+		}
+		return nil
+	}
+	if kl == nil {
+		return nil
+	}
+	if kl.Pending != nil {
+		return kl.Pending
+	}
+	return kl.Applied
+}
+
+// subscriptionFile строит файл подписки для ядра из её снимка. Источник без снимка
+// для ядра файла не даёт; снимок есть, а прочитать его нельзя — ошибка генератора,
+// а не пустой набор: пустой набор удалил бы рабочие файлы ядра (Pitfall 7, T-145-23).
+func (s *Service) subscriptionFile(mode configlayer.SourceKind, kernel, id string, raw json.RawMessage, live LiveSources, cands Candidates, caps nodes.Caps, capsJSON string) (*configlayer.GeneratedFile, error) {
+	cfg, err := parseSubscription(raw)
+	if err != nil {
+		return nil, err
+	}
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	var kl *KernelLive
+	if src := live[id]; src != nil {
+		kl = src.Kernels[kernel]
+	}
+	var cand *Ref
+	if c, ok := cands[id][kernel]; ok {
+		cand = &c
+	}
+	ref := refFor(mode, kl, cand)
+	if ref == nil {
+		return nil, nil
+	}
+	key := hash(kernel, id, string(raw), capsJSON, ref.Hash)
+	if m, ok := s.memoGet(key); ok {
+		return m.file, nil
+	}
+	list, err := s.blobs.get(ref.Hash)
+	if err != nil {
+		return nil, fmt.Errorf("источник %s, ядро %s: %w", id, kernel, err)
+	}
+	keyed := s.subscriptionNodes(id, list)
+	var file *configlayer.GeneratedFile
+	switch kernel {
+	case kernelXray:
+		file, err = xrayFile(id, keyed, caps)
+	case kernelMihomo:
+		file, err = mihomoFile(id, keyed, caps)
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.memoPut(key, memoFile{file: file})
+	return file, nil
+}
+
+// subscriptionNodes присваивает узлам снимка ключи: полные дубли схлопываются,
+// порядок — по ключу. Тег Xray — от ключа, поэтому не меняется при переименовании
+// узла у провайдера (Pitfall 4).
+func (s *Service) subscriptionNodes(id string, list []nodes.Node) []keyedNode {
+	uniq, _ := nodes.Uniq(id, list)
+	out := make([]keyedNode, 0, len(uniq))
+	for _, k := range uniq {
+		out = append(out, keyedNode{
+			name: displayName(k.Node),
+			key:  k.Key,
+			tag:  nodes.XrayTag(id, k.Key),
+			node: k.Node,
+		})
+	}
+	return out
 }

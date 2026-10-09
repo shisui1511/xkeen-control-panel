@@ -70,8 +70,27 @@ type PreviewLineError struct {
 	Error    *nodes.SourceError `json:"error"`
 }
 
-// PreviewSubscription — подписка в предпросмотре; поля объявляет 145-08.
-type PreviewSubscription struct{}
+// PreviewKernel — результат запроса подписки под одно ядро: сколько рабочих
+// узлов, заглушек и пропущенных прокси; Error — причина отказа (D-32).
+type PreviewKernel struct {
+	Installed bool               `json:"installed"`
+	Count     int                `json:"count"`
+	Stubs     int                `json:"stubs"`
+	Skipped   int                `json:"skipped"`
+	Error     *nodes.SourceError `json:"error,omitempty"`
+}
+
+// PreviewSubscription — подписка в предпросмотре. Kernels содержит ровно ключи
+// "xray" и "mihomo"; Warnings — не nil (например, expired); Error — отказ,
+// общий для всех установленных ядер. Подписку можно добавить и при ошибке (D-18).
+type PreviewSubscription struct {
+	Line      int                      `json:"line"`
+	Name      string                   `json:"name"`
+	URLMasked string                   `json:"url_masked"`
+	Kernels   map[string]PreviewKernel `json:"kernels"`
+	Warnings  []*nodes.SourceError     `json:"warnings"`
+	Error     *nodes.SourceError       `json:"error,omitempty"`
+}
 
 // PreviewView — предпросмотр ввода поля «Добавить». Ключи JSON совпадают с
 // контрактом frontend/src/lib/configSources.ts.
@@ -99,6 +118,9 @@ type previewEntry struct {
 	created time.Time
 	nodes   []nodes.Node
 	urls    []nodes.URLItem
+	// subs — подписки из ввода с ответами провайдера по ядрам: «Добавить» берёт
+	// снимки отсюда и не повторяет запрос (Pitfall 8, T-145-24).
+	subs []*subCandidate
 }
 
 // Preview распознаёт ввод и строит предпросмотр с одноразовым токеном.
@@ -117,9 +139,17 @@ func (s *Service) Preview(ctx context.Context, in nodes.Input) (PreviewView, err
 	}
 	existing := s.dupIndex(cfg, "")
 	view, addable := s.buildView(rec, existing)
+	subs, err := s.previewSubscriptions(ctx, rec.URLs)
+	if err != nil {
+		return PreviewView{}, err
+	}
+	for _, c := range subs {
+		view.Subscriptions = append(view.Subscriptions, c.view)
+	}
+	addable += len(subs)
 	view.Addable = addable
-	if addable > 0 || len(rec.URLs) > 0 {
-		token, expires, err := s.putPreview(&previewEntry{nodes: rec.Nodes, urls: rec.URLs})
+	if addable > 0 {
+		token, expires, err := s.putPreview(&previewEntry{nodes: rec.Nodes, urls: rec.URLs, subs: subs})
 		if err != nil {
 			return PreviewView{}, err
 		}
@@ -332,16 +362,71 @@ func (s *Service) addEntry(rev int64, entry *previewEntry) (AddResult, error) {
 		cfg.Entries = append(cfg.Entries, MyEntry{ID: id, Name: displayName(n), Format: n.Format, Raw: n.Text})
 		added++
 	}
-	if added == 0 {
+	if added == 0 && len(entry.subs) == 0 {
 		return AddResult{}, fmt.Errorf("%w: нечего добавлять", ErrInvalidInput)
 	}
-	section, err := encodeMy(cfg)
+	sections := map[string]json.RawMessage{}
+	if added > 0 {
+		section, err := encodeMy(cfg)
+		if err != nil {
+			return AddResult{}, err
+		}
+		sections[MySection] = section
+	}
+	now := s.d.Now()
+	srcIDs := takenSourceIDs(st)
+	live := make(LiveSources, len(entry.subs))
+	for _, c := range entry.subs {
+		id, err := s.uniqueID(srcIDs)
+		if err != nil {
+			return AddResult{}, err
+		}
+		srcIDs[id] = true
+		section, err := json.Marshal(SubscriptionConfig{
+			Kind: KindSubscription, ID: id, Name: c.name, URL: c.url, Enabled: true,
+			Exclude: []string{}, Interval: Interval{Mode: IntervalProvider}, AddedAt: now,
+		})
+		if err != nil {
+			return AddResult{}, err
+		}
+		sections[sectionName(id)] = section
+		live[id] = c.liveSource(now)
+	}
+	var liveFn func(configlayer.Sections) error
+	if len(live) > 0 {
+		liveFn = func(l configlayer.Sections) error {
+			cur, err := readLive(l)
+			if err != nil {
+				return err
+			}
+			for id, src := range live {
+				cur[id] = src
+			}
+			return writeLive(l, cur)
+		}
+	}
+	ev, err := s.d.Layer.EditDraftBatch(rev, sections, liveFn)
 	if err != nil {
 		return AddResult{}, err
 	}
-	ev, err := s.d.Layer.EditDraftBatch(rev, map[string]json.RawMessage{MySection: section}, nil)
-	if err != nil {
-		return AddResult{}, err
+	return AddResult{DraftEvent: ev, Subscriptions: len(entry.subs), Nodes: added}, nil
+}
+
+// takenSourceIDs — идентификаторы источников, которые уже заняты секциями
+// черновика, применённого состояния или живыми данными.
+func takenSourceIDs(st configlayer.StateView) map[string]bool {
+	taken := map[string]bool{}
+	for _, secs := range []configlayer.Sections{st.Draft, st.Applied} {
+		for name := range secs {
+			if id, ok := sourceID(name); ok {
+				taken[id] = true
+			}
+		}
 	}
-	return AddResult{DraftEvent: ev, Nodes: added}, nil
+	if ls, err := readLive(st.Live); err == nil {
+		for id := range ls {
+			taken[id] = true
+		}
+	}
+	return taken
 }
