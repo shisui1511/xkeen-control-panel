@@ -5,7 +5,6 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "postbuild": "node scripts/inject-sw-version.cjs",
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:changed": "node scripts/select-e2e.mjs --base origin/main --explain --run",

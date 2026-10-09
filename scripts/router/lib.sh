@@ -1,0 +1,321 @@
+# scripts/router/lib.sh — общие функции проверки на роутерах.
+#
+# Подключается через `. "$(dirname "$0")/lib.sh"` из остальных скриптов каталога
+# (POSIX sh, у вызывающих `set -eu`). Сам ничего не запускает.
+#
+# Цели (ssh-алиас, архитектура, URL и пароль панели) и URL подписки читаются из
+# неотслеживаемого локального файла основной копии репозитория:
+#   scripts/router/targets.local.env      (формат — scripts/router/targets.example.env)
+# В git нет ни алиасов, ни адресов, ни паролей: только имена переменных.
+#
+# Переменные окружения:
+#   ROUTERS           выбор целей через пробел или запятую (иначе XCP_TARGETS из файла)
+#   XCP_TARGETS_FILE  другой файл целей (иначе локальный файл основной копии)
+#   RT_LOCK_WAIT      сколько секунд ждать очередь на роутеры (по умолчанию 3600)
+#   RT_LOCK_HELD      1 — блокировка уже взята родительским скриптом
+#   RT_REPORT         каталог отчёта текущего прогона (создаёт rt_report_init)
+#   RT_CORE           ядро (xray|mihomo) для колонки результатов
+
+# Корень рабочей копии (основная копия или worktree).
+rt_repo_root() {
+  git rev-parse --show-toplevel
+}
+
+# Общий каталог git: одинаковый для основной копии и всех worktree.
+rt_common_dir() {
+  git rev-parse --path-format=absolute --git-common-dir
+}
+
+# Корень основной копии: работает и из worktree.
+rt_main_root() {
+  dirname "$(rt_common_dir)"
+}
+
+# Путь к локальному файлу целей; нет файла — ошибка с подсказкой.
+rt_targets_file() {
+  _tf="${XCP_TARGETS_FILE:-$(rt_main_root)/scripts/router/targets.local.env}"
+  if [ ! -f "$_tf" ]; then
+    echo "router: нет локального файла целей: $_tf" >&2
+    echo "router: создайте его по образцу scripts/router/targets.example.env (в git он не попадает)" >&2
+    return 1
+  fi
+  printf '%s\n' "$_tf"
+}
+
+# Подключает файл целей и проверяет выбранные цели. Итог: RT_TARGETS — список id.
+rt_load_targets() {
+  _tf=$(rt_targets_file) || return 1
+  # shellcheck disable=SC1090
+  . "$_tf"
+  _list="${ROUTERS:-${XCP_TARGETS:-}}"
+  RT_TARGETS=$(printf '%s' "$_list" | tr ',' ' ' | tr -s ' ' | sed 's/^ //; s/ $//')
+  if [ -z "$RT_TARGETS" ]; then
+    echo "router: не задан ни ROUTERS, ни XCP_TARGETS в файле целей" >&2
+    return 1
+  fi
+  for _id in $RT_TARGETS; do
+    case "$_id" in
+      '' | *[!a-z0-9]*)
+        echo "router: недопустимый идентификатор цели '$_id' (только a-z и 0-9)" >&2
+        return 1
+        ;;
+    esac
+    for _key in SSH ARCH URL PASSWORD; do
+      if [ -z "$(rt_get "$_id" "$_key")" ]; then
+        echo "router: у цели $_id не задано XCP_T_${_id}_${_key}" >&2
+        return 1
+      fi
+    done
+  done
+  export RT_TARGETS
+}
+
+# Значение XCP_T_<id>_<KEY>. Идентификатор проверен в rt_load_targets.
+rt_get() {
+  case "$1" in
+    '' | *[!a-z0-9]*) return 1 ;;
+  esac
+  eval "printf '%s' \"\${XCP_T_${1}_${2}:-}\""
+}
+
+# ssh на цель. Код 255 (нет связи) превращается в 3. Первая строка удалённой
+# команды выставляет PATH Entware, как в обычном входе: иначе tar, curl и прочее
+# берутся из прошивки.
+rt_ssh() {
+  _id=$1
+  shift
+  _alias=$(rt_get "$_id" SSH)
+  _rc=0
+  if [ "${RT_SSH_STDIN:-0}" = 1 ]; then
+    ssh -o BatchMode=yes -o ConnectTimeout=15 "$_alias" "PATH=/opt/bin:/opt/sbin:\$PATH; export PATH; $*" || _rc=$?
+  else
+    ssh -n -o BatchMode=yes -o ConnectTimeout=15 "$_alias" "PATH=/opt/bin:/opt/sbin:\$PATH; export PATH; $*" || _rc=$?
+  fi
+  if [ "$_rc" = 255 ]; then
+    echo "цель $_id: нет связи по ssh" >&2
+    return 3
+  fi
+  return "$_rc"
+}
+
+# scp на цель: rt_scp <id> <локальный файл> <путь на роутере>. На роутерах нет
+# sftp-server, поэтому -O.
+rt_scp() {
+  _id=$1
+  _alias=$(rt_get "$_id" SSH)
+  _rc=0
+  scp -O -q -o BatchMode=yes -o ConnectTimeout=15 "$2" "$_alias:$3" || _rc=$?
+  if [ "$_rc" = 255 ]; then
+    echo "цель $_id: нет связи по scp" >&2
+    return 3
+  fi
+  return "$_rc"
+}
+
+# Блокировка на весь прогон: общая для основной копии и всех worktree (путь внутри
+# общего каталога git). На роутерах flock нет — блокировка только на ПК.
+rt_lock() {
+  if [ "${RT_LOCK_HELD:-0}" = 1 ]; then
+    return 0
+  fi
+  _lf="$(rt_common_dir)/router-test.lock"
+  exec 9>"$_lf"
+  if ! flock -n 9; then
+    echo "router: очередь на роутеры — занято другим прогоном, жду до ${RT_LOCK_WAIT:-3600} с" >&2
+    if ! flock -w "${RT_LOCK_WAIT:-3600}" 9; then
+      echo "router: очередь на роутеры не освободилась за ${RT_LOCK_WAIT:-3600} с" >&2
+      return 1
+    fi
+  fi
+  RT_LOCK_HELD=1
+  export RT_LOCK_HELD
+}
+
+# Каталог отчёта: build/router/<UTC дата-время>-<короткий SHA>[-dirty], ссылка last.
+rt_report_init() {
+  _root=$(rt_repo_root)
+  _sha=$(git rev-parse HEAD)
+  _short=$(git rev-parse --short HEAD)
+  _dirty=""
+  _dirty_flag=false
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    _dirty="-dirty"
+    _dirty_flag=true
+  fi
+  _ts=$(date -u +%Y%m%d-%H%M%S)
+  _name="$_ts-$_short$_dirty"
+  mkdir -p "$_root/build/router/$_name"
+  RT_REPORT="$_root/build/router/$_name"
+  ln -sfn "$_name" "$_root/build/router/last"
+  {
+    echo "sha=$_sha"
+    echo "dirty=$_dirty_flag"
+    echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"$RT_REPORT/meta"
+  export RT_REPORT
+}
+
+# Строка результата: rt_result <цель> <PASS|FAIL|KNOWN|XPASS|SKIP> <проверка> <деталь>.
+# Формат results.tsv: статус, ядро, проверка, деталь (разделитель — табуляция).
+rt_result() {
+  _id=$1
+  _st=$2
+  _chk=$3
+  _det=$(printf '%s' "${4:-}" | tr '\t\n' '  ' | rt_redact)
+  mkdir -p "$RT_REPORT/$_id"
+  _core="${RT_CORE:-}"
+  if [ -z "$_core" ] && [ -f "$RT_REPORT/$_id/core" ]; then
+    _core=$(cat "$RT_REPORT/$_id/core")
+  fi
+  [ -n "$_core" ] || _core="-"
+  printf '%s\t%s\t%s\t%s\n' "$_st" "$_core" "$_chk" "$_det" >>"$RT_REPORT/$_id/results.tsv"
+}
+
+# Этап с замером времени: rt_stage <цель> <этап> <команда…>. Пишет в timings.tsv
+# строку <цель>\t<этап>\t<секунды>\t<код>\t<начало, секунды эпохи> и возвращает код команды.
+# Время начала нужно, чтобы видеть пересечение этапов разных целей (параллельность).
+rt_stage() {
+  _id=$1
+  _stage=$2
+  shift 2
+  _t0=$(date +%s)
+  _rc=0
+  "$@" || _rc=$?
+  _t1=$(date +%s)
+  printf '%s\t%s\t%s\t%s\t%s\n' "$_id" "$_stage" "$((_t1 - _t0))" "$_rc" "$_t0" >>"$RT_REPORT/timings.tsv"
+  return "$_rc"
+}
+
+# Фильтр stdin: убирает из текста адреса, значения ip=, cookie и csrf-токены.
+rt_redact() {
+  sed -E \
+    -e 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/x.x.x.x/g' \
+    -e 's/(ip=)[^ ]*/\1***/g' \
+    -e 's/([Cc]ookie[^ =:]*[=:] *)[^ ;]*/\1***/g' \
+    -e 's/([Cc][Ss][Rr][Ff][^ =:]*[=:] *)[^ ;]*/\1***/g'
+}
+
+# Сопоставление селектора метки известного падения с целью:
+#   rt_selector_match <селектор> <архитектура> <ядро>
+# Грамматика: * | <arch> | <arch>/<ядро> | */<ядро>. Код 0 — селектор подходит.
+rt_selector_match() {
+  _sel=$1
+  _arch=$2
+  _core=$3
+  case "$_sel" in
+    '*') return 0 ;;
+    '*/'*) [ "${_sel#*/}" = "$_core" ] ;;
+    */*) [ "${_sel%%/*}" = "$_arch" ] && [ "${_sel#*/}" = "$_core" ] ;;
+    *) [ "$_sel" = "$_arch" ] ;;
+  esac
+}
+
+# Каталог снимка на устройстве (создаёт и чистит snapshot.sh).
+RT_SNAP_DIR=/opt/tmp/xcp-rt-snap
+
+# Копирует snapshot.sh на устройство и вызывает подкоманду:
+#   rt_snap_remote <id> <подкоманда>
+# Код возврата — код подкоманды (3 — нет связи).
+rt_snap_remote() {
+  _id=$1
+  _sub=$2
+  rt_ssh "$_id" "mkdir -p $RT_SNAP_DIR" || return $?
+  rt_scp "$_id" "$(rt_repo_root)/scripts/router/snapshot.sh" "$RT_SNAP_DIR/snapshot.sh" || return $?
+  rt_ssh "$_id" "sh $RT_SNAP_DIR/snapshot.sh $_sub"
+}
+
+# Предполётная проверка и снимок цели. Пишет FAIL preflight / snapshot в results.tsv.
+# Коды: 0 — снимок снят, 1 — нет (прогон цели дальше не идёт), 3 — нет связи.
+rt_snapshot() {
+  _id=$1
+  mkdir -p "$RT_REPORT/$_id"
+  _log="$RT_REPORT/$_id/snapshot.log"
+  _rc=0
+  rt_stage "$_id" preflight rt_snap_remote "$_id" preflight >"$_log" 2>&1 || _rc=$?
+  case "$_rc" in
+    0) ;;
+    3)
+      rt_result "$_id" FAIL reachable "нет связи"
+      return 3
+      ;;
+    5 | 6 | 7)
+      rt_result "$_id" FAIL preflight "$(tail -n 1 "$_log")"
+      return 1
+      ;;
+    *)
+      rt_result "$_id" FAIL preflight "предполётная проверка завершилась с кодом $_rc"
+      return 1
+      ;;
+  esac
+  _rc=0
+  rt_stage "$_id" snapshot rt_snap_remote "$_id" snapshot >>"$_log" 2>&1 || _rc=$?
+  if [ "$_rc" = 3 ]; then
+    rt_result "$_id" FAIL reachable "нет связи"
+    return 3
+  elif [ "$_rc" != 0 ]; then
+    rt_result "$_id" FAIL snapshot "снимок не снят (код $_rc): $(grep 'ОШИБКА' "$_log" | head -n 2)"
+    return 1
+  fi
+  rt_result "$_id" PASS snapshot "$(grep '^снимок:' "$_log" | head -n 1)"
+}
+
+# Восстановление цели по снимку и сверка. Результат — строка restore-verify:
+# PASS, либо FAIL «расхождение после восстановления» (D-19). После успешной
+# сверки снимок на устройстве удаляется. Коды: 0 — равно снимку, 1 — нет.
+rt_restore() {
+  _id=$1
+  mkdir -p "$RT_REPORT/$_id"
+  _log="$RT_REPORT/$_id/restore.log"
+  _rc=0
+  rt_stage "$_id" restore rt_snap_remote "$_id" restore >"$_log" 2>&1 || _rc=$?
+  if [ "$_rc" = 3 ]; then
+    rt_result "$_id" FAIL restore-verify "нет связи, стенд не восстановлен"
+    return 1
+  elif [ "$_rc" != 0 ]; then
+    rt_result "$_id" FAIL restore-verify "расхождение после восстановления (код $_rc): $(grep 'ОШИБКА' "$_log" | head -n 2)"
+    return 1
+  fi
+  _rc=0
+  rt_stage "$_id" verify rt_snap_remote "$_id" verify >>"$_log" 2>&1 || _rc=$?
+  if [ "$_rc" != 0 ]; then
+    rt_result "$_id" FAIL restore-verify "расхождение после восстановления: $(grep 'ОШИБКА' "$_log" | head -n 2)"
+    return 1
+  fi
+  rt_result "$_id" PASS restore-verify "файлы, версии, ядро и xcp равны снимку"
+  rt_ssh "$_id" "sh $RT_SNAP_DIR/snapshot.sh cleanup; rm -rf $RT_SNAP_DIR" >/dev/null 2>&1 || true
+}
+
+# Значение ключа из строк «ключ=значение»: rt_kv <ключ> (текст на stdin).
+rt_kv() {
+  sed -n "s/^$1=//p" | head -n 1
+}
+
+# Ждёт возврата цели после перезагрузки: ssh отвечает и панель отвечает 200 на /api/version.
+#   rt_wait_back <id> [boot_id_до]
+# С boot_id ждёт ещё и его смены: пока устройство не выключилось, ответ старой загрузки не
+# считается возвратом. Опрос раз в 10 с до RT_REBOOT_WAIT (по умолчанию 900; mipsle медленнее).
+# Итог: RT_BACK_SECS — сколько секунд прошло до возврата или до выхода срока;
+# код 0 — вернулась, 1 — срок вышел (D-17).
+rt_wait_back() {
+  _wb_id=$1
+  _wb_boot=${2:-}
+  _wb_max=${RT_REBOOT_WAIT:-900}
+  _wb_url=$(rt_get "$_wb_id" URL)
+  _wb_t0=$(date +%s)
+  RT_BACK_SECS=0
+  while :; do
+    _wb_bid=$(rt_ssh "$_wb_id" 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null) || _wb_bid=""
+    if [ -n "$_wb_bid" ] && { [ -z "$_wb_boot" ] || [ "$_wb_bid" != "$_wb_boot" ]; }; then
+      _wb_code=$(curl -sk --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code}' "$_wb_url/api/version" 2>/dev/null) || _wb_code=000
+      if [ "$_wb_code" = 200 ]; then
+        RT_BACK_SECS=$(($(date +%s) - _wb_t0))
+        return 0
+      fi
+    fi
+    RT_BACK_SECS=$(($(date +%s) - _wb_t0))
+    if [ "$RT_BACK_SECS" -ge "$_wb_max" ]; then
+      return 1
+    fi
+    sleep 10
+  done
+}

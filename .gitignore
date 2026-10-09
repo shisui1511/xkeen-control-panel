@@ -13,6 +13,8 @@ build/
 # Внутренняя документация разработчика
 # Личные скрипты (деплой и замеры на роутере разработчика)
 scripts/local/
+# Локальный конфиг целей проверки на роутерах (алиасы, адреса, пароли, URL подписки)
+scripts/router/*.local.env
 AGENTS.md
 ROADMAP.md
 CLAUDE.md
@@ -38,6 +40,9 @@ bin/golangci-lint
 # Playwright
 frontend/playwright-report/
 frontend/test-results/
+# Запасные пути роутерного конфига, если этап pw запущен вне pw-suite.sh
+frontend/test-results-router/
+frontend/test-results-router.json
 
 # Redesign folder from external designer
 /frontend-redesign/

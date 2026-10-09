@@ -1,8 +1,8 @@
-.PHONY: build run clean test test-coverage lint fmt deps hooks router-arm64 router-mipsle router-mips proto
+.PHONY: build run clean test test-coverage lint fmt deps hooks router-arm64 router-mipsle router-mips router-test proto
 
 BINARY_NAME=xcp
 # Single source of truth for the version: scripts/version.sh (git tags +
-# conventional commits). CI and the Service Worker cache name use it too.
+# conventional commits). CI uses it too.
 ifeq ($(origin VERSION),undefined)
   VERSION := $(shell sh scripts/version.sh)
 endif
@@ -36,6 +36,14 @@ router-mipsle: update-version
 # Сборка для роутеров Keenetic MIPS big-endian (KN-2410, KN-2510, KN-3610 и др.)
 router-mips: update-version
 	CGO_ENABLED=0 GOOS=linux GOARCH=mips GOMIPS=softfloat go build -buildvcs=false -ldflags "-s -w -X main.Version=$(VERSION)" -o build/$(BINARY_NAME)_$(VERSION)_mips ./cmd/xcp
+
+# Проверка на роутерах: деплой, смоук, отчёт в build/router/last.
+# Цели берутся из локального scripts/router/targets.local.env (образец — targets.example.env).
+#   make router-test SUITE=smoke [ROUTERS=arm64] [RELEASE=vX.Y.Z]
+# Наборы: (пусто) — полный, smoke — деплой и смоук, changed — затронутое diff'ом,
+# reboot — холодный старт каждой цели и проверка автозапуска.
+router-test:
+	sh scripts/router/run.sh $(SUITE)
 
 run: build
 	./build/$(BINARY_NAME)
