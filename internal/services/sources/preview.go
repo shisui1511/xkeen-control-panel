@@ -24,7 +24,7 @@ const (
 const (
 	// MarkDupExists — такой узел уже есть в «Моих узлах»: он не добавляется (D-14).
 	MarkDupExists = "dup_exists"
-	// MarkDupInSub — узел есть в подписке (добавить можно); заполняет 145-08.
+	// MarkDupInSub — узел есть в подписке (добавить можно); имя подписки — в DupSubName.
 	MarkDupInSub = "dup_in_sub"
 )
 
@@ -143,6 +143,14 @@ func (s *Service) Preview(ctx context.Context, in nodes.Input) (PreviewView, err
 	if err != nil {
 		return PreviewView{}, err
 	}
+	if len(subs) > 0 {
+		// Снимки и диагностика кандидатов удержаны с момента записи; после
+		// регистрации токена их держит токен, без токена — никто.
+		defer func() {
+			releaseAll(subs)
+			s.collectGarbage()
+		}()
+	}
 	for _, c := range subs {
 		view.Subscriptions = append(view.Subscriptions, c.view)
 	}
@@ -175,6 +183,7 @@ func (s *Service) buildView(rec nodes.Recognition, existing map[string]string) (
 		return view, 0
 	}
 	caps := s.caps(s.d.Installed())
+	inSub := s.subscriptionIndex()
 	my := &PreviewMyNodes{Nodes: make([]PreviewNode, 0, len(rec.Nodes))}
 	addable := 0
 	for _, n := range rec.Nodes {
@@ -183,6 +192,11 @@ func (s *Service) buildView(rec nodes.Recognition, existing map[string]string) (
 			pn.Marks = append(pn.Marks, MarkDupExists)
 		} else {
 			addable++
+		}
+		// Узел подписки не мешает добавить его в «Мои узлы»: только пометка (D-14).
+		if name, ok := inSub[n.Identity()]; ok {
+			pn.Marks = append(pn.Marks, MarkDupInSub)
+			pn.DupSubName = name
 		}
 		my.Nodes = append(my.Nodes, pn)
 		x, m := pn.Support.Xray.OK, pn.Support.Mihomo.OK
@@ -281,13 +295,24 @@ func (s *Service) pruneLocked(now time.Time) {
 }
 
 // claimPreview забирает предпросмотр: токен одноразовый. Неизвестный или
-// просроченный — ErrPreviewExpired.
-func (s *Service) claimPreview(token string) (*previewEntry, error) {
+// просроченный — ErrPreviewExpired. Снимки и диагностика предпросмотра удерживаются
+// ещё до того, как токен исчезнет из кэша, поэтому между «забран» и «записан в
+// Live» уборка их не заберёт. release (идемпотентный) вызывает вызывающий после
+// записи или возврата токена.
+func (s *Service) claimPreview(token string) (*previewEntry, func(), error) {
+	s.pmu.Lock()
+	e, ok := s.previews[token]
+	s.pmu.Unlock()
+	if !ok {
+		return nil, nil, ErrPreviewExpired
+	}
+	release := s.holdEntry(e)
+
 	s.pmu.Lock()
 	defer s.pmu.Unlock()
-	e, ok := s.previews[token]
-	if !ok {
-		return nil, ErrPreviewExpired
+	if cur, ok := s.previews[token]; !ok || cur != e {
+		release()
+		return nil, nil, ErrPreviewExpired
 	}
 	delete(s.previews, token)
 	for i, t := range s.order {
@@ -297,9 +322,47 @@ func (s *Service) claimPreview(token string) (*previewEntry, error) {
 		}
 	}
 	if s.d.Now().Sub(e.created) > previewTTL {
-		return nil, ErrPreviewExpired
+		release()
+		return nil, nil, ErrPreviewExpired
 	}
-	return e, nil
+	return e, release, nil
+}
+
+// holdEntry удерживает снимки и диагностику предпросмотра в реестре «в полёте».
+func (s *Service) holdEntry(e *previewEntry) func() {
+	var hashes, ids []string
+	for _, c := range e.subs {
+		hashes = append(hashes, c.hashes()...)
+		if c.diagID != "" {
+			ids = append(ids, c.diagID)
+		}
+	}
+	relSnap := s.blobs.hold(hashes...)
+	relDiag := s.blobs.holdDiag(ids...)
+	return func() {
+		relSnap()
+		relDiag()
+	}
+}
+
+// previewKeep добавляет в набор уборки снимки и диагностику живых токенов.
+func (s *Service) previewKeep(k *gcKeep) {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	now := s.d.Now()
+	for _, e := range s.previews {
+		if now.Sub(e.created) > previewTTL {
+			continue
+		}
+		for _, c := range e.subs {
+			for _, h := range c.hashes() {
+				k.Snapshots[h] = true
+			}
+			if c.diagID != "" {
+				k.Diag[c.diagID] = true
+			}
+		}
+	}
 }
 
 // restorePreview возвращает забранный предпросмотр: «Добавить» не удалось
@@ -319,15 +382,19 @@ func (s *Service) restorePreview(token string, e *previewEntry) {
 // ревизия черновика, на которой клиент строил вид; при расхождении
 // configlayer.ErrDraftConflict, токен остаётся действительным.
 func (s *Service) Add(rev int64, token string) (AddResult, error) {
-	entry, err := s.claimPreview(token)
+	entry, release, err := s.claimPreview(token)
 	if err != nil {
 		return AddResult{}, err
 	}
 	res, err := s.addEntry(rev, entry)
 	if err != nil {
+		// Токен возвращается до отпускания удержания: снимки не остаются без хозяина.
 		s.restorePreview(token, entry)
+		release()
 		return AddResult{}, err
 	}
+	release()
+	s.collectGarbage()
 	return res, nil
 }
 
@@ -377,9 +444,16 @@ func (s *Service) addEntry(rev int64, entry *previewEntry) (AddResult, error) {
 	srcIDs := takenSourceIDs(st)
 	live := make(LiveSources, len(entry.subs))
 	for _, c := range entry.subs {
-		id, err := s.uniqueID(srcIDs)
-		if err != nil {
-			return AddResult{}, err
+		// Идентификатор источника — идентификатор диагностики кандидата, если он
+		// свободен: файлы диагностики остаются на месте. Занят (случайное
+		// совпадение 8 hex) — берётся новый, диагностика кандидата уберётся
+		// уборкой, следующий запрос напишет свою.
+		id := c.diagID
+		if id == "" || srcIDs[id] {
+			var err error
+			if id, err = s.uniqueID(srcIDs); err != nil {
+				return AddResult{}, err
+			}
 		}
 		srcIDs[id] = true
 		section, err := json.Marshal(SubscriptionConfig{

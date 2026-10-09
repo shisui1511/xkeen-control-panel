@@ -21,11 +21,11 @@ const maxBodyBytes = 16 << 20
 // Fragment — не длиннее 80 символов и без секретов: берётся только из имени
 // узла или типа (маскирование текста — задача вызывающего).
 type Skipped struct {
-	Line     int
-	Name     string
-	Code     string
-	Params   map[string]string
-	Fragment string
+	Line     int               `json:"line"`
+	Name     string            `json:"name,omitempty"`
+	Code     string            `json:"code"`
+	Params   map[string]string `json:"params,omitempty"`
+	Fragment string            `json:"fragment"`
 }
 
 // ParseResult — итог разбора тела ответа.

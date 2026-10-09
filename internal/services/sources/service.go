@@ -79,7 +79,7 @@ type Service struct {
 	// parses — сколько раз реально разбирался исходный текст записи.
 	parses atomic.Int64
 
-	// blobs — снимки наборов узлов подписок по хэшу.
+	// blobs — снимки наборов узлов подписок по хэшу и диагностика ответов.
 	blobs blobStore
 
 	xray   xrayGen
@@ -125,7 +125,11 @@ func New(d Deps) (*Service, error) {
 		previews: map[string]*previewEntry{},
 		parsed:   map[string]parsedEntry{},
 		gens:     map[string]memoFile{},
-		blobs:    blobStore{dir: filepath.Join(d.DataDir, "config_layer", "snapshots")},
+		blobs: blobStore{
+			dir:     filepath.Join(d.DataDir, "config_layer", "snapshots"),
+			diagDir: filepath.Join(d.DataDir, "config_layer", "diag"),
+			reg:     newBlobRegistry(),
+		},
 	}
 	s.xray = xrayGen{s: s}
 	s.mihomo = mihomoGen{s: s}

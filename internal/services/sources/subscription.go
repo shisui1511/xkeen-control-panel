@@ -3,10 +3,12 @@ package sources
 import (
 	"context"
 	"net/url"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
 // maxParallelURLs — сколько подписок из одной вставки запрашивается одновременно:
@@ -30,6 +32,43 @@ type subCandidate struct {
 	// kernels — только установленные ядра; неустановленное не запрашивалось.
 	kernels map[string]*kernelOutcome
 	view    PreviewSubscription
+	// diagID — идентификатор, под которым записана диагностика ответов; при
+	// «Добавить» он становится идентификатором источника, если свободен.
+	diagID string
+	// releaseDiag снимает удержание диагностики «в полёте».
+	releaseDiag func()
+}
+
+// hashes — хэши снимков кандидата по ядрам.
+func (c *subCandidate) hashes() []string {
+	var out []string
+	for _, oc := range c.kernels {
+		if oc != nil && oc.Ref != nil {
+			out = append(out, oc.Ref.Hash)
+		}
+	}
+	return out
+}
+
+// release отпускает удержание снимков и диагностики: после регистрации токена их
+// держит токен, при отброшенном результате — никто. Повторный вызов безопасен.
+func (c *subCandidate) release() {
+	if c == nil {
+		return
+	}
+	for _, oc := range c.kernels {
+		oc.free()
+	}
+	if c.releaseDiag != nil {
+		c.releaseDiag()
+	}
+}
+
+// releaseAll отпускает удержание всех кандидатов.
+func releaseAll(list []*subCandidate) {
+	for _, c := range list {
+		c.release()
+	}
 }
 
 // previewSubscriptions запрашивает каждый URL подписки под установленные ядра.
@@ -63,12 +102,15 @@ func (s *Service) previewSubscriptions(ctx context.Context, urls []nodes.URLItem
 		}()
 	}
 	wg.Wait()
-	for _, err := range errs {
-		if err != nil {
-			return nil, err
+	err := ctx.Err()
+	for _, e := range errs {
+		if e != nil {
+			err = e
+			break
 		}
 	}
-	if err := ctx.Err(); err != nil {
+	if err != nil {
+		releaseAll(out)
 		return nil, err
 	}
 	return out, nil
@@ -83,6 +125,18 @@ func (s *Service) previewOne(ctx context.Context, item nodes.URLItem, kernels []
 			return nil, err
 		}
 		c.kernels = res
+		// Диагностика ответа по каждому ядру пишется под идентификатором кандидата;
+		// он удержан, пока токен не зарегистрирован.
+		if c.diagID, err = s.newID(); err != nil {
+			c.release()
+			return nil, err
+		}
+		c.releaseDiag = s.blobs.holdDiag(c.diagID)
+		for _, k := range kernels {
+			if oc := res[k]; oc != nil {
+				s.writeDiag(c.diagID, k, oc.fetch, oc.report)
+			}
+		}
 	}
 	var metas []Meta
 	for _, k := range previewKernels {
@@ -206,4 +260,68 @@ func (c *subCandidate) liveSource(now time.Time) *LiveSource {
 		src.Kernels[k] = kl
 	}
 	return src
+}
+
+// subscriptionIndex — идентичность узла → имя подписки, набор которой его содержит
+// (D-14: «есть в подписке X»). Берётся применённый набор ядра, иначе ожидающий;
+// подписки — из черновика и применённого состояния. Нечитаемый снимок подписку
+// пропускает: пометка — подсказка, а не условие добавления.
+func (s *Service) subscriptionIndex() map[string]string {
+	idx := map[string]string{}
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
+		return idx
+	}
+	live, err := readLive(st.Live)
+	if err != nil {
+		return idx
+	}
+	names := map[string]string{}
+	for _, secs := range []configlayer.Sections{st.Applied, st.Draft} {
+		for section, raw := range secs {
+			id, ok := sourceID(section)
+			if !ok || kindOf(raw) != KindSubscription {
+				continue
+			}
+			cfg, err := parseSubscription(raw)
+			if err != nil {
+				continue
+			}
+			names[id] = cfg.Name
+		}
+	}
+	ids := make([]string, 0, len(names))
+	for id := range names {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		src := live[id]
+		if src == nil || names[id] == "" {
+			continue
+		}
+		for _, kernel := range previewKernels {
+			kl := src.Kernels[kernel]
+			if kl == nil {
+				continue
+			}
+			ref := kl.Applied
+			if ref == nil {
+				ref = kl.Pending
+			}
+			if ref == nil {
+				continue
+			}
+			list, err := s.blobs.get(ref.Hash)
+			if err != nil {
+				continue
+			}
+			for _, n := range list {
+				if _, seen := idx[n.Identity()]; !seen {
+					idx[n.Identity()] = names[id]
+				}
+			}
+		}
+	}
+	return idx
 }

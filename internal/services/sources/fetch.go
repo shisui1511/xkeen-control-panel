@@ -64,6 +64,9 @@ type fetchResult struct {
 	Header http.Header
 	Status int
 	Err    *nodes.SourceError
+	// Secrets — части адреса запроса (сегменты пути, значения запроса, учётные
+	// данные), которые нельзя выводить: ими маскируется диагностика (D-33).
+	Secrets []string
 }
 
 // newFetchRequest собирает запрос подписки. HWID и заголовки устройства у обоих
@@ -146,17 +149,18 @@ func (s *Service) fetchKernel(ctx context.Context, rawURL, kernel, hwid string, 
 	if serr != nil {
 		return fetchResult{Err: serr}
 	}
+	secrets := urlSecrets(req.URL)
 	client := s.d.Client(timeout)
 	defer client.CloseIdleConnections()
 
 	resp, err := client.Do(req)
 	if err != nil {
 		connected, dnsOK := ts.snapshot(req.URL.Hostname())
-		return fetchResult{Err: classifyTransportErr(err, req.URL, connected, dnsOK)}
+		return fetchResult{Err: classifyTransportErr(err, req.URL, connected, dnsOK), Secrets: secrets}
 	}
 	defer resp.Body.Close()
 
-	res := fetchResult{Header: resp.Header, Status: resp.StatusCode}
+	res := fetchResult{Header: resp.Header, Status: resp.StatusCode, Secrets: secrets}
 	if serr := classifyStatus(resp.StatusCode); serr != nil {
 		res.Err = serr
 		return res
@@ -328,6 +332,9 @@ type parsed struct {
 	Total   int
 	Stubs   int
 	Skipped int
+	// Result — полный итог разбора (для отчёта диагностики); пуст, если тело не
+	// дошло до разбора (HTML, пустой ответ).
+	Result nodes.ParseResult
 }
 
 // htmlPrefixes — начала HTML-страниц, которые ParseBody не узнаёт по doctype.
@@ -351,12 +358,12 @@ func evaluateBody(body []byte, contentType string) (parsed, *nodes.SourceError) 
 	if err != nil {
 		var se *nodes.SourceError
 		if errors.As(err, &se) {
-			return parsed{}, se
+			return parsed{Result: res}, se
 		}
-		return parsed{}, nodes.NewError(nodes.CodeUnrecognized)
+		return parsed{Result: res}, nodes.NewError(nodes.CodeUnrecognized)
 	}
 	working, stubs := nodes.SplitStubs(res.Nodes)
-	out := parsed{Format: res.Format, Working: working, Total: len(res.Nodes), Stubs: stubs, Skipped: len(res.Skipped)}
+	out := parsed{Format: res.Format, Working: working, Total: len(res.Nodes), Stubs: stubs, Skipped: len(res.Skipped), Result: res}
 	if len(working) == 0 {
 		switch {
 		case stubs > 0:
@@ -381,6 +388,21 @@ type kernelOutcome struct {
 	Skipped int
 	// Nodes — рабочие узлы набора (нужны, пока снимок не записан в Live).
 	Nodes []nodes.Node
+	// fetch и report — ответ провайдера и итог разбора: из них строится диагностика
+	// (writeDiag).
+	fetch  fetchResult
+	report nodes.ParseResult
+	// release снимает удержание снимка «в полёте»; nil — снимка не записывалось.
+	// Вызывающий отпускает его после того, как ссылка попала в Live или в токен
+	// предпросмотра (или когда результат отброшен).
+	release func()
+}
+
+// free отпускает удержанный снимок; безопасно вызывать повторно и на nil.
+func (oc *kernelOutcome) free() {
+	if oc != nil && oc.release != nil {
+		oc.release()
+	}
 }
 
 // fetchOutcome — запрос под ядро, разбор и запись снимка рабочего набора.
@@ -389,21 +411,24 @@ type kernelOutcome struct {
 func (s *Service) fetchOutcome(ctx context.Context, rawURL, kernel, hwid string, hwidLocked bool) (*kernelOutcome, error) {
 	fr := s.fetchKernel(ctx, rawURL, kernel, hwid, hwidLocked)
 	now := s.d.Now()
-	oc := &kernelOutcome{Header: fr.Header, Meta: parseMeta(fr.Header, now)}
+	oc := &kernelOutcome{Header: fr.Header, Meta: parseMeta(fr.Header, now), fetch: fr}
 	if fr.Err != nil {
 		oc.Err = fr.Err
 		return oc, nil
 	}
 	p, serr := evaluateBody(fr.Body, fr.Header.Get("Content-Type"))
 	oc.Stubs, oc.Skipped = p.Stubs, p.Skipped
+	oc.report = p.Result
 	if serr != nil {
 		oc.Err = serr
 		return oc, nil
 	}
-	hash, err := s.blobs.put(p.Working)
+	// Снимок удержан с момента записи: уборка не удалит его до фиксации в Live.
+	hash, release, err := s.blobs.putHeld(p.Working)
 	if err != nil {
 		return nil, err
 	}
+	oc.release = release
 	oc.Nodes = p.Working
 	oc.Ref = &Ref{Hash: hash, FetchedAt: now, Format: p.Format, Total: p.Total, Usable: len(p.Working), Stubs: p.Stubs, Skipped: p.Skipped}
 	return oc, nil
@@ -447,13 +472,19 @@ func (s *Service) fetchAll(ctx context.Context, rawURL, hwid string, hwidLocked 
 		if it.err != nil && firstErr == nil {
 			firstErr = it.err
 		}
-		out[it.kernel] = it.oc
+		if it.oc != nil {
+			out[it.kernel] = it.oc
+		}
+	}
+	if firstErr == nil {
+		firstErr = ctx.Err()
 	}
 	if firstErr != nil {
+		// Результат отброшен: удержанные снимки отпускаются.
+		for _, oc := range out {
+			oc.free()
+		}
 		return nil, firstErr
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
 	}
 	return out, nil
 }
