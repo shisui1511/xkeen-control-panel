@@ -200,3 +200,276 @@ func TestRouterVerdictJSON(t *testing.T) {
 		t.Errorf("ключи вердикта OK: %v", got)
 	}
 }
+
+// rtCapCase — строка матрицы: узел и ожидаемые вердикты обоих ядер при CapsLatest.
+type rtCapCase struct {
+	name       string
+	node       func(t *testing.T) Node
+	xrayCode   string
+	xrayParams map[string]string
+	mihomoCode string
+}
+
+func rtCapFromLink(scheme string, mutate func(n *Node)) func(t *testing.T) Node {
+	return func(t *testing.T) Node {
+		n := rtCapLink(t, scheme)
+		if mutate != nil {
+			mutate(&n)
+		}
+		return n
+	}
+}
+
+// rtCapFromInput берёт узел входного файла по порядковому номеру.
+func rtCapFromInput(file string, idx int, mutate func(n *Node)) func(t *testing.T) Node {
+	return func(t *testing.T) Node {
+		nodes := rtCapInput(t, file)
+		if idx >= len(nodes) {
+			t.Fatalf("в %s нет узла %d", file, idx)
+		}
+		n := nodes[idx]
+		if mutate != nil {
+			mutate(&n)
+		}
+		return n
+	}
+}
+
+// TestRouterCapabilityMatrix: протоколы, транспорты, TLS, родные узлы Xray-JSON.
+func TestRouterCapabilityMatrix(t *testing.T) {
+	routertest.Current(t)
+	latest := CapsLatest()
+
+	cases := []rtCapCase{
+		{name: "vless_ws", node: rtCapFromLink("vless_ws", nil)},
+		{name: "vless_reality", node: rtCapFromLink("vless_reality", nil)},
+		{name: "vless_grpc", node: rtCapFromLink("vless_grpc", nil)},
+		{name: "vless_httpupgrade", node: rtCapFromLink("vless_httpupgrade", nil)},
+		{name: "vless_tls_alpn", node: rtCapFromLink("vless_tls_alpn", nil)},
+		{name: "vmess_ws_tls", node: rtCapFromLink("vmess_ws_tls", nil)},
+		{name: "trojan_grpc", node: rtCapFromLink("trojan_grpc", nil)},
+		{name: "ss_plain", node: rtCapFromLink("ss_plain", nil)},
+		{name: "socks", node: rtCapFromLink("socks", nil)},
+		{name: "http_proxy", node: rtCapFromLink("http_proxy", nil)},
+		{name: "wireguard", node: rtCapFromLink("wireguard", nil)},
+		{name: "ss_plugin", node: rtCapFromLink("ss_plugin", nil), xrayCode: CodeSSPluginXray},
+		{name: "hysteria2", node: rtCapFromLink("hysteria2", nil), xrayCode: CodeHysteria2Xray},
+		{name: "hy2_alias", node: rtCapFromLink("hy2_alias", nil), xrayCode: CodeHysteria2Xray},
+		{name: "tuic", node: rtCapFromLink("tuic", nil), xrayCode: CodeTUICXray},
+		{name: "hysteria_v1", node: rtCapFromLink("hysteria_v1", nil), xrayCode: CodeUnsupportedType, mihomoCode: CodeUnsupportedType},
+		{name: "vmess_h2", node: rtCapFromLink("vmess_h2", nil), xrayCode: CodeXrayNoHTTPTransport,
+			xrayParams: map[string]string{"network": "h2"}},
+		{name: "insecure_without_pin", node: rtCapFromLink("trojan_ws", nil), xrayCode: CodeXrayNoInsecure},
+		{name: "insecure_with_pin", node: rtCapFromLink("trojan_ws", func(n *Node) {
+			n.TLS.Insecure = true
+			n.TLS.PinSHA256 = []string{"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
+		})},
+		{name: "kcp", node: rtCapFromLink("vless_kcp", nil), mihomoCode: CodeKCPMihomo},
+		{name: "xhttp_download_settings_link", node: rtCapFromLink("vless_xhttp", func(n *Node) {
+			n.Transport.XHTTP = map[string]any{"downloadSettings": map[string]any{"address": "x.example"}}
+		}), xrayCode: CodeXHTTPDownloadSettings, mihomoCode: CodeXHTTPDownloadSettings},
+		{name: "clash_anytls_passthrough", node: func(t *testing.T) Node {
+			for _, n := range rtCapInput(t, "clash_passthrough.yaml") {
+				if n.Protocol == "anytls" {
+					return n
+				}
+			}
+			t.Fatal("в clash_passthrough.yaml нет узла anytls")
+			return Node{}
+		}, xrayCode: CodeUnsupportedType, xrayParams: map[string]string{"type": "anytls"}},
+		// Родные узлы Xray-JSON: оригинал уходит ядру как есть, поэтому запреты
+		// Xray 26.x проверяет пробная эмиссия оригинала.
+		{name: "raw_allow_insecure_with_pin", node: rtCapFromInput("xray_forbidden_fields.json", 0, nil), xrayCode: CodeXrayNoInsecure},
+		{name: "raw_h2", node: rtCapFromInput("xray_forbidden_fields.json", 1, nil), xrayCode: CodeXrayNoHTTPTransport},
+		{name: "raw_http_settings_tcp", node: rtCapFromInput("xray_forbidden_fields.json", 2, nil), xrayCode: CodeXrayNoHTTPTransport},
+		{name: "raw_xhttp_headers_host", node: rtCapFromInput("xray_forbidden_fields.json", 3, nil), xrayCode: CodeXrayForbiddenKey,
+			xrayParams: map[string]string{"key": "xhttpSettings.headers.Host"}},
+		{name: "raw_clean_vless", node: rtCapFromInput("xray_outbounds.json", 0, nil)},
+		{name: "raw_xhttp_download_settings", node: rtCapFromInput("xray_xhttp.json", 0, func(n *Node) {
+			n.Transport.XHTTP["downloadSettings"] = map[string]any{"address": "x.example"}
+		}), mihomoCode: CodeXHTTPDownloadSettings},
+		{name: "clash_xhttp_download_settings", node: rtCapFromInput("clash_xhttp.yaml", 0, func(n *Node) {
+			n.Transport.XHTTP["download-settings"] = map[string]any{"server": "x.example"}
+		}), xrayCode: CodeXHTTPDownloadSettings},
+	}
+	if len(cases) < 19 {
+		t.Fatalf("в матрице %d строк, нужно не меньше 19", len(cases))
+	}
+	raw := 0
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			n := c.node(t)
+			if n.Origin == OriginXrayJSON {
+				raw++
+			}
+			rtCapExpect(t, "xray", Support(n, "xray", latest), c.xrayCode == "", c.xrayCode, c.xrayParams)
+			rtCapExpect(t, "mihomo", Support(n, "mihomo", latest), c.mihomoCode == "", c.mihomoCode, nil)
+		})
+	}
+	if raw < 5 {
+		t.Errorf("родных узлов Xray-JSON в матрице %d, нужно не меньше 5", raw)
+	}
+}
+
+// rtCapAWG — узел AmneziaWG из входного файла wg.conf.
+func rtCapAWG(t *testing.T, file, version string) Node {
+	t.Helper()
+	nodes := rtCapInput(t, file)
+	if len(nodes) != 1 || nodes[0].WG == nil {
+		t.Fatalf("%s: ожидался один узел wireguard", file)
+	}
+	if version == "1.0" {
+		// Классический диалект: те же опции, версия задана явно (в Clash —
+		// amnezia-wg-option без признаков 1.5+).
+		wg := *nodes[0].WG
+		wg.AWGVersion = version
+		nodes[0].WG = &wg
+	}
+	if nodes[0].WG.AWGVersion != version {
+		t.Fatalf("%s: версия AWG %q, ожидалась %q", file, nodes[0].WG.AWGVersion, version)
+	}
+	return nodes[0]
+}
+
+// TestRouterCapabilityAWG: пороги диалектов AmneziaWG в Mihomo; в Xray AWG нет.
+func TestRouterCapabilityAWG(t *testing.T) {
+	routertest.Current(t)
+	latest := CapsLatest()
+
+	plain := rtCapLink(t, "wireguard")
+	rtCapExpect(t, "wg/xray", Support(plain, "xray", Caps{}), true, "", nil)
+	rtCapExpect(t, "wg/mihomo", Support(plain, "mihomo", Caps{}), true, "", nil)
+	// wg.conf без опций AmneziaWG (ключи wg-quick не делают его AWG) — обычный wireguard.
+	for _, n := range rtCapInput(t, "wg_classic.conf") {
+		rtCapExpect(t, "wg_classic/xray", Support(n, "xray", Caps{}), true, "", nil)
+		rtCapExpect(t, "wg_classic/mihomo", Support(n, "mihomo", Caps{}), true, "", nil)
+	}
+
+	cases := []struct {
+		file, version, min string
+		gate               func(c *Caps, g Gate)
+	}{
+		{"wg_awg15.conf", "1.0", "1.18.9", func(c *Caps, g Gate) { c.MihomoAWG = g }},
+		{"wg_awg15.conf", "1.5", "1.19.13", func(c *Caps, g Gate) { c.MihomoAWG15 = g }},
+		{"wg_awg20.conf", "2.0", "1.19.14", func(c *Caps, g Gate) { c.MihomoAWG20 = g }},
+		{"wg_awg31.conf", "3.1", "1.19.30", func(c *Caps, g Gate) { c.MihomoAWG3 = g }},
+	}
+	for _, c := range cases {
+		t.Run(c.version, func(t *testing.T) {
+			n := rtCapAWG(t, c.file, c.version)
+			rtCapExpect(t, "xray", Support(n, "xray", latest), false, CodeAWGXray, nil)
+			rtCapExpect(t, "mihomo/latest", Support(n, "mihomo", latest), true, "", nil)
+
+			caps := latest
+			c.gate(&caps, Gate{OK: false, Min: c.min})
+			rtCapExpect(t, "mihomo/below", Support(n, "mihomo", caps), false, CodeNeedsMihomo, map[string]string{"kernel_min": c.min})
+
+			// Порог чужого диалекта версию не затрагивает.
+			other := latest
+			for _, o := range cases {
+				if o.version != c.version {
+					o.gate(&other, Gate{OK: false, Min: o.min})
+				}
+			}
+			rtCapExpect(t, "mihomo/other-gates-closed", Support(n, "mihomo", other), true, "", nil)
+		})
+	}
+}
+
+func rtCapHasNote(v Verdict, code string) bool {
+	for _, n := range v.Notes {
+		if n == code {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRouterCapabilityLevelB: потери уровня B не меняют вердикт, а добавляют
+// примечания note_*.
+func TestRouterCapabilityLevelB(t *testing.T) {
+	routertest.Current(t)
+	latest := CapsLatest()
+	off := false
+
+	type probe struct {
+		name   string
+		node   Node
+		kernel string
+		note   string
+		want   bool
+	}
+	ws := rtCapLink(t, "vless_ws")
+	ws.UDP = &off
+	pe := rtCapLink(t, "vless_ws")
+	pe.PacketEncoding = "xudp"
+	reality := rtCapLink(t, "vless_reality")
+	reality.Reality.SpiderX = "/"
+	plainReality := rtCapLink(t, "vless_reality")
+	plainReality.TLS.Fingerprint = ""
+	withFP := func(fp string) Node {
+		n := rtCapLink(t, "vless_tls_alpn")
+		n.TLS.Fingerprint = fp
+		return n
+	}
+	clash := rtCapInput(t, "clash_xhttp.yaml")[0]
+	clash.UDP = &off
+	clash.PacketEncoding = "xudp"
+
+	probes := []probe{
+		{"udp/xray", ws, "xray", CodeNoteUDPDropped, true},
+		{"udp/mihomo", ws, "mihomo", CodeNoteUDPDropped, false},
+		{"packet-encoding/xray", pe, "xray", CodeNotePacketEncDropped, true},
+		{"packet-encoding/mihomo", pe, "mihomo", CodeNotePacketEncDropped, false},
+		{"spiderx/mihomo", reality, "mihomo", CodeNoteSpiderXDropped, true},
+		{"spiderx/xray", reality, "xray", CodeNoteSpiderXDropped, false},
+		{"fingerprint-hellochrome133/mihomo", withFP("hellochrome_133"), "mihomo", CodeNoteFingerprintDropped, true},
+		{"fingerprint-hellochrome133/xray", withFP("hellochrome_133"), "xray", CodeNoteFingerprintDropped, false},
+		{"fingerprint-unknown/xray", withFP("weird"), "xray", CodeNoteFingerprintDropped, true},
+		{"fingerprint-chrome120/xray", withFP("chrome120"), "xray", CodeNoteFingerprintDropped, false},
+		{"fingerprint-chrome120/mihomo", withFP("chrome120"), "mihomo", CodeNoteFingerprintDropped, false},
+		{"reality-without-fingerprint/mihomo", plainReality, "mihomo", CodeNoteFingerprintDropped, false},
+		// Родное ядро получает оригинал без потерь: примечаний нет.
+		{"native-clash/mihomo-udp", clash, "mihomo", CodeNoteUDPDropped, false},
+		{"native-clash/xray-udp", clash, "xray", CodeNoteUDPDropped, true},
+		{"native-clash/xray-packet-encoding", clash, "xray", CodeNotePacketEncDropped, true},
+	}
+	for _, p := range probes {
+		t.Run(p.name, func(t *testing.T) {
+			v := Support(p.node, p.kernel, latest)
+			if !v.OK {
+				t.Fatalf("вердикт не OK (%s): потери уровня B не должны менять вердикт", v.Code)
+			}
+			if got := rtCapHasNote(v, p.note); got != p.want {
+				t.Errorf("примечание %s: есть %v, ожидалось %v (все: %v)", p.note, got, p.want, v.Notes)
+			}
+		})
+	}
+}
+
+// TestRouterCapabilityPinnedInsecure: узел с «insecure» и закреплённым
+// сертификатом уходит в Xray без allowInsecure (ключ удалён в Xray 26.x), с
+// pinnedPeerCertSha256; вердикт ядра устройства — код выхода `xray run -test`.
+func TestRouterCapabilityPinnedInsecure(t *testing.T) {
+	routertest.Current(t)
+	n := rtCapLink(t, "trojan_ws")
+	n.TLS.Insecure = true
+	n.TLS.PinSHA256 = []string{"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
+	ob, err := XrayOutbound(n, rtNodeTag(0))
+	if err != nil {
+		t.Fatalf("XrayOutbound отказал узлу с закреплённым сертификатом: %v", err)
+	}
+	file, err := XrayFile([]map[string]any{ob})
+	if err != nil {
+		t.Fatalf("XrayFile: %v", err)
+	}
+	for _, banned := range []string{`"allowInsecure"`} {
+		if strings.Contains(string(file), banned) {
+			t.Errorf("файл Xray содержит запрещённый ключ %s", banned)
+		}
+	}
+	if !strings.Contains(string(file), `"pinnedPeerCertSha256"`) {
+		t.Errorf("в файле Xray нет pinnedPeerCertSha256")
+	}
+	rtXrayKernel(t, "pinned-insecure", rtParseWork(t), rtRedactNodes(n), ob)
+}

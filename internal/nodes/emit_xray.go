@@ -234,7 +234,7 @@ func xrayStream(n Node) (map[string]any, error) {
 		ss["security"] = "reality"
 		ss["realitySettings"] = rs
 	case n.TLS != nil && n.TLS.Enabled:
-		if n.TLS.Insecure {
+		if xrayInsecureForbidden(n) {
 			return nil, NewError(CodeXrayNoInsecure)
 		}
 		ts := map[string]any{}
@@ -254,6 +254,15 @@ func xrayStream(n Node) (map[string]any, error) {
 		ss["tlsSettings"] = ts
 	}
 	return ss, nil
+}
+
+// xrayInsecureForbidden — отключение проверки сертификата, которое Xray 26.x не
+// выражает: allowInsecure удалён, поэтому узел с «insecure» без закрепления
+// сертификата уйти в Xray не может. С закреплением (pinnedPeerCertSha256)
+// узел принимается: поле allowInsecure не пишется, сертификат сверяется по хешу.
+// Reality сертификат не проверяет вовсе.
+func xrayInsecureForbidden(n Node) bool {
+	return n.Reality == nil && n.TLS != nil && n.TLS.Enabled && n.TLS.Insecure && len(n.TLS.PinSHA256) == 0
 }
 
 // checkXrayRaw проверяет родной outbound Xray на ключи, которые Xray 26.x

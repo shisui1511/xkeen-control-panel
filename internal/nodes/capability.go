@@ -76,6 +76,19 @@ func Support(n Node, kernel string, c Caps) Verdict {
 }
 
 func supportXray(n Node, c Caps) Verdict {
+	// Запреты Xray 26.x не зависят от происхождения узла: у неродного узла их
+	// отсекает проверка по IR, у родного (оригинал уходит ядру как есть) — пробная
+	// эмиссия через checkXrayRaw: allowInsecure даже с закреплением, h2/http/quic,
+	// httpSettings, Host в заголовках xhttp, отпечаток вне таблиц Xray. Вердикт OK
+	// для оригинала невозможен без успешной проверки оригинала.
+	if !nativeXray(n) && reachesXrayStream(n) {
+		if network := normNetwork(n.Transport.Network); isRemovedTransport(network) {
+			return fromError(NewError(CodeXrayNoHTTPTransport, "network", network))
+		}
+		if xrayInsecureForbidden(n) {
+			return fromError(NewError(CodeXrayNoInsecure))
+		}
+	}
 	if normNetwork(n.Transport.Network) == "xhttp" {
 		if !c.XrayXHTTP.OK {
 			return needs(CodeNeedsXray, c.XrayXHTTP)
@@ -87,7 +100,7 @@ func supportXray(n Node, c Caps) Verdict {
 	if _, err := XrayOutbound(n, "xcp-probe"); err != nil {
 		return fromError(err)
 	}
-	return Verdict{OK: true}
+	return Verdict{OK: true, Notes: levelBNotes(n, kernelXray)}
 }
 
 func supportMihomo(n Node, c Caps) Verdict {
@@ -99,6 +112,11 @@ func supportMihomo(n Node, c Caps) Verdict {
 			return needs(CodeNeedsMihomo, c.MihomoXHTTPReuse)
 		}
 	}
+	if n.WG != nil && (len(n.WG.AWG) > 0 || n.WG.AWGVersion != "") {
+		if g := awgGate(n.WG.AWGVersion, c); !g.OK {
+			return needs(CodeNeedsMihomo, g)
+		}
+	}
 	name := n.Name
 	if name == "" {
 		name = "probe"
@@ -106,7 +124,88 @@ func supportMihomo(n Node, c Caps) Verdict {
 	if _, err := ClashProxy(n, name); err != nil {
 		return fromError(err)
 	}
-	return Verdict{OK: true}
+	return Verdict{OK: true, Notes: levelBNotes(n, kernelMihomo)}
+}
+
+// nativeXray — узел из Xray-JSON с оригиналом: ядро получает копию Raw.
+func nativeXray(n Node) bool { return n.Origin == OriginXrayJSON && n.Raw != nil }
+
+// reachesXrayStream — узел идёт через streamSettings эмиттера Xray (протоколы
+// с транспортом и TLS), а не отклоняется раньше по типу: IR-проверки транспорта
+// и TLS применимы только к нему, иначе они подменили бы код отказа эмиттера.
+func reachesXrayStream(n Node) bool {
+	switch normProtocol(n.Protocol) {
+	case "vless", "vmess", "trojan", "socks", "http":
+		return true
+	case "shadowsocks":
+		return n.Plugin == ""
+	}
+	return false
+}
+
+// awgGate выбирает ворота Mihomo по версии диалекта AmneziaWG: 1.0 (классика и
+// версия не указана), 1.5, 2.0, 3.x.
+func awgGate(version string, c Caps) Gate {
+	v := strings.TrimSpace(version)
+	switch {
+	case strings.HasPrefix(v, "3"):
+		return c.MihomoAWG3
+	case strings.HasPrefix(v, "2"):
+		return c.MihomoAWG20
+	case v == "1.5":
+		return c.MihomoAWG15
+	}
+	return c.MihomoAWG
+}
+
+// levelBNotes — примечания уровня B (A13, D-20): узел работает, но при переводе
+// в это ядро теряется функция. Вердикт не меняют, считаются при каждой
+// генерации и в состоянии не хранятся. Родное ядро узла получает оригинал
+// без потерь, поэтому для него примечаний нет.
+func levelBNotes(n Node, kernel string) []string {
+	if kernel == kernelXray && nativeXray(n) || kernel == kernelMihomo && n.Origin == OriginClash && n.Raw != nil {
+		return nil
+	}
+	var notes []string
+	if kernel == kernelXray {
+		if n.UDP != nil && !*n.UDP {
+			notes = append(notes, CodeNoteUDPDropped)
+		}
+		if n.PacketEncoding != "" {
+			notes = append(notes, CodeNotePacketEncDropped)
+		}
+	}
+	if kernel == kernelMihomo && n.Reality != nil && n.Reality.SpiderX != "" {
+		notes = append(notes, CodeNoteSpiderXDropped)
+	}
+	if n.TLS != nil && fingerprintEmitted(n, kernel) {
+		reality := n.Reality != nil
+		var replaced bool
+		if kernel == kernelXray {
+			_, replaced = XrayFingerprint(n.TLS.Fingerprint, reality)
+		} else {
+			_, replaced = MihomoFingerprint(n.TLS.Fingerprint, reality)
+		}
+		if replaced {
+			notes = append(notes, CodeNoteFingerprintDropped)
+		}
+	}
+	return notes
+}
+
+// fingerprintEmitted — эмиттер ядра пишет отпечаток uTLS этого узла: TLS или
+// Reality у протоколов с транспортом (у hysteria2, tuic и wireguard отпечатка нет).
+func fingerprintEmitted(n Node, kernel string) bool {
+	if !n.TLS.Enabled && n.Reality == nil {
+		return false
+	}
+	switch normProtocol(n.Protocol) {
+	case "vless", "vmess", "trojan":
+		return true
+	case "shadowsocks", "socks", "http":
+		return kernel == kernelXray
+	}
+	return false
 }
 
 // needs — вердикт «нужна более новая версия ядра» с порогом из ворот.
