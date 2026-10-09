@@ -104,7 +104,9 @@ func wireguardSettings(n Node) (map[string]any, error) {
 	} else {
 		peer["allowedIPs"] = []any{"0.0.0.0/0", "::/0"}
 	}
-	s := map[string]any{"secretKey": wg.PrivateKey, "peers": []any{peer}}
+	// noKernelTun: userspace-стек вместо настоящего TUN — панель не создаёт
+	// интерфейсов на роутере, а на mipsle проверка конфигурации не падает.
+	s := map[string]any{"secretKey": wg.PrivateKey, "peers": []any{peer}, "noKernelTun": true}
 	if len(wg.Address) > 0 {
 		s["address"] = stringsToAny(wg.Address)
 	}
