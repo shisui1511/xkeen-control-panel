@@ -60,7 +60,8 @@ export interface LayerRestart {
     | 'failed_rolled_back'
     | 'failed_rollback_failed'
     | 'failed_kernel_down'
-    | 'interrupted';
+    | 'interrupted'
+    | 'no_runtime_effect';
   note_code?: string;
 }
 
