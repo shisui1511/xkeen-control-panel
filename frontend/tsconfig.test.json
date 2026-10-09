@@ -5,5 +5,5 @@
     "isolatedModules": false,
     "types": ["node"]
   },
-  "include": ["tests/**/*.ts", "playwright.config.ts", "playwright.router.config.ts"]
+  "include": ["tests/**/*.ts", "playwright.router.config.ts"]
 }

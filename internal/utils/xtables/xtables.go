@@ -127,12 +127,3 @@ func IsCommandNotFound(err error) bool {
 	}
 	return errors.Is(err, os.ErrNotExist)
 }
-
-// ResetForTest clears the process-wide cache so tests can re-probe against
-// freshly installed fake binaries. Must only be called from _test.go files.
-func ResetForTest() {
-	mu.Lock()
-	defer mu.Unlock()
-	haveGood = make(map[string]bool)
-	cached = make(map[string][]string)
-}

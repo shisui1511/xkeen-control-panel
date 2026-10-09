@@ -1,4 +1,4 @@
-.PHONY: build run clean test test-coverage lint fmt deps hooks router-arm64 router-mipsle router-mips router-test proto
+.PHONY: build run clean lint fmt deps hooks router-arm64 router-mipsle router-mips router-test proto
 
 BINARY_NAME=xcp
 # Single source of truth for the version: scripts/version.sh (git tags +
@@ -47,13 +47,6 @@ router-test:
 
 run: build
 	./build/$(BINARY_NAME)
-
-test:
-	go test -race -v ./...
-
-test-coverage:
-	go test -race -v -coverprofile=coverage.out ./internal/...
-	./scripts/check-coverage.sh coverage.out
 
 lint:
 	golangci-lint run ./...

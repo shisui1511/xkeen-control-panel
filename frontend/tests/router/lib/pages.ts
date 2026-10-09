@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 // Маршруты страниц панели для обхода (RT-05). Список берётся из
 // frontend/src/Dashboard.svelte во время прогона: ветви `currentTab === '<маршрут>'`
-// (тот же разбор, что parsePages в frontend/scripts/select-e2e.mjs), поэтому новая
+// (тот же разбор, что parsePages в scripts/router/import-graph.mjs), поэтому новая
 // страница попадает в обход без правки спека.
 
 const DASHBOARD = fileURLToPath(new URL('../../../src/Dashboard.svelte', import.meta.url));
