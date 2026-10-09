@@ -6,7 +6,8 @@ import (
 	"strings"
 )
 
-// ParseXray разбирает Xray-JSON: одиночный outbound, объект с outbounds.
+// ParseXray разбирает Xray-JSON во всех формах: одиночный outbound, объект с
+// outbounds, полный конфиг (inbounds и routing) и массив конфигов.
 // Узел хранит оригинал в Raw (числа — json.Number): Xray получает его без
 // изменений, Mihomo — результат эмиттера.
 func ParseXray(data []byte) (ParseResult, error) {
@@ -19,27 +20,62 @@ func ParseXray(data []byte) (ParseResult, error) {
 
 func parseXrayValue(v any) (ParseResult, error) {
 	res := ParseResult{Format: "xray_json"}
-	root := mapOf(v)
-	if root == nil {
-		return res, NewError(CodeUnrecognized)
-	}
-	if _, ok := root["outbounds"]; ok {
-		list := listOf(root["outbounds"])
-		if len(list) > maxNodes {
+	switch x := v.(type) {
+	case map[string]any:
+		switch {
+		case x["outbounds"] != nil:
+			xrayConfig(&res, x, false)
+		case x["protocol"] != nil:
+			xrayCollect(&res, []any{x}, "")
+		default:
+			return res, NewError(CodeUnrecognized)
+		}
+	case []any:
+		if len(x) > maxNodes {
 			return res, NewError(CodeTooLarge)
 		}
-		xrayCollect(&res, list)
-		return res, nil
+		for i, e := range x {
+			m := mapOf(e)
+			switch {
+			case m != nil && m["outbounds"] != nil:
+				xrayConfig(&res, m, true)
+			case m != nil && m["protocol"] != nil:
+				xrayCollect(&res, []any{m}, "")
+			default:
+				res.Skipped = append(res.Skipped, Skipped{Code: CodeUnrecognized,
+					Params: map[string]string{"index": strconv.Itoa(i + 1)}})
+			}
+		}
+	default:
+		return res, NewError(CodeUnrecognized)
 	}
-	if _, ok := root["protocol"]; ok {
-		xrayCollect(&res, []any{root})
-		return res, nil
+	if len(res.Nodes) > maxNodes {
+		return res, NewError(CodeTooLarge)
 	}
-	return res, NewError(CodeUnrecognized)
+	return res, nil
 }
 
-// xrayCollect добавляет в результат узлы и пропуски списка outbound.
-func xrayCollect(res *ParseResult, list []any) {
+// xrayConfig разбирает конфиг Xray с outbounds. Полным (D-12) он считается, если
+// рядом с outbounds есть inbounds или routing, либо конфиг лежит в массиве конфигов.
+func xrayConfig(res *ParseResult, cfg map[string]any, inArray bool) {
+	if inArray || cfg["inbounds"] != nil || cfg["routing"] != nil {
+		res.FullConfig = true
+	}
+	xrayCollect(res, listOf(cfg["outbounds"]), strOf(cfg["remarks"]))
+}
+
+// xrayCollect добавляет в результат узлы и пропуски списка outbound. remarks —
+// название конфига: даёт имя узлам, у которых своего названия нет (у нескольких
+// узлов одного конфига к нему добавляется тег).
+func xrayCollect(res *ParseResult, list []any, remarks string) {
+	proxies := 0
+	for _, e := range list {
+		if ob := mapOf(e); ob != nil {
+			if p := strings.ToLower(strOf(ob["protocol"])); p != "" && !xrayServiceProtocol(p) {
+				proxies++
+			}
+		}
+	}
 	for i, e := range list {
 		ob := mapOf(e)
 		if ob == nil {
@@ -51,10 +87,24 @@ func xrayCollect(res *ParseResult, list []any) {
 		if ignore {
 			continue
 		}
+		own := pickStr(ob, "remarks", "name")
+		if remarks != "" && own == "" {
+			switch tag := strOf(ob["tag"]); {
+			case proxies == 1:
+				own = remarks
+			case tag != "":
+				own = remarks + " " + tag
+			default:
+				own = remarks + " " + strconv.Itoa(i+1)
+			}
+		}
 		if err != nil {
 			res.Skipped = append(res.Skipped, skippedFrom(err, 0,
-				pickStr(ob, "remarks", "name", "tag"), strOf(ob["protocol"])))
+				orDefault(own, strOf(ob["tag"])), strOf(ob["protocol"])))
 			continue
+		}
+		if own != "" {
+			n.Name = own
 		}
 		res.Nodes = append(res.Nodes, n)
 	}
@@ -80,6 +130,10 @@ func xrayOutboundNode(ob map[string]any) (n Node, ignore bool, err *SourceError)
 	}
 	if proto == "" {
 		return Node{}, false, NewError(CodeUnrecognized)
+	}
+	// Ключ transport Xray 26.x отвергает целиком: узел не уходит в конфиг (T-145-05).
+	if hasKeyDeep(ob, "transport", 0) {
+		return Node{}, false, NewError(CodeXrayForbiddenKey, "key", "transport")
 	}
 	settings := mapOf(ob["settings"])
 	n = Node{
@@ -151,7 +205,29 @@ func xrayOutboundNode(ob map[string]any) (n Node, ignore bool, err *SourceError)
 		}
 	}
 	n.Text = marshalIndent(ob)
+	// Ссылки на чужие outbound ломают xray -test висячим тегом: узел, вынутый из
+	// чужого конфига, работает без цепочки (уровень B), факт — в Notes.
+	if removeXrayChain(ob) {
+		n.Notes = append(n.Notes, CodeNoteChainRemoved)
+	}
 	return n, false, nil
+}
+
+// removeXrayChain удаляет proxySettings и streamSettings.sockopt.dialerProxy из
+// родного outbound; true — что-то удалено.
+func removeXrayChain(ob map[string]any) bool {
+	removed := false
+	if _, ok := ob["proxySettings"]; ok {
+		delete(ob, "proxySettings")
+		removed = true
+	}
+	if so := mapOf(mapOf(ob["streamSettings"])["sockopt"]); so != nil {
+		if _, ok := so["dialerProxy"]; ok {
+			delete(so, "dialerProxy")
+			removed = true
+		}
+	}
+	return removed
 }
 
 // xrayVnext — сервер и пользователь vless/vmess: форма vnext или плоская.

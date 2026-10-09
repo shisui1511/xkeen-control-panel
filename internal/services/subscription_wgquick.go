@@ -13,6 +13,12 @@ func LooksLikeWgQuickConf(content string) bool {
 	return looksLikeWgQuickConf(content)
 }
 
+// ParseWgQuickConf разбирает wg-quick .conf (в том числе AmneziaWG 1.0/1.5/2.0/3.x).
+// Шов для пакета internal/nodes; удаляется вместе со старым слоем в Phase 151.
+func ParseWgQuickConf(content string) ([]SubscriptionNode, error) {
+	return parseWgQuickConf(content, "")
+}
+
 // looksLikeWgQuickConf возвращает true, если содержимое напоминает wg-quick .conf конфигурацию.
 func looksLikeWgQuickConf(content string) bool {
 	trimmed := strings.TrimSpace(content)

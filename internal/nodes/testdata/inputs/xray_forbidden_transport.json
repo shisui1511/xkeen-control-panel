@@ -1,0 +1,32 @@
+{
+  "outbounds": [
+    {
+      "tag": "bad",
+      "remarks": "Узел transport",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "node1.example",
+            "port": 443,
+            "users": [{ "id": "11111111-1111-4111-8111-111111111111", "encryption": "none" }]
+          }
+        ]
+      },
+      "streamSettings": { "network": "tcp", "transport": { "type": "ws" } }
+    },
+    {
+      "tag": "good",
+      "remarks": "Узел без transport",
+      "protocol": "trojan",
+      "settings": {
+        "servers": [{ "address": "node3.example", "port": 443, "password": "trojan-pass-3" }]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": { "serverName": "cdn.example" }
+      }
+    }
+  ]
+}
