@@ -16,7 +16,8 @@
  *   3. Playwright: *.spec.{ts,js} только в frontend/tests/router/; в них нельзя
  *      подменять сеть (.route(, .routeFromHAR(, .fulfill(, .unroute().
  *   4. Shell-тесты *_test.sh и *_test.bash.
- *   5. Порог покрытия: scripts/check-coverage.sh и -coverprofile в COVERAGE_FILES.
+ *   5. Порог покрытия: scripts/check-coverage.sh и -coverprofile в Makefile и во
+ *      всех .github/workflows/*.yml (файлы берутся из индекса, не по именам).
  *   6. Эталонные файлы: testdata/golden/ и *.golden.
  *
  * Usage: node scripts/check-no-simulations.js
@@ -26,8 +27,9 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 
-// Файлы, где запрещён -coverprofile. Список расширяется правкой этой константы.
+// Файлы, где запрещён -coverprofile: Makefile и любой workflow из индекса.
 const COVERAGE_FILES = ['Makefile'];
+const WORKFLOW_FILE = /^\.github\/workflows\/[^/]+\.ya?ml$/;
 
 const VITEST_SUFFIX = /\.test\.(ts|js|mjs|cjs|tsx|jsx)$/;
 const SPEC_SUFFIX = /\.spec\.(ts|js)$/;
@@ -131,7 +133,8 @@ if (fileSet.has('frontend/vite.config.ts') && /^ {2}test\s*:/m.test(indexed('fro
 if (fileSet.has('scripts/check-coverage.sh')) {
   violate('scripts/check-coverage.sh', 'порог покрытия');
 }
-for (const f of COVERAGE_FILES) {
+const coverageFiles = [...COVERAGE_FILES, ...files.filter((f) => WORKFLOW_FILE.test(f))];
+for (const f of coverageFiles) {
   if (fileSet.has(f) && /-coverprofile/.test(indexed(f))) {
     violate(f, 'сбор покрытия (-coverprofile)');
   }
