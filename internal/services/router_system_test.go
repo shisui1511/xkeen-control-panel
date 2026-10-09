@@ -66,6 +66,27 @@ func rtWaitRunning(name string, want bool, limit time.Duration) string {
 	}
 }
 
+// rtWaitStable ждёт, пока процесс работает с одним и тем же PID не меньше hold
+// (XKeen возвращает управление раньше, чем закончил фоновый запуск: команда,
+// пришедшая в это окно, молча не выполняется), и возвращает PID.
+func rtWaitStable(name string, hold, limit time.Duration) string {
+	deadline := time.Now().Add(limit)
+	last, since := "", time.Now()
+	for {
+		pids := rtPids(name)
+		if pids != last {
+			last, since = pids, time.Now()
+		}
+		if pids != "" && time.Since(since) >= hold {
+			return pids
+		}
+		if time.Now().After(deadline) {
+			return pids
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 // rtWaitChanged ждёт, пока у процесса появится PID, отличный от old (перезапуск
 // XKeen возвращает управление раньше, чем ядро поднялось заново), и возвращает PID.
 func rtWaitChanged(name, old string, limit time.Duration) string {
@@ -226,6 +247,8 @@ func TestRouterXKeenLifecycle(t *testing.T) {
 			"после Start панель считает XKeen неработающим: %s", rtShort(st))
 		// Перезапуск сразу после запуска пришёл бы во время фонового запуска XKeen
 		routertest.Verdict(t, rtWaitRules(limit), routertest.KnownMark{}, "после Start XKeen не поставил перехват")
+		stable := rtWaitStable(core, 30*time.Second, limit)
+		routertest.Verdict(t, stable != "", routertest.KnownMark{}, "после Start процесс %s не удержался 30 с", core)
 	})
 
 	t.Run("restart", func(t *testing.T) {

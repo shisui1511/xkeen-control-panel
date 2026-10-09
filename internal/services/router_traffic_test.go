@@ -678,7 +678,22 @@ func TestRouterTproxyRules(t *testing.T) {
 		t.Fatal("в iptables нет правил TPROXY/REDIRECT: XKeen не поставил перехват")
 	}
 
+	// Ядро после перезапуска XKeen открывает порты позже, чем встают правила: ждём
+	// порты правил до трёх минут, затем вердикт по тому, что слушается.
 	listening := rtListeningPorts()
+	for end := time.Now().Add(3 * time.Minute); time.Now().Before(end); {
+		all := true
+		for p := range rulePorts {
+			if !listening[p] {
+				all = false
+			}
+		}
+		if all {
+			break
+		}
+		time.Sleep(2 * time.Second)
+		listening = rtListeningPorts()
+	}
 	var matched int
 	for p := range rulePorts {
 		if want[p] {
