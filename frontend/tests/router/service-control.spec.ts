@@ -68,7 +68,7 @@ async function passStartGate(page: Page, badge: Locator): Promise<void> {
   // окно появляется с анимацией: ждём, пока рамка остановится
   await page.waitForTimeout(400);
   const vp = page.viewportSize();
-  const buttons = dialog.locator('.confirm-modal-actions button');
+  const buttons = dialog.locator('.confirm-actions button');
   const n = await buttons.count();
   expect(n, 'шлюз запуска: кнопок действий в окне').toBeGreaterThanOrEqual(2);
   for (let i = 0; i < n; i++) {
