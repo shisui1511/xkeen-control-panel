@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -9,6 +10,11 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrPrivateNetwork — адрес назначения в частной сети, петле или link-local:
+// SafeHTTPClient отказывает в соединении. Сентинел позволяет вызывающему отличить
+// защиту от SSRF от сетевого сбоя через errors.Is; текст ошибки не менялся.
+var ErrPrivateNetwork = errors.New("access to private network is prohibited")
 
 // SafeHTTPClient returns an http.Client that is protected against SSRF.
 // It prevents connections to private, loopback, and link-local IP addresses.
@@ -37,7 +43,8 @@ func SafeHTTPClient(timeout time.Duration) *http.Client {
 					var err2 error
 					ips, err2 = r.LookupIP(ctx, "ip", host)
 					if err2 != nil {
-						return nil, fmt.Errorf("DNS lookup failed: system resolver error: %v, fallback resolver error: %v", err, err2)
+						// %w сохраняет *net.DNSError резервного резолвера для errors.As; текст прежний.
+						return nil, fmt.Errorf("DNS lookup failed: system resolver error: %v, fallback resolver error: %w", err, err2)
 					}
 				}
 
@@ -51,7 +58,7 @@ func SafeHTTPClient(timeout time.Duration) *http.Client {
 				}
 
 				if chosenIP == nil {
-					return nil, fmt.Errorf("access to private network is prohibited")
+					return nil, ErrPrivateNetwork
 				}
 
 				// Dial the specific IP to avoid TOCTOU
