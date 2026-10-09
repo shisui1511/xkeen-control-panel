@@ -6,7 +6,7 @@
 //              `//go:build router`), затронутые изменением: сам пакет изменён, либо в его
 //              зависимостях (`go list -tags router -test -deps`) есть изменённый пакет.
 //   Playwright роутерные спеки frontend/tests/router/*.spec.ts, затронутые страницы
-//              считаются по графу импортов frontend/src (логика frontend/scripts/select-e2e.mjs):
+//              считаются по графу импортов frontend/src (логика scripts/router/import-graph.mjs):
 //              спек выбирается, если открывает затронутый маршрут (`#/<маршрут>` в тексте
 //              или `// e2e-pages: …`). `// e2e-pages: *` — спек обходит все страницы: он
 //              выбирается при любом затронутом маршруте и сужается до них через --grep.
@@ -300,7 +300,7 @@ async function select(changed) {
     let model = null;
     let specRoutes = null;
     if (touchedSrc.length > 0) {
-      const mod = await import(pathToFileURL(path.join(ROOT, 'frontend/scripts/select-e2e.mjs')));
+      const mod = await import(pathToFileURL(path.join(ROOT, 'scripts/router/import-graph.mjs')));
       specRoutes = mod.specRoutes;
       model = mod.buildModel(path.join(ROOT, 'frontend'));
       for (const rel of touchedSrc) {
