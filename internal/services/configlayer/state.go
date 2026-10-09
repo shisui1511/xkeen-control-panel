@@ -284,6 +284,65 @@ func (s *Store) EditDraft(baseRev int64, section string, value json.RawMessage) 
 	return ev, nil
 }
 
+// EditDraftBatch атомарно меняет несколько секций черновика и, при live != nil,
+// живые данные слоя под одной проверкой ревизии: один файл, одна запись,
+// ревизия +1, одно событие draft. Значение nil или JSON null удаляет секцию.
+// Конфликт ревизии, недопустимое имя секции, невалидный JSON или ошибка
+// live-функции — ничего не записано, состояние и файл прежние, события нет.
+// live получает глубокую копию Live и меняет её на месте.
+func (s *Store) EditDraftBatch(baseRev int64, sections map[string]json.RawMessage, live func(live Sections) error) (DraftEvent, error) {
+	for name := range sections {
+		if !sectionNameRE.MatchString(name) {
+			return DraftEvent{}, fmt.Errorf("%w: %q", ErrInvalidSection, name)
+		}
+	}
+
+	s.mu.Lock()
+	if err := s.loadLocked(); err != nil {
+		s.mu.Unlock()
+		return DraftEvent{}, err
+	}
+	if baseRev != s.st.DraftRevision {
+		s.mu.Unlock()
+		return DraftEvent{}, ErrDraftConflict
+	}
+
+	next := s.st.clone()
+	for name, value := range sections {
+		if len(value) == 0 || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			delete(next.Draft, name)
+			continue
+		}
+		compact, err := compactRaw(value)
+		if err != nil {
+			s.mu.Unlock()
+			return DraftEvent{}, fmt.Errorf("configlayer: section %q value is not valid JSON: %w", name, err)
+		}
+		next.Draft[name] = compact
+	}
+	if live != nil {
+		if next.Live == nil {
+			next.Live = Sections{}
+		}
+		if err := live(next.Live); err != nil {
+			s.mu.Unlock()
+			return DraftEvent{}, err
+		}
+	}
+	next.DraftRevision++
+
+	if err := s.persist(next); err != nil {
+		s.mu.Unlock()
+		return DraftEvent{}, err
+	}
+	s.st = next
+	ev := draftEventOf(next)
+	s.mu.Unlock()
+
+	s.broker.Publish(Event{Type: EventDraft, Data: ev})
+	return ev, nil
+}
+
 // ResetDraft сбрасывает черновик к применённому состоянию, если baseRev
 // совпадает с текущей ревизией. Ревизия растёт, публикуется событие draft.
 func (s *Store) ResetDraft(baseRev int64) (DraftEvent, error) {

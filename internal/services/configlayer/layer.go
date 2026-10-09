@@ -26,6 +26,9 @@ var (
 	ErrDevModeRequired = errors.New("действие доступно только в режиме разработчика")
 	ErrFileReleased    = errors.New("файл отпущен: панель его не сверяет")
 	ErrStopped         = errors.New("слой остановлен")
+	// ErrAlreadyStarted — генератор зарегистрирован после Start: набор генераторов
+	// фиксируется до запуска слоя.
+	ErrAlreadyStarted = errors.New("слой уже запущен: генераторы регистрируются до Start")
 )
 
 // Значения по умолчанию и пределы.
@@ -102,6 +105,8 @@ type Layer struct {
 
 	mu      sync.Mutex
 	stopped bool
+	// started выставляется в Start: после него регистрация генераторов закрыта.
+	started bool
 	// lastFiles — JSON последнего результата сверки; nil — базы нет.
 	lastFiles []byte
 	// failed — уведомления build_failed:<ядро> (только в памяти).
@@ -224,6 +229,9 @@ func (l *Layer) bootstrap() {
 // ничего не читает и не пишет. Повторный вызов безопасен.
 func (l *Layer) Start() {
 	l.startOnce.Do(func() {
+		l.mu.Lock()
+		l.started = true
+		l.mu.Unlock()
 		if l.Enabled() {
 			if err := l.store.Load(); err != nil {
 				log.Printf("[configlayer] состояние слоя не загружено: %v", err)
@@ -361,7 +369,7 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	// Pending: файл, которого нет в манифесте, или чей хэш у черновика отличается
 	// от записи манифеста при совпадающем диске. Ошибка сборки здесь не важна:
 	// «Применить» покажет её сам.
-	if generated, err := l.registry.Build(st.Draft, l.installed()); err == nil {
+	if generated, err := l.registry.Build(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft}, l.installed()); err == nil {
 		for _, g := range generated {
 			key := g.Key()
 			i, known := index[key]
@@ -502,6 +510,74 @@ func (l *Layer) EditDraft(rev int64, section string, value json.RawMessage) (Dra
 		l.RequestCheck()
 	}
 	return ev, err
+}
+
+// EditDraftBatch атомарно правит несколько секций черновика и, если live не
+// nil, живые данные слоя под одной проверкой ревизии: конфликт — ErrDraftConflict
+// без записи, успех — ревизия +1 и одно событие draft. Значение nil или JSON
+// null удаляет секцию.
+func (l *Layer) EditDraftBatch(rev int64, sections map[string]json.RawMessage, live func(live Sections) error) (DraftEvent, error) {
+	if !l.Enabled() {
+		return DraftEvent{}, ErrDisabled
+	}
+	ev, err := l.store.EditDraftBatch(rev, sections, live)
+	if err == nil {
+		l.RequestCheck()
+	}
+	return ev, err
+}
+
+// UpdateLive обновляет живые данные слоя (метаданные и статусы источников)
+// отдельно от черновика: ревизия не растёт, события конвейера не публикуются.
+// fn получает глубокую копию Live; ошибка fn или записи — ничего не меняется.
+func (l *Layer) UpdateLive(fn func(live Sections) error) error {
+	if !l.Enabled() {
+		return ErrDisabled
+	}
+	return l.store.Update(func(st *State) error {
+		if st.Live == nil {
+			st.Live = Sections{}
+		}
+		return fn(st.Live)
+	})
+}
+
+// StateView — копия секций слоя для сервисов-потребителей.
+type StateView struct {
+	DraftRevision int64
+	Draft         Sections
+	Applied       Sections
+	Live          Sections
+}
+
+// ReadState возвращает глубокие копии черновика, применённого состояния и
+// живых данных: изменение результата состояние слоя не меняет.
+func (l *Layer) ReadState() (StateView, error) {
+	if !l.Enabled() {
+		return StateView{}, ErrDisabled
+	}
+	st := l.store.Snapshot()
+	return StateView{
+		DraftRevision: st.DraftRevision,
+		Draft:         st.Draft,
+		Applied:       st.Applied,
+		Live:          st.Live,
+	}, nil
+}
+
+// RegisterGenerator добавляет генератор в реестр. Допустима только до Start;
+// генератор с уже занятым ID отклоняется.
+func (l *Layer) RegisterGenerator(g Generator) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	if l.registry.Has(g.ID()) {
+		return fmt.Errorf("configlayer: генератор %q уже зарегистрирован", g.ID())
+	}
+	l.registry.Register(g)
+	return nil
 }
 
 // ResetDraft сбрасывает черновик к применённому состоянию.

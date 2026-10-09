@@ -301,7 +301,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
 		}
 	}
-	files, err := p.d.Registry.Build(src, installed)
+	files, err := p.d.Registry.Build(Input{Sections: src, Live: snap.Live, Mode: req.Source}, installed)
 	if err == nil {
 		files = filesOfScope(files, req.Kernel)
 		err = CheckGenerated(files, p.d.ForeignOwned)
@@ -543,7 +543,7 @@ func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest) error 
 			case ActionWrite:
 				st.Manifest[fp.Key] = ManifestEntry{
 					Kernel: fp.Kernel, RelPath: fp.RelPath, Kind: fp.Kind,
-					Hash: fp.NewHash, Status: StatusManaged, WrittenAt: now,
+					Hash: fp.NewHash, Status: StatusManaged, WrittenAt: now, Inert: fp.Inert,
 				}
 			case ActionDelete:
 				delete(st.Manifest, fp.Key)

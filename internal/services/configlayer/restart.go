@@ -78,6 +78,9 @@ const (
 	RestartOutcomeFailedKernelDown = "failed_kernel_down"
 	// Перезапуск прерван остановкой панели: исход ядра неизвестен, журнал остался.
 	RestartOutcomeInterrupted = "interrupted"
+	// Все изменения ядра — файлы без влияния на запущенное ядро (Inert): записаны
+	// и проверены, перезапуска и перезагрузки нет.
+	RestartOutcomeNoRuntimeEffect = "no_runtime_effect"
 )
 
 // Коды пояснений перезапуска (RestartView.NoteCode и StepView.NoteCode).
@@ -88,6 +91,8 @@ const (
 	NoteHotReloadFailed      = "hot_reload_failed_restarting"
 	NoteRestartFailedRolling = "restart_failed_rolling_back"
 	NoteRestartNotConfigured = "restart_not_configured"
+	// NoteNoRuntimeEffect — файлы записаны, но ядро их пока не использует.
+	NoteNoRuntimeEffect = "no_runtime_effect"
 )
 
 // errInterrupted — запуск прерван отменой контекста (остановка панели). Откат и
@@ -157,7 +162,8 @@ func (p *Pipeline) runRestart(ctx context.Context, plan Plan, set *BackupSet) ([
 
 // restartStepState сводит итоги ядер к состоянию шага: done — хоть одно ядро
 // перезапущено или перечитало конфиг; deferred — ядра с изменениями остановлены;
-// иначе пропущен.
+// иначе пропущен (в том числе с пометкой no_runtime_effect: файлы записаны, а
+// ядро их пока не использует).
 func restartStepState(views []RestartView) (StepState, string) {
 	var deferred, untouched string
 	for _, v := range views {
@@ -196,6 +202,12 @@ func (p *Pipeline) restartKernels(ctx context.Context, plan Plan, set *BackupSet
 		}
 		if err := interrupted(ctx); err != nil {
 			return views, err
+		}
+		if !plan.RuntimeChanges(kernel) {
+			// Только файлы с признаком Inert: ядро их не читает, трогать его незачем.
+			views = append(views, RestartView{Kernel: kernel, Outcome: RestartOutcomeNoRuntimeEffect, NoteCode: NoteNoRuntimeEffect})
+			p.setRestartViews(views)
+			continue
 		}
 		rv, err := p.restartKernel(ctx, kernel, plan, set)
 		views = append(views, rv)

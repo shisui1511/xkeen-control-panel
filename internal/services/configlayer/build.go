@@ -126,6 +126,9 @@ type FilePlan struct {
 	Expect         *Expectation
 	RemoveObsolete bool
 	WasReleased    bool
+	// Inert — файл не влияет на запущенное ядро (GeneratedFile.Inert, для
+	// удаления — ManifestEntry.Inert): шаг перезапуска его не учитывает.
+	Inert bool
 }
 
 // Plan — результат расчёта: что писать, удалять, пропустить и какие сироты.
@@ -153,6 +156,23 @@ func (p Plan) Empty() bool {
 func (p Plan) Changes(kernel string) bool {
 	for _, fp := range p.Files {
 		if fp.Kernel == kernel && (fp.Action == ActionWrite || fp.Action == ActionDelete) {
+			return true
+		}
+	}
+	for _, o := range p.Orphans {
+		if o.Kernel == kernel {
+			return true
+		}
+	}
+	return false
+}
+
+// RuntimeChanges — как Changes, но без записей и удалений с признаком Inert:
+// только они способны изменить то, что ядро уже прочитало. Сироты считаются
+// изменением, как в Changes.
+func (p Plan) RuntimeChanges(kernel string) bool {
+	for _, fp := range p.Files {
+		if fp.Kernel == kernel && !fp.Inert && (fp.Action == ActionWrite || fp.Action == ActionDelete) {
 			return true
 		}
 	}
@@ -201,6 +221,7 @@ func ComputePlan(roots Roots, desired []GeneratedFile, manifest map[string]Manif
 			NewHash:     HashContent(f.Content),
 			Expect:      f.Expect,
 			WasReleased: released,
+			Inert:       f.Inert,
 		}
 		if released && !only[key] {
 			fp.Action = ActionSkipReleased
@@ -241,6 +262,7 @@ func ComputePlan(roots Roots, desired []GeneratedFile, manifest map[string]Manif
 			AbsPath: abs,
 			Action:  ActionDelete,
 			Kind:    entry.Kind,
+			Inert:   entry.Inert,
 		})
 	}
 	sort.Slice(plan.Files, func(i, j int) bool { return plan.Files[i].Key < plan.Files[j].Key })
