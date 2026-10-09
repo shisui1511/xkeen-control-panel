@@ -26,10 +26,7 @@ var invalidIDCharsRe = regexp.MustCompile(`[^a-z0-9_-]`)
 // (frontend/src/components/subscriptions/NodeList.svelte) — единого
 // источника истины нет (IN-03 из код-ревью фазы 133). При добавлении сюда
 // нового протокола обязательно обновить фронтенд-копию: иначе кнопка
-// выбора узла останется задизейблена для валидного узла. Список закреплён
-// тестом TestAllowedXrayProtocols_MatchesFrontendList в
-// subscription_selection_test.go — падение теста напоминает о ручной
-// синхронизации.
+// выбора узла останется задизейблена для валидного узла.
 var (
 	nonAlphanumericDashRe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
 	multiDashRe           = regexp.MustCompile(`-+`)
