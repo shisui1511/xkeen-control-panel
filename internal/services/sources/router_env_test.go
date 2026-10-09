@@ -54,6 +54,7 @@ type rtEnv struct {
 	svc   *Service
 	roots configlayer.Roots
 	clock *rtClock
+	dir   string
 	// installed — какие ядра видит сервис (и слой).
 	installed configlayer.InstalledKernels
 }
@@ -89,6 +90,13 @@ func rtNeedKernels(t *testing.T, xray, mihomo bool) {
 // установленными по запросу (для проверок без применения).
 func rtNewEnv(t *testing.T, xray, mihomo bool) *rtEnv {
 	t.Helper()
+	return rtNewEnvWith(t, xray, mihomo, nil)
+}
+
+// rtNewEnvWith — rtNewEnv с правкой зависимостей сервиса до создания (клиент с
+// подсчётом настоящих запросов, свой HWID).
+func rtNewEnvWith(t *testing.T, xray, mihomo bool, mutate func(*Deps)) *rtEnv {
+	t.Helper()
 	tg := routertest.Current(t)
 	dir, err := os.MkdirTemp(tg.WorkDir, "src-")
 	if err != nil {
@@ -121,17 +129,22 @@ func rtNewEnv(t *testing.T, xray, mihomo bool) *rtEnv {
 	}
 	t.Cleanup(layer.Stop)
 	e := &rtEnv{
+		dir:       dir,
 		layer:     layer,
 		roots:     roots,
 		clock:     &rtClock{t: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)},
 		installed: configlayer.InstalledKernels{Xray: xray, Mihomo: mihomo},
 	}
-	svc, err := New(Deps{
+	deps := Deps{
 		DataDir:   dir,
 		Layer:     layer,
 		Installed: func() configlayer.InstalledKernels { return e.installed },
 		Now:       e.clock.Now,
-	})
+	}
+	if mutate != nil {
+		mutate(&deps)
+	}
+	svc, err := New(deps)
 	if err != nil {
 		t.Fatalf("sources.New: %v", err)
 	}
@@ -140,6 +153,9 @@ func rtNewEnv(t *testing.T, xray, mihomo bool) *rtEnv {
 		if err := layer.RegisterGenerator(g); err != nil {
 			t.Fatalf("RegisterGenerator %s: %v", g.ID(), err)
 		}
+	}
+	if err := layer.SetLiveCommitter(svc.CommitLive); err != nil {
+		t.Fatalf("SetLiveCommitter: %v", err)
 	}
 	layer.Start()
 	return e
