@@ -27,7 +27,7 @@ var passwordBlacklistRaw string
 // passwordBlacklist — набор запрещённых паролей в нижнем регистре, собранный
 // один раз при инициализации пакета из password_blacklist.txt. Тот же набор,
 // что frontend/src/lib/passwordBlacklist.json (134-04) — паритет проверяет
-// TestPasswordBlacklist_MatchesFrontend.
+// scripts/check-password-blacklist.js.
 var passwordBlacklist = parsePasswordBlacklist(passwordBlacklistRaw)
 
 func parsePasswordBlacklist(raw string) map[string]struct{} {

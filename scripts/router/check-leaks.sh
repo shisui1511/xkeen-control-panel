@@ -8,10 +8,6 @@
 # отслеживаемых (без игнорируемых). Печатаются только «файл:строка» — без самой
 # строки.
 #
-# Тесты вне роутера (*_test.go без тега router, frontend/tests вне tests/router,
-# *.test.ts) пропускаются: они удаляются при переходе на проверки на роутерах,
-# число пропущенных файлов выводится.
-#
 # Код выхода: 0 — утечек нет (или нет локального файла целей), 1 — найдены.
 
 set -eu
@@ -88,34 +84,8 @@ if [ -s "$TMP/untracked" ]; then
   [ ! -s "$TMP/words" ] || xargs -0 grep -HnIFw -f "$TMP/words" -- <"$TMP/untracked" 2>/dev/null | cut -d: -f1,2 >>"$TMP/hits" || true
 fi
 
-# Файл тестов вне роутера?
-is_legacy_test() {
-  case "$1" in
-    frontend/tests/router/*) return 1 ;;
-    frontend/tests/* | *.test.ts | *.test.js | *.test.mjs) return 0 ;;
-    *_test.go)
-      head -n 5 "$1" 2>/dev/null | grep -q '^//go:build router' && return 1
-      return 0
-      ;;
-  esac
-  return 1
-}
+sort -u "$TMP/hits" >"$TMP/real"
 
-LEGACY=0
-: >"$TMP/real"
-sort -u "$TMP/hits" | while IFS= read -r hit; do
-  f=${hit%%:*}
-  if is_legacy_test "$f"; then
-    printf '%s\n' "$f" >>"$TMP/legacy"
-  else
-    printf '%s\n' "$hit" >>"$TMP/real"
-  fi
-done
-[ ! -f "$TMP/legacy" ] || LEGACY=$(sort -u "$TMP/legacy" | wc -l | tr -d ' ')
-
-if [ "$LEGACY" -gt 0 ]; then
-  echo "check-leaks: пропущено файлов тестов вне роутера (удаляются при переходе на роутеры): $LEGACY"
-fi
 if [ "$SKIPPED" -gt 0 ]; then
   echo "check-leaks: пропущено слишком коротких строк (меньше 4 символов): $SKIPPED"
 fi

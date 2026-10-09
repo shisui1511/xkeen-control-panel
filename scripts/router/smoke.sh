@@ -5,7 +5,9 @@
 #   kernel-running       xkeen -status сообщает «запущен в режиме …», процесс ядра жив;
 #                        ядро записывается в <отчёт>/<id>/core
 #   iptables-rules       при запущенном XKeen есть его правила TPROXY (mangle) и/или
-#                        REDIRECT (nat) — по режиму XKeen
+#                        REDIRECT (nat) — по режиму XKeen; XKeen ставит правила в
+#                        фоне уже после запуска, поэтому проверка ждёт их до
+#                        RT_SMOKE_WINDOW с и только потом краснеет
 #   version              /opt/sbin/xcp -v равна ожидаемой версии
 #   xcp-pid              у pidof xcp ровно один процесс
 #   api-version          GET <панель>/api/version с ПК отвечает 200
@@ -181,25 +183,41 @@ fi
 
 # --- iptables-rules ----------------------------------------------------------
 if [ -n "$run_line" ]; then
-  rc=0
-  # только -w без числа: iptables 1.4.21 не принимает -w 5
-  out=$(rt_stage "$ID" smoke-iptables rt_ssh "$ID" 'echo "tproxy=$(iptables -w -t mangle -S 2>/dev/null | grep -c "xkeen.*-j TPROXY")"; echo "redirect=$(iptables -w -t nat -S 2>/dev/null | grep -c "xkeen.*-j REDIRECT")"') || rc=$?
-  [ "$rc" != 3 ] || lost
-  nt=$(printf '%s\n' "$out" | sed -n 's/^tproxy=//p')
-  nr=$(printf '%s\n' "$out" | sed -n 's/^redirect=//p')
-  nt=${nt:-0}
-  nr=${nr:-0}
-  ok=0
-  case "$mode" in
-    TProxy | tproxy) [ "$nt" -gt 0 ] && ok=1 ;;
-    Redirect | redirect) [ "$nr" -gt 0 ] && ok=1 ;;
-    Hybrid | hybrid) [ "$nt" -gt 0 ] && [ "$nr" -gt 0 ] && ok=1 ;;
-    *) { [ "$nt" -gt 0 ] || [ "$nr" -gt 0 ]; } && ok=1 ;;
-  esac
+  # XKeen возвращает управление раньше, чем фоновый запуск поставил правила перехвата
+  # (сразу после смены ядра правил ещё нет): проверка опрашивает роутер раз в
+  # IPT_POLL с, но не дольше окна RT_SMOKE_WINDOW. Правил нет и по истечении окна — FAIL.
+  IPT_POLL=3
+  ipt_wait=$WINDOW
+  [ "$ipt_wait" -gt 0 ] 2>/dev/null || ipt_wait=0
+  ipt_t0=$(date +%s)
+  while :; do
+    rc=0
+    # только -w без числа: iptables 1.4.21 не принимает -w 5
+    out=$(rt_stage "$ID" smoke-iptables rt_ssh "$ID" 'echo "tproxy=$(iptables -w -t mangle -S 2>/dev/null | grep -c "xkeen.*-j TPROXY")"; echo "redirect=$(iptables -w -t nat -S 2>/dev/null | grep -c "xkeen.*-j REDIRECT")"') || rc=$?
+    [ "$rc" != 3 ] || lost
+    nt=$(printf '%s\n' "$out" | sed -n 's/^tproxy=//p')
+    nr=$(printf '%s\n' "$out" | sed -n 's/^redirect=//p')
+    nt=${nt:-0}
+    nr=${nr:-0}
+    ok=0
+    case "$mode" in
+      TProxy | tproxy) [ "$nt" -gt 0 ] && ok=1 ;;
+      Redirect | redirect) [ "$nr" -gt 0 ] && ok=1 ;;
+      Hybrid | hybrid) [ "$nt" -gt 0 ] && [ "$nr" -gt 0 ] && ok=1 ;;
+      *) { [ "$nt" -gt 0 ] || [ "$nr" -gt 0 ]; } && ok=1 ;;
+    esac
+    [ "$ok" = 1 ] && break
+    ipt_waited=$(($(date +%s) - ipt_t0))
+    [ "$ipt_waited" -lt "$ipt_wait" ] || break
+    sleep "$IPT_POLL"
+  done
+  ipt_waited=$(($(date +%s) - ipt_t0))
+  ipt_note=""
+  [ "$ipt_waited" -lt 2 ] || ipt_note=", ожидание ${ipt_waited} с"
   if [ "$ok" = 1 ]; then
-    chk PASS iptables-rules "режим ${mode:--}: TPROXY $nt, REDIRECT $nr"
+    chk PASS iptables-rules "режим ${mode:--}: TPROXY $nt, REDIRECT $nr$ipt_note"
   else
-    chk FAIL iptables-rules "режим ${mode:--}: правил XKeen TPROXY $nt, REDIRECT $nr — не хватает"
+    chk FAIL iptables-rules "режим ${mode:--}: правил XKeen TPROXY $nt, REDIRECT $nr — не хватает$ipt_note"
   fi
 else
   chk SKIP iptables-rules "XKeen не запущен"

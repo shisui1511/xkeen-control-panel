@@ -57,8 +57,8 @@ const (
 )
 
 // kernelRoutePolicies — по одной записи на каждый шаблон HandleProtected из
-// cmd/xcp/main.go под kernelGatedPrefixes. Сверяется тестом
-// TestRouteKernelTable_* в cmd/xcp.
+// cmd/xcp/main.go под kernelGatedPrefixes. Сверяется статическим
+// стражем scripts/check-kernel-routes.js.
 var kernelRoutePolicies = map[string]KernelRoutePolicy{
 	// Mihomo, живые маршруты
 	"/api/mihomo/proxy/":             {"mihomo", GateLive, "обратный прокси Clash API: " + reasonMihomoClash},
