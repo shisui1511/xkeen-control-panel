@@ -1,9 +1,11 @@
 package sources
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
 	"runtime"
@@ -29,8 +31,7 @@ var (
 	ErrInvalidInput = errors.New("sources: недопустимый ввод")
 )
 
-// Deps — зависимости сервиса. Поля планировщика и вида добавляют планы
-// 145-09…145-10.
+// Deps — зависимости сервиса. Поля вида добавляет план 145-10.
 type Deps struct {
 	// DataDir — каталог данных панели.
 	DataDir string
@@ -58,7 +59,24 @@ type Deps struct {
 	// FetchTimeout — таймаут одного запроса к провайдеру (0 — 30 с, на
 	// mips/mipsle 60 с).
 	FetchTimeout time.Duration
+	// TickInterval — период проверки сроков обновления подписок (0 — минута).
+	TickInterval time.Duration
+	// RetryDelays — задержки повторов после сетевой ошибки (D-30); nil — 5, 15 и
+	// 60 минут. Пустой, но не nil набор отключает повторы.
+	RetryDelays []time.Duration
 }
+
+// Значения по умолчанию планировщика.
+const (
+	defaultTickInterval = time.Minute
+	// defaultIntervalHours — интервал обновления, когда его не задал ни
+	// пользователь, ни провайдер (D-05).
+	defaultIntervalHours = 12
+)
+
+// defaultRetryDelays — повторы после сетевой ошибки: 5, 15 и 60 минут, затем по
+// обычному интервалу (D-30).
+var defaultRetryDelays = []time.Duration{5 * time.Minute, 15 * time.Minute, time.Hour}
 
 // Service — сервис источников. Создаётся один раз в cmd/xcp/main.go.
 type Service struct {
@@ -84,6 +102,30 @@ type Service struct {
 
 	xray   xrayGen
 	mihomo mihomoGen
+
+	// ctx — контекст жизни сервиса: отменяется Stop. Фоновые обновления и запросы
+	// к провайдерам привязаны к нему, а не к HTTP-запросу.
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	// lmu защищает stopped: после Stop горутины не запускаются (иначе wg.Add
+	// гонялся бы с wg.Wait).
+	lmu       sync.Mutex
+	stopped   bool
+	startOnce sync.Once
+	stopOnce  sync.Once
+	// startupDone — стартовые действия (уборка, уведомления, отложенные записи)
+	// выполнены: они ждут включения слоя.
+	startupDone atomic.Bool
+
+	// cmu защищает calls: одновременные обновления одного источника сливаются.
+	cmu   sync.Mutex
+	calls map[string]*refreshCall
+	// refreshMu — один источник за раз: обновления, повторы отложенных записей и
+	// сборка после установки ядра идут по очереди (T-145-25).
+	refreshMu sync.Mutex
+	// nmu сериализует сборку уведомлений.
+	nmu sync.Mutex
 }
 
 // New создаёт сервис. Слой и источник «установленных ядер» обязательны.
@@ -119,9 +161,19 @@ func New(d Deps) (*Service, error) {
 			d.FetchTimeout = slowFetchTimeout
 		}
 	}
+	if d.TickInterval <= 0 {
+		d.TickInterval = defaultTickInterval
+	}
+	if d.RetryDelays == nil {
+		d.RetryDelays = defaultRetryDelays
+	}
+	ctx, cancel := context.WithCancel(context.Background())
 	// Конструктор диска и сети не трогает: каталог снимков создаёт первая запись.
 	s := &Service{
 		d:        d,
+		ctx:      ctx,
+		cancel:   cancel,
+		calls:    map[string]*refreshCall{},
 		previews: map[string]*previewEntry{},
 		parsed:   map[string]parsedEntry{},
 		gens:     map[string]memoFile{},
@@ -134,6 +186,56 @@ func New(d Deps) (*Service, error) {
 	s.xray = xrayGen{s: s}
 	s.mihomo = mihomoGen{s: s}
 	return s, nil
+}
+
+// spawn запускает фоновую горутину сервиса под wg; после Stop не запускает.
+func (s *Service) spawn(fn func()) bool {
+	s.lmu.Lock()
+	if s.stopped {
+		s.lmu.Unlock()
+		return false
+	}
+	s.wg.Add(1)
+	s.lmu.Unlock()
+	go func() {
+		defer s.wg.Done()
+		fn()
+	}()
+	return true
+}
+
+// OnKernelInstalled — хук установки ядра (D-01): панель сама запрашивает
+// подписки под это ядро и в фоне собирает его файлы. Выключенный слой — возврат до
+// горутины: ни запросов к провайдерам, ни чтения состояния, ни каталогов на диске.
+// Запущенное ядро решает конвейер (Xray перезапускается, файл Mihomo пишется без
+// перезагрузки); остановленное не запускается.
+func (s *Service) OnKernelInstalled(kernel string) {
+	if kernel != kernelXray && kernel != kernelMihomo {
+		return
+	}
+	if !s.d.Layer.Enabled() {
+		return
+	}
+	s.spawn(func() {
+		st, err := s.d.Layer.ReadState()
+		if err != nil {
+			return
+		}
+		for _, id := range subscriptionIDs(st, false) {
+			if s.ctx.Err() != nil {
+				return
+			}
+			if _, err := s.refreshWork(s.ctx, id, []string{kernel}); err != nil && !errors.Is(err, ErrSourceDisabled) {
+				log.Printf("[sources] сборка источника %s после установки ядра %s не выполнена: %v", id, kernel, err)
+			}
+		}
+	})
+}
+
+// OnDriftResolved — колбэк слоя «дрейф решён» (Layer.OnDriftResolved): отложенные
+// записи подписок проходят сами, без нового запроса к провайдеру (D-27).
+func (s *Service) OnDriftResolved() {
+	s.spawn(func() { s.retryDeferred(s.ctx) })
 }
 
 // Generators — генераторы файлов источников для реестра слоя

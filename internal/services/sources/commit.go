@@ -96,6 +96,9 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 		return err
 	}
 	delete(st.Live, LiveKeyCandidates)
+	// Статусы могли измениться («Применить» делает снимки применёнными): уведомления
+	// пересобираются после записи состояния, из горутины — слой держит замок хранилища.
+	s.spawn(s.rebuildNotices)
 	return nil
 }
 

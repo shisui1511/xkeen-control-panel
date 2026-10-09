@@ -26,6 +26,9 @@ type Meta struct {
 	// HWIDLocked — провайдер не поддерживает HWID: запросы к нему идут без x-hwid.
 	HWIDLocked bool      `json:"hwid_locked,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at"`
+	// CheckedAt — когда подписку последний раз запрашивали при обновлении (успешно
+	// или нет): от него считается срок следующего обновления.
+	CheckedAt time.Time `json:"checked_at,omitempty"`
 }
 
 // Пределы метаданных: заголовки приходят от недоверенной стороны.
