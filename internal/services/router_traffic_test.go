@@ -703,6 +703,10 @@ func TestRouterTproxyRules(t *testing.T) {
 			t.Errorf("правило XKeen ведёт на порт %d, который никто не слушает", p)
 		}
 	}
+	if !rtAllListening(rulePorts, listening) {
+		t.Logf("диагностика: PID ядра %s=%q, PID xkeen=%q, слушаются порты %v",
+			tg.Core, rtPids(tg.Core), rtPids("xkeen"), rtSortedPorts(listening))
+	}
 	if matched == 0 {
 		t.Errorf("правила XKeen ведут на порты %v, ни один не совпал с входящими активного ядра %s", rtSortedPorts(rulePorts), tg.Core)
 	}

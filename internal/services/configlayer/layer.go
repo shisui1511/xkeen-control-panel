@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Ошибки действий слоя.
@@ -720,7 +721,7 @@ func (l *Layer) OnKernelInstalled(kernel string) {
 	l.spawn(func() {
 		release, err := l.pipeline.TryBegin(l.ctx, false)
 		if err != nil {
-			log.Printf("[configlayer] сборка после установки ядра %s не запущена: %v", kernel, err)
+			log.Printf("[configlayer] сборка после установки ядра %s не запущена: %v", utils.SanitizeLogInput(kernel), err)
 			return
 		}
 		defer release()

@@ -159,7 +159,7 @@ async function confirmSave(page: Page, what: string): Promise<number> {
   await expectKeyboardReach(page, n);
   // последняя кнопка — «Сохранить»
   await buttons.nth(n - 1).click();
-  await expect(dialog).toBeHidden({ timeout: T.action });
+  await expect(dialog).toBeHidden({ timeout: T.save });
   return n;
 }
 
