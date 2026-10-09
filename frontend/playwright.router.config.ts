@@ -7,15 +7,18 @@ import { defineConfig, devices } from '@playwright/test';
 //   XCP_PW_STATE   файл storageState (создаёт global-setup одним входом)
 //   XCP_PW_OUT     каталог трасс и снимков
 //   XCP_PW_JSON    файл JSON-отчёта
+//   XCP_PW_WORKERS воркеров (по умолчанию 1; больше одного — только для обхода страниц)
 // Конфиг не падает без переменных (нужно для `--list`): их наличие проверяет global-setup.
 // Сервер не поднимается и сеть не подменяется: тесты видят то же, что браузер пользователя.
 export default defineConfig({
   testDir: './tests/router',
   testMatch: '**/*.spec.ts',
   tsconfig: './tsconfig.test.json',
-  // Сценарии меняют общее состояние устройства: внутри цели всё строго по очереди
-  fullyParallel: false,
-  workers: 1,
+  // Сценарии меняют общее состояние устройства: внутри цели всё строго по очереди. Исключение —
+  // обход страниц (pages.spec.ts), только читающий: pw-suite.sh запускает его отдельно и
+  // отдаёт несколько воркеров через XCP_PW_WORKERS
+  workers: Number(process.env.XCP_PW_WORKERS) > 0 ? Number(process.env.XCP_PW_WORKERS) : 1,
+  fullyParallel: Number(process.env.XCP_PW_WORKERS) > 1,
   // Повторов нет: любое падение — находка (метка известного падения или починка)
   retries: 0,
   // Лимит теста учитывает медленные устройства (XCP_SLOW из локального конфига цели)

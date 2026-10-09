@@ -26,6 +26,7 @@
 #   RT_REPORT  каталог отчёта (если не задан, создаётся новый)
 #   XCP_T_<id>_SLOW  множитель таймаутов цели (в локальном конфиге; по умолчанию 1,
 #                    для mipsle и mips — 2)
+#   XCP_T_<id>_PAGE_WORKERS  воркеров обхода страниц (по умолчанию 3)
 #
 # Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна, иначе 1.
 
@@ -95,7 +96,7 @@ STATE="$PW_DIR/state.json"
 LOG="$PW_DIR/run.log"
 JSON="$PW_DIR/report.json"
 OUT="$PW_DIR/artifacts"
-rm -f "$STATE" "$JSON"
+rm -f "$STATE" "$JSON" "$PW_DIR/report-pages.json"
 
 # Файл сессии содержит cookie и CSRF: после этапа его на диске быть не должно.
 trap 'rm -f "$STATE"' EXIT
@@ -111,43 +112,83 @@ fi
 
 # --- запуск --------------------------------------------------------------------
 # Пароль идёт только в окружение процесса Playwright; в отчёт и журнал не попадает.
+# Обход страниц только читает и идёт в несколько воркеров (PAGE_WORKERS цели, по умолчанию 3);
+# остальные спеки меняют состояние устройства и идут одним воркером, после обхода. Два запуска
+# Playwright — два JSON-отчёта, разбор общий.
+PAGE_WORKERS=$(rt_get "$ID" PAGE_WORKERS)
+[ -n "$PAGE_WORKERS" ] || PAGE_WORKERS=3
+
+# run_pw <json> <воркеров> <спеки...>: один запуск Playwright, журнал дописывается в $LOG
+run_pw() {
+  _json=$1
+  _workers=$2
+  shift 2
+  (
+    cd "$ROOT/frontend"
+    # core-switch.spec.ts регистрирует тест только при XCP_WANT_CORE: в обычном наборе
+    # переменная не должна просочиться из окружения вызывающего
+    unset XCP_WANT_CORE
+    [ -z "$SWITCH" ] || export XCP_WANT_CORE=$SWITCH
+    # --grep собирается в позиционные параметры: выражение содержит пробелы и скобки
+    [ -n "${RT_PW_GREP:-}" ] && [ -z "$SWITCH" ] && set -- "$@" --grep "$RT_PW_GREP"
+    XCP_URL=$URL \
+      XCP_PASSWORD=$(rt_get "$ID" PASSWORD) \
+      XCP_ARCH=$ARCH \
+      XCP_CORE=${CORE:--} \
+      XCP_SLOW=$SLOW \
+      XCP_PW_STATE=$STATE \
+      XCP_PW_OUT=$OUT \
+      XCP_PW_JSON=$_json \
+      XCP_PW_WORKERS=$_workers \
+      "$PWBIN" test -c playwright.router.config.ts "$@"
+  ) >>"$LOG" 2>&1
+}
+
+PAGES_SPEC=""
+REST_SPECS=""
+if [ -n "$SWITCH" ]; then
+  REST_SPECS=$SPECS
+else
+  [ -n "$SPECS" ] || SPECS=$(cd "$ROOT/frontend/tests/router" && ls ./*.spec.ts | sed 's#^\./##' | tr '\n' ' ')
+  for _s in $SPECS; do
+    case "$_s" in
+      *pages.spec.ts) PAGES_SPEC=$_s ;;
+      *) REST_SPECS="$REST_SPECS $_s" ;;
+    esac
+  done
+fi
+
+: >"$LOG"
 rc=0
-(
-  cd "$ROOT/frontend"
-  # core-switch.spec.ts регистрирует тест только при XCP_WANT_CORE: в обычном наборе
-  # переменная не должна просочиться из окружения вызывающего
-  unset XCP_WANT_CORE
-  [ -z "$SWITCH" ] || export XCP_WANT_CORE=$SWITCH
-  # спеки и --grep собираются в позиционные параметры: выражение содержит пробелы и скобки
-  set --
+JSONS=""
+if [ -n "$PAGES_SPEC" ]; then
+  JSONS="$PW_DIR/report-pages.json"
+  rm -f "$PW_DIR/report-pages.json"
   # shellcheck disable=SC2086
-  [ -z "$SPECS" ] || set -- $SPECS
-  [ -n "${RT_PW_GREP:-}" ] && [ -z "$SWITCH" ] && set -- "$@" --grep "$RT_PW_GREP"
-  XCP_URL=$URL \
-    XCP_PASSWORD=$(rt_get "$ID" PASSWORD) \
-    XCP_ARCH=$ARCH \
-    XCP_CORE=${CORE:--} \
-    XCP_SLOW=$SLOW \
-    XCP_PW_STATE=$STATE \
-    XCP_PW_OUT=$OUT \
-    XCP_PW_JSON=$JSON \
-    "$PWBIN" test -c playwright.router.config.ts "$@"
-) >"$LOG" 2>&1 || rc=$?
+  run_pw "$PW_DIR/report-pages.json" "$PAGE_WORKERS" $PAGES_SPEC || rc=$?
+fi
+if [ -n "$(echo $REST_SPECS)" ]; then
+  JSONS="$JSONS $JSON"
+  # shellcheck disable=SC2086
+  run_pw "$JSON" 1 $REST_SPECS || { _r=$?; [ "$rc" != 0 ] || rc=$_r; }
+fi
 rt_redact <"$LOG" >"$LOG.red" && mv "$LOG.red" "$LOG"
 
 # --- разбор --------------------------------------------------------------------
 TAB=$(printf '\t')
 BAD=0
 found=0
-if [ -f "$JSON" ]; then
-  node "$SCRIPT_DIR/pw-parse.js" "$JSON" >"$PW_DIR/parsed.tsv" || true
-  while IFS="$TAB" read -r st chk det || [ -n "$st" ]; do
-    [ -n "$st" ] || continue
-    found=$((found + 1))
-    rt_result "$ID" "$st" "pw:$chk" "$det"
-    case "$st" in FAIL | XPASS) BAD=$((BAD + 1)) ;; esac
-  done <"$PW_DIR/parsed.tsv"
-fi
+: >"$PW_DIR/parsed.tsv"
+for _j in $JSONS; do
+  [ -f "$_j" ] || continue
+  node "$SCRIPT_DIR/pw-parse.js" "$_j" >>"$PW_DIR/parsed.tsv" || true
+done
+while IFS="$TAB" read -r st chk det || [ -n "$st" ]; do
+  [ -n "$st" ] || continue
+  found=$((found + 1))
+  rt_result "$ID" "$st" "pw:$chk" "$det"
+  case "$st" in FAIL | XPASS) BAD=$((BAD + 1)) ;; esac
+done <"$PW_DIR/parsed.tsv"
 
 if [ "$found" = 0 ]; then
   # отчёта нет или он пуст: причина — в журнале запуска (панель не отвечает и т. п.)
