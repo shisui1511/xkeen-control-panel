@@ -99,7 +99,7 @@ func (s *Service) rebuildNotices() {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	s.d.Layer.SetNotices(noticePrefix, out)
+	s.d.Layer.SetNotices("source_", out)
 }
 
 // previousDate — дата прежнего рабочего снимка ядра (применённого, иначе
