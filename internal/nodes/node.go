@@ -145,6 +145,11 @@ func (n Node) Identity() string {
 // Key — src + "|" + Identity().
 func (n Node) Key(src string) string { return src + "|" + n.Identity() }
 
+// DupKey — идентичность узла и отпечаток транспорта: по нему узлы считаются
+// дублями (как при схлопывании в Recognize). Узлы с одной идентичностью и
+// разным транспортом (CDN-фронты) дублями не являются.
+func (n Node) DupKey() string { return n.Identity() + "|" + transportFingerprint(n) }
+
 // Hash8 — первые 8 hex от sha256.
 func Hash8(s string) string {
 	sum := sha256.Sum256([]byte(s))
