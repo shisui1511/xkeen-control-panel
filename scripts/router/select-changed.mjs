@@ -99,13 +99,13 @@ function modulePath() {
 function routerPackages() {
   const found = new Set();
   const walk = (dir) => {
-    for (const entry of readdirSync(path.join(ROOT, dir))) {
+    for (const dirent of readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+      const entry = dirent.name;
       const rel = `${dir}/${entry}`;
-      const full = path.join(ROOT, rel);
-      if (statSync(full).isDirectory()) {
+      if (dirent.isDirectory()) {
         if (entry !== 'node_modules' && entry !== 'testdata') walk(rel);
       } else if (entry.endsWith('_test.go')) {
-        const first = readFileSync(full, 'utf8').split('\n', 1)[0].trim();
+        const first = readFileSync(path.join(ROOT, rel), 'utf8').split('\n', 1)[0].trim();
         if (first === '//go:build router') found.add(dir);
       }
     }
