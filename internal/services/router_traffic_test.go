@@ -245,28 +245,63 @@ func (w *lockedWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// rtFetchIP запрашивает внешний адрес у сервиса через переданный клиент.
-// Возвращает адрес и HTTP-статус (0 — сетевая ошибка).
-func rtFetchIP(client *http.Client, service string) (string, int) {
+// rtFetchIP запрашивает внешний адрес у сервиса через переданный клиент. Возвращает адрес,
+// HTTP-статус (0 — сетевая ошибка) и текст сетевой ошибки (пусто, если ответ получен).
+func rtFetchIP(client *http.Client, service string) (string, int, string) {
 	req, err := http.NewRequest(http.MethodGet, service, nil)
 	if err != nil {
-		return "", 0
+		return "", 0, err.Error()
 	}
 	req.Header.Set("User-Agent", "curl/7.88.1")
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", 0
+		return "", 0, err.Error()
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 	if resp.StatusCode != http.StatusOK {
-		return "", resp.StatusCode
+		return "", resp.StatusCode, ""
 	}
 	ip := strings.TrimSpace(string(body))
 	if net.ParseIP(ip) == nil {
-		return "", resp.StatusCode
+		return "", resp.StatusCode, "тело ответа не похоже на адрес"
 	}
-	return ip, resp.StatusCode
+	return ip, resp.StatusCode, ""
+}
+
+// rtInternetUp проверяет выход самой цели в интернет прямыми запросами (мимо узла): интернет
+// есть, если хотя бы один сервис определения адреса ответил по HTTP (любой статус, в том
+// числе 429). Возвращает также причины по сервисам для сообщения.
+func rtInternetUp(client *http.Client) (bool, string) {
+	var reasons []string
+	for i, svc := range rtEchoServices {
+		_, st, errText := rtFetchIP(client, svc)
+		if st != 0 {
+			return true, ""
+		}
+		reasons = append(reasons, fmt.Sprintf("сервис %d: %s", i+1, rtShortErr(errText)))
+	}
+	return false, strings.Join(reasons, "; ")
+}
+
+// rtGetPrefixRe — начало ошибки net/http: «Get "адрес": », адрес сервиса в сообщении не нужен.
+var rtGetPrefixRe = regexp.MustCompile(`^Get "[^"]*": `)
+
+// rtShortErr сокращает текст сетевой ошибки для сообщения (адреса скрыты).
+func rtShortErr(s string) string {
+	s = rtGetPrefixRe.ReplaceAllString(s, "")
+	s = rtIPv4Re.ReplaceAllStringFunc(s, func(ip string) string {
+		if ip == "127.0.0.1" || ip == "0.0.0.0" {
+			return ip
+		}
+		return "x.x.x.x"
+	})
+	s = rtIPv6Re.ReplaceAllString(s, "x:x")
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > 160 {
+		s = string(r[:80]) + " … " + string(r[len(r)-70:])
+	}
+	return s
 }
 
 // rtStartNodeProc готовит собственный конфиг с этим узлом и socks на loopback и запускает
@@ -329,6 +364,41 @@ func rtStartNodeProc(t *testing.T, core, dir string, node map[string]any) (*rtCo
 	}
 }
 
+// rtCoreReasonRe — причины отказа в выводе ядра: «error: …» у Mihomo, «failed to …» у Xray.
+var rtCoreReasonRe = regexp.MustCompile(`(?:error: |failed to )([^"<>|]{3,70})`)
+
+// Reasons возвращает до двух различных причин отказа из вывода ядра (значения узла и
+// адреса в них скрыты).
+func (p *rtCoreProc) Reasons() string {
+	p.mu.Lock()
+	raw := strings.Join(strings.Fields(p.buf.String()), " ")
+	p.mu.Unlock()
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range rtCoreReasonRe.FindAllStringSubmatch(raw, -1) {
+		// logrus пишет многострочную ошибку с литералом \n: берётся первая строка
+		r, _, _ := strings.Cut(m[1], `\n`)
+		r = strings.TrimSpace(p.redact(r))
+		if r == "" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, r)
+		if len(out) == 2 {
+			break
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
+// TestRouterTrafficSeparateCore: вердикт теста — «ядро пропустило трафик через узел подписки»
+// (внешний адрес через узел отличается от прямого). Исходы без повторов (D-16):
+//   - есть узел, через который запрос прошёл: PASS (адреса различаются) или FAIL (совпали);
+//   - у самой цели нет выхода в интернет (до или после перебора): SKIP — вердикта о ядре нет;
+//   - выход цели есть, процесс ядра поднимался и принимал соединения, но ни один узел подписки
+//     не ответил (обрыв до узла, узел мёртв или отвергает клиента): SKIP с причинами по узлам —
+//     вердикт о ядре невозможен, пока нет живого узла;
+//   - ядро не приняло конфиг узла (процесс не поднялся, порт не открылся): FAIL.
 func TestRouterTrafficSeparateCore(t *testing.T) {
 	tg := routertest.Current(t)
 	if tg.Core != "xray" && tg.Core != "mihomo" {
@@ -342,11 +412,17 @@ func TestRouterTrafficSeparateCore(t *testing.T) {
 	}
 
 	direct := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	if up, why := rtInternetUp(direct); !up {
+		t.Skipf("у цели нет выхода в интернет: прямые запросы не прошли (%s)", why)
+	}
 	directIP := map[string]string{} // сервис -> прямой адрес (по одному запросу на сервис)
 	limited := map[string]bool{}
 
-	var lastReason, lastTail string
+	var startFailures int
+	var startReason string
+	var summaries []string // по узлу: протокол и причина, почему запрос не прошёл
 	for i, node := range nodes {
+		redact := rtRedactorValue(node)
 		dir, err := os.MkdirTemp(tg.WorkDir, "traffic-")
 		if err != nil {
 			t.Fatalf("рабочий каталог: %v", err)
@@ -354,7 +430,8 @@ func TestRouterTrafficSeparateCore(t *testing.T) {
 		pr, port, protocol, err := rtStartNodeProc(t, tg.Core, dir, node)
 		if err != nil {
 			_ = os.RemoveAll(dir)
-			lastReason, lastTail = "отдельный процесс ядра не поднялся", err.Error()
+			startFailures++
+			startReason = err.Error()
 			t.Logf("узел %d из %d (протокол %s): процесс ядра не поднялся", i+1, len(nodes), protocol)
 			continue
 		}
@@ -379,43 +456,52 @@ func TestRouterTrafficSeparateCore(t *testing.T) {
 		}}
 
 		var nodeIP, usedDirect string
-		reason := "узел не пропустил запрос"
-		for _, svc := range rtEchoServices {
+		var attempts []string // что вернул каждый сервис через этот узел: статус или сетевая ошибка
+		for si, svc := range rtEchoServices {
 			if limited[svc] {
 				continue
 			}
 			d, seen := directIP[svc]
 			if !seen {
 				var st int
-				d, st = rtFetchIP(direct, svc)
+				d, st, _ = rtFetchIP(direct, svc)
 				if st == http.StatusTooManyRequests {
 					limited[svc] = true
 					continue
 				}
 				if d == "" {
-					reason = "прямой запрос не дал адреса"
 					continue
 				}
 				directIP[svc] = d
 			}
-			n, st := rtFetchIP(viaNode, svc)
+			n, st, errText := rtFetchIP(viaNode, svc)
 			if st == http.StatusTooManyRequests {
 				limited[svc] = true
 				continue
 			}
 			if n == "" {
-				break // узел мёртв: к следующему узлу
+				if st != 0 {
+					// узел ответил, но сервис не отдал адрес: пробуем следующий сервис
+					attempts = append(attempts, fmt.Sprintf("сервис %d: HTTP %d", si+1, st))
+					continue
+				}
+				attempts = append(attempts, fmt.Sprintf("сервис %d: %s", si+1, rtShortErr(redact(errText))))
+				break // обрыв до узла или узел мёртв: к следующему узлу
 			}
 			nodeIP, usedDirect = n, d
 			break
 		}
-		tail := pr.Tail()
+		coreWhy := pr.Reasons()
 		pr.Stop()
 		_ = os.RemoveAll(dir)
 
 		if nodeIP == "" {
-			lastReason, lastTail = reason, tail
-			t.Logf("узел %d из %d (протокол %s): запрос через узел не прошёл", i+1, len(nodes), protocol)
+			why := strings.Join(attempts, "; ")
+			if r := coreWhy; r != "" {
+				why += "; ядро: " + r
+			}
+			summaries = append(summaries, fmt.Sprintf("узел %d (%s): %s", i+1, protocol, why))
+			t.Logf("узел %d из %d (протокол %s): запрос через узел не прошёл: %s", i+1, len(nodes), protocol, why)
 			continue
 		}
 		same := usedDirect == nodeIP
@@ -428,7 +514,15 @@ func TestRouterTrafficSeparateCore(t *testing.T) {
 	if len(limited) == len(rtEchoServices) {
 		t.Fatal("все сервисы определения адреса ответили лимитом частоты (429)")
 	}
-	t.Fatalf("ни один из %d узлов активного конфига не пропустил трафик: %s; вывод ядра: %s", len(nodes), lastReason, lastTail)
+	if startFailures > 0 {
+		t.Fatalf("ядро не приняло конфиг узла у %d из %d узлов: %s", startFailures, len(nodes), startReason)
+	}
+	// Интернет у цели мог пропасть во время перебора узлов.
+	if up, why := rtInternetUp(direct); !up {
+		t.Skipf("выход цели в интернет пропал во время теста: прямые запросы не прошли (%s)", why)
+	}
+	t.Skipf("ни один из %d узлов подписки не ответил через ядро %s (ядро запускалось и принимало соединения, выход цели в интернет есть): %s",
+		len(nodes), tg.Core, strings.Join(summaries, " | "))
 }
 
 // --- TPROXY ---

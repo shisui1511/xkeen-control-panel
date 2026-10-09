@@ -1,5 +1,5 @@
 // e2e-pages: services
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
 
@@ -46,6 +46,79 @@ async function readStatus(page: Page): Promise<Status | string> {
 function describe(s: Status | string): string {
   if (typeof s === 'string') return s;
   return `running=${s.running} kernels=[${s.kernels.join(',')}] pid=${s.pid ? 'есть' : 'нет'} conflict=${s.conflict}`;
+}
+
+/**
+ * Ждёт устойчивого состояния: ядро работает, PID не меняется `hold` мс. XKeen возвращает
+ * управление раньше, чем закончил запуск (ядро поднимается, ставятся правила, на медленных
+ * устройствах процесс ядра заменяется), а команда, пришедшая в это окно, молча не
+ * выполняется: поэтому следующее действие начинается только после устойчивого состояния.
+ */
+async function waitStable(page: Page, core: string, what: string): Promise<void> {
+  const hold = 20_000 * RT.slow;
+  const deadline = Date.now() + 2 * 120_000 * RT.slow;
+  let pid = 0;
+  let since = Date.now();
+  for (;;) {
+    const s = await readStatus(page);
+    const ok = typeof s !== 'string' && s.running && s.kernels.join(',') === core;
+    const cur = ok ? (s as Status).pid : 0;
+    if (!ok || cur !== pid) {
+      pid = cur;
+      since = Date.now();
+    }
+    if (ok && Date.now() - since >= hold) return;
+    expect(Date.now(), `${what}: ${describe(s)}`).toBeLessThan(deadline);
+    await page.waitForTimeout(3000);
+  }
+}
+
+/**
+ * Шлюз запуска: перед `xkeen -start` панель опрашивает Preflight (не дольше 3 с) и, если в
+ * конфиге есть ошибки, просит подтверждение («Исправить» / «Запустить всё равно»). У Mihomo без
+ * external-controller (на стенде нет API ядра) Preflight сообщает именно такую ошибку, поэтому
+ * окно — штатная часть запуска, а не сбой. Если окно появилось, проверяется его геометрия и
+ * запуск подтверждается последней кнопкой; если ядро поднялось без вопроса, ничего не делается.
+ */
+async function passStartGate(page: Page, badge: Locator): Promise<void> {
+  const dialog = page.getByRole('dialog');
+  const wait = 10_000 * RT.slow;
+  const shown = await Promise.race([
+    dialog.waitFor({ state: 'visible', timeout: wait }).then(() => true),
+    expect(badge)
+      .toHaveClass(/\brunning\b/, { timeout: wait })
+      .then(() => false)
+  ]).catch(() => false);
+  if (!shown) return;
+  // окно появляется с анимацией: ждём, пока рамка остановится
+  await page.waitForTimeout(400);
+  const vp = page.viewportSize();
+  const buttons = dialog.locator('.confirm-actions button');
+  const n = await buttons.count();
+  expect(n, 'шлюз запуска: кнопок действий в окне').toBeGreaterThanOrEqual(2);
+  for (let i = 0; i < n; i++) {
+    const b = buttons.nth(i);
+    await expect(b).toBeVisible();
+    await expect(b).toBeEnabled();
+    const box = await b.boundingBox();
+    expect(box, `шлюз запуска: кнопка ${i + 1} без рамки`).not.toBeNull();
+    if (box && vp) {
+      expect(box.x, `шлюз запуска: кнопка ${i + 1} левее экрана`).toBeGreaterThanOrEqual(-0.5);
+      expect(box.x + box.width, `шлюз запуска: кнопка ${i + 1} правее экрана`).toBeLessThanOrEqual(
+        vp.width + 0.5
+      );
+      expect(box.y + box.height, `шлюз запуска: кнопка ${i + 1} ниже экрана`).toBeLessThanOrEqual(
+        vp.height + 0.5
+      );
+    }
+  }
+  test.info().annotations.push({
+    type: 'start-gate',
+    description: 'Preflight запуска показал окно подтверждения: запуск подтверждён'
+  });
+  // последняя кнопка — «Запустить всё равно»
+  await buttons.nth(n - 1).click();
+  await expect(dialog).toBeHidden({ timeout: T.action });
 }
 
 test(`service-control core:${RT.core || 'unknown'}`, async ({ page }) => {
@@ -95,13 +168,16 @@ test(`service-control core:${RT.core || 'unknown'}`, async ({ page }) => {
   // --- запуск ----------------------------------------------------------------------
   await expect(startBtn).toBeEnabled({ timeout: ACTION });
   await startBtn.click();
+  await passStartGate(page, heroStatus);
   await expectState(true, 'после запуска');
   const started = (await readStatus(page)) as Status;
   expect(started.active, 'ядро после запуска').toBe(core);
 
   // --- перезапуск: процесс ядра заменён ------------------------------------------------
+  await waitStable(page, core, 'после запуска ядро не пришло в устойчивое состояние');
   await expect(restartBtn).toBeEnabled({ timeout: ACTION });
-  const pidBefore = started.pid;
+  // процесс ядра мог смениться за время ожидания: сравнение идёт с PID устойчивого состояния
+  const pidBefore = ((await readStatus(page)) as Status).pid;
   await restartBtn.click();
   await expect
     .poll(
@@ -122,25 +198,7 @@ test(`service-control core:${RT.core || 'unknown'}`, async ({ page }) => {
   await expectState(true, 'после перезапуска');
 
   // --- устойчивость: после перезапуска ядро держится, PID не меняется ------------------
-  // XKeen на медленных устройствах заменяет процесс ядра спустя время после запуска
-  const hold = 20_000 * RT.slow;
-  const deadline = Date.now() + 2 * ACTION;
-  let pid = 0;
-  let since = Date.now();
-  for (;;) {
-    const s = await readStatus(page);
-    const ok = typeof s !== 'string' && s.running && s.kernels.join(',') === core;
-    const cur = ok ? (s as Status).pid : 0;
-    if (!ok || cur !== pid) {
-      pid = cur;
-      since = Date.now();
-    }
-    if (ok && Date.now() - since >= hold) break;
-    expect(Date.now(), `ядро не пришло в устойчивое состояние: ${describe(s)}`).toBeLessThan(
-      deadline
-    );
-    await page.waitForTimeout(3000);
-  }
+  await waitStable(page, core, 'ядро не пришло в устойчивое состояние');
 
   await guard.assertClean();
 });
