@@ -41,11 +41,15 @@ export interface LayerKernel {
 export type StepId = 'build' | 'validate_xray' | 'validate_mihomo' | 'write' | 'restart';
 export type StepState = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'deferred';
 
+export type LayerTrigger =
+  'user' | 'rebuild' | 'kernel_installed' | 'flag_on' | 'flag_off' | 'source_refresh';
+
 export interface LayerStep {
   id: StepId;
   state: StepState;
   note_code?: string;
   message?: string;
+  trigger?: LayerTrigger;
 }
 
 export interface LayerRestart {
@@ -85,7 +89,7 @@ export interface LayerResult {
 
 export interface LayerApply {
   running: boolean;
-  trigger?: 'user' | 'rebuild' | 'kernel_installed' | 'flag_on' | 'flag_off';
+  trigger?: LayerTrigger;
   steps: LayerStep[];
   restart?: LayerRestart[];
   result?: LayerResult;
@@ -96,6 +100,7 @@ export interface LayerNotice {
   kind: 'warning' | 'error' | 'info';
   kernel?: string;
   reason?: string;
+  params?: Record<string, string>;
 }
 
 export interface LayerSnapshot {

@@ -116,6 +116,11 @@ type Layer struct {
 	onDriftResolved func()
 	// failed — уведомления build_failed:<ядро> (только в памяти).
 	failed map[string]NoticeView
+	// extNotices — уведомления сервиса источников по префиксу идентификатора
+	// (SetNotices); dismissed — закрытые из них: id возвращается только после того,
+	// как условие исчезло и появилось снова (D-29).
+	extNotices map[string][]NoticeView
+	dismissed  map[string]bool
 	// Кэш версий ядер.
 	verAt time.Time
 	// verGen растёт при каждом сбросе кэша: результат вычисления, начатого до
@@ -176,6 +181,9 @@ func New(opts Options) (*Layer, error) {
 		cancel:   cancel,
 		checkReq: make(chan struct{}, 1),
 		failed:   make(map[string]NoticeView),
+
+		extNotices: make(map[string][]NoticeView),
+		dismissed:  make(map[string]bool),
 	}, nil
 }
 
@@ -505,7 +513,95 @@ func (l *Layer) noticeViews(st State) []NoticeView {
 			out = append(out, n)
 		}
 	}
+	return append(out, l.visibleExtLocked()...)
+}
+
+// visibleExtLocked — незакрытые внешние уведомления: префиксы по алфавиту, внутри
+// префикса по ID. Вызывается под l.mu.
+func (l *Layer) visibleExtLocked() []NoticeView {
+	prefixes := make([]string, 0, len(l.extNotices))
+	for p := range l.extNotices {
+		prefixes = append(prefixes, p)
+	}
+	sort.Strings(prefixes)
+	var out []NoticeView
+	for _, p := range prefixes {
+		for _, n := range l.extNotices[p] {
+			if !l.dismissed[n.ID] {
+				out = append(out, n)
+			}
+		}
+	}
 	return out
+}
+
+// SetNotices заменяет уведомления сервиса источников с данным префиксом
+// идентификатора (например, "source_"). Закрытое пользователем уведомление не
+// возвращается, пока его условие не исчезнет из списка и не появится снова.
+// Событие notices публикуется только при изменении видимого списка.
+func (l *Layer) SetNotices(prefix string, notices []NoticeView) {
+	l.mu.Lock()
+	before, _ := json.Marshal(l.visibleExtLocked())
+	list := make([]NoticeView, 0, len(notices))
+	present := make(map[string]bool, len(notices))
+	for _, n := range notices {
+		if !strings.HasPrefix(n.ID, prefix) || present[n.ID] {
+			continue
+		}
+		present[n.ID] = true
+		list = append(list, n)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
+	if len(list) == 0 {
+		delete(l.extNotices, prefix)
+	} else {
+		l.extNotices[prefix] = list
+	}
+	// Условие исчезло — закрытие забывается: при повторном появлении уведомление
+	// снова видно.
+	for id := range l.dismissed {
+		if strings.HasPrefix(id, prefix) && !present[id] {
+			delete(l.dismissed, id)
+		}
+	}
+	after, _ := json.Marshal(l.visibleExtLocked())
+	l.mu.Unlock()
+	if bytes.Equal(before, after) {
+		return
+	}
+	l.publishNotices()
+}
+
+// publishNotices рассылает текущие уведомления событием notices (выключенный слой
+// диск не читает и событий не шлёт).
+func (l *Layer) publishNotices() {
+	if !l.Enabled() {
+		return
+	}
+	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(l.store.Snapshot())}})
+}
+
+// isExtNoticeID — идентификатор есть среди внешних уведомлений.
+func (l *Layer) isExtNoticeID(id string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, list := range l.extNotices {
+		for _, n := range list {
+			if n.ID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// PublishSources сообщает клиентам, что представление источников изменилось
+// (событие sources с текущей ревизией черновика). Выключенный слой молчит.
+func (l *Layer) PublishSources() {
+	if !l.Enabled() {
+		return
+	}
+	l.broker.Publish(Event{Type: EventSources, Data: SourcesEvent{Revision: l.store.Snapshot().DraftRevision}})
 }
 
 // noticeBuildFailedPrefix — префикс идентификатора уведомления о неудачной
@@ -806,7 +902,8 @@ func (l *Layer) Release(key string) (FilesEvent, error) {
 // --- уведомления ---
 
 // DismissNotice закрывает уведомление: schema_reset, recovered_from_journal и
-// journal_recovery_failed сохраняются в файле состояния, build_failed:<ядро> живёт только в памяти.
+// journal_recovery_failed сохраняются в файле состояния, build_failed:<ядро> и
+// уведомления сервиса источников (SetNotices) живут только в памяти.
 // Неизвестный идентификатор — ErrUnknownNotice. Возвращает оставшиеся
 // уведомления и публикует событие notices.
 func (l *Layer) DismissNotice(id string) ([]NoticeView, error) {
@@ -818,6 +915,10 @@ func (l *Layer) DismissNotice(id string) ([]NoticeView, error) {
 	case isBuildFailedID(id):
 		l.mu.Lock()
 		delete(l.failed, id)
+		l.mu.Unlock()
+	case l.isExtNoticeID(id):
+		l.mu.Lock()
+		l.dismissed[id] = true
 		l.mu.Unlock()
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownNotice, id)
