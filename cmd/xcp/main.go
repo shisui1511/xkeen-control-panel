@@ -24,6 +24,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -672,9 +673,72 @@ func main() {
 	if err != nil {
 		log.Printf("Слой конфигурации не создан, маршруты /api/configlayer/* отвечают 404: %v", err)
 	} else {
+		// Сервис источников (фаза 145): создаётся только здесь. Генераторы, хук
+		// фиксации живых данных и колбэк «дрейф решён» регистрируются до Start слоя
+		// (после него слой их не принимает). Не создался или не подключился —
+		// маршруты /api/configlayer/sources* отвечают 404.
+		sourcesSvc, srcErr := sources.New(sources.Deps{
+			DataDir: cfg.DataDir,
+			Layer:   configLayer,
+			Installed: func() configlayer.InstalledKernels {
+				return configlayer.InstalledKernels{
+					Xray:   installedKernelBinary(kernelSvc, "xray") != "",
+					Mihomo: installedKernelBinary(kernelSvc, "mihomo") != "",
+				}
+			},
+			KernelVersion: func(kernel string) string {
+				info := kernelSvc.Get(kernel)
+				if info == nil {
+					return ""
+				}
+				// Служебные значения вместо версии — версия не определена.
+				switch info.CurrentVersion {
+				case "not installed", "error", "unknown":
+					return ""
+				}
+				return info.CurrentVersion
+			},
+			ActiveKernel: func() string { return kernelSvc.ActiveState().Kernel },
+			Running: func(kernel string) bool {
+				for _, st := range kernelSvc.ProcessStates() {
+					if st.Name == kernel && st.Status == "running" {
+						return true
+					}
+				}
+				return false
+			},
+		})
+		if srcErr != nil {
+			log.Printf("Сервис источников не создан, маршруты /api/configlayer/sources* отвечают 404: %v", srcErr)
+			sourcesSvc = nil
+		}
+		if sourcesSvc != nil {
+			for _, g := range sourcesSvc.Generators() {
+				if srcErr = configLayer.RegisterGenerator(g); srcErr != nil {
+					break
+				}
+			}
+			if srcErr == nil {
+				srcErr = configLayer.SetLiveCommitter(sourcesSvc.CommitLive)
+			}
+			if srcErr == nil {
+				srcErr = configLayer.OnDriftResolved(sourcesSvc.OnDriftResolved)
+			}
+			if srcErr != nil {
+				log.Printf("Сервис источников не подключён к слою, маршруты /api/configlayer/sources* отвечают 404: %v", srcErr)
+				sourcesSvc = nil
+			}
+		}
 		configLayer.Start()
 		api.SetConfigLayer(configLayer)
 		defer configLayer.Stop()
+		if sourcesSvc != nil {
+			// Планировщик подписок стартует после слоя; defer идёт после defer слоя,
+			// поэтому сервис останавливается раньше слоя.
+			sourcesSvc.Start()
+			api.SetSourcesService(sourcesSvc)
+			defer sourcesSvc.Stop()
+		}
 	}
 	srv.HandleProtected("/api/configlayer/state", api.ConfigLayerState)
 	srv.HandleProtected("/api/configlayer/events", api.ConfigLayerEvents)
@@ -686,6 +750,18 @@ func main() {
 	srv.HandleProtected("/api/configlayer/files/diff", api.ConfigLayerFilesDiff)
 	srv.HandleProtected("/api/configlayer/notices/dismiss", api.ConfigLayerNoticesDismiss)
 	srv.HandleProtected("/api/configlayer/diag", api.ConfigLayerDiag)
+	srv.HandleProtected("/api/configlayer/sources", api.ConfigSources)
+	srv.HandleProtected("/api/configlayer/sources/preview", api.ConfigSourcesPreview)
+	srv.HandleProtected("/api/configlayer/sources/add", api.ConfigSourcesAdd)
+	srv.HandleProtected("/api/configlayer/sources/update", api.ConfigSourcesUpdate)
+	srv.HandleProtected("/api/configlayer/sources/delete", api.ConfigSourcesDelete)
+	srv.HandleProtected("/api/configlayer/sources/refresh", api.ConfigSourcesRefresh)
+	srv.HandleProtected("/api/configlayer/sources/reveal", api.ConfigSourcesReveal)
+	srv.HandleProtected("/api/configlayer/sources/diagnostics", api.ConfigSourcesDiagnostics)
+	srv.HandleProtected("/api/configlayer/sources/nodes/preview", api.ConfigSourcesNodePreview)
+	srv.HandleProtected("/api/configlayer/sources/nodes/raw", api.ConfigSourcesNodeRaw)
+	srv.HandleProtected("/api/configlayer/sources/nodes/save", api.ConfigSourcesNodeSave)
+	srv.HandleProtected("/api/configlayer/sources/nodes/delete", api.ConfigSourcesNodeDelete)
 
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
 		strings.TrimPrefix(Version, "v"), runtime.Version(), effectiveMemLimit, effectiveGC, goExp)

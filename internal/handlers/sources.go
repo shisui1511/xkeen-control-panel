@@ -114,3 +114,196 @@ func (a *API) ConfigSourcesAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	JSONSuccess(w, res)
 }
+
+// ConfigSourcesUpdate — POST /api/configlayer/sources/update {revision, id, patch}:
+// правка настроек источника через черновик.
+func (a *API) ConfigSourcesUpdate(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireSources(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64         `json:"revision"`
+		ID       string        `json:"id"`
+		Patch    sources.Patch `json:"patch"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.sources.Update(req.Revision, req.ID, req.Patch)
+	if err != nil {
+		a.writeSourceError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigSourcesDelete — POST /api/configlayer/sources/delete {revision, id}.
+func (a *API) ConfigSourcesDelete(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireSources(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64  `json:"revision"`
+		ID       string `json:"id"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.sources.Delete(req.Revision, req.ID)
+	if err != nil {
+		a.writeSourceError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigSourcesRefresh — POST /api/configlayer/sources/refresh {id}: обновление
+// подписки по запросу пользователя. Ответ приходит после запроса к провайдеру и
+// конвейера (на MIPS — до десятков секунд) и несёт итог для тоста инициатора
+// (D-08); остальные вкладки узнают из события SSE sources.
+func (a *API) ConfigSourcesRefresh(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireSources(w, r) {
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	out, err := a.sources.Refresh(r.Context(), req.ID, true)
+	if err != nil {
+		a.writeSourceError(w, r, err)
+		return
+	}
+	JSONSuccess(w, out)
+}
+
+// writeSensitive пишет успешный ответ с секретом (полный URL, исходный текст
+// узла): без кэширования и без записи в журнал.
+func writeSensitive(w http.ResponseWriter, data any) {
+	w.Header().Set("Cache-Control", "no-store")
+	JSONSuccess(w, data)
+}
+
+// ConfigSourcesReveal — POST /api/configlayer/sources/reveal {id}: полный URL
+// подписки по явному действию «Показать» (D-33). Единственный маршрут, где он
+// есть в ответе, кроме nodes/raw для учётных данных узла.
+func (a *API) ConfigSourcesReveal(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireSources(w, r) {
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	u, err := a.sources.Reveal(req.ID)
+	if err != nil {
+		a.writeSourceError(w, r, err)
+		return
+	}
+	writeSensitive(w, map[string]string{"url": u})
+}
+
+// ConfigSourcesDiagnostics — GET /api/configlayer/sources/diagnostics?id=&kernel=:
+// замаскированная диагностика ответа подписки по ядру.
+func (a *API) ConfigSourcesDiagnostics(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireSources(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	view, err := a.sources.Diagnostics(q.Get("id"), q.Get("kernel"))
+	if err != nil {
+		a.writeSourceError(w, r, err)
+		return
+	}
+	JSONSuccess(w, view)
+}
+
+// ConfigSourcesNodePreview — POST /api/configlayer/sources/nodes/preview
+// {text, entry_id?}: предпросмотр правки или добавления одного узла «Моих узлов».
+// Текст, который не даёт ровно один узел, — 400 edit_single_node.
+func (a *API) ConfigSourcesNodePreview(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireSources(w, r) {
+		return
+	}
+	var req struct {
+		Text    string `json:"text"`
+		EntryID string `json:"entry_id"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	view, err := a.sources.PreviewNode(r.Context(), req.Text, req.EntryID)
+	if err != nil {
+		a.writeSourceError(w, r, err)
+		return
+	}
+	JSONSuccess(w, view)
+}
+
+// ConfigSourcesNodeRaw — POST /api/configlayer/sources/nodes/raw {entry_id}:
+// исходный текст узла без маски для режима «Изменить» (D-34).
+func (a *API) ConfigSourcesNodeRaw(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireSources(w, r) {
+		return
+	}
+	var req struct {
+		EntryID string `json:"entry_id"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	view, err := a.sources.NodeRaw(req.EntryID)
+	if err != nil {
+		a.writeSourceError(w, r, err)
+		return
+	}
+	writeSensitive(w, view)
+}
+
+// ConfigSourcesNodeSave — POST /api/configlayer/sources/nodes/save
+// {revision, entry_id?, name, text}: сохраняет узел в черновик.
+func (a *API) ConfigSourcesNodeSave(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireSources(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64  `json:"revision"`
+		EntryID  string `json:"entry_id"`
+		Name     string `json:"name"`
+		Text     string `json:"text"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.sources.SaveNode(req.Revision, req.EntryID, req.Name, req.Text)
+	if err != nil {
+		a.writeSourceError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigSourcesNodeDelete — POST /api/configlayer/sources/nodes/delete
+// {revision, entry_id}.
+func (a *API) ConfigSourcesNodeDelete(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireSources(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64  `json:"revision"`
+		EntryID  string `json:"entry_id"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.sources.DeleteNode(req.Revision, req.EntryID)
+	if err != nil {
+		a.writeSourceError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
