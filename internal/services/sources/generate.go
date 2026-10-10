@@ -410,27 +410,40 @@ func (s *Service) subscriptionFile(mode configlayer.SourceKind, kernel, id strin
 // шаблоны игнорируются. Фильтр действует до обоих ядер, потому что работает над
 // общим набором; «Мои узлы» им не пользуются.
 func excludeByName(list []nodes.Node, patterns []string) []nodes.Node {
+	subs := excludeSubs(patterns)
+	if len(subs) == 0 {
+		return list
+	}
+	out := make([]nodes.Node, 0, len(list))
+	for _, n := range list {
+		if !nameExcluded(n, subs) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// excludeSubs приводит шаблоны исключения к подстрокам: нижний регистр, без
+// пробелов по краям, пустые отброшены.
+func excludeSubs(patterns []string) []string {
 	var subs []string
 	for _, p := range patterns {
 		if p = strings.ToLower(strings.TrimSpace(p)); p != "" {
 			subs = append(subs, p)
 		}
 	}
-	if len(subs) == 0 {
-		return list
-	}
-	out := make([]nodes.Node, 0, len(list))
-next:
-	for _, n := range list {
-		name := strings.ToLower(displayName(n))
-		for _, p := range subs {
-			if strings.Contains(name, p) {
-				continue next
-			}
+	return subs
+}
+
+// nameExcluded — имя узла содержит любую из подстрок (subs из excludeSubs).
+func nameExcluded(n nodes.Node, subs []string) bool {
+	name := strings.ToLower(displayName(n))
+	for _, p := range subs {
+		if strings.Contains(name, p) {
+			return true
 		}
-		out = append(out, n)
 	}
-	return out
+	return false
 }
 
 // subscriptionNodes присваивает узлам снимка ключи: полные дубли схлопываются,

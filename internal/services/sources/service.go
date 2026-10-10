@@ -31,7 +31,7 @@ var (
 	ErrInvalidInput = errors.New("sources: недопустимый ввод")
 )
 
-// Deps — зависимости сервиса. Поля вида добавляет план 145-10.
+// Deps — зависимости сервиса.
 type Deps struct {
 	// DataDir — каталог данных панели.
 	DataDir string
@@ -64,6 +64,13 @@ type Deps struct {
 	// RetryDelays — задержки повторов после сетевой ошибки (D-30); nil — 5, 15 и
 	// 60 минут. Пустой, но не nil набор отключает повторы.
 	RetryDelays []time.Duration
+	// ActiveKernel — активное ядро для выбора ядра просмотра по умолчанию (D-16):
+	// "xray", "mihomo" или любое другое значение («none», «both», пусто — активного
+	// нет). nil — активного ядра нет. Должна быть дешёвой: вызывается при каждом
+	// построении представления.
+	ActiveKernel func() string
+	// Running сообщает, запущено ли ядро ("xray" или "mihomo"). nil — не запущено.
+	Running func(kernel string) bool
 }
 
 // Значения по умолчанию планировщика.
@@ -99,6 +106,11 @@ type Service struct {
 
 	// blobs — снимки наборов узлов подписок по хэшу и диагностика ответов.
 	blobs blobStore
+
+	// vmu защищает кэш разобранных снимков представления (view.go).
+	vmu       sync.Mutex
+	viewNodes map[string][]nodes.Node
+	viewOrder []string
 
 	xray   xrayGen
 	mihomo mihomoGen
@@ -161,6 +173,12 @@ func New(d Deps) (*Service, error) {
 			d.FetchTimeout = slowFetchTimeout
 		}
 	}
+	if d.ActiveKernel == nil {
+		d.ActiveKernel = func() string { return "" }
+	}
+	if d.Running == nil {
+		d.Running = func(string) bool { return false }
+	}
 	if d.TickInterval <= 0 {
 		d.TickInterval = defaultTickInterval
 	}
@@ -170,13 +188,14 @@ func New(d Deps) (*Service, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	// Конструктор диска и сети не трогает: каталог снимков создаёт первая запись.
 	s := &Service{
-		d:        d,
-		ctx:      ctx,
-		cancel:   cancel,
-		calls:    map[string]*refreshCall{},
-		previews: map[string]*previewEntry{},
-		parsed:   map[string]parsedEntry{},
-		gens:     map[string]memoFile{},
+		d:         d,
+		ctx:       ctx,
+		cancel:    cancel,
+		calls:     map[string]*refreshCall{},
+		previews:  map[string]*previewEntry{},
+		parsed:    map[string]parsedEntry{},
+		gens:      map[string]memoFile{},
+		viewNodes: map[string][]nodes.Node{},
 		blobs: blobStore{
 			dir:     filepath.Join(d.DataDir, "config_layer", "snapshots"),
 			diagDir: filepath.Join(d.DataDir, "config_layer", "diag"),
