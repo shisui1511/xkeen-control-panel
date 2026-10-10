@@ -1,0 +1,79 @@
+{
+  "KernelCounts": {
+    "required": ["xray", "mihomo"],
+    "optional": [],
+    "children": {}
+  },
+  "KernelOutcome": {
+    "required": ["status", "count"],
+    "optional": ["error_code"],
+    "children": {}
+  },
+  "PreviewKernel": {
+    "required": ["installed", "count", "stubs", "skipped"],
+    "optional": ["error"],
+    "children": { "error": "SourceError" }
+  },
+  "PreviewLineError": {
+    "required": ["line", "fragment", "error"],
+    "optional": ["file"],
+    "children": { "error": "SourceError" }
+  },
+  "PreviewMyNodes": {
+    "required": ["nodes", "count", "only", "skipped"],
+    "optional": [],
+    "children": { "nodes": "PreviewNode[]", "only": "KernelCounts" }
+  },
+  "PreviewNode": {
+    "required": ["key", "name", "protocol", "address", "cred_mask", "support", "marks"],
+    "optional": ["dup_sub_name"],
+    "children": { "support": "SupportPair" }
+  },
+  "PreviewSubscription": {
+    "required": ["line", "name", "url_masked", "kernels", "warnings"],
+    "optional": ["error"],
+    "children": {
+      "kernels": "PreviewKernel{}",
+      "warnings": "SourceError[]",
+      "error": "SourceError"
+    }
+  },
+  "PreviewView": {
+    "required": [
+      "token",
+      "expires_at",
+      "subscriptions",
+      "my_nodes",
+      "errors",
+      "addable",
+      "nodes_only",
+      "collapsed"
+    ],
+    "optional": [],
+    "children": {
+      "subscriptions": "PreviewSubscription[]",
+      "my_nodes": "PreviewMyNodes",
+      "errors": "PreviewLineError[]"
+    }
+  },
+  "RefreshOutcome": {
+    "required": ["outcome", "added", "removed", "kernels"],
+    "optional": ["error"],
+    "children": { "kernels": "KernelOutcome{}", "error": "SourceError" }
+  },
+  "SourceError": {
+    "required": ["code"],
+    "optional": ["params", "http_status", "line", "fragment", "detail"],
+    "children": {}
+  },
+  "SupportPair": {
+    "required": ["xray", "mihomo"],
+    "optional": [],
+    "children": { "xray": "Verdict", "mihomo": "Verdict" }
+  },
+  "Verdict": {
+    "required": ["ok"],
+    "optional": ["code", "params", "notes"],
+    "children": {}
+  }
+}

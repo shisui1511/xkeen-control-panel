@@ -89,5 +89,10 @@
   "configlayer.file_released": "The file is released: the panel does not track it",
   "configlayer.disable_failed": "Could not disable the configuration layer: files were restored and the flag stays on",
   "configlayer.file_managed": "Panel file: editing is available after \"Release control\"",
-  "configlayer.too_many_subscribers": "Too many open panel tabs: close some and retry"
+  "configlayer.too_many_subscribers": "Too many open panel tabs: close some and retry",
+  "configlayer.source_error": "The source could not be processed",
+  "configlayer.source_not_found": "Source not found",
+  "configlayer.node_not_found": "Node not found",
+  "configlayer.preview_expired": "The preview has expired: paste the data again",
+  "configlayer.source_disabled": "The source is disabled: enable it before refreshing"
 }

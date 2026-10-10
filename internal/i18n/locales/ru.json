@@ -89,5 +89,10 @@
   "configlayer.file_released": "Файл отпущен: панель его не сверяет",
   "configlayer.disable_failed": "Не удалось выключить слой конфигурации: файлы возвращены, флаг остаётся включённым",
   "configlayer.file_managed": "Файл панели: правка доступна после «Отпустить управление»",
-  "configlayer.too_many_subscribers": "Слишком много открытых вкладок с панелью: закройте лишние и повторите"
+  "configlayer.too_many_subscribers": "Слишком много открытых вкладок с панелью: закройте лишние и повторите",
+  "configlayer.source_error": "Источник не удалось обработать",
+  "configlayer.source_not_found": "Источник не найден",
+  "configlayer.node_not_found": "Узел не найден",
+  "configlayer.preview_expired": "Предпросмотр устарел: вставьте данные заново",
+  "configlayer.source_disabled": "Источник выключен: включите его перед обновлением"
 }

@@ -24,6 +24,9 @@ type APIResponse struct {
 	// "both"). Фронтенд по ним выбирает текст и заглушку.
 	Required string `json:"required,omitempty"`
 	Active   string `json:"active,omitempty"`
+	// Params — параметры ошибки для подстановки в текст на фронтенде (код
+	// ошибки источника и его значения). Секретов в них нет.
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // JSONSuccess writes a successful JSON response with the given data payload.
@@ -57,6 +60,14 @@ func JSONErrorCodeDetail(w http.ResponseWriter, status int, code, msg, detail st
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: msg, Code: code, Detail: detail})
+}
+
+// JSONErrorCodeParams — как JSONErrorCode, плюс params: стабильный код и значения
+// для подстановки в текст на фронтенде. Текст msg — только запасной.
+func JSONErrorCodeParams(w http.ResponseWriter, status int, code, msg string, params map[string]string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: msg, Code: code, Params: params})
 }
 
 // JSONErrorKernelInactive — 409 «нужное ядро не активно»: живой маршрут ядра
