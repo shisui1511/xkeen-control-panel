@@ -3,6 +3,8 @@ package sources
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -192,4 +194,77 @@ func decodeBase64Body(body []byte) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// DiagView — диагностика ответа подписки по ядру для интерфейса (D-07): файл,
+// записанный при запросе, отдаётся как есть, он уже замаскирован.
+type DiagView struct {
+	Kernel     string       `json:"kernel"`
+	Empty      bool         `json:"empty"`
+	FetchedAt  *time.Time   `json:"fetched_at,omitempty"`
+	HTTPStatus int          `json:"http_status,omitempty"`
+	Headers    []diagHeader `json:"headers"`
+	Body       string       `json:"body"`
+	Truncated  bool         `json:"truncated"`
+	Report     diagReport   `json:"report"`
+}
+
+// Diagnostics читает диагностику подписки по ядру. Ядро вне xray и mihomo —
+// ErrInvalidInput; источник без секции в черновике и применённом состоянии —
+// ErrSourceNotFound; нет записанной диагностики — признак Empty.
+func (s *Service) Diagnostics(id, kernel string) (DiagView, error) {
+	if kernel != kernelXray && kernel != kernelMihomo {
+		return DiagView{}, ErrInvalidInput
+	}
+	if id == MySourceID {
+		return DiagView{}, ErrInvalidInput
+	}
+	if !idRE.MatchString(id) {
+		return DiagView{}, ErrSourceNotFound
+	}
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
+		return DiagView{}, err
+	}
+	_, inDraft := st.Draft[sectionName(id)]
+	_, inApplied := st.Applied[sectionName(id)]
+	if !inDraft && !inApplied {
+		return DiagView{}, ErrSourceNotFound
+	}
+	empty := DiagView{Kernel: kernel, Empty: true, Headers: []diagHeader{}, Report: diagReport{Skipped: []nodes.Skipped{}}}
+	path, ok := s.blobs.diagPath(id, kernel)
+	if !ok {
+		return empty, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return empty, nil
+		}
+		return DiagView{}, err
+	}
+	var rec diagRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		log.Printf("[sources] диагностика источника %s повреждена", id)
+		return empty, nil
+	}
+	v := DiagView{
+		Kernel:     kernel,
+		HTTPStatus: rec.HTTPStatus,
+		Headers:    rec.Headers,
+		Body:       rec.Body,
+		Truncated:  rec.Truncated,
+		Report:     rec.Report,
+	}
+	if !rec.FetchedAt.IsZero() {
+		t := rec.FetchedAt
+		v.FetchedAt = &t
+	}
+	if v.Headers == nil {
+		v.Headers = []diagHeader{}
+	}
+	if v.Report.Skipped == nil {
+		v.Report.Skipped = []nodes.Skipped{}
+	}
+	return v, nil
 }
