@@ -13,8 +13,11 @@
 #
 # Тесты получают окружение XCP_RT_ARCH, XCP_RT_CORE, XCP_RT_WORKDIR, XCP_RT_PANEL (адрес
 # панели на loopback устройства), XCP_RT_SESSION_FILE (cookie и CSRF, права 600) и
-# XCP_RT_LINKS (данные share-ссылок internal/nodes/testdata/links) и XCP_RT_INPUTS
-# (входные тела ответов internal/nodes/testdata/inputs).
+# XCP_RT_LINKS (данные share-ссылок internal/nodes/testdata/links), XCP_RT_INPUTS
+# (входные тела ответов internal/nodes/testdata/inputs), XCP_RT_CONTRACT (контракт
+# ключей ответов API источников frontend/src/lib/sourcesContract.json) и, если в
+# локальном конфиге целей задан XCP_SUBSCRIPTION_URL, XCP_RT_SUBSCRIPTION_URL (адрес
+# настоящей подписки: передаётся файлом с правами 600, в журнал и отчёт не попадает).
 #
 # Окружение:
 #   RT_GO_PKGS    пакеты через пробел (по умолчанию все с роутерными тестами)
@@ -72,7 +75,7 @@ cleanup() {
   if [ -n "$CSRF" ] && [ -f "$JAR" ]; then
     curl -sk --connect-timeout 10 --max-time 20 -b "$JAR" -X POST -H "X-CSRF-Token: $CSRF" -o /dev/null "$URL/api/auth/logout" || true
   fi
-  rm -f "$JAR" "$SESSION_LOCAL"
+  rm -f "$JAR" "$SESSION_LOCAL" "${SUB_LOCAL:-}"
   rt_ssh "$ID" "rm -rf $RWD" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -206,6 +209,51 @@ if [ -d "$ROOT/internal/nodes/testdata/inputs" ]; then
   fi
 fi
 
+# Контракт ключей ответов API источников: тесты сверяют с ним ответы панели.
+CONTRACT_ENV=""
+if [ -f "$ROOT/frontend/src/lib/sourcesContract.json" ]; then
+  rc=0
+  rt_scp "$ID" "$ROOT/frontend/src/lib/sourcesContract.json" "$RWD/sourcesContract.json" || rc=$?
+  if [ "$rc" = 3 ]; then
+    rt_result "$ID" FAIL reachable "нет связи"
+    exit 3
+  elif [ "$rc" = 0 ]; then
+    CONTRACT_ENV="XCP_RT_CONTRACT=$RWD/sourcesContract.json"
+  else
+    rt_result "$ID" FAIL "go:contract" "копирование контракта ответов не удалось (код $rc)"
+    BAD=$((BAD + 1))
+  fi
+fi
+
+# Адрес настоящей подписки из локального конфига целей: на устройство уходит файлом
+# с правами 600 внутри рабочего каталога (он удаляется при выходе), в окружение теста
+# значение подставляет сам запускающий скрипт на устройстве. Адрес нигде не печатается.
+SUB_ENV=""
+if [ -n "${XCP_SUBSCRIPTION_URL:-}" ]; then
+  SUB_LOCAL="$RT_REPORT/$ID/.go-subscription.url"
+  (
+    umask 077
+    printf '%s' "$XCP_SUBSCRIPTION_URL" >"$SUB_LOCAL"
+  )
+  rc=0
+  rt_scp "$ID" "$SUB_LOCAL" "$RWD/subscription.url" || rc=$?
+  rm -f "$SUB_LOCAL"
+  if [ "$rc" = 0 ]; then
+    rc=0
+    rt_ssh "$ID" "chmod 600 $RWD/subscription.url" || rc=$?
+  fi
+  if [ "$rc" = 3 ]; then
+    rt_result "$ID" FAIL reachable "нет связи"
+    exit 3
+  elif [ "$rc" = 0 ]; then
+    # одинарные кавычки: $(cat ...) выполнится на устройстве, а не здесь
+    SUB_ENV='XCP_RT_SUBSCRIPTION_URL=$(cat '"$RWD"'/subscription.url)'
+  else
+    rt_result "$ID" FAIL "go:subscription" "передача адреса подписки не удалась (код $rc)"
+    BAD=$((BAD + 1))
+  fi
+fi
+
 # --- пакеты --------------------------------------------------------------------
 for pkg in $PKGS; do
   name=$(printf '%s' "${pkg#internal/}" | tr '/' '-')
@@ -239,7 +287,7 @@ for pkg in $PKGS; do
   runner="$RT_REPORT/$ID/.go-run.sh"
   cat >"$runner" <<EOF
 cd $RWD
-XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV $INPUTS_ENV ./$name.test -test.v=test2json -test.run '${RT_GO_RUN:-^TestRouter}' -test.timeout 20m &
+XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV $INPUTS_ENV $CONTRACT_ENV $SUB_ENV ./$name.test -test.v=test2json -test.run '${RT_GO_RUN:-^TestRouter}' -test.timeout 20m &
 T=\$!
 ( while kill -0 \$T 2>/dev/null; do grep VmHWM /proc/\$T/status > $RWD/$name.hwm 2>/dev/null; sleep 1; done ) &
 W=\$!

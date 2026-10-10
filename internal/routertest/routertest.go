@@ -230,6 +230,73 @@ func (p *Panel) do(method, path string, in, out any) (int, error) {
 	return resp.StatusCode, nil
 }
 
+// PanelAuth — какие данные сессии Request отправляет с запросом.
+type PanelAuth int
+
+const (
+	// AuthFull — cookie сессии и X-CSRF-Token.
+	AuthFull PanelAuth = iota
+	// AuthNoCSRF — только cookie сессии (проверка защиты от CSRF).
+	AuthNoCSRF
+	// AuthNone — без сессии (проверка авторизации).
+	AuthNone
+)
+
+// Request выполняет запрос с произвольным методом и сырым телом и возвращает
+// статус и тело ответа при любом статусе. Content-Type при непустом теле —
+// application/json.
+func (p *Panel) Request(method, path string, body []byte, auth PanelAuth) (int, []byte, error) {
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, p.base+path, rd)
+	if err != nil {
+		return 0, nil, err
+	}
+	if auth != AuthNone {
+		req.Header.Set("Cookie", p.cookie)
+	}
+	if auth == AuthFull {
+		req.Header.Set("X-CSRF-Token", p.csrf)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	return resp.StatusCode, raw, err
+}
+
+// Call выполняет запрос с полной сессией; in (nil — без тела) кодируется в JSON.
+// Возвращает статус и сырое тело ответа при любом статусе.
+func (p *Panel) Call(method, path string, in any) (int, []byte, error) {
+	var body []byte
+	if in != nil {
+		raw, err := json.Marshal(in)
+		if err != nil {
+			return 0, nil, fmt.Errorf("тело запроса: %w", err)
+		}
+		body = raw
+	}
+	return p.Request(method, path, body, AuthFull)
+}
+
+// ContractFile — путь к файлу контракта ключей ответов API источников
+// (frontend/src/lib/sourcesContract.json), скопированному на устройство.
+func ContractFile(t testing.TB) string {
+	t.Helper()
+	path := os.Getenv("XCP_RT_CONTRACT")
+	if path == "" {
+		t.Fatal("нет XCP_RT_CONTRACT: тест запускается только через make router-test")
+	}
+	return path
+}
+
 // LinksDir — каталог с данными share-ссылок, скопированный на устройство.
 func LinksDir(t testing.TB) string {
 	t.Helper()
