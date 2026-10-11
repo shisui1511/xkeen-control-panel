@@ -371,6 +371,11 @@ func TestRouterGenerateMissingBlobIsError(t *testing.T) {
 func TestRouterCommitLiveRemovedSourceDropsLive(t *testing.T) {
 	rtNeedKernels(t, true, false)
 	e := rtNewEnv(t, true, false)
+	// Как на устройстве, каталог Xray не пуст: пустой каталог `xray run -test -confdir`
+	// не читает, а ждёт конфиг на stdin и падает на EOF после удаления последнего файла.
+	if err := os.WriteFile(filepath.Join(e.roots.Xray, "01_log.json"), []byte("{\"log\":{\"loglevel\":\"none\"}}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	const id = "a1b2c3d4"
 	ref := rtPut(t, e, "vless_ws")
 	rtAddSub(t, e, rtSubNamed(t, id, "Провайдер", nil), id, false, map[string]*Ref{kernelXray: ref})

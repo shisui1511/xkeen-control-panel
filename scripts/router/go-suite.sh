@@ -248,6 +248,9 @@ if [ -n "${XCP_SUBSCRIPTION_URL:-}" ]; then
   elif [ "$rc" = 0 ]; then
     # одинарные кавычки: $(cat ...) выполнится на устройстве, а не здесь
     SUB_ENV='XCP_RT_SUBSCRIPTION_URL=$(cat '"$RWD"'/subscription.url)'
+    # HWID устройства: у провайдера занят один слот, посторонний HWID получает заглушки
+    # (all_stubs), поэтому проверки с настоящей подпиской идут с HWID самой панели.
+    SUB_ENV="$SUB_ENV"' XCP_RT_HWID=$(cat /opt/etc/xcp/data/xcp_hwid.txt 2>/dev/null)'
   else
     rt_result "$ID" FAIL "go:subscription" "передача адреса подписки не удалась (код $rc)"
     BAD=$((BAD + 1))

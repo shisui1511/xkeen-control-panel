@@ -55,7 +55,9 @@ var rtNotExpressibleMihomo = map[string]string{
 
 // rtLinkMarks — метки известных падений по шагам схем: ключ «схема/шаг».
 // Шаги: parse, xray, mihomo.
-var rtLinkMarks = map[string]routertest.KnownMark{}
+var rtLinkMarks = map[string]routertest.KnownMark{
+	"wireguard/xray": routertest.Known("mipsle", "xray-wireguard-outbound-crash-mipsle"),
+}
 
 func rtStep(t *testing.T, scheme, step string, ok bool, format string, args ...any) {
 	t.Helper()

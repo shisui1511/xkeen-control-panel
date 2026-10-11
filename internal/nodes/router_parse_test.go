@@ -21,7 +21,11 @@ import (
 // круговые конвертации сохраняют важные поля). Эталонных файлов нет.
 
 // rtParseMarks — метки известных падений: ключ «имя проверки/шаг» (xray, mihomo).
-var rtParseMarks = map[string]routertest.KnownMark{}
+var rtParseMarks = map[string]routertest.KnownMark{
+	// outbound wireguard в Xray на mipsle: рантайм Go падает уже в `xray run -test`
+	"singbox/xray":    routertest.Known("mipsle", "xray-wireguard-outbound-crash-mipsle"),
+	"wg_classic/xray": routertest.Known("mipsle", "xray-wireguard-outbound-crash-mipsle"),
+}
 
 func rtInput(t *testing.T, name string) []byte {
 	t.Helper()

@@ -84,7 +84,13 @@ func rtSubscriptionEnv(t *testing.T, xray, mihomo bool, installedBinaries bool) 
 	}
 	e := rtNewEnvWith(t, binX, binM, func(d *Deps) {
 		d.Client = rtObservedClient(cap)
-		d.HWID = func() string { return "A1B2C3D4E5F6" }
+		// Провайдер выдаёт один слот устройства: с настоящей подпиской запросы идут с HWID
+		// самой панели (XCP_RT_HWID), иначе провайдер отвечает заглушками (all_stubs).
+		hwid := "A1B2C3D4E5F6"
+		if real := strings.TrimSpace(os.Getenv("XCP_RT_HWID")); real != "" && os.Getenv("XCP_RT_SUBSCRIPTION_URL") != "" {
+			hwid = real
+		}
+		d.HWID = func() string { return hwid }
 		d.Device = rtDevice
 		d.KernelVersion = func(k string) string {
 			if k == kernelMihomo {
@@ -234,7 +240,7 @@ func TestRouterSubscriptionAddDespiteError(t *testing.T) {
 	}
 
 	reqs := cap.all()
-	if len(reqs) != 2 || reqs[0].HWID != "A1B2C3D4E5F6" || reqs[0].HWID != reqs[1].HWID ||
+	if len(reqs) != 2 || reqs[0].HWID != e.svc.d.HWID() || reqs[0].HWID != reqs[1].HWID ||
 		reqs[0].OS != "Linux" || reqs[0].OS != reqs[1].OS || reqs[0].Model != reqs[1].Model || reqs[0].Ver != "5.1.6" || reqs[0].Ver != reqs[1].Ver {
 		t.Errorf("заголовки запросов под ядра: %+v", reqs)
 	}
