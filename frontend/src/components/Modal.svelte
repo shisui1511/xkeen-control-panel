@@ -51,6 +51,28 @@
     }
   });
 
+  // Фокус, ушедший на body (элемент с фокусом убран из разметки при перерисовке),
+  // не доходит до обработчика на самом диалоге: Tab увёл бы его на страницу под
+  // модалью. Пока диалог открыт и он верхний, такой Tab возвращает фокус на первый
+  // элемент диалога.
+  $effect(() => {
+    if (!isOpen) return;
+    const onWindowKeydown = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab' || !modalElement) return;
+      const active = document.activeElement;
+      // только потеря фокуса на body; фокус в другой модали поверх этой не трогаем
+      if (active && active !== document.body) return;
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      if (dialogs[dialogs.length - 1] !== modalElement) return;
+      event.preventDefault();
+      const focusables = getFocusableElements();
+      if (focusables.length > 0) focusables[0].focus();
+      else modalElement.focus();
+    };
+    window.addEventListener('keydown', onWindowKeydown, true);
+    return () => window.removeEventListener('keydown', onWindowKeydown, true);
+  });
+
   function getFocusableElements(): HTMLElement[] {
     if (!modalElement) return [];
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
