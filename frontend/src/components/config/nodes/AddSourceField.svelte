@@ -40,6 +40,8 @@
   let pasted = false;
 
   const hasInput = $derived(text.trim() !== '' || files.length > 0);
+  // Ошибка без ввода (слишком большой файл) тоже показывается в области предпросмотра
+  const showPreview = $derived(hasInput || error !== null);
   const canAdd = $derived(
     !loading && !adding && preview !== null && preview.addable > 0 && !$applyRunning
   );
@@ -308,7 +310,7 @@
     </ul>
   {/if}
 
-  {#if hasInput}
+  {#if showPreview}
     <AddPreview {preview} {loading} {error} />
   {/if}
 
@@ -324,7 +326,7 @@
     </Button>
     <Button
       variant="secondary"
-      disabled={!hasInput && !adding}
+      disabled={!showPreview && !adding}
       data-testid="nodes-add-clear"
       onclick={onClear}
     >

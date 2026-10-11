@@ -88,7 +88,7 @@ async function sourcesCount(page: Page): Promise<number> {
 }
 
 /** Кладёт в черновик один узел «Моих узлов» настоящим маршрутом добавления. */
-async function addDraftNode(page: Page): Promise<void> {
+async function addDraftNode(page: Page): Promise<string> {
   const text = uniqueLink();
   const preview = await api(page, 'POST', '/api/configlayer/sources/preview', { text, files: [] });
   expect(preview.status, 'предпросмотр узла').toBe(200);
@@ -98,6 +98,7 @@ async function addDraftNode(page: Page): Promise<void> {
     token: preview.data?.token
   });
   expect(add.status, 'добавление узла в черновик').toBe(200);
+  return text;
 }
 
 let layerWasOn = false;
@@ -295,5 +296,308 @@ test('config-add: вставка ссылки → предпросмотр → �
   const after = Number((await api(page, 'GET', '/api/configlayer/state')).data?.draft_changes ?? 0);
   expect(after, 'узел попал в черновик').toBeGreaterThan(before);
 
+  await guard.assertClean();
+});
+
+// --- Поле «Добавить»: состояния предпросмотра, файлы, перетаскивание (план 13) ---
+
+const PREVIEW_URL = '/api/configlayer/sources/preview';
+// Адрес в зарезервированной зоне .invalid: имя не разрешается нигде, провайдер не затрагивается
+const BAD_SUB = 'https://sub.invalid/feed';
+
+function isPreview(r: { method(): string; url(): string }): boolean {
+  return r.method() === 'POST' && r.url().endsWith(PREVIEW_URL);
+}
+
+async function openAddCard(page: Page, width = 1440): Promise<void> {
+  await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+  await page.goto('/', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  await page.locator('.main-content').first().waitFor({ state: 'visible', timeout: T.page });
+  await openConfig(page, '#/config/nodes');
+  await expect(page.getByTestId('nodes-add')).toBeVisible({ timeout: T.action });
+}
+
+test('config-add: подписка с ошибкой первого запроса — строка подписки, причина из трёх частей, Добавить доступна', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await openAddCard(page);
+  const input = page.locator('#nodes-add-input');
+  const submit = page.getByTestId('nodes-add-submit');
+
+  await input.fill(BAD_SUB);
+  // идёт распознавание: индикатор в регионе aria-live, «Добавить» неактивна
+  const region = page.getByTestId('nodes-preview');
+  await expect(region).toHaveAttribute('aria-live', 'polite');
+  await expect(page.getByTestId('nodes-preview-loading')).toBeVisible({ timeout: T.action });
+  await expect(submit).toBeDisabled();
+
+  const row = page.getByTestId('nodes-preview-sub');
+  await expect(row).toBeVisible({ timeout: T.save });
+  await expect(page.getByTestId('nodes-preview-loading')).toHaveCount(0);
+  // ошибка подписки — заголовок, совет и свёрнутые «Подробности» с кодом
+  const err = page.getByTestId('nodes-preview-sub-error');
+  await expect(err).toBeVisible();
+  await expect(err.locator('strong')).toHaveText(/\S/);
+  const details = err.locator('details');
+  await expect(details).toHaveCount(1);
+  expect(await details.evaluate((el) => (el as HTMLDetailsElement).open)).toBe(false);
+  await details.locator('summary').click();
+  await expect(details.locator('li').first()).toContainText(/\S/);
+  // подписку можно добавить и при ошибке (D-18); сам адрес в строке замаскирован
+  await expect(submit).toBeEnabled();
+  await expect(row).not.toContainText(BAD_SUB);
+
+  await guard.assertClean();
+});
+
+test('config-add: смешанная вставка — подписка, «Мои узлы», нераспознанная строка с номером', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await openAddCard(page);
+  const input = page.locator('#nodes-add-input');
+
+  await input.fill(`${BAD_SUB}\n${uniqueLink()}\nhello world`);
+  const sub = page.getByTestId('nodes-preview-sub');
+  const my = page.getByTestId('nodes-preview-my');
+  const bad = page.getByTestId('nodes-preview-errors');
+  await expect(bad).toBeVisible({ timeout: T.save });
+  await expect(sub).toBeVisible();
+  await expect(my).toBeVisible();
+  // порядок строк: подписки, затем «Мои узлы», затем нераспознанные
+  const [ySub, yMy, yBad] = await Promise.all(
+    [sub, my, bad].map(async (l) => (await l.boundingBox())?.y ?? -1)
+  );
+  expect(ySub).toBeGreaterThan(0);
+  expect(yMy).toBeGreaterThan(ySub);
+  expect(yBad).toBeGreaterThan(yMy);
+  // у нераспознанной строки виден её номер (третья строка ввода)
+  const lineErr = page.getByTestId('nodes-preview-line-error');
+  await expect(lineErr).toHaveCount(1);
+  await expect(lineErr).toContainText('3');
+  await expect(page.getByTestId('nodes-add-submit')).toBeEnabled();
+
+  // список узлов свёрнут и раскрывается кнопкой с aria-expanded
+  const toggle = page.getByTestId('nodes-preview-my-toggle');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByTestId('nodes-preview-nodes')).toHaveCount(0);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByTestId('nodes-preview-nodes')).toBeVisible();
+
+  await guard.assertClean();
+});
+
+test('config-add: ничего не распознано — ошибка с «Подробностями», Добавить неактивна', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await openAddCard(page);
+  await page.locator('#nodes-add-input').fill('hello world');
+
+  const err = page.getByTestId('nodes-preview-error');
+  await expect(err).toBeVisible({ timeout: T.action });
+  await expect(err.locator('strong')).toHaveText(/\S/);
+  await expect(page.getByTestId('nodes-add-submit')).toBeDisabled();
+  // пустой рамки нет: ни строк подписок, ни «Моих узлов»
+  await expect(page.getByTestId('nodes-preview-sub')).toHaveCount(0);
+  await expect(page.getByTestId('nodes-preview-my')).toHaveCount(0);
+  const details = err.locator('details');
+  await details.locator('summary').click();
+  await expect(details).toContainText('unrecognized');
+
+  // «Очистить» убирает ввод и предпросмотр, фокус возвращается в поле
+  await page.getByTestId('nodes-add-clear').click();
+  await expect(page.locator('#nodes-add-input')).toHaveValue('');
+  await expect(page.locator('#nodes-add-input')).toBeFocused();
+  await expect(page.getByTestId('nodes-preview')).toHaveCount(0);
+
+  await guard.assertClean();
+});
+
+test('config-add: выбор файла — предпросмотр получает файл с именем и содержимым', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await openAddCard(page);
+  const link = uniqueLink();
+  const sent = page.waitForRequest(isPreview);
+  await page.getByTestId('nodes-add-file').setInputFiles({
+    name: 'nodes.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from(link)
+  });
+  const body = (await sent).postDataJSON() as {
+    text: string;
+    files: { name: string; content: string }[];
+  };
+  expect(body.files).toEqual([{ name: 'nodes.txt', content: link }]);
+  await expect(page.getByTestId('nodes-preview-my')).toBeVisible({ timeout: T.action });
+  await expect(page.getByTestId('nodes-add-submit')).toBeEnabled();
+
+  // файл снимается чипом — ввод и предпросмотр исчезают
+  await page.getByTestId('nodes-add-files').getByRole('button').click();
+  await expect(page.getByTestId('nodes-add-files')).toHaveCount(0);
+  await expect(page.getByTestId('nodes-preview')).toHaveCount(0);
+
+  await guard.assertClean();
+});
+
+test('config-add: файл больше 1 МиБ отклоняется на клиенте без запроса', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await openAddCard(page);
+  let requests = 0;
+  page.on('request', (r) => {
+    if (isPreview(r)) requests++;
+  });
+  await page.getByTestId('nodes-add-file').setInputFiles({
+    name: 'big.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.alloc(1024 * 1024 + 1, 'a')
+  });
+  const err = page.getByTestId('nodes-preview-error');
+  await expect(err).toBeVisible({ timeout: T.action });
+  await err.locator('details summary').click();
+  await expect(err.locator('details')).toContainText('too_large');
+  await expect(page.getByTestId('nodes-add-submit')).toBeDisabled();
+  await expect(page.getByTestId('nodes-add-files')).toHaveCount(0);
+  expect(requests, 'запрос предпросмотра не отправлялся').toBe(0);
+
+  await guard.assertClean();
+});
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`config-add: перетаскивание файла (${theme}) — рамка и фон --accent, подпись, drop отправляет файл`, async ({
+    page
+  }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => {
+      localStorage.setItem('theme', th);
+    }, theme);
+    await openAddCard(page);
+    const card = page.getByTestId('nodes-add');
+    const hint = page.getByTestId('nodes-add-hint');
+    const idle = (await hint.textContent()) ?? '';
+
+    const colors = () =>
+      card.evaluate((el) => {
+        const probe = document.createElement('i');
+        probe.style.color = 'var(--accent)';
+        probe.style.backgroundColor = 'var(--accent-soft)';
+        document.body.append(probe);
+        const p = getComputedStyle(probe);
+        const out = { accent: p.color, soft: p.backgroundColor };
+        probe.remove();
+        const c = getComputedStyle(el);
+        return { ...out, border: c.borderTopColor, bg: c.backgroundColor };
+      });
+
+    const before = await colors();
+    expect(before.border, 'в покое рамка не акцентная').not.toBe(before.accent);
+
+    const link = uniqueLink();
+    const dt = await page.evaluateHandle((content) => {
+      const d = new DataTransfer();
+      d.items.add(new File([content], 'drop.conf', { type: 'text/plain' }));
+      return d;
+    }, link);
+
+    await card.dispatchEvent('dragover', { dataTransfer: dt });
+    await expect(card).toHaveClass(/add-dragging/);
+    await expect
+      .poll(async () => {
+        const c = await colors();
+        return c.border === c.accent && c.bg === c.soft;
+      })
+      .toBe(true);
+    expect(((await hint.textContent()) ?? '').trim()).not.toBe(idle.trim());
+
+    await card.dispatchEvent('dragleave', { dataTransfer: dt });
+    await expect(card).not.toHaveClass(/add-dragging/);
+    expect(((await hint.textContent()) ?? '').trim()).toBe(idle.trim());
+
+    await card.dispatchEvent('dragover', { dataTransfer: dt });
+    const sent = page.waitForRequest(isPreview);
+    await card.dispatchEvent('drop', { dataTransfer: dt });
+    const body = (await sent).postDataJSON() as { files: { name: string }[] };
+    expect(body.files.map((f) => f.name)).toEqual(['drop.conf']);
+    await expect(card).not.toHaveClass(/add-dragging/);
+    await expect(page.getByTestId('nodes-preview-my')).toBeVisible({ timeout: T.action });
+
+    await guard.assertClean();
+  });
+}
+
+test('config-add: новый ввод заменяет прошлый — показан результат последнего', async ({ page }) => {
+  // Отмена прошлого запроса (AbortController) намеренна и в сети выглядит как оборванный
+  // запрос, который сборщик консоли считает нарушением, поэтому здесь он не подключается
+  await openAddCard(page);
+  const input = page.locator('#nodes-add-input');
+  const first = page.waitForRequest(isPreview);
+  await input.fill(uniqueLink());
+  await first;
+  await input.fill('hello world');
+  await expect(page.getByTestId('nodes-preview-error')).toBeVisible({ timeout: T.action });
+  await expect(page.getByTestId('nodes-preview-my')).toHaveCount(0);
+  await expect(page.getByTestId('nodes-add-submit')).toBeDisabled();
+});
+
+test('config-add: уже добавленный узел помечен, Добавить неактивна', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.goto('/', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  await page.locator('.main-content').first().waitFor({ state: 'visible', timeout: T.page });
+  await resetDraft(page);
+  const link = await addDraftNode(page);
+
+  await openAddCard(page);
+  await page.locator('#nodes-add-input').fill(link);
+  await expect(page.getByTestId('nodes-preview-my')).toBeVisible({ timeout: T.action });
+  await page.getByTestId('nodes-preview-my-toggle').click();
+  await expect(page.getByTestId('nodes-preview-nodes').locator('.chip-default')).toHaveCount(1);
+  await expect(page.getByTestId('nodes-add-submit')).toBeDisabled();
+
+  await guard.assertClean();
+});
+
+test('config-add: на 390 px длинный ввод и все строки предпросмотра не дают горизонтальной прокрутки', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await openAddCard(page, 390);
+  const input = page.locator('#nodes-add-input');
+  await input.fill(`${BAD_SUB}\n${uniqueLink()}\nvless://${'a'.repeat(1500)}\nhello world`);
+  await expect(page.getByTestId('nodes-preview-errors')).toBeVisible({ timeout: T.save });
+  await expect(page.getByTestId('nodes-preview-my')).toBeVisible();
+  await page.getByTestId('nodes-preview-my-toggle').click();
+  await expect(page.getByTestId('nodes-preview-nodes')).toBeVisible();
+
+  const m = await page.evaluate(() => {
+    const root = document.documentElement;
+    const card = document.querySelector('[data-testid="nodes-add"]') as HTMLElement;
+    const field = document.getElementById('nodes-add-input') as HTMLElement;
+    return {
+      page: root.scrollWidth - root.clientWidth,
+      card: card.scrollWidth - card.clientWidth,
+      fieldH: field.getBoundingClientRect().height,
+      fieldMax: parseFloat(getComputedStyle(field).maxHeight)
+    };
+  });
+  expect(m.page, 'горизонтальная прокрутка страницы').toBeLessThanOrEqual(0);
+  expect(m.card, 'содержимое карточки шире неё').toBeLessThanOrEqual(0);
+  expect(m.fieldH, 'поле не выше восьми строк').toBeLessThanOrEqual(m.fieldMax + 1);
+
+  await guard.assertClean();
+});
+
+test('config-add: пустой список источников — CTA переводит фокус в поле', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.goto('/', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  await page.locator('.main-content').first().waitFor({ state: 'visible', timeout: T.page });
+  // Пустое состояние зависит от стенда: при непустом списке его нет, сценарий не применим
+  test.skip((await sourcesCount(page)) > 0, 'на стенде есть источники: пустого состояния нет');
+  await openAddCard(page);
+  await page.getByTestId('nodes-tab').locator('.empty-state button').click();
+  await expect(page.locator('#nodes-add-input')).toBeFocused();
   await guard.assertClean();
 });
