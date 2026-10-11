@@ -459,6 +459,199 @@ for (const lang of ["ru", "en"]) {
   }
 }
 
+// --- 6. Список источников и узлов (план 145-14) -----------------------------
+
+const CARD = `${SRC}/components/config/nodes/SourceCard.svelte`;
+const ROW = `${SRC}/components/config/nodes/NodeRow.svelte`;
+const TAB = `${SRC}/components/config/nodes/NodesTab.svelte`;
+const VIEW_TS = `${SRC}/lib/nodesView.ts`;
+
+const card = read(CARD);
+const row = read(ROW);
+const tab = read(TAB);
+const view = read(VIEW_TS);
+
+for (const lit of [
+  'role="progressbar"',
+  "aria-valuenow",
+  "aria-expanded",
+  'rel="noopener noreferrer"',
+  'target="_blank"',
+  'data-testid="source-status-cabinet"',
+  "refreshSource(",
+  "updateSource(",
+  "revealUrl(",
+  "isDeviceRejected(",
+  "safeHttpUrl(",
+]) {
+  expect(card.includes(lit), `SourceCard.svelte: нет ${lit}`);
+}
+// ссылки провайдера: каждая с target=_blank несёт rel noopener noreferrer
+expect(
+  (card.match(/target="_blank"/g) ?? []).length ===
+    (card.match(/rel="noopener noreferrer"/g) ?? []).length,
+  "SourceCard.svelte: у ссылки с target=_blank нет rel=noopener noreferrer",
+);
+// ссылки кабинета и поддержки берутся только из safeHttpUrl, не из сырых полей meta
+expect(
+  !/href=\{(?:meta|source)[.?]/.test(card),
+  "SourceCard.svelte: href берётся из сырого поля источника, а не из safeHttpUrl",
+);
+// полный URL подписки не хранится в сторе и не пишется в журнал
+expect(
+  !/console\.|localStorage|sessionStorage|\.set\(\s*revealedUrl/.test(card),
+  "SourceCard.svelte: полный URL подписки не должен попадать в журнал или хранилище",
+);
+expect(
+  !/revealedUrl\s*=\s*\$state<string \| null>\(\s*source/.test(card),
+  "SourceCard.svelte: revealedUrl инициализируется из представления",
+);
+
+for (const [name, src] of [
+  ["SourceCard.svelte", card],
+  ["NodeRow.svelte", row],
+  ["NodesTab.svelte", tab],
+]) {
+  expect(!/\{@html/.test(src), `${name}: {@html}`);
+  expect(!/on:click|\$:\s/.test(src), `${name}: устаревший синтаксис Svelte 4`);
+  expect(
+    !/--bg-surface-hover|--color-primary/.test(src),
+    `${name}: неопределённый токен (--bg-surface-hover / --color-primary)`,
+  );
+  expect(
+    !/class="[^"]*\bbadge\b/.test(src),
+    `${name}: пометки узлов — .chip, а не .badge`,
+  );
+}
+
+// узел: приглушение цветом без opacity, без переключателей и флажков, без --danger
+expect(row.includes("var(--fg-dim)"), "NodeRow.svelte: нет var(--fg-dim)");
+expect(!/opacity/.test(row), "NodeRow.svelte: приглушение прозрачностью");
+expect(
+  !/<input|role="switch"|toggle-switch|type="checkbox"/.test(row),
+  "NodeRow.svelte: у узла нет переключателей и флажков ядер (D-17)",
+);
+expect(!/--danger/.test(row), "NodeRow.svelte: --danger в пометках узла");
+expect(
+  /chip chip-info/.test(row) && /chip chip-warning/.test(row),
+  "NodeRow.svelte: «только <ядро>» — chip-info, «не поддерживается» — chip-warning",
+);
+expect(
+  !/\bcred|secret|password/i.test(row),
+  "NodeRow.svelte: учётные данные узла не показываются (D-34)",
+);
+
+// вкладка: сегмент ядра показывается только при двух установленных ядрах
+expect(
+  tab.includes('data-testid="nodes-kernel-segment"') &&
+    /\{#if both\}/.test(tab) &&
+    /const both = \$derived\(installed\.xray && installed\.mihomo\)/.test(tab),
+  "NodesTab.svelte: сегмент ядра не привязан к двум установленным ядрам",
+);
+
+// nodesView.ts: экспорт и таблица соответствия статусов
+for (const name of [
+  "kernelStatusView",
+  "nodesForKernel",
+  "trafficLevel",
+  "refreshToast",
+  "safeHttpUrl",
+  "statusLabel",
+]) {
+  expect(
+    new RegExp(`export function ${name}\\(`).test(view),
+    `nodesView.ts: нет ${name}`,
+  );
+}
+expect(
+  /new URL\(raw\)/.test(view) && /'http:'/.test(view) && /'https:'/.test(view),
+  "nodesView.ts: safeHttpUrl не проверяет схему через new URL",
+);
+const STATUS_VARIANT = {
+  not_installed: "idle",
+  disabled: "idle",
+  refused: "stopped",
+  deferred: "warning",
+  rejected: "warning",
+  provider_error: "warning",
+  network: "warning",
+  draft: "info",
+  stopped: "idle",
+  ready: "running",
+  ok: "running",
+  ok_delta: "running",
+  none: "idle",
+};
+const usedStatus = new Map();
+for (const m of view.matchAll(
+  /view\(\s*'(running|stopped|warning|idle|info)',\s*'([a-z_]+)'/g,
+)) {
+  usedStatus.set(m[2], m[1]);
+}
+for (const [key, variant] of Object.entries(STATUS_VARIANT)) {
+  expect(
+    usedStatus.get(key) === variant,
+    `nodesView.ts: статус ${key} должен быть ${variant}, а не ${usedStatus.get(key)}`,
+  );
+}
+expect(
+  [...usedStatus.keys()].every((k) => k in STATUS_VARIANT),
+  "nodesView.ts: появился статус, которого нет в таблице check-config-ui.js",
+);
+expect(
+  /ratio >= 1\)\s*return 'full'/.test(view) &&
+    /ratio >= 0\.9\)\s*return 'warning'/.test(view),
+  "nodesView.ts: пороги индикатора трафика — 90% и 100%",
+);
+
+// словари: статусы, итоги обновления, счётчики и плюрализация
+const refreshKeys = [...view.matchAll(/'(cfg\.nodes\.refresh_[a-z_]+)'/g)].map(
+  (m) => m[1],
+);
+expect(
+  refreshKeys.length >= 7,
+  "nodesView.ts: не все итоги ручного обновления",
+);
+for (const lang of ["ru", "en"]) {
+  const dict = JSON.parse(read(`${SRC}/locales/${lang}.json`));
+  const has = (k) => typeof dict[k] === "string" && dict[k].trim() !== "";
+  for (const key of Object.keys(STATUS_VARIANT)) {
+    expect(
+      has(`cfg.nodes.status.${key}`),
+      `${lang}.json: нет cfg.nodes.status.${key}`,
+    );
+  }
+  for (const key of new Set(refreshKeys)) {
+    expect(has(key), `${lang}.json: нет ${key}`);
+  }
+  for (const unit of ["now", "minutes", "hours", "days"]) {
+    expect(
+      has(`cfg.nodes.ago_${unit}`),
+      `${lang}.json: нет cfg.nodes.ago_${unit}`,
+    );
+  }
+  for (const key of [
+    "cfg.nodes.search_empty",
+    "cfg.nodes.search_placeholder",
+    "cfg.nodes.my_empty",
+    "cfg.nodes.no_nodes",
+    "cfg.nodes.kernel_segment_aria",
+    "cfg.nodes.cabinet",
+    "cfg.nodes.support",
+  ]) {
+    expect(has(key), `${lang}.json: нет ${key}`);
+  }
+  for (const base of [
+    "cfg.nodes.sources_count",
+    "cfg.nodes.nodes_count",
+    "cfg.nodes.stubs_unused",
+  ]) {
+    for (const suffix of ["_one", "_few", "_many"]) {
+      expect(has(base + suffix), `${lang}.json: нет формы ${base}${suffix}`);
+    }
+  }
+}
+
 if (errors.length > 0) {
   console.error("check-config-ui: найдено нарушений: " + errors.length);
   for (const e of errors) console.error("  - " + e);
