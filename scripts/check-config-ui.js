@@ -22,6 +22,12 @@
  *    плейсхолдеры в них — только известные параметры, у счётчиков через $tp есть
  *    формы _one/_few/_many в обоих словарях; разметка компонентов (id поля, отмена
  *    запроса, aria-live, раскрытие, «Подробности», файлы).
+ * 6. Список источников и узлов (карточка, строка узла, таблица статусов StatusBadge).
+ * 7. Модали (план 145-15): правка узла идёт по исходному тексту через nodeRaw →
+ *    previewNode → saveNode с отменой запроса; настройки подписки — Select из проекта,
+ *    только изменённые поля, без sockopt и флажков ядер; диагностика — <pre> с
+ *    переносом, «Скопировать» копирует показанный текст, «Показать ещё 50»; действия
+ *    карточки и строки узла; удаление через showConfirm; полнота словарей.
  *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
@@ -649,6 +655,218 @@ for (const lang of ["ru", "en"]) {
     for (const suffix of ["_one", "_few", "_many"]) {
       expect(has(base + suffix), `${lang}.json: нет формы ${base}${suffix}`);
     }
+  }
+}
+
+// --- 7. Модали: правка узла, настройки подписки, диагностика, удаление -------
+
+const NODES_DIR = `${SRC}/components/config/nodes`;
+const editModal = read(`${NODES_DIR}/NodeEditModal.svelte`);
+const settingsModal = read(`${NODES_DIR}/SourceSettingsModal.svelte`);
+const diagModal = read(`${NODES_DIR}/SourceDiagnosticsModal.svelte`);
+const cardSrc = read(`${NODES_DIR}/SourceCard.svelte`);
+const rowSrc = read(`${NODES_DIR}/NodeRow.svelte`);
+
+// правка узла: исходный текст → тот же распознаватель → запись с ревизией; форм по протоколам нет
+for (const call of [
+  "nodeRaw(",
+  "previewNode(",
+  "saveNode(",
+  "AbortController",
+]) {
+  expect(editModal.includes(call), `NodeEditModal.svelte: нет ${call}`);
+}
+expect(
+  /<textarea[^>]*\bid="\{uid\}-text"/.test(editModal) &&
+    /for="\{uid\}-text"/.test(editModal),
+  "NodeEditModal.svelte: у поля «Исходный текст» нет связанной подписи (label for)",
+);
+expect(
+  /mode="single"/.test(editModal),
+  "NodeEditModal.svelte: предпросмотр не в режиме одного узла",
+);
+expect(
+  /DEBOUNCE_MS\s*=\s*600/.test(editModal),
+  "NodeEditModal.svelte: дебаунс предпросмотра не 600 мс",
+);
+expect(
+  !/<select\b/.test(editModal) &&
+    !/vless|vmess|trojan|hysteria/i.test(editModal),
+  "NodeEditModal.svelte: формы под протоколы запрещены (D-13)",
+);
+expect(
+  !/localStorage|sessionStorage|console\./.test(
+    editModal + settingsModal + diagModal,
+  ),
+  "модали: исходный текст и адрес не кладутся в хранилище браузера и не логируются (T-145-40)",
+);
+
+// настройки подписки
+expect(
+  /import Select from/.test(settingsModal) && !/<select\b/.test(settingsModal),
+  "SourceSettingsModal.svelte: только Select.svelte, нативного <select> нет",
+);
+expect(
+  settingsModal.includes("updateSource(") &&
+    settingsModal.includes("revealUrl("),
+  "SourceSettingsModal.svelte: нет updateSource( или revealUrl(",
+);
+expect(
+  !/sockopt|xray_enabled|mihomo_enabled|type="checkbox"/i.test(settingsModal),
+  "SourceSettingsModal.svelte: sockopt и флажки ядер запрещены (U-03, D-09)",
+);
+expect(
+  /<details[\s\S]*?cfg\.nodes\.advanced[\s\S]*?<\/details>/.test(
+    settingsModal,
+  ) && /cfg\.nodes\.hwid_label/.test(settingsModal),
+  "SourceSettingsModal.svelte: HWID не в блоке «Дополнительно»",
+);
+expect(
+  /\.filter\(\(line\) => line !== ''\)/.test(settingsModal),
+  "SourceSettingsModal.svelte: пустые строки исключений не отбрасываются",
+);
+expect(
+  /EXCLUDE_MAX_ROWS\s*=\s*8/.test(settingsModal),
+  "SourceSettingsModal.svelte: textarea исключений растёт не до 8 строк",
+);
+const intervalKeys = ["provider", "1", "3", "6", "12", "24", "off"];
+for (const k of intervalKeys) {
+  expect(
+    settingsModal.includes(`'cfg.nodes.interval_${k}'`),
+    `SourceSettingsModal.svelte: нет варианта интервала ${k}`,
+  );
+}
+
+// диагностика
+expect(
+  diagModal.includes("fetchDiagnostics(") && /<pre\b/.test(diagModal),
+  "SourceDiagnosticsModal.svelte: нет fetchDiagnostics( или <pre",
+);
+expect(
+  !diagModal.includes("{@html"),
+  "SourceDiagnosticsModal.svelte: {@html} запрещён",
+);
+expect(
+  /copy\(headersText\)/.test(diagModal) && /copy\(bodyText\)/.test(diagModal),
+  "SourceDiagnosticsModal.svelte: «Скопировать» должна копировать показанный текст",
+);
+expect(
+  /PAGE_FIRST/.test(diagModal) && /PAGE_STEP/.test(diagModal),
+  "SourceDiagnosticsModal.svelte: нет «Показать ещё 50» после 100 строк",
+);
+expect(
+  /overflow-wrap:\s*anywhere/.test(diagModal) &&
+    /\.dg-pre[\s\S]*?font-size:\s*var\(--font-size-xs\)/.test(diagModal),
+  "SourceDiagnosticsModal.svelte: <pre> без переноса или не mono 12px",
+);
+expect(
+  /diag\.empty/.test(diagModal) && /cfg\.nodes\.diag_all_ok/.test(diagModal),
+  "SourceDiagnosticsModal.svelte: нет пустого состояния или «Все строки разобраны»",
+);
+expect(
+  /variant="pill"/.test(diagModal) && /SegmentedControl/.test(diagModal),
+  "SourceDiagnosticsModal.svelte: сегмент ядер и вкладки pill",
+);
+
+// карточка и строка узла
+expect(
+  cardSrc.includes("showConfirm(") &&
+    cardSrc.includes("deleteSource(") &&
+    cardSrc.includes("deleteNode("),
+  "SourceCard.svelte: удаление подписки и узла идёт не через showConfirm( + deleteSource( / deleteNode(",
+);
+expect(
+  /\{:else\}[\s\S]*SourceSettingsModal[\s\S]*SourceDiagnosticsModal/.test(
+    cardSrc,
+  ) && /\{#if isMy\}[\s\S]*NodeEditModal/.test(cardSrc),
+  "SourceCard.svelte: «Настройки» и «Диагностика» — только у подписок, «Изменить» — только у «Моих узлов»",
+);
+expect(
+  /node\.entry_id && \(onedit \|\| ondelete\)/.test(rowSrc),
+  "NodeRow.svelte: действия строки — только у узлов с entry_id (Мои узлы)",
+);
+expect(
+  /aria-label=\{\$t\('cfg\.nodes\.edit_aria'/.test(rowSrc) &&
+    /aria-label=\{\$t\('cfg\.nodes\.delete_aria'/.test(rowSrc),
+  "NodeRow.svelte: у icon-кнопок нет aria-label",
+);
+
+// запрещённые токены и хардкодные цвета в новых файлах
+for (const [name, src] of [
+  ["NodeEditModal.svelte", editModal],
+  ["SourceSettingsModal.svelte", settingsModal],
+  ["SourceDiagnosticsModal.svelte", diagModal],
+]) {
+  expect(
+    !/--bg-surface-hover|--color-primary/.test(src),
+    `${name}: неопределённые токены --bg-surface-hover / --color-primary`,
+  );
+  expect(
+    !/on:click|\$:\s/.test(src),
+    `${name}: синтаксис Svelte 4 (on:click, $:)`,
+  );
+  expect(
+    !/style="[^"]*#[0-9a-fA-F]{3,8}/.test(src),
+    `${name}: цвет в inline-стиле`,
+  );
+}
+
+// словари: ключи модалей в обоих языках, формы счётчика удаления подписки
+const MODAL_KEYS = [
+  "btn_edit",
+  "btn_delete",
+  "btn_settings",
+  "btn_diag",
+  "btn_delete_source",
+  "edit_title",
+  "edit_name",
+  "edit_text",
+  "edit_warning",
+  "edit_aria",
+  "delete_aria",
+  "save_draft",
+  "save_failed",
+  "cancel",
+  "settings_title",
+  "settings_name",
+  "settings_url",
+  "settings_exclude",
+  "settings_interval",
+  "interval_provider",
+  "interval_1",
+  "interval_3",
+  "interval_6",
+  "interval_12",
+  "interval_24",
+  "interval_off",
+  "advanced",
+  "hwid_label",
+  "hwid_placeholder",
+  "diag_title",
+  "diag_empty",
+  "diag_all_ok",
+  "diag_no_response",
+  "diag_meta_none",
+  "tab_report",
+  "tab_headers",
+  "tab_raw",
+  "delete_sub_title",
+  "delete_sub_btn",
+  "delete_node_title",
+  "delete_node_body",
+  "delete_node_btn",
+];
+for (const lang of ["ru", "en"]) {
+  const dict = JSON.parse(read(`${SRC}/locales/${lang}.json`));
+  const has = (k) => typeof dict[k] === "string" && dict[k].trim() !== "";
+  for (const key of MODAL_KEYS) {
+    expect(has(`cfg.nodes.${key}`), `${lang}.json: нет cfg.nodes.${key}`);
+  }
+  for (const suffix of ["_one", "_few", "_many"]) {
+    expect(
+      has(`cfg.nodes.delete_sub_body${suffix}`),
+      `${lang}.json: нет формы cfg.nodes.delete_sub_body${suffix}`,
+    );
   }
 }
 
