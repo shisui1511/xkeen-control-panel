@@ -2,15 +2,90 @@
   import { t } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import {
-    layerSnapshot,
+    visibleNotices,
     dismissNotice,
     handleLayerError,
     type LayerNotice
   } from '../../lib/configLayer';
 
-  type Shown = { notice: LayerNotice; tone: 'warning' | 'error'; text: string };
+  type Shown = {
+    notice: LayerNotice;
+    tone: 'warning' | 'error';
+    text: string;
+    // Ссылка личного кабинета провайдера (только http/https), чтобы освободить слот устройства
+    cabinet?: string;
+  };
 
   const KERNEL_LABELS: Record<string, string> = { xray: 'Xray', mihomo: 'Mihomo' };
+
+  // Провайдер освобождает слот устройства только в кабинете: для этих кодов отказ — «устройство отклонено»
+  const DEVICE_REJECTED_CODES = ['all_stubs', 'http_auth'];
+
+  /** Ссылка кабинета: разбирается как адрес и принимается только со схемой http или https. */
+  function cabinetUrl(raw: string | undefined): string | undefined {
+    if (!raw) return undefined;
+    try {
+      const u = new URL(raw);
+      return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function kernelOf(n: LayerNotice): string {
+    const raw = n.kernel ?? n.params?.kernel ?? n.id.split(':')[2] ?? '';
+    return KERNEL_LABELS[raw] ?? raw;
+  }
+
+  /** Через сколько повтор: минуты из params.in, от часа — часы. */
+  function inText(raw: string | undefined): string {
+    const minutes = Number(raw);
+    if (!Number.isFinite(minutes) || minutes <= 0) return $t('cfg.notice.in_soon');
+    if (minutes >= 60) return $t('cfg.notice.in_hours', { n: Math.round(minutes / 60) });
+    return $t('cfg.notice.in_minutes', { n: Math.round(minutes) });
+  }
+
+  // Причина отказа провайдера: перевод по коду, иначе сам код
+  function providerReason(code: string): string {
+    const key = 'cfg.nodes.err.' + code + '.title';
+    const text = $t(key);
+    return text === key ? code : text;
+  }
+
+  function describeSource(n: LayerNotice): Shown | null {
+    const p = n.params ?? {};
+    const name = p.name ?? '';
+    if (n.id.startsWith('source_rejected:')) {
+      const snapshot = p.date ? $t('cfg.notice.snapshot_from', { date: p.date }) : '';
+      const code = p.code ?? '';
+      const text = DEVICE_REJECTED_CODES.includes(code)
+        ? $t('cfg.notice.source_rejected', { name, snapshot })
+        : $t('cfg.notice.source_provider_error', { name, reason: providerReason(code), snapshot });
+      return { notice: n, tone: 'warning', text, cabinet: cabinetUrl(p.web_url) };
+    }
+    if (n.id.startsWith('source_deferred:')) {
+      return { notice: n, tone: 'warning', text: $t('cfg.notice.source_deferred', { name }) };
+    }
+    if (n.id.startsWith('source_network:')) {
+      return {
+        notice: n,
+        tone: 'warning',
+        text: $t('cfg.notice.source_network', { name, in: inText(p.in) })
+      };
+    }
+    if (n.id.startsWith('source_kernel_refused:')) {
+      return {
+        notice: n,
+        tone: 'error',
+        text: $t('cfg.notice.source_kernel_refused', {
+          kernel: kernelOf(n),
+          name,
+          reason: p.reason ?? n.reason ?? ''
+        })
+      };
+    }
+    return null;
+  }
 
   // Уведомления известных видов; неизвестные идентификаторы не показываем
   function describe(n: LayerNotice): Shown | null {
@@ -34,12 +109,10 @@
         })
       };
     }
-    return null;
+    return describeSource(n);
   }
 
-  const shown = $derived(
-    ($layerSnapshot?.notices ?? []).map(describe).filter((x): x is Shown => x !== null)
-  );
+  const shown = $derived($visibleNotices.map(describe).filter((x): x is Shown => x !== null));
 
   async function dismiss(id: string) {
     try {
@@ -52,10 +125,21 @@
 
 <!-- Закрытие хранится на сервере: уведомление не вернётся после перезагрузки и в других вкладках (D-08) -->
 <section class="config-notices" data-testid="config-notices">
-  {#each shown as { notice, tone, text } (notice.id)}
+  {#each shown as { notice, tone, text, cabinet } (notice.id)}
     <div class="alert alert-{tone} alert-dismissible" role="alert" data-notice={notice.id}>
       <Icon name="warning" size={16} />
-      <span class="notice-text">{text}</span>
+      <span class="notice-text"
+        >{text}
+        {#if cabinet}
+          <a
+            class="notice-link"
+            href={cabinet}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="notice-cabinet-link">{$t('cfg.notice.cabinet_link')}</a
+          >
+        {/if}</span
+      >
       <button
         type="button"
         class="alert-close-btn"
@@ -94,5 +178,12 @@
   .notice-text {
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+
+  .notice-link {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    white-space: nowrap;
   }
 </style>

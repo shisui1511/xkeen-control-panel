@@ -145,7 +145,33 @@ export function formatBadgeCount(n: number): string {
   return n > 99 ? '99+' : String(Math.floor(n));
 }
 
-export const navBadgeCount: Readable<string> = derived(draftChanges, (n) => formatBadgeCount(n));
+/** Известные виды уведомлений слоя: точные идентификаторы и префиксы (id вида `вид:<источник>:<ядро>`). */
+const NOTICE_IDS = ['schema_reset', 'recovered_from_journal', 'journal_recovery_failed'];
+const NOTICE_PREFIXES = [
+  'build_failed',
+  'source_rejected:',
+  'source_deferred:',
+  'source_kernel_refused:',
+  'source_network:'
+];
+
+/** Показывается ли уведомление: незнакомые идентификаторы не рисуются и в бейдж не попадают. */
+export function isKnownNoticeId(id: string): boolean {
+  return NOTICE_IDS.includes(id) || NOTICE_PREFIXES.some((p) => id.startsWith(p));
+}
+
+/** Уведомления, которые видит пользователь (в том же порядке, что в снимке). */
+export const visibleNotices: Readable<LayerNotice[]> = derived(layerSnapshot, (s) =>
+  (s?.notices ?? []).filter((n) => isKnownNoticeId(n.id))
+);
+
+/** Бейдж меню «Конфигурация»: изменения черновика плюс видимые уведомления слоя (D-29). */
+export const badgeTotal: Readable<number> = derived(
+  [draftChanges, visibleNotices],
+  ([changes, notices]) => changes + notices.length
+);
+
+export const navBadgeCount: Readable<string> = derived(badgeTotal, (n) => formatBadgeCount(n));
 
 export const filesByPath: Readable<Map<string, LayerFile>> = derived(layerSnapshot, (s) => {
   const map = new Map<string, LayerFile>();
@@ -243,7 +269,9 @@ export function reduceLayerEvent(
       const steps = base.steps.some((s) => s.id === step.id)
         ? base.steps.map((s) => (s.id === step.id ? { ...s, ...step } : s))
         : [...base.steps, step];
-      return { ...state, apply: { ...base, running: true, steps } };
+      // Фоновое обновление источника (source_refresh) несёт trigger в данных шага
+      const trigger = step.trigger ?? base.trigger;
+      return { ...state, apply: { ...base, running: true, trigger, steps } };
     }
     case 'apply_done': {
       return { ...state, apply: normalizeApply(data) };
@@ -258,9 +286,30 @@ export function reduceLayerEvent(
 
 // --- Загрузка состояния и SSE ---
 
-const EVENT_NAMES = ['snapshot', 'draft', 'files', 'apply_step', 'apply_done', 'notices'] as const;
+const EVENT_NAMES = [
+  'snapshot',
+  'draft',
+  'files',
+  'apply_step',
+  'apply_done',
+  'notices',
+  'sources'
+] as const;
 const RETRY_MIN_MS = 3000;
 const RETRY_MAX_MS = 30000;
+
+// Обработчики события sources: представление источников перечитывает configSources.ts
+// (регистрируется при загрузке его модуля; configLayer его не импортирует — цикла нет)
+const sourcesHandlers = new Set<() => void>();
+
+/** Подписка на событие SSE `sources`; возвращает функцию отписки. */
+export function onLayerEvent(name: 'sources', fn: () => void): () => void {
+  if (name !== 'sources') return () => {};
+  sourcesHandlers.add(fn);
+  return () => {
+    sourcesHandlers.delete(fn);
+  };
+}
 
 let source: EventSource | null = null;
 let started = false;
@@ -275,6 +324,11 @@ function syncStartedHere(): void {
 }
 
 function applyEvent(name: string, data: unknown): void {
+  if (name === 'sources') {
+    // Состояния слоя событие не меняет: оно только сообщает, что источники обновились
+    for (const fn of [...sourcesHandlers]) fn();
+    return;
+  }
   eventSeq++;
   layerSnapshot.update((s) => reduceLayerEvent(s, name, data));
   if (name === 'snapshot') {
@@ -380,12 +434,13 @@ export function stopConfigLayer(): void {
 
 // --- Клиент маршрутов ---
 
-interface DraftAck {
+export interface DraftAck {
   draft_revision: number;
   draft_changes: number;
 }
 
-function post<T>(path: string, body: unknown): Promise<T> {
+/** POST с JSON-телом через общий клиент (токен CSRF и разбор конверта ошибок). */
+export function post<T>(path: string, body: unknown): Promise<T> {
   return apiFetchJSON<T>(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -393,11 +448,13 @@ function post<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-function currentRevision(): number {
+/** Ревизия черновика из снимка слоя. */
+export function currentRevision(): number {
   return get(layerSnapshot)?.draft_revision ?? 0;
 }
 
-function applyDraftAck(ack: DraftAck): void {
+/** Применяет подтверждение правки черновика (ревизия и число изменений) к снимку. */
+export function applyDraftAck(ack: DraftAck): void {
   layerSnapshot.update((s) => reduceLayerEvent(s, 'draft', ack));
 }
 

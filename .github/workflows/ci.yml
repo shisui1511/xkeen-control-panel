@@ -283,6 +283,9 @@ jobs:
       - name: Check sources API
         run: node scripts/check-sources-api.js
 
+      - name: Check config UI
+        run: node scripts/check-config-ui.js
+
       - name: Check fixtures anonymized
         run: node scripts/check-fixtures-anonymized.js
 

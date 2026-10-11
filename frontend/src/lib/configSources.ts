@@ -5,6 +5,7 @@
 
 import { writable, get } from 'svelte/store';
 import { apiFetchJSON } from './api';
+import { onLayerEvent, post, currentRevision, applyDraftAck, type DraftAck } from './configLayer';
 
 // --- Типы контракта ---
 
@@ -256,4 +257,128 @@ export async function loadSources(): Promise<void> {
     if (seq !== loadSeq) return;
     if (get(sourcesView) === null) sourcesStatus.set('error');
   }
+}
+
+// Событие SSE sources — представление изменилось (фоновое обновление, отложенная запись):
+// перечитываем с дебаунсом, без второго потока событий. Пока представление ни разу не
+// загружалось, перечитывать нечего. configLayer этот модуль не импортирует — цикла нет.
+const SOURCES_DEBOUNCE_MS = 300;
+let sourcesTimer: ReturnType<typeof setTimeout> | null = null;
+
+onLayerEvent('sources', () => {
+  if (get(sourcesView) === null) return;
+  if (sourcesTimer !== null) clearTimeout(sourcesTimer);
+  sourcesTimer = setTimeout(() => {
+    sourcesTimer = null;
+    void loadSources();
+  }, SOURCES_DEBOUNCE_MS);
+});
+
+// --- Клиент маршрутов ---
+
+export interface PreviewFile {
+  name: string;
+  content: string;
+}
+
+/** Итог добавления: событие черновика и число добавленного. */
+export interface AddResult extends DraftAck {
+  subscriptions: number;
+  nodes: number;
+}
+
+const BASE = '/api/configlayer/sources';
+
+function postJSON<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  return apiFetchJSON<T>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal
+  });
+}
+
+/**
+ * Правка черновика через маршрут источников: ревизия берётся из снимка слоя, по ответу
+ * обновляются ревизия и счётчик изменений, представление источников перечитывается.
+ * Ошибки (в т. ч. draft_conflict с code) пробрасываются: разбирает handleLayerError.
+ */
+async function editSources<T extends DraftAck>(
+  path: string,
+  body: Record<string, unknown>
+): Promise<T> {
+  const ack = await post<T>(`${BASE}/${path}`, { revision: currentRevision(), ...body });
+  applyDraftAck(ack);
+  void loadSources();
+  return ack;
+}
+
+/** Предпросмотр ввода поля «Добавить»; повторный ввод отменяет прошлый запрос через signal. */
+export function previewInput(
+  text: string,
+  files: PreviewFile[],
+  signal?: AbortSignal
+): Promise<PreviewView> {
+  return postJSON<PreviewView>(`${BASE}/preview`, { text, files }, signal);
+}
+
+/** «Добавить»: кладёт результат предпросмотра в черновик. */
+export function addPreview(token: string): Promise<AddResult> {
+  return editSources<AddResult>('add', { token });
+}
+
+export function updateSource(id: string, patch: SourcePatch): Promise<DraftAck> {
+  return editSources<DraftAck>('update', { id, patch });
+}
+
+export function deleteSource(id: string): Promise<DraftAck> {
+  return editSources<DraftAck>('delete', { id });
+}
+
+/** Ручное обновление подписки; ответ приходит после запроса к провайдеру. */
+export function refreshSource(id: string): Promise<RefreshOutcome> {
+  return post<RefreshOutcome>(`${BASE}/refresh`, { id });
+}
+
+/** Полный адрес подписки по явному действию «показать». */
+export async function revealUrl(id: string): Promise<string> {
+  const res = await post<{ url: string }>(`${BASE}/reveal`, { id });
+  return res.url;
+}
+
+export function fetchDiagnostics(id: string, kernel: KernelName): Promise<DiagView> {
+  return apiFetchJSON<DiagView>(
+    `${BASE}/diagnostics?id=${encodeURIComponent(id)}&kernel=${encodeURIComponent(kernel)}`
+  );
+}
+
+/** Предпросмотр правки одного узла «Моих узлов». */
+export function previewNode(
+  text: string,
+  entryId?: string,
+  signal?: AbortSignal
+): Promise<PreviewView> {
+  const body = entryId ? { text, entry_id: entryId } : { text };
+  return postJSON<PreviewView>(`${BASE}/nodes/preview`, body, signal);
+}
+
+/** Исходный текст узла целиком (секреты открыты — только по явному действию). */
+export function nodeRaw(entryId: string): Promise<NodeRaw> {
+  return post<NodeRaw>(`${BASE}/nodes/raw`, { entry_id: entryId });
+}
+
+/** Сохраняет узел «Моих узлов»; без entryId — новый. */
+export function saveNode(
+  entryId: string | undefined,
+  name: string,
+  text: string
+): Promise<DraftAck> {
+  return editSources<DraftAck>(
+    'nodes/save',
+    entryId ? { entry_id: entryId, name, text } : { name, text }
+  );
+}
+
+export function deleteNode(entryId: string): Promise<DraftAck> {
+  return editSources<DraftAck>('nodes/delete', { entry_id: entryId });
 }

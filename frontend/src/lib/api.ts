@@ -123,6 +123,8 @@ function attachErrorMeta(err: any, payload: any): void {
   if (!payload || typeof payload !== 'object') return;
   if (typeof payload.code === 'string') err.code = payload.code;
   if (typeof payload.detail === 'string') err.detail = payload.detail;
+  // Параметры ошибки источников (код + params, текст собирает фронтенд)
+  if (payload.params && typeof payload.params === 'object') err.params = payload.params;
   // Поля ответа гейта ядра (409 kernel_inactive): в текст попадают только через kernelGateMessage
   if (typeof payload.required === 'string') err.required = payload.required;
   if (typeof payload.active === 'string') err.active = payload.active;
