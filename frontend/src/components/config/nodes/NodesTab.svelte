@@ -8,6 +8,7 @@
   import { layerSnapshot } from '../../../lib/configLayer';
   import { sourcesView, sourcesStatus, loadSources } from '../../../lib/configSources';
   import type { KernelName } from '../../../lib/configSources';
+  import { chosenKernel, expandedSources, toggleExpanded } from '../../../lib/nodesView';
   import AddSourceField from './AddSourceField.svelte';
   import SourceCard from './SourceCard.svelte';
 
@@ -23,15 +24,10 @@
   const failed = $derived(!loading && $sourcesStatus === 'error' && $sourcesView === null);
   const empty = $derived(!loading && !failed && ($sourcesView?.sources.length ?? 0) === 0);
 
-  // Раскрытие карточек живёт здесь, а не в карточке: смена вкладки и перерисовка списка
-  // его не сбрасывают
-  let expandedIds = $state<Record<string, boolean>>({});
-  // Явный выбор ядра в сегменте; пока выбора нет, берётся ядро по умолчанию
-  let chosen = $state<KernelName | null>(null);
-
   const installed = $derived($sourcesView?.installed ?? { xray: false, mihomo: false });
   const both = $derived(installed.xray && installed.mihomo);
   const kernel = $derived.by<KernelName>(() => {
+    const chosen = $chosenKernel;
     if (chosen !== null && installed[chosen]) return chosen;
     const def = $sourcesView?.default_kernel;
     if ((def === 'xray' || def === 'mihomo') && installed[def]) return def;
@@ -78,7 +74,7 @@
             items={segmentItems}
             value={kernel}
             ariaLabel={$t('cfg.nodes.kernel_segment_aria')}
-            onchange={(v) => (chosen = v as KernelName)}
+            onchange={(v) => chosenKernel.set(v as KernelName)}
           />
         </div>
       {/if}
@@ -92,8 +88,8 @@
           {source}
           {kernel}
           {installed}
-          expanded={expandedIds[source.id] === true}
-          ontoggle={() => (expandedIds[source.id] = !expandedIds[source.id])}
+          expanded={$expandedSources[source.id] === true}
+          ontoggle={() => toggleExpanded(source.id)}
         />
       {/each}
     </div>

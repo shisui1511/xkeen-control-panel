@@ -3,7 +3,7 @@
 // (D-25), уровень индикатора трафика, итог ручного «Обновить» (D-08). Только данные и
 // ключи словарей: тексты собирают компоненты, поведение проверяют роутерные сценарии.
 
-import { readable } from 'svelte/store';
+import { readable, writable } from 'svelte/store';
 import type {
   KernelName,
   KernelStateView,
@@ -13,6 +13,20 @@ import type {
   VerdictView
 } from './configSources';
 import { sourceErrorText, type TFn } from './sourceErrors';
+
+// Состояние вкладки живёт на уровне модуля, а не компонента: вкладки раздела
+// «Конфигурация» размонтируются при смене, а раскрытие карточек и выбранное ядро
+// должны её пережить (UI-SPEC, E1).
+
+/** Раскрытые карточки источников по идентификатору. */
+export const expandedSources = writable<Record<string, boolean>>({});
+
+/** Явный выбор ядра в сегменте «Xray │ Mihomo»; null — берётся ядро по умолчанию. */
+export const chosenKernel = writable<KernelName | null>(null);
+
+export function toggleExpanded(id: string): void {
+  expandedSources.update((m) => ({ ...m, [id]: !m[id] }));
+}
 
 export type StatusVariant = 'running' | 'stopped' | 'warning' | 'idle' | 'info';
 
