@@ -17,6 +17,11 @@
  *    rel="noopener noreferrer"; ApplyProgress не открывается для source_refresh.
  * 4. Каркас: Config.svelte со вкладками и маршрутами; NodesTab; ключи i18n в обоих
  *    словарях.
+ * 5. Поле «Добавить» и предпросмотр: у каждого кода из sourceErrorCodes.json есть
+ *    непустые cfg.nodes.err.<код>.title и .hint в ru и en (и общий cfg.nodes.err.unknown),
+ *    плейсхолдеры в них — только известные параметры, у счётчиков через $tp есть
+ *    формы _one/_few/_many в обоих словарях; разметка компонентов (id поля, отмена
+ *    запроса, aria-live, раскрытие, «Подробности», файлы).
  *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
@@ -327,6 +332,130 @@ for (const lang of ["ru", "en"]) {
       v.trim().split(/\s+/).length <= 2 && !/[…]|\.\.\./.test(v),
       `${lang}.json: подпись ${key} длиннее двух слов или с многоточием`,
     );
+  }
+}
+
+// --- 5. Поле «Добавить», предпросмотр и тексты ошибок -----------------------
+
+const ADD_FIELD = `${SRC}/components/config/nodes/AddSourceField.svelte`;
+const ADD_PREVIEW = `${SRC}/components/config/nodes/AddPreview.svelte`;
+const ERRORS_TS = `${SRC}/lib/sourceErrors.ts`;
+const CODES = JSON.parse(read(`${SRC}/lib/sourceErrorCodes.json`));
+
+const field = read(ADD_FIELD);
+for (const lit of [
+  'id="nodes-add-input"',
+  'data-testid="nodes-add"',
+  "AbortController",
+  "onpaste",
+  'accept=".conf,.yaml,.yml,.json,.txt"',
+  "multiple",
+  "previewInput(",
+  "addPreview(",
+]) {
+  expect(field.includes(lit), `AddSourceField.svelte: нет ${lit}`);
+}
+// предпросмотр не пишет в черновик: из полей ввода вызывается только addPreview
+expect(
+  !/\b(updateSource|deleteSource|saveNode|deleteNode)\(/.test(field),
+  "AddSourceField.svelte: правит черновик не через кнопку «Добавить»",
+);
+expect(
+  !/localStorage|sessionStorage/.test(field),
+  "AddSourceField.svelte: вставленный текст не должен попадать в хранилище браузера",
+);
+
+const prev = read(ADD_PREVIEW);
+for (const lit of [
+  'aria-live="polite"',
+  'data-testid="nodes-preview"',
+  "aria-expanded",
+  "<details",
+]) {
+  expect(prev.includes(lit), `AddPreview.svelte: нет ${lit}`);
+}
+expect(!/\{@html/.test(prev), "AddPreview.svelte: {@html} в предпросмотре");
+
+const errTs = read(ERRORS_TS);
+for (const name of ["sourceErrorText", "verdictReason"]) {
+  expect(
+    new RegExp(`export function ${name}\\(`).test(errTs),
+    `sourceErrors.ts: нет ${name}`,
+  );
+}
+expect(
+  /export const SOURCE_ERROR_CODES/.test(errTs) &&
+    /cfg\.nodes\.err\.unknown/.test(errTs),
+  "sourceErrors.ts: нет SOURCE_ERROR_CODES или запасного текста cfg.nodes.err.unknown",
+);
+const paramList = /const PARAM_NAMES = \[([\s\S]*?)\];/.exec(errTs);
+const PARAMS = new Set(
+  paramList ? [...paramList[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]) : [],
+);
+expect(PARAMS.size > 0, "sourceErrors.ts: не найден список PARAM_NAMES");
+PARAMS.add("code");
+
+// Параметры, без которых текст теряет смысл (сервер передаёт их всегда)
+const NEEDS = {
+  http_auth: ["status"],
+  expired: ["date"],
+  dns_failed: ["host"],
+  unknown_scheme: ["scheme"],
+  yaml_error: ["line"],
+  json_error: ["line"],
+  wg_missing_key: ["key", "section"],
+  needs_mihomo: ["kernel_min"],
+  needs_xray: ["kernel_min"],
+};
+
+for (const lang of ["ru", "en"]) {
+  const dict = JSON.parse(read(`${SRC}/locales/${lang}.json`));
+  let checked = 0;
+  for (const code of [...CODES, "unknown"]) {
+    const title = dict[`cfg.nodes.err.${code}.title`];
+    const hint = dict[`cfg.nodes.err.${code}.hint`];
+    expect(
+      typeof title === "string" && title.trim() !== "",
+      `${lang}.json: нет cfg.nodes.err.${code}.title`,
+    );
+    expect(
+      typeof hint === "string" && hint.trim() !== "",
+      `${lang}.json: нет cfg.nodes.err.${code}.hint`,
+    );
+    checked++;
+    for (const text of [title, hint]) {
+      for (const m of String(text ?? "").matchAll(/\{([a-z_]+)\}/g)) {
+        expect(
+          PARAMS.has(m[1]),
+          `${lang}.json: cfg.nodes.err.${code} использует неизвестный параметр {${m[1]}}`,
+        );
+      }
+    }
+    for (const param of NEEDS[code] ?? []) {
+      expect(
+        `${title} ${hint}`.includes(`{${param}}`),
+        `${lang}.json: cfg.nodes.err.${code} не подставляет {${param}}`,
+      );
+    }
+  }
+  expect(
+    checked === CODES.length + 1,
+    `${lang}.json: проверены не все коды (${checked} из ${CODES.length + 1})`,
+  );
+  // счётчики через $tp: все три формы в словаре
+  for (const base of [
+    "cfg.nodes.preview_my",
+    "cfg.nodes.stubs",
+    "cfg.nodes.added_subs",
+    "cfg.nodes.added_nodes",
+    "cfg.nodes.preview_skipped",
+  ]) {
+    for (const suffix of ["_one", "_few", "_many"]) {
+      expect(
+        typeof dict[base + suffix] === "string" && dict[base + suffix] !== "",
+        `${lang}.json: нет формы ${base}${suffix}`,
+      );
+    }
   }
 }
 
