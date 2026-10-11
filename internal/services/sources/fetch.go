@@ -430,8 +430,18 @@ func (s *Service) fetchOutcome(ctx context.Context, rawURL, kernel, hwid string,
 	}
 	oc.release = release
 	oc.Nodes = p.Working
-	oc.Ref = &Ref{Hash: hash, FetchedAt: now, Format: p.Format, Total: p.Total, Usable: len(p.Working), Stubs: p.Stubs, Skipped: p.Skipped}
+	// Usable — узлов, которые ядро получит: полные дубли в ответе (один узел в
+	// нескольких конфигурациях Xray-JSON) схлопываются, как в наборе источника, иначе
+	// счётчик предпросмотра («57 для Xray») расходился бы с карточкой («20»).
+	oc.Ref = &Ref{Hash: hash, FetchedAt: now, Format: p.Format, Total: p.Total, Usable: usableCount(p.Working), Stubs: p.Stubs, Skipped: p.Skipped}
 	return oc, nil
+}
+
+// usableCount — число узлов ответа, которые получит ядро: полные дубли схлопнуты
+// так же, как в наборе источника (nodes.Uniq).
+func usableCount(working []nodes.Node) int {
+	keyed, _ := nodes.Uniq("", working)
+	return len(keyed)
 }
 
 // sourceHWID выбирает HWID запроса: свой HWID источника заменяет общий, источник

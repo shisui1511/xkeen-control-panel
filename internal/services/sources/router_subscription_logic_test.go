@@ -44,6 +44,17 @@ func rtNodes(t *testing.T, names ...string) []nodes.Node {
 	return out
 }
 
+// Счётчик «рабочих узлов» ответа считает полные дубли один раз: тот же узел в
+// нескольких конфигурациях Xray-JSON не раздувает «N для Xray» против карточки.
+func TestRouterUsableCountCollapsesDuplicates(t *testing.T) {
+	one := rtNodes(t, "vless_ws")
+	two := rtNodes(t, "vless_ws", "trojan_grpc")
+	list := append(append(append([]nodes.Node{}, one...), one...), two...)
+	if got := usableCount(list); got != 2 {
+		t.Fatalf("узлов в ответе %d (с дублями), счётчик %d, нужно 2", len(list), got)
+	}
+}
+
 func TestRouterClassifyTransportErrors(t *testing.T) {
 	const token = "pathtoken9999"
 	u := &url.URL{Scheme: "https", Host: "provider.invalid", Path: "/" + token}
