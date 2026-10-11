@@ -2890,6 +2890,8 @@
   "cfg.nodes.diag_error": "Не удалось загрузить диагностику",
   "cfg.nodes.diag_summary": "Разобрано узлов: {parsed} · заглушек: {stubs} · пропущено строк: {skipped}",
   "cfg.nodes.diag_meta": "Получено {date} · ответ HTTP {status}",
+  "cfg.nodes.diag_meta_none": "Попытка {date} · ответа от провайдера не было",
+  "cfg.nodes.diag_no_response": "Ответ провайдера не получен: проверьте ссылку, DNS и связь роутера",
   "cfg.nodes.diag_col_line": "Строка",
   "cfg.nodes.diag_col_reason": "Причина",
   "cfg.nodes.diag_col_fragment": "Фрагмент",

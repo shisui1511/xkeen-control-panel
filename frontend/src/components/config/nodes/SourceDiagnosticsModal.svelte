@@ -56,6 +56,8 @@
     (diag?.headers ?? []).map((h) => `${h.name}: ${h.value}`).join('\n')
   );
   const bodyText = $derived(diag?.body ?? '');
+  // Статуса нет, когда запрос не дошёл до провайдера (DNS, обрыв связи): ответа не было
+  const responded = $derived((diag?.http_status ?? 0) > 0);
   const fetchedAt = $derived.by(() => {
     const d = diag?.fetched_at ? new Date(diag.fetched_at) : null;
     return d && !Number.isNaN(d.getTime()) ? d.toLocaleString() : '—';
@@ -163,7 +165,11 @@
       <p class="dg-empty" data-testid="nodes-diag-empty">{$t('cfg.nodes.diag_empty')}</p>
     {:else}
       <p class="dg-meta" data-testid="nodes-diag-meta">
-        {$t('cfg.nodes.diag_meta', { date: fetchedAt, status: diag.http_status ?? '—' })}
+        {#if responded}
+          {$t('cfg.nodes.diag_meta', { date: fetchedAt, status: diag.http_status ?? '' })}
+        {:else}
+          {$t('cfg.nodes.diag_meta_none', { date: fetchedAt })}
+        {/if}
       </p>
 
       {#if tab === 'report'}
@@ -175,7 +181,11 @@
               skipped: skipped.length
             })}
           </p>
-          {#if skipped.length === 0}
+          {#if !responded}
+            <p class="dg-hint" data-testid="nodes-diag-no-response">
+              {$t('cfg.nodes.diag_no_response')}
+            </p>
+          {:else if skipped.length === 0}
             <p class="dg-ok" data-testid="nodes-diag-all-ok">{$t('cfg.nodes.diag_all_ok')}</p>
           {:else}
             <table class="dg-table">

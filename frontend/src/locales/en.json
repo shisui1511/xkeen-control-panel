@@ -2890,6 +2890,8 @@
   "cfg.nodes.diag_error": "Could not load diagnostics",
   "cfg.nodes.diag_summary": "Nodes parsed: {parsed} · placeholders: {stubs} · lines skipped: {skipped}",
   "cfg.nodes.diag_meta": "Received {date} · HTTP {status}",
+  "cfg.nodes.diag_meta_none": "Attempt {date} · the provider sent no response",
+  "cfg.nodes.diag_no_response": "No response from the provider: check the link, DNS and the router connection",
   "cfg.nodes.diag_col_line": "Line",
   "cfg.nodes.diag_col_reason": "Reason",
   "cfg.nodes.diag_col_fragment": "Fragment",
