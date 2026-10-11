@@ -421,7 +421,12 @@ test('nodes-list: подписка — замаскированный адрес
     await openNodes(page);
     // подписка из черновика находится по домену; на стенде могут быть и другие подписки
     const view = await api(page, 'GET', '/api/configlayer/sources');
-    const list = (view.data?.sources ?? []) as { id: string; host?: string }[];
+    const list = (view.data?.sources ?? []) as {
+      id: string;
+      host?: string;
+      draft_state?: string;
+      kernels?: Record<string, { status: { code: string }; pending: boolean; stopped: boolean }>;
+    }[];
     const found = list.filter((s) => s.host === 'sub.invalid');
     expect(found.length, 'подписка из черновика одна').toBe(1);
     const id = found[0].id;
@@ -446,11 +451,24 @@ test('nodes-list: подписка — замаскированный адрес
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     expect(clip === BAD_SUB, 'в буфере полный адрес подписки').toBe(true);
 
-    // строки статуса: по одной на установленное ядро; ответа провайдера ещё не было — idle
+    // строки статуса: по одной на установленное ядро, вариант StatusBadge — по таблице UI-SPEC
+    // из состояния, которое отдал сервер
+    const variantOf = (code: string, pending: boolean, stopped: boolean): string => {
+      if (code === 'refused') return 'stopped';
+      if (['deferred', 'rejected', 'provider_error', 'network'].includes(code)) return 'warning';
+      if (pending && found[0].draft_state !== 'applied') return 'info';
+      if (stopped) return 'idle';
+      return code === 'ok' ? 'running' : 'idle';
+    };
     for (const k of ['xray', 'mihomo'] as const) {
       const row = page.getByTestId(`nodes-status-${id}-${k}`);
       await expect(row).toHaveCount(inst[k] ? 1 : 0);
-      if (inst[k]) await expect(row.locator('.status-badge.idle')).toHaveCount(1);
+      if (!inst[k]) continue;
+      const st = found[0].kernels?.[k];
+      expect(st, `сервер отдал состояние ядра ${k}`).toBeTruthy();
+      const want = variantOf(st!.status.code, st!.pending, st!.stopped);
+      const got = await row.locator('.status-badge').getAttribute('class');
+      expect(got?.split(/\s+/), `вариант статуса ${k} при коде ${st!.status.code}`).toContain(want);
     }
 
     // «Обновить» доходит до сервера, после ответа кнопка снова доступна, итог — уведомление
