@@ -168,6 +168,7 @@ expect(
 
 // Клиент источников подключают только компоненты раздела «Конфигурация»: иначе при
 // выключенном флаге слоя пошли бы запросы /api/configlayer/sources
+// (import type стирается при сборке и запросов не делает)
 function walk(dir, out) {
   for (const ent of fs.readdirSync(path.join(root, dir), {
     withFileTypes: true,
@@ -182,7 +183,7 @@ for (const file of walk(SRC, [])) {
   if (file === SOURCES_TS) continue;
   const text = read(file);
   if (
-    /from '[^']*\/configSources'/.test(text) &&
+    /^\s*import(?!\s+type\b)[^;]*?from '[^']*\/configSources'/m.test(text) &&
     !file.startsWith(`${SRC}/components/config/`)
   ) {
     errors.push(

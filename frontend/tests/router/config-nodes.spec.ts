@@ -16,6 +16,17 @@ const LINK = fileURLToPath(
   new URL('../../../internal/nodes/testdata/links/socks.txt', import.meta.url)
 );
 
+/**
+ * Ссылка узла из тестовых данных с уникальным портом: предпросмотр не пометит её как «уже
+ * есть», даже если такой же узел уже лежит в «Моих узлах» стенда.
+ */
+function uniqueLink(): string {
+  const port = 20000 + Math.floor(Math.random() * 40000);
+  return readFileSync(LINK, 'utf8')
+    .trim()
+    .replace(/(@[^:/?#]+:)\d+/, `$1${port}`);
+}
+
 interface ApiResult {
   status: number;
   data: Record<string, unknown> | null;
@@ -78,7 +89,7 @@ async function sourcesCount(page: Page): Promise<number> {
 
 /** Кладёт в черновик один узел «Моих узлов» настоящим маршрутом добавления. */
 async function addDraftNode(page: Page): Promise<void> {
-  const text = readFileSync(LINK, 'utf8').trim();
+  const text = uniqueLink();
   const preview = await api(page, 'POST', '/api/configlayer/sources/preview', { text, files: [] });
   expect(preview.status, 'предпросмотр узла').toBe(200);
   const view = await api(page, 'GET', '/api/configlayer/sources');
@@ -238,5 +249,51 @@ test('config-tabs: на 390 px полоса вкладок прокручива�
     expect(metrics.oneLine, `${hash}: подписи не разрослись по высоте`).toBe(true);
     expect(metrics.pageScroll, `${hash}: горизонтальная прокрутка страницы`).toBeLessThanOrEqual(0);
   }
+  await guard.assertClean();
+});
+
+test('config-add: вставка ссылки → предпросмотр → Добавить → поле пусто и в фокусе', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  await page.locator('.main-content').first().waitFor({ state: 'visible', timeout: T.page });
+  await resetDraft(page);
+  const before = Number(
+    (await api(page, 'GET', '/api/configlayer/state')).data?.draft_changes ?? 0
+  );
+
+  await openConfig(page, '#/config/nodes');
+  const card = page.getByTestId('nodes-add');
+  await expect(card).toBeVisible({ timeout: T.action });
+  const input = page.locator('#nodes-add-input');
+  const submit = page.getByTestId('nodes-add-submit');
+  // пустое поле: предпросмотра нет, «Добавить» неактивна
+  await expect(page.getByTestId('nodes-preview')).toHaveCount(0);
+  await expect(submit).toBeDisabled();
+
+  await input.fill(uniqueLink());
+  // предпросмотр ничего не пишет в черновик: строка «Мои узлы» и активная кнопка
+  await expect(page.getByTestId('nodes-preview-my')).toBeVisible({ timeout: T.action });
+  await expect(submit).toBeEnabled();
+  const mid = Number((await api(page, 'GET', '/api/configlayer/state')).data?.draft_changes ?? 0);
+  expect(mid, 'предпросмотр не меняет черновик').toBe(before);
+
+  const added = page.waitForRequest(
+    (r) => r.method() === 'POST' && r.url().endsWith('/api/configlayer/sources/add')
+  );
+  await submit.click();
+  const body = (await added).postDataJSON() as { revision?: unknown; token?: unknown };
+  expect(typeof body.revision, 'в теле add есть ревизия').toBe('number');
+  expect(typeof body.token === 'string' && body.token !== '', 'в теле add есть токен').toBe(true);
+
+  await expect(input).toHaveValue('', { timeout: T.action });
+  await expect(input).toBeFocused();
+  await expect(page.getByTestId('nodes-preview')).toHaveCount(0);
+  await expect(page.getByTestId('nodes-add-announce')).toContainText(/\S/);
+  const after = Number((await api(page, 'GET', '/api/configlayer/state')).data?.draft_changes ?? 0);
+  expect(after, 'узел попал в черновик').toBeGreaterThan(before);
+
   await guard.assertClean();
 });

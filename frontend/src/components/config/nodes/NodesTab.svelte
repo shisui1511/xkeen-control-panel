@@ -6,6 +6,7 @@
   import Button from '../../Button.svelte';
   import { layerSnapshot } from '../../../lib/configLayer';
   import { sourcesView, sourcesStatus, loadSources } from '../../../lib/configSources';
+  import AddSourceField from './AddSourceField.svelte';
 
   // Источники читаются при открытии вкладки; дальше представление перечитывает
   // событие SSE sources (обработчик регистрирует configSources.ts)
@@ -19,13 +20,13 @@
   const failed = $derived(!loading && $sourcesStatus === 'error' && $sourcesView === null);
   const empty = $derived(!loading && !failed && ($sourcesView?.sources.length ?? 0) === 0);
 
-  // Поле «Добавить» появляется в плане 145-13; до тех пор действие ничего не делает
   function focusAddField() {
     document.getElementById('nodes-add-input')?.focus();
   }
 </script>
 
 <div class="nodes-tab" data-testid="nodes-tab">
+  <AddSourceField />
   {#if loading}
     <div class="nodes-skeleton" aria-hidden="true">
       <Skeleton type="card" height="120px" />
