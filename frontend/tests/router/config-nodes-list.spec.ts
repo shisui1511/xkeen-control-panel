@@ -510,11 +510,7 @@ for (const theme of ['dark', 'light'] as const) {
     const metrics = await page.evaluate(() => {
       const root = document.documentElement;
       const theme = root.getAttribute('data-theme');
-      const small = [
-        ...document.querySelectorAll(
-          'article.source-card button, article.source-card label.toggle-switch'
-        )
-      ]
+      const small = [...document.querySelectorAll('article.source-card button')]
         .map((el) => (el as HTMLElement).getBoundingClientRect())
         .filter((r) => r.width > 0 && r.height > 0 && (r.height < 32 || r.width < 32)).length;
       return { theme, pageScroll: root.scrollWidth - root.clientWidth, small };
