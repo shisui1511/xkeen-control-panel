@@ -200,6 +200,15 @@ export interface SourcesView {
   sources: SourceView[];
 }
 
+/** Пропущенная строка ответа провайдера: номер, причина (код и параметры) и замаскированный фрагмент. */
+export interface DiagSkipped {
+  line: number;
+  name?: string;
+  code: string;
+  params?: Record<string, string>;
+  fragment: string;
+}
+
 export interface DiagView {
   kernel: string;
   empty: boolean;
@@ -211,7 +220,7 @@ export interface DiagView {
   report: {
     parsed: number;
     stubs: number;
-    skipped: unknown[];
+    skipped: DiagSkipped[];
   };
 }
 

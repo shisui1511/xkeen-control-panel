@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t, tp } from '../../../i18n';
-  import { showToast } from '../../../stores';
+  import { showConfirm, showToast } from '../../../stores';
   import { formatBytes } from '../../../lib/format';
   import Button from '../../Button.svelte';
   import StatusBadge from '../../StatusBadge.svelte';
@@ -9,6 +9,8 @@
   import {
     refreshSource,
     updateSource,
+    deleteNode,
+    deleteSource,
     revealUrl,
     loadSources,
     type KernelFlags,
@@ -31,9 +33,13 @@
     safeHttpUrl,
     statusLabel,
     trafficLevel,
-    trafficPercent
+    trafficPercent,
+    type NodeItem
   } from '../../../lib/nodesView';
   import NodeRow from './NodeRow.svelte';
+  import NodeEditModal from './NodeEditModal.svelte';
+  import SourceSettingsModal from './SourceSettingsModal.svelte';
+  import SourceDiagnosticsModal from './SourceDiagnosticsModal.svelte';
 
   let { source, kernel, installed, expanded, ontoggle } = $props<{
     source: SourceView;
@@ -59,6 +65,12 @@
   let announceOpen = $state(false);
   let query = $state('');
   let limit = $state(PAGE_FIRST);
+  // Узел «Моих узлов», открытый в «Изменить»
+  let editId = $state<string | null>(null);
+  // Последний открытый id нужен модали, пока она закрывается: контент уже не показывается
+  let lastEditId = $state('');
+  let settingsOpen = $state(false);
+  let diagOpen = $state(false);
 
   // «Сейчас» для подписей «2 ч назад» и срока подписки; обновляется раз в минуту
   const now = $derived($minuteClock);
@@ -178,6 +190,47 @@
       handleLayerError(err);
     } finally {
       urlBusy = false;
+    }
+  }
+
+  async function removeSource() {
+    const ok = await showConfirm({
+      variant: 'danger',
+      title: $t('cfg.nodes.delete_sub_title', { name: source.name }),
+      message: $tp('cfg.nodes.delete_sub_body', source.nodes.length),
+      confirmLabel: $t('cfg.nodes.delete_sub_btn'),
+      cancelLabel: $t('cfg.nodes.cancel')
+    });
+    if (!ok) return;
+    try {
+      await deleteSource(source.id);
+    } catch (err) {
+      // Запись в черновик не удалась: диалог уже закрыт, источник остаётся на месте
+      showToast('error', err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function editNode(entryId: string) {
+    lastEditId = entryId;
+    editId = entryId;
+  }
+
+  async function removeNode(item: NodeItem) {
+    const entryId = item.node.entry_id;
+    if (!entryId) return;
+    const ok = await showConfirm({
+      variant: 'danger',
+      title: $t('cfg.nodes.delete_node_title', { name: item.node.name }),
+      message: $t('cfg.nodes.delete_node_body'),
+      confirmLabel: $t('cfg.nodes.delete_node_btn'),
+      cancelLabel: $t('cfg.nodes.cancel')
+    });
+    if (!ok) return;
+    try {
+      await deleteNode(entryId);
+    } catch (err) {
+      // Запись в черновик не удалась: диалог уже закрыт, узел остаётся на месте
+      showToast('error', err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -361,17 +414,46 @@
     </ul>
   {/if}
 
-  {#if !isMy && source.enabled}
+  {#if !isMy}
     <div class="sc-actions">
+      {#if source.enabled}
+        <Button
+          variant="secondary"
+          class="btn-sm"
+          loading={refreshing}
+          data-testid="nodes-refresh-{source.id}"
+          onclick={refresh}
+        >
+          <Icon name="refresh" size={14} />
+          {$t('cfg.nodes.btn_refresh')}
+        </Button>
+      {/if}
       <Button
         variant="secondary"
         class="btn-sm"
-        loading={refreshing}
-        data-testid="nodes-refresh-{source.id}"
-        onclick={refresh}
+        data-testid="nodes-settings-{source.id}"
+        onclick={() => (settingsOpen = true)}
       >
-        <Icon name="refresh" size={14} />
-        {$t('cfg.nodes.btn_refresh')}
+        <Icon name="edit" size={14} />
+        {$t('cfg.nodes.btn_settings')}
+      </Button>
+      <Button
+        variant="secondary"
+        class="btn-sm"
+        data-testid="nodes-diag-{source.id}"
+        onclick={() => (diagOpen = true)}
+      >
+        <Icon name="info" size={14} />
+        {$t('cfg.nodes.btn_diag')}
+      </Button>
+      <Button
+        variant="danger"
+        class="btn-sm"
+        data-testid="nodes-delete-{source.id}"
+        onclick={removeSource}
+      >
+        <Icon name="delete" size={14} />
+        {$t('cfg.nodes.btn_delete_source')}
       </Button>
     </div>
   {/if}
@@ -405,7 +487,11 @@
         {:else}
           <ul class="sc-nodes">
             {#each shown as item (item.node.key)}
-              <NodeRow {item} />
+              <NodeRow
+                {item}
+                onedit={isMy ? editNode : undefined}
+                ondelete={isMy ? removeNode : undefined}
+              />
             {/each}
           </ul>
           {#if filtered.length > limit}
@@ -428,6 +514,20 @@
     </div>
   {/if}
 </article>
+
+{#if isMy}
+  <NodeEditModal open={editId !== null} entryId={lastEditId} onclose={() => (editId = null)} />
+{:else}
+  <SourceSettingsModal open={settingsOpen} {source} onclose={() => (settingsOpen = false)} />
+  <SourceDiagnosticsModal
+    open={diagOpen}
+    name={source.name}
+    sourceId={source.id}
+    {installed}
+    initialKernel={kernel}
+    onclose={() => (diagOpen = false)}
+  />
+{/if}
 
 <style>
   .source-card {

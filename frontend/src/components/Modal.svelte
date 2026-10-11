@@ -181,8 +181,11 @@
     letter-spacing: 0.02em;
     margin: 0;
     color: var(--fg-primary);
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   .modal-close-btn {
+    flex-shrink: 0;
     background: transparent;
     border: 0;
     width: 28px;

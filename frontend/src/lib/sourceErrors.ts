@@ -111,3 +111,15 @@ export function errorFromThrown(err: unknown): SourceErrorPayload {
     http_status: status
   };
 }
+
+/**
+ * Текст ошибки записи в черновик для алерта в модали: конфликт ревизии — своя строка слоя,
+ * иначе сообщение сервера (в нём нет ни адресов, ни учётных данных), иначе общий текст.
+ */
+export function writeErrorText(err: unknown, t: TFn): string {
+  const code =
+    (typeof err === 'object' && err !== null ? (err as { code?: unknown }).code : '') ?? '';
+  if (code === 'draft_conflict') return t('cfg.toast.draft_conflict');
+  if (err instanceof Error && err.message !== '') return err.message;
+  return t('cfg.nodes.save_failed');
+}

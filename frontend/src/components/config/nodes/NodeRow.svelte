@@ -1,9 +1,15 @@
 <script lang="ts">
   import { t } from '../../../i18n';
   import { sourceErrorText, verdictReason } from '../../../lib/sourceErrors';
+  import Icon from '../../../lib/components/Icon.svelte';
   import type { NodeItem } from '../../../lib/nodesView';
 
-  let { item } = $props<{ item: NodeItem }>();
+  // onedit и ondelete передаются только строкам «Моих узлов»: у узлов подписки действий нет
+  let { item, onedit, ondelete } = $props<{
+    item: NodeItem;
+    onedit?: (entryId: string) => void;
+    ondelete?: (item: NodeItem) => void;
+  }>();
 
   const node = $derived(item.node);
   const reason = $derived(item.reason ? verdictReason(item.reason, $t) : '');
@@ -31,6 +37,35 @@
   {:else if item.mark === 'excluded'}
     <span class="chip chip-default node-mark" data-mark="excluded">
       {$t('cfg.nodes.excluded')}
+    </span>
+  {/if}
+  {#if node.entry_id && (onedit || ondelete)}
+    {@const entryId = node.entry_id}
+    <span class="node-actions">
+      {#if onedit}
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm node-act"
+          title={$t('cfg.nodes.btn_edit')}
+          aria-label={$t('cfg.nodes.edit_aria', { name: node.name })}
+          data-testid="nodes-edit-{entryId}"
+          onclick={() => onedit(entryId)}
+        >
+          <Icon name="edit" size={14} />
+        </button>
+      {/if}
+      {#if ondelete}
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm node-act"
+          title={$t('cfg.nodes.btn_delete')}
+          aria-label={$t('cfg.nodes.delete_aria', { name: node.name })}
+          data-testid="nodes-delete-{entryId}"
+          onclick={() => ondelete(item)}
+        >
+          <Icon name="delete" size={14} />
+        </button>
+      {/if}
     </span>
   {/if}
 </li>
@@ -78,6 +113,26 @@
     color: var(--fg-secondary);
     overflow-wrap: anywhere;
     word-break: break-word;
+  }
+
+  .node-actions {
+    display: inline-flex;
+    gap: var(--spacing-1);
+    margin-left: auto;
+  }
+
+  .node-act {
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0 var(--spacing-2);
+    justify-content: center;
+  }
+
+  @media (pointer: coarse), (max-width: 768px) {
+    .node-act {
+      min-width: 44px;
+      min-height: 44px;
+    }
   }
 
   .node-mark {
