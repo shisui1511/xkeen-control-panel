@@ -203,7 +203,7 @@ func clashWireGuard(n Node, m map[string]any) {
 		m["reserved"] = r
 	}
 	if len(wg.AWG) > 0 {
-		m["amnezia-wg-option"] = deepCopyMap(wg.AWG)
+		m["amnezia-wg-option"] = clashAWGOptions(wg.AWG)
 	}
 	m["udp"] = udpValue(n)
 }
