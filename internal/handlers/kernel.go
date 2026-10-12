@@ -311,8 +311,9 @@ func (a *API) KernelUpload(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	a.ClearCapabilitiesCache()
-	a.invalidateXKeenStatus()
+	// Тот же путь, что после установки из релиза: сброс кэшей, файлы слоя и запрос
+	// подписок под ядро, загруженное файлом (роутер без доступа к GitHub).
+	a.onKernelInstallDone(name, nil)
 
 	kUpdated := a.kernelSvc.Get(name)
 	JSONSuccess(w, kUpdated)
