@@ -8,8 +8,11 @@ import (
 
 // ParseXray разбирает Xray-JSON во всех формах: одиночный outbound, объект с
 // outbounds, полный конфиг (inbounds и routing) и массив конфигов.
-// Узел хранит оригинал в Raw (числа — json.Number): Xray получает его без
-// изменений, Mihomo — результат эмиттера.
+// Узел хранит в Raw оригинал (числа — json.Number) с правками, обязательными для
+// роутера: settings.noKernelTun у wireguard, без цепочек (proxySettings,
+// dialerProxy) и привязок к интерфейсу (sendThrough, sockopt.interface). Xray
+// получает Raw в таком виде, Mihomo — результат эмиттера; текст узла до этих
+// правок — в Text.
 func ParseXray(data []byte) (ParseResult, error) {
 	v, serr := decodeJSON(data)
 	if serr != nil {
