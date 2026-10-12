@@ -445,14 +445,26 @@ func TestRouterSourcesMyNodesFlow(t *testing.T) {
 		t.Errorf("diagnostics «Моих узлов»: %d %q", d.Status, d.Code)
 	}
 
-	// тело больше 1 МиБ
-	huge := []byte(`{"text":"` + strings.Repeat("a", (1<<20)+4096) + `"}`)
+	// ввод больше 1 МиБ доходит до распознавателя и получает too_large, а не
+	// безликий invalid_request; тело больше предела маршрута — invalid_request
+	big := []byte(`{"text":"` + strings.Repeat("a", (1<<20)+4096) + `"}`)
+	status, bigRaw, err := e.p.Request(http.MethodPost, rtSourcesBase+"/preview", big, routertest.AuthFull)
+	if err != nil {
+		t.Fatalf("большой ввод: %v", err)
+	}
+	if br := e.decode(status, bigRaw); br.Status != http.StatusOK {
+		t.Errorf("ввод больше 1 МиБ: %d %q", br.Status, br.Code)
+	} else if errs, _ := br.object(t)["errors"].([]any); len(errs) != 1 ||
+		!strings.Contains(string(br.Data), `"too_large"`) {
+		t.Errorf("ввод больше 1 МиБ без too_large: %.200s", br.Data)
+	}
+	huge := []byte(`{"text":"` + strings.Repeat("a", (3<<20)) + `"}`)
 	status, hugeRaw, err := e.p.Request(http.MethodPost, rtSourcesBase+"/preview", huge, routertest.AuthFull)
 	if err != nil {
 		t.Fatalf("большое тело: %v", err)
 	}
 	if hr := e.decode(status, hugeRaw); hr.Status != http.StatusBadRequest || hr.Code != "invalid_request" {
-		t.Errorf("тело больше 1 МиБ: %d %q", hr.Status, hr.Code)
+		t.Errorf("тело больше предела маршрута: %d %q", hr.Status, hr.Code)
 	}
 
 	// nodes/delete: запись удаляется, повторное удаление — 404

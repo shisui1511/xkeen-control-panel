@@ -74,7 +74,12 @@ func (a *API) requireMethod(w http.ResponseWriter, r *http.Request, method strin
 // decodeLayerBody читает JSON-тело запроса слоя с пределом 1 МБ. Ошибка разбора
 // или превышение предела — 400 invalid_request.
 func (a *API) decodeLayerBody(w http.ResponseWriter, r *http.Request, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxLayerBodyBytes)
+	return a.decodeLayerBodyLimit(w, r, dst, maxLayerBodyBytes)
+}
+
+// decodeLayerBodyLimit — decodeLayerBody с заданным пределом тела.
+func (a *API) decodeLayerBodyLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
 		JSONErrorCode(w, http.StatusBadRequest, "invalid_request", a.t(r, "configlayer.invalid_request"))
 		return false

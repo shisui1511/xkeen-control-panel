@@ -18,8 +18,22 @@
   // Распознавание запускается без отдельной кнопки: сразу после вставки и после
   // паузы в наборе. Предпросмотр ничего не пишет в черновик — только «Добавить».
   const DEBOUNCE_MS = 600;
-  // Сервер ограничивает тело запроса 1 МиБ; больший файл не читается и не отправляется
-  const MAX_FILE_BYTES = 1024 * 1024;
+  // Сервер ограничивает ввод (вставку и файлы вместе) 1 МиБ; больший файл не читается,
+  // а ввод больше предела не отправляется
+  const MAX_INPUT_BYTES = 1024 * 1024;
+  const encoder = new TextEncoder();
+
+  function tooLarge(): SourceErrorPayload {
+    return { code: 'too_large', params: { unit: 'bytes', limit: String(MAX_INPUT_BYTES) } };
+  }
+
+  // Размер ввода в байтах UTF-8 — так его считает сервер
+  function inputBytes(input: string, list: PreviewFile[]): number {
+    return list.reduce(
+      (sum, f) => sum + encoder.encode(f.content).length,
+      encoder.encode(input).length
+    );
+  }
 
   let text = $state('');
   let files = $state<PreviewFile[]>([]);
@@ -66,6 +80,13 @@
     loading = true;
     error = null;
     preview = null;
+    if (inputBytes(text, files) > MAX_INPUT_BYTES) {
+      // Вставка и файлы вместе больше предела: запрос не отправляется
+      controller = null;
+      loading = false;
+      error = tooLarge();
+      return;
+    }
     try {
       const res = await previewInput(text, files, signal);
       if (mine !== seq) return;
@@ -102,12 +123,12 @@
   async function addFiles(list: File[]) {
     if (list.length === 0) return;
     announce = '';
-    if (list.some((f) => f.size > MAX_FILE_BYTES)) {
+    if (list.some((f) => f.size > MAX_INPUT_BYTES)) {
       // Слишком большой файл не читается и не отправляется (T-145-35)
       cancel();
       preview = null;
       loading = false;
-      error = { code: 'too_large', params: { unit: 'bytes', limit: String(MAX_FILE_BYTES) } };
+      error = tooLarge();
       return;
     }
     cancel();

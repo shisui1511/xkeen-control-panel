@@ -16,6 +16,13 @@ import (
 // Ни один обработчик не пишет в журнал тела запросов и ответов: полный URL
 // подписки и учётные данные узлов отдают только reveal и nodes/raw (D-33, D-34).
 
+// maxSourcesInputBody — предел тела маршрутов с вводом узлов (preview, nodes/preview,
+// nodes/save). JSON-экранирование (\n, \", \\) и обёртка {text, files} делают тело
+// больше содержимого: при пределе, равном nodes.MaxInputBytes, ввод у границы
+// обрезался бы MaxBytesReader безликим invalid_request и не доходил до
+// распознавателя с понятным too_large. Размер содержимого проверяет Recognize.
+const maxSourcesInputBody = 2*nodes.MaxInputBytes + 64<<10
+
 // urlInText находит адрес со схемой в произвольном тексте ошибки.
 var urlInText = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+`)
 
@@ -83,7 +90,7 @@ func (a *API) ConfigSourcesPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in nodes.Input
-	if !a.decodeLayerBody(w, r, &in) {
+	if !a.decodeLayerBodyLimit(w, r, &in, maxSourcesInputBody) {
 		return
 	}
 	view, err := a.sources.Preview(r.Context(), in)
@@ -234,7 +241,7 @@ func (a *API) ConfigSourcesNodePreview(w http.ResponseWriter, r *http.Request) {
 		Text    string `json:"text"`
 		EntryID string `json:"entry_id"`
 	}
-	if !a.decodeLayerBody(w, r, &req) {
+	if !a.decodeLayerBodyLimit(w, r, &req, maxSourcesInputBody) {
 		return
 	}
 	view, err := a.sources.PreviewNode(r.Context(), req.Text, req.EntryID)
@@ -282,7 +289,7 @@ func (a *API) ConfigSourcesNodeSave(w http.ResponseWriter, r *http.Request) {
 		Name     string `json:"name"`
 		Text     string `json:"text"`
 	}
-	if !a.decodeLayerBody(w, r, &req) {
+	if !a.decodeLayerBodyLimit(w, r, &req, maxSourcesInputBody) {
 		return
 	}
 	ev, err := a.sources.SaveNode(req.Revision, req.EntryID, req.Name, req.Text)
