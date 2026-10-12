@@ -63,29 +63,39 @@ type refreshCall struct {
 // источник — ErrSourceDisabled, неизвестный — ErrSourceNotFound. manual — запрос
 // пользователя («Обновить»); на ход обновления он не влияет: срок и повторы решает
 // планировщик по статусам.
+//
+// Общая работа идёт в контексте сервиса и учитывается Stop: оборванный HTTP-запрос
+// инициатора не прерывает запросы к провайдеру и запись итога, а остальные
+// ожидающие не получают чужую отмену. ctx ограничивает только ожидание итога.
+// Остановленный сервис — configlayer.ErrStopped.
 func (s *Service) Refresh(ctx context.Context, id string, manual bool) (RefreshOutcome, error) {
 	_ = manual
 	s.cmu.Lock()
-	if c, ok := s.calls[id]; ok {
-		s.cmu.Unlock()
-		select {
-		case <-c.done:
-			return c.out, c.err
-		case <-ctx.Done():
-			return RefreshOutcome{}, ctx.Err()
+	c, ok := s.calls[id]
+	if !ok {
+		c = &refreshCall{done: make(chan struct{})}
+		s.calls[id] = c
+		started := s.spawn(func() {
+			out, err := s.refreshWork(s.ctx, id, nil)
+			s.cmu.Lock()
+			c.out, c.err = out, err
+			delete(s.calls, id)
+			s.cmu.Unlock()
+			close(c.done)
+		})
+		if !started {
+			delete(s.calls, id)
+			s.cmu.Unlock()
+			return RefreshOutcome{}, configlayer.ErrStopped
 		}
 	}
-	c := &refreshCall{done: make(chan struct{})}
-	s.calls[id] = c
 	s.cmu.Unlock()
-
-	c.out, c.err = s.refreshWork(ctx, id, nil)
-
-	s.cmu.Lock()
-	delete(s.calls, id)
-	s.cmu.Unlock()
-	close(c.done)
-	return c.out, c.err
+	select {
+	case <-c.done:
+		return c.out, c.err
+	case <-ctx.Done():
+		return RefreshOutcome{}, ctx.Err()
+	}
 }
 
 // subscriptionConfig находит конфигурацию подписки: применённое состояние
