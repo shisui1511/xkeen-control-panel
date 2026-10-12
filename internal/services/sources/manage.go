@@ -3,11 +3,14 @@ package sources
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
@@ -58,6 +61,34 @@ func cleanName(name string) (string, error) {
 		}
 	}
 	return name, nil
+}
+
+// sanitizeName приводит имя, взятое из текста узла (ремарка ссылки, имя в
+// YAML), к виду, который проходит cleanName: управляющие символы и переводы
+// строк заменяются пробелом, длина обрезается до maxNameRunes. Имя попадает в
+// файл провайдера Mihomo и в ссылки групп, а модаль «Изменить» отправляет его
+// обратно как есть.
+func sanitizeName(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == utf8.RuneError {
+			return ' '
+		}
+		return r
+	}, name)
+	name = strings.TrimSpace(name)
+	if r := []rune(name); len(r) > maxNameRunes {
+		name = strings.TrimSpace(string(r[:maxNameRunes]))
+	}
+	return name
+}
+
+// entryName — имя записи «Моих узлов» из текста узла: displayName, приведённое
+// sanitizeName; имя только из управляющих символов заменяется адресом host:port.
+func entryName(n nodes.Node) string {
+	if name := sanitizeName(displayName(n)); name != "" {
+		return name
+	}
+	return net.JoinHostPort(n.Host, strconv.Itoa(n.Port))
 }
 
 // cleanExclude обрезает шаблоны исключения, отбрасывает пустые и проверяет пределы.

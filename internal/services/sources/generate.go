@@ -174,7 +174,7 @@ func (s *Service) myNodes(cfg MySourceConfig) []keyedNode {
 		}
 		name := e.Name
 		if name == "" {
-			name = displayName(n)
+			name = entryName(n)
 		}
 		list = append(list, keyedNode{entryID: e.ID, name: name, key: n.Key(MySourceID), tag: "xcp-" + MySourceID + "-" + e.ID, node: n})
 	}

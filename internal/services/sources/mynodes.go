@@ -87,8 +87,10 @@ func (s *Service) SaveNode(rev int64, entryID, name, text string) (configlayer.D
 	if n.Text == "" {
 		return configlayer.DraftEvent{}, fmt.Errorf("%w: пустой текст узла", ErrInvalidInput)
 	}
-	// Имя проверяется как имя подписки: до 128 символов, без управляющих символов и
-	// переводов строк — оно попадает в файл провайдера Mihomo и в ссылки групп.
+	// Имя, введённое пользователем, проверяется как имя подписки: до 128 символов,
+	// без управляющих символов и переводов строк — оно попадает в файл провайдера
+	// Mihomo и в ссылки групп. Имя из текста узла приводится к этому виду
+	// (entryName), как и при «Добавить».
 	name, err := cleanName(name)
 	if err != nil {
 		return configlayer.DraftEvent{}, err
@@ -101,7 +103,7 @@ func (s *Service) SaveNode(rev int64, entryID, name, text string) (configlayer.D
 		return configlayer.DraftEvent{}, configlayer.ErrDraftConflict
 	}
 	if name == "" {
-		name = displayName(n)
+		name = entryName(n)
 	}
 	if entryID == "" {
 		taken := make(map[string]bool, len(cfg.Entries))

@@ -5,8 +5,10 @@ package sources
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
@@ -122,6 +124,39 @@ func TestRouterMyNodesEditSingleNode(t *testing.T) {
 	// Запись не тронута неудачными попытками.
 	if got := e.my(t).Entries[0].Raw; got != linkA {
 		t.Errorf("запись изменилась: %q", got)
+	}
+}
+
+// Имя из ремарки ссылки при «Добавить» приводится к виду, который проходит
+// проверку правки: без перевода строки и не длиннее 128 символов. Модаль
+// «Изменить» отправляет сохранённое имя обратно, и правка сохраняется.
+func TestRouterMyNodesAddSanitizesName(t *testing.T) {
+	e := rtNewEnv(t, false, false)
+	e.installed = rtBoth
+	base := func(name string) string {
+		link, _, _ := strings.Cut(rtLink(t, name), "#")
+		return link
+	}
+	broken := base("vless_ws") + "#" + url.PathEscape("a\nproxies: []")
+	long := base("trojan_ws") + "#" + url.PathEscape(strings.Repeat("я", maxNameRunes+40))
+	e.addLinks(t, broken, long)
+
+	entries := e.my(t).Entries
+	if len(entries) != 2 {
+		t.Fatalf("записей после «Добавить»: %d", len(entries))
+	}
+	for _, en := range entries {
+		if strings.ContainsAny(en.Name, "\r\n") || utf8.RuneCountInString(en.Name) > maxNameRunes || en.Name == "" {
+			t.Errorf("имя записи не приведено: %q", en.Name)
+		}
+		if _, err := e.svc.SaveNode(e.rev(t), en.ID, en.Name, en.Raw); err != nil {
+			t.Errorf("правка с сохранённым именем %q: %v", en.Name, err)
+		}
+	}
+	for _, name := range rtNames(rtMihomoProxies(t, rtGenerate(t, e.svc, kernelMihomo, e.draftInput(t), rtBoth))) {
+		if strings.ContainsAny(name, "\r\n") {
+			t.Errorf("перевод строки в имени узла Mihomo: %q", name)
+		}
 	}
 }
 

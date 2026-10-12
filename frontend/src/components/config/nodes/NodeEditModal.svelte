@@ -189,7 +189,8 @@
     </div>
   {:else}
     <div class="ne-body">
-      <Input id="{uid}-name" label={$t('cfg.nodes.edit_name')} bind:value={name} />
+      <!-- Предел имени на сервере — 128 символов (maxNameRunes) -->
+      <Input id="{uid}-name" label={$t('cfg.nodes.edit_name')} bind:value={name} maxlength={128} />
 
       <div class="form-group">
         <label class="form-label" for="{uid}-text">{$t('cfg.nodes.edit_text')}</label>

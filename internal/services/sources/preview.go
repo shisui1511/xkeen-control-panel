@@ -457,7 +457,7 @@ func (s *Service) addEntry(rev int64, entry *previewEntry) (AddResult, error) {
 		}
 		taken[id] = true
 		existing[n.DupKey()] = id
-		cfg.Entries = append(cfg.Entries, MyEntry{ID: id, Name: displayName(n), Format: n.Format, Raw: n.Text})
+		cfg.Entries = append(cfg.Entries, MyEntry{ID: id, Name: entryName(n), Format: n.Format, Raw: n.Text})
 		added++
 	}
 	if added == 0 && len(entry.subs) == 0 {
