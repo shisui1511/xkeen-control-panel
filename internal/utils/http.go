@@ -71,12 +71,21 @@ func SafeHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
+// isPrivateIP — адрес, соединение с которым не должно уйти наружу: частные сети,
+// петля, link-local, multicast и неуказанный адрес. В Linux соединение с 0.0.0.0
+// (и с ::) уходит на локальный хост, а DNS-блокировщики отвечают 0.0.0.0 на
+// заблокированные домены — без проверки запрос попал бы в службы самого роутера.
 func isPrivateIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
 		return true
 	}
-	// Check CGNAT (100.64.0.0/10)
 	if ip4 := ip.To4(); ip4 != nil {
+		// 0.0.0.0/8 («эта сеть») и широковещательный 255.255.255.255.
+		if ip4[0] == 0 || ip4.Equal(net.IPv4bcast) {
+			return true
+		}
+		// CGNAT (100.64.0.0/10)
 		if ip4[0] == 100 && (ip4[1] >= 64 && ip4[1] <= 127) {
 			return true
 		}
