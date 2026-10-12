@@ -272,3 +272,50 @@ func TestRouterPreviewNodeSingle(t *testing.T) {
 		t.Errorf("новый узел с имеющимся текстом: %+v", dup)
 	}
 }
+
+// Узлы с одной идентичностью и разным транспортом (CDN-фронты) получают разные
+// ключи строк в предпросмотре и в карточке «Мои узлы»: интерфейс использует ключ
+// как ключ keyed-блока. Повтор чужой записи при правке не сохраняется.
+func TestRouterMyNodesUniqueKeys(t *testing.T) {
+	e := rtNewEnv(t, false, false)
+	e.installed = rtBoth
+	linkA := rtLink(t, "vless_ws")
+	linkB := strings.Replace(linkA, "path=%2Fvl", "path=%2Fvl2", 1)
+	if linkA == linkB {
+		t.Fatal("в данных vless_ws нет path=%2Fvl")
+	}
+
+	view, err := e.svc.Preview(context.Background(), inputOf(linkA+"\n"+linkB))
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if view.MyNodes == nil || len(view.MyNodes.Nodes) != 2 {
+		t.Fatalf("узлов в предпросмотре: %+v", view.MyNodes)
+	}
+	if view.MyNodes.Nodes[0].Key == view.MyNodes.Nodes[1].Key {
+		t.Errorf("ключи строк предпросмотра совпали: %q", view.MyNodes.Nodes[0].Key)
+	}
+
+	e.addLinks(t, linkA, linkB)
+	list := rtFindSource(t, rtView(t, e), MySourceID).Nodes
+	if len(list) != 2 {
+		t.Fatalf("узлов в карточке «Мои узлы»: %d", len(list))
+	}
+	if list[0].Key == list[1].Key {
+		t.Errorf("ключи строк карточки совпали: %q", list[0].Key)
+	}
+
+	// Правка записи B текстом записи A — повтор, сервер отвергает.
+	idB := ""
+	for _, en := range e.my(t).Entries {
+		if strings.Contains(en.Raw, "%2Fvl2") {
+			idB = en.ID
+		}
+	}
+	if idB == "" {
+		t.Fatal("запись B не найдена")
+	}
+	if _, err := e.svc.SaveNode(e.rev(t), idB, "", linkA); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("правка на повтор другой записи: %v, нужна ErrInvalidInput", err)
+	}
+}

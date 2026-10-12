@@ -105,6 +105,11 @@ func (s *Service) SaveNode(rev int64, entryID, name, text string) (configlayer.D
 	if name == "" {
 		name = entryName(n)
 	}
+	// Текст, который повторяет другую запись, не сохраняется: «Добавить» такие
+	// узлы пропускает так же.
+	if _, dup := s.dupIndex(cfg, entryID)[n.DupKey()]; dup {
+		return configlayer.DraftEvent{}, fmt.Errorf("%w: узел уже есть в «Моих узлах»", ErrInvalidInput)
+	}
 	if entryID == "" {
 		taken := make(map[string]bool, len(cfg.Entries))
 		for _, e := range cfg.Entries {

@@ -244,8 +244,15 @@ func (s *Service) buildView(rec nodes.Recognition, existing map[string]string) (
 	inSub := s.subscriptionIndex()
 	my := &PreviewMyNodes{Nodes: make([]PreviewNode, 0, len(rec.Nodes))}
 	addable := 0
-	for _, n := range rec.Nodes {
+	usedKeys := make(map[string]bool, len(rec.Nodes))
+	for i, n := range rec.Nodes {
 		pn := previewNode(n, caps)
+		// Ключ строки уникален в предпросмотре: узлы с одной идентичностью и разным
+		// транспортом иначе совпали бы, а интерфейс использует ключ в keyed-блоке.
+		if usedKeys[pn.Key] {
+			pn.Key += "~" + strconv.Itoa(i)
+		}
+		usedKeys[pn.Key] = true
 		if _, dup := existing[n.DupKey()]; dup {
 			pn.Marks = append(pn.Marks, MarkDupExists)
 		} else {

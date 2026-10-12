@@ -176,7 +176,10 @@ func (s *Service) myNodes(cfg MySourceConfig) []keyedNode {
 		if name == "" {
 			name = entryName(n)
 		}
-		list = append(list, keyedNode{entryID: e.ID, name: name, key: n.Key(MySourceID), tag: "xcp-" + MySourceID + "-" + e.ID, node: n})
+		// Ключ уникален в секции: узлы с одной идентичностью и разным транспортом
+		// (CDN-фронты) иначе получили бы одинаковый ключ, а интерфейс использует его
+		// как ключ keyed-блока.
+		list = append(list, keyedNode{entryID: e.ID, name: name, key: n.Key(MySourceID) + "~" + e.ID, tag: "xcp-" + MySourceID + "-" + e.ID, node: n})
 	}
 	sort.Slice(list, func(i, j int) bool {
 		if list[i].key != list[j].key {

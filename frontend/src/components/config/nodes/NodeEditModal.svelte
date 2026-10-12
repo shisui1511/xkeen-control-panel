@@ -53,7 +53,9 @@
       !pvLoading &&
       pvError === null &&
       preview !== null &&
-      (preview.my_nodes?.nodes.length ?? 0) > 0
+      (preview.my_nodes?.nodes.length ?? 0) > 0 &&
+      // Повтор другой записи не сохраняется (сервер ответит invalid_request)
+      preview.addable > 0
   );
 
   function cancelPreview() {
