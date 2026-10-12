@@ -255,6 +255,9 @@ func rtRstExpectApplied(t *testing.T, a map[string]any) {
 	}
 }
 
+// rtRstMihomoNoController — выключение слоя при запущенном Mihomo без Clash API.
+var rtRstMihomoNoController = routertest.Known("mipsle/mihomo", "config-layer-restart-mihomo-no-controller")
+
 func TestRouterConfigApplyRestartsRunningKernel(t *testing.T) {
 	tg := routertest.Current(t)
 	kernel := tg.Core
@@ -361,8 +364,12 @@ func TestRouterConfigApplyRestartsRunningKernel(t *testing.T) {
 		e := root.with(t)
 		pidBefore := rtRstKernelPID(t, kernel)
 		r := e.callSlow(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": false})
+		// Mihomo без external-controller (так настроен стенд mipsle): после рестарта
+		// подтверждение ждёт ответа Clash API, которого нет, и отвечает 500 с откатом.
+		routertest.Verdict(t, r.Status == http.StatusOK, rtRstMihomoNoController,
+			"выключение слоя: %d %s %s", r.Status, r.Code, r.Detail)
 		if r.Status != http.StatusOK {
-			t.Fatalf("выключение слоя: %d %s %s", r.Status, r.Code, r.Detail)
+			return
 		}
 		pid := rtRstKernelPID(t, kernel)
 		if kernel == "xray" {
