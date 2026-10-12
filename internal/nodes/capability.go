@@ -85,6 +85,9 @@ func supportXray(n Node, c Caps) Verdict {
 		if network := normNetwork(n.Transport.Network); isRemovedTransport(network) {
 			return fromError(NewError(CodeXrayNoHTTPTransport, "network", network))
 		}
+		if pinLostInsecure(n) {
+			return fromError(NewError(CodePinNotExpressible))
+		}
 		if xrayInsecureForbidden(n) {
 			return fromError(NewError(CodeXrayNoInsecure))
 		}
@@ -189,6 +192,9 @@ func levelBNotes(n Node, kernel string) []string {
 		if replaced {
 			notes = append(notes, CodeNoteFingerprintDropped)
 		}
+	}
+	if pinsDropped(n, kernel) {
+		notes = append(notes, CodeNotePinDropped)
 	}
 	return notes
 }

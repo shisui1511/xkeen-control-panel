@@ -2,6 +2,7 @@ package nodes
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"strconv"
 	"strings"
 )
@@ -191,7 +192,10 @@ func singboxTLSIR(n *Node, ob map[string]any, alwaysTLS bool) {
 		SNI:       strOf(tls["server_name"]),
 		ALPN:      strListOf(tls["alpn"]),
 		Insecure:  truthyOf(tls["insecure"]),
-		PinSHA256: strListOf(tls["certificate_public_key_sha256"]),
+		PinSHA256: singboxCertPins(strListOf(tls["certificate_sha256"])),
+		// закрепление открытого ключа (SPKI) не выражается ни в Xray, ни в Mihomo:
+		// хранится отдельно, чтобы не сойти за отпечаток сертификата
+		PinPubKeySHA256: strListOf(tls["certificate_public_key_sha256"]),
 	}
 	if u := mapOf(tls["utls"]); u != nil && (u["enabled"] == nil || truthyOf(u["enabled"])) {
 		t.Fingerprint = strOf(u["fingerprint"])
@@ -200,6 +204,31 @@ func singboxTLSIR(n *Node, ob map[string]any, alwaysTLS bool) {
 	if realityOn {
 		n.Reality = &Reality{PublicKey: strOf(reality["public_key"]), ShortID: strOf(reality["short_id"])}
 	}
+}
+
+// singboxCertPins переводит certificate_sha256 sing-box (SHA-256 всего
+// сертификата в base64) в hex, как его принимают оба ядра. Значение, которое не
+// декодируется в 32 байта, остаётся как есть: закрепление задано, но не
+// выражается, и правило потери закрепления не даст потерять его молча.
+func singboxCertPins(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		out = append(out, singboxPinHex(p))
+	}
+	return out
+}
+
+func singboxPinHex(p string) string {
+	p = strings.TrimSpace(p)
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		if b, err := enc.DecodeString(p); err == nil && len(b) == 32 {
+			return hex.EncodeToString(b)
+		}
+	}
+	return p
 }
 
 // singboxTransportIR переносит блок transport. Тип xhttp — защитная ветка:

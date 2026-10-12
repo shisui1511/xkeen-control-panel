@@ -143,6 +143,38 @@ func normPins(in []string) []string {
 	return out
 }
 
+// pinsRequested — пользователь (или провайдер) задал закрепление сертификата или
+// открытого ключа.
+func pinsRequested(t *TLS) bool {
+	return t != nil && (len(t.PinSHA256) > 0 || len(t.PinPubKeySHA256) > 0)
+}
+
+// pinLostInsecure — проверка сертификата отключена, а заданное закрепление ядро
+// не выражает (открытый ключ или значение не sha256). Без закрепления ядро с
+// отключённой проверкой доверяло бы любому серверу, поэтому узел не уходит ни в
+// одно ядро. Reality сертификат не проверяет, правило к нему не применяется.
+func pinLostInsecure(n Node) bool {
+	return n.Reality == nil && n.TLS != nil && n.TLS.Enabled && n.TLS.Insecure &&
+		pinsRequested(n.TLS) && len(normPins(n.TLS.PinSHA256)) == 0
+}
+
+// pinsDropped — узел принимается ядром, но часть заданных закреплений в файл не
+// попала: открытый ключ не выражается, значение не sha256, а Mihomo пишет только
+// первое из нескольких. Ядро проверяет сертификат цепочкой доверия.
+func pinsDropped(n Node, kernel string) bool {
+	if n.Reality != nil || n.TLS == nil || !n.TLS.Enabled {
+		return false
+	}
+	if len(n.TLS.PinPubKeySHA256) > 0 {
+		return true
+	}
+	pins := normPins(n.TLS.PinSHA256)
+	if len(pins) < len(n.TLS.PinSHA256) {
+		return true
+	}
+	return kernel == kernelMihomo && len(pins) > 1
+}
+
 func stringsToAny(in []string) []any {
 	out := make([]any, len(in))
 	for i, v := range in {
@@ -254,6 +286,9 @@ func xrayStream(n Node) (map[string]any, error) {
 		ss["security"] = "reality"
 		ss["realitySettings"] = rs
 	case n.TLS != nil && n.TLS.Enabled:
+		if pinLostInsecure(n) {
+			return nil, NewError(CodePinNotExpressible)
+		}
 		if xrayInsecureForbidden(n) {
 			return nil, NewError(CodeXrayNoInsecure)
 		}

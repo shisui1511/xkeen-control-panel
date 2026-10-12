@@ -51,6 +51,12 @@ const (
 	CodeNotePacketEncDropped   = "note_packet_encoding_dropped"
 	CodeNoteChainRemoved       = "note_chain_removed"
 	CodeNoteFingerprintDropped = "note_fingerprint_dropped"
+	// CodePinNotExpressible — проверка сертификата отключена, а заданное
+	// закрепление ядро не выражает: без отказа ядро доверяло бы любому серверу.
+	CodePinNotExpressible = "pin_not_expressible"
+	// CodeNotePinDropped — примечание уровня B: закрепление не перенесено в ядро,
+	// оно проверяет сертификат цепочкой доверия.
+	CodeNotePinDropped = "note_pin_dropped"
 )
 
 // SourceError — ошибка ввода или ответа провайдера; уходит клиенту как есть.
@@ -117,7 +123,7 @@ func AllCodes() []string {
 		CodeXrayNoInsecure, CodeXrayForbiddenKey, CodeXHTTPUnknownField,
 		CodeXHTTPDownloadSettings, CodeXHTTPBadMode, CodeUnsupportedType, CodeKCPMihomo,
 		CodeStub, CodeNoteUDPDropped, CodeNoteSpiderXDropped, CodeNotePacketEncDropped,
-		CodeNoteChainRemoved, CodeNoteFingerprintDropped,
+		CodeNoteChainRemoved, CodeNoteFingerprintDropped, CodePinNotExpressible, CodeNotePinDropped,
 	}
 	sort.Strings(out)
 	return out

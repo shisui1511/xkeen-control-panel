@@ -79,8 +79,14 @@ func EmitClash(n Node) (map[string]any, error) {
 			if n.TLS.SNI != "" {
 				m["sni"] = n.TLS.SNI
 			}
+			if pinLostInsecure(n) {
+				return nil, NewError(CodePinNotExpressible)
+			}
 			if n.TLS.Insecure {
 				m["skip-cert-verify"] = true
+			}
+			if pins := normPins(n.TLS.PinSHA256); len(pins) > 0 {
+				m["fingerprint"] = pins[0]
 			}
 		}
 	case "hysteria2":
@@ -103,7 +109,9 @@ func EmitClash(n Node) (map[string]any, error) {
 				m["ports"] = h.Ports
 			}
 		}
-		clashPlainTLS(n, m)
+		if err := clashPlainTLS(n, m); err != nil {
+			return nil, err
+		}
 	case "tuic":
 		m["type"] = "tuic"
 		m["uuid"] = n.UUID
@@ -119,7 +127,9 @@ func EmitClash(n Node) (map[string]any, error) {
 				m["reduce-rtt"] = true
 			}
 		}
-		clashPlainTLS(n, m)
+		if err := clashPlainTLS(n, m); err != nil {
+			return nil, err
+		}
 	case "wireguard":
 		if n.WG == nil {
 			return nil, NewError(CodeUnsupportedType, "type", n.Protocol)
@@ -133,10 +143,14 @@ func EmitClash(n Node) (map[string]any, error) {
 
 // clashPlainTLS пишет TLS-поля протоколов, у которых TLS всегда включён
 // (hysteria2, tuic): sni, alpn, skip-cert-verify, закрепление сертификата.
-func clashPlainTLS(n Node, m map[string]any) {
+// Отключённая проверка при закреплении, которое ядро не выражает, — отказ.
+func clashPlainTLS(n Node, m map[string]any) error {
 	t := n.TLS
 	if t == nil {
-		return
+		return nil
+	}
+	if pinLostInsecure(n) {
+		return NewError(CodePinNotExpressible)
 	}
 	if t.SNI != "" {
 		m["sni"] = t.SNI
@@ -150,6 +164,7 @@ func clashPlainTLS(n Node, m map[string]any) {
 	if pins := normPins(t.PinSHA256); len(pins) > 0 {
 		m["fingerprint"] = pins[0]
 	}
+	return nil
 }
 
 func clashWireGuard(n Node, m map[string]any) {
@@ -343,6 +358,9 @@ func clashStream(n Node, m map[string]any, sniKey string) (map[string]any, error
 		}
 		fp := ""
 		if n.TLS != nil {
+			if pinLostInsecure(n) {
+				return nil, NewError(CodePinNotExpressible)
+			}
 			if n.TLS.SNI != "" {
 				m[sniKey] = n.TLS.SNI
 			}

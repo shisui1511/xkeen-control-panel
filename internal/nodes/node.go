@@ -38,7 +38,12 @@ type TLS struct {
 	ALPN        []string
 	Fingerprint string
 	Insecure    bool
-	PinSHA256   []string
+	// PinSHA256 — SHA-256 всего сертификата (hex): его выражают оба ядра.
+	PinSHA256 []string
+	// PinPubKeySHA256 — SHA-256 открытого ключа сертификата (SPKI) в base64, как в
+	// sing-box; ни Xray 26.x, ни Mihomo его не выражают. omitempty: канонический
+	// JSON и хэш снимков узлов без этого поля не меняются.
+	PinPubKeySHA256 []string `json:"PinPubKeySHA256,omitempty"`
 }
 
 // Reality — параметры Reality (ключи); TLS при этом тоже заполнен.
