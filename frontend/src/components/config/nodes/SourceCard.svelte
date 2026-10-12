@@ -17,7 +17,6 @@
     type KernelName,
     type SourceView
   } from '../../../lib/configSources';
-  import { sourceErrorText } from '../../../lib/sourceErrors';
   import {
     PAGE_FIRST,
     PAGE_STEP,
@@ -154,9 +153,6 @@
       const toast = refreshToast(outcome);
       let message = $t(toast.key, toast.params);
       if (toast.extra) message += `; ${$t(toast.extra.key, toast.extra.params)}`;
-      if (outcome.outcome === 'failed' && outcome.error) {
-        message += `: ${sourceErrorText(outcome.error, $t).title}`;
-      }
       showToast(toast.kind, message);
       void loadSources();
     } catch (err) {
