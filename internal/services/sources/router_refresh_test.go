@@ -539,6 +539,17 @@ func TestRouterNoticesRebuildFromLive(t *testing.T) {
 	if _, ok := rtNoticeIDs(e)["source_rejected:"+a+":xray"]; ok {
 		t.Error("уведомление об отказе осталось при статусе ok")
 	}
+
+	// Ядро Mihomo удалено вне панели: его последний статус больше не обновляется, и
+	// уведомление о нём не висит.
+	if _, ok := rtNoticeIDs(e)["source_network:"+a+":mihomo"]; !ok {
+		t.Fatal("нет уведомления о сети Mihomo до удаления ядра")
+	}
+	e.installed = configlayer.InstalledKernels{Xray: true}
+	e.svc.rebuildNotices()
+	if _, ok := rtNoticeIDs(e)["source_network:"+a+":mihomo"]; ok {
+		t.Error("уведомление о неустановленном ядре осталось")
+	}
 }
 
 // Причина отказа ядра: секреты узлов кандидата и части адреса подписки маскируются,

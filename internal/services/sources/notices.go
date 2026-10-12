@@ -39,6 +39,7 @@ func (s *Service) rebuildNotices() {
 		return
 	}
 	now := s.d.Now()
+	installed := s.d.Installed()
 	var out []configlayer.NoticeView
 	for _, id := range subscriptionIDs(st, true) {
 		src := live[id]
@@ -56,7 +57,9 @@ func (s *Service) rebuildNotices() {
 		deferred := false
 		for _, kernel := range previewKernels {
 			kl := src.Kernels[kernel]
-			if kl == nil {
+			// Статус удалённого вне панели ядра больше не обновляется запросами и в
+			// карточке не показывается: уведомление о нём висело бы до удаления подписки.
+			if kl == nil || !installed.Has(kernel) {
 				continue
 			}
 			switch kl.Status.Code {
