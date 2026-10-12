@@ -2,6 +2,7 @@ package nodes
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"net"
 	"strconv"
@@ -121,6 +122,25 @@ func wireguardSettings(n Node) (map[string]any, error) {
 		s["reserved"] = r
 	}
 	return s, nil
+}
+
+// normPins приводит закрепления сертификата к виду, который принимают оба ядра:
+// sha256 из 64 hex-символов в нижнем регистре. Двоеточия и пробелы (так пишут
+// отпечаток в ссылках hysteria) убираются; значение другой длины или не hex
+// отбрасывается: ядро отвергает такой файл целиком и ломает всё применение.
+func normPins(in []string) []string {
+	var out []string
+	for _, p := range in {
+		p = strings.ToLower(strings.NewReplacer(":", "", " ", "").Replace(strings.TrimSpace(p)))
+		if len(p) != 64 {
+			continue
+		}
+		if _, err := hex.DecodeString(p); err != nil {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func stringsToAny(in []string) []any {
@@ -247,8 +267,9 @@ func xrayStream(n Node) (map[string]any, error) {
 		if fp, _ := XrayFingerprint(n.TLS.Fingerprint, false); fp != "" {
 			ts["fingerprint"] = fp
 		}
-		if len(n.TLS.PinSHA256) > 0 {
-			ts["pinnedPeerCertSha256"] = stringsToAny(n.TLS.PinSHA256)
+		if pins := normPins(n.TLS.PinSHA256); len(pins) > 0 {
+			// Xray 26.x: строка, несколько хешей — через запятую (массив отвергается)
+			ts["pinnedPeerCertSha256"] = strings.Join(pins, ",")
 		}
 		ss["security"] = "tls"
 		ss["tlsSettings"] = ts
@@ -262,7 +283,7 @@ func xrayStream(n Node) (map[string]any, error) {
 // узел принимается: поле allowInsecure не пишется, сертификат сверяется по хешу.
 // Reality сертификат не проверяет вовсе.
 func xrayInsecureForbidden(n Node) bool {
-	return n.Reality == nil && n.TLS != nil && n.TLS.Enabled && n.TLS.Insecure && len(n.TLS.PinSHA256) == 0
+	return n.Reality == nil && n.TLS != nil && n.TLS.Enabled && n.TLS.Insecure && len(normPins(n.TLS.PinSHA256)) == 0
 }
 
 // checkXrayRaw проверяет родной outbound Xray на ключи, которые Xray 26.x

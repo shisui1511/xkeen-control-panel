@@ -147,8 +147,8 @@ func clashPlainTLS(n Node, m map[string]any) {
 	if t.Insecure {
 		m["skip-cert-verify"] = true
 	}
-	if len(t.PinSHA256) > 0 {
-		m["fingerprint"] = t.PinSHA256[0]
+	if pins := normPins(t.PinSHA256); len(pins) > 0 {
+		m["fingerprint"] = pins[0]
 	}
 }
 
@@ -352,8 +352,8 @@ func clashStream(n Node, m map[string]any, sniKey string) (map[string]any, error
 			if n.TLS.Insecure {
 				m["skip-cert-verify"] = true
 			}
-			if len(n.TLS.PinSHA256) > 0 {
-				m["fingerprint"] = n.TLS.PinSHA256[0]
+			if pins := normPins(n.TLS.PinSHA256); len(pins) > 0 {
+				m["fingerprint"] = pins[0]
 			}
 			fp = n.TLS.Fingerprint
 		}
