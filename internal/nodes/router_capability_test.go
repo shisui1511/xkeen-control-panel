@@ -3,6 +3,8 @@
 package nodes
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -285,6 +287,13 @@ func TestRouterCapabilityMatrix(t *testing.T) {
 		{name: "raw_xhttp_headers_host", node: rtCapFromInput("xray_forbidden_fields.json", 3, nil), xrayCode: CodeXrayForbiddenKey,
 			xrayParams: map[string]string{"key": "xhttpSettings.headers.Host"}},
 		{name: "raw_clean_vless", node: rtCapFromInput("xray_outbounds.json", 0, nil)},
+		{name: "raw_pins_array", node: func(t *testing.T) Node {
+			h := hex.EncodeToString(rtCapPin("a"))
+			return rtCapRawTLS(t, []any{h, h}, true)
+		}, xrayCode: CodeXrayForbiddenKey, xrayParams: map[string]string{"key": "tlsSettings.pinnedPeerCertSha256"}},
+		{name: "raw_pins_bad_length", node: func(t *testing.T) Node {
+			return rtCapRawTLS(t, hex.EncodeToString(rtCapPin("a"))[:62], true)
+		}, xrayCode: CodeXrayForbiddenKey, xrayParams: map[string]string{"key": "tlsSettings.pinnedPeerCertSha256"}},
 		{name: "raw_xhttp_download_settings", node: rtCapFromInput("xray_xhttp.json", 0, func(n *Node) {
 			n.Transport.XHTTP["downloadSettings"] = map[string]any{"address": "x.example"}
 		}), mihomoCode: CodeXHTTPDownloadSettings},
@@ -442,6 +451,123 @@ func TestRouterCapabilityLevelB(t *testing.T) {
 			}
 			if got := rtCapHasNote(v, p.note); got != p.want {
 				t.Errorf("примечание %s: есть %v, ожидалось %v (все: %v)", p.note, got, p.want, v.Notes)
+			}
+		})
+	}
+}
+
+// rtCapPin — SHA-256 постоянной строки теста: реальных сертификатов в данных нет.
+func rtCapPin(seed string) []byte {
+	sum := sha256.Sum256([]byte("xcp-router-test-pin/" + seed))
+	return sum[:]
+}
+
+// rtCapRawTLS — родной узел Xray-JSON с TLS: первый узел xray_outbounds.json с
+// tlsSettings, а если такого нет, первый vless с переписанным на TLS транспортом.
+// Закрепление записывается в Raw как есть (hasPins=false — ключа нет).
+func rtCapRawTLS(t *testing.T, pins any, hasPins bool) Node {
+	t.Helper()
+	nodes := rtCapInput(t, "xray_outbounds.json")
+	var base *Node
+	for i := range nodes {
+		ss, _ := nodes[i].Raw["streamSettings"].(map[string]any)
+		if _, ok := ss["tlsSettings"]; ok && nodes[i].Origin == OriginXrayJSON {
+			base = &nodes[i]
+			break
+		}
+	}
+	if base == nil {
+		for i := range nodes {
+			if nodes[i].Origin == OriginXrayJSON && nodes[i].Raw["protocol"] == "vless" {
+				base = &nodes[i]
+				break
+			}
+		}
+	}
+	if base == nil {
+		t.Fatal("в xray_outbounds.json нет родного узла vless")
+	}
+	n := *base
+	n.Raw = deepCopyMap(base.Raw)
+	ss, _ := n.Raw["streamSettings"].(map[string]any)
+	if ss == nil {
+		ss = map[string]any{"network": "tcp"}
+		n.Raw["streamSettings"] = ss
+	}
+	ts, _ := ss["tlsSettings"].(map[string]any)
+	if ts == nil {
+		delete(ss, "realitySettings")
+		ss["security"] = "tls"
+		ts = map[string]any{"serverName": orDefault(n.Host, "node.example")}
+		ss["tlsSettings"] = ts
+	}
+	delete(ts, "pinnedPeerCertSha256")
+	if hasPins {
+		ts["pinnedPeerCertSha256"] = pins
+	}
+	return n
+}
+
+// TestRouterCapabilityRawPins: вердикт матрицы для каждой формы
+// tlsSettings.pinnedPeerCertSha256 родного узла Xray-JSON совпадает с кодом
+// выхода `xray run -test` на устройстве. Отвергнутая форма даёт
+// xray_forbidden_key и в файл Xray не попадает.
+func TestRouterCapabilityRawPins(t *testing.T) {
+	routertest.Current(t)
+	latest := CapsLatest()
+	h1 := hex.EncodeToString(rtCapPin("a"))
+	h2 := hex.EncodeToString(rtCapPin("b"))
+	colon := func(h string) string {
+		parts := make([]string, 0, 32)
+		for i := 0; i < len(h); i += 2 {
+			parts = append(parts, h[i:i+2])
+		}
+		return strings.ToUpper(strings.Join(parts, ":"))
+	}
+	forms := []struct {
+		name string
+		pins any
+	}{
+		{"single_lower", h1},
+		{"two_comma", h1 + "," + h2},
+		{"colons_upper", colon(h1)},
+		{"spaces_and_empty_parts", " " + h1 + " , ," + h2 + ","},
+		{"empty_string", ""},
+		{"array_two", []any{h1, h2}},
+		{"short_62", h1[:62]},
+		{"long_66", h1 + "ab"},
+		{"not_hex_64", strings.Repeat("zz", 32)},
+		{"number", json.Number("12345")},
+	}
+	for i, f := range forms {
+		t.Run(f.name, func(t *testing.T) {
+			n := rtCapRawTLS(t, f.pins, true)
+			v := Support(n, "xray", latest)
+
+			ob := deepCopyMap(n.Raw)
+			ob["tag"] = rtNodeTag(i)
+			setSockoptMark(ob)
+			file, err := XrayFile([]map[string]any{ob, {"protocol": "freedom", "tag": "direct"}})
+			if err != nil {
+				t.Fatalf("XrayFile: %v", err)
+			}
+			dir := filepath.Join(rtParseWork(t), "xray-rawpins-"+f.name)
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "outbounds.json"), file, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			code, tail := rtRunKernel(rtXrayBin, rtRedactNodes(n), "run", "-test", "-confdir", dir)
+
+			if v.OK != (code == 0) {
+				t.Fatalf("форма %s: матрица ok=%v (code %q), xray run -test вернул %d: %s", f.name, v.OK, v.Code, code, tail)
+			}
+			if !v.OK {
+				rtCapExpect(t, f.name, v, false, CodeXrayForbiddenKey, map[string]string{"key": "tlsSettings.pinnedPeerCertSha256"})
+				if _, err := XrayOutbound(n, rtNodeTag(i)); err == nil {
+					t.Errorf("форма %s: XrayOutbound пропустил отвергнутую форму в файл", f.name)
+				}
 			}
 		})
 	}
