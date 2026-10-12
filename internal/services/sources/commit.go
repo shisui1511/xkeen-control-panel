@@ -103,7 +103,12 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 	delete(st.Live, LiveKeyCandidatePrints)
 	// Статусы могли измениться («Применить» делает снимки применёнными): уведомления
 	// пересобираются после записи состояния, из горутины — слой держит замок хранилища.
-	s.spawn(s.rebuildNotices)
+	// Туда же уходит уборка: прежние применённые снимки и диагностика удалённых
+	// источников больше не нужны, а читать состояние под замком нельзя.
+	s.spawn(func() {
+		s.rebuildNotices()
+		s.collectGarbage()
+	})
 	return nil
 }
 

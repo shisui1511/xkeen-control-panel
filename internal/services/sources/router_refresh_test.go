@@ -827,6 +827,18 @@ func TestRouterRefreshChangedSetTracer(t *testing.T) {
 	if kl.Applied == nil || kl.Applied.Hash == hash || kl.Delta.Added != 1 || kl.Status.Code != StatusOK {
 		t.Errorf("живые данные после обновления: %+v", kl)
 	}
+	// Прежний применённый снимок после обновления никому не нужен: фоновая уборка
+	// убирает его без перезапуска панели.
+	deadline := time.Now().Add(5 * time.Second)
+	for rtExists(rtBlobPath(e, hash)) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if rtExists(rtBlobPath(e, hash)) {
+		t.Error("прежний применённый снимок остался на носителе после обновления")
+	}
+	if !rtExists(rtBlobPath(e, kl.Applied.Hash)) {
+		t.Error("новый применённый снимок удалён уборкой")
+	}
 
 	// Повтор без изменений: конвейер не запускается, файл не переписывается.
 	st, err := os.Stat(rtXrayFile(e, id))
