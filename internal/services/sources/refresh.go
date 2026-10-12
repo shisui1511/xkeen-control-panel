@@ -350,7 +350,9 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 }
 
 // markChecked отмечает время проверки источника без изменения снимков и статусов.
-// Сбой записи — только в журнал: вызывающий уже возвращает исходную ошибку.
+// Источник без живых данных не создаётся: его могли удалить, пока шёл запрос
+// (Delete подписки только в черновике убирает и её Live). Сбой записи — только в
+// журнал: вызывающий уже возвращает исходную ошибку.
 func (s *Service) markChecked(id string, now time.Time) {
 	err := s.d.Layer.UpdateLive(func(l configlayer.Sections) error {
 		cur, err := readLive(l)
@@ -359,8 +361,7 @@ func (s *Service) markChecked(id string, now time.Time) {
 		}
 		src := cur[id]
 		if src == nil {
-			src = &LiveSource{Kernels: map[string]*KernelLive{}}
-			cur[id] = src
+			return nil
 		}
 		src.Meta.CheckedAt = now
 		return writeLive(l, cur)
