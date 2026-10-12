@@ -224,7 +224,8 @@ func (a *API) ConfigSourcesDiagnostics(w http.ResponseWriter, r *http.Request) {
 
 // ConfigSourcesNodePreview — POST /api/configlayer/sources/nodes/preview
 // {text, entry_id?}: предпросмотр правки или добавления одного узла «Моих узлов».
-// Текст, который не даёт ровно один узел, — 400 edit_single_node.
+// Текст, который не даёт ровно один узел, — 400 edit_single_node, а в data —
+// предпросмотр этого текста: по нему видно, какая строка и почему не распознана.
 func (a *API) ConfigSourcesNodePreview(w http.ResponseWriter, r *http.Request) {
 	if !a.requireMethod(w, r, http.MethodPost) || !a.requireSources(w, r) {
 		return
@@ -237,7 +238,12 @@ func (a *API) ConfigSourcesNodePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view, err := a.sources.PreviewNode(r.Context(), req.Text, req.EntryID)
-	if err != nil {
+	var serr *nodes.SourceError
+	switch {
+	case errors.As(err, &serr):
+		JSONErrorCodeParamsData(w, http.StatusBadRequest, serr.Code, a.t(r, "configlayer.source_error"), serr.Params, view)
+		return
+	case err != nil:
 		a.writeSourceError(w, r, err)
 		return
 	}

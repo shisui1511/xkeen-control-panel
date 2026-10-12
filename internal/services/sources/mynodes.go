@@ -53,7 +53,8 @@ func singleNode(rec nodes.Recognition) (nodes.Node, *nodes.SourceError) {
 // запись (пустой — новый узел): она не считается дублем самой себя. Токена нет:
 // сохраняет SaveNode по тому же тексту. Текст, который не даёт ровно один узел,
 // возвращается вместе с ошибкой *nodes.SourceError (edit_single_node) и
-// предпросмотром, где видны причины по строкам.
+// предпросмотром, где видны причины по строкам: обработчик отдаёт его в data
+// ответа 400.
 func (s *Service) PreviewNode(ctx context.Context, text, entryID string) (PreviewView, error) {
 	if err := ctx.Err(); err != nil {
 		return PreviewView{}, err

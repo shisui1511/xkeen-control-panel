@@ -83,6 +83,11 @@
     } catch (e) {
       if (mine !== seq) return;
       pvError = errorFromThrown(e);
+      // Отказ edit_single_node приходит с предпросмотром: по нему видны причины по строкам
+      const data = (e as { data?: unknown })?.data;
+      if (data && typeof data === 'object' && Array.isArray((data as PreviewView).errors)) {
+        preview = data as PreviewView;
+      }
     } finally {
       if (mine === seq) pvLoading = false;
     }

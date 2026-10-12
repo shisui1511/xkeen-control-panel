@@ -4,6 +4,7 @@
   import type {
     PreviewView,
     PreviewNode,
+    PreviewLineError,
     PreviewSubscription,
     SourceErrorPayload
   } from '../../../lib/configSources';
@@ -47,6 +48,9 @@
   const restErrors = $derived(nothing ? lineErrors.slice(1) : lineErrors);
   const shownErrors = $derived(restErrors.slice(0, MAX_ERROR_ROWS));
   const moreErrors = $derived(Math.max(0, restErrors.length - MAX_ERROR_ROWS));
+  // Отказ правки одного узла приходит вместе с предпросмотром: под общей ошибкой —
+  // причины по строкам
+  const errorLines = $derived(mode === 'single' && error ? lineErrors : []);
   const showList = $derived(mode === 'single' || expanded);
 
   const mySummary = $derived.by(() => {
@@ -84,6 +88,35 @@
   }
 </script>
 
+{#snippet lineErrorList(list: PreviewLineError[], more: number, head: boolean)}
+  <div class="pv-row" data-testid="nodes-preview-errors">
+    {#if head}
+      <div class="pv-head">
+        <span class="pv-name">{$t('cfg.nodes.unrecognized_head')}</span>
+      </div>
+    {/if}
+    {#each list as le, i (i)}
+      <div class="alert alert-warning pv-alert" data-testid="nodes-preview-line-error">
+        <Icon name="warning" size={16} class="pv-alert-icon" />
+        <div class="pv-err-text">
+          <span class="pv-line-ref">
+            {le.file
+              ? $t('cfg.nodes.line_ref_file', { file: le.file, line: le.line })
+              : $t('cfg.nodes.line_ref', { line: le.line })}
+          </span>
+          {#if le.fragment}
+            <code class="pv-fragment">{truncateFragment(le.fragment)}</code>
+          {/if}
+          {@render errorBlock(le.error, le.file)}
+        </div>
+      </div>
+    {/each}
+    {#if more > 0}
+      <span class="pv-hint">{$t('cfg.nodes.errors_more', { n: more })}</span>
+    {/if}
+  </div>
+{/snippet}
+
 {#snippet errorBlock(e: SourceErrorPayload, file?: string)}
   {@const text = sourceErrorText(e, $t)}
   <div class="pv-err-text">
@@ -117,6 +150,13 @@
       <Icon name="warning" size={16} class="pv-alert-icon" />
       {@render errorBlock(error)}
     </div>
+    {#if errorLines.length > 0}
+      {@render lineErrorList(
+        errorLines.slice(0, MAX_ERROR_ROWS),
+        Math.max(0, errorLines.length - MAX_ERROR_ROWS),
+        false
+      )}
+    {/if}
   {:else if preview}
     {#if nothing}
       <div class="alert alert-error pv-alert" data-testid="nodes-preview-error">
@@ -262,32 +302,7 @@
     {/if}
 
     {#if shownErrors.length > 0}
-      <div class="pv-row" data-testid="nodes-preview-errors">
-        {#if !nothing}
-          <div class="pv-head">
-            <span class="pv-name">{$t('cfg.nodes.unrecognized_head')}</span>
-          </div>
-        {/if}
-        {#each shownErrors as le, i (i)}
-          <div class="alert alert-warning pv-alert" data-testid="nodes-preview-line-error">
-            <Icon name="warning" size={16} class="pv-alert-icon" />
-            <div class="pv-err-text">
-              <span class="pv-line-ref">
-                {le.file
-                  ? $t('cfg.nodes.line_ref_file', { file: le.file, line: le.line })
-                  : $t('cfg.nodes.line_ref', { line: le.line })}
-              </span>
-              {#if le.fragment}
-                <code class="pv-fragment">{truncateFragment(le.fragment)}</code>
-              {/if}
-              {@render errorBlock(le.error, le.file)}
-            </div>
-          </div>
-        {/each}
-        {#if moreErrors > 0}
-          <span class="pv-hint">{$t('cfg.nodes.errors_more', { n: moreErrors })}</span>
-        {/if}
-      </div>
+      {@render lineErrorList(shownErrors, moreErrors, !nothing)}
     {/if}
   {/if}
 </div>

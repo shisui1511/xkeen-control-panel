@@ -398,6 +398,17 @@ func TestRouterSourcesMyNodesFlow(t *testing.T) {
 	if two.Status != http.StatusBadRequest || two.Code != "edit_single_node" {
 		t.Errorf("nodes/preview двух ссылок: %d %q", two.Status, two.Code)
 	}
+	// Нераспознанная строка: тот же отказ, а в data — предпросмотр с причиной по строке.
+	broken := e.call(http.MethodPost, rtSourcesBase+"/nodes/preview", map[string]string{"text": "foo://broken"})
+	if broken.Status != http.StatusBadRequest || broken.Code != "edit_single_node" {
+		t.Errorf("nodes/preview нераспознанной строки: %d %q", broken.Status, broken.Code)
+	} else {
+		bv := broken.object(t)
+		rtAssertContractKeys(t, contract, bv, "PreviewView", "data")
+		if errs, _ := bv["errors"].([]any); len(errs) != 1 {
+			t.Errorf("предпросмотр отказа без причины по строке: %v", bv["errors"])
+		}
+	}
 
 	// nodes/save: устаревшая ревизия, две ссылки, успех
 	if st := e.call(http.MethodPost, rtSourcesBase+"/nodes/save", map[string]any{"revision": 0, "entry_id": entryID, "name": "x", "text": link}); st.Status != http.StatusConflict || st.Code != "draft_conflict" {

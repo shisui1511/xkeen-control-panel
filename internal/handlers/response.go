@@ -70,6 +70,15 @@ func JSONErrorCodeParams(w http.ResponseWriter, status int, code, msg string, pa
 	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: msg, Code: code, Params: params})
 }
 
+// JSONErrorCodeParamsData — как JSONErrorCodeParams, плюс data: результат, который
+// объясняет отказ (например, предпросмотр с причинами по строкам). Секретов в data
+// быть не должно, как и в успешном ответе того же маршрута.
+func JSONErrorCodeParamsData(w http.ResponseWriter, status int, code, msg string, params map[string]string, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(APIResponse{Success: false, Data: data, Error: msg, Code: code, Params: params})
+}
+
 // JSONErrorKernelInactive — 409 «нужное ядро не активно»: живой маршрут ядра
 // вызван, когда активно другое ядро, оба сразу или ни одного. Отдаётся сразу,
 // без обращения к процессу ядра (иначе запрос висит до таймаута).

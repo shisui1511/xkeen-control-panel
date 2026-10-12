@@ -429,6 +429,14 @@ test('modals: «Изменить» — текст из двух ссылок д�
   expect(await err.textContent(), 'в подробностях код ошибки').toContain('edit_single_node');
   await expect(page.getByTestId('nodes-edit-save')).toBeDisabled();
 
+  // нераспознанная строка: под общей ошибкой видна причина по строке
+  await text.fill(`${original}\nfoo://broken`);
+  await expect(err).toBeVisible({ timeout: T.action });
+  const lineErr = modal.getByTestId('nodes-preview-line-error');
+  await expect(lineErr).toHaveCount(1, { timeout: T.action });
+  await expect(lineErr).toContainText('foo://');
+  await expect(page.getByTestId('nodes-edit-save')).toBeDisabled();
+
   // пустой текст: предпросмотр скрыт, запись невозможна
   await text.fill('');
   await expect(modal.getByTestId('nodes-preview')).toHaveCount(0);
