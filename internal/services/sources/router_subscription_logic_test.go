@@ -603,4 +603,29 @@ func TestRouterPreviewDupSubscription(t *testing.T) {
 			}
 		}
 	}
+
+	dupOf := func(text string) bool {
+		t.Helper()
+		v, err := e.svc.Preview(context.Background(), inputOf(text))
+		if err != nil || len(v.Subscriptions) != 1 {
+			t.Fatalf("Preview %q: %v", text, err)
+		}
+		for _, w := range v.Subscriptions[0].Warnings {
+			if w.Code == nodes.CodeDupSubscription {
+				return true
+			}
+		}
+		return false
+	}
+	// Регистр хоста и «/» в конце пути повтора не скрывают.
+	if !dupOf(strings.Replace(rtDeadURL, "xcp-provider", "XCP-Provider", 1) + "/") {
+		t.Error("адрес в другом регистре и с «/» в конце не помечен как повтор")
+	}
+	// Подписка, удалённая в черновике, повтором не считается: «Применить» её уберёт.
+	if _, err := e.svc.Delete(e.rev(t), "a1b2c3d4"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if dupOf(rtDeadURL) {
+		t.Error("подписка, удалённая в черновике, помечена как повтор")
+	}
 }

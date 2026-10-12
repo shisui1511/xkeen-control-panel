@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
@@ -156,7 +159,7 @@ func (s *Service) Preview(ctx context.Context, in nodes.Input) (PreviewView, err
 		// Адрес уже есть среди источников: «Добавить» создаст второй источник с теми
 		// же узлами и вторым набором запросов к провайдеру — только предупреждение,
 		// как пометка dup_exists у узлов.
-		if name, ok := known[c.url]; ok {
+		if name, ok := known[subscriptionKey(c.url)]; ok {
 			c.view.Warnings = append(c.view.Warnings, nodes.NewError(nodes.CodeDupSubscription, "name", name))
 		}
 		view.Subscriptions = append(view.Subscriptions, c.view)
@@ -173,28 +176,52 @@ func (s *Service) Preview(ctx context.Context, in nodes.Input) (PreviewView, err
 	return view, nil
 }
 
-// subscriptionURLs — адреса подписок черновика и применённого состояния с их
-// именами (имя черновика важнее: его видит пользователь). Пустое имя заменяется
-// доменом адреса.
+// subscriptionURLs — адреса подписок черновика (их увидит «Применить»; подписка,
+// удалённая в черновике, повтором не считается) по ключу subscriptionKey с
+// именами. При нескольких источниках с одним адресом имя берётся у источника с
+// наименьшим id. Пустое имя заменяется доменом адреса.
 func subscriptionURLs(st configlayer.StateView) map[string]string {
+	sections := make([]string, 0, len(st.Draft))
+	for section := range st.Draft {
+		sections = append(sections, section)
+	}
+	sort.Strings(sections)
 	out := map[string]string{}
-	for _, secs := range []configlayer.Sections{st.Applied, st.Draft} {
-		for section, raw := range secs {
-			if id, ok := sourceID(section); !ok || id == MySourceID || kindOf(raw) != KindSubscription {
-				continue
-			}
-			cfg, err := parseSubscription(raw)
-			if err != nil || cfg.URL == "" {
-				continue
-			}
-			name := cfg.Name
-			if name == "" {
-				name = hostOf(cfg.URL)
-			}
-			out[cfg.URL] = name
+	for _, section := range sections {
+		raw := st.Draft[section]
+		if id, ok := sourceID(section); !ok || id == MySourceID || kindOf(raw) != KindSubscription {
+			continue
 		}
+		cfg, err := parseSubscription(raw)
+		if err != nil || cfg.URL == "" {
+			continue
+		}
+		key := subscriptionKey(cfg.URL)
+		if _, seen := out[key]; seen {
+			continue
+		}
+		name := cfg.Name
+		if name == "" {
+			name = hostOf(cfg.URL)
+		}
+		out[key] = name
 	}
 	return out
+}
+
+// subscriptionKey — адрес подписки для сравнения повторов: схема и хост без
+// учёта регистра, без «/» в конце пути. Неразбираемый адрес сравнивается как есть.
+func subscriptionKey(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawPath = strings.TrimRight(u.RawPath, "/")
+	u.Fragment, u.RawFragment = "", ""
+	return u.String()
 }
 
 // buildView строит представление по результату распознавания; existing — уже
