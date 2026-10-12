@@ -328,7 +328,7 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 				kl.setStatus(Status{Code: StatusOK}, now)
 			case kf.candidate:
 				s.settleKernel(kl, kf.kernel, *kf.oc.Ref, settled, now)
-				if settled.Outcome == OutcomeApplied {
+				if _, refused := settled.Refused[kf.kernel]; !refused && settled.Outcome == OutcomeApplied {
 					delta.Added = max(delta.Added, kl.Delta.Added)
 					delta.Removed = max(delta.Removed, kl.Delta.Removed)
 				}
@@ -416,13 +416,17 @@ func (s *Service) fillOutcome(out *RefreshOutcome, fetches []*kernelFetch, inApp
 			ko.Count = kf.oc.Ref.Usable
 			ko.Status = StatusOK
 			if kf.candidate && inApplied {
-				switch settled.Outcome {
-				case OutcomeDeferred:
-					ko.Status = StatusDeferred
-				case OutcomeFailed:
-					if _, refused := settled.Refused[kf.kernel]; refused {
-						ko.Status = StatusRefused
+				if _, refused := settled.Refused[kf.kernel]; refused {
+					// Набор отвергнут: действует прежний применённый.
+					ko.Status = StatusRefused
+					ko.Count = 0
+					if prev != nil {
+						if kl := prev.Kernels[kf.kernel]; kl != nil && kl.Applied != nil {
+							ko.Count = kl.Applied.Usable
+						}
 					}
+				} else if settled.Outcome == OutcomeDeferred {
+					ko.Status = StatusDeferred
 				}
 			}
 		}
@@ -450,9 +454,11 @@ func (s *Service) fillOutcome(out *RefreshOutcome, fetches []*kernelFetch, inApp
 
 // settleResult — итог запуска конвейера обновления.
 type settleResult struct {
-	// Outcome — applied, deferred или failed; пусто — конвейер не запускался.
+	// Outcome — applied, deferred или failed для ядер вне Refused; пусто — конвейер
+	// не запускался.
 	Outcome string
-	// Refused — ядра, отказавшиеся принять состав, с замаскированной причиной.
+	// Refused — ядра, отказавшиеся принять состав, с замаскированной причиной. При
+	// applied и deferred в нём ядра, отвергнутые до повтора без них.
 	Refused map[string]string
 }
 
@@ -484,15 +490,32 @@ func (s *Service) settle(ctx context.Context, id string, cfg SubscriptionConfig,
 		code, message, blamed = view.Result.Code, view.Result.Message, view.Result.Kernel
 	}
 	reason := s.maskReason(message, code, cfg, cands)
-	refused := map[string]string{}
-	if _, ok := cands[blamed]; ok {
-		refused[blamed] = reason
-	} else {
+	if _, ok := cands[blamed]; !ok || len(cands) == 1 {
+		refused := map[string]string{}
 		for k := range cands {
 			refused[k] = reason
 		}
+		return settleResult{Outcome: OutcomeFailed, Refused: refused}, nil
 	}
-	return settleResult{Outcome: OutcomeFailed, Refused: refused}, nil
+	// Отказало одно названное ядро: конвейер всё-или-ничего, и кандидаты остальных
+	// ядер не применены, хотя их не отвергали. Повтор без виноватого ядра: иначе
+	// свежие наборы остальных ядер пропали бы, а их прежний отложенный снимок
+	// применился бы позже, хотя он старше полученного.
+	rest := make(map[string]Ref, len(cands)-1)
+	for k, ref := range cands {
+		if k != blamed {
+			rest[k] = ref
+		}
+	}
+	next, err := s.settle(ctx, id, cfg, rest)
+	if err != nil {
+		return settleResult{}, err
+	}
+	if next.Refused == nil {
+		next.Refused = map[string]string{}
+	}
+	next.Refused[blamed] = reason
+	return next, nil
 }
 
 // settleKernel отражает итог конвейера в состоянии ядра. Применённое состояние
@@ -501,18 +524,18 @@ func (s *Service) settle(ctx context.Context, id string, cfg SubscriptionConfig,
 // При отказе ядра ожидающий снимок снимается: при обновлении он старше
 // отвергнутого кандидата, при повторе отложенной записи он сам и есть
 // отвергнутый кандидат. Иначе черновик продолжил бы собираться из него, а
-// «Применить» молча применило бы непроверенный или отвергнутый набор.
+// «Применить» молча применило бы непроверенный или отвергнутый набор. Отказ
+// проверяется до итога: остальные ядра могли примениться повтором без него.
 func (s *Service) settleKernel(kl *KernelLive, kernel string, ref Ref, sr settleResult, now time.Time) {
-	switch sr.Outcome {
-	case OutcomeDeferred:
+	if reason, ok := sr.Refused[kernel]; ok {
+		kl.Pending = nil
+		kl.setStatus(Status{Code: StatusRefused, Params: map[string]string{"reason": reason}}, now)
+		return
+	}
+	if sr.Outcome == OutcomeDeferred {
 		p := ref
 		kl.Pending = &p
 		kl.setStatus(Status{Code: StatusDeferred}, now)
-	case OutcomeFailed:
-		if reason, ok := sr.Refused[kernel]; ok {
-			kl.Pending = nil
-			kl.setStatus(Status{Code: StatusRefused, Params: map[string]string{"reason": reason}}, now)
-		}
 	}
 }
 
@@ -650,10 +673,10 @@ func (s *Service) retryDeferredOne(ctx context.Context, id string) bool {
 		}
 		return false
 	}
-	if sr.Outcome == OutcomeDeferred {
+	if sr.Outcome == OutcomeDeferred && len(sr.Refused) == 0 {
 		return false
 	}
-	if sr.Outcome == OutcomeApplied {
+	if sr.Outcome == OutcomeApplied && len(sr.Refused) == 0 {
 		// Снимки применены хуком фиксации: статус ok выставлен им.
 		return true
 	}
