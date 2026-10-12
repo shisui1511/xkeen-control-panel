@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 )
@@ -92,9 +93,19 @@ func (e *rtSrc) setLayer(on bool) {
 	if e.layerFlag() == on {
 		return
 	}
-	r := e.call(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": on})
-	if r.Status != http.StatusOK {
-		e.t.Fatalf("переключение слоя в %v: %d %s", on, r.Status, r.Code)
+	// Включение запускает фоновую сборку (flag_on): пока она идёт, выключение отвечает
+	// 409 apply_busy (на arm64 сборка не успевает закончиться к очистке теста).
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		r := e.call(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": on})
+		if r.Status == http.StatusOK {
+			return
+		}
+		busy := r.Status == http.StatusConflict && (r.Code == "apply_busy" || r.Code == "kernel_op_in_progress")
+		if !busy || time.Now().After(deadline) {
+			e.t.Fatalf("переключение слоя в %v: %d %s", on, r.Status, r.Code)
+		}
+		time.Sleep(time.Second)
 	}
 }
 
