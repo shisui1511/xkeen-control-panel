@@ -366,7 +366,24 @@ func clashProxyNode(raw map[string]any) (n Node, ignore bool, err *SourceError) 
 		n.Protocol = typ
 	}
 	n.Text = clashProxyText(raw)
+	// Ссылка на чужой прокси (dialer-proxy) висит в файле провайдера без цели: узел
+	// работает без цепочки (уровень B), факт — в Notes, как у Xray. Метка и
+	// интерфейс из чужого ответа перебили бы маршрутизацию XKeen (петля TPROXY).
+	if removeClashChain(raw) {
+		n.Notes = append(n.Notes, CodeNoteChainRemoved)
+	}
 	return n, false, nil
+}
+
+// removeClashChain удаляет из родного прокси Clash цепочку (dialer-proxy) и
+// привязку маршрутизации (routing-mark, interface-name); true — убрана цепочка.
+// Исходный текст узла (Text) снимается до удаления и остаётся прежним.
+func removeClashChain(raw map[string]any) bool {
+	_, chained := raw["dialer-proxy"]
+	delete(raw, "dialer-proxy")
+	delete(raw, "routing-mark")
+	delete(raw, "interface-name")
+	return chained
 }
 
 func truthyOf(v any) bool {

@@ -150,6 +150,59 @@ func TestRouterParseXrayChainRemoved(t *testing.T) {
 	rtXrayKernel(t, "xray_chain", rtParseWork(t), rtRedactNodes(n), ob)
 }
 
+// Прокси Clash с цепочкой и привязкой маршрутизации: dialer-proxy, routing-mark и
+// interface-name не доходят до Mihomo (цели цепочки в файле провайдера нет, метка
+// и интерфейс перебили бы маршрутизацию XKeen), прочие ключи и исходный текст
+// узла прежние, примечание о цепочке есть. Mihomo принимает итоговый прокси.
+func TestRouterParseClashChainRemoved(t *testing.T) {
+	routertest.Current(t)
+	body := "proxies:\n" +
+		"  - name: Узел с цепочкой\n" +
+		"    type: vless\n" +
+		"    server: node2.example\n" +
+		"    port: 443\n" +
+		"    uuid: 22222222-2222-4222-8222-222222222222\n" +
+		"    network: tcp\n" +
+		"    tls: true\n" +
+		"    servername: cdn.example\n" +
+		"    dialer-proxy: hop\n" +
+		"    routing-mark: 1234\n" +
+		"    interface-name: eth9\n"
+	res, err := ParseClash([]byte(body))
+	if err != nil || len(res.Nodes) != 1 {
+		t.Fatalf("ParseClash: узлов %d, ошибка %v", len(res.Nodes), err)
+	}
+	n := res.Nodes[0]
+	for _, k := range []string{"dialer-proxy", "routing-mark", "interface-name"} {
+		if _, has := n.Raw[k]; has {
+			t.Errorf("%s остался в Raw", k)
+		}
+	}
+	if n.Raw["servername"] != "cdn.example" {
+		t.Errorf("прочие ключи прокси потеряны: %v", n.Raw)
+	}
+	found := false
+	for _, note := range n.Notes {
+		found = found || note == CodeNoteChainRemoved
+	}
+	if !found {
+		t.Errorf("нет примечания %s: %v", CodeNoteChainRemoved, n.Notes)
+	}
+	if !strings.Contains(n.Text, "dialer-proxy") {
+		t.Errorf("исходный текст узла для правки должен хранить оригинал")
+	}
+	px, err := ClashProxy(n, "rt-clash-chain")
+	if err != nil {
+		t.Fatalf("ClashProxy: %v", err)
+	}
+	for _, k := range []string{"dialer-proxy", "routing-mark", "interface-name"} {
+		if _, has := px[k]; has {
+			t.Errorf("%s попал в прокси Mihomo", k)
+		}
+	}
+	rtMihomoKernel(t, "clash_chain", rtParseWork(t), rtRedactNodes(n), px)
+}
+
 func TestRouterParseXrayForbiddenKey(t *testing.T) {
 	routertest.Current(t)
 	res, err := ParseXray(rtInput(t, "xray_forbidden_transport.json"))
