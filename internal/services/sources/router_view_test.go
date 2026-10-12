@@ -487,8 +487,11 @@ func TestRouterViewDupAndKernelState(t *testing.T) {
 		t.Fatal(err)
 	}
 	sub = rtFindSource(t, rtView(t, e), id)
+	// Подписка только в черновике: планировщик её не обновляет, срока повтора нет,
+	// повтор начнётся после «Применить» (срок применённой подписки проверяет
+	// TestRouterViewNetworkRetryFollowsScheduler).
 	ks := sub.Kernels[kernelMihomo]
-	if ks.Status.Code != StatusNetwork || ks.Status.Attempts != 2 || ks.Status.RetryAt == nil || !ks.Status.RetryAt.Equal(retry) {
+	if ks.Status.Code != StatusNetwork || ks.Status.Attempts != 2 || ks.Status.RetryAt != nil || !ks.Status.RetryAfterApply {
 		t.Errorf("статус Mihomo: %+v", ks.Status)
 	}
 	if d := sub.Kernels[kernelXray].Delta; d == nil || d.Added != 1 || d.Removed != 0 {

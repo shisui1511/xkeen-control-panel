@@ -503,6 +503,18 @@ func TestRouterCommitLive(t *testing.T) {
 	otherRef := rtPut(t, e, "tuic")
 	sections := configlayer.Sections{sectionName(id): rtSubSection(t, id, true)}
 
+	// Каждая фиксация запускает уборку снимков по настоящему состоянию слоя, а не по
+	// State теста: без записи в слое уборка удаляет файлы снимков раньше, чем их
+	// читает расчёт разницы.
+	if err := e.layer.UpdateLive(func(l configlayer.Sections) error {
+		return writeLive(l, LiveSources{"c0ffee00": {Kernels: map[string]*KernelLive{
+			kernelXray:   {Applied: oldRef, Pending: newRef},
+			kernelMihomo: {Applied: otherRef},
+		}}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	mk := func() LiveSources {
 		return LiveSources{
 			id: {Kernels: map[string]*KernelLive{

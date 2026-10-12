@@ -496,7 +496,7 @@ func TestRouterSchedulerAddressChangeAfterApply(t *testing.T) {
 	if len(reqs) != 1 {
 		t.Fatalf("запросов к новому адресу: %d", len(reqs))
 	}
-	if reqs[0].HWID != "A1B2C3D4E5F6" {
+	if reqs[0].HWID != rtHWID() {
 		t.Errorf("x-hwid запроса к новому адресу: %q, признак «без HWID» прежнего провайдера не должен действовать", reqs[0].HWID)
 	}
 	if m := rtLiveOf(t, e, id).Meta; m.HWIDLocked || m.Print != candidatePrint(cfg) {

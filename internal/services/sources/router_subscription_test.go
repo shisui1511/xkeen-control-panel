@@ -81,6 +81,15 @@ func rtObservedClient(c *rtCapture) func(time.Duration) *http.Client {
 // rtDevice — заголовки устройства для проверок (значения не секретны).
 func rtDevice() (string, string, string) { return "XCP-Router", "Linux", "5.1.6" }
 
+// rtHWID — HWID, с которым панель теста запрашивает подписки: HWID самой панели при
+// настоящей подписке стенда, иначе фиксированный.
+func rtHWID() string {
+	if real := strings.TrimSpace(os.Getenv("XCP_RT_HWID")); real != "" && os.Getenv("XCP_RT_SUBSCRIPTION_URL") != "" {
+		return real
+	}
+	return "A1B2C3D4E5F6"
+}
+
 // rtSubscriptionEnv — окружение с наблюдателем запросов и постоянным HWID.
 func rtSubscriptionEnv(t *testing.T, xray, mihomo bool, installedBinaries bool) (*rtEnv, *rtCapture) {
 	t.Helper()
@@ -93,10 +102,7 @@ func rtSubscriptionEnv(t *testing.T, xray, mihomo bool, installedBinaries bool) 
 		d.Client = rtObservedClient(cap)
 		// Провайдер выдаёт один слот устройства: с настоящей подпиской запросы идут с HWID
 		// самой панели (XCP_RT_HWID), иначе провайдер отвечает заглушками (all_stubs).
-		hwid := "A1B2C3D4E5F6"
-		if real := strings.TrimSpace(os.Getenv("XCP_RT_HWID")); real != "" && os.Getenv("XCP_RT_SUBSCRIPTION_URL") != "" {
-			hwid = real
-		}
+		hwid := rtHWID()
 		d.HWID = func() string { return hwid }
 		d.Device = rtDevice
 		d.KernelVersion = func(k string) string {
