@@ -130,9 +130,12 @@ type Service struct {
 	// выполнены: они ждут включения слоя.
 	startupDone atomic.Bool
 
-	// cmu защищает calls: одновременные обновления одного источника сливаются.
+	// cmu защищает calls и backoffs: одновременные обновления одного источника
+	// сливаются.
 	cmu   sync.Mutex
 	calls map[string]*refreshCall
+	// backoffs — откат планировщика после внутреннего сбоя обновления (scheduler.go).
+	backoffs map[string]backoff
 	// refreshMu — один источник за раз: обновления, повторы отложенных записей и
 	// сборка после установки ядра идут по очереди (T-145-25).
 	refreshMu sync.Mutex
@@ -192,6 +195,7 @@ func New(d Deps) (*Service, error) {
 		ctx:       ctx,
 		cancel:    cancel,
 		calls:     map[string]*refreshCall{},
+		backoffs:  map[string]backoff{},
 		previews:  map[string]*previewEntry{},
 		parsed:    map[string]parsedEntry{},
 		gens:      map[string]memoFile{},

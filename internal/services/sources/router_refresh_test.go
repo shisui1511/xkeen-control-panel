@@ -250,6 +250,64 @@ func TestRouterSchedulerNetworkRetries(t *testing.T) {
 	check(5, 0)
 }
 
+// Снимок не записывается (каталог снимков недоступен, как на переполненном
+// носителе), а срок повтора прошлого сетевого сбоя уже наступил: планировщик не
+// запрашивает провайдера на каждом тике, а откатывается на 5, затем 15 минут.
+func TestRouterSchedulerBacksOffAfterSnapshotFailure(t *testing.T) {
+	subURL := rtSubURL(t)
+	e, cap := rtSubscriptionEnv(t, true, false, false)
+	const id = "a1b2c3d4"
+	ref := rtPut(t, e, "vless_ws", "trojan_grpc")
+	kl := rtAppliedRef(e, ref)
+	kl.Status = Status{Code: StatusNetwork, ErrorCode: nodes.CodeTimeout, Attempts: 1, Since: e.clock.Now(), RetryAt: e.clock.Now().Add(5 * time.Minute)}
+	kl.UpdatedAt = e.clock.Now()
+	rtSeedApplied(t, e, id, subURL, Interval{Mode: IntervalProvider}, true, &LiveSource{Kernels: map[string]*KernelLive{kernelXray: kl}})
+
+	// Вместо каталога снимков — файл: запись любого снимка падает.
+	snapDir := filepath.Join(e.dir, "config_layer", "snapshots")
+	if err := os.RemoveAll(snapDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snapDir, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	requests := func() int { return len(cap.all()) }
+	tickAfter := func(d time.Duration) {
+		e.clock.Advance(d)
+		e.svc.tick(ctx)
+	}
+
+	tickAfter(5 * time.Minute)
+	if requests() != 1 {
+		t.Fatalf("запросов в срок повтора: %d", requests())
+	}
+	if st := rtLiveOf(t, e, id).Kernels[kernelXray].Status; st.Code != StatusNetwork || st.Attempts != 1 {
+		t.Skipf("провайдер не отдал рабочий набор, снимок не записывался: %s/%s", st.Code, st.ErrorCode)
+	}
+	tickAfter(time.Minute)
+	if requests() != 1 {
+		t.Fatalf("после сбоя записи снимка провайдер запрошен на следующем тике: %d", requests())
+	}
+	tickAfter(4 * time.Minute)
+	if requests() != 2 {
+		t.Fatalf("повтор через 5 минут после сбоя: запросов %d", requests())
+	}
+	tickAfter(14 * time.Minute)
+	if requests() != 2 {
+		t.Fatalf("второй откат короче 15 минут: запросов %d", requests())
+	}
+
+	// Носитель освободился: после отката запрос идёт снова.
+	if err := os.Remove(snapDir); err != nil {
+		t.Fatal(err)
+	}
+	tickAfter(time.Minute)
+	if requests() != 3 {
+		t.Fatalf("запрос после отката: %d", requests())
+	}
+}
+
 // Выключенный источник не обновляется: ни одного запроса к провайдеру; неизвестный
 // источник — ErrSourceNotFound; «Мои узлы» не подписка.
 func TestRouterRefreshDisabledAndUnknown(t *testing.T) {

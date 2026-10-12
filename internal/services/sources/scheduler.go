@@ -88,14 +88,61 @@ func (s *Service) tick(ctx context.Context) {
 			continue
 		}
 		due, ok := s.nextDue(cfg, live[id])
-		if !ok || now.Before(due) {
+		if !ok || now.Before(due) || s.backedOff(id, now) {
 			continue
 		}
-		if _, err := s.Refresh(ctx, id); err != nil && ctx.Err() == nil &&
-			!errors.Is(err, ErrSourceDisabled) && !errors.Is(err, ErrSourceNotFound) && !errors.Is(err, configlayer.ErrDisabled) {
+		_, err = s.Refresh(ctx, id)
+		switch {
+		case err == nil:
+			s.clearBackoff(id)
+		case ctx.Err() != nil, errors.Is(err, ErrSourceDisabled), errors.Is(err, ErrSourceNotFound),
+			errors.Is(err, ErrSourceChanged), errors.Is(err, configlayer.ErrDisabled):
+		default:
 			log.Printf("[sources] фоновое обновление источника %s не выполнено: %v", id, err)
+			s.backOff(id, now)
 		}
 	}
+}
+
+// backoff — откат планировщика для источника после внутреннего сбоя обновления
+// (запись снимка или состояния): until — до какого времени источник не
+// запрашивается, n — сбоев подряд.
+type backoff struct {
+	until time.Time
+	n     int
+}
+
+// backOff откладывает следующее фоновое обновление источника после внутреннего
+// сбоя: 5, 15, затем 60 минут (задержки повторов D-30). Откат держится в памяти:
+// переполненный флеш или USB, из-за которого не записался снимок, не даёт
+// записать на диск и время проверки, и без отката провайдер запрашивался бы на
+// каждом тике. После перезапуска панели откат сбрасывается.
+func (s *Service) backOff(id string, now time.Time) {
+	s.cmu.Lock()
+	defer s.cmu.Unlock()
+	b := s.backoffs[id]
+	delay := 5 * time.Minute
+	if n := len(s.d.RetryDelays); n > 0 {
+		delay = s.d.RetryDelays[min(b.n, n-1)]
+	}
+	b.n++
+	b.until = now.Add(delay)
+	s.backoffs[id] = b
+}
+
+// backedOff — фоновое обновление источника отложено откатом.
+func (s *Service) backedOff(id string, now time.Time) bool {
+	s.cmu.Lock()
+	defer s.cmu.Unlock()
+	b, ok := s.backoffs[id]
+	return ok && now.Before(b.until)
+}
+
+// clearBackoff снимает откат после удавшегося обновления.
+func (s *Service) clearBackoff(id string) {
+	s.cmu.Lock()
+	delete(s.backoffs, id)
+	s.cmu.Unlock()
 }
 
 // intervalOf — интервал обновления подписки (D-05): свой в часах; иначе
