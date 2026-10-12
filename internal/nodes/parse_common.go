@@ -237,3 +237,42 @@ func hasKeyDeep(v any, key string, depth int) bool {
 	}
 	return false
 }
+
+// credentialKeys — ключи структурных записей (Xray-JSON, Clash, sing-box), значения
+// которых — учётные данные; имена приведены к нижнему регистру без «-» и «_».
+var credentialKeys = map[string]bool{
+	"id": true, "uuid": true, "pass": true, "passwd": true, "password": true, "pwd": true,
+	"auth": true, "authstr": true, "authpayload": true, "token": true, "secret": true,
+	"psk": true, "presharedkey": true, "privatekey": true, "obfspassword": true,
+	"shortid": true, "key": true,
+}
+
+// credentialValues собирает значения учётных данных из сырой записи, включая
+// вложенные карты и списки (vnext, users, peers). Записи, которая не стала узлом,
+// эти значения нужны только для маскирования в диагностике.
+func credentialValues(v any) []string {
+	var out []string
+	var walk func(v any, depth int)
+	walk = func(v any, depth int) {
+		if depth > 8 {
+			return
+		}
+		switch x := v.(type) {
+		case map[string]any:
+			for k, val := range x {
+				name := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(k))
+				if s, ok := val.(string); ok && credentialKeys[name] && s != "" {
+					out = append(out, s)
+					continue
+				}
+				walk(val, depth+1)
+			}
+		case []any:
+			for _, e := range x {
+				walk(e, depth+1)
+			}
+		}
+	}
+	walk(v, 0)
+	return out
+}

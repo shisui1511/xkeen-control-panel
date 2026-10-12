@@ -48,6 +48,7 @@ func parseSingboxValue(v any) (ParseResult, error) {
 		}
 		if err != nil {
 			res.Skipped = append(res.Skipped, skippedFrom(err, 0, strOf(ob["tag"]), strOf(ob["type"])))
+			res.SkippedSecrets = append(res.SkippedSecrets, credentialValues(ob)...)
 			continue
 		}
 		res.Nodes = append(res.Nodes, n)

@@ -33,10 +33,14 @@ type Skipped struct {
 // Format: "clash" | "xray_json" | "singbox" | "base64" | "links" | "wg".
 // FullConfig — тело оказалось полным конфигом ядра (D-12).
 type ParseResult struct {
-	Nodes      []Node
-	Skipped    []Skipped
-	Format     string
-	FullConfig bool
+	Nodes   []Node
+	Skipped []Skipped
+	// SkippedSecrets — значения учётных данных записей, которые не стали узлом
+	// (пропущенный outbound или прокси): в узлах их нет, а в сыром теле ответа
+	// они остаются, поэтому диагностика маскирует их наравне с секретами узлов.
+	SkippedSecrets []string
+	Format         string
+	FullConfig     bool
 }
 
 // skippedFrom строит запись пропуска из ошибки разбора.

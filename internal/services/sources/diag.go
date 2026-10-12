@@ -77,6 +77,7 @@ func (s *Service) writeDiag(id, kernel string, fr fetchResult, pr nodes.ParseRes
 		return
 	}
 	secrets := append([]string(nil), fr.Secrets...)
+	secrets = append(secrets, pr.SkippedSecrets...)
 	stubs := 0
 	for _, n := range pr.Nodes {
 		secrets = append(secrets, nodes.Secrets(n)...)

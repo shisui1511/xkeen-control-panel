@@ -308,3 +308,43 @@ func mustURL(t *testing.T, raw string) *url.URL {
 }
 
 func rtBase64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+// Учётные данные записей, которые не стали узлом (пропущенный outbound Xray-JSON,
+// прокси Clash, outbound sing-box), маскируются в теле диагностики: в узлах их
+// нет, а в сыром теле ответа они остаются.
+func TestRouterDiagMasksSkippedStructuralSecrets(t *testing.T) {
+	e := rtNewEnv(t, false, false)
+	cases := map[string]struct {
+		body    string
+		secrets []string
+	}{
+		"a1b2c3d4": {
+			body:    `{"outbounds":[{"tag":"a","protocol":"vmess","settings":{"vnext":[{"address":"h.invalid","port":99999,"users":[{"id":"9f1d2c3b-aaaa-bbbb-cccc-0123456789ab"}]}]}},{"tag":"b","protocol":"socks","settings":{"servers":[{"address":"h.invalid","port":0,"users":[{"user":"u","pass":"SocksPassXyz"}]}]}}]}`,
+			secrets: []string{"9f1d2c3b-aaaa-bbbb-cccc-0123456789ab", "SocksPassXyz"},
+		},
+		"b1b2c3d4": {
+			body:    "proxies:\n  - name: c1\n    type: hysteria\n    server: h.invalid\n    port: 0\n    auth-str: ClashAuthStr1\n",
+			secrets: []string{"ClashAuthStr1"},
+		},
+		"c1b2c3d4": {
+			body:    `{"outbounds":[{"type":"hysteria","tag":"s","server":"h.invalid","server_port":0,"auth_str":"SbAuthStrXy"}]}`,
+			secrets: []string{"SbAuthStrXy"},
+		},
+	}
+	for id, c := range cases {
+		pr, err := nodes.ParseBody([]byte(c.body))
+		if err != nil {
+			t.Fatalf("%s: ParseBody: %v", id, err)
+		}
+		if len(pr.Nodes) != 0 || len(pr.Skipped) == 0 {
+			t.Fatalf("%s: узлов %d, пропусков %d: запись должна быть пропущена", id, len(pr.Nodes), len(pr.Skipped))
+		}
+		e.svc.writeDiag(id, kernelXray, fetchResult{Body: []byte(c.body), Status: 200, Header: http.Header{}}, pr)
+		_, _, data := rtReadDiag(t, filepath.Join(rtDiagDir(e), id+"."+kernelXray+".json"))
+		for _, s := range c.secrets {
+			if strings.Contains(string(data), s) {
+				t.Errorf("%s: в диагностике остался секрет пропущенной записи %q…", id, s[:4])
+			}
+		}
+	}
+}

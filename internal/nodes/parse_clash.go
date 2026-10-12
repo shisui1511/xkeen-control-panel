@@ -215,6 +215,7 @@ func ParseClash(data []byte) (ParseResult, error) {
 		}
 		if nerr != nil {
 			res.Skipped = append(res.Skipped, skippedFrom(nerr, it.Line, strOf(raw["name"]), strOf(raw["type"])))
+			res.SkippedSecrets = append(res.SkippedSecrets, credentialValues(raw)...)
 			continue
 		}
 		res.Nodes = append(res.Nodes, n)

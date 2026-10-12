@@ -101,6 +101,7 @@ func xrayCollect(res *ParseResult, list []any, remarks string) {
 		if err != nil {
 			res.Skipped = append(res.Skipped, skippedFrom(err, 0,
 				orDefault(own, strOf(ob["tag"])), strOf(ob["protocol"])))
+			res.SkippedSecrets = append(res.SkippedSecrets, credentialValues(ob)...)
 			continue
 		}
 		if own != "" {
