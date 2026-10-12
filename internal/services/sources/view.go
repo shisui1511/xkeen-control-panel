@@ -92,13 +92,16 @@ type SourceView struct {
 // StatusView — состояние источника по ядру (контракт Status с необязательным
 // сроком повтора). Params несёт только безопасные значения.
 type StatusView struct {
-	Code      string            `json:"code"`
-	ErrorCode string            `json:"error_code,omitempty"`
-	HTTP      int               `json:"http,omitempty"`
-	Since     time.Time         `json:"since"`
-	RetryAt   *time.Time        `json:"retry_at,omitempty"`
-	Attempts  int               `json:"attempts,omitempty"`
-	Params    map[string]string `json:"params,omitempty"`
+	Code      string     `json:"code"`
+	ErrorCode string     `json:"error_code,omitempty"`
+	HTTP      int        `json:"http,omitempty"`
+	Since     time.Time  `json:"since"`
+	RetryAt   *time.Time `json:"retry_at,omitempty"`
+	// RetryOff — автоматического повтора не будет: обновление подписки выключено,
+	// «Обновить» остаётся единственным способом.
+	RetryOff bool              `json:"retry_off,omitempty"`
+	Attempts int               `json:"attempts,omitempty"`
+	Params   map[string]string `json:"params,omitempty"`
 }
 
 // KernelStateView — состояние источника по одному установленному ядру.
@@ -432,6 +435,9 @@ func (s *Service) subViewOf(id string, cfg SubscriptionConfig, draft json.RawMes
 			kl = src.Kernels[kernel]
 		}
 		ks := kernelStateOf(kl, s.d.Running(kernel))
+		if ks.Status.Code == StatusNetwork {
+			s.planRetry(&ks.Status, cfg, src)
+		}
 		for _, k := range sets[kernel] {
 			n, ok := representative(k, kepts[kernel])
 			if !ok {
@@ -520,6 +526,26 @@ func sortNodeViews(list []NodeView) {
 		}
 		return list[i].Key < list[j].Key
 	})
+}
+
+// planRetry приводит срок повтора в статусе к тому, что сделает планировщик
+// (nextDue). Срок по номеру попытки остаётся, если он есть. Но при выключенном
+// обновлении повтора не будет совсем, а у отказа без срока (tls_error, ssrf_blocked,
+// исчерпанные попытки) следующий запрос идёт через обычный интервал.
+func (s *Service) planRetry(st *StatusView, cfg SubscriptionConfig, src *LiveSource) {
+	due, ok := s.nextDue(cfg, src)
+	switch {
+	case !ok:
+		st.RetryAt, st.RetryOff = nil, true
+	case st.RetryAt != nil:
+		// Срок повтора по номеру попытки действует.
+	case due.IsZero():
+		// Срок наступил: запрос будет на ближайшем тике.
+		now := s.d.Now()
+		st.RetryAt = &now
+	default:
+		st.RetryAt = &due
+	}
 }
 
 // kernelStateOf — состояние источника по ядру без счётчика; kl == nil — запроса

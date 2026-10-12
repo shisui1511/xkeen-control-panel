@@ -128,6 +128,8 @@ export interface StatusView {
   http?: number;
   since: string;
   retry_at?: string;
+  /** Автоматического повтора не будет: обновление подписки выключено. */
+  retry_off?: boolean;
   attempts?: number;
   params?: Record<string, string>;
 }

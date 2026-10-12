@@ -81,7 +81,10 @@ func (s *Service) rebuildNotices() {
 				}
 				// Абсолютный срок повтора: остаток считает клиент, иначе «через 5 мин»
 				// застывал бы на момент сборки уведомлений.
-				if due, ok := s.nextDue(cfg, src); ok && !due.IsZero() {
+				if due, ok := s.nextDue(cfg, src); !ok {
+					// Обновление выключено: повтора не будет, уведомление не обещает его.
+					params["no_retry"] = "1"
+				} else if !due.IsZero() {
 					params["retry_at"] = due.UTC().Format(time.RFC3339)
 				}
 				out = append(out, configlayer.NoticeView{

@@ -159,6 +159,7 @@ export function kernelStatusView(
     case 'provider_error':
       return view('warning', 'provider_error', { date: snapshot, code: st.error_code ?? '' });
     case 'network': {
+      if (st.retry_off) return view('warning', 'network_no_retry');
       let minutes = 0;
       if (st.retry_at) {
         const ms = new Date(st.retry_at).getTime() - now.getTime();

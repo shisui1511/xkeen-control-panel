@@ -75,6 +75,14 @@
       return { notice: n, tone: 'warning', text: $t('cfg.notice.source_deferred', { name }) };
     }
     if (n.id.startsWith('source_network:')) {
+      // Обновление выключено: повтора не будет, срок не обещается
+      if (p.no_retry) {
+        return {
+          notice: n,
+          tone: 'warning',
+          text: $t('cfg.notice.source_network_no_retry', { name })
+        };
+      }
       return {
         notice: n,
         tone: 'warning',

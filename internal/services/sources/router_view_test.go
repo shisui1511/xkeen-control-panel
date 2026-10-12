@@ -519,3 +519,42 @@ func TestRouterDiagnosticsView(t *testing.T) {
 		t.Errorf("неизвестный источник: %v", err)
 	}
 }
+
+// Подписка с выключенным обновлением после сетевого отказа: повтора не будет, и
+// представление, и уведомление не обещают срок.
+func TestRouterViewNetworkNoRetryWhenIntervalOff(t *testing.T) {
+	e := rtViewEnv(t, "xray", kernelXray)
+	const id = "a1b2c3d4"
+	raw, err := json.Marshal(SubscriptionConfig{
+		Kind: KindSubscription, ID: id, Name: "Провайдер", URL: rtViewSubURL, Enabled: true,
+		Exclude: []string{}, Interval: Interval{Mode: IntervalOff}, AddedAt: e.clock.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rtAddSub(t, e, raw, id, false, map[string]*Ref{kernelXray: rtPut(t, e, "vless_ws")})
+	if err := e.layer.UpdateLive(func(l configlayer.Sections) error {
+		cur, err := readLive(l)
+		if err != nil {
+			return err
+		}
+		kl := cur[id].kernelLive(kernelXray)
+		kl.Status = Status{Code: StatusNetwork, ErrorCode: nodes.CodeDNSFailed, Since: e.clock.Now(), RetryAt: e.clock.Now().Add(5 * time.Minute), Attempts: 1}
+		return writeLive(l, cur)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	st := rtFindSource(t, rtView(t, e), id).Kernels[kernelXray].Status
+	if st.Code != StatusNetwork || st.RetryAt != nil || !st.RetryOff {
+		t.Errorf("статус при выключенном обновлении: %+v", st)
+	}
+	e.svc.rebuildNotices()
+	n, ok := rtNoticeIDs(e)["source_network:"+id+":xray"]
+	if !ok {
+		t.Fatal("нет уведомления о сети")
+	}
+	if n.Params["no_retry"] != "1" || n.Params["retry_at"] != "" {
+		t.Errorf("уведомление обещает повтор: %+v", n.Params)
+	}
+}
