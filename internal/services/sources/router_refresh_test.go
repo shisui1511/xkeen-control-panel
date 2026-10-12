@@ -898,6 +898,63 @@ func TestRouterRefreshDeferredOnDrift(t *testing.T) {
 	}
 }
 
+// Отложенный набор устаревает: применён полный ответ провайдера, ожидающим ждёт
+// другой набор (отложен при дрейфе), а следующее «Обновить» возвращает прежний
+// применённый состав. Ожидающий снимок снимается, статус ok: черновик больше не
+// собирается из устаревшего набора, и «Применить» его не применит.
+func TestRouterRefreshUnchangedDropsStalePending(t *testing.T) {
+	subURL := rtSubURL(t)
+	rtNeedKernels(t, true, false)
+	e, _ := rtSubscriptionEnv(t, true, false, true)
+	id, full := rtApplyProviderSub(t, e, subURL, nil)
+	if full < 2 {
+		t.Skipf("в подписке меньше двух рабочих узлов: %d", full)
+	}
+	applied := rtLiveOf(t, e, id).Kernels[kernelXray].Applied.Hash
+
+	// Отложенный набор без одного узла: как если бы провайдер на время убрал узел,
+	// а запись упёрлась в дрейф.
+	err := e.layer.UpdateLive(func(l configlayer.Sections) error {
+		cur, err := readLive(l)
+		if err != nil {
+			return err
+		}
+		kl := cur[id].Kernels[kernelXray]
+		list, err := e.svc.blobs.get(kl.Applied.Hash)
+		if err != nil {
+			return err
+		}
+		list = rtDropLastXray(e)(list)
+		hash, err := e.svc.blobs.put(list)
+		if err != nil {
+			return err
+		}
+		ref := *kl.Applied
+		ref.Hash, ref.Usable, ref.Total = hash, len(list), len(list)
+		kl.Pending = &ref
+		kl.setStatus(Status{Code: StatusDeferred}, e.clock.Now())
+		return writeLive(l, cur)
+	})
+	if err != nil {
+		t.Fatalf("отложенный набор: %v", err)
+	}
+
+	out, err := e.svc.Refresh(context.Background(), id, true)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if out.Outcome != OutcomeUnchanged {
+		t.Skipf("состав у провайдера изменился между запросами: %s", out.Outcome)
+	}
+	kl := rtLiveOf(t, e, id).Kernels[kernelXray]
+	if kl.Pending != nil {
+		t.Errorf("устаревший отложенный набор остался: %+v", kl.Pending)
+	}
+	if kl.Status.Code != StatusOK || kl.Applied == nil || kl.Applied.Hash != applied {
+		t.Errorf("живые данные после обновления: %+v", kl)
+	}
+}
+
 // Сборка после установки ядра (D-01): применённая подписка Xray получает файл Mihomo
 // без «Обновить» — один запрос под Mihomo и файл провайдера на диске.
 func TestRouterOnKernelInstalledBuildsFiles(t *testing.T) {

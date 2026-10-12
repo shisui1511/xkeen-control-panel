@@ -273,6 +273,9 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 				if kl.Applied != nil {
 					kl.Applied.FetchedAt = kf.oc.Ref.FetchedAt
 				}
+				// Свежий ответ совпал с применённым: отложенный ранее набор устарел и не
+				// должен попасть ни в черновик, ни в следующее «Применить».
+				kl.Pending = nil
 				kl.Delta = Delta{}
 				kl.setStatus(Status{Code: StatusOK}, now)
 			case kf.candidate:
@@ -422,6 +425,11 @@ func (s *Service) settle(ctx context.Context, id string, cfg SubscriptionConfig,
 
 // settleKernel отражает итог конвейера в состоянии ядра. Применённое состояние
 // записал хук фиксации; здесь — отложенная запись и отказ ядра.
+//
+// При отказе ядра ожидающий снимок снимается: при обновлении он старше
+// отвергнутого кандидата, при повторе отложенной записи он сам и есть
+// отвергнутый кандидат. Иначе черновик продолжил бы собираться из него, а
+// «Применить» молча применило бы непроверенный или отвергнутый набор.
 func (s *Service) settleKernel(kl *KernelLive, kernel string, ref Ref, sr settleResult, now time.Time) {
 	switch sr.Outcome {
 	case OutcomeDeferred:
@@ -430,6 +438,7 @@ func (s *Service) settleKernel(kl *KernelLive, kernel string, ref Ref, sr settle
 		kl.setStatus(Status{Code: StatusDeferred}, now)
 	case OutcomeFailed:
 		if reason, ok := sr.Refused[kernel]; ok {
+			kl.Pending = nil
 			kl.setStatus(Status{Code: StatusRefused, Params: map[string]string{"reason": reason}}, now)
 		}
 	}
