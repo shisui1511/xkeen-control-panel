@@ -652,6 +652,22 @@ func (l *Layer) UpdateLive(fn func(live Sections) error) error {
 	})
 }
 
+// UpdateLiveWith — как UpdateLive, но fn видит и черновик с применённым
+// состоянием той же записи: сервис может сверить, что конфигурация, по которой он
+// считал живые данные, не изменилась, пока шёл долгий запрос. Draft и Applied в
+// view — только для чтения (их изменения не сохраняются), Live — копия под запись.
+func (l *Layer) UpdateLiveWith(fn func(view StateView) error) error {
+	if !l.Enabled() {
+		return ErrDisabled
+	}
+	return l.store.Update(func(st *State) error {
+		if st.Live == nil {
+			st.Live = Sections{}
+		}
+		return fn(StateView{DraftRevision: st.DraftRevision, Draft: st.Draft.Clone(), Applied: st.Applied.Clone(), Live: st.Live})
+	})
+}
+
 // StateView — копия секций слоя для сервисов-потребителей.
 type StateView struct {
 	DraftRevision int64

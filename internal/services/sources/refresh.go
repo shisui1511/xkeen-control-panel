@@ -16,6 +16,9 @@ import (
 // ErrSourceDisabled — источник выключен: он не обновляется (D-17).
 var ErrSourceDisabled = errors.New("sources: источник выключен")
 
+// errRefreshStale — подписку изменили, пока шёл запрос: ответ отбрасывается.
+var errRefreshStale = errors.New("sources: конфигурация подписки изменилась во время обновления")
+
 // Итоги обновления источника (RefreshOutcome.Outcome).
 const (
 	OutcomeUnchanged      = "unchanged"
@@ -263,8 +266,20 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 	}
 
 	// Итоговая запись живых данных: метаданные, время проверки, статусы по ядрам.
+	// Пока шёл запрос (на MIPS до минуты), подписку могли изменить: адрес, HWID,
+	// выключение или удаление. Тогда ответ относится к прежней конфигурации и
+	// отбрасывается целиком — иначе набор старого адреса стал бы ожидающим под
+	// новым и ушёл бы в «Применить».
 	var delta Delta
-	err = s.d.Layer.UpdateLive(func(l configlayer.Sections) error {
+	err = s.d.Layer.UpdateLiveWith(func(view configlayer.StateView) error {
+		curCfg, curInApplied, err := subscriptionConfig(view, id)
+		if err != nil {
+			return err
+		}
+		if curInApplied != inApplied || curCfg.URL != cfg.URL || curCfg.HWID != cfg.HWID {
+			return errRefreshStale
+		}
+		l := view.Live
 		cur, err := readLive(l)
 		if err != nil {
 			return err
@@ -305,6 +320,11 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 		}
 		return writeLive(l, cur)
 	})
+	if errors.Is(err, errRefreshStale) {
+		// Ответ отброшен: срок проверки не сдвинут, новая конфигурация запросится
+		// на ближайшем тике.
+		return RefreshOutcome{Outcome: OutcomeUnchanged, Kernels: map[string]KernelOutcome{}}, nil
+	}
 	if err != nil {
 		return RefreshOutcome{}, err
 	}
