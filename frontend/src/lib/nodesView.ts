@@ -232,6 +232,8 @@ export interface RefreshToast {
   key: string;
   params: Record<string, string>;
   kind: 'success' | 'info' | 'warning' | 'error';
+  /** Дополнение: ядра, запрос под которые не удался, пока остальные обновились. */
+  extra?: { key: string; params: Record<string, string> };
 }
 
 /**
@@ -246,8 +248,38 @@ function refusedKernels(o: RefreshOutcome): string[] {
     .sort();
 }
 
-/** Тост инициатору ручного обновления (D-08, D-29): ключ, параметры и вид. */
+/**
+ * Ядра, запрос под которые не удался (сеть, отказ провайдера, ответ без подписки),
+ * хотя общий итог не ошибка: другое ядро получило свежий набор или остался прежний.
+ */
+function failedKernels(o: RefreshOutcome): string[] {
+  const failed = ['network', 'rejected', 'provider_error'];
+  return Object.entries(o.kernels ?? {})
+    .filter(([, k]) => failed.includes(k.status))
+    .map(([name]) => kernelLabel(name))
+    .sort();
+}
+
+/**
+ * Тост инициатору ручного обновления (D-08, D-29): ключ, параметры и вид. Если один
+ * запрос не удался, а общий итог не ошибка, тост предупреждает и называет ядра.
+ */
 export function refreshToast(o: RefreshOutcome): RefreshToast {
+  const toast = baseRefreshToast(o);
+  if (['unchanged', 'applied', 'deferred', 'pending_updated'].includes(o.outcome)) {
+    const failed = failedKernels(o);
+    if (failed.length > 0) {
+      return {
+        ...toast,
+        kind: toast.kind === 'error' ? 'error' : 'warning',
+        extra: { key: 'cfg.nodes.refresh_partial_failed', params: { kernels: failed.join(', ') } }
+      };
+    }
+  }
+  return toast;
+}
+
+function baseRefreshToast(o: RefreshOutcome): RefreshToast {
   const code = o.error?.code ?? '';
   const refused = refusedKernels(o);
   switch (o.outcome) {

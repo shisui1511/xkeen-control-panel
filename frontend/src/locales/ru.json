@@ -2836,6 +2836,7 @@
   "cfg.nodes.refresh_pending": "Состав обновлён и вступит в силу после «Применить»",
   "cfg.nodes.refresh_partial": "+{a} / −{b}, применено; {kernels} не принял новый состав и остаётся на прежнем наборе",
   "cfg.nodes.refresh_partial_deferred": "Обновление ждёт: есть изменённые файлы панели; {kernels} не принял новый состав",
+  "cfg.nodes.refresh_partial_failed": "{kernels}: провайдер не ответил или отклонил запрос, остаётся прежний набор",
   "cfg.nodes.source_enabled": "Источник включён",
   "cfg.nodes.disabled": "Выключен",
   "cfg.nodes.expired": "Истекла",

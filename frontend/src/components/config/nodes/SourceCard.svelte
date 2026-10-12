@@ -153,6 +153,7 @@
       const outcome = await refreshSource(source.id);
       const toast = refreshToast(outcome);
       let message = $t(toast.key, toast.params);
+      if (toast.extra) message += `; ${$t(toast.extra.key, toast.extra.params)}`;
       if (outcome.outcome === 'failed' && outcome.error) {
         message += `: ${sourceErrorText(outcome.error, $t).title}`;
       }

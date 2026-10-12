@@ -2836,6 +2836,7 @@
   "cfg.nodes.refresh_pending": "The set was updated and takes effect after “Apply”",
   "cfg.nodes.refresh_partial": "+{a} / −{b}, applied; {kernels} refused the new set and keeps the previous one",
   "cfg.nodes.refresh_partial_deferred": "Update pending: panel files were changed by hand; {kernels} refused the new set",
+  "cfg.nodes.refresh_partial_failed": "{kernels}: the provider did not respond or rejected the request, the previous set stays",
   "cfg.nodes.source_enabled": "Source is enabled",
   "cfg.nodes.disabled": "Disabled",
   "cfg.nodes.expired": "Expired",
