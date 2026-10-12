@@ -123,7 +123,9 @@
   }
 </script>
 
-<!-- Закрытие хранится на сервере: уведомление не вернётся после перезагрузки и в других вкладках (D-08) -->
+<!-- Закрытие хранится на сервере: уведомление не вернётся после перезагрузки страницы и в
+     других вкладках (D-08). Системные уведомления слоя закрываются навсегда, а
+     build_failed и source_* — до перезапуска панели или пока не исчезнет их условие -->
 <section class="config-notices" data-testid="config-notices">
   {#each shown as { notice, tone, text, cabinet } (notice.id)}
     <div class="alert alert-{tone} alert-dismissible" role="alert" data-notice={notice.id}>
