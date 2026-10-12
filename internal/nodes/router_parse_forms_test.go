@@ -529,3 +529,64 @@ func TestRouterParseBody(t *testing.T) {
 		rtMustCode(t, err, CodeTooLarge)
 	}
 }
+
+// Родной outbound Xray-JSON с привязками из чужого конфига: wireguard без
+// noKernelTun получает ключ при разборе (панель не создаёт интерфейсов на
+// роутере), sockopt.interface и sendThrough убираются (интерфейса конфига телефона
+// на роутере нет), прочие ключи и исходный текст прежние. Xray принимает файл.
+func TestRouterParseXrayNativeRouterBindings(t *testing.T) {
+	routertest.Current(t)
+	const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	body := `{"outbounds":[
+  {"tag":"wg","protocol":"wireguard","settings":{"secretKey":"` + key + `","address":["10.0.0.2/32"],
+    "peers":[{"publicKey":"` + key + `","allowedIPs":["0.0.0.0/0"],"endpoint":"node3.example:51820"}]}},
+  {"tag":"vl","protocol":"vless","sendThrough":"192.0.2.9",
+    "settings":{"vnext":[{"address":"node1.example","port":443,"users":[{"id":"11111111-1111-4111-8111-111111111111","encryption":"none"}]}]},
+    "streamSettings":{"network":"tcp","security":"tls","tlsSettings":{"serverName":"cdn.example"},
+      "sockopt":{"interface":"wlan0","tcpFastOpen":true}}}
+]}`
+	res, err := ParseXray([]byte(body))
+	if err != nil || len(res.Nodes) != 2 {
+		t.Fatalf("ParseXray: узлов %d, ошибка %v", len(res.Nodes), err)
+	}
+	var wg, vl Node
+	for _, n := range res.Nodes {
+		if n.Protocol == "wireguard" {
+			wg = n
+		} else {
+			vl = n
+		}
+	}
+	if wg.Raw == nil || vl.Raw == nil {
+		t.Fatalf("не оба узла разобраны: %+v", res.Nodes)
+	}
+	if v, _ := rtDig(wg.Raw, "settings", "noKernelTun").(bool); !v {
+		t.Errorf("у родного wireguard нет noKernelTun: %v", wg.Raw["settings"])
+	}
+	if strings.Contains(wg.Text, "noKernelTun") {
+		t.Errorf("исходный текст wireguard изменён")
+	}
+	if _, has := vl.Raw["sendThrough"]; has {
+		t.Errorf("sendThrough остался в Raw")
+	}
+	so := mapOf(rtDig(vl.Raw, "streamSettings", "sockopt"))
+	if _, has := so["interface"]; has {
+		t.Errorf("sockopt.interface остался в Raw")
+	}
+	if tfo, _ := so["tcpFastOpen"].(bool); !tfo {
+		t.Errorf("прочие поля sockopt потеряны: %v", so)
+	}
+	if !strings.Contains(vl.Text, "wlan0") || !strings.Contains(vl.Text, "sendThrough") {
+		t.Errorf("исходный текст узла для правки должен хранить оригинал")
+	}
+
+	obs := make([]map[string]any, 0, 2)
+	for i, n := range []Node{wg, vl} {
+		ob, err := XrayOutbound(n, rtNodeTag(i+1))
+		if err != nil {
+			t.Fatalf("XrayOutbound: %v", err)
+		}
+		obs = append(obs, ob)
+	}
+	rtXrayKernel(t, "xray_router_bindings", rtParseWork(t), rtRedactNodes(wg, vl), obs...)
+}

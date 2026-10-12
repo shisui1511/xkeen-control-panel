@@ -206,6 +206,13 @@ func xrayOutboundNode(ob map[string]any) (n Node, ignore bool, err *SourceError)
 		}
 	}
 	n.Text = marshalIndent(ob)
+	// Панель не создаёт интерфейсов на роутере: родной wireguard-outbound без
+	// noKernelTun поднял бы настоящий TUN в обход XKeen, а на mipsle проверка
+	// конфигурации с ним падает и отвергает весь файл подписки. Исходный текст (Text)
+	// снят выше и остаётся прежним.
+	if proto == "wireguard" && settings != nil {
+		settings["noKernelTun"] = true
+	}
 	// Ссылки на чужие outbound ломают xray -test висячим тегом: узел, вынутый из
 	// чужого конфига, работает без цепочки (уровень B), факт — в Notes.
 	if removeXrayChain(ob) {
@@ -215,9 +222,16 @@ func xrayOutboundNode(ob map[string]any) (n Node, ignore bool, err *SourceError)
 }
 
 // removeXrayChain удаляет proxySettings и streamSettings.sockopt.dialerProxy из
-// родного outbound; true — что-то удалено.
+// родного outbound; true — убрана цепочка. Привязка к интерфейсу
+// (sockopt.interface) и к адресу источника (sendThrough) из чужого ответа
+// убирается молча, как у Clash: интерфейса конфига телефона на роутере нет, а
+// узел с такой привязкой не соединяется.
 func removeXrayChain(ob map[string]any) bool {
 	removed := false
+	delete(ob, "sendThrough")
+	if so := mapOf(mapOf(ob["streamSettings"])["sockopt"]); so != nil {
+		delete(so, "interface")
+	}
 	if _, ok := ob["proxySettings"]; ok {
 		delete(ob, "proxySettings")
 		removed = true
