@@ -151,7 +151,14 @@ func (s *Service) Preview(ctx context.Context, in nodes.Input) (PreviewView, err
 			s.collectGarbage()
 		}()
 	}
+	known := subscriptionURLs(st)
 	for _, c := range subs {
+		// Адрес уже есть среди источников: «Добавить» создаст второй источник с теми
+		// же узлами и вторым набором запросов к провайдеру — только предупреждение,
+		// как пометка dup_exists у узлов.
+		if name, ok := known[c.url]; ok {
+			c.view.Warnings = append(c.view.Warnings, nodes.NewError(nodes.CodeDupSubscription, "name", name))
+		}
 		view.Subscriptions = append(view.Subscriptions, c.view)
 	}
 	addable += len(subs)
@@ -164,6 +171,30 @@ func (s *Service) Preview(ctx context.Context, in nodes.Input) (PreviewView, err
 		view.Token, view.ExpiresAt = token, expires
 	}
 	return view, nil
+}
+
+// subscriptionURLs — адреса подписок черновика и применённого состояния с их
+// именами (имя черновика важнее: его видит пользователь). Пустое имя заменяется
+// доменом адреса.
+func subscriptionURLs(st configlayer.StateView) map[string]string {
+	out := map[string]string{}
+	for _, secs := range []configlayer.Sections{st.Applied, st.Draft} {
+		for section, raw := range secs {
+			if id, ok := sourceID(section); !ok || id == MySourceID || kindOf(raw) != KindSubscription {
+				continue
+			}
+			cfg, err := parseSubscription(raw)
+			if err != nil || cfg.URL == "" {
+				continue
+			}
+			name := cfg.Name
+			if name == "" {
+				name = hostOf(cfg.URL)
+			}
+			out[cfg.URL] = name
+		}
+	}
+	return out
 }
 
 // buildView строит представление по результату распознавания; existing — уже

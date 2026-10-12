@@ -2715,6 +2715,8 @@
   "cfg.nodes.err.all_stubs.hint": "The device slot is probably taken: free it in your provider account",
   "cfg.nodes.err.empty_response.title": "The provider response is empty",
   "cfg.nodes.err.empty_response.hint": "Try again later or check the link",
+  "cfg.nodes.err.dup_subscription.title": "This subscription is already added: “{name}”",
+  "cfg.nodes.err.dup_subscription.hint": "“Add” creates a second source with the same nodes and twice the requests to the provider",
   "cfg.nodes.err.expired.title": "The subscription expired on {date}",
   "cfg.nodes.err.expired.hint": "Renew it with your provider",
   "cfg.nodes.err.dns_failed.title": "Could not resolve {host}",

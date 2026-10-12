@@ -31,7 +31,8 @@ const PARAM_NAMES = [
   'network',
   'plugin',
   'limit',
-  'unit'
+  'unit',
+  'name'
 ];
 
 function paramsOf(

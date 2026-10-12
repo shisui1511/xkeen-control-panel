@@ -565,3 +565,42 @@ func TestRouterCommitLive(t *testing.T) {
 		t.Errorf("Xray после обновления: %+v", x)
 	}
 }
+
+// Повторное добавление той же подписки: предпросмотр помечает её предупреждением
+// dup_subscription с именем существующего источника. Провайдер недоступен (зона
+// .invalid): пометка от ответа не зависит.
+func TestRouterPreviewDupSubscription(t *testing.T) {
+	e, _ := rtSubscriptionEnv(t, true, false, false)
+	ref := rtPut(t, e, "vless_ws")
+	rtSeedApplied(t, e, "a1b2c3d4", rtDeadURL, Interval{Mode: IntervalProvider}, true,
+		&LiveSource{Kernels: map[string]*KernelLive{kernelXray: rtAppliedRef(e, ref)}})
+
+	view, err := e.svc.Preview(context.Background(), inputOf(rtDeadURL))
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if len(view.Subscriptions) != 1 {
+		t.Fatalf("подписок в предпросмотре: %d", len(view.Subscriptions))
+	}
+	found := false
+	for _, w := range view.Subscriptions[0].Warnings {
+		if w.Code == nodes.CodeDupSubscription && w.Params["name"] == "Провайдер" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("нет предупреждения dup_subscription: %+v", view.Subscriptions[0].Warnings)
+	}
+
+	other, err := e.svc.Preview(context.Background(), inputOf("https://xcp-other.invalid/sub"))
+	if err != nil {
+		t.Fatalf("Preview другого адреса: %v", err)
+	}
+	for _, s := range other.Subscriptions {
+		for _, w := range s.Warnings {
+			if w.Code == nodes.CodeDupSubscription {
+				t.Errorf("новый адрес помечен как повтор: %+v", w)
+			}
+		}
+	}
+}

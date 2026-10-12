@@ -2715,6 +2715,8 @@
   "cfg.nodes.err.all_stubs.hint": "Скорее всего, занят слот устройства: освободите его в личном кабинете",
   "cfg.nodes.err.empty_response.title": "Ответ провайдера пуст",
   "cfg.nodes.err.empty_response.hint": "Повторите позже или проверьте ссылку",
+  "cfg.nodes.err.dup_subscription.title": "Эта подписка уже добавлена: «{name}»",
+  "cfg.nodes.err.dup_subscription.hint": "«Добавить» создаст второй источник с теми же узлами и вдвое больше запросов к провайдеру",
   "cfg.nodes.err.expired.title": "Подписка истекла {date}",
   "cfg.nodes.err.expired.hint": "Продлите её у провайдера",
   "cfg.nodes.err.dns_failed.title": "Не удалось найти адрес {host}",

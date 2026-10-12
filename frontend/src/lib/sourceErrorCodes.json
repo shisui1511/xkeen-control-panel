@@ -3,6 +3,7 @@
   "awg_xray",
   "bad_base64",
   "dns_failed",
+  "dup_subscription",
   "edit_single_node",
   "empty_response",
   "expired",

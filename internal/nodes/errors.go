@@ -28,6 +28,7 @@ const (
 	CodeInvalidURL             = "invalid_url"
 	CodeTooLarge               = "too_large"
 	CodeTooManyURLs            = "too_many_urls"
+	CodeDupSubscription        = "dup_subscription"
 	CodeUnrecognized           = "unrecognized"
 	CodeEditSingleNode         = "edit_single_node"
 	CodeTUICXray               = "tuic_xray"
@@ -110,6 +111,7 @@ func AllCodes() []string {
 		CodeDNSFailed, CodeTimeout, CodeTLSError, CodeSSRFBlocked, CodeUnreachableDirect,
 		CodeServerError, CodeUnknownScheme, CodeBadBase64, CodeYAMLError, CodeJSONError,
 		CodeFullKernelConfig, CodeWGMissingKey, CodeInvalidURL, CodeTooLarge, CodeTooManyURLs,
+		CodeDupSubscription,
 		CodeUnrecognized, CodeEditSingleNode, CodeTUICXray, CodeNeedsMihomo, CodeNeedsXray,
 		CodeAWGXray, CodeHysteria2Xray, CodeSSPluginXray, CodeXrayNoHTTPTransport,
 		CodeXrayNoInsecure, CodeXrayForbiddenKey, CodeXHTTPUnknownField,
