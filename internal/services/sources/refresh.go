@@ -89,6 +89,11 @@ func (s *Service) Refresh(ctx context.Context, id string) (RefreshOutcome, error
 			s.cmu.Lock()
 			c.out, c.err = out, err
 			delete(s.calls, id)
+			if err == nil {
+				// Удачное обновление (и ручное «Обновить») снимает откат планировщика:
+				// следующий сбой начнёт задержки заново с 5 минут.
+				delete(s.backoffs, id)
+			}
 			s.cmu.Unlock()
 			close(c.done)
 		})

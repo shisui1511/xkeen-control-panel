@@ -79,7 +79,9 @@ func (s *Service) tick(ctx context.Context) {
 		return
 	}
 	now := s.d.Now()
-	for _, id := range subscriptionIDs(st, true) {
+	ids := subscriptionIDs(st, true)
+	s.pruneBackoffs(ids)
+	for _, id := range ids {
 		if ctx.Err() != nil {
 			return
 		}
@@ -91,11 +93,10 @@ func (s *Service) tick(ctx context.Context) {
 		if !ok || now.Before(due) || s.backedOff(id, now) {
 			continue
 		}
+		// Удачное обновление снимает откат в общей работе Refresh.
 		_, err = s.Refresh(ctx, id)
 		switch {
-		case err == nil:
-			s.clearBackoff(id)
-		case ctx.Err() != nil, errors.Is(err, ErrSourceDisabled), errors.Is(err, ErrSourceNotFound),
+		case err == nil, ctx.Err() != nil, errors.Is(err, ErrSourceDisabled), errors.Is(err, ErrSourceNotFound),
 			errors.Is(err, ErrSourceChanged), errors.Is(err, configlayer.ErrDisabled):
 		default:
 			log.Printf("[sources] фоновое обновление источника %s не выполнено: %v", id, err)
@@ -138,10 +139,19 @@ func (s *Service) backedOff(id string, now time.Time) bool {
 	return ok && now.Before(b.until)
 }
 
-// clearBackoff снимает откат после удавшегося обновления.
-func (s *Service) clearBackoff(id string) {
+// pruneBackoffs убирает откаты источников, которых планировщик больше не
+// обновляет (удалены, выключены): ids — текущие применённые включённые подписки.
+func (s *Service) pruneBackoffs(ids []string) {
+	keep := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		keep[id] = true
+	}
 	s.cmu.Lock()
-	delete(s.backoffs, id)
+	for id := range s.backoffs {
+		if !keep[id] {
+			delete(s.backoffs, id)
+		}
+	}
 	s.cmu.Unlock()
 }
 

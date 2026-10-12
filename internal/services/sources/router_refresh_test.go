@@ -306,6 +306,13 @@ func TestRouterSchedulerBacksOffAfterSnapshotFailure(t *testing.T) {
 	if requests() != 3 {
 		t.Fatalf("запрос после отката: %d", requests())
 	}
+	// Удачное обновление снимает откат: следующий сбой начнёт задержки с 5 минут.
+	e.svc.cmu.Lock()
+	_, left := e.svc.backoffs[id]
+	e.svc.cmu.Unlock()
+	if left {
+		t.Error("откат планировщика не снят удачным обновлением")
+	}
 }
 
 // Выключенный источник не обновляется: ни одного запроса к провайдеру; неизвестный
