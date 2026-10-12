@@ -517,11 +517,18 @@ func (s *Service) settle(ctx context.Context, id string, cfg SubscriptionConfig,
 	// Ядро отказалось проверить новый состав: кандидат отбрасывается, прежний набор
 	// действует (D-29).
 	code, message, blamed := "", "", ""
+	rolledBack := false
 	if view.Result != nil {
-		code, message, blamed = view.Result.Code, view.Result.Message, view.Result.Kernel
+		code, message, blamed, rolledBack = view.Result.Code, view.Result.Message, view.Result.Kernel, view.Result.RolledBack
 	}
 	reason := s.maskReason(message, code, cfg, cands)
-	if _, ok := cands[blamed]; !ok || len(cands) == 1 {
+	// Виноватым ядро считается только при отказе проверки или перезапуска с удачным
+	// откатом. В деградированных итогах (rollback_failed, kernel_not_recovered)
+	// Kernel тоже заполнен, но отказ вызван не кандидатом, а повтор начался бы с
+	// восстановления журнала в тех же условиях, в которых откат только что не
+	// удался.
+	blameable := code == configlayer.CodeValidationFailed || (code == configlayer.ResultRestartFailed && rolledBack)
+	if _, ok := cands[blamed]; !ok || !blameable || len(cands) == 1 {
 		refused := map[string]string{}
 		for k := range cands {
 			refused[k] = reason
