@@ -167,10 +167,13 @@ func cleanURL(raw string) (string, error) {
 
 // Update правит настройки источника в черновике с проверкой ревизии: устаревшая
 // ревизия — configlayer.ErrDraftConflict без записи. Значения проверяются по
-// пределам; неизвестный источник — ErrSourceNotFound. Смена URL или HWID
-// сохраняет идентификатор источника, снимает ожидающий снимок и метаданные:
-// набор и признаки прежнего адреса к новой настройке не относятся, новый ответ
-// придёт при следующем обновлении.
+// пределам; неизвестный источник — ErrSourceNotFound. Смена URL сохраняет
+// идентификатор источника и снимает ожидающий снимок: набор из прежнего адреса к
+// новому не относится. Смена HWID снимает его у подписки, которой нет в
+// применённом состоянии. Метаданные прежнего провайдера здесь не сбрасываются:
+// они хранят отпечаток адреса и HWID (Meta.Print) и к новой настройке не
+// относятся сами (metaFor); живые данные применённой подписки правка черновика
+// не трогает, планировщик работает по применённой конфигурации.
 func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent, error) {
 	if p.empty() {
 		return configlayer.DraftEvent{}, invalid("нечего менять")
@@ -191,9 +194,9 @@ func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent,
 	}
 
 	var section json.RawMessage
-	// sourceChanged — изменился адрес или HWID: ответ прежнего адреса или прежнего
-	// HWID к новой настройке не относится.
-	sourceChanged := false
+	// urlChanged и hwidChanged — изменился адрес или HWID: набор, полученный под
+	// прежним адресом или HWID, к новой настройке не относится.
+	urlChanged, hwidChanged := false, false
 	if id == MySourceID {
 		cfg, err := parseMy(raw)
 		if err != nil {
@@ -235,9 +238,7 @@ func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent,
 			if err != nil {
 				return configlayer.DraftEvent{}, err
 			}
-			if hwid != cfg.HWID {
-				sourceChanged = true
-			}
+			hwidChanged = hwid != cfg.HWID
 			cfg.HWID = hwid
 		}
 		if p.URL != nil {
@@ -245,9 +246,7 @@ func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent,
 			if err != nil {
 				return configlayer.DraftEvent{}, err
 			}
-			if u != cfg.URL {
-				sourceChanged = true
-			}
+			urlChanged = u != cfg.URL
 			cfg.URL = u
 		}
 		if cfg.Exclude == nil {
@@ -258,8 +257,13 @@ func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent,
 		}
 	}
 
+	// Ожидающий набор снимается при смене адреса и при смене HWID у подписки только
+	// в черновике. У применённой подписки при смене одного HWID он остаётся: это
+	// отложенная запись действующего адреса, а ответ под новым HWID придёт при
+	// следующем обновлении, срок которого наступит сразу (Meta.Print не совпадёт).
+	_, inApplied := st.Applied[sectionName(id)]
 	var liveFn func(configlayer.Sections) error
-	if sourceChanged {
+	if urlChanged || (hwidChanged && !inApplied) {
 		liveFn = func(l configlayer.Sections) error {
 			cur, err := readLive(l)
 			if err != nil {
@@ -269,11 +273,6 @@ func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent,
 				for _, kl := range src.Kernels {
 					kl.Pending = nil
 				}
-				// Метаданные прежнего провайдера (трафик, срок, ссылки кабинета,
-				// признак «без HWID») к новому адресу или HWID не относятся; пустые
-				// метаданные делают срок обновления наступившим: новый адрес
-				// запрашивается на ближайшем тике, а не через прежний интервал.
-				src.Meta = Meta{}
 			}
 			return writeLive(l, cur)
 		}

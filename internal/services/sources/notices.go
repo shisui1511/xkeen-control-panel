@@ -47,9 +47,10 @@ func (s *Service) rebuildNotices() {
 		if src == nil || err != nil {
 			continue
 		}
+		meta := metaFor(cfg, src)
 		name := cfg.Name
 		if name == "" {
-			name = src.Meta.Title
+			name = meta.Title
 		}
 		if name == "" {
 			name = id
@@ -70,8 +71,8 @@ func (s *Service) rebuildNotices() {
 				}
 				// Ссылка кабинета проверена parseMeta (только http/https): здесь она
 				// передаётся как есть, без повторного построения.
-				if src.Meta.WebURL != "" {
-					params["web_url"] = src.Meta.WebURL
+				if meta.WebURL != "" {
+					params["web_url"] = meta.WebURL
 				}
 				out = append(out, configlayer.NoticeView{
 					ID: "source_rejected:" + id + ":" + kernel, Kind: noticeWarning, Kernel: kernel, Params: params,

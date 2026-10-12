@@ -180,10 +180,7 @@ func intervalOf(cfg SubscriptionConfig, meta Meta) (time.Duration, bool) {
 // задержке повтора; отказ провайдера чаще интервала не повторяется. false —
 // автоматическое обновление выключено.
 func (s *Service) nextDue(cfg SubscriptionConfig, src *LiveSource) (time.Time, bool) {
-	var meta Meta
-	if src != nil {
-		meta = src.Meta
-	}
+	meta := metaFor(cfg, src)
 	interval, ok := intervalOf(cfg, meta)
 	if !ok {
 		return time.Time{}, false

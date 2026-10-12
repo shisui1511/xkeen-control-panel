@@ -53,6 +53,7 @@ func rtSeedApplied(t *testing.T, e *rtEnv, id, subURL string, interval Interval,
 		t.Fatal(err)
 	}
 	src.Meta.UpdatedAt = e.clock.Now()
+	src.Meta.Print = candidatePrint(SubscriptionConfig{URL: subURL})
 	_, err = e.layer.EditDraftBatch(e.rev(t), map[string]json.RawMessage{sectionName(id): section}, func(l configlayer.Sections) error {
 		cur, err := readLive(l)
 		if err != nil {
@@ -112,6 +113,7 @@ func TestRouterSchedulerDue(t *testing.T) {
 	t0 := e.clock.Now()
 	live := func(meta Meta, st Status) *LiveSource {
 		meta.CheckedAt = t0
+		meta.Print = candidatePrint(SubscriptionConfig{})
 		return &LiveSource{Meta: meta, Kernels: map[string]*KernelLive{kernelXray: {Status: st, UpdatedAt: t0}}}
 	}
 	ok := Status{Code: StatusOK}
@@ -147,7 +149,7 @@ func TestRouterSchedulerDue(t *testing.T) {
 
 	// Срок отсчитывается от времени добавления, пока проверок не было; подписка без
 	// единой отметки времени обновляется сразу.
-	added := &LiveSource{Meta: Meta{UpdatedAt: t0}, Kernels: map[string]*KernelLive{}}
+	added := &LiveSource{Meta: Meta{UpdatedAt: t0, Print: candidatePrint(SubscriptionConfig{})}, Kernels: map[string]*KernelLive{}}
 	if due, _ := e.svc.nextDue(SubscriptionConfig{Interval: Interval{Mode: IntervalProvider}}, added); due.Sub(t0) != 12*time.Hour {
 		t.Errorf("срок от времени добавления: %v", due.Sub(t0))
 	}
@@ -441,6 +443,64 @@ func TestRouterRefreshOutcomeJSONKeys(t *testing.T) {
 	}
 	if _, ok := kernels["mihomo"]["error_code"]; !ok {
 		t.Error("error_code при отказе не выведен")
+	}
+}
+
+// Правка адреса применённой подписки в черновике не вызывает запрос к прежнему
+// провайдеру и не трогает его метаданные: планировщик работает по применённой
+// конфигурации. После «Применить» метаданные прежнего адреса не действуют: срок
+// нового наступил сразу, запрос идёт с HWID панели, а не без него.
+func TestRouterSchedulerAddressChangeAfterApply(t *testing.T) {
+	e, cap := rtSubscriptionEnv(t, true, false, false)
+	const id = "a1b2c3d4"
+	const newURL = "https://xcp-provider-new.invalid/sub"
+	ref := rtPut(t, e, "vless_ws")
+	now := e.clock.Now()
+	rtSeedApplied(t, e, id, rtDeadURL, Interval{Mode: IntervalProvider}, true,
+		&LiveSource{
+			Meta:    Meta{HWIDLocked: true, CheckedAt: now},
+			Kernels: map[string]*KernelLive{kernelXray: rtAppliedRef(e, ref)},
+		})
+	ctx := context.Background()
+
+	u := newURL
+	if _, err := e.svc.Update(e.rev(t), id, Patch{URL: &u}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	// Тик по применённому адресу: срок ещё не наступил, запроса нет, метаданные целы.
+	e.clock.Advance(2 * time.Minute)
+	e.svc.tick(ctx)
+	if n := len(cap.all()); n != 0 {
+		t.Fatalf("правка черновика вызвала запросов: %d", n)
+	}
+	if m := rtLiveOf(t, e, id).Meta; !m.HWIDLocked || m.Print != candidatePrint(SubscriptionConfig{URL: rtDeadURL}) {
+		t.Fatalf("метаданные прежнего адреса изменились: %+v", m)
+	}
+
+	if done := e.applyAndWait(t); done.Result == nil || !done.Result.OK {
+		t.Fatalf("применение: %+v", done.Result)
+	}
+	st, err := e.layer.ReadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := subscriptionConfig(st, id)
+	if err != nil || cfg.URL != newURL {
+		t.Fatalf("применённый адрес: %q, %v", cfg.URL, err)
+	}
+	if due, ok := e.svc.nextDue(cfg, rtLiveOf(t, e, id)); !ok || !due.IsZero() {
+		t.Fatalf("срок нового адреса после «Применить»: %v, включено %v; ждали наступивший", due, ok)
+	}
+	e.svc.tick(ctx)
+	reqs := cap.all()
+	if len(reqs) != 1 {
+		t.Fatalf("запросов к новому адресу: %d", len(reqs))
+	}
+	if reqs[0].HWID != "A1B2C3D4E5F6" {
+		t.Errorf("x-hwid запроса к новому адресу: %q, признак «без HWID» прежнего провайдера не должен действовать", reqs[0].HWID)
+	}
+	if m := rtLiveOf(t, e, id).Meta; m.HWIDLocked || m.Print != candidatePrint(cfg) {
+		t.Errorf("метаданные после запроса: %+v", m)
 	}
 }
 

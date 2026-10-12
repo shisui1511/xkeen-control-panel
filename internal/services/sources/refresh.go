@@ -240,10 +240,7 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 		return RefreshOutcome{Outcome: OutcomeUnchanged, Kernels: map[string]KernelOutcome{}}, nil
 	}
 
-	var meta Meta
-	if prev != nil {
-		meta = prev.Meta
-	}
+	meta := metaFor(cfg, prev)
 	hwid, locked := s.sourceHWID(cfg, meta)
 	res, err := s.fetchAll(ctx, cfg.URL, hwid, locked, kernels)
 	if err != nil {
@@ -253,7 +250,7 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 			// носителе она может не записаться, а прошедший срок повтора сетевого
 			// сбоя она не сдвигает. Частоту запросов ограничивает откат планировщика
 			// в памяти (backOff).
-			s.markChecked(id, s.d.Now())
+			s.markChecked(id, cfg, s.d.Now())
 		}
 		return RefreshOutcome{}, err
 	}
@@ -342,6 +339,7 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 			cur[id] = src
 		}
 		src.Meta = freshMeta
+		src.Meta.Print = candidatePrint(cfg)
 		src.Meta.CheckedAt = now
 		for _, kf := range fetches {
 			kl := src.kernelLive(kf.kernel)
@@ -392,7 +390,7 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 // Источник без живых данных не создаётся: его могли удалить, пока шёл запрос
 // (Delete подписки только в черновике убирает и её Live). Сбой записи — только в
 // журнал: вызывающий уже возвращает исходную ошибку.
-func (s *Service) markChecked(id string, now time.Time) {
+func (s *Service) markChecked(id string, cfg SubscriptionConfig, now time.Time) {
 	err := s.d.Layer.UpdateLive(func(l configlayer.Sections) error {
 		cur, err := readLive(l)
 		if err != nil {
@@ -401,6 +399,10 @@ func (s *Service) markChecked(id string, now time.Time) {
 		src := cur[id]
 		if src == nil {
 			return nil
+		}
+		if src.Meta.Print != candidatePrint(cfg) {
+			// Метаданные прежнего адреса или HWID: отметка относится к новым.
+			src.Meta = Meta{Print: candidatePrint(cfg)}
 		}
 		src.Meta.CheckedAt = now
 		return writeLive(l, cur)

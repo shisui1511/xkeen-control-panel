@@ -303,6 +303,25 @@ func TestRouterManageUpdate(t *testing.T) {
 		t.Error("HWID источника попал в представление")
 	}
 
+	// Метаданные получены под текущим адресом и HWID.
+	seeded := Meta{
+		Title: "Прежний провайдер", WebURL: "https://cab.example/account", HWIDLocked: true,
+		UpdatedAt: e.clock.Now(), CheckedAt: e.clock.Now(), Print: candidatePrint(section()),
+	}
+	if err := e.layer.UpdateLive(func(l configlayer.Sections) error {
+		cur, err := readLive(l)
+		if err != nil {
+			return err
+		}
+		cur[id].Meta = seeded
+		return writeLive(l, cur)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if sub := rtFindSource(t, rtView(t, e), id); sub.Meta == nil || sub.Meta.WebURL == "" {
+		t.Fatalf("карточка не показывает метаданные текущего адреса: %+v", sub.Meta)
+	}
+
 	// Смена URL: ID прежний, ожидающий снимок снят, применённого у подписки нет.
 	if _, err := e.svc.Update(e.rev(t), id, Patch{URL: str("https://new.example/s")}); err != nil {
 		t.Fatalf("URL: %v", err)
@@ -321,10 +340,17 @@ func TestRouterManageUpdate(t *testing.T) {
 	if kl := live[id].Kernels[kernelXray]; kl == nil || kl.Pending != nil {
 		t.Errorf("ожидающий снимок после смены URL: %+v", kl)
 	}
-	// Метаданные прежнего адреса (в том числе «без HWID») сняты: срок обновления
-	// наступил, новый адрес запрашивается на ближайшем тике.
-	if live[id].Meta != (Meta{}) {
-		t.Errorf("метаданные после смены URL: %+v", live[id].Meta)
+	// Метаданные прежнего адреса правка черновика не трогает (применённая подписка
+	// живёт по ним до «Применить»), но к новому адресу они не относятся: ни срок,
+	// ни признак «без HWID», ни карточка их не берут.
+	if live[id].Meta != seeded {
+		t.Errorf("метаданные изменились при правке черновика: %+v, были %+v", live[id].Meta, seeded)
+	}
+	if m := metaFor(section(), live[id]); m != (Meta{}) {
+		t.Errorf("метаданные прежнего адреса действуют для нового: %+v", m)
+	}
+	if sub := rtFindSource(t, rtView(t, e), id); sub.Meta != nil {
+		t.Errorf("карточка показывает метаданные прежнего адреса: %+v", sub.Meta)
 	}
 
 	// Проверка значений.

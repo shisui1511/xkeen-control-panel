@@ -242,6 +242,8 @@ func mergeMeta(now time.Time, metas ...Meta) Meta {
 // состояние не попадают.
 func (c *subCandidate) liveSource(now time.Time) *LiveSource {
 	src := &LiveSource{Meta: c.meta, Kernels: map[string]*KernelLive{}}
+	// Подписка добавляется со своим адресом и общим HWID панели (HWID источника пуст).
+	src.Meta.Print = candidatePrint(SubscriptionConfig{URL: c.url})
 	for _, k := range previewKernels {
 		oc := c.kernels[k]
 		if oc == nil {

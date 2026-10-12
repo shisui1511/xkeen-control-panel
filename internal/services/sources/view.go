@@ -329,12 +329,15 @@ func (s *Service) subViewOf(id string, cfg SubscriptionConfig, draft json.RawMes
 		exclude = []string{}
 	}
 	v.Settings = &SettingsView{Exclude: exclude, Interval: cfg.Interval, HWIDCustom: cfg.HWID != ""}
+	// Метаданные другого адреса или HWID (подписку правили в черновике) не
+	// показываются: трафик и ссылки прежнего провайдера к новой настройке не относятся.
+	meta := metaFor(cfg, src)
 	if src != nil {
-		v.Meta = metaView(src.Meta)
+		v.Meta = metaView(meta)
 	}
 	v.Name = cfg.Name
-	if v.Name == "" && src != nil {
-		v.Name = src.Meta.Title
+	if v.Name == "" {
+		v.Name = meta.Title
 	}
 	if v.Name == "" {
 		v.Name = v.Host
