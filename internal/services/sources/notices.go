@@ -74,13 +74,19 @@ func (s *Service) rebuildNotices() {
 					ID: "source_rejected:" + id + ":" + kernel, Kind: noticeWarning, Kernel: kernel, Params: params,
 				})
 			case StatusNetwork:
+				params := map[string]string{
+					"name": name,
+					"in":   strconv.Itoa(s.minutesUntilNext(cfg, src, now)),
+					"code": kl.Status.ErrorCode,
+				}
+				// Абсолютный срок повтора: остаток считает клиент, иначе «через 5 мин»
+				// застывал бы на момент сборки уведомлений.
+				if due, ok := s.nextDue(cfg, src); ok && !due.IsZero() {
+					params["retry_at"] = due.UTC().Format(time.RFC3339)
+				}
 				out = append(out, configlayer.NoticeView{
 					ID: "source_network:" + id + ":" + kernel, Kind: noticeWarning, Kernel: kernel,
-					Params: map[string]string{
-						"name": name,
-						"in":   strconv.Itoa(s.minutesUntilNext(cfg, src, now)),
-						"code": kl.Status.ErrorCode,
-					},
+					Params: params,
 				})
 			case StatusDeferred:
 				deferred = true

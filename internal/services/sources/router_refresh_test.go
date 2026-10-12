@@ -212,6 +212,10 @@ func TestRouterSchedulerNetworkRetries(t *testing.T) {
 	if n.Kind != "warning" || n.Params["in"] != "5" || n.Params["code"] != nodes.CodeDNSFailed || n.Params["name"] != "Провайдер" {
 		t.Errorf("уведомление о сети: %+v", n)
 	}
+	// Абсолютный срок повтора: остаток до него считает клиент.
+	if at, err := time.Parse(time.RFC3339, n.Params["retry_at"]); err != nil || !at.Equal(e.clock.Now().Add(5*time.Minute).Truncate(time.Second)) {
+		t.Errorf("срок повтора в уведомлении: %q (%v)", n.Params["retry_at"], err)
+	}
 
 	tickAfter(4 * time.Minute)
 	if requests() != 1 {

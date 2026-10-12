@@ -7,6 +7,8 @@
     handleLayerError,
     type LayerNotice
   } from '../../lib/configLayer';
+  // Часы с шагом в минуту: текст «повтор через N мин» не застывает на момент сборки
+  import { minuteClock } from '../../lib/nodesView';
 
   type Shown = {
     notice: LayerNotice;
@@ -37,9 +39,15 @@
     return KERNEL_LABELS[raw] ?? raw;
   }
 
-  /** Через сколько повтор: минуты из params.in, от часа — часы. */
-  function inText(raw: string | undefined): string {
-    const minutes = Number(raw);
+  /** Минуты до повтора: от абсолютного params.retry_at, иначе params.in сервера. */
+  function retryMinutes(p: Record<string, string>): number {
+    const at = p.retry_at ? Date.parse(p.retry_at) : NaN;
+    if (Number.isFinite(at)) return Math.ceil((at - $minuteClock.getTime()) / 60_000);
+    return Number(p.in);
+  }
+
+  /** Через сколько повтор: минуты, от часа — часы. */
+  function inText(minutes: number): string {
     if (!Number.isFinite(minutes) || minutes <= 0) return $t('cfg.notice.in_soon');
     if (minutes >= 60) return $t('cfg.notice.in_hours', { n: Math.round(minutes / 60) });
     return $t('cfg.notice.in_minutes', { n: Math.round(minutes) });
@@ -70,7 +78,7 @@
       return {
         notice: n,
         tone: 'warning',
-        text: $t('cfg.notice.source_network', { name, in: inText(p.in) })
+        text: $t('cfg.notice.source_network', { name, in: inText(retryMinutes(p)) })
       };
     }
     if (n.id.startsWith('source_kernel_refused:')) {
