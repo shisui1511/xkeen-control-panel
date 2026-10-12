@@ -113,6 +113,12 @@ func TestRouterMyNodesEditSingleNode(t *testing.T) {
 	if _, err := e.svc.PreviewNode(context.Background(), linkB, "ffffffff"); !errors.Is(err, ErrNodeNotFound) {
 		t.Errorf("предпросмотр неизвестной записи: %v", err)
 	}
+	// Имя проверяется как имя подписки: перевод строки и длина больше 128 символов.
+	for label, name := range map[string]string{"перевод строки": "a\nproxies: []", "длинное": strings.Repeat("я", maxNameRunes+1)} {
+		if _, err := e.svc.SaveNode(e.rev(t), id, name, linkB); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("имя «%s»: %v, нужна ErrInvalidInput", label, err)
+		}
+	}
 	// Запись не тронута неудачными попытками.
 	if got := e.my(t).Entries[0].Raw; got != linkA {
 		t.Errorf("запись изменилась: %q", got)

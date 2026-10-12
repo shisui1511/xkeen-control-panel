@@ -87,6 +87,12 @@ func (s *Service) SaveNode(rev int64, entryID, name, text string) (configlayer.D
 	if n.Text == "" {
 		return configlayer.DraftEvent{}, fmt.Errorf("%w: пустой текст узла", ErrInvalidInput)
 	}
+	// Имя проверяется как имя подписки: до 128 символов, без управляющих символов и
+	// переводов строк — оно попадает в файл провайдера Mihomo и в ссылки групп.
+	name, err := cleanName(name)
+	if err != nil {
+		return configlayer.DraftEvent{}, err
+	}
 	cfg, cur, err := s.draftMy()
 	if err != nil {
 		return configlayer.DraftEvent{}, err
