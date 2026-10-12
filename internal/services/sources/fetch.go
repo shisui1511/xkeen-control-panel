@@ -398,6 +398,19 @@ type kernelOutcome struct {
 	release func()
 }
 
+// dropBody освобождает тяжёлые поля после записи диагностики: тело ответа (до
+// 10 МиБ), итог разбора и рабочие узлы. Кандидат предпросмотра живёт в токене до
+// 10 минут, и на mipsle со 128 МБ памяти удержание нескольких тел опасно. Для
+// «Добавить» и представления хватает Ref, Meta, Err, Stubs и Skipped.
+func (oc *kernelOutcome) dropBody() {
+	if oc == nil {
+		return
+	}
+	oc.fetch = fetchResult{}
+	oc.report = nodes.ParseResult{}
+	oc.Nodes = nil
+}
+
 // free отпускает удержанный снимок; безопасно вызывать повторно и на nil.
 func (oc *kernelOutcome) free() {
 	if oc != nil && oc.release != nil {

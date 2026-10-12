@@ -223,6 +223,7 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 			continue
 		}
 		s.writeDiag(id, k, oc.fetch, oc.report)
+		oc.dropBody()
 		kf := &kernelFetch{kernel: k, oc: oc}
 		if oc.Ref != nil {
 			if inApplied && prev != nil && prev.Kernels[k] != nil && prev.Kernels[k].Applied != nil &&

@@ -135,6 +135,7 @@ func (s *Service) previewOne(ctx context.Context, item nodes.URLItem, kernels []
 		for _, k := range kernels {
 			if oc := res[k]; oc != nil {
 				s.writeDiag(c.diagID, k, oc.fetch, oc.report)
+				oc.dropBody()
 			}
 		}
 	}
