@@ -56,13 +56,19 @@ func TestRouterDiagMaskedAndCapped(t *testing.T) {
 	const unknownSecret, brokenUUID = "Sup3rSecretPass", "11111111-2222-3333-4444-555555555555"
 	unknown := "anytls://" + unknownSecret + "@node9.invalid:443?sni=a#n1"
 	broken := "vless://" + brokenUUID + "@node9.invalid:99999?type=tcp#bad"
-	links := []string{rtLink(t, "vless_ws"), rtLink(t, "trojan_ws"), rtLink(t, "ss_plain"), vmess, sip002, "foo://broken", unknown, broken, "# " + subURL}
+	// Неэкранированные «#» и «?» в пароле: адрес разбирается с частью пароля в роли
+	// хоста, ссылка не становится узлом. Хвост пароля не должен остаться ни в теле,
+	// ни в имени пропуска.
+	const hashTail, queryTail = "ss0rdHashTail", "Pass2QueryTail"
+	hashPass := "trojan://pa#" + hashTail + "@node9.invalid:443?sni=a#n2"
+	queryPass := "hysteria2://Secret?" + queryTail + "@node9.invalid:443#n3"
+	links := []string{rtLink(t, "vless_ws"), rtLink(t, "trojan_ws"), rtLink(t, "ss_plain"), vmess, sip002, "foo://broken", unknown, broken, hashPass, queryPass, "# " + subURL}
 	body := strings.Join(links, "\n") + "\n" + strings.Repeat("# "+strings.Repeat("x", 78)+"\n", (maxDiagBody/80)+1000)
 	pr, err := nodes.ParseBody([]byte(body))
 	if err != nil {
 		t.Fatalf("ParseBody: %v", err)
 	}
-	if len(pr.Nodes) != 5 || len(pr.Skipped) != 3 {
+	if len(pr.Nodes) != 5 || len(pr.Skipped) != 5 {
 		t.Fatalf("разбор ответа: узлов %d, пропусков %d", len(pr.Nodes), len(pr.Skipped))
 	}
 	fr := fetchResult{
@@ -94,7 +100,7 @@ func TestRouterDiagMaskedAndCapped(t *testing.T) {
 	if rec.Kernel != kernelXray || rec.HTTPStatus != 200 || !rec.Truncated || len(rec.Body) > maxDiagBody {
 		t.Errorf("запись: ядро %s, статус %d, усечено %v, тело %d байт", rec.Kernel, rec.HTTPStatus, rec.Truncated, len(rec.Body))
 	}
-	if rec.Report.Parsed != 5 || rec.Report.Stubs != 0 || len(rec.Report.Skipped) != 3 || rec.Report.Skipped[0].Code == "" {
+	if rec.Report.Parsed != 5 || rec.Report.Stubs != 0 || len(rec.Report.Skipped) != 5 || rec.Report.Skipped[0].Code == "" {
 		t.Errorf("отчёт: %+v", rec.Report)
 	}
 	sk := generic["report"].(map[string]any)["skipped"].([]any)[0].(map[string]any)
@@ -117,7 +123,7 @@ func TestRouterDiagMaskedAndCapped(t *testing.T) {
 	// Закодированные формы: блок vmess целиком и base64 userinfo ss.
 	vmessBlock := strings.TrimPrefix(vmess, "vmess://")
 	ssUserinfo, _, _ := strings.Cut(strings.TrimPrefix(sip002, "ss://"), "@")
-	secrets = append(secrets, vmessBlock, ssUserinfo, unknownSecret, brokenUUID)
+	secrets = append(secrets, vmessBlock, ssUserinfo, unknownSecret, brokenUUID, hashTail, queryTail)
 	for _, n := range pr.Nodes {
 		secrets = append(secrets, nodes.Secrets(n)...)
 	}

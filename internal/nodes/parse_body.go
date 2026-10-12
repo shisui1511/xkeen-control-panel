@@ -161,6 +161,19 @@ func looksSingbox(v any) bool {
 	return false
 }
 
+// skippedLinkName — имя неразобранной ссылки из её фрагмента. Неэкранированный
+// «#» в пароле дал бы «фрагмент» с хвостом пароля и адресом: если до первого «#»
+// нет «@», а после он есть, «#» лежит внутри userinfo, и имя берётся из фрагмента
+// после последнего «@».
+func skippedLinkName(line string) string {
+	before, after, found := strings.Cut(line, "#")
+	if found && !strings.Contains(before, "@") && strings.Contains(after, "@") {
+		line = after[strings.LastIndex(after, "@")+1:]
+	}
+	_, name := splitFragment(line)
+	return name
+}
+
 // parseLinks разбирает список ссылок построчно: пустые строки и комментарии # пропускаются.
 func parseLinks(text string) (ParseResult, error) {
 	res := ParseResult{Format: "links"}
@@ -175,7 +188,7 @@ func parseLinks(text string) (ParseResult, error) {
 			if !errors.As(err, &se) {
 				se = NewError(CodeUnrecognized)
 			}
-			_, name := splitFragment(line)
+			name := skippedLinkName(line)
 			fragment := ""
 			if scheme, _, ok := strings.Cut(line, "://"); ok && validScheme(strings.ToLower(scheme)) {
 				fragment = strings.ToLower(scheme) + "://"
