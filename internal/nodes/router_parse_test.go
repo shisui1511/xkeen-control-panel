@@ -23,8 +23,9 @@ import (
 // rtParseMarks — метки известных падений: ключ «имя проверки/шаг» (xray, mihomo).
 var rtParseMarks = map[string]routertest.KnownMark{
 	// outbound wireguard в Xray на mipsle: рантайм Go падает уже в `xray run -test`
-	"singbox/xray":    routertest.Known("mipsle", "xray-wireguard-outbound-crash-mipsle"),
-	"wg_classic/xray": routertest.Known("mipsle", "xray-wireguard-outbound-crash-mipsle"),
+	"singbox/xray":              routertest.Known("mipsle", "xray-wireguard-outbound-crash-mipsle"),
+	"wg_classic/xray":           routertest.Known("mipsle", "xray-wireguard-outbound-crash-mipsle"),
+	"xray_router_bindings/xray": routertest.Known("mipsle", "xray-wireguard-outbound-crash-mipsle"),
 }
 
 func rtInput(t *testing.T, name string) []byte {
