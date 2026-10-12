@@ -4,6 +4,7 @@ package nodes
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -462,6 +463,15 @@ func rtCapPin(seed string) []byte {
 	return sum[:]
 }
 
+// rtCapColon — hex с двоеточиями в верхнем регистре (так пишут отпечаток в ссылках).
+func rtCapColon(h string) string {
+	parts := make([]string, 0, len(h)/2)
+	for i := 0; i+1 < len(h); i += 2 {
+		parts = append(parts, h[i:i+2])
+	}
+	return strings.ToUpper(strings.Join(parts, ":"))
+}
+
 // rtCapRawTLS — родной узел Xray-JSON с TLS: первый узел xray_outbounds.json с
 // tlsSettings, а если такого нет, первый vless с переписанным на TLS транспортом.
 // Закрепление записывается в Raw как есть (hasPins=false — ключа нет).
@@ -517,13 +527,7 @@ func TestRouterCapabilityRawPins(t *testing.T) {
 	latest := CapsLatest()
 	h1 := hex.EncodeToString(rtCapPin("a"))
 	h2 := hex.EncodeToString(rtCapPin("b"))
-	colon := func(h string) string {
-		parts := make([]string, 0, 32)
-		for i := 0; i < len(h); i += 2 {
-			parts = append(parts, h[i:i+2])
-		}
-		return strings.ToUpper(strings.Join(parts, ":"))
-	}
+	colon := rtCapColon
 	forms := []struct {
 		name string
 		pins any
@@ -571,6 +575,195 @@ func TestRouterCapabilityRawPins(t *testing.T) {
 			}
 		})
 	}
+}
+
+// rtCapSingbox разбирает trojan из JSON sing-box с заданным блоком tls.
+func rtCapSingbox(t *testing.T, tls map[string]any) Node {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"outbounds": []any{map[string]any{
+		"type": "trojan", "tag": "pin-probe", "server": "node.example", "server_port": 443,
+		"password": "probe-pass", "tls": tls,
+	}}})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	res, err := ParseBody(body)
+	if err != nil || len(res.Nodes) != 1 {
+		t.Fatalf("ParseBody sing-box: узлов %d, ошибка %v", len(res.Nodes), err)
+	}
+	return res.Nodes[0]
+}
+
+// rtCapRefused: эмиттеры отказывают узлу с кодом pin_not_expressible, а вердикты
+// обоих ядер совпадают с этим отказом: в файл ядра ничего не уходит.
+func rtCapRefused(t *testing.T, n Node, code string) {
+	t.Helper()
+	latest := CapsLatest()
+	rtCapExpect(t, "xray", Support(n, "xray", latest), false, code, nil)
+	rtCapExpect(t, "mihomo", Support(n, "mihomo", latest), false, code, nil)
+	_, xerr := XrayOutbound(n, rtNodeTag(0))
+	rtCapSame(t, 0, n, "xray", Support(n, "xray", latest), xerr)
+	_, merr := ClashProxy(n, "pin-probe")
+	rtCapSame(t, 0, n, "mihomo", Support(n, "mihomo", latest), merr)
+	if xerr == nil || merr == nil {
+		t.Errorf("узел без выражаемого закрепления при отключённой проверке ушёл в ядро: xray=%v mihomo=%v", xerr, merr)
+	}
+}
+
+// rtCapKernels отдаёт узел обоим ядрам устройства и возвращает outbound Xray и
+// прокси Mihomo, которые ядра приняли.
+func rtCapKernels(t *testing.T, name string, n Node) (map[string]any, map[string]any) {
+	t.Helper()
+	ob, err := XrayOutbound(n, rtNodeTag(0))
+	if err != nil {
+		t.Fatalf("XrayOutbound: %v", err)
+	}
+	px, err := ClashProxy(n, "pin-probe")
+	if err != nil {
+		t.Fatalf("ClashProxy: %v", err)
+	}
+	work := rtParseWork(t)
+	rtXrayKernel(t, name, work, rtRedactNodes(n), ob)
+	rtMihomoKernel(t, name, work, rtRedactNodes(n), px)
+	return ob, px
+}
+
+// TestRouterCapabilityPins: закрепление сертификата переносится в оба ядра без
+// потерь, а закрепление, которое ядро не выражает, не теряется молча: при
+// отключённой проверке сертификата узел отвергается с причиной, без неё идёт с
+// примечанием note_pin_dropped. Вердикт ядер — xray run -test и mihomo -t.
+func TestRouterCapabilityPins(t *testing.T) {
+	routertest.Current(t)
+	latest := CapsLatest()
+	certRaw := rtCapPin("cert")
+	certHex := hex.EncodeToString(certRaw)
+	certB64 := base64.StdEncoding.EncodeToString(certRaw)
+	keyB64 := base64.StdEncoding.EncodeToString(rtCapPin("spki"))
+
+	t.Run("pubkey_insecure", func(t *testing.T) {
+		rtCapRefused(t, rtCapSingbox(t, map[string]any{
+			"enabled": true, "server_name": "node.example", "insecure": true,
+			"certificate_public_key_sha256": []any{keyB64},
+		}), CodePinNotExpressible)
+	})
+
+	t.Run("pubkey_secure", func(t *testing.T) {
+		n := rtCapSingbox(t, map[string]any{
+			"enabled": true, "server_name": "node.example",
+			"certificate_public_key_sha256": []any{keyB64},
+		})
+		if len(n.TLS.PinPubKeySHA256) != 1 || len(n.TLS.PinSHA256) != 0 {
+			t.Fatalf("закрепление открытого ключа в IR: pubkey=%v cert=%v", n.TLS.PinPubKeySHA256, n.TLS.PinSHA256)
+		}
+		for _, k := range []string{"xray", "mihomo"} {
+			v := Support(n, k, latest)
+			if !v.OK || !rtCapHasNote(v, CodeNotePinDropped) {
+				t.Errorf("%s: вердикт %+v, ожидался OK с примечанием %s", k, v, CodeNotePinDropped)
+			}
+		}
+		ob, px := rtCapKernels(t, "pins-pubkey-secure", n)
+		if _, has := px["skip-cert-verify"]; has {
+			t.Errorf("прокси Mihomo содержит skip-cert-verify при включённой проверке")
+		}
+		if _, has := px["fingerprint"]; has {
+			t.Errorf("прокси Mihomo содержит fingerprint, хотя закрепление открытого ключа не выражается")
+		}
+		if rtDig(ob, "streamSettings", "tlsSettings", "pinnedPeerCertSha256") != nil {
+			t.Errorf("в файле Xray есть pinnedPeerCertSha256 для закрепления открытого ключа")
+		}
+	})
+
+	t.Run("cert_sha256_insecure", func(t *testing.T) {
+		n := rtCapSingbox(t, map[string]any{
+			"enabled": true, "server_name": "node.example", "insecure": true,
+			"certificate_sha256": []any{certB64},
+		})
+		if len(n.TLS.PinSHA256) != 1 || n.TLS.PinSHA256[0] != certHex {
+			t.Fatalf("certificate_sha256 не переведён в hex: %v", n.TLS.PinSHA256)
+		}
+		for _, k := range []string{"xray", "mihomo"} {
+			v := Support(n, k, latest)
+			if !v.OK || rtCapHasNote(v, CodeNotePinDropped) {
+				t.Errorf("%s: вердикт %+v, ожидался OK без примечания %s", k, v, CodeNotePinDropped)
+			}
+		}
+		ob, px := rtCapKernels(t, "pins-cert-insecure", n)
+		if got := rtDig(ob, "streamSettings", "tlsSettings", "pinnedPeerCertSha256"); got != certHex {
+			t.Errorf("pinnedPeerCertSha256 в файле Xray не равен hex закрепления: %v", got)
+		}
+		if px["fingerprint"] != certHex {
+			t.Errorf("fingerprint прокси Mihomo не равен hex закрепления: %v", px["fingerprint"])
+		}
+	})
+
+	t.Run("link_colons_upper", func(t *testing.T) {
+		n := rtCapLink(t, "trojan_ws")
+		n.TLS.Insecure = true
+		n.TLS.PinSHA256 = []string{rtCapColon(certHex)}
+		for _, k := range []string{"xray", "mihomo"} {
+			if v := Support(n, k, latest); !v.OK || rtCapHasNote(v, CodeNotePinDropped) {
+				t.Errorf("%s: вердикт %+v, ожидался OK без примечания", k, v)
+			}
+		}
+		ob, px := rtCapKernels(t, "pins-link-colons", n)
+		if got := rtDig(ob, "streamSettings", "tlsSettings", "pinnedPeerCertSha256"); got != certHex {
+			t.Errorf("pinnedPeerCertSha256 в файле Xray: %v, ожидался hex в нижнем регистре без двоеточий", got)
+		}
+		if px["fingerprint"] != certHex {
+			t.Errorf("fingerprint прокси Mihomo: %v, ожидался тот же hex", px["fingerprint"])
+		}
+	})
+
+	t.Run("link_short_pin_insecure", func(t *testing.T) {
+		n := rtCapLink(t, "trojan_ws")
+		n.TLS.Insecure = true
+		n.TLS.PinSHA256 = []string{certHex[:62]}
+		rtCapRefused(t, n, CodePinNotExpressible)
+	})
+
+	t.Run("two_pins_mihomo_note", func(t *testing.T) {
+		n := rtCapLink(t, "trojan_ws")
+		n.TLS.Insecure = false
+		n.TLS.PinSHA256 = []string{certHex, hex.EncodeToString(rtCapPin("other"))}
+		if v := Support(n, "xray", latest); !v.OK || rtCapHasNote(v, CodeNotePinDropped) {
+			t.Errorf("xray: вердикт %+v, ожидался OK без примечания (пишутся оба хеша)", v)
+		}
+		if v := Support(n, "mihomo", latest); !v.OK || !rtCapHasNote(v, CodeNotePinDropped) {
+			t.Errorf("mihomo: вердикт %+v, ожидался OK с примечанием (пишется первый хеш)", v)
+		}
+		rtCapKernels(t, "pins-two", n)
+	})
+
+	t.Run("hysteria2_link", func(t *testing.T) {
+		n := rtCapLink(t, "hysteria2")
+		px, err := ClashProxy(n, "pin-probe")
+		if err != nil {
+			t.Fatalf("ClashProxy: %v", err)
+		}
+		fp, _ := px["fingerprint"].(string)
+		if b, err := hex.DecodeString(fp); err != nil || len(b) != 32 || fp != strings.ToLower(fp) {
+			t.Errorf("fingerprint прокси Mihomo не 64 hex в нижнем регистре: %q", fp)
+		}
+		rtMihomoKernel(t, "pins-hysteria2", rtParseWork(t), rtRedactNodes(n), px)
+	})
+
+	t.Run("http_tls_insecure", func(t *testing.T) {
+		n := rtCapLink(t, "http_proxy")
+		n.TLS = &TLS{Enabled: true, SNI: "node.example", Insecure: true, PinSHA256: []string{certHex}}
+		px, err := ClashProxy(n, "pin-probe")
+		if err != nil {
+			t.Fatalf("ClashProxy: %v", err)
+		}
+		if px["fingerprint"] != certHex {
+			t.Errorf("fingerprint http-прокси Mihomo: %v, ожидался hex закрепления", px["fingerprint"])
+		}
+		rtMihomoKernel(t, "pins-http-tls", rtParseWork(t), rtRedactNodes(n), px)
+		n.TLS.PinSHA256 = nil
+		n.TLS.PinPubKeySHA256 = []string{keyB64}
+		if _, err := ClashProxy(n, "pin-probe"); err == nil {
+			t.Errorf("http-прокси с отключённой проверкой и закреплением открытого ключа ушёл в Mihomo")
+		}
+	})
 }
 
 // TestRouterCapabilityPinnedInsecure: узел с «insecure» и закреплённым

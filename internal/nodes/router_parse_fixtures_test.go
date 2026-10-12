@@ -35,7 +35,10 @@ func TestRouterParseFixtures(t *testing.T) {
 				"*/" + CodeHysteria2Xray: "x", "*/" + CodeUnsupportedType: "x", "*/" + CodeSSPluginXray: "x",
 				"*/" + CodeXrayNoInsecure: "x", "*/" + CodeTUICXray: "x", "*/" + CodeXrayNoHTTPTransport: "x",
 			},
-			mihomoNo: map[string]string{"*/" + CodeUnsupportedType: "x", "*/" + CodeKCPMihomo: "x"}},
+			// hysteria2 с insecure и закреплением «AA:BB:CC» (не sha256): ядро его не
+			// выражает, а проверка отключена — узел отвергается, а не уходит с
+			// skip-cert-verify без закрепления
+			mihomoNo: map[string]string{"*/" + CodeUnsupportedType: "x", "*/" + CodeKCPMihomo: "x", "*/" + CodePinNotExpressible: "x"}},
 	}
 	work := rtParseWork(t)
 	for _, c := range cases {
