@@ -53,6 +53,38 @@ func maskEncodedLinks(text string) string {
 	return b.String()
 }
 
+// linkUserinfoRe — userinfo любой ссылки «схема://секрет@хост». Строка, которая не
+// стала узлом (неизвестная схема, ошибка разбора), своих секретов в список не
+// даёт, поэтому userinfo маскируется по форме ссылки.
+var linkUserinfoRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)([^\s@/?#"'<>]+)@`)
+
+// maskLinkUserinfo заменяет userinfo ссылок на MaskSecret. У ss в открытом виде
+// «метод:пароль» остаётся метод: секрет — только пароль. У остальных схем
+// userinfo скрывается целиком: двоеточие может быть частью пароля.
+func maskLinkUserinfo(text string) string {
+	idx := linkUserinfoRe.FindAllStringSubmatchIndex(text, -1)
+	if len(idx) == 0 {
+		return text
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	last := 0
+	for _, m := range idx {
+		start, end := m[4], m[5]
+		info := text[start:end]
+		b.WriteString(text[last:start])
+		method, secret, ok := strings.Cut(info, ":")
+		if ok && method != "" && secret != "" && strings.EqualFold(text[m[2]:m[3]], "ss://") {
+			b.WriteString(method + ":" + MaskSecret(secret))
+		} else {
+			b.WriteString(MaskSecret(info))
+		}
+		last = end
+	}
+	b.WriteString(text[last:])
+	return b.String()
+}
+
 // escapedForms — формы секрета, в которых он встречается внутри ссылок
 // (percent-кодирование userinfo и параметров запроса), кроме самого секрета.
 func escapedForms(s string) []string {
@@ -134,8 +166,10 @@ func Secrets(n Node) []string {
 // MaskText маскирует секреты в тексте диагностики: сначала закодированная часть
 // ссылок vmess, ssr и ss (учётные данные в base64), затем перечисленные секреты
 // узлов (от шести символов) — сами и в percent-кодировании — заменяются на
-// MaskSecret, затем адреса http(s) — на MaskURL, затем применяется общая очистка
-// services.RedactSensitiveText (пары password=/token=, ключи, LAN-адреса).
+// MaskSecret, затем адреса http(s) — на MaskURL, затем userinfo любой ссылки
+// «схема://секрет@хост» (узел мог не разобраться, и его секретов нет в списке),
+// затем применяется общая очистка services.RedactSensitiveText (пары
+// password=/token=, ключи, LAN-адреса).
 func MaskText(text string, secrets []string) string {
 	text = maskEncodedLinks(text)
 	uniq := make(map[string]bool, len(secrets))
@@ -166,5 +200,8 @@ func MaskText(text string, secrets []string) string {
 		trimmed := strings.TrimRight(m, ".,;:)]}")
 		return MaskURL(trimmed) + m[len(trimmed):]
 	})
+	// После адресов http(s): их userinfo MaskURL уже убрал, а маска внутри
+	// userinfo сломала бы разбор адреса.
+	text = maskLinkUserinfo(text)
 	return services.RedactSensitiveText(text)
 }
