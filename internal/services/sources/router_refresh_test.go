@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -956,6 +957,78 @@ func TestRouterRefreshUnchangedDropsStalePending(t *testing.T) {
 	}
 	if kl.Status.Code != StatusOK || kl.Applied == nil || kl.Applied.Hash != applied {
 		t.Errorf("живые данные после обновления: %+v", kl)
+	}
+}
+
+// Подписку изменили, пока шёл запрос: ответ прежней конфигурации отбрасывается, и
+// общая работа запрашивает провайдера заново с новой. Подписка только в черновике
+// (планировщик её не обновляет) получает ожидающий набор без второго «Обновить», а
+// итог — не поддельное «без изменений».
+func TestRouterRefreshRetriesWhenChangedDuringFetch(t *testing.T) {
+	subURL := rtSubURL(t)
+	rtNeedKernels(t, true, false)
+	e, cap := rtSubscriptionEnv(t, true, false, true)
+	view, err := e.svc.Preview(context.Background(), inputOf(subURL))
+	if err != nil || len(view.Subscriptions) != 1 || view.Token == "" {
+		t.Fatalf("предпросмотр подписки: %v", err)
+	}
+	if _, err := e.svc.Add(e.rev(t), view.Token); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	id, _, _ := rtDraftSubscription(t, e)
+	if err := e.layer.UpdateLive(func(l configlayer.Sections) error {
+		cur, err := readLive(l)
+		if err != nil {
+			return err
+		}
+		for _, kl := range cur[id].Kernels {
+			kl.Pending = nil
+		}
+		return writeLive(l, cur)
+	}); err != nil {
+		t.Fatalf("сброс ожидающего набора: %v", err)
+	}
+
+	// Свой HWID, равный HWID панели: конфигурация подписки меняется, а запросы к
+	// провайдеру остаются прежними.
+	hwid := e.svc.d.HWID()
+	var (
+		once      sync.Once
+		updateErr error
+	)
+	cap.mu.Lock()
+	cap.before = func() {
+		once.Do(func() {
+			st, err := e.layer.ReadState()
+			if err != nil {
+				updateErr = err
+				return
+			}
+			_, updateErr = e.svc.Update(st.DraftRevision, id, Patch{HWID: &hwid})
+		})
+	}
+	cap.mu.Unlock()
+	reqs := len(cap.all())
+
+	out, err := e.svc.Refresh(context.Background(), id)
+	if updateErr != nil {
+		t.Fatalf("смена HWID во время запроса: %v", updateErr)
+	}
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if got := len(cap.all()) - reqs; got != 2 {
+		t.Errorf("запросов к провайдеру %d, ожидалось 2: отброшенный и повтор", got)
+	}
+	if out.Outcome != OutcomePendingUpdated {
+		t.Errorf("итог %q, ожидалось %q", out.Outcome, OutcomePendingUpdated)
+	}
+	if kl := rtLiveOf(t, e, id).Kernels[kernelXray]; kl == nil || kl.Pending == nil {
+		t.Errorf("ожидающий набор новой конфигурации не записан: %+v", kl)
+	}
+	_, cfg, _ := rtDraftSubscription(t, e)
+	if cfg.HWID != hwid {
+		t.Errorf("HWID подписки после смены: %q", cfg.HWID)
 	}
 }
 

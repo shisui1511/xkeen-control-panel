@@ -62,6 +62,8 @@ func (a *API) writeSourceError(w http.ResponseWriter, r *http.Request, err error
 		JSONErrorCode(w, http.StatusGone, "preview_expired", a.t(r, "configlayer.preview_expired"))
 	case errors.Is(err, sources.ErrSourceDisabled):
 		JSONErrorCode(w, http.StatusConflict, "source_disabled", a.t(r, "configlayer.source_disabled"))
+	case errors.Is(err, sources.ErrSourceChanged):
+		JSONErrorCode(w, http.StatusConflict, "source_changed", a.t(r, "configlayer.source_changed"))
 	case errors.Is(err, sources.ErrInvalidInput):
 		JSONErrorCode(w, http.StatusBadRequest, "invalid_request", a.t(r, "configlayer.invalid_request"))
 	default:

@@ -94,5 +94,6 @@
   "configlayer.source_not_found": "Source not found",
   "configlayer.node_not_found": "Node not found",
   "configlayer.preview_expired": "The preview has expired: paste the data again",
-  "configlayer.source_disabled": "The source is disabled: enable it before refreshing"
+  "configlayer.source_disabled": "The source is disabled: enable it before refreshing",
+  "configlayer.source_changed": "The subscription settings changed during the refresh: refresh again"
 }

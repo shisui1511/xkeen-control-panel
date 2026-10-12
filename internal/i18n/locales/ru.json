@@ -94,5 +94,6 @@
   "configlayer.source_not_found": "Источник не найден",
   "configlayer.node_not_found": "Узел не найден",
   "configlayer.preview_expired": "Предпросмотр устарел: вставьте данные заново",
-  "configlayer.source_disabled": "Источник выключен: включите его перед обновлением"
+  "configlayer.source_disabled": "Источник выключен: включите его перед обновлением",
+  "configlayer.source_changed": "Настройки подписки изменились во время обновления: повторите обновление"
 }

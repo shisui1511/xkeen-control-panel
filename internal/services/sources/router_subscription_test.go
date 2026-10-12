@@ -37,6 +37,9 @@ type rtReq struct {
 type rtCapture struct {
 	mu   sync.Mutex
 	reqs []rtReq
+	// before вызывается перед отправкой запроса (действие пользователя, пока запрос
+	// идёт); ответ не подменяется.
+	before func()
 }
 
 func (c *rtCapture) all() []rtReq {
@@ -58,7 +61,11 @@ func (o rtObserver) RoundTrip(r *http.Request) (*http.Response, error) {
 		UA: r.Header.Get("User-Agent"), HWID: r.Header.Get("x-hwid"), OS: r.Header.Get("x-device-os"),
 		Model: r.Header.Get("x-device-model"), Ver: r.Header.Get("x-ver-os"),
 	})
+	before := o.c.before
 	o.c.mu.Unlock()
+	if before != nil {
+		before()
+	}
 	return o.base.RoundTrip(r)
 }
 

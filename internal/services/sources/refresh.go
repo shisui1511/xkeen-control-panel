@@ -16,8 +16,9 @@ import (
 // ErrSourceDisabled — источник выключен: он не обновляется (D-17).
 var ErrSourceDisabled = errors.New("sources: источник выключен")
 
-// errRefreshStale — подписку изменили, пока шёл запрос: ответ отбрасывается.
-var errRefreshStale = errors.New("sources: конфигурация подписки изменилась во время обновления")
+// ErrSourceChanged — подписку изменили, пока шёл запрос, и после повтора с новой
+// конфигурацией тоже: ответ относится к прежней конфигурации и отброшен.
+var ErrSourceChanged = errors.New("sources: конфигурация подписки изменилась во время обновления")
 
 // Итоги обновления источника (RefreshOutcome.Outcome).
 const (
@@ -78,7 +79,7 @@ func (s *Service) Refresh(ctx context.Context, id string) (RefreshOutcome, error
 		c = &refreshCall{done: make(chan struct{})}
 		s.calls[id] = c
 		started := s.spawn(func() {
-			out, err := s.refreshWork(s.ctx, id, nil)
+			out, err := s.refreshCurrent(s.ctx, id, nil)
 			s.cmu.Lock()
 			c.out, c.err = out, err
 			delete(s.calls, id)
@@ -98,6 +99,20 @@ func (s *Service) Refresh(ctx context.Context, id string) (RefreshOutcome, error
 	case <-ctx.Done():
 		return RefreshOutcome{}, ctx.Err()
 	}
+}
+
+// refreshCurrent — refreshWork с одним повтором, если подписку изменили, пока шёл
+// запрос: ответ прежней конфигурации отброшен, и запрос идёт заново с новой. Так
+// вызов, присоединившийся к идущему обновлению после смены адреса, получает итог
+// по новому адресу, а подписка только в черновике (её не обновляет планировщик)
+// получает набор без второго «Обновить». Повторная смена за время повтора —
+// ErrSourceChanged.
+func (s *Service) refreshCurrent(ctx context.Context, id string, only []string) (RefreshOutcome, error) {
+	out, err := s.refreshWork(ctx, id, only)
+	if errors.Is(err, ErrSourceChanged) && ctx.Err() == nil {
+		out, err = s.refreshWork(ctx, id, only)
+	}
+	return out, err
 }
 
 // subscriptionConfig находит конфигурацию подписки: применённое состояние
@@ -276,7 +291,7 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 			return err
 		}
 		if curInApplied != inApplied || curCfg.URL != cfg.URL || curCfg.HWID != cfg.HWID {
-			return errRefreshStale
+			return ErrSourceChanged
 		}
 		l := view.Live
 		cur, err := readLive(l)
@@ -319,12 +334,10 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 		}
 		return writeLive(l, cur)
 	})
-	if errors.Is(err, errRefreshStale) {
-		// Ответ отброшен: срок проверки не сдвинут, новая конфигурация запросится
-		// на ближайшем тике.
-		return RefreshOutcome{Outcome: OutcomeUnchanged, Kernels: map[string]KernelOutcome{}}, nil
-	}
 	if err != nil {
+		// ErrSourceChanged: ответ отброшен, срок проверки не сдвинут. Это не итог
+		// «без изменений»: ничего не проверено и не записано, повтор с новой
+		// конфигурацией делает refreshCurrent.
 		return RefreshOutcome{}, err
 	}
 
