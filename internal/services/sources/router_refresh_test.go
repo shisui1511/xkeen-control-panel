@@ -258,13 +258,13 @@ func TestRouterRefreshDisabledAndUnknown(t *testing.T) {
 	rtSeedApplied(t, e, id, rtDeadURL, Interval{Mode: IntervalProvider}, false,
 		&LiveSource{Kernels: map[string]*KernelLive{kernelXray: rtAppliedRef(e, ref)}})
 	ctx := context.Background()
-	if _, err := e.svc.Refresh(ctx, id, true); !errors.Is(err, ErrSourceDisabled) {
+	if _, err := e.svc.Refresh(ctx, id); !errors.Is(err, ErrSourceDisabled) {
 		t.Errorf("выключенный источник: %v", err)
 	}
-	if _, err := e.svc.Refresh(ctx, "deadbeef", true); !errors.Is(err, ErrSourceNotFound) {
+	if _, err := e.svc.Refresh(ctx, "deadbeef"); !errors.Is(err, ErrSourceNotFound) {
 		t.Errorf("неизвестный источник: %v", err)
 	}
-	if _, err := e.svc.Refresh(ctx, MySourceID, true); !errors.Is(err, ErrSourceNotFound) {
+	if _, err := e.svc.Refresh(ctx, MySourceID); !errors.Is(err, ErrSourceNotFound) {
 		t.Errorf("«Мои узлы»: %v", err)
 	}
 	// Планировщик выключенный источник пропускает.
@@ -293,7 +293,7 @@ func TestRouterRefreshSingleflight(t *testing.T) {
 	results := make(chan result, 2)
 	e.svc.refreshMu.Lock()
 	go func() {
-		out, err := e.svc.Refresh(context.Background(), id, true)
+		out, err := e.svc.Refresh(context.Background(), id)
 		results <- result{out, err}
 	}()
 	deadline := time.Now().Add(5 * time.Second)
@@ -311,7 +311,7 @@ func TestRouterRefreshSingleflight(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	go func() {
-		out, err := e.svc.Refresh(context.Background(), id, true)
+		out, err := e.svc.Refresh(context.Background(), id)
 		results <- result{out, err}
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -736,7 +736,7 @@ func TestRouterRefreshChangedSetTracer(t *testing.T) {
 	}
 
 	reqBefore := len(cap.all())
-	out, err := e.svc.Refresh(ctx, id, true)
+	out, err := e.svc.Refresh(ctx, id)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -768,7 +768,7 @@ func TestRouterRefreshChangedSetTracer(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := rtWatchApply(t, e)
-	out, err = e.svc.Refresh(ctx, id, true)
+	out, err = e.svc.Refresh(ctx, id)
 	if err != nil {
 		t.Fatalf("повторный Refresh: %v", err)
 	}
@@ -807,7 +807,7 @@ func TestRouterRefreshRenameOnlyXrayFileUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := e.svc.Refresh(context.Background(), id, true)
+	out, err := e.svc.Refresh(context.Background(), id)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -849,7 +849,7 @@ func TestRouterRefreshDeferredOnDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := e.svc.Refresh(ctx, id, true)
+	out, err := e.svc.Refresh(ctx, id)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -943,7 +943,7 @@ func TestRouterRefreshUnchangedDropsStalePending(t *testing.T) {
 		t.Fatalf("отложенный набор: %v", err)
 	}
 
-	out, err := e.svc.Refresh(context.Background(), id, true)
+	out, err := e.svc.Refresh(context.Background(), id)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}

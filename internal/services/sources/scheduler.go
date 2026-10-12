@@ -91,7 +91,7 @@ func (s *Service) tick(ctx context.Context) {
 		if !ok || now.Before(due) {
 			continue
 		}
-		if _, err := s.Refresh(ctx, id, false); err != nil && ctx.Err() == nil &&
+		if _, err := s.Refresh(ctx, id); err != nil && ctx.Err() == nil &&
 			!errors.Is(err, ErrSourceDisabled) && !errors.Is(err, ErrSourceNotFound) && !errors.Is(err, configlayer.ErrDisabled) {
 			log.Printf("[sources] фоновое обновление источника %s не выполнено: %v", id, err)
 		}

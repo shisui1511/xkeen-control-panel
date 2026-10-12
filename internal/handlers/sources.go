@@ -178,7 +178,7 @@ func (a *API) ConfigSourcesRefresh(w http.ResponseWriter, r *http.Request) {
 	if !a.decodeLayerBody(w, r, &req) {
 		return
 	}
-	out, err := a.sources.Refresh(r.Context(), req.ID, true)
+	out, err := a.sources.Refresh(r.Context(), req.ID)
 	if err != nil {
 		a.writeSourceError(w, r, err)
 		return
