@@ -48,13 +48,16 @@ func TestRouterDiagMaskedAndCapped(t *testing.T) {
 
 	// Ответ: список ссылок (настоящие узлы), строка, которую разобрать нельзя, и
 	// длинный хвост комментариев, чтобы тело превысило 2 МиБ.
-	links := []string{rtLink(t, "vless_ws"), rtLink(t, "trojan_ws"), rtLink(t, "ss_plain"), "foo://broken", "# " + subURL}
+	// vmess и ss SIP002 хранят учётные данные в base64: буквальной замены
+	// секретов они избегают и должны маскироваться по форме ссылки.
+	vmess, sip002 := rtLink(t, "vmess_ws_tls"), rtLink(t, "ss_sip002")
+	links := []string{rtLink(t, "vless_ws"), rtLink(t, "trojan_ws"), rtLink(t, "ss_plain"), vmess, sip002, "foo://broken", "# " + subURL}
 	body := strings.Join(links, "\n") + "\n" + strings.Repeat("# "+strings.Repeat("x", 78)+"\n", (maxDiagBody/80)+1000)
 	pr, err := nodes.ParseBody([]byte(body))
 	if err != nil {
 		t.Fatalf("ParseBody: %v", err)
 	}
-	if len(pr.Nodes) != 3 || len(pr.Skipped) != 1 {
+	if len(pr.Nodes) != 5 || len(pr.Skipped) != 1 {
 		t.Fatalf("разбор ответа: узлов %d, пропусков %d", len(pr.Nodes), len(pr.Skipped))
 	}
 	fr := fetchResult{
@@ -86,7 +89,7 @@ func TestRouterDiagMaskedAndCapped(t *testing.T) {
 	if rec.Kernel != kernelXray || rec.HTTPStatus != 200 || !rec.Truncated || len(rec.Body) > maxDiagBody {
 		t.Errorf("запись: ядро %s, статус %d, усечено %v, тело %d байт", rec.Kernel, rec.HTTPStatus, rec.Truncated, len(rec.Body))
 	}
-	if rec.Report.Parsed != 3 || rec.Report.Stubs != 0 || len(rec.Report.Skipped) != 1 || rec.Report.Skipped[0].Code == "" {
+	if rec.Report.Parsed != 5 || rec.Report.Stubs != 0 || len(rec.Report.Skipped) != 1 || rec.Report.Skipped[0].Code == "" {
 		t.Errorf("отчёт: %+v", rec.Report)
 	}
 	sk := generic["report"].(map[string]any)["skipped"].([]any)[0].(map[string]any)
@@ -106,6 +109,10 @@ func TestRouterDiagMaskedAndCapped(t *testing.T) {
 	}
 	text := string(data)
 	secrets := []string{token, "topsecretvalue", "abcdef123456", "zzzzzzzzzzzz", "dXNlcjpwYXNz", subURL}
+	// Закодированные формы: блок vmess целиком и base64 userinfo ss.
+	vmessBlock := strings.TrimPrefix(vmess, "vmess://")
+	ssUserinfo, _, _ := strings.Cut(strings.TrimPrefix(sip002, "ss://"), "@")
+	secrets = append(secrets, vmessBlock, ssUserinfo)
 	for _, n := range pr.Nodes {
 		secrets = append(secrets, nodes.Secrets(n)...)
 	}

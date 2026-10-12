@@ -3,6 +3,8 @@
 package nodes
 
 import (
+	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -132,5 +134,33 @@ func TestRouterMask(t *testing.T) {
 	}
 	if !strings.Contains(got, "tiny") {
 		t.Errorf("MaskText заменил секрет короче шести символов: %s", got)
+	}
+
+	// Учётные данные в base64 (блок vmess, userinfo ss SIP002, ss целиком) и пароль в
+	// percent-кодировании: ни закодированной, ни раскодированной формы в выходе.
+	vmessLink := rtFirstLink(t, filepath.Join(routertest.LinksDir(t), "vmess_ws_tls.txt"))
+	sipLink := rtFirstLink(t, filepath.Join(routertest.LinksDir(t), "ss_sip002.txt"))
+	legacyLink := rtFirstLink(t, filepath.Join(routertest.LinksDir(t), "ss_legacy.txt"))
+	plainLink := rtFirstLink(t, filepath.Join(routertest.LinksDir(t), "ss_plain.txt"))
+	vmess, sip, legacy, plain := rtCapLink(t, "vmess_ws_tls"), rtCapLink(t, "ss_sip002"), rtCapLink(t, "ss_legacy"), rtCapLink(t, "ss_plain")
+	const escaped = "p@ss/word:42"
+	escapedLink := "trojan://" + url.QueryEscape(escaped) + "@node3.example:443#t"
+	text = strings.Join([]string{vmessLink, sipLink, legacyLink, plainLink, escapedLink}, "\n")
+	secrets = append(append(append(Secrets(vmess), Secrets(sip)...), append(Secrets(legacy), Secrets(plain)...)...), escaped)
+	got = MaskText(text, secrets)
+	sipUser, _, _ := strings.Cut(strings.TrimPrefix(sipLink, "ss://"), "@")
+	leaks := append([]string{
+		strings.TrimPrefix(vmessLink, "vmess://"), sipUser,
+		strings.TrimPrefix(strings.SplitN(legacyLink, "#", 2)[0], "ss://"), url.QueryEscape(escaped),
+	}, secrets...)
+	for _, leak := range leaks {
+		if len(leak) >= minMaskedSecret && strings.Contains(got, leak) {
+			t.Errorf("MaskText оставил закодированный секрет %q…: %s", leak[:4], got)
+		}
+	}
+	for _, keep := range []string{"vmess://", "@node4.example:8388", "@node3.example:443", "ss://chacha20-ietf-poly1305:"} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("MaskText повредил ссылку (нет %q): %s", keep, got)
+		}
 	}
 }

@@ -24,6 +24,48 @@ const maskedPrefix = 4
 
 var textURLRe = regexp.MustCompile(`https?://[^\s"'<>]+`)
 
+// encodedLinkRe — ссылки, у которых учётные данные лежат в base64: весь блок
+// vmess (JSON) и ssr, userinfo ss в SIP002 или ss целиком в старом формате.
+// Буквальной замены секретов они избегают, поэтому маскируются по форме.
+var encodedLinkRe = regexp.MustCompile(`(?i)\b(vmess|ssr|ss)://([A-Za-z0-9+/=_-]+)`)
+
+// maskEncodedLinks заменяет закодированную часть ссылок vmess, ssr и ss на
+// MaskSecret. У ss в открытом виде «метод:пароль@…» маскировать по форме нечего:
+// пароль заменяется буквально как секрет узла.
+func maskEncodedLinks(text string) string {
+	idx := encodedLinkRe.FindAllStringSubmatchIndex(text, -1)
+	if len(idx) == 0 {
+		return text
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	last := 0
+	for _, m := range idx {
+		start, end := m[4], m[5]
+		if strings.EqualFold(text[m[2]:m[3]], "ss") && end < len(text) && text[end] == ':' {
+			continue
+		}
+		b.WriteString(text[last:start])
+		b.WriteString(MaskSecret(text[start:end]))
+		last = end
+	}
+	b.WriteString(text[last:])
+	return b.String()
+}
+
+// escapedForms — формы секрета, в которых он встречается внутри ссылок
+// (percent-кодирование userinfo и параметров запроса), кроме самого секрета.
+func escapedForms(s string) []string {
+	var out []string
+	userinfo := strings.TrimPrefix(url.UserPassword("u", s).String(), "u:")
+	for _, e := range []string{url.QueryEscape(s), url.PathEscape(s), userinfo} {
+		if e != s {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // MaskURL оставляет схему, домен и маску пути вида «домен/…/ab12…»: последний
 // непустой сегмент пути сокращается до четырёх символов. Запрос, фрагмент,
 // userinfo и путь целиком не выводятся. Неразбираемый адрес даёт «…».
@@ -89,17 +131,24 @@ func Secrets(n Node) []string {
 	return out
 }
 
-// MaskText маскирует секреты в тексте диагностики: сначала перечисленные
-// секреты узлов (от шести символов) заменяются на MaskSecret, затем адреса
-// http(s) — на MaskURL, затем применяется общая очистка
+// MaskText маскирует секреты в тексте диагностики: сначала закодированная часть
+// ссылок vmess, ssr и ss (учётные данные в base64), затем перечисленные секреты
+// узлов (от шести символов) — сами и в percent-кодировании — заменяются на
+// MaskSecret, затем адреса http(s) — на MaskURL, затем применяется общая очистка
 // services.RedactSensitiveText (пары password=/token=, ключи, LAN-адреса).
 func MaskText(text string, secrets []string) string {
+	text = maskEncodedLinks(text)
 	uniq := make(map[string]bool, len(secrets))
 	list := make([]string, 0, len(secrets))
 	for _, s := range secrets {
-		if utf8.RuneCountInString(s) >= minMaskedSecret && !uniq[s] {
-			uniq[s] = true
-			list = append(list, s)
+		if utf8.RuneCountInString(s) < minMaskedSecret {
+			continue
+		}
+		for _, v := range append([]string{s}, escapedForms(s)...) {
+			if !uniq[v] {
+				uniq[v] = true
+				list = append(list, v)
+			}
 		}
 	}
 	// Длинные секреты первыми: короткий не должен разрезать длинный.
