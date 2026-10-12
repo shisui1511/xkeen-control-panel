@@ -446,7 +446,8 @@ func TestRouterSourcesMyNodesFlow(t *testing.T) {
 	}
 
 	// ввод больше 1 МиБ доходит до распознавателя и получает too_large, а не
-	// безликий invalid_request; тело больше предела маршрута — invalid_request
+	// безликий invalid_request; тело больше общего предела API (2 МиБ) отсекает
+	// middleware.MaxBytes ответом 413 до обработчика
 	big := []byte(`{"text":"` + strings.Repeat("a", (1<<20)+4096) + `"}`)
 	status, bigRaw, err := e.p.Request(http.MethodPost, rtSourcesBase+"/preview", big, routertest.AuthFull)
 	if err != nil {
@@ -463,8 +464,8 @@ func TestRouterSourcesMyNodesFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("большое тело: %v", err)
 	}
-	if hr := e.decode(status, hugeRaw); hr.Status != http.StatusBadRequest || hr.Code != "invalid_request" {
-		t.Errorf("тело больше предела маршрута: %d %q", hr.Status, hr.Code)
+	if hr := e.decode(status, hugeRaw); hr.Status != http.StatusRequestEntityTooLarge {
+		t.Errorf("тело больше общего предела API: %d %q", hr.Status, hr.Code)
 	}
 
 	// nodes/delete: запись удаляется, повторное удаление — 404
