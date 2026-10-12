@@ -382,11 +382,18 @@ func (s *Service) subViewOf(id string, cfg SubscriptionConfig, draft json.RawMes
 		}
 	}
 
+	// Идентификаторы — как у тега Xray в генераторе (nodeIDs): при совпадении
+	// Hash8 ссылка группы получает тот же суффикс, что и outbound.
+	all := make([]nodes.Keyed, 0, len(order))
+	for _, e := range order {
+		all = append(all, nodes.Keyed{Key: e.key, Node: e.node})
+	}
+	ids := nodeIDs(all)
 	idents := make(map[string]bool, len(order))
 	views := make([]NodeView, 0, len(order))
 	excluded := make(map[string]bool, len(order))
 	for _, e := range order {
-		nv := nodeViewOf(e.node, e.key, nodes.Ref(id, nodes.Hash8(e.key)), "", caps)
+		nv := nodeViewOf(e.node, e.key, nodes.Ref(id, ids[e.key]), "", caps)
 		nv.InSet = KernelFlags{Xray: e.in[kernelXray], Mihomo: e.in[kernelMihomo]}
 		nv.Excluded = nameExcluded(e.node, subs)
 		excluded[e.key] = nv.Excluded

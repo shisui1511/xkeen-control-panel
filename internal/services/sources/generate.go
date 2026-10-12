@@ -390,7 +390,7 @@ func (s *Service) subscriptionFile(mode configlayer.SourceKind, kernel, id strin
 	if err != nil {
 		return nil, fmt.Errorf("источник %s, ядро %s: %w", id, kernel, err)
 	}
-	keyed := s.subscriptionNodes(id, excludeByName(list, cfg.Exclude))
+	keyed := s.subscriptionNodes(id, list, cfg.Exclude)
 	var file *configlayer.GeneratedFile
 	switch kernel {
 	case kernelXray:
@@ -405,26 +405,10 @@ func (s *Service) subscriptionFile(mode configlayer.SourceKind, kernel, id strin
 	return file, nil
 }
 
-// excludeByName убирает узлы, в имени которых есть любая из подстрок (без учёта
-// регистра): единственный фильтр источника (D-04). Пустые и состоящие из пробелов
-// шаблоны игнорируются. Фильтр действует до обоих ядер, потому что работает над
-// общим набором; «Мои узлы» им не пользуются.
-func excludeByName(list []nodes.Node, patterns []string) []nodes.Node {
-	subs := excludeSubs(patterns)
-	if len(subs) == 0 {
-		return list
-	}
-	out := make([]nodes.Node, 0, len(list))
-	for _, n := range list {
-		if !nameExcluded(n, subs) {
-			out = append(out, n)
-		}
-	}
-	return out
-}
-
 // excludeSubs приводит шаблоны исключения к подстрокам: нижний регистр, без
-// пробелов по краям, пустые отброшены.
+// пробелов по краям, пустые отброшены. Исключение по подстроке имени без учёта
+// регистра — единственный фильтр источника (D-04); действует для обоих ядер,
+// «Мои узлы» им не пользуются.
 func excludeSubs(patterns []string) []string {
 	var subs []string
 	for _, p := range patterns {
@@ -448,30 +432,55 @@ func nameExcluded(n nodes.Node, subs []string) bool {
 
 // subscriptionNodes присваивает узлам снимка ключи: полные дубли схлопываются,
 // порядок — по ключу. Тег Xray — от ключа, поэтому не меняется при переименовании
-// узла у провайдера (Pitfall 4).
-//
-// Тег — 32 бита хэша ключа: совпадение у двух разных узлов дало бы повторяющийся
-// тег outbound, и xray -test отверг бы весь файл. Совпавший тег получает суффикс
-// «-2», «-3» в порядке ключей, поэтому остаётся стабильным при том же наборе.
-func (s *Service) subscriptionNodes(id string, list []nodes.Node) []keyedNode {
+// узла у провайдера (Pitfall 4). Ключи и идентификаторы (nodeIDs) считаются от
+// полного снимка, исключение по имени (D-04) действует после: так ключ и тег
+// узла совпадают с ref представления, а исключение одного узла не меняет тег
+// другого.
+func (s *Service) subscriptionNodes(id string, list []nodes.Node, exclude []string) []keyedNode {
 	uniq, _ := nodes.Uniq(id, list)
+	ids := nodeIDs(uniq)
+	subs := excludeSubs(exclude)
 	out := make([]keyedNode, 0, len(uniq))
-	used := make(map[string]bool, len(uniq))
 	for _, k := range uniq {
-		tag := nodes.XrayTag(id, k.Key)
-		if used[tag] {
-			base := tag
-			for i := 2; used[tag]; i++ {
-				tag = base + "-" + strconv.Itoa(i)
-			}
+		if len(subs) > 0 && nameExcluded(k.Node, subs) {
+			continue
 		}
-		used[tag] = true
 		out = append(out, keyedNode{
 			name: displayName(k.Node),
 			key:  k.Key,
-			tag:  tag,
+			tag:  "xcp-" + id + "-" + ids[k.Key],
 			node: k.Node,
 		})
+	}
+	return out
+}
+
+// nodeIDs — идентификаторы узлов источника по ключу для тега Xray и ref групп:
+// 8 hex от sha256 ключа (nodes.Hash8). Это 32 бита: совпадение у двух разных
+// узлов дало бы повторяющийся тег outbound, и xray -test отверг бы весь файл.
+// Совпавший идентификатор получает суффикс «-2», «-3» в порядке ключей, поэтому
+// остаётся стабильным при том же наборе.
+func nodeIDs(keyed []nodes.Keyed) map[string]string {
+	keys := make([]string, 0, len(keyed))
+	for _, k := range keyed {
+		keys = append(keys, k.Key)
+	}
+	sort.Strings(keys)
+	out := make(map[string]string, len(keys))
+	used := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		if _, ok := out[key]; ok {
+			continue
+		}
+		id8 := nodes.Hash8(key)
+		if used[id8] {
+			base := id8
+			for i := 2; used[id8]; i++ {
+				id8 = base + "-" + strconv.Itoa(i)
+			}
+		}
+		used[id8] = true
+		out[key] = id8
 	}
 	return out
 }

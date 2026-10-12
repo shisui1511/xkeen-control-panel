@@ -112,6 +112,22 @@ func TestRouterGenerateExcludeFilter(t *testing.T) {
 	if x, m, _ = gen([]string{"", "  "}); x != 4 || m != 4 {
 		t.Errorf("пустые шаблоны: Xray %d, Mihomo %d, нужно по 4", x, m)
 	}
+	// Ключи и теги считаются от полного снимка: исключение одних узлов не меняет
+	// теги остальных.
+	tagsOf := func(exclude []string) []string {
+		sections := map[string]json.RawMessage{sectionName(id): rtSubNamed(t, id, "Провайдер", exclude)}
+		in := rtLiveInput(t, configlayer.SourceDraft, sections, ls, nil)
+		return rtSubXrayTags(t, rtGenerate(t, e.svc, kernelXray, in, rtBoth), id)
+	}
+	full := map[string]bool{}
+	for _, tag := range tagsOf(nil) {
+		full[tag] = true
+	}
+	for _, tag := range tagsOf([]string{"ru", "Тест"}) {
+		if !full[tag] {
+			t.Errorf("тег %s при фильтре отличается от тегов полного набора", tag)
+		}
+	}
 
 	// «Мои узлы»: фильтра нет, узел с «ru» в имени остаётся.
 	myRaw := rtEntries(t, true, "00000001", rtLink(t, "vless_ws"))
