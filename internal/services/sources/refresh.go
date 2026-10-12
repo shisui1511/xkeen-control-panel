@@ -205,6 +205,12 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 	hwid, locked := s.sourceHWID(cfg, meta)
 	res, err := s.fetchAll(ctx, cfg.URL, hwid, locked, kernels)
 	if err != nil {
+		if ctx.Err() == nil {
+			// Сбой записи снимка (переполненный флеш или USB): без отметки проверки
+			// срок остался бы наступившим, и провайдер запрашивался бы на каждом тике
+			// планировщика. Следующая попытка — через обычный интервал.
+			s.markChecked(id, s.d.Now())
+		}
 		return RefreshOutcome{}, err
 	}
 	// Снимки кандидатов удержаны с момента записи; отпускаются после того, как они
@@ -307,6 +313,27 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 	s.d.Layer.PublishSources()
 	s.rebuildNotices()
 	return out, nil
+}
+
+// markChecked отмечает время проверки источника без изменения снимков и статусов.
+// Сбой записи — только в журнал: вызывающий уже возвращает исходную ошибку.
+func (s *Service) markChecked(id string, now time.Time) {
+	err := s.d.Layer.UpdateLive(func(l configlayer.Sections) error {
+		cur, err := readLive(l)
+		if err != nil {
+			return err
+		}
+		src := cur[id]
+		if src == nil {
+			src = &LiveSource{Kernels: map[string]*KernelLive{}}
+			cur[id] = src
+		}
+		src.Meta.CheckedAt = now
+		return writeLive(l, cur)
+	})
+	if err != nil {
+		log.Printf("[sources] время проверки источника %s не записано: %v", id, err)
+	}
 }
 
 // freshMeta — метаданные после запроса: свежие из удавшихся ответов; если ни один
