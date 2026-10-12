@@ -558,3 +558,17 @@ func TestRouterViewNetworkNoRetryWhenIntervalOff(t *testing.T) {
 		t.Errorf("уведомление обещает повтор: %+v", n.Params)
 	}
 }
+
+// Пропуски в карточке не складываются по ядрам: ответы под оба ядра несут одни и те
+// же неразбираемые прокси, число совпадает с пропусками каждого ядра.
+func TestRouterViewSkippedNotSummedAcrossKernels(t *testing.T) {
+	e := rtViewEnv(t, "xray", kernelXray, kernelMihomo)
+	const id = "a1b2c3d4"
+	xr, mh := rtPut(t, e, "vless_ws"), rtPut(t, e, "vless_ws")
+	xr.Skipped, mh.Skipped = 3, 3
+	rtAddSub(t, e, rtSubAt(t, id, "Провайдер", rtViewSubURL, e.clock.Now()), id, false,
+		map[string]*Ref{kernelXray: xr, kernelMihomo: mh})
+	if got := rtFindSource(t, rtView(t, e), id).Skipped; got != 3 {
+		t.Errorf("пропущено в карточке %d, ожидалось 3 (по 3 в ответе каждого ядра)", got)
+	}
+}

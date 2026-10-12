@@ -368,7 +368,12 @@ func (s *Service) subViewOf(id string, cfg SubscriptionConfig, draft json.RawMes
 		if ref.Stubs > v.Stubs {
 			v.Stubs = ref.Stubs
 		}
-		v.Skipped += ref.Skipped
+		// Как заглушки: ответы под оба ядра обычно несут одни и те же неразбираемые
+		// прокси, сумма удвоила бы число; в диагностике и предпросмотре пропуски
+		// показаны по ядрам.
+		if ref.Skipped > v.Skipped {
+			v.Skipped = ref.Skipped
+		}
 		list, err := s.snapshotNodes(ref.Hash)
 		if err != nil {
 			// Нечитаемый снимок — пустой набор ядра, статус остаётся из живых данных.
