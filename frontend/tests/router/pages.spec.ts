@@ -68,6 +68,11 @@ function markKnown(route: string, theme: string, width: number): void {
   if (light && route === 'services') knownFailure('*', 'muted-small-label-text-contrast');
   if (route === 'smartproxy') knownFailure('*', 'muted-small-label-text-contrast');
 
+  // Журнал перезапусков на «Службах»: прокручиваемый <pre> с выводом команды без фокуса с клавиатуры
+  // (запись о смене ядра на mipsle длинная; на arm64 вывод короче и области прокрутки нет)
+  if (dark && route === 'services')
+    knownFailure('mipsle/mihomo', 'services-restart-log-pre-not-focusable');
+
   // Строки DAT-файлов с вложенными интерактивными элементами (при Xray)
   if (wide && route === 'dat') knownFailure('*/xray', 'dat-rows-nested-interactive');
 

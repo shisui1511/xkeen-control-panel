@@ -914,7 +914,18 @@ func TestRouterOnKernelInstalledBuildsFiles(t *testing.T) {
 
 	e.installed = configlayer.InstalledKernels{Xray: true, Mihomo: true}
 	e.svc.OnKernelInstalled("mihomo")
-	e.svc.Stop() // дожидается фоновой сборки
+	// Stop отменяет контекст сервиса, а не ждёт сборку: сначала ждём запрос к
+	// провайдеру и запись снимка, иначе отмена обрывает сборку до запроса.
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		if len(cap.all()) > reqs {
+			if kl := rtLiveOf(t, e, id).Kernels[kernelMihomo]; kl != nil && kl.Applied != nil {
+				break
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	e.svc.Stop() // дожидается завершения фоновой сборки
 	got := cap.all()[reqs:]
 	if len(got) != 1 || !strings.HasPrefix(got[0].UA, "ClashMeta/") {
 		t.Fatalf("запросы после установки ядра: %+v", got)
