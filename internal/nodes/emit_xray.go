@@ -286,9 +286,34 @@ func xrayInsecureForbidden(n Node) bool {
 	return n.Reality == nil && n.TLS != nil && n.TLS.Enabled && n.TLS.Insecure && len(normPins(n.TLS.PinSHA256)) == 0
 }
 
-// checkXrayRaw проверяет родной outbound Xray на ключи, которые Xray 26.x
-// отвергает. Raw не правится: родное ядро получает оригинал или ничего, иначе
-// xray run -test откатит всё применение.
+// xrayPinsValid повторяет разбор tlsSettings.pinnedPeerCertSha256 в Xray 26.x:
+// значение обязано быть строкой; она делится по запятой, части обрезаются,
+// пустые пропускаются, двоеточия удаляются, остаток — hex ровно из 32 байт.
+// Любое другое значение (массив, число, другая длина, не hex) Xray отвергает
+// вместе со всем файлом. Двоеточия и верхний регистр он принимает.
+func xrayPinsValid(v any) bool {
+	s, ok := v.(string)
+	if !ok {
+		return false
+	}
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		b, err := hex.DecodeString(strings.ReplaceAll(part, ":", ""))
+		if err != nil || len(b) != 32 {
+			return false
+		}
+	}
+	return true
+}
+
+// checkXrayRaw проверяет родной outbound Xray на ключи и формы, которые Xray
+// 26.x отвергает. Raw — оригинал с правками, обязательными для роутера
+// (noKernelTun, без sendThrough и sockopt.interface; их вносит разбор); здесь
+// только запреты Xray 26.x. Нарушение исключает узел из файла Xray с кодом
+// причины, остальные узлы применяются: иначе xray run -test откатит всё.
 func checkXrayRaw(raw map[string]any) *SourceError {
 	if _, ok := raw["transport"]; ok {
 		return NewError(CodeXrayForbiddenKey, "key", "transport")
@@ -306,6 +331,9 @@ func checkXrayRaw(raw map[string]any) *SourceError {
 		}
 		if fp, _ := tls["fingerprint"].(string); fp != "" && !validXrayFingerprint(fp, false) {
 			return NewError(CodeXrayForbiddenKey, "key", "tlsSettings.fingerprint")
+		}
+		if pins, ok := tls["pinnedPeerCertSha256"]; ok && !xrayPinsValid(pins) {
+			return NewError(CodeXrayForbiddenKey, "key", "tlsSettings.pinnedPeerCertSha256")
 		}
 	}
 	if rs, ok := ss["realitySettings"].(map[string]any); ok {
