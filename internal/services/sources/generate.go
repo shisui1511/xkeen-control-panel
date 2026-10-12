@@ -449,14 +449,27 @@ func nameExcluded(n nodes.Node, subs []string) bool {
 // subscriptionNodes присваивает узлам снимка ключи: полные дубли схлопываются,
 // порядок — по ключу. Тег Xray — от ключа, поэтому не меняется при переименовании
 // узла у провайдера (Pitfall 4).
+//
+// Тег — 32 бита хэша ключа: совпадение у двух разных узлов дало бы повторяющийся
+// тег outbound, и xray -test отверг бы весь файл. Совпавший тег получает суффикс
+// «-2», «-3» в порядке ключей, поэтому остаётся стабильным при том же наборе.
 func (s *Service) subscriptionNodes(id string, list []nodes.Node) []keyedNode {
 	uniq, _ := nodes.Uniq(id, list)
 	out := make([]keyedNode, 0, len(uniq))
+	used := make(map[string]bool, len(uniq))
 	for _, k := range uniq {
+		tag := nodes.XrayTag(id, k.Key)
+		if used[tag] {
+			base := tag
+			for i := 2; used[tag]; i++ {
+				tag = base + "-" + strconv.Itoa(i)
+			}
+		}
+		used[tag] = true
 		out = append(out, keyedNode{
 			name: displayName(k.Node),
 			key:  k.Key,
-			tag:  nodes.XrayTag(id, k.Key),
+			tag:  tag,
 			node: k.Node,
 		})
 	}
