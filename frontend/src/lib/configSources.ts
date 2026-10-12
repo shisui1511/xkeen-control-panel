@@ -130,6 +130,8 @@ export interface StatusView {
   retry_at?: string;
   /** Автоматического повтора не будет: обновление подписки выключено. */
   retry_off?: boolean;
+  /** Планировщик подписку не обновляет, пока её нет в применённом состоянии: повтор после «Применить». */
+  retry_after_apply?: boolean;
   attempts?: number;
   params?: Record<string, string>;
 }

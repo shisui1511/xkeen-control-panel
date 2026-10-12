@@ -2819,6 +2819,7 @@
   "cfg.nodes.status.deferred": "Update pending: panel files were changed by hand",
   "cfg.nodes.status.network": "The provider is unreachable · retrying in {in}",
   "cfg.nodes.status.network_no_retry": "The provider is unreachable · automatic refresh is off",
+  "cfg.nodes.status.network_after_apply": "The provider is unreachable · retry after “Apply”",
   "cfg.nodes.status.stopped": "Will take effect when the kernel starts",
   "cfg.nodes.status.disabled": "Disabled",
   "cfg.nodes.status.not_installed": "Kernel is not installed",

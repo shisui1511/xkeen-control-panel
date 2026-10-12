@@ -546,42 +546,76 @@ func TestRouterDiagnosticsView(t *testing.T) {
 	}
 }
 
-// Подписка с выключенным обновлением после сетевого отказа: повтора не будет, и
-// представление, и уведомление не обещают срок.
-func TestRouterViewNetworkNoRetryWhenIntervalOff(t *testing.T) {
+// Срок повтора после сетевого отказа в карточке считается так же, как у планировщика:
+// по применённой конфигурации и только для применённой подписки. Выключенное
+// обновление — повтора нет; правка интервала в черновике срок не меняет до «Применить»;
+// подписка только в черновике повтора не обещает до «Применить».
+func TestRouterViewNetworkRetryFollowsScheduler(t *testing.T) {
 	e := rtViewEnv(t, "xray", kernelXray)
-	const id = "a1b2c3d4"
-	raw, err := json.Marshal(SubscriptionConfig{
-		Kind: KindSubscription, ID: id, Name: "Провайдер", URL: rtViewSubURL, Enabled: true,
-		Exclude: []string{}, Interval: Interval{Mode: IntervalOff}, AddedAt: e.clock.Now(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rtAddSub(t, e, raw, id, false, map[string]*Ref{kernelXray: rtPut(t, e, "vless_ws")})
-	if err := e.layer.UpdateLive(func(l configlayer.Sections) error {
+	const id, draftOnly = "a1b2c3d4", "b1b2c3d4"
+	netFail := func(l configlayer.Sections, sid string) error {
 		cur, err := readLive(l)
 		if err != nil {
 			return err
 		}
-		kl := cur[id].kernelLive(kernelXray)
+		kl := cur[sid].kernelLive(kernelXray)
 		kl.Status = Status{Code: StatusNetwork, ErrorCode: nodes.CodeDNSFailed, Since: e.clock.Now(), RetryAt: e.clock.Now().Add(5 * time.Minute), Attempts: 1}
 		return writeLive(l, cur)
-	}); err != nil {
-		t.Fatal(err)
 	}
 
-	st := rtFindSource(t, rtView(t, e), id).Kernels[kernelXray].Status
-	if st.Code != StatusNetwork || st.RetryAt != nil || !st.RetryOff {
+	rtSeedApplied(t, e, id, rtViewSubURL, Interval{Mode: IntervalOff}, true, &LiveSource{
+		Kernels: map[string]*KernelLive{kernelXray: rtAppliedRef(e, rtPut(t, e, "vless_ws"))},
+	})
+	if err := e.layer.UpdateLive(func(l configlayer.Sections) error { return netFail(l, id) }); err != nil {
+		t.Fatal(err)
+	}
+	status := func(sid string) StatusView {
+		t.Helper()
+		return rtFindSource(t, rtView(t, e), sid).Kernels[kernelXray].Status
+	}
+	noticeOf := func(sid string) (configlayer.NoticeView, bool) {
+		e.svc.rebuildNotices()
+		n, ok := rtNoticeIDs(e)["source_network:"+sid+":xray"]
+		return n, ok
+	}
+
+	// Применённая подписка с выключенным обновлением: повтора не будет.
+	if st := status(id); st.Code != StatusNetwork || st.RetryAt != nil || !st.RetryOff || st.RetryAfterApply {
 		t.Errorf("статус при выключенном обновлении: %+v", st)
 	}
-	e.svc.rebuildNotices()
-	n, ok := rtNoticeIDs(e)["source_network:"+id+":xray"]
+	n, ok := noticeOf(id)
 	if !ok {
 		t.Fatal("нет уведомления о сети")
 	}
 	if n.Params["no_retry"] != "1" || n.Params["retry_at"] != "" {
 		t.Errorf("уведомление обещает повтор: %+v", n.Params)
+	}
+
+	// Интервал включён только в черновике: планировщик и уведомление живут по
+	// применённому («выкл.»), карточка не расходится с ними.
+	hours := Interval{Mode: IntervalHours, Hours: 6}
+	if _, err := e.svc.Update(e.rev(t), id, Patch{Interval: &hours}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if st := status(id); st.RetryAt != nil || !st.RetryOff {
+		t.Errorf("карточка по черновику, а не по применённой конфигурации: %+v", st)
+	}
+	if n, _ := noticeOf(id); n.Params["no_retry"] != "1" {
+		t.Errorf("уведомление: %+v", n.Params)
+	}
+
+	// Подписка только в черновике: планировщик её не обновляет, срок не обещается,
+	// уведомления нет.
+	rtAddSub(t, e, rtSubAt(t, draftOnly, "Новая", rtViewSubURL+"-2", e.clock.Now()), draftOnly, false,
+		map[string]*Ref{kernelXray: rtPut(t, e, "vless_ws")})
+	if err := e.layer.UpdateLive(func(l configlayer.Sections) error { return netFail(l, draftOnly) }); err != nil {
+		t.Fatal(err)
+	}
+	if st := status(draftOnly); st.Code != StatusNetwork || st.RetryAt != nil || st.RetryOff || !st.RetryAfterApply {
+		t.Errorf("статус подписки только в черновике: %+v", st)
+	}
+	if _, ok := noticeOf(draftOnly); ok {
+		t.Error("уведомление о сети у подписки только в черновике")
 	}
 }
 

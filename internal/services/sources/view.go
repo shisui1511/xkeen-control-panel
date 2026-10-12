@@ -99,9 +99,13 @@ type StatusView struct {
 	RetryAt   *time.Time `json:"retry_at,omitempty"`
 	// RetryOff — автоматического повтора не будет: обновление подписки выключено,
 	// «Обновить» остаётся единственным способом.
-	RetryOff bool              `json:"retry_off,omitempty"`
-	Attempts int               `json:"attempts,omitempty"`
-	Params   map[string]string `json:"params,omitempty"`
+	RetryOff bool `json:"retry_off,omitempty"`
+	// RetryAfterApply — планировщик эту подписку не обновляет, пока её нет в
+	// применённом состоянии (добавлена или включена только в черновике): повтор
+	// начнётся после «Применить».
+	RetryAfterApply bool              `json:"retry_after_apply,omitempty"`
+	Attempts        int               `json:"attempts,omitempty"`
+	Params          map[string]string `json:"params,omitempty"`
 }
 
 // KernelStateView — состояние источника по одному установленному ядру.
@@ -240,7 +244,10 @@ func (s *Service) View() (SourcesView, error) {
 	// identNames — идентичность узла → имена подписок, где он есть (для dup_in).
 	identNames := map[string][]string{}
 	for _, it := range subs {
-		sv := s.subViewOf(it.id, it.cfg, st.Draft[sectionName(it.id)], st.Applied, live[it.id], installed, caps)
+		// Срок повтора считается так же, как у планировщика: по применённой
+		// конфигурации и только для применённой включённой подписки.
+		sched := schedulerOf(st, it.id)
+		sv := s.subViewOf(it.id, it.cfg, sched, st.Draft[sectionName(it.id)], st.Applied, live[it.id], installed, caps)
 		view.Sources = append(view.Sources, sv.view)
 		for ident := range sv.idents {
 			identNames[ident] = append(identNames[ident], sv.view.Name)
@@ -311,7 +318,7 @@ func displayRef(kl *KernelLive) *Ref {
 // subViewOf строит представление одной подписки: наборы по установленным
 // ядрам объединяются по ключу узла, у каждого узла — вхождение в наборы и
 // вердикты по обоим ядрам.
-func (s *Service) subViewOf(id string, cfg SubscriptionConfig, draft json.RawMessage, applied configlayer.Sections, src *LiveSource, installed configlayer.InstalledKernels, caps nodes.Caps) subView {
+func (s *Service) subViewOf(id string, cfg SubscriptionConfig, sched schedule, draft json.RawMessage, applied configlayer.Sections, src *LiveSource, installed configlayer.InstalledKernels, caps nodes.Caps) subView {
 	v := SourceView{
 		ID:         id,
 		Kind:       KindSubscription,
@@ -444,7 +451,7 @@ func (s *Service) subViewOf(id string, cfg SubscriptionConfig, draft json.RawMes
 		}
 		ks := kernelStateOf(kl, s.d.Running(kernel))
 		if ks.Status.Code == StatusNetwork {
-			s.planRetry(&ks.Status, cfg, src)
+			s.planRetry(&ks.Status, sched, src)
 		}
 		for _, k := range sets[kernel] {
 			n, ok := representative(k, kepts[kernel])
@@ -536,12 +543,33 @@ func sortNodeViews(list []NodeView) {
 	})
 }
 
+// schedule — конфигурация подписки глазами планировщика: применённая секция, а
+// не черновик. active — планировщик подписку обновляет (она применена и включена
+// там); иначе повтора не будет до «Применить».
+type schedule struct {
+	cfg    SubscriptionConfig
+	active bool
+}
+
+// schedulerOf находит конфигурацию подписки, по которой работают планировщик и
+// уведомления (subscriptionConfig): применённое состояние важнее черновика.
+func schedulerOf(st configlayer.StateView, id string) schedule {
+	cfg, inApplied, err := subscriptionConfig(st, id)
+	return schedule{cfg: cfg, active: err == nil && inApplied}
+}
+
 // planRetry приводит срок повтора в статусе к тому, что сделает планировщик
 // (nextDue). Срок по номеру попытки остаётся, если он есть. Но при выключенном
 // обновлении повтора не будет совсем, а у отказа без срока (tls_error, ssrf_blocked,
-// исчерпанные попытки) следующий запрос идёт через обычный интервал.
-func (s *Service) planRetry(st *StatusView, cfg SubscriptionConfig, src *LiveSource) {
-	due, ok := s.nextDue(cfg, src)
+// исчерпанные попытки) следующий запрос идёт через обычный интервал. Подписку, которую
+// планировщик не обновляет (её нет в применённом состоянии), срок не обещается:
+// повтор начнётся после «Применить».
+func (s *Service) planRetry(st *StatusView, sched schedule, src *LiveSource) {
+	if !sched.active {
+		st.RetryAt, st.RetryAfterApply = nil, true
+		return
+	}
+	due, ok := s.nextDue(sched.cfg, src)
 	switch {
 	case !ok:
 		st.RetryAt, st.RetryOff = nil, true

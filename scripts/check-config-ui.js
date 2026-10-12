@@ -583,6 +583,7 @@ const STATUS_VARIANT = {
   provider_error: "warning",
   network: "warning",
   network_no_retry: "warning",
+  network_after_apply: "warning",
   draft: "info",
   stopped: "idle",
   ready: "running",

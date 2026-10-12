@@ -131,7 +131,7 @@ func TestRouterGenerateExcludeFilter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return e.svc.subViewOf(id, cfg, nil, nil, ls[id], rtBoth, e.svc.caps(rtBoth)).view
+		return e.svc.subViewOf(id, cfg, schedule{}, nil, nil, ls[id], rtBoth, e.svc.caps(rtBoth)).view
 	}
 	v := viewOf([]string{"de-"})
 	names := map[string]bool{}

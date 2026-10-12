@@ -2819,6 +2819,7 @@
   "cfg.nodes.status.deferred": "Обновление ждёт: есть изменённые файлы панели",
   "cfg.nodes.status.network": "Нет связи с провайдером · повтор через {in}",
   "cfg.nodes.status.network_no_retry": "Нет связи с провайдером · автообновление выключено",
+  "cfg.nodes.status.network_after_apply": "Нет связи с провайдером · повтор после «Применить»",
   "cfg.nodes.status.stopped": "Вступит в силу при запуске ядра",
   "cfg.nodes.status.disabled": "Выключен",
   "cfg.nodes.status.not_installed": "Ядро не установлено",
