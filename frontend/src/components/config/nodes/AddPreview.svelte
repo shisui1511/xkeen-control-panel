@@ -99,11 +99,14 @@
       <div class="alert alert-warning pv-alert" data-testid="nodes-preview-line-error">
         <Icon name="warning" size={16} class="pv-alert-icon" />
         <div class="pv-err-text">
-          <span class="pv-line-ref">
-            {le.file
-              ? $t('cfg.nodes.line_ref_file', { file: le.file, line: le.line })
-              : $t('cfg.nodes.line_ref', { line: le.line })}
-          </span>
+          <!-- Ошибка всего ввода (too_large) приходит без строки: «Строка 0» не выводится -->
+          {#if le.line > 0}
+            <span class="pv-line-ref">
+              {le.file
+                ? $t('cfg.nodes.line_ref_file', { file: le.file, line: le.line })
+                : $t('cfg.nodes.line_ref', { line: le.line })}
+            </span>
+          {/if}
           {#if le.fragment}
             <code class="pv-fragment">{truncateFragment(le.fragment)}</code>
           {/if}
