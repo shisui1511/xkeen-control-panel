@@ -286,6 +286,21 @@ func (p *Panel) Call(method, path string, in any) (int, []byte, error) {
 	return p.Request(method, path, body, AuthFull)
 }
 
+// SlowCallTimeout — предел ожидания ответа для CallSlow.
+const SlowCallTimeout = 6 * time.Minute
+
+// CallSlow — как Call, но с пределом ожидания SlowCallTimeout вместо минуты: для
+// запросов, которые панель выполняет синхронно вместе с перезапуском ядра
+// (выключение слоя «Конфигурация»: на медленном устройстве перезапуск и ожидание
+// API Mihomo дольше минуты).
+func (p *Panel) CallSlow(method, path string, in any) (int, []byte, error) {
+	slow := *p
+	c := *p.client
+	c.Timeout = SlowCallTimeout
+	slow.client = &c
+	return slow.Call(method, path, in)
+}
+
 // ContractFile — путь к файлу контракта ключей ответов API источников
 // (frontend/src/lib/sourcesContract.json), скопированному на устройство.
 func ContractFile(t testing.TB) string {

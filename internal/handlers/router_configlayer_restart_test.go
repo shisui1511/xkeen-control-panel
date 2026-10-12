@@ -273,6 +273,22 @@ func TestRouterConfigApplyRestartsRunningKernel(t *testing.T) {
 	root := rtNewSrc(t)
 	var layerPath string // путь файла слоя «Моих узлов» текущего ядра
 
+	// Провал посреди сценария не оставляет узел в применённом состоянии: следующие
+	// проверки работают с тем же стендом. Выполняется до возврата флага слоя.
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		root.setLayer(true)
+		root.rtRstIdle()
+		if id := root.rtRstMyEntry(); id != "" {
+			root.rtRstDeleteMyNode(id)
+			before := root.rtRstStartApply()
+			root.rtRstWaitApply(before)
+			root.rtRstIdle()
+		}
+	})
+
 	t.Run("подготовка", func(t *testing.T) {
 		e := root.with(t)
 		e.setLayer(true)
@@ -344,7 +360,7 @@ func TestRouterConfigApplyRestartsRunningKernel(t *testing.T) {
 	t.Run("выключение флага", func(t *testing.T) {
 		e := root.with(t)
 		pidBefore := rtRstKernelPID(t, kernel)
-		r := e.call(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": false})
+		r := e.callSlow(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": false})
 		if r.Status != http.StatusOK {
 			t.Fatalf("выключение слоя: %d %s %s", r.Status, r.Code, r.Detail)
 		}

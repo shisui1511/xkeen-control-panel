@@ -78,6 +78,17 @@ func (e *rtSrc) call(method, path string, in any) rtSrcResp {
 	return e.decode(status, raw)
 }
 
+// callSlow — как call, но с увеличенным пределом ожидания ответа (запрос идёт
+// вместе с перезапуском ядра на панели).
+func (e *rtSrc) callSlow(method, path string, in any) rtSrcResp {
+	e.t.Helper()
+	status, raw, err := e.p.CallSlow(method, path, in)
+	if err != nil {
+		e.t.Fatalf("%s %s: %v", method, path, err)
+	}
+	return e.decode(status, raw)
+}
+
 func (e *rtSrc) layerFlag() bool {
 	e.t.Helper()
 	r := e.call(http.MethodGet, "/api/settings", nil)
@@ -97,7 +108,8 @@ func (e *rtSrc) setLayer(on bool) {
 	// 409 apply_busy (на arm64 сборка не успевает закончиться к очистке теста).
 	deadline := time.Now().Add(90 * time.Second)
 	for {
-		r := e.call(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": on})
+		// Выключение слоя с файлами перезапускает ядра внутри запроса.
+		r := e.callSlow(http.MethodPost, "/api/settings/config-layer", map[string]bool{"enabled": on})
 		if r.Status == http.StatusOK {
 			return
 		}
