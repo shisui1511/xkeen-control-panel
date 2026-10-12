@@ -321,6 +321,11 @@ func TestRouterManageUpdate(t *testing.T) {
 	if kl := live[id].Kernels[kernelXray]; kl == nil || kl.Pending != nil {
 		t.Errorf("ожидающий снимок после смены URL: %+v", kl)
 	}
+	// Метаданные прежнего адреса (в том числе «без HWID») сняты: срок обновления
+	// наступил, новый адрес запрашивается на ближайшем тике.
+	if live[id].Meta != (Meta{}) {
+		t.Errorf("метаданные после смены URL: %+v", live[id].Meta)
+	}
 
 	// Проверка значений.
 	long := strings.Repeat("я", 129)

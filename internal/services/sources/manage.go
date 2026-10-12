@@ -167,9 +167,10 @@ func cleanURL(raw string) (string, error) {
 
 // Update правит настройки источника в черновике с проверкой ревизии: устаревшая
 // ревизия — configlayer.ErrDraftConflict без записи. Значения проверяются по
-// пределам; неизвестный источник — ErrSourceNotFound. Смена URL сохраняет
-// идентификатор источника и снимает ожидающий снимок: набор из прежнего адреса
-// к новому не относится, новый ответ придёт при следующем обновлении.
+// пределам; неизвестный источник — ErrSourceNotFound. Смена URL или HWID
+// сохраняет идентификатор источника, снимает ожидающий снимок и метаданные:
+// набор и признаки прежнего адреса к новой настройке не относятся, новый ответ
+// придёт при следующем обновлении.
 func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent, error) {
 	if p.empty() {
 		return configlayer.DraftEvent{}, invalid("нечего менять")
@@ -190,7 +191,9 @@ func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent,
 	}
 
 	var section json.RawMessage
-	urlChanged := false
+	// sourceChanged — изменился адрес или HWID: ответ прежнего адреса или прежнего
+	// HWID к новой настройке не относится.
+	sourceChanged := false
 	if id == MySourceID {
 		cfg, err := parseMy(raw)
 		if err != nil {
@@ -228,16 +231,23 @@ func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent,
 			}
 		}
 		if p.HWID != nil {
-			if cfg.HWID, err = cleanHWID(*p.HWID); err != nil {
+			hwid, err := cleanHWID(*p.HWID)
+			if err != nil {
 				return configlayer.DraftEvent{}, err
 			}
+			if hwid != cfg.HWID {
+				sourceChanged = true
+			}
+			cfg.HWID = hwid
 		}
 		if p.URL != nil {
 			u, err := cleanURL(*p.URL)
 			if err != nil {
 				return configlayer.DraftEvent{}, err
 			}
-			urlChanged = u != cfg.URL
+			if u != cfg.URL {
+				sourceChanged = true
+			}
 			cfg.URL = u
 		}
 		if cfg.Exclude == nil {
@@ -249,7 +259,7 @@ func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent,
 	}
 
 	var liveFn func(configlayer.Sections) error
-	if urlChanged {
+	if sourceChanged {
 		liveFn = func(l configlayer.Sections) error {
 			cur, err := readLive(l)
 			if err != nil {
@@ -259,6 +269,11 @@ func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent,
 				for _, kl := range src.Kernels {
 					kl.Pending = nil
 				}
+				// Метаданные прежнего провайдера (трафик, срок, ссылки кабинета,
+				// признак «без HWID») к новому адресу или HWID не относятся; пустые
+				// метаданные делают срок обновления наступившим: новый адрес
+				// запрашивается на ближайшем тике, а не через прежний интервал.
+				src.Meta = Meta{}
 			}
 			return writeLive(l, cur)
 		}
