@@ -622,6 +622,9 @@ func kernelStateOf(kl *KernelLive, running bool) KernelStateView {
 
 // metaView переводит метаданные провайдера в представление; пустые — nil.
 func metaView(m Meta) *MetaView {
+	if m == (Meta{}) {
+		return nil
+	}
 	mv := &MetaView{
 		Title: m.Title, Upload: m.Upload, Download: m.Download, Total: m.Total, Expire: m.Expire,
 		IntervalH: m.IntervalH, SupportURL: m.SupportURL, WebURL: m.WebURL, Announce: m.Announce,
