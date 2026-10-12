@@ -342,9 +342,15 @@ func (s *Service) subViewOf(id string, cfg SubscriptionConfig, sched schedule, d
 	if src != nil {
 		v.Meta = metaView(meta)
 	}
+	// Имя по умолчанию — название провайдера из применённой конфигурации, как в
+	// уведомлениях: пока правка адреса или HWID не применена, ядро живёт по прежней.
+	titleMeta := meta
+	if sched.active {
+		titleMeta = metaFor(sched.cfg, src)
+	}
 	v.Name = cfg.Name
 	if v.Name == "" {
-		v.Name = meta.Title
+		v.Name = titleMeta.Title
 	}
 	if v.Name == "" {
 		v.Name = v.Host
