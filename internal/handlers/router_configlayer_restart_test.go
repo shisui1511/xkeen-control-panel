@@ -47,11 +47,30 @@ func rtRstKernelPIDs(name string) (pids []int, out string) {
 		return nil, out
 	}
 	for _, f := range strings.Fields(stdout) {
-		if n, err := strconv.Atoi(f); err == nil && n > 0 {
+		if n, err := strconv.Atoi(f); err == nil && n > 0 && !rtRstHelperProcess(n) {
 			pids = append(pids, n)
 		}
 	}
 	return pids, out
+}
+
+// rtRstHelperProcess — короткоживущий вспомогательный запуск бинарника ядра, а не само
+// ядро: проверка конфигурации («-test»/«-t») и запрос версии, которые панель и XKeen
+// запускают рядом с перезапуском. Различается по аргументам из /proc/<pid>/cmdline;
+// процесс, исчезнувший к моменту чтения, тоже не считается ядром.
+func rtRstHelperProcess(pid int) bool {
+	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+	if err != nil {
+		return true
+	}
+	args := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
+	for _, a := range args[1:] {
+		switch a {
+		case "-test", "--test", "-t", "version", "-v", "-V", "--version":
+			return true
+		}
+	}
+	return false
 }
 
 // rtRstKernelPID — PID работающего ядра; не ровно один процесс — провал.
