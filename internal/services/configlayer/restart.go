@@ -263,7 +263,15 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 		p.setStep(StepRestart, StepRunning, NoteHotReloadFailed, "")
 		outcome = RestartOutcomeRestartedReload
 	}
-	err := p.restartAndConfirm(ctx, kernel)
+	applied, err := p.restartAndConfirm(ctx, kernel)
+	if err == nil && applied != services.ApplyRestarted {
+		// Applier по свежему статусу решил не перезапускать (ядро остановили между
+		// Preview и ApplyLocked): это не отказ ядра, откатывать файлы незачем.
+		if v, ok := untouchedView(kernel, applied); ok {
+			return v, nil
+		}
+		err = fmt.Errorf("перезапуск не выполнен: %s", applied)
+	}
 	if err == nil && kernel == KernelMihomo {
 		err = p.confirmMihomoAfterRestart(ctx, plan)
 	}
@@ -407,10 +415,13 @@ func (p *Pipeline) rollbackAndRestart(ctx context.Context, kernel string, set *B
 // recoverKernel поднимает ядро на прежних файлах после отката. Ядро, которое мы
 // только что уронили, остановлено не пользователем, поэтому, если applier умеет,
 // запускается принудительный рестарт (ApplyLocked не запускает остановленное).
+// Подтверждение то же, что после обычного перезапуска: PID, который был до
+// рестарта, не засчитывается (confirmRestarted).
 func (p *Pipeline) recoverKernel(ctx context.Context, kernel string) error {
 	if err := interrupted(ctx); err != nil {
 		return err
 	}
+	oldPID := p.runningPID(kernel)
 	var res services.ApplyResult
 	if r, ok := p.d.Applier.(kernelRestarter); ok {
 		res = r.RestartLocked(kernel)
@@ -424,23 +435,28 @@ func (p *Pipeline) recoverKernel(ctx context.Context, kernel string) error {
 	default:
 		return fmt.Errorf("ядро не запущено: %s", res.Outcome)
 	}
-	return p.confirmRunning(ctx, kernel, 0)
+	return p.confirmRestarted(ctx, kernel, oldPID)
 }
 
 // restartAndConfirm перезапускает ядро через ApplyLocked и подтверждает успех по
 // процессу ядра: код выхода xkeen -restart всегда 0 и о запуске ничего не говорит.
-func (p *Pipeline) restartAndConfirm(ctx context.Context, kernel string) error {
+// Возвращает исход ApplyLocked: подтверждение процесса (со сменой PID) идёт только
+// после ApplyRestarted, то есть когда xkeen -restart действительно выполнялся. Любой
+// другой исход без ошибки (ядро остановлено, неактивно, конфликт) значит «ядро не
+// трогали» — решает вызывающий. PID до рестарта берётся до ApplyLocked.
+func (p *Pipeline) restartAndConfirm(ctx context.Context, kernel string) (services.ApplyOutcome, error) {
 	if err := interrupted(ctx); err != nil {
-		return err
+		return "", err
 	}
+	oldPID := p.runningPID(kernel)
 	res := p.d.Applier.ApplyLocked(kernel)
 	if res.Outcome == services.ApplyRestartFailed {
-		return errors.New(res.Error)
+		return res.Outcome, errors.New(res.Error)
 	}
 	if res.Outcome != services.ApplyRestarted {
-		return fmt.Errorf("перезапуск не выполнен: %s", res.Outcome)
+		return res.Outcome, nil
 	}
-	return p.confirmRunning(ctx, kernel, 0)
+	return res.Outcome, p.confirmRestarted(ctx, kernel, oldPID)
 }
 
 // processState — текущее состояние процесса ядра.
@@ -456,10 +472,20 @@ func (p *Pipeline) processState(kernel string) (services.KernelProcessState, boo
 	return services.KernelProcessState{}, false
 }
 
-// confirmRunning опрашивает процесс ядра каждые RestartPollInterval до статуса
+// runningPID — PID работающего процесса ядра сейчас, 0 — ядро не запущено.
+func (p *Pipeline) runningPID(kernel string) int {
+	if st, ok := p.processState(kernel); ok && st.Status == "running" && st.PID > 0 {
+		return st.PID
+	}
+	return 0
+}
+
+// confirmRunning (строгий режим) опрашивает процесс ядра каждые RestartPollInterval до статуса
 // running (не дольше RestartConfirmTimeout), затем ядро обязано оставаться
 // running с тем же PID всё окно RestartStableWindow. wantPID > 0 требует именно
-// этот PID (горячая перезагрузка: процесс обязан остаться прежним).
+// этот PID (горячая перезагрузка: процесс обязан остаться прежним). Только для
+// горячей перезагрузки: после xkeen -restart процесс обязан смениться, и там
+// работает confirmRestarted.
 func (p *Pipeline) confirmRunning(ctx context.Context, kernel string, wantPID int) error {
 	if p.d.ProcessStates == nil {
 		return errors.New("нет источника состояния процессов ядер")
@@ -487,6 +513,67 @@ func (p *Pipeline) confirmRunning(ctx context.Context, kernel string, wantPID in
 		}
 		if running && now.Sub(stableSince) >= RestartStableWindow {
 			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+		}
+	}
+}
+
+// confirmRestarted подтверждает перезапуск ядра по процессу после xkeen -restart.
+// xkeen -restart возвращается раньше, чем завершается старый процесс, а при старте
+// ядра init-скрипт запускает и гасит вспомогательные экземпляры (проверки конфигурации,
+// первый экземпляр до устойчивого), поэтому:
+//   - процесс с PID oldPID (до рестарта) не засчитывается как запущенный;
+//   - пропажа или смена PID внутри окна устойчивости не ошибка, а начало окна
+//     заново: допустимо, пока не истёк общий срок RestartConfirmTimeout;
+//   - успех — процесс держится с одним PID не меньше RestartStableWindow.
+//
+// Окно, начатое до истечения срока, доводится до конца (не дольше RestartStableWindow
+// сверх срока). Ядро, которое так и не поднялось устойчиво, даёт ошибку.
+func (p *Pipeline) confirmRestarted(ctx context.Context, kernel string, oldPID int) error {
+	if p.d.ProcessStates == nil {
+		return errors.New("нет источника состояния процессов ядер")
+	}
+	deadline := time.Now().Add(RestartConfirmTimeout)
+	var stableSince time.Time
+	var pid, lastPID, resets int
+	onlyOld := false
+	tick := time.NewTicker(RestartPollInterval)
+	defer tick.Stop()
+	for {
+		st, ok := p.processState(kernel)
+		now := time.Now()
+		running := ok && st.Status == "running" && st.PID > 0
+		onlyOld = false
+		if running && oldPID > 0 && st.PID == oldPID {
+			// Прежний процесс ещё не завершился: перезапуск им не подтверждается.
+			running, onlyOld = false, true
+		}
+		switch {
+		case running && stableSince.IsZero():
+			stableSince, pid = now, st.PID
+		case running && st.PID != pid:
+			resets, lastPID = resets+1, pid
+			stableSince, pid = now, st.PID
+		case !running && !stableSince.IsZero():
+			resets, lastPID = resets+1, pid
+			stableSince = time.Time{}
+		}
+		if !stableSince.IsZero() && now.Sub(stableSince) >= RestartStableWindow {
+			return nil
+		}
+		if stableSince.IsZero() && now.After(deadline) {
+			switch {
+			case onlyOld && resets == 0:
+				return fmt.Errorf("прежний процесс PID %d не завершился за %v", oldPID, RestartConfirmTimeout)
+			case resets > 0:
+				return fmt.Errorf("процесс не поднялся устойчиво за %v: сбросов окна %d, последний PID %d", RestartConfirmTimeout, resets, lastPID)
+			default:
+				return fmt.Errorf("процесс не поднялся за %v", RestartConfirmTimeout)
+			}
 		}
 		select {
 		case <-ctx.Done():
