@@ -590,3 +590,22 @@ func TestRouterParseXrayNativeRouterBindings(t *testing.T) {
 	}
 	rtXrayKernel(t, "xray_router_bindings", rtParseWork(t), rtRedactNodes(wg, vl), obs...)
 }
+
+// Имя пропущенной ссылки vmess и ssr остаётся целым, даже если в нём есть «@»: у них
+// нет userinfo, и «#» всегда начинает настоящий фрагмент. У схем с userinfo «#» в
+// пароле по-прежнему не даёт хвосту пароля попасть в имя.
+func TestRouterParseSkippedLinkNameKeepsAt(t *testing.T) {
+	routertest.Current(t)
+	body := "vmess://%%%bad-base64#Узел a@b\n" +
+		"trojan://pa#Tail1x@node9.invalid:443?sni=a#n2\n"
+	res, err := ParseBody([]byte(body))
+	if err != nil || len(res.Skipped) != 2 {
+		t.Fatalf("ParseBody: пропусков %d, ошибка %v", len(res.Skipped), err)
+	}
+	if got := res.Skipped[0].Name; got != "Узел a@b" {
+		t.Errorf("имя пропущенной ссылки vmess: %q", got)
+	}
+	if got := res.Skipped[1].Name; strings.Contains(got, "Tail1x") {
+		t.Errorf("хвост пароля в имени пропуска: %q", got)
+	}
+}

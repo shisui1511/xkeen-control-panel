@@ -168,9 +168,15 @@ func looksSingbox(v any) bool {
 // skippedLinkName — имя неразобранной ссылки из её фрагмента. Неэкранированный
 // «#» в пароле дал бы «фрагмент» с хвостом пароля и адресом: если до первого «#»
 // нет «@», а после он есть, «#» лежит внутри userinfo, и имя берётся из фрагмента
-// после последнего «@».
+// после последнего «@». У vmess и ssr нет userinfo: их тело — base64 без «#», так
+// что «#» всегда начинает настоящий фрагмент, и «@» в имени узла не режет его.
 func skippedLinkName(line string) string {
 	before, after, found := strings.Cut(line, "#")
+	scheme, _, _ := strings.Cut(before, "://")
+	switch strings.ToLower(scheme) {
+	case "vmess", "ssr":
+		found = false
+	}
 	if found && !strings.Contains(before, "@") && strings.Contains(after, "@") {
 		line = after[strings.LastIndex(after, "@")+1:]
 	}
