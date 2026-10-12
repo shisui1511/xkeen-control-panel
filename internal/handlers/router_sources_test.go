@@ -571,3 +571,90 @@ func TestRouterSourcesSubscriptionFlow(t *testing.T) {
 	}
 	rtNoSecrets(t, "delete", del.Raw, secrets...)
 }
+
+// Загрузка бинарника ядра файлом, как установка из релиза, собирает файлы слоя и
+// запрашивает подписки под это ядро (роутер без доступа к GitHub). Стенд не
+// меняется: загружается тот же бинарник, что уже установлен (замена атомарная, копия
+// прежней версии не плодится: у той же версии она уже есть). Вердикт — диагностика
+// подписки по ядру: время последнего запроса стало новее. Нужна настоящая подписка.
+func TestRouterKernelUploadRequestsSubscriptions(t *testing.T) {
+	subURL := os.Getenv("XCP_RT_SUBSCRIPTION_URL")
+	if subURL == "" {
+		t.Skip("нет XCP_RT_SUBSCRIPTION_URL: настоящая подписка не задана")
+	}
+	kernel, bin := "", ""
+	for _, c := range []struct{ name, path string }{{"xray", "/opt/sbin/xray"}, {"mihomo", "/opt/sbin/mihomo"}} {
+		if st, err := os.Stat(c.path); err == nil && st.Mode().IsRegular() {
+			kernel, bin = c.name, c.path
+			break
+		}
+	}
+	if kernel == "" {
+		t.Skip("на устройстве нет установленного бинарника ядра")
+	}
+
+	e := rtNewSrc(t)
+	e.enableLayer()
+	pv := e.call(http.MethodPost, rtSourcesBase+"/preview", map[string]any{"text": subURL})
+	if pv.Status != http.StatusOK {
+		t.Fatalf("preview: %d %s", pv.Status, pv.Code)
+	}
+	token, _ := pv.object(t)["token"].(string)
+	if add := e.call(http.MethodPost, rtSourcesBase+"/add", map[string]any{"revision": e.revision(), "token": token}); add.Status != http.StatusOK {
+		t.Fatalf("add: %d %s", add.Status, add.Code)
+	}
+	subID := ""
+	for _, s := range e.call(http.MethodGet, rtSourcesBase, nil).object(t)["sources"].([]any) {
+		if src := s.(map[string]any); src["kind"] != "my" {
+			subID, _ = src["id"].(string)
+		}
+	}
+	if subID == "" {
+		t.Fatal("в представлении нет подписки")
+	}
+
+	fetchedAt := func() time.Time {
+		t.Helper()
+		d := e.call(http.MethodGet, rtSourcesBase+"/diagnostics?id="+subID+"&kernel="+kernel, nil)
+		if d.Status != http.StatusOK {
+			t.Fatalf("diagnostics: %d %s", d.Status, d.Code)
+		}
+		at, _ := d.object(t)["fetched_at"].(string)
+		ts, err := time.Parse(time.RFC3339Nano, at)
+		if err != nil {
+			t.Fatalf("diagnostics: нет времени запроса под ядро %s: %q", kernel, at)
+		}
+		return ts
+	}
+	before := fetchedAt()
+
+	// Установка и загрузка делят замок ядра: занят — ждём и повторяем.
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		f, err := os.Open(bin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, raw, err := e.p.Upload("/api/kernels/"+kernel+"/upload", "file", filepath.Base(bin), f)
+		_ = f.Close()
+		if err != nil {
+			t.Fatalf("загрузка ядра: %v", err)
+		}
+		if status == http.StatusOK {
+			break
+		}
+		if status != http.StatusConflict || time.Now().After(deadline) {
+			t.Fatalf("загрузка ядра: %d %s", status, raw)
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	// Запрос под ядро идёт в фоне: ждём, пока время запроса в диагностике сдвинется.
+	deadline = time.Now().Add(2 * time.Minute)
+	for !fetchedAt().After(before) {
+		if time.Now().After(deadline) {
+			t.Fatalf("после загрузки ядра %s подписка не запрошена под него (последний запрос %v)", kernel, before)
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
