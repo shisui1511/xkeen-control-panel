@@ -16,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
@@ -266,44 +265,6 @@ func (p *Panel) Request(method, path string, body []byte, auth PanelAuth) (int, 
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return 0, nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	return resp.StatusCode, raw, err
-}
-
-// Upload отправляет файл multipart-формой (поле field) методом POST с полной
-// сессией. Содержимое читается потоком, а не копируется в память: загрузка бинарника
-// ядра на устройстве с малой памятью. Таймаут длиннее обычного — панель сохраняет
-// копию прежнего бинарника и проверяет версию. Возвращает статус и тело ответа при
-// любом статусе.
-func (p *Panel) Upload(path, field, filename string, content io.Reader) (int, []byte, error) {
-	pr, pw := io.Pipe()
-	mw := multipart.NewWriter(pw)
-	go func() {
-		part, err := mw.CreateFormFile(field, filename)
-		if err == nil {
-			_, err = io.Copy(part, content)
-		}
-		if err == nil {
-			err = mw.Close()
-		}
-		_ = pw.CloseWithError(err)
-	}()
-	req, err := http.NewRequest(http.MethodPost, p.base+path, pr)
-	if err != nil {
-		_ = pr.Close()
-		return 0, nil, err
-	}
-	req.Header.Set("Cookie", p.cookie)
-	req.Header.Set("X-CSRF-Token", p.csrf)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	cl := *p.client
-	cl.Timeout = 5 * time.Minute
-	resp, err := cl.Do(req)
-	if err != nil {
-		_ = pr.Close()
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
