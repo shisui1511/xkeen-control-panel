@@ -617,6 +617,14 @@ func TestRouterViewNetworkRetryFollowsScheduler(t *testing.T) {
 	if _, ok := noticeOf(draftOnly); ok {
 		t.Error("уведомление о сети у подписки только в черновике")
 	}
+	// Обновление выключено в черновике: после «Применить» повтора тоже не будет.
+	off := Interval{Mode: IntervalOff}
+	if _, err := e.svc.Update(e.rev(t), draftOnly, Patch{Interval: &off}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if st := status(draftOnly); st.RetryAt != nil || !st.RetryOff || st.RetryAfterApply {
+		t.Errorf("подпись «повтор после Применить» при выключенном обновлении: %+v", st)
+	}
 }
 
 // Пропуски в карточке не складываются по ядрам: ответы под оба ядра несут одни и те

@@ -451,7 +451,7 @@ func (s *Service) subViewOf(id string, cfg SubscriptionConfig, sched schedule, d
 		}
 		ks := kernelStateOf(kl, s.d.Running(kernel))
 		if ks.Status.Code == StatusNetwork {
-			s.planRetry(&ks.Status, sched, src)
+			s.planRetry(&ks.Status, cfg, sched, src)
 		}
 		for _, k := range sets[kernel] {
 			n, ok := representative(k, kepts[kernel])
@@ -563,10 +563,15 @@ func schedulerOf(st configlayer.StateView, id string) schedule {
 // обновлении повтора не будет совсем, а у отказа без срока (tls_error, ssrf_blocked,
 // исчерпанные попытки) следующий запрос идёт через обычный интервал. Подписку, которую
 // планировщик не обновляет (её нет в применённом состоянии), срок не обещается:
-// повтор начнётся после «Применить».
-func (s *Service) planRetry(st *StatusView, sched schedule, src *LiveSource) {
+// повтор начнётся после «Применить», если обновление включено в черновике cfg.
+func (s *Service) planRetry(st *StatusView, cfg SubscriptionConfig, sched schedule, src *LiveSource) {
 	if !sched.active {
-		st.RetryAt, st.RetryAfterApply = nil, true
+		st.RetryAt = nil
+		if _, on := intervalOf(cfg, Meta{}); on {
+			st.RetryAfterApply = true
+		} else {
+			st.RetryOff = true
+		}
 		return
 	}
 	due, ok := s.nextDue(sched.cfg, src)
