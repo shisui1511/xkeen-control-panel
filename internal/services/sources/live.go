@@ -3,6 +3,7 @@ package sources
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
@@ -15,6 +16,9 @@ const (
 	// LiveKeyCandidates — кандидаты фонового обновления: id → ядро → снимок.
 	// Живут только в оверлее одного запуска конвейера, в состоянии не сохраняются.
 	LiveKeyCandidates = "candidates"
+	// LiveKeyCandidatePrints — отпечатки конфигурации, под которой получены
+	// кандидаты: id → sha256 от адреса подписки и HWID. Живут в том же оверлее.
+	LiveKeyCandidatePrints = "candidate_prints"
 )
 
 // Коды состояния источника по ядру (Status.Code).
@@ -135,8 +139,20 @@ func writeLive(live configlayer.Sections, ls LiveSources) error {
 // Candidates — кандидаты обновления: id источника → ядро → снимок.
 type Candidates map[string]map[string]Ref
 
-// readCandidates разбирает Live["candidates"] (оверлей запуска конвейера).
-func readCandidates(live configlayer.Sections) (Candidates, error) {
+// candidatePrint — отпечаток конфигурации подписки, от которой зависит ответ
+// провайдера: адрес и HWID. Фильтр исключений в него не входит: он действует при
+// сборке из секции и к ответу не относится.
+func candidatePrint(cfg SubscriptionConfig) string {
+	return hash(cfg.URL, cfg.HWID)
+}
+
+// readCandidates разбирает Live["candidates"] (оверлей запуска конвейера) и
+// оставляет только кандидатов, чей отпечаток совпадает с секцией sections, из
+// которой идёт сборка. Пока кандидат ждал конвейер, подписку могли применить с
+// другим адресом или HWID: набор прежнего адреса к ней не относится и не должен
+// ни попасть в файлы, ни стать применённым. Кандидат без отпечатка или без
+// секции отбрасывается так же.
+func readCandidates(live, sections configlayer.Sections) (Candidates, error) {
 	out := Candidates{}
 	raw, ok := live[LiveKeyCandidates]
 	if !ok || len(raw) == 0 {
@@ -146,22 +162,49 @@ func readCandidates(live configlayer.Sections) (Candidates, error) {
 		return Candidates{}, fmt.Errorf("%w: кандидаты источников: %v", ErrInvalidInput, err)
 	}
 	if out == nil {
-		out = Candidates{}
+		return Candidates{}, nil
+	}
+	prints := map[string]string{}
+	if raw := live[LiveKeyCandidatePrints]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &prints); err != nil {
+			return Candidates{}, fmt.Errorf("%w: отпечатки кандидатов: %v", ErrInvalidInput, err)
+		}
+	}
+	for id := range out {
+		if sec, ok := sections[sectionName(id)]; ok && prints[id] != "" {
+			if cfg, err := parseSubscription(sec); err == nil && candidatePrint(cfg) == prints[id] {
+				continue
+			}
+		}
+		log.Printf("[sources] кандидаты источника %s отброшены: конфигурация подписки изменилась", id)
+		delete(out, id)
 	}
 	return out, nil
 }
 
-// writeCandidates записывает Live["candidates"]; пустой набор удаляет ключ.
-func writeCandidates(live configlayer.Sections, c Candidates) error {
+// writeCandidates записывает Live["candidates"] и отпечатки конфигураций cfgs
+// (id → конфигурация, под которой получены кандидаты); пустой набор удаляет оба
+// ключа. Кандидат без конфигурации в cfgs при чтении отбрасывается.
+func writeCandidates(live configlayer.Sections, c Candidates, cfgs map[string]SubscriptionConfig) error {
 	if len(c) == 0 {
 		delete(live, LiveKeyCandidates)
+		delete(live, LiveKeyCandidatePrints)
 		return nil
 	}
 	raw, err := json.Marshal(c)
 	if err != nil {
 		return err
 	}
+	prints := make(map[string]string, len(cfgs))
+	for id, cfg := range cfgs {
+		prints[id] = candidatePrint(cfg)
+	}
+	praw, err := json.Marshal(prints)
+	if err != nil {
+		return err
+	}
 	live[LiveKeyCandidates] = raw
+	live[LiveKeyCandidatePrints] = praw
 	return nil
 }
 

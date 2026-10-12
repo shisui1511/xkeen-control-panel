@@ -139,6 +139,20 @@ func subscriptionConfig(st configlayer.StateView, id string) (cfg SubscriptionCo
 	return cfg, inApplied, nil
 }
 
+// sameSubscription сверяет конфигурацию подписки в st с той, под которой шёл
+// запрос: другой адрес, HWID или место (применена или только в черновике) —
+// ErrSourceChanged; выключенная или удалённая подписка — ошибка subscriptionConfig.
+func sameSubscription(st configlayer.StateView, id string, cfg SubscriptionConfig, inApplied bool) error {
+	cur, curInApplied, err := subscriptionConfig(st, id)
+	if err != nil {
+		return err
+	}
+	if curInApplied != inApplied || cur.URL != cfg.URL || cur.HWID != cfg.HWID {
+		return ErrSourceChanged
+	}
+	return nil
+}
+
 // subscriptionIDs — идентификаторы включённых подписок: применённых, а при
 // appliedOnly=false ещё и тех, что есть только в черновике. Порядок стабильный.
 func subscriptionIDs(st configlayer.StateView, appliedOnly bool) []string {
@@ -275,6 +289,17 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 			}
 		}
 		if len(cands) > 0 {
+			// Пока шёл запрос, подписку могли применить с другим адресом или HWID:
+			// конвейер собрал бы файлы из нового применённого состояния, но с набором
+			// прежнего адреса. Сверка до запуска; окно между ней и замком конвейера
+			// закрывает отпечаток конфигурации у кандидатов (readCandidates).
+			cur, err := s.d.Layer.ReadState()
+			if err != nil {
+				return RefreshOutcome{}, err
+			}
+			if err := sameSubscription(cur, id, cfg, inApplied); err != nil {
+				return RefreshOutcome{}, err
+			}
 			if settled, err = s.settle(ctx, id, cfg, cands); err != nil {
 				return RefreshOutcome{}, err
 			}
@@ -284,16 +309,12 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 	// Итоговая запись живых данных: метаданные, время проверки, статусы по ядрам.
 	// Пока шёл запрос (на MIPS до минуты), подписку могли изменить: адрес, HWID,
 	// выключение или удаление. Тогда ответ относится к прежней конфигурации и
-	// отбрасывается целиком — иначе набор старого адреса стал бы ожидающим под
+	// статусы по нему не пишутся — иначе набор старого адреса стал бы ожидающим под
 	// новым и ушёл бы в «Применить».
 	var delta Delta
 	err = s.d.Layer.UpdateLiveWith(func(view configlayer.StateView) error {
-		curCfg, curInApplied, err := subscriptionConfig(view, id)
-		if err != nil {
+		if err := sameSubscription(view, id, cfg, inApplied); err != nil {
 			return err
-		}
-		if curInApplied != inApplied || curCfg.URL != cfg.URL || curCfg.HWID != cfg.HWID {
-			return ErrSourceChanged
 		}
 		l := view.Live
 		cur, err := readLive(l)
@@ -337,9 +358,12 @@ func (s *Service) refreshWork(ctx context.Context, id string, only []string) (Re
 		return writeLive(l, cur)
 	})
 	if err != nil {
-		// ErrSourceChanged: ответ отброшен, срок проверки не сдвинут. Это не итог
-		// «без изменений»: ничего не проверено и не записано, повтор с новой
-		// конфигурацией делает refreshCurrent.
+		// ErrSourceChanged: живые данные не записаны, срок проверки не сдвинут; повтор
+		// с новой конфигурацией делает refreshCurrent. Если смена пришла, пока шёл
+		// конвейер, он уже мог отработать: кандидаты прежней конфигурации в нём
+		// отброшены по отпечатку, и файлы собраны из применённых снимков. Если смена
+		// пришла после конвейера, набор применён под той конфигурацией, которая
+		// действовала при запуске.
 		return RefreshOutcome{}, err
 	}
 
@@ -468,7 +492,7 @@ type settleResult struct {
 // и его ревизия не меняются. Ошибка возврата — остановка сервиса или слоя.
 func (s *Service) settle(ctx context.Context, id string, cfg SubscriptionConfig, cands map[string]Ref) (settleResult, error) {
 	overlay := configlayer.Sections{}
-	if err := writeCandidates(overlay, Candidates{id: cands}); err != nil {
+	if err := writeCandidates(overlay, Candidates{id: cands}, map[string]SubscriptionConfig{id: cfg}); err != nil {
 		return settleResult{}, err
 	}
 	view, err := s.d.Layer.RunSourceRefresh(ctx, overlay)

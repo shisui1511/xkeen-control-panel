@@ -102,8 +102,16 @@ func TestRouterGCKeepsInflightCandidate(t *testing.T) {
 		t.Fatal("уборка удалила применённый снимок")
 	}
 
+	st, err := e.layer.ReadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := subscriptionConfig(st, id)
+	if err != nil {
+		t.Fatal(err)
+	}
 	overlay := configlayer.Sections{}
-	if err := writeCandidates(overlay, Candidates{id: {kernelXray: *rtRefOf(e, hash, list)}}); err != nil {
+	if err := writeCandidates(overlay, Candidates{id: {kernelXray: *rtRefOf(e, hash, list)}}, map[string]SubscriptionConfig{id: cfg}); err != nil {
 		t.Fatal(err)
 	}
 	view, err := e.layer.RunSourceRefresh(context.Background(), overlay)

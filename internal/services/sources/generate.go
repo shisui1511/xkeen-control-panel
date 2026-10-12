@@ -108,7 +108,7 @@ func (s *Service) generate(in configlayer.Input, installed configlayer.Installed
 				if live, err = readLive(in.Live); err != nil {
 					return nil, err
 				}
-				if cands, err = readCandidates(in.Live); err != nil {
+				if cands, err = readCandidates(in.Live, in.Sections); err != nil {
 					return nil, err
 				}
 				loaded = true

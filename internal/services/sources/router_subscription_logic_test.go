@@ -359,7 +359,17 @@ func rtLiveInput(t *testing.T, mode configlayer.SourceKind, sections map[string]
 	if err := writeLive(live, ls); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCandidates(live, cands); err != nil {
+	cfgs := map[string]SubscriptionConfig{}
+	for id := range cands {
+		if raw, ok := sections[sectionName(id)]; ok {
+			cfg, err := parseSubscription(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfgs[id] = cfg
+		}
+	}
+	if err := writeCandidates(live, cands, cfgs); err != nil {
 		t.Fatal(err)
 	}
 	return configlayer.Input{Sections: configlayer.Sections(sections), Live: live, Mode: mode}
@@ -445,6 +455,19 @@ func TestRouterGenerateSubscriptionPerKernel(t *testing.T) {
 	if got := rtSubXrayTags(t, rtGenerate(t, e.svc, kernelXray, in, rtBoth), id); strings.Join(got, ",") != strings.Join(wantTags, ",") {
 		t.Errorf("теги Xray с кандидатом: %v", got)
 	}
+	// Кандидат с отпечатком другой конфигурации (подписку применили с новым адресом,
+	// пока он ждал конвейер) не используется: файл из применённого снимка.
+	stale := configlayer.Sections{}
+	if err := writeLive(stale, ls); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCandidates(stale, Candidates{id: {kernelXray: *xrayRef}}, map[string]SubscriptionConfig{id: {URL: "https://old-provider.invalid/sub"}}); err != nil {
+		t.Fatal(err)
+	}
+	in = configlayer.Input{Sections: configlayer.Sections(sections), Live: stale, Mode: configlayer.SourceApplied}
+	if got := rtSubXrayTags(t, rtGenerate(t, e.svc, kernelXray, in, rtBoth), id); len(got) != 1 {
+		t.Errorf("теги Xray с кандидатом прежнего адреса: %v", got)
+	}
 
 	// Выключенный источник файла не даёт.
 	in = rtLiveInput(t, configlayer.SourceDraft, map[string]json.RawMessage{sectionName(id): rtSubSection(t, id, false)}, ls, nil)
@@ -494,7 +517,7 @@ func TestRouterCommitLive(t *testing.T) {
 		if err := writeLive(st.Live, ls); err != nil {
 			t.Fatal(err)
 		}
-		if err := writeCandidates(st.Live, Candidates{"x": {}}); err != nil {
+		if err := writeCandidates(st.Live, Candidates{"x": {}}, map[string]SubscriptionConfig{"x": {}}); err != nil {
 			t.Fatal(err)
 		}
 		return st
@@ -528,6 +551,9 @@ func TestRouterCommitLive(t *testing.T) {
 	if _, ok := st.Live[LiveKeyCandidates]; ok {
 		t.Error("ключ candidates сохранён в состоянии")
 	}
+	if _, ok := st.Live[LiveKeyCandidatePrints]; ok {
+		t.Error("ключ candidate_prints сохранён в состоянии")
+	}
 
 	// Ожидающий снимок заменился после сборки файлов: фиксируется только собранный.
 	changed := mk()
@@ -552,17 +578,38 @@ func TestRouterCommitLive(t *testing.T) {
 	}
 
 	// Фоновое обновление: кандидаты оверлея становятся применёнными.
-	st = state(mk())
-	overlay := configlayer.Sections{}
-	if err := writeCandidates(overlay, Candidates{id: {kernelXray: *otherRef}}); err != nil {
+	cfg, err := parseSubscription(sections[sectionName(id)])
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.CommitLive(st, configlayer.ApplyRequest{Trigger: configlayer.TriggerSourceRefresh, Source: configlayer.SourceApplied, LiveOverlay: overlay}, configlayer.Input{Mode: configlayer.SourceApplied}); err != nil {
+	refreshReq := func(c SubscriptionConfig) configlayer.ApplyRequest {
+		overlay := configlayer.Sections{}
+		if err := writeCandidates(overlay, Candidates{id: {kernelXray: *otherRef}}, map[string]SubscriptionConfig{id: c}); err != nil {
+			t.Fatal(err)
+		}
+		return configlayer.ApplyRequest{Trigger: configlayer.TriggerSourceRefresh, Source: configlayer.SourceApplied, LiveOverlay: overlay}
+	}
+	usedApplied := configlayer.Input{Sections: sections, Mode: configlayer.SourceApplied}
+	st = state(mk())
+	if err := e.svc.CommitLive(st, refreshReq(cfg), usedApplied); err != nil {
 		t.Fatal(err)
 	}
 	x = read(st)[id].Kernels[kernelXray]
 	if x.Applied.Hash != otherRef.Hash || x.Pending != nil || x.Delta != (Delta{Added: 1, Removed: 2}) {
 		t.Errorf("Xray после обновления: %+v", x)
+	}
+
+	// Кандидат получен под прежним адресом, а конвейер собран из секции с новым:
+	// он не фиксируется, применённый снимок и ожидающий остаются прежними.
+	stale := cfg
+	stale.URL = "https://old-provider.invalid/sub"
+	st = state(mk())
+	if err := e.svc.CommitLive(st, refreshReq(stale), usedApplied); err != nil {
+		t.Fatal(err)
+	}
+	x = read(st)[id].Kernels[kernelXray]
+	if x.Applied.Hash != oldRef.Hash || x.Pending == nil || x.Pending.Hash != newRef.Hash {
+		t.Errorf("кандидат прежнего адреса зафиксирован: %+v", x)
 	}
 }
 

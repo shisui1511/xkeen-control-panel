@@ -17,11 +17,14 @@ import (
 //     файлы этого запуска, становится применённым (applied). Если с тех пор
 //     ожидающий снимок заменился более свежим, он остаётся ждать (Open Question 2).
 //   - Фоновое обновление (TriggerSourceRefresh): кандидаты оверлея становятся
-//     применёнными, ожидающий снимок ядра сбрасывается.
+//     применёнными, ожидающий снимок ядра сбрасывается. Кандидат, чей отпечаток
+//     конфигурации не совпадает с секцией запуска, не фиксируется (readCandidates):
+//     файлы собраны без него.
 //
 // После фиксации Live очищается от источников, которых нет ни в черновике, ни в
-// применённом состоянии, а ключ candidates в состояние не попадает. Повреждённые
-// живые данные не блокируют «Применить»: фиксация пропускается с записью в журнал.
+// применённом состоянии, а ключи candidates и candidate_prints в состояние не
+// попадают. Повреждённые живые данные не блокируют «Применить»: фиксация
+// пропускается с записью в журнал.
 func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest, used configlayer.Input) error {
 	if st.Live == nil {
 		st.Live = configlayer.Sections{}
@@ -30,13 +33,14 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 	if err != nil {
 		log.Printf("[sources] фиксация пропущена: живые данные источников не читаются")
 		delete(st.Live, LiveKeyCandidates)
+		delete(st.Live, LiveKeyCandidatePrints)
 		return nil
 	}
 	now := s.d.Now()
 
 	switch {
 	case req.Trigger == configlayer.TriggerSourceRefresh:
-		cands, err := readCandidates(req.LiveOverlay)
+		cands, err := readCandidates(req.LiveOverlay, used.Sections)
 		if err != nil {
 			log.Printf("[sources] кандидаты обновления не читаются: фиксация пропущена")
 			break
@@ -96,6 +100,7 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 		return err
 	}
 	delete(st.Live, LiveKeyCandidates)
+	delete(st.Live, LiveKeyCandidatePrints)
 	// Статусы могли измениться («Применить» делает снимки применёнными): уведомления
 	// пересобираются после записи состояния, из горутины — слой держит замок хранилища.
 	s.spawn(s.rebuildNotices)
