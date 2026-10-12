@@ -69,10 +69,13 @@ func TestRouterGenerateExcludeFilter(t *testing.T) {
 	e := rtNewEnv(t, false, false)
 	const id = "a1b2c3d4"
 	base := rtNodes(t, "vless_ws", "trojan_grpc", "ss_plain", "vless_reality")
+	// DE-2 повторён провайдером под вторым именем (полный дубль): узел остаётся,
+	// пока хотя бы одно его имя не исключено.
 	list := []nodes.Node{
 		rtNamed(base[0], "RU-1 быстрый"),
 		rtNamed(base[1], "Нидерланды тестовый"),
 		rtNamed(base[2], "DE-2"),
+		rtNamed(base[2], "SE-2 дубль"),
 		rtNamed(base[3], "FR-3"),
 	}
 	ref := rtPutList(t, e, list)
@@ -111,6 +114,45 @@ func TestRouterGenerateExcludeFilter(t *testing.T) {
 	}
 	if x, m, _ = gen([]string{"", "  "}); x != 4 || m != 4 {
 		t.Errorf("пустые шаблоны: Xray %d, Mihomo %d, нужно по 4", x, m)
+	}
+	// Исключено меньшее из имён полного дубля: узел остаётся под вторым именем.
+	x, m, text = gen([]string{"de-"})
+	if x != 4 || m != 4 || strings.Contains(text, "DE-2") || !strings.Contains(text, "SE-2 дубль") {
+		t.Errorf("дубль с исключённым именем DE-2: Xray %d, Mihomo %d, файл Mihomo:\n%s", x, m, text)
+	}
+	// Исключены оба имени — узла нет.
+	if x, m, _ = gen([]string{"de-", "дубль"}); x != 3 || m != 3 {
+		t.Errorf("дубль с обоими исключёнными именами: Xray %d, Mihomo %d, нужно по 3", x, m)
+	}
+	// Представление совпадает с файлами: строка дубля не исключена и идёт под
+	// неисключённым именем, счётчики ядер — как число узлов в файлах.
+	viewOf := func(exclude []string) SourceView {
+		cfg, err := parseSubscription(rtSubNamed(t, id, "Провайдер", exclude))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e.svc.subViewOf(id, cfg, nil, nil, ls[id], rtBoth, e.svc.caps(rtBoth)).view
+	}
+	v := viewOf([]string{"de-"})
+	names := map[string]bool{}
+	for _, n := range v.Nodes {
+		names[n.Name] = n.Excluded
+	}
+	if excl, ok := names["SE-2 дубль"]; !ok || excl || len(v.Nodes) != 4 {
+		t.Errorf("представление с исключённым DE-2: строк %d, имена %v", len(v.Nodes), names)
+	}
+	if v.Kernels[kernelXray].Count != 4 || v.Kernels[kernelMihomo].Count != 4 {
+		t.Errorf("счётчики представления: Xray %d, Mihomo %d, нужно по 4", v.Kernels[kernelXray].Count, v.Kernels[kernelMihomo].Count)
+	}
+	v = viewOf([]string{"de-", "дубль"})
+	excludedRows := 0
+	for _, n := range v.Nodes {
+		if n.Excluded {
+			excludedRows++
+		}
+	}
+	if excludedRows != 1 || v.Kernels[kernelXray].Count != 3 || v.Kernels[kernelMihomo].Count != 3 {
+		t.Errorf("представление с обоими исключёнными именами: исключённых строк %d, Xray %d, Mihomo %d", excludedRows, v.Kernels[kernelXray].Count, v.Kernels[kernelMihomo].Count)
 	}
 	// Ключи и теги считаются от полного снимка: исключение одних узлов не меняет
 	// теги остальных.

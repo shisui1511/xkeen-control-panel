@@ -347,6 +347,9 @@ func (s *Service) subViewOf(id string, cfg SubscriptionConfig, draft json.RawMes
 	byKey := map[string]*entry{}
 	var order []*entry
 	sets := map[string][]nodes.Keyed{}
+	// Представители полных дублей с неисключённым именем по ядрам — как в
+	// генераторе (keptByDup): каждое ядро строится из своего ответа.
+	kepts := map[string]map[string]nodes.Node{}
 	for _, kernel := range previewKernels {
 		if !installed.Has(kernel) {
 			continue
@@ -371,6 +374,7 @@ func (s *Service) subViewOf(id string, cfg SubscriptionConfig, draft json.RawMes
 		}
 		keyed, _ := nodes.Uniq(id, list)
 		sets[kernel] = keyed
+		kepts[kernel] = keptByDup(list, subs)
 		for _, k := range keyed {
 			e := byKey[k.Key]
 			if e == nil {
@@ -391,12 +395,25 @@ func (s *Service) subViewOf(id string, cfg SubscriptionConfig, draft json.RawMes
 	ids := nodeIDs(all)
 	idents := make(map[string]bool, len(order))
 	views := make([]NodeView, 0, len(order))
-	excluded := make(map[string]bool, len(order))
 	for _, e := range order {
-		nv := nodeViewOf(e.node, e.key, nodes.Ref(id, ids[e.key]), "", caps)
+		// Узел исключён, только если исключены все его имена; иначе строка идёт под
+		// неисключённым именем, как в файле ядра.
+		node, excludedAll := e.node, false
+		if len(subs) > 0 {
+			found := false
+			for _, kernel := range previewKernels {
+				if !e.in[kernel] {
+					continue
+				}
+				if n, ok := kepts[kernel][e.node.DupKey()]; ok && (!found || nodeBefore(n, node)) {
+					node, found = n, true
+				}
+			}
+			excludedAll = !found
+		}
+		nv := nodeViewOf(node, e.key, nodes.Ref(id, ids[e.key]), "", caps)
 		nv.InSet = KernelFlags{Xray: e.in[kernelXray], Mihomo: e.in[kernelMihomo]}
-		nv.Excluded = nameExcluded(e.node, subs)
-		excluded[e.key] = nv.Excluded
+		nv.Excluded = excludedAll
 		if !nv.Excluded && !nv.Support.Xray.OK && !nv.Support.Mihomo.OK {
 			v.Unsupported++
 		}
@@ -416,10 +433,11 @@ func (s *Service) subViewOf(id string, cfg SubscriptionConfig, draft json.RawMes
 		}
 		ks := kernelStateOf(kl, s.d.Running(kernel))
 		for _, k := range sets[kernel] {
-			if excluded[k.Key] {
+			n, ok := representative(k, kepts[kernel])
+			if !ok {
 				continue
 			}
-			if nodes.Support(k.Node, kernel, caps).OK {
+			if nodes.Support(n, kernel, caps).OK {
 				ks.Count++
 			}
 		}

@@ -435,24 +435,66 @@ func nameExcluded(n nodes.Node, subs []string) bool {
 // узла у провайдера (Pitfall 4). Ключи и идентификаторы (nodeIDs) считаются от
 // полного снимка, исключение по имени (D-04) действует после: так ключ и тег
 // узла совпадают с ref представления, а исключение одного узла не меняет тег
-// другого.
+// другого. Полный дубль под несколькими именами остаётся, если хотя бы одно имя
+// не исключено, и идёт под ним (keptByDup).
 func (s *Service) subscriptionNodes(id string, list []nodes.Node, exclude []string) []keyedNode {
 	uniq, _ := nodes.Uniq(id, list)
 	ids := nodeIDs(uniq)
-	subs := excludeSubs(exclude)
+	kept := keptByDup(list, excludeSubs(exclude))
 	out := make([]keyedNode, 0, len(uniq))
 	for _, k := range uniq {
-		if len(subs) > 0 && nameExcluded(k.Node, subs) {
+		n, ok := representative(k, kept)
+		if !ok {
 			continue
 		}
 		out = append(out, keyedNode{
-			name: displayName(k.Node),
+			name: displayName(n),
 			key:  k.Key,
 			tag:  "xcp-" + id + "-" + ids[k.Key],
-			node: k.Node,
+			node: n,
 		})
 	}
 	return out
+}
+
+// keptByDup — представители полных дублей среди узлов, чьё имя не исключено:
+// DupKey → узел с наименьшим именем, затем текстом (тот же порядок, что у
+// nodes.Uniq). Узел, повторённый провайдером под двумя именами, остаётся, если
+// хотя бы одно имя не подпадает под исключение (D-04), а результат не зависит от
+// порядка имён. nil — исключений нет.
+func keptByDup(list []nodes.Node, subs []string) map[string]nodes.Node {
+	if len(subs) == 0 {
+		return nil
+	}
+	out := map[string]nodes.Node{}
+	for _, n := range list {
+		if nameExcluded(n, subs) {
+			continue
+		}
+		dk := n.DupKey()
+		if cur, ok := out[dk]; !ok || nodeBefore(n, cur) {
+			out[dk] = n
+		}
+	}
+	return out
+}
+
+// nodeBefore — порядок выбора представителя полных дублей: имя, затем текст.
+func nodeBefore(a, b nodes.Node) bool {
+	if a.Name != b.Name {
+		return a.Name < b.Name
+	}
+	return a.Text < b.Text
+}
+
+// representative — узел ключа с учётом исключения по имени (kept из keptByDup);
+// false — все имена полного дубля исключены. Без исключений — узел Uniq.
+func representative(k nodes.Keyed, kept map[string]nodes.Node) (nodes.Node, bool) {
+	if kept == nil {
+		return k.Node, true
+	}
+	n, ok := kept[k.Node.DupKey()]
+	return n, ok
 }
 
 // nodeIDs — идентификаторы узлов источника по ключу для тега Xray и ref групп:
