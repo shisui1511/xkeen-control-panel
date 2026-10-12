@@ -202,8 +202,9 @@
     try {
       await deleteSource(source.id);
     } catch (err) {
-      // Запись в черновик не удалась: диалог уже закрыт, источник остаётся на месте
-      showToast('error', err instanceof Error ? err.message : String(err));
+      // Запись в черновик не удалась: диалог уже закрыт, источник остаётся на месте; конфликт ревизии и
+      // занятость применения разбирает общий обработчик
+      handleLayerError(err);
     }
   }
 
@@ -226,8 +227,9 @@
     try {
       await deleteNode(entryId);
     } catch (err) {
-      // Запись в черновик не удалась: диалог уже закрыт, узел остаётся на месте
-      showToast('error', err instanceof Error ? err.message : String(err));
+      // Запись в черновик не удалась: диалог уже закрыт, узел остаётся на месте; конфликт ревизии и
+      // занятость применения разбирает общий обработчик
+      handleLayerError(err);
     }
   }
 
