@@ -106,6 +106,11 @@ export interface KernelOutcome {
 export type RefreshOutcomeKind =
   'unchanged' | 'applied' | 'rejected' | 'network' | 'deferred' | 'failed' | 'pending_updated';
 
+/**
+ * Итог «Обновить». applied и deferred описывают ядра, принявшие новый состав:
+ * ядро, которое его отвергло, отмечено в kernels статусом refused и остаётся на
+ * прежнем наборе.
+ */
 export interface RefreshOutcome {
   outcome: RefreshOutcomeKind;
   added: number;

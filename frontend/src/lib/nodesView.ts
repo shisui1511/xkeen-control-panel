@@ -12,6 +12,7 @@ import type {
   SourceView,
   VerdictView
 } from './configSources';
+import { kernelLabel } from './kernelState';
 import { sourceErrorText, type TFn } from './sourceErrors';
 
 // Состояние вкладки живёт на уровне модуля, а не компонента: вкладки раздела
@@ -233,13 +234,33 @@ export interface RefreshToast {
   kind: 'success' | 'info' | 'warning' | 'error';
 }
 
+/**
+ * Ядра, отвергшие новый состав при проверке. outcome описывает остальные ядра:
+ * applied или deferred при одном отвергнутом ядре значит, что оно осталось на
+ * прежнем наборе.
+ */
+function refusedKernels(o: RefreshOutcome): string[] {
+  return Object.entries(o.kernels ?? {})
+    .filter(([, k]) => k.status === 'refused')
+    .map(([name]) => kernelLabel(name))
+    .sort();
+}
+
 /** Тост инициатору ручного обновления (D-08, D-29): ключ, параметры и вид. */
 export function refreshToast(o: RefreshOutcome): RefreshToast {
   const code = o.error?.code ?? '';
+  const refused = refusedKernels(o);
   switch (o.outcome) {
     case 'unchanged':
       return { key: 'cfg.nodes.refresh_unchanged', params: {}, kind: 'info' };
     case 'applied':
+      if (refused.length > 0) {
+        return {
+          key: 'cfg.nodes.refresh_partial',
+          params: { a: String(o.added), b: String(o.removed), kernels: refused.join(', ') },
+          kind: 'warning'
+        };
+      }
       return {
         key: 'cfg.nodes.refresh_applied',
         params: { a: String(o.added), b: String(o.removed) },
@@ -250,6 +271,13 @@ export function refreshToast(o: RefreshOutcome): RefreshToast {
     case 'network':
       return { key: 'cfg.nodes.refresh_network', params: { code }, kind: 'warning' };
     case 'deferred':
+      if (refused.length > 0) {
+        return {
+          key: 'cfg.nodes.refresh_partial_deferred',
+          params: { kernels: refused.join(', ') },
+          kind: 'warning'
+        };
+      }
       return { key: 'cfg.nodes.refresh_deferred', params: {}, kind: 'warning' };
     case 'pending_updated':
       return { key: 'cfg.nodes.refresh_pending', params: {}, kind: 'info' };
