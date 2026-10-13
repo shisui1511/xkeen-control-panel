@@ -120,8 +120,10 @@ func (s *Service) rebuildNotices() {
 	s.d.Layer.SetNotices("source_", out)
 }
 
-// previousDate — дата прежнего рабочего снимка ядра (применённого, иначе
-// ожидающего); пусто, если снимка не было.
+// previousDate — момент прежнего рабочего снимка ядра (применённого, иначе
+// ожидающего) в RFC 3339; пусто, если снимка не было. Передаётся полная метка, а не
+// календарная дата UTC: клиент переводит её в местное время так же, как дату
+// карточки источника, и день не расходится у пользователей вне UTC.
 func previousDate(kl *KernelLive) string {
 	ref := kl.Applied
 	if ref == nil {
@@ -130,7 +132,7 @@ func previousDate(kl *KernelLive) string {
 	if ref == nil || ref.FetchedAt.IsZero() {
 		return ""
 	}
-	return ref.FetchedAt.UTC().Format("2006-01-02")
+	return ref.FetchedAt.UTC().Format(time.RFC3339)
 }
 
 // minutesUntilNext — сколько минут до следующего запроса подписки, не меньше одной.
