@@ -58,6 +58,8 @@
   const bodyText = $derived(diag?.body ?? '');
   // Статуса нет, когда запрос не дошёл до провайдера (DNS, обрыв связи): ответа не было
   const responded = $derived((diag?.http_status ?? 0) > 0);
+  // Провайдер ответил, но отказом (4xx/5xx): «все строки разобраны» тут неверно, разбирать нечего
+  const httpFailed = $derived((diag?.http_status ?? 0) >= 400);
   // Дата в том же формате, что и в карточке источника
   const fetchedAt = $derived(formatDateTime(diag?.fetched_at) || '—');
 
@@ -182,6 +184,10 @@
           {#if !responded}
             <p class="dg-hint" data-testid="nodes-diag-no-response">
               {$t('cfg.nodes.diag_no_response')}
+            </p>
+          {:else if httpFailed}
+            <p class="dg-hint" data-testid="nodes-diag-http-error">
+              {$t('cfg.nodes.diag_http_error', { status: diag.http_status ?? '' })}
             </p>
           {:else if skipped.length === 0}
             <p class="dg-ok" data-testid="nodes-diag-all-ok">{$t('cfg.nodes.diag_all_ok')}</p>

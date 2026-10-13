@@ -321,6 +321,30 @@ test('modals: настройки — ошибка записи показыва�
   await guard.assertClean();
 });
 
+// Публичный адрес без такого пути отвечает кодом 404: настоящий ответ HTTP с ошибкой (не сбой связи)
+const NOT_FOUND_SUB = 'https://github.com/xcp-router-test-no-such-feed';
+
+test('modals: диагностика при ответе провайдера с ошибкой HTTP не говорит «все строки разобраны»', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await startPage(page);
+  await addToDraft(page, NOT_FOUND_SUB);
+  const found = (await listSources(page)).filter((s) => s.host === 'github.com');
+  expect(found.length, 'подписка из черновика одна').toBe(1);
+
+  await openNodes(page);
+  await page.getByTestId(`nodes-diag-${found[0].id}`).click();
+  await expect(page.getByTestId('nodes-diag-modal')).toBeVisible({ timeout: T.action });
+  await diagSettled(page);
+  await expect(page.getByTestId('nodes-diag-meta')).toContainText(/HTTP 4\d\d/);
+  await expect(page.getByTestId('nodes-diag-http-error')).toBeVisible();
+  await expect(page.getByTestId('nodes-diag-all-ok')).toHaveCount(0);
+  await expect(page.getByTestId('nodes-diag-no-response')).toHaveCount(0);
+
+  await guard.assertClean();
+});
+
 test('modals: диагностика — сегмент по установленным ядрам, пустое состояние, запрос с нужным ядром', async ({
   page
 }) => {

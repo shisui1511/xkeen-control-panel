@@ -2903,6 +2903,7 @@
   "cfg.nodes.diag_meta": "Получено {date} · ответ HTTP {status}",
   "cfg.nodes.diag_meta_none": "Попытка {date} · ответа от провайдера не было",
   "cfg.nodes.diag_no_response": "Ответ провайдера не получен: проверьте ссылку, DNS и связь роутера",
+  "cfg.nodes.diag_http_error": "Провайдер ответил ошибкой (HTTP {status}): проверьте ссылку и токен подписки или повторите позже",
   "cfg.nodes.diag_col_line": "Строка",
   "cfg.nodes.diag_col_reason": "Причина",
   "cfg.nodes.diag_col_fragment": "Фрагмент",
