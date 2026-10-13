@@ -311,6 +311,11 @@ export function onLayerEvent(name: 'sources', fn: () => void): () => void {
   };
 }
 
+/** Сообщает подписчикам, что представление источников устарело и его нужно перечитать. */
+function notifySourcesChanged(): void {
+  for (const fn of [...sourcesHandlers]) fn();
+}
+
 let source: EventSource | null = null;
 let started = false;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -326,7 +331,7 @@ function syncStartedHere(): void {
 function applyEvent(name: string, data: unknown): void {
   if (name === 'sources') {
     // Состояния слоя событие не меняет: оно только сообщает, что источники обновились
-    for (const fn of [...sourcesHandlers]) fn();
+    notifySourcesChanged();
     return;
   }
   eventSeq++;
@@ -473,6 +478,9 @@ export async function resetDraft(): Promise<void> {
     revision: currentRevision()
   });
   applyDraftAck(ack);
+  // Сброс убирает из черновика источники и узлы: список вкладки «Узлы» перечитывается
+  // (обработчик configSources.ts; пока список ни разу не загружался, он ничего не делает)
+  notifySourcesChanged();
 }
 
 /**

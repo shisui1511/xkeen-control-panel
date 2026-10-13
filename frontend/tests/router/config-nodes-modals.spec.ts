@@ -609,6 +609,40 @@ test('modals: удаление узла — подтверждение и POST n
   await guard.assertClean();
 });
 
+test('modals: «Сбросить» черновик на вкладке «Узлы» сразу убирает добавленные источник и узел из списка', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await startPage(page);
+  const port = randomPort();
+  await addToDraft(page, [BAD_SUB, nodeLink('vless_ws.txt', port, 'ResetA')].join('\n'));
+  const id = await subId(page);
+
+  await openNodes(page);
+  await expect(page.getByTestId(`nodes-source-${id}`)).toBeVisible({ timeout: T.action });
+  await expandCard(page, 'my');
+  const row = page.locator('.node-row').filter({ hasText: `:${port}` });
+  await expect(row).toHaveCount(1, { timeout: T.action });
+
+  // сброс из полосы черновика: подтверждение, затем POST draft/reset
+  const req = page.waitForRequest(
+    (r) => r.method() === 'POST' && r.url().endsWith('/api/configlayer/draft/reset')
+  );
+  await page.getByTestId('config-draftbar').locator('.draft-bar-actions button').first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible({ timeout: T.action });
+  await dialog.locator('.confirm-actions button').last().click();
+  await req;
+  await expect(dialog).toHaveCount(0, { timeout: T.action });
+
+  // список обновился без перезагрузки страницы: источник и узел черновика исчезли
+  await expect(page.getByTestId(`nodes-source-${id}`)).toHaveCount(0, { timeout: T.action });
+  await expect(row).toHaveCount(0, { timeout: T.action });
+  expect((await listSources(page)).some((s) => s.id === id)).toBe(false);
+
+  await guard.assertClean();
+});
+
 /** Критичные и серьёзные нарушения axe внутри открытого диалога. */
 async function dialogViolations(page: Page): Promise<string[]> {
   // модаль появляется с затуханием: axe не должен видеть полупрозрачный кадр
