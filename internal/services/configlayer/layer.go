@@ -301,7 +301,7 @@ func (l *Layer) RequestCheck() {
 func (l *Layer) Context() context.Context { return l.ctx }
 
 // Stop останавливает слой: отменяет контекст, дожидается всех горутин и
-// закрывает шину. Безопасен при повторном вызове.
+// фоновой записи черновика и закрывает шину. Безопасен при повторном вызове.
 func (l *Layer) Stop() {
 	l.stopOnce.Do(func() {
 		l.mu.Lock()
@@ -310,6 +310,7 @@ func (l *Layer) Stop() {
 		l.cancel()
 	})
 	l.wg.Wait()
+	l.store.Flush()
 	l.broker.Close()
 }
 
@@ -1060,6 +1061,8 @@ func resolveDirSymlinks(p string) string {
 // applyMu → lifecycleMu нарушать нельзя).
 func (l *Layer) RestoreExternally(fn func() error) error {
 	if !l.Enabled() {
+		// фоновая запись черновика, начатая до выключения, не ляжет поверх снимка
+		l.store.Flush()
 		err := fn()
 		l.store.Invalidate()
 		return err

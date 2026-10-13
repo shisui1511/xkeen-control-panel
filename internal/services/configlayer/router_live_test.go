@@ -143,6 +143,8 @@ func TestRouterLiveStore(t *testing.T) {
 		if _, ok := final.Live["leak"]; ok {
 			t.Error("Live записан при ошибке live-функции")
 		}
+		// правки черновика пишутся в файл в фоне
+		s.Flush()
 		onDisk := NewStore(dir, nil).Snapshot()
 		if onDisk.DraftRevision != 3 || len(onDisk.Draft) != 1 {
 			t.Errorf("файл после отказов: ревизия %d, секций %d", onDisk.DraftRevision, len(onDisk.Draft))

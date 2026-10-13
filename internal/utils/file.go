@@ -65,6 +65,22 @@ func resolveSymlinkTarget(path string) string {
 //
 // If path is an existing symlink, the write goes to its target so the link itself survives.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	return atomicWrite(path, data, perm, true)
+}
+
+// AtomicWriteFileNoSync — AtomicWriteFile без fsync: вызов не ждёт записи на
+// носитель, а после обрыва питания на диске прежнее или новое содержимое
+// целиком — ext4 с data=ordered (раздел Entware на роутере) записывает данные
+// файла, подменяющего другой переименованием, раньше самого переименования.
+// fsync ждёт фиксации журнала, а она — записи всех данных, выделенных в той же
+// транзакции: на USB-флешке роутера под нагрузкой это десятки секунд. Для
+// частых правок, потеря последней из которых при обрыве питания допустима,
+// fsync не нужен.
+func AtomicWriteFileNoSync(path string, data []byte, perm os.FileMode) error {
+	return atomicWrite(path, data, perm, false)
+}
+
+func atomicWrite(path string, data []byte, perm os.FileMode, sync bool) error {
 	// Sanitize path to prevent directory traversal (CWE-22).
 	path = filepath.Clean(path)
 	targetPath := resolveSymlinkTarget(path)
@@ -89,9 +105,11 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	}
 
 	// Sync to disk
-	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
-		return err
+	if sync {
+		if err := tmpFile.Sync(); err != nil {
+			tmpFile.Close()
+			return err
+		}
 	}
 
 	if err := tmpFile.Close(); err != nil {
