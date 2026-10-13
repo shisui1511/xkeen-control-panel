@@ -83,6 +83,11 @@ func (s *Service) rebuildNotices() {
 					"in":   strconv.Itoa(s.minutesUntilNext(cfg, src, now)),
 					"code": kl.Status.ErrorCode,
 				}
+				// Дата прежнего рабочего снимка: без неё (источник ещё ни разу не отвечал)
+				// уведомление не говорит, что снимок действует.
+				if d := previousDate(kl); d != "" {
+					params["date"] = d
+				}
 				// Абсолютный срок повтора: остаток считает клиент, иначе «через 5 мин»
 				// застывал бы на момент сборки уведомлений.
 				if due, ok := s.nextDue(cfg, src); !ok {

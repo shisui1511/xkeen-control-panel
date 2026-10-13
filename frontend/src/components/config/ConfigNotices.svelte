@@ -8,7 +8,7 @@
     type LayerNotice
   } from '../../lib/configLayer';
   // Часы с шагом в минуту: текст «повтор через N мин» не застывает на момент сборки
-  import { minuteClock } from '../../lib/nodesView';
+  import { minuteClock, formatDate } from '../../lib/nodesView';
 
   type Shown = {
     notice: LayerNotice;
@@ -16,6 +16,8 @@
     text: string;
     // Ссылка личного кабинета провайдера (только http/https), чтобы освободить слот устройства
     cabinet?: string;
+    // Идентификаторы всех слитых уведомлений: закрытие снимает их разом
+    ids: string[];
   };
 
   const KERNEL_LABELS: Record<string, string> = { xray: 'Xray', mihomo: 'Mihomo' };
@@ -60,11 +62,15 @@
     return text === key ? code : text;
   }
 
-  function describeSource(n: LayerNotice): Shown | null {
+  type Described = Omit<Shown, 'ids'>;
+
+  function describeSource(n: LayerNotice): Described | null {
     const p = n.params ?? {};
     const name = p.name ?? '';
+    // Дата снимка в том же виде, что и в карточке источника
+    const day = formatDate(p.date) || (p.date ?? '');
     if (n.id.startsWith('source_rejected:')) {
-      const snapshot = p.date ? $t('cfg.notice.snapshot_from', { date: p.date }) : '';
+      const snapshot = p.date ? $t('cfg.notice.snapshot_from', { date: day }) : '';
       const code = p.code ?? '';
       const text = DEVICE_REJECTED_CODES.includes(code)
         ? $t('cfg.notice.source_rejected', { name, snapshot })
@@ -75,18 +81,20 @@
       return { notice: n, tone: 'warning', text: $t('cfg.notice.source_deferred', { name }) };
     }
     if (n.id.startsWith('source_network:')) {
+      // Рабочий снимок упоминается, только если он был (у нового источника его нет)
+      const snapshot = p.date ? ' ' + $t('cfg.notice.network_snapshot', { date: day }) : '';
       // Обновление выключено: повтора не будет, срок не обещается
       if (p.no_retry) {
         return {
           notice: n,
           tone: 'warning',
-          text: $t('cfg.notice.source_network_no_retry', { name })
+          text: $t('cfg.notice.source_network_no_retry', { name }) + snapshot
         };
       }
       return {
         notice: n,
         tone: 'warning',
-        text: $t('cfg.notice.source_network', { name, in: inText(retryMinutes(p)) })
+        text: $t('cfg.notice.source_network', { name, in: inText(retryMinutes(p)) }) + snapshot
       };
     }
     if (n.id.startsWith('source_kernel_refused:')) {
@@ -104,7 +112,7 @@
   }
 
   // Уведомления известных видов; неизвестные идентификаторы не показываем
-  function describe(n: LayerNotice): Shown | null {
+  function describe(n: LayerNotice): Described | null {
     if (n.id === 'schema_reset') {
       return { notice: n, tone: 'warning', text: $t('cfg.notice.schema_reset') };
     }
@@ -128,11 +136,30 @@
     return describeSource(n);
   }
 
-  const shown = $derived($visibleNotices.map(describe).filter((x): x is Shown => x !== null));
+  // Уведомление о связи сервер ведёт по одному на ядро, а в тексте ядра нет: совпадающие
+  // по источнику и тексту показываются одним, закрытие снимает все слитые
+  const shown = $derived.by(() => {
+    const out: Shown[] = [];
+    for (const n of $visibleNotices) {
+      const d = describe(n);
+      if (d === null) continue;
+      const twin = n.id.startsWith('source_network:')
+        ? out.find(
+            (o) =>
+              o.notice.id.startsWith('source_network:') &&
+              o.notice.id.split(':')[1] === n.id.split(':')[1] &&
+              o.text === d.text
+          )
+        : undefined;
+      if (twin) twin.ids.push(n.id);
+      else out.push({ ...d, ids: [n.id] });
+    }
+    return out;
+  });
 
-  async function dismiss(id: string) {
+  async function dismiss(ids: string[]) {
     try {
-      await dismissNotice(id);
+      for (const id of ids) await dismissNotice(id);
     } catch (err) {
       handleLayerError(err);
     }
@@ -143,7 +170,7 @@
      других вкладках (D-08). Системные уведомления слоя закрываются навсегда, а
      build_failed и source_* — до перезапуска панели или пока не исчезнет их условие -->
 <section class="config-notices" data-testid="config-notices">
-  {#each shown as { notice, tone, text, cabinet } (notice.id)}
+  {#each shown as { notice, tone, text, cabinet, ids } (notice.id)}
     <div class="alert alert-{tone} alert-dismissible" role="alert" data-notice={notice.id}>
       <Icon name="warning" size={16} />
       <span class="notice-text"
@@ -162,7 +189,7 @@
         type="button"
         class="alert-close-btn"
         aria-label={$t('app.dismiss')}
-        onclick={() => void dismiss(notice.id)}
+        onclick={() => void dismiss(ids)}
       >
         &times;
       </button>

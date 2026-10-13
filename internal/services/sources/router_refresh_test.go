@@ -515,7 +515,7 @@ func TestRouterNoticesRebuildFromLive(t *testing.T) {
 	ref.FetchedAt = time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 	now := e.clock.Now()
 
-	const a, b, c, d = "a1b2c3d4", "b1b2c3d4", "c1b2c3d4", "d1b2c3d4"
+	const a, b, c, d, f = "a1b2c3d4", "b1b2c3d4", "c1b2c3d4", "d1b2c3d4", "f1b2c3d4"
 	rtSeedApplied(t, e, a, rtDeadURL, Interval{Mode: IntervalProvider}, true, &LiveSource{
 		Meta: Meta{WebURL: "https://cab.example/account"},
 		Kernels: map[string]*KernelLive{
@@ -539,6 +539,12 @@ func TestRouterNoticesRebuildFromLive(t *testing.T) {
 			kernelMihomo: rtAppliedRef(e, ref),
 		},
 	})
+	// Источник, который ни разу не отвечал: рабочего снимка нет, уведомление о сети его не обещает.
+	rtSeedApplied(t, e, f, rtDeadURL, Interval{Mode: IntervalProvider}, true, &LiveSource{
+		Kernels: map[string]*KernelLive{
+			kernelXray: {Status: Status{Code: StatusNetwork, ErrorCode: nodes.CodeDNSFailed, Since: now, Attempts: 1, RetryAt: now.Add(5 * time.Minute)}, UpdatedAt: now},
+		},
+	})
 	// Ожидающий снимок при «Применить» становится применённым, поэтому отложенная
 	// запись выставляется после применения.
 	if err := e.layer.UpdateLive(func(l configlayer.Sections) error {
@@ -557,7 +563,7 @@ func TestRouterNoticesRebuildFromLive(t *testing.T) {
 	e.svc.rebuildNotices()
 	got := rtNoticeIDs(e)
 	want := []string{
-		"source_rejected:" + a + ":xray", "source_network:" + a + ":mihomo",
+		"source_rejected:" + a + ":xray", "source_network:" + a + ":mihomo", "source_network:" + f + ":xray",
 		"source_rejected:" + b + ":xray", "source_deferred:" + c, "source_kernel_refused:" + d + ":xray",
 	}
 	if len(got) != len(want) {
@@ -576,8 +582,12 @@ func TestRouterNoticesRebuildFromLive(t *testing.T) {
 	if _, has := got["source_rejected:"+b+":xray"].Params["web_url"]; has {
 		t.Error("web_url у уведомления без известной ссылки кабинета")
 	}
-	if net := got["source_network:"+a+":mihomo"]; net.Params["in"] != "5" || net.Params["code"] != nodes.CodeDNSFailed {
+	if net := got["source_network:"+a+":mihomo"]; net.Params["in"] != "5" || net.Params["code"] != nodes.CodeDNSFailed ||
+		net.Params["date"] != "2026-10-01" {
 		t.Errorf("сеть: %+v", net)
+	}
+	if net := got["source_network:"+f+":xray"]; net.Params["date"] != "" {
+		t.Errorf("сеть без рабочего снимка называет его дату: %+v", net)
 	}
 	if ref := got["source_kernel_refused:"+d+":xray"]; ref.Kind != "error" || ref.Params["reason"] != "порт занят" ||
 		ref.Params["kernel"] != "xray" || ref.Params["name"] != "Провайдер" {

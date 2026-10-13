@@ -671,6 +671,52 @@ test('modals: «Сбросить» черновик на вкладке «Узл
   await guard.assertClean();
 });
 
+/** Запускает применение и ждёт его конца: идёт ли применение, видно в снимке слоя. */
+async function applyAndWait(page: Page): Promise<void> {
+  const start = await api(page, 'POST', '/api/configlayer/apply', {});
+  expect(start.status, 'запуск применения').toBe(200);
+  await expect
+    .poll(
+      async () => {
+        const st = await api(page, 'GET', '/api/configlayer/state');
+        const apply = (st.data?.apply ?? {}) as { running?: boolean };
+        return apply.running === false && Number(st.data?.draft_changes ?? -1) === 0;
+      },
+      { timeout: T.save * 3, intervals: [2000] }
+    )
+    .toBe(true);
+}
+
+test('notices: сбой связи у нового источника — одно уведомление без упоминания рабочего снимка', async ({
+  page
+}) => {
+  test.setTimeout(T.save * 8);
+  const guard = attachConsoleGuard(page);
+  await startPage(page);
+  await addToDraft(page, BAD_SUB);
+  const id = await subId(page);
+  try {
+    await applyAndWait(page);
+    await page.goto('/#/config/nodes', { timeout: T.page, waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
+    const notice = page.locator(`[data-notice^="source_network:${id}:"]`);
+    // уведомление по ядру приходит с сервера отдельно для каждого установленного ядра,
+    // а на экране оно одно: в тексте ядра нет
+    await expect(notice).toHaveCount(1, { timeout: T.action });
+    // у источника, который ни разу не отвечал, рабочего снимка нет
+    await expect(notice).not.toContainText(/снимок|snapshot/i);
+  } finally {
+    // возврат стенда: источник убран из применённого состояния
+    const view = await api(page, 'GET', '/api/configlayer/sources');
+    await api(page, 'POST', '/api/configlayer/sources/delete', {
+      revision: Number(view.data?.draft_revision ?? 0),
+      id
+    });
+    await applyAndWait(page);
+  }
+  await guard.assertClean();
+});
+
 /** Критичные и серьёзные нарушения axe внутри открытого диалога. */
 async function dialogViolations(page: Page): Promise<string[]> {
   // модаль появляется с затуханием: axe не должен видеть полупрозрачный кадр
