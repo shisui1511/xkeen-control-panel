@@ -23,6 +23,10 @@ type KernelApplier interface {
 type MihomoControl interface {
 	ReloadConfig(configPath string) error
 	ProviderCount(ctx context.Context, providerType, name string) (int, error)
+	// HasController — настроен ли у Mihomo external-controller. Без него Clash API
+	// нет: ни горячей перезагрузки, ни сверки провайдеров, ядро подтверждается
+	// только по процессу.
+	HasController() bool
 }
 
 // LifecycleLocker — замок жизненного цикла ядра (*sync.Mutex подходит).
@@ -251,7 +255,7 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 
 	outcome := RestartOutcomeRestarted
 	var hotErr error
-	if kernel == KernelMihomo && p.d.Mihomo != nil {
+	if kernel == KernelMihomo && p.d.Mihomo != nil && p.d.Mihomo.HasController() {
 		if hotErr = p.hotReloadMihomo(ctx, plan); hotErr == nil {
 			return RestartView{Kernel: kernel, Outcome: RestartOutcomeHotReloaded}, nil
 		}
@@ -311,8 +315,13 @@ func (p *Pipeline) hotReloadMihomo(ctx context.Context, plan Plan) error {
 }
 
 // confirmMihomoAfterRestart ждёт готовности API Mihomo после рестарта и сверяет
-// провайдеры с Expect (API поднимается не сразу после старта процесса).
+// провайдеры с Expect (API поднимается не сразу после старта процесса). У Mihomo
+// без external-controller API нет и не будет: там достаточно подтверждения процесса
+// (confirmRestarted), которое к этому моменту уже пройдено.
 func (p *Pipeline) confirmMihomoAfterRestart(ctx context.Context, plan Plan) error {
+	if p.d.Mihomo != nil && !p.d.Mihomo.HasController() {
+		return nil
+	}
 	if p.d.MihomoAPIReady != nil {
 		if err := pollUntil(ctx, RestartExpectTimeout, p.d.MihomoAPIReady); err != nil {
 			return errors.New("API Mihomo не ответил после перезапуска")
@@ -532,7 +541,10 @@ func (p *Pipeline) confirmRunning(ctx context.Context, kernel string, wantPID in
 //   - успех — процесс держится с одним PID не меньше RestartStableWindow.
 //
 // Окно, начатое до истечения срока, доводится до конца (не дольше RestartStableWindow
-// сверх срока). Ядро, которое так и не поднялось устойчиво, даёт ошибку.
+// сверх срока), но новое окно после срока не начинается: смена или пропажа PID уже
+// после RestartConfirmTimeout даёт ошибку сразу, в том числе когда PID меняется
+// непрерывно и ни одно окно не доходит до конца. Ядро, которое так и не поднялось
+// устойчиво, даёт ошибку.
 func (p *Pipeline) confirmRestarted(ctx context.Context, kernel string, oldPID int) error {
 	if p.d.ProcessStates == nil {
 		return errors.New("нет источника состояния процессов ядер")
@@ -565,7 +577,9 @@ func (p *Pipeline) confirmRestarted(ctx context.Context, kernel string, oldPID i
 		if !stableSince.IsZero() && now.Sub(stableSince) >= RestartStableWindow {
 			return nil
 		}
-		if stableSince.IsZero() && now.After(deadline) {
+		// Срок вышел, а устойчивого окна нет: либо процесса нет, либо окно (пере)начато
+		// уже после срока. Окно, начатое до срока, ещё может дойти до конца.
+		if now.After(deadline) && (stableSince.IsZero() || stableSince.After(deadline)) {
 			switch {
 			case onlyOld && resets == 0:
 				return fmt.Errorf("прежний процесс PID %d не завершился за %v", oldPID, RestartConfirmTimeout)
