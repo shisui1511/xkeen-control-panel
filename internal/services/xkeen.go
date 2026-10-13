@@ -596,6 +596,12 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 		}
 	}
 
+	// Команда жизненного цикла не начинается, пока работает вспомогательный запуск
+	// бинарника ядра: XKeen принял бы его за запущенное ядро (kernel_exec_gate.go).
+	if isXKeenLifecycleCmdline(append([]string{"xkeen"}, args...)) {
+		defer lockKernelLifecycleExec()()
+	}
+
 	// INVARIANT: no shell interpreter — exec.Command receives the binary path directly,
 	// never via "sh -c", so action cannot trigger shell injection.
 	cmd := exec.Command(s.BinaryPath, args...)

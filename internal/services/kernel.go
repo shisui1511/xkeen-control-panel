@@ -907,6 +907,18 @@ func (s *KernelService) detectVersion(k *KernelInfo) string {
 		return "not installed"
 	}
 
+	// Пока XKeen запускает или перезапускает ядро, `<ядро> -v` не запускается: XKeen
+	// принял бы его за само ядро и пропустил запуск (kernel_exec_gate.go). Опрос не
+	// ждёт: отдаётся прежняя версия, а без неё — ожидание конца операции.
+	release, ok := TryAcquireKernelHelper()
+	if !ok {
+		if k.verCache.value != "" {
+			return k.verCache.value
+		}
+		release = AcquireKernelHelper(context.Background())
+	}
+	defer release()
+
 	// Зависший бинарник не должен держать List()/Get() (и мьютекс версии) бесконечно.
 	ctx, cancel := context.WithTimeout(context.Background(), kernelVersionTimeout)
 	defer cancel()

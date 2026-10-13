@@ -756,6 +756,8 @@ func (a *API) runConfigValidator(ctx context.Context, cleanPath, content string)
 	}
 	// После таймаута не ждать дочерние процессы валидатора, держащие вывод
 	cmd.WaitDelay = 2 * time.Second
+	// Проверка не идёт во время операции XKeen над ядром (services.AcquireKernelHelper).
+	defer services.AcquireKernelHelper(ctx)()
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

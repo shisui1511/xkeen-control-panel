@@ -17,6 +17,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 type SystemStats struct {
@@ -331,6 +333,14 @@ func (a *API) checkActiveConfigsInvalid() bool {
 	if time.Since(a.configValCacheTime) < 30*time.Second {
 		return a.configValCache
 	}
+	// Пока XKeen запускает или перезапускает ядро, проверка не запускается: XKeen
+	// принял бы `xray -test` / `mihomo -t` за само ядро и пропустил запуск
+	// (services.TryAcquireKernelHelper). Опрос статуса не ждёт: прежний итог.
+	release, ok := services.TryAcquireKernelHelper()
+	if !ok {
+		return a.configValCache
+	}
+	defer release()
 
 	invalid := false
 	st := a.activeKernelState()

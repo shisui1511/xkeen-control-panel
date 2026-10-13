@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -47,7 +48,7 @@ func rtRstKernelPIDs(name string) (pids []int, out string) {
 		return nil, out
 	}
 	for _, f := range strings.Fields(stdout) {
-		if n, err := strconv.Atoi(f); err == nil && n > 0 && !rtRstHelperProcess(n) {
+		if n, err := strconv.Atoi(f); err == nil && n > 0 && !rtRstHelperProcess(n, name) {
 			pids = append(pids, n)
 		}
 	}
@@ -57,13 +58,17 @@ func rtRstKernelPIDs(name string) (pids []int, out string) {
 // rtRstHelperProcess — короткоживущий вспомогательный запуск бинарника ядра, а не само
 // ядро: проверка конфигурации («-test»/«-t») и запрос версии, которые панель и XKeen
 // запускают рядом с перезапуском. Различается по аргументам из /proc/<pid>/cmdline;
-// процесс, исчезнувший к моменту чтения, тоже не считается ядром.
-func rtRstHelperProcess(pid int) bool {
+// процесс, исчезнувший к моменту чтения, и процесс, ещё не сменивший образ после
+// fork (argv[0] не бинарник ядра), тоже не считаются ядром.
+func rtRstHelperProcess(pid int, name string) bool {
 	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
 	if err != nil {
 		return true
 	}
 	args := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
+	if filepath.Base(args[0]) != name {
+		return true
+	}
 	for _, a := range args[1:] {
 		switch a {
 		case "-test", "--test", "-t", "version", "-v", "-V", "--version":

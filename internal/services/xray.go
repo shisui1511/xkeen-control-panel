@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/tls"
@@ -414,7 +415,10 @@ func ValidateXrayConfigDir(configPath string) (bool, string) {
 	}
 	cmd.Env = env
 
+	// Проверка не идёт во время операции XKeen над ядром (kernel_exec_gate.go).
+	release := AcquireKernelHelper(context.Background())
 	out, err := cmd.CombinedOutput()
+	release()
 	if err != nil {
 		return false, string(out)
 	}
