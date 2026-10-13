@@ -493,6 +493,10 @@ func (s *Store) ResetDraft(baseRev int64) (DraftEvent, error) {
 // вернула ошибку или запись на диск не удалась, состояние в памяти и файл не
 // меняются. Событий Update не публикует: их рассылает вызывающий конвейер.
 func (s *Store) Update(fn func(st *State) error) error {
+	// Синхронная запись берёт wmu под mu, а фоновая держит wmu всю запись (на
+	// флешке десятки секунд): дождаться её без mu, иначе правки и чтения встанут
+	// за этой записью. Окно остаётся только для правки, пришедшей после ожидания.
+	s.Flush()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.loadLocked(); err != nil {
@@ -514,6 +518,7 @@ func (s *Store) Update(fn func(st *State) error) error {
 // DismissNotice закрывает уведомление и сохраняет состояние. Допустимые id:
 // "schema_reset", "recovered_from_journal" и "journal_recovery_failed".
 func (s *Store) DismissNotice(id string) error {
+	s.Flush() // без mu: см. Update
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.loadLocked(); err != nil {
@@ -547,6 +552,7 @@ func (s *Store) DismissNotice(id string) error {
 // Возвращает ошибку fn и ошибку перечитывания по отдельности. fn не должна
 // обращаться к самому хранилищу (замок не реентерабелен).
 func (s *Store) ReplaceExternally(fn func() error) (fnErr, reloadErr error) {
+	s.Flush() // без mu: см. Update
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Фоновая запись черновика не должна лечь поверх подменённого файла: wmu
