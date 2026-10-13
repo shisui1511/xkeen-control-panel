@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,6 +23,12 @@ import (
 // `xkeen -restart` выходил, не запустив ядро (ядро лежало до ручного запуска, а
 // подтверждение перезапуска слоя «Конфигурация» падало через 90 с). Вердикт —
 // процесс ядра в /proc (pidof) независимо от панели.
+//
+// Параллельно перезапуску идут опросы статуса панели (/api/system/stats проверяет
+// конфигурацию ядра под тем же замком вспомогательных запусков, /api/kernels
+// определяет версию ядра): вложенный читательский замок при ожидающем писателе
+// (`xkeen -restart`) замыкал их во взаимную блокировку, и опросы висели до
+// перезапуска панели.
 
 const (
 	// rtHelperRestartWait — сколько ждать нового процесса ядра после перезапуска:
@@ -37,6 +44,10 @@ const (
 	// rtHelperValidators — параллельных потоков проверки: процесс проверки жив почти
 	// всё время, как при частых опросах панели на слабом устройстве.
 	rtHelperValidators = 2
+	// rtHelperPollers — потоков опроса статуса панели во время перезапуска.
+	rtHelperPollers = 2
+	// rtHelperPollLimit — предел ответа на опрос статуса: дольше — зависание.
+	rtHelperPollLimit = 40 * time.Second
 	// rtHelperRounds — перезапусков подряд.
 	rtHelperRounds = 3
 )
@@ -108,7 +119,33 @@ func TestRouterRestartWithKernelHelper(t *testing.T) {
 			wg        sync.WaitGroup
 			completed atomic.Int64
 			lastErr   atomic.Value
+			polls     atomic.Int64
+			slowPolls atomic.Int64
+			lastSlow  atomic.Value
 		)
+		for i := 0; i < rtHelperPollers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+					}
+					for _, path := range []string{"/api/system/stats", "/api/kernels"} {
+						begin := time.Now()
+						status, raw, err := p.Call(http.MethodGet, path, nil)
+						if took := time.Since(begin); err != nil || status != http.StatusOK || took > rtHelperPollLimit {
+							slowPolls.Add(1)
+							lastSlow.Store(fmt.Sprintf("%s: %d за %v, ошибка %v, %.200s", path, status, took.Round(time.Millisecond), err, raw))
+						}
+						polls.Add(1)
+					}
+					time.Sleep(500 * time.Millisecond)
+				}
+			}()
+		}
 		for i := 0; i < rtHelperValidators; i++ {
 			wg.Add(1)
 			go func() {
@@ -168,6 +205,13 @@ func TestRouterRestartWithKernelHelper(t *testing.T) {
 		if completed.Load() == before {
 			t.Fatalf("перезапуск %d: за время перезапуска ни одна проверка конфигурации не завершилась (ошибка %v)",
 				round, lastErr.Load())
+		}
+		if slowPolls.Load() > 0 {
+			t.Fatalf("перезапуск %d: опрос статуса панели завис или упал во время перезапуска (%d из %d): %v",
+				round, slowPolls.Load(), polls.Load(), lastSlow.Load())
+		}
+		if polls.Load() == 0 {
+			t.Fatalf("перезапуск %d: ни один опрос статуса панели не завершился", round)
 		}
 		// Ядро держится с новым PID уже без проверок: вспомогательные процессы не
 		// мешают подсчёту.

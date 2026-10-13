@@ -909,13 +909,17 @@ func (s *KernelService) detectVersion(k *KernelInfo) string {
 
 	// Пока XKeen запускает или перезапускает ядро, `<ядро> -v` не запускается: XKeen
 	// принял бы его за само ядро и пропустил запуск (kernel_exec_gate.go). Опрос не
-	// ждёт: отдаётся прежняя версия, а без неё — ожидание конца операции.
+	// ждёт: отдаётся прежняя версия, а без неё — "unknown" без кеширования, и
+	// следующий опрос повторит. Ждать замок здесь нельзя: вызывающий может держать
+	// KernelService.mu (refreshInstalledVersion), а читатель замка — ждать этот
+	// мьютекс или verCache.mu; писатель (`xkeen -restart`) ждёт читателя, и
+	// ожидание превращается во взаимную блокировку.
 	release, ok := TryAcquireKernelHelper()
 	if !ok {
 		if k.verCache.value != "" {
 			return k.verCache.value
 		}
-		release = AcquireKernelHelper(context.Background())
+		return "unknown"
 	}
 	defer release()
 
