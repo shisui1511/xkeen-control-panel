@@ -688,7 +688,11 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Отключение клиента прерывает ручную проверку: результат уже некому показать
+	// Проверка не идёт во время операции XKeen над ядром; ожидание берётся до
+	// таймаута проверки и не съедает его (services.AcquireKernelHelper).
+	// Отключение клиента прерывает и ожидание, и ручную проверку: результат уже
+	// некому показать.
+	defer services.AcquireKernelHelper(r.Context())()
 	ctx, cancel := context.WithTimeout(r.Context(), configValidateTimeout)
 	defer cancel()
 	out, err := a.runConfigValidator(ctx, cleanPath, req.Content)
@@ -727,7 +731,8 @@ func detectKernelFromPath(cleanPath string) string {
 var configValidateTimeout = 30 * time.Second
 
 // runConfigValidator проверяет content как файл cleanPath вместе с соседними
-// конфигами каталога: `xray -test` / `mihomo -t` во временной копии.
+// конфигами каталога: `xray -test` / `mihomo -t` во временной копии. Вызывающий
+// уже держит замок вспомогательных запусков (services.AcquireKernelHelper).
 // Ошибка без *exec.ExitError — валидатор не запустился или не успел.
 func (a *API) runConfigValidator(ctx context.Context, cleanPath, content string) (string, error) {
 	kernelType := detectKernelFromPath(cleanPath)
@@ -756,8 +761,8 @@ func (a *API) runConfigValidator(ctx context.Context, cleanPath, content string)
 	}
 	// После таймаута не ждать дочерние процессы валидатора, держащие вывод
 	cmd.WaitDelay = 2 * time.Second
-	// Проверка не идёт во время операции XKeen над ядром (services.AcquireKernelHelper).
-	defer services.AcquireKernelHelper(ctx)()
+	// Замок вспомогательных запусков берёт вызывающий до таймаута проверки: ожидание
+	// конца операции XKeen не должно съедать её время.
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -769,6 +774,12 @@ func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data 
 
 	// Отключение клиента не должно обрывать проверку и откатывать сохранённый
 	// конфиг: контекст запроса используется без отмены
+	//
+	// Проверка не идёт во время операции XKeen над ядром, а ожидание берётся до
+	// таймаута проверки (services.AcquireKernelHelper): на mipsle restart с
+	// подготовкой правил идёт десятки секунд, и ожидание в том же таймауте давало
+	// ложный «таймаут проверки» с откатом сохранённого файла.
+	defer services.AcquireKernelHelper(context.WithoutCancel(r.Context()))()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), configValidateTimeout)
 	defer cancel()
 	out, err := a.runConfigValidator(ctx, cleanPath, string(data))
