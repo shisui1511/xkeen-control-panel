@@ -598,8 +598,13 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 
 	// Команда жизненного цикла не начинается, пока работает вспомогательный запуск
 	// бинарника ядра: XKeen принял бы его за запущенное ядро (kernel_exec_gate.go).
+	// Замок держится только до старта процесса: дальше операцию видно в /proc.
+	releaseGate := func() {}
 	if isXKeenLifecycleCmdline(append([]string{"xkeen"}, args...)) {
-		defer lockKernelLifecycleExec()()
+		var once sync.Once
+		unlock := lockKernelLifecycleExec()
+		releaseGate = func() { once.Do(unlock) }
+		defer releaseGate()
 	}
 
 	// INVARIANT: no shell interpreter — exec.Command receives the binary path directly,
@@ -614,6 +619,7 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 
 	err = cmd.Start()
 	out.started()
+	releaseGate()
 	if err != nil {
 		return "", err
 	}

@@ -26,7 +26,7 @@ import (
 // идёт», пока в /proc есть процесс XKeen с командой жизненного цикла.
 
 // kernelExecGate: вспомогательные запуски держат RLock на время работы
-// бинарника, вызов команды жизненного цикла XKeen — Lock.
+// бинарника, запуск команды жизненного цикла XKeen (до старта процесса) — Lock.
 var kernelExecGate sync.RWMutex
 
 // Сколько вспомогательный запуск ждёт конца операции XKeen и как часто проверяет.
@@ -102,15 +102,21 @@ func isXKeenLifecycleCmdline(args []string) bool {
 
 // AcquireKernelHelper ждёт конца операции XKeen над ядром (не дольше
 // kernelHelperWait и отмены ctx) и возвращает функцию освобождения: её вызывают,
-// когда вспомогательный процесс ядра завершился.
+// когда вспомогательный процесс ядра завершился. Ожидание строится на TryRLock с
+// опросом, а не на блокирующем RLock: так оно не зависит от писателя, держащего
+// замок, и соблюдает срок и отмену. По истечении срока или отмены без замка
+// возвращается пустая функция освобождения: запуск идёт без согласования.
 func AcquireKernelHelper(ctx context.Context) (release func()) {
 	deadline := time.Now().Add(kernelHelperWait)
 	for {
-		kernelExecGate.RLock()
-		if !xkeenLifecycleRunning() || ctx.Err() != nil || !time.Now().Before(deadline) {
-			return kernelExecGate.RUnlock
+		if kernelExecGate.TryRLock() {
+			if !xkeenLifecycleRunning() || ctx.Err() != nil || !time.Now().Before(deadline) {
+				return kernelExecGate.RUnlock
+			}
+			kernelExecGate.RUnlock()
+		} else if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return func() {}
 		}
-		kernelExecGate.RUnlock()
 		select {
 		case <-ctx.Done():
 		case <-time.After(kernelHelperPoll):
@@ -130,9 +136,11 @@ func TryAcquireKernelHelper() (release func(), ok bool) {
 	return kernelExecGate.RUnlock, true
 }
 
-// lockKernelLifecycleExec берёт замок на вызов команды жизненного цикла XKeen:
+// lockKernelLifecycleExec берёт замок на запуск команды жизненного цикла XKeen:
 // ждёт конца идущих вспомогательных запусков и не даёт начаться новым, пока
-// команда не вернулась (дальше их держит процесс XKeen в /proc).
+// процесс XKeen не стартовал. Дальше операцию видно в /proc (xkeenLifecycleRunning),
+// и замок отпускается сразу после cmd.Start: иначе он держался бы весь таймаут
+// команды (десятки секунд вместе с ожиданием запуска ядра).
 func lockKernelLifecycleExec() (unlock func()) {
 	kernelExecGate.Lock()
 	return kernelExecGate.Unlock
