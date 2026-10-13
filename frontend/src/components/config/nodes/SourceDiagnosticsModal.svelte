@@ -13,7 +13,7 @@
     type KernelName
   } from '../../../lib/configSources';
   import { sourceErrorText } from '../../../lib/sourceErrors';
-  import { PAGE_FIRST, PAGE_STEP } from '../../../lib/nodesView';
+  import { PAGE_FIRST, PAGE_STEP, formatDateTime } from '../../../lib/nodesView';
 
   // Диагностика ответа провайдера по каждому установленному ядру (D-07). Заголовки, тело и
   // отчёт приходят с сервера уже замаскированными (D-33, D-34): модаль показывает их как есть,
@@ -58,10 +58,8 @@
   const bodyText = $derived(diag?.body ?? '');
   // Статуса нет, когда запрос не дошёл до провайдера (DNS, обрыв связи): ответа не было
   const responded = $derived((diag?.http_status ?? 0) > 0);
-  const fetchedAt = $derived.by(() => {
-    const d = diag?.fetched_at ? new Date(diag.fetched_at) : null;
-    return d && !Number.isNaN(d.getTime()) ? d.toLocaleString() : '—';
-  });
+  // Дата в том же формате, что и в карточке источника
+  const fetchedAt = $derived(formatDateTime(diag?.fetched_at) || '—');
 
   async function load() {
     const mine = ++seq;

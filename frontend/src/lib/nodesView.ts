@@ -114,6 +114,17 @@ export function formatDate(value: string | number | Date | undefined): string {
   return `${dd}.${mm}.${d.getFullYear()}`;
 }
 
+/** Дата и время для интерфейса: ДД.ММ.ГГГГ ЧЧ:ММ:СС по местному времени; не дата — пустая строка. */
+export function formatDateTime(value: string | number | Date | undefined): string {
+  const date = formatDate(value);
+  if (date === '') return '';
+  const d = value instanceof Date ? value : new Date(value as string | number);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${date} ${hh}:${mi}:${ss}`;
+}
+
 /** Метка времени срока подписки (секунды Unix) → Date; 0 и меньше — срока нет. */
 export function expireDate(expire: number | undefined): Date | null {
   if (!expire || expire <= 0) return null;

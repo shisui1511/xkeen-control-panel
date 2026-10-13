@@ -91,6 +91,10 @@ async function checkTabs(page: Page): Promise<void> {
     // адрес в зоне .invalid не отвечает: вместо «Все строки разобраны» — объяснение
     await expect(page.getByTestId('nodes-diag-no-response')).toBeVisible();
     await expect(page.getByTestId('nodes-diag-all-ok')).toHaveCount(0);
+    // дата попытки в том же виде, что в карточке: ДД.ММ.ГГГГ ЧЧ:ММ:СС, без американского формата
+    await expect(page.getByTestId('nodes-diag-meta')).toContainText(
+      /\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}/
+    );
   }
 }
 
