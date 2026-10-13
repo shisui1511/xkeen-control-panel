@@ -46,27 +46,29 @@ interface RawGeoResult {
   org?: string;
 }
 
-async function fetchWithTimeout(
-  url: string,
-  timeoutMs = 4000,
-  acceptJson = false
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
+// Ожидание ответа ограничено по времени, но сам запрос не обрывается: оборванный
+// собственным AbortController внешний запрос браузер сообщает как net::ERR_ABORTED,
+// и такой «отказ» неотличим от настоящего сбоя сети. По таймауту определение просто
+// переходит к следующему сервису, а запоздавший ответ игнорируется.
+function fetchWithTimeout(url: string, timeoutMs = 4000, acceptJson = false): Promise<Response> {
+  return new Promise<Response>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timeout after ${timeoutMs} ms`)), timeoutMs);
     const headers: Record<string, string> = {};
     if (acceptJson) {
       headers['Accept'] = 'application/json';
     }
     // eslint-disable-next-line no-restricted-syntax -- external public echo service request from client browser
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers
-    });
-    return res;
-  } finally {
-    clearTimeout(timer);
-  }
+    fetch(url, { headers }).then(
+      (res) => {
+        clearTimeout(timer);
+        resolve(res);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
 }
 
 async function queryPublicEcho(): Promise<RawGeoResult> {

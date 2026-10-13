@@ -970,8 +970,8 @@
     breadcrumbs={[{ label: $t('nav.group_proxy_subs') }, { label: $t('proxies.title') }]}
     {onSwitchTab}
   >
-    <ClientExitIpBadge />
     {#if activeTab === 'groups'}
+      <ClientExitIpBadge />
       {#if mihomoOffline}
         <!-- No groups to filter, expand or refresh: the empty state below explains why. -->
       {:else}
