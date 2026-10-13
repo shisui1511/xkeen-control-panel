@@ -502,6 +502,13 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 	// main(), который выполнится уже ПОСЛЕ os.Exit ниже и не успеет отработать.
 	a.srv.GetAuthService().Stop()
 
+	// То же для черновика слоя «Конфигурация»: правка может лежать только в памяти
+	// (фоновая запись идёт или упала), а Stop слоя после os.Exit не выполнится.
+	// Дописанный файл нужен до запуска нового процесса, который его прочитает.
+	if a.configLayer != nil {
+		a.configLayer.FlushState()
+	}
+
 	// Fork new process с тем же конфигом, с которым запущен текущий: data_dir
 	// может не совпадать с каталогом config.json
 	configPath := filepath.Join(dataDir, "config.json")
