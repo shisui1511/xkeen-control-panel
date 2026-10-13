@@ -27,8 +27,13 @@ const (
 	// rtHelperRestartWait — сколько ждать нового процесса ядра после перезапуска:
 	// столько же даёт подтверждение перезапуска на панели.
 	rtHelperRestartWait = 90 * time.Second
-	// rtHelperLead — сколько проверки идут до первого перезапуска.
+	// rtHelperLead — сколько проверки идут до перезапуска, не меньше.
 	rtHelperLead = 2 * time.Second
+	// rtHelperFirstWait — потолок ожидания первой завершённой проверки перед
+	// перезапуском. Проверка ждёт конца операции XKeen, оставшейся от предыдущего
+	// теста (замок вспомогательных запусков ждёт до 2 мин), и сама на mipsle идёт
+	// секунды: перезапуск без завершённой проверки ничего не проверяет.
+	rtHelperFirstWait = 150 * time.Second
 	// rtHelperValidators — параллельных потоков проверки: процесс проверки жив почти
 	// всё время, как при частых опросах панели на слабом устройстве.
 	rtHelperValidators = 2
@@ -135,13 +140,20 @@ func TestRouterRestartWithKernelHelper(t *testing.T) {
 			wg.Wait()
 		}
 
+		// Перезапуск — только когда проверки уже идут: первая завершилась, следующие
+		// запущены теми же потоками.
+		started := time.Now()
 		time.Sleep(rtHelperLead)
+		for completed.Load() == 0 && time.Since(started) < rtHelperFirstWait {
+			time.Sleep(250 * time.Millisecond)
+		}
 		before := completed.Load()
 		if before == 0 {
 			stopHelpers()
 			t.Fatalf("перезапуск %d: за %v ни одна проверка конфигурации %s не завершилась (ошибка %v)",
-				round, rtHelperLead, path, lastErr.Load())
+				round, rtHelperFirstWait, path, lastErr.Load())
 		}
+		t.Logf("перезапуск %d: проверки идут %v, завершено %d", round, time.Since(started).Round(time.Millisecond), before)
 		status, raw, err := p.Call(http.MethodPost, "/api/service/control?action=restart", nil)
 		if err != nil || status != http.StatusOK {
 			stopHelpers()
