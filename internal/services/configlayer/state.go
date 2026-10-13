@@ -38,9 +38,15 @@ var sectionNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 // сразу, а файл пишется в фоне без fsync (flushLoop): ответ на правку не ждёт
 // диск. На флешке роутера под чужой записью запись файла ждёт её — fsync до
 // фиксации журнала ext4, подмена переименованием до записи прежней версии файла,
-// стоящей в очереди устройства за чужими данными, — это десятки секунд. При
-// обрыве питания теряются последние правки черновика; следующая синхронная
-// запись включает и их.
+// стоящей в очереди устройства за чужими данными, — это десятки секунд. Запись
+// без fsync держится на том, что ext4 с auto_da_alloc (по умолчанию) сбрасывает
+// данные файла, подменяющего другой переименованием, раньше самого
+// переименования; на другой ФС или с noauto_da_alloc после обрыва питания возможен
+// пустой файл. Поэтому, когда незаписанных правок не осталось, файл
+// досинхронизируется fsync в отдельной горутине (scheduleSync), не задерживая
+// правки: окно риска — только от правки до конца этого fsync. При обрыве питания в
+// этом окне теряются последние правки черновика; следующая синхронная запись
+// включает и их.
 //
 // Файл читается (или создаётся) лениво, при первом обращении включённого слоя
 // (Load): выключенный слой ничего не читает и не пишет (FND-01). Пока состояние
@@ -65,6 +71,10 @@ type Store struct {
 	// (меняется под wmu): запись версии старше записанной пропускается.
 	wmu     sync.Mutex
 	written atomic.Uint64
+	// syncing — идёт досинхронизация файла (scheduleSync); syncWanted — после
+	// неё файл снова записывался без fsync и нужен ещё один проход.
+	syncing    atomic.Bool
+	syncWanted atomic.Bool
 }
 
 // NewStore создаёт хранилище, не обращаясь к диску: файл состояния читается или
@@ -229,6 +239,7 @@ func (s *Store) scheduleFlushLocked() {
 // версии, следующая правка черновика или синхронная запись (FlushSync при
 // остановке).
 func (s *Store) flushLoop() {
+	wrote := false
 	for {
 		s.mu.Lock()
 		ver := s.ver
@@ -236,6 +247,9 @@ func (s *Store) flushLoop() {
 			s.flushing = false
 			s.flushDone.Broadcast()
 			s.mu.Unlock()
+			if wrote {
+				s.scheduleSync()
+			}
 			return
 		}
 		st := s.st.clone()
@@ -255,9 +269,42 @@ func (s *Store) flushLoop() {
 			s.flushing = false
 			s.flushDone.Broadcast()
 			s.mu.Unlock()
+			if wrote {
+				s.scheduleSync()
+			}
 			return
 		}
+		wrote = true
 	}
+}
+
+// scheduleSync досинхронизирует файл состояния (fsync) в отдельной горутине:
+// запись без fsync (flushLoop) не защищает от пустого файла после обрыва питания
+// вне ext4 с auto_da_alloc, а ожидание fsync внутри flushLoop держало бы
+// следующую фоновую запись. Ни mu, ни wmu не берётся: fsync по пути относится к
+// файлу, лежащему там сейчас, а более новая подмена сама попросит ещё проход.
+func (s *Store) scheduleSync() {
+	s.syncWanted.Store(true)
+	if !s.syncing.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		for s.syncWanted.Swap(false) {
+			f, err := os.Open(s.path)
+			if err != nil {
+				continue
+			}
+			if err := f.Sync(); err != nil {
+				log.Printf("[configlayer] fsync файла состояния: %v", err)
+			}
+			_ = f.Close()
+		}
+		s.syncing.Store(false)
+		// Запрос, пришедший между последней проверкой и сбросом флага.
+		if s.syncWanted.Load() {
+			s.scheduleSync()
+		}
+	}()
 }
 
 // FlushSync дожидается фоновой записи и, если в файле осталась версия старше
