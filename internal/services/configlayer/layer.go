@@ -310,8 +310,17 @@ func (l *Layer) Stop() {
 		l.cancel()
 	})
 	l.wg.Wait()
-	l.store.Flush()
+	l.FlushState()
 	l.broker.Close()
+}
+
+// FlushState дожидается фоновой записи черновика и дописывает остаток синхронно, с
+// fsync (Store.FlushSync). Stop вызывает её сам; процесс, который завершается
+// через os.Exit (самообновление панели), вызывает её до запуска нового.
+func (l *Layer) FlushState() {
+	if err := l.store.FlushSync(); err != nil {
+		log.Printf("[configlayer] состояние слоя не записано при остановке: %v", err)
+	}
 }
 
 // Subscribe подписывает на события шины (SSE).

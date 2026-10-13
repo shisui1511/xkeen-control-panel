@@ -225,8 +225,9 @@ func (s *Store) scheduleFlushLocked() {
 
 // flushLoop пишет в файл последнюю версию состояния без fsync
 // (utils.AtomicWriteFileNoSync), пока в памяти есть незаписанные правки. Ошибка
-// записи логируется: правки остаются в памяти, их запишет следующая правка
-// черновика или синхронная запись.
+// записи логируется: правки остаются в памяти, их запишет повтор по более новой
+// версии, следующая правка черновика или синхронная запись (FlushSync при
+// остановке).
 func (s *Store) flushLoop() {
 	for {
 		s.mu.Lock()
@@ -243,12 +244,37 @@ func (s *Store) flushLoop() {
 		if err := s.writeVersion(st, ver, utils.AtomicWriteFileNoSync); err != nil {
 			log.Printf("[configlayer] правка черновика не записана на диск: %v", err)
 			s.mu.Lock()
+			// Правка, пришедшая во время неудачной записи, не запускала новую
+			// горутину (flushing был true): без повтора её никто не записал бы.
+			// Повтор идёт только по новой версии, поэтому постоянный сбой диска
+			// не крутит цикл вхолостую.
+			if s.ver != ver {
+				s.mu.Unlock()
+				continue
+			}
 			s.flushing = false
 			s.flushDone.Broadcast()
 			s.mu.Unlock()
 			return
 		}
 	}
+}
+
+// FlushSync дожидается фоновой записи и, если в файле осталась версия старше
+// памяти (запись не удалась или не успела), пишет текущее состояние синхронно, с
+// fsync. Вызывается при остановке слоя и перед самообновлением панели: процесс
+// завершается без отложенных вызовов, и правка черновика, лежавшая только в
+// памяти, иначе пропала бы.
+func (s *Store) FlushSync() error {
+	s.Flush()
+	s.mu.Lock()
+	if !s.loaded || s.written.Load() >= s.ver {
+		s.mu.Unlock()
+		return nil
+	}
+	st, ver := s.st.clone(), s.ver
+	s.mu.Unlock()
+	return s.writeVersion(st, ver, utils.AtomicWriteFile)
 }
 
 // writeVersion пишет st версии ver, если в файле нет версии новее.
