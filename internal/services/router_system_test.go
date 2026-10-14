@@ -389,6 +389,22 @@ func TestRouterKernelVersions(t *testing.T) {
 		}
 
 		fresh := NewKernelService(tg.WorkDir)
+		// Пробы установки и отката идут параллельно с Get, тоже во время операции XKeen:
+		// бинарники не заменяются и бэкапы не создаются (стенд не меняется).
+		type inspected struct {
+			had     bool
+			version string
+		}
+		inspectCh := make(chan inspected, 1)
+		probeCh := make(chan string, 1)
+		go func() {
+			had, v := fresh.inspectInstalled(core, bin)
+			inspectCh <- inspected{had, v}
+		}()
+		go func() {
+			v, _ := fresh.probeInstalledVersion(core)
+			probeCh <- v
+		}()
 		started := time.Now()
 		info := fresh.Get(core)
 		waited := time.Since(started)
@@ -410,6 +426,12 @@ func TestRouterKernelVersions(t *testing.T) {
 		limit := kernelHelperWait + kernelVersionTimeout + 15*time.Second
 		routertest.Verdict(t, waited <= limit, routertest.KnownMark{},
 			"Get ждал %s, предел %s", waited.Round(time.Millisecond), limit)
+		insp := <-inspectCh
+		probed := <-probeCh
+		routertest.Verdict(t, insp.had && knownKernelVersion(insp.version) && insp.version == info.CurrentVersion, routertest.KnownMark{},
+			"inspectInstalled во время операции XKeen: стоит %v, версия %q (в Get %q)", insp.had, insp.version, info.CurrentVersion)
+		routertest.Verdict(t, knownKernelVersion(probed) && probed == info.CurrentVersion, routertest.KnownMark{},
+			"probeInstalledVersion во время операции XKeen: версия %q (в Get %q)", probed, info.CurrentVersion)
 
 		// Вывод бинарника снимается после Get и смены PID: проба теста не должна сама
 		// запускать бинарник во время операции XKeen.
