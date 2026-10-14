@@ -575,7 +575,7 @@ func TestRouterNoticesRebuildFromLive(t *testing.T) {
 		}
 	}
 	rej := got["source_rejected:"+a+":xray"]
-	if rej.Kind != "warning" || rej.Params["name"] != "Провайдер" || rej.Params["date"] != "2026-10-01" ||
+	if rej.Kind != "warning" || rej.Params["name"] != "Провайдер" || rej.Params["date"] != "2026-10-01T08:00:00Z" ||
 		rej.Params["code"] != nodes.CodeAllStubs || rej.Params["web_url"] != "https://cab.example/account" {
 		t.Errorf("отказ провайдера: %+v", rej)
 	}
@@ -583,7 +583,7 @@ func TestRouterNoticesRebuildFromLive(t *testing.T) {
 		t.Error("web_url у уведомления без известной ссылки кабинета")
 	}
 	if net := got["source_network:"+a+":mihomo"]; net.Params["in"] != "5" || net.Params["code"] != nodes.CodeDNSFailed ||
-		net.Params["date"] != "2026-10-01" {
+		net.Params["date"] != "2026-10-01T08:00:00Z" {
 		t.Errorf("сеть: %+v", net)
 	}
 	if net := got["source_network:"+f+":xray"]; net.Params["date"] != "" {
