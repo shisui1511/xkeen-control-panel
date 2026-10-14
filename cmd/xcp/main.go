@@ -432,9 +432,11 @@ func main() {
 
 	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL, cfg.MihomoSecret)
 	trafficQuotaSvc.SetMihomoService(api.MihomoService())
+	// Живость ядра — по процессам, без определения версии: опрос квот не должен
+	// ждать конца операции XKeen (ProcessStates не запускает бинарники).
 	trafficQuotaSvc.SetKernelAliveCheck(func() bool {
-		for _, info := range kernelSvc.List() {
-			if info.Name == "mihomo" && info.ProcessStatus == "running" {
+		for _, st := range kernelSvc.ProcessStates() {
+			if st.Name == "mihomo" && st.Status == "running" {
 				return true
 			}
 		}
@@ -647,6 +649,8 @@ func main() {
 				Installed: xkeenBin != "" && statErr == nil,
 				Version:   xkeenStatusCache.Snapshot().Version,
 			}}
+			// Здесь нужна версия (версионные ворота): при пустом кеше List ждёт конца
+			// операции XKeen, не дольше kernelHelperWait.
 			for _, info := range kernelSvc.List() {
 				inputs = append(inputs, configlayer.KernelVersionInput{
 					Name:      info.Name,
@@ -686,6 +690,8 @@ func main() {
 					Mihomo: installedKernelBinary(kernelSvc, "mihomo") != "",
 				}
 			},
+			// Нужна версия (UA подписки Mihomo): при пустом кеше Get ждёт конца
+			// операции XKeen, не дольше kernelHelperWait.
 			KernelVersion: func(kernel string) string {
 				info := kernelSvc.Get(kernel)
 				if info == nil {
@@ -802,14 +808,15 @@ func main() {
 }
 
 // installedKernelBinary — путь бинарника ядра, если он есть на диске; иначе
-// пустая строка (ядро не установлено).
+// пустая строка (ядро не установлено). Версия не определяется (BinaryPath, не Get):
+// путь нужен слою «Конфигурация» и сервису источников, ждать операции XKeen им незачем.
 func installedKernelBinary(kernelSvc *services.KernelService, name string) string {
-	info := kernelSvc.Get(name)
-	if info == nil || info.BinaryPath == "" {
+	path := kernelSvc.BinaryPath(name)
+	if path == "" {
 		return ""
 	}
-	if _, err := os.Stat(info.BinaryPath); err != nil {
+	if _, err := os.Stat(path); err != nil {
 		return ""
 	}
-	return info.BinaryPath
+	return path
 }

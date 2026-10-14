@@ -21,6 +21,13 @@ import (
 // запуск не начинается, пока идёт start/stop/restart/переключение XKeen, а
 // операция XKeen не начинается, пока вспомогательный запуск не закончился.
 //
+// Правило определения версии ядра. Версия определяется только через
+// KernelService.Get/List (при пустом кеше ждут конца операции XKeen через
+// WaitKernelHelper, вне мьютексов) или detectVersionNoWait (не ждёт: конструктор,
+// checkLatest). Код, который держит замок вспомогательных запусков, KernelService.mu
+// или versionCache.mu, не вызывает Get/List: путь к бинарнику берётся через
+// KernelService.BinaryPath, состояние процесса — через ProcessStates.
+//
 // `xkeen -restart` без терминала отвязывается в фон (start-stop-daemon) и
 // возвращается сразу, поэтому одного замка вокруг его вызова мало: «операция
 // идёт», пока в /proc есть процесс XKeen с командой жизненного цикла.
@@ -128,6 +135,41 @@ func TryAcquireKernelHelper() (release func(), ok bool) {
 		return nil, false
 	}
 	return kernelExecGate.RUnlock, true
+}
+
+// WaitKernelHelper ждёт конца операции XKeen над ядром опросом TryAcquireKernelHelper
+// и отдаёт замок вспомогательных запусков на чтение. Во время сна не удерживается ни
+// один замок, блокирующего RLock нет: вызывающий обязан звать её без
+// KernelService.mu, без versionCache.mu и без самого замка.
+//
+// Почему не AcquireKernelHelper: блокирующий RLock вложенного читателя при ожидающем
+// писателе (`xkeen -restart` в lockKernelLifecycleExec) ждёт внешнего читателя, а
+// тот — этого вызывающего: взаимная блокировка (CR-01, dcfe11c5). Бинарник ядра без
+// замка тоже не запускается (9340659f): за сроком kernelHelperWait процесс XKeen в
+// /proc больше не учитывается, но замок берётся только неблокирующе. ok=false — отмена
+// ctx или писатель держит Lock (идёт сама команда XKeen): вызывающий бинарник не
+// запускает.
+func WaitKernelHelper(ctx context.Context) (release func(), ok bool) {
+	deadline := time.Now().Add(kernelHelperWait)
+	for {
+		if rel, got := TryAcquireKernelHelper(); got {
+			return rel, true
+		}
+		if ctx.Err() != nil {
+			return nil, false
+		}
+		if !time.Now().Before(deadline) {
+			if kernelExecGate.TryRLock() {
+				return kernelExecGate.RUnlock, true
+			}
+			return nil, false
+		}
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-time.After(kernelHelperPoll):
+		}
+	}
 }
 
 // lockKernelLifecycleExec берёт замок на вызов команды жизненного цикла XKeen:

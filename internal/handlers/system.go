@@ -333,11 +333,11 @@ func (a *API) checkActiveConfigsInvalid() bool {
 	if time.Since(a.configValCacheTime) < 30*time.Second {
 		return a.configValCache
 	}
-	// Пути к бинарникам и состояние ядра берутся ДО замка: getBinaryPath ведёт в
-	// KernelService.Get → detectVersion, которая сама берёт читательский замок
-	// вспомогательных запусков. Вложенный RLock при ожидающем писателе
-	// (`xkeen -restart`) встаёт в очередь за ним, а писатель ждёт внешний RLock:
-	// взаимная блокировка (kernel_exec_gate.go).
+	// Пути к бинарникам и состояние ядра берутся ДО замка: код под замком не должен
+	// вызывать сервисы, которые сами берут читательский замок вспомогательных запусков.
+	// Вложенный RLock при ожидающем писателе (`xkeen -restart`) встаёт в очередь за
+	// ним, а писатель ждёт внешний RLock: взаимная блокировка (kernel_exec_gate.go).
+	// getBinaryPath версию не определяет (KernelService.BinaryPath).
 	xrayBin := a.getBinaryPath("xray")
 	mihomoBin := a.getBinaryPath("mihomo")
 	st := a.activeKernelState()

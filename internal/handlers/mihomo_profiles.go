@@ -83,8 +83,10 @@ func (a *API) waitMihomoRunning() bool {
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(2 * time.Second)
-		for _, info := range a.kernelSvc.List() {
-			if info.Name == "mihomo" && info.ProcessStatus == "running" {
+		// По процессам, без определения версии: двадцатисекундный опрос не должен
+		// растягиваться ожиданием конца операции XKeen.
+		for _, st := range a.kernelSvc.ProcessStates() {
+			if st.Name == "mihomo" && st.Status == "running" {
 				return true
 			}
 		}
