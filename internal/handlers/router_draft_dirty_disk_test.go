@@ -16,6 +16,8 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
+// Помощник нагрузки на носитель (rtStartDirtyLoad) общий для сценариев черновика и входа.
+//
 // Правка черновика слоя «Конфигурация», пока на раздел панели идёт большая запись.
 // Раздел панели на роутере — USB-флешка с ext4 (data=ordered). Когда файл состояния
 // слоя писался в обработчике правки, ответ ждал диск: fsync — фиксации журнала, а с
@@ -63,42 +65,9 @@ func TestRouterDraftEditWithDirtyDisk(t *testing.T) {
 	}
 	rev := e.revision()
 
-	f, err := os.CreateTemp(dir, "rt-dirty-*")
-	if err != nil {
-		t.Fatalf("временный файл в %s: %v", dir, err)
-	}
-	chunk := make([]byte, 1<<20)
-	for i := range chunk {
-		chunk[i] = byte(i)
-	}
-	for written := 0; written < rtDirtyBytes; written += len(chunk) {
-		if _, err := f.Write(chunk); err != nil {
-			_ = f.Close()
-			_ = os.Remove(f.Name())
-			t.Fatalf("запись временного файла: %v", err)
-		}
-	}
-	// fsync временного файла в фоне: блоки его данных выделяются сразу и попадают
-	// в текущую транзакцию журнала, а запись на носитель идёт, пока идут правки.
-	var (
-		syncErr  error
-		syncTook time.Duration
-	)
-	synced := make(chan struct{})
-	syncStart := time.Now()
-	go func() {
-		syncErr = f.Sync()
-		syncTook = time.Since(syncStart)
-		close(synced)
-	}()
-	t.Cleanup(func() {
-		// следующий тест не должен начинаться под этой нагрузкой
-		<-synced
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-	})
+	load := rtStartDirtyLoad(t, dir)
 
-	wb := rtWaitWriteback(t, synced)
+	wb := rtWaitWriteback(t, load.synced)
 	t.Logf("в записи на носитель: %d МБ", wb>>20)
 	// Запрос без записи файла: начало отправки данных на носитель занимает
 	// процессор mipsle, и первая правка мерила бы его, а не себя.
@@ -119,9 +88,9 @@ func TestRouterDraftEditWithDirtyDisk(t *testing.T) {
 		rev = int64(next)
 	}
 
-	<-synced
-	if syncErr != nil {
-		t.Fatalf("fsync временного файла: %v", syncErr)
+	syncTook, err := load.wait()
+	if err != nil {
+		t.Fatalf("fsync временного файла: %v", err)
 	}
 	limit := max(rtDraftEditFloor, syncTook/4)
 	t.Logf("чужие данные записаны на носитель за %v, предел правки %v",
@@ -132,6 +101,57 @@ func TestRouterDraftEditWithDirtyDisk(t *testing.T) {
 				i+1, d.Round(time.Millisecond), syncTook.Round(time.Millisecond), limit.Round(time.Millisecond))
 		}
 	}
+}
+
+// rtDirtyLoad — идущая в фоне запись rtDirtyBytes чужих данных на носитель.
+type rtDirtyLoad struct {
+	synced   <-chan struct{}
+	syncErr  error
+	syncTook time.Duration
+}
+
+// wait ждёт конца fsync нагрузки и возвращает, сколько носитель её записывал.
+func (l *rtDirtyLoad) wait() (time.Duration, error) {
+	<-l.synced
+	return l.syncTook, l.syncErr
+}
+
+// rtStartDirtyLoad пишет rtDirtyBytes во временный файл rt-dirty-* в dir и
+// запускает его fsync в фоне: блоки данных выделяются сразу и попадают в текущую
+// транзакцию журнала, а запись на носитель идёт, пока сценарий мерит ответы.
+// Очистка (дождаться fsync, удалить файл) регистрируется в t.Cleanup.
+func rtStartDirtyLoad(t *testing.T, dir string) *rtDirtyLoad {
+	t.Helper()
+	f, err := os.CreateTemp(dir, "rt-dirty-*")
+	if err != nil {
+		t.Fatalf("временный файл в %s: %v", dir, err)
+	}
+	chunk := make([]byte, 1<<20)
+	for i := range chunk {
+		chunk[i] = byte(i)
+	}
+	for written := 0; written < rtDirtyBytes; written += len(chunk) {
+		if _, err := f.Write(chunk); err != nil {
+			_ = f.Close()
+			_ = os.Remove(f.Name())
+			t.Fatalf("запись временного файла: %v", err)
+		}
+	}
+	synced := make(chan struct{})
+	l := &rtDirtyLoad{synced: synced}
+	syncStart := time.Now()
+	go func() {
+		l.syncErr = f.Sync()
+		l.syncTook = time.Since(syncStart)
+		close(synced)
+	}()
+	t.Cleanup(func() {
+		// следующий тест не должен начинаться под этой нагрузкой
+		<-synced
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+	})
+	return l
 }
 
 // rtWaitApplyIdle ждёт, пока на панели не идёт применение (сборка после включения
