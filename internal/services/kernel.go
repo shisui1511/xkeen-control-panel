@@ -685,7 +685,7 @@ func NewKernelService(dataDir string) *KernelService {
 
 	// Detect current versions (outside lock — no concurrent calls yet)
 	for _, k := range svc.kernels {
-		k.CurrentVersion = svc.detectVersion(k)
+		k.CurrentVersion = svc.detectVersionNoWait(k)
 	}
 
 	return svc
@@ -768,6 +768,10 @@ func (s *KernelService) resolveBinaryPath(k *KernelInfo) {
 	k.binaryPathCachedAt = time.Now()
 }
 
+// List — снимки всех ядер с версиями. Версию определяет detectVersion: при пустом
+// кеше и идущей операции XKeen вызов ждёт её конца (не дольше kernelHelperWait), не
+// держа s.mu. Кому нужен только путь к бинарнику или состояние процесса —
+// BinaryPath и ProcessStates, они версию не определяют и XKeen не ждут.
 func (s *KernelService) List() []KernelInfo {
 	// Resolve binary paths under write lock before taking snapshots
 	s.mu.Lock()
@@ -811,6 +815,21 @@ func (k *KernelInfo) fillBackup() {
 	k.BackupVersion = version
 }
 
+// BinaryPath — путь к бинарнику ядра без определения версии и без ожидания операций
+// XKeen; неизвестное ядро — "". Для кода, который держит замок вспомогательных
+// запусков или которому версия не нужна.
+func (s *KernelService) BinaryPath(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k, ok := s.kernels[name]
+	if !ok {
+		return ""
+	}
+	s.resolveBinaryPath(k)
+	return k.BinaryPath
+}
+
+// Get — снимок ядра с версией (см. List: ожидание конца операции XKeen при пустом кеше).
 func (s *KernelService) Get(name string) *KernelInfo {
 	// Resolve binary path under write lock before taking snapshot
 	s.mu.Lock()
@@ -890,30 +909,72 @@ var kernelVersionTimeout = 5 * time.Second
 // versionCacheTTL is the duration for which a detected version string is considered valid.
 const versionCacheTTL = 60 * time.Second
 
-// detectVersion runs the binary with a version flag and caches the result for
-// versionCacheTTL (60 s) to avoid spawning a subprocess on every poll.
+// detectVersion — версия ядра для List() и Get(): запускает бинарник с флагом версии и
+// кеширует результат на versionCacheTTL (60 с), чтобы не порождать процесс на каждый
+// опрос.
+//
+// Пока XKeen запускает или перезапускает ядро, `<ядро> -v` не запускается: XKeen
+// принял бы его за само ядро и пропустил запуск (kernel_exec_gate.go). Если в кеше есть
+// прежняя версия, она и отдаётся (опрос не ждёт). Если кеш пуст, вызов ждёт конца
+// операции XKeen через WaitKernelHelper — вне verCache.mu и вне KernelService.mu
+// (вызывающие List/Get их не держат), опросом, без блокирующего RLock: так нет
+// взаимной блокировки с `xkeen -restart` (CR-01). Ждать больше kernelHelperWait
+// нельзя: за сроком, если команда XKeen держит замок, отдаётся "unknown" без кеша.
+//
+// Порядок замков: замок вспомогательных запусков -> verCache.mu; под verCache.mu
+// замок берётся только неблокирующе.
 func (s *KernelService) detectVersion(k *KernelInfo) string {
+	if k.verCache == nil {
+		k.verCache = &versionCache{}
+	}
+	cache := k.verCache
+	cache.mu.Lock()
+	if v, done := s.cachedOrMissingVersionLocked(k); done {
+		cache.mu.Unlock()
+		return v
+	}
+	if release, ok := TryAcquireKernelHelper(); ok {
+		v := s.runVersionLocked(k)
+		release()
+		cache.mu.Unlock()
+		return v
+	}
+	if cache.value != "" {
+		v := cache.value
+		cache.mu.Unlock()
+		return v
+	}
+	cache.mu.Unlock()
+
+	release, ok := WaitKernelHelper(context.Background())
+	if !ok {
+		return "unknown"
+	}
+	defer release()
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	// Пока вызов ждал, параллельный мог определить версию.
+	if v, done := s.cachedOrMissingVersionLocked(k); done {
+		return v
+	}
+	return s.runVersionLocked(k)
+}
+
+// detectVersionNoWait — то же без ожидания: занятый операцией XKeen замок даёт прежнюю
+// версию из кеша, а без неё "unknown" без кеширования.
+// Для конструктора (старт панели не ждёт XKeen: на холодном старте роутера init XKeen
+// идёт одновременно с xcp), checkLatest (проверка релиза не ждёт операции XKeen).
+func (s *KernelService) detectVersionNoWait(k *KernelInfo) string {
 	if k.verCache == nil {
 		k.verCache = &versionCache{}
 	}
 	k.verCache.mu.Lock()
 	defer k.verCache.mu.Unlock()
 
-	if k.verCache.value != "" && time.Now().Before(k.verCache.expires) {
-		return k.verCache.value
+	if v, done := s.cachedOrMissingVersionLocked(k); done {
+		return v
 	}
-
-	if _, err := os.Stat(k.BinaryPath); os.IsNotExist(err) {
-		return "not installed"
-	}
-
-	// Пока XKeen запускает или перезапускает ядро, `<ядро> -v` не запускается: XKeen
-	// принял бы его за само ядро и пропустил запуск (kernel_exec_gate.go). Опрос не
-	// ждёт: отдаётся прежняя версия, а без неё — "unknown" без кеширования, и
-	// следующий опрос повторит. Ждать замок здесь нельзя: вызывающий может держать
-	// KernelService.mu (refreshInstalledVersion), а читатель замка — ждать этот
-	// мьютекс или verCache.mu; писатель (`xkeen -restart`) ждёт читателя, и
-	// ожидание превращается во взаимную блокировку.
 	release, ok := TryAcquireKernelHelper()
 	if !ok {
 		if k.verCache.value != "" {
@@ -922,7 +983,24 @@ func (s *KernelService) detectVersion(k *KernelInfo) string {
 		return "unknown"
 	}
 	defer release()
+	return s.runVersionLocked(k)
+}
 
+// cachedOrMissingVersionLocked отдаёт версию без запуска бинарника: свежую из кеша или
+// "not installed". Вызывается под k.verCache.mu.
+func (s *KernelService) cachedOrMissingVersionLocked(k *KernelInfo) (string, bool) {
+	if k.verCache.value != "" && time.Now().Before(k.verCache.expires) {
+		return k.verCache.value, true
+	}
+	if _, err := os.Stat(k.BinaryPath); os.IsNotExist(err) {
+		return "not installed", true
+	}
+	return "", false
+}
+
+// runVersionLocked запускает бинарник с флагом версии и кеширует разобранный результат.
+// Вызывается под k.verCache.mu и под замком вспомогательных запусков (RLock).
+func (s *KernelService) runVersionLocked(k *KernelInfo) string {
 	// Зависший бинарник не должен держать List()/Get() (и мьютекс версии) бесконечно.
 	ctx, cancel := context.WithTimeout(context.Background(), kernelVersionTimeout)
 	defer cancel()
@@ -1060,7 +1138,7 @@ func kernelAheadOfLatest(channel, latest, current string) bool {
 // «v26.9.9 → v26.9.9, Обновить». Вызывается под s.mu.
 func (s *KernelService) refreshInstalledVersion(kk *KernelInfo) {
 	kk.verCache = &versionCache{}
-	kk.CurrentVersion = s.detectVersion(kk)
+	kk.CurrentVersion = s.detectVersionNoWait(kk)
 	kk.HasUpdate = kernelHasUpdate(kk.LatestVersion, kk.CurrentVersion)
 	kk.AheadOfLatest = kernelAheadOfLatest(kk.Channel, kk.LatestVersion, kk.CurrentVersion)
 }
@@ -1212,7 +1290,7 @@ func (s *KernelService) checkLatest(ctx context.Context, name string, quiet bool
 
 	// Свежая версия бинарника вне s.mu: хранимая могла остаться нераспознанной
 	// (error после таймаута при старте), и флаги по ней ложны (G2).
-	freshVersion := s.detectVersion(&verSnap)
+	freshVersion := s.detectVersionNoWait(&verSnap)
 
 	s.mu.Lock()
 	// Канал сменился, пока шёл запрос: результат относится к прежнему каналу.
@@ -1725,7 +1803,7 @@ func (s *KernelService) inspectInstalled(name, safeBinaryPath string) (bool, str
 	probe.Name = name
 	probe.BinaryPath = safeBinaryPath
 	probe.verCache = &versionCache{}
-	return true, s.detectVersion(&probe)
+	return true, s.detectVersionNoWait(&probe)
 }
 
 // backupKernelBinary копирует действующий бинарник в .backup рядом с ним: имя

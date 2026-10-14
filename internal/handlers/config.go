@@ -494,11 +494,14 @@ func mapIssues(issues []services.PreflightIssue) []PreflightIssueJSON {
 	return result
 }
 
+// getBinaryPath — путь к бинарнику ядра. Берётся через KernelService.BinaryPath, а не
+// Get: runConfigValidator вызывает его под замком вспомогательных запусков (ревью
+// IN-05), а определение версии в Get могло бы ждать операции XKeen, держа этот замок.
 func (a *API) getBinaryPath(name string) string {
 	if a.kernelSvc != nil {
-		if k := a.kernelSvc.Get(name); k != nil && k.BinaryPath != "" {
-			if _, err := os.Stat(k.BinaryPath); err == nil {
-				return k.BinaryPath
+		if p := a.kernelSvc.BinaryPath(name); p != "" {
+			if _, err := os.Stat(p); err == nil {
+				return p
 			}
 		}
 	}
