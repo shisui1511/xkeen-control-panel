@@ -442,6 +442,13 @@ test('modals: диагностика — ошибка загрузки пока�
   await page.getByTestId('nodes-diag-retry').click();
   await retry;
   await diagSettled(page);
+  // «Повторить» исчезла вместе с алертом: фокус не теряется и Tab не выводит из диалога
+  const st = await focusState(page, 'nodes-diag-modal');
+  expect(st.dialog, 'диагностика открыта').toBe(true);
+  expect(st.inside, `фокус вне диалога на ${st.active}`).toBe(true);
+  await page.keyboard.press('Tab');
+  const st2 = await focusState(page, 'nodes-diag-modal');
+  expect(st2.inside, `фокус вне диалога на ${st2.active} после Tab`).toBe(true);
 });
 
 test('modals: «Изменить» — текст из двух ссылок даёт ошибку, «Сохранить» неактивна', async ({

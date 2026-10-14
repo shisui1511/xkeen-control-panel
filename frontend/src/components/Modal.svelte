@@ -77,6 +77,24 @@
     return () => window.removeEventListener('keydown', onWindowKeydown, true);
   });
 
+  // Перестройка содержимого может убрать элемент с фокусом (в диагностике «Повторить»
+  // исчезает вместе с алертом ошибки): фокус уходит на body, и скринридер с клавиатурой
+  // теряют место. Пока диалог открыт и он верхний, такой фокус возвращается на контейнер
+  // (tabindex=-1): следующий Tab попадёт на первый элемент диалога.
+  $effect(() => {
+    if (!isOpen || !modalElement) return;
+    const element = modalElement;
+    const observer = new MutationObserver(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      const dialogs = document.querySelectorAll(MODAL_SELECTOR);
+      if (dialogs[dialogs.length - 1] !== element) return;
+      element.focus();
+    });
+    observer.observe(element, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  });
+
   function getFocusableElements(): HTMLElement[] {
     if (!modalElement) return [];
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
