@@ -19,6 +19,33 @@ test(`subscription-refresh core:${RT.core || 'unknown'}`, async ({ page }) => {
 
   test.setTimeout(T.page + 6 * ACTION);
   const guard = attachConsoleGuard(page);
+
+  // Запросы обновления, ушедшие за одно нажатие (сеть только наблюдается, не подменяется).
+  // Одно нажатие — одна команда обновления провайдера Mihomo: PUT /api/proxy-providers/<имя>/refresh;
+  // запрос Xray в этом случае идёт с kernel=xray и Mihomo не трогает.
+  const refreshReqs: { method: string; path: string; xrayOnly: boolean }[] = [];
+  page.on('request', (req) => {
+    let u: URL;
+    try {
+      u = new URL(req.url());
+    } catch {
+      return;
+    }
+    if (u.pathname === '/api/subscriptions/refresh') {
+      refreshReqs.push({
+        method: req.method(),
+        path: u.pathname,
+        xrayOnly: u.searchParams.get('kernel') === 'xray'
+      });
+    } else if (/^\/api\/proxy-providers\/[^/]+\/refresh$/.test(u.pathname)) {
+      // имя провайдера в отчёт не попадает (D-21)
+      refreshReqs.push({
+        method: req.method(),
+        path: '/api/proxy-providers/<имя>/refresh',
+        xrayOnly: false
+      });
+    }
+  });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/#/proxies?tab=providers');
 
@@ -42,6 +69,7 @@ test(`subscription-refresh core:${RT.core || 'unknown'}`, async ({ page }) => {
     await expect(page.locator('.toast')).toHaveCount(0, { timeout: T.action });
 
     await expect(refresh, `${label}: кнопка обновления`).toBeEnabled({ timeout: T.action });
+    refreshReqs.length = 0;
     await refresh.click();
 
     // обновление закончено, когда пришло уведомление (успех, предупреждение или ошибка)
@@ -52,6 +80,18 @@ test(`subscription-refresh core:${RT.core || 'unknown'}`, async ({ page }) => {
     await expect(refresh, `${label}: кнопка обновления осталась занятой`).toBeEnabled({
       timeout: ACTION
     });
+
+    // форма запросов нажатия: если ушёл PUT обновления провайдера Mihomo, то он один, а запрос
+    // Xray идёт с kernel=xray (иначе панель сама шлёт Mihomo вторую команду)
+    const puts = refreshReqs.filter((r) => r.method === 'PUT');
+    const posts = refreshReqs.filter((r) => r.method === 'POST');
+    const doubled = puts.length > 1 || (puts.length === 1 && posts.some((r) => !r.xrayOnly));
+    expect(
+      doubled,
+      `${label}: одно нажатие — больше одной команды обновления провайдера Mihomo (${refreshReqs
+        .map((r) => `${r.method} ${r.path}${r.xrayOnly ? ' kernel=xray' : ''}`)
+        .join(', ')})`
+    ).toBe(false);
 
     // ошибки: уведомление, баннер отказа устройства, сообщение об ошибке на карточке
     await expect(page.locator('.toast--error'), `${label}: уведомление об ошибке`).toHaveCount(0);
