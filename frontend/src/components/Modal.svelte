@@ -24,6 +24,8 @@
     children?: Snippet;
   }>();
 
+  const MODAL_SELECTOR = '[role="dialog"][aria-modal="true"]';
+
   let modalElement: HTMLDivElement | null = $state(null);
   let previouslyFocusedElement: HTMLElement | null = null;
 
@@ -51,23 +53,25 @@
     }
   });
 
-  // Фокус, ушедший на body (элемент с фокусом убран из разметки при перерисовке),
-  // не доходит до обработчика на самом диалоге: Tab увёл бы его на страницу под
-  // модалью. Пока диалог открыт и он верхний, такой Tab возвращает фокус на первый
-  // элемент диалога.
+  // Фокус вне диалога бывает и на body (элемент с фокусом убран из разметки при
+  // перерисовке), и на вызвавшей кнопке (Tab пришёл раньше начального фокуса, который
+  // ставится через setTimeout). Такой Tab не доходит до обработчика на самом диалоге и
+  // увёл бы фокус на страницу под модалью. Пока диалог открыт и он верхний, Tab
+  // возвращает фокус на первый элемент диалога, Shift+Tab: на последний. Фокус внутри
+  // любого диалога aria-modal (свой или лежащего поверх подтверждения) не трогаем.
   $effect(() => {
     if (!isOpen) return;
     const onWindowKeydown = (event: KeyboardEvent) => {
       if (event.key !== 'Tab' || !modalElement) return;
       const active = document.activeElement;
-      // только потеря фокуса на body; фокус в другой модали поверх этой не трогаем
-      if (active && active !== document.body) return;
-      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      if (active && active !== document.body && active.closest(MODAL_SELECTOR)) return;
+      const dialogs = document.querySelectorAll(MODAL_SELECTOR);
       if (dialogs[dialogs.length - 1] !== modalElement) return;
       event.preventDefault();
       const focusables = getFocusableElements();
-      if (focusables.length > 0) focusables[0].focus();
-      else modalElement.focus();
+      if (focusables.length === 0) modalElement.focus();
+      else if (event.shiftKey) focusables[focusables.length - 1].focus();
+      else focusables[0].focus();
     };
     window.addEventListener('keydown', onWindowKeydown, true);
     return () => window.removeEventListener('keydown', onWindowKeydown, true);

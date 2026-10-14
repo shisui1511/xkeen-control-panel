@@ -73,6 +73,21 @@ async function diagSettled(page: Page): Promise<void> {
   ).toBeVisible({ timeout: T.action });
 }
 
+/** Где фокус относительно диалога: открыт ли он, внутри ли фокус и какой элемент активен. */
+async function focusState(
+  page: Page,
+  testid: string
+): Promise<{ dialog: boolean; inside: boolean; active: string }> {
+  return page.evaluate((sel) => {
+    const dlg = document.querySelector(sel);
+    const el = document.activeElement as HTMLElement | null;
+    const active = el
+      ? el.getAttribute('data-testid') || `${el.tagName.toLowerCase()}.${el.className}`
+      : 'нет';
+    return { dialog: !!dlg, inside: !!dlg && !!el && dlg.contains(el), active };
+  }, `[data-testid="${testid}"]`);
+}
+
 /** Все вкладки диагностики открываются; пробный запрос без ответа объяснён в отчёте. */
 async function checkTabs(page: Page): Promise<void> {
   const hasRecord = await page.getByTestId('nodes-diag-meta').isVisible();
@@ -781,6 +796,33 @@ test('modals: Esc закрывает, фокус заперт и возвращ�
     const modal = page.getByTestId(c.modal);
     await expect(modal, c.name).toBeVisible({ timeout: T.action });
     await expect(c.ready, c.name).toBeVisible({ timeout: T.action });
+
+    // при открытии фокус уходит в диалог
+    await expect
+      .poll(async () => (await focusState(page, c.modal)).inside, {
+        message: `${c.name}: начальный фокус в диалоге`,
+        timeout: T.action
+      })
+      .toBe(true);
+
+    // Tab, пришедший пока фокус ещё вне диалога (на вызвавшей кнопке, раньше начального
+    // фокуса), не должен уводить его на страницу под модалью: фокус уводится наружу
+    // намеренно, чтобы окно гонки воспроизводилось детерминированно.
+    for (const key of ['Tab', 'Shift+Tab']) {
+      await c.opener.focus();
+      const before = await focusState(page, c.modal);
+      if (!before.dialog) {
+        problems.push(`${c.name}: диалог закрылся при возврате фокуса на кнопку`);
+        break;
+      }
+      await page.keyboard.press(key);
+      const after = await focusState(page, c.modal);
+      if (!after.dialog) problems.push(`${c.name}: диалог закрылся после ${key} с кнопки`);
+      else if (!after.inside)
+        problems.push(`${c.name}: фокус вне диалога на ${after.active} после ${key} с кнопки`);
+    }
+    // дальше Escape и обход Tab имеют смысл только при фокусе в диалоге
+    expect(problems, problems.join('\n')).toEqual([]);
 
     // фокус заперт: Tab по кругу не выводит его из диалога
     for (let i = 0; i < 14; i++) {
