@@ -24,6 +24,8 @@
     children?: Snippet;
   }>();
 
+  const MODAL_SELECTOR = '[role="dialog"][aria-modal="true"]';
+
   let modalElement: HTMLDivElement | null = $state(null);
   let previouslyFocusedElement: HTMLElement | null = null;
 
@@ -51,26 +53,46 @@
     }
   });
 
-  // Фокус, ушедший на body (элемент с фокусом убран из разметки при перерисовке),
-  // не доходит до обработчика на самом диалоге: Tab увёл бы его на страницу под
-  // модалью. Пока диалог открыт и он верхний, такой Tab возвращает фокус на первый
-  // элемент диалога.
+  // Фокус вне диалога бывает и на body (элемент с фокусом убран из разметки при
+  // перерисовке), и на вызвавшей кнопке (Tab пришёл раньше начального фокуса, который
+  // ставится через setTimeout). Такой Tab не доходит до обработчика на самом диалоге и
+  // увёл бы фокус на страницу под модалью. Пока диалог открыт и он верхний, Tab
+  // возвращает фокус на первый элемент диалога, Shift+Tab: на последний. Фокус внутри
+  // любого диалога aria-modal (свой или лежащего поверх подтверждения) не трогаем.
   $effect(() => {
     if (!isOpen) return;
     const onWindowKeydown = (event: KeyboardEvent) => {
       if (event.key !== 'Tab' || !modalElement) return;
       const active = document.activeElement;
-      // только потеря фокуса на body; фокус в другой модали поверх этой не трогаем
-      if (active && active !== document.body) return;
-      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      if (active && active !== document.body && active.closest(MODAL_SELECTOR)) return;
+      const dialogs = document.querySelectorAll(MODAL_SELECTOR);
       if (dialogs[dialogs.length - 1] !== modalElement) return;
       event.preventDefault();
       const focusables = getFocusableElements();
-      if (focusables.length > 0) focusables[0].focus();
-      else modalElement.focus();
+      if (focusables.length === 0) modalElement.focus();
+      else if (event.shiftKey) focusables[focusables.length - 1].focus();
+      else focusables[0].focus();
     };
     window.addEventListener('keydown', onWindowKeydown, true);
     return () => window.removeEventListener('keydown', onWindowKeydown, true);
+  });
+
+  // Перестройка содержимого может убрать элемент с фокусом (в диагностике «Повторить»
+  // исчезает вместе с алертом ошибки): фокус уходит на body, и скринридер с клавиатурой
+  // теряют место. Пока диалог открыт и он верхний, такой фокус возвращается на контейнер
+  // (tabindex=-1): следующий Tab попадёт на первый элемент диалога.
+  $effect(() => {
+    if (!isOpen || !modalElement) return;
+    const element = modalElement;
+    const observer = new MutationObserver(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      const dialogs = document.querySelectorAll(MODAL_SELECTOR);
+      if (dialogs[dialogs.length - 1] !== element) return;
+      element.focus();
+    });
+    observer.observe(element, { childList: true, subtree: true });
+    return () => observer.disconnect();
   });
 
   function getFocusableElements(): HTMLElement[] {
