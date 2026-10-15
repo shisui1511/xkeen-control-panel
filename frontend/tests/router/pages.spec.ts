@@ -80,9 +80,54 @@ async function datReady(page: Page): Promise<void> {
     });
 }
 
+// Прокси: группы Mihomo и значок внешнего IP клиента. Нарушения контраста живут в счётчиках
+// разделов групп и в значке маршрута IP, которых нет, пока виден скелетон или идёт проверка IP.
+async function proxiesReady(page: Page): Promise<void> {
+  const fail = (what: string, ms: number) =>
+    new Error(`страница proxies не загрузила данные за ${Math.round(ms / 1000)} с: ${what}`);
+  const workspace = page.locator('.main-content');
+
+  // группы загружены либо показано пустое состояние (Mihomo не запущен): скелетона нет
+  await expect(workspace.locator('.skeleton-card'))
+    .toHaveCount(0, { timeout: T.page })
+    .catch(() => {
+      throw fail('группы прокси не загрузились', T.page);
+    });
+
+  // проверка внешнего IP клиента закончилась (показан адрес или кнопка повторной проверки)
+  await expect(workspace.locator('.pill-label').filter({ hasText: /Определение IP|Detecting IP/ }))
+    .toHaveCount(0, { timeout: T.page })
+    .catch(() => {
+      throw fail('проверка внешнего IP не закончилась', T.page);
+    });
+}
+
+// Конструктор Mihomo: сценарии, вкладки разделов и предпросмотр YAML строятся по схеме,
+// пока она грузится, на месте конструктора только индикатор загрузки.
+async function mihomoGenReady(page: Page): Promise<void> {
+  const fail = (what: string, ms: number) =>
+    new Error(`страница mihomo-gen не загрузила данные за ${Math.round(ms / 1000)} с: ${what}`);
+  const workspace = page.locator('.main-content');
+
+  await expect(workspace.locator('.loading-state-block'))
+    .toHaveCount(0, { timeout: T.page })
+    .catch(() => {
+      throw fail('схема конструктора не загрузилась', T.page);
+    });
+
+  // сценарии из схемы отрисованы; attached, а не visible: на 390 px часть колонки скрыта
+  await expect(workspace.locator('.gen-layout button[data-scenario-id]').first())
+    .toBeAttached({ timeout: T.page })
+    .catch(() => {
+      throw fail('сценарии конструктора не отрисованы', T.page);
+    });
+}
+
 // Ожидание данных страницы перед axe: маршрут -> функция готовности
 const READY: Record<string, (page: Page) => Promise<void>> = {
-  dat: datReady
+  dat: datReady,
+  proxies: proxiesReady,
+  'mihomo-gen': mihomoGenReady
 };
 
 // Известные находки обхода (D-12): каждая размечена todo из pending и конкретной
