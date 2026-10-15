@@ -17,7 +17,8 @@
 #                        Dirty/Writeback носителя и loadavg устройства
 #   api-service-status   GET /api/service/status = 200
 #   kernel-restart       PID ядра в начале и в конце окна RT_SMOKE_WINDOW (по умолчанию
-#                        120 с) один и тот же: смена PID без команды — падение
+#                        120 с) один и тот же: ни один PID начала окна не дожил до конца —
+#                        перезапуск без команды, падение
 #   log-panic            в xcp.log после последнего баннера запуска нет panic
 #   log-error            в xcp.log после баннера нет слов ERROR и fatal
 #   log-repeat:<префикс> сообщение, повторившееся не менее 3 раз и чаще раза в минуту
@@ -348,8 +349,18 @@ else
   rc=0
   p1=$(rt_ssh "$ID" "pidof $core") || rc=$?
   [ "$rc" != 3 ] || lost
-  if [ -n "$p0" ] && [ "$p0" = "$p1" ]; then
+  # Перезапуск — ни один PID начала окна не дожил до конца. Рядом с ядром бывают
+  # короткие вспомогательные запуски бинарника с тем же именем (версия, проверка
+  # конфига): лишний PID в одном из замеров перезапуском не считается (прогон
+  # 20261015-015433-24d29880: было '9748 9176', стало '9176').
+  kept=""
+  for _p in $p0; do
+    case " $p1 " in *" $_p "*) kept=$_p ;; esac
+  done
+  if [ -n "$kept" ] && [ "$p0" = "$p1" ]; then
     chk PASS kernel-restart "PID $core не менялся за $WINDOW с"
+  elif [ -n "$kept" ]; then
+    chk PASS kernel-restart "PID $core $kept не менялся за $WINDOW с; рядом короткий процесс: было '$p0', стало '$p1'"
   else
     chk FAIL kernel-restart "PID $core за $WINDOW с: было '${p0:--}', стало '${p1:--}' — перезапуск без команды"
   fi
