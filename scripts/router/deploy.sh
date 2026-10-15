@@ -188,18 +188,21 @@ deploy_one() {
     echo "deploy[$id]: не удалось залить бинарник"
     return 1
   fi
-  # Остановка с ожиданием выхода: новый процесс не поднимется, пока старый держит порт.
+  # Остановка с ожиданием полного выхода: пока старый процесс жив (даже после kill -9
+  # он может дописывать на флешку), init-скрипт на запуск отвечает «already running»
+  # и ничего не запускает — панель остаётся лежать (прогон 20261015-015433-24d29880).
   rc=0
   rt_stage "$id" install rt_ssh "$id" "
     set -e
     chmod +x $BIN_PATH.new
     pid=\$(pidof xcp || true)
     if [ -n \"\$pid\" ]; then
-      kill \$pid
+      kill \$pid 2>/dev/null || true
       i=0
       while pidof xcp >/dev/null; do
         i=\$((i + 1))
-        if [ \$i -ge 15 ]; then kill -9 \$(pidof xcp) 2>/dev/null || true; sleep 1; break; fi
+        if [ \$i -eq 20 ]; then kill -9 \$(pidof xcp) 2>/dev/null || true; fi
+        if [ \$i -ge 30 ]; then echo 'старый xcp не вышел за 30 с' >&2; exit 4; fi
         sleep 1
       done
     fi
@@ -220,6 +223,9 @@ deploy_one() {
   if [ "$rc" = 3 ]; then
     echo "deploy[$id]: нет связи"
     return 3
+  elif [ "$rc" = 4 ]; then
+    echo "deploy[$id]: старый xcp не вышел за 30 с, подмена не выполнена"
+    return 1
   elif [ "$rc" != 0 ]; then
     echo "deploy[$id]: xcp не запустился после подмены"
     return 1
