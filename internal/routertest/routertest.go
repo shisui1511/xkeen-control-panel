@@ -286,6 +286,19 @@ func (p *Panel) Call(method, path string, in any) (int, []byte, error) {
 	return p.Request(method, path, body, AuthFull)
 }
 
+// Stream открывает долгий GET (поток SSE) с cookie сессии и без предела времени
+// клиента. Поток живёт, пока панель его не закроет или не отменён ctx.
+func (p *Panel) Stream(ctx context.Context, path string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.base+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Cookie", p.cookie)
+	c := *p.client
+	c.Timeout = 0
+	return c.Do(req)
+}
+
 // SlowCallTimeout — предел ожидания ответа для CallSlow.
 const SlowCallTimeout = 6 * time.Minute
 
