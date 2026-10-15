@@ -136,19 +136,24 @@
     return describeSource(n);
   }
 
-  // Уведомление о связи сервер ведёт по одному на ядро, а в тексте ядра нет: совпадающие
-  // по источнику и тексту показываются одним, закрытие снимает все слитые
+  // Уведомления о связи и об отказе провайдера сервер ведёт по одному на ядро, а в тексте
+  // ядра нет: совпадающие по виду, источнику, тексту и ссылке кабинета показываются одним,
+  // закрытие снимает все слитые
+  const TWIN_PREFIXES = ['source_network:', 'source_rejected:'];
+
   const shown = $derived.by(() => {
     const out: Shown[] = [];
     for (const n of $visibleNotices) {
       const d = describe(n);
       if (d === null) continue;
-      const twin = n.id.startsWith('source_network:')
+      const prefix = TWIN_PREFIXES.find((p) => n.id.startsWith(p));
+      const twin = prefix
         ? out.find(
             (o) =>
-              o.notice.id.startsWith('source_network:') &&
+              o.notice.id.startsWith(prefix) &&
               o.notice.id.split(':')[1] === n.id.split(':')[1] &&
-              o.text === d.text
+              o.text === d.text &&
+              o.cabinet === d.cabinet
           )
         : undefined;
       if (twin) twin.ids.push(n.id);
