@@ -1,5 +1,5 @@
 // e2e-pages: *
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
@@ -34,6 +34,55 @@ const ROOT: Record<string, string> = {
 // открывает конструктор в редакторе). Остальные маршруты должны остаться как есть.
 const ALIAS: Record<string, string> = {
   'mihomo-gen': '#/constructor'
+};
+
+// Часть нарушений axe видна только на загруженных данных страницы (например, путь файла и
+// теги в инспекторе DAT). Проверка до их загрузки даёт плавающий вердикт: помеченный тест
+// то падает, то проходит (XPASS). Поэтому страница с такими данными ждёт их явно и только
+// наблюдает: сеть не подменяется, а не дождавшийся тест падает как находка (стенд или продукт).
+async function datReady(page: Page): Promise<void> {
+  const fail = (what: string, ms: number) =>
+    new Error(`страница dat не загрузила данные за ${Math.round(ms / 1000)} с: ${what}`);
+  const workspace = page.locator('.main-content');
+
+  // список файлов загружен: индикатора загрузки на месте рабочей области нет
+  await expect(workspace.locator('p.text-secondary').filter({ hasText: /Загрузка|Loading/ }))
+    .toHaveCount(0, { timeout: T.page })
+    .catch(() => {
+      throw fail('список файлов не загрузился', T.page);
+    });
+
+  // правая колонка показывает инспектор, заглушку «файл не выбран» или набор по умолчанию;
+  // ожидание attached, а не visible: на 390 px колонка может быть скрыта вёрсткой
+  await expect(
+    page
+      .locator(
+        [
+          '.dat-detail .tags-grid',
+          '.dat-detail .inspector-scroll-area .td-state',
+          '.dat-detail .inspector-body',
+          '.dat-detail .detail-empty-card',
+          '[data-testid="dat-standard-sets"]'
+        ].join(', ')
+      )
+      .first()
+  )
+    .toBeAttached({ timeout: T.page })
+    .catch(() => {
+      throw fail('правая колонка не отрисована', T.page);
+    });
+
+  // теги догружены: тяжёлый geosite на mipsle разбирается дольше обычной загрузки страницы
+  await expect(page.locator('.dat-detail .inspector-scroll-area .spinner-circle'))
+    .toHaveCount(0, { timeout: T.save })
+    .catch(() => {
+      throw fail('теги выбранного файла не загрузились', T.save);
+    });
+}
+
+// Ожидание данных страницы перед axe: маршрут -> функция готовности
+const READY: Record<string, (page: Page) => Promise<void>> = {
+  dat: datReady
 };
 
 // Известные находки обхода (D-12): каждая размечена todo из pending и конкретной
@@ -104,6 +153,7 @@ for (const route of routes()) {
           await page.waitForLoadState('networkidle', { timeout: T.network }).catch(() => {});
           // переход между вкладками идёт с затуханием: axe не должен видеть полупрозрачный кадр
           await page.waitForTimeout(500);
+          await READY[route]?.(page);
 
           const hash = await page.evaluate(() => window.location.hash);
           // Маршрут #/config панель открывает только при включённом флаге config_layer, иначе
