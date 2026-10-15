@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -619,6 +620,132 @@ func TestRouterNoticesRebuildFromLive(t *testing.T) {
 	e.svc.rebuildNotices()
 	if _, ok := rtNoticeIDs(e)["source_network:"+a+":mihomo"]; ok {
 		t.Error("уведомление о неустановленном ядре осталось")
+	}
+}
+
+// Метаданные провайдера после отказа: когда у подписки под текущими адресом и HWID
+// своих метаданных ещё нет (сменили HWID или адрес), freshMeta берёт их из заголовков
+// ответа с отказом (all_stubs, http_auth), и уведомление source_rejected несёт
+// ссылку кабинета, а карточка — срок, объявление и поддержку. Метаданные той же
+// конфигурации при отказе не перезаписываются; сетевые сбои и provider_error
+// метаданных не дают. Тест идёт на роутере, но к провайдеру не ходит: ответы заданы
+// заголовками зоны .example и собираются настоящим parseMeta. Настоящий отказ
+// провайдера проверяет роутерный сценарий Playwright, один за прогон.
+func TestRouterRefreshMetaOnRejection(t *testing.T) {
+	e := rtNewEnv(t, false, false)
+	e.installed = configlayer.InstalledKernels{Xray: true, Mihomo: true}
+	now := e.clock.Now()
+
+	const (
+		rejCabinet  = "https://cab.example/rejected"
+		rejSupport  = "https://support.example/rejected"
+		okCabinet   = "https://cab.example/accepted"
+		rejAnnounce = "Лимит устройств исчерпан"
+	)
+	rejMeta := parseMeta(http.Header{
+		"Profile-Web-Page-Url": {rejCabinet}, "Support-Url": {rejSupport}, "Announce": {rejAnnounce},
+		"Subscription-Userinfo": {"upload=100; download=200; total=1000; expire=1893456000"},
+	}, now)
+	okMeta := parseMeta(http.Header{
+		"Profile-Web-Page-Url": {okCabinet}, "Subscription-Userinfo": {"upload=1; download=2; total=3; expire=1893456001"},
+	}, now)
+	webOnly := parseMeta(http.Header{"Profile-Web-Page-Url": {rejCabinet}}, now)
+	supportOnly := parseMeta(http.Header{"Support-Url": {rejSupport}}, now)
+	if rejMeta.WebURL != rejCabinet || rejMeta.SupportURL != rejSupport || rejMeta.Expire == 0 || rejMeta.Announce != rejAnnounce ||
+		okMeta.WebURL != okCabinet || webOnly.WebURL == "" || supportOnly.SupportURL == "" {
+		t.Fatalf("заданные заголовки не разобраны: %+v %+v", rejMeta, okMeta)
+	}
+	if rejMeta.WebURL == okMeta.WebURL {
+		t.Fatal("ссылки кабинета ответов должны различаться")
+	}
+
+	// rtFetchOf — ответ ядра: пустой код — удавшийся, иначе ошибка с кодом; заголовки
+	// разобраны и у ответа с ошибкой, как в fetchOutcome.
+	rtFetchOf := func(kernel, code string, m Meta) *kernelFetch {
+		oc := &kernelOutcome{Meta: m}
+		if code != "" {
+			oc.Err = nodes.NewError(code)
+		}
+		return &kernelFetch{kernel: kernel, oc: oc}
+	}
+	cfg := SubscriptionConfig{URL: rtDeadURL}
+	netOnly := Meta{Print: candidatePrint(cfg), CheckedAt: now}
+	// withLocked — ожидаемое при locked: к метаданным добавляется HWIDLocked.
+	withLocked := func(m Meta) Meta { m.HWIDLocked = true; return m }
+	// fields — поля провайдера без служебных меток времени и отпечатка.
+	fields := func(m Meta) Meta { m.UpdatedAt, m.CheckedAt, m.Print = time.Time{}, time.Time{}, ""; return m }
+
+	cases := []struct {
+		name    string
+		prev    Meta
+		locked  bool
+		fetches []*kernelFetch
+		want    Meta
+		exact   bool // сравнение целиком с want; иначе без служебных меток
+	}{
+		{"(a) новая конфигурация, отказ all_stubs", Meta{}, false,
+			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, rejMeta), rtFetchOf(kernelMihomo, nodes.CodeAllStubs, rejMeta)}, rejMeta, false},
+		{"(b) новая конфигурация, отказ http_auth", Meta{}, false,
+			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeHTTPAuth, rejMeta)}, rejMeta, false},
+		{"(c) сначала сетевой сбой, затем отказ", netOnly, false,
+			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, rejMeta)}, rejMeta, false},
+		{"(d) метаданные той же конфигурации не перезаписываются", okMeta, false,
+			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, rejMeta), rtFetchOf(kernelMihomo, nodes.CodeAllStubs, rejMeta)}, okMeta, true},
+		{"(e) сетевой сбой с заголовками метаданных не даёт", Meta{}, false,
+			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeServerError, rejMeta)}, Meta{}, true},
+		{"(f) provider_error с заголовками метаданных не даёт", Meta{}, false,
+			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeHTMLResponse, rejMeta)}, Meta{}, true},
+		{"(g) удавшийся ответ главнее отказа", Meta{}, false,
+			[]*kernelFetch{rtFetchOf(kernelXray, "", okMeta), rtFetchOf(kernelMihomo, nodes.CodeAllStubs, rejMeta)}, okMeta, false},
+		{"(h) без HWID: признак сохраняется при отказе", Meta{}, true,
+			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, rejMeta)}, withLocked(rejMeta), false},
+		{"(i) отказы с разными полями складываются", Meta{}, false,
+			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, webOnly), rtFetchOf(kernelMihomo, nodes.CodeAllStubs, supportOnly)},
+			Meta{WebURL: rejCabinet, SupportURL: rejSupport}, false},
+	}
+	for _, tc := range cases {
+		got := e.svc.freshMeta(now, tc.prev, tc.locked, tc.fetches)
+		if tc.exact {
+			if got != tc.want {
+				t.Errorf("%s: метаданные %+v, ждали %+v", tc.name, got, tc.want)
+			}
+			continue
+		}
+		if fields(got) != fields(tc.want) {
+			t.Errorf("%s: метаданные %+v, ждали %+v", tc.name, fields(got), fields(tc.want))
+		}
+	}
+
+	// Сборка в уведомления и карточку: итог случая (a) в живых данных отказа по обоим ядрам.
+	const id = "a1b2c3d4"
+	ref := rtPut(t, e, "vless_ws")
+	ref.FetchedAt = time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	meta := e.svc.freshMeta(now, Meta{}, false,
+		[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, rejMeta), rtFetchOf(kernelMihomo, nodes.CodeAllStubs, rejMeta)})
+	rtSeedApplied(t, e, id, rtDeadURL, Interval{Mode: IntervalProvider}, true, &LiveSource{
+		Meta: meta,
+		Kernels: map[string]*KernelLive{
+			kernelXray:   {Applied: ref, Status: Status{Code: StatusRejected, ErrorCode: nodes.CodeAllStubs, Since: now}},
+			kernelMihomo: {Applied: ref, Status: Status{Code: StatusRejected, ErrorCode: nodes.CodeAllStubs, Since: now}},
+		},
+	})
+	e.svc.rebuildNotices()
+	got := rtNoticeIDs(e)
+	nx, okx := got["source_rejected:"+id+":xray"]
+	nm, okm := got["source_rejected:"+id+":mihomo"]
+	if !okx || !okm {
+		t.Fatalf("уведомления об отказе по ядрам: xray=%v mihomo=%v", okx, okm)
+	}
+	if nx.Params["web_url"] != rejCabinet || nm.Params["web_url"] != rejCabinet {
+		t.Errorf("web_url уведомлений: %q и %q, ждали ссылку кабинета ответа с отказом", nx.Params["web_url"], nm.Params["web_url"])
+	}
+	if !reflect.DeepEqual(nx.Params, nm.Params) {
+		t.Errorf("params двойников различаются: %+v и %+v", nx.Params, nm.Params)
+	}
+	src := rtFindSource(t, rtView(t, e), id)
+	if src.Meta == nil || src.Meta.WebURL != rejCabinet || src.Meta.SupportURL != rejSupport ||
+		src.Meta.Expire != rejMeta.Expire || src.Meta.Announce != rejAnnounce {
+		t.Errorf("метаданные карточки: %+v", src.Meta)
 	}
 }
 

@@ -412,22 +412,46 @@ func (s *Service) markChecked(id string, cfg SubscriptionConfig, now time.Time) 
 	}
 }
 
-// freshMeta — метаданные после запроса: свежие из удавшихся ответов; если ни один
-// запрос не удался, прежние. HWIDLocked не снимается, пока запросы идут без HWID:
-// без x-hwid провайдер заголовка не повторит.
+// freshMeta — метаданные после запроса. Источников три, по порядку:
+//  1. удавшиеся ответы: свежие метаданные из них, как и раньше;
+//  2. ни один запрос не удался, но провайдер отказал (all_stubs, http_auth), а своих
+//     метаданных у подписки под текущими адресом и HWID ещё нет (сменили HWID или
+//     адрес — отпечаток не совпал, metaFor пуст): метаданные ответов с отказом. Это
+//     ответ самого провайдера на текущие адрес и HWID, с ним же приходят ссылка
+//     кабинета, срок и объявление; без него уведомление об отказе осталось бы без
+//     ссылки кабинета, а карточка — без данных провайдера;
+//  3. иначе прежние. Метаданные той же конфигурации при отказе не перезаписываются.
+//
+// Сетевые сбои (5xx, TLS, таймаут) и provider_error (HTML, пустой ответ) метаданных не
+// дают: заголовки там могут быть от промежуточного узла, а не от провайдера.
+// HWIDLocked не снимается, пока запросы идут без HWID: без x-hwid провайдер заголовка
+// не повторит.
 func (s *Service) freshMeta(now time.Time, prev Meta, locked bool, fetches []*kernelFetch) Meta {
-	var metas []Meta
+	var metas, rejected []Meta
 	for _, kf := range fetches {
-		if kf.oc.Err == nil {
+		switch {
+		case kf.oc.Err == nil:
 			metas = append(metas, kf.oc.Meta)
+		case statusGroup(kf.oc.Err.Code) == StatusRejected:
+			rejected = append(rejected, kf.oc.Meta)
 		}
 	}
 	if len(metas) == 0 {
-		return prev
+		if len(rejected) == 0 || !noProviderData(prev) {
+			return prev
+		}
+		metas = rejected
 	}
 	m := mergeMeta(now, metas...)
 	m.HWIDLocked = m.HWIDLocked || locked
 	return m
+}
+
+// noProviderData — у метаданных нет данных провайдера: без служебных UpdatedAt,
+// CheckedAt и Print остаётся пустое значение.
+func noProviderData(m Meta) bool {
+	m.UpdatedAt, m.CheckedAt, m.Print = time.Time{}, time.Time{}, ""
+	return m == Meta{}
 }
 
 // fillOutcome собирает итог обновления из результатов по ядрам.
