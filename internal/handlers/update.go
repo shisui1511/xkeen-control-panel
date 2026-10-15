@@ -319,10 +319,13 @@ func (a *API) UpdateEventsSSE(w http.ResponseWriter, r *http.Request) {
 	defer ticker.Stop()
 
 	lastState := state
+	stopping := a.srv.Stopping()
 
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-stopping:
 			return
 		case <-ticker.C:
 			currentState := getUpdateState()

@@ -110,8 +110,8 @@ func writeLayerEvent(w http.ResponseWriter, flusher http.Flusher, name string, d
 
 // ConfigLayerEvents — GET /api/configlayer/events: поток событий слоя (SSE).
 // Первое событие — snapshot; дальше draft, files, apply_step, apply_done,
-// notices; раз в 20 с комментарий ping. Выход по закрытию соединения, отписка в
-// defer (D-06).
+// notices; раз в 20 с комментарий ping. Выход по закрытию соединения или по
+// остановке сервера, отписка в defer (D-06).
 func (a *API) ConfigLayerEvents(w http.ResponseWriter, r *http.Request) {
 	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
 		return
@@ -144,9 +144,12 @@ func (a *API) ConfigLayerEvents(w http.ResponseWriter, r *http.Request) {
 
 	ticker := time.NewTicker(layerSSEPing)
 	defer ticker.Stop()
+	stopping := a.srv.Stopping()
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-stopping:
 			return
 		case ev, open := <-events:
 			if !open {
