@@ -57,6 +57,7 @@ var rtNotExpressibleMihomo = map[string]string{
 // Шаги: parse, xray, mihomo.
 var rtLinkMarks = map[string]routertest.KnownMark{
 	"wireguard/xray": routertest.Known("mipsle", "xray-wireguard-outbound-crash-mipsle"),
+	"vless_kcp/xray": routertest.Known("arm64", "xray-mkcp-header-seed-finalmask"),
 }
 
 func rtStep(t *testing.T, scheme, step string, ok bool, format string, args ...any) {
