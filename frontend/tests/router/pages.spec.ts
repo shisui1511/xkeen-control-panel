@@ -2,7 +2,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { attachConsoleGuard } from './lib/console';
-import { T } from './lib/env';
+import { RT, T } from './lib/env';
 import { knownFailure } from './lib/known';
 import { routes } from './lib/pages';
 
@@ -102,6 +102,30 @@ async function proxiesReady(page: Page): Promise<void> {
     });
 }
 
+// Подключения: индикатор в шапке зелёный («Онлайн») только после соединения сокета Mihomo.
+// Нарушение контраста живёт именно в этом зелёном индикаторе, поэтому проверка до соединения
+// даёт плавающий вердикт (то KNOWN, то XPASS). Если Clash API ядра выключен (api_reachable
+// false в /api/capabilities), индикатор законно остаётся «нет связи» и ждать нечего.
+async function connectionsReady(page: Page): Promise<void> {
+  if (RT.core !== 'mihomo') return;
+  const reachable = await page.evaluate(async () => {
+    const res = await fetch('/api/capabilities', { credentials: 'same-origin' });
+    const body = (await res.json()) as {
+      data?: { mihomo?: { api_reachable?: boolean } };
+      mihomo?: { api_reachable?: boolean };
+    };
+    return Boolean((body.data ?? body).mihomo?.api_reachable);
+  });
+  if (!reachable) return;
+  await expect(page.locator('.main-content .status-indicator.connected').first())
+    .toBeVisible({ timeout: T.page })
+    .catch(() => {
+      throw new Error(
+        `страница connections не загрузила данные за ${Math.round(T.page / 1000)} с: сокет подключений не соединился`
+      );
+    });
+}
+
 // Конструктор Mihomo: сценарии, вкладки разделов и предпросмотр YAML строятся по схеме,
 // пока она грузится, на месте конструктора только индикатор загрузки.
 async function mihomoGenReady(page: Page): Promise<void> {
@@ -126,6 +150,7 @@ async function mihomoGenReady(page: Page): Promise<void> {
 // Ожидание данных страницы перед axe: маршрут -> функция готовности
 const READY: Record<string, (page: Page) => Promise<void>> = {
   dat: datReady,
+  connections: connectionsReady,
   proxies: proxiesReady,
   'mihomo-gen': mihomoGenReady
 };
