@@ -81,7 +81,9 @@ func rtMprAPIAddr(t *testing.T) (network, addr string) {
 		target := strings.TrimPrefix(strings.TrimPrefix(info.Target, "http://"), "https://")
 		return "tcp", strings.TrimRight(target, "/")
 	}
-	t.Fatalf("в config.yaml Mihomo нет external-controller (тип %q)", info.Type)
+	// Без external-controller у ядра нет Clash API: панели нечего проксировать,
+	// окно перезапуска наблюдать нечем. Это настройка стенда, а не дефект.
+	t.Skipf("в config.yaml Mihomo нет external-controller (тип %q): Clash API выключен", info.Type)
 	return "", ""
 }
 
