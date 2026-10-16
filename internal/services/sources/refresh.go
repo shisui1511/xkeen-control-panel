@@ -476,10 +476,14 @@ func displayOnly(m Meta) Meta {
 	return m
 }
 
-// noProviderData — у метаданных нет данных провайдера: без служебных UpdatedAt,
-// CheckedAt и Print остаётся пустое значение.
+// noProviderData — у метаданных нет данных провайдера для показа: без служебных
+// UpdatedAt, CheckedAt и Print и без признака HWIDLocked остаётся пустое значение.
+// HWIDLocked — признак поведения из удавшегося ответа, а не данные провайдера. Если его
+// считать данными, то при locked (а в refreshWork locked == prev.HWIDLocked) ветка отказа
+// недостижима, и уведомление остаётся без ссылки кабинета. Признак сохраняется в итоге
+// freshMeta через HWIDLocked ||= locked.
 func noProviderData(m Meta) bool {
-	m.UpdatedAt, m.CheckedAt, m.Print = time.Time{}, time.Time{}, ""
+	m.UpdatedAt, m.CheckedAt, m.Print, m.HWIDLocked = time.Time{}, time.Time{}, "", false
 	return m == Meta{}
 }
 

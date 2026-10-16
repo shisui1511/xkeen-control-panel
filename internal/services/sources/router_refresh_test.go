@@ -694,48 +694,54 @@ func TestRouterRefreshMetaOnRejection(t *testing.T) {
 	// fields — поля провайдера без служебных меток времени и отпечатка.
 	fields := func(m Meta) Meta { m.UpdatedAt, m.CheckedAt, m.Print = time.Time{}, time.Time{}, ""; return m }
 
+	// onlyLocked — под текущими адресом и HWID есть только признак «без HWID» из удавшегося
+	// ответа: данных провайдера для показа нет (WR-02).
+	onlyLocked := Meta{HWIDLocked: true, Print: candidatePrint(cfg), CheckedAt: now}
+
 	cases := []struct {
 		name    string
 		prev    Meta
-		locked  bool
 		fetches []*kernelFetch
 		want    Meta
 		exact   bool // сравнение целиком с want; иначе без служебных меток
 	}{
-		{"(a) новая конфигурация, отказ all_stubs", Meta{}, false,
+		{"(a) новая конфигурация, отказ all_stubs", Meta{},
 			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, rejMeta), rtFetchOf(kernelMihomo, nodes.CodeAllStubs, rejMeta)}, rejMeta, false},
-		{"(b) новая конфигурация, отказ http_auth 401", Meta{}, false,
+		{"(b) новая конфигурация, отказ http_auth 401", Meta{},
 			[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusUnauthorized, rejMeta)}, rejMeta, false},
-		{"(c) сначала сетевой сбой, затем отказ", netOnly, false,
+		{"(c) сначала сетевой сбой, затем отказ", netOnly,
 			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, rejMeta)}, rejMeta, false},
-		{"(d) метаданные той же конфигурации не перезаписываются", okMeta, false,
+		{"(d) метаданные той же конфигурации не перезаписываются", okMeta,
 			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, rejMeta), rtFetchOf(kernelMihomo, nodes.CodeAllStubs, rejMeta)}, okMeta, true},
-		{"(e) сетевой сбой с заголовками метаданных не даёт", Meta{}, false,
+		{"(e) сетевой сбой с заголовками метаданных не даёт", Meta{},
 			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeServerError, rejMeta)}, Meta{}, true},
-		{"(f) provider_error с заголовками метаданных не даёт", Meta{}, false,
+		{"(f) provider_error с заголовками метаданных не даёт", Meta{},
 			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeHTMLResponse, rejMeta)}, Meta{}, true},
-		{"(g) удавшийся ответ главнее отказа", Meta{}, false,
+		{"(g) удавшийся ответ главнее отказа", Meta{},
 			[]*kernelFetch{rtFetchOf(kernelXray, "", okMeta), rtFetchOf(kernelMihomo, nodes.CodeAllStubs, rejMeta)}, okMeta, false},
-		{"(h) без HWID: признак сохраняется при отказе", Meta{}, true,
-			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, rejMeta)}, withLocked(rejMeta), false},
-		{"(i) отказы с разными полями складываются", Meta{}, false,
+		{"(h) у подписки только признак «без HWID» из удавшегося ответа, затем отказ 403", onlyLocked,
+			[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusForbidden, rejMeta)}, withLocked(rejMeta), false},
+		{"(i) отказы с разными полями складываются", Meta{},
 			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, webOnly), rtFetchOf(kernelMihomo, nodes.CodeAllStubs, supportOnly)},
 			Meta{WebURL: rejCabinet, SupportURL: rejSupport}, false},
-		{"(j) all_stubs: признак «без HWID» и интервал из ответа с отказом не берутся", Meta{}, false,
+		{"(j) all_stubs: признак «без HWID» и интервал из ответа с отказом не берутся", Meta{},
 			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, lockMeta)}, rejMeta, false},
-		{"(k) http_auth 403: признак «без HWID» и интервал из ответа с отказом не берутся", Meta{}, false,
+		{"(k) http_auth 403: признак «без HWID» и интервал из ответа с отказом не берутся", Meta{},
 			[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusForbidden, lockMeta)}, rejMeta, false},
-		{"(l) http_auth 404 метаданных не даёт", Meta{}, false,
+		{"(l) http_auth 404 метаданных не даёт", Meta{},
 			[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusNotFound, rejMeta)}, Meta{}, true},
-		{"(m) http_auth 407 метаданных не даёт", Meta{}, false,
+		{"(m) http_auth 407 метаданных не даёт", Meta{},
 			[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusProxyAuthRequired, rejMeta)}, Meta{}, true},
-		{"(n) http_auth 429 метаданных не даёт", Meta{}, false,
+		{"(n) http_auth 429 метаданных не даёт", Meta{},
 			[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusTooManyRequests, rejMeta)}, Meta{}, true},
-		{"(o) удавшийся ответ задаёт поведение подписки", Meta{}, false,
+		{"(o) удавшийся ответ задаёт поведение подписки", Meta{},
 			[]*kernelFetch{rtFetchOf(kernelXray, "", lockMeta)}, lockMeta, false},
 	}
 	for _, tc := range cases {
-		got := e.svc.freshMeta(now, tc.prev, tc.locked, tc.fetches)
+		// В работе locked всегда равен prev.HWIDLocked (refreshWork берёт его из sourceHWID),
+		// поэтому таблица не описывает состояний, которых не бывает.
+		_, locked := e.svc.sourceHWID(cfg, tc.prev)
+		got := e.svc.freshMeta(now, tc.prev, locked, tc.fetches)
 		if tc.exact {
 			if got != tc.want {
 				t.Errorf("%s: метаданные %+v, ждали %+v", tc.name, got, tc.want)
@@ -757,6 +763,31 @@ func TestRouterRefreshMetaOnRejection(t *testing.T) {
 	if d, on := intervalOf(SubscriptionConfig{URL: rtDeadURL, Interval: Interval{Mode: IntervalProvider}}, afterReject); !on ||
 		d != defaultIntervalHours*time.Hour {
 		t.Errorf("интервал «по провайдеру» после отказа: %v (включён=%v), ждали %d ч", d, on, defaultIntervalHours)
+	}
+
+	// Следствия (h): итог отказа при одном только признаке «без HWID» кладётся в живые
+	// данные второго источника; уведомление несёт ссылку кабинета ответа с отказом, а
+	// признак «без HWID» сохраняется (WR-02, D-07).
+	const idLocked = "b1b2c3d4"
+	_, lockedNow := e.svc.sourceHWID(cfg, onlyLocked)
+	afterLocked := e.svc.freshMeta(now, onlyLocked, lockedNow,
+		[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusForbidden, rejMeta)})
+	refLocked := rtPut(t, e, "vless_ws")
+	refLocked.FetchedAt = time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	rtSeedApplied(t, e, idLocked, rtDeadURL, Interval{Mode: IntervalProvider}, true, &LiveSource{
+		Meta: afterLocked,
+		Kernels: map[string]*KernelLive{
+			kernelXray: {Applied: refLocked, Status: Status{Code: StatusRejected, ErrorCode: nodes.CodeHTTPAuth, Since: now}},
+		},
+	})
+	e.svc.rebuildNotices()
+	if nl, ok := rtNoticeIDs(e)["source_rejected:"+idLocked+":xray"]; !ok {
+		t.Error("нет уведомления об отказе у подписки с признаком «без HWID»")
+	} else if nl.Params["web_url"] != rejCabinet {
+		t.Errorf("web_url уведомления при признаке «без HWID»: %q, ждали ссылку кабинета ответа с отказом", nl.Params["web_url"])
+	}
+	if _, lk := e.svc.sourceHWID(cfg, afterLocked); !lk {
+		t.Error("признак «без HWID» потерян после отказа")
 	}
 
 	// Сборка в уведомления и карточку: итог случая (a) в живых данных отказа по обоим ядрам.
