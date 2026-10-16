@@ -2632,6 +2632,7 @@
   "kernel.inactive_wrong": "Action unavailable: {active} is active, {required} is required.",
   "kernel.inactive_none": "Action unavailable: no kernel is running. This needs {required}.",
   "kernel.op_in_progress": "Another kernel operation is still running. Try again in a few seconds.",
+  "kernel.restarting": "The kernel is restarting: the Mihomo API is not answering yet. Data will refresh once it is up.",
   "kernel.stop_still_running": "{kernel} did not stop. Try again or check the logs.",
   "kernel.conflict_not_resolved": "Conflict not resolved: both kernels are still running. Try again or check the logs.",
   "kernel.state_conflict": "Both kernels",

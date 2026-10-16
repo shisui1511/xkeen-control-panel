@@ -42,6 +42,7 @@
   "kernel.inactive": "Действие недоступно: нужное ядро не активно",
   "kernel.conflict": "Запущены оба ядра: действие заблокировано",
   "kernel.op_in_progress": "Операция с ядром уже выполняется",
+  "kernel.restarting": "Ядро перезапускается: API Mihomo ещё не отвечает",
   "kernel.stop_failed": "Не удалось остановить ядро",
 
   "mihomo.not_running": "Mihomo не запущен",
