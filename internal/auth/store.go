@@ -78,6 +78,8 @@ type fileStore struct {
 	// sessionsSeq — номер последнего записанного снимка сессий (под mu).
 	sessionsSeq uint64
 	writes      atomic.Int64
+	// noSync — записи без fsync (finalWrites, остановка панели).
+	noSync atomic.Bool
 }
 
 // newFileStore возвращает nil при пустом dir — это режим «только память»,
@@ -88,6 +90,27 @@ func newFileStore(dir string) *fileStore {
 		return nil
 	}
 	return &fileStore{dir: dir}
+}
+
+// finalWrites переводит хранилище на запись без fsync: последние записи перед
+// выходом процесса (AuthService.Stop). Новый процесс панели читает файлы из кэша
+// страниц, а fsync под идущей записью на флешку ждёт фиксации журнала ext4
+// десятки секунд — дольше, чем init-скрипт ждёт выхода. Подмена файла остаётся
+// атомарной (utils.AtomicWriteFileNoSync).
+func (s *fileStore) finalWrites() {
+	if s == nil {
+		return
+	}
+	s.noSync.Store(true)
+}
+
+// writeFile атомарно пишет файл хранилища с правами 0600: с fsync, пока не
+// вызван finalWrites.
+func (s *fileStore) writeFile(path string, data []byte) error {
+	if s.noSync.Load() {
+		return utils.AtomicWriteFileNoSync(path, data, 0600)
+	}
+	return utils.AtomicWriteFile(path, data, 0600)
 }
 
 func (s *fileStore) path() string {
@@ -161,7 +184,7 @@ func (s *fileStore) saveRateLimit(attempts map[string]LoginAttempts) error {
 	if err != nil {
 		return err
 	}
-	if err := utils.AtomicWriteFile(s.rateLimitPath(), data, 0600); err != nil {
+	if err := s.writeFile(s.rateLimitPath(), data); err != nil {
 		return err
 	}
 	s.writes.Add(1)
@@ -255,7 +278,7 @@ func (s *fileStore) saveSessions(fingerprint string, sessions []*Session, seq ui
 	if err != nil {
 		return err
 	}
-	if err := utils.AtomicWriteFile(s.path(), data, 0600); err != nil {
+	if err := s.writeFile(s.path(), data); err != nil {
 		return err
 	}
 	if seq != 0 {

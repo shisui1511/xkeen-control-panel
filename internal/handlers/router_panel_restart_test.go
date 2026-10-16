@@ -3,32 +3,50 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 )
 
-// Перезапуск настоящей панели устройства init-скриптом, пока открыты потоки SSE
-// (вкладка «Конфигурация» и ход обновления). Остановка ждала потоки до дедлайна
-// http.Server.Shutdown (10 с); init-скрипт Entware за это время объявлял остановку
-// неудачной, запуск отвечал «already running», и после выхода старого процесса
-// панель оставалась лежать (деплой на arm64, прогон 20261015-015433-24d29880).
+// Перезапуск настоящей панели устройства init-скриптом. Init-скрипт Entware ждёт
+// выход старого процесса около 10 с; не дождался — запуск отвечает «already
+// running», и после выхода старого процесса панель остаётся лежать. Сценарии:
+// открытые потоки SSE (остановка ждала их до дедлайна http.Server.Shutdown, деплой
+// на arm64, прогон 20261015-015433-24d29880) и идущая запись на раздел панели
+// (остановка ждала fsync файлов состояния, прогон 20261016-085028-f37a028f).
 // Вердикт — процессы xcp в /proc (pidof, независимо от панели), время выхода
-// старого процесса и ответ новой панели по прежней сессии.
+// старого процесса, ответ новой панели по прежней сессии и журнал панели:
+// остановка закончилась сама, без аварийного выхода по сроку. Окно init-скрипта
+// отсчитывается от killall (rc.func печатает «Shutting down» прямо перед ним), а не
+// от запуска команды: цепочка sh → env → S99xcp → pidof сразу после большой записи
+// сама запускается секундами (exec busybox ждал чтения страницы с флешки 4,5 с,
+// прогон 20261016-115824-f37a028f), и это не время остановки панели.
 
 const (
 	rtPanelInit = "/opt/etc/init.d/S99xcp"
-	// rtPanelStopLimit — за сколько старый процесс обязан выйти после команды:
+	// rtPanelStopLimit — за сколько старый процесс обязан выйти после killall:
 	// init-скрипт ждёт остановку около 10 с, затем запуск видит старый процесс.
 	rtPanelStopLimit = 8 * time.Second
+	// rtPanelStopMark — вывод rc.func перед killall при stop/restart.
+	rtPanelStopMark = "Shutting down"
+	// rtPanelShellMark — первая строка обёртки команды: оболочка запущена.
+	rtPanelShellMark = "xcp-rt-shell-started"
+	// rtPanelDeadlineMark — строка журнала панели об аварийном выходе по сроку
+	// остановки (cmd/xcp): шаг остановки не уложился и был брошен.
+	rtPanelDeadlineMark = "Shutdown: deadline"
 	// rtPanelUpTimeout — предел ожидания ответа новой панели (mipsle читает
 	// бинарник с флешки и поднимается десятки секунд).
 	rtPanelUpTimeout = 90 * time.Second
@@ -70,9 +88,68 @@ var rtPanelANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 // должна унаследовать переменные теста (адрес подписки, сессия, каталоги).
 // Возвращает вывод скрипта одной строкой без цветовых кодов.
 func rtPanelInitCmd(ctx context.Context, action string) (string, int) {
-	stdout, stderr, code := routertest.Exec(ctx, "/bin/sh", "-c",
-		"exec env -i PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root "+rtPanelInit+" "+action)
-	return strings.Join(strings.Fields(rtPanelANSI.ReplaceAllString(stdout+" "+stderr, "")), " "), code
+	return rtPanelInitRun(ctx, action, nil)
+}
+
+// rtPanelInitRun — rtPanelInitCmd, вывод которого по мере поступления пишется и в
+// marks (может быть nil): по нему видно, когда оболочка запустилась и когда rc.func
+// дошёл до killall.
+func rtPanelInitRun(ctx context.Context, action string, marks *rtPanelMarks) (string, int) {
+	var out, errOut bytes.Buffer
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "echo "+rtPanelShellMark+
+		"; exec env -i PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root "+rtPanelInit+" "+action)
+	cmd.Stdout = &out
+	if marks != nil {
+		cmd.Stdout = io.MultiWriter(&out, marks)
+	}
+	cmd.Stderr = &errOut
+	code := 0
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		code = -1
+		if errors.As(err, &exitErr) {
+			code = exitErr.ExitCode()
+		} else if errOut.Len() == 0 {
+			errOut.WriteString(err.Error())
+		}
+	}
+	text := strings.ReplaceAll(out.String()+" "+errOut.String(), rtPanelShellMark, "")
+	return strings.Join(strings.Fields(rtPanelANSI.ReplaceAllString(text, "")), " "), code
+}
+
+// rtPanelMarks отмечает момент первого появления каждой метки в потоке вывода.
+type rtPanelMarks struct {
+	mu   sync.Mutex
+	seen bytes.Buffer
+	at   map[string]time.Time
+}
+
+func newRtPanelMarks(names ...string) *rtPanelMarks {
+	m := &rtPanelMarks{at: make(map[string]time.Time, len(names))}
+	for _, n := range names {
+		m.at[n] = time.Time{}
+	}
+	return m
+}
+
+func (m *rtPanelMarks) Write(b []byte) (int, error) {
+	now := time.Now()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.seen.Write(b)
+	for n, at := range m.at {
+		if at.IsZero() && bytes.Contains(m.seen.Bytes(), []byte(n)) {
+			m.at[n] = now
+		}
+	}
+	return len(b), nil
+}
+
+// get — момент появления метки name; нулевое время — метки не было.
+func (m *rtPanelMarks) get(name string) time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.at[name]
 }
 
 // rtPanelWaitUp ждёт панель с PID, отличным от old, которая отвечает на
@@ -127,22 +204,29 @@ func rtPanelOpenStream(t *testing.T, ctx context.Context, p *routertest.Panel, p
 	return done
 }
 
-func TestRouterPanelRestartWithOpenStreams(t *testing.T) {
-	p := routertest.NewPanel(t)
-
+// rtPanelCurrent возвращает PID единственного процесса панели. Cleanup: что бы ни
+// случилось, следующие тесты получают работающую панель.
+func rtPanelCurrent(t *testing.T, p *routertest.Panel) int {
+	t.Helper()
 	pids, out := rtPanelPIDs()
 	if len(pids) != 1 {
 		t.Fatalf("процессов панели: %d (pidof: %q), ожидался ровно один", len(pids), out)
 	}
 	old := pids[0]
-
-	// Что бы ни случилось, следующие тесты получают работающую панель.
 	t.Cleanup(func() {
 		if pid, _ := rtPanelWaitUp(p, old, 5*time.Second); pid != 0 {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
+		// Старый процесс мог ещё выходить: запуск при живом старом ответил бы
+		// «already running» и ничего не запустил.
+		for i := 0; i < 30; i++ {
+			if _, err := os.Stat("/proc/" + strconv.Itoa(old)); err != nil {
+				break
+			}
+			time.Sleep(time.Second)
+		}
 		if pids, _ := rtPanelPIDs(); len(pids) == 0 {
 			_, _ = rtPanelInitCmd(ctx, "start")
 		}
@@ -150,14 +234,44 @@ func TestRouterPanelRestartWithOpenStreams(t *testing.T) {
 			t.Errorf("панель не поднялась после теста: %s", last)
 		}
 	})
+	return old
+}
 
-	streamCtx, cancelStreams := context.WithCancel(context.Background())
-	defer cancelStreams()
-	updDone := rtPanelOpenStream(t, streamCtx, p, "/api/update/events", true)
-	// Поток слоя есть, только когда слой «Конфигурация» включён.
-	layerDone := rtPanelOpenStream(t, streamCtx, p, "/api/configlayer/events", false)
-	// Поток должен быть установлен до команды: первое событие уже отдано.
-	time.Sleep(2 * time.Second)
+// rtPanelRestartResult — итог перезапуска панели init-скриптом.
+type rtPanelRestartResult struct {
+	// stopTook — за сколько вышел старый процесс после killall (без метки killall —
+	// после команды); -1 — не вышел за 30 с после команды.
+	stopTook time.Duration
+	// shellLag и killLag — через сколько после команды запустилась оболочка и
+	// rc.func дошёл до killall; -1 — метки нет.
+	shellLag, killLag time.Duration
+	initOut           string
+	initCode          int
+	// newPID — PID новой панели, ответившей по прежней сессии; 0 — нет панели.
+	newPID int
+	// upLast — последнее наблюдение, если новой панели нет.
+	upLast string
+	// shutdownLog — строки журнала панели о сигнале и шагах остановки
+	// («Received signal», «Shutdown: ...»);
+	// logErr — журнал не прочитан (ротирован).
+	shutdownLog []string
+	logErr      error
+}
+
+// rtPanelRestart перезапускает панель init-скриптом (restart) и мерит выход старого
+// процесса old по /proc. afterExit (может быть nil) вызывается сразу после выхода
+// старого процесса, до ожидания init-скрипта. Затем ждёт новую панель и читает
+// журнал панели с момента команды.
+func rtPanelRestart(t *testing.T, p *routertest.Panel, old int, afterExit func()) rtPanelRestartResult {
+	t.Helper()
+	logPath := config.Default().XCPLogPath
+	if logPath == "" {
+		logPath = "/opt/var/log/xcp.log"
+	}
+	var offset int64
+	if st, err := os.Stat(logPath); err == nil {
+		offset = st.Size()
+	}
 
 	start := time.Now()
 	restartCtx, cancelRestart := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -167,24 +281,107 @@ func TestRouterPanelRestartWithOpenStreams(t *testing.T) {
 		code int
 	}
 	restarted := make(chan initResult, 1)
+	marks := newRtPanelMarks(rtPanelShellMark, rtPanelStopMark)
 	go func() {
-		o, c := rtPanelInitCmd(restartCtx, "restart")
+		o, c := rtPanelInitRun(restartCtx, "restart", marks)
 		restarted <- initResult{o, c}
 	}()
 
 	// Выход старого процесса — по /proc, независимо от панели.
-	var stopTook time.Duration
+	var res rtPanelRestartResult
+	var exitAt time.Time
 	for {
 		if _, err := os.Stat("/proc/" + strconv.Itoa(old)); err != nil {
-			stopTook = time.Since(start)
+			exitAt = time.Now()
 			break
 		}
 		if time.Since(start) > 30*time.Second {
-			stopTook = -1
+			res.stopTook = -1
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	if afterExit != nil {
+		afterExit()
+	}
+	ir := <-restarted
+	res.initOut, res.initCode = ir.out, ir.code
+	lag := func(at time.Time) time.Duration {
+		if at.IsZero() {
+			return -1
+		}
+		return at.Sub(start)
+	}
+	res.shellLag, res.killLag = lag(marks.get(rtPanelShellMark)), lag(marks.get(rtPanelStopMark))
+	if res.stopTook < 0 {
+		return res
+	}
+	from := start
+	if res.killLag >= 0 {
+		from = start.Add(res.killLag)
+	}
+	// Выход замечен опросом раз в 0,1 с, вывод — через пайп: разница бывает обратной.
+	res.stopTook = max(exitAt.Sub(from), 0)
+	res.newPID, res.upLast = rtPanelWaitUp(p, old, rtPanelUpTimeout)
+
+	window, err := rtReadLogFrom(logPath, offset)
+	if err != nil {
+		res.logErr = err
+		return res
+	}
+	for _, line := range strings.Split(window, "\n") {
+		if strings.Contains(line, "Shutdown: ") || strings.Contains(line, "Received signal") {
+			res.shutdownLog = append(res.shutdownLog, strings.TrimSpace(line))
+		}
+	}
+	return res
+}
+
+// rtPanelRestartVerdict — общий вердикт перезапуска: старый процесс вышел в окно
+// init-скрипта, новая панель отвечает по прежней сессии, остановка не брошена по сроку.
+func rtPanelRestartVerdict(t *testing.T, old int, res rtPanelRestartResult, details string) {
+	t.Helper()
+	if res.stopTook < 0 {
+		t.Fatalf("старый процесс %d не вышел за 30 с после restart (%s; init: код %d, %q)",
+			old, details, res.initCode, res.initOut)
+	}
+	since := "после killall"
+	if res.killLag < 0 {
+		since = "после команды (метки killall нет)"
+	}
+	t.Logf("старый процесс вышел за %.1f с %s; оболочка init через %.1f с, killall через %.1f с после команды; %s; init: код %d, %q; новый PID %d",
+		res.stopTook.Seconds(), since, res.shellLag.Seconds(), res.killLag.Seconds(), details, res.initCode, res.initOut, res.newPID)
+	if res.logErr != nil {
+		t.Logf("журнал панели не прочитан (ротирован?): %v", res.logErr)
+	}
+	for _, line := range res.shutdownLog {
+		t.Logf("журнал остановки: %s", line)
+	}
+	if res.newPID == 0 {
+		t.Fatalf("после restart панели нет за %s: %s (init: код %d, %q)", rtPanelUpTimeout, res.upLast, res.initCode, res.initOut)
+	}
+	if res.stopTook > rtPanelStopLimit {
+		t.Errorf("старый процесс выходил %.1f с %s (%s), предел %s", res.stopTook.Seconds(), since, details, rtPanelStopLimit)
+	}
+	for _, line := range res.shutdownLog {
+		if strings.Contains(line, rtPanelDeadlineMark) {
+			t.Errorf("остановка не уложилась в срок и брошена: %s", line)
+		}
+	}
+}
+
+func TestRouterPanelRestartWithOpenStreams(t *testing.T) {
+	p := routertest.NewPanel(t)
+	old := rtPanelCurrent(t, p)
+
+	streamCtx, cancelStreams := context.WithCancel(context.Background())
+	defer cancelStreams()
+	updDone := rtPanelOpenStream(t, streamCtx, p, "/api/update/events", true)
+	// Поток слоя есть, только когда слой «Конфигурация» включён.
+	layerDone := rtPanelOpenStream(t, streamCtx, p, "/api/configlayer/events", false)
+	// Поток должен быть установлен до команды: первое событие уже отдано.
+	time.Sleep(2 * time.Second)
+
 	streamEnd := func(done <-chan struct{}) string {
 		if done == nil {
 			return "-"
@@ -196,21 +393,29 @@ func TestRouterPanelRestartWithOpenStreams(t *testing.T) {
 			return "открыт"
 		}
 	}
-	upd, layer := streamEnd(updDone), streamEnd(layerDone)
-	res := <-restarted
-	initOut := res.out
+	var upd, layer string
+	res := rtPanelRestart(t, p, old, func() {
+		upd, layer = streamEnd(updDone), streamEnd(layerDone)
+	})
+	rtPanelRestartVerdict(t, old, res, "потоки: обновление "+upd+", слой "+layer)
+}
 
-	if stopTook < 0 {
-		t.Fatalf("старый процесс %d не вышел за 30 с после restart (потоки: обновление %s, слой %s; init: код %d, %q)",
-			old, upd, layer, res.code, initOut)
+// Перезапуск, пока на раздел панели идёт большая запись (rtStartDirtyLoad). Остановка
+// писала traffic.json и sessions.json с fsync: под идущей записью на флешку fsync
+// ждал фиксации журнала ext4 — 10 с и больше, — и init-скрипт не дожидался выхода.
+// Если нагрузка не набралась, сценарий пропускается (rtWaitWriteback).
+func TestRouterPanelRestartWithDirtyDisk(t *testing.T) {
+	p := routertest.NewPanel(t)
+	old := rtPanelCurrent(t, p)
+
+	load := rtStartDirtyLoad(t, config.Default().DataDir)
+	wb := rtWaitWriteback(t, load.synced)
+
+	res := rtPanelRestart(t, p, old, nil)
+	syncTook, err := load.wait()
+	if err != nil {
+		t.Fatalf("fsync временного файла: %v", err)
 	}
-	pid, last := rtPanelWaitUp(p, old, rtPanelUpTimeout)
-	t.Logf("старый процесс вышел за %.1f с; потоки: обновление %s, слой %s; init: код %d, %q; новый PID %d",
-		stopTook.Seconds(), upd, layer, res.code, initOut, pid)
-	if pid == 0 {
-		t.Fatalf("после restart панели нет за %s: %s (init: код %d, %q)", rtPanelUpTimeout, last, res.code, initOut)
-	}
-	if stopTook > rtPanelStopLimit {
-		t.Errorf("старый процесс выходил %.1f с при открытых потоках, предел %s", stopTook.Seconds(), rtPanelStopLimit)
-	}
+	rtPanelRestartVerdict(t, old, res, "в записи на носитель было "+strconv.FormatInt(wb>>20, 10)+
+		" МБ, чужие данные записаны за "+syncTook.Round(time.Millisecond).String())
 }

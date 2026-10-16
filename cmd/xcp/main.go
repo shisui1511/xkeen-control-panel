@@ -178,6 +178,8 @@ func main() {
 		}
 		os.Exit(1)
 	}
+	// Шаги остановки (отложенные Stop ниже) и срок выхода после сигнала.
+	stops := &shutdownSteps{}
 
 	// System sysctl profile (STAB-06): no-op on non-Entware machines (see
 	// DeploySysctlProfile's "/opt/etc missing" detection), so this is safe
@@ -227,7 +229,7 @@ func main() {
 
 	// Auth endpoints (public)
 	authSvc := srv.GetAuthService()
-	defer authSvc.Stop()
+	defer stops.run("auth", authSvc.Stop)
 
 	// SIGHUP триггерит горячую перезагрузку пароля (D-22): xcp --reset-password
 	// (134-10) меняет password_hash в config.json, пока панель уже запущена —
@@ -260,7 +262,7 @@ func main() {
 	xkeenStatusCache := services.NewXKeenStatusCache(api.XKeenService())
 	xkeenStatusCache.Start()
 	api.SetXKeenStatusCache(xkeenStatusCache)
-	defer xkeenStatusCache.Stop()
+	defer stops.run("xkeen-status-cache", xkeenStatusCache.Stop)
 	srv.HandleProtected("/api/auth/change-password", api.ChangePassword)
 	srv.HandleProtected("/api/auth/sessions", api.AuthSessions)
 	srv.HandleProtected("/api/auth/sessions/terminate", api.AuthSessionTerminate)
@@ -428,7 +430,7 @@ func main() {
 	smartProxySvc.SetMihomoService(api.MihomoService())
 	smartProxySvc.Start()
 	api.SetSmartProxyService(smartProxySvc)
-	defer smartProxySvc.Stop()
+	defer stops.run("smart-proxy", smartProxySvc.Stop)
 
 	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL, cfg.MihomoSecret)
 	trafficQuotaSvc.SetMihomoService(api.MihomoService())
@@ -447,14 +449,14 @@ func main() {
 		xSvc.SetKernelStartedHook(trafficQuotaSvc.NotifyKernelStarted)
 	}
 	api.SetTrafficQuotaService(trafficQuotaSvc)
-	defer trafficQuotaSvc.Stop()
+	defer stops.run("traffic-quota", trafficQuotaSvc.Stop)
 
 	xrayGRPCSvc := services.NewXrayGRPCService(fmt.Sprintf("127.0.0.1:%d", cfg.XRayAPIPort))
 	// Единый резолвер активного ядра; при конфликте Kernel пуст, и gRPC Xray не опрашивается.
 	xrayGRPCSvc.SetActiveKernelFunc(func() string { return kernelSvc.ActiveState().Kernel })
 	xrayGRPCSvc.Start()
 	api.SetXrayGRPCService(xrayGRPCSvc)
-	defer xrayGRPCSvc.Stop()
+	defer stops.run("xray-grpc", xrayGRPCSvc.Stop)
 
 	// Watchdog / circuit breaker (STAB-05): supervises the active kernel and
 	// disarms the XKEEN_TPROXY iptables interception after 3 consecutive
@@ -474,13 +476,13 @@ func main() {
 	}
 	watchdogSvc.Start()
 	api.SetWatchdogService(watchdogSvc)
-	defer watchdogSvc.Stop()
+	defer stops.run("watchdog", watchdogSvc.Stop)
 
 	// Фоновая проверка обновлений (уведомления) и автоустановка в окно времени
 	updateScheduler := handlers.NewUpdateScheduler(api)
 	updateScheduler.Start()
 	api.SetUpdateScheduler(updateScheduler)
-	defer updateScheduler.Stop()
+	defer stops.run("update-scheduler", updateScheduler.Stop)
 
 	// Unified Log Dispatcher (LOGHUB-04, LOGHUB-05, LOGHUB-06)
 	logDir := filepath.Dir(cfg.XCPLogPath)
@@ -489,7 +491,7 @@ func main() {
 	}
 	logDispatcher := services.NewLogDispatcher(cfg.LogSources, logDir, cfg.MihomoAPIURL)
 	logDispatcher.Start()
-	defer logDispatcher.Stop()
+	defer stops.run("log-dispatcher", logDispatcher.Stop)
 	api.SetLogDispatcher(logDispatcher)
 
 	// Config Snapshots
@@ -529,7 +531,7 @@ func main() {
 	// Interactive PTY Terminal
 	ptySvc := services.NewPTYService()
 	api.SetPTYService(ptySvc)
-	defer ptySvc.CloseAll()
+	defer stops.run("pty", ptySvc.CloseAll)
 	api.SetXKeenInstaller(services.NewXKeenInstaller())
 	srv.HandleProtected("/api/terminal/ws", api.TerminalWebSocket)
 
@@ -597,7 +599,7 @@ func main() {
 	healthSvc := services.NewSubscriptionHealthService(cfg.DataDir, subscriptionSvc)
 	healthSvc.Start()
 	api.SetSubscriptionHealthService(healthSvc)
-	defer healthSvc.Stop()
+	defer stops.run("subscription-health", healthSvc.Stop)
 
 	// Network Tools
 	networkSvc := services.NewNetworkToolsService(cfg.MihomoAPIURL)
@@ -737,13 +739,13 @@ func main() {
 		}
 		configLayer.Start()
 		api.SetConfigLayer(configLayer)
-		defer configLayer.Stop()
+		defer stops.run("config-layer", configLayer.Stop)
 		if sourcesSvc != nil {
 			// Планировщик подписок стартует после слоя; defer идёт после defer слоя,
 			// поэтому сервис останавливается раньше слоя.
 			sourcesSvc.Start()
 			api.SetSourcesService(sourcesSvc)
-			defer sourcesSvc.Stop()
+			defer stops.run("sources", sourcesSvc.Stop)
 		}
 	}
 	srv.HandleProtected("/api/configlayer/state", api.ConfigLayerState)
@@ -789,8 +791,10 @@ func main() {
 	select {
 	case sig := <-sigCh:
 		log.Printf("Received signal %s, shutting down...", sig)
+		stops.arm(shutdownDeadline, fatalf)
+		stops.enter("http")
 		cancelScheduler()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownHTTPTimeout)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("Shutdown error: %v", err)
@@ -803,6 +807,7 @@ func main() {
 		// or for the update process to call os.Exit().
 		sig := <-sigCh
 		log.Printf("Received signal %s during restart, exiting...", sig)
+		stops.arm(shutdownDeadline, fatalf)
 	}
 	log.Println("Server stopped.")
 }

@@ -304,8 +304,11 @@ func (a *AuthService) currentSetupCode() string {
 
 // Stop останавливает фоновые горутины очистки и делает финальный Flush
 // сессий на диск. Идемпотентен — повторный вызов безопасен (stopOnce).
+// Финальные записи — без fsync (fileStore.finalWrites): остановка панели не
+// ждёт носитель.
 func (a *AuthService) Stop() {
 	a.stopOnce.Do(func() {
+		a.store.finalWrites()
 		if err := a.Flush(); err != nil {
 			log.Printf("[auth] final flush on Stop failed: %v", err)
 		}
