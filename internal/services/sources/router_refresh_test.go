@@ -628,9 +628,13 @@ func TestRouterNoticesRebuildFromLive(t *testing.T) {
 // ответа с отказом (all_stubs, http_auth), и уведомление source_rejected несёт
 // ссылку кабинета, а карточка — срок, объявление и поддержку. Метаданные той же
 // конфигурации при отказе не перезаписываются; сетевые сбои и provider_error
-// метаданных не дают. Тест идёт на роутере, но к провайдеру не ходит: ответы заданы
-// заголовками зоны .example и собираются настоящим parseMeta. Настоящий отказ
-// провайдера проверяет роутерный сценарий Playwright, один за прогон.
+// метаданных не дают. Из ответа с отказом берутся только отображаемые поля (название,
+// трафик, срок, ссылки, объявление): поля поведения подписки, признак «без HWID» и
+// интервал, приходят только из удавшихся ответов. Доверие — all_stubs и http_auth с
+// HTTP 401/403; 404, 407 и 429 отдают промежуточные узлы (WR-01). Тест идёт на
+// роутере, но к провайдеру не ходит: ответы заданы заголовками зоны .example и
+// собираются настоящим parseMeta. Настоящий отказ провайдера проверяет роутерный
+// сценарий Playwright, один за прогон.
 func TestRouterRefreshMetaOnRejection(t *testing.T) {
 	e := rtNewEnv(t, false, false)
 	e.installed = configlayer.InstalledKernels{Xray: true, Mihomo: true}
@@ -642,10 +646,17 @@ func TestRouterRefreshMetaOnRejection(t *testing.T) {
 		okCabinet   = "https://cab.example/accepted"
 		rejAnnounce = "Лимит устройств исчерпан"
 	)
-	rejMeta := parseMeta(http.Header{
+	rejHeaders := http.Header{
 		"Profile-Web-Page-Url": {rejCabinet}, "Support-Url": {rejSupport}, "Announce": {rejAnnounce},
 		"Subscription-Userinfo": {"upload=100; download=200; total=1000; expire=1893456000"},
-	}, now)
+	}
+	rejMeta := parseMeta(rejHeaders, now)
+	// lockMeta — ответ с теми же отображаемыми полями и полями поведения подписки:
+	// «без HWID» и интервал провайдера.
+	lockHeaders := rejHeaders.Clone()
+	lockHeaders.Set("X-Hwid-Not-Supported", "true")
+	lockHeaders.Set("Profile-Update-Interval", "6")
+	lockMeta := parseMeta(lockHeaders, now)
 	okMeta := parseMeta(http.Header{
 		"Profile-Web-Page-Url": {okCabinet}, "Subscription-Userinfo": {"upload=1; download=2; total=3; expire=1893456001"},
 	}, now)
@@ -658,6 +669,9 @@ func TestRouterRefreshMetaOnRejection(t *testing.T) {
 	if rejMeta.WebURL == okMeta.WebURL {
 		t.Fatal("ссылки кабинета ответов должны различаться")
 	}
+	if !lockMeta.HWIDLocked || lockMeta.IntervalH != 6 || rejMeta.HWIDLocked || rejMeta.IntervalH != 0 {
+		t.Fatalf("заголовки поведения не разобраны: %+v и %+v", lockMeta, rejMeta)
+	}
 
 	// rtFetchOf — ответ ядра: пустой код — удавшийся, иначе ошибка с кодом; заголовки
 	// разобраны и у ответа с ошибкой, как в fetchOutcome.
@@ -667,6 +681,11 @@ func TestRouterRefreshMetaOnRejection(t *testing.T) {
 			oc.Err = nodes.NewError(code)
 		}
 		return &kernelFetch{kernel: kernel, oc: oc}
+	}
+	// rtFetchHTTP — ответ ядра с HTTP-статусом: ошибка собрана настоящим classifyStatus,
+	// так что HTTPStatus проставлен, как в fetchOutcome.
+	rtFetchHTTP := func(kernel string, status int, m Meta) *kernelFetch {
+		return &kernelFetch{kernel: kernel, oc: &kernelOutcome{Meta: m, Err: classifyStatus(status)}}
 	}
 	cfg := SubscriptionConfig{URL: rtDeadURL}
 	netOnly := Meta{Print: candidatePrint(cfg), CheckedAt: now}
@@ -685,8 +704,8 @@ func TestRouterRefreshMetaOnRejection(t *testing.T) {
 	}{
 		{"(a) новая конфигурация, отказ all_stubs", Meta{}, false,
 			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, rejMeta), rtFetchOf(kernelMihomo, nodes.CodeAllStubs, rejMeta)}, rejMeta, false},
-		{"(b) новая конфигурация, отказ http_auth", Meta{}, false,
-			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeHTTPAuth, rejMeta)}, rejMeta, false},
+		{"(b) новая конфигурация, отказ http_auth 401", Meta{}, false,
+			[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusUnauthorized, rejMeta)}, rejMeta, false},
 		{"(c) сначала сетевой сбой, затем отказ", netOnly, false,
 			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, rejMeta)}, rejMeta, false},
 		{"(d) метаданные той же конфигурации не перезаписываются", okMeta, false,
@@ -702,6 +721,18 @@ func TestRouterRefreshMetaOnRejection(t *testing.T) {
 		{"(i) отказы с разными полями складываются", Meta{}, false,
 			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, webOnly), rtFetchOf(kernelMihomo, nodes.CodeAllStubs, supportOnly)},
 			Meta{WebURL: rejCabinet, SupportURL: rejSupport}, false},
+		{"(j) all_stubs: признак «без HWID» и интервал из ответа с отказом не берутся", Meta{}, false,
+			[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, lockMeta)}, rejMeta, false},
+		{"(k) http_auth 403: признак «без HWID» и интервал из ответа с отказом не берутся", Meta{}, false,
+			[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusForbidden, lockMeta)}, rejMeta, false},
+		{"(l) http_auth 404 метаданных не даёт", Meta{}, false,
+			[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusNotFound, rejMeta)}, Meta{}, true},
+		{"(m) http_auth 407 метаданных не даёт", Meta{}, false,
+			[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusProxyAuthRequired, rejMeta)}, Meta{}, true},
+		{"(n) http_auth 429 метаданных не даёт", Meta{}, false,
+			[]*kernelFetch{rtFetchHTTP(kernelXray, http.StatusTooManyRequests, rejMeta)}, Meta{}, true},
+		{"(o) удавшийся ответ задаёт поведение подписки", Meta{}, false,
+			[]*kernelFetch{rtFetchOf(kernelXray, "", lockMeta)}, lockMeta, false},
 	}
 	for _, tc := range cases {
 		got := e.svc.freshMeta(now, tc.prev, tc.locked, tc.fetches)
@@ -714,6 +745,18 @@ func TestRouterRefreshMetaOnRejection(t *testing.T) {
 		if fields(got) != fields(tc.want) {
 			t.Errorf("%s: метаданные %+v, ждали %+v", tc.name, fields(got), fields(tc.want))
 		}
+	}
+
+	// Следствия (j): после ответа с отказом, в котором есть поля поведения, следующий
+	// запрос идёт с HWID, а интервал «по провайдеру» остаётся 12 часов (WR-01).
+	afterReject := e.svc.freshMeta(now, Meta{}, false,
+		[]*kernelFetch{rtFetchOf(kernelXray, nodes.CodeAllStubs, lockMeta)})
+	if hwid, lk := e.svc.sourceHWID(cfg, afterReject); hwid == "" || lk {
+		t.Errorf("после отказа запрос идёт без HWID: hwid задан=%v, locked=%v", hwid != "", lk)
+	}
+	if d, on := intervalOf(SubscriptionConfig{URL: rtDeadURL, Interval: Interval{Mode: IntervalProvider}}, afterReject); !on ||
+		d != defaultIntervalHours*time.Hour {
+		t.Errorf("интервал «по провайдеру» после отказа: %v (включён=%v), ждали %d ч", d, on, defaultIntervalHours)
 	}
 
 	// Сборка в уведомления и карточку: итог случая (a) в живых данных отказа по обоим ядрам.

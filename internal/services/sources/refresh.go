@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
@@ -414,16 +415,17 @@ func (s *Service) markChecked(id string, cfg SubscriptionConfig, now time.Time) 
 
 // freshMeta — метаданные после запроса. Источников три, по порядку:
 //  1. удавшиеся ответы: свежие метаданные из них, как и раньше;
-//  2. ни один запрос не удался, но провайдер отказал (all_stubs, http_auth), а своих
-//     метаданных у подписки под текущими адресом и HWID ещё нет (сменили HWID или
-//     адрес — отпечаток не совпал, metaFor пуст): метаданные ответов с отказом. Это
-//     ответ самого провайдера на текущие адрес и HWID, с ним же приходят ссылка
-//     кабинета, срок и объявление; без него уведомление об отказе осталось бы без
-//     ссылки кабинета, а карточка — без данных провайдера;
+//  2. ни один запрос не удался, но провайдер отказал (all_stubs, http_auth 401/403), а
+//     своих метаданных у подписки под текущими адресом и HWID ещё нет (сменили HWID или
+//     адрес — отпечаток не совпал, metaFor пуст): метаданные ответов с отказом, только
+//     отображаемые поля (displayOnly). Это ответ самого провайдера на текущие адрес и
+//     HWID, с ним же приходят ссылка кабинета, срок и объявление; без него уведомление
+//     об отказе осталось бы без ссылки кабинета, а карточка — без данных провайдера;
 //  3. иначе прежние. Метаданные той же конфигурации при отказе не перезаписываются.
 //
-// Сетевые сбои (5xx, TLS, таймаут) и provider_error (HTML, пустой ответ) метаданных не
-// дают: заголовки там могут быть от промежуточного узла, а не от провайдера.
+// Сетевые сбои (5xx, TLS, таймаут), provider_error (HTML, пустой ответ) и http_auth с
+// другими 4xx (404, 407, 429) метаданных не дают: заголовки там могут быть от
+// промежуточного узла, а не от провайдера.
 // HWIDLocked не снимается, пока запросы идут без HWID: без x-hwid провайдер заголовка
 // не повторит.
 func (s *Service) freshMeta(now time.Time, prev Meta, locked bool, fetches []*kernelFetch) Meta {
@@ -432,8 +434,8 @@ func (s *Service) freshMeta(now time.Time, prev Meta, locked bool, fetches []*ke
 		switch {
 		case kf.oc.Err == nil:
 			metas = append(metas, kf.oc.Meta)
-		case statusGroup(kf.oc.Err.Code) == StatusRejected:
-			rejected = append(rejected, kf.oc.Meta)
+		case trustedRejection(kf.oc.Err):
+			rejected = append(rejected, displayOnly(kf.oc.Meta))
 		}
 	}
 	if len(metas) == 0 {
@@ -444,6 +446,33 @@ func (s *Service) freshMeta(now time.Time, prev Meta, locked bool, fetches []*ke
 	}
 	m := mergeMeta(now, metas...)
 	m.HWIDLocked = m.HWIDLocked || locked
+	return m
+}
+
+// trustedRejection — ответу с этой ошибкой можно доверять как ответу самого
+// провайдера: all_stubs (заглушки вместо узлов) и http_auth с HTTP 401/403. Остальные
+// 4xx (404, 407, 429) отдают промежуточные узлы (CDN, WAF, прокси), а ссылку кабинета
+// уведомление показывает с призывом к действию. Статус берётся из ошибки: исход теряет
+// сам ответ в dropBody раньше этого вызова, и поле fetch.Status там уже нулевое.
+func trustedRejection(e *nodes.SourceError) bool {
+	if e == nil {
+		return false
+	}
+	switch e.Code {
+	case nodes.CodeAllStubs:
+		return true
+	case nodes.CodeHTTPAuth:
+		return e.HTTPStatus == http.StatusUnauthorized || e.HTTPStatus == http.StatusForbidden
+	}
+	return false
+}
+
+// displayOnly — метаданные без полей поведения подписки. Интервал обновления (D-05) и
+// режим «без HWID» (D-06) приходят только из удавшихся ответов: иначе один ответ с
+// отказом переводил бы подписку в режим «без HWID» (sourceHWID перестаёт слать HWID)
+// или менял срок обновления до смены адреса или HWID.
+func displayOnly(m Meta) Meta {
+	m.HWIDLocked, m.IntervalH = false, 0
 	return m
 }
 
