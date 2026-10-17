@@ -409,7 +409,7 @@ func (s *Service) markChecked(id string, cfg SubscriptionConfig, now time.Time) 
 		return writeLive(l, cur)
 	})
 	if err != nil {
-		log.Printf("[sources] время проверки источника %s не записано: %v", id, err)
+		log.Printf("[sources] время проверки источника %q не записано: %v", id, err)
 	}
 }
 

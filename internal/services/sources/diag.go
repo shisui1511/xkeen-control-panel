@@ -57,12 +57,21 @@ var sensitiveHeaders = map[string]bool{
 }
 
 // diagPath — путь файла диагностики. id и ядро проверяются до построения пути:
-// из них строится имя файла.
+// из них строится имя файла. Ядро в имя попадает константой, не строкой запроса.
 func (b blobStore) diagPath(id, kernel string) (string, bool) {
-	if !idRE.MatchString(id) || id == MySourceID || (kernel != kernelXray && kernel != kernelMihomo) {
+	var k string
+	switch kernel {
+	case kernelXray:
+		k = kernelXray
+	case kernelMihomo:
+		k = kernelMihomo
+	default:
 		return "", false
 	}
-	return filepath.Join(b.diagDir, id+"."+kernel+".json"), true
+	if !idRE.MatchString(id) || id == MySourceID {
+		return "", false
+	}
+	return filepath.Join(b.diagDir, id+"."+k+".json"), true
 }
 
 // writeDiag записывает диагностику запроса подписки под ядро: заголовки, тело до
@@ -110,7 +119,7 @@ func (s *Service) writeDiag(id, kernel string, fr fetchResult, pr nodes.ParseRes
 
 	data, err := json.Marshal(rec)
 	if err != nil {
-		log.Printf("[sources] диагностика источника %s не сериализована", id)
+		log.Printf("[sources] диагностика источника %q не сериализована", id)
 		return
 	}
 	if err := os.MkdirAll(s.blobs.diagDir, 0o700); err != nil {
@@ -118,7 +127,7 @@ func (s *Service) writeDiag(id, kernel string, fr fetchResult, pr nodes.ParseRes
 		return
 	}
 	if err := utils.AtomicWriteFile(path, data, 0o600); err != nil {
-		log.Printf("[sources] диагностика источника %s не записана", id)
+		log.Printf("[sources] диагностика источника %q не записана", id)
 	}
 }
 
@@ -246,7 +255,7 @@ func (s *Service) Diagnostics(id, kernel string) (DiagView, error) {
 	}
 	var rec diagRecord
 	if err := json.Unmarshal(data, &rec); err != nil {
-		log.Printf("[sources] диагностика источника %s повреждена", id)
+		log.Printf("[sources] диагностика источника %q повреждена", id)
 		return empty, nil
 	}
 	v := DiagView{
