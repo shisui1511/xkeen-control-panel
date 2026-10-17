@@ -1,4 +1,5 @@
 // e2e-pages: config config/nodes config/files
+import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Browser, type Page } from '@playwright/test';
@@ -21,7 +22,7 @@ const LINK = fileURLToPath(
  * есть», даже если такой же узел уже лежит в «Моих узлах» стенда.
  */
 function uniqueLink(): string {
-  const port = 20000 + Math.floor(Math.random() * 40000);
+  const port = randomInt(20000, 60000);
   return readFileSync(LINK, 'utf8')
     .trim()
     .replace(/(@[^:/?#]+:)\d+/, `$1${port}`);

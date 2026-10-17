@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, type Browser, type Page } from '@playwright/test';
@@ -15,7 +16,7 @@ export function nodeLink(file: string, port: number, name: string): string {
   return raw.replace(/(@[^:/?#]+:)\d+/, `$1${port}`).replace(/#.*$/, '') + `#${name}`;
 }
 
-export const randomPort = (): number => 20000 + Math.floor(Math.random() * 20000);
+export const randomPort = (): number => randomInt(20000, 40000);
 
 export interface ApiResult {
   status: number;

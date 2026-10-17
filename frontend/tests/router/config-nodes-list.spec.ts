@@ -1,4 +1,5 @@
 // e2e-pages: config config/nodes
+import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
@@ -28,7 +29,7 @@ function nodeLink(file: string, port: number, name: string): string {
   return raw.replace(/(@[^:/?#]+:)\d+/, `$1${port}`).replace(/#.*$/, '') + `#${name}`;
 }
 
-const randomPort = (): number => 20000 + Math.floor(Math.random() * 20000);
+const randomPort = (): number => randomInt(20000, 40000);
 
 interface ApiResult {
   status: number;
