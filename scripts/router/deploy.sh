@@ -12,6 +12,9 @@
 # родителем (RT_LOCK_HELD=1), скрипт берёт её сам.
 #
 # Панель на цели уже установлена через scripts/setup.sh (init-скрипт S99xcp).
+# Init-скрипт при каждой установке пересоздаётся тем же setup.sh (--init-script:
+# без загрузки и перезапуска) — из рабочей копии, а для --release из тега: стенд
+# получает init-скрипт той же версии и тем же путём, что и установка у пользователя.
 # Бинарник заливается во временный файл и подменяется через mv после остановки
 # процесса — без «Text file busy».
 
@@ -128,6 +131,8 @@ if [ "$RELEASE" = 1 ]; then
   bin_for() {
     printf '%s\n' "$REL_DIR/xcp_${RELEASE_TAG}_$1"
   }
+  SETUP_SRC="$REL_DIR/setup.sh"
+  git show "$RELEASE_TAG:scripts/setup.sh" >"$SETUP_SRC" 2>/dev/null || : >"$SETUP_SRC"
 else
   # version.sh не видит RC-теги (от них не считается следующая версия), поэтому
   # версию RC берём из тега на HEAD; XCP_VERSION подхватят и make, и сборка фронта.
@@ -155,12 +160,23 @@ else
   bin_for() {
     printf '%s\n' "build/xcp_${VERSION}_$1"
   }
+  SETUP_SRC="$(rt_repo_root)/scripts/setup.sh"
 fi
+# setup.sh старых тегов не умеет пересоздавать init-скрипт отдельно: его init-скрипт
+# на цели остаётся прежним.
+SETUP_INIT=0
+grep -q -- '--init-script)' "$SETUP_SRC" && SETUP_INIT=1
 
 # Ожидаемая версия для смоука.
 printf '%s\n' "$VERSION" >"$RT_REPORT/version"
 
 # --- установка на одну цель --------------------------------------------------
+
+# Init-скрипт S99xcp из setup.sh этой сборки (setup.sh читается из stdin, как при
+# установке через curl | sh).
+init_script_refresh() {
+  RT_SSH_STDIN=1 rt_ssh "$1" "sh -s -- --init-script" <"$SETUP_SRC" >/dev/null
+}
 
 deploy_one() {
   id=$1
@@ -179,6 +195,17 @@ deploy_one() {
       return 1
       ;;
   esac
+  if [ "$SETUP_INIT" = 1 ]; then
+    rc=0
+    rt_stage "$id" init-script init_script_refresh "$id" || rc=$?
+    if [ "$rc" = 3 ]; then
+      echo "deploy[$id]: нет связи"
+      return 3
+    elif [ "$rc" != 0 ]; then
+      echo "deploy[$id]: init-скрипт не пересоздан (setup.sh --init-script, код $rc)"
+      return 1
+    fi
+  fi
   rc=0
   rt_stage "$id" upload rt_scp "$id" "$bin" "$BIN_PATH.new" || rc=$?
   if [ "$rc" = 3 ]; then

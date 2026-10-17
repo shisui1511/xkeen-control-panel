@@ -23,26 +23,36 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 )
 
-// Перезапуск настоящей панели устройства init-скриптом. Init-скрипт Entware ждёт
-// выход старого процесса около 10 с; не дождался — запуск отвечает «already
-// running», и после выхода старого процесса панель остаётся лежать. Сценарии:
-// открытые потоки SSE (остановка ждала их до дедлайна http.Server.Shutdown, деплой
-// на arm64, прогон 20261015-015433-24d29880) и идущая запись на раздел панели
-// (остановка ждала fsync файлов состояния, прогон 20261016-085028-f37a028f).
-// Вердикт — процессы xcp в /proc (pidof, независимо от панели), время выхода
-// старого процесса, ответ новой панели по прежней сессии и журнал панели:
-// остановка закончилась сама, без аварийного выхода по сроку. Окно init-скрипта
-// отсчитывается от killall (rc.func печатает «Shutting down» прямо перед ним), а не
-// от запуска команды: цепочка sh → env → S99xcp → pidof сразу после большой записи
-// сама запускается секундами (exec busybox ждал чтения страницы с флешки 4,5 с,
-// прогон 20261016-115824-f37a028f), и это не время остановки панели.
+// Перезапуск настоящей панели устройства init-скриптом. Сценарии: открытые потоки
+// SSE (остановка ждала их до дедлайна http.Server.Shutdown, деплой на arm64, прогон
+// 20261015-015433-24d29880), идущая запись на раздел панели (остановка ждала fsync
+// файлов состояния, прогон 20261016-085028-f37a028f), опросы XKeen и проверка правил
+// watchdog, поздний выход старого процесса и застой носителя.
+//
+// Контракт (с init-скриптом S99xcp из scripts/setup.sh, у которого свои stop и
+// restart): restart ждёт настоящего выхода старого процесса и только потом
+// запускает новый; панель поднята за ограниченное время — init-скрипт отвечает
+// «done» на остановку и запуск (без «failed» и «already running») не дольше
+// rtPanelRestartLimit, новая панель отвечает по прежней сессии не позже
+// rtPanelUpTimeout после него. Прежний контракт «старый процесс выходит не позже
+// 8 с после killall» снят: поток панели в непрерываемом ожидании носителя держит
+// выход процесса до возврата системного вызова (под записью на флешку — десятки
+// секунд), и никакой срок внутри процесса этого не ограничивает; окно rc.func
+// (около 10 с) больше не условие подъёма панели. Остальное проверяется как
+// раньше: журнал остановки (сигнал получен, остановка закончилась сама, без
+// аварийного выхода по сроку), шаги остановки, не ждущие опросы XKeen, и
+// дочерние процессы, не оставшиеся висеть. Процессы — по /proc (pidof,
+// независимо от панели). Время выхода старого процесса пишется в журнал теста и
+// отсчитывается от killall (init-скрипт печатает «Shutting down» прямо перед
+// ним): цепочка sh → env → S99xcp → pidof сразу после большой записи сама
+// запускается секундами (прогон 20261016-115824-f37a028f).
 
 const (
 	rtPanelInit = "/opt/etc/init.d/S99xcp"
-	// rtPanelStopLimit — за сколько старый процесс обязан выйти после killall:
-	// init-скрипт ждёт остановку около 10 с, затем запуск видит старый процесс.
-	rtPanelStopLimit = 8 * time.Second
-	// rtPanelStopMark — вывод rc.func перед killall при stop/restart.
+	// rtPanelRestartLimit — за сколько init-скрипт обязан закончить restart:
+	// остановка ждёт выхода не дольше XCP_STOP_TIMEOUT (60 с), запуск — до 11 с.
+	rtPanelRestartLimit = 75 * time.Second
+	// rtPanelStopMark — вывод init-скрипта перед killall при stop/restart.
 	rtPanelStopMark = "Shutting down"
 	// rtPanelShellMark — первая строка обёртки команды: оболочка запущена.
 	rtPanelShellMark = "xcp-rt-shell-started"
@@ -248,8 +258,10 @@ func rtPanelCurrent(t *testing.T, p *routertest.Panel) int {
 // rtPanelRestartResult — итог перезапуска панели init-скриптом.
 type rtPanelRestartResult struct {
 	// stopTook — за сколько вышел старый процесс после killall (без метки killall —
-	// после команды); -1 — не вышел за 30 с после команды.
+	// после команды); -1 — не вышел за rtPanelRestartLimit после команды.
 	stopTook time.Duration
+	// initTook — за сколько init-скрипт закончил restart.
+	initTook time.Duration
 	// shellLag и killLag — через сколько после команды запустилась оболочка и
 	// rc.func дошёл до killall; -1 — метки нет.
 	shellLag, killLag time.Duration
@@ -266,11 +278,27 @@ type rtPanelRestartResult struct {
 	logErr      error
 }
 
+// rtPanelHooks — действия сценария по ходу перезапуска; nil — нет действия.
+type rtPanelHooks struct {
+	// afterKill вызывается в своей горутине, как только init-скрипт дошёл до
+	// killall; перезапуск дальше не ждёт его конца.
+	afterKill func()
+	// afterExit вызывается сразу после выхода старого процесса, до ожидания
+	// init-скрипта.
+	afterExit func()
+}
+
 // rtPanelRestart перезапускает панель init-скриптом (restart) и мерит выход старого
 // процесса old по /proc. afterExit (может быть nil) вызывается сразу после выхода
 // старого процесса, до ожидания init-скрипта. Затем ждёт новую панель и читает
 // журнал панели с момента команды.
 func rtPanelRestart(t *testing.T, p *routertest.Panel, old int, afterExit func()) rtPanelRestartResult {
+	t.Helper()
+	return rtPanelRestartWith(t, p, old, rtPanelHooks{afterExit: afterExit})
+}
+
+// rtPanelRestartWith — rtPanelRestart с действиями сценария hooks.
+func rtPanelRestartWith(t *testing.T, p *routertest.Panel, old int, hooks rtPanelHooks) rtPanelRestartResult {
 	t.Helper()
 	logPath := config.Default().XCPLogPath
 	if logPath == "" {
@@ -282,38 +310,44 @@ func rtPanelRestart(t *testing.T, p *routertest.Panel, old int, afterExit func()
 	}
 
 	start := time.Now()
-	restartCtx, cancelRestart := context.WithTimeout(context.Background(), 2*time.Minute)
+	restartCtx, cancelRestart := context.WithTimeout(context.Background(), rtPanelRestartLimit+30*time.Second)
 	defer cancelRestart()
 	type initResult struct {
 		out  string
 		code int
+		took time.Duration
 	}
 	restarted := make(chan initResult, 1)
 	marks := newRtPanelMarks(rtPanelShellMark, rtPanelStopMark)
 	go func() {
 		o, c := rtPanelInitRun(restartCtx, "restart", marks)
-		restarted <- initResult{o, c}
+		restarted <- initResult{o, c, time.Since(start)}
 	}()
 
 	// Выход старого процесса — по /proc, независимо от панели.
 	var res rtPanelRestartResult
 	var exitAt time.Time
+	killSeen := false
 	for {
+		if !killSeen && hooks.afterKill != nil && !marks.get(rtPanelStopMark).IsZero() {
+			killSeen = true
+			go hooks.afterKill()
+		}
 		if _, err := os.Stat("/proc/" + strconv.Itoa(old)); err != nil {
 			exitAt = time.Now()
 			break
 		}
-		if time.Since(start) > 30*time.Second {
+		if time.Since(start) > rtPanelRestartLimit {
 			res.stopTook = -1
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
-	if afterExit != nil {
-		afterExit()
+	if hooks.afterExit != nil {
+		hooks.afterExit()
 	}
 	ir := <-restarted
-	res.initOut, res.initCode = ir.out, ir.code
+	res.initOut, res.initCode, res.initTook = ir.out, ir.code, ir.took
 	lag := func(at time.Time) time.Duration {
 		if at.IsZero() {
 			return -1
@@ -345,20 +379,22 @@ func rtPanelRestart(t *testing.T, p *routertest.Panel, old int, afterExit func()
 	return res
 }
 
-// rtPanelRestartVerdict — общий вердикт перезапуска: старый процесс вышел в окно
-// init-скрипта, новая панель отвечает по прежней сессии, остановка не брошена по сроку.
+// rtPanelRestartVerdict — общий вердикт перезапуска (контракт — в начале файла):
+// init-скрипт дождался выхода старого процесса и запустил новый за
+// rtPanelRestartLimit, новая панель отвечает по прежней сессии, остановка не
+// брошена по сроку.
 func rtPanelRestartVerdict(t *testing.T, old int, res rtPanelRestartResult, details string) {
 	t.Helper()
 	if res.stopTook < 0 {
-		t.Fatalf("старый процесс %d не вышел за 30 с после restart (%s; init: код %d, %q)",
-			old, details, res.initCode, res.initOut)
+		t.Fatalf("старый процесс %d не вышел за %s после restart (%s; init: код %d, %q)",
+			old, rtPanelRestartLimit, details, res.initCode, res.initOut)
 	}
 	since := "после killall"
 	if res.killLag < 0 {
 		since = "после команды (метки killall нет)"
 	}
-	t.Logf("старый процесс вышел за %.1f с %s; оболочка init через %.1f с, killall через %.1f с после команды; %s; init: код %d, %q; новый PID %d",
-		res.stopTook.Seconds(), since, res.shellLag.Seconds(), res.killLag.Seconds(), details, res.initCode, res.initOut, res.newPID)
+	t.Logf("старый процесс вышел за %.1f с %s; оболочка init через %.1f с, killall через %.1f с после команды; init закончил за %.1f с; %s; init: код %d, %q; новый PID %d",
+		res.stopTook.Seconds(), since, res.shellLag.Seconds(), res.killLag.Seconds(), res.initTook.Seconds(), details, res.initCode, res.initOut, res.newPID)
 	if res.logErr != nil {
 		t.Logf("журнал панели не прочитан (ротирован?): %v", res.logErr)
 	}
@@ -368,8 +404,11 @@ func rtPanelRestartVerdict(t *testing.T, old int, res rtPanelRestartResult, deta
 	if res.newPID == 0 {
 		t.Fatalf("после restart панели нет за %s: %s (init: код %d, %q)", rtPanelUpTimeout, res.upLast, res.initCode, res.initOut)
 	}
-	if res.stopTook > rtPanelStopLimit {
-		t.Errorf("старый процесс выходил %.1f с %s (%s), предел %s", res.stopTook.Seconds(), since, details, rtPanelStopLimit)
+	if res.initCode != 0 || strings.Contains(res.initOut, "failed") || strings.Contains(res.initOut, "already running") {
+		t.Errorf("init-скрипт не дождался выхода старого процесса или не запустил новый: код %d, %q", res.initCode, res.initOut)
+	}
+	if res.initTook > rtPanelRestartLimit {
+		t.Errorf("init-скрипт закончил restart за %.1f с, предел %s", res.initTook.Seconds(), rtPanelRestartLimit)
 	}
 	for _, line := range res.shutdownLog {
 		if strings.Contains(line, rtPanelDeadlineMark) {
@@ -882,5 +921,55 @@ func TestRouterPanelRestartDuringWatchdogRulesCheck(t *testing.T) {
 		if st != "" && st != "Z" {
 			t.Errorf("прерванная остановкой проверка правил «%s» осталась висеть: состояние «%s» через 5 с после выхода панели", cmd, st)
 		}
+	}
+}
+
+// rtPanelLateExitHold — сколько после killall старый процесс остаётся остановленным:
+// дольше окна rc.func (11 проверок раз в секунду) и меньше SIGKILL init-скрипта
+// через XCP_STOP_KILL_AFTER (20 с).
+const rtPanelLateExitHold = 15 * time.Second
+
+// Перезапуск, когда старый процесс выходит позже окна rc.func. Так выходит панель,
+// поток которой стоит в непрерываемом ожидании носителя: SIGTERM доставлен, но
+// процесс держится до возврата системного вызова (12–17 с в прогоне
+// 20261017-130553-7e154ece). rc.func ждал около 10 с, запуск видел живой процесс и
+// отвечал «already running» — после выхода старого процесса панели не было.
+// Init-скрипт с собственной остановкой ждёт настоящего выхода. Здесь старый
+// процесс останавливается SIGSTOP до команды и продолжается через
+// rtPanelLateExitHold после killall: SIGTERM ждёт его, и выход наступает позже окна
+// rc.func при любой загрузке стенда.
+func TestRouterPanelRestartWithLateExit(t *testing.T) {
+	p := routertest.NewPanel(t)
+	old := rtPanelCurrent(t, p)
+	if err := syscall.Kill(old, syscall.SIGSTOP); err != nil {
+		t.Fatalf("SIGSTOP панели %d: %v", old, err)
+	}
+	var resumeOnce sync.Once
+	resume := func() { resumeOnce.Do(func() { _ = syscall.Kill(old, syscall.SIGCONT) }) }
+	t.Cleanup(resume)
+	if st := rtWaitStopped(old); st != "T" {
+		resume()
+		t.Fatalf("панель %d не остановилась по SIGSTOP: состояние «%s»", old, st)
+	}
+
+	res := rtPanelRestartWith(t, p, old, rtPanelHooks{
+		afterKill: func() {
+			time.Sleep(rtPanelLateExitHold)
+			resume()
+		},
+	})
+	resume()
+	rtPanelRestartVerdict(t, old, res, "старый процесс остановлен SIGSTOP и продолжен через "+rtPanelLateExitHold.String()+" после killall")
+	if res.stopTook >= 0 && res.stopTook < rtPanelLateExitHold-time.Second {
+		t.Errorf("старый процесс вышел за %.1f с после killall, раньше, чем был продолжен (%s): условие сценария не выполнено", res.stopTook.Seconds(), rtPanelLateExitHold)
+	}
+	received := false
+	for _, line := range res.shutdownLog {
+		if strings.Contains(line, "Received signal") {
+			received = true
+		}
+	}
+	if !received && res.logErr == nil {
+		t.Errorf("в журнале нет «Received signal»: старый процесс не остановился штатно по SIGTERM")
 	}
 }
