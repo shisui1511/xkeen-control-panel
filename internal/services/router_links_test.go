@@ -52,7 +52,6 @@ var rtLinkMarks = map[string]routertest.KnownMark{
 	"hysteria_v1/xray": routertest.Known("*", "xray-hysteria2-outbound-rejected"),
 	"tuic/xray":        routertest.Known("*", "xray-tuic-outbound-rejected"),
 	"vmess_h2/xray":    routertest.Known("*", "xray-vmess-h2-transport-removed"),
-	"wireguard/xray":   routertest.Known("mipsle", "xray-wireguard-outbound-crash-mipsle"),
 
 	// mihomo: ядро отвергает YAML, который выпустил генератор панели.
 	"ss_plain/mihomo":     routertest.Known("*", "mihomo-yaml-shadowsocks-type-name"),

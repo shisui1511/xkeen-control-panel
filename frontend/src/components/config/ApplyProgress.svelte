@@ -25,14 +25,18 @@
   const running = $derived(apply?.running ?? false);
   const result = $derived(apply?.result ?? null);
 
+  // Фоновое обновление источника (D-29) идёт тем же конвейером, но тихо: панель хода
+  // не открывается ни во время запуска, ни по итогу. Отказ виден в уведомлениях раздела.
+  const silent = $derived(apply?.trigger === 'source_refresh');
+
   $effect(() => {
-    if (running || $applyStartedHere) {
+    if ((running || $applyStartedHere) && !silent) {
       seenRunning = true;
       dismissed = false;
     }
   });
 
-  const visible = $derived(running || (seenRunning && !dismissed && result !== null));
+  const visible = $derived(!silent && (running || (seenRunning && !dismissed && result !== null)));
 
   const steps = $derived(
     STEP_ORDER.map(

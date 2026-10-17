@@ -18,8 +18,12 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-// providerFetchBudget — общий тайм-аут на весь цикл ProviderFetch.
-const providerFetchBudget = 20 * time.Second
+// providerFetchBudget — общий тайм-аут на весь цикл ProviderFetch. Mihomo ждёт тело
+// провайдера не дольше 20 с (resource.DefaultHttpTimeout, adapter/provider/parser.go),
+// а адаптер обязан ответить раньше: иначе кэш приходит, когда Mihomo уже бросил запрос,
+// и обновление провайдера падает (503 от Mihomo, 500/502 в панели). Запас 6 с покрывает
+// путь отказа: запись last_error с fsync и чтение кэша.
+const providerFetchBudget = 14 * time.Second
 
 // Метки формата provider payload — записываются в Subscription.DetectedFormat,
 // чтобы в UI было видно, отдал ли провайдер готовый Clash YAML или payload

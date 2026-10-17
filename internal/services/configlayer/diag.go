@@ -52,11 +52,11 @@ const (
 // вне dev_mode, без секции diag или при Enabled=false не выдаёт ничего: прод-набор
 // файлов пуст (D-19), а переключение dev_mode не требует перезапуска панели.
 // Файлы ядер, которых нет в installed, отбрасывает реестр.
-func (g *DiagGenerator) Generate(src Sections, _ InstalledKernels) ([]GeneratedFile, error) {
+func (g *DiagGenerator) Generate(in Input, _ InstalledKernels) ([]GeneratedFile, error) {
 	if g.devMode == nil || !g.devMode() {
 		return nil, nil
 	}
-	raw, ok := src[DiagSection]
+	raw, ok := in.Sections[DiagSection]
 	if !ok || len(raw) == 0 {
 		return nil, nil
 	}

@@ -7,10 +7,13 @@
  */
 import { kernelLabel } from './kernelState';
 
+// kernel_restarting — живой маршрут Mihomo во время перезапуска ядра, начатого панелью:
+// API ядра ещё не отвечает, это переходное состояние, а не сбой сервера.
 export const KERNEL_GATE_CODES = [
   'kernel_inactive',
   'kernel_conflict',
-  'kernel_op_in_progress'
+  'kernel_op_in_progress',
+  'kernel_restarting'
 ] as const;
 export type KernelGateCode = (typeof KERNEL_GATE_CODES)[number];
 
@@ -41,6 +44,8 @@ export function kernelGateMessage(
       return tr('kernel.conflict_blocked_toast');
     case 'kernel_op_in_progress':
       return tr('kernel.op_in_progress');
+    case 'kernel_restarting':
+      return tr('kernel.restarting');
     case 'kernel_inactive': {
       if (typeof meta.required !== 'string' || !REQUIRED_KERNELS.includes(meta.required)) {
         return null;

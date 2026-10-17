@@ -24,6 +24,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -138,14 +139,19 @@ func main() {
 		goExp = "none (greenteagc default)"
 	}
 
-	// Setup logging to file if configured with size-based rotation (1 MB) and deduplication (D-16, D-38)
-	var dedupWriter *utils.DeduplicatingWriter
+	// Журнал в файл: ротация по размеру (1 МБ), схлопывание повторов (D-16, D-38) и
+	// асинхронная запись через ограниченную очередь (utils.AsyncWriter): строку
+	// журнала — в том числе журнала доступа (middleware.Logging) и строки остановки
+	// по сигналу — не ждёт ни обработчик запроса, ни поток остановки. Под застоем
+	// журнала ext4 на флешке запись строки стояла 12–17 с. Закрытие — последним
+	// отложенным шагом: дописать очередь не дольше shutdownLogDrain.
+	var logWriter *utils.AsyncWriter
 	if cfg.XCPLogPath != "" {
 		rotator, err := utils.NewRotateWriter(cfg.XCPLogPath, 1*1024*1024)
 		if err == nil {
-			dedupWriter = utils.NewDeduplicatingWriter(rotator)
-			log.SetOutput(dedupWriter)
-			defer dedupWriter.Close()
+			logWriter = utils.NewAsyncWriter(utils.NewDeduplicatingWriter(rotator), utils.AsyncWriterLimit)
+			log.SetOutput(logWriter)
+			defer func() { _ = logWriter.Close(shutdownLogDrain) }()
 		} else {
 			log.Printf("Failed to initialize log rotator for %s: %v", cfg.XCPLogPath, err)
 		}
@@ -167,16 +173,18 @@ func main() {
 		}
 	}
 
+	// Аварийный выход сам на носитель не пишет: строка ставится в очередь журнала и
+	// ждёт записи не дольше shutdownLogDrain (раньше Flush/Printf/Close xcp.log шли
+	// синхронно и под застоем журнала ФС стояли секундами — уже после срока).
 	fatalf := func(format string, v ...interface{}) {
-		if dedupWriter != nil {
-			_ = dedupWriter.Flush()
-		}
 		log.Printf(format, v...)
-		if dedupWriter != nil {
-			_ = dedupWriter.Close()
+		if logWriter != nil {
+			logWriter.Flush(shutdownLogDrain)
 		}
 		os.Exit(1)
 	}
+	// Шаги остановки (отложенные Stop ниже) и срок выхода после сигнала.
+	stops := &shutdownSteps{}
 
 	// System sysctl profile (STAB-06): no-op on non-Entware machines (see
 	// DeploySysctlProfile's "/opt/etc missing" detection), so this is safe
@@ -226,7 +234,7 @@ func main() {
 
 	// Auth endpoints (public)
 	authSvc := srv.GetAuthService()
-	defer authSvc.Stop()
+	defer stops.run("auth", authSvc.Stop)
 
 	// SIGHUP триггерит горячую перезагрузку пароля (D-22): xcp --reset-password
 	// (134-10) меняет password_hash в config.json, пока панель уже запущена —
@@ -259,7 +267,7 @@ func main() {
 	xkeenStatusCache := services.NewXKeenStatusCache(api.XKeenService())
 	xkeenStatusCache.Start()
 	api.SetXKeenStatusCache(xkeenStatusCache)
-	defer xkeenStatusCache.Stop()
+	defer stops.run("xkeen-status-cache", xkeenStatusCache.Stop)
 	srv.HandleProtected("/api/auth/change-password", api.ChangePassword)
 	srv.HandleProtected("/api/auth/sessions", api.AuthSessions)
 	srv.HandleProtected("/api/auth/sessions/terminate", api.AuthSessionTerminate)
@@ -427,13 +435,15 @@ func main() {
 	smartProxySvc.SetMihomoService(api.MihomoService())
 	smartProxySvc.Start()
 	api.SetSmartProxyService(smartProxySvc)
-	defer smartProxySvc.Stop()
+	defer stops.run("smart-proxy", smartProxySvc.Stop)
 
 	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL, cfg.MihomoSecret)
 	trafficQuotaSvc.SetMihomoService(api.MihomoService())
+	// Живость ядра — по процессам, без определения версии: опрос квот не должен
+	// ждать конца операции XKeen (ProcessStates не запускает бинарники).
 	trafficQuotaSvc.SetKernelAliveCheck(func() bool {
-		for _, info := range kernelSvc.List() {
-			if info.Name == "mihomo" && info.ProcessStatus == "running" {
+		for _, st := range kernelSvc.ProcessStates() {
+			if st.Name == "mihomo" && st.Status == "running" {
 				return true
 			}
 		}
@@ -444,14 +454,14 @@ func main() {
 		xSvc.SetKernelStartedHook(trafficQuotaSvc.NotifyKernelStarted)
 	}
 	api.SetTrafficQuotaService(trafficQuotaSvc)
-	defer trafficQuotaSvc.Stop()
+	defer stops.run("traffic-quota", trafficQuotaSvc.Stop)
 
 	xrayGRPCSvc := services.NewXrayGRPCService(fmt.Sprintf("127.0.0.1:%d", cfg.XRayAPIPort))
 	// Единый резолвер активного ядра; при конфликте Kernel пуст, и gRPC Xray не опрашивается.
 	xrayGRPCSvc.SetActiveKernelFunc(func() string { return kernelSvc.ActiveState().Kernel })
 	xrayGRPCSvc.Start()
 	api.SetXrayGRPCService(xrayGRPCSvc)
-	defer xrayGRPCSvc.Stop()
+	defer stops.run("xray-grpc", xrayGRPCSvc.Stop)
 
 	// Watchdog / circuit breaker (STAB-05): supervises the active kernel and
 	// disarms the XKEEN_TPROXY iptables interception after 3 consecutive
@@ -471,13 +481,13 @@ func main() {
 	}
 	watchdogSvc.Start()
 	api.SetWatchdogService(watchdogSvc)
-	defer watchdogSvc.Stop()
+	defer stops.run("watchdog", watchdogSvc.Stop)
 
 	// Фоновая проверка обновлений (уведомления) и автоустановка в окно времени
 	updateScheduler := handlers.NewUpdateScheduler(api)
 	updateScheduler.Start()
 	api.SetUpdateScheduler(updateScheduler)
-	defer updateScheduler.Stop()
+	defer stops.run("update-scheduler", updateScheduler.Stop)
 
 	// Unified Log Dispatcher (LOGHUB-04, LOGHUB-05, LOGHUB-06)
 	logDir := filepath.Dir(cfg.XCPLogPath)
@@ -486,7 +496,7 @@ func main() {
 	}
 	logDispatcher := services.NewLogDispatcher(cfg.LogSources, logDir, cfg.MihomoAPIURL)
 	logDispatcher.Start()
-	defer logDispatcher.Stop()
+	defer stops.run("log-dispatcher", logDispatcher.Stop)
 	api.SetLogDispatcher(logDispatcher)
 
 	// Config Snapshots
@@ -526,7 +536,7 @@ func main() {
 	// Interactive PTY Terminal
 	ptySvc := services.NewPTYService()
 	api.SetPTYService(ptySvc)
-	defer ptySvc.CloseAll()
+	defer stops.run("pty", ptySvc.CloseAll)
 	api.SetXKeenInstaller(services.NewXKeenInstaller())
 	srv.HandleProtected("/api/terminal/ws", api.TerminalWebSocket)
 
@@ -594,7 +604,7 @@ func main() {
 	healthSvc := services.NewSubscriptionHealthService(cfg.DataDir, subscriptionSvc)
 	healthSvc.Start()
 	api.SetSubscriptionHealthService(healthSvc)
-	defer healthSvc.Stop()
+	defer stops.run("subscription-health", healthSvc.Stop)
 
 	// Network Tools
 	networkSvc := services.NewNetworkToolsService(cfg.MihomoAPIURL)
@@ -646,6 +656,8 @@ func main() {
 				Installed: xkeenBin != "" && statErr == nil,
 				Version:   xkeenStatusCache.Snapshot().Version,
 			}}
+			// Здесь нужна версия (версионные ворота): при пустом кеше List ждёт конца
+			// операции XKeen, не дольше kernelHelperWait.
 			for _, info := range kernelSvc.List() {
 				inputs = append(inputs, configlayer.KernelVersionInput{
 					Name:      info.Name,
@@ -672,9 +684,74 @@ func main() {
 	if err != nil {
 		log.Printf("Слой конфигурации не создан, маршруты /api/configlayer/* отвечают 404: %v", err)
 	} else {
+		// Сервис источников (фаза 145): создаётся только здесь. Генераторы, хук
+		// фиксации живых данных и колбэк «дрейф решён» регистрируются до Start слоя
+		// (после него слой их не принимает). Не создался или не подключился —
+		// маршруты /api/configlayer/sources* отвечают 404.
+		sourcesSvc, srcErr := sources.New(sources.Deps{
+			DataDir: cfg.DataDir,
+			Layer:   configLayer,
+			Installed: func() configlayer.InstalledKernels {
+				return configlayer.InstalledKernels{
+					Xray:   installedKernelBinary(kernelSvc, "xray") != "",
+					Mihomo: installedKernelBinary(kernelSvc, "mihomo") != "",
+				}
+			},
+			// Нужна версия (UA подписки Mihomo): при пустом кеше Get ждёт конца
+			// операции XKeen, не дольше kernelHelperWait.
+			KernelVersion: func(kernel string) string {
+				info := kernelSvc.Get(kernel)
+				if info == nil {
+					return ""
+				}
+				// Служебные значения вместо версии — версия не определена.
+				switch info.CurrentVersion {
+				case "not installed", "error", "unknown":
+					return ""
+				}
+				return info.CurrentVersion
+			},
+			ActiveKernel: func() string { return kernelSvc.ActiveState().Kernel },
+			Running: func(kernel string) bool {
+				for _, st := range kernelSvc.ProcessStates() {
+					if st.Name == kernel && st.Status == "running" {
+						return true
+					}
+				}
+				return false
+			},
+		})
+		if srcErr != nil {
+			log.Printf("Сервис источников не создан, маршруты /api/configlayer/sources* отвечают 404: %v", srcErr)
+			sourcesSvc = nil
+		}
+		if sourcesSvc != nil {
+			for _, g := range sourcesSvc.Generators() {
+				if srcErr = configLayer.RegisterGenerator(g); srcErr != nil {
+					break
+				}
+			}
+			if srcErr == nil {
+				srcErr = configLayer.SetLiveCommitter(sourcesSvc.CommitLive)
+			}
+			if srcErr == nil {
+				srcErr = configLayer.OnDriftResolved(sourcesSvc.OnDriftResolved)
+			}
+			if srcErr != nil {
+				log.Printf("Сервис источников не подключён к слою, маршруты /api/configlayer/sources* отвечают 404: %v", srcErr)
+				sourcesSvc = nil
+			}
+		}
 		configLayer.Start()
 		api.SetConfigLayer(configLayer)
-		defer configLayer.Stop()
+		defer stops.run("config-layer", configLayer.Stop)
+		if sourcesSvc != nil {
+			// Планировщик подписок стартует после слоя; defer идёт после defer слоя,
+			// поэтому сервис останавливается раньше слоя.
+			sourcesSvc.Start()
+			api.SetSourcesService(sourcesSvc)
+			defer stops.run("sources", sourcesSvc.Stop)
+		}
 	}
 	srv.HandleProtected("/api/configlayer/state", api.ConfigLayerState)
 	srv.HandleProtected("/api/configlayer/events", api.ConfigLayerEvents)
@@ -686,6 +763,18 @@ func main() {
 	srv.HandleProtected("/api/configlayer/files/diff", api.ConfigLayerFilesDiff)
 	srv.HandleProtected("/api/configlayer/notices/dismiss", api.ConfigLayerNoticesDismiss)
 	srv.HandleProtected("/api/configlayer/diag", api.ConfigLayerDiag)
+	srv.HandleProtected("/api/configlayer/sources", api.ConfigSources)
+	srv.HandleProtected("/api/configlayer/sources/preview", api.ConfigSourcesPreview)
+	srv.HandleProtected("/api/configlayer/sources/add", api.ConfigSourcesAdd)
+	srv.HandleProtected("/api/configlayer/sources/update", api.ConfigSourcesUpdate)
+	srv.HandleProtected("/api/configlayer/sources/delete", api.ConfigSourcesDelete)
+	srv.HandleProtected("/api/configlayer/sources/refresh", api.ConfigSourcesRefresh)
+	srv.HandleProtected("/api/configlayer/sources/reveal", api.ConfigSourcesReveal)
+	srv.HandleProtected("/api/configlayer/sources/diagnostics", api.ConfigSourcesDiagnostics)
+	srv.HandleProtected("/api/configlayer/sources/nodes/preview", api.ConfigSourcesNodePreview)
+	srv.HandleProtected("/api/configlayer/sources/nodes/raw", api.ConfigSourcesNodeRaw)
+	srv.HandleProtected("/api/configlayer/sources/nodes/save", api.ConfigSourcesNodeSave)
+	srv.HandleProtected("/api/configlayer/sources/nodes/delete", api.ConfigSourcesNodeDelete)
 
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
 		strings.TrimPrefix(Version, "v"), runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
@@ -706,9 +795,12 @@ func main() {
 
 	select {
 	case sig := <-sigCh:
+		// Срок — до первой строки журнала: остановку ничто не задерживает до него.
+		stops.arm(shutdownDeadline, fatalf)
 		log.Printf("Received signal %s, shutting down...", sig)
+		stops.enter("http")
 		cancelScheduler()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownHTTPTimeout)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("Shutdown error: %v", err)
@@ -720,20 +812,22 @@ func main() {
 		// If the server was closed (e.g. during update restart), wait for either a signal
 		// or for the update process to call os.Exit().
 		sig := <-sigCh
+		stops.arm(shutdownDeadline, fatalf)
 		log.Printf("Received signal %s during restart, exiting...", sig)
 	}
 	log.Println("Server stopped.")
 }
 
 // installedKernelBinary — путь бинарника ядра, если он есть на диске; иначе
-// пустая строка (ядро не установлено).
+// пустая строка (ядро не установлено). Версия не определяется (BinaryPath, не Get):
+// путь нужен слою «Конфигурация» и сервису источников, ждать операции XKeen им незачем.
 func installedKernelBinary(kernelSvc *services.KernelService, name string) string {
-	info := kernelSvc.Get(name)
-	if info == nil || info.BinaryPath == "" {
+	path := kernelSvc.BinaryPath(name)
+	if path == "" {
 		return ""
 	}
-	if _, err := os.Stat(info.BinaryPath); err != nil {
+	if _, err := os.Stat(path); err != nil {
 		return ""
 	}
-	return info.BinaryPath
+	return path
 }

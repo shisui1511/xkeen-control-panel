@@ -311,8 +311,9 @@ func (a *API) KernelUpload(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	a.ClearCapabilitiesCache()
-	a.invalidateXKeenStatus()
+	// Тот же путь, что после установки из релиза: сброс кэшей, файлы слоя и запрос
+	// подписок под ядро, загруженное файлом (роутер без доступа к GitHub).
+	a.onKernelInstallDone(name, nil)
 
 	kUpdated := a.kernelSvc.Get(name)
 	JSONSuccess(w, kUpdated)
@@ -320,11 +321,15 @@ func (a *API) KernelUpload(w http.ResponseWriter, r *http.Request) {
 
 // onKernelInstallDone — действия панели после завершения установки ядра: сброс
 // кэшей и, при успехе, фоновая сборка файлов слоя «Конфигурация» для нового ядра
-// из применённого состояния (D-18). Ядро при этом не запускается.
+// из применённого состояния (D-18) и запрос подписок под это ядро (D-01). Ядро при
+// этом не запускается.
 func (a *API) onKernelInstallDone(name string, err error) {
 	a.ClearCapabilitiesCache()
 	a.invalidateXKeenStatus()
 	if err == nil && a.configLayer != nil {
 		a.configLayer.OnKernelInstalled(name)
+		if a.sources != nil {
+			a.sources.OnKernelInstalled(name)
+		}
 	}
 }

@@ -92,7 +92,24 @@ func (s *SubscriptionService) SetMihomoSecretResolver(fn func() string) {
 	s.mihomoSecretResolver = fn
 }
 
+// ErrRefreshNotXray — RefreshXray вызван для подписки без Xray: обновлять нечего,
+// а команду Mihomo этот путь не отправляет.
+var ErrRefreshNotXray = errors.New("subscription is not enabled for xray")
+
+// Refresh обновляет подписку для всех включённых ядер, Mihomo — командой обновления
+// провайдера.
 func (s *SubscriptionService) Refresh(id string) error {
+	return s.refresh(id, true)
+}
+
+// RefreshXray обновляет только Xray-часть подписки и не отправляет команду Mihomo.
+// Интерфейс обновляет провайдер Mihomo своим запросом PUT /api/proxy-providers/<имя>/refresh,
+// и вторая команда из того же нажатия удвоила бы обращения к провайдеру и слоты HWID.
+func (s *SubscriptionService) RefreshXray(id string) error {
+	return s.refresh(id, false)
+}
+
+func (s *SubscriptionService) refresh(id string, reloadMihomo bool) error {
 	safeID := filepath.Base(id)
 	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
 
@@ -117,6 +134,9 @@ func (s *SubscriptionService) Refresh(id string) error {
 
 	if !subCopy.EnableXray && !subCopy.EnableMihomo {
 		return fmt.Errorf("subscription is not enabled for any kernel")
+	}
+	if !reloadMihomo && !subCopy.EnableXray {
+		return ErrRefreshNotXray
 	}
 
 	var refreshErr error
@@ -155,7 +175,7 @@ func (s *SubscriptionService) Refresh(id string) error {
 		}
 	}
 
-	if subCopy.EnableMihomo {
+	if reloadMihomo && subCopy.EnableMihomo {
 		providerName := subCopy.GetProviderName()
 		activeKernel := ""
 		if s.kernelSvc != nil {

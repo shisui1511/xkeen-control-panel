@@ -1,0 +1,1713 @@
+[
+  {
+    "remarks": "🇩🇪 Узел 1",
+    "log": {
+      "dnsLog": true,
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "tag": "socks",
+        "port": 10808,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {
+          "udp": true,
+          "auth": "noauth"
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      },
+      {
+        "tag": "http",
+        "port": 10809,
+        "listen": "127.0.0.1",
+        "protocol": "http",
+        "settings": {
+          "allowTransparent": false
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      }
+    ],
+    "dns": {
+      "servers": [
+        "192.0.2.53",
+        "198.51.100.53"
+      ],
+      "queryStrategy": "UseIPv4"
+    },
+    "routing": {
+      "domainMatcher": "hybrid",
+      "domainStrategy": "IPIfNonMatch",
+      "rules": [
+        {
+          "type": "field",
+          "port": "53",
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "domain": [
+            "domain:direct.example"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "network": "tcp,udp",
+          "balancerTag": "balancer"
+        }
+      ],
+      "balancers": [
+        {
+          "tag": "balancer",
+          "selector": [
+            "proxy"
+          ],
+          "strategy": {
+            "type": "leastLoad",
+            "settings": {
+              "costs": [
+                {
+                  "match": "proxy",
+                  "value": 1,
+                  "regexp": false
+                }
+              ],
+              "maxRTT": "1s",
+              "expected": 2,
+              "baselines": [
+                "1s"
+              ],
+              "tolerance": 0.01
+            }
+          }
+        }
+      ]
+    },
+    "burstObservatory": {
+      "subjectSelector": [
+        "proxy"
+      ],
+      "pingConfig": {
+        "destination": "https://probe.example/generate_204",
+        "interval": "5m",
+        "sampling": 3,
+        "timeout": "5s",
+        "httpMethod": "HEAD",
+        "enableConcurrency": true
+      }
+    },
+    "geoip": "https://geo.example/geoip.dat",
+    "geosite": "https://geo.example/geosite.dat",
+    "meta": {
+      "serverDescription": "Описание"
+    },
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node1.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "70f1c7f8-16ba-4095-8389-da5fd1f309d7",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "tcpSettings": {},
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front2.example",
+            "publicKey": "qV_JmImmYTpnqWhv07krx6lgx8MCK2NbVOZQ8bNioSY",
+            "shortId": "7a086bf4",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "proxy-2",
+        "protocol": "hysteria",
+        "settings": {
+          "address": "node2.example",
+          "port": 443,
+          "version": 2
+        },
+        "streamSettings": {
+          "network": "hysteria",
+          "hysteriaSettings": {
+            "version": 2,
+            "auth": "hy2-auth-f5773f18c4"
+          },
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "front3.example",
+            "enableSessionResumption": true,
+            "fingerprint": "chrome",
+            "alpn": [
+              "h3"
+            ]
+          },
+          "finalmask": {
+            "quicParams": {
+              "debug": false,
+              "congestion": "bbr"
+            }
+          }
+        }
+      },
+      {
+        "tag": "proxy-3",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node3.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "a0cd2e99-6a99-4520-87a3-95dd39ce65af",
+                  "encryption": "none",
+                  "flow": ""
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "grpc",
+          "grpcSettings": {
+            "serviceName": "svc1",
+            "authority": "front1.example",
+            "mode": false
+          },
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front1.example",
+            "publicKey": "mmPSoQK7kjA2teDUp52ugPh54vYk7gpcgzKv_rV52tQ",
+            "shortId": "bfedd4aa",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "proxy-4",
+        "protocol": "hysteria",
+        "settings": {
+          "address": "node4.example",
+          "port": 443,
+          "version": 2
+        },
+        "streamSettings": {
+          "network": "hysteria",
+          "hysteriaSettings": {
+            "version": 2,
+            "auth": "hy2-auth-b48f0c1c5b"
+          },
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "front2.example",
+            "enableSessionResumption": true,
+            "fingerprint": "chrome",
+            "alpn": [
+              "h3"
+            ]
+          },
+          "finalmask": {
+            "quicParams": {
+              "debug": false,
+              "congestion": "bbr"
+            }
+          }
+        }
+      },
+      {
+        "tag": "proxy-5",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node5.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "9b99c918-b227-413d-8153-4d989d0e2c2d",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "tcpSettings": {},
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front3.example",
+            "publicKey": "qV_JmImmYTpnqWhv07krx6lgx8MCK2NbVOZQ8bNioSY",
+            "shortId": "c749c1ed",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "proxy-6",
+        "protocol": "hysteria",
+        "settings": {
+          "address": "node6.example",
+          "port": 443,
+          "version": 2
+        },
+        "streamSettings": {
+          "network": "hysteria",
+          "hysteriaSettings": {
+            "version": 2,
+            "auth": "hy2-auth-80103a1a79"
+          },
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "front1.example",
+            "enableSessionResumption": true,
+            "fingerprint": "chrome",
+            "alpn": [
+              "h3"
+            ]
+          },
+          "finalmask": {
+            "quicParams": {
+              "debug": false,
+              "congestion": "bbr"
+            }
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom",
+        "settings": {}
+      },
+      {
+        "tag": "block",
+        "protocol": "blackhole",
+        "settings": {}
+      }
+    ]
+  },
+  {
+    "remarks": "🇳🇱 Узел 2",
+    "log": {
+      "dnsLog": true,
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "tag": "socks",
+        "port": 10808,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {
+          "udp": true,
+          "auth": "noauth"
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      },
+      {
+        "tag": "http",
+        "port": 10809,
+        "listen": "127.0.0.1",
+        "protocol": "http",
+        "settings": {
+          "allowTransparent": false
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      }
+    ],
+    "dns": {
+      "servers": [
+        "192.0.2.53",
+        "198.51.100.53"
+      ],
+      "queryStrategy": "UseIPv4"
+    },
+    "routing": {
+      "domainMatcher": "hybrid",
+      "domainStrategy": "IPIfNonMatch",
+      "rules": [
+        {
+          "type": "field",
+          "port": "53",
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "domain": [
+            "domain:direct.example"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "network": "tcp,udp",
+          "balancerTag": "balancer"
+        }
+      ],
+      "balancers": [
+        {
+          "tag": "balancer",
+          "selector": [
+            "proxy"
+          ],
+          "strategy": {
+            "type": "leastLoad",
+            "settings": {
+              "costs": [
+                {
+                  "match": "proxy",
+                  "value": 1,
+                  "regexp": false
+                }
+              ],
+              "maxRTT": "1s",
+              "expected": 2,
+              "baselines": [
+                "1s"
+              ],
+              "tolerance": 0.01
+            }
+          }
+        }
+      ]
+    },
+    "burstObservatory": {
+      "subjectSelector": [
+        "proxy"
+      ],
+      "pingConfig": {
+        "destination": "https://probe.example/generate_204",
+        "interval": "5m",
+        "sampling": 3,
+        "timeout": "5s",
+        "httpMethod": "HEAD",
+        "enableConcurrency": true
+      }
+    },
+    "geoip": "https://geo.example/geoip.dat",
+    "geosite": "https://geo.example/geosite.dat",
+    "meta": {
+      "serverDescription": "Описание"
+    },
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "hysteria",
+        "settings": {
+          "address": "node7.example",
+          "port": 443,
+          "version": 2
+        },
+        "streamSettings": {
+          "network": "hysteria",
+          "hysteriaSettings": {
+            "version": 2,
+            "auth": "hy2-auth-cc6eab1a87"
+          },
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "front2.example",
+            "enableSessionResumption": true,
+            "fingerprint": "chrome",
+            "alpn": [
+              "h3"
+            ]
+          },
+          "finalmask": {
+            "quicParams": {
+              "debug": false,
+              "congestion": "bbr"
+            }
+          }
+        }
+      },
+      {
+        "tag": "proxy-2",
+        "protocol": "hysteria",
+        "settings": {
+          "address": "node8.example",
+          "port": 443,
+          "version": 2
+        },
+        "streamSettings": {
+          "network": "hysteria",
+          "hysteriaSettings": {
+            "version": 2,
+            "auth": "hy2-auth-e8f1f73362"
+          },
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "front3.example",
+            "enableSessionResumption": true,
+            "fingerprint": "chrome",
+            "alpn": [
+              "h3"
+            ]
+          },
+          "finalmask": {
+            "quicParams": {
+              "debug": false,
+              "congestion": "bbr"
+            }
+          }
+        }
+      },
+      {
+        "tag": "proxy-3",
+        "protocol": "hysteria",
+        "settings": {
+          "address": "node9.example",
+          "port": 443,
+          "version": 2
+        },
+        "streamSettings": {
+          "network": "hysteria",
+          "hysteriaSettings": {
+            "version": 2,
+            "auth": "hy2-auth-6542a86f5b"
+          },
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "front1.example",
+            "enableSessionResumption": true,
+            "fingerprint": "chrome",
+            "alpn": [
+              "h3"
+            ]
+          },
+          "finalmask": {
+            "quicParams": {
+              "debug": false,
+              "congestion": "bbr"
+            }
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom",
+        "settings": {}
+      },
+      {
+        "tag": "block",
+        "protocol": "blackhole",
+        "settings": {}
+      }
+    ]
+  },
+  {
+    "remarks": "🇫🇮 Узел 3",
+    "log": {
+      "dnsLog": true,
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "tag": "socks",
+        "port": 10808,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {
+          "udp": true,
+          "auth": "noauth"
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      },
+      {
+        "tag": "http",
+        "port": 10809,
+        "listen": "127.0.0.1",
+        "protocol": "http",
+        "settings": {
+          "allowTransparent": false
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      }
+    ],
+    "dns": {
+      "servers": [
+        "192.0.2.53",
+        "198.51.100.53"
+      ],
+      "queryStrategy": "UseIPv4"
+    },
+    "routing": {
+      "domainMatcher": "hybrid",
+      "domainStrategy": "IPIfNonMatch",
+      "rules": [
+        {
+          "type": "field",
+          "port": "53",
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "domain": [
+            "domain:direct.example"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "network": "tcp,udp",
+          "balancerTag": "balancer"
+        }
+      ],
+      "balancers": [
+        {
+          "tag": "balancer",
+          "selector": [
+            "proxy"
+          ],
+          "strategy": {
+            "type": "leastLoad",
+            "settings": {
+              "costs": [
+                {
+                  "match": "proxy",
+                  "value": 1,
+                  "regexp": false
+                }
+              ],
+              "maxRTT": "1s",
+              "expected": 2,
+              "baselines": [
+                "1s"
+              ],
+              "tolerance": 0.01
+            }
+          }
+        }
+      ]
+    },
+    "burstObservatory": {
+      "subjectSelector": [
+        "proxy"
+      ],
+      "pingConfig": {
+        "destination": "https://probe.example/generate_204",
+        "interval": "5m",
+        "sampling": 3,
+        "timeout": "5s",
+        "httpMethod": "HEAD",
+        "enableConcurrency": true
+      }
+    },
+    "geoip": "https://geo.example/geoip.dat",
+    "geosite": "https://geo.example/geosite.dat",
+    "meta": {
+      "serverDescription": "Описание"
+    },
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node10.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "a5acdecf-3ffb-4e7f-8ae1-fbf2a5baa08a",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "tcpSettings": {},
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front2.example",
+            "publicKey": "n8ML0QR0kNhtlLAYywS4CjOOER-OZxGgn0MRSfGiOOo",
+            "shortId": "a007bb2d",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "proxy-2",
+        "protocol": "hysteria",
+        "settings": {
+          "address": "node11.example",
+          "port": 443,
+          "version": 2
+        },
+        "streamSettings": {
+          "network": "hysteria",
+          "hysteriaSettings": {
+            "version": 2,
+            "auth": "hy2-auth-d15af81307"
+          },
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "front3.example",
+            "enableSessionResumption": true,
+            "fingerprint": "chrome",
+            "alpn": [
+              "h3"
+            ]
+          },
+          "finalmask": {
+            "quicParams": {
+              "debug": false,
+              "congestion": "bbr"
+            }
+          }
+        }
+      },
+      {
+        "tag": "proxy-3",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node12.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "cf7eb19b-859c-4d15-84b9-bf7752411b3b",
+                  "encryption": "none",
+                  "flow": ""
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "grpc",
+          "grpcSettings": {
+            "serviceName": "svc1",
+            "authority": "front1.example",
+            "mode": false
+          },
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front1.example",
+            "publicKey": "mu4u36G1Tr9sLIu9eT3lYxNT7x8NjEiemr9ceSYvt0Y",
+            "shortId": "e6b783b1",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "bypass",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node13.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "d7f64689-c1ee-466e-89cb-31dd7c12b92e",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "tcpSettings": {},
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front2.example",
+            "publicKey": "qV_JmImmYTpnqWhv07krx6lgx8MCK2NbVOZQ8bNioSY",
+            "shortId": "e40f4404",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "bypass-2",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node14.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "1ee19089-d2ac-46ed-89a6-a45a240fdcdd",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "tcpSettings": {},
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front3.example",
+            "publicKey": "n8ML0QR0kNhtlLAYywS4CjOOER-OZxGgn0MRSfGiOOo",
+            "shortId": "af938933",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom",
+        "settings": {}
+      },
+      {
+        "tag": "block",
+        "protocol": "blackhole",
+        "settings": {}
+      }
+    ]
+  },
+  {
+    "remarks": "🇸🇪 Узел 4",
+    "log": {
+      "dnsLog": true,
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "tag": "socks",
+        "port": 10808,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {
+          "udp": true,
+          "auth": "noauth"
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      },
+      {
+        "tag": "http",
+        "port": 10809,
+        "listen": "127.0.0.1",
+        "protocol": "http",
+        "settings": {
+          "allowTransparent": false
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      }
+    ],
+    "dns": {
+      "servers": [
+        "192.0.2.53",
+        "198.51.100.53"
+      ],
+      "queryStrategy": "UseIPv4"
+    },
+    "routing": {
+      "domainMatcher": "hybrid",
+      "domainStrategy": "IPIfNonMatch",
+      "rules": [
+        {
+          "type": "field",
+          "port": "53",
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "domain": [
+            "domain:direct.example"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "network": "tcp,udp",
+          "balancerTag": "balancer"
+        }
+      ],
+      "balancers": [
+        {
+          "tag": "balancer",
+          "selector": [
+            "proxy"
+          ],
+          "strategy": {
+            "type": "leastLoad",
+            "settings": {
+              "costs": [
+                {
+                  "match": "proxy",
+                  "value": 1,
+                  "regexp": false
+                }
+              ],
+              "maxRTT": "1s",
+              "expected": 2,
+              "baselines": [
+                "1s"
+              ],
+              "tolerance": 0.01
+            }
+          }
+        }
+      ]
+    },
+    "burstObservatory": {
+      "subjectSelector": [
+        "proxy"
+      ],
+      "pingConfig": {
+        "destination": "https://probe.example/generate_204",
+        "interval": "5m",
+        "sampling": 3,
+        "timeout": "5s",
+        "httpMethod": "HEAD",
+        "enableConcurrency": true
+      }
+    },
+    "geoip": "https://geo.example/geoip.dat",
+    "geosite": "https://geo.example/geosite.dat",
+    "meta": {
+      "serverDescription": "Описание"
+    },
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node15.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "b45b383d-8fb4-4801-82ed-17b74c0855a3",
+                  "encryption": "none",
+                  "flow": ""
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "grpc",
+          "grpcSettings": {
+            "serviceName": "svc1",
+            "authority": "front1.example",
+            "mode": false
+          },
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front1.example",
+            "publicKey": "mmPSoQK7kjA2teDUp52ugPh54vYk7gpcgzKv_rV52tQ",
+            "shortId": "29e7b9ed",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "proxy-2",
+        "protocol": "hysteria",
+        "settings": {
+          "address": "node16.example",
+          "port": 443,
+          "version": 2
+        },
+        "streamSettings": {
+          "network": "hysteria",
+          "hysteriaSettings": {
+            "version": 2,
+            "auth": "hy2-auth-b83d752ac9"
+          },
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "front2.example",
+            "enableSessionResumption": true,
+            "fingerprint": "chrome",
+            "alpn": [
+              "h3"
+            ]
+          },
+          "finalmask": {
+            "quicParams": {
+              "debug": false,
+              "congestion": "bbr"
+            }
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom",
+        "settings": {}
+      },
+      {
+        "tag": "block",
+        "protocol": "blackhole",
+        "settings": {}
+      }
+    ]
+  },
+  {
+    "remarks": "🇵🇱 Узел 5",
+    "log": {
+      "dnsLog": true,
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "tag": "socks",
+        "port": 10808,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {
+          "udp": true,
+          "auth": "noauth"
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      },
+      {
+        "tag": "http",
+        "port": 10809,
+        "listen": "127.0.0.1",
+        "protocol": "http",
+        "settings": {
+          "allowTransparent": false
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      }
+    ],
+    "dns": {
+      "servers": [
+        "192.0.2.53",
+        "198.51.100.53"
+      ],
+      "queryStrategy": "UseIPv4"
+    },
+    "routing": {
+      "domainMatcher": "hybrid",
+      "domainStrategy": "IPIfNonMatch",
+      "rules": [
+        {
+          "type": "field",
+          "port": "53",
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "domain": [
+            "domain:direct.example"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "network": "tcp,udp",
+          "balancerTag": "balancer"
+        }
+      ],
+      "balancers": [
+        {
+          "tag": "balancer",
+          "selector": [
+            "proxy"
+          ],
+          "strategy": {
+            "type": "leastLoad",
+            "settings": {
+              "costs": [
+                {
+                  "match": "proxy",
+                  "value": 1,
+                  "regexp": false
+                }
+              ],
+              "maxRTT": "1s",
+              "expected": 2,
+              "baselines": [
+                "1s"
+              ],
+              "tolerance": 0.01
+            }
+          }
+        }
+      ]
+    },
+    "burstObservatory": {
+      "subjectSelector": [
+        "proxy"
+      ],
+      "pingConfig": {
+        "destination": "https://probe.example/generate_204",
+        "interval": "5m",
+        "sampling": 3,
+        "timeout": "5s",
+        "httpMethod": "HEAD",
+        "enableConcurrency": true
+      }
+    },
+    "geoip": "https://geo.example/geoip.dat",
+    "geosite": "https://geo.example/geosite.dat",
+    "meta": {
+      "serverDescription": "Описание"
+    },
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node17.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "590065b0-077a-47ac-89b6-040179fbf231",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "tcpSettings": {},
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front3.example",
+            "publicKey": "qV_JmImmYTpnqWhv07krx6lgx8MCK2NbVOZQ8bNioSY",
+            "shortId": "2878f550",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom",
+        "settings": {}
+      },
+      {
+        "tag": "block",
+        "protocol": "blackhole",
+        "settings": {}
+      }
+    ]
+  },
+  {
+    "remarks": "🇫🇷 Узел 6",
+    "log": {
+      "dnsLog": true,
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "tag": "socks",
+        "port": 10808,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {
+          "udp": true,
+          "auth": "noauth"
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      },
+      {
+        "tag": "http",
+        "port": 10809,
+        "listen": "127.0.0.1",
+        "protocol": "http",
+        "settings": {
+          "allowTransparent": false
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      }
+    ],
+    "dns": {
+      "servers": [
+        "192.0.2.53",
+        "198.51.100.53"
+      ],
+      "queryStrategy": "UseIPv4"
+    },
+    "routing": {
+      "domainMatcher": "hybrid",
+      "domainStrategy": "IPIfNonMatch",
+      "rules": [
+        {
+          "type": "field",
+          "port": "53",
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "domain": [
+            "domain:direct.example"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "network": "tcp,udp",
+          "balancerTag": "balancer"
+        }
+      ],
+      "balancers": [
+        {
+          "tag": "balancer",
+          "selector": [
+            "proxy"
+          ],
+          "strategy": {
+            "type": "leastLoad",
+            "settings": {
+              "costs": [
+                {
+                  "match": "proxy",
+                  "value": 1,
+                  "regexp": false
+                }
+              ],
+              "maxRTT": "1s",
+              "expected": 2,
+              "baselines": [
+                "1s"
+              ],
+              "tolerance": 0.01
+            }
+          }
+        }
+      ]
+    },
+    "burstObservatory": {
+      "subjectSelector": [
+        "proxy"
+      ],
+      "pingConfig": {
+        "destination": "https://probe.example/generate_204",
+        "interval": "5m",
+        "sampling": 3,
+        "timeout": "5s",
+        "httpMethod": "HEAD",
+        "enableConcurrency": true
+      }
+    },
+    "geoip": "https://geo.example/geoip.dat",
+    "geosite": "https://geo.example/geosite.dat",
+    "meta": {
+      "serverDescription": "Описание"
+    },
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node18.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "88060545-73d4-4a99-850d-b9bc4a101799",
+                  "encryption": "none",
+                  "flow": ""
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "grpc",
+          "grpcSettings": {
+            "serviceName": "svc1",
+            "authority": "front1.example",
+            "mode": false
+          },
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front1.example",
+            "publicKey": "n8ML0QR0kNhtlLAYywS4CjOOER-OZxGgn0MRSfGiOOo",
+            "shortId": "65673d49",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom",
+        "settings": {}
+      },
+      {
+        "tag": "block",
+        "protocol": "blackhole",
+        "settings": {}
+      }
+    ]
+  },
+  {
+    "remarks": "🇹🇷 Узел 7",
+    "log": {
+      "dnsLog": true,
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "tag": "socks",
+        "port": 10808,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {
+          "udp": true,
+          "auth": "noauth"
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      },
+      {
+        "tag": "http",
+        "port": 10809,
+        "listen": "127.0.0.1",
+        "protocol": "http",
+        "settings": {
+          "allowTransparent": false
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      }
+    ],
+    "dns": {
+      "servers": [
+        "192.0.2.53",
+        "198.51.100.53"
+      ],
+      "queryStrategy": "UseIPv4"
+    },
+    "routing": {
+      "domainMatcher": "hybrid",
+      "domainStrategy": "IPIfNonMatch",
+      "rules": [
+        {
+          "type": "field",
+          "port": "53",
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "domain": [
+            "domain:direct.example"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "network": "tcp,udp",
+          "balancerTag": "balancer"
+        }
+      ],
+      "balancers": [
+        {
+          "tag": "balancer",
+          "selector": [
+            "proxy"
+          ],
+          "strategy": {
+            "type": "leastLoad",
+            "settings": {
+              "costs": [
+                {
+                  "match": "proxy",
+                  "value": 1,
+                  "regexp": false
+                }
+              ],
+              "maxRTT": "1s",
+              "expected": 2,
+              "baselines": [
+                "1s"
+              ],
+              "tolerance": 0.01
+            }
+          }
+        }
+      ]
+    },
+    "burstObservatory": {
+      "subjectSelector": [
+        "proxy"
+      ],
+      "pingConfig": {
+        "destination": "https://probe.example/generate_204",
+        "interval": "5m",
+        "sampling": 3,
+        "timeout": "5s",
+        "httpMethod": "HEAD",
+        "enableConcurrency": true
+      }
+    },
+    "geoip": "https://geo.example/geoip.dat",
+    "geosite": "https://geo.example/geosite.dat",
+    "meta": {
+      "serverDescription": "Описание"
+    },
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node19.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "c7c2b9d0-283e-484c-8c52-8bdf2a5f63e3",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "tcpSettings": {},
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front2.example",
+            "publicKey": "mmPSoQK7kjA2teDUp52ugPh54vYk7gpcgzKv_rV52tQ",
+            "shortId": "5fbb5288",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "proxy-2",
+        "protocol": "hysteria",
+        "settings": {
+          "address": "node20.example",
+          "port": 443,
+          "version": 2
+        },
+        "streamSettings": {
+          "network": "hysteria",
+          "hysteriaSettings": {
+            "version": 2,
+            "auth": "hy2-auth-58b373507c"
+          },
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "front3.example",
+            "enableSessionResumption": true,
+            "fingerprint": "chrome",
+            "alpn": [
+              "h3"
+            ]
+          },
+          "finalmask": {
+            "quicParams": {
+              "debug": false,
+              "congestion": "bbr"
+            }
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom",
+        "settings": {}
+      },
+      {
+        "tag": "block",
+        "protocol": "blackhole",
+        "settings": {}
+      }
+    ]
+  },
+  {
+    "remarks": "🇱🇻 Узел 8",
+    "log": {
+      "dnsLog": true,
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "tag": "socks",
+        "port": 10808,
+        "listen": "127.0.0.1",
+        "protocol": "socks",
+        "settings": {
+          "udp": true,
+          "auth": "noauth"
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      },
+      {
+        "tag": "http",
+        "port": 10809,
+        "listen": "127.0.0.1",
+        "protocol": "http",
+        "settings": {
+          "allowTransparent": false
+        },
+        "sniffing": {
+          "enabled": true,
+          "routeOnly": false,
+          "destOverride": [
+            "http",
+            "tls",
+            "quic"
+          ]
+        }
+      }
+    ],
+    "dns": {
+      "servers": [
+        "192.0.2.53",
+        "198.51.100.53"
+      ],
+      "queryStrategy": "UseIPv4"
+    },
+    "routing": {
+      "domainMatcher": "hybrid",
+      "domainStrategy": "IPIfNonMatch",
+      "rules": [
+        {
+          "type": "field",
+          "port": "53",
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "domain": [
+            "domain:direct.example"
+          ],
+          "outboundTag": "direct"
+        },
+        {
+          "type": "field",
+          "network": "tcp,udp",
+          "balancerTag": "balancer"
+        }
+      ],
+      "balancers": [
+        {
+          "tag": "balancer",
+          "selector": [
+            "proxy"
+          ],
+          "strategy": {
+            "type": "leastLoad",
+            "settings": {
+              "costs": [
+                {
+                  "match": "proxy",
+                  "value": 1,
+                  "regexp": false
+                }
+              ],
+              "maxRTT": "1s",
+              "expected": 2,
+              "baselines": [
+                "1s"
+              ],
+              "tolerance": 0.01
+            }
+          }
+        }
+      ]
+    },
+    "burstObservatory": {
+      "subjectSelector": [
+        "proxy"
+      ],
+      "pingConfig": {
+        "destination": "https://probe.example/generate_204",
+        "interval": "5m",
+        "sampling": 3,
+        "timeout": "5s",
+        "httpMethod": "HEAD",
+        "enableConcurrency": true
+      }
+    },
+    "geoip": "https://geo.example/geoip.dat",
+    "geosite": "https://geo.example/geosite.dat",
+    "meta": {
+      "serverDescription": "Описание"
+    },
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node21.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "0b54b083-ebec-4838-8880-055b746b6c72",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "tcpSettings": {},
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "front1.example",
+            "publicKey": "qV_JmImmYTpnqWhv07krx6lgx8MCK2NbVOZQ8bNioSY",
+            "shortId": "15af9d5c",
+            "fingerprint": "chrome"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom",
+        "settings": {}
+      },
+      {
+        "tag": "block",
+        "protocol": "blackhole",
+        "settings": {}
+      }
+    ]
+  }
+]

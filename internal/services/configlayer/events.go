@@ -13,6 +13,8 @@ const (
 	EventApplyStep = "apply_step"
 	EventApplyDone = "apply_done"
 	EventNotices   = "notices"
+	// EventSources — представление источников изменилось: клиент перечитывает его.
+	EventSources = "sources"
 )
 
 const (
@@ -41,6 +43,11 @@ type Event struct {
 type DraftEvent struct {
 	DraftRevision int64 `json:"draft_revision"`
 	DraftChanges  int   `json:"draft_changes"`
+}
+
+// SourcesEvent — данные события sources: ревизия черновика на момент события.
+type SourcesEvent struct {
+	Revision int64 `json:"revision"`
 }
 
 // Broker — шина событий слоя для SSE-подписчиков.

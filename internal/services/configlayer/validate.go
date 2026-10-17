@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -96,6 +97,9 @@ func ValidateXray(ctx context.Context, tmpBase string, roots Roots, bin string, 
 		return notRun(KernelXray, err)
 	}
 
+	// Проверка не идёт во время операции XKeen над ядром; ожидание не съедает
+	// её таймаут (services.AcquireKernelHelper).
+	defer services.AcquireKernelHelper(ctx)()
 	cctx, cancel := context.WithTimeout(ctx, ValidateTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, bin, "run", "-test", "-confdir", tmp)
@@ -150,6 +154,7 @@ func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string
 		return notRun(KernelMihomo, err)
 	}
 
+	defer services.AcquireKernelHelper(ctx)()
 	cctx, cancel := context.WithTimeout(ctx, ValidateTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, bin, "-t", "-d", tmp, "-f", filepath.Join(tmp, "config.yaml"))

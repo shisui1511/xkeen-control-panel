@@ -175,8 +175,24 @@ func (a *API) SubscriptionRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.subscriptionSvc.Refresh(id); err != nil {
-		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+	// kernel=xray: интерфейс обновляет провайдер Mihomo своим запросом, поэтому
+	// панель не шлёт Mihomo вторую команду из того же нажатия.
+	var err error
+	switch r.URL.Query().Get("kernel") {
+	case "":
+		err = a.subscriptionSvc.Refresh(id)
+	case "xray":
+		err = a.subscriptionSvc.RefreshXray(id)
+	default:
+		a.errorResponse(w, a.t(r, "error.bad_request"), http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, services.ErrRefreshNotXray) {
+			status = http.StatusBadRequest
+		}
+		a.errorResponse(w, err.Error(), status)
 		return
 	}
 

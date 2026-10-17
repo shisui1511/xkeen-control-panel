@@ -236,10 +236,17 @@ export class ProvidersState {
         | { kernel: 'xray' | 'mihomo'; status: 'rejected'; reason: any }
       >[] = [];
 
+      // Одно нажатие — один запрос к провайдеру на ядро: когда провайдер Mihomo
+      // обновляется своим запросом ниже, запрос Xray идёт с kernel=xray и сам Mihomo
+      // не трогает (иначе провайдер получает вторую команду и вторую загрузку).
+      const providerName = sub.mihomo_provider?.name;
+      const reloadMihomo = !!sub.enable_mihomo && !!providerName;
+
       if (sub.enable_xray) {
         tasks.push(
           (async () => {
-            const res = await apiFetch(`/api/subscriptions/refresh?id=${id}`, {
+            const kernelParam = reloadMihomo ? '&kernel=xray' : '';
+            const res = await apiFetch(`/api/subscriptions/refresh?id=${id}${kernelParam}`, {
               method: 'POST'
             });
             if (res.ok) {
@@ -253,8 +260,7 @@ export class ProvidersState {
         );
       }
 
-      const providerName = sub.mihomo_provider?.name;
-      if (sub.enable_mihomo && providerName) {
+      if (reloadMihomo) {
         tasks.push(
           (async () => {
             const res = await apiFetch(`/api/proxy-providers/${providerName}/refresh`, {

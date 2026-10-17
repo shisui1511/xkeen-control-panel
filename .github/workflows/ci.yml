@@ -277,6 +277,18 @@ jobs:
       - name: Check Xray protocols
         run: node scripts/check-xray-protocols.js
 
+      - name: Check source error codes
+        run: node scripts/check-source-error-codes.js
+
+      - name: Check sources API
+        run: node scripts/check-sources-api.js
+
+      - name: Check config UI
+        run: node scripts/check-config-ui.js
+
+      - name: Check fixtures anonymized
+        run: node scripts/check-fixtures-anonymized.js
+
       - name: Check password blacklist
         run: node scripts/check-password-blacklist.js
 

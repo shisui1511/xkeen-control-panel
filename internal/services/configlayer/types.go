@@ -52,6 +52,9 @@ type ManifestEntry struct {
 	Hash      string      `json:"hash"`
 	Status    EntryStatus `json:"status"`
 	WrittenAt time.Time   `json:"written_at"`
+	// Inert — файл не влияет на запущенное ядро (см. GeneratedFile.Inert);
+	// признак сохраняется, чтобы удаление такого файла тоже не перезапускало ядро.
+	Inert bool `json:"inert,omitempty"`
 }
 
 // ManifestKey — ключ записи манифеста: ядро и путь внутри каталога ядра.
@@ -127,13 +130,16 @@ type Notices struct {
 
 // State — содержимое файла состояния.
 type State struct {
-	SchemaVersion int64                    `json:"schema_version"`
-	DraftRevision int64                    `json:"draft_revision"`
-	Draft         Sections                 `json:"draft"`
-	Applied       Sections                 `json:"applied"`
-	Manifest      map[string]ManifestEntry `json:"manifest"`
-	Notices       Notices                  `json:"notices"`
-	Journal       *Journal                 `json:"journal,omitempty"`
+	SchemaVersion int64    `json:"schema_version"`
+	DraftRevision int64    `json:"draft_revision"`
+	Draft         Sections `json:"draft"`
+	Applied       Sections `json:"applied"`
+	// Live — живые данные слоя (метаданные и статусы источников): не часть
+	// черновика, не меняется его правкой и сбросом, передаётся генераторам.
+	Live     Sections                 `json:"live,omitempty"`
+	Manifest map[string]ManifestEntry `json:"manifest"`
+	Notices  Notices                  `json:"notices"`
+	Journal  *Journal                 `json:"journal,omitempty"`
 }
 
 // emptyState — чистое состояние текущей схемы.
@@ -151,6 +157,7 @@ func (st State) clone() State {
 	out := st
 	out.Draft = st.Draft.Clone()
 	out.Applied = st.Applied.Clone()
+	out.Live = st.Live.Clone()
 	out.Manifest = make(map[string]ManifestEntry, len(st.Manifest))
 	for k, v := range st.Manifest {
 		out.Manifest[k] = v
@@ -170,6 +177,9 @@ func (st *State) normalize() {
 	}
 	if st.Applied == nil {
 		st.Applied = Sections{}
+	}
+	if st.Live == nil {
+		st.Live = Sections{}
 	}
 	if st.Manifest == nil {
 		st.Manifest = map[string]ManifestEntry{}

@@ -10,7 +10,7 @@
     activeKernelName,
     configLayerEnabled
   } from '../stores';
-  import { navBadgeCount, draftChanges } from '../lib/configLayer';
+  import { navBadgeCount, badgeTotal } from '../lib/configLayer';
   import { showMihomoNavFor } from '../lib/navCaps';
   import Skeleton from './Skeleton.svelte';
   import { capsuleConfigStore } from '../lib/capsuleSettings';
@@ -311,7 +311,7 @@
             class="nav-badge-config"
             class:dot={$isSidebarCollapsed}
             role="img"
-            aria-label={$t('nav.config_badge_aria', { n: $draftChanges })}>{$navBadgeCount}</span
+            aria-label={$t('nav.config_badge_aria', { n: $badgeTotal })}>{$navBadgeCount}</span
           >
         {/if}
       </a>

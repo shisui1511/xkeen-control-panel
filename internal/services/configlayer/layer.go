@@ -26,6 +26,9 @@ var (
 	ErrDevModeRequired = errors.New("действие доступно только в режиме разработчика")
 	ErrFileReleased    = errors.New("файл отпущен: панель его не сверяет")
 	ErrStopped         = errors.New("слой остановлен")
+	// ErrAlreadyStarted — генератор зарегистрирован после Start: набор генераторов
+	// фиксируется до запуска слоя.
+	ErrAlreadyStarted = errors.New("слой уже запущен: генераторы регистрируются до Start")
 )
 
 // Значения по умолчанию и пределы.
@@ -102,10 +105,22 @@ type Layer struct {
 
 	mu      sync.Mutex
 	stopped bool
+	// started выставляется в Start: после него регистрация генераторов закрыта.
+	started bool
 	// lastFiles — JSON последнего результата сверки; nil — базы нет.
 	lastFiles []byte
+	// lastDrift — число файлов с дрейфом по последней сверке; переход >0 → 0 будит
+	// onDriftResolved.
+	lastDrift int
+	// onDriftResolved — колбэк «дрейф решён» (сервис источников), до Start.
+	onDriftResolved func()
 	// failed — уведомления build_failed:<ядро> (только в памяти).
 	failed map[string]NoticeView
+	// extNotices — уведомления сервиса источников по префиксу идентификатора
+	// (SetNotices); dismissed — закрытые из них: id возвращается только после того,
+	// как условие исчезло и появилось снова (D-29).
+	extNotices map[string][]NoticeView
+	dismissed  map[string]bool
 	// Кэш версий ядер.
 	verAt time.Time
 	// verGen растёт при каждом сбросе кэша: результат вычисления, начатого до
@@ -166,6 +181,9 @@ func New(opts Options) (*Layer, error) {
 		cancel:   cancel,
 		checkReq: make(chan struct{}, 1),
 		failed:   make(map[string]NoticeView),
+
+		extNotices: make(map[string][]NoticeView),
+		dismissed:  make(map[string]bool),
 	}, nil
 }
 
@@ -224,6 +242,9 @@ func (l *Layer) bootstrap() {
 // ничего не читает и не пишет. Повторный вызов безопасен.
 func (l *Layer) Start() {
 	l.startOnce.Do(func() {
+		l.mu.Lock()
+		l.started = true
+		l.mu.Unlock()
 		if l.Enabled() {
 			if err := l.store.Load(); err != nil {
 				log.Printf("[configlayer] состояние слоя не загружено: %v", err)
@@ -280,7 +301,7 @@ func (l *Layer) RequestCheck() {
 func (l *Layer) Context() context.Context { return l.ctx }
 
 // Stop останавливает слой: отменяет контекст, дожидается всех горутин и
-// закрывает шину. Безопасен при повторном вызове.
+// фоновой записи черновика и закрывает шину. Безопасен при повторном вызове.
 func (l *Layer) Stop() {
 	l.stopOnce.Do(func() {
 		l.mu.Lock()
@@ -289,7 +310,17 @@ func (l *Layer) Stop() {
 		l.cancel()
 	})
 	l.wg.Wait()
+	l.FlushState()
 	l.broker.Close()
+}
+
+// FlushState дожидается фоновой записи черновика и дописывает остаток синхронно, с
+// fsync (Store.FlushSync). Stop вызывает её сам; процесс, который завершается
+// через os.Exit (самообновление панели), вызывает её до запуска нового.
+func (l *Layer) FlushState() {
+	if err := l.store.FlushSync(); err != nil {
+		log.Printf("[configlayer] состояние слоя не записано при остановке: %v", err)
+	}
 }
 
 // Subscribe подписывает на события шины (SSE).
@@ -308,6 +339,7 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 	if !l.Enabled() {
 		l.mu.Lock()
 		l.lastFiles = nil
+		l.lastDrift = 0
 		l.mu.Unlock()
 		return FilesEvent{Files: []FileView{}}
 	}
@@ -319,9 +351,17 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 	l.mu.Lock()
 	changed := !bytes.Equal(l.lastFiles, data)
 	l.lastFiles = data
+	resolved := publish && l.lastDrift > 0 && ev.DriftCount == 0
+	l.lastDrift = ev.DriftCount
+	onResolved := l.onDriftResolved
 	l.mu.Unlock()
 	if publish && changed {
 		l.broker.Publish(Event{Type: EventFiles, Data: ev})
+	}
+	// Дрейф решён (Пересобрать, Принять правку, ручное исправление): будим сервис
+	// источников, чтобы отложенная запись состоялась. Горутина слоя, не под checkMu.
+	if resolved && onResolved != nil {
+		l.spawn(onResolved)
 	}
 	return ev
 }
@@ -361,7 +401,7 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	// Pending: файл, которого нет в манифесте, или чей хэш у черновика отличается
 	// от записи манифеста при совпадающем диске. Ошибка сборки здесь не важна:
 	// «Применить» покажет её сам.
-	if generated, err := l.registry.Build(st.Draft, l.installed()); err == nil {
+	if generated, err := l.registry.Build(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft}, l.installed()); err == nil {
 		for _, g := range generated {
 			key := g.Key()
 			i, known := index[key]
@@ -483,7 +523,95 @@ func (l *Layer) noticeViews(st State) []NoticeView {
 			out = append(out, n)
 		}
 	}
+	return append(out, l.visibleExtLocked()...)
+}
+
+// visibleExtLocked — незакрытые внешние уведомления: префиксы по алфавиту, внутри
+// префикса по ID. Вызывается под l.mu.
+func (l *Layer) visibleExtLocked() []NoticeView {
+	prefixes := make([]string, 0, len(l.extNotices))
+	for p := range l.extNotices {
+		prefixes = append(prefixes, p)
+	}
+	sort.Strings(prefixes)
+	var out []NoticeView
+	for _, p := range prefixes {
+		for _, n := range l.extNotices[p] {
+			if !l.dismissed[n.ID] {
+				out = append(out, n)
+			}
+		}
+	}
 	return out
+}
+
+// SetNotices заменяет уведомления сервиса источников с данным префиксом
+// идентификатора (например, "source_"). Закрытое пользователем уведомление не
+// возвращается, пока его условие не исчезнет из списка и не появится снова.
+// Событие notices публикуется только при изменении видимого списка.
+func (l *Layer) SetNotices(prefix string, notices []NoticeView) {
+	l.mu.Lock()
+	before, _ := json.Marshal(l.visibleExtLocked())
+	list := make([]NoticeView, 0, len(notices))
+	present := make(map[string]bool, len(notices))
+	for _, n := range notices {
+		if !strings.HasPrefix(n.ID, prefix) || present[n.ID] {
+			continue
+		}
+		present[n.ID] = true
+		list = append(list, n)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
+	if len(list) == 0 {
+		delete(l.extNotices, prefix)
+	} else {
+		l.extNotices[prefix] = list
+	}
+	// Условие исчезло — закрытие забывается: при повторном появлении уведомление
+	// снова видно.
+	for id := range l.dismissed {
+		if strings.HasPrefix(id, prefix) && !present[id] {
+			delete(l.dismissed, id)
+		}
+	}
+	after, _ := json.Marshal(l.visibleExtLocked())
+	l.mu.Unlock()
+	if bytes.Equal(before, after) {
+		return
+	}
+	l.publishNotices()
+}
+
+// publishNotices рассылает текущие уведомления событием notices (выключенный слой
+// диск не читает и событий не шлёт).
+func (l *Layer) publishNotices() {
+	if !l.Enabled() {
+		return
+	}
+	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(l.store.Snapshot())}})
+}
+
+// isExtNoticeID — идентификатор есть среди внешних уведомлений.
+func (l *Layer) isExtNoticeID(id string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, list := range l.extNotices {
+		for _, n := range list {
+			if n.ID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// PublishSources сообщает клиентам, что представление источников изменилось
+// (событие sources с текущей ревизией черновика). Выключенный слой молчит.
+func (l *Layer) PublishSources() {
+	if !l.Enabled() {
+		return
+	}
+	l.broker.Publish(Event{Type: EventSources, Data: SourcesEvent{Revision: l.store.Snapshot().DraftRevision}})
 }
 
 // noticeBuildFailedPrefix — префикс идентификатора уведомления о неудачной
@@ -502,6 +630,115 @@ func (l *Layer) EditDraft(rev int64, section string, value json.RawMessage) (Dra
 		l.RequestCheck()
 	}
 	return ev, err
+}
+
+// EditDraftBatch атомарно правит несколько секций черновика и, если live не
+// nil, живые данные слоя под одной проверкой ревизии: конфликт — ErrDraftConflict
+// без записи, успех — ревизия +1 и одно событие draft. Значение nil или JSON
+// null удаляет секцию.
+func (l *Layer) EditDraftBatch(rev int64, sections map[string]json.RawMessage, live func(live Sections) error) (DraftEvent, error) {
+	if !l.Enabled() {
+		return DraftEvent{}, ErrDisabled
+	}
+	ev, err := l.store.EditDraftBatch(rev, sections, live)
+	if err == nil {
+		l.RequestCheck()
+	}
+	return ev, err
+}
+
+// UpdateLive обновляет живые данные слоя (метаданные и статусы источников)
+// отдельно от черновика: ревизия не растёт, события конвейера не публикуются.
+// fn получает глубокую копию Live; ошибка fn или записи — ничего не меняется.
+func (l *Layer) UpdateLive(fn func(live Sections) error) error {
+	if !l.Enabled() {
+		return ErrDisabled
+	}
+	return l.store.Update(func(st *State) error {
+		if st.Live == nil {
+			st.Live = Sections{}
+		}
+		return fn(st.Live)
+	})
+}
+
+// UpdateLiveWith — как UpdateLive, но fn видит и черновик с применённым
+// состоянием той же записи: сервис может сверить, что конфигурация, по которой он
+// считал живые данные, не изменилась, пока шёл долгий запрос. Draft и Applied в
+// view — только для чтения (их изменения не сохраняются), Live — копия под запись.
+func (l *Layer) UpdateLiveWith(fn func(view StateView) error) error {
+	if !l.Enabled() {
+		return ErrDisabled
+	}
+	return l.store.Update(func(st *State) error {
+		if st.Live == nil {
+			st.Live = Sections{}
+		}
+		return fn(StateView{DraftRevision: st.DraftRevision, Draft: st.Draft.Clone(), Applied: st.Applied.Clone(), Live: st.Live})
+	})
+}
+
+// StateView — копия секций слоя для сервисов-потребителей.
+type StateView struct {
+	DraftRevision int64
+	Draft         Sections
+	Applied       Sections
+	Live          Sections
+}
+
+// ReadState возвращает глубокие копии черновика, применённого состояния и
+// живых данных: изменение результата состояние слоя не меняет.
+func (l *Layer) ReadState() (StateView, error) {
+	if !l.Enabled() {
+		return StateView{}, ErrDisabled
+	}
+	st := l.store.Snapshot()
+	return StateView{
+		DraftRevision: st.DraftRevision,
+		Draft:         st.Draft,
+		Applied:       st.Applied,
+		Live:          st.Live,
+	}, nil
+}
+
+// RegisterGenerator добавляет генератор в реестр. Допустима только до Start;
+// генератор с уже занятым ID отклоняется.
+func (l *Layer) RegisterGenerator(g Generator) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	if l.registry.Has(g.ID()) {
+		return fmt.Errorf("configlayer: генератор %q уже зарегистрирован", g.ID())
+	}
+	l.registry.Register(g)
+	return nil
+}
+
+// SetLiveCommitter задаёт хук фиксации живых данных конвейера (см.
+// PipelineDeps.CommitLive). Допустим только до Start.
+func (l *Layer) SetLiveCommitter(fn func(st *State, req ApplyRequest, used Input) error) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	l.pipeline.setCommitLive(fn)
+	return nil
+}
+
+// OnDriftResolved регистрирует колбэк «дрейф решён»: вызывается, когда число
+// файлов с дрейфом по сверке становится 0 (Пересобрать, Принять правку, ручное
+// исправление файла). Допустим только до Start.
+func (l *Layer) OnDriftResolved(fn func()) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	l.onDriftResolved = fn
+	return nil
 }
 
 // ResetDraft сбрасывает черновик к применённому состоянию.
@@ -571,6 +808,40 @@ func (l *Layer) afterRun() {
 	l.broker.Publish(Event{Type: EventDraft, Data: draftEventOf(st)})
 	l.broker.Publish(Event{Type: EventNotices, Data: NoticesEvent{Notices: l.noticeViews(st)}})
 	l.checkNow(true)
+}
+
+// RunSourceRefresh — фоновое обновление источника (FND-06, U-04): тот же конвейер
+// (сборка, проверка обоих ядер, запись, перезапуск только запущенного, коммит), но
+// из применённого состояния с оверлеем живых данных. Черновик и его ревизия не
+// меняются; живые данные фиксирует хук SetLiveCommitter в той же записи, что и
+// манифест. Идущее «Применить» ждёт (параллельного применения нет). Нерешённый
+// дрейф — ErrDriftBlocked: файлы и ядро не тронуты. Вызов синхронный: горутину
+// запускает вызывающий сервис со своим wg.
+func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyView, error) {
+	if !l.Enabled() {
+		return ApplyView{}, ErrDisabled
+	}
+	l.mu.Lock()
+	stopped := l.stopped
+	l.mu.Unlock()
+	if stopped {
+		return ApplyView{}, ErrStopped
+	}
+	release, err := l.pipeline.TryBegin(ctx, false)
+	if err != nil {
+		if l.ctx.Err() != nil {
+			return ApplyView{}, ErrStopped
+		}
+		return ApplyView{}, err
+	}
+	defer release()
+	view := l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerSourceRefresh, Source: SourceApplied, LiveOverlay: overlay})
+	release()
+	l.afterRun()
+	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
+		return view, ErrDriftBlocked
+	}
+	return view, nil
 }
 
 // Rebuild — «Пересобрать»: полный конвейер, ограниченный названными файлами.
@@ -657,7 +928,8 @@ func (l *Layer) Release(key string) (FilesEvent, error) {
 // --- уведомления ---
 
 // DismissNotice закрывает уведомление: schema_reset, recovered_from_journal и
-// journal_recovery_failed сохраняются в файле состояния, build_failed:<ядро> живёт только в памяти.
+// journal_recovery_failed сохраняются в файле состояния, build_failed:<ядро> и
+// уведомления сервиса источников (SetNotices) живут только в памяти.
 // Неизвестный идентификатор — ErrUnknownNotice. Возвращает оставшиеся
 // уведомления и публикует событие notices.
 func (l *Layer) DismissNotice(id string) ([]NoticeView, error) {
@@ -669,6 +941,10 @@ func (l *Layer) DismissNotice(id string) ([]NoticeView, error) {
 	case isBuildFailedID(id):
 		l.mu.Lock()
 		delete(l.failed, id)
+		l.mu.Unlock()
+	case l.isExtNoticeID(id):
+		l.mu.Lock()
+		l.dismissed[id] = true
 		l.mu.Unlock()
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownNotice, id)
@@ -794,6 +1070,8 @@ func resolveDirSymlinks(p string) string {
 // applyMu → lifecycleMu нарушать нельзя).
 func (l *Layer) RestoreExternally(fn func() error) error {
 	if !l.Enabled() {
+		// фоновая запись черновика, начатая до выключения, не ляжет поверх снимка
+		l.store.Flush()
 		err := fn()
 		l.store.Invalidate()
 		return err

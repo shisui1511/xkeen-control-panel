@@ -87,19 +87,21 @@ type XKeenStatusCache struct {
 
 // NewXKeenStatusCache создаёт кэш поверх сервиса XKeen. Кэш создаётся только в
 // cmd/xcp/main.go; Start запускает опрос, Stop (через defer) останавливает.
+// Опрос получает ctx, отменяемый Stop: остановка панели прерывает идущий
+// `xkeen -status`/`xkeen -v`, а не ждёт его до таймаута.
 func NewXKeenStatusCache(x *XKeenService) *XKeenStatusCache {
 	return newXKeenStatusCacheFunc(
-		func(context.Context) (string, error) {
+		func(ctx context.Context) (string, error) {
 			if !x.Installed() {
 				return "", ErrXKeenNotInstalled
 			}
-			return x.StatusWithTimeout(xkeenStatusPollTimeout)
+			return x.StatusContext(ctx, xkeenStatusPollTimeout)
 		},
-		func(context.Context) string {
+		func(ctx context.Context) string {
 			if !x.Installed() {
 				return ""
 			}
-			return x.GetVersion()
+			return x.GetVersionContext(ctx)
 		},
 		time.Now,
 		XKeenStatusPollInterval,
@@ -147,7 +149,8 @@ func (c *XKeenStatusCache) Start() {
 	})
 }
 
-// Stop останавливает цикл и ждёт его завершения. Безопасен при повторном
+// Stop останавливает цикл и ждёт его завершения: идущий опрос прерывается
+// (процесс XKeen убивается, его выход не ждётся). Безопасен при повторном
 // вызове и без Start.
 func (c *XKeenStatusCache) Stop() {
 	c.stopOnce.Do(func() {
@@ -213,6 +216,13 @@ func (c *XKeenStatusCache) pollOnce() {
 	}()
 
 	raw, err := c.runStatus(ctx)
+	if ctx.Err() != nil {
+		// Опрос прерван остановкой кэша: снимок не меняется, версия не читается.
+		for _, w := range waiters {
+			close(w)
+		}
+		return
+	}
 
 	c.mu.Lock()
 	now := c.now()

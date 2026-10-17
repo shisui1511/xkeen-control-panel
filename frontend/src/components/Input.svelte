@@ -7,6 +7,7 @@
     placeholder = '',
     disabled = false,
     error = '',
+    maxlength,
     oninput
   } = $props<{
     id: string;
@@ -16,6 +17,7 @@
     placeholder?: string;
     disabled?: boolean;
     error?: string;
+    maxlength?: number;
     oninput?: (event: Event & { currentTarget: HTMLInputElement }) => void;
   }>();
 </script>
@@ -31,6 +33,7 @@
     bind:value
     {placeholder}
     {disabled}
+    {maxlength}
     {oninput}
     aria-invalid={error ? 'true' : 'false'}
     aria-describedby={error ? `${id}-error` : undefined}

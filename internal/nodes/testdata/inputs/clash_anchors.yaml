@@ -1,0 +1,32 @@
+x-base: &base
+  type: vless
+  network: ws
+  tls: true
+  udp: false
+  servername: cdn.example
+  client-fingerprint: chrome
+  ws-opts:
+    path: /w
+    headers:
+      Host: cdn.example
+
+proxies:
+  - <<: *base
+    name: "Узел якорь"
+    server: node2.example
+    port: 443
+    uuid: 22222222-2222-4222-8222-222222222222
+  - name: "Узел short-id"
+    type: vless
+    server: node3.example
+    port: 443
+    uuid: 33333333-3333-4333-8333-333333333333
+    network: tcp
+    tls: true
+    udp: true
+    flow: xtls-rprx-vision
+    servername: cdn.example
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ
+      short-id: 12345678

@@ -1175,6 +1175,9 @@ func cleanBackupFile(path string) {
 }
 
 func (s *DATManagerService) validateKernelConfig(baseDir, filename string) error {
+	// Проверка не идёт во время операции XKeen над ядром (kernel_exec_gate.go);
+	// ожидание не съедает её собственный таймаут.
+	defer AcquireKernelHelper(context.Background())()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 

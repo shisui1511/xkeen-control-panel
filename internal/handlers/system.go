@@ -17,6 +17,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 type SystemStats struct {
@@ -331,12 +333,28 @@ func (a *API) checkActiveConfigsInvalid() bool {
 	if time.Since(a.configValCacheTime) < 30*time.Second {
 		return a.configValCache
 	}
-
-	invalid := false
+	// Пути к бинарникам и состояние ядра берутся ДО замка: код под замком не должен
+	// вызывать сервисы, которые сами берут читательский замок вспомогательных запусков.
+	// Вложенный RLock при ожидающем писателе (`xkeen -restart`) встаёт в очередь за
+	// ним, а писатель ждёт внешний RLock: взаимная блокировка (kernel_exec_gate.go).
+	// getBinaryPath версию не определяет (KernelService.BinaryPath).
+	xrayBin := a.getBinaryPath("xray")
+	mihomoBin := a.getBinaryPath("mihomo")
 	st := a.activeKernelState()
 
+	// Пока XKeen запускает или перезапускает ядро, проверка не запускается: XKeen
+	// принял бы `xray -test` / `mihomo -t` за само ядро и пропустил запуск
+	// (services.TryAcquireKernelHelper). Опрос статуса не ждёт: прежний итог.
+	// Под замком нельзя вызывать ничего, что берёт этот замок или ждёт сервисы ядра.
+	release, ok := services.TryAcquireKernelHelper()
+	if !ok {
+		return a.configValCache
+	}
+	defer release()
+
+	invalid := false
+
 	checkXray := func() bool {
-		xrayBin := a.getBinaryPath("xray")
 		if xrayBin != "" {
 			if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -352,7 +370,6 @@ func (a *API) checkActiveConfigsInvalid() bool {
 	}
 
 	checkMihomo := func() bool {
-		mihomoBin := a.getBinaryPath("mihomo")
 		if mihomoBin != "" {
 			if _, err := os.Stat(a.cfg.MihomoConfigDir); err == nil {
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

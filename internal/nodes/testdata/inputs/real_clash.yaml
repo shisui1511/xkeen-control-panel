@@ -1,0 +1,134 @@
+proxies:
+  - name: "🇩🇪 Узел 1"
+    type: vless
+    server: node101.example
+    port: 443
+    uuid: 05e805e3-0e3d-4bea-88a1-4406a1982d16
+    network: tcp
+    tls: true
+    udp: true
+    flow: xtls-rprx-vision
+    packet-encoding: xudp
+    servername: front1.example
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: mu4u36G1Tr9sLIu9eT3lYxNT7x8NjEiemr9ceSYvt0Y
+      short-id: "e26b0fb4"
+  - name: "🇳🇱 Узел 2"
+    type: hysteria2
+    server: node102.example
+    port: 443
+    password: hy2-auth-55aca3c600
+    udp: true
+    sni: front2.example
+    alpn:
+      - h3
+    client-fingerprint: chrome
+  - name: "🇫🇮 Узел 3"
+    type: vless
+    server: node103.example
+    port: 443
+    uuid: 57820a63-6638-421e-8462-14aa29bcebce
+    network: grpc
+    tls: true
+    udp: true
+    packet-encoding: xudp
+    servername: front3.example
+    client-fingerprint: chrome
+    grpc-opts:
+      grpc-service-name: svc3
+    reality-opts:
+      public-key: n8ML0QR0kNhtlLAYywS4CjOOER-OZxGgn0MRSfGiOOo
+      short-id: "404381a9"
+  - name: "🇸🇪 Узел 4"
+    type: hysteria2
+    server: node104.example
+    port: 443
+    password: hy2-auth-bba51998c9
+    udp: true
+    sni: front1.example
+    alpn:
+      - h3
+    client-fingerprint: chrome
+  - name: "🇵🇱 Узел 5"
+    type: vless
+    server: node105.example
+    port: 443
+    uuid: 3b853f26-decb-4b99-8a7e-6a16f62c1216
+    network: tcp
+    tls: true
+    udp: true
+    flow: xtls-rprx-vision
+    packet-encoding: xudp
+    servername: front2.example
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: mu4u36G1Tr9sLIu9eT3lYxNT7x8NjEiemr9ceSYvt0Y
+      short-id: "397b904f"
+  - name: "🇫🇷 Узел 6"
+    type: vless
+    server: node106.example
+    port: 443
+    uuid: 2d504811-fbec-4bd7-8594-02994593ead3
+    network: grpc
+    tls: true
+    udp: true
+    packet-encoding: xudp
+    servername: front3.example
+    client-fingerprint: chrome
+    grpc-opts:
+      grpc-service-name: svc3
+    reality-opts:
+      public-key: qV_JmImmYTpnqWhv07krx6lgx8MCK2NbVOZQ8bNioSY
+      short-id: "c749c1ed"
+  - name: "🇹🇷 Узел 7"
+    type: hysteria2
+    server: node107.example
+    port: 443
+    password: hy2-auth-80103a1a79
+    udp: true
+    sni: front1.example
+    alpn:
+      - h3
+    client-fingerprint: chrome
+  - name: "🇱🇻 Узел 8"
+    type: vless
+    server: node108.example
+    port: 443
+    uuid: 4e6ebae1-bf50-4fd6-827e-7caef6ad3d6e
+    network: tcp
+    tls: true
+    udp: true
+    flow: xtls-rprx-vision
+    packet-encoding: xudp
+    servername: front2.example
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: mmPSoQK7kjA2teDUp52ugPh54vYk7gpcgzKv_rV52tQ
+      short-id: "92f74300"
+  - name: "🇩🇪 Узел 9"
+    type: vless
+    server: node109.example
+    port: 443
+    uuid: 1f991922-80db-4cc0-8ab7-1f5e7b8da98e
+    network: grpc
+    tls: true
+    udp: true
+    packet-encoding: xudp
+    servername: front3.example
+    client-fingerprint: chrome
+    grpc-opts:
+      grpc-service-name: svc3
+    reality-opts:
+      public-key: mu4u36G1Tr9sLIu9eT3lYxNT7x8NjEiemr9ceSYvt0Y
+      short-id: "be29ca77"
+  - name: "🇳🇱 Узел 10"
+    type: hysteria2
+    server: node110.example
+    port: 443
+    password: hy2-auth-6542a86f5b
+    udp: true
+    sni: front1.example
+    alpn:
+      - h3
+    client-fingerprint: chrome

@@ -1,0 +1,87 @@
+{
+  "outbounds": [
+    {
+      "tag": "insecure",
+      "remarks": "Узел allowInsecure",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "node1.example",
+            "port": 443,
+            "users": [{ "id": "11111111-1111-4111-8111-111111111111", "encryption": "none" }]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "cdn.example",
+          "allowInsecure": true,
+          "pinnedPeerCertSha256": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]
+        }
+      }
+    },
+    {
+      "tag": "h2",
+      "remarks": "Узел h2",
+      "protocol": "vmess",
+      "settings": {
+        "vnext": [
+          {
+            "address": "node2.example",
+            "port": 443,
+            "users": [{ "id": "22222222-2222-4222-8222-222222222222", "alterId": 0, "security": "auto" }]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "h2",
+        "security": "tls",
+        "tlsSettings": { "serverName": "cdn.example" },
+        "httpSettings": { "path": "/h2", "host": ["cdn.example"] }
+      }
+    },
+    {
+      "tag": "httpsettings",
+      "remarks": "Узел httpSettings",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "node1.example",
+            "port": 443,
+            "users": [{ "id": "11111111-1111-4111-8111-111111111111", "encryption": "none" }]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": { "serverName": "cdn.example" },
+        "httpSettings": { "path": "/h", "host": ["cdn.example"] }
+      }
+    },
+    {
+      "tag": "xhttp-host",
+      "remarks": "Узел xhttp headers",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "node1.example",
+            "port": 443,
+            "users": [{ "id": "11111111-1111-4111-8111-111111111111", "encryption": "none" }]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "tlsSettings": { "serverName": "cdn.example" },
+        "xhttpSettings": { "path": "/xh", "headers": { "Host": "cdn.example" } }
+      }
+    }
+  ]
+}

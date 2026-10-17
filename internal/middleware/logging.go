@@ -56,6 +56,8 @@ func shouldLogRequest(method string, status int, elapsed time.Duration) bool {
 }
 
 // Logging is an HTTP middleware that logs request method, URL path, response status code, and duration.
+// Строка уходит в очередь журнала (utils.AsyncWriter, cmd/xcp): ответ, который
+// дописывается после неё, не ждёт запись на носитель.
 func Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

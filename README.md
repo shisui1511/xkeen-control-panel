@@ -119,7 +119,14 @@ curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/s
 1. Определит архитектуру роутера
 2. Остановит текущую версию
 3. Скачает новый бинарник
-4. Перезапустит сервис
+4. Обновит init-скрипт службы `/opt/etc/init.d/S99xcp`
+5. Перезапустит сервис
+
+Обновление из веб-интерфейса меняет только бинарник. Init-скрипт обновляется скриптом установки: при `install` и `update` или отдельно, без загрузки и перезапуска:
+
+```bash
+curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/scripts/setup.sh | sh -s -- --init-script
+```
 
 ---
 
@@ -160,6 +167,8 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 /opt/etc/init.d/S99xcp restart  # Перезапуск
 /opt/etc/init.d/S99xcp status   # Статус
 ```
+
+`stop` и `restart` ждут настоящего выхода процесса панели: если флешка занята чужой записью, процесс может выходить дольше обычного. Через 20 с init-скрипт добивает процесс SIGKILL, через 60 с сообщает «failed»; `restart` запускает панель только после выхода прежнего процесса. Сроки меняются переменными `XCP_STOP_KILL_AFTER` и `XCP_STOP_TIMEOUT` в `/opt/etc/xcp/xcp.env`.
 
 ### Настройка параметров рантайма Go
 
