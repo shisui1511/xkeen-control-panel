@@ -75,17 +75,6 @@ func rtFindSource(t *testing.T, v SourcesView, id string) SourceView {
 	return SourceView{}
 }
 
-func rtFindNode(t *testing.T, s SourceView, name string) NodeView {
-	t.Helper()
-	for _, n := range s.Nodes {
-		if n.Name == name {
-			return n
-		}
-	}
-	t.Fatalf("узла %q нет в источнике %s", name, s.ID)
-	return NodeView{}
-}
-
 // rtSecretsOf собирает секреты всех узлов ссылок.
 func rtSecretsOf(t *testing.T, names ...string) []string {
 	t.Helper()

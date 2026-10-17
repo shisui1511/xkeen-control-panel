@@ -163,8 +163,8 @@ const need = {
   drift: lineOf('OnDriftResolved('),
   layerStart: lineOf('configLayer.Start()'),
   svcStart: lineOf('sourcesSvc.Start()'),
-  layerStop: lineOf('defer configLayer.Stop()'),
-  svcStop: lineOf('defer sourcesSvc.Stop()')
+  layerStop: lineOf('defer stops.run("config-layer", configLayer.Stop)'),
+  svcStop: lineOf('defer stops.run("sources", sourcesSvc.Stop)')
 };
 for (const [k, v] of Object.entries(need)) {
   if (v === 0) errors.push(`${MAIN}: не найдено «${k}»`);
@@ -178,7 +178,7 @@ if (Object.values(need).every((v) => v > 0)) {
   order('committer', 'layerStart', 'SetLiveCommitter( должен идти до configLayer.Start()');
   order('drift', 'layerStart', 'OnDriftResolved( должен идти до configLayer.Start()');
   order('layerStart', 'svcStart', 'sourcesSvc.Start() должен идти после configLayer.Start()');
-  order('layerStop', 'svcStop', 'defer sourcesSvc.Stop() должен идти после defer configLayer.Stop() (сервис останавливается раньше слоя)');
+  order('layerStop', 'svcStop', 'шаг остановки sources должен идти после шага config-layer (defer: сервис останавливается раньше слоя)');
 }
 
 const kernel = read('internal/handlers/kernel.go');

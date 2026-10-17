@@ -302,9 +302,9 @@ func TestRouterBlobStore(t *testing.T) {
 			t.Fatalf("узел %d не найден в снимке", i)
 		}
 		wo, err1 := nodes.XrayOutbound(want, "xcp-t")
-		go_, err2 := nodes.XrayOutbound(n, "xcp-t")
+		gotOut, err2 := nodes.XrayOutbound(n, "xcp-t")
 		wj, _ := json.Marshal(wo)
-		gj, _ := json.Marshal(go_)
+		gj, _ := json.Marshal(gotOut)
 		if (err1 == nil) != (err2 == nil) || string(wj) != string(gj) {
 			t.Errorf("узел %d: outbound после снимка изменился", i)
 		}
