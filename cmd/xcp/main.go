@@ -139,14 +139,19 @@ func main() {
 		goExp = "none (greenteagc default)"
 	}
 
-	// Setup logging to file if configured with size-based rotation (1 MB) and deduplication (D-16, D-38)
-	var dedupWriter *utils.DeduplicatingWriter
+	// Журнал в файл: ротация по размеру (1 МБ), схлопывание повторов (D-16, D-38) и
+	// асинхронная запись через ограниченную очередь (utils.AsyncWriter): строку
+	// журнала — в том числе журнала доступа (middleware.Logging) и строки остановки
+	// по сигналу — не ждёт ни обработчик запроса, ни поток остановки. Под застоем
+	// журнала ext4 на флешке запись строки стояла 12–17 с. Закрытие — последним
+	// отложенным шагом: дописать очередь не дольше shutdownLogDrain.
+	var logWriter *utils.AsyncWriter
 	if cfg.XCPLogPath != "" {
 		rotator, err := utils.NewRotateWriter(cfg.XCPLogPath, 1*1024*1024)
 		if err == nil {
-			dedupWriter = utils.NewDeduplicatingWriter(rotator)
-			log.SetOutput(dedupWriter)
-			defer dedupWriter.Close()
+			logWriter = utils.NewAsyncWriter(utils.NewDeduplicatingWriter(rotator), utils.AsyncWriterLimit)
+			log.SetOutput(logWriter)
+			defer func() { _ = logWriter.Close(shutdownLogDrain) }()
 		} else {
 			log.Printf("Failed to initialize log rotator for %s: %v", cfg.XCPLogPath, err)
 		}
@@ -168,13 +173,13 @@ func main() {
 		}
 	}
 
+	// Аварийный выход сам на носитель не пишет: строка ставится в очередь журнала и
+	// ждёт записи не дольше shutdownLogDrain (раньше Flush/Printf/Close xcp.log шли
+	// синхронно и под застоем журнала ФС стояли секундами — уже после срока).
 	fatalf := func(format string, v ...interface{}) {
-		if dedupWriter != nil {
-			_ = dedupWriter.Flush()
-		}
 		log.Printf(format, v...)
-		if dedupWriter != nil {
-			_ = dedupWriter.Close()
+		if logWriter != nil {
+			logWriter.Flush(shutdownLogDrain)
 		}
 		os.Exit(1)
 	}
@@ -790,8 +795,9 @@ func main() {
 
 	select {
 	case sig := <-sigCh:
-		log.Printf("Received signal %s, shutting down...", sig)
+		// Срок — до первой строки журнала: остановку ничто не задерживает до него.
 		stops.arm(shutdownDeadline, fatalf)
+		log.Printf("Received signal %s, shutting down...", sig)
 		stops.enter("http")
 		cancelScheduler()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownHTTPTimeout)
@@ -806,8 +812,8 @@ func main() {
 		// If the server was closed (e.g. during update restart), wait for either a signal
 		// or for the update process to call os.Exit().
 		sig := <-sigCh
-		log.Printf("Received signal %s during restart, exiting...", sig)
 		stops.arm(shutdownDeadline, fatalf)
+		log.Printf("Received signal %s during restart, exiting...", sig)
 	}
 	log.Println("Server stopped.")
 }
