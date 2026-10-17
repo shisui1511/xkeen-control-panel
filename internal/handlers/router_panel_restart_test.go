@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -418,4 +420,149 @@ func TestRouterPanelRestartWithDirtyDisk(t *testing.T) {
 	}
 	rtPanelRestartVerdict(t, old, res, "в записи на носитель было "+strconv.FormatInt(wb>>20, 10)+
 		" МБ, чужие данные записаны за "+syncTook.Round(time.Millisecond).String())
+}
+
+// rtPanelXKeenSteps — шаги остановки панели, которые ждали опрос XKeen: кэш
+// статуса и сторожевой таймер (имена шагов — cmd/xcp/main.go).
+var rtPanelXKeenSteps = []string{"Shutdown: xkeen-status-cache took", "Shutdown: watchdog took"}
+
+// rtProcState — состояние процесса из /proc/<pid>/stat («R», «S», «D», «T», «Z»);
+// пусто — процесса нет.
+func rtProcState(pid int) (state string, ppid int) {
+	st, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return "", 0
+	}
+	// поля после «(comm)»: состояние, PPID
+	i := bytes.LastIndexByte(st, ')')
+	if i < 0 {
+		return "", 0
+	}
+	f := strings.Fields(string(st[i+1:]))
+	if len(f) < 2 {
+		return "", 0
+	}
+	ppid, _ = strconv.Atoi(f[1])
+	return f[0], ppid
+}
+
+// rtPanelXKeenPoll — опрос XKeen, запущенный панелью pid (`xkeen -status` кэша
+// статуса или watchdog, `xkeen -v` кэша): PID дочернего процесса и его командная
+// строка; 0 — опроса сейчас нет. Команды жизненного цикла XKeen не берутся.
+func rtPanelXKeenPoll(pid int) (int, string) {
+	ents, _ := os.ReadDir("/proc")
+	for _, e := range ents {
+		n, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		if _, ppid := rtProcState(n); ppid != pid {
+			continue
+		}
+		raw, err := os.ReadFile("/proc/" + e.Name() + "/cmdline")
+		if err != nil {
+			continue
+		}
+		args := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
+		xkeen, poll := false, false
+		for _, a := range args {
+			switch {
+			case filepath.Base(a) == "xkeen":
+				xkeen = true
+			case a == "-status" || a == "-v":
+				poll = true
+			}
+		}
+		if xkeen && poll {
+			return n, strings.Join(args, " ")
+		}
+	}
+	return 0, ""
+}
+
+// rtWaitStorageQuiet ждёт (не дольше limit), пока в кэше страниц почти не
+// останется грязных и записываемых данных, и возвращает описание состояния
+// носителя для журнала теста.
+func rtWaitStorageQuiet(t *testing.T, limit time.Duration) string {
+	t.Helper()
+	start := time.Now()
+	for {
+		dirty, wb := rtMeminfo(t, "Dirty"), rtMeminfo(t, "Writeback")
+		if dirty+wb < 1<<20 || time.Since(start) > limit {
+			return "носитель: грязных " + strconv.FormatInt(dirty>>10, 10) + " КБ, в записи " +
+				strconv.FormatInt(wb>>10, 10) + " КБ (ожидание " + time.Since(start).Round(100*time.Millisecond).String() + ")"
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// Перезапуск, пока идёт опрос XKeen панели (`xkeen -status` кэша статуса или
+// watchdog) и не заканчивается. В полном прогоне так выглядел опрос под записью на
+// флешку: страницы скрипта XKeen вытеснены из кэша, и скрипт читал их с носителя
+// всё время записи (14 с вместо 0,2 с). Остановка ждала этот процесс — шаг кэша
+// статуса или watchdog держал выход до срока 8 с, аварийный выход сам ждал флешку,
+// и init-скрипт не дождался выхода (прогон 20261016-235133-f6573bfd). Здесь опрос
+// останавливается сигналом SIGSTOP: он гарантированно не закончится сам, пока
+// панель останавливается. Сверх общего вердикта: шаги остановки, ждавшие опрос
+// XKeen, не идут секунду и дольше, а прерванный опрос не остаётся висеть.
+func TestRouterPanelRestartDuringXKeenStatus(t *testing.T) {
+	bin := config.Default().XKeenBinary
+	if _, err := os.Stat(bin); err != nil {
+		t.Skipf("XKeen не установлен (%s): опроса XKeen у панели нет", bin)
+	}
+	p := routertest.NewPanel(t)
+	old := rtPanelCurrent(t, p)
+
+	// Сценарий проверяет только ожидание опроса XKeen: запись на носитель от
+	// предыдущих проверок (перезапуск под нагрузкой, старт свежей панели) сюда не
+	// примешивается — её держит отдельный сценарий WithDirtyDisk.
+	quiet := rtWaitStorageQuiet(t, time.Minute)
+	// Опрос идёт раз в 10 с после конца предыдущего, проверка watchdog — раз в 30 с.
+	var poll int
+	var pollCmd string
+	deadline := time.Now().Add(45 * time.Second)
+	for time.Now().Before(deadline) {
+		if poll, pollCmd = rtPanelXKeenPoll(old); poll != 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if poll == 0 {
+		t.Skipf("за 45 с панель не запустила опрос XKeen: условие сценария не набралось")
+	}
+	if err := syscall.Kill(poll, syscall.SIGSTOP); err != nil {
+		t.Skipf("опрос XKeen «%s» закончился раньше, чем его удалось остановить: %v", pollCmd, err)
+	}
+	t.Cleanup(func() {
+		// Опрос, который никто не убил, продолжается и заканчивается сам.
+		_ = syscall.Kill(poll, syscall.SIGCONT)
+	})
+	stopped := ""
+	for end := time.Now().Add(time.Second); time.Now().Before(end) && stopped != "T"; time.Sleep(10 * time.Millisecond) {
+		stopped, _ = rtProcState(poll)
+	}
+	if stopped != "T" {
+		t.Skipf("опрос XKeen «%s» закончился раньше, чем остановился (состояние «%s»)", pollCmd, stopped)
+	}
+
+	pollAtExit := "-"
+	res := rtPanelRestart(t, p, old, func() {
+		pollAtExit, _ = rtProcState(poll)
+	})
+	rtPanelRestartVerdict(t, old, res, "опрос XKeen «"+pollCmd+"» остановлен SIGSTOP, при выходе панели — состояние «"+pollAtExit+"»; "+quiet)
+	for _, line := range res.shutdownLog {
+		for _, step := range rtPanelXKeenSteps {
+			if strings.Contains(line, step) {
+				t.Errorf("остановка ждала опрос XKeen: %s", line)
+			}
+		}
+	}
+	// Убитый опрос исчезает (или остаётся зомби, пока его не подберут).
+	state := ""
+	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
+		if state, _ = rtProcState(poll); state == "" || state == "Z" {
+			return
+		}
+	}
+	t.Errorf("прерванный остановкой опрос XKeen «%s» остался висеть: состояние «%s» через 5 с после выхода панели", pollCmd, state)
 }

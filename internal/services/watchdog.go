@@ -113,6 +113,10 @@ type WatchdogService struct {
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	wg       sync.WaitGroup
+	// stopCtx отменяется в Stop: проверка здоровья прерывает идущий
+	// `xkeen -status` (остановка панели не ждёт скрипт XKeen).
+	stopCtx    context.Context
+	cancelStop context.CancelFunc
 
 	now       func() time.Time
 	startedAt time.Time
@@ -161,12 +165,15 @@ type WatchdogService struct {
 // on the struct so a future periodic self-heal pass can reuse them without
 // re-plumbing parameters through main.go.
 func NewWatchdogService(xkeenSvc *XKeenService, mihomoDir, xrayDir string) *WatchdogService {
+	stopCtx, cancelStop := context.WithCancel(context.Background())
 	return &WatchdogService{
-		xkeenSvc:  xkeenSvc,
-		mihomoDir: mihomoDir,
-		xrayDir:   xrayDir,
-		stopCh:    make(chan struct{}),
-		now:       time.Now,
+		xkeenSvc:   xkeenSvc,
+		mihomoDir:  mihomoDir,
+		xrayDir:    xrayDir,
+		stopCh:     make(chan struct{}),
+		stopCtx:    stopCtx,
+		cancelStop: cancelStop,
+		now:        time.Now,
 	}
 }
 
@@ -207,9 +214,12 @@ func (w *WatchdogService) Start() {
 }
 
 // Stop signals the loop to exit and waits for it to finish. Safe to call multiple times.
+// Идущая проверка здоровья прерывается (процесс `xkeen -status` убивается, его
+// выход не ждётся); аварийное снятие TPROXY и возврат перехвата Stop дожидается.
 func (w *WatchdogService) Stop() {
 	w.stopOnce.Do(func() {
 		close(w.stopCh)
+		w.cancelStop()
 	})
 	w.wg.Wait()
 }
@@ -239,6 +249,9 @@ func (w *WatchdogService) loop() {
 // runCheck performs one health-check + routing-validation pass.
 func (w *WatchdogService) runCheck() {
 	w.CheckHealth()
+	if w.stopCtx.Err() != nil {
+		return
+	}
 	w.reportRoutingIssues(ValidateXrayRoutingTags(w.xrayDir))
 }
 
@@ -288,7 +301,8 @@ func isKernelStatusHealthy(status string) bool {
 // (15s, STAB-01), so a hung/unresponsive kernel process surfaces here as an
 // error/timeout rather than blocking this goroutine. Live output is used
 // instead of XKeenStatusCache: the cache may serve a stale Raw, and the
-// watchdog needs a real answer; statusRunMu still serialises `xkeen -status`.
+// watchdog needs a real answer; XKeenService.statusRun still serialises
+// `xkeen -status`. Stop прерывает идущую проверку (stopCtx).
 func (w *WatchdogService) CheckHealth() {
 	if w.xkeenSvc == nil {
 		return
@@ -330,7 +344,12 @@ func (w *WatchdogService) CheckHealth() {
 	}
 	w.mu.Unlock()
 
-	status, err := w.xkeenSvc.StatusWithTimeout(watchdogStatusTimeout)
+	status, err := w.xkeenSvc.StatusContext(w.stopCtx, watchdogStatusTimeout)
+	if w.stopCtx.Err() != nil {
+		// Проверку прервала остановка сервиса: это не провал ядра, счётчики не
+		// меняются, аварийное снятие не запускается.
+		return
+	}
 	healthy := err == nil && isKernelStatusHealthy(status)
 
 	if healthy {
