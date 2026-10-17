@@ -438,7 +438,12 @@ func (w *WatchdogService) CheckHealth() {
 	w.mu.Unlock()
 
 	if checkRules {
-		v4, v6 := w.tproxyInterceptionFamilies()
+		v4, v6 := w.tproxyInterceptionFamilies(w.stopCtx)
+		if w.stopCtx.Err() != nil {
+			// Чтение правил прервала остановка сервиса: результат неполный, состояние
+			// не меняется (как при прерванном `xkeen -status` выше).
+			return
+		}
 		rulesActive = v4 || v6
 		var family string
 		switch {
@@ -565,7 +570,8 @@ func (w *WatchdogService) CheckHealth() {
 func (w *WatchdogService) rearmInterception(fn func() error) {
 	defer w.wg.Done()
 
-	if v4, v6 := w.tproxyInterceptionFamilies(); v4 || v6 {
+	// Возврат перехвата Stop дожидается: проверка правил здесь не прерывается.
+	if v4, v6 := w.tproxyInterceptionFamilies(context.Background()); v4 || v6 {
 		log.Printf("Watchdog: TPROXY rules already present after recovery — rearm skipped")
 		return
 	}
@@ -808,11 +814,16 @@ func (w *WatchdogService) resolveXtablesBins() (saveV4, delV4, saveV6, delV6 str
 
 // tproxyInterceptionFamilies performs a non-destructive check of both IPv4 and IPv6
 // mangle tables, returning whether TPROXY interception rules are present in each family.
-func (w *WatchdogService) tproxyInterceptionFamilies() (v4, v6 bool) {
-	ctx := context.Background()
+// Отмена ctx убивает идущую утилиту чтения правил и пропускает оставшуюся: проверка
+// здоровья передаёт сюда stopCtx, и Stop не ждёт iptables-save (до 10 с на таблицу).
+// После отмены результат неполный — вызывающий проверяет ctx.Err().
+func (w *WatchdogService) tproxyInterceptionFamilies(ctx context.Context) (v4, v6 bool) {
 	saveV4, _, saveV6, _ := w.resolveXtablesBins()
 
 	check := func(saveBin string) bool {
+		if ctx.Err() != nil {
+			return false
+		}
 		lines, err := listMangleRules(ctx, saveBin)
 		if err != nil {
 			return false

@@ -606,7 +606,9 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 // runArgs запускает xkeen с аргументами args и таймаутом timeout. Отмена ctx
 // убивает процесс и сразу возвращает ctx.Err(): выхода процесса не ждёт — скрипт
 // в непрерываемом ожидании носителя умрёт, когда чтение вернётся, а Wait в фоне
-// его подберёт. Вывод при отмене не собирается.
+// его подберёт. Вывод при отмене не собирается. Отмена действует и после таймаута
+// и выхода скрипта: ожидание выхода убитого процесса и остатка вывода
+// (scriptOutputGrace) прерывается.
 func (s *XKeenService) runArgs(ctx context.Context, timeout time.Duration, args ...string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -661,10 +663,17 @@ func (s *XKeenService) runArgs(ctx context.Context, timeout time.Duration, args 
 		return "", ctx.Err()
 	case <-time.After(timeout):
 		if cmd.Process != nil {
-			cmd.Process.Kill()
+			_ = cmd.Process.Kill()
 		}
-		<-done
-		output := utils.StripANSI(out.snapshot(scriptOutputGrace))
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+		output := utils.StripANSI(out.snapshot(ctx, scriptOutputGrace))
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		isStart := false
 		for _, arg := range args {
 			if strings.Contains(arg, "start") || strings.Contains(arg, "restart") {
@@ -677,7 +686,10 @@ func (s *XKeenService) runArgs(ctx context.Context, timeout time.Duration, args 
 		}
 		return output, fmt.Errorf("timeout exceeded")
 	case err := <-done:
-		output := utils.StripANSI(out.snapshot(scriptOutputGrace))
+		output := utils.StripANSI(out.snapshot(ctx, scriptOutputGrace))
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
 		isStart := false
 		for _, arg := range args {
 			if strings.Contains(arg, "start") || strings.Contains(arg, "restart") {

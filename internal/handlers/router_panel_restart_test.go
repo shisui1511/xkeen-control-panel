@@ -216,6 +216,12 @@ func rtPanelCurrent(t *testing.T, p *routertest.Panel) int {
 	}
 	old := pids[0]
 	t.Cleanup(func() {
+		// Сценарий пропущен до перезапуска: работает прежний процесс.
+		if pids, _ := rtPanelPIDs(); len(pids) == 1 && pids[0] == old {
+			if code, err := p.GetJSON("/api/auth/me", nil); err == nil && code == http.StatusOK {
+				return
+			}
+		}
 		if pid, _ := rtPanelWaitUp(p, old, 5*time.Second); pid != 0 {
 			return
 		}
@@ -565,4 +571,316 @@ func TestRouterPanelRestartDuringXKeenStatus(t *testing.T) {
 		}
 	}
 	t.Errorf("прерванный остановкой опрос XKeen «%s» остался висеть: состояние «%s» через 5 с после выхода панели", pollCmd, state)
+}
+
+// rtPanelChild — дочерний процесс панели: PID и командная строка (аргументы).
+type rtPanelChild struct {
+	pid  int
+	args []string
+}
+
+func (c rtPanelChild) cmd() string { return strings.Join(c.args, " ") }
+
+// xkeenStatus — опрос `xkeen -status` (кэш статуса или watchdog).
+func (c rtPanelChild) xkeenStatus() bool {
+	xkeen, status := false, false
+	for _, a := range c.args {
+		switch {
+		case filepath.Base(a) == "xkeen":
+			xkeen = true
+		case a == "-status":
+			status = true
+		}
+	}
+	return xkeen && status
+}
+
+// rulesCheck — чтение таблицы mangle (iptables-save/ip6tables-save): так watchdog
+// проверяет, стоят ли правила перехвата TPROXY.
+func (c rtPanelChild) rulesCheck() bool {
+	if len(c.args) == 0 {
+		return false
+	}
+	switch filepath.Base(c.args[0]) {
+	case "iptables-save", "ip6tables-save":
+		return true
+	}
+	return false
+}
+
+// rtPanelChildren — дочерние процессы панели pid.
+func rtPanelChildren(pid int) []rtPanelChild {
+	var out []rtPanelChild
+	ents, _ := os.ReadDir("/proc")
+	for _, e := range ents {
+		n, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		if _, ppid := rtProcState(n); ppid != pid {
+			continue
+		}
+		raw, err := os.ReadFile("/proc/" + e.Name() + "/cmdline")
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		out = append(out, rtPanelChild{pid: n, args: strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")})
+	}
+	return out
+}
+
+// rtStoppedProcs — процессы, остановленные сценарием сигналом SIGSTOP. Cleanup
+// продолжает их (SIGCONT): процесс, который никто не убил, закончится сам.
+type rtStoppedProcs struct {
+	mu   sync.Mutex
+	pids map[int]string
+}
+
+func newRtStoppedProcs(t *testing.T) *rtStoppedProcs {
+	s := &rtStoppedProcs{pids: map[int]string{}}
+	t.Cleanup(func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for pid := range s.pids {
+			_ = syscall.Kill(pid, syscall.SIGCONT)
+		}
+	})
+	return s
+}
+
+// stop останавливает процесс c, если он ещё не остановлен; true — остановлен сейчас.
+func (s *rtStoppedProcs) stop(c rtPanelChild) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.pids[c.pid]; ok {
+		return false
+	}
+	if err := syscall.Kill(c.pid, syscall.SIGSTOP); err != nil {
+		return false
+	}
+	s.pids[c.pid] = c.cmd()
+	return true
+}
+
+// note запоминает командную строку остановленного процесса (до SIGSTOP она бывает
+// неизвестна: процесс ещё в execve); forget — процесс продолжен сценарием.
+func (s *rtStoppedProcs) note(c rtPanelChild) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.pids[c.pid]; ok {
+		s.pids[c.pid] = c.cmd()
+	}
+}
+
+func (s *rtStoppedProcs) forget(pid int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.pids, pid)
+}
+
+func (s *rtStoppedProcs) snapshot() map[int]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[int]string, len(s.pids))
+	for pid, cmd := range s.pids {
+		out[pid] = cmd
+	}
+	return out
+}
+
+// rtWatchOpens сообщает об открытиях файла path (inotify IN_OPEN): запуск
+// бинарника открывает его, поэтому событие приходит, пока новый процесс ещё в
+// execve. Наблюдение снимается в Cleanup.
+func rtWatchOpens(t *testing.T, path string) <-chan struct{} {
+	t.Helper()
+	fd, err := syscall.InotifyInit1(syscall.IN_CLOEXEC | syscall.IN_NONBLOCK)
+	if err != nil {
+		t.Skipf("inotify недоступен: %v", err)
+	}
+	if _, err := syscall.InotifyAddWatch(fd, path, syscall.IN_OPEN); err != nil {
+		_ = syscall.Close(fd)
+		t.Skipf("inotify на %s: %v", path, err)
+	}
+	f := os.NewFile(uintptr(fd), "inotify")
+	ch := make(chan struct{}, 1)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			if _, err := f.Read(buf); err != nil {
+				return
+			}
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	t.Cleanup(func() { _ = f.Close() })
+	return ch
+}
+
+// rtNewestChildren — дочерние процессы parent среди span последних выданных PID
+// (последний PID — из /proc/loadavg). Быстрее обхода /proc: процесс, который
+// только что начал execve, ловится раньше, чем успеет закончиться.
+func rtNewestChildren(parent, span int) []int {
+	raw, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return nil
+	}
+	f := strings.Fields(string(raw))
+	if len(f) == 0 {
+		return nil
+	}
+	last, err := strconv.Atoi(f[len(f)-1])
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for pid := last; pid > last-span && pid > 0; pid-- {
+		if _, ppid := rtProcState(pid); ppid == parent {
+			out = append(out, pid)
+		}
+	}
+	return out
+}
+
+// rtProcArgs — командная строка процесса pid.
+func rtProcArgs(pid int) []string {
+	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	return strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
+}
+
+// rtWaitStopped ждёт (до секунды), пока процесс pid не перейдёт в состояние «T»
+// после SIGSTOP. Возвращает последнее состояние.
+func rtWaitStopped(pid int) string {
+	state := ""
+	for end := time.Now().Add(time.Second); time.Now().Before(end) && state != "T"; time.Sleep(5 * time.Millisecond) {
+		if state, _ = rtProcState(pid); state == "" {
+			return ""
+		}
+	}
+	return state
+}
+
+// Перезапуск, пока watchdog после провала проверки здоровья читает таблицу mangle
+// (iptables-save): так он решает, стоят ли правила перехвата TPROXY. Под записью на
+// флешку `xkeen -status` не укладывается в свой таймаут 15 с, и проверка правил
+// начинается, когда панель уже могут остановить. Эта проверка шла без отмены
+// (до 10 с на таблицу), и Stop watchdog ждал её хвост (прогон
+// 20261017-152925-7e154ece: «Shutdown: watchdog took 1.504s»). Здесь внеочередная
+// проверка watchdog запускается сбросом счётчиков (POST /api/service/watchdog/reset:
+// счётчик провалов — 0, поэтому после провала правила проверяются), опросы `xkeen
+// -status` останавливаются SIGSTOP, пока проверка не провалится по таймауту, а
+// утилита чтения правил ловится в момент запуска (inotify на её бинарник) и тоже
+// останавливается: сама она не закончится. Сверх общего вердикта: шаг остановки
+// watchdog не идёт секунду и дольше, и прерванная утилита не остаётся висеть.
+func TestRouterPanelRestartDuringWatchdogRulesCheck(t *testing.T) {
+	bin := config.Default().XKeenBinary
+	if _, err := os.Stat(bin); err != nil {
+		t.Skipf("XKeen не установлен (%s): проверки здоровья watchdog нет", bin)
+	}
+	// Утилита — по PATH панели (init-скрипт: сначала /opt/sbin), наблюдение — за
+	// настоящим файлом (iptables-save — ссылка на общий бинарник).
+	saveBin := ""
+	for _, dir := range []string{"/opt/sbin", "/opt/bin", "/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"} {
+		if real, err := filepath.EvalSymlinks(filepath.Join(dir, "iptables-save")); err == nil {
+			saveBin = real
+			break
+		}
+	}
+	if saveBin == "" {
+		t.Skip("iptables-save не найден: watchdog не проверяет правила TPROXY")
+	}
+	p := routertest.NewPanel(t)
+	old := rtPanelCurrent(t, p)
+	quiet := rtWaitStorageQuiet(t, time.Minute)
+
+	opens := rtWatchOpens(t, saveBin)
+	stopped := newRtStoppedProcs(t)
+	// catch останавливает дочерние процессы панели, которые только что начали
+	// execve бинарника утилиты, и возвращает утилиту чтения правил, если поймана.
+	catch := func() (rtPanelChild, bool) {
+		for _, pid := range rtNewestChildren(old, 64) {
+			c := rtPanelChild{pid: pid}
+			if !stopped.stop(c) {
+				continue
+			}
+			state := rtWaitStopped(pid)
+			c.args = rtProcArgs(pid)
+			stopped.note(c)
+			switch {
+			case state == "T" && c.rulesCheck():
+				return c, true
+			case state == "T" && c.xkeenStatus():
+				// опрос XKeen остаётся остановленным, как и остальные
+			default:
+				stopped.forget(pid)
+				_ = syscall.Kill(pid, syscall.SIGCONT)
+			}
+		}
+		return rtPanelChild{}, false
+	}
+
+	code, err := p.PostJSON("/api/service/watchdog/reset", nil, nil)
+	if err != nil || code != http.StatusOK {
+		t.Skipf("сброс watchdog: http %d (%v): внеочередная проверка не запущена", code, err)
+	}
+	// Проверка ждёт опрос кэша статуса (таймаут 10 с) и сама ждёт `xkeen -status` 15 с.
+	var check rtPanelChild
+	deadline := time.Now().Add(45 * time.Second)
+	for check.pid == 0 && time.Now().Before(deadline) {
+		select {
+		case <-opens:
+			check, _ = catch()
+		case <-time.After(10 * time.Millisecond):
+			for _, c := range rtPanelChildren(old) {
+				if c.xkeenStatus() {
+					stopped.stop(c)
+				}
+			}
+		}
+	}
+	if check.pid == 0 {
+		t.Skipf("за 45 с после сброса watchdog не дошёл до проверки правил TPROXY: условие сценария не набралось (остановлено процессов: %d)", len(stopped.snapshot()))
+	}
+
+	// Пока панель останавливается, утилиты чтения правил (вторая таблица) тоже
+	// останавливаются: иначе они закончились бы сами.
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	defer stopWatch()
+	go func() {
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case <-opens:
+				_, _ = catch()
+			}
+		}
+	}()
+	res := rtPanelRestart(t, p, old, stopWatch)
+	rtPanelRestartVerdict(t, old, res, "проверка правил «"+check.cmd()+"» остановлена SIGSTOP; "+quiet)
+	for _, line := range res.shutdownLog {
+		if strings.Contains(line, "Shutdown: watchdog took") {
+			t.Errorf("остановка ждала проверку правил watchdog: %s", line)
+		}
+	}
+	// Утилиты чтения правил, остановленные сценарием, убиты остановкой панели.
+	for pid, cmd := range stopped.snapshot() {
+		if !strings.Contains(cmd, "-save") {
+			continue
+		}
+		var st string
+		for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
+			if st, _ = rtProcState(pid); st == "" || st == "Z" {
+				break
+			}
+		}
+		if st != "" && st != "Z" {
+			t.Errorf("прерванная остановкой проверка правил «%s» осталась висеть: состояние «%s» через 5 с после выхода панели", cmd, st)
+		}
+	}
 }
