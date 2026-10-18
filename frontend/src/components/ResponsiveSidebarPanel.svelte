@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { fade, fly } from 'svelte/transition';
+  import { fade, fly, type EasingFunction, type TransitionConfig } from 'svelte/transition';
   import { cubicIn, cubicOut } from 'svelte/easing';
   import { prefersReducedMotion } from 'svelte/motion';
   import { t } from '../i18n';
@@ -44,12 +44,35 @@
 
   // Длительность выезда и ухода шторки, мс
   const SHEET_MOTION_MS = 200;
-  // Svelte читает параметры перехода в момент появления или ухода элемента, поэтому при
-  // смене режима уход ветки оверлея видит уже новый isOverlay и длится 0: шторка и бэкдроп
-  // исчезают сразу и не гаснут поверх колонки ПК. Колонка не анимируется вовсе (panel(false)).
+  // Длительность берётся при каждом переходе через sheetFly и sheetFade. При смене режима уход
+  // ветки оверлея видит уже новый isOverlay и длится 0: шторка и бэкдроп исчезают сразу и не
+  // гаснут поверх колонки ПК. Колонка не анимируется вовсе (panel(false)).
   let sheetMotionMs = $derived(isOverlay && !prefersReducedMotion.current ? SHEET_MOTION_MS : 0);
   // Шторка выезжает со своей стороны экрана
   let sheetOffset = $derived(side === 'left' ? '-100%' : '100%');
+
+  // Svelte кеширует результат функции перехода на время жизни менеджера перехода, а у перехода
+  // только на уход кеш переживает прерванный уход (шторку открыли снова, пока она уезжала):
+  // ветка возобновляется вместе с менеджерами и хранит прежнюю длительность. Функция вместо
+  // объекта кешируется как функция, и Svelte вызывает её при каждом выезде и уходе (в microtask
+  // после обновления DOM), поэтому длительность и сторона читаются заново: после прерванного
+  // закрытия действуют и смена режима, и prefers-reduced-motion (G-142-4-WR01, D-15).
+  function sheetFly(
+    node: Element,
+    p: { animated: boolean; easing: EasingFunction }
+  ): () => TransitionConfig {
+    return () =>
+      fly(node, {
+        x: sheetOffset,
+        opacity: 1,
+        duration: p.animated ? sheetMotionMs : 0,
+        easing: p.easing
+      });
+  }
+
+  function sheetFade(node: Element, p: { easing: EasingFunction }): () => TransitionConfig {
+    return () => fade(node, { duration: sheetMotionMs, easing: p.easing });
+  }
 
   let customWidth = $state<number | null>(null);
   let initialWidth = $derived.by(() => {
@@ -271,18 +294,8 @@
       isSwiping = false;
     }}
     style={isOverlay ? undefined : `width: ${panelWidth}px;`}
-    in:fly={{
-      x: sheetOffset,
-      opacity: 1,
-      duration: animated ? sheetMotionMs : 0,
-      easing: cubicOut
-    }}
-    out:fly={{
-      x: sheetOffset,
-      opacity: 1,
-      duration: animated ? sheetMotionMs : 0,
-      easing: cubicIn
-    }}
+    in:sheetFly={{ animated, easing: cubicOut }}
+    out:sheetFly={{ animated, easing: cubicIn }}
   >
     {#if isOverlay}
       <div class="responsive-sidebar-overlay-header">
@@ -331,8 +344,8 @@
       aria-label={$t('app.close')}
       tabindex="-1"
       onclick={handleClose}
-      in:fade={{ duration: sheetMotionMs, easing: cubicOut }}
-      out:fade={{ duration: sheetMotionMs, easing: cubicIn }}
+      in:sheetFade={{ easing: cubicOut }}
+      out:sheetFade={{ easing: cubicIn }}
     ></button>
     {@render panel(true)}
   </div>
