@@ -120,23 +120,25 @@
                 <div class="spinner" style="--spinner-size: 24px;"></div>
               </div>
             {:else}
-              {#each diffGroups as group, gi (gi)}
-                {#if group.type === 'added'}
-                  {#each group.lines as line, li (li)}
-                    <div class="diff-line diff-line-added">+ {line}</div>
-                  {/each}
-                {:else if group.type === 'removed'}
-                  {#each group.lines as line, li (li)}
-                    <div class="diff-line diff-line-removed">- {line}</div>
-                  {/each}
-                {:else if group.type === 'collapsed'}
-                  <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
-                {:else}
-                  {#each group.lines as line, li (li)}
-                    <div class="diff-line diff-line-unchanged">{line}</div>
-                  {/each}
-                {/if}
-              {/each}
+              <div class="diff-lines">
+                {#each diffGroups as group, gi (gi)}
+                  {#if group.type === 'added'}
+                    {#each group.lines as line, li (li)}
+                      <div class="diff-line diff-line-added">+ {line}</div>
+                    {/each}
+                  {:else if group.type === 'removed'}
+                    {#each group.lines as line, li (li)}
+                      <div class="diff-line diff-line-removed">- {line}</div>
+                    {/each}
+                  {:else if group.type === 'collapsed'}
+                    <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
+                  {:else}
+                    {#each group.lines as line, li (li)}
+                      <div class="diff-line diff-line-unchanged">{line}</div>
+                    {/each}
+                  {/if}
+                {/each}
+              </div>
             {/if}
           </div>
         </div>
@@ -440,7 +442,21 @@
 
     .diff-body {
       overflow-x: auto;
+    }
+
+    /* Строки растягиваются до самой длинной: фон добавленных и удалённых строк идёт на всю ширину
+       прокрутки, а короткое сравнение по-прежнему занимает весь лист */
+    .diff-lines {
+      width: max-content;
+      min-width: 100%;
+    }
+
+    /* Код в сравнении не переносится: длинная строка прокручивается внутри .diff-body
+       (G-142-2, D-25, UI-SPEC E5); перебивает базовые правила переноса, которые остаются для ПК */
+    .diff-line {
       white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
     }
   }
 </style>
