@@ -17,12 +17,16 @@ type FileView struct {
 }
 
 // NoticeView — уведомление слоя. ID: schema_reset, recovered_from_journal,
-// build_failed:xray, build_failed:mihomo; Kind: "warning" или "error".
+// journal_recovery_failed, build_failed:xray, build_failed:mihomo и уведомления
+// сервиса источников source_rejected:<id>:<ядро>, source_deferred:<id>,
+// source_kernel_refused:<id>:<ядро>, source_network:<id>:<ядро>; Kind: "warning"
+// или "error". Params — параметры подстановки в текст (имя источника, дата).
 type NoticeView struct {
-	ID     string `json:"id"`
-	Kind   string `json:"kind"`
-	Kernel string `json:"kernel,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	ID     string            `json:"id"`
+	Kind   string            `json:"kind"`
+	Kernel string            `json:"kernel,omitempty"`
+	Reason string            `json:"reason,omitempty"`
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // FilesEvent — данные события files.

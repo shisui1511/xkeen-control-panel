@@ -1,8 +1,8 @@
 // e2e-pages: *
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { attachConsoleGuard } from './lib/console';
-import { T } from './lib/env';
+import { RT, T } from './lib/env';
 import { knownFailure } from './lib/known';
 import { routes } from './lib/pages';
 
@@ -34,6 +34,125 @@ const ROOT: Record<string, string> = {
 // открывает конструктор в редакторе). Остальные маршруты должны остаться как есть.
 const ALIAS: Record<string, string> = {
   'mihomo-gen': '#/constructor'
+};
+
+// Часть нарушений axe видна только на загруженных данных страницы (например, путь файла и
+// теги в инспекторе DAT). Проверка до их загрузки даёт плавающий вердикт: помеченный тест
+// то падает, то проходит (XPASS). Поэтому страница с такими данными ждёт их явно и только
+// наблюдает: сеть не подменяется, а не дождавшийся тест падает как находка (стенд или продукт).
+async function datReady(page: Page): Promise<void> {
+  const fail = (what: string, ms: number) =>
+    new Error(`страница dat не загрузила данные за ${Math.round(ms / 1000)} с: ${what}`);
+  const workspace = page.locator('.main-content');
+
+  // список файлов загружен: индикатора загрузки на месте рабочей области нет
+  await expect(workspace.locator('p.text-secondary').filter({ hasText: /Загрузка|Loading/ }))
+    .toHaveCount(0, { timeout: T.page })
+    .catch(() => {
+      throw fail('список файлов не загрузился', T.page);
+    });
+
+  // правая колонка показывает инспектор, заглушку «файл не выбран» или набор по умолчанию;
+  // ожидание attached, а не visible: на 390 px колонка может быть скрыта вёрсткой
+  await expect(
+    page
+      .locator(
+        [
+          '.dat-detail .tags-grid',
+          '.dat-detail .inspector-scroll-area .td-state',
+          '.dat-detail .inspector-body',
+          '.dat-detail .detail-empty-card',
+          '[data-testid="dat-standard-sets"]'
+        ].join(', ')
+      )
+      .first()
+  )
+    .toBeAttached({ timeout: T.page })
+    .catch(() => {
+      throw fail('правая колонка не отрисована', T.page);
+    });
+
+  // теги догружены: тяжёлый geosite на mipsle разбирается дольше обычной загрузки страницы
+  await expect(page.locator('.dat-detail .inspector-scroll-area .spinner-circle'))
+    .toHaveCount(0, { timeout: T.save })
+    .catch(() => {
+      throw fail('теги выбранного файла не загрузились', T.save);
+    });
+}
+
+// Прокси: группы Mihomo и значок внешнего IP клиента. Нарушения контраста живут в счётчиках
+// разделов групп и в значке маршрута IP, которых нет, пока виден скелетон или идёт проверка IP.
+async function proxiesReady(page: Page): Promise<void> {
+  const fail = (what: string, ms: number) =>
+    new Error(`страница proxies не загрузила данные за ${Math.round(ms / 1000)} с: ${what}`);
+  const workspace = page.locator('.main-content');
+
+  // группы загружены либо показано пустое состояние (Mihomo не запущен): скелетона нет
+  await expect(workspace.locator('.skeleton-card'))
+    .toHaveCount(0, { timeout: T.page })
+    .catch(() => {
+      throw fail('группы прокси не загрузились', T.page);
+    });
+
+  // проверка внешнего IP клиента закончилась (показан адрес или кнопка повторной проверки)
+  await expect(workspace.locator('.pill-label').filter({ hasText: /Определение IP|Detecting IP/ }))
+    .toHaveCount(0, { timeout: T.page })
+    .catch(() => {
+      throw fail('проверка внешнего IP не закончилась', T.page);
+    });
+}
+
+// Подключения: индикатор в шапке зелёный («Онлайн») только после соединения сокета Mihomo.
+// Нарушение контраста живёт именно в этом зелёном индикаторе, поэтому проверка до соединения
+// даёт плавающий вердикт (то KNOWN, то XPASS). Если Clash API ядра выключен (api_reachable
+// false в /api/capabilities), индикатор законно остаётся «нет связи» и ждать нечего.
+async function connectionsReady(page: Page): Promise<void> {
+  if (RT.core !== 'mihomo') return;
+  const reachable = await page.evaluate(async () => {
+    const res = await fetch('/api/capabilities', { credentials: 'same-origin' });
+    const body = (await res.json()) as {
+      data?: { mihomo?: { api_reachable?: boolean } };
+      mihomo?: { api_reachable?: boolean };
+    };
+    return Boolean((body.data ?? body).mihomo?.api_reachable);
+  });
+  if (!reachable) return;
+  await expect(page.locator('.main-content .status-indicator.connected').first())
+    .toBeVisible({ timeout: T.page })
+    .catch(() => {
+      throw new Error(
+        `страница connections не загрузила данные за ${Math.round(T.page / 1000)} с: сокет подключений не соединился`
+      );
+    });
+}
+
+// Конструктор Mihomo: сценарии, вкладки разделов и предпросмотр YAML строятся по схеме,
+// пока она грузится, на месте конструктора только индикатор загрузки.
+async function mihomoGenReady(page: Page): Promise<void> {
+  const fail = (what: string, ms: number) =>
+    new Error(`страница mihomo-gen не загрузила данные за ${Math.round(ms / 1000)} с: ${what}`);
+  const workspace = page.locator('.main-content');
+
+  await expect(workspace.locator('.loading-state-block'))
+    .toHaveCount(0, { timeout: T.page })
+    .catch(() => {
+      throw fail('схема конструктора не загрузилась', T.page);
+    });
+
+  // сценарии из схемы отрисованы; attached, а не visible: на 390 px часть колонки скрыта
+  await expect(workspace.locator('.gen-layout button[data-scenario-id]').first())
+    .toBeAttached({ timeout: T.page })
+    .catch(() => {
+      throw fail('сценарии конструктора не отрисованы', T.page);
+    });
+}
+
+// Ожидание данных страницы перед axe: маршрут -> функция готовности
+const READY: Record<string, (page: Page) => Promise<void>> = {
+  dat: datReady,
+  connections: connectionsReady,
+  proxies: proxiesReady,
+  'mihomo-gen': mihomoGenReady
 };
 
 // Известные находки обхода (D-12): каждая размечена todo из pending и конкретной
@@ -104,6 +223,7 @@ for (const route of routes()) {
           await page.waitForLoadState('networkidle', { timeout: T.network }).catch(() => {});
           // переход между вкладками идёт с затуханием: axe не должен видеть полупрозрачный кадр
           await page.waitForTimeout(500);
+          await READY[route]?.(page);
 
           const hash = await page.evaluate(() => window.location.hash);
           // Маршрут #/config панель открывает только при включённом флаге config_layer, иначе

@@ -1,0 +1,460 @@
+package nodes
+
+import (
+	"net"
+	"strconv"
+	"strings"
+)
+
+// ParseXray разбирает Xray-JSON во всех формах: одиночный outbound, объект с
+// outbounds, полный конфиг (inbounds и routing) и массив конфигов.
+// Узел хранит в Raw оригинал (числа — json.Number) с правками, обязательными для
+// роутера: settings.noKernelTun у wireguard, без цепочек (proxySettings,
+// dialerProxy) и привязок к интерфейсу (sendThrough, sockopt.interface). Xray
+// получает Raw в таком виде, Mihomo — результат эмиттера; текст узла до этих
+// правок — в Text.
+func ParseXray(data []byte) (ParseResult, error) {
+	v, serr := decodeJSON(data)
+	if serr != nil {
+		return ParseResult{Format: "xray_json"}, serr
+	}
+	return parseXrayValue(v)
+}
+
+func parseXrayValue(v any) (ParseResult, error) {
+	res := ParseResult{Format: "xray_json"}
+	switch x := v.(type) {
+	case map[string]any:
+		switch {
+		case x["outbounds"] != nil:
+			xrayConfig(&res, x, false)
+		case x["protocol"] != nil:
+			xrayCollect(&res, []any{x}, "")
+		default:
+			return res, NewError(CodeUnrecognized)
+		}
+	case []any:
+		if len(x) > maxNodes {
+			return res, NewError(CodeTooLarge)
+		}
+		for i, e := range x {
+			m := mapOf(e)
+			switch {
+			case m != nil && m["outbounds"] != nil:
+				xrayConfig(&res, m, true)
+			case m != nil && m["protocol"] != nil:
+				xrayCollect(&res, []any{m}, "")
+			default:
+				res.Skipped = append(res.Skipped, Skipped{Code: CodeUnrecognized,
+					Params: map[string]string{"index": strconv.Itoa(i + 1)}})
+			}
+		}
+	default:
+		return res, NewError(CodeUnrecognized)
+	}
+	if len(res.Nodes) > maxNodes {
+		return res, NewError(CodeTooLarge)
+	}
+	return res, nil
+}
+
+// xrayConfig разбирает конфиг Xray с outbounds. Полным (D-12) он считается, если
+// рядом с outbounds есть inbounds или routing, либо конфиг лежит в массиве конфигов.
+func xrayConfig(res *ParseResult, cfg map[string]any, inArray bool) {
+	if inArray || cfg["inbounds"] != nil || cfg["routing"] != nil {
+		res.FullConfig = true
+	}
+	xrayCollect(res, listOf(cfg["outbounds"]), strOf(cfg["remarks"]))
+}
+
+// xrayCollect добавляет в результат узлы и пропуски списка outbound. remarks —
+// название конфига: даёт имя узлам, у которых своего названия нет (у нескольких
+// узлов одного конфига к нему добавляется тег).
+func xrayCollect(res *ParseResult, list []any, remarks string) {
+	proxies := 0
+	for _, e := range list {
+		if ob := mapOf(e); ob != nil {
+			if p := strings.ToLower(strOf(ob["protocol"])); p != "" && !xrayServiceProtocol(p) {
+				proxies++
+			}
+		}
+	}
+	for i, e := range list {
+		ob := mapOf(e)
+		if ob == nil {
+			res.Skipped = append(res.Skipped, Skipped{Code: CodeUnrecognized,
+				Params: map[string]string{"index": strconv.Itoa(i + 1)}})
+			continue
+		}
+		n, ignore, err := xrayOutboundNode(ob)
+		if ignore {
+			continue
+		}
+		own := pickStr(ob, "remarks", "name")
+		if remarks != "" && own == "" {
+			switch tag := strOf(ob["tag"]); {
+			case proxies == 1:
+				own = remarks
+			case tag != "":
+				own = remarks + " " + tag
+			default:
+				own = remarks + " " + strconv.Itoa(i+1)
+			}
+		}
+		if err != nil {
+			res.Skipped = append(res.Skipped, skippedFrom(err, 0,
+				orDefault(own, strOf(ob["tag"])), strOf(ob["protocol"])))
+			res.SkippedSecrets = append(res.SkippedSecrets, credentialValues(ob)...)
+			continue
+		}
+		if own != "" {
+			n.Name = own
+		}
+		res.Nodes = append(res.Nodes, n)
+	}
+}
+
+// xrayServiceProtocol — служебные outbound: не узлы, в Skipped не попадают.
+func xrayServiceProtocol(p string) bool {
+	switch p {
+	case "freedom", "blackhole", "dns", "loopback":
+		return true
+	}
+	return false
+}
+
+// xrayOutboundNode строит узел из outbound Xray. IR заполняется из Raw, в том
+// числе из полей, запрещённых в Xray 26.x (h2, allowInsecure, httpSettings):
+// такой узел остаётся виден с причиной, решение «не для Xray» принимают
+// XrayOutbound и матрица возможностей, а не разборщик.
+func xrayOutboundNode(ob map[string]any) (n Node, ignore bool, err *SourceError) {
+	proto := strings.ToLower(strings.TrimSpace(strOf(ob["protocol"])))
+	if xrayServiceProtocol(proto) {
+		return Node{}, true, nil
+	}
+	if proto == "" {
+		return Node{}, false, NewError(CodeUnrecognized)
+	}
+	// Ключ transport Xray 26.x отвергает целиком: узел не уходит в конфиг (T-145-05).
+	if hasKeyDeep(ob, "transport", 0) {
+		return Node{}, false, NewError(CodeXrayForbiddenKey, "key", "transport")
+	}
+	settings := mapOf(ob["settings"])
+	n = Node{
+		Name:   pickStr(ob, "remarks", "name", "tag"),
+		Origin: OriginXrayJSON,
+		Raw:    ob,
+		Format: "json",
+	}
+	var host string
+	var port int
+	switch proto {
+	case "vless", "vmess":
+		srv, user := xrayVnext(settings)
+		host, port = strOf(srv["address"]), intOf(srv["port"])
+		n.Protocol = proto
+		n.UUID = strOf(user["id"])
+		if proto == "vless" {
+			n.Flow = strOf(user["flow"])
+			n.Encryption = strOf(user["encryption"])
+		} else {
+			n.AlterID = intOf(user["alterId"])
+			n.Security = strOf(user["security"])
+		}
+	case "trojan", "shadowsocks", "socks", "http":
+		srv := xrayServer(settings)
+		host, port = strOf(srv["address"]), intOf(srv["port"])
+		n.Protocol = proto
+		switch proto {
+		case "trojan":
+			n.Password = strOf(srv["password"])
+		case "shadowsocks":
+			n.Method = strOf(srv["method"])
+			n.Password = strOf(srv["password"])
+		default:
+			user := srv
+			if users := listOf(srv["users"]); len(users) > 0 {
+				if u := mapOf(users[0]); u != nil {
+					user = u
+				}
+			}
+			n.UUID = pickStr(user, "user", "username")
+			n.Password = pickStr(user, "pass", "password")
+		}
+	case "wireguard":
+		n.Protocol = proto
+		n.WG, host, port = xrayWireGuardIR(settings)
+	case "hysteria":
+		if intOf(settings["version"]) != 2 {
+			return Node{}, false, NewError(CodeUnsupportedType, "type", "hysteria")
+		}
+		n.Protocol = "hysteria2"
+		host, port = strOf(settings["address"]), intOf(settings["port"])
+		if hs := mapOf(mapOf(ob["streamSettings"])["hysteriaSettings"]); hs != nil {
+			n.Password = pickStr(hs, "auth", "password")
+		}
+	default:
+		return Node{}, false, NewError(CodeUnsupportedType, "type", fragmentOf(proto))
+	}
+	if host == "" || port < 1 || port > 65535 {
+		return Node{}, false, NewError(CodeUnrecognized, "type", fragmentOf(proto))
+	}
+	n.Host, n.Port = host, port
+	if n.Name == "" {
+		n.Name = defaultName(host, port)
+	}
+	if proto != "wireguard" {
+		if ss := mapOf(ob["streamSettings"]); ss != nil {
+			xrayStreamIR(&n, ss)
+		}
+	}
+	n.Text = marshalIndent(ob)
+	// Панель не создаёт интерфейсов на роутере: родной wireguard-outbound без
+	// noKernelTun поднял бы настоящий TUN в обход XKeen, а на mipsle проверка
+	// конфигурации с ним падает и отвергает весь файл подписки. Исходный текст (Text)
+	// снят выше и остаётся прежним.
+	if proto == "wireguard" && settings != nil {
+		settings["noKernelTun"] = true
+	}
+	// Ссылки на чужие outbound ломают xray -test висячим тегом: узел, вынутый из
+	// чужого конфига, работает без цепочки (уровень B), факт — в Notes.
+	if removeXrayChain(ob) {
+		n.Notes = append(n.Notes, CodeNoteChainRemoved)
+	}
+	return n, false, nil
+}
+
+// removeXrayChain удаляет proxySettings и streamSettings.sockopt.dialerProxy из
+// родного outbound; true — убрана цепочка. Привязка к интерфейсу
+// (sockopt.interface) и к адресу источника (sendThrough) из чужого ответа
+// убирается молча, как у Clash: интерфейса конфига телефона на роутере нет, а
+// узел с такой привязкой не соединяется.
+func removeXrayChain(ob map[string]any) bool {
+	removed := false
+	delete(ob, "sendThrough")
+	if so := mapOf(mapOf(ob["streamSettings"])["sockopt"]); so != nil {
+		delete(so, "interface")
+	}
+	if _, ok := ob["proxySettings"]; ok {
+		delete(ob, "proxySettings")
+		removed = true
+	}
+	if so := mapOf(mapOf(ob["streamSettings"])["sockopt"]); so != nil {
+		if _, ok := so["dialerProxy"]; ok {
+			delete(so, "dialerProxy")
+			removed = true
+		}
+	}
+	return removed
+}
+
+// xrayVnext — сервер и пользователь vless/vmess: форма vnext или плоская.
+func xrayVnext(settings map[string]any) (srv, user map[string]any) {
+	srv = settings
+	if vn := listOf(settings["vnext"]); len(vn) > 0 {
+		if m := mapOf(vn[0]); m != nil {
+			srv = m
+		}
+	}
+	if srv == nil {
+		srv = map[string]any{}
+	}
+	user = srv
+	if us := listOf(srv["users"]); len(us) > 0 {
+		if m := mapOf(us[0]); m != nil {
+			user = m
+		}
+	}
+	return srv, user
+}
+
+// xrayServer — сервер trojan/shadowsocks/socks/http: форма servers или плоская.
+func xrayServer(settings map[string]any) map[string]any {
+	if sv := listOf(settings["servers"]); len(sv) > 0 {
+		if m := mapOf(sv[0]); m != nil {
+			return m
+		}
+	}
+	if settings == nil {
+		return map[string]any{}
+	}
+	return settings
+}
+
+func xrayWireGuardIR(settings map[string]any) (wg *WireGuard, host string, port int) {
+	wg = &WireGuard{
+		PrivateKey: strOf(settings["secretKey"]),
+		MTU:        intOf(settings["mtu"]),
+		Address:    strListOf(settings["address"]),
+	}
+	for _, r := range listOf(settings["reserved"]) {
+		wg.Reserved = append(wg.Reserved, intOf(r))
+	}
+	if peers := listOf(settings["peers"]); len(peers) > 0 {
+		if p := mapOf(peers[0]); p != nil {
+			wg.PeerPublicKey = strOf(p["publicKey"])
+			wg.PreSharedKey = pickStr(p, "preSharedKey", "presharedKey")
+			wg.AllowedIPs = strListOf(p["allowedIPs"])
+			if h, ps, err := net.SplitHostPort(strOf(p["endpoint"])); err == nil {
+				host, port = h, intOf(ps)
+			}
+		}
+	}
+	return wg, host, port
+}
+
+// stringHeaders приводит карту заголовков к map[string]string целиком, с Host.
+func stringHeaders(v any) map[string]string {
+	m := mapOf(v)
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, e := range m {
+		out[k] = firstStr(e)
+	}
+	return out
+}
+
+// xrayStreamIR переносит streamSettings в IR: транспорт, TLS, Reality.
+func xrayStreamIR(n *Node, ss map[string]any) {
+	t := &n.Transport
+	network := normNetwork(strOf(ss["network"]))
+	if m := strings.ToLower(strings.TrimSpace(strOf(ss["method"]))); isRemovedTransport(m) {
+		network = m
+	}
+	if _, ok := ss["httpSettings"]; ok && network == "tcp" {
+		network = "http"
+	}
+	if _, ok := ss["quicSettings"]; ok && network == "tcp" {
+		network = "quic"
+	}
+	t.Network = network
+	switch network {
+	case "tcp":
+		if h := mapOf(mapOf(ss["tcpSettings"])["header"]); h != nil {
+			t.HeaderType = strOf(h["type"])
+			if t.HeaderType == "http" {
+				if req := mapOf(h["request"]); req != nil {
+					t.Path = firstStr(req["path"])
+					t.Host, t.Headers = headersOf(req["headers"])
+				}
+			}
+		}
+	case "ws":
+		if ws := mapOf(ss["wsSettings"]); ws != nil {
+			t.Path = strOf(ws["path"])
+			t.Host = strOf(ws["host"])
+			host, rest := headersOf(ws["headers"])
+			if t.Host == "" {
+				t.Host = host
+			}
+			t.Headers = rest
+		}
+	case "grpc":
+		if g := mapOf(ss["grpcSettings"]); g != nil {
+			t.ServiceName = strOf(g["serviceName"])
+			if b, _ := boolOf(g["multiMode"]); b {
+				t.Mode = "multi"
+			}
+		}
+	case "httpupgrade":
+		if h := mapOf(ss["httpupgradeSettings"]); h != nil {
+			t.Path = strOf(h["path"])
+			t.Host = strOf(h["host"])
+		}
+	case "xhttp":
+		xs := mapOf(ss["xhttpSettings"])
+		if xs == nil {
+			xs = mapOf(ss["splithttpSettings"])
+		}
+		if xs != nil {
+			xrayXHTTPIR(t, xs)
+		}
+	case "kcp":
+		if k := mapOf(ss["kcpSettings"]); k != nil {
+			t.Path = strOf(k["seed"])
+			t.HeaderType = strOf(mapOf(k["header"])["type"])
+		}
+	case "h2", "http":
+		if h := mapOf(ss["httpSettings"]); h != nil {
+			t.Path = strOf(h["path"])
+			t.Host = firstStr(h["host"])
+		}
+	}
+
+	security := strings.ToLower(strOf(ss["security"]))
+	switch {
+	case security == "reality":
+		rs := mapOf(ss["realitySettings"])
+		n.TLS = &TLS{
+			Enabled:     true,
+			SNI:         strOf(rs["serverName"]),
+			Fingerprint: strOf(rs["fingerprint"]),
+		}
+		n.Reality = &Reality{
+			PublicKey: strOf(rs["publicKey"]),
+			ShortID:   strOf(rs["shortId"]),
+			SpiderX:   strOf(rs["spiderX"]),
+		}
+	case mapOf(ss["tlsSettings"]) != nil:
+		ts := mapOf(ss["tlsSettings"])
+		n.TLS = &TLS{
+			Enabled:     true,
+			SNI:         strOf(ts["serverName"]),
+			ALPN:        strListOf(ts["alpn"]),
+			Fingerprint: strOf(ts["fingerprint"]),
+			Insecure:    rawTruthy(ts["allowInsecure"]),
+			PinSHA256:   strListOf(ts["pinnedPeerCertSha256"]),
+		}
+	case security == "tls" || security == "xtls":
+		n.TLS = &TLS{Enabled: true}
+	}
+}
+
+// xrayXHTTPIR переносит xhttpSettings: path, host, mode, headers (вместе с
+// Host) — в поля транспорта, остальное, включая вложенный extra, — в XHTTP.
+func xrayXHTTPIR(t *Transport, xs map[string]any) {
+	set := func(k string, v any) {
+		switch k {
+		case "path":
+			if t.Path == "" {
+				t.Path = strOf(v)
+			}
+		case "host":
+			if t.Host == "" {
+				t.Host = strOf(v)
+			}
+		case "mode":
+			if t.Mode == "" {
+				t.Mode = strOf(v)
+			}
+		case "headers":
+			for hk, hv := range stringHeaders(v) {
+				if t.Headers == nil {
+					t.Headers = map[string]string{}
+				}
+				if _, dup := t.Headers[hk]; !dup {
+					t.Headers[hk] = hv
+				}
+			}
+		default:
+			if t.XHTTP == nil {
+				t.XHTTP = map[string]any{}
+			}
+			if _, dup := t.XHTTP[k]; !dup {
+				t.XHTTP[k] = deepCopy(v)
+			}
+		}
+	}
+	for k, v := range xs {
+		if k != "extra" {
+			set(k, v)
+		}
+	}
+	if extra := mapOf(xs["extra"]); extra != nil {
+		for k, v := range extra {
+			set(k, v)
+		}
+	}
+}

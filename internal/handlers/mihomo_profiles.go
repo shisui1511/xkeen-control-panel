@@ -59,6 +59,9 @@ func (a *API) validateMihomoProfile(path string) error {
 		// No core installed (e.g. development machine): nothing to test with.
 		return nil
 	}
+	// Проверка не идёт во время операции XKeen над ядром (services.AcquireKernelHelper);
+	// ожидание не съедает её таймаут.
+	defer services.AcquireKernelHelper(context.Background())()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, bin, "-t", "-d", a.cfg.MihomoConfigDir, "-f", path).CombinedOutput()
@@ -80,8 +83,10 @@ func (a *API) waitMihomoRunning() bool {
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(2 * time.Second)
-		for _, info := range a.kernelSvc.List() {
-			if info.Name == "mihomo" && info.ProcessStatus == "running" {
+		// По процессам, без определения версии: двадцатисекундный опрос не должен
+		// растягиваться ожиданием конца операции XKeen.
+		for _, st := range a.kernelSvc.ProcessStates() {
+			if st.Name == "mihomo" && st.Status == "running" {
 				return true
 			}
 		}

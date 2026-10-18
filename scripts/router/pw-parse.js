@@ -5,7 +5,8 @@
 // PASS, FAIL, KNOWN, XPASS, SKIP; проверка — название теста (pw-suite.sh добавляет «pw:»).
 //   - тест с аннотацией known-failure, упавший как ожидалось -> KNOWN, деталь — slug todo;
 //   - тест с аннотацией known-failure, который прошёл (test.fail не сработал) -> XPASS;
-//   - остальные: expected -> PASS, unexpected/flaky -> FAIL, skipped -> SKIP.
+//   - остальные: expected -> PASS, unexpected/flaky -> FAIL, skipped -> SKIP (деталь — описание
+//     аннотации 'skip', то есть причина test.skip(условие, причина); без неё — «пропущен»).
 // Ошибки вне тестов (глобальная настройка: панель не отвечает, вход не удался) -> FAIL global-setup.
 // Без зависимостей: только встроенные модули Node.
 
@@ -54,6 +55,17 @@ function knownSlug(test) {
   return null;
 }
 
+function skipReason(test) {
+  const lists = [test.annotations || []];
+  for (const r of test.results || []) lists.push(r.annotations || []);
+  for (const list of lists) {
+    for (const a of list) {
+      if (a && a.type === "skip" && a.description) return a.description;
+    }
+  }
+  return null;
+}
+
 function errorText(test) {
   for (const r of test.results || []) {
     const e = r.error || (r.errors && r.errors[0]);
@@ -69,7 +81,7 @@ function visit(suite, titles) {
       const slug = knownSlug(test);
       const st = test.status;
       if (st === "skipped") {
-        out("SKIP", name, "пропущен");
+        out("SKIP", name, skipReason(test) || "пропущен");
       } else if (
         slug &&
         st === "expected" &&

@@ -1,0 +1,37 @@
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks",
+      "settings": { "udp": true }
+    }
+  ],
+  "routing": { "rules": [] },
+  "outbounds": [
+    {
+      "tag": "proxy",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "node2.example",
+            "port": 443,
+            "users": [
+              { "id": "22222222-2222-4222-8222-222222222222", "encryption": "none" }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "tls",
+        "tlsSettings": { "serverName": "cdn.example", "alpn": ["h2", "http/1.1"] },
+        "wsSettings": { "path": "/ws", "headers": { "Host": "cdn.example" } }
+      }
+    },
+    { "tag": "direct", "protocol": "freedom", "settings": {} }
+  ]
+}

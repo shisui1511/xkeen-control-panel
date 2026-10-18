@@ -42,6 +42,7 @@
   "kernel.inactive": "Действие недоступно: нужное ядро не активно",
   "kernel.conflict": "Запущены оба ядра: действие заблокировано",
   "kernel.op_in_progress": "Операция с ядром уже выполняется",
+  "kernel.restarting": "Ядро перезапускается: API Mihomo ещё не отвечает",
   "kernel.stop_failed": "Не удалось остановить ядро",
 
   "mihomo.not_running": "Mihomo не запущен",
@@ -89,5 +90,11 @@
   "configlayer.file_released": "Файл отпущен: панель его не сверяет",
   "configlayer.disable_failed": "Не удалось выключить слой конфигурации: файлы возвращены, флаг остаётся включённым",
   "configlayer.file_managed": "Файл панели: правка доступна после «Отпустить управление»",
-  "configlayer.too_many_subscribers": "Слишком много открытых вкладок с панелью: закройте лишние и повторите"
+  "configlayer.too_many_subscribers": "Слишком много открытых вкладок с панелью: закройте лишние и повторите",
+  "configlayer.source_error": "Источник не удалось обработать",
+  "configlayer.source_not_found": "Источник не найден",
+  "configlayer.node_not_found": "Узел не найден",
+  "configlayer.preview_expired": "Предпросмотр устарел: вставьте данные заново",
+  "configlayer.source_disabled": "Источник выключен: включите его перед обновлением",
+  "configlayer.source_changed": "Настройки подписки изменились во время обновления: повторите обновление"
 }

@@ -421,8 +421,13 @@ func (s *TrafficQuotaService) Stop() {
 	close(s.stopCh)
 	s.wg.Wait()
 
+	// Последняя запись — без fsync (см. saveLocked): новый процесс панели читает
+	// файл из кэша страниц, а ожидание носителя держало выход панели дольше окна
+	// init-скрипта.
 	s.mu.Lock()
-	_ = s.saveLocked(true)
+	if err := s.writeStoreLocked(utils.AtomicWriteFileNoSync); err != nil {
+		log.Printf("traffic: final save failed: %v", err)
+	}
 	s.mu.Unlock()
 }
 
@@ -472,10 +477,31 @@ func (s *TrafficQuotaService) load() {
 // within saveLockThrottle — suitable for high-frequency periodic saves.
 // Pass force=true for CRUD operations (quota add/update/delete/reset)
 // so user changes are always persisted immediately.
+//
+// Периодическое сохранение (force=false) идёт без fsync: под идущей записью на
+// флешку fsync ждёт фиксации журнала ext4 десятки секунд, держа s.mu и цикл
+// WebSocket, а остановка панели ждала этот цикл дольше окна init-скрипта. Потеря
+// последнего снимка счётчиков при обрыве питания допустима (подмена файла
+// остаётся атомарной, utils.AtomicWriteFileNoSync); правки квот пишутся с fsync.
 func (s *TrafficQuotaService) saveLocked(force bool) error {
 	if !force && !s.lastSave.IsZero() && time.Since(s.lastSave) < saveLockThrottle {
 		return nil
 	}
+	write := utils.AtomicWriteFile
+	if !force {
+		write = utils.AtomicWriteFileNoSync
+	}
+	if err := s.writeStoreLocked(write); err != nil {
+		return err
+	}
+	s.lastSave = time.Now()
+	s.rotateIfNeeded()
+	return nil
+}
+
+// writeStoreLocked сериализует состояние и пишет traffic.json функцией write.
+// Caller MUST hold s.mu (write lock).
+func (s *TrafficQuotaService) writeStoreLocked(write func(path string, data []byte, perm os.FileMode) error) error {
 	store := TrafficStore{
 		Quotas:         s.quotas,
 		ProxyStats:     s.proxyStats,
@@ -488,12 +514,7 @@ func (s *TrafficQuotaService) saveLocked(force bool) error {
 	if err != nil {
 		return err
 	}
-	if err := utils.AtomicWriteFile(s.storePath(), data, 0600); err != nil {
-		return err
-	}
-	s.lastSave = time.Now()
-	s.rotateIfNeeded()
-	return nil
+	return write(s.storePath(), data, 0600)
 }
 
 // rotateIfNeeded renames traffic.json to a timestamped .bak when it exceeds

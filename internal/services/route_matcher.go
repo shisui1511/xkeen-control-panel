@@ -569,7 +569,12 @@ func (s *ruleSetStore) convertedMRS(ctx context.Context, path, behavior string) 
 	tmp := cached + ".tmp"
 	// Detached from the request: an aborted trace must not waste the
 	// conversion, the next trace reuses the cache.
-	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+	// Конвертация не идёт во время операции XKeen над ядром (kernel_exec_gate.go).
+	// Ожидание тоже отвязано от запроса: по отмене ctx AcquireKernelHelper вернулся
+	// бы сразу, и convert-ruleset пошёл бы посреди `xkeen -restart`.
+	detached := context.WithoutCancel(ctx)
+	defer AcquireKernelHelper(detached)()
+	cctx, cancel := context.WithTimeout(detached, 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, s.mihomoBin, "convert-ruleset", behavior, "mrs", path, tmp)
 	if out, err := cmd.CombinedOutput(); err != nil {

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -63,12 +64,15 @@ func (o *scriptOutput) started() {
 	_ = o.w.Close()
 }
 
-// snapshot ждёт EOF не дольше grace после выхода скрипта и возвращает
-// собранный вывод; всё, что придёт позже, отбрасывается.
-func (o *scriptOutput) snapshot(grace time.Duration) string {
+// snapshot ждёт EOF не дольше grace после выхода скрипта (и не дольше отмены
+// ctx) и возвращает собранный вывод; всё, что придёт позже, отбрасывается.
+func (o *scriptOutput) snapshot(ctx context.Context, grace time.Duration) string {
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
 	select {
 	case <-o.done:
-	case <-time.After(grace):
+	case <-timer.C:
+	case <-ctx.Done():
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()

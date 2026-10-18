@@ -3,6 +3,7 @@ package configlayer
 import (
 	"fmt"
 	"sort"
+	"sync"
 )
 
 // Expectation — что должно быть видно в Mihomo после перезагрузки провайдера:
@@ -21,6 +22,10 @@ type GeneratedFile struct {
 	Kind    FileKind
 	Content []byte
 	Expect  *Expectation
+	// Inert — файл не влияет на запущенное ядро, пока на него не сослались
+	// (провайдеры Mihomo до Phase 146): пишется, проверяется и сверяется, но не
+	// перезапускает ядро.
+	Inert bool
 }
 
 // Key — ключ записи манифеста этого файла.
@@ -45,15 +50,25 @@ func (k InstalledKernels) Has(kernel string) bool {
 	return false
 }
 
-// Generator — единственная точка расширения слоя для фаз 145–147: по секциям
-// состояния выдаёт файлы ядер. Вывод обязан быть детерминированным.
+// Input — входные данные генератора. Sections — секции черновика (Mode
+// SourceDraft) или применённого состояния (Mode SourceApplied). Live — живые
+// данные слоя (State.Live), которые генератор только читает и не меняет.
+type Input struct {
+	Sections Sections
+	Live     Sections
+	Mode     SourceKind
+}
+
+// Generator — единственная точка расширения слоя для фаз 145–147: по входным
+// данным выдаёт файлы ядер. Вывод обязан быть детерминированным.
 type Generator interface {
 	ID() string
-	Generate(src Sections, installed InstalledKernels) ([]GeneratedFile, error)
+	Generate(in Input, installed InstalledKernels) ([]GeneratedFile, error)
 }
 
 // Registry — упорядоченный набор генераторов.
 type Registry struct {
+	mu         sync.RWMutex
 	generators []Generator
 }
 
@@ -64,7 +79,21 @@ func NewRegistry() *Registry {
 
 // Register добавляет генератор в конец списка.
 func (r *Registry) Register(g Generator) {
+	r.mu.Lock()
 	r.generators = append(r.generators, g)
+	r.mu.Unlock()
+}
+
+// Has сообщает, зарегистрирован ли генератор с таким ID.
+func (r *Registry) Has(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, g := range r.generators {
+		if g.ID() == id {
+			return true
+		}
+	}
+	return false
 }
 
 // Build вызывает генераторы по порядку регистрации и собирает желаемый набор
@@ -72,12 +101,15 @@ func (r *Registry) Register(g Generator) {
 // файлов — ошибка duplicate_file (перезаписи нет), ошибка генератора — ошибка
 // generator_failed с ID генератора. Результат отсортирован по ключу: сборка
 // детерминирована, иначе каждое «Применить» переписывало бы файлы.
-func (r *Registry) Build(src Sections, installed InstalledKernels) ([]GeneratedFile, error) {
+func (r *Registry) Build(in Input, installed InstalledKernels) ([]GeneratedFile, error) {
 	var out []GeneratedFile
 	owner := make(map[string]string)
 	var issues []BuildIssue
-	for _, g := range r.generators {
-		files, err := g.Generate(src, installed)
+	r.mu.RLock()
+	generators := append([]Generator(nil), r.generators...)
+	r.mu.RUnlock()
+	for _, g := range generators {
+		files, err := g.Generate(in, installed)
 		if err != nil {
 			issues = append(issues, BuildIssue{Key: g.ID(), Code: IssueGeneratorFailed, Detail: fmt.Sprintf("%s: %v", g.ID(), err)})
 			continue

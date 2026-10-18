@@ -33,6 +33,18 @@ const (
 	FeatureMihomoUnixSocket     Feature = "mihomo_unix_socket"
 	FeatureMihomoInlineProvider Feature = "mihomo_inline_provider"
 	FeatureXKeenManagedInbounds Feature = "xkeen_managed_inbounds"
+
+	// Функции узлов (145, D-21). Пороги — по релизам ядер.
+	FeatureXrayXHTTP Feature = "xray_xhttp"
+	// FeatureXraySessionIDFields — поля sessionID транспорта xhttp. Порог взят по
+	// истории коммитов Xray и не бисектован (A9): проверка на роутере в 145-16.
+	FeatureXraySessionIDFields Feature = "xray_xhttp_session_id"
+	FeatureMihomoXHTTP         Feature = "mihomo_xhttp"
+	FeatureMihomoXHTTPReuse    Feature = "mihomo_xhttp_reuse"
+	FeatureMihomoAWG           Feature = "mihomo_awg"
+	FeatureMihomoAWG15         Feature = "mihomo_awg_15"
+	FeatureMihomoAWG20         Feature = "mihomo_awg_20"
+	FeatureMihomoAWG3          Feature = "mihomo_awg_3"
 )
 
 // featureThreshold — ядро, к которому относится функция, и первая версия,
@@ -55,6 +67,21 @@ var featureThresholds = map[Feature]featureThreshold{
 	FeatureMihomoUnixSocket:     {kernelMihomo, "1.18.4"},
 	FeatureMihomoInlineProvider: {kernelMihomo, "1.19.1"},
 	FeatureXKeenManagedInbounds: {kernelXKeen, "2.0"},
+
+	FeatureXrayXHTTP:           {kernelXray, "24.11.21"},
+	FeatureXraySessionIDFields: {kernelXray, "26.6.22"},
+	FeatureMihomoXHTTP:         {kernelMihomo, "1.19.22"},
+	FeatureMihomoXHTTPReuse:    {kernelMihomo, "1.19.23"},
+	FeatureMihomoAWG:           {kernelMihomo, "1.18.9"},
+	FeatureMihomoAWG15:         {kernelMihomo, "1.19.13"},
+	FeatureMihomoAWG20:         {kernelMihomo, "1.19.14"},
+	FeatureMihomoAWG3:          {kernelMihomo, "1.19.30"},
+}
+
+// FeatureMinVersion — минимальная версия ядра, на которой работает функция;
+// неизвестная функция — пустая строка.
+func FeatureMinVersion(f Feature) string {
+	return featureThresholds[f].min
 }
 
 // Version — числовая версия ядра.

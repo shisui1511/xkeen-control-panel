@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -29,8 +31,22 @@ var sectionNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 // Store — хранилище состояния слоя: структура в памяти под мьютексом и
 // JSON-файл в каталоге данных панели.
 //
-// Все мутации идут по схеме «копия → запись на диск → подмена в памяти», поэтому
-// ошибка записи не оставляет в памяти изменений, которых нет на диске.
+// Мутации применённого состояния, манифеста, журнала, живых данных и уведомлений
+// идут по схеме «копия → запись на диск с fsync → подмена в памяти», поэтому
+// ошибка записи не оставляет в памяти изменений, которых нет на диске. Правки
+// черновика (EditDraft, EditDraftBatch, ResetDraft) меняют состояние в памяти
+// сразу, а файл пишется в фоне без fsync (flushLoop): ответ на правку не ждёт
+// диск. На флешке роутера под чужой записью запись файла ждёт её — fsync до
+// фиксации журнала ext4, подмена переименованием до записи прежней версии файла,
+// стоящей в очереди устройства за чужими данными, — это десятки секунд. Запись
+// без fsync держится на том, что ext4 с auto_da_alloc (по умолчанию) сбрасывает
+// данные файла, подменяющего другой переименованием, раньше самого
+// переименования; на другой ФС или с noauto_da_alloc после обрыва питания возможен
+// пустой файл. Поэтому, когда незаписанных правок не осталось, файл
+// досинхронизируется fsync в отдельной горутине (scheduleSync), не задерживая
+// правки: окно риска — только от правки до конца этого fsync. При обрыве питания в
+// этом окне теряются последние правки черновика; следующая синхронная запись
+// включает и их.
 //
 // Файл читается (или создаётся) лениво, при первом обращении включённого слоя
 // (Load): выключенный слой ничего не читает и не пишет (FND-01). Пока состояние
@@ -44,19 +60,33 @@ type Store struct {
 	broker *Broker
 	// now — источник времени для имён копий состояния; в тестах подменяется.
 	now func() time.Time
-	// writeFile — запись файла состояния (nil — utils.AtomicWriteFile); в тестах
-	// подменяется, чтобы имитировать сбой диска.
-	writeFile func(path string, data []byte, perm os.FileMode) error
+
+	// ver — версия состояния в памяти: растёт с каждой подменой st (под mu).
+	ver uint64
+	// flushing — идёт фоновая запись правок черновика (под mu); flushDone
+	// сигналит её конец (L — &mu).
+	flushing  bool
+	flushDone *sync.Cond
+	// wmu упорядочивает записи файла; written — версия, лежащая в файле
+	// (меняется под wmu): запись версии старше записанной пропускается.
+	wmu     sync.Mutex
+	written atomic.Uint64
+	// syncing — идёт досинхронизация файла (scheduleSync); syncWanted — после
+	// неё файл снова записывался без fsync и нужен ещё один проход.
+	syncing    atomic.Bool
+	syncWanted atomic.Bool
 }
 
 // NewStore создаёт хранилище, не обращаясь к диску: файл состояния читается или
 // создаётся при первом Load (или первом чтении и мутации). broker может быть nil.
 func NewStore(dataDir string, broker *Broker) *Store {
-	return &Store{
+	s := &Store{
 		path:   filepath.Join(dataDir, StateFileName),
 		broker: broker,
 		now:    time.Now,
 	}
+	s.flushDone = sync.NewCond(&s.mu)
+	return s
 }
 
 // Load загружает состояние с диска, если оно ещё не загружено (читает файл или
@@ -76,16 +106,28 @@ func (s *Store) loadLocked() error {
 	if err != nil {
 		return err
 	}
-	s.st, s.loaded = st, true
+	s.commitLocked(st)
+	s.loaded = true
+	s.markWrittenLocked()
 	return nil
 }
 
 // Invalidate сбрасывает состояние в памяти, не трогая диск: следующее обращение
 // включённого слоя прочитает файл заново. Нужен выключенному слою после
-// восстановления снимка панели.
+// восстановления снимка панели; незаписанные правки черновика отбрасываются.
 func (s *Store) Invalidate() {
 	s.mu.Lock()
+	s.markWrittenLocked()
 	s.st, s.loaded = State{}, false
+	s.mu.Unlock()
+}
+
+// Flush дожидается фоновой записи правок черновика.
+func (s *Store) Flush() {
+	s.mu.Lock()
+	for s.flushing {
+		s.flushDone.Wait()
+	}
 	s.mu.Unlock()
 }
 
@@ -160,17 +202,148 @@ func (s *Store) backupOriginal(original []byte) (string, error) {
 	return path, nil
 }
 
-// persist сохраняет состояние на диск (права 0600).
-func (s *Store) persist(st State) error {
+// persist записывает next — следующую версию состояния — на диск (права 0600) с
+// fsync. Вызывается под mu до подмены; после успеха вызывающий делает
+// commitLocked(next). next включает и незаписанные фоном правки черновика.
+func (s *Store) persist(next State) error {
+	return s.writeVersion(next, s.ver+1, utils.AtomicWriteFile)
+}
+
+// commitLocked подменяет состояние в памяти и поднимает версию (под mu).
+func (s *Store) commitLocked(next State) {
+	s.st = next
+	s.ver++
+}
+
+// markWrittenLocked отмечает, что файл соответствует версии в памяти (под mu):
+// дожидается текущей фоновой записи, а незаписанные версии пропускаются.
+func (s *Store) markWrittenLocked() {
+	s.wmu.Lock()
+	s.written.Store(s.ver)
+	s.wmu.Unlock()
+}
+
+// scheduleFlushLocked запускает фоновую запись правок черновика, если она ещё
+// не идёт (под mu).
+func (s *Store) scheduleFlushLocked() {
+	if s.flushing {
+		return
+	}
+	s.flushing = true
+	go s.flushLoop()
+}
+
+// flushLoop пишет в файл последнюю версию состояния без fsync
+// (utils.AtomicWriteFileNoSync), пока в памяти есть незаписанные правки. Ошибка
+// записи логируется: правки остаются в памяти, их запишет повтор по более новой
+// версии, следующая правка черновика или синхронная запись (FlushSync при
+// остановке).
+func (s *Store) flushLoop() {
+	wrote := false
+	for {
+		s.mu.Lock()
+		ver := s.ver
+		if !s.loaded || s.written.Load() >= ver {
+			s.flushing = false
+			s.flushDone.Broadcast()
+			s.mu.Unlock()
+			if wrote {
+				s.scheduleSync()
+			}
+			return
+		}
+		st := s.st.clone()
+		s.mu.Unlock()
+
+		if err := s.writeVersion(st, ver, utils.AtomicWriteFileNoSync); err != nil {
+			log.Printf("[configlayer] правка черновика не записана на диск: %v", err)
+			s.mu.Lock()
+			// Правка, пришедшая во время неудачной записи, не запускала новую
+			// горутину (flushing был true): без повтора её никто не записал бы.
+			// Повтор идёт только по новой версии, поэтому постоянный сбой диска
+			// не крутит цикл вхолостую.
+			if s.ver != ver {
+				s.mu.Unlock()
+				continue
+			}
+			s.flushing = false
+			s.flushDone.Broadcast()
+			s.mu.Unlock()
+			if wrote {
+				s.scheduleSync()
+			}
+			return
+		}
+		wrote = true
+	}
+}
+
+// scheduleSync досинхронизирует файл состояния (fsync) в отдельной горутине:
+// запись без fsync (flushLoop) не защищает от пустого файла после обрыва питания
+// вне ext4 с auto_da_alloc, а ожидание fsync внутри flushLoop держало бы
+// следующую фоновую запись. Ни mu, ни wmu не берётся: fsync по пути относится к
+// файлу, лежащему там сейчас, а более новая подмена сама попросит ещё проход.
+func (s *Store) scheduleSync() {
+	s.syncWanted.Store(true)
+	if !s.syncing.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		for s.syncWanted.Swap(false) {
+			f, err := os.Open(s.path)
+			if err != nil {
+				continue
+			}
+			if err := f.Sync(); err != nil {
+				log.Printf("[configlayer] fsync файла состояния: %v", err)
+			}
+			_ = f.Close()
+		}
+		s.syncing.Store(false)
+		// Запрос, пришедший между последней проверкой и сбросом флага.
+		if s.syncWanted.Load() {
+			s.scheduleSync()
+		}
+	}()
+}
+
+// FlushSync дожидается фоновой записи и, если в файле осталась версия старше
+// памяти (запись не удалась или не успела), пишет текущее состояние синхронно, с
+// fsync. Вызывается при остановке слоя и перед самообновлением панели: процесс
+// завершается без отложенных вызовов, и правка черновика, лежавшая только в
+// памяти, иначе пропала бы.
+func (s *Store) FlushSync() error {
+	s.Flush()
+	s.mu.Lock()
+	if !s.loaded || s.written.Load() >= s.ver {
+		s.mu.Unlock()
+		return nil
+	}
+	st, ver := s.st.clone(), s.ver
+	s.mu.Unlock()
+	return s.writeVersion(st, ver, utils.AtomicWriteFile)
+}
+
+// writeVersion пишет st версии ver, если в файле нет версии новее.
+func (s *Store) writeVersion(st State, ver uint64, writeFile func(path string, data []byte, perm os.FileMode) error) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	if s.written.Load() >= ver {
+		return nil
+	}
+	if err := s.write(st, writeFile); err != nil {
+		return err
+	}
+	s.written.Store(ver)
+	return nil
+}
+
+func (s *Store) write(st State, writeFile func(path string, data []byte, perm os.FileMode) error) error {
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return fmt.Errorf("configlayer: encode state: %w", err)
 	}
-	write := s.writeFile
-	if write == nil {
-		write = utils.AtomicWriteFile
-	}
-	if err := write(s.path, data, 0o600); err != nil {
+	if err := writeFile(s.path, data, 0o600); err != nil {
 		return fmt.Errorf("configlayer: write state: %w", err)
 	}
 	return nil
@@ -272,11 +445,64 @@ func (s *Store) EditDraft(baseRev int64, section string, value json.RawMessage) 
 	}
 	next.DraftRevision++
 
-	if err := s.persist(next); err != nil {
+	s.commitLocked(next)
+	s.scheduleFlushLocked()
+	ev := draftEventOf(next)
+	s.mu.Unlock()
+
+	s.broker.Publish(Event{Type: EventDraft, Data: ev})
+	return ev, nil
+}
+
+// EditDraftBatch атомарно меняет несколько секций черновика и, при live != nil,
+// живые данные слоя под одной проверкой ревизии: один файл, одна запись,
+// ревизия +1, одно событие draft. Значение nil или JSON null удаляет секцию.
+// Конфликт ревизии, недопустимое имя секции, невалидный JSON или ошибка
+// live-функции — ничего не записано, состояние и файл прежние, события нет.
+// live получает глубокую копию Live и меняет её на месте.
+func (s *Store) EditDraftBatch(baseRev int64, sections map[string]json.RawMessage, live func(live Sections) error) (DraftEvent, error) {
+	for name := range sections {
+		if !sectionNameRE.MatchString(name) {
+			return DraftEvent{}, fmt.Errorf("%w: %q", ErrInvalidSection, name)
+		}
+	}
+
+	s.mu.Lock()
+	if err := s.loadLocked(); err != nil {
 		s.mu.Unlock()
 		return DraftEvent{}, err
 	}
-	s.st = next
+	if baseRev != s.st.DraftRevision {
+		s.mu.Unlock()
+		return DraftEvent{}, ErrDraftConflict
+	}
+
+	next := s.st.clone()
+	for name, value := range sections {
+		if len(value) == 0 || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			delete(next.Draft, name)
+			continue
+		}
+		compact, err := compactRaw(value)
+		if err != nil {
+			s.mu.Unlock()
+			return DraftEvent{}, fmt.Errorf("configlayer: section %q value is not valid JSON: %w", name, err)
+		}
+		next.Draft[name] = compact
+	}
+	if live != nil {
+		if next.Live == nil {
+			next.Live = Sections{}
+		}
+		if err := live(next.Live); err != nil {
+			s.mu.Unlock()
+			return DraftEvent{}, err
+		}
+	}
+	next.DraftRevision++
+
+	s.commitLocked(next)
+	s.scheduleFlushLocked()
 	ev := draftEventOf(next)
 	s.mu.Unlock()
 
@@ -301,11 +527,8 @@ func (s *Store) ResetDraft(baseRev int64) (DraftEvent, error) {
 	next.Draft = next.Applied.Clone()
 	next.DraftRevision++
 
-	if err := s.persist(next); err != nil {
-		s.mu.Unlock()
-		return DraftEvent{}, err
-	}
-	s.st = next
+	s.commitLocked(next)
+	s.scheduleFlushLocked()
 	ev := draftEventOf(next)
 	s.mu.Unlock()
 
@@ -317,6 +540,10 @@ func (s *Store) ResetDraft(baseRev int64) (DraftEvent, error) {
 // вернула ошибку или запись на диск не удалась, состояние в памяти и файл не
 // меняются. Событий Update не публикует: их рассылает вызывающий конвейер.
 func (s *Store) Update(fn func(st *State) error) error {
+	// Синхронная запись берёт wmu под mu, а фоновая держит wmu всю запись (на
+	// флешке десятки секунд): дождаться её без mu, иначе правки и чтения встанут
+	// за этой записью. Окно остаётся только для правки, пришедшей после ожидания.
+	s.Flush()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.loadLocked(); err != nil {
@@ -331,13 +558,14 @@ func (s *Store) Update(fn func(st *State) error) error {
 	if err := s.persist(next); err != nil {
 		return err
 	}
-	s.st = next
+	s.commitLocked(next)
 	return nil
 }
 
 // DismissNotice закрывает уведомление и сохраняет состояние. Допустимые id:
 // "schema_reset", "recovered_from_journal" и "journal_recovery_failed".
 func (s *Store) DismissNotice(id string) error {
+	s.Flush() // без mu: см. Update
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.loadLocked(); err != nil {
@@ -359,7 +587,7 @@ func (s *Store) DismissNotice(id string) error {
 	if err := s.persist(next); err != nil {
 		return err
 	}
-	s.st = next
+	s.commitLocked(next)
 	return nil
 }
 
@@ -371,9 +599,15 @@ func (s *Store) DismissNotice(id string) error {
 // Возвращает ошибку fn и ошибку перечитывания по отдельности. fn не должна
 // обращаться к самому хранилищу (замок не реентерабелен).
 func (s *Store) ReplaceExternally(fn func() error) (fnErr, reloadErr error) {
+	s.Flush() // без mu: см. Update
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Фоновая запись черновика не должна лечь поверх подменённого файла: wmu
+	// держится, пока идёт fn, а незаписанные версии отбрасываются.
+	s.wmu.Lock()
 	fnErr = fn()
+	s.written.Store(s.ver)
+	s.wmu.Unlock()
 	st, err := s.readFile()
 	if err != nil {
 		// Загруженное состояние больше не соответствует файлу: сбрасываем кэш,
@@ -381,6 +615,8 @@ func (s *Store) ReplaceExternally(fn func() error) (fnErr, reloadErr error) {
 		s.st, s.loaded = State{}, false
 		return fnErr, err
 	}
-	s.st, s.loaded = st, true
+	s.commitLocked(st)
+	s.loaded = true
+	s.markWrittenLocked()
 	return fnErr, nil
 }

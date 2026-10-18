@@ -75,7 +75,11 @@ type fileStore struct {
 	dir    string
 	mu     sync.Mutex
 	closed bool
-	writes atomic.Int64
+	// sessionsSeq — номер последнего записанного снимка сессий (под mu).
+	sessionsSeq uint64
+	writes      atomic.Int64
+	// noSync — записи без fsync (finalWrites, остановка панели).
+	noSync atomic.Bool
 }
 
 // newFileStore возвращает nil при пустом dir — это режим «только память»,
@@ -86,6 +90,27 @@ func newFileStore(dir string) *fileStore {
 		return nil
 	}
 	return &fileStore{dir: dir}
+}
+
+// finalWrites переводит хранилище на запись без fsync: последние записи перед
+// выходом процесса (AuthService.Stop). Новый процесс панели читает файлы из кэша
+// страниц, а fsync под идущей записью на флешку ждёт фиксации журнала ext4
+// десятки секунд — дольше, чем init-скрипт ждёт выхода. Подмена файла остаётся
+// атомарной (utils.AtomicWriteFileNoSync).
+func (s *fileStore) finalWrites() {
+	if s == nil {
+		return
+	}
+	s.noSync.Store(true)
+}
+
+// writeFile атомарно пишет файл хранилища с правами 0600: с fsync, пока не
+// вызван finalWrites.
+func (s *fileStore) writeFile(path string, data []byte) error {
+	if s.noSync.Load() {
+		return utils.AtomicWriteFileNoSync(path, data, 0600)
+	}
+	return utils.AtomicWriteFile(path, data, 0600)
 }
 
 func (s *fileStore) path() string {
@@ -159,7 +184,7 @@ func (s *fileStore) saveRateLimit(attempts map[string]LoginAttempts) error {
 	if err != nil {
 		return err
 	}
-	if err := utils.AtomicWriteFile(s.rateLimitPath(), data, 0600); err != nil {
+	if err := s.writeFile(s.rateLimitPath(), data); err != nil {
 		return err
 	}
 	s.writes.Add(1)
@@ -212,7 +237,12 @@ func (s *fileStore) loadSessions(fingerprint string) []*Session {
 
 // saveSessions пишет снимок сессий атомарно (tmp+rename) с правами 0600.
 // No-op после close() — не пишет на диск после Stop().
-func (s *fileStore) saveSessions(fingerprint string, sessions []*Session) error {
+//
+// seq — номер снимка (AuthService.snapshotSessionsLocked). Фоновая запись при
+// входе может дойти до s.mu позже синхронной записи удаления: снимок с номером не
+// больше уже записанного (sessionsSeq) пропускается, чтобы не вернуть на диск
+// завершённую сессию. seq == 0 — запись без условия.
+func (s *fileStore) saveSessions(fingerprint string, sessions []*Session, seq uint64) error {
 	if s == nil {
 		return nil
 	}
@@ -220,6 +250,9 @@ func (s *fileStore) saveSessions(fingerprint string, sessions []*Session) error 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
+		return nil
+	}
+	if seq != 0 && seq <= s.sessionsSeq {
 		return nil
 	}
 
@@ -245,8 +278,11 @@ func (s *fileStore) saveSessions(fingerprint string, sessions []*Session) error 
 	if err != nil {
 		return err
 	}
-	if err := utils.AtomicWriteFile(s.path(), data, 0600); err != nil {
+	if err := s.writeFile(s.path(), data); err != nil {
 		return err
+	}
+	if seq != 0 {
+		s.sessionsSeq = seq
 	}
 	s.writes.Add(1)
 	return nil
@@ -298,7 +334,7 @@ func ResetPersistedAuthState(dataDir string) error {
 		return nil
 	}
 	s := newFileStore(dataDir)
-	if err := s.saveSessions("", nil); err != nil {
+	if err := s.saveSessions("", nil, 0); err != nil {
 		return err
 	}
 	return s.saveRateLimit(nil)

@@ -2,6 +2,7 @@ package services
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -160,7 +161,9 @@ func (s *MihomoService) MigrateToSocket(xkeenSvc *XKeenService) (*MigrationResul
 	if s.BinaryPath != "" {
 		if _, err := os.Stat(s.BinaryPath); err == nil {
 			cmd := exec.Command(s.BinaryPath, "-t", "-d", s.ConfigDir, "-f", configPath)
+			release := AcquireKernelHelper(context.Background())
 			out, err := cmd.CombinedOutput()
+			release()
 			if err != nil {
 				// Rollback
 				_ = utils.AtomicReplaceFile(configPath, origBytes)

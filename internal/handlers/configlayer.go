@@ -32,7 +32,7 @@ func (a *API) requireLayer(w http.ResponseWriter, r *http.Request) bool {
 // (500) текст самой ошибки без ANSI-последовательностей уходит в поле detail, как
 // в остальных обработчиках: по нему пользователь и поддержка видят причину сбоя
 // диска, не заглядывая в журнал. Текст может содержать путь к файлу под каталогами
-// панели; секретов в нём нет, внутренние структуры не раскрываются.
+// панели; адреса со схемой в нём заменены, других секретов нет, внутренние структуры не раскрываются.
 func (a *API) writeLayerError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, configlayer.ErrDisabled):
@@ -56,8 +56,9 @@ func (a *API) writeLayerError(w http.ResponseWriter, r *http.Request, err error)
 	case errors.Is(err, configlayer.ErrDevModeRequired):
 		JSONErrorCode(w, http.StatusForbidden, "dev_mode_required", a.t(r, "configlayer.dev_mode_required"))
 	default:
-		// Деталь — текст ошибки без управляющих ANSI-последовательностей.
-		JSONErrorCodeDetail(w, http.StatusInternalServerError, "internal", a.t(r, "error.internal"), utils.StripANSI(err.Error()))
+		// Деталь — текст ошибки без управляющих ANSI-последовательностей и без
+		// адресов: в тексте сетевой ошибки бывает URL подписки с ключом доступа.
+		JSONErrorCodeDetail(w, http.StatusInternalServerError, "internal", a.t(r, "error.internal"), maskURLsInText(utils.StripANSI(err.Error())))
 	}
 }
 
@@ -73,7 +74,12 @@ func (a *API) requireMethod(w http.ResponseWriter, r *http.Request, method strin
 // decodeLayerBody читает JSON-тело запроса слоя с пределом 1 МБ. Ошибка разбора
 // или превышение предела — 400 invalid_request.
 func (a *API) decodeLayerBody(w http.ResponseWriter, r *http.Request, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxLayerBodyBytes)
+	return a.decodeLayerBodyLimit(w, r, dst, maxLayerBodyBytes)
+}
+
+// decodeLayerBodyLimit — decodeLayerBody с заданным пределом тела.
+func (a *API) decodeLayerBodyLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
 		JSONErrorCode(w, http.StatusBadRequest, "invalid_request", a.t(r, "configlayer.invalid_request"))
 		return false
@@ -104,8 +110,8 @@ func writeLayerEvent(w http.ResponseWriter, flusher http.Flusher, name string, d
 
 // ConfigLayerEvents — GET /api/configlayer/events: поток событий слоя (SSE).
 // Первое событие — snapshot; дальше draft, files, apply_step, apply_done,
-// notices; раз в 20 с комментарий ping. Выход по закрытию соединения, отписка в
-// defer (D-06).
+// notices; раз в 20 с комментарий ping. Выход по закрытию соединения или по
+// остановке сервера, отписка в defer (D-06).
 func (a *API) ConfigLayerEvents(w http.ResponseWriter, r *http.Request) {
 	if !a.requireMethod(w, r, http.MethodGet) || !a.requireLayer(w, r) {
 		return
@@ -138,9 +144,12 @@ func (a *API) ConfigLayerEvents(w http.ResponseWriter, r *http.Request) {
 
 	ticker := time.NewTicker(layerSSEPing)
 	defer ticker.Stop()
+	stopping := a.srv.Stopping()
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-stopping:
 			return
 		case ev, open := <-events:
 			if !open {

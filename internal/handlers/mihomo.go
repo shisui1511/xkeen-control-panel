@@ -109,6 +109,15 @@ var fallbackMihomoTransport = &http.Transport{
 	MaxIdleConnsPerHost:   4,
 }
 
+// kernelRestarting сообщает, что идёт перезапуск ядра, начатый панелью: окно
+// после XKeenService.Restart и SwitchKernel (InRestart). XKeen выполняет
+// -restart в фоне, и старый процесс ядра гаснет уже после ответа панели, когда
+// гейт опросов фронтенда ещё открыт (capabilities видели старый процесс): пока
+// новый процесс не открыл API, запросы к нему не проходят.
+func (a *API) kernelRestarting() bool {
+	return a.xkeenSvc != nil && a.xkeenSvc.InRestart()
+}
+
 func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 	// Whitelist allowed HTTP methods
 	switch r.Method {
@@ -185,6 +194,13 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 	proxy := &httputil.ReverseProxy{
 		Transport: transport,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// Ядро перезапускает сама панель: API недоступен штатно, это не сбой
+			// шлюза. Ответ сразу, без ожидания API: опросы страниц повторятся по
+			// своему такту, а гейт опросов закроется по capabilities.
+			if a.kernelRestarting() {
+				JSONErrorCode(w, http.StatusConflict, "kernel_restarting", a.t(r, "kernel.restarting"))
+				return
+			}
 			a.errorResponse(w, a.t(r, "mihomo.not_running")+": "+err.Error(), http.StatusBadGateway)
 		},
 		Rewrite: func(pr *httputil.ProxyRequest) {

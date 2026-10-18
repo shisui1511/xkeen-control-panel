@@ -51,11 +51,12 @@ type XKeenService struct {
 	lifecycleHook func()
 	now           func() time.Time
 
-	// statusRunMu сериализует `xkeen -status` во всём процессе: цикл кэша,
-	// сторожевой таймер и пост-проверки start/restart не порождают второй
-	// процесс, пока предыдущий не завершился. Под замком не вызывать ничего,
-	// что снова зовёт Status.
-	statusRunMu sync.Mutex
+	// statusRun — замок (семафор на один слот), который сериализует
+	// `xkeen -status` во всём процессе: цикл кэша, сторожевой таймер и
+	// пост-проверки start/restart не порождают второй процесс, пока предыдущий
+	// не завершился. Канал, а не sync.Mutex: ожидание замка прерывается отменой
+	// ctx (StatusContext). Под замком не вызывать ничего, что снова зовёт Status.
+	statusRun chan struct{}
 }
 
 // ErrXKeenNotInstalled — бинарник XKeen не найден, `xkeen -status` не запускался.
@@ -66,6 +67,7 @@ func NewXKeenService(binary, dataDir string) *XKeenService {
 		BinaryPath: binary,
 		dataDir:    dataDir,
 		now:        time.Now,
+		statusRun:  make(chan struct{}, 1),
 	}
 	svc.loadRestartLog()
 	return svc
@@ -148,14 +150,17 @@ func lastNLines(s string, n int) string {
 // --- Service control ---
 
 func (s *XKeenService) GetVersion() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, s.BinaryPath, "-v")
-	out, err := cmd.Output()
+	return s.GetVersionContext(context.Background())
+}
+
+// GetVersionContext — GetVersion с отменой: отмена ctx убивает `xkeen -v` и
+// возвращает "unknown", не дожидаясь выхода процесса (остановка панели).
+func (s *XKeenService) GetVersionContext(ctx context.Context) string {
+	out, err := s.runArgs(ctx, 5*time.Second, "-v")
 	if err != nil {
 		return "unknown"
 	}
-	output := strings.TrimSpace(utils.StripANSI(string(out)))
+	output := strings.TrimSpace(out)
 	if output == "" {
 		return "unknown"
 	}
@@ -179,9 +184,23 @@ func (s *XKeenService) Status() (string, error) {
 // StatusWithTimeout запускает `xkeen -status` с заданным таймаутом. Одновременно
 // выполняется не больше одного такого процесса: остальные вызовы ждут замок.
 func (s *XKeenService) StatusWithTimeout(d time.Duration) (string, error) {
-	s.statusRunMu.Lock()
-	defer s.statusRunMu.Unlock()
-	out, err := s.runWithTimeout("-status", d)
+	return s.StatusContext(context.Background(), d)
+}
+
+// StatusContext — StatusWithTimeout с отменой: отмена ctx прерывает ожидание
+// замка и убивает идущий `xkeen -status`, не дожидаясь выхода процесса. Так
+// остановка панели не ждёт скрипт XKeen, который под записью на флешку читается
+// с носителя секундами (сторожевой таймер и кэш статуса передают сюда ctx своего
+// Stop). Замок после отмены освобождается сразу, хотя убитый процесс ещё может
+// выходить: отмена бывает только при остановке сервиса.
+func (s *XKeenService) StatusContext(ctx context.Context, d time.Duration) (string, error) {
+	select {
+	case s.statusRun <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	defer func() { <-s.statusRun }()
+	out, err := s.runArgs(ctx, d, "-status")
 	output := utils.StripANSI(out)
 	if err != nil {
 		return output, err
@@ -581,6 +600,19 @@ func (s *XKeenService) waitKernelHealthy(window, interval time.Duration) bool {
 }
 
 func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string) (string, error) {
+	return s.runArgs(context.Background(), timeout, args...)
+}
+
+// runArgs запускает xkeen с аргументами args и таймаутом timeout. Отмена ctx
+// убивает процесс и сразу возвращает ctx.Err(): выхода процесса не ждёт — скрипт
+// в непрерываемом ожидании носителя умрёт, когда чтение вернётся, а Wait в фоне
+// его подберёт. Вывод при отмене не собирается. Отмена действует и после таймаута
+// и выхода скрипта: ожидание выхода убитого процесса и остатка вывода
+// (scriptOutputGrace) прерывается.
+func (s *XKeenService) runArgs(ctx context.Context, timeout time.Duration, args ...string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if s.isLocalhost() {
 		// For commands starting, stopping, or restarting services, return mock success
 		isLifecycleCmd := false
@@ -594,6 +626,12 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 			log.Printf("xkeen: bypassing service lifecycle command %v on localhost (Rule #3)", args)
 			return fmt.Sprintf("Bypassed service command %q on localhost (Rule #3)", strings.Join(args, " ")), nil
 		}
+	}
+
+	// Команда жизненного цикла не начинается, пока работает вспомогательный запуск
+	// бинарника ядра: XKeen принял бы его за запущенное ядро (kernel_exec_gate.go).
+	if isXKeenLifecycleCmdline(append([]string{"xkeen"}, args...)) {
+		defer lockKernelLifecycleExec()()
 	}
 
 	// INVARIANT: no shell interpreter — exec.Command receives the binary path directly,
@@ -618,12 +656,24 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 	}()
 
 	select {
+	case <-ctx.Done():
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		return "", ctx.Err()
 	case <-time.After(timeout):
 		if cmd.Process != nil {
-			cmd.Process.Kill()
+			_ = cmd.Process.Kill()
 		}
-		<-done
-		output := utils.StripANSI(out.snapshot(scriptOutputGrace))
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+		output := utils.StripANSI(out.snapshot(ctx, scriptOutputGrace))
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		isStart := false
 		for _, arg := range args {
 			if strings.Contains(arg, "start") || strings.Contains(arg, "restart") {
@@ -636,7 +686,10 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 		}
 		return output, fmt.Errorf("timeout exceeded")
 	case err := <-done:
-		output := utils.StripANSI(out.snapshot(scriptOutputGrace))
+		output := utils.StripANSI(out.snapshot(ctx, scriptOutputGrace))
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
 		isStart := false
 		for _, arg := range args {
 			if strings.Contains(arg, "start") || strings.Contains(arg, "restart") {

@@ -524,6 +524,17 @@ func (s *MihomoService) FlushFakeIPCache(ctx context.Context) error {
 	return nil
 }
 
+// HasController сообщает, настроен ли у Mihomo внешний контроллер (Clash API):
+// external-controller или external-controller-unix в config.yaml. Без него ядро
+// работает, но API недоступен, и состояние ядра подтверждается только по процессу.
+func (s *MihomoService) HasController() bool {
+	info, err := s.ParseControllerConfig()
+	if err != nil {
+		return false
+	}
+	return info.Type == "unix" || (info.Type == "tcp" && info.Target != "")
+}
+
 // ReloadConfig reloads Mihomo configuration at runtime via PUT /configs?force=true.
 func (s *MihomoService) ReloadConfig(configPath string) error {
 	info, err := s.ParseControllerConfig()

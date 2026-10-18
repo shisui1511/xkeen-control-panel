@@ -452,7 +452,7 @@ cmd_restore() {
     done <"$BASE/dirs.txt" >>"$WORK/restore.list"
     if [ -s "$WORK/restore.list" ]; then
       say "restore: из архива извлекаю $(wc -l <"$WORK/restore.list") путей"
-      "$TAR" -C / -xpzf "$BASE/baseline.tar.gz" -T "$WORK/restore.list" 2>"$WORK/untar.err" || {
+      "$TAR" -C / --no-recursion -xpzf "$BASE/baseline.tar.gz" -T "$WORK/restore.list" 2>"$WORK/untar.err" || {
         say "ОШИБКА: распаковка tar не удалась"
         head -5 "$WORK/untar.err"
         return 4

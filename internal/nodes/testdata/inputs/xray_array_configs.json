@@ -1,0 +1,53 @@
+[
+  {
+    "remarks": "Конфиг первый",
+    "inbounds": [
+      { "tag": "socks-in", "listen": "127.0.0.1", "port": 10808, "protocol": "socks", "settings": {} }
+    ],
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "trojan",
+        "settings": {
+          "servers": [{ "address": "node3.example", "port": 443, "password": "trojan-pass-3" }]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "tls",
+          "tlsSettings": { "serverName": "cdn.example" }
+        }
+      },
+      { "tag": "direct", "protocol": "freedom", "settings": {} }
+    ]
+  },
+  {
+    "remarks": "Конфиг второй",
+    "inbounds": [
+      { "tag": "socks-in", "listen": "127.0.0.1", "port": 10808, "protocol": "socks", "settings": {} }
+    ],
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vmess",
+        "settings": {
+          "vnext": [
+            {
+              "address": "node2.example",
+              "port": 443,
+              "users": [
+                { "id": "22222222-2222-4222-8222-222222222222", "alterId": 0, "security": "auto" }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "ws",
+          "security": "tls",
+          "tlsSettings": { "serverName": "cdn.example" },
+          "wsSettings": { "path": "/ws", "headers": { "Host": "cdn.example" } }
+        }
+      },
+      { "tag": "direct", "protocol": "freedom", "settings": {} }
+    ]
+  }
+]

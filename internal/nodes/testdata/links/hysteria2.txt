@@ -1,1 +1,1 @@
-hysteria2://hy2-pass@node5.example:443?obfs=salamander&obfs-password=obfs-pass&sni=cdn.example&insecure=1&pinSHA256=AA:BB:CC&mport=20000-30000&alpn=h3#Hy2
+hysteria2://hy2-pass@node5.example:443?obfs=salamander&obfs-password=obfs-pass&sni=cdn.example&insecure=1&pinSHA256=9D:A0:CE:E6:CF:6F:41:05:3C:D2:F0:D5:89:CD:45:DE:BE:E5:B4:E5:D0:60:BD:2E:88:9B:C1:88:86:CC:ED:1C&mport=20000-30000&alpn=h3#Hy2

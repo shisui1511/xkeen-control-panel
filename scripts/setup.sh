@@ -390,15 +390,17 @@ EOF
   fi
 }
 
-# Создание init-скрипта с резервным копированием существующего
-create_init_script() {
-  if [ -f "$INIT_SCRIPT" ]; then
-    cp "$INIT_SCRIPT" "${INIT_SCRIPT}.bak"
-    ok "Бэкап старого init-скрипта создан: ${INIT_SCRIPT}.bak"
-    log_install "Backed up existing init script to ${INIT_SCRIPT}.bak"
-  fi
-
-  cat > "$INIT_SCRIPT" <<EOF
+# Текст init-скрипта службы (в stdout). Остановка и перезапуск — свои, а не из
+# rc.func: rc.func ждёт выхода процесса около 10 с, после чего запуск при живом
+# старом процессе отвечает «already running», и панель остаётся лежать. Процесс
+# панели, поток которого стоит в непрерываемом ожидании носителя (запись на флешку
+# под чужой записью), выходит только после возврата системного вызова — иногда
+# через десятки секунд. Поэтому stop ждёт настоящего выхода (pidof): SIGTERM, через
+# XCP_STOP_KILL_AFTER с — SIGKILL, через XCP_STOP_TIMEOUT с — отказ; restart
+# запускает панель только после выхода старого процесса. start, status, kill —
+# из rc.func.
+init_script_body() {
+  cat <<EOF
 #!/bin/sh
 ENABLED=yes
 PROCS=$BINARY
@@ -417,11 +419,80 @@ fi
 # Escape hatch for Green Tea GC if needed (Go 1.26 default):
 # export GOEXPERIMENT=nogreenteagc
 
-. /opt/etc/init.d/rc.func
+# stop и restart ждут настоящего выхода процесса: поток, стоящий в ожидании
+# носителя, держит процесс до возврата системного вызова, а запуск при живом
+# процессе ответил бы «already running».
+XCP_STOP_TIMEOUT=\${XCP_STOP_TIMEOUT:-60}
+XCP_STOP_KILL_AFTER=\${XCP_STOP_KILL_AFTER:-20}
+
+xcp_stop() {
+    if [ -z "\$(pidof \$PROCS)" ]; then
+        echo " \$DESC is not running."
+        return 0
+    fi
+    if usleep 0 2>/dev/null; then
+        _nap="usleep 200000"
+        _hz=5
+    else
+        _nap="sleep 1"
+        _hz=1
+    fi
+    echo -n " Shutting down \$PROCS... "
+    killall \$PROCS 2>/dev/null
+    _n=0
+    while [ -n "\$(pidof \$PROCS)" ]; do
+        if [ "\$_n" -ge \$((XCP_STOP_TIMEOUT * _hz)) ]; then
+            echo "failed."
+            return 255
+        fi
+        if [ "\$_n" -eq \$((XCP_STOP_KILL_AFTER * _hz)) ]; then
+            killall -9 \$PROCS 2>/dev/null
+        fi
+        \$_nap
+        _n=\$((_n + 1))
+    done
+    echo "done."
+    return 0
+}
+
+case "\$1" in
+    stop)
+        xcp_stop
+        ;;
+    restart)
+        xcp_stop && . /opt/etc/init.d/rc.func start "\$2"
+        ;;
+    *)
+        . /opt/etc/init.d/rc.func
+        ;;
+esac
 EOF
-  chmod +x "$INIT_SCRIPT"
-  ok "Сервис создан"
-  log_install "Created init script at $INIT_SCRIPT"
+}
+
+# Создание init-скрипта: пишется, только если текст отличается (тогда прежний
+# копируется в .bak); запись — через временный файл и mv, чтобы идущий запуск
+# скрипта дочитал прежнюю версию.
+create_init_script() {
+  local body
+  body=$(init_script_body)
+  if [ -f "$INIT_SCRIPT" ] && [ "$(cat "$INIT_SCRIPT")" = "$body" ]; then
+    chmod +x "$INIT_SCRIPT"
+    ok "Init-скрипт актуален: $INIT_SCRIPT"
+  else
+    if [ -f "$INIT_SCRIPT" ]; then
+      cp "$INIT_SCRIPT" "${INIT_SCRIPT}.bak"
+      # rc.unslung запускает все исполняемые S* в init.d — копию он запускать не должен
+      chmod -x "${INIT_SCRIPT}.bak"
+      ok "Бэкап старого init-скрипта создан: ${INIT_SCRIPT}.bak"
+      log_install "Backed up existing init script to ${INIT_SCRIPT}.bak"
+    fi
+    mkdir -p "$(dirname "$INIT_SCRIPT")"
+    printf '%s\n' "$body" > "${INIT_SCRIPT}.tmp.$$" || return 1
+    chmod +x "${INIT_SCRIPT}.tmp.$$"
+    mv -f "${INIT_SCRIPT}.tmp.$$" "$INIT_SCRIPT" || return 1
+    ok "Сервис создан"
+    log_install "Created init script at $INIT_SCRIPT"
+  fi
 
   # Создание шаблонного xcp.env, если его нет
   if [ ! -f "$INSTALL_DIR/xcp.env" ]; then
@@ -867,6 +938,10 @@ do_update() {
 
   detect_arch
   echo "$CHANNEL" > "$INSTALL_DIR/channel"
+
+  # Init-скрипт — из этой версии setup.sh, в том числе когда бинарник актуален:
+  # так существующая установка получает новую остановку и перезапуск службы
+  create_init_script
   
   cp "$BIN_PATH" "${BIN_PATH}.bak"
   log_install "Created backup of current binary at ${BIN_PATH}.bak"
@@ -905,8 +980,8 @@ do_update() {
     stop_service
     mv "${BIN_PATH}.bak" "$BIN_PATH"
     chmod +x "$BIN_PATH"
-    # init-скрипт do_update не меняет — его .bak остался от давней установки,
-    # восстанавливать его нельзя
+    # init-скрипт не откатывается: он не зависит от версии бинарника, а его .bak
+    # может остаться от давней установки
 
     start_service
     
@@ -1201,6 +1276,11 @@ parse_args() {
         ACTION="status"
         shift
         ;;
+      --init-script)
+        INTERACTIVE="false"
+        ACTION="init-script"
+        shift
+        ;;
       --purge)
         ARG_PURGE="true"
         shift
@@ -1233,6 +1313,7 @@ parse_args() {
         printf "      --purge        С --uninstall: удалить и данные панели (пароль, TLS, сессии)\n"
         printf "  -r, --restart      Перезапуск службы панели\n"
         printf "  -s, --status       Проверить статус службы\n"
+        printf "      --init-script  Пересоздать init-скрипт службы (без загрузки и перезапуска)\n"
         printf "  -c, --channel CH   Канал обновления (stable/prerelease)\n"
         printf "  -p, --port PORT    Порт для веб-интерфейса панели\n"
         printf "  -h, --help         Показать эту справку\n\n"
@@ -1302,6 +1383,11 @@ if [ "$INTERACTIVE" = "false" ]; then
       ;;
     status)
       status_service
+      exit $?
+      ;;
+    init-script)
+      check_entware
+      create_init_script
       exit $?
       ;;
     *)

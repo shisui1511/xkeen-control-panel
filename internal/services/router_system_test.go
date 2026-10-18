@@ -329,4 +329,117 @@ func TestRouterKernelVersions(t *testing.T) {
 				"версия ядра %s в панели %q не найдена в выводе ядра", c.name, info.CurrentVersion)
 		})
 	}
+
+	// Версия активного ядра, запрошенная во время операции XKeen, ждёт её конца и
+	// остаётся настоящей: ни «unknown», ни помехи самому перезапуску.
+	t.Run("во_время_перезапуска_XKeen", func(t *testing.T) {
+		core := tg.Core
+		var bin string
+		var args []string
+		switch core {
+		case "xray":
+			bin, args = rtXrayBinary, []string{"version"}
+		case "mihomo":
+			bin, args = rtMihomoBin, []string{"-v"}
+		default:
+			t.Fatalf("активное ядро цели не определено (%q)", core)
+		}
+		if rtPids(core) == "" {
+			t.Fatalf("перед тестом ядро %s не запущено: стенд должен быть в рабочем состоянии", core)
+		}
+		before := rtPids(core)
+		svc := NewXKeenService(rtXKeenBinary, tg.WorkDir)
+		t.Cleanup(func() {
+			if rtPids(core) == "" {
+				_, _ = svc.Start()
+				rtWaitRunning(core, true, 3*time.Minute)
+			}
+		})
+
+		type restartResult struct {
+			out string
+			err error
+		}
+		done := make(chan restartResult, 1)
+		go func() {
+			out, err := svc.Restart()
+			done <- restartResult{out, err}
+		}()
+
+		seen := false
+		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+			if xkeenLifecycleRunning() {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			<-done
+			t.Skipf("операция XKeen закончилась раньше пробы")
+		}
+		{
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			stdout, _, _ := routertest.Exec(ctx, "ps", "w")
+			cancel()
+			for _, line := range strings.Split(stdout, "\n") {
+				if strings.Contains(line, "xkeen") || strings.Contains(line, "S05xkeen") {
+					t.Logf("процесс XKeen: %s", strings.TrimSpace(line))
+				}
+			}
+		}
+
+		fresh := NewKernelService(tg.WorkDir)
+		// Пробы установки и отката идут параллельно с Get, тоже во время операции XKeen:
+		// бинарники не заменяются и бэкапы не создаются (стенд не меняется).
+		type inspected struct {
+			had     bool
+			version string
+		}
+		inspectCh := make(chan inspected, 1)
+		probeCh := make(chan string, 1)
+		go func() {
+			had, v := fresh.inspectInstalled(core, bin)
+			inspectCh <- inspected{had, v}
+		}()
+		go func() {
+			v, _ := fresh.probeInstalledVersion(core)
+			probeCh <- v
+		}()
+		started := time.Now()
+		info := fresh.Get(core)
+		waited := time.Since(started)
+		t.Logf("Get во время операции XKeen занял %s", waited.Round(time.Millisecond))
+		if info == nil {
+			t.Fatalf("панель не знает ядро %s", core)
+		}
+
+		res := <-done
+		routertest.Verdict(t, res.err == nil, routertest.KnownMark{}, "Restart: %v: %s", res.err, rtShort(res.out))
+		after := rtWaitChanged(core, before, 3*time.Minute)
+		routertest.Verdict(t, after != "" && after != before, routertest.KnownMark{},
+			"после Restart с пробой версии PID ядра %s не сменился (было %q, стало %q)", core, before, after)
+
+		valid := info.CurrentVersion != "" && info.CurrentVersion != "error" &&
+			info.CurrentVersion != "unknown" && info.CurrentVersion != "not installed"
+		routertest.Verdict(t, valid, routertest.KnownMark{},
+			"версия ядра %s, запрошенная во время операции XKeen: %q", core, info.CurrentVersion)
+		limit := kernelHelperWait + kernelVersionTimeout + 15*time.Second
+		routertest.Verdict(t, waited <= limit, routertest.KnownMark{},
+			"Get ждал %s, предел %s", waited.Round(time.Millisecond), limit)
+		insp := <-inspectCh
+		probed := <-probeCh
+		routertest.Verdict(t, insp.had && knownKernelVersion(insp.version) && insp.version == info.CurrentVersion, routertest.KnownMark{},
+			"inspectInstalled во время операции XKeen: стоит %v, версия %q (в Get %q)", insp.had, insp.version, info.CurrentVersion)
+		routertest.Verdict(t, knownKernelVersion(probed) && probed == info.CurrentVersion, routertest.KnownMark{},
+			"probeInstalledVersion во время операции XKeen: версия %q (в Get %q)", probed, info.CurrentVersion)
+
+		// Вывод бинарника снимается после Get и смены PID: проба теста не должна сама
+		// запускать бинарник во время операции XKeen.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		stdout, stderr, code := routertest.Exec(ctx, bin, args...)
+		routertest.Verdict(t, code == 0, routertest.KnownMark{}, "%s %v: код %d: %s", bin, args, code, rtShort(stderr))
+		routertest.Verdict(t, valid && strings.Contains(stdout, info.CurrentVersion), routertest.KnownMark{},
+			"версия ядра %s в панели %q не найдена в выводе ядра", core, info.CurrentVersion)
+	})
 }

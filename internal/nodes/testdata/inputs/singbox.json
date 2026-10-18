@@ -1,0 +1,98 @@
+{
+  "outbounds": [
+    { "type": "selector", "tag": "select", "outbounds": ["reality", "ws"] },
+    { "type": "urltest", "tag": "auto", "outbounds": ["reality", "ws"] },
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "block" },
+    { "type": "dns", "tag": "dns-out" },
+    {
+      "type": "vless",
+      "tag": "Узел reality",
+      "server": "node1.example",
+      "server_port": 443,
+      "uuid": "11111111-1111-4111-8111-111111111111",
+      "flow": "xtls-rprx-vision",
+      "packet_encoding": "xudp",
+      "tls": {
+        "enabled": true,
+        "server_name": "cdn.example",
+        "utls": { "enabled": true, "fingerprint": "chrome" },
+        "reality": {
+          "enabled": true,
+          "public_key": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
+          "short_id": "0a1b2c3d"
+        }
+      }
+    },
+    {
+      "type": "vmess",
+      "tag": "Узел ws",
+      "server": "node2.example",
+      "server_port": 443,
+      "uuid": "22222222-2222-4222-8222-222222222222",
+      "security": "auto",
+      "tls": { "enabled": true, "server_name": "cdn.example", "alpn": ["h2", "http/1.1"] },
+      "transport": { "type": "ws", "path": "/ws", "headers": { "Host": "cdn.example" } }
+    },
+    {
+      "type": "trojan",
+      "tag": "Узел grpc",
+      "server": "node3.example",
+      "server_port": 443,
+      "password": "trojan-pass-3",
+      "tls": { "enabled": true, "server_name": "cdn.example" },
+      "transport": { "type": "grpc", "service_name": "trsvc" }
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "Узел ss",
+      "server": "node4.example",
+      "server_port": 8388,
+      "method": "aes-128-gcm",
+      "password": "ss-pass-4",
+      "plugin": "obfs-local",
+      "plugin_opts": "obfs=http;obfs-host=cdn.example"
+    },
+    {
+      "type": "hysteria2",
+      "tag": "Узел hy2",
+      "server": "node5.example",
+      "server_port": 443,
+      "password": "hy2-pass-5",
+      "up_mbps": 50,
+      "down_mbps": 100,
+      "obfs": { "type": "salamander", "password": "obfs-pass-5" },
+      "tls": { "enabled": true, "server_name": "cdn.example", "alpn": ["h3"] }
+    },
+    {
+      "type": "tuic",
+      "tag": "Узел tuic",
+      "server": "node7.example",
+      "server_port": 443,
+      "uuid": "11111111-1111-4111-8111-111111111111",
+      "password": "tuic-pass-7",
+      "congestion_control": "bbr",
+      "udp_relay_mode": "native",
+      "tls": { "enabled": true, "server_name": "cdn.example", "alpn": ["h3"] }
+    },
+    {
+      "type": "wireguard",
+      "tag": "Узел wg",
+      "server": "node10.example",
+      "server_port": 51820,
+      "local_address": ["10.0.0.2/32"],
+      "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "peer_public_key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+      "mtu": 1280
+    },
+    {
+      "type": "vless",
+      "tag": "Узел xhttp",
+      "server": "node1.example",
+      "server_port": 443,
+      "uuid": "11111111-1111-4111-8111-111111111111",
+      "tls": { "enabled": true, "server_name": "cdn.example" },
+      "transport": { "type": "xhttp", "path": "/xh", "host": "cdn.example", "mode": "packet-up" }
+    }
+  ]
+}

@@ -1758,8 +1758,9 @@ td.mono,
   background: color-mix(in srgb, var(--success) 6%, transparent);
 }
 
+/* Подложка 10% красного поднимает фон, и чистый --danger в тёмной теме проседает до 4.1:1 */
 .status-badge.stopped {
-  color: var(--danger);
+  color: color-mix(in srgb, var(--danger) 80%, var(--fg-primary));
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
   background: color-mix(in srgb, var(--danger) 10%, transparent);
 }

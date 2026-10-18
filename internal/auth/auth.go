@@ -99,6 +99,13 @@ type AuthService struct {
 	now              func() time.Time
 	stopCh           chan struct{}
 	stopOnce         sync.Once
+	// persistCh (ёмкость 1) будит persistLoop: создание сессии при входе пишет
+	// sessions.json в фоне, а не в обработчике (fsync на флешке под нагрузкой
+	// ждёт записи чужих данных — десятки секунд).
+	persistCh chan struct{}
+	// persistSeq — номер последнего снятого снимка сессий (под a.mu); по нему
+	// fileStore не даёт старому снимку затереть на диске более новый.
+	persistSeq uint64
 	// lastSeenDirty — есть ли накопленная активность (LastSeen), не
 	// записанная на диск с последнего flush; сбрасывается flushIfDirty.
 	lastSeenDirty bool
@@ -198,6 +205,7 @@ func NewAuthService(opts Options) *AuthService {
 		store:            newFileStore(opts.DataDir),
 		now:              time.Now,
 		stopCh:           make(chan struct{}),
+		persistCh:        make(chan struct{}, 1),
 		dataDir:          opts.DataDir,
 	}
 
@@ -296,8 +304,11 @@ func (a *AuthService) currentSetupCode() string {
 
 // Stop останавливает фоновые горутины очистки и делает финальный Flush
 // сессий на диск. Идемпотентен — повторный вызов безопасен (stopOnce).
+// Финальные записи — без fsync (fileStore.finalWrites): остановка панели не
+// ждёт носитель.
 func (a *AuthService) Stop() {
 	a.stopOnce.Do(func() {
+		a.store.finalWrites()
 		if err := a.Flush(); err != nil {
 			log.Printf("[auth] final flush on Stop failed: %v", err)
 		}
@@ -313,21 +324,26 @@ func (a *AuthService) Stop() {
 // указателю), пока вызывающий код держит a.mu — это единственный способ
 // затем безопасно сериализовать снимок за пределами блокировки без гонки с
 // одновременной записью LastSeen другим запросом (go test -race).
-func (a *AuthService) snapshotSessionsLocked() (string, []*Session) {
+//
+// Третье значение — номер снимка: fileStore.saveSessions не пишет снимок с
+// номером не больше уже записанного, поэтому медленный фоновый снимок не
+// возвращает на диск сессию, завершённую после него.
+func (a *AuthService) snapshotSessionsLocked() (string, []*Session, uint64) {
 	sessions := make([]*Session, 0, len(a.sessions))
 	for _, s := range a.sessions {
 		cp := *s
 		sessions = append(sessions, &cp)
 	}
-	return passwordFingerprint(a.passwordHash), sessions
+	a.persistSeq++
+	return passwordFingerprint(a.passwordHash), sessions, a.persistSeq
 }
 
 // Flush сохраняет снимок текущих сессий на диск синхронно.
 func (a *AuthService) Flush() error {
 	a.mu.Lock()
-	fingerprint, snapshot := a.snapshotSessionsLocked()
+	fingerprint, snapshot, seq := a.snapshotSessionsLocked()
 	a.mu.Unlock()
-	return a.store.saveSessions(fingerprint, snapshot)
+	return a.store.saveSessions(fingerprint, snapshot, seq)
 }
 
 // persistSessions — Flush() с логированием ошибки вместо её возврата;
@@ -341,9 +357,32 @@ func (a *AuthService) persistSessions() {
 
 // persistSnapshot — как persistSessions, но принимает уже готовый снимок
 // (снятый под a.mu в вызывающем коде, например в cleanupSessions).
-func (a *AuthService) persistSnapshot(fingerprint string, sessions []*Session) {
-	if err := a.store.saveSessions(fingerprint, sessions); err != nil {
+func (a *AuthService) persistSnapshot(fingerprint string, sessions []*Session, seq uint64) {
+	if err := a.store.saveSessions(fingerprint, sessions, seq); err != nil {
 		log.Printf("[auth] failed to persist sessions: %v", err)
+	}
+}
+
+// requestPersist просит persistLoop записать sessions.json и сразу возвращается:
+// отправка неблокирующая, а один ожидающий сигнал покрывает все входы, пришедшие
+// до начала записи (снимок берётся уже в persistLoop).
+func (a *AuthService) requestPersist() {
+	select {
+	case a.persistCh <- struct{}{}:
+	default:
+	}
+}
+
+// persistLoop пишет sessions.json по сигналам requestPersist. Выходит по stopCh;
+// последний снимок пишет Stop() синхронно.
+func (a *AuthService) persistLoop() {
+	for {
+		select {
+		case <-a.persistCh:
+			a.persistSessions()
+		case <-a.stopCh:
+			return
+		}
 	}
 }
 
@@ -467,9 +506,9 @@ func (a *AuthService) ReloadPasswordHash(hash string, apply func(string)) int {
 		delete(a.sessions, h)
 		a.tombstones[h] = tombstone{reason: ReasonPasswordChanged, until: now.Add(tombstoneTTL)}
 	}
-	fingerprint, snapshot := a.snapshotSessionsLocked()
+	fingerprint, snapshot, seq := a.snapshotSessionsLocked()
 	a.mu.Unlock()
-	a.persistSnapshot(fingerprint, snapshot)
+	a.persistSnapshot(fingerprint, snapshot, seq)
 
 	a.rateLimiter.Reset()
 	auditf("password reloaded", "local", fmt.Sprintf(" terminated=%d", count))
@@ -478,15 +517,17 @@ func (a *AuthService) ReloadPasswordHash(hash string, apply func(string)) int {
 }
 
 func (a *AuthService) startCleanup() {
+	go a.persistLoop()
 	go a.cleanupSessions()
 	go a.cleanupRateLimiter()
 	go a.flushLoop()
 }
 
 // flushIfDirty сохраняет снимок сессий, только если с последнего flush была
-// активность (lastSeenDirty) — иначе no-op. Структурные изменения
-// (создание/удаление сессии) пишутся синхронно сами по себе и не зависят от
-// этого флага; он покрывает только LastSeen, обновляемый на каждый
+// активность (lastSeenDirty) — иначе no-op. Структурные изменения не зависят
+// от этого флага: создание сессии при входе пишется в фоне сразу после ответа
+// (requestPersist), удаление сессий и смена пароля — синхронно. Флаг покрывает
+// только LastSeen, обновляемый на каждый
 // authenticated-запрос (T-134-05: без троттлинга это был бы один write на
 // каждый запрос — неприемлемый износ флеша роутера).
 func (a *AuthService) flushIfDirty() {
@@ -496,9 +537,9 @@ func (a *AuthService) flushIfDirty() {
 		return
 	}
 	a.lastSeenDirty = false
-	fingerprint, snapshot := a.snapshotSessionsLocked()
+	fingerprint, snapshot, seq := a.snapshotSessionsLocked()
 	a.mu.Unlock()
-	a.persistSnapshot(fingerprint, snapshot)
+	a.persistSnapshot(fingerprint, snapshot, seq)
 }
 
 // flushLoop сбрасывает накопленную активность (last_seen) не чаще раза в
@@ -544,12 +585,13 @@ func (a *AuthService) cleanupSessions() {
 			}
 			var fingerprint string
 			var snapshot []*Session
+			var seq uint64
 			if removed {
-				fingerprint, snapshot = a.snapshotSessionsLocked()
+				fingerprint, snapshot, seq = a.snapshotSessionsLocked()
 			}
 			a.mu.Unlock()
 			if removed {
-				a.persistSnapshot(fingerprint, snapshot)
+				a.persistSnapshot(fingerprint, snapshot, seq)
 			}
 		case <-a.stopCh:
 			return
@@ -618,9 +660,22 @@ func DeriveCSRFToken(token string) string {
 	return base64.URLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// CreateSessionWithMeta создаёt новую сессию с контекстом входа (IP,
-// User-Agent, «Запомнить меня»). Записывает синхронный снимок на диск.
+// CreateSessionWithMeta создаёт новую сессию с контекстом входа (IP,
+// User-Agent, «Запомнить меня») и синхронно записывает снимок на диск —
+// нужно смене пароля, которая пишет новый отпечаток и завершение прежних сессий.
 func (a *AuthService) CreateSessionWithMeta(meta SessionMeta) (*IssuedSession, error) {
+	issued, err := a.createSession(meta)
+	if err != nil {
+		return nil, err
+	}
+	a.persistSessions()
+	return issued, nil
+}
+
+// createSession создаёт сессию только в памяти, без записи на диск: вход
+// отвечает сразу и просит фоновую запись (requestPersist). Если сессия вытеснила
+// самую давнюю из-за MaxSessions, вытеснение попадёт на диск вместе с ней.
+func (a *AuthService) createSession(meta SessionMeta) (*IssuedSession, error) {
 	idBytes := make([]byte, 16)
 	if _, err := rand.Read(idBytes); err != nil {
 		return nil, err
@@ -668,8 +723,6 @@ func (a *AuthService) CreateSessionWithMeta(meta SessionMeta) (*IssuedSession, e
 	a.sessions[session.TokenHash] = session
 	a.mu.Unlock()
 
-	a.persistSessions()
-
 	return &IssuedSession{
 		ID:         session.ID,
 		Token:      token,
@@ -703,9 +756,9 @@ func (a *AuthService) ValidateSession(token string) (*Session, error) {
 
 	if now.Sub(session.CreatedAt) >= a.absoluteTTL || now.Sub(session.LastSeen) >= a.idleTTL {
 		delete(a.sessions, tokenHash)
-		fingerprint, snapshot := a.snapshotSessionsLocked()
+		fingerprint, snapshot, seq := a.snapshotSessionsLocked()
 		a.mu.Unlock()
-		a.persistSnapshot(fingerprint, snapshot)
+		a.persistSnapshot(fingerprint, snapshot, seq)
 		return nil, errors.New("session expired")
 	}
 
@@ -815,10 +868,10 @@ func (a *AuthService) TerminateSession(id, currentToken string) error {
 	}
 	delete(a.sessions, targetHash)
 	a.tombstones[targetHash] = tombstone{reason: ReasonTerminatedElsewhere, until: a.now().Add(tombstoneTTL)}
-	fingerprint, snapshot := a.snapshotSessionsLocked()
+	fingerprint, snapshot, seq := a.snapshotSessionsLocked()
 	a.mu.Unlock()
 
-	a.persistSnapshot(fingerprint, snapshot)
+	a.persistSnapshot(fingerprint, snapshot, seq)
 	auditf("session terminated", targetIP, fmt.Sprintf(" session=%s by=%s", shortSessionID(id), shortSessionID(byID)))
 	return nil
 }
@@ -845,13 +898,14 @@ func (a *AuthService) TerminateOtherSessions(currentToken string) int {
 	}
 	var fingerprint string
 	var snapshot []*Session
+	var seq uint64
 	if count > 0 {
-		fingerprint, snapshot = a.snapshotSessionsLocked()
+		fingerprint, snapshot, seq = a.snapshotSessionsLocked()
 	}
 	a.mu.Unlock()
 
 	if count > 0 {
-		a.persistSnapshot(fingerprint, snapshot)
+		a.persistSnapshot(fingerprint, snapshot, seq)
 	}
 	auditf("sessions terminated others", actorIP, fmt.Sprintf(" count=%d", count))
 	return count
@@ -1003,10 +1057,16 @@ func (rl *RateLimiter) CheckLimit(ip string, maxAttempts int, lockoutDuration ti
 	return nil
 }
 
+// ResetAttempts сбрасывает счётчик IP после успешного входа. Запись на диск
+// отложена (dirty → flushLoop или Stop): сброс незаблокированного счётчика — того
+// же класса, что его рост (D-04 фазы 134), а синхронный fsync в обработчике входа
+// ждал бы носитель. Блокировка IP и Reset() по-прежнему пишутся синхронно.
 func (rl *RateLimiter) ResetAttempts(ip string) {
 	rl.mu.Lock()
-	delete(rl.attempts, ip)
-	rl.persistLocked()
+	if _, ok := rl.attempts[ip]; ok {
+		delete(rl.attempts, ip)
+		rl.dirty = true
+	}
 	rl.mu.Unlock()
 }
 
@@ -1203,11 +1263,14 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if len(ua) > 256 {
 		ua = ua[:256]
 	}
-	issued, err := a.CreateSessionWithMeta(SessionMeta{IP: ip, UserAgent: ua, RememberMe: req.RememberMe})
+	issued, err := a.createSession(SessionMeta{IP: ip, UserAgent: ua, RememberMe: req.RememberMe})
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "Failed to create session")
 		return
 	}
+	// sessions.json пишется в фоне: fsync на флешке под нагрузкой ждёт записи
+	// чужих данных, и вход зависал на десятки секунд.
+	a.requestPersist()
 	auditf("login ok", ip, fmt.Sprintf(" session=%s", shortSessionID(issued.ID)))
 
 	_, absoluteTTL := a.TTL()

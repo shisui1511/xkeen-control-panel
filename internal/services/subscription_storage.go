@@ -72,6 +72,11 @@ func detectRouterMAC() string {
 	return ""
 }
 
+// LoadOrGenerateHWID — общий HWID старого и нового слоя: слот устройства у
+// провайдера один; удаляется вместе со старым слоем в Phase 151 только после
+// переноса в sources.
+func LoadOrGenerateHWID(dataDir string) string { return loadOrGenerateHWID(dataDir) }
+
 // loadOrGenerateHWID определяет стабильный HWID роутера:
 // 1) переменные окружения XCP_HWID / XCP_MIHOMO_HWID / XCP_DEVICE_HWID
 // 2) валидный 12-значный MAC-адрес из xcp_hwid.txt

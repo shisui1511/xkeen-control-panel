@@ -79,6 +79,11 @@ type Server struct {
 	// protectedWrap оборачивает каждый защищённый обработчик при регистрации
 	// (гейт по активному ядру). Выполняется внутри RequireAuth.
 	protectedWrap func(pattern string, h http.HandlerFunc) http.HandlerFunc
+	// stopping закрывается в начале Shutdown: потоки SSE завершаются сами, иначе
+	// http.Server.Shutdown ждёт их до своего дедлайна (открытая вкладка панели
+	// держала остановку xcp 10 с и больше).
+	stopping chan struct{}
+	stopOnce sync.Once
 }
 
 type Config struct {
@@ -156,7 +161,18 @@ func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 		mux:         mux,
 		loopbackMux: http.NewServeMux(),
 		authService: authService,
+		stopping:    make(chan struct{}),
 	}, nil
+}
+
+// Stopping закрывается, когда сервер начинает остановку. Долгие ответы (SSE)
+// выбирают его наравне с r.Context().Done(). Для nil-сервера — nil-канал, который
+// никогда не срабатывает.
+func (s *Server) Stopping() <-chan struct{} {
+	if s == nil {
+		return nil
+	}
+	return s.stopping
 }
 
 // Handle регистрирует обработчик в основном mux и, если путь входит в
@@ -323,6 +339,8 @@ func (s *Server) Start() error {
 // Shutdown gracefully stops the HTTP server, waiting up to ctx deadline for
 // active connections to finish.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.stopOnce.Do(func() { close(s.stopping) })
+
 	s.mu.RLock()
 	httpSrv := s.httpSrv
 	loopbackSrv := s.loopbackSrv

@@ -1,0 +1,5 @@
+proxies:
+  - {name: "Узел anytls", type: anytls, server: node4.example, port: 443, password: pass-4, sni: cdn.example, alpn: [h2]}
+  - {name: "Узел ssh", type: ssh, server: node5.example, port: 22, username: user-5, password: pass-5}
+  - {name: "Без адреса", type: vless, uuid: 55555555-5555-4555-8555-555555555555}
+  - {name: "REJECT", type: reject}
