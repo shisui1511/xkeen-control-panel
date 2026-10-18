@@ -44,9 +44,10 @@
 
   // Длительность выезда и ухода шторки, мс
   const SHEET_MOTION_MS = 200;
-  // Движение только у оверлея; в колонке на ПК панель появляется без анимации
+  // Svelte читает параметры перехода в момент появления или ухода элемента, поэтому при
+  // смене режима уход ветки оверлея видит уже новый isOverlay и длится 0: шторка и бэкдроп
+  // исчезают сразу и не гаснут поверх колонки ПК. Колонка не анимируется вовсе (panel(false)).
   let sheetMotionMs = $derived(isOverlay && !prefersReducedMotion.current ? SHEET_MOTION_MS : 0);
-  let backdropMotionMs = $derived(prefersReducedMotion.current ? 0 : SHEET_MOTION_MS);
   // Шторка выезжает со своей стороны экрана
   let sheetOffset = $derived(side === 'left' ? '-100%' : '100%');
 
@@ -108,18 +109,23 @@
     onClose?.();
   }
 
+  // Поверхности диалогов, которым принадлежит Escape над шторкой
+  const MODAL_SURFACES = '.modal-backdrop, .confirm-modal-backdrop';
+
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && isOverlay && show) {
-      if (
-        typeof document !== 'undefined' &&
-        document.querySelector('.modal-backdrop, .confirm-modal-backdrop, .confirm-dialog-backdrop')
-      ) {
-        return;
-      }
-      e.stopPropagation();
-      e.preventDefault();
-      handleClose();
-    }
+    if (e.key !== 'Escape' || !isOverlay || !show) return;
+    // Escape уже обработал другой слой
+    if (e.defaultPrevented) return;
+    // Путь события фиксируется при отправке. Svelte делегирует keydown на корень и document и
+    // применяет закрытие модалки в microtask до вызова слушателя window; у Modal нет анимации
+    // ухода, поэтому текущий DOM модалку уже не содержит, а путь события её помнит.
+    const fromModal = e
+      .composedPath()
+      .some((node) => node instanceof Element && node.matches(MODAL_SURFACES));
+    if (fromModal || document.querySelector(MODAL_SURFACES)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    handleClose();
   }
 
   function startResize(e: PointerEvent) {
@@ -249,7 +255,7 @@
   });
 </script>
 
-{#snippet panel()}
+{#snippet panel(animated: boolean)}
   <div
     class="responsive-sidebar-panel file-tree-pane {containerClass}"
     class:overlay={isOverlay}
@@ -265,8 +271,18 @@
       isSwiping = false;
     }}
     style={isOverlay ? undefined : `width: ${panelWidth}px;`}
-    in:fly={{ x: sheetOffset, opacity: 1, duration: sheetMotionMs, easing: cubicOut }}
-    out:fly={{ x: sheetOffset, opacity: 1, duration: sheetMotionMs, easing: cubicIn }}
+    in:fly={{
+      x: sheetOffset,
+      opacity: 1,
+      duration: animated ? sheetMotionMs : 0,
+      easing: cubicOut
+    }}
+    out:fly={{
+      x: sheetOffset,
+      opacity: 1,
+      duration: animated ? sheetMotionMs : 0,
+      easing: cubicIn
+    }}
   >
     {#if isOverlay}
       <div class="responsive-sidebar-overlay-header">
@@ -315,10 +331,10 @@
       aria-label={$t('app.close')}
       tabindex="-1"
       onclick={handleClose}
-      in:fade={{ duration: backdropMotionMs, easing: cubicOut }}
-      out:fade={{ duration: backdropMotionMs, easing: cubicIn }}
+      in:fade={{ duration: sheetMotionMs, easing: cubicOut }}
+      out:fade={{ duration: sheetMotionMs, easing: cubicIn }}
     ></button>
-    {@render panel()}
+    {@render panel(true)}
   </div>
 {:else if show}
   {#if side === 'right'}
@@ -332,7 +348,7 @@
     ></button>
   {/if}
 
-  {@render panel()}
+  {@render panel(false)}
 
   {#if side === 'left'}
     <button
