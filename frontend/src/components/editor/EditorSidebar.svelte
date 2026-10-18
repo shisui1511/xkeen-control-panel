@@ -14,6 +14,8 @@
     xrayFiles: ConfigFileInfo[];
     mihomoFiles: ConfigFileInfo[];
     selectedFile: string;
+    /** Путь файла, который сейчас открывается: строка списка показывает занятость */
+    loadingPath?: string | null;
     activeKernel?: string;
     /** Узкий экран: панель выезжает листом поверх редактора, а не занимает колонку */
     overlay?: boolean;
@@ -32,6 +34,7 @@
     xrayFiles,
     mihomoFiles,
     selectedFile,
+    loadingPath = null,
     activeKernel = '',
     overlay = false,
     onClose,
@@ -59,6 +62,7 @@
     {xrayFiles}
     {mihomoFiles}
     {selectedFile}
+    {loadingPath}
     {activeKernel}
     {onLoadFile}
     {onCreateFile}

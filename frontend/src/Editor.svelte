@@ -470,8 +470,10 @@
         }
       }
 
-      await loadBackups(path);
+      // Вкладка уже показана: список копий догружается отдельно и не задерживает
+      // закрытие шторки (D-16, G-142-4-WR02).
       tabs = [...tabs];
+      void loadBackups(path);
     } catch (e: any) {
       showToast('error', $t('editor.file_load_error') + ': ' + (e?.message || e));
       loading = false;
@@ -642,8 +644,10 @@
         }
       }
 
-      await loadBackups(path);
+      // D-16, G-142-4-WR02: файл уже показан во вкладке; список копий догружается
+      // отдельно и не задерживает закрытие шторки.
       tabs = [...tabs];
+      void loadBackups(path);
       return true;
     } catch (e: any) {
       console.error('loadFile error:', e);
@@ -656,7 +660,10 @@
 
   async function loadBackups(path: string) {
     try {
-      backups = await fetchBackupsList(path);
+      const list = await fetchBackupsList(path);
+      // Список копий грузится в фоне: ответ для уже не выбранного файла
+      // не перетирает список текущего (G-142-4-WR02).
+      if (path === selectedFile) backups = list;
     } catch (e: any) {
       if (e?.status === 401) return;
     }
@@ -1364,6 +1371,7 @@
         {selectedFile}
         activeKernel={$activeKernelName}
         overlay={isNarrow}
+        {loadingPath}
         onClose={() => (showSidebar = false)}
         onLoadFile={async (path, isPreviewClick) => {
           const opened = await loadFile(path, isPreviewClick);
