@@ -475,6 +475,110 @@ test('editor-mobile sheet-pick-unsaved vp:390', async ({ page }) => {
   await guard.assertClean();
 });
 
+test('editor-mobile sheet-pick-busy vp:390', async ({ page }) => {
+  test.setTimeout(90_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_PHONE);
+  await openSheetFromEmpty(page);
+
+  // G-142-4-WR02: шторка закрывается без ожидания списка копий, строка сразу помечена занятой
+  const r = await observeSheetPick(page, [fx().name], fx());
+  expect(r.closedSeq, 'шторка не закрылась после выбора файла').not.toBeNull();
+  expect(r.backupsEnd, 'ответ списка копий файла не пойман').not.toBeNull();
+  expect(
+    r.closedAt!,
+    `G-142-4-WR02: шторка закрылась только после ответа списка копий: закрытие ${r.closedAt} мс, конец ответа ${r.backupsEnd} мс`
+  ).toBeLessThan(r.backupsEnd!);
+  expect(r.tabSeq, 'файл не показан во вкладке').not.toBeNull();
+  expect(
+    r.tabSeq!,
+    `D-16: шторка закрылась раньше, чем файл показан: шаг закрытия ${r.closedSeq}, шаг вкладки ${r.tabSeq}`
+  ).toBeLessThanOrEqual(r.closedSeq!);
+  expect(r.busySeq, 'строка файла не получила aria-busy во время чтения').not.toBeNull();
+  expect(
+    r.busySeq!,
+    `aria-busy появился не раньше вкладки: шаг занятости ${r.busySeq}, шаг вкладки ${r.tabSeq}`
+  ).toBeLessThan(r.tabSeq!);
+
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(
+    page.locator('.editor-tab.active', {
+      has: page.locator(`.tab-name[title="${fx().name}"]`)
+    })
+  ).toHaveCount(1, { timeout: T.action });
+  await expect(page.locator('.cm-content').first()).toBeVisible({ timeout: T.page });
+
+  // список копий догрузился после закрытия: число в кнопке Backups совпадает с API
+  const res = await rawRequest(
+    page,
+    'GET',
+    `/api/config/backups?path=${encodeURIComponent(fx().path)}`
+  );
+  expectOk(res, 'backups');
+  const n = asArray(res.text).length;
+  expect(n, `копий файла ${n}`).toBeGreaterThanOrEqual(2);
+  await expect(page.locator('.backups-toggle-btn').first()).toContainText(`(${n})`, {
+    timeout: T.page
+  });
+
+  // занятость снята, строка открытого файла подсвечена выбором
+  await openSheetFromToolbar(page);
+  await expect(
+    page.locator(SHEET).locator('button.file-row[aria-busy="true"]'),
+    'занятость строки не снята после загрузки'
+  ).toHaveCount(0);
+  await expect(
+    page.locator(SHEET).locator(`.file-row.active:has(.fr-name[title="${fx().name}"])`)
+  ).toHaveCount(1, { timeout: T.action });
+  await page.locator(CLOSE_BTN).click();
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+
+  await expectNoHorizontalScroll(page, 'файл открыт');
+  await guard.assertClean();
+});
+
+test('editor-mobile sheet-pick-twice vp:390', async ({ page }) => {
+  test.setTimeout(90_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_PHONE);
+  await openSheetFromEmpty(page);
+
+  // G-142-4-WR02: два нажатия в одной задаче; первое ставит чтение, второе приходится на его время
+  const r = await observeSheetPick(page, [fx().name, altFx().name], altFx());
+
+  // последний выбор побеждает: открыт второй файл, первого во вкладках нет
+  await expect(
+    page.locator('.editor-tab.active', {
+      has: page.locator(`.tab-name[title="${altFx().name}"]`)
+    }),
+    'G-142-4-WR02: второе нажатие потеряно — открыт не последний выбранный файл'
+  ).toHaveCount(1, { timeout: T.action });
+  await expect(
+    page.locator('.editor-tab', { has: page.locator(`.tab-name[title="${fx().name}"]`) }),
+    'первый файл открыт, хотя последним выбран второй'
+  ).toHaveCount(0);
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
+
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+  await expect(page.locator(TOGGLE).first()).toHaveAttribute('aria-expanded', 'false');
+
+  expect(r.busySeq, 'строка второго файла не получила aria-busy после нажатия').not.toBeNull();
+  expect(r.tabSeq, 'второй файл не показан во вкладке').not.toBeNull();
+  expect(
+    r.busySeq!,
+    `aria-busy появился не раньше вкладки: шаг занятости ${r.busySeq}, шаг вкладки ${r.tabSeq}`
+  ).toBeLessThan(r.tabSeq!);
+  expect(r.closedSeq, 'шторка не закрылась после выбора файла').not.toBeNull();
+  expect(
+    r.tabSeq!,
+    `D-16: шторка закрылась раньше, чем показан последний выбранный файл: шаг закрытия ${r.closedSeq}, шаг вкладки ${r.tabSeq}`
+  ).toBeLessThanOrEqual(r.closedSeq!);
+
+  await expectNoHorizontalScroll(page, 'второй файл открыт');
+  await guard.assertClean();
+});
+
 test('editor-mobile sheet-escape-modal vp:390', async ({ page }) => {
   test.setTimeout(90_000 * RT.slow);
   const dir = fx().dir;
@@ -576,6 +680,111 @@ async function observePickOrder(
         row.click();
       }),
     { sheetSel: SHEET, fileName, capMs: T.page }
+  );
+}
+
+/** Трасса выбора файла в шторке: порядок изменений DOM и метки времени одной шкалы. */
+interface PickTrace {
+  /** номер вызова наблюдателя, на котором строка цели получила aria-busy="true" */
+  busySeq: number | null;
+  /** номер вызова, на котором появилась вкладка цели */
+  tabSeq: number | null;
+  /** номер вызова, на котором шторка закрылась (ушла из документа или стала inert) */
+  closedSeq: number | null;
+  /** performance.now() в момент закрытия шторки */
+  closedAt: number | null;
+  /** responseEnd запроса списка копий цели (performance.now()-шкала) */
+  backupsEnd: number | null;
+}
+
+/**
+ * Нажимает строки `clicks` в открытой шторке по порядку и фиксирует трассу выбора цели `target`:
+ * aria-busy у её строки, появление вкладки, закрытие шторки и конец ответа списка копий.
+ * Первое нажатие синхронно ставит загрузку, поэтому второе в той же задаче всегда приходится на
+ * время чтения при любой скорости сети; важен порядок изменений DOM и метки времени одной шкалы,
+ * а не кадры. Из страницы возвращаются только номера шагов и числа.
+ */
+async function observeSheetPick(
+  page: Page,
+  clicks: string[],
+  target: { name: string; path: string }
+): Promise<PickTrace> {
+  return page.evaluate(
+    ({ sheetSel, clicks, targetName, backupsUrl, capMs }) =>
+      new Promise<PickTrace>((resolve, reject) => {
+        const sheet = document.querySelector<HTMLElement>(sheetSel);
+        const rowOf = (name: string): HTMLButtonElement | undefined =>
+          Array.from(sheet?.querySelectorAll<HTMLButtonElement>('button.file-row') ?? [])
+            .filter((b) => b.querySelector(`.fr-name[title="${name}"]`) !== null)
+            .shift();
+        const rows = clicks.map(rowOf);
+        const targetRow = rowOf(targetName);
+        if (!sheet || !targetRow || rows.some((r) => r === undefined)) {
+          reject(new Error(`${sheetSel} button.file-row .fr-name[title]: нужной строки нет`));
+          return;
+        }
+        let seq = 0;
+        const trace: PickTrace = {
+          busySeq: null,
+          tabSeq: null,
+          closedSeq: null,
+          closedAt: null,
+          backupsEnd: null
+        };
+        const finish = () => {
+          observer.disconnect();
+          perf.disconnect();
+          clearTimeout(timer);
+          resolve(trace);
+        };
+        const check = () => {
+          if (trace.tabSeq !== null && trace.closedSeq !== null && trace.backupsEnd !== null) {
+            finish();
+          }
+        };
+        const observer = new MutationObserver(() => {
+          seq++;
+          if (trace.busySeq === null && targetRow.getAttribute('aria-busy') === 'true') {
+            trace.busySeq = seq;
+          }
+          if (
+            trace.tabSeq === null &&
+            document.querySelector(`.editor-tab .tab-name[title="${targetName}"]`) !== null
+          ) {
+            trace.tabSeq = seq;
+          }
+          if (trace.closedSeq === null && (!sheet.isConnected || sheet.inert)) {
+            trace.closedSeq = seq;
+            trace.closedAt = performance.now();
+          }
+          check();
+        });
+        const perf = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            if (trace.backupsEnd === null && entry.name.includes(backupsUrl)) {
+              trace.backupsEnd = (entry as PerformanceResourceTiming).responseEnd;
+            }
+          }
+          check();
+        });
+        const timer = setTimeout(finish, capMs);
+        observer.observe(document.body, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['inert', 'aria-busy']
+        });
+        perf.observe({ type: 'resource' });
+        // все нажатия в одной синхронной задаче
+        for (const row of rows) row?.click();
+      }),
+    {
+      sheetSel: SHEET,
+      clicks,
+      targetName: target.name,
+      backupsUrl: '/api/config/backups?path=' + encodeURIComponent(target.path),
+      capMs: T.page
+    }
   );
 }
 
