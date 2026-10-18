@@ -515,8 +515,12 @@
     }
   }
 
-  async function loadFile(path: string, isPreviewClick = true) {
-    if (!path) return;
+  /**
+   * Открывает файл во вкладке. Возвращает true, когда файл показан во вкладке; false при пустом пути,
+   * занятости загрузки, отмене подтверждения и ошибке чтения.
+   */
+  async function loadFile(path: string, isPreviewClick = true): Promise<boolean> {
+    if (!path) return false;
     saveError = false;
 
     const existingTab = tabs.find((t) => t.path === path);
@@ -526,17 +530,17 @@
         tabs = [...tabs];
       }
       await switchTab(path);
-      return;
+      return true;
     }
 
     if (loading && loadingPath === path) {
       if (!isPreviewClick) {
         pendingPins.add(path);
       }
-      return;
+      return false;
     }
 
-    if (loading) return;
+    if (loading) return false;
 
     loading = true;
     loadingPath = path;
@@ -571,7 +575,7 @@
             if (!(await confirmUnsaved())) {
               loading = false;
               loadingPath = null;
-              return;
+              return false;
             }
             localStorage.removeItem('editor.draft.' + previewTab.path);
           }
@@ -640,11 +644,13 @@
 
       await loadBackups(path);
       tabs = [...tabs];
+      return true;
     } catch (e: any) {
       console.error('loadFile error:', e);
       showToast('error', $t('editor.file_load_error') + ': ' + (e?.message || e));
       loading = false;
       loadingPath = null;
+      return false;
     }
   }
 
@@ -1359,9 +1365,11 @@
         activeKernel={$activeKernelName}
         overlay={isNarrow}
         onClose={() => (showSidebar = false)}
-        onLoadFile={(path, isPreviewClick) => {
-          loadFile(path, isPreviewClick);
-          if (isNarrow) showSidebar = false;
+        onLoadFile={async (path, isPreviewClick) => {
+          const opened = await loadFile(path, isPreviewClick);
+          // D-16: шторка закрывается только после того, как файл показан во вкладке; при отмене
+          // подтверждения, занятой загрузке и ошибке чтения она остаётся открытой
+          if (opened && isNarrow) showSidebar = false;
         }}
         onCreateFile={() => {
           showCreateModal = true;

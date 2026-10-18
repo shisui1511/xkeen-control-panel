@@ -40,7 +40,14 @@ interface Fixture {
   previous: string;
 }
 
+/** Второй тестовый файл: пустой, без копий; нужен сценарию выбора файла при несохранённых правках. */
+interface AltFixture {
+  name: string;
+  path: string;
+}
+
 let fixture: Fixture | null = null;
+let altFixture: AltFixture | null = null;
 
 /** Каталог и расширение тестового файла: каталог активного ядра, его проверка точно установлена. */
 function fixtureDir(): { dir: string; ext: string } | null {
@@ -118,6 +125,25 @@ async function createFixture(page: Page, dir: string, ext: string): Promise<Fixt
   return { dir, name, path, current, previous };
 }
 
+/** Второй тестовый файл с другим именем, чем `taken`; содержимое задаёт сам create. */
+async function createAltFixture(
+  page: Page,
+  dir: string,
+  ext: string,
+  taken: string
+): Promise<AltFixture> {
+  let name = taken;
+  while (name === taken) {
+    name = `${FIXTURE_PREFIX}${randomInt(100000, 1000000)}${ext}`;
+  }
+  const path = `${dir}/${name}`;
+  expectOk(
+    await rawRequest(page, 'POST', `/api/config/create?path=${encodeURIComponent(path)}`),
+    'create alt'
+  );
+  return { name, path };
+}
+
 /** Удаляет тестовые файлы с префиксом вместе со всеми их резервными копиями. */
 async function sweepFixtures(page: Page, dir: string): Promise<void> {
   const list = await rawRequest(page, 'GET', `/api/config/list?dir=${encodeURIComponent(dir)}`);
@@ -160,6 +186,7 @@ test.beforeAll(async ({ browser }) => {
   await withPanel(browser, async (page) => {
     await sweepFixtures(page, target.dir);
     fixture = await createFixture(page, target.dir, target.ext);
+    altFixture = await createAltFixture(page, target.dir, target.ext, fixture.name);
   });
 });
 
@@ -168,12 +195,18 @@ test.afterAll(async ({ browser }) => {
   const target = fixtureDir();
   if (!target) return;
   fixture = null;
+  altFixture = null;
   await withPanel(browser, (page) => sweepFixtures(page, target.dir));
 });
 
 function fx(): Fixture {
   if (!fixture) throw new Error('тестовый файл не создан');
   return fixture;
+}
+
+function altFx(): AltFixture {
+  if (!altFixture) throw new Error('второй тестовый файл не создан');
+  return altFixture;
 }
 
 /** Открывает Редактор в заданном окне и теме и дожидается заголовка страницы. */
@@ -191,11 +224,25 @@ async function gotoEditor(page: Page, vp: Viewport, theme: Theme = 'light'): Pro
   );
 }
 
-/** Элемент видим целиком внутри окна браузера. */
-async function expectInside(page: Page, loc: Locator, what: string): Promise<void> {
+/** Рамка элемента; без неё падает с понятным сообщением, а не с TypeError на разыменовании. */
+async function boxOf(
+  loc: Locator,
+  what: string
+): Promise<{ x: number; y: number; width: number; height: number }> {
   const b = await loc.boundingBox();
   expect(b, `${what}: нет рамки`).not.toBeNull();
-  const box = b!;
+  if (!b) throw new Error(`${what}: нет рамки`);
+  return b;
+}
+
+/** Значение document.body.style.overflow: блокировка прокрутки страницы под шторкой (D-14). */
+async function bodyOverflow(page: Page): Promise<string> {
+  return page.evaluate(() => document.body.style.overflow);
+}
+
+/** Элемент видим целиком внутри окна браузера. */
+async function expectInside(page: Page, loc: Locator, what: string): Promise<void> {
+  const box = await boxOf(loc, what);
   const vp = page.viewportSize()!;
   expect(box.width, `${what}: нулевая ширина`).toBeGreaterThan(0);
   expect(box.height, `${what}: нулевая высота`).toBeGreaterThan(0);
@@ -279,8 +326,7 @@ async function expectSheetGeometry(page: Page, vp: Viewport): Promise<void> {
   expect(info.position, 'шторка: position').toBe('fixed');
   expect(info.inMain, 'шторка внутри .main-content, а не в body').toBe(false);
 
-  const box = (await sheet.boundingBox())!;
-  expect(box, 'шторка: нет рамки').not.toBeNull();
+  const box = await boxOf(sheet, 'шторка');
   expect(Math.abs(box.y), `шторка: верхний край ${box.y}`).toBeLessThanOrEqual(1);
   expect(
     Math.abs(box.height - vp.height),
@@ -292,8 +338,7 @@ async function expectSheetGeometry(page: Page, vp: Viewport): Promise<void> {
     `шторка: ширина ${box.width}, ожидалась ${want}`
   ).toBeLessThanOrEqual(1);
 
-  const bd = (await page.locator(BACKDROP).boundingBox())!;
-  expect(bd, 'бэкдроп: нет рамки').not.toBeNull();
+  const bd = await boxOf(page.locator(BACKDROP), 'бэкдроп');
   expect(Math.abs(bd.x), `бэкдроп: левый край ${bd.x}`).toBeLessThanOrEqual(1);
   expect(Math.abs(bd.y), `бэкдроп: верхний край ${bd.y}`).toBeLessThanOrEqual(1);
   expect(Math.abs(bd.width - vp.width), `бэкдроп: ширина ${bd.width}`).toBeLessThanOrEqual(1);
@@ -326,13 +371,17 @@ test('editor-mobile sheet-close vp:390', async ({ page }) => {
   await openFixtureFile(page);
 
   const toggle = page.locator(TOGGLE).first();
-  const mainBefore = (await page.locator(MAIN_CARD).first().boundingBox())!;
-  expect(mainBefore, 'карточка кода: нет рамки').not.toBeNull();
+  const mainBefore = await boxOf(page.locator(MAIN_CARD).first(), 'карточка кода');
+  const overflow0 = await bodyOverflow(page);
+  expect(overflow0, 'прокрутка body заблокирована до открытия шторки').not.toBe('hidden');
 
   // открытая шторка отражается в aria-expanded и не сжимает карточку кода
   await openSheetFromToolbar(page);
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  const mainOpen = (await page.locator(MAIN_CARD).first().boundingBox())!;
+  expect(await bodyOverflow(page), 'шторка открыта, прокрутка body не заблокирована (D-14)').toBe(
+    'hidden'
+  );
+  const mainOpen = await boxOf(page.locator(MAIN_CARD).first(), 'карточка кода при шторке');
   expect(
     Math.abs(mainOpen.width - mainBefore.width),
     `ширина карточки кода изменилась: ${mainBefore.width} → ${mainOpen.width}`
@@ -341,29 +390,88 @@ test('editor-mobile sheet-close vp:390', async ({ page }) => {
 
   // кнопка «Закрыть»: зона не меньше 44×44, фокус возвращается на кнопку шторки
   const close = page.locator(CLOSE_BTN);
-  const cb = (await close.boundingBox())!;
-  expect(cb, 'кнопка «Закрыть»: нет рамки').not.toBeNull();
+  const cb = await boxOf(close, 'кнопка «Закрыть»');
   expect(cb.width, `кнопка «Закрыть»: ширина ${cb.width}`).toBeGreaterThanOrEqual(43.5);
   expect(cb.height, `кнопка «Закрыть»: высота ${cb.height}`).toBeGreaterThanOrEqual(43.5);
   await close.click();
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(toggle).toBeFocused();
+  expect(await bodyOverflow(page), 'после «Закрыть» прокрутка body не восстановлена').toBe(
+    overflow0
+  );
 
   // клавиатура: Enter открывает, Escape закрывает, фокус снова на кнопке
   await toggle.focus();
   await page.keyboard.press('Enter');
   await expect(page.locator(SHEET)).toBeVisible({ timeout: T.action });
   await waitSheetSettled(page);
+  expect(await bodyOverflow(page), 'открытие по Enter: прокрутка body не заблокирована').toBe(
+    'hidden'
+  );
   await page.keyboard.press('Escape');
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
   await expect(toggle).toBeFocused();
+  expect(await bodyOverflow(page), 'после Escape прокрутка body не восстановлена').toBe(overflow0);
 
   // нажатие мышью по фону правее панели шириной 320 px
   await openSheetFromToolbar(page);
   await page.mouse.click(VP_PHONE.width - 16, VP_PHONE.height / 2);
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  expect(await bodyOverflow(page), 'после нажатия по фону прокрутка body не восстановлена').toBe(
+    overflow0
+  );
 
+  await guard.assertClean();
+});
+
+test('editor-mobile sheet-pick-unsaved vp:390', async ({ page }) => {
+  test.setTimeout(90_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_PHONE);
+  await openFixtureFile(page);
+
+  // правка закрепляет вкладку: превью-вкладка с несохранёнными правками недостижима
+  await page.locator('.cm-content').first().click({ timeout: T.action });
+  await page.keyboard.press('Control+End');
+  await page.keyboard.insertText(' ');
+  const firstTab = page.locator('.editor-tab', {
+    has: page.locator(`.tab-name[title="${fx().name}"]`)
+  });
+  await expect(firstTab.locator('.tab-dirty-dot')).toBeVisible({ timeout: T.action });
+  await expect(
+    firstTab,
+    'правка не закрепила вкладку — подтверждение замены превью стало достижимым, сценарий нужно расширить'
+  ).not.toHaveClass(/\bpreview\b/);
+
+  // D-16: шторка закрывается только после того, как второй файл показан во вкладке
+  await openSheetFromToolbar(page);
+  const order = await observePickOrder(page, altFx().name);
+  expect(order.tabSeq, 'второй файл не показан во вкладке').not.toBeNull();
+  expect(
+    order.closedSeq,
+    'шторка не закрылась после выбора файла — возможно, появилось подтверждение'
+  ).not.toBeNull();
+  expect(
+    order.tabSeq!,
+    `D-16: шторка закрылась раньше, чем файл показан: шаг закрытия ${order.closedSeq}, шаг вкладки ${order.tabSeq}`
+  ).toBeLessThanOrEqual(order.closedSeq!);
+
+  // правки не потеряны: первая вкладка осталась с точкой, второй файл открыт в своей вкладке
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+  await expect(page.locator('.editor-tab')).toHaveCount(2, { timeout: T.action });
+  await expect(firstTab.locator('.tab-dirty-dot')).toBeVisible({ timeout: T.action });
+  await expect(
+    page.locator('.editor-tab.active', {
+      has: page.locator(`.tab-name[title="${altFx().name}"]`)
+    })
+  ).toHaveCount(1, { timeout: T.action });
+  await expect(page.locator(TOGGLE).first()).toHaveAttribute('aria-expanded', 'false');
+
+  // «Сохранить» не нажималось: файл на диске прежний
+  expect(await readFixtureOnDisk(page), 'правка попала на диск').toBe(fx().current);
+  await expectNoHorizontalScroll(page, 'второй файл открыт');
   await guard.assertClean();
 });
 
@@ -390,7 +498,8 @@ test('editor-mobile sheet-escape-modal vp:390', async ({ page }) => {
   // первый Escape закрывает только модалку; второй не нажимаем, пока она не ушла полностью
   await page.keyboard.press('Escape');
   await expect(page.locator('.modal-backdrop')).toHaveCount(0, { timeout: T.action });
-  await expect(page.locator(SHEET)).toBeVisible();
+  // шторка в документе и не inert: уходящая шторка (анимация 200 мс) не считается оставшейся
+  await expectSheetStays(page, 'первый Escape');
 
   // второй Escape закрывает шторку
   await page.keyboard.press('Escape');
@@ -412,6 +521,63 @@ test('editor-mobile sheet vp:768', async ({ page }) => {
 
   await guard.assertClean();
 });
+
+/**
+ * Нажимает строку файла в открытой шторке и фиксирует порядок изменений DOM: номер вызова
+ * наблюдателя, на котором появилась вкладка файла, и номер, на котором шторка закрылась (ушла из
+ * документа или стала inert). Важен порядок изменений, а не кадры: закрытие шторки до ответа
+ * сервера видно при любой скорости сети.
+ */
+async function observePickOrder(
+  page: Page,
+  fileName: string
+): Promise<{ tabSeq: number | null; closedSeq: number | null }> {
+  return page.evaluate(
+    ({ sheetSel, fileName, capMs }) =>
+      new Promise<{ tabSeq: number | null; closedSeq: number | null }>((resolve, reject) => {
+        const sheet = document.querySelector<HTMLElement>(sheetSel);
+        const row = Array.from(sheet?.querySelectorAll<HTMLButtonElement>('button.file-row') ?? [])
+          .filter((b) => b.querySelector(`.fr-name[title="${fileName}"]`) !== null)
+          .at(0);
+        if (!sheet || !row) {
+          reject(
+            new Error(`${sheetSel} button.file-row .fr-name[title="${fileName}"]: строки нет`)
+          );
+          return;
+        }
+        let seq = 0;
+        let tabSeq: number | null = null;
+        let closedSeq: number | null = null;
+        const finish = () => {
+          observer.disconnect();
+          clearTimeout(timer);
+          resolve({ tabSeq, closedSeq });
+        };
+        const observer = new MutationObserver(() => {
+          seq++;
+          if (
+            tabSeq === null &&
+            document.querySelector(`.editor-tab .tab-name[title="${fileName}"]`) !== null
+          ) {
+            tabSeq = seq;
+          }
+          if (closedSeq === null && (!sheet.isConnected || sheet.inert)) {
+            closedSeq = seq;
+          }
+          if (tabSeq !== null && closedSeq !== null) finish();
+        });
+        const timer = setTimeout(finish, capMs);
+        observer.observe(document.body, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['inert']
+        });
+        row.click();
+      }),
+    { sheetSel: SHEET, fileName, capMs: T.page }
+  );
+}
 
 interface Point {
   x: number;
@@ -447,7 +613,11 @@ test.describe('touch', () => {
     const guard = attachConsoleGuard(page);
     await gotoEditor(page, VP_PHONE);
     await openFixtureFile(page);
+    const overflow0 = await bodyOverflow(page);
     await openSheetFromToolbar(page);
+    expect(await bodyOverflow(page), 'шторка открыта, прокрутка body не заблокирована').toBe(
+      'hidden'
+    );
 
     const cdp = await page.context().newCDPSession(page);
     const tabs = page.locator('.editor-tab');
@@ -457,21 +627,34 @@ test.describe('touch', () => {
     await touchDrag(cdp, { x: 150, y: 600 }, { x: 160, y: 300 });
     await expectSheetStays(page, 'вертикальный жест');
     expect(await tabs.count(), 'вертикальный жест открыл файл').toBe(tabsBefore);
+    expect(await bodyOverflow(page), 'вертикальный жест снял блокировку прокрутки body').toBe(
+      'hidden'
+    );
 
     // диагональный жест (dx -70, dy +80: |dx| < 1.5·|dy|) шторку не закрывает
     await touchDrag(cdp, { x: 200, y: 300 }, { x: 130, y: 380 });
     await expectSheetStays(page, 'диагональный жест');
     expect(await tabs.count(), 'диагональный жест открыл файл').toBe(tabsBefore);
+    expect(await bodyOverflow(page), 'диагональный жест снял блокировку прокрутки body').toBe(
+      'hidden'
+    );
 
     // горизонтальный свайп влево (dx -120, dy 5) закрывает
     await touchDrag(cdp, { x: 250, y: 400 }, { x: 130, y: 405 });
     await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+    expect(await bodyOverflow(page), 'после свайпа влево прокрутка body не восстановлена').toBe(
+      overflow0
+    );
 
     // касание по фону правее панели закрывает
     await openSheetFromToolbar(page);
     await page.touchscreen.tap(VP_PHONE.width - 16, VP_PHONE.height / 2);
     await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+    expect(await bodyOverflow(page), 'после касания по фону прокрутка body не восстановлена').toBe(
+      overflow0
+    );
 
+    await cdp.detach();
     await guard.assertClean();
   });
 });
@@ -490,13 +673,12 @@ test('editor-mobile desktop-column vp:1280', async ({ page }) => {
   const splitter = page.locator('.editor-splitter').first();
   await expect(splitter).toBeVisible();
 
-  const w0 = (await pane.boundingBox())!.width;
+  const w0 = (await boxOf(pane, 'колонка файлов')).width;
   expect(w0, `ширина колонки ${w0}`).toBeGreaterThanOrEqual(160);
   expect(w0, `ширина колонки ${w0}`).toBeLessThanOrEqual(450);
 
   // сплиттер тянет колонку: +80 px, но не шире 450 и не шире 42 % рабочей области
-  const sb = (await splitter.boundingBox())!;
-  expect(sb, 'сплиттер: нет рамки').not.toBeNull();
+  const sb = await boxOf(splitter, 'сплиттер');
   const cx = sb.x + sb.width / 2;
   const cy = sb.y + sb.height / 2;
   await page.mouse.move(cx, cy);
@@ -506,12 +688,12 @@ test('editor-mobile desktop-column vp:1280', async ({ page }) => {
   const cap = await page.locator('.editor-workspace').evaluate((el) => el.clientWidth * 0.42);
   const want = Math.min(w0 + 80, 450, cap);
   await expect
-    .poll(async () => Math.abs((await pane.boundingBox())!.width - want), {
+    .poll(async () => Math.abs(((await pane.boundingBox())?.width ?? Number.NaN) - want), {
       message: `ширина колонки после перетаскивания, ожидалась ${want}`,
       timeout: T.action
     })
     .toBeLessThanOrEqual(2);
-  const w1 = (await pane.boundingBox())!.width;
+  const w1 = (await boxOf(pane, 'колонка файлов после перетаскивания')).width;
   await guard.assertClean();
 
   // ширина сохраняется: вторая страница того же контекста делит localStorage
@@ -521,7 +703,7 @@ test('editor-mobile desktop-column vp:1280', async ({ page }) => {
   const pane2 = page2.locator('.file-tree-pane').first();
   await expect(pane2).toBeVisible({ timeout: T.page });
   expect(
-    Math.abs((await pane2.boundingBox())!.width - w1),
+    Math.abs((await boxOf(pane2, 'колонка файлов на второй странице')).width - w1),
     `ширина колонки не сохранилась: было ${w1}`
   ).toBeLessThanOrEqual(1);
 
@@ -532,8 +714,8 @@ test('editor-mobile desktop-column vp:1280', async ({ page }) => {
     timeout: T.page
   });
   await expect(page2.locator('.cm-content').first()).toBeVisible({ timeout: T.page });
-  const paneBox = (await pane2.boundingBox())!;
-  const cardBox = (await page2.locator(MAIN_CARD).first().boundingBox())!;
+  const paneBox = await boxOf(pane2, 'колонка файлов рядом с кодом');
+  const cardBox = await boxOf(page2.locator(MAIN_CARD).first(), 'карточка кода на ПК');
   expect(
     paneBox.x + paneBox.width,
     `колонка заходит под карточку кода: правый край ${paneBox.x + paneBox.width}, левый край карточки ${cardBox.x}`
@@ -543,10 +725,37 @@ test('editor-mobile desktop-column vp:1280', async ({ page }) => {
   // кнопка тулбара скрывает и показывает колонку без оверлея
   const toggle = page2.locator(TOGGLE).first();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  await toggle.click();
+  // нажатие и один кадр внутри страницы: на ПК колонка исчезает и появляется без анимации
+  const clickToggle = () =>
+    page2.evaluate(
+      (sel) =>
+        new Promise<{ panes: number; animations: number }>((resolve, reject) => {
+          const btn = document.querySelector<HTMLElement>(sel);
+          if (!btn) {
+            reject(new Error(`${sel}: кнопки нет`));
+            return;
+          }
+          btn.click();
+          requestAnimationFrame(() => {
+            const pane = document.querySelector('.file-tree-pane');
+            resolve({
+              panes: document.querySelectorAll('.file-tree-pane').length,
+              animations: pane ? pane.getAnimations().length : 0
+            });
+          });
+        }),
+      TOGGLE
+    );
+  const hidden = await clickToggle();
+  expect(
+    hidden.panes,
+    'колонка ПК уходит с анимацией: через кадр после нажатия она ещё в документе'
+  ).toBe(0);
   await expect(page2.locator('.file-tree-pane')).toHaveCount(0, { timeout: T.action });
   await expect(page2.locator(BACKDROP)).toHaveCount(0);
-  await toggle.click();
+  const shown = await clickToggle();
+  expect(shown.panes, 'колонка ПК не появилась через кадр после нажатия').toBeGreaterThanOrEqual(1);
+  expect(shown.animations, 'колонка ПК появляется с анимацией').toBe(0);
   await expect(page2.locator('.file-tree-pane').first()).toBeVisible({ timeout: T.action });
   await expect(page2.locator('.file-tree-pane').first()).not.toHaveClass(/\boverlay\b/);
 
@@ -628,7 +837,7 @@ for (const theme of THEMES) {
     const bar = page.locator('.editor-statusbar').first();
     await expect(bar).toBeVisible({ timeout: T.page });
     await expectInside(page, bar, 'статус-бар');
-    const barBox = (await bar.boundingBox())!;
+    const barBox = await boxOf(bar, 'статус-бар');
     expect(
       barBox.height,
       `статус-бар не в одну строку: высота ${barBox.height}`
@@ -676,8 +885,7 @@ async function readFixtureOnDisk(page: Page): Promise<string> {
 
 /** Высота рамки кнопки не меньше сенсорной зоны 44 px. */
 async function expectTapZone(loc: Locator, what: string): Promise<void> {
-  const b = (await loc.boundingBox())!;
-  expect(b, `${what}: нет рамки`).not.toBeNull();
+  const b = await boxOf(loc, what);
   expect(b.height, `${what}: высота ${b.height}`).toBeGreaterThanOrEqual(43.5);
 }
 
@@ -704,8 +912,8 @@ for (const theme of THEMES) {
     await toggle.click({ timeout: T.page });
     await expect(drawer).toBeVisible({ timeout: T.action });
     await waitAnimationsDone(drawer, 'лист Backups');
-    const cardBox = (await page.locator(MAIN_CARD).first().boundingBox())!;
-    const drawerBox = (await drawer.boundingBox())!;
+    const cardBox = await boxOf(page.locator(MAIN_CARD).first(), 'карточка кода');
+    const drawerBox = await boxOf(drawer, 'лист Backups');
     for (const k of ['x', 'y', 'width', 'height'] as const) {
       expect(
         Math.abs(drawerBox[k] - cardBox[k]),
