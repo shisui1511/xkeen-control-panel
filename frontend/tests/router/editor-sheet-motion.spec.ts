@@ -332,6 +332,63 @@ for (const mode of MODES) {
   });
 }
 
+// После прерванного закрытия (шторку открыли снова, пока она уезжала) включение
+// prefers-reduced-motion делает следующее закрытие мгновенным (D-15, G-142-4-WR01).
+test('editor-sheet-motion interrupted-close vp:390', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize(VIEWPORT);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/#/editor');
+
+  const trigger = await openTrigger(page);
+  await page.locator(trigger).first().click();
+  await waitSheetIdle(page, 'открытие');
+
+  const interrupt = await interruptClose(page, trigger);
+  expect(
+    interrupt.interrupted,
+    'уход не застали: шторка исчезла раньше, чем её открыли снова'
+  ).toBe(true);
+  expect(
+    interrupt.resumed,
+    'повторное открытие не вернуло ту же шторку — прерванный уход не воспроизведён'
+  ).toBe(true);
+  await waitSheetIdle(page, 'после повторного открытия');
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect
+    .poll(() => page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), {
+      message: 'reduced-motion не включился',
+      timeout: T.action
+    })
+    .toBe(true);
+  // Событие change медиазапроса доставляется на шаге отрисовки до колбэков кадра: через два
+  // кадра слушатель prefersReducedMotion компонента его уже получил
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      })
+  );
+
+  const closing = await sampleSheet(page, CLOSE_BUTTON);
+  const mid = closing.filter((f) => f.present && (f.left ?? 0) < -1);
+  expect(
+    mid.length,
+    `reduced-motion после прерванного закрытия: промежуточные кадры ухода ${mid.length} (D-15)`
+  ).toBe(0);
+  expect(
+    closing[0].backdrop,
+    `reduced-motion после прерванного закрытия: бэкдроп виден в первом кадре, прозрачность ${closing[0].backdrop}`
+  ).toBeNull();
+  expect(
+    closing[closing.length - 1].present,
+    'reduced-motion после прерванного закрытия: шторка осталась в последнем кадре'
+  ).toBe(false);
+
+  await guard.assertClean();
+});
+
 test('editor-sheet-motion media-switch vp:1280-768', async ({ page }) => {
   test.setTimeout(120_000 * RT.slow);
   const guard = attachConsoleGuard(page);
