@@ -229,9 +229,20 @@ for (const mode of MODES) {
         gone!.t,
         `шторка исчезла через ${Math.round(gone!.t)} мс, ожидалось не раньше 120`
       ).toBeGreaterThanOrEqual(120);
+      const fading = closing.filter(
+        (f) => f.backdrop !== null && f.backdrop > 0.01 && f.backdrop < 0.99
+      );
+      expect(
+        fading.length,
+        'уход: бэкдроп не гаснет — нет кадра с промежуточной прозрачностью'
+      ).toBeGreaterThan(0);
     } else {
       const mid = closing.filter((f) => f.present && (f.left ?? 0) < -1);
       expect(mid.length, 'reduced-motion: промежуточные кадры ухода').toBe(0);
+      expect(
+        closing[0].backdrop,
+        `reduced-motion: бэкдроп ещё виден в первом кадре закрытия, прозрачность ${closing[0].backdrop}`
+      ).toBeNull();
     }
 
     await guard.assertClean();
