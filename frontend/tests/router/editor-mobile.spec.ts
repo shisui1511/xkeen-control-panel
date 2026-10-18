@@ -912,12 +912,26 @@ for (const theme of THEMES) {
     await toggle.click({ timeout: T.page });
     await expect(drawer).toBeVisible({ timeout: T.action });
     await waitAnimationsDone(drawer, 'лист Backups');
-    const cardBox = await boxOf(page.locator(MAIN_CARD).first(), 'карточка кода');
+    // inset: 0 отсчитывается от внутренней области карточки: её рамка остаётся вокруг листа
+    const card = page.locator(MAIN_CARD).first();
+    const cardOuter = await boxOf(card, 'карточка кода');
+    const inner = await card.evaluate((el) => ({
+      left: el.clientLeft,
+      top: el.clientTop,
+      width: el.clientWidth,
+      height: el.clientHeight
+    }));
+    const cardBox = {
+      x: cardOuter.x + inner.left,
+      y: cardOuter.y + inner.top,
+      width: inner.width,
+      height: inner.height
+    };
     const drawerBox = await boxOf(drawer, 'лист Backups');
     for (const k of ['x', 'y', 'width', 'height'] as const) {
       expect(
         Math.abs(drawerBox[k] - cardBox[k]),
-        `лист не на всю карточку: ${k} листа ${drawerBox[k]}, карточки ${cardBox[k]}`
+        `лист не на всю карточку: ${k} листа ${drawerBox[k]}, карточки внутри рамки ${cardBox[k]}`
       ).toBeLessThanOrEqual(1);
     }
     await expectInside(page, drawer, 'лист Backups');
