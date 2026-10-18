@@ -318,3 +318,97 @@ for (const theme of THEMES) {
     await guard.assertClean();
   });
 }
+
+test('editor-mobile sheet-close vp:390', async ({ page }) => {
+  test.setTimeout(90_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_PHONE);
+  await openFixtureFile(page);
+
+  const toggle = page.locator(TOGGLE).first();
+  const mainBefore = (await page.locator(MAIN_CARD).first().boundingBox())!;
+  expect(mainBefore, 'карточка кода: нет рамки').not.toBeNull();
+
+  // открытая шторка отражается в aria-expanded и не сжимает карточку кода
+  await openSheetFromToolbar(page);
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  const mainOpen = (await page.locator(MAIN_CARD).first().boundingBox())!;
+  expect(
+    Math.abs(mainOpen.width - mainBefore.width),
+    `ширина карточки кода изменилась: ${mainBefore.width} → ${mainOpen.width}`
+  ).toBeLessThanOrEqual(1);
+  await expectNoHorizontalScroll(page, 'шторка открыта поверх файла');
+
+  // кнопка «Закрыть»: зона не меньше 44×44, фокус возвращается на кнопку шторки
+  const close = page.locator(CLOSE_BTN);
+  const cb = (await close.boundingBox())!;
+  expect(cb, 'кнопка «Закрыть»: нет рамки').not.toBeNull();
+  expect(cb.width, `кнопка «Закрыть»: ширина ${cb.width}`).toBeGreaterThanOrEqual(43.5);
+  expect(cb.height, `кнопка «Закрыть»: высота ${cb.height}`).toBeGreaterThanOrEqual(43.5);
+  await close.click();
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toBeFocused();
+
+  // клавиатура: Enter открывает, Escape закрывает, фокус снова на кнопке
+  await toggle.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator(SHEET)).toBeVisible({ timeout: T.action });
+  await waitSheetSettled(page);
+  await page.keyboard.press('Escape');
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(toggle).toBeFocused();
+
+  // нажатие мышью по фону правее панели шириной 320 px
+  await openSheetFromToolbar(page);
+  await page.mouse.click(VP_PHONE.width - 16, VP_PHONE.height / 2);
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+
+  await guard.assertClean();
+});
+
+test('editor-mobile sheet-escape-modal vp:390', async ({ page }) => {
+  test.setTimeout(90_000 * RT.slow);
+  const dir = fx().dir;
+  const filesCount = async (): Promise<number> => {
+    const res = await rawRequest(page, 'GET', `/api/config/list?dir=${encodeURIComponent(dir)}`);
+    expectOk(res, 'list');
+    return asArray(res.text).length;
+  };
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_PHONE);
+  const before = await filesCount();
+
+  await openFixtureFile(page);
+  await openSheetFromToolbar(page);
+
+  // модалка создания открывается поверх шторки; фокус уходит внутрь модалки
+  await page.locator(SHEET).locator('.btn-new-file').first().click({ timeout: T.action });
+  await expect(page.locator('.modal-backdrop').first()).toBeVisible({ timeout: T.action });
+  await expect(page.locator('.modal-backdrop :focus')).toHaveCount(1, { timeout: T.action });
+
+  // первый Escape закрывает только модалку; второй не нажимаем, пока она не ушла полностью
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0, { timeout: T.action });
+  await expect(page.locator(SHEET)).toBeVisible();
+
+  // второй Escape закрывает шторку
+  await page.keyboard.press('Escape');
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+
+  expect(await filesCount(), 'число файлов каталога изменилось').toBe(before);
+  await guard.assertClean();
+});
+
+test('editor-mobile sheet vp:768', async ({ page }) => {
+  test.setTimeout(90_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_TABLET);
+
+  await openSheetFromEmpty(page);
+  await expectSheetGeometry(page, VP_TABLET);
+  await expectNoHorizontalScroll(page, 'шторка на 768 px');
+  await pickFixtureInSheet(page);
+
+  await guard.assertClean();
+});
