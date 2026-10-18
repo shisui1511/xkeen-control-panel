@@ -169,6 +169,89 @@ func rtStallProbe(p *routertest.Panel, timeout time.Duration) (time.Duration, in
 	}
 }
 
+// rtThreadCPU — процессорное время потока tid процесса pid (utime+stime из
+// /proc/<pid>/task/<tid>/stat, в тиках ядра).
+func rtThreadCPU(t *testing.T, pid, tid int) int64 {
+	t.Helper()
+	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/task/" + strconv.Itoa(tid) + "/stat")
+	if err != nil {
+		t.Fatalf("поток %d процесса %d: %v", tid, pid, err)
+	}
+	// поля после «(comm)»: состояние — третье поле stat, utime и stime — 14-е и 15-е
+	i := strings.LastIndexByte(string(raw), ')')
+	f := strings.Fields(string(raw[i+1:]))
+	if i < 0 || len(f) < 13 {
+		t.Fatalf("поток %d процесса %d: stat не разобран: %q", tid, pid, raw)
+	}
+	utime, err1 := strconv.ParseInt(f[11], 10, 64)
+	stime, err2 := strconv.ParseInt(f[12], 10, 64)
+	if err1 != nil || err2 != nil {
+		t.Fatalf("поток %d процесса %d: utime/stime не разобраны: %q", tid, pid, raw)
+	}
+	return utime + stime
+}
+
+// rtPanelLoad — сколько и как нагружать панель запросами в
+// TestRouterPanelMainThreadIdle.
+const (
+	rtPanelLoadWorkers = 8
+	rtPanelLoadFor     = 4 * time.Second
+)
+
+// Главный поток панели не выполняет посторонних горутин. killall из init-скрипта
+// шлёт сигнал процессу, и ядро отдаёт его главному потоку (лидеру группы), если тот
+// не блокирует сигнал и у него нет других ожидающих, — даже когда поток в
+// непрерываемом ожидании; остальные потоки сигнал не видят, пока не получат свой.
+// Планировщик Go гоняет любые горутины и на главном потоке, поэтому горутина,
+// ждущая носитель (запись файла на застывшем разделе), запирала SIGTERM: в прогоне
+// 20261017-225050-8ab60d28 слушатель закрылся через 1,96 с после killall, на стенде
+// главный поток стоял в openat → __sb_start_write на замороженном /opt, SIGTERM
+// лежал в общей очереди процесса 1,1 с. Попадание горутины с записью на главный
+// поток случайно, поэтому сценарий с заморозкой ловит это не каждый раз; здесь
+// проверяется само условие: под нагрузкой запросами главный поток не получает
+// процессорного времени (главная горутина ждёт сигнал, остальное идёт на других
+// потоках).
+func TestRouterPanelMainThreadIdle(t *testing.T) {
+	p := routertest.NewPanel(t)
+	pid := rtPanelCurrent(t, p)
+
+	before := rtThreadCPU(t, pid, pid)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	done, failed := 0, 0
+	stop := time.Now().Add(rtPanelLoadFor)
+	for w := 0; w < rtPanelLoadWorkers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			path := "/api/auth/me"
+			if w%2 == 1 {
+				path = "/api/service/status"
+			}
+			for time.Now().Before(stop) {
+				code, _, err := p.Request(http.MethodGet, path, nil, routertest.AuthFull)
+				mu.Lock()
+				if err != nil || code != http.StatusOK {
+					failed++
+				} else {
+					done++
+				}
+				mu.Unlock()
+			}
+		}(w)
+	}
+	wg.Wait()
+	after := rtThreadCPU(t, pid, pid)
+	if done == 0 {
+		t.Fatalf("панель не ответила ни на один запрос нагрузки (неудачных: %d)", failed)
+	}
+	t.Logf("нагрузка: %d запросов за %s в %d потоков (неудачных %d); главный поток панели: %d → %d тиков",
+		done, rtPanelLoadFor, rtPanelLoadWorkers, failed, before, after)
+	if after != before {
+		t.Errorf("главный поток панели выполнял горутины под нагрузкой (+%d тиков процессорного времени): горутина, ждущая носитель, может оказаться на нём, и SIGTERM процессу будет ждать её", after-before)
+	}
+}
+
 // rtStallHold — сколько раздел остаётся замороженным после killall: меньше срока
 // остановки панели (8 с), чтобы финальные записи состояния успели после оттаивания.
 const rtStallHold = 3 * time.Second
@@ -179,8 +262,10 @@ const rtStallHold = 3 * time.Second
 // (прогон 20261017-130553-7e154ece). Тот же синхронный журнал доступа держал ответ
 // на правку черновика 12 с (TestRouterDraftEditWithDirtyDisk). Раздел панели
 // замораживается до команды: запрос, строка журнала доступа которого пишется,
-// отвечает сразу; после killall панель сразу перестаёт принимать соединения (поток
-// остановки не ждёт носитель); через rtStallHold раздел оттаивает, и перезапуск
+// отвечает сразу; после killall панель сразу перестаёт принимать соединения (ни
+// доставка SIGTERM, ни поток остановки не ждут носитель: сигнал процессу ядро отдаёт
+// главному потоку, см. TestRouterPanelMainThreadIdle); через rtStallHold раздел
+// оттаивает, и перезапуск
 // доходит до конца: новая панель отвечает по прежней сессии, срок остановки не
 // истёк.
 func TestRouterPanelRestartWithStalledStorage(t *testing.T) {
@@ -226,9 +311,9 @@ func TestRouterPanelRestartWithStalledStorage(t *testing.T) {
 	}
 	switch {
 	case closedAfter < 0:
-		t.Errorf("после killall панель принимала соединения все %s заморозки — поток остановки ждал носитель", rtStallHold)
+		t.Errorf("после killall панель принимала соединения все %s заморозки — обработка SIGTERM ждала носитель", rtStallHold)
 	case closedAfter > time.Second:
-		t.Errorf("после killall панель перестала принимать соединения через %v — поток остановки ждал носитель", closedAfter.Round(time.Millisecond))
+		t.Errorf("после killall панель перестала принимать соединения через %v — обработка SIGTERM ждала носитель", closedAfter.Round(time.Millisecond))
 	default:
 		t.Logf("после killall панель перестала принимать соединения через %v", closedAfter.Round(time.Millisecond))
 	}
