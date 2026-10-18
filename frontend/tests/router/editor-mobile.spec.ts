@@ -29,6 +29,8 @@ const CLOSE_BTN = '.responsive-sidebar-close';
 const TOGGLE = '.btn-sidebar-toggle';
 const SHOW_FILES = '.editor-empty-actions .btn-secondary';
 const MAIN_CARD = '.editor-main-card';
+// синтетическая строка без пробелов, шире листа на 390 px; вводится в редактор и на диск не сохраняется
+const LONG_DIFF_LINE = 'zz_e2e_long_' + '0123456789'.repeat(15);
 
 interface Fixture {
   dir: string;
@@ -1115,6 +1117,21 @@ for (const theme of THEMES) {
     expect(n, `копий файла ${n}`).toBeGreaterThanOrEqual(2);
     expect(await readFixtureOnDisk(page), 'файл на диске до сценария').toBe(fx().current);
 
+    // длинная строка вводится только в редактор: сравнение строится против текущего документа,
+    // поэтому она попадает в diff как добавленная; «Сохранить» не нажимается
+    const fixtureTab = page.locator('.editor-tab', {
+      has: page.locator(`.tab-name[title="${fx().name}"]`)
+    });
+    await page.locator('.cm-content').first().click({ timeout: T.action });
+    await page.keyboard.press('Control+End');
+    await page.keyboard.insertText(LONG_DIFF_LINE);
+    await page.keyboard.press('Escape');
+    await expect(fixtureTab.locator('.tab-dirty-dot')).toBeVisible({ timeout: T.action });
+    await expect(
+      page.locator('.cm-content').first(),
+      'длинная строка не попала в редактор'
+    ).toContainText(LONG_DIFF_LINE, { timeout: T.action });
+
     // лист открывается на всю карточку Редактора
     const toggle = page.locator('.backups-toggle-btn');
     const drawer = page.locator('.editor-bottom-drawer');
@@ -1170,6 +1187,44 @@ for (const theme of THEMES) {
       await page.locator('.diff-line-added, .diff-line-removed').count(),
       'строк различий в сравнении'
     ).toBeGreaterThanOrEqual(1);
+    // G-142-2, D-25, UI-SPEC E5: длинная строка не переносится, а прокручивается по горизонтали
+    await expect(
+      page.locator('.diff-line-added', { hasText: LONG_DIFF_LINE }),
+      'длинная строка не попала в сравнение'
+    ).toHaveCount(1, { timeout: T.action });
+    const longLine = await page.locator('.diff-body').evaluate((el, text) => {
+      const row = Array.from(el.querySelectorAll<HTMLElement>('.diff-line-added')).find((r) =>
+        (r.textContent ?? '').includes(text)
+      );
+      if (!row) throw new Error('строка с длинным текстом не найдена');
+      const clipped = Array.from(
+        el.querySelectorAll<HTMLElement>('.diff-line-added, .diff-line-removed')
+      ).filter((r) => r.scrollWidth > r.clientWidth + 1).length;
+      el.scrollLeft = el.scrollWidth;
+      const moved = el.scrollLeft > 0;
+      el.scrollLeft = 0;
+      return {
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        height: row.getBoundingClientRect().height,
+        lineHeight: parseFloat(getComputedStyle(row).lineHeight),
+        clipped,
+        moved
+      };
+    }, LONG_DIFF_LINE);
+    expect(
+      longLine.height,
+      `G-142-2: длинная строка diff переносится: высота ${longLine.height} при высоте строки ${longLine.lineHeight}`
+    ).toBeLessThan(1.5 * longLine.lineHeight);
+    expect(
+      longLine.scrollWidth,
+      `.diff-body не прокручивается по горизонтали: scrollWidth ${longLine.scrollWidth}, clientWidth ${longLine.clientWidth}`
+    ).toBeGreaterThan(longLine.clientWidth + 1);
+    expect(longLine.moved, '.diff-body не сдвигается по горизонтали').toBe(true);
+    expect(
+      longLine.clipped,
+      `подсветка строк различий не тянется на ширину прокрутки: строк с текстом за фоном ${longLine.clipped}`
+    ).toBe(0);
     await expect(page.locator('.drawer-sidebar')).toBeHidden();
     const back = page.locator('.drawer-back-btn');
     const restore = page.locator('.diff-restore-btn');
@@ -1216,6 +1271,11 @@ for (const theme of THEMES) {
     await expect(
       page.locator('.editor-tab', { hasText: fx().name }).locator('.tab-dirty-dot')
     ).toBeVisible({ timeout: T.action });
+    // копия создана до ввода длинной строки: после подстановки её в редакторе быть не должно
+    await expect(
+      page.locator('.cm-content').first(),
+      'Восстановить не подставило копию в редактор: длинная строка осталась'
+    ).not.toContainText(LONG_DIFF_LINE, { timeout: T.action });
     expect(await readFixtureOnDisk(page), 'файл на диске после «Восстановить»').toBe(fx().current);
 
     // «Закрыть» закрывает лист
