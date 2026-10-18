@@ -1,5 +1,5 @@
 // e2e-pages: editor
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type CDPSession, type Locator, type Page } from '@playwright/test';
 import { randomInt } from 'node:crypto';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
@@ -411,4 +411,145 @@ test('editor-mobile sheet vp:768', async ({ page }) => {
   await pickFixtureInSheet(page);
 
   await guard.assertClean();
+});
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+/** Жест пальцем настоящим вводом браузера (CDP): касание, равные шаги движения, отпускание. */
+async function touchDrag(cdp: CDPSession, from: Point, to: Point, steps = 8): Promise<void> {
+  const send = (type: 'touchStart' | 'touchMove' | 'touchEnd', touchPoints: Point[]) =>
+    cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  await send('touchStart', [from]);
+  for (let i = 1; i <= steps; i++) {
+    await send('touchMove', [
+      { x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }
+    ]);
+  }
+  await send('touchEnd', []);
+}
+
+/** Шторка на месте и не уходит: обработчик touchend и обновление Svelte синхронны с жестом. */
+async function expectSheetStays(page: Page, what: string): Promise<void> {
+  const sheet = page.locator(SHEET);
+  await expect(sheet, `${what}: шторка закрылась`).toHaveCount(1);
+  const alive = await sheet.evaluate((el) => el.isConnected && !(el as HTMLElement).inert);
+  expect(alive, `${what}: шторка уходит`).toBe(true);
+}
+
+test.describe('touch', () => {
+  test.use({ hasTouch: true });
+
+  test('editor-mobile sheet-gestures vp:390', async ({ page }) => {
+    test.setTimeout(90_000 * RT.slow);
+    const guard = attachConsoleGuard(page);
+    await gotoEditor(page, VP_PHONE);
+    await openFixtureFile(page);
+    await openSheetFromToolbar(page);
+
+    const cdp = await page.context().newCDPSession(page);
+    const tabs = page.locator('.editor-tab');
+    const tabsBefore = await tabs.count();
+
+    // вертикальный жест (dx +10, dy -300) не закрывает шторку и не открывает файл
+    await touchDrag(cdp, { x: 150, y: 600 }, { x: 160, y: 300 });
+    await expectSheetStays(page, 'вертикальный жест');
+    expect(await tabs.count(), 'вертикальный жест открыл файл').toBe(tabsBefore);
+
+    // диагональный жест (dx -70, dy +80: |dx| < 1.5·|dy|) шторку не закрывает
+    await touchDrag(cdp, { x: 200, y: 300 }, { x: 130, y: 380 });
+    await expectSheetStays(page, 'диагональный жест');
+    expect(await tabs.count(), 'диагональный жест открыл файл').toBe(tabsBefore);
+
+    // горизонтальный свайп влево (dx -120, dy 5) закрывает
+    await touchDrag(cdp, { x: 250, y: 400 }, { x: 130, y: 405 });
+    await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+
+    // касание по фону правее панели закрывает
+    await openSheetFromToolbar(page);
+    await page.touchscreen.tap(VP_PHONE.width - 16, VP_PHONE.height / 2);
+    await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+
+    await guard.assertClean();
+  });
+});
+
+test('editor-mobile desktop-column vp:1280', async ({ page }) => {
+  test.setTimeout(120_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_DESKTOP);
+
+  // на ПК панель файлов — колонка со сплиттером: без оверлея, бэкдропа и роли диалога
+  const pane = page.locator('.file-tree-pane').first();
+  await expect(pane).toBeVisible({ timeout: T.page });
+  await expect(pane).not.toHaveClass(/\boverlay\b/);
+  expect(await pane.evaluate((el) => el.hasAttribute('role')), 'у колонки есть role').toBe(false);
+  await expect(page.locator(BACKDROP)).toHaveCount(0);
+  const splitter = page.locator('.editor-splitter').first();
+  await expect(splitter).toBeVisible();
+
+  const w0 = (await pane.boundingBox())!.width;
+  expect(w0, `ширина колонки ${w0}`).toBeGreaterThanOrEqual(160);
+  expect(w0, `ширина колонки ${w0}`).toBeLessThanOrEqual(450);
+
+  // сплиттер тянет колонку: +80 px, но не шире 450 и не шире 42 % рабочей области
+  const sb = (await splitter.boundingBox())!;
+  expect(sb, 'сплиттер: нет рамки').not.toBeNull();
+  const cx = sb.x + sb.width / 2;
+  const cy = sb.y + sb.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 80, cy, { steps: 5 });
+  await page.mouse.up();
+  const cap = await page.locator('.editor-workspace').evaluate((el) => el.clientWidth * 0.42);
+  const want = Math.min(w0 + 80, 450, cap);
+  await expect
+    .poll(async () => Math.abs((await pane.boundingBox())!.width - want), {
+      message: `ширина колонки после перетаскивания, ожидалась ${want}`,
+      timeout: T.action
+    })
+    .toBeLessThanOrEqual(2);
+  const w1 = (await pane.boundingBox())!.width;
+  await guard.assertClean();
+
+  // ширина сохраняется: вторая страница того же контекста делит localStorage
+  const page2 = await page.context().newPage();
+  const guard2 = attachConsoleGuard(page2);
+  await gotoEditor(page2, VP_DESKTOP);
+  const pane2 = page2.locator('.file-tree-pane').first();
+  await expect(pane2).toBeVisible({ timeout: T.page });
+  expect(
+    Math.abs((await pane2.boundingBox())!.width - w1),
+    `ширина колонки не сохранилась: было ${w1}`
+  ).toBeLessThanOrEqual(1);
+
+  // файл открывается кликом по строке колонки, без шторки; колонка рядом с кодом, не поверх
+  const name = fx().name;
+  await pane2.locator(`.file-row:has(.fr-name[title="${name}"])`).first().click();
+  await expect(page2.locator('.editor-tab', { hasText: name }).first()).toBeVisible({
+    timeout: T.page
+  });
+  await expect(page2.locator('.cm-content').first()).toBeVisible({ timeout: T.page });
+  const paneBox = (await pane2.boundingBox())!;
+  const cardBox = (await page2.locator(MAIN_CARD).first().boundingBox())!;
+  expect(
+    paneBox.x + paneBox.width,
+    `колонка заходит под карточку кода: правый край ${paneBox.x + paneBox.width}, левый край карточки ${cardBox.x}`
+  ).toBeLessThanOrEqual(cardBox.x + 1);
+  await expect(page2.locator(SHEET)).toHaveCount(0);
+
+  // кнопка тулбара скрывает и показывает колонку без оверлея
+  const toggle = page2.locator(TOGGLE).first();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await toggle.click();
+  await expect(page2.locator('.file-tree-pane')).toHaveCount(0, { timeout: T.action });
+  await expect(page2.locator(BACKDROP)).toHaveCount(0);
+  await toggle.click();
+  await expect(page2.locator('.file-tree-pane').first()).toBeVisible({ timeout: T.action });
+  await expect(page2.locator('.file-tree-pane').first()).not.toHaveClass(/\boverlay\b/);
+
+  await guard2.assertClean();
+  await page2.close();
 });
