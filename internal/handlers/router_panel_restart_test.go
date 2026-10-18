@@ -937,10 +937,22 @@ const rtPanelLateExitHold = 15 * time.Second
 // Init-скрипт с собственной остановкой ждёт настоящего выхода. Здесь старый
 // процесс останавливается SIGSTOP до команды и продолжается через
 // rtPanelLateExitHold после killall: SIGTERM ждёт его, и выход наступает позже окна
-// rc.func при любой загрузке стенда.
+// rc.func при любой загрузке стенда. Сверх общего вердикта: продолженный процесс
+// сразу начинает остановку по SIGTERM — слушатель HTTP закрывается не позже чем
+// через секунду. Строка «Received signal» в журнале для этого не годится: журнал
+// пишется асинхронно, и когда носитель не принимает запись (на стенде — запись
+// тестового бинарника перед пакетом), очередь журнала не дописывается до выхода
+// процесса — строка теряется, хотя сигнал обработан сразу (прогон
+// 20261017-225050-8ab60d28 и сессия на стенде 20261017-234835-8ab60d28: SIGTERM
+// забран из очереди процесса через 40 мс после SIGCONT, поток журнала стоял в
+// write → wait_transaction_locked до SIGKILL init-скрипта).
 func TestRouterPanelRestartWithLateExit(t *testing.T) {
 	p := routertest.NewPanel(t)
 	old := rtPanelCurrent(t, p)
+	addr := rtPanelAddr(t)
+	if !rtPortAccepts(addr) {
+		t.Fatalf("слушатель панели не принимает соединения до сценария")
+	}
 	if err := syscall.Kill(old, syscall.SIGSTOP); err != nil {
 		t.Fatalf("SIGSTOP панели %d: %v", old, err)
 	}
@@ -952,16 +964,47 @@ func TestRouterPanelRestartWithLateExit(t *testing.T) {
 		t.Fatalf("панель %d не остановилась по SIGSTOP: состояние «%s»", old, st)
 	}
 
+	// После SIGCONT слушатель опрашивается: openAt — начало последней попытки
+	// соединения, которую он принял (-1 — ни одной), closedAt — когда соединение
+	// впервые отвергнуто (-1 — не отвергнуто за rtPanelLateExitClose). Время
+	// принятой попытки берётся по её началу: сам опрос под записью на носитель
+	// стоит на подкачке страниц тестового бинарника секундами, и время ответа
+	// сказало бы о нём, а не о панели.
+	var openAt, closedAt time.Duration = -1, -1
+	probes := 0
+	probed := make(chan struct{})
 	res := rtPanelRestartWith(t, p, old, rtPanelHooks{
 		afterKill: func() {
+			defer close(probed)
 			time.Sleep(rtPanelLateExitHold)
 			resume()
+			start := time.Now()
+			for time.Since(start) < rtPanelLateExitClose {
+				at := time.Since(start)
+				probes++
+				if !rtPortAccepts(addr) {
+					closedAt = time.Since(start)
+					return
+				}
+				openAt = at
+				time.Sleep(20 * time.Millisecond)
+			}
 		},
 	})
 	resume()
+	<-probed
 	rtPanelRestartVerdict(t, old, res, "старый процесс остановлен SIGSTOP и продолжен через "+rtPanelLateExitHold.String()+" после killall")
 	if res.stopTook >= 0 && res.stopTook < rtPanelLateExitHold-time.Second {
 		t.Errorf("старый процесс вышел за %.1f с после killall, раньше, чем был продолжен (%s): условие сценария не выполнено", res.stopTook.Seconds(), rtPanelLateExitHold)
+	}
+	switch {
+	case openAt > time.Second:
+		t.Errorf("старый процесс принял соединение через %v после SIGCONT: остановка по SIGTERM началась не сразу", openAt.Round(time.Millisecond))
+	case closedAt < 0:
+		t.Errorf("после SIGCONT старый процесс не перестал принимать соединения за %s (попыток %d): остановка по SIGTERM не началась", rtPanelLateExitClose, probes)
+	default:
+		t.Logf("после SIGCONT слушатель старого процесса закрыт: последнее принятое соединение — %v, первое отвергнутое — %v (попыток %d)",
+			openAt.Round(time.Millisecond), closedAt.Round(time.Millisecond), probes)
 	}
 	received := false
 	for _, line := range res.shutdownLog {
@@ -970,6 +1013,10 @@ func TestRouterPanelRestartWithLateExit(t *testing.T) {
 		}
 	}
 	if !received && res.logErr == nil {
-		t.Errorf("в журнале нет «Received signal»: старый процесс не остановился штатно по SIGTERM")
+		t.Logf("строки «Received signal» в журнале нет: очередь журнала не дописана до выхода старого процесса (носитель не принимал запись)")
 	}
 }
+
+// rtPanelLateExitClose — сколько после SIGCONT ждать закрытия слушателя старого
+// процесса.
+const rtPanelLateExitClose = 5 * time.Second
