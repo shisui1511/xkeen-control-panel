@@ -1,7 +1,7 @@
 // e2e-pages: editor
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
-import { T } from './lib/env';
+import { RT, T } from './lib/env';
 
 // Движение шторки файлов Редактора на настоящей панели при 390 px. Выезд и уход шторки
 // занимают около 200 мс, бэкдроп проявляется и гаснет по прозрачности (D-12); при
@@ -146,6 +146,89 @@ async function sampleAcrossResize(
   return frames;
 }
 
+/** Итог попытки закрыть шторку и открыть её снова во время ухода. */
+interface InterruptResult {
+  /** Уход застали: шторка была в документе, inert и анимировалась, когда её открыли снова */
+  interrupted: boolean;
+  /** Через кадр в документе та же шторка .file-tree-pane.overlay и она не inert */
+  resumed: boolean;
+  /** Миллисекунды от нажатия «Закрыть» до повторного открытия (null, если уход не застали) */
+  reopenedAt: number | null;
+}
+
+/**
+ * Нажимает «Закрыть» и, пока шторка уезжает, открывает её снова. Повторное открытие во время
+ * ухода возобновляет ту же ветку Svelte вместе с её менеджерами переходов — именно на этом пути
+ * держался кеш длительности ухода (G-142-4-WR01).
+ */
+async function interruptClose(page: Page, reopen: string): Promise<InterruptResult> {
+  return page.evaluate(
+    ({ closeSel, reopenSel, limit }) =>
+      new Promise<InterruptResult>((resolve, reject) => {
+        const pane = document.querySelector<HTMLElement>('.file-tree-pane.overlay');
+        const closeBtn = document.querySelector<HTMLElement>(closeSel);
+        const reopenBtn = document.querySelector<HTMLElement>(reopenSel);
+        const missing = !pane
+          ? '.file-tree-pane.overlay'
+          : !closeBtn
+            ? closeSel
+            : !reopenBtn
+              ? reopenSel
+              : null;
+        if (missing !== null || !pane || !closeBtn || !reopenBtn) {
+          reject(new Error(`нет элемента ${missing}`));
+          return;
+        }
+        const t0 = performance.now();
+        let reopenedAt: number | null = null;
+        closeBtn.click();
+        const tick = () => {
+          const t = performance.now() - t0;
+          const current = document.querySelector<HTMLElement>('.file-tree-pane.overlay');
+          if (reopenedAt !== null) {
+            resolve({
+              interrupted: true,
+              resumed: current === pane && !pane.inert,
+              reopenedAt
+            });
+            return;
+          }
+          if (current === null || t >= limit) {
+            resolve({ interrupted: false, resumed: false, reopenedAt: null });
+            return;
+          }
+          if (current === pane && pane.inert && pane.getAnimations().length > 0) {
+            reopenBtn.click();
+            reopenedAt = t;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    { closeSel: CLOSE_BUTTON, reopenSel: reopen, limit: 800 }
+  );
+}
+
+/** Ждёт, пока шторка встанет на место: анимаций у шторки и бэкдропа нет, левая граница у края. */
+async function waitSheetIdle(page: Page, what: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const pane = document.querySelector<HTMLElement>('.file-tree-pane.overlay');
+          if (!pane) return false;
+          const bd = document.querySelector<HTMLElement>('.responsive-sidebar-backdrop');
+          return (
+            pane.getAnimations().length === 0 &&
+            (bd ? bd.getAnimations().length : 0) === 0 &&
+            Math.abs(pane.getBoundingClientRect().left) <= 1
+          );
+        }),
+      { message: `${what}: шторка не встала на место`, timeout: T.action }
+    )
+    .toBe(true);
+}
+
 const MODES = [
   { name: 'default', reducedMotion: 'no-preference' },
   { name: 'reduce', reducedMotion: 'reduce' }
@@ -250,6 +333,7 @@ for (const mode of MODES) {
 }
 
 test('editor-sheet-motion media-switch vp:1280-768', async ({ page }) => {
+  test.setTimeout(120_000 * RT.slow);
   const guard = attachConsoleGuard(page);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -312,6 +396,56 @@ test('editor-sheet-motion media-switch vp:1280-768', async ({ page }) => {
   expect(
     desktopLast.bodyOverflow,
     `768 → ПК: прокрутка body "${desktopLast.bodyOverflow}", ожидалось "${overflowBefore}"`
+  ).toBe(overflowBefore);
+
+  // После прерванного закрытия (G-142-4-WR01): шторку закрыли и открыли снова, пока она уезжала;
+  // уход ветки при смене режима по-прежнему не должен анимироваться поверх колонки ПК
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await expect(openBtn.first(), '768, повторно: кнопка открытия файлов').toBeVisible({
+    timeout: T.page
+  });
+  await openBtn.first().click();
+  await waitSheetIdle(page, '768, повторно');
+  const interrupt = await interruptClose(page, OPEN_BUTTON);
+  expect(
+    interrupt.interrupted,
+    'уход не застали: шторка исчезла раньше, чем её открыли снова'
+  ).toBe(true);
+  expect(
+    interrupt.resumed,
+    'повторное открытие не вернуло ту же шторку — прерванный уход не воспроизведён'
+  ).toBe(true);
+  await waitSheetIdle(page, 'после повторного открытия');
+  expect(
+    await page.evaluate(() => document.body.style.overflow),
+    'после повторного открытия: прокрутка body при открытой шторке'
+  ).toBe('hidden');
+  const afterInterrupt = await sampleAcrossResize(page, { width: 1280, height: 800 }, T.action);
+  expect(
+    afterInterrupt.some((f) => f.width === 1280),
+    'после прерванного закрытия 768 → ПК: ширина окна не сменилась'
+  ).toBe(true);
+  const afterAnimated = afterInterrupt.filter((f) => f.paneAnims > 0 || f.backdropAnims > 0);
+  expect(
+    afterAnimated.length,
+    `после прерванного закрытия 768 → ПК: шторка или бэкдроп уходят с анимацией поверх колонки, кадров ${afterAnimated.length}`
+  ).toBe(0);
+  const afterLast = afterInterrupt[afterInterrupt.length - 1];
+  expect(
+    afterLast.column,
+    'после прерванного закрытия 768 → ПК: колонки нет в последнем кадре'
+  ).toBe(true);
+  expect(
+    afterLast.sheet,
+    'после прерванного закрытия 768 → ПК: шторка осталась в последнем кадре'
+  ).toBe(false);
+  expect(
+    afterLast.backdrop,
+    'после прерванного закрытия 768 → ПК: бэкдроп остался в последнем кадре'
+  ).toBe(false);
+  expect(
+    afterLast.bodyOverflow,
+    `после прерванного закрытия 768 → ПК: прокрутка body "${afterLast.bodyOverflow}", ожидалось "${overflowBefore}"`
   ).toBe(overflowBefore);
 
   await expectNoHorizontalScroll(page, 'после возврата на ПК');
