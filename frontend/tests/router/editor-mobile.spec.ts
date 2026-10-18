@@ -553,3 +553,249 @@ test('editor-mobile desktop-column vp:1280', async ({ page }) => {
   await guard2.assertClean();
   await page2.close();
 });
+
+/** Ждёт конца всех анимаций элемента и его потомков: рамка перестаёт меняться. */
+async function waitAnimationsDone(loc: Locator, what: string): Promise<void> {
+  await expect
+    .poll(async () => loc.evaluate((el) => el.getAnimations({ subtree: true }).length), {
+      message: `${what}: анимации не закончились`,
+      timeout: T.action
+    })
+    .toBe(0);
+}
+
+for (const theme of THEMES) {
+  test(`editor-mobile actions theme:${theme} vp:390`, async ({ page }) => {
+    test.setTimeout(120_000 * RT.slow);
+    const guard = attachConsoleGuard(page);
+    await gotoEditor(page, VP_PHONE, theme);
+    await openFixtureFile(page);
+    await expectNoHorizontalScroll(page, 'файл открыт');
+
+    // шапка (D-20): «Сохранить и применить» и «Ещё» видны, кнопки для ПК скрыты
+    const apply = page.locator('.eph-right .btn-accent').first();
+    await expect(apply).toBeVisible({ timeout: T.page });
+    await expectInside(page, apply, '«Сохранить и применить»');
+    const more = page.locator('.btn-overflow-trigger').first();
+    await expect(more).toBeVisible();
+    await expectInside(page, more, '«Ещё»');
+    const desktopOnly = page.locator('.eph-right .btn-desktop-only');
+    const desktopCount = await desktopOnly.count();
+    for (let i = 0; i < desktopCount; i++) {
+      await expect(desktopOnly.nth(i), `кнопка для ПК №${i} видна на 390 px`).toBeHidden();
+    }
+
+    // две кнопки «⋮»/«Ещё» различимы по aria-label (§7 D-24)
+    const kebab = page.locator('.btn-kebab').first();
+    await expect(kebab).toBeVisible();
+    const moreLabel = (await more.getAttribute('aria-label')) ?? '';
+    const kebabLabel = (await kebab.getAttribute('aria-label')) ?? '';
+    expect(moreLabel, 'у «Ещё» нет aria-label').not.toBe('');
+    expect(kebabLabel, 'у «⋮» нет aria-label').not.toBe('');
+    expect(moreLabel, `aria-label «Ещё» и «⋮» совпадают: ${moreLabel}`).not.toBe(kebabLabel);
+
+    // меню «Ещё» (D-21): два пункта, целиком внутри окна, Escape и клик вне закрывают.
+    // Пункты «Сохранить» и «Перезагрузить» не нажимаются: считаются и измеряются
+    await more.click();
+    const menu = page.locator('.overflow-dropdown[role="menu"]');
+    await expect(menu).toBeVisible({ timeout: T.action });
+    const items = menu.locator('.dropdown-item');
+    expect(await items.count(), 'пунктов в меню «Ещё»').toBe(2);
+    await expectInside(page, menu, 'меню «Ещё»');
+    for (let i = 0; i < 2; i++) {
+      await expectInside(page, items.nth(i), `пункт меню «Ещё» №${i + 1}`);
+    }
+    await expectNoHorizontalScroll(page, 'меню «Ещё» открыто');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.overflow-dropdown')).toHaveCount(0, { timeout: T.action });
+
+    await more.click();
+    await expect(menu).toBeVisible({ timeout: T.action });
+    await page.locator('.cm-content').first().click();
+    await expect(page.locator('.overflow-dropdown')).toHaveCount(0, { timeout: T.action });
+
+    // меню файла «⋮»: появляется с затуханием, после него рамка стабильна
+    await kebab.click();
+    const kebabMenu = page.locator('.kebab-dropdown');
+    await expect(kebabMenu).toBeVisible({ timeout: T.action });
+    await waitAnimationsDone(kebabMenu, 'меню файла «⋮»');
+    await expectInside(page, kebabMenu, 'меню файла «⋮»');
+    await expectNoHorizontalScroll(page, 'меню файла открыто');
+    await kebab.click();
+    await expect(page.locator('.kebab-dropdown')).toHaveCount(0, { timeout: T.action });
+
+    // статус-бар (D-22, §7 D-23): одна строка, чипы с подписью, «Backups (N)» с числом из API
+    const bar = page.locator('.editor-statusbar').first();
+    await expect(bar).toBeVisible({ timeout: T.page });
+    await expectInside(page, bar, 'статус-бар');
+    const barBox = (await bar.boundingBox())!;
+    expect(
+      barBox.height,
+      `статус-бар не в одну строку: высота ${barBox.height}`
+    ).toBeLessThanOrEqual(48);
+    const chips = bar.locator('.chip-toggle');
+    expect(await chips.count(), 'чипов в статус-баре').toBe(2);
+    for (let i = 0; i < 2; i++) {
+      const chip = chips.nth(i);
+      await expect(chip).toBeVisible();
+      const label = (await chip.getAttribute('aria-label')) ?? '';
+      expect(label, `у чипа №${i + 1} нет aria-label`).not.toBe('');
+      await expectInside(page, chip, `чип статус-бара №${i + 1}`);
+    }
+    const res = await rawRequest(
+      page,
+      'GET',
+      `/api/config/backups?path=${encodeURIComponent(fx().path)}`
+    );
+    expectOk(res, 'backups');
+    const n = asArray(res.text).length;
+    expect(n, `копий файла ${n}`).toBeGreaterThanOrEqual(2);
+    const backupsBtn = bar.locator('.backups-toggle-btn');
+    await expect(backupsBtn).toBeVisible({ timeout: T.page });
+    await expect(backupsBtn).toContainText(`(${n})`, { timeout: T.page });
+    await expectInside(page, backupsBtn, 'кнопка Backups');
+
+    expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe(
+      theme
+    );
+    await expectNoHorizontalScroll(page, 'действия: итог');
+    await guard.assertClean();
+  });
+}
+
+/** Содержимое тестового файла на диске, как его видит API. */
+async function readFixtureOnDisk(page: Page): Promise<string> {
+  const res = await rawRequest(
+    page,
+    'GET',
+    `/api/config/read?path=${encodeURIComponent(fx().path)}`
+  );
+  expectOk(res, 'read');
+  return res.text;
+}
+
+/** Высота рамки кнопки не меньше сенсорной зоны 44 px. */
+async function expectTapZone(loc: Locator, what: string): Promise<void> {
+  const b = (await loc.boundingBox())!;
+  expect(b, `${what}: нет рамки`).not.toBeNull();
+  expect(b.height, `${what}: высота ${b.height}`).toBeGreaterThanOrEqual(43.5);
+}
+
+for (const theme of THEMES) {
+  test(`editor-mobile backups theme:${theme} vp:390`, async ({ page }) => {
+    test.setTimeout(150_000 * RT.slow);
+    const guard = attachConsoleGuard(page);
+    await gotoEditor(page, VP_PHONE, theme);
+    await openFixtureFile(page);
+
+    const listRes = await rawRequest(
+      page,
+      'GET',
+      `/api/config/backups?path=${encodeURIComponent(fx().path)}`
+    );
+    expectOk(listRes, 'backups');
+    const n = asArray(listRes.text).length;
+    expect(n, `копий файла ${n}`).toBeGreaterThanOrEqual(2);
+    expect(await readFixtureOnDisk(page), 'файл на диске до сценария').toBe(fx().current);
+
+    // лист открывается на всю карточку Редактора
+    const toggle = page.locator('.backups-toggle-btn');
+    const drawer = page.locator('.editor-bottom-drawer');
+    await toggle.click({ timeout: T.page });
+    await expect(drawer).toBeVisible({ timeout: T.action });
+    await waitAnimationsDone(drawer, 'лист Backups');
+    const cardBox = (await page.locator(MAIN_CARD).first().boundingBox())!;
+    const drawerBox = (await drawer.boundingBox())!;
+    for (const k of ['x', 'y', 'width', 'height'] as const) {
+      expect(
+        Math.abs(drawerBox[k] - cardBox[k]),
+        `лист не на всю карточку: ${k} листа ${drawerBox[k]}, карточки ${cardBox[k]}`
+      ).toBeLessThanOrEqual(1);
+    }
+    await expectInside(page, drawer, 'лист Backups');
+    await expectNoHorizontalScroll(page, 'лист Backups открыт');
+
+    // экран списка: только копии, без подсказки, «Назад» и «Восстановить»
+    const items = page.locator('.backup-select-btn');
+    expect(await items.count(), 'копий в списке листа').toBe(n);
+    for (let i = 0; i < n; i++) {
+      await expect(items.nth(i)).toBeVisible();
+      await expectInside(page, items.nth(i), `копия №${i + 1}`);
+    }
+    await expect(page.locator('.drawer-back-btn')).toHaveCount(0);
+    await expect(page.locator('.drawer-empty-state')).toBeHidden();
+    await expect(page.locator('.restore-inline-btn').first()).toBeHidden();
+    const close = page.locator('.drawer-close-btn');
+    await expect(close).toBeVisible();
+    await expectInside(page, close, 'кнопка «Закрыть» листа');
+    await expectTapZone(close, 'кнопка «Закрыть» листа');
+
+    // экран сравнения: на весь лист, со строками различий, кнопки не меньше 44 px
+    await items.first().click();
+    const diff = page.locator('.diff-viewer-container');
+    await expect(diff).toBeVisible({ timeout: T.action });
+    await expect(page.locator('.diff-body .spinner')).toHaveCount(0, { timeout: T.page });
+    expect(
+      await page.locator('.diff-line-added, .diff-line-removed').count(),
+      'строк различий в сравнении'
+    ).toBeGreaterThanOrEqual(1);
+    await expect(page.locator('.drawer-sidebar')).toBeHidden();
+    const back = page.locator('.drawer-back-btn');
+    const restore = page.locator('.diff-restore-btn');
+    for (const [loc, what] of [
+      [back, '«Назад»'],
+      [restore, '«Восстановить» в сравнении']
+    ] as const) {
+      await expect(loc).toBeVisible();
+      await expectInside(page, loc, what);
+      await expectTapZone(loc, what);
+    }
+    expect(
+      await page.locator('.diff-body').evaluate((el) => getComputedStyle(el).overflowX),
+      'diff-body: overflow-x'
+    ).toBe('auto');
+    await expectNoHorizontalScroll(page, 'сравнение открыто');
+
+    // «Назад» возвращает к списку
+    await back.click();
+    await expect(items.first()).toBeVisible({ timeout: T.action });
+    await expect(diff).toBeHidden();
+
+    // «Восстановить»: окно подтверждения, подстановка в редактор без записи на диск
+    await items.first().click();
+    await expect(diff).toBeVisible({ timeout: T.action });
+    await page.locator('.diff-restore-btn').click();
+    const dialog = page.locator('[role="dialog"]:has(.confirm-actions)');
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await waitAnimationsDone(dialog, 'окно подтверждения');
+    await expectInside(page, dialog, 'окно подтверждения');
+    const confirmButtons = dialog.locator('.confirm-actions button');
+    const confirmCount = await confirmButtons.count();
+    expect(confirmCount, 'кнопок в окне подтверждения').toBeGreaterThanOrEqual(2);
+    for (let i = 0; i < confirmCount; i++) {
+      await expectInside(page, confirmButtons.nth(i), `кнопка окна подтверждения №${i + 1}`);
+    }
+    await expectNoHorizontalScroll(page, 'окно подтверждения открыто');
+    await confirmButtons.last().click();
+    await expect(page.locator('[role="dialog"]:has(.confirm-actions)')).toHaveCount(0, {
+      timeout: T.action
+    });
+    await expect(drawer).toHaveCount(0, { timeout: T.action });
+    await expect(page.locator('.toast--success').first()).toBeVisible({ timeout: T.action });
+    await expect(
+      page.locator('.editor-tab', { hasText: fx().name }).locator('.tab-dirty-dot')
+    ).toBeVisible({ timeout: T.action });
+    expect(await readFixtureOnDisk(page), 'файл на диске после «Восстановить»').toBe(fx().current);
+
+    // «Закрыть» закрывает лист
+    await toggle.click();
+    await expect(drawer).toBeVisible({ timeout: T.action });
+    await page.locator('.drawer-close-btn').click();
+    await expect(drawer).toHaveCount(0, { timeout: T.action });
+
+    expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe(
+      theme
+    );
+    await guard.assertClean();
+  });
+}
