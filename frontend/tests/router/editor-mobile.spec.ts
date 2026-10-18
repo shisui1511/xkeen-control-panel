@@ -40,7 +40,14 @@ interface Fixture {
   previous: string;
 }
 
+/** Второй тестовый файл: пустой, без копий; нужен сценарию выбора файла при несохранённых правках. */
+interface AltFixture {
+  name: string;
+  path: string;
+}
+
 let fixture: Fixture | null = null;
+let altFixture: AltFixture | null = null;
 
 /** Каталог и расширение тестового файла: каталог активного ядра, его проверка точно установлена. */
 function fixtureDir(): { dir: string; ext: string } | null {
@@ -118,6 +125,25 @@ async function createFixture(page: Page, dir: string, ext: string): Promise<Fixt
   return { dir, name, path, current, previous };
 }
 
+/** Второй тестовый файл с другим именем, чем `taken`; содержимое задаёт сам create. */
+async function createAltFixture(
+  page: Page,
+  dir: string,
+  ext: string,
+  taken: string
+): Promise<AltFixture> {
+  let name = taken;
+  while (name === taken) {
+    name = `${FIXTURE_PREFIX}${randomInt(100000, 1000000)}${ext}`;
+  }
+  const path = `${dir}/${name}`;
+  expectOk(
+    await rawRequest(page, 'POST', `/api/config/create?path=${encodeURIComponent(path)}`),
+    'create alt'
+  );
+  return { name, path };
+}
+
 /** Удаляет тестовые файлы с префиксом вместе со всеми их резервными копиями. */
 async function sweepFixtures(page: Page, dir: string): Promise<void> {
   const list = await rawRequest(page, 'GET', `/api/config/list?dir=${encodeURIComponent(dir)}`);
@@ -160,6 +186,7 @@ test.beforeAll(async ({ browser }) => {
   await withPanel(browser, async (page) => {
     await sweepFixtures(page, target.dir);
     fixture = await createFixture(page, target.dir, target.ext);
+    altFixture = await createAltFixture(page, target.dir, target.ext, fixture.name);
   });
 });
 
@@ -168,12 +195,18 @@ test.afterAll(async ({ browser }) => {
   const target = fixtureDir();
   if (!target) return;
   fixture = null;
+  altFixture = null;
   await withPanel(browser, (page) => sweepFixtures(page, target.dir));
 });
 
 function fx(): Fixture {
   if (!fixture) throw new Error('тестовый файл не создан');
   return fixture;
+}
+
+function altFx(): AltFixture {
+  if (!altFixture) throw new Error('второй тестовый файл не создан');
+  return altFixture;
 }
 
 /** Открывает Редактор в заданном окне и теме и дожидается заголовка страницы. */
@@ -367,6 +400,56 @@ test('editor-mobile sheet-close vp:390', async ({ page }) => {
   await guard.assertClean();
 });
 
+test('editor-mobile sheet-pick-unsaved vp:390', async ({ page }) => {
+  test.setTimeout(90_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_PHONE);
+  await openFixtureFile(page);
+
+  // правка закрепляет вкладку: превью-вкладка с несохранёнными правками недостижима
+  await page.locator('.cm-content').first().click({ timeout: T.action });
+  await page.keyboard.press('Control+End');
+  await page.keyboard.insertText(' ');
+  const firstTab = page.locator('.editor-tab', {
+    has: page.locator(`.tab-name[title="${fx().name}"]`)
+  });
+  await expect(firstTab.locator('.tab-dirty-dot')).toBeVisible({ timeout: T.action });
+  await expect(
+    firstTab,
+    'правка не закрепила вкладку — подтверждение замены превью стало достижимым, сценарий нужно расширить'
+  ).not.toHaveClass(/\bpreview\b/);
+
+  // D-16: шторка закрывается только после того, как второй файл показан во вкладке
+  await openSheetFromToolbar(page);
+  const order = await observePickOrder(page, altFx().name);
+  expect(order.tabSeq, 'второй файл не показан во вкладке').not.toBeNull();
+  expect(
+    order.closedSeq,
+    'шторка не закрылась после выбора файла — возможно, появилось подтверждение'
+  ).not.toBeNull();
+  expect(
+    order.tabSeq!,
+    `D-16: шторка закрылась раньше, чем файл показан: шаг закрытия ${order.closedSeq}, шаг вкладки ${order.tabSeq}`
+  ).toBeLessThanOrEqual(order.closedSeq!);
+
+  // правки не потеряны: первая вкладка осталась с точкой, второй файл открыт в своей вкладке
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+  await expect(page.locator('.editor-tab')).toHaveCount(2, { timeout: T.action });
+  await expect(firstTab.locator('.tab-dirty-dot')).toBeVisible({ timeout: T.action });
+  await expect(
+    page.locator('.editor-tab.active', {
+      has: page.locator(`.tab-name[title="${altFx().name}"]`)
+    })
+  ).toHaveCount(1, { timeout: T.action });
+  await expect(page.locator(TOGGLE).first()).toHaveAttribute('aria-expanded', 'false');
+
+  // «Сохранить» не нажималось: файл на диске прежний
+  expect(await readFixtureOnDisk(page), 'правка попала на диск').toBe(fx().current);
+  await expectNoHorizontalScroll(page, 'второй файл открыт');
+  await guard.assertClean();
+});
+
 test('editor-mobile sheet-escape-modal vp:390', async ({ page }) => {
   test.setTimeout(90_000 * RT.slow);
   const dir = fx().dir;
@@ -412,6 +495,63 @@ test('editor-mobile sheet vp:768', async ({ page }) => {
 
   await guard.assertClean();
 });
+
+/**
+ * Нажимает строку файла в открытой шторке и фиксирует порядок изменений DOM: номер вызова
+ * наблюдателя, на котором появилась вкладка файла, и номер, на котором шторка закрылась (ушла из
+ * документа или стала inert). Важен порядок изменений, а не кадры: закрытие шторки до ответа
+ * сервера видно при любой скорости сети.
+ */
+async function observePickOrder(
+  page: Page,
+  fileName: string
+): Promise<{ tabSeq: number | null; closedSeq: number | null }> {
+  return page.evaluate(
+    ({ sheetSel, fileName, capMs }) =>
+      new Promise<{ tabSeq: number | null; closedSeq: number | null }>((resolve, reject) => {
+        const sheet = document.querySelector<HTMLElement>(sheetSel);
+        const row = Array.from(sheet?.querySelectorAll<HTMLButtonElement>('button.file-row') ?? [])
+          .filter((b) => b.querySelector(`.fr-name[title="${fileName}"]`) !== null)
+          .at(0);
+        if (!sheet || !row) {
+          reject(
+            new Error(`${sheetSel} button.file-row .fr-name[title="${fileName}"]: строки нет`)
+          );
+          return;
+        }
+        let seq = 0;
+        let tabSeq: number | null = null;
+        let closedSeq: number | null = null;
+        const finish = () => {
+          observer.disconnect();
+          clearTimeout(timer);
+          resolve({ tabSeq, closedSeq });
+        };
+        const observer = new MutationObserver(() => {
+          seq++;
+          if (
+            tabSeq === null &&
+            document.querySelector(`.editor-tab .tab-name[title="${fileName}"]`) !== null
+          ) {
+            tabSeq = seq;
+          }
+          if (closedSeq === null && (!sheet.isConnected || sheet.inert)) {
+            closedSeq = seq;
+          }
+          if (tabSeq !== null && closedSeq !== null) finish();
+        });
+        const timer = setTimeout(finish, capMs);
+        observer.observe(document.body, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['inert']
+        });
+        row.click();
+      }),
+    { sheetSel: SHEET, fileName, capMs: T.page }
+  );
+}
 
 interface Point {
   x: number;
