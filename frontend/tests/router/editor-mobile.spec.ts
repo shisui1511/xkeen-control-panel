@@ -537,6 +537,48 @@ test('editor-mobile sheet-pick-busy vp:390', async ({ page }) => {
   await guard.assertClean();
 });
 
+test('editor-mobile sheet-pick-twice vp:390', async ({ page }) => {
+  test.setTimeout(90_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_PHONE);
+  await openSheetFromEmpty(page);
+
+  // G-142-4-WR02: два нажатия в одной задаче; первое ставит чтение, второе приходится на его время
+  const r = await observeSheetPick(page, [fx().name, altFx().name], altFx());
+
+  // последний выбор побеждает: открыт второй файл, первого во вкладках нет
+  await expect(
+    page.locator('.editor-tab.active', {
+      has: page.locator(`.tab-name[title="${altFx().name}"]`)
+    }),
+    'G-142-4-WR02: второе нажатие потеряно — открыт не последний выбранный файл'
+  ).toHaveCount(1, { timeout: T.action });
+  await expect(
+    page.locator('.editor-tab', { has: page.locator(`.tab-name[title="${fx().name}"]`) }),
+    'первый файл открыт, хотя последним выбран второй'
+  ).toHaveCount(0);
+  await expect(page.locator('.editor-tab')).toHaveCount(1);
+
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+  await expect(page.locator(TOGGLE).first()).toHaveAttribute('aria-expanded', 'false');
+
+  expect(r.busySeq, 'строка второго файла не получила aria-busy после нажатия').not.toBeNull();
+  expect(r.tabSeq, 'второй файл не показан во вкладке').not.toBeNull();
+  expect(
+    r.busySeq!,
+    `aria-busy появился не раньше вкладки: шаг занятости ${r.busySeq}, шаг вкладки ${r.tabSeq}`
+  ).toBeLessThan(r.tabSeq!);
+  expect(r.closedSeq, 'шторка не закрылась после выбора файла').not.toBeNull();
+  expect(
+    r.tabSeq!,
+    `D-16: шторка закрылась раньше, чем показан последний выбранный файл: шаг закрытия ${r.closedSeq}, шаг вкладки ${r.tabSeq}`
+  ).toBeLessThanOrEqual(r.closedSeq!);
+
+  await expectNoHorizontalScroll(page, 'второй файл открыт');
+  await guard.assertClean();
+});
+
 test('editor-mobile sheet-escape-modal vp:390', async ({ page }) => {
   test.setTimeout(90_000 * RT.slow);
   const dir = fx().dir;
