@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { fade, fly } from 'svelte/transition';
+  import { cubicIn, cubicOut } from 'svelte/easing';
+  import { prefersReducedMotion } from 'svelte/motion';
   import { t } from '../i18n';
 
   export interface ResponsiveSidebarProps {
@@ -38,6 +41,14 @@
   );
 
   let isOverlay = $derived(overlay !== undefined ? overlay : isMediaNarrow);
+
+  // Длительность выезда и ухода шторки, мс
+  const SHEET_MOTION_MS = 200;
+  // Движение только у оверлея; в колонке на ПК панель появляется без анимации
+  let sheetMotionMs = $derived(isOverlay && !prefersReducedMotion.current ? SHEET_MOTION_MS : 0);
+  let backdropMotionMs = $derived(prefersReducedMotion.current ? 0 : SHEET_MOTION_MS);
+  // Шторка выезжает со своей стороны экрана
+  let sheetOffset = $derived(side === 'left' ? '-100%' : '100%');
 
   let customWidth = $state<number | null>(null);
   let initialWidth = $derived.by(() => {
@@ -254,6 +265,8 @@
       isSwiping = false;
     }}
     style={isOverlay ? undefined : `width: ${panelWidth}px;`}
+    in:fly={{ x: sheetOffset, opacity: 1, duration: sheetMotionMs, easing: cubicOut }}
+    out:fly={{ x: sheetOffset, opacity: 1, duration: sheetMotionMs, easing: cubicIn }}
   >
     {#if isOverlay}
       <div class="responsive-sidebar-overlay-header">
@@ -302,6 +315,8 @@
       aria-label={$t('app.close')}
       tabindex="-1"
       onclick={handleClose}
+      in:fade={{ duration: backdropMotionMs, easing: cubicOut }}
+      out:fade={{ duration: backdropMotionMs, easing: cubicIn }}
     ></button>
     {@render panel()}
   </div>
@@ -430,7 +445,6 @@
     margin: 0;
     background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
     cursor: default;
-    transition: opacity 0.2s ease-out;
   }
 
   .editor-splitter {
@@ -476,11 +490,10 @@
     width: 2px;
   }
 
+  /* Шторку и бэкдроп гасит prefersReducedMotion в скрипте; здесь — переходы сплиттера (D-15) */
   @media (prefers-reduced-motion: reduce) {
-    .responsive-sidebar-panel.overlay,
-    .responsive-sidebar-backdrop {
-      animation: none !important;
-      transition: none !important;
+    .editor-splitter::before {
+      transition: none;
     }
   }
 </style>
