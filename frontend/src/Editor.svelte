@@ -102,6 +102,11 @@
   );
   let loading = $state(false);
   let loadingPath = $state<string | null>(null);
+  // Выбор файла, сделанный во время чтения другого: последний выбор перекрывает предыдущий
+  // и открывается по окончании чтения (G-142-4-WR02)
+  let queuedPick = $state<{ path: string; isPreviewClick: boolean } | null>(null);
+  // Дерево показывает занятость у последнего выбранного файла
+  const treeBusyPath = $derived(queuedPick?.path ?? loadingPath);
   let templateLoading = $state(false);
   const pendingPins = new Set<string>();
   let saving = $state(false);
@@ -517,12 +522,32 @@
     }
   }
 
+  /** Забирает запомненный выбор файла и сбрасывает очередь */
+  function takeQueuedPick(): { path: string; isPreviewClick: boolean } | null {
+    const next = queuedPick;
+    queuedPick = null;
+    return next;
+  }
+
   /**
-   * Открывает файл во вкладке. Возвращает true, когда файл показан во вкладке; false при пустом пути,
-   * занятости загрузки, отмене подтверждения и ошибке чтения.
+   * Открывает файл во вкладке. Возвращает true, когда показан файл последнего выбора: если во время
+   * чтения выбрали другой файл, открывается он, и результат относится к нему. false — пустой путь,
+   * выбор запомнен до конца текущего чтения, отмена подтверждения, ошибка чтения без запомненного выбора.
    */
   async function loadFile(path: string, isPreviewClick = true): Promise<boolean> {
     if (!path) return false;
+
+    // Идёт чтение другого файла: выбор запоминается, последний перекрывает предыдущий. Проверка
+    // стоит до ветки существующей вкладки, иначе завершившееся чтение перебило бы показанный файл.
+    // Двойное нажатие по запомненному файлу закрепляет его вкладку.
+    if (loadingPath !== null && loadingPath !== path) {
+      queuedPick = {
+        path,
+        isPreviewClick:
+          queuedPick?.path === path ? queuedPick.isPreviewClick && isPreviewClick : isPreviewClick
+      };
+      return false;
+    }
     saveError = false;
 
     const existingTab = tabs.find((t) => t.path === path);
@@ -539,6 +564,8 @@
       if (!isPreviewClick) {
         pendingPins.add(path);
       }
+      // последний выбор снова этот файл
+      queuedPick = null;
       return false;
     }
 
@@ -552,6 +579,15 @@
 
     try {
       const content = await readConfigFile(path);
+
+      // Пока читался этот файл, выбрали другой: ответ отбрасывается до любых изменений вкладок
+      let next = takeQueuedPick();
+      if (next) {
+        loading = false;
+        loadingPath = null;
+        pendingPins.delete(path);
+        return loadFile(next.path, next.isPreviewClick);
+      }
 
       // Save active tab state before leaving
       if (activeTabPath && editorView) {
@@ -577,6 +613,8 @@
             if (!(await confirmUnsaved())) {
               loading = false;
               loadingPath = null;
+              // пользователь отменил выбор
+              queuedPick = null;
               return false;
             }
             localStorage.removeItem('editor.draft.' + previewTab.path);
@@ -648,12 +686,17 @@
       // отдельно и не задерживает закрытие шторки.
       tabs = [...tabs];
       void loadBackups(path);
+      // выбор мог появиться, пока было открыто подтверждение
+      next = takeQueuedPick();
+      if (next) return loadFile(next.path, next.isPreviewClick);
       return true;
     } catch (e: any) {
       console.error('loadFile error:', e);
       showToast('error', $t('editor.file_load_error') + ': ' + (e?.message || e));
       loading = false;
       loadingPath = null;
+      const next = takeQueuedPick();
+      if (next) return loadFile(next.path, next.isPreviewClick);
       return false;
     }
   }
@@ -1371,12 +1414,14 @@
         {selectedFile}
         activeKernel={$activeKernelName}
         overlay={isNarrow}
-        {loadingPath}
+        loadingPath={treeBusyPath}
         onClose={() => (showSidebar = false)}
         onLoadFile={async (path, isPreviewClick) => {
           const opened = await loadFile(path, isPreviewClick);
           // D-16: шторка закрывается только после того, как файл показан во вкладке; при отмене
-          // подтверждения, занятой загрузке и ошибке чтения она остаётся открытой
+          // подтверждения и ошибке чтения она остаётся открытой. Выбор во время чтения запоминается
+          // и откроется по окончании: шторку закроет обработчик первого нажатия, когда покажет
+          // последний выбранный файл
           if (opened && isNarrow) showSidebar = false;
         }}
         onCreateFile={() => {
