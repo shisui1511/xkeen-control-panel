@@ -662,3 +662,140 @@ for (const theme of THEMES) {
     await guard.assertClean();
   });
 }
+
+/** Содержимое тестового файла на диске, как его видит API. */
+async function readFixtureOnDisk(page: Page): Promise<string> {
+  const res = await rawRequest(
+    page,
+    'GET',
+    `/api/config/read?path=${encodeURIComponent(fx().path)}`
+  );
+  expectOk(res, 'read');
+  return res.text;
+}
+
+/** Высота рамки кнопки не меньше сенсорной зоны 44 px. */
+async function expectTapZone(loc: Locator, what: string): Promise<void> {
+  const b = (await loc.boundingBox())!;
+  expect(b, `${what}: нет рамки`).not.toBeNull();
+  expect(b.height, `${what}: высота ${b.height}`).toBeGreaterThanOrEqual(43.5);
+}
+
+for (const theme of THEMES) {
+  test(`editor-mobile backups theme:${theme} vp:390`, async ({ page }) => {
+    test.setTimeout(150_000 * RT.slow);
+    const guard = attachConsoleGuard(page);
+    await gotoEditor(page, VP_PHONE, theme);
+    await openFixtureFile(page);
+
+    const listRes = await rawRequest(
+      page,
+      'GET',
+      `/api/config/backups?path=${encodeURIComponent(fx().path)}`
+    );
+    expectOk(listRes, 'backups');
+    const n = asArray(listRes.text).length;
+    expect(n, `копий файла ${n}`).toBeGreaterThanOrEqual(2);
+    expect(await readFixtureOnDisk(page), 'файл на диске до сценария').toBe(fx().current);
+
+    // лист открывается на всю карточку Редактора
+    const toggle = page.locator('.backups-toggle-btn');
+    const drawer = page.locator('.editor-bottom-drawer');
+    await toggle.click({ timeout: T.page });
+    await expect(drawer).toBeVisible({ timeout: T.action });
+    await waitAnimationsDone(drawer, 'лист Backups');
+    const cardBox = (await page.locator(MAIN_CARD).first().boundingBox())!;
+    const drawerBox = (await drawer.boundingBox())!;
+    for (const k of ['x', 'y', 'width', 'height'] as const) {
+      expect(
+        Math.abs(drawerBox[k] - cardBox[k]),
+        `лист не на всю карточку: ${k} листа ${drawerBox[k]}, карточки ${cardBox[k]}`
+      ).toBeLessThanOrEqual(1);
+    }
+    await expectInside(page, drawer, 'лист Backups');
+    await expectNoHorizontalScroll(page, 'лист Backups открыт');
+
+    // экран списка: только копии, без подсказки, «Назад» и «Восстановить»
+    const items = page.locator('.backup-select-btn');
+    expect(await items.count(), 'копий в списке листа').toBe(n);
+    for (let i = 0; i < n; i++) {
+      await expect(items.nth(i)).toBeVisible();
+      await expectInside(page, items.nth(i), `копия №${i + 1}`);
+    }
+    await expect(page.locator('.drawer-back-btn')).toHaveCount(0);
+    await expect(page.locator('.drawer-empty-state')).toBeHidden();
+    await expect(page.locator('.restore-inline-btn').first()).toBeHidden();
+    const close = page.locator('.drawer-close-btn');
+    await expect(close).toBeVisible();
+    await expectInside(page, close, 'кнопка «Закрыть» листа');
+    await expectTapZone(close, 'кнопка «Закрыть» листа');
+
+    // экран сравнения: на весь лист, со строками различий, кнопки не меньше 44 px
+    await items.first().click();
+    const diff = page.locator('.diff-viewer-container');
+    await expect(diff).toBeVisible({ timeout: T.action });
+    await expect(page.locator('.diff-body .spinner')).toHaveCount(0, { timeout: T.page });
+    expect(
+      await page.locator('.diff-line-added, .diff-line-removed').count(),
+      'строк различий в сравнении'
+    ).toBeGreaterThanOrEqual(1);
+    await expect(page.locator('.drawer-sidebar')).toBeHidden();
+    const back = page.locator('.drawer-back-btn');
+    const restore = page.locator('.diff-restore-btn');
+    for (const [loc, what] of [
+      [back, '«Назад»'],
+      [restore, '«Восстановить» в сравнении']
+    ] as const) {
+      await expect(loc).toBeVisible();
+      await expectInside(page, loc, what);
+      await expectTapZone(loc, what);
+    }
+    expect(
+      await page.locator('.diff-body').evaluate((el) => getComputedStyle(el).overflowX),
+      'diff-body: overflow-x'
+    ).toBe('auto');
+    await expectNoHorizontalScroll(page, 'сравнение открыто');
+
+    // «Назад» возвращает к списку
+    await back.click();
+    await expect(items.first()).toBeVisible({ timeout: T.action });
+    await expect(diff).toBeHidden();
+
+    // «Восстановить»: окно подтверждения, подстановка в редактор без записи на диск
+    await items.first().click();
+    await expect(diff).toBeVisible({ timeout: T.action });
+    await page.locator('.diff-restore-btn').click();
+    const dialog = page.locator('[role="dialog"]:has(.confirm-actions)');
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await waitAnimationsDone(dialog, 'окно подтверждения');
+    await expectInside(page, dialog, 'окно подтверждения');
+    const confirmButtons = dialog.locator('.confirm-actions button');
+    const confirmCount = await confirmButtons.count();
+    expect(confirmCount, 'кнопок в окне подтверждения').toBeGreaterThanOrEqual(2);
+    for (let i = 0; i < confirmCount; i++) {
+      await expectInside(page, confirmButtons.nth(i), `кнопка окна подтверждения №${i + 1}`);
+    }
+    await expectNoHorizontalScroll(page, 'окно подтверждения открыто');
+    await confirmButtons.last().click();
+    await expect(page.locator('[role="dialog"]:has(.confirm-actions)')).toHaveCount(0, {
+      timeout: T.action
+    });
+    await expect(drawer).toHaveCount(0, { timeout: T.action });
+    await expect(page.locator('.toast--success').first()).toBeVisible({ timeout: T.action });
+    await expect(
+      page.locator('.editor-tab', { hasText: fx().name }).locator('.tab-dirty-dot')
+    ).toBeVisible({ timeout: T.action });
+    expect(await readFixtureOnDisk(page), 'файл на диске после «Восстановить»').toBe(fx().current);
+
+    // «Закрыть» закрывает лист
+    await toggle.click();
+    await expect(drawer).toBeVisible({ timeout: T.action });
+    await page.locator('.drawer-close-btn').click();
+    await expect(drawer).toHaveCount(0, { timeout: T.action });
+
+    expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe(
+      theme
+    );
+    await guard.assertClean();
+  });
+}
