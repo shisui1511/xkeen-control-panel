@@ -109,18 +109,23 @@
     onClose?.();
   }
 
+  // Поверхности диалогов, которым принадлежит Escape над шторкой
+  const MODAL_SURFACES = '.modal-backdrop, .confirm-modal-backdrop';
+
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && isOverlay && show) {
-      if (
-        typeof document !== 'undefined' &&
-        document.querySelector('.modal-backdrop, .confirm-modal-backdrop, .confirm-dialog-backdrop')
-      ) {
-        return;
-      }
-      e.stopPropagation();
-      e.preventDefault();
-      handleClose();
-    }
+    if (e.key !== 'Escape' || !isOverlay || !show) return;
+    // Escape уже обработал другой слой
+    if (e.defaultPrevented) return;
+    // Путь события фиксируется при отправке. Svelte делегирует keydown на корень и document и
+    // применяет закрытие модалки в microtask до вызова слушателя window; у Modal нет анимации
+    // ухода, поэтому текущий DOM модалку уже не содержит, а путь события её помнит.
+    const fromModal = e
+      .composedPath()
+      .some((node) => node instanceof Element && node.matches(MODAL_SURFACES));
+    if (fromModal || document.querySelector(MODAL_SURFACES)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    handleClose();
   }
 
   function startResize(e: PointerEvent) {
