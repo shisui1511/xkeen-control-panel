@@ -111,6 +111,11 @@
   const pendingPins = new Set<string>();
   let saving = $state(false);
   let backups = $state<string[]>([]);
+  // Путь файла, которому принадлежит список backups
+  let backupsPath = $state('');
+  // Копии показываются только для файла в редакторе: до ответа фонового запроса
+  // список пуст, копии прежнего файла не видны (WR-01)
+  const visibleBackups = $derived(backupsPath === selectedFile ? backups : []);
   let tabs = $state<EditorTab[]>([]);
   let activeTabPath = $state('');
   let breadcrumbs = $state<PathSegment[]>([]);
@@ -120,8 +125,17 @@
 
   // Drawer states
   let drawerOpen = $state(false);
-  let selectedBackup = $state('');
-  let diffGroups = $state<DiffGroup[]>([]);
+  // Смена файла в редакторе сбрасывает выбор копии и сравнение в том же обновлении:
+  // сравнение с копией другого файла недействительно (WR-01). Присваивания в
+  // selectBackup и restoreBackup перезаписывают значение до следующей смены файла.
+  let selectedBackup = $derived.by<string>(() => {
+    void selectedFile;
+    return '';
+  });
+  let diffGroups = $derived.by<DiffGroup[]>(() => {
+    void selectedFile;
+    return [];
+  });
   let backupLoading = $state(false);
   let saveWarnings = $state<PreflightWarning[]>([]);
 
@@ -191,6 +205,11 @@
   let showGeneratorModal = $state(false);
   let newFileName = $state('');
   let renameTarget = $state('');
+  // Файл, над которым открыто действие меню (переименование, удаление): файл редактора
+  // selectedFile от него не меняется, поэтому «Сохранить» пишет открытую вкладку в её файл (CR-01)
+  let menuTarget = $state('');
+  // Цель модалок переименования и удаления: файл меню, без него — файл редактора
+  const actionTarget = $derived(menuTarget || selectedFile);
 
   // Dirty state tracking
   let originalContent = $state('');
@@ -385,6 +404,7 @@
     currentDir = dir;
     selectedFile = '';
     backups = [];
+    backupsPath = '';
     originalContent = '';
     isDirty = false;
     loadFiles();
@@ -705,20 +725,30 @@
     try {
       const list = await fetchBackupsList(path);
       // Список копий грузится в фоне: ответ для уже не выбранного файла
-      // не перетирает список текущего (G-142-4-WR02).
-      if (path === selectedFile) backups = list;
+      // не перетирает список текущего (G-142-4-WR02). Список помечается путём файла:
+      // его видно только при совпадении с файлом в редакторе (WR-01).
+      if (path !== selectedFile) return;
+      backups = list;
+      backupsPath = path;
     } catch (e: any) {
       if (e?.status === 401) return;
+      if (path === selectedFile) {
+        backups = [];
+        backupsPath = path;
+      }
     }
   }
 
   async function selectBackup(backupPath: string) {
     if (selectedBackup === backupPath) return;
+    const forPath = selectedFile;
     selectedBackup = backupPath;
     backupLoading = true;
     diffGroups = [];
     try {
       const backupContent = await fetchBackupContent(backupPath);
+      // Ответ для другого файла или другой копии отбрасывается (WR-01)
+      if (selectedFile !== forPath || selectedBackup !== backupPath) return;
       const currentContent = editorView ? editorView.state.doc.toString() : '';
       diffGroups = getDiffGroups(backupContent, currentContent);
     } catch (e: any) {
@@ -927,6 +957,8 @@
   }
 
   async function restoreBackup(backupPath: string) {
+    // Подставлять можно только копию из списка текущего файла (WR-01)
+    if (!visibleBackups.includes(backupPath)) return;
     const filename = backupPath.split('/').pop() || backupPath;
     if (
       !(await showConfirm({
@@ -1052,17 +1084,20 @@
 
   function deleteFile() {
     if (!selectedFile) return;
+    menuTarget = '';
     showDeleteConfirmModal = true;
   }
 
   async function confirmDeleteFile() {
-    if (!selectedFile) return;
+    // цель берётся до любых await: файл меню либо файл редактора
+    const fileToDelete = actionTarget;
+    if (!fileToDelete) return;
+    menuTarget = '';
     showDeleteConfirmModal = false;
 
     try {
-      await deleteConfigFile(selectedFile);
+      await deleteConfigFile(fileToDelete);
       showToast('success', $t('app.delete'));
-      const fileToDelete = selectedFile;
       await closeTab(fileToDelete, true);
       await loadFiles();
     } catch (e: any) {
@@ -1073,9 +1108,9 @@
 
   async function renameFile(newName?: string) {
     const target = newName || renameTarget;
-    if (!target || !selectedFile) return;
+    const oldPath = actionTarget;
+    if (!target || !oldPath) return;
 
-    const oldPath = selectedFile;
     const newPath = oldPath.substring(0, oldPath.lastIndexOf('/') + 1) + target;
 
     try {
@@ -1089,6 +1124,7 @@
       showToast('success', $t('app.rename'));
       showRenameModal = false;
       renameTarget = '';
+      menuTarget = '';
       await loadFiles();
       await loadFile(newPath);
     } catch (e: any) {
@@ -1132,14 +1168,29 @@
   }
 
   function deleteFileByInfo(file: ConfigFileInfo) {
-    selectedFile = file.path;
-    deleteFile();
+    menuTarget = file.path;
+    showDeleteConfirmModal = true;
   }
 
-  function openBackupsForFile(file: ConfigFileInfo) {
-    selectedFile = file.path;
-    loadBackups(file.path);
+  /**
+   * Открывает файл и лист его копий. true — файл показан во вкладке (шторку можно закрыть),
+   * false — файл не открыт. Лист копий всегда относится к файлу в редакторе (CR-01, WR-03):
+   * по файлу без копий лист не открывается, показывается уведомление, а флаг листа
+   * не остаётся включённым и не накрывает следующий открытый файл.
+   */
+  async function openBackupsForFile(file: ConfigFileInfo): Promise<boolean> {
+    if (!(await loadFile(file.path))) return false;
+    // loadFile открыл запомненный выбор другого файла («последний выбор побеждает»)
+    if (selectedFile !== file.path) return true;
+    await loadBackups(file.path);
+    if (selectedFile !== file.path) return true;
+    if (visibleBackups.length === 0) {
+      drawerOpen = false;
+      showToast('info', $t('editor.no_backups'));
+      return true;
+    }
     drawerOpen = true;
+    return true;
   }
 
   function toggleSchema() {
@@ -1429,16 +1480,17 @@
           newFileName = '';
         }}
         onRenameFile={(f) => {
-          showRenameModal = true;
+          menuTarget = f.path;
           renameTarget = f.name;
-          selectedFile = f.path;
+          showRenameModal = true;
         }}
         onDuplicateFile={duplicateFile}
         onDownloadFile={downloadFileByName}
         onDeleteFile={deleteFileByInfo}
-        onViewBackups={(file) => {
-          openBackupsForFile(file);
-          if (isNarrow) showSidebar = false;
+        onViewBackups={async (file) => {
+          // D-16: шторка закрывается только после того, как файл показан, как у onLoadFile
+          const opened = await openBackupsForFile(file);
+          if (opened && isNarrow) showSidebar = false;
         }}
       />
 
@@ -1531,6 +1583,7 @@
             onDiscardDraft={discardDraft}
             onDownloadFile={downloadFile}
             onRenameFile={() => {
+              menuTarget = '';
               showRenameModal = true;
               renameTarget = selectedFile.split('/').pop() || '';
             }}
@@ -1610,7 +1663,7 @@
             {expertMode}
             {applyLoading}
             {backgroundStatusText}
-            backupCount={backups.length}
+            backupCount={visibleBackups.length}
             {drawerOpen}
             onToggleSchema={toggleSchema}
             onToggleExpertMode={toggleExpertMode}
@@ -1618,9 +1671,9 @@
           />
 
           <!-- Bottom Drawer -->
-          {#if drawerOpen && backups.length > 0}
+          {#if drawerOpen && visibleBackups.length > 0}
             <BackupSidebar
-              {backups}
+              backups={visibleBackups}
               {selectedBackup}
               {diffGroups}
               {backupLoading}
@@ -1667,11 +1720,14 @@
   initialRenameValue={renameTarget}
   {xrayDir}
   createDir={selectedFile ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : xrayDir}
-  renameDir={selectedFile ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : ''}
+  renameDir={actionTarget ? actionTarget.substring(0, actionTarget.lastIndexOf('/')) : ''}
   onCreate={createFile}
   onRename={renameFile}
   onCloseCreate={() => (showCreateModal = false)}
-  onCloseRename={() => (showRenameModal = false)}
+  onCloseRename={() => {
+    showRenameModal = false;
+    menuTarget = '';
+  }}
 />
 
 <!-- Templates Modal -->
@@ -1700,9 +1756,12 @@
 
 <DeleteFileModal
   isOpen={showDeleteConfirmModal}
-  filePath={selectedFile}
+  filePath={actionTarget}
   onConfirm={confirmDeleteFile}
-  onClose={() => (showDeleteConfirmModal = false)}
+  onClose={() => {
+    showDeleteConfirmModal = false;
+    menuTarget = '';
+  }}
 />
 
 <style>
