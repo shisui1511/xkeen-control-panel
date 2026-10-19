@@ -790,6 +790,132 @@ async function observeSheetPick(
   );
 }
 
+/** Трасса переключения файла: что видно при активной вкладке цели до ответа списка копий. */
+interface SwitchTrace {
+  /** номер вызова наблюдателя, на котором вкладка цели стала активной */
+  tabSeq: number | null;
+  /** performance.now() первого состояния, когда при активной вкладке цели видно прежнее */
+  staleAt: number | null;
+  /** что именно показало копии прежнего файла */
+  staleWhat: 'кнопка Backups' | 'лист Backups' | null;
+  /** responseEnd запроса списка копий цели (шкала performance.now()) */
+  backupsEnd: number | null;
+}
+
+/**
+ * Нажимает в `scopeSel` строку файла `target` и следит за DOM: пока активна вкладка цели, кнопка
+ * Backups не должна показывать число копий прежнего файла (`staleCount`), а лист Backups прежнего
+ * файла не должен быть живым. Важны порядок изменений DOM и одна шкала времени: окно между
+ * показом вкладки и ответом списка копий наблюдается при любой скорости сети, потому что запрос
+ * стартует только после показа вкладки. Состояние после ответа (у цели могут быть свои копии)
+ * отсекается сравнением staleAt < backupsEnd. Уходящий лист (inert, анимация 200 мс) устаревшим
+ * не считается: Svelte ставит ему inert синхронно, в том же обновлении, где сменилась вкладка.
+ * Из страницы возвращаются только числа, null и одна из двух фиксированных строк.
+ */
+async function observeBackupsSwitch(
+  page: Page,
+  scopeSel: string,
+  target: { name: string; path: string },
+  staleCount: number
+): Promise<SwitchTrace> {
+  return page.evaluate(
+    ({ scopeSel, targetName, backupsUrl, staleText, capMs }) =>
+      new Promise<SwitchTrace>((resolve, reject) => {
+        const scope = document.querySelector<HTMLElement>(scopeSel);
+        const row = Array.from(scope?.querySelectorAll<HTMLButtonElement>('button.file-row') ?? [])
+          .filter((b) => b.querySelector(`.fr-name[title="${targetName}"]`) !== null)
+          .at(0);
+        if (!scope || !row) {
+          reject(
+            new Error(`${scopeSel} button.file-row .fr-name[title="${targetName}"]: строки нет`)
+          );
+          return;
+        }
+        let seq = 0;
+        const trace: SwitchTrace = {
+          tabSeq: null,
+          staleAt: null,
+          staleWhat: null,
+          backupsEnd: null
+        };
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          observer.disconnect();
+          perf.disconnect();
+          clearTimeout(timer);
+          resolve(trace);
+        };
+        const inspect = () => {
+          const active =
+            document.querySelector(`.editor-tab.active .tab-name[title="${targetName}"]`) !== null;
+          if (!active) return;
+          if (trace.tabSeq === null) trace.tabSeq = seq;
+          if (trace.staleAt !== null) return;
+          const btn = document.querySelector('.backups-toggle-btn');
+          if ((btn?.textContent ?? '').includes(staleText)) {
+            trace.staleAt = performance.now();
+            trace.staleWhat = 'кнопка Backups';
+            return;
+          }
+          const drawer = document.querySelector<HTMLElement>('.editor-bottom-drawer');
+          if (drawer !== null && !drawer.inert) {
+            trace.staleAt = performance.now();
+            trace.staleWhat = 'лист Backups';
+          }
+        };
+        let settling = false;
+        const check = () => {
+          if (trace.tabSeq === null || trace.backupsEnd === null || settling) return;
+          settling = true;
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              inspect();
+              finish();
+            })
+          );
+        };
+        const observer = new MutationObserver(() => {
+          seq++;
+          inspect();
+          check();
+        });
+        const perf = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            if (trace.backupsEnd === null && entry.name.includes(backupsUrl)) {
+              trace.backupsEnd = (entry as PerformanceResourceTiming).responseEnd;
+            }
+          }
+          check();
+        });
+        const timer = setTimeout(finish, capMs);
+        observer.observe(document.body, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributes: true
+        });
+        perf.observe({ type: 'resource' });
+        row.click();
+      }),
+    {
+      scopeSel,
+      targetName: target.name,
+      backupsUrl: '/api/config/backups?path=' + encodeURIComponent(target.path),
+      staleText: `(${staleCount})`,
+      capMs: T.page
+    }
+  );
+}
+
+/** Число копий файла по API панели. */
+async function countBackups(page: Page, path: string): Promise<number> {
+  const res = await rawRequest(page, 'GET', `/api/config/backups?path=${encodeURIComponent(path)}`);
+  expectOk(res, 'backups');
+  return asArray(res.text).length;
+}
+
 interface Point {
   x: number;
   y: number;
@@ -1290,3 +1416,93 @@ for (const theme of THEMES) {
     await guard.assertClean();
   });
 }
+
+test('editor-mobile backups-switch vp:390', async ({ page }) => {
+  test.setTimeout(120_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_PHONE);
+  await openFixtureFile(page);
+
+  const n = await countBackups(page, fx().path);
+  const m = await countBackups(page, altFx().path);
+  expect(n, `копий первого файла ${n}`).toBeGreaterThanOrEqual(2);
+  expect(m, 'сценарий не различает списки: у файлов одинаковое число копий').not.toBe(n);
+  const toggle = page.locator('.backups-toggle-btn');
+  await expect(toggle).toContainText(`(${n})`, { timeout: T.page });
+
+  await openSheetFromToolbar(page);
+  const r = await observeBackupsSwitch(page, SHEET, altFx(), n);
+  expect(r.tabSeq, 'второй файл не показан во вкладке').not.toBeNull();
+  expect(r.backupsEnd, 'ответ списка копий второго файла не пойман').not.toBeNull();
+  expect(
+    r.staleAt !== null && r.staleAt < r.backupsEnd!,
+    `WR-01: после переключения на второй файл ${r.staleWhat} показывает копии прежнего файла (${n}) до ответа списка копий`
+  ).toBe(false);
+
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  if (m === 0) {
+    await expect(toggle).toHaveCount(0, { timeout: T.page });
+  } else {
+    await expect(toggle).toContainText(`(${m})`, { timeout: T.page });
+  }
+  await expectNoHorizontalScroll(page, 'второй файл открыт');
+  await guard.assertClean();
+});
+
+test('editor-mobile backups-switch vp:1280', async ({ page }) => {
+  test.setTimeout(120_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_DESKTOP);
+  const column = page.locator('.file-tree-pane');
+  const rowOf = (name: string) =>
+    column.locator(`.file-row:has(.fr-name[title="${name}"])`).first();
+  await rowOf(fx().name).click({ timeout: T.page });
+  await expect(page.locator('.editor-tab', { hasText: fx().name }).first()).toBeVisible({
+    timeout: T.page
+  });
+  await expect(page.locator('.cm-content').first()).toBeVisible({ timeout: T.page });
+
+  const n = await countBackups(page, fx().path);
+  const m = await countBackups(page, altFx().path);
+  expect(n, `копий первого файла ${n}`).toBeGreaterThanOrEqual(2);
+  expect(m, 'сценарий не различает списки: у файлов одинаковое число копий').not.toBe(n);
+  const toggle = page.locator('.backups-toggle-btn');
+  await expect(toggle).toContainText(`(${n})`, { timeout: T.page });
+
+  const drawer = page.locator('.editor-bottom-drawer');
+  await toggle.click();
+  await expect(drawer).toBeVisible({ timeout: T.action });
+  await page.locator('.backup-select-btn').first().click();
+  await expect(page.locator('.diff-viewer-container')).toBeVisible({ timeout: T.action });
+  await expect(page.locator('.diff-body .spinner')).toHaveCount(0, { timeout: T.page });
+
+  const r = await observeBackupsSwitch(page, '.file-tree-pane', altFx(), n);
+  expect(r.tabSeq, 'второй файл не показан во вкладке').not.toBeNull();
+  expect(r.backupsEnd, 'ответ списка копий второго файла не пойман').not.toBeNull();
+  expect(
+    r.staleAt !== null && r.staleAt < r.backupsEnd!,
+    `WR-01: после переключения на второй файл ${r.staleWhat} показывает копии прежнего файла (${n}) до ответа списка копий`
+  ).toBe(false);
+
+  // узел листа уходит 200 мс: ожидание с автоповтором, без фиксированных пауз
+  await expect(drawer).toHaveCount(0, { timeout: T.page });
+  if (m === 0) {
+    await expect(toggle).toHaveCount(0, { timeout: T.page });
+  } else {
+    await expect(toggle).toContainText(`(${m})`, { timeout: T.page });
+  }
+
+  // лист на ПК остаётся открытым при смене файла (прежнее поведение)
+  await rowOf(fx().name).click({ timeout: T.action });
+  await expect(toggle).toContainText(`(${n})`, { timeout: T.page });
+  await expect(drawer).toBeVisible({ timeout: T.action });
+  await expect(
+    page.locator('.diff-viewer-container'),
+    'WR-01: выбор копии и сравнение не сброшены после смены файла'
+  ).toHaveCount(0);
+  await expect(page.locator('.drawer-empty-state')).toBeVisible({ timeout: T.action });
+
+  await toggle.click();
+  await expect(drawer).toHaveCount(0, { timeout: T.action });
+  await guard.assertClean();
+});
