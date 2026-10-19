@@ -111,6 +111,11 @@
   const pendingPins = new Set<string>();
   let saving = $state(false);
   let backups = $state<string[]>([]);
+  // Путь файла, которому принадлежит список backups
+  let backupsPath = $state('');
+  // Копии показываются только для файла в редакторе: до ответа фонового запроса
+  // список пуст, копии прежнего файла не видны (WR-01)
+  const visibleBackups = $derived(backupsPath === selectedFile ? backups : []);
   let tabs = $state<EditorTab[]>([]);
   let activeTabPath = $state('');
   let breadcrumbs = $state<PathSegment[]>([]);
@@ -120,8 +125,17 @@
 
   // Drawer states
   let drawerOpen = $state(false);
-  let selectedBackup = $state('');
-  let diffGroups = $state<DiffGroup[]>([]);
+  // Смена файла в редакторе сбрасывает выбор копии и сравнение в том же обновлении:
+  // сравнение с копией другого файла недействительно (WR-01). Присваивания в
+  // selectBackup и restoreBackup перезаписывают значение до следующей смены файла.
+  let selectedBackup = $derived.by<string>(() => {
+    void selectedFile;
+    return '';
+  });
+  let diffGroups = $derived.by<DiffGroup[]>(() => {
+    void selectedFile;
+    return [];
+  });
   let backupLoading = $state(false);
   let saveWarnings = $state<PreflightWarning[]>([]);
 
@@ -385,6 +399,7 @@
     currentDir = dir;
     selectedFile = '';
     backups = [];
+    backupsPath = '';
     originalContent = '';
     isDirty = false;
     loadFiles();
@@ -705,20 +720,30 @@
     try {
       const list = await fetchBackupsList(path);
       // Список копий грузится в фоне: ответ для уже не выбранного файла
-      // не перетирает список текущего (G-142-4-WR02).
-      if (path === selectedFile) backups = list;
+      // не перетирает список текущего (G-142-4-WR02). Список помечается путём файла:
+      // его видно только при совпадении с файлом в редакторе (WR-01).
+      if (path !== selectedFile) return;
+      backups = list;
+      backupsPath = path;
     } catch (e: any) {
       if (e?.status === 401) return;
+      if (path === selectedFile) {
+        backups = [];
+        backupsPath = path;
+      }
     }
   }
 
   async function selectBackup(backupPath: string) {
     if (selectedBackup === backupPath) return;
+    const forPath = selectedFile;
     selectedBackup = backupPath;
     backupLoading = true;
     diffGroups = [];
     try {
       const backupContent = await fetchBackupContent(backupPath);
+      // Ответ для другого файла или другой копии отбрасывается (WR-01)
+      if (selectedFile !== forPath || selectedBackup !== backupPath) return;
       const currentContent = editorView ? editorView.state.doc.toString() : '';
       diffGroups = getDiffGroups(backupContent, currentContent);
     } catch (e: any) {
@@ -927,6 +952,8 @@
   }
 
   async function restoreBackup(backupPath: string) {
+    // Подставлять можно только копию из списка текущего файла (WR-01)
+    if (!visibleBackups.includes(backupPath)) return;
     const filename = backupPath.split('/').pop() || backupPath;
     if (
       !(await showConfirm({
@@ -1610,7 +1637,7 @@
             {expertMode}
             {applyLoading}
             {backgroundStatusText}
-            backupCount={backups.length}
+            backupCount={visibleBackups.length}
             {drawerOpen}
             onToggleSchema={toggleSchema}
             onToggleExpertMode={toggleExpertMode}
@@ -1618,9 +1645,9 @@
           />
 
           <!-- Bottom Drawer -->
-          {#if drawerOpen && backups.length > 0}
+          {#if drawerOpen && visibleBackups.length > 0}
             <BackupSidebar
-              {backups}
+              backups={visibleBackups}
               {selectedBackup}
               {diffGroups}
               {backupLoading}
