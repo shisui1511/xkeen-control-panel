@@ -1690,6 +1690,28 @@ test('editor-mobile menu-save-target vp:390', async ({ page, browser }) => {
     ).not.toContain(d.name);
     await expectDisk('после «Удалить → подтвердить»');
 
+    // «История бэкапов» по F: файл открывается во вкладке, F на диске прежний
+    await editA();
+    await openSheetFromToolbar(page);
+    const menu4 = await openFileMenu(page, f.name);
+    await menu4.locator('.ctx-item').nth(CTX_BACKUPS).click();
+    await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+    await expect(
+      page.locator(`.editor-tab.active .tab-name[title="${f.name}"]`),
+      'CR-01: «История бэкапов» не открыла файл из меню — «Сохранить» нацелено не на открытую вкладку'
+    ).toHaveCount(1, { timeout: T.page });
+    await expect(page.locator('.editor-bottom-drawer')).toHaveCount(0);
+    await tabA.click({ timeout: T.action });
+    await expect(page.locator(`.editor-tab.active .tab-name[title="${a.name}"]`)).toHaveCount(1, {
+      timeout: T.page
+    });
+    await saveActiveFile(page);
+    expect(
+      await readOnDisk(page, f.path),
+      'CR-01: после «История бэкапов» «Сохранить» записало открытую вкладку в файл из меню'
+    ).toBe(origin.f);
+    await expectDisk('после «История бэкапов»');
+
     await expectNoHorizontalScroll(page, 'действия меню выполнены');
     await guard.assertClean();
   } finally {
@@ -1697,4 +1719,62 @@ test('editor-mobile menu-save-target vp:390', async ({ page, browser }) => {
       for (const x of created) await deleteFileWithBackups(pg, x.path);
     });
   }
+});
+
+test('editor-mobile menu-backups vp:390', async ({ page }) => {
+  test.setTimeout(150_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  await gotoEditor(page, VP_PHONE);
+  // Редактор пуст: вкладок нет
+  await openSheetFromEmpty(page);
+
+  const n = await countBackups(page, fx().path);
+  const m = await countBackups(page, altFx().path);
+  expect(n, `копий первого файла ${n}`).toBeGreaterThanOrEqual(2);
+  expect(m, 'у второго тестового файла есть копии — сценарий пустого списка не проверяется').toBe(
+    0
+  );
+
+  const drawer = page.locator('.editor-bottom-drawer');
+  const activeTab = (name: string) => page.locator(`.editor-tab.active .tab-name[title="${name}"]`);
+
+  // файл с копиями: файл открыт, лист виден со всеми копиями из API
+  const menu1 = await openFileMenu(page, fx().name);
+  await menu1.locator('.ctx-item').nth(CTX_BACKUPS).click();
+  await expect(
+    activeTab(fx().name),
+    'WR-03: «История бэкапов» из шторки при пустом Редакторе не открыли файл'
+  ).toHaveCount(1, { timeout: T.page });
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(drawer, 'WR-03: лист копий не открылся').toBeVisible({ timeout: T.page });
+  await expect(page.locator('.backup-select-btn'), 'WR-03: в листе не все копии файла').toHaveCount(
+    n,
+    { timeout: T.action }
+  );
+  await page.locator('.drawer-close-btn').click();
+  await expect(drawer).toHaveCount(0, { timeout: T.action });
+
+  // файл без копий: файл открыт, листа нет, есть уведомление
+  await openSheetFromToolbar(page);
+  const menu2 = await openFileMenu(page, altFx().name);
+  await menu2.locator('.ctx-item').nth(CTX_BACKUPS).click();
+  await expect(activeTab(altFx().name)).toHaveCount(1, { timeout: T.page });
+  await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+  await expect(
+    page.locator('.toast--info').first(),
+    'нет уведомления об отсутствии копий'
+  ).toBeVisible({ timeout: T.action });
+  await expect(drawer).toHaveCount(0);
+
+  // флаг листа не остался включённым: следующий файл открывается без листа
+  await openSheetFromToolbar(page);
+  await pickFileInSheet(page, fx().name);
+  await expect(page.locator('.backups-toggle-btn')).toContainText(`(${n})`, { timeout: T.page });
+  await expect(
+    drawer,
+    'WR-03: лист копий открылся сам после выбора файла: флаг листа остался от действия меню'
+  ).toHaveCount(0);
+
+  await expectNoHorizontalScroll(page, 'история бэкапов из меню');
+  await guard.assertClean();
 });
