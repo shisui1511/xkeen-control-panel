@@ -1,3 +1,16 @@
+<script module lang="ts">
+  import { parse as bestEffortParse } from 'best-effort-json-parser';
+
+  // Текст после JSON-значения — ввод пользователя, его показывает диагностика линтера разбора.
+  // Обработчик библиотеки по умолчанию писал в console.error весь текст документа. Модуль
+  // выполняется один раз при первом импорте Редактора, до запуска линтеров, и меняет свойство той
+  // же функции parse, которую импортирует codemirror-json-schema: копия пакета одна
+  // (CR-02, todo editor-json-extra-tokens-console-error).
+  bestEffortParse.onExtraToken = () => {
+    // намеренно пусто: см. комментарий выше
+  };
+</script>
+
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
   import { t as translate, currentLang, type Lang } from '../../i18n';
