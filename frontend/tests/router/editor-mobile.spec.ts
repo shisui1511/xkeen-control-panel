@@ -146,6 +146,29 @@ async function createAltFixture(
   return { name, path };
 }
 
+/** Удаляет файл вместе со всеми его резервными копиями; 404 не ошибка. */
+async function deleteFileWithBackups(page: Page, path: string): Promise<void> {
+  const q = encodeURIComponent(path);
+  const backups = await rawRequest(page, 'GET', `/api/config/backups?path=${q}`);
+  if (backups.status === 200) {
+    for (const b of asArray(backups.text)) {
+      if (typeof b !== 'string') continue;
+      const res = await rawRequest(
+        page,
+        'POST',
+        `/api/config/delete?path=${encodeURIComponent(b)}`
+      );
+      if (res.status !== 200 && res.status !== 404) {
+        throw new Error(`уборка: удаление копии HTTP ${res.status}`);
+      }
+    }
+  }
+  const res = await rawRequest(page, 'POST', `/api/config/delete?path=${q}`);
+  if (res.status !== 200 && res.status !== 404) {
+    throw new Error(`уборка: удаление файла HTTP ${res.status}`);
+  }
+}
+
 /** Удаляет тестовые файлы с префиксом вместе со всеми их резервными копиями. */
 async function sweepFixtures(page: Page, dir: string): Promise<void> {
   const list = await rawRequest(page, 'GET', `/api/config/list?dir=${encodeURIComponent(dir)}`);
@@ -158,27 +181,42 @@ async function sweepFixtures(page: Page, dir: string): Promise<void> {
       typeof (f as { path?: unknown }).path === 'string' &&
       (f as { name: string }).name.startsWith(FIXTURE_PREFIX)
   );
-  for (const f of stale) {
-    const q = encodeURIComponent(f.path);
-    const backups = await rawRequest(page, 'GET', `/api/config/backups?path=${q}`);
-    if (backups.status === 200) {
-      for (const b of asArray(backups.text)) {
-        if (typeof b !== 'string') continue;
-        const res = await rawRequest(
-          page,
-          'POST',
-          `/api/config/delete?path=${encodeURIComponent(b)}`
-        );
-        if (res.status !== 200 && res.status !== 404) {
-          throw new Error(`уборка: удаление копии HTTP ${res.status}`);
-        }
-      }
-    }
-    const res = await rawRequest(page, 'POST', `/api/config/delete?path=${q}`);
-    if (res.status !== 200 && res.status !== 404) {
-      throw new Error(`уборка: удаление файла HTTP ${res.status}`);
-    }
+  for (const f of stale) await deleteFileWithBackups(page, f.path);
+}
+
+/**
+ * Временный файл теста: пустой, без копий. Удаляется самим тестом, остатки прерванных прогонов
+ * убирает уборка по префиксу. Имя не из `taken` и не совпадает с общими тестовыми файлами.
+ */
+async function createScratchFile(page: Page, taken: string[]): Promise<AltFixture> {
+  const target = fixtureDir();
+  if (!target) throw new Error('активное ядро стенда не определено');
+  let name = '';
+  while (name === '' || taken.includes(name) || name === fx().name || name === altFx().name) {
+    name = `${FIXTURE_PREFIX}${randomInt(100000, 1000000)}${target.ext}`;
   }
+  const path = `${target.dir}/${name}`;
+  expectOk(
+    await rawRequest(page, 'POST', `/api/config/create?path=${encodeURIComponent(path)}`),
+    'create scratch'
+  );
+  return { name, path };
+}
+
+/** Содержимое файла на диске, как его видит API. */
+async function readOnDisk(page: Page, path: string): Promise<string> {
+  const res = await rawRequest(page, 'GET', `/api/config/read?path=${encodeURIComponent(path)}`);
+  expectOk(res, 'read');
+  return res.text;
+}
+
+/** Имена файлов каталога по API панели. */
+async function listNames(page: Page, dir: string): Promise<string[]> {
+  const res = await rawRequest(page, 'GET', `/api/config/list?dir=${encodeURIComponent(dir)}`);
+  expectOk(res, 'list');
+  return asArray(res.text)
+    .map((f) => (typeof f === 'object' && f !== null ? (f as { name?: unknown }).name : undefined))
+    .filter((n): n is string => typeof n === 'string');
 }
 
 test.beforeAll(async ({ browser }) => {
@@ -299,9 +337,8 @@ async function openSheetFromToolbar(page: Page): Promise<void> {
   await waitSheetSettled(page);
 }
 
-/** Выбор тестового файла в открытой шторке: шторка закрывается, файл открыт во вкладке с кодом. */
-async function pickFixtureInSheet(page: Page): Promise<void> {
-  const name = fx().name;
+/** Выбор файла по имени в открытой шторке: шторка закрывается, файл открыт во вкладке с кодом. */
+async function pickFileInSheet(page: Page, name: string): Promise<void> {
   const row = page.locator(SHEET).locator(`.file-row:has(.fr-name[title="${name}"])`).first();
   await row.click({ timeout: T.action });
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
@@ -309,6 +346,11 @@ async function pickFixtureInSheet(page: Page): Promise<void> {
     timeout: T.page
   });
   await expect(page.locator('.cm-content').first()).toBeVisible({ timeout: T.page });
+}
+
+/** Выбор тестового файла в открытой шторке. */
+async function pickFixtureInSheet(page: Page): Promise<void> {
+  await pickFileInSheet(page, fx().name);
 }
 
 async function openFixtureFile(page: Page): Promise<void> {
@@ -824,7 +866,7 @@ async function observeBackupsSwitch(
         const scope = document.querySelector<HTMLElement>(scopeSel);
         const row = Array.from(scope?.querySelectorAll<HTMLButtonElement>('button.file-row') ?? [])
           .filter((b) => b.querySelector(`.fr-name[title="${targetName}"]`) !== null)
-          .at(0);
+          .shift();
         if (!scope || !row) {
           reject(
             new Error(`${scopeSel} button.file-row .fr-name[title="${targetName}"]: строки нет`)
@@ -914,6 +956,42 @@ async function countBackups(page: Page, path: string): Promise<number> {
   const res = await rawRequest(page, 'GET', `/api/config/backups?path=${encodeURIComponent(path)}`);
   expectOk(res, 'backups');
   return asArray(res.text).length;
+}
+
+// Порядок пунктов контекстного меню файла: переименовать, дублировать, скачать, «История
+// бэкапов», удалить (последний — .ctx-item.ctx-danger). openFileMenu проверяет их число.
+const CTX_RENAME = 0;
+const CTX_BACKUPS = 3;
+
+/** Правый клик по строке файла в открытой шторке: меню файла с заголовком и пятью пунктами. */
+async function openFileMenu(page: Page, name: string): Promise<Locator> {
+  const row = page.locator(SHEET).locator(`button.file-row:has(.fr-name[title="${name}"])`).first();
+  await row.click({ button: 'right', timeout: T.action });
+  const menu = page.locator('.file-context-menu');
+  await expect(menu).toBeVisible({ timeout: T.action });
+  await expect(menu.locator('.ctx-header')).toContainText(name);
+  expect(
+    await menu.locator('.ctx-item').count(),
+    'порядок пунктов меню файла изменился — сценарий выбирает пункт по номеру'
+  ).toBe(5);
+  return menu;
+}
+
+/** «Сохранить» активной вкладки: меню «Ещё» на узком экране, окно подтверждения, запись. */
+async function saveActiveFile(page: Page): Promise<void> {
+  const more = page.locator('.btn-overflow-trigger');
+  if (await more.isVisible()) {
+    await more.click();
+    await page.locator('.overflow-dropdown .dropdown-item').first().click();
+  } else {
+    await page.locator('.eph-right .btn-desktop-only').first().click();
+  }
+  const dialog = page.locator('.modal-backdrop:has(.confirm-modal-actions)');
+  await expect(dialog).toBeVisible({ timeout: T.action });
+  await waitAnimationsDone(dialog, 'окно сохранения');
+  await dialog.locator('.confirm-modal-actions button').last().click();
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0, { timeout: T.save });
+  await expect(page.locator('.toast--success').first()).toBeVisible({ timeout: T.action });
 }
 
 interface Point {
@@ -1209,15 +1287,9 @@ for (const theme of THEMES) {
   });
 }
 
-/** Содержимое тестового файла на диске, как его видит API. */
+/** Содержимое общего тестового файла на диске, как его видит API. */
 async function readFixtureOnDisk(page: Page): Promise<string> {
-  const res = await rawRequest(
-    page,
-    'GET',
-    `/api/config/read?path=${encodeURIComponent(fx().path)}`
-  );
-  expectOk(res, 'read');
-  return res.text;
+  return readOnDisk(page, fx().path);
 }
 
 /** Высота рамки кнопки не меньше сенсорной зоны 44 px. */
@@ -1505,4 +1577,124 @@ test('editor-mobile backups-switch vp:1280', async ({ page }) => {
   await toggle.click();
   await expect(drawer).toHaveCount(0, { timeout: T.action });
   await guard.assertClean();
+});
+
+test('editor-mobile menu-save-target vp:390', async ({ page, browser }) => {
+  test.setTimeout(240_000 * RT.slow);
+  const dir = fixtureDir()!.dir;
+  const created: AltFixture[] = [];
+  try {
+    // A открыт в редакторе, F — цель отменяемых действий, D — удаляется
+    const origin = await withPanel(browser, async (pg) => {
+      const x = await createScratchFile(pg, []);
+      created.push(x);
+      const y = await createScratchFile(pg, [x.name]);
+      created.push(y);
+      const z = await createScratchFile(pg, [x.name, y.name]);
+      created.push(z);
+      return { files: [x, y, z], a: await readOnDisk(pg, x.path), f: await readOnDisk(pg, y.path) };
+    });
+    const [a, f, d] = origin.files;
+
+    const guard = attachConsoleGuard(page);
+    await gotoEditor(page, VP_PHONE);
+    await openSheetFromEmpty(page);
+    await pickFileInSheet(page, a.name);
+    const tabA = page.locator('.editor-tab', { has: page.locator(`.tab-name[title="${a.name}"]`) });
+
+    // правка вкладки A: пробел в конце документа, ядро принимает запись
+    let edits = 0;
+    const editA = async () => {
+      edits++;
+      await page.locator('.cm-content').first().click({ timeout: T.action });
+      await page.keyboard.press('Control+End');
+      await page.keyboard.insertText(' ');
+      await expect(tabA.locator('.tab-dirty-dot')).toBeVisible({ timeout: T.action });
+    };
+    const expectDisk = async (what: string) => {
+      const got = await readOnDisk(page, a.path);
+      expect(got, `CR-01: ${what}: открытая вкладка не сохранена в свой файл`).toBe(
+        origin.a + ' '.repeat(edits)
+      );
+    };
+
+    // «Переименовать → Отмена»
+    await editA();
+    await openSheetFromToolbar(page);
+    const menu1 = await openFileMenu(page, f.name);
+    await menu1.locator('.ctx-item').nth(CTX_RENAME).click();
+    await expect(page.locator('.modal-backdrop')).toBeVisible({ timeout: T.action });
+    await expect(
+      page.locator('#rename-target'),
+      'цель переименования — не файл из меню'
+    ).toHaveValue(f.name);
+    await page.locator('.modal-backdrop .confirm-modal-actions .btn-secondary').click();
+    await expect(page.locator('.modal-backdrop')).toHaveCount(0, { timeout: T.action });
+    await page.locator(CLOSE_BTN).click();
+    await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+    await saveActiveFile(page);
+    expect(
+      await readOnDisk(page, f.path),
+      'CR-01: после «Переименовать → Отмена» «Сохранить» записало открытую вкладку в файл из меню'
+    ).toBe(origin.f);
+    await expectDisk('после «Переименовать → Отмена»');
+    await openSheetFromToolbar(page);
+    await expect(
+      page.locator(SHEET).locator('.file-row.active'),
+      'CR-01: в дереве выбран файл из меню, а не открытый'
+    ).toHaveCount(1);
+    await expect(
+      page.locator(SHEET).locator(`.file-row.active:has(.fr-name[title="${a.name}"])`)
+    ).toHaveCount(1);
+    await page.locator(CLOSE_BTN).click();
+    await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+
+    // «Удалить → Отмена»
+    await editA();
+    await openSheetFromToolbar(page);
+    const menu2 = await openFileMenu(page, f.name);
+    await menu2.locator('.ctx-item.ctx-danger').click();
+    await expect(page.locator('.modal-backdrop')).toContainText(f.name, { timeout: T.action });
+    await page.locator('.modal-backdrop .confirm-modal-actions .btn-secondary').click();
+    await expect(page.locator('.modal-backdrop')).toHaveCount(0, { timeout: T.action });
+    await page.locator(CLOSE_BTN).click();
+    await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+    await saveActiveFile(page);
+    expect(
+      await readOnDisk(page, f.path),
+      'CR-01: после «Удалить → Отмена» «Сохранить» записало открытую вкладку в файл из меню'
+    ).toBe(origin.f);
+    await expectDisk('после «Удалить → Отмена»');
+
+    // «Удалить → подтвердить» по неоткрытому файлу D
+    await editA();
+    await openSheetFromToolbar(page);
+    const menu3 = await openFileMenu(page, d.name);
+    await menu3.locator('.ctx-item.ctx-danger').click();
+    await expect(page.locator('.modal-backdrop')).toContainText(d.name, { timeout: T.action });
+    await page.locator('.modal-backdrop .confirm-modal-actions .btn-danger').click();
+    await expect(page.locator('.modal-backdrop')).toHaveCount(0, { timeout: T.action });
+    await expect(
+      page.locator(SHEET).locator(`button.file-row:has(.fr-name[title="${d.name}"])`)
+    ).toHaveCount(0, { timeout: T.action });
+    await expect(
+      page.locator(`.editor-tab.active .tab-name[title="${a.name}"]`),
+      'CR-01: после удаления файла меню активна не вкладка открытого файла'
+    ).toHaveCount(1);
+    await page.locator(CLOSE_BTN).click();
+    await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
+    await saveActiveFile(page);
+    expect(
+      await listNames(page, dir),
+      'CR-01: «Сохранить» создало заново удалённый файл'
+    ).not.toContain(d.name);
+    await expectDisk('после «Удалить → подтвердить»');
+
+    await expectNoHorizontalScroll(page, 'действия меню выполнены');
+    await guard.assertClean();
+  } finally {
+    await withPanel(browser, async (pg) => {
+      for (const x of created) await deleteFileWithBackups(pg, x.path);
+    });
+  }
 });
