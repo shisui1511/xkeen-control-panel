@@ -1778,3 +1778,121 @@ test('editor-mobile menu-backups vp:390', async ({ page }) => {
   await expectNoHorizontalScroll(page, 'история бэкапов из меню');
   await guard.assertClean();
 });
+
+test('editor-mobile backups-collapsed vp:390', async ({ page, browser }) => {
+  test.setTimeout(150_000 * RT.slow);
+  let scratch: AltFixture | null = null;
+  try {
+    // комментарии и пустой объект — верный JSONC (Xray) и YAML (Mihomo): ядро запись принимает
+    const mark = fixtureDir()!.ext === '.json' ? '//' : '#';
+    const lines = ['{}'];
+    for (let i = 1; i <= 12; i++) lines.push(`${mark} zz_e2e_line_${String(i).padStart(2, '0')}`);
+    const previous = lines.join('\n') + '\n';
+    const current = [...lines, `${mark} ${LONG_DIFF_LINE}`].join('\n') + '\n';
+
+    const idx = await withPanel(browser, async (pg) => {
+      const made = await createScratchFile(pg, []);
+      scratch = made;
+      const q = encodeURIComponent(made.path);
+      expectOk(await rawRequest(pg, 'POST', `/api/config/save?path=${q}`, previous), 'save 1');
+      // имя копии с точностью до секунды: вторая запись должна попасть в другую секунду
+      await pg.waitForTimeout(1100);
+      expectOk(await rawRequest(pg, 'POST', `/api/config/save?path=${q}`, current), 'save 2');
+
+      const list = await rawRequest(pg, 'GET', `/api/config/backups?path=${q}`);
+      expectOk(list, 'backups');
+      const paths = asArray(list.text).filter((b): b is string => typeof b === 'string');
+      expect(paths.length, `копий файла ${paths.length}`).toBeGreaterThanOrEqual(2);
+      const texts: string[] = [];
+      for (const b of paths) texts.push(await readOnDisk(pg, b));
+      const found = texts.indexOf(previous);
+      expect(
+        found,
+        'нет копии с исходным текстом — сравнение не даст свёрнутой группы'
+      ).toBeGreaterThanOrEqual(0);
+      return { k: paths.length, found };
+    });
+    const file = scratch as AltFixture | null;
+    if (!file) throw new Error('временный файл не создан');
+
+    const guard = attachConsoleGuard(page);
+    await gotoEditor(page, VP_PHONE);
+    await openSheetFromEmpty(page);
+    await pickFileInSheet(page, file.name);
+
+    const toggle = page.locator('.backups-toggle-btn');
+    await expect(toggle).toContainText(`(${idx.k})`, { timeout: T.page });
+    await toggle.click({ timeout: T.page });
+    const drawer = page.locator('.editor-bottom-drawer');
+    await expect(drawer).toBeVisible({ timeout: T.action });
+    await waitAnimationsDone(drawer, 'лист Backups');
+    await page.locator('.backup-select-btn').nth(idx.found).click();
+    await expect(page.locator('.diff-viewer-container')).toBeVisible({ timeout: T.action });
+    await expect(page.locator('.diff-body .spinner')).toHaveCount(0, { timeout: T.page });
+
+    expect(
+      await page.locator('.diff-line-collapsed').count(),
+      'в сравнении нет свёрнутых строк — сценарий не проверяет подпись'
+    ).toBeGreaterThanOrEqual(1);
+    await expect(
+      page.locator('.diff-line-added', { hasText: LONG_DIFF_LINE }),
+      'длинная строка не попала в сравнение'
+    ).toHaveCount(1, { timeout: T.action });
+
+    // прямоугольник текста подписи берётся по содержимому строки: от разметки не зависит
+    const m = await page.locator('.diff-body').evaluate((el) => {
+      const row = el.querySelector<HTMLElement>('.diff-line-collapsed');
+      if (!row) throw new Error('свёрнутая строка не найдена');
+      const box = el.getBoundingClientRect();
+      const left = box.left + el.clientLeft;
+      const label = () => {
+        const range = document.createRange();
+        range.selectNodeContents(row);
+        const r = range.getBoundingClientRect();
+        return { left: r.left, right: r.right };
+      };
+      el.scrollLeft = 0;
+      const atStart = label();
+      el.scrollLeft = el.scrollWidth;
+      const scrolled = el.scrollLeft;
+      const atEnd = label();
+      el.scrollLeft = 0;
+      return {
+        areaLeft: left,
+        areaRight: left + el.clientWidth,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        scrolled,
+        atStart,
+        atEnd
+      };
+    });
+    expect(
+      m.scrollWidth,
+      'длинная строка не дала горизонтальной прокрутки — сценарий не проверяет подпись'
+    ).toBeGreaterThan(m.clientWidth + 1);
+    expect(m.scrolled, '.diff-body не сдвигается по горизонтали').toBeGreaterThan(0);
+    const eps = 0.5;
+    const area = `видимая область ${m.areaLeft}–${m.areaRight}`;
+    expect(
+      m.atStart.left >= m.areaLeft - eps && m.atStart.right <= m.areaRight + eps,
+      `WR-02: подпись свёрнутых строк за краем листа при scrollLeft = 0: подпись ${m.atStart.left}–${m.atStart.right}, ${area}`
+    ).toBe(true);
+    expect(
+      m.atEnd.left >= m.areaLeft - eps && m.atEnd.right <= m.areaRight + eps,
+      `WR-02: подпись свёрнутых строк уходит из вида при горизонтальной прокрутке: подпись ${m.atEnd.left}–${m.atEnd.right}, ${area}`
+    ).toBe(true);
+
+    await expectNoHorizontalScroll(page, 'сравнение со свёрнутыми строками');
+    await page.locator('.drawer-close-btn').click();
+    await expect(drawer).toHaveCount(0, { timeout: T.action });
+    await guard.assertClean();
+  } finally {
+    const left = scratch as AltFixture | null;
+    if (left) {
+      await withPanel(browser, async (pg) => {
+        await deleteFileWithBackups(pg, left.path);
+      });
+    }
+  }
+});
