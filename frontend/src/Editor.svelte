@@ -721,21 +721,29 @@
     }
   }
 
-  async function loadBackups(path: string) {
+  /** Исход запроса списка копий: `ok` и `stale` — список получен, `error` — нет. */
+  type BackupsLoadResult =
+    | { kind: 'ok' }
+    | { kind: 'stale' }
+    | { kind: 'unauthorized' }
+    | { kind: 'error'; message: string };
+
+  async function loadBackups(path: string): Promise<BackupsLoadResult> {
     try {
       const list = await fetchBackupsList(path);
       // Список копий грузится в фоне: ответ для уже не выбранного файла
       // не перетирает список текущего (G-142-4-WR02). Список помечается путём файла:
       // его видно только при совпадении с файлом в редакторе (WR-01).
-      if (path !== selectedFile) return;
+      if (path !== selectedFile) return { kind: 'stale' };
       backups = list;
       backupsPath = path;
+      return { kind: 'ok' };
     } catch (e: any) {
-      if (e?.status === 401) return;
-      if (path === selectedFile) {
-        backups = [];
-        backupsPath = path;
-      }
+      if (e?.status === 401) return { kind: 'unauthorized' };
+      // «Копий нет» и «список не получен» различаются (WR-03). Поздний сбой
+      // фонового запроса не обнуляет уже показанный список и не закрывает
+      // открытый лист (IN-02 ревью).
+      return { kind: 'error', message: e?.message || String(e) };
     }
   }
 
@@ -1195,14 +1203,24 @@
    * Открывает файл и лист его копий. true — файл показан во вкладке (шторку можно закрыть),
    * false — файл не открыт. Лист копий всегда относится к файлу в редакторе (CR-01, WR-03):
    * по файлу без копий лист не открывается, показывается уведомление, а флаг листа
-   * не остаётся включённым и не накрывает следующий открытый файл.
+   * не остаётся включённым и не накрывает следующий открытый файл. «Нет сохранённых бэкапов» —
+   * только при успешном пустом списке; если список не получен, показывается уведомление
+   * об ошибке и лист не открывается (WR-03). Возврат true по-прежнему значит «файл показан»
+   * (D-16, шторку можно закрыть).
    */
   async function openBackupsForFile(file: ConfigFileInfo): Promise<boolean> {
     if (!(await loadFile(file.path))) return false;
     // loadFile открыл запомненный выбор другого файла («последний выбор побеждает»)
     if (selectedFile !== file.path) return true;
-    await loadBackups(file.path);
-    if (selectedFile !== file.path) return true;
+    const res = await loadBackups(file.path);
+    if (selectedFile !== file.path || res.kind === 'stale' || res.kind === 'unauthorized') {
+      return true;
+    }
+    if (res.kind === 'error') {
+      drawerOpen = false;
+      showToast('error', $t('editor.backups_load_error') + ': ' + res.message);
+      return true;
+    }
     if (visibleBackups.length === 0) {
       drawerOpen = false;
       showToast('info', $t('editor.no_backups'));

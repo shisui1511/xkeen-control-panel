@@ -153,9 +153,13 @@ export async function downloadConfigFile(file: ConfigFileInfo): Promise<void> {
   downloadContent(file.name, content);
 }
 
+/**
+ * Список резервных копий файла. Ответ не 2xx — ошибка с текстом сервера, а не пустой список:
+ * «копий нет» и «список не получен» различаются (WR-03).
+ */
 export async function fetchBackupsList(path: string): Promise<string[]> {
   const res = await apiFetch(`/api/config/backups?path=${encodeURIComponent(path)}`);
-  if (!res.ok) return [];
+  if (!res.ok) throw await readConfigOpError(res);
   const data = await res.json();
   return Array.isArray(data) ? data : [];
 }

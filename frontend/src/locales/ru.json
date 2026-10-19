@@ -281,6 +281,7 @@
   "editor.configs": "Конфиги",
   "editor.backups": "Backups",
   "editor.no_backups": "Нет сохранённых бэкапов",
+  "editor.backups_load_error": "Ошибка загрузки списка бэкапов",
   "editor.select_file": "Выберите файл для редактирования",
   "editor.empty_state_body": "Откройте файл из боковой панели слева или создайте новый конфиг",
   "editor.empty_state_body_touch": "Откройте файл из списка или создайте новый",
