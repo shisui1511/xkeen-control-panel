@@ -957,8 +957,19 @@
   }
 
   async function restoreBackup(backupPath: string) {
-    // Подставлять можно только копию из списка текущего файла (WR-01)
-    if (!visibleBackups.includes(backupPath)) return;
+    // «Восстановить» подставляет копию только в файл, для которого её нажали.
+    // Пока открыто подтверждение или читается копия, на ПК можно открыть другой
+    // файл из колонки (лист копий при этом жив). Без сверки после каждого
+    // ожидания копия прежнего файла попала бы в новый (WR-01 ревью 19.10,
+    // T-142-36). Копия, которой уже нет в списке (ротация после «Сохранить»),
+    // тоже не восстанавливается молча.
+    const forPath = selectedFile;
+    const stillValid = () => selectedFile === forPath && visibleBackups.includes(backupPath);
+    const abortStale = () => showToast('info', $t('editor.restore_stale'));
+    if (!stillValid()) {
+      abortStale();
+      return;
+    }
     const filename = backupPath.split('/').pop() || backupPath;
     if (
       !(await showConfirm({
@@ -970,9 +981,17 @@
       }))
     )
       return;
+    if (!stillValid()) {
+      abortStale();
+      return;
+    }
 
     try {
       const content = await fetchBackupContent(backupPath);
+      if (!stillValid()) {
+        abortStale();
+        return;
+      }
 
       if (editorView) {
         editorView.dispatch({

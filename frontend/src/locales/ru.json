@@ -302,6 +302,7 @@
   "editor.delete_error": "Ошибка удаления",
   "editor.rename_error": "Ошибка переименования",
   "editor.restore_error": "Ошибка восстановления",
+  "editor.restore_stale": "Бэкап не восстановлен: открыт другой файл или список бэкапов изменился",
   "editor.show_files": "Показать файлы",
   "editor.select_file_for_yaml": "Пожалуйста, выберите файл в панели слева для вставки YAML.",
   "editor.hide_sidebar": "Скрыть сайдбар",

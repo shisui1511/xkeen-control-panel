@@ -305,6 +305,7 @@
   "editor.delete_error": "Delete error",
   "editor.rename_error": "Rename error",
   "editor.restore_error": "Restore error",
+  "editor.restore_stale": "Backup not restored: another file is open or the backup list has changed",
   "editor.show_files": "Show files",
   "editor.select_file_for_yaml": "Please select a file from the left panel to insert YAML.",
   "editor.hide_sidebar": "Hide sidebar",
