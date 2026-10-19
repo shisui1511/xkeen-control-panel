@@ -1,5 +1,5 @@
 // e2e-pages: editor
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { randomInt } from 'node:crypto';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
@@ -14,6 +14,11 @@ import { withPanel } from './lib/nodes-api';
 // «Сохранить» не нажимается. Стенд меняется только временным файлом с префиксом TAIL_PREFIX:
 // файл создаётся через API панели до сценария и удаляется после (afterAll), остатки прерванных
 // прогонов убираются по префиксу перед созданием.
+//
+// WR-02 (ревью 19.10): два сценария value-missing и value-unquoted вводят значение, с которого
+// библиотека разбора не умеет начинать (`}` или слово без кавычек). Раньше это давало
+// console.error «no parser registered» с остатком документа. Консоль должна остаться чистой, а
+// ошибка быть видна диагностикой линтера.
 
 const VP_DESKTOP = { width: 1280, height: 800 };
 
@@ -151,10 +156,12 @@ async function readOnDisk(page: Page, path: string): Promise<string> {
   return res.text;
 }
 
-test('editor-json-tail extra-tokens vp:1280', async ({ page }) => {
-  test.setTimeout(90_000 * RT.slow);
-  const guard = attachConsoleGuard(page);
-  const { name, path } = tf();
+/**
+ * Открывает тестовый файл в Редакторе на десктопном viewport и проверяет, что сценарий не пройдёт
+ * вхолостую: схема включена, экспертный режим выключен. Возвращает локатор вкладки файла.
+ */
+async function openTailFile(page: Page): Promise<Locator> {
+  const { name } = tf();
 
   await page.setViewportSize(VP_DESKTOP);
   await page.goto('/#/editor');
@@ -184,6 +191,32 @@ test('editor-json-tail extra-tokens vp:1280', async ({ page }) => {
     /(^|\s)active(\s|$)/,
     { timeout: T.action }
   );
+  return tab;
+}
+
+/**
+ * Ждёт диагностику линтера разбора. Оба линтера идут одним проходом @codemirror/lint: диагностика
+ * ставится после ответа всех источников, поэтому к её появлению линтер схемы уже разобрал
+ * документ, и console.error, если бы он был, уже прозвучал.
+ */
+async function expectParseErrorShown(page: Page, what: string): Promise<void> {
+  await expect
+    .poll(
+      () => page.locator('.cm-editor .cm-lintPoint-error, .cm-editor .cm-lintRange-error').count(),
+      {
+        message: `линтер не отметил ${what}: разбор документа не запускался`,
+        timeout: T.action
+      }
+    )
+    .toBeGreaterThan(0);
+}
+
+test('editor-json-tail extra-tokens vp:1280', async ({ page }) => {
+  test.setTimeout(90_000 * RT.slow);
+  const guard = attachConsoleGuard(page);
+  const { path } = tf();
+
+  const tab = await openTailFile(page);
 
   const original = await readOnDisk(page, path);
 
@@ -194,18 +227,7 @@ test('editor-json-tail extra-tokens vp:1280', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(tab.first().locator('.tab-dirty-dot')).toBeVisible({ timeout: T.action });
 
-  // оба линтера идут одним проходом @codemirror/lint: диагностика ставится после ответа всех
-  // источников, поэтому к её появлению линтер схемы уже разобрал документ, и console.error,
-  // если бы он был, уже прозвучал
-  await expect
-    .poll(
-      () => page.locator('.cm-editor .cm-lintPoint-error, .cm-editor .cm-lintRange-error').count(),
-      {
-        message: 'линтер не отметил текст после JSON: разбор документа не запускался',
-        timeout: T.action
-      }
-    )
-    .toBeGreaterThan(0);
+  await expectParseErrorShown(page, 'текст после JSON');
 
   expect(await readOnDisk(page, path), 'правка попала на диск без нажатия «Сохранить»').toBe(
     original
@@ -213,3 +235,43 @@ test('editor-json-tail extra-tokens vp:1280', async ({ page }) => {
 
   await guard.assertClean();
 });
+
+// Значение начинается с символа, для которого у библиотеки разбора нет парсера (`}` или буква,
+// кроме t/f/n). Первая запись — обычный набор: closeBrackets даёт `{}`, пользователь вводит ключ
+// и ждёт дольше задержки линтера. Синтетические токены не похожи на конфиги стенда.
+const VALUE_CASES = [
+  { id: 'value-missing', text: '"zz_e2e_key": ', what: 'ключ без значения' },
+  { id: 'value-unquoted', text: '"zz_e2e_key": zz_e2e_bare', what: 'значение без кавычек' }
+] as const;
+
+for (const c of VALUE_CASES) {
+  test(`editor-json-tail ${c.id} vp:1280`, async ({ page }) => {
+    test.setTimeout(90_000 * RT.slow);
+    const guard = attachConsoleGuard(page);
+    const { path } = tf();
+
+    const tab = await openTailFile(page);
+
+    const original = await readOnDisk(page, path);
+
+    // текст вводится только в редактор: курсор между `{` и `}` документа `{}` с диска, документ
+    // становится `{"zz_e2e_key": }` или `{"zz_e2e_key": zz_e2e_bare}`; многосимвольная вставка не
+    // вызывает автозакрытие скобок и кавычек
+    await page.locator('.cm-content').first().click({ timeout: T.action });
+    await page.keyboard.press('Control+End');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.insertText(c.text);
+    await page.keyboard.press('Escape');
+    await expect(tab.first().locator('.tab-dirty-dot')).toBeVisible({ timeout: T.action });
+
+    // у `{}` с диска нет диагностик (корневые схемы без `required`), поэтому диагностика
+    // появляется только после прохода линтера по набранному документу
+    await expectParseErrorShown(page, c.what);
+
+    expect(await readOnDisk(page, path), 'правка попала на диск без нажатия «Сохранить»').toBe(
+      original
+    );
+
+    await guard.assertClean();
+  });
+}
