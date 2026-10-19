@@ -30,6 +30,9 @@ const TOGGLE = '.btn-sidebar-toggle';
 const SHOW_FILES = '.editor-empty-actions .btn-secondary';
 const MAIN_CARD = '.editor-main-card';
 // синтетическая строка без пробелов, шире листа на 390 px; вводится в редактор и на диск не сохраняется
+// текст временного файла отличается от обеих копий fixture (`{}` и `{}` с переводом строки),
+// иначе подстановку копии не видно по признаку несохранённых правок
+const SCRATCH_TEXT = '{}\n\n\n';
 const LONG_DIFF_LINE = 'zz_e2e_long_' + '0123456789'.repeat(15);
 
 interface Fixture {
@@ -1532,62 +1535,173 @@ test('editor-mobile backups-switch vp:390', async ({ page }) => {
   await guard.assertClean();
 });
 
-test('editor-mobile backups-switch vp:1280', async ({ page }) => {
-  test.setTimeout(120_000 * RT.slow);
-  const guard = attachConsoleGuard(page);
-  await gotoEditor(page, VP_DESKTOP);
-  const column = page.locator('.file-tree-pane');
-  const rowOf = (name: string) =>
-    column.locator(`.file-row:has(.fr-name[title="${name}"])`).first();
-  await rowOf(fx().name).click({ timeout: T.page });
-  await expect(page.locator('.editor-tab', { hasText: fx().name }).first()).toBeVisible({
-    timeout: T.page
-  });
-  await expect(page.locator('.cm-content').first()).toBeVisible({ timeout: T.page });
+test('editor-mobile backups-switch vp:1280', async ({ page, browser }) => {
+  test.setTimeout(150_000 * RT.slow);
+  const created: AltFixture[] = [];
+  try {
+    // временный файл X для шага «Восстановить во время смены файла»: создаётся до перехода,
+    // чтобы строка X попала в колонку при загрузке страницы
+    const x = await withPanel(browser, async (pg) => {
+      const file = await createScratchFile(pg, []);
+      created.push(file);
+      expectOk(
+        await rawRequest(
+          pg,
+          'POST',
+          `/api/config/save?path=${encodeURIComponent(file.path)}`,
+          SCRATCH_TEXT
+        ),
+        'save scratch'
+      );
+      return file;
+    });
 
-  const n = await countBackups(page, fx().path);
-  const m = await countBackups(page, altFx().path);
-  expect(n, `копий первого файла ${n}`).toBeGreaterThanOrEqual(2);
-  expect(m, 'сценарий не различает списки: у файлов одинаковое число копий').not.toBe(n);
-  const toggle = page.locator('.backups-toggle-btn');
-  await expect(toggle).toContainText(`(${n})`, { timeout: T.page });
+    const guard = attachConsoleGuard(page);
+    await gotoEditor(page, VP_DESKTOP);
+    const column = page.locator('.file-tree-pane');
+    const rowOf = (name: string) =>
+      column.locator(`.file-row:has(.fr-name[title="${name}"])`).first();
+    await rowOf(fx().name).click({ timeout: T.page });
+    await expect(page.locator('.editor-tab', { hasText: fx().name }).first()).toBeVisible({
+      timeout: T.page
+    });
+    await expect(page.locator('.cm-content').first()).toBeVisible({ timeout: T.page });
 
-  const drawer = page.locator('.editor-bottom-drawer');
-  await toggle.click();
-  await expect(drawer).toBeVisible({ timeout: T.action });
-  await page.locator('.backup-select-btn').first().click();
-  await expect(page.locator('.diff-viewer-container')).toBeVisible({ timeout: T.action });
-  await expect(page.locator('.diff-body .spinner')).toHaveCount(0, { timeout: T.page });
+    const n = await countBackups(page, fx().path);
+    const m = await countBackups(page, altFx().path);
+    expect(n, `копий первого файла ${n}`).toBeGreaterThanOrEqual(2);
+    expect(m, 'сценарий не различает списки: у файлов одинаковое число копий').not.toBe(n);
+    const toggle = page.locator('.backups-toggle-btn');
+    await expect(toggle).toContainText(`(${n})`, { timeout: T.page });
 
-  const r = await observeBackupsSwitch(page, '.file-tree-pane', altFx(), n);
-  expect(r.tabSeq, 'второй файл не показан во вкладке').not.toBeNull();
-  expect(r.backupsEnd, 'ответ списка копий второго файла не пойман').not.toBeNull();
-  expect(
-    r.staleAt !== null && r.staleAt < r.backupsEnd!,
-    `WR-01: после переключения на второй файл ${r.staleWhat} показывает копии прежнего файла (${n}) до ответа списка копий`
-  ).toBe(false);
+    const drawer = page.locator('.editor-bottom-drawer');
+    await toggle.click();
+    await expect(drawer).toBeVisible({ timeout: T.action });
+    await page.locator('.backup-select-btn').first().click();
+    await expect(page.locator('.diff-viewer-container')).toBeVisible({ timeout: T.action });
+    await expect(page.locator('.diff-body .spinner')).toHaveCount(0, { timeout: T.page });
 
-  // узел листа уходит 200 мс: ожидание с автоповтором, без фиксированных пауз
-  await expect(drawer).toHaveCount(0, { timeout: T.page });
-  if (m === 0) {
-    await expect(toggle).toHaveCount(0, { timeout: T.page });
-  } else {
-    await expect(toggle).toContainText(`(${m})`, { timeout: T.page });
+    const r = await observeBackupsSwitch(page, '.file-tree-pane', altFx(), n);
+    expect(r.tabSeq, 'второй файл не показан во вкладке').not.toBeNull();
+    expect(r.backupsEnd, 'ответ списка копий второго файла не пойман').not.toBeNull();
+    expect(
+      r.staleAt !== null && r.staleAt < r.backupsEnd!,
+      `WR-01: после переключения на второй файл ${r.staleWhat} показывает копии прежнего файла (${n}) до ответа списка копий`
+    ).toBe(false);
+
+    // узел листа уходит 200 мс: ожидание с автоповтором, без фиксированных пауз
+    await expect(drawer).toHaveCount(0, { timeout: T.page });
+    if (m === 0) {
+      await expect(toggle).toHaveCount(0, { timeout: T.page });
+    } else {
+      await expect(toggle).toContainText(`(${m})`, { timeout: T.page });
+    }
+
+    // лист на ПК остаётся открытым при смене файла (прежнее поведение)
+    await rowOf(fx().name).click({ timeout: T.action });
+    await expect(toggle).toContainText(`(${n})`, { timeout: T.page });
+    await expect(drawer).toBeVisible({ timeout: T.action });
+    await expect(
+      page.locator('.diff-viewer-container'),
+      'WR-01: выбор копии и сравнение не сброшены после смены файла'
+    ).toHaveCount(0);
+    await expect(page.locator('.drawer-empty-state')).toBeVisible({ timeout: T.action });
+
+    await toggle.click();
+    await expect(drawer).toHaveCount(0, { timeout: T.action });
+
+    // WR-01 ревью 19.10: «Восстановить» во время смены файла на ПК. Лист копий fixture открыт,
+    // пользователь нажимает файл X в колонке и, пока X читается, «Восстановить» у копии fixture.
+    // Подтверждение приходит уже после показа X: копия fixture не должна попасть в X.
+    const copies = asArray(
+      (await rawRequest(page, 'GET', `/api/config/backups?path=${encodeURIComponent(fx().path)}`))
+        .text
+    ).filter((b): b is string => typeof b === 'string');
+    expect(copies.length, 'у файла fixture нет копий').toBeGreaterThanOrEqual(1);
+    const xText = await readOnDisk(page, x.path);
+    for (const b of copies) {
+      expect(
+        await readOnDisk(page, b),
+        'сценарий не различит подстановку: копия fixture совпадает с текстом временного файла'
+      ).not.toBe(xText);
+    }
+    await expect(
+      page.locator(`.editor-tab .tab-name[title="${x.name}"]`),
+      'у временного файла уже есть вкладка: loadFile не пойдёт в сеть, окна гонки нет'
+    ).toHaveCount(0);
+    await expect(column.locator(`.file-row:has(.fr-name[title="${x.name}"])`).first()).toBeVisible({
+      timeout: T.page
+    });
+
+    await toggle.click();
+    await expect(drawer).toBeVisible({ timeout: T.action });
+    await expect(page.locator('.backup-item')).toHaveCount(n, { timeout: T.action });
+
+    // оба нажатия в одном такте страницы: чтение X уже идёт, а «Восстановить» проверяет копию
+    // до смены файла. Так сценарий ревью воспроизводится детерминированно, без пауз и подмены сети
+    await page.evaluate((name) => {
+      const nameEl = document.querySelector(`.file-tree-pane .fr-name[title="${name}"]`);
+      const row = nameEl?.closest('button.file-row');
+      if (!(row instanceof HTMLElement)) {
+        throw new Error(`не найдена строка файла: .file-tree-pane button.file-row ${name}`);
+      }
+      const restore = document.querySelector(
+        '.editor-bottom-drawer .backup-item .restore-inline-btn'
+      );
+      if (!(restore instanceof HTMLElement)) {
+        throw new Error(
+          'не найдена кнопка: .editor-bottom-drawer .backup-item .restore-inline-btn'
+        );
+      }
+      row.click();
+      restore.click();
+    }, x.name);
+
+    const confirm = page.locator('[role="dialog"]:has(.confirm-actions)');
+    await expect(confirm, 'Восстановить не открыло подтверждение').toBeVisible({
+      timeout: T.action
+    });
+    await expect(
+      page.locator(`.editor-tab.active .tab-name[title="${x.name}"]`),
+      'второй файл не показан, пока открыто подтверждение'
+    ).toHaveCount(1, { timeout: T.page });
+    await expect(page.locator('.cm-content').first()).toBeVisible({ timeout: T.page });
+
+    await waitAnimationsDone(confirm, 'окно подтверждения');
+    await confirm.locator('.confirm-actions button').last().click();
+    await expect(confirm).toHaveCount(0, { timeout: T.action });
+
+    const staleToast = page.locator('.toast--info', {
+      hasText: /Бэкап не восстановлен|Backup not restored/
+    });
+    const restoredToast = page.locator('.toast--success', {
+      hasText: /Backup восстановлен|Backup restored/
+    });
+    await expect(
+      staleToast.or(restoredToast).first(),
+      'Восстановить не завершилось: нет ни уведомления об отмене, ни уведомления о восстановлении'
+    ).toBeVisible({ timeout: T.action });
+    // исход определён: проверки ниже не проходят вхолостую
+    await expect(
+      page.locator(`.editor-tab:has(.tab-name[title="${x.name}"]) .tab-dirty-dot`),
+      'WR-01 restore: копия прежнего файла подставлена во второй файл после подтверждения — вкладка второго файла с несохранёнными правками'
+    ).toHaveCount(0);
+    await expect(
+      restoredToast,
+      'WR-01 restore: показано «Backup восстановлен» для копии прежнего файла'
+    ).toHaveCount(0);
+    await expect(staleToast.first()).toBeVisible({ timeout: T.action });
+    await expect(page.locator(`.editor-tab.active .tab-name[title="${x.name}"]`)).toHaveCount(1);
+    expect(await readOnDisk(page, x.path), 'WR-01 restore: временный файл на диске изменился').toBe(
+      xText
+    );
+
+    await guard.assertClean();
+  } finally {
+    await withPanel(browser, async (pg) => {
+      for (const f of created) await deleteFileWithBackups(pg, f.path);
+    });
   }
-
-  // лист на ПК остаётся открытым при смене файла (прежнее поведение)
-  await rowOf(fx().name).click({ timeout: T.action });
-  await expect(toggle).toContainText(`(${n})`, { timeout: T.page });
-  await expect(drawer).toBeVisible({ timeout: T.action });
-  await expect(
-    page.locator('.diff-viewer-container'),
-    'WR-01: выбор копии и сравнение не сброшены после смены файла'
-  ).toHaveCount(0);
-  await expect(page.locator('.drawer-empty-state')).toBeVisible({ timeout: T.action });
-
-  await toggle.click();
-  await expect(drawer).toHaveCount(0, { timeout: T.action });
-  await guard.assertClean();
 });
 
 test('editor-mobile menu-save-target vp:390', async ({ page, browser }) => {
