@@ -1876,6 +1876,14 @@ test('editor-mobile menu-backups vp:390', async ({ page }) => {
     n,
     { timeout: T.action }
   );
+  // Путь ошибки списка копий на настоящем стенде без подмены сети не воспроизводится: сервер
+  // отвечает не 2xx только при отказе валидатора пути или ошибке шаблона, а для прочитанного
+  // файла оба уже пройдены. Сценарий держит оба успешных пути: точный текст E5 empty ниже и
+  // отсутствие уведомления об ошибке у обоих.
+  await expect(
+    page.locator('.toast--error'),
+    'WR-03: при успешном списке копий показано уведомление об ошибке'
+  ).toHaveCount(0);
   await page.locator('.drawer-close-btn').click();
   await expect(drawer).toHaveCount(0, { timeout: T.action });
 
@@ -1886,9 +1894,13 @@ test('editor-mobile menu-backups vp:390', async ({ page }) => {
   await expect(activeTab(altFx().name)).toHaveCount(1, { timeout: T.page });
   await expect(page.locator(SHEET)).toHaveCount(0, { timeout: T.action });
   await expect(
-    page.locator('.toast--info').first(),
-    'нет уведомления об отсутствии копий'
+    page.locator('.toast--info', { hasText: /Нет сохранённых бэкапов|No saved backups/ }).first(),
+    'WR-03: нет уведомления «Нет сохранённых бэкапов» при успешном пустом списке'
   ).toBeVisible({ timeout: T.action });
+  await expect(
+    page.locator('.toast--error'),
+    'WR-03: при успешном пустом списке показано уведомление об ошибке'
+  ).toHaveCount(0);
   await expect(drawer).toHaveCount(0);
 
   // флаг листа не остался включённым: следующий файл открывается без листа
