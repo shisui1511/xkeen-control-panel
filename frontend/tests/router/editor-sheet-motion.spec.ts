@@ -159,7 +159,8 @@ interface InterruptResult {
 /**
  * Нажимает «Закрыть» и, пока шторка уезжает, открывает её снова. Повторное открытие во время
  * ухода возобновляет ту же ветку Svelte вместе с её менеджерами переходов — именно на этом пути
- * держался кеш длительности ухода (G-142-4-WR01).
+ * держался кеш длительности ухода (G-142-4-WR01). Кнопка повторного открытия ищется в кадре
+ * ухода: на пустом экране Редактора она есть только при закрытой шторке.
  */
 async function interruptClose(page: Page, reopen: string): Promise<InterruptResult> {
   return page.evaluate(
@@ -167,20 +168,14 @@ async function interruptClose(page: Page, reopen: string): Promise<InterruptResu
       new Promise<InterruptResult>((resolve, reject) => {
         const pane = document.querySelector<HTMLElement>('.file-tree-pane.overlay');
         const closeBtn = document.querySelector<HTMLElement>(closeSel);
-        const reopenBtn = document.querySelector<HTMLElement>(reopenSel);
-        const missing = !pane
-          ? '.file-tree-pane.overlay'
-          : !closeBtn
-            ? closeSel
-            : !reopenBtn
-              ? reopenSel
-              : null;
-        if (missing !== null || !pane || !closeBtn || !reopenBtn) {
+        const missing = !pane ? '.file-tree-pane.overlay' : !closeBtn ? closeSel : null;
+        if (missing !== null || !pane || !closeBtn) {
           reject(new Error(`нет элемента ${missing}`));
           return;
         }
         const t0 = performance.now();
         let reopenedAt: number | null = null;
+        let reopenMissing = false;
         closeBtn.click();
         const tick = () => {
           const t = performance.now() - t0;
@@ -194,12 +189,18 @@ async function interruptClose(page: Page, reopen: string): Promise<InterruptResu
             return;
           }
           if (current === null || t >= limit) {
-            resolve({ interrupted: false, resumed: false, reopenedAt: null });
+            if (reopenMissing) reject(new Error(`нет элемента ${reopenSel} во время ухода шторки`));
+            else resolve({ interrupted: false, resumed: false, reopenedAt: null });
             return;
           }
           if (current === pane && pane.inert && pane.getAnimations().length > 0) {
-            reopenBtn.click();
-            reopenedAt = t;
+            const reopenBtn = document.querySelector<HTMLElement>(reopenSel);
+            if (reopenBtn) {
+              reopenBtn.click();
+              reopenedAt = t;
+            } else {
+              reopenMissing = true;
+            }
           }
           requestAnimationFrame(tick);
         };
