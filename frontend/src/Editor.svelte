@@ -205,6 +205,11 @@
   let showGeneratorModal = $state(false);
   let newFileName = $state('');
   let renameTarget = $state('');
+  // Файл, над которым открыто действие меню (переименование, удаление): файл редактора
+  // selectedFile от него не меняется, поэтому «Сохранить» пишет открытую вкладку в её файл (CR-01)
+  let menuTarget = $state('');
+  // Цель модалок переименования и удаления: файл меню, без него — файл редактора
+  const actionTarget = $derived(menuTarget || selectedFile);
 
   // Dirty state tracking
   let originalContent = $state('');
@@ -1079,17 +1084,20 @@
 
   function deleteFile() {
     if (!selectedFile) return;
+    menuTarget = '';
     showDeleteConfirmModal = true;
   }
 
   async function confirmDeleteFile() {
-    if (!selectedFile) return;
+    // цель берётся до любых await: файл меню либо файл редактора
+    const fileToDelete = actionTarget;
+    if (!fileToDelete) return;
+    menuTarget = '';
     showDeleteConfirmModal = false;
 
     try {
-      await deleteConfigFile(selectedFile);
+      await deleteConfigFile(fileToDelete);
       showToast('success', $t('app.delete'));
-      const fileToDelete = selectedFile;
       await closeTab(fileToDelete, true);
       await loadFiles();
     } catch (e: any) {
@@ -1100,9 +1108,9 @@
 
   async function renameFile(newName?: string) {
     const target = newName || renameTarget;
-    if (!target || !selectedFile) return;
+    const oldPath = actionTarget;
+    if (!target || !oldPath) return;
 
-    const oldPath = selectedFile;
     const newPath = oldPath.substring(0, oldPath.lastIndexOf('/') + 1) + target;
 
     try {
@@ -1116,6 +1124,7 @@
       showToast('success', $t('app.rename'));
       showRenameModal = false;
       renameTarget = '';
+      menuTarget = '';
       await loadFiles();
       await loadFile(newPath);
     } catch (e: any) {
@@ -1159,8 +1168,8 @@
   }
 
   function deleteFileByInfo(file: ConfigFileInfo) {
-    selectedFile = file.path;
-    deleteFile();
+    menuTarget = file.path;
+    showDeleteConfirmModal = true;
   }
 
   function openBackupsForFile(file: ConfigFileInfo) {
@@ -1456,9 +1465,9 @@
           newFileName = '';
         }}
         onRenameFile={(f) => {
-          showRenameModal = true;
+          menuTarget = f.path;
           renameTarget = f.name;
-          selectedFile = f.path;
+          showRenameModal = true;
         }}
         onDuplicateFile={duplicateFile}
         onDownloadFile={downloadFileByName}
@@ -1558,6 +1567,7 @@
             onDiscardDraft={discardDraft}
             onDownloadFile={downloadFile}
             onRenameFile={() => {
+              menuTarget = '';
               showRenameModal = true;
               renameTarget = selectedFile.split('/').pop() || '';
             }}
@@ -1694,11 +1704,14 @@
   initialRenameValue={renameTarget}
   {xrayDir}
   createDir={selectedFile ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : xrayDir}
-  renameDir={selectedFile ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : ''}
+  renameDir={actionTarget ? actionTarget.substring(0, actionTarget.lastIndexOf('/')) : ''}
   onCreate={createFile}
   onRename={renameFile}
   onCloseCreate={() => (showCreateModal = false)}
-  onCloseRename={() => (showRenameModal = false)}
+  onCloseRename={() => {
+    showRenameModal = false;
+    menuTarget = '';
+  }}
 />
 
 <!-- Templates Modal -->
@@ -1727,9 +1740,12 @@
 
 <DeleteFileModal
   isOpen={showDeleteConfirmModal}
-  filePath={selectedFile}
+  filePath={actionTarget}
   onConfirm={confirmDeleteFile}
-  onClose={() => (showDeleteConfirmModal = false)}
+  onClose={() => {
+    showDeleteConfirmModal = false;
+    menuTarget = '';
+  }}
 />
 
 <style>
