@@ -529,10 +529,12 @@ test('editor-mobile sheet-pick-busy vp:390', async ({ page }) => {
   const r = await observeSheetPick(page, [fx().name], fx());
   expect(r.closedSeq, 'шторка не закрылась после выбора файла').not.toBeNull();
   expect(r.backupsEnd, 'ответ списка копий файла не пойман').not.toBeNull();
+  // список, показанный позже конца трассы, тоже показан после закрытия; что он показан вообще,
+  // проверяет число в кнопке Backups ниже
   expect(
-    r.closedAt!,
-    `G-142-4-WR02: шторка закрылась только после ответа списка копий: закрытие ${r.closedAt} мс, конец ответа ${r.backupsEnd} мс`
-  ).toBeLessThan(r.backupsEnd!);
+    r.backupsSeq === null || r.closedSeq! < r.backupsSeq,
+    `G-142-4-WR02: шторка закрылась только после показа списка копий: шаг закрытия ${r.closedSeq}, шаг списка ${r.backupsSeq}`
+  ).toBe(true);
   expect(r.tabSeq, 'файл не показан во вкладке').not.toBeNull();
   expect(
     r.tabSeq!,
@@ -727,7 +729,7 @@ async function observePickOrder(
   );
 }
 
-/** Трасса выбора файла в шторке: порядок изменений DOM и метки времени одной шкалы. */
+/** Трасса выбора файла в шторке: порядок изменений DOM. */
 interface PickTrace {
   /** номер вызова наблюдателя, на котором строка цели получила aria-busy="true" */
   busySeq: number | null;
@@ -735,18 +737,20 @@ interface PickTrace {
   tabSeq: number | null;
   /** номер вызова, на котором шторка закрылась (ушла из документа или стала inert) */
   closedSeq: number | null;
-  /** performance.now() в момент закрытия шторки */
-  closedAt: number | null;
+  /** номер вызова, на котором список копий показан (кнопка Backups); null — не до конца трассы */
+  backupsSeq: number | null;
   /** responseEnd запроса списка копий цели (performance.now()-шкала) */
   backupsEnd: number | null;
 }
 
 /**
  * Нажимает строки `clicks` в открытой шторке по порядку и фиксирует трассу выбора цели `target`:
- * aria-busy у её строки, появление вкладки, закрытие шторки и конец ответа списка копий.
- * Первое нажатие синхронно ставит загрузку, поэтому второе в той же задаче всегда приходится на
- * время чтения при любой скорости сети; важен порядок изменений DOM и метки времени одной шкалы,
- * а не кадры. Из страницы возвращаются только номера шагов и числа.
+ * aria-busy у её строки, появление вкладки, закрытие шторки, показ списка копий и конец ответа
+ * списка копий. Первое нажатие синхронно ставит загрузку, поэтому второе в той же задаче всегда
+ * приходится на время чтения при любой скорости сети; важен порядок изменений DOM, а не кадры.
+ * Сетевой responseEnd с закрытием не сравнивается: ответ может прийти, пока главный поток
+ * отрисовывает файл в той же задаче, что и закрытие, хотя Редактор его ещё не обработал.
+ * Из страницы возвращаются только номера шагов и числа.
  */
 async function observeSheetPick(
   page: Page,
@@ -772,7 +776,7 @@ async function observeSheetPick(
           busySeq: null,
           tabSeq: null,
           closedSeq: null,
-          closedAt: null,
+          backupsSeq: null,
           backupsEnd: null
         };
         const finish = () => {
@@ -799,7 +803,14 @@ async function observeSheetPick(
           }
           if (trace.closedSeq === null && (!sheet.isConnected || sheet.inert)) {
             trace.closedSeq = seq;
-            trace.closedAt = performance.now();
+          }
+          // кнопка Backups появляется, когда Редактор применил список копий открытого файла
+          if (
+            trace.backupsSeq === null &&
+            trace.tabSeq !== null &&
+            document.querySelector('.backups-toggle-btn') !== null
+          ) {
+            trace.backupsSeq = seq;
           }
           check();
         });
