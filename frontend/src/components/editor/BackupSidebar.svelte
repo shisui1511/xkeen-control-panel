@@ -131,7 +131,9 @@
                       <div class="diff-line diff-line-removed">- {line}</div>
                     {/each}
                   {:else if group.type === 'collapsed'}
-                    <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
+                    <div class="diff-line diff-line-collapsed">
+                      <span class="diff-collapsed-label">{group.lines[0]}</span>
+                    </div>
                   {:else}
                     {#each group.lines as line, li (li)}
                       <div class="diff-line diff-line-unchanged">{line}</div>
@@ -457,6 +459,20 @@
       white-space: pre;
       word-break: normal;
       overflow-wrap: normal;
+    }
+
+    /* Строки растянуты до самой длинной (.diff-lines), поэтому подпись по центру ушла бы за правый край.
+       Подпись прижата к левому видимому краю и остаётся на виду при горизонтальной прокрутке
+       (WR-02, D-25, UI-SPEC E5) */
+    .diff-line-collapsed {
+      text-align: left;
+    }
+
+    .diff-collapsed-label {
+      position: sticky;
+      left: 0;
+      display: inline-block;
+      padding-left: 9px;
     }
   }
 </style>
