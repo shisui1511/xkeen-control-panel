@@ -1172,10 +1172,25 @@
     showDeleteConfirmModal = true;
   }
 
-  function openBackupsForFile(file: ConfigFileInfo) {
-    selectedFile = file.path;
-    loadBackups(file.path);
+  /**
+   * Открывает файл и лист его копий. true — файл показан во вкладке (шторку можно закрыть),
+   * false — файл не открыт. Лист копий всегда относится к файлу в редакторе (CR-01, WR-03):
+   * по файлу без копий лист не открывается, показывается уведомление, а флаг листа
+   * не остаётся включённым и не накрывает следующий открытый файл.
+   */
+  async function openBackupsForFile(file: ConfigFileInfo): Promise<boolean> {
+    if (!(await loadFile(file.path))) return false;
+    // loadFile открыл запомненный выбор другого файла («последний выбор побеждает»)
+    if (selectedFile !== file.path) return true;
+    await loadBackups(file.path);
+    if (selectedFile !== file.path) return true;
+    if (visibleBackups.length === 0) {
+      drawerOpen = false;
+      showToast('info', $t('editor.no_backups'));
+      return true;
+    }
     drawerOpen = true;
+    return true;
   }
 
   function toggleSchema() {
@@ -1472,9 +1487,10 @@
         onDuplicateFile={duplicateFile}
         onDownloadFile={downloadFileByName}
         onDeleteFile={deleteFileByInfo}
-        onViewBackups={(file) => {
-          openBackupsForFile(file);
-          if (isNarrow) showSidebar = false;
+        onViewBackups={async (file) => {
+          // D-16: шторка закрывается только после того, как файл показан, как у onLoadFile
+          const opened = await openBackupsForFile(file);
+          if (opened && isNarrow) showSidebar = false;
         }}
       />
 
