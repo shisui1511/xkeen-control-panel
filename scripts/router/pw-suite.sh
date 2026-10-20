@@ -96,10 +96,10 @@ STATE="$PW_DIR/state.json"
 LOG="$PW_DIR/run.log"
 JSON="$PW_DIR/report.json"
 OUT="$PW_DIR/artifacts"
-rm -f "$STATE" "$JSON" "$PW_DIR/report-pages.json"
+rm -f "$STATE" "$STATE.restore.json" "$JSON" "$PW_DIR/report-pages.json"
 
 # Файл сессии содержит cookie и CSRF: после этапа его на диске быть не должно.
-trap 'rm -f "$STATE"' EXIT
+trap 'rm -f "$STATE" "$STATE.restore.json"' EXIT
 # Прерывание сигналом тоже запускает EXIT-trap (иначе storageState с cookie остался бы на ПК).
 trap 'exit 130' INT TERM HUP
 

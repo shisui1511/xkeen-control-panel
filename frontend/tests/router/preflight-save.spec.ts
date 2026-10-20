@@ -1,5 +1,6 @@
 // e2e-pages: editor
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
 import { withPanel } from './lib/nodes-api';
@@ -55,6 +56,31 @@ function insertBlankLine(orig: string): string {
 
 /** Пути изменённых файлов с исходным текстом: ждут возврата, пока не подтверждён второй записью. */
 const pendingRestore = new Map<string, string>();
+
+/**
+ * Копия ожидающих возврата файлов на диске ПК рядом со storageState (удаляется вместе с ним при
+ * выходе pw-suite.sh). После падения Playwright перезапускает воркер, и карта в новом процессе
+ * пуста: без копии следующий тест принял бы изменённый файл стенда за исходный (IN-02).
+ */
+const RESTORE_FILE = process.env.XCP_PW_STATE ? `${process.env.XCP_PW_STATE}.restore.json` : '';
+
+function persistPending(): void {
+  if (!RESTORE_FILE) return;
+  if (pendingRestore.size === 0) rmSync(RESTORE_FILE, { force: true });
+  else
+    writeFileSync(RESTORE_FILE, JSON.stringify(Object.fromEntries(pendingRestore)), {
+      mode: 0o600
+    });
+}
+
+/** Подтягивает записи, оставшиеся от упавшего воркера; запись текущего процесса главнее. */
+function loadPending(): void {
+  if (!RESTORE_FILE || !existsSync(RESTORE_FILE)) return;
+  const data = JSON.parse(readFileSync(RESTORE_FILE, 'utf8')) as Record<string, string>;
+  for (const [path, text] of Object.entries(data)) {
+    if (!pendingRestore.has(path)) pendingRestore.set(path, text);
+  }
+}
 
 /** Запрос к API панели из страницы с её сессией; тело уходит строкой, как у Редактора. */
 async function rawRequest(
@@ -254,6 +280,7 @@ async function writeAndRestore(
   ).not.toBe(orig.trimEnd());
   // файл ждёт возврата с первой записи; при падении теста его вернёт afterEach
   pendingRestore.set(path, orig);
+  persistPending();
 
   await openFile(page, name);
   await clearSuccessToasts(page);
@@ -287,44 +314,98 @@ async function writeAndRestore(
   await expect(page.locator('.toast--success').first()).toBeVisible({ timeout: T.action });
   expect((await readFile(page, path)).trimEnd()).toBe(orig.trimEnd());
   pendingRestore.delete(path);
+  persistPending();
   return preflight;
 }
 
 /**
- * Уборка после падения или тайм-аута: исходный текст каждого изменённого файла возвращается
- * через API тем же путём, что у Редактора (запись и применение к ядру). Ошибка уборки добавляется
- * к падению теста, не заменяя его; в вывод идут только имена файлов и коды HTTP.
+ * Возвращает исходный текст каждого изменённого файла через API тем же путём, что у Редактора
+ * (запись и применение к ядру), и убеждается, что ядро работает без конфликта. Записи остаются
+ * в карте и на диске, пока вся уборка не подтверждена. Возвращает описания неудач; в них только
+ * имена файлов и коды HTTP.
+ */
+async function restorePending(page: Page): Promise<string[]> {
+  const failed: string[] = [];
+  for (const [path, orig] of pendingRestore) {
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    const q = encodeURIComponent(path);
+    const save = await rawRequest(page, 'POST', `/api/config/save?path=${q}`, orig);
+    const apply =
+      save.status === 200
+        ? await rawRequest(page, 'POST', `/api/service/control?action=apply&path=${q}`)
+        : { status: 0, text: '' };
+    console.log(`уборка: ${name} возвращён (save http ${save.status}, apply http ${apply.status})`);
+    if (save.status !== 200) failed.push(`${name}: save http ${save.status}`);
+    else if (apply.status !== 200) failed.push(`${name}: apply http ${apply.status}`);
+  }
+  // файл возвращён, но ядро должно работать: упавший тест мог оставить его остановленным
+  const deadline = Date.now() + T.save;
+  let state = 'нет ответа';
+  for (;;) {
+    const st = await page.request.get('/api/service/status');
+    if (st.ok()) {
+      const d = (
+        (await st.json()) as {
+          data?: { running_kernels?: string[]; kernel_conflict?: boolean };
+        }
+      ).data;
+      const kernels = d?.running_kernels ?? [];
+      state = `ядра [${kernels.join(',')}], конфликт ${d?.kernel_conflict === true}`;
+      if (kernels.length === 1 && kernels[0] === RT.core && d?.kernel_conflict !== true) break;
+    } else {
+      state = `статус http ${st.status()}`;
+    }
+    if (Date.now() > deadline) {
+      failed.push(`ядро ${RT.core} не работает после уборки (${state})`);
+      break;
+    }
+    await page.waitForTimeout(3000);
+  }
+  if (failed.length === 0) {
+    pendingRestore.clear();
+    persistPending();
+  }
+  return failed;
+}
+
+/**
+ * Уборка после падения или тайм-аута. Ошибка уборки добавляется к падению теста, не заменяя
+ * его.
  */
 test.afterEach(async ({ browser }, testInfo) => {
   if (pendingRestore.size === 0) return;
-  testInfo.setTimeout(testInfo.timeout + 2 * T.save * pendingRestore.size);
-  const failed: string[] = [];
-  await withPanel(browser, async (page) => {
-    for (const [path, orig] of pendingRestore) {
-      const name = path.slice(path.lastIndexOf('/') + 1);
-      const q = encodeURIComponent(path);
-      const save = await rawRequest(page, 'POST', `/api/config/save?path=${q}`, orig);
-      const apply =
-        save.status === 200
-          ? await rawRequest(page, 'POST', `/api/service/control?action=apply&path=${q}`)
-          : { status: 0, text: '' };
-      console.log(
-        `уборка: ${name} возвращён (save http ${save.status}, apply http ${apply.status})`
-      );
-      if (save.status !== 200) failed.push(`${name}: save http ${save.status}`);
-    }
-  });
-  pendingRestore.clear();
+  testInfo.setTimeout(testInfo.timeout + 2 * T.save * pendingRestore.size + T.save);
+  const failed = await withPanel(browser, restorePending);
   if (failed.length > 0) {
     throw new Error(`уборка: стенд не вернулся в исходное состояние (${failed.join('; ')})`);
   }
 });
 
+/**
+ * Начало теста: записи упавшего раньше воркера возвращаются до чтения исходного текста, иначе
+ * изменённый файл был бы принят за исходный. Неудача — падение теста: стенд остался грязным.
+ */
+async function recoverLeftovers(browser: Browser): Promise<void> {
+  loadPending();
+  if (pendingRestore.size === 0) return;
+  console.log(`editor-save: от прежнего прогона остался файл (${pendingRestore.size}), возвращаю`);
+  const failed = await withPanel(browser, restorePending);
+  if (failed.length > 0) {
+    throw new Error(
+      `стенд не вернулся в исходное состояние до начала теста (${failed.join('; ')})`
+    );
+  }
+}
+
 for (const theme of THEMES) {
-  test(`editor-save theme:${theme} vp:390 core:${RT.core || 'unknown'}`, async ({ page }) => {
+  test(`editor-save theme:${theme} vp:390 core:${RT.core || 'unknown'}`, async ({
+    page,
+    browser
+  }) => {
     test.setTimeout(300_000 * RT.slow);
     const core = RT.core;
     test.skip(core !== 'xray' && core !== 'mihomo', 'активное ядро стенда не определено');
+    await recoverLeftovers(browser);
 
     const guard = attachConsoleGuard(page);
     await page.setViewportSize(VIEWPORT);
