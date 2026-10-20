@@ -275,9 +275,16 @@ full_target() {
     # Номер последней строки xcp.log до начала ветви: смоук смотрит только строки после неё,
     # поэтому ошибки, вызванные разрушающими тестами предыдущей ветви (D-04), не
     # засчитываются этой ветви. В первой ветви смоук смотрит от баннера запуска.
+    # Вместе с номером строки запоминается inode файла: при размере 1 МБ xcp.log
+    # ротируется (RotateWriter: xcp.log -> xcp.log.1 -> xcp.log.2), и без inode номер
+    # строки указывал бы уже на другой файл. Смоук по inode находит файл ветви среди
+    # xcp.log, .1 и .2 и берёт хвост после запомненной строки (WR-01).
     _from=""
+    _ino=""
     if [ "$_first" = 0 ]; then
-      _from=$(rt_ssh "$_t" 'wc -l </opt/var/log/xcp.log' 2>/dev/null | tr -dc '0-9') || _from=""
+      _lraw=$(rt_ssh "$_t" 'echo "xcp_lines=$(wc -l </opt/var/log/xcp.log)"; set -- $(ls -i /opt/var/log/xcp.log); echo "xcp_ino=$1"' 2>/dev/null) || _lraw=""
+      _from=$(printf '%s\n' "$_lraw" | sed -n 's/^xcp_lines=//p' | tr -dc '0-9')
+      _ino=$(printf '%s\n' "$_lraw" | sed -n 's/^xcp_ino=//p' | tr -dc '0-9')
     fi
     _first=0
 
@@ -292,7 +299,9 @@ full_target() {
     fi
 
     # 2. смоук (только чтение; строки лога — после начала ветви)
-    if [ -n "$_from" ]; then
+    if [ -n "$_from" ] && [ -n "$_ino" ]; then
+      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino"
+    elif [ -n "$_from" ]; then
       _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from"
     else
       _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT"
