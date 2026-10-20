@@ -141,9 +141,35 @@ async function rawRequest(page: Page, method: string, path: string): Promise<num
 }
 
 /**
+ * Упавший тест мог остановиться посреди перезапуска, а XKeen возвращает управление раньше
+ * конца действия: статус «работает» в этот момент ещё не значит, что ядро устойчиво. Ждёт, пока
+ * PID не продержится неизменным `hold` мс. false — ядро оказалось остановленным (запоздавшая
+ * остановка или перезапуск в разгаре): его надо запустить.
+ */
+async function holdsRunning(page: Page, core: string): Promise<boolean> {
+  const hold = 20_000 * RT.slow;
+  let pid = 0;
+  let since = Date.now();
+  for (;;) {
+    const s = await readStatus(page);
+    if (typeof s === 'string') throw new Error(`уборка: статус службы недоступен (${describe(s)})`);
+    if (s.conflict) throw new Error(`уборка: конфликт двух ядер (${describe(s)})`);
+    if (!(s.running && s.kernels.length === 1 && s.kernels[0] === core)) return false;
+    if (s.pid !== pid) {
+      pid = s.pid;
+      since = Date.now();
+    }
+    if (Date.now() - since >= hold) return true;
+    await page.waitForTimeout(3000);
+  }
+}
+
+/**
  * Уборка после падения: остановленное ядро запускается и дожидается устойчивого состояния.
- * Работающее ядро не трогается; конфликт двух ядер — ошибка без вмешательства. Ошибка уборки
- * добавляется к падению теста, не заменяя его.
+ * Работающее ядро после упавшего теста тоже дожидается устойчивого состояния: если оно в ходе
+ * ожидания остановилось, его запускают. Удачный тест уже дождался сам, ничего не делается.
+ * Конфликт двух ядер — ошибка без вмешательства. Ошибка уборки добавляется к падению теста, не
+ * заменяя его.
  */
 test.afterEach(async ({ browser }, testInfo) => {
   const core = RT.core;
@@ -152,8 +178,13 @@ test.afterEach(async ({ browser }, testInfo) => {
     const s = await readStatus(page);
     if (typeof s === 'string') throw new Error(`уборка: статус службы недоступен (${describe(s)})`);
     if (s.conflict) throw new Error(`уборка: конфликт двух ядер (${describe(s)})`);
-    if (s.running && s.kernels.length === 1 && s.kernels[0] === core) return;
-    testInfo.setTimeout(testInfo.timeout + 3 * ACTION);
+    const running = s.running && s.kernels.length === 1 && s.kernels[0] === core;
+    if (running && testInfo.status === 'passed') return;
+    testInfo.setTimeout(testInfo.timeout + 4 * ACTION);
+    if (running && (await holdsRunning(page, core))) {
+      console.log('уборка: ядро после падения теста устойчиво работает');
+      return;
+    }
     const code = await rawRequest(page, 'POST', '/api/service/control?action=start');
     console.log(`уборка: запуск службы после падения теста, http ${code}`);
     await waitStable(page, core, 'уборка: ядро не вернулось в рабочее состояние');
