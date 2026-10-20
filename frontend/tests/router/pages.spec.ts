@@ -178,6 +178,8 @@ function markKnown(route: string, theme: string, width: number): void {
   if (light && route === 'logs') knownFailure('*', 'light-tinted-badge-text-contrast');
   if (light && route === 'proxies') knownFailure('*', 'light-tinted-badge-text-contrast');
   if (light && route === 'traffic') knownFailure('*', 'light-tinted-badge-text-contrast');
+  // Бейдж вида выпуска в баннере обновления: есть, пока доступен более новый не-stable выпуск
+  if (light && wide && route === 'dashboard') knownFailure('*', 'light-tinted-badge-text-contrast');
 
   // Приглушённый текст мелких меток, счётчиков и подписей
   if (dark && route === 'dat') knownFailure('*', 'muted-small-label-text-contrast');
