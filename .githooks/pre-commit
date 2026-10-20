@@ -6,6 +6,8 @@
 #   frontend/** → prettier --check (те же правила, что в CI/Lint Frontend)
 #   *.go        → gofmt -l
 #   весь индекс → scripts/check-no-simulations.js (тесты вне роутера запрещены)
+#   индекс целиком → scripts/router/check-leaks.sh --staged (строки локального
+#                    файла целей; нет файла — пропуск)
 # Пропустить разово: git commit --no-verify.
 
 set -eu
@@ -47,6 +49,16 @@ fi
 if ! node scripts/check-no-simulations.js; then
   echo "pre-commit: тесты вне роутера запрещены (AGENTS.md, «Тестирование»)" >&2
   FAILED=1
+fi
+
+# Строки стенда из локального файла целей не должны попасть в индекс. В старых
+# ветках скрипта может не быть — тогда блок пропускается. stdout (охват целей)
+# скрыт, stderr с находками «файл:строка» остаётся видимым.
+if [ -f scripts/router/check-leaks.sh ]; then
+  if ! sh scripts/router/check-leaks.sh --staged >/dev/null; then
+    echo "pre-commit: в коммит попадают строки из локального файла целей (D-40): уберите их или замените переменными" >&2
+    FAILED=1
+  fi
 fi
 
 exit "$FAILED"
