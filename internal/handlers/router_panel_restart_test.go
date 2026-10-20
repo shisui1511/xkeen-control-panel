@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -276,6 +277,11 @@ type rtPanelRestartResult struct {
 	// logErr — журнал не прочитан (ротирован).
 	shutdownLog []string
 	logErr      error
+	// stuck — потоки старого процесса, стоявшие в непрерываемом ожидании (состояние D)
+	// во время остановки: поток, его ожидание в ядре и верх стека. Остановка по сроку
+	// на такой записи — ожидание журнала ext4 на медленной флешке, а не шаг панели;
+	// без этих строк отчёт называет только шаг, на котором процесс стоял.
+	stuck []string
 }
 
 // rtPanelHooks — действия сценария по ходу перезапуска; nil — нет действия.
@@ -324,6 +330,10 @@ func rtPanelRestartWith(t *testing.T, p *routertest.Panel, old int, hooks rtPane
 		restarted <- initResult{o, c, time.Since(start)}
 	}()
 
+	// Потоки старого процесса в состоянии D — наблюдение для отчёта, на ход сценария не влияет.
+	stuckDone := make(chan struct{})
+	stuckCh := rtSampleStuck(old, start, stuckDone)
+
 	// Выход старого процесса — по /proc, независимо от панели.
 	var res rtPanelRestartResult
 	var exitAt time.Time
@@ -343,6 +353,8 @@ func rtPanelRestartWith(t *testing.T, p *routertest.Panel, old int, hooks rtPane
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	close(stuckDone)
+	res.stuck = <-stuckCh
 	if hooks.afterExit != nil {
 		hooks.afterExit()
 	}
@@ -385,6 +397,9 @@ func rtPanelRestartWith(t *testing.T, p *routertest.Panel, old int, hooks rtPane
 // брошена по сроку.
 func rtPanelRestartVerdict(t *testing.T, old int, res rtPanelRestartResult, details string) {
 	t.Helper()
+	for _, line := range res.stuck {
+		t.Logf("поток старого процесса в непрерываемом ожидании: %s", line)
+	}
 	if res.stopTook < 0 {
 		t.Fatalf("старый процесс %d не вышел за %s после restart (%s; init: код %d, %q)",
 			old, rtPanelRestartLimit, details, res.initCode, res.initOut)
@@ -525,6 +540,83 @@ func rtPanelXKeenPoll(pid int) (int, string) {
 	return 0, ""
 }
 
+// rtSampleStuck раз в 100 мс осматривает потоки процесса pid, пока не закрыт done или
+// процесс не вышел, и возвращает по одной строке на каждое новое сочетание «поток и ожидание
+// в ядре» в состоянии D: время от start, номер потока, wchan и верх стека ядра. Стек
+// читается от root (на устройстве тесты идут от него); недоступный стек пропускается.
+func rtSampleStuck(pid int, start time.Time, done <-chan struct{}) <-chan []string {
+	out := make(chan []string, 1)
+	go func() {
+		seen := map[string]bool{}
+		var found []string
+		for {
+			dir := "/proc/" + strconv.Itoa(pid) + "/task"
+			tasks, err := os.ReadDir(dir)
+			if err != nil {
+				break
+			}
+			for _, e := range tasks {
+				tdir := dir + "/" + e.Name()
+				stat, err := os.ReadFile(tdir + "/stat")
+				if err != nil {
+					continue
+				}
+				i := bytes.LastIndexByte(stat, ')')
+				if i < 0 || i+2 >= len(stat) || stat[i+2] != 'D' {
+					continue
+				}
+				wchan, _ := os.ReadFile(tdir + "/wchan")
+				key := e.Name() + ":" + string(wchan)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				var frames []string
+				if st, err := os.ReadFile(tdir + "/stack"); err == nil {
+					for _, l := range strings.Split(string(st), "\n") {
+						if f := strings.Fields(l); len(f) >= 2 {
+							frames = append(frames, strings.SplitN(f[1], "+", 2)[0])
+						}
+						if len(frames) == 6 {
+							break
+						}
+					}
+				}
+				found = append(found, fmt.Sprintf("t=%.1f с, поток %s, ожидание %q, стек: %s",
+					time.Since(start).Seconds(), e.Name(), strings.TrimSpace(string(wchan)), strings.Join(frames, " < ")))
+			}
+			select {
+			case <-done:
+				out <- found
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+		out <- found
+	}()
+	return out
+}
+
+// rtFsyncProbe пишет 4 КБ в каталог dir с fsync и возвращает, сколько это заняло: на
+// носителе, где идёт фиксация журнала ext4, мелкая запись с fsync ждёт её конца, поэтому
+// задержка показывает застой, которого нет в счётчиках Dirty и Writeback.
+func rtFsyncProbe(dir string) time.Duration {
+	f, err := os.CreateTemp(dir, "rt-fsync-*")
+	if err != nil {
+		return -1
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	start := time.Now()
+	if _, err := f.Write(make([]byte, 4096)); err != nil {
+		return -1
+	}
+	if err := f.Sync(); err != nil {
+		return -1
+	}
+	return time.Since(start)
+}
+
 // rtWaitStorageQuiet ждёт (не дольше limit), пока в кэше страниц почти не
 // останется грязных и записываемых данных, и возвращает описание состояния
 // носителя для журнала теста.
@@ -535,7 +627,8 @@ func rtWaitStorageQuiet(t *testing.T, limit time.Duration) string {
 		dirty, wb := rtMeminfo(t, "Dirty"), rtMeminfo(t, "Writeback")
 		if dirty+wb < 1<<20 || time.Since(start) > limit {
 			return "носитель: грязных " + strconv.FormatInt(dirty>>10, 10) + " КБ, в записи " +
-				strconv.FormatInt(wb>>10, 10) + " КБ (ожидание " + time.Since(start).Round(100*time.Millisecond).String() + ")"
+				strconv.FormatInt(wb>>10, 10) + " КБ (ожидание " + time.Since(start).Round(100*time.Millisecond).String() +
+				"), запись 4 КБ с fsync " + rtFsyncProbe(config.Default().DataDir).Round(time.Millisecond).String()
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
