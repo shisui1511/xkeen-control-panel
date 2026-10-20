@@ -178,6 +178,9 @@ if [ -z "$SESSION_ENV" ]; then
 fi
 
 # Данные share-ссылок для тестов: одним копированием каталога.
+# Данные для тестов (этот блок и два следующих): новый путь данных, который тесты получают
+# через окружение, надо добавить в TEST_DATA_ALL в scripts/router/select-changed.mjs, иначе
+# SUITE=changed его правку не увидит (граф зависимостей Go такие связи не показывает).
 LINKS_ENV=""
 if [ -d "$ROOT/internal/nodes/testdata/links" ]; then
   rc=0
