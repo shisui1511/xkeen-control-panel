@@ -2,15 +2,20 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
+import { withPanel } from './lib/nodes-api';
 
 // Управление службой ядра через интерфейс настоящей панели (RT-05, D-04): остановка, запуск и
 // перезапуск кнопками страницы «Службы». После каждого действия статус в интерфейсе (значок
 // в шапке карточки) и ответ /api/service/status должны совпадать и отражать настоящее состояние
 // устройства: процесс ядра остановлен, запущен, перезапущен (PID сменился).
 //
-// Сценарий разрушающий: пока идёт остановка, перехват трафика на стенде снят. Исходное
-// состояние возвращает снимок стенда (D-19); в конце теста ядро дожидается устойчивого
-// состояния, чтобы следующие спеки начинали с рабочей панели.
+// Сценарий разрушающий: пока идёт остановка, перехват трафика на стенде снят. Службу при
+// падении возвращает хук afterEach (запускает остановленное ядро и ждёт устойчивого состояния);
+// снимок стенда есть только в полном прогоне. В конце удачного теста ядро тоже дожидается
+// устойчивого состояния, чтобы следующие спеки начинали с рабочей панели.
+
+// действие службы на медленном устройстве: остановка, запуск и перезапуск идут минуты
+const ACTION = 120_000 * RT.slow;
 
 interface Status {
   running: boolean;
@@ -121,11 +126,44 @@ async function passStartGate(page: Page, badge: Locator): Promise<void> {
   await expect(dialog).toBeHidden({ timeout: T.action });
 }
 
+/** Запрос к API панели из страницы с её сессией и токеном CSRF. */
+async function rawRequest(page: Page, method: string, path: string): Promise<number> {
+  return page.evaluate(
+    async ({ method, path }) => {
+      const res = await fetch(path, {
+        method,
+        headers: { 'X-CSRF-Token': localStorage.getItem('csrf_token') ?? '' }
+      });
+      return res.status;
+    },
+    { method, path }
+  );
+}
+
+/**
+ * Уборка после падения: остановленное ядро запускается и дожидается устойчивого состояния.
+ * Работающее ядро не трогается; конфликт двух ядер — ошибка без вмешательства. Ошибка уборки
+ * добавляется к падению теста, не заменяя его.
+ */
+test.afterEach(async ({ browser }, testInfo) => {
+  const core = RT.core;
+  if (testInfo.status === 'skipped' || (core !== 'xray' && core !== 'mihomo')) return;
+  await withPanel(browser, async (page) => {
+    const s = await readStatus(page);
+    if (typeof s === 'string') throw new Error(`уборка: статус службы недоступен (${describe(s)})`);
+    if (s.conflict) throw new Error(`уборка: конфликт двух ядер (${describe(s)})`);
+    if (s.running && s.kernels.length === 1 && s.kernels[0] === core) return;
+    testInfo.setTimeout(testInfo.timeout + 3 * ACTION);
+    const code = await rawRequest(page, 'POST', '/api/service/control?action=start');
+    console.log(`уборка: запуск службы после падения теста, http ${code}`);
+    await waitStable(page, core, 'уборка: ядро не вернулось в рабочее состояние');
+    console.log('уборка: служба запущена после падения теста');
+  });
+});
+
 test(`service-control core:${RT.core || 'unknown'}`, async ({ page }) => {
   const core = RT.core;
   test.skip(core !== 'xray' && core !== 'mihomo', 'активное ядро стенда не определено');
-  // действие службы на медленном устройстве: остановка, запуск и перезапуск идут минуты
-  const ACTION = 120_000 * RT.slow;
   test.setTimeout(6 * ACTION);
 
   const guard = attachConsoleGuard(page);
