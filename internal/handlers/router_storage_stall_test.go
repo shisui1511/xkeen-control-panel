@@ -252,8 +252,8 @@ func TestRouterPanelMainThreadIdle(t *testing.T) {
 	}
 }
 
-// rtStallHold — сколько раздел остаётся замороженным после killall: меньше срока
-// остановки панели (8 с), чтобы финальные записи состояния успели после оттаивания.
+// rtStallHold — сколько раздел остаётся замороженным после killall: застой короче
+// срока остановки панели (8 с); застой дольше срока — TestRouterPanelRestartWithLongStall.
 const rtStallHold = 3 * time.Second
 
 // Перезапуск при застое носителя панели. Поток остановки первым делом писал строку
@@ -316,5 +316,184 @@ func TestRouterPanelRestartWithStalledStorage(t *testing.T) {
 		t.Errorf("после killall панель перестала принимать соединения через %v — обработка SIGTERM ждала носитель", closedAfter.Round(time.Millisecond))
 	default:
 		t.Logf("после killall панель перестала принимать соединения через %v", closedAfter.Round(time.Millisecond))
+	}
+}
+
+// rtLongStallHold — сколько раздел остаётся замороженным после killall в
+// TestRouterPanelRestartWithLongStall: дольше срока остановки панели (8 с) с
+// дозаписью журнала по сроку (1 с) и меньше SIGKILL init-скрипта через
+// XCP_STOP_KILL_AFTER (20 с). rtLongStallStopEnd — не позже какого момента после
+// killall главный поток старого процесса обязан закончить остановку: бюджеты
+// финальных записей и дозаписи журнала (cmd/xcp/shutdown.go) с запасом, раньше
+// срока.
+const (
+	rtLongStallHold    = 12 * time.Second
+	rtLongStallStopEnd = 6 * time.Second
+)
+
+// rtStopEnd — как главный поток процесса закончил остановку (rtWatchStopEnd).
+type rtStopEnd struct {
+	// end — когда главный поток вышел (от start): зомби-лидер «Z», пока остальные
+	// потоки ждут носитель, или процесс исчез; -1 — не вышел, пока шло наблюдение.
+	end time.Duration
+	// stuckFrom, stuck — начало и длительность самого долгого непрерывного
+	// пребывания главного потока в состоянии D (stuckFrom -1 — не был); wchan и
+	// stack — его ожидание в ядре и верх стека в начале этого пребывания.
+	stuckFrom, stuck time.Duration
+	wchan, stack     string
+}
+
+// rtWatchStopEnd раз в 20 мс смотрит главный поток процесса pid, пока процесс не
+// исчезнет или не закрыт done. Остановку по сигналу выполняет главная горутина,
+// закреплённая за главным потоком (cmd/xcp/shutdown.go): поток выходит, когда
+// остановка закончена (main вернулся) или брошена по сроку. После выхода главного
+// потока процесс живёт, пока другие его потоки стоят в непрерываемом ожидании
+// носителя, а сам поток остаётся зомби, поэтому конец остановки виден по /proc
+// раньше выхода процесса и без журнала панели, который при застое носителя не
+// дописывается.
+func rtWatchStopEnd(pid int, start time.Time, done <-chan struct{}) <-chan rtStopEnd {
+	out := make(chan rtStopEnd, 1)
+	go func() {
+		res := rtStopEnd{end: -1, stuckFrom: -1}
+		task := "/proc/" + strconv.Itoa(pid) + "/task/" + strconv.Itoa(pid)
+		var spanFrom time.Duration = -1
+		var spanWchan, spanStack string
+		closeSpan := func(at time.Duration) {
+			if spanFrom >= 0 && at-spanFrom > res.stuck {
+				res.stuckFrom, res.stuck, res.wchan, res.stack = spanFrom, at-spanFrom, spanWchan, spanStack
+			}
+			spanFrom = -1
+		}
+		for {
+			st, _ := rtProcState(pid)
+			at := time.Since(start)
+			if st == "D" {
+				if spanFrom < 0 {
+					spanFrom = at
+					w, _ := os.ReadFile(task + "/wchan")
+					spanWchan = strings.TrimSpace(string(w))
+					spanStack = ""
+					if raw, err := os.ReadFile(task + "/stack"); err == nil {
+						var frames []string
+						for _, l := range strings.Split(string(raw), "\n") {
+							if f := strings.Fields(l); len(f) >= 2 {
+								frames = append(frames, strings.SplitN(f[1], "+", 2)[0])
+							}
+							if len(frames) == 6 {
+								break
+							}
+						}
+						spanStack = strings.Join(frames, " < ")
+					}
+				}
+			} else {
+				closeSpan(at)
+			}
+			switch st {
+			case "", "Z", "X", "x":
+				res.end = at
+				out <- res
+				return
+			}
+			select {
+			case <-done:
+				closeSpan(time.Since(start))
+				out <- res
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	}()
+	return out
+}
+
+// rtWaitPollGap ждёт (не дольше limit), пока опрос XKeen панели pid не закончится:
+// следующий начнётся не раньше чем через 10 с, и запуск скрипта при замороженном
+// разделе не примешается к остановке. Возвращает описание для журнала теста.
+func rtWaitPollGap(pid int, limit time.Duration) string {
+	start := time.Now()
+	seen := false
+	for time.Since(start) < limit {
+		poll, _ := rtPanelXKeenPoll(pid)
+		switch {
+		case poll != 0:
+			seen = true
+		case seen:
+			return "опрос XKeen закончился за " + time.Since(start).Round(10*time.Millisecond).String() + " до заморозки"
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if seen {
+		return "опрос XKeen идёт дольше " + limit.String()
+	}
+	return "опроса XKeen за " + limit.String() + " не было"
+}
+
+// Перезапуск при застое носителя дольше срока остановки. Финальные записи состояния
+// — сессии (шаг auth) и счётчики трафика (traffic-quota) — шли синхронно на главной
+// горутине: под застоем журнала ext4 создание временного файла (ext4_create) стояло
+// до 8,5 с, шаг traffic-quota съедал весь срок, и остановка бросалась по сроку
+// (гейт 20261020-172121-9acdd677, «deadline 8s exceeded at step traffic-quota»;
+// гейт 20261020-104418-cfaec7f7). Застой воспроизводится заморозкой раздела панели
+// до команды restart; раздел оттаивает через rtLongStallHold после killall. Финальные
+// записи пробуются, но у каждой свой бюджет: главный поток старого процесса
+// заканчивает остановку не позже rtLongStallStopEnd после killall и не стоит в
+// непрерываемом ожидании носителя, а процесс выходит, когда раздел оттает (потоки
+// брошенных записей держат exit_group до возврата системного вызова). Сверх этого —
+// общий вердикт перезапуска.
+func TestRouterPanelRestartWithLongStall(t *testing.T) {
+	p := routertest.NewPanel(t)
+	old := rtPanelCurrent(t, p)
+	quiet := rtWaitStorageQuiet(t, time.Minute)
+	gap := rtWaitPollGap(old, 15*time.Second)
+
+	dir := config.Default().DataDir
+	thaw := rtFreezeStorage(t, dir, rtLongStallHold+40*time.Second)
+
+	watchDone := make(chan struct{})
+	var once sync.Once
+	stopWatch := func() { once.Do(func() { close(watchDone) }) }
+	defer stopWatch()
+	ended := make(chan rtStopEnd, 1)
+	res := rtPanelRestartWith(t, p, old, rtPanelHooks{
+		afterKill: func() {
+			end := rtWatchStopEnd(old, time.Now(), watchDone)
+			time.Sleep(rtLongStallHold)
+			thaw()
+			ended <- <-end
+		},
+	})
+	thaw()
+	// Наблюдение заканчивается само с выходом процесса; без метки killall хука не было.
+	stopWatch()
+	end := rtStopEnd{end: -1, stuckFrom: -1}
+	select {
+	case end = <-ended:
+	case <-time.After(rtLongStallHold + 5*time.Second):
+	}
+	rtPanelRestartVerdict(t, old, res, "раздел "+filepath.Clean(dir)+" заморожен до команды, оттаял через "+
+		rtLongStallHold.String()+" после killall; "+quiet+"; "+gap)
+
+	if end.stuckFrom >= 0 {
+		t.Logf("главный поток старого процесса в непрерываемом ожидании дольше всего с %.1f с после killall, %.1f с: %q, стек: %s",
+			end.stuckFrom.Seconds(), end.stuck.Seconds(), end.wchan, end.stack)
+	}
+	switch {
+	case end.end < 0:
+		t.Errorf("главный поток старого процесса не закончил остановку за %s после killall: остановка ждала носитель", rtLongStallHold)
+	case end.end > rtLongStallStopEnd:
+		t.Errorf("главный поток старого процесса закончил остановку через %.1f с после killall (предел %s): шаг остановки ждал носитель",
+			end.end.Seconds(), rtLongStallStopEnd)
+	default:
+		t.Logf("главный поток старого процесса закончил остановку через %.1f с после killall", end.end.Seconds())
+	}
+	if end.stuck >= time.Second {
+		t.Errorf("главный поток старого процесса стоял в непрерываемом ожидании %.1f с подряд: шаг остановки сам ждал носитель",
+			end.stuck.Seconds())
+	}
+	// Условие сценария: потоки старого процесса ждали носитель до оттаивания.
+	if res.stopTook >= 0 && res.stopTook < rtLongStallHold-time.Second {
+		t.Errorf("старый процесс вышел за %.1f с после killall, раньше оттаивания раздела (%s): финальные записи не ждали носитель, условие сценария не выполнено",
+			res.stopTook.Seconds(), rtLongStallHold)
 	}
 }
