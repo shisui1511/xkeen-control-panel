@@ -23,7 +23,7 @@ export default async function globalTeardown(_config: FullConfig) {
     try {
       const res = await ctx.post('/api/auth/logout', {
         headers: { 'X-CSRF-Token': csrf },
-        timeout: T.action
+        timeout: T.logout
       });
       console.log(`global-teardown: выход из панели, http ${res.status()}`);
     } finally {

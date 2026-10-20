@@ -26,6 +26,9 @@ export const T = {
   network: 8_000 * RT.slow,
   /** вход в панель */
   login: 30_000 * RT.slow,
+  /** выход из панели: удаление сессии пишется на носитель синхронно и под застоем
+   *  флешки стенда идёт 9–41 с (todo logout-waits-session-persist-on-stalled-storage) */
+  logout: 60_000 * RT.slow,
   /** переключение ядра: перезапуск XKeen и подтверждение по процессам */
   switchKernel: 240_000 * RT.slow
 };
