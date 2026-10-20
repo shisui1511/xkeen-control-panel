@@ -278,10 +278,13 @@ func TestRouterPanelRestartWithStalledStorage(t *testing.T) {
 	}
 
 	dir := config.Default().DataDir
+	store := filepath.Join(dir, "traffic", "traffic.json")
+	storeBefore, storeKnown := rtModTime(store)
 	thaw := rtFreezeStorage(t, dir, 40*time.Second)
 	probeTook, probeCode, probeErr := rtStallProbe(p, 2*time.Second)
 
 	var closedAfter time.Duration = -1
+	storeAtExit := make(chan time.Time, 1)
 	res := rtPanelRestartWith(t, p, old, rtPanelHooks{
 		afterKill: func() {
 			start := time.Now()
@@ -296,6 +299,7 @@ func TestRouterPanelRestartWithStalledStorage(t *testing.T) {
 				time.Sleep(wait)
 			}
 			thaw()
+			storeAtExit <- rtModTimeAtExit(old, store, 15*time.Second)
 		},
 	})
 	thaw()
@@ -318,6 +322,50 @@ func TestRouterPanelRestartWithStalledStorage(t *testing.T) {
 		t.Logf("после killall панель перестала принимать соединения через %v", closedAfter.Round(time.Millisecond))
 	}
 	rtFinalSavesDone(t, res.shutdownLog)
+
+	// Запись счётчиков трафика дошла до носителя: файл сменился до того, как старый
+	// процесс исчез (новый init-скрипт запускает только после этого).
+	var atExit time.Time
+	select {
+	case atExit = <-storeAtExit:
+	case <-time.After(20 * time.Second):
+	}
+	switch {
+	case !storeKnown:
+		t.Logf("%s до перезапуска нет: запись счётчиков трафика не сверяется", store)
+	case atExit.IsZero():
+		t.Errorf("%s не прочитан при выходе старого процесса: процесс не исчез или файла нет", store)
+	case !atExit.After(storeBefore):
+		t.Errorf("%s не сменился до выхода старого процесса (%s): финальная запись счётчиков трафика не дошла до носителя",
+			store, storeBefore.Format(time.RFC3339Nano))
+	default:
+		t.Logf("%s записан старым процессом через %s после прежней записи", store, atExit.Sub(storeBefore).Round(time.Millisecond))
+	}
+}
+
+// rtModTime — время изменения файла path; false — файла нет.
+func rtModTime(path string) (time.Time, bool) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return fi.ModTime(), true
+}
+
+// rtModTimeAtExit ждёт (не дольше limit), пока процесс pid не исчезнет совсем (не
+// зомби: потоки брошенных записей держат выход до возврата системного вызова), и
+// возвращает время изменения path в этот момент; нулевое время — не дождались или
+// файла нет.
+func rtModTimeAtExit(pid int, path string, limit time.Duration) time.Time {
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		if st, _ := rtProcState(pid); st == "" {
+			mt, _ := rtModTime(path)
+			return mt
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return time.Time{}
 }
 
 // rtFinalSavesDone проверяет по журналу остановки, что финальные записи, не
@@ -326,6 +374,7 @@ func TestRouterPanelRestartWithStalledStorage(t *testing.T) {
 func rtFinalSavesDone(t *testing.T, shutdownLog []string) {
 	t.Helper()
 	const late, done, dropped = " not finished in ", " finished after ", " not finished before deadline"
+	lateSeen := false
 	for _, line := range shutdownLog {
 		_, rest, ok := strings.Cut(line, "Shutdown: ")
 		if !ok {
@@ -339,6 +388,7 @@ func rtFinalSavesDone(t *testing.T, shutdownLog []string) {
 		if !ok {
 			continue
 		}
+		lateSeen = true
 		finished := false
 		for _, other := range shutdownLog {
 			if strings.Contains(other, "Shutdown: "+name+done) {
@@ -350,18 +400,23 @@ func rtFinalSavesDone(t *testing.T, shutdownLog []string) {
 			t.Errorf("финальная запись %s не уложилась в бюджет, и остановка её не дождалась: %s", name, line)
 		}
 	}
+	if !lateSeen {
+		t.Logf("в журнале остановки нет финальной записи сверх бюджета (журнал не прочитан или записи успели): ожидание записей по журналу не проверено")
+	}
 }
 
 // rtLongStallHold — сколько раздел остаётся замороженным после killall в
 // TestRouterPanelRestartWithLongStall: дольше срока остановки панели (8 с) с
 // дозаписью журнала по сроку (1 с) и меньше SIGKILL init-скрипта через
 // XCP_STOP_KILL_AFTER (20 с). rtLongStallStopEnd — не позже какого момента после
-// killall главный поток старого процесса обязан закончить остановку: финальные
-// записи остановка ждёт до срока без запаса (6 с), затем дозапись журнала (до
-// 1 с; cmd/xcp/shutdown.go) — раньше срока 8 с, с запасом на опрос.
+// killall главный поток старого процесса обязан закончить остановку — сам срок
+// остановки (8 с, cmd/xcp/shutdown.go): финальные записи остановка ждёт до срока
+// без запаса (6 с), затем дозапись журнала (до 1 с), то есть около 7 с; при выходе
+// по сроку главный поток живёт ещё дозапись журнала аварийного выхода (до 1 с),
+// около 9 с.
 const (
 	rtLongStallHold    = 12 * time.Second
-	rtLongStallStopEnd = 7500 * time.Millisecond
+	rtLongStallStopEnd = 8 * time.Second
 )
 
 // rtStopEnd — как главный поток процесса закончил остановку (rtWatchStopEnd).
