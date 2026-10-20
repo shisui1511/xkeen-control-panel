@@ -30,7 +30,8 @@ func init() {
 // fsync: пропуск терял бы сессии и счётчики трафика при каждом перезапуске. Но
 // каждая идёт в своей горутине со своим бюджетом (shutdownSteps.save): под
 // застоем журнала ext4 создание файла стоит секундами, и шаг на главной горутине
-// съедал весь срок. Поток, уже стоящий в непрерываемом ожидании носителя, ни
+// съедал весь срок. Не уложившиеся в бюджет записи после остальных шагов
+// дожидаются до срока без shutdownSaveReserve (shutdownSteps.drainSaves). Поток, уже стоящий в непрерываемом ожидании носителя, ни
 // срок, ни выход процесса не прервут — процесс живёт до возврата системного
 // вызова; поэтому init-скрипт S99xcp (scripts/setup.sh) ждёт настоящего выхода
 // процесса, а не окно rc.func (около 10 с, после которого запуск ответил бы
@@ -49,7 +50,7 @@ const (
 	// shutdownSaveReserve — сколько до срока остаётся на шаги после финальных
 	// записей и дозапись журнала: бюджет записи урезается, чтобы не съесть срок,
 	// даже если HTTP-сервер ждал запросы весь shutdownHTTPTimeout.
-	shutdownSaveReserve = shutdownLogDrain + 500*time.Millisecond
+	shutdownSaveReserve = shutdownLogDrain + time.Second
 )
 
 // shutdownSteps отслеживает отложенные шаги остановки main(): медленный шаг
@@ -60,6 +61,16 @@ type shutdownSteps struct {
 	armed   atomic.Bool
 	// deadline — момент срока (UnixNano); 0 — срок не взведён.
 	deadline atomic.Int64
+	// pending — финальные записи, не уложившиеся в бюджет save; их дожидается
+	// drainSaves. Меняется только главной горутиной (отложенные шаги main).
+	pending []pendingSave
+}
+
+// pendingSave — финальная запись, которая продолжается после своего шага.
+type pendingSave struct {
+	name  string
+	start time.Time
+	done  <-chan struct{}
 }
 
 // enter отмечает начало шага name.
@@ -80,8 +91,9 @@ func (s *shutdownSteps) run(name string, fn func()) {
 
 // save выполняет шаг name с финальной записью состояния (для defer в main) в
 // своей горутине и ждёт его не дольше shutdownSaveBudget и не дольше, чем
-// позволяет срок (shutdownSaveReserve до него). Не уложившийся шаг продолжается
-// до выхода процесса: успеет — состояние записано; нет — на носителе остаётся
+// позволяет срок (shutdownSaveReserve до него). Не уложившийся шаг продолжается,
+// остальные шаги остановки идут дальше, а после них drainSaves ждёт его до
+// срока без запаса: успеет — состояние записано; нет — на носителе остаётся
 // прежний файл целиком (подмена переименованием, utils.AtomicWriteFileNoSync).
 // Главная горутина ждёт шаг в select, поэтому главный поток в непрерываемое
 // ожидание носителя не попадает.
@@ -106,6 +118,34 @@ func (s *shutdownSteps) save(name string, fn func()) {
 		}
 	case <-t.C:
 		log.Printf("Shutdown: %s not finished in %s, continuing without waiting for storage", name, wait.Round(time.Millisecond))
+		s.pending = append(s.pending, pendingSave{name: name, start: start, done: done})
+	}
+}
+
+// drainSaves (для defer в main сразу после создания shutdownSteps: выполняется
+// после всех шагов остановки, до закрытия журнала) ждёт финальные записи, не
+// уложившиеся в бюджет save, но не дольше срока без shutdownSaveReserve. Застой
+// носителя в несколько секунд так не теряет сессии и счётчики трафика, а срок
+// остановки не нарушается: главная горутина ждёт в select.
+func (s *shutdownSteps) drainSaves() {
+	if len(s.pending) == 0 {
+		return
+	}
+	s.enter("saves")
+	wait := shutdownSaveBudget
+	if dl := s.deadline.Load(); dl != 0 {
+		wait = max(time.Until(time.Unix(0, dl))-shutdownSaveReserve, 0)
+	}
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	for _, p := range s.pending {
+		select {
+		case <-p.done:
+			log.Printf("Shutdown: %s finished after %s", p.name, time.Since(p.start).Round(time.Millisecond))
+		case <-t.C:
+			log.Printf("Shutdown: %s not finished before deadline, exiting without waiting for storage", p.name)
+			return
+		}
 	}
 }
 

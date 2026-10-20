@@ -317,18 +317,51 @@ func TestRouterPanelRestartWithStalledStorage(t *testing.T) {
 	default:
 		t.Logf("после killall панель перестала принимать соединения через %v", closedAfter.Round(time.Millisecond))
 	}
+	rtFinalSavesDone(t, res.shutdownLog)
+}
+
+// rtFinalSavesDone проверяет по журналу остановки, что финальные записи, не
+// уложившиеся в свой бюджет (cmd/xcp/shutdown.go, save), остановка дождалась:
+// застой короче срока не теряет сессии и счётчики трафика.
+func rtFinalSavesDone(t *testing.T, shutdownLog []string) {
+	t.Helper()
+	const late, done, dropped = " not finished in ", " finished after ", " not finished before deadline"
+	for _, line := range shutdownLog {
+		_, rest, ok := strings.Cut(line, "Shutdown: ")
+		if !ok {
+			continue
+		}
+		if strings.Contains(rest, dropped) {
+			t.Errorf("финальная запись брошена при застое короче срока: %s", line)
+			continue
+		}
+		name, _, ok := strings.Cut(rest, late)
+		if !ok {
+			continue
+		}
+		finished := false
+		for _, other := range shutdownLog {
+			if strings.Contains(other, "Shutdown: "+name+done) {
+				finished = true
+				break
+			}
+		}
+		if !finished {
+			t.Errorf("финальная запись %s не уложилась в бюджет, и остановка её не дождалась: %s", name, line)
+		}
+	}
 }
 
 // rtLongStallHold — сколько раздел остаётся замороженным после killall в
 // TestRouterPanelRestartWithLongStall: дольше срока остановки панели (8 с) с
 // дозаписью журнала по сроку (1 с) и меньше SIGKILL init-скрипта через
 // XCP_STOP_KILL_AFTER (20 с). rtLongStallStopEnd — не позже какого момента после
-// killall главный поток старого процесса обязан закончить остановку: бюджеты
-// финальных записей и дозаписи журнала (cmd/xcp/shutdown.go) с запасом, раньше
-// срока.
+// killall главный поток старого процесса обязан закончить остановку: финальные
+// записи остановка ждёт до срока без запаса (6 с), затем дозапись журнала (до
+// 1 с; cmd/xcp/shutdown.go) — раньше срока 8 с, с запасом на опрос.
 const (
 	rtLongStallHold    = 12 * time.Second
-	rtLongStallStopEnd = 6 * time.Second
+	rtLongStallStopEnd = 7500 * time.Millisecond
 )
 
 // rtStopEnd — как главный поток процесса закончил остановку (rtWatchStopEnd).
@@ -436,7 +469,8 @@ func rtWaitPollGap(pid int, limit time.Duration) string {
 // (гейт 20261020-172121-9acdd677, «deadline 8s exceeded at step traffic-quota»;
 // гейт 20261020-104418-cfaec7f7). Застой воспроизводится заморозкой раздела панели
 // до команды restart; раздел оттаивает через rtLongStallHold после killall. Финальные
-// записи пробуются, но у каждой свой бюджет: главный поток старого процесса
+// записи пробуются, у каждой свой бюджет, а дождаться их остановка готова только до
+// срока без запаса: главный поток старого процесса
 // заканчивает остановку не позже rtLongStallStopEnd после killall и не стоит в
 // непрерываемом ожидании носителя, а процесс выходит, когда раздел оттает (потоки
 // брошенных записей держат exit_group до возврата системного вызова). Сверх этого —

@@ -185,6 +185,8 @@ func main() {
 	}
 	// Шаги остановки (отложенные Stop ниже) и срок выхода после сигнала.
 	stops := &shutdownSteps{}
+	// Последним из шагов: дождаться финальных записей, не уложившихся в бюджет.
+	defer stops.drainSaves()
 
 	// System sysctl profile (STAB-06): no-op on non-Entware machines (see
 	// DeploySysctlProfile's "/opt/etc missing" detection), so this is safe
