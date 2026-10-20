@@ -8,6 +8,8 @@ import { defineConfig, devices } from '@playwright/test';
 //   XCP_PW_OUT     каталог трасс и снимков
 //   XCP_PW_JSON    файл JSON-отчёта
 //   XCP_PW_WORKERS воркеров (по умолчанию 1; больше одного — только для обхода страниц)
+// Вход в панель делает global-setup, выход — global-teardown (лимит панели — 20 сессий; cookie
+// в трассах после выхода недействительны).
 // Конфиг не падает без переменных (нужно для `--list`): их наличие проверяет global-setup.
 // Сервер не поднимается и сеть не подменяется: тесты видят то же, что браузер пользователя.
 export default defineConfig({
@@ -25,6 +27,7 @@ export default defineConfig({
   timeout: 90_000 * (Number(process.env.XCP_SLOW) > 0 ? Number(process.env.XCP_SLOW) : 1),
   forbidOnly: true,
   globalSetup: './tests/router/global-setup.ts',
+  globalTeardown: './tests/router/global-teardown.ts',
   outputDir: process.env.XCP_PW_OUT || './test-results-router',
   reporter: [
     ['list'],
