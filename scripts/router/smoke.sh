@@ -37,6 +37,11 @@
 # (smoke:<проверка или префикс>, селектор цели, slug todo), записывается как KNOWN;
 # применимая запись без совпавшего FAIL — XPASS (метка больше не нужна), прогон красный.
 #
+# Чистка в начале: рабочий каталог Go-тестов на устройстве (/opt/tmp/xcp-rt, в нём session.env
+# и subscription.url) удаляется, если остался от прерванного прогона (kill -9, обрыв связи).
+# Удаляется ровно этот путь, без шаблонов; каталог снимка стенда не затрагивается. В матрице
+# безопасно: go-suite ветви идёт после смоука и создаёт каталог заново.
+#
 # Хвосты логов в отчёте проходят rt_redact (адреса и токены скрыты).
 #
 # Код выхода: 0 — нет FAIL и XPASS, 3 — цель недоступна (reachable), иначе 1.
@@ -115,6 +120,15 @@ lost() {
 finalize() {
   _rc=$?
   trap - EXIT
+  # Файл cookie остаётся, только если прогон прервали между входом и выходом из панели:
+  # best-effort выход (лимит 20 сессий) и удаление файла на ПК.
+  _jar="$RT_REPORT/$ID/.cookies"
+  if [ -f "$_jar" ]; then
+    if [ -n "${csrf:-}" ] && [ -n "${url:-}" ]; then
+      curl -sk --connect-timeout 10 --max-time 20 -b "$_jar" -X POST -H "X-CSRF-Token: $csrf" -o /dev/null "$url/api/auth/logout" || true
+    fi
+    rm -f "$_jar"
+  fi
   if [ "$UNREACH" = 1 ]; then
     for _c in kernel-running iptables-rules version xcp-pid api-version api-me api-service-status kernel-restart log-panic log-error; do
       grep -q "^[A-Z]*${TAB}${_c}${TAB}" "$BUF" || chk SKIP "$_c" "нет связи"
@@ -166,10 +180,13 @@ finalize() {
   exit 0
 }
 trap finalize EXIT
+# Прерывание сигналом: finalize получает 130 и завершает с кодом 1 (прерванный смоук не зелёный);
+# без обработчика EXIT-trap не выполнился бы.
+trap 'exit 130' INT TERM HUP
 
 # --- kernel-running ----------------------------------------------------------
 rc=0
-out=$(rt_stage "$ID" smoke-kernel rt_ssh "$ID" '/opt/sbin/xkeen -status 2>&1; echo "xray_pid=$(pidof xray | cut -d" " -f1)"; echo "mihomo_pid=$(pidof mihomo | cut -d" " -f1)"') || rc=$?
+out=$(rt_stage "$ID" smoke-kernel rt_ssh "$ID" 'rm -rf /opt/tmp/xcp-rt; /opt/sbin/xkeen -status 2>&1; echo "xray_pid=$(pidof xray | cut -d" " -f1)"; echo "mihomo_pid=$(pidof mihomo | cut -d" " -f1)"') || rc=$?
 [ "$rc" != 3 ] || lost
 clean=$(printf '%s\n' "$out" | sed "s/${ESC}\[[0-9;]*[A-Za-z]//g")
 xpid=$(printf '%s\n' "$clean" | sed -n 's/^xray_pid=//p')

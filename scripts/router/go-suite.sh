@@ -79,6 +79,10 @@ cleanup() {
   rt_ssh "$ID" "rm -rf $RWD" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
+# Прерывание сигналом: dash не выполняет EXIT-trap, когда процесс гибнет от необработанного
+# сигнала; выход из обработчика запускает cleanup (выход из панели, файлы сессии и подписки
+# на ПК, рабочий каталог на устройстве).
+trap 'exit 130' INT TERM HUP
 
 # Список пакетов: RT_GO_PKGS или все каталоги, где у _test.go первая строка `//go:build router`.
 if [ -n "${RT_GO_PKGS:-}" ]; then
