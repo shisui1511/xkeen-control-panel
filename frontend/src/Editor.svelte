@@ -102,10 +102,20 @@
   );
   let loading = $state(false);
   let loadingPath = $state<string | null>(null);
+  // Выбор файла, сделанный во время чтения другого: последний выбор перекрывает предыдущий
+  // и открывается по окончании чтения (G-142-4-WR02)
+  let queuedPick = $state<{ path: string; isPreviewClick: boolean } | null>(null);
+  // Дерево показывает занятость у последнего выбранного файла
+  const treeBusyPath = $derived(queuedPick?.path ?? loadingPath);
   let templateLoading = $state(false);
   const pendingPins = new Set<string>();
   let saving = $state(false);
   let backups = $state<string[]>([]);
+  // Путь файла, которому принадлежит список backups
+  let backupsPath = $state('');
+  // Копии показываются только для файла в редакторе: до ответа фонового запроса
+  // список пуст, копии прежнего файла не видны (WR-01)
+  const visibleBackups = $derived(backupsPath === selectedFile ? backups : []);
   let tabs = $state<EditorTab[]>([]);
   let activeTabPath = $state('');
   let breadcrumbs = $state<PathSegment[]>([]);
@@ -115,8 +125,17 @@
 
   // Drawer states
   let drawerOpen = $state(false);
-  let selectedBackup = $state('');
-  let diffGroups = $state<DiffGroup[]>([]);
+  // Смена файла в редакторе сбрасывает выбор копии и сравнение в том же обновлении:
+  // сравнение с копией другого файла недействительно (WR-01). Присваивания в
+  // selectBackup и restoreBackup перезаписывают значение до следующей смены файла.
+  let selectedBackup = $derived.by<string>(() => {
+    void selectedFile;
+    return '';
+  });
+  let diffGroups = $derived.by<DiffGroup[]>(() => {
+    void selectedFile;
+    return [];
+  });
   let backupLoading = $state(false);
   let saveWarnings = $state<PreflightWarning[]>([]);
 
@@ -186,6 +205,11 @@
   let showGeneratorModal = $state(false);
   let newFileName = $state('');
   let renameTarget = $state('');
+  // Файл, над которым открыто действие меню (переименование, удаление): файл редактора
+  // selectedFile от него не меняется, поэтому «Сохранить» пишет открытую вкладку в её файл (CR-01)
+  let menuTarget = $state('');
+  // Цель модалок переименования и удаления: файл меню, без него — файл редактора
+  const actionTarget = $derived(menuTarget || selectedFile);
 
   // Dirty state tracking
   let originalContent = $state('');
@@ -380,6 +404,7 @@
     currentDir = dir;
     selectedFile = '';
     backups = [];
+    backupsPath = '';
     originalContent = '';
     isDirty = false;
     loadFiles();
@@ -470,8 +495,10 @@
         }
       }
 
-      await loadBackups(path);
+      // Вкладка уже показана: список копий догружается отдельно и не задерживает
+      // закрытие шторки (D-16, G-142-4-WR02).
       tabs = [...tabs];
+      void loadBackups(path);
     } catch (e: any) {
       showToast('error', $t('editor.file_load_error') + ': ' + (e?.message || e));
       loading = false;
@@ -515,8 +542,32 @@
     }
   }
 
-  async function loadFile(path: string, isPreviewClick = true) {
-    if (!path) return;
+  /** Забирает запомненный выбор файла и сбрасывает очередь */
+  function takeQueuedPick(): { path: string; isPreviewClick: boolean } | null {
+    const next = queuedPick;
+    queuedPick = null;
+    return next;
+  }
+
+  /**
+   * Открывает файл во вкладке. Возвращает true, когда показан файл последнего выбора: если во время
+   * чтения выбрали другой файл, открывается он, и результат относится к нему. false — пустой путь,
+   * выбор запомнен до конца текущего чтения, отмена подтверждения, ошибка чтения без запомненного выбора.
+   */
+  async function loadFile(path: string, isPreviewClick = true): Promise<boolean> {
+    if (!path) return false;
+
+    // Идёт чтение другого файла: выбор запоминается, последний перекрывает предыдущий. Проверка
+    // стоит до ветки существующей вкладки, иначе завершившееся чтение перебило бы показанный файл.
+    // Двойное нажатие по запомненному файлу закрепляет его вкладку.
+    if (loadingPath !== null && loadingPath !== path) {
+      queuedPick = {
+        path,
+        isPreviewClick:
+          queuedPick?.path === path ? queuedPick.isPreviewClick && isPreviewClick : isPreviewClick
+      };
+      return false;
+    }
     saveError = false;
 
     const existingTab = tabs.find((t) => t.path === path);
@@ -526,17 +577,19 @@
         tabs = [...tabs];
       }
       await switchTab(path);
-      return;
+      return true;
     }
 
     if (loading && loadingPath === path) {
       if (!isPreviewClick) {
         pendingPins.add(path);
       }
-      return;
+      // последний выбор снова этот файл
+      queuedPick = null;
+      return false;
     }
 
-    if (loading) return;
+    if (loading) return false;
 
     loading = true;
     loadingPath = path;
@@ -546,6 +599,15 @@
 
     try {
       const content = await readConfigFile(path);
+
+      // Пока читался этот файл, выбрали другой: ответ отбрасывается до любых изменений вкладок
+      let next = takeQueuedPick();
+      if (next) {
+        loading = false;
+        loadingPath = null;
+        pendingPins.delete(path);
+        return loadFile(next.path, next.isPreviewClick);
+      }
 
       // Save active tab state before leaving
       if (activeTabPath && editorView) {
@@ -571,7 +633,9 @@
             if (!(await confirmUnsaved())) {
               loading = false;
               loadingPath = null;
-              return;
+              // пользователь отменил выбор
+              queuedPick = null;
+              return false;
             }
             localStorage.removeItem('editor.draft.' + previewTab.path);
           }
@@ -638,31 +702,61 @@
         }
       }
 
-      await loadBackups(path);
+      // D-16, G-142-4-WR02: файл уже показан во вкладке; список копий догружается
+      // отдельно и не задерживает закрытие шторки.
       tabs = [...tabs];
+      void loadBackups(path);
+      // выбор мог появиться, пока было открыто подтверждение
+      next = takeQueuedPick();
+      if (next) return loadFile(next.path, next.isPreviewClick);
+      return true;
     } catch (e: any) {
       console.error('loadFile error:', e);
       showToast('error', $t('editor.file_load_error') + ': ' + (e?.message || e));
       loading = false;
       loadingPath = null;
+      const next = takeQueuedPick();
+      if (next) return loadFile(next.path, next.isPreviewClick);
+      return false;
     }
   }
 
-  async function loadBackups(path: string) {
+  /** Исход запроса списка копий: `ok` и `stale` — список получен, `error` — нет. */
+  type BackupsLoadResult =
+    | { kind: 'ok' }
+    | { kind: 'stale' }
+    | { kind: 'unauthorized' }
+    | { kind: 'error'; message: string };
+
+  async function loadBackups(path: string): Promise<BackupsLoadResult> {
     try {
-      backups = await fetchBackupsList(path);
+      const list = await fetchBackupsList(path);
+      // Список копий грузится в фоне: ответ для уже не выбранного файла
+      // не перетирает список текущего (G-142-4-WR02). Список помечается путём файла:
+      // его видно только при совпадении с файлом в редакторе (WR-01).
+      if (path !== selectedFile) return { kind: 'stale' };
+      backups = list;
+      backupsPath = path;
+      return { kind: 'ok' };
     } catch (e: any) {
-      if (e?.status === 401) return;
+      if (e?.status === 401) return { kind: 'unauthorized' };
+      // «Копий нет» и «список не получен» различаются (WR-03). Поздний сбой
+      // фонового запроса не обнуляет уже показанный список и не закрывает
+      // открытый лист (IN-02 ревью).
+      return { kind: 'error', message: e?.message || String(e) };
     }
   }
 
   async function selectBackup(backupPath: string) {
     if (selectedBackup === backupPath) return;
+    const forPath = selectedFile;
     selectedBackup = backupPath;
     backupLoading = true;
     diffGroups = [];
     try {
       const backupContent = await fetchBackupContent(backupPath);
+      // Ответ для другого файла или другой копии отбрасывается (WR-01)
+      if (selectedFile !== forPath || selectedBackup !== backupPath) return;
       const currentContent = editorView ? editorView.state.doc.toString() : '';
       diffGroups = getDiffGroups(backupContent, currentContent);
     } catch (e: any) {
@@ -871,6 +965,19 @@
   }
 
   async function restoreBackup(backupPath: string) {
+    // «Восстановить» подставляет копию только в файл, для которого её нажали.
+    // Пока открыто подтверждение или читается копия, на ПК можно открыть другой
+    // файл из колонки (лист копий при этом жив). Без сверки после каждого
+    // ожидания копия прежнего файла попала бы в новый (WR-01 ревью 19.10,
+    // T-142-36). Копия, которой уже нет в списке (ротация после «Сохранить»),
+    // тоже не восстанавливается молча.
+    const forPath = selectedFile;
+    const stillValid = () => selectedFile === forPath && visibleBackups.includes(backupPath);
+    const abortStale = () => showToast('info', $t('editor.restore_stale'));
+    if (!stillValid()) {
+      abortStale();
+      return;
+    }
     const filename = backupPath.split('/').pop() || backupPath;
     if (
       !(await showConfirm({
@@ -882,9 +989,17 @@
       }))
     )
       return;
+    if (!stillValid()) {
+      abortStale();
+      return;
+    }
 
     try {
       const content = await fetchBackupContent(backupPath);
+      if (!stillValid()) {
+        abortStale();
+        return;
+      }
 
       if (editorView) {
         editorView.dispatch({
@@ -996,17 +1111,20 @@
 
   function deleteFile() {
     if (!selectedFile) return;
+    menuTarget = '';
     showDeleteConfirmModal = true;
   }
 
   async function confirmDeleteFile() {
-    if (!selectedFile) return;
+    // цель берётся до любых await: файл меню либо файл редактора
+    const fileToDelete = actionTarget;
+    if (!fileToDelete) return;
+    menuTarget = '';
     showDeleteConfirmModal = false;
 
     try {
-      await deleteConfigFile(selectedFile);
+      await deleteConfigFile(fileToDelete);
       showToast('success', $t('app.delete'));
-      const fileToDelete = selectedFile;
       await closeTab(fileToDelete, true);
       await loadFiles();
     } catch (e: any) {
@@ -1017,9 +1135,9 @@
 
   async function renameFile(newName?: string) {
     const target = newName || renameTarget;
-    if (!target || !selectedFile) return;
+    const oldPath = actionTarget;
+    if (!target || !oldPath) return;
 
-    const oldPath = selectedFile;
     const newPath = oldPath.substring(0, oldPath.lastIndexOf('/') + 1) + target;
 
     try {
@@ -1033,6 +1151,7 @@
       showToast('success', $t('app.rename'));
       showRenameModal = false;
       renameTarget = '';
+      menuTarget = '';
       await loadFiles();
       await loadFile(newPath);
     } catch (e: any) {
@@ -1076,14 +1195,39 @@
   }
 
   function deleteFileByInfo(file: ConfigFileInfo) {
-    selectedFile = file.path;
-    deleteFile();
+    menuTarget = file.path;
+    showDeleteConfirmModal = true;
   }
 
-  function openBackupsForFile(file: ConfigFileInfo) {
-    selectedFile = file.path;
-    loadBackups(file.path);
+  /**
+   * Открывает файл и лист его копий. true — файл показан во вкладке (шторку можно закрыть),
+   * false — файл не открыт. Лист копий всегда относится к файлу в редакторе (CR-01, WR-03):
+   * по файлу без копий лист не открывается, показывается уведомление, а флаг листа
+   * не остаётся включённым и не накрывает следующий открытый файл. «Нет сохранённых бэкапов» —
+   * только при успешном пустом списке; если список не получен, показывается уведомление
+   * об ошибке и лист не открывается (WR-03). Возврат true по-прежнему значит «файл показан»
+   * (D-16, шторку можно закрыть).
+   */
+  async function openBackupsForFile(file: ConfigFileInfo): Promise<boolean> {
+    if (!(await loadFile(file.path))) return false;
+    // loadFile открыл запомненный выбор другого файла («последний выбор побеждает»)
+    if (selectedFile !== file.path) return true;
+    const res = await loadBackups(file.path);
+    if (selectedFile !== file.path || res.kind === 'stale' || res.kind === 'unauthorized') {
+      return true;
+    }
+    if (res.kind === 'error') {
+      drawerOpen = false;
+      showToast('error', $t('editor.backups_load_error') + ': ' + res.message);
+      return true;
+    }
+    if (visibleBackups.length === 0) {
+      drawerOpen = false;
+      showToast('info', $t('editor.no_backups'));
+      return true;
+    }
     drawerOpen = true;
+    return true;
   }
 
   function toggleSchema() {
@@ -1358,26 +1502,32 @@
         {selectedFile}
         activeKernel={$activeKernelName}
         overlay={isNarrow}
+        loadingPath={treeBusyPath}
         onClose={() => (showSidebar = false)}
-        onLoadFile={(path, isPreviewClick) => {
-          loadFile(path, isPreviewClick);
-          if (isNarrow) showSidebar = false;
+        onLoadFile={async (path, isPreviewClick) => {
+          const opened = await loadFile(path, isPreviewClick);
+          // D-16: шторка закрывается только после того, как файл показан во вкладке; при отмене
+          // подтверждения и ошибке чтения она остаётся открытой. Выбор во время чтения запоминается
+          // и откроется по окончании: шторку закроет обработчик первого нажатия, когда покажет
+          // последний выбранный файл
+          if (opened && isNarrow) showSidebar = false;
         }}
         onCreateFile={() => {
           showCreateModal = true;
           newFileName = '';
         }}
         onRenameFile={(f) => {
-          showRenameModal = true;
+          menuTarget = f.path;
           renameTarget = f.name;
-          selectedFile = f.path;
+          showRenameModal = true;
         }}
         onDuplicateFile={duplicateFile}
         onDownloadFile={downloadFileByName}
         onDeleteFile={deleteFileByInfo}
-        onViewBackups={(file) => {
-          openBackupsForFile(file);
-          if (isNarrow) showSidebar = false;
+        onViewBackups={async (file) => {
+          // D-16: шторка закрывается только после того, как файл показан, как у onLoadFile
+          const opened = await openBackupsForFile(file);
+          if (opened && isNarrow) showSidebar = false;
         }}
       />
 
@@ -1470,6 +1620,7 @@
             onDiscardDraft={discardDraft}
             onDownloadFile={downloadFile}
             onRenameFile={() => {
+              menuTarget = '';
               showRenameModal = true;
               renameTarget = selectedFile.split('/').pop() || '';
             }}
@@ -1549,7 +1700,7 @@
             {expertMode}
             {applyLoading}
             {backgroundStatusText}
-            backupCount={backups.length}
+            backupCount={visibleBackups.length}
             {drawerOpen}
             onToggleSchema={toggleSchema}
             onToggleExpertMode={toggleExpertMode}
@@ -1557,9 +1708,9 @@
           />
 
           <!-- Bottom Drawer -->
-          {#if drawerOpen && backups.length > 0}
+          {#if drawerOpen && visibleBackups.length > 0}
             <BackupSidebar
-              {backups}
+              backups={visibleBackups}
               {selectedBackup}
               {diffGroups}
               {backupLoading}
@@ -1606,11 +1757,14 @@
   initialRenameValue={renameTarget}
   {xrayDir}
   createDir={selectedFile ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : xrayDir}
-  renameDir={selectedFile ? selectedFile.substring(0, selectedFile.lastIndexOf('/')) : ''}
+  renameDir={actionTarget ? actionTarget.substring(0, actionTarget.lastIndexOf('/')) : ''}
   onCreate={createFile}
   onRename={renameFile}
   onCloseCreate={() => (showCreateModal = false)}
-  onCloseRename={() => (showRenameModal = false)}
+  onCloseRename={() => {
+    showRenameModal = false;
+    menuTarget = '';
+  }}
 />
 
 <!-- Templates Modal -->
@@ -1639,9 +1793,12 @@
 
 <DeleteFileModal
   isOpen={showDeleteConfirmModal}
-  filePath={selectedFile}
+  filePath={actionTarget}
   onConfirm={confirmDeleteFile}
-  onClose={() => (showDeleteConfirmModal = false)}
+  onClose={() => {
+    showDeleteConfirmModal = false;
+    menuTarget = '';
+  }}
 />
 
 <style>

@@ -15,6 +15,7 @@
     xrayFiles = [],
     mihomoFiles = [],
     selectedFile = '',
+    loadingPath = null,
     activeKernel = '',
     onLoadFile,
     onCreateFile,
@@ -27,6 +28,8 @@
     xrayFiles: ConfigFileInfo[];
     mihomoFiles: ConfigFileInfo[];
     selectedFile: string;
+    /** Путь файла, который сейчас открывается: его строка помечена aria-busy и подсвечена */
+    loadingPath?: string | null;
     activeKernel: string;
     onLoadFile: (path: string, isPreviewClick: boolean) => void;
     onCreateFile: () => void;
@@ -184,9 +187,12 @@
           {@const fmt = getFormatBadge(file.name)}
           {@const stopWord = matchXKeenStoplist(file.name)}
           {@const activeConfig = isActiveRunningConfig(file)}
+          {@const busy = file.path === loadingPath}
           <button
             class="file-row"
-            class:active={file.path === selectedFile}
+            class:active={loadingPath ? busy : file.path === selectedFile}
+            class:busy
+            aria-busy={busy ? 'true' : undefined}
             onclick={() => onLoadFile(file.path, true)}
             ondblclick={() => onLoadFile(file.path, false)}
             oncontextmenu={(e) => handleContextMenu(e, file)}
@@ -244,9 +250,12 @@
         {#each filteredMihomoFiles as file (file.path)}
           {@const fmt = getFormatBadge(file.name)}
           {@const activeConfig = isActiveRunningConfig(file)}
+          {@const busy = file.path === loadingPath}
           <button
             class="file-row"
-            class:active={file.path === selectedFile}
+            class:active={loadingPath ? busy : file.path === selectedFile}
+            class:busy
+            aria-busy={busy ? 'true' : undefined}
             onclick={() => onLoadFile(file.path, true)}
             ondblclick={() => onLoadFile(file.path, false)}
             oncontextmenu={(e) => handleContextMenu(e, file)}
@@ -562,6 +571,28 @@
     background: var(--accent-soft);
     color: var(--accent);
     font-weight: 600;
+  }
+
+  /* Файл открывается: подсветка и aria-busy ставятся сразу, пульс — после 150 мс, поэтому
+     быстрое чтение не мигает; раскладка строки не меняется (G-142-4-WR02) */
+  .file-row.busy {
+    cursor: progress;
+    animation: fr-busy-pulse 0.9s ease-in-out 0.15s infinite alternate;
+  }
+
+  @keyframes fr-busy-pulse {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0.55;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .file-row.busy {
+      animation: none;
+    }
   }
 
   .fr-left {

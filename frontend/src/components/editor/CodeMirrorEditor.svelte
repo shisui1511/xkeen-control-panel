@@ -1,3 +1,16 @@
+<script module lang="ts">
+  import { disableErrorLogging } from 'best-effort-json-parser';
+
+  // Неверный JSON — ввод пользователя, его показывает диагностика линтера разбора. Библиотека
+  // разбора не должна писать в console.error ни текст после значения, ни значение без парсера
+  // («no parser registered» при `{"a": }` или слове без кавычек): её вывод содержал текст документа
+  // с ключами и адресами. Выключатель штатный и действует на все вызовы логгера библиотеки, в том
+  // числе на обработчик лишних токенов по умолчанию. Модуль выполняется один раз при первом
+  // импорте Редактора, до запуска линтеров; копия пакета одна, её же импортирует
+  // codemirror-json-schema. WR-02 ревью 19.10; заменяет решение T-142-33.
+  disableErrorLogging();
+</script>
+
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
   import { t as translate, currentLang, type Lang } from '../../i18n';

@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { fade, fly, type EasingFunction, type TransitionConfig } from 'svelte/transition';
+  import { cubicIn, cubicOut } from 'svelte/easing';
+  import { prefersReducedMotion } from 'svelte/motion';
   import { t } from '../i18n';
 
   export interface ResponsiveSidebarProps {
@@ -38,6 +41,38 @@
   );
 
   let isOverlay = $derived(overlay !== undefined ? overlay : isMediaNarrow);
+
+  // Длительность выезда и ухода шторки, мс
+  const SHEET_MOTION_MS = 200;
+  // Длительность берётся при каждом переходе через sheetFly и sheetFade. При смене режима уход
+  // ветки оверлея видит уже новый isOverlay и длится 0: шторка и бэкдроп исчезают сразу и не
+  // гаснут поверх колонки ПК. Колонка не анимируется вовсе (panel(false)).
+  let sheetMotionMs = $derived(isOverlay && !prefersReducedMotion.current ? SHEET_MOTION_MS : 0);
+  // Шторка выезжает со своей стороны экрана
+  let sheetOffset = $derived(side === 'left' ? '-100%' : '100%');
+
+  // Svelte кеширует результат функции перехода на время жизни менеджера перехода, а у перехода
+  // только на уход кеш переживает прерванный уход (шторку открыли снова, пока она уезжала):
+  // ветка возобновляется вместе с менеджерами и хранит прежнюю длительность. Функция вместо
+  // объекта кешируется как функция, и Svelte вызывает её при каждом выезде и уходе (в microtask
+  // после обновления DOM), поэтому длительность и сторона читаются заново: после прерванного
+  // закрытия действуют и смена режима, и prefers-reduced-motion (G-142-4-WR01, D-15).
+  function sheetFly(
+    node: Element,
+    p: { animated: boolean; easing: EasingFunction }
+  ): () => TransitionConfig {
+    return () =>
+      fly(node, {
+        x: sheetOffset,
+        opacity: 1,
+        duration: p.animated ? sheetMotionMs : 0,
+        easing: p.easing
+      });
+  }
+
+  function sheetFade(node: Element, p: { easing: EasingFunction }): () => TransitionConfig {
+    return () => fade(node, { duration: sheetMotionMs, easing: p.easing });
+  }
 
   let customWidth = $state<number | null>(null);
   let initialWidth = $derived.by(() => {
@@ -97,18 +132,23 @@
     onClose?.();
   }
 
+  // Поверхности диалогов, которым принадлежит Escape над шторкой
+  const MODAL_SURFACES = '.modal-backdrop, .confirm-modal-backdrop';
+
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && isOverlay && show) {
-      if (
-        typeof document !== 'undefined' &&
-        document.querySelector('.modal-backdrop, .confirm-modal-backdrop, .confirm-dialog-backdrop')
-      ) {
-        return;
-      }
-      e.stopPropagation();
-      e.preventDefault();
-      handleClose();
-    }
+    if (e.key !== 'Escape' || !isOverlay || !show) return;
+    // Escape уже обработал другой слой
+    if (e.defaultPrevented) return;
+    // Путь события фиксируется при отправке. Svelte делегирует keydown на корень и document и
+    // применяет закрытие модалки в microtask до вызова слушателя window; у Modal нет анимации
+    // ухода, поэтому текущий DOM модалку уже не содержит, а путь события её помнит.
+    const fromModal = e
+      .composedPath()
+      .some((node) => node instanceof Element && node.matches(MODAL_SURFACES));
+    if (fromModal || document.querySelector(MODAL_SURFACES)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    handleClose();
   }
 
   function startResize(e: PointerEvent) {
@@ -238,7 +278,7 @@
   });
 </script>
 
-{#snippet panel()}
+{#snippet panel(animated: boolean)}
   <div
     class="responsive-sidebar-panel file-tree-pane {containerClass}"
     class:overlay={isOverlay}
@@ -254,6 +294,8 @@
       isSwiping = false;
     }}
     style={isOverlay ? undefined : `width: ${panelWidth}px;`}
+    in:sheetFly={{ animated, easing: cubicOut }}
+    out:sheetFly={{ animated, easing: cubicIn }}
   >
     {#if isOverlay}
       <div class="responsive-sidebar-overlay-header">
@@ -302,8 +344,10 @@
       aria-label={$t('app.close')}
       tabindex="-1"
       onclick={handleClose}
+      in:sheetFade={{ easing: cubicOut }}
+      out:sheetFade={{ easing: cubicIn }}
     ></button>
-    {@render panel()}
+    {@render panel(true)}
   </div>
 {:else if show}
   {#if side === 'right'}
@@ -317,7 +361,7 @@
     ></button>
   {/if}
 
-  {@render panel()}
+  {@render panel(false)}
 
   {#if side === 'left'}
     <button
@@ -430,7 +474,6 @@
     margin: 0;
     background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
     cursor: default;
-    transition: opacity 0.2s ease-out;
   }
 
   .editor-splitter {
@@ -476,11 +519,10 @@
     width: 2px;
   }
 
+  /* Шторку и бэкдроп гасит prefersReducedMotion в скрипте; здесь — переходы сплиттера (D-15) */
   @media (prefers-reduced-motion: reduce) {
-    .responsive-sidebar-panel.overlay,
-    .responsive-sidebar-backdrop {
-      animation: none !important;
-      transition: none !important;
+    .editor-splitter::before {
+      transition: none;
     }
   }
 </style>
