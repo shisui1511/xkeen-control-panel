@@ -1,5 +1,5 @@
 #!/bin/sh
-# scripts/router/smoke.sh <id цели> <ожидаемая версия xcp> [--from-line <n> [--from-inode <i>]] — смоук цели после деплоя.
+# scripts/router/smoke.sh <id цели> <ожидаемая версия xcp> [--from-line <n> [--from-inode <i> [--from-fp <md5>]]] — смоук цели после деплоя.
 #
 # Проверки (каждая пишет строку в <отчёт>/<id>/results.tsv; D-34):
 #   kernel-running       xkeen -status сообщает «запущен в режиме …», процесс ядра жив;
@@ -32,6 +32,11 @@
 # среди xcp.log, xcp.log.1, xcp.log.2, берёт его хвост после строки n и целиком все более
 # новые файлы. Файл не найден или короче строки n — окно ветви не восстановлено: FAIL
 # log-error (не PASS), log-panic и log-repeat — SKIP.
+# --from-fp <md5> (только вместе с --from-inode): md5 первой строки файла на момент строки n.
+# Номер inode освобождается после третьей ротации и может достаться новому xcp.log, поэтому
+# найденный по inode файл принимается, только если его первая строка даёт тот же отпечаток;
+# иначе окно не восстановлено. Файл читается одним открытием: число строк и хвост берутся
+# из одного дескриптора, ротация между ними не подменяет файл.
 #
 # Известные падения (D-12): FAIL, совпавший с записью scripts/router/known-failures
 # (smoke:<проверка или префикс>, селектор цели, slug todo), записывается как KNOWN;
@@ -53,7 +58,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/lib.sh"
 
 usage() {
-  echo "usage: smoke.sh <id цели> <ожидаемая версия> [--from-line <n> [--from-inode <i>]]" >&2
+  echo "usage: smoke.sh <id цели> <ожидаемая версия> [--from-line <n> [--from-inode <i> [--from-fp <md5>]]]" >&2
   exit 2
 }
 
@@ -63,6 +68,7 @@ EXPECT=$2
 shift 2
 FROM_LINE=""
 FROM_INODE=""
+FROM_FP=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --from-line)
@@ -81,10 +87,19 @@ while [ $# -gt 0 ]; do
       esac
       shift 2
       ;;
+    --from-fp)
+      [ $# -ge 2 ] || usage
+      FROM_FP=$2
+      case "$FROM_FP" in
+        '' | *[!0-9a-f]*) usage ;;
+      esac
+      shift 2
+      ;;
     *) usage ;;
   esac
 done
 [ -z "$FROM_INODE" ] || [ -n "$FROM_LINE" ] || usage
+[ -z "$FROM_FP" ] || [ -n "$FROM_INODE" ] || usage
 
 cd "$(rt_repo_root)"
 ROUTERS=$ID
@@ -407,6 +422,7 @@ L=/opt/var/log/xcp.log
 [ -f "$L" ] || exit 9
 from=${1:-}
 ino=${2:-}
+fp=${3:-}
 lost=XCP_RT_LOG_WINDOW_LOST
 if [ -z "$from" ]; then
   from=$(grep -n "XKeen Control Panel v.* starting\.\.\." "$L" | tail -n 1 | cut -d: -f1)
@@ -438,12 +454,24 @@ if [ -z "$found" ]; then
   echo "$lost"
   exit 0
 fi
-n=$(wc -l <"$found")
-if [ "$n" -lt "$from" ]; then
-  echo "$lost"
-  exit 0
+# Файл читается одним открытием (дескриптор 3): первая строка для отпечатка, остальное —
+# для подсчёта и хвоста. Два открытия по пути дали бы хвост другого файла, если ротация
+# случится между ними.
+exec 3<"$found"
+off=0
+if [ "$from" -gt 0 ]; then
+  IFS= read -r first <&3 || first=""
+  if [ -n "$fp" ]; then
+    sum=$(printf "%s\n" "$first" | md5sum | cut -c1-32)
+    if [ "$sum" != "$fp" ]; then
+      # inode тот же, файл другой: номер достался новому xcp.log после ротации
+      echo "$lost"
+      exit 0
+    fi
+  fi
+  off=1
 fi
-sed -n "$((from + 1)),\$p" "$found"
+awk -v from="$from" -v off="$off" -v lost="$lost" "NR + off > from { print } END { if (NR + off < from) print lost }" <&3
 # более новые файлы целиком, в хронологическом порядке (от большего суффикса к текущему)
 case "$found" in
   "$L.2") newer="$L.1 $L" ;;
@@ -456,10 +484,10 @@ done
 exit 0
 '
 rc=0
-printf '%s\n' "$REMOTE_LOG" | RT_SSH_STDIN=1 rt_ssh "$ID" "sh -s -- $FROM_LINE $FROM_INODE" 2>/dev/null | rt_redact >"$tail_file" || rc=$?
+printf '%s\n' "$REMOTE_LOG" | RT_SSH_STDIN=1 rt_ssh "$ID" "sh -s -- $FROM_LINE $FROM_INODE $FROM_FP" 2>/dev/null | rt_redact >"$tail_file" || rc=$?
 # rc здесь — код rt_redact; кода ssh в POSIX sh не получить, поэтому отсутствие
 # лога определяется по пустому файлу и повторной проверкой наличия файла.
-if [ -s "$tail_file" ] && [ "$(head -n 1 "$tail_file")" = XCP_RT_LOG_WINDOW_LOST ]; then
+if [ -s "$tail_file" ] && grep -qx XCP_RT_LOG_WINDOW_LOST "$tail_file"; then
   # Файл ветви найти нельзя (ротирован дважды, усечён, inode не найден): строки ветви
   # потеряны, поэтому PASS по неполному хвосту недопустим (D-34).
   _why="xcp.log ротирован или усечён за ветвь: окно ветви не восстановлено"

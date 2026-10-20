@@ -278,13 +278,17 @@ full_target() {
     # Вместе с номером строки запоминается inode файла: при размере 1 МБ xcp.log
     # ротируется (RotateWriter: xcp.log -> xcp.log.1 -> xcp.log.2), и без inode номер
     # строки указывал бы уже на другой файл. Смоук по inode находит файл ветви среди
-    # xcp.log, .1 и .2 и берёт хвост после запомненной строки (WR-01).
+    # xcp.log, .1 и .2 и берёт хвост после запомненной строки (WR-01). Номер inode
+    # освобождается после третьей ротации и может достаться новому xcp.log, поэтому
+    # запоминается ещё и md5 первой строки: найденный файл с другой первой строкой — не файл ветви.
     _from=""
     _ino=""
+    _fp=""
     if [ "$_first" = 0 ]; then
-      _lraw=$(rt_ssh "$_t" 'echo "xcp_lines=$(wc -l </opt/var/log/xcp.log)"; set -- $(ls -i /opt/var/log/xcp.log); echo "xcp_ino=$1"' 2>/dev/null) || _lraw=""
+      _lraw=$(rt_ssh "$_t" 'L=/opt/var/log/xcp.log; echo "xcp_lines=$(wc -l <$L)"; set -- $(ls -i $L); echo "xcp_ino=$1"; echo "xcp_fp=$(head -n 1 $L | md5sum | cut -c1-32)"' 2>/dev/null) || _lraw=""
       _from=$(printf '%s\n' "$_lraw" | sed -n 's/^xcp_lines=//p' | tr -dc '0-9')
       _ino=$(printf '%s\n' "$_lraw" | sed -n 's/^xcp_ino=//p' | tr -dc '0-9')
+      _fp=$(printf '%s\n' "$_lraw" | sed -n 's/^xcp_fp=//p' | tr -dc '0-9a-f')
     fi
     _first=0
 
@@ -299,7 +303,9 @@ full_target() {
     fi
 
     # 2. смоук (только чтение; строки лога — после начала ветви)
-    if [ -n "$_from" ] && [ -n "$_ino" ]; then
+    if [ -n "$_from" ] && [ -n "$_ino" ] && [ -n "$_fp" ]; then
+      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino" --from-fp "$_fp"
+    elif [ -n "$_from" ] && [ -n "$_ino" ]; then
       _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino"
     elif [ -n "$_from" ]; then
       _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from"
