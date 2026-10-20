@@ -2,6 +2,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
+import { withPanel } from './lib/nodes-api';
 
 // Запись в Редакторе настоящей панели и окна, которые появляются только при записи (RT-05):
 // окно подтверждения сохранения (SaveConfirm) и предупреждения Preflight после записи. Проверка
@@ -10,14 +11,17 @@ import { RT, T } from './lib/env';
 //
 // Правка безвредная (D-04): уровень журнала активного ядра. Xray — «loglevel» в файле секции
 // log каталога конфигов, Mihomo — «log-level» в config.yaml. Исходное значение возвращается
-// вторым сохранением тем же путём; при любом исходе прогона снимок стенда (D-19) вернёт файлы.
+// вторым сохранением тем же путём; при падении теста файл возвращает хук afterEach через API
+// (запись и применение к ядру, как делает Редактор). В сессии на стенде снимка нет.
 //
 // Предупреждения Preflight (блок над редактором) приходят не на каждую запись: сервер ищет
 // рискованные правила маршрутизации и DNS. Блок проверяется, когда он открылся, а если нет —
 // тест пишет об этом в вывод (не падение). Для Xray есть безвредная правка, которая его
 // вызывает: файл маршрутизации сервер проверяет на обход частных сетей и порта RDP, поэтому
-// пробельная правка (лишняя пустая строка в конце) даёт предупреждение, если в маршрутизации
-// стенда этого обхода нет. Для Mihomo то же даёт правка config.yaml без секции rules.
+// пробельная правка даёт предупреждение, если в маршрутизации стенда этого обхода нет. Правка —
+// пустая строка сразу после первой строки файла: смысл JSON не меняется, а сверка записи не
+// пустая (текст отличается не только хвостовыми пробелами, которые сверка отбрасывает).
+// Для Mihomo то же даёт правка config.yaml без секции rules.
 
 const THEMES = ['light', 'dark'] as const;
 const VIEWPORT = { width: 390, height: 844 };
@@ -41,6 +45,38 @@ function mutateLogLevel(core: string, orig: string): string {
   const m = re.exec(orig);
   if (m) return orig.replace(re, `log-level: ${m[1] === 'warning' ? 'error' : 'warning'}`);
   return `log-level: warning\n${orig}`;
+}
+
+/** Вставляет пустую строку сразу после первой строки файла (без перевода строки — перед текстом). */
+function insertBlankLine(orig: string): string {
+  const i = orig.indexOf('\n');
+  return i < 0 ? `\n${orig}` : `${orig.slice(0, i)}\n${orig.slice(i)}`;
+}
+
+/** Пути изменённых файлов с исходным текстом: ждут возврата, пока не подтверждён второй записью. */
+const pendingRestore = new Map<string, string>();
+
+/** Запрос к API панели из страницы с её сессией; тело уходит строкой, как у Редактора. */
+async function rawRequest(
+  page: Page,
+  method: string,
+  path: string,
+  body?: string
+): Promise<{ status: number; text: string }> {
+  return page.evaluate(
+    async ({ method, path, body }) => {
+      const res = await fetch(path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': localStorage.getItem('csrf_token') ?? ''
+        },
+        body
+      });
+      return { status: res.status, text: await res.text() };
+    },
+    { method, path, body }
+  );
 }
 
 interface Box {
@@ -212,6 +248,12 @@ async function writeAndRestore(
   const orig = await readFile(page, path);
   const edited = edit(orig);
   expect(edited).not.toBe(orig);
+  expect(
+    edited.trimEnd(),
+    `${what}: сверка записи была бы пустой (правка отличается только хвостовыми пробелами)`
+  ).not.toBe(orig.trimEnd());
+  // файл ждёт возврата с первой записи; при падении теста его вернёт afterEach
+  pendingRestore.set(path, orig);
 
   await openFile(page, name);
   await clearSuccessToasts(page);
@@ -244,8 +286,39 @@ async function writeAndRestore(
   await confirmSave(page, `${what}, возврат`);
   await expect(page.locator('.toast--success').first()).toBeVisible({ timeout: T.action });
   expect((await readFile(page, path)).trimEnd()).toBe(orig.trimEnd());
+  pendingRestore.delete(path);
   return preflight;
 }
+
+/**
+ * Уборка после падения или тайм-аута: исходный текст каждого изменённого файла возвращается
+ * через API тем же путём, что у Редактора (запись и применение к ядру). Ошибка уборки добавляется
+ * к падению теста, не заменяя его; в вывод идут только имена файлов и коды HTTP.
+ */
+test.afterEach(async ({ browser }, testInfo) => {
+  if (pendingRestore.size === 0) return;
+  testInfo.setTimeout(testInfo.timeout + 2 * T.save * pendingRestore.size);
+  const failed: string[] = [];
+  await withPanel(browser, async (page) => {
+    for (const [path, orig] of pendingRestore) {
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      const q = encodeURIComponent(path);
+      const save = await rawRequest(page, 'POST', `/api/config/save?path=${q}`, orig);
+      const apply =
+        save.status === 200
+          ? await rawRequest(page, 'POST', `/api/service/control?action=apply&path=${q}`)
+          : { status: 0, text: '' };
+      console.log(
+        `уборка: ${name} возвращён (save http ${save.status}, apply http ${apply.status})`
+      );
+      if (save.status !== 200) failed.push(`${name}: save http ${save.status}`);
+    }
+  });
+  pendingRestore.clear();
+  if (failed.length > 0) {
+    throw new Error(`уборка: стенд не вернулся в исходное состояние (${failed.join('; ')})`);
+  }
+});
 
 for (const theme of THEMES) {
   test(`editor-save theme:${theme} vp:390 core:${RT.core || 'unknown'}`, async ({ page }) => {
@@ -294,7 +367,7 @@ for (const theme of THEMES) {
           core,
           XRAY_DIR,
           XRAY_ROUTING,
-          (o) => `${o}\n`,
+          insertBlankLine,
           'маршрутизация Xray'
         );
       } else {
