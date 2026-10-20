@@ -11,7 +11,8 @@ deps:
 	go mod download
 	go mod tidy
 
-# Git-хуки из .githooks (pre-commit по индексу: prettier, gofmt, check-no-simulations, check-leaks)
+# Git-хуки из .githooks: pre-commit по индексу (prettier, gofmt, check-no-simulations, check-leaks),
+# commit-msg (check-leaks по сообщению коммита), pre-merge-commit (check-leaks по индексу слияния)
 hooks:
 	git config core.hooksPath .githooks
 	@echo "Git hooks: .githooks"

@@ -1,0 +1,20 @@
+#!/bin/sh
+# .githooks/pre-merge-commit — слияние (git merge, в том числе «merge executor worktree»)
+# не должно вносить строки из локального файла целей.
+# Подключение: make hooks (git config core.hooksPath .githooks).
+#
+# pre-commit при слиянии не вызывается. Форматирование чужих веток здесь не проверяется
+# (оно проверено их коммитами), только индекс слияния на строки стенда: туда попадает и
+# текст, внесённый при разрешении конфликтов. Сообщение слияния проверяет commit-msg.
+# Нет локального файла целей — пропуск. Пропустить разово: git merge --no-verify.
+
+set -eu
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+[ -f scripts/router/check-leaks.sh ] || exit 0
+if ! sh scripts/router/check-leaks.sh --staged >/dev/null; then
+  echo "pre-merge-commit: в слияние попадают строки из локального файла целей (D-40): уберите их" >&2
+  exit 1
+fi

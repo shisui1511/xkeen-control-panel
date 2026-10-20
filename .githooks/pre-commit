@@ -8,6 +8,7 @@
 #   весь индекс → scripts/check-no-simulations.js (тесты вне роутера запрещены)
 #   индекс целиком → scripts/router/check-leaks.sh --staged (строки локального
 #                    файла целей; нет файла — пропуск)
+# Сообщение коммита проверяет commit-msg, слияния — pre-merge-commit.
 # Пропустить разово: git commit --no-verify.
 
 set -eu
