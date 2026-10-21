@@ -306,18 +306,41 @@ full_target() {
     fi
   }
   _sp=""
-  # сигнал: остановить текущий этап и выйти — EXIT-trap восстановит стенд
+  # PID фоновых этапов, идущих одновременно с основным (их запускает план параллельных
+  # этапов); _term гасит и их
+  _sps=""
+  # Остановить этап целиком: он стартует отдельной группой процессов (setsid, PID этапа равен
+  # номеру группы), поэтому TERM группе настигает и ssh, и node этапа. Без setsid группы нет —
+  # тогда TERM только самому процессу. Запись `kill -TERM -- -N` dash не принимает, форма
+  # `kill -s TERM -- -N` работает и в dash, и в bash.
+  _stop_stage() {
+    kill -s TERM -- "-$1" 2>/dev/null || kill "$1" 2>/dev/null || true
+  }
+  # сигнал: остановить текущий этап целиком и выйти — EXIT-trap восстановит стенд, когда
+  # потомки этапа уже не меняют его
   _term() {
-    [ -z "$_sp" ] || kill "$_sp" 2>/dev/null || true
+    for _p in $_sp $_sps; do
+      _stop_stage "$_p"
+    done
+    for _p in $_sp $_sps; do
+      wait "$_p" 2>/dev/null || true
+    done
     exit 130
   }
-  # Этап ветви в фоне с ожиданием: код этапа попадает в _brc, сигнал прерывает этап.
+  # Этап ветви в фоне с ожиданием: код этапа попадает в _brc и возвращается как код функции
+  # (вызовы под rt_stage дополняются `|| true`: run.sh идёт под set -e), сигнал прерывает
+  # этап целиком.
   _bg() {
-    "$@" &
+    if command -v setsid >/dev/null 2>&1; then
+      setsid "$@" &
+    else
+      "$@" &
+    fi
     _sp=$!
     _brc=0
     wait "$_sp" || _brc=$?
     _sp=""
+    return "$_brc"
   }
   trap '_finish' EXIT
   trap '_term' INT TERM HUP
@@ -363,7 +386,7 @@ full_target() {
     rt_stage "$_t" "sync-$_c" rt_ssh "$_t" sync >/dev/null 2>&1 || true
 
     # 1. переключение ядра интерфейсом панели
-    rt_stage "$_t" "switch-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --switch "$_c"
+    rt_stage "$_t" "switch-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --switch "$_c" || true
     _src=$_brc
     if [ "$_src" != 0 ]; then
       for _s in smoke go pw; do
@@ -374,13 +397,13 @@ full_target() {
 
     # 2. смоук (только чтение; строки лога — после начала ветви)
     if [ -n "$_from" ] && [ -n "$_ino" ] && [ -n "$_fp" ]; then
-      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino" --from-fp "$_fp"
+      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino" --from-fp "$_fp" || true
     elif [ -n "$_from" ] && [ -n "$_ino" ]; then
-      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino"
+      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino" || true
     elif [ -n "$_from" ]; then
-      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from"
+      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" || true
     else
-      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT"
+      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" || true
     fi
     # смоук записывает в core определённое им ядро: ветвь продолжается с ядром ветви
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
@@ -388,10 +411,10 @@ full_target() {
 
     # 3. Go-тесты на устройстве с этим ядром
     if [ "$_do_go" = 1 ]; then
-      rt_stage "$_t" "go-$_c" _bg sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c"
+      rt_stage "$_t" "go-$_c" _bg sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
 
       # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
-      _settle "$_t"
+      rt_stage "$_t" "settle-$_c" _settle "$_t"
     else
       rt_result "$_t" SKIP go "роутерные Go-пакеты набора changed не затронуты"
     fi
@@ -399,7 +422,7 @@ full_target() {
     # 4. Playwright против настоящей панели: цели идут параллельно своими процессами
     # (D-23), внутри цели — один воркер
     if [ "$_do_pw" = 1 ]; then
-      rt_stage "$_t" "pw-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c"
+      rt_stage "$_t" "pw-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" || true
     else
       rt_result "$_t" SKIP pw "роутерные спеки набора changed не затронуты"
     fi
@@ -483,7 +506,7 @@ rb_state() {
 rb_settle() {
   rb_s0=$(date +%s)
   RT_SSH_STDIN=1 rt_ssh "$1" "sh -s" <"$SCRIPT_DIR/settle.sh" >/dev/null 2>&1 || true
-  printf '%s\t%s\t%s\t%s\t%s\n' "$1" reboot-settle "$(($(date +%s) - rb_s0))" 0 "$rb_s0" >>"$RT_REPORT/timings.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" reboot-settle "$(($(date +%s) - rb_s0))" 0 "$rb_s0" - >>"$RT_REPORT/timings.tsv"
 }
 
 # Полный цикл одной цели: состояние до -> перезагрузка -> возврат -> состояние после ->
@@ -771,6 +794,8 @@ XPASSES=0
     else
       echo "результатов нет"
     fi
+    # этапы по ветвям, итог и критический путь, оболочка, долгие тесты (D-19)
+    node "$SCRIPT_DIR/branch-report.mjs" "$RT_REPORT" "$t" --suite "$SUITE_NAME" || true
   done
 } >"$RT_REPORT/summary.md"
 

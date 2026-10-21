@@ -312,7 +312,7 @@ while [ "$tries" -lt 30 ]; do
   sleep 1
 done
 t1=$(date +%s)
-printf '%s\t%s\t%s\t%s\n' "$ID" smoke-api "$((t1 - t0))" 0 >>"$RT_REPORT/timings.tsv"
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$ID" smoke-api "$((t1 - t0))" 0 "$t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
 if [ "$code" = 200 ]; then
   chk PASS api-version "http 200"
 elif [ "$code" = 000 ] || [ -z "$code" ]; then
@@ -337,7 +337,7 @@ body=""
 lcode=${lres%% *}
 ltime=$(printf '%s' "${lres#* }" | awk '{ printf "%.1f", $1 }')
 ltime_s=$(printf '%s' "${lres#* }" | awk '{ printf "%d", $1 }')
-printf '%s\t%s\t%s\t%s\n' "$ID" smoke-login "${ltime_s:-0}" 0 >>"$RT_REPORT/timings.tsv"
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$ID" smoke-login "${ltime_s:-0}" 0 "$t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
 if [ "$lcode" = 200 ]; then
   me=$(curl -sk --connect-timeout 10 --max-time 20 -b "$jar" -w '\n%{http_code}' "$url/api/auth/me" || true)
   mecode=$(printf '%s\n' "$me" | tail -n 1)
@@ -375,7 +375,7 @@ else
 fi
 rm -f "$jar"
 t1=$(date +%s)
-printf '%s\t%s\t%s\t%s\n' "$ID" smoke-api-session "$((t1 - t0))" 0 >>"$RT_REPORT/timings.tsv"
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$ID" smoke-api-session "$((t1 - t0))" 0 "$t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
 
 # --- kernel-restart: PID ядра в начале и конце окна ----------------------------
 if [ -z "$core" ]; then

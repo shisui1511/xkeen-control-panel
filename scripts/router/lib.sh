@@ -14,6 +14,9 @@
 #   RT_LOCK_WAIT      сколько секунд ждать очередь на роутеры (по умолчанию 3600)
 #   RT_LOCK_HELD      1 — блокировка уже взята родительским скриптом
 #   RT_REPORT         каталог отчёта текущего прогона (создаёт rt_report_init)
+#   RT_REPORT_DIR     абсолютный путь внутри <корень>/build/router/: отчёт создаётся в нём,
+#                     ссылка build/router/last не переставляется (вложенные прогоны сессии);
+#                     путь вне build/router — ошибка и код 2
 #   RT_CORE           ядро (xray|mihomo) для колонки результатов
 
 # Корень рабочей копии (основная копия или worktree).
@@ -144,9 +147,28 @@ rt_report_init() {
   fi
   _ts=$(date -u +%Y%m%d-%H%M%S)
   _name="$_ts-$_short$_dirty"
-  mkdir -p "$_root/build/router/$_name"
-  RT_REPORT="$_root/build/router/$_name"
-  ln -sfn "$_name" "$_root/build/router/last"
+  if [ -n "${RT_REPORT_DIR:-}" ]; then
+    # вложенный прогон (сессия): отчёт в заданном каталоге, ссылку last не трогаем
+    case "$RT_REPORT_DIR" in
+      "$_root"/build/router/?*) ;;
+      *)
+        echo "RT_REPORT_DIR вне build/router" >&2
+        return 2
+        ;;
+    esac
+    case "/${RT_REPORT_DIR#"$_root"/build/router/}/" in
+      */../* | */./*)
+        echo "RT_REPORT_DIR вне build/router" >&2
+        return 2
+        ;;
+    esac
+    mkdir -p "$RT_REPORT_DIR"
+    RT_REPORT="$RT_REPORT_DIR"
+  else
+    mkdir -p "$_root/build/router/$_name"
+    RT_REPORT="$_root/build/router/$_name"
+    ln -sfn "$_name" "$_root/build/router/last"
+  fi
   {
     echo "sha=$_sha"
     echo "dirty=$_dirty_flag"
@@ -172,7 +194,8 @@ rt_result() {
 }
 
 # Этап с замером времени: rt_stage <цель> <этап> <команда…>. Пишет в timings.tsv
-# строку <цель>\t<этап>\t<секунды>\t<код>\t<начало, секунды эпохи> и возвращает код команды.
+# строку <цель>\t<этап>\t<секунды>\t<код>\t<начало, секунды эпохи>\t<ядро ветви или -> и возвращает
+# код команды. Ядро — RT_CORE на момент вызова (общие этапы идут с «-»).
 # Время начала нужно, чтобы видеть пересечение этапов разных целей (параллельность).
 rt_stage() {
   _id=$1
@@ -182,7 +205,7 @@ rt_stage() {
   _rc=0
   "$@" || _rc=$?
   _t1=$(date +%s)
-  printf '%s\t%s\t%s\t%s\t%s\n' "$_id" "$_stage" "$((_t1 - _t0))" "$_rc" "$_t0" >>"$RT_REPORT/timings.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_id" "$_stage" "$((_t1 - _t0))" "$_rc" "$_t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
   return "$_rc"
 }
 
