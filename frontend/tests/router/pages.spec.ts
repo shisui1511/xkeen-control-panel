@@ -236,17 +236,6 @@ for (const route of routes()) {
           await page.waitForTimeout(500);
           await READY[route]?.(page);
 
-          // Состояние списка выпусков внешнее: без бейджа в баннере нарушения нет, и метка
-          // дала бы XPASS. Решение принимается по странице перед проверкой доступности.
-          if (
-            route === 'dashboard' &&
-            theme === 'light' &&
-            vp.width === 1440 &&
-            (await page.locator('.update-banner .badge-primary').count()) > 0
-          ) {
-            knownFailure('*', 'light-tinted-badge-text-contrast');
-          }
-
           const hash = await page.evaluate(() => window.location.hash);
           // Маршрут #/config панель открывает только при включённом флаге config_layer, иначе
           // сама уводит на #/dashboard (по замыслу, Dashboard.svelte). Это состояние устройства,
@@ -284,6 +273,20 @@ for (const route of routes()) {
           const severe = scan.violations.filter(
             (v) => v.impact === 'critical' || v.impact === 'serious'
           );
+          // Состояние списка выпусков внешнее, баннер приходит асинхронно: без бейджа нарушения
+          // нет, и метка дала бы XPASS. Решение принимается по результату axe, а не по DOM до него.
+          if (
+            route === 'dashboard' &&
+            theme === 'light' &&
+            vp.width === 1440 &&
+            severe.some(
+              (v) =>
+                v.id === 'color-contrast' &&
+                v.nodes.some((n) => n.target.join(' ').includes('.update-banner'))
+            )
+          ) {
+            knownFailure('*', 'light-tinted-badge-text-contrast');
+          }
           if (severe.length > 0) {
             // Только правило, селекторы и числа контраста: HTML узлов может содержать имена узлов
             const list = severe.map((v) => {
