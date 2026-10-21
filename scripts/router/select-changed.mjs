@@ -22,6 +22,20 @@
 //   RT_GO_PKGS='./internal/services ./internal/utils/xtables'
 //   RT_SPECS='tests/router/pages.spec.ts'
 //   RT_PW_GREP='^(?!.*page:(?!(?:logs|dashboard) ))'
+//   RT_GO_CORE_PKGS='./internal/handlers ./internal/services'
+//   RT_GO_CORE_RUN='^(TestRouterA|TestRouterB)$'
+//   RT_SPECS_CORE='tests/router/pages.spec.ts'
+//   RT_KERNEL_TOUCHED=0|1
+// Строки 5–7 — тесты выбора, зависящие от ядра (D-01, D-03, D-04); по ним run.sh решает,
+// нужна ли вторая ветвь (второе ядро):
+//   RT_GO_CORE_PKGS  выбранные пакеты, где core-marks.cjs нашёл размеченные тесты (core,
+//                    known-core); при полном выборе — все такие пакеты
+//   RT_GO_CORE_RUN   выражение -test.run по именам этих тестов; пусто, если размеченных нет
+//   RT_SPECS_CORE    выбранные спеки, где `playwright test --list` с отбором @core (вместе
+//                    с сужением RT_PW_GREP) находит тест; список не получен — все выбранные
+//   RT_KERNEL_TOUCHED  1, если изменён код запуска или перезапуска ядра либо watchdog
+//                    (KERNEL_PATHS, D-07) или выбор полный по любой причине; иначе 0
+// Сбой расчёта ядра не роняет выбор: списки расширяются (все пакеты, все спеки), не сужаются.
 // Причины выбора — в stderr при --explain.
 //
 // Использование (из корня репозитория):
@@ -61,6 +75,22 @@ const HARNESS_ALL = [
   /^frontend\/package-lock\.json$/,
   /^go\.mod$/,
   /^go\.sum$/
+];
+
+// Код запуска или перезапуска ядра и watchdog (D-07): изменение даёт RT_KERNEL_TOUCHED=1 —
+// run.sh берёт полное окно смоука. `_test.go` не считаются. Файл при этом разбирается как
+// обычно, признак лишь добавляется к выбору.
+const KERNEL_PATHS = [
+  /^internal\/services\/kernel[\w]*\.go$/,
+  /^internal\/services\/watchdog\.go$/,
+  /^internal\/services\/xkeen[\w]*\.go$/,
+  /^internal\/handlers\/kernel[\w]*\.go$/,
+  /^internal\/handlers\/watchdog\.go$/,
+  /^internal\/handlers\/service\.go$/,
+  // перезапуск запущенного ядра после «Применить»
+  /^internal\/services\/configlayer\/pipeline\.go$/,
+  // запуск служб и watchdog
+  /^cmd\/xcp\/[\w]+\.go$/
 ];
 
 // Данные роутерных тестов: их получают Go-тесты через окружение go-suite.sh (XCP_RT_LINKS,
@@ -204,6 +234,7 @@ async function select(changed) {
     goPkgs: new Set(),
     specs: new Set(),
     grepRoutes: null, // null — без сужения
+    kernelTouched: false, // затронут код запуска ядра или watchdog (KERNEL_PATHS)
     reasons
   };
   const escalate = (why) => {
@@ -223,6 +254,11 @@ async function select(changed) {
     if (!SAFE_PATH.test(file)) {
       escalate(`небезопасное имя файла ${JSON.stringify(file)}`);
       continue;
+    }
+    // Признак не отменяет разбор файла: он идёт дальше как обычно (выбор пакетов)
+    if (!file.endsWith('_test.go') && KERNEL_PATHS.some((re) => re.test(file))) {
+      res.kernelTouched = true;
+      reasons.push(`${file}: код запуска или перезапуска ядра либо watchdog — полное окно смоука`);
     }
     if (HARNESS_ALL.some((re) => re.test(file))) {
       escalate(`${file}: обвязка проверки или сборка`);
@@ -584,7 +620,8 @@ function emit(res, routerPkgs, specsAll) {
     `RT_PW_GREP=${quote(grep)}`,
     `RT_GO_CORE_PKGS=${quote(core.goPkgs.join(' '))}`,
     `RT_GO_CORE_RUN=${quote(core.goRun)}`,
-    `RT_SPECS_CORE=${quote(core.specs.join(' '))}`
+    `RT_SPECS_CORE=${quote(core.specs.join(' '))}`,
+    `RT_KERNEL_TOUCHED=${all || res.kernelTouched ? 1 : 0}`
   ].join('\n');
 }
 
