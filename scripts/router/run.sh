@@ -506,7 +506,7 @@ rb_state() {
 rb_settle() {
   rb_s0=$(date +%s)
   RT_SSH_STDIN=1 rt_ssh "$1" "sh -s" <"$SCRIPT_DIR/settle.sh" >/dev/null 2>&1 || true
-  printf '%s\t%s\t%s\t%s\t%s\n' "$1" reboot-settle "$(($(date +%s) - rb_s0))" 0 "$rb_s0" >>"$RT_REPORT/timings.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" reboot-settle "$(($(date +%s) - rb_s0))" 0 "$rb_s0" - >>"$RT_REPORT/timings.tsv"
 }
 
 # Полный цикл одной цели: состояние до -> перезагрузка -> возврат -> состояние после ->

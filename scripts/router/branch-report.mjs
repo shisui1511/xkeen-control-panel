@@ -7,6 +7,7 @@
 //   - «- Итого: N с; критический путь: …» — от первого начала до последнего конца этапов;
 //   - «- Оболочка: N с (тесты M с)» — итог без объединения интервалов этапов тестов;
 //   - «- Строк времени без начала или ядра: N» — строки timings.tsv короче шести колонок;
+//   - «## 10 самых долгих тестов» — по Go (go-*.jsonl) и Playwright (pw*/report*.json).
 // Формат timings.tsv: <цель> <этап> <секунды> <код> <начало> <ядро ветви или ->. У старых
 // отчётов колонок пять или четыре: ядро берётся из суффикса имени этапа, иначе — по
 // интервалу ветви. Скрипт только читает отчёт. В вывод попадают лишь имена этапов и тестов,
@@ -185,5 +186,88 @@ if (curE !== null) tests += curE - curS;
 out.push(`- Оболочка: ${total - tests} с (тесты ${tests} с)`);
 out.push(`- Строк времени без начала или ядра: ${shortRows}`);
 out.push("");
+
+// --- 10 самых долгих тестов --------------------------------------------------------
+
+const longest = [];
+const coreDir = path.join(report, target);
+let coreDirs = [];
+try {
+  coreDirs = fs
+    .readdirSync(coreDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+} catch {
+  coreDirs = [];
+}
+
+function list(dir, re) {
+  try {
+    return fs.readdirSync(dir).filter((n) => re.test(n));
+  } catch {
+    return [];
+  }
+}
+
+for (const core of coreDirs) {
+  const base = path.join(coreDir, core);
+  // Go: событие test2json pass/fail/skip верхнего теста (без «/») несёт Elapsed
+  for (const f of list(base, /^go-.*\.jsonl$/)) {
+    let text = "";
+    try {
+      text = fs.readFileSync(path.join(base, f), "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of text.split("\n")) {
+      if (!line.includes('"Elapsed"')) continue;
+      let ev;
+      try {
+        ev = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!["pass", "fail", "skip"].includes(ev.Action)) continue;
+      if (!ev.Test || ev.Test.includes("/")) continue;
+      if (typeof ev.Elapsed !== "number") continue;
+      longest.push({ name: ev.Test, core, sec: ev.Elapsed });
+    }
+  }
+  // Playwright: сумма длительностей прогонов теста; имя — как в pw-parse.js
+  for (const dir of list(base, /^pw/)) {
+    for (const f of list(path.join(base, dir), /^report.*\.json$/)) {
+      let rep;
+      try {
+        rep = JSON.parse(fs.readFileSync(path.join(base, dir, f), "utf8"));
+      } catch {
+        continue;
+      }
+      const sums = new Map();
+      const visit = (suiteNode, titles) => {
+        for (const spec of suiteNode.specs || []) {
+          const name = [...titles, spec.title].join(" > ");
+          for (const test of spec.tests || []) {
+            let ms = 0;
+            for (const r of test.results || []) ms += Number(r.duration) || 0;
+            sums.set(name, (sums.get(name) || 0) + ms);
+          }
+        }
+        for (const child of suiteNode.suites || []) visit(child, [...titles, child.title]);
+      };
+      for (const top of rep.suites || []) visit(top, top.file === top.title ? [] : [top.title]);
+      for (const [name, ms] of sums) longest.push({ name, core, sec: ms / 1000 });
+    }
+  }
+}
+
+if (longest.length > 0) {
+  longest.sort((a, b) => b.sec - a.sec);
+  out.push("## 10 самых долгих тестов", "", "| Тест | Ядро | с |", "|---|---|---:|");
+  for (const t of longest.slice(0, 10)) {
+    const name = t.name.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+    out.push(`| ${name} | ${t.core} | ${Math.round(t.sec)} |`);
+  }
+  out.push("");
+}
 
 process.stdout.write(out.join("\n") + "\n");
