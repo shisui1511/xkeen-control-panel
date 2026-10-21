@@ -14,6 +14,9 @@
 #               если файлы ядра и активное ядро равны снимку, ядро не перезапускается:
 #               возвращаются только файлы панели
 #   verify      сверка с снимком: 0 — равно, 1 — расхождение
+#   classify    только чтение: пути со stdin → «класс <TAB> путь», класс — panel,
+#               core-runtime или core (тот же классификатор, что в restore); для разбора
+#               расхождений на стенде, снимок не нужен и не меняется
 #   cleanup     убрать снимок (после успешной сверки)
 #   status      версии, активное ядро, процессы, есть ли снимок
 #
@@ -681,6 +684,14 @@ cmd_verify() {
   return $rc
 }
 
+cmd_classify() {
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    classify_path "$p"
+    printf '%s\t%s\n' "$PCLASS" "$p"
+  done
+}
+
 cmd_cleanup() {
   rm -rf "$BASE" "$WORK"
   say "снимок удалён"
@@ -704,10 +715,11 @@ case "$cmd" in
   snapshot) cmd_snapshot ;;
   restore) cmd_restore ;;
   verify) cmd_verify ;;
+  classify) cmd_classify ;;
   cleanup) cmd_cleanup ;;
   status) cmd_status ;;
   *)
-    say "usage: snapshot.sh preflight|snapshot|restore|verify|cleanup|status"
+    say "usage: snapshot.sh preflight|snapshot|restore|verify|classify|cleanup|status"
     exit 2
     ;;
 esac
