@@ -593,7 +593,7 @@ else
   fi
   # Повторы: нормализация (метка времени убрана, числа -> 0, адреса/hex/uuid -> маски),
   # строка «[dedup] ... repeated N time(s)» засчитывается предыдущему сообщению.
-  reps=$(awk '
+  reps=$(awk -v core="$core" '
     function days(y, m, d) {
       if (m <= 2) { y--; m += 12 }
       return 365 * y + int(y / 4) - int(y / 100) + int(y / 400) + int((153 * (m - 3) + 2) / 5) + d
@@ -631,8 +631,10 @@ else
       # При ядре Xray открытые страницы раз в несколько секунд опрашивают источники Mihomo:
       # трафик получает 409, список провайдеров пишет отладочную строку о недоступном
       # Clash API. Обход страниц идёт параллельно окну, поэтому эти опросы попадают в журнал.
-      # Исключены только эти две строки: остальные 4xx/5xx и любые POST считаются, как раньше.
-      if (msg ~ /^GET \/api\/traffic\/(stats|alerts) 409 / || msg ~ /^\[ProxyProviders\] Debug: Clash API unreachable \(Mihomo is not running\)$/) {
+      # Исключены только эти две строки и только при ядре Xray: при Mihomo они означают
+      # дефект (гейт ядра отвечает 409 работающему Mihomo, панель потеряла Clash API).
+      # Остальные 4xx/5xx и любые POST считаются, как раньше.
+      if (core == "xray" && (msg ~ /^GET \/api\/traffic\/(stats|alerts) 409 / || msg ~ /^\[ProxyProviders\] Debug: Clash API unreachable \(Mihomo is not running\)$/)) {
         prev = ""
         next
       }
