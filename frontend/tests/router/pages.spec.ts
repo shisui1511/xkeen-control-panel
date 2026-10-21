@@ -275,6 +275,8 @@ for (const route of routes()) {
           );
           // Состояние списка выпусков внешнее, баннер приходит асинхронно: без бейджа нарушения
           // нет, и метка дала бы XPASS. Решение принимается по результату axe, а не по DOM до него.
+          // axe называет узел кратчайшим селектором (.badge-primary), без предка, поэтому
+          // принадлежность бейджа баннеру проверяется по странице после проверки.
           if (
             route === 'dashboard' &&
             theme === 'light' &&
@@ -282,8 +284,9 @@ for (const route of routes()) {
             severe.some(
               (v) =>
                 v.id === 'color-contrast' &&
-                v.nodes.some((n) => n.target.join(' ').includes('.update-banner'))
-            )
+                v.nodes.some((n) => n.target.join(' ').includes('.badge-primary'))
+            ) &&
+            (await page.locator('.update-banner .badge-primary').count()) > 0
           ) {
             knownFailure('*', 'light-tinted-badge-text-contrast');
           }
