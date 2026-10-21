@@ -294,3 +294,6 @@ jobs:
 
       - name: Check kernel guard
         run: node scripts/check-kernel-guard.js
+
+      - name: Check core marks
+        run: node scripts/check-core-marks.js

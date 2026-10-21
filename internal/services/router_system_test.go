@@ -210,7 +210,7 @@ func TestRouterNdmcHotspot(t *testing.T) {
 // состояния панелью совпадает с наличием процесса. Тест разрушающий (стенд, D-04):
 // исходное состояние возвращается в Cleanup, а прогон в целом — восстановлением по снимку.
 func TestRouterXKeenLifecycle(t *testing.T) {
-	tg := routertest.Current(t)
+	tg := routertest.CoreSpecific(t)
 	core := tg.Core
 	if core != "xray" && core != "mihomo" {
 		t.Fatalf("активное ядро цели не определено (%q)", core)
@@ -263,7 +263,7 @@ func TestRouterXKeenLifecycle(t *testing.T) {
 
 // TestRouterActiveConfigAccepted: активный конфиг принимает само ядро.
 func TestRouterActiveConfigAccepted(t *testing.T) {
-	tg := routertest.Current(t)
+	tg := routertest.CoreSpecific(t)
 	switch tg.Core {
 	case "xray":
 		if _, err := os.Stat(rtXrayBinary); err != nil {
@@ -294,7 +294,7 @@ func TestRouterActiveConfigAccepted(t *testing.T) {
 // TestRouterKernelVersions: версии ядер, которые определяет панель, совпадают с
 // выводом самих ядер на устройстве.
 func TestRouterKernelVersions(t *testing.T) {
-	tg := routertest.Current(t)
+	tg := routertest.CoreSpecific(t)
 	ks := NewKernelService(tg.WorkDir)
 	cases := []struct {
 		name string

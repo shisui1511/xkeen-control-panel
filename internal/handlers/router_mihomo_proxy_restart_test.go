@@ -98,7 +98,7 @@ func rtMprDial(network, addr string) bool {
 }
 
 func TestRouterMihomoProxyDuringRestart(t *testing.T) {
-	tg := routertest.Current(t)
+	tg := routertest.CoreSpecific(t)
 	if tg.Core != "mihomo" {
 		t.Skip("ядро ветви не Mihomo: Clash API через панель не опрашивается")
 	}
