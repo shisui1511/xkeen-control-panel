@@ -606,9 +606,13 @@ class Session {
         rows.push({ status, core, check, detail });
       }
     }
-    // вложенный прогон поставил сборку HEAD и вернул ядро снимка; не удался деплой —
-    // сборку HEAD вернёт cleanup
-    this.deployed = rows.some((r) => r.status === 'FAIL' && r.check === 'deploy') ? null : 'HEAD';
+    // вложенный прогон поставил сборку HEAD и вернул ядро снимка. Признак — только код деплоя 0
+    // из deploy.rc: прогон мог не дойти до деплоя (check-known, нет целей, неверный отчёт), и тогда
+    // results.tsv нет, а на стенде остаётся сборка прохода product.ref. Нет признака — сборку HEAD
+    // вернёт cleanup
+    const deployRc = path.join(dir, this.t, 'deploy.rc');
+    this.deployed =
+      existsSync(deployRc) && readFileSync(deployRc, 'utf8').trim() === '0' ? 'HEAD' : null;
     // сбой связи — только проверка reachable и потеря связи при восстановлении; по подстроке
     // «нет связи» в любой строке нельзя: так пишет и смоук, когда не отвечает сама панель
     if (
