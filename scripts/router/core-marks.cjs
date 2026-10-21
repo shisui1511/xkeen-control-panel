@@ -14,7 +14,8 @@
  *       или переключает его (switch_kernel), но не размечен; помощник сам берёт
  *       ядро из Current/CoreSpecific/XCP_RT_CORE.
  * TS-часть (specFacts, specIssues, specViolations): спеки Playwright, читающие ядро
- * (RT.core, XCP_CORE, selectorApplies, переключение), обязаны нести тег ядра (CORE_TAG),
+ * (RT.core, XCP_CORE, selectorApplies, переключение, помощник спека, читающий ядро),
+ * обязаны нести тег ядра (CORE_TAG) на каждом таком test(...),
  * а метки knownFailure с ядром в селекторе — идти через coreTagsOf. core-switch.spec.ts
  * исключён: он идёт в каждой ветви.
  * Потребители: scripts/check-core-marks.js (страж в CI), выбор набора в changed
@@ -36,6 +37,7 @@ const ENV_CORE = /XCP_RT_CORE/;
 const SWITCH_KERNEL = /switch_kernel/;
 const CORE_SPECIFIC = /\broutertest\.CoreSpecific\(/;
 const CURRENT_CALL = /\broutertest\.Current\(/;
+const TARGET_PARAM = /\broutertest\.Target\b/;
 const KNOWN_WITH_SLASH = /\broutertest\.Known\(\s*"[^"\n]*\/[^"\n]*"/;
 const DECL_START = /^(func|var|const|type)\s/;
 
@@ -151,6 +153,14 @@ function analyzeGo(text) {
         name: d.name,
         reason: 'помощник сам берёт ядро: передайте ядро параметром из теста с CoreSpecific'
       });
+    } else if (CORE_READ.test(d.masked) && TARGET_PARAM.test(d.masked.split('\n', 1)[0])) {
+      // Цель, полученная тестом из routertest.Current(t), не размечает тест: в теле его нет
+      // ни .Core, ни CoreSpecific, а помощник читает ядро. Ядро передаётся строкой.
+      violations.push({
+        name: d.name,
+        reason:
+          'помощник принимает routertest.Target и читает ядро: передайте ядро строкой из теста с CoreSpecific'
+      });
     }
   }
   return { marks, violations };
@@ -258,12 +268,106 @@ function specFacts(text) {
   };
 }
 
+/** Конец вызова, открытого скобкой в позиции open: индекс закрывающей скобки или -1. */
+function matchParen(code, open) {
+  let depth = 0;
+  const n = code.length;
+  for (let i = open; i < n; i++) {
+    const c = code[i];
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < n && code[j] !== c && (c === '`' || code[j] !== '\n')) {
+        j += code[j] === '\\' ? 2 : 1;
+      }
+      i = j;
+    } else if (c === '(') {
+      depth++;
+    } else if (c === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Помощники верхнего уровня спека, читающие ядро (прямо или через другой такой помощник):
+ * Set имён. Объявление — строка в колонке 0 с function/const; оно тянется до следующей строки
+ * в колонке 0, начинающейся со слова (закрывающие скобки в колонке 0 его не обрывают).
+ */
+function coreReadingHelpers(code) {
+  const chunks = new Map();
+  const lines = code.split('\n');
+  let name = null;
+  let buf = [];
+  const flush = () => {
+    if (name) chunks.set(name, buf.join('\n'));
+  };
+  for (const line of lines) {
+    if (/^[A-Za-z_$]/.test(line)) {
+      flush();
+      const m = /^(?:export\s+)?(?:async\s+)?function\s+(\w+)|^(?:export\s+)?const\s+(\w+)\s*=/.exec(line);
+      name = m ? m[1] || m[2] : null;
+      buf = [line];
+    } else {
+      buf.push(line);
+    }
+  }
+  flush();
+  const tainted = new Set();
+  for (const [n, body] of chunks) if (SPEC_READS_CORE.test(body)) tainted.add(n);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [n, body] of chunks) {
+      if (tainted.has(n)) continue;
+      for (const t of tainted) {
+        if (new RegExp('\\b' + t + '\\(').test(body)) {
+          tainted.add(n);
+          grew = true;
+          break;
+        }
+      }
+    }
+  }
+  return tainted;
+}
+
+/**
+ * Вызовы test(...) спека, читающие ядро (RT.core и т. п. или помощник, читающий ядро), но
+ * без тега ядра: список заголовков. Тег — CORE_TAG, '@core' или coreTagsOf в самом вызове либо
+ * переменная tag, объявленная с ними. Вызов с несошедшимися скобками пропускается.
+ */
+function untaggedCoreTests(text) {
+  const code = stripTs(text);
+  const tainted = coreReadingHelpers(code);
+  const tagVarOk = /\b(?:const|let)\s+tag\s*=[^;]*?(?:CORE_TAG|CORE_LABEL_TAG|coreTagsOf)/s.test(code);
+  const bad = [];
+  for (const m of code.matchAll(/(?<![\w.$])test\(/g)) {
+    const open = m.index + m[0].length - 1;
+    const end = matchParen(code, open);
+    if (end < 0) continue;
+    const seg = code.slice(open, end + 1);
+    const reads =
+      SPEC_READS_CORE.test(seg) || [...tainted].some((n) => new RegExp('\\b' + n + '\\(').test(seg));
+    if (!reads) continue;
+    const tagged =
+      SPEC_CORE_TAGGED.test(seg) || (tagVarOk && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(seg));
+    if (!tagged) bad.push(seg.slice(1, 70).replace(/\s+/g, ' '));
+  }
+  return bad;
+}
+
 /** Причины нарушений одного спека (список строк). */
 function specIssues(text) {
   const f = specFacts(text);
   const issues = [];
   if (f.readsCore && !f.coreTagged) {
     issues.push('спек читает ядро без тега ядра: объявите такие тесты с { tag: CORE_TAG }');
+  } else if (f.readsCore) {
+    // тег есть у части тестов файла: остальные тесты, читающие ядро, тоже должны его нести
+    for (const title of untaggedCoreTests(text)) {
+      issues.push(`тест читает ядро без тега ядра: объявите его с { tag: CORE_TAG } (${title})`);
+    }
   }
   if (f.coreLabelSelectors.length > 0 && !f.usesCoreTagsOf) {
     issues.push(

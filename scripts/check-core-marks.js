@@ -11,10 +11,12 @@
  *   1. Тело TestRouter*, читающее ядро (.Core, XCP_RT_CORE) или переключающее его
  *      (switch_kernel), обязано вызывать routertest.CoreSpecific(t).
  *   2. Помощник (не Test*) сам не берёт ядро из routertest.Current, routertest.CoreSpecific
- *      или XCP_RT_CORE: ядро передаётся параметром из теста с CoreSpecific.
+ *      или XCP_RT_CORE и не читает .Core у параметра routertest.Target: цель из Current(t)
+ *      не размечает тест, поэтому ядро передаётся строкой из теста с CoreSpecific.
  * Правила (TS, спеки frontend/tests/router/*.spec.ts, кроме core-switch.spec.ts):
  *   3. Спек, читающий ядро (RT.core, RT.wantCore, XCP_CORE, XCP_WANT_CORE, selectorApplies),
- *      объявляет такие тесты с тегом ядра (CORE_TAG, '@core' или coreTagsOf).
+ *      объявляет такие тесты с тегом ядра (CORE_TAG, '@core' или coreTagsOf): тег нужен на
+ *      каждом test(...), читающем ядро напрямую или через помощника спека, а не только в файле.
  *   4. Метка knownFailure с ядром в селекторе («арх/ядро», «* / ядро») идёт через coreTagsOf:
  *      тег @core-label выводится автоматически.
  *   5. Помощник frontend/tests/router/lib/*.ts (кроме env.ts и known.ts) не читает RT.core.
@@ -43,7 +45,8 @@ const samples = [
   [HEAD + 'func TestRouterC(t *testing.T) {\n\ttg := routertest.CoreSpecific(t)\n\t_ = tg.Core\n}\n', 0, 1, 'core'],
   [HEAD + 'func rtX(t *testing.T) string { return routertest.Current(t).Core }\n', 1, 0, ''],
   [HEAD + 'func rtY(t *testing.T) string { return os.Getenv("XCP_RT_CORE") }\n', 1, 0, ''],
-  [HEAD + 'func rtZ(tg routertest.Target) string { return tg.Core }\n', 0, 0, ''],
+  [HEAD + 'func rtZ(tg routertest.Target) string { return tg.Core }\n', 1, 0, ''],
+  [HEAD + 'func rtW(tg routertest.Target) string { return tg.Arch }\n', 0, 0, ''],
   [
     HEAD +
       'var m = map[string]routertest.KnownMark{\n\t"a": routertest.Known("*/xray", "s"),\n}\n\nfunc TestRouterD(t *testing.T) {\n\troutertest.Current(t)\n}\n',
@@ -82,7 +85,21 @@ const specSamples = [
   ],
   ["function m() {\n  knownFailure('*/xray', 's');\n}\n", 1],
   ["const tag = coreTagsOf(() => {\n  knownFailure('*/xray', 's');\n});\n", 0],
-  ["function m() {\n  knownFailure('*', 's');\n  knownFailure('arm64', 's');\n}\n", 0]
+  ["function m() {\n  knownFailure('*', 's');\n  knownFailure('arm64', 's');\n}\n", 0],
+  // тег есть у одного теста файла, второй читает ядро без тега
+  [
+    "test('a', { tag: CORE_TAG }, async () => {\n  if (RT.core === 'xray') return;\n});\ntest('b', async () => {\n  if (RT.core === 'mihomo') return;\n});\n",
+    1
+  ],
+  // помощник спека читает ядро, тест его вызывает без тега
+  [
+    "function tailDir() {\n  return RT.core;\n}\ntest('a', { tag: CORE_TAG }, async () => {\n  tailDir();\n});\ntest('b', async () => {\n  tailDir();\n});\n",
+    1
+  ],
+  [
+    "test('a', { tag: CORE_TAG }, async () => {\n  if (RT.core === 'xray') return;\n});\ntest('b', async () => {\n  await page.goto('/');\n});\n",
+    0
+  ]
 ];
 for (const [text, want] of specSamples) {
   const got = specIssues(text).length;
