@@ -121,7 +121,6 @@
       class="capsule-mobile"
       onclick={toggleMenu}
       bind:this={triggerEl}
-      aria-label={$t('capsule.quick_actions')}
       aria-expanded={isMenuOpen}
     >
       <span class="led-dot {ledClass}"></span>
@@ -129,6 +128,8 @@
       {#if $capsuleConfigStore.showTraffic}
         <span class="mobile-traffic">↓↑ {combinedSpeedFormatted}</span>
       {/if}
+      <!-- Accessible name = visible text + purpose (WCAG 2.5.3 Label in Name) -->
+      <span class="sr-only">{$t('capsule.quick_actions')}</span>
     </button>
 
     <SystemQuickMenu
@@ -175,7 +176,6 @@
       class="sidebar-kernel-row"
       onclick={toggleMenu}
       bind:this={triggerEl}
-      aria-label={$t('capsule.quick_actions')}
       aria-expanded={isMenuOpen}
     >
       <div class="kernel-left">
