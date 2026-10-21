@@ -291,6 +291,10 @@ func TestRouterActiveConfigAccepted(t *testing.T) {
 	}
 }
 
+// rtXKeenProbeAttempts — сколько раз подтест «во_время_перезапуска_XKeen» перезапускает XKeen,
+// пока проба не застанет операцию в работе.
+const rtXKeenProbeAttempts = 3
+
 // TestRouterKernelVersions: версии ядер, которые определяет панель, совпадают с
 // выводом самих ядер на устройстве.
 func TestRouterKernelVersions(t *testing.T) {
@@ -347,7 +351,6 @@ func TestRouterKernelVersions(t *testing.T) {
 		if rtPids(core) == "" {
 			t.Fatalf("перед тестом ядро %s не запущено: стенд должен быть в рабочем состоянии", core)
 		}
-		before := rtPids(core)
 		svc := NewXKeenService(rtXKeenBinary, tg.WorkDir)
 		t.Cleanup(func() {
 			if rtPids(core) == "" {
@@ -360,22 +363,39 @@ func TestRouterKernelVersions(t *testing.T) {
 			out string
 			err error
 		}
-		done := make(chan restartResult, 1)
-		go func() {
-			out, err := svc.Restart()
-			done <- restartResult{out, err}
-		}()
-
+		// Операция XKeen на быстром устройстве может закончиться раньше, чем проба её
+		// застанет: до rtXKeenProbeAttempts попыток, в каждой прежний срок 30 с. Не застали
+		// ни разу — сценарий не воспроизводится, это провал, а не пропуск (D-17).
+		var before string
+		var done chan restartResult
 		seen := false
-		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-			if xkeenLifecycleRunning() {
-				seen = true
-				break
+		for attempt := 1; attempt <= rtXKeenProbeAttempts && !seen; attempt++ {
+			before = rtPids(core)
+			done = make(chan restartResult, 1)
+			go func(done chan<- restartResult) {
+				out, err := svc.Restart()
+				done <- restartResult{out, err}
+			}(done)
+
+			for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+				if xkeenLifecycleRunning() {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				missed := <-done
+				if missed.err != nil {
+					t.Errorf("Restart (попытка %d): %v: %s", attempt, missed.err, rtShort(missed.out))
+				}
+				t.Logf("попытка %d из %d: операция XKeen закончилась раньше пробы", attempt, rtXKeenProbeAttempts)
+				if attempt < rtXKeenProbeAttempts {
+					rtWaitRunning(core, true, 3*time.Minute)
+				}
 			}
 		}
 		if !seen {
-			<-done
-			t.Skipf("операция XKeen закончилась раньше пробы")
+			t.Fatalf("операция XKeen закончилась раньше пробы во всех %d попытках: сценарий не воспроизводится", rtXKeenProbeAttempts)
 		}
 		{
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
