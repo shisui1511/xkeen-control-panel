@@ -68,16 +68,37 @@ func rtSwitchRaceSettled(want, other string, wait time.Duration) (int, string) {
 // и не даёт подняться следующему.
 func rtSwitchRaceKillOrphans(t *testing.T) {
 	t.Helper()
+	signaled := false
 	for _, name := range []string{"xray", "mihomo"} {
 		pids, _ := rtRstKernelPIDs(name)
 		for _, pid := range pids {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			_, _, _ = routertest.Exec(ctx, "kill", strconv.Itoa(pid))
 			cancel()
+			signaled = true
 			t.Logf("уборка: процесс %s %d остался после остановки через XKeen, остановлен сигналом", name, pid)
 		}
 	}
-	time.Sleep(2 * time.Second)
+	if !signaled {
+		return
+	}
+	// Сигнал отправлен: ждём, пока процессы исчезнут (шаг 200 мс, предел 10 с).
+	var left []string
+	for end := time.Now().Add(10 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+		left = left[:0]
+		for _, name := range []string{"xray", "mihomo"} {
+			pids, _ := rtRstKernelPIDs(name)
+			for _, pid := range pids {
+				left = append(left, name+" "+strconv.Itoa(pid))
+			}
+		}
+		if len(left) == 0 || !time.Now().Before(end) {
+			break
+		}
+	}
+	if len(left) != 0 {
+		t.Logf("уборка: за 10 с не исчезли процессы: %s", strings.Join(left, ", "))
+	}
 }
 
 func TestRouterSwitchKernelDuringDetachedRestart(t *testing.T) {

@@ -596,7 +596,11 @@ test('config-add: пустой список источников — CTA пер�
   await page.goto('/', { timeout: T.page, waitUntil: 'domcontentloaded' });
   await page.locator('.main-content').first().waitFor({ state: 'visible', timeout: T.page });
   // Пустое состояние зависит от стенда: при непустом списке его нет, сценарий не применим
-  test.skip((await sourcesCount(page)) > 0, 'на стенде есть источники: пустого состояния нет');
+  const sources = await sourcesCount(page);
+  test.skip(
+    sources > 0,
+    `на стенде есть источники (${sources}): пустого состояния нет — сценарий проверяется на стенде без источников`
+  );
   await openAddCard(page);
   await page.getByTestId('nodes-tab').locator('.empty-state button').click();
   await expect(page.locator('#nodes-add-input')).toBeFocused();
