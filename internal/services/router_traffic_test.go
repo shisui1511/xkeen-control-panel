@@ -248,7 +248,12 @@ func (w *lockedWriter) Write(p []byte) (int, error) {
 // rtFetchIP запрашивает внешний адрес у сервиса через переданный клиент. Возвращает адрес,
 // HTTP-статус (0 — сетевая ошибка) и текст сетевой ошибки (пусто, если ответ получен).
 func rtFetchIP(client *http.Client, service string) (string, int, string) {
-	req, err := http.NewRequest(http.MethodGet, service, nil)
+	return rtFetchIPCtx(context.Background(), client, service)
+}
+
+// rtFetchIPCtx — rtFetchIP с контекстом: отмена обрывает запрос.
+func rtFetchIPCtx(ctx context.Context, client *http.Client, service string) (string, int, string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, service, nil)
 	if err != nil {
 		return "", 0, err.Error()
 	}
@@ -305,10 +310,10 @@ func rtShortErr(s string) string {
 }
 
 // rtStartNodeProc готовит собственный конфиг с этим узлом и socks на loopback и запускает
-// отдельный процесс ядра. Возвращает процесс, порт и протокол узла.
-func rtStartNodeProc(t *testing.T, core, dir string, node map[string]any) (*rtCoreProc, int, string, error) {
-	t.Helper()
-	port := rtFreePort(t)
+// отдельный процесс ядра на заданном порту. Порт выдаёт вызывающий заранее (параллельные
+// пробы не должны брать один и тот же). Возвращает процесс, порт и протокол узла.
+// Безопасен для вызова из горутины: t.Fatal не используется.
+func rtStartNodeProc(core, dir string, port int, node map[string]any) (*rtCoreProc, int, string, error) {
 	redact := rtRedactorValue(node)
 	switch core {
 	case "xray":
@@ -391,19 +396,122 @@ func (p *rtCoreProc) Reasons() string {
 	return strings.Join(out, ", ")
 }
 
+// Пределы параллельного опроса узлов (D-17): одновременно не больше rtTrafficProbeParallel
+// процессов ядра, запрос через узел обрывается за rtTrafficProbeTimeout. Верхние пределы
+// запуска ядра (rtStartCore) не менялись.
+const (
+	rtTrafficProbeParallel = 3
+	rtTrafficProbeTimeout  = 15 * time.Second
+)
+
+// rtNodeProbe — итог пробы одного узла. Горутины пробы t.Fatal не вызывают: ошибки идут
+// сюда, решение принимает тест.
+type rtNodeProbe struct {
+	index      int
+	protocol   string
+	nodeIP     string // внешний адрес через узел; пусто — запрос через узел не прошёл
+	usedDirect string // прямой адрес того же сервиса
+	why        string // причина, почему запрос через узел не прошёл
+	startErr   string // процесс ядра не поднялся
+	fatalErr   string // сбой самого теста (каталог, клиент socks5)
+	cancelled  bool   // проба отменена до результата: другой узел уже ответил
+}
+
+// rtProbeNode запускает отдельный процесс ядра с узлом и опрашивает сервисы определения
+// адреса через него. Процесс и каталог убираются здесь же. directIP и limited только читаются.
+func rtProbeNode(ctx context.Context, core, workDir string, i, port int, node map[string]any,
+	directIP map[string]string, limited map[string]bool) rtNodeProbe {
+	res := rtNodeProbe{index: i}
+	redact := rtRedactorValue(node)
+	dir, err := os.MkdirTemp(workDir, "traffic-")
+	if err != nil {
+		res.fatalErr = fmt.Sprintf("рабочий каталог: %v", err)
+		return res
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	if ctx.Err() != nil {
+		res.cancelled = true
+		return res
+	}
+	pr, _, protocol, err := rtStartNodeProc(core, dir, port, node)
+	res.protocol = protocol
+	if err != nil {
+		res.startErr = err.Error()
+		return res
+	}
+	defer pr.Stop()
+
+	dialer, err := proxy.SOCKS5("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), nil, proxy.Direct)
+	if err != nil {
+		res.fatalErr = fmt.Sprintf("клиент socks5: %v", err)
+		return res
+	}
+	cd, ok := dialer.(proxy.ContextDialer)
+	if !ok {
+		res.fatalErr = "клиент socks5 без DialContext"
+		return res
+	}
+	viaNode := &http.Client{Timeout: rtTrafficProbeTimeout, Transport: &http.Transport{
+		Proxy: nil,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return cd.DialContext(ctx, network, addr)
+		},
+	}}
+
+	var attempts []string // что вернул каждый сервис через этот узел: статус или сетевая ошибка
+	for si, svc := range rtEchoServices {
+		if ctx.Err() != nil {
+			res.cancelled = true
+			return res
+		}
+		d, seen := directIP[svc]
+		if !seen || limited[svc] {
+			continue
+		}
+		n, st, errText := rtFetchIPCtx(ctx, viaNode, svc)
+		if ctx.Err() != nil {
+			res.cancelled = true
+			return res
+		}
+		if n == "" {
+			if st != 0 {
+				// узел ответил, но сервис не отдал адрес: пробуем следующий сервис
+				attempts = append(attempts, fmt.Sprintf("сервис %d: HTTP %d", si+1, st))
+				continue
+			}
+			attempts = append(attempts, fmt.Sprintf("сервис %d: %s", si+1, rtShortErr(redact(errText))))
+			break // обрыв до узла или узел мёртв
+		}
+		res.nodeIP, res.usedDirect = n, d
+		break
+	}
+	if res.nodeIP == "" {
+		res.why = strings.Join(attempts, "; ")
+		if r := pr.Reasons(); r != "" {
+			res.why += "; ядро: " + r
+		}
+	}
+	return res
+}
+
 // TestRouterTrafficSeparateCore: вердикт теста — «ядро пропустило трафик через узел подписки»
-// (внешний адрес через узел отличается от прямого). Исходы без повторов (D-16):
+// (внешний адрес через узел отличается от прямого). Узлы опрашиваются параллельно (не больше
+// rtTrafficProbeParallel процессов ядра), первый ответивший даёт вердикт, остальные пробы
+// отменяются. Исходы без повторов (D-16, D-17):
 //   - есть узел, через который запрос прошёл: PASS (адреса различаются) или FAIL (совпали);
 //   - у самой цели нет выхода в интернет (до или после перебора): SKIP — вердикта о ядре нет;
 //   - выход цели есть, процесс ядра поднимался и принимал соединения, но ни один узел подписки
-//     не ответил (обрыв до узла, узел мёртв или отвергает клиента): SKIP с причинами по узлам —
-//     вердикт о ядре невозможен, пока нет живого узла;
+//     не ответил: FAIL, под меткой nodesMark — KNOWN; молчание узлов при живом интернете —
+//     находка, а не пропуск;
 //   - ядро не приняло конфиг узла (процесс не поднялся, порт не открылся): FAIL.
 func TestRouterTrafficSeparateCore(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	if tg.Core != "xray" && tg.Core != "mihomo" {
 		t.Fatalf("активное ядро цели неизвестно: %q", tg.Core)
 	}
+	// Метка объявлена в теле, а не на уровне файла: иначе core-marks.cjs отметил бы
+	// известным-по-ядру все тесты файла.
+	nodesMark := routertest.Known("*/mihomo", "traffic-separate-core-mihomo-nodes-unreachable")
 	var nodes []map[string]any
 	if tg.Core == "xray" {
 		nodes = rtXrayNodes(t)
@@ -415,100 +523,100 @@ func TestRouterTrafficSeparateCore(t *testing.T) {
 	if up, why := rtInternetUp(direct); !up {
 		t.Skipf("у цели нет выхода в интернет: прямые запросы не прошли (%s)", why)
 	}
+	// Прямые адреса сервисов и признак лимита собираются один раз, последовательно, до проб:
+	// горутины пробы только читают их.
 	directIP := map[string]string{} // сервис -> прямой адрес (по одному запросу на сервис)
 	limited := map[string]bool{}
+	for _, svc := range rtEchoServices {
+		d, st, _ := rtFetchIP(direct, svc)
+		if st == http.StatusTooManyRequests {
+			limited[svc] = true
+			continue
+		}
+		if d != "" {
+			directIP[svc] = d
+		}
+	}
 
+	// Порты процессов ядра выдаются заранее и по очереди; освобождённый порт система могла
+	// выдать повторно, поэтому одинаковые не принимаются.
+	ports := make([]int, len(nodes))
+	usedPort := map[int]bool{}
+	for i := range nodes {
+		for {
+			p := rtFreePort(t)
+			if !usedPort[p] {
+				usedPort[p] = true
+				ports[i] = p
+				break
+			}
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sem := make(chan struct{}, rtTrafficProbeParallel)
+	results := make(chan rtNodeProbe, len(nodes))
+	var wg sync.WaitGroup
+	for i, node := range nodes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results <- rtNodeProbe{index: i, cancelled: true}
+				return
+			}
+			res := rtProbeNode(ctx, tg.Core, tg.WorkDir, i, ports[i], node, directIP, limited)
+			if res.nodeIP != "" {
+				cancel() // первый ответивший узел даёт вердикт
+			}
+			results <- res
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	var all []rtNodeProbe
+	for res := range results {
+		all = append(all, res)
+	}
+	sort.Slice(all, func(a, b int) bool { return all[a].index < all[b].index })
+
+	var winner *rtNodeProbe
 	var startFailures int
 	var startReason string
 	var summaries []string // по узлу: протокол и причина, почему запрос не прошёл
-	for i, node := range nodes {
-		redact := rtRedactorValue(node)
-		dir, err := os.MkdirTemp(tg.WorkDir, "traffic-")
-		if err != nil {
-			t.Fatalf("рабочий каталог: %v", err)
-		}
-		pr, port, protocol, err := rtStartNodeProc(t, tg.Core, dir, node)
-		if err != nil {
-			_ = os.RemoveAll(dir)
+	for k := range all {
+		res := &all[k]
+		switch {
+		case res.fatalErr != "":
+			t.Fatal(res.fatalErr)
+		case res.cancelled:
+			continue
+		case res.startErr != "":
 			startFailures++
-			startReason = err.Error()
-			t.Logf("узел %d из %d (протокол %s): процесс ядра не поднялся", i+1, len(nodes), protocol)
-			continue
+			startReason = res.startErr
+			t.Logf("узел %d из %d (протокол %s): процесс ядра не поднялся", res.index+1, len(nodes), res.protocol)
+		case res.nodeIP != "":
+			if winner == nil {
+				winner = res
+			}
+		default:
+			summaries = append(summaries, fmt.Sprintf("узел %d (%s): %s", res.index+1, res.protocol, res.why))
+			t.Logf("узел %d из %d (протокол %s): запрос через узел не прошёл: %s", res.index+1, len(nodes), res.protocol, res.why)
 		}
+	}
 
-		dialer, err := proxy.SOCKS5("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), nil, proxy.Direct)
-		if err != nil {
-			pr.Stop()
-			_ = os.RemoveAll(dir)
-			t.Fatalf("клиент socks5: %v", err)
-		}
-		cd, ok := dialer.(proxy.ContextDialer)
-		if !ok {
-			pr.Stop()
-			_ = os.RemoveAll(dir)
-			t.Fatal("клиент socks5 без DialContext")
-		}
-		viaNode := &http.Client{Timeout: 45 * time.Second, Transport: &http.Transport{
-			Proxy: nil,
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return cd.DialContext(ctx, network, addr)
-			},
-		}}
-
-		var nodeIP, usedDirect string
-		var attempts []string // что вернул каждый сервис через этот узел: статус или сетевая ошибка
-		for si, svc := range rtEchoServices {
-			if limited[svc] {
-				continue
-			}
-			d, seen := directIP[svc]
-			if !seen {
-				var st int
-				d, st, _ = rtFetchIP(direct, svc)
-				if st == http.StatusTooManyRequests {
-					limited[svc] = true
-					continue
-				}
-				if d == "" {
-					continue
-				}
-				directIP[svc] = d
-			}
-			n, st, errText := rtFetchIP(viaNode, svc)
-			if st == http.StatusTooManyRequests {
-				limited[svc] = true
-				continue
-			}
-			if n == "" {
-				if st != 0 {
-					// узел ответил, но сервис не отдал адрес: пробуем следующий сервис
-					attempts = append(attempts, fmt.Sprintf("сервис %d: HTTP %d", si+1, st))
-					continue
-				}
-				attempts = append(attempts, fmt.Sprintf("сервис %d: %s", si+1, rtShortErr(redact(errText))))
-				break // обрыв до узла или узел мёртв: к следующему узлу
-			}
-			nodeIP, usedDirect = n, d
-			break
-		}
-		coreWhy := pr.Reasons()
-		pr.Stop()
-		_ = os.RemoveAll(dir)
-
-		if nodeIP == "" {
-			why := strings.Join(attempts, "; ")
-			if r := coreWhy; r != "" {
-				why += "; ядро: " + r
-			}
-			summaries = append(summaries, fmt.Sprintf("узел %d (%s): %s", i+1, protocol, why))
-			t.Logf("узел %d из %d (протокол %s): запрос через узел не прошёл: %s", i+1, len(nodes), protocol, why)
-			continue
-		}
-		same := usedDirect == nodeIP
-		t.Logf("ядро %s, узел %d из %d, протокол %s: адреса различаются: %s", tg.Core, i+1, len(nodes), protocol, map[bool]string{true: "нет", false: "да"}[same])
+	if winner != nil {
+		same := winner.usedDirect == winner.nodeIP
+		t.Logf("ядро %s, узел %d из %d, протокол %s: адреса различаются: %s", tg.Core, winner.index+1, len(nodes), winner.protocol, map[bool]string{true: "нет", false: "да"}[same])
 		if same {
-			t.Errorf("внешний адрес через узел совпал с прямым: трафик не ушёл через узел подписки (протокол %s)", protocol)
+			t.Errorf("внешний адрес через узел совпал с прямым: трафик не ушёл через узел подписки (протокол %s)", winner.protocol)
 		}
+		routertest.Verdict(t, true, nodesMark, "через узел подписки запрос прошёл")
 		return
 	}
 	if len(limited) == len(rtEchoServices) {
@@ -521,7 +629,8 @@ func TestRouterTrafficSeparateCore(t *testing.T) {
 	if up, why := rtInternetUp(direct); !up {
 		t.Skipf("выход цели в интернет пропал во время теста: прямые запросы не прошли (%s)", why)
 	}
-	t.Skipf("ни один из %d узлов подписки не ответил через ядро %s (ядро запускалось и принимало соединения, выход цели в интернет есть): %s",
+	routertest.Verdict(t, false, nodesMark,
+		"ни один из %d узлов подписки не ответил через ядро %s (ядро запускалось и принимало соединения, выход цели в интернет есть): %s",
 		len(nodes), tg.Core, strings.Join(summaries, " | "))
 }
 
