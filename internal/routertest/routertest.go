@@ -48,6 +48,20 @@ func Current(t testing.TB) Target {
 	return tg
 }
 
+// CoreSpecific — Current плюс явная метка «результат теста зависит от активного
+// ядра цели»: тест читает Target.Core или переключает ядро. Метку читают статически
+// (без запуска) гибрид матрицы в changed, сводка и страж scripts/check-core-marks.js:
+// размеченный тест идёт в обе ветви ядра, неразмеченный — в одну. Поэтому вызывать
+// её нужно прямо в теле TestRouter*, а не в помощнике. Ядро вне xray/mihomo — провал.
+func CoreSpecific(t testing.TB) Target {
+	t.Helper()
+	tg := Current(t)
+	if tg.Core != "xray" && tg.Core != "mihomo" {
+		t.Fatalf("тест зависит от ядра, а ядро ветви не определено: %q", tg.Core)
+	}
+	return tg
+}
+
 // KnownMark — метка известного падения: селектор целей и slug todo.
 // Пустая метка не применяется ни к одной цели.
 type KnownMark struct {
