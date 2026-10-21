@@ -46,6 +46,24 @@
 //       "same_failures_as": "full-1"        множество строк FAIL, KNOWN и XPASS (статус, ядро,
 //     }                                     проверка) совпадает с более ранним проходом-прогоном
 //   }
+// Прерывание прогона посреди этапа (необязательно, проверка исправления обрыва, G-145.1-5):
+//     "interrupt": {
+//       "stage": "go",                      обязателен; поддерживается только go
+//       "signal": "TERM",                   TERM (kill группе make) или INT (Ctrl+C), по умолчанию TERM
+//       "after": 20,                        1..600 с после появления go-<пакет>.raw
+//       "deadline": 300                     30..3600 с на выход run.sh, по умолчанию 600
+//     }
+// Триггер — файл go-<пакет>.raw в <отчёт прохода>/<цель>/<ядро>/: go-suite.sh держит его, пока
+// бинарник тестов работает на цели. Вложенный run.sh с interrupt запускается отдельной группой
+// процессов (detached), как make в терминале; через after секунд после появления файла сигнал
+// уходит всей группе (только при целом pid > 1), не вышел за deadline — SIGKILL группе. Этапы
+// обвязки идут под setsid и сигнал не получают: их гасит сам run.sh (план 145.1-16). Вердикты
+// прохода с interrupt, кроме exit и summary: «interrupt: сигнал» (отправлен), «interrupt: выход
+// run.sh» (до deadline без SIGKILL), «interrupt: процессы на ПК» (нет: группа вложенного
+// прогона пуста и нет go-suite/pw-suite/smoke — они держали бы блокировку), «interrupt:
+// тестовые процессы на цели» (нет; в отчёте только число), restore-verify, xcp-after-restore и
+// core-restored (PASS) и по вердикту на каждую лишнюю строку FAIL и XPASS результатов
+// вложенного прогона. Прерывание по спеке не прерывает сессию: следующие проходы идут дальше.
 // С go, specs, grep и product проход-прогон не сочетается. Вложенный `sh run.sh [changed]`
 // идёт под блокировкой сессии (RT_LOCK_HELD=1) без RT_HOLD_MINUTES, RT_CORES, RT_BASE и
 // SPEC, сам ставит сборку HEAD, снимает снимок и восстанавливает стенд. Его отчёт — в
@@ -75,16 +93,20 @@
 // числе FAIL reachable во вложенном прогоне набора); 130 — прерывание.
 // Прерывание во время вложенного прогона: сигнал уходит вложенному run.sh, сессия ждёт его
 // выхода (стенд по снимку он восстанавливает сам); повторный сигнал — выход без возврата.
+// Прерывание по спеке (interrupt) сессию не прерывает: после выхода вложенного прогона
+// сессия сверяет вердикты и продолжает следующие проходы.
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
+import { constants as osConstants } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -138,6 +160,27 @@ function parseStatus(s, where) {
   return parts;
 }
 
+// Поле interrupt прохода-прогона: прерывание вложенного run.sh посреди этапа go.
+function loadInterrupt(i, where) {
+  if (!i || typeof i !== 'object' || Array.isArray(i)) die(`${where}.interrupt: объект`);
+  for (const k of Object.keys(i)) {
+    if (!['stage', 'signal', 'after', 'deadline'].includes(k)) {
+      die(`${where}.interrupt.${k}: допустимы stage, signal, after, deadline`);
+    }
+  }
+  if (i.stage !== 'go') die(`${where}.interrupt.stage: поддерживается только go`);
+  const signal = i.signal ?? 'TERM';
+  if (signal !== 'TERM' && signal !== 'INT') die(`${where}.interrupt.signal: TERM или INT`);
+  if (!Number.isInteger(i.after) || i.after < 1 || i.after > 600) {
+    die(`${where}.interrupt.after: целое от 1 до 600 (с)`);
+  }
+  const deadline = i.deadline ?? 600;
+  if (!Number.isInteger(deadline) || deadline < 30 || deadline > 3600) {
+    die(`${where}.interrupt.deadline: целое от 30 до 3600 (с)`);
+  }
+  return { stage: 'go', signal, after: i.after, deadline };
+}
+
 // Проход-прогон набора: разбор и проверка полей. earlier — имена прогонов набора выше по спеке.
 function loadSuitePass(p, where, earlier) {
   if (p.suite !== 'full' && p.suite !== 'changed') die(`${where}.suite: full или changed`);
@@ -179,6 +222,7 @@ function loadSuitePass(p, where, earlier) {
     name: p.name,
     suite: p.suite,
     files,
+    interrupt: p.interrupt === undefined ? null : loadInterrupt(p.interrupt, where),
     product: null,
     go: null,
     specs: [],
@@ -210,6 +254,9 @@ function loadSpec(file, root) {
     if (typeof p.name !== 'string' || !SAFE_NAME.test(p.name)) die(`${where}.name: [a-z0-9-]`);
     if (names.has(p.name)) die(`${where}.name: «${p.name}» повторяется`);
     names.add(p.name);
+    if (p.suite === undefined && p.interrupt !== undefined) {
+      die(`${where}.interrupt: только у прохода-прогона`);
+    }
     if (p.suite !== undefined) {
       const sp = loadSuitePass(p, where, suites);
       suites.push(sp.name);
@@ -307,8 +354,11 @@ function dryRun(spec, specFile) {
   for (const p of spec.passes) {
     if (p.suite) {
       // вложенный прогон ставит сборку HEAD сам и оставляет активным ядро, найденное в начале
+      const irq = p.interrupt
+        ? `; прерывание SIG${p.interrupt.signal} через ${p.interrupt.after} с после старта go, выход до ${p.interrupt.deadline} с`
+        : '';
       step(
-        `прогон набора ${p.suite}${p.files.length ? ` по файлам ${p.files.join(' ')}` : ''}: вложенный run.sh, отчёт build/router/<сессия>-NN-${p.name}`
+        `прогон набора ${p.suite}${p.files.length ? ` по файлам ${p.files.join(' ')}` : ''}: вложенный run.sh, отчёт build/router/<сессия>-NN-${p.name}${irq}`
       );
       deployed = 'HEAD';
       continue;
@@ -387,7 +437,9 @@ class Session {
   }
 
   // Запуск этапа: вывод — в консоль и session.log. Код выхода (сигнал — 128+n).
-  run(cmd, args, env = {}) {
+  // opts.detached — отдельная группа процессов; opts.onSpawn(child) вызывается сразу после
+  // spawn и может вернуть функцию, которая будет вызвана при закрытии процесса.
+  run(cmd, args, env = {}, opts = {}) {
     if (this.aborted && !this.cleaning) return Promise.resolve(130);
     const base = { ...process.env };
     for (const k of [
@@ -410,9 +462,11 @@ class Session {
       const child = spawn(cmd, args, {
         cwd: this.root,
         env: full,
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: opts.detached === true
       });
       this.child = child;
+      const onClose = opts.onSpawn ? opts.onSpawn(child) : null;
       const out = (d) => {
         process.stdout.write(d);
         appendFileSync(this.log, d);
@@ -421,7 +475,8 @@ class Session {
       child.stderr.on('data', out);
       child.on('close', (code, sig) => {
         this.child = null;
-        resolve(code ?? 128 + (sig === 'SIGINT' ? 2 : 15));
+        if (onClose) onClose();
+        resolve(code ?? 128 + (osConstants.signals[sig] ?? 15));
       });
     });
   }
@@ -572,6 +627,83 @@ class Session {
     return 0;
   }
 
+  // Прерывание вложенного run.sh по спеке (interrupt). Вложенный прогон идёт отдельной группой
+  // процессов (detached), как make в терминале. Опрос раз в секунду: появился go-<пакет>.raw в
+  // <отчёт>/<цель>/<ядро>/ — go-этап начался; через after секунд сигнал уходит группе; не вышла
+  // за deadline секунд — SIGKILL группе. Возвращает opts для run и состояние для вердиктов.
+  interruptWatch(i, dir) {
+    const state = {
+      pkg: '',
+      goAt: 0,
+      sentAt: 0,
+      closedAt: 0,
+      killed: false,
+      pgid: 0
+    };
+    const findRaw = () => {
+      const tdir = path.join(dir, this.t);
+      let cores;
+      try {
+        cores = readdirSync(tdir, { withFileTypes: true }).filter((d) => d.isDirectory());
+      } catch {
+        return '';
+      }
+      for (const c of cores) {
+        let names;
+        try {
+          names = readdirSync(path.join(tdir, c.name));
+        } catch {
+          continue;
+        }
+        const raw = names.find((n) => /^go-.+\.raw$/.test(n));
+        if (raw) return raw.slice(3, -4);
+      }
+      return '';
+    };
+    const opts = {
+      detached: true,
+      onSpawn: (child) => {
+        // группа вложенного прогона — только по целому pid > 1; иначе сигнал не шлём вовсе
+        const pid = child.pid;
+        const okPid = Number.isInteger(pid) && pid > 1;
+        if (okPid) state.pgid = pid;
+        let kill = null;
+        const poll = setInterval(() => {
+          if (state.sentAt || !okPid) return;
+          if (!state.goAt) {
+            const pkg = findRaw();
+            if (!pkg) return;
+            state.goAt = Date.now();
+            state.pkg = pkg;
+            return;
+          }
+          if (this.aborted || Date.now() - state.goAt < i.after * 1000) return;
+          state.sentAt = Date.now();
+          this.say(`прерывание: SIG${i.signal} группе вложенного прогона`);
+          try {
+            process.kill(-pid, 'SIG' + i.signal);
+          } catch {
+            // группа уже вышла
+          }
+          kill = setTimeout(() => {
+            state.killed = true;
+            this.say(`вложенный прогон не вышел за ${i.deadline} с: SIGKILL группе`);
+            try {
+              process.kill(-pid, 'SIGKILL');
+            } catch {
+              // группа уже вышла
+            }
+          }, i.deadline * 1000);
+        }, 1000);
+        return () => {
+          clearInterval(poll);
+          if (kill) clearTimeout(kill);
+        };
+      }
+    };
+    return { opts, state };
+  }
+
   // Проход-прогон набора: вложенный run.sh под блокировкой сессии, отчёт в build/router.
   // Вложенный прогон сам ставит сборку HEAD, снимает снимок и восстанавливает стенд.
   async runSuite(p) {
@@ -602,7 +734,9 @@ class Session {
     };
     const args = [path.join(SCRIPT_DIR, 'run.sh')];
     if (p.suite === 'changed') args.push('changed');
-    const rc = await this.run('sh', args, env);
+    const irq = p.interrupt ? this.interruptWatch(p.interrupt, dir) : null;
+    const rc = await this.run('sh', args, env, irq ? irq.opts : {});
+    if (irq) irq.state.closedAt = Date.now();
     this.record({ kind: 'suite', pass: p.name, label: p.suite, dir, rc });
     if (this.aborted && !existsSync(dir)) return 0;
 
@@ -688,6 +822,32 @@ class Session {
         report: rel
       });
     push('exit', [String(p.expect.exit)], String(rc), '', rc === p.expect.exit);
+    if (irq) {
+      const st = irq.state;
+      const sent = st.sentAt > 0;
+      push(
+        'interrupt: сигнал',
+        ['отправлен'],
+        sent ? 'отправлен' : 'не отправлен',
+        sent
+          ? `SIG${p.interrupt.signal} через ${Math.round((st.sentAt - st.goAt) / 1000)} с после старта go-${st.pkg}`
+          : 'этап go не начался до выхода run.sh',
+        sent
+      );
+      const secs = sent ? Math.round((st.closedAt - st.sentAt) / 1000) : 0;
+      push(
+        'interrupt: выход run.sh',
+        [`до ${p.interrupt.deadline} с`],
+        !sent ? 'не вышел' : st.killed ? 'не вышел' : `${secs} с`,
+        !sent
+          ? 'сигнал не отправлен'
+          : st.killed
+            ? `SIGKILL группе через ${p.interrupt.deadline} с`
+            : '',
+        sent && !st.killed
+      );
+    }
+    if (irq) this.judgeInterrupt(irq.state, rows, push);
     for (const sub of p.expect.summary) {
       const ok = md.includes(sub);
       push(`summary: ${sub}`, ['есть'], ok ? 'есть' : 'нет', md ? '' : 'summary.md не создан', ok);
@@ -725,6 +885,76 @@ class Session {
       }
     }
     return 0;
+  }
+
+  // Вердикты после прерванного вложенного прогона: этап погас, блокировка свободна, стенд
+  // восстановлен, лишних падений нет. В отчёт идут только числа: командные строки процессов
+  // (рабочий каталог, регэксп -test.run) не выводятся.
+  judgeInterrupt(st, rows, push) {
+    // процессы на ПК: группа вложенного прогона и этапы обвязки (держали бы дескриптор блокировки)
+    let groupAlive = false;
+    if (st.pgid > 1) {
+      try {
+        process.kill(-st.pgid, 0);
+        groupAlive = true;
+      } catch (e) {
+        groupAlive = e.code !== 'ESRCH';
+      }
+    }
+    const pg = spawnSync('pgrep', ['-f', 'scripts/router/(go-suite|pw-suite|smoke)[.]sh'], {
+      encoding: 'utf8'
+    });
+    let stages = -1;
+    if (!pg.error && pg.status === 1) stages = 0;
+    else if (!pg.error && pg.status === 0) stages = pg.stdout.split('\n').filter(Boolean).length;
+    const pcOk = !groupAlive && stages === 0;
+    push(
+      'interrupt: процессы на ПК',
+      ['нет'],
+      pcOk ? 'нет' : 'есть',
+      `группа: ${groupAlive ? 'жива' : 'пуста'}; этапов обвязки: ${stages < 0 ? 'не проверено' : stages}`,
+      pcOk
+    );
+
+    // тестовые процессы на цели: ./<пакет>.test -test.v=test2json; шаблон со скобками не находит
+    // сам себя в командной строке проверки
+    const r = this.remote(
+      'n=0; for f in /proc/[0-9]*/cmdline; do tr "\\000" " " <"$f" 2>/dev/null | grep -q "[.]test -test[.]" && n=$((n+1)); done; echo "n=$n"'
+    );
+    const m = r.out.match(/^n=(\d+)$/m);
+    if (r.rc !== 0 || !m) {
+      push('interrupt: тестовые процессы на цели', ['нет'], 'нет связи', `код ${r.rc}`, false);
+    } else {
+      const n = Number(m[1]);
+      push(
+        'interrupt: тестовые процессы на цели',
+        ['нет'],
+        n === 0 ? 'нет' : `есть: ${n}`,
+        '',
+        n === 0
+      );
+    }
+
+    // восстановление стенда вложенным прогоном
+    const restore = ['restore-verify', 'xcp-after-restore', 'core-restored'];
+    for (const check of restore) {
+      const own = rows.filter((x) => x.check === check);
+      const row = own.find((x) => x.status !== 'PASS') ?? own[own.length - 1];
+      push(
+        check,
+        ['PASS'],
+        row ? row.status : 'нет',
+        row ? row.detail : 'строки нет в results.tsv вложенного прогона',
+        !!row && row.status === 'PASS'
+      );
+    }
+
+    // остальные падения: при коде 130 код выхода о них не сообщает
+    for (const row of rows) {
+      if (restore.includes(row.check)) continue;
+      if (row.status !== 'FAIL' && row.status !== 'XPASS') continue;
+      push(row.check, ['PASS'], row.status, `${row.core}: ${row.detail}`, false);
+    }
   }
 
   // Сверка results.tsv этапа с ожиданиями прохода.
