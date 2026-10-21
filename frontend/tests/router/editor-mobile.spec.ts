@@ -3,6 +3,7 @@ import { test, expect, type CDPSession, type Locator, type Page } from '@playwri
 import { randomInt } from 'node:crypto';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
+import { CORE_TAG } from './lib/known';
 import { withPanel } from './lib/nodes-api';
 
 // Сценарии EDT-01 на настоящей панели: шторка файлов на ≤768 px, действия и лист Backups на
@@ -393,25 +394,29 @@ async function expectSheetGeometry(page: Page, vp: Viewport): Promise<void> {
 }
 
 for (const theme of THEMES) {
-  test(`editor-mobile sheet-open-file theme:${theme} vp:390`, async ({ page }) => {
-    test.setTimeout(90_000 * RT.slow);
-    const guard = attachConsoleGuard(page);
-    await gotoEditor(page, VP_PHONE, theme);
+  test(
+    `editor-mobile sheet-open-file theme:${theme} vp:390`,
+    { tag: CORE_TAG },
+    async ({ page }) => {
+      test.setTimeout(90_000 * RT.slow);
+      const guard = attachConsoleGuard(page);
+      await gotoEditor(page, VP_PHONE, theme);
 
-    await openSheetFromEmpty(page);
-    await expectSheetGeometry(page, VP_PHONE);
-    await expectNoHorizontalScroll(page, 'шторка открыта');
+      await openSheetFromEmpty(page);
+      await expectSheetGeometry(page, VP_PHONE);
+      await expectNoHorizontalScroll(page, 'шторка открыта');
 
-    // D-16: выбор файла закрывает шторку и открывает вкладку с кодом
-    await pickFixtureInSheet(page);
-    await expect(page.locator(TOGGLE).first()).toHaveAttribute('aria-expanded', 'false');
-    await expectNoHorizontalScroll(page, 'файл открыт');
+      // D-16: выбор файла закрывает шторку и открывает вкладку с кодом
+      await pickFixtureInSheet(page);
+      await expect(page.locator(TOGGLE).first()).toHaveAttribute('aria-expanded', 'false');
+      await expectNoHorizontalScroll(page, 'файл открыт');
 
-    await guard.assertClean();
-  });
+      await guard.assertClean();
+    }
+  );
 }
 
-test('editor-mobile sheet-close vp:390', async ({ page }) => {
+test('editor-mobile sheet-close vp:390', { tag: CORE_TAG }, async ({ page }) => {
   test.setTimeout(90_000 * RT.slow);
   const guard = attachConsoleGuard(page);
   await gotoEditor(page, VP_PHONE);
@@ -472,7 +477,7 @@ test('editor-mobile sheet-close vp:390', async ({ page }) => {
   await guard.assertClean();
 });
 
-test('editor-mobile sheet-pick-unsaved vp:390', async ({ page }) => {
+test('editor-mobile sheet-pick-unsaved vp:390', { tag: CORE_TAG }, async ({ page }) => {
   test.setTimeout(90_000 * RT.slow);
   const guard = attachConsoleGuard(page);
   await gotoEditor(page, VP_PHONE);
@@ -522,7 +527,7 @@ test('editor-mobile sheet-pick-unsaved vp:390', async ({ page }) => {
   await guard.assertClean();
 });
 
-test('editor-mobile sheet-pick-busy vp:390', async ({ page }) => {
+test('editor-mobile sheet-pick-busy vp:390', { tag: CORE_TAG }, async ({ page }) => {
   test.setTimeout(90_000 * RT.slow);
   const guard = attachConsoleGuard(page);
   await gotoEditor(page, VP_PHONE);
@@ -586,7 +591,7 @@ test('editor-mobile sheet-pick-busy vp:390', async ({ page }) => {
   await guard.assertClean();
 });
 
-test('editor-mobile sheet-pick-twice vp:390', async ({ page }) => {
+test('editor-mobile sheet-pick-twice vp:390', { tag: CORE_TAG }, async ({ page }) => {
   test.setTimeout(90_000 * RT.slow);
   const guard = attachConsoleGuard(page);
   await gotoEditor(page, VP_PHONE);
@@ -628,7 +633,7 @@ test('editor-mobile sheet-pick-twice vp:390', async ({ page }) => {
   await guard.assertClean();
 });
 
-test('editor-mobile sheet-escape-modal vp:390', async ({ page }) => {
+test('editor-mobile sheet-escape-modal vp:390', { tag: CORE_TAG }, async ({ page }) => {
   test.setTimeout(90_000 * RT.slow);
   const dir = fx().dir;
   const filesCount = async (): Promise<number> => {
@@ -662,7 +667,7 @@ test('editor-mobile sheet-escape-modal vp:390', async ({ page }) => {
   await guard.assertClean();
 });
 
-test('editor-mobile sheet vp:768', async ({ page }) => {
+test('editor-mobile sheet vp:768', { tag: CORE_TAG }, async ({ page }) => {
   test.setTimeout(90_000 * RT.slow);
   const guard = attachConsoleGuard(page);
   await gotoEditor(page, VP_TABLET);
@@ -1037,7 +1042,7 @@ async function expectSheetStays(page: Page, what: string): Promise<void> {
 test.describe('touch', () => {
   test.use({ hasTouch: true });
 
-  test('editor-mobile sheet-gestures vp:390', async ({ page }) => {
+  test('editor-mobile sheet-gestures vp:390', { tag: CORE_TAG }, async ({ page }) => {
     test.setTimeout(90_000 * RT.slow);
     const guard = attachConsoleGuard(page);
     await gotoEditor(page, VP_PHONE);
@@ -1088,7 +1093,7 @@ test.describe('touch', () => {
   });
 });
 
-test('editor-mobile desktop-column vp:1280', async ({ page }) => {
+test('editor-mobile desktop-column vp:1280', { tag: CORE_TAG }, async ({ page }) => {
   test.setTimeout(120_000 * RT.slow);
   const guard = attachConsoleGuard(page);
   await gotoEditor(page, VP_DESKTOP);
@@ -1203,7 +1208,7 @@ async function waitAnimationsDone(loc: Locator, what: string): Promise<void> {
 }
 
 for (const theme of THEMES) {
-  test(`editor-mobile actions theme:${theme} vp:390`, async ({ page }) => {
+  test(`editor-mobile actions theme:${theme} vp:390`, { tag: CORE_TAG }, async ({ page }) => {
     test.setTimeout(120_000 * RT.slow);
     const guard = attachConsoleGuard(page);
     await gotoEditor(page, VP_PHONE, theme);
@@ -1313,7 +1318,7 @@ async function expectTapZone(loc: Locator, what: string): Promise<void> {
 }
 
 for (const theme of THEMES) {
-  test(`editor-mobile backups theme:${theme} vp:390`, async ({ page }) => {
+  test(`editor-mobile backups theme:${theme} vp:390`, { tag: CORE_TAG }, async ({ page }) => {
     test.setTimeout(150_000 * RT.slow);
     const guard = attachConsoleGuard(page);
     await gotoEditor(page, VP_PHONE, theme);
@@ -1503,7 +1508,7 @@ for (const theme of THEMES) {
   });
 }
 
-test('editor-mobile backups-switch vp:390', async ({ page }) => {
+test('editor-mobile backups-switch vp:390', { tag: CORE_TAG }, async ({ page }) => {
   test.setTimeout(120_000 * RT.slow);
   const guard = attachConsoleGuard(page);
   await gotoEditor(page, VP_PHONE);
@@ -1535,7 +1540,7 @@ test('editor-mobile backups-switch vp:390', async ({ page }) => {
   await guard.assertClean();
 });
 
-test('editor-mobile backups-switch vp:1280', async ({ page, browser }) => {
+test('editor-mobile backups-switch vp:1280', { tag: CORE_TAG }, async ({ page, browser }) => {
   test.setTimeout(150_000 * RT.slow);
   const created: AltFixture[] = [];
   try {
@@ -1704,7 +1709,7 @@ test('editor-mobile backups-switch vp:1280', async ({ page, browser }) => {
   }
 });
 
-test('editor-mobile menu-save-target vp:390', async ({ page, browser }) => {
+test('editor-mobile menu-save-target vp:390', { tag: CORE_TAG }, async ({ page, browser }) => {
   test.setTimeout(240_000 * RT.slow);
   const dir = fixtureDir()!.dir;
   const created: AltFixture[] = [];
@@ -1846,7 +1851,7 @@ test('editor-mobile menu-save-target vp:390', async ({ page, browser }) => {
   }
 });
 
-test('editor-mobile menu-backups vp:390', async ({ page }) => {
+test('editor-mobile menu-backups vp:390', { tag: CORE_TAG }, async ({ page }) => {
   test.setTimeout(150_000 * RT.slow);
   const guard = attachConsoleGuard(page);
   await gotoEditor(page, VP_PHONE);
@@ -1916,7 +1921,7 @@ test('editor-mobile menu-backups vp:390', async ({ page }) => {
   await guard.assertClean();
 });
 
-test('editor-mobile backups-collapsed vp:390', async ({ page, browser }) => {
+test('editor-mobile backups-collapsed vp:390', { tag: CORE_TAG }, async ({ page, browser }) => {
   test.setTimeout(150_000 * RT.slow);
   let scratch: AltFixture | null = null;
   try {

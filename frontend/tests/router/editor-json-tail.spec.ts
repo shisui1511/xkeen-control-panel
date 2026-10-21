@@ -3,6 +3,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import { randomInt } from 'node:crypto';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
+import { CORE_TAG } from './lib/known';
 import { withPanel } from './lib/nodes-api';
 
 // CR-02 (todo editor-json-extra-tokens-console-error): текст после JSON-значения в Редакторе не
@@ -211,7 +212,7 @@ async function expectParseErrorShown(page: Page, what: string): Promise<void> {
     .toBeGreaterThan(0);
 }
 
-test('editor-json-tail extra-tokens vp:1280', async ({ page }) => {
+test('editor-json-tail extra-tokens vp:1280', { tag: CORE_TAG }, async ({ page }) => {
   test.setTimeout(90_000 * RT.slow);
   const guard = attachConsoleGuard(page);
   const { path } = tf();
@@ -245,7 +246,7 @@ const VALUE_CASES = [
 ] as const;
 
 for (const c of VALUE_CASES) {
-  test(`editor-json-tail ${c.id} vp:1280`, async ({ page }) => {
+  test(`editor-json-tail ${c.id} vp:1280`, { tag: CORE_TAG }, async ({ page }) => {
     test.setTimeout(90_000 * RT.slow);
     const guard = attachConsoleGuard(page);
     const { path } = tf();
