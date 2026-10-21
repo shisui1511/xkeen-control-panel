@@ -391,7 +391,7 @@ full_target() {
       rt_stage "$_t" "go-$_c" _bg sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c"
 
       # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
-      _settle "$_t"
+      rt_stage "$_t" "settle-$_c" _settle "$_t"
     else
       rt_result "$_t" SKIP go "роутерные Go-пакеты набора changed не затронуты"
     fi
@@ -771,6 +771,8 @@ XPASSES=0
     else
       echo "результатов нет"
     fi
+    # этапы по ветвям, итог и критический путь, оболочка, долгие тесты (D-19)
+    node "$SCRIPT_DIR/branch-report.mjs" "$RT_REPORT" "$t" --suite "$SUITE_NAME" || true
   done
 } >"$RT_REPORT/summary.md"
 
