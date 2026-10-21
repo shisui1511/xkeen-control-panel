@@ -400,7 +400,7 @@ func (p *rtCoreProc) Reasons() string {
 //     вердикт о ядре невозможен, пока нет живого узла;
 //   - ядро не приняло конфиг узла (процесс не поднялся, порт не открылся): FAIL.
 func TestRouterTrafficSeparateCore(t *testing.T) {
-	tg := routertest.Current(t)
+	tg := routertest.CoreSpecific(t)
 	if tg.Core != "xray" && tg.Core != "mihomo" {
 		t.Fatalf("активное ядро цели неизвестно: %q", tg.Core)
 	}
@@ -630,7 +630,7 @@ func rtListeningPorts() map[int]bool {
 }
 
 func TestRouterTproxyRules(t *testing.T) {
-	tg := routertest.Current(t)
+	tg := routertest.CoreSpecific(t)
 	if tg.Core != "xray" && tg.Core != "mihomo" {
 		t.Fatalf("активное ядро цели неизвестно: %q", tg.Core)
 	}
