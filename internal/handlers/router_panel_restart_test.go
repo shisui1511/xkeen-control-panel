@@ -53,6 +53,9 @@ const (
 	// rtPanelRestartLimit — за сколько init-скрипт обязан закончить restart:
 	// остановка ждёт выхода не дольше XCP_STOP_TIMEOUT (60 с), запуск — до 11 с.
 	rtPanelRestartLimit = 75 * time.Second
+	// rtPanelStreamFirstWait — верхний предел ожидания первого байта открытого
+	// потока; тест идёт дальше сразу, как байт получен.
+	rtPanelStreamFirstWait = 30 * time.Second
 	// rtPanelStopMark — вывод init-скрипта перед killall при stop/restart.
 	rtPanelStopMark = "Shutting down"
 	// rtPanelShellMark — первая строка обёртки команды: оболочка запущена.
@@ -192,9 +195,11 @@ func rtPanelWaitUp(p *routertest.Panel, old int, limit time.Duration) (int, stri
 	return 0, last
 }
 
-// rtPanelOpenStream открывает поток и возвращает канал, который закрывается, когда
-// панель его завершила (EOF или обрыв соединения).
-func rtPanelOpenStream(t *testing.T, ctx context.Context, p *routertest.Panel, path string, required bool) <-chan struct{} {
+// rtPanelOpenStream открывает поток и возвращает два канала: done закрывается, когда
+// панель его завершила (EOF или обрыв соединения), first — когда получен первый байт
+// тела (при обрыве до первого байта first не закрывается). Без потока (необязательный,
+// ответ не 200) оба канала nil.
+func rtPanelOpenStream(t *testing.T, ctx context.Context, p *routertest.Panel, path string, required bool) (done, first <-chan struct{}) {
 	t.Helper()
 	resp, err := p.Stream(ctx, path)
 	if err != nil {
@@ -206,15 +211,54 @@ func rtPanelOpenStream(t *testing.T, ctx context.Context, p *routertest.Panel, p
 			t.Fatalf("поток %s: http %d", path, resp.StatusCode)
 		}
 		t.Logf("поток %s: http %d — без него", path, resp.StatusCode)
-		return nil
+		return nil, nil
 	}
-	done := make(chan struct{})
+	doneCh := make(chan struct{})
+	firstCh := make(chan struct{})
 	go func() {
-		defer close(done)
+		defer close(doneCh)
 		defer resp.Body.Close()
-		_, _ = io.Copy(io.Discard, resp.Body)
+		buf := make([]byte, 4096)
+		got := false
+		for {
+			n, err := resp.Body.Read(buf)
+			if n > 0 && !got {
+				got = true
+				close(firstCh)
+			}
+			if err != nil {
+				return
+			}
+		}
 	}()
-	return done
+	return doneCh, firstCh
+}
+
+// rtPanelAwaitStreamFirst ждёт первый байт потока не дольше rtPanelStreamFirstWait.
+// Обязательный поток без первого события — FAIL, необязательный — запись в журнал.
+func rtPanelAwaitStreamFirst(t *testing.T, path string, done, first <-chan struct{}, required bool) {
+	t.Helper()
+	if first == nil {
+		return
+	}
+	fail := func(format string, args ...any) {
+		if required {
+			t.Fatalf(format, args...)
+		}
+		t.Logf(format, args...)
+	}
+	select {
+	case <-first:
+	case <-done:
+		// Тело могло закрыться сразу после первого байта.
+		select {
+		case <-first:
+		default:
+			fail("поток %s закрыт панелью до первого события", path)
+		}
+	case <-time.After(rtPanelStreamFirstWait):
+		fail("поток %s не отдал первое событие за %v", path, rtPanelStreamFirstWait)
+	}
 }
 
 // rtPanelCurrent возвращает PID единственного процесса панели. Cleanup: что бы ни
@@ -438,11 +482,12 @@ func TestRouterPanelRestartWithOpenStreams(t *testing.T) {
 
 	streamCtx, cancelStreams := context.WithCancel(context.Background())
 	defer cancelStreams()
-	updDone := rtPanelOpenStream(t, streamCtx, p, "/api/update/events", true)
+	updDone, updFirst := rtPanelOpenStream(t, streamCtx, p, "/api/update/events", true)
 	// Поток слоя есть, только когда слой «Конфигурация» включён.
-	layerDone := rtPanelOpenStream(t, streamCtx, p, "/api/configlayer/events", false)
+	layerDone, layerFirst := rtPanelOpenStream(t, streamCtx, p, "/api/configlayer/events", false)
 	// Поток должен быть установлен до команды: первое событие уже отдано.
-	time.Sleep(2 * time.Second)
+	rtPanelAwaitStreamFirst(t, "/api/update/events", updDone, updFirst, true)
+	rtPanelAwaitStreamFirst(t, "/api/configlayer/events", layerDone, layerFirst, false)
 
 	streamEnd := func(done <-chan struct{}) string {
 		if done == nil {
@@ -656,32 +701,42 @@ func TestRouterPanelRestartDuringXKeenStatus(t *testing.T) {
 	// примешивается — её держит отдельный сценарий WithDirtyDisk.
 	quiet := rtWaitStorageQuiet(t, time.Minute)
 	// Опрос идёт раз в 10 с после конца предыдущего, проверка watchdog — раз в 30 с.
+	// Поиск, SIGSTOP и ожидание состояния T — один цикл до срока: опрос, который
+	// закончился раньше остановки, не отменяет сценарий — ищется следующий.
 	var poll int
 	var pollCmd string
+	seen := false
 	deadline := time.Now().Add(45 * time.Second)
-	for time.Now().Before(deadline) {
-		if poll, pollCmd = rtPanelXKeenPoll(old); poll != 0 {
-			break
+	for poll == 0 && time.Now().Before(deadline) {
+		cand, cmd := rtPanelXKeenPoll(old)
+		if cand == 0 {
+			time.Sleep(10 * time.Millisecond)
+			continue
 		}
-		time.Sleep(10 * time.Millisecond)
+		seen = true
+		if err := syscall.Kill(cand, syscall.SIGSTOP); err != nil {
+			continue
+		}
+		stopped := ""
+		for end := time.Now().Add(time.Second); time.Now().Before(end) && stopped != "T"; time.Sleep(10 * time.Millisecond) {
+			stopped, _ = rtProcState(cand)
+		}
+		if stopped != "T" {
+			_ = syscall.Kill(cand, syscall.SIGCONT)
+			continue
+		}
+		poll, pollCmd = cand, cmd
 	}
 	if poll == 0 {
-		t.Skipf("за 45 с панель не запустила опрос XKeen: условие сценария не набралось")
-	}
-	if err := syscall.Kill(poll, syscall.SIGSTOP); err != nil {
-		t.Skipf("опрос XKeen «%s» закончился раньше, чем его удалось остановить: %v", pollCmd, err)
+		if !seen {
+			t.Fatalf("за 45 с панель не запустила опрос XKeen: условие сценария не набралось")
+		}
+		t.Fatalf("за 45 с не удалось остановить ни один опрос XKeen: каждый закончился раньше, чем остановился: условие сценария не набралось")
 	}
 	t.Cleanup(func() {
 		// Опрос, который никто не убил, продолжается и заканчивается сам.
 		_ = syscall.Kill(poll, syscall.SIGCONT)
 	})
-	stopped := ""
-	for end := time.Now().Add(time.Second); time.Now().Before(end) && stopped != "T"; time.Sleep(10 * time.Millisecond) {
-		stopped, _ = rtProcState(poll)
-	}
-	if stopped != "T" {
-		t.Skipf("опрос XKeen «%s» закончился раньше, чем остановился (состояние «%s»)", pollCmd, stopped)
-	}
 
 	pollAtExit := "-"
 	res := rtPanelRestart(t, p, old, func() {
@@ -958,7 +1013,7 @@ func TestRouterPanelRestartDuringWatchdogRulesCheck(t *testing.T) {
 
 	code, err := p.PostJSON("/api/service/watchdog/reset", nil, nil)
 	if err != nil || code != http.StatusOK {
-		t.Skipf("сброс watchdog: http %d (%v): внеочередная проверка не запущена", code, err)
+		t.Fatalf("сброс watchdog: http %d (%v): внеочередная проверка не запущена", code, err)
 	}
 	// Проверка ждёт опрос кэша статуса (таймаут 10 с) и сама ждёт `xkeen -status` 15 с.
 	var check rtPanelChild
@@ -976,7 +1031,7 @@ func TestRouterPanelRestartDuringWatchdogRulesCheck(t *testing.T) {
 		}
 	}
 	if check.pid == 0 {
-		t.Skipf("за 45 с после сброса watchdog не дошёл до проверки правил TPROXY: условие сценария не набралось (остановлено процессов: %d)", len(stopped.snapshot()))
+		t.Fatalf("за 45 с после сброса watchdog не дошёл до проверки правил TPROXY: условие сценария не набралось (остановлено процессов: %d)", len(stopped.snapshot()))
 	}
 
 	// Пока панель останавливается, утилиты чтения правил (вторая таблица) тоже
