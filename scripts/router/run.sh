@@ -395,18 +395,49 @@ full_target() {
       continue
     fi
 
-    # 2. смоук (только чтение; строки лога — после начала ветви)
+    # 2. смоук без окна (только чтение; строки лога — после начала ветви). Ключи --from-* общие
+    # для проверок и наблюдателя: числа и шестнадцатеричный отпечаток, кавычки не нужны.
+    _fargs=""
     if [ -n "$_from" ] && [ -n "$_ino" ] && [ -n "$_fp" ]; then
-      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino" --from-fp "$_fp" || true
+      _fargs="--from-line $_from --from-inode $_ino --from-fp $_fp"
     elif [ -n "$_from" ] && [ -n "$_ino" ]; then
-      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino" || true
+      _fargs="--from-line $_from --from-inode $_ino"
     elif [ -n "$_from" ]; then
-      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" || true
-    else
-      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" || true
+      _fargs="--from-line $_from"
     fi
+    # shellcheck disable=SC2086
+    rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --no-observe $_fargs || true
+    _smrc=$_brc
     # смоук записывает в core определённое им ядро: ветвь продолжается с ядром ветви
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
+
+    # 2а. окно наблюдения (smoke.sh --observe-only: smoke-settle 30 с, окно RT_SMOKE_WINDOW, вердикт
+    # kernel-restart и правила логов) фоном параллельно с частью Playwright только чтения
+    # (D-07): окно перекрыто обходом страниц, а не простоем. Параллельно окну идут только спеки
+    # только чтения; Go-тесты и изменяющие спеки стартуют после ожидания наблюдателя.
+    # Цель недоступна (код 3) — наблюдать нечего: смоук уже записал SKIP по этим проверкам.
+    if [ "$_smrc" != 3 ]; then
+      _ot0=$(date +%s)
+      if command -v setsid >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        setsid sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --observe-only $_fargs &
+      else
+        # shellcheck disable=SC2086
+        sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --observe-only $_fargs &
+      fi
+      _osp=$!
+      _sps="$_sps $_osp"
+      if [ "$_do_pw" = 1 ]; then
+        rt_stage "$_t" "pw-read-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+      fi
+      _orc=0
+      wait "$_osp" || _orc=$?
+      _sps=""
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$(($(date +%s) - _ot0))" "$_orc" "$_ot0" "$_c" >>"$RT_REPORT/timings.tsv"
+    elif [ "$_do_pw" = 1 ]; then
+      rt_stage "$_t" "pw-read-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+    fi
+    # хвост xcp.log пишет наблюдатель (без него — смоук без окна не пишет)
     [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$RT_REPORT/$_t/$_c/xcp-log-tail.txt"
 
     # 3. Go-тесты на устройстве с этим ядром
@@ -419,10 +450,10 @@ full_target() {
       rt_result "$_t" SKIP go "роутерные Go-пакеты набора changed не затронуты"
     fi
 
-    # 4. Playwright против настоящей панели: цели идут параллельно своими процессами
-    # (D-23), внутри цели — один воркер
+    # 4. Playwright, часть state: спеки, меняющие состояние стенда, один воркер. Часть только
+    # чтения прошла в шаге 2а
     if [ "$_do_pw" = 1 ]; then
-      rt_stage "$_t" "pw-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" || true
+      rt_stage "$_t" "pw-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
     else
       rt_result "$_t" SKIP pw "роутерные спеки набора changed не затронуты"
     fi
