@@ -36,6 +36,12 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import coreMarks from './core-marks.cjs';
+
+const { goMarks, analyzeGo } = coreMarks;
+
+// Изменённые файлы текущего выбора: goMarks читает только индекс, новые тесты он не видит
+let changedFiles = [];
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SPEC_DIR = 'frontend/tests/router';
@@ -106,7 +112,9 @@ function modulePath() {
 function routerPackages() {
   const found = new Set();
   const walk = (dir) => {
-    for (const dirent of readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+    for (const dirent of readdirSync(path.join(ROOT, dir), {
+      withFileTypes: true
+    })) {
       const entry = dirent.name;
       const rel = `${dir}/${entry}`;
       if (dirent.isDirectory()) {
@@ -288,9 +296,7 @@ async function select(changed) {
     }
     if (goChanged.size > 0) {
       const mod = modulePath();
-      const changedImports = new Set(
-        [...goChanged].map((d) => (d === '.' ? mod : `${mod}/${d}`))
-      );
+      const changedImports = new Set([...goChanged].map((d) => (d === '.' ? mod : `${mod}/${d}`)));
       for (const pkg of routerPkgs) {
         if (res.goPkgs.has(pkg)) continue;
         const own = `${mod}/${pkg}`;
@@ -384,6 +390,155 @@ async function select(changed) {
   return { res, routerPkgs, specsAll };
 }
 
+/** Размеченные тесты Go в пакетах `./internal/…`: { pkgs, run, rows } (rows — для причин). */
+function goCoreOf(goPkgs) {
+  const want = goPkgs.map((p) => p.replace(/^\.\//, ''));
+  // Пустой список goMarks понимает как «все пакеты»: пустой выбор отдаём сами
+  const rows = want.length > 0 ? goMarks(ROOT, want) : [];
+  // Новые (ещё не в индексе) и изменённые роутерные тесты читаем с диска сами
+  const seen = new Set(rows.map((r) => `${r.pkg}\t${r.test}`));
+  for (const file of changedFiles) {
+    const pkg = path.posix.dirname(file);
+    if (!want.includes(pkg) || !/_test\.go$/.test(file) || !SAFE_PATH.test(file)) continue;
+    const abs = path.join(ROOT, file);
+    if (!existsSync(abs)) continue;
+    const text = readFileSync(abs, 'utf8');
+    if (text.split('\n', 1)[0].trim() !== '//go:build router') continue;
+    for (const m of analyzeGo(text).marks) {
+      if (seen.has(`${pkg}\t${m.test}`)) continue;
+      seen.add(`${pkg}\t${m.test}`);
+      rows.push({ pkg, test: m.test, reason: m.reason, file });
+    }
+  }
+  const names = [
+    ...new Set(rows.map((r) => r.test).filter((t) => /^TestRouter[A-Za-z0-9_]+$/.test(t)))
+  ].sort();
+  const withMarks = new Set(rows.map((r) => r.pkg));
+  return {
+    pkgs: want.filter((p) => withMarks.has(p)).map((p) => `./${p}`),
+    run: names.length > 0 ? `^(${names.join('|')})$` : '',
+    rows
+  };
+}
+
+/** Выражение отбора тегов ядра для Playwright; то же строит pw-suite.sh при RT_PW_CORE_ONLY=1. */
+function coreGrep(grep) {
+  return grep === '' ? '@core' : `(?=.*@core)${grep}`;
+}
+
+/** Выбранные спеки, в которых есть хотя бы один тест с тегом ядра: { specs, reasons }. */
+function pwCoreOf(specs, grep) {
+  const reasons = [];
+  if (specs.length === 0) return { specs: [], reasons };
+  const fallback = (why) => {
+    reasons.push(
+      `ядро: список Playwright не получен (${why}) — вторая ветвь берёт все выбранные спеки`
+    );
+    return { specs, reasons };
+  };
+  const frontend = path.join(ROOT, 'frontend');
+  const bin = path.join(frontend, 'node_modules', '.bin', 'playwright');
+  if (!existsSync(bin)) return fallback('нет frontend/node_modules/.bin/playwright');
+  // Конфигу переменные стенда не нужны (--list), адрес и пароль панели в окружение не передаём
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith('XCP_'))
+  );
+  let json;
+  try {
+    let text;
+    try {
+      text = execFileSync(
+        bin,
+        [
+          'test',
+          '-c',
+          'playwright.router.config.ts',
+          '--list',
+          '--reporter=json',
+          '--grep',
+          coreGrep(grep),
+          ...specs
+        ],
+        {
+          cwd: frontend,
+          env,
+          encoding: 'utf8',
+          timeout: 60000,
+          maxBuffer: 64 * 1024 * 1024
+        }
+      );
+    } catch (e) {
+      // «No tests found» — код 1, но это законный ответ «тестов с тегом нет»: JSON есть в stdout
+      if (typeof e.stdout !== 'string' || e.stdout === '') throw e;
+      text = e.stdout;
+    }
+    json = JSON.parse(text);
+  } catch (e) {
+    return fallback(
+      String(e.message ?? e)
+        .split('\n', 1)[0]
+        .slice(0, 120)
+    );
+  }
+  const errors = json && Array.isArray(json.errors) ? json.errors : [];
+  const noTests = errors.every((er) => /No tests found/.test(String(er.message ?? '')));
+  if (!json || !Array.isArray(json.suites) || !noTests) {
+    return fallback('ответ с ошибками или неожиданной формы');
+  }
+  if (errors.length > 0 && json.suites.length > 0) {
+    return fallback('ответ с ошибками или неожиданной формы');
+  }
+  const counts = new Map();
+  const walk = (suite) => {
+    for (const sp of suite.specs ?? []) {
+      const key = `tests/router/${path.posix.basename(String(sp.file ?? ''))}`;
+      counts.set(key, (counts.get(key) ?? 0) + (sp.tests ?? []).length);
+    }
+    for (const child of suite.suites ?? []) walk(child);
+  };
+  json.suites.forEach(walk);
+  const found = specs.filter((s) => (counts.get(s) ?? 0) > 0);
+  for (const s of found) reasons.push(`ядро: pw ${s} — тестов с тегом ядра ${counts.get(s)}`);
+  return { specs: found, reasons };
+}
+
+/**
+ * Тесты выбора, зависящие от ядра (D-01, D-03, D-04): Go — размеченные core/known-core,
+ * Playwright — спеки с тегом @core. Ошибка расчёта не роняет выбор, а расширяет списки
+ * до безопасных значений: все выбранные пакеты (без отбора по именам) и все выбранные спеки.
+ */
+function coreSelection(goPkgs, specs, grep) {
+  const reasons = [];
+  let go;
+  try {
+    go = goCoreOf(goPkgs);
+    for (const r of go.rows) reasons.push(`ядро: go ./${r.pkg} ${r.test} (${r.reason})`);
+  } catch (e) {
+    reasons.push(`ядро: разметка Go не получена (${e.message}) — берутся все выбранные пакеты`);
+    go = { pkgs: goPkgs, run: '', rows: [] };
+  }
+  let pw;
+  try {
+    pw = pwCoreOf(specs, grep);
+  } catch (e) {
+    reasons.push(`ядро: отбор Playwright не удался (${e.message}) — берутся все выбранные спеки`);
+    pw = { specs, reasons: [] };
+  }
+  reasons.push(...pw.reasons);
+  return { goPkgs: go.pkgs, goRun: go.run, specs: pw.specs, reasons };
+}
+
+/** Безопасные значения ядра для отката на полный выбор: все пакеты с размеченными тестами и все спеки. */
+function coreSafeAll(routerPkgs, specsAll, reasons) {
+  const all = routerPkgs.map((p) => `./${p}`);
+  try {
+    const go = goCoreOf(all);
+    return { goPkgs: go.pkgs, goRun: go.run, specs: specsAll, reasons };
+  } catch {
+    return { goPkgs: all, goRun: '', specs: specsAll, reasons };
+  }
+}
+
 function emit(res, routerPkgs, specsAll) {
   const quote = (s) => `'${s}'`;
   const goList = (set) => routerPkgs.filter((p) => set.has(p)).map((p) => `./${p}`);
@@ -401,20 +556,35 @@ function emit(res, routerPkgs, specsAll) {
       grep = `^(?!.*page:(?!(?:${res.grepRoutes.join('|')}) ))`;
     }
   }
-  // Последняя проверка безопасности вывода: иначе — всё
   const okList = (l) => l.every((x) => SAFE_PATH.test(x.replace(/^\.\//, '')));
-  if (!okList(go) || !okList(specs) || !/^[A-Za-z0-9_|()?!^*.: -]*$/.test(grep)) {
+  const okGrep = (g) => /^[A-Za-z0-9_|()?!^*.: -]*$/.test(g);
+  const okRun = (r) => /^[A-Za-z0-9_|^$()]*$/.test(r);
+  let core = coreSelection(go, specs, grep);
+  // Последняя проверка безопасности вывода: иначе — всё
+  if (
+    !okList(go) ||
+    !okList(specs) ||
+    !okGrep(grep) ||
+    !okList(core.goPkgs) ||
+    !okList(core.specs) ||
+    !okRun(core.goRun)
+  ) {
     all = true;
     go = routerPkgs.map((p) => `./${p}`);
     specs = specsAll;
     grep = '';
+    core = coreSafeAll(routerPkgs, specsAll, core.reasons);
     res.reasons.push('всё: значение выбора не прошло проверку безопасных символов');
   }
+  res.reasons.push(...core.reasons);
   return [
     `RT_SELECT_ALL=${all ? 1 : 0}`,
     `RT_GO_PKGS=${quote(go.join(' '))}`,
     `RT_SPECS=${quote(specs.join(' '))}`,
-    `RT_PW_GREP=${quote(grep)}`
+    `RT_PW_GREP=${quote(grep)}`,
+    `RT_GO_CORE_PKGS=${quote(core.goPkgs.join(' '))}`,
+    `RT_GO_CORE_RUN=${quote(core.goRun)}`,
+    `RT_SPECS_CORE=${quote(core.specs.join(' '))}`
   ].join('\n');
 }
 
@@ -437,6 +607,7 @@ async function main(argv) {
     const changed = args.files
       ? args.files.map((f) => path.posix.normalize(f))
       : changedFromGit(args.base);
+    changedFiles = changed;
     const { res, routerPkgs, specsAll } = await select(changed);
     out = emit(res, routerPkgs, specsAll);
     reasons = res.reasons;
