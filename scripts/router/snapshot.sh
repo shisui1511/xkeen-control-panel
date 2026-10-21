@@ -157,6 +157,19 @@ is_core_runtime() {
   return 1
 }
 
+# Данные ядра внутри класса core-runtime: геоданные и списки ipset тесты способны удалить или
+# подменить (страница DAT, обновление списков). Быстрый путь возвращает их из архива без
+# перезапуска ядра. cache.db, .last_policy_mark и proxy.sh меняются сами при работе ядра и
+# сюда не входят.
+is_core_data() {
+  case "$1" in
+    /opt/etc/xkeen/ipset/*) return 0 ;;
+    /opt/etc/xray/*.dat | /opt/etc/xray/*.mmdb | /opt/etc/xray/*.metadb) return 0 ;;
+    /opt/etc/mihomo/*.dat | /opt/etc/mihomo/*.mmdb | /opt/etc/mihomo/*.metadb) return 0 ;;
+  esac
+  return 1
+}
+
 # класс пути в PCLASS: panel, core-runtime или core (всё остальное в SNAP_PATHS)
 classify_path() {
   if is_panel_path "$1"; then
@@ -530,6 +543,15 @@ cmd_restore() {
           ;;
       esac
     done <"$WORK/diff.panel"
+    # данные ядра (геоданные, ipset): изменённые и пропавшие — из архива, лишние — удалить;
+    # остальные изменчивые файлы работы ядра не трогаем
+    while IFS="$TAB" read -r kind path; do
+      is_core_data "$path" || continue
+      case "$kind" in
+        CHANGED | MISSING) printf '%s\n' "${path#/}" >>"$WORK/restore.list" ;;
+        EXTRA) case "$path" in /opt/*) rm -f "$path" ;; esac ;;
+      esac
+    done <"$WORK/diff.corert"
     while IFS= read -r d; do
       printf '%s\n' "${d#/}"
     done <"$WORK/dirs.missing" >>"$WORK/restore.list"
@@ -548,9 +570,13 @@ cmd_restore() {
     split_classes "$WORK/diff.all"
     left_panel=$(wc -l <"$WORK/diff.panel")
     left_core=$(wc -l <"$WORK/diff.core")
-    if [ "$left_panel" != 0 ] || [ "$left_core" != 0 ]; then
-      say "ОШИБКА: после восстановления расхождений вне изменчивых файлов ядра: панель $left_panel, ядро $left_core"
-      cat "$WORK/diff.panel" "$WORK/diff.core" | head -20
+    left_data=0
+    while IFS="$TAB" read -r kind path; do
+      is_core_data "$path" && left_data=$((left_data + 1))
+    done <"$WORK/diff.corert"
+    if [ "$left_panel" != 0 ] || [ "$left_core" != 0 ] || [ "$left_data" != 0 ]; then
+      say "ОШИБКА: после восстановления расхождений вне изменчивых файлов ядра: панель $left_panel, ядро $left_core, данные ядра $left_data"
+      cat "$WORK/diff.panel" "$WORK/diff.core" "$WORK/diff.corert" | head -20
       return 4
     fi
     left_dirs=$(list_dirs | grep -cvxFf "$BASE/dirs.txt")
