@@ -4,10 +4,14 @@
 # Наборы:
 #   (без SUITE)  полный: деплой, снимок, затем матрица ядер (D-20) — для каждого ядра
 #                из RT_CORES ветвь «сброс записи на носитель (sync) -> переключение ядра
-#                через интерфейс панели (pw-suite.sh --switch) -> смоук по строкам лога
-#                после начала ветви ->
-#                Go-тесты на устройстве (go-suite.sh) -> Playwright против панели
-#                (pw-suite.sh)»; затем восстановление, сверка и проверка core-restored.
+#                через интерфейс панели (pw-suite.sh --switch) -> смоук без окна
+#                (smoke.sh --no-observe) -> наблюдатель окна (smoke.sh --observe-only)
+#                параллельно с частью Playwright только чтения (pw-suite.sh --part read) ->
+#                Go-тесты на устройстве (go-suite.sh) -> ожидание стенда (settle) -> часть
+#                Playwright, меняющая состояние (pw-suite.sh --part state)»; затем
+#                восстановление, сверка и проверка core-restored. Параллельно окну идут только
+#                спеки только чтения: Go-тесты и изменяющие спеки стартуют после ожидания
+#                наблюдателя (D-07).
 #   smoke        деплой и смоук (только чтение, без снимка).
 #   changed      быстрый набор для каждой задачи (D-25): select-changed.mjs по diff от
 #                origin/main и незакоммиченным правкам выбирает Go-пакеты и роутерные спеки;
@@ -42,6 +46,8 @@
 #                        проверки; снять раньше: touch <git-common-dir>/router-test.release
 #   RT_LOCK_WAIT=<с>     ожидание очереди на роутеры (по умолчанию 3600)
 #   RT_SMOKE_WINDOW=<с>  окно наблюдения смоука за перезапуском ядра (по умолчанию 120)
+#   RT_SMOKE_IPT_WAIT=<с> предел ожидания правил iptables в смоуке (по умолчанию 120); не
+#                        зависит от длины окна
 #   RT_CORES="<ядра>"    ветви матрицы через пробел (по умолчанию «xray mihomo»); сужать
 #                        можно для ручной отладки, гейт перед PR — обе ветви на обеих целях
 #   RT_REBOOT_WAIT=<с>   ожидание возврата цели после перезагрузки (по умолчанию 900)
@@ -50,7 +56,11 @@
 #   RT_FILES=<a,b,c>     набор changed: выбор для заданного списка файлов вместо git (отладка)
 #
 # Раскладка отчёта: результаты всех ветвей — в <отчёт>/<id>/results.tsv (ядро ветви — во
-# второй колонке), артефакты ветви (go-*.jsonl, pw/, pw-switch/) — в <отчёт>/<id>/<ядро>/.
+# второй колонке), артефакты ветви (go-*.jsonl, pw-read/, pw/, pw-switch/) — в
+# <отчёт>/<id>/<ядро>/: pw-read/ — часть Playwright только чтения, pw/ — изменяющая часть.
+# Этапы ветви в timings.tsv: sync-<ядро>, switch-<ядро>, smoke-<ядро> (проверки без окна),
+# observe-<ядро> (окно, идёт параллельно pw-read-<ядро>), pw-read-<ядро>, go-<ядро>,
+# settle-<ядро>, pw-<ядро> (часть state). Хвост xcp.log ветви пишет наблюдатель окна.
 #
 # Код выхода: 0 — нет строк FAIL и XPASS, 2 — неизвестный набор, иначе 1. Набор session —
 # код session.mjs: 0 — ожидания совпали и стенд вернулся, 3 — сбой связи ПК↔стенд, иначе 1 или 2.
@@ -395,18 +405,49 @@ full_target() {
       continue
     fi
 
-    # 2. смоук (только чтение; строки лога — после начала ветви)
+    # 2. смоук без окна (только чтение; строки лога — после начала ветви). Ключи --from-* общие
+    # для проверок и наблюдателя: числа и шестнадцатеричный отпечаток, кавычки не нужны.
+    _fargs=""
     if [ -n "$_from" ] && [ -n "$_ino" ] && [ -n "$_fp" ]; then
-      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino" --from-fp "$_fp" || true
+      _fargs="--from-line $_from --from-inode $_ino --from-fp $_fp"
     elif [ -n "$_from" ] && [ -n "$_ino" ]; then
-      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino" || true
+      _fargs="--from-line $_from --from-inode $_ino"
     elif [ -n "$_from" ]; then
-      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" || true
-    else
-      rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" || true
+      _fargs="--from-line $_from"
     fi
+    # shellcheck disable=SC2086
+    rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --no-observe $_fargs || true
+    _smrc=$_brc
     # смоук записывает в core определённое им ядро: ветвь продолжается с ядром ветви
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
+
+    # 2а. окно наблюдения (smoke.sh --observe-only: smoke-settle 30 с, окно RT_SMOKE_WINDOW, вердикт
+    # kernel-restart и правила логов) фоном параллельно с частью Playwright только чтения
+    # (D-07): окно перекрыто обходом страниц, а не простоем. Параллельно окну идут только спеки
+    # только чтения; Go-тесты и изменяющие спеки стартуют после ожидания наблюдателя.
+    # Цель недоступна (код 3) — наблюдать нечего: смоук уже записал SKIP по этим проверкам.
+    if [ "$_smrc" != 3 ]; then
+      _ot0=$(date +%s)
+      if command -v setsid >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        setsid sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --observe-only $_fargs &
+      else
+        # shellcheck disable=SC2086
+        sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --observe-only $_fargs &
+      fi
+      _osp=$!
+      _sps="$_sps $_osp"
+      if [ "$_do_pw" = 1 ]; then
+        rt_stage "$_t" "pw-read-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+      fi
+      _orc=0
+      wait "$_osp" || _orc=$?
+      _sps=""
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$(($(date +%s) - _ot0))" "$_orc" "$_ot0" "$_c" >>"$RT_REPORT/timings.tsv"
+    elif [ "$_do_pw" = 1 ]; then
+      rt_stage "$_t" "pw-read-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+    fi
+    # хвост xcp.log пишет наблюдатель (без него — смоук без окна не пишет)
     [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$RT_REPORT/$_t/$_c/xcp-log-tail.txt"
 
     # 3. Go-тесты на устройстве с этим ядром
@@ -419,10 +460,10 @@ full_target() {
       rt_result "$_t" SKIP go "роутерные Go-пакеты набора changed не затронуты"
     fi
 
-    # 4. Playwright против настоящей панели: цели идут параллельно своими процессами
-    # (D-23), внутри цели — один воркер
+    # 4. Playwright, часть state: спеки, меняющие состояние стенда, один воркер. Часть только
+    # чтения прошла в шаге 2а
     if [ "$_do_pw" = 1 ]; then
-      rt_stage "$_t" "pw-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" || true
+      rt_stage "$_t" "pw-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
     else
       rt_result "$_t" SKIP pw "роутерные спеки набора changed не затронуты"
     fi
