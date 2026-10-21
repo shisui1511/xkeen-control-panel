@@ -501,17 +501,13 @@ func rtProbeNode(ctx context.Context, core, workDir string, i, port int, node ma
 //   - есть узел, через который запрос прошёл: PASS (адреса различаются) или FAIL (совпали);
 //   - у самой цели нет выхода в интернет (до или после перебора): SKIP — вердикта о ядре нет;
 //   - выход цели есть, процесс ядра поднимался и принимал соединения, но ни один узел подписки
-//     не ответил: FAIL, под меткой nodesMark — KNOWN; молчание узлов при живом интернете —
-//     находка, а не пропуск;
+//     не ответил: FAIL; молчание узлов при живом интернете — находка, а не пропуск;
 //   - ядро не приняло конфиг узла (процесс не поднялся, порт не открылся): FAIL.
 func TestRouterTrafficSeparateCore(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	if tg.Core != "xray" && tg.Core != "mihomo" {
 		t.Fatalf("активное ядро цели неизвестно: %q", tg.Core)
 	}
-	// Метка объявлена в теле, а не на уровне файла: иначе core-marks.cjs отметил бы
-	// известным-по-ядру все тесты файла.
-	nodesMark := routertest.Known("*/mihomo", "traffic-separate-core-mihomo-nodes-unreachable")
 	var nodes []map[string]any
 	if tg.Core == "xray" {
 		nodes = rtXrayNodes(t)
@@ -624,7 +620,7 @@ func TestRouterTrafficSeparateCore(t *testing.T) {
 		if same {
 			t.Errorf("внешний адрес через узел совпал с прямым: трафик не ушёл через узел подписки (протокол %s)", winner.protocol)
 		}
-		routertest.Verdict(t, true, nodesMark, "через узел подписки запрос прошёл")
+		routertest.Verdict(t, true, routertest.KnownMark{}, "через узел подписки запрос прошёл")
 		return
 	}
 	if len(limited) == len(rtEchoServices) {
@@ -637,7 +633,7 @@ func TestRouterTrafficSeparateCore(t *testing.T) {
 	if up, why := rtInternetUp(direct); !up {
 		t.Skipf("выход цели в интернет пропал во время теста: прямые запросы не прошли (%s)", why)
 	}
-	routertest.Verdict(t, false, nodesMark,
+	routertest.Verdict(t, false, routertest.KnownMark{},
 		"ни один из %d узлов подписки не ответил через ядро %s (ядро запускалось и принимало соединения, выход цели в интернет есть): %s",
 		len(nodes), tg.Core, strings.Join(summaries, " | "))
 }
