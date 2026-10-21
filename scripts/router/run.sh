@@ -14,6 +14,13 @@
 #                дальше та же матрица ядер, что у полного, но go и pw — только выбранное.
 #                Ничего не затронуто — деплой и смоук (без снимка). Причины выбора —
 #                <отчёт>/select.txt и раздел «Выбор» отчёта.
+#   session      сессия на стенде по спеке (SPEC=<файл JSON>): проходы с ожиданиями на одной
+#                цели и ядрах спеки, в том числе на файлах продукта из другого коммита
+#                (воспроизведение до исправления). Проходы ведёт session.mjs (формат спеки —
+#                в его заголовке), этапы — те же deploy.sh, smoke.sh, pw-suite.sh и
+#                go-suite.sh. В конце рабочее дерево и стенд возвращаются: сборка HEAD,
+#                исходное ядро. Итог — summary.md и session.json отчёта. Нужно чистое
+#                рабочее дерево; снимка нет, как у ручной сессии на стенде.
 #   reboot       холодный старт (D-24): деплой, предполёт и снимок параллельно, затем
 #                по одной цели в порядке XCP_REBOOT_ORDER (нижестоящая цель каскада первой):
 #                перезагрузка, ожидание возврата, проверки автозапуска (xcp той же версии,
@@ -30,6 +37,7 @@
 # Окружение:
 #   ROUTERS=<id,id>      выбор целей (по умолчанию все из конфига)
 #   RELEASE=<тег>        ставить артефакт GitHub Release вместо сборки ветки
+#   SPEC=<файл>          спека набора session (путь от корня рабочей копии или абсолютный)
 #   RT_HOLD_MINUTES=<N>  после прогона держать блокировку N минут для ручной
 #                        проверки; снять раньше: touch <git-common-dir>/router-test.release
 #   RT_LOCK_WAIT=<с>     ожидание очереди на роутеры (по умолчанию 3600)
@@ -44,7 +52,8 @@
 # Раскладка отчёта: результаты всех ветвей — в <отчёт>/<id>/results.tsv (ядро ветви — во
 # второй колонке), артефакты ветви (go-*.jsonl, pw/, pw-switch/) — в <отчёт>/<id>/<ядро>/.
 #
-# Код выхода: 0 — нет строк FAIL и XPASS, 2 — неизвестный набор, иначе 1.
+# Код выхода: 0 — нет строк FAIL и XPASS, 2 — неизвестный набор, иначе 1. Набор session —
+# код session.mjs: 0 — ожидания совпали и стенд вернулся, 3 — сбой связи ПК↔стенд, иначе 1 или 2.
 
 set -eu
 
@@ -54,9 +63,9 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 SUITE=${1:-}
 case "$SUITE" in
-  smoke | changed | reboot | '') ;;
+  smoke | changed | reboot | session | '') ;;
   *)
-    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, reboot и полный (без SUITE)" >&2
+    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, reboot, session и полный (без SUITE)" >&2
     echo "router-test: пример: make router-test SUITE=smoke" >&2
     exit 2
     ;;
@@ -85,6 +94,20 @@ done
 
 cd "$(rt_repo_root)"
 
+# Набор session: спека и чистое дерево проверяются до блокировки, цель берётся из спеки.
+if [ "$SUITE" = session ]; then
+  if [ -z "${SPEC:-}" ]; then
+    echo "router-test: SUITE=session требует SPEC=<файл спеки>" >&2
+    exit 2
+  fi
+  ROUTERS=$(node "$SCRIPT_DIR/session.mjs" --target "$SPEC") || exit 2
+  export ROUTERS
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    echo "router-test: SUITE=session требует чистое рабочее дерево: проходы меняют файлы продукта" >&2
+    exit 2
+  fi
+fi
+
 # Метки известных падений должны ссылаться на живые todo (D-13): до блокировки и деплоя.
 if ! sh "$SCRIPT_DIR/check-known.sh"; then
   echo "router-test: красный — метки известных падений ссылаются на закрытые или несуществующие todo" >&2
@@ -95,6 +118,44 @@ rt_load_targets
 rt_lock
 rt_report_init
 echo "router-test: отчёт $RT_REPORT"
+
+# Удержание блокировки после прогона для ручной проверки (RT_HOLD_MINUTES).
+hold_lock() {
+  if [ -n "${RT_HOLD_MINUTES:-}" ] && [ "$RT_HOLD_MINUTES" -gt 0 ] 2>/dev/null; then
+    RELEASE_FILE="$(rt_common_dir)/router-test.release"
+    rm -f "$RELEASE_FILE"
+    trap 'rm -f "$RELEASE_FILE"' EXIT INT TERM
+    echo "router-test: блокировка удерживается $RT_HOLD_MINUTES мин; снять раньше: touch $RELEASE_FILE"
+    END=$(($(date +%s) + RT_HOLD_MINUTES * 60))
+    while [ "$(date +%s)" -lt "$END" ] && [ ! -e "$RELEASE_FILE" ]; do
+      sleep 1
+    done
+    rm -f "$RELEASE_FILE"
+  fi
+}
+
+# --- набор session ------------------------------------------------------------------
+# Сессию ведёт session.mjs под блокировкой этого процесса. Сигнал передаётся ему, и run.sh
+# ждёт, пока он вернёт стенд (повторный wait, как у матрицы ниже).
+if [ "$SUITE" = session ]; then
+  node "$SCRIPT_DIR/session.mjs" "$SPEC" &
+  SPID=$!
+  trap 'kill -TERM "$SPID" 2>/dev/null || true' INT TERM HUP
+  SRC=0
+  wait "$SPID" || SRC=$?
+  while kill -0 "$SPID" 2>/dev/null; do
+    SRC=0
+    wait "$SPID" || SRC=$?
+  done
+  trap - INT TERM HUP
+  hold_lock
+  if [ "$SRC" = 0 ]; then
+    echo "router-test: зелёный"
+  else
+    echo "router-test: сессия завершилась с кодом $SRC (итог — $RT_REPORT/summary.md)" >&2
+  fi
+  exit "$SRC"
+fi
 
 # --- выбор проверок набора changed (D-25) ------------------------------------------
 # select-changed.mjs печатает четыре строки для eval; перед eval вывод проверяется по
@@ -729,17 +790,7 @@ cat "$RT_REPORT/summary.md"
 
 # --- удержание блокировки для ручной проверки ---------------------------------------
 
-if [ -n "${RT_HOLD_MINUTES:-}" ] && [ "$RT_HOLD_MINUTES" -gt 0 ] 2>/dev/null; then
-  RELEASE_FILE="$(rt_common_dir)/router-test.release"
-  rm -f "$RELEASE_FILE"
-  trap 'rm -f "$RELEASE_FILE"' EXIT INT TERM
-  echo "router-test: блокировка удерживается $RT_HOLD_MINUTES мин; снять раньше: touch $RELEASE_FILE"
-  END=$(($(date +%s) + RT_HOLD_MINUTES * 60))
-  while [ "$(date +%s)" -lt "$END" ] && [ ! -e "$RELEASE_FILE" ]; do
-    sleep 1
-  done
-  rm -f "$RELEASE_FILE"
-fi
+hold_lock
 
 if [ "$FAILS" -gt 0 ] || [ "$XPASSES" -gt 0 ]; then
   echo "router-test: красный (FAIL: $FAILS, XPASS: $XPASSES)" >&2

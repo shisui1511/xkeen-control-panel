@@ -41,8 +41,10 @@ router-mips: update-version
 # Проверка на роутерах: деплой, смоук, отчёт в build/router/last.
 # Цели берутся из локального scripts/router/targets.local.env (образец — targets.example.env).
 #   make router-test SUITE=smoke [ROUTERS=arm64] [RELEASE=vX.Y.Z]
+#   make router-test SUITE=session SPEC=<спека.json>
 # Наборы: (пусто) — полный, smoke — деплой и смоук, changed — затронутое diff'ом,
-# reboot — холодный старт каждой цели и проверка автозапуска.
+# reboot — холодный старт каждой цели и проверка автозапуска, session — сессия на стенде
+# по спеке (формат — в scripts/router/session.mjs).
 router-test:
 	sh scripts/router/run.sh $(SUITE)
 
