@@ -87,8 +87,10 @@ const KERNEL_PATHS = [
   /^internal\/handlers\/kernel[\w]*\.go$/,
   /^internal\/handlers\/watchdog\.go$/,
   /^internal\/handlers\/service\.go$/,
-  // перезапуск запущенного ядра после «Применить»
-  /^internal\/services\/configlayer\/pipeline\.go$/,
+  // перезапуск запущенного ядра после «Применить», его подтверждение и флаг перезапуска
+  /^internal\/services\/configlayer\/(pipeline|restart|flag)\.go$/,
+  // перезапуск Mihomo из обработчика (kernel_restarting)
+  /^internal\/handlers\/mihomo\.go$/,
   // запуск служб и watchdog
   /^cmd\/xcp\/[\w]+\.go$/
 ];
