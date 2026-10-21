@@ -629,9 +629,10 @@ func (s *XKeenService) runArgs(ctx context.Context, timeout time.Duration, args 
 	}
 
 	// Команда жизненного цикла не начинается, пока работает вспомогательный запуск
-	// бинарника ядра: XKeen принял бы его за запущенное ядро (kernel_exec_gate.go).
+	// бинарника ядра (XKeen принял бы его за запущенное ядро) или предыдущая
+	// операция XKeen, ушедшая в фон (kernel_exec_gate.go).
 	if isXKeenLifecycleCmdline(append([]string{"xkeen"}, args...)) {
-		defer lockKernelLifecycleExec()()
+		defer lockKernelLifecycleExec(ctx)()
 	}
 
 	// INVARIANT: no shell interpreter — exec.Command receives the binary path directly,
