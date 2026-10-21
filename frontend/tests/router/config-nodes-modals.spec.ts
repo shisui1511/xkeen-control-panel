@@ -3,6 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
+import { CORE_TAG } from './lib/known';
 import {
   addToDraft,
   api,
@@ -792,205 +793,207 @@ interface RefreshInfo {
   kernels?: Record<string, { status?: string; error_code?: string }>;
 }
 
-test('notices: отказ провайдера по обоим ядрам — одно уведомление со ссылкой кабинета, закрытие снимает оба', async ({
-  page
-}, testInfo) => {
-  test.skip(
-    `${RT.arch}/${RT.core}` !== REJECT_PAIR,
-    'сценарий с чужим HWID идёт только на паре mipsle/xray: не больше одного за прогон'
-  );
-  test.setTimeout(T.save * 10);
-  const guard = attachConsoleGuard(page);
-  await startPage(page);
-  const kernels = await installedKernels(page);
-  test.skip(
-    !(kernels.xray && kernels.mihomo),
-    'нужны оба ядра: уведомления приходят по одному на ядро'
-  );
-
-  // адрес подписки старого слоя (D-36): только в переменной, в вывод не попадает
-  const old = await api(page, 'GET', '/api/subscriptions');
-  const oldRaw = old.data as unknown;
-  const oldList = (
-    Array.isArray(oldRaw)
-      ? oldRaw
-      : ((oldRaw as { subscriptions?: unknown[] } | null)?.subscriptions ?? [])
-  ) as { url?: string }[];
-  const subUrl = oldList.map((s) => s.url ?? '').find((u) => /^https?:\/\//.test(u));
-  test.skip(!subUrl, 'на стенде нет подписки старого слоя (D-36)');
-
-  const before = new Set((await listSources(page)).map((s) => s.id));
-  const preview = await api(page, 'POST', '/api/configlayer/sources/preview', {
-    text: subUrl,
-    files: []
-  });
-  expect(preview.status, 'предпросмотр подписки стенда').toBe(200);
-  const sub = (
-    (preview.data?.subscriptions ?? []) as {
-      error?: { code?: string };
-      kernels?: Record<string, PreviewKernelInfo>;
-    }[]
-  )[0];
-  const previewCodes = [
-    sub?.error?.code ?? '',
-    ...['xray', 'mihomo'].map((k) => sub?.kernels?.[k]?.error?.code ?? '')
-  ].filter(Boolean);
-  expect(
-    previewCodes.includes('dup_subscription'),
-    'подписка стенда уже есть в новом слое: стенд не в исходном состоянии'
-  ).toBe(false);
-  const net = previewCodes.find((c) => NETWORK_CODES.includes(c));
-  test.skip(!!net, `провайдер подписки недоступен: ${net}`);
-  expect(
-    previewCodes.length === 0 &&
-      (sub?.kernels?.xray?.count ?? 0) > 0 &&
-      (sub?.kernels?.mihomo?.count ?? 0) > 0,
-    `подписка стенда не отдаёт узлов с HWID панели: ${previewCodes.join(',') || 'пустой набор'}`
-  ).toBe(true);
-
-  let id = '';
-  try {
-    const view = await api(page, 'GET', '/api/configlayer/sources');
-    const add = await api(page, 'POST', '/api/configlayer/sources/add', {
-      revision: Number(view.data?.draft_revision ?? 0),
-      token: preview.data?.token
-    });
-    expect(add.status, 'добавление подписки стенда в черновик').toBe(200);
-    const added = (await listSources(page)).filter((s) => !before.has(s.id));
-    expect(added.length, 'новый источник один').toBe(1);
-    id = added[0].id;
-
-    const rev = await api(page, 'GET', '/api/configlayer/sources');
-    const upd = await api(page, 'POST', '/api/configlayer/sources/update', {
-      revision: Number(rev.data?.draft_revision ?? 0),
-      id,
-      patch: { hwid: FOREIGN_HWID }
-    });
-    expect(upd.status, 'чужой HWID у подписки в черновике').toBe(200);
-    // смена HWID в черновике снимает ожидающий снимок: «Применить» не пишет узлов в ядра
-    await applyAndWait(page);
-
-    const rf = await api(page, 'POST', '/api/configlayer/sources/refresh', { id });
-    expect(rf.status, 'обновление подписки с чужим HWID').toBe(200);
-    const out = (rf.data ?? {}) as RefreshInfo;
-    const st = (k: string) => out.kernels?.[k]?.status ?? '';
-    const codes = ['xray', 'mihomo']
-      .map((k) => {
-        const code = out.kernels?.[k]?.error_code;
-        return `${k}=${st(k)}${code ? '/' + code : ''}`;
-      })
-      .join(' ');
-    test.skip(out.outcome === 'network', `провайдер подписки недоступен: ${codes}`);
+test(
+  'notices: отказ провайдера по обоим ядрам — одно уведомление со ссылкой кабинета, закрытие снимает оба',
+  { tag: CORE_TAG },
+  async ({ page }, testInfo) => {
     test.skip(
-      (st('xray') === 'ok' && st('mihomo') === 'ok') ||
-        ['unchanged', 'pending_updated', 'applied', 'deferred'].includes(out.outcome ?? ''),
-      `провайдер принял чужой HWID ${FOREIGN_HWID}: лимит устройств не исчерпан, удалите это устройство в личном кабинете провайдера`
+      `${RT.arch}/${RT.core}` !== REJECT_PAIR,
+      'сценарий с чужим HWID идёт только на паре mipsle/xray: не больше одного за прогон'
     );
+    test.setTimeout(T.save * 10);
+    const guard = attachConsoleGuard(page);
+    await startPage(page);
+    const kernels = await installedKernels(page);
+    test.skip(
+      !(kernels.xray && kernels.mihomo),
+      'нужны оба ядра: уведомления приходят по одному на ядро'
+    );
+
+    // адрес подписки старого слоя (D-36): только в переменной, в вывод не попадает
+    const old = await api(page, 'GET', '/api/subscriptions');
+    const oldRaw = old.data as unknown;
+    const oldList = (
+      Array.isArray(oldRaw)
+        ? oldRaw
+        : ((oldRaw as { subscriptions?: unknown[] } | null)?.subscriptions ?? [])
+    ) as { url?: string }[];
+    const subUrl = oldList.map((s) => s.url ?? '').find((u) => /^https?:\/\//.test(u));
+    test.skip(!subUrl, 'на стенде нет подписки старого слоя (D-36)');
+
+    const before = new Set((await listSources(page)).map((s) => s.id));
+    const preview = await api(page, 'POST', '/api/configlayer/sources/preview', {
+      text: subUrl,
+      files: []
+    });
+    expect(preview.status, 'предпросмотр подписки стенда').toBe(200);
+    const sub = (
+      (preview.data?.subscriptions ?? []) as {
+        error?: { code?: string };
+        kernels?: Record<string, PreviewKernelInfo>;
+      }[]
+    )[0];
+    const previewCodes = [
+      sub?.error?.code ?? '',
+      ...['xray', 'mihomo'].map((k) => sub?.kernels?.[k]?.error?.code ?? '')
+    ].filter(Boolean);
     expect(
-      out.outcome === 'rejected' && st('xray') === 'rejected' && st('mihomo') === 'rejected',
-      `отказ по обоим ядрам: итог ${out.outcome} ${codes}`
+      previewCodes.includes('dup_subscription'),
+      'подписка стенда уже есть в новом слое: стенд не в исходном состоянии'
+    ).toBe(false);
+    const net = previewCodes.find((c) => NETWORK_CODES.includes(c));
+    test.skip(!!net, `провайдер подписки недоступен: ${net}`);
+    expect(
+      previewCodes.length === 0 &&
+        (sub?.kernels?.xray?.count ?? 0) > 0 &&
+        (sub?.kernels?.mihomo?.count ?? 0) > 0,
+      `подписка стенда не отдаёт узлов с HWID панели: ${previewCodes.join(',') || 'пустой набор'}`
     ).toBe(true);
 
-    // сервер ведёт два уведомления
-    await expect
-      .poll(async () => (await noticeIds(page, `source_rejected:${id}:`)).sort(), {
-        timeout: T.action
-      })
-      .toEqual([`source_rejected:${id}:mihomo`, `source_rejected:${id}:xray`]);
-
-    // на экране оно одно
-    await openNodes(page);
-    const notice = page.locator(`[data-notice^="source_rejected:${id}:"]`);
-    await expect(notice).toHaveCount(1, { timeout: T.action });
-
-    // ссылка кабинета и данные провайдера из ответа с отказом (G-145-16). Значения ссылок
-    // не печатаются: при падении матчеры атрибутов показали бы ссылку провайдера
-    const diag = await api(
-      page,
-      'GET',
-      `/api/configlayer/sources/diagnostics?id=${id}&kernel=xray`
-    );
-    const headers = (diag.data?.headers ?? []) as { name?: string }[];
-    const hasCabinetHeader = headers.some(
-      (h) => (h.name ?? '').toLowerCase() === 'profile-web-page-url'
-    );
-    if (hasCabinetHeader) {
-      const sv = await api(page, 'GET', '/api/configlayer/sources');
-      const meta = (
-        (sv.data?.sources ?? []) as {
-          id: string;
-          meta?: { web_url?: string; expire?: number; support_url?: string };
-        }[]
-      ).find((s) => s.id === id)?.meta;
-      expect(!!meta?.web_url, 'у источника есть ссылка кабинета после отказа').toBe(true);
-      const want = new URL(meta?.web_url ?? '').href;
-      const noticeHref = await notice.getByTestId('notice-cabinet-link').getAttribute('href');
-      expect(noticeHref === want, 'ссылка кабинета в уведомлении совпадает с метаданными').toBe(
-        true
-      );
-      const cabinet = page.getByTestId(`nodes-cabinet-${id}`);
-      await expect(cabinet).toBeVisible({ timeout: T.action });
-      expect(
-        (await cabinet.getAttribute('href')) === want,
-        'ссылка кабинета в карточке совпадает с метаданными'
-      ).toBe(true);
-      await expect(
-        page.getByTestId(`nodes-source-${id}`).getByTestId('source-status-cabinet').first()
-      ).toBeVisible();
-      if (meta?.expire) await expect(page.getByTestId(`nodes-expire-${id}`)).toBeVisible();
-      if (meta?.support_url) await expect(page.getByTestId(`nodes-support-${id}`)).toBeVisible();
-    } else {
-      testInfo.annotations.push({
-        type: 'info',
-        description: 'ответ с отказом без ссылки кабинета: проверки ссылок пропущены'
+    let id = '';
+    try {
+      const view = await api(page, 'GET', '/api/configlayer/sources');
+      const add = await api(page, 'POST', '/api/configlayer/sources/add', {
+        revision: Number(view.data?.draft_revision ?? 0),
+        token: preview.data?.token
       });
-    }
+      expect(add.status, 'добавление подписки стенда в черновик').toBe(200);
+      const added = (await listSources(page)).filter((s) => !before.has(s.id));
+      expect(added.length, 'новый источник один').toBe(1);
+      id = added[0].id;
 
-    // снимки для визуальной проверки: каталог отчёта вне репозитория, в отчёт не прикладываются
-    for (const theme of ['light', 'dark']) {
-      await page.evaluate((th) => localStorage.setItem('theme', th), theme);
-      await page.reload({ timeout: T.page, waitUntil: 'domcontentloaded' });
-      for (const width of [1440, 390]) {
-        await openNodes(page, width);
+      const rev = await api(page, 'GET', '/api/configlayer/sources');
+      const upd = await api(page, 'POST', '/api/configlayer/sources/update', {
+        revision: Number(rev.data?.draft_revision ?? 0),
+        id,
+        patch: { hwid: FOREIGN_HWID }
+      });
+      expect(upd.status, 'чужой HWID у подписки в черновике').toBe(200);
+      // смена HWID в черновике снимает ожидающий снимок: «Применить» не пишет узлов в ядра
+      await applyAndWait(page);
+
+      const rf = await api(page, 'POST', '/api/configlayer/sources/refresh', { id });
+      expect(rf.status, 'обновление подписки с чужим HWID').toBe(200);
+      const out = (rf.data ?? {}) as RefreshInfo;
+      const st = (k: string) => out.kernels?.[k]?.status ?? '';
+      const codes = ['xray', 'mihomo']
+        .map((k) => {
+          const code = out.kernels?.[k]?.error_code;
+          return `${k}=${st(k)}${code ? '/' + code : ''}`;
+        })
+        .join(' ');
+      test.skip(out.outcome === 'network', `провайдер подписки недоступен: ${codes}`);
+      test.skip(
+        (st('xray') === 'ok' && st('mihomo') === 'ok') ||
+          ['unchanged', 'pending_updated', 'applied', 'deferred'].includes(out.outcome ?? ''),
+        `провайдер принял чужой HWID ${FOREIGN_HWID}: лимит устройств не исчерпан, удалите это устройство в личном кабинете провайдера`
+      );
+      expect(
+        out.outcome === 'rejected' && st('xray') === 'rejected' && st('mihomo') === 'rejected',
+        `отказ по обоим ядрам: итог ${out.outcome} ${codes}`
+      ).toBe(true);
+
+      // сервер ведёт два уведомления
+      await expect
+        .poll(async () => (await noticeIds(page, `source_rejected:${id}:`)).sort(), {
+          timeout: T.action
+        })
+        .toEqual([`source_rejected:${id}:mihomo`, `source_rejected:${id}:xray`]);
+
+      // на экране оно одно
+      await openNodes(page);
+      const notice = page.locator(`[data-notice^="source_rejected:${id}:"]`);
+      await expect(notice).toHaveCount(1, { timeout: T.action });
+
+      // ссылка кабинета и данные провайдера из ответа с отказом (G-145-16). Значения ссылок
+      // не печатаются: при падении матчеры атрибутов показали бы ссылку провайдера
+      const diag = await api(
+        page,
+        'GET',
+        `/api/configlayer/sources/diagnostics?id=${id}&kernel=xray`
+      );
+      const headers = (diag.data?.headers ?? []) as { name?: string }[];
+      const hasCabinetHeader = headers.some(
+        (h) => (h.name ?? '').toLowerCase() === 'profile-web-page-url'
+      );
+      if (hasCabinetHeader) {
+        const sv = await api(page, 'GET', '/api/configlayer/sources');
+        const meta = (
+          (sv.data?.sources ?? []) as {
+            id: string;
+            meta?: { web_url?: string; expire?: number; support_url?: string };
+          }[]
+        ).find((s) => s.id === id)?.meta;
+        expect(!!meta?.web_url, 'у источника есть ссылка кабинета после отказа').toBe(true);
+        const want = new URL(meta?.web_url ?? '').href;
+        const noticeHref = await notice.getByTestId('notice-cabinet-link').getAttribute('href');
+        expect(noticeHref === want, 'ссылка кабинета в уведомлении совпадает с метаданными').toBe(
+          true
+        );
+        const cabinet = page.getByTestId(`nodes-cabinet-${id}`);
+        await expect(cabinet).toBeVisible({ timeout: T.action });
         expect(
-          await page.evaluate(() => document.documentElement.getAttribute('data-theme')),
-          'тема применена'
-        ).toBe(theme);
-        await expect(notice).toHaveCount(1, { timeout: T.action });
-        await page
-          .getByTestId('config-notices')
-          .screenshot({ path: testInfo.outputPath(`notices-${theme}-${width}.png`) });
-        await page
-          .getByTestId(`nodes-source-${id}`)
-          .screenshot({ path: testInfo.outputPath(`card-${theme}-${width}.png`) });
+          (await cabinet.getAttribute('href')) === want,
+          'ссылка кабинета в карточке совпадает с метаданными'
+        ).toBe(true);
+        await expect(
+          page.getByTestId(`nodes-source-${id}`).getByTestId('source-status-cabinet').first()
+        ).toBeVisible();
+        if (meta?.expire) await expect(page.getByTestId(`nodes-expire-${id}`)).toBeVisible();
+        if (meta?.support_url) await expect(page.getByTestId(`nodes-support-${id}`)).toBeVisible();
+      } else {
+        testInfo.annotations.push({
+          type: 'info',
+          description: 'ответ с отказом без ссылки кабинета: проверки ссылок пропущены'
+        });
+      }
+
+      // снимки для визуальной проверки: каталог отчёта вне репозитория, в отчёт не прикладываются
+      for (const theme of ['light', 'dark']) {
+        await page.evaluate((th) => localStorage.setItem('theme', th), theme);
+        await page.reload({ timeout: T.page, waitUntil: 'domcontentloaded' });
+        for (const width of [1440, 390]) {
+          await openNodes(page, width);
+          expect(
+            await page.evaluate(() => document.documentElement.getAttribute('data-theme')),
+            'тема применена'
+          ).toBe(theme);
+          await expect(notice).toHaveCount(1, { timeout: T.action });
+          await page
+            .getByTestId('config-notices')
+            .screenshot({ path: testInfo.outputPath(`notices-${theme}-${width}.png`) });
+          await page
+            .getByTestId(`nodes-source-${id}`)
+            .screenshot({ path: testInfo.outputPath(`card-${theme}-${width}.png`) });
+        }
+      }
+
+      // закрытие снимает на сервере оба уведомления и не возвращает их после перезагрузки
+      await openNodes(page);
+      await notice.locator('.alert-close-btn').click();
+      await expect(notice).toHaveCount(0, { timeout: T.action });
+      await expect
+        .poll(async () => (await noticeIds(page, `source_rejected:${id}:`)).length, {
+          timeout: T.action
+        })
+        .toBe(0);
+      await page.reload({ timeout: T.page, waitUntil: 'domcontentloaded' });
+      await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
+      await expect(notice).toHaveCount(0, { timeout: T.action });
+    } finally {
+      // возврат стенда: источник убран из применённого состояния
+      if (id) {
+        const view = await api(page, 'GET', '/api/configlayer/sources');
+        await api(page, 'POST', '/api/configlayer/sources/delete', {
+          revision: Number(view.data?.draft_revision ?? 0),
+          id
+        });
+        await applyAndWait(page);
       }
     }
-
-    // закрытие снимает на сервере оба уведомления и не возвращает их после перезагрузки
-    await openNodes(page);
-    await notice.locator('.alert-close-btn').click();
-    await expect(notice).toHaveCount(0, { timeout: T.action });
-    await expect
-      .poll(async () => (await noticeIds(page, `source_rejected:${id}:`)).length, {
-        timeout: T.action
-      })
-      .toBe(0);
-    await page.reload({ timeout: T.page, waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
-    await expect(notice).toHaveCount(0, { timeout: T.action });
-  } finally {
-    // возврат стенда: источник убран из применённого состояния
-    if (id) {
-      const view = await api(page, 'GET', '/api/configlayer/sources');
-      await api(page, 'POST', '/api/configlayer/sources/delete', {
-        revision: Number(view.data?.draft_revision ?? 0),
-        id
-      });
-      await applyAndWait(page);
-    }
+    await guard.assertClean();
   }
-  await guard.assertClean();
-});
+);
 
 /** Критичные и серьёзные нарушения axe внутри открытого диалога. */
 async function dialogViolations(page: Page): Promise<string[]> {
