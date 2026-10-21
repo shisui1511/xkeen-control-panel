@@ -389,8 +389,10 @@ func TestRouterKernelVersions(t *testing.T) {
 					t.Errorf("Restart (попытка %d): %v: %s", attempt, missed.err, rtShort(missed.out))
 				}
 				t.Logf("попытка %d из %d: операция XKeen закончилась раньше пробы", attempt, rtXKeenProbeAttempts)
-				if attempt < rtXKeenProbeAttempts {
-					rtWaitRunning(core, true, 3*time.Minute)
+				if attempt < rtXKeenProbeAttempts && rtWaitRunning(core, true, 3*time.Minute) == "" {
+					// без ядра следующая попытка взяла бы пустой PID «до», и проверка смены PID
+					// прошла бы при любом запущенном ядре
+					t.Fatalf("ядро %s не вернулось за 3 мин после операции XKeen: следующая попытка невозможна", core)
 				}
 			}
 		}
