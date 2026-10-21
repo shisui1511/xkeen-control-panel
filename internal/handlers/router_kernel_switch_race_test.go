@@ -81,7 +81,7 @@ func rtSwitchRaceKillOrphans(t *testing.T) {
 }
 
 func TestRouterSwitchKernelDuringDetachedRestart(t *testing.T) {
-	tg := routertest.Current(t)
+	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	other := map[string]string{"xray": "mihomo", "mihomo": "xray"}[kernel]
 	if other == "" {

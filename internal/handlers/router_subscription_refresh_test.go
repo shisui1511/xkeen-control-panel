@@ -23,8 +23,11 @@ import (
 // загрузку и вторую команду (слоты HWID, ответ адаптера опаздывал за срок Mihomo).
 // Вердикт — журнал панели в окне запроса: строки «Mihomo reload triggered for
 // provider <имя этой подписки> (» быть не должно.
+// «XrayOnly» описывает запрос (kernel=xray); активный Mihomo здесь наблюдатель: команда
+// обновления провайдера видна в журнале только при работающем Mihomo.
 func TestRouterSubscriptionRefreshXrayOnly(t *testing.T) {
-	if routertest.Current(t).Core != "mihomo" {
+	tg := routertest.CoreSpecific(t)
+	if tg.Core != "mihomo" {
 		t.Skip("ядро ветви не Mihomo: команда обновления провайдера не проверяется")
 	}
 	p := routertest.NewPanel(t)

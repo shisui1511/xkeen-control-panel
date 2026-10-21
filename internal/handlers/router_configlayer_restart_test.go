@@ -280,7 +280,7 @@ func rtRstExpectApplied(t *testing.T, a map[string]any) {
 }
 
 func TestRouterConfigApplyRestartsRunningKernel(t *testing.T) {
-	tg := routertest.Current(t)
+	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	if kernel != "xray" && kernel != "mihomo" {
 		t.Fatalf("неизвестное ядро цели %q", kernel)

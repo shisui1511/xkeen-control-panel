@@ -93,7 +93,7 @@ func rtHelperWaitNewPID(name string, old int, wait time.Duration) (int, string) 
 }
 
 func TestRouterRestartWithKernelHelper(t *testing.T) {
-	tg := routertest.Current(t)
+	tg := routertest.CoreSpecific(t)
 	kernel := tg.Core
 	if kernel != "xray" && kernel != "mihomo" {
 		t.Fatalf("неизвестное ядро цели %q", kernel)
