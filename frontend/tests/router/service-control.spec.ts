@@ -2,6 +2,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
+import { CORE_TAG } from './lib/known';
 import { withPanel } from './lib/nodes-api';
 
 // Управление службой ядра через интерфейс настоящей панели (RT-05, D-04): остановка, запуск и
@@ -192,7 +193,7 @@ test.afterEach(async ({ browser }, testInfo) => {
   });
 });
 
-test(`service-control core:${RT.core || 'unknown'}`, async ({ page }) => {
+test(`service-control core:${RT.core || 'unknown'}`, { tag: CORE_TAG }, async ({ page }) => {
   const core = RT.core;
   test.skip(core !== 'xray' && core !== 'mihomo', 'активное ядро стенда не определено');
   test.setTimeout(6 * ACTION);
