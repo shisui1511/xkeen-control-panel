@@ -869,6 +869,15 @@ DIRTY=$(sed -n 's/^dirty=//p' "$RT_REPORT/meta")
 FAILS=0
 XPASSES=0
 
+# Разделы по ветвям (этапы, восстановление, долгие тесты, метки ядра) строятся до отчётов и
+# до подсчёта FAIL: --write дописывает в results.tsv строки FAIL core-mark:… (D-05б, полный
+# прогон краснеет на неразмеченном тесте с разным исходом) и пишет <цель>/layout.tsv (D-19).
+# Строки плана ветвей (plan.txt) идут первыми в разделе цели.
+for t in $RT_TARGETS; do
+  mkdir -p "$RT_REPORT/$t"
+  node "$SCRIPT_DIR/branch-report.mjs" "$RT_REPORT" "$t" --suite "$SUITE_NAME" --write --plan "$RT_REPORT/plan.txt" >"$RT_REPORT/$t/branch.md" 2>"$RT_REPORT/$t/branch.err" || true
+done
+
 {
   echo "# Прогон проверки на роутерах"
   echo
@@ -882,6 +891,17 @@ XPASSES=0
     echo '```'
     cat "$RT_REPORT/select.txt"
     echo '```'
+    echo
+    if [ -s "$RT_REPORT/plan.txt" ]; then
+      echo "### Ветви"
+      echo
+      cat "$RT_REPORT/plan.txt"
+      echo
+    fi
+  elif [ -s "$RT_REPORT/plan.txt" ]; then
+    echo "## Ветви"
+    echo
+    cat "$RT_REPORT/plan.txt"
     echo
   fi
   if [ "$SUITE" = reboot ] && [ -f "$RT_REPORT/reboot-order" ]; then
@@ -946,8 +966,9 @@ XPASSES=0
     else
       echo "результатов нет"
     fi
-    # этапы по ветвям, итог и критический путь, оболочка, долгие тесты (D-19)
-    node "$SCRIPT_DIR/branch-report.mjs" "$RT_REPORT" "$t" --suite "$SUITE_NAME" || true
+    # план ветвей, этапы по ветвям, итог и критический путь, оболочка, восстановление, долгие
+    # тесты, метки ядра (D-19)
+    [ ! -f "$RT_REPORT/$t/branch.md" ] || cat "$RT_REPORT/$t/branch.md"
   done
 } >"$RT_REPORT/summary.md"
 
