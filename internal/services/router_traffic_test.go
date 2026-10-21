@@ -748,8 +748,8 @@ func TestRouterTproxyRules(t *testing.T) {
 		t.Fatalf("в активном конфиге ядра %s нет tproxy/redirect-входящих", tg.Core)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
-	defer cancel()
+	// На каждый вызов iptables — свой контекст на 30 с: общий контекст не должен обрывать
+	// ожидания правил и портов (до трёх минут каждое).
 	// После перезапуска XKeen (предыдущие тесты) правила на медленном устройстве
 	// появляются не сразу: ждём их до трёх минут, затем вердикт по тому, что есть.
 	var rulePorts map[int]bool
@@ -759,7 +759,9 @@ func TestRouterTproxyRules(t *testing.T) {
 		rulePorts = map[int]bool{}
 		chains = nil
 		for _, table := range []string{"mangle", "nat"} {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			out, stderr, code := routertest.Exec(ctx, "iptables", "-w", "-t", table, "-S")
+			cancel()
 			if code != 0 {
 				t.Fatalf("iptables -w -t %s -S: код %d: %s", table, code, strings.TrimSpace(stderr))
 			}
@@ -825,7 +827,9 @@ func TestRouterTproxyRules(t *testing.T) {
 	// Счётчики пакетов цепочек XKeen: только числа.
 	for _, ch := range chains {
 		table, name, _ := strings.Cut(ch, " ")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		out, _, code := routertest.Exec(ctx, "iptables", "-w", "-t", table, "-L", name, "-v", "-x", "-n")
+		cancel()
 		if code != 0 {
 			t.Errorf("iptables -t %s -L %s: код %d", table, name, code)
 			continue
