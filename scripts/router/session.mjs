@@ -46,6 +46,24 @@
 //       "same_failures_as": "full-1"        множество строк FAIL, KNOWN и XPASS (статус, ядро,
 //     }                                     проверка) совпадает с более ранним проходом-прогоном
 //   }
+// Прерывание прогона посреди этапа (необязательно, проверка исправления обрыва, G-145.1-5):
+//     "interrupt": {
+//       "stage": "go",                      обязателен; поддерживается только go
+//       "signal": "TERM",                   TERM (kill группе make) или INT (Ctrl+C), по умолчанию TERM
+//       "after": 20,                        1..600 с после появления go-<пакет>.raw
+//       "deadline": 300                     30..3600 с на выход run.sh, по умолчанию 600
+//     }
+// Триггер — файл go-<пакет>.raw в <отчёт прохода>/<цель>/<ядро>/: go-suite.sh держит его, пока
+// бинарник тестов работает на цели. Вложенный run.sh с interrupt запускается отдельной группой
+// процессов (detached), как make в терминале; через after секунд после появления файла сигнал
+// уходит всей группе (только при целом pid > 1), не вышел за deadline — SIGKILL группе. Этапы
+// обвязки идут под setsid и сигнал не получают: их гасит сам run.sh (план 145.1-16). Вердикты
+// прохода с interrupt, кроме exit и summary: «interrupt: сигнал» (отправлен), «interrupt: выход
+// run.sh» (до deadline без SIGKILL), «interrupt: процессы на ПК» (нет: группа вложенного
+// прогона пуста и нет go-suite/pw-suite/smoke — они держали бы блокировку), «interrupt:
+// тестовые процессы на цели» (нет; в отчёте только число), restore-verify, xcp-after-restore и
+// core-restored (PASS) и по вердикту на каждую лишнюю строку FAIL и XPASS результатов
+// вложенного прогона. Прерывание по спеке не прерывает сессию: следующие проходы идут дальше.
 // С go, specs, grep и product проход-прогон не сочетается. Вложенный `sh run.sh [changed]`
 // идёт под блокировкой сессии (RT_LOCK_HELD=1) без RT_HOLD_MINUTES, RT_CORES, RT_BASE и
 // SPEC, сам ставит сборку HEAD, снимает снимок и восстанавливает стенд. Его отчёт — в
@@ -75,6 +93,8 @@
 // числе FAIL reachable во вложенном прогоне набора); 130 — прерывание.
 // Прерывание во время вложенного прогона: сигнал уходит вложенному run.sh, сессия ждёт его
 // выхода (стенд по снимку он восстанавливает сам); повторный сигнал — выход без возврата.
+// Прерывание по спеке (interrupt) сессию не прерывает: после выхода вложенного прогона
+// сессия сверяет вердикты и продолжает следующие проходы.
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
@@ -827,6 +847,7 @@ class Session {
         sent && !st.killed
       );
     }
+    if (irq) this.judgeInterrupt(irq.state, rows, push);
     for (const sub of p.expect.summary) {
       const ok = md.includes(sub);
       push(`summary: ${sub}`, ['есть'], ok ? 'есть' : 'нет', md ? '' : 'summary.md не создан', ok);
@@ -864,6 +885,76 @@ class Session {
       }
     }
     return 0;
+  }
+
+  // Вердикты после прерванного вложенного прогона: этап погас, блокировка свободна, стенд
+  // восстановлен, лишних падений нет. В отчёт идут только числа: командные строки процессов
+  // (рабочий каталог, регэксп -test.run) не выводятся.
+  judgeInterrupt(st, rows, push) {
+    // процессы на ПК: группа вложенного прогона и этапы обвязки (держали бы дескриптор блокировки)
+    let groupAlive = false;
+    if (st.pgid > 1) {
+      try {
+        process.kill(-st.pgid, 0);
+        groupAlive = true;
+      } catch (e) {
+        groupAlive = e.code !== 'ESRCH';
+      }
+    }
+    const pg = spawnSync('pgrep', ['-f', 'scripts/router/(go-suite|pw-suite|smoke)[.]sh'], {
+      encoding: 'utf8'
+    });
+    let stages = -1;
+    if (!pg.error && pg.status === 1) stages = 0;
+    else if (!pg.error && pg.status === 0) stages = pg.stdout.split('\n').filter(Boolean).length;
+    const pcOk = !groupAlive && stages === 0;
+    push(
+      'interrupt: процессы на ПК',
+      ['нет'],
+      pcOk ? 'нет' : 'есть',
+      `группа: ${groupAlive ? 'жива' : 'пуста'}; этапов обвязки: ${stages < 0 ? 'не проверено' : stages}`,
+      pcOk
+    );
+
+    // тестовые процессы на цели: ./<пакет>.test -test.v=test2json; шаблон со скобками не находит
+    // сам себя в командной строке проверки
+    const r = this.remote(
+      'n=0; for f in /proc/[0-9]*/cmdline; do tr "\\000" " " <"$f" 2>/dev/null | grep -q "[.]test -test[.]" && n=$((n+1)); done; echo "n=$n"'
+    );
+    const m = r.out.match(/^n=(\d+)$/m);
+    if (r.rc !== 0 || !m) {
+      push('interrupt: тестовые процессы на цели', ['нет'], 'нет связи', `код ${r.rc}`, false);
+    } else {
+      const n = Number(m[1]);
+      push(
+        'interrupt: тестовые процессы на цели',
+        ['нет'],
+        n === 0 ? 'нет' : `есть: ${n}`,
+        '',
+        n === 0
+      );
+    }
+
+    // восстановление стенда вложенным прогоном
+    const restore = ['restore-verify', 'xcp-after-restore', 'core-restored'];
+    for (const check of restore) {
+      const own = rows.filter((x) => x.check === check);
+      const row = own.find((x) => x.status !== 'PASS') ?? own[own.length - 1];
+      push(
+        check,
+        ['PASS'],
+        row ? row.status : 'нет',
+        row ? row.detail : 'строки нет в results.tsv вложенного прогона',
+        !!row && row.status === 'PASS'
+      );
+    }
+
+    // остальные падения: при коде 130 код выхода о них не сообщает
+    for (const row of rows) {
+      if (restore.includes(row.check)) continue;
+      if (row.status !== 'FAIL' && row.status !== 'XPASS') continue;
+      push(row.check, ['PASS'], row.status, `${row.core}: ${row.detail}`, false);
+    }
   }
 
   // Сверка results.tsv этапа с ожиданиями прохода.
