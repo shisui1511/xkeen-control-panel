@@ -577,7 +577,13 @@ class Session {
   }
 
   report(result, end) {
-    const esc = (s) => String(s).replace(/\|/g, '\\|').replace(/\s+/g, ' ').slice(0, 220);
+    // ячейка таблицы Markdown: сначала обратный слеш, иначе «\|» из детали закроет ячейку
+    const esc = (s) =>
+      String(s)
+        .replace(/\\/g, '\\\\')
+        .replace(/\|/g, '\\|')
+        .replace(/\s+/g, ' ')
+        .slice(0, 220);
     const L = [];
     L.push('# Сессия на стенде', '');
     L.push(`- Итог: ${result}`);
