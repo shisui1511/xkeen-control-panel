@@ -155,7 +155,8 @@ UNREACH=0
 # (иначе метка проверки окна дала бы XPASS в части без окна). Пусто — все проверки.
 PART_CHECKS=""
 if [ "$NO_OBSERVE" = 1 ]; then
-  PART_CHECKS="kernel-running iptables-rules version xcp-pid api-version api-me api-service-status"
+  # reachable общая для обеих частей, метка smoke:reachable оценивается здесь
+  PART_CHECKS="reachable kernel-running iptables-rules version xcp-pid api-version api-me api-service-status"
 elif [ "$OBSERVE_ONLY" = 1 ]; then
   PART_CHECKS="kernel-restart log-panic log-error log-repeat"
 fi
