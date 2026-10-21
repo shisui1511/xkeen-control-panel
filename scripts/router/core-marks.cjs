@@ -13,6 +13,10 @@
  *   - goViolations(root)     — нарушения: тест читает ядро (.Core, XCP_RT_CORE)
  *       или переключает его (switch_kernel), но не размечен; помощник сам берёт
  *       ядро из Current/CoreSpecific/XCP_RT_CORE.
+ * TS-часть (specFacts, specIssues, specViolations): спеки Playwright, читающие ядро
+ * (RT.core, XCP_CORE, selectorApplies, переключение), обязаны нести тег ядра (CORE_TAG),
+ * а метки knownFailure с ядром в селекторе — идти через coreTagsOf. core-switch.spec.ts
+ * исключён: он идёт в каждой ветви.
  * Потребители: scripts/check-core-marks.js (страж в CI), выбор набора в changed
  * и сводка прогона. Имя теста принимается только по шаблону ^TestRouter[A-Za-z0-9_]+$
  * (имя попадает в -test.run).
@@ -198,7 +202,108 @@ function goViolations(root) {
   return rows;
 }
 
-module.exports = { analyzeGo, goMarks, goViolations };
+/** TS-часть (Playwright): спеки frontend/tests/router/*.spec.ts. */
+const SPEC_READS_CORE = /\b(?:RT\.core|RT\.wantCore|XCP_CORE|XCP_WANT_CORE|switch_kernel)\b|\bselectorApplies\(/;
+const SPEC_CORE_TAGGED = /\bCORE_TAG\b|\bCORE_LABEL_TAG\b|['"`]@core['"`]|\bcoreTagsOf\(/;
+const SPEC_USES_COREOF = /\bcoreTagsOf\(/;
+const KNOWN_CALL = /\bknownFailure\(\s*(['"`])([^'"`\n]*)\1/g;
+const LIB_READS_CORE = /\bRT\.core\b|\bXCP_CORE\b/;
+const SPEC_EXEMPT = new Set(['core-switch.spec.ts']);
+const LIB_EXEMPT = new Set(['env.ts', 'known.ts']);
+
+/** Вырезает комментарии TS/JS и импорты; строки и шаблоны оставляет как есть. */
+function stripTs(text) {
+  let out = '';
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const c = text[i];
+    const next = text[i + 1];
+    if (c === '/' && next === '/') {
+      while (i < n && text[i] !== '\n') i++;
+    } else if (c === '/' && next === '*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end < 0 ? n : end + 2;
+    } else if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < n && text[j] !== c && (c === '`' || text[j] !== '\n')) {
+        j += text[j] === '\\' ? 2 : 1;
+      }
+      j = Math.min(j + 1, n);
+      out += text.slice(i, j);
+      i = j;
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out.replace(/^import[\s\S]*?\bfrom\s*['"][^'"\n]+['"];?/gm, '');
+}
+
+/**
+ * Факты об одном TS-спеке (после вырезания комментариев и импортов):
+ * { readsCore, coreTagged, coreLabelSelectors, usesCoreTagsOf }.
+ */
+function specFacts(text) {
+  const code = stripTs(text);
+  const coreLabelSelectors = [];
+  for (const m of code.matchAll(KNOWN_CALL)) {
+    if (m[2].includes('/')) coreLabelSelectors.push(m[2]);
+  }
+  return {
+    readsCore: SPEC_READS_CORE.test(code),
+    coreTagged: SPEC_CORE_TAGGED.test(code),
+    coreLabelSelectors,
+    usesCoreTagsOf: SPEC_USES_COREOF.test(code)
+  };
+}
+
+/** Причины нарушений одного спека (список строк). */
+function specIssues(text) {
+  const f = specFacts(text);
+  const issues = [];
+  if (f.readsCore && !f.coreTagged) {
+    issues.push('спек читает ядро без тега ядра: объявите такие тесты с { tag: CORE_TAG }');
+  }
+  if (f.coreLabelSelectors.length > 0 && !f.usesCoreTagsOf) {
+    issues.push(
+      `метка knownFailure с ядром в селекторе (${f.coreLabelSelectors.join(', ')}) без coreTagsOf: тег @core-label выводится через test(title, { tag: coreTagsOf(() => …) }, fn)`
+    );
+  }
+  return issues;
+}
+
+function trackedFiles(root, glob) {
+  return execFileSync('git', ['ls-files', '--', glob], { cwd: root, encoding: 'utf8' })
+    .split('\n')
+    .filter(Boolean)
+    .filter((f) => fs.existsSync(path.join(root, f)));
+}
+
+/** Нарушения разметки спеков и помощников Playwright: [{file, name, reason}]. */
+function specViolations(root) {
+  const rows = [];
+  for (const file of trackedFiles(root, 'frontend/tests/router/*.spec.ts')) {
+    if (SPEC_EXEMPT.has(path.posix.basename(file))) continue;
+    for (const reason of specIssues(fs.readFileSync(path.join(root, file), 'utf8'))) {
+      rows.push({ file, name: '(спек)', reason });
+    }
+  }
+  for (const file of trackedFiles(root, 'frontend/tests/router/lib/*.ts')) {
+    if (LIB_EXEMPT.has(path.posix.basename(file))) continue;
+    if (LIB_READS_CORE.test(stripTs(fs.readFileSync(path.join(root, file), 'utf8')))) {
+      rows.push({
+        file,
+        name: '(помощник)',
+        reason: 'помощник читает ядро: решение принимается в спеке с тегом ядра'
+      });
+    }
+  }
+  rows.sort((a, b) => (a.file + a.name).localeCompare(b.file + b.name));
+  return rows;
+}
+
+module.exports = { analyzeGo, goMarks, goViolations, specFacts, specIssues, specViolations };
 
 if (require.main === module) {
   const argv = process.argv.slice(2);

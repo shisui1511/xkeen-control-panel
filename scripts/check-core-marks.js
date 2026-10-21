@@ -12,12 +12,18 @@
  *      (switch_kernel), обязано вызывать routertest.CoreSpecific(t).
  *   2. Помощник (не Test*) сам не берёт ядро из routertest.Current, routertest.CoreSpecific
  *      или XCP_RT_CORE: ядро передаётся параметром из теста с CoreSpecific.
+ * Правила (TS, спеки frontend/tests/router/*.spec.ts, кроме core-switch.spec.ts):
+ *   3. Спек, читающий ядро (RT.core, RT.wantCore, XCP_CORE, XCP_WANT_CORE, selectorApplies),
+ *      объявляет такие тесты с тегом ядра (CORE_TAG, '@core' или coreTagsOf).
+ *   4. Метка knownFailure с ядром в селекторе («арх/ядро», «* / ядро») идёт через coreTagsOf:
+ *      тег @core-label выводится автоматически.
+ *   5. Помощник frontend/tests/router/lib/*.ts (кроме env.ts и known.ts) не читает RT.core.
  * Самопроверка сканера на образцах идёт при каждом запуске: расхождение — код 1.
  *
  * Usage: node scripts/check-core-marks.js
  */
 const path = require('path');
-const { analyzeGo, goMarks, goViolations } = require('./router/core-marks.cjs');
+const { analyzeGo, goMarks, goViolations, specIssues, specViolations } = require('./router/core-marks.cjs');
 
 const root = path.resolve(__dirname, '..');
 
@@ -62,10 +68,35 @@ for (const [text, wantViolations, wantMarks, wantReason] of samples) {
   }
 }
 
+// Самопроверка TS-правил: [текст спека, ожидаемое число нарушений]
+const specSamples = [
+  ["test('a', async () => {\n  if (RT.core === 'xray') return;\n});\n", 1],
+  [
+    "import { CORE_TAG } from './lib/known';\ntest('a', { tag: CORE_TAG }, async () => {\n  if (RT.core === 'xray') return;\n});\n",
+    0
+  ],
+  ["// RT.core в комментарии\ntest('a', async () => {});\n", 0],
+  [
+    "import { CORE_TAG } from './lib/known';\ntest('a', async () => {\n  if (RT.core === 'xray') return;\n});\n",
+    1
+  ],
+  ["function m() {\n  knownFailure('*/xray', 's');\n}\n", 1],
+  ["const tag = coreTagsOf(() => {\n  knownFailure('*/xray', 's');\n});\n", 0],
+  ["function m() {\n  knownFailure('*', 's');\n  knownFailure('arm64', 's');\n}\n", 0]
+];
+for (const [text, want] of specSamples) {
+  const got = specIssues(text).length;
+  if (got !== want) {
+    problems.push(
+      `самопроверка сканера спеков: образец ${JSON.stringify(text)} дал нарушений ${got}; ожидалось ${want}`
+    );
+  }
+}
+
 let violations = [];
 let marks = [];
 try {
-  violations = goViolations(root);
+  violations = goViolations(root).concat(specViolations(root));
   marks = goMarks(root);
 } catch (e) {
   problems.push(`сканер не отработал: ${e.message}`);
@@ -79,7 +110,9 @@ if (violations.length > 0 || problems.length > 0) {
   for (const v of violations) console.error(`  ${v.file}: ${v.name} — ${v.reason}`);
   for (const p of problems) console.error('  ' + p);
   if (violations.length > 0) {
-    console.error('Тест, читающий ядро, получает цель через routertest.CoreSpecific(t) прямо в своём теле.');
+    console.error(
+      'Go: тест, читающий ядро, получает цель через routertest.CoreSpecific(t) прямо в своём теле. Playwright: тест, читающий ядро, объявляется с { tag: CORE_TAG }.'
+    );
   }
   process.exit(1);
 }
