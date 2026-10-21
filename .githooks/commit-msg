@@ -1,0 +1,18 @@
+#!/bin/sh
+# .githooks/commit-msg — в сообщении коммита не должно быть строк из локального файла целей.
+# Подключение: make hooks (git config core.hooksPath .githooks).
+#
+# pre-commit проверяет только индекс; сообщение коммита после push остаётся в истории
+# навсегда, поэтому проверяется здесь теми же списками (check-leaks.sh --file).
+# Нет локального файла целей — пропуск. Пропустить разово: git commit --no-verify.
+
+set -eu
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+[ -f scripts/router/check-leaks.sh ] || exit 0
+if ! sh scripts/router/check-leaks.sh --file "$1" >/dev/null; then
+  echo "commit-msg: в сообщении коммита строки из локального файла целей (D-40): уберите их или обезличьте" >&2
+  exit 1
+fi

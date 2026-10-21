@@ -1,5 +1,5 @@
 #!/bin/sh
-# scripts/router/smoke.sh <id цели> <ожидаемая версия xcp> [--from-line <n>] — смоук цели после деплоя.
+# scripts/router/smoke.sh <id цели> <ожидаемая версия xcp> [--from-line <n> [--from-inode <i> [--from-fp <md5>]]] — смоук цели после деплоя.
 #
 # Проверки (каждая пишет строку в <отчёт>/<id>/results.tsv; D-34):
 #   kernel-running       xkeen -status сообщает «запущен в режиме …», процесс ядра жив;
@@ -27,10 +27,25 @@
 #
 # --from-line <n>: правила логов смотрят строки xcp.log после строки n, а не после
 # последнего баннера запуска (для следующих ветвей матрицы).
+# --from-inode <i> (только вместе с --from-line): inode xcp.log на момент строки n. xcp.log
+# ротируется при 1 МБ (xcp.log -> xcp.log.1 -> xcp.log.2): смоук находит файл ветви по inode
+# среди xcp.log, xcp.log.1, xcp.log.2, берёт его хвост после строки n и целиком все более
+# новые файлы. Файл не найден или короче строки n — окно ветви не восстановлено: FAIL
+# log-error (не PASS), log-panic и log-repeat — SKIP.
+# --from-fp <md5> (только вместе с --from-inode): md5 первой строки файла на момент строки n.
+# Номер inode освобождается после третьей ротации и может достаться новому xcp.log, поэтому
+# найденный по inode файл принимается, только если его первая строка даёт тот же отпечаток;
+# иначе окно не восстановлено. Файл читается одним открытием: число строк и хвост берутся
+# из одного дескриптора, ротация между ними не подменяет файл.
 #
 # Известные падения (D-12): FAIL, совпавший с записью scripts/router/known-failures
 # (smoke:<проверка или префикс>, селектор цели, slug todo), записывается как KNOWN;
 # применимая запись без совпавшего FAIL — XPASS (метка больше не нужна), прогон красный.
+#
+# Чистка в начале: рабочий каталог Go-тестов на устройстве (/opt/tmp/xcp-rt, в нём session.env
+# и subscription.url) удаляется, если остался от прерванного прогона (kill -9, обрыв связи).
+# Удаляется ровно этот путь, без шаблонов; каталог снимка стенда не затрагивается. В матрице
+# безопасно: go-suite ветви идёт после смоука и создаёт каталог заново.
 #
 # Хвосты логов в отчёте проходят rt_redact (адреса и токены скрыты).
 #
@@ -43,7 +58,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/lib.sh"
 
 usage() {
-  echo "usage: smoke.sh <id цели> <ожидаемая версия> [--from-line <n>]" >&2
+  echo "usage: smoke.sh <id цели> <ожидаемая версия> [--from-line <n> [--from-inode <i> [--from-fp <md5>]]]" >&2
   exit 2
 }
 
@@ -52,6 +67,8 @@ ID=$1
 EXPECT=$2
 shift 2
 FROM_LINE=""
+FROM_INODE=""
+FROM_FP=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --from-line)
@@ -62,9 +79,27 @@ while [ $# -gt 0 ]; do
       esac
       shift 2
       ;;
+    --from-inode)
+      [ $# -ge 2 ] || usage
+      FROM_INODE=$2
+      case "$FROM_INODE" in
+        '' | *[!0-9]*) usage ;;
+      esac
+      shift 2
+      ;;
+    --from-fp)
+      [ $# -ge 2 ] || usage
+      FROM_FP=$2
+      case "$FROM_FP" in
+        '' | *[!0-9a-f]*) usage ;;
+      esac
+      shift 2
+      ;;
     *) usage ;;
   esac
 done
+[ -z "$FROM_INODE" ] || [ -n "$FROM_LINE" ] || usage
+[ -z "$FROM_FP" ] || [ -n "$FROM_INODE" ] || usage
 
 cd "$(rt_repo_root)"
 ROUTERS=$ID
@@ -100,6 +135,15 @@ lost() {
 finalize() {
   _rc=$?
   trap - EXIT
+  # Файл cookie остаётся, только если прогон прервали между входом и выходом из панели:
+  # best-effort выход (лимит 20 сессий) и удаление файла на ПК.
+  _jar="$RT_REPORT/$ID/.cookies"
+  if [ -f "$_jar" ]; then
+    if [ -n "${csrf:-}" ] && [ -n "${url:-}" ]; then
+      curl -sk --connect-timeout 10 --max-time 20 -b "$_jar" -X POST -H "X-CSRF-Token: $csrf" -o /dev/null "$url/api/auth/logout" || true
+    fi
+    rm -f "$_jar"
+  fi
   if [ "$UNREACH" = 1 ]; then
     for _c in kernel-running iptables-rules version xcp-pid api-version api-me api-service-status kernel-restart log-panic log-error; do
       grep -q "^[A-Z]*${TAB}${_c}${TAB}" "$BUF" || chk SKIP "$_c" "нет связи"
@@ -151,10 +195,13 @@ finalize() {
   exit 0
 }
 trap finalize EXIT
+# Прерывание сигналом: finalize получает 130 и завершает с кодом 1 (прерванный смоук не зелёный);
+# без обработчика EXIT-trap не выполнился бы.
+trap 'exit 130' INT TERM HUP
 
 # --- kernel-running ----------------------------------------------------------
 rc=0
-out=$(rt_stage "$ID" smoke-kernel rt_ssh "$ID" '/opt/sbin/xkeen -status 2>&1; echo "xray_pid=$(pidof xray | cut -d" " -f1)"; echo "mihomo_pid=$(pidof mihomo | cut -d" " -f1)"') || rc=$?
+out=$(rt_stage "$ID" smoke-kernel rt_ssh "$ID" 'rm -rf /opt/tmp/xcp-rt; /opt/sbin/xkeen -status 2>&1; echo "xray_pid=$(pidof xray | cut -d" " -f1)"; echo "mihomo_pid=$(pidof mihomo | cut -d" " -f1)"') || rc=$?
 [ "$rc" != 3 ] || lost
 clean=$(printf '%s\n' "$out" | sed "s/${ESC}\[[0-9;]*[A-Za-z]//g")
 xpid=$(printf '%s\n' "$clean" | sed -n 's/^xray_pid=//p')
@@ -373,18 +420,81 @@ tail_file="$RT_REPORT/$ID/xcp-log-tail.txt"
 REMOTE_LOG='
 L=/opt/var/log/xcp.log
 [ -f "$L" ] || exit 9
-from=$1
+from=${1:-}
+ino=${2:-}
+fp=${3:-}
+lost=XCP_RT_LOG_WINDOW_LOST
 if [ -z "$from" ]; then
   from=$(grep -n "XKeen Control Panel v.* starting\.\.\." "$L" | tail -n 1 | cut -d: -f1)
   from=${from:-0}
+  sed -n "$((from + 1)),\$p" "$L"
+  exit 0
 fi
-sed -n "$((from + 1)),\$p" "$L"
+if [ -z "$ino" ]; then
+  # номер строки без inode: файл не ротировался, если в нём не меньше запомненных строк
+  n=$(wc -l <"$L")
+  if [ "$n" -lt "$from" ]; then
+    echo "$lost"
+    exit 0
+  fi
+  sed -n "$((from + 1)),\$p" "$L"
+  exit 0
+fi
+# файл ветви — среди текущего и двух предыдущих по ротации; ищется по inode
+found=""
+for f in "$L" "$L.1" "$L.2"; do
+  [ -f "$f" ] || continue
+  set -- $(ls -i "$f")
+  if [ "$1" = "$ino" ]; then
+    found=$f
+    break
+  fi
+done
+if [ -z "$found" ]; then
+  echo "$lost"
+  exit 0
+fi
+# Файл читается одним открытием (дескриптор 3): первая строка для отпечатка, остальное —
+# для подсчёта и хвоста. Два открытия по пути дали бы хвост другого файла, если ротация
+# случится между ними.
+exec 3<"$found"
+off=0
+if [ "$from" -gt 0 ]; then
+  IFS= read -r first <&3 || first=""
+  if [ -n "$fp" ]; then
+    sum=$(printf "%s\n" "$first" | md5sum | cut -c1-32)
+    if [ "$sum" != "$fp" ]; then
+      # inode тот же, файл другой: номер достался новому xcp.log после ротации
+      echo "$lost"
+      exit 0
+    fi
+  fi
+  off=1
+fi
+awk -v from="$from" -v off="$off" -v lost="$lost" "NR + off > from { print } END { if (NR + off < from) print lost }" <&3
+# более новые файлы целиком, в хронологическом порядке (от большего суффикса к текущему)
+case "$found" in
+  "$L.2") newer="$L.1 $L" ;;
+  "$L.1") newer="$L" ;;
+  *) newer="" ;;
+esac
+for f in $newer; do
+  [ -f "$f" ] && cat "$f"
+done
+exit 0
 '
 rc=0
-printf '%s\n' "$REMOTE_LOG" | RT_SSH_STDIN=1 rt_ssh "$ID" "sh -s -- $FROM_LINE" 2>/dev/null | rt_redact >"$tail_file" || rc=$?
+printf '%s\n' "$REMOTE_LOG" | RT_SSH_STDIN=1 rt_ssh "$ID" "sh -s -- $FROM_LINE $FROM_INODE $FROM_FP" 2>/dev/null | rt_redact >"$tail_file" || rc=$?
 # rc здесь — код rt_redact; кода ssh в POSIX sh не получить, поэтому отсутствие
 # лога определяется по пустому файлу и повторной проверкой наличия файла.
-if [ ! -s "$tail_file" ]; then
+if [ -s "$tail_file" ] && grep -qx XCP_RT_LOG_WINDOW_LOST "$tail_file"; then
+  # Файл ветви найти нельзя (ротирован дважды, усечён, inode не найден): строки ветви
+  # потеряны, поэтому PASS по неполному хвосту недопустим (D-34).
+  _why="xcp.log ротирован или усечён за ветвь: окно ветви не восстановлено"
+  chk FAIL log-error "$_why"
+  chk SKIP log-panic "$_why"
+  chk SKIP log-repeat "$_why"
+elif [ ! -s "$tail_file" ]; then
   rc=0
   rt_ssh "$ID" "[ -f $LOG_PATH ]" || rc=$?
   [ "$rc" != 3 ] || lost
@@ -392,9 +502,14 @@ if [ ! -s "$tail_file" ]; then
     chk FAIL log-panic "нет файла $LOG_PATH"
     chk FAIL log-error "нет файла $LOG_PATH"
   else
-    chk PASS log-panic "после баннера запуска строк нет"
-    chk PASS log-error "после баннера запуска строк нет"
-    chk PASS log-repeat "после баннера запуска строк нет"
+    if [ -n "$FROM_LINE" ]; then
+      _none="после строки ветви новых строк нет"
+    else
+      _none="после баннера запуска строк нет"
+    fi
+    chk PASS log-panic "$_none"
+    chk PASS log-error "$_none"
+    chk PASS log-repeat "$_none"
   fi
 else
   lines=$(wc -l <"$tail_file" | tr -d ' ')

@@ -79,6 +79,10 @@ cleanup() {
   rt_ssh "$ID" "rm -rf $RWD" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
+# Прерывание сигналом: dash не выполняет EXIT-trap, когда процесс гибнет от необработанного
+# сигнала; выход из обработчика запускает cleanup (выход из панели, файлы сессии и подписки
+# на ПК, рабочий каталог на устройстве).
+trap 'exit 130' INT TERM HUP
 
 # Список пакетов: RT_GO_PKGS или все каталоги, где у _test.go первая строка `//go:build router`.
 if [ -n "${RT_GO_PKGS:-}" ]; then
@@ -178,6 +182,9 @@ if [ -z "$SESSION_ENV" ]; then
 fi
 
 # Данные share-ссылок для тестов: одним копированием каталога.
+# Данные для тестов (этот блок и два следующих): новый путь данных, который тесты получают
+# через окружение, надо добавить в TEST_DATA_ALL в scripts/router/select-changed.mjs, иначе
+# SUITE=changed его правку не увидит (граф зависимостей Go такие связи не показывает).
 LINKS_ENV=""
 if [ -d "$ROOT/internal/nodes/testdata/links" ]; then
   rc=0

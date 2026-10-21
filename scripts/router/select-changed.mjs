@@ -13,7 +13,8 @@
 //              core-switch.spec.ts не выбирается: его запускает матрица ядер.
 //
 // При сомнении выбор только расширяется до полного (D-25): неизвестный файл, небезопасное
-// имя, ошибка разбора, нет базы сравнения — RT_SELECT_ALL=1.
+// имя, ошибка разбора, нет базы сравнения — RT_SELECT_ALL=1. Данные роутерных тестов
+// (`testdata/`, контракт источников frontend/src/lib/sourcesContract.json) — тоже полный выбор.
 //
 // Вывод (stdout) — строки для eval в sh, значения в одинарных кавычках и только из
 // безопасных символов (T-144.1-23):
@@ -49,12 +50,18 @@ const HARNESS_ALL = [
   /^Makefile$/,
   /^frontend\/playwright\.router\.config\.ts$/,
   /^frontend\/tests\/router\/lib\//,
-  /^frontend\/tests\/router\/global-setup\.ts$/,
+  /^frontend\/tests\/router\/global-(setup|teardown)\.ts$/,
   /^frontend\/package\.json$/,
   /^frontend\/package-lock\.json$/,
   /^go\.mod$/,
   /^go\.sum$/
 ];
+
+// Данные роутерных тестов: их получают Go-тесты через окружение go-suite.sh (XCP_RT_LINKS,
+// XCP_RT_INPUTS, XCP_RT_CONTRACT), а спеки — через lib/nodes-api.ts. Граф импортов и
+// `go list -deps` этих связей не видят, поэтому правка данных даёт полный выбор (D-25).
+// Новый путь данных для тестов добавлять сюда (см. комментарий в go-suite.sh).
+const TEST_DATA_ALL = [/(^|\/)testdata\//, /^frontend\/src\/lib\/sourcesContract\.json$/];
 
 // Ничего не добавляют (смоук идёт всё равно): документация, CI, хуки, служебное.
 const IGNORED = [
@@ -211,6 +218,12 @@ async function select(changed) {
     }
     if (HARNESS_ALL.some((re) => re.test(file))) {
       escalate(`${file}: обвязка проверки или сборка`);
+      continue;
+    }
+    if (TEST_DATA_ALL.some((re) => re.test(file))) {
+      escalate(
+        `${file}: данные роутерных тестов (Go-тесты получают их через окружение go-suite.sh, спеки — через lib/nodes-api.ts)`
+      );
       continue;
     }
     if (IGNORED.some((re) => re.test(file))) {

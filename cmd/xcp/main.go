@@ -185,6 +185,8 @@ func main() {
 	}
 	// Шаги остановки (отложенные Stop ниже) и срок выхода после сигнала.
 	stops := &shutdownSteps{}
+	// Последним из шагов: дождаться финальных записей, не уложившихся в бюджет.
+	defer stops.drainSaves()
 
 	// System sysctl profile (STAB-06): no-op on non-Entware machines (see
 	// DeploySysctlProfile's "/opt/etc missing" detection), so this is safe
@@ -234,7 +236,8 @@ func main() {
 
 	// Auth endpoints (public)
 	authSvc := srv.GetAuthService()
-	defer stops.run("auth", authSvc.Stop)
+	// Финальная запись сессий — со своим бюджетом (shutdownSteps.save).
+	defer stops.save("auth", authSvc.Stop)
 
 	// SIGHUP триггерит горячую перезагрузку пароля (D-22): xcp --reset-password
 	// (134-10) меняет password_hash в config.json, пока панель уже запущена —
@@ -454,7 +457,8 @@ func main() {
 		xSvc.SetKernelStartedHook(trafficQuotaSvc.NotifyKernelStarted)
 	}
 	api.SetTrafficQuotaService(trafficQuotaSvc)
-	defer stops.run("traffic-quota", trafficQuotaSvc.Stop)
+	// Финальная запись счётчиков трафика — со своим бюджетом (shutdownSteps.save).
+	defer stops.save("traffic-quota", trafficQuotaSvc.Stop)
 
 	xrayGRPCSvc := services.NewXrayGRPCService(fmt.Sprintf("127.0.0.1:%d", cfg.XRayAPIPort))
 	// Единый резолвер активного ядра; при конфликте Kernel пуст, и gRPC Xray не опрашивается.

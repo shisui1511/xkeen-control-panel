@@ -175,7 +175,20 @@ func WaitKernelHelper(ctx context.Context) (release func(), ok bool) {
 // lockKernelLifecycleExec берёт замок на вызов команды жизненного цикла XKeen:
 // ждёт конца идущих вспомогательных запусков и не даёт начаться новым, пока
 // команда не вернулась (дальше их держит процесс XKeen в /proc).
-func lockKernelLifecycleExec() (unlock func()) {
+//
+// Под замком команда ждёт и конца предыдущей операции XKeen, отвязавшейся в фон
+// (`xkeen -restart` без терминала возвращается сразу): иначе два init-скрипта
+// поднимают ядра одновременно — переключение на Mihomo во время фонового
+// перезапуска Xray (обновление подписки) оставляло работать оба ядра, и панель
+// упиралась в конфликт ядер. Ожидание — не дольше kernelHelperWait и до отмены ctx.
+func lockKernelLifecycleExec(ctx context.Context) (unlock func()) {
 	kernelExecGate.Lock()
+	deadline := time.Now().Add(kernelHelperWait)
+	for xkeenLifecycleRunning() && ctx.Err() == nil && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+		case <-time.After(kernelHelperPoll):
+		}
+	}
 	return kernelExecGate.Unlock
 }

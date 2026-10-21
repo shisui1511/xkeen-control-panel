@@ -1,7 +1,9 @@
 // e2e-pages: editor
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
+import { withPanel } from './lib/nodes-api';
 
 // Запись в Редакторе настоящей панели и окна, которые появляются только при записи (RT-05):
 // окно подтверждения сохранения (SaveConfirm) и предупреждения Preflight после записи. Проверка
@@ -10,14 +12,17 @@ import { RT, T } from './lib/env';
 //
 // Правка безвредная (D-04): уровень журнала активного ядра. Xray — «loglevel» в файле секции
 // log каталога конфигов, Mihomo — «log-level» в config.yaml. Исходное значение возвращается
-// вторым сохранением тем же путём; при любом исходе прогона снимок стенда (D-19) вернёт файлы.
+// вторым сохранением тем же путём; при падении теста файл возвращает хук afterEach через API
+// (запись и применение к ядру, как делает Редактор). В сессии на стенде снимка нет.
 //
 // Предупреждения Preflight (блок над редактором) приходят не на каждую запись: сервер ищет
 // рискованные правила маршрутизации и DNS. Блок проверяется, когда он открылся, а если нет —
 // тест пишет об этом в вывод (не падение). Для Xray есть безвредная правка, которая его
 // вызывает: файл маршрутизации сервер проверяет на обход частных сетей и порта RDP, поэтому
-// пробельная правка (лишняя пустая строка в конце) даёт предупреждение, если в маршрутизации
-// стенда этого обхода нет. Для Mihomo то же даёт правка config.yaml без секции rules.
+// пробельная правка даёт предупреждение, если в маршрутизации стенда этого обхода нет. Правка —
+// пустая строка сразу после первой строки файла: смысл JSON не меняется, а сверка записи не
+// пустая (текст отличается не только хвостовыми пробелами, которые сверка отбрасывает).
+// Для Mihomo то же даёт правка config.yaml без секции rules.
 
 const THEMES = ['light', 'dark'] as const;
 const VIEWPORT = { width: 390, height: 844 };
@@ -41,6 +46,63 @@ function mutateLogLevel(core: string, orig: string): string {
   const m = re.exec(orig);
   if (m) return orig.replace(re, `log-level: ${m[1] === 'warning' ? 'error' : 'warning'}`);
   return `log-level: warning\n${orig}`;
+}
+
+/** Вставляет пустую строку сразу после первой строки файла (без перевода строки — перед текстом). */
+function insertBlankLine(orig: string): string {
+  const i = orig.indexOf('\n');
+  return i < 0 ? `\n${orig}` : `${orig.slice(0, i)}\n${orig.slice(i)}`;
+}
+
+/** Пути изменённых файлов с исходным текстом: ждут возврата, пока не подтверждён второй записью. */
+const pendingRestore = new Map<string, string>();
+
+/**
+ * Копия ожидающих возврата файлов на диске ПК рядом со storageState (удаляется вместе с ним при
+ * выходе pw-suite.sh). После падения Playwright перезапускает воркер, и карта в новом процессе
+ * пуста: без копии следующий тест принял бы изменённый файл стенда за исходный (IN-02).
+ */
+const RESTORE_FILE = process.env.XCP_PW_STATE ? `${process.env.XCP_PW_STATE}.restore.json` : '';
+
+function persistPending(): void {
+  if (!RESTORE_FILE) return;
+  if (pendingRestore.size === 0) rmSync(RESTORE_FILE, { force: true });
+  else
+    writeFileSync(RESTORE_FILE, JSON.stringify(Object.fromEntries(pendingRestore)), {
+      mode: 0o600
+    });
+}
+
+/** Подтягивает записи, оставшиеся от упавшего воркера; запись текущего процесса главнее. */
+function loadPending(): void {
+  if (!RESTORE_FILE || !existsSync(RESTORE_FILE)) return;
+  const data = JSON.parse(readFileSync(RESTORE_FILE, 'utf8')) as Record<string, string>;
+  for (const [path, text] of Object.entries(data)) {
+    if (!pendingRestore.has(path)) pendingRestore.set(path, text);
+  }
+}
+
+/** Запрос к API панели из страницы с её сессией; тело уходит строкой, как у Редактора. */
+async function rawRequest(
+  page: Page,
+  method: string,
+  path: string,
+  body?: string
+): Promise<{ status: number; text: string }> {
+  return page.evaluate(
+    async ({ method, path, body }) => {
+      const res = await fetch(path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': localStorage.getItem('csrf_token') ?? ''
+        },
+        body
+      });
+      return { status: res.status, text: await res.text() };
+    },
+    { method, path, body }
+  );
 }
 
 interface Box {
@@ -212,6 +274,13 @@ async function writeAndRestore(
   const orig = await readFile(page, path);
   const edited = edit(orig);
   expect(edited).not.toBe(orig);
+  expect(
+    edited.trimEnd(),
+    `${what}: сверка записи была бы пустой (правка отличается только хвостовыми пробелами)`
+  ).not.toBe(orig.trimEnd());
+  // файл ждёт возврата с первой записи; при падении теста его вернёт afterEach
+  pendingRestore.set(path, orig);
+  persistPending();
 
   await openFile(page, name);
   await clearSuccessToasts(page);
@@ -244,14 +313,99 @@ async function writeAndRestore(
   await confirmSave(page, `${what}, возврат`);
   await expect(page.locator('.toast--success').first()).toBeVisible({ timeout: T.action });
   expect((await readFile(page, path)).trimEnd()).toBe(orig.trimEnd());
+  pendingRestore.delete(path);
+  persistPending();
   return preflight;
 }
 
+/**
+ * Возвращает исходный текст каждого изменённого файла через API тем же путём, что у Редактора
+ * (запись и применение к ядру), и убеждается, что ядро работает без конфликта. Записи остаются
+ * в карте и на диске, пока вся уборка не подтверждена. Возвращает описания неудач; в них только
+ * имена файлов и коды HTTP.
+ */
+async function restorePending(page: Page): Promise<string[]> {
+  const failed: string[] = [];
+  for (const [path, orig] of pendingRestore) {
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    const q = encodeURIComponent(path);
+    const save = await rawRequest(page, 'POST', `/api/config/save?path=${q}`, orig);
+    const apply =
+      save.status === 200
+        ? await rawRequest(page, 'POST', `/api/service/control?action=apply&path=${q}`)
+        : { status: 0, text: '' };
+    console.log(`уборка: ${name} возвращён (save http ${save.status}, apply http ${apply.status})`);
+    if (save.status !== 200) failed.push(`${name}: save http ${save.status}`);
+    else if (apply.status !== 200) failed.push(`${name}: apply http ${apply.status}`);
+  }
+  // файл возвращён, но ядро должно работать: упавший тест мог оставить его остановленным
+  const deadline = Date.now() + T.save;
+  let state = 'нет ответа';
+  for (;;) {
+    const st = await page.request.get('/api/service/status');
+    if (st.ok()) {
+      const d = (
+        (await st.json()) as {
+          data?: { running_kernels?: string[]; kernel_conflict?: boolean };
+        }
+      ).data;
+      const kernels = d?.running_kernels ?? [];
+      state = `ядра [${kernels.join(',')}], конфликт ${d?.kernel_conflict === true}`;
+      if (kernels.length === 1 && kernels[0] === RT.core && d?.kernel_conflict !== true) break;
+    } else {
+      state = `статус http ${st.status()}`;
+    }
+    if (Date.now() > deadline) {
+      failed.push(`ядро ${RT.core} не работает после уборки (${state})`);
+      break;
+    }
+    await page.waitForTimeout(3000);
+  }
+  if (failed.length === 0) {
+    pendingRestore.clear();
+    persistPending();
+  }
+  return failed;
+}
+
+/**
+ * Уборка после падения или тайм-аута. Ошибка уборки добавляется к падению теста, не заменяя
+ * его.
+ */
+test.afterEach(async ({ browser }, testInfo) => {
+  if (pendingRestore.size === 0) return;
+  testInfo.setTimeout(testInfo.timeout + 2 * T.save * pendingRestore.size + T.save);
+  const failed = await withPanel(browser, restorePending);
+  if (failed.length > 0) {
+    throw new Error(`уборка: стенд не вернулся в исходное состояние (${failed.join('; ')})`);
+  }
+});
+
+/**
+ * Начало теста: записи упавшего раньше воркера возвращаются до чтения исходного текста, иначе
+ * изменённый файл был бы принят за исходный. Неудача — падение теста: стенд остался грязным.
+ */
+async function recoverLeftovers(browser: Browser): Promise<void> {
+  loadPending();
+  if (pendingRestore.size === 0) return;
+  console.log(`editor-save: от прежнего прогона остался файл (${pendingRestore.size}), возвращаю`);
+  const failed = await withPanel(browser, restorePending);
+  if (failed.length > 0) {
+    throw new Error(
+      `стенд не вернулся в исходное состояние до начала теста (${failed.join('; ')})`
+    );
+  }
+}
+
 for (const theme of THEMES) {
-  test(`editor-save theme:${theme} vp:390 core:${RT.core || 'unknown'}`, async ({ page }) => {
+  test(`editor-save theme:${theme} vp:390 core:${RT.core || 'unknown'}`, async ({
+    page,
+    browser
+  }) => {
     test.setTimeout(300_000 * RT.slow);
     const core = RT.core;
     test.skip(core !== 'xray' && core !== 'mihomo', 'активное ядро стенда не определено');
+    await recoverLeftovers(browser);
 
     const guard = attachConsoleGuard(page);
     await page.setViewportSize(VIEWPORT);
@@ -294,7 +448,7 @@ for (const theme of THEMES) {
           core,
           XRAY_DIR,
           XRAY_ROUTING,
-          (o) => `${o}\n`,
+          insertBlankLine,
           'маршрутизация Xray'
         );
       } else {
