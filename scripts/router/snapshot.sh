@@ -10,7 +10,9 @@
 #               нет снимка незавершённого прогона (выход 7)
 #   snapshot    остановить xcp, снять архив и md5 (до трёх попыток), записать
 #               версии и активное ядро, запустить xcp
-#   restore     вернуть файлы и ядро к снимку со строгой сверкой (выход 4 — не удалось)
+#   restore     вернуть файлы и ядро к снимку со строгой сверкой (выход 4 — не удалось);
+#               если файлы ядра и активное ядро равны снимку, ядро не перезапускается:
+#               возвращаются только файлы панели
 #   verify      сверка с снимком: 0 — равно, 1 — расхождение
 #   cleanup     убрать снимок (после успешной сверки)
 #   status      версии, активное ядро, процессы, есть ли снимок
@@ -128,6 +130,70 @@ split_diff() {
     else
       printf '%s\t%s\n' "$kind" "$path" >>"$WORK/diff.nonvol"
     fi
+  done
+}
+
+# Файлы панели: восстановление возвращает их без перезапуска ядра
+is_panel_path() {
+  case "$1" in
+    /opt/etc/xcp/* | /opt/sbin/xcp | /opt/etc/init.d/S99xcp | /opt/var/spool/cron/crontabs/*) return 0 ;;
+  esac
+  return 1
+}
+
+# Изменчивые файлы работы ядра: меняются при его старте и кэшировании, на сверку не влияют.
+# Конфиги ядра (04_outbounds.zz_xcp_*, *.sub_*.tail.json) сюда НЕ входят: их расхождение
+# требует перезапуска ядра.
+is_core_runtime() {
+  case "$1" in
+    /opt/etc/xkeen/.last_policy_mark | /opt/etc/xkeen/ipset/* | /opt/etc/mihomo/cache.db) return 0 ;;
+    /opt/etc/xray/*.dat | /opt/etc/xray/*.mmdb | /opt/etc/xray/*.metadb) return 0 ;;
+    /opt/etc/mihomo/*.dat | /opt/etc/mihomo/*.mmdb | /opt/etc/mihomo/*.metadb) return 0 ;;
+    /opt/etc/ndm/netfilter.d/proxy.sh | /opt/etc/ndm/netfilter.d/proxy.sh.tmp.*) return 0 ;;
+  esac
+  return 1
+}
+
+# класс пути в PCLASS: panel, core-runtime или core (всё остальное в SNAP_PATHS)
+classify_path() {
+  if is_panel_path "$1"; then
+    PCLASS=panel
+  elif is_core_runtime "$1"; then
+    PCLASS=core-runtime
+  else
+    PCLASS=core
+  fi
+}
+
+# разбор строк «вид <TAB> путь» из файла $1 по классам: $WORK/diff.panel, diff.corert, diff.core
+split_classes() {
+  : >"$WORK/diff.panel"
+  : >"$WORK/diff.corert"
+  : >"$WORK/diff.core"
+  while IFS="$TAB" read -r kind path; do
+    [ -n "$path" ] || continue
+    classify_path "$path"
+    case "$PCLASS" in
+      panel) f=diff.panel ;;
+      core-runtime) f=diff.corert ;;
+      *) f=diff.core ;;
+    esac
+    printf '%s\t%s\n' "$kind" "$path" >>"$WORK/$f"
+  done <"$1"
+}
+
+# Каталоги, расходящиеся со снимком: лишние ($WORK/dirs.extra) и пропавшие ($WORK/dirs.missing).
+# CDIRS — сколько из них вне панели (такие требуют пути с перезапуском ядра).
+core_dirs_diff() {
+  list_dirs | grep -vxFf "$BASE/dirs.txt" >"$WORK/dirs.extra"
+  while IFS= read -r d; do
+    [ -d "$d" ] || printf '%s\n' "$d"
+  done <"$BASE/dirs.txt" >"$WORK/dirs.missing"
+  CDIRS=0
+  for f in dirs.extra dirs.missing; do
+    while IFS= read -r d; do
+      is_panel_path "$d" || CDIRS=$((CDIRS + 1))
+    done <"$WORK/$f"
   done
 }
 
@@ -411,11 +477,84 @@ cmd_restore() {
   stop_xcp || return 4
 
   make_md5 >"$WORK/md5.now"
-  diffs=$(diff_state "$WORK/md5.now" | wc -l)
-  if [ "$diffs" = 0 ] && [ "$(active_core)" = "$want_core" ]; then
+  diff_state "$WORK/md5.now" >"$WORK/diff.all"
+  diffs=$(wc -l <"$WORK/diff.all")
+  split_classes "$WORK/diff.all"
+  cnt_panel=$(wc -l <"$WORK/diff.panel")
+  cnt_core=$(wc -l <"$WORK/diff.core")
+  cnt_rt=$(wc -l <"$WORK/diff.corert")
+  cur_core=$(active_core)
+  breakdown="restore: расхождений $diffs (панель $cnt_panel, ядро $cnt_core, изменчивые ядра $cnt_rt), ядро сейчас $cur_core, нужно $want_core"
+
+  # быстрый путь: файлы ядра и активное ядро равны снимку — расходятся только файлы панели
+  # и изменчивые файлы работы ядра (D-15)
+  fast=no
+  if [ "$diffs" != 0 ] && [ "$cnt_core" = 0 ] && [ "$cur_core" = "$want_core" ]; then
+    core_dirs_diff
+    if [ "$CDIRS" = 0 ]; then
+      fast=yes
+    else
+      say "restore: каталогов вне панели расходится со снимком: $CDIRS"
+    fi
+  fi
+
+  if [ "$diffs" = 0 ] && [ "$cur_core" = "$want_core" ]; then
+    say "$breakdown"
     say "restore: изменений нет, ядро $want_core — ядро не трогаю"
+  elif [ "$fast" = yes ]; then
+    say "$breakdown"
+    say "restore: файлы ядра и ядро равны снимку — ядро не перезапускаю"
+
+    # лишние файлы панели — только под /opt (EXTRA уже отобраны по SNAP_PATHS)
+    while IFS="$TAB" read -r kind path; do
+      [ "$kind" = EXTRA ] || continue
+      case "$path" in /opt/*) rm -f "$path" ;; esac
+    done <"$WORK/diff.panel"
+    LC_ALL=C sort -r "$WORK/dirs.extra" | while IFS= read -r d; do
+      case "$d" in /opt/*) rmdir "$d" 2>/dev/null ;; esac
+    done
+
+    # изменённые и пропавшие файлы панели: бинарник — из жёсткой ссылки снимка, остальное из архива
+    : >"$WORK/restore.list"
+    while IFS="$TAB" read -r kind path; do
+      case "$kind" in
+        CHANGED | MISSING)
+          if grep -qxF "$path" "$BASE/bin.list" 2>/dev/null; then
+            restore_bin "$path" || say "ОШИБКА: бинарник $path не восстановлен"
+          else
+            printf '%s\n' "${path#/}" >>"$WORK/restore.list"
+          fi
+          ;;
+      esac
+    done <"$WORK/diff.panel"
+    while IFS= read -r d; do
+      printf '%s\n' "${d#/}"
+    done <"$WORK/dirs.missing" >>"$WORK/restore.list"
+    if [ -s "$WORK/restore.list" ]; then
+      say "restore: из архива извлекаю $(wc -l <"$WORK/restore.list") путей"
+      "$TAR" -C / --no-recursion -xpzf "$BASE/baseline.tar.gz" -T "$WORK/restore.list" 2>"$WORK/untar.err" || {
+        say "ОШИБКА: распаковка tar не удалась"
+        head -5 "$WORK/untar.err"
+        return 4
+      }
+    fi
+
+    # строгая сверка: вне изменчивых файлов ядра расхождений быть не должно
+    make_md5 >"$WORK/md5.now"
+    diff_state "$WORK/md5.now" >"$WORK/diff.all"
+    split_classes "$WORK/diff.all"
+    left_panel=$(wc -l <"$WORK/diff.panel")
+    left_core=$(wc -l <"$WORK/diff.core")
+    if [ "$left_panel" != 0 ] || [ "$left_core" != 0 ]; then
+      say "ОШИБКА: после восстановления расхождений вне изменчивых файлов ядра: панель $left_panel, ядро $left_core"
+      cat "$WORK/diff.panel" "$WORK/diff.core" | head -20
+      return 4
+    fi
+    left_dirs=$(list_dirs | grep -cvxFf "$BASE/dirs.txt")
+    [ "$left_dirs" = 0 ] || { say "ОШИБКА: остались лишние каталоги: $left_dirs"; return 4; }
+    say "restore: файлы совпадают со снимком (изменчивые ядра не в счёт), ядро не перезапускалось"
   else
-    say "restore: расхождений файлов $diffs, ядро сейчас $(active_core), нужно $want_core"
+    say "$breakdown"
     "$XKEEN" -stop >/dev/null 2>&1
     if ! wait_core_gone; then
       say "ОШИБКА: ядро не остановилось после xkeen -stop (kill по pidof не применяю)"
@@ -487,6 +626,7 @@ cmd_restore() {
     esac
   fi
 
+  rm -f "$WORK/diff.all" "$WORK/diff.panel" "$WORK/diff.corert" "$WORK/diff.core" "$WORK/dirs.extra" "$WORK/dirs.missing"
   if [ "$want_xcp" = yes ]; then
     start_xcp || return 4
   fi
