@@ -715,7 +715,7 @@ class Session {
         );
       }
     }
-    return rc === 3 ? 3 : 0;
+    return 0;
   }
 
   // Сверка results.tsv этапа с ожиданиями прохода.
