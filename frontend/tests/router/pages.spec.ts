@@ -178,8 +178,8 @@ function markKnown(route: string, theme: string, width: number): void {
   if (light && route === 'logs') knownFailure('*', 'light-tinted-badge-text-contrast');
   if (light && route === 'proxies') knownFailure('*', 'light-tinted-badge-text-contrast');
   if (light && route === 'traffic') knownFailure('*', 'light-tinted-badge-text-contrast');
-  // Бейдж вида выпуска в баннере обновления: есть, пока доступен более новый не-stable выпуск
-  if (light && wide && route === 'dashboard') knownFailure('*', 'light-tinted-badge-text-contrast');
+  // Бейдж вида выпуска в баннере обновления (dashboard, светлая тема, 1440 px) есть, пока
+  // доступен более новый не-stable выпуск: метка ставится в самом тесте, когда бейдж на странице
 
   // Приглушённый текст мелких меток, счётчиков и подписей
   if (dark && route === 'dat') knownFailure('*', 'muted-small-label-text-contrast');
@@ -235,6 +235,17 @@ for (const route of routes()) {
           // переход между вкладками идёт с затуханием: axe не должен видеть полупрозрачный кадр
           await page.waitForTimeout(500);
           await READY[route]?.(page);
+
+          // Состояние списка выпусков внешнее: без бейджа в баннере нарушения нет, и метка
+          // дала бы XPASS. Решение принимается по странице перед проверкой доступности.
+          if (
+            route === 'dashboard' &&
+            theme === 'light' &&
+            vp.width === 1440 &&
+            (await page.locator('.update-banner .badge-primary').count()) > 0
+          ) {
+            knownFailure('*', 'light-tinted-badge-text-contrast');
+          }
 
           const hash = await page.evaluate(() => window.location.hash);
           // Маршрут #/config панель открывает только при включённом флаге config_layer, иначе
