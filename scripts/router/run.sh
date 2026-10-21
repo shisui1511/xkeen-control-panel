@@ -82,7 +82,9 @@ case "$SUITE" in
 esac
 SUITE_NAME=${SUITE:-full}
 
-# Ветви матрицы ядер: только xray и mihomo, без повторов.
+# Ветви матрицы ядер: только xray и mihomo, без повторов. Явно заданный RT_CORES (даже
+# равный умолчанию) — ручная отладка: гибрид набора changed выключается.
+RT_CORES_SET=${RT_CORES+1}
 RT_CORES=${RT_CORES:-xray mihomo}
 _seen=""
 for _c in $RT_CORES; do
@@ -101,6 +103,18 @@ for _c in $RT_CORES; do
   esac
   _seen="$_seen $_c"
 done
+
+# Ядро первой ветви набора changed (D-02): чётная контрольная сумма cksum строки SHA HEAD
+# (без перевода строки) — xray, нечётная — mihomo. Зависит только от SHA: повтор на том же
+# HEAD идёт под тем же ядром, а на разных коммитах ядра чередуются.
+rt_sha_core() {
+  _shc=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+  if [ $((_shc % 2)) = 0 ]; then
+    echo xray
+  else
+    echo mihomo
+  fi
+}
 
 cd "$(rt_repo_root)"
 
@@ -168,9 +182,15 @@ if [ "$SUITE" = session ]; then
 fi
 
 # --- выбор проверок набора changed (D-25) ------------------------------------------
-# select-changed.mjs печатает четыре строки для eval; перед eval вывод проверяется по
-# строгому шаблону (T-144.1-23), при любом сомнении выбирается всё.
+# select-changed.mjs печатает восемь строк для eval; перед eval вывод проверяется по
+# строгому шаблону на каждую строку и по их числу (T-144.1-23, T-145.1-18), при любом
+# сомнении выбирается всё, а вторая ветвь идёт со всеми тестами (RT_SEL_BAD=1).
 SEL_ANY=1
+RT_SEL_BAD=0
+RT_KERNEL_TOUCHED=0
+RT_GO_CORE_PKGS=""
+RT_GO_CORE_RUN=""
+RT_SPECS_CORE=""
 if [ "$SUITE" = changed ]; then
   _sel_args=""
   [ -z "${RT_BASE:-}" ] || _sel_args="--base $RT_BASE"
@@ -180,15 +200,18 @@ if [ "$SUITE" = changed ]; then
   _sel=$(node "$SCRIPT_DIR/select-changed.mjs" --explain $_sel_args 2>"$RT_REPORT/select.txt") || _sel_rc=$?
   _q="'"
   if [ "$_sel_rc" != 0 ] ||
-    [ "$(printf '%s\n' "$_sel" | wc -l)" != 4 ] ||
-    printf '%s\n' "$_sel" | grep -qvE "^(RT_SELECT_ALL=[01]|RT_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_PW_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q})\$"; then
+    [ "$(printf '%s\n' "$_sel" | wc -l)" != 8 ] ||
+    printf '%s\n' "$_sel" | grep -qvE "^(RT_SELECT_ALL=[01]|RT_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_PW_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_GO_CORE_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_GO_CORE_RUN=${_q}[A-Za-z0-9_|^\$()]*${_q}|RT_SPECS_CORE=${_q}[A-Za-z0-9_./ -]*${_q}|RT_KERNEL_TOUCHED=[01])\$"; then
     echo "всё: выбор не удался или его вывод не прошёл проверку (код $_sel_rc)" >>"$RT_REPORT/select.txt"
     RT_SELECT_ALL=1
+    RT_SEL_BAD=1
+    RT_KERNEL_TOUCHED=1
   else
     eval "$_sel"
   fi
   if [ "$RT_SELECT_ALL" = 1 ]; then
-    # полный набор: списки не нужны, этапы go и pw берут значения по умолчанию
+    # полный набор: списки не нужны, этапы go и pw берут значения по умолчанию; списки тестов
+    # с меткой ядра и RT_KERNEL_TOUCHED остаются: по ним строится вторая ветвь
     unset RT_GO_PKGS RT_SPECS RT_PW_GREP
     echo "итог: полный набор" >>"$RT_REPORT/select.txt"
   elif [ -z "$RT_GO_PKGS" ] && [ -z "$RT_SPECS" ]; then
@@ -199,6 +222,69 @@ if [ "$SUITE" = changed ]; then
     export RT_GO_PKGS RT_SPECS RT_PW_GREP
   fi
   echo "router-test: выбор — $(tail -n 1 "$RT_REPORT/select.txt")"
+fi
+
+# --- план ветвей и окно смоука (D-01…D-03, D-07) -----------------------------------------
+# changed без явного RT_CORES — гибрид: первая ветвь идёт под ядром из SHA HEAD со всем
+# выбором, вторая (другое ядро) — только с тестами, размеченными как зависящие от ядра, и не
+# запускается вовсе, если таких в выборе нет (ни sync, ни переключения, ни смоука, ни окна).
+# Полный прогон — полная матрица (оба ядра, все тесты); явный RT_CORES — прежняя семантика
+# для ручной отладки. Строки плана — в <отчёт>/plan.txt: раздел «Выбор» report.md и начало
+# раздела цели в summary.md.
+RT_HYBRID=0
+RT_B1=""
+RT_B2=""
+RT_B2_RUN=0
+if [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
+  : >"$RT_REPORT/plan.txt"
+  if [ -n "$RT_CORES_SET" ]; then
+    echo "- Ветви: $RT_CORES (отладка RT_CORES: все выбранные тесты в каждой ветви, гибрид выключен)" >>"$RT_REPORT/plan.txt"
+  elif [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ] && [ "$RT_SEL_BAD" = 0 ]; then
+    RT_B1=$(rt_sha_core "$(git rev-parse HEAD)")
+    case "$RT_B1" in xray) RT_B2=mihomo ;; *) RT_B2=xray ;; esac
+    if [ -n "$RT_GO_CORE_PKGS" ] || [ -n "$RT_SPECS_CORE" ]; then
+      RT_B2_RUN=1
+      RT_CORES="$RT_B1 $RT_B2"
+    else
+      RT_CORES="$RT_B1"
+    fi
+    RT_HYBRID=1
+    echo "- Ядро ветви: $RT_B1 (правило: cksum SHA HEAD чётный — xray, нечётный — mihomo)" >>"$RT_REPORT/plan.txt"
+    if [ "$RT_B2_RUN" = 1 ]; then
+      _n_go=0
+      if [ -n "$RT_GO_CORE_RUN" ]; then
+        _n_go=$(($(printf '%s' "$RT_GO_CORE_RUN" | tr -cd '|' | wc -c) + 1))
+      fi
+      # shellcheck disable=SC2086
+      _n_pw=$(printf '%s\n' $RT_SPECS_CORE | grep -c . || true)
+      echo "- Вторая ветвь ($RT_B2): только тесты с меткой ядра (Go: $_n_go, Playwright: $_n_pw спеков)" >>"$RT_REPORT/plan.txt"
+    else
+      echo "- Вторая ветвь ($RT_B2): не запускалась — в выборе нет тестов с меткой ядра" >>"$RT_REPORT/plan.txt"
+    fi
+  elif [ "$SUITE" = changed ] && [ "$RT_SEL_BAD" = 1 ]; then
+    echo "- Ветви: $RT_CORES (выбор не прошёл проверку: вторая ветвь со всеми тестами)" >>"$RT_REPORT/plan.txt"
+  elif [ "$SUITE" = changed ]; then
+    echo "- Ветви: нет (затронутого нет — деплой и смоук)" >>"$RT_REPORT/plan.txt"
+  else
+    echo "- Ветви: $RT_CORES (полная матрица: все тесты под каждым ядром)" >>"$RT_REPORT/plan.txt"
+  fi
+  # окно смоука: в changed 120 с при затронутом коде запуска ядра, иначе 30 с; заданный в
+  # окружении RT_SMOKE_WINDOW приоритетнее; в полном прогоне — RT_SMOKE_WINDOW или 120 с (D-07)
+  if [ "$SUITE" = changed ]; then
+    if [ -n "${RT_SMOKE_WINDOW:-}" ]; then
+      echo "- Окно смоука: $RT_SMOKE_WINDOW с (RT_SMOKE_WINDOW задан явно)" >>"$RT_REPORT/plan.txt"
+    elif [ "$RT_KERNEL_TOUCHED" = 1 ]; then
+      RT_SMOKE_WINDOW=120
+      echo "- Окно смоука: 120 с (затронут код запуска ядра или выбор полный)" >>"$RT_REPORT/plan.txt"
+    else
+      RT_SMOKE_WINDOW=30
+      echo "- Окно смоука: 30 с (код запуска ядра и watchdog не затронуты)" >>"$RT_REPORT/plan.txt"
+    fi
+  else
+    echo "- Окно смоука: ${RT_SMOKE_WINDOW:-120} с (полный прогон)" >>"$RT_REPORT/plan.txt"
+  fi
+  [ -z "${RT_SMOKE_WINDOW:-}" ] || export RT_SMOKE_WINDOW
+  echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
 fi
 
 # Проверки смоука, которые пропускаются, если цель недоступна или деплой не удался.
@@ -367,6 +453,31 @@ full_target() {
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
     mkdir -p "$RT_REPORT/$_t/$_c"
 
+    # Тесты ветви. Гибрид (changed): в ветви второго ядра идут только тесты с меткой ядра
+    # (Go — RT_GO_CORE_PKGS по RT_GO_CORE_RUN, Playwright — RT_SPECS_CORE с отбором @core);
+    # пустой список — этап пропускается. Значения этапам передаёт env: _bg запускает этап в
+    # фоне отдельной группой процессов. Пустые значения этапы читают как «по умолчанию».
+    _b_go=$_do_go
+    _b_pw=$_do_pw
+    _b_skip="роутерные Go-пакеты набора changed не затронуты"
+    _b_skip_pw="роутерные спеки набора changed не затронуты"
+    _g_pkgs=${RT_GO_PKGS:-}
+    _g_run=${RT_GO_RUN:-}
+    _p_specs=${RT_SPECS:-}
+    _p_core=""
+    if [ "${RT_HYBRID:-0}" = 1 ] && [ "$_c" = "$RT_B2" ]; then
+      _g_pkgs=$RT_GO_CORE_PKGS
+      _g_run=$RT_GO_CORE_RUN
+      _p_specs=$RT_SPECS_CORE
+      _p_core=1
+      _b_go=1
+      _b_pw=1
+      [ -n "$RT_GO_CORE_PKGS" ] || _b_go=0
+      [ -n "$RT_SPECS_CORE" ] || _b_pw=0
+      _b_skip="во второй ветви нет тестов с меткой ядра"
+      _b_skip_pw="во второй ветви нет тестов с меткой ядра"
+    fi
+
     # Номер последней строки xcp.log до начала ветви: смоук смотрит только строки после неё,
     # поэтому ошибки, вызванные разрушающими тестами предыдущей ветви (D-04), не
     # засчитываются этой ветви. В первой ветви смоук смотрит от баннера запуска.
@@ -437,35 +548,35 @@ full_target() {
       fi
       _osp=$!
       _sps="$_sps $_osp"
-      if [ "$_do_pw" = 1 ]; then
-        rt_stage "$_t" "pw-read-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+      if [ "$_b_pw" = 1 ]; then
+        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
       fi
       _orc=0
       wait "$_osp" || _orc=$?
       _sps=""
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$(($(date +%s) - _ot0))" "$_orc" "$_ot0" "$_c" >>"$RT_REPORT/timings.tsv"
-    elif [ "$_do_pw" = 1 ]; then
-      rt_stage "$_t" "pw-read-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+    elif [ "$_b_pw" = 1 ]; then
+      rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
     fi
     # хвост xcp.log пишет наблюдатель (без него — смоук без окна не пишет)
     [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$RT_REPORT/$_t/$_c/xcp-log-tail.txt"
 
     # 3. Go-тесты на устройстве с этим ядром
-    if [ "$_do_go" = 1 ]; then
-      rt_stage "$_t" "go-$_c" _bg sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
+    if [ "$_b_go" = 1 ]; then
+      rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
 
       # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
       rt_stage "$_t" "settle-$_c" _settle "$_t"
     else
-      rt_result "$_t" SKIP go "роутерные Go-пакеты набора changed не затронуты"
+      rt_result "$_t" SKIP go "$_b_skip"
     fi
 
     # 4. Playwright, часть state: спеки, меняющие состояние стенда, один воркер. Часть только
     # чтения прошла в шаге 2а
-    if [ "$_do_pw" = 1 ]; then
-      rt_stage "$_t" "pw-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
+    if [ "$_b_pw" = 1 ]; then
+      rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
     else
-      rt_result "$_t" SKIP pw "роутерные спеки набора changed не затронуты"
+      rt_result "$_t" SKIP pw "$_b_skip_pw"
     fi
   done
   RT_CORE=""
