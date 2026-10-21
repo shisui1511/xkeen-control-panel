@@ -4,10 +4,11 @@
 # Части (D-07): смоук делится на проверки без окна и наблюдение окна, чтобы окно шло фоном
 # параллельно обходу страниц (только чтение), а не простоем.
 #   --no-observe    проверки без окна: kernel-running, iptables-rules, version, xcp-pid,
-#                   api-version, api-me, api-service-status; ядро записывается в
-#                   <отчёт>/<id>/core. Проверок kernel-restart и log-* в этой части нет.
-#   --observe-only  только наблюдение: ядро берётся из <отчёт>/<id>/core (нет файла или «-» —
-#                   SKIP kernel-restart), smoke-settle (один PID 30 с, не дольше 120 с),
+#                   api-version, api-me, api-service-status; обнаруженное ядро записывается
+#                   в <отчёт>/<id>/core и <отчёт>/<id>/core.detected (ядро не найдено — файла
+#                   нет). Проверок kernel-restart и log-* в этой части нет.
+#   --observe-only  только наблюдение: ядро берётся из <отчёт>/<id>/core.detected (нет файла —
+#                   SKIP kernel-restart; файл core оркестратор подменяет ядром ветви), smoke-settle (один PID 30 с, не дольше 120 с),
 #                   окно RT_SMOKE_WINDOW, вердикт kernel-restart по PID начала и конца окна и
 #                   правила логов по строкам от начала ветви до конца окна. Буфер — отдельный
 #                   smoke-observe.buf; рабочий каталог устройства и файл core не трогаются.
@@ -148,7 +149,7 @@ SUF=""
 [ "$OBSERVE_ONLY" != 1 ] || SUF="-observe"
 BUF="$RT_REPORT/$ID/smoke${SUF}.buf"
 : >"$BUF"
-[ "$OBSERVE_ONLY" = 1 ] || rm -f "$RT_REPORT/$ID/core"
+[ "$OBSERVE_ONLY" = 1 ] || rm -f "$RT_REPORT/$ID/core" "$RT_REPORT/$ID/core.detected"
 UNREACH=0
 # Проверки, которые выносит эта часть: метки известных падений других частей не оцениваются
 # (иначе метка проверки окна дала бы XPASS в части без окна). Пусто — все проверки.
@@ -271,7 +272,7 @@ if [ "$OBSERVE_ONLY" != 1 ]; then
       core=mihomo
     fi
   fi
-  [ -z "$core" ] || printf '%s\n' "$core" >"$RT_REPORT/$ID/core"
+  [ -z "$core" ] || printf '%s\n' "$core" | tee "$RT_REPORT/$ID/core.detected" >"$RT_REPORT/$ID/core"
   core_pid=""
   case "$core" in
     xray) core_pid=$xpid ;;
@@ -434,10 +435,11 @@ fi
 # Часть без окна на этом заканчивается: kernel-restart и правила логов выносит --observe-only.
 [ "$NO_OBSERVE" != 1 ] || exit 0
 
-# Часть наблюдения берёт ядро, определённое частью проверок (<отчёт>/<id>/core).
+# Часть наблюдения берёт ядро, обнаруженное частью проверок (<отчёт>/<id>/core.detected): файл
+# core после неё подменён ядром ветви и не говорит, запущено ли оно на самом деле.
 if [ "$OBSERVE_ONLY" = 1 ]; then
   core=""
-  [ ! -f "$RT_REPORT/$ID/core" ] || core=$(cat "$RT_REPORT/$ID/core")
+  [ ! -f "$RT_REPORT/$ID/core.detected" ] || core=$(cat "$RT_REPORT/$ID/core.detected")
   [ "$core" != "-" ] || core=""
 fi
 
