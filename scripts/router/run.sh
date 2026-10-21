@@ -249,7 +249,9 @@ RT_B2=""
 RT_B2_RUN=0
 if [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
   : >"$RT_REPORT/plan.txt"
-  if [ -n "$RT_CORES_SET" ]; then
+  if [ -n "$RT_CORES_SET" ] && [ "$SUITE" = changed ] && [ "$SEL_ANY" = 0 ]; then
+    echo "- Ветви: нет (затронутого нет — деплой и смоук; RT_CORES=$RT_CORES не применяется)" >>"$RT_REPORT/plan.txt"
+  elif [ -n "$RT_CORES_SET" ]; then
     echo "- Ветви: $RT_CORES (отладка RT_CORES: все выбранные тесты в каждой ветви, гибрид выключен)" >>"$RT_REPORT/plan.txt"
   elif [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ] && [ "$RT_SEL_BAD" = 0 ]; then
     RT_B1=$(rt_sha_core "$(git rev-parse HEAD)")
@@ -266,6 +268,10 @@ if [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
       _n_go=0
       if [ -n "$RT_GO_CORE_RUN" ]; then
         _n_go=$(($(printf '%s' "$RT_GO_CORE_RUN" | tr -cd '|' | wc -c) + 1))
+      elif [ -n "$RT_GO_CORE_PKGS" ]; then
+        # откат на «все роутерные тесты пакетов»: список тестов пуст, пакеты идут целиком
+        # shellcheck disable=SC2086
+        _n_go="все тесты пакетов ($(printf '%s\n' $RT_GO_CORE_PKGS | grep -c . || true))"
       fi
       # shellcheck disable=SC2086
       _n_pw=$(printf '%s\n' $RT_SPECS_CORE | grep -c . || true)
