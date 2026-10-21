@@ -34,6 +34,25 @@
 //       }
 //     ]
 //   }
+// Проход-прогон набора (вместо go/specs): прогон набора router-test целиком как этап сессии.
+//   {
+//     "name": "narrow-go",                  [a-z0-9-]
+//     "suite": "changed",                   full или changed
+//     "files": ["internal/nodes/router_nodes_test.go"],    только у changed: выбор по списку
+//                                           файлов (RT_FILES) вместо git; пути без «..»
+//     "expect": {
+//       "exit": 0,                          код выхода run.sh, по умолчанию 0
+//       "summary": ["- Окно смоука: 30 с"], подстроки summary.md вложенного отчёта
+//       "same_failures_as": "full-1"        множество строк FAIL, KNOWN и XPASS (статус, ядро,
+//     }                                     проверка) совпадает с более ранним проходом-прогоном
+//   }
+// С go, specs, grep и product проход-прогон не сочетается. Вложенный `sh run.sh [changed]`
+// идёт под блокировкой сессии (RT_LOCK_HELD=1) без RT_HOLD_MINUTES, RT_CORES, RT_BASE и
+// SPEC, сам ставит сборку HEAD, снимает снимок и восстанавливает стенд. Его отчёт — в
+// build/router/<каталог сессии>-<NN>-<проход> (RT_REPORT_DIR; ссылка last остаётся на
+// сессии). В summary.md сессии — раздел «Прогоны наборов»: проход, набор, код, итог,
+// оболочка, путь отчёта; те же данные — в session.json (suites).
+//
 // Статус ожидания — PASS, FAIL, KNOWN, XPASS или SKIP; несколько — через «|» (PASS|KNOWN).
 // detail — подстрока детали в results.tsv. Без default тест вне tests справочный, но FAIL
 // и XPASS у него — расхождение: неожиданное падение не теряется.
@@ -52,8 +71,10 @@
 //
 // Код выхода сессии: 0 — все ожидания совпали и стенд вернулся в исходное состояние;
 // 1 — расхождение, или этап сломался, или стенд не вернулся; 2 — неверная спека или запуск
-// не через run.sh; 3 — сбой связи ПК↔стенд (не красный прогон, разбор по AGENTS.md);
-// 130 — прерывание.
+// не через run.sh; 3 — сбой связи ПК↔стенд (не красный прогон, разбор по AGENTS.md; в том
+// числе код 3 или строка «нет связи» во вложенном прогоне набора); 130 — прерывание.
+// Прерывание во время вложенного прогона: сигнал уходит вложенному run.sh, сессия ждёт его
+// выхода (стенд по снимку он восстанавливает сам); повторный сигнал — выход без возврата.
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
@@ -117,6 +138,55 @@ function parseStatus(s, where) {
   return parts;
 }
 
+// Проход-прогон набора: разбор и проверка полей. earlier — имена прогонов набора выше по спеке.
+function loadSuitePass(p, where, earlier) {
+  if (p.suite !== 'full' && p.suite !== 'changed') die(`${where}.suite: full или changed`);
+  if (p.go || p.specs !== undefined || p.grep !== undefined || p.product) {
+    die(`${where}: проход-прогон не сочетается с go/specs/product`);
+  }
+  let files = [];
+  if (p.files !== undefined) {
+    if (p.suite !== 'changed') die(`${where}.files: только у changed`);
+    if (!Array.isArray(p.files) || !p.files.length) die(`${where}.files: непустой список путей`);
+    for (const f of p.files) {
+      if (typeof f !== 'string' || !SAFE_PATH.test(f) || f.includes('..')) {
+        die(`${where}.files: недопустимый путь ${f}`);
+      }
+    }
+    files = [...new Set(p.files)];
+  }
+  const e = p.expect ?? {};
+  for (const k of Object.keys(e)) {
+    if (!['exit', 'summary', 'same_failures_as'].includes(k)) {
+      die(`${where}.expect.${k}: у прохода-прогона только exit, summary, same_failures_as`);
+    }
+  }
+  if (e.exit !== undefined && (!Number.isInteger(e.exit) || e.exit < 0)) {
+    die(`${where}.expect.exit: целое от 0`);
+  }
+  const summary = e.summary ?? [];
+  if (!Array.isArray(summary) || summary.some((x) => typeof x !== 'string' || !x)) {
+    die(`${where}.expect.summary: список непустых строк`);
+  }
+  let same = null;
+  if (e.same_failures_as !== undefined) {
+    if (typeof e.same_failures_as !== 'string' || !earlier.includes(e.same_failures_as)) {
+      die(`${where}.expect.same_failures_as: нужно имя более раннего прохода-прогона`);
+    }
+    same = e.same_failures_as;
+  }
+  return {
+    name: p.name,
+    suite: p.suite,
+    files,
+    product: null,
+    go: null,
+    specs: [],
+    grep: '',
+    expect: { exit: e.exit ?? 0, summary, same }
+  };
+}
+
 function loadSpec(file, root) {
   let spec;
   try {
@@ -134,11 +204,17 @@ function loadSpec(file, root) {
   if (new Set(cores).size !== cores.length) die('cores: ядро указано дважды');
   if (!Array.isArray(spec.passes) || !spec.passes.length) die('passes: непустой список');
   const names = new Set();
+  const suites = [];
   const passes = spec.passes.map((p, i) => {
     const where = `passes[${i}]`;
     if (typeof p.name !== 'string' || !SAFE_NAME.test(p.name)) die(`${where}.name: [a-z0-9-]`);
     if (names.has(p.name)) die(`${where}.name: «${p.name}» повторяется`);
     names.add(p.name);
+    if (p.suite !== undefined) {
+      const sp = loadSuitePass(p, where, suites);
+      suites.push(sp.name);
+      return sp;
+    }
     let product = null;
     if (p.product) {
       const { ref, files } = p.product;
@@ -229,6 +305,14 @@ function dryRun(spec, specFile) {
   let deployed = null;
   let cur = c0;
   for (const p of spec.passes) {
+    if (p.suite) {
+      // вложенный прогон ставит сборку HEAD сам и оставляет активным ядро, найденное в начале
+      step(
+        `прогон набора ${p.suite}${p.files.length ? ` по файлам ${p.files.join(' ')}` : ''}: вложенный run.sh, отчёт build/router/<сессия>-NN-${p.name}`
+      );
+      deployed = 'HEAD';
+      continue;
+    }
     const key = productKey(p);
     if (key !== deployed) {
       step(
@@ -268,6 +352,8 @@ class Session {
     this.log = path.join(this.dir, 'session.log');
     this.steps = [];
     this.verdicts = [];
+    this.suites = [];
+    this.suiteFails = new Map();
     this.notes = [];
     this.n = 0;
     this.c0 = null;
@@ -310,12 +396,15 @@ class Session {
       'RT_GO_PKGS',
       'RT_GO_RUN',
       'RT_REPORT',
+      'RT_REPORT_DIR',
       'RT_CORE',
       'XCP_WANT_CORE'
     ]) {
       delete base[k];
     }
     const full = { ...base, RT_LOCK_HELD: '1', ROUTERS: this.t, ...env };
+    // undefined в env — снять переменную (вложенный прогон набора не наследует настройки сессии)
+    for (const k of Object.keys(full)) if (full[k] === undefined) delete full[k];
     appendFileSync(this.log, `\n$ ${[cmd, ...args].join(' ')}\n`);
     return new Promise((resolve) => {
       const child = spawn(cmd, args, {
@@ -483,6 +572,139 @@ class Session {
     return 0;
   }
 
+  // Проход-прогон набора: вложенный run.sh под блокировкой сессии, отчёт в build/router.
+  // Вложенный прогон сам ставит сборку HEAD, снимает снимок и восстанавливает стенд.
+  async runSuite(p) {
+    const base = `${path.basename(this.dir)}-${String(++this.n).padStart(2, '0')}-${p.name}`;
+    const dir = path.join(this.root, 'build', 'router', base);
+    const rel = path.relative(this.root, dir);
+    this.say(
+      `прогон набора ${p.suite}${p.files.length ? ` по файлам ${p.files.join(' ')}` : ''} → ${rel}`
+    );
+    const env = {
+      RT_REPORT_DIR: dir,
+      RT_HOLD_MINUTES: undefined,
+      RT_CORES: undefined,
+      RT_BASE: undefined,
+      RT_FILES: p.files.length ? p.files.join(',') : undefined,
+      SPEC: undefined,
+      SUITE: undefined,
+      RELEASE: undefined
+    };
+    const args = [path.join(SCRIPT_DIR, 'run.sh')];
+    if (p.suite === 'changed') args.push('changed');
+    const rc = await this.run('sh', args, env);
+    this.record({ kind: 'suite', pass: p.name, label: p.suite, dir, rc });
+    if (this.aborted && !existsSync(dir)) return 0;
+
+    const res = path.join(dir, this.t, 'results.tsv');
+    const rows = [];
+    if (existsSync(res)) {
+      for (const line of readFileSync(res, 'utf8').split('\n')) {
+        if (!line) continue;
+        const [status, core = '-', check = '', detail = ''] = line.split('\t');
+        rows.push({ status, core, check, detail });
+      }
+    }
+    // вложенный прогон поставил сборку HEAD и вернул ядро снимка; не удался деплой —
+    // сборку HEAD вернёт cleanup
+    this.deployed = rows.some((r) => r.status === 'FAIL' && r.check === 'deploy') ? null : 'HEAD';
+    if (rows.some((r) => r.detail.includes('нет связи') || r.check.includes('нет связи'))) {
+      this.network = true;
+    }
+    if (!this.c0) {
+      const snap = path.join(dir, this.t, 'snapshot.log');
+      const coreFile = path.join(dir, this.t, 'core');
+      let core = '';
+      if (existsSync(snap)) {
+        const m = readFileSync(snap, 'utf8').match(/^core=(.*)$/m);
+        if (m) core = m[1].trim();
+      }
+      if (!CORES.includes(core) && existsSync(coreFile))
+        core = readFileSync(coreFile, 'utf8').trim();
+      if (CORES.includes(core)) {
+        // восстановление вложенного прогона вернуло ядро снимка; позже снимок берёт активное
+        // ядро как есть, поэтому this.cur после первого прогона не трогаем
+        this.c0 = core;
+        this.cur = core;
+        this.say(`исходное ядро стенда: ${core}`);
+      } else if (!this.network && !this.aborted) {
+        this.notes.push(
+          `после прогона набора ${p.name} не найдено исходное ядро: сессия остановлена`
+        );
+        this.broken = true;
+      }
+    }
+
+    let md = '';
+    const mdFile = path.join(dir, 'summary.md');
+    if (existsSync(mdFile)) md = readFileSync(mdFile, 'utf8');
+    const num = (re) => {
+      const m = md.match(re);
+      return m ? Number(m[1]) : null;
+    };
+    this.suites.push({
+      pass: p.name,
+      suite: p.suite,
+      files: p.files,
+      exit: rc,
+      total: num(/^- Итого: (\d+) с/m),
+      shell: num(/^- Оболочка: (\d+) с/m),
+      report: rel
+    });
+
+    // вердикты прохода
+    const push = (test, expected, actual, detail, ok) =>
+      this.verdicts.push({
+        pass: p.name,
+        core: '-',
+        test,
+        expected,
+        actual,
+        detail,
+        ok,
+        report: rel
+      });
+    push('exit', [String(p.expect.exit)], String(rc), '', rc === p.expect.exit);
+    for (const sub of p.expect.summary) {
+      const ok = md.includes(sub);
+      push(`summary: ${sub}`, ['есть'], ok ? 'есть' : 'нет', md ? '' : 'summary.md не создан', ok);
+    }
+    const fails = new Set(
+      rows
+        .filter((r) => ['FAIL', 'KNOWN', 'XPASS'].includes(r.status))
+        .map((r) => `${r.status}\t${r.core}\t${r.check}`)
+    );
+    this.suiteFails.set(p.name, fails);
+    if (p.expect.same) {
+      const other = this.suiteFails.get(p.expect.same);
+      const test = `same_failures_as ${p.expect.same}`;
+      if (!other) {
+        push(test, ['совпадает'], 'нет', `прогон ${p.expect.same} не выполнялся`, false);
+      } else {
+        const fmt = (a, b) =>
+          [...a]
+            .filter((x) => !b.has(x))
+            .slice(0, 10)
+            .map((x) => x.replace(/\t/g, ' '))
+            .join(', ') || '-';
+        const onlyHere = fmt(fails, other);
+        const onlyThere = fmt(other, fails);
+        const same = onlyHere === '-' && onlyThere === '-';
+        push(
+          test,
+          ['совпадает'],
+          same ? 'совпадает' : 'расходится',
+          same
+            ? `${fails.size} строк`
+            : `только в ${p.name}: ${onlyHere}; только в ${p.expect.same}: ${onlyThere}`,
+          same
+        );
+      }
+    }
+    return rc === 3 ? 3 : 0;
+  }
+
   // Сверка results.tsv этапа с ожиданиями прохода.
   judge(p, core, dir) {
     const rel = path.relative(this.root, dir);
@@ -552,6 +774,8 @@ class Session {
       this.notes.push('сбой связи: стенд не возвращался автоматически — проверить вручную');
       return;
     }
+    // после прохода-прогона deployed === 'HEAD': вложенный run.sh поставил сборку HEAD и сам
+    // вернул стенд по снимку, повторный деплой не нужен
     if (this.deployed !== 'HEAD') {
       const rc = await this.deployAndSmoke('HEAD', 'head-restore');
       if (rc === 3) return;
@@ -579,11 +803,7 @@ class Session {
   report(result, end) {
     // ячейка таблицы Markdown: сначала обратный слеш, иначе «\|» из детали закроет ячейку
     const esc = (s) =>
-      String(s)
-        .replace(/\\/g, '\\\\')
-        .replace(/\|/g, '\\|')
-        .replace(/\s+/g, ' ')
-        .slice(0, 220);
+      String(s).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\s+/g, ' ').slice(0, 220);
     const L = [];
     L.push('# Сессия на стенде', '');
     L.push(`- Итог: ${result}`);
@@ -599,6 +819,17 @@ class Session {
       L.push(
         `| ${v.pass} | ${v.core} | ${esc(v.test)} | ${v.expected.join('\\|')} | ${v.actual} | ${v.ok ? 'да' : '**нет**'} | ${esc(v.detail)} | ${v.report} |`
       );
+    }
+    if (this.suites.length) {
+      L.push('', '## Прогоны наборов', '');
+      L.push('| Проход | Набор | Код | Итог, с | Оболочка, с | Отчёт |');
+      L.push('|---|---|---|---|---|---|');
+      for (const r of this.suites) {
+        const set = r.files.length ? `${r.suite} (${esc(r.files.join(', '))})` : r.suite;
+        L.push(
+          `| ${r.pass} | ${set} | ${r.exit} | ${r.total ?? '-'} | ${r.shell ?? '-'} | ${r.report} |`
+        );
+      }
     }
     L.push('', '## Этапы', '');
     for (const s of this.steps) {
@@ -629,6 +860,7 @@ class Session {
           target: this.t,
           core_initial: this.c0,
           verdicts: this.verdicts,
+          suites: this.suites,
           steps: this.steps.map((s) => ({
             ...s,
             dir: path.relative(this.root, s.dir)
@@ -680,6 +912,12 @@ async function main() {
   try {
     for (const p of spec.passes) {
       if (s.aborted || s.network || s.broken) break;
+      if (p.suite) {
+        // вложенный прогон деплоит рабочее дерево: файлы продукта прежнего прохода — к HEAD
+        s.restoreProduct();
+        await s.runSuite(p);
+        continue;
+      }
       s.applyProduct(p);
       const key = productKey(p);
       if (s.deployed !== key) {
