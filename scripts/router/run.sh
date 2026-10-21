@@ -402,15 +402,17 @@ full_target() {
   # Ожидание рабочего состояния стенда после разрушающих Go-тестов (остановка, запуск и
   # перезапуск XKeen, D-04): на медленном устройстве перехват и статус XKeen приходят в норму
   # не сразу, а Playwright должен начинать с рабочей панели. Результат — строка stand-ready.
+  # Свои имена переменных (_sl_*): sh не имеет локальных, а rt_stage держит _t0 и _rc и
+  # по ним пишет код этапа; общие имена портили бы код и обрывали подпроцесс цели под set -e.
   _settle() {
-    _t0=$(date +%s)
-    _rc=0
-    RT_SSH_STDIN=1 rt_ssh "$1" "sh -s" <"$SCRIPT_DIR/settle.sh" >/dev/null 2>&1 || _rc=$?
-    _dt=$(($(date +%s) - _t0))
-    if [ "$_rc" = 0 ]; then
-      rt_result "$1" PASS stand-ready "после Go-тестов ядро запущено и перехват на месте за $_dt с"
+    _sl_t0=$(date +%s)
+    _sl_rc=0
+    RT_SSH_STDIN=1 rt_ssh "$1" "sh -s" <"$SCRIPT_DIR/settle.sh" >/dev/null 2>&1 || _sl_rc=$?
+    _sl_dt=$(($(date +%s) - _sl_t0))
+    if [ "$_sl_rc" = 0 ]; then
+      rt_result "$1" PASS stand-ready "после Go-тестов ядро запущено и перехват на месте за $_sl_dt с"
     else
-      rt_result "$1" FAIL stand-ready "после Go-тестов стенд не пришёл в рабочее состояние за $_dt с (код $_rc)"
+      rt_result "$1" FAIL stand-ready "после Go-тестов стенд не пришёл в рабочее состояние за $_sl_dt с (код $_sl_rc)"
     fi
   }
   _sp=""
@@ -578,7 +580,7 @@ full_target() {
       rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
 
       # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
-      rt_stage "$_t" "settle-$_c" _settle "$_t"
+      rt_stage "$_t" "settle-$_c" _settle "$_t" || true
     else
       rt_result "$_t" SKIP go "$_b_skip"
     fi
