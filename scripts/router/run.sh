@@ -444,8 +444,18 @@ full_target() {
   # номеру группы), поэтому TERM группе настигает и ssh, и node этапа. Без setsid группы нет —
   # тогда TERM только самому процессу. Запись `kill -TERM -- -N` dash не принимает, форма
   # `kill -s TERM -- -N` работает и в dash, и в bash.
+  # Функция оболочки (_settle, rt_ssh) идёт в фоновом подпроцессе без своей группы: ему шлётся
+  # TERM, а его дочерние процессы (ssh) собираются заранее и получают TERM отдельно, иначе после
+  # смерти подпроцесса они осиротели бы.
   _stop_stage() {
-    kill -s TERM -- "-$1" 2>/dev/null || kill "$1" 2>/dev/null || true
+    if kill -s TERM -- "-$1" 2>/dev/null; then
+      return 0
+    fi
+    _st_kids=$(pgrep -P "$1" 2>/dev/null || true)
+    kill "$1" 2>/dev/null || true
+    for _st_k in $_st_kids; do
+      kill -s TERM "$_st_k" 2>/dev/null || true
+    done
   }
   # сигнал: остановить текущий этап целиком и выйти — EXIT-trap восстановит стенд, когда
   # потомки этапа уже не меняют его. Повторный сигнал игнорируется (первая команда): он не
@@ -482,11 +492,17 @@ full_target() {
   _bg() {
     _bg_stage=${_stage:-}
     _bg_t0=${_t0:-}
-    if command -v setsid >/dev/null 2>&1; then
-      setsid "$@" &
-    else
-      "$@" &
-    fi
+    # Функцию оболочки (_settle, rt_ssh) setsid запустить не может: она идёт в фоне как есть.
+    case "$(type "$1" 2>&1)" in
+      *"shell function"* | *"is a function"*) "$@" & ;;
+      *)
+        if command -v setsid >/dev/null 2>&1; then
+          setsid "$@" &
+        else
+          "$@" &
+        fi
+        ;;
+    esac
     _sp=$!
     _brc=0
     wait "$_sp" || _brc=$?
@@ -496,8 +512,14 @@ full_target() {
   }
   trap '_finish' EXIT
   trap '_term' INT TERM HUP
-  rt_snapshot "$_t" || exit 1
+  # Флаг ставится до снимка: сигнал, пришедший сразу после возврата ssh снимка, обрабатывается
+  # ещё до следующей строки, и без флага восстановление не запустилось бы. Снимок не снят —
+  # флаг сбрасывается, восстанавливать нечего.
   _snapped=1
+  rt_snapshot "$_t" || {
+    _snapped=0
+    exit 1
+  }
   # Исходное ядро — из журнала снимка (строка core=…): к нему вернёт восстановление.
   _orig=$(sed -n 's/^core=//p' "$RT_REPORT/$_t/snapshot.log" | tail -n 1)
 
@@ -560,7 +582,7 @@ full_target() {
     # десятки секунд — смоук ветви попадал в него: ssh без баннера, выход из панели
     # 36–41 с (гейты 20261020-203115-fdaccf9d, 20261020-214913-b9421f42). sync сбрасывает
     # всё сейчас, до переключения ядра; нет связи — смоук ветви это и покажет.
-    rt_stage "$_t" "sync-$_c" rt_ssh "$_t" sync >/dev/null 2>&1 || true
+    rt_stage "$_t" "sync-$_c" _bg rt_ssh "$_t" sync >/dev/null 2>&1 || true
 
     # 1. переключение ядра интерфейсом панели
     rt_stage "$_t" "switch-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --switch "$_c" || true
@@ -622,7 +644,7 @@ full_target() {
       rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
 
       # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
-      rt_stage "$_t" "settle-$_c" _settle "$_t" || true
+      rt_stage "$_t" "settle-$_c" _bg _settle "$_t" || true
     else
       rt_result "$_t" SKIP go "$_b_skip"
     fi
