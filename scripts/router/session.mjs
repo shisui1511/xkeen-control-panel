@@ -64,6 +64,9 @@
 // тестовые процессы на цели» (нет; в отчёте только число), restore-verify, xcp-after-restore и
 // core-restored (PASS) и по вердикту на каждую лишнюю строку FAIL и XPASS результатов
 // вложенного прогона. Прерывание по спеке не прерывает сессию: следующие проходы идут дальше.
+// После SIGKILL run.sh не успевает восстановить стенд и оставляет снимок на цели: стенд по нему
+// (rt_restore со сверкой) возвращает сессия, вердикт «interrupt: возврат стенда сессией»; не
+// вернулся — сессия останавливается. Снимок, оставшийся к концу сессии, возвращает cleanup.
 // С go, specs, grep и product проход-прогон не сочетается. Вложенный `sh run.sh [changed]`
 // идёт под блокировкой сессии (RT_LOCK_HELD=1) без RT_HOLD_MINUTES, RT_CORES, RT_BASE и
 // SPEC, сам ставит сборку HEAD, снимает снимок и восстанавливает стенд. Его отчёт — в
@@ -118,6 +121,8 @@ const STATUSES = ['PASS', 'FAIL', 'KNOWN', 'XPASS', 'SKIP'];
 const SAFE_PATH = /^[A-Za-z0-9_.][A-Za-z0-9_./-]*$/;
 const SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const SAFE_REF = /^[A-Za-z0-9_.][A-Za-z0-9_./~^-]*$/;
+// Снимок незавершённого прогона на цели (RT_SNAP_DIR из lib.sh): с ним preflight отказывает.
+const SNAP_BASE = '/opt/tmp/xcp-rt-snap/baseline';
 // Служебные строки этапов: всегда расхождение, если их FAIL не ожидался явно.
 const SERVICE = new Set(['pw:run', 'pw:setup']);
 
@@ -385,7 +390,9 @@ function dryRun(spec, specFile) {
   }
   if (deployed !== 'HEAD') step('деплой и смоук: HEAD (возврат продукта)');
   if (cur !== c0) step(`переключение на ${c0} (исходное)`);
-  step('проверка стенда: дерево чистое, сборка HEAD, исходное ядро, xcp запущен');
+  step(
+    'проверка стенда: дерево чистое, сборка HEAD, исходное ядро, xcp запущен, снимка незавершённого прогона нет'
+  );
   process.stdout.write(lines.join('\n') + '\n');
 }
 
@@ -636,6 +643,56 @@ class Session {
     if (rc === 0) this.cur = core;
     else if (rc !== 3) this.broken = true;
     return rc;
+  }
+
+  // Возврат стенда по снимку, который оставил незавершённый вложенный прогон (SIGKILL по
+  // deadline или повторный сигнал посреди восстановления): тем же rt_restore со сверкой и
+  // удалением снимка. Без этого следующий прогон откажет на preflight, а стенд останется в
+  // состоянии теста. Итог: { had: снимок был, ok: снимка нет или стенд сверен со снимком,
+  // detail }.
+  async restoreLeftover(label) {
+    const r = this.remote(`[ -d ${SNAP_BASE} ] && echo snap=yes || echo snap=no`);
+    if (r.rc === 3) {
+      this.network = true;
+      return { had: false, ok: false, detail: 'нет связи' };
+    }
+    if (r.rc !== 0 || !/^snap=(yes|no)$/m.test(r.out)) {
+      return {
+        had: false,
+        ok: false,
+        detail: `наличие снимка не проверено (код ${r.rc})`
+      };
+    }
+    if (/^snap=no$/m.test(r.out)) return { had: false, ok: true, detail: 'снимка нет' };
+    const dir = this.stepDir(`restore-${label}`);
+    this.say(
+      `остался снимок незавершённого прогона: возврат стенда → ${path.relative(this.root, dir)}`
+    );
+    const rc = await this.run(
+      'sh',
+      [
+        '-c',
+        '. "$1/lib.sh"; rt_load_targets >/dev/null || exit 2; rt_restore "$2"',
+        'sh',
+        SCRIPT_DIR,
+        this.t
+      ],
+      { RT_REPORT: dir }
+    );
+    this.record({ kind: 'restore', label, dir, rc });
+    const res = path.join(dir, this.t, 'results.tsv');
+    let detail = `код ${rc}`;
+    if (existsSync(res)) {
+      const row = readFileSync(res, 'utf8')
+        .split('\n')
+        .map((l) => l.split('\t'))
+        .find((f) => f[2] === 'restore-verify');
+      if (row) {
+        detail = row[3] ?? '';
+        if (row[0] !== 'PASS' && detail.startsWith('нет связи,')) this.network = true;
+      }
+    }
+    return { had: true, ok: rc === 0, detail };
   }
 
   async runPass(p, core) {
@@ -906,6 +963,19 @@ class Session {
       );
     }
     if (irq) this.judgeInterrupt(irq.state, rows, push);
+    if (irq && irq.state.killed && !this.network) {
+      // run.sh убит до конца восстановления: стенд возвращает сессия, иначе следующие проходы
+      // откажут на preflight. Не вернулся — сессия останавливается
+      const lr = await this.restoreLeftover(p.name);
+      push(
+        'interrupt: возврат стенда сессией',
+        ['PASS'],
+        lr.ok ? 'PASS' : 'FAIL',
+        lr.had ? `по снимку вложенного прогона: ${lr.detail}` : lr.detail,
+        lr.ok
+      );
+      if (!lr.ok && !this.network) this.broken = true;
+    }
     for (const sub of p.expect.summary) {
       const ok = md.includes(sub);
       push(`summary: ${sub}`, ['есть'], ok ? 'есть' : 'нет', md ? '' : 'summary.md не создан', ok);
@@ -959,14 +1029,14 @@ class Session {
     for (let attempt = 0; attempt < 3; attempt++) {
       groupAlive = false;
       if (st.pgid > 1) {
-        const ps = spawnSync('ps', ['-eo', 'pgid=,stat='], { encoding: 'utf8' });
+        const ps = spawnSync('ps', ['-eo', 'pgid=,stat='], {
+          encoding: 'utf8'
+        });
         if (!ps.error && ps.status === 0) {
-          groupAlive = ps.stdout
-            .split('\n')
-            .some((l) => {
-              const [g, stat = ''] = l.trim().split(/\s+/);
-              return Number(g) === st.pgid && !stat.startsWith('Z');
-            });
+          groupAlive = ps.stdout.split('\n').some((l) => {
+            const [g, stat = ''] = l.trim().split(/\s+/);
+            return Number(g) === st.pgid && !stat.startsWith('Z');
+          });
         } else {
           try {
             process.kill(-st.pgid, 0);
@@ -1106,6 +1176,11 @@ class Session {
       this.notes.push('сбой связи: стенд не возвращался автоматически — проверить вручную');
       return;
     }
+    // снимок незавершённого прогона (сессию прервали посреди восстановления вложенного run.sh)
+    const lr = await this.restoreLeftover('leftover');
+    if (this.network) return;
+    if (lr.had && !lr.ok)
+      this.notes.push(`снимок незавершённого прогона не вернул стенд: ${lr.detail}`);
     // после прохода-прогона deployed === 'HEAD': вложенный run.sh поставил сборку HEAD и сам
     // вернул стенд по снимку, повторный деплой не нужен
     if (this.deployed !== 'HEAD') {
@@ -1121,14 +1196,15 @@ class Session {
     };
     end.product_head = this.deployed === 'HEAD';
     const r = this.remote(
-      'x=$(pidof xray | cut -d" " -f1); m=$(pidof mihomo | cut -d" " -f1); c=none; [ -n "$x" ] && c=xray; [ -n "$m" ] && c=mihomo; [ -n "$x" ] && [ -n "$m" ] && c=both; echo "$c"; pidof xcp >/dev/null && echo xcp-up || echo xcp-down'
+      `x=$(pidof xray | cut -d" " -f1); m=$(pidof mihomo | cut -d" " -f1); c=none; [ -n "$x" ] && c=xray; [ -n "$m" ] && c=mihomo; [ -n "$x" ] && [ -n "$m" ] && c=both; echo "$c"; pidof xcp >/dev/null && echo xcp-up || echo xcp-down; [ -d ${SNAP_BASE} ] && echo snap-left || echo snap-none`
     );
-    const [core = '-', xcp = '-'] = r.out.split('\n');
+    const [core = '-', xcp = '-', snap = '-'] = r.out.split('\n');
     end.core = r.rc === 0 ? core : '-';
     end.core_initial = this.c0 ?? '-';
     end.core_ok = r.rc === 0 && core === this.c0;
     end.xcp_up = r.rc === 0 && xcp === 'xcp-up';
-    end.ok = end.tree_clean && end.product_head && end.core_ok && end.xcp_up;
+    end.no_snapshot = r.rc === 0 && snap === 'snap-none';
+    end.ok = end.tree_clean && end.product_head && end.core_ok && end.xcp_up && end.no_snapshot;
     return end;
   }
 
@@ -1177,6 +1253,7 @@ class Session {
         `- активное ядро: ${end.core} (исходное ${end.core_initial}) — ${end.core_ok ? 'да' : '**нет**'}`
       );
       L.push(`- xcp запущен: ${end.xcp_up ? 'да' : '**нет**'}`);
+      L.push(`- снимка незавершённого прогона нет: ${end.no_snapshot ? 'да' : '**нет**'}`);
     } else {
       L.push('- не проверялся');
     }
