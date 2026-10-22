@@ -3,7 +3,7 @@ import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
-import { knownFailure } from './lib/known';
+import { CORE_TAG, coreTagsOf, knownFailure } from './lib/known';
 import { routes } from './lib/pages';
 
 // Обход всех страниц настоящей панели цели (RT-05): две темы, ширины 1440 и 390 px.
@@ -178,8 +178,8 @@ function markKnown(route: string, theme: string, width: number): void {
   if (light && route === 'logs') knownFailure('*', 'light-tinted-badge-text-contrast');
   if (light && route === 'proxies') knownFailure('*', 'light-tinted-badge-text-contrast');
   if (light && route === 'traffic') knownFailure('*', 'light-tinted-badge-text-contrast');
-  // Бейдж вида выпуска в баннере обновления: есть, пока доступен более новый не-stable выпуск
-  if (light && wide && route === 'dashboard') knownFailure('*', 'light-tinted-badge-text-contrast');
+  // Бейдж вида выпуска в баннере обновления (dashboard, светлая тема, 1440 px) есть, пока
+  // доступен более новый не-stable выпуск: метка ставится в самом тесте, когда бейдж на странице
 
   // Приглушённый текст мелких меток, счётчиков и подписей
   if (dark && route === 'dat') knownFailure('*', 'muted-small-label-text-contrast');
@@ -196,6 +196,9 @@ function markKnown(route: string, theme: string, width: number): void {
   if (route === 'mihomo-gen') knownFailure('*/mihomo', 'mihomo-constructor-a11y');
 }
 
+// Маршруты, чей тест читает ядро: connectionsReady ждёт сокет Mihomo только на Mihomo
+const CORE_ROUTES = new Set(['connections']);
+
 // Тесты одной страницы идут в одном воркере по очереди (mode default): консоль открывает
 // сеанс терминала, и параллельные вкладки упираются в лимит сеансов панели
 for (const route of routes()) {
@@ -203,7 +206,13 @@ for (const route of routes()) {
     test.describe.configure({ mode: 'default' });
     for (const theme of THEMES) {
       for (const vp of VIEWPORTS) {
-        test(`page:${route} theme:${theme} vp:${vp.width}`, async ({ page }) => {
+        // Теги ядра (D-04): явный @core по CORE_ROUTES и автоматический @core-label из меток
+        // известных падений с ядром в селекторе. Название теста не меняется: по нему --grep.
+        const tag = [
+          ...coreTagsOf(() => markKnown(route, theme, vp.width)),
+          ...(CORE_ROUTES.has(route) ? [CORE_TAG] : [])
+        ];
+        test(`page:${route} theme:${theme} vp:${vp.width}`, { tag }, async ({ page }) => {
           // сборщики консоли и сети подключаются до перехода, чтобы ранние ошибки не терялись
           const guard = attachConsoleGuard(page);
           const problems: string[] = [];
@@ -264,6 +273,23 @@ for (const route of routes()) {
           const severe = scan.violations.filter(
             (v) => v.impact === 'critical' || v.impact === 'serious'
           );
+          // Состояние списка выпусков внешнее, баннер приходит асинхронно: без бейджа нарушения
+          // нет, и метка дала бы XPASS. Решение принимается по результату axe, а не по DOM до него.
+          // axe называет узел кратчайшим селектором (.badge-primary), без предка, поэтому
+          // принадлежность бейджа баннеру проверяется по странице после проверки.
+          if (
+            route === 'dashboard' &&
+            theme === 'light' &&
+            vp.width === 1440 &&
+            severe.some(
+              (v) =>
+                v.id === 'color-contrast' &&
+                v.nodes.some((n) => n.target.join(' ').includes('.badge-primary'))
+            ) &&
+            (await page.locator('.update-banner .badge-primary').count()) > 0
+          ) {
+            knownFailure('*', 'light-tinted-badge-text-contrast');
+          }
           if (severe.length > 0) {
             // Только правило, селекторы и числа контраста: HTML узлов может содержать имена узлов
             const list = severe.map((v) => {

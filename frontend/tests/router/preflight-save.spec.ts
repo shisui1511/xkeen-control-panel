@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
+import { CORE_TAG } from './lib/known';
 import { withPanel } from './lib/nodes-api';
 
 // Запись в Редакторе настоящей панели и окна, которые появляются только при записи (RT-05):
@@ -398,66 +399,67 @@ async function recoverLeftovers(browser: Browser): Promise<void> {
 }
 
 for (const theme of THEMES) {
-  test(`editor-save theme:${theme} vp:390 core:${RT.core || 'unknown'}`, async ({
-    page,
-    browser
-  }) => {
-    test.setTimeout(300_000 * RT.slow);
-    const core = RT.core;
-    test.skip(core !== 'xray' && core !== 'mihomo', 'активное ядро стенда не определено');
-    await recoverLeftovers(browser);
+  test(
+    `editor-save theme:${theme} vp:390 core:${RT.core || 'unknown'}`,
+    { tag: CORE_TAG },
+    async ({ page, browser }) => {
+      test.setTimeout(300_000 * RT.slow);
+      const core = RT.core;
+      test.skip(core !== 'xray' && core !== 'mihomo', 'активное ядро стенда не определено');
+      await recoverLeftovers(browser);
 
-    const guard = attachConsoleGuard(page);
-    await page.setViewportSize(VIEWPORT);
-    await page.addInitScript((th) => {
-      localStorage.setItem('theme', th);
-    }, theme);
-    await page.goto('/#/editor');
-    expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe(
-      theme
-    );
-
-    // Основной сценарий: уровень журнала активного ядра
-    if (core === 'xray') {
-      await writeAndRestore(
-        page,
-        core,
-        XRAY_DIR,
-        XRAY_LOG,
-        (o) => mutateLogLevel('xray', o),
-        'журнал Xray'
+      const guard = attachConsoleGuard(page);
+      await page.setViewportSize(VIEWPORT);
+      await page.addInitScript((th) => {
+        localStorage.setItem('theme', th);
+      }, theme);
+      await page.goto('/#/editor');
+      expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe(
+        theme
       );
-    } else {
-      await writeAndRestore(
-        page,
-        core,
-        MIHOMO_DIR,
-        MIHOMO_CONFIG,
-        (o) => mutateLogLevel('mihomo', o),
-        'журнал Mihomo'
-      );
-    }
 
-    // Предупреждения Preflight для Xray: безвредная пробельная правка файла маршрутизации
-    if (core === 'xray') {
-      const list = await page.request.get(`/api/config/list?dir=${encodeURIComponent(XRAY_DIR)}`);
-      const files = list.ok() ? ((await list.json()) as { name: string }[]) : [];
-      if (files.some((f) => f.name === XRAY_ROUTING)) {
+      // Основной сценарий: уровень журнала активного ядра
+      if (core === 'xray') {
         await writeAndRestore(
           page,
           core,
           XRAY_DIR,
-          XRAY_ROUTING,
-          insertBlankLine,
-          'маршрутизация Xray'
+          XRAY_LOG,
+          (o) => mutateLogLevel('xray', o),
+          'журнал Xray'
         );
       } else {
-        console.log(
-          `editor-save: файла ${XRAY_ROUTING} на стенде нет, проверка Preflight для Xray пропущена`
+        await writeAndRestore(
+          page,
+          core,
+          MIHOMO_DIR,
+          MIHOMO_CONFIG,
+          (o) => mutateLogLevel('mihomo', o),
+          'журнал Mihomo'
         );
       }
-    }
 
-    await guard.assertClean();
-  });
+      // Предупреждения Preflight для Xray: безвредная пробельная правка файла маршрутизации
+      if (core === 'xray') {
+        const list = await page.request.get(`/api/config/list?dir=${encodeURIComponent(XRAY_DIR)}`);
+        const files = list.ok() ? ((await list.json()) as { name: string }[]) : [];
+        if (files.some((f) => f.name === XRAY_ROUTING)) {
+          await writeAndRestore(
+            page,
+            core,
+            XRAY_DIR,
+            XRAY_ROUTING,
+            insertBlankLine,
+            'маршрутизация Xray'
+          );
+        } else {
+          console.log(
+            `editor-save: файла ${XRAY_ROUTING} на стенде нет, проверка Preflight для Xray пропущена`
+          );
+        }
+      }
+
+      await guard.assertClean();
+    }
+  );
 }

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { test, expect, type Request } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
+import { CORE_TAG } from './lib/known';
 
 // Обновление настоящей подписки через интерфейс (RT-05): страница «Прокси», вкладка подписок,
 // кнопка обновления на карточке. Подписка уже добавлена на стенде; обновление идёт к настоящему
@@ -76,7 +77,7 @@ function describeCalls(calls: RefreshCall[]): string {
     .join(', ');
 }
 
-test(`subscription-refresh core:${RT.core || 'unknown'}`, async ({ page }) => {
+test(`subscription-refresh core:${RT.core || 'unknown'}`, { tag: CORE_TAG }, async ({ page }) => {
   // обновление ходит к провайдеру и пересобирает конфиги: на медленном устройстве это минуты
   const ACTION = 60_000 * RT.slow;
   const cards = page.locator('.subscriptions-list .sub-card');

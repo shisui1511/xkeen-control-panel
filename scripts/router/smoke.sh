@@ -1,5 +1,18 @@
 #!/bin/sh
-# scripts/router/smoke.sh <id цели> <ожидаемая версия xcp> [--from-line <n> [--from-inode <i> [--from-fp <md5>]]] — смоук цели после деплоя.
+# scripts/router/smoke.sh <id цели> <ожидаемая версия xcp> [--no-observe | --observe-only] [--from-line <n> [--from-inode <i> [--from-fp <md5>]]] — смоук цели после деплоя.
+#
+# Части (D-07): смоук делится на проверки без окна и наблюдение окна, чтобы окно шло фоном
+# параллельно обходу страниц (только чтение), а не простоем.
+#   --no-observe    проверки без окна: kernel-running, iptables-rules, version, xcp-pid,
+#                   api-version, api-me, api-service-status; обнаруженное ядро записывается
+#                   в <отчёт>/<id>/core и <отчёт>/<id>/core.detected (ядро не найдено — файла
+#                   нет). Проверок kernel-restart и log-* в этой части нет.
+#   --observe-only  только наблюдение: ядро берётся из <отчёт>/<id>/core.detected (нет файла —
+#                   SKIP kernel-restart; файл core оркестратор подменяет ядром ветви), smoke-settle (один PID 30 с, не дольше 120 с),
+#                   окно RT_SMOKE_WINDOW, вердикт kernel-restart по PID начала и конца окна и
+#                   правила логов по строкам от начала ветви до конца окна. Буфер — отдельный
+#                   smoke-observe.buf; рабочий каталог устройства и файл core не трогаются.
+#   (без флага)     обе части подряд, как раньше.
 #
 # Проверки (каждая пишет строку в <отчёт>/<id>/results.tsv; D-34):
 #   kernel-running       xkeen -status сообщает «запущен в режиме …», процесс ядра жив;
@@ -7,7 +20,7 @@
 #   iptables-rules       при запущенном XKeen есть его правила TPROXY (mangle) и/или
 #                        REDIRECT (nat) — по режиму XKeen; XKeen ставит правила в
 #                        фоне уже после запуска, поэтому проверка ждёт их до
-#                        RT_SMOKE_WINDOW с и только потом краснеет
+#                        RT_SMOKE_IPT_WAIT с (по умолчанию 120) и только потом краснеет
 #   version              /opt/sbin/xcp -v равна ожидаемой версии
 #   xcp-pid              у pidof xcp ровно один процесс
 #   api-version          GET <панель>/api/version с ПК отвечает 200
@@ -23,7 +36,13 @@
 #   log-error            в xcp.log после баннера нет слов ERROR и fatal
 #   log-repeat:<префикс> сообщение, повторившееся не менее 3 раз и чаще раза в минуту
 #                        (строки «[dedup] previous message repeated N time(s)» учтены;
-#                        вход и выход самого смоука в счёт не идут)
+#                        вход и выход самого смоука в счёт не идут; успешные GET /api/...
+#                        и опросы Mihomo при ядре Xray — GET /api/traffic/stats|alerts
+#                        с ответом 409 и отладочная строка ProxyProviders о недоступном
+#                        Clash API — не повтор: обход страниц идёт параллельно окну)
+#
+# RT_SMOKE_IPT_WAIT — верхний предел ожидания правил iptables, не зависит от длины окна
+# RT_SMOKE_WINDOW: короткое окно не сокращает предел ожидания правил (D-07, D-16).
 #
 # --from-line <n>: правила логов смотрят строки xcp.log после строки n, а не после
 # последнего баннера запуска (для следующих ветвей матрицы).
@@ -58,7 +77,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/lib.sh"
 
 usage() {
-  echo "usage: smoke.sh <id цели> <ожидаемая версия> [--from-line <n> [--from-inode <i> [--from-fp <md5>]]]" >&2
+  echo "usage: smoke.sh <id цели> <ожидаемая версия> [--no-observe | --observe-only] [--from-line <n> [--from-inode <i> [--from-fp <md5>]]]" >&2
   exit 2
 }
 
@@ -69,8 +88,18 @@ shift 2
 FROM_LINE=""
 FROM_INODE=""
 FROM_FP=""
+NO_OBSERVE=0
+OBSERVE_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    --no-observe)
+      NO_OBSERVE=1
+      shift
+      ;;
+    --observe-only)
+      OBSERVE_ONLY=1
+      shift
+      ;;
     --from-line)
       [ $# -ge 2 ] || usage
       FROM_LINE=$2
@@ -100,6 +129,7 @@ while [ $# -gt 0 ]; do
 done
 [ -z "$FROM_INODE" ] || [ -n "$FROM_LINE" ] || usage
 [ -z "$FROM_FP" ] || [ -n "$FROM_INODE" ] || usage
+[ "$NO_OBSERVE$OBSERVE_ONLY" != 11 ] || usage
 
 cd "$(rt_repo_root)"
 ROUTERS=$ID
@@ -114,10 +144,22 @@ ESC=$(printf '\033')
 WINDOW=${RT_SMOKE_WINDOW:-120}
 LOG_PATH=/opt/var/log/xcp.log
 KNOWN_FILE="$SCRIPT_DIR/known-failures"
-BUF="$RT_REPORT/$ID/smoke.buf"
+# Часть наблюдения (--observe-only) идёт параллельно другим этапам ветви и пишет свои файлы.
+SUF=""
+[ "$OBSERVE_ONLY" != 1 ] || SUF="-observe"
+BUF="$RT_REPORT/$ID/smoke${SUF}.buf"
 : >"$BUF"
-rm -f "$RT_REPORT/$ID/core"
+[ "$OBSERVE_ONLY" = 1 ] || rm -f "$RT_REPORT/$ID/core" "$RT_REPORT/$ID/core.detected"
 UNREACH=0
+# Проверки, которые выносит эта часть: метки известных падений других частей не оцениваются
+# (иначе метка проверки окна дала бы XPASS в части без окна). Пусто — все проверки.
+PART_CHECKS=""
+if [ "$NO_OBSERVE" = 1 ]; then
+  # reachable общая для обеих частей, метка smoke:reachable оценивается здесь
+  PART_CHECKS="reachable kernel-running iptables-rules version xcp-pid api-version api-me api-service-status"
+elif [ "$OBSERVE_ONLY" = 1 ]; then
+  PART_CHECKS="kernel-restart log-panic log-error log-repeat"
+fi
 
 # Строка результата в буфер; в results.tsv она попадает через finalize (метки известных падений).
 chk() {
@@ -145,13 +187,15 @@ finalize() {
     rm -f "$_jar"
   fi
   if [ "$UNREACH" = 1 ]; then
-    for _c in kernel-running iptables-rules version xcp-pid api-version api-me api-service-status kernel-restart log-panic log-error; do
+    _unr="kernel-running iptables-rules version xcp-pid api-version api-me api-service-status kernel-restart log-panic log-error"
+    [ "$OBSERVE_ONLY" != 1 ] || _unr="kernel-restart log-panic log-error"
+    for _c in $_unr; do
       grep -q "^[A-Z]*${TAB}${_c}${TAB}" "$BUF" || chk SKIP "$_c" "нет связи"
     done
   fi
   _core="-"
   [ -f "$RT_REPORT/$ID/core" ] && _core=$(cat "$RT_REPORT/$ID/core")
-  _lab="$RT_REPORT/$ID/smoke.labels"
+  _lab="$RT_REPORT/$ID/smoke${SUF}.labels"
   : >"$_lab"
   if [ -f "$KNOWN_FILE" ]; then
     while IFS="$TAB" read -r _lchk _lsel _lslug || [ -n "$_lchk" ]; do
@@ -162,13 +206,30 @@ finalize() {
     done <"$KNOWN_FILE"
   fi
   # FAIL, совпавший с применимой меткой (точно или по префиксу), -> KNOWN; метка без
-  # совпавшего FAIL -> XPASS.
-  _fin="$RT_REPORT/$ID/smoke.final"
-  awk -F'\t' -v OFS='\t' -v lf="$_lab" '
-    BEGIN { n = 0 }
-    FILENAME == lf { lp[n] = $1; ls[n] = $2; n++; next }
+  # совпавшего FAIL -> XPASS, но только если её проверка выполнилась и прошла (PASS самой
+  # проверки — log-repeat для метки log-repeat:<сообщение> — или строки с префиксом метки),
+  # как у меток reboot:* в run.sh.
+  _fin="$RT_REPORT/$ID/smoke${SUF}.final"
+  # Проверка не выполнялась — SKIP (нет связи, окно лога потеряно), строки нет совсем (нет файла
+  # лога) или смоук прерван (код >= 128): XPASS по метке был бы ложным.
+  _intr=0
+  [ "$_rc" -lt 128 ] || _intr=1
+  awk -F'\t' -v OFS='\t' -v lf="$_lab" -v part="$PART_CHECKS" -v intr="$_intr" '
+    BEGIN { n = 0; np = split(part, pc, " ") }
+    FILENAME == lf {
+      # метка другой части смоука не оценивается: ни KNOWN, ни XPASS
+      rel = (np == 0)
+      for (j = 1; j <= np; j++)
+        if (index(pc[j], $1) == 1 || index($1, pc[j]) == 1) rel = 1
+      if (rel) { lp[n] = $1; ls[n] = $2; lb[n] = $1; sub(/:.*/, "", lb[n]); n++ }
+      next
+    }
     {
       st = $1; det = $3
+      if (st == "PASS") {
+        for (i = 0; i < n; i++)
+          if ($2 == lb[i] || index($2, lp[i]) == 1) ok[i] = 1
+      }
       if (st == "FAIL") {
         for (i = 0; i < n; i++) {
           if (index($2, lp[i]) == 1) {
@@ -179,8 +240,8 @@ finalize() {
       print st, $2, det
     }
     END {
-      for (i = 0; i < n; i++)
-        if (!m[i]) print "XPASS", "known:" lp[i], "метка больше не нужна: снять и закрыть todo " ls[i]
+      for (i = 0; i < n && !intr; i++)
+        if (!m[i] && ok[i]) print "XPASS", "known:" lp[i], "метка больше не нужна: снять и закрыть todo " ls[i]
     }
   ' "$_lab" "$BUF" >"$_fin"
   while IFS="$TAB" read -r _st _chk _det || [ -n "$_st" ]; do
@@ -199,183 +260,199 @@ trap finalize EXIT
 # без обработчика EXIT-trap не выполнился бы.
 trap 'exit 130' INT TERM HUP
 
-# --- kernel-running ----------------------------------------------------------
-rc=0
-out=$(rt_stage "$ID" smoke-kernel rt_ssh "$ID" 'rm -rf /opt/tmp/xcp-rt; /opt/sbin/xkeen -status 2>&1; echo "xray_pid=$(pidof xray | cut -d" " -f1)"; echo "mihomo_pid=$(pidof mihomo | cut -d" " -f1)"') || rc=$?
-[ "$rc" != 3 ] || lost
-clean=$(printf '%s\n' "$out" | sed "s/${ESC}\[[0-9;]*[A-Za-z]//g")
-xpid=$(printf '%s\n' "$clean" | sed -n 's/^xray_pid=//p')
-mpid=$(printf '%s\n' "$clean" | sed -n 's/^mihomo_pid=//p')
-run_line=$(printf '%s\n' "$clean" | grep 'запущен в режиме' | head -n 1 || true)
-mode=$(printf '%s' "$run_line" | sed -n 's/.*запущен в режиме *//p' | tr -d ' ')
-core=""
-case "$run_line" in
-  *xray*) core=xray ;;
-  *mihomo*) core=mihomo ;;
-esac
-if [ -z "$core" ]; then
-  if [ -n "$xpid" ] && [ -z "$mpid" ]; then
-    core=xray
-  elif [ -n "$mpid" ] && [ -z "$xpid" ]; then
-    core=mihomo
+# Проверки без окна (часть --observe-only их не выполняет).
+if [ "$OBSERVE_ONLY" != 1 ]; then
+  # --- kernel-running ----------------------------------------------------------
+  rc=0
+  out=$(rt_stage "$ID" smoke-kernel rt_ssh "$ID" 'rm -rf /opt/tmp/xcp-rt; /opt/sbin/xkeen -status 2>&1; echo "xray_pid=$(pidof xray | cut -d" " -f1)"; echo "mihomo_pid=$(pidof mihomo | cut -d" " -f1)"') || rc=$?
+  [ "$rc" != 3 ] || lost
+  clean=$(printf '%s\n' "$out" | sed "s/${ESC}\[[0-9;]*[A-Za-z]//g")
+  xpid=$(printf '%s\n' "$clean" | sed -n 's/^xray_pid=//p')
+  mpid=$(printf '%s\n' "$clean" | sed -n 's/^mihomo_pid=//p')
+  run_line=$(printf '%s\n' "$clean" | grep 'запущен в режиме' | head -n 1 || true)
+  mode=$(printf '%s' "$run_line" | sed -n 's/.*запущен в режиме *//p' | tr -d ' ')
+  core=""
+  case "$run_line" in
+    *xray*) core=xray ;;
+    *mihomo*) core=mihomo ;;
+  esac
+  if [ -z "$core" ]; then
+    if [ -n "$xpid" ] && [ -z "$mpid" ]; then
+      core=xray
+    elif [ -n "$mpid" ] && [ -z "$xpid" ]; then
+      core=mihomo
+    fi
   fi
-fi
-[ -z "$core" ] || printf '%s\n' "$core" >"$RT_REPORT/$ID/core"
-core_pid=""
-case "$core" in
-  xray) core_pid=$xpid ;;
-  mihomo) core_pid=$mpid ;;
-esac
-if [ -n "$run_line" ] && [ -n "$core_pid" ]; then
-  chk PASS kernel-running "$core запущен, режим $mode"
-else
-  chk FAIL kernel-running "XKeen не сообщает о запущенном ядре или процесс ядра не найден (ядро ${core:--}, режим ${mode:--})"
-fi
+  [ -z "$core" ] || printf '%s\n' "$core" | tee "$RT_REPORT/$ID/core.detected" >"$RT_REPORT/$ID/core"
+  core_pid=""
+  case "$core" in
+    xray) core_pid=$xpid ;;
+    mihomo) core_pid=$mpid ;;
+  esac
+  if [ -n "$run_line" ] && [ -n "$core_pid" ]; then
+    chk PASS kernel-running "$core запущен, режим $mode"
+  else
+    chk FAIL kernel-running "XKeen не сообщает о запущенном ядре или процесс ядра не найден (ядро ${core:--}, режим ${mode:--})"
+  fi
 
-# --- iptables-rules ----------------------------------------------------------
-if [ -n "$run_line" ]; then
-  # XKeen возвращает управление раньше, чем фоновый запуск поставил правила перехвата
-  # (сразу после смены ядра правил ещё нет): проверка опрашивает роутер раз в
-  # IPT_POLL с, но не дольше окна RT_SMOKE_WINDOW. Правил нет и по истечении окна — FAIL.
-  IPT_POLL=3
-  ipt_wait=$WINDOW
-  [ "$ipt_wait" -gt 0 ] 2>/dev/null || ipt_wait=0
-  ipt_t0=$(date +%s)
-  while :; do
-    rc=0
-    # только -w без числа: iptables 1.4.21 не принимает -w 5
-    out=$(rt_stage "$ID" smoke-iptables rt_ssh "$ID" 'echo "tproxy=$(iptables -w -t mangle -S 2>/dev/null | grep -c "xkeen.*-j TPROXY")"; echo "redirect=$(iptables -w -t nat -S 2>/dev/null | grep -c "xkeen.*-j REDIRECT")"') || rc=$?
-    [ "$rc" != 3 ] || lost
-    nt=$(printf '%s\n' "$out" | sed -n 's/^tproxy=//p')
-    nr=$(printf '%s\n' "$out" | sed -n 's/^redirect=//p')
-    nt=${nt:-0}
-    nr=${nr:-0}
-    ok=0
-    case "$mode" in
-      TProxy | tproxy) [ "$nt" -gt 0 ] && ok=1 ;;
-      Redirect | redirect) [ "$nr" -gt 0 ] && ok=1 ;;
-      Hybrid | hybrid) [ "$nt" -gt 0 ] && [ "$nr" -gt 0 ] && ok=1 ;;
-      *) { [ "$nt" -gt 0 ] || [ "$nr" -gt 0 ]; } && ok=1 ;;
-    esac
-    [ "$ok" = 1 ] && break
+  # --- iptables-rules ----------------------------------------------------------
+  if [ -n "$run_line" ]; then
+    # XKeen возвращает управление раньше, чем фоновый запуск поставил правила перехвата
+    # (сразу после смены ядра правил ещё нет): проверка опрашивает роутер раз в
+    # IPT_POLL с, но не дольше RT_SMOKE_IPT_WAIT (по умолчанию 120 с). Предел не зависит от
+    # длины окна: короткое окно набора changed не сокращает ожидание правил (D-07, D-16).
+    # Правил нет и по истечении предела — FAIL.
+    IPT_POLL=3
+    ipt_wait=${RT_SMOKE_IPT_WAIT:-120}
+    [ "$ipt_wait" -gt 0 ] 2>/dev/null || ipt_wait=0
+    ipt_t0=$(date +%s)
+    while :; do
+      rc=0
+      # только -w без числа: iptables 1.4.21 не принимает -w 5
+      out=$(rt_stage "$ID" smoke-iptables rt_ssh "$ID" 'echo "tproxy=$(iptables -w -t mangle -S 2>/dev/null | grep -c "xkeen.*-j TPROXY")"; echo "redirect=$(iptables -w -t nat -S 2>/dev/null | grep -c "xkeen.*-j REDIRECT")"') || rc=$?
+      [ "$rc" != 3 ] || lost
+      nt=$(printf '%s\n' "$out" | sed -n 's/^tproxy=//p')
+      nr=$(printf '%s\n' "$out" | sed -n 's/^redirect=//p')
+      nt=${nt:-0}
+      nr=${nr:-0}
+      ok=0
+      case "$mode" in
+        TProxy | tproxy) [ "$nt" -gt 0 ] && ok=1 ;;
+        Redirect | redirect) [ "$nr" -gt 0 ] && ok=1 ;;
+        Hybrid | hybrid) [ "$nt" -gt 0 ] && [ "$nr" -gt 0 ] && ok=1 ;;
+        *) { [ "$nt" -gt 0 ] || [ "$nr" -gt 0 ]; } && ok=1 ;;
+      esac
+      [ "$ok" = 1 ] && break
+      ipt_waited=$(($(date +%s) - ipt_t0))
+      [ "$ipt_waited" -lt "$ipt_wait" ] || break
+      sleep "$IPT_POLL"
+    done
     ipt_waited=$(($(date +%s) - ipt_t0))
-    [ "$ipt_waited" -lt "$ipt_wait" ] || break
-    sleep "$IPT_POLL"
+    ipt_note=""
+    [ "$ipt_waited" -lt 2 ] || ipt_note=", ожидание ${ipt_waited} с"
+    if [ "$ok" = 1 ]; then
+      chk PASS iptables-rules "режим ${mode:--}: TPROXY $nt, REDIRECT $nr$ipt_note"
+    else
+      chk FAIL iptables-rules "режим ${mode:--}: правил XKeen TPROXY $nt, REDIRECT $nr — не хватает$ipt_note"
+    fi
+  else
+    chk SKIP iptables-rules "XKeen не запущен"
+  fi
+
+  # --- version -----------------------------------------------------------------
+  rc=0
+  got=$(rt_stage "$ID" smoke-version rt_ssh "$ID" "/opt/sbin/xcp -v") || rc=$?
+  [ "$rc" != 3 ] || lost
+  if [ "$rc" != 0 ]; then
+    chk FAIL version "xcp -v завершился с кодом $rc"
+  elif [ "$got" = "$EXPECT" ]; then
+    chk PASS version "$got"
+    printf '%s\n' "$got" >"$RT_REPORT/$ID/xcp_version"
+  else
+    chk FAIL version "на цели $got, ожидалась $EXPECT"
+    printf '%s\n' "$got" >"$RT_REPORT/$ID/xcp_version"
+  fi
+
+  # --- xcp-pid -----------------------------------------------------------------
+  rc=0
+  pids=$(rt_stage "$ID" smoke-pid rt_ssh "$ID" "pidof xcp") || rc=$?
+  [ "$rc" != 3 ] || lost
+  count=$(printf '%s' "$pids" | wc -w | tr -d ' ')
+  if [ "$rc" = 0 ] && [ "$count" = 1 ]; then
+    chk PASS xcp-pid "1 процесс"
+  else
+    chk FAIL xcp-pid "процессов xcp: $count"
+  fi
+
+  # --- api-version -------------------------------------------------------------
+  url=$(rt_get "$ID" URL)
+  t0=$(date +%s)
+  # Панель после перезапуска xcp может ещё не слушать порт: до 30 с ждём любой ответ.
+  code=000
+  tries=0
+  while [ "$tries" -lt 30 ]; do
+    code=$(curl -sk --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' "$url/api/version" || true)
+    [ "$code" != 000 ] && [ -n "$code" ] && break
+    tries=$((tries + 1))
+    sleep 1
   done
-  ipt_waited=$(($(date +%s) - ipt_t0))
-  ipt_note=""
-  [ "$ipt_waited" -lt 2 ] || ipt_note=", ожидание ${ipt_waited} с"
-  if [ "$ok" = 1 ]; then
-    chk PASS iptables-rules "режим ${mode:--}: TPROXY $nt, REDIRECT $nr$ipt_note"
+  t1=$(date +%s)
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$ID" smoke-api "$((t1 - t0))" 0 "$t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
+  if [ "$code" = 200 ]; then
+    chk PASS api-version "http 200"
+  elif [ "$code" = 000 ] || [ -z "$code" ]; then
+    chk FAIL api-version "нет связи с панелью"
   else
-    chk FAIL iptables-rules "режим ${mode:--}: правил XKeen TPROXY $nt, REDIRECT $nr — не хватает$ipt_note"
+    chk FAIL api-version "http $code"
   fi
-else
-  chk SKIP iptables-rules "XKeen не запущен"
+
+  # --- api-me, api-service-status ----------------------------------------------
+  # Вход с ПК: тело строится через JSON.stringify (пароль идёт через окружение и stdin,
+  # в аргументы команд не попадает). Сессия закрывается выходом: лимит 20 сессий.
+  jar="$RT_REPORT/$ID/.cookies"
+  rm -f "$jar"
+  # LOGIN_WAIT — сколько ждать ответа входа. Вход отвечает за доли секунды (около 0,4 с
+  # на arm64, около 0,8 с на mipsle: bcrypt); запас нужен на загруженный после смены
+  # ядра или записи на флешку стенд, но вход не ждёт записи файлов на носитель.
+  LOGIN_WAIT=20
+  t0=$(date +%s)
+  body=$(RT_PW="$(rt_get "$ID" PASSWORD)" node -e 'process.stdout.write(JSON.stringify({ password: process.env.RT_PW }))' || true)
+  lres=$(printf '%s' "$body" | curl -sk --connect-timeout 10 --max-time "$LOGIN_WAIT" -c "$jar" -H 'Content-Type: application/json' --data-binary @- -o /dev/null -w '%{http_code} %{time_total}' "$url/api/auth/login" || true)
+  body=""
+  lcode=${lres%% *}
+  ltime=$(printf '%s' "${lres#* }" | awk '{ printf "%.1f", $1 }')
+  ltime_s=$(printf '%s' "${lres#* }" | awk '{ printf "%d", $1 }')
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$ID" smoke-login "${ltime_s:-0}" 0 "$t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
+  if [ "$lcode" = 200 ]; then
+    me=$(curl -sk --connect-timeout 10 --max-time 20 -b "$jar" -w '\n%{http_code}' "$url/api/auth/me" || true)
+    mecode=$(printf '%s\n' "$me" | tail -n 1)
+    csrf=$(printf '%s\n' "$me" | sed -n 's/.*"csrf_token" *: *"\([^"]*\)".*/\1/p' | head -n 1)
+    if [ "$mecode" = 200 ]; then
+      chk PASS api-me "вход и GET /api/auth/me: http 200, вход ${ltime:--} с"
+    else
+      chk FAIL api-me "GET /api/auth/me: http ${mecode:--}"
+    fi
+    sscode=$(curl -sk --connect-timeout 10 --max-time 30 -b "$jar" -o /dev/null -w '%{http_code}' "$url/api/service/status" || true)
+    if [ "$sscode" = 200 ]; then
+      chk PASS api-service-status "http 200"
+    else
+      chk FAIL api-service-status "GET /api/service/status: http ${sscode:--}"
+    fi
+    curl -sk --connect-timeout 10 --max-time 20 -b "$jar" -X POST -H "X-CSRF-Token: $csrf" -o /dev/null "$url/api/auth/logout" || true
+  else
+    if [ "$lcode" = 000 ] || [ -z "$lcode" ]; then
+      # Вход не ответил: отличить зависший вход (панель отвечает, носитель занят) от
+      # недоступной панели. Состояние носителя и загрузка читаются одним вызовом ssh.
+      rc=0
+      stand=$(rt_ssh "$ID" "grep -E '^(Dirty|Writeback):' /proc/meminfo; cat /proc/loadavg") || rc=$?
+      [ "$rc" != 3 ] || lost
+      dirty=$(printf '%s\n' "$stand" | awk '$1 == "Dirty:" { print $2 }')
+      wback=$(printf '%s\n' "$stand" | awk '$1 == "Writeback:" { print $2 }')
+      load=$(printf '%s\n' "$stand" | awk 'NF >= 3 && $1 !~ /:$/ { print $1, $2, $3 }')
+      vres=$(curl -sk --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code} %{time_total}' "$url/api/version" || true)
+      vcode=${vres%% *}
+      vtime=$(printf '%s' "${vres#* }" | awk '{ printf "%.1f", $1 }')
+      chk FAIL api-me "вход не ответил за $LOGIN_WAIT с; панель: /api/version http ${vcode:--} за ${vtime:--} с; носитель: Dirty ${dirty:--} КБ, Writeback ${wback:--} КБ; loadavg ${load:--}"
+    else
+      chk FAIL api-me "вход не удался: http ${lcode:--} за ${ltime:--} с"
+    fi
+    chk SKIP api-service-status "нет сессии"
+  fi
+  rm -f "$jar"
+  t1=$(date +%s)
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$ID" smoke-api-session "$((t1 - t0))" 0 "$t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
 fi
 
-# --- version -----------------------------------------------------------------
-rc=0
-got=$(rt_stage "$ID" smoke-version rt_ssh "$ID" "/opt/sbin/xcp -v") || rc=$?
-[ "$rc" != 3 ] || lost
-if [ "$rc" != 0 ]; then
-  chk FAIL version "xcp -v завершился с кодом $rc"
-elif [ "$got" = "$EXPECT" ]; then
-  chk PASS version "$got"
-  printf '%s\n' "$got" >"$RT_REPORT/$ID/xcp_version"
-else
-  chk FAIL version "на цели $got, ожидалась $EXPECT"
-  printf '%s\n' "$got" >"$RT_REPORT/$ID/xcp_version"
-fi
+# Часть без окна на этом заканчивается: kernel-restart и правила логов выносит --observe-only.
+[ "$NO_OBSERVE" != 1 ] || exit 0
 
-# --- xcp-pid -----------------------------------------------------------------
-rc=0
-pids=$(rt_stage "$ID" smoke-pid rt_ssh "$ID" "pidof xcp") || rc=$?
-[ "$rc" != 3 ] || lost
-count=$(printf '%s' "$pids" | wc -w | tr -d ' ')
-if [ "$rc" = 0 ] && [ "$count" = 1 ]; then
-  chk PASS xcp-pid "1 процесс"
-else
-  chk FAIL xcp-pid "процессов xcp: $count"
+# Часть наблюдения берёт ядро, обнаруженное частью проверок (<отчёт>/<id>/core.detected): файл
+# core после неё подменён ядром ветви и не говорит, запущено ли оно на самом деле.
+if [ "$OBSERVE_ONLY" = 1 ]; then
+  core=""
+  [ ! -f "$RT_REPORT/$ID/core.detected" ] || core=$(cat "$RT_REPORT/$ID/core.detected")
+  [ "$core" != "-" ] || core=""
 fi
-
-# --- api-version -------------------------------------------------------------
-url=$(rt_get "$ID" URL)
-t0=$(date +%s)
-# Панель после перезапуска xcp может ещё не слушать порт: до 30 с ждём любой ответ.
-code=000
-tries=0
-while [ "$tries" -lt 30 ]; do
-  code=$(curl -sk --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' "$url/api/version" || true)
-  [ "$code" != 000 ] && [ -n "$code" ] && break
-  tries=$((tries + 1))
-  sleep 1
-done
-t1=$(date +%s)
-printf '%s\t%s\t%s\t%s\n' "$ID" smoke-api "$((t1 - t0))" 0 >>"$RT_REPORT/timings.tsv"
-if [ "$code" = 200 ]; then
-  chk PASS api-version "http 200"
-elif [ "$code" = 000 ] || [ -z "$code" ]; then
-  chk FAIL api-version "нет связи с панелью"
-else
-  chk FAIL api-version "http $code"
-fi
-
-# --- api-me, api-service-status ----------------------------------------------
-# Вход с ПК: тело строится через JSON.stringify (пароль идёт через окружение и stdin,
-# в аргументы команд не попадает). Сессия закрывается выходом: лимит 20 сессий.
-jar="$RT_REPORT/$ID/.cookies"
-rm -f "$jar"
-# LOGIN_WAIT — сколько ждать ответа входа. Вход отвечает за доли секунды (около 0,4 с
-# на arm64, около 0,8 с на mipsle: bcrypt); запас нужен на загруженный после смены
-# ядра или записи на флешку стенд, но вход не ждёт записи файлов на носитель.
-LOGIN_WAIT=20
-t0=$(date +%s)
-body=$(RT_PW="$(rt_get "$ID" PASSWORD)" node -e 'process.stdout.write(JSON.stringify({ password: process.env.RT_PW }))' || true)
-lres=$(printf '%s' "$body" | curl -sk --connect-timeout 10 --max-time "$LOGIN_WAIT" -c "$jar" -H 'Content-Type: application/json' --data-binary @- -o /dev/null -w '%{http_code} %{time_total}' "$url/api/auth/login" || true)
-body=""
-lcode=${lres%% *}
-ltime=$(printf '%s' "${lres#* }" | awk '{ printf "%.1f", $1 }')
-ltime_s=$(printf '%s' "${lres#* }" | awk '{ printf "%d", $1 }')
-printf '%s\t%s\t%s\t%s\n' "$ID" smoke-login "${ltime_s:-0}" 0 >>"$RT_REPORT/timings.tsv"
-if [ "$lcode" = 200 ]; then
-  me=$(curl -sk --connect-timeout 10 --max-time 20 -b "$jar" -w '\n%{http_code}' "$url/api/auth/me" || true)
-  mecode=$(printf '%s\n' "$me" | tail -n 1)
-  csrf=$(printf '%s\n' "$me" | sed -n 's/.*"csrf_token" *: *"\([^"]*\)".*/\1/p' | head -n 1)
-  if [ "$mecode" = 200 ]; then
-    chk PASS api-me "вход и GET /api/auth/me: http 200, вход ${ltime:--} с"
-  else
-    chk FAIL api-me "GET /api/auth/me: http ${mecode:--}"
-  fi
-  sscode=$(curl -sk --connect-timeout 10 --max-time 30 -b "$jar" -o /dev/null -w '%{http_code}' "$url/api/service/status" || true)
-  if [ "$sscode" = 200 ]; then
-    chk PASS api-service-status "http 200"
-  else
-    chk FAIL api-service-status "GET /api/service/status: http ${sscode:--}"
-  fi
-  curl -sk --connect-timeout 10 --max-time 20 -b "$jar" -X POST -H "X-CSRF-Token: $csrf" -o /dev/null "$url/api/auth/logout" || true
-else
-  if [ "$lcode" = 000 ] || [ -z "$lcode" ]; then
-    # Вход не ответил: отличить зависший вход (панель отвечает, носитель занят) от
-    # недоступной панели. Состояние носителя и загрузка читаются одним вызовом ssh.
-    rc=0
-    stand=$(rt_ssh "$ID" "grep -E '^(Dirty|Writeback):' /proc/meminfo; cat /proc/loadavg") || rc=$?
-    [ "$rc" != 3 ] || lost
-    dirty=$(printf '%s\n' "$stand" | awk '$1 == "Dirty:" { print $2 }')
-    wback=$(printf '%s\n' "$stand" | awk '$1 == "Writeback:" { print $2 }')
-    load=$(printf '%s\n' "$stand" | awk 'NF >= 3 && $1 !~ /:$/ { print $1, $2, $3 }')
-    vres=$(curl -sk --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code} %{time_total}' "$url/api/version" || true)
-    vcode=${vres%% *}
-    vtime=$(printf '%s' "${vres#* }" | awk '{ printf "%.1f", $1 }')
-    chk FAIL api-me "вход не ответил за $LOGIN_WAIT с; панель: /api/version http ${vcode:--} за ${vtime:--} с; носитель: Dirty ${dirty:--} КБ, Writeback ${wback:--} КБ; loadavg ${load:--}"
-  else
-    chk FAIL api-me "вход не удался: http ${lcode:--} за ${ltime:--} с"
-  fi
-  chk SKIP api-service-status "нет сессии"
-fi
-rm -f "$jar"
-t1=$(date +%s)
-printf '%s\t%s\t%s\t%s\n' "$ID" smoke-api-session "$((t1 - t0))" 0 >>"$RT_REPORT/timings.tsv"
 
 # --- kernel-restart: PID ядра в начале и конце окна ----------------------------
 if [ -z "$core" ]; then
@@ -527,7 +604,7 @@ else
   fi
   # Повторы: нормализация (метка времени убрана, числа -> 0, адреса/hex/uuid -> маски),
   # строка «[dedup] ... repeated N time(s)» засчитывается предыдущему сообщению.
-  reps=$(awk '
+  reps=$(awk -v core="$core" '
     function days(y, m, d) {
       if (m <= 2) { y--; m += 12 }
       return 365 * y + int(y / 4) - int(y / 100) + int(y / 400) + int((153 * (m - 3) + 2) / 5) + d
@@ -550,6 +627,25 @@ else
       }
       # собственный вход и выход смоука (и проверочных прогонов) — не повтор сообщения продукта
       if (msg ~ /^\[auth\] (login ok|logout) / || msg ~ /^(POST|GET) \/api\/auth\/(login|logout|me) /) {
+        prev = ""
+        next
+      }
+      # Успешное чтение в журнале доступа (GET|HEAD /api/... с ответом 1xx-3xx) не считается:
+      # такие строки пишутся для потоков, закрытых переходом между страницами, и для медленных
+      # успешных чтений обхода страниц, идущего параллельно окну. В простое без браузера их
+      # нет, поэтому обнаружение повторов сообщений служб и ошибок не теряется. Ответы 4xx/5xx
+      # и любые POST считаются, как раньше.
+      if (msg ~ /^(GET|HEAD) \/api\/[^ ]+ [1-3][0-9][0-9] /) {
+        prev = ""
+        next
+      }
+      # При ядре Xray открытые страницы раз в несколько секунд опрашивают источники Mihomo:
+      # трафик получает 409, список провайдеров пишет отладочную строку о недоступном
+      # Clash API. Обход страниц идёт параллельно окну, поэтому эти опросы попадают в журнал.
+      # Исключены только эти две строки и только при ядре Xray: при Mihomo они означают
+      # дефект (гейт ядра отвечает 409 работающему Mihomo, панель потеряла Clash API).
+      # Остальные 4xx/5xx и любые POST считаются, как раньше.
+      if (core == "xray" && (msg ~ /^GET \/api\/traffic\/(stats|alerts) 409 / || msg ~ /^\[ProxyProviders\] Debug: Clash API unreachable \(Mihomo is not running\)$/)) {
         prev = ""
         next
       }

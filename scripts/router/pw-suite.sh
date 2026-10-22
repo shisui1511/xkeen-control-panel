@@ -1,5 +1,5 @@
 #!/bin/sh
-# scripts/router/pw-suite.sh <id цели> [ядро] [--switch <ядро>] — Playwright против настоящей панели цели.
+# scripts/router/pw-suite.sh <id цели> [ядро] [--switch <ядро> | --part read|state] — Playwright против настоящей панели цели.
 #
 # Запускает frontend/playwright.router.config.ts (один воркер, без повторов): вход в
 # панель делает global-setup один раз, тесты работают с настоящим API и ядром. Каждая
@@ -10,6 +10,16 @@
 # интерфейс панели («Службы») переключает устройство на это ядро (XCP_WANT_CORE, матрица
 # ядер, D-20). Артефакты — в <отчёт>/<id>/<ядро>/pw-switch/, результат — строка
 # pw:core-switch:<ядро>.
+#
+# --part read|state (вне --switch): запускается одна часть набора (D-07, D-18). Спеки делятся
+# так же, как раньше: спеки только чтения (пока pages.spec.ts; план 13 заменит признак
+# разметкой `// e2e-kind: read`) — часть read, остальные, меняющие состояние стенда, — часть
+# state.
+#   read   только спеки только чтения, PAGE_WORKERS воркеров, артефакты — <отчёт>/<id>/<ядро>/pw-read/;
+#          идёт параллельно окну наблюдения смоука (smoke.sh --observe-only)
+#   state  остальные спеки, один воркер, артефакты — <отчёт>/<id>/<ядро>/pw/
+# Пустая часть (в выбранных спеках нет подходящих) — выход 0 без строк результата.
+# Без --part обе части идут подряд в <отчёт>/<id>/<ядро>/pw/ (так зовёт session.mjs).
 #
 # Результаты: строки `pw:<название теста>` в <отчёт>/<id>/results.tsv:
 #   PASS, FAIL, SKIP, а также KNOWN (тест с меткой knownFailure упал, как ожидалось) и
@@ -23,6 +33,10 @@
 #              при --switch не используется
 #   RT_PW_GREP регулярное выражение --grep по названиям тестов (набор changed сужает им
 #              обход страниц до затронутых маршрутов); при --switch не используется
+#   RT_PW_CORE_ONLY=1  только тесты с тегом @core (вторая ветвь набора changed): --grep @core,
+#              а вместе с RT_PW_GREP — (?=.*@core) и затем RT_PW_GREP; --pass-with-no-tests;
+#              часть без таких тестов завершается кодом 0 без строк результата; при --switch
+#              не используется
 #   RT_REPORT  каталог отчёта (если не задан, создаётся новый)
 #   XCP_T_<id>_SLOW  множитель таймаутов цели (в локальном конфиге; по умолчанию 1,
 #                    для mipsle и mips — 2)
@@ -37,7 +51,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/lib.sh"
 
 usage() {
-  echo "usage: pw-suite.sh <id цели> [ядро] [--switch <ядро>]" >&2
+  echo "usage: pw-suite.sh <id цели> [ядро] [--switch <ядро> | --part read|state]" >&2
   exit 2
 }
 [ $# -ge 1 ] || usage
@@ -45,12 +59,19 @@ ID=$1
 shift
 CORE=""
 SWITCH=""
+PART=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --switch)
       [ $# -ge 2 ] || usage
       SWITCH=$2
       case "$SWITCH" in xray | mihomo) ;; *) usage ;; esac
+      shift 2
+      ;;
+    --part)
+      [ $# -ge 2 ] || usage
+      PART=$2
+      case "$PART" in read | state) ;; *) usage ;; esac
       shift 2
       ;;
     *)
@@ -61,6 +82,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ "$CORE" != "-" ] || CORE=""
+[ -z "$PART" ] || [ -z "$SWITCH" ] || usage
 
 cd "$(rt_repo_root)"
 ROUTERS=$ID
@@ -90,6 +112,7 @@ if [ -n "$SWITCH" ]; then
   PW_NAME=pw-switch
   SPECS=core-switch.spec.ts
 fi
+[ "$PART" != read ] || PW_NAME=pw-read
 PW_DIR="$RT_REPORT/$ID/$CORE_DIR/$PW_NAME"
 mkdir -p "$PW_DIR"
 STATE="$PW_DIR/state.json"
@@ -131,8 +154,16 @@ run_pw() {
     # переменная не должна просочиться из окружения вызывающего
     unset XCP_WANT_CORE
     [ -z "$SWITCH" ] || export XCP_WANT_CORE=$SWITCH
-    # --grep собирается в позиционные параметры: выражение содержит пробелы и скобки
-    [ -n "${RT_PW_GREP:-}" ] && [ -z "$SWITCH" ] && set -- "$@" --grep "$RT_PW_GREP"
+    # --grep собирается в позиционные параметры: выражение содержит пробелы и скобки.
+    # RT_PW_CORE_ONLY=1 (вторая ветвь набора changed) оставляет только тесты с тегом @core, в
+    # том числе внутри сужения RT_PW_GREP: то же выражение строит select-changed.mjs для
+    # RT_SPECS_CORE. Спек без таких тестов — не ошибка (--pass-with-no-tests).
+    _grep=${RT_PW_GREP:-}
+    if [ "${RT_PW_CORE_ONLY:-}" = 1 ] && [ -z "$SWITCH" ]; then
+      if [ -n "$_grep" ]; then _grep="(?=.*@core)$_grep"; else _grep="@core"; fi
+      set -- "$@" --pass-with-no-tests
+    fi
+    [ -n "$_grep" ] && [ -z "$SWITCH" ] && set -- "$@" --grep "$_grep"
     XCP_URL=$URL \
       XCP_PASSWORD=$(rt_get "$ID" PASSWORD) \
       XCP_ARCH=$ARCH \
@@ -158,6 +189,16 @@ else
       *) REST_SPECS="$REST_SPECS $_s" ;;
     esac
   done
+fi
+
+# --part: остаётся только своя часть набора
+case "$PART" in
+  read) REST_SPECS="" ;;
+  state) PAGES_SPEC="" ;;
+esac
+if [ -n "$PART" ] && [ -z "$PAGES_SPEC" ] && [ -z "$(echo $REST_SPECS)" ]; then
+  # в выбранных спеках нет подходящих этой части: нет ни строк результата, ни FAIL pw:run
+  exit 0
 fi
 
 : >"$LOG"
@@ -192,7 +233,10 @@ while IFS="$TAB" read -r st chk det || [ -n "$st" ]; do
   case "$st" in FAIL | XPASS) BAD=$((BAD + 1)) ;; esac
 done <"$PW_DIR/parsed.tsv"
 
-if [ "$found" = 0 ]; then
+if [ "$found" = 0 ] && [ "$rc" = 0 ] && [ "${RT_PW_CORE_ONLY:-}" = 1 ] && [ -z "$SWITCH" ]; then
+  # вторая ветвь: в части нет ни одного теста с тегом @core — строк результата нет и FAIL pw:run тоже
+  :
+elif [ "$found" = 0 ]; then
   # отчёта нет или он пуст: причина — в журнале запуска (панель не отвечает и т. п.)
   reason=$(grep -m 1 -E 'панель не отвечает|вход в панель не удался|не заданы переменные' "$LOG" || true)
   [ -n "$reason" ] || reason="Playwright завершился с кодом $rc без результатов: $(tail -n 3 "$LOG" | tr '\n' ' ')"

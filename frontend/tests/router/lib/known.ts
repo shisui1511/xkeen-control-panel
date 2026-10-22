@@ -20,7 +20,37 @@ export function selectorApplies(selector: string, arch = RT.arch, core = RT.core
   return selector === arch;
 }
 
+// Теги зависимости от ядра (D-04). Playwright отбирает по ним тесты второй ветви набора
+// changed: размеченные идут под обоими ядрами, остальные — под одним.
+export const CORE_TAG = '@core'; // тест явно читает ядро (RT.core, переключение)
+export const CORE_LABEL_TAG = '@core-label'; // ядро названо в селекторе метки knownFailure
+
+// Сборщик селекторов: пока он включён, knownFailure только запоминает селектор (см. coreTagsOf).
+let collected: string[] | null = null;
+
+/**
+ * Теги теста по его меткам известных падений: [CORE_LABEL_TAG], если среди селекторов,
+ * которые вызывает mark, есть называющий ядро (содержит «/»), иначе []. Тег выводится из
+ * тех же вызовов knownFailure, что и сама метка, поэтому снятая метка снимает и тег.
+ * mark вызывается при объявлении теста: без test.fail и без test.info().
+ */
+export function coreTagsOf(mark: () => void): string[] {
+  const previous = collected;
+  const selectors: string[] = [];
+  collected = selectors;
+  try {
+    mark();
+  } finally {
+    collected = previous;
+  }
+  return selectors.some((selector) => selector.includes('/')) ? [CORE_LABEL_TAG] : [];
+}
+
 export function knownFailure(selector: string, slug: string): void {
+  if (collected) {
+    collected.push(selector);
+    return;
+  }
   if (!selectorApplies(selector, RT.arch, RT.core)) return;
   test.fail(true, slug);
   // pw-parse.js ищет именно эту аннотацию: по ней KNOWN отличается от обычного ожидаемого падения

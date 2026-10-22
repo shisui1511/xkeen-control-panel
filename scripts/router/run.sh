@@ -4,16 +4,30 @@
 # Наборы:
 #   (без SUITE)  полный: деплой, снимок, затем матрица ядер (D-20) — для каждого ядра
 #                из RT_CORES ветвь «сброс записи на носитель (sync) -> переключение ядра
-#                через интерфейс панели (pw-suite.sh --switch) -> смоук по строкам лога
-#                после начала ветви ->
-#                Go-тесты на устройстве (go-suite.sh) -> Playwright против панели
-#                (pw-suite.sh)»; затем восстановление, сверка и проверка core-restored.
+#                через интерфейс панели (pw-suite.sh --switch) -> смоук без окна
+#                (smoke.sh --no-observe) -> наблюдатель окна (smoke.sh --observe-only)
+#                параллельно с частью Playwright только чтения (pw-suite.sh --part read) ->
+#                Go-тесты на устройстве (go-suite.sh) -> ожидание стенда (settle) -> часть
+#                Playwright, меняющая состояние (pw-suite.sh --part state)»; затем
+#                восстановление, сверка и проверка core-restored. Параллельно окну идут только
+#                спеки только чтения: Go-тесты и изменяющие спеки стартуют после ожидания
+#                наблюдателя (D-07). Полный прогон — полная матрица: все тесты под обоими
+#                ядрами; неразмеченный тест с разным исходом в ветвях даёт строку
+#                FAIL core-mark:<проверка> «нужна метка ядра» и раздел «Нужна метка ядра» в
+#                summary.md (D-05б).
 #   smoke        деплой и смоук (только чтение, без снимка).
 #   changed      быстрый набор для каждой задачи (D-25): select-changed.mjs по diff от
-#                origin/main и незакоммиченным правкам выбирает Go-пакеты и роутерные спеки;
-#                дальше та же матрица ядер, что у полного, но go и pw — только выбранное.
+#                origin/main и незакоммиченным правкам выбирает Go-пакеты и роутерные спеки.
+#                Ветви строятся гибридом (D-01…D-03): первая — ядро из SHA HEAD (cksum SHA
+#                чётный — xray, нечётный — mihomo; повтор на том же HEAD идёт под тем же
+#                ядром) со всем выбором; вторая — другое ядро и только тесты с меткой ядра
+#                (Go: RT_GO_CORE_PKGS по RT_GO_CORE_RUN, Playwright: RT_SPECS_CORE с отбором
+#                @core). Нет размеченных тестов — второй ветви нет вовсе (ни sync, ни
+#                переключения, ни смоука, ни окна). Окно смоука — 30 с, а при изменённом коде
+#                запуска ядра, watchdog или полном выборе (RT_KERNEL_TOUCHED=1) — 120 с (D-07).
 #                Ничего не затронуто — деплой и смоук (без снимка). Причины выбора —
-#                <отчёт>/select.txt и раздел «Выбор» отчёта.
+#                <отчёт>/select.txt, план ветвей и окно — <отчёт>/plan.txt, оба в разделе
+#                «Выбор» отчёта; раскладка тестов по ветвям — <отчёт>/<цель>/layout.tsv.
 #   session      сессия на стенде по спеке (SPEC=<файл JSON>): проходы с ожиданиями на одной
 #                цели и ядрах спеки, в том числе на файлах продукта из другого коммита
 #                (воспроизведение до исправления). Проходы ведёт session.mjs (формат спеки —
@@ -32,7 +46,9 @@
 # параллельно [preflight -> снимок -> ветви ядер (переключение, смоук, Go-тесты, Playwright)
 # -> восстановление + сверка] -> report.md и summary.md в build/router/<время>-<sha>/ (ссылка build/router/last).
 # Восстановление стоит в trap подпроцесса цели сразу после снимка: оно выполняется
-# при любом исходе, в том числе при падении этапов посередине.
+# при любом исходе, в том числе при падении этапов посередине. Сигнал, полученный верхним
+# run.sh, пересылается подпроцессам целей (под dash они сами SIGINT не перехватывают);
+# повторный сигнал восстановление не прерывает: _term и восстановление его игнорируют.
 #
 # Окружение:
 #   ROUTERS=<id,id>      выбор целей (по умолчанию все из конфига)
@@ -41,19 +57,30 @@
 #   RT_HOLD_MINUTES=<N>  после прогона держать блокировку N минут для ручной
 #                        проверки; снять раньше: touch <git-common-dir>/router-test.release
 #   RT_LOCK_WAIT=<с>     ожидание очереди на роутеры (по умолчанию 3600)
-#   RT_SMOKE_WINDOW=<с>  окно наблюдения смоука за перезапуском ядра (по умолчанию 120)
-#   RT_CORES="<ядра>"    ветви матрицы через пробел (по умолчанию «xray mihomo»); сужать
-#                        можно для ручной отладки, гейт перед PR — обе ветви на обеих целях
+#   RT_SMOKE_WINDOW=<с>  окно наблюдения смоука за перезапуском ядра (по умолчанию 120; в наборе
+#                        changed без этой переменной — 30 с, при RT_KERNEL_TOUCHED=1 — 120 с)
+#   RT_SMOKE_IPT_WAIT=<с> предел ожидания правил iptables в смоуке (по умолчанию 120); не
+#                        зависит от длины окна
+#   RT_CORES="<ядра>"    ветви матрицы через пробел (по умолчанию «xray mihomo»); явный RT_CORES —
+#                        ручная отладка: гибрид changed выключается, все выбранные тесты идут в
+#                        каждой ветви. Для гейта и обычной работы не задавать
 #   RT_REBOOT_WAIT=<с>   ожидание возврата цели после перезагрузки (по умолчанию 900)
 #   XCP_REBOOT_ORDER     порядок перезагрузки (локальный конфиг, id через пробел)
 #   RT_BASE=<ref>        база сравнения набора changed (по умолчанию merge-base с origin/main)
 #   RT_FILES=<a,b,c>     набор changed: выбор для заданного списка файлов вместо git (отладка)
 #
 # Раскладка отчёта: результаты всех ветвей — в <отчёт>/<id>/results.tsv (ядро ветви — во
-# второй колонке), артефакты ветви (go-*.jsonl, pw/, pw-switch/) — в <отчёт>/<id>/<ядро>/.
+# второй колонке), артефакты ветви (go-*.jsonl, pw-read/, pw/, pw-switch/) — в
+# <отчёт>/<id>/<ядро>/: pw-read/ — часть Playwright только чтения, pw/ — изменяющая часть.
+# Этапы ветви в timings.tsv: sync-<ядро>, switch-<ядро>, smoke-<ядро> (проверки без окна),
+# observe-<ядро> (окно, идёт параллельно pw-read-<ядро>), pw-read-<ядро>, go-<ядро>,
+# settle-<ядро>, pw-<ядро> (часть state). Хвост xcp.log ветви пишет наблюдатель окна.
+# Этап, оборванный сигналом, — строка с кодом 130 (её пишет _term), начало и ядро ветви те же.
 #
 # Код выхода: 0 — нет строк FAIL и XPASS, 2 — неизвестный набор, иначе 1. Набор session —
 # код session.mjs: 0 — ожидания совпали и стенд вернулся, 3 — сбой связи ПК↔стенд, иначе 1 или 2.
+# 130 — прерван сигналом INT, TERM или HUP: этап остановлен, стенд восстановлен по снимку,
+# отчёт с пометкой «Прерван» написан, удержание блокировки (RT_HOLD_MINUTES) не применяется.
 
 set -eu
 
@@ -72,7 +99,9 @@ case "$SUITE" in
 esac
 SUITE_NAME=${SUITE:-full}
 
-# Ветви матрицы ядер: только xray и mihomo, без повторов.
+# Ветви матрицы ядер: только xray и mihomo, без повторов. Явно заданный RT_CORES (даже
+# равный умолчанию) — ручная отладка: гибрид набора changed выключается.
+RT_CORES_SET=${RT_CORES+1}
 RT_CORES=${RT_CORES:-xray mihomo}
 _seen=""
 for _c in $RT_CORES; do
@@ -91,6 +120,18 @@ for _c in $RT_CORES; do
   esac
   _seen="$_seen $_c"
 done
+
+# Ядро первой ветви набора changed (D-02): чётная контрольная сумма cksum строки SHA HEAD
+# (без перевода строки) — xray, нечётная — mihomo. Зависит только от SHA: повтор на том же
+# HEAD идёт под тем же ядром, а на разных коммитах ядра чередуются.
+rt_sha_core() {
+  _shc=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+  if [ $((_shc % 2)) = 0 ]; then
+    echo xray
+  else
+    echo mihomo
+  fi
+}
 
 cd "$(rt_repo_root)"
 
@@ -124,7 +165,9 @@ hold_lock() {
   if [ -n "${RT_HOLD_MINUTES:-}" ] && [ "$RT_HOLD_MINUTES" -gt 0 ] 2>/dev/null; then
     RELEASE_FILE="$(rt_common_dir)/router-test.release"
     rm -f "$RELEASE_FILE"
-    trap 'rm -f "$RELEASE_FILE"' EXIT INT TERM
+    # INT/TERM/HUP прерывают удержание (код 130); EXIT убирает файл-флаг при любом выходе
+    trap 'rm -f "$RELEASE_FILE"' EXIT
+    trap 'exit 130' INT TERM HUP
     echo "router-test: блокировка удерживается $RT_HOLD_MINUTES мин; снять раньше: touch $RELEASE_FILE"
     END=$(($(date +%s) + RT_HOLD_MINUTES * 60))
     while [ "$(date +%s)" -lt "$END" ] && [ ! -e "$RELEASE_FILE" ]; do
@@ -136,7 +179,7 @@ hold_lock() {
 
 # --- набор session ------------------------------------------------------------------
 # Сессию ведёт session.mjs под блокировкой этого процесса. Сигнал передаётся ему, и run.sh
-# ждёт, пока он вернёт стенд (повторный wait, как у матрицы ниже).
+# ждёт, пока он вернёт стенд: по признаку жизни (kill -0), а не по коду wait, как у матрицы ниже.
 if [ "$SUITE" = session ]; then
   node "$SCRIPT_DIR/session.mjs" "$SPEC" &
   SPID=$!
@@ -148,7 +191,8 @@ if [ "$SUITE" = session ]; then
     wait "$SPID" || SRC=$?
   done
   trap - INT TERM HUP
-  hold_lock
+  # Прерванная сессия (код 130) блокировку не удерживает, как и прерванная матрица
+  [ "$SRC" = 130 ] || hold_lock
   if [ "$SRC" = 0 ]; then
     echo "router-test: зелёный"
   else
@@ -158,9 +202,15 @@ if [ "$SUITE" = session ]; then
 fi
 
 # --- выбор проверок набора changed (D-25) ------------------------------------------
-# select-changed.mjs печатает четыре строки для eval; перед eval вывод проверяется по
-# строгому шаблону (T-144.1-23), при любом сомнении выбирается всё.
+# select-changed.mjs печатает восемь строк для eval; перед eval вывод проверяется по
+# строгому шаблону на каждую строку и по их числу (T-144.1-23, T-145.1-18), при любом
+# сомнении выбирается всё, а вторая ветвь идёт со всеми тестами (RT_SEL_BAD=1).
 SEL_ANY=1
+RT_SEL_BAD=0
+RT_KERNEL_TOUCHED=0
+RT_GO_CORE_PKGS=""
+RT_GO_CORE_RUN=""
+RT_SPECS_CORE=""
 if [ "$SUITE" = changed ]; then
   _sel_args=""
   [ -z "${RT_BASE:-}" ] || _sel_args="--base $RT_BASE"
@@ -170,15 +220,18 @@ if [ "$SUITE" = changed ]; then
   _sel=$(node "$SCRIPT_DIR/select-changed.mjs" --explain $_sel_args 2>"$RT_REPORT/select.txt") || _sel_rc=$?
   _q="'"
   if [ "$_sel_rc" != 0 ] ||
-    [ "$(printf '%s\n' "$_sel" | wc -l)" != 4 ] ||
-    printf '%s\n' "$_sel" | grep -qvE "^(RT_SELECT_ALL=[01]|RT_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_PW_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q})\$"; then
+    [ "$(printf '%s\n' "$_sel" | wc -l)" != 8 ] ||
+    printf '%s\n' "$_sel" | grep -qvE "^(RT_SELECT_ALL=[01]|RT_GO_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_SPECS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_PW_GREP=${_q}[A-Za-z0-9_|()?!^*.: -]*${_q}|RT_GO_CORE_PKGS=${_q}[A-Za-z0-9_./ -]*${_q}|RT_GO_CORE_RUN=${_q}[A-Za-z0-9_|^\$()]*${_q}|RT_SPECS_CORE=${_q}[A-Za-z0-9_./ -]*${_q}|RT_KERNEL_TOUCHED=[01])\$"; then
     echo "всё: выбор не удался или его вывод не прошёл проверку (код $_sel_rc)" >>"$RT_REPORT/select.txt"
     RT_SELECT_ALL=1
+    RT_SEL_BAD=1
+    RT_KERNEL_TOUCHED=1
   else
     eval "$_sel"
   fi
   if [ "$RT_SELECT_ALL" = 1 ]; then
-    # полный набор: списки не нужны, этапы go и pw берут значения по умолчанию
+    # полный набор: списки не нужны, этапы go и pw берут значения по умолчанию; списки тестов
+    # с меткой ядра и RT_KERNEL_TOUCHED остаются: по ним строится вторая ветвь
     unset RT_GO_PKGS RT_SPECS RT_PW_GREP
     echo "итог: полный набор" >>"$RT_REPORT/select.txt"
   elif [ -z "$RT_GO_PKGS" ] && [ -z "$RT_SPECS" ]; then
@@ -189,6 +242,75 @@ if [ "$SUITE" = changed ]; then
     export RT_GO_PKGS RT_SPECS RT_PW_GREP
   fi
   echo "router-test: выбор — $(tail -n 1 "$RT_REPORT/select.txt")"
+fi
+
+# --- план ветвей и окно смоука (D-01…D-03, D-07) -----------------------------------------
+# changed без явного RT_CORES — гибрид: первая ветвь идёт под ядром из SHA HEAD со всем
+# выбором, вторая (другое ядро) — только с тестами, размеченными как зависящие от ядра, и не
+# запускается вовсе, если таких в выборе нет (ни sync, ни переключения, ни смоука, ни окна).
+# Полный прогон — полная матрица (оба ядра, все тесты); явный RT_CORES — прежняя семантика
+# для ручной отладки. Строки плана — в <отчёт>/plan.txt: раздел «Выбор» report.md и начало
+# раздела цели в summary.md.
+RT_HYBRID=0
+RT_B1=""
+RT_B2=""
+RT_B2_RUN=0
+if [ "$SUITE" = changed ] || [ -z "$SUITE" ]; then
+  : >"$RT_REPORT/plan.txt"
+  if [ -n "$RT_CORES_SET" ] && [ "$SUITE" = changed ] && [ "$SEL_ANY" = 0 ]; then
+    echo "- Ветви: нет (затронутого нет — деплой и смоук; RT_CORES=$RT_CORES не применяется)" >>"$RT_REPORT/plan.txt"
+  elif [ -n "$RT_CORES_SET" ]; then
+    echo "- Ветви: $RT_CORES (отладка RT_CORES: все выбранные тесты в каждой ветви, гибрид выключен)" >>"$RT_REPORT/plan.txt"
+  elif [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ] && [ "$RT_SEL_BAD" = 0 ]; then
+    RT_B1=$(rt_sha_core "$(git rev-parse HEAD)")
+    case "$RT_B1" in xray) RT_B2=mihomo ;; *) RT_B2=xray ;; esac
+    if [ -n "$RT_GO_CORE_PKGS" ] || [ -n "$RT_SPECS_CORE" ]; then
+      RT_B2_RUN=1
+      RT_CORES="$RT_B1 $RT_B2"
+    else
+      RT_CORES="$RT_B1"
+    fi
+    RT_HYBRID=1
+    echo "- Ядро ветви: $RT_B1 (правило: cksum SHA HEAD чётный — xray, нечётный — mihomo)" >>"$RT_REPORT/plan.txt"
+    if [ "$RT_B2_RUN" = 1 ]; then
+      _n_go=0
+      if [ -n "$RT_GO_CORE_RUN" ]; then
+        _n_go=$(($(printf '%s' "$RT_GO_CORE_RUN" | tr -cd '|' | wc -c) + 1))
+      elif [ -n "$RT_GO_CORE_PKGS" ]; then
+        # откат на «все роутерные тесты пакетов»: список тестов пуст, пакеты идут целиком
+        # shellcheck disable=SC2086
+        _n_go="все тесты пакетов ($(printf '%s\n' $RT_GO_CORE_PKGS | grep -c . || true))"
+      fi
+      # shellcheck disable=SC2086
+      _n_pw=$(printf '%s\n' $RT_SPECS_CORE | grep -c . || true)
+      echo "- Вторая ветвь ($RT_B2): только тесты с меткой ядра (Go: $_n_go, Playwright: $_n_pw спеков)" >>"$RT_REPORT/plan.txt"
+    else
+      echo "- Вторая ветвь ($RT_B2): не запускалась — в выборе нет тестов с меткой ядра" >>"$RT_REPORT/plan.txt"
+    fi
+  elif [ "$SUITE" = changed ] && [ "$RT_SEL_BAD" = 1 ]; then
+    echo "- Ветви: $RT_CORES (выбор не прошёл проверку: вторая ветвь со всеми тестами)" >>"$RT_REPORT/plan.txt"
+  elif [ "$SUITE" = changed ]; then
+    echo "- Ветви: нет (затронутого нет — деплой и смоук)" >>"$RT_REPORT/plan.txt"
+  else
+    echo "- Ветви: $RT_CORES (полная матрица: все тесты под каждым ядром)" >>"$RT_REPORT/plan.txt"
+  fi
+  # окно смоука: в changed 120 с при затронутом коде запуска ядра, иначе 30 с; заданный в
+  # окружении RT_SMOKE_WINDOW приоритетнее; в полном прогоне — RT_SMOKE_WINDOW или 120 с (D-07)
+  if [ "$SUITE" = changed ]; then
+    if [ -n "${RT_SMOKE_WINDOW:-}" ]; then
+      echo "- Окно смоука: $RT_SMOKE_WINDOW с (RT_SMOKE_WINDOW задан явно)" >>"$RT_REPORT/plan.txt"
+    elif [ "$RT_KERNEL_TOUCHED" = 1 ]; then
+      RT_SMOKE_WINDOW=120
+      echo "- Окно смоука: 120 с (затронут код запуска ядра или выбор полный)" >>"$RT_REPORT/plan.txt"
+    else
+      RT_SMOKE_WINDOW=30
+      echo "- Окно смоука: 30 с (код запуска ядра и watchdog не затронуты)" >>"$RT_REPORT/plan.txt"
+    fi
+  else
+    echo "- Окно смоука: ${RT_SMOKE_WINDOW:-120} с (полный прогон)" >>"$RT_REPORT/plan.txt"
+  fi
+  [ -z "${RT_SMOKE_WINDOW:-}" ] || export RT_SMOKE_WINDOW
+  echo "router-test: ветви — $(head -n 1 "$RT_REPORT/plan.txt")"
 fi
 
 # Проверки смоука, которые пропускаются, если цель недоступна или деплой не удался.
@@ -259,7 +381,10 @@ full_target() {
     [ -n "${RT_GO_PKGS:-}" ] || _do_go=0
     [ -n "${RT_SPECS:-}" ] || _do_pw=0
   fi
+  # Повторный сигнал (TERM группе плюс TERM, пересланный верхним run.sh, или второй Ctrl+C) не
+  # должен обрывать восстановление: игнорирование наследуют rt_restore, _after_restore и ssh.
   _finish() {
+    trap '' INT TERM HUP
     if [ "$_snapped" = 1 ]; then
       _snapped=0
       # строки восстановления и сверки несут исходное ядро
@@ -294,35 +419,131 @@ full_target() {
   # Ожидание рабочего состояния стенда после разрушающих Go-тестов (остановка, запуск и
   # перезапуск XKeen, D-04): на медленном устройстве перехват и статус XKeen приходят в норму
   # не сразу, а Playwright должен начинать с рабочей панели. Результат — строка stand-ready.
+  # Свои имена переменных (_sl_*): sh не имеет локальных, а rt_stage держит _t0 и _rc и
+  # по ним пишет код этапа; общие имена портили бы код и обрывали подпроцесс цели под set -e.
   _settle() {
-    _t0=$(date +%s)
-    _rc=0
-    RT_SSH_STDIN=1 rt_ssh "$1" "sh -s" <"$SCRIPT_DIR/settle.sh" >/dev/null 2>&1 || _rc=$?
-    _dt=$(($(date +%s) - _t0))
-    if [ "$_rc" = 0 ]; then
-      rt_result "$1" PASS stand-ready "после Go-тестов ядро запущено и перехват на месте за $_dt с"
+    _sl_t0=$(date +%s)
+    _sl_rc=0
+    RT_SSH_STDIN=1 rt_ssh "$1" "sh -s" <"$SCRIPT_DIR/settle.sh" >/dev/null 2>&1 || _sl_rc=$?
+    _sl_dt=$(($(date +%s) - _sl_t0))
+    if [ "$_sl_rc" = 0 ]; then
+      rt_result "$1" PASS stand-ready "после Go-тестов ядро запущено и перехват на месте за $_sl_dt с"
     else
-      rt_result "$1" FAIL stand-ready "после Go-тестов стенд не пришёл в рабочее состояние за $_dt с (код $_rc)"
+      rt_result "$1" FAIL stand-ready "после Go-тестов стенд не пришёл в рабочее состояние за $_sl_dt с (код $_sl_rc)"
     fi
   }
   _sp=""
-  # сигнал: остановить текущий этап и выйти — EXIT-trap восстановит стенд
+  # имя и время начала этапа под _bg (см. _bg), время начала наблюдателя окна (шаг 2а)
+  _bg_stage=""
+  _bg_t0=""
+  _ot0=""
+  # PID фоновых этапов, идущих одновременно с основным (их запускает план параллельных
+  # этапов); _term гасит и их
+  _sps=""
+  # Остановить этап целиком: он стартует отдельной группой процессов (setsid, PID этапа равен
+  # номеру группы), поэтому TERM группе настигает и ssh, и node этапа. Без setsid группы нет —
+  # тогда TERM только самому процессу. Запись `kill -TERM -- -N` dash не принимает, форма
+  # `kill -s TERM -- -N` работает и в dash, и в bash.
+  # Функция оболочки (_settle, rt_ssh) идёт в фоновом подпроцессе без своей группы: ему шлётся
+  # TERM, а его дочерние процессы (ssh) собираются заранее и получают TERM отдельно, иначе после
+  # смерти подпроцесса они осиротели бы.
+  _stop_stage() {
+    if kill -s TERM -- "-$1" 2>/dev/null; then
+      return 0
+    fi
+    _st_kids=$(pgrep -P "$1" 2>/dev/null || true)
+    kill "$1" 2>/dev/null || true
+    for _st_k in $_st_kids; do
+      kill -s TERM "$_st_k" 2>/dev/null || true
+    done
+  }
+  # То же с KILL: для этапа, не завершившегося по TERM за отведённый срок.
+  _kill_stage() {
+    if kill -s KILL -- "-$1" 2>/dev/null; then
+      return 0
+    fi
+    _st_kids=$(pgrep -P "$1" 2>/dev/null || true)
+    kill -s KILL "$1" 2>/dev/null || true
+    for _st_k in $_st_kids; do
+      kill -s KILL "$_st_k" 2>/dev/null || true
+    done
+  }
+  # сигнал: остановить текущий этап целиком и выйти — EXIT-trap восстановит стенд, когда
+  # потомки этапа уже не меняют его. Повторный сигнал игнорируется (первая команда): он не
+  # входит в _term заново. Оборванные этапы — основной под _bg и наблюдатель окна — пишутся в
+  # timings.tsv строкой с кодом 130 в формате rt_stage (цель, этап, секунды, код, начало,
+  # ядро): по ним summary.md видит, где оборвался прогон. Что шло, запоминается до остановки.
   _term() {
-    [ -z "$_sp" ] || kill "$_sp" 2>/dev/null || true
+    trap '' INT TERM HUP
+    _tm_stage=""
+    _tm_obs=0
+    [ -z "$_sp" ] || _tm_stage=$_bg_stage
+    [ -z "$_sps" ] || _tm_obs=1
+    for _p in $_sp $_sps; do
+      _stop_stage "$_p"
+    done
+    # Ожидание этапов ограничено 60 с: этап, не реагирующий на TERM (ssh к недоступной цели),
+    # иначе держал бы подпроцесс цели и блокировку неограниченно, а повторный сигнал игнорируется.
+    # Сторож по истечении срока посылает KILL; игнорируемые сигналы он наследует, поэтому его
+    # самого и его sleep гасит только KILL.
+    (
+      sleep 60
+      for _p in $_sp $_sps; do
+        _kill_stage "$_p"
+      done
+    ) &
+    _tm_kw=$!
+    for _p in $_sp $_sps; do
+      wait "$_p" 2>/dev/null || true
+    done
+    pkill -KILL -P "$_tm_kw" 2>/dev/null || true
+    kill -s KILL "$_tm_kw" 2>/dev/null || true
+    _tm_now=$(date +%s)
+    if [ -n "$_tm_stage" ]; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "$_tm_stage" "$((_tm_now - _bg_t0))" 130 "$_bg_t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
+    fi
+    if [ "$_tm_obs" = 1 ] && [ -n "$_ot0" ]; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$((_tm_now - _ot0))" 130 "$_ot0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
+    fi
     exit 130
   }
-  # Этап ветви в фоне с ожиданием: код этапа попадает в _brc, сигнал прерывает этап.
+  # Этап ветви в фоне с ожиданием: код этапа попадает в _brc и возвращается как код функции
+  # (вызовы под rt_stage дополняются `|| true`: run.sh идёт под set -e), сигнал прерывает
+  # этап целиком. Вызывается только как `rt_stage … _bg …`: rt_stage до вызова кладёт имя
+  # этапа в _stage, а время начала — в _t0, и _bg копирует их в свои _bg_stage и _bg_t0 (в sh
+  # нет локальных переменных, а rt_stage при восстановлении перезапишет общие): по ним _term
+  # пишет строку оборванного этапа. Свои имена — по той же причине, что и _sl_* у _settle.
   _bg() {
-    "$@" &
+    _bg_stage=${_stage:-}
+    _bg_t0=${_t0:-}
+    # Функцию оболочки (_settle, rt_ssh) setsid запустить не может: она идёт в фоне как есть.
+    case "$(type "$1" 2>&1)" in
+      *"shell function"* | *"is a function"*) "$@" & ;;
+      *)
+        if command -v setsid >/dev/null 2>&1; then
+          setsid "$@" &
+        else
+          "$@" &
+        fi
+        ;;
+    esac
     _sp=$!
     _brc=0
     wait "$_sp" || _brc=$?
     _sp=""
+    _bg_stage=""
+    return "$_brc"
   }
   trap '_finish' EXIT
   trap '_term' INT TERM HUP
-  rt_snapshot "$_t" || exit 1
+  # Флаг ставится до снимка: сигнал, пришедший сразу после возврата ssh снимка, обрабатывается
+  # ещё до следующей строки, и без флага восстановление не запустилось бы. Снимок не снят —
+  # флаг сбрасывается, восстанавливать нечего.
   _snapped=1
+  rt_snapshot "$_t" || {
+    _snapped=0
+    exit 1
+  }
   # Исходное ядро — из журнала снимка (строка core=…): к нему вернёт восстановление.
   _orig=$(sed -n 's/^core=//p' "$RT_REPORT/$_t/snapshot.log" | tail -n 1)
 
@@ -333,6 +554,31 @@ full_target() {
     export RT_CORE
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
     mkdir -p "$RT_REPORT/$_t/$_c"
+
+    # Тесты ветви. Гибрид (changed): в ветви второго ядра идут только тесты с меткой ядра
+    # (Go — RT_GO_CORE_PKGS по RT_GO_CORE_RUN, Playwright — RT_SPECS_CORE с отбором @core);
+    # пустой список — этап пропускается. Значения этапам передаёт env: _bg запускает этап в
+    # фоне отдельной группой процессов. Пустые значения этапы читают как «по умолчанию».
+    _b_go=$_do_go
+    _b_pw=$_do_pw
+    _b_skip="роутерные Go-пакеты набора changed не затронуты"
+    _b_skip_pw="роутерные спеки набора changed не затронуты"
+    _g_pkgs=${RT_GO_PKGS:-}
+    _g_run=${RT_GO_RUN:-}
+    _p_specs=${RT_SPECS:-}
+    _p_core=""
+    if [ "${RT_HYBRID:-0}" = 1 ] && [ "$_c" = "$RT_B2" ]; then
+      _g_pkgs=$RT_GO_CORE_PKGS
+      _g_run=$RT_GO_CORE_RUN
+      _p_specs=$RT_SPECS_CORE
+      _p_core=1
+      _b_go=1
+      _b_pw=1
+      [ -n "$RT_GO_CORE_PKGS" ] || _b_go=0
+      [ -n "$RT_SPECS_CORE" ] || _b_pw=0
+      _b_skip="во второй ветви нет тестов с меткой ядра"
+      _b_skip_pw="во второй ветви нет тестов с меткой ядра"
+    fi
 
     # Номер последней строки xcp.log до начала ветви: смоук смотрит только строки после неё,
     # поэтому ошибки, вызванные разрушающими тестами предыдущей ветви (D-04), не
@@ -360,10 +606,10 @@ full_target() {
     # десятки секунд — смоук ветви попадал в него: ssh без баннера, выход из панели
     # 36–41 с (гейты 20261020-203115-fdaccf9d, 20261020-214913-b9421f42). sync сбрасывает
     # всё сейчас, до переключения ядра; нет связи — смоук ветви это и покажет.
-    rt_stage "$_t" "sync-$_c" rt_ssh "$_t" sync >/dev/null 2>&1 || true
+    rt_stage "$_t" "sync-$_c" _bg rt_ssh "$_t" sync >/dev/null 2>&1 || true
 
     # 1. переключение ядра интерфейсом панели
-    rt_stage "$_t" "switch-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --switch "$_c"
+    rt_stage "$_t" "switch-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --switch "$_c" || true
     _src=$_brc
     if [ "$_src" != 0 ]; then
       for _s in smoke go pw; do
@@ -372,36 +618,67 @@ full_target() {
       continue
     fi
 
-    # 2. смоук (только чтение; строки лога — после начала ветви)
+    # 2. смоук без окна (только чтение; строки лога — после начала ветви). Ключи --from-* общие
+    # для проверок и наблюдателя: числа и шестнадцатеричный отпечаток, кавычки не нужны.
+    _fargs=""
     if [ -n "$_from" ] && [ -n "$_ino" ] && [ -n "$_fp" ]; then
-      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino" --from-fp "$_fp"
+      _fargs="--from-line $_from --from-inode $_ino --from-fp $_fp"
     elif [ -n "$_from" ] && [ -n "$_ino" ]; then
-      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from" --from-inode "$_ino"
+      _fargs="--from-line $_from --from-inode $_ino"
     elif [ -n "$_from" ]; then
-      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --from-line "$_from"
-    else
-      _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT"
+      _fargs="--from-line $_from"
     fi
+    # shellcheck disable=SC2086
+    rt_stage "$_t" "smoke-$_c" _bg sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --no-observe $_fargs || true
+    _smrc=$_brc
     # смоук записывает в core определённое им ядро: ветвь продолжается с ядром ветви
     printf '%s\n' "$_c" >"$RT_REPORT/$_t/core"
+
+    # 2а. окно наблюдения (smoke.sh --observe-only: smoke-settle 30 с, окно RT_SMOKE_WINDOW, вердикт
+    # kernel-restart и правила логов) фоном параллельно с частью Playwright только чтения
+    # (D-07): окно перекрыто обходом страниц, а не простоем. Параллельно окну идут только спеки
+    # только чтения; Go-тесты и изменяющие спеки стартуют после ожидания наблюдателя.
+    # Цель недоступна (код 3) — наблюдать нечего: смоук уже записал SKIP по этим проверкам.
+    if [ "$_smrc" != 3 ]; then
+      _ot0=$(date +%s)
+      if command -v setsid >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        setsid sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --observe-only $_fargs &
+      else
+        # shellcheck disable=SC2086
+        sh "$SCRIPT_DIR/smoke.sh" "$_t" "$EXPECT" --observe-only $_fargs &
+      fi
+      _osp=$!
+      _sps="$_sps $_osp"
+      if [ "$_b_pw" = 1 ]; then
+        rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+      fi
+      _orc=0
+      wait "$_osp" || _orc=$?
+      _sps=""
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "observe-$_c" "$(($(date +%s) - _ot0))" "$_orc" "$_ot0" "$_c" >>"$RT_REPORT/timings.tsv"
+    elif [ "$_b_pw" = 1 ]; then
+      rt_stage "$_t" "pw-read-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part read || true
+    fi
+    # хвост xcp.log пишет наблюдатель (без него — смоук без окна не пишет)
     [ ! -f "$RT_REPORT/$_t/xcp-log-tail.txt" ] || mv "$RT_REPORT/$_t/xcp-log-tail.txt" "$RT_REPORT/$_t/$_c/xcp-log-tail.txt"
 
     # 3. Go-тесты на устройстве с этим ядром
-    if [ "$_do_go" = 1 ]; then
-      rt_stage "$_t" "go-$_c" _bg sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c"
+    if [ "$_b_go" = 1 ]; then
+      rt_stage "$_t" "go-$_c" _bg env "RT_GO_PKGS=$_g_pkgs" "RT_GO_RUN=$_g_run" sh "$SCRIPT_DIR/go-suite.sh" "$_t" "$_c" || true
 
       # 3а. стенд после разрушающих тестов должен прийти в рабочее состояние
-      _settle "$_t"
+      rt_stage "$_t" "settle-$_c" _bg _settle "$_t" || true
     else
-      rt_result "$_t" SKIP go "роутерные Go-пакеты набора changed не затронуты"
+      rt_result "$_t" SKIP go "$_b_skip"
     fi
 
-    # 4. Playwright против настоящей панели: цели идут параллельно своими процессами
-    # (D-23), внутри цели — один воркер
-    if [ "$_do_pw" = 1 ]; then
-      rt_stage "$_t" "pw-$_c" _bg sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c"
+    # 4. Playwright, часть state: спеки, меняющие состояние стенда, один воркер. Часть только
+    # чтения прошла в шаге 2а
+    if [ "$_b_pw" = 1 ]; then
+      rt_stage "$_t" "pw-$_c" _bg env "RT_SPECS=$_p_specs" "RT_PW_CORE_ONLY=$_p_core" sh "$SCRIPT_DIR/pw-suite.sh" "$_t" "$_c" --part state || true
     else
-      rt_result "$_t" SKIP pw "роутерные спеки набора changed не затронуты"
+      rt_result "$_t" SKIP pw "$_b_skip_pw"
     fi
   done
   RT_CORE=""
@@ -483,7 +760,7 @@ rb_state() {
 rb_settle() {
   rb_s0=$(date +%s)
   RT_SSH_STDIN=1 rt_ssh "$1" "sh -s" <"$SCRIPT_DIR/settle.sh" >/dev/null 2>&1 || true
-  printf '%s\t%s\t%s\t%s\t%s\n' "$1" reboot-settle "$(($(date +%s) - rb_s0))" 0 "$rb_s0" >>"$RT_REPORT/timings.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" reboot-settle "$(($(date +%s) - rb_s0))" 0 "$rb_s0" - >>"$RT_REPORT/timings.tsv"
 }
 
 # Полный цикл одной цели: состояние до -> перезагрузка -> возврат -> состояние после ->
@@ -660,9 +937,18 @@ reboot_suite() {
 }
 
 PIDS=""
+RT_INTR=0
 if [ "$SUITE" = reboot ]; then
   reboot_suite
 else
+  # Сигнал ставится до запуска подпроцессов целей: между запуском и ожиданием он не убивает
+  # run.sh и не оставляет цели без ожидания. Под dash сигнал, игнорируемый при старте
+  # асинхронного списка (`( full_target ) &`), подпроцесс цели перехватить не может: его
+  # trap INT не срабатывает, и Ctrl+C не гасил бы этап. TERM он перехватывает, поэтому
+  # обработчик пересылает TERM каждому подпроцессу цели (его PID, не группе: подпроцесс не
+  # лидер группы, и TERM группе задел бы сам run.sh). Цель останавливает этап, восстанавливает
+  # стенд и выходит с кодом 130.
+  trap 'RT_INTR=1; echo "router-test: прерывание — останавливаю этапы и жду восстановления стенда" >&2; for _kp in $PIDS; do kill -s TERM "$_kp" 2>/dev/null || true; done' INT TERM HUP
   for t in ${DEPLOYED:-}; do
     if [ -z "$SUITE" ] || { [ "$SUITE" = changed ] && [ "$SEL_ANY" = 1 ]; }; then
       (full_target "$t") &
@@ -672,20 +958,26 @@ else
     PIDS="$PIDS $!"
   done
 fi
-# Фоновые подпроцессы игнорируют SIGINT, поэтому прерывание run.sh не обрывает
-# восстановление: wait, прерванный сигналом (код больше 128), повторяем, пока
-# подпроцесс не завершится (повторный wait завершённого даёт 127).
-trap 'echo "router-test: прерывание — жду восстановления стенда" >&2' INT TERM HUP
+# Ждём подпроцессы целей по признаку жизни, а не по коду wait. Прерванный перехваченным
+# сигналом wait возвращает больше 128, пока подпроцесс жив; повторный wait завершённого
+# подпроцесса в dash и bash снова даёт его сохранённый код, а не 127, поэтому условие по
+# величине кода зацикливалось бы навсегда (G-145.1-5). Конец ожидания — kill -0: пока
+# подпроцесс жив (в том числе зомби), wait повторяется, и последний wait забирает его код.
+# Код 130 — цель прервали напрямую, мимо этого обработчика.
 for p in $PIDS; do
-  while :; do
+  wrc=0
+  wait "$p" || wrc=$?
+  while kill -0 "$p" 2>/dev/null; do
     wrc=0
     wait "$p" || wrc=$?
-    if [ "$wrc" -le 128 ] || [ "$wrc" = 127 ]; then
-      break
-    fi
   done
+  if [ "$wrc" = 130 ]; then
+    RT_INTR=1
+  fi
 done
-trap - INT TERM HUP
+# На время построения отчёта сигнал не убивает run.sh: он только запоминается (RT_INTR), отчёт
+# доводится до конца, и прогон выходит с кодом 130 без удержания блокировки.
+trap 'RT_INTR=1' INT TERM HUP
 
 # --- отчёт -------------------------------------------------------------------------
 
@@ -694,11 +986,34 @@ DIRTY=$(sed -n 's/^dirty=//p' "$RT_REPORT/meta")
 FAILS=0
 XPASSES=0
 
+# Прерванный прогон: пометка в отчётах и список оборванных этапов (строки timings.tsv с кодом
+# 130 пишет _term, D-19). Нет таких строк — «-».
+if [ "$RT_INTR" = 1 ]; then
+  INTR_STAGES=""
+  for t in $RT_TARGETS; do
+    _is=""
+    if [ -f "$RT_REPORT/timings.tsv" ]; then
+      _is=$(awk -F'\t' -v t="$t" '$1 == t && $4 == 130 {printf "%s%s/%s", sep, t, $2; sep = ", "}' "$RT_REPORT/timings.tsv") || _is=""
+    fi
+    [ -z "$_is" ] || INTR_STAGES="${INTR_STAGES:+$INTR_STAGES, }$_is"
+  done
+fi
+
+# Разделы по ветвям (этапы, восстановление, долгие тесты, метки ядра) строятся до отчётов и
+# до подсчёта FAIL: --write дописывает в results.tsv строки FAIL core-mark:… (D-05б, полный
+# прогон краснеет на неразмеченном тесте с разным исходом) и пишет <цель>/layout.tsv (D-19).
+# Строки плана ветвей (plan.txt) идут первыми в разделе цели.
+for t in $RT_TARGETS; do
+  mkdir -p "$RT_REPORT/$t"
+  node "$SCRIPT_DIR/branch-report.mjs" "$RT_REPORT" "$t" --suite "$SUITE_NAME" --write --plan "$RT_REPORT/plan.txt" >"$RT_REPORT/$t/branch.md" 2>"$RT_REPORT/$t/branch.err" || true
+done
+
 {
   echo "# Прогон проверки на роутерах"
   echo
   echo "- Набор: $SUITE_NAME"
   echo "- SHA: $SHA (незакоммиченные правки: $DIRTY)"
+  [ "$RT_INTR" != 1 ] || echo "- Прерван: да (сигнал); оборваны этапы: ${INTR_STAGES:--}"
   [ -z "${RELEASE:-}" ] || echo "- Релиз: $RELEASE"
   echo
   if [ "$SUITE" = changed ] && [ -f "$RT_REPORT/select.txt" ]; then
@@ -707,6 +1022,17 @@ XPASSES=0
     echo '```'
     cat "$RT_REPORT/select.txt"
     echo '```'
+    echo
+    if [ -s "$RT_REPORT/plan.txt" ]; then
+      echo "### Ветви"
+      echo
+      cat "$RT_REPORT/plan.txt"
+      echo
+    fi
+  elif [ -s "$RT_REPORT/plan.txt" ]; then
+    echo "## Ветви"
+    echo
+    cat "$RT_REPORT/plan.txt"
     echo
   fi
   if [ "$SUITE" = reboot ] && [ -f "$RT_REPORT/reboot-order" ]; then
@@ -760,6 +1086,7 @@ XPASSES=0
   echo "- SHA: $SHA"
   [ -z "${RELEASE:-}" ] || echo "- Релиз: $RELEASE"
   echo "- Проверены цели: $(printf '%s' "$RT_TARGETS" | tr ' ' ',')"
+  [ "$RT_INTR" != 1 ] || echo "- Прерван: да (сигнал); оборваны этапы: ${INTR_STAGES:--}"
   echo
   for t in $RT_TARGETS; do
     arch=$(rt_get "$t" ARCH)
@@ -771,6 +1098,9 @@ XPASSES=0
     else
       echo "результатов нет"
     fi
+    # план ветвей, этапы по ветвям, итог и критический путь, оболочка, восстановление, долгие
+    # тесты, метки ядра (D-19)
+    [ ! -f "$RT_REPORT/$t/branch.md" ] || cat "$RT_REPORT/$t/branch.md"
   done
 } >"$RT_REPORT/summary.md"
 
@@ -789,6 +1119,13 @@ echo
 cat "$RT_REPORT/summary.md"
 
 # --- удержание блокировки для ручной проверки ---------------------------------------
+
+# Прерванный прогон блокировку не удерживает: RT_HOLD_MINUTES — для ручной проверки после
+# завершённого прогона, а здесь блокировка снимается выходом процесса.
+if [ "$RT_INTR" = 1 ]; then
+  echo "router-test: прерван (код 130), итог — $RT_REPORT/summary.md" >&2
+  exit 130
+fi
 
 hold_lock
 
