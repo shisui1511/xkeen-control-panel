@@ -419,7 +419,7 @@ if (suite === "full") {
   out.push("## Нужна метка ядра", "");
   if (needMark.length === 0) out.push("- нет");
   for (const n of needMark) {
-    const name = n.check.replace(/\|/g, "\\|");
+    const name = n.check.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
     out.push(`- core-mark:${name}: нужна метка ядра: xray ${n.xray}, mihomo ${n.mihomo}`);
   }
   out.push("");
