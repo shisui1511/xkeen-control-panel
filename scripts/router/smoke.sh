@@ -208,7 +208,11 @@ finalize() {
   # FAIL, совпавший с применимой меткой (точно или по префиксу), -> KNOWN; метка без
   # совпавшего FAIL -> XPASS.
   _fin="$RT_REPORT/$ID/smoke${SUF}.final"
-  awk -F'\t' -v OFS='\t' -v lf="$_lab" -v part="$PART_CHECKS" '
+  # Прерванный смоук (код >= 128) и проверка со статусом SKIP (нет связи) метку не оценивают:
+  # проверка не выполнялась, XPASS по ней был бы ложным.
+  _intr=0
+  [ "$_rc" -lt 128 ] || _intr=1
+  awk -F'\t' -v OFS='\t' -v lf="$_lab" -v part="$PART_CHECKS" -v intr="$_intr" '
     BEGIN { n = 0; np = split(part, pc, " ") }
     FILENAME == lf {
       # метка другой части смоука не оценивается: ни KNOWN, ни XPASS
@@ -220,6 +224,10 @@ finalize() {
     }
     {
       st = $1; det = $3
+      if (st == "SKIP") {
+        for (i = 0; i < n; i++)
+          if (index($2, lp[i]) == 1) m[i] = 1
+      }
       if (st == "FAIL") {
         for (i = 0; i < n; i++) {
           if (index($2, lp[i]) == 1) {
@@ -230,7 +238,7 @@ finalize() {
       print st, $2, det
     }
     END {
-      for (i = 0; i < n; i++)
+      for (i = 0; i < n && !intr; i++)
         if (!m[i]) print "XPASS", "known:" lp[i], "метка больше не нужна: снять и закрыть todo " ls[i]
     }
   ' "$_lab" "$BUF" >"$_fin"
