@@ -165,7 +165,9 @@ hold_lock() {
   if [ -n "${RT_HOLD_MINUTES:-}" ] && [ "$RT_HOLD_MINUTES" -gt 0 ] 2>/dev/null; then
     RELEASE_FILE="$(rt_common_dir)/router-test.release"
     rm -f "$RELEASE_FILE"
-    trap 'rm -f "$RELEASE_FILE"' EXIT INT TERM
+    # INT/TERM/HUP прерывают удержание (код 130); EXIT убирает файл-флаг при любом выходе
+    trap 'rm -f "$RELEASE_FILE"' EXIT
+    trap 'exit 130' INT TERM HUP
     echo "router-test: блокировка удерживается $RT_HOLD_MINUTES мин; снять раньше: touch $RELEASE_FILE"
     END=$(($(date +%s) + RT_HOLD_MINUTES * 60))
     while [ "$(date +%s)" -lt "$END" ] && [ ! -e "$RELEASE_FILE" ]; do
@@ -189,7 +191,8 @@ if [ "$SUITE" = session ]; then
     wait "$SPID" || SRC=$?
   done
   trap - INT TERM HUP
-  hold_lock
+  # Прерванная сессия (код 130) блокировку не удерживает, как и прерванная матрица
+  [ "$SRC" = 130 ] || hold_lock
   if [ "$SRC" = 0 ]; then
     echo "router-test: зелёный"
   else
