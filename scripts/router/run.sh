@@ -457,6 +457,17 @@ full_target() {
       kill -s TERM "$_st_k" 2>/dev/null || true
     done
   }
+  # То же с KILL: для этапа, не завершившегося по TERM за отведённый срок.
+  _kill_stage() {
+    if kill -s KILL -- "-$1" 2>/dev/null; then
+      return 0
+    fi
+    _st_kids=$(pgrep -P "$1" 2>/dev/null || true)
+    kill -s KILL "$1" 2>/dev/null || true
+    for _st_k in $_st_kids; do
+      kill -s KILL "$_st_k" 2>/dev/null || true
+    done
+  }
   # сигнал: остановить текущий этап целиком и выйти — EXIT-trap восстановит стенд, когда
   # потомки этапа уже не меняют его. Повторный сигнал игнорируется (первая команда): он не
   # входит в _term заново. Оборванные этапы — основной под _bg и наблюдатель окна — пишутся в
@@ -471,9 +482,22 @@ full_target() {
     for _p in $_sp $_sps; do
       _stop_stage "$_p"
     done
+    # Ожидание этапов ограничено 60 с: этап, не реагирующий на TERM (ssh к недоступной цели),
+    # иначе держал бы подпроцесс цели и блокировку неограниченно, а повторный сигнал игнорируется.
+    # Сторож по истечении срока посылает KILL; игнорируемые сигналы он наследует, поэтому его
+    # самого и его sleep гасит только KILL.
+    (
+      sleep 60
+      for _p in $_sp $_sps; do
+        _kill_stage "$_p"
+      done
+    ) &
+    _tm_kw=$!
     for _p in $_sp $_sps; do
       wait "$_p" 2>/dev/null || true
     done
+    pkill -KILL -P "$_tm_kw" 2>/dev/null || true
+    kill -s KILL "$_tm_kw" 2>/dev/null || true
     _tm_now=$(date +%s)
     if [ -n "$_tm_stage" ]; then
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "$_tm_stage" "$((_tm_now - _bg_t0))" 130 "$_bg_t0" "${RT_CORE:--}" >>"$RT_REPORT/timings.tsv"
