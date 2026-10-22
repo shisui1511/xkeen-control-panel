@@ -221,7 +221,7 @@ const LIB_READS_CORE = /\bRT\.core\b|\bXCP_CORE\b/;
 const SPEC_EXEMPT = new Set(['core-switch.spec.ts']);
 const LIB_EXEMPT = new Set(['env.ts', 'known.ts']);
 
-/** Вырезает комментарии TS/JS и импорты; строки и шаблоны оставляет как есть. */
+/** Вырезает комментарии TS/JS и импорты; строки, шаблоны и литералы регулярных выражений оставляет как есть. */
 function stripTs(text) {
   let out = '';
   const n = text.length;
@@ -229,7 +229,12 @@ function stripTs(text) {
   while (i < n) {
     const c = text[i];
     const next = text[i + 1];
-    if (c === '/' && next === '/') {
+    if (c === '/' && isRegexStart(text, i)) {
+      // литерал регулярного выражения целиком: `\/\/` внутри него не комментарий
+      const j = Math.min(regexEnd(text, i) + 1, n);
+      out += text.slice(i, j);
+      i = j;
+    } else if (c === '/' && next === '/') {
       while (i < n && text[i] !== '\n') i++;
     } else if (c === '/' && next === '*') {
       const end = text.indexOf('*/', i + 2);
@@ -280,6 +285,9 @@ function matchParen(code, open) {
         j += code[j] === '\\' ? 2 : 1;
       }
       i = j;
+    } else if (c === '/' && isRegexStart(code, i)) {
+      // литерал регулярного выражения: скобки и кавычки внутри не считаются
+      i = regexEnd(code, i);
     } else if (c === '(') {
       depth++;
     } else if (c === ')') {
@@ -288,6 +296,31 @@ function matchParen(code, open) {
     }
   }
   return -1;
+}
+
+/** Индекс закрывающего слеша литерала регулярного выражения, начатого в позиции i (или конец строки). */
+function regexEnd(code, i) {
+  const n = code.length;
+  let j = i + 1;
+  let cls = false;
+  while (j < n && code[j] !== '\n' && (cls || code[j] !== '/')) {
+    if (code[j] === '\\') j++;
+    else if (code[j] === '[') cls = true;
+    else if (code[j] === ']') cls = false;
+    j++;
+  }
+  return j;
+}
+
+/** Слеш в позиции i начинает литерал регулярного выражения, а не деление или комментарий. */
+function isRegexStart(code, i) {
+  if (code[i + 1] === '/' || code[i + 1] === '*') return false;
+  let k = i - 1;
+  while (k >= 0 && /\s/.test(code[k])) k--;
+  if (k < 0 || '(,=:[!&|?{};<>+-*%^~'.includes(code[k])) return true;
+  // слово-оператор перед слешем: `return /x/`, `await /x/.test(…)` и т. п.
+  const word = /([A-Za-z_$][\w$]*)$/.exec(code.slice(Math.max(0, k - 12), k + 1));
+  return word !== null && /^(?:return|typeof|case|in|of|else|do|void|throw|delete|new|await|yield)$/.test(word[1]);
 }
 
 /**
@@ -335,7 +368,8 @@ function coreReadingHelpers(code) {
 /**
  * Вызовы test(...) спека, читающие ядро (RT.core и т. п. или помощник, читающий ядро), но
  * без тега ядра: список заголовков. Тег — CORE_TAG, '@core' или coreTagsOf в самом вызове либо
- * переменная tag, объявленная с ними. Вызов с несошедшимися скобками пропускается.
+ * переменная tag, объявленная с ними. Вызов с несошедшимися скобками не пропускается, а
+ * попадает в список с unparsed: true (разбор не удался — нарушение, а не молчаливый пропуск).
  */
 function untaggedCoreTests(text) {
   const code = stripTs(text);
@@ -345,14 +379,18 @@ function untaggedCoreTests(text) {
   for (const m of code.matchAll(/(?<![\w.$])test\(/g)) {
     const open = m.index + m[0].length - 1;
     const end = matchParen(code, open);
-    if (end < 0) continue;
+    if (end < 0) {
+      // страж не должен проходить на том, что не смог разобрать
+      bad.push({ unparsed: true, title: code.slice(open, open + 60).replace(/\s+/g, ' ') });
+      continue;
+    }
     const seg = code.slice(open, end + 1);
     const reads =
       SPEC_READS_CORE.test(seg) || [...tainted].some((n) => new RegExp('\\b' + n + '\\(').test(seg));
     if (!reads) continue;
     const tagged =
       SPEC_CORE_TAGGED.test(seg) || (tagVarOk && /\{\s*tag\s*[,}]|\btag:\s*tag\b/.test(seg));
-    if (!tagged) bad.push(seg.slice(1, 70).replace(/\s+/g, ' '));
+    if (!tagged) bad.push({ unparsed: false, title: seg.slice(1, 70).replace(/\s+/g, ' ') });
   }
   return bad;
 }
@@ -365,8 +403,12 @@ function specIssues(text) {
     issues.push('спек читает ядро без тега ядра: объявите такие тесты с { tag: CORE_TAG }');
   } else if (f.readsCore) {
     // тег есть у части тестов файла: остальные тесты, читающие ядро, тоже должны его нести
-    for (const title of untaggedCoreTests(text)) {
-      issues.push(`тест читает ядро без тега ядра: объявите его с { tag: CORE_TAG } (${title})`);
+    for (const { unparsed, title } of untaggedCoreTests(text)) {
+      issues.push(
+        unparsed
+          ? `не удалось разобрать скобки вызова test(…), проверка тега ядра невозможна: ${title}`
+          : `тест читает ядро без тега ядра: объявите его с { tag: CORE_TAG } (${title})`
+      );
     }
   }
   if (f.coreLabelSelectors.length > 0 && !f.usesCoreTagsOf) {

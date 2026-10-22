@@ -99,6 +99,16 @@ const specSamples = [
   [
     "test('a', { tag: CORE_TAG }, async () => {\n  if (RT.core === 'xray') return;\n});\ntest('b', async () => {\n  await page.goto('/');\n});\n",
     0
+  ],
+  // регулярный литерал со скобкой и апострофом не сбивает разбор: тест b без тега найден
+  [
+    "test('a', { tag: CORE_TAG }, async () => {\n  if (RT.core === 'xray') return;\n});\ntest('b', async () => {\n  expect(x).toMatch(/\\(/);\n  expect(y).toMatch(/it's/);\n  if (RT.core === 'mihomo') return;\n});\n",
+    1
+  ],
+  // скобки вызова не сошлись: страж сообщает о неразобранном вызове, а не молчит
+  [
+    "test('a', { tag: CORE_TAG }, async () => {\n  if (RT.core === 'xray') return;\n});\ntest('b', async () => {\n  const r = a ? /x/ : (1;\n",
+    1
   ]
 ];
 for (const [text, want] of specSamples) {
