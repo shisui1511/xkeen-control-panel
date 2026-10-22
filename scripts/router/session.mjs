@@ -91,8 +91,9 @@
 // 1 — расхождение, или этап сломался, или стенд не вернулся; 2 — неверная спека или запуск
 // не через run.sh; 3 — сбой связи ПК↔стенд (не красный прогон, разбор по AGENTS.md; в том
 // числе FAIL reachable во вложенном прогоне набора); 130 — прерывание.
-// Прерывание во время вложенного прогона: сигнал уходит вложенному run.sh, сессия ждёт его
-// выхода (стенд по снимку он восстанавливает сам); повторный сигнал — выход без возврата.
+// Прерывание во время вложенного прогона: сигнал уходит всей группе процессов текущего этапа
+// (каждый этап и вложенный run.sh идут отдельной группой), сессия ждёт выхода run.sh (стенд по
+// снимку он восстанавливает сам) и опустения группы; повторный сигнал — выход без возврата.
 // Прерывание по спеке (interrupt) сессию не прерывает: после выхода вложенного прогона
 // сессия сверяет вердикты и продолжает следующие проходы.
 
@@ -463,7 +464,9 @@ class Session {
         cwd: this.root,
         env: full,
         stdio: ['ignore', 'pipe', 'pipe'],
-        detached: opts.detached === true
+        // каждый этап — своя группа процессов: сигнал прерывания уходит всей группе (этап и
+        // его ssh, вложенный run.sh и его deploy.sh), а не одному pid
+        detached: opts.detached !== false
       });
       this.child = child;
       const onClose = opts.onSpawn ? opts.onSpawn(child) : null;
@@ -476,9 +479,62 @@ class Session {
       child.on('close', (code, sig) => {
         this.child = null;
         if (onClose) onClose();
-        resolve(code ?? 128 + (osConstants.signals[sig] ?? 15));
+        const rc = code ?? 128 + (osConstants.signals[sig] ?? 15);
+        // После прерывания потомки группы (deploy.sh вложенного прогона, ssh этапа) могли
+        // пережить лидера: возврат стенда не стартует, пока группа не опустеет, иначе он шёл бы
+        // одновременно с ними
+        const pid = child.pid;
+        const interrupted = this.aborted || rc >= 128;
+        if (opts.drain !== false && interrupted && Number.isInteger(pid) && pid > 1) {
+          this.drainGroup(pid).then(() => resolve(rc));
+        } else {
+          resolve(rc);
+        }
       });
     });
+  }
+
+  // Сигнал текущему этапу: всей его группе (лидер группы — сам этап, см. run); не вышло —
+  // самому процессу.
+  signalChild(sig) {
+    const c = this.child;
+    if (!c) return;
+    const pid = c.pid;
+    if (Number.isInteger(pid) && pid > 1) {
+      try {
+        process.kill(-pid, sig);
+        return;
+      } catch {
+        // группы нет — сигнал самому процессу
+      }
+    }
+    try {
+      c.kill(sig);
+    } catch {
+      // процесс уже вышел
+    }
+  }
+
+  // Ждёт, пока группа процессов опустеет: до 30 с, затем SIGKILL группе и ещё до 5 с.
+  async drainGroup(pgid) {
+    const alive = () => {
+      try {
+        process.kill(-pgid, 0);
+        return true;
+      } catch (e) {
+        return e.code !== 'ESRCH';
+      }
+    };
+    const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+    for (let i = 0; i < 60 && alive(); i++) await pause(500);
+    if (!alive()) return;
+    this.say(`потомки этапа живы после прерывания: SIGKILL группе ${pgid}`);
+    try {
+      process.kill(-pgid, 'SIGKILL');
+    } catch {
+      // группа уже вышла
+    }
+    for (let i = 0; i < 10 && alive(); i++) await pause(500);
   }
 
   // Команда на цели через rt_ssh из lib.sh; печатает stdout команды.
@@ -662,6 +718,8 @@ class Session {
     };
     const opts = {
       detached: true,
+      // потомков после выхода run.sh проверяет вердикт «процессы на ПК», группу не добивать
+      drain: false,
       onSpawn: (child) => {
         // группа вложенного прогона — только по целому pid > 1; иначе сигнал не шлём вовсе
         const pid = child.pid;
@@ -1154,10 +1212,13 @@ async function main() {
   s.say(`отчёт ${path.relative(root, s.dir)}`);
   let interrupts = 0;
   const onSignal = () => {
-    if (++interrupts > 1) process.exit(130);
+    if (++interrupts > 1) {
+      s.signalChild('SIGTERM');
+      process.exit(130);
+    }
     s.say('прерывание — возвращаю стенд (повторный сигнал — выход без возврата)');
     s.aborted = true;
-    if (s.child) s.child.kill('SIGTERM');
+    s.signalChild('SIGTERM');
   };
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, onSignal);
 
