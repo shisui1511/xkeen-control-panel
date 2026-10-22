@@ -206,10 +206,12 @@ finalize() {
     done <"$KNOWN_FILE"
   fi
   # FAIL, совпавший с применимой меткой (точно или по префиксу), -> KNOWN; метка без
-  # совпавшего FAIL -> XPASS.
+  # совпавшего FAIL -> XPASS, но только если её проверка выполнилась и прошла (PASS самой
+  # проверки — log-repeat для метки log-repeat:<сообщение> — или строки с префиксом метки),
+  # как у меток reboot:* в run.sh.
   _fin="$RT_REPORT/$ID/smoke${SUF}.final"
-  # Прерванный смоук (код >= 128) и проверка со статусом SKIP (нет связи) метку не оценивают:
-  # проверка не выполнялась, XPASS по ней был бы ложным.
+  # Проверка не выполнялась — SKIP (нет связи, окно лога потеряно), строки нет совсем (нет файла
+  # лога) или смоук прерван (код >= 128): XPASS по метке был бы ложным.
   _intr=0
   [ "$_rc" -lt 128 ] || _intr=1
   awk -F'\t' -v OFS='\t' -v lf="$_lab" -v part="$PART_CHECKS" -v intr="$_intr" '
@@ -219,14 +221,14 @@ finalize() {
       rel = (np == 0)
       for (j = 1; j <= np; j++)
         if (index(pc[j], $1) == 1 || index($1, pc[j]) == 1) rel = 1
-      if (rel) { lp[n] = $1; ls[n] = $2; n++ }
+      if (rel) { lp[n] = $1; ls[n] = $2; lb[n] = $1; sub(/:.*/, "", lb[n]); n++ }
       next
     }
     {
       st = $1; det = $3
-      if (st == "SKIP") {
+      if (st == "PASS") {
         for (i = 0; i < n; i++)
-          if (index($2, lp[i]) == 1) m[i] = 1
+          if ($2 == lb[i] || index($2, lp[i]) == 1) ok[i] = 1
       }
       if (st == "FAIL") {
         for (i = 0; i < n; i++) {
@@ -239,7 +241,7 @@ finalize() {
     }
     END {
       for (i = 0; i < n && !intr; i++)
-        if (!m[i]) print "XPASS", "known:" lp[i], "метка больше не нужна: снять и закрыть todo " ls[i]
+        if (!m[i] && ok[i]) print "XPASS", "known:" lp[i], "метка больше не нужна: снять и закрыть todo " ls[i]
     }
   ' "$_lab" "$BUF" >"$_fin"
   while IFS="$TAB" read -r _st _chk _det || [ -n "$_st" ]; do
