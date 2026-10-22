@@ -949,22 +949,44 @@ class Session {
   // восстановлен, лишних падений нет. В отчёт идут только числа: командные строки процессов
   // (рабочий каталог, регэксп -test.run) не выводятся.
   judgeInterrupt(st, rows, push) {
-    // процессы на ПК: группа вложенного прогона и этапы обвязки (держали бы дескриптор блокировки)
+    // процессы на ПК: группа вложенного прогона и этапы обвязки (держали бы дескриптор блокировки).
+    // Проверка повторяется до трёх раз с паузой 1 с: процессы только что вышли, и зомби-сироты
+    // ещё не подобраны init. Живой член группы — не зомби (ps -o stat); этап обвязки — процесс,
+    // чья командная строка НАЧИНАЕТСЯ с `sh <путь>/scripts/router/<этап>.sh`, поэтому редактор,
+    // tail или shellcheck с тем же путём в аргументах не считаются.
     let groupAlive = false;
-    if (st.pgid > 1) {
-      try {
-        process.kill(-st.pgid, 0);
-        groupAlive = true;
-      } catch (e) {
-        groupAlive = e.code !== 'ESRCH';
-      }
-    }
-    const pg = spawnSync('pgrep', ['-f', 'scripts/router/(go-suite|pw-suite|smoke)[.]sh'], {
-      encoding: 'utf8'
-    });
     let stages = -1;
-    if (!pg.error && pg.status === 1) stages = 0;
-    else if (!pg.error && pg.status === 0) stages = pg.stdout.split('\n').filter(Boolean).length;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      groupAlive = false;
+      if (st.pgid > 1) {
+        const ps = spawnSync('ps', ['-eo', 'pgid=,stat='], { encoding: 'utf8' });
+        if (!ps.error && ps.status === 0) {
+          groupAlive = ps.stdout
+            .split('\n')
+            .some((l) => {
+              const [g, stat = ''] = l.trim().split(/\s+/);
+              return Number(g) === st.pgid && !stat.startsWith('Z');
+            });
+        } else {
+          try {
+            process.kill(-st.pgid, 0);
+            groupAlive = true;
+          } catch (e) {
+            groupAlive = e.code !== 'ESRCH';
+          }
+        }
+      }
+      const pg = spawnSync(
+        'pgrep',
+        ['-f', '^(/[^ ]*/)?(ba|da)?sh +[^ ]*scripts/router/(go-suite|pw-suite|smoke)[.]sh'],
+        { encoding: 'utf8' }
+      );
+      stages = -1;
+      if (!pg.error && pg.status === 1) stages = 0;
+      else if (!pg.error && pg.status === 0) stages = pg.stdout.split('\n').filter(Boolean).length;
+      if (!groupAlive && stages === 0) break;
+      if (attempt < 2) spawnSync('sleep', ['1']);
+    }
     const pcOk = !groupAlive && stages === 0;
     push(
       'interrupt: процессы на ПК',
