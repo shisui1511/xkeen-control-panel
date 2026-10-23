@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { t, currentLang, pluralize } from './i18n';
   import { showToast, activeKernelName } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
@@ -15,9 +16,9 @@
 
   let { onSwitchTab = () => {} }: Props = $props();
 
-  function autofocusAction(node: HTMLElement) {
+  const autofocus: Attachment<HTMLElement> = (node) => {
     node.focus();
-  }
+  };
 
   interface DATFile {
     name: string;
@@ -1158,7 +1159,7 @@
                     placeholder={$t('dat.search_entries')}
                     bind:value={entrySearch}
                     oninput={handleEntrySearch}
-                    use:autofocusAction
+                    {@attach autofocus}
                   />
                   {#if entrySearch}
                     <button
