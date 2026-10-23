@@ -25,6 +25,8 @@ type MemberOption struct {
 
 // GroupView — группа в представлении: поля группы, состав по ядрам, проблемы и
 // предупреждения, варианты участника и текущий выбор для строки «Сейчас» (D-38).
+// MemberOptions — участники ручной группы и узлы её состава по ядрам (Resolve),
+// а не весь каталог.
 type GroupView struct {
 	Group
 	Counts        KernelCounts   `json:"counts"`
@@ -137,8 +139,8 @@ func optCount(on bool, n int) *int {
 }
 
 // memberOptions строит варианты участника ручной группы: сначала участники
-// группы по порядку (группы, DIRECT, REJECT), затем узлы Xray и Mihomo без
-// повторов. У «авто» и «резерва» вариантов нет.
+// группы по порядку (группы, DIRECT, REJECT), затем узлы состава группы по
+// ядрам (Resolve) без повторов. У «авто» и «резерва» вариантов нет.
 func memberOptions(g Group, members []Member, groups []Group, xray, mihomo []sources.CatalogNode) []MemberOption {
 	out := []MemberOption{}
 	if g.Mode != ModeManual {
@@ -327,7 +329,7 @@ func (s *Service) View() (RoutingView, error) {
 			counts = KernelCounts{Xray: optCount(installed.Xray, len(xr.Nodes)), Mihomo: optCount(installed.Mihomo, len(mr.Nodes))}
 		}
 		key := "group:" + g.ID
-		options := memberOptions(g, xr.Members, groups.Items, xrayNodes, mihomoNodes)
+		options := memberOptions(g, xr.Members, groups.Items, xr.Nodes, mr.Nodes)
 		var current, currentLabel string
 		if g.Mode == ModeManual {
 			var m *appliedModel

@@ -173,6 +173,56 @@ func TestRouterSelectXray(t *testing.T) {
 	}
 }
 
+// Варианты «Сейчас» и проверка Select идут по составу группы (D-38): узел вне
+// фильтра «включить» не предлагается и отвергается member_invalid, выбор ядра
+// не меняется; узел из фильтра выбирается.
+func TestRouterSelectOutsideComposition(t *testing.T) {
+	ctx := context.Background()
+	e := rtNewEnv(t, rtWithSelection())
+	e.addMyRaw(t, "socks5://127.0.0.1:9#scope-in-a", "socks5://127.0.0.1:10#scope-out-b")
+	cat := e.catalog(t).Xray
+	nodeIn, nodeOut := rtsNode(t, cat, "scope-in-a"), rtsNode(t, cat, "scope-out-b")
+
+	_, grp, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Фильтр", Mode: ModeManual,
+		Sources: GroupSources{All: true}, Include: []string{"scope-in"},
+	})
+	if err != nil {
+		t.Fatalf("SaveGroup: %v", err)
+	}
+	e.takeAndApply(t)
+
+	opts := rtViewGroup(t, e.view(t), "Фильтр").MemberOptions
+	has := func(member string) bool {
+		for _, o := range opts {
+			if o.Member == member {
+				return true
+			}
+		}
+		return false
+	}
+	if has(memberNode + nodeOut.Ref) {
+		t.Errorf("вариант вне состава группы: узел вне фильтра «включить» среди member_options (%d вариантов)", len(opts))
+	}
+	if !has(memberNode + nodeIn.Ref) {
+		t.Errorf("вариант состава группы пропал: узла из фильтра нет среди member_options (%d вариантов)", len(opts))
+	}
+
+	if _, err := e.svc.Select(ctx, grp.ID, memberNode+nodeOut.Ref); !errors.Is(err, ErrMemberInvalid) {
+		t.Errorf("выбор вне состава принят: %v, ожидалась member_invalid", err)
+	}
+	if sel := e.rtcSelection(t); len(sel) != 0 {
+		t.Fatalf("отвергнутый выбор записался в Live: %v", sel)
+	}
+
+	if _, err := e.svc.Select(ctx, grp.ID, memberNode+nodeIn.Ref); err != nil {
+		t.Fatalf("Select узла из фильтра: %v", err)
+	}
+	if got := e.rtcSelection(t)[grp.ID]; got != memberNode+nodeIn.Ref {
+		t.Errorf("Live[selection] = %q, ожидался узел из фильтра", got)
+	}
+}
+
 // rtsNotice возвращает уведомление слоя по идентификатору.
 func (e *rtEnv) rtsNotice(id string) (configlayer.NoticeView, bool) {
 	for _, n := range e.layer.Snapshot().Notices {
