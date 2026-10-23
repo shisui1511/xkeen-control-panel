@@ -34,6 +34,7 @@ var geodataErrorStatus = map[string]int{
 	"invalid_structure":  http.StatusConflict,
 	"update_unavailable": http.StatusServiceUnavailable,
 	"update_failed":      http.StatusBadGateway,
+	"geodata_changed":    http.StatusConflict,
 }
 
 // invalidReasonStatus — причины InvalidInputError, у которых свой код ответа
@@ -489,7 +490,8 @@ const geodataUpdateTimeout = 10 * time.Minute
 // ConfigRoutingGeodataAdd — POST /api/configlayer/routing/lists/geodata/add
 // {set, accept_comment_loss, update_now}: «Добавить в XKeen». Набор только из
 // встроенного каталога, запись в xkeen.json с резервной копией; причины отказа —
-// no_jq, geofile_update_off, already_present, comments_lost. update_now запускает
+// no_jq, geofile_update_off, already_present, comments_lost, geodata_changed (xkeen.json
+// изменился между предпросмотром и записью, предпросмотр строится заново). update_now запускает
 // xkeen -ug; сбой запуска — 502 update_failed, запись при этом уже сделана
 // (data.written=true). Отмена запроса вкладкой запись и обновление не прерывает.
 func (a *API) ConfigRoutingGeodataAdd(w http.ResponseWriter, r *http.Request) {

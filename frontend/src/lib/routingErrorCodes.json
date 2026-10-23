@@ -6,6 +6,7 @@
   "country_unavailable",
   "draft_conflict",
   "final_requires_redirect",
+  "geodata_changed",
   "foreign_mixed",
   "geofile_update_off",
   "group_cycle",

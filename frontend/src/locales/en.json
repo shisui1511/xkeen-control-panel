@@ -3245,6 +3245,7 @@
   "cfg.routing.apply_blocked_hint": "A group is empty for all kernels, a list is missing or there is a cycle. Fix the marked places.",
   "cfg.routing.apply_busy_hint": "Applying is in progress. Wait for it to finish.",
   "cfg.routing.err.already_present": "This set is already added to XKeen.",
+  "cfg.routing.err.geodata_changed": "xkeen.json was changed since the preview, the write was cancelled. Repeat the action.",
   "cfg.routing.err.apply_busy": "Applying is in progress. Try again when it finishes.",
   "cfg.routing.err.catalog_unavailable": "The lists on the router could not be read. Install the dat databases through XKeen and try again.",
   "cfg.routing.err.comments_lost": "xkeen.json contains comments and writing would remove them. Confirm the loss of comments.",

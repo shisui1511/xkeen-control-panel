@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
@@ -47,6 +48,9 @@ var (
 	ErrUpdateUnavail    = &CodedError{Code: "update_unavailable"}
 	// ErrUpdateFailed — запись выполнена, а запуск xkeen -ug не удался.
 	ErrUpdateFailed = &CodedError{Code: "update_failed"}
+	// ErrGeodataChanged — xkeen.json изменился между чтением и записью: запись
+	// отменена, предпросмотр нужно построить заново.
+	ErrGeodataChanged = &CodedError{Code: "geodata_changed"}
 )
 
 // ErrorCode возвращает код ошибки пакета или пустую строку.
@@ -61,6 +65,8 @@ func ErrorCode(err error) string {
 // GeodataStore читает и дополняет .xkeen.xray.geodata[] в xkeen.json. Файлы dat
 // скачивает и пишет только XKeen: панель вписывает лишь адреса из встроенного каталога.
 type GeodataStore struct {
+	// mu сериализует «Добавить»: два одновременных запроса не пишут поверх друг друга.
+	mu        sync.Mutex
 	settings  *services.XKeenSettingsService
 	lookPath  func(string) (string, error)
 	runUpdate func(ctx context.Context) error
@@ -242,8 +248,27 @@ func (g *GeodataStore) PreviewAdd(setID string) (before, after string, commentsK
 // Add дописывает набор в xkeen.json через XKeenSettingsService.Save (с резервной
 // копией). acceptCommentLoss подтверждает потерю комментариев, если вставка без
 // потерь невозможна. runUpdate=true запускает xkeen -ug после записи; ошибка запуска
-// (ErrUpdateFailed) означает, что запись уже сделана.
+// (ErrUpdateFailed) означает, что запись уже сделана. Чтение, построение и запись
+// идут под замком хранилища; перед записью файл перечитывается и сравнивается с
+// прочитанным для предпросмотра: изменился (правка в Редакторе, другой запрос) —
+// ErrGeodataChanged, файл не пишется, чужое изменение не теряется.
 func (g *GeodataStore) Add(ctx context.Context, setID string, acceptCommentLoss, runUpdate bool) error {
+	if err := g.write(setID, acceptCommentLoss, runUpdate); err != nil {
+		return err
+	}
+	if runUpdate {
+		if err := g.runUpdate(ctx); err != nil {
+			return fmt.Errorf("%w: %v", ErrUpdateFailed, err)
+		}
+	}
+	return nil
+}
+
+// write — запись набора в xkeen.json под замком (без запуска xkeen -ug: он долгий
+// и замок не держит).
+func (g *GeodataStore) write(setID string, acceptCommentLoss, runUpdate bool) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	st, err := g.Status()
 	if err != nil {
 		return err
@@ -257,22 +282,22 @@ func (g *GeodataStore) Add(ctx context.Context, setID string, acceptCommentLoss,
 	if runUpdate && g.runUpdate == nil {
 		return ErrUpdateUnavail
 	}
-	_, after, kept, err := g.PreviewAdd(setID)
+	before, after, kept, err := g.PreviewAdd(setID)
 	if err != nil {
 		return err
 	}
 	if !kept && !acceptCommentLoss {
 		return ErrCommentsLost
 	}
-	if _, err := g.settings.Save(services.XKeenConfigJSON, after); err != nil {
+	cur, err := g.settings.Get(services.XKeenConfigJSON)
+	if err != nil {
 		return err
 	}
-	if runUpdate {
-		if err := g.runUpdate(ctx); err != nil {
-			return fmt.Errorf("%w: %v", ErrUpdateFailed, err)
-		}
+	if cur.Content != before {
+		return ErrGeodataChanged
 	}
-	return nil
+	_, err = g.settings.Save(services.XKeenConfigJSON, after)
+	return err
 }
 
 // addGeneric добавляет запись в разобранный объект (создавая недостающие уровни).

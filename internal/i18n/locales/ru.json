@@ -115,6 +115,7 @@
   "configlayer.routing.catalog_unavailable": "Списки dat недоступны: не удалось прочитать файлы XKeen",
   "configlayer.routing.set_unknown": "Такого набора нет во встроенном каталоге",
   "configlayer.routing.already_present": "Набор уже есть в настройках XKeen",
+  "configlayer.routing.geodata_changed": "Файл xkeen.json изменился с момента предпросмотра: запись отменена, повторите",
   "configlayer.routing.no_jq": "На роутере нет jq: XKeen не сможет обновлять списки",
   "configlayer.routing.geofile_update_off": "В настройках XKeen выключено обновление geo-файлов",
   "configlayer.routing.comments_lost": "Запись удалит комментарии в xkeen.json: подтвердите потерю",

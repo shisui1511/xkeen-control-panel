@@ -115,6 +115,7 @@
   "configlayer.routing.catalog_unavailable": "List files are unavailable: the XKeen dat files could not be read",
   "configlayer.routing.set_unknown": "This set is not in the built-in catalog",
   "configlayer.routing.already_present": "The set is already in the XKeen settings",
+  "configlayer.routing.geodata_changed": "xkeen.json changed since the preview: the write was cancelled, try again",
   "configlayer.routing.no_jq": "jq is not installed on the router: XKeen cannot update the lists",
   "configlayer.routing.geofile_update_off": "Geo file updates are turned off in the XKeen settings",
   "configlayer.routing.comments_lost": "Writing will remove comments from xkeen.json: confirm the loss",
