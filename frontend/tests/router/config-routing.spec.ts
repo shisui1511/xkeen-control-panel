@@ -662,3 +662,38 @@ for (const theme of ['dark', 'light'] as const) {
     }
   });
 }
+
+test('routing: уведомления', { tag: CORE_TAG }, async ({ page }) => {
+  test.setTimeout(T.save * 10);
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  const snap = await ownerSnap(page);
+  test.skip(!snap.xray && !snap.mihomo, 'на стенде нет установленных ядер');
+  const restore = await prepareXKeen(page);
+  try {
+    // уведомления разметки ConfigNotices по снимку стенда без события не вызвать: проверяем
+    // обратное — взятие и применение их не порождает, а «Версии» не жалуются на пороги
+    await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtOwnE'));
+    await setOwnership(page, true);
+
+    await openConfig(page, '#/config/rules');
+    await tabReady(page, 'rules-tab');
+    await expect(page.getByTestId('routing-notice')).toHaveAttribute('data-owner', 'panel', {
+      timeout: T.action
+    });
+    const notices = page.getByTestId('config-notices');
+    await expect(notices.locator('[data-notice^="routing_auto_taken:"]')).toHaveCount(0);
+    await expect(notices.locator('[data-notice^="routing_list_missing:"]')).toHaveCount(0);
+
+    // стенд: Mihomo не ниже 1.19.27, Xray не ниже 1.8.10 — пояснений о порогах нет
+    await openConfig(page, '#/config/files');
+    await expect(page.getByTestId('config-kernels')).toBeVisible({ timeout: T.action });
+    await expect(page.getByTestId('config-kernels').locator('li').first()).toBeVisible();
+    await expect(page.locator('[data-testid^="config-kernel-note-"]')).toHaveCount(0);
+
+    await guard.assertClean();
+  } finally {
+    await restore();
+  }
+});
