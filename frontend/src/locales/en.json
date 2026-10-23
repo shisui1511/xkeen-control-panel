@@ -3386,6 +3386,8 @@
   "cfg.rules.raw_hint": "The rule is skipped for the other kernel. The target is a group, DIRECT or REJECT.",
   "cfg.rules.raw_err": "The kernel did not accept the rule: {reason}. Fix it and save again.",
   "cfg.rules.raw_invalid": "The kernel did not accept the rule: {reason}. Fix it and save again.",
+  "cfg.rules.raw_reason_xray": "expected a single JSON object with Xray rule fields, without outboundTag and without geosite or geoip",
+  "cfg.rules.raw_reason_mihomo": "expected a single Mihomo rule line without a target, without MATCH, GEOSITE or GEOIP",
   "cfg.rules.seg_conds": "Conditions",
   "cfg.rules.seg_raw": "Custom kernel rule",
   "cfg.rules.seg_aria": "Rule kind",
