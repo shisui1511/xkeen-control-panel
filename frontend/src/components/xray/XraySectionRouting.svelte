@@ -189,7 +189,7 @@
     <label class="form-label" for="rule-filter-select">{$t('xray.filter_by_outbound_tag')}:</label>
     <Select id="rule-filter-select" class="form-select" bind:value={ruleFilterTag}>
       <option value="">{$t('xray.all_rules')}</option>
-      {#each outboundTags as tag}
+      {#each outboundTags as tag, i (i)}
         <option value={tag}>{tag}</option>
       {/each}
       <option value="PROXY_TAG">PROXY_TAG</option>
@@ -338,7 +338,7 @@
               <span class="form-label" style="margin: 0;"
                 >{$t('xray.test_route.result_groups')}:</span
               >
-              {#each testRouteResult.outbound_group_tags || testRouteResult.rule_groups as group}
+              {#each testRouteResult.outbound_group_tags || testRouteResult.rule_groups as group, i (i)}
                 <span class="badge badge-tag" data-testid="test-route-rule-group">{group}</span>
               {/each}
             </div>
@@ -526,7 +526,7 @@
             <div class="rule-detail-item">
               <strong>{$t('xray.inbound_tags')}:</strong>
               <span class="rule-chips">
-                {#each rule.inboundTag as ib}
+                {#each rule.inboundTag as ib, i (i)}
                   <span class="chip chip-ip">{ib}</span>
                 {/each}
               </span>
@@ -537,7 +537,7 @@
             <div class="rule-detail-item">
               <strong>{$t('xray.domains')}:</strong>
               <span class="rule-chips">
-                {#each rule.domain as d}
+                {#each rule.domain as d, i (i)}
                   <span class="chip chip-domain">{d}</span>
                 {/each}
               </span>
@@ -548,7 +548,7 @@
             <div class="rule-detail-item">
               <strong>IP:</strong>
               <span class="rule-chips">
-                {#each rule.ip as ip}
+                {#each rule.ip as ip, i (i)}
                   <span class="chip chip-ip">{ip}</span>
                 {/each}
               </span>
@@ -631,7 +631,7 @@
     onclose={() => (showPresetModal = false)}
   >
     <div class="presets-list" style="display: flex; flex-direction: column; gap: 8px;">
-      {#each XRAY_DEFAULT_PRESETS as preset}
+      {#each XRAY_DEFAULT_PRESETS as preset (preset.id)}
         <div
           class="card"
           style="padding: 12px; display: flex; justify-content: space-between; align-items: center;"

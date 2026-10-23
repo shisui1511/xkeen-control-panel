@@ -225,7 +225,7 @@
           </div>
         </div>
         <div class="geoscan-files-grid">
-          {#each availableFiles as file}
+          {#each availableFiles as file (file.name)}
             <label class="geoscan-file-item" class:disabled={!file.exists}>
               <input
                 type="checkbox"
@@ -275,7 +275,7 @@
           <span>{$t('dat.geoscan_matches', { count: results.length })}</span>
         </div>
         <div class="geoscan-results-list">
-          {#each results as res}
+          {#each results as res, i (i)}
             {@const isCopied = copiedRule === res.rule}
             <div class="geoscan-result-card">
               <div class="geoscan-card-top">
@@ -336,7 +336,7 @@
                 <div class="geoscan-samples">
                   <span class="geoscan-samples-lbl">{$t('dat.geoscan_sample_matches')}</span>
                   <div class="geoscan-samples-tags">
-                    {#each res.sample_matches as sample}
+                    {#each res.sample_matches as sample, i (i)}
                       <span class="sample-tag">{sample}</span>
                     {/each}
                   </div>

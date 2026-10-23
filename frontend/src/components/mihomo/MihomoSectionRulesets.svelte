@@ -24,7 +24,7 @@
     data-testid="rulesets-picker"
     style="display:flex; flex-direction:column; gap:16px;"
   >
-    {#each Object.entries(META_RULE_SETS_BY_CATEGORY) as [catName, items]}
+    {#each Object.entries(META_RULE_SETS_BY_CATEGORY) as [catName, items] (catName)}
       {@const checkedCount = items.filter((it) =>
         ctx.selectedMetaRuleSets.has(`${it.id}|${it.type}`)
       ).length}
@@ -57,7 +57,7 @@
           class="ruleset-items-grid"
           style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:8px;"
         >
-          {#each items as item}
+          {#each items as item (`${item.id}|${item.type}`)}
             {@const key = `${item.id}|${item.type}`}
             {@const isChecked = ctx.selectedMetaRuleSets.has(key)}
             <div
@@ -105,7 +105,7 @@
                       ctx.markDirty();
                     }}
                   >
-                    {#each allProxyNames as n}
+                    {#each allProxyNames as n, i (i)}
                       <option value={n}>{n}</option>
                     {/each}
                   </Select>
