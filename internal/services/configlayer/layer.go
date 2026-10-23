@@ -1152,7 +1152,7 @@ func (l *Layer) StartApply(user bool) error {
 	if !l.spawn(func() {
 		defer release()
 		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft}
-		view := l.pipeline.Run(l.ctx, req)
+		view := l.runPipeline(req)
 		release()
 		l.afterRun()
 		l.fireAfterApply(req, view)
@@ -1161,6 +1161,64 @@ func (l *Layer) StartApply(user bool) error {
 		return ErrStopped
 	}
 	return nil
+}
+
+// runPipeline запускает конвейер и следит за владением маршрутизацией: если запуск
+// взял или вернул маршрутизацию, клиенты получают событие routing; ядро, которое
+// установка взяла автоматически (D-02), получает уведомление routing_auto_taken.
+func (l *Layer) runPipeline(req ApplyRequest) ApplyView {
+	before := l.store.Snapshot().Routing
+	view := l.pipeline.Run(l.ctx, req)
+	after := l.store.Snapshot().Routing
+	auto := ""
+	if req.Trigger == TriggerKernelInstalled && view.Result != nil && view.Result.OK && routingKernelTaken(after, req.Kernel) && !routingKernelTaken(before, req.Kernel) {
+		auto = req.Kernel
+	}
+	l.updateAutoTakenNotices(auto, after)
+	if !routingStateEqual(before, after) {
+		l.PublishRouting()
+	}
+	return view
+}
+
+// routingKernelTaken — панель владеет маршрутизацией ядра.
+func routingKernelTaken(r RoutingState, kernel string) bool {
+	switch kernel {
+	case KernelXray:
+		return r.Xray != nil
+	case KernelMihomo:
+		return r.Mihomo != nil
+	}
+	return false
+}
+
+// routingStateEqual сравнивает владение маршрутизацией до и после запуска.
+func routingStateEqual(a, b RoutingState) bool {
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(ja, jb)
+}
+
+// updateAutoTakenNotices обновляет уведомления routing_auto_taken:<ядро>: добавляет
+// auto (если не пусто, закрытое ранее показывается заново) и убирает уведомления
+// ядер, которыми панель больше не владеет.
+func (l *Layer) updateAutoTakenNotices(auto string, now RoutingState) {
+	l.mu.Lock()
+	cur := append([]NoticeView(nil), l.extNotices[noticeRoutingAutoTakenPrefix]...)
+	if auto != "" {
+		delete(l.dismissed, noticeRoutingAutoTakenPrefix+auto)
+	}
+	l.mu.Unlock()
+	list := make([]NoticeView, 0, len(cur)+1)
+	for _, n := range cur {
+		if n.Kernel != auto && routingKernelTaken(now, n.Kernel) {
+			list = append(list, n)
+		}
+	}
+	if auto != "" {
+		list = append(list, NoticeView{ID: noticeRoutingAutoTakenPrefix + auto, Kind: noticeWarning, Kernel: auto})
+	}
+	l.SetNotices(noticeRoutingAutoTakenPrefix, list)
 }
 
 // afterRun — действия после запуска конвейера: число изменений черновика после
@@ -1216,7 +1274,7 @@ func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	}
 	defer release()
 	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel}
-	view := l.pipeline.Run(l.ctx, req)
+	view := l.runPipeline(req)
 	release()
 	l.afterRun()
 	l.fireAfterApply(req, view)
@@ -1274,7 +1332,7 @@ func (l *Layer) Rebuild(keys []string, all bool) error {
 	if !l.spawn(func() {
 		defer release()
 		req := ApplyRequest{Trigger: TriggerRebuild, Source: SourceApplied, Only: only}
-		view := l.pipeline.Run(l.ctx, req)
+		view := l.runPipeline(req)
 		release()
 		l.afterRun()
 		l.fireAfterApply(req, view)
@@ -1392,7 +1450,7 @@ func (l *Layer) OnKernelInstalled(kernel string) {
 		}
 		defer release()
 		req := ApplyRequest{Trigger: TriggerKernelInstalled, Source: SourceApplied, Kernel: kernel}
-		view := l.pipeline.Run(l.ctx, req)
+		view := l.runPipeline(req)
 		release()
 		l.invalidateVersions()
 		l.noteBuildResult(kernel, view)

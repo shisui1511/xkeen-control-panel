@@ -3,6 +3,7 @@
 package configlayer
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -332,5 +333,72 @@ func TestRouterRoutingDrift(t *testing.T) {
 	}
 	if st := e.layer.store.Snapshot(); !st.Routing.isEmpty() || st.Journal != nil {
 		t.Errorf("состояние после возврата: routing %+v, журнал %+v", st.Routing, st.Journal)
+	}
+}
+
+func TestRouterKernelInstalledAutoTake(t *testing.T) {
+	e := rtNewTakeoverEnv(t)
+
+	// Установлен только Xray: взятие касается его одного.
+	e.noMihomo.Store(true)
+	e.setManaged(t, true)
+	if res := e.apply(t); !res.OK || res.Code != ResultApplied {
+		t.Fatalf("взятие при одном Xray: %+v", res)
+	}
+	st := e.layer.store.Snapshot()
+	if st.Routing.Xray == nil || st.Routing.Mihomo != nil {
+		t.Fatalf("State.Routing после взятия Xray: %+v", st.Routing)
+	}
+	e.assertConfigLink(t, e.link)
+	xrayHashes := map[string]string{
+		rtTkPanelRoute: hashOf(e.xray(rtTkPanelRoute)),
+		rtTkPanelTail:  hashOf(e.xray(rtTkPanelTail)),
+	}
+	xrayState, err := json.Marshal(st.Routing.Xray)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mihomo установили позже: его маршрутизация берётся в фоне той же сборкой.
+	events, cancel, err := e.layer.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	e.noMihomo.Store(false)
+	e.layer.OnKernelInstalled(KernelMihomo)
+	rtWaitFor(t, "фоновое взятие Mihomo после установки", func() bool {
+		s := e.layer.store.Snapshot()
+		return s.Routing.Mihomo != nil && s.Journal == nil
+	})
+	waitRoutingEvent(t, events)
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	if _, err := os.Lstat(e.mihomo(PanelMihomoProfile)); err != nil {
+		t.Errorf("профиль панели не записан: %v", err)
+	}
+	if m := e.layer.store.Snapshot().Routing.Mihomo; m == nil || m.PrevProfile != "profiles/user.yaml" {
+		t.Errorf("State.Routing.Mihomo: %+v", m)
+	}
+	rtWaitFor(t, "уведомление routing_auto_taken:mihomo", func() bool {
+		for _, n := range e.layer.Snapshot().Notices {
+			if n.ID == "routing_auto_taken:mihomo" && n.Kernel == KernelMihomo {
+				return true
+			}
+		}
+		return false
+	})
+
+	// Xray не тронут: файлы панели и запись о владении прежние.
+	for name, want := range xrayHashes {
+		if got := hashOf(e.xray(name)); got != want {
+			t.Errorf("%s изменён при установке Mihomo: %q, ожидался %q", name, got, want)
+		}
+	}
+	after, err := json.Marshal(e.layer.store.Snapshot().Routing.Xray)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(xrayState) {
+		t.Errorf("State.Routing.Xray изменено установкой Mihomo:\n%s\n%s", xrayState, after)
 	}
 }
