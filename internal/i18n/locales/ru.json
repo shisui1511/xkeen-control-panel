@@ -109,5 +109,17 @@
   "configlayer.routing.nothing_to_reclaim": "Возвращать нечего: расхождений маршрутизации нет",
   "configlayer.routing.apply_busy": "Применение уже выполняется",
   "configlayer.routing.group_not_applied": "Группа ещё не применена: выбор участника доступен после «Применить»",
-  "configlayer.routing.member_invalid": "Такого участника нет среди вариантов группы"
+  "configlayer.routing.member_invalid": "Такого участника нет среди вариантов группы",
+  "configlayer.routing.preset_unknown": "Неизвестный пресет",
+  "configlayer.routing.country_unavailable": "Для выбранной страны нет списков на роутере",
+  "configlayer.routing.catalog_unavailable": "Списки dat недоступны: не удалось прочитать файлы XKeen",
+  "configlayer.routing.set_unknown": "Такого набора нет во встроенном каталоге",
+  "configlayer.routing.already_present": "Набор уже есть в настройках XKeen",
+  "configlayer.routing.no_jq": "На роутере нет jq: XKeen не сможет обновлять списки",
+  "configlayer.routing.geofile_update_off": "В настройках XKeen выключено обновление geo-файлов",
+  "configlayer.routing.comments_lost": "Запись удалит комментарии в xkeen.json: подтвердите потерю",
+  "configlayer.routing.update_failed": "Набор записан в настройки XKeen, но обновить списки (xkeen -ug) не удалось",
+  "configlayer.routing.invalid_json": "Файл настроек XKeen не разбирается как JSON",
+  "configlayer.routing.invalid_structure": "В файле настроек XKeen неожиданная структура geodata",
+  "configlayer.routing.update_unavailable": "Запуск обновления списков недоступен"
 }

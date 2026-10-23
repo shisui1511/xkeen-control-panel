@@ -109,5 +109,17 @@
   "configlayer.routing.nothing_to_reclaim": "Nothing to reclaim: no routing drift",
   "configlayer.routing.apply_busy": "An apply is already in progress",
   "configlayer.routing.group_not_applied": "The group has not been applied yet: pick a member after “Apply”",
-  "configlayer.routing.member_invalid": "This member is not among the group options"
+  "configlayer.routing.member_invalid": "This member is not among the group options",
+  "configlayer.routing.preset_unknown": "Unknown preset",
+  "configlayer.routing.country_unavailable": "No lists for the selected country on this router",
+  "configlayer.routing.catalog_unavailable": "List files are unavailable: the XKeen dat files could not be read",
+  "configlayer.routing.set_unknown": "This set is not in the built-in catalog",
+  "configlayer.routing.already_present": "The set is already in the XKeen settings",
+  "configlayer.routing.no_jq": "jq is not installed on the router: XKeen cannot update the lists",
+  "configlayer.routing.geofile_update_off": "Geo file updates are turned off in the XKeen settings",
+  "configlayer.routing.comments_lost": "Writing will remove comments from xkeen.json: confirm the loss",
+  "configlayer.routing.update_failed": "The set was written to the XKeen settings, but the list update (xkeen -ug) failed",
+  "configlayer.routing.invalid_json": "The XKeen settings file is not valid JSON",
+  "configlayer.routing.invalid_structure": "The geodata section of the XKeen settings has an unexpected structure",
+  "configlayer.routing.update_unavailable": "Running the list update is not available"
 }
