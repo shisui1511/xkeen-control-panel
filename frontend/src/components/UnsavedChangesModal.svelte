@@ -54,7 +54,7 @@
               >{$t('nav.unsaved_sources', { sources: dirtySources.join(', ') })}</span
             >
             <div class="sources-tags">
-              {#each dirtySources as source}
+              {#each dirtySources as source, i (i)}
                 <span class="source-badge">{source}</span>
               {/each}
             </div>
