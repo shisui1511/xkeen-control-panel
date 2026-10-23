@@ -245,10 +245,21 @@ func TestRouterMihomoGroupsMaterialize(t *testing.T) {
 		!rtxEqualStrings(rtmStrings(g["proxies"]), []string{hidden, reserveNode.MihomoName}) {
 		t.Errorf("группа «Резерв»: %v", g)
 	}
+	// Основные узлы выбираются из провайдера точными именами: резервный узел того же
+	// источника под фильтр не подходит, основные подходят все.
 	if g := groups[hidden]; g == nil || g["type"] != "url-test" || g["hidden"] != true ||
-		!rtxEqualStrings(rtmStrings(g["use"]), []string{"xcp-my"}) ||
-		g["exclude-filter"] != "^"+regexp.QuoteMeta(reserveNode.MihomoName)+"$" {
+		!rtxEqualStrings(rtmStrings(g["use"]), []string{"xcp-my"}) || g["exclude-filter"] != nil {
 		t.Errorf("скрытая группа %s: %v", hidden, g)
+	} else if pat, _ := g["filter"].(string); pat == "" {
+		t.Errorf("скрытая группа %s без filter: резервный узел попадёт в основные", hidden)
+	} else if re, err := regexp.Compile(pat); err != nil {
+		t.Errorf("filter скрытой группы не компилируется: %v", err)
+	} else {
+		for _, n := range catalog {
+			if re.MatchString(n.MihomoName) != (n.Ref != reserveNode.Ref) {
+				t.Errorf("filter скрытой группы: узел резервный=%v, совпадение=%v", n.Ref == reserveNode.Ref, re.MatchString(n.MihomoName))
+			}
+		}
 	}
 
 	want := []string{

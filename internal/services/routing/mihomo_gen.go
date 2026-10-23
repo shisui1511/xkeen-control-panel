@@ -70,9 +70,10 @@ type mihomoGroup struct {
 	names map[string]string
 	// copies — имена копий отдельных узлов в proxies групп «авто» и «резерв».
 	copies []string
-	// use, filter и exclude — провайдеры источников и фильтры имён.
-	use             []string
-	filter, exclude string
+	// use и filter — провайдеры источников и точные имена узлов из них
+	// (exactFilter); пустой filter — берутся все узлы провайдеров.
+	use    []string
+	filter string
 	// reserve — имя копии резервного узла; пусто — REJECT.
 	reserve string
 }
@@ -233,28 +234,41 @@ func sourcesOf(list []sources.CatalogNode) []string {
 	return out
 }
 
-// mihomoFilter превращает значения «включить» или «исключить» в filter Mihomo:
-// подстроки без учёта регистра — (?i) и QuoteMeta через |; выражения Go (режим
-// «Эксперт») — как есть через |. Пусто — фильтра нет.
-func mihomoFilter(values []string, regex bool) string {
-	var parts []string
-	for _, v := range values {
-		v = strings.TrimSpace(v)
-		if v == "" {
+// exactFilter возвращает filter Mihomo для use=sourcesOf(list), который выбирает
+// из провайдеров ровно узлы list; пусто — фильтр не нужен (в источниках нет других
+// узлов). Состав группы считает только Resolve: по именам для показа и движком Go,
+// а Mihomo фильтровал бы имена файла провайдера (после uniqueName) своим движком,
+// поэтому фильтры группы в профиль не переносятся, а пишется список точных имён.
+// ok=false — так выбрать нельзя: узел тех же источников вне списка носит имя
+// узла списка; тогда группа пишется копиями. Обратная кавычка в filter Mihomo
+// разделяет выражения и записывается кодом.
+func (b *mihomoBuild) exactFilter(list []sources.CatalogNode) (filter string, ok bool) {
+	use := sourcesOf(list)
+	in := make(map[string]bool, len(list))
+	names := make(map[string]bool, len(list))
+	for _, n := range list {
+		in[n.Ref] = true
+		names[n.MihomoName] = true
+	}
+	other := false
+	for _, n := range b.catalog {
+		if in[n.Ref] || !slices.Contains(use, n.Source) {
 			continue
 		}
-		if !regex {
-			v = regexp.QuoteMeta(v)
+		if names[n.MihomoName] {
+			return "", false
 		}
-		parts = append(parts, v)
+		other = true
 	}
-	if len(parts) == 0 {
-		return ""
+	if !other {
+		return "", true
 	}
-	if regex {
-		return strings.Join(parts, "|")
+	parts := make([]string, 0, len(names))
+	for name := range names {
+		parts = append(parts, strings.ReplaceAll(regexp.QuoteMeta(name), "`", `\x60`))
 	}
-	return "(?i)" + strings.Join(parts, "|")
+	sort.Strings(parts)
+	return "^(?:" + strings.Join(parts, "|") + ")$", true
 }
 
 // freeName подбирает имя, которого нет среди занятых (группы, скрытые группы,
@@ -372,36 +386,20 @@ func (b *mihomoBuild) shapeOf(g Group) *mihomoGroup {
 	}
 	mg := &mihomoGroup{g: g}
 	base, picks := b.split(g)
-	filter := mihomoFilter(g.Include, g.Regex)
-	exclude := mihomoFilter(g.Exclude, g.Regex)
 
 	if g.Mode == ModeFallback {
 		var reserve *sources.CatalogNode
 		if n, ok := b.nodeByRef[g.Reserve]; ok && g.Reserve != "" {
 			reserve = &n
 		}
+		// Основные узлы — без резервного: если он входит в источник группы,
+		// точный фильтр его не выбирает, а при совпадении имён основные узлы
+		// пишутся копиями.
 		baseMains := withoutRef(base, g.Reserve)
-		reserveInBase := len(baseMains) != len(base)
-		use := sourcesOf(baseMains)
-		copyAll := false
-		if reserveInBase && len(baseMains) > 0 && reserve != nil {
-			// Резервный узел входит в источник группы: из основных его убирает
-			// фильтр по точному имени, а если имя не единственное — основные узлы
-			// группы записываются копиями.
-			if b.uniqueNameIn(reserve.MihomoName, use) {
-				pat := "^" + regexp.QuoteMeta(reserve.MihomoName) + "$"
-				if exclude != "" {
-					pat += "|" + exclude
-				}
-				exclude = pat
-			} else {
-				copyAll = true
-			}
-		}
-		if copyAll {
+		if filter, ok := b.exactFilter(baseMains); !ok {
 			mg.copies = append(mg.copies, b.copiesOf(baseMains)...)
 		} else if len(baseMains) > 0 {
-			mg.use, mg.filter, mg.exclude = use, filter, exclude
+			mg.use, mg.filter = sourcesOf(baseMains), filter
 		}
 		mg.copies = append(mg.copies, b.copiesOf(withoutRef(picks, g.Reserve))...)
 		if reserve != nil {
@@ -410,10 +408,12 @@ func (b *mihomoBuild) shapeOf(g Group) *mihomoGroup {
 		return mg
 	}
 
-	if len(base) > 0 {
-		mg.use, mg.filter, mg.exclude = sourcesOf(base), filter, exclude
+	if filter, ok := b.exactFilter(base); !ok {
+		mg.copies = b.copiesOf(base)
+	} else if len(base) > 0 {
+		mg.use, mg.filter = sourcesOf(base), filter
 	}
-	mg.copies = b.copiesOf(picks)
+	mg.copies = append(mg.copies, b.copiesOf(picks)...)
 	return mg
 }
 
@@ -463,7 +463,8 @@ func (b *mihomoBuild) manualShape(g Group) *mihomoGroup {
 			pIsBase = pIsBase || n.Ref == pRef
 		}
 	}
-	copyAll := len(base) > 0 && pIsNode && (len(tail) > 0 || (pIsBase && len(picks) > 0))
+	filter, exact := b.exactFilter(base)
+	copyAll := len(base) > 0 && (!exact || (pIsNode && (len(tail) > 0 || (pIsBase && len(picks) > 0))))
 
 	var copies []string
 	if copyAll {
@@ -476,9 +477,7 @@ func (b *mihomoBuild) manualShape(g Group) *mihomoGroup {
 		}
 	} else {
 		if len(base) > 0 {
-			mg.use = sourcesOf(base)
-			mg.filter = mihomoFilter(g.Include, g.Regex)
-			mg.exclude = mihomoFilter(g.Exclude, g.Regex)
+			mg.use, mg.filter = sourcesOf(base), filter
 		}
 		for _, n := range base {
 			mg.names[n.Ref] = n.MihomoName
@@ -663,7 +662,7 @@ func proxiesSection(b *mihomoBuild) *yaml.Node {
 
 // groupNode собирает группу Mihomo. Ключи идут в постоянном порядке; фильтры
 // пишутся только вместе с use.
-func (b *mihomoBuild) groupNode(name, typ string, hidden bool, proxies, use []string, filter, exclude string, probe bool) *yaml.Node {
+func (b *mihomoBuild) groupNode(name, typ string, hidden bool, proxies, use []string, filter string, probe bool) *yaml.Node {
 	if len(proxies) == 0 && len(use) == 0 {
 		// Копии узлов не записались: группа без участников ушла бы в COMPATIBLE.
 		proxies = []string{mihomoReject}
@@ -682,9 +681,6 @@ func (b *mihomoBuild) groupNode(name, typ string, hidden bool, proxies, use []st
 		add("use", ySeq(use, false))
 		if filter != "" {
 			add("filter", yStr(filter))
-		}
-		if exclude != "" {
-			add("exclude-filter", yStr(exclude))
 		}
 	}
 	if probe {
@@ -723,17 +719,17 @@ func groupsSection(b *mihomoBuild) *yaml.Node {
 		g := mg.g
 		switch g.Mode {
 		case ModeManual:
-			seq.Content = append(seq.Content, b.groupNode(g.Name, "select", false, mg.proxies, uses(mg.use), mg.filter, mg.exclude, false))
+			seq.Content = append(seq.Content, b.groupNode(g.Name, "select", false, mg.proxies, uses(mg.use), mg.filter, false))
 		case ModeAuto:
-			seq.Content = append(seq.Content, b.groupNode(g.Name, "url-test", false, mg.copies, uses(mg.use), mg.filter, mg.exclude, true))
+			seq.Content = append(seq.Content, b.groupNode(g.Name, "url-test", false, mg.copies, uses(mg.use), mg.filter, true))
 		case ModeFallback:
 			hidden := hiddenName(g.ID)
-			seq.Content = append(seq.Content, b.groupNode(hidden, "url-test", true, mg.copies, uses(mg.use), mg.filter, mg.exclude, true))
+			seq.Content = append(seq.Content, b.groupNode(hidden, "url-test", true, mg.copies, uses(mg.use), mg.filter, true))
 			reserve := mg.reserve
 			if reserve == "" {
 				reserve = mihomoReject
 			}
-			seq.Content = append(seq.Content, b.groupNode(g.Name, "fallback", false, []string{hidden, reserve}, nil, "", "", true))
+			seq.Content = append(seq.Content, b.groupNode(g.Name, "fallback", false, []string{hidden, reserve}, nil, "", true))
 		}
 	}
 	return yMap("proxy-groups", seq)
