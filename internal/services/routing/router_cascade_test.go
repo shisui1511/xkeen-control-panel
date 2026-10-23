@@ -463,3 +463,108 @@ func keepOther(list []sources.CatalogNode) string {
 	}
 	return list[0].Ref
 }
+
+// rtcWarn ищет предупреждение с кодом и возвращает его номер n.
+func rtcWarn(list []IssueView, code string) (string, bool) {
+	for _, w := range list {
+		if w.Code == code {
+			return w.Params["n"], true
+		}
+	}
+	return "", false
+}
+
+// rtcRuleView находит правило в представлении по ID.
+func rtcRuleView(t *testing.T, v RoutingView, id string) RuleView {
+	t.Helper()
+	for _, r := range v.Rules {
+		if r.ID == id {
+			return r
+		}
+	}
+	t.Fatalf("правила %s нет в представлении", id)
+	return RuleView{}
+}
+
+// Проверки качества правил: точный дубль, перекрытие другой целью, правило ниже
+// «всё подряд»; выключенное правило ничего не перекрывает; «Применить» эти
+// предупреждения не блокируют.
+func TestRouterRulesLint(t *testing.T) {
+	e := rtNewEnv(t, rtWithKernels(rtXrayOnly))
+	e.addMyLinks(t, "vless_ws")
+	proxyG, ok := rtGroupByName(e.groups(t), "Прокси")
+	if !ok {
+		t.Fatal("нет группы «Прокси»")
+	}
+	direct, reject, viaProxy := Target{Kind: KindDirect}, Target{Kind: KindReject}, Target{Kind: KindGroup, ID: proxyG.ID}
+	add := func(target Target, conds ...Cond) Rule {
+		t.Helper()
+		_, saved, err := e.svc.SaveRule(e.rev(t), Rule{Enabled: true, Target: target, Conds: conds})
+		if err != nil {
+			t.Fatalf("SaveRule: %v", err)
+		}
+		return saved
+	}
+	r1 := add(direct, Cond{Type: CondDomain, Values: []string{"a.example.test"}})
+	r2 := add(viaProxy, Cond{Type: CondDomain, Values: []string{"sub.a.example.test"}})
+	r3 := add(direct, Cond{Type: CondDomain, Values: []string{"a.example.test"}})
+	r4 := add(direct, Cond{Type: CondIP, Values: []string{"10.0.0.0/8"}})
+	r5 := add(reject, Cond{Type: CondIP, Values: []string{"10.1.0.0/16"}})
+	r6 := add(reject, Cond{Type: CondNetwork, Values: []string{"tcp", "udp"}})
+	r7 := add(direct, Cond{Type: CondDomain, Values: []string{"b.example.test"}})
+
+	view, err := e.svc.View()
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	want := []struct {
+		rule Rule
+		code string
+		n    string
+	}{
+		{r1, "", ""}, {r2, warnOverlap, "1"}, {r3, warnExactDup, "1"}, {r4, "", ""},
+		{r5, warnOverlap, "4"}, {r6, "", ""}, {r7, warnBelowCatchall, "6"},
+	}
+	for _, w := range want {
+		rv := rtcRuleView(t, view, w.rule.ID)
+		if w.code == "" {
+			if len(rv.Warnings) != 0 {
+				t.Errorf("правило %d: лишние предупреждения %+v", rv.Index, rv.Warnings)
+			}
+			continue
+		}
+		if n, ok := rtcWarn(rv.Warnings, w.code); !ok || n != w.n || len(rv.Warnings) != 1 {
+			t.Errorf("правило %d: ожидалось %s {n: %s}, получено %+v", rv.Index, w.code, w.n, rv.Warnings)
+		}
+		if len(rv.Issues) != 0 {
+			t.Errorf("правило %d: предупреждение качества стало проблемой: %+v", rv.Index, rv.Issues)
+		}
+	}
+
+	// Предупреждения не блокируют «Применить».
+	if issues := e.check(t); len(issues) != 0 {
+		t.Errorf("проверка блокирует из-за предупреждений: %+v", issues)
+	}
+	e.takeAndApply(t)
+
+	// Выключенное правило ничего не перекрывает и само предупреждений не получает.
+	if _, err := e.svc.SetRuleEnabled(e.rev(t), r1.ID, false); err != nil {
+		t.Fatalf("SetRuleEnabled: %v", err)
+	}
+	if _, err := e.svc.SetRuleEnabled(e.rev(t), r7.ID, false); err != nil {
+		t.Fatalf("SetRuleEnabled: %v", err)
+	}
+	view, err = e.svc.View()
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	for _, r := range []Rule{r1, r2, r3, r7} {
+		if rv := rtcRuleView(t, view, r.ID); len(rv.Warnings) != 0 {
+			t.Errorf("правило %d при выключенном перекрывающем: %+v", rv.Index, rv.Warnings)
+		}
+	}
+	if n, ok := rtcWarn(rtcRuleView(t, view, r5.ID).Warnings, warnOverlap); !ok || n != "4" {
+		t.Errorf("перекрытие IP пропало после выключения других правил: %q", n)
+	}
+	e.applyOK(t)
+}

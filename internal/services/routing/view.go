@@ -33,8 +33,9 @@ type GroupView struct {
 }
 
 // RuleView — правило в представлении: поля правила, номер с 1, ядро, для
-// которого оно существует, проблемы и предупреждения. Перекрытия правил добавит
-// 146-08.
+// которого оно существует, проблемы и предупреждения. В предупреждениях — и
+// проверки качества правил (exact_dup, overlap, below_catchall с номером
+// перекрывающего правила); «Применить» они не блокируют.
 type RuleView struct {
 	Rule
 	Index int `json:"index"`
@@ -257,14 +258,16 @@ func (s *Service) View() (RoutingView, error) {
 			MemberOptions: memberOptions(g, xr.Members, groups.Items, xrayNodes, mihomoNodes),
 		})
 	}
+	lint := lintRules(rules.Items)
 	for i, r := range rules.Items {
 		key := "rule:" + r.ID
+		warns := append(append([]IssueView{}, warningsByKey[key]...), lint[r.ID]...)
 		view.Rules = append(view.Rules, RuleView{
 			Rule:     r,
 			Index:    i + 1,
 			Only:     ruleOnly(r),
 			Issues:   orEmpty(issuesByKey[key]),
-			Warnings: orEmpty(warningsByKey[key]),
+			Warnings: warns,
 		})
 	}
 	return view, nil
