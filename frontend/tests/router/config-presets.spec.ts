@@ -393,6 +393,7 @@ async function prepareXKeen(page: Page): Promise<() => Promise<void>> {
   await resetDraft(page);
   const before = await ownerSnap(page);
   if (before.taken) await setOwnership(page, false);
+  const routed = await routingNow(page);
   return async () => {
     await resetDraft(page);
     // Сначала возврат владельца: пока узлы теста на месте, группы по умолчанию не пусты
@@ -411,6 +412,25 @@ async function prepareXKeen(page: Page): Promise<() => Promise<void>> {
         entry_id: n.entry_id
       });
       expect(del.status, 'удаление узла теста').toBe(200);
+    }
+    // Возврат владельца правила пресета не убирает: они остаются применёнными и ломают
+    // следующий прогон, поэтому правила теста и «Всё остальное» возвращаются к прежним
+    const had = new Set(routed.rules.map((r) => r.id));
+    for (const r of (await routingNow(page)).rules) {
+      if (had.has(r.id)) continue;
+      const del = await api(page, 'POST', '/api/configlayer/routing/rules/delete', {
+        revision: (await routingNow(page)).revision,
+        id: r.id
+      });
+      expect(del.status, 'удаление правила теста').toBe(200);
+    }
+    const now = await routingNow(page);
+    if (now.final.kind !== routed.final.kind || now.final.id !== routed.final.id) {
+      const fin = await api(page, 'POST', '/api/configlayer/routing/final', {
+        revision: now.revision,
+        target: routed.final
+      });
+      expect(fin.status, 'возврат «Всё остальное»').toBe(200);
     }
     const after = await ownerSnap(page);
     if (after.changes > 0) await applyAndWait(page);
