@@ -134,6 +134,10 @@ func (e *GroupCycleError) Is(target error) bool { return target == ErrGroupCycle
 // сломала бы строки правил (D-14).
 var reservedNames = []string{"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"}
 
+// reservedNamePrefix — префикс имён, которые панель даёт своим тегам и скрытым
+// группам Mihomo.
+const reservedNamePrefix = "xcp-"
+
 // validateName проверяет имя группы по D-14 (уникальность — validateGroup).
 func validateName(name string) error {
 	if name == "" {
@@ -154,6 +158,11 @@ func validateName(name string) error {
 		if strings.EqualFold(name, res) {
 			return invalid("name", reasonNameReserved)
 		}
+	}
+	// Префикс xcp- у панели свой (теги Xray, скрытые группы «резерва» Mihomo):
+	// имя xcp-g-<id>-main дублировало бы скрытую группу, и Mihomo отверг бы профиль.
+	if len(name) >= len(reservedNamePrefix) && strings.EqualFold(name[:len(reservedNamePrefix)], reservedNamePrefix) {
+		return invalid("name", reasonNameReserved)
 	}
 	return nil
 }

@@ -653,6 +653,7 @@ func TestRouterRulesModel(t *testing.T) {
 		{"управляющий символ", with(func(g *Group) { g.Name = "а\tб" }), "name", reasonNameChars},
 		{"пробел по краям", with(func(g *Group) { g.Name = " ab" }), "name", reasonNameEdges},
 		{"зарезервированное имя", with(func(g *Group) { g.Name = "Direct" }), "name", reasonNameReserved},
+		{"имя с префиксом панели", with(func(g *Group) { g.Name = "XCP-g-0123abcd-main" }), "name", reasonNameReserved},
 		{"неизвестный режим", with(func(g *Group) { g.Mode = "weird" }), "mode", reasonModeInvalid},
 		{"слишком много значений фильтра", with(func(g *Group) { g.Include = many }), "include", reasonFilterTooMany},
 		{"длинное значение фильтра", with(func(g *Group) { g.Exclude = []string{strings.Repeat("a", 65)} }), "exclude", reasonFilterTooLong},
