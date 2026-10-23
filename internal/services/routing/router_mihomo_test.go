@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 )
 
 // Материализация групп, правил и списков в Mihomo: настоящий слой, настоящий
@@ -270,4 +271,224 @@ func TestRouterMihomoGroupsMaterialize(t *testing.T) {
 	if link, err := os.Readlink(e.mihomoPath("config.yaml")); err != nil || link != user {
 		t.Errorf("config.yaml после возврата: %q, %v (ожидался симлинк на прежний профиль)", link, err)
 	}
+}
+
+// rtmDatRefs находит в каталоге dat стенда первый небольшой список geosite и
+// geoip (не больше трёх тысяч записей, чтобы не упереться в пределы Mihomo);
+// nil — списка нет.
+func rtmDatRefs(ix *lists.Index) (site, ip *lists.ListRef) {
+	files, err := ix.Files()
+	if err != nil {
+		return nil, nil
+	}
+	for _, f := range files {
+		if (f.Kind != lists.KindSite && f.Kind != lists.KindIP) || !listFileRE.MatchString(f.Name) {
+			continue
+		}
+		if (f.Kind == lists.KindSite && site != nil) || (f.Kind == lists.KindIP && ip != nil) {
+			continue
+		}
+		tags, err := ix.Tags(f.Name)
+		if err != nil {
+			continue
+		}
+		for _, tg := range tags {
+			if !listTagRE.MatchString(tg.Tag) || tg.Count < 3 || tg.Count > 3000 {
+				continue
+			}
+			ref := lists.ListRef{File: f.Name, Tag: tg.Tag, Kind: f.Kind}
+			if f.Kind == lists.KindSite {
+				site = &ref
+			} else {
+				ip = &ref
+			}
+			break
+		}
+		if site != nil && ip != nil {
+			break
+		}
+	}
+	return site, ip
+}
+
+// Правила и списки dat в Mihomo: строки rules, свои текстовые провайдеры правил с
+// теми же данными, что видит Xray, пороги версий.
+func TestRouterMihomoRulesAndLists(t *testing.T) {
+	t.Run("lists_and_rules", func(t *testing.T) {
+		ix := lists.NewIndex("")
+		site, ipList := rtmDatRefs(ix)
+		if site == nil && ipList == nil {
+			t.Skip("в каталоге dat стенда нет подходящих списков")
+		}
+		// Оба ядра: один и тот же список должен попасть и в Xray (ext:), и в Mihomo.
+		e := rtNewEnv(t, rtWithDeps(func(d *Deps) { d.Lists = ix }))
+		e.writeUserProfile(t)
+		e.addMyLinks(t, "vless_ws")
+
+		direct, reject := Target{Kind: KindDirect}, Target{Kind: KindReject}
+		save := func(name string, r Rule) {
+			t.Helper()
+			if _, _, err := e.svc.SaveRule(e.rev(t), r); err != nil {
+				t.Fatalf("SaveRule %s: %v", name, err)
+			}
+		}
+		var want []string
+		if site != nil {
+			cat, err := ix.Extract(site.File, site.Tag)
+			if err != nil {
+				t.Fatalf("Extract %s:%s: %v", site.File, site.Tag, err)
+			}
+			save("geosite", Rule{Enabled: true, Target: direct, Conds: []Cond{{Type: CondGeosite, Lists: []lists.ListRef{*site}}}})
+			if len(cat.Domains) > 0 {
+				want = append(want, "RULE-SET,"+ProviderName(site.File, site.Tag, listPartDomain)+",DIRECT")
+			}
+			if len(cat.Classical) > 0 {
+				want = append(want, "RULE-SET,"+ProviderName(site.File, site.Tag, listPartClassical)+",DIRECT")
+			}
+		}
+		if ipList != nil {
+			cat, err := ix.Extract(ipList.File, ipList.Tag)
+			if err != nil {
+				t.Fatalf("Extract %s:%s: %v", ipList.File, ipList.Tag, err)
+			}
+			save("geoip", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondGeoip, Lists: []lists.ListRef{*ipList}}}})
+			if len(cat.CIDRs) > 0 {
+				want = append(want, "RULE-SET,"+ProviderName(ipList.File, ipList.Tag, listPartIP)+",REJECT,no-resolve")
+			}
+		}
+		save("domain_port", Rule{Enabled: true, Target: direct, Conds: []Cond{
+			{Type: CondDomain, Values: []string{"two.example.test"}}, {Type: CondPort, Values: []string{"8443"}},
+		}})
+		want = append(want, "AND,((DOMAIN-SUFFIX,two.example.test),(DST-PORT,8443)),DIRECT")
+		save("bittorrent", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondBittorrent}}})
+		save("raw_mihomo", Rule{Enabled: true, Target: direct, Raw: &RawRule{Kernel: configlayer.KernelMihomo, Text: "PROCESS-NAME,rt-raw-proc"}})
+		want = append(want, "PROCESS-NAME,rt-raw-proc,DIRECT")
+		if site != nil {
+			// Тот же список во втором правиле: провайдер один.
+			save("geosite_again", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondGeosite, Lists: []lists.ListRef{*site}}}})
+			cat, _ := ix.Extract(site.File, site.Tag)
+			if len(cat.Domains) > 0 {
+				want = append(want, "RULE-SET,"+ProviderName(site.File, site.Tag, listPartDomain)+",REJECT")
+			}
+			if len(cat.Classical) > 0 {
+				want = append(want, "RULE-SET,"+ProviderName(site.File, site.Tag, listPartClassical)+",REJECT")
+			}
+		}
+		want = append(want, "MATCH,DIRECT")
+
+		// «Применить»: mihomo -t читает профиль и файлы провайдеров, xray run -test —
+		// ext:-списки из тех же dat.
+		e.takeAndApply(t)
+
+		doc := e.mihomoProfile(t)
+		if got := rtmStrings(doc["rules"]); !rtxEqualStrings(got, want) {
+			t.Errorf("rules профиля:\n got %q\nwant %q", got, want)
+		}
+		for _, line := range rtmStrings(doc["rules"]) {
+			if strings.Contains(strings.ToLower(line), "bittorrent") {
+				t.Errorf("правило «только Xray» попало в Mihomo: %q", line)
+			}
+		}
+
+		// Файлы провайдеров: существуют, число строк равно Expect и числу записей
+		// категории в dat (один источник данных для обоих ядер).
+		gens := e.svc.Generators()
+		files, err := gens[1].Generate(inputOf(e.state(t)), e.installed)
+		if err != nil {
+			t.Fatalf("генератор %s: %v", gens[1].ID(), err)
+		}
+		perList := map[string]int{}
+		providers := 0
+		for _, f := range files {
+			if f.Kind != configlayer.KindMihomoRuleProviderText {
+				continue
+			}
+			providers++
+			if f.Inert || f.Expect == nil || f.Expect.ProviderType != "rules" {
+				t.Errorf("провайдер %s: Inert=%v Expect=%+v", f.RelPath, f.Inert, f.Expect)
+				continue
+			}
+			if !strings.HasPrefix(f.RelPath, "rule_providers/"+f.Expect.ProviderName+".") {
+				t.Errorf("имя провайдера %q не совпадает с файлом %s", f.Expect.ProviderName, f.RelPath)
+			}
+			n := rtmCountLines(t, e.mihomoPath(f.RelPath))
+			if n != f.Expect.Count {
+				t.Errorf("в %s строк %d, Expect.Count %d", f.RelPath, n, f.Expect.Count)
+			}
+			// Имя «xcp-ls-<8hex>-<часть>»: список — всё до последнего дефиса.
+			perList[f.Expect.ProviderName[:strings.LastIndex(f.Expect.ProviderName, "-")]] += n
+		}
+		if provs, _ := doc["rule-providers"].(map[string]any); len(provs) != providers {
+			t.Errorf("rule-providers профиля %d, файлов провайдеров %d", len(provs), providers)
+		}
+		for _, ref := range []*lists.ListRef{site, ipList} {
+			if ref == nil {
+				continue
+			}
+			cat, err := ix.Extract(ref.File, ref.Tag)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prefix := strings.TrimSuffix(ProviderName(ref.File, ref.Tag, listPartDomain), "-"+listPartDomain)
+			if got := perList[prefix]; got != cat.Entries {
+				t.Errorf("список %s:%s: в провайдерах %d строк, в категории dat %d", ref.File, ref.Tag, got, cat.Entries)
+			}
+		}
+
+		// Тот же список в Xray — ext:<файл>:<тег>.
+		xrules := rtxRules(t, rtxRouting(t, e.xrayDoc(t, xrayRoutingFile)))
+		for _, c := range []struct {
+			ref   *lists.ListRef
+			field string
+		}{{site, "domain"}, {ipList, "ip"}} {
+			if c.ref == nil {
+				continue
+			}
+			ext := "ext:" + c.ref.File + ":" + c.ref.Tag
+			found := false
+			for _, r := range xrules {
+				if v := rtxStrings(r[c.field]); len(v) == 1 && v[0] == ext {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("в routing Xray нет правила с %s", ext)
+			}
+		}
+	})
+
+	t.Run("version_threshold", func(t *testing.T) {
+		// Ниже Mihomo 1.19.27 группы не материализуются, цели групп — REJECT,
+		// «Применить» проходит (D-45).
+		e := rtNewEnv(t, rtWithKernels(rtMihomoOnly), rtWithDeps(func(d *Deps) {
+			d.KernelVersion = func(kernel string) string {
+				if kernel == configlayer.KernelMihomo {
+					return "1.19.26"
+				}
+				return ""
+			}
+		}))
+		e.writeUserProfile(t)
+		e.addMyLinks(t, "vless_ws", "trojan_grpc")
+		auto, _ := rtGroupByName(e.groups(t), "Авто")
+		if _, _, err := e.svc.SaveRule(e.rev(t), Rule{
+			Enabled: true, Target: Target{Kind: KindGroup, ID: auto.ID},
+			Conds: []Cond{{Type: CondDomain, Values: []string{"group.example.test"}}},
+		}); err != nil {
+			t.Fatalf("SaveRule: %v", err)
+		}
+		if _, err := e.svc.SetFinal(e.rev(t), Target{Kind: KindGroup, ID: auto.ID}); err != nil {
+			t.Fatalf("SetFinal: %v", err)
+		}
+		e.takeAndApply(t)
+
+		doc := e.mihomoProfile(t)
+		if _, has := doc["proxy-groups"]; has {
+			t.Errorf("ниже 1.19.27 в профиле есть proxy-groups: %v", doc["proxy-groups"])
+		}
+		want := []string{"DOMAIN-SUFFIX,group.example.test,REJECT", "MATCH,REJECT"}
+		if got := rtmStrings(doc["rules"]); !rtxEqualStrings(got, want) {
+			t.Errorf("rules профиля %q, ожидались %q (цели групп — REJECT)", got, want)
+		}
+	})
 }
