@@ -394,7 +394,15 @@ test('routing: взятие и отпускание', { tag: CORE_TAG }, async (
     expect((await ownerSnap(page)).desired, 'диалог сам ничего не записал').toBe(false);
 
     // «Взять» пишет желание в черновик: файлы меняются при «Применить»
+    const noRules = (await routingProbe(page)).rules === 0;
     await modal.getByTestId('take-routing-confirm').click();
+    if (noRules) {
+      // список правил пуст: взятие идёт через диалог пресета; закрытие без выбора
+      // оставляет маршрутизацию взятой в черновике с пустым списком правил (D-04)
+      const preset = page.getByTestId('preset-modal');
+      await expect(preset).toBeVisible({ timeout: T.action });
+      await preset.getByTestId('preset-cancel').click();
+    }
     await expect(modal).toHaveCount(0, { timeout: T.action });
     await expect(notice).toHaveAttribute('data-owner', 'pending', { timeout: T.action });
     await expect(page.getByTestId('routing-take-pending')).toBeVisible();
