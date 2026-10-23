@@ -24,6 +24,7 @@
   import GroupCard from './GroupCard.svelte';
   import GroupEditModal from './GroupEditModal.svelte';
   import GroupDeleteModal from './GroupDeleteModal.svelte';
+  import ProbeSettingsCard from './ProbeSettingsCard.svelte';
 
   // Представление маршрутизации читается при открытии вкладки; дальше его перечитывают
   // события SSE routing, sources и draft (подписки регистрирует configRouting.ts).
@@ -186,7 +187,7 @@
         {$t('cfg.groups.add')}
       </Button>
     </div>
-    <div class="groups-list">
+    <div class="groups-list" data-testid="groups-list">
       {#each groups as group (group.id)}
         <GroupCard
           {group}
@@ -200,6 +201,7 @@
         />
       {/each}
     </div>
+    <ProbeSettingsCard />
   {/if}
 </div>
 

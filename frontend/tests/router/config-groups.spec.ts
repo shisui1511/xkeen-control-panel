@@ -506,3 +506,123 @@ test('groups: диалог группы — «Резерв» без резерв
     await resetDraft(page);
   }
 });
+
+// --- Проверка доступности узлов (фаза 146, план 28) ---
+
+interface ProbeInfo {
+  revision: number;
+  url: string;
+  interval: number;
+  timeout: number;
+}
+
+async function probeInfo(page: Page): Promise<ProbeInfo> {
+  const view = await api(page, 'GET', '/api/configlayer/routing');
+  expect(view.status, 'GET /api/configlayer/routing').toBe(200);
+  const probe = (view.data?.probe ?? {}) as {
+    url?: string;
+    interval_s?: number;
+    timeout_s?: number;
+  };
+  return {
+    revision: Number(view.data?.revision ?? 0),
+    url: String(probe.url ?? ''),
+    interval: Number(probe.interval_s ?? 0),
+    timeout: Number(probe.timeout_s ?? 0)
+  };
+}
+
+/** Раскрывает карточку проверки и возвращает поле по имени. */
+async function openProbe(page: Page): Promise<(name: 'url' | 'interval' | 'timeout') => Locator> {
+  await expect(page.getByTestId('probe-card')).toBeVisible({ timeout: T.action });
+  const toggle = page.getByTestId('probe-toggle');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.getByTestId('probe-body')).toBeVisible({ timeout: T.action });
+  return (name) => page.getByTestId(`probe-${name}`).locator('input');
+}
+
+test('groups: проверка доступности — недопустимое значение в черновик не пишется, допустимое пишется', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await startPage(page);
+  await resetDraft(page);
+  const port = randomPort();
+  try {
+    await addToDraft(page, nodeLink('vless_ws.txt', port, 'PrbNode'));
+    await saveGroupApi(page, { name: `RT Проба ${port}`, mode: 'auto' });
+    await openGroups(page);
+
+    // карточка под списком групп, свёрнута по умолчанию
+    const list = page.getByTestId('groups-list');
+    const card = page.getByTestId('probe-card');
+    await expect(card).toBeVisible({ timeout: T.action });
+    await expect(page.getByTestId('probe-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByTestId('probe-body')).toHaveCount(0);
+    const listBox = await list.boundingBox();
+    const cardBox = await card.boundingBox();
+    expect(cardBox!.y, 'карточка проверки ниже списка групп').toBeGreaterThan(listBox!.y);
+
+    const field = await openProbe(page);
+    const start = await probeInfo(page);
+    // поля заполнены записанными значениями (по умолчанию — D-12)
+    await expect(field('url')).toHaveValue(start.url);
+    await expect(field('interval')).toHaveValue(String(start.interval));
+    await expect(field('timeout')).toHaveValue(String(start.timeout));
+
+    // таймаут не меньше интервала: ошибка под полем через aria-describedby, в черновик не записано
+    await field('timeout').fill(String(start.interval + 5));
+    await field('timeout').press('Tab');
+    const timeoutError = page.getByTestId('probe-timeout').locator('.error-text');
+    await expect(timeoutError).toContainText(/Таймаут должен быть меньше|timeout must be less/);
+    await expect(field('timeout')).toHaveAttribute('aria-describedby', /-error$/);
+    const afterBad = await probeInfo(page);
+    expect(afterBad.revision, 'ревизия черновика не изменилась').toBe(start.revision);
+    expect(afterBad.timeout, 'таймаут в черновике прежний').toBe(start.timeout);
+
+    // очищенное поле адреса: ошибка, ничего не записано
+    await field('url').fill('');
+    await field('url').press('Tab');
+    const urlError = page.getByTestId('probe-url').locator('.error-text');
+    await expect(urlError).toContainText(/Введите адрес http или https|Enter an http or https/);
+    expect((await probeInfo(page)).url, 'адрес в черновике прежний').toBe(start.url);
+
+    // недопустимое поле не мешает записи остальных: таймаут возвращён, интервал записан
+    await field('timeout').fill(String(start.timeout));
+    await field('timeout').press('Tab');
+    await expect(timeoutError).toHaveCount(0);
+    await field('interval').fill(String(start.interval + 20));
+    await field('interval').press('Tab');
+    await expect
+      .poll(async () => (await probeInfo(page)).interval, { timeout: T.action })
+      .toBe(start.interval + 20);
+    const written = await probeInfo(page);
+    expect(written.revision, 'запись создала ревизию').toBeGreaterThan(start.revision);
+    expect(written.url, 'ошибочный адрес не записан').toBe(start.url);
+    expect(written.timeout).toBe(start.timeout);
+    await expect(urlError).toHaveCount(1);
+
+    // интервал — не целое число: ошибка, в черновике прежний
+    await field('interval').fill('abc');
+    await field('interval').press('Tab');
+    await expect(page.getByTestId('probe-interval').locator('.error-text')).toContainText(
+      /Интервал: целое число секунд|Interval: a whole number/
+    );
+    expect((await probeInfo(page)).interval, 'интервал в черновике прежний').toBe(
+      start.interval + 20
+    );
+
+    // длинный допустимый адрес прокручивается внутри поля, ширина карточки не меняется
+    const widthBefore = (await card.boundingBox())!.width;
+    await field('url').fill(`https://probe.example.test/${'a'.repeat(300)}`);
+    await field('url').press('Tab');
+    expect((await card.boundingBox())!.width, 'ширина карточки').toBe(widthBefore);
+    await expect(urlError).toHaveCount(0);
+    await expect
+      .poll(async () => (await probeInfo(page)).url.length, { timeout: T.action })
+      .toBeGreaterThan(300);
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});
