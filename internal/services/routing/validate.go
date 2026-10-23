@@ -907,6 +907,9 @@ const (
 	// warnListHeavy — список тяжёлый (больше lists.WarnEntries записей): Mihomo
 	// будет грузить его заметно дольше (D-19).
 	warnListHeavy = "list_heavy"
+	// warnListDropped — часть записей списка не записать строкой провайдера
+	// Mihomo (lists.Category.Dropped): Mihomo ловит меньше, чем Xray.
+	warnListDropped = "list_dropped"
 )
 
 // checkerID — идентификатор проверки в реестре слоя.
@@ -1034,7 +1037,8 @@ func emptyGroups(groups []Group, nodes []sources.CatalogNode) map[string]bool {
 // проверки, которым нужен состав. Правила со списками, которых нет на роутере
 // (list_not_found) или которые больше предела Mihomo (list_too_large), при
 // желаемом routing.managed блокируют «Применить», иначе — предупреждения;
-// тяжёлый список (list_heavy) — всегда предупреждение. Индекс ix nil — списки
+// тяжёлый список (list_heavy) и список с отброшенными записями (list_dropped) —
+// всегда предупреждения. Индекс ix nil — списки
 // не проверяются.
 func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catalog catalogFunc, version versionFunc, ix *lists.Index) (issues, warnings []IssueView) {
 	issues, warnings = []IssueView{}, []IssueView{}
@@ -1164,13 +1168,13 @@ func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catal
 		if missing(rules.Final) {
 			issues = append(issues, IssueView{Code: issueTargetMissing, Params: map[string]string{"rule": "final"}, Key: "final"})
 		}
-		problems, heavy := listProblems(rules.Items, installed, ix, version)
+		problems, listWarns := listProblems(rules.Items, installed, ix, version)
 		if configlayer.DesiredRouting(in.Sections).Managed {
 			issues = append(issues, problems...)
 		} else {
 			warnings = append(warnings, problems...)
 		}
-		warnings = append(warnings, heavy...)
+		warnings = append(warnings, listWarns...)
 	}
 	return issues, warnings
 }
@@ -1178,12 +1182,13 @@ func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catal
 // listProblems проверяет списки dat, на которые ссылаются включённые правила
 // (D-19, D-21): нет файла или тега — list_not_found {file, tag, rule}; для
 // Mihomo (установлен, группы доступны по версии) список больше предела —
-// list_too_large {file, tag}; тяжёлый — list_heavy {file, tag, entries}
-// (отдельным списком: это предупреждение при любом желаемом состоянии). Ошибка
+// list_too_large {file, tag}; тяжёлый — list_heavy {file, tag, entries}, с
+// отброшенными записями — list_dropped {file, tag, dropped} (отдельным списком:
+// это предупреждения при любом желаемом состоянии). Ошибка
 // чтения индекса даёт list_not_found для той же пары. Свои правила ядра списков
 // не содержат. Один список в правиле — одна запись, номер правила считается с
 // единицы по всему списку правил.
-func listProblems(items []Rule, installed configlayer.InstalledKernels, ix *lists.Index, version versionFunc) (problems, heavy []IssueView) {
+func listProblems(items []Rule, installed configlayer.InstalledKernels, ix *lists.Index, version versionFunc) (problems, warns []IssueView) {
 	if ix == nil {
 		return nil, nil
 	}
@@ -1222,13 +1227,17 @@ func listProblems(items []Rule, installed configlayer.InstalledKernels, ix *list
 				case err != nil:
 					problems = append(problems, notFound)
 				case cat.Heavy:
-					heavy = append(heavy, IssueView{Code: warnListHeavy, Key: key,
+					warns = append(warns, IssueView{Code: warnListHeavy, Key: key,
 						Params: map[string]string{"file": ref.File, "tag": ref.Tag, "entries": strconv.Itoa(cat.Entries)}})
+				}
+				if err == nil && cat.Dropped > 0 {
+					warns = append(warns, IssueView{Code: warnListDropped, Key: key,
+						Params: map[string]string{"file": ref.File, "tag": ref.Tag, "dropped": strconv.Itoa(cat.Dropped)}})
 				}
 			}
 		}
 	}
-	return problems, heavy
+	return problems, warns
 }
 
 // routingChecker — проверка до записи (configlayer.Checker). При желаемом

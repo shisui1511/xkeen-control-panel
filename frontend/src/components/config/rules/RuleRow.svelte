@@ -92,6 +92,12 @@
         tag: w.params?.tag ?? '?',
         entries: w.params?.entries ?? '?'
       });
+    if (w.code === 'list_dropped')
+      return $t('cfg.rules.list_dropped', {
+        file: w.params?.file ?? '?',
+        tag: w.params?.tag ?? '?',
+        dropped: w.params?.dropped ?? '?'
+      });
     return $t(issueTextKey(w.code), w.params ?? {});
   }
 

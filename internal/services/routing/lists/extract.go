@@ -44,13 +44,16 @@ const (
 //   - CIDRs — для behavior: ipcidr.
 //
 // Entries — число строк во всех трёх списках после удаления дублей и невалидных
-// значений; именно оно ожидается в ruleCount провайдера.
+// значений; именно оно ожидается в ruleCount провайдера. Dropped — сколько записей
+// категории не попало в строки провайдера: значение нельзя записать строкой
+// (validValue), поэтому Mihomo по этому списку ловит меньше, чем Xray.
 type Category struct {
 	Kind      string
 	Domains   []string
 	Classical []string
 	CIDRs     []string
 	Entries   int
+	Dropped   int
 	Hash      string
 	Heavy     bool
 
@@ -117,12 +120,15 @@ func (ix *Index) storeCategory(key string, c Category) {
 }
 
 // validValue — значение пригодно для строки текстового провайдера: непустое, без
-// «/», пробелов и запятых (запись со «/» провайдер домена отбрасывает).
-func validValue(v string) bool {
-	if v == "" {
+// «/» и пробелов (запись со «/» провайдер домена отбрасывает, пробелы вокруг
+// запятых Mihomo срезает). Запятая недопустима везде, кроме регулярного выражения:
+// строку DOMAIN-REGEX Mihomo собирает обратно по всем полям после типа, а у
+// DOMAIN-KEYWORD и доменов лишнее поле стало бы параметром.
+func validValue(v string, regex bool) bool {
+	if v == "" || strings.ContainsAny(v, "/ \t\r\n") {
 		return false
 	}
-	return !strings.ContainsAny(v, "/, \t\r\n")
+	return regex || !strings.Contains(v, ",")
 }
 
 func extractFrom(r io.Reader, kind, tag string) (Category, error) {
@@ -132,6 +138,7 @@ func extractFrom(r io.Reader, kind, tag string) (Category, error) {
 		classical = map[string]struct{}{}
 		cidrs     = map[string]struct{}{}
 		total     int
+		dropped   int
 		bytes     int
 		found     bool
 	)
@@ -179,7 +186,11 @@ func extractFrom(r io.Reader, kind, tag string) (Category, error) {
 				continue
 			}
 			dt, v, ok := parseDomain(elem)
-			if !ok || !validValue(v) {
+			if !ok {
+				continue
+			}
+			if !validValue(v, dt == domainRegex) {
+				dropped++
 				continue
 			}
 			switch dt {
@@ -211,6 +222,7 @@ func extractFrom(r io.Reader, kind, tag string) (Category, error) {
 	cat.Classical = sortedKeys(classical)
 	cat.CIDRs = sortedKeys(cidrs)
 	cat.Entries = len(cat.Domains) + len(cat.Classical) + len(cat.CIDRs)
+	cat.Dropped = dropped
 	cat.Heavy = cat.Entries > WarnEntries
 	cat.bytes = bytes
 	h := sha256.New()
