@@ -451,6 +451,9 @@ func TestRouterRulesModel(t *testing.T) {
 		{"raw mihomo: GEOIP внутри AND", Rule{Raw: &RawRule{Kernel: "mihomo", Text: "AND,((GEOIP,RU),(NETWORK,TCP))"}, Target: toProxy}, "raw", reasonRawInvalid},
 		{"raw mihomo: скобки", Rule{Raw: &RawRule{Kernel: "mihomo", Text: "AND,((NETWORK,TCP)"}, Target: toProxy}, "raw", reasonRawInvalid},
 		{"raw mihomo: неизвестный тип", Rule{Raw: &RawRule{Kernel: "mihomo", Text: "FOO,a.com"}, Target: toProxy}, "raw", reasonRawInvalid},
+		{"домен и geosite", Rule{Conds: []Cond{{Type: CondDomain, Values: []string{"a.com"}}, {Type: CondGeosite, Lists: siteList}}, Target: toProxy}, "conds.1.type", "cond_conflict"},
+		{"ip и geoip", Rule{Conds: []Cond{{Type: CondIP, Values: []string{"10.0.0.0/8"}}, {Type: CondGeoip, Lists: []lists.ListRef{{File: "geoip.dat", Tag: "RU"}}}}, Target: toProxy}, "conds.1.type", "cond_conflict"},
+		{"два условия «порт»", Rule{Conds: []Cond{{Type: CondPort, Values: []string{"443"}}, {Type: CondPort, Values: []string{"8443"}}}, Target: toProxy}, "conds.1.type", "cond_conflict"},
 	}
 	for _, c := range cases {
 		_, _, err := e.svc.SaveRule(e.rev(t), c.rule)
@@ -468,7 +471,6 @@ func TestRouterRulesModel(t *testing.T) {
 			{Type: CondNetwork, Values: []string{"UDP", "tcp"}},
 			{Type: CondPort, Values: []string{"443", "8000-9000"}},
 			{Type: CondIP, Values: []string{"10.0.0.5/8", "1.1.1.1"}},
-			{Type: CondGeosite, Lists: []lists.ListRef{{File: "geosite_zkeen.dat", Tag: "YOUTUBE"}}},
 			{Type: CondBittorrent},
 		},
 	})
@@ -482,9 +484,23 @@ func TestRouterRulesModel(t *testing.T) {
 	if strings.Join(norm.Conds[0].Values, "|") != strings.Join(wantVals, "|") {
 		t.Errorf("значения домена: %v", norm.Conds[0].Values)
 	}
-	if strings.Join(norm.Conds[1].Values, "|") != "tcp|udp" || strings.Join(norm.Conds[3].Values, "|") != "10.0.0.0/8|1.1.1.1" ||
-		norm.Conds[4].Lists[0].Kind != lists.KindSite {
-		t.Errorf("нормализация сети, IP или списка: %+v", norm.Conds)
+	if strings.Join(norm.Conds[1].Values, "|") != "tcp|udp" || strings.Join(norm.Conds[3].Values, "|") != "10.0.0.0/8|1.1.1.1" {
+		t.Errorf("нормализация сети или IP: %+v", norm.Conds)
+	}
+	// Вид списка проставляется при сохранении; условие geosite — отдельным правилом
+	// (вместе с условием «домен» оно было бы конфликтом поля), правило убирается.
+	_, siteRule, err := e.svc.SaveRule(e.rev(t), Rule{
+		Enabled: true, Target: toProxy,
+		Conds: []Cond{{Type: CondGeosite, Lists: []lists.ListRef{{File: "geosite_zkeen.dat", Tag: "YOUTUBE"}}}},
+	})
+	if err != nil {
+		t.Fatalf("SaveRule с условием geosite: %v", err)
+	}
+	if siteRule.Conds[0].Lists[0].Kind != lists.KindSite {
+		t.Errorf("нормализация списка: %+v", siteRule.Conds)
+	}
+	if _, err := e.svc.DeleteRule(e.rev(t), siteRule.ID); err != nil {
+		t.Fatalf("DeleteRule: %v", err)
 	}
 	rawRule := Rule{Enabled: true, Target: Target{Kind: KindDirect, ID: "лишний"}, Raw: &RawRule{
 		Kernel: "xray", Text: `{ "type": "field", "domain": ["domain:example.com"], "outboundTag": "proxy", "balancerTag": "b" }`}}
@@ -703,5 +719,68 @@ func TestRouterRulesModel(t *testing.T) {
 	}
 	if got, err := e.svc.Probe(); err != nil || got != want {
 		t.Errorf("параметры проверки после сохранения: %+v, %v", got, err)
+	}
+}
+
+// Не больше одного условия на поле Xray (D-15): домен + geosite отвергается при
+// сохранении в любом порядке; то же правило, лежащее в черновике в обход сервиса,
+// помечено cond_conflict в представлении и в проверке и блокирует «Применить»;
+// выключенное правило проблемы не даёт.
+func TestRouterRuleCondConflict(t *testing.T) {
+	e := rtNewEnv(t)
+	e.addMyLinks(t, "vless_ws")
+	proxy, ok := rtGroupByName(e.groups(t), "Прокси")
+	if !ok {
+		t.Fatal("нет группы «Прокси»")
+	}
+	toProxy := Target{Kind: KindGroup, ID: proxy.ID}
+	domain := Cond{Type: CondDomain, Values: []string{"conflict.example.test"}}
+	site := Cond{Type: CondGeosite, Lists: []lists.ListRef{{File: "geosite_zkeen.dat", Tag: "YOUTUBE"}}}
+
+	_, _, err := e.svc.SaveRule(e.rev(t), Rule{Enabled: true, Target: toProxy, Conds: []Cond{domain, site}})
+	rtWantInvalid(t, "конфликт условий принят при сохранении", err, "conds.1.type", "cond_conflict")
+	_, _, err = e.svc.SaveRule(e.rev(t), Rule{Enabled: true, Target: toProxy, Conds: []Cond{site, domain}})
+	rtWantInvalid(t, "конфликт условий (обратный порядок) принят при сохранении", err, "conds.1.type", "cond_conflict")
+
+	// Правило с конфликтом в черновике в обход сервиса.
+	const id = "c0ffee10"
+	cfg := e.rules(t)
+	cfg.Items = append(cfg.Items, Rule{ID: id, Enabled: true, Target: toProxy, Conds: []Cond{domain, site}})
+	raw, err := encodeRules(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.putSection(t, RulesSection, raw)
+	number := strconv.Itoa(len(cfg.Items))
+
+	if rv := rtcRuleView(t, e.view(t), id); !rtViewHas(rv.Issues, "cond_conflict", "rule", number) {
+		t.Errorf("в представлении у правила нет cond_conflict с номером %s: %+v", number, rv.Issues)
+	}
+	if _, err := e.svc.Take(e.rev(t)); err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	found := false
+	for _, is := range e.check(t) {
+		if is.Code == "cond_conflict" && is.Key == "rule:"+id {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("в проверке нет cond_conflict с ключом rule:%s", id)
+	}
+
+	_, err = e.applyResult(t)
+	var ce *configlayer.ChecksError
+	if !errors.Is(err, configlayer.ErrChecksFailed) || !errors.As(err, &ce) || !rtHasIssue(ce.Issues, "cond_conflict", "rule", number) {
+		t.Errorf("«Применить» не заблокировано проверкой cond_conflict: %v", err)
+	}
+
+	if _, err := e.svc.SetRuleEnabled(e.rev(t), id, false); err != nil {
+		t.Fatalf("SetRuleEnabled: %v", err)
+	}
+	for _, is := range e.check(t) {
+		if is.Code == "cond_conflict" {
+			t.Errorf("выключенное правило даёт cond_conflict: %+v", is)
+		}
 	}
 }
