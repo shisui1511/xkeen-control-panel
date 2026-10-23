@@ -5,9 +5,15 @@
   import Icon from '../../../lib/components/Icon.svelte';
   import { applyRunning } from '../../../lib/configLayer';
   import { configSubTabHash } from '../../../lib/configSubTab';
-  import { fetchTakeover } from '../../../lib/configRouting';
+  import { fetchTakeover, reclaimRouting } from '../../../lib/configRouting';
   import TakeRoutingModal from './TakeRoutingModal.svelte';
-  import { ownerState, routingBusy, confirmRelease } from './routingOwner';
+  import {
+    ownerState,
+    routingBusy,
+    confirmRelease,
+    releaseAndApply,
+    guarded
+  } from './routingOwner';
 
   // Плашка владельца маршрутизации на вкладках «Группы» и «Правила» (D-01…D-07): пока
   // управляет XKeen — предупреждение с кнопкой взятия; после взятия — строка с «Отпустить
@@ -36,7 +42,82 @@
   });
 
   let takeOpen = $state(false);
+
+  // Какое действие дрейфа идёт: его кнопка показывает загрузку, остальные неактивны
+  let action = $state<'' | 'mihomo' | 'xray' | 'release'>('');
+
+  async function run(name: 'mihomo' | 'xray' | 'release') {
+    action = name;
+    try {
+      if (name === 'release') await releaseAndApply();
+      else await guarded(() => reclaimRouting(name));
+    } finally {
+      action = '';
+    }
+  }
+
+  const mihomoDrift = $derived($ownerState.mihomoDrift.length > 0);
+  const xrayDrift = $derived($ownerState.xrayDrift);
 </script>
+
+<!-- Дрейф (D-06, D-07): профиль Mihomo или чужой файл routing решает пользователь; пока он
+     не решён, «Применить» заблокировано механизмом дрейфа слоя -->
+{#if mihomoDrift}
+  <div class="alert alert-error ro-notice" role="alert" data-testid="routing-drift-mihomo">
+    <Icon name="warning" size={16} class="ro-icon" />
+    <div class="ro-body">
+      <span class="ro-text">{$t('cfg.routing.drift_profile')}</span>
+      <div class="ro-actions">
+        <Button
+          variant="primary"
+          disabled={blocked}
+          loading={action === 'mihomo'}
+          data-testid="routing-reclaim-mihomo"
+          onclick={() => void run('mihomo')}
+        >
+          {$t('cfg.routing.drift_reclaim_profile')}
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={blocked}
+          loading={action === 'release'}
+          data-testid="routing-drift-release"
+          onclick={() => void run('release')}
+        >
+          {$t('cfg.routing.drift_release')}
+        </Button>
+      </div>
+    </div>
+  </div>
+{/if}
+{#if xrayDrift.length > 0}
+  <div class="alert alert-error ro-notice" role="alert" data-testid="routing-drift-xray">
+    <Icon name="warning" size={16} class="ro-icon" />
+    <div class="ro-body">
+      <span class="ro-text">{$t('cfg.routing.drift_foreign', { file: xrayDrift.join(', ') })}</span>
+      <div class="ro-actions">
+        <Button
+          variant="primary"
+          disabled={blocked}
+          loading={action === 'xray'}
+          data-testid="routing-reclaim-xray"
+          onclick={() => void run('xray')}
+        >
+          {$t('cfg.routing.drift_reclaim_file')}
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={blocked}
+          loading={action === 'release'}
+          data-testid="routing-drift-release-xray"
+          onclick={() => void run('release')}
+        >
+          {$t('cfg.routing.drift_release')}
+        </Button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if kind === 'xkeen' || kind === 'pending'}
   <div

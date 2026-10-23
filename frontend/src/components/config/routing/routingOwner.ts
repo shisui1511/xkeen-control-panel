@@ -11,12 +11,7 @@ import {
   layerSnapshot,
   refetchLayerState
 } from '../../../lib/configLayer';
-import {
-  reclaimRouting,
-  releaseRouting,
-  routingErrorText,
-  takeRouting
-} from '../../../lib/configRouting';
+import { releaseRouting, routingErrorText, takeRouting } from '../../../lib/configRouting';
 
 /** Кто управляет маршрутизацией: ни одного установленного ядра, XKeen, панель или взятие ждёт «Применить». */
 export type OwnerKind = 'none' | 'xkeen' | 'pending' | 'panel';
@@ -117,11 +112,14 @@ export async function confirmRelease(): Promise<void> {
   if (ok) await releaseAndApply();
 }
 
-/** Решает дрейф в пользу панели: профиль Mihomo или файлы routing Xray возвращаются. */
-export async function reclaim(kernel: 'xray' | 'mihomo'): Promise<void> {
+/**
+ * Выполняет действие решения дрейфа (reclaim) под признаком «идёт запрос»: остальные
+ * действия вкладки неактивны. Ошибка — тост с текстом по коду; снимок слоя перечитывается.
+ */
+export async function guarded(action: () => Promise<void>): Promise<void> {
   routingBusy.set(true);
   try {
-    await reclaimRouting(kernel);
+    await action();
     await refetchLayerState();
   } catch (err) {
     showToast('error', routingErrorText(get(t), (err as { code?: string })?.code, paramsOf(err)));

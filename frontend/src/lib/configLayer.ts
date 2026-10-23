@@ -73,6 +73,8 @@ export interface LayerIssue {
   key: string;
   code: string;
   detail?: string;
+  /** Параметры текста проблемы групп и правил: group, file, tag, rule. */
+  params?: Record<string, string>;
 }
 
 export interface LayerResult {
