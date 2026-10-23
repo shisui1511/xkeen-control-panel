@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -73,9 +74,14 @@ func providerKey(kind FileKind) (string, bool) {
 
 // ProviderContentProblem проверяет содержимое провайдера Mihomo: пустой файл,
 // неразбираемый YAML, нет обязательного ключа (proxies или payload) или список
-// пуст. Пустой file-провайдер Mihomo не загружает, поэтому это дрейф. Для
-// остальных видов возвращается "": JSON Xray проверяет сборка (144-04).
+// пуст. Для текстового провайдера правил (KindMihomoRuleProviderText) YAML не
+// разбирается: см. textProviderProblem. Пустой file-провайдер Mihomo не
+// загружает, поэтому это дрейф. Для остальных видов возвращается "": JSON Xray
+// проверяет сборка (144-04).
 func ProviderContentProblem(kind FileKind, content []byte) string {
+	if kind == KindMihomoRuleProviderText {
+		return textProviderProblem(content)
+	}
 	key, ok := providerKey(kind)
 	if !ok {
 		return ""
@@ -102,6 +108,22 @@ func ProviderContentProblem(kind FileKind, content []byte) string {
 	default:
 		return IssueProviderYAMLInvalid
 	}
+}
+
+// textProviderProblem проверяет текст провайдера правил: NUL-байт или не UTF-8
+// (код provider_yaml_invalid: подсказка «содержимое не разбирается» общая),
+// пустой текст или одни комментарии `#` и пустые строки — provider_empty.
+func textProviderProblem(content []byte) string {
+	if bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content) {
+		return IssueProviderYAMLInvalid
+	}
+	for _, line := range bytes.Split(content, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) > 0 && line[0] != '#' {
+			return ""
+		}
+	}
+	return IssueProviderEmpty
 }
 
 // CheckEntry сверяет запись манифеста с диском (D-09, D-10). Порядок проверок:

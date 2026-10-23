@@ -52,7 +52,8 @@ func (e *BuildError) Error() string {
 // правилу панели и стоп-списку XKeen, имя не занято старым слоем
 // (foreignOwned, может быть nil), для Xray — ключ "transport": (XKeen при нём
 // выводит файл из работы), валидный JSON и объект на верхнем уровне, для
-// провайдеров Mihomo — YAML с обязательным ключом и непустым списком. Файл
+// провайдеров Mihomo — YAML с обязательным ключом и непустым списком (текстовый
+// провайдер правил — непустой текст со строками правил). Файл
 // не переименовывается и другое имя не подбирается.
 func CheckGenerated(files []GeneratedFile, foreignOwned func(kernel, rel string) bool) error {
 	var issues []BuildIssue
@@ -75,7 +76,7 @@ func CheckGenerated(files []GeneratedFile, foreignOwned func(kernel, rel string)
 			for _, is := range checkXrayContent(f.Content) {
 				add(f, is.Code, is.Detail)
 			}
-		case KindMihomoProxyProvider, KindMihomoRuleProvider:
+		case KindMihomoProxyProvider, KindMihomoRuleProvider, KindMihomoRuleProviderText:
 			if code := ProviderContentProblem(f.Kind, f.Content); code != "" {
 				add(f, code, "")
 			}

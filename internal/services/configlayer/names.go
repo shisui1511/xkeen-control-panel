@@ -16,6 +16,9 @@ import (
 // имена старого слоя (zz_xcp_*, xcp_hwid.txt) панели не принадлежат.
 const PanelPrefix = "xcp-"
 
+// mihomoTextDir — единственный каталог Mihomo, где допустимы файлы панели .txt.
+const mihomoTextDir = "rule_providers"
+
 // MihomoPanelDirs — единственный список каталогов Mihomo, где живут файлы панели.
 var MihomoPanelDirs = []string{"proxy_providers", "rule_providers", "profiles"}
 
@@ -78,6 +81,9 @@ var ErrStoplistName = errors.New("имя файла совпадает со ст
 var (
 	xrayPanelName   = regexp.MustCompile(`^(?:[0-9]{2}_[a-z0-9]+\.|[0-9]{2}_)?xcp-[a-z0-9][a-z0-9-]*(?:\.tail)?\.json$`)
 	mihomoPanelName = regexp.MustCompile(`^xcp-[a-z0-9][a-z0-9-]*\.yaml$`)
+	// mihomoPanelTextName — текстовый rule-provider: расширение .txt допустимо
+	// только в каталоге rule_providers (mihomoTextDir).
+	mihomoPanelTextName = regexp.MustCompile(`^xcp-[a-z0-9][a-z0-9-]*\.txt$`)
 
 	// forbiddenTransport — тот же шаблон, что у XKeen: он ищет ключ текстом
 	// (`grep -qE`, 02_install_xray.sh), JSON не разбирается.
@@ -93,8 +99,12 @@ func IsPanelFileName(kernel, rel string) bool {
 		return !strings.Contains(rel, "/") && xrayPanelName.MatchString(rel)
 	case KernelMihomo:
 		dir, name := path.Split(rel)
-		if dir == "" || !slices.Contains(MihomoPanelDirs, strings.TrimSuffix(dir, "/")) {
+		dir = strings.TrimSuffix(dir, "/")
+		if dir == "" || !slices.Contains(MihomoPanelDirs, dir) {
 			return false
+		}
+		if dir == mihomoTextDir && mihomoPanelTextName.MatchString(name) {
+			return true
 		}
 		return mihomoPanelName.MatchString(name)
 	}
@@ -114,7 +124,7 @@ func ValidatePanelName(kernel, rel string) error {
 	// <основа>.json: так фрагмент Xray с тем же ID не нарушит стоп-список.
 	probe := base
 	if kernel == KernelMihomo {
-		probe = strings.TrimSuffix(base, ".yaml") + ".json"
+		probe = strings.TrimSuffix(base, path.Ext(base)) + ".json"
 	}
 	if word, hit := utils.XKeenStoplistMatch(probe); hit {
 		return fmt.Errorf("%w: %s (%s)", ErrStoplistName, base, word)
