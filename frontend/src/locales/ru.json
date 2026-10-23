@@ -3129,6 +3129,7 @@
   "cfg.groups.nodes_none_hint": "Узлов нет. Добавьте источник на вкладке",
   "cfg.groups.nodes_none_link": "Узлы",
   "cfg.groups.chip_empty": "пустая",
+  "cfg.groups.current_empty": "В группе нет действующего участника: выбирать нечего.",
   "cfg.groups.chip_empty_kernel": "пуста для {kernel}",
   "cfg.groups.chip_cycle": "цикл",
   "cfg.groups.chip_version": "нужен {kernel} {min}",

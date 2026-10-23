@@ -121,9 +121,11 @@
   const selectTitle = $derived(
     $applyRunning
       ? $t('cfg.routing.apply_busy_hint')
-      : notApplied
+      : !group.applied
         ? routingErrorText($t, 'group_not_applied')
-        : undefined
+        : group.current === ''
+          ? $t('cfg.groups.current_empty')
+          : undefined
   );
   const hintXray = $derived(installed.xray === true);
   // Ядро не запущено: выбор сохраняется в панели и ставится при запуске

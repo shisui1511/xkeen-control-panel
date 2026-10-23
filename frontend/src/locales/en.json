@@ -3129,6 +3129,7 @@
   "cfg.groups.nodes_none_hint": "No nodes. Add a source on the",
   "cfg.groups.nodes_none_link": "Nodes",
   "cfg.groups.chip_empty": "empty",
+  "cfg.groups.current_empty": "The group has no active member: there is nothing to choose.",
   "cfg.groups.chip_empty_kernel": "empty for {kernel}",
   "cfg.groups.chip_cycle": "cycle",
   "cfg.groups.chip_version": "needs {kernel} {min}",
