@@ -342,6 +342,14 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		files = filesOfScope(files, req.Kernel)
 		err = CheckGenerated(files, p.d.ForeignOwned)
 	}
+	if err == nil {
+		// Проверки до записи (пустая группа, висячая ссылка): при любом триггере,
+		// в том числе фоновом, иначе обновление источника обошло бы блокировку
+		// «Применить». Непустой итог — отказ сборки без записи на диск.
+		if issues := p.d.Registry.Check(used, installed); len(issues) > 0 {
+			err = &BuildError{Issues: issues}
+		}
+	}
 	var plan Plan
 	if err == nil {
 		only := make(map[string]bool, len(req.Only))

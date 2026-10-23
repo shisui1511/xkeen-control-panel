@@ -29,7 +29,24 @@ var (
 	// ErrAlreadyStarted — генератор зарегистрирован после Start: набор генераторов
 	// фиксируется до запуска слоя.
 	ErrAlreadyStarted = errors.New("слой уже запущен: генераторы регистрируются до Start")
+	// ErrChecksFailed — проверка черновика нашла проблемы: применение не начато.
+	// Конкретная ошибка — *ChecksError со списком проблем.
+	ErrChecksFailed = errors.New("применение заблокировано проверкой черновика")
 )
+
+// ChecksError — отказ применения по проверкам до записи; Is совпадает с
+// ErrChecksFailed.
+type ChecksError struct {
+	Issues []BuildIssue
+}
+
+// Error называет число проблем.
+func (e *ChecksError) Error() string {
+	return fmt.Sprintf("%s: проблем %d", ErrChecksFailed.Error(), len(e.Issues))
+}
+
+// Is связывает ChecksError с сентинелом ErrChecksFailed.
+func (e *ChecksError) Is(target error) bool { return target == ErrChecksFailed }
 
 // Значения по умолчанию и пределы.
 const (
@@ -728,6 +745,28 @@ func (l *Layer) SetLiveCommitter(fn func(st *State, req ApplyRequest, used Input
 	return nil
 }
 
+// RegisterChecker добавляет проверку до записи в реестр. Допустима только до
+// Start; проверка с уже занятым ID отклоняется.
+func (l *Layer) RegisterChecker(c Checker) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	if l.registry.HasChecker(c.ID()) {
+		return fmt.Errorf("configlayer: проверка %q уже зарегистрирована", c.ID())
+	}
+	l.registry.RegisterChecker(c)
+	return nil
+}
+
+// checksFor проверяет черновик состояния: те же входные данные, из которых Run
+// собирает файлы для SourceDraft. Пустой срез — проблем нет. Диск проверка не
+// читает: это обязанность самих проверок.
+func (l *Layer) checksFor(st State) []BuildIssue {
+	return l.registry.Check(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft}, l.installed())
+}
+
 // OnDriftResolved регистрирует колбэк «дрейф решён»: вызывается, когда число
 // файлов с дрейфом по сверке становится 0 (Пересобрать, Принять правку, ручное
 // исправление файла). Допустим только до Start.
@@ -777,6 +816,11 @@ func (l *Layer) Diag(rev int64, action string) (DraftEvent, error) {
 func (l *Layer) StartApply(user bool) error {
 	if !l.Enabled() {
 		return ErrDisabled
+	}
+	// Проверки до записи: пустая группа или висячая ссылка не дают начать
+	// применение (GRP-05, SRC-07). Фоновые запуски проверяет сам конвейер.
+	if issues := l.checksFor(l.store.Snapshot()); len(issues) > 0 {
+		return &ChecksError{Issues: issues}
 	}
 	release, err := l.pipeline.TryBegin(l.ctx, user)
 	if err != nil {

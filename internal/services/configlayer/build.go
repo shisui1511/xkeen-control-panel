@@ -24,6 +24,8 @@ const (
 	IssueDuplicateFile         = "duplicate_file"
 	IssueNameTaken             = "name_taken"
 	IssueGeneratorFailed       = "generator_failed"
+	// IssueCheckerFailed — проверка черновика завершилась паникой (Registry.Check).
+	IssueCheckerFailed = "checker_failed"
 )
 
 // BuildIssue — проблема одного файла сборки.
@@ -31,6 +33,9 @@ type BuildIssue struct {
 	Key    string `json:"key"`
 	Code   string `json:"code"`
 	Detail string `json:"detail,omitempty"`
+	// Params — параметры текста проблемы для клиента (имя группы, файл, тег);
+	// секретов в них нет.
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // BuildError — все проблемы сборки разом.
