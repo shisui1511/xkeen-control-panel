@@ -28,6 +28,11 @@ import (
 // на него.
 const PanelMihomoProfile = "profiles/xcp-main.yaml"
 
+// PanelXrayRoutingFile — файл routing панели в каталоге Xray (имя совпадает с
+// генератором маршрутизации). Файлы routing, сортирующиеся после него, перекрывают
+// его при слиянии каталога (D-07).
+const PanelXrayRoutingFile = "99_xcp-routing.json"
+
 // ReasonRoutingTakeover — причина, по которой чужой файл попал в набор копий
 // (перенос «чистого» файла routing или пометка файла, созданного возвратом).
 const ReasonRoutingTakeover = "routing_takeover"
@@ -108,6 +113,9 @@ type RoutingState struct {
 	Xray   *XrayRoutingState   `json:"xray,omitempty"`
 	Mihomo *MihomoRoutingState `json:"mihomo,omitempty"`
 }
+
+// isEmpty — ни одним ядром маршрутизация не взята.
+func (r RoutingState) isEmpty() bool { return r.Xray == nil && r.Mihomo == nil }
 
 // clone возвращает глубокую копию.
 func (r RoutingState) clone() RoutingState {
@@ -190,6 +198,10 @@ type RoutingOps struct {
 	Next RoutingState
 	// xrayTaking — это применение берёт Xray (Moved в Next заполняется при записи).
 	xrayTaking bool
+	// keepPrev — перекладка config.yaml не меняет сведений о прежнем профиле
+	// (повторное «вернуть профиль панели»): возврат при выключении ведёт к
+	// профилю, который был до первого взятия.
+	keepPrev bool
 }
 
 // hasXrayDisk — у Xray есть операции на диске.
@@ -1061,8 +1073,22 @@ func (p *Pipeline) prepareRouting(set *BackupSet, ops *RoutingOps) (*JournalRout
 		jr.XrayTaken = append(jr.XrayTaken, name)
 		files = append(files, JournalFile{Key: key, Existed: true})
 	}
-	if ops.xrayTaking && ops.Next.Xray != nil {
+	switch {
+	case ops.xrayTaking && ops.Next.Xray != nil:
 		ops.Next.Xray.Moved = moved
+	case ops.Next.Xray != nil && len(moved) > 0:
+		// «Вернуть файл панели»: новый перенос заменяет запись о файле с тем же именем.
+		replaced := make(map[string]bool, len(moved))
+		for _, m := range moved {
+			replaced[m.Name] = true
+		}
+		merged := make([]MovedFile, 0, len(ops.Next.Xray.Moved)+len(moved))
+		for _, m := range ops.Next.Xray.Moved {
+			if !replaced[m.Name] {
+				merged = append(merged, m)
+			}
+		}
+		ops.Next.Xray.Moved = append(merged, moved...)
 	}
 	for _, mf := range ops.XrayRelease {
 		if !safeRoutingName(mf.Name) {
@@ -1091,7 +1117,7 @@ func (p *Pipeline) prepareRouting(set *BackupSet, ops *RoutingOps) (*JournalRout
 		if was.Kind == configKindFile {
 			files = append(files, JournalFile{Key: ManifestKey(KernelMihomo, "config.yaml"), Existed: true})
 		}
-		if ops.MihomoPoint && ops.Next.Mihomo != nil {
+		if ops.MihomoPoint && ops.Next.Mihomo != nil && !ops.keepPrev {
 			// Вид прежнего config.yaml берётся из набора, а не из скана: файл мог
 			// измениться между ними.
 			ops.Next.Mihomo.PrevKind, ops.Next.Mihomo.PrevLink = was.Kind, was.Link

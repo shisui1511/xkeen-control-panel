@@ -655,6 +655,11 @@ func (l *Layer) PublishSources() {
 // фоновой сборке файлов ядра.
 const noticeBuildFailedPrefix = "build_failed:"
 
+// noticeRoutingAutoTakenPrefix — префикс идентификатора уведомления «панель
+// автоматически взяла маршрутизацию установленного позже ядра» (D-02):
+// routing_auto_taken:<ядро>.
+const noticeRoutingAutoTakenPrefix = "routing_auto_taken:"
+
 // --- черновик ---
 
 // EditDraft правит секцию черновика с проверкой ревизии (D-05).
