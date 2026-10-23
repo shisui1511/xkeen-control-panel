@@ -86,6 +86,9 @@ type mihomoBuild struct {
 	res       map[string]Resolved
 	emit      map[string]bool
 	visiting  map[string]bool
+	// pick — участник по умолчанию ручной группы в Mihomo (D-36): ID группы →
+	// результат effectiveSelection с пустым выбором; пусто — группа не выпущена.
+	pick map[string]string
 
 	lists     map[string]*mihomoList
 	providers []mihomoProvider
@@ -103,6 +106,7 @@ func newMihomoBuild(b mihomoBuild) *mihomoBuild {
 	b.res = make(map[string]Resolved, len(b.groups))
 	b.emit = map[string]bool{}
 	b.visiting = map[string]bool{}
+	b.pick = map[string]string{}
 	b.used = map[string]bool{}
 	b.copyName = map[string]string{}
 	for i := range b.groups {
@@ -140,9 +144,28 @@ func withoutRef(list []sources.CatalogNode, ref string) []sources.CatalogNode {
 	return out
 }
 
-// isEmitted сообщает, что группа материализуется в профиле Mihomo. Группа, пустая
-// для Mihomo (нет узлов и участников), не эмитируется (D-13); ниже порога
-// FeatureMihomoGroups группы не эмитируются вовсе (D-45).
+// manualPick возвращает участника по умолчанию ручной группы в Mihomo — тот же
+// расчёт D-36, что у Xray (xrayBuild.selection): effectiveSelection с пустым выбором
+// по участникам группы и узлам её состава по каталогу Mihomo. DIRECT и REJECT
+// берутся, только если стоят первыми; вложенная группа — если она выпущена. Пусто —
+// действующего участника нет.
+func (b *mihomoBuild) manualPick(g Group) string {
+	avail := func(member string) bool {
+		if id, ok := strings.CutPrefix(member, memberGroup); ok {
+			return b.byID[id] != nil && b.isEmitted(id)
+		}
+		// DIRECT и REJECT допустимы всегда, ссылки узлов приходят из состава группы.
+		return true
+	}
+	return effectiveSelection(g, "", avail, nodeRefs(b.res[g.ID].Nodes)...)
+}
+
+// isEmitted сообщает, что группа материализуется в профиле Mihomo. Ручная группа
+// выпускается по тому же правилу D-36, что xrayBuild.selection: только если у неё
+// есть участник по умолчанию (manualPick); иначе она не выпускается, а цели правил
+// на неё — REJECT (mihomoTarget), как xcp-block у Xray (D-13). Группы «авто» и
+// «резерв» без основных узлов не выпускаются; ниже порога FeatureMihomoGroups
+// группы не выпускаются вовсе (D-45).
 func (b *mihomoBuild) isEmitted(id string) bool {
 	if !b.groupsOK {
 		return false
@@ -158,14 +181,9 @@ func (b *mihomoBuild) isEmitted(id string) bool {
 	b.visiting[id] = true
 	var ok bool
 	if g.Mode == ModeManual {
-		r := b.res[id]
-		ok = len(r.Nodes) > 0
-		for _, m := range r.Members {
-			if ok {
-				break
-			}
-			ok = m.Kind != KindGroup || b.isEmitted(m.ID)
-		}
+		p := b.manualPick(*g)
+		b.pick[id] = p
+		ok = p != ""
 	} else {
 		ok = len(b.mains(*g)) > 0
 	}
