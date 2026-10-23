@@ -1,5 +1,6 @@
 // e2e-pages: config/rules
 import { randomInt } from 'node:crypto';
+import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
@@ -115,6 +116,86 @@ test('presets: выбор списка', async ({ page }) => {
   await expect(
     page.getByTestId('rules-tab').locator('[data-testid^="rule-row-"]').filter({ hasText: label })
   ).toHaveCount(1, { timeout: T.action });
+
+  await guard.assertClean();
+  await resetDraft(page);
+});
+
+interface ExtendedApi {
+  id: string;
+  file: string;
+  kind: string;
+  in_xkeen: boolean;
+}
+
+/** Расширенные наборы каталога (geosite), которых ещё нет в xkeen.json стенда. */
+async function freeExtendedSets(page: Page): Promise<ExtendedApi[]> {
+  const res = await api(page, 'GET', '/api/configlayer/routing/lists');
+  if (res.status !== 200) return [];
+  return ((res.data?.extended ?? []) as ExtendedApi[]).filter(
+    (e) => e.kind === 'site' && !e.in_xkeen
+  );
+}
+
+/** Содержимое xkeen.json стенда в виде «до» из предпросмотра: запись не выполняется. */
+async function xkeenJsonNow(page: Page, set: string): Promise<string> {
+  const res = await api(page, 'POST', '/api/configlayer/routing/lists/geodata/preview', { set });
+  expect(res.status, 'предпросмотр записи geodata').toBe(200);
+  return String(res.data?.before ?? '');
+}
+
+test('presets: добавить в XKeen', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  await resetDraft(page);
+
+  const free = await freeExtendedSets(page);
+  test.skip(
+    free.length === 0,
+    'на стенде все наборы geosite уже в xkeen.json или каталог не прочитан'
+  );
+  const target = free[0];
+  const before = await xkeenJsonNow(page, target.id);
+
+  await openRules(page);
+  await page.getByTestId('rules-add').click();
+  const rule = page.getByTestId('rule-modal');
+  await expect(rule).toBeVisible({ timeout: T.action });
+  await rule.getByTestId('rule-cond-type-0').selectOption('geosite');
+  await rule.getByTestId('rule-cond-pick-0').click();
+  const picker = page.getByTestId('list-picker');
+  await expect(picker).toBeVisible({ timeout: T.action });
+  await expect(picker.getByTestId('list-picker-loading')).toHaveCount(0, { timeout: T.page });
+
+  // блок расширенных наборов под списком; у набора вне xkeen.json есть «Добавить в XKeen»
+  const block = picker.getByTestId('list-picker-extended');
+  await expect(block).toBeVisible({ timeout: T.action });
+  await expect(block.getByTestId(`list-ext-${target.id}`)).toBeVisible();
+  await block.getByTestId(`list-ext-add-${target.id}`).click();
+
+  // диалог: запись geodata с набором в diff, по умолчанию «дождаться ночного обновления»
+  const modal = page.getByTestId('geodata-add-modal');
+  await expect(modal).toBeVisible({ timeout: T.action });
+  await expect(modal.getByTestId('geodata-add-loading')).toHaveCount(0, { timeout: T.page });
+  const diff = modal.getByTestId('geodata-add-diff');
+  await expect(diff).toContainText(target.file, { timeout: T.action });
+  await expect(diff.locator('.diff-line-added').first()).toBeVisible();
+  await expect(modal.getByTestId('geodata-update-later')).toBeChecked();
+  await expect(modal.getByTestId('geodata-update-now')).not.toBeChecked();
+  // адрес набора в интерфейсе не вводится
+  await expect(modal.locator('input[type="url"], input[type="text"], textarea')).toHaveCount(0);
+
+  // «Отмена»: диалог закрыт, xkeen.json не менялся (запись в сценарии не выполняется)
+  await modal.getByTestId('geodata-add-cancel').click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+  await expect(picker).toBeVisible();
+  expect(await xkeenJsonNow(page, target.id), 'xkeen.json стенда не изменён').toBe(before);
+
+  await picker.getByTestId('list-picker-cancel').click();
+  await expect(picker).toBeHidden({ timeout: T.action });
+  await rule.getByTestId('rule-cancel').click();
+  await expect(rule).toBeHidden({ timeout: T.action });
 
   await guard.assertClean();
   await resetDraft(page);
@@ -385,3 +466,144 @@ test('presets: взятие с пресетом', { tag: CORE_TAG }, async ({ pa
     await restore();
   }
 });
+
+// --- Доступность диалогов (axe) ---
+
+/**
+ * Серьёзные и критические нарушения WCAG 2.0/2.1 A и AA (включая контраст) внутри заданных
+ * областей. Вывод — правило, селекторы и числа контраста: HTML узлов может содержать имена
+ * узлов и групп.
+ */
+async function axeSevere(page: Page, scopes: string[]): Promise<string[]> {
+  // диалоги появляются с затуханием: axe не должен видеть полупрозрачный кадр
+  await page.waitForTimeout(500);
+  let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']);
+  for (const scope of scopes) builder = builder.include(scope);
+  const scan = await builder.analyze();
+  return scan.violations
+    .filter((v) => v.impact === 'critical' || v.impact === 'serious')
+    .map((v) => {
+      const nodes = v.nodes.slice(0, 3).map((n) => {
+        const msg = (n.any[0]?.message ?? '')
+          .replace(/^Element has insufficient color contrast of /, 'контраст ')
+          .replace(/, font size:.*?\)/, ')')
+          .replace(/\. Expected contrast ratio of /, ', нужно ');
+        return `${n.target.join(' ')} [${msg}]`;
+      });
+      return `${v.id} (${v.impact}, узлов ${v.nodes.length}): ${nodes.join(' | ')}`;
+    });
+}
+
+const WIDTHS = [1280, 390] as const;
+
+async function setWidth(page: Page, width: number): Promise<void> {
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`presets axe: пресет, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await setWidth(page, 1280);
+    await startPage(page);
+    await resetDraft(page);
+
+    const problems: string[] = [];
+    for (const width of WIDTHS) {
+      await setWidth(page, width);
+      await openRules(page);
+      const applied = await page.evaluate(() =>
+        document.documentElement.getAttribute('data-theme')
+      );
+      if (applied !== theme)
+        problems.push(`${width}px: тема применена ${applied}, ожидалась ${theme}`);
+
+      // диалог пресета: выбрана карточка «Всё через прокси», план «Будет создано» показан
+      await page.getByTestId('rules-preset').click();
+      const modal = page.getByTestId('preset-modal');
+      await expect(modal).toBeVisible({ timeout: T.action });
+      await expect(modal.getByTestId('preset-loading')).toHaveCount(0, { timeout: T.page });
+      await pickCard(page, 'all_proxy');
+      await expect(modal.getByTestId('preset-plan-first')).toBeVisible({ timeout: T.action });
+      for (const v of await axeSevere(page, ['[data-testid="preset-modal"]'])) {
+        problems.push(`пресет ${width}px: axe ${v}`);
+      }
+
+      // «Отмена»: в черновике ничего не создано
+      await modal.getByTestId('preset-cancel').click();
+      await expect(modal).toBeHidden({ timeout: T.action });
+      expect((await routingNow(page)).rules, 'отмена ничего не создаёт').toHaveLength(0);
+    }
+    expect(problems, problems.join('\n')).toEqual([]);
+
+    await guard.assertClean();
+    await resetDraft(page);
+  });
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`presets axe: списки и XKeen, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await setWidth(page, 1280);
+    await startPage(page);
+    await resetDraft(page);
+    test.skip(
+      (await siteLists(page)).length === 0,
+      'на стенде нет установленных geosite-баз: каталог пуст'
+    );
+    const free = await freeExtendedSets(page);
+
+    const problems: string[] = [];
+    for (const width of WIDTHS) {
+      await setWidth(page, width);
+      await openRules(page);
+      const applied = await page.evaluate(() =>
+        document.documentElement.getAttribute('data-theme')
+      );
+      if (applied !== theme)
+        problems.push(`${width}px: тема применена ${applied}, ожидалась ${theme}`);
+
+      // диалог выбора списка лежит поверх диалога правила: область — по testid
+      await page.getByTestId('rules-add').click();
+      const rule = page.getByTestId('rule-modal');
+      await expect(rule).toBeVisible({ timeout: T.action });
+      await rule.getByTestId('rule-cond-type-0').selectOption('geosite');
+      await rule.getByTestId('rule-cond-pick-0').click();
+      const picker = page.getByTestId('list-picker');
+      await expect(picker).toBeVisible({ timeout: T.action });
+      await expect(picker.getByTestId('list-picker-loading')).toHaveCount(0, { timeout: T.page });
+      await expect(picker.getByTestId('list-picker-extended')).toBeVisible({ timeout: T.action });
+
+      for (const seg of ['services', 'all'] as const) {
+        await picker.getByTestId('list-picker-seg').locator(`[data-value="${seg}"]`).click();
+        for (const v of await axeSevere(page, ['[data-testid="list-picker"]'])) {
+          problems.push(`список (${seg}) ${width}px: axe ${v}`);
+        }
+      }
+
+      // «Добавить в XKeen» у набора, которого нет в xkeen.json; запись не выполняется
+      if (free.length > 0) {
+        await picker.getByTestId(`list-ext-add-${free[0].id}`).click();
+        const add = page.getByTestId('geodata-add-modal');
+        await expect(add).toBeVisible({ timeout: T.action });
+        await expect(add.getByTestId('geodata-add-diff')).toBeVisible({ timeout: T.page });
+        for (const v of await axeSevere(page, ['[data-testid="geodata-add-modal"]'])) {
+          problems.push(`добавить в XKeen ${width}px: axe ${v}`);
+        }
+        await add.getByTestId('geodata-add-cancel').click();
+        await expect(add).toBeHidden({ timeout: T.action });
+      }
+
+      await picker.getByTestId('list-picker-cancel').click();
+      await expect(picker).toBeHidden({ timeout: T.action });
+      await rule.getByTestId('rule-cancel').click();
+      await expect(rule).toBeHidden({ timeout: T.action });
+    }
+    expect(problems, problems.join('\n')).toEqual([]);
+    expect((await routingNow(page)).rules, 'черновик не изменён').toHaveLength(0);
+
+    await guard.assertClean();
+    await resetDraft(page);
+  });
+}
