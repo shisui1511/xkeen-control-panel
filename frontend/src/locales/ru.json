@@ -3396,6 +3396,7 @@
   "cfg.rules.from_preset_chip": "из пресета",
   "cfg.rules.more_values": "+{n}",
   "cfg.rules.add_cond": "Добавить условие",
+  "cfg.rules.cond_field_hint": "Домены и списки доменов, IP и списки IP, порты, сеть — по одному условию каждого вида в правиле: Xray не умеет пересекать их. Нужно «или» — добавьте второе правило.",
   "cfg.rules.remove_cond": "Убрать условие",
   "cfg.rules.remove_cond_aria": "Убрать условие {n}",
   "cfg.rules.empty_title": "Правил пока нет",

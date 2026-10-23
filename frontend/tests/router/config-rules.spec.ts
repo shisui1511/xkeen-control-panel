@@ -554,6 +554,50 @@ test('rules: диалог — создание и правка, пустое з�
   await resetDraft(page);
 });
 
+test('rules: тип условия того же поля недоступен во втором условии', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  await resetDraft(page);
+
+  await openRules(page);
+  const modal = await openNewRule(page);
+  const type0 = modal.getByTestId('rule-cond-type-0');
+  const type1 = modal.getByTestId('rule-cond-type-1');
+  await expect(type0).toHaveValue('domain');
+
+  // одно условие: свой тип доступен, подсказки о полях ещё нет
+  await expect(modal.getByTestId('rule-cond-field-hint')).toHaveCount(0);
+  await expect(type0.locator('option[value="geosite"]')).toBeEnabled();
+
+  // второе условие: домены и geosite занимают одно поле Xray
+  await modal.getByTestId('rule-add-cond').click();
+  await expect(
+    type1.locator('option[value="geosite"]'),
+    'тип того же поля недоступен'
+  ).toBeDisabled({ timeout: T.action });
+  await expect(type1.locator('option[value="domain"]')).toBeDisabled();
+
+  // новое условие взяло первый тип со свободным полем; у первого заняты ip и geoip
+  await expect(type1).toHaveValue('ip');
+  await expect(type0.locator('option[value="ip"]')).toBeDisabled();
+  await expect(type0.locator('option[value="geoip"]')).toBeDisabled();
+  await expect(type1.locator('option[value="geoip"]')).toBeEnabled();
+  await expect(modal.getByTestId('rule-cond-field-hint')).toBeVisible({ timeout: T.action });
+
+  // смена типа второго условия снимает запрет с пары ip и geoip
+  await type1.selectOption('port');
+  await expect(type0.locator('option[value="ip"]')).toBeEnabled({ timeout: T.action });
+  await expect(type0.locator('option[value="geoip"]')).toBeEnabled();
+  await expect(type0.locator('option[value="port"]')).toBeDisabled();
+
+  await modal.getByTestId('rule-cancel').click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+
+  await guard.assertClean();
+  await resetDraft(page);
+});
+
 test('rules: своё правило ядра — Mihomo, отказ ядра, BitTorrent «только Xray»', async ({
   page
 }) => {

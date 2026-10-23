@@ -3396,6 +3396,7 @@
   "cfg.rules.from_preset_chip": "from preset",
   "cfg.rules.more_values": "+{n}",
   "cfg.rules.add_cond": "Add condition",
+  "cfg.rules.cond_field_hint": "Domains and domain lists, IPs and IP lists, ports, network — one condition of each kind per rule: Xray cannot intersect them. For “or”, add a second rule.",
   "cfg.rules.remove_cond": "Remove condition",
   "cfg.rules.remove_cond_aria": "Remove condition {n}",
   "cfg.rules.empty_title": "No rules yet",

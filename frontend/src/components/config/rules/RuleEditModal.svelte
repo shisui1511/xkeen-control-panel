@@ -9,7 +9,7 @@
   import { handleLayerError } from '../../../lib/configLayer';
   import { routingView, routingErrorText, saveRule } from '../../../lib/configRouting';
   import type { ListRef, RawRule, RuleView, Target } from '../../../lib/configRouting';
-  import { condTypeKey, targetLabel } from '../../../lib/routingView';
+  import { condTypeKey, condXrayField, targetLabel } from '../../../lib/routingView';
   import ListPickerModal from './ListPickerModal.svelte';
 
   // Диалог правила: условия через «И», цель (группа, DIRECT или REJECT) и «своё правило ядра»
@@ -268,6 +268,30 @@
 
   const dups = $derived(conds.map(dupOf));
 
+  // --- Поля Xray: одно условие на поле (cond_conflict) ---
+
+  /** Первый тип, чьё поле Xray не занято ни одним условием; undefined — свободных полей нет. */
+  const freeType = $derived.by(() => {
+    const used = new Set(conds.map((c) => condXrayField(c.type)));
+    return COND_TYPES.find((type) => !used.has(condXrayField(type)));
+  });
+
+  /**
+   * Пункты списка типа для каждого условия: тип, чьё поле Xray занято другим условием,
+   * неактивен (свой текущий тип остаётся доступным, в том числе у правила, загруженного
+   * с конфликтом).
+   */
+  const typeOptions = $derived(
+    conds.map((c, i) => {
+      const taken = new Set(conds.filter((_, j) => j !== i).map((o) => condXrayField(o.type)));
+      return COND_TYPES.map((type) => ({
+        value: type,
+        label: typeLabel(type),
+        disabled: type !== c.type && taken.has(condXrayField(type))
+      }));
+    })
+  );
+
   // Правило с ненайденным списком: предупреждение с именем файла и тега
   const missingLists = $derived(
     (rule?.issues ?? []).filter((i: { code: string }) => i.code === 'list_not_found')
@@ -276,7 +300,8 @@
   // --- Правка ---
 
   function addCond() {
-    conds.push(newCond());
+    if (freeType === undefined) return;
+    conds.push(newCond(freeType));
   }
 
   function removeCond(i: number) {
@@ -551,7 +576,7 @@
                 <Select
                   id="{uid}-type-{c.key}"
                   value={c.type}
-                  options={COND_TYPES.map((type) => ({ value: type, label: typeLabel(type) }))}
+                  options={typeOptions[i]}
                   disabled={saving}
                   data-testid="rule-cond-type-{i}"
                   onchange={(e) => setType(c, e.currentTarget.value)}
@@ -689,13 +714,18 @@
           <button
             type="button"
             class="btn btn-secondary btn-sm"
-            disabled={saving}
+            disabled={saving || freeType === undefined}
             data-testid="rule-add-cond"
             onclick={addCond}
           >
             <Icon name="add" size={14} />
             {$t('cfg.rules.add_cond')}
           </button>
+          {#if conds.length >= 2}
+            <p class="re-hint" data-testid="rule-cond-field-hint">
+              {$t('cfg.rules.cond_field_hint')}
+            </p>
+          {/if}
         </div>
       </section>
     {/if}
