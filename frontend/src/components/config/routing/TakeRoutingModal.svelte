@@ -1,18 +1,27 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { get } from 'svelte/store';
   import { t } from '../../../i18n';
   import Modal from '../../Modal.svelte';
   import Button from '../../Button.svelte';
   import Skeleton from '../../Skeleton.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
-  import { fetchTakeover, type TakeoverPreview } from '../../../lib/configRouting';
+  import {
+    fetchTakeover,
+    loadRouting,
+    routingView,
+    type TakeoverPreview
+  } from '../../../lib/configRouting';
+  import PresetModal from '../rules/PresetModal.svelte';
   import { takeIntoDraft, applyFromUi } from './routingOwner';
 
   // Диалог взятия маршрутизации (D-01, D-02, D-43, D-44). Показывает, какие файлы routing
   // Xray уйдут в копии, какие останутся на месте и какой профиль Mihomo запомнится, и только
   // по явному «Взять маршрутизацию» пишет желание в черновик. Режим take — кнопка плашки:
   // применение идёт общей кнопкой «Применить». Режим intercept — «Применить» при группах и
-  // правилах без взятия: взятие сразу применяется либо применяются только узлы.
+  // правилах без взятия: взятие сразу применяется либо применяются только узлы. Если список
+  // правил пуст, «Взять» открывает диалог пресета (D-04): он сам берёт маршрутизацию в черновике
+  // вместе с выбранным пресетом либо, при закрытии без выбора, с пустым списком правил.
   let {
     open,
     mode = 'take',
@@ -30,6 +39,8 @@
   let loading = $state(false);
   let failed = $state(false);
   let busy = $state(false);
+  // Диалог пресета лежит поверх этого: после него диалог взятия закрывается
+  let presetStep = $state(false);
   // Растёт с каждым чтением: устаревший ответ не затирает более свежий
   let seq = 0;
 
@@ -54,6 +65,7 @@
     loading = false;
     failed = false;
     busy = false;
+    presetStep = false;
   }
 
   $effect(() => {
@@ -83,16 +95,32 @@
     onclose();
   }
 
+  /** Правил в черновике нет: представление при необходимости дочитывается. */
+  async function rulesEmpty(): Promise<boolean> {
+    if (get(routingView) === null) await loadRouting();
+    const view = get(routingView);
+    return view !== null && view.rules.length === 0;
+  }
+
   async function confirmTake() {
     if (busy || !preview) return;
     busy = true;
     try {
+      if (await rulesEmpty()) {
+        presetStep = true;
+        return;
+      }
       const ok = await takeIntoDraft();
       if (ok && mode === 'intercept') await applyFromUi();
     } finally {
       busy = false;
     }
     // При ошибке тост уже показан и состояние прежнее: диалог закрывается в любом случае
+    onclose();
+  }
+
+  function presetDone() {
+    presetStep = false;
     onclose();
   }
 
@@ -207,6 +235,8 @@
     </div>
   </div>
 </Modal>
+
+<PresetModal open={presetStep} {mode} onclose={presetDone} />
 
 <style>
   .tr-body {

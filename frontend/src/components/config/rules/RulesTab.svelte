@@ -18,6 +18,8 @@
   import Button from '../../Button.svelte';
   import RuleRow from './RuleRow.svelte';
   import RuleEditModal from './RuleEditModal.svelte';
+  import PresetModal from './PresetModal.svelte';
+  import { routingBusy } from '../routing/routingOwner';
 
   const uid = $props.id();
 
@@ -114,6 +116,9 @@
     editOpen = true;
   }
 
+  // --- Диалог пресета (одна копия на вкладку) ---
+  let presetOpen = $state(false);
+
   // --- «Всё остальное» ---
   function targetValue(target: Target): string {
     return target.kind === 'group' ? `group:${target.id ?? ''}` : target.kind;
@@ -158,12 +163,26 @@
     />
   {:else}
     <div class="rules-panel">
+      <Button
+        variant="secondary"
+        disabled={$applyRunning || $routingBusy}
+        data-testid="rules-preset"
+        onclick={() => (presetOpen = true)}
+      >
+        {$t('cfg.rules.preset_btn')}
+      </Button>
       {#if showList}
         <span class="rules-count" data-testid="rules-count">
           {$tp('cfg.rules.count', rules.length)}
         </span>
       {/if}
-      <Button variant="primary" disabled={$applyRunning} data-testid="rules-add" onclick={openNew}>
+      <Button
+        variant="primary"
+        class="rules-add-btn"
+        disabled={$applyRunning}
+        data-testid="rules-add"
+        onclick={openNew}
+      >
         <Icon name="add" size={14} />
         {$t('cfg.rules.add')}
       </Button>
@@ -172,7 +191,9 @@
       <EmptyState
         title={$t('cfg.rules.empty_title')}
         description={$t('cfg.rules.empty_body')}
+        ctaText={$t('cfg.rules.empty_cta')}
         plain
+        oncta={() => (presetOpen = true)}
       />
     {:else if showList}
       <div class="card rules-card">
@@ -196,6 +217,7 @@
 </div>
 
 <RuleEditModal open={editOpen} rule={editRule} onclose={() => (editOpen = false)} />
+<PresetModal open={presetOpen} mode="preset" onclose={() => (presetOpen = false)} />
 
 {#snippet fallback()}
   <div class="rules-fallback" data-testid="rules-fallback">
@@ -233,13 +255,16 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: flex-end;
     gap: var(--spacing-2) var(--spacing-4);
     min-height: var(--btn-h, 38px);
   }
 
+  /* «Добавить правило» всегда у правого края, «Пресет» и счётчик — слева */
+  .rules-panel :global(.rules-add-btn) {
+    margin-left: auto;
+  }
+
   .rules-count {
-    margin-right: auto;
     font-size: var(--font-size-base);
     color: var(--fg-secondary);
   }
