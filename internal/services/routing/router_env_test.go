@@ -187,6 +187,27 @@ func (e *rtEnv) putSection(t *testing.T, name string, raw json.RawMessage) {
 	}
 }
 
+// dropSection удаляет секцию из черновика в обход сервиса.
+func (e *rtEnv) dropSection(t *testing.T, name string) {
+	t.Helper()
+	if _, err := e.layer.EditDraftBatch(e.rev(t), map[string]json.RawMessage{name: nil}, nil); err != nil {
+		t.Fatalf("удаление секции %s: %v", name, err)
+	}
+}
+
+// replaceGroups правит секцию groups черновика в обход сервиса (без проверок
+// сервиса: так в черновик попадают циклы и мусор общего маршрута черновика).
+func (e *rtEnv) replaceGroups(t *testing.T, fn func(cfg *GroupsConfig)) {
+	t.Helper()
+	cfg := e.groups(t)
+	fn(&cfg)
+	raw, err := encodeGroups(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.putSection(t, GroupsSection, raw)
+}
+
 // catalog — каталог узлов текущего черновика.
 func (e *rtEnv) catalog(t *testing.T) sources.Catalog {
 	t.Helper()

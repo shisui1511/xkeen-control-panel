@@ -261,6 +261,99 @@ func TestRouterGroupEmptyBlocksApply(t *testing.T) {
 	if res, err := e.applyResult(t); err != nil || res == nil || res.Code != configlayer.ResultApplied {
 		t.Fatalf("«Применить только узлы» не прошло: %v, %+v", err, res)
 	}
+
+	// Группа, пустая только для одного ядра, не блокирует «Применить» (D-13):
+	// её единственный узел есть только в Mihomo.
+	if _, err := e.svc.Take(e.rev(t)); err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	e.replaceGroups(t, func(cfg *GroupsConfig) {
+		kept := cfg.Items[:0:0]
+		for _, g := range cfg.Items {
+			if g.Name != "Пустая" {
+				kept = append(kept, g)
+			}
+		}
+		cfg.Items = kept
+	})
+	cat = e.catalog(t)
+	inXray := map[string]bool{}
+	for _, n := range cat.Xray {
+		inXray[n.Ref] = true
+	}
+	var onlyRef string
+	for _, n := range cat.Mihomo {
+		if !inXray[n.Ref] {
+			onlyRef = n.Ref
+			break
+		}
+	}
+	if onlyRef == "" {
+		t.Fatal("нет узла только для Mihomo")
+	}
+	if _, _, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Только Mihomo", Mode: ModeAuto, Picks: []string{onlyRef}}); err != nil {
+		t.Fatalf("SaveGroup: %v", err)
+	}
+	if issues := e.check(t); len(issues) != 0 {
+		t.Errorf("группа, пустая для одного ядра, блокирует: %+v", issues)
+	}
+	if res, err := e.applyResult(t); err != nil || res == nil || !res.OK {
+		t.Fatalf("«Применить» с группой, пустой для одного ядра: %v, %+v", err, res)
+	}
+
+	// Цикл, записанный в обход сервиса общим маршрутом черновика.
+	e.replaceGroups(t, func(cfg *GroupsConfig) {
+		cfg.Items = append(cfg.Items,
+			Group{ID: "c0ffee01", Name: "Цикл А", Mode: ModeManual, Sources: GroupSources{All: true}, Members: []Member{{Kind: KindGroup, ID: "c0ffee02"}}},
+			Group{ID: "c0ffee02", Name: "Цикл Б", Mode: ModeManual, Sources: GroupSources{All: true}, Members: []Member{{Kind: KindGroup, ID: "c0ffee01"}}},
+		)
+	})
+	issues := e.check(t)
+	if !rtHasIssue(issues, "group_cycle", "group", "Цикл А") || !rtHasIssue(issues, "group_cycle", "group", "Цикл Б") || len(issues) != 2 {
+		t.Errorf("цикл вложенности: %+v", issues)
+	}
+	if _, err := e.applyResult(t); !errors.Is(err, configlayer.ErrChecksFailed) {
+		t.Errorf("«Применить» при цикле: %v", err)
+	}
+	e.replaceGroups(t, func(cfg *GroupsConfig) { cfg.Items = cfg.Items[:len(cfg.Items)-2] })
+
+	// Цель правила и «Остального» — несуществующая группа (висячая ссылка).
+	dangling, err := encodeRules(RulesConfig{
+		Items: []Rule{{ID: "deadbeef", Enabled: true, Conds: []Cond{{Type: CondDomain, Values: []string{"example.com"}}}, Target: Target{Kind: KindGroup, ID: "00000000"}}},
+		Final: Target{Kind: KindGroup, ID: "00000000"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.putSection(t, RulesSection, dangling)
+	issues = e.check(t)
+	if !rtHasIssue(issues, "target_missing", "rule", "1") || !rtHasIssue(issues, "target_missing", "rule", "final") || len(issues) != 2 {
+		t.Errorf("висячая цель: %+v", issues)
+	}
+	e.dropSection(t, RulesSection)
+
+	// Испорченная секция не роняет слой: проверка и снимок дают section_invalid.
+	junk := map[string]json.RawMessage{
+		GroupsSection: json.RawMessage(`"junk"`),
+		RulesSection:  json.RawMessage(`{"v":7,"items":[]}`),
+		ProbeSection:  json.RawMessage(`{"v":1,"url":"https://example.com/x","interval_s":1,"timeout_s":5}`),
+	}
+	for name, raw := range junk {
+		e.putSection(t, name, raw)
+		if issues := e.check(t); !rtHasIssue(issues, "section_invalid", "section", name) {
+			t.Errorf("секция %s с мусором: проверка %+v", name, issues)
+		}
+		if snap := e.layer.Snapshot().Checks; !rtHasIssue(snap, "section_invalid", "section", name) {
+			t.Errorf("секция %s с мусором: Snapshot().Checks %+v", name, snap)
+		}
+		if _, err := e.applyResult(t); !errors.Is(err, configlayer.ErrChecksFailed) {
+			t.Errorf("«Применить» с испорченной секцией %s: %v", name, err)
+		}
+		e.dropSection(t, name)
+	}
+	if issues := e.check(t); len(issues) != 0 {
+		t.Errorf("после очистки секций остались проблемы: %+v", issues)
+	}
 }
 
 // rtWantInvalid требует ErrInvalidInput с полем и причиной.
