@@ -463,12 +463,11 @@ export function saveGroup(
 }
 
 /** Состав группы по ядрам для диалога; группа не сохраняется. */
-export function previewGroup(group: Partial<Group>, signal?: AbortSignal): Promise<GroupPreview> {
+export function previewGroup(group: Partial<Group>): Promise<GroupPreview> {
   return apiFetchJSON<GroupPreview>(`${BASE}/groups/preview`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ group }),
-    signal
+    body: JSON.stringify({ group })
   });
 }
 

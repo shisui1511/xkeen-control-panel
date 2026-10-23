@@ -244,22 +244,25 @@
     reserveServerError = '';
   }
 
-  // --- Предпросмотр: через 250 мс после последнего изменения, прежний запрос отменяется ---
+  // --- Предпросмотр: через 250 мс после последнего изменения ---
+  // Прежний запрос не обрывается: расчёт короткий, а ответ устаревшего ввода или
+  // закрытого диалога просто отбрасывается
   $effect(() => {
     if (!open) return;
     const key = payloadKey;
     void retryTick;
-    const ctrl = new AbortController();
+    let stale = false;
     previewBusy = true;
     const timer = setTimeout(() => {
-      previewGroup(JSON.parse(key), ctrl.signal)
+      previewGroup(JSON.parse(key))
         .then((res) => {
+          if (stale) return;
           previewData = res;
           previewError = '';
           previewBusy = false;
         })
         .catch((err) => {
-          if (ctrl.signal.aborted) return;
+          if (stale) return;
           const e = err as { code?: string; params?: Record<string, string>; message?: string };
           previewError = e.code ? routingErrorText($t, e.code, e.params) : (e.message ?? '');
           previewBusy = false;
@@ -267,7 +270,7 @@
     }, PREVIEW_DELAY_MS);
     return () => {
       clearTimeout(timer);
-      ctrl.abort();
+      stale = true;
     };
   });
 

@@ -188,20 +188,24 @@
       members: group.members,
       reserve: group.reserve
     }));
-    const ctrl = new AbortController();
+    // Прежний расчёт не обрывается: ответ устаревшего состава отбрасывается
+    let stale = false;
     previewState = 'loading';
-    previewGroup(g, ctrl.signal)
+    previewGroup(g)
       .then((res) => {
+        if (stale) return;
         preview = res;
         previewState = 'idle';
       })
       .catch((err) => {
-        if (ctrl.signal.aborted) return;
+        if (stale) return;
         const e = err as { code?: string; params?: Record<string, string>; message?: string };
         previewReason = e.code ? routingErrorText($t, e.code, e.params) : (e.message ?? '');
         previewState = 'error';
       });
-    return () => ctrl.abort();
+    return () => {
+      stale = true;
+    };
   });
 
   const kernelPreview = $derived((kernel === 'xray' ? preview?.xray : preview?.mihomo) ?? null);
