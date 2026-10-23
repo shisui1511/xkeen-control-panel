@@ -12,7 +12,7 @@
 
 {#if breadcrumbs.length > 0}
   <div class="editor-breadcrumbs">
-    {#each breadcrumbs as segment, i}
+    {#each breadcrumbs as segment, i (i)}
       {#if i > 0}
         <span class="breadcrumb-divider">&gt;</span>
       {/if}

@@ -69,7 +69,7 @@
       <ul class="preflight-warnings-list">
         {#each activeWarnings as warning, i (i)}
           <li>
-            {#each formatWarningParts(getWarningText(warning)) as part}
+            {#each formatWarningParts(getWarningText(warning)) as part, pi (pi)}
               {#if part.isCode}
                 <code class="warning-code-token">{part.text}</code>
               {:else}
