@@ -116,7 +116,7 @@
     }
     return list;
   });
-  const notApplied = $derived(group.current === '');
+  const notApplied = $derived(!group.applied || group.current === '');
   const selectDisabled = $derived(selecting || $applyRunning || notApplied);
   const selectTitle = $derived(
     $applyRunning
@@ -153,7 +153,10 @@
       }
     } catch (err) {
       pick = group.current;
-      if ((err as { code?: unknown })?.code === 'apply_busy') handleLayerError(err);
+      const code = (err as { code?: unknown })?.code;
+      if (code === 'apply_busy') handleLayerError(err);
+      else if (code === 'group_not_applied' || code === 'member_invalid')
+        showToast('error', routingErrorText($t, code));
       else showToast('error', $t('cfg.groups.select_failed', { name: label }));
     } finally {
       selecting = false;

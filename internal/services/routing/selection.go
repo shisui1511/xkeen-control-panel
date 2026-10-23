@@ -350,11 +350,10 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 	return res, nil
 }
 
-// memberAllowed — участник есть среди вариантов группы по применённому состоянию
-// (те же варианты, что отдаёт представление): участники группы и узлы её состава
-// в каждом установленном ядре. Выбор вне состава effectiveSelection всё равно
-// игнорировал бы.
-func memberAllowed(g Group, member string, am appliedModel) bool {
+// appliedOptions — варианты участника ручной группы g по применённому состоянию:
+// участники группы и узлы её состава в каждом установленном ядре. g — группа из
+// применённой модели am.
+func appliedOptions(g Group, am appliedModel) []MemberOption {
 	var xray, mihomo []sources.CatalogNode
 	if am.installed.Xray {
 		xray = Resolve(g, am.cat.Xray, am.groups.Items).Nodes
@@ -363,7 +362,14 @@ func memberAllowed(g Group, member string, am appliedModel) bool {
 		mihomo = Resolve(g, am.cat.Mihomo, am.groups.Items).Nodes
 	}
 	members := Resolve(g, am.union, am.groups.Items).Members
-	for _, o := range memberOptions(g, members, am.groups.Items, xray, mihomo) {
+	return memberOptions(g, members, am.groups.Items, xray, mihomo)
+}
+
+// memberAllowed — участник есть среди вариантов группы по применённому состоянию
+// (те же варианты, что отдаёт представление для применённой группы,
+// appliedOptions). Выбор вне состава effectiveSelection всё равно игнорировал бы.
+func memberAllowed(g Group, member string, am appliedModel) bool {
+	for _, o := range appliedOptions(g, am) {
 		if o.Member == member {
 			return true
 		}

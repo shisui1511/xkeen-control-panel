@@ -38,6 +38,11 @@ type GroupView struct {
 	// "group:<id>", "direct", "reject"); группы нет в применённом — по черновику.
 	// Пусто у групп «авто»/«резерв» и при отсутствии допустимых участников.
 	Current string `json:"current"`
+	// Applied — ручная группа есть в применённом состоянии при управляемой панелью
+	// маршрутизации: только тогда Select принимает выбор (иначе group_not_applied),
+	// а MemberOptions построены по применённому составу, как проверка Select.
+	// Иначе варианты и Current — по черновику, выбор недоступен.
+	Applied bool `json:"applied"`
 	// CurrentLabel — подпись Current: имя группы, DIRECT, REJECT или имя узла (та
 	// же, что у варианта в member_options).
 	CurrentLabel string `json:"current_label"`
@@ -331,7 +336,14 @@ func (s *Service) View() (RoutingView, error) {
 		key := "group:" + g.ID
 		options := memberOptions(g, xr.Members, groups.Items, xr.Nodes, mr.Nodes)
 		var current, currentLabel string
+		applied := false
 		if g.Mode == ModeManual {
+			if appliedM != nil {
+				if ag, ok := appliedM.group(g.ID); ok && ag.Mode == ModeManual {
+					applied = true
+					options = appliedOptions(ag, *appliedM)
+				}
+			}
 			var m *appliedModel
 			current, m = currentOf(g, live, appliedM, draftM)
 			for _, o := range options {
@@ -352,6 +364,7 @@ func (s *Service) View() (RoutingView, error) {
 			MemberOptions: options,
 			Current:       current,
 			CurrentLabel:  currentLabel,
+			Applied:       applied,
 		})
 	}
 	lint := lintRules(rules.Items)

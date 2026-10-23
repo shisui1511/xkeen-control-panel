@@ -86,6 +86,8 @@ export interface GroupView extends Group {
   warnings: IssueView[];
   member_options: MemberOption[];
   current: string;
+  /** Группа применена: выбор участника принимается (иначе group_not_applied). */
+  applied: boolean;
   current_label: string;
 }
 

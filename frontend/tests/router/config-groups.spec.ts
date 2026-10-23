@@ -51,6 +51,7 @@ interface GroupInfo {
   name: string;
   mode: string;
   current: string;
+  applied: boolean;
 }
 
 interface RoutingInfo {
@@ -74,7 +75,8 @@ async function routingInfo(page: Page): Promise<RoutingInfo> {
       id: g.id,
       name: g.name,
       mode: g.mode,
-      current: g.current ?? ''
+      current: g.current ?? '',
+      applied: g.applied === true
     }))
   };
 }
@@ -208,11 +210,16 @@ test(
       expect(saved.status, 'сохранение группы').toBe(200);
       groupId = String((saved.data?.group as { id?: string } | undefined)?.id ?? '');
       expect(groupId, 'идентификатор группы').not.toBe('');
+      // группа есть только в черновике: Select её отвергнет, выбор недоступен
+      const draftOnly = (await routingInfo(page)).groups.find((g) => g.id === groupId);
+      expect(draftOnly?.applied, 'группа черновика не отмечена применённой').toBe(false);
       const take = await api(page, 'POST', '/api/configlayer/routing/take', {
         revision: (await routingInfo(page)).revision
       });
       expect(take.status, 'взятие маршрутизации').toBe(200);
       await applyAndWait(page);
+      const appliedGroup = (await routingInfo(page)).groups.find((g) => g.id === groupId);
+      expect(appliedGroup?.applied, 'применённая группа отмечена применённой').toBe(true);
 
       await openGroups(page);
       const select = page.getByTestId(`group-current-${groupId}`);

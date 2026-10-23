@@ -122,6 +122,7 @@
       "warnings",
       "member_options",
       "current",
+      "applied",
       "current_label"
     ],
     "optional": [],
