@@ -15,31 +15,37 @@
 
   let { isOpen, rule, groups, onSave, onClose }: Props = $props();
 
-  let ruleValue = $state('');
-  let ruleType = $state('domain_suffix');
-  let ruleTarget = $state('proxy');
-  let ruleGroup = $state('');
-  let ruleComment = $state('');
-  let validationError = $state('');
-
-  $effect(() => {
-    if (isOpen) {
-      if (rule) {
-        ruleValue = rule.value;
-        ruleType = rule.type;
-        ruleTarget = rule.target;
-        ruleGroup = rule.group || groups[0] || 'PROXY';
-        ruleComment = rule.comment || '';
-      } else {
-        ruleValue = '';
-        ruleType = 'domain_suffix';
-        ruleTarget = 'proxy';
-        ruleGroup = groups[0] || 'PROXY';
-        ruleComment = '';
-      }
-      validationError = '';
+  // Начальные значения формы пересчитываются при каждом открытии и при смене rule/groups.
+  // Поля ниже — записываемые $derived: ввод пользователя переопределяет значение
+  // до следующего пересчёта, после чего поле возвращается к начальному.
+  const initial = $derived.by(() => {
+    void isOpen;
+    if (rule) {
+      return {
+        value: rule.value,
+        type: rule.type,
+        target: rule.target,
+        group: rule.group || groups[0] || 'PROXY',
+        comment: rule.comment || '',
+        error: ''
+      };
     }
+    return {
+      value: '',
+      type: 'domain_suffix',
+      target: 'proxy',
+      group: groups[0] || 'PROXY',
+      comment: '',
+      error: ''
+    };
   });
+
+  let ruleValue = $derived(initial.value);
+  let ruleType = $derived(initial.type);
+  let ruleTarget = $derived(initial.target);
+  let ruleGroup = $derived(initial.group);
+  let ruleComment = $derived(initial.comment);
+  let validationError = $derived(initial.error);
 
   const typeOptions = $derived([
     { value: 'domain_suffix', label: $t('rules.custom_type_suffix') },
