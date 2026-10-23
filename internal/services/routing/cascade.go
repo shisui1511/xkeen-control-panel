@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
 
 // Действия каскада удаления группы (Cascade.Mode).
@@ -178,4 +180,95 @@ func (s *Service) DeleteGroup(rev int64, id string, c Cascade) (configlayer.Draf
 		sections[RulesSection] = rawRules
 	}
 	return s.d.Layer.EditDraftBatch(rev, sections, selectionDrop(id))
+}
+
+// scrubGroups убирает из групп ссылки на удаляемый источник или узел: источник
+// из sources.ids, отдельные узлы из picks, резервный узел. Меняется только то,
+// что ссылалось; changed сообщает, правились ли группы.
+func scrubGroups(groups []Group, sc sourceScope) ([]Group, bool) {
+	out := make([]Group, len(groups))
+	changed := false
+	for i, g := range groups {
+		if sc.source != "" {
+			ids := make([]string, 0, len(g.Sources.IDs))
+			for _, id := range g.Sources.IDs {
+				if id != sc.source {
+					ids = append(ids, id)
+				}
+			}
+			if len(ids) != len(g.Sources.IDs) {
+				g.Sources.IDs, changed = ids, true
+			}
+		}
+		picks := make([]string, 0, len(g.Picks))
+		for _, ref := range g.Picks {
+			if !sc.hasRef(ref) {
+				picks = append(picks, ref)
+			}
+		}
+		if len(picks) != len(g.Picks) {
+			g.Picks, changed = picks, true
+		}
+		if g.Reserve != "" && sc.hasRef(g.Reserve) {
+			g.Reserve, changed = "", true
+		}
+		out[i] = g
+	}
+	return out, changed
+}
+
+// scrubSections возвращает секцию groups без ссылок на удаляемое (nil — править
+// нечего). Испорченная секция групп удалению не мешает: о ней сообщает проверка.
+func scrubSections(st configlayer.StateView, sc sourceScope) (map[string]json.RawMessage, error) {
+	cfg, err := parseGroups(st.Draft[GroupsSection])
+	if err != nil {
+		return nil, nil
+	}
+	items, changed := scrubGroups(cfg.Items, sc)
+	if !changed {
+		return nil, nil
+	}
+	cfg.Items = items
+	raw, err := encodeGroups(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]json.RawMessage{GroupsSection: raw}, nil
+}
+
+// DeleteSource удаляет подписку из черновика и той же ревизией убирает ссылки на
+// неё и на её узлы из групп (sources.ids, picks, резерв, D-35). Удаление
+// разрешено, даже если группа станет пустой: «Применить» заблокирует проверка
+// group_empty. Выбор в Live, ссылающийся на узел источника, остаётся до
+// «Применить»: генератор выберет участника по умолчанию.
+func (s *Service) DeleteSource(rev int64, id string) (configlayer.DraftEvent, error) {
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
+		return configlayer.DraftEvent{}, err
+	}
+	if st.DraftRevision != rev {
+		return configlayer.DraftEvent{}, configlayer.ErrDraftConflict
+	}
+	extra, err := scrubSections(st, sourceScope{source: id})
+	if err != nil {
+		return configlayer.DraftEvent{}, err
+	}
+	return s.d.Sources.DeleteWith(rev, id, extra)
+}
+
+// DeleteNode удаляет запись «Моих узлов» и той же ревизией убирает ссылки на её
+// узел (picks, резерв) из групп (D-35).
+func (s *Service) DeleteNode(rev int64, entryID string) (configlayer.DraftEvent, error) {
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
+		return configlayer.DraftEvent{}, err
+	}
+	if st.DraftRevision != rev {
+		return configlayer.DraftEvent{}, configlayer.ErrDraftConflict
+	}
+	extra, err := scrubSections(st, sourceScope{ref: nodes.Ref(sources.MySourceID, entryID)})
+	if err != nil {
+		return configlayer.DraftEvent{}, err
+	}
+	return s.d.Sources.DeleteNodeWith(rev, entryID, extra)
 }

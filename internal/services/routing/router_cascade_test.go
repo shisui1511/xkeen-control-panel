@@ -9,9 +9,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
 
 // Каскад удаления: настоящий слой, настоящий `xray run -test` устройства в
@@ -277,4 +279,187 @@ func TestRouterCascadeGroup(t *testing.T) {
 	}
 	e.applyOK(t)
 	rtcFilesLack(t, e.xrayDir(), GroupTag(dropG.ID))
+}
+
+// Удаление узла «Моих узлов» и подписки показывает группы со ссылками, потери
+// узлов по ядру и группы, которые станут пустыми; ссылки убираются из групп той
+// же ревизией; опустевшая группа блокирует «Применить» проверкой group_empty, а
+// новый узел, проходящий фильтр, снимает блок; тега удалённого узла в файлах Xray
+// нет.
+func TestRouterCascadeSourceAndNode(t *testing.T) {
+	e := rtNewEnv(t, rtWithKernels(rtXrayOnly))
+	e.addMyLinks(t, "vless_ws", "trojan_grpc", "ss_plain")
+
+	// Единственный узел «Только мои»: остальные исключены по полным именам.
+	nodesXray := e.catalog(t).Xray
+	if len(nodesXray) != 3 {
+		t.Fatalf("в каталоге Xray %d узлов, ожидалось 3", len(nodesXray))
+	}
+	keep := nodesXray[0]
+	var exclude []string
+	for _, n := range nodesXray[1:] {
+		if strings.Contains(strings.ToLower(keep.Display), strings.ToLower(n.Display)) {
+			t.Fatalf("имя одного узла содержит имя другого: исключение по подстроке неоднозначно")
+		}
+		exclude = append(exclude, n.Display)
+	}
+	entryID := strings.TrimPrefix(keep.Ref, sources.MySourceID+"/")
+	if entryID == keep.Ref {
+		t.Fatalf("ссылка узла %q не из источника «Мои узлы»", keep.Ref)
+	}
+	_, only, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Только мои", Mode: ModeAuto, Sources: GroupSources{IDs: []string{sources.MySourceID}}, Exclude: exclude,
+	})
+	if err != nil {
+		t.Fatalf("SaveGroup (Только мои): %v", err)
+	}
+	if _, _, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Выбор", Mode: ModeManual, Picks: []string{keep.Ref}, Members: []Member{{Kind: KindDirect}},
+	}); err != nil {
+		t.Fatalf("SaveGroup (Выбор): %v", err)
+	}
+	e.takeAndApply(t)
+	rtcFilesHave(t, e.xrayDir(), "xcp-my-"+entryID)
+
+	imp, err := e.svc.Impact(ImpactNode, entryID)
+	if err != nil {
+		t.Fatalf("Impact(node): %v", err)
+	}
+	if len(imp.Groups) != 1 || imp.Groups[0].Name != "Выбор" || imp.Groups[0].Role != RoleComposition {
+		t.Errorf("группы со ссылкой на узел: %+v", imp.Groups)
+	}
+	lost := map[string]int{}
+	for _, l := range imp.Kernels.Xray {
+		lost[l.Group] = l.Lost
+	}
+	if lost["Только мои"] != 1 || lost["Авто"] != 1 || lost["Выбор"] != 1 {
+		t.Errorf("потери узлов Xray: %+v", imp.Kernels.Xray)
+	}
+	if len(imp.Empties) != 1 || imp.Empties[0].ID != only.ID {
+		t.Errorf("станут пустыми: %+v, ожидалась «Только мои»", imp.Empties)
+	}
+	if _, err := e.svc.Impact(ImpactNode, "0badc0de"); !errors.Is(err, sources.ErrNodeNotFound) {
+		t.Errorf("Impact неизвестного узла: %v", err)
+	}
+	if _, err := e.svc.Impact(ImpactSource, "0badc0de"); !errors.Is(err, sources.ErrSourceNotFound) {
+		t.Errorf("Impact неизвестного источника: %v", err)
+	}
+
+	// Удаление: узел, ссылка на него и группа правятся одной ревизией.
+	rev := e.rev(t)
+	if _, err := e.svc.DeleteNode(rev-1, entryID); !errors.Is(err, configlayer.ErrDraftConflict) {
+		t.Errorf("устаревшая ревизия: %v", err)
+	}
+	ev, err := e.svc.DeleteNode(rev, entryID)
+	if err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+	if ev.DraftRevision != rev+1 {
+		t.Errorf("удаление узла заняло %d ревизий, ожидалась одна", ev.DraftRevision-rev)
+	}
+	choice, _ := rtGroupByName(e.groups(t), "Выбор")
+	if len(choice.Picks) != 0 || len(choice.Members) != 1 {
+		t.Errorf("«Выбор» после удаления узла: picks %v, участники %v", choice.Picks, choice.Members)
+	}
+	for _, n := range e.catalog(t).Xray {
+		if n.Ref == keep.Ref {
+			t.Errorf("узел %s остался в каталоге", keep.Ref)
+		}
+	}
+
+	// Группа осталась без узлов: «Применить» отвергается проверкой.
+	issues := e.check(t)
+	if !rtHasIssue(issues, "group_empty", "group", "Только мои") || len(issues) != 1 {
+		t.Fatalf("проверка после удаления единственного узла: %+v", issues)
+	}
+	_, err = e.applyResult(t)
+	var ce *configlayer.ChecksError
+	if !errors.Is(err, configlayer.ErrChecksFailed) || !errors.As(err, &ce) || !rtHasIssue(ce.Issues, "group_empty", "group", "Только мои") {
+		t.Fatalf("«Применить» не заблокировано пустой группой: %v", err)
+	}
+
+	// Новый узел, проходящий фильтр, снимает блок.
+	e.addMyLinks(t, "vless_reality")
+	if issues := e.check(t); len(issues) != 0 {
+		t.Fatalf("после добавления узла остались проблемы: %+v", issues)
+	}
+	e.applyOK(t)
+	rtcFilesLack(t, e.xrayDir(), "xcp-my-"+entryID)
+
+	// «Мои узлы» не удаляются как источник; черновик не меняется.
+	rev = e.rev(t)
+	if _, err := e.svc.DeleteSource(rev, sources.MySourceID); err == nil {
+		t.Error("источник «Мои узлы» удалён")
+	}
+	if e.rev(t) != rev {
+		t.Error("отказ удалить «Мои узлы» изменил черновик")
+	}
+
+	// Подписка: секция источника в черновике без снимка узлов; ссылки на неё
+	// (источник, отдельный узел, резерв) уходят из групп той же ревизией.
+	const subID = "a1b2c3d4"
+	subRaw, err := json.Marshal(sources.SubscriptionConfig{
+		Kind: sources.KindSubscription, ID: subID, Name: "Подписка", URL: "https://sub.example.test/list",
+		Enabled: true, Exclude: []string{}, Interval: sources.Interval{Mode: sources.IntervalProvider},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.putSection(t, sources.SectionPrefix+subID, subRaw)
+	_, mixed, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Смешанная", Mode: ModeAuto, Sources: GroupSources{IDs: []string{subID, sources.MySourceID}},
+		Picks: []string{subID + "/deadbeef", keepOther(e.catalog(t).Xray)},
+	})
+	if err != nil {
+		t.Fatalf("SaveGroup (Смешанная): %v", err)
+	}
+	if _, _, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "С резервом", Mode: ModeFallback, Sources: GroupSources{All: true}, Reserve: subID + "/cafebabe",
+	}); err != nil {
+		t.Fatalf("SaveGroup (С резервом): %v", err)
+	}
+	srcImp, err := e.svc.Impact(ImpactSource, subID)
+	if err != nil {
+		t.Fatalf("Impact(source): %v", err)
+	}
+	roles := map[string]string{}
+	for _, g := range srcImp.Groups {
+		roles[g.Name] = g.Role
+	}
+	if roles["Смешанная"] != RoleComposition || roles["С резервом"] != RoleReserve || len(srcImp.Groups) != 2 {
+		t.Errorf("группы со ссылкой на подписку: %+v", srcImp.Groups)
+	}
+	if len(srcImp.Empties) != 0 {
+		t.Errorf("подписка без снимка узлов не опустошает группы: %+v", srcImp.Empties)
+	}
+	rev = e.rev(t)
+	ev, err = e.svc.DeleteSource(rev, subID)
+	if err != nil {
+		t.Fatalf("DeleteSource: %v", err)
+	}
+	if ev.DraftRevision != rev+1 {
+		t.Errorf("удаление подписки заняло %d ревизий, ожидалась одна", ev.DraftRevision-rev)
+	}
+	if _, has := e.state(t).Draft[sources.SectionPrefix+subID]; has {
+		t.Error("секция подписки осталась в черновике")
+	}
+	mixedAfter, _ := rtGroupByName(e.groups(t), "Смешанная")
+	if len(mixedAfter.Sources.IDs) != 1 || mixedAfter.Sources.IDs[0] != sources.MySourceID || len(mixedAfter.Picks) != 1 || mixedAfter.ID != mixed.ID {
+		t.Errorf("«Смешанная» после удаления подписки: источники %v, picks %v", mixedAfter.Sources.IDs, mixedAfter.Picks)
+	}
+	if reserved, _ := rtGroupByName(e.groups(t), "С резервом"); reserved.Reserve != "" {
+		t.Errorf("резерв удалённой подписки остался: %q", reserved.Reserve)
+	}
+	if _, err := e.svc.DeleteSource(e.rev(t), subID); !errors.Is(err, sources.ErrSourceNotFound) {
+		t.Errorf("повторное удаление подписки: %v", err)
+	}
+}
+
+// keepOther возвращает ссылку первого узла списка (отдельный узел «Моих узлов»,
+// который останется после удаления подписки).
+func keepOther(list []sources.CatalogNode) string {
+	if len(list) == 0 {
+		return ""
+	}
+	return list[0].Ref
 }
