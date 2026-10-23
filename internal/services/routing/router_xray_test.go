@@ -4,10 +4,13 @@ package routing
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
@@ -268,5 +271,169 @@ func TestRouterXrayGroupsMaterialize(t *testing.T) {
 		if e.xrayFileExists(name) {
 			t.Errorf("после возврата файл панели %s остался на диске", name)
 		}
+	}
+}
+
+// rtxYesNo — «да» или «нет» для лога.
+func rtxYesNo(v bool) string {
+	if v {
+		return "да"
+	}
+	return "нет"
+}
+
+// Ни при каком состоянии трафик не уходит мимо VPN: все узлы «авто» мертвы —
+// соединение обрывается. Контроль воспроизводит исследованную утечку: balancer
+// без fallbackTag при первом исходящем freedom (как пользовательский
+// 04_outbounds.json без .tail) отдаёт трафик напрямую (поправка к 143 Q6).
+func TestRouterXrayBalancerFailClosed(t *testing.T) {
+	e := rtNewEnv(t, rtWithKernels(rtXrayOnly))
+	// Мёртвые узлы: на этих портах loopback никто не слушает.
+	e.addMyRaw(t, "socks5://127.0.0.1:9#dead-1", "socks5://127.0.0.1:10#dead-2")
+	auto, ok := rtGroupByName(e.groups(t), "Авто")
+	if !ok {
+		t.Fatal("нет группы «Авто»")
+	}
+	if _, err := e.svc.SetFinal(e.rev(t), Target{Kind: KindGroup, ID: auto.ID}); err != nil {
+		t.Fatalf("SetFinal: %v", err)
+	}
+	if _, err := e.svc.SaveProbe(e.rev(t), ProbeConfig{URL: rtxDefaultProbeURL, IntervalS: 10, TimeoutS: 3}); err != nil {
+		t.Fatalf("SaveProbe: %v", err)
+	}
+	e.takeAndApply(t)
+
+	bals, _ := rtxRouting(t, e.xrayDoc(t, xrayRoutingFile))["balancers"].([]any)
+	if len(bals) != 1 || bals[0].(map[string]any)["fallbackTag"] != TagBlock {
+		t.Fatalf("balancer без fallbackTag xcp-block: %v", bals)
+	}
+
+	// Основной шаг: после двух циклов наблюдения (не меньше 25 с) ни один запрос
+	// через группу из мёртвых узлов не проходит.
+	port := rtFreePort(t)
+	proc := rtStartXrayDir(t, rtXrayCoreDir(t, e.xrayDir(), port), port)
+	attempts, passed := 0, 0
+	for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(2 * time.Second) {
+		attempts++
+		if _, err := rtSocksGet(port, rtxDefaultProbeURL, 6*time.Second); err == nil {
+			passed++
+		}
+	}
+	if !proc.alive() {
+		t.Fatalf("процесс ядра завершился во время проверки: %s", proc.tail())
+	}
+	t.Logf("запросов через группу из мёртвых узлов: %d, прошло: %d", attempts, passed)
+	if passed > 0 {
+		t.Errorf("утечка мимо VPN: %d из %d запросов прошли при мёртвых узлах", passed, attempts)
+	}
+
+	// Контроль: тот же каталог, но без fallbackTag и с freedom первым исходящим.
+	t.Run("control_without_fallback", func(t *testing.T) {
+		ctrlPort := rtFreePort(t)
+		dir := rtXrayCoreDir(t, e.xrayDir(), ctrlPort)
+		routingPath := filepath.Join(dir, xrayRoutingFile)
+		raw, err := os.ReadFile(routingPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		for _, b := range rtxRouting(t, doc)["balancers"].([]any) {
+			delete(b.(map[string]any), "fallbackTag")
+		}
+		if raw, err = json.Marshal(doc); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(routingPath, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// Файл без .tail встаёт в начало и становится исходящим по умолчанию.
+		const userOutbounds = `{"outbounds":[{"tag":"direct","protocol":"freedom"}]}`
+		if err := os.WriteFile(filepath.Join(dir, "04_outbounds.json"), []byte(userOutbounds), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		rtStartXrayDir(t, dir, ctrlPort)
+
+		leak := false
+		for end := time.Now().Add(75 * time.Second); time.Now().Before(end); time.Sleep(3 * time.Second) {
+			if _, err := rtSocksGet(ctrlPort, rtxDefaultProbeURL, 6*time.Second); err == nil {
+				leak = true
+				break
+			}
+		}
+		if !leak {
+			// Нет утечки: либо её правда нет, либо у стенда нет интернета вообще.
+			client := &http.Client{Timeout: 8 * time.Second}
+			resp, err := client.Get(rtxDefaultProbeURL)
+			if err != nil {
+				t.Skip("у стенда нет доступа в интернет: контроль утечки не выполнен")
+			}
+			_ = resp.Body.Close()
+		}
+		t.Logf("утечка без fallbackTag: %s", rtxYesNo(leak))
+	})
+}
+
+// Маршрутизация по правилам на настоящем Xray: домен в DIRECT не доходит до
+// узла, остальное доходит, REJECT обрывает соединение. Узел — второй
+// локальный процесс Xray с журналом доступа, интернет не нужен.
+func TestRouterXrayRulesTraffic(t *testing.T) {
+	nodePort, accessLog := rtStartNode(t)
+	e := rtNewEnv(t, rtWithKernels(rtXrayOnly))
+	e.addMyRaw(t, "socks5://127.0.0.1:"+strconv.Itoa(nodePort)+"#rt-node")
+
+	_, nodeGroup, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Узел", Mode: ModeManual, Sources: GroupSources{All: true}})
+	if err != nil {
+		t.Fatalf("SaveGroup: %v", err)
+	}
+	for _, r := range []struct {
+		domain string
+		target Target
+	}{
+		{"direct.example.test", Target{Kind: KindDirect}},
+		{"reject.example.test", Target{Kind: KindReject}},
+	} {
+		if _, _, err := e.svc.SaveRule(e.rev(t), Rule{
+			Enabled: true, Target: r.target,
+			Conds: []Cond{{Type: CondDomain, Values: []string{r.domain}}},
+		}); err != nil {
+			t.Fatalf("SaveRule: %v", err)
+		}
+	}
+	if _, err := e.svc.SetFinal(e.rev(t), Target{Kind: KindGroup, ID: nodeGroup.ID}); err != nil {
+		t.Fatalf("SetFinal: %v", err)
+	}
+	e.takeAndApply(t)
+
+	port := rtFreePort(t)
+	proc := rtStartXrayDir(t, rtXrayCoreDir(t, e.xrayDir(), port), port)
+
+	// Остальное доходит до узла (запрос может упасть на DNS узла — это не важно).
+	_, _ = rtSocksGet(port, "http://proxy.example.test/", 8*time.Second)
+	sawProxy := rtWaitNodeSaw(accessLog, "proxy.example.test", 10*time.Second)
+	_, errDirect := rtSocksGet(port, "http://direct.example.test/", 6*time.Second)
+	_, errReject := rtSocksGet(port, "http://reject.example.test/", 6*time.Second)
+	time.Sleep(2 * time.Second)
+	sawDirect := rtNodeSaw(accessLog, "direct.example.test")
+	sawReject := rtNodeSaw(accessLog, "reject.example.test")
+
+	if !proc.alive() {
+		t.Fatalf("процесс ядра завершился: %s", proc.tail())
+	}
+	t.Logf("узел видел: остальное %s, DIRECT %s, REJECT %s; запрос REJECT не прошёл: %s",
+		rtxYesNo(sawProxy), rtxYesNo(sawDirect), rtxYesNo(sawReject), rtxYesNo(errReject != nil))
+	_ = errDirect
+	if !sawProxy {
+		t.Error("домен без правила не дошёл до узла (журнал узла пуст — маршрут в группу не работает)")
+	}
+	if sawDirect {
+		t.Error("домен с правилом DIRECT дошёл до узла")
+	}
+	if sawReject {
+		t.Error("домен с правилом REJECT дошёл до узла")
+	}
+	if errReject == nil {
+		t.Error("запрос к домену с правилом REJECT прошёл: соединение не закрыто")
 	}
 }
