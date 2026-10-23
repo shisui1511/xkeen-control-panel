@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { t, currentLang } from '../../i18n';
   import { showToast, capabilities } from '../../stores';
   import { clientExitIpStore, fetchClientExitIP, type ClientExitIPInfo } from '../../lib/clientIp';
@@ -7,7 +8,6 @@
   let { compact = false }: { compact?: boolean } = $props();
 
   let isOpen = $state(false);
-  let containerRef: HTMLDivElement | null = $state(null);
 
   const info = $derived<ClientExitIPInfo>($clientExitIpStore);
   const isLoading = $derived(info.status === 'loading');
@@ -63,33 +63,36 @@
       });
   }
 
-  function handleClickOutside(event: MouseEvent) {
-    if (isOpen && containerRef && !containerRef.contains(event.target as Node)) {
-      isOpen = false;
+  // Закрытие по клику вне бейджа и по Escape: слушатели живут, пока жив контейнер.
+  const dismissOnOutside: Attachment<HTMLDivElement> = (container) => {
+    function handleClickOutside(event: MouseEvent) {
+      if (isOpen && !container.contains(event.target as Node)) {
+        isOpen = false;
+      }
     }
-  }
 
-  function handleKeyDown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && isOpen) {
-      isOpen = false;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && isOpen) {
+        isOpen = false;
+      }
     }
-  }
 
-  onMount(() => {
     document.addEventListener('click', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  };
+
+  onMount(() => {
     if (info.status === 'idle') {
       fetchClientExitIP(false, $currentLang);
     }
   });
-
-  onDestroy(() => {
-    document.removeEventListener('click', handleClickOutside);
-    document.removeEventListener('keydown', handleKeyDown);
-  });
 </script>
 
-<div class="client-ip-wrapper" bind:this={containerRef}>
+<div class="client-ip-wrapper" {@attach dismissOnOutside}>
   <div
     class="client-ip-pill"
     class:is-loading={isLoading}

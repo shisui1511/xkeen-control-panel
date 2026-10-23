@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { t } from '../../i18n';
   import { getMissingCountryFlag } from '../../lib/countryFlags';
   import type { LatencyBucket } from '../../lib/proxyClassification';
@@ -33,9 +34,10 @@
     onClose
   }: Props = $props();
 
-  let popoverEl: HTMLElement | null = $state(null);
+  // popoverEl — обычная переменная: заполняется вложением popoverPosition, читается из
+  // оконных обработчиков. listEl остаётся bind:this: читается только из обработчика клавиш.
+  let popoverEl: HTMLElement | null = null;
   let listEl: HTMLElement | null = $state(null);
-  let searchEl: HTMLInputElement | null = $state(null);
   let query = $state('');
   let highlightIndex = $state(0);
   let top = $state(0);
@@ -219,7 +221,7 @@
     }
   }
 
-  onMount(async () => {
+  onMount(() => {
     if (typeof window !== 'undefined') {
       mql = window.matchMedia('(max-width: 768px)');
       isBottomSheet = mql.matches;
@@ -230,10 +232,6 @@
       window.addEventListener('pointerdown', handlePointerDown, { capture: true });
       window.addEventListener('keydown', handleKeyDown);
     }
-
-    await tick();
-    searchEl?.focus();
-    updatePosition();
   });
 
   onDestroy(() => {
@@ -246,15 +244,23 @@
     }
   });
 
-  $effect(() => {
-    if (popoverEl && anchorEl && !isBottomSheet) {
-      updatePosition();
-    }
-  });
+  // Привязка к элементу: пересчёт позиции при смене якоря и режима bottom-sheet
+  // (updatePosition читает anchorEl и isBottomSheet, вложение перезапускается по ним).
+  const popoverPosition: Attachment<HTMLElement> = (node) => {
+    popoverEl = node;
+    updatePosition();
+    return () => {
+      popoverEl = null;
+    };
+  };
+
+  const focusOnMount: Attachment<HTMLInputElement> = (node) => {
+    node.focus();
+  };
 </script>
 
 <div
-  bind:this={popoverEl}
+  {@attach popoverPosition}
   class="qs-popover"
   class:qs-bottom-sheet={isBottomSheet}
   style={isBottomSheet
@@ -287,7 +293,7 @@
     ontouchcancel={handleTouchEnd}
   >
     <input
-      bind:this={searchEl}
+      {@attach focusOnMount}
       type="search"
       class="qs-search"
       placeholder={$t('proxies.quick_select_search')}

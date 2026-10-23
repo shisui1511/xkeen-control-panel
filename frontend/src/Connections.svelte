@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
+  import type { Attachment } from 'svelte/attachments';
   import { t, pluralize, currentLang } from './i18n';
   import {
     capabilities,
@@ -103,42 +104,36 @@
   let selectedConnection = $derived(
     selectedConnectionId ? connections.find((c) => c.id === selectedConnectionId) : null
   );
-  let drawerElement: HTMLDivElement | null = $state(null);
-  let previouslyFocusedRow: HTMLElement | null = null;
 
-  $effect(() => {
-    if (selectedConnectionId) {
-      if (!previouslyFocusedRow) {
-        previouslyFocusedRow = document.activeElement as HTMLElement;
-      }
-      setTimeout(() => {
-        if (drawerElement) {
-          const focusables = getDrawerFocusableElements();
-          if (focusables.length > 0) focusables[0].focus();
-          else drawerElement.focus();
-        }
-      }, 0);
-    } else if (previouslyFocusedRow) {
-      previouslyFocusedRow.focus();
-      previouslyFocusedRow = null;
-    }
-  });
-
-  function getDrawerFocusableElements(): HTMLElement[] {
-    if (!drawerElement) return [];
+  function getDrawerFocusableElements(drawer: HTMLElement): HTMLElement[] {
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-    return Array.from(drawerElement.querySelectorAll(selectors)).filter(
+    return Array.from(drawer.querySelectorAll(selectors)).filter(
       (el) => (el as HTMLElement).offsetParent !== null
     ) as HTMLElement[];
   }
 
+  // Фокус в панель при её появлении и возврат на строку при закрытии.
+  const drawerFocus: Attachment<HTMLElement> = (drawer) => {
+    const opener = document.activeElement as HTMLElement | null;
+    const timer = setTimeout(() => {
+      const focusables = getDrawerFocusableElements(drawer);
+      if (focusables.length > 0) focusables[0].focus();
+      else drawer.focus();
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      opener?.focus();
+    };
+  };
+
   function handleDrawerKeydown(event: KeyboardEvent) {
+    const drawer = event.currentTarget as HTMLElement;
     if (event.key === 'Escape') {
       selectedConnectionId = null;
       return;
     }
     if (event.key === 'Tab') {
-      const focusables = getDrawerFocusableElements();
+      const focusables = getDrawerFocusableElements(drawer);
       if (focusables.length === 0) {
         event.preventDefault();
         return;
@@ -147,7 +142,7 @@
       const last = focusables[focusables.length - 1];
       const active = document.activeElement;
       if (event.shiftKey) {
-        if (active === first || active === drawerElement || !drawerElement?.contains(active)) {
+        if (active === first || active === drawer || !drawer.contains(active)) {
           last.focus();
           event.preventDefault();
         }
@@ -1176,7 +1171,7 @@
     aria-modal="true"
     aria-labelledby="inspector-title"
     tabindex="-1"
-    bind:this={drawerElement}
+    {@attach drawerFocus}
     onkeydown={handleDrawerKeydown}
   >
     <div class="drawer-header">
