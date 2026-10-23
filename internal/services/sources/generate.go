@@ -31,6 +31,8 @@ var entryIDRE = regexp.MustCompile(`^[0-9a-f]{8}$`)
 // memoFile — запомненный результат источника для одного ядра; nil — файла нет.
 type memoFile struct {
 	file *configlayer.GeneratedFile
+	// catalog — запомненный каталог узлов (Service.Catalog); у файла nil.
+	catalog *Catalog
 }
 
 // xrayGen — генератор файлов Xray: 04_outbounds.xcp-<id>.tail.json по источнику.
@@ -98,7 +100,7 @@ func (s *Service) generate(in configlayer.Input, installed configlayer.Installed
 				file = m.file
 				break
 			}
-			file, err = s.myFile(kernel, id, raw, caps)
+			file, err = s.myFile(in.Mode, kernel, id, raw, caps)
 			if err != nil {
 				return nil, err
 			}
@@ -149,7 +151,10 @@ type keyedNode struct {
 	key     string
 	// tag — тег Xray: xcp-<источник>-<id записи> у «Моих узлов», xcp-<источник>-<8 hex
 	// от ключа> у подписок; не зависит от имени узла.
-	tag  string
+	tag string
+	// id8 — идентификатор узла в ссылке групп: id записи у «Моих узлов», 8 hex от
+	// ключа у подписок (nodes.Ref).
+	id8  string
 	node nodes.Node
 }
 
@@ -179,7 +184,7 @@ func (s *Service) myNodes(cfg MySourceConfig) []keyedNode {
 		// Ключ уникален в секции: узлы с одной идентичностью и разным транспортом
 		// (CDN-фронты) иначе получили бы одинаковый ключ, а интерфейс использует его
 		// как ключ keyed-блока.
-		list = append(list, keyedNode{entryID: e.ID, name: name, key: n.Key(MySourceID) + "~" + e.ID, tag: "xcp-" + MySourceID + "-" + e.ID, node: n})
+		list = append(list, keyedNode{entryID: e.ID, name: name, key: n.Key(MySourceID) + "~" + e.ID, tag: "xcp-" + MySourceID + "-" + e.ID, id8: e.ID, node: n})
 	}
 	sort.Slice(list, func(i, j int) bool {
 		if list[i].key != list[j].key {
@@ -192,36 +197,30 @@ func (s *Service) myNodes(cfg MySourceConfig) []keyedNode {
 
 // myFile строит файл источника «Мои узлы» для ядра; nil — файла нет (источник
 // выключен, узлов для ядра нет).
-func (s *Service) myFile(kernel, id string, raw json.RawMessage, caps nodes.Caps) (*configlayer.GeneratedFile, error) {
-	cfg, err := parseMy(raw)
+func (s *Service) myFile(mode configlayer.SourceKind, kernel, id string, raw json.RawMessage, caps nodes.Caps) (*configlayer.GeneratedFile, error) {
+	list, err := s.kernelNodes(mode, kernel, id, raw, nil, nil, caps)
 	if err != nil {
 		return nil, err
 	}
-	if !cfg.Enabled {
-		return nil, nil
-	}
-	list := s.myNodes(cfg)
 	switch kernel {
 	case kernelXray:
-		return xrayFile(id, list, caps)
+		return xrayFile(id, list)
 	case kernelMihomo:
-		return mihomoFile(id, list, caps)
+		return mihomoFile(id, list)
 	}
 	return nil, nil
 }
 
-// xrayFile — outbounds узлов, которые умеет Xray; тег xcp-my-<id записи> не
-// зависит от текста узла (D-22).
-func xrayFile(id string, list []keyedNode, caps nodes.Caps) (*configlayer.GeneratedFile, error) {
+// xrayFile — outbounds узлов списка ядра Xray (kernelList); тег xcp-my-<id
+// записи> не зависит от текста узла (D-22). Состав и теги решает список, файл
+// только эмитит.
+func xrayFile(id string, list []CatalogNode) (*configlayer.GeneratedFile, error) {
 	outbounds := make([]map[string]any, 0, len(list))
 	for _, k := range list {
-		if !nodes.Support(k.node, kernelXray, caps).OK {
-			continue
-		}
-		ob, err := nodes.XrayOutbound(k.node, k.tag)
+		ob, err := nodes.XrayOutbound(k.Node, k.XrayTag)
 		if err != nil {
 			// Вердикт OK означает, что пробная эмиссия прошла; сюда не доходим.
-			log.Printf("[sources] узел %s источника %s не записан для Xray", k.tag, id)
+			log.Printf("[sources] узел %s источника %s не записан для Xray", k.XrayTag, id)
 			continue
 		}
 		outbounds = append(outbounds, ob)
@@ -241,20 +240,16 @@ func xrayFile(id string, list []keyedNode, caps nodes.Caps) (*configlayer.Genera
 	}, nil
 }
 
-// mihomoFile — провайдер Mihomo из узлов, которые умеет Mihomo. Файл Inert и без
-// Expect: пока провайдер не подключён к config.yaml (Phase 146), перезапускать
-// ядро и сверять число узлов в рантайме нечем.
-func mihomoFile(id string, list []keyedNode, caps nodes.Caps) (*configlayer.GeneratedFile, error) {
-	used := make(map[string]bool, len(list))
+// mihomoFile — провайдер Mihomo из узлов списка ядра Mihomo (kernelList); имена
+// с суффиксами дублей уже в списке. Файл Inert и без Expect: пока провайдер не
+// подключён к config.yaml (Phase 146), перезапускать ядро и сверять число узлов
+// в рантайме нечем.
+func mihomoFile(id string, list []CatalogNode) (*configlayer.GeneratedFile, error) {
 	proxies := make([]map[string]any, 0, len(list))
 	for _, k := range list {
-		if !nodes.Support(k.node, kernelMihomo, caps).OK {
-			continue
-		}
-		name := uniqueName(k.name, used)
-		p, err := nodes.ClashProxy(k.node, name)
+		p, err := nodes.ClashProxy(k.Node, k.MihomoName)
 		if err != nil {
-			log.Printf("[sources] узел %s источника %s не записан для Mihomo", k.tag, id)
+			log.Printf("[sources] узел %s источника %s не записан для Mihomo", k.Ref, id)
 			continue
 		}
 		proxies = append(proxies, p)
@@ -389,17 +384,16 @@ func (s *Service) subscriptionFile(mode configlayer.SourceKind, kernel, id strin
 	if m, ok := s.memoGet(key); ok {
 		return m.file, nil
 	}
-	list, err := s.blobs.get(ref.Hash)
+	list, err := s.kernelNodes(mode, kernel, id, raw, live, cands, caps)
 	if err != nil {
-		return nil, fmt.Errorf("источник %s, ядро %s: %w", id, kernel, err)
+		return nil, err
 	}
-	keyed := s.subscriptionNodes(id, list, cfg.Exclude)
 	var file *configlayer.GeneratedFile
 	switch kernel {
 	case kernelXray:
-		file, err = xrayFile(id, keyed, caps)
+		file, err = xrayFile(id, list)
 	case kernelMihomo:
-		file, err = mihomoFile(id, keyed, caps)
+		file, err = mihomoFile(id, list)
 	}
 	if err != nil {
 		return nil, err
@@ -454,6 +448,7 @@ func (s *Service) subscriptionNodes(id string, list []nodes.Node, exclude []stri
 			name: displayName(n),
 			key:  k.Key,
 			tag:  "xcp-" + id + "-" + ids[k.Key],
+			id8:  ids[k.Key],
 			node: n,
 		})
 	}
