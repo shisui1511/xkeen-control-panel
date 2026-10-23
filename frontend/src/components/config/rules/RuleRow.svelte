@@ -86,6 +86,12 @@
     if (w.code === 'overlap') return $t('cfg.rules.overlap_chip', { n });
     if (w.code === 'exact_dup') return $t('cfg.rules.exact_dup', { n });
     if (w.code === 'below_catchall') return $t('cfg.rules.below_catchall', { n });
+    if (w.code === 'list_heavy')
+      return $t('cfg.rules.list_heavy', {
+        file: w.params?.file ?? '?',
+        tag: w.params?.tag ?? '?',
+        entries: w.params?.entries ?? '?'
+      });
     return $t(issueTextKey(w.code), w.params ?? {});
   }
 

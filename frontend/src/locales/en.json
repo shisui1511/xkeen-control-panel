@@ -3378,6 +3378,7 @@
   "cfg.rules.list_missing": "List not found: {file} · {tag}. “Apply” is unavailable until you choose another list.",
   "cfg.rules.list_missing_chip": "List not found: {file} · {tag}",
   "cfg.rules.list_too_large": "The list is too large for Mihomo: {file} · {tag}",
+  "cfg.rules.list_heavy": "Heavy list: {file} · {tag} ({entries} entries). Mihomo will take noticeably longer to load it.",
   "cfg.rules.err_domain": "Enter a domain, for example example.com or full:example.com.",
   "cfg.rules.err_cidr": "Invalid address or CIDR: {value}.",
   "cfg.rules.err_port": "A port is a number from 1 to 65535 or a range, for example 8000-9000.",

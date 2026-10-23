@@ -3378,6 +3378,7 @@
   "cfg.rules.list_missing": "Список не найден: {file} · {tag}. «Применить» недоступно, пока не выберете другой список.",
   "cfg.rules.list_missing_chip": "Список не найден: {file} · {tag}",
   "cfg.rules.list_too_large": "Список слишком большой для Mihomo: {file} · {tag}",
+  "cfg.rules.list_heavy": "Тяжёлый список: {file} · {tag} ({entries} записей). Mihomo будет загружать его заметно дольше.",
   "cfg.rules.err_domain": "Введите домен, например example.com или full:example.com.",
   "cfg.rules.err_cidr": "Неверный адрес или CIDR: {value}.",
   "cfg.rules.err_port": "Порт — число от 1 до 65535 или диапазон, например 8000-9000.",

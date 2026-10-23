@@ -921,6 +921,31 @@ for (const [file, id] of [
   expect(read(file).includes(id), `${file}: нет ${id}`);
 }
 
+// Каждый код предупреждения проверки (warn* в validate.go и lint.go) разбирает
+// фронтенд: иначе предупреждение показалось бы общим «Не удалось проверить
+// черновик» (issueTextKey)
+{
+  const warnCodes = [];
+  for (const file of [
+    "internal/services/routing/validate.go",
+    "internal/services/routing/lint.go",
+  ]) {
+    for (const m of read(file).matchAll(/^\s*warn[A-Za-z]+\s*=\s*"([a-z_]+)"/gm)) {
+      warnCodes.push(m[1]);
+    }
+  }
+  expect(warnCodes.length > 0, "validate.go/lint.go: не найдены коды предупреждений warn*");
+  const uiText = walk(`${SRC}/components/config`, [])
+    .map((f) => read(f))
+    .join("\n");
+  for (const code of warnCodes) {
+    expect(
+      uiText.includes(`'${code}'`),
+      `код предупреждения ${code} (бэкенд) не разбирается в components/config`,
+    );
+  }
+}
+
 // Типы ответов против routingContract.json; интерфейс может наследовать другой
 // (`extends`), RoutingSnapshot и RoutingKernelView объявлены в configLayer.ts
 // (configLayer не импортирует configRouting)
