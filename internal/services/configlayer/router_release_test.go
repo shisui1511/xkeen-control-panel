@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Возврат маршрутизации при выключении флага, дрейф маршрутизации и автоматическое
@@ -154,5 +155,182 @@ func TestRouterDisableReleasesRouting(t *testing.T) {
 	e.assertUntouched(t)
 	if st := e.layer.store.Snapshot(); !st.Routing.isEmpty() || st.Journal != nil {
 		t.Errorf("состояние после второго выключения: routing %+v, журнал %+v", st.Routing, st.Journal)
+	}
+}
+
+const (
+	rtRelForeignBody = `{"routing": {"rules": [{"type": "field", "network": "tcp,udp", "outboundTag": "direct"}]}}` + "\n"
+	rtRelMixedBody   = `{"routing": {"rules": []}, "outbounds": [{"tag": "zz-out", "protocol": "freedom"}]}` + "\n"
+	rtRelMixedFile   = "zz_user.json"
+)
+
+// waitRoutingEvent ждёт события routing из подписки.
+func waitRoutingEvent(t *testing.T, events <-chan Event) {
+	t.Helper()
+	deadline := time.After(30 * time.Second)
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatal("подписка закрыта до события routing")
+			}
+			if ev.Type == EventRouting {
+				if _, ok := ev.Data.(RoutingEvent); !ok {
+					t.Fatalf("данные события routing: %T", ev.Data)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("события routing нет")
+		}
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestRouterRoutingDrift(t *testing.T) {
+	e := rtNewTakeoverEnv(t)
+
+	// Предпросмотр до взятия: 05_routing.json уйдёт, смешанный 00_api.json останется.
+	pv, err := e.layer.RoutingPreview()
+	if err != nil {
+		t.Fatalf("RoutingPreview: %v", err)
+	}
+	if pv.Xray == nil || !containsString(pv.Xray.Move, rtTkRoutingFile) || !containsString(pv.Xray.Left, rtTkAPIFile) {
+		t.Fatalf("предпросмотр Xray: %+v", pv.Xray)
+	}
+	if pv.Mihomo == nil || pv.Mihomo.PrevProfile != "profiles/user.yaml" {
+		t.Fatalf("предпросмотр Mihomo: %+v", pv.Mihomo)
+	}
+	if got := hashOf(e.xray(rtTkRoutingFile)); got != e.hashes[rtTkRoutingFile] {
+		t.Fatalf("предпросмотр изменил %s", rtTkRoutingFile)
+	}
+
+	e.setManaged(t, true)
+	if res := e.apply(t); !res.OK || res.Code != ResultApplied {
+		t.Fatalf("взятие: %+v", res)
+	}
+	snap := e.layer.Snapshot()
+	if !snap.Routing.Desired || snap.Routing.Xray == nil || snap.Routing.Mihomo == nil {
+		t.Fatalf("раздел routing снимка: %+v", snap.Routing)
+	}
+	x, m := snap.Routing.Xray, snap.Routing.Mihomo
+	if !x.Taken || !equalStrings(x.Moved, []string{rtTkRoutingFile}) || !containsString(x.Left, rtTkAPIFile) || len(x.Drift) != 0 {
+		t.Errorf("Xray в снимке: %+v", x)
+	}
+	if !m.Taken || m.PrevProfile != "profiles/user.yaml" || len(m.Drift) != 0 || snap.DriftCount != 0 {
+		t.Errorf("Mihomo в снимке: %+v, drift_count %d", m, snap.DriftCount)
+	}
+
+	// Дрейф профиля: config.yaml переложили снаружи на прежний профиль.
+	cfg := e.mihomo("config.yaml")
+	if err := os.Remove(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(e.link, cfg); err != nil {
+		t.Fatal(err)
+	}
+	snap = e.layer.Snapshot()
+	if !equalStrings(snap.Routing.Mihomo.Drift, []string{"config.yaml"}) || snap.DriftCount == 0 {
+		t.Fatalf("дрейф профиля не виден: %+v, drift_count %d", snap.Routing.Mihomo, snap.DriftCount)
+	}
+	if err := e.layer.StartApply(true); !errors.Is(err, ErrDriftBlocked) {
+		t.Fatalf("StartApply при дрейфе профиля: %v, ожидался ErrDriftBlocked", err)
+	}
+	events, cancel, err := e.layer.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	if err := e.layer.ReclaimRouting(e.layer.Context(), KernelMihomo); err != nil {
+		t.Fatalf("ReclaimRouting mihomo: %v", err)
+	}
+	waitRoutingEvent(t, events)
+	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+	snap = e.layer.Snapshot()
+	if len(snap.Routing.Mihomo.Drift) != 0 || snap.DriftCount != 0 || snap.Routing.Mihomo.PrevProfile != "profiles/user.yaml" {
+		t.Errorf("после возврата профиля: %+v, drift_count %d", snap.Routing.Mihomo, snap.DriftCount)
+	}
+	if err := e.layer.ReclaimRouting(e.layer.Context(), KernelMihomo); !errors.Is(err, ErrNothingToReclaim) {
+		t.Errorf("повторное «вернуть профиль»: %v, ожидался ErrNothingToReclaim", err)
+	}
+
+	// Чужой routing вернулся (05_routing.json от XKeen): дрейф, «вернуть» уносит его в копию.
+	if err := os.WriteFile(e.xray(rtTkRoutingFile), []byte(rtRelForeignBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snap = e.layer.Snapshot()
+	if !equalStrings(snap.Routing.Xray.Drift, []string{rtTkRoutingFile}) || snap.DriftCount == 0 {
+		t.Fatalf("дрейф routing не виден: %+v, drift_count %d", snap.Routing.Xray, snap.DriftCount)
+	}
+	if err := e.layer.ReclaimRouting(e.layer.Context(), KernelXray); err != nil {
+		t.Fatalf("ReclaimRouting xray: %v", err)
+	}
+	if _, err := os.Lstat(e.xray(rtTkRoutingFile)); !os.IsNotExist(err) {
+		t.Errorf("чужой файл остался в configs/: %v", err)
+	}
+	st := e.layer.store.Snapshot()
+	var got *MovedFile
+	for i := range st.Routing.Xray.Moved {
+		if st.Routing.Xray.Moved[i].Name == rtTkRoutingFile {
+			got = &st.Routing.Xray.Moved[i]
+		}
+	}
+	if got == nil || got.Hash != HashContent([]byte(rtRelForeignBody)) || hashOf(movedCopyPath(*got)) != got.Hash {
+		t.Fatalf("перенесённый файл не в копии: %+v", st.Routing.Xray.Moved)
+	}
+	if st.Journal != nil {
+		t.Errorf("журнал не снят: %+v", st.Journal)
+	}
+	if snap = e.layer.Snapshot(); len(snap.Routing.Xray.Drift) != 0 || snap.DriftCount != 0 {
+		t.Errorf("дрейф не пропал: %+v", snap.Routing.Xray)
+	}
+	e.assertUntouched(t)
+
+	// Смешанный чужой файл с routing после файла панели: дрейф, «вернуть» отказывает.
+	if err := os.WriteFile(e.xray(rtRelMixedFile), []byte(rtRelMixedBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snap = e.layer.Snapshot()
+	if !equalStrings(snap.Routing.Xray.Drift, []string{rtRelMixedFile}) {
+		t.Fatalf("дрейф смешанного файла не виден: %+v", snap.Routing.Xray)
+	}
+	err = e.layer.ReclaimRouting(e.layer.Context(), KernelXray)
+	var fm *ForeignMixedError
+	if !errors.Is(err, ErrForeignMixed) || !errors.As(err, &fm) || fm.File != rtRelMixedFile {
+		t.Fatalf("ReclaimRouting смешанного файла: %v", err)
+	}
+	if hashOf(e.xray(rtRelMixedFile)) != HashContent([]byte(rtRelMixedBody)) {
+		t.Error("смешанный файл изменён")
+	}
+	if err := e.layer.StartApply(true); !errors.Is(err, ErrDriftBlocked) {
+		t.Fatalf("StartApply при чужом routing: %v, ожидался ErrDriftBlocked", err)
+	}
+
+	// «Отпустить»: желаемое managed=false проходит несмотря на дрейф и возвращает файлы.
+	e.setManaged(t, false)
+	if res := e.apply(t); !res.OK || res.Code != ResultApplied {
+		t.Fatalf("возврат при дрейфе: %+v", res)
+	}
+	if got := hashOf(e.xray(rtTkRoutingFile)); got != HashContent([]byte(rtRelForeignBody)) {
+		t.Errorf("вернулась не последняя копия %s: %q", rtTkRoutingFile, got)
+	}
+	e.assertConfigLink(t, e.link)
+	e.assertNoPanelFiles(t)
+	if hashOf(e.xray(rtRelMixedFile)) != HashContent([]byte(rtRelMixedBody)) {
+		t.Error("смешанный файл тронут при возврате")
+	}
+	if st := e.layer.store.Snapshot(); !st.Routing.isEmpty() || st.Journal != nil {
+		t.Errorf("состояние после возврата: routing %+v, журнал %+v", st.Routing, st.Journal)
 	}
 }

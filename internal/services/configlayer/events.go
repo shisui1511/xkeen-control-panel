@@ -15,6 +15,9 @@ const (
 	EventNotices   = "notices"
 	// EventSources — представление источников изменилось: клиент перечитывает его.
 	EventSources = "sources"
+	// EventRouting — владение маршрутизацией или её дрейф изменились: клиент
+	// перечитывает раздел routing снимка.
+	EventRouting = "routing"
 )
 
 const (
@@ -47,6 +50,11 @@ type DraftEvent struct {
 
 // SourcesEvent — данные события sources: ревизия черновика на момент события.
 type SourcesEvent struct {
+	Revision int64 `json:"revision"`
+}
+
+// RoutingEvent — данные события routing: ревизия черновика на момент события.
+type RoutingEvent struct {
 	Revision int64 `json:"revision"`
 }
 

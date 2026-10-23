@@ -129,6 +129,9 @@ type Layer struct {
 	// lastDrift — число файлов с дрейфом по последней сверке; переход >0 → 0 будит
 	// onDriftResolved.
 	lastDrift int
+	// lastRoutingDrift — подпись расхождений маршрутизации по последней сверке:
+	// смена будит событие routing.
+	lastRoutingDrift string
 	// onDriftResolved — колбэк «дрейф решён» (сервис источников), до Start.
 	onDriftResolved func()
 	// failed — уведомления build_failed:<ядро> (только в памяти).
@@ -375,6 +378,7 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 		l.mu.Lock()
 		l.lastFiles = nil
 		l.lastDrift = 0
+		l.lastRoutingDrift = ""
 		l.mu.Unlock()
 		return FilesEvent{Files: []FileView{}}
 	}
@@ -388,10 +392,16 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 	l.lastFiles = data
 	resolved := publish && l.lastDrift > 0 && ev.DriftCount == 0
 	l.lastDrift = ev.DriftCount
+	rsig := routingDriftSig(ev.Routing)
+	routingChanged := l.lastRoutingDrift != rsig
+	l.lastRoutingDrift = rsig
 	onResolved := l.onDriftResolved
 	l.mu.Unlock()
 	if publish && changed {
 		l.broker.Publish(Event{Type: EventFiles, Data: ev})
+	}
+	if publish && routingChanged {
+		l.PublishRouting()
 	}
 	// Дрейф решён (Пересобрать, Принять правку, ручное исправление): будим сервис
 	// источников, чтобы отложенная запись состоялась. Горутина слоя, не под checkMu.
@@ -454,7 +464,19 @@ func (l *Layer) evaluate(st State) FilesEvent {
 		}
 	}
 	sortFileViews(files)
-	return FilesEvent{Files: files, DriftCount: drift}
+	// Расхождения маршрутизации входят в число дрейфа: «Применить» блокируется тем же
+	// механизмом (кроме запуска с желаемым managed=false, D-06, D-07).
+	rd := routingDrift(l.opts.Roots, st.Routing, l.installed(), "", l.opts.ForeignOwned)
+	return FilesEvent{Files: files, DriftCount: drift + len(rd), Routing: rd}
+}
+
+// routingDriftSig — подпись списка расхождений маршрутизации для сравнения сверок.
+func routingDriftSig(items []RoutingDriftItem) string {
+	var b strings.Builder
+	for _, it := range items {
+		b.WriteString(it.Kernel + "|" + it.Code + "|" + it.File + ";")
+	}
+	return b.String()
 }
 
 // mihomoConfigAlias — путь config.yaml Mihomo и файл, в который он разрешается,
@@ -499,8 +521,48 @@ func (l *Layer) Snapshot() SnapshotView {
 	sv.Checks = l.cachedChecks(st)
 	fe := l.evaluate(st)
 	sv.Files, sv.DriftCount = fe.Files, fe.DriftCount
+	sv.Routing = l.routingSnapshot(st, fe.Routing)
 	sv.Kernels, sv.Features = l.versions()
 	return sv
+}
+
+// routingSnapshot собирает раздел routing снимка: желаемое из секции черновика,
+// по установленным ядрам — взято ли, перенесённые и оставленные файлы, дрейф.
+func (l *Layer) routingSnapshot(st State, drift []RoutingDriftItem) RoutingSnapshot {
+	out := RoutingSnapshot{Desired: DesiredRouting(st.Draft).Managed}
+	installed := l.installed()
+	view := func(kernel string, taken bool, moved, left []string, prev string) *RoutingKernelView {
+		v := &RoutingKernelView{Taken: taken, Moved: []string{}, Left: []string{}, Drift: []string{}}
+		if taken {
+			v.Moved = append(v.Moved, moved...)
+			v.Left = append(v.Left, left...)
+			v.PrevProfile = prev
+		}
+		for _, it := range drift {
+			if it.Kernel == kernel {
+				v.Drift = append(v.Drift, it.File)
+			}
+		}
+		return v
+	}
+	if installed.Xray {
+		var moved, left []string
+		if x := st.Routing.Xray; x != nil {
+			for _, m := range x.Moved {
+				moved = append(moved, m.Name)
+			}
+			left = x.Left
+		}
+		out.Xray = view(KernelXray, st.Routing.Xray != nil, moved, left, "")
+	}
+	if installed.Mihomo {
+		prev := ""
+		if m := st.Routing.Mihomo; m != nil {
+			prev = m.PrevProfile
+		}
+		out.Mihomo = view(KernelMihomo, st.Routing.Mihomo != nil, nil, nil, prev)
+	}
+	return out
 }
 
 // versions возвращает строки версий и карту функций с кэшем на versionsCacheTTL.
@@ -649,6 +711,142 @@ func (l *Layer) PublishSources() {
 		return
 	}
 	l.broker.Publish(Event{Type: EventSources, Data: SourcesEvent{Revision: l.store.Snapshot().DraftRevision}})
+}
+
+// PublishRouting сообщает клиентам, что владение маршрутизацией или её дрейф
+// изменились (событие routing с текущей ревизией черновика). Выключенный слой
+// молчит.
+func (l *Layer) PublishRouting() {
+	if !l.Enabled() {
+		return
+	}
+	l.broker.Publish(Event{Type: EventRouting, Data: RoutingEvent{Revision: l.store.Snapshot().DraftRevision}})
+}
+
+// Ошибки действий с маршрутизацией.
+var (
+	// ErrNothingToReclaim — у ядра нет дрейфа маршрутизации: возвращать нечего.
+	ErrNothingToReclaim = errors.New(IssueNothingToReclaim)
+	// ErrForeignMixed — смешанный чужой файл с routing: переносится только
+	// «Отпустить маршрутизацию». Конкретная ошибка — *ForeignMixedError с файлом.
+	ErrForeignMixed = errors.New(IssueForeignMixed)
+	// ErrUnknownKernel — ядро не xray и не mihomo.
+	ErrUnknownKernel = errors.New("неизвестное ядро")
+)
+
+// ForeignMixedError — «вернуть файл панели» отказал: файл File содержит не только
+// routing. Диск не тронут; Is совпадает с ErrForeignMixed.
+type ForeignMixedError struct {
+	File string
+}
+
+// Error называет файл.
+func (e *ForeignMixedError) Error() string { return IssueForeignMixed + ": " + e.File }
+
+// Is связывает ForeignMixedError с сентинелом ErrForeignMixed.
+func (e *ForeignMixedError) Is(target error) bool { return target == ErrForeignMixed }
+
+// RoutingPreview — предпросмотр взятия для диалога (E10): какие файлы routing Xray
+// уйдут в копии, какие останутся, предупреждения D-44 и прежний профиль Mihomo с
+// портами по текущему диску. Неустановленное ядро — nil. Диск не меняется.
+func (l *Layer) RoutingPreview() (TakeoverPreview, error) {
+	if !l.Enabled() {
+		return TakeoverPreview{}, ErrDisabled
+	}
+	installed := l.installed()
+	var files []RoutingFile
+	if installed.Xray {
+		var err error
+		if files, _, err = ScanXrayRouting(l.opts.Roots.Xray, l.opts.ForeignOwned); err != nil {
+			return TakeoverPreview{}, err
+		}
+	}
+	prevProfile, ports := "", defaultMihomoPorts()
+	if installed.Mihomo {
+		var err error
+		if _, prevProfile, ports, err = ScanMihomoActive(l.opts.Roots.Mihomo); err != nil {
+			return TakeoverPreview{}, err
+		}
+	}
+	pv := RoutingPreviewOf(files, prevProfile, ports)
+	if !installed.Xray {
+		pv.Xray = nil
+	}
+	if !installed.Mihomo {
+		pv.Mihomo = nil
+	}
+	return pv, nil
+}
+
+// ReclaimRouting решает дрейф маршрутизации ядра, оставляя маршрутизацию у панели
+// (D-06, D-07). Mihomo: config.yaml перекладывается на профиль панели (обычный файл
+// уходит в набор копий), затем Mihomo перечитывает профиль. Xray: каждый «чистый»
+// чужой файл routing переносится в копию и добавляется к перенесённым, затем Xray
+// перезапускается; если среди расхождений есть смешанный файл — ошибка
+// *ForeignMixedError без изменений (его решает только «Отпустить»). Нет дрейфа —
+// ErrNothingToReclaim. Всё под журналом и откатом, как взятие; занятое применение —
+// ErrApplyBusy или ErrKernelBusy.
+func (l *Layer) ReclaimRouting(ctx context.Context, kernel string) error {
+	if !l.Enabled() {
+		return ErrDisabled
+	}
+	if kernel != KernelXray && kernel != KernelMihomo {
+		return fmt.Errorf("%w: %q", ErrUnknownKernel, kernel)
+	}
+	release, err := l.pipeline.TryBegin(ctx, true)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := l.pipeline.recoverPendingJournal(); err != nil {
+		return err
+	}
+	st := l.store.Snapshot()
+	items := routingDrift(l.opts.Roots, st.Routing, l.installed(), kernel, l.opts.ForeignOwned)
+	if len(items) == 0 {
+		return ErrNothingToReclaim
+	}
+	ops := &RoutingOps{Next: st.Routing.clone()}
+	switch kernel {
+	case KernelXray:
+		files, _, err := ScanXrayRouting(l.opts.Roots.Xray, l.opts.ForeignOwned)
+		if err != nil {
+			return err
+		}
+		byName := make(map[string]RoutingFile, len(files))
+		for _, f := range files {
+			byName[f.Name] = f
+		}
+		// Сначала проверяются все файлы: смешанный отказывает без единого изменения.
+		for _, it := range items {
+			if f, ok := byName[it.File]; !ok || !f.Pure || !safeRoutingName(f.Name) {
+				return &ForeignMixedError{File: it.File}
+			}
+		}
+		taking := make(map[string]bool, len(items))
+		for _, it := range items {
+			ops.XrayTake = append(ops.XrayTake, it.File)
+			taking[it.File] = true
+		}
+		// Файл, который раньше был смешанным, а теперь перенесён, оставленным не числится.
+		if x := ops.Next.Xray; x != nil {
+			left := make([]string, 0, len(x.Left))
+			for _, n := range x.Left {
+				if !taking[n] {
+					left = append(left, n)
+				}
+			}
+			x.Left = left
+		}
+	case KernelMihomo:
+		ops.MihomoPoint, ops.keepPrev = true, true
+	}
+	if err := l.commitDiskPlan(ctx, Plan{Routing: ops}, TriggerRoutingReclaim, ReasonRoutingTakeover); err != nil {
+		return err
+	}
+	l.PublishRouting()
+	l.checkNow(true)
+	return nil
 }
 
 // noticeBuildFailedPrefix — префикс идентификатора уведомления о неудачной
@@ -944,7 +1142,10 @@ func (l *Layer) StartApply(user bool) error {
 	}
 	// Свежая сверка под замком применения: пока есть нерешённый дрейф, диск не
 	// трогается (D-11). «Пересобрать» по названным файлам этим не блокируется.
-	if l.checkNow(true).DriftCount > 0 {
+	// Расхождение маршрутизации не блокирует применение с желаемым managed=false:
+	// это и есть решение «Отпустить маршрутизацию» (D-06, D-07).
+	fe := l.checkNow(true)
+	if fe.DriftCount-len(fe.Routing) > 0 || (len(fe.Routing) > 0 && DesiredRouting(l.store.Snapshot().Draft).Managed) {
 		release()
 		return ErrDriftBlocked
 	}

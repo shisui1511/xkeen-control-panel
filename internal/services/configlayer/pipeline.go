@@ -30,6 +30,9 @@ const (
 	TriggerSelect Trigger = "select"
 	// TriggerDatRefresh — пересборка списков после обновления dat-файлов.
 	TriggerDatRefresh Trigger = "dat_refresh"
+	// TriggerRoutingReclaim — «вернуть» маршрутизацию: профиль панели Mihomo или
+	// чужой файл routing Xray в копию (набор копий вне конвейера «Применить»).
+	TriggerRoutingReclaim Trigger = "routing_reclaim"
 )
 
 // SourceKind — из какого состояния собираются файлы.
