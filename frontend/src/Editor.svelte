@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { fade, slide } from 'svelte/transition';
+  import { SvelteSet } from 'svelte/reactivity';
   import { t, currentLang } from './i18n';
   import {
     showToast,
@@ -108,7 +109,7 @@
   // Дерево показывает занятость у последнего выбранного файла
   const treeBusyPath = $derived(queuedPick?.path ?? loadingPath);
   let templateLoading = $state(false);
-  const pendingPins = new Set<string>();
+  const pendingPins = new SvelteSet<string>();
   let saving = $state(false);
   let backups = $state<string[]>([]);
   // Путь файла, которому принадлежит список backups
