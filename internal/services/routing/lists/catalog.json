@@ -1,0 +1,174 @@
+{
+  "services": [
+    {
+      "id": "youtube",
+      "name_ru": "YouTube",
+      "name_en": "YouTube",
+      "refs": [
+        { "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "YOUTUBE" },
+        { "kind": "site", "file_re": "^geosite_roscomvpn\\.dat$", "tag": "YOUTUBE" },
+        { "kind": "site", "file_re": "^(geosite_)?zkeen\\.dat$", "tag": "YOUTUBE" },
+        { "kind": "ip", "file_re": "^(geoip_)?zkeenip\\.dat$", "tag": "YOUTUBE" }
+      ]
+    },
+    {
+      "id": "telegram",
+      "name_ru": "Telegram",
+      "name_en": "Telegram",
+      "refs": [
+        { "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "TELEGRAM" },
+        { "kind": "site", "file_re": "^geosite_roscomvpn\\.dat$", "tag": "TELEGRAM" },
+        { "kind": "ip", "file_re": "^(geoip_)?zkeenip\\.dat$", "tag": "TELEGRAM" }
+      ]
+    },
+    {
+      "id": "discord",
+      "name_ru": "Discord",
+      "name_en": "Discord",
+      "refs": [
+        { "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "DISCORD" },
+        { "kind": "ip", "file_re": "^(geoip_)?zkeenip\\.dat$", "tag": "DISCORD" }
+      ]
+    },
+    {
+      "id": "ai",
+      "name_ru": "Нейросети",
+      "name_en": "AI services",
+      "refs": [
+        { "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "CATEGORY-AI-!CN" },
+        { "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "OPENAI" }
+      ]
+    },
+    {
+      "id": "ru_sites",
+      "name_ru": "Российские сайты",
+      "name_en": "Russian sites",
+      "refs": [
+        { "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "CATEGORY-RU" },
+        { "kind": "site", "file_re": "^geosite_roscomvpn\\.dat$", "tag": "WHITELIST" },
+        { "kind": "site", "file_re": "^geosite_roscomvpn\\.dat$", "tag": "CATEGORY-RU" }
+      ]
+    },
+    {
+      "id": "ru_blocked",
+      "name_ru": "Заблокированные в России",
+      "name_en": "Blocked in Russia",
+      "refs": [
+        { "kind": "site", "file_re": "^geosite_refilter\\.dat$", "tag": "REFILTER" },
+        { "kind": "site", "file_re": "^(geosite_)?zkeen\\.dat$", "tag": "DOMAINS" },
+        { "kind": "site", "file_re": "^(geosite_)?zkeen\\.dat$", "tag": "OTHER" },
+        { "kind": "site", "file_re": "^geosite_roscomvpn\\.dat$", "tag": "CATEGORY-GEOBLOCK-RU" },
+        { "kind": "ip", "file_re": "^geoip_refilter\\.dat$", "tag": "REFILTER" }
+      ]
+    },
+    {
+      "id": "ads",
+      "name_ru": "Реклама",
+      "name_en": "Ads",
+      "refs": [
+        { "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "CATEGORY-ADS-ALL" },
+        { "kind": "site", "file_re": "^geosite_roscomvpn\\.dat$", "tag": "CATEGORY-ADS" }
+      ]
+    },
+    {
+      "id": "games",
+      "name_ru": "Игры",
+      "name_en": "Games",
+      "refs": [
+        { "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "CATEGORY-GAMES" },
+        { "kind": "site", "file_re": "^geosite_roscomvpn\\.dat$", "tag": "STEAM" }
+      ]
+    },
+    {
+      "id": "steam",
+      "name_ru": "Steam",
+      "name_en": "Steam",
+      "refs": [
+        { "kind": "site", "file_re": "^geosite_roscomvpn\\.dat$", "tag": "STEAM" },
+        { "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "STEAM" }
+      ]
+    },
+    {
+      "id": "torrent",
+      "name_ru": "Торренты",
+      "name_en": "Torrents",
+      "refs": [{ "kind": "site", "file_re": "^geosite_roscomvpn\\.dat$", "tag": "TORRENT" }]
+    },
+    {
+      "id": "cloudflare",
+      "name_ru": "Cloudflare",
+      "name_en": "Cloudflare",
+      "refs": [{ "kind": "ip", "file_re": "^(geoip_)?zkeenip\\.dat$", "tag": "CLOUDFLARE" }]
+    },
+    {
+      "id": "private",
+      "name_ru": "Частные сети",
+      "name_en": "Private networks",
+      "refs": [
+        { "kind": "ip", "file_re": "^geoip_roscomvpn\\.dat$", "tag": "PRIVATE" },
+        { "kind": "ip", "file_re": "^geoip_v2fly\\.dat$", "tag": "PRIVATE" }
+      ]
+    }
+  ],
+  "countries": [
+    {
+      "code": "RU",
+      "site": [
+        { "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "CATEGORY-RU" },
+        { "kind": "site", "file_re": "^geosite_roscomvpn\\.dat$", "tag": "CATEGORY-RU" }
+      ],
+      "blocked": [
+        { "kind": "site", "file_re": "^geosite_refilter\\.dat$", "tag": "REFILTER" },
+        { "kind": "site", "file_re": "^(geosite_)?zkeen\\.dat$", "tag": "DOMAINS" },
+        { "kind": "site", "file_re": "^(geosite_)?zkeen\\.dat$", "tag": "OTHER" },
+        { "kind": "site", "file_re": "^geosite_roscomvpn\\.dat$", "tag": "CATEGORY-GEOBLOCK-RU" },
+        { "kind": "ip", "file_re": "^geoip_refilter\\.dat$", "tag": "REFILTER" }
+      ]
+    },
+    {
+      "code": "CN",
+      "site": [
+        { "kind": "site", "file_re": "^geosite_loyalsoldier\\.dat$", "tag": "CN" },
+        { "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "CN" }
+      ],
+      "blocked": [
+        { "kind": "site", "file_re": "^geosite_loyalsoldier\\.dat$", "tag": "GFW" },
+        { "kind": "site", "file_re": "^geosite_loyalsoldier\\.dat$", "tag": "GREATFIRE" }
+      ]
+    },
+    {
+      "code": "IR",
+      "site": [{ "kind": "site", "file_re": "^(geosite_v2fly|dlc)\\.dat$", "tag": "CATEGORY-IR" }],
+      "blocked": []
+    }
+  ],
+  "extended": [
+    {
+      "id": "roscomvpn_geosite",
+      "name": "roscomvpn geosite",
+      "file": "geosite_roscomvpn.dat",
+      "url": "https://github.com/hydraponique/roscomvpn-geosite/releases/latest/download/geosite.dat",
+      "kind": "site",
+      "size_hint": "~68 KB",
+      "heavy": false
+    },
+    {
+      "id": "roscomvpn_geoip",
+      "name": "roscomvpn geoip",
+      "file": "geoip_roscomvpn.dat",
+      "url": "https://github.com/hydraponique/roscomvpn-geoip/releases/latest/download/geoip.dat",
+      "kind": "ip",
+      "size_hint": "~436 KB",
+      "heavy": false
+    },
+    {
+      "id": "loyalsoldier_geosite",
+      "name": "Loyalsoldier geosite",
+      "file": "geosite_loyalsoldier.dat",
+      "url": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
+      "kind": "site",
+      "size_hint": "~11 MB",
+      "heavy": true
+    }
+  ]
+}

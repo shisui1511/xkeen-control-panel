@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -240,6 +241,87 @@ func TestRouterListsIndexAndExtract(t *testing.T) {
 			t.Errorf("xray -test принял выдуманный тег %s:XCP-NO-SUCH-TAG", f.Name)
 		} else if !strings.Contains(out, "failed to check code") && !strings.Contains(out, "code not found") {
 			t.Errorf("xray -test отклонил выдуманный тег другим текстом: %s", strings.TrimSpace(out))
+		}
+	}
+}
+
+func TestRouterListsCatalog(t *testing.T) {
+	routertest.Current(t)
+	ix, _ := rtDatIndex(t)
+
+	view, err := Resolve(ix, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	again, err := Resolve(ix, nil)
+	if err != nil || !reflect.DeepEqual(view, again) {
+		t.Errorf("Resolve недетерминирован или упал: %v", err)
+	}
+	if len(view.Lists) == 0 {
+		t.Error("раздел «Все списки» пуст при установленных dat")
+	}
+
+	for _, s := range view.Services {
+		if len(s.Refs) == 0 {
+			t.Errorf("сервис %s показан без ссылок", s.ID)
+		}
+		for _, r := range s.Refs {
+			if _, _, ok, err := ix.Has(r.File, r.Tag); err != nil || !ok {
+				t.Errorf("сервис %s: ссылка %s · %s не найдена в индексе: %v", s.ID, r.File, r.Tag, err)
+			}
+		}
+	}
+
+	var ru *CountryView
+	for i := range view.Countries {
+		c := view.Countries[i]
+		if c.IP == nil {
+			t.Errorf("страна %s показана без IP-списка", c.Code)
+			continue
+		}
+		if _, _, ok, err := ix.Has(c.IP.File, c.IP.Tag); err != nil || !ok {
+			t.Errorf("страна %s: IP-ссылка %s · %s не найдена: %v", c.Code, c.IP.File, c.IP.Tag, err)
+		}
+		if c.Code == "RU" {
+			ru = &view.Countries[i]
+		}
+	}
+	if ru == nil {
+		t.Error("RU нет в странах: ни geoip_zkeenip.dat, ни geoip_v2fly.dat с тегом RU")
+	}
+
+	// GRP-04: в доменных ссылках нет логики geoip:!cn — только теги файлов.
+	checkTag := func(where, tag, kind string) {
+		low := strings.ToLower(tag)
+		if kind == KindSite && (strings.HasPrefix(low, "geoip:") || strings.HasPrefix(low, "ext:") || strings.HasPrefix(low, "geosite:")) {
+			t.Errorf("%s: доменная ссылка с префиксом в теге %q", where, tag)
+		}
+	}
+	for _, s := range catalog.Services {
+		for _, r := range s.Refs {
+			checkTag("service "+s.ID, r.Tag, r.Kind)
+		}
+	}
+	for _, c := range catalog.Countries {
+		for _, r := range append(append([]catRef{}, c.Site...), c.Blocked...) {
+			checkTag("country "+c.Code, r.Tag, r.Kind)
+		}
+	}
+	for _, s := range view.Services {
+		for _, r := range s.Refs {
+			checkTag("service "+s.ID, r.Tag, r.Kind)
+		}
+	}
+
+	if len(view.Extended) == 0 {
+		t.Error("нет расширенных наборов")
+	}
+	for _, e := range view.Extended {
+		if !strings.HasPrefix(e.URL, "https://github.com/") || !strings.Contains(e.URL, "/releases/latest/download/") {
+			t.Errorf("набор %s: адрес не GitHub release: %s", e.ID, e.URL)
+		}
+		if strings.Contains(e.URL, "..") || strings.ContainsAny(e.File, "/\\") {
+			t.Errorf("набор %s: недопустимые файл или адрес", e.ID)
 		}
 	}
 }
