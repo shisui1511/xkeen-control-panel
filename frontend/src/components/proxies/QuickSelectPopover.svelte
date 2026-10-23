@@ -266,7 +266,6 @@
   tabindex="-1"
 >
   {#if isBottomSheet}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="qs-drag-handle"
       aria-hidden="true"

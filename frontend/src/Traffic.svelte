@@ -883,7 +883,6 @@
           <span class="y-label">0 B/s</span>
         </div>
         <div class="chart-svg-container">
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
           <svg
             viewBox="0 0 1000 240"
             preserveAspectRatio="none"
