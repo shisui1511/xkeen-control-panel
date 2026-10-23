@@ -2,6 +2,7 @@ package routing
 
 import (
 	"context"
+	"errors"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 )
@@ -63,6 +64,11 @@ func (s *Service) GeodataPreview(setID string) (GeodataPreview, error) {
 func (s *Service) GeodataAdd(ctx context.Context, setID string, acceptCommentLoss, updateNow bool) (lists.GeodataStatus, error) {
 	if s.d.Geodata == nil {
 		return lists.GeodataStatus{}, lists.ErrUpdateUnavail
+	}
+	// Набор вне каталога — ошибка запроса и отвечает раньше условий окружения
+	// (jq, обновление geo-файлов): адрес от клиента сюда не доходит никогда.
+	if _, _, _, err := s.d.Geodata.PreviewAdd(setID); errors.Is(err, lists.ErrSetUnknown) {
+		return lists.GeodataStatus{}, err
 	}
 	addErr := s.d.Geodata.Add(ctx, setID, acceptCommentLoss, updateNow)
 	if addErr != nil && lists.ErrorCode(addErr) != lists.ErrUpdateFailed.Code {
