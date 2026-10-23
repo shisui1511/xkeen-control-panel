@@ -25,6 +25,8 @@ const (
 	rtTkOutbounds   = "04_outbounds.json"
 	rtTkPanelRoute  = "99_xcp-routing.json"
 	rtTkPanelTail   = "04_outbounds.xcp-takeover.tail.json"
+	rtTkBalancer    = "06_balancer.json"
+	rtTkForceProxy  = "07_force-proxy.json"
 )
 
 const (
@@ -64,6 +66,12 @@ const (
 }
 `
 	rtTkOutboundsBody = `{"outbounds": [{"tag": "direct", "protocol": "freedom"}]}
+`
+	// Чистые файлы routing с признаками XKeen (D-44): балансировщик с тегом
+	// balancer и правило с inboundTag force-proxy-redirect.
+	rtTkBalancerBody = `{"routing": {"balancers": [{"tag": "balancer", "selector": ["proxy"]}], "rules": []}}
+`
+	rtTkForceProxyBody = `{"routing": {"rules": [{"type": "field", "inboundTag": ["force-proxy-redirect"], "outboundTag": "proxy"}]}}
 `
 	rtTkUserProfile = "mode: rule\n" +
 		"redir-port: 7000\n" +
@@ -141,21 +149,18 @@ type rtTakeoverEnv struct {
 	link   string
 }
 
-func rtNewTakeoverEnv(t *testing.T) *rtTakeoverEnv {
+// rtWriteTakeoverLayout раскладывает чужие файлы Xray и профиль Mihomo в dir/xray
+// и dir/mihomo: config.yaml — симлинк на profiles/user.yaml или (plain) обычный
+// файл с тем же текстом. Возвращает корни, хэши файлов и цель симлинка.
+func rtWriteTakeoverLayout(t *testing.T, dir string, plain bool) (Roots, map[string]string, string) {
 	t.Helper()
-	for _, bin := range []string{rtRefreshXrayBin, rtMhBin} {
-		if _, err := os.Stat(bin); err != nil {
-			t.Skipf("ядро не установлено на устройстве: %v", err)
-		}
-	}
-	dir := rtLiveDir(t)
 	roots := Roots{Xray: filepath.Join(dir, "xray"), Mihomo: filepath.Join(dir, "mihomo")}
 	for _, d := range []string{roots.Xray, filepath.Join(roots.Mihomo, "profiles")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	e := &rtTakeoverEnv{gen: &rtTakeoverGen{}, roots: roots, hashes: map[string]string{}}
+	hashes := map[string]string{}
 	for name, body := range map[string]string{
 		rtTkRoutingFile: rtTkRoutingBody,
 		rtTkAPIFile:     rtTkAPIBody,
@@ -165,17 +170,39 @@ func rtNewTakeoverEnv(t *testing.T) *rtTakeoverEnv {
 		if err := os.WriteFile(filepath.Join(roots.Xray, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		e.hashes[name] = HashContent([]byte(body))
+		hashes[name] = HashContent([]byte(body))
 	}
 	userProfile := filepath.Join(roots.Mihomo, "profiles", "user.yaml")
 	if err := os.WriteFile(userProfile, []byte(rtTkUserProfile), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e.hashes["profiles/user.yaml"] = HashContent([]byte(rtTkUserProfile))
-	e.link = userProfile
-	if err := os.Symlink(userProfile, filepath.Join(roots.Mihomo, "config.yaml")); err != nil {
+	hashes["profiles/user.yaml"] = HashContent([]byte(rtTkUserProfile))
+	cfg := filepath.Join(roots.Mihomo, "config.yaml")
+	if plain {
+		if err := os.WriteFile(cfg, []byte(rtTkUserProfile), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		hashes["config.yaml"] = HashContent([]byte(rtTkUserProfile))
+	} else if err := os.Symlink(userProfile, cfg); err != nil {
 		t.Fatal(err)
 	}
+	return roots, hashes, userProfile
+}
+
+func rtNewTakeoverEnv(t *testing.T) *rtTakeoverEnv { return rtNewTakeoverEnvKind(t, false) }
+
+// rtNewTakeoverEnvKind — слой с раскладкой rtWriteTakeoverLayout; plain делает
+// config.yaml обычным файлом.
+func rtNewTakeoverEnvKind(t *testing.T, plain bool) *rtTakeoverEnv {
+	t.Helper()
+	for _, bin := range []string{rtRefreshXrayBin, rtMhBin} {
+		if _, err := os.Stat(bin); err != nil {
+			t.Skipf("ядро не установлено на устройстве: %v", err)
+		}
+	}
+	dir := rtLiveDir(t)
+	roots, hashes, link := rtWriteTakeoverLayout(t, dir, plain)
+	e := &rtTakeoverEnv{gen: &rtTakeoverGen{}, roots: roots, hashes: hashes, link: link}
 
 	layer, err := New(Options{
 		DataDir:       dir,
@@ -447,4 +474,116 @@ func containsString(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// rtDirSnapshot — имена и хэши файлов каталога (рекурсивно), чтобы убедиться,
+// что предпросмотр на диск не писал.
+func rtDirSnapshot(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		if d.IsDir() {
+			out[rel] = "dir"
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			link, _ := os.Readlink(p)
+			out[rel] = "link:" + link
+			return nil
+		}
+		out[rel] = hashOf(p)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func rtSameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestRouterTakeoverScan — скан настоящего каталога и config.yaml → предпросмотр
+// взятия: что уйдёт в копии, что останется, предупреждения XKeen, прежний профиль.
+// Ядро стенда не трогается и не читается — метка ядра не нужна.
+func TestRouterTakeoverScan(t *testing.T) {
+	dir := rtLiveDir(t)
+	roots, _, _ := rtWriteTakeoverLayout(t, dir, false)
+	for name, body := range map[string]string{
+		rtTkBalancer:   rtTkBalancerBody,
+		rtTkForceProxy: rtTkForceProxyBody,
+	} {
+		if err := os.WriteFile(filepath.Join(roots.Xray, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := rtDirSnapshot(t, dir)
+
+	files, api, err := ScanXrayRouting(roots.Xray, nil)
+	if err != nil {
+		t.Fatalf("ScanXrayRouting: %v", err)
+	}
+	if !api {
+		t.Error("входящий api в 00_api.json не найден")
+	}
+	kind, prev, ports, err := ScanMihomoActive(roots.Mihomo)
+	if err != nil {
+		t.Fatalf("ScanMihomoActive: %v", err)
+	}
+	if kind != configKindSymlink || prev != "profiles/user.yaml" {
+		t.Fatalf("config.yaml: вид %q, профиль %q", kind, prev)
+	}
+
+	pv := RoutingPreviewOf(files, prev, ports)
+	if pv.Xray == nil || pv.Mihomo == nil {
+		t.Fatalf("предпросмотр без ядра: %+v", pv)
+	}
+	if want := []string{rtTkRoutingFile, rtTkBalancer, rtTkForceProxy}; !rtSameStrings(pv.Xray.Move, want) {
+		t.Errorf("Move: %v, ожидалось %v", pv.Xray.Move, want)
+	}
+	if want := []string{rtTkAPIFile}; !rtSameStrings(pv.Xray.Left, want) {
+		t.Errorf("Left: %v, ожидалось %v", pv.Xray.Left, want)
+	}
+	if want := []string{WarnSpeedBalancer, WarnForceProxy}; !rtSameStrings(pv.Xray.Warnings, want) {
+		t.Errorf("Warnings: %v, ожидалось %v", pv.Xray.Warnings, want)
+	}
+	if pv.Mihomo.PrevProfile != "profiles/user.yaml" {
+		t.Errorf("PrevProfile: %q", pv.Mihomo.PrevProfile)
+	}
+	if p := pv.Mihomo.Ports; p.Redir != 7000 || p.TProxy != 7001 || p.AllowLAN == nil || !*p.AllowLAN {
+		t.Errorf("порты прежнего профиля: %+v", p)
+	}
+
+	// Пустой каталог: срезы сериализуются как [], а не null.
+	raw, err := json.Marshal(RoutingPreviewOf(nil, "", defaultMihomoPorts()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "null") {
+		t.Errorf("пустые срезы сериализуются как null: %s", raw)
+	}
+
+	// Предпросмотр — чистая функция: на диске ничего не изменилось.
+	after := rtDirSnapshot(t, dir)
+	if len(after) != len(before) {
+		t.Errorf("состав каталога изменился: было %d, стало %d", len(before), len(after))
+	}
+	for k, v := range before {
+		if after[k] != v {
+			t.Errorf("%s изменён при предпросмотре", k)
+		}
+	}
 }
