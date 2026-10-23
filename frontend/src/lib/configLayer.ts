@@ -454,7 +454,12 @@ export async function refetchLayerState(): Promise<void> {
   try {
     const data = await apiFetchJSON<Record<string, unknown>>('/api/configlayer/state');
     if (get(layerSnapshot) === null || seq === eventSeq) setSnapshot(data);
-    else layerStatus.set('ready');
+    else {
+      layerStatus.set('ready');
+      // Событие пришло во время чтения: ответ отброшен, а разделы, которых события не
+      // несут (routing, checks), остались бы прежними — перечитываем, когда поток стихнет
+      refreshSnapshotSoon();
+    }
   } catch {
     if (get(layerSnapshot) === null) layerStatus.set('error');
   }
