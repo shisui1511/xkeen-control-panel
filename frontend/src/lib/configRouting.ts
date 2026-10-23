@@ -591,6 +591,62 @@ const KNOWN_CODES = new Set(ROUTING_ERROR_CODES);
 // на «?», а не остаётся голым «{field}» в интерфейсе.
 const ERROR_PARAMS = ['field', 'reason', 'group', 'file', 'kernel', 'name', 'tag'];
 
+/**
+ * Причины ошибки invalid_input (params.reason): у каждой есть текст cfg.routing.reason.<причина>
+ * (полноту словарей проверяет scripts/check-config-ui.js).
+ */
+export const ROUTING_REASONS = [
+  'section_invalid',
+  'name_empty',
+  'name_too_long',
+  'name_chars',
+  'name_edges',
+  'name_reserved',
+  'mode_invalid',
+  'filter_too_many',
+  'filter_too_long',
+  'filter_backtick',
+  'regex_invalid',
+  'regex_backtick',
+  'source_missing',
+  'pick_invalid',
+  'too_many',
+  'members_manual_only',
+  'member_kind_invalid',
+  'member_self',
+  'member_group_missing',
+  'reserve_required',
+  'reserve_invalid',
+  'reserve_fallback_only',
+  'conds_required',
+  'conds_too_many',
+  'raw_with_conds',
+  'cond_type_invalid',
+  'values_required',
+  'values_forbidden',
+  'values_too_many',
+  'lists_required',
+  'lists_forbidden',
+  'list_invalid',
+  'domain_invalid',
+  'regexp_invalid',
+  'ip_invalid',
+  'port_invalid',
+  'network_invalid',
+  'target_invalid',
+  'raw_invalid',
+  'probe_invalid',
+  'out_of_range',
+  'final_requires_redirect',
+  'catalog_unavailable',
+  'preset_unknown',
+  'preset_invalid',
+  'country_unavailable',
+  'service_unknown'
+];
+
+const KNOWN_REASONS = new Set(ROUTING_REASONS);
+
 /** Текст ошибки по коду: cfg.routing.err.<код>, неизвестный код — cfg.routing.err.unknown. */
 export function routingErrorText(
   t: TFn,
@@ -606,5 +662,8 @@ export function routingErrorText(
   for (const [k, v] of Object.entries(params ?? {})) {
     if (typeof v === 'string' && v !== '') p[k] = v;
   }
+  // Причина invalid_input — стабильный код: показываем её текстом, неизвестную — как есть
+  if (p.reason !== '?' && KNOWN_REASONS.has(p.reason))
+    p.reason = t(`cfg.routing.reason.${p.reason}`);
   return t(key, p);
 }

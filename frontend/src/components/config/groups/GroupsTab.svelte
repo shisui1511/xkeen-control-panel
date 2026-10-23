@@ -6,6 +6,7 @@
   import { layerSnapshot } from '../../../lib/configLayer';
   import { configSubTabHash } from '../../../lib/configSubTab';
   import { routingView, routingStatus, loadRouting } from '../../../lib/configRouting';
+  import { kernelSummary, nestedCount } from '../../../lib/routingView';
 
   // Представление маршрутизации читается при открытии вкладки; дальше его перечитывают
   // события SSE routing, sources и draft (подписки регистрирует configRouting.ts).
@@ -19,6 +20,7 @@
   const failed = $derived(!loading && $routingStatus === 'error' && $routingView === null);
   const groups = $derived($routingView?.groups ?? []);
   const hasSources = $derived($routingView?.has_sources ?? false);
+  const installed = $derived($routingView?.installed ?? {});
   // Групп нет и источников нет: группы по умолчанию появятся с первым источником (D-09)
   const noSources = $derived(
     !loading && !failed && $routingView !== null && groups.length === 0 && !hasSources
@@ -72,6 +74,9 @@
         <li class="card groups-row" data-testid="group-row-{group.id}">
           <span class="groups-name">{group.name}</span>
           <span class="chip chip-default">{$t(`cfg.groups.mode_${group.mode}`)}</span>
+          <span class="groups-summary" data-testid="group-summary-{group.id}">
+            {kernelSummary($t, group.counts, installed, nestedCount(group))}
+          </span>
         </li>
       {/each}
     </ul>
@@ -122,6 +127,13 @@
     align-items: center;
     gap: var(--spacing-2) var(--spacing-4);
     min-width: 0;
+  }
+
+  .groups-summary {
+    min-width: 0;
+    font-size: var(--font-size-base);
+    color: var(--fg-secondary);
+    overflow-wrap: anywhere;
   }
 
   .groups-name {
