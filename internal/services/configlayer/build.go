@@ -141,12 +141,14 @@ type FilePlan struct {
 type Plan struct {
 	Files   []FilePlan
 	Orphans []OrphanFile
+	// Routing — операции взятия и возврата маршрутизации (nil — нет).
+	Routing *RoutingOps
 }
 
-// Empty — в плане нет ни записи, ни удаления, ни сирот (skip_released
-// действием не считается).
+// Empty — в плане нет ни записи, ни удаления, ни сирот, ни операций
+// маршрутизации (skip_released действием не считается).
 func (p Plan) Empty() bool {
-	if len(p.Orphans) > 0 {
+	if len(p.Orphans) > 0 || p.Routing != nil {
 		return false
 	}
 	for _, fp := range p.Files {
@@ -158,8 +160,12 @@ func (p Plan) Empty() bool {
 }
 
 // Changes — у ядра есть действия плана: запись, удаление или сирота
-// (сироты считаются изменением своего ядра). skip_released действием не является.
+// (сироты считаются изменением своего ядра); операции маршрутизации над
+// файлами ядра тоже изменение. skip_released действием не является.
 func (p Plan) Changes(kernel string) bool {
+	if p.Routing.hasDisk(kernel) {
+		return true
+	}
 	for _, fp := range p.Files {
 		if fp.Kernel == kernel && (fp.Action == ActionWrite || fp.Action == ActionDelete) {
 			return true
@@ -177,6 +183,9 @@ func (p Plan) Changes(kernel string) bool {
 // только они способны изменить то, что ядро уже прочитало. Сироты считаются
 // изменением, как в Changes.
 func (p Plan) RuntimeChanges(kernel string) bool {
+	if p.Routing.hasDisk(kernel) {
+		return true
+	}
 	for _, fp := range p.Files {
 		if fp.Kernel == kernel && !fp.Inert && (fp.Action == ActionWrite || fp.Action == ActionDelete) {
 			return true

@@ -358,7 +358,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
 		}
 	}
-	used := Input{Sections: src, Live: liveWithOverlay(snap.Live, req.LiveOverlay), Mode: req.Source}
+	used := Input{Sections: src, Live: liveWithOverlay(snap.Live, req.LiveOverlay), Mode: req.Source, Routing: routingFacts(p.d.Roots, snap.Routing)}
 	files, err := p.d.Registry.Build(used, installed)
 	if err == nil {
 		files = filesOfScope(files, req.Kernel)
@@ -384,6 +384,11 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		// Каталог неустановленного ядра (и ядра вне области запуска) так же не
 		// трогается: его сирот не убираем.
 		plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)
+	}
+	if err == nil {
+		// Взятие и возврат маршрутизации — часть этого же плана: проверка ядрами
+		// идёт на итоговой раскладке, запись и откат общие.
+		plan.Routing, err = p.planRouting(src, snap.Routing, installed, req)
 	}
 	if err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
@@ -454,7 +459,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		return p.finish(p.rollbackAfterCommitFailure(ctx, out.Set, views, err))
 	}
 	// Ротация копий — после успешного применения; сбой уборки применение не отменяет.
-	_ = PruneBackups(p.d.DataDir, BackupRetention)
+	_ = PruneBackups(p.d.DataDir, BackupRetention, p.d.Store.Snapshot().Routing.backupDirs()...)
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
 }
 
@@ -635,6 +640,9 @@ func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest, used I
 		}
 		if applyDraft {
 			st.Applied = src.Clone()
+		}
+		if plan.Routing != nil {
+			st.Routing = plan.Routing.Next.clone()
 		}
 		// Живые данные фиксируются в той же записи, что и манифест (RESEARCH
 		// Pitfall 3): отказ хука отменяет и манифест.

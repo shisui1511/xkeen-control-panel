@@ -364,7 +364,8 @@ func (p *Pipeline) updateProviders(ctx context.Context, exps []*Expectation) err
 // на диске до записи (по набору копий), и нет ни профиля, ни удалений, ни новых
 // файлов, ни сирот ядра. Inert-файлы ядро не читает и в выборе пути не участвуют.
 func providerTargets(plan Plan, set *BackupSet) []*Expectation {
-	if set == nil {
+	if set == nil || plan.Routing.hasMihomoDisk() {
+		// Перекладка config.yaml меняет профиль ядра: нужна полная перезагрузка.
 		return nil
 	}
 	for _, o := range plan.Orphans {

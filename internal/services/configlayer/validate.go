@@ -96,6 +96,10 @@ func ValidateXray(ctx context.Context, tmpBase string, roots Roots, bin string, 
 	if err := overlayPlan(tmp, plan, KernelXray); err != nil {
 		return notRun(KernelXray, err)
 	}
+	// Итоговая раскладка: переносимые файлы routing убраны, возвращаемые на месте.
+	if err := overlayXrayRouting(tmp, plan.Routing); err != nil {
+		return notRun(KernelXray, err)
+	}
 
 	// Проверка не идёт во время операции XKeen над ядром; ожидание не съедает
 	// её таймаут (services.AcquireKernelHelper).
@@ -126,7 +130,7 @@ func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string
 	if !plan.Changes(KernelMihomo) {
 		return skippedResult(KernelMihomo, NoteNoChanges)
 	}
-	cfg, err := filepath.EvalSymlinks(filepath.Join(roots.Mihomo, "config.yaml"))
+	cfg, restoreData, err := mihomoConfigAfterPlan(roots, plan)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return skippedResult(KernelMihomo, NoteNoConfig)
@@ -139,7 +143,10 @@ func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string
 	}
 	defer os.RemoveAll(tmp)
 
-	override, deleted := plannedContent(roots.Mihomo, cfg, plan)
+	override, deleted := restoreData, false
+	if override == nil {
+		override, deleted = plannedContent(roots.Mihomo, cfg, plan)
+	}
 	if deleted {
 		return ValidationResult{
 			Kernel:  KernelMihomo,
@@ -161,6 +168,33 @@ func ValidateMihomo(ctx context.Context, tmpBase string, roots Roots, bin string
 	cmd.WaitDelay = ValidateWaitDelay
 	out, runErr := cmd.CombinedOutput()
 	return finishValidation(KernelMihomo, cctx, runErr, out, tmp, roots.Mihomo)
+}
+
+// mihomoConfigAfterPlan возвращает файл, который Mihomo прочтёт как config.yaml
+// после записи плана: при взятии — профиль панели, даже если симлинк пока
+// указывает на другой профиль; при возврате — прежний профиль или копия прежнего
+// обычного файла (data не nil). Без операций маршрутизации — разрешённый
+// config.yaml.
+func mihomoConfigAfterPlan(roots Roots, plan Plan) (cfg string, data []byte, err error) {
+	ops := plan.Routing
+	switch {
+	case ops != nil && ops.MihomoPoint:
+		return filepath.Join(roots.Mihomo, filepath.FromSlash(PanelMihomoProfile)), nil, nil
+	case ops != nil && ops.MihomoRestore != nil:
+		r := ops.MihomoRestore
+		switch r.PrevKind {
+		case configKindSymlink:
+			return filepath.Join(roots.Mihomo, filepath.FromSlash(r.PrevProfile)), nil, nil
+		case configKindFile:
+			data, err = os.ReadFile(filepath.Join(r.PrevBackup, KernelMihomo, "config.yaml"))
+			if err != nil {
+				return "", nil, err
+			}
+			return filepath.Join(roots.Mihomo, "config.yaml"), data, nil
+		}
+	}
+	cfg, err = filepath.EvalSymlinks(filepath.Join(roots.Mihomo, "config.yaml"))
+	return cfg, nil, err
 }
 
 // makeTmp создаёт каталог проверки <tmpBase>/apply-* с правами 0700.

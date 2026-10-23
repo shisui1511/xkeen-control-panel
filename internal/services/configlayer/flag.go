@@ -148,7 +148,7 @@ func (l *Layer) moveManagedToBackup(ctx context.Context, plan Plan) error {
 		rbErr := l.pipeline.rollback(set)
 		return errors.Join(err, rbErr)
 	}
-	_ = PruneBackups(l.opts.DataDir, BackupRetention)
+	_ = PruneBackups(l.opts.DataDir, BackupRetention, l.store.Snapshot().Routing.backupDirs()...)
 	return nil
 }
 

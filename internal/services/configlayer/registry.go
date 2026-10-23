@@ -57,6 +57,9 @@ type Input struct {
 	Sections Sections
 	Live     Sections
 	Mode     SourceKind
+	// Routing — факты о маршрутизации (146-06): api-входящий в configs/, порты
+	// прежнего профиля Mihomo, какие ядра уже взяты. Только для чтения.
+	Routing RoutingFacts
 }
 
 // Generator — единственная точка расширения слоя для фаз 145–147: по входным

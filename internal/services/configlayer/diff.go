@@ -45,7 +45,7 @@ func (l *Layer) Diff(key string) (DiffView, error) {
 	if err != nil {
 		return DiffView{}, fmt.Errorf("%s: %w", key, err)
 	}
-	generated, err := l.registry.Build(Input{Sections: st.Applied, Live: st.Live, Mode: SourceApplied}, l.installed())
+	generated, err := l.registry.Build(Input{Sections: st.Applied, Live: st.Live, Mode: SourceApplied, Routing: routingFacts(l.opts.Roots, st.Routing)}, l.installed())
 	if err != nil {
 		return DiffView{}, fmt.Errorf("сборка ожидаемого содержимого: %w", err)
 	}
