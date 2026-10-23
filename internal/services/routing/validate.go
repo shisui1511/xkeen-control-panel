@@ -668,7 +668,8 @@ func checkRawXray(text string) (string, error) {
 }
 
 // checkRawMihomo проверяет «своё правило» Mihomo: одна строка без цели, тип из
-// списка, скобки сбалансированы, без MATCH, SUB-RULE, GEOSITE и GEOIP.
+// списка, скобки сбалансированы, без MATCH, SUB-RULE, GEOSITE и GEOIP, после
+// значения нет полей, кроме no-resolve и src (mihomoRawShape).
 func checkRawMihomo(text string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" || len(text) > maxMihomoRawLine {
@@ -698,7 +699,60 @@ func checkRawMihomo(text string) (string, error) {
 	if depth != 0 {
 		return "", invalid("raw", reasonRawInvalid)
 	}
+	if !mihomoRawShape(strings.ToUpper(strings.TrimSpace(head)), text) {
+		return "", invalid("raw", reasonRawInvalid)
+	}
 	return text, nil
+}
+
+// mihomoRawParams — параметры простого правила Mihomo, которые панель переносит
+// за цель (rawMihomoLine).
+var mihomoRawParams = map[string]bool{"no-resolve": true, "src": true}
+
+// mihomoRawRegexTypes — типы с регулярным выражением в значении: параметров у них
+// нет, а запятая в значении ломает разбор строки в Mihomo.
+var mihomoRawRegexTypes = map[string]bool{"DOMAIN-REGEX": true, "PROCESS-NAME-REGEX": true, "PROCESS-PATH-REGEX": true}
+
+// mihomoRawShape проверяет, что после значения нет ничего, кроме допустимых
+// параметров. Цель правила Mihomo — поле сразу за значением, поэтому лишнее
+// поле (DST-PORT,22,DIRECT) заняло бы место цели панели и увело трафик мимо
+// группы. Простое правило: тип, значение и только no-resolve/src (у regexp-типов
+// параметров нет). Логическое: после закрывающей скобки ничего.
+func mihomoRawShape(typ, text string) bool {
+	if logicTypes[typ] {
+		_, rest, _ := strings.Cut(text, ",")
+		rest = strings.TrimSpace(rest)
+		if !strings.HasPrefix(rest, "(") {
+			return false
+		}
+		depth := 0
+		for i, r := range rest {
+			switch r {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					return strings.TrimSpace(rest[i+1:]) == ""
+				}
+			}
+		}
+		return false
+	}
+	parts := strings.Split(text, ",")
+	if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+		return false
+	}
+	extra := parts[2:]
+	if len(extra) > 0 && mihomoRawRegexTypes[typ] {
+		return false
+	}
+	for _, p := range extra {
+		if !mihomoRawParams[strings.ToLower(strings.TrimSpace(p))] {
+			return false
+		}
+	}
+	return true
 }
 
 // validateRaw проверяет «своё правило ядра» и нормализует его текст.
