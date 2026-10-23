@@ -124,6 +124,7 @@ func (s *Service) DeleteGroup(rev int64, id string, c Cascade) (configlayer.Draf
 		return configlayer.DraftEvent{}, invalid("mode", reasonFinalRequiresRedirect)
 	}
 
+	// Состав ручных групп: удалённая группа уходит (и из участников).
 	remaining := groupsWithout(groups.Items, id)
 	var to Target
 	if c.Mode == CascadeRedirect {
@@ -136,18 +137,6 @@ func (s *Service) DeleteGroup(rev int64, id string, c Cascade) (configlayer.Draf
 		}
 	}
 
-	// Состав ручных групп: удалённая группа уходит.
-	for i := range remaining {
-		g := &remaining[i]
-		kept := make([]Member, 0, len(g.Members))
-		for _, m := range g.Members {
-			if m.Kind == KindGroup && m.ID == id {
-				continue
-			}
-			kept = append(kept, m)
-		}
-		g.Members = kept
-	}
 	groups.Items = remaining
 	rawGroups, err := encodeGroups(groups)
 	if err != nil {

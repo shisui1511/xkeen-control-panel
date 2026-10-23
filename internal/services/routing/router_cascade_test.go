@@ -570,3 +570,85 @@ func TestRouterRulesLint(t *testing.T) {
 	}
 	e.applyOK(t)
 }
+
+// Диалог удаления называет пустыми ровно те группы, которые после удаления
+// заблокирует проверка group_empty (правило D-36, состав после каскада): при
+// единственном узле удаление узла опустошает «Авто», «Прокси» и обе группы с
+// DIRECT не на первом месте — «Сервис» и «Запасную»; удаление «Авто» пустых групп
+// не создаёт (у «Запасной» DIRECT становится первым, у «Прокси» остаётся узел).
+// Ядро стенда не читается и не переключается; «Применить» не вызывается.
+func TestRouterCascadeServiceGroupEmpty(t *testing.T) {
+	e := rtNewEnv(t, rtWithKernels(rtXrayOnly))
+	e.addMyLinks(t, "vless_ws")
+
+	cfg := e.groups(t)
+	auto, okA := rtGroupByName(cfg, "Авто")
+	proxyG, okP := rtGroupByName(cfg, "Прокси")
+	if !okA || !okP {
+		t.Fatalf("нет групп по умолчанию: %+v", cfg.Items)
+	}
+	if _, _, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Сервис", Mode: ModeManual,
+		Members: []Member{{Kind: KindGroup, ID: proxyG.ID}, {Kind: KindGroup, ID: auto.ID}, {Kind: KindDirect}},
+	}); err != nil {
+		t.Fatalf("SaveGroup (Сервис): %v", err)
+	}
+	if _, _, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Запасная", Mode: ModeManual,
+		Members: []Member{{Kind: KindGroup, ID: auto.ID}, {Kind: KindDirect}},
+	}); err != nil {
+		t.Fatalf("SaveGroup (Запасная): %v", err)
+	}
+	// Желание «взять маршрутизацию» в черновике: без него проверка проблем не даёт.
+	if _, err := e.svc.Take(e.rev(t)); err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+
+	nodesXray := e.catalog(t).Xray
+	if len(nodesXray) != 1 {
+		t.Fatalf("в каталоге Xray %d узлов, ожидался 1", len(nodesXray))
+	}
+	entryID := strings.TrimPrefix(nodesXray[0].Ref, sources.MySourceID+"/")
+	if entryID == nodesXray[0].Ref {
+		t.Fatalf("ссылка узла %q не из источника «Мои узлы»", nodesXray[0].Ref)
+	}
+	names := []string{"Авто", "Прокси", "Сервис", "Запасная"}
+
+	imp, err := e.svc.Impact(ImpactNode, entryID)
+	if err != nil {
+		t.Fatalf("Impact(node): %v", err)
+	}
+	named := map[string]bool{}
+	var got []string
+	for _, g := range imp.Empties {
+		named[g.Name] = true
+		got = append(got, g.Name)
+	}
+	for _, name := range names {
+		if !named[name] {
+			t.Errorf("диалог удаления не называет опустевшие группы: названы %v, нет «%s»", got, name)
+		}
+	}
+
+	impAuto, err := e.svc.Impact(ImpactGroup, auto.ID)
+	if err != nil {
+		t.Fatalf("Impact(group Авто): %v", err)
+	}
+	if len(impAuto.Empties) != 0 {
+		var emp []string
+		for _, g := range impAuto.Empties {
+			emp = append(emp, g.Name)
+		}
+		t.Errorf("диалог удаления «Авто» называет пустыми %v: после каскада у «Запасной» DIRECT первый, у «Прокси» остаётся узел", emp)
+	}
+
+	if _, err := e.svc.DeleteNode(e.rev(t), entryID); err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+	issues := e.check(t)
+	for _, name := range names {
+		if !rtHasIssue(issues, "group_empty", "group", name) {
+			t.Errorf("проверка не блокирует опустевшую группу «%s»", name)
+		}
+	}
+}
