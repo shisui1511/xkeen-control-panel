@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -147,6 +148,10 @@ type rtTakeoverEnv struct {
 	rev    int64
 	hashes map[string]string
 	link   string
+	// enabled — флаг config_layer окружения; noMihomo скрывает бинарник Mihomo
+	// (ядро «ещё не установлено»).
+	enabled  atomic.Bool
+	noMihomo atomic.Bool
 }
 
 // rtWriteTakeoverLayout раскладывает чужие файлы Xray и профиль Mihomo в dir/xray
@@ -203,12 +208,18 @@ func rtNewTakeoverEnvKind(t *testing.T, plain bool) *rtTakeoverEnv {
 	dir := rtLiveDir(t)
 	roots, hashes, link := rtWriteTakeoverLayout(t, dir, plain)
 	e := &rtTakeoverEnv{gen: &rtTakeoverGen{}, roots: roots, hashes: hashes, link: link}
+	e.enabled.Store(true)
 
 	layer, err := New(Options{
-		DataDir:       dir,
-		Roots:         roots,
-		Enabled:       func() bool { return true },
-		Binaries:      func() Binaries { return Binaries{Xray: rtRefreshXrayBin, Mihomo: rtMhBin} },
+		DataDir: dir,
+		Roots:   roots,
+		Enabled: e.enabled.Load,
+		Binaries: func() Binaries {
+			if e.noMihomo.Load() {
+				return Binaries{Xray: rtRefreshXrayBin}
+			}
+			return Binaries{Xray: rtRefreshXrayBin, Mihomo: rtMhBin}
+		},
 		DriftInterval: time.Hour,
 		DebounceDelay: 20 * time.Millisecond,
 	})

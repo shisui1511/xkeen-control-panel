@@ -30,6 +30,9 @@ const (
 	TriggerSelect Trigger = "select"
 	// TriggerDatRefresh — пересборка списков после обновления dat-файлов.
 	TriggerDatRefresh Trigger = "dat_refresh"
+	// TriggerRoutingReclaim — «вернуть» маршрутизацию: профиль панели Mihomo или
+	// чужой файл routing Xray в копию (набор копий вне конвейера «Применить»).
+	TriggerRoutingReclaim Trigger = "routing_reclaim"
 )
 
 // SourceKind — из какого состояния собираются файлы.
@@ -353,7 +356,14 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 			// ручной правки там нет, поэтому сборка их восстанавливает (D-18).
 			drift = driftKeysExceptMissing
 		}
-		if len(drift(p.d.Roots, manifest)) > 0 {
+		blocked := len(drift(p.d.Roots, manifest)) > 0
+		// Дрейф маршрутизации (D-06, D-07) блокирует запуск, который держит
+		// маршрутизацию панели; запуск с желаемым managed=false — это и есть
+		// решение «Отпустить», он дрейфом маршрутизации не блокируется.
+		if !blocked && DesiredRouting(src).Managed {
+			blocked = len(routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel, p.d.ForeignOwned)) > 0
+		}
+		if blocked {
 			p.setStep(StepBuild, StepFailed, "", ErrDriftBlocked.Error())
 			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
 		}
