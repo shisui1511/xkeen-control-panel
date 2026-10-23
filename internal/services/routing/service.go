@@ -82,6 +82,12 @@ type Service struct {
 	lmu      sync.Mutex
 	stopped  bool
 	stopOnce sync.Once
+
+	// Мемоизация генераторов: Registry.Build вызывается постоянно (Snapshot,
+	// «Применить», фон), а вывод зависит только от входа.
+	gmu      sync.Mutex
+	gens     map[string][]configlayer.GeneratedFile
+	genOrder []string
 }
 
 // New создаёт сервис. Слой, сервис источников и источник «установленных ядер»
@@ -112,9 +118,15 @@ func New(d Deps) (*Service, error) {
 		d.Rand = rand.Reader
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{d: d, ctx: ctx, cancel: cancel}
+	s := &Service{d: d, ctx: ctx, cancel: cancel, gens: map[string][]configlayer.GeneratedFile{}}
 	d.Sources.SetDraftExtras(s.draftExtras)
 	return s, nil
+}
+
+// Generators возвращает генераторы файлов ядер для Layer.RegisterGenerator:
+// сейчас — routing_xray (146-07); генератор Mihomo добавляет 146-11.
+func (s *Service) Generators() []configlayer.Generator {
+	return []configlayer.Generator{xrayGen{s: s}}
 }
 
 // Start запускает фоновые задачи сервиса. В этом плане задач нет: наблюдатель dat
