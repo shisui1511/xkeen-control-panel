@@ -93,10 +93,15 @@ type datWatcher struct {
 	delay   time.Duration
 	// restartFails — подряд отказов перезапуска.
 	restartFails int
+	// draftSigs — сигнатуры файлов dat, на которые ссылаются правила черновика,
+	// по прошлому проходу (пусто — файла нет). Нужны, чтобы сбросить мемо проверок
+	// черновика, когда список появился или файл изменился: применённые правила
+	// это не покрывает.
+	draftSigs map[string]string
 }
 
 func newDatWatcher(s *Service) *datWatcher {
-	return &datWatcher{s: s, first: true, hashes: map[string]string{}, missing: map[string]bool{}}
+	return &datWatcher{s: s, first: true, hashes: map[string]string{}, missing: map[string]bool{}, draftSigs: map[string]string{}}
 }
 
 // startDatWatcher запускает наблюдателя под учётом Stop сервиса.
@@ -143,6 +148,7 @@ func (w *datWatcher) tick(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	w.watchDraft(st)
 	var refs []datRef
 	if configlayer.DesiredRouting(st.Applied).Managed {
 		rules, err := parseRules(st.Applied[RulesSection])
@@ -248,6 +254,40 @@ func (w *datWatcher) tick(ctx context.Context) {
 		for k, h := range next {
 			w.hashes[k] = h
 		}
+	}
+}
+
+// watchDraft следит за файлами dat правил черновика: список появился (был
+// list_not_found) или файл изменился — мемо проверок сбрасывается, и «Применить»
+// снимается или ставится по свежим данным. Уведомления и пересборка
+// остаются за применёнными правилами.
+func (w *datWatcher) watchDraft(st configlayer.StateView) {
+	rules, err := parseRules(st.Draft[RulesSection])
+	if err != nil {
+		return
+	}
+	var files []string
+	seen := map[string]bool{}
+	for _, r := range appliedRefs(rules.Items) {
+		if !seen[r.file] {
+			seen[r.file] = true
+			files = append(files, r.file)
+		}
+	}
+	sort.Strings(files)
+	sigs := w.s.d.Lists.Signature(files)
+	next := make(map[string]string, len(files))
+	changed := false
+	for _, f := range files {
+		sig := sigs[f]
+		next[f] = sig
+		if old, had := w.draftSigs[f]; had && old != sig {
+			changed = true
+		}
+	}
+	w.draftSigs = next
+	if changed {
+		w.s.d.Layer.InvalidateChecks()
 	}
 }
 

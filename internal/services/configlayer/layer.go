@@ -1453,6 +1453,8 @@ func (l *Layer) OnKernelInstalled(kernel string) {
 		return
 	}
 	l.invalidateVersions()
+	// Версия и состав списков ядра меняют итог проверок черновика.
+	l.InvalidateChecks()
 	l.spawn(func() {
 		release, err := l.pipeline.TryBegin(l.ctx, false)
 		if err != nil {
@@ -1464,6 +1466,7 @@ func (l *Layer) OnKernelInstalled(kernel string) {
 		view := l.runPipeline(req)
 		release()
 		l.invalidateVersions()
+		l.InvalidateChecks()
 		l.noteBuildResult(kernel, view)
 		l.afterRun()
 		l.fireAfterApply(req, view)

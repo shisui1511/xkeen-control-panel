@@ -74,6 +74,9 @@ func (s *Service) GeodataAdd(ctx context.Context, setID string, acceptCommentLos
 	if addErr != nil && lists.ErrorCode(addErr) != lists.ErrUpdateFailed.Code {
 		return lists.GeodataStatus{}, addErr
 	}
+	// Запись сделана: списки набора могли появиться на роутере, мемо проверок
+	// черновика (list_not_found) устарело.
+	s.d.Layer.InvalidateChecks()
 	st, err := s.d.Geodata.Status()
 	if err != nil && addErr == nil {
 		return lists.GeodataStatus{}, err
