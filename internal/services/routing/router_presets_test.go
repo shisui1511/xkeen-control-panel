@@ -4,6 +4,7 @@ package routing
 
 import (
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -414,5 +415,123 @@ func TestRouterPresetsTakeWithPreset(t *testing.T) {
 	}
 	if _, err := e.svc.TakeWithPreset(before, c); !errors.Is(err, configlayer.ErrDraftConflict) {
 		t.Errorf("повтор на устаревшей ревизии: %v, ожидался ErrDraftConflict", err)
+	}
+}
+
+// rtpKernels — ядра, установленные на устройстве.
+func rtpKernels() configlayer.InstalledKernels {
+	var k configlayer.InstalledKernels
+	if _, err := os.Stat(rtXrayBin); err == nil {
+		k.Xray = true
+	}
+	if _, err := os.Stat(rtMihomoBin); err == nil {
+		k.Mihomo = true
+	}
+	return k
+}
+
+// rtpCountries выбирает страны для проверки ядрами (D-31): РФ, если она есть
+// в данных, затем до трёх других: страна со списками блокировок и страны только
+// с IP-списком наименьшего размера (крупные IP-списки проверяет тест списков).
+func rtpCountries(t *testing.T, view PresetsView) []string {
+	t.Helper()
+	cat, err := lists.Resolve(lists.NewIndex(""), nil)
+	if err != nil {
+		t.Skipf("каталог списков dat стенда недоступен: %v", err)
+	}
+	size := func(ref *lists.ListRef) int {
+		for _, l := range cat.Lists {
+			if ref != nil && l.File == ref.File && l.Tag == ref.Tag {
+				return l.Count
+			}
+		}
+		return 0
+	}
+	var out []string
+	if view.DefaultCountry == defaultPresetCountry {
+		out = append(out, defaultPresetCountry)
+	}
+	var blocked, ipOnly []lists.CountryView
+	for _, c := range cat.Countries {
+		switch {
+		case c.Code == defaultPresetCountry:
+		case len(c.Blocked) > 0:
+			blocked = append(blocked, c)
+		default:
+			ipOnly = append(ipOnly, c)
+		}
+	}
+	slices.SortFunc(ipOnly, func(a, b lists.CountryView) int { return size(a.IP) - size(b.IP) })
+	if len(blocked) > 0 {
+		out = append(out, blocked[0].Code)
+	}
+	for _, c := range ipOnly {
+		if len(out) >= 4 {
+			break
+		}
+		out = append(out, c.Code)
+	}
+	return out
+}
+
+// Правила пресетов проходят проверку обоими ядрами: для «всё через прокси»,
+// «всё кроме страны» и «выборочно» и для РФ плюс до трёх других стран с данными
+// на стенде берётся маршрутизация с пресетом и «Применить» с настоящими
+// xray run -test и mihomo -t (D-31). Выполняется в план-сессии 146-16.
+func TestRouterPresetsValidByKernels(t *testing.T) {
+	k := rtpKernels()
+	if !k.Xray && !k.Mihomo {
+		t.Skip("на устройстве нет ни Xray, ни Mihomo")
+	}
+	probe := rtpNewEnv(t, rtWithKernels(k))
+	view, err := probe.svc.Presets()
+	if err != nil {
+		t.Fatalf("Presets: %v", err)
+	}
+	countries := rtpCountries(t, view)
+
+	type pair struct{ preset, country string }
+	var pairs []pair
+	for _, p := range view.Presets {
+		switch p.ID {
+		case PresetAllProxy:
+			pairs = append(pairs, pair{p.ID, ""})
+		case PresetExceptCountry, PresetSelective:
+			for _, code := range countries {
+				if slices.Contains(p.Countries, code) {
+					pairs = append(pairs, pair{p.ID, code})
+				}
+			}
+		}
+	}
+	if len(pairs) == 0 {
+		t.Skip("ни один пресет не доступен на dat стенда")
+	}
+	for _, p := range pairs {
+		name := p.preset + "/" + p.country
+		if p.country == "" {
+			name = p.preset
+		}
+		t.Run(name, func(t *testing.T) {
+			e := rtpNewEnv(t, rtWithKernels(k))
+			if k.Mihomo {
+				e.writeUserProfile(t)
+			}
+			c, ok := rtpChoice(view, p.preset)
+			if !ok {
+				t.Skip("пресет недоступен")
+			}
+			c.Country = p.country
+			c.Flags.ServiceGroups = p.preset == PresetSelective
+			if _, err := e.svc.TakeWithPreset(e.rev(t), c); err != nil {
+				t.Fatalf("TakeWithPreset: %v", err)
+			}
+			n := len(e.rules(t).Items)
+			if n == 0 {
+				t.Fatalf("пресет %s, страна %q: правил нет", p.preset, p.country)
+			}
+			e.applyOK(t)
+			t.Logf("пресет %s, страна %q: правил %d, xray=%v mihomo=%v", p.preset, p.country, n, k.Xray, k.Mihomo)
+		})
 	}
 }
