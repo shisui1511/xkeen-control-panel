@@ -72,7 +72,13 @@ async function routingInfo(page: Page): Promise<RoutingInfo> {
 /** Создаёт группу настоящим маршрутом сохранения и возвращает её идентификатор. */
 async function createGroup(
   page: Page,
-  group: { name: string; mode: string; members?: { kind: string; id?: string }[] }
+  group: {
+    name: string;
+    mode: string;
+    members?: { kind: string; id?: string }[];
+    sources?: { all: boolean; ids: string[] };
+    include?: string[];
+  }
 ): Promise<string> {
   const res = await api(page, 'POST', '/api/configlayer/routing/groups/save', {
     revision: (await routingInfo(page)).revision,
@@ -314,3 +320,76 @@ for (const theme of ['dark', 'light'] as const) {
     }
   });
 }
+
+/** Коды проблем проверки черновика из снимка слоя. */
+async function checkCodes(page: Page): Promise<string[]> {
+  const st = await api(page, 'GET', '/api/configlayer/state');
+  expect(st.status, 'GET /api/configlayer/state').toBe(200);
+  const checks = (st.data?.checks ?? []) as { code: string }[];
+  return checks.map((c) => c.code);
+}
+
+test('cascade: источник опустошает группу — предупреждение в подтверждении, «Применить» недоступно, новый узел снимает блок', async ({
+  page
+}) => {
+  test.setTimeout(T.save * 4);
+  const guard = attachConsoleGuard(page);
+  await startPage(page);
+  await resetDraft(page);
+  const port = randomPort();
+  const uniq = `CasEmpty${port}`;
+  try {
+    // группа только из одного узла «Моих узлов»: фильтр по имени, источник — «Мои узлы»
+    await addToDraft(page, nodeLink('vless_ws.txt', port, uniq));
+    await createGroup(page, {
+      name: 'RT Пустеет',
+      mode: 'auto',
+      sources: { all: false, ids: ['my'] },
+      include: [uniq]
+    });
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/#/config/nodes', { timeout: T.page, waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
+    const tab = page.getByTestId('nodes-tab');
+    await expect(tab).toBeVisible({ timeout: T.action });
+    await expect(tab.locator('.skeleton')).toHaveCount(0, { timeout: T.action });
+    const toggle = page.getByTestId('nodes-source-my').locator('.sc-expand');
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+    const row = page
+      .locator('.node-row')
+      .filter({ hasText: `:${port}` })
+      .first();
+    await expect(row).toBeVisible({ timeout: T.action });
+    await row.locator('[data-testid^="nodes-delete-"]').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await expect(dialog).toContainText('RT Пустеет');
+    await expect(dialog).toContainText(/станет пустой|will become empty/);
+    await dialog.locator('.btn-danger').click();
+    await expect(dialog).toHaveCount(0, { timeout: T.action });
+    await expect(page.locator('.node-row').filter({ hasText: `:${port}` })).toHaveCount(0, {
+      timeout: T.action
+    });
+
+    // пустая группа — проблема проверки; при управлении маршрутизацией панелью она блокирует «Применить»
+    const take = await api(page, 'POST', '/api/configlayer/routing/take', {
+      revision: (await routingInfo(page)).revision
+    });
+    expect(take.status, 'взятие маршрутизации в черновике').toBe(200);
+    await expect.poll(() => checkCodes(page), { timeout: T.action }).toContain('group_empty');
+    await expect(page.getByTestId('config-apply-blocked')).toBeVisible({ timeout: T.action });
+    await expect(page.getByTestId('config-apply')).toBeDisabled();
+
+    // новый узел с тем же именем возвращает группе состав и снимает блок
+    await addToDraft(page, nodeLink('vless_ws.txt', port + 1, `${uniq}b`));
+    await expect.poll(() => checkCodes(page), { timeout: T.action }).not.toContain('group_empty');
+    await expect(page.getByTestId('config-apply-blocked')).toHaveCount(0, { timeout: T.action });
+
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});

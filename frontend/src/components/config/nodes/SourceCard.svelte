@@ -17,6 +17,7 @@
     type KernelName,
     type SourceView
   } from '../../../lib/configSources';
+  import { fetchImpact } from '../../../lib/configRouting';
   import {
     PAGE_FIRST,
     PAGE_STEP,
@@ -190,11 +191,30 @@
     }
   }
 
+  // Группы, которые станут пустыми после удаления (D-35): строка для подтверждения. Слой
+  // маршрутизации недоступен (404 и любая другая ошибка) — подтверждение прежнее, без строки.
+  async function emptyGroupsNote(kind: 'source' | 'node', id: string): Promise<string | undefined> {
+    try {
+      const impact = await fetchImpact(kind, id);
+      const first = impact.empties[0];
+      if (!first) return undefined;
+      let note = $t('cfg.nodes.del_empty_group', { name: first.name });
+      if (impact.empties.length > 1) {
+        note += ' ' + $t('cfg.nodes.del_empty_more', { n: impact.empties.length - 1 });
+      }
+      return note;
+    } catch {
+      return undefined;
+    }
+  }
+
   async function removeSource() {
+    const consequence = await emptyGroupsNote('source', source.id);
     const ok = await showConfirm({
       variant: 'danger',
       title: $t('cfg.nodes.delete_sub_title', { name: source.name }),
       message: $tp('cfg.nodes.delete_sub_body', source.nodes.length),
+      consequence,
       confirmLabel: $t('cfg.nodes.delete_sub_btn'),
       cancelLabel: $t('cfg.nodes.cancel')
     });
@@ -216,10 +236,12 @@
   async function removeNode(item: NodeItem) {
     const entryId = item.node.entry_id;
     if (!entryId) return;
+    const consequence = await emptyGroupsNote('node', entryId);
     const ok = await showConfirm({
       variant: 'danger',
       title: $t('cfg.nodes.delete_node_title', { name: item.node.name }),
       message: $t('cfg.nodes.delete_node_body'),
+      consequence,
       confirmLabel: $t('cfg.nodes.delete_node_btn'),
       cancelLabel: $t('cfg.nodes.cancel')
     });
