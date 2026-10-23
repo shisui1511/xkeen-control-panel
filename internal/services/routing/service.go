@@ -25,6 +25,10 @@ const (
 	defaultProxyGroupName = "Прокси"
 )
 
+// defaultWatchInterval — период опроса dat наблюдателем, если Deps.WatchInterval
+// не задан (D-22).
+const defaultWatchInterval = 60 * time.Second
+
 // MihomoAPI — часть Clash API Mihomo, которая нужна выбору участника и пингу
 // (используют 146-14 и 146-15).
 type MihomoAPI interface {
@@ -61,6 +65,9 @@ type Deps struct {
 	Mihomo MihomoAPI
 	// Ping проверяет доступность узла (TLS-проверка, пока нет пинга через туннель).
 	Ping func(ctx context.Context, n nodes.Node) error
+	// WatchInterval — как часто наблюдатель dat сверяет размер и время файлов,
+	// на которые ссылаются применённые правила (0 — 60 с).
+	WatchInterval time.Duration
 	// GOARCH — архитектура для значений проверки по умолчанию (D-12); пусто —
 	// runtime.GOARCH.
 	GOARCH string
@@ -83,6 +90,8 @@ type Service struct {
 	lmu      sync.Mutex
 	stopped  bool
 	stopOnce sync.Once
+	// startOnce — Start запускает наблюдателя dat один раз.
+	startOnce sync.Once
 
 	// Мемоизация генераторов: Registry.Build вызывается постоянно (Snapshot,
 	// «Применить», фон), а вывод зависит только от входа.
@@ -129,6 +138,9 @@ func New(d Deps) (*Service, error) {
 	if d.GOARCH == "" {
 		d.GOARCH = runtime.GOARCH
 	}
+	if d.WatchInterval <= 0 {
+		d.WatchInterval = defaultWatchInterval
+	}
 	if d.Now == nil {
 		d.Now = time.Now
 	}
@@ -147,10 +159,12 @@ func (s *Service) Generators() []configlayer.Generator {
 	return []configlayer.Generator{xrayGen{s: s}, mihomoGen{s: s}}
 }
 
-// Start запускает фоновые задачи сервиса. В этом плане задач нет: наблюдатель dat
-// добавит 146-13; SelectionWatcher (146-14) создаётся и останавливается в
+// Start запускает фоновые задачи сервиса: наблюдателя dat (D-22). Повторный вызов
+// ничего не делает. SelectionWatcher (146-14) создаётся и останавливается в
 // cmd/xcp/main.go.
-func (s *Service) Start() {}
+func (s *Service) Start() {
+	s.startOnce.Do(s.startDatWatcher)
+}
 
 // Stop останавливает фоновые задачи и ждёт их завершения. Идемпотентен.
 func (s *Service) Stop() {

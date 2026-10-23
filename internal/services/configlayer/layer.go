@@ -1431,6 +1431,17 @@ func (l *Layer) noteBuildResult(kernel string, view ApplyView) {
 	}
 }
 
+// NoteBuildResult отражает итог фонового запуска RunLive в уведомлении
+// build_failed:<ядро> так же, как это делает сборка после установки ядра:
+// неудача ставит уведомление, успех снимает прежнее. Какие итоги считать
+// неудачей, решает вызывающий сервис. Неизвестное ядро игнорируется.
+func (l *Layer) NoteBuildResult(kernel string, view ApplyView) {
+	if kernel != KernelXray && kernel != KernelMihomo {
+		return
+	}
+	l.noteBuildResult(kernel, view)
+}
+
 // OnKernelInstalled — хук установки ядра (D-18): в фоне собирает для него файлы
 // из применённого состояния. Запуск ограничен этим ядром: файлы, сироты и
 // ручные правки другого ядра не трогаются, а нерешённый дрейф самого ядра
