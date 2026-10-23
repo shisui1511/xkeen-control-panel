@@ -196,7 +196,7 @@ func (s *Service) View() (RoutingView, error) {
 	}
 	in := inputOf(st)
 	installed := s.d.Installed()
-	issues, warnings := analyze(in, installed, s.d.Sources.Catalog, s.d.KernelVersion)
+	issues, warnings := analyze(in, installed, s.d.Sources.Catalog, s.d.KernelVersion, s.d.Lists)
 	issuesByKey, warningsByKey := byKey(issues), byKey(warnings)
 
 	groups, gerr := parseGroups(st.Draft[GroupsSection])

@@ -25,6 +25,10 @@ const (
 	defaultProxyGroupName = "Прокси"
 )
 
+// defaultWatchInterval — период опроса dat наблюдателем, если Deps.WatchInterval
+// не задан (D-22).
+const defaultWatchInterval = 60 * time.Second
+
 // MihomoAPI — часть Clash API Mihomo, которая нужна выбору участника и пингу
 // (используют 146-14 и 146-15).
 type MihomoAPI interface {
@@ -61,6 +65,9 @@ type Deps struct {
 	Mihomo MihomoAPI
 	// Ping проверяет доступность узла (TLS-проверка, пока нет пинга через туннель).
 	Ping func(ctx context.Context, n nodes.Node) error
+	// WatchInterval — как часто наблюдатель dat сверяет размер и время файлов,
+	// на которые ссылаются применённые правила (0 — 60 с).
+	WatchInterval time.Duration
 	// GOARCH — архитектура для значений проверки по умолчанию (D-12); пусто —
 	// runtime.GOARCH.
 	GOARCH string
@@ -128,6 +135,9 @@ func New(d Deps) (*Service, error) {
 	}
 	if d.GOARCH == "" {
 		d.GOARCH = runtime.GOARCH
+	}
+	if d.WatchInterval <= 0 {
+		d.WatchInterval = defaultWatchInterval
 	}
 	if d.Now == nil {
 		d.Now = time.Now
