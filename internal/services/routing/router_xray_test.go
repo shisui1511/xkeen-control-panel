@@ -3,16 +3,23 @@
 package routing
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Материализация групп и правил в Xray: настоящий слой, настоящий
@@ -412,7 +419,7 @@ func TestRouterXrayRulesTraffic(t *testing.T) {
 	// Остальное доходит до узла (запрос может упасть на DNS узла — это не важно).
 	_, _ = rtSocksGet(port, "http://proxy.example.test/", 8*time.Second)
 	sawProxy := rtWaitNodeSaw(accessLog, "proxy.example.test", 10*time.Second)
-	_, errDirect := rtSocksGet(port, "http://direct.example.test/", 6*time.Second)
+	_, _ = rtSocksGet(port, "http://direct.example.test/", 6*time.Second)
 	_, errReject := rtSocksGet(port, "http://reject.example.test/", 6*time.Second)
 	time.Sleep(2 * time.Second)
 	sawDirect := rtNodeSaw(accessLog, "direct.example.test")
@@ -423,7 +430,6 @@ func TestRouterXrayRulesTraffic(t *testing.T) {
 	}
 	t.Logf("узел видел: остальное %s, DIRECT %s, REJECT %s; запрос REJECT не прошёл: %s",
 		rtxYesNo(sawProxy), rtxYesNo(sawDirect), rtxYesNo(sawReject), rtxYesNo(errReject != nil))
-	_ = errDirect
 	if !sawProxy {
 		t.Error("домен без правила не дошёл до узла (журнал узла пуст — маршрут в группу не работает)")
 	}
@@ -436,4 +442,362 @@ func TestRouterXrayRulesTraffic(t *testing.T) {
 	if errReject == nil {
 		t.Error("запрос к домену с правилом REJECT прошёл: соединение не закрыто")
 	}
+}
+
+// rtxNorm приводит значение к виду после JSON (числа float64, списки []any):
+// ожидаемое и прочитанное с диска сравниваются через reflect.DeepEqual.
+func rtxNorm(t *testing.T, v any) any {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// rtxUserRules — правила routing без loopback-правил групп и без заключительного
+// «Остальное»: то, что перевело правила пользователя.
+func rtxUserRules(t *testing.T, routing map[string]any) []map[string]any {
+	t.Helper()
+	rules := rtxRules(t, routing)
+	var out []map[string]any
+	for i, r := range rules {
+		if i == len(rules)-1 {
+			continue
+		}
+		if tags := rtxStrings(r["inboundTag"]); len(tags) == 1 && strings.HasPrefix(tags[0], loopbackTagPrefix) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// rtxTestFiles проверяет файлы генераторов настоящим `xray run -test`: те же
+// файлы, что слой пишет в каталог ядра, но без «Применить» (для случаев, которые
+// проверка до записи блокирует).
+func rtxTestFiles(t *testing.T, e *rtEnv, files []configlayer.GeneratedFile) {
+	t.Helper()
+	in := inputOf(e.state(t))
+	all := append([]configlayer.GeneratedFile(nil), files...)
+	for _, g := range e.src.Generators() {
+		more, err := g.Generate(in, e.installed)
+		if err != nil {
+			t.Fatalf("генератор %s: %v", g.ID(), err)
+		}
+		all = append(all, more...)
+	}
+	dir := rtWorkSubdir(t, "rt-xtest-")
+	for _, f := range all {
+		if f.Kernel != configlayer.KernelXray {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dir, f.RelPath), f.Content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, rtXrayBin, "run", "-test", "-confdir", dir)
+	cmd.Env = utils.XrayAssetEnv(os.Environ(), "")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("xray run -test отверг файлы: %v: %s", err, rtRedact(string(out)))
+	}
+}
+
+// rtxDatRefs находит в каталоге dat стенда первый список geosite и первый список
+// geoip, пригодные для правила; nil — списка нет.
+func rtxDatRefs() (site, ip *lists.ListRef) {
+	ix := lists.NewIndex("")
+	files, err := ix.Files()
+	if err != nil {
+		return nil, nil
+	}
+	for _, f := range files {
+		if (f.Kind != lists.KindSite && f.Kind != lists.KindIP) || !listFileRE.MatchString(f.Name) {
+			continue
+		}
+		if (f.Kind == lists.KindSite && site != nil) || (f.Kind == lists.KindIP && ip != nil) {
+			continue
+		}
+		tags, err := ix.Tags(f.Name)
+		if err != nil {
+			continue
+		}
+		for _, tg := range tags {
+			if !listTagRE.MatchString(tg.Tag) {
+				continue
+			}
+			ref := lists.ListRef{File: f.Name, Tag: tg.Tag, Kind: f.Kind}
+			if f.Kind == lists.KindSite {
+				site = &ref
+			} else {
+				ip = &ref
+			}
+			break
+		}
+		if site != nil && ip != nil {
+			break
+		}
+	}
+	return site, ip
+}
+
+// Перевод условий правил, вложенных групп и порогов версий в формы Xray. Каждый
+// вариант проходит проверку ядром (настоящий xray run -test), форма проверяется
+// по записанным файлам.
+func TestRouterXrayRulesTranslate(t *testing.T) {
+	t.Run("conditions", func(t *testing.T) {
+		e := rtNewEnv(t, rtWithKernels(rtXrayOnly))
+		e.addMyLinks(t, "vless_ws")
+		reject := Target{Kind: KindReject}
+		blk := TagBlock
+		type tcase struct {
+			name string
+			rule Rule
+			want map[string]any // nil — правила в файле нет
+		}
+		cases := []tcase{
+			{"domain_all_prefixes", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondDomain,
+				Values: []string{"example.com", "full:a.example.com", "keyword:ads", `regexp:^ad[0-9]+\.example\.com$`}}}},
+				map[string]any{"domain": []string{"domain:example.com", "full:a.example.com", "keyword:ads", `regexp:^ad[0-9]+\.example\.com$`}, "outboundTag": blk}},
+			{"ip_v4_v6", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondIP, Values: []string{"10.0.0.0/8", "2001:db8::/32"}}}},
+				map[string]any{"ip": []string{"10.0.0.0/8", "2001:db8::/32"}, "outboundTag": blk}},
+			{"port_list_and_range", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondPort, Values: []string{"443", "8000-9000"}}}},
+				map[string]any{"port": "443,8000-9000", "outboundTag": blk}},
+			{"network_tcp", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondNetwork, Values: []string{"tcp"}}}},
+				map[string]any{"network": "tcp", "outboundTag": blk}},
+			{"network_udp", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondNetwork, Values: []string{"udp"}}}},
+				map[string]any{"network": "udp", "outboundTag": blk}},
+			{"network_both", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondNetwork, Values: []string{"udp", "tcp"}}}},
+				map[string]any{"network": "tcp,udp", "outboundTag": blk}},
+			{"src_ip", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondSrcIP, Values: []string{"192.168.1.0/24"}}}},
+				map[string]any{"source": []string{"192.168.1.0/24"}, "outboundTag": blk}},
+			{"bittorrent", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondBittorrent}}},
+				map[string]any{"protocol": []string{"bittorrent"}, "outboundTag": blk}},
+			{"two_conditions_one_object", Rule{Enabled: true, Target: reject, Conds: []Cond{
+				{Type: CondDomain, Values: []string{"both.example.com"}}, {Type: CondPort, Values: []string{"443"}}}},
+				map[string]any{"domain": []string{"domain:both.example.com"}, "port": "443", "outboundTag": blk}},
+			{"raw_xray_target_from_rule", Rule{Enabled: true, Target: Target{Kind: KindDirect}, Raw: &RawRule{Kernel: configlayer.KernelXray,
+				Text: `{"protocol":["bittorrent"],"domain":["domain:raw.example.com"],"outboundTag":"junk"}`}},
+				map[string]any{"protocol": []string{"bittorrent"}, "domain": []string{"domain:raw.example.com"}, "outboundTag": TagDirect}},
+			{"raw_mihomo_absent", Rule{Enabled: true, Target: reject, Raw: &RawRule{Kernel: configlayer.KernelMihomo, Text: "DOMAIN-SUFFIX,example.com"}}, nil},
+			{"disabled_absent", Rule{Enabled: false, Target: reject, Conds: []Cond{{Type: CondDomain, Values: []string{"off.example.com"}}}}, nil},
+		}
+		// Списки dat: без файлов dat на стенде варианты пропускаются.
+		site, ipList := rtxDatRefs()
+		if site != nil {
+			cases = append(cases, tcase{"geosite_ext", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondGeosite, Lists: []lists.ListRef{*site}}}},
+				map[string]any{"domain": []string{"ext:" + site.File + ":" + site.Tag}, "outboundTag": blk}})
+		} else {
+			t.Log("списков geosite в каталоге dat стенда нет: вариант geosite пропущен")
+		}
+		if ipList != nil {
+			cases = append(cases, tcase{"geoip_ext", Rule{Enabled: true, Target: reject, Conds: []Cond{{Type: CondGeoip, Lists: []lists.ListRef{*ipList}}}},
+				map[string]any{"ip": []string{"ext:" + ipList.File + ":" + ipList.Tag}, "outboundTag": blk}})
+		} else {
+			t.Log("списков geoip в каталоге dat стенда нет: вариант geoip пропущен")
+		}
+
+		var want []any
+		for _, c := range cases {
+			if _, _, err := e.svc.SaveRule(e.rev(t), c.rule); err != nil {
+				t.Fatalf("SaveRule %s: %v", c.name, err)
+			}
+			if c.want != nil {
+				want = append(want, rtxNorm(t, c.want))
+			}
+		}
+		e.takeAndApply(t)
+
+		routing := rtxRouting(t, e.xrayDoc(t, xrayRoutingFile))
+		var got []any
+		for _, r := range rtxUserRules(t, routing) {
+			got = append(got, r)
+		}
+		if !reflect.DeepEqual(rtxNorm(t, got), rtxNorm(t, want)) {
+			gotJSON, _ := json.MarshalIndent(got, "", " ")
+			wantJSON, _ := json.MarshalIndent(want, "", " ")
+			t.Errorf("правила в файле не совпали с ожидаемыми\nполучено: %s\nожидалось: %s", gotJSON, wantJSON)
+		}
+		rules := rtxRules(t, routing)
+		if last := rules[len(rules)-1]; last["network"] != "tcp,udp" || last["outboundTag"] != TagDirect {
+			t.Errorf("заключительное правило: %v", last)
+		}
+	})
+
+	t.Run("nesting_and_reserve", func(t *testing.T) {
+		e := rtNewEnv(t, rtWithKernels(rtXrayOnly))
+		e.addMyLinks(t, "vless_ws", "trojan_grpc", "ss_plain")
+		cat := e.catalog(t).Xray
+		if len(cat) < 3 {
+			t.Fatalf("в каталоге Xray %d узлов, ожидалось 3", len(cat))
+		}
+		x, y := cat[0], cat[1]
+
+		save := func(g Group) Group {
+			t.Helper()
+			_, saved, err := e.svc.SaveGroup(e.rev(t), g)
+			if err != nil {
+				t.Fatalf("SaveGroup %s: %v", g.Name, err)
+			}
+			return saved
+		}
+		inner := save(Group{Name: "Внутренняя", Mode: ModeManual, Picks: []string{x.Ref}})
+		outer := save(Group{Name: "Внешняя", Mode: ModeManual, Members: []Member{{Kind: KindGroup, ID: inner.ID}}})
+		withReserve := save(Group{Name: "Резерв с узлом", Mode: ModeFallback, Sources: GroupSources{All: true}, Reserve: y.Ref})
+		viaReserve := save(Group{Name: "Через резерв", Mode: ModeManual, Members: []Member{{Kind: KindGroup, ID: withReserve.ID}}})
+		// Резервного узла нет в каталоге Xray: fallbackTag — xcp-block.
+		noReserve := save(Group{Name: "Резерв без узла", Mode: ModeFallback, Sources: GroupSources{All: true}, Reserve: "my/00000000"})
+		e.takeAndApply(t)
+
+		outs := rtxOutbounds(t, e.xrayDoc(t, xrayGroupsFile))
+		for _, g := range []Group{inner, outer} {
+			want, err := nodes.XrayOutbound(x.Node, GroupTag(g.ID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(rtxNorm(t, outs[GroupTag(g.ID)]), rtxNorm(t, want)) {
+				t.Errorf("исходящий группы %s не равен копии выбранного узла под своим тегом", g.Name)
+			}
+		}
+		if ob := outs[GroupTag(viaReserve.ID)]; ob == nil || ob["protocol"] != "loopback" ||
+			ob["settings"].(map[string]any)["inboundTag"] != loopbackTagPrefix+viaReserve.ID {
+			t.Errorf("группа, выбравшая «резерв»: %v (ожидался loopback)", ob)
+		}
+
+		routing := rtxRouting(t, e.xrayDoc(t, xrayRoutingFile))
+		bals := map[string]map[string]any{}
+		for _, b := range routing["balancers"].([]any) {
+			bm := b.(map[string]any)
+			bals[bm["tag"].(string)] = bm
+		}
+		if b := bals[GroupTag(withReserve.ID)]; b == nil || b["fallbackTag"] != y.XrayTag {
+			t.Errorf("«резерв» с узлом: %v (fallbackTag должен быть тегом резервного узла)", b)
+		} else {
+			var wantSel []string
+			for _, tag := range rtxXrayTags(e, t) {
+				if tag != y.XrayTag {
+					wantSel = append(wantSel, tag)
+				}
+			}
+			if sel := rtxStrings(b["selector"]); !rtxEqualStrings(sel, wantSel) {
+				t.Errorf("selector «резерва» %v, ожидались основные узлы без резервного %v", sel, wantSel)
+			}
+		}
+		if b := bals[GroupTag(noReserve.ID)]; b == nil || b["fallbackTag"] != TagBlock {
+			t.Errorf("«резерв» без узла: %v (fallbackTag должен быть xcp-block)", b)
+		}
+		foundLoop := false
+		for _, r := range rtxRules(t, routing) {
+			if rtxEqualStrings(rtxStrings(r["inboundTag"]), []string{loopbackTagPrefix + viaReserve.ID}) && r["balancerTag"] == GroupTag(withReserve.ID) {
+				foundLoop = true
+			}
+		}
+		if !foundLoop {
+			t.Error("нет правила loopback на balancer «резерва»")
+		}
+	})
+
+	t.Run("empty_for_xray", func(t *testing.T) {
+		e := rtNewEnv(t, rtWithKernels(rtXrayOnly))
+		e.addMyLinks(t, "vless_ws")
+		// Пустые для Xray группы блокируют «Применить» проверкой модели (они пусты
+		// и для единственного установленного ядра), поэтому файлы берутся у
+		// генератора напрямую и проверяются ядром без конвейера.
+		const noMatch = "нет-такого-узла-xyz"
+		_, m, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Пустая ручная", Mode: ModeManual, Sources: GroupSources{All: true}, Include: []string{noMatch}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, a, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Пустая авто", Mode: ModeAuto, Sources: GroupSources{All: true}, Include: []string{noMatch}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, g := range []Group{m, a} {
+			if _, _, err := e.svc.SaveRule(e.rev(t), Rule{Enabled: true, Target: Target{Kind: KindGroup, ID: g.ID},
+				Conds: []Cond{{Type: CondDomain, Values: []string{"empty" + strconv.Itoa(i) + ".example.com"}}}}); err != nil {
+				t.Fatalf("SaveRule: %v", err)
+			}
+		}
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("Take: %v", err)
+		}
+		files, err := e.svc.Generators()[0].Generate(inputOf(e.state(t)), e.installed)
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		byName := map[string][]byte{}
+		for _, f := range files {
+			byName[f.RelPath] = f.Content
+		}
+		var groupsDoc, routingDoc map[string]any
+		if err := json.Unmarshal(byName[xrayGroupsFile], &groupsDoc); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(byName[xrayRoutingFile], &routingDoc); err != nil {
+			t.Fatal(err)
+		}
+		if ob := rtxOutbounds(t, groupsDoc)[GroupTag(m.ID)]; ob == nil || ob["protocol"] != "blackhole" {
+			t.Errorf("пустая ручная группа: %v (ожидался blackhole под тегом группы)", ob)
+		}
+		routing := rtxRouting(t, routingDoc)
+		for _, b := range routing["balancers"].([]any) {
+			if b.(map[string]any)["tag"] == GroupTag(a.ID) {
+				t.Error("для пустой группы «авто» создан balancer")
+			}
+		}
+		user := rtxUserRules(t, routing)
+		if len(user) != 2 {
+			t.Fatalf("правил пользователя %d, ожидалось 2", len(user))
+		}
+		for _, r := range user {
+			if r["outboundTag"] != TagBlock || r["balancerTag"] != nil {
+				t.Errorf("правило на пустую группу: %v (ожидался xcp-block)", r)
+			}
+		}
+		rtxTestFiles(t, e, files)
+	})
+
+	t.Run("version_threshold", func(t *testing.T) {
+		// Ниже 1.8.10 «авто» и «резерв» в Xray не создаются: цели — xcp-block,
+		// «Применить» не блокируется, «Прокси» выбирает первый узел (D-09, D-42).
+		e := rtNewEnv(t, rtWithKernels(rtXrayOnly), rtWithDeps(func(d *Deps) {
+			d.KernelVersion = func(kernel string) string {
+				if kernel == configlayer.KernelXray {
+					return "1.8.9"
+				}
+				return ""
+			}
+		}))
+		e.addMyLinks(t, "vless_ws", "trojan_grpc")
+		cfg := e.groups(t)
+		auto, _ := rtGroupByName(cfg, "Авто")
+		proxyG, _ := rtGroupByName(cfg, "Прокси")
+		if _, err := e.svc.SetFinal(e.rev(t), Target{Kind: KindGroup, ID: auto.ID}); err != nil {
+			t.Fatalf("SetFinal: %v", err)
+		}
+		e.takeAndApply(t)
+
+		routing := rtxRouting(t, e.xrayDoc(t, xrayRoutingFile))
+		if _, has := routing["balancers"]; has {
+			t.Errorf("ниже 1.8.10 в routing есть balancers: %v", routing["balancers"])
+		}
+		rules := rtxRules(t, routing)
+		if last := rules[len(rules)-1]; last["outboundTag"] != TagBlock || last["balancerTag"] != nil {
+			t.Errorf("«Остальное» на «авто» ниже порога: %v (ожидался xcp-block)", last)
+		}
+		if e.xrayFileExists(xrayObservatoryFile) {
+			t.Error("ниже 1.8.10 создан файл observatory")
+		}
+		ob := rtxOutbounds(t, e.xrayDoc(t, xrayGroupsFile))[GroupTag(proxyG.ID)]
+		if ob == nil || ob["protocol"] == "loopback" || ob["protocol"] == "blackhole" {
+			t.Errorf("«Прокси» ниже порога: %v (ожидалась копия первого узла)", ob)
+		}
+	})
 }
