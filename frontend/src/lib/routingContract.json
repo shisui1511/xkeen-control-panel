@@ -165,7 +165,7 @@
     }
   },
   "KernelPreview": {
-    "required": ["count", "names", "members"],
+    "required": ["count", "names", "members", "empty"],
     "optional": [],
     "children": {
       "members": "Member[]"

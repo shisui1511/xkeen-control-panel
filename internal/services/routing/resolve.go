@@ -144,6 +144,9 @@ type KernelPreview struct {
 	Names []string `json:"names"`
 	// Members — участники ручной группы.
 	Members []Member `json:"members"`
+	// Empty — у группы нет действующего участника для этого ядра по правилу D-36
+	// (groupEmptiness): ровно то, что заблокирует «Применить» проверкой group_empty.
+	Empty bool `json:"empty"`
 }
 
 // GroupPreview — состав группы по ядрам; nil — ядро не установлено.
@@ -152,9 +155,37 @@ type GroupPreview struct {
 	Mihomo *KernelPreview `json:"mihomo"`
 }
 
-// kernelPreview превращает результат Resolve в предпросмотр.
-func kernelPreview(r Resolved) *KernelPreview {
-	p := &KernelPreview{Count: len(r.Nodes), Names: []string{}, Members: r.Members}
+// previewGroupID — временный ID группы, которой ещё нет в секции: пустота новой
+// группы считается тем же помощником, что у сохранённых.
+const previewGroupID = "preview-new"
+
+// withGroup возвращает копию списка групп, где группа с ID g.ID заменена на g, а
+// при отсутствии такой — g добавлена в конец. У группы без ID берётся временный
+// previewGroupID; возвращается ID, под которым g лежит в списке.
+func withGroup(items []Group, g Group) ([]Group, string) {
+	if g.ID == "" {
+		g.ID = previewGroupID
+	}
+	out := make([]Group, 0, len(items)+1)
+	replaced := false
+	for _, x := range items {
+		if x.ID == g.ID {
+			out = append(out, g)
+			replaced = true
+			continue
+		}
+		out = append(out, x)
+	}
+	if !replaced {
+		out = append(out, g)
+	}
+	return out, g.ID
+}
+
+// kernelPreview превращает результат Resolve в предпросмотр; empty — пустота
+// группы для ядра по правилу D-36.
+func kernelPreview(r Resolved, empty bool) *KernelPreview {
+	p := &KernelPreview{Count: len(r.Nodes), Names: []string{}, Members: r.Members, Empty: empty}
 	for _, n := range r.Nodes {
 		if len(p.Names) >= maxPreviewNames {
 			break
@@ -186,12 +217,15 @@ func (s *Service) PreviewGroup(g Group) (GroupPreview, error) {
 	if err != nil {
 		return GroupPreview{}, err
 	}
+	// Пустота — по правилу D-36 на списке групп с правленой группой: то же, что
+	// посчитает проверка до записи.
+	items, id := withGroup(cfg.Items, g)
 	var out GroupPreview
 	if installed.Xray {
-		out.Xray = kernelPreview(Resolve(g, cat.Xray, cfg.Items))
+		out.Xray = kernelPreview(Resolve(g, cat.Xray, cfg.Items), newGroupEmptiness(items, cat.Xray).empty(id))
 	}
 	if installed.Mihomo {
-		out.Mihomo = kernelPreview(Resolve(g, cat.Mihomo, cfg.Items))
+		out.Mihomo = kernelPreview(Resolve(g, cat.Mihomo, cfg.Items), newGroupEmptiness(items, cat.Mihomo).empty(id))
 	}
 	return out, nil
 }

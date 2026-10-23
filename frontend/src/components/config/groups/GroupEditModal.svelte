@@ -279,9 +279,8 @@
       (r): r is { id: KernelName; name: string; p: NonNullable<typeof r.p> } => r.p !== null
     )
   );
-  const emptyKernels = $derived(
-    kernelRows.filter((r) => r.p.count === 0 && r.p.members.length === 0)
-  );
+  // Пустоту считает сервер по правилу D-36 (то же, что проверка до записи)
+  const emptyKernels = $derived(kernelRows.filter((r) => r.p.empty));
   const emptyAll = $derived(kernelRows.length > 0 && emptyKernels.length === kernelRows.length);
   const emptyOne = $derived(emptyAll ? [] : emptyKernels);
   const previewLine = $derived(

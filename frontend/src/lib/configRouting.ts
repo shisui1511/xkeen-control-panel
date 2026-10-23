@@ -153,6 +153,8 @@ export interface KernelPreview {
   count: number;
   names: string[];
   members: Member[];
+  /** Нет действующего участника для ядра по правилу D-36: «Применить» будет заблокировано. */
+  empty: boolean;
 }
 
 /** Состав группы по ядрам; null — ядро не установлено. */

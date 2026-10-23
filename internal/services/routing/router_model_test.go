@@ -211,6 +211,24 @@ func TestRouterGroupsDefaultsAndResolve(t *testing.T) {
 		t.Errorf("узел только для Mihomo в Xray: узлов %d, устаревших %v", len(r.Nodes), r.Stale)
 	}
 
+	// Пустота предпросмотра — по правилу D-36 (то же, что проверка до записи):
+	// «авто» с узлами не пуста, «резерв», в составе которого только резервный узел,
+	// пуст для обоих ядер, хотя узел в составе есть.
+	if all.Xray.Empty || all.Mihomo.Empty {
+		t.Errorf("группа с узлами названа пустой: xray=%v mihomo=%v", all.Xray.Empty, all.Mihomo.Empty)
+	}
+	reserve, err := e.svc.PreviewGroup(Group{
+		Name: "Резерв", Mode: ModeFallback, Sources: GroupSources{},
+		Picks: []string{cat.Xray[0].Ref}, Reserve: cat.Xray[0].Ref,
+	})
+	if err != nil {
+		t.Fatalf("PreviewGroup резерва: %v", err)
+	}
+	if reserve.Xray.Count != 1 || !reserve.Xray.Empty || !reserve.Mihomo.Empty {
+		t.Errorf("«резерв» только с резервным узлом: узлов xray=%d, empty xray=%v mihomo=%v, ожидалось 1, true, true",
+			reserve.Xray.Count, reserve.Xray.Empty, reserve.Mihomo.Empty)
+	}
+
 	// Выражения: плохое отвергается, регистр учитывается.
 	if _, err := e.svc.PreviewGroup(Group{Name: "Рег", Mode: ModeAuto, Regex: true, Include: []string{"("}}); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("плохое выражение принято предпросмотром: %v", err)
