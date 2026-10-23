@@ -12,12 +12,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
@@ -125,7 +127,10 @@ func rtCatalogMatches(t *testing.T, e *rtEnv, in configlayer.Input, installed co
 
 // rtKernelsAccept прогоняет файлы источника через ядра устройства: xray run -test
 // по каталогу с журналом и файлами, mihomo -t по профилю с этим провайдером.
-func rtKernelsAccept(t *testing.T, e *rtEnv, xf, mf []configlayer.GeneratedFile) {
+//
+// xrayMark — метка известного отказа Xray от mKCP с header/seed (находка вне фазы):
+// применяется только к такому отказу, другой отказ остаётся провалом.
+func rtKernelsAccept(t *testing.T, e *rtEnv, xf, mf []configlayer.GeneratedFile, xrayMark routertest.KnownMark) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -144,8 +149,12 @@ func rtKernelsAccept(t *testing.T, e *rtEnv, xf, mf []configlayer.GeneratedFile)
 				t.Fatal(err)
 			}
 		}
-		if err := exec.CommandContext(ctx, rtXrayBin, "run", "-test", "-confdir", dir).Run(); err != nil {
-			t.Errorf("xray run -test отверг файл источника: %v", err)
+		out, err := exec.CommandContext(ctx, rtXrayBin, "run", "-test", "-confdir", dir).CombinedOutput()
+		switch {
+		case xrayMark.Slug != "" && (err == nil || strings.Contains(string(out), rtXrayMKCPRemoved)):
+			routertest.Verdict(t, err == nil, xrayMark, "xray run -test отверг файл источника: %v: %s", err, rtKernelReason(out))
+		case err != nil:
+			t.Errorf("xray run -test отверг файл источника: %v: %s", err, rtKernelReason(out))
 		}
 	}
 	if len(mf) > 0 {
@@ -177,10 +186,28 @@ func rtKernelsAccept(t *testing.T, e *rtEnv, xf, mf []configlayer.GeneratedFile)
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg.String()), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := exec.CommandContext(ctx, rtMihomoBin, "-t", "-d", dir, "-f", filepath.Join(dir, "config.yaml")).Run(); err != nil {
-			t.Errorf("mihomo -t отверг провайдер источника: %v", err)
+		if out, err := exec.CommandContext(ctx, rtMihomoBin, "-t", "-d", dir, "-f", filepath.Join(dir, "config.yaml")).CombinedOutput(); err != nil {
+			t.Errorf("mihomo -t отверг провайдер источника: %v: %s", err, rtKernelReason(out))
 		}
 	}
+}
+
+// rtXrayMKCPRemoved — отказ Xray 26.x от kcpSettings.header/seed (todo
+// xray-mkcp-header-seed-finalmask).
+const rtXrayMKCPRemoved = "mkcp header & seed has been removed"
+
+// rtKernelAddrRe — адреса и имена хостов в выводе ядра: в сообщение теста они не попадают.
+var rtKernelAddrRe = regexp.MustCompile(`([0-9]{1,3}\.){3}[0-9]{1,3}|\[?[0-9a-fA-F]*:[0-9a-fA-F:]+\]?|[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+`)
+
+// rtKernelReason — последняя непустая строка вывода ядра без адресов и хостов
+// (не больше 300 байт): причина отказа видна в отчёте без данных узлов.
+func rtKernelReason(out []byte) string {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	last := rtKernelAddrRe.ReplaceAllString(strings.TrimSpace(lines[len(lines)-1]), "<addr>")
+	if len(last) > 300 {
+		last = last[len(last)-300:]
+	}
+	return last
 }
 
 // Каталог узлов — те же узлы, теги Xray и имена Mihomo, что в файлах источников;
@@ -258,7 +285,7 @@ func TestRouterCatalogMatchesFiles(t *testing.T) {
 	}
 
 	// Ядра устройства принимают сгенерированные файлы.
-	rtKernelsAccept(t, e, xf, mf)
+	rtKernelsAccept(t, e, xf, mf, routertest.Known("*", "xray-mkcp-header-seed-finalmask"))
 
 	// Установлено одно ядро — список другого пуст.
 	only := configlayer.InstalledKernels{Xray: true}
@@ -310,7 +337,7 @@ func TestRouterCatalogMatchesFiles(t *testing.T) {
 			t.Errorf("узел подписки: ссылка %s не согласована с тегом", n.Ref)
 		}
 	}
-	rtKernelsAccept(t, e, sxf, smf)
+	rtKernelsAccept(t, e, sxf, smf, routertest.KnownMark{})
 
 	// Исключение по имени: исключённый узел уходит и из каталога, и из файлов.
 	var firstName string

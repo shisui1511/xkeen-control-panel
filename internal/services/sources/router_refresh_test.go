@@ -947,7 +947,18 @@ func rtApplyProviderSub(t *testing.T, e *rtEnv, subURL string, mutate func([]nod
 		t.Fatalf("Preview: %v", err)
 	}
 	if len(view.Subscriptions) != 1 || view.Token == "" || view.Subscriptions[0].Kernels[kernelXray].Error != nil {
-		t.Fatalf("предпросмотр подписки: %+v", view.Subscriptions)
+		// Имя, адрес и хост подписки в отчёт не попадают: только число и коды ошибок.
+		codes := make([]string, 0, len(view.Subscriptions))
+		for _, sub := range view.Subscriptions {
+			c := "-"
+			if ke := sub.Kernels[kernelXray].Error; ke != nil {
+				c = ke.Code
+			} else if sub.Error != nil {
+				c = sub.Error.Code
+			}
+			codes = append(codes, c)
+		}
+		t.Fatalf("предпросмотр подписки: подписок %d, токен есть: %v, коды ошибок Xray: %v", len(view.Subscriptions), view.Token != "", codes)
 	}
 	if _, err := e.svc.Add(e.rev(t), view.Token); err != nil {
 		t.Fatalf("Add: %v", err)
