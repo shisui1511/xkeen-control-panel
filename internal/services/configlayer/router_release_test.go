@@ -68,8 +68,10 @@ func TestRouterDisableReleasesRouting(t *testing.T) {
 	}
 	e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
 
-	// Занятое применение: Disable отказывает, диск не тронут.
-	release, err := e.layer.pipeline.TryBegin(e.layer.Context(), true)
+	// Занятое применение: Disable отказывает, диск не тронут. Замок берётся как
+	// фоновым запуском: apply_done публикуется ещё под замком «Применить», и
+	// запуск по кнопке сразу после итога мог бы получить ErrApplyBusy сам.
+	release, err := e.layer.pipeline.TryBegin(e.layer.Context(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
