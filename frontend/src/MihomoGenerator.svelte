@@ -160,7 +160,7 @@
       ctx.tun = res.tun || ctx.tun;
       ctx.sniffer = res.sniffer || ctx.sniffer;
       ctx.activeRuleProvider = res.activeRuleProvider as any;
-      ctx.selectedMetaRuleSets = res.selectedMetaRuleSets || new Map();
+      ctx.replaceMetaRuleSets(res.selectedMetaRuleSets);
       ctx.preservedKeys = res.preservedKeys || [];
       ctx.existingTproxyPort = res.existingTproxyPort;
       ctx.existingRedirPort = res.existingRedirPort;

@@ -142,15 +142,15 @@
       return { chain: [currentTag, 'DIRECT'], hasCycle: false };
     }
     const chain: string[] = [currentTag];
-    const visited = new Set<string>([currentTag]);
     let curr = targetProxy;
 
     while (curr) {
+      // Цепочка уже содержит все пройденные теги, отдельный набор «посещённых» не нужен.
+      const alreadyVisited = chain.includes(curr);
       chain.push(curr);
-      if (visited.has(curr)) {
+      if (alreadyVisited) {
         return { chain, hasCycle: true };
       }
-      visited.add(curr);
       // find next proxy in details
       const found = outboundDetails.find((d) => d.tag === curr);
       curr = (found as any)?.dialerProxy || '';

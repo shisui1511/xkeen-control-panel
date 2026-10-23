@@ -112,52 +112,38 @@
     ])
   );
 
+  // Первое вхождение тега выигрывает; пустые теги отбрасываются.
+  function uniqueByTag<T extends { tag?: string }>(items: T[]): T[] {
+    return items.filter((o, i) => o.tag && items.findIndex((x) => x.tag === o.tag) === i);
+  }
+
+  function toOutboundDetail(o: any): OutboundDetail {
+    let server = '';
+    if (o.settings?.vnext?.[0]?.address) {
+      server = o.settings.vnext[0].address;
+    } else if (o.settings?.servers?.[0]?.address) {
+      server = o.settings.servers[0].address;
+    } else if (o.settings?.peers?.[0]?.endpoint) {
+      server = o.settings.peers[0].endpoint;
+    }
+    return {
+      tag: o.tag,
+      protocol: o.protocol || 'unknown',
+      server: server || undefined
+    };
+  }
+
   let outboundDetails = $derived.by<OutboundDetail[]>(() => {
-    const list: OutboundDetail[] = [
+    const system: OutboundDetail[] = [
       { tag: 'direct', protocol: 'freedom' },
       { tag: 'block', protocol: 'blackhole' },
       { tag: 'dns-out', protocol: 'dns' }
     ];
-    const seen = new Set<string>(['direct', 'block', 'dns-out']);
-
-    for (const o of customOutbounds) {
-      if (o.tag && !seen.has(o.tag)) {
-        seen.add(o.tag);
-        let server = '';
-        if (o.settings?.vnext?.[0]?.address) {
-          server = o.settings.vnext[0].address;
-        } else if (o.settings?.servers?.[0]?.address) {
-          server = o.settings.servers[0].address;
-        } else if (o.settings?.peers?.[0]?.endpoint) {
-          server = o.settings.peers[0].endpoint;
-        }
-        list.push({
-          tag: o.tag,
-          protocol: o.protocol || 'unknown',
-          server: server || undefined
-        });
-      }
-    }
-
-    for (const o of subscriptionOutbounds) {
-      if (o.tag && !seen.has(o.tag)) {
-        seen.add(o.tag);
-        let server = '';
-        if (o.settings?.vnext?.[0]?.address) {
-          server = o.settings.vnext[0].address;
-        } else if (o.settings?.servers?.[0]?.address) {
-          server = o.settings.servers[0].address;
-        } else if (o.settings?.peers?.[0]?.endpoint) {
-          server = o.settings.peers[0].endpoint;
-        }
-        list.push({
-          tag: o.tag,
-          protocol: o.protocol || 'unknown',
-          server: server || undefined
-        });
-      }
-    }
-    return list;
+    const systemTags = system.map((o) => o.tag);
+    const extra = uniqueByTag([...customOutbounds, ...subscriptionOutbounds]).filter(
+      (o) => !systemTags.includes(o.tag)
+    );
+    return [...system, ...extra.map(toOutboundDetail)];
   });
 
   let routingRules = $state<XrayRoutingRule[]>([]);
@@ -532,25 +518,9 @@
       /* fallback */
     }
 
-    // Deduplicate custom by tag
-    const seenCustom = new Set<string>();
-    const uniqueCustom: any[] = [];
-    for (const o of custom) {
-      if (o.tag && !seenCustom.has(o.tag)) {
-        seenCustom.add(o.tag);
-        uniqueCustom.push(o);
-      }
-    }
-
-    // Deduplicate subs by tag
-    const seenSubs = new Set<string>();
-    const uniqueSubs: any[] = [];
-    for (const o of subs) {
-      if (o.tag && !seenSubs.has(o.tag)) {
-        seenSubs.add(o.tag);
-        uniqueSubs.push(o);
-      }
-    }
+    // Deduplicate custom and subs by tag
+    const uniqueCustom: any[] = uniqueByTag(custom);
+    const uniqueSubs: any[] = uniqueByTag(subs);
 
     if (uniqueCustom.length > 0) {
       customOutbounds = uniqueCustom;

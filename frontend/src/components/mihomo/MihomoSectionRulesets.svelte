@@ -79,7 +79,6 @@
                     } else {
                       ctx.selectedMetaRuleSets.delete(key);
                     }
-                    ctx.selectedMetaRuleSets = new Map(ctx.selectedMetaRuleSets);
                     ctx.markDirty();
                   }}
                 />
@@ -101,7 +100,6 @@
                     value={ctx.selectedMetaRuleSets.get(key)}
                     onchange={(e) => {
                       ctx.selectedMetaRuleSets.set(key, e.currentTarget.value);
-                      ctx.selectedMetaRuleSets = new Map(ctx.selectedMetaRuleSets);
                       ctx.markDirty();
                     }}
                   >

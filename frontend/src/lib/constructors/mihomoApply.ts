@@ -439,12 +439,11 @@ export function applyMihomoPreset(
         value: r.value,
         outbound: r.outbound
       }));
-      ctx.selectedMetaRuleSets = new Map();
-      if (p.selected_meta_rule_sets) {
-        for (const [k, v] of Object.entries(p.selected_meta_rule_sets)) {
-          ctx.selectedMetaRuleSets.set(k, v as string);
-        }
-      }
+      ctx.replaceMetaRuleSets(
+        p.selected_meta_rule_sets
+          ? (Object.entries(p.selected_meta_rule_sets) as [string, string][])
+          : null
+      );
       const baseline = JSON.stringify({
         activeRuleProvider: ctx.activeRuleProvider,
         groups: ctx.groups.map((g) => ({ name: g.name, type: g.type, enabled: g.enabled })),
@@ -472,7 +471,7 @@ export function applyMihomoPreset(
     ];
     ctx.rules = [];
     ctx.activeRuleProvider = 'metacubex';
-    ctx.selectedMetaRuleSets = new Map([
+    ctx.replaceMetaRuleSets([
       ['category-ads-all|geosite', 'REJECT'],
       ['telegram|geoip', 'Selective'],
       ['private|geoip', 'DIRECT']
@@ -492,7 +491,7 @@ export function applyMihomoPreset(
     ];
     ctx.rules = [{ id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'GLOBAL' }];
     ctx.activeRuleProvider = 'none';
-    ctx.selectedMetaRuleSets = new Map();
+    ctx.replaceMetaRuleSets();
   } else if (id === 'zkeen-selective') {
     ctx.applyPreset('zkeen');
     ctx.rules = [
@@ -523,7 +522,7 @@ export function applyMihomoPreset(
       { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'DIRECT' }
     ];
     ctx.activeRuleProvider = 'zkeen';
-    ctx.selectedMetaRuleSets = new Map();
+    ctx.replaceMetaRuleSets();
   }
 
   const baseline = JSON.stringify({
