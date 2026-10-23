@@ -90,6 +90,8 @@ type Service struct {
 	lmu      sync.Mutex
 	stopped  bool
 	stopOnce sync.Once
+	// startOnce — Start запускает наблюдателя dat один раз.
+	startOnce sync.Once
 
 	// Мемоизация генераторов: Registry.Build вызывается постоянно (Snapshot,
 	// «Применить», фон), а вывод зависит только от входа.
@@ -157,10 +159,12 @@ func (s *Service) Generators() []configlayer.Generator {
 	return []configlayer.Generator{xrayGen{s: s}, mihomoGen{s: s}}
 }
 
-// Start запускает фоновые задачи сервиса. В этом плане задач нет: наблюдатель dat
-// добавит 146-13; SelectionWatcher (146-14) создаётся и останавливается в
+// Start запускает фоновые задачи сервиса: наблюдателя dat (D-22). Повторный вызов
+// ничего не делает. SelectionWatcher (146-14) создаётся и останавливается в
 // cmd/xcp/main.go.
-func (s *Service) Start() {}
+func (s *Service) Start() {
+	s.startOnce.Do(s.startDatWatcher)
+}
 
 // Stop останавливает фоновые задачи и ждёт их завершения. Идемпотентен.
 func (s *Service) Stop() {
