@@ -137,7 +137,6 @@
   let selectedFile = $state('');
   let backups = $state<string[]>([]);
   let loadingBackups = $state(false);
-  let backupsLoaded = $state(false);
 
   // Snapshots state
   interface SnapshotMeta {
@@ -487,16 +486,6 @@
     }
   }
 
-  $effect(() => {
-    if (activeTab === 'backups' && !backupsLoaded) {
-      backupsLoaded = true;
-      loadConfigFiles();
-      fetchSnapshots();
-    } else if (activeTab !== 'backups') {
-      backupsLoaded = false;
-    }
-  });
-
   // Appearance & Behavior settings (persisted in localStorage)
   let selectedTheme = $state<'light' | 'dark' | 'auto'>('auto');
   let selectedAccent = $state<AccentChoice>('blue');
@@ -812,16 +801,17 @@
     }
   }
 
-  let securityLoaded = $state(false);
-  $effect(() => {
-    if (activeTab === 'security' && !securityLoaded) {
-      securityLoaded = true;
+  // Данные вкладок «Резервные копии» и «Безопасность» подгружаются при каждом входе
+  // на вкладку: при переключении (onchange у Tabs) и при открытии страницы сразу на ней.
+  function loadTabData(tab: SettingsTab) {
+    if (tab === 'backups') {
+      loadConfigFiles();
+      fetchSnapshots();
+    } else if (tab === 'security') {
       loadSessions();
       loadSessionTTL();
-    } else if (activeTab !== 'security') {
-      securityLoaded = false;
     }
-  });
+  }
 
   async function fetchVersion() {
     try {
@@ -849,6 +839,7 @@
     fetchDevMode();
     loadAppearanceSettings();
     loadSystemTimezone();
+    loadTabData(activeTab);
   });
 </script>
 
@@ -860,7 +851,12 @@
     {onSwitchTab}
   />
 
-  <Tabs bind:value={activeTab} items={settingsTabItems} ariaLabel={$t('settings.h1')} />
+  <Tabs
+    bind:value={activeTab}
+    items={settingsTabItems}
+    ariaLabel={$t('settings.h1')}
+    onchange={(tab) => loadTabData(tab as SettingsTab)}
+  />
 
   <!-- General tab -->
   {#if activeTab === 'general'}

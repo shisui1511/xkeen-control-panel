@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Attachment } from 'svelte/attachments';
   import Modal from '../Modal.svelte';
   import { t } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
@@ -27,16 +28,17 @@
   let errorMessage = $state<string | null>(null);
   let stepMessage = $state<string>('');
 
-  $effect(() => {
-    if (open) {
-      loadPreview();
-    } else {
+  // Modal монтирует содержимое только пока он открыт: вложение на теле диалога
+  // грузит предпросмотр при каждом открытии, а при закрытии сбрасывает состояние.
+  const syncWithOpenState: Attachment = () => {
+    loadPreview();
+    return () => {
       previewData = null;
       errorMessage = null;
       loading = false;
       stepMessage = '';
-    }
-  });
+    };
+  };
 
   async function loadPreview() {
     previewLoading = true;
@@ -82,7 +84,7 @@
 </script>
 
 <Modal isOpen={open} title={$t('mihomo.migrate_title')} maxWidth="560px" {onclose}>
-  <div class="migrate-modal-body">
+  <div class="migrate-modal-body" {@attach syncWithOpenState}>
     <div class="info-banner">
       <div class="info-icon">
         <svg
