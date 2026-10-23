@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { get } from 'svelte/store';
   import { fade } from 'svelte/transition';
   import { t, currentLang, pluralize } from './i18n';
@@ -806,8 +807,12 @@
     });
   }
 
-  function reportChunkErrorAction(_node: HTMLElement, err: unknown): void {
-    reportChunkError(err);
+  // Вложение для блока {:catch err}: сообщает об ошибке один раз при монтировании блока.
+  // untrack — чтобы смена вкладки или языка не запускала вложение повторно.
+  function reportChunkErrorAttachment(err: unknown): Attachment<HTMLElement> {
+    return () => {
+      untrack(() => reportChunkError(err));
+    };
   }
 
   function switchTab(tab: string) {
@@ -1582,7 +1587,7 @@
             <Editor onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1599,7 +1604,7 @@
             <Logs />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1616,7 +1621,7 @@
             <Proxies />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1633,7 +1638,7 @@
             <Connections />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1650,7 +1655,7 @@
             <Rules onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1667,7 +1672,7 @@
             <Traffic />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1684,7 +1689,7 @@
             <Services onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1701,7 +1706,7 @@
             <SmartProxy onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1718,7 +1723,7 @@
             <TrafficQuotas onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1735,7 +1740,7 @@
             <DATManager onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1752,7 +1757,7 @@
             <MihomoGenerator onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1769,7 +1774,7 @@
             <Console onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1796,7 +1801,7 @@
               <Config onSwitchTab={switchTab} />
             </div>
           {:catch err}
-            <div use:reportChunkErrorAction={err}>
+            <div {@attach reportChunkErrorAttachment(err)}>
               <EmptyState
                 title={$t('app.chunk_load_failed')}
                 description=""
@@ -1814,7 +1819,7 @@
             <Settings onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { fade, fly, type EasingFunction, type TransitionConfig } from 'svelte/transition';
   import { cubicIn, cubicOut } from 'svelte/easing';
   import { prefersReducedMotion } from 'svelte/motion';
@@ -118,14 +119,10 @@
     bodyLocked = false;
   }
 
-  function portalToBody(node: HTMLElement) {
+  const portalToBody: Attachment<HTMLElement> = (node) => {
     document.body.appendChild(node);
-    return {
-      destroy() {
-        node.remove();
-      }
-    };
-  }
+    return () => node.remove();
+  };
 
   function handleClose() {
     show = false;
@@ -337,7 +334,7 @@
 
 {#if show && isOverlay}
   <!-- Оверлей выносится в body: предок с transform/filter (анимация страницы) ломает position: fixed и слои -->
-  <div class="responsive-sidebar-portal" use:portalToBody>
+  <div class="responsive-sidebar-portal" {@attach portalToBody}>
     <button
       type="button"
       class="responsive-sidebar-backdrop file-tree-backdrop"

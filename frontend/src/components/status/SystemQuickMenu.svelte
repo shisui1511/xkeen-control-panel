@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { fade } from 'svelte/transition';
   import { t } from '../../i18n';
   import {
@@ -49,14 +50,10 @@
   let menuEl = $state<HTMLElement | null>(null);
   let menuPos = $state<{ top: number; left: number } | null>(null);
 
-  function portalToBody(node: HTMLElement) {
+  const portalToBody: Attachment<HTMLElement> = (node) => {
     document.body.appendChild(node);
-    return {
-      destroy() {
-        node.remove();
-      }
-    };
-  }
+    return () => node.remove();
+  };
 
   function updatePosition() {
     if (!anchorEl) {
@@ -210,7 +207,7 @@
 {#if isOpen}
   <div
     bind:this={menuEl}
-    use:portalToBody
+    {@attach portalToBody}
     class="system-quick-menu"
     style={menuPos ? `top: ${menuPos.top}px; left: ${menuPos.left}px; position: fixed;` : ''}
     role="menu"
