@@ -3386,6 +3386,8 @@
   "cfg.rules.raw_hint": "Для другого ядра это правило пропускается. Цель — группа, DIRECT или REJECT.",
   "cfg.rules.raw_err": "Ядро не приняло правило: {reason}. Исправьте и сохраните ещё раз.",
   "cfg.rules.raw_invalid": "Ядро не приняло правило: {reason}. Исправьте и сохраните ещё раз.",
+  "cfg.rules.raw_reason_xray": "нужен один JSON-объект с полями правила Xray, без outboundTag и без geosite и geoip",
+  "cfg.rules.raw_reason_mihomo": "нужна одна строка правила Mihomo без цели, без MATCH, GEOSITE и GEOIP",
   "cfg.rules.seg_conds": "Условия",
   "cfg.rules.seg_raw": "Своё правило ядра",
   "cfg.rules.seg_aria": "Вид правила",
