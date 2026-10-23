@@ -83,8 +83,10 @@ type Impact struct {
 	Groups []GroupRef `json:"groups"`
 	// Final — на удаляемую группу ссылается «Остальное».
 	Final bool `json:"final"`
-	// Empties — группы, которые после удаления станут пустыми для всех
-	// установленных ядер.
+	// Empties — группы, которые после удаления (с составом после каскада) станут
+	// пустыми для всех установленных ядер по правилу D-36 (emptyGroups): ровно те,
+	// что заблокирует проверка group_empty. DIRECT и REJECT не на первом месте и
+	// пустые вложенные группы группу не держат.
 	Empties []GroupRef   `json:"empties"`
 	Kernels KernelImpact `json:"kernels"`
 }
@@ -178,25 +180,37 @@ func installedKernelNodes(cat sources.Catalog, installed configlayer.InstalledKe
 	return out
 }
 
-// emptyResolved — у группы нет ни узлов, ни участников.
-func emptyResolved(r Resolved) bool { return len(r.Nodes) == 0 && len(r.Members) == 0 }
-
-// becomesEmpty сообщает, что группа до изменения не была пустой хотя бы для
-// одного ядра, а после станет пустой для всех установленных.
-func becomesEmpty(g Group, kernels []kernelNodes, before, after []Group, nodesAfter func(kernelNodes) []sources.CatalogNode) bool {
+// emptiedGroups — группы, которые после изменения станут пустыми для всех
+// установленных ядер, а до него были непусты хотя бы в одном. Пустота — правило
+// D-36 (emptyGroups): то же, что у проверки group_empty до «Применить» и у
+// генераторов; второго расчёта нет. before и after — состав групп до и после
+// каскада, nodesAfter — узлы ядра после изменения. Результат — группы after в их
+// порядке; группы нет в карте «до» считаются пустыми «до»; нет ядер — nil.
+func emptiedGroups(kernels []kernelNodes, before, after []Group, nodesAfter func(kernelNodes) []sources.CatalogNode) []Group {
 	if len(kernels) == 0 {
-		return false
+		return nil
 	}
-	wasFull := false
+	wasFull := make(map[string]bool, len(after))
+	stillFull := make(map[string]bool, len(after))
 	for _, k := range kernels {
-		if !emptyResolved(Resolve(g, k.nodes, before)) {
-			wasFull = true
-		}
-		if !emptyResolved(Resolve(g, nodesAfter(k), after)) {
-			return false
+		emptyBefore := emptyGroups(before, k.nodes)
+		emptyAfter := emptyGroups(after, nodesAfter(k))
+		for _, g := range after {
+			if empty, ok := emptyBefore[g.ID]; ok && !empty {
+				wasFull[g.ID] = true
+			}
+			if empty, ok := emptyAfter[g.ID]; ok && !empty {
+				stillFull[g.ID] = true
+			}
 		}
 	}
-	return wasFull
+	var out []Group
+	for _, g := range after {
+		if wasFull[g.ID] && !stillFull[g.ID] {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // Impact показывает, что затронет удаление группы, правила, источника или узла
@@ -264,7 +278,8 @@ func (s *Service) catalogOf(st configlayer.StateView) ([]kernelNodes, sources.Ca
 
 // impactGroup считает последствия удаления группы. Для Xray — узлы, которые
 // теряет balancer удаляемой группы «авто»/«резерв»; для Mihomo — ручные группы,
-// которые теряют участника.
+// которые теряют участника. Empties — группы, опустевшие по правилу D-36 при
+// составе после каскада (groupsWithout), в том числе через вложенность.
 func (s *Service) impactGroup(st configlayer.StateView, out Impact, groups []Group, rules RulesConfig) (Impact, error) {
 	idx := -1
 	for i := range groups {
@@ -300,24 +315,34 @@ func (s *Service) impactGroup(st configlayer.StateView, out Impact, groups []Gro
 		}
 	}
 	same := func(k kernelNodes) []sources.CatalogNode { return k.nodes }
-	for _, ref := range refs.groups {
-		for _, g := range after {
-			if g.ID == ref.ID && becomesEmpty(g, kernels, groups, after, same) {
-				out.Empties = append(out.Empties, GroupRef{ID: g.ID, Name: g.Name, Role: RoleMember})
-			}
-		}
+	for _, g := range emptiedGroups(kernels, groups, after, same) {
+		out.Empties = append(out.Empties, GroupRef{ID: g.ID, Name: g.Name, Role: RoleMember})
 	}
 	return out, nil
 }
 
-// groupsWithout возвращает группы без группы id; ссылки на неё в составах
-// ручных групп отбрасывает Resolve (участник, которого нет в списке).
+// groupsWithout возвращает состав групп после удаления группы id: группа
+// уходит из списка и из участников ручных групп (Members без group:id). Это
+// состав после каскада, его же пишет DeleteGroup. Resolve отбросил бы ссылку на
+// удалённую группу и сам, но правило D-36 читает Members по позициям: без чистки
+// у [удалённая, DIRECT] DIRECT остался бы вторым и прогноз назвал бы группу
+// пустой, а после DeleteGroup DIRECT стоит первым. У каждой группы новый срез
+// Members, вход не меняется (impactGroup передаёт исходные группы как «до»).
 func groupsWithout(groups []Group, id string) []Group {
 	out := make([]Group, 0, len(groups))
 	for _, g := range groups {
-		if g.ID != id {
-			out = append(out, g)
+		if g.ID == id {
+			continue
 		}
+		kept := make([]Member, 0, len(g.Members))
+		for _, m := range g.Members {
+			if m.Kind == KindGroup && m.ID == id {
+				continue
+			}
+			kept = append(kept, m)
+		}
+		g.Members = kept
+		out = append(out, g)
 	}
 	return out
 }
@@ -372,7 +397,9 @@ func (sc sourceScope) groupRoles(g Group) []string {
 }
 
 // impactNodes считает последствия удаления источника или узла: группы со
-// ссылками, потери узлов по ядрам и группы, которые станут пустыми.
+// ссылками, потери узлов по ядрам и группы, которые станут пустыми для всех
+// установленных ядер по правилу D-36 (emptyGroups) при составе после scrubGroups,
+// как у DeleteSource и DeleteNode.
 func (s *Service) impactNodes(st configlayer.StateView, out Impact, groups []Group, sc sourceScope) (Impact, error) {
 	for _, g := range groups {
 		for _, role := range sc.groupRoles(g) {
@@ -426,14 +453,18 @@ func (s *Service) impactNodes(st configlayer.StateView, out Impact, groups []Gro
 			}
 		}
 	}
+	// Состав после каскада — тот же, что пишут DeleteSource и DeleteNode.
+	scrubbed, _ := scrubGroups(groups, sc)
+	before := make(map[string]Group, len(groups))
 	for _, g := range groups {
-		if becomesEmpty(g, kernels, groups, groups, nodesAfter) {
-			role := RoleComposition
-			if roles := sc.groupRoles(g); len(roles) > 0 {
-				role = roles[0]
-			}
-			out.Empties = append(out.Empties, GroupRef{ID: g.ID, Name: g.Name, Role: role})
+		before[g.ID] = g
+	}
+	for _, g := range emptiedGroups(kernels, groups, scrubbed, nodesAfter) {
+		role := RoleComposition
+		if roles := sc.groupRoles(before[g.ID]); len(roles) > 0 {
+			role = roles[0]
 		}
+		out.Empties = append(out.Empties, GroupRef{ID: g.ID, Name: g.Name, Role: role})
 	}
 	return out, nil
 }

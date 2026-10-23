@@ -147,17 +147,19 @@ func (m appliedModel) group(id string) (Group, bool) {
 	return Group{}, false
 }
 
-// groupAlive — вложенная группа не пуста.
+// groupAlive — вложенная группа не пуста по правилу D-36: то же, что у проверки
+// до «Применить» и генераторов (newGroupEmptiness). Считается по объединённому
+// каталогу: выбор один на оба ядра (D-39), а группа непуста в объединении тогда и
+// только тогда, когда непуста хотя бы в одном ядре (узлы объединения — объединение
+// узлов ядер, вложенная группа непуста в объединении, если непуста в каком-то
+// ядре). Поэтому «Сейчас», CommitLive и повторный выбор не ставят вложенную группу,
+// которую оба ядра блокируют. Помощник строится на каждый вызов: групп десятки,
+// кэш в appliedModel потребовал бы правки newModel.
 func (m appliedModel) groupAlive(id string) bool {
-	g, ok := m.group(id)
-	if !ok {
+	if _, ok := m.group(id); !ok {
 		return false
 	}
-	r := Resolve(g, m.union, m.groups.Items)
-	if g.Mode == ModeManual {
-		return len(r.Nodes) > 0 || len(r.Members) > 0
-	}
-	return len(r.Nodes) > 0
+	return !newGroupEmptiness(m.groups.Items, m.union).empty(id)
 }
 
 // avail сообщает, что участник существует и пригоден для выбора.
