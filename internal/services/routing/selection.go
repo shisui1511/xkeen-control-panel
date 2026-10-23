@@ -665,7 +665,9 @@ func (s *Service) setReconcileNotices(failed []mihomoSelEntry) {
 // применённых данных, группа удалена, узел вышел из состава), заменяется
 // детерминированным выбором effectiveSelection (тем же, что уже использовал
 // генератор), а группа попадает в LiveKeyRepick: AfterApply заменит его первым
-// живым по пингу. Выбор удалённых групп убирается.
+// живым по пингу. Выбор удалённых групп и участников-групп, DIRECT/REJECT,
+// которых в составе больше нет, снимается молча и в повторный выбор не идёт:
+// это правка пользователя, а не пропавший узел.
 func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest, used configlayer.Input) error {
 	fullDraft := req.Source == configlayer.SourceDraft && len(req.Only) == 0
 	if !fullDraft && req.Source != configlayer.SourceApplied {
@@ -715,6 +717,13 @@ func (s *Service) CommitLive(st *configlayer.State, req configlayer.ApplyRequest
 				g := manual[gid]
 				cands := am.candidates(g)
 				if cur != "" && containsString(cands, cur) && am.avail(cur) {
+					continue
+				}
+				if cur != "" && !strings.HasPrefix(cur, memberNode) {
+					// Участник-группа удалена или опустела, DIRECT/REJECT убран из
+					// состава: это правка пользователя, а не пропавший узел. Выбор
+					// снимается молча, дальше действует выбор по умолчанию.
+					delete(sel, gid)
 					continue
 				}
 				refs := make([]string, 0, len(cands))

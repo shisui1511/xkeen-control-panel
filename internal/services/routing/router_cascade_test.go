@@ -250,6 +250,14 @@ func TestRouterCascadeGroup(t *testing.T) {
 	if sel[service.ID] == memberGroup+auto.ID {
 		t.Errorf("после «Применить» «Сервис» по-прежнему выбрал удалённую группу: %v", sel)
 	}
+	// Выбор удалённой группы — правка пользователя, а не пропавший узел: повторного
+	// выбора и уведомления «узел пропал» быть не должно.
+	if containsString(readRepick(e.state(t).Live), service.ID) {
+		t.Error("после «Применить» «Сервис» попал в повторный выбор из-за удалённой группы")
+	}
+	if _, ok := e.rtsNotice(noticeRepickPrefix + service.ID); ok {
+		t.Error("после «Применить» появилось уведомление routing_repick для «Сервис»")
+	}
 	rtcFilesLack(t, e.xrayDir(), GroupTag(auto.ID))
 	if bals, _ := rtxRouting(t, e.xrayDoc(t, xrayRoutingFile))["balancers"].([]any); len(bals) != 0 {
 		t.Errorf("balancer-ов после удаления «Авто» %d, ожидалось 0", len(bals))
