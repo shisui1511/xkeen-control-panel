@@ -113,11 +113,12 @@ func TestRouterListNotFoundBlocksApply(t *testing.T) {
 		t.Errorf("правило на существующий тег получило list_not_found: %+v", gv.Issues)
 	}
 
-	// Убрали правило с выдуманным тегом: «Применить» снова проходит.
+	// Убрали правило с выдуманным тегом: «Применить» снова проходит (черновик
+	// вернулся к применённому — nothing_to_apply).
 	if _, err := e.svc.DeleteRule(e.rev(t), rule.ID); err != nil {
 		t.Fatalf("DeleteRule: %v", err)
 	}
-	e.applyOK(t)
+	e.applyPasses(t)
 
 	// Файл dat пропал: правило на прежний тег тоже получает list_not_found.
 	if err := os.Remove(filepath.Join(datDir, site.File)); err != nil {

@@ -65,6 +65,19 @@ func (e *rtEnv) applyOK(t *testing.T) {
 	}
 }
 
+// applyPasses — «Применить» не отклонено и прошло: применено или черновик уже
+// совпадает с применённым (nothing_to_apply), когда правки вернули его к прежнему.
+func (e *rtEnv) applyPasses(t *testing.T) {
+	t.Helper()
+	res, err := e.applyResult(t)
+	if err != nil {
+		t.Fatalf("«Применить» отклонено: %v", err)
+	}
+	if !res.OK || (res.Code != configlayer.ResultApplied && res.Code != configlayer.ResultNothingToApply) {
+		t.Fatalf("«Применить»: ok=%v code=%q kernel=%q rolled_back=%v issues=%+v", res.OK, res.Code, res.Kernel, res.RolledBack, res.Issues)
+	}
+}
+
 // takeAndApply берёт маршрутизацию под панель и применяет.
 func (e *rtEnv) takeAndApply(t *testing.T) {
 	t.Helper()

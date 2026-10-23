@@ -291,7 +291,7 @@ func TestRouterSelectRepick(t *testing.T) {
 		e := rtNewEnv(t, rtWithKernels(rtXrayOnly), rtWithSelection(), rtWithDeps(func(d *Deps) { d.Ping = rtTLSPing }))
 		e.addMyRaw(t, "socks5://127.0.0.1:9#rep-a", "socks5://127.0.0.1:10#rep-b", "socks5://127.0.0.1:11#rep-c")
 		cat := e.catalog(t).Xray
-		nodeA, nodeB := rtsNode(t, cat, "rep-a"), rtsNode(t, cat, "rep-b")
+		nodeB := rtsNode(t, cat, "rep-b")
 		_, grp, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Выбор", Mode: ModeManual, Sources: GroupSources{All: true}})
 		if err != nil {
 			t.Fatalf("SaveGroup: %v", err)
@@ -306,6 +306,12 @@ func TestRouterSelectRepick(t *testing.T) {
 			t.Fatalf("DeleteNode: %v", err)
 		}
 		e.applyOK(t)
+		// «Первый по порядку» — первый узел группы в порядке каталога после удаления B
+		// (порядок каталога — по id записи, а не по порядку добавления).
+		first := e.catalog(t).Xray
+		if len(first) == 0 {
+			t.Fatal("каталог Xray пуст после удаления узла B")
+		}
 
 		var n configlayer.NoticeView
 		rtWaitCond(t, 60*time.Second, "уведомление routing_repick", func() bool {
@@ -317,8 +323,8 @@ func TestRouterSelectRepick(t *testing.T) {
 			t.Errorf("параметры уведомления: %v, ожидалось answered=false method=tls group=Выбор", n.Params)
 		}
 		sel := e.rtcSelection(t)[grp.ID]
-		if sel != memberNode+nodeA.Ref {
-			t.Errorf("выбор после замены = %q, ожидался первый по порядку (узел A)", sel)
+		if sel != memberNode+first[0].Ref {
+			t.Errorf("выбор после замены = %q, ожидался первый по порядку каталога %q", sel, memberNode+first[0].Ref)
 		}
 		if sel == memberDirect {
 			t.Errorf("панель сама выбрала DIRECT при пропаже узла")

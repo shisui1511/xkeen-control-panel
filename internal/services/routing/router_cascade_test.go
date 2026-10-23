@@ -277,7 +277,9 @@ func TestRouterCascadeGroup(t *testing.T) {
 	if after := len(e.rules(t).Items); after != before-1 {
 		t.Errorf("правил после drop %d, ожидалось %d", after, before-1)
 	}
-	e.applyOK(t)
+	// Группы «Одинокая» и «Под нож» созданы и удалены после прошлого применения:
+	// черновик совпадает с применённым, «Применить» проходит без записи.
+	e.applyPasses(t)
 	rtcFilesLack(t, e.xrayDir(), GroupTag(dropG.ID))
 }
 
