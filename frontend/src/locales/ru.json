@@ -3206,6 +3206,7 @@
   "cfg.groups.del_effect_xray_few": "В Xray балансир «{name}» потеряет {count} узла.",
   "cfg.groups.del_effect_xray_many": "В Xray балансир «{name}» потеряет {count} узлов.",
   "cfg.groups.del_effect_mihomo": "В Mihomo группа «{x}» потеряет участника «{name}».",
+  "cfg.groups.del_demoted": "Из группы «{x}» уберут DIRECT/REJECT: после удаления они встали бы первыми и стали выбором по умолчанию.",
   "cfg.groups.del_confirm": "Удалить группу",
   "cfg.groups.toast_deleted": "Группа удалена.",
   "cfg.nodes.del_empty_group": "Группа «{name}» станет пустой: «Применить» будет недоступно, пока не добавите узлы.",

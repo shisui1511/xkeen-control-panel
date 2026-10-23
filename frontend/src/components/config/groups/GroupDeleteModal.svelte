@@ -81,6 +81,8 @@
   const xrayEffects = $derived(impact?.kernels.xray ?? []);
   const mihomoEffects = $derived(impact?.kernels.mihomo ?? []);
   const hasEffects = $derived(xrayEffects.length > 0 || mihomoEffects.length > 0);
+  // Группы, из которых каскад убирает DIRECT/REJECT (D-36): список приходит от сервера
+  const demotedRefs = $derived(impact?.demoted ?? []);
 
   function initialize() {
     errorText = '';
@@ -214,6 +216,17 @@
           {/each}
           {#each mihomoEffects as e (e.group + '/' + e.member)}
             <li>{$t('cfg.groups.del_effect_mihomo', { x: e.group, name: e.member })}</li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+
+    {#if demotedRefs.length > 0}
+      <div class="alert alert-warning gd-alert" data-testid="group-delete-demoted">
+        <Icon name="warning" size={16} class="gd-alert-icon" />
+        <ul class="gd-effects">
+          {#each demotedRefs as g (g.id)}
+            <li>{$t('cfg.groups.del_demoted', { x: g.name })}</li>
           {/each}
         </ul>
       </div>

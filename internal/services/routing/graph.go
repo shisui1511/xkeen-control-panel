@@ -87,7 +87,12 @@ type Impact struct {
 	// пустыми для всех установленных ядер по правилу D-36 (emptyGroups): ровно те,
 	// что заблокирует проверка group_empty. DIRECT и REJECT не на первом месте и
 	// пустые вложенные группы группу не держат.
-	Empties []GroupRef   `json:"empties"`
+	Empties []GroupRef `json:"empties"`
+	// Demoted — ручные группы, из которых каскад убрал DIRECT/REJECT (groupsWithout):
+	// после чистки они остались бы на первом месте и стали бы участником по
+	// умолчанию (D-36). Группа не пуста, но вариант DIRECT/REJECT в ней пропадает,
+	// в том числе явный выбор пользователя.
+	Demoted []GroupRef   `json:"demoted"`
 	Kernels KernelImpact `json:"kernels"`
 }
 
@@ -95,7 +100,7 @@ type Impact struct {
 func newImpact(kind, id string) Impact {
 	return Impact{
 		Kind: kind, ID: id,
-		Rules: []RuleRef{}, Groups: []GroupRef{}, Empties: []GroupRef{},
+		Rules: []RuleRef{}, Groups: []GroupRef{}, Empties: []GroupRef{}, Demoted: []GroupRef{},
 		Kernels: KernelImpact{Xray: []BalancerLoss{}, Mihomo: []MemberLoss{}},
 	}
 }
@@ -295,11 +300,13 @@ func (s *Service) impactGroup(st configlayer.StateView, out Impact, groups []Gro
 	out.Rules, out.Final = append(out.Rules, refs.rules...), refs.final
 	out.Groups = append(out.Groups, refs.groups...)
 
+	after := groupsWithout(groups, out.ID)
+	out.Demoted = append(out.Demoted, demotedGroups(groups, after)...)
+
 	kernels, _, ok := s.catalogOf(st)
 	if !ok {
 		return out, nil
 	}
-	after := groupsWithout(groups, out.ID)
 	for _, k := range kernels {
 		switch k.name {
 		case configlayer.KernelXray:
@@ -351,6 +358,32 @@ func groupsWithout(groups []Group, id string) []Group {
 		}
 		g.Members = kept
 		out = append(out, g)
+	}
+	return out
+}
+
+// demotedGroups находит группы, у которых groupsWithout убрал DIRECT/REJECT
+// совсем (ведущая серия без следующего участника): число таких участников
+// после каскада меньше, чем было до него.
+func demotedGroups(before, after []Group) []GroupRef {
+	terminals := func(members []Member) int {
+		n := 0
+		for _, m := range members {
+			if isTerminalMember(m) {
+				n++
+			}
+		}
+		return n
+	}
+	was := make(map[string]int, len(before))
+	for _, g := range before {
+		was[g.ID] = terminals(g.Members)
+	}
+	var out []GroupRef
+	for _, g := range after {
+		if g.Mode == ModeManual && terminals(g.Members) < was[g.ID] {
+			out = append(out, GroupRef{ID: g.ID, Name: g.Name, Role: RoleMember})
+		}
 	}
 	return out
 }

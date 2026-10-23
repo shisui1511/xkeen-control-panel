@@ -136,12 +136,13 @@
     }
   },
   "Impact": {
-    "required": ["kind", "id", "rules", "groups", "final", "empties", "kernels"],
+    "required": ["kind", "id", "rules", "groups", "final", "empties", "demoted", "kernels"],
     "optional": [],
     "children": {
       "rules": "RuleRef[]",
       "groups": "GroupRef[]",
       "empties": "GroupRef[]",
+      "demoted": "GroupRef[]",
       "kernels": "KernelImpact"
     }
   },

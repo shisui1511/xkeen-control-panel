@@ -198,6 +198,8 @@ export interface Impact {
   groups: GroupRef[];
   final: boolean;
   empties: GroupRef[];
+  /** Ручные группы, из которых каскад убрал DIRECT/REJECT. */
+  demoted: GroupRef[];
   kernels: KernelImpact;
 }
 

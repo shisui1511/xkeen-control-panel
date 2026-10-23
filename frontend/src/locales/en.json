@@ -3206,6 +3206,7 @@
   "cfg.groups.del_effect_xray_few": "In Xray the balancer “{name}” will lose {count} nodes.",
   "cfg.groups.del_effect_xray_many": "In Xray the balancer “{name}” will lose {count} nodes.",
   "cfg.groups.del_effect_mihomo": "In Mihomo group “{x}” will lose the member “{name}”.",
+  "cfg.groups.del_demoted": "DIRECT/REJECT will be removed from group “{x}”: after the deletion they would come first and become the default choice.",
   "cfg.groups.del_confirm": "Delete group",
   "cfg.groups.toast_deleted": "Group deleted.",
   "cfg.nodes.del_empty_group": "Group “{name}” will become empty: “Apply” will be unavailable until you add nodes.",

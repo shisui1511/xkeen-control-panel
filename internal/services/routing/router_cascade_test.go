@@ -155,7 +155,7 @@ func TestRouterCascadeGroup(t *testing.T) {
 	if len(imp.Kernels.Mihomo) != 0 {
 		t.Errorf("Mihomo не установлен, а в Impact есть потери: %+v", imp.Kernels.Mihomo)
 	}
-	if imp.Rules == nil || imp.Empties == nil || imp.Kernels.Mihomo == nil {
+	if imp.Rules == nil || imp.Empties == nil || imp.Demoted == nil || imp.Kernels.Mihomo == nil {
 		t.Error("в Impact срезы должны быть [], а не null")
 	}
 	if ruleImp, err := e.svc.Impact(ImpactRule, directRule.ID); err != nil || len(ruleImp.Rules)+len(ruleImp.Groups) != 0 || ruleImp.Final {
@@ -658,6 +658,12 @@ func TestRouterCascadeServiceGroupEmpty(t *testing.T) {
 			emp = append(emp, g.Name)
 		}
 		t.Errorf("диалог удаления «Авто» называет пустыми %v: ожидалась только «Запасная» (DIRECT после каскада не первый), у «Прокси» остаётся узел", emp)
+	}
+	// «Запасная» [Авто, DIRECT]: после каскада DIRECT встал бы первым, поэтому его
+	// убирают; диалог называет такую группу, «Сервис» ([Прокси, Авто, DIRECT]) не
+	// затронута.
+	if len(impAuto.Demoted) != 1 || impAuto.Demoted[0].Name != "Запасная" {
+		t.Errorf("диалог удаления «Авто» называет группы с убранным DIRECT %+v: ожидалась только «Запасная»", impAuto.Demoted)
 	}
 
 	// «Сейчас» (маршрутизация не применена — по модели черновика): контроль, что
