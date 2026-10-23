@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import type { Attachment } from 'svelte/attachments';
   import { fade, fly, type EasingFunction, type TransitionConfig } from 'svelte/transition';
   import { cubicIn, cubicOut } from 'svelte/easing';
   import { prefersReducedMotion } from 'svelte/motion';
@@ -36,11 +38,9 @@
     header
   }: ResponsiveSidebarProps = $props();
 
-  let isMediaNarrow = $state(
-    typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)').matches : false
-  );
+  const mediaNarrow = new MediaQuery('(max-width: 768px)');
 
-  let isOverlay = $derived(overlay !== undefined ? overlay : isMediaNarrow);
+  let isOverlay = $derived(overlay !== undefined ? overlay : mediaNarrow.current);
 
   // Длительность выезда и ухода шторки, мс
   const SHEET_MOTION_MS = 200;
@@ -118,14 +118,10 @@
     bodyLocked = false;
   }
 
-  function portalToBody(node: HTMLElement) {
+  const portalToBody: Attachment<HTMLElement> = (node) => {
     document.body.appendChild(node);
-    return {
-      destroy() {
-        node.remove();
-      }
-    };
-  }
+    return () => node.remove();
+  };
 
   function handleClose() {
     show = false;
@@ -229,42 +225,25 @@
     }
   }
 
-  $effect(() => {
-    if (typeof window === 'undefined') return;
-    const mql = window.matchMedia('(max-width: 768px)');
-    const onChange = (e: MediaQueryListEvent) => {
-      isMediaNarrow = e.matches;
-    };
-    isMediaNarrow = mql.matches;
-    mql.addEventListener('change', onChange);
-    return () => {
-      mql.removeEventListener('change', onChange);
-    };
-  });
-
-  $effect(() => {
+  // Блокировка прокрутки body и возврат фокуса, пока шторка открыта как оверлей. Вложение на
+  // document перезапускается при смене isOverlay и show: ветки открытия и закрытия те же,
+  // что были в $effect, а выход из оверлея возвращает фокус сразу, не дожидаясь ухода шторки.
+  const overlayLock: Attachment<Document> = () => {
     if (isOverlay && show) {
       lockBodyScroll();
-      if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      if (document.activeElement instanceof HTMLElement) {
         previouslyFocusedElement = document.activeElement;
       }
-      window.addEventListener('keydown', handleKeydown);
     } else {
       restoreBodyScroll();
-      window.removeEventListener('keydown', handleKeydown);
       if (previouslyFocusedElement && typeof previouslyFocusedElement.focus === 'function') {
         previouslyFocusedElement.focus();
         previouslyFocusedElement = null;
       }
     }
 
-    return () => {
-      restoreBodyScroll();
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('keydown', handleKeydown);
-      }
-    };
-  });
+    return () => restoreBodyScroll();
+  };
 
   onDestroy(() => {
     if (activeResizeCleanup) {
@@ -272,11 +251,11 @@
       activeResizeCleanup = null;
     }
     restoreBodyScroll();
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('keydown', handleKeydown);
-    }
   });
 </script>
+
+<svelte:document {@attach overlayLock} />
+<svelte:window onkeydown={handleKeydown} />
 
 {#snippet panel(animated: boolean)}
   <div
@@ -337,7 +316,7 @@
 
 {#if show && isOverlay}
   <!-- Оверлей выносится в body: предок с transform/filter (анимация страницы) ломает position: fixed и слои -->
-  <div class="responsive-sidebar-portal" use:portalToBody>
+  <div class="responsive-sidebar-portal" {@attach portalToBody}>
     <button
       type="button"
       class="responsive-sidebar-backdrop file-tree-backdrop"

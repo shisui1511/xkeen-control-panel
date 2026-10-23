@@ -19,7 +19,7 @@
       {$t('nav.dashboard')}
     </button>
   {/if}
-  {#each items as item, i}
+  {#each items as item, i (i)}
     {#if !hideHome || i > 0}
       <span class="breadcrumb-separator">›</span>
     {/if}

@@ -88,7 +88,7 @@
   <Card title={$t('dash.system_stats')}>
     {#if !systemStats}
       <div class="stats-grid">
-        {#each [1, 2, 3, 4] as _}
+        {#each [1, 2, 3, 4] as _, i (i)}
           <div class="stat-box">
             <Skeleton type="rect" width="80px" height="16px" />
             <Skeleton type="rect" width="120px" height="28px" />

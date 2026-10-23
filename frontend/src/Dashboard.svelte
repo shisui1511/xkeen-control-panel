@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { get } from 'svelte/store';
   import { fade } from 'svelte/transition';
   import { t, currentLang, pluralize } from './i18n';
@@ -123,7 +124,6 @@
   let isMobile = $state(window.matchMedia('(max-width: 768px)').matches);
   const drawerIsModal = $derived(isMobile && $isSidebarOpen);
 
-  let sidebarEl: HTMLElement | null = $state(null);
   let previouslyFocusedElement: HTMLElement | null = null;
   let lockedScrollY = 0;
 
@@ -702,11 +702,10 @@
     }
   }
 
-  function getDrawerFocusables(): HTMLElement[] {
-    if (!sidebarEl) return [];
+  function getDrawerFocusables(drawer: HTMLElement): HTMLElement[] {
     const selectors =
       'summary, button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-    return Array.from(sidebarEl.querySelectorAll(selectors)).filter(
+    return Array.from(drawer.querySelectorAll(selectors)).filter(
       (el) => !(el as HTMLElement).closest('details:not([open])')
     ) as HTMLElement[];
   }
@@ -721,7 +720,7 @@
       return;
     }
     if (e.key === 'Tab') {
-      const focusables = getDrawerFocusables();
+      const focusables = getDrawerFocusables(e.currentTarget as HTMLElement);
       if (focusables.length === 0) {
         e.preventDefault();
         return;
@@ -744,26 +743,25 @@
   }
 
   // Focus save/restore for the mobile drawer-as-modal (mirrors Modal.svelte).
-  $effect(() => {
+  // Вложение на элементе боковой панели: перезапускается при смене drawerIsModal.
+  const drawerFocus: Attachment<HTMLElement> = (drawer) => {
     if (drawerIsModal) {
       previouslyFocusedElement = document.activeElement as HTMLElement;
       const timerId = setTimeout(() => {
-        if (sidebarEl) {
-          const focusables = getDrawerFocusables();
-          if (focusables.length > 0) focusables[0].focus();
-          else sidebarEl.focus();
-        }
+        const focusables = getDrawerFocusables(drawer);
+        if (focusables.length > 0) focusables[0].focus();
+        else drawer.focus();
       }, 0);
       return () => clearTimeout(timerId);
     } else if (previouslyFocusedElement) {
       previouslyFocusedElement.focus();
       previouslyFocusedElement = null;
     }
-  });
+  };
 
   // scrollY-preserving body scroll-lock (RESEARCH §2), reactive on drawerIsModal so
   // it auto-releases on close and on nav-item auto-close (pitfall 6 — no stuck state).
-  $effect(() => {
+  const drawerScrollLock: Attachment<HTMLElement> = () => {
     if (drawerIsModal) {
       lockedScrollY = window.scrollY;
       document.body.style.top = `-${lockedScrollY}px`;
@@ -777,7 +775,7 @@
       document.body.classList.remove('drawer-locked');
       document.body.style.top = '';
     };
-  });
+  };
 
   let chunkReloadKey = $state(0);
   let lastChunkErrorTab: string | null = null;
@@ -806,8 +804,12 @@
     });
   }
 
-  function reportChunkErrorAction(_node: HTMLElement, err: unknown): void {
-    reportChunkError(err);
+  // Вложение для блока {:catch err}: сообщает об ошибке один раз при монтировании блока.
+  // untrack — чтобы смена вкладки или языка не запускала вложение повторно.
+  function reportChunkErrorAttachment(err: unknown): Attachment<HTMLElement> {
+    return () => {
+      untrack(() => reportChunkError(err));
+    };
   }
 
   function switchTab(tab: string) {
@@ -969,7 +971,8 @@
     class:sidebar-open={$isSidebarOpen}
     class:rail={$isSidebarCollapsed}
     style="display: flex; flex-direction: column;"
-    bind:this={sidebarEl}
+    {@attach drawerFocus}
+    {@attach drawerScrollLock}
     onkeydown={handleDrawerKeydown}
     role={drawerIsModal ? 'dialog' : undefined}
     aria-modal={drawerIsModal ? 'true' : undefined}
@@ -1582,7 +1585,7 @@
             <Editor onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1599,7 +1602,7 @@
             <Logs />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1616,7 +1619,7 @@
             <Proxies />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1633,7 +1636,7 @@
             <Connections />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1650,7 +1653,7 @@
             <Rules onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1667,7 +1670,7 @@
             <Traffic />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1684,7 +1687,7 @@
             <Services onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1701,7 +1704,7 @@
             <SmartProxy onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1718,7 +1721,7 @@
             <TrafficQuotas onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1735,7 +1738,7 @@
             <DATManager onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1752,7 +1755,7 @@
             <MihomoGenerator onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1769,7 +1772,7 @@
             <Console onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -1796,7 +1799,7 @@
               <Config onSwitchTab={switchTab} />
             </div>
           {:catch err}
-            <div use:reportChunkErrorAction={err}>
+            <div {@attach reportChunkErrorAttachment(err)}>
               <EmptyState
                 title={$t('app.chunk_load_failed')}
                 description=""
@@ -1814,7 +1817,7 @@
             <Settings onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          <div use:reportChunkErrorAction={err}>
+          <div {@attach reportChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
