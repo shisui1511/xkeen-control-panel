@@ -4,6 +4,7 @@
   import { showConfirm, showToast, activeKernelState } from '../../../stores';
   import EmptyState from '../../EmptyState.svelte';
   import Skeleton from '../../Skeleton.svelte';
+  import Button from '../../Button.svelte';
   import SegmentedControl from '../../SegmentedControl.svelte';
   import { handleLayerError, layerSnapshot } from '../../../lib/configLayer';
   import { configSubTabHash } from '../../../lib/configSubTab';
@@ -20,6 +21,7 @@
   import { chosenKernel } from '../../../lib/nodesView';
   import { expandedGroups, toggleGroupExpanded } from '../../../lib/routingView';
   import GroupCard from './GroupCard.svelte';
+  import GroupEditModal from './GroupEditModal.svelte';
 
   // Представление маршрутизации читается при открытии вкладки; дальше его перечитывают
   // события SSE routing, sources и draft (подписки регистрирует configRouting.ts).
@@ -58,6 +60,20 @@
     { value: 'xray', label: 'Xray' },
     { value: 'mihomo', label: 'Mihomo' }
   ];
+
+  // Одна копия диалога на вкладку: null — новая группа
+  let modalOpen = $state(false);
+  let editing = $state<GroupView | null>(null);
+
+  function openNew() {
+    editing = null;
+    modalOpen = true;
+  }
+
+  function openEdit(group: GroupView) {
+    editing = group;
+    modalOpen = true;
+  }
 
   function gotoNodes() {
     window.location.hash = configSubTabHash('nodes');
@@ -103,6 +119,11 @@
       oncta={() => void loadRouting()}
     />
   {:else if noSources}
+    <div class="groups-panel">
+      <Button variant="primary" data-testid="groups-add" onclick={openNew}>
+        {$t('cfg.groups.add')}
+      </Button>
+    </div>
     <EmptyState
       title={$t('cfg.groups.nosrc_title')}
       description={$t('cfg.groups.nosrc_body')}
@@ -114,7 +135,9 @@
     <EmptyState
       title={$t('cfg.groups.empty_title')}
       description={$t('cfg.groups.empty_body')}
+      ctaText={$t('cfg.groups.empty_cta')}
       plain
+      oncta={openNew}
     />
   {:else if showList}
     <!-- Строка управления есть всегда: сегмент появляется в ней без сдвига списка -->
@@ -132,6 +155,9 @@
       <span class="groups-count" data-testid="groups-count">
         {$tp('cfg.groups.count', groups.length)}
       </span>
+      <Button variant="primary" data-testid="groups-add" onclick={openNew}>
+        {$t('cfg.groups.add')}
+      </Button>
     </div>
     <div class="groups-list">
       {#each groups as group (group.id)}
@@ -142,12 +168,21 @@
           {installed}
           expanded={$expandedGroups[group.id] === true}
           ontoggle={() => toggleGroupExpanded(group.id)}
+          onedit={openEdit}
           ondelete={removeGroup}
         />
       {/each}
     </div>
   {/if}
 </div>
+
+<GroupEditModal
+  open={modalOpen}
+  group={editing}
+  {groups}
+  features={$routingView?.features ?? {}}
+  onclose={() => (modalOpen = false)}
+/>
 
 <style>
   .groups-tab {

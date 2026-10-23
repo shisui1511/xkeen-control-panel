@@ -1,5 +1,5 @@
 // e2e-pages: config/groups
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
 import { CORE_TAG } from './lib/known';
@@ -271,3 +271,238 @@ test(
     }
   }
 );
+
+// --- Диалог группы ---
+
+const addGroupButton = (page: Page): Locator =>
+  page.getByRole('button', { name: /^(Добавить группу|Add group)$/ }).first();
+
+const modalOf = (page: Page): Locator => page.getByTestId('group-modal');
+
+/** Открывает диалог новой группы и ждёт его появления. */
+async function openNewGroup(page: Page): Promise<Locator> {
+  await addGroupButton(page).click();
+  const modal = modalOf(page);
+  await expect(modal).toBeVisible({ timeout: T.action });
+  return modal;
+}
+
+/** Числа строки предпросмотра по ядрам после того, как расчёт закончился. */
+async function previewCounts(page: Page): Promise<number[]> {
+  await expect(page.getByTestId('group-preview-busy')).toHaveCount(0, { timeout: T.action });
+  const line = page.getByTestId('group-preview-line');
+  await expect(line).toBeVisible({ timeout: T.action });
+  return ((await line.innerText()).match(/\d+/g) ?? []).map(Number);
+}
+
+/** Сохраняет группу через API панели (в черновик); возвращает её идентификатор. */
+async function saveGroupApi(page: Page, group: Record<string, unknown>): Promise<string> {
+  const res = await api(page, 'POST', '/api/configlayer/routing/groups/save', {
+    revision: (await routingInfo(page)).revision,
+    group: {
+      id: '',
+      sources: { all: true, ids: [] },
+      include: [],
+      exclude: [],
+      regex: false,
+      picks: [],
+      members: [],
+      reserve: '',
+      ...group
+    }
+  });
+  expect(res.status, 'сохранение группы через API').toBe(200);
+  return String((res.data?.group as { id?: string } | undefined)?.id ?? '');
+}
+
+interface GroupFull {
+  id: string;
+  name: string;
+  mode: string;
+  exclude: string[];
+  reserve: string;
+  members: { kind: string; id?: string }[];
+}
+
+async function groupsFull(page: Page): Promise<GroupFull[]> {
+  const view = await api(page, 'GET', '/api/configlayer/routing');
+  expect(view.status, 'GET /api/configlayer/routing').toBe(200);
+  return (view.data?.groups ?? []) as GroupFull[];
+}
+
+test('groups: диалог группы — пустое имя блокирует сохранение, дубль имени, «Авто» с исключением по подстроке в другом регистре', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await startPage(page);
+  await resetDraft(page);
+  const inst = await installedKernels(page);
+  const port = randomPort();
+  try {
+    await addToDraft(
+      page,
+      [
+        nodeLink('vless_ws.txt', port, 'DlgAlpha'),
+        nodeLink('vless_ws.txt', port + 1, 'DlgBeta')
+      ].join('\n')
+    );
+    await openGroups(page);
+    const modal = await openNewGroup(page);
+    const nameField = modal.getByRole('textbox', { name: /^(Имя|Name)$/ });
+    const save = page.getByTestId('group-save');
+
+    // пустое имя: ошибка под полем, «Сохранить в черновик» неактивна
+    await expect(save).toBeDisabled();
+    await expect(modal.locator('.error-text').first()).toContainText(
+      /Введите имя группы|Enter a group name/
+    );
+    await expect(nameField).toHaveAttribute('aria-describedby', /-error$/);
+
+    // дубль имени существующей группы (регистр не важен)
+    const existing = (await routingInfo(page)).groups[0];
+    if (existing) {
+      await nameField.fill(existing.name.toUpperCase());
+      await expect(modal.locator('.error-text').first()).toContainText(/уже есть|already/);
+      await expect(save).toBeDisabled();
+    }
+
+    // режим «Авто»: предпросмотр считает состав по каждому установленному ядру
+    const name = `RT Авто ${port}`;
+    await nameField.fill(name);
+    await expect(modal.locator('.error-text')).toHaveCount(0);
+    await expect(save).toBeEnabled();
+    await modal
+      .getByTestId('group-mode')
+      .getByRole('button', { name: /^(Авто|Auto)$/ })
+      .click();
+    const before = await previewCounts(page);
+    expect(before.length, 'по числу на каждое установленное ядро').toBe(
+      Number(inst.xray) + Number(inst.mihomo)
+    );
+    expect(
+      before.every((n) => n >= 2),
+      'оба узла попали в предпросмотр'
+    ).toBe(true);
+
+    // исключение по подстроке без учёта регистра уменьшает состав в каждом ядре
+    await modal.getByTestId('group-exclude').fill('dlgbeta');
+    await expect
+      .poll(async () => (await previewCounts(page)).every((n, i) => n === before[i] - 1), {
+        timeout: T.action
+      })
+      .toBe(true);
+
+    await save.click();
+    await expect(modal).toHaveCount(0, { timeout: T.action });
+    const card = page.locator('article[data-testid^="group-card-"]').filter({ hasText: name });
+    await expect(card).toBeVisible({ timeout: T.action });
+    await expect(card.locator('[data-testid^="group-mode-"]')).toHaveText(/Авто|Auto/);
+
+    // в черновике лежит то, что показал диалог
+    const saved = (await groupsFull(page)).find((g) => g.name === name);
+    expect(saved?.mode).toBe('auto');
+    expect(saved?.exclude).toEqual(['dlgbeta']);
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});
+
+test('groups: диалог группы — «Вручную» с участниками DIRECT и вложенной «Авто», цикл при вложении группы, уже содержащей текущую', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await startPage(page);
+  await resetDraft(page);
+  const port = randomPort();
+  try {
+    await addToDraft(page, nodeLink('vless_ws.txt', port, 'DlgMember'));
+    const autoId = await saveGroupApi(page, { name: `RT Вложенная ${port}`, mode: 'auto' });
+    await openGroups(page);
+
+    // «Вручную» (режим по умолчанию): участники DIRECT и вложенная группа, порядок кнопками
+    const modal = await openNewGroup(page);
+    const name = `RT Ручная ${port}`;
+    await modal.getByRole('textbox', { name: /^(Имя|Name)$/ }).fill(name);
+    const add = modal.getByTestId('group-member-add');
+    await add.selectOption('direct');
+    await add.selectOption(`group:${autoId}`);
+    const members = modal.getByTestId('group-members').locator('li');
+    await expect(members).toHaveCount(2);
+    await expect(members.first()).toContainText('DIRECT');
+    // «Вниз» у первого участника меняет порядок
+    await members
+      .first()
+      .getByRole('button', { name: /Опустить участника|Move member .* down/ })
+      .click();
+    await expect(members.last()).toContainText('DIRECT');
+    await page.getByTestId('group-save').click();
+    await expect(modal).toHaveCount(0, { timeout: T.action });
+    const manual = (await groupsFull(page)).find((g) => g.name === name);
+    expect(
+      manual?.members.map((m) => m.kind),
+      'порядок участников'
+    ).toEqual(['group', 'direct']);
+    const manualId = manual?.id ?? '';
+
+    // цикл: вторая ручная группа вкладывает первую; вложить вторую в первую нельзя
+    const outerId = await saveGroupApi(page, {
+      name: `RT Внешняя ${port}`,
+      mode: 'manual',
+      members: [{ kind: 'group', id: manualId }]
+    });
+    await expect(page.getByTestId(`group-card-${outerId}`)).toBeVisible({ timeout: T.action });
+    await page.getByTestId(`group-edit-${manualId}`).click();
+    const edit = modalOf(page);
+    await expect(edit).toBeVisible({ timeout: T.action });
+    await expect(edit.getByRole('textbox', { name: /^(Имя|Name)$/ })).toHaveValue(name);
+    await edit.getByTestId('group-member-add').selectOption(`group:${outerId}`);
+    await page.getByTestId('group-save').click();
+    const cycle = edit.getByTestId('group-cycle-error');
+    await expect(cycle).toBeVisible({ timeout: T.action });
+    // диалог остался открытым с введённым, отмена закрывает без записи
+    await expect(edit).toBeVisible();
+    await page.getByTestId('group-cancel').click();
+    await expect(edit).toHaveCount(0, { timeout: T.action });
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});
+
+test('groups: диалог группы — «Резерв» без резервного узла: ошибка под полем и неактивное сохранение', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await startPage(page);
+  await resetDraft(page);
+  const port = randomPort();
+  try {
+    await addToDraft(page, nodeLink('vless_ws.txt', port, 'DlgReserve'));
+    await openGroups(page);
+    const modal = await openNewGroup(page);
+    const name = `RT Резерв ${port}`;
+    await modal.getByRole('textbox', { name: /^(Имя|Name)$/ }).fill(name);
+    await modal
+      .getByTestId('group-mode')
+      .getByRole('button', { name: /^(Резерв|Fallback)$/ })
+      .click();
+
+    const error = modal.getByTestId('group-reserve-error');
+    await expect(error).toBeVisible({ timeout: T.action });
+    await expect(page.getByTestId('group-save')).toBeDisabled();
+
+    // выбор резервного узла снимает ошибку; сохранение пишет в черновик режим и узел
+    await modal.getByTestId('group-reserve').selectOption({ index: 1 });
+    await expect(error).toHaveCount(0);
+    await expect(page.getByTestId('group-save')).toBeEnabled();
+    await page.getByTestId('group-save').click();
+    await expect(modal).toHaveCount(0, { timeout: T.action });
+    const saved = (await groupsFull(page)).find((g) => g.name === name);
+    expect(saved?.mode).toBe('fallback');
+    expect(saved?.reserve, 'резервный узел записан').not.toBe('');
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});
