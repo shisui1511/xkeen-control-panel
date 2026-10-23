@@ -471,7 +471,7 @@
           <span class="gc-arrow">›</span>
           {@render chainPill(displayChain.items[1])}
         {:else if displayChain.items.length > 0}
-          {#each displayChain.items as item, index}
+          {#each displayChain.items as item, index (index)}
             {#if index > 0}
               <span class="gc-arrow">›</span>
             {/if}
@@ -548,7 +548,7 @@
           </div>
 
           <div class="proxy-grid">
-            {#each renderedNodes as proxyName}
+            {#each renderedNodes as proxyName, i (i)}
               {@const proxy = proxies[proxyName]}
               {@const isActive = group.now === proxyName}
               {@const flag = getMissingCountryFlag(proxyName)}

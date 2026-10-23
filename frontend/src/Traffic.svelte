@@ -1004,7 +1004,7 @@
     </div>
 
     <div class="chart-x">
-      {#each timeLabels as label}
+      {#each timeLabels as label, i (i)}
         <span>{label}</span>
       {/each}
     </div>
@@ -1099,7 +1099,7 @@
         />
       {:else}
         <div class="clients-list">
-          {#each topClients as client}
+          {#each topClients as client, i (i)}
             {@const sharePercent = Math.min(
               100,
               Math.max(2, Math.round((client.total_bytes / totalClientsTraffic) * 100))

@@ -122,7 +122,7 @@
       <div class="dropdown-section">
         <div class="section-title">{$t('settings.ping_timeout_label')}</div>
         <div class="timeout-chips">
-          {#each [2000, 5000, 8000, 10000] as to}
+          {#each [2000, 5000, 8000, 10000] as to (to)}
             <button
               type="button"
               class="timeout-chip {config.timeoutMs === to ? 'selected' : ''}"

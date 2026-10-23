@@ -253,7 +253,7 @@
 
     {#if availableCountries.length > 0 || availableProtocols.length > 0}
       <div class="node-filter-chips">
-        {#each availableCountries as c}
+        {#each availableCountries as c (c.code)}
           {@const isSelected = selectedCountry === c.code}
           <button
             type="button"
@@ -269,7 +269,7 @@
           </button>
         {/each}
 
-        {#each availableProtocols as p}
+        {#each availableProtocols as p (p.protocol)}
           {@const isSelected = selectedProtocol === p.protocol}
           <button
             type="button"
@@ -299,7 +299,7 @@
     </div>
   {:else}
     <div class="inline-nodes-list">
-      {#each filteredNodes as node}
+      {#each filteredNodes as node (node.tag)}
         {@const h = health[node.tag]}
         {@const isNodeActive = node.active}
         {@const showSelectionBadge = enableXray && isNodeActive && !node.stub}
@@ -461,7 +461,7 @@
                   title={$t('subscr.dialer_proxy.hint')}
                 >
                   <option value="">{$t('subscr.dialer_proxy.none')}</option>
-                  {#each dialerProxyTargets as target}
+                  {#each dialerProxyTargets as target, i (i)}
                     {#if target.tag !== node.tag}
                       <option value={target.tag}>
                         {target.name || target.tag}{target.subscription_id !== subId

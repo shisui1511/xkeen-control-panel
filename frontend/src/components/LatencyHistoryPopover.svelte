@@ -133,7 +133,7 @@
   {:else}
     <div class="sparkline-section">
       <div class="history-sparkline">
-        {#each recentHistory as item}
+        {#each recentHistory as item, i (i)}
           <div
             class="sparkline-bar"
             style="height: {getBarHeight(item.delay)}%; background-color: {getBarColor(
@@ -149,7 +149,7 @@
     </div>
 
     <div class="history-list">
-      {#each [...recentHistory].reverse() as item}
+      {#each [...recentHistory].reverse() as item, i (i)}
         <div class="history-row">
           <span class="history-time">
             {formatTimeAgo(new Date(item.time).getTime(), $t)}
