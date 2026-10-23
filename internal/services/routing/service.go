@@ -244,7 +244,8 @@ func draftSourceIDs(draft configlayer.Sections) map[string]bool {
 // «авто») и «Прокси» (ручная, участник «Авто» и все узлы). Один раз:
 // defaults_done не даёт создать их снова, а группы, удалённые пользователем,
 // не возвращаются (D-09, D-37). Источники, добавленные до этой фазы, групп по
-// умолчанию не получают: до 1.0.0 без миграций (U-07).
+// умолчанию не получают: до 1.0.0 без миграций (U-07). «Мои узлы» без записей
+// источником не считаются (sources.SourcePresent).
 func (s *Service) draftExtras(st configlayer.StateView, added []string) (map[string]json.RawMessage, error) {
 	if len(added) == 0 {
 		return nil, nil
@@ -254,8 +255,8 @@ func (s *Service) draftExtras(st configlayer.StateView, added []string) (map[str
 		// Испорченную секцию сообщает проверка; добавлению источника она не мешает.
 		return nil, nil
 	}
-	for name := range st.Draft {
-		if strings.HasPrefix(name, sources.SectionPrefix) {
+	for name, raw := range st.Draft {
+		if sources.SourcePresent(name, raw) {
 			return nil, nil
 		}
 	}

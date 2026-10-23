@@ -58,6 +58,12 @@ func TestRouterGroupsDefaultsAndResolve(t *testing.T) {
 		t.Fatalf("«Применить» без источников и групп заблокировано: %v", err)
 	}
 
+	// «Мои узлы» без записей (все узлы удалены) источником не считаются: первый
+	// Add всё равно создаёт группы по умолчанию.
+	if _, err := e.layer.EditDraft(e.rev(t), sources.MySection, json.RawMessage(`{"kind":"my","enabled":true,"entries":[]}`)); err != nil {
+		t.Fatalf("пустые «Мои узлы» в черновике: %v", err)
+	}
+
 	// Первый Add: «Авто» и «Прокси» той же ревизией, что источник.
 	before := e.rev(t)
 	e.addMyLinks(t, rtLinkNames...)

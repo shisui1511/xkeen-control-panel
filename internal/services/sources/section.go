@@ -87,6 +87,24 @@ func sourceID(section string) (string, bool) {
 	return id, true
 }
 
+// SourcePresent сообщает, считается ли секция черновика источником для групп по
+// умолчанию: секция src_* есть, а «Мои узлы» — с хотя бы одной записью. «Мои
+// узлы», из которых удалены все узлы, источником не считаются; испорченная секция
+// считается (её сообщает проверка).
+func SourcePresent(section string, raw json.RawMessage) bool {
+	if !strings.HasPrefix(section, SectionPrefix) {
+		return false
+	}
+	if section != MySection {
+		return true
+	}
+	if len(raw) == 0 {
+		return false
+	}
+	cfg, err := parseMy(raw)
+	return err != nil || len(cfg.Entries) > 0
+}
+
 // newID возвращает 8 hex из источника случайности.
 func newID(r io.Reader) (string, error) {
 	var b [4]byte

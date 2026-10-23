@@ -535,7 +535,7 @@ func (s *Service) addEntry(rev int64, entry *previewEntry) (AddResult, error) {
 	// источники (группы по умолчанию при первом источнике, D-09).
 	if hook := s.extrasHook(); hook != nil {
 		var addedIDs []string
-		if _, present := st.Draft[MySection]; added > 0 && !present {
+		if added > 0 && !SourcePresent(MySection, st.Draft[MySection]) {
 			addedIDs = append(addedIDs, MySourceID)
 		}
 		for id := range live {
