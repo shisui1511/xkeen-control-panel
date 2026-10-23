@@ -388,3 +388,77 @@ func (e *rtEnv) svcSaveProbe(url string) error {
 	_, err = e.svc.SaveProbe(rev.DraftRevision, ProbeConfig{URL: url, IntervalS: 10, TimeoutS: 5})
 	return err
 }
+
+// Наблюдатель выбора: выбор панели ставится в каждый новый процесс Mihomo.
+// Остановленный процесс получает pending_stopped; новый процесс в том же каталоге
+// восстанавливает из cache.db прежний выбор (store-selected), и наблюдатель
+// возвращает выбор панели. Внешний PUT при том же процессе наблюдатель не
+// перетирает. Тот же путь проходит переключение ядра с Xray на Mihomo: новый
+// процесс. Ядро стенда не трогается (отдельный процесс в каталоге теста).
+func TestRouterSelectMihomoStart(t *testing.T) {
+	ctx := context.Background()
+	core := rtNewMihomoCore(t)
+	e := rtNewEnv(t, rtWithKernels(rtMihomoOnly), rtWithMihomoCore(core), rtWithSelection())
+	e.writeUserProfile(t)
+	e.addMyRaw(t, "socks5://127.0.0.1:9#sel-a", "socks5://127.0.0.1:10#sel-b")
+	cat := e.catalog(t).Mihomo
+	nodeA, nodeB := rtsNode(t, cat, "sel-a"), rtsNode(t, cat, "sel-b")
+	_, grp, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Выбор", Mode: ModeManual, Sources: GroupSources{All: true}})
+	if err != nil {
+		t.Fatalf("SaveGroup: %v", err)
+	}
+	e.takeAndApply(t)
+
+	// Первый процесс: выбор A, store-selected пишет его в cache.db каталога теста.
+	core.start(t, e)
+	res, err := e.svc.Select(ctx, grp.ID, memberNode+nodeA.Ref)
+	if err != nil {
+		t.Fatalf("Select (A): %v", err)
+	}
+	if got := res.Kernels[configlayer.KernelMihomo]; got != selApplied {
+		t.Fatalf("Kernels[mihomo] = %q, ожидалось %q", got, selApplied)
+	}
+	rtsWaitNow(t, core, "Выбор", nodeA.MihomoName, 10*time.Second)
+
+	w := NewSelectionWatcher(e.svc, core.pidOf, time.Second)
+	w.Start()
+	t.Cleanup(w.Stop)
+
+	// Остановка процесса: выбор B записывается, Mihomo получит его при запуске.
+	core.stop()
+	rtWaitCond(t, 10*time.Second, "остановка процесса Mihomo", func() bool { return core.pid() == 0 })
+	res, err = e.svc.Select(ctx, grp.ID, memberNode+nodeB.Ref)
+	if err != nil {
+		t.Fatalf("Select (B, ядро остановлено): %v", err)
+	}
+	if got := res.Kernels[configlayer.KernelMihomo]; got != selPendingStopped {
+		t.Errorf("Kernels[mihomo] при остановленном ядре = %q, ожидалось %q", got, selPendingStopped)
+	}
+	if got := e.rtcSelection(t)[grp.ID]; got != memberNode+nodeB.Ref {
+		t.Fatalf("Live[selection] = %q, ожидался узел B", got)
+	}
+
+	// Второй процесс в том же каталоге: cache.db восстанавливает A, наблюдатель
+	// возвращает B в пределах 15 секунд.
+	core.start(t, e)
+	rtsWaitNow(t, core, "Выбор", nodeB.MihomoName, 15*time.Second)
+
+	// Внешний выбор при том же процессе наблюдатель не перетирает: сверка идёт
+	// только при новом процессе, после «Применить» и после сбоя выбора.
+	if err := core.svc.SelectProxy(ctx, "Выбор", nodeA.MihomoName); err != nil {
+		t.Fatalf("внешний PUT: %v", err)
+	}
+	overwritten := false
+	for end := time.Now().Add(6 * time.Second); time.Now().Before(end); time.Sleep(500 * time.Millisecond) {
+		if now, err := core.svc.ProxyNow(ctx, "Выбор"); err == nil && now != nodeA.MihomoName {
+			overwritten = true
+			break
+		}
+	}
+	if overwritten {
+		t.Errorf("наблюдатель перетёр внешний выбор при том же процессе")
+	}
+
+	w.Stop()
+	w.Stop()
+}
