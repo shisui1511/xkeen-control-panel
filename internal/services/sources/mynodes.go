@@ -127,11 +127,21 @@ func (s *Service) SaveNode(rev int64, entryID, name, text string) (configlayer.D
 		}
 		cfg.Entries[i] = MyEntry{ID: entryID, Name: name, Format: n.Format, Raw: n.Text}
 	}
-	return s.writeMy(rev, cfg)
+	return s.writeMy(rev, cfg, nil)
 }
 
-// DeleteNode удаляет запись; секция src_my остаётся, даже если записей не стало.
+// DeleteNode удаляет запись без правок других секций (DeleteNodeWith).
 func (s *Service) DeleteNode(rev int64, entryID string) (configlayer.DraftEvent, error) {
+	return s.DeleteNodeWith(rev, entryID, nil)
+}
+
+// DeleteNodeWith удаляет запись и одной правкой (одна ревизия) меняет секции
+// extra — ссылки групп на её узел (SRC-07). Секция src_my остаётся, даже если
+// записей не стало. Правила extra — как у DeleteWith.
+func (s *Service) DeleteNodeWith(rev int64, entryID string, extra map[string]json.RawMessage) (configlayer.DraftEvent, error) {
+	if _, err := mergeExtra(nil, extra); err != nil {
+		return configlayer.DraftEvent{}, err
+	}
 	cfg, cur, err := s.draftMy()
 	if err != nil {
 		return configlayer.DraftEvent{}, err
@@ -144,7 +154,7 @@ func (s *Service) DeleteNode(rev int64, entryID string) (configlayer.DraftEvent,
 		return configlayer.DraftEvent{}, ErrNodeNotFound
 	}
 	cfg.Entries = append(cfg.Entries[:i], cfg.Entries[i+1:]...)
-	return s.writeMy(rev, cfg)
+	return s.writeMy(rev, cfg, extra)
 }
 
 // NodeRaw возвращает исходный текст записи полностью, без маски (D-34).
@@ -162,10 +172,15 @@ func (s *Service) NodeRaw(entryID string) (NodeRawView, error) {
 }
 
 // writeMy записывает секцию src_my в черновик.
-func (s *Service) writeMy(rev int64, cfg MySourceConfig) (configlayer.DraftEvent, error) {
+// Секции extra (если есть) идут в той же правке черновика.
+func (s *Service) writeMy(rev int64, cfg MySourceConfig, extra map[string]json.RawMessage) (configlayer.DraftEvent, error) {
 	section, err := encodeMy(cfg)
 	if err != nil {
 		return configlayer.DraftEvent{}, err
 	}
-	return s.d.Layer.EditDraftBatch(rev, map[string]json.RawMessage{MySection: section}, nil)
+	sections, err := mergeExtra(map[string]json.RawMessage{MySection: section}, extra)
+	if err != nil {
+		return configlayer.DraftEvent{}, err
+	}
+	return s.d.Layer.EditDraftBatch(rev, sections, nil)
 }
