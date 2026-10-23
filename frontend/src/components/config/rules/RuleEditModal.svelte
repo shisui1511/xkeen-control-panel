@@ -10,6 +10,7 @@
   import { routingView, routingErrorText, saveRule } from '../../../lib/configRouting';
   import type { ListRef, RawRule, RuleView, Target } from '../../../lib/configRouting';
   import { condTypeKey, targetLabel } from '../../../lib/routingView';
+  import ListPickerModal from './ListPickerModal.svelte';
 
   // Диалог правила: условия через «И», цель (группа, DIRECT или REJECT) и «своё правило ядра»
   // в режиме «Эксперт». Клиентская проверка значений — только подсказка формата для мгновенной
@@ -298,6 +299,21 @@
   function removeList(c: CondDraft, i: number) {
     c.lists.splice(i, 1);
     c.touched = true;
+    delete serverCondErrors[c.key];
+  }
+
+  // --- Выбор списка (поверх диалога правила) ---
+  // Ключ условия, для которого открыт выбор; null — диалог выбора закрыт
+  let pickerKey = $state<number | null>(null);
+  const pickerCond = $derived(conds.find((c) => c.key === pickerKey) ?? null);
+
+  function onPickLists(refs: ListRef[]) {
+    const c = pickerCond;
+    pickerKey = null;
+    if (!c) return;
+    c.lists = refs.map((r) => ({ ...r }));
+    c.touched = true;
+    saveError = '';
     delete serverCondErrors[c.key];
   }
 
@@ -633,6 +649,16 @@
                     </button>
                   </span>
                 {/each}
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  disabled={saving}
+                  data-testid="rule-cond-pick-{i}"
+                  onclick={() => (pickerKey = c.key)}
+                >
+                  <Icon name="add" size={14} />
+                  {$t('cfg.rules.pick_list')}
+                </button>
               </div>
             {/if}
 
@@ -711,6 +737,14 @@
     </div>
   </div>
 </Modal>
+
+<ListPickerModal
+  open={pickerKey !== null}
+  kind={pickerCond?.type === 'geoip' ? 'ip' : 'site'}
+  selected={pickerCond?.lists ?? []}
+  onpick={onPickLists}
+  onclose={() => (pickerKey = null)}
+/>
 
 <style>
   .re-body {
@@ -876,6 +910,7 @@
   .re-lists {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: var(--spacing-1) var(--spacing-2);
   }
 

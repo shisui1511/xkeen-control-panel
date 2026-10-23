@@ -48,7 +48,7 @@ export const ownerState: Readable<OwnerState> = derived(layerSnapshot, (s) => {
 export const routingBusy = writable(false);
 
 /** Причина ошибки действия без завершающей точки: текст подставляется в предложение. */
-function reasonOf(err: unknown): string {
+export function reasonOf(err: unknown): string {
   const e = err as { code?: string; params?: Record<string, string>; message?: string } | null;
   const text =
     e && typeof e.code === 'string' && e.code !== ''
