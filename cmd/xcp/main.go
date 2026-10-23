@@ -958,8 +958,12 @@ func runXKeenUpdateGeo(ctx context.Context, console *services.ConsoleService) er
 // порту и SNI узла). Проверка сертификата не нужна: важна достижимость сервера.
 // Узел без TLS и Reality (Shadowsocks, VMess и подобные) TLS не отвечает никогда,
 // поэтому для него проверяется TCP-соединение с адресом и портом. Протоколы
-// поверх UDP (hysteria2, tuic, wireguard) проверяются, как и раньше, по TLS.
-// Срок ожидания задаёт ctx; сама проверка ограничена пятью секундами.
+// поверх UDP (hysteria2, tuic, wireguard) проверяются по TLS через TCP, но их
+// серверы QUIC/WireGuard на TCP-порту не отвечают: такая проверка заведомо
+// неуспешна, и без запущенного Mihomo (пинг через его API) повторный выбор не
+// считает UDP-узел «ответившим»: он остаётся в выборе лишь как первый по порядку,
+// когда не ответил никто (answered=false, уведомление честно говорит «ни один узел
+// не ответил»). Срок ожидания задаёт ctx; сама проверка ограничена пятью секундами.
 func pingNodeTLS(ctx context.Context, n nodes.Node) error {
 	if n.TLS == nil && n.Reality == nil && !nodeOverUDP(n.Protocol) {
 		dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
