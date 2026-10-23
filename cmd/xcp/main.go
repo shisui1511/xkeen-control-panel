@@ -741,17 +741,13 @@ func main() {
 			sourcesSvc = nil
 		}
 		if sourcesSvc != nil {
-			for _, g := range sourcesSvc.Generators() {
-				if srcErr = configLayer.RegisterGenerator(g); srcErr != nil {
-					break
-				}
-			}
-			if srcErr == nil {
-				srcErr = configLayer.AddLiveCommitter(sourcesSvc.CommitLive)
-			}
-			if srcErr == nil {
-				srcErr = configLayer.OnDriftResolved(sourcesSvc.OnDriftResolved)
-			}
+			// Подключение целиком или никак: при ошибке в слое не остаётся
+			// генераторов сервиса, которого нет.
+			srcErr = configLayer.Register(configlayer.Hooks{
+				Generators:      sourcesSvc.Generators(),
+				LiveCommitter:   sourcesSvc.CommitLive,
+				OnDriftResolved: sourcesSvc.OnDriftResolved,
+			})
 			if srcErr != nil {
 				log.Printf("Сервис источников не подключён к слою, маршруты /api/configlayer/sources* отвечают 404: %v", srcErr)
 				sourcesSvc = nil
@@ -779,24 +775,18 @@ func main() {
 				Ping:          pingNodeTLS,
 				GOARCH:        runtime.GOARCH,
 			})
+			// Генераторы, проверка и хуки выбора участника (D-36, D-39) подключаются
+			// одним вызовом: при ошибке в слое не остаётся ничего от остановленного
+			// сервиса. Фиксатор выбора идёт после фиксатора источников (каталог
+			// узлов считается по уже зафиксированным источникам), сверка now и
+			// повторный выбор — после каждого применения.
 			if routeErr == nil {
-				for _, g := range routingSvc.Generators() {
-					if routeErr = configLayer.RegisterGenerator(g); routeErr != nil {
-						break
-					}
-				}
-			}
-			if routeErr == nil {
-				routeErr = configLayer.RegisterChecker(routingSvc.Checker())
-			}
-			// Хуки выбора участника (D-36, D-39): фиксатор выбора идёт после
-			// фиксатора источников (каталог узлов считается по уже зафиксированным
-			// источникам), сверка now и повторный выбор — после каждого применения.
-			if routeErr == nil {
-				routeErr = configLayer.AddLiveCommitter(routingSvc.CommitLive)
-			}
-			if routeErr == nil {
-				routeErr = configLayer.AddAfterApply(routingSvc.AfterApply)
+				routeErr = configLayer.Register(configlayer.Hooks{
+					Generators:    routingSvc.Generators(),
+					Checker:       routingSvc.Checker(),
+					LiveCommitter: routingSvc.CommitLive,
+					AfterApply:    routingSvc.AfterApply,
+				})
 			}
 			if routeErr == nil {
 				// Хук групп по умолчанию ставится только после полной регистрации.

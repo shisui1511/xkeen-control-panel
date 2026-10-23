@@ -1094,6 +1094,58 @@ func (l *Layer) OnDriftResolved(fn func()) error {
 	return nil
 }
 
+// Hooks — всё, чем сервис подключается к слою: генераторы, проверка и хуки.
+// Пустые поля пропускаются.
+type Hooks struct {
+	Generators      []Generator
+	Checker         Checker
+	LiveCommitter   LiveCommitFunc
+	AfterApply      func(ctx context.Context, info AfterApplyInfo)
+	OnDriftResolved func()
+}
+
+// Register подключает сервис целиком или не подключает вовсе: все условия
+// (слой не запущен, ID генераторов и проверки свободны и не повторяются)
+// проверяются под одним замком до первой записи. Ошибка оставляет слой как был:
+// у сервиса, которого не подключили, в слое ничего не остаётся. Допустим только
+// до Start.
+func (l *Layer) Register(h Hooks) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	seen := make(map[string]bool, len(h.Generators))
+	for _, g := range h.Generators {
+		if g == nil {
+			return errors.New("configlayer: генератор не задан")
+		}
+		if seen[g.ID()] || l.registry.Has(g.ID()) {
+			return fmt.Errorf("configlayer: генератор %q уже зарегистрирован", g.ID())
+		}
+		seen[g.ID()] = true
+	}
+	if h.Checker != nil && l.registry.HasChecker(h.Checker.ID()) {
+		return fmt.Errorf("configlayer: проверка %q уже зарегистрирована", h.Checker.ID())
+	}
+	for _, g := range h.Generators {
+		l.registry.Register(g)
+	}
+	if h.Checker != nil {
+		l.registry.RegisterChecker(h.Checker)
+	}
+	if h.LiveCommitter != nil {
+		l.pipeline.addCommitLive(h.LiveCommitter)
+	}
+	if h.AfterApply != nil {
+		l.afterApply = append(l.afterApply, h.AfterApply)
+	}
+	if h.OnDriftResolved != nil {
+		l.onDriftResolved = h.OnDriftResolved
+	}
+	return nil
+}
+
 // ResetDraft сбрасывает черновик к применённому состоянию.
 func (l *Layer) ResetDraft(rev int64) (DraftEvent, error) {
 	if !l.Enabled() {

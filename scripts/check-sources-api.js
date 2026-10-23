@@ -158,9 +158,9 @@ function lineOf(sub) {
 }
 const need = {
   new: lineOf('sources.New('),
-  register: lineOf('RegisterGenerator('),
-  committer: lineOf('AddLiveCommitter('),
-  drift: lineOf('OnDriftResolved('),
+  register: lineOf('configLayer.Register(configlayer.Hooks{'),
+  committer: lineOf('sourcesSvc.CommitLive'),
+  drift: lineOf('sourcesSvc.OnDriftResolved'),
   layerStart: lineOf('configLayer.Start()'),
   svcStart: lineOf('sourcesSvc.Start()'),
   layerStop: lineOf('defer stops.run("config-layer", configLayer.Stop)'),
@@ -173,10 +173,10 @@ if (Object.values(need).every((v) => v > 0)) {
   const order = (a, b, why) => {
     if (!(need[a] < need[b])) errors.push(`${MAIN}: ${why}`);
   };
-  order('new', 'register', 'sources.New( должен идти до RegisterGenerator(');
-  order('register', 'layerStart', 'RegisterGenerator( должен идти до configLayer.Start()');
-  order('committer', 'layerStart', 'AddLiveCommitter( должен идти до configLayer.Start()');
-  order('drift', 'layerStart', 'OnDriftResolved( должен идти до configLayer.Start()');
+  order('new', 'register', 'sources.New( должен идти до configLayer.Register(');
+  order('register', 'layerStart', 'configLayer.Register( должен идти до configLayer.Start()');
+  order('committer', 'layerStart', 'фиксатор sourcesSvc.CommitLive должен регистрироваться до configLayer.Start()');
+  order('drift', 'layerStart', 'колбэк sourcesSvc.OnDriftResolved должен регистрироваться до configLayer.Start()');
   order('layerStart', 'svcStart', 'sourcesSvc.Start() должен идти после configLayer.Start()');
   order('layerStop', 'svcStop', 'шаг остановки sources должен идти после шага config-layer (defer: сервис останавливается раньше слоя)');
 }

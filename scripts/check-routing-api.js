@@ -251,16 +251,16 @@ const created = lineOf("routing.New(");
 const need = {
   new: created,
   generators: lineOf("routingSvc.Generators()", created),
-  register: lineOf("RegisterGenerator(", created),
-  checker: lineOf("RegisterChecker(routingSvc.Checker())", created),
+  register: lineOf("configLayer.Register(configlayer.Hooks{", created),
+  checker: lineOf("routingSvc.Checker()", created),
   layerStart: lineOf("configLayer.Start()"),
   svcStart: lineOf("routingSvc.Start()"),
   layerStop: lineOf('defer stops.run("config-layer", configLayer.Stop)'),
   svcStop: lineOf('defer stops.run("routing", routingSvc.Stop)'),
   setSvc: lineOf("api.SetRoutingService(routingSvc)"),
-  srcCommit: lineOf("AddLiveCommitter(sourcesSvc.CommitLive)"),
-  liveCommit: lineOf("AddLiveCommitter(routingSvc.CommitLive)", created),
-  afterApply: lineOf("AddAfterApply(routingSvc.AfterApply)", created),
+  srcCommit: lineOf("sourcesSvc.CommitLive"),
+  liveCommit: lineOf("routingSvc.CommitLive", created),
+  afterApply: lineOf("routingSvc.AfterApply", created),
   watcher: lineOf("routing.NewSelectionWatcher(", created),
   watcherStart: lineOf("selWatch.Start()", created),
   watcherStop: lineOf('defer stops.run("routing-selection"', created),
@@ -272,16 +272,16 @@ if (Object.values(need).every((v) => v > 0)) {
   const order = (a, b, why) => {
     if (!(need[a] < need[b])) errors.push(`${MAIN}: ${why}`);
   };
-  order("new", "register", "routing.New( должен идти до RegisterGenerator(");
+  order("new", "register", "routing.New( должен идти до configLayer.Register(");
   order(
     "register",
     "layerStart",
-    "RegisterGenerator( сервиса маршрутизации должен идти до configLayer.Start()",
+    "configLayer.Register( сервиса маршрутизации должен идти до configLayer.Start()",
   );
   order(
     "checker",
     "layerStart",
-    "RegisterChecker( сервиса маршрутизации должен идти до configLayer.Start()",
+    "проверка сервиса маршрутизации (Hooks.Checker) должна регистрироваться до configLayer.Start()",
   );
   order(
     "layerStart",
@@ -296,17 +296,17 @@ if (Object.values(need).every((v) => v > 0)) {
   order(
     "srcCommit",
     "liveCommit",
-    "AddLiveCommitter(routingSvc.CommitLive) должен идти после фиксатора источников (каталог узлов считается по уже зафиксированным источникам)",
+    "фиксатор routingSvc.CommitLive должен идти после фиксатора источников (каталог узлов считается по уже зафиксированным источникам)",
   );
   order(
     "liveCommit",
     "layerStart",
-    "AddLiveCommitter(routingSvc.CommitLive) должен идти до configLayer.Start()",
+    "фиксатор routingSvc.CommitLive должен регистрироваться до configLayer.Start()",
   );
   order(
     "afterApply",
     "layerStart",
-    "AddAfterApply(routingSvc.AfterApply) должен идти до configLayer.Start()",
+    "хук routingSvc.AfterApply должен регистрироваться до configLayer.Start()",
   );
   order(
     "layerStart",
