@@ -4,6 +4,17 @@
     "optional": [],
     "children": {}
   },
+  "CatalogView": {
+    "required": ["services", "lists", "countries", "extended", "geodata"],
+    "optional": [],
+    "children": {
+      "services": "ServiceView[]",
+      "lists": "ListEntry[]",
+      "countries": "CountryView[]",
+      "extended": "ExtendedSet[]",
+      "geodata": "GeodataStatus"
+    }
+  },
   "Cond": {
     "required": ["type", "values", "lists"],
     "optional": [],
@@ -11,10 +22,51 @@
       "lists": "ListRef[]"
     }
   },
+  "CountryView": {
+    "required": ["code", "ip", "site", "blocked"],
+    "optional": [],
+    "children": {
+      "ip": "ListRef",
+      "site": "ListRef",
+      "blocked": "ListRef[]"
+    }
+  },
+  "ExtendedSet": {
+    "required": [
+      "id",
+      "name",
+      "file",
+      "url",
+      "kind",
+      "size_hint",
+      "heavy",
+      "installed",
+      "in_xkeen"
+    ],
+    "optional": [],
+    "children": {}
+  },
   "FeatureView": {
     "required": ["status", "min"],
     "optional": [],
     "children": {}
+  },
+  "GeodataEntry": {
+    "required": ["file", "url"],
+    "optional": [],
+    "children": {}
+  },
+  "GeodataPreview": {
+    "required": ["before", "after", "comments_kept"],
+    "optional": [],
+    "children": {}
+  },
+  "GeodataStatus": {
+    "required": ["jq", "geofile_update", "entries"],
+    "optional": ["reason"],
+    "children": {
+      "entries": "GeodataEntry[]"
+    }
   },
   "Group": {
     "required": [
@@ -68,7 +120,9 @@
       "counts",
       "issues",
       "warnings",
-      "member_options"
+      "member_options",
+      "current",
+      "current_label"
     ],
     "optional": [],
     "children": {
@@ -115,6 +169,11 @@
       "members": "Member[]"
     }
   },
+  "ListEntry": {
+    "required": ["file", "tag", "kind", "count", "examples"],
+    "optional": [],
+    "children": {}
+  },
   "ListRef": {
     "required": ["file", "tag", "kind"],
     "optional": [],
@@ -139,6 +198,34 @@
     "required": ["redir", "tproxy"],
     "optional": ["allow_lan", "bind_address"],
     "children": {}
+  },
+  "PresetInfo": {
+    "required": ["id", "needs_country", "needs_services", "countries"],
+    "optional": [],
+    "children": {}
+  },
+  "PresetPlan": {
+    "required": ["remove", "add", "groups", "final", "kept"],
+    "optional": ["final_name"],
+    "children": {
+      "remove": "RuleSummary[]",
+      "add": "RuleSummary[]",
+      "final": "Target"
+    }
+  },
+  "PresetState": {
+    "required": ["id", "country", "services", "flags"],
+    "optional": [],
+    "children": {}
+  },
+  "PresetsView": {
+    "required": ["presets", "services", "ads_available", "default_country", "current"],
+    "optional": [],
+    "children": {
+      "presets": "PresetInfo[]",
+      "services": "ServiceView[]",
+      "current": "PresetState"
+    }
   },
   "ProbeConfig": {
     "required": ["v", "url", "interval_s", "timeout_s"],
@@ -205,6 +292,14 @@
       "target": "Target"
     }
   },
+  "RuleSummary": {
+    "required": ["conds", "target"],
+    "optional": ["target_name"],
+    "children": {
+      "conds": "Cond[]",
+      "target": "Target"
+    }
+  },
   "RuleView": {
     "required": [
       "id",
@@ -225,6 +320,18 @@
       "raw": "RawRule",
       "issues": "IssueView[]",
       "warnings": "IssueView[]"
+    }
+  },
+  "SelectResult": {
+    "required": ["member", "kernels"],
+    "optional": [],
+    "children": {}
+  },
+  "ServiceView": {
+    "required": ["id", "name_ru", "name_en", "refs"],
+    "optional": [],
+    "children": {
+      "refs": "ListRef[]"
     }
   },
   "TakeoverMihomo": {

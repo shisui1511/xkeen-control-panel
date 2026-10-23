@@ -1,6 +1,8 @@
 package routing
 
 import (
+	"strings"
+
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
@@ -22,14 +24,21 @@ type MemberOption struct {
 }
 
 // GroupView — группа в представлении: поля группы, состав по ядрам, проблемы и
-// предупреждения и варианты участника. Текущий выбор (current, current_label)
-// добавит 146-15.
+// предупреждения, варианты участника и текущий выбор для строки «Сейчас» (D-38).
 type GroupView struct {
 	Group
 	Counts        KernelCounts   `json:"counts"`
 	Issues        []IssueView    `json:"issues"`
 	Warnings      []IssueView    `json:"warnings"`
 	MemberOptions []MemberOption `json:"member_options"`
+	// Current — участник, на которого смотрит ядро: effectiveSelection по
+	// применённому состоянию с выбором из State.Live[selection] ("node:<ref>",
+	// "group:<id>", "direct", "reject"); группы нет в применённом — по черновику.
+	// Пусто у групп «авто»/«резерв» и при отсутствии допустимых участников.
+	Current string `json:"current"`
+	// CurrentLabel — подпись Current: имя группы, DIRECT, REJECT или имя узла (та
+	// же, что у варианта в member_options).
+	CurrentLabel string `json:"current_label"`
 }
 
 // RuleView — правило в представлении: поля правила, номер с 1, ядро, для
@@ -162,6 +171,50 @@ func memberOptions(g Group, members []Member, groups []Group, xray, mihomo []sou
 	return out
 }
 
+// newModel собирает модель групп и каталога узлов по готовым данным.
+func newModel(cfg GroupsConfig, cat sources.Catalog, installed configlayer.InstalledKernels) appliedModel {
+	m := appliedModel{groups: cfg, cat: cat, union: unionCatalog(cat), installed: installed, byRef: map[string]sources.CatalogNode{}}
+	for _, n := range m.union {
+		m.byRef[n.Ref] = n
+	}
+	return m
+}
+
+// label — подпись участника: имя группы, DIRECT, REJECT или имя узла; пусто —
+// участника в модели нет.
+func (m appliedModel) label(member string) string {
+	switch {
+	case member == memberDirect:
+		return "DIRECT"
+	case member == memberReject:
+		return "REJECT"
+	case strings.HasPrefix(member, memberGroup):
+		g, _ := m.group(strings.TrimPrefix(member, memberGroup))
+		return g.Name
+	case strings.HasPrefix(member, memberNode):
+		return m.byRef[strings.TrimPrefix(member, memberNode)].Display
+	}
+	return ""
+}
+
+// currentOf считает «Сейчас» ручной группы g: действующий участник и модель, по
+// которой он посчитан. Группа есть в применённом состоянии — считается по нему
+// (по группе применённого состояния), иначе по черновику (draft). Нет ни той, ни
+// другой модели — пусто.
+func currentOf(g Group, live map[string]string, applied, draft *appliedModel) (string, *appliedModel) {
+	m, use := draft, g
+	if applied != nil {
+		if ag, ok := applied.group(g.ID); ok {
+			m, use = applied, ag
+		}
+	}
+	if m == nil {
+		return "", nil
+	}
+	nodes := Resolve(use, m.union, m.groups.Items).Nodes
+	return effectiveSelection(use, live[g.ID], m.avail, nodeRefs(nodes)...), m
+}
+
 // featureViews считает доступность функций групп: функции Xray — по версии Xray,
 // Mihomo — по версии Mihomo; неустановленное ядро — undetermined.
 func (s *Service) featureViews(installed configlayer.InstalledKernels) map[string]FeatureView {
@@ -242,6 +295,30 @@ func (s *Service) View() (RoutingView, error) {
 		Features:      s.featureViews(installed),
 	}
 
+	// Модели для строки «Сейчас» нужны только при ручных группах: применённая —
+	// если маршрутизацией управляет панель, по черновику — для групп, которых в
+	// применённом состоянии ещё нет.
+	var appliedM, draftM *appliedModel
+	live := liveSelection(st.Live)
+	hasManual := false
+	for _, g := range groups.Items {
+		if g.Mode == ModeManual {
+			hasManual = true
+			break
+		}
+	}
+	if hasManual {
+		if configlayer.DesiredRouting(st.Applied).Managed {
+			if am, err := s.appliedModelOf(st); err == nil {
+				appliedM = &am
+			}
+		}
+		if haveCat {
+			dm := newModel(groups, cat, installed)
+			draftM = &dm
+		}
+	}
+
 	for _, g := range groups.Items {
 		xr := Resolve(g, xrayNodes, groups.Items)
 		mr := Resolve(g, mihomoNodes, groups.Items)
@@ -250,12 +327,29 @@ func (s *Service) View() (RoutingView, error) {
 			counts = KernelCounts{Xray: optCount(installed.Xray, len(xr.Nodes)), Mihomo: optCount(installed.Mihomo, len(mr.Nodes))}
 		}
 		key := "group:" + g.ID
+		options := memberOptions(g, xr.Members, groups.Items, xrayNodes, mihomoNodes)
+		var current, currentLabel string
+		if g.Mode == ModeManual {
+			var m *appliedModel
+			current, m = currentOf(g, live, appliedM, draftM)
+			for _, o := range options {
+				if o.Member == current {
+					currentLabel = o.Label
+					break
+				}
+			}
+			if currentLabel == "" && current != "" && m != nil {
+				currentLabel = m.label(current)
+			}
+		}
 		view.Groups = append(view.Groups, GroupView{
 			Group:         g,
 			Counts:        counts,
 			Issues:        orEmpty(issuesByKey[key]),
 			Warnings:      orEmpty(warningsByKey[key]),
-			MemberOptions: memberOptions(g, xr.Members, groups.Items, xrayNodes, mihomoNodes),
+			MemberOptions: options,
+			Current:       current,
+			CurrentLabel:  currentLabel,
 		})
 	}
 	lint := lintRules(rules.Items)
