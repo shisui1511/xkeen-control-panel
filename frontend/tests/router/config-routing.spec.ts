@@ -3,7 +3,8 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { api, layerFlag, resetDraft } from './lib/nodes-api';
+import { CORE_TAG } from './lib/known';
+import { addToDraft, api, layerFlag, nodeLink, randomPort, resetDraft } from './lib/nodes-api';
 
 // Вкладки «Группы» и «Правила» раздела «Конфигурация» на настоящей панели (фаза 146,
 // план 17): маршруты #/config/groups и #/config/rules, общая полоса черновика, состояния
@@ -268,3 +269,161 @@ for (const theme of ['dark', 'light'] as const) {
     await guard.assertClean();
   });
 }
+
+// --- Владение маршрутизацией (фаза 146, план 18) ---
+
+interface OwnerSnap {
+  taken: boolean;
+  desired: boolean;
+  xray: boolean;
+  mihomo: boolean;
+  checks: number;
+  revision: number;
+  changes: number;
+  running: boolean;
+}
+
+/** Снимок слоя: кто владеет маршрутизацией, какие ядра установлены, проблемы проверки. */
+async function ownerSnap(page: Page): Promise<OwnerSnap> {
+  const st = await api(page, 'GET', '/api/configlayer/state');
+  expect(st.status, 'GET /api/configlayer/state').toBe(200);
+  const routing = (st.data?.routing ?? {}) as {
+    desired?: boolean;
+    xray?: { taken?: boolean } | null;
+    mihomo?: { taken?: boolean } | null;
+  };
+  const apply = (st.data?.apply ?? {}) as { running?: boolean };
+  return {
+    taken: routing.xray?.taken === true || routing.mihomo?.taken === true,
+    desired: routing.desired === true,
+    xray: !!routing.xray,
+    mihomo: !!routing.mihomo,
+    checks: Array.isArray(st.data?.checks) ? st.data.checks.length : 0,
+    revision: Number(st.data?.draft_revision ?? 0),
+    changes: Number(st.data?.draft_changes ?? 0),
+    running: apply.running === true
+  };
+}
+
+/** Запускает «Применить» и ждёт конца: применение не идёт, в черновике нет изменений. */
+async function applyAndWait(page: Page): Promise<void> {
+  const start = await api(page, 'POST', '/api/configlayer/apply', {});
+  expect(start.status, 'запуск применения').toBe(200);
+  await expect
+    .poll(
+      async () => {
+        const s = await ownerSnap(page);
+        return !s.running && s.changes === 0;
+      },
+      { timeout: T.save * 4, intervals: [2000] }
+    )
+    .toBe(true);
+}
+
+/** Берёт или возвращает маршрутизацию настоящими маршрутами и применяет. */
+async function setOwnership(page: Page, take: boolean): Promise<void> {
+  const s = await ownerSnap(page);
+  if (s.taken === take && s.desired === take) return;
+  const res = await api(page, 'POST', `/api/configlayer/routing/${take ? 'take' : 'release'}`, {
+    revision: s.revision
+  });
+  expect(res.status, take ? 'взятие через API' : 'возврат через API').toBe(200);
+  await applyAndWait(page);
+}
+
+/**
+ * Приводит стенд к состоянию «маршрутизацией управляет XKeen» и возвращает функцию
+ * отката: сбрасывает черновик, убирает добавленные узлы, возвращает прежнего владельца.
+ */
+async function prepareXKeen(page: Page): Promise<() => Promise<void>> {
+  await resetDraft(page);
+  const before = await ownerSnap(page);
+  if (before.taken) await setOwnership(page, false);
+  return async () => {
+    await resetDraft(page);
+    // узлы теста могли быть применены: убираем их и применяем
+    const view = await api(page, 'GET', '/api/configlayer/sources');
+    const mine = (
+      (view.data?.sources ?? []) as { id: string; nodes?: { name: string; entry_id?: string }[] }[]
+    ).find((x) => x.id === 'my');
+    for (const n of mine?.nodes ?? []) {
+      if (!n.name.startsWith('RtOwn') || !n.entry_id) continue;
+      const cur = await ownerSnap(page);
+      const del = await api(page, 'POST', '/api/configlayer/sources/nodes/delete', {
+        revision: cur.revision,
+        entry_id: n.entry_id
+      });
+      expect(del.status, 'удаление узла теста').toBe(200);
+    }
+    const after = await ownerSnap(page);
+    if (after.changes > 0) await applyAndWait(page);
+    await setOwnership(page, before.taken);
+  };
+}
+
+test('routing: взятие и отпускание', { tag: CORE_TAG }, async ({ page }) => {
+  test.setTimeout(T.save * 10);
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  const snap = await ownerSnap(page);
+  test.skip(!snap.xray && !snap.mihomo, 'на стенде нет установленных ядер');
+  const restore = await prepareXKeen(page);
+  try {
+    await addToDraft(page, nodeLink('vless_ws.txt', randomPort(), 'RtOwnA'));
+    await openConfig(page, '#/config/rules');
+    await tabReady(page, 'rules-tab');
+
+    // управляет XKeen: плашка и кнопка взятия
+    const notice = page.getByTestId('routing-notice');
+    await expect(notice).toHaveAttribute('data-owner', 'xkeen', { timeout: T.action });
+    await page.getByTestId('routing-take').click();
+
+    // диалог показывает последствия до любого запроса записи
+    const modal = page.getByTestId('take-routing-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
+    await expect(modal.getByTestId('take-routing-consequence')).toBeVisible({
+      timeout: T.action
+    });
+    if (snap.xray) {
+      await expect(
+        modal.getByTestId('take-routing-move').or(modal.getByTestId('take-routing-none'))
+      ).toBeVisible();
+    }
+    if (snap.mihomo) await expect(modal.getByTestId('take-routing-mihomo')).toBeVisible();
+    expect((await ownerSnap(page)).desired, 'диалог сам ничего не записал').toBe(false);
+
+    // «Взять» пишет желание в черновик: файлы меняются при «Применить»
+    await modal.getByTestId('take-routing-confirm').click();
+    await expect(modal).toHaveCount(0, { timeout: T.action });
+    await expect(notice).toHaveAttribute('data-owner', 'pending', { timeout: T.action });
+    await expect(page.getByTestId('routing-take-pending')).toBeVisible();
+    expect((await ownerSnap(page)).taken, 'до «Применить» файлы не тронуты').toBe(false);
+
+    await page.getByTestId('config-apply').click();
+    await expect(notice).toHaveAttribute('data-owner', 'panel', { timeout: T.save * 3 });
+    await expect(
+      page
+        .locator('.toast--success')
+        .filter({ hasText: /Маршрутизацию взяла панель|managed by the panel/ })
+    ).toBeVisible({ timeout: T.action });
+    expect((await ownerSnap(page)).taken).toBe(true);
+
+    // «Отпустить»: подтверждение, возврат и применение без ожидания
+    await page.getByTestId('routing-release').click();
+    const confirm = page.getByRole('dialog');
+    await expect(confirm).toBeVisible({ timeout: T.action });
+    await confirm.getByRole('button', { name: /^(Отпустить|Release)$/ }).click();
+    await expect(notice).toHaveAttribute('data-owner', 'xkeen', { timeout: T.save * 3 });
+    await expect(
+      page
+        .locator('.toast--success')
+        .filter({ hasText: /Маршрутизацию вернули XKeen|returned to XKeen/ })
+    ).toBeVisible({ timeout: T.action });
+    expect((await ownerSnap(page)).taken).toBe(false);
+
+    await guard.assertClean();
+  } finally {
+    await restore();
+  }
+});
