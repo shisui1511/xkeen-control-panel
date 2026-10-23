@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { t } from '../i18n';
 
   let {
@@ -26,32 +27,32 @@
 
   const MODAL_SELECTOR = '[role="dialog"][aria-modal="true"]';
 
-  let modalElement: HTMLDivElement | null = $state(null);
-  let previouslyFocusedElement: HTMLElement | null = null;
+  // Диалог рендерится только внутри {#if isOpen}, поэтому вложения на его контейнере
+  // начинают работу при открытии и снимаются при закрытии.
 
-  $effect(() => {
-    if (isOpen) {
-      // Native Fullscreen API paints only the fullscreened element's subtree
-      // (e.g. .editor-cm-wrapper); a <Modal> always renders at its own call
-      // site outside that subtree, so a dialog opened during fullscreen would
-      // hold focus while being invisible on screen (G-71-29). Leave fullscreen
-      // first so the dialog renders in normal document flow.
-      if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
-        document.exitFullscreen().catch(() => {});
-      }
-      previouslyFocusedElement = document.activeElement as HTMLElement;
-      setTimeout(() => {
-        if (modalElement) {
-          const focusables = getFocusableElements();
-          if (focusables.length > 0) focusables[0].focus();
-          else modalElement.focus();
-        }
-      }, 0);
-    } else if (previouslyFocusedElement) {
-      previouslyFocusedElement.focus();
-      previouslyFocusedElement = null;
+  // Начальный фокус при открытии и возврат фокуса на прежний элемент при закрытии.
+  const manageFocus: Attachment<HTMLDivElement> = (dialog) => {
+    // Native Fullscreen API paints only the fullscreened element's subtree
+    // (e.g. .editor-cm-wrapper); a <Modal> always renders at its own call
+    // site outside that subtree, so a dialog opened during fullscreen would
+    // hold focus while being invisible on screen (G-71-29). Leave fullscreen
+    // first so the dialog renders in normal document flow.
+    if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+      document.exitFullscreen().catch(() => {});
     }
-  });
+    const previouslyFocusedElement = document.activeElement as HTMLElement | null;
+    const timerId = setTimeout(() => {
+      const focusables = getFocusableElements(dialog);
+      if (focusables.length > 0) focusables[0].focus();
+      else dialog.focus();
+    }, 0);
+    return () => {
+      clearTimeout(timerId);
+      // Фокус возвращается только при закрытии (isOpen уже false); размонтирование
+      // модали при isOpen=true фокус не трогает, как и раньше.
+      if (!isOpen) previouslyFocusedElement?.focus();
+    };
+  };
 
   // Фокус вне диалога бывает и на body (элемент с фокусом убран из разметки при
   // перерисовке), и на вызвавшей кнопке (Tab пришёл раньше начального фокуса, который
@@ -59,50 +60,46 @@
   // увёл бы фокус на страницу под модалью. Пока диалог открыт и он верхний, Tab
   // возвращает фокус на первый элемент диалога, Shift+Tab: на последний. Фокус внутри
   // любого диалога aria-modal (свой или лежащего поверх подтверждения) не трогаем.
-  $effect(() => {
-    if (!isOpen) return;
+  const trapWindowTab: Attachment<HTMLDivElement> = (dialog) => {
     const onWindowKeydown = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab' || !modalElement) return;
+      if (event.key !== 'Tab') return;
       const active = document.activeElement;
       if (active && active !== document.body && active.closest(MODAL_SELECTOR)) return;
       const dialogs = document.querySelectorAll(MODAL_SELECTOR);
-      if (dialogs[dialogs.length - 1] !== modalElement) return;
+      if (dialogs[dialogs.length - 1] !== dialog) return;
       event.preventDefault();
-      const focusables = getFocusableElements();
-      if (focusables.length === 0) modalElement.focus();
+      const focusables = getFocusableElements(dialog);
+      if (focusables.length === 0) dialog.focus();
       else if (event.shiftKey) focusables[focusables.length - 1].focus();
       else focusables[0].focus();
     };
     window.addEventListener('keydown', onWindowKeydown, true);
     return () => window.removeEventListener('keydown', onWindowKeydown, true);
-  });
+  };
 
   // Перестройка содержимого может убрать элемент с фокусом (в диагностике «Повторить»
   // исчезает вместе с алертом ошибки): фокус уходит на body, и скринридер с клавиатурой
   // теряют место. Пока диалог открыт и он верхний, такой фокус возвращается на контейнер
   // (tabindex=-1): следующий Tab попадёт на первый элемент диалога.
-  $effect(() => {
-    if (!isOpen || !modalElement) return;
-    const element = modalElement;
+  const refocusOnMutation: Attachment<HTMLDivElement> = (dialog) => {
     const observer = new MutationObserver(() => {
       const active = document.activeElement;
       if (active && active !== document.body) return;
       const dialogs = document.querySelectorAll(MODAL_SELECTOR);
-      if (dialogs[dialogs.length - 1] !== element) return;
-      element.focus();
+      if (dialogs[dialogs.length - 1] !== dialog) return;
+      dialog.focus();
     });
-    observer.observe(element, { childList: true, subtree: true });
+    observer.observe(dialog, { childList: true, subtree: true });
     return () => observer.disconnect();
-  });
+  };
 
-  function getFocusableElements(): HTMLElement[] {
-    if (!modalElement) return [];
+  function getFocusableElements(dialog: HTMLElement): HTMLElement[] {
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
     // offsetParent is null for display:none (on the element or an ancestor) — callers
     // like the dat-drawer variant hide Modal's own header (and its close button) via
     // CSS in favor of a custom in-content header. .focus() on such an element is a
     // silent no-op, so it must be excluded here rather than merely deprioritized.
-    return Array.from(modalElement.querySelectorAll(selectors)).filter(
+    return Array.from(dialog.querySelectorAll(selectors)).filter(
       (el) => (el as HTMLElement).offsetParent !== null
     ) as HTMLElement[];
   }
@@ -113,7 +110,7 @@
       return;
     }
     if (event.key === 'Tab') {
-      const focusables = getFocusableElements();
+      const focusables = getFocusableElements(event.currentTarget as HTMLElement);
       if (focusables.length === 0) {
         event.preventDefault();
         return;
@@ -145,7 +142,9 @@
       aria-label={ariaLabel || undefined}
       aria-labelledby={ariaLabel ? undefined : 'modal-title'}
       data-testid={dataTestid || undefined}
-      bind:this={modalElement}
+      {@attach manageFocus}
+      {@attach trapWindowTab}
+      {@attach refocusOnMutation}
       onkeydown={handleKeydown}
       onclick={(e) => e.stopPropagation()}
       style="max-width: {maxWidth};"

@@ -47,7 +47,6 @@
   let isRestartingKernel = $state(false);
   let isRestartingXkeen = $state(false);
   let isTogglingService = $state(false);
-  let menuEl = $state<HTMLElement | null>(null);
   let menuPos = $state<{ top: number; left: number } | null>(null);
 
   const portalToBody: Attachment<HTMLElement> = (node) => {
@@ -84,11 +83,11 @@
     menuPos = { top, left };
   }
 
-  $effect(() => {
-    if (isOpen) {
-      updatePosition();
-    }
-  });
+  // Меню существует только пока isOpen, поэтому позиция считается при монтировании и
+  // пересчитывается при смене anchorEl (его читает updatePosition).
+  const positionMenu: Attachment<HTMLElement> = () => {
+    updatePosition();
+  };
 
   async function handleRestartKernel() {
     if (isRestartingKernel || $isConflict) return;
@@ -179,35 +178,34 @@
     }
   }
 
-  function handleDocumentClick(e: MouseEvent) {
-    if (!isOpen || !menuEl) return;
-    const target = e.target as Node;
-    if (anchorEl && anchorEl.contains(target)) return;
-    if (!menuEl.contains(target)) {
-      onClose();
-    }
-  }
-
-  $effect(() => {
-    if (isOpen) {
-      document.addEventListener('keydown', handleKeydown, true);
-      // Attach click with microtask delay so trigger click doesn't close it instantly
-      const timer = setTimeout(() => {
-        document.addEventListener('click', handleDocumentClick);
-      }, 0);
-      return () => {
-        clearTimeout(timer);
-        document.removeEventListener('keydown', handleKeydown, true);
-        document.removeEventListener('click', handleDocumentClick);
-      };
-    }
-  });
+  // Закрытие по Escape и по клику вне меню, пока оно открыто.
+  const dismissMenu: Attachment<HTMLElement> = (menu) => {
+    const handleDocumentClick = (e: MouseEvent) => {
+      if (!isOpen) return;
+      const target = e.target as Node;
+      if (anchorEl && anchorEl.contains(target)) return;
+      if (!menu.contains(target)) {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeydown, true);
+    // Attach click with microtask delay so trigger click doesn't close it instantly
+    const timer = setTimeout(() => {
+      document.addEventListener('click', handleDocumentClick);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('keydown', handleKeydown, true);
+      document.removeEventListener('click', handleDocumentClick);
+    };
+  };
 </script>
 
 {#if isOpen}
   <div
-    bind:this={menuEl}
     {@attach portalToBody}
+    {@attach positionMenu}
+    {@attach dismissMenu}
     class="system-quick-menu"
     style={menuPos ? `top: ${menuPos.top}px; left: ${menuPos.left}px; position: fixed;` : ''}
     role="menu"
