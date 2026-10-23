@@ -71,6 +71,9 @@ func (s *Service) generate(in configlayer.Input, installed configlayer.Installed
 	if err != nil {
 		return nil, err
 	}
+	// managed — желаемое состояние «маршрутизацией управляет панель» (D-28): от него
+	// зависит, подключён ли провайдер Mihomo профилем панели.
+	managed := configlayer.DesiredRouting(in.Sections).Managed
 	names := make([]string, 0, len(in.Sections))
 	for name := range in.Sections {
 		names = append(names, name)
@@ -100,7 +103,7 @@ func (s *Service) generate(in configlayer.Input, installed configlayer.Installed
 				file = m.file
 				break
 			}
-			file, err = s.myFile(in.Mode, kernel, id, raw, caps)
+			file, err = s.myFile(in.Mode, kernel, id, raw, caps, managed)
 			if err != nil {
 				return nil, err
 			}
@@ -115,7 +118,7 @@ func (s *Service) generate(in configlayer.Input, installed configlayer.Installed
 				}
 				loaded = true
 			}
-			file, err = s.subscriptionFile(in.Mode, kernel, id, raw, live, cands, caps, string(capsJSON))
+			file, err = s.subscriptionFile(in.Mode, kernel, id, raw, live, cands, caps, string(capsJSON), managed)
 			if err != nil {
 				return nil, err
 			}
@@ -197,7 +200,7 @@ func (s *Service) myNodes(cfg MySourceConfig) []keyedNode {
 
 // myFile строит файл источника «Мои узлы» для ядра; nil — файла нет (источник
 // выключен, узлов для ядра нет).
-func (s *Service) myFile(mode configlayer.SourceKind, kernel, id string, raw json.RawMessage, caps nodes.Caps) (*configlayer.GeneratedFile, error) {
+func (s *Service) myFile(mode configlayer.SourceKind, kernel, id string, raw json.RawMessage, caps nodes.Caps, managed bool) (*configlayer.GeneratedFile, error) {
 	list, err := s.kernelNodes(mode, kernel, id, raw, nil, nil, caps)
 	if err != nil {
 		return nil, err
@@ -206,7 +209,7 @@ func (s *Service) myFile(mode configlayer.SourceKind, kernel, id string, raw jso
 	case kernelXray:
 		return xrayFile(id, list)
 	case kernelMihomo:
-		return mihomoFile(id, list)
+		return mihomoFile(id, list, managed)
 	}
 	return nil, nil
 }
@@ -241,10 +244,11 @@ func xrayFile(id string, list []CatalogNode) (*configlayer.GeneratedFile, error)
 }
 
 // mihomoFile — провайдер Mihomo из узлов списка ядра Mihomo (kernelList); имена
-// с суффиксами дублей уже в списке. Файл Inert и без Expect: пока провайдер не
-// подключён к config.yaml (Phase 146), перезапускать ядро и сверять число узлов
-// в рантайме нечем.
-func mihomoFile(id string, list []CatalogNode) (*configlayer.GeneratedFile, error) {
+// с суффиксами дублей уже в списке. Пока маршрутизацией управляет панель
+// (managed), провайдер подключён к ядру профилем панели через use: (D-28):
+// файл не Inert, а в рантайме сверяется число узлов (Expect). Без управления
+// профиля панели нет, ядро провайдер не читает: файл Inert и без Expect, как в 145.
+func mihomoFile(id string, list []CatalogNode, managed bool) (*configlayer.GeneratedFile, error) {
 	proxies := make([]map[string]any, 0, len(list))
 	for _, k := range list {
 		p, err := nodes.ClashProxy(k.Node, k.MihomoName)
@@ -261,13 +265,17 @@ func mihomoFile(id string, list []CatalogNode) (*configlayer.GeneratedFile, erro
 	if err != nil {
 		return nil, err
 	}
-	return &configlayer.GeneratedFile{
+	file := &configlayer.GeneratedFile{
 		Kernel:  kernelMihomo,
 		RelPath: "proxy_providers/xcp-" + id + ".yaml",
 		Kind:    configlayer.KindMihomoProxyProvider,
 		Content: content,
-		Inert:   true,
-	}, nil
+		Inert:   !managed,
+	}
+	if managed {
+		file.Expect = &configlayer.Expectation{ProviderType: "proxies", ProviderName: "xcp-" + id, Count: len(proxies)}
+	}
+	return file, nil
 }
 
 // displayName — имя узла; пустое заменяется адресом host:port.
@@ -360,7 +368,7 @@ func refFor(mode configlayer.SourceKind, kl *KernelLive, cand *Ref) *Ref {
 // subscriptionFile строит файл подписки для ядра из её снимка. Источник без снимка
 // для ядра файла не даёт; снимок есть, а прочитать его нельзя — ошибка генератора,
 // а не пустой набор: пустой набор удалил бы рабочие файлы ядра (Pitfall 7, T-145-23).
-func (s *Service) subscriptionFile(mode configlayer.SourceKind, kernel, id string, raw json.RawMessage, live LiveSources, cands Candidates, caps nodes.Caps, capsJSON string) (*configlayer.GeneratedFile, error) {
+func (s *Service) subscriptionFile(mode configlayer.SourceKind, kernel, id string, raw json.RawMessage, live LiveSources, cands Candidates, caps nodes.Caps, capsJSON string, managed bool) (*configlayer.GeneratedFile, error) {
 	cfg, err := parseSubscription(raw)
 	if err != nil {
 		return nil, err
@@ -380,7 +388,7 @@ func (s *Service) subscriptionFile(mode configlayer.SourceKind, kernel, id strin
 	if ref == nil {
 		return nil, nil
 	}
-	key := hash(kernel, id, string(raw), capsJSON, ref.Hash)
+	key := hash(kernel, id, string(raw), capsJSON, ref.Hash, strconv.FormatBool(managed))
 	if m, ok := s.memoGet(key); ok {
 		return m.file, nil
 	}
@@ -393,7 +401,7 @@ func (s *Service) subscriptionFile(mode configlayer.SourceKind, kernel, id strin
 	case kernelXray:
 		file, err = xrayFile(id, list)
 	case kernelMihomo:
-		file, err = mihomoFile(id, list)
+		file, err = mihomoFile(id, list, managed)
 	}
 	if err != nil {
 		return nil, err
