@@ -333,7 +333,7 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	}
 	for _, name := range []string{"Авто", "Прокси"} {
 		if rtRtFindGroup(view, name) == nil {
-			t.Errorf("представление: нет группы по умолчанию №%d", len(name))
+			t.Errorf("представление: нет группы по умолчанию %q", name)
 		}
 	}
 
@@ -692,8 +692,10 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 		c.rtRtPurge()
 	})
 
+	// Оба узла выражаются в обоих ядрах: выбор узла, которого активное ядро не
+	// умеет (trojan_ws в Xray — xray_no_insecure), на его файлы не влияет.
 	e.rtRstAddMyNode(rtRtUniqueLinkOf(t, "vless_ws", 1))
-	e.rtRstAddMyNode(rtRtUniqueLinkOf(t, "trojan_ws", 2))
+	e.rtRstAddMyNode(rtRtUniqueLinkOf(t, "trojan_grpc", 2))
 
 	// До взятия и «Применить» группа не применена: select отвечает group_not_applied.
 	save := e.call(http.MethodPost, rtRoutingBase+"/groups/save", map[string]any{
