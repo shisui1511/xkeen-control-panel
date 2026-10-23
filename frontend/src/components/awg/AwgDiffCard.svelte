@@ -30,7 +30,7 @@
         <div class="diff-row">
           <span class="diff-cat-label text-success">{$t('proxies.diff_kept')}:</span>
           <div class="diff-badges">
-            {#each diff.kept as item}
+            {#each diff.kept as item, i (i)}
               <span class="badge badge-success">{item.key}</span>
             {/each}
           </div>
@@ -41,7 +41,7 @@
         <div class="diff-row">
           <span class="diff-cat-label text-warning">{$t('proxies.diff_warnings')}:</span>
           <div class="diff-badges">
-            {#each diff.warnings as warn}
+            {#each diff.warnings as warn, i (i)}
               {@const warnReason = $t(warn.messageKey)}
               <span class="badge badge-warning" title={warnReason}>
                 {warn.key}: {warnReason}
@@ -55,7 +55,7 @@
         <div class="diff-row">
           <span class="diff-cat-label text-danger">{$t('proxies.diff_dropped')}:</span>
           <div class="diff-badges">
-            {#each diff.dropped as drop}
+            {#each diff.dropped as drop, i (i)}
               {@const dropReason = $t(drop.reasonKey)}
               <span class="badge badge-danger" title={dropReason}>
                 {drop.key}: {dropReason}

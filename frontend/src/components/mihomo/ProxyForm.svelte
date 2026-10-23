@@ -659,14 +659,14 @@
       <label class="form-label" for="proxy-dialer-compact">{$t('proxies.dialer_proxy')}</label>
       <Select id="proxy-dialer-compact" class="form-select" bind:value={np.dialerProxy}>
         <option value="">{$t('proxies.dialer_none')}</option>
-        {#each availableDialers as d}
+        {#each availableDialers as d, i (i)}
           <option value={d}>{d}</option>
         {/each}
       </Select>
       {#if np.dialerProxy}
         <div class="dialer-chain-preview">
           <span class="chain-title">{$t('proxies.dialer_chain')}:</span>
-          {#each dialerChain.chain as node, idx}
+          {#each dialerChain.chain as node, idx (idx)}
             <span
               class="badge"
               class:badge-primary={idx === 0}
@@ -737,7 +737,7 @@
     <div class="form-row">
       <label class="form-label" for="proxy-type">{$t('proxies.type')}</label>
       <Select id="proxy-type" class="form-select" bind:value={np.type}>
-        {#each PROXY_TYPES as pt}<option value={pt}>{pt}</option>{/each}
+        {#each PROXY_TYPES as pt (pt)}<option value={pt}>{pt}</option>{/each}
       </Select>
     </div>
     <div class="form-row">
@@ -888,7 +888,7 @@
       <div class="form-row">
         <label class="form-label" for="proxy-ss-cipher">Cipher</label>
         <Select id="proxy-ss-cipher" class="form-select" bind:value={np.cipher}>
-          {#each CIPHERS as c}<option value={c}>{c}</option>{/each}
+          {#each CIPHERS as c (c)}<option value={c}>{c}</option>{/each}
         </Select>
       </div>
       <div class="form-row">
@@ -1144,7 +1144,7 @@
       <label class="form-label" for="proxy-dialer">{$t('proxies.dialer_proxy')}</label>
       <Select id="proxy-dialer" class="form-select" bind:value={np.dialerProxy}>
         <option value="">{$t('proxies.dialer_none')}</option>
-        {#each availableDialers as d}
+        {#each availableDialers as d, i (i)}
           <option value={d}>{d}</option>
         {/each}
       </Select>
@@ -1154,7 +1154,7 @@
           style="margin-top: 6px; font-size: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;"
         >
           <span style="color: var(--fg-secondary);">{$t('proxies.dialer_chain')}:</span>
-          {#each dialerChain.chain as node, idx}
+          {#each dialerChain.chain as node, idx (idx)}
             <span
               class="badge"
               class:badge-primary={idx === 0}

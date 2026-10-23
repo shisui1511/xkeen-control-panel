@@ -22,7 +22,9 @@
   let quickValue = $state('');
   let quickType = $state('domain_suffix');
   let quickTarget = $state('proxy');
-  let quickGroup = $state('');
+  // Группа по умолчанию — первая из groups, пока пользователь не выбрал другую.
+  let quickGroupChoice = $state('');
+  const quickGroup = $derived(quickGroupChoice || groups[0] || '');
   let quickError = $state('');
   let adding = $state(false);
 
@@ -50,12 +52,6 @@
   const groupOptions = $derived.by(() => {
     const list = groups.length > 0 ? groups : ['PROXY'];
     return list.map((g) => ({ value: g, label: g }));
-  });
-
-  $effect(() => {
-    if (!quickGroup && groups.length > 0) {
-      quickGroup = groups[0];
-    }
   });
 
   async function handleQuickAdd(e?: Event) {
@@ -222,7 +218,7 @@
       {#if quickTarget === 'proxy'}
         <div class="quick-add-field group-field">
           <Select
-            bind:value={quickGroup}
+            bind:value={() => quickGroup, (v) => (quickGroupChoice = v)}
             options={groupOptions}
             ariaLabel={$t('rules.rule_group')}
           />

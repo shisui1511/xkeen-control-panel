@@ -244,7 +244,7 @@
 
   <div class="outbounds-list">
     <!-- Custom Outbounds (Editable) -->
-    {#each customOutbounds as item, idx}
+    {#each customOutbounds as item, idx (idx)}
       <div
         class="card tag-card"
         style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between;"
@@ -277,7 +277,7 @@
     {/each}
 
     <!-- System / Subscription Outbounds (Read-Only) -->
-    {#each outboundDetails.filter((d) => ['direct', 'block', 'dns-out'].includes(d.tag) || subscriptionOutbounds.some((s) => s.tag === d.tag)) as item}
+    {#each outboundDetails.filter((d) => ['direct', 'block', 'dns-out'].includes(d.tag) || subscriptionOutbounds.some((s) => s.tag === d.tag)) as item, i (i)}
       <div
         class="card tag-card"
         style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; opacity: 0.75; background: var(--bg-surface-active);"
@@ -466,7 +466,7 @@
             class="preview-list"
             style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;"
           >
-            {#each importNodes as item, idx}
+            {#each importNodes as item, idx (idx)}
               {#if item.rowError}
                 <div
                   class="preview-item-card"

@@ -156,14 +156,10 @@
       }
     } catch {
       // Fallback: extract groups from rules
-      const set = new Set<string>();
-      for (const r of kernelRules) {
-        const p = (r.proxy || '').trim();
-        if (p && !['DIRECT', 'REJECT', 'PASS'].includes(p.toUpperCase())) {
-          set.add(p);
-        }
-      }
-      proxyGroups = Array.from(set).sort();
+      const names = kernelRules
+        .map((r) => (r.proxy || '').trim())
+        .filter((p) => p && !['DIRECT', 'REJECT', 'PASS'].includes(p.toUpperCase()));
+      proxyGroups = Array.from(new Set(names)).sort();
     }
   }
 

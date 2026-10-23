@@ -25,11 +25,7 @@
 
   // Dynamic filter options
   let availableTypes = $derived.by(() => {
-    const set = new Set<string>();
-    for (const r of rules) {
-      if (r.type) set.add(r.type);
-    }
-    const list = Array.from(set).sort();
+    const list = Array.from(new Set(rules.map((r) => r.type).filter(Boolean))).sort();
     return [
       { value: '', label: $t('rules.all_types') },
       ...list.map((type) => ({ value: type, label: type }))
@@ -37,11 +33,7 @@
   });
 
   let availableProxies = $derived.by(() => {
-    const set = new Set<string>();
-    for (const r of rules) {
-      if (r.proxy) set.add(r.proxy);
-    }
-    const list = Array.from(set).sort();
+    const list = Array.from(new Set(rules.map((r) => r.proxy).filter(Boolean))).sort();
     return [
       { value: '', label: $t('rules.all_targets') },
       ...list.map((proxy) => ({ value: proxy, label: proxy }))
