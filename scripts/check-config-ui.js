@@ -229,6 +229,10 @@ for (const prefix of [
   "source_deferred:",
   "source_kernel_refused:",
   "source_network:",
+  "routing_auto_taken:",
+  "routing_reconcile:",
+  "routing_repick:",
+  "routing_list_missing:",
 ]) {
   expect(
     layerTs.includes(`'${prefix}'`),
@@ -276,6 +280,10 @@ for (const id of [
   "source_deferred:",
   "source_kernel_refused:",
   "source_network:",
+  "routing_auto_taken:",
+  "routing_reconcile:",
+  "routing_repick:",
+  "routing_list_missing:",
 ]) {
   expect(notices.includes(id), `ConfigNotices.svelte: нет разбора ${id}`);
 }

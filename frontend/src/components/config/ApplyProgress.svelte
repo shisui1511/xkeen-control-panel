@@ -81,11 +81,12 @@
     return text === key ? '' : text;
   }
 
-  // Подсказка по коду; пустая строка, если для кода нет перевода
-  function hintText(code: string | undefined): string {
+  // Подсказка по коду; пустая строка, если для кода нет перевода. Параметры (group, file,
+  // tag, rule) приходят вместе с проблемой проверки групп и правил и подставляются в текст
+  function hintText(code: string | undefined, params?: Record<string, string>): string {
     if (!code) return '';
     const key = 'cfg.hint.' + code;
-    const text = $t(key);
+    const text = $t(key, params);
     return text === key ? '' : text;
   }
 
@@ -217,7 +218,7 @@
               {#each failure.issues as issue, i (issue.key + ':' + issue.code + ':' + i)}
                 <li>
                   <code class="issue-key">{issue.key}</code>
-                  <span>{hintText(issue.code) || issue.detail || issue.code}</span>
+                  <span>{hintText(issue.code, issue.params) || issue.detail || issue.code}</span>
                 </li>
               {/each}
             </ul>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { t } from './i18n';
   import PageHeader from './PageHeader.svelte';
   import EmptyState from './components/EmptyState.svelte';
@@ -12,6 +13,8 @@
   import NodesTab from './components/config/nodes/NodesTab.svelte';
   import GroupsTab from './components/config/groups/GroupsTab.svelte';
   import RulesTab from './components/config/rules/RulesTab.svelte';
+  import RoutingOwnerNotice from './components/config/routing/RoutingOwnerNotice.svelte';
+  import { watchOwnerToasts } from './components/config/routing/routingOwner';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
   import {
     asConfigSubTab,
@@ -36,6 +39,10 @@
     { value: 'rules', label: $t('cfg.tab.rules'), testId: 'config-tab-rules' },
     { value: 'files', label: $t('cfg.tab.files'), testId: 'config-tab-files' }
   ]);
+
+  // Тосты «Маршрутизацию взяла панель.» / «Маршрутизацию вернули XKeen.» по итогу применения
+  // не зависят от открытой вкладки
+  onMount(() => watchOwnerToasts());
 
   function selectTab(value: string) {
     window.location.hash = configSubTabHash(asConfigSubTab(value));
@@ -85,8 +92,10 @@
     {:else if subTab === 'nodes'}
       <NodesTab />
     {:else if subTab === 'groups'}
+      <RoutingOwnerNotice tab="groups" />
       <GroupsTab />
     {:else if subTab === 'rules'}
+      <RoutingOwnerNotice tab="rules" />
       <RulesTab />
     {:else if subTab === 'files'}
       <ManagedFiles />

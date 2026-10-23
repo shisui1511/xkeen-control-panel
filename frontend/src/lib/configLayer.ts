@@ -73,6 +73,8 @@ export interface LayerIssue {
   key: string;
   code: string;
   detail?: string;
+  /** Параметры текста проблемы групп и правил: group, file, tag, rule. */
+  params?: Record<string, string>;
 }
 
 export interface LayerResult {
@@ -180,7 +182,11 @@ const NOTICE_PREFIXES = [
   'source_rejected:',
   'source_deferred:',
   'source_kernel_refused:',
-  'source_network:'
+  'source_network:',
+  'routing_auto_taken:',
+  'routing_reconcile:',
+  'routing_repick:',
+  'routing_list_missing:'
 ];
 
 /** Показывается ли уведомление: незнакомые идентификаторы не рисуются и в бейдж не попадают. */

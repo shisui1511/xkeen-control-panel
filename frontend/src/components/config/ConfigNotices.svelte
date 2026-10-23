@@ -111,6 +111,42 @@
     return null;
   }
 
+  // Фоновые события маршрутизации (фаза 146): автоматическое взятие, сбой сверки выбора,
+  // замена пропавшего узла, пропавший список. Текст собирается только интерполяцией
+  function describeRouting(n: LayerNotice): Described | null {
+    const p = n.params ?? {};
+    if (n.id.startsWith('routing_auto_taken:')) {
+      const raw = n.kernel ?? n.id.split(':')[1] ?? '';
+      return {
+        notice: n,
+        tone: 'warning',
+        text: $t('cfg.notice.routing_auto_taken', { kernel: KERNEL_LABELS[raw] ?? raw })
+      };
+    }
+    if (n.id.startsWith('routing_reconcile:')) {
+      return {
+        notice: n,
+        tone: 'warning',
+        text: $t('cfg.routing.reconcile_failed', { group: p.group ?? '' })
+      };
+    }
+    if (n.id.startsWith('routing_repick:')) {
+      const key = p.answered === 'true' ? 'cfg.groups.repick_alive' : 'cfg.groups.repick_none';
+      let text = $t(key, { group: p.group ?? '', node: p.node ?? '' });
+      // Mihomo не запущен: узлы проверялись без него, по доступности сервера (D-36)
+      if (p.method === 'tls') text += ' ' + $t('cfg.groups.repick_method_tls');
+      return { notice: n, tone: 'warning', text };
+    }
+    if (n.id.startsWith('routing_list_missing:')) {
+      return {
+        notice: n,
+        tone: 'error',
+        text: $t('cfg.rules.list_missing', { file: p.file ?? '', tag: p.tag ?? '' })
+      };
+    }
+    return null;
+  }
+
   // Уведомления известных видов; неизвестные идентификаторы не показываем
   function describe(n: LayerNotice): Described | null {
     if (n.id === 'schema_reset') {
@@ -133,7 +169,7 @@
         })
       };
     }
-    return describeSource(n);
+    return describeSource(n) ?? describeRouting(n);
   }
 
   // Уведомления о связи и об отказе провайдера сервер ведёт по одному на ядро, а в тексте
