@@ -887,8 +887,8 @@ func groupModeFeature(kernel string, mode GroupMode) configlayer.Feature {
 // Mihomo). Ручная группа пуста, если у неё нет действующего участника по
 // effectiveSelection с пустым выбором: вложенная группа считается, если она не
 // пуста; DIRECT и REJECT — только на первом месте; узел — из состава Resolve.
-// Группа «авто» и «резерв» пуста, если в составе нет узлов. Один расчёт для всех
-// потребителей пустоты (analyze, последствия удаления, «Сейчас»). Версия ядра
+// Группа «авто» пуста, если в составе нет узлов, «резерв» — если нет основных
+// узлов (без резервного). Один расчёт для всех потребителей пустоты (analyze, последствия удаления, «Сейчас»). Версия ядра
 // пустоту не меняет: режим, недоступный по версии, — отдельное предупреждение.
 type groupEmptiness struct {
 	groups   []Group
@@ -935,7 +935,13 @@ func (e *groupEmptiness) empty(id string) bool {
 		}
 		empty = effectiveSelection(*g, "", avail, nodeRefs(r.Nodes)...) == ""
 	} else {
-		empty = len(r.Nodes) == 0
+		// Резервный узел «резерва» в основные не входит (balancerOf, mains): без
+		// других узлов группу оба ядра заблокируют.
+		main := r.Nodes
+		if g.Mode == ModeFallback && g.Reserve != "" {
+			main = withoutRef(main, g.Reserve)
+		}
+		empty = len(main) == 0
 	}
 	delete(e.visiting, id)
 	e.memo[id] = empty

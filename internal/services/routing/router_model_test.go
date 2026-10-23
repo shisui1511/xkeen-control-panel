@@ -257,6 +257,30 @@ func TestRouterGroupEmptyBlocksApply(t *testing.T) {
 		t.Fatalf("«Применить» не заблокировано пустой группой: %v", err)
 	}
 
+	// «Резерв», в составе которого только резервный узел, основных узлов не имеет:
+	// оба ядра блокируют его трафик, поэтому проверка называет группу пустой.
+	if len(cat.Mihomo) == 0 {
+		t.Fatalf("в каталоге Mihomo нет узлов")
+	}
+	reserveRef := cat.Mihomo[0].Ref
+	if _, _, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Только резерв", Mode: ModeFallback, Picks: []string{reserveRef}, Reserve: reserveRef,
+	}); err != nil {
+		t.Fatalf("SaveGroup (Только резерв): %v", err)
+	}
+	if issues := e.check(t); !rtHasIssue(issues, "group_empty", "group", "Только резерв") {
+		t.Errorf("«резерв» без основных узлов не назван пустым: %+v", issues)
+	}
+	e.replaceGroups(t, func(cfg *GroupsConfig) {
+		kept := cfg.Items[:0:0]
+		for _, g := range cfg.Items {
+			if g.Name != "Только резерв" {
+				kept = append(kept, g)
+			}
+		}
+		cfg.Items = kept
+	})
+
 	// «Применить только узлы»: после Release проверка ничего не блокирует.
 	if _, err := e.svc.Release(e.rev(t)); err != nil {
 		t.Fatalf("Release: %v", err)
