@@ -642,6 +642,12 @@ func TestRouterCascadeServiceGroupEmpty(t *testing.T) {
 		t.Errorf("диалог удаления «Авто» называет пустыми %v: после каскада у «Запасной» DIRECT первый, у «Прокси» остаётся узел", emp)
 	}
 
+	// «Сейчас» (маршрутизация не применена — по модели черновика): контроль, что
+	// проверка после удаления не пуста сама по себе.
+	if cur := rtViewGroup(t, e.view(t), "Сервис").Current; cur != memberGroup+proxyG.ID {
+		t.Errorf("до удаления «Сейчас» у «Сервиса» — %q, ожидалась «Прокси»", cur)
+	}
+
 	if _, err := e.svc.DeleteNode(e.rev(t), entryID); err != nil {
 		t.Fatalf("DeleteNode: %v", err)
 	}
@@ -649,6 +655,12 @@ func TestRouterCascadeServiceGroupEmpty(t *testing.T) {
 	for _, name := range names {
 		if !rtHasIssue(issues, "group_empty", "group", name) {
 			t.Errorf("проверка не блокирует опустевшую группу «%s»", name)
+		}
+	}
+	v := e.view(t)
+	for _, name := range []string{"Сервис", "Прокси"} {
+		if cur := rtViewGroup(t, v, name).Current; cur != "" {
+			t.Errorf("у опустевшей группы «%s» «Сейчас» — %q: участник, которого ядро не выберет", name, cur)
 		}
 	}
 }
