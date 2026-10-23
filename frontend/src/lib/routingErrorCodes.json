@@ -5,9 +5,11 @@
   "foreign_mixed",
   "group_cycle",
   "group_name_taken",
+  "group_not_applied",
   "group_not_found",
   "group_referenced",
   "invalid_input",
+  "member_invalid",
   "nothing_to_reclaim",
   "rule_not_found"
 ]

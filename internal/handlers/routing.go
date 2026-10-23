@@ -73,6 +73,10 @@ func (a *API) writeRoutingError(w http.ResponseWriter, r *http.Request, err erro
 		JSONErrorCode(w, http.StatusConflict, "foreign_mixed", a.t(r, "configlayer.routing.foreign_mixed"))
 	case errors.Is(err, configlayer.ErrNothingToReclaim):
 		JSONErrorCode(w, http.StatusConflict, "nothing_to_reclaim", a.t(r, "configlayer.routing.nothing_to_reclaim"))
+	case errors.Is(err, routing.ErrGroupNotApplied):
+		JSONErrorCode(w, http.StatusConflict, "group_not_applied", a.t(r, "configlayer.routing.group_not_applied"))
+	case errors.Is(err, routing.ErrMemberInvalid):
+		JSONErrorCode(w, http.StatusBadRequest, "member_invalid", a.t(r, "configlayer.routing.member_invalid"))
 	case errors.Is(err, configlayer.ErrApplyBusy):
 		JSONErrorCode(w, http.StatusConflict, "apply_busy", a.t(r, "configlayer.routing.apply_busy"))
 	default:
@@ -387,4 +391,27 @@ func (a *API) ConfigRoutingReclaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSONSuccess(w, map[string]bool{"reclaimed": true})
+}
+
+// ConfigRoutingSelect — POST /api/configlayer/routing/select {group, member}:
+// выбор участника ручной группы без черновика. Mihomo получает выбор сразу, Xray —
+// через перезапуск запущенного ядра. Ответ приходит после исхода по ядрам; отмена
+// запроса вкладкой выбор не прерывает (запись в Live и ядро не расходятся).
+func (a *API) ConfigRoutingSelect(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Group  string `json:"group"`
+		Member string `json:"member"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	res, err := a.routing.Select(context.WithoutCancel(r.Context()), req.Group, req.Member)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, res)
 }

@@ -789,6 +789,15 @@ func main() {
 			if routeErr == nil {
 				routeErr = configLayer.RegisterChecker(routingSvc.Checker())
 			}
+			// Хуки выбора участника (D-36, D-39): фиксатор выбора идёт после
+			// фиксатора источников (каталог узлов считается по уже зафиксированным
+			// источникам), сверка now и повторный выбор — после каждого применения.
+			if routeErr == nil {
+				routeErr = configLayer.AddLiveCommitter(routingSvc.CommitLive)
+			}
+			if routeErr == nil {
+				routeErr = configLayer.AddAfterApply(routingSvc.AfterApply)
+			}
 			if routeErr != nil {
 				log.Printf("Сервис маршрутизации не подключён к слою, маршруты /api/configlayer/routing* отвечают 404: %v", routeErr)
 				routingSvc = nil
@@ -809,6 +818,19 @@ func main() {
 			routingSvc.Start()
 			api.SetRoutingService(routingSvc)
 			defer stops.run("routing", routingSvc.Stop)
+			// Наблюдатель выбора (D-39): при каждом новом процессе Mihomo ставит
+			// выбор групп из State.Live. Создаётся только здесь; defer идёт после
+			// defer сервиса маршрутизации, поэтому наблюдатель останавливается первым.
+			selWatch := routing.NewSelectionWatcher(routingSvc, func(kernel string) int {
+				for _, st := range kernelSvc.ProcessStates() {
+					if st.Name == kernel && st.Status == "running" {
+						return st.PID
+					}
+				}
+				return 0
+			}, 0)
+			selWatch.Start()
+			defer stops.run("routing-selection", selWatch.Stop)
 		}
 	}
 	srv.HandleProtected("/api/configlayer/state", api.ConfigLayerState)
@@ -848,6 +870,7 @@ func main() {
 	srv.HandleProtected("/api/configlayer/routing/release", api.ConfigRoutingRelease)
 	srv.HandleProtected("/api/configlayer/routing/takeover", api.ConfigRoutingTakeover)
 	srv.HandleProtected("/api/configlayer/routing/reclaim", api.ConfigRoutingReclaim)
+	srv.HandleProtected("/api/configlayer/routing/select", api.ConfigRoutingSelect)
 
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
 		strings.TrimPrefix(Version, "v"), runtime.Version(), effectiveMemLimit, effectiveGC, goExp)

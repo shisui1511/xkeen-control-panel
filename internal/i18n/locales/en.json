@@ -107,5 +107,7 @@
   "configlayer.routing.draft_conflict": "The draft was changed in another tab",
   "configlayer.routing.foreign_mixed": "The file contains more than routing: only Release can resolve it",
   "configlayer.routing.nothing_to_reclaim": "Nothing to reclaim: no routing drift",
-  "configlayer.routing.apply_busy": "An apply is already in progress"
+  "configlayer.routing.apply_busy": "An apply is already in progress",
+  "configlayer.routing.group_not_applied": "The group has not been applied yet: pick a member after “Apply”",
+  "configlayer.routing.member_invalid": "This member is not among the group options"
 }

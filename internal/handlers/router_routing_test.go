@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -97,9 +99,16 @@ func rtRtScanDisk(t *testing.T) rtRtDiskState {
 // источников стенда.
 func rtRtUniqueLink(t *testing.T) string {
 	t.Helper()
-	link := rtLinkText(t, "vless_ws")
+	return rtRtUniqueLinkOf(t, "vless_ws", 0)
+}
+
+// rtRtUniqueLinkOf — как rtRtUniqueLink для заданной фикстуры; salt разводит порты
+// нескольких ссылок, взятых подряд.
+func rtRtUniqueLinkOf(t *testing.T, fixture string, salt int) string {
+	t.Helper()
+	link := rtLinkText(t, fixture)
 	re := regexp.MustCompile(`(@[^:/?#]+):\d+`)
-	port := 20000 + int(time.Now().UnixNano()%30000)
+	port := 20000 + int((time.Now().UnixNano()+int64(salt)*7919)%30000)
 	if !re.MatchString(link) {
 		t.Fatal("в ссылке фикстуры нет порта")
 	}
@@ -545,6 +554,293 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	e.rtRtExpectReleased(tg, before)
 }
 
+// --- выбор участника ----------------------------------------------------------
+
+// rtRtXrayOutbounds читает исходящие всех файлов каталога конфигов Xray: тег → объект.
+func rtRtXrayOutbounds(t *testing.T) map[string]map[string]any {
+	t.Helper()
+	entries, err := os.ReadDir(rtRtXrayDir)
+	if err != nil {
+		t.Fatalf("каталог конфигов Xray не читается: %v", err)
+	}
+	out := map[string]map[string]any{}
+	for _, ent := range entries {
+		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(rtRtXrayDir, ent.Name()))
+		if err != nil {
+			continue
+		}
+		var doc struct {
+			Outbounds []map[string]any `json:"outbounds"`
+		}
+		if json.Unmarshal(data, &doc) != nil {
+			continue
+		}
+		for _, ob := range doc.Outbounds {
+			if tag, _ := ob["tag"].(string); tag != "" {
+				out[tag] = ob
+			}
+		}
+	}
+	return out
+}
+
+// rtRtWithoutTag — исходящий без тега: сравнение копии узла с самим узлом.
+func rtRtWithoutTag(ob map[string]any) map[string]any {
+	cp := make(map[string]any, len(ob))
+	for k, v := range ob {
+		if k != "tag" {
+			cp[k] = v
+		}
+	}
+	return cp
+}
+
+// rtRtGroupOutbound — исходящий группы xcp-g-<id> без тега и признак «найден».
+func rtRtGroupOutbound(t *testing.T, gid string) (map[string]any, bool) {
+	t.Helper()
+	ob, ok := rtRtXrayOutbounds(t)["xcp-g-"+gid]
+	if !ok {
+		return nil, false
+	}
+	return rtRtWithoutTag(ob), true
+}
+
+// rtRtMatchesNode сообщает, что исходящий (без тега) совпадает с исходящим одного
+// из узлов «Моих узлов».
+func rtRtMatchesNode(t *testing.T, ob map[string]any) bool {
+	t.Helper()
+	for tag, cand := range rtRtXrayOutbounds(t) {
+		if strings.HasPrefix(tag, "xcp-my-") && reflect.DeepEqual(rtRtWithoutTag(cand), ob) {
+			return true
+		}
+	}
+	return false
+}
+
+// rtRtMihomoNow читает выбранного участника группы Mihomo через панель (Clash API).
+func (e *rtSrc) rtRtMihomoNow(group string) string {
+	e.t.Helper()
+	r := e.call(http.MethodGet, "/api/mihomo/proxy/proxies/"+url.PathEscape(group), nil)
+	if r.Status != http.StatusOK {
+		return ""
+	}
+	var body struct {
+		Now string `json:"now"`
+	}
+	_ = json.Unmarshal(r.Raw, &body)
+	return body.Now
+}
+
+// rtRtWaitNow ждёт, пока выбранный участник группы Mihomo станет want.
+func (e *rtSrc) rtRtWaitNow(group, want string) string {
+	e.t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		now := e.rtRtMihomoNow(group)
+		if now == want || time.Now().After(deadline) {
+			return now
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// rtRtNodeOptions — варианты участника группы представления, которые являются
+// узлами: список member и подпись каждого.
+func rtRtNodeOptions(group map[string]any) (members []string, labels map[string]string) {
+	labels = map[string]string{}
+	opts, _ := group["member_options"].([]any)
+	for _, o := range opts {
+		m, _ := o.(map[string]any)
+		member, _ := m["member"].(string)
+		if !strings.HasPrefix(member, "node:") {
+			continue
+		}
+		members = append(members, member)
+		labels[member], _ = m["label"].(string)
+	}
+	return members, labels
+}
+
+// Выбор участника ручной группы: флаг → два узла → ручная группа → take → «Применить»
+// → POST select → «Сейчас» в представлении, now группы в Mihomo или исходящий группы
+// в Xray (с перезапуском запущенного Xray) → правка правила и «Применить» не
+// сбрасывают выбор. Метка ядра: тест читает активное ядро и ставит выбор в нём.
+func TestRouterRoutingSelectLive(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	e.rtRtPurge()
+	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
+	taken := false
+
+	// Очистка при любом исходе: release → «Применить», затем узлы и секции. Выбор в
+	// Live уходит вместе с группой при «Применить».
+	t.Cleanup(func() {
+		c := e.with(t)
+		if taken {
+			r := c.call(http.MethodPost, rtRoutingBase+"/release", map[string]int64{"revision": c.rtRtRevision()})
+			if r.Status != http.StatusOK {
+				t.Errorf("очистка: release: %d %s", r.Status, r.Code)
+				return
+			}
+			c.rtRtApplyOK("очистка: возврат")
+		}
+		c.rtRtPurge()
+	})
+
+	e.rtRstAddMyNode(rtRtUniqueLinkOf(t, "vless_ws", 1))
+	e.rtRstAddMyNode(rtRtUniqueLinkOf(t, "trojan_ws", 2))
+
+	// До взятия и «Применить» группа не применена: select отвечает group_not_applied.
+	save := e.call(http.MethodPost, rtRoutingBase+"/groups/save", map[string]any{
+		"revision": e.rtRtRevision(),
+		"group": map[string]any{
+			"name": "Выбор", "mode": "manual",
+			"sources": map[string]any{"all": true},
+			"members": []map[string]string{},
+		},
+	})
+	if save.Status != http.StatusOK {
+		t.Fatalf("groups/save: %d %s", save.Status, save.Code)
+	}
+	gid, _ := save.object(t)["group"].(map[string]any)["id"].(string)
+	if len(gid) != 8 {
+		t.Fatalf("groups/save: идентификатор группы длиной %d, ожидалось 8", len(gid))
+	}
+	e.rtRtExpect("select: группа не применена", e.call(http.MethodPost, rtRoutingBase+"/select",
+		map[string]string{"group": gid, "member": "direct"}), http.StatusConflict, "group_not_applied")
+
+	if tk := e.call(http.MethodPost, rtRoutingBase+"/take", map[string]int64{"revision": e.rtRtRevision()}); tk.Status != http.StatusOK {
+		t.Fatalf("take: %d %s", tk.Status, tk.Code)
+	}
+	taken = true
+	e.rtRtApplyOK("взятие")
+
+	view := e.rtRtView()
+	rtAssertContractKeys(t, contract, view, "RoutingView", "routing")
+	group := rtRtFindGroup(view, "Выбор")
+	if group == nil {
+		t.Fatal("представление: нет группы «Выбор»")
+	}
+	nodeMembers, labels := rtRtNodeOptions(group)
+	if len(nodeMembers) < 2 {
+		t.Fatalf("представление: узлов среди вариантов группы %d, ожидалось не меньше 2", len(nodeMembers))
+	}
+	startMember, _ := group["current"].(string)
+	if !strings.HasPrefix(startMember, "node:") {
+		t.Fatalf("представление: current до выбора не узел (длина %d)", len(startMember))
+	}
+	if label, _ := group["current_label"].(string); label == "" || label != labels[startMember] {
+		t.Errorf("представление: current_label до выбора не совпадает с подписью варианта")
+	}
+	target := ""
+	for _, m := range nodeMembers {
+		if m != startMember && labels[m] != labels[startMember] {
+			target = m
+			break
+		}
+	}
+	if target == "" {
+		t.Fatal("среди вариантов нет узла, отличного от текущего")
+	}
+
+	// Коды отказа выбора.
+	e.rtRtExpect("select: неизвестный участник", e.call(http.MethodPost, rtRoutingBase+"/select",
+		map[string]string{"group": gid, "member": "node:my/00000000"}), http.StatusBadRequest, "member_invalid")
+	e.rtRtExpect("select: неизвестная группа", e.call(http.MethodPost, rtRoutingBase+"/select",
+		map[string]string{"group": "ffffffff", "member": target}), http.StatusConflict, "group_not_applied")
+
+	var xrayBefore map[string]any
+	var pidsBefore []int
+	if tg.Core == "xray" {
+		var ok bool
+		if xrayBefore, ok = rtRtGroupOutbound(t, gid); !ok {
+			t.Fatal("Xray: в файлах нет исходящего группы после «Применить»")
+		}
+		pidsBefore, _ = rtRstKernelPIDs("xray")
+	}
+
+	// Выбор участника через API.
+	sel := e.callSlow(http.MethodPost, rtRoutingBase+"/select", map[string]string{"group": gid, "member": target})
+	if sel.Status != http.StatusOK {
+		t.Fatalf("select: %d %s", sel.Status, sel.Code)
+	}
+	rtAssertContractKeys(t, contract, sel.object(t), "SelectResult", "select")
+	kernels, _ := sel.object(t)["kernels"].(map[string]any)
+	outcome, _ := kernels[tg.Core].(string)
+	if outcome != "applied" && outcome != "restarted" {
+		t.Errorf("select: исход для активного ядра %q, ожидалось applied или restarted", outcome)
+	}
+
+	// «Сейчас» в представлении.
+	group = rtRtFindGroup(e.rtRtView(), "Выбор")
+	if group == nil || group["current"] != target {
+		t.Errorf("представление после выбора: current не равен выбранному участнику")
+	}
+	if group != nil {
+		if label, _ := group["current_label"].(string); label == "" || label != labels[target] {
+			t.Errorf("представление после выбора: current_label не совпадает с подписью варианта")
+		}
+	}
+
+	// Ядро: now группы в Mihomo, исходящий группы в Xray.
+	switch tg.Core {
+	case "mihomo":
+		if now := e.rtRtWaitNow("Выбор", labels[target]); now != labels[target] {
+			t.Errorf("Mihomo: now группы не равен имени выбранного узла (длина now %d)", len(now))
+		}
+	case "xray":
+		after, ok := rtRtGroupOutbound(t, gid)
+		switch {
+		case !ok:
+			t.Error("Xray: исходящий группы пропал после выбора")
+		case reflect.DeepEqual(after, xrayBefore):
+			t.Error("Xray: исходящий группы не сменился после выбора")
+		case !rtRtMatchesNode(t, after):
+			t.Error("Xray: исходящий группы не совпадает ни с одним узлом «Моих узлов»")
+		}
+		if len(pidsBefore) > 0 {
+			pidsAfter, out := rtRstKernelPIDs("xray")
+			if len(pidsAfter) != 1 || (len(pidsBefore) == 1 && pidsAfter[0] == pidsBefore[0]) {
+				t.Errorf("Xray: после выбора PID %v (до %v): ядро не перезапущено: %s", pidsAfter, pidsBefore, out)
+			}
+		}
+	}
+
+	// Правка правила и «Применить»: выбор остаётся.
+	rs := e.call(http.MethodPost, rtRoutingBase+"/rules/save", map[string]any{
+		"revision": e.rtRtRevision(),
+		"rule": map[string]any{
+			"enabled": true,
+			"conds":   []map[string]any{{"type": "domain", "values": []string{"direct.example.test"}}},
+			"target":  map[string]string{"kind": "direct"},
+		},
+	})
+	if rs.Status != http.StatusOK {
+		t.Fatalf("rules/save: %d %s", rs.Status, rs.Code)
+	}
+	e.rtRtApplyOK("после правки правила")
+	group = rtRtFindGroup(e.rtRtView(), "Выбор")
+	if group == nil || group["current"] != target {
+		t.Errorf("после «Применить» current не равен выбранному участнику")
+	}
+	switch tg.Core {
+	case "mihomo":
+		if now := e.rtRtWaitNow("Выбор", labels[target]); now != labels[target] {
+			t.Errorf("Mihomo: после «Применить» now группы не равен выбранному узлу (длина now %d)", len(now))
+		}
+	case "xray":
+		again, ok := rtRtGroupOutbound(t, gid)
+		if !ok || reflect.DeepEqual(again, xrayBefore) || !rtRtMatchesNode(t, again) {
+			t.Error("Xray: после «Применить» исходящий группы не соответствует выбранному узлу")
+		}
+	}
+}
+
 // --- маршруты -----------------------------------------------------------------
 
 var rtRoutingRoutes = []struct{ method, path string }{
@@ -563,6 +859,7 @@ var rtRoutingRoutes = []struct{ method, path string }{
 	{http.MethodPost, rtRoutingBase + "/release"},
 	{http.MethodGet, rtRoutingBase + "/takeover"},
 	{http.MethodPost, rtRoutingBase + "/reclaim"},
+	{http.MethodPost, rtRoutingBase + "/select"},
 }
 
 // Флаг слоя выключен: каждый маршрут маршрутизации отвечает 404 config_layer_disabled.

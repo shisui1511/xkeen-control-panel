@@ -68,7 +68,9 @@
       "counts",
       "issues",
       "warnings",
-      "member_options"
+      "member_options",
+      "current",
+      "current_label"
     ],
     "optional": [],
     "children": {
