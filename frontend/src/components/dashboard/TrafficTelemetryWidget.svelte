@@ -9,16 +9,9 @@
     onSwitchTab?: (tab: string) => void;
   }>();
 
-  let traffic = $state<TrafficState>(trafficStream.getState());
-
-  $effect(() => {
-    const unsubscribe = trafficStream.subscribe((state) => {
-      traffic = state;
-    });
-    return () => {
-      unsubscribe();
-    };
-  });
+  // trafficStream соответствует контракту стора Svelte (подписчик сразу получает текущее
+  // состояние, subscribe возвращает отписку), поэтому подписка идёт через $trafficStream.
+  const traffic: TrafficState = $derived($trafficStream);
 
   const formattedDown = $derived(formatTrafficSpeed(traffic.down));
   const formattedUp = $derived(formatTrafficSpeed(traffic.up));

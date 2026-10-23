@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
   import type { Attachment } from 'svelte/attachments';
   import { fade, fly, type EasingFunction, type TransitionConfig } from 'svelte/transition';
   import { cubicIn, cubicOut } from 'svelte/easing';
@@ -37,11 +38,9 @@
     header
   }: ResponsiveSidebarProps = $props();
 
-  let isMediaNarrow = $state(
-    typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)').matches : false
-  );
+  const mediaNarrow = new MediaQuery('(max-width: 768px)');
 
-  let isOverlay = $derived(overlay !== undefined ? overlay : isMediaNarrow);
+  let isOverlay = $derived(overlay !== undefined ? overlay : mediaNarrow.current);
 
   // Длительность выезда и ухода шторки, мс
   const SHEET_MOTION_MS = 200;
@@ -225,19 +224,6 @@
       }
     }
   }
-
-  $effect(() => {
-    if (typeof window === 'undefined') return;
-    const mql = window.matchMedia('(max-width: 768px)');
-    const onChange = (e: MediaQueryListEvent) => {
-      isMediaNarrow = e.matches;
-    };
-    isMediaNarrow = mql.matches;
-    mql.addEventListener('change', onChange);
-    return () => {
-      mql.removeEventListener('change', onChange);
-    };
-  });
 
   $effect(() => {
     if (isOverlay && show) {
