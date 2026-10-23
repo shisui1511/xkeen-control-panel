@@ -673,6 +673,11 @@
     background: var(--accent-soft);
   }
 
+  /* На подложке выбора вторичный цвет в тёмной теме не дотягивает до 4.5:1 */
+  .pm-card.pm-selected .pm-card-desc {
+    color: var(--fg-primary);
+  }
+
   .pm-card:has(input:focus-visible) {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
