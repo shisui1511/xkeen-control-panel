@@ -15,7 +15,9 @@
   } from '../../../lib/configRouting';
   import type { RuleView, Target } from '../../../lib/configRouting';
   import { targetLabel } from '../../../lib/routingView';
+  import Button from '../../Button.svelte';
   import RuleRow from './RuleRow.svelte';
+  import RuleEditModal from './RuleEditModal.svelte';
 
   const uid = $props.id();
 
@@ -97,6 +99,21 @@
     });
   });
 
+  // --- Диалог правила (одна копия на вкладку) ---
+  let editOpen = $state(false);
+  // Правило остаётся в состоянии и после закрытия, пока диалог гаснет
+  let editRule = $state<RuleView | null>(null);
+
+  function openNew() {
+    editRule = null;
+    editOpen = true;
+  }
+
+  function openEdit(rule: RuleView) {
+    editRule = rule;
+    editOpen = true;
+  }
+
   // --- «Всё остальное» ---
   function targetValue(target: Target): string {
     return target.kind === 'group' ? `group:${target.id ?? ''}` : target.kind;
@@ -140,6 +157,17 @@
       oncta={() => void loadRouting()}
     />
   {:else}
+    <div class="rules-panel">
+      {#if showList}
+        <span class="rules-count" data-testid="rules-count">
+          {$tp('cfg.rules.count', rules.length)}
+        </span>
+      {/if}
+      <Button variant="primary" disabled={$applyRunning} data-testid="rules-add" onclick={openNew}>
+        <Icon name="add" size={14} />
+        {$t('cfg.rules.add')}
+      </Button>
+    </div>
     {#if empty}
       <EmptyState
         title={$t('cfg.rules.empty_title')}
@@ -147,15 +175,10 @@
         plain
       />
     {:else if showList}
-      <div class="rules-panel">
-        <span class="rules-count" data-testid="rules-count">
-          {$tp('cfg.rules.count', rules.length)}
-        </span>
-      </div>
       <div class="card rules-card">
         <ol class="rules-list" aria-label={$t('cfg.rules.list_aria')}>
           {#each rules as rule (rule.id)}
-            <RuleRow {rule} count={rules.length} {groups} {onmove} />
+            <RuleRow {rule} count={rules.length} {groups} {onmove} onedit={openEdit} />
           {/each}
         </ol>
         {#if showFallback}
@@ -171,6 +194,8 @@
   {/if}
   <div class="sr-only" aria-live="polite" data-testid="rules-live">{live}</div>
 </div>
+
+<RuleEditModal open={editOpen} rule={editRule} onclose={() => (editOpen = false)} />
 
 {#snippet fallback()}
   <div class="rules-fallback" data-testid="rules-fallback">
@@ -214,6 +239,7 @@
   }
 
   .rules-count {
+    margin-right: auto;
     font-size: var(--font-size-base);
     color: var(--fg-secondary);
   }

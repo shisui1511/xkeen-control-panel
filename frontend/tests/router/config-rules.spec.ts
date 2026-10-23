@@ -330,3 +330,170 @@ test('rules: перекрытие — chip-warning и «Поднять выше�
   await guard.assertClean();
   await resetDraft(page);
 });
+
+const ALL_ROWS = '[data-testid^="rule-row-"]';
+
+/** Открывает диалог нового правила и возвращает его. */
+async function openNewRule(page: Page) {
+  await page.getByTestId('rules-add').click();
+  const modal = page.getByTestId('rule-modal');
+  await expect(modal).toBeVisible({ timeout: T.action });
+  return modal;
+}
+
+test('rules: диалог — создание и правка, пустое значение, «И», неверный CIDR, подсказка о дубле', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  await resetDraft(page);
+
+  // правило, значение которого потом повторится в диалоге
+  const taken = domain('dlg', 0);
+  const seeded = await seedRule(page, { conds: [{ type: 'domain', values: [taken] }] });
+  const seededIndex = (await listRules(page)).find((r) => r.id === seeded)?.index;
+
+  await openRules(page);
+  const rows = page.locator(ALL_ROWS);
+  const before = await rows.count();
+
+  // пустое значение: ошибка у условия и неактивная кнопка
+  let modal = await openNewRule(page);
+  const save = modal.getByTestId('rule-save');
+  await expect(save).toBeDisabled();
+  await modal.getByTestId('rule-cond-values-0').focus();
+  await modal.getByTestId('rule-cond-values-0').blur();
+  await expect(modal.getByTestId('rule-cond-error-0')).toBeVisible({ timeout: T.action });
+  await expect(save).toBeDisabled();
+
+  // домен → DIRECT: строка с чипом домена и целью
+  const created = domain('dlg', 1);
+  await modal.getByTestId('rule-cond-values-0').fill(created);
+  await expect(modal.getByTestId('rule-cond-error-0')).toHaveCount(0);
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+  await expect(rows).toHaveCount(before + 1, { timeout: T.action });
+  const row = rows.filter({ hasText: created });
+  await expect(row).toHaveCount(1);
+  await expect(row.locator('.rr-target-chip')).toHaveText('DIRECT');
+
+  // правка: условия и цель на месте, цель меняется на REJECT
+  const createdId = (await listRules(page)).find((r) => r.index === before + 1)?.id as string;
+  await page.getByTestId(`rule-edit-${createdId}`).click();
+  modal = page.getByTestId('rule-modal');
+  await expect(modal).toBeVisible({ timeout: T.action });
+  await expect(modal.getByTestId('rule-cond-values-0')).toHaveValue(created);
+  await expect(modal.getByTestId('rule-target')).toHaveValue('direct');
+  await modal.getByTestId('rule-target').selectOption('reject');
+  await modal.getByTestId('rule-save').click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+  await expect(page.getByTestId(`rule-row-${createdId}`).locator('.rr-target-chip')).toHaveText(
+    'REJECT',
+    { timeout: T.action }
+  );
+  await expect(rows).toHaveCount(before + 1);
+
+  // два условия, домен и порт: между ними «И», сохраняется одна строка
+  modal = await openNewRule(page);
+  const second = domain('dlg', 2);
+  await modal.getByTestId('rule-cond-values-0').fill(second);
+  await modal.getByTestId('rule-add-cond').click();
+  await expect(modal.locator('.re-and')).toHaveCount(1);
+  await modal.getByTestId('rule-cond-type-1').selectOption('port');
+  await modal.getByTestId('rule-cond-values-1').fill('443');
+  await modal.getByTestId('rule-save').click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+  await expect(rows).toHaveCount(before + 2, { timeout: T.action });
+  const two = rows.filter({ hasText: second });
+  await expect(two).toHaveCount(1);
+  await expect(two.locator('.rr-and')).toHaveCount(1);
+
+  // неверный CIDR: ошибка под условием, кнопка неактивна
+  modal = await openNewRule(page);
+  await modal.getByTestId('rule-cond-type-0').selectOption('ip');
+  await modal.getByTestId('rule-cond-values-0').fill('10.0.0.999/8');
+  await expect(modal.getByTestId('rule-cond-error-0')).toContainText('10.0.0.999/8', {
+    timeout: T.action
+  });
+  await expect(modal.getByTestId('rule-save')).toBeDisabled();
+  await modal.getByTestId('rule-cancel').click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+
+  // значение уже есть в другом правиле: подсказка с номером, сохранить можно
+  modal = await openNewRule(page);
+  await modal.getByTestId('rule-cond-values-0').fill(taken);
+  const hint = modal.getByTestId('rule-cond-dup-0');
+  await expect(hint).toBeVisible({ timeout: T.action });
+  await expect(hint).toContainText(String(seededIndex));
+  await expect(modal.getByTestId('rule-save')).toBeEnabled();
+  await modal.getByTestId('rule-cancel').click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+  await expect(rows).toHaveCount(before + 2);
+
+  await guard.assertClean();
+  await resetDraft(page);
+});
+
+test('rules: своё правило ядра — Mihomo, отказ ядра, BitTorrent «только Xray»', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  await resetDraft(page);
+
+  await openRules(page);
+  const rows = page.locator(ALL_ROWS);
+  const rawTab = /Своё правило ядра|Custom kernel rule/;
+
+  /** Включает «Эксперт» и открывает сегмент «Своё правило ядра». */
+  async function openRaw() {
+    const modal = await openNewRule(page);
+    await modal.locator('.toggle-slider').click();
+    await modal.getByRole('button', { name: rawTab }).click();
+    await expect(modal.getByTestId('rule-raw')).toBeVisible({ timeout: T.action });
+    return modal;
+  }
+
+  // строка Mihomo принимается: строка списка с чипом «только Mihomo»
+  let modal = await openRaw();
+  await modal.getByTestId('rule-raw-kernel').selectOption('mihomo');
+  await modal.getByTestId('rule-raw-text').fill('PROCESS-NAME,example');
+  await modal.getByTestId('rule-save').click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+  const mihomoRule = (await ruleOrder(page)).pop() as string;
+  await expect(
+    page.getByTestId(`rule-row-${mihomoRule}`).locator('[data-chip="only-mihomo"]')
+  ).toBeVisible({ timeout: T.action });
+
+  // MATCH ядро не принимает: ошибка сервера под полем, диалог остаётся открытым
+  const count = await rows.count();
+  modal = await openRaw();
+  await modal.getByTestId('rule-raw-kernel').selectOption('mihomo');
+  await modal.getByTestId('rule-raw-text').fill('MATCH,DIRECT');
+  await modal.getByTestId('rule-save').click();
+  await expect(modal.getByTestId('rule-raw-error')).toContainText(
+    /Ядро не приняло правило|did not accept the rule/,
+    { timeout: T.action }
+  );
+  await expect(modal).toBeVisible();
+  await modal.getByTestId('rule-cancel').click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+  await expect(rows).toHaveCount(count);
+
+  // BitTorrent: условие без значений, строка помечена «только Xray»
+  modal = await openNewRule(page);
+  await modal.getByTestId('rule-cond-type-0').selectOption('bittorrent');
+  await expect(modal.getByTestId('rule-save')).toBeEnabled();
+  await modal.getByTestId('rule-save').click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+  const bt = (await ruleOrder(page)).pop() as string;
+  await expect(page.getByTestId(`rule-row-${bt}`).locator('[data-chip="only-xray"]')).toBeVisible({
+    timeout: T.action
+  });
+
+  await guard.assertClean();
+  await resetDraft(page);
+});
