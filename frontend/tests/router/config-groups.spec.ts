@@ -1,4 +1,5 @@
 // e2e-pages: config/groups
+import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
@@ -506,3 +507,312 @@ test('groups: диалог группы — «Резерв» без резерв
     await resetDraft(page);
   }
 });
+
+// --- Проверка доступности узлов (фаза 146, план 28) ---
+
+interface ProbeInfo {
+  revision: number;
+  url: string;
+  interval: number;
+  timeout: number;
+}
+
+async function probeInfo(page: Page): Promise<ProbeInfo> {
+  const view = await api(page, 'GET', '/api/configlayer/routing');
+  expect(view.status, 'GET /api/configlayer/routing').toBe(200);
+  const probe = (view.data?.probe ?? {}) as {
+    url?: string;
+    interval_s?: number;
+    timeout_s?: number;
+  };
+  return {
+    revision: Number(view.data?.revision ?? 0),
+    url: String(probe.url ?? ''),
+    interval: Number(probe.interval_s ?? 0),
+    timeout: Number(probe.timeout_s ?? 0)
+  };
+}
+
+/** Раскрывает карточку проверки и возвращает поле по имени. */
+async function openProbe(page: Page): Promise<(name: 'url' | 'interval' | 'timeout') => Locator> {
+  await expect(page.getByTestId('probe-card')).toBeVisible({ timeout: T.action });
+  const toggle = page.getByTestId('probe-toggle');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.getByTestId('probe-body')).toBeVisible({ timeout: T.action });
+  return (name) => page.getByTestId(`probe-${name}`).locator('input');
+}
+
+test('groups: проверка доступности — недопустимое значение в черновик не пишется, допустимое пишется', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await startPage(page);
+  await resetDraft(page);
+  const port = randomPort();
+  try {
+    await addToDraft(page, nodeLink('vless_ws.txt', port, 'PrbNode'));
+    await saveGroupApi(page, { name: `RT Проба ${port}`, mode: 'auto' });
+    await openGroups(page);
+
+    // карточка под списком групп, свёрнута по умолчанию
+    const list = page.getByTestId('groups-list');
+    const card = page.getByTestId('probe-card');
+    await expect(card).toBeVisible({ timeout: T.action });
+    await expect(page.getByTestId('probe-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByTestId('probe-body')).toHaveCount(0);
+    const listBox = await list.boundingBox();
+    const cardBox = await card.boundingBox();
+    expect(cardBox!.y, 'карточка проверки ниже списка групп').toBeGreaterThan(listBox!.y);
+
+    const field = await openProbe(page);
+    const start = await probeInfo(page);
+    // поля заполнены записанными значениями (по умолчанию — D-12)
+    await expect(field('url')).toHaveValue(start.url);
+    await expect(field('interval')).toHaveValue(String(start.interval));
+    await expect(field('timeout')).toHaveValue(String(start.timeout));
+
+    // таймаут не меньше интервала: ошибка под полем через aria-describedby, в черновик не записано
+    await field('timeout').fill(String(start.interval + 5));
+    await field('timeout').press('Tab');
+    const timeoutError = page.getByTestId('probe-timeout').locator('.error-text');
+    await expect(timeoutError).toContainText(/Таймаут должен быть меньше|timeout must be less/);
+    await expect(field('timeout')).toHaveAttribute('aria-describedby', /-error$/);
+    const afterBad = await probeInfo(page);
+    expect(afterBad.revision, 'ревизия черновика не изменилась').toBe(start.revision);
+    expect(afterBad.timeout, 'таймаут в черновике прежний').toBe(start.timeout);
+
+    // очищенное поле адреса: ошибка, ничего не записано
+    await field('url').fill('');
+    await field('url').press('Tab');
+    const urlError = page.getByTestId('probe-url').locator('.error-text');
+    await expect(urlError).toContainText(/Введите адрес http или https|Enter an http or https/);
+    expect((await probeInfo(page)).url, 'адрес в черновике прежний').toBe(start.url);
+
+    // недопустимое поле не мешает записи остальных: таймаут возвращён, интервал записан
+    await field('timeout').fill(String(start.timeout));
+    await field('timeout').press('Tab');
+    await expect(timeoutError).toHaveCount(0);
+    await field('interval').fill(String(start.interval + 20));
+    await field('interval').press('Tab');
+    await expect
+      .poll(async () => (await probeInfo(page)).interval, { timeout: T.action })
+      .toBe(start.interval + 20);
+    const written = await probeInfo(page);
+    expect(written.revision, 'запись создала ревизию').toBeGreaterThan(start.revision);
+    expect(written.url, 'ошибочный адрес не записан').toBe(start.url);
+    expect(written.timeout).toBe(start.timeout);
+    await expect(urlError).toHaveCount(1);
+
+    // интервал — не целое число: ошибка, в черновике прежний
+    await field('interval').fill('abc');
+    await field('interval').press('Tab');
+    await expect(page.getByTestId('probe-interval').locator('.error-text')).toContainText(
+      /Интервал: целое число секунд|Interval: a whole number/
+    );
+    expect((await probeInfo(page)).interval, 'интервал в черновике прежний').toBe(
+      start.interval + 20
+    );
+
+    // длинный допустимый адрес прокручивается внутри поля, ширина карточки не меняется
+    const widthBefore = (await card.boundingBox())!.width;
+    await field('url').fill(`https://probe.example.test/${'a'.repeat(300)}`);
+    await field('url').press('Tab');
+    expect((await card.boundingBox())!.width, 'ширина карточки').toBe(widthBefore);
+    await expect(urlError).toHaveCount(0);
+    await expect
+      .poll(async () => (await probeInfo(page)).url.length, { timeout: T.action })
+      .toBeGreaterThan(300);
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});
+
+// --- Узкие экраны, темы и axe (фаза 146, план 28) ---
+
+const LONG_NAME = 'GroupLongNameGroupLongNameGroupLongNameGroupLongName';
+
+/** Узел с длинным именем и две группы (автоматическая и ручная) с длинными именами. */
+async function prepareGroups(page: Page, port: number): Promise<string[]> {
+  await addToDraft(page, nodeLink('vless_ws.txt', port, LONG_NAME));
+  const autoId = await saveGroupApi(page, { name: `RT ${LONG_NAME} Авто ${port}`, mode: 'auto' });
+  const manualId = await saveGroupApi(page, {
+    name: `RT ${LONG_NAME} Ручная ${port}`,
+    mode: 'manual',
+    members: [{ kind: 'direct' }, { kind: 'reject' }]
+  });
+  return [autoId, manualId];
+}
+
+/** Раскрывает состав карточки группы и ждёт, пока он посчитан. */
+async function expandGroup(page: Page, id: string): Promise<void> {
+  const toggle = page.getByTestId(`group-toggle-${id}`);
+  await expect(toggle).toBeVisible({ timeout: T.action });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  const list = page.getByTestId(`group-list-${id}`);
+  await expect(list).toBeVisible({ timeout: T.action });
+  await expect(list.locator('.spinner')).toHaveCount(0, { timeout: T.action });
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`groups: 390 px, тема ${theme} — без горизонтальной прокрутки, шапки переносятся, кнопки не меньше 44×44`, async ({
+    page
+  }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await startPage(page);
+    await resetDraft(page);
+    const port = randomPort();
+    try {
+      const ids = await prepareGroups(page, port);
+      await openGroups(page, 390);
+      for (const id of ids) await expandGroup(page, id);
+      await openProbe(page);
+
+      const metrics = await page.evaluate(() => {
+        const root = document.documentElement;
+        const rect = (el: Element) => (el as HTMLElement).getBoundingClientRect();
+        const buttons = [
+          ...document.querySelectorAll(
+            '[data-testid="groups-tab"] article.group-card button, [data-testid="probe-card"] button'
+          )
+        ]
+          .map(rect)
+          .filter((r) => r.width > 0 && r.height > 0);
+        const heads = [...document.querySelectorAll('[data-testid="groups-tab"] .gc-head')];
+        return {
+          theme: root.getAttribute('data-theme'),
+          pageScroll: root.scrollWidth - root.clientWidth,
+          buttons: buttons.length,
+          small: buttons.filter((r) => r.height < 44 || r.width < 44).length,
+          clipped: heads.filter((el) => el.scrollWidth > el.clientWidth + 1).length,
+          heads: heads.length
+        };
+      });
+      expect(metrics.theme, 'применена тема').toBe(theme);
+      expect(metrics.pageScroll, 'горизонтальная прокрутка страницы').toBeLessThanOrEqual(0);
+      expect(metrics.heads, 'шапки карточек групп').toBeGreaterThanOrEqual(2);
+      expect(metrics.clipped, 'шапки карточек переносятся, а не выходят за край').toBe(0);
+      expect(metrics.buttons, 'кнопки карточек на странице').toBeGreaterThan(0);
+      expect(metrics.small, 'кнопки карточек не меньше 44×44').toBe(0);
+      await guard.assertClean();
+    } finally {
+      await resetDraft(page);
+    }
+  });
+
+  test(`groups: 768 и 1280 px, тема ${theme} — без горизонтальной прокрутки, шапки переносятся`, async ({
+    page
+  }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await startPage(page);
+    await resetDraft(page);
+    const port = randomPort();
+    try {
+      const ids = await prepareGroups(page, port);
+      for (const width of [768, 1280]) {
+        await openGroups(page, width);
+        for (const id of ids) await expandGroup(page, id);
+        await openProbe(page);
+        const metrics = await page.evaluate(() => {
+          const root = document.documentElement;
+          const heads = [...document.querySelectorAll('[data-testid="groups-tab"] .gc-head')];
+          return {
+            theme: root.getAttribute('data-theme'),
+            pageScroll: root.scrollWidth - root.clientWidth,
+            clipped: heads.filter((el) => el.scrollWidth > el.clientWidth + 1).length
+          };
+        });
+        expect(metrics.theme, `${width} px: применена тема`).toBe(theme);
+        expect(
+          metrics.pageScroll,
+          `${width} px: горизонтальная прокрутка страницы`
+        ).toBeLessThanOrEqual(0);
+        expect(metrics.clipped, `${width} px: шапки карточек`).toBe(0);
+      }
+      await guard.assertClean();
+    } finally {
+      await resetDraft(page);
+    }
+  });
+}
+
+/**
+ * Критичные и серьёзные нарушения axe (WCAG 2.0/2.1 A и AA, в том числе color-contrast)
+ * внутри заданных областей. Вывод — правило, селекторы и числа контраста: HTML узлов
+ * может содержать имена узлов и групп.
+ */
+async function axeSevere(page: Page, scopes: string[]): Promise<string[]> {
+  // смена ширины и появление диалога идут с затуханием: axe не должен видеть полупрозрачный кадр
+  await page.waitForTimeout(500);
+  let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']);
+  for (const scope of scopes) builder = builder.include(scope);
+  const scan = await builder.analyze();
+  return scan.violations
+    .filter((v) => v.impact === 'critical' || v.impact === 'serious')
+    .map((v) => {
+      const nodes = v.nodes.slice(0, 3).map((n) => {
+        const msg = (n.any[0]?.message ?? '')
+          .replace(/^Element has insufficient color contrast of /, 'контраст ')
+          .replace(/, font size:.*?\)/, ')')
+          .replace(/\. Expected contrast ratio of /, ', нужно ');
+        return `${n.target.join(' ')} [${msg}]`;
+      });
+      return `${v.id} (${v.impact}, узлов ${v.nodes.length}): ${nodes.join(' | ')}`;
+    });
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`groups axe: карточки и диалог, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await startPage(page);
+    await resetDraft(page);
+    const port = randomPort();
+    const problems: string[] = [];
+    try {
+      const ids = await prepareGroups(page, port);
+      await openGroups(page, 1280);
+      const applied = await page.evaluate(() =>
+        document.documentElement.getAttribute('data-theme')
+      );
+      if (applied !== theme) problems.push(`тема применена ${applied}, ожидалась ${theme}`);
+
+      // вкладка: группы, раскрытый состав и раскрытая карточка проверки
+      await expandGroup(page, ids[0]);
+      await openProbe(page);
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        // область должна быть видима: include без совпадений axe считает ошибкой
+        await expect(page.getByTestId('groups-tab')).toBeVisible({ timeout: T.action });
+        for (const v of await axeSevere(page, ['[data-testid="groups-tab"]'])) {
+          problems.push(`вкладка ${width}px: axe ${v}`);
+        }
+      }
+
+      // диалог группы: «Вручную», «Эксперт» включён
+      await page.setViewportSize({ width: 1280, height: 900 });
+      const modal = await openNewGroup(page);
+      await modal
+        .getByTestId('group-mode')
+        .getByRole('button', { name: /^(Вручную|Manual)$/ })
+        .click();
+      await modal.locator('.gm-expert .toggle-slider').click();
+      await expect(modal.getByTestId('group-expert')).toBeChecked();
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        await expect(modal).toBeVisible({ timeout: T.action });
+        for (const v of await axeSevere(page, ['[data-testid="group-modal"]'])) {
+          problems.push(`диалог ${width}px: axe ${v}`);
+        }
+      }
+      await page.keyboard.press('Escape');
+      await expect(modal).toHaveCount(0, { timeout: T.action });
+      expect(problems, problems.join('\n')).toEqual([]);
+      await guard.assertClean();
+    } finally {
+      await resetDraft(page);
+    }
+  });
+}
