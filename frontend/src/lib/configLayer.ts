@@ -103,6 +103,30 @@ export interface LayerNotice {
   params?: Record<string, string>;
 }
 
+/** Проблема проверки черновика (пустая группа, висячая ссылка): блокирует «Применить». */
+export interface BuildIssue {
+  key: string;
+  code: string;
+  detail?: string;
+  params?: Record<string, string>;
+}
+
+/** Владение маршрутизацией одного ядра: взято ли панелью, что перенесено и оставлено, дрейф. */
+export interface RoutingKernelView {
+  taken: boolean;
+  moved: string[];
+  left: string[];
+  drift: string[];
+  prev_profile?: string;
+}
+
+/** Раздел routing снимка: желаемое владение и фактическое по ядрам (null — ядро не установлено). */
+export interface RoutingSnapshot {
+  desired: boolean;
+  xray: RoutingKernelView | null;
+  mihomo: RoutingKernelView | null;
+}
+
 export interface LayerSnapshot {
   enabled: boolean;
   dev_mode: boolean;
@@ -114,6 +138,10 @@ export interface LayerSnapshot {
   features: Record<string, 'available' | 'unavailable' | 'undetermined'>;
   apply: LayerApply;
   notices: LayerNotice[];
+  /** Блокирующие проблемы проверки черновика; пока список не пуст, «Применить» отказывает. */
+  checks: BuildIssue[];
+  /** Владение маршрутизацией по ядрам. */
+  routing: RoutingSnapshot;
 }
 
 export interface LayerDiff {
@@ -207,6 +235,29 @@ function normalizeApply(raw: unknown): LayerApply {
   return apply;
 }
 
+function normalizeRoutingKernel(raw: unknown): RoutingKernelView | null {
+  if (!isObject(raw)) return null;
+  const k: RoutingKernelView = {
+    taken: raw.taken === true,
+    moved: asArray<string>(raw.moved),
+    left: asArray<string>(raw.left),
+    drift: asArray<string>(raw.drift)
+  };
+  if (typeof raw.prev_profile === 'string' && raw.prev_profile !== '') {
+    k.prev_profile = raw.prev_profile;
+  }
+  return k;
+}
+
+function normalizeRouting(raw: unknown): RoutingSnapshot {
+  const r = isObject(raw) ? raw : {};
+  return {
+    desired: r.desired === true,
+    xray: normalizeRoutingKernel(r.xray),
+    mihomo: normalizeRoutingKernel(r.mihomo)
+  };
+}
+
 /** Приводит данные snapshot к полной форме: null и пропущенные поля становятся пустыми. */
 function normalizeSnapshot(raw: Record<string, unknown>): LayerSnapshot {
   return {
@@ -219,7 +270,9 @@ function normalizeSnapshot(raw: Record<string, unknown>): LayerSnapshot {
     kernels: asArray<LayerKernel>(raw.kernels),
     features: isObject(raw.features) ? (raw.features as LayerSnapshot['features']) : {},
     apply: normalizeApply(raw.apply),
-    notices: asArray<LayerNotice>(raw.notices)
+    notices: asArray<LayerNotice>(raw.notices),
+    checks: asArray<BuildIssue>(raw.checks),
+    routing: normalizeRouting(raw.routing)
   };
 }
 
@@ -293,27 +346,54 @@ const EVENT_NAMES = [
   'apply_step',
   'apply_done',
   'notices',
-  'sources'
+  'sources',
+  'routing'
 ] as const;
 const RETRY_MIN_MS = 3000;
 const RETRY_MAX_MS = 30000;
 
-// Обработчики события sources: представление источников перечитывает configSources.ts
-// (регистрируется при загрузке его модуля; configLayer его не импортирует — цикла нет)
-const sourcesHandlers = new Set<() => void>();
+// Обработчики событий sources, routing и draft: представления перечитывают
+// configSources.ts и configRouting.ts (регистрируются при загрузке их модулей;
+// configLayer их не импортирует — цикла нет). У каждого имени свой набор обработчиков.
+type HandlerEvent = 'sources' | 'routing' | 'draft';
+const layerHandlers: Record<HandlerEvent, Set<() => void>> = {
+  sources: new Set(),
+  routing: new Set(),
+  draft: new Set()
+};
 
-/** Подписка на событие SSE `sources`; возвращает функцию отписки. */
-export function onLayerEvent(name: 'sources', fn: () => void): () => void {
-  if (name !== 'sources') return () => {};
-  sourcesHandlers.add(fn);
+/** Подписка на событие SSE `sources`, `routing` или `draft`; возвращает функцию отписки. */
+export function onLayerEvent(name: HandlerEvent, fn: () => void): () => void {
+  const set = layerHandlers[name];
+  if (!set) return () => {};
+  set.add(fn);
   return () => {
-    sourcesHandlers.delete(fn);
+    set.delete(fn);
   };
+}
+
+function notifyHandlers(name: HandlerEvent): void {
+  for (const fn of [...layerHandlers[name]]) fn();
 }
 
 /** Сообщает подписчикам, что представление источников устарело и его нужно перечитать. */
 function notifySourcesChanged(): void {
-  for (const fn of [...sourcesHandlers]) fn();
+  notifyHandlers('sources');
+}
+
+// Проблемы проверки (checks) и раздел routing приходят только в снимке: после события
+// draft или routing снимок перечитывается с дебаунсом, иначе «Применить недоступно»
+// и плашка владельца показывали бы устаревшее.
+const SNAPSHOT_REFRESH_MS = 300;
+let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+
+function refreshSnapshotSoon(): void {
+  if (!started || get(layerSnapshot) === null) return;
+  if (snapshotTimer !== null) clearTimeout(snapshotTimer);
+  snapshotTimer = setTimeout(() => {
+    snapshotTimer = null;
+    if (started) void refetchLayerState();
+  }, SNAPSHOT_REFRESH_MS);
 }
 
 let source: EventSource | null = null;
@@ -334,8 +414,19 @@ function applyEvent(name: string, data: unknown): void {
     notifySourcesChanged();
     return;
   }
+  if (name === 'routing') {
+    // Владение маршрутизацией изменилось: снимок (раздел routing) и представление
+    // маршрутизации перечитываются
+    refreshSnapshotSoon();
+    notifyHandlers('routing');
+    return;
+  }
   eventSeq++;
   layerSnapshot.update((s) => reduceLayerEvent(s, name, data));
+  if (name === 'draft') {
+    refreshSnapshotSoon();
+    notifyHandlers('draft');
+  }
   if (name === 'snapshot') {
     layerStatus.set('ready');
     syncStartedHere();
@@ -422,6 +513,10 @@ export function startConfigLayer(): void {
 /** Закрывает соединение и таймеры, сбрасывает состояние. */
 export function stopConfigLayer(): void {
   started = false;
+  if (snapshotTimer !== null) {
+    clearTimeout(snapshotTimer);
+    snapshotTimer = null;
+  }
   if (retryTimer !== null) {
     clearTimeout(retryTimer);
     retryTimer = null;
