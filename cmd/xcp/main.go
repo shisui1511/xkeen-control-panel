@@ -798,8 +798,15 @@ func main() {
 			if routeErr == nil {
 				routeErr = configLayer.AddAfterApply(routingSvc.AfterApply)
 			}
-			if routeErr != nil {
+			if routeErr == nil {
+				// Хук групп по умолчанию ставится только после полной регистрации.
+				routingSvc.Attach()
+			} else {
 				log.Printf("Сервис маршрутизации не подключён к слою, маршруты /api/configlayer/routing* отвечают 404: %v", routeErr)
+				if routingSvc != nil {
+					// Контекст сервиса не должен остаться живым без владельца.
+					routingSvc.Stop()
+				}
 				routingSvc = nil
 			}
 		}

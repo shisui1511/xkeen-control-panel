@@ -177,6 +177,7 @@ func rtNewEnv(t *testing.T, opts ...rtOption) *rtEnv {
 		t.Fatalf("routing.New: %v", err)
 	}
 	t.Cleanup(svc.Stop)
+	svc.Attach()
 
 	for _, gens := range [][]configlayer.Generator{src.Generators(), svc.Generators()} {
 		for _, g := range gens {

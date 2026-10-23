@@ -118,7 +118,7 @@ type Service struct {
 }
 
 // New создаёт сервис. Слой, сервис источников и источник «установленных ядер»
-// обязательны. Регистрирует у сервиса источников хук групп по умолчанию.
+// обязательны. Хук групп по умолчанию у сервиса источников ставит Attach.
 func New(d Deps) (*Service, error) {
 	if d.Layer == nil {
 		return nil, errors.New("routing: не задан слой конфигурации")
@@ -149,9 +149,14 @@ func New(d Deps) (*Service, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{d: d, ctx: ctx, cancel: cancel, gens: map[string][]configlayer.GeneratedFile{}, provs: map[string][]byte{}}
-	d.Sources.SetDraftExtras(s.draftExtras)
 	return s, nil
 }
+
+// Attach подключает сервис к сервису источников: хук групп по умолчанию при
+// первом источнике (D-09). Вызывается из cmd/xcp/main.go после успешной
+// регистрации генераторов, проверки и хуков слоя: сервис, не подключённый к слою
+// целиком, в «Добавить» источника не участвует.
+func (s *Service) Attach() { s.d.Sources.SetDraftExtras(s.draftExtras) }
 
 // Generators возвращает генераторы файлов ядер для Layer.RegisterGenerator:
 // routing_xray (146-07) и routing_mihomo (146-11).
