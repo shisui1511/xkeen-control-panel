@@ -51,6 +51,9 @@ func RecoverJournal(store *Store, roots Roots) (bool, error) {
 		return false, fmt.Errorf("configlayer: recover journal: %w", err)
 	}
 	var errs []error
+	if err := undoRoutingJournal(roots, set, j.Routing); err != nil {
+		errs = append(errs, err)
+	}
 	for i := len(set.Meta.Files) - 1; i >= 0; i-- {
 		if err := set.Restore(roots, set.Meta.Files[i]); err != nil {
 			errs = append(errs, err)

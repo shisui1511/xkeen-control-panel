@@ -385,6 +385,11 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		// трогается: его сирот не убираем.
 		plan.Orphans = orphansOfScope(plan.Orphans, installed, req.Kernel)
 	}
+	if err == nil {
+		// Взятие и возврат маршрутизации — часть этого же плана: проверка ядрами
+		// идёт на итоговой раскладке, запись и откат общие.
+		plan.Routing, err = p.planRouting(src, snap.Routing, installed, req)
+	}
 	if err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
 		res := ResultView{Code: ResultBuildFailed, Message: err.Error()}
@@ -635,6 +640,9 @@ func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest, used I
 		}
 		if applyDraft {
 			st.Applied = src.Clone()
+		}
+		if plan.Routing != nil {
+			st.Routing = plan.Routing.Next.clone()
 		}
 		// Живые данные фиксируются в той же записи, что и манифест (RESEARCH
 		// Pitfall 3): отказ хука отменяет и манифест.
