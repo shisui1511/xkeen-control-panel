@@ -38,6 +38,9 @@
   import EyeOff from './icons/EyeOff.svelte';
   import Copy from './icons/Copy.svelte';
   import ConfigIcon from './icons/Config.svelte';
+  import ChevronUp from './icons/ChevronUp.svelte';
+  import Grip from './icons/Grip.svelte';
+  import ArrowRight from './icons/ArrowRight.svelte';
 
   let {
     name,
@@ -128,4 +131,10 @@
   <EyeOff {size} {color} class={className} />
 {:else if name === 'copy'}
   <Copy {size} {color} class={className} />
+{:else if name === 'chevron-up'}
+  <ChevronUp {size} {color} class={className} />
+{:else if name === 'grip'}
+  <Grip {size} {color} class={className} />
+{:else if name === 'arrow-right'}
+  <ArrowRight {size} {color} class={className} />
 {/if}

@@ -1,21 +1,29 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { t, tp } from '../../../i18n';
   import EmptyState from '../../EmptyState.svelte';
   import Skeleton from '../../Skeleton.svelte';
-  import { layerSnapshot } from '../../../lib/configLayer';
-  import { routingView, routingStatus, loadRouting } from '../../../lib/configRouting';
-  import type { Cond, Target } from '../../../lib/configRouting';
-  import { condLabelKey, targetLabel } from '../../../lib/routingView';
+  import Select from '../../Select.svelte';
+  import Icon from '../../../lib/components/Icon.svelte';
+  import { applyRunning, handleLayerError, layerSnapshot } from '../../../lib/configLayer';
+  import {
+    routingView,
+    routingStatus,
+    loadRouting,
+    moveRule,
+    setFinal
+  } from '../../../lib/configRouting';
+  import type { RuleView, Target } from '../../../lib/configRouting';
+  import { targetLabel } from '../../../lib/routingView';
+  import RuleRow from './RuleRow.svelte';
+
+  const uid = $props.id();
 
   // Представление маршрутизации читается при открытии вкладки; дальше его перечитывают
   // события SSE routing, sources и draft (подписки регистрирует configRouting.ts).
   onMount(() => {
     void loadRouting();
   });
-
-  // Значений в чипе условия показано до трёх, остальное — чипом «+{n}»
-  const VALUES_SHOWN = 3;
 
   const loading = $derived(
     $layerSnapshot === null || $routingStatus === 'idle' || $routingStatus === 'loading'
@@ -32,24 +40,92 @@
   );
   const finalTarget = $derived($routingView?.final ?? { kind: 'direct' });
 
-  function valuesOf(c: Cond): string[] {
-    return [...c.values, ...c.lists.map((l) => `${l.file} · ${l.tag}`)];
+  // --- Перестановка кнопками ---
+  // После ответа сервера порядок в представлении обновляется отдельным запросом: фокус и
+  // объявление ждут, пока правило окажется на новой позиции.
+  interface PendingMove {
+    id: string;
+    dir: -1 | 1;
+    to: number;
   }
 
-  function shown(c: Cond): string[] {
-    return valuesOf(c).slice(0, VALUES_SHOWN);
+  let moving = $state(false);
+  let pending = $state<PendingMove | null>(null);
+  let live = $state('');
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+  let tabEl: HTMLDivElement | undefined;
+
+  function clearPending() {
+    pending = null;
+    if (pendingTimer !== null) clearTimeout(pendingTimer);
+    pendingTimer = null;
   }
 
-  function hiddenCount(c: Cond): number {
-    return Math.max(0, valuesOf(c).length - VALUES_SHOWN);
+  async function onmove(rule: RuleView, dir: -1 | 1) {
+    if (moving || $applyRunning) return;
+    const to = rule.index - 1 + dir;
+    if (to < 0 || to >= rules.length) return;
+    moving = true;
+    try {
+      await moveRule(rule.id, to);
+      pending = { id: rule.id, dir, to: to + 1 };
+      // Если представление не обновилось, объявление и фокус всё равно не зависают
+      pendingTimer = setTimeout(clearPending, 4000);
+    } catch (err) {
+      handleLayerError(err);
+    } finally {
+      moving = false;
+    }
   }
 
-  function isReject(target: Target): boolean {
-    return target.kind === 'reject';
+  $effect(() => {
+    const p = pending;
+    if (p === null) return;
+    const rule = rules.find((r) => r.id === p.id);
+    if (!rule || rule.index !== p.to) return;
+    clearPending();
+    live = $t('cfg.rules.moved_live', { n: rule.index });
+    void tick().then(() => {
+      // Фокус остаётся на той же кнопке той же строки; у границы она неактивна — берём парную
+      const same = tabEl?.querySelector<HTMLButtonElement>(
+        `[data-testid="rule-${p.dir < 0 ? 'up' : 'down'}-${p.id}"]`
+      );
+      const other = tabEl?.querySelector<HTMLButtonElement>(
+        `[data-testid="rule-${p.dir < 0 ? 'down' : 'up'}-${p.id}"]`
+      );
+      (same && !same.disabled ? same : other)?.focus();
+    });
+  });
+
+  // --- «Всё остальное» ---
+  function targetValue(target: Target): string {
+    return target.kind === 'group' ? `group:${target.id ?? ''}` : target.kind;
+  }
+
+  function targetOf(value: string): Target {
+    if (value.startsWith('group:')) return { kind: 'group', id: value.slice('group:'.length) };
+    return { kind: value === 'reject' ? 'reject' : 'direct' };
+  }
+
+  const targetOptions = $derived([
+    ...groups.map((g) => ({ value: `group:${g.id}`, label: g.name })),
+    { value: 'direct', label: 'DIRECT' },
+    { value: 'reject', label: 'REJECT' }
+  ]);
+  const finalValue = $derived(targetValue(finalTarget));
+
+  async function changeFinal(e: Event & { currentTarget: HTMLSelectElement }) {
+    const select = e.currentTarget;
+    try {
+      await setFinal(targetOf(select.value));
+    } catch (err) {
+      select.value = finalValue;
+      handleLayerError(err);
+    }
   }
 </script>
 
-<div class="rules-tab" data-testid="rules-tab">
+<div class="rules-tab" data-testid="rules-tab" bind:this={tabEl}>
   {#if loading}
     <div class="rules-skeleton" aria-hidden="true">
       <Skeleton type="card" height="120px" />
@@ -79,49 +155,40 @@
       <div class="card rules-card">
         <ol class="rules-list" aria-label={$t('cfg.rules.list_aria')}>
           {#each rules as rule (rule.id)}
-            <li class="rules-row" data-testid="rule-row-{rule.id}">
-              <span class="rules-num">{rule.index}</span>
-              <div class="rules-conds">
-                {#each rule.conds as cond, i (i)}
-                  {#if i > 0}
-                    <span class="rules-and">{$t('cfg.rules.and')}</span>
-                  {/if}
-                  <span class="chip chip-default rules-cond">
-                    <span>{$t(condLabelKey(cond.type))}</span>
-                    {#each shown(cond) as value, vi (vi)}
-                      <span class="rules-value">{vi === 0 ? '· ' : ''}{value}</span>
-                    {/each}
-                  </span>
-                  {#if hiddenCount(cond) > 0}
-                    <span class="chip chip-default" title={valuesOf(cond).join(', ')}>
-                      {$t('cfg.rules.more_values', { n: hiddenCount(cond) })}
-                    </span>
-                  {/if}
-                {/each}
-                {#if rule.raw}
-                  <span class="chip chip-default rules-cond">{$t('cfg.rules.raw_title')}</span>
-                {/if}
-              </div>
-              <span class="rules-target">
-                <span aria-hidden="true">→</span>
-                <span class="chip {isReject(rule.target) ? 'chip-danger' : 'chip-default'}">
-                  {targetLabel($t, rule.target, groups)}
-                </span>
-              </span>
-            </li>
+            <RuleRow {rule} count={rules.length} {groups} {onmove} />
           {/each}
         </ol>
+        {#if showFallback}
+          {@render fallback()}
+        {/if}
       </div>
     {/if}
-    {#if showFallback}
-      <div class="rules-fallback" data-testid="rules-fallback">
-        <span class="rules-fallback-text">
-          {$t('cfg.rules.fallback', { target: targetLabel($t, finalTarget, groups) })}
-        </span>
+    {#if empty && showFallback}
+      <div class="card rules-card">
+        {@render fallback()}
       </div>
     {/if}
   {/if}
+  <div class="sr-only" aria-live="polite" data-testid="rules-live">{live}</div>
 </div>
+
+{#snippet fallback()}
+  <div class="rules-fallback" data-testid="rules-fallback">
+    <label class="rules-fallback-label" for="{uid}-final">
+      <span>{$t('cfg.rules.fallback_label')}</span>
+      <Icon name="arrow-right" size={14} />
+    </label>
+    <Select
+      id="{uid}-final"
+      wrapperClass="rules-fallback-select"
+      value={finalValue}
+      disabled={$applyRunning}
+      options={targetOptions}
+      data-testid="rules-fallback-select"
+      onchange={changeFinal}
+    />
+  </div>
+{/snippet}
 
 <style>
   .rules-tab {
@@ -154,65 +221,13 @@
   .rules-card {
     min-width: 0;
     padding: 0;
+    overflow: hidden;
   }
 
   .rules-list {
     margin: 0;
     padding: 0;
     list-style: none;
-  }
-
-  .rules-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--spacing-2) var(--spacing-4);
-    min-width: 0;
-    padding: var(--spacing-2) var(--spacing-4);
-    border-top: 1px solid var(--border);
-  }
-
-  .rules-row:first-child {
-    border-top: none;
-  }
-
-  .rules-num {
-    font-family: var(--font-family-mono);
-    font-size: var(--font-size-xs);
-    color: var(--fg-secondary);
-  }
-
-  .rules-conds {
-    display: flex;
-    flex: 1 1 200px;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--spacing-1);
-    min-width: 0;
-  }
-
-  .rules-cond {
-    flex-wrap: wrap;
-    gap: var(--spacing-1);
-    overflow-wrap: anywhere;
-  }
-
-  .rules-value {
-    font-family: var(--font-family-mono);
-    overflow-wrap: anywhere;
-  }
-
-  .rules-and {
-    font-size: var(--font-size-xs);
-    color: var(--fg-dim);
-  }
-
-  .rules-target {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing-1);
-    min-width: 0;
-    overflow-wrap: anywhere;
   }
 
   .rules-fallback {
@@ -223,14 +238,34 @@
     min-width: 0;
     padding: var(--spacing-2) var(--spacing-4);
     background: var(--bg-elevated);
-    border: 1px solid var(--border);
     border-top: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
+    font-size: var(--font-size-base);
   }
 
-  .rules-fallback-text {
+  .rules-fallback-label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
     min-width: 0;
-    font-size: var(--font-size-base);
+    color: var(--fg-primary);
     overflow-wrap: anywhere;
+  }
+
+  .rules-fallback :global(.rules-fallback-select) {
+    flex: 0 1 280px;
+    width: auto;
+    min-width: 160px;
+  }
+
+  @media (max-width: 768px) {
+    .rules-fallback {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .rules-fallback :global(.rules-fallback-select) {
+      flex: 1 1 auto;
+      width: 100%;
+    }
   }
 </style>
