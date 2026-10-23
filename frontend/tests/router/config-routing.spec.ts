@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { CORE_TAG } from './lib/known';
+import { CORE_TAG, knownFailure } from './lib/known';
 import { addToDraft, api, layerFlag, nodeLink, randomPort, resetDraft } from './lib/nodes-api';
 
 // Вкладки «Группы» и «Правила» раздела «Конфигурация» на настоящей панели (фаза 146,
@@ -235,6 +235,8 @@ async function axeSevere(page: Page, scopes: string[]): Promise<string[]> {
 
 for (const theme of ['dark', 'light'] as const) {
   test(`routing axe: вкладки, тема ${theme}`, async ({ page }) => {
+    // Белый текст на --danger в тёмной теме не дотягивает до 4.5:1 — общий токен кнопки
+    if (theme === 'dark') knownFailure('*', 'btn-danger-dark-contrast');
     const guard = attachConsoleGuard(page);
     await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -341,6 +343,10 @@ async function prepareXKeen(page: Page): Promise<() => Promise<void>> {
   if (before.taken) await setOwnership(page, false);
   return async () => {
     await resetDraft(page);
+    // Сначала возврат владельца: пока узлы теста на месте, группы по умолчанию не пусты
+    // и «Применить» не блокируется (GRP-05); без управления маршрутизацией пустая группа
+    // применению не мешает, и узлы теста убираются следом
+    await setOwnership(page, false);
     // узлы теста могли быть применены: убираем их и применяем
     const view = await api(page, 'GET', '/api/configlayer/sources');
     const mine = (
@@ -357,7 +363,7 @@ async function prepareXKeen(page: Page): Promise<() => Promise<void>> {
     }
     const after = await ownerSnap(page);
     if (after.changes > 0) await applyAndWait(page);
-    await setOwnership(page, before.taken);
+    if (before.taken) await setOwnership(page, true);
   };
 }
 

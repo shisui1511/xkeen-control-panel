@@ -259,7 +259,8 @@ async function pickCard(page: Page, id: string): Promise<void> {
   const modal = page.getByTestId('preset-modal');
   const radio = modal.getByTestId(`preset-card-${id}`);
   await expect(radio).toBeEnabled({ timeout: T.action });
-  await modal.locator('label.pm-card', { has: radio }).click();
+  // Внутренний локатор в has ищется относительно карточки, поэтому строится от page
+  await modal.locator('label.pm-card', { has: page.getByTestId(`preset-card-${id}`) }).click();
   await expect(radio).toBeChecked();
 }
 
@@ -394,6 +395,10 @@ async function prepareXKeen(page: Page): Promise<() => Promise<void>> {
   if (before.taken) await setOwnership(page, false);
   return async () => {
     await resetDraft(page);
+    // Сначала возврат владельца: пока узлы теста на месте, группы по умолчанию не пусты
+    // и «Применить» не блокируется (GRP-05); без управления маршрутизацией пустая группа
+    // применению не мешает, и узлы теста убираются следом
+    await setOwnership(page, false);
     const view = await api(page, 'GET', '/api/configlayer/sources');
     const mine = (
       (view.data?.sources ?? []) as { id: string; nodes?: { name: string; entry_id?: string }[] }[]
@@ -409,7 +414,7 @@ async function prepareXKeen(page: Page): Promise<() => Promise<void>> {
     }
     const after = await ownerSnap(page);
     if (after.changes > 0) await applyAndWait(page);
-    await setOwnership(page, before.taken);
+    if (before.taken) await setOwnership(page, true);
   };
 }
 

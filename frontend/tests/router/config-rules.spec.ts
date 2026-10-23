@@ -163,8 +163,10 @@ test('rules: вверх/вниз — порядок в черновике, фо�
   await startPage(page);
   await resetDraft(page);
 
+  // Четыре правила: второе после переноса вниз не становится последним, и его кнопка
+  // «вниз» остаётся активной (у границы фокус по UI-SPEC уходит на парную кнопку)
   const ids: string[] = [];
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= 4; i++) {
     ids.push(await seedRule(page, { conds: [{ type: 'domain', values: [domain('ord', i)] }] }));
   }
   const [r1, r2, r3] = ids;
@@ -270,7 +272,12 @@ test('rules: перетаскивание — линия вставки, пор�
   await page.mouse.up();
   await expect.poll(mine, { timeout: T.action }).toEqual([r1, r2, r3]);
 
-  // кнопки продолжают работать после перетаскивания
+  // кнопки продолжают работать после перетаскивания; кнопка берёт позицию из списка
+  // на экране, поэтому сначала ждём, пока он покажет новый порядок
+  await expect(page.getByTestId(`rule-num-${r1}`)).toHaveText(
+    String((await ruleOrder(page)).indexOf(r1) + 1),
+    { timeout: T.action }
+  );
   await page.getByTestId(`rule-down-${r1}`).click();
   await expect.poll(mine, { timeout: T.action }).toEqual([r2, r1, r3]);
 
