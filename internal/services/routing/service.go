@@ -88,6 +88,13 @@ type Service struct {
 	gmu      sync.Mutex
 	gens     map[string][]configlayer.GeneratedFile
 	genOrder []string
+
+	// Мемоизация текста провайдеров списков dat для Mihomo (выгрузка большого
+	// списка не повторяется на каждый вызов генератора).
+	pmu       sync.Mutex
+	provs     map[string][]byte
+	provOrder []string
+	provBytes int
 }
 
 // New создаёт сервис. Слой, сервис источников и источник «установленных ядер»
@@ -118,15 +125,15 @@ func New(d Deps) (*Service, error) {
 		d.Rand = rand.Reader
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{d: d, ctx: ctx, cancel: cancel, gens: map[string][]configlayer.GeneratedFile{}}
+	s := &Service{d: d, ctx: ctx, cancel: cancel, gens: map[string][]configlayer.GeneratedFile{}, provs: map[string][]byte{}}
 	d.Sources.SetDraftExtras(s.draftExtras)
 	return s, nil
 }
 
 // Generators возвращает генераторы файлов ядер для Layer.RegisterGenerator:
-// сейчас — routing_xray (146-07); генератор Mihomo добавляет 146-11.
+// routing_xray (146-07) и routing_mihomo (146-11).
 func (s *Service) Generators() []configlayer.Generator {
-	return []configlayer.Generator{xrayGen{s: s}}
+	return []configlayer.Generator{xrayGen{s: s}, mihomoGen{s: s}}
 }
 
 // Start запускает фоновые задачи сервиса. В этом плане задач нет: наблюдатель dat
