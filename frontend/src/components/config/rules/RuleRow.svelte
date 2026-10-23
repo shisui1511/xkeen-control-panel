@@ -11,12 +11,36 @@
   // кнопки «вверх/вниз», «изменить», «удалить» и чипы статуса. Перекрытия, дубли и ненайденные
   // списки приходят от сервера готовыми (warnings, issues) — клиент их не пересчитывает (D-40).
   // Перестановка идёт через onmove: фокус и объявление позиции ведёт список.
-  let { rule, count, groups, onmove, onedit } = $props<{
+  // Перетаскивание — нативный HTML5 DnD за ручку: состояние (кто тащится, где линия вставки)
+  // держит список, строка только сообщает о событиях и рисует линию.
+  let {
+    rule,
+    count,
+    groups,
+    onmove,
+    onedit,
+    dragId = null,
+    dropAt = null,
+    dragLocked = false,
+    onpickup,
+    onhover,
+    onleave,
+    ondropon,
+    onputdown
+  } = $props<{
     rule: RuleView;
     count: number;
     groups: ReadonlyArray<{ id: string; name: string }>;
     onmove: (rule: RuleView, dir: -1 | 1) => void;
     onedit?: (rule: RuleView) => void;
+    dragId?: string | null;
+    dropAt?: { id: string; pos: 'before' | 'after' } | null;
+    dragLocked?: boolean;
+    onpickup?: (rule: RuleView) => void;
+    onhover?: (rule: RuleView, pos: 'before' | 'after') => void;
+    onleave?: (rule: RuleView) => void;
+    ondropon?: (rule: RuleView) => void;
+    onputdown?: () => void;
   }>();
 
   // Значений в чипе условия показано до трёх, остальное — чипом «+{n}»
@@ -25,6 +49,7 @@
   const RAW_SHOWN = 80;
 
   let busy = $state(false);
+  let rowEl: HTMLLIElement | undefined;
 
   const locked = $derived(busy || $applyRunning);
   const first = $derived(rule.index <= 1);
@@ -82,6 +107,42 @@
     rawText.length > RAW_SHOWN ? `${rawText.slice(0, RAW_SHOWN)}…` : rawText
   );
 
+  const dragDisabled = $derived(locked || dragLocked);
+  const dropPos = $derived(dropAt !== null && dropAt.id === rule.id ? dropAt.pos : null);
+
+  function handleDragStart(e: DragEvent) {
+    if (dragDisabled || !e.dataTransfer) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.effectAllowed = 'move';
+    // Firefox не начинает перетаскивание без данных
+    e.dataTransfer.setData('text/plain', rule.id);
+    if (rowEl) e.dataTransfer.setDragImage(rowEl, 16, 16);
+    onpickup?.(rule);
+  }
+
+  function handleDragOver(e: DragEvent) {
+    // Чужое перетаскивание (файл, текст) строку не интересует
+    if (dragId === null || dragLocked || !rowEl) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const box = rowEl.getBoundingClientRect();
+    onhover?.(rule, e.clientY < box.top + box.height / 2 ? 'before' : 'after');
+  }
+
+  function handleDragLeave(e: DragEvent) {
+    // Переход на дочерний элемент строки — не уход
+    if (rowEl && e.relatedTarget instanceof Node && rowEl.contains(e.relatedTarget)) return;
+    onleave?.(rule);
+  }
+
+  function handleDrop(e: DragEvent) {
+    if (dragId === null) return;
+    e.preventDefault();
+    ondropon?.(rule);
+  }
+
   async function toggleEnabled(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
     const want = input.checked;
@@ -137,9 +198,27 @@
   class:rr-danger={hasIssues}
   class:rr-warn={!hasIssues && hasWarnings}
   class:rr-has-status={hasStatus}
+  class:rr-dragging={dragId === rule.id}
+  class:rr-drop-before={dropPos === 'before'}
+  class:rr-drop-after={dropPos === 'after'}
   data-testid="rule-row-{rule.id}"
+  bind:this={rowEl}
+  ondragover={handleDragOver}
+  ondragleave={handleDragLeave}
+  ondrop={handleDrop}
 >
-  <span class="rr-grip" aria-hidden="true" data-rule-grip>
+  <span
+    class="rr-grip"
+    class:rr-grip-off={dragDisabled}
+    role="img"
+    aria-label={$t('cfg.rules.drag_aria', { n: rule.index })}
+    title={$t('cfg.rules.drag_aria', { n: rule.index })}
+    draggable={!dragDisabled}
+    data-testid="rule-grip-{rule.id}"
+    data-rule-grip
+    ondragstart={handleDragStart}
+    ondragend={() => onputdown?.()}
+  >
     <Icon name="grip" size={16} />
   </span>
   <span class="rr-num" data-testid="rule-num-{rule.id}">{rule.index}</span>
@@ -324,11 +403,29 @@
     color: var(--fg-dim);
   }
 
-  /* Ручка перетаскивания видна только при точном указателе (перетаскивание подключает 146-29) */
+  /* Ручка перетаскивания видна только при точном указателе; на касании остаются кнопки */
   .rr-grip {
     grid-area: grip;
     display: none;
     color: var(--fg-dim);
+    cursor: grab;
+  }
+
+  .rr-grip-off {
+    cursor: not-allowed;
+  }
+
+  /* Источник перетаскивания приглушён фоном, цель получает линию вставки 2px над или под строкой */
+  .rr-dragging {
+    background: var(--surface-tint);
+  }
+
+  .rr-drop-before {
+    box-shadow: inset 0 2px 0 0 var(--accent);
+  }
+
+  .rr-drop-after {
+    box-shadow: inset 0 -2px 0 0 var(--accent);
   }
 
   @media (pointer: fine) {

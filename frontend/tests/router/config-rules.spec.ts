@@ -203,6 +203,114 @@ test('rules: вверх/вниз — порядок в черновике, фо�
   await resetDraft(page);
 });
 
+test('rules: перетаскивание — линия вставки, порядок в черновике, объявление позиции', async ({
+  page
+}) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  await resetDraft(page);
+
+  const ids: string[] = [];
+  for (let i = 1; i <= 3; i++) {
+    ids.push(await seedRule(page, { conds: [{ type: 'domain', values: [domain('dnd', i)] }] }));
+  }
+  const [r1, r2, r3] = ids;
+  /** Порядок только тестовых правил: в черновике могут быть и другие. */
+  const mine = async () => (await ruleOrder(page)).filter((id) => ids.includes(id));
+  expect(await mine()).toEqual([r1, r2, r3]);
+
+  await openRules(page);
+  const live = page.getByTestId('rules-live');
+  const row = (id: string) => page.getByTestId(`rule-row-${id}`);
+  const grip = (id: string) => page.getByTestId(`rule-grip-${id}`);
+  const lines = page.locator('[data-testid^="rule-row-"][class*="rr-drop-"]');
+
+  // ручка видна при точном указателе, подпись с номером, в порядок фокуса не входит
+  await expect(grip(r3)).toBeVisible({ timeout: T.action });
+  await expect(grip(r3)).toHaveAttribute('aria-label', /.+/);
+  await expect(grip(r3)).toHaveAttribute('draggable', 'true');
+
+  // третье правило несут на верхнюю половину первого: линия над первым, источник приглушён
+  await grip(r3).hover();
+  await page.mouse.down();
+  await row(r3).hover({ position: { x: 60, y: 4 } });
+  // над собой линии нет
+  await expect(lines).toHaveCount(0);
+  await row(r1).hover({ position: { x: 60, y: 3 } });
+  await row(r1).hover({ position: { x: 62, y: 3 } });
+  await expect(row(r1)).toHaveClass(/rr-drop-before/, { timeout: T.action });
+  await expect(row(r3)).toHaveClass(/rr-dragging/);
+  const line = await row(r1).evaluate((el) => getComputedStyle(el).boxShadow);
+  expect(line, 'линия вставки 2px').toMatch(/\b2px\b/);
+  await page.mouse.up();
+
+  await expect.poll(mine, { timeout: T.action }).toEqual([r3, r1, r2]);
+  await expect(lines).toHaveCount(0);
+  await expect(row(r3)).not.toHaveClass(/rr-dragging/);
+  const pos3 = (await ruleOrder(page)).indexOf(r3) + 1;
+  await expect(live).toContainText(String(pos3), { timeout: T.action });
+  await expect(page.getByTestId(`rule-num-${r3}`)).toHaveText(String(pos3), {
+    timeout: T.action
+  });
+
+  // и вниз: нижняя половина последнего правила — перенос в конец
+  await grip(r3).hover();
+  await page.mouse.down();
+  await row(r2).hover({ position: { x: 60, y: 6 } });
+  await row(r2).hover({ position: { x: 62, y: 6 } });
+  const box = await row(r2).boundingBox();
+  expect(box, 'строка последнего правила').not.toBeNull();
+  await row(r2).hover({ position: { x: 60, y: (box?.height ?? 40) - 3 } });
+  await row(r2).hover({ position: { x: 62, y: (box?.height ?? 40) - 3 } });
+  await expect(row(r2)).toHaveClass(/rr-drop-after/, { timeout: T.action });
+  await page.mouse.up();
+  await expect.poll(mine, { timeout: T.action }).toEqual([r1, r2, r3]);
+
+  // кнопки продолжают работать после перетаскивания
+  await page.getByTestId(`rule-down-${r1}`).click();
+  await expect.poll(mine, { timeout: T.action }).toEqual([r2, r1, r3]);
+
+  await guard.assertClean();
+  await resetDraft(page);
+});
+
+test.describe('касание', () => {
+  test.use({ hasTouch: true });
+
+  test('rules: перетаскивание — на касании ручка скрыта, кнопки «вверх / вниз» работают', async ({
+    page
+  }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startPage(page);
+    await resetDraft(page);
+
+    const a = await seedRule(page, { conds: [{ type: 'domain', values: [domain('tch', 1)] }] });
+    const b = await seedRule(page, { conds: [{ type: 'domain', values: [domain('tch', 2)] }] });
+    await openRules(page);
+    await expect(page.getByTestId(`rule-row-${a}`)).toBeVisible({ timeout: T.action });
+
+    const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
+    expect(coarse, 'эмуляция касания включает (pointer: coarse)').toBe(true);
+    await expect(page.getByTestId(`rule-grip-${a}`)).toBeHidden();
+    await expect(page.getByTestId(`rule-grip-${b}`)).toBeHidden();
+
+    // порядок меняется кнопкой
+    const before = (await ruleOrder(page)).filter((id) => id === a || id === b);
+    expect(before).toEqual([a, b]);
+    await page.getByTestId(`rule-down-${a}`).tap();
+    await expect
+      .poll(async () => (await ruleOrder(page)).filter((id) => id === a || id === b), {
+        timeout: T.action
+      })
+      .toEqual([b, a]);
+
+    await guard.assertClean();
+    await resetDraft(page);
+  });
+});
+
 test('rules: выключение — чип «выключено» и приглушённый цвет текста, правило остаётся', async ({
   page
 }) => {
