@@ -146,7 +146,13 @@
       if (failed.length > 0) {
         showToast(
           'warning',
-          $t('cfg.groups.select_partial', { name: label, kernels: failed.join(', ') })
+          $t(
+            failed.length > 1 ? 'cfg.groups.select_partial_both' : 'cfg.groups.select_partial_one',
+            {
+              name: label,
+              kernels: failed.join(', ')
+            }
+          )
         );
       } else {
         showToast('success', $t('cfg.groups.toast_selected', { name: label }));
