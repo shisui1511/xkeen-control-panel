@@ -115,7 +115,8 @@ const ISSUE_CODES = new Set([
   'target_missing',
   'section_invalid',
   'list_not_found',
-  'list_too_large'
+  'list_too_large',
+  'cond_conflict'
 ]);
 
 /**
