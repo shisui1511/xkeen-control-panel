@@ -621,6 +621,7 @@ export const ROUTING_REASONS = [
   'conds_too_many',
   'raw_with_conds',
   'cond_type_invalid',
+  'cond_conflict',
   'values_required',
   'values_forbidden',
   'values_too_many',

@@ -138,8 +138,19 @@
     selecting = true;
     pick = member;
     try {
-      await selectMember(group.id, member);
-      showToast('success', $t('cfg.groups.toast_selected', { name: label }));
+      const res = await selectMember(group.id, member);
+      // Выбор в панели записан, но ядро могло его не принять: «Выбрано» только без исхода failed
+      const failed = Object.entries(res?.kernels ?? {})
+        .filter(([, outcome]) => outcome === 'failed')
+        .map(([name]) => kernelLabel(name));
+      if (failed.length > 0) {
+        showToast(
+          'warning',
+          $t('cfg.groups.select_partial', { name: label, kernels: failed.join(', ') })
+        );
+      } else {
+        showToast('success', $t('cfg.groups.toast_selected', { name: label }));
+      }
     } catch (err) {
       pick = group.current;
       if ((err as { code?: unknown })?.code === 'apply_busy') handleLayerError(err);

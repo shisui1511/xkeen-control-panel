@@ -39,6 +39,28 @@ export function condTypeKey(type: string): string {
   return COND_TYPES.has(type) ? `cfg.rules.type_${type}` : 'cfg.rules.type_domain';
 }
 
+/**
+ * Поле правила Xray, в которое попадает условие. То же сопоставление, что таблица
+ * xrayCondFields в internal/services/routing/validate.go и xrayRule в rules_xray.go; их
+ * сверяет scripts/check-routing-api.js. В правиле — одно условие на поле (cond_conflict):
+ * Xray не пересекает два списка одного поля, «или» делается вторым правилом.
+ */
+export const COND_XRAY_FIELD: Record<string, string> = {
+  domain: 'domain',
+  geosite: 'domain',
+  ip: 'ip',
+  geoip: 'ip',
+  port: 'port',
+  network: 'network',
+  src_ip: 'source',
+  bittorrent: 'protocol'
+};
+
+/** Поле Xray условия по типу; неизвестный тип — сам тип. */
+export function condXrayField(type: string): string {
+  return COND_XRAY_FIELD[type] ?? type;
+}
+
 /** Подпись цели правила или участника: имя группы, DIRECT или REJECT. */
 export function targetLabel(
   t: TFn,
@@ -93,7 +115,8 @@ const ISSUE_CODES = new Set([
   'target_missing',
   'section_invalid',
   'list_not_found',
-  'list_too_large'
+  'list_too_large',
+  'cond_conflict'
 ]);
 
 /**
