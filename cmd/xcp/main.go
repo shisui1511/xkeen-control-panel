@@ -736,7 +736,7 @@ func main() {
 				}
 			}
 			if srcErr == nil {
-				srcErr = configLayer.SetLiveCommitter(sourcesSvc.CommitLive)
+				srcErr = configLayer.AddLiveCommitter(sourcesSvc.CommitLive)
 			}
 			if srcErr == nil {
 				srcErr = configLayer.OnDriftResolved(sourcesSvc.OnDriftResolved)

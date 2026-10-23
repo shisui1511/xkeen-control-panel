@@ -29,7 +29,24 @@ var (
 	// ErrAlreadyStarted — генератор зарегистрирован после Start: набор генераторов
 	// фиксируется до запуска слоя.
 	ErrAlreadyStarted = errors.New("слой уже запущен: генераторы регистрируются до Start")
+	// ErrChecksFailed — проверка черновика нашла проблемы: применение не начато.
+	// Конкретная ошибка — *ChecksError со списком проблем.
+	ErrChecksFailed = errors.New("применение заблокировано проверкой черновика")
 )
+
+// ChecksError — отказ применения по проверкам до записи; Is совпадает с
+// ErrChecksFailed.
+type ChecksError struct {
+	Issues []BuildIssue
+}
+
+// Error называет число проблем.
+func (e *ChecksError) Error() string {
+	return fmt.Sprintf("%s: проблем %d", ErrChecksFailed.Error(), len(e.Issues))
+}
+
+// Is связывает ChecksError с сентинелом ErrChecksFailed.
+func (e *ChecksError) Is(target error) bool { return target == ErrChecksFailed }
 
 // Значения по умолчанию и пределы.
 const (
@@ -128,6 +145,24 @@ type Layer struct {
 	verGen      uint64
 	verKernels  []KernelVersionView
 	verFeatures map[Feature]Availability
+	// Мемо проверок черновика (Layer.cachedChecks): ключ последнего расчёта и его
+	// итог; checksEpoch растёт в InvalidateChecks.
+	checksEpoch uint64
+	checksKey   checksKey
+	checksVal   []BuildIssue
+	checksOK    bool
+	// afterApply — хуки после успешного применения (AddAfterApply), до Start.
+	afterApply []func(ctx context.Context, info AfterApplyInfo)
+}
+
+// checksKey — от чего зависит итог проверок черновика: ревизия черновика, хэш
+// живых данных, установленные ядра и эпоха (данные вне черновика: dat, каталог
+// списков).
+type checksKey struct {
+	rev       int64
+	liveHash  string
+	installed InstalledKernels
+	epoch     uint64
 }
 
 // New создаёт слой: открывает файл состояния, шину, реестр и конвейер. Фоновые
@@ -456,10 +491,12 @@ func (l *Layer) Snapshot() SnapshotView {
 		Features:      map[Feature]Availability{},
 		Apply:         l.pipeline.Current(),
 		Notices:       l.noticeViews(st),
+		Checks:        []BuildIssue{},
 	}
 	if !sv.Enabled {
 		return sv
 	}
+	sv.Checks = l.cachedChecks(st)
 	fe := l.evaluate(st)
 	sv.Files, sv.DriftCount = fe.Files, fe.DriftCount
 	sv.Kernels, sv.Features = l.versions()
@@ -716,16 +753,129 @@ func (l *Layer) RegisterGenerator(g Generator) error {
 	return nil
 }
 
-// SetLiveCommitter задаёт хук фиксации живых данных конвейера (см.
-// PipelineDeps.CommitLive). Допустим только до Start.
-func (l *Layer) SetLiveCommitter(fn func(st *State, req ApplyRequest, used Input) error) error {
+// AddLiveCommitter добавляет хук фиксации живых данных конвейера (см.
+// PipelineDeps.CommitLive) в конец списка: хуки вызываются по порядку
+// регистрации в той же записи состояния, что и манифест. Допустим только до
+// Start; nil отклоняется.
+func (l *Layer) AddLiveCommitter(fn func(st *State, req ApplyRequest, used Input) error) error {
+	if fn == nil {
+		return errors.New("configlayer: хук фиксации живых данных не задан")
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.started {
 		return ErrAlreadyStarted
 	}
-	l.pipeline.setCommitLive(fn)
+	l.pipeline.addCommitLive(fn)
 	return nil
+}
+
+// AfterApplyInfo — итог успешного применения для хуков AddAfterApply: что
+// запустило конвейер, из какого состояния собраны файлы, итог и перезапуски.
+type AfterApplyInfo struct {
+	Trigger Trigger
+	Source  SourceKind
+	Result  ResultView
+	Restart []RestartView
+}
+
+// AddAfterApply добавляет хук, который слой вызывает асинхронно после каждого
+// успешного применения (пользовательского и фонового), уже после снятия замка
+// применения: хук может сам вызвать RunLive. Неуспешное применение хуки не
+// вызывает. Допустим только до Start; nil отклоняется.
+func (l *Layer) AddAfterApply(fn func(ctx context.Context, info AfterApplyInfo)) error {
+	if fn == nil {
+		return errors.New("configlayer: хук после применения не задан")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	l.afterApply = append(l.afterApply, fn)
+	return nil
+}
+
+// fireAfterApply вызывает хуки после успешного применения, каждый в своей
+// горутине слоя. Вызывается после снятия замка применения и afterRun.
+func (l *Layer) fireAfterApply(req ApplyRequest, view ApplyView) {
+	if view.Result == nil || !view.Result.OK {
+		return
+	}
+	l.mu.Lock()
+	hooks := append([]func(context.Context, AfterApplyInfo){}, l.afterApply...)
+	l.mu.Unlock()
+	if len(hooks) == 0 {
+		return
+	}
+	info := AfterApplyInfo{
+		Trigger: req.Trigger,
+		Source:  req.Source,
+		Result:  *view.Result,
+		Restart: append([]RestartView(nil), view.Restart...),
+	}
+	for _, fn := range hooks {
+		l.spawn(func() { fn(l.ctx, info) })
+	}
+}
+
+// RegisterChecker добавляет проверку до записи в реестр. Допустима только до
+// Start; проверка с уже занятым ID отклоняется.
+func (l *Layer) RegisterChecker(c Checker) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	if l.registry.HasChecker(c.ID()) {
+		return fmt.Errorf("configlayer: проверка %q уже зарегистрирована", c.ID())
+	}
+	l.registry.RegisterChecker(c)
+	return nil
+}
+
+// checksFor проверяет черновик состояния: те же входные данные, из которых Run
+// собирает файлы для SourceDraft. Пустой срез — проблем нет. Диск проверка не
+// читает: это обязанность самих проверок.
+func (l *Layer) checksFor(st State) []BuildIssue {
+	return l.registry.Check(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft}, l.installed())
+}
+
+// cachedChecks — checksFor с мемо по ревизии черновика, хэшу живых данных,
+// установленным ядрам и эпохе проверок: Snapshot и ежеминутная сверка не
+// пересчитывают проверки, пока ничего не изменилось. Возвращает копию.
+func (l *Layer) cachedChecks(st State) []BuildIssue {
+	live, err := json.Marshal(st.Live)
+	if err != nil {
+		return l.checksFor(st)
+	}
+	installed := l.installed()
+	l.mu.Lock()
+	key := checksKey{rev: st.DraftRevision, liveHash: HashContent(live), installed: installed, epoch: l.checksEpoch}
+	if l.checksOK && l.checksKey == key {
+		out := append([]BuildIssue{}, l.checksVal...)
+		l.mu.Unlock()
+		return out
+	}
+	l.mu.Unlock()
+	issues := l.checksFor(st)
+	l.mu.Lock()
+	// Эпоха сменилась, пока считали: итог мог устареть, в мемо он не попадает.
+	if l.checksEpoch == key.epoch {
+		l.checksKey, l.checksVal, l.checksOK = key, append([]BuildIssue{}, issues...), true
+	}
+	l.mu.Unlock()
+	return issues
+}
+
+// InvalidateChecks сбрасывает мемо проверок и просит внеочередную сверку:
+// сервисы зовут его, когда изменились данные вне черновика (dat, каталог
+// списков), от которых зависят проверки.
+func (l *Layer) InvalidateChecks() {
+	l.mu.Lock()
+	l.checksEpoch++
+	l.mu.Unlock()
+	l.RequestCheck()
 }
 
 // OnDriftResolved регистрирует колбэк «дрейф решён»: вызывается, когда число
@@ -778,6 +928,11 @@ func (l *Layer) StartApply(user bool) error {
 	if !l.Enabled() {
 		return ErrDisabled
 	}
+	// Проверки до записи: пустая группа или висячая ссылка не дают начать
+	// применение (GRP-05, SRC-07). Фоновые запуски проверяет сам конвейер.
+	if issues := l.cachedChecks(l.store.Snapshot()); len(issues) > 0 {
+		return &ChecksError{Issues: issues}
+	}
 	release, err := l.pipeline.TryBegin(l.ctx, user)
 	if err != nil {
 		return err
@@ -790,9 +945,11 @@ func (l *Layer) StartApply(user bool) error {
 	}
 	if !l.spawn(func() {
 		defer release()
-		l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft}
+		view := l.pipeline.Run(l.ctx, req)
 		release()
 		l.afterRun()
+		l.fireAfterApply(req, view)
 	}) {
 		release()
 		return ErrStopped
@@ -810,16 +967,33 @@ func (l *Layer) afterRun() {
 	l.checkNow(true)
 }
 
-// RunSourceRefresh — фоновое обновление источника (FND-06, U-04): тот же конвейер
-// (сборка, проверка обоих ядер, запись, перезапуск только запущенного, коммит), но
-// из применённого состояния с оверлеем живых данных. Черновик и его ревизия не
-// меняются; живые данные фиксирует хук SetLiveCommitter в той же записи, что и
-// манифест. Идущее «Применить» ждёт (параллельного применения нет). Нерешённый
-// дрейф — ErrDriftBlocked: файлы и ядро не тронуты. Вызов синхронный: горутину
-// запускает вызывающий сервис со своим wg.
-func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyView, error) {
+// LiveRun — параметры фонового запуска конвейера в обход черновика (RunLive).
+type LiveRun struct {
+	// Trigger — что запустило конвейер (TriggerSourceRefresh, TriggerSelect,
+	// TriggerDatRefresh); попадает в шаги apply_step и в хуки.
+	Trigger Trigger
+	// Overlay — ключи живых данных, которые заменяют одноимённые во входе
+	// генераторов этого запуска (кандидат); сами живые данные фиксируют хуки
+	// AddLiveCommitter.
+	Overlay Sections
+	// Kernel ограничивает запуск одним ядром; пусто — все установленные.
+	Kernel string
+}
+
+// RunLive — запуск конвейера из применённого состояния с оверлеем живых данных
+// (FND-06, U-04): сборка, проверки до записи, проверка обоих ядер, запись,
+// перезапуск только запущенного, коммит. Черновик и его ревизия не меняются; живые
+// данные фиксируют хуки AddLiveCommitter в той же записи, что и манифест. Идущее
+// «Применить» ждёт (параллельного применения нет). Нерешённый дрейф —
+// ErrDriftBlocked: файлы и ядро не тронуты. Вызов синхронный: горутину запускает
+// вызывающий сервис со своим wg. После успешного запуска слой зовёт хуки
+// AddAfterApply уже после снятия замка применения.
+func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	if !l.Enabled() {
 		return ApplyView{}, ErrDisabled
+	}
+	if run.Trigger == "" {
+		return ApplyView{}, errors.New("configlayer: не задан триггер запуска")
 	}
 	l.mu.Lock()
 	stopped := l.stopped
@@ -835,13 +1009,21 @@ func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyVi
 		return ApplyView{}, err
 	}
 	defer release()
-	view := l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerSourceRefresh, Source: SourceApplied, LiveOverlay: overlay})
+	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel}
+	view := l.pipeline.Run(l.ctx, req)
 	release()
 	l.afterRun()
+	l.fireAfterApply(req, view)
 	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
 		return view, ErrDriftBlocked
 	}
 	return view, nil
+}
+
+// RunSourceRefresh — фоновое обновление источника: RunLive с триггером
+// TriggerSourceRefresh (его зовёт сервис источников).
+func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyView, error) {
+	return l.RunLive(ctx, LiveRun{Trigger: TriggerSourceRefresh, Overlay: overlay})
 }
 
 // Rebuild — «Пересобрать»: полный конвейер, ограниченный названными файлами.
@@ -885,9 +1067,11 @@ func (l *Layer) Rebuild(keys []string, all bool) error {
 	}
 	if !l.spawn(func() {
 		defer release()
-		l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerRebuild, Source: SourceApplied, Only: only})
+		req := ApplyRequest{Trigger: TriggerRebuild, Source: SourceApplied, Only: only}
+		view := l.pipeline.Run(l.ctx, req)
 		release()
 		l.afterRun()
+		l.fireAfterApply(req, view)
 	}) {
 		release()
 		return ErrStopped
@@ -1001,11 +1185,13 @@ func (l *Layer) OnKernelInstalled(kernel string) {
 			return
 		}
 		defer release()
-		view := l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerKernelInstalled, Source: SourceApplied, Kernel: kernel})
+		req := ApplyRequest{Trigger: TriggerKernelInstalled, Source: SourceApplied, Kernel: kernel}
+		view := l.pipeline.Run(l.ctx, req)
 		release()
 		l.invalidateVersions()
 		l.noteBuildResult(kernel, view)
 		l.afterRun()
+		l.fireAfterApply(req, view)
 	})
 }
 
@@ -1077,6 +1263,10 @@ func (l *Layer) RestoreExternally(fn func() error) error {
 		return err
 	}
 	fnErr, reloadErr := l.store.ReplaceExternally(fn)
+	// Восстановленный файл состояния мог дать ту же ревизию с другим черновиком.
+	l.mu.Lock()
+	l.checksEpoch++
+	l.mu.Unlock()
 	if reloadErr != nil {
 		log.Printf("[configlayer] не удалось перечитать состояние слоя после восстановления: %v", reloadErr)
 	}

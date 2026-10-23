@@ -8,7 +8,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
-// CommitLive — хук фиксации живых данных для Layer.SetLiveCommitter. Конвейер
+// CommitLive — хук фиксации живых данных для Layer.AddLiveCommitter. Конвейер
 // вызывает его внутри той же записи файла состояния, что и манифест, после
 // успешной записи файлов и перезапуска (и когда план пуст), поэтому состояние
 // снимков меняется вместе с применёнными файлами и не раньше них.

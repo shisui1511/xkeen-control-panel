@@ -167,8 +167,8 @@ func rtNewEnvOpts(t *testing.T, xray, mihomo, enabled bool, mutate func(*Deps)) 
 			t.Fatalf("RegisterGenerator %s: %v", g.ID(), err)
 		}
 	}
-	if err := layer.SetLiveCommitter(svc.CommitLive); err != nil {
-		t.Fatalf("SetLiveCommitter: %v", err)
+	if err := layer.AddLiveCommitter(svc.CommitLive); err != nil {
+		t.Fatalf("AddLiveCommitter: %v", err)
 	}
 	if err := layer.OnDriftResolved(svc.OnDriftResolved); err != nil {
 		t.Fatalf("OnDriftResolved: %v", err)

@@ -25,6 +25,11 @@ const (
 	// TriggerSourceRefresh — фоновое обновление источника: сборка из применённого
 	// состояния с оверлеем живых данных, черновик не трогается (FND-06, U-04).
 	TriggerSourceRefresh Trigger = "source_refresh"
+	// TriggerSelect — выбор участника ручной группы: сборка из применённого
+	// состояния с оверлеем живых данных, черновик не трогается.
+	TriggerSelect Trigger = "select"
+	// TriggerDatRefresh — пересборка списков после обновления dat-файлов.
+	TriggerDatRefresh Trigger = "dat_refresh"
 )
 
 // SourceKind — из какого состояния собираются файлы.
@@ -47,7 +52,7 @@ type ApplyRequest struct {
 	Kernel string
 	// LiveOverlay — ключи, которые заменяют одноимённые ключи State.Live во входе
 	// генераторов этого запуска (кандидат фонового обновления источника). Сам State.Live
-	// оверлей не меняет: живые данные фиксирует хук PipelineDeps.CommitLive.
+	// оверлей не меняет: живые данные фиксируют хуки PipelineDeps.CommitLive.
 	LiveOverlay Sections
 }
 
@@ -168,15 +173,19 @@ type PipelineDeps struct {
 	MihomoAPIReady func() bool
 	Lifecycle      LifecycleLocker
 
-	// CommitLive — хук фиксации живых данных. Вызывается внутри той же записи файла
-	// состояния, что и манифест, после успешной записи файлов и перезапуска, а также
-	// когда план пуст; used — вход, из которого собраны файлы этого запуска. Ошибка
-	// хука отменяет запись состояния (файлы возвращаются). При отказе сборки,
-	// проверки, записи, перезапуска и при дрейфе хук не вызывается. Хук получает req:
-	// запуск, ограниченный одним ядром (req.Kernel), собрал файлы только этого ядра.
-	// nil — хука нет.
-	CommitLive func(st *State, req ApplyRequest, used Input) error
+	// CommitLive — хуки фиксации живых данных. Вызываются по порядку регистрации
+	// внутри той же записи файла состояния, что и манифест, после успешной записи
+	// файлов и перезапуска, а также когда план пуст; used — вход, из которого
+	// собраны файлы этого запуска. Ошибка хука отменяет запись состояния (файлы
+	// возвращаются), следующие хуки не вызываются. При отказе сборки, проверки,
+	// записи, перезапуска и при дрейфе хуки не вызываются. Хук получает req: запуск,
+	// ограниченный одним ядром (req.Kernel), собрал файлы только этого ядра.
+	// Пусто — хуков нет.
+	CommitLive []LiveCommitFunc
 }
+
+// LiveCommitFunc — хук фиксации живых данных: вызывается внутри записи состояния.
+type LiveCommitFunc func(st *State, req ApplyRequest, used Input) error
 
 // Pipeline — конвейер «Применить»: сборка, проверка Xray, проверка Mihomo,
 // запись, перезапуск, коммит манифеста. Run вызывается под замками вызывающего
@@ -187,9 +196,9 @@ type Pipeline struct {
 	applyMu sync.Mutex
 	mu      sync.Mutex
 	view    ApplyView
-	// commitLive — хук фиксации живых данных (PipelineDeps.CommitLive), под mu:
-	// слой выставляет его после создания конвейера.
-	commitLive func(st *State, req ApplyRequest, used Input) error
+	// commitLive — хуки фиксации живых данных (PipelineDeps.CommitLive) в порядке
+	// регистрации, под mu: слой добавляет их после создания конвейера.
+	commitLive []LiveCommitFunc
 }
 
 // NewPipeline создаёт конвейер; WriteFile и Now имеют значения по умолчанию
@@ -201,20 +210,33 @@ func NewPipeline(d PipelineDeps) *Pipeline {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
-	return &Pipeline{d: d, commitLive: d.CommitLive}
+	return &Pipeline{d: d, commitLive: append([]LiveCommitFunc(nil), d.CommitLive...)}
 }
 
-// setCommitLive подменяет хук фиксации живых данных (до Start слоя).
-func (p *Pipeline) setCommitLive(fn func(st *State, req ApplyRequest, used Input) error) {
+// addCommitLive добавляет хук фиксации живых данных в конец списка (до Start слоя).
+func (p *Pipeline) addCommitLive(fn LiveCommitFunc) {
 	p.mu.Lock()
-	p.commitLive = fn
+	p.commitLive = append(p.commitLive, fn)
 	p.mu.Unlock()
 }
 
-func (p *Pipeline) liveCommitter() func(st *State, req ApplyRequest, used Input) error {
+// liveCommitter возвращает один хук, который вызывает все зарегистрированные по
+// порядку и останавливается на первой ошибке; nil — хуков нет.
+func (p *Pipeline) liveCommitter() LiveCommitFunc {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.commitLive
+	hooks := append([]LiveCommitFunc(nil), p.commitLive...)
+	p.mu.Unlock()
+	if len(hooks) == 0 {
+		return nil
+	}
+	return func(st *State, req ApplyRequest, used Input) error {
+		for _, h := range hooks {
+			if err := h(st, req, used); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 }
 
 func (v ApplyView) clone() ApplyView {
@@ -341,6 +363,14 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	if err == nil {
 		files = filesOfScope(files, req.Kernel)
 		err = CheckGenerated(files, p.d.ForeignOwned)
+	}
+	if err == nil {
+		// Проверки до записи (пустая группа, висячая ссылка): при любом триггере,
+		// в том числе фоновом, иначе обновление источника обошло бы блокировку
+		// «Применить». Непустой итог — отказ сборки без записи на диск.
+		if issues := p.d.Registry.Check(used, installed); len(issues) > 0 {
+			err = &BuildError{Issues: issues}
+		}
 	}
 	var plan Plan
 	if err == nil {

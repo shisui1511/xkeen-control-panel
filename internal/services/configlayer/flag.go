@@ -168,8 +168,10 @@ func (l *Layer) Enable() {
 		}
 		defer release()
 		l.bootstrap()
-		l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerFlagOn, Source: SourceApplied})
+		req := ApplyRequest{Trigger: TriggerFlagOn, Source: SourceApplied}
+		view := l.pipeline.Run(l.ctx, req)
 		release()
 		l.afterRun()
+		l.fireAfterApply(req, view)
 	})
 }

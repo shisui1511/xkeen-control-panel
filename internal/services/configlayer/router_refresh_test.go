@@ -135,15 +135,15 @@ func rtNewRefreshEnv(t *testing.T) *rtRefreshEnv {
 		st.Live["probe"] = used.Live["probe"]
 		return nil
 	}
-	if err := layer.SetLiveCommitter(hook); err != nil {
+	if err := layer.AddLiveCommitter(hook); err != nil {
 		t.Fatal(err)
 	}
 	if err := layer.OnDriftResolved(func() { e.drift <- struct{}{} }); err != nil {
 		t.Fatal(err)
 	}
 	layer.Start()
-	if err := layer.SetLiveCommitter(hook); !errors.Is(err, ErrAlreadyStarted) {
-		t.Errorf("SetLiveCommitter после Start: %v", err)
+	if err := layer.AddLiveCommitter(hook); !errors.Is(err, ErrAlreadyStarted) {
+		t.Errorf("AddLiveCommitter после Start: %v", err)
 	}
 	if err := layer.OnDriftResolved(func() {}); !errors.Is(err, ErrAlreadyStarted) {
 		t.Errorf("OnDriftResolved после Start: %v", err)
