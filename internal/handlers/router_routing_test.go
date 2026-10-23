@@ -282,6 +282,7 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	e.enableLayer()
 	e.rtRstIdle()
 	e.rtRtPurge()
+	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
 	before := rtRtScanDisk(t)
 	taken := false
 
@@ -317,6 +318,7 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	if hs, _ := view["has_sources"].(bool); !hs {
 		t.Error("представление: has_sources=false после добавления узла")
 	}
+	rtAssertContractKeys(t, contract, view, "RoutingView", "routing")
 	if done, _ := view["defaults_done"].(bool); !done {
 		t.Error("представление: defaults_done=false после добавления первого источника")
 	}
@@ -379,11 +381,7 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	if gp.Status != http.StatusOK {
 		t.Errorf("groups/preview: %d %s", gp.Status, gp.Code)
 	} else {
-		for _, k := range []string{"xray", "mihomo"} {
-			if _, ok := gp.object(t)[k]; !ok {
-				t.Errorf("groups/preview: нет ключа %s", k)
-			}
-		}
+		rtAssertContractKeys(t, contract, gp.object(t), "GroupPreview", "groups/preview")
 	}
 	if rtRtFindGroup(e.rtRtView(), "Предпросмотр") != nil {
 		t.Error("groups/preview сохранил группу")
@@ -454,8 +452,11 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	imp := e.call(http.MethodPost, rtRoutingBase+"/impact", map[string]string{"kind": "group", "id": gid})
 	if imp.Status != http.StatusOK {
 		t.Errorf("impact: %d %s", imp.Status, imp.Code)
-	} else if refs, _ := imp.object(t)["rules"].([]any); len(refs) != 1 {
-		t.Errorf("impact: правил с целью на группу %d, ожидалось 1", len(refs))
+	} else {
+		rtAssertContractKeys(t, contract, imp.object(t), "Impact", "impact")
+		if refs, _ := imp.object(t)["rules"].([]any); len(refs) != 1 {
+			t.Errorf("impact: правил с целью на группу %d, ожидалось 1", len(refs))
+		}
 	}
 	e.rtRtExpect("impact: неизвестный вид", e.call(http.MethodPost, rtRoutingBase+"/impact",
 		map[string]string{"kind": "bogus", "id": gid}), http.StatusBadRequest, "invalid_input")
@@ -470,8 +471,11 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	e.rtRtExpect("groups/delete: есть ссылки", ref, http.StatusConflict, "group_referenced")
 	if impact, _ := ref.object(t)["impact"].(map[string]any); impact == nil {
 		t.Error("groups/delete: в ответе group_referenced нет impact")
-	} else if refs, _ := impact["rules"].([]any); len(refs) != 1 {
-		t.Errorf("groups/delete: в impact правил %d, ожидалось 1", len(refs))
+	} else {
+		rtAssertContractKeys(t, contract, impact, "Impact", "groups/delete.impact")
+		if refs, _ := impact["rules"].([]any); len(refs) != 1 {
+			t.Errorf("groups/delete: в impact правил %d, ожидалось 1", len(refs))
+		}
 	}
 	e.rtRtExpect("groups/delete: «Остальное» без замены", e.call(http.MethodPost, rtRoutingBase+"/groups/delete",
 		map[string]any{"revision": e.rtRtRevision(), "id": gid, "cascade": map[string]any{"mode": "drop"}}), http.StatusBadRequest, "final_requires_redirect")
@@ -497,8 +501,11 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	tp := e.call(http.MethodGet, rtRoutingBase+"/takeover", nil)
 	if tp.Status != http.StatusOK {
 		t.Errorf("takeover: %d %s", tp.Status, tp.Code)
-	} else if _, ok := tp.object(t)[tg.Core]; !ok {
-		t.Errorf("takeover: нет ключа %s", tg.Core)
+	} else {
+		rtAssertContractKeys(t, contract, tp.object(t), "TakeoverPreview", "takeover")
+		if m, _ := tp.object(t)[tg.Core].(map[string]any); m == nil {
+			t.Errorf("takeover: для активного ядра %s нет предпросмотра", tg.Core)
+		}
 	}
 	e.rtRtExpect("reclaim: неизвестное ядро", e.call(http.MethodPost, rtRoutingBase+"/reclaim",
 		map[string]string{"kernel": "bogus"}), http.StatusBadRequest, "invalid_input")
@@ -516,6 +523,10 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	if desired, got := e.rtRtOwnership(tg.Core); !desired || !got {
 		t.Errorf("снимок слоя: желаемое=%v, взято %s=%v", desired, tg.Core, got)
 	}
+	if st := e.call(http.MethodGet, "/api/configlayer/state", nil); st.Status == http.StatusOK {
+		snap, _ := st.object(t)["routing"].(map[string]any)
+		rtAssertContractKeys(t, contract, snap, "RoutingSnapshot", "state.routing")
+	}
 	e.rtRtExpectTaken(tg, before, 1)
 	// Взято и применено: расхождений нет, возвращать нечего.
 	e.rtRtExpect("reclaim: нет расхождений", e.call(http.MethodPost, rtRoutingBase+"/reclaim",
@@ -532,4 +543,89 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 		t.Errorf("снимок слоя: %s остаётся взятым после «Отпустить»", tg.Core)
 	}
 	e.rtRtExpectReleased(tg, before)
+}
+
+// --- маршруты -----------------------------------------------------------------
+
+var rtRoutingRoutes = []struct{ method, path string }{
+	{http.MethodGet, rtRoutingBase},
+	{http.MethodPost, rtRoutingBase + "/groups/save"},
+	{http.MethodPost, rtRoutingBase + "/groups/preview"},
+	{http.MethodPost, rtRoutingBase + "/groups/delete"},
+	{http.MethodPost, rtRoutingBase + "/impact"},
+	{http.MethodPost, rtRoutingBase + "/rules/save"},
+	{http.MethodPost, rtRoutingBase + "/rules/delete"},
+	{http.MethodPost, rtRoutingBase + "/rules/move"},
+	{http.MethodPost, rtRoutingBase + "/rules/enable"},
+	{http.MethodPost, rtRoutingBase + "/final"},
+	{http.MethodPost, rtRoutingBase + "/probe"},
+	{http.MethodPost, rtRoutingBase + "/take"},
+	{http.MethodPost, rtRoutingBase + "/release"},
+	{http.MethodGet, rtRoutingBase + "/takeover"},
+	{http.MethodPost, rtRoutingBase + "/reclaim"},
+}
+
+// Флаг слоя выключен: каждый маршрут маршрутизации отвечает 404 config_layer_disabled.
+func TestRouterRoutingFlagOff404(t *testing.T) {
+	e := rtNewSrc(t)
+	e.setLayer(false)
+	for _, rt := range rtRoutingRoutes {
+		r := e.call(rt.method, rt.path, rtBody(rt.method))
+		if r.Status != http.StatusNotFound || r.Code != "config_layer_disabled" {
+			t.Errorf("%s %s: статус %d, код %q; ожидалось 404 config_layer_disabled", rt.method, rt.path, r.Status, r.Code)
+		}
+	}
+}
+
+// Без сессии маршруты отвечают 401, изменяющие без X-CSRF-Token — 403; метод не из
+// контракта — 405. Ответы читаемых маршрутов совпадают с routingContract.json по ключам.
+func TestRouterRoutingProtected(t *testing.T) {
+	e := rtNewSrc(t)
+	e.enableLayer()
+	for _, rt := range rtRoutingRoutes {
+		var body []byte
+		if rt.method == http.MethodPost {
+			body = []byte("{}")
+		}
+		status, _, err := e.p.Request(rt.method, rt.path, body, routertest.AuthNone)
+		if err != nil {
+			t.Fatalf("%s %s без сессии: %v", rt.method, rt.path, err)
+		}
+		if status != http.StatusUnauthorized {
+			t.Errorf("%s %s без сессии: статус %d, ожидался 401", rt.method, rt.path, status)
+		}
+		if rt.method != http.MethodPost {
+			continue
+		}
+		status, _, err = e.p.Request(rt.method, rt.path, body, routertest.AuthNoCSRF)
+		if err != nil {
+			t.Fatalf("%s %s без CSRF: %v", rt.method, rt.path, err)
+		}
+		if status != http.StatusForbidden {
+			t.Errorf("%s %s без X-CSRF-Token: статус %d, ожидался 403", rt.method, rt.path, status)
+		}
+	}
+	for _, rt := range rtRoutingRoutes {
+		other := http.MethodGet
+		if rt.method == http.MethodGet {
+			other = http.MethodPost
+		}
+		r := e.call(other, rt.path, rtBody(other))
+		if r.Status != http.StatusMethodNotAllowed {
+			t.Errorf("%s %s: статус %d, ожидался 405", other, rt.path, r.Status)
+		}
+	}
+
+	// Ключи ответов читаемых маршрутов — по контракту.
+	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
+	view := e.call(http.MethodGet, rtRoutingBase, nil)
+	if view.Status != http.StatusOK {
+		t.Fatalf("GET %s: %d %s", rtRoutingBase, view.Status, view.Code)
+	}
+	rtAssertContractKeys(t, contract, view.object(t), "RoutingView", "routing")
+	tp := e.call(http.MethodGet, rtRoutingBase+"/takeover", nil)
+	if tp.Status != http.StatusOK {
+		t.Fatalf("GET %s/takeover: %d %s", rtRoutingBase, tp.Status, tp.Code)
+	}
+	rtAssertContractKeys(t, contract, tp.object(t), "TakeoverPreview", "takeover")
 }

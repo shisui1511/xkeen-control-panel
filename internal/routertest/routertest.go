@@ -339,6 +339,17 @@ func ContractFile(t testing.TB) string {
 	return path
 }
 
+// RoutingContractFile — путь к файлу контракта ключей ответов API маршрутизации
+// (frontend/src/lib/routingContract.json), скопированному на устройство.
+func RoutingContractFile(t testing.TB) string {
+	t.Helper()
+	path := os.Getenv("XCP_RT_ROUTING_CONTRACT")
+	if path == "" {
+		t.Fatal("нет XCP_RT_ROUTING_CONTRACT: тест запускается только через make router-test")
+	}
+	return path
+}
+
 // LinksDir — каталог с данными share-ссылок, скопированный на устройство.
 func LinksDir(t testing.TB) string {
 	t.Helper()

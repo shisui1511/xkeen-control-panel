@@ -1,0 +1,255 @@
+{
+  "BalancerLoss": {
+    "required": ["group", "lost"],
+    "optional": [],
+    "children": {}
+  },
+  "Cond": {
+    "required": ["type", "values", "lists"],
+    "optional": [],
+    "children": {
+      "lists": "ListRef[]"
+    }
+  },
+  "FeatureView": {
+    "required": ["status", "min"],
+    "optional": [],
+    "children": {}
+  },
+  "Group": {
+    "required": [
+      "id",
+      "name",
+      "mode",
+      "sources",
+      "include",
+      "exclude",
+      "regex",
+      "picks",
+      "members",
+      "reserve"
+    ],
+    "optional": [],
+    "children": {
+      "sources": "GroupSources",
+      "members": "Member[]"
+    }
+  },
+  "GroupPreview": {
+    "required": ["xray", "mihomo"],
+    "optional": [],
+    "children": {
+      "xray": "KernelPreview",
+      "mihomo": "KernelPreview"
+    }
+  },
+  "GroupRef": {
+    "required": ["id", "name", "role"],
+    "optional": [],
+    "children": {}
+  },
+  "GroupSources": {
+    "required": ["all", "ids"],
+    "optional": [],
+    "children": {}
+  },
+  "GroupView": {
+    "required": [
+      "id",
+      "name",
+      "mode",
+      "sources",
+      "include",
+      "exclude",
+      "regex",
+      "picks",
+      "members",
+      "reserve",
+      "counts",
+      "issues",
+      "warnings",
+      "member_options"
+    ],
+    "optional": [],
+    "children": {
+      "sources": "GroupSources",
+      "members": "Member[]",
+      "counts": "KernelCounts",
+      "issues": "IssueView[]",
+      "warnings": "IssueView[]",
+      "member_options": "MemberOption[]"
+    }
+  },
+  "Impact": {
+    "required": ["kind", "id", "rules", "groups", "final", "empties", "kernels"],
+    "optional": [],
+    "children": {
+      "rules": "RuleRef[]",
+      "groups": "GroupRef[]",
+      "empties": "GroupRef[]",
+      "kernels": "KernelImpact"
+    }
+  },
+  "IssueView": {
+    "required": ["code", "params"],
+    "optional": ["key"],
+    "children": {}
+  },
+  "KernelCounts": {
+    "required": ["xray", "mihomo"],
+    "optional": [],
+    "children": {}
+  },
+  "KernelImpact": {
+    "required": ["xray", "mihomo"],
+    "optional": [],
+    "children": {
+      "xray": "BalancerLoss[]",
+      "mihomo": "MemberLoss[]"
+    }
+  },
+  "KernelPreview": {
+    "required": ["count", "names", "members"],
+    "optional": [],
+    "children": {
+      "members": "Member[]"
+    }
+  },
+  "ListRef": {
+    "required": ["file", "tag", "kind"],
+    "optional": [],
+    "children": {}
+  },
+  "Member": {
+    "required": ["kind"],
+    "optional": ["id"],
+    "children": {}
+  },
+  "MemberLoss": {
+    "required": ["group", "member"],
+    "optional": [],
+    "children": {}
+  },
+  "MemberOption": {
+    "required": ["member", "label"],
+    "optional": [],
+    "children": {}
+  },
+  "MihomoPorts": {
+    "required": ["redir", "tproxy"],
+    "optional": ["allow_lan", "bind_address"],
+    "children": {}
+  },
+  "ProbeConfig": {
+    "required": ["v", "url", "interval_s", "timeout_s"],
+    "optional": [],
+    "children": {}
+  },
+  "RawRule": {
+    "required": ["kernel", "text"],
+    "optional": [],
+    "children": {}
+  },
+  "RoutingKernelView": {
+    "required": ["taken", "moved", "left", "drift"],
+    "optional": ["prev_profile"],
+    "children": {}
+  },
+  "RoutingSnapshot": {
+    "required": ["desired", "xray", "mihomo"],
+    "optional": [],
+    "children": {
+      "xray": "RoutingKernelView",
+      "mihomo": "RoutingKernelView"
+    }
+  },
+  "RoutingView": {
+    "required": [
+      "revision",
+      "installed",
+      "desired",
+      "has_sources",
+      "defaults_done",
+      "groups",
+      "rules",
+      "final",
+      "probe",
+      "probe_defaults",
+      "issues",
+      "features"
+    ],
+    "optional": [],
+    "children": {
+      "groups": "GroupView[]",
+      "rules": "RuleView[]",
+      "final": "Target",
+      "probe": "ProbeConfig",
+      "probe_defaults": "ProbeConfig",
+      "issues": "IssueView[]",
+      "features": "FeatureView{}"
+    }
+  },
+  "Rule": {
+    "required": ["id", "enabled", "origin", "conds", "target", "raw"],
+    "optional": [],
+    "children": {
+      "conds": "Cond[]",
+      "target": "Target",
+      "raw": "RawRule"
+    }
+  },
+  "RuleRef": {
+    "required": ["id", "index", "summary", "target"],
+    "optional": [],
+    "children": {
+      "target": "Target"
+    }
+  },
+  "RuleView": {
+    "required": [
+      "id",
+      "enabled",
+      "origin",
+      "conds",
+      "target",
+      "raw",
+      "index",
+      "only",
+      "issues",
+      "warnings"
+    ],
+    "optional": [],
+    "children": {
+      "conds": "Cond[]",
+      "target": "Target",
+      "raw": "RawRule",
+      "issues": "IssueView[]",
+      "warnings": "IssueView[]"
+    }
+  },
+  "TakeoverMihomo": {
+    "required": ["prev_profile", "ports"],
+    "optional": [],
+    "children": {
+      "ports": "MihomoPorts"
+    }
+  },
+  "TakeoverPreview": {
+    "required": ["xray", "mihomo"],
+    "optional": [],
+    "children": {
+      "xray": "TakeoverXray",
+      "mihomo": "TakeoverMihomo"
+    }
+  },
+  "TakeoverXray": {
+    "required": ["move", "left", "warnings"],
+    "optional": [],
+    "children": {}
+  },
+  "Target": {
+    "required": ["kind"],
+    "optional": ["id"],
+    "children": {}
+  }
+}

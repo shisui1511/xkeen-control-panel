@@ -181,7 +181,13 @@ type rtContractType struct {
 
 func rtLoadContract(t *testing.T) map[string]rtContractType {
 	t.Helper()
-	raw, err := os.ReadFile(routertest.ContractFile(t))
+	return rtLoadContractFile(t, routertest.ContractFile(t))
+}
+
+// rtLoadContractFile читает файл контракта ключей по пути (источники и маршрутизация).
+func rtLoadContractFile(t *testing.T, path string) map[string]rtContractType {
+	t.Helper()
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("контракт ответов: %v", err)
 	}
