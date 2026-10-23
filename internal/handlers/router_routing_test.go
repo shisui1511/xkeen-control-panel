@@ -841,6 +841,151 @@ func TestRouterRoutingSelectLive(t *testing.T) {
 	}
 }
 
+// --- каталог списков, «Добавить в XKeen» и пресеты -----------------------------
+
+// rtRtHasRulesFromPreset сообщает, что в представлении есть правило с пометкой
+// «из пресета».
+func rtRtHasRulesFromPreset(view map[string]any) bool {
+	rules, _ := view["rules"].([]any)
+	for _, r := range rules {
+		if m, _ := r.(map[string]any); m != nil && m["origin"] == "preset" {
+			return true
+		}
+	}
+	return false
+}
+
+// Каталог списков, пресеты и «Добавить в XKeen» на настоящей панели: ответы совпадают
+// с контрактом, пресет без взятия правит только черновик, файл настроек XKeen
+// предпросмотр не меняет, неизвестный набор и адрес от клиента отклоняются. Метки
+// ядра нет: тест меняет только черновик и не читает активное ядро.
+func TestRouterRoutingPresetsAndLists(t *testing.T) {
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	e.rtRtPurge()
+	contract := rtLoadContractFile(t, routertest.RoutingContractFile(t))
+	// Черновик с пресетом и узлом не применяется: при выходе узлы и секции
+	// убираются из черновика, затем enableLayer сбрасывает его к применённому.
+	t.Cleanup(func() { e.with(t).rtRtPurge() })
+	e.rtRstAddMyNode(rtRtUniqueLink(t))
+
+	// GET /routing/lists: сервисы и страны из dat стенда, ключи по контракту.
+	lr := e.call(http.MethodGet, rtRoutingBase+"/lists", nil)
+	if lr.Status != http.StatusOK {
+		t.Fatalf("GET lists: %d %s", lr.Status, lr.Code)
+	}
+	catalog := lr.object(t)
+	rtAssertContractKeys(t, contract, catalog, "CatalogView", "lists")
+	if svc, _ := catalog["services"].([]any); len(svc) == 0 {
+		t.Error("lists: services пуст при списках dat на стенде")
+	}
+	if cs, _ := catalog["countries"].([]any); len(cs) == 0 {
+		t.Error("lists: countries пуст при списках dat на стенде")
+	}
+	setFile := ""
+	for _, x := range catalog["extended"].([]any) {
+		if m, _ := x.(map[string]any); m != nil && m["id"] == "roscomvpn_geosite" {
+			setFile, _ = m["file"].(string)
+		}
+	}
+	if setFile == "" {
+		t.Fatal("lists: в extended нет набора roscomvpn_geosite")
+	}
+
+	// GET /routing/presets: есть пресеты, среди стран есть RU.
+	pr := e.call(http.MethodGet, rtRoutingBase+"/presets", nil)
+	if pr.Status != http.StatusOK {
+		t.Fatalf("GET presets: %d %s", pr.Status, pr.Code)
+	}
+	presets := pr.object(t)
+	rtAssertContractKeys(t, contract, presets, "PresetsView", "presets")
+	hasRU := false
+	for _, p := range presets["presets"].([]any) {
+		cs, _ := p.(map[string]any)["countries"].([]any)
+		for _, c := range cs {
+			if c == "RU" {
+				hasRU = true
+			}
+		}
+	}
+	if !hasRU {
+		t.Error("presets: среди стран пресетов нет RU")
+	}
+
+	// presets/plan для «всё через прокси»: правила на добавление есть, черновик не меняется.
+	choice := map[string]any{"id": "all_proxy", "flags": map[string]bool{"quic": false, "torrent": false, "ads": false, "service_groups": false}}
+	revBefore := e.rtRtRevision()
+	pl := e.call(http.MethodPost, rtRoutingBase+"/presets/plan", map[string]any{"choice": choice})
+	if pl.Status != http.StatusOK {
+		t.Fatalf("presets/plan: %d %s", pl.Status, pl.Code)
+	}
+	plan := pl.object(t)
+	rtAssertContractKeys(t, contract, plan, "PresetPlan", "presets/plan")
+	if add, _ := plan["add"].([]any); len(add) == 0 {
+		t.Error("presets/plan: add пуст для all_proxy")
+	}
+	if got := e.rtRtRevision(); got != revBefore {
+		t.Errorf("presets/plan изменил ревизию черновика: %d → %d", revBefore, got)
+	}
+
+	// Коды отказа пресета.
+	e.rtRtExpect("presets/plan: неизвестный пресет", e.call(http.MethodPost, rtRoutingBase+"/presets/plan",
+		map[string]any{"choice": map[string]any{"id": "nope"}}), http.StatusBadRequest, "preset_unknown")
+	e.rtRtExpect("presets/plan: страна без списков", e.call(http.MethodPost, rtRoutingBase+"/presets/plan",
+		map[string]any{"choice": map[string]any{"id": "except_country", "country": "ZZ"}}), http.StatusBadRequest, "country_unavailable")
+	e.rtRtExpect("presets/apply: старая ревизия", e.call(http.MethodPost, rtRoutingBase+"/presets/apply",
+		map[string]any{"revision": 0, "choice": choice, "take": false}), http.StatusConflict, "draft_conflict")
+
+	// presets/apply без взятия: правила «из пресета» в представлении, управление не взято.
+	ap := e.call(http.MethodPost, rtRoutingBase+"/presets/apply", map[string]any{"revision": e.rtRtRevision(), "choice": choice, "take": false})
+	if ap.Status != http.StatusOK {
+		t.Fatalf("presets/apply: %d %s", ap.Status, ap.Code)
+	}
+	if ev := ap.object(t); ev["draft_revision"] == nil {
+		t.Error("presets/apply: в ответе нет draft_revision")
+	}
+	view := e.rtRtView()
+	if !rtRtHasRulesFromPreset(view) {
+		t.Error("представление: после presets/apply нет правил с origin=preset")
+	}
+	if on, _ := view["desired"].(bool); on {
+		t.Error("представление: presets/apply с take=false взял маршрутизацию")
+	}
+	pr = e.call(http.MethodGet, rtRoutingBase+"/presets", nil)
+	if cur, _ := pr.object(t)["current"].(map[string]any); cur == nil || cur["id"] != "all_proxy" {
+		t.Error("presets: current не показывает применённый пресет")
+	}
+
+	// geodata/preview: файл настроек XKeen не меняется, набор из встроенного каталога.
+	gp := e.call(http.MethodPost, rtRoutingBase+"/lists/geodata/preview", map[string]string{"set": "roscomvpn_geosite"})
+	switch gp.Status {
+	case http.StatusOK:
+		preview := gp.object(t)
+		rtAssertContractKeys(t, contract, preview, "GeodataPreview", "geodata/preview")
+		after, _ := preview["after"].(string)
+		before, _ := preview["before"].(string)
+		if !strings.Contains(after, setFile) || before == after {
+			t.Error("geodata/preview: after не содержит запись набора или равен before")
+		}
+	case http.StatusConflict:
+		// Набор уже записан в настройках стенда или файл не разбирается: код из таблицы.
+		if gp.Code != "already_present" && gp.Code != "invalid_json" && gp.Code != "invalid_structure" {
+			t.Errorf("geodata/preview: 409 с кодом %q", gp.Code)
+		}
+	default:
+		t.Errorf("geodata/preview: %d %s", gp.Status, gp.Code)
+	}
+
+	// geodata/add: неизвестный набор и адрес от клиента не принимаются; файл не пишется.
+	for _, set := range []string{"nope", "https://example.invalid/list.dat", ""} {
+		e.rtRtExpect("geodata/add: набор вне каталога", e.call(http.MethodPost, rtRoutingBase+"/lists/geodata/add",
+			map[string]any{"set": set, "accept_comment_loss": true, "update_now": false}), http.StatusBadRequest, "set_unknown")
+		e.rtRtExpect("geodata/preview: набор вне каталога", e.call(http.MethodPost, rtRoutingBase+"/lists/geodata/preview",
+			map[string]string{"set": set}), http.StatusBadRequest, "set_unknown")
+	}
+}
+
 // --- маршруты -----------------------------------------------------------------
 
 var rtRoutingRoutes = []struct{ method, path string }{
@@ -860,6 +1005,12 @@ var rtRoutingRoutes = []struct{ method, path string }{
 	{http.MethodGet, rtRoutingBase + "/takeover"},
 	{http.MethodPost, rtRoutingBase + "/reclaim"},
 	{http.MethodPost, rtRoutingBase + "/select"},
+	{http.MethodGet, rtRoutingBase + "/lists"},
+	{http.MethodPost, rtRoutingBase + "/lists/geodata/preview"},
+	{http.MethodPost, rtRoutingBase + "/lists/geodata/add"},
+	{http.MethodGet, rtRoutingBase + "/presets"},
+	{http.MethodPost, rtRoutingBase + "/presets/plan"},
+	{http.MethodPost, rtRoutingBase + "/presets/apply"},
 }
 
 // Флаг слоя выключен: каждый маршрут маршрутизации отвечает 404 config_layer_disabled.
