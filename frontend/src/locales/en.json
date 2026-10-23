@@ -3490,7 +3490,7 @@
   "cfg.hint.list_too_large": "The list {file} · {tag} is too large for Mihomo. Choose another one.",
   "cfg.hint.cond_conflict": "Rule {rule} has two conditions of the same kind (for example, domains and geosite): Xray cannot express this. Split them into two rules.",
   "cfg.hint.checker_failed": "The draft could not be checked. Try “Apply” again.",
-  "cfg.hint.xray_selector_prefix": "The group tag overlaps with the node tag prefix in Xray. Rename the group.",
+  "cfg.hint.xray_selector_prefix": "A node tag in Xray matches the beginning of another node tag. Exclude one of them from the group.",
   "cfg.notice.routing_auto_taken": "{kernel} is installed: the panel took over its routing automatically. Check the groups and rules.",
   "cfg.notice.routing_reconcile": "Could not restore the choice in group “{group}”: Mihomo returned an error. Select the member again.",
   "cfg.notice.routing_repick": "Group “{group}”: the selected node is gone after the update, “{node}” was chosen.",
