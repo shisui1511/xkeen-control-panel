@@ -505,20 +505,26 @@
   // опросе — cleanup обнулял бы xrayStatsError и прятал предупреждение WR-06.
   const isXrayStatsActive = $derived($isXray && $capabilities?.xray?.grpc_ready === true);
 
+  function clearXrayStats() {
+    xrayOutbounds = [];
+    xrayInbounds = [];
+    xrayUsers = [];
+  }
+
+  function syncXrayPolling(active: boolean) {
+    if (active) {
+      startXrayStatsPolling();
+    } else {
+      stopXrayStatsPolling();
+      clearXrayStats();
+    }
+  }
+
   $effect(() => {
     const active = isXrayStatsActive;
     // start/stop сами читают $isXray и $capabilities (проверка в fetchXrayStats): вне untrack эти
     // чтения стали бы зависимостями эффекта и вернули перезапуск на каждом опросе
-    untrack(() => {
-      if (active) {
-        startXrayStatsPolling();
-      } else {
-        stopXrayStatsPolling();
-        xrayOutbounds = [];
-        xrayInbounds = [];
-        xrayUsers = [];
-      }
-    });
+    untrack(() => syncXrayPolling(active));
     return () => {
       stopXrayStatsPolling();
     };

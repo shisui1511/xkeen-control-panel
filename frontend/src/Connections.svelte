@@ -567,18 +567,20 @@
   // Поток подключений подчиняется тому же сигналу, что и опросы Mihomo: сокет не открывается,
   // пока API не отвечает (в том числе до первого ответа capabilities), закрывается при уходе
   // в down без цикла переподключений и открывается сам, когда API ответил.
+  function syncStream(ready: boolean, unknown: boolean) {
+    if (ready) {
+      loading = true;
+      connectWS();
+    } else {
+      disconnectWS();
+      loading = unknown;
+    }
+  }
+
   $effect(() => {
     const ready = $mihomoApiReady;
     const unknown = $mihomoApiState === 'unknown';
-    untrack(() => {
-      if (ready) {
-        loading = true;
-        connectWS();
-      } else {
-        disconnectWS();
-        loading = unknown;
-      }
-    });
+    untrack(() => syncStream(ready, unknown));
   });
 
   onDestroy(() => {

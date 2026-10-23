@@ -134,13 +134,6 @@
     return list;
   });
 
-  $effect(() => {
-    // Reset highlight on query change
-    if (query !== undefined) {
-      highlightIndex = 0;
-    }
-  });
-
   let activeOptionId = $derived(
     sortedNodes.length > 0 && highlightIndex >= 0 && highlightIndex < sortedNodes.length
       ? `qs-opt-${highlightIndex}`
@@ -298,6 +291,7 @@
       class="qs-search"
       placeholder={$t('proxies.quick_select_search')}
       bind:value={query}
+      oninput={() => (highlightIndex = 0)}
     />
   </div>
 
