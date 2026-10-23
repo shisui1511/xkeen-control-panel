@@ -351,14 +351,16 @@ func (s *Service) Select(ctx context.Context, groupID, member string) (SelectRes
 }
 
 // memberAllowed — участник есть среди вариантов группы по применённому состоянию
-// (те же варианты, что отдаёт представление).
+// (те же варианты, что отдаёт представление): участники группы и узлы её состава
+// в каждом установленном ядре. Выбор вне состава effectiveSelection всё равно
+// игнорировал бы.
 func memberAllowed(g Group, member string, am appliedModel) bool {
 	var xray, mihomo []sources.CatalogNode
 	if am.installed.Xray {
-		xray = am.cat.Xray
+		xray = Resolve(g, am.cat.Xray, am.groups.Items).Nodes
 	}
 	if am.installed.Mihomo {
-		mihomo = am.cat.Mihomo
+		mihomo = Resolve(g, am.cat.Mihomo, am.groups.Items).Nodes
 	}
 	members := Resolve(g, am.union, am.groups.Items).Members
 	for _, o := range memberOptions(g, members, am.groups.Items, xray, mihomo) {

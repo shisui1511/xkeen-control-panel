@@ -67,6 +67,7 @@ const (
 	reasonCondsTooMany   = "conds_too_many"
 	reasonRawWithConds   = "raw_with_conds"
 	reasonCondType       = "cond_type_invalid"
+	reasonCondConflict   = "cond_conflict"
 	reasonValuesRequired = "values_required"
 	reasonValuesForbid   = "values_forbidden"
 	reasonValuesTooMany  = "values_too_many"
@@ -724,8 +725,49 @@ func validateRaw(raw *RawRule) error {
 	return nil
 }
 
+// xrayCondFields — поле правила routing Xray для каждого типа условия. Два
+// условия одного поля не выражаются в одном правиле Xray (xray_cond_conflict).
+// Таблицу читает scripts/check-routing-api.js: по строке на тип, вид `Тип: "поле",`.
+var xrayCondFields = map[string]string{
+	CondDomain:     "domain",
+	CondGeosite:    "domain",
+	CondIP:         "ip",
+	CondGeoip:      "ip",
+	CondPort:       "port",
+	CondNetwork:    "network",
+	CondSrcIP:      "source",
+	CondBittorrent: "protocol",
+}
+
+// xrayCondField возвращает поле правила Xray для типа условия; неизвестный тип —
+// сам тип (он отвергается раньше, validateCond). То же сопоставление, что в
+// xrayRule (rules_xray.go) и COND_XRAY_FIELD во фронтенде (routingView.ts), их
+// сверяет scripts/check-routing-api.js.
+func xrayCondField(t string) string {
+	if f, ok := xrayCondFields[t]; ok {
+		return f
+	}
+	return t
+}
+
+// condConflict возвращает индекс первого условия, чьё поле Xray уже занято более
+// ранним условием: домены и geosite — одно поле domain, IP и geoip — одно поле ip.
+func condConflict(conds []Cond) (int, bool) {
+	taken := make(map[string]bool, len(conds))
+	for i, c := range conds {
+		f := xrayCondField(c.Type)
+		if taken[f] {
+			return i, true
+		}
+		taken[f] = true
+	}
+	return 0, false
+}
+
 // validateRule проверяет и нормализует правило: 1–8 условий или своё правило
-// ядра, цель — группа, DIRECT или REJECT.
+// ядра, цель — группа, DIRECT или REJECT. Не больше одного условия на поле Xray
+// (cond_conflict, D-15): модель одна для обоих ядер, ядро, установленное позже,
+// берётся автоматически, и его сборка не должна падать.
 func validateRule(r *Rule, groups []Group) error {
 	normalizeRule(r)
 	switch {
@@ -744,6 +786,9 @@ func validateRule(r *Rule, groups []Group) error {
 		if err := validateCond(i, &r.Conds[i]); err != nil {
 			return err
 		}
+	}
+	if i, bad := condConflict(r.Conds); bad {
+		return invalid(condField(i, "type"), reasonCondConflict)
 	}
 	return validateTarget("target", &r.Target, groups)
 }
@@ -778,6 +823,9 @@ const (
 	issueGroupCycle     = "group_cycle"
 	issueTargetMissing  = "target_missing"
 	issueSectionInvalid = "section_invalid"
+	// issueCondConflict — включённое правило в черновике с двумя условиями одного
+	// поля Xray: генератор Xray такого не выразит (xray_cond_conflict).
+	issueCondConflict = "cond_conflict"
 	// issueListNotFound — правило ссылается на список, которого нет на роутере
 	// (файл dat удалён или тег пропал после обновления баз): D-21.
 	issueListNotFound = "list_not_found"
@@ -907,8 +955,8 @@ func emptyGroups(groups []Group, nodes []sources.CatalogNode) map[string]bool {
 // analyze считает проблемы и предупреждения маршрутизации по входным данным:
 // испорченные секции, группы, пустые для всех установленных ядер (пустота — по
 // правилу D-36, emptyGroups), циклы
-// вложенности и цели правил на несуществующие группы (issues, блокируют
-// «Применить»), а также группы, пустые только для части ядер, режимы, недоступные
+// вложенности, цели правил на несуществующие группы и включённые правила с двумя
+// условиями одного поля Xray (cond_conflict) (issues, блокируют «Применить»), а также группы, пустые только для части ядер, режимы, недоступные
 // по версии ядра, и устаревшие отдельные узлы (warnings, не блокируют). Состав
 // считает Resolve на каталоге источников. Это единственный расчёт проблем:
 // проверка до записи и представление вызывают его. Сеть не трогается, dat читает
@@ -1037,6 +1085,11 @@ func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catal
 		for i, r := range rules.Items {
 			if missing(r.Target) {
 				issues = append(issues, IssueView{Code: issueTargetMissing, Params: map[string]string{"rule": strconv.Itoa(i + 1)}, Key: "rule:" + r.ID})
+			}
+			// Правило, записанное в обход сервиса, с двумя условиями одного поля
+			// Xray: помечается до «Применить», а не сбоем генератора.
+			if _, bad := condConflict(r.Conds); bad && r.Enabled && r.Raw == nil {
+				issues = append(issues, IssueView{Code: issueCondConflict, Params: map[string]string{"rule": strconv.Itoa(i + 1)}, Key: "rule:" + r.ID})
 			}
 		}
 		if missing(rules.Final) {
