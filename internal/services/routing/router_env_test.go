@@ -4,6 +4,7 @@ package routing
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,6 +176,15 @@ func (e *rtEnv) rules(t *testing.T) RulesConfig {
 		t.Fatalf("секция rules: %v", err)
 	}
 	return cfg
+}
+
+// putSection пишет секцию в черновик в обход сервиса (как общий маршрут
+// черновика).
+func (e *rtEnv) putSection(t *testing.T, name string, raw json.RawMessage) {
+	t.Helper()
+	if _, err := e.layer.EditDraft(e.rev(t), name, raw); err != nil {
+		t.Fatalf("EditDraft %s: %v", name, err)
+	}
 }
 
 // catalog — каталог узлов текущего черновика.
