@@ -31,19 +31,19 @@
       {$t('editor.diff_preview')}
     </div>
     <div class="diff-preview-body" style="max-height: 40vh; overflow-y: auto;">
-      {#each diffGroups as group}
+      {#each diffGroups as group, gi (gi)}
         {#if group.type === 'added'}
-          {#each group.lines as line}
+          {#each group.lines as line, li (li)}
             <div class="diff-line diff-line-added">+ {line}</div>
           {/each}
         {:else if group.type === 'removed'}
-          {#each group.lines as line}
+          {#each group.lines as line, li (li)}
             <div class="diff-line diff-line-removed">- {line}</div>
           {/each}
         {:else if group.type === 'collapsed'}
           <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
         {:else}
-          {#each group.lines as line}
+          {#each group.lines as line, li (li)}
             <div class="diff-line diff-line-unchanged">{line}</div>
           {/each}
         {/if}

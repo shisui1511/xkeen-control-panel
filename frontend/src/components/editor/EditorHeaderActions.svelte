@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Attachment } from 'svelte/attachments';
   import { t } from '../../i18n';
   import { isConflict } from '../../stores';
   import StatusBadge from '../StatusBadge.svelte';
@@ -36,7 +37,6 @@
   }: Props = $props();
 
   let showOverflowMenu = $state(false);
-  let containerRef = $state<HTMLElement | null>(null);
 
   // В конфликте ядер применять нечего: сохранение файла (данные) остаётся доступным.
   const saveAndApplyLabel = $derived(
@@ -53,31 +53,22 @@
     showOverflowMenu = !showOverflowMenu;
   }
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && showOverflowMenu) {
-      showOverflowMenu = false;
-    }
-  }
-
-  function handleClickOutside(e: MouseEvent) {
-    if (showOverflowMenu && containerRef && !containerRef.contains(e.target as Node)) {
-      showOverflowMenu = false;
-    }
-  }
-
-  $effect(() => {
-    if (showOverflowMenu) {
-      window.addEventListener('keydown', handleKeydown);
-      window.addEventListener('click', handleClickOutside);
-    } else {
-      window.removeEventListener('keydown', handleKeydown);
-      window.removeEventListener('click', handleClickOutside);
-    }
-    return () => {
-      window.removeEventListener('keydown', handleKeydown);
-      window.removeEventListener('click', handleClickOutside);
+  // Пока меню открыто: Escape и клик вне блока кнопки закрывают его
+  const closeMenuOnEscapeOrOutside: Attachment<HTMLElement> = (menu) => {
+    const container = menu.parentElement;
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') showOverflowMenu = false;
     };
-  });
+    const onClickOutside = (e: MouseEvent) => {
+      if (container && !container.contains(e.target as Node)) showOverflowMenu = false;
+    };
+    window.addEventListener('keydown', onKeydown);
+    window.addEventListener('click', onClickOutside);
+    return () => {
+      window.removeEventListener('keydown', onKeydown);
+      window.removeEventListener('click', onClickOutside);
+    };
+  };
 </script>
 
 <div class="eph-right">
@@ -124,7 +115,7 @@
       {saving ? $t('app.loading') : $t('app.save')}
     </button>
 
-    <div class="overflow-wrap" bind:this={containerRef}>
+    <div class="overflow-wrap">
       <button
         type="button"
         class="btn btn-secondary btn-compact btn-overflow-trigger"
@@ -151,7 +142,7 @@
       </button>
 
       {#if showOverflowMenu}
-        <div class="overflow-dropdown" role="menu">
+        <div class="overflow-dropdown" role="menu" {@attach closeMenuOnEscapeOrOutside}>
           <button
             type="button"
             class="dropdown-item"

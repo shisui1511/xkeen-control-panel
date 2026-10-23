@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Modal from '../Modal.svelte';
   import Tabs, { type TabItem } from '../Tabs.svelte';
   import { t } from '../../i18n';
@@ -28,12 +29,31 @@
   }: Props = $props();
 
   let templates = $state<Template[]>([]);
-  let templateTab = $state<'xray' | 'mihomo'>('xray');
-  let selectedTemplate = $state<Template | null>(null);
-  let templatePreview = $state('');
   let templateLoading = $state(false);
 
+  function defaultTemplateTab(file: string): 'xray' | 'mihomo' {
+    const isMihomo =
+      file && (file.endsWith('.yaml') || file.endsWith('.yml') || file.includes('mihomo'));
+    return isMihomo ? 'mihomo' : 'xray';
+  }
+
+  // Вкладка и выбранный шаблон сбрасываются при каждом открытии и закрытии диалога;
+  // присваивание (выбор пользователя) действует до следующей смены isOpen.
+  let templateTab = $derived.by<'xray' | 'mihomo'>(() => {
+    void isOpen;
+    return untrack(() => defaultTemplateTab(selectedFile));
+  });
+  let pickedTemplate = $derived.by<Template | null>(() => {
+    void isOpen;
+    return null;
+  });
+
   let filteredTemplates = $derived(templates.filter((t) => t.type === templateTab));
+  // Без явного выбора показан первый шаблон вкладки (в том числе когда список пришёл позже)
+  const selectedTemplate = $derived(pickedTemplate ?? filteredTemplates[0] ?? null);
+  const templatePreview = $derived(
+    (selectedTemplate?.content || '').split('\n').slice(0, 50).join('\n')
+  );
 
   const templateTabItems = $derived<TabItem[]>([
     { value: 'xray', label: $t('editor.templates_tab_xray') },
@@ -50,39 +70,10 @@
     }
   }
 
-  function loadTemplatePreview(template: Template) {
-    selectedTemplate = template;
-    templatePreview = (template.content || '').split('\n').slice(0, 50).join('\n');
-  }
-
-  let prevOpen = false;
-
+  // Список шаблонов запрашивается при открытии, если он ещё пуст
   $effect(() => {
-    if (isOpen && !prevOpen) {
-      prevOpen = true;
-      const isMihomo =
-        selectedFile &&
-        (selectedFile.endsWith('.yaml') ||
-          selectedFile.endsWith('.yml') ||
-          selectedFile.includes('mihomo'));
-      templateTab = isMihomo ? 'mihomo' : 'xray';
-      selectedTemplate = null;
-      templatePreview = '';
-      if (templates.length === 0) {
-        loadTemplates().then(() => {
-          const first = templates.filter((t) => t.type === templateTab)[0];
-          if (first && !selectedTemplate) {
-            loadTemplatePreview(first);
-          }
-        });
-      } else {
-        const first = templates.filter((t) => t.type === templateTab)[0];
-        if (first) {
-          loadTemplatePreview(first);
-        }
-      }
-    } else if (!isOpen) {
-      prevOpen = false;
+    if (isOpen && untrack(() => templates.length) === 0) {
+      void loadTemplates();
     }
   });
 
@@ -121,10 +112,7 @@
           ariaLabel={$t('editor.templates')}
           onchange={(val) => {
             templateTab = val as 'xray' | 'mihomo';
-            selectedTemplate = null;
-            templatePreview = '';
-            const first = filteredTemplates[0];
-            if (first) loadTemplatePreview(first);
+            pickedTemplate = null;
           }}
         />
       </div>
@@ -134,7 +122,7 @@
           <button
             class="template-item"
             class:selected={selectedTemplate?.name === template.name}
-            onclick={() => loadTemplatePreview(template)}
+            onclick={() => (pickedTemplate = template)}
             disabled={templateLoading}
           >
             <div class="template-info">

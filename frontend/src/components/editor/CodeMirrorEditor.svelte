@@ -13,6 +13,7 @@
 
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { t as translate, currentLang, type Lang } from '../../i18n';
   import {
     EditorView,
@@ -108,7 +109,6 @@
     onSave: () => void;
   } = $props();
 
-  let editorContainer: HTMLDivElement | null = $state(null);
   const schemaCompartment = new Compartment();
   const readOnlyCompartment = new Compartment();
   let lastPath = '';
@@ -252,117 +252,127 @@
     return [EditorState.readOnly.of(ro), EditorView.editable.of(!ro)];
   }
 
-  // Create or update the EditorState / EditorView when parameters change
-  $effect(() => {
-    if (!editorContainer || !path) return;
-
-    // Track path, expertMode, schemaEnabled, language reactively
+  // Create the EditorView in the container, or reset its state when the file path changes.
+  // Reads `path` only; everything else is untracked, so typing or option changes never rebuild it.
+  const mountEditor: Attachment<HTMLDivElement> = (node) => {
     const currentPath = path;
-    const currentExpertMode = expertMode;
-    const currentSchemaEnabled = schemaEnabled;
-    const currentLang_ = $currentLang;
+    if (!currentPath) return;
 
-    if (view && view.dom.isConnected && lastPath === currentPath) {
-      const schemaExts = getSchemaExtensions(currentPath, currentExpertMode, currentLang_);
-      view.dispatch({
-        effects: schemaCompartment.reconfigure(schemaExts)
-      });
-      return;
-    }
+    untrack(() => {
+      if (view && view.dom.isConnected && lastPath === currentPath) return;
 
-    lastPath = currentPath;
-    const lang = currentPath.endsWith('.yaml') || currentPath.endsWith('.yml') ? yaml() : json();
-    const schemaExts = getSchemaExtensions(currentPath, currentExpertMode, currentLang_);
+      lastPath = currentPath;
+      const lang = currentPath.endsWith('.yaml') || currentPath.endsWith('.yml') ? yaml() : json();
+      const schemaExts = getSchemaExtensions(currentPath, expertMode, $currentLang);
 
-    const state = EditorState.create({
-      doc: untrack(() => content),
-      extensions: [
-        lineNumbers(),
-        highlightActiveLineGutter(),
-        highlightSpecialChars(),
-        history(),
-        foldGutter(),
-        drawSelection(),
-        dropCursor(),
-        EditorState.allowMultipleSelections.of(true),
-        indentOnInput(),
-        syntaxHighlighting(customHighlightStyle),
-        bracketMatching(),
-        closeBrackets(),
-        autocompletion(),
-        rectangularSelection(),
-        crosshairCursor(),
-        highlightActiveLine(),
-        highlightSelectionMatches(),
-        keymap.of([
-          {
-            key: 'Mod-s',
-            run: () => {
-              onSave();
-              return true;
+      const state = EditorState.create({
+        doc: content,
+        extensions: [
+          lineNumbers(),
+          highlightActiveLineGutter(),
+          highlightSpecialChars(),
+          history(),
+          foldGutter(),
+          drawSelection(),
+          dropCursor(),
+          EditorState.allowMultipleSelections.of(true),
+          indentOnInput(),
+          syntaxHighlighting(customHighlightStyle),
+          bracketMatching(),
+          closeBrackets(),
+          autocompletion(),
+          rectangularSelection(),
+          crosshairCursor(),
+          highlightActiveLine(),
+          highlightSelectionMatches(),
+          keymap.of([
+            {
+              key: 'Mod-s',
+              run: () => {
+                onSave();
+                return true;
+              }
+            },
+            ...closeBracketsKeymap,
+            ...defaultKeymap,
+            ...searchKeymap,
+            ...historyKeymap,
+            ...foldKeymap,
+            ...completionKeymap,
+            ...lintKeymap
+          ]),
+          lang,
+          EditorView.lineWrapping,
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              const currentContent = update.state.doc.toString();
+              onContentChange(currentContent);
             }
-          },
-          ...closeBracketsKeymap,
-          ...defaultKeymap,
-          ...searchKeymap,
-          ...historyKeymap,
-          ...foldKeymap,
-          ...completionKeymap,
-          ...lintKeymap
-        ]),
-        lang,
-        EditorView.lineWrapping,
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            const currentContent = update.state.doc.toString();
-            onContentChange(currentContent);
-          }
-          if (update.selectionSet || update.docChanged) {
-            const pos = update.state.selection.main.head;
-            const line = update.state.doc.lineAt(pos);
-            onCursorChange(line.number, pos - line.from + 1, pos, update.state);
-          }
-        }),
-        schemaCompartment.of(schemaExts),
-        readOnlyCompartment.of(readOnlyExtensions(untrack(() => readOnly)))
-      ]
-    });
+            if (update.selectionSet || update.docChanged) {
+              const pos = update.state.selection.main.head;
+              const line = update.state.doc.lineAt(pos);
+              onCursorChange(line.number, pos - line.from + 1, pos, update.state);
+            }
+          }),
+          schemaCompartment.of(schemaExts),
+          readOnlyCompartment.of(readOnlyExtensions(readOnly))
+        ]
+      });
 
-    if (view) {
-      if (view.dom.isConnected) {
-        view.setState(state);
+      if (view) {
+        if (view.dom.isConnected) {
+          view.setState(state);
+        } else {
+          view.destroy();
+          view = new EditorView({ state, parent: node });
+        }
       } else {
-        view.destroy();
-        view = new EditorView({ state, parent: editorContainer });
+        view = new EditorView({ state, parent: node });
       }
-    } else {
-      view = new EditorView({ state, parent: editorContainer });
-    }
-  });
+    });
+  };
+
+  // Schema/expert mode/language change for the same file: reconfigure the compartment in place
+  const syncSchema: Attachment<HTMLDivElement> = () => {
+    const currentExpertMode = expertMode;
+    const currentLang_ = $currentLang;
+    const currentView = untrack(() => view);
+    const currentPath = untrack(() => path);
+    if (!currentView || !currentPath || !currentView.dom.isConnected) return;
+    currentView.dispatch({
+      effects: schemaCompartment.reconfigure(
+        getSchemaExtensions(currentPath, currentExpertMode, currentLang_)
+      )
+    });
+  };
 
   // Смена readOnly без пересоздания состояния (как у schemaCompartment): история и курсор целы
-  $effect(() => {
+  const syncReadOnly: Attachment<HTMLDivElement> = () => {
     const ro = readOnly;
-    if (!view || !view.dom.isConnected) return;
-    view.dispatch({ effects: readOnlyCompartment.reconfigure(readOnlyExtensions(ro)) });
-  });
+    const currentView = untrack(() => view);
+    if (!currentView || !currentView.dom.isConnected) return;
+    currentView.dispatch({ effects: readOnlyCompartment.reconfigure(readOnlyExtensions(ro)) });
+  };
 
   // Keep editor content in sync with external updates if path is unchanged
-  $effect(() => {
-    if (view && content !== view.state.doc.toString()) {
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: content }
+  const syncContent: Attachment<HTMLDivElement> = () => {
+    const next = content;
+    const currentView = untrack(() => view);
+    if (currentView && next !== currentView.state.doc.toString()) {
+      currentView.dispatch({
+        changes: { from: 0, to: currentView.state.doc.length, insert: next }
       });
     }
-  });
+  };
 
   let isFullscreen = $state(false);
 
-  function toggleFullscreen() {
+  function toggleFullscreen(e: MouseEvent) {
+    const wrapper = (e.currentTarget as HTMLElement).closest<HTMLElement>('.editor-cm-wrapper');
     isFullscreen = !isFullscreen;
     if (isFullscreen) {
-      if (editorContainer?.requestFullscreen) {
-        editorContainer.requestFullscreen().catch(() => {});
+      if (wrapper?.requestFullscreen) {
+        wrapper.requestFullscreen().catch(() => {});
       } else if (document.documentElement.requestFullscreen) {
         document.documentElement.requestFullscreen().catch(() => {});
       }
@@ -409,7 +419,14 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="editor-cm-wrapper" class:is-fullscreen={isFullscreen} bind:this={editorContainer}>
+<div
+  class="editor-cm-wrapper"
+  class:is-fullscreen={isFullscreen}
+  {@attach mountEditor}
+  {@attach syncSchema}
+  {@attach syncReadOnly}
+  {@attach syncContent}
+>
   <div class="editor-cm-toolbar" class:is-fullscreen={isFullscreen}>
     <button
       type="button"
