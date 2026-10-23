@@ -203,8 +203,9 @@ func TestRouterCascadeGroup(t *testing.T) {
 		t.Error("отказы изменили черновик")
 	}
 
-	// Выбор участников в Live: ключ удалённой группы и выбор её как участника
-	// уходят, остальное остаётся.
+	// Выбор участников в Live: удаление в черновике его не трогает (группа в ядре
+	// остаётся до «Применить», сброс черновика вернул бы её с выбором); ключ
+	// удалённой группы и выбор её как участника убирает «Применить».
 	e.rtcSetSelection(t, map[string]string{service.ID: memberGroup + auto.ID, auto.ID: memberDirect, proxyG.ID: memberDirect})
 
 	// Перенаправление на «Прокси» — одна ревизия.
@@ -236,12 +237,19 @@ func TestRouterCascadeGroup(t *testing.T) {
 		t.Errorf("правила после каскада: %+v, «Остальное» %+v", rules.Items, rules.Final)
 	}
 	sel := e.rtcSelection(t)
-	if len(sel) != 1 || sel[proxyG.ID] != memberDirect {
-		t.Errorf("выбор в Live после каскада: %v, ожидался только выбор «Прокси»", sel)
+	if len(sel) != 3 || sel[auto.ID] != memberDirect || sel[service.ID] != memberGroup+auto.ID || sel[proxyG.ID] != memberDirect {
+		t.Errorf("выбор в Live изменился до «Применить»: %v", sel)
 	}
 
 	// «Применить» проходит проверкой ядра, тега удалённой группы нет в файлах.
 	e.applyOK(t)
+	sel = e.rtcSelection(t)
+	if _, ok := sel[auto.ID]; ok {
+		t.Errorf("после «Применить» остался выбор удалённой группы: %v", sel)
+	}
+	if sel[service.ID] == memberGroup+auto.ID {
+		t.Errorf("после «Применить» «Сервис» по-прежнему выбрал удалённую группу: %v", sel)
+	}
 	rtcFilesLack(t, e.xrayDir(), GroupTag(auto.ID))
 	if bals, _ := rtxRouting(t, e.xrayDoc(t, xrayRoutingFile))["balancers"].([]any); len(bals) != 0 {
 		t.Errorf("balancer-ов после удаления «Авто» %d, ожидалось 0", len(bals))

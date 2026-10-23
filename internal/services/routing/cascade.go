@@ -42,41 +42,11 @@ type Cascade struct {
 	To *Target `json:"to,omitempty"`
 }
 
-// selectionDrop убирает из Live[selection] выбор удалённой группы и выбор самой
-// группы как участника в других группах: дальше они выбирают по умолчанию.
-func selectionDrop(id string) func(live configlayer.Sections) error {
-	return func(live configlayer.Sections) error {
-		raw, ok := live[LiveKeySelection]
-		if !ok || isEmptyRaw(raw) {
-			return nil
-		}
-		var sel map[string]string
-		if err := json.Unmarshal(raw, &sel); err != nil {
-			// Порчу живых данных генераторы переносят и так: выбора нет.
-			return nil
-		}
-		changed := false
-		for gid, member := range sel {
-			if gid == id || member == memberGroup+id {
-				delete(sel, gid)
-				changed = true
-			}
-		}
-		if !changed {
-			return nil
-		}
-		out, err := json.Marshal(sel)
-		if err != nil {
-			return err
-		}
-		live[LiveKeySelection] = out
-		return nil
-	}
-}
-
-// DeleteGroup удаляет группу из черновика одной ревизией вместе с очисткой
-// выбора в Live (D-34). Есть ссылки (правила, «Остальное», участие в ручных
-// группах) и действие не выбрано — *ReferencedError без изменений. redirect
+// DeleteGroup удаляет группу из черновика одной ревизией (D-34). Живой выбор
+// (Live[selection]) не трогается: пока удаление не применено, группа в ядре
+// остаётся, а «Сбросить черновик» вернул бы группу без выбора. Выбор удалённой
+// группы и выбор её как участника убирает CommitLive после «Применить». Есть
+// ссылки (правила, «Остальное», участие в ручных группах) и действие не выбрано — *ReferencedError без изменений. redirect
 // направляет правила и «Остальное» на c.To, drop удаляет правила с целью на
 // группу; если на неё ссылается «Остальное», нужна замена (ErrInvalidInput,
 // final_requires_redirect). Из состава ручных групп удалённая группа уходит
@@ -168,7 +138,7 @@ func (s *Service) DeleteGroup(rev int64, id string, c Cascade) (configlayer.Draf
 		}
 		sections[RulesSection] = rawRules
 	}
-	return s.d.Layer.EditDraftBatch(rev, sections, selectionDrop(id))
+	return s.d.Layer.EditDraftBatch(rev, sections, nil)
 }
 
 // scrubGroups убирает из групп ссылки на удаляемый источник или узел: источник
