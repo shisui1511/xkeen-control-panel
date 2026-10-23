@@ -780,6 +780,16 @@ const (
 	issueSectionInvalid = "section_invalid"
 )
 
+// Коды предупреждений проверки: «Применить» они не блокируют.
+const (
+	// warnGroupEmptyKernel — группа пуста только для одного ядра (D-13).
+	warnGroupEmptyKernel = "group_empty_kernel"
+	// warnModeUnavailable — режим группы недоступен по версии ядра.
+	warnModeUnavailable = "mode_unavailable"
+	// warnPickStale — выбранного узла нет ни в одном установленном ядре.
+	warnPickStale = "pick_stale"
+)
+
 // checkerID — идентификатор проверки в реестре слоя.
 const checkerID = "routing_check"
 
@@ -795,13 +805,36 @@ type IssueView struct {
 // catalogFunc — источник каталога узлов (sources.Service.Catalog).
 type catalogFunc func(configlayer.Input, configlayer.InstalledKernels) (sources.Catalog, error)
 
-// analyze считает проблемы маршрутизации по входным данным: испорченные секции,
-// группы, пустые для всех установленных ядер, циклы вложенности и цели правил на
-// несуществующие группы. warnings этот план оставляет пустыми (предупреждения
-// добавляет 146-26). Состав считает Resolve на каталоге источников. Диск и сеть
-// не трогаются; ошибка каталога (его сообщают генераторы источников) пропускает
-// только проверку пустых групп.
-func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catalog catalogFunc) (issues, warnings []IssueView) {
+// versionFunc — сырая версия ядра ("xray" или "mihomo"); пусто — не определена
+// (Deps.KernelVersion).
+type versionFunc func(kernel string) string
+
+// groupModeFeature — функция, от версии ядра которой зависит режим группы;
+// пустая — режим порога не имеет. Группы Mihomo зависят от mihomo_groups при
+// любом режиме (empty-fallback задан у каждой группы панели).
+func groupModeFeature(kernel string, mode GroupMode) configlayer.Feature {
+	if kernel == configlayer.KernelMihomo {
+		return configlayer.FeatureMihomoGroups
+	}
+	switch mode {
+	case ModeAuto:
+		return configlayer.FeatureXrayAutoGroup
+	case ModeFallback:
+		return configlayer.FeatureXrayFallbackGroup
+	}
+	return ""
+}
+
+// analyze считает проблемы и предупреждения маршрутизации по входным данным:
+// испорченные секции, группы, пустые для всех установленных ядер, циклы
+// вложенности и цели правил на несуществующие группы (issues, блокируют
+// «Применить»), а также группы, пустые только для части ядер, режимы, недоступные
+// по версии ядра, и устаревшие отдельные узлы (warnings, не блокируют). Состав
+// считает Resolve на каталоге источников. Это единственный расчёт проблем:
+// проверка до записи и представление вызывают его. Диск и сеть не трогаются;
+// ошибка каталога (его сообщают генераторы источников) пропускает только
+// проверки, которым нужен состав.
+func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catalog catalogFunc, version versionFunc) (issues, warnings []IssueView) {
 	issues, warnings = []IssueView{}, []IssueView{}
 	sectionBad := func(name string) {
 		issues = append(issues, IssueView{Code: issueSectionInvalid, Params: map[string]string{"section": name}, Key: "section:" + name})
@@ -820,25 +853,75 @@ func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catal
 	}
 
 	if gerr == nil {
+		var cat sources.Catalog
+		haveCat := false
 		if installed.Xray || installed.Mihomo {
-			if cat, err := catalog(in, installed); err == nil {
-				for _, g := range groups.Items {
-					empty := true
-					for _, k := range []struct {
-						on    bool
-						nodes []sources.CatalogNode
-					}{{installed.Xray, cat.Xray}, {installed.Mihomo, cat.Mihomo}} {
-						if !k.on {
-							continue
-						}
-						if r := Resolve(g, k.nodes, groups.Items); len(r.Nodes) > 0 || len(r.Members) > 0 {
-							empty = false
-							break
-						}
+			if c, err := catalog(in, installed); err == nil {
+				cat, haveCat = c, true
+			}
+		}
+		kernels := []struct {
+			name  string
+			on    bool
+			nodes []sources.CatalogNode
+		}{
+			{configlayer.KernelXray, installed.Xray, cat.Xray},
+			{configlayer.KernelMihomo, installed.Mihomo, cat.Mihomo},
+		}
+		for _, g := range groups.Items {
+			key := "group:" + g.ID
+			params := func(extra ...string) map[string]string {
+				m := map[string]string{"group": g.Name}
+				for i := 0; i+1 < len(extra); i += 2 {
+					m[extra[i]] = extra[i+1]
+				}
+				return m
+			}
+			if haveCat {
+				var emptyOn []string
+				active := 0
+				staleIn := map[string]int{}
+				for _, k := range kernels {
+					if !k.on {
+						continue
 					}
-					if empty {
-						issues = append(issues, IssueView{Code: issueGroupEmpty, Params: map[string]string{"group": g.Name}, Key: "group:" + g.ID})
+					active++
+					r := Resolve(g, k.nodes, groups.Items)
+					if len(r.Nodes) == 0 && len(r.Members) == 0 {
+						emptyOn = append(emptyOn, k.name)
 					}
+					for _, ref := range r.Stale {
+						staleIn[ref]++
+					}
+				}
+				switch {
+				case active > 0 && len(emptyOn) == active:
+					issues = append(issues, IssueView{Code: issueGroupEmpty, Params: params(), Key: key})
+				default:
+					for _, k := range emptyOn {
+						warnings = append(warnings, IssueView{Code: warnGroupEmptyKernel, Params: params("kernel", k), Key: key})
+					}
+				}
+				// Узел устарел, если его нет ни в одном установленном ядре: узел,
+				// который ядро просто не умеет (tuic в Xray), устаревшим не считается.
+				for _, ref := range g.Picks {
+					if active > 0 && staleIn[ref] == active {
+						warnings = append(warnings, IssueView{Code: warnPickStale, Params: params(), Key: key})
+						break
+					}
+				}
+			}
+			for _, k := range kernels {
+				f := groupModeFeature(k.name, g.Mode)
+				if !k.on || f == "" {
+					continue
+				}
+				if configlayer.FeatureAvailable(k.name, version(k.name), f) == configlayer.Unavailable {
+					warnings = append(warnings, IssueView{
+						Code:   warnModeUnavailable,
+						Params: params("kernel", k.name, "min", configlayer.FeatureMinVersion(f)),
+						Key:    key,
+					})
 				}
 			}
 		}
@@ -882,7 +965,7 @@ func (c routingChecker) Check(in configlayer.Input, installed configlayer.Instal
 	if !configlayer.DesiredRouting(in.Sections).Managed {
 		return nil
 	}
-	issues, _ := analyze(in, installed, c.s.d.Sources.Catalog)
+	issues, _ := analyze(in, installed, c.s.d.Sources.Catalog, c.s.d.KernelVersion)
 	out := make([]configlayer.BuildIssue, 0, len(issues))
 	for _, is := range issues {
 		out = append(out, configlayer.BuildIssue{Key: is.Key, Code: is.Code, Params: is.Params})
