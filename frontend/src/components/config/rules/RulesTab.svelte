@@ -44,12 +44,13 @@
   );
   const finalTarget = $derived($routingView?.final ?? { kind: 'direct' });
 
-  // --- Перестановка кнопками ---
+  // --- Перестановка кнопками и перетаскиванием ---
   // После ответа сервера порядок в представлении обновляется отдельным запросом: фокус и
-  // объявление ждут, пока правило окажется на новой позиции.
+  // объявление ждут, пока правило окажется на новой позиции. dir 0 — перетаскивание,
+  // фокус при этом не двигается.
   interface PendingMove {
     id: string;
-    dir: -1 | 1;
+    dir: -1 | 0 | 1;
     to: number;
   }
 
@@ -66,13 +67,17 @@
   }
 
   async function onmove(rule: RuleView, dir: -1 | 1) {
+    await performMove(rule.id, rule.index - 1 + dir, dir);
+  }
+
+  /** Переставляет правило на позицию `to` (с нуля); порядок пишет сервер, ревизию проверяет он. */
+  async function performMove(id: string, to: number, dir: -1 | 0 | 1) {
     if (moving || $applyRunning) return;
-    const to = rule.index - 1 + dir;
     if (to < 0 || to >= rules.length) return;
     moving = true;
     try {
-      await moveRule(rule.id, to);
-      pending = { id: rule.id, dir, to: to + 1 };
+      await moveRule(id, to);
+      pending = { id, dir, to: to + 1 };
       // Если представление не обновилось, объявление и фокус всё равно не зависают
       pendingTimer = setTimeout(clearPending, 4000);
     } catch (err) {
@@ -89,6 +94,7 @@
     if (!rule || rule.index !== p.to) return;
     clearPending();
     live = $t('cfg.rules.moved_live', { n: rule.index });
+    if (p.dir === 0) return;
     void tick().then(() => {
       // Фокус остаётся на той же кнопке той же строки; у границы она неактивна — берём парную
       const same = tabEl?.querySelector<HTMLButtonElement>(
@@ -100,6 +106,55 @@
       (same && !same.disabled ? same : other)?.focus();
     });
   });
+
+  // --- Перетаскивание (нативный HTML5 DnD за ручку) ---
+  let dragId = $state<string | null>(null);
+  let dropAt = $state<{ id: string; pos: 'before' | 'after' } | null>(null);
+  const dragLocked = $derived(moving || $applyRunning);
+
+  /** Позиция правила (с нуля) после переноса из `from` в щель над или под строкой `target`. */
+  function destOf(from: number, target: number, pos: 'before' | 'after'): number {
+    const slot = pos === 'before' ? target : target + 1;
+    return from < slot ? slot - 1 : slot;
+  }
+
+  function onpickup(rule: RuleView) {
+    if (dragLocked) return;
+    dragId = rule.id;
+    dropAt = null;
+  }
+
+  function onhover(rule: RuleView, pos: 'before' | 'after') {
+    if (dragId === null || dragLocked) return;
+    const from = rules.findIndex((r) => r.id === dragId);
+    const target = rules.findIndex((r) => r.id === rule.id);
+    // Линия не рисуется там, где правило и так стоит: на себе и на соседней щели
+    if (from < 0 || target < 0 || destOf(from, target, pos) === from) {
+      dropAt = null;
+      return;
+    }
+    if (dropAt?.id !== rule.id || dropAt.pos !== pos) dropAt = { id: rule.id, pos };
+  }
+
+  function onleave(rule: RuleView) {
+    if (dropAt?.id === rule.id) dropAt = null;
+  }
+
+  function onputdown() {
+    dragId = null;
+    dropAt = null;
+  }
+
+  function ondropon(rule: RuleView) {
+    const id = dragId;
+    const at = dropAt;
+    onputdown();
+    if (id === null || at === null || at.id !== rule.id) return;
+    const from = rules.findIndex((r) => r.id === id);
+    const target = rules.findIndex((r) => r.id === rule.id);
+    if (from < 0 || target < 0) return;
+    void performMove(id, destOf(from, target, at.pos), 0);
+  }
 
   // --- Диалог правила (одна копия на вкладку) ---
   let editOpen = $state(false);
@@ -199,7 +254,21 @@
       <div class="card rules-card">
         <ol class="rules-list" aria-label={$t('cfg.rules.list_aria')}>
           {#each rules as rule (rule.id)}
-            <RuleRow {rule} count={rules.length} {groups} {onmove} onedit={openEdit} />
+            <RuleRow
+              {rule}
+              count={rules.length}
+              {groups}
+              {onmove}
+              onedit={openEdit}
+              {dragId}
+              {dropAt}
+              {dragLocked}
+              {onpickup}
+              {onhover}
+              {onleave}
+              {ondropon}
+              {onputdown}
+            />
           {/each}
         </ol>
         {#if showFallback}
