@@ -289,6 +289,8 @@ export interface GeodataPreview {
   before: string;
   after: string;
   comments_kept: boolean;
+  /** Отпечаток `before`: возвращается в addGeodata, чтобы запись шла по показанному файлу. */
+  base: string;
 }
 
 export interface CatalogView {
@@ -549,11 +551,13 @@ export function previewGeodata(set: string): Promise<GeodataPreview> {
 /** «Добавить в XKeen»: запись геоданных в xkeen.json, при updateNow — обновление баз. */
 export function addGeodata(
   set: string,
+  base: string,
   acceptCommentLoss: boolean,
   updateNow: boolean
 ): Promise<GeodataStatus> {
   return post<GeodataStatus>(`${BASE}/lists/geodata/add`, {
     set,
+    base,
     accept_comment_loss: acceptCommentLoss,
     update_now: updateNow
   });

@@ -403,7 +403,16 @@ func TestRouterGeodataAdd(t *testing.T) {
 		t.Errorf("разбор after не равен прежнему объекту плюс запись: %v", err)
 	}
 
-	if err := g.Add(context.Background(), set, false, false); err != nil {
+	// Запись привязана к показанному предпросмотру: отпечаток чужого файла отменяет
+	// запись, файл остаётся как был.
+	if err := g.Add(context.Background(), set, ContentBase(before+" "), false, false); ErrorCode(err) != "geodata_changed" {
+		t.Errorf("Add с отпечатком другого файла: %v", err)
+	}
+	if disk, _ := os.ReadFile(filepath.Join(dir, "xkeen.json")); string(disk) != before {
+		t.Error("файл изменён при отказе geodata_changed")
+	}
+
+	if err := g.Add(context.Background(), set, ContentBase(before), false, false); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	disk, err := os.ReadFile(filepath.Join(dir, "xkeen.json"))
@@ -419,7 +428,7 @@ func TestRouterGeodataAdd(t *testing.T) {
 		t.Errorf("Status после Add: %+v %v", st, err)
 	}
 
-	if err := g.Add(context.Background(), set, false, false); ErrorCode(err) != "already_present" {
+	if err := g.Add(context.Background(), set, "", false, false); ErrorCode(err) != "already_present" {
 		t.Errorf("повторный Add: %v", err)
 	}
 	if _, _, _, err := g.PreviewAdd("no-such-set"); ErrorCode(err) != "set_unknown" {
@@ -428,7 +437,7 @@ func TestRouterGeodataAdd(t *testing.T) {
 
 	// Без jq запись не делается.
 	g2, dir2 := rtGeodataStore(t, tg.WorkDir, content, false)
-	if err := g2.Add(context.Background(), set, true, false); ErrorCode(err) != "no_jq" {
+	if err := g2.Add(context.Background(), set, "", true, false); ErrorCode(err) != "no_jq" {
 		t.Errorf("Add без jq: %v", err)
 	}
 	if disk, _ := os.ReadFile(filepath.Join(dir2, "xkeen.json")); string(disk) != content {
@@ -438,7 +447,7 @@ func TestRouterGeodataAdd(t *testing.T) {
 	// geofile_update: false — запись не делается.
 	off := "{\n  \"xkeen\": {\"geofile_update\": false}\n}\n"
 	g3, dir3 := rtGeodataStore(t, tg.WorkDir, off, true)
-	if err := g3.Add(context.Background(), set, true, false); ErrorCode(err) != "geofile_update_off" {
+	if err := g3.Add(context.Background(), set, "", true, false); ErrorCode(err) != "geofile_update_off" {
 		t.Errorf("Add при geofile_update=false: %v", err)
 	}
 	if disk, _ := os.ReadFile(filepath.Join(dir3, "xkeen.json")); string(disk) != off {

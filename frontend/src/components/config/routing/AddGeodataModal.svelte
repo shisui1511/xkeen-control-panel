@@ -118,7 +118,7 @@
     }
     busy = true;
     try {
-      await addGeodata(set.id, acceptCommentLoss, updateMode === 'now');
+      await addGeodata(set.id, preview.base, acceptCommentLoss, updateMode === 'now');
       showToast('success', get(t)('cfg.geodata.toast_added'));
       onadded();
       onclose();
@@ -129,6 +129,11 @@
         written = true;
         writeFailure = routingErrorText(get(t), err.code, err.params);
         onadded();
+      } else if (err?.code === 'geodata_changed') {
+        // Файл изменился после показанного предпросмотра: показываем новый diff
+        const id = set.id;
+        await load(id);
+        writeFailure = routingErrorText(get(t), err.code, err.params);
       } else {
         writeFailure = get(t)('cfg.geodata.write_failed', { reason: reasonOf(e) });
       }

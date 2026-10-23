@@ -488,10 +488,12 @@ func (a *API) ConfigRoutingGeodataPreview(w http.ResponseWriter, r *http.Request
 const geodataUpdateTimeout = 10 * time.Minute
 
 // ConfigRoutingGeodataAdd — POST /api/configlayer/routing/lists/geodata/add
-// {set, accept_comment_loss, update_now}: «Добавить в XKeen». Набор только из
-// встроенного каталога, запись в xkeen.json с резервной копией; причины отказа —
+// {set, base, accept_comment_loss, update_now}: «Добавить в XKeen». Набор только из
+// встроенного каталога, запись в xkeen.json с резервной копией; base — отпечаток
+// файла из ответа предпросмотра (пусто — без привязки); причины отказа —
 // no_jq, geofile_update_off, already_present, comments_lost, geodata_changed (xkeen.json
-// изменился между предпросмотром и записью, предпросмотр строится заново). update_now запускает
+// изменился после показанного предпросмотра или во время записи, предпросмотр
+// строится заново). update_now запускает
 // xkeen -ug; сбой запуска — 502 update_failed, запись при этом уже сделана
 // (data.written=true). Отмена запроса вкладкой запись и обновление не прерывает.
 func (a *API) ConfigRoutingGeodataAdd(w http.ResponseWriter, r *http.Request) {
@@ -500,6 +502,7 @@ func (a *API) ConfigRoutingGeodataAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Set               string `json:"set"`
+		Base              string `json:"base"`
 		AcceptCommentLoss bool   `json:"accept_comment_loss"`
 		UpdateNow         bool   `json:"update_now"`
 	}
@@ -508,7 +511,7 @@ func (a *API) ConfigRoutingGeodataAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), geodataUpdateTimeout)
 	defer cancel()
-	st, err := a.routing.GeodataAdd(ctx, req.Set, req.AcceptCommentLoss, req.UpdateNow)
+	st, err := a.routing.GeodataAdd(ctx, req.Set, req.Base, req.AcceptCommentLoss, req.UpdateNow)
 	if err != nil {
 		if errors.Is(err, lists.ErrUpdateFailed) {
 			JSONErrorCodeParamsData(w, http.StatusBadGateway, "update_failed", a.t(r, "configlayer.routing.update_failed"),

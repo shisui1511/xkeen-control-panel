@@ -3247,7 +3247,7 @@
   "cfg.routing.apply_blocked_hint": "Группа пуста для всех ядер, не найден список или есть цикл. Исправьте отмеченные места.",
   "cfg.routing.apply_busy_hint": "Идёт применение. Дождитесь окончания.",
   "cfg.routing.err.already_present": "Этот набор уже добавлен в XKeen.",
-  "cfg.routing.err.geodata_changed": "Файл xkeen.json изменился после предпросмотра, запись отменена. Повторите действие.",
+  "cfg.routing.err.geodata_changed": "Файл xkeen.json изменился после предпросмотра, запись отменена. Предпросмотр обновлён: проверьте изменения и повторите.",
   "cfg.routing.err.apply_busy": "Идёт применение. Повторите после окончания.",
   "cfg.routing.err.catalog_unavailable": "Списки на роутере не прочитаны. Установите базы dat через XKeen и повторите.",
   "cfg.routing.err.comments_lost": "В xkeen.json есть комментарии, запись их удалит. Подтвердите потерю комментариев.",

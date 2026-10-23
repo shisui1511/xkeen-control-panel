@@ -2,6 +2,8 @@ package lists
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,8 +50,9 @@ var (
 	ErrUpdateUnavail    = &CodedError{Code: "update_unavailable"}
 	// ErrUpdateFailed — запись выполнена, а запуск xkeen -ug не удался.
 	ErrUpdateFailed = &CodedError{Code: "update_failed"}
-	// ErrGeodataChanged — xkeen.json изменился между чтением и записью: запись
-	// отменена, предпросмотр нужно построить заново.
+	// ErrGeodataChanged — xkeen.json изменился после показанного предпросмотра
+	// (или между чтением и записью): запись отменена, предпросмотр нужно построить
+	// заново.
 	ErrGeodataChanged = &CodedError{Code: "geodata_changed"}
 )
 
@@ -189,6 +192,14 @@ func hasFalseKey(v any, key string) bool {
 	return false
 }
 
+// ContentBase — отпечаток содержимого xkeen.json (sha256 в hex). Клиент получает
+// его с предпросмотром и возвращает при записи: запись идёт по тому файлу, который
+// пользователь видел.
+func ContentBase(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
+}
+
 // PreviewAdd строит новое содержимое xkeen.json с записью набора из встроенного
 // каталога. Вставка текстовая — комментарии и порядок ключей сохраняются; если
 // проверка результата не прошла, файл собирается заново (commentsKept=false при
@@ -250,10 +261,12 @@ func (g *GeodataStore) PreviewAdd(setID string) (before, after string, commentsK
 // потерь невозможна. runUpdate=true запускает xkeen -ug после записи; ошибка запуска
 // (ErrUpdateFailed) означает, что запись уже сделана. Чтение, построение и запись
 // идут под замком хранилища; перед записью файл перечитывается и сравнивается с
-// прочитанным для предпросмотра: изменился (правка в Редакторе, другой запрос) —
-// ErrGeodataChanged, файл не пишется, чужое изменение не теряется.
-func (g *GeodataStore) Add(ctx context.Context, setID string, acceptCommentLoss, runUpdate bool) error {
-	if err := g.write(setID, acceptCommentLoss, runUpdate); err != nil {
+// прочитанным для предпросмотра. base — отпечаток файла из показанного
+// пользователю предпросмотра (ContentBase); пусто — привязки к показанному нет.
+// Изменился с момента предпросмотра или во время записи (правка в Редакторе, другой
+// запрос) — ErrGeodataChanged, файл не пишется, чужое изменение не теряется.
+func (g *GeodataStore) Add(ctx context.Context, setID, base string, acceptCommentLoss, runUpdate bool) error {
+	if err := g.write(setID, base, acceptCommentLoss, runUpdate); err != nil {
 		return err
 	}
 	if runUpdate {
@@ -266,7 +279,7 @@ func (g *GeodataStore) Add(ctx context.Context, setID string, acceptCommentLoss,
 
 // write — запись набора в xkeen.json под замком (без запуска xkeen -ug: он долгий
 // и замок не держит).
-func (g *GeodataStore) write(setID string, acceptCommentLoss, runUpdate bool) error {
+func (g *GeodataStore) write(setID, base string, acceptCommentLoss, runUpdate bool) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	st, err := g.Status()
@@ -285,6 +298,9 @@ func (g *GeodataStore) write(setID string, acceptCommentLoss, runUpdate bool) er
 	before, after, kept, err := g.PreviewAdd(setID)
 	if err != nil {
 		return err
+	}
+	if base != "" && ContentBase(before) != base {
+		return ErrGeodataChanged
 	}
 	if !kept && !acceptCommentLoss {
 		return ErrCommentsLost

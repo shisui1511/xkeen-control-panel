@@ -15,6 +15,9 @@ type GeodataPreview struct {
 	// CommentsKept — false: вставка без потерь невозможна, запись удалит
 	// комментарии и требует подтверждения (accept_comment_loss).
 	CommentsKept bool `json:"comments_kept"`
+	// Base — отпечаток Before (sha256 в hex). Клиент возвращает его в
+	// GeodataAdd: запись идёт только по тому файлу, который показан в предпросмотре.
+	Base string `json:"base"`
 }
 
 // Catalog возвращает каталог списков роутера с состоянием geodata XKeen (поле
@@ -54,14 +57,15 @@ func (s *Service) GeodataPreview(setID string) (GeodataPreview, error) {
 	if err != nil {
 		return GeodataPreview{}, err
 	}
-	return GeodataPreview{Before: before, After: after, CommentsKept: kept}, nil
+	return GeodataPreview{Before: before, After: after, CommentsKept: kept, Base: lists.ContentBase(before)}, nil
 }
 
 // GeodataAdd дописывает набор из встроенного каталога в xkeen.json (с резервной
 // копией) и при updateNow запускает xkeen -ug. Состояние geodata после записи
 // возвращается и вместе с ошибкой lists.ErrUpdateFailed: запись к этому моменту
-// уже сделана.
-func (s *Service) GeodataAdd(ctx context.Context, setID string, acceptCommentLoss, updateNow bool) (lists.GeodataStatus, error) {
+// уже сделана. base — отпечаток файла из предпросмотра (GeodataPreview.Base):
+// файл изменился после предпросмотра — lists.ErrGeodataChanged.
+func (s *Service) GeodataAdd(ctx context.Context, setID, base string, acceptCommentLoss, updateNow bool) (lists.GeodataStatus, error) {
 	if s.d.Geodata == nil {
 		return lists.GeodataStatus{}, lists.ErrUpdateUnavail
 	}
@@ -70,7 +74,7 @@ func (s *Service) GeodataAdd(ctx context.Context, setID string, acceptCommentLos
 	if _, _, _, err := s.d.Geodata.PreviewAdd(setID); errors.Is(err, lists.ErrSetUnknown) {
 		return lists.GeodataStatus{}, err
 	}
-	addErr := s.d.Geodata.Add(ctx, setID, acceptCommentLoss, updateNow)
+	addErr := s.d.Geodata.Add(ctx, setID, base, acceptCommentLoss, updateNow)
 	if addErr != nil && lists.ErrorCode(addErr) != lists.ErrUpdateFailed.Code {
 		return lists.GeodataStatus{}, addErr
 	}

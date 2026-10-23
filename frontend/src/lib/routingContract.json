@@ -57,7 +57,7 @@
     "children": {}
   },
   "GeodataPreview": {
-    "required": ["before", "after", "comments_kept"],
+    "required": ["before", "after", "comments_kept", "base"],
     "optional": [],
     "children": {}
   },
