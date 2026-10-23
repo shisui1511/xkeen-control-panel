@@ -32,7 +32,11 @@ const (
 	KindXrayJSON            FileKind = "xray_json"
 	KindMihomoProxyProvider FileKind = "mihomo_provider_proxies"
 	KindMihomoRuleProvider  FileKind = "mihomo_provider_rules"
-	KindMihomoProfile       FileKind = "mihomo_profile"
+	// KindMihomoRuleProviderText — file rule-provider в формате text: одно правило
+	// на строку (выгрузка списков dat, D-19). Файл лежит в rule_providers/ с
+	// расширением .txt; формат text принимает Mihomo (RESEARCH, Pitfall 10).
+	KindMihomoRuleProviderText FileKind = "mihomo_provider_rules_text"
+	KindMihomoProfile          FileKind = "mihomo_profile"
 )
 
 // EntryStatus — состояние записи манифеста.
