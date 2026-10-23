@@ -10,8 +10,14 @@
   import ManagedFiles from './components/config/ManagedFiles.svelte';
   import KernelVersions from './components/config/KernelVersions.svelte';
   import NodesTab from './components/config/nodes/NodesTab.svelte';
+  import GroupsTab from './components/config/groups/GroupsTab.svelte';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
-  import { configSubTab, configSubTabHash, type ConfigSubTab } from './lib/configSubTab';
+  import {
+    asConfigSubTab,
+    configSubTab,
+    configSubTabHash,
+    type ConfigSubTab
+  } from './lib/configSubTab';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -25,11 +31,13 @@
 
   const tabItems = $derived([
     { value: 'nodes', label: $t('cfg.tab.nodes'), testId: 'config-tab-nodes' },
+    { value: 'groups', label: $t('cfg.tab.groups'), testId: 'config-tab-groups' },
+    { value: 'rules', label: $t('cfg.tab.rules'), testId: 'config-tab-rules' },
     { value: 'files', label: $t('cfg.tab.files'), testId: 'config-tab-files' }
   ]);
 
   function selectTab(value: string) {
-    window.location.hash = configSubTabHash(value === 'files' ? 'files' : 'nodes');
+    window.location.hash = configSubTabHash(asConfigSubTab(value));
   }
 </script>
 
@@ -38,7 +46,7 @@
 <!--
   Каркас раздела «Конфигурация» (D-02, D-15): уведомления (config-notices), DraftBar
   (config-draftbar) и ход применения (config-progress) общие и стоят над вкладками;
-  вкладка «Узлы» (nodes-tab) и вкладка «Файлы панели» — нынешний стек: расхождения
+  вкладки «Узлы» (nodes-tab), «Группы» (groups-tab), «Правила» (rules-tab) и «Файлы панели» — нынешний стек: расхождения
   (config-drift) и файлы (config-files) внутри ManagedFiles, ядра (config-kernels),
   диагностика (config-diag). Фазы 146–148 добавляют вкладки в тот же Tabs.
 -->
@@ -75,7 +83,9 @@
       />
     {:else if subTab === 'nodes'}
       <NodesTab />
-    {:else}
+    {:else if subTab === 'groups'}
+      <GroupsTab />
+    {:else if subTab === 'files'}
       <ManagedFiles />
       <KernelVersions />
       <DevDiagnostics />
