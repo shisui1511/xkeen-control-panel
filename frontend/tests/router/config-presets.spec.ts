@@ -120,6 +120,86 @@ test('presets: выбор списка', async ({ page }) => {
   await resetDraft(page);
 });
 
+interface ExtendedApi {
+  id: string;
+  file: string;
+  kind: string;
+  in_xkeen: boolean;
+}
+
+/** Расширенные наборы каталога (geosite), которых ещё нет в xkeen.json стенда. */
+async function freeExtendedSets(page: Page): Promise<ExtendedApi[]> {
+  const res = await api(page, 'GET', '/api/configlayer/routing/lists');
+  if (res.status !== 200) return [];
+  return ((res.data?.extended ?? []) as ExtendedApi[]).filter(
+    (e) => e.kind === 'site' && !e.in_xkeen
+  );
+}
+
+/** Содержимое xkeen.json стенда в виде «до» из предпросмотра: запись не выполняется. */
+async function xkeenJsonNow(page: Page, set: string): Promise<string> {
+  const res = await api(page, 'POST', '/api/configlayer/routing/lists/geodata/preview', { set });
+  expect(res.status, 'предпросмотр записи geodata').toBe(200);
+  return String(res.data?.before ?? '');
+}
+
+test('presets: добавить в XKeen', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  await resetDraft(page);
+
+  const free = await freeExtendedSets(page);
+  test.skip(
+    free.length === 0,
+    'на стенде все наборы geosite уже в xkeen.json или каталог не прочитан'
+  );
+  const target = free[0];
+  const before = await xkeenJsonNow(page, target.id);
+
+  await openRules(page);
+  await page.getByTestId('rules-add').click();
+  const rule = page.getByTestId('rule-modal');
+  await expect(rule).toBeVisible({ timeout: T.action });
+  await rule.getByTestId('rule-cond-type-0').selectOption('geosite');
+  await rule.getByTestId('rule-cond-pick-0').click();
+  const picker = page.getByTestId('list-picker');
+  await expect(picker).toBeVisible({ timeout: T.action });
+  await expect(picker.getByTestId('list-picker-loading')).toHaveCount(0, { timeout: T.page });
+
+  // блок расширенных наборов под списком; у набора вне xkeen.json есть «Добавить в XKeen»
+  const block = picker.getByTestId('list-picker-extended');
+  await expect(block).toBeVisible({ timeout: T.action });
+  await expect(block.getByTestId(`list-ext-${target.id}`)).toBeVisible();
+  await block.getByTestId(`list-ext-add-${target.id}`).click();
+
+  // диалог: запись geodata с набором в diff, по умолчанию «дождаться ночного обновления»
+  const modal = page.getByTestId('geodata-add-modal');
+  await expect(modal).toBeVisible({ timeout: T.action });
+  await expect(modal.getByTestId('geodata-add-loading')).toHaveCount(0, { timeout: T.page });
+  const diff = modal.getByTestId('geodata-add-diff');
+  await expect(diff).toContainText(target.file, { timeout: T.action });
+  await expect(diff.locator('.diff-line-added').first()).toBeVisible();
+  await expect(modal.getByTestId('geodata-update-later')).toBeChecked();
+  await expect(modal.getByTestId('geodata-update-now')).not.toBeChecked();
+  // адрес набора в интерфейсе не вводится
+  await expect(modal.locator('input[type="url"], input[type="text"], textarea')).toHaveCount(0);
+
+  // «Отмена»: диалог закрыт, xkeen.json не менялся (запись в сценарии не выполняется)
+  await modal.getByTestId('geodata-add-cancel').click();
+  await expect(modal).toBeHidden({ timeout: T.action });
+  await expect(picker).toBeVisible();
+  expect(await xkeenJsonNow(page, target.id), 'xkeen.json стенда не изменён').toBe(before);
+
+  await picker.getByTestId('list-picker-cancel').click();
+  await expect(picker).toBeHidden({ timeout: T.action });
+  await rule.getByTestId('rule-cancel').click();
+  await expect(rule).toBeHidden({ timeout: T.action });
+
+  await guard.assertClean();
+  await resetDraft(page);
+});
+
 // --- Пресеты ---
 
 interface PresetInfoApi {

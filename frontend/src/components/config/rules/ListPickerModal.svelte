@@ -6,15 +6,24 @@
   import SegmentedControl from '../../SegmentedControl.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import { fetchLists } from '../../../lib/configRouting';
-  import type { CatalogView, ListEntry, ListRef, ServiceView } from '../../../lib/configRouting';
+  import type {
+    CatalogView,
+    ExtendedSet,
+    ListEntry,
+    ListRef,
+    ServiceView
+  } from '../../../lib/configRouting';
   import { reasonOf } from '../routing/routingOwner';
+  import AddGeodataModal from '../routing/AddGeodataModal.svelte';
 
   // Выбор списка для условия geosite или geoip (D-19…D-21): каталог читается с роутера, а не
   // вводится вручную. «Сервисы» — человеческие имена каталога, за каждым «файл · тег»;
   // «Все списки» — каждый тег установленных dat с числом записей и примерами. Диалог лежит
   // поверх диалога правила и возвращает полный набор ссылок условия: убранное здесь
-  // убирается и из условия. Всё, что приходит из dat (файлы, теги, примеры), выводится только
-  // интерполяцией.
+  // убирается и из условия. Под списком — расширенные наборы встроенного каталога с
+  // «Добавить в XKeen» (D-32, D-33): блок доступен и при пустом каталоге, и при ошибке чтения
+  // (тогда показываются наборы последнего успешного чтения). Всё, что приходит из dat (файлы,
+  // теги, примеры) и из каталога наборов, выводится только интерполяцией.
   let { open, kind, selected, onpick, onclose } = $props<{
     open: boolean;
     /** site — условие geosite, ip — условие geoip. */
@@ -41,6 +50,9 @@
   let query = $state('');
   let picked = $state<ListRef[]>([]);
   let limit = $state(PAGE_FIRST);
+  // Наборы последнего успешного чтения каталога: ошибка повторного чтения их не стирает
+  let extended = $state<ExtendedSet[]>([]);
+  let addTarget = $state<ExtendedSet | null>(null);
   // Растёт с каждым чтением: устаревший ответ не затирает более свежий
   let seq = 0;
 
@@ -56,6 +68,7 @@
         services: Array.isArray(data.services) ? data.services : [],
         lists: Array.isArray(data.lists) ? data.lists : []
       };
+      extended = Array.isArray(data.extended) ? data.extended : [];
       // Нет сервисов нужного вида — сразу полный каталог, а не пустой список сервисов
       const hasServices = catalog.services.some((sv: ServiceView) => refsOf(sv).length > 0);
       if (!hasServices) seg = 'all';
@@ -69,6 +82,8 @@
   function reset() {
     seq++;
     catalog = null;
+    extended = [];
+    addTarget = null;
     loading = false;
     failure = '';
   }
@@ -92,6 +107,9 @@
   const pickedKeys = $derived(new Set(picked.map(keyOf)));
   const ready = $derived(!loading && failure === '' && catalog !== null);
   const needle = $derived(query.trim().toLowerCase());
+
+  /** Наборы нужного вида; список диалога и без того ограничен этим видом. */
+  const extendedSets = $derived(extended.filter((e: ExtendedSet) => e.kind === kind));
 
   const catalogLists = $derived((catalog?.lists ?? []).filter((l: ListEntry) => l.kind === kind));
 
@@ -340,6 +358,47 @@
       {/if}
     </div>
 
+    {#if !loading}
+      <section class="lp-ext" aria-labelledby="{uid}-ext" data-testid="list-picker-extended">
+        <h3 class="lp-ext-title" id="{uid}-ext">{$t('cfg.list.extended_title')}</h3>
+        <p class="lp-ext-desc">{$t('cfg.list.extended_desc')}</p>
+        {#if extendedSets.length > 0}
+          <ul class="lp-ext-list">
+            {#each extendedSets as set (set.id)}
+              <li class="lp-ext-card" data-testid="list-ext-{set.id}">
+                <span class="lp-main">
+                  <span class="lp-line">
+                    <span class="lp-name">{set.name}</span>
+                    {#if set.heavy}
+                      <span class="chip chip-warning lp-chip">{$t('cfg.list.heavy')}</span>
+                    {/if}
+                    {#if set.installed}
+                      <span class="chip chip-default lp-chip">{$t('setup.installed')}</span>
+                    {/if}
+                  </span>
+                  <span class="lp-mono lp-dim">{set.file} · {set.size_hint}</span>
+                </span>
+                {#if set.in_xkeen}
+                  <span class="chip chip-success lp-chip" data-testid="list-ext-in-{set.id}">
+                    {$t('cfg.list.in_xkeen')}
+                  </span>
+                {:else}
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm lp-ext-add"
+                    data-testid="list-ext-add-{set.id}"
+                    onclick={() => (addTarget = set)}
+                  >
+                    {$t('cfg.list.add_xkeen')}
+                  </button>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
+
     <div class="lp-footer">
       <Button
         variant="primary"
@@ -355,6 +414,14 @@
     </div>
   </div>
 </Modal>
+
+<AddGeodataModal
+  open={addTarget !== null}
+  set={addTarget}
+  geodata={catalog?.geodata ?? null}
+  onadded={() => void load()}
+  onclose={() => (addTarget = null)}
+/>
 
 <style>
   .lp-body {
@@ -500,6 +567,52 @@
 
   .lp-row-missing {
     border-left: 3px solid var(--danger);
+  }
+
+  .lp-ext {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    min-width: 0;
+  }
+
+  .lp-ext-title {
+    margin: 0;
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .lp-ext-desc {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--fg-secondary);
+  }
+
+  .lp-ext-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .lp-ext-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-2) var(--spacing-4);
+    min-width: 0;
+    padding: var(--spacing-2) var(--spacing-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+  }
+
+  .lp-ext-add {
+    flex-shrink: 0;
   }
 
   .lp-footer {
