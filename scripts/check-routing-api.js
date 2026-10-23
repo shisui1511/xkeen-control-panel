@@ -19,6 +19,10 @@
  * 3. Коды ошибок: каждый код из frontend/src/lib/routingErrorCodes.json встречается
  *    в internal/handlers/routing.go и имеет ключ configlayer.routing.<код> в обоих
  *    бэкенд-словарях.
+ * 4. Поля Xray условий: таблица xrayCondFields (validate.go, бэкенд отвергает
+ *    два условия одного поля, cond_conflict) совпадает с COND_XRAY_FIELD
+ *    (frontend/src/lib/routingView.ts, редактор не даёт второй тип того же поля)
+ *    и покрывает все типы условий модели (Cond* в model.go).
  *
  * Usage: node scripts/check-routing-api.js [--root <каталог>]
  */
@@ -376,10 +380,94 @@ for (const code of codes) {
     errors.push(`internal/i18n/locales/en.json: нет ключа ${key}`);
 }
 
+// --- 4. Поля Xray условий ----------------------------------------------------
+
+const MODEL_GO = "internal/services/routing/model.go";
+const VALIDATE_GO = "internal/services/routing/validate.go";
+const VIEW_TS = "frontend/src/lib/routingView.ts";
+
+// Типы условий модели: имя константы → строковое значение.
+const condConsts = new Map();
+{
+  const block = read(MODEL_GO).match(
+    /\/\/ Типы условий правила[^\n]*\nconst \(\n([\s\S]*?)\n\)/,
+  );
+  if (!block) {
+    errors.push(`${MODEL_GO}: не найден const-блок «Типы условий правила»`);
+  } else {
+    for (const m of block[1].matchAll(/^\s*(Cond\w+)\s*=\s*"([^"]+)"/gm)) {
+      condConsts.set(m[1], m[2]);
+    }
+    if (condConsts.size === 0)
+      errors.push(
+        `${MODEL_GO}: в блоке «Типы условий правила» нет констант Cond*`,
+      );
+  }
+}
+
+// Тип условия → поле Xray из таблицы бэкенда.
+const backFields = new Map();
+{
+  const body = read(VALIDATE_GO).match(
+    /var xrayCondFields = map\[string\]string\{\n([\s\S]*?)\n\}/,
+  );
+  if (!body) {
+    errors.push(`${VALIDATE_GO}: не найдена таблица xrayCondFields`);
+  } else {
+    for (const m of body[1].matchAll(/^\s*(\w+):\s*"([^"]+)",/gm)) {
+      const type = condConsts.get(m[1]);
+      if (type === undefined) {
+        errors.push(
+          `${VALIDATE_GO}: ключ ${m[1]} таблицы xrayCondFields — не тип условия модели`,
+        );
+        continue;
+      }
+      backFields.set(type, m[2]);
+    }
+  }
+}
+
+// Тип условия → поле Xray из таблицы фронтенда.
+const frontFields = new Map();
+{
+  const body = read(VIEW_TS).match(
+    /export const COND_XRAY_FIELD[^=]*=\s*\{([\s\S]*?)\}/,
+  );
+  if (!body) {
+    errors.push(`${VIEW_TS}: не найдена таблица COND_XRAY_FIELD`);
+  } else {
+    for (const m of body[1].matchAll(/(\w+)\s*:\s*'([^']+)'/g)) {
+      frontFields.set(m[1], m[2]);
+    }
+  }
+}
+
+const condTypes = [...condConsts.values()];
+for (const type of condTypes) {
+  if (backFields.size > 0 && !backFields.has(type))
+    errors.push(`${VALIDATE_GO}: в xrayCondFields нет типа условия ${type}`);
+  if (frontFields.size > 0 && !frontFields.has(type))
+    errors.push(`${VIEW_TS}: в COND_XRAY_FIELD нет типа условия ${type}`);
+  if (
+    backFields.has(type) &&
+    frontFields.has(type) &&
+    backFields.get(type) !== frontFields.get(type)
+  )
+    errors.push(
+      `поле Xray типа ${type} различается: xrayCondFields (${VALIDATE_GO}) — ${backFields.get(type)}, COND_XRAY_FIELD (${VIEW_TS}) — ${frontFields.get(type)}`,
+    );
+}
+for (const type of frontFields.keys()) {
+  if (condConsts.size > 0 && !condTypes.includes(type))
+    errors.push(
+      `${VIEW_TS}: ключ ${type} таблицы COND_XRAY_FIELD — не тип условия модели`,
+    );
+}
+
 if (errors.length > 0) {
   for (const e of errors) console.error("❌ " + e);
   process.exit(1);
 }
 console.log(
-  `✅ API маршрутизации согласован: типов контракта ${contract ? Object.keys(contract).length : 0}, маршрутов ${Object.keys(ROUTES).length}, кодов ${codes.length}`,
+  `✅ API маршрутизации согласован: типов контракта ${contract ? Object.keys(contract).length : 0}, маршрутов ${Object.keys(ROUTES).length}, кодов ${codes.length}, типов условий ${condTypes.length}`,
 );
