@@ -14,14 +14,16 @@
     routingStatus,
     loadRouting,
     deleteGroup,
-    routingErrorText,
-    type GroupView
+    fetchImpact,
+    type GroupView,
+    type Impact
   } from '../../../lib/configRouting';
   import { kernelNameOf } from '../../../lib/kernelState';
   import { chosenKernel } from '../../../lib/nodesView';
   import { expandedGroups, toggleGroupExpanded } from '../../../lib/routingView';
   import GroupCard from './GroupCard.svelte';
   import GroupEditModal from './GroupEditModal.svelte';
+  import GroupDeleteModal from './GroupDeleteModal.svelte';
 
   // Представление маршрутизации читается при открытии вкладки; дальше его перечитывают
   // события SSE routing, sources и draft (подписки регистрирует configRouting.ts).
@@ -79,27 +81,52 @@
     window.location.hash = configSubTabHash('nodes');
   }
 
-  // Удаление группы без ссылок; со ссылками сервер отвечает group_referenced, диалог
-  // каскада открывает вкладка в плане 146-21
+  // Удаление группы (D-34): ссылки и последствия по ядрам приходят от сервера (Impact).
+  // Ссылок нет — простое подтверждение; есть — диалог с выбором действия.
+  let deleteOpen = $state(false);
+  let deleting = $state<GroupView | null>(null);
+  let deleteImpact = $state<Impact | null>(null);
+  let removing = $state(false);
+
+  function openDelete(group: GroupView, impact: Impact) {
+    deleting = group;
+    deleteImpact = impact;
+    deleteOpen = true;
+  }
+
   async function removeGroup(group: GroupView) {
-    const ok = await showConfirm({
-      variant: 'danger',
-      title: $t('cfg.groups.del_title', { name: group.name }),
-      message: $t('cfg.groups.del_simple_body'),
-      confirmLabel: $t('cfg.groups.del_confirm'),
-      cancelLabel: $t('cfg.nodes.cancel')
-    });
-    if (!ok) return;
+    if (removing) return;
+    removing = true;
     try {
-      await deleteGroup(group.id);
-      showToast('success', $t('cfg.groups.toast_deleted'));
-    } catch (err) {
-      const e = err as { code?: string; params?: Record<string, string> };
-      if (e.code === 'group_referenced') {
-        showToast('error', routingErrorText($t, e.code, e.params));
-      } else {
-        handleLayerError(err);
+      const impact = await fetchImpact('group', group.id);
+      if (impact.rules.length > 0 || impact.groups.length > 0 || impact.final) {
+        openDelete(group, impact);
+        return;
       }
+      const ok = await showConfirm({
+        variant: 'danger',
+        title: $t('cfg.groups.del_title', { name: group.name }),
+        message: $t('cfg.groups.del_simple_body'),
+        confirmLabel: $t('cfg.groups.del_confirm'),
+        cancelLabel: $t('cfg.nodes.cancel')
+      });
+      if (!ok) return;
+      try {
+        await deleteGroup(group.id, { mode: '' });
+        showToast('success', $t('cfg.groups.toast_deleted'));
+      } catch (err) {
+        // Ссылки появились между запросами: сервер вернул их вместе с ответом
+        const e = err as { code?: string; data?: { impact?: Impact } };
+        if (e.code === 'group_referenced' && e.data?.impact) {
+          openDelete(group, e.data.impact);
+        } else {
+          handleLayerError(err);
+        }
+      }
+    } catch (err) {
+      handleLayerError(err);
+    } finally {
+      removing = false;
     }
   }
 </script>
@@ -182,6 +209,14 @@
   {groups}
   features={$routingView?.features ?? {}}
   onclose={() => (modalOpen = false)}
+/>
+
+<GroupDeleteModal
+  open={deleteOpen}
+  group={deleting}
+  impact={deleteImpact}
+  {groups}
+  onclose={() => (deleteOpen = false)}
 />
 
 <style>
