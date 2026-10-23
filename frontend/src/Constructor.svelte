@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { t } from './i18n';
   import { activeKernelName, showToast } from './stores';
@@ -23,13 +23,15 @@
   let kernel = $state<'xray' | 'mihomo'>('xray');
   let kernelInitialized = $state(false);
 
-  $effect(() => {
-    const active = $activeKernelName;
+  // Первое известное активное ядро выбирается один раз; позже выбор меняет только пользователь
+  function latchActiveKernel(active: 'xray' | 'mihomo' | '' | null | undefined) {
     if (!kernelInitialized && active) {
       kernel = active;
       kernelInitialized = true;
     }
-  });
+  }
+  const unsubscribeActiveKernel = activeKernelName.subscribe(latchActiveKernel);
+  onDestroy(unsubscribeActiveKernel);
 
   // Nested lazy boundary for the kernel-specific constructor (Pitfall 1,
   // RESEARCH.md): XrayRoutingConstructor.svelte (3 473 lines) has no other

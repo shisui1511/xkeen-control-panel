@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick, untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { fade, slide } from 'svelte/transition';
-  import { SvelteSet } from 'svelte/reactivity';
+  import { MediaQuery, SvelteSet } from 'svelte/reactivity';
   import { t, currentLang } from './i18n';
   import {
     showToast,
@@ -151,42 +151,15 @@
   let mihomoFiles = $state<ConfigFileInfo[]>([]);
   // До 768 px панель файлов — выезжающий лист поверх редактора, а не колонка рядом
   const NARROW_QUERY = '(max-width: 768px)';
-  const startsNarrow =
-    typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia(NARROW_QUERY).matches;
-  let isNarrow = $state(startsNarrow);
-  let showSidebar = $state(!startsNarrow);
-
-  $effect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const mql = window.matchMedia(NARROW_QUERY);
-    const onChange = (e: MediaQueryListEvent) => {
-      isNarrow = e.matches;
-      showSidebar = !e.matches;
-    };
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
-  });
+  const narrowQuery = new MediaQuery(NARROW_QUERY);
+  const isNarrow = $derived(narrowQuery.current);
+  // Следует за запросом при каждом его изменении; переключатель пользователя действует между ними
+  let showSidebar = $derived(!narrowQuery.current);
 
   // Сенсорный экран или узкое окно: подсказки клавиатуры в пустом состоянии не нужны
   const TOUCH_LAYOUT_QUERY = '(max-width: 768px), (pointer: coarse)';
-  let isTouchLayout = $state(
-    typeof window !== 'undefined' &&
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia(TOUCH_LAYOUT_QUERY).matches
-  );
-
-  $effect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const mql = window.matchMedia(TOUCH_LAYOUT_QUERY);
-    const onChange = (e: MediaQueryListEvent) => {
-      isTouchLayout = e.matches;
-    };
-    isTouchLayout = mql.matches;
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
-  });
+  const touchLayoutQuery = new MediaQuery(TOUCH_LAYOUT_QUERY);
+  const isTouchLayout = $derived(touchLayoutQuery.current);
 
   let isMac = $derived(
     typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
