@@ -23,6 +23,9 @@ type KernelApplier interface {
 type MihomoControl interface {
 	ReloadConfig(configPath string) error
 	ProviderCount(ctx context.Context, providerType, name string) (int, error)
+	// UpdateProvider обновляет один провайдер точечно (PUT /providers/{тип}/{имя}),
+	// не перечитывая профиль целиком. providerType — "proxies" или "rules".
+	UpdateProvider(ctx context.Context, providerType, name string) error
 	// HasController — настроен ли у Mihomo external-controller. Без него Clash API
 	// нет: ни горячей перезагрузки, ни сверки провайдеров, ядро подтверждается
 	// только по процессу.
@@ -97,6 +100,10 @@ const (
 	NoteRestartNotConfigured = "restart_not_configured"
 	// NoteNoRuntimeEffect — файлы записаны, но ядро их пока не использует.
 	NoteNoRuntimeEffect = "no_runtime_effect"
+	// NoteProvidersUpdated — Mihomo обновил только изменившиеся провайдеры точечно
+	// (PUT /providers/...), профиль не перечитывался. Код несёт RestartView у
+	// исхода hot_reloaded; перезагрузка профиля целиком (PUT /configs) кода не имеет.
+	NoteProvidersUpdated = "providers_updated"
 )
 
 // errInterrupted — запуск прерван отменой контекста (остановка панели). Откат и
@@ -256,8 +263,13 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 	outcome := RestartOutcomeRestarted
 	var hotErr error
 	if kernel == KernelMihomo && p.d.Mihomo != nil && p.d.Mihomo.HasController() {
-		if hotErr = p.hotReloadMihomo(ctx, plan); hotErr == nil {
-			return RestartView{Kernel: kernel, Outcome: RestartOutcomeHotReloaded}, nil
+		var targeted bool
+		if targeted, hotErr = p.hotReloadMihomo(ctx, plan, set); hotErr == nil {
+			view := RestartView{Kernel: kernel, Outcome: RestartOutcomeHotReloaded}
+			if targeted {
+				view.NoteCode = NoteProvidersUpdated
+			}
+			return view, nil
 		}
 		// Остановка панели посреди горячей перезагрузки: полный рестарт не нужен.
 		if err := interrupted(ctx); err != nil {
@@ -292,26 +304,103 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 	return RestartView{Kernel: kernel, Outcome: outcome}, nil
 }
 
-// hotReloadMihomo перечитывает конфиг Mihomo без смены PID (PUT /configs?force=true),
-// сверяет провайдеры с Expect и подтверждает, что процесс остался прежним.
-func (p *Pipeline) hotReloadMihomo(ctx context.Context, plan Plan) error {
+// hotReloadMihomo применяет изменения Mihomo без смены PID, сверяет провайдеры с
+// Expect и подтверждает, что процесс остался прежним. Путь выбирается по плану
+// (D-28): если изменились только существующие файлы провайдеров с Expect, каждый
+// обновляется точечно (PUT /providers/{тип}/{имя}); иначе, или если точечное
+// обновление не удалось, профиль перечитывается целиком (PUT /configs?force=true,
+// одна попытка). Результат targeted — прошло ли применение точечным путём.
+func (p *Pipeline) hotReloadMihomo(ctx context.Context, plan Plan, set *BackupSet) (targeted bool, err error) {
 	prev := 0
 	if st, ok := p.processState(KernelMihomo); ok {
 		prev = st.PID
 	}
-	if err := p.d.Mihomo.ReloadConfig(filepath.Join(p.d.Roots.Mihomo, "config.yaml")); err != nil {
-		return err
+	if exps := providerTargets(plan, set); len(exps) > 0 {
+		targeted = p.updateProviders(ctx, exps) == nil
+		if !targeted {
+			if err := interrupted(ctx); err != nil {
+				return false, err
+			}
+		}
 	}
+	if !targeted {
+		if err := p.d.Mihomo.ReloadConfig(filepath.Join(p.d.Roots.Mihomo, "config.yaml")); err != nil {
+			return false, err
+		}
+	}
+	// Точечное обновление отвечает 204 и при пустом наборе: считаем применённым
+	// только после сверки числа узлов и правил с Expect (143-FINDINGS Q3).
 	if err := p.checkExpect(ctx, plan, false); err != nil {
-		return err
+		return false, err
 	}
 	if err := p.confirmRunning(ctx, KernelMihomo, prev); err != nil {
-		return err
+		return false, err
 	}
 	if p.d.MihomoAPIReady != nil && !p.d.MihomoAPIReady() {
-		return errors.New("API Mihomo не отвечает после перезагрузки")
+		return false, errors.New("API Mihomo не отвечает после перезагрузки")
+	}
+	return targeted, nil
+}
+
+// providerUpdateTimeout — предел одного точечного обновления провайдера.
+const providerUpdateTimeout = 30 * time.Second
+
+// updateProviders обновляет провайдеры точечно, прекращая на первой ошибке.
+func (p *Pipeline) updateProviders(ctx context.Context, exps []*Expectation) error {
+	for _, exp := range exps {
+		uctx, cancel := context.WithTimeout(ctx, providerUpdateTimeout)
+		err := p.d.Mihomo.UpdateProvider(uctx, exp.ProviderType, exp.ProviderName)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("провайдер %s: %w", exp.ProviderName, err)
+		}
 	}
 	return nil
+}
+
+// providerTargets возвращает Expect провайдеров для точечного обновления или nil,
+// если путь не подходит. Подходит план, где среди действий над Mihomo (записи без
+// Inert) есть только перезапись файлов провайдеров с Expect, которые уже лежали
+// на диске до записи (по набору копий), и нет ни профиля, ни удалений, ни новых
+// файлов, ни сирот ядра. Inert-файлы ядро не читает и в выборе пути не участвуют.
+func providerTargets(plan Plan, set *BackupSet) []*Expectation {
+	if set == nil {
+		return nil
+	}
+	for _, o := range plan.Orphans {
+		if o.Kernel == KernelMihomo {
+			return nil
+		}
+	}
+	existed := make(map[string]bool, len(set.Meta.Files))
+	for _, m := range set.Meta.Files {
+		if m.Existed && m.Reason == ReasonOverwrite {
+			existed[m.Key] = true
+		}
+	}
+	var out []*Expectation
+	for _, fp := range plan.Files {
+		if fp.Kernel != KernelMihomo || fp.Inert {
+			continue
+		}
+		switch fp.Action {
+		case ActionWrite:
+		case ActionDelete:
+			return nil
+		default:
+			continue
+		}
+		switch fp.Kind {
+		case KindMihomoProxyProvider, KindMihomoRuleProvider, KindMihomoRuleProviderText:
+		default:
+			return nil
+		}
+		if fp.Expect == nil || fp.RemoveObsolete || !existed[fp.Key] {
+			return nil
+		}
+		out = append(out, fp.Expect)
+	}
+	return out
 }
 
 // confirmMihomoAfterRestart ждёт готовности API Mihomo после рестарта и сверяет

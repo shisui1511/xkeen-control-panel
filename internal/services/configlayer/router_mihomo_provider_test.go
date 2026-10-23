@@ -4,6 +4,8 @@ package configlayer
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 // Проверка файлов провайдеров Mihomo на устройстве: настоящие хранилище, конвейер
@@ -198,4 +202,162 @@ func TestRouterTextRuleProvider(t *testing.T) {
 			t.Fatalf("mihomo -t отверг профиль со ссылкой на текстовый провайдер: %v: %s", err, strings.TrimSpace(string(out)))
 		}
 	})
+}
+
+// rtMhProviderFile — файл proxy-provider из socks-узлов на loopback; номера портов
+// произвольные: узлы только перечисляются, трафик через них не идёт.
+func rtMhProviderFile(ports ...string) string {
+	var b strings.Builder
+	b.WriteString("proxies:\n")
+	for i, port := range ports {
+		b.WriteString("  - {name: node-" + string(rune('1'+i)) + ", type: socks5, server: 127.0.0.1, port: " + port + "}\n")
+	}
+	return b.String()
+}
+
+// rtMhStartCore запускает отдельный процесс mihomo во временном каталоге и ждёт,
+// пока Clash API ответит по unix-сокету. Процесс останавливается в t.Cleanup.
+func rtMhStartCore(t *testing.T, dir string, svc *services.MihomoService, provider string) {
+	t.Helper()
+	logPath := filepath.Join(dir, "core.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(rtMhBin, "-d", dir, "-f", filepath.Join(dir, "config.yaml"))
+	cmd.Stdout, cmd.Stderr = logFile, logFile
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		t.Fatalf("процесс mihomo не запустился: %v", err)
+	}
+	exited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-exited:
+		default:
+			_ = cmd.Process.Kill()
+			select {
+			case <-exited:
+			case <-time.After(20 * time.Second):
+			}
+		}
+		_ = logFile.Close()
+	})
+	tail := func() string {
+		data, _ := os.ReadFile(logPath)
+		if len(data) > 2000 {
+			data = data[len(data)-2000:]
+		}
+		return string(data)
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, err := svc.ProviderCount(ctx, "proxies", provider)
+		cancel()
+		if err == nil {
+			return
+		}
+		select {
+		case <-exited:
+			t.Fatalf("mihomo завершился до готовности API: %s", tail())
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Clash API не ответил за 60 с: %v: %s", err, tail())
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
+func TestRouterMihomoProviderUpdateTargeted(t *testing.T) {
+	if _, err := os.Stat(rtMhBin); err != nil {
+		t.Skipf("Mihomo не установлен на устройстве: %v", err)
+	}
+	dir := rtLiveDir(t)
+	mdir := filepath.Join(dir, "core")
+	if err := os.MkdirAll(filepath.Join(mdir, "proxy_providers"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const (
+		provider = "xcp-ls-test"
+		group    = "группа тест"
+	)
+	providerPath := filepath.Join(mdir, "proxy_providers", provider+".yaml")
+	if err := os.WriteFile(providerPath, []byte(rtMhProviderFile("19001", "19002")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Контроллер описан до proxy-providers: так его читает ParseControllerConfig.
+	profile := "mode: rule\n" +
+		"log-level: warning\n" +
+		"external-controller-unix: " + filepath.Join(mdir, "ctl.sock") + "\n" +
+		"proxy-providers:\n" +
+		"  " + provider + ":\n" +
+		"    type: file\n" +
+		"    path: ./proxy_providers/" + provider + ".yaml\n" +
+		"proxy-groups:\n" +
+		"  - name: " + group + "\n" +
+		"    type: select\n" +
+		"    use: [" + provider + "]\n" +
+		"rules:\n" +
+		"  - MATCH," + group + "\n"
+	if err := os.WriteFile(filepath.Join(mdir, "config.yaml"), []byte(profile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := services.NewMihomoService(rtMhBin, "", mdir)
+	rtMhStartCore(t, mdir, svc, provider)
+	ctx := context.Background()
+
+	count := func() int {
+		t.Helper()
+		n, err := svc.ProviderCount(ctx, "proxies", provider)
+		if err != nil {
+			t.Fatalf("ProviderCount: %v", err)
+		}
+		return n
+	}
+	if n := count(); n != 2 {
+		t.Fatalf("узлов в провайдере при старте: %d, нужно 2", n)
+	}
+
+	// Файл переписан на три узла: до точечного обновления ядро видит прежние два.
+	if err := os.WriteFile(providerPath, []byte(rtMhProviderFile("19001", "19002", "9")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.UpdateProvider(ctx, "proxies", provider); err != nil {
+		t.Fatalf("UpdateProvider: %v", err)
+	}
+	if n := count(); n != 3 {
+		t.Errorf("узлов после точечного обновления: %d, нужно 3", n)
+	}
+
+	now, err := svc.ProxyNow(ctx, group)
+	if err != nil || now != "node-1" {
+		t.Errorf("ProxyNow при старте: %q, %v (ожидался первый участник)", now, err)
+	}
+	if err := svc.SelectProxy(ctx, group, "node-2"); err != nil {
+		t.Fatalf("SelectProxy: %v", err)
+	}
+	if now, err := svc.ProxyNow(ctx, group); err != nil || now != "node-2" {
+		t.Errorf("ProxyNow после выбора: %q, %v (ожидался второй участник)", now, err)
+	}
+
+	// Узел на закрытом порту не отвечает: задержка не измеряется.
+	if d, err := svc.ProxyDelay(ctx, "node-3", "http://127.0.0.1:9/", 3*time.Second); err == nil {
+		t.Errorf("ProxyDelay мёртвого узла вернул %d мс без ошибки", d)
+	}
+
+	// Несуществующий провайдер: ошибка с кодом ответа.
+	err = svc.UpdateProvider(ctx, "proxies", "xcp-no-such-provider")
+	var se *services.ClashStatusError
+	if !errors.As(err, &se) || se.Status != http.StatusNotFound {
+		t.Errorf("UpdateProvider несуществующего: %v (ожидался код 404)", err)
+	}
+	if err := svc.UpdateProvider(ctx, "unknown", provider); err == nil {
+		t.Error("UpdateProvider принял неизвестный тип провайдера")
+	}
 }
