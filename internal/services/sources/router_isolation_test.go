@@ -233,7 +233,7 @@ func TestRouterIsolationGeneratorPathsTable(t *testing.T) {
 		if err != nil || xf == nil {
 			t.Fatalf("файл Xray для %s: %v", id, err)
 		}
-		mf, err := mihomoFile(id, kernelList(kernelMihomo, id, "", list, caps))
+		mf, err := mihomoFile(id, kernelList(kernelMihomo, id, "", list, caps), false)
 		if err != nil || mf == nil {
 			t.Fatalf("файл Mihomo для %s: %v", id, err)
 		}
