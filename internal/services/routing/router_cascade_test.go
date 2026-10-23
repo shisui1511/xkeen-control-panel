@@ -85,7 +85,7 @@ func (e *rtEnv) rtcSelection(t *testing.T) map[string]string {
 // правил и «Остального», убирает группу из состава ручных групп и чистит выбор
 // в Live; после «Применить» тега удалённой группы в файлах Xray нет.
 func TestRouterCascadeGroup(t *testing.T) {
-	e := rtNewEnv(t, rtWithKernels(rtXrayOnly))
+	e := rtNewEnv(t, rtWithKernels(rtXrayOnly), rtWithSelection())
 	e.addMyLinks(t, "vless_ws", "trojan_grpc", "ss_plain")
 
 	cfg := e.groups(t)
