@@ -151,6 +151,8 @@ type Layer struct {
 	checksKey   checksKey
 	checksVal   []BuildIssue
 	checksOK    bool
+	// afterApply — хуки после успешного применения (AddAfterApply), до Start.
+	afterApply []func(ctx context.Context, info AfterApplyInfo)
 }
 
 // checksKey — от чего зависит итог проверок черновика: ревизия черновика, хэш
@@ -751,16 +753,70 @@ func (l *Layer) RegisterGenerator(g Generator) error {
 	return nil
 }
 
-// SetLiveCommitter задаёт хук фиксации живых данных конвейера (см.
-// PipelineDeps.CommitLive). Допустим только до Start.
-func (l *Layer) SetLiveCommitter(fn func(st *State, req ApplyRequest, used Input) error) error {
+// AddLiveCommitter добавляет хук фиксации живых данных конвейера (см.
+// PipelineDeps.CommitLive) в конец списка: хуки вызываются по порядку
+// регистрации в той же записи состояния, что и манифест. Допустим только до
+// Start; nil отклоняется.
+func (l *Layer) AddLiveCommitter(fn func(st *State, req ApplyRequest, used Input) error) error {
+	if fn == nil {
+		return errors.New("configlayer: хук фиксации живых данных не задан")
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.started {
 		return ErrAlreadyStarted
 	}
-	l.pipeline.setCommitLive(fn)
+	l.pipeline.addCommitLive(fn)
 	return nil
+}
+
+// AfterApplyInfo — итог успешного применения для хуков AddAfterApply: что
+// запустило конвейер, из какого состояния собраны файлы, итог и перезапуски.
+type AfterApplyInfo struct {
+	Trigger Trigger
+	Source  SourceKind
+	Result  ResultView
+	Restart []RestartView
+}
+
+// AddAfterApply добавляет хук, который слой вызывает асинхронно после каждого
+// успешного применения (пользовательского и фонового), уже после снятия замка
+// применения: хук может сам вызвать RunLive. Неуспешное применение хуки не
+// вызывает. Допустим только до Start; nil отклоняется.
+func (l *Layer) AddAfterApply(fn func(ctx context.Context, info AfterApplyInfo)) error {
+	if fn == nil {
+		return errors.New("configlayer: хук после применения не задан")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	l.afterApply = append(l.afterApply, fn)
+	return nil
+}
+
+// fireAfterApply вызывает хуки после успешного применения, каждый в своей
+// горутине слоя. Вызывается после снятия замка применения и afterRun.
+func (l *Layer) fireAfterApply(req ApplyRequest, view ApplyView) {
+	if view.Result == nil || !view.Result.OK {
+		return
+	}
+	l.mu.Lock()
+	hooks := append([]func(context.Context, AfterApplyInfo){}, l.afterApply...)
+	l.mu.Unlock()
+	if len(hooks) == 0 {
+		return
+	}
+	info := AfterApplyInfo{
+		Trigger: req.Trigger,
+		Source:  req.Source,
+		Result:  *view.Result,
+		Restart: append([]RestartView(nil), view.Restart...),
+	}
+	for _, fn := range hooks {
+		l.spawn(func() { fn(l.ctx, info) })
+	}
 }
 
 // RegisterChecker добавляет проверку до записи в реестр. Допустима только до
@@ -889,9 +945,11 @@ func (l *Layer) StartApply(user bool) error {
 	}
 	if !l.spawn(func() {
 		defer release()
-		l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft}
+		view := l.pipeline.Run(l.ctx, req)
 		release()
 		l.afterRun()
+		l.fireAfterApply(req, view)
 	}) {
 		release()
 		return ErrStopped
@@ -909,16 +967,33 @@ func (l *Layer) afterRun() {
 	l.checkNow(true)
 }
 
-// RunSourceRefresh — фоновое обновление источника (FND-06, U-04): тот же конвейер
-// (сборка, проверка обоих ядер, запись, перезапуск только запущенного, коммит), но
-// из применённого состояния с оверлеем живых данных. Черновик и его ревизия не
-// меняются; живые данные фиксирует хук SetLiveCommitter в той же записи, что и
-// манифест. Идущее «Применить» ждёт (параллельного применения нет). Нерешённый
-// дрейф — ErrDriftBlocked: файлы и ядро не тронуты. Вызов синхронный: горутину
-// запускает вызывающий сервис со своим wg.
-func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyView, error) {
+// LiveRun — параметры фонового запуска конвейера в обход черновика (RunLive).
+type LiveRun struct {
+	// Trigger — что запустило конвейер (TriggerSourceRefresh, TriggerSelect,
+	// TriggerDatRefresh); попадает в шаги apply_step и в хуки.
+	Trigger Trigger
+	// Overlay — ключи живых данных, которые заменяют одноимённые во входе
+	// генераторов этого запуска (кандидат); сами живые данные фиксируют хуки
+	// AddLiveCommitter.
+	Overlay Sections
+	// Kernel ограничивает запуск одним ядром; пусто — все установленные.
+	Kernel string
+}
+
+// RunLive — запуск конвейера из применённого состояния с оверлеем живых данных
+// (FND-06, U-04): сборка, проверки до записи, проверка обоих ядер, запись,
+// перезапуск только запущенного, коммит. Черновик и его ревизия не меняются; живые
+// данные фиксируют хуки AddLiveCommitter в той же записи, что и манифест. Идущее
+// «Применить» ждёт (параллельного применения нет). Нерешённый дрейф —
+// ErrDriftBlocked: файлы и ядро не тронуты. Вызов синхронный: горутину запускает
+// вызывающий сервис со своим wg. После успешного запуска слой зовёт хуки
+// AddAfterApply уже после снятия замка применения.
+func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	if !l.Enabled() {
 		return ApplyView{}, ErrDisabled
+	}
+	if run.Trigger == "" {
+		return ApplyView{}, errors.New("configlayer: не задан триггер запуска")
 	}
 	l.mu.Lock()
 	stopped := l.stopped
@@ -934,13 +1009,21 @@ func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyVi
 		return ApplyView{}, err
 	}
 	defer release()
-	view := l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerSourceRefresh, Source: SourceApplied, LiveOverlay: overlay})
+	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel}
+	view := l.pipeline.Run(l.ctx, req)
 	release()
 	l.afterRun()
+	l.fireAfterApply(req, view)
 	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
 		return view, ErrDriftBlocked
 	}
 	return view, nil
+}
+
+// RunSourceRefresh — фоновое обновление источника: RunLive с триггером
+// TriggerSourceRefresh (его зовёт сервис источников).
+func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyView, error) {
+	return l.RunLive(ctx, LiveRun{Trigger: TriggerSourceRefresh, Overlay: overlay})
 }
 
 // Rebuild — «Пересобрать»: полный конвейер, ограниченный названными файлами.
@@ -984,9 +1067,11 @@ func (l *Layer) Rebuild(keys []string, all bool) error {
 	}
 	if !l.spawn(func() {
 		defer release()
-		l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerRebuild, Source: SourceApplied, Only: only})
+		req := ApplyRequest{Trigger: TriggerRebuild, Source: SourceApplied, Only: only}
+		view := l.pipeline.Run(l.ctx, req)
 		release()
 		l.afterRun()
+		l.fireAfterApply(req, view)
 	}) {
 		release()
 		return ErrStopped
@@ -1100,11 +1185,13 @@ func (l *Layer) OnKernelInstalled(kernel string) {
 			return
 		}
 		defer release()
-		view := l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerKernelInstalled, Source: SourceApplied, Kernel: kernel})
+		req := ApplyRequest{Trigger: TriggerKernelInstalled, Source: SourceApplied, Kernel: kernel}
+		view := l.pipeline.Run(l.ctx, req)
 		release()
 		l.invalidateVersions()
 		l.noteBuildResult(kernel, view)
 		l.afterRun()
+		l.fireAfterApply(req, view)
 	})
 }
 

@@ -159,7 +159,7 @@ function lineOf(sub) {
 const need = {
   new: lineOf('sources.New('),
   register: lineOf('RegisterGenerator('),
-  committer: lineOf('SetLiveCommitter('),
+  committer: lineOf('AddLiveCommitter('),
   drift: lineOf('OnDriftResolved('),
   layerStart: lineOf('configLayer.Start()'),
   svcStart: lineOf('sourcesSvc.Start()'),
@@ -175,7 +175,7 @@ if (Object.values(need).every((v) => v > 0)) {
   };
   order('new', 'register', 'sources.New( должен идти до RegisterGenerator(');
   order('register', 'layerStart', 'RegisterGenerator( должен идти до configLayer.Start()');
-  order('committer', 'layerStart', 'SetLiveCommitter( должен идти до configLayer.Start()');
+  order('committer', 'layerStart', 'AddLiveCommitter( должен идти до configLayer.Start()');
   order('drift', 'layerStart', 'OnDriftResolved( должен идти до configLayer.Start()');
   order('layerStart', 'svcStart', 'sourcesSvc.Start() должен идти после configLayer.Start()');
   order('layerStop', 'svcStop', 'шаг остановки sources должен идти после шага config-layer (defer: сервис останавливается раньше слоя)');
