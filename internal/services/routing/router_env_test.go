@@ -56,6 +56,9 @@ type rtEnv struct {
 type rtOptions struct {
 	installed configlayer.InstalledKernels
 	deps      []func(*Deps)
+	// selection — хуки выбора участника (CommitLive и AfterApply) зарегистрированы
+	// в слое, как это делает cmd/xcp/main.go.
+	selection bool
 }
 
 // rtOption меняет настройки окружения rtNewEnv.
@@ -66,6 +69,12 @@ type rtOption func(*rtOptions)
 // пользуются сценарии версий, списков и выбора участника.
 func rtWithDeps(f func(*Deps)) rtOption {
 	return func(o *rtOptions) { o.deps = append(o.deps, f) }
+}
+
+// rtWithSelection регистрирует в слое хуки выбора участника: фиксацию живых данных
+// и сверку после применения (сценарии 146-14).
+func rtWithSelection() rtOption {
+	return func(o *rtOptions) { o.selection = true }
 }
 
 // rtWithKernels задаёт установленные ядра окружения (по умолчанию оба).
@@ -184,6 +193,14 @@ func rtNewEnv(t *testing.T, opts ...rtOption) *rtEnv {
 	}
 	if err := layer.RegisterChecker(svc.Checker()); err != nil {
 		t.Fatalf("RegisterChecker: %v", err)
+	}
+	if o.selection {
+		if err := layer.AddLiveCommitter(svc.CommitLive); err != nil {
+			t.Fatalf("AddLiveCommitter (выбор): %v", err)
+		}
+		if err := layer.AddAfterApply(svc.AfterApply); err != nil {
+			t.Fatalf("AddAfterApply: %v", err)
+		}
 	}
 	layer.Start()
 	svc.Start()
