@@ -956,8 +956,21 @@ func runXKeenUpdateGeo(ctx context.Context, console *services.ConsoleService) er
 
 // pingNodeTLS проверяет доступность сервера узла по TLS (рукопожатие по адресу,
 // порту и SNI узла). Проверка сертификата не нужна: важна достижимость сервера.
+// Узел без TLS и Reality (Shadowsocks, VMess и подобные) TLS не отвечает никогда,
+// поэтому для него проверяется TCP-соединение с адресом и портом. Протоколы
+// поверх UDP (hysteria2, tuic, wireguard) проверяются, как и раньше, по TLS.
 // Срок ожидания задаёт ctx; сама проверка ограничена пятью секундами.
 func pingNodeTLS(ctx context.Context, n nodes.Node) error {
+	if n.TLS == nil && n.Reality == nil && !nodeOverUDP(n.Protocol) {
+		dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		var d net.Dialer
+		conn, err := d.DialContext(dctx, "tcp", net.JoinHostPort(n.Host, strconv.Itoa(n.Port)))
+		if err != nil {
+			return err
+		}
+		return conn.Close()
+	}
 	sni := ""
 	if n.TLS != nil {
 		sni = n.TLS.SNI
@@ -984,6 +997,16 @@ func pingNodeTLS(ctx context.Context, n nodes.Node) error {
 		}
 		return nil
 	}
+}
+
+// nodeOverUDP сообщает, что протокол узла работает поверх UDP: TCP-соединение с
+// его портом ничего не доказывает.
+func nodeOverUDP(protocol string) bool {
+	switch protocol {
+	case "hysteria2", "hysteria", "tuic", "wireguard":
+		return true
+	}
+	return false
 }
 
 // installedKernelBinary — путь бинарника ядра, если он есть на диске; иначе
