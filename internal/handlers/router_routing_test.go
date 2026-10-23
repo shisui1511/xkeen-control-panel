@@ -134,6 +134,14 @@ func rtRtFindGroup(view map[string]any, name string) map[string]any {
 	return nil
 }
 
+// rtRtExpect требует от ответа статус и код ошибки.
+func (e *rtSrc) rtRtExpect(label string, r rtSrcResp, status int, code string) {
+	e.t.Helper()
+	if r.Status != status || r.Code != code {
+		e.t.Errorf("%s: %d %q, ожидалось %d %q", label, r.Status, r.Code, status, code)
+	}
+}
+
 // rtRtApplyOK запускает «Применить», ждёт итог и требует успех.
 func (e *rtSrc) rtRtApplyOK(label string) {
 	e.t.Helper()
@@ -340,6 +348,160 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 	if rtRtFindGroup(e.rtRtView(), "Проверка") == nil {
 		t.Error("представление: сохранённой группы нет")
 	}
+	gid, _ := saved["id"].(string)
+	manual := func(name string) map[string]any {
+		return map[string]any{
+			"name": name, "mode": "manual",
+			"sources": map[string]any{"all": true},
+			"members": []map[string]string{{"kind": "direct"}},
+		}
+	}
+
+	// Коды ошибок записи группы.
+	e.rtRtExpect("groups/save: то же имя", e.call(http.MethodPost, rtRoutingBase+"/groups/save",
+		map[string]any{"revision": e.rtRtRevision(), "group": manual("проверка")}), http.StatusConflict, "group_name_taken")
+	bad := e.call(http.MethodPost, rtRoutingBase+"/groups/save", map[string]any{"revision": e.rtRtRevision(), "group": manual("")})
+	e.rtRtExpect("groups/save: пустое имя", bad, http.StatusBadRequest, "invalid_input")
+	if bad.Params["field"] != "name" || bad.Params["reason"] != "name_empty" {
+		t.Errorf("groups/save: пустое имя: params %v, ожидались field=name reason=name_empty", bad.Params)
+	}
+	e.rtRtExpect("groups/save: старая ревизия", e.call(http.MethodPost, rtRoutingBase+"/groups/save",
+		map[string]any{"revision": 0, "group": manual("Другая")}), http.StatusConflict, "draft_conflict")
+	ghost := manual("Другая")
+	ghost["id"] = "ffffffff"
+	e.rtRtExpect("groups/save: неизвестная группа", e.call(http.MethodPost, rtRoutingBase+"/groups/save",
+		map[string]any{"revision": e.rtRtRevision(), "group": ghost}), http.StatusNotFound, "group_not_found")
+
+	// groups/preview: ответ по установленным ядрам, группа не сохраняется.
+	gp := e.call(http.MethodPost, rtRoutingBase+"/groups/preview", map[string]any{"group": map[string]any{
+		"name": "Предпросмотр", "mode": "auto", "sources": map[string]any{"all": true},
+	}})
+	if gp.Status != http.StatusOK {
+		t.Errorf("groups/preview: %d %s", gp.Status, gp.Code)
+	} else {
+		for _, k := range []string{"xray", "mihomo"} {
+			if _, ok := gp.object(t)[k]; !ok {
+				t.Errorf("groups/preview: нет ключа %s", k)
+			}
+		}
+	}
+	if rtRtFindGroup(e.rtRtView(), "Предпросмотр") != nil {
+		t.Error("groups/preview сохранил группу")
+	}
+
+	// Правила: сохранить, выключить, включить, переставить, удалить; коды ошибок.
+	ruleBody := func(domain string) map[string]any {
+		return map[string]any{
+			"enabled": true,
+			"conds":   []map[string]any{{"type": "domain", "values": []string{domain}}},
+			"target":  map[string]string{"kind": "group", "id": gid},
+		}
+	}
+	rs := e.call(http.MethodPost, rtRoutingBase+"/rules/save", map[string]any{"revision": e.rtRtRevision(), "rule": ruleBody("example.com")})
+	if rs.Status != http.StatusOK {
+		t.Fatalf("rules/save: %d %s", rs.Status, rs.Code)
+	}
+	savedRule, _ := rs.object(t)["rule"].(map[string]any)
+	rid, _ := savedRule["id"].(string)
+	if len(rid) != 8 {
+		t.Fatalf("rules/save: идентификатор правила длиной %d, ожидалось 8", len(rid))
+	}
+	rs2 := e.call(http.MethodPost, rtRoutingBase+"/rules/save", map[string]any{"revision": e.rtRtRevision(), "rule": ruleBody("example.org")})
+	if rs2.Status != http.StatusOK {
+		t.Fatalf("rules/save (второе): %d %s", rs2.Status, rs2.Code)
+	}
+	secondRule, _ := rs2.object(t)["rule"].(map[string]any)
+	rid2, _ := secondRule["id"].(string)
+	for _, enabled := range []bool{false, true} {
+		r := e.call(http.MethodPost, rtRoutingBase+"/rules/enable", map[string]any{"revision": e.rtRtRevision(), "id": rid, "enabled": enabled})
+		if r.Status != http.StatusOK {
+			t.Errorf("rules/enable enabled=%v: %d %s", enabled, r.Status, r.Code)
+		}
+	}
+	if r := e.call(http.MethodPost, rtRoutingBase+"/rules/move", map[string]any{"revision": e.rtRtRevision(), "id": rid2, "to": 0}); r.Status != http.StatusOK {
+		t.Errorf("rules/move: %d %s", r.Status, r.Code)
+	}
+	if rules, _ := e.rtRtView()["rules"].([]any); len(rules) < 2 || rules[0].(map[string]any)["id"] != rid2 {
+		t.Error("rules/move: второе правило не стало первым")
+	}
+	mv := e.call(http.MethodPost, rtRoutingBase+"/rules/move", map[string]any{"revision": e.rtRtRevision(), "id": rid, "to": 99})
+	e.rtRtExpect("rules/move: вне диапазона", mv, http.StatusBadRequest, "invalid_input")
+	if mv.Params["reason"] != "out_of_range" {
+		t.Errorf("rules/move: вне диапазона: reason %q", mv.Params["reason"])
+	}
+	e.rtRtExpect("rules/save: без условий", e.call(http.MethodPost, rtRoutingBase+"/rules/save", map[string]any{
+		"revision": e.rtRtRevision(),
+		"rule":     map[string]any{"enabled": true, "conds": []any{}, "target": map[string]string{"kind": "direct"}},
+	}), http.StatusBadRequest, "invalid_input")
+	e.rtRtExpect("rules/delete: неизвестное правило", e.call(http.MethodPost, rtRoutingBase+"/rules/delete",
+		map[string]any{"revision": e.rtRtRevision(), "id": "ffffffff"}), http.StatusNotFound, "rule_not_found")
+	e.rtRtExpect("rules/enable: неизвестное правило", e.call(http.MethodPost, rtRoutingBase+"/rules/enable",
+		map[string]any{"revision": e.rtRtRevision(), "id": "ffffffff", "enabled": true}), http.StatusNotFound, "rule_not_found")
+	if r := e.call(http.MethodPost, rtRoutingBase+"/rules/delete", map[string]any{"revision": e.rtRtRevision(), "id": rid2}); r.Status != http.StatusOK {
+		t.Errorf("rules/delete: %d %s", r.Status, r.Code)
+	}
+
+	// probe: параметры из представления сохраняются, недопустимые отклоняются.
+	probe, _ := e.rtRtView()["probe"].(map[string]any)
+	if r := e.call(http.MethodPost, rtRoutingBase+"/probe", map[string]any{"revision": e.rtRtRevision(), "probe": probe}); r.Status != http.StatusOK {
+		t.Errorf("probe: %d %s", r.Status, r.Code)
+	}
+	badProbe := map[string]any{"url": "ftp://x", "interval_s": 30, "timeout_s": 5}
+	e.rtRtExpect("probe: недопустимый адрес", e.call(http.MethodPost, rtRoutingBase+"/probe",
+		map[string]any{"revision": e.rtRtRevision(), "probe": badProbe}), http.StatusBadRequest, "invalid_input")
+
+	// impact и каскад удаления группы: на группу ссылаются правило и «Остальное».
+	imp := e.call(http.MethodPost, rtRoutingBase+"/impact", map[string]string{"kind": "group", "id": gid})
+	if imp.Status != http.StatusOK {
+		t.Errorf("impact: %d %s", imp.Status, imp.Code)
+	} else if refs, _ := imp.object(t)["rules"].([]any); len(refs) != 1 {
+		t.Errorf("impact: правил с целью на группу %d, ожидалось 1", len(refs))
+	}
+	e.rtRtExpect("impact: неизвестный вид", e.call(http.MethodPost, rtRoutingBase+"/impact",
+		map[string]string{"kind": "bogus", "id": gid}), http.StatusBadRequest, "invalid_input")
+	e.rtRtExpect("impact: неизвестное правило", e.call(http.MethodPost, rtRoutingBase+"/impact",
+		map[string]string{"kind": "rule", "id": "ffffffff"}), http.StatusNotFound, "rule_not_found")
+	e.rtRtExpect("impact: неизвестный источник", e.call(http.MethodPost, rtRoutingBase+"/impact",
+		map[string]string{"kind": "source", "id": "ffffffff"}), http.StatusNotFound, "source_not_found")
+	if r := e.call(http.MethodPost, rtRoutingBase+"/final", map[string]any{"revision": e.rtRtRevision(), "target": map[string]string{"kind": "group", "id": gid}}); r.Status != http.StatusOK {
+		t.Fatalf("final: %d %s", r.Status, r.Code)
+	}
+	ref := e.call(http.MethodPost, rtRoutingBase+"/groups/delete", map[string]any{"revision": e.rtRtRevision(), "id": gid, "cascade": map[string]any{"mode": ""}})
+	e.rtRtExpect("groups/delete: есть ссылки", ref, http.StatusConflict, "group_referenced")
+	if impact, _ := ref.object(t)["impact"].(map[string]any); impact == nil {
+		t.Error("groups/delete: в ответе group_referenced нет impact")
+	} else if refs, _ := impact["rules"].([]any); len(refs) != 1 {
+		t.Errorf("groups/delete: в impact правил %d, ожидалось 1", len(refs))
+	}
+	e.rtRtExpect("groups/delete: «Остальное» без замены", e.call(http.MethodPost, rtRoutingBase+"/groups/delete",
+		map[string]any{"revision": e.rtRtRevision(), "id": gid, "cascade": map[string]any{"mode": "drop"}}), http.StatusBadRequest, "final_requires_redirect")
+	e.rtRtExpect("groups/delete: группа не найдена", e.call(http.MethodPost, rtRoutingBase+"/groups/delete",
+		map[string]any{"revision": e.rtRtRevision(), "id": "ffffffff", "cascade": map[string]any{"mode": ""}}), http.StatusNotFound, "group_not_found")
+	if r := e.call(http.MethodPost, rtRoutingBase+"/groups/delete", map[string]any{
+		"revision": e.rtRtRevision(), "id": gid, "cascade": map[string]any{"mode": "redirect", "to": map[string]string{"kind": "direct"}},
+	}); r.Status != http.StatusOK {
+		t.Fatalf("groups/delete с заменой: %d %s", r.Status, r.Code)
+	}
+	view = e.rtRtView()
+	if rtRtFindGroup(view, "Проверка") != nil {
+		t.Error("groups/delete: группа осталась в представлении")
+	}
+	if fin, _ := view["final"].(map[string]any); fin["kind"] != "direct" {
+		t.Errorf("groups/delete: «Остальное» после замены: %v", fin["kind"])
+	}
+	if rules, _ := view["rules"].([]any); len(rules) != 1 || rules[0].(map[string]any)["target"].(map[string]any)["kind"] != "direct" {
+		t.Error("groups/delete: правило не направлено на DIRECT")
+	}
+
+	// Предпросмотр взятия и reclaim с неизвестным ядром.
+	tp := e.call(http.MethodGet, rtRoutingBase+"/takeover", nil)
+	if tp.Status != http.StatusOK {
+		t.Errorf("takeover: %d %s", tp.Status, tp.Code)
+	} else if _, ok := tp.object(t)[tg.Core]; !ok {
+		t.Errorf("takeover: нет ключа %s", tg.Core)
+	}
+	e.rtRtExpect("reclaim: неизвестное ядро", e.call(http.MethodPost, rtRoutingBase+"/reclaim",
+		map[string]string{"kernel": "bogus"}), http.StatusBadRequest, "invalid_input")
 
 	// take: желание управлять маршрутизацией в черновике, затем «Применить».
 	tk := e.call(http.MethodPost, rtRoutingBase+"/take", map[string]int64{"revision": e.rtRtRevision()})
@@ -355,6 +517,9 @@ func TestRouterRoutingAPIFlow(t *testing.T) {
 		t.Errorf("снимок слоя: желаемое=%v, взято %s=%v", desired, tg.Core, got)
 	}
 	e.rtRtExpectTaken(tg, before, 1)
+	// Взято и применено: расхождений нет, возвращать нечего.
+	e.rtRtExpect("reclaim: нет расхождений", e.call(http.MethodPost, rtRoutingBase+"/reclaim",
+		map[string]string{"kernel": tg.Core}), http.StatusConflict, "nothing_to_reclaim")
 
 	// release → «Применить»: файлы ядра как были.
 	rl := e.call(http.MethodPost, rtRoutingBase+"/release", map[string]int64{"revision": e.rtRtRevision()})

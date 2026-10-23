@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -35,7 +36,7 @@ func (a *API) requireRouting(w http.ResponseWriter, r *http.Request) bool {
 // writeRoutingError переводит ошибку сервиса маршрутизации и операций владения в
 // HTTP-ответ со стабильным кодом. Параметры (field, reason, group, file) — имена
 // полей, коды причин и имена файлов настроек; ни узлов, ни адресов в них нет.
-// Остальные ошибки идут по таблице слоя.
+// Остальные ошибки идут по таблицам источников и слоя.
 func (a *API) writeRoutingError(w http.ResponseWriter, r *http.Request, err error) {
 	var (
 		invalid *routing.InvalidInputError
@@ -75,7 +76,8 @@ func (a *API) writeRoutingError(w http.ResponseWriter, r *http.Request, err erro
 	case errors.Is(err, configlayer.ErrApplyBusy):
 		JSONErrorCode(w, http.StatusConflict, "apply_busy", a.t(r, "configlayer.routing.apply_busy"))
 	default:
-		a.writeLayerError(w, r, err)
+		// Ошибки источников (узел или источник не найден) и слоя — по их таблицам.
+		a.writeSourceError(w, r, err)
 	}
 }
 
@@ -153,4 +155,236 @@ func (a *API) ConfigRoutingRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSONSuccess(w, ev)
+}
+
+// ConfigRoutingGroupsPreview — POST /api/configlayer/routing/groups/preview
+// {group}: какие узлы попадут в группу по каждому установленному ядру. Группа не
+// сохраняется.
+func (a *API) ConfigRoutingGroupsPreview(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Group routing.Group `json:"group"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	pv, err := a.routing.PreviewGroup(req.Group)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, pv)
+}
+
+// ConfigRoutingGroupsDelete — POST /api/configlayer/routing/groups/delete
+// {revision, id, cascade: {mode, to}}: удаляет группу из черновика. Есть ссылки и
+// действие не выбрано — 409 group_referenced с impact в data.
+func (a *API) ConfigRoutingGroupsDelete(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64           `json:"revision"`
+		ID       string          `json:"id"`
+		Cascade  routing.Cascade `json:"cascade"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.routing.DeleteGroup(req.Revision, req.ID, req.Cascade)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigRoutingImpact — POST /api/configlayer/routing/impact {kind, id}: что
+// затронет удаление группы, правила, источника или узла «Моих узлов».
+func (a *API) ConfigRoutingImpact(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Kind string `json:"kind"`
+		ID   string `json:"id"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	imp, err := a.routing.Impact(req.Kind, req.ID)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, imp)
+}
+
+// ConfigRoutingRulesSave — POST /api/configlayer/routing/rules/save
+// {revision, rule}: сохраняет правило (пустой id — новое) и отдаёт {event, rule}.
+func (a *API) ConfigRoutingRulesSave(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64        `json:"revision"`
+		Rule     routing.Rule `json:"rule"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, rule, err := a.routing.SaveRule(req.Revision, req.Rule)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, map[string]any{"event": ev, "rule": rule})
+}
+
+// ConfigRoutingRulesDelete — POST /api/configlayer/routing/rules/delete
+// {revision, id}.
+func (a *API) ConfigRoutingRulesDelete(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64  `json:"revision"`
+		ID       string `json:"id"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.routing.DeleteRule(req.Revision, req.ID)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigRoutingRulesMove — POST /api/configlayer/routing/rules/move
+// {revision, id, to}: переставляет правило на позицию to (с нуля).
+func (a *API) ConfigRoutingRulesMove(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64  `json:"revision"`
+		ID       string `json:"id"`
+		To       int    `json:"to"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.routing.MoveRule(req.Revision, req.ID, req.To)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigRoutingRulesEnable — POST /api/configlayer/routing/rules/enable
+// {revision, id, enabled}: включает или выключает правило, не удаляя его.
+func (a *API) ConfigRoutingRulesEnable(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64  `json:"revision"`
+		ID       string `json:"id"`
+		Enabled  bool   `json:"enabled"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.routing.SetRuleEnabled(req.Revision, req.ID, req.Enabled)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigRoutingFinal — POST /api/configlayer/routing/final {revision, target}:
+// цель «Остального» (в Mihomo MATCH).
+func (a *API) ConfigRoutingFinal(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64          `json:"revision"`
+		Target   routing.Target `json:"target"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.routing.SetFinal(req.Revision, req.Target)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigRoutingProbe — POST /api/configlayer/routing/probe {revision, probe}:
+// параметры проверки узлов (одни на панель).
+func (a *API) ConfigRoutingProbe(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Revision int64               `json:"revision"`
+		Probe    routing.ProbeConfig `json:"probe"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	ev, err := a.routing.SaveProbe(req.Revision, req.Probe)
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigRoutingTakeover — GET /api/configlayer/routing/takeover: предпросмотр
+// взятия для диалога (какие файлы routing Xray уйдут в копии, прежний профиль
+// Mihomo). Диск не меняется.
+func (a *API) ConfigRoutingTakeover(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireRouting(w, r) {
+		return
+	}
+	pv, err := a.configLayer.RoutingPreview()
+	if err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, pv)
+}
+
+// ConfigRoutingReclaim — POST /api/configlayer/routing/reclaim {kernel}: решает
+// дрейф маршрутизации ядра в пользу панели. kernel — только xray или mihomo. Ответ
+// приходит после перезапуска ядра; отмена запроса вкладкой операцию не прерывает.
+func (a *API) ConfigRoutingReclaim(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
+		return
+	}
+	var req struct {
+		Kernel string `json:"kernel"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	if req.Kernel != configlayer.KernelXray && req.Kernel != configlayer.KernelMihomo {
+		a.writeRoutingError(w, r, &routing.InvalidInputError{Field: "kernel", Reason: "kernel_invalid"})
+		return
+	}
+	if err := a.configLayer.ReclaimRouting(context.WithoutCancel(r.Context()), req.Kernel); err != nil {
+		a.writeRoutingError(w, r, err)
+		return
+	}
+	JSONSuccess(w, map[string]bool{"reclaimed": true})
 }

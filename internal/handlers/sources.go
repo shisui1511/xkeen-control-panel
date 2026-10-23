@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
 
@@ -158,7 +159,17 @@ func (a *API) ConfigSourcesDelete(w http.ResponseWriter, r *http.Request) {
 	if !a.decodeLayerBody(w, r, &req) {
 		return
 	}
-	ev, err := a.sources.Delete(req.Revision, req.ID)
+	// С сервисом маршрутизации удаление идёт каскадом: ссылки групп на источник
+	// и его узлы убираются той же ревизией (SRC-07).
+	var (
+		ev  configlayer.DraftEvent
+		err error
+	)
+	if a.routing != nil {
+		ev, err = a.routing.DeleteSource(req.Revision, req.ID)
+	} else {
+		ev, err = a.sources.Delete(req.Revision, req.ID)
+	}
 	if err != nil {
 		a.writeSourceError(w, r, err)
 		return
@@ -315,7 +326,16 @@ func (a *API) ConfigSourcesNodeDelete(w http.ResponseWriter, r *http.Request) {
 	if !a.decodeLayerBody(w, r, &req) {
 		return
 	}
-	ev, err := a.sources.DeleteNode(req.Revision, req.EntryID)
+	// Как и удаление источника: с сервисом маршрутизации — каскадом (SRC-07).
+	var (
+		ev  configlayer.DraftEvent
+		err error
+	)
+	if a.routing != nil {
+		ev, err = a.routing.DeleteNode(req.Revision, req.EntryID)
+	} else {
+		ev, err = a.sources.DeleteNode(req.Revision, req.EntryID)
+	}
 	if err != nil {
 		a.writeSourceError(w, r, err)
 		return
