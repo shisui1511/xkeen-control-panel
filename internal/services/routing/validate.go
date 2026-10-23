@@ -833,8 +833,80 @@ func groupModeFeature(kernel string, mode GroupMode) configlayer.Feature {
 	return ""
 }
 
+// groupEmptiness — пустота групп для одного набора узлов (одного ядра или
+// объединённого каталога) по правилу D-36: то же правило, что у генераторов
+// (xrayBuild.selection для Xray, выпуск ручной группы mihomoBuild.isEmitted для
+// Mihomo). Ручная группа пуста, если у неё нет действующего участника по
+// effectiveSelection с пустым выбором: вложенная группа считается, если она не
+// пуста; DIRECT и REJECT — только на первом месте; узел — из состава Resolve.
+// Группа «авто» и «резерв» пуста, если в составе нет узлов. Один расчёт для всех
+// потребителей пустоты (analyze, последствия удаления, «Сейчас»). Версия ядра
+// пустоту не меняет: режим, недоступный по версии, — отдельное предупреждение.
+type groupEmptiness struct {
+	groups   []Group
+	nodes    []sources.CatalogNode
+	byID     map[string]*Group
+	memo     map[string]bool
+	visiting map[string]bool
+}
+
+// newGroupEmptiness готовит расчёт пустоты групп для набора узлов.
+func newGroupEmptiness(groups []Group, nodes []sources.CatalogNode) *groupEmptiness {
+	e := &groupEmptiness{
+		groups: groups, nodes: nodes,
+		byID: make(map[string]*Group, len(groups)),
+		memo: map[string]bool{}, visiting: map[string]bool{},
+	}
+	for i := range groups {
+		e.byID[groups[i].ID] = &groups[i]
+	}
+	return e
+}
+
+// empty сообщает, что у группы нет действующего участника для этого набора узлов.
+// Группы нет в списке и цикл вложенности — пусто (цикл отдельно блокирует
+// group_cycle).
+func (e *groupEmptiness) empty(id string) bool {
+	g := e.byID[id]
+	if g == nil || e.visiting[id] {
+		return true
+	}
+	if v, ok := e.memo[id]; ok {
+		return v
+	}
+	e.visiting[id] = true
+	r := Resolve(*g, e.nodes, e.groups)
+	var empty bool
+	if g.Mode == ModeManual {
+		avail := func(member string) bool {
+			if gid, ok := strings.CutPrefix(member, memberGroup); ok {
+				return !e.empty(gid)
+			}
+			// DIRECT и REJECT допустимы всегда, ссылки узлов приходят из состава.
+			return true
+		}
+		empty = effectiveSelection(*g, "", avail, nodeRefs(r.Nodes)...) == ""
+	} else {
+		empty = len(r.Nodes) == 0
+	}
+	delete(e.visiting, id)
+	e.memo[id] = empty
+	return empty
+}
+
+// emptyGroups — ID каждой группы → пуста ли она для набора узлов (groupEmptiness).
+func emptyGroups(groups []Group, nodes []sources.CatalogNode) map[string]bool {
+	e := newGroupEmptiness(groups, nodes)
+	out := make(map[string]bool, len(groups))
+	for _, g := range groups {
+		out[g.ID] = e.empty(g.ID)
+	}
+	return out
+}
+
 // analyze считает проблемы и предупреждения маршрутизации по входным данным:
-// испорченные секции, группы, пустые для всех установленных ядер, циклы
+// испорченные секции, группы, пустые для всех установленных ядер (пустота — по
+// правилу D-36, emptyGroups), циклы
 // вложенности и цели правил на несуществующие группы (issues, блокируют
 // «Применить»), а также группы, пустые только для части ядер, режимы, недоступные
 // по версии ядра, и устаревшие отдельные узлы (warnings, не блокируют). Состав
@@ -881,6 +953,16 @@ func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catal
 			{configlayer.KernelXray, installed.Xray, cat.Xray},
 			{configlayer.KernelMihomo, installed.Mihomo, cat.Mihomo},
 		}
+		// Пустота групп по каждому установленному ядру считается один раз: тем же
+		// правилом D-36, что у генераторов.
+		emptyBy := map[string]map[string]bool{}
+		if haveCat {
+			for _, k := range kernels {
+				if k.on {
+					emptyBy[k.name] = emptyGroups(groups.Items, k.nodes)
+				}
+			}
+		}
 		for _, g := range groups.Items {
 			key := "group:" + g.ID
 			params := func(extra ...string) map[string]string {
@@ -899,11 +981,10 @@ func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catal
 						continue
 					}
 					active++
-					r := Resolve(g, k.nodes, groups.Items)
-					if len(r.Nodes) == 0 && len(r.Members) == 0 {
+					if emptyBy[k.name][g.ID] {
 						emptyOn = append(emptyOn, k.name)
 					}
-					for _, ref := range r.Stale {
+					for _, ref := range Resolve(g, k.nodes, groups.Items).Stale {
 						staleIn[ref]++
 					}
 				}
