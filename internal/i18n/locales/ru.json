@@ -96,5 +96,16 @@
   "configlayer.node_not_found": "Узел не найден",
   "configlayer.preview_expired": "Предпросмотр устарел: вставьте данные заново",
   "configlayer.source_disabled": "Источник выключен: включите его перед обновлением",
-  "configlayer.source_changed": "Настройки подписки изменились во время обновления: повторите обновление"
+  "configlayer.source_changed": "Настройки подписки изменились во время обновления: повторите обновление",
+  "configlayer.routing.group_not_found": "Группа не найдена",
+  "configlayer.routing.rule_not_found": "Правило не найдено",
+  "configlayer.routing.group_name_taken": "Группа с таким именем уже есть",
+  "configlayer.routing.group_cycle": "Группы образуют цикл вложенности",
+  "configlayer.routing.group_referenced": "На группу есть ссылки: выберите, что с ними сделать",
+  "configlayer.routing.final_requires_redirect": "На группу ссылается «Остальное»: выберите для него другую цель",
+  "configlayer.routing.invalid_input": "Недопустимое значение в настройках маршрутизации",
+  "configlayer.routing.draft_conflict": "Черновик изменён в другой вкладке",
+  "configlayer.routing.foreign_mixed": "Файл содержит не только маршрутизацию: его решает только «Отпустить»",
+  "configlayer.routing.nothing_to_reclaim": "Возвращать нечего: расхождений маршрутизации нет",
+  "configlayer.routing.apply_busy": "Применение уже выполняется"
 }

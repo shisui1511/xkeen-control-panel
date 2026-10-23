@@ -96,5 +96,16 @@
   "configlayer.node_not_found": "Node not found",
   "configlayer.preview_expired": "The preview has expired: paste the data again",
   "configlayer.source_disabled": "The source is disabled: enable it before refreshing",
-  "configlayer.source_changed": "The subscription settings changed during the refresh: refresh again"
+  "configlayer.source_changed": "The subscription settings changed during the refresh: refresh again",
+  "configlayer.routing.group_not_found": "Group not found",
+  "configlayer.routing.rule_not_found": "Rule not found",
+  "configlayer.routing.group_name_taken": "A group with this name already exists",
+  "configlayer.routing.group_cycle": "The groups form a nesting cycle",
+  "configlayer.routing.group_referenced": "The group is referenced: choose what to do with the references",
+  "configlayer.routing.final_requires_redirect": "The group is used by the catch-all rule: choose another target for it",
+  "configlayer.routing.invalid_input": "Invalid value in the routing settings",
+  "configlayer.routing.draft_conflict": "The draft was changed in another tab",
+  "configlayer.routing.foreign_mixed": "The file contains more than routing: only Release can resolve it",
+  "configlayer.routing.nothing_to_reclaim": "Nothing to reclaim: no routing drift",
+  "configlayer.routing.apply_busy": "An apply is already in progress"
 }

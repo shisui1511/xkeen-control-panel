@@ -6,9 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -21,9 +23,12 @@ import (
 	xkeencontrolpanel "github.com/shisui1511/xkeen-control-panel"
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/handlers"
+	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
@@ -319,7 +324,8 @@ func main() {
 	srv.HandleProtected("/api/settings/session", api.SessionSettings)
 
 	// XKeen own settings: proxied/excluded ports, excluded IPs, xkeen.json
-	api.SetXKeenSettingsService(services.NewXKeenSettingsService(services.DefaultXKeenConfigDir, cfg.DataDir, cfg.AllowedRoots))
+	xkeenSettingsSvc := services.NewXKeenSettingsService(services.DefaultXKeenConfigDir, cfg.DataDir, cfg.AllowedRoots)
+	api.SetXKeenSettingsService(xkeenSettingsSvc)
 	srv.HandleProtected("/api/xkeen/settings", api.XKeenSettingsList)
 	srv.HandleProtected("/api/xkeen/settings/validate", api.XKeenSettingsValidate)
 	srv.HandleProtected("/api/xkeen/settings/save", api.XKeenSettingsSave)
@@ -692,38 +698,43 @@ func main() {
 		// фиксации живых данных и колбэк «дрейф решён» регистрируются до Start слоя
 		// (после него слой их не принимает). Не создался или не подключился —
 		// маршруты /api/configlayer/sources* отвечают 404.
+		// Одни и те же источники сведений о ядрах у сервисов источников и
+		// маршрутизации.
+		installedKernels := func() configlayer.InstalledKernels {
+			return configlayer.InstalledKernels{
+				Xray:   installedKernelBinary(kernelSvc, "xray") != "",
+				Mihomo: installedKernelBinary(kernelSvc, "mihomo") != "",
+			}
+		}
+		// Нужна версия (UA подписки Mihomo, ворота функций): при пустом кеше Get
+		// ждёт конца операции XKeen, не дольше kernelHelperWait.
+		kernelVersion := func(kernel string) string {
+			info := kernelSvc.Get(kernel)
+			if info == nil {
+				return ""
+			}
+			// Служебные значения вместо версии — версия не определена.
+			switch info.CurrentVersion {
+			case "not installed", "error", "unknown":
+				return ""
+			}
+			return info.CurrentVersion
+		}
+		kernelRunning := func(kernel string) bool {
+			for _, st := range kernelSvc.ProcessStates() {
+				if st.Name == kernel && st.Status == "running" {
+					return true
+				}
+			}
+			return false
+		}
 		sourcesSvc, srcErr := sources.New(sources.Deps{
-			DataDir: cfg.DataDir,
-			Layer:   configLayer,
-			Installed: func() configlayer.InstalledKernels {
-				return configlayer.InstalledKernels{
-					Xray:   installedKernelBinary(kernelSvc, "xray") != "",
-					Mihomo: installedKernelBinary(kernelSvc, "mihomo") != "",
-				}
-			},
-			// Нужна версия (UA подписки Mihomo): при пустом кеше Get ждёт конца
-			// операции XKeen, не дольше kernelHelperWait.
-			KernelVersion: func(kernel string) string {
-				info := kernelSvc.Get(kernel)
-				if info == nil {
-					return ""
-				}
-				// Служебные значения вместо версии — версия не определена.
-				switch info.CurrentVersion {
-				case "not installed", "error", "unknown":
-					return ""
-				}
-				return info.CurrentVersion
-			},
-			ActiveKernel: func() string { return kernelSvc.ActiveState().Kernel },
-			Running: func(kernel string) bool {
-				for _, st := range kernelSvc.ProcessStates() {
-					if st.Name == kernel && st.Status == "running" {
-						return true
-					}
-				}
-				return false
-			},
+			DataDir:       cfg.DataDir,
+			Layer:         configLayer,
+			Installed:     installedKernels,
+			KernelVersion: kernelVersion,
+			ActiveKernel:  func() string { return kernelSvc.ActiveState().Kernel },
+			Running:       kernelRunning,
 		})
 		if srcErr != nil {
 			log.Printf("Сервис источников не создан, маршруты /api/configlayer/sources* отвечают 404: %v", srcErr)
@@ -746,6 +757,43 @@ func main() {
 				sourcesSvc = nil
 			}
 		}
+		// Сервис маршрутизации (фаза 146) создаётся только здесь, после сервиса
+		// источников: генераторы файлов ядер и проверка регистрируются до Start
+		// слоя. Не создался или не подключился — маршруты
+		// /api/configlayer/routing* отвечают 404, панель работает без них.
+		var routingSvc *routing.Service
+		if sourcesSvc != nil {
+			var routeErr error
+			routingSvc, routeErr = routing.New(routing.Deps{
+				DataDir: cfg.DataDir,
+				Layer:   configLayer,
+				Sources: sourcesSvc,
+				Lists:   lists.NewIndex(lists.DefaultDatDir),
+				Geodata: lists.NewGeodataStore(xkeenSettingsSvc, exec.LookPath, func(ctx context.Context) error {
+					return runXKeenUpdateGeo(ctx, consoleSvc)
+				}),
+				Installed:     installedKernels,
+				KernelVersion: kernelVersion,
+				Running:       kernelRunning,
+				Mihomo:        api.MihomoService(),
+				Ping:          pingNodeTLS,
+				GOARCH:        runtime.GOARCH,
+			})
+			if routeErr == nil {
+				for _, g := range routingSvc.Generators() {
+					if routeErr = configLayer.RegisterGenerator(g); routeErr != nil {
+						break
+					}
+				}
+			}
+			if routeErr == nil {
+				routeErr = configLayer.RegisterChecker(routingSvc.Checker())
+			}
+			if routeErr != nil {
+				log.Printf("Сервис маршрутизации не подключён к слою, маршруты /api/configlayer/routing* отвечают 404: %v", routeErr)
+				routingSvc = nil
+			}
+		}
 		configLayer.Start()
 		api.SetConfigLayer(configLayer)
 		defer stops.run("config-layer", configLayer.Stop)
@@ -755,6 +803,12 @@ func main() {
 			sourcesSvc.Start()
 			api.SetSourcesService(sourcesSvc)
 			defer stops.run("sources", sourcesSvc.Stop)
+		}
+		if routingSvc != nil {
+			// Как и сервис источников: стартует после слоя, останавливается раньше него.
+			routingSvc.Start()
+			api.SetRoutingService(routingSvc)
+			defer stops.run("routing", routingSvc.Stop)
 		}
 	}
 	srv.HandleProtected("/api/configlayer/state", api.ConfigLayerState)
@@ -779,6 +833,10 @@ func main() {
 	srv.HandleProtected("/api/configlayer/sources/nodes/raw", api.ConfigSourcesNodeRaw)
 	srv.HandleProtected("/api/configlayer/sources/nodes/save", api.ConfigSourcesNodeSave)
 	srv.HandleProtected("/api/configlayer/sources/nodes/delete", api.ConfigSourcesNodeDelete)
+	srv.HandleProtected("/api/configlayer/routing", api.ConfigRouting)
+	srv.HandleProtected("/api/configlayer/routing/groups/save", api.ConfigRoutingGroupsSave)
+	srv.HandleProtected("/api/configlayer/routing/take", api.ConfigRoutingTake)
+	srv.HandleProtected("/api/configlayer/routing/release", api.ConfigRoutingRelease)
 
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
 		strings.TrimPrefix(Version, "v"), runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
@@ -820,6 +878,65 @@ func main() {
 		log.Printf("Received signal %s during restart, exiting...", sig)
 	}
 	log.Println("Server stopped.")
+}
+
+// runXKeenUpdateGeo запускает `xkeen -ug` через консольный сервис. Команда идёт
+// в отдельной горутине: сервис ждёт её без контекста, а ожидание вызывающего
+// прерывается отменой ctx (процесс при этом доработает сам).
+func runXKeenUpdateGeo(ctx context.Context, console *services.ConsoleService) error {
+	type result struct {
+		res *services.CommandResult
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		res, err := console.Execute("-ug")
+		ch <- result{res, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case out := <-ch:
+		if out.err != nil {
+			return out.err
+		}
+		if out.res == nil || !out.res.Success {
+			return errors.New("xkeen -ug завершился с ошибкой")
+		}
+		return nil
+	}
+}
+
+// pingNodeTLS проверяет доступность сервера узла по TLS (рукопожатие по адресу,
+// порту и SNI узла). Проверка сертификата не нужна: важна достижимость сервера.
+// Срок ожидания задаёт ctx; сама проверка ограничена пятью секундами.
+func pingNodeTLS(ctx context.Context, n nodes.Node) error {
+	sni := ""
+	if n.TLS != nil {
+		sni = n.TLS.SNI
+	}
+	dest := net.JoinHostPort(n.Host, strconv.Itoa(n.Port))
+	type result struct {
+		res *services.TLSPingResult
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		res, err := services.TLSPing(dest, sni, nil, true)
+		ch <- result{res, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case out := <-ch:
+		if out.err != nil {
+			return out.err
+		}
+		if out.res == nil || !out.res.OK {
+			return errors.New("сервер узла недоступен по TLS")
+		}
+		return nil
+	}
 }
 
 // installedKernelBinary — путь бинарника ядра, если он есть на диске; иначе
