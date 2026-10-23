@@ -43,6 +43,15 @@ func (a *API) writeLayerError(w http.ResponseWriter, r *http.Request, err error)
 		JSONErrorCode(w, http.StatusBadRequest, "invalid_request", a.t(r, "configlayer.invalid_request"))
 	case errors.Is(err, configlayer.ErrApplyBusy):
 		JSONErrorCode(w, http.StatusConflict, "apply_busy", a.t(r, "configlayer.apply_busy"))
+	case errors.Is(err, configlayer.ErrChecksFailed):
+		// Проблемы проверки черновика: клиент показывает их по коду и параметрам.
+		// Запасной текст — сообщение слоя; новых ключей словаря здесь нет.
+		issues := []configlayer.BuildIssue{}
+		var ce *configlayer.ChecksError
+		if errors.As(err, &ce) {
+			issues = ce.Issues
+		}
+		JSONErrorCodeParamsData(w, http.StatusConflict, "apply_blocked", configlayer.ErrChecksFailed.Error(), nil, map[string]any{"issues": issues})
 	case errors.Is(err, configlayer.ErrKernelBusy):
 		JSONErrorCode(w, http.StatusConflict, "kernel_op_in_progress", a.t(r, "kernel.op_in_progress"))
 	case errors.Is(err, configlayer.ErrDriftBlocked):

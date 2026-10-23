@@ -145,6 +145,22 @@ type Layer struct {
 	verGen      uint64
 	verKernels  []KernelVersionView
 	verFeatures map[Feature]Availability
+	// Мемо проверок черновика (Layer.cachedChecks): ключ последнего расчёта и его
+	// итог; checksEpoch растёт в InvalidateChecks.
+	checksEpoch uint64
+	checksKey   checksKey
+	checksVal   []BuildIssue
+	checksOK    bool
+}
+
+// checksKey — от чего зависит итог проверок черновика: ревизия черновика, хэш
+// живых данных, установленные ядра и эпоха (данные вне черновика: dat, каталог
+// списков).
+type checksKey struct {
+	rev       int64
+	liveHash  string
+	installed InstalledKernels
+	epoch     uint64
 }
 
 // New создаёт слой: открывает файл состояния, шину, реестр и конвейер. Фоновые
@@ -473,10 +489,12 @@ func (l *Layer) Snapshot() SnapshotView {
 		Features:      map[Feature]Availability{},
 		Apply:         l.pipeline.Current(),
 		Notices:       l.noticeViews(st),
+		Checks:        []BuildIssue{},
 	}
 	if !sv.Enabled {
 		return sv
 	}
+	sv.Checks = l.cachedChecks(st)
 	fe := l.evaluate(st)
 	sv.Files, sv.DriftCount = fe.Files, fe.DriftCount
 	sv.Kernels, sv.Features = l.versions()
@@ -767,6 +785,43 @@ func (l *Layer) checksFor(st State) []BuildIssue {
 	return l.registry.Check(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft}, l.installed())
 }
 
+// cachedChecks — checksFor с мемо по ревизии черновика, хэшу живых данных,
+// установленным ядрам и эпохе проверок: Snapshot и ежеминутная сверка не
+// пересчитывают проверки, пока ничего не изменилось. Возвращает копию.
+func (l *Layer) cachedChecks(st State) []BuildIssue {
+	live, err := json.Marshal(st.Live)
+	if err != nil {
+		return l.checksFor(st)
+	}
+	installed := l.installed()
+	l.mu.Lock()
+	key := checksKey{rev: st.DraftRevision, liveHash: HashContent(live), installed: installed, epoch: l.checksEpoch}
+	if l.checksOK && l.checksKey == key {
+		out := append([]BuildIssue{}, l.checksVal...)
+		l.mu.Unlock()
+		return out
+	}
+	l.mu.Unlock()
+	issues := l.checksFor(st)
+	l.mu.Lock()
+	// Эпоха сменилась, пока считали: итог мог устареть, в мемо он не попадает.
+	if l.checksEpoch == key.epoch {
+		l.checksKey, l.checksVal, l.checksOK = key, append([]BuildIssue{}, issues...), true
+	}
+	l.mu.Unlock()
+	return issues
+}
+
+// InvalidateChecks сбрасывает мемо проверок и просит внеочередную сверку:
+// сервисы зовут его, когда изменились данные вне черновика (dat, каталог
+// списков), от которых зависят проверки.
+func (l *Layer) InvalidateChecks() {
+	l.mu.Lock()
+	l.checksEpoch++
+	l.mu.Unlock()
+	l.RequestCheck()
+}
+
 // OnDriftResolved регистрирует колбэк «дрейф решён»: вызывается, когда число
 // файлов с дрейфом по сверке становится 0 (Пересобрать, Принять правку, ручное
 // исправление файла). Допустим только до Start.
@@ -819,7 +874,7 @@ func (l *Layer) StartApply(user bool) error {
 	}
 	// Проверки до записи: пустая группа или висячая ссылка не дают начать
 	// применение (GRP-05, SRC-07). Фоновые запуски проверяет сам конвейер.
-	if issues := l.checksFor(l.store.Snapshot()); len(issues) > 0 {
+	if issues := l.cachedChecks(l.store.Snapshot()); len(issues) > 0 {
 		return &ChecksError{Issues: issues}
 	}
 	release, err := l.pipeline.TryBegin(l.ctx, user)
@@ -1121,6 +1176,10 @@ func (l *Layer) RestoreExternally(fn func() error) error {
 		return err
 	}
 	fnErr, reloadErr := l.store.ReplaceExternally(fn)
+	// Восстановленный файл состояния мог дать ту же ревизию с другим черновиком.
+	l.mu.Lock()
+	l.checksEpoch++
+	l.mu.Unlock()
 	if reloadErr != nil {
 		log.Printf("[configlayer] не удалось перечитать состояние слоя после восстановления: %v", reloadErr)
 	}

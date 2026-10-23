@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -156,6 +157,17 @@ func TestRouterCheckerBlocksApply(t *testing.T) {
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
 		t.Fatalf("файл записан при отказе проверки: %v", err)
 	}
+	// Снимок слоя отдаёт те же проблемы с параметрами.
+	snapIssues := layer.Snapshot().Checks
+	snapFound := false
+	for _, is := range snapIssues {
+		if is.Code == "group_empty" && is.Params["group"] == "g1" {
+			snapFound = true
+		}
+	}
+	if !snapFound {
+		t.Errorf("в Snapshot().Checks нет проблемы с Params: %+v", snapIssues)
+	}
 	if v := layer.pipeline.Current(); v.Running || v.Result != nil {
 		t.Errorf("применение началось при отказе проверки: %+v", v)
 	}
@@ -212,6 +224,26 @@ func TestRouterCheckerBlocksApply(t *testing.T) {
 	before, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// Проблем нет: в снимке пустой список, не null; расчёт мемоизирован по
+	// ревизии, а InvalidateChecks заставляет проверку вызваться снова.
+	snap := layer.Snapshot()
+	if len(snap.Checks) != 0 {
+		t.Errorf("Snapshot().Checks без проблем: %+v", snap.Checks)
+	}
+	if raw, err := json.Marshal(snap); err != nil || !strings.Contains(string(raw), `"checks":[]`) {
+		t.Errorf("checks в JSON снимка не []: %v", err)
+	}
+	calls := checker.calls.Load()
+	layer.Snapshot()
+	if got := checker.calls.Load(); got != calls {
+		t.Errorf("проверка пересчитана при той же ревизии: %d -> %d", calls, got)
+	}
+	layer.InvalidateChecks()
+	layer.Snapshot()
+	if got := checker.calls.Load(); got <= calls {
+		t.Errorf("проверка не вызвана после InvalidateChecks: %d -> %d", calls, got)
 	}
 
 	// Фоновый запуск с оверлеем, меняющим файл и вызывающим проверку, файл не трогает.

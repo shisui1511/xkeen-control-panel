@@ -52,6 +52,9 @@ type SnapshotView struct {
 	Features      map[Feature]Availability `json:"features"`
 	Apply         ApplyView                `json:"apply"`
 	Notices       []NoticeView             `json:"notices"`
+	// Checks — блокирующие проблемы проверки черновика (пустая группа, висячая
+	// ссылка): пока список не пуст, «Применить» отказывает. Пустой список — [].
+	Checks []BuildIssue `json:"checks"`
 }
 
 // sortFileViews упорядочивает файлы для UI: drift, pending, ok, released;
