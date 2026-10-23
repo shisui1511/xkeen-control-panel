@@ -324,10 +324,15 @@ func (s *Service) impactGroup(st configlayer.StateView, out Impact, groups []Gro
 // groupsWithout возвращает состав групп после удаления группы id: группа
 // уходит из списка и из участников ручных групп (Members без group:id). Это
 // состав после каскада, его же пишет DeleteGroup. Resolve отбросил бы ссылку на
-// удалённую группу и сам, но правило D-36 читает Members по позициям: без чистки
-// у [удалённая, DIRECT] DIRECT остался бы вторым и прогноз назвал бы группу
-// пустой, а после DeleteGroup DIRECT стоит первым. У каждой группы новый срез
-// Members, вход не меняется (impactGroup передаёт исходные группы как «до»).
+// удалённую группу и сам, но правило D-36 читает Members по позициям. Каскад не
+// должен менять его смысл: если участником по умолчанию был не DIRECT/REJECT, а
+// после чистки первыми остались DIRECT/REJECT (удалённая группа стояла перед
+// ними), они сами не становятся выбором по умолчанию — иначе трафик ушёл бы в
+// обход VPN без ведома пользователя. Такие участники переносятся за ближайшего
+// следующего участника; если за ними никого нет, убираются, и группа без
+// действующего участника блокируется проверкой group_empty (отказ закрытый).
+// У каждой группы новый срез Members, вход не меняется (impactGroup передаёт
+// исходные группы как «до»).
 func groupsWithout(groups []Group, id string) []Group {
 	out := make([]Group, 0, len(groups))
 	for _, g := range groups {
@@ -341,10 +346,37 @@ func groupsWithout(groups []Group, id string) []Group {
 			}
 			kept = append(kept, m)
 		}
+		if len(g.Members) > 0 && !isTerminalMember(g.Members[0]) {
+			kept = demoteLeadingTerminals(kept)
+		}
 		g.Members = kept
 		out = append(out, g)
 	}
 	return out
+}
+
+// isTerminalMember — участник DIRECT или REJECT (D-36: по умолчанию не
+// выбираются, если не стоят первыми).
+func isTerminalMember(m Member) bool { return m.Kind == KindDirect || m.Kind == KindReject }
+
+// demoteLeadingTerminals уводит DIRECT/REJECT с первых мест: ведущая серия
+// переносится за первого следующего участника, а без него убирается. Порядок
+// остальных участников не меняется.
+func demoteLeadingTerminals(members []Member) []Member {
+	n := 0
+	for n < len(members) && isTerminalMember(members[n]) {
+		n++
+	}
+	if n == 0 {
+		return members
+	}
+	if n == len(members) {
+		return []Member{}
+	}
+	out := make([]Member, 0, len(members))
+	out = append(out, members[n])
+	out = append(out, members[:n]...)
+	return append(out, members[n+1:]...)
 }
 
 // sourceScope — что удаляется из каталога: источник целиком (source) или один
