@@ -416,6 +416,87 @@ func ScanMihomoActive(root string) (prevKind, prevProfile string, ports MihomoPo
 	return a.Kind, a.Profile, a.Ports, err
 }
 
+// Предупреждения предпросмотра взятия (D-44): взятие они не блокируют.
+const (
+	// WarnSpeedBalancer — у какого-либо файла каталога признак балансировщика
+	// XKeen (тег balancer или входящий probe).
+	WarnSpeedBalancer = "speed_balancer"
+	// WarnForceProxy — у переносимого файла есть правило с inboundTag force-proxy*.
+	WarnForceProxy = "force_proxy"
+)
+
+// TakeoverXray — предпросмотр взятия маршрутизации Xray.
+type TakeoverXray struct {
+	// Move — «чистые» файлы routing, которые уйдут в резервные копии панели.
+	Move []string `json:"move"`
+	// Left — файлы с routing, которые останутся на месте (смешанные, D-43).
+	Left     []string `json:"left"`
+	Warnings []string `json:"warnings"`
+}
+
+// TakeoverMihomo — предпросмотр взятия маршрутизации Mihomo.
+type TakeoverMihomo struct {
+	// PrevProfile — прежний активный профиль внутри каталога Mihomo.
+	PrevProfile string      `json:"prev_profile"`
+	Ports       MihomoPorts `json:"ports"`
+}
+
+// TakeoverPreview — предпросмотр взятия для диалога (UI-SPEC E10). Ядро, которого
+// нет, остаётся nil.
+type TakeoverPreview struct {
+	Xray   *TakeoverXray   `json:"xray"`
+	Mihomo *TakeoverMihomo `json:"mihomo"`
+}
+
+// splitRoutingFiles делит файлы скана на переносимые и оставленные на месте:
+// переносится «чистый» файл routing (не старого слоя, с допустимым именем),
+// остаются смешанные и не разобравшиеся файлы с ключом routing (D-43). Файл
+// старого слоя не переносится и не числится оставленным: он переписывается
+// старым слоем. Оба списка отсортированы и не nil.
+func splitRoutingFiles(files []RoutingFile) (move, left []string) {
+	move, left = []string{}, []string{}
+	for _, f := range files {
+		switch {
+		case f.Pure && !f.Legacy && safeRoutingName(f.Name):
+			move = append(move, f.Name)
+		case f.HasRouting && !f.Legacy:
+			left = append(left, f.Name)
+		}
+	}
+	sort.Strings(move)
+	sort.Strings(left)
+	return move, left
+}
+
+// RoutingPreviewOf строит предпросмотр взятия по результатам сканов: files —
+// ScanXrayRouting, prevProfile и ports — ScanMihomoActive. Функция чистая: на
+// диск не пишет и ничего не скрывает — оставленные смешанные файлы попадают в
+// Left. Предупреждения (D-44) взятие не блокируют.
+func RoutingPreviewOf(files []RoutingFile, prevProfile string, ports MihomoPorts) TakeoverPreview {
+	move, left := splitRoutingFiles(files)
+	warnings := []string{}
+	for _, f := range files {
+		if f.Balancer {
+			warnings = append(warnings, WarnSpeedBalancer)
+			break
+		}
+	}
+	moving := make(map[string]bool, len(move))
+	for _, n := range move {
+		moving[n] = true
+	}
+	for _, f := range files {
+		if f.ForceProxy && moving[f.Name] {
+			warnings = append(warnings, WarnForceProxy)
+			break
+		}
+	}
+	return TakeoverPreview{
+		Xray:   &TakeoverXray{Move: move, Left: left, Warnings: warnings},
+		Mihomo: &TakeoverMihomo{PrevProfile: prevProfile, Ports: ports},
+	}
+}
+
 // yamlInt читает скалярное целое из значения YAML.
 func yamlInt(v any) int {
 	switch n := v.(type) {
@@ -527,18 +608,11 @@ func computeRoutingOps(desired RoutingDesired, actual RoutingState, installed In
 		case desired.Managed && actual.Xray == nil:
 			changed = true
 			st := &XrayRoutingState{TakenAt: now, Moved: []MovedFile{}, Left: []string{}}
-			taken := make(map[string]bool)
-			for _, f := range scans.Xray {
-				if f.Pure && !f.Legacy && safeRoutingName(f.Name) {
-					ops.XrayTake = append(ops.XrayTake, f.Name)
-					taken[f.Name] = true
-				}
+			move, left := splitRoutingFiles(scans.Xray)
+			if len(move) > 0 {
+				ops.XrayTake = move
 			}
-			for _, f := range scans.Xray {
-				if f.HasRouting && !taken[f.Name] {
-					st.Left = append(st.Left, f.Name)
-				}
-			}
+			st.Left = left
 			ops.Next.Xray = st
 			ops.xrayTaking = true
 		case !desired.Managed && actual.Xray != nil:
