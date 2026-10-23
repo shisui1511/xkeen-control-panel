@@ -29,6 +29,13 @@
  *    переносом, «Скопировать» копирует показанный текст, «Показать ещё 50»; действия
  *    карточки и строки узла; удаление через showConfirm; полнота словарей.
  *
+ * 8. Маршрутизация (план 146-17): вкладки «Группы» и «Правила» и их testId; интерфейсы
+ *    configRouting.ts совпадают по ключам с routingContract.json; событие routing,
+ *    подписки клиента (дебаунс 300 мс), нет обратного импорта в configLayer.ts и импорта
+ *    клиента вне config-раздела; {@html} в компонентах config запрещён; у каждого кода
+ *    из routingErrorCodes.json и каждой причины invalid_input есть текст в ru и en;
+ *    ключи $tp вкладок имеют формы _one/_few/_many; тексты D-28.
+ *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
 const fs = require("fs");
@@ -869,6 +876,235 @@ for (const lang of ["ru", "en"]) {
     expect(
       has(`cfg.nodes.delete_sub_body${suffix}`),
       `${lang}.json: нет формы cfg.nodes.delete_sub_body${suffix}`,
+    );
+  }
+}
+
+// --- 8. Маршрутизация: вкладки «Группы» и «Правила», клиент, словари (план 146-17) --------
+
+const ROUTING_TS = `${SRC}/lib/configRouting.ts`;
+const ROUTING_CONTRACT = `${SRC}/lib/routingContract.json`;
+const ROUTING_CODES = `${SRC}/lib/routingErrorCodes.json`;
+
+// Каркас: вкладки, маршруты, компоненты
+for (const id of ["config-tab-groups", "config-tab-rules"]) {
+  expect(config.includes(id), `Config.svelte: нет testId ${id}`);
+}
+for (const tabName of ["groups", "rules"]) {
+  expect(
+    new RegExp(`'${tabName}'`).test(tabs),
+    `configSubTab.ts: вкладка ${tabName} не известна`,
+  );
+}
+for (const [file, id] of [
+  [
+    `${SRC}/components/config/groups/GroupsTab.svelte`,
+    'data-testid="groups-tab"',
+  ],
+  [
+    `${SRC}/components/config/rules/RulesTab.svelte`,
+    'data-testid="rules-tab"',
+  ],
+  [
+    `${SRC}/components/config/rules/RulesTab.svelte`,
+    'data-testid="rules-fallback"',
+  ],
+]) {
+  expect(read(file).includes(id), `${file}: нет ${id}`);
+}
+
+// Типы ответов против routingContract.json; интерфейс может наследовать другой
+// (`extends`), RoutingSnapshot и RoutingKernelView объявлены в configLayer.ts
+// (configLayer не импортирует configRouting)
+const routingTs = read(ROUTING_TS);
+const routingSources = [routingTs, layerTs];
+function routingInterfaceKeys(name, seen = new Set()) {
+  if (seen.has(name)) return null;
+  seen.add(name);
+  for (const src of routingSources) {
+    const own = interfaceKeys(src, name);
+    if (!own) continue;
+    const head = new RegExp(
+      `export interface ${name}\\s+extends\\s+([A-Za-z0-9_,\\s]+?)\\s*\\{`,
+    ).exec(src);
+    if (head) {
+      for (const parent of head[1].split(",").map((x) => x.trim())) {
+        const inherited = routingInterfaceKeys(parent, seen);
+        if (inherited) for (const [k, v] of inherited) own.set(k, v);
+      }
+    }
+    return own;
+  }
+  return null;
+}
+let routingContract = {};
+try {
+  routingContract = JSON.parse(read(ROUTING_CONTRACT));
+} catch (e) {
+  errors.push(`${ROUTING_CONTRACT}: не разбирается как JSON: ${e.message}`);
+}
+for (const [type, spec] of Object.entries(routingContract)) {
+  const keys = routingInterfaceKeys(type);
+  if (!keys) {
+    errors.push(
+      `${ROUTING_TS}: нет интерфейса ${type} (контракт маршрутизации)`,
+    );
+    continue;
+  }
+  for (const k of spec.required) {
+    if (!keys.has(k)) errors.push(`${type}: нет обязательного ключа "${k}"`);
+    else if (keys.get(k))
+      errors.push(
+        `${type}: ключ "${k}" обязателен в контракте, но объявлен как необязательный`,
+      );
+  }
+  for (const k of spec.optional) {
+    if (!keys.has(k)) errors.push(`${type}: нет необязательного ключа "${k}"`);
+    else if (!keys.get(k))
+      errors.push(
+        `${type}: ключ "${k}" необязателен в контракте, но объявлен как обязательный`,
+      );
+  }
+  const allowed = new Set([...spec.required, ...spec.optional]);
+  for (const k of keys.keys()) {
+    if (!allowed.has(k))
+      errors.push(`${type}: лишний ключ "${k}" вне контракта`);
+  }
+}
+
+// События SSE: routing слушается в одном потоке, клиент маршрутизации подписан на
+// routing, sources и draft с дебаунсом 300 мс; обратного импорта нет
+expect(
+  /EVENT_NAMES\s*=\s*\[[^\]]*'routing'/.test(layerTs),
+  `${LAYER_TS}: 'routing' нет в EVENT_NAMES`,
+);
+expect(
+  !/from '\.\/configRouting'/.test(layerTs),
+  `${LAYER_TS}: импортирует configRouting (цикл импортов)`,
+);
+for (const ev of ["routing", "sources", "draft"]) {
+  expect(
+    new RegExp(`onLayerEvent\\('${ev}'`).test(routingTs),
+    `${ROUTING_TS}: нет подписки onLayerEvent('${ev}', …)`,
+  );
+}
+expect(
+  /ROUTING_DEBOUNCE_MS\s*=\s*300/.test(routingTs),
+  `${ROUTING_TS}: дебаунс перечитывания не 300 мс`,
+);
+expect(
+  !/EventSource/.test(routingTs),
+  `${ROUTING_TS}: открывает собственный поток событий`,
+);
+expect(
+  /export async function loadRouting\(/.test(routingTs) &&
+    routingTs.includes("/api/configlayer/routing"),
+  `${ROUTING_TS}: нет loadRouting или адреса /api/configlayer/routing`,
+);
+
+// Клиент маршрутизации подключают только Config.svelte и components/config/: иначе при
+// выключенном флаге слоя пошли бы запросы /api/configlayer/routing (T-146-51)
+for (const file of walk(SRC, [])) {
+  if (file === ROUTING_TS) continue;
+  const text = read(file);
+  if (
+    /^\s*import(?!\s+type\b)[^;]*?from '[^']*\/configRouting'/m.test(text) &&
+    file !== `${SRC}/Config.svelte` &&
+    !file.startsWith(`${SRC}/components/config/`)
+  ) {
+    errors.push(
+      `${file}: импортирует configRouting вне Config.svelte и components/config/ (запросы маршрутизации при выключенном флаге)`,
+    );
+  }
+}
+
+// XSS (T-146-50): имена групп и значения условий выводятся только интерполяцией
+for (const file of walk(`${SRC}/components/config`, [])) {
+  if (file.endsWith(".svelte") && /\{@html/.test(read(file))) {
+    errors.push(`${file}: {@html} запрещён в компонентах config (XSS)`);
+  }
+}
+
+// Словари: коды ошибок API, причины invalid_input, подписи вкладок, тексты D-28
+const routingCodes = JSON.parse(read(ROUTING_CODES));
+const reasonsList = /ROUTING_REASONS\s*=\s*\[([\s\S]*?)\];/.exec(routingTs);
+const routingReasons = reasonsList
+  ? [...reasonsList[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1])
+  : [];
+expect(
+  routingReasons.length > 0,
+  `${ROUTING_TS}: не найден список ROUTING_REASONS`,
+);
+
+// Ключи $tp в компонентах вкладок маршрутизации: нужны все три формы
+const tpKeys = new Set();
+for (const dir of ["groups", "rules", "routing"]) {
+  const rel = `${SRC}/components/config/${dir}`;
+  if (!fs.existsSync(path.join(root, rel))) continue;
+  for (const file of walk(rel, [])) {
+    for (const m of read(file).matchAll(/\$tp\(\s*['"`]([^'"`]+)['"`]/g)) {
+      tpKeys.add(m[1]);
+    }
+  }
+}
+
+for (const lang of ["ru", "en"]) {
+  const dict = JSON.parse(read(`${SRC}/locales/${lang}.json`));
+  const has = (k) => typeof dict[k] === "string" && dict[k].trim() !== "";
+  for (const code of [...routingCodes, "unknown"]) {
+    expect(
+      has(`cfg.routing.err.${code}`),
+      `${lang}.json: нет cfg.routing.err.${code}`,
+    );
+  }
+  for (const reason of routingReasons) {
+    expect(
+      has(`cfg.routing.reason.${reason}`),
+      `${lang}.json: нет cfg.routing.reason.${reason}`,
+    );
+  }
+  for (const key of ["cfg.tab.groups", "cfg.tab.rules"]) {
+    const v = dict[key] || "";
+    expect(
+      has(key) && v.trim().split(/\s+/).length <= 2 && !/[…]|\.\.\./.test(v),
+      `${lang}.json: подпись ${key} пуста, длиннее двух слов или с многоточием`,
+    );
+  }
+  for (const base of [
+    "cfg.groups.count",
+    "cfg.rules.count",
+    "cfg.routing.apply_blocked",
+    "cfg.groups.preview_nodes",
+    "cfg.groups.del_rules",
+    "cfg.groups.del_groups",
+    "cfg.groups.del_effect_xray",
+    "cfg.preset.plan_first_rules",
+    "cfg.preset.plan_first_groups",
+    ...tpKeys,
+  ]) {
+    for (const suffix of ["_one", "_few", "_many"]) {
+      expect(has(base + suffix), `${lang}.json: нет формы ${base}${suffix}`);
+    }
+  }
+  // тексты D-28 (в английском словаре — перевод без русской фразы)
+  const d28 = lang === "ru" ? /взятия маршрутизации/ : /routing is taken over/;
+  expect(
+    d28.test(dict["cfg.restart.no_runtime_effect"] || "") &&
+      d28.test(dict["cfg.step_note.no_runtime_effect"] || ""),
+    `${lang}.json: тексты no_runtime_effect (D-28) не заменены`,
+  );
+  // каждая группа ключей фазы непуста
+  for (const prefix of [
+    "cfg.groups.",
+    "cfg.rules.",
+    "cfg.routing.",
+    "cfg.list.",
+    "cfg.geodata.",
+    "cfg.preset.",
+  ]) {
+    expect(
+      Object.keys(dict).some((k) => k.startsWith(prefix)),
+      `${lang}.json: нет ключей ${prefix}*`,
     );
   }
 }

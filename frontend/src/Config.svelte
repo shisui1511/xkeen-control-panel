@@ -11,6 +11,7 @@
   import KernelVersions from './components/config/KernelVersions.svelte';
   import NodesTab from './components/config/nodes/NodesTab.svelte';
   import GroupsTab from './components/config/groups/GroupsTab.svelte';
+  import RulesTab from './components/config/rules/RulesTab.svelte';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
   import {
     asConfigSubTab,
@@ -85,6 +86,8 @@
       <NodesTab />
     {:else if subTab === 'groups'}
       <GroupsTab />
+    {:else if subTab === 'rules'}
+      <RulesTab />
     {:else if subTab === 'files'}
       <ManagedFiles />
       <KernelVersions />
