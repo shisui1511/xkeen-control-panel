@@ -294,7 +294,7 @@
     </div>
   {:else}
     <div class="inline-nodes-list">
-      {#each filteredNodes as node (node.tag)}
+      {#each filteredNodes as node, i (i)}
         {@const h = health[node.tag]}
         {@const isNodeActive = node.active}
         {@const showSelectionBadge = enableXray && isNodeActive && !node.stub}
