@@ -476,9 +476,19 @@ func (s *Service) mihomoBuildOf(st configlayer.StateView, installed configlayer.
 	return b, nil
 }
 
-// nodeNames — имя в профиле Mihomo для каждого узла состава группы: имя копии у
-// отдельных узлов (picks) и имя в файле провайдера у остальных.
+// nodeNames — имя в профиле Mihomo для каждого узла состава группы. У выпущенной
+// ручной группы имена берутся из её формы (shapeByID) — той же, что пишет
+// генератор: имя копии (отдельные узлы Picks и все узлы группы при copyAll) или
+// имя в файле провайдера. Иначе (группа не выпущена, группы «авто» и «резерв») —
+// имя копии у отдельных узлов (picks) и имя в файле провайдера у остальных.
 func (b *mihomoBuild) nodeNames(g Group) map[string]string {
+	if mg := b.shapeByID[g.ID]; mg != nil && len(mg.names) > 0 {
+		out := make(map[string]string, len(mg.names))
+		for ref, name := range mg.names {
+			out[ref] = name
+		}
+		return out
+	}
 	out := map[string]string{}
 	base, picks := b.split(g)
 	for _, n := range base {
@@ -510,7 +520,10 @@ func (b *mihomoBuild) memberName(member string, names map[string]string) string 
 }
 
 // mihomoPlan считает ожидаемый выбор каждой материализованной ручной группы по
-// Live и effectiveSelection. Пусто — сверять нечего.
+// Live и effectiveSelection. Пусто — сверять нечего. У каждой выпущенной ручной
+// группы выбор по умолчанию непуст по самому правилу выпуска (manualPick, D-36),
+// поэтому Mihomo не остаётся на DIRECT, который пользователь не ставил первым;
+// ветка pick == "" — защита, сверку для такой группы она не делает.
 func (s *Service) mihomoPlan(st configlayer.StateView, installed configlayer.InstalledKernels) ([]mihomoSelEntry, error) {
 	b, err := s.mihomoBuildOf(st, installed)
 	if err != nil || b == nil {

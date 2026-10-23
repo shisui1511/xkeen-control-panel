@@ -61,9 +61,14 @@ func (g mihomoGen) Generate(in configlayer.Input, installed configlayer.Installe
 // mihomoGroup — материализованная группа: что стоит в proxy-groups.
 type mihomoGroup struct {
 	g Group
-	// members — имена участников ручной группы (вложенные группы, DIRECT, REJECT).
-	members []string
-	// copies — имена копий отдельных узлов в proxies группы.
+	// proxies — итоговый упорядоченный список proxies ручной группы: участник по
+	// умолчанию первым, затем выпущенные вложенные группы и DIRECT/REJECT с первого
+	// места, копии узлов, в конце DIRECT/REJECT не с первого места.
+	proxies []string
+	// names — ручная группа: ссылка узла состава → его имя в группе профиля (имя
+	// копии или имя в файле провайдера); по ним идут выбор и сверка Mihomo.
+	names map[string]string
+	// copies — имена копий отдельных узлов в proxies групп «авто» и «резерв».
 	copies []string
 	// use, filter и exclude — провайдеры источников и фильтры имён.
 	use             []string
@@ -93,10 +98,12 @@ type mihomoBuild struct {
 	lists     map[string]*mihomoList
 	providers []mihomoProvider
 
-	shapes   []*mihomoGroup
-	used     map[string]bool
-	copyName map[string]string
-	copies   []*yaml.Node
+	shapes []*mihomoGroup
+	// shapeByID — форма выпущенной группы по её ID.
+	shapeByID map[string]*mihomoGroup
+	used      map[string]bool
+	copyName  map[string]string
+	copies    []*yaml.Node
 }
 
 // newMihomoBuild готовит расчёт: состав каждой группы по списку узлов Mihomo.
@@ -107,6 +114,7 @@ func newMihomoBuild(b mihomoBuild) *mihomoBuild {
 	b.emit = map[string]bool{}
 	b.visiting = map[string]bool{}
 	b.pick = map[string]string{}
+	b.shapeByID = map[string]*mihomoGroup{}
 	b.used = map[string]bool{}
 	b.copyName = map[string]string{}
 	for i := range b.groups {
@@ -350,29 +358,20 @@ func (b *mihomoBuild) prepare() {
 	}
 	for _, g := range b.groups {
 		if b.isEmitted(g.ID) {
-			b.shapes = append(b.shapes, b.shapeOf(g))
+			mg := b.shapeOf(g)
+			b.shapes = append(b.shapes, mg)
+			b.shapeByID[g.ID] = mg
 		}
 	}
 }
 
 // shapeOf описывает материализацию одной группы.
 func (b *mihomoBuild) shapeOf(g Group) *mihomoGroup {
+	if g.Mode == ModeManual {
+		return b.manualShape(g)
+	}
 	mg := &mihomoGroup{g: g}
 	base, picks := b.split(g)
-	if g.Mode == ModeManual {
-		for _, m := range b.res[g.ID].Members {
-			switch m.Kind {
-			case KindDirect:
-				mg.members = append(mg.members, mihomoDirect)
-			case KindReject:
-				mg.members = append(mg.members, mihomoReject)
-			case KindGroup:
-				if b.isEmitted(m.ID) {
-					mg.members = append(mg.members, b.byID[m.ID].Name)
-				}
-			}
-		}
-	}
 	filter := mihomoFilter(g.Include, g.Regex)
 	exclude := mihomoFilter(g.Exclude, g.Regex)
 
@@ -415,6 +414,111 @@ func (b *mihomoBuild) shapeOf(g Group) *mihomoGroup {
 		mg.use, mg.filter, mg.exclude = sourcesOf(base), filter, exclude
 	}
 	mg.copies = b.copiesOf(picks)
+	return mg
+}
+
+// manualShape описывает ручную группу (select) по правилу D-36. Первым в proxies
+// стоит участник по умолчанию p (manualPick), затем выпущенные вложенные группы и
+// DIRECT/REJECT с первого места, копии узлов и в конце DIRECT/REJECT не с первого
+// места: DIRECT и REJECT по умолчанию не выбираются, пока не стоят первыми среди
+// участников, и идут после узлов группы. Mihomo перечисляет узлы use после
+// proxies, поэтому при узле по умолчанию и таких участниках (или копиях Picks)
+// узлы группы пишутся копиями без use: ни DIRECT, ни REJECT не оказываются перед
+// узлами, а Mihomo до первой сверки выбирает p.
+func (b *mihomoBuild) manualShape(g Group) *mihomoGroup {
+	mg := &mihomoGroup{g: g, names: map[string]string{}}
+	base, picks := b.split(g)
+	p := b.pick[g.ID]
+
+	var lead, tail []string
+	idx := 0
+	for _, m := range g.Members {
+		if memberString(m) == "" {
+			continue
+		}
+		first := idx == 0
+		idx++
+		switch m.Kind {
+		case KindDirect, KindReject:
+			name := mihomoDirect
+			if m.Kind == KindReject {
+				name = mihomoReject
+			}
+			if first {
+				lead = append(lead, name)
+			} else {
+				tail = append(tail, name)
+			}
+		case KindGroup:
+			if x := b.byID[m.ID]; x != nil && b.isEmitted(m.ID) {
+				lead = append(lead, x.Name)
+			}
+		}
+	}
+
+	pRef, pIsNode := strings.CutPrefix(p, memberNode)
+	pIsBase := false
+	if pIsNode {
+		for _, n := range base {
+			pIsBase = pIsBase || n.Ref == pRef
+		}
+	}
+	copyAll := len(base) > 0 && pIsNode && (len(tail) > 0 || (pIsBase && len(picks) > 0))
+
+	var copies []string
+	if copyAll {
+		for _, n := range b.res[g.ID].Nodes {
+			name := b.copyOf(n)
+			mg.names[n.Ref] = name
+			if name != "" {
+				copies = append(copies, name)
+			}
+		}
+	} else {
+		if len(base) > 0 {
+			mg.use = sourcesOf(base)
+			mg.filter = mihomoFilter(g.Include, g.Regex)
+			mg.exclude = mihomoFilter(g.Exclude, g.Regex)
+		}
+		for _, n := range base {
+			mg.names[n.Ref] = n.MihomoName
+		}
+		for _, n := range picks {
+			name := b.copyOf(n)
+			mg.names[n.Ref] = name
+			if name != "" {
+				copies = append(copies, name)
+			}
+		}
+	}
+
+	pName := ""
+	switch {
+	case p == memberDirect:
+		pName = mihomoDirect
+	case p == memberReject:
+		pName = mihomoReject
+	case pIsNode:
+		pName = mg.names[pRef]
+		if pIsBase && !copyAll {
+			// Узел провайдера в proxies не пишется: Mihomo берёт первый узел use.
+			pName = ""
+		}
+	case strings.HasPrefix(p, memberGroup):
+		if x := b.byID[strings.TrimPrefix(p, memberGroup)]; x != nil {
+			pName = x.Name
+		}
+	}
+	if pName != "" {
+		mg.proxies = append(mg.proxies, pName)
+	}
+	for _, list := range [][]string{lead, copies, tail} {
+		for _, name := range list {
+			if name != pName {
+				mg.proxies = append(mg.proxies, name)
+			}
+		}
+	}
 	return mg
 }
 
@@ -607,7 +711,9 @@ func uses(srcs []string) []string {
 
 // groupsSection — proxy-groups: ручная группа — select, «авто» — url-test,
 // «резерв» — fallback из скрытой url-test по основным узлам и резервного узла
-// (без резерва — REJECT). У каждой группы empty-fallback: REJECT. nil — групп нет.
+// (без резерва — REJECT). Первым в proxies select стоит участник по умолчанию D-36,
+// DIRECT и REJECT не с первого места идут после узлов группы (manualShape). У
+// каждой группы empty-fallback: REJECT. nil — групп нет.
 func groupsSection(b *mihomoBuild) *yaml.Node {
 	if len(b.shapes) == 0 {
 		return nil
@@ -617,8 +723,7 @@ func groupsSection(b *mihomoBuild) *yaml.Node {
 		g := mg.g
 		switch g.Mode {
 		case ModeManual:
-			proxies := append(append([]string(nil), mg.members...), mg.copies...)
-			seq.Content = append(seq.Content, b.groupNode(g.Name, "select", false, proxies, uses(mg.use), mg.filter, mg.exclude, false))
+			seq.Content = append(seq.Content, b.groupNode(g.Name, "select", false, mg.proxies, uses(mg.use), mg.filter, mg.exclude, false))
 		case ModeAuto:
 			seq.Content = append(seq.Content, b.groupNode(g.Name, "url-test", false, mg.copies, uses(mg.use), mg.filter, mg.exclude, true))
 		case ModeFallback:

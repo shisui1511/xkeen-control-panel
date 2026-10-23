@@ -3,6 +3,8 @@
 package routing
 
 import (
+	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -121,5 +123,88 @@ func TestRouterMihomoManualFailClosed(t *testing.T) {
 	t.Logf("запросов через правило группы «Сервис»: %d, прошло: %d", attempts, passed)
 	if passed > 0 {
 		t.Errorf("утечка мимо VPN в Mihomo: %d из %d запросов прошли через группу «Сервис»", passed, attempts)
+	}
+}
+
+// Группа [группа, пустая для Mihomo, DIRECT] с узлами источника: DIRECT стоит не
+// первым, поэтому по умолчанию не выбирается. В профиле proxies начинается с узла,
+// DIRECT последний и после всех узлов группы (узлы пишутся копиями, без use), а
+// настоящий процесс Mihomo без сверки выбирает узел, и запрос по правилу группы
+// доходит до узла-процесса.
+func TestRouterMihomoManualDefaultNode(t *testing.T) {
+	nodePort, accessLog := rtStartNode(t)
+	core := rtNewMihomoCore(t)
+	e := rtNewEnv(t, rtWithMihomoCore(core))
+	e.writeUserProfile(t)
+	e.addMyRaw(t, "socks5://127.0.0.1:"+strconv.Itoa(nodePort)+"#rt-first", rtmXrayOnlyLink)
+
+	cat := e.catalog(t)
+	rtsNode(t, cat.Mihomo, "rt-first")
+	xrayOnly := rtsNode(t, cat.Xray, "rt-xray-only")
+	for _, n := range cat.Mihomo {
+		if n.Ref == xrayOnly.Ref {
+			t.Fatal("набор ссылок не даёт узла только для Xray: узел есть в каталоге Mihomo")
+		}
+	}
+
+	// Группа, пустая для Mihomo: единственный отдельный узел умеет только Xray.
+	_, onlyXray, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Только Xray", Mode: ModeAuto, Picks: []string{xrayOnly.Ref}})
+	if err != nil {
+		t.Fatalf("SaveGroup (Только Xray): %v", err)
+	}
+	_, nodeFirst, err := e.svc.SaveGroup(e.rev(t), Group{
+		Name: "Узел первым", Mode: ModeManual, Sources: GroupSources{All: true},
+		Members: []Member{{Kind: KindGroup, ID: onlyXray.ID}, {Kind: KindDirect}},
+	})
+	if err != nil {
+		t.Fatalf("SaveGroup (Узел первым): %v", err)
+	}
+	if _, _, err := e.svc.SaveRule(e.rev(t), Rule{
+		Enabled: true, Target: Target{Kind: KindGroup, ID: nodeFirst.ID},
+		Conds: []Cond{{Type: CondDomain, Values: []string{"node-first.example.test"}}},
+	}); err != nil {
+		t.Fatalf("SaveRule (домен → Узел первым): %v", err)
+	}
+	if _, err := e.svc.SetFinal(e.rev(t), Target{Kind: KindReject}); err != nil {
+		t.Fatalf("SetFinal: %v", err)
+	}
+	e.takeAndApply(t)
+
+	// Профиль: DIRECT не раньше узлов группы.
+	g, ok := rtmGroups(t, e.mihomoProfile(t))["Узел первым"]
+	if !ok {
+		t.Fatal("группы «Узел первым» нет в профиле Mihomo")
+	}
+	proxies := rtmStrings(g["proxies"])
+	if len(proxies) == 0 || proxies[0] == "DIRECT" || proxies[0] == "REJECT" {
+		t.Errorf("DIRECT раньше узлов в Mihomo: группа начинается с %v", proxies)
+	} else if proxies[len(proxies)-1] != "DIRECT" {
+		t.Errorf("DIRECT не последний в группе «Узел первым»: %v", proxies)
+	}
+	if _, has := g["use"]; has {
+		t.Errorf("DIRECT раньше узлов в Mihomo: узлы провайдера идут после proxies (%v)", g["use"])
+	}
+
+	// Процесс без сверки: Mihomo сам берёт первый элемент группы.
+	rtmtStart(t, e, core, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	now, err := core.svc.ProxyNow(ctx, "Узел первым")
+	if err != nil {
+		t.Fatalf("ProxyNow: %v", err)
+	}
+	if now == "DIRECT" || now == "REJECT" || (len(proxies) > 0 && now != proxies[0]) {
+		t.Errorf("Mihomo до сверки выбрал %q, ожидался первый элемент группы %q", now, strings.Join(proxies[:min(1, len(proxies))], ""))
+	}
+
+	// Трафик: запрос по правилу группы доходит до узла-процесса (запрос может
+	// упасть на DNS узла — важен лишь журнал узла).
+	saw := false
+	for end := time.Now().Add(30 * time.Second); time.Now().Before(end) && !saw; {
+		_, _ = rtSocksGet(core.port, "http://node-first.example.test/", 6*time.Second)
+		saw = rtWaitNodeSaw(accessLog, "node-first.example.test", 2*time.Second)
+	}
+	if !saw {
+		t.Error("запрос группы «Узел первым» не дошёл до узла: трафик мимо VPN")
 	}
 }
