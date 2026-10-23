@@ -3319,6 +3319,7 @@
   "cfg.routing.reason.preset_invalid": "пресет нельзя применить",
   "cfg.routing.reason.country_unavailable": "для страны нет данных",
   "cfg.routing.reason.service_unknown": "неизвестный сервис",
+  "cfg.routing.reason.kernel_invalid": "неизвестное ядро",
   "cfg.rules.list_aria": "Правила маршрутизации, сверху вниз: срабатывает первое совпавшее",
   "cfg.rules.fallback": "Всё остальное → {target}",
   "cfg.rules.fallback_label": "Всё остальное",

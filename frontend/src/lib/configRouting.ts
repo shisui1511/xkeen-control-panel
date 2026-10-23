@@ -644,7 +644,8 @@ export const ROUTING_REASONS = [
   'preset_unknown',
   'preset_invalid',
   'country_unavailable',
-  'service_unknown'
+  'service_unknown',
+  'kernel_invalid'
 ];
 
 const KNOWN_REASONS = new Set(ROUTING_REASONS);

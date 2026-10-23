@@ -3319,6 +3319,7 @@
   "cfg.routing.reason.preset_invalid": "the preset cannot be applied",
   "cfg.routing.reason.country_unavailable": "no data for the country",
   "cfg.routing.reason.service_unknown": "unknown service",
+  "cfg.routing.reason.kernel_invalid": "unknown kernel",
   "cfg.rules.list_aria": "Routing rules, top to bottom: the first match wins",
   "cfg.rules.fallback": "Everything else → {target}",
   "cfg.rules.fallback_label": "Everything else",
