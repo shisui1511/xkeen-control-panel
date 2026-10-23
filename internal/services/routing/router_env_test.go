@@ -16,6 +16,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Общая обвязка роутерных проверок модели маршрутизации: настоящий слой
@@ -31,18 +32,50 @@ const (
 // rtBoth — оба ядра установлены.
 var rtBoth = configlayer.InstalledKernels{Xray: true, Mihomo: true}
 
+// rtXrayOnly — установлен только Xray.
+var rtXrayOnly = configlayer.InstalledKernels{Xray: true}
+
 // rtEnv — слой и сервисы на каталоге теста.
 type rtEnv struct {
 	layer *configlayer.Layer
 	src   *sources.Service
 	svc   *Service
 	dir   string
+	// installed — какие ядра установлены в этом окружении (и у слоя, и у сервисов).
+	installed configlayer.InstalledKernels
+}
+
+// rtOptions — настройки окружения.
+type rtOptions struct {
+	installed configlayer.InstalledKernels
+	deps      []func(*Deps)
+}
+
+// rtOption меняет настройки окружения rtNewEnv.
+type rtOption func(*rtOptions)
+
+// rtWithDeps подменяет поля Deps (KernelVersion, Lists, Mihomo, Running, Ping)
+// до routing.New. Вызовы rtNewEnv без опций работают как раньше. Этим хуком
+// пользуются сценарии версий, списков и выбора участника.
+func rtWithDeps(f func(*Deps)) rtOption {
+	return func(o *rtOptions) { o.deps = append(o.deps, f) }
+}
+
+// rtWithKernels задаёт установленные ядра окружения (по умолчанию оба).
+func rtWithKernels(k configlayer.InstalledKernels) rtOption {
+	return func(o *rtOptions) { o.installed = k }
 }
 
 // rtNeedKernels пропускает тест, если на устройстве нет обоих ядер.
 func rtNeedKernels(t *testing.T) {
 	t.Helper()
-	for _, bin := range []string{rtXrayBin, rtMihomoBin} {
+	rtNeedBins(t, rtXrayBin, rtMihomoBin)
+}
+
+// rtNeedBins пропускает тест, если нет хотя бы одного из бинарников ядер.
+func rtNeedBins(t *testing.T, bins ...string) {
+	t.Helper()
+	for _, bin := range bins {
 		if _, err := os.Stat(bin); err != nil {
 			t.Skipf("ядро %s не установлено на устройстве: %v", filepath.Base(bin), err)
 		}
@@ -61,9 +94,20 @@ func rtLink(t *testing.T, name string) string {
 
 // rtNewEnv создаёт слой с генераторами источников и проверкой маршрутизации и
 // запускает его вместе с сервисами.
-func rtNewEnv(t *testing.T) *rtEnv {
+func rtNewEnv(t *testing.T, opts ...rtOption) *rtEnv {
 	t.Helper()
-	rtNeedKernels(t)
+	o := rtOptions{installed: rtBoth}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	var bins []string
+	if o.installed.Xray {
+		bins = append(bins, rtXrayBin)
+	}
+	if o.installed.Mihomo {
+		bins = append(bins, rtMihomoBin)
+	}
+	rtNeedBins(t, bins...)
 	tg := routertest.Current(t)
 	dir, err := os.MkdirTemp(tg.WorkDir, "rt-routing-")
 	if err != nil {
@@ -79,10 +123,21 @@ func rtNewEnv(t *testing.T) *rtEnv {
 	var enabled atomic.Bool
 	enabled.Store(true)
 	layer, err := configlayer.New(configlayer.Options{
-		DataDir:       dir,
-		Roots:         roots,
-		Enabled:       enabled.Load,
-		Binaries:      func() configlayer.Binaries { return configlayer.Binaries{Xray: rtXrayBin, Mihomo: rtMihomoBin} },
+		DataDir: dir,
+		Roots:   roots,
+		Enabled: enabled.Load,
+		Binaries: func() configlayer.Binaries {
+			var b configlayer.Binaries
+			if o.installed.Xray {
+				b.Xray = rtXrayBin
+			}
+			if o.installed.Mihomo {
+				b.Mihomo = rtMihomoBin
+			}
+			return b
+		},
+		// geodata (.dat) для проверки правил с ext:<файл>:<тег>.
+		XrayEnv:       func(string) []string { return utils.XrayAssetEnv(os.Environ(), "") },
 		DriftInterval: time.Hour,
 		DebounceDelay: 20 * time.Millisecond,
 	})
@@ -91,21 +146,27 @@ func rtNewEnv(t *testing.T) *rtEnv {
 	}
 	t.Cleanup(layer.Stop)
 
-	installed := func() configlayer.InstalledKernels { return rtBoth }
+	installed := func() configlayer.InstalledKernels { return o.installed }
 	src, err := sources.New(sources.Deps{DataDir: dir, Layer: layer, Installed: installed})
 	if err != nil {
 		t.Fatalf("sources.New: %v", err)
 	}
 	t.Cleanup(src.Stop)
-	svc, err := New(Deps{DataDir: dir, Layer: layer, Sources: src, Installed: installed})
+	deps := Deps{DataDir: dir, Layer: layer, Sources: src, Installed: installed}
+	for _, f := range o.deps {
+		f(&deps)
+	}
+	svc, err := New(deps)
 	if err != nil {
 		t.Fatalf("routing.New: %v", err)
 	}
 	t.Cleanup(svc.Stop)
 
-	for _, g := range src.Generators() {
-		if err := layer.RegisterGenerator(g); err != nil {
-			t.Fatalf("RegisterGenerator %s: %v", g.ID(), err)
+	for _, gens := range [][]configlayer.Generator{src.Generators(), svc.Generators()} {
+		for _, g := range gens {
+			if err := layer.RegisterGenerator(g); err != nil {
+				t.Fatalf("RegisterGenerator %s: %v", g.ID(), err)
+			}
 		}
 	}
 	if err := layer.AddLiveCommitter(src.CommitLive); err != nil {
@@ -119,7 +180,7 @@ func rtNewEnv(t *testing.T) *rtEnv {
 	}
 	layer.Start()
 	svc.Start()
-	return &rtEnv{layer: layer, src: src, svc: svc, dir: dir}
+	return &rtEnv{layer: layer, src: src, svc: svc, dir: dir, installed: o.installed}
 }
 
 // state — текущее состояние слоя.
@@ -146,6 +207,12 @@ func (e *rtEnv) addMyLinks(t *testing.T, names ...string) {
 	for _, n := range names {
 		links = append(links, rtLink(t, n))
 	}
+	e.addMyRaw(t, links...)
+}
+
+// addMyRaw добавляет в «Мои узлы» готовые ссылки (текст как у пользователя).
+func (e *rtEnv) addMyRaw(t *testing.T, links ...string) {
+	t.Helper()
 	view, err := e.src.Preview(context.Background(), nodes.Input{Text: strings.Join(links, "\n")})
 	if err != nil {
 		t.Fatalf("Preview: %v", err)
@@ -211,7 +278,7 @@ func (e *rtEnv) replaceGroups(t *testing.T, fn func(cfg *GroupsConfig)) {
 // catalog — каталог узлов текущего черновика.
 func (e *rtEnv) catalog(t *testing.T) sources.Catalog {
 	t.Helper()
-	cat, err := e.src.Catalog(inputOf(e.state(t)), rtBoth)
+	cat, err := e.src.Catalog(inputOf(e.state(t)), e.installed)
 	if err != nil {
 		t.Fatalf("Catalog: %v", err)
 	}
@@ -253,5 +320,5 @@ func (e *rtEnv) applyResult(t *testing.T) (*configlayer.ResultView, error) {
 // check вызывает проверку маршрутизации на черновике.
 func (e *rtEnv) check(t *testing.T) []configlayer.BuildIssue {
 	t.Helper()
-	return e.svc.Checker().Check(inputOf(e.state(t)), rtBoth)
+	return e.svc.Checker().Check(inputOf(e.state(t)), e.installed)
 }
