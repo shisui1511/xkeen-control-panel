@@ -1,5 +1,6 @@
 // e2e-pages: config/rules
 import { randomInt } from 'node:crypto';
+import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
@@ -46,6 +47,8 @@ interface SeedCond {
 interface SeedRule {
   conds: SeedCond[];
   target?: { kind: string; id?: string };
+  /** Своё правило ядра: условия при этом пустые. */
+  raw?: { kernel: 'xray' | 'mihomo'; text: string };
 }
 
 /** Уникальный домен прогона: значения правил разных тестов не пересекаются. */
@@ -69,7 +72,7 @@ async function seedRule(page: Page, seed: SeedRule): Promise<string> {
       origin: '',
       conds: seed.conds.map((c) => ({ type: c.type, values: c.values ?? [], lists: [] })),
       target: seed.target ?? { kind: 'direct' },
-      raw: null
+      raw: seed.raw ?? null
     }
   });
   expect(res.status, 'rules/save').toBe(200);
@@ -605,3 +608,232 @@ test('rules: своё правило ядра — Mihomo, отказ ядра, B
   await guard.assertClean();
   await resetDraft(page);
 });
+
+// --- 390 / 768 / 1280 px, обе темы и проход axe (фаза 146, план 29) ---
+
+interface Showcase {
+  /** Правило с четырьмя доменами, один из них длинный: чип «+1» и перенос значения. */
+  many: string;
+  /** Два условия через «И», цель REJECT. */
+  pair: string;
+  disabled: string;
+  /** Второе из двух правил с одним доменом и разными целями: чип перекрытия. */
+  overlapped: string;
+  mihomo: string;
+}
+
+/** Строки всех видов: чип «+{n}», выключенное, перекрытое, «только Mihomo» (и «Всё остальное»). */
+async function seedShowcase(page: Page): Promise<Showcase> {
+  const long = `${'x'.repeat(55)}-${randomInt(100000, 999999)}.example.com`;
+  const many = await seedRule(page, {
+    conds: [
+      { type: 'domain', values: [long, domain('shw', 2), domain('shw', 3), domain('shw', 4)] }
+    ]
+  });
+  const pair = await seedRule(page, {
+    conds: [
+      { type: 'port', values: ['443'] },
+      { type: 'network', values: ['udp'] }
+    ],
+    target: { kind: 'reject' }
+  });
+  const off = await seedRule(page, { conds: [{ type: 'domain', values: [domain('shw', 5)] }] });
+  const res = await api(page, 'POST', '/api/configlayer/routing/rules/enable', {
+    revision: await routingRevision(page),
+    id: off,
+    enabled: false
+  });
+  expect(res.status, 'rules/enable').toBe(200);
+  const same = domain('shw', 6);
+  await seedRule(page, { conds: [{ type: 'domain', values: [same] }] });
+  const overlapped = await seedRule(page, {
+    conds: [{ type: 'domain', values: [same] }],
+    target: { kind: 'reject' }
+  });
+  const mihomo = await seedRule(page, {
+    conds: [],
+    raw: { kernel: 'mihomo', text: 'PROCESS-NAME,example' }
+  });
+  return { many, pair, disabled: off, overlapped, mihomo };
+}
+
+/** Страница с темой, заданной до загрузки. */
+async function startThemed(page: Page, theme: 'dark' | 'light'): Promise<void> {
+  await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await startPage(page);
+}
+
+async function appliedTheme(page: Page): Promise<string | null> {
+  return page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  // Один тест на тему проходит три ширины: 390, 768 и 1280 px
+  test(`rules: 390 px, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await startThemed(page, theme);
+    await resetDraft(page);
+    const shw = await seedShowcase(page);
+    await openRules(page);
+    expect(await appliedTheme(page), 'тема применена').toBe(theme);
+
+    const problems: string[] = [];
+    for (const width of [390, 768, 1280]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expect(page.getByTestId(`rule-row-${shw.many}`)).toBeVisible({ timeout: T.action });
+      const narrow = width <= 768;
+
+      const found = await page.evaluate(
+        ({ id, narrow }) => {
+          const out: string[] = [];
+          const root = document.documentElement;
+          if (root.scrollWidth - root.clientWidth > 0)
+            out.push(`прокрутка страницы ${root.scrollWidth - root.clientWidth}px`);
+          const tab = document.querySelector('[data-testid="rules-tab"]') as HTMLElement;
+          const tabBox = tab.getBoundingClientRect();
+          const rows = [...tab.querySelectorAll<HTMLElement>('[data-testid^="rule-row-"]')];
+          rows.forEach((row, i) => {
+            const rb = row.getBoundingClientRect();
+            if (row.scrollWidth - row.clientWidth > 0)
+              out.push(`строка ${i + 1}: шире своей области`);
+            for (const el of row.querySelectorAll<HTMLElement>('.chip, .rr-actions, button')) {
+              const b = el.getBoundingClientRect();
+              if (b.width > 0 && (b.right > rb.right + 1 || b.left < rb.left - 1))
+                out.push(`строка ${i + 1}: ${el.className.split(' ')[0] || el.tagName} вне строки`);
+            }
+            if (narrow) {
+              for (const el of row.querySelectorAll<HTMLElement>('.rr-act, .rr-raise')) {
+                const b = el.getBoundingClientRect();
+                if (b.width < 43.5 || b.height < 43.5)
+                  out.push(
+                    `строка ${i + 1}: кнопка ${Math.round(b.width)}x${Math.round(b.height)}`
+                  );
+              }
+            }
+          });
+          const fb = document.querySelector('[data-testid="rules-fallback"]') as HTMLElement;
+          if (fb.getBoundingClientRect().right > tabBox.right + 1)
+            out.push('«Всё остальное» шире вкладки');
+
+          // раскладка строки с несколькими значениями: три ряда на узком, одна строка на широком
+          const row = document.querySelector(`[data-testid="rule-row-${id}"]`) as HTMLElement;
+          const box = (sel: string) =>
+            (row.querySelector(sel) as HTMLElement).getBoundingClientRect();
+          const conds = box('.rr-conds');
+          const actions = box('.rr-actions');
+          const target = box('.rr-target');
+          const gripShown =
+            getComputedStyle(row.querySelector('.rr-grip') as HTMLElement).display !== 'none';
+          if (narrow) {
+            if (conds.top < actions.bottom - 1) out.push('условия не ниже кнопок');
+            if (target.top < conds.bottom - 1) out.push('цель не ниже условий');
+            if (gripShown) out.push('ручка видна на узком экране');
+          } else {
+            if (conds.top >= actions.bottom) out.push('условия и кнопки не в одной строке');
+            if (target.top >= conds.bottom) out.push('цель и условия не в одной строке');
+          }
+          return out;
+        },
+        { id: shw.many, narrow }
+      );
+      for (const v of found) problems.push(`${width}px: ${v}`);
+    }
+    expect(problems, problems.join('\n')).toEqual([]);
+
+    await guard.assertClean();
+    await resetDraft(page);
+  });
+}
+
+/**
+ * Критичные и серьёзные нарушения axe (WCAG 2.0/2.1 A и AA, в том числе color-contrast)
+ * внутри заданных областей. Вывод — правило, селекторы и числа контраста: HTML узлов
+ * может содержать имена узлов и групп.
+ */
+async function axeSevere(page: Page, scopes: string[]): Promise<string[]> {
+  // смена ширины и открытие диалога идут с затуханием: axe не должен видеть полупрозрачный кадр
+  await page.waitForTimeout(500);
+  let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']);
+  for (const scope of scopes) builder = builder.include(scope);
+  const scan = await builder.analyze();
+  return scan.violations
+    .filter((v) => v.impact === 'critical' || v.impact === 'serious')
+    .map((v) => {
+      const nodes = v.nodes.slice(0, 3).map((n) => {
+        const msg = (n.any[0]?.message ?? '')
+          .replace(/^Element has insufficient color contrast of /, 'контраст ')
+          .replace(/, font size:.*?\)/, ')')
+          .replace(/\. Expected contrast ratio of /, ', нужно ');
+        return `${n.target.join(' ')} [${msg}]`;
+      });
+      return `${v.id} (${v.impact}, узлов ${v.nodes.length}): ${nodes.join(' | ')}`;
+    });
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`rules axe: строки и диалог, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await startThemed(page, theme);
+    await resetDraft(page);
+    const shw = await seedShowcase(page);
+    await openRules(page);
+
+    const problems: string[] = [];
+    const applied = await appliedTheme(page);
+    if (applied !== theme) problems.push(`тема применена ${applied}, ожидалась ${theme}`);
+
+    // строки всех видов: вкладка целиком на 1280 и 390 px
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      // области должны быть видимы: include без совпадений axe считает ошибкой
+      await expect(page.getByTestId(`rule-row-${shw.mihomo}`)).toBeVisible({ timeout: T.action });
+      await expect(page.getByTestId(`rule-row-${shw.overlapped}`)).toBeVisible();
+      await expect(page.getByTestId(`rule-row-${shw.pair}`)).toBeVisible();
+      await expect(page.getByTestId(`rule-row-${shw.disabled}`)).toBeVisible();
+      await expect(page.getByTestId('rules-fallback')).toBeVisible();
+      for (const v of await axeSevere(page, ['[data-testid="rules-tab"]'])) {
+        problems.push(`строки ${width}px: axe ${v}`);
+      }
+    }
+
+    // диалог правила: два условия, затем «Эксперт» и сегмент «Своё правило ядра»
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const modal = await openNewRule(page);
+    await modal.getByTestId('rule-cond-values-0').fill(domain('axe', 1));
+    await modal.getByTestId('rule-add-cond').click();
+    await modal.getByTestId('rule-cond-type-1').selectOption('port');
+    await modal.getByTestId('rule-cond-values-1').fill('443');
+    await expect(modal.locator('.re-and')).toHaveCount(1);
+    const scope = ['[data-testid="rule-modal"]'];
+
+    for (const v of await axeSevere(page, scope)) problems.push(`диалог 1280px: axe ${v}`);
+
+    await modal.locator('.toggle-slider').click();
+    await modal.getByRole('button', { name: /Своё правило ядра|Custom kernel rule/ }).click();
+    await expect(modal.getByTestId('rule-raw')).toBeVisible({ timeout: T.action });
+    await modal.getByTestId('rule-raw-kernel').selectOption('mihomo');
+    await modal.getByTestId('rule-raw-text').fill('PROCESS-NAME,example');
+    for (const v of await axeSevere(page, scope)) {
+      problems.push(`диалог, своё правило 1280px: axe ${v}`);
+    }
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(modal).toBeVisible();
+    for (const v of await axeSevere(page, scope)) {
+      problems.push(`диалог, своё правило 390px: axe ${v}`);
+    }
+
+    await modal.getByRole('button', { name: /^(Условия|Conditions)$/ }).click();
+    await expect(modal.getByTestId('rule-cond-values-0')).toBeVisible({ timeout: T.action });
+    for (const v of await axeSevere(page, scope)) problems.push(`диалог, условия 390px: axe ${v}`);
+
+    // Escape закрывает диалог, в черновик ничего не попадает
+    await page.keyboard.press('Escape');
+    await expect(modal).toBeHidden({ timeout: T.action });
+    expect(problems, problems.join('\n')).toEqual([]);
+
+    await guard.assertClean();
+    await resetDraft(page);
+  });
+}
