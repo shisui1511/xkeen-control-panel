@@ -200,8 +200,10 @@ func LoadBackupSet(dir string) (*BackupSet, error) {
 // PruneBackups оставляет keep новейших наборов apply-* в
 // <dataDir>/backup/config-layer. Трогает только каталоги с префиксом apply-:
 // каталог state и чужие каталоги в backup/ остаются на месте (T-144-21).
-// Отсутствие каталога копий ошибкой не считается.
-func PruneBackups(dataDir string, keep int) error {
+// Отсутствие каталога копий ошибкой не считается. protect — каталоги наборов,
+// на которые ссылается фактическое владение маршрутизацией (State.Routing): они
+// не удаляются и не входят в счёт keep, иначе возврат не из чего было бы делать.
+func PruneBackups(dataDir string, keep int, protect ...string) error {
 	root := filepath.Join(dataDir, backupDirName, backupLayerName)
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -212,7 +214,7 @@ func PruneBackups(dataDir string, keep int) error {
 	}
 	var sets []string
 	for _, e := range entries {
-		if e.IsDir() && strings.HasPrefix(e.Name(), backupSetPrefix) {
+		if e.IsDir() && strings.HasPrefix(e.Name(), backupSetPrefix) && !isProtectedDir(filepath.Join(root, e.Name()), protect) {
 			sets = append(sets, e.Name())
 		}
 	}
@@ -233,4 +235,14 @@ func PruneBackups(dataDir string, keep int) error {
 		sets = sets[1:]
 	}
 	return errors.Join(errs...)
+}
+
+// isProtectedDir — каталог набора назван в списке защищённых.
+func isProtectedDir(dir string, protect []string) bool {
+	for _, p := range protect {
+		if p != "" && filepath.Clean(p) == filepath.Clean(dir) {
+			return true
+		}
+	}
+	return false
 }

@@ -436,7 +436,7 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	// Pending: файл, которого нет в манифесте, или чей хэш у черновика отличается
 	// от записи манифеста при совпадающем диске. Ошибка сборки здесь не важна:
 	// «Применить» покажет её сам.
-	if generated, err := l.registry.Build(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft}, l.installed()); err == nil {
+	if generated, err := l.registry.Build(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft, Routing: routingFacts(l.opts.Roots, st.Routing)}, l.installed()); err == nil {
 		for _, g := range generated {
 			key := g.Key()
 			i, known := index[key]
@@ -838,7 +838,7 @@ func (l *Layer) RegisterChecker(c Checker) error {
 // собирает файлы для SourceDraft. Пустой срез — проблем нет. Диск проверка не
 // читает: это обязанность самих проверок.
 func (l *Layer) checksFor(st State) []BuildIssue {
-	return l.registry.Check(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft}, l.installed())
+	return l.registry.Check(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft, Routing: routingFacts(l.opts.Roots, st.Routing)}, l.installed())
 }
 
 // cachedChecks — checksFor с мемо по ревизии черновика, хэшу живых данных,

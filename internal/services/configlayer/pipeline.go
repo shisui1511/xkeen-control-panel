@@ -358,7 +358,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
 		}
 	}
-	used := Input{Sections: src, Live: liveWithOverlay(snap.Live, req.LiveOverlay), Mode: req.Source}
+	used := Input{Sections: src, Live: liveWithOverlay(snap.Live, req.LiveOverlay), Mode: req.Source, Routing: routingFacts(p.d.Roots, snap.Routing)}
 	files, err := p.d.Registry.Build(used, installed)
 	if err == nil {
 		files = filesOfScope(files, req.Kernel)
@@ -454,7 +454,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		return p.finish(p.rollbackAfterCommitFailure(ctx, out.Set, views, err))
 	}
 	// Ротация копий — после успешного применения; сбой уборки применение не отменяет.
-	_ = PruneBackups(p.d.DataDir, BackupRetention)
+	_ = PruneBackups(p.d.DataDir, BackupRetention, p.d.Store.Snapshot().Routing.backupDirs()...)
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
 }
 
