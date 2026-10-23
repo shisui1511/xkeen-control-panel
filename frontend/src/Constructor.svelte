@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { t } from './i18n';
   import { activeKernelName, showToast } from './stores';
   import Skeleton from './components/Skeleton.svelte';
@@ -57,8 +59,10 @@
     });
   }
 
-  function reportKernelChunkErrorAction(_node: HTMLElement, err: unknown): void {
-    reportKernelChunkError(err);
+  function reportKernelChunkErrorAttachment(err: unknown): Attachment {
+    return () => {
+      untrack(() => reportKernelChunkError(err));
+    };
   }
 </script>
 
@@ -98,7 +102,7 @@
         {:then { default: XrayRoutingConstructor }}
           <XrayRoutingConstructor {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} />
         {:catch err}
-          <div use:reportKernelChunkErrorAction={err}>
+          <div {@attach reportKernelChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -119,7 +123,7 @@
             {invalidateCache}
           />
         {:catch err}
-          <div use:reportKernelChunkErrorAction={err}>
+          <div {@attach reportKernelChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""

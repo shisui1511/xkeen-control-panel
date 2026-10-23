@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy, tick, untrack } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { fade, slide } from 'svelte/transition';
   import { SvelteSet } from 'svelte/reactivity';
   import { t, currentLang } from './i18n';
@@ -273,8 +274,10 @@
     });
   }
 
-  function reportConstructorChunkErrorAction(_node: HTMLElement, err: unknown): void {
-    reportConstructorChunkError(err);
+  function reportConstructorChunkErrorAttachment(err: unknown): Attachment {
+    return () => {
+      untrack(() => reportConstructorChunkError(err));
+    };
   }
 
   function jumpToSegment(pos: number) {
@@ -1738,7 +1741,7 @@
           />
         </div>
       {:catch err}
-        <div use:reportConstructorChunkErrorAction={err}>
+        <div {@attach reportConstructorChunkErrorAttachment(err)}>
           <EmptyState
             title={$t('app.chunk_load_failed')}
             description=""
