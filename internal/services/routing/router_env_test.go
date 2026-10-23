@@ -5,15 +5,22 @@ package routing
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -49,6 +56,9 @@ type rtEnv struct {
 type rtOptions struct {
 	installed configlayer.InstalledKernels
 	deps      []func(*Deps)
+	// selection — хуки выбора участника (CommitLive и AfterApply) зарегистрированы
+	// в слое, как это делает cmd/xcp/main.go.
+	selection bool
 }
 
 // rtOption меняет настройки окружения rtNewEnv.
@@ -59,6 +69,12 @@ type rtOption func(*rtOptions)
 // пользуются сценарии версий, списков и выбора участника.
 func rtWithDeps(f func(*Deps)) rtOption {
 	return func(o *rtOptions) { o.deps = append(o.deps, f) }
+}
+
+// rtWithSelection регистрирует в слое хуки выбора участника: фиксацию живых данных
+// и сверку после применения (сценарии 146-14).
+func rtWithSelection() rtOption {
+	return func(o *rtOptions) { o.selection = true }
 }
 
 // rtWithKernels задаёт установленные ядра окружения (по умолчанию оба).
@@ -177,6 +193,14 @@ func rtNewEnv(t *testing.T, opts ...rtOption) *rtEnv {
 	}
 	if err := layer.RegisterChecker(svc.Checker()); err != nil {
 		t.Fatalf("RegisterChecker: %v", err)
+	}
+	if o.selection {
+		if err := layer.AddLiveCommitter(svc.CommitLive); err != nil {
+			t.Fatalf("AddLiveCommitter (выбор): %v", err)
+		}
+		if err := layer.AddAfterApply(svc.AfterApply); err != nil {
+			t.Fatalf("AddAfterApply: %v", err)
+		}
 	}
 	layer.Start()
 	svc.Start()
@@ -322,3 +346,158 @@ func (e *rtEnv) check(t *testing.T) []configlayer.BuildIssue {
 	t.Helper()
 	return e.svc.Checker().Check(inputOf(e.state(t)), e.installed)
 }
+
+// --- отдельный процесс Mihomo для сценариев выбора участника (146-14) ---
+
+// rtMihomoCore — отдельный процесс Mihomo в каталоге теста: профиль панели из
+// окружения с портами и сокетом контроллера в этом каталоге. Ядро стенда и его
+// сокет не трогаются. Процесс можно остановить и запустить снова в том же
+// каталоге: cache.db (store-selected) остаётся и восстанавливает прежний выбор
+// процесса — ровно как при перезапуске или переключении ядра на устройстве.
+type rtMihomoCore struct {
+	dir  string
+	port int
+	svc  *services.MihomoService
+
+	mu   sync.Mutex
+	proc *rtProc
+}
+
+// rtNewMihomoCore готовит каталог и сервис Clash API отдельного процесса.
+func rtNewMihomoCore(t *testing.T) *rtMihomoCore {
+	t.Helper()
+	rtNeedBins(t, rtMihomoBin)
+	dir := rtWorkSubdir(t, "rm-")
+	return &rtMihomoCore{dir: dir, port: rtFreePort(t), svc: services.NewMihomoService(rtMihomoBin, "", dir)}
+}
+
+// rtWithMihomoCore подключает отдельный процесс к Deps окружения: Clash API
+// процесса вместо сокета стенда, Running и PID — по живости процесса.
+func rtWithMihomoCore(c *rtMihomoCore) rtOption {
+	return rtWithDeps(func(d *Deps) {
+		d.Mihomo = c.svc
+		d.Running = func(kernel string) bool { return kernel == configlayer.KernelMihomo && c.pid() != 0 }
+	})
+}
+
+// pid возвращает PID живого процесса или 0.
+func (c *rtMihomoCore) pid() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.proc == nil || !c.proc.alive() {
+		return 0
+	}
+	return c.proc.cmd.Process.Pid
+}
+
+// pidOf — функция PID для SelectionWatcher: только Mihomo.
+func (c *rtMihomoCore) pidOf(kernel string) int {
+	if kernel != configlayer.KernelMihomo {
+		return 0
+	}
+	return c.pid()
+}
+
+// stop завершает процесс; повторный вызов безопасен.
+func (c *rtMihomoCore) stop() {
+	c.mu.Lock()
+	p := c.proc
+	c.mu.Unlock()
+	if p != nil {
+		p.stop()
+	}
+}
+
+// rtCopyFiles копирует файлы каталога (без вложенных каталогов); нет каталога —
+// ничего не делает.
+func rtCopyFiles(t *testing.T, from, to string) {
+	t.Helper()
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(to, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(from, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(to, e.Name()), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// start собирает config.yaml процесса из профиля панели окружения (порты
+// прозрачного прокси и метка сокетов убраны, socks и сокет контроллера — в
+// каталоге теста) и запускает процесс. Файлы провайдеров копируются.
+func (c *rtMihomoCore) start(t *testing.T, e *rtEnv) {
+	t.Helper()
+	data, err := os.ReadFile(e.mihomoPath(configlayer.PanelMihomoProfile))
+	if err != nil {
+		t.Fatalf("профиль панели: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("профиль панели не YAML: %v", err)
+	}
+	for _, k := range []string{"redir-port", "tproxy-port", "routing-mark"} {
+		delete(doc, k)
+	}
+	sock := filepath.Join(c.dir, "c.sock")
+	if len(sock) > 100 {
+		t.Fatalf("путь сокета контроллера длиннее предела unix-сокета: %d знаков", len(sock))
+	}
+	_ = os.Remove(sock)
+	doc["socks-port"] = c.port
+	doc["bind-address"] = "127.0.0.1"
+	doc["allow-lan"] = false
+	doc["external-controller-unix"] = sock
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(c.dir, "config.yaml"), out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rtCopyFiles(t, e.mihomoPath(proxyProviderDir), filepath.Join(c.dir, proxyProviderDir))
+	rtCopyFiles(t, e.mihomoPath(mihomoRuleProviderDir), filepath.Join(c.dir, mihomoRuleProviderDir))
+	p := rtStartMihomoCore(t, c.dir, c.port)
+	c.mu.Lock()
+	c.proc = p
+	c.mu.Unlock()
+	rtWaitCond(t, 30*time.Second, "Clash API отдельного процесса", c.svc.HasController)
+}
+
+// rtWaitCond ждёт, пока условие станет истинным; не дождался — провал теста.
+func rtWaitCond(t *testing.T, wait time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(wait)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("не дождались: %s (%s)", what, wait)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// rtTLSPing — проверка узла для Deps.Ping: рукопожатие TLS с сервером узла
+// (доступность сервера по TLS), как у панели без запущенного Mihomo.
+func rtTLSPing(_ context.Context, n nodes.Node) error {
+	res, err := services.TLSPing(net.JoinHostPort(n.Host, strconv.Itoa(n.Port)), "", nil, true)
+	if err != nil {
+		return err
+	}
+	if !res.OK {
+		return errRtNoAnswer
+	}
+	return nil
+}
+
+// errRtNoAnswer — сервер узла не ответил на рукопожатие.
+var errRtNoAnswer = errors.New("сервер узла не ответил")

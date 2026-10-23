@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
@@ -95,6 +96,16 @@ type Service struct {
 	provs     map[string][]byte
 	provOrder []string
 	provBytes int
+
+	// Выбор участника ручной группы (146-14). selMu — общий замок ветки Mihomo в
+	// Select и сверки reconcileMihomo: выбор пользователя и сверка не перетирают
+	// друг друга. reconcilePending взводит markReconcile (сбой выбора в Mihomo),
+	// забирает SelectionWatcher через Swap(false). repickMu — один проход замены
+	// пропавшего узла за раз; repick — уведомления routing_repick по группам.
+	selMu            sync.Mutex
+	reconcilePending atomic.Bool
+	repickMu         sync.Mutex
+	repick           repickNotes
 }
 
 // New создаёт сервис. Слой, сервис источников и источник «установленных ядер»
@@ -137,7 +148,8 @@ func (s *Service) Generators() []configlayer.Generator {
 }
 
 // Start запускает фоновые задачи сервиса. В этом плане задач нет: наблюдатель dat
-// добавит 146-13, выбор участника — 146-14; они запускаются через Go.
+// добавит 146-13; SelectionWatcher (146-14) создаётся и останавливается в
+// cmd/xcp/main.go.
 func (s *Service) Start() {}
 
 // Stop останавливает фоновые задачи и ждёт их завершения. Идемпотентен.
