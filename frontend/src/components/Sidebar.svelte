@@ -132,13 +132,6 @@
     isSidebarCollapsed.update((v) => !v);
   }
 
-  $effect(() => {
-    window.addEventListener('keydown', handleGlobalKeydown);
-    return () => {
-      window.removeEventListener('keydown', handleGlobalKeydown);
-    };
-  });
-
   // Single source of truth for "does this nav item/group belong to the Mihomo
   // kernel" gating — hoisted so the group-level and item-level checks can
   // never drift apart (WR-01 / IN-05).
@@ -202,19 +195,6 @@
     }
   }
 
-  $effect(() => {
-    window.addEventListener('pointerover', handleRailPointerOver);
-    window.addEventListener('pointerout', handleRailPointerOut);
-    window.addEventListener('focusin', handleRailFocusIn);
-    window.addEventListener('focusout', handleRailFocusOut);
-    return () => {
-      window.removeEventListener('pointerover', handleRailPointerOver);
-      window.removeEventListener('pointerout', handleRailPointerOut);
-      window.removeEventListener('focusin', handleRailFocusIn);
-      window.removeEventListener('focusout', handleRailFocusOut);
-    };
-  });
-
   // Minimal portal attachment — moves the tooltip node to <body> on mount so it
   // paints outside .sidebar's overflow clipping box, and cleans it up on
   // teardown (the tooltip is only ever mounted while railTooltip is set).
@@ -223,6 +203,14 @@
     return () => node.remove();
   };
 </script>
+
+<svelte:window
+  onkeydown={handleGlobalKeydown}
+  onpointerover={handleRailPointerOver}
+  onpointerout={handleRailPointerOut}
+  onfocusin={handleRailFocusIn}
+  onfocusout={handleRailFocusOut}
+/>
 
 <!-- Brand block -->
 <div class="sidebar-logo">

@@ -225,29 +225,25 @@
     }
   }
 
-  $effect(() => {
+  // Блокировка прокрутки body и возврат фокуса, пока шторка открыта как оверлей. Вложение на
+  // document перезапускается при смене isOverlay и show: ветки открытия и закрытия те же,
+  // что были в $effect, а выход из оверлея возвращает фокус сразу, не дожидаясь ухода шторки.
+  const overlayLock: Attachment<Document> = () => {
     if (isOverlay && show) {
       lockBodyScroll();
-      if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      if (document.activeElement instanceof HTMLElement) {
         previouslyFocusedElement = document.activeElement;
       }
-      window.addEventListener('keydown', handleKeydown);
     } else {
       restoreBodyScroll();
-      window.removeEventListener('keydown', handleKeydown);
       if (previouslyFocusedElement && typeof previouslyFocusedElement.focus === 'function') {
         previouslyFocusedElement.focus();
         previouslyFocusedElement = null;
       }
     }
 
-    return () => {
-      restoreBodyScroll();
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('keydown', handleKeydown);
-      }
-    };
-  });
+    return () => restoreBodyScroll();
+  };
 
   onDestroy(() => {
     if (activeResizeCleanup) {
@@ -255,11 +251,11 @@
       activeResizeCleanup = null;
     }
     restoreBodyScroll();
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('keydown', handleKeydown);
-    }
   });
 </script>
+
+<svelte:document {@attach overlayLock} />
+<svelte:window onkeydown={handleKeydown} />
 
 {#snippet panel(animated: boolean)}
   <div
