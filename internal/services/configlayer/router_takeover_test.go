@@ -586,4 +586,145 @@ func TestRouterTakeoverScan(t *testing.T) {
 			t.Errorf("%s изменён при предпросмотре", k)
 		}
 	}
+
+	// Границы скана на настоящих файлах.
+	t.Run("jsonc", func(t *testing.T) {
+		// Файл routing с комментариями — «чистый»: переносится целиком.
+		rf := rtScanFile(t, files, rtTkRoutingFile)
+		if !rf.Pure || rf.Broken || rf.Legacy || !containsString(pv.Xray.Move, rtTkRoutingFile) {
+			t.Errorf("файл routing с комментариями не чистый: %+v", rf)
+		}
+	})
+
+	t.Run("mixed_broken_legacy_panel", func(t *testing.T) {
+		d := rtLiveDir(t)
+		xr := filepath.Join(d, "xray")
+		if err := os.MkdirAll(xr, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		const (
+			clean    = "12_clean.json"
+			mixed    = "10_mixed.json"
+			broken   = "11_broken.json"
+			legacy   = "05_routing.sub_test.json"
+			linked   = "13_linked.json"
+			rtTkPure = `{"routing": {"rules": [{"type": "field", "network": "tcp", "outboundTag": "direct"}]}}` + "\n"
+		)
+		write := map[string]string{
+			clean:  rtTkPure,
+			mixed:  `{"routing": {"rules": []}, "policy": {"levels": {"0": {"handshake": 4}}}}` + "\n",
+			broken: `{"routing": {"rules": [` + "\n",
+			legacy: rtTkPure,
+			// Файл панели в скан не попадает.
+			rtTkPanelRoute: rtTkPure,
+		}
+		for name, body := range write {
+			if err := os.WriteFile(filepath.Join(xr, name), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Симлинк на чистый файл вне configs/: удаление унесло бы ссылку, а не
+		// файл, поэтому он не переносится.
+		target := filepath.Join(d, "outside.json")
+		if err := os.WriteFile(target, []byte(rtTkPure), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(xr, linked)); err != nil {
+			t.Fatal(err)
+		}
+		snap := rtDirSnapshot(t, d)
+
+		foreign := func(kernel, rel string) bool { return kernel == KernelXray && rel == legacy }
+		fs, _, err := ScanXrayRouting(xr, foreign)
+		if err != nil {
+			t.Fatalf("битый файл ломает скан: %v", err)
+		}
+		if rf := rtScanFile(t, fs, clean); !rf.Pure {
+			t.Errorf("чистый файл не распознан: %+v", rf)
+		}
+		if rf := rtScanFile(t, fs, mixed); rf.Pure || !rf.HasRouting {
+			t.Errorf("routing + policy должен быть смешанным: %+v", rf)
+		}
+		if rf := rtScanFile(t, fs, broken); rf.Pure || !rf.Broken {
+			t.Errorf("битый JSON должен быть смешанным: %+v", rf)
+		}
+		if rf := rtScanFile(t, fs, legacy); !rf.Legacy || rf.Pure {
+			t.Errorf("файл старого слоя должен быть помечен и не чистым: %+v", rf)
+		}
+		for _, f := range fs {
+			if f.Name == rtTkPanelRoute {
+				t.Errorf("файл панели попал в скан: %+v", f)
+			}
+		}
+
+		got := RoutingPreviewOf(fs, "", defaultMihomoPorts())
+		if want := []string{clean}; !rtSameStrings(got.Xray.Move, want) {
+			t.Errorf("Move: %v, ожидалось %v", got.Xray.Move, want)
+		}
+		if want := []string{mixed, broken, linked}; !rtSameStrings(got.Xray.Left, want) {
+			t.Errorf("Left: %v, ожидалось %v", got.Xray.Left, want)
+		}
+		for _, n := range []string{legacy, rtTkPanelRoute} {
+			if containsString(got.Xray.Move, n) || containsString(got.Xray.Left, n) {
+				t.Errorf("%s не должен ни переноситься, ни числиться оставленным: %+v", n, got.Xray)
+			}
+		}
+
+		// Скан и предпросмотр ничего не трогают, в том числе битый файл.
+		after := rtDirSnapshot(t, d)
+		for k, v := range snap {
+			if after[k] != v {
+				t.Errorf("%s изменён сканом", k)
+			}
+		}
+	})
+
+	t.Run("plain_config_yaml", func(t *testing.T) {
+		e := rtNewTakeoverEnvKind(t, true)
+		kind, prev, ports, err := ScanMihomoActive(e.roots.Mihomo)
+		if err != nil {
+			t.Fatalf("ScanMihomoActive: %v", err)
+		}
+		if kind != configKindFile || prev != "config.yaml" {
+			t.Fatalf("обычный config.yaml: вид %q, профиль %q", kind, prev)
+		}
+		if ports.Redir != 7000 || ports.TProxy != 7001 {
+			t.Errorf("порты обычного config.yaml: %+v", ports)
+		}
+
+		e.setManaged(t, true)
+		if res := e.apply(t); !res.OK || res.Code != ResultApplied {
+			t.Fatalf("взятие: %+v", res)
+		}
+		e.assertConfigLink(t, panelProfileLink(e.roots.Mihomo))
+		m := e.layer.store.Snapshot().Routing.Mihomo
+		if m == nil || m.PrevKind != configKindFile {
+			t.Fatalf("State.Routing.Mihomo: %+v", m)
+		}
+
+		e.setManaged(t, false)
+		if res := e.apply(t); !res.OK || res.Code != ResultApplied {
+			t.Fatalf("возврат: %+v", res)
+		}
+		fi, err := os.Lstat(e.mihomo("config.yaml"))
+		if err != nil || fi.Mode()&os.ModeSymlink != 0 {
+			t.Fatalf("после возврата config.yaml не обычный файл: %v %v", fi, err)
+		}
+		if got := hashOf(e.mihomo("config.yaml")); got != e.hashes["config.yaml"] {
+			t.Errorf("config.yaml вернулся не побайтно: %s, ожидался %s", got, e.hashes["config.yaml"])
+		}
+		e.assertNoPanelFiles(t)
+	})
+}
+
+// rtScanFile возвращает результат скана файла name.
+func rtScanFile(t *testing.T, files []RoutingFile, name string) RoutingFile {
+	t.Helper()
+	for _, f := range files {
+		if f.Name == name {
+			return f
+		}
+	}
+	t.Fatalf("файла %s нет в скане", name)
+	return RoutingFile{}
 }
