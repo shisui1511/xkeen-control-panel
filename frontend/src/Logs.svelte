@@ -175,11 +175,9 @@
   }
 
   function updateSources() {
-    const sources = new Set<string>();
-    for (const log of logs) {
-      if (log.source) sources.add(log.source);
-    }
-    availableSources = Array.from(sources).sort();
+    availableSources = Array.from(
+      new Set(logs.filter((log) => log.source).map((log) => log.source))
+    ).sort();
   }
 
   function scheduleBatchFlush() {
@@ -197,7 +195,13 @@
       // The stream can repeat entries already loaded from history; ids are
       // the {#each} keys, so duplicates must never reach the list.
       const known = new Set(logs.map((l) => l.id));
-      const toAppend = incomingBuffer.filter((l) => !known.has(l.id) && known.add(l.id));
+      // id -> индекс первого появления в буфере: повтор внутри буфера отбрасывается.
+      const firstIndex = new Map(
+        incomingBuffer.map((l, i): [number, number] => [l.id, i]).reverse()
+      );
+      const toAppend = incomingBuffer.filter(
+        (l, i) => !known.has(l.id) && firstIndex.get(l.id) === i
+      );
       incomingBuffer = [];
       logs = [...logs, ...toAppend].slice(-MAX_LOG_BUFFER);
       updateSources();
@@ -269,8 +273,9 @@
         const data = await res.json();
         if (data.entries && Array.isArray(data.entries) && data.entries.length > 0) {
           // Merge with entries the stream may have delivered meanwhile.
-          const byId = new Map<number, any>();
-          for (const l of [...data.entries, ...logs]) byId.set(l.id, l);
+          const byId = new Map<number, any>(
+            [...data.entries, ...logs].map((l): [number, any] => [l.id, l])
+          );
           logs = [...byId.values()].sort((a, b) => a.id - b.id).slice(-MAX_LOG_BUFFER);
           updateSources();
           if (autoScroll && logContainer) {

@@ -91,31 +91,26 @@
   let selectedProtocol = $state<string | null>(null);
 
   let availableCountries = $derived.by(() => {
-    const counts = new Map<string, { code: string; flag?: string; count: number }>();
-    for (const node of nodes) {
-      if (!node || !node.country) continue;
-      const code = node.country.toUpperCase();
-      const existing = counts.get(code);
-      if (existing) {
-        existing.count++;
-        if (!existing.flag && node.flag) existing.flag = node.flag;
-      } else {
-        counts.set(code, { code, flag: node.flag, count: 1 });
-      }
-    }
-    return Array.from(counts.values()).sort((a, b) => b.count - a.count);
+    const withCountry = nodes.filter((node) => node && node.country);
+    const codes = new Set(withCountry.map((node) => node.country!.toUpperCase()));
+    return Array.from(codes, (code) => {
+      const group = withCountry.filter((node) => node.country!.toUpperCase() === code);
+      return {
+        code,
+        flag: group.find((node) => node.flag)?.flag ?? group[0].flag,
+        count: group.length
+      };
+    }).sort((a, b) => b.count - a.count);
   });
 
   let availableProtocols = $derived.by(() => {
-    const counts = new Map<string, number>();
-    for (const node of nodes) {
-      if (!node || !node.protocol) continue;
-      const proto = node.protocol.toUpperCase();
-      counts.set(proto, (counts.get(proto) || 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .map(([protocol, count]) => ({ protocol, count }))
-      .sort((a, b) => b.count - a.count);
+    const protocols = nodes
+      .filter((node) => node && node.protocol)
+      .map((node) => node.protocol!.toUpperCase());
+    return Array.from(new Set(protocols), (protocol) => ({
+      protocol,
+      count: protocols.filter((p) => p === protocol).length
+    })).sort((a, b) => b.count - a.count);
   });
 
   let filteredNodes = $derived.by(() => {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
+  import { SvelteMap } from 'svelte/reactivity';
   import { t, pluralize, currentLang } from './i18n';
   import {
     capabilities,
@@ -70,8 +71,8 @@
     download: number;
     timestamp: number;
   }
-  let trafficHistory = $state(new Map<string, TrafficHistory>());
-  let connectionSpeeds = $state(new Map<string, { uploadSpeed: number; downloadSpeed: number }>());
+  const trafficHistory = new SvelteMap<string, TrafficHistory>();
+  const connectionSpeeds = new SvelteMap<string, { uploadSpeed: number; downloadSpeed: number }>();
 
   let loading = $state(false);
   let error = $state('');
@@ -193,8 +194,6 @@
       try {
         const data = JSON.parse(event.data);
         const now = Date.now();
-        const nextSpeeds = new Map<string, { uploadSpeed: number; downloadSpeed: number }>();
-        const nextHistory = new Map<string, TrafficHistory>();
 
         const rawConnections: Connection[] = data.connections || [];
         for (const conn of rawConnections) {
@@ -207,13 +206,13 @@
             if (durationSec > 0.2 && durationSec <= 5) {
               uploadSpeed = Math.max(0, (conn.upload - prev.upload) / durationSec);
               downloadSpeed = Math.max(0, (conn.download - prev.download) / durationSec);
-              nextHistory.set(conn.id, {
+              trafficHistory.set(conn.id, {
                 upload: conn.upload,
                 download: conn.download,
                 timestamp: now
               });
             } else if (durationSec > 5) {
-              nextHistory.set(conn.id, {
+              trafficHistory.set(conn.id, {
                 upload: conn.upload,
                 download: conn.download,
                 timestamp: now
@@ -224,21 +223,26 @@
                 uploadSpeed = prevSpeed.uploadSpeed;
                 downloadSpeed = prevSpeed.downloadSpeed;
               }
-              nextHistory.set(conn.id, prev);
             }
           } else {
-            nextHistory.set(conn.id, {
+            trafficHistory.set(conn.id, {
               upload: conn.upload,
               download: conn.download,
               timestamp: now
             });
           }
 
-          nextSpeeds.set(conn.id, { uploadSpeed, downloadSpeed });
+          connectionSpeeds.set(conn.id, { uploadSpeed, downloadSpeed });
         }
 
-        connectionSpeeds = nextSpeeds;
-        trafficHistory = nextHistory;
+        // Записи исчезнувших соединений убираются — карты держат только текущие id.
+        const liveIds = new Set(rawConnections.map((c) => c.id));
+        for (const id of [...trafficHistory.keys()]) {
+          if (!liveIds.has(id)) trafficHistory.delete(id);
+        }
+        for (const id of [...connectionSpeeds.keys()]) {
+          if (!liveIds.has(id)) connectionSpeeds.delete(id);
+        }
         connections = rawConnections;
         loading = false;
       } catch (_) {}
@@ -496,7 +500,9 @@
   let groupedConnections = $derived.by(() => {
     if (groupingMode === 'none') return [];
 
-    const map = new Map<string, ConnectionGroup>();
+    // Словарь без прототипа для поиска по ключу + массив для порядка первого появления.
+    const byKey: Record<string, ConnectionGroup> = Object.create(null);
+    const ordered: ConnectionGroup[] = [];
 
     for (const conn of filteredConnections) {
       let key = '';
@@ -521,8 +527,9 @@
         subtitle = isDirect(conn) ? $t('conn.route_direct_sub') : $t('conn.route_proxy_sub');
       }
 
-      if (!map.has(key)) {
-        map.set(key, {
+      let grp = byKey[key];
+      if (!grp) {
+        grp = {
           key,
           title,
           subtitle,
@@ -530,22 +537,23 @@
           uploadTotal: 0,
           downloadTotal: 0,
           items: []
-        });
+        };
+        byKey[key] = grp;
+        ordered.push(grp);
       }
 
-      const grp = map.get(key)!;
       grp.activeCount += 1;
       grp.uploadTotal += conn.upload;
       grp.downloadTotal += conn.download;
       grp.items.push(conn);
     }
 
-    return Array.from(map.values()).sort((a, b) => b.downloadTotal - a.downloadTotal);
+    return ordered.sort((a, b) => b.downloadTotal - a.downloadTotal);
   });
 
   function handleVisibilityChange() {
     if (document.visibilityState === 'visible') {
-      trafficHistory = new Map();
+      trafficHistory.clear();
     }
   }
 
