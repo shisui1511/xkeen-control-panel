@@ -3,10 +3,43 @@
 package routing
 
 import (
+	"context"
 	"encoding/json"
+	"net/url"
+	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
+
+// rtVersionRE — число версии в выводе `xray version` и `mihomo -v`.
+var rtVersionRE = regexp.MustCompile(`\d+\.\d+\.\d+|alpha-[0-9a-f]{7,}`)
+
+// rtBinVersion читает версию настоящего бинарника ядра устройства; не
+// прочиталась — пустая строка (версия не определена).
+func rtBinVersion(bin string, args ...string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return rtVersionRE.FindString(string(out))
+}
+
+// withVersions — копия сервиса с заданными версиями ядер: представление читает
+// версии из Deps.KernelVersion.
+func withVersions(e *rtEnv, xray, mihomo string) *Service {
+	d := e.svc.d
+	d.KernelVersion = func(kernel string) string {
+		if kernel == "xray" {
+			return xray
+		}
+		return mihomo
+	}
+	return &Service{d: d}
+}
 
 // view читает представление маршрутизации.
 func (e *rtEnv) view(t *testing.T) RoutingView {
@@ -152,5 +185,166 @@ func TestRouterRoutingView(t *testing.T) {
 	}
 	if js := string(raw); strings.Contains(js, "null") || !strings.Contains(js, `"rules":[]`) {
 		t.Errorf("в представлении null или нет пустого списка правил: %s", js)
+	}
+}
+
+// Правила, варианты участника, доступность функций и испорченные секции.
+func TestRouterRoutingViewRules(t *testing.T) {
+	e := rtNewEnv(t)
+	e.addMyLinks(t, rtLinkNames...)
+	cat := e.catalog(t)
+
+	proxy, ok := rtGroupByName(e.groups(t), "Прокси")
+	if !ok {
+		t.Fatal("нет группы «Прокси»")
+	}
+	auto, _ := rtGroupByName(e.groups(t), "Авто")
+
+	// Варианты участника: «Прокси» — группа «Авто» первой, затем узлы без повторов;
+	// у «Авто» вариантов нет.
+	v := e.view(t)
+	opts := rtViewGroup(t, v, "Прокси").MemberOptions
+	if len(opts) == 0 || opts[0].Member != "group:"+auto.ID || opts[0].Label != "Авто" {
+		t.Fatalf("варианты участника «Прокси»: %+v", opts)
+	}
+	seen := map[string]bool{}
+	for _, o := range opts[1:] {
+		if !strings.HasPrefix(o.Member, "node:") || o.Label == "" || seen[o.Member] {
+			t.Errorf("вариант участника %+v: не узел, без имени или повтор", o)
+		}
+		seen[o.Member] = true
+	}
+	for _, n := range cat.Mihomo {
+		if !seen["node:"+n.Ref] {
+			t.Errorf("узла %s нет среди вариантов участника", n.Ref)
+		}
+	}
+	if got := rtViewGroup(t, v, "Авто").MemberOptions; len(got) != 0 {
+		t.Errorf("у группы «авто» есть варианты участника: %+v", got)
+	}
+
+	// Правила: номера с 1, пометка ядра.
+	toProxy := Target{Kind: KindGroup, ID: proxy.ID}
+	for _, r := range []Rule{
+		{Enabled: true, Conds: []Cond{{Type: CondDomain, Values: []string{"example.com"}}}, Target: toProxy},
+		{Enabled: true, Conds: []Cond{{Type: CondBittorrent}}, Target: Target{Kind: KindDirect}},
+		{Enabled: true, Raw: &RawRule{Kernel: "mihomo", Text: "DOMAIN,example.org"}, Target: toProxy},
+		{Enabled: true, Raw: &RawRule{Kernel: "xray", Text: `{"domain":["example.net"]}`}, Target: toProxy},
+	} {
+		if _, _, err := e.svc.SaveRule(e.rev(t), r); err != nil {
+			t.Fatalf("SaveRule: %v", err)
+		}
+	}
+	v = e.view(t)
+	wantOnly := []string{"", "xray", "mihomo", "xray"}
+	if len(v.Rules) != len(wantOnly) {
+		t.Fatalf("правил в представлении %d, ждали %d", len(v.Rules), len(wantOnly))
+	}
+	for i, r := range v.Rules {
+		if r.Index != i+1 || r.Only != wantOnly[i] || len(r.Issues) != 0 || len(r.Warnings) != 0 {
+			t.Errorf("правило %d: %+v", i+1, r)
+		}
+	}
+
+	// Доступность функций: на стенде версии ядер достаточны (Xray 1.8.10+,
+	// Mihomo 1.19.27+). Alpha-сборка Mihomo версии не имеет — undetermined.
+	live := withVersions(e, rtBinVersion(rtXrayBin, "version"), rtBinVersion(rtMihomoBin, "-v"))
+	lv, err := live.View()
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	for _, f := range []string{"xray_auto_group", "xray_fallback_group", "mihomo_groups"} {
+		fv, ok := lv.Features[f]
+		if !ok || fv.Min == "" || (fv.Status != "available" && fv.Status != "undetermined") {
+			t.Errorf("функция %s на стенде: %+v", f, fv)
+		}
+	}
+	if lv.Features["xray_auto_group"].Min != "1.8.10" || lv.Features["mihomo_groups"].Min != "1.19.27" {
+		t.Errorf("пороги функций: %+v", lv.Features)
+	}
+	for _, g := range lv.Groups {
+		for _, w := range g.Warnings {
+			if w.Code == "mode_unavailable" {
+				t.Errorf("на стенде режим группы %q недоступен: %+v", g.Name, w)
+			}
+		}
+	}
+
+	// Старые версии ядер: режим «авто» и группы Mihomo недоступны, предупреждения
+	// не блокируют «Применить».
+	old := withVersions(e, "1.8.4", "1.19.1")
+	ov, err := old.View()
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	oa := rtViewGroup(t, ov, "Авто")
+	if !rtViewHas(oa.Warnings, "mode_unavailable", "group", "Авто", "kernel", "xray", "min", "1.8.10") ||
+		!rtViewHas(oa.Warnings, "mode_unavailable", "group", "Авто", "kernel", "mihomo", "min", "1.19.27") {
+		t.Errorf("«Авто» на старых ядрах: %+v", oa.Warnings)
+	}
+	if fv := ov.Features["xray_auto_group"]; fv.Status != "unavailable" {
+		t.Errorf("xray_auto_group на Xray 1.8.4: %+v", fv)
+	}
+	if len(ov.Issues) != 0 {
+		t.Errorf("версии ядер дали блокирующие проблемы: %+v", ov.Issues)
+	}
+	if rtViewHas(rtViewGroup(t, ov, "Прокси").Warnings, "mode_unavailable", "kernel", "xray") {
+		t.Errorf("ручная группа Xray не зависит от версии")
+	}
+
+	// Устаревший отдельный узел: ссылки нет ни в одном ядре.
+	if _, _, err := e.svc.SaveGroup(e.rev(t), Group{Name: "Старый узел", Mode: ModeManual, Picks: []string{"my/deadbeef"}}); err != nil {
+		t.Fatalf("SaveGroup: %v", err)
+	}
+	stale := rtViewGroup(t, e.view(t), "Старый узел")
+	if !rtViewHas(stale.Warnings, "pick_stale", "group", "Старый узел") {
+		t.Errorf("нет pick_stale для узла, которого нет в каталоге: %+v", stale.Warnings)
+	}
+
+	// Секреты узлов в представление не попадают.
+	raw, err := json.Marshal(e.view(t))
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, name := range []string{"vless_ws", "trojan_grpc", "vless_reality"} {
+		u, err := url.Parse(rtLink(t, name))
+		if err != nil || u.User == nil || len(u.User.Username()) < 8 {
+			t.Fatalf("в ссылке %s нет секрета для проверки: %v", name, err)
+		}
+		if strings.Contains(string(raw), u.User.Username()) {
+			t.Errorf("секрет узла %s попал в представление", name)
+		}
+	}
+
+	// Испорченная секция не роняет представление: пустая секция и section_invalid.
+	junk := map[string]json.RawMessage{
+		GroupsSection: json.RawMessage(`"junk"`),
+		RulesSection:  json.RawMessage(`{"v":7,"items":[]}`),
+		ProbeSection:  json.RawMessage(`[1]`),
+	}
+	for name, body := range junk {
+		e.putSection(t, name, body)
+		jv := e.view(t)
+		if !rtViewHas(jv.Issues, "section_invalid", "section", name) {
+			t.Errorf("секция %s с мусором: Issues %+v", name, jv.Issues)
+		}
+		if jv.Groups == nil || jv.Rules == nil || jv.Issues == nil {
+			t.Errorf("секция %s с мусором: срезы nil", name)
+		}
+		switch name {
+		case GroupsSection:
+			if len(jv.Groups) != 0 {
+				t.Errorf("испорченная секция groups отдала группы: %+v", jv.Groups)
+			}
+		case RulesSection:
+			if len(jv.Rules) != 0 {
+				t.Errorf("испорченная секция rules отдала правила: %+v", jv.Rules)
+			}
+		case ProbeSection:
+			if jv.Probe != jv.ProbeDefaults {
+				t.Errorf("испорченная секция probe: %+v, по умолчанию %+v", jv.Probe, jv.ProbeDefaults)
+			}
+		}
+		e.dropSection(t, name)
 	}
 }
