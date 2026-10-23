@@ -348,7 +348,7 @@
 </div>
 
 <div class="subscriptions-list">
-  {#each subscriptions as sub}
+  {#each subscriptions as sub (sub.id)}
     {@const exp = getExpireDays(sub.expire)}
     <div class="card sub-card" id="sub-card-{sub.id}">
       <!-- Sub header row -->
@@ -706,12 +706,12 @@
               </button>
 
               <div class="announcement-popover">
-                {#each parseAnnouncementLines(sub.announcement) as line}
+                {#each parseAnnouncementLines(sub.announcement) as line, li (li)}
                   {#if line.isWarn}
                     <div class="inline-announcement-warn">
                       <span class="inline-warn-icon">!</span>
                       <span class="inline-warn-text">
-                        {#each parseSimpleMarkdown(line.text) as token}
+                        {#each parseSimpleMarkdown(line.text) as token, ti (ti)}
                           {#if token.type === 'text'}
                             {token.value}
                           {:else if token.type === 'bold'}
@@ -728,7 +728,7 @@
                     </div>
                   {:else}
                     <div class="announcement-line">
-                      {#each parseSimpleMarkdown(line.text) as token}
+                      {#each parseSimpleMarkdown(line.text) as token, ti (ti)}
                         {#if token.type === 'text'}
                           {token.value}
                         {:else if token.type === 'bold'}

@@ -3,7 +3,7 @@
 </script>
 
 <div class="node-skeleton-list">
-  {#each Array(3) as _}
+  {#each Array(3) as _, i (i)}
     <div class="node-skeleton-row">
       <div class="left-section">
         <div class="skeleton-circle-wrapper">

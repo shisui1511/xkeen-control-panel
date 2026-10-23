@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { t } from '../i18n';
   import { formatTimeAgo } from '../lib/batchLatencyTester';
 
@@ -17,14 +17,13 @@
 
   let { proxyName, history = [], anchorEl, onClose }: Props = $props();
 
-  let popoverEl: HTMLElement | null = $state(null);
   let top = $state(0);
   let left = $state(0);
 
   let recentHistory = $derived(history.slice(-10));
 
-  function updatePosition() {
-    if (!anchorEl || !popoverEl) return;
+  function updatePosition(popoverEl: HTMLElement) {
+    if (!anchorEl) return;
     const anchorRect = anchorEl.getBoundingClientRect();
     const popoverRect = popoverEl.getBoundingClientRect();
 
@@ -51,42 +50,40 @@
     left = newLeft;
   }
 
-  function handlePointerDown(e: PointerEvent) {
-    const target = e.target as Node | null;
-    if (popoverEl && !popoverEl.contains(target) && anchorEl && !anchorEl.contains(target)) {
-      onClose();
-    }
-  }
+  // Позиция и закрытие всплывающего окна: слушатели живут, пока жив элемент;
+  // первое позиционирование читает anchorEl, поэтому смена якоря пересчитывает позицию.
+  const popover: Attachment<HTMLElement> = (popoverEl) => {
+    const place = () => updatePosition(popoverEl);
 
-  function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      onClose();
+    function handlePointerDown(e: PointerEvent) {
+      const target = e.target as Node | null;
+      if (!popoverEl.contains(target) && anchorEl && !anchorEl.contains(target)) {
+        onClose();
+      }
     }
-  }
 
-  $effect(() => {
-    if (popoverEl && anchorEl) {
-      updatePosition();
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        onClose();
+      }
     }
-  });
 
-  onMount(() => {
+    place();
     window.addEventListener('pointerdown', handlePointerDown, true);
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
     // Initial position
-    setTimeout(updatePosition, 0);
-  });
+    const timer = setTimeout(place, 0);
 
-  onDestroy(() => {
-    if (typeof window !== 'undefined') {
+    return () => {
+      clearTimeout(timer);
       window.removeEventListener('pointerdown', handlePointerDown, true);
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
-    }
-  });
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  };
 
   function getBarHeight(delay: number): number {
     if (delay <= 0) return 100;
@@ -109,7 +106,7 @@
 </script>
 
 <div
-  bind:this={popoverEl}
+  {@attach popover}
   class="latency-history-popover"
   style="top: {top}px; left: {left}px;"
   role="dialog"
@@ -133,7 +130,7 @@
   {:else}
     <div class="sparkline-section">
       <div class="history-sparkline">
-        {#each recentHistory as item}
+        {#each recentHistory as item, i (i)}
           <div
             class="sparkline-bar"
             style="height: {getBarHeight(item.delay)}%; background-color: {getBarColor(
@@ -149,7 +146,7 @@
     </div>
 
     <div class="history-list">
-      {#each [...recentHistory].reverse() as item}
+      {#each [...recentHistory].reverse() as item, i (i)}
         <div class="history-row">
           <span class="history-time">
             {formatTimeAgo(new Date(item.time).getTime(), $t)}

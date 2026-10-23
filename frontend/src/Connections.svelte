@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
+  import { SvelteMap } from 'svelte/reactivity';
+  import type { Attachment } from 'svelte/attachments';
   import { t, pluralize, currentLang } from './i18n';
   import {
     capabilities,
@@ -70,8 +72,8 @@
     download: number;
     timestamp: number;
   }
-  let trafficHistory = $state(new Map<string, TrafficHistory>());
-  let connectionSpeeds = $state(new Map<string, { uploadSpeed: number; downloadSpeed: number }>());
+  const trafficHistory = new SvelteMap<string, TrafficHistory>();
+  const connectionSpeeds = new SvelteMap<string, { uploadSpeed: number; downloadSpeed: number }>();
 
   let loading = $state(false);
   let error = $state('');
@@ -102,42 +104,36 @@
   let selectedConnection = $derived(
     selectedConnectionId ? connections.find((c) => c.id === selectedConnectionId) : null
   );
-  let drawerElement: HTMLDivElement | null = $state(null);
-  let previouslyFocusedRow: HTMLElement | null = null;
 
-  $effect(() => {
-    if (selectedConnectionId) {
-      if (!previouslyFocusedRow) {
-        previouslyFocusedRow = document.activeElement as HTMLElement;
-      }
-      setTimeout(() => {
-        if (drawerElement) {
-          const focusables = getDrawerFocusableElements();
-          if (focusables.length > 0) focusables[0].focus();
-          else drawerElement.focus();
-        }
-      }, 0);
-    } else if (previouslyFocusedRow) {
-      previouslyFocusedRow.focus();
-      previouslyFocusedRow = null;
-    }
-  });
-
-  function getDrawerFocusableElements(): HTMLElement[] {
-    if (!drawerElement) return [];
+  function getDrawerFocusableElements(drawer: HTMLElement): HTMLElement[] {
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-    return Array.from(drawerElement.querySelectorAll(selectors)).filter(
+    return Array.from(drawer.querySelectorAll(selectors)).filter(
       (el) => (el as HTMLElement).offsetParent !== null
     ) as HTMLElement[];
   }
 
+  // Фокус в панель при её появлении и возврат на строку при закрытии.
+  const drawerFocus: Attachment<HTMLElement> = (drawer) => {
+    const opener = document.activeElement as HTMLElement | null;
+    const timer = setTimeout(() => {
+      const focusables = getDrawerFocusableElements(drawer);
+      if (focusables.length > 0) focusables[0].focus();
+      else drawer.focus();
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      opener?.focus();
+    };
+  };
+
   function handleDrawerKeydown(event: KeyboardEvent) {
+    const drawer = event.currentTarget as HTMLElement;
     if (event.key === 'Escape') {
       selectedConnectionId = null;
       return;
     }
     if (event.key === 'Tab') {
-      const focusables = getDrawerFocusableElements();
+      const focusables = getDrawerFocusableElements(drawer);
       if (focusables.length === 0) {
         event.preventDefault();
         return;
@@ -146,7 +142,7 @@
       const last = focusables[focusables.length - 1];
       const active = document.activeElement;
       if (event.shiftKey) {
-        if (active === first || active === drawerElement || !drawerElement?.contains(active)) {
+        if (active === first || active === drawer || !drawer.contains(active)) {
           last.focus();
           event.preventDefault();
         }
@@ -193,8 +189,6 @@
       try {
         const data = JSON.parse(event.data);
         const now = Date.now();
-        const nextSpeeds = new Map<string, { uploadSpeed: number; downloadSpeed: number }>();
-        const nextHistory = new Map<string, TrafficHistory>();
 
         const rawConnections: Connection[] = data.connections || [];
         for (const conn of rawConnections) {
@@ -207,13 +201,13 @@
             if (durationSec > 0.2 && durationSec <= 5) {
               uploadSpeed = Math.max(0, (conn.upload - prev.upload) / durationSec);
               downloadSpeed = Math.max(0, (conn.download - prev.download) / durationSec);
-              nextHistory.set(conn.id, {
+              trafficHistory.set(conn.id, {
                 upload: conn.upload,
                 download: conn.download,
                 timestamp: now
               });
             } else if (durationSec > 5) {
-              nextHistory.set(conn.id, {
+              trafficHistory.set(conn.id, {
                 upload: conn.upload,
                 download: conn.download,
                 timestamp: now
@@ -224,21 +218,26 @@
                 uploadSpeed = prevSpeed.uploadSpeed;
                 downloadSpeed = prevSpeed.downloadSpeed;
               }
-              nextHistory.set(conn.id, prev);
             }
           } else {
-            nextHistory.set(conn.id, {
+            trafficHistory.set(conn.id, {
               upload: conn.upload,
               download: conn.download,
               timestamp: now
             });
           }
 
-          nextSpeeds.set(conn.id, { uploadSpeed, downloadSpeed });
+          connectionSpeeds.set(conn.id, { uploadSpeed, downloadSpeed });
         }
 
-        connectionSpeeds = nextSpeeds;
-        trafficHistory = nextHistory;
+        // Записи исчезнувших соединений убираются — карты держат только текущие id.
+        const liveIds = new Set(rawConnections.map((c) => c.id));
+        for (const id of [...trafficHistory.keys()]) {
+          if (!liveIds.has(id)) trafficHistory.delete(id);
+        }
+        for (const id of [...connectionSpeeds.keys()]) {
+          if (!liveIds.has(id)) connectionSpeeds.delete(id);
+        }
         connections = rawConnections;
         loading = false;
       } catch (_) {}
@@ -496,7 +495,9 @@
   let groupedConnections = $derived.by(() => {
     if (groupingMode === 'none') return [];
 
-    const map = new Map<string, ConnectionGroup>();
+    // Словарь без прототипа для поиска по ключу + массив для порядка первого появления.
+    const byKey: Record<string, ConnectionGroup> = Object.create(null);
+    const ordered: ConnectionGroup[] = [];
 
     for (const conn of filteredConnections) {
       let key = '';
@@ -521,8 +522,9 @@
         subtitle = isDirect(conn) ? $t('conn.route_direct_sub') : $t('conn.route_proxy_sub');
       }
 
-      if (!map.has(key)) {
-        map.set(key, {
+      let grp = byKey[key];
+      if (!grp) {
+        grp = {
           key,
           title,
           subtitle,
@@ -530,22 +532,23 @@
           uploadTotal: 0,
           downloadTotal: 0,
           items: []
-        });
+        };
+        byKey[key] = grp;
+        ordered.push(grp);
       }
 
-      const grp = map.get(key)!;
       grp.activeCount += 1;
       grp.uploadTotal += conn.upload;
       grp.downloadTotal += conn.download;
       grp.items.push(conn);
     }
 
-    return Array.from(map.values()).sort((a, b) => b.downloadTotal - a.downloadTotal);
+    return ordered.sort((a, b) => b.downloadTotal - a.downloadTotal);
   });
 
   function handleVisibilityChange() {
     if (document.visibilityState === 'visible') {
-      trafficHistory = new Map();
+      trafficHistory.clear();
     }
   }
 
@@ -564,18 +567,20 @@
   // Поток подключений подчиняется тому же сигналу, что и опросы Mihomo: сокет не открывается,
   // пока API не отвечает (в том числе до первого ответа capabilities), закрывается при уходе
   // в down без цикла переподключений и открывается сам, когда API ответил.
+  function syncStream(ready: boolean, unknown: boolean) {
+    if (ready) {
+      loading = true;
+      connectWS();
+    } else {
+      disconnectWS();
+      loading = unknown;
+    }
+  }
+
   $effect(() => {
     const ready = $mihomoApiReady;
     const unknown = $mihomoApiState === 'unknown';
-    untrack(() => {
-      if (ready) {
-        loading = true;
-        connectWS();
-      } else {
-        disconnectWS();
-        loading = unknown;
-      }
-    });
+    untrack(() => syncStream(ready, unknown));
   });
 
   onDestroy(() => {
@@ -1168,7 +1173,7 @@
     aria-modal="true"
     aria-labelledby="inspector-title"
     tabindex="-1"
-    bind:this={drawerElement}
+    {@attach drawerFocus}
     onkeydown={handleDrawerKeydown}
   >
     <div class="drawer-header">

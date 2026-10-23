@@ -1,11 +1,9 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { t } from '../i18n';
   import { pingTargetStore, setPingTargetConfig, type PingPreset } from '../lib/pingTargetStore';
 
   let isOpen = $state(false);
-  let menuEl: HTMLElement | null = $state(null);
-  let btnEl: HTMLElement | null = $state(null);
 
   let config = $derived($pingTargetStore);
 
@@ -21,35 +19,32 @@
     setPingTargetConfig({ timeoutMs });
   }
 
-  function handlePointerDown(e: PointerEvent) {
-    const target = e.target as Node | null;
-    if (isOpen && menuEl && !menuEl.contains(target) && btnEl && !btnEl.contains(target)) {
-      isOpen = false;
+  // Контейнер держит и кнопку, и выпадающее меню: клик вне него закрывает меню.
+  const dismissOnOutside: Attachment<HTMLElement> = (container) => {
+    function handlePointerDown(e: PointerEvent) {
+      const target = e.target as Node | null;
+      if (isOpen && !container.contains(target)) {
+        isOpen = false;
+      }
     }
-  }
 
-  function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && isOpen) {
-      isOpen = false;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && isOpen) {
+        isOpen = false;
+      }
     }
-  }
 
-  onMount(() => {
     window.addEventListener('pointerdown', handlePointerDown, true);
     window.addEventListener('keydown', handleKeyDown);
-  });
-
-  onDestroy(() => {
-    if (typeof window !== 'undefined') {
+    return () => {
       window.removeEventListener('pointerdown', handlePointerDown, true);
       window.removeEventListener('keydown', handleKeyDown);
-    }
-  });
+    };
+  };
 </script>
 
-<div class="quick-ping-menu-container">
+<div class="quick-ping-menu-container" {@attach dismissOnOutside}>
   <button
-    bind:this={btnEl}
     type="button"
     class="btn btn-ghost btn-icon {isOpen ? 'active' : ''}"
     onclick={toggleOpen}
@@ -76,7 +71,7 @@
   </button>
 
   {#if isOpen}
-    <div bind:this={menuEl} class="quick-ping-dropdown" role="menu">
+    <div class="quick-ping-dropdown" role="menu">
       <div class="dropdown-header">
         {$t('settings.ping_target_title')}
       </div>
@@ -122,7 +117,7 @@
       <div class="dropdown-section">
         <div class="section-title">{$t('settings.ping_timeout_label')}</div>
         <div class="timeout-chips">
-          {#each [2000, 5000, 8000, 10000] as to}
+          {#each [2000, 5000, 8000, 10000] as to (to)}
             <button
               type="button"
               class="timeout-chip {config.timeoutMs === to ? 'selected' : ''}"
