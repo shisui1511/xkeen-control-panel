@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -334,5 +335,169 @@ func TestRouterCatalogMatchesFiles(t *testing.T) {
 	dcat, _, _ := rtCatalogMatches(t, e, rtLiveInput(t, configlayer.SourceDraft, sections, ls, nil), rtBoth)
 	if count(dcat.Xray, sub)+count(dcat.Mihomo, sub) != 0 {
 		t.Error("узлы выключенной подписки остались в каталоге")
+	}
+}
+
+// rtDraftRaw — секция черновика как строка (пусто, если секции нет).
+func rtDraftRaw(t *testing.T, e *rtEnv, name string) string {
+	t.Helper()
+	st, err := e.layer.ReadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(st.Draft[name])
+}
+
+// DeleteWith и DeleteNodeWith меняют источник и переданные секции одной
+// ревизией черновика; секции источников в extra и недопустимые имена отвергаются
+// без правки; хук SetDraftExtras кладёт секции в ту же правку, что «Добавить».
+func TestRouterDeleteWithAndDraftExtras(t *testing.T) {
+	e := rtNewEnv(t, false, false)
+	const groups = "test_groups"
+
+	var calls int
+	var lastAdded []string
+	e.svc.SetDraftExtras(func(st configlayer.StateView, added []string) (map[string]json.RawMessage, error) {
+		calls++
+		lastAdded = added
+		for name := range st.Draft {
+			if _, ok := sourceID(name); ok {
+				return nil, nil
+			}
+		}
+		return map[string]json.RawMessage{groups: json.RawMessage(`{"v":1}`)}, nil
+	})
+
+	// Первый источник: хук кладёт секцию в ту же правку (ревизия +1).
+	rev := e.rev(t)
+	e.addLinks(t, rtLink(t, "vless_ws"))
+	if got := e.rev(t); got != rev+1 {
+		t.Fatalf("после первого Add ревизия %d, ожидалась %d", got, rev+1)
+	}
+	if calls != 1 || len(lastAdded) != 1 || lastAdded[0] != MySourceID {
+		t.Errorf("хук после первого Add: вызовов %d, добавлено %v", calls, lastAdded)
+	}
+	if got := rtDraftRaw(t, e, groups); got != `{"v":1}` {
+		t.Errorf("секция групп после первого Add: %q", got)
+	}
+
+	// Второй Add: хук вызван, секция не меняется.
+	rev = e.rev(t)
+	e.addLinks(t, rtLink(t, "trojan_grpc"))
+	if calls != 2 || e.rev(t) != rev+1 {
+		t.Errorf("второй Add: вызовов %d, ревизия %d (была %d)", calls, e.rev(t), rev)
+	}
+	if got := rtDraftRaw(t, e, groups); got != `{"v":1}` {
+		t.Errorf("секция групп изменилась вторым Add: %q", got)
+	}
+
+	// Ошибка хука — ошибка Add без правки черновика, токен остаётся годным.
+	e.svc.SetDraftExtras(func(configlayer.StateView, []string) (map[string]json.RawMessage, error) {
+		return nil, errors.New("отказ хука")
+	})
+	view, err := e.svc.Preview(context.Background(), inputOf(rtLink(t, "ss_plain")))
+	if err != nil || view.Token == "" {
+		t.Fatalf("Preview: %v", err)
+	}
+	rev = e.rev(t)
+	before := rtDraftRaw(t, e, MySection)
+	if _, err := e.svc.Add(rev, view.Token); err == nil {
+		t.Error("Add прошёл при ошибке хука")
+	}
+	if e.rev(t) != rev || rtDraftRaw(t, e, MySection) != before {
+		t.Error("ошибка хука изменила черновик")
+	}
+	// Хук с секцией источника — недопустимый ввод, черновик прежний.
+	e.svc.SetDraftExtras(func(configlayer.StateView, []string) (map[string]json.RawMessage, error) {
+		return map[string]json.RawMessage{MySection: json.RawMessage(`null`)}, nil
+	})
+	if _, err := e.svc.Add(rev, view.Token); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("Add с секцией источника из хука: %v, ожидался ErrInvalidInput", err)
+	}
+	if e.rev(t) != rev || rtDraftRaw(t, e, MySection) != before {
+		t.Error("секция источника из хука изменила черновик")
+	}
+	// Без хука — прежнее поведение, тот же токен.
+	e.svc.SetDraftExtras(nil)
+	if _, err := e.svc.Add(rev, view.Token); err != nil {
+		t.Fatalf("Add без хука: %v", err)
+	}
+	if e.rev(t) != rev+1 {
+		t.Errorf("Add без хука: ревизия %d, ожидалась %d", e.rev(t), rev+1)
+	}
+
+	// DeleteWith: источник удалён и секция изменена одной ревизией.
+	const sub1, sub2 = "a1b2c3d4", "b2c3d4e5"
+	rtAddSub(t, e, rtSubNamed(t, sub1, "Провайдер", nil), sub1, false, nil)
+	rtAddSub(t, e, rtSubNamed(t, sub2, "Провайдер", nil), sub2, false, nil)
+	rev = e.rev(t)
+	if _, err := e.svc.DeleteWith(rev, sub1, map[string]json.RawMessage{groups: json.RawMessage(`{"v":2}`)}); err != nil {
+		t.Fatalf("DeleteWith: %v", err)
+	}
+	if e.rev(t) != rev+1 {
+		t.Errorf("DeleteWith: ревизия %d, ожидалась %d", e.rev(t), rev+1)
+	}
+	if rtDraftRaw(t, e, sectionName(sub1)) != "" || rtDraftRaw(t, e, groups) != `{"v":2}` {
+		t.Error("DeleteWith: источник не удалён или секция групп не изменена")
+	}
+
+	// DeleteWith с секцией источника или недопустимым именем — ошибка, черновик прежний.
+	rev = e.rev(t)
+	snap := func() string {
+		return rtDraftRaw(t, e, groups) + "|" + rtDraftRaw(t, e, sectionName(sub2)) + "|" + rtDraftRaw(t, e, MySection)
+	}
+	snapshot := snap()
+	_, err = e.svc.DeleteWith(rev, sub2, map[string]json.RawMessage{MySection: json.RawMessage(`null`), groups: json.RawMessage(`{"v":3}`)})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("DeleteWith с src_my в extra: %v, ожидался ErrInvalidInput", err)
+	}
+	_, err = e.svc.DeleteWith(rev, sub2, map[string]json.RawMessage{"Bad-Name": json.RawMessage(`{}`)})
+	if !errors.Is(err, configlayer.ErrInvalidSection) {
+		t.Errorf("DeleteWith с недопустимым именем секции: %v, ожидался ErrInvalidSection", err)
+	}
+	if e.rev(t) != rev || snap() != snapshot {
+		t.Error("отвергнутый DeleteWith изменил черновик")
+	}
+	// Устаревшая ревизия — конфликт, ничего не меняется.
+	if _, err := e.svc.DeleteWith(rev-1, sub2, map[string]json.RawMessage{groups: json.RawMessage(`{"v":3}`)}); !errors.Is(err, configlayer.ErrDraftConflict) {
+		t.Errorf("DeleteWith на устаревшей ревизии: %v", err)
+	}
+	if e.rev(t) != rev || snap() != snapshot {
+		t.Error("DeleteWith на устаревшей ревизии изменил черновик")
+	}
+
+	// DeleteNodeWith: запись «Моих узлов» удалена, секция изменена одной ревизией.
+	entries := e.my(t).Entries
+	if len(entries) < 2 {
+		t.Fatalf("в «Моих узлах» записей %d, нужно не меньше двух", len(entries))
+	}
+	rev = e.rev(t)
+	if _, err := e.svc.DeleteNodeWith(rev, entries[0].ID, map[string]json.RawMessage{groups: json.RawMessage(`{"v":3}`)}); err != nil {
+		t.Fatalf("DeleteNodeWith: %v", err)
+	}
+	if e.rev(t) != rev+1 || rtDraftRaw(t, e, groups) != `{"v":3}` || findEntry(e.my(t), entries[0].ID) >= 0 {
+		t.Error("DeleteNodeWith: запись не удалена, секция групп не изменена или ревизия не +1")
+	}
+	// Секция источника в extra — ошибка, запись на месте.
+	rev = e.rev(t)
+	left := e.my(t).Entries
+	_, err = e.svc.DeleteNodeWith(rev, left[0].ID, map[string]json.RawMessage{sectionName(sub2): nil})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("DeleteNodeWith с src_ в extra: %v, ожидался ErrInvalidInput", err)
+	}
+	if e.rev(t) != rev || len(e.my(t).Entries) != len(left) {
+		t.Error("отвергнутый DeleteNodeWith изменил черновик")
+	}
+	// nil в extra удаляет секцию.
+	if _, err := e.svc.DeleteNodeWith(rev, left[0].ID, map[string]json.RawMessage{groups: nil}); err != nil {
+		t.Fatalf("DeleteNodeWith с nil: %v", err)
+	}
+	if rtDraftRaw(t, e, groups) != "" {
+		t.Error("nil в extra не удалил секцию")
+	}
+	// Delete остаётся обёрткой без extra.
+	rev = e.rev(t)
+	if _, err := e.svc.Delete(rev, sub2); err != nil || e.rev(t) != rev+1 {
+		t.Errorf("Delete: %v, ревизия %d (была %d)", err, e.rev(t), rev)
 	}
 }

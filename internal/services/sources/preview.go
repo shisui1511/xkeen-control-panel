@@ -531,6 +531,25 @@ func (s *Service) addEntry(rev int64, entry *previewEntry) (AddResult, error) {
 		sections[sectionName(id)] = section
 		live[id] = c.liveSource(now)
 	}
+	// Хук draftExtras (SetDraftExtras): его секции идут в ту же правку черновика, что
+	// источники (группы по умолчанию при первом источнике, D-09).
+	if hook := s.extrasHook(); hook != nil {
+		var addedIDs []string
+		if _, present := st.Draft[MySection]; added > 0 && !present {
+			addedIDs = append(addedIDs, MySourceID)
+		}
+		for id := range live {
+			addedIDs = append(addedIDs, id)
+		}
+		sort.Strings(addedIDs)
+		extra, err := hook(st, addedIDs)
+		if err != nil {
+			return AddResult{}, err
+		}
+		if sections, err = mergeExtra(sections, extra); err != nil {
+			return AddResult{}, err
+		}
+	}
 	var liveFn func(configlayer.Sections) error
 	if len(live) > 0 {
 		liveFn = func(l configlayer.Sections) error {

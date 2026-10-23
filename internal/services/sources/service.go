@@ -3,6 +3,7 @@ package sources
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -141,6 +142,35 @@ type Service struct {
 	refreshMu sync.Mutex
 	// nmu сериализует сборку уведомлений.
 	nmu sync.Mutex
+
+	// emu защищает draftExtras.
+	emu sync.Mutex
+	// draftExtras — хук секций, которые «Добавить» кладёт в ту же правку черновика
+	// (группы по умолчанию при первом источнике); nil — хука нет.
+	draftExtras DraftExtras
+}
+
+// DraftExtras — хук «Добавить»: по состоянию слоя до правки и идентификаторам
+// источников, которые эта правка добавляет («my» — если «Мои узлы» появляются в
+// черновике впервые, и id новых подписок), возвращает секции, которые войдут в ту
+// же правку черновика (одна ревизия). Секции src_* недопустимы; nil-значение
+// удаляет секцию. Ошибка хука — ошибка «Добавить» без правки черновика.
+type DraftExtras func(st configlayer.StateView, added []string) (map[string]json.RawMessage, error)
+
+// SetDraftExtras задаёт хук секций для «Добавить» (nil снимает его). Вызывается
+// при сборке в cmd/xcp/main.go до Start; гонок с «Добавить» нет, хук читается под
+// мьютексом.
+func (s *Service) SetDraftExtras(fn DraftExtras) {
+	s.emu.Lock()
+	s.draftExtras = fn
+	s.emu.Unlock()
+}
+
+// extrasHook — текущий хук секций (nil — не задан).
+func (s *Service) extrasHook() DraftExtras {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	return s.draftExtras
 }
 
 // New создаёт сервис. Слой и источник «установленных ядер» обязательны.
