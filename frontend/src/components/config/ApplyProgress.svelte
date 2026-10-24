@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Attachment } from 'svelte/attachments';
   import { t } from '../../i18n';
   import Button from '../Button.svelte';
   import Icon from '../../lib/components/Icon.svelte';
@@ -15,7 +16,6 @@
   const STEP_ORDER: StepId[] = ['build', 'validate_xray', 'validate_mihomo', 'write', 'restart'];
   const KERNEL_LABELS: Record<string, string> = { xray: 'Xray', mihomo: 'Mihomo' };
 
-  let section = $state<HTMLElement | null>(null);
   // Ход виден, пока идёт применение, и после него — до «Скрыть» или следующего запуска.
   // Свежая загрузка страницы с уже завершённым применением его не показывает.
   let seenRunning = $state(false);
@@ -45,15 +45,12 @@
   );
   const restartRows = $derived<LayerRestart[]>(apply?.restart ?? []);
 
-  // Карточка появилась — прокручиваем к ней, не дёргая страницу при reduced-motion
-  let wasVisible = false;
-  $effect(() => {
-    if (visible && !wasVisible && section) {
-      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      section.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
-    }
-    wasVisible = visible;
-  });
+  // Карточка появилась — прокручиваем к ней, не дёргая страницу при reduced-motion.
+  // Карточка есть в разметке, только пока она видна, поэтому прокрутка — при её монтировании
+  const scrollIntoViewOnShow: Attachment<HTMLElement> = (node) => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    node.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+  };
 
   const kernelLabel = (k: string) => KERNEL_LABELS[k] ?? k;
 
@@ -147,7 +144,7 @@
     class="card apply-progress"
     data-testid="config-progress"
     aria-label={$t('cfg.progress_title')}
-    bind:this={section}
+    {@attach scrollIntoViewOnShow}
   >
     <div class="card-title">{$t('cfg.progress_title')}</div>
 

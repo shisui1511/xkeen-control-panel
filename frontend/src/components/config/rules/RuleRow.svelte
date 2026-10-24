@@ -49,7 +49,6 @@
   const RAW_SHOWN = 80;
 
   let busy = $state(false);
-  let rowEl: HTMLLIElement | undefined;
 
   const locked = $derived(busy || $applyRunning);
   const first = $derived(rule.index <= 1);
@@ -130,22 +129,25 @@
     e.dataTransfer.effectAllowed = 'move';
     // Firefox не начинает перетаскивание без данных
     e.dataTransfer.setData('text/plain', rule.id);
-    if (rowEl) e.dataTransfer.setDragImage(rowEl, 16, 16);
+    // Ручка лежит внутри строки: картинкой перетаскивания служит вся строка
+    const row = (e.currentTarget as HTMLElement).closest('li');
+    if (row) e.dataTransfer.setDragImage(row, 16, 16);
     onpickup?.(rule);
   }
 
-  function handleDragOver(e: DragEvent) {
+  // Обработчики ниже висят на самой строке: currentTarget — её элемент
+  function handleDragOver(e: DragEvent & { currentTarget: HTMLLIElement }) {
     // Чужое перетаскивание (файл, текст) строку не интересует
-    if (dragId === null || dragLocked || !rowEl) return;
+    if (dragId === null || dragLocked) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-    const box = rowEl.getBoundingClientRect();
+    const box = e.currentTarget.getBoundingClientRect();
     onhover?.(rule, e.clientY < box.top + box.height / 2 ? 'before' : 'after');
   }
 
-  function handleDragLeave(e: DragEvent) {
+  function handleDragLeave(e: DragEvent & { currentTarget: HTMLLIElement }) {
     // Переход на дочерний элемент строки — не уход
-    if (rowEl && e.relatedTarget instanceof Node && rowEl.contains(e.relatedTarget)) return;
+    if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
     onleave?.(rule);
   }
 
@@ -214,7 +216,6 @@
   class:rr-drop-before={dropPos === 'before'}
   class:rr-drop-after={dropPos === 'after'}
   data-testid="rule-row-{rule.id}"
-  bind:this={rowEl}
   ondragover={handleDragOver}
   ondragleave={handleDragLeave}
   ondrop={handleDrop}
