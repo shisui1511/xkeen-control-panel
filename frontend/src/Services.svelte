@@ -2231,6 +2231,8 @@
     padding: 0 2px;
     font-size: 12px;
     color: var(--fg-secondary);
+    /* Ошибка проверки обновлений несёт URL без пробелов: без переноса он шире 390 px */
+    overflow-wrap: anywhere;
   }
 
   .update-hint.update-hint-error {
