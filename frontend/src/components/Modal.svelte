@@ -48,9 +48,12 @@
     }, 0);
     return () => {
       clearTimeout(timerId);
-      // Фокус возвращается только при закрытии (isOpen уже false); размонтирование
-      // модали при isOpen=true фокус не трогает, как и раньше.
-      if (!isOpen) previouslyFocusedElement?.focus();
+      // В очистке пропсы читаются со значениями до изменения, поэтому isOpen здесь всегда
+      // true. Разметка диалога к этому моменту уже убрана: если фокус потерян (body или
+      // отсоединённый узел), он возвращается на прежний элемент, пока тот в разметке.
+      const active = document.activeElement;
+      const focusLost = !active || active === document.body || !active.isConnected;
+      if (focusLost && previouslyFocusedElement?.isConnected) previouslyFocusedElement.focus();
     };
   };
 
