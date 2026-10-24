@@ -705,12 +705,37 @@ func waitFor(ctx context.Context, try func() bool) error {
 // LifecyclePollInterval — как часто фоновый запуск пробует взять замки применения и жизненного цикла.
 var LifecyclePollInterval = 250 * time.Millisecond
 
+// applyTailWait — сколько запуск по кнопке ждёт конца хвоста завершённого запуска,
+// прежде чем ответить ErrApplyBusy.
+var applyTailWait = 5 * time.Second
+
+// waitTail ждёт замок применения, пока прошлый запуск дорабатывает хвост: apply_done
+// уже опубликован и клиент видит итог, а замок снимается чуть позже (runPipeline
+// после Run ещё обновляет уведомления и публикует событие routing). Истина — замок
+// взят; ложь — замок держит идущий запуск или другая операция под замком, хвост не
+// кончился за applyTailWait или контекст отменён.
+func (p *Pipeline) waitTail(ctx context.Context) bool {
+	deadline := time.Now().Add(applyTailWait)
+	for p.tail.Load() && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(5 * time.Millisecond):
+		}
+		if p.applyMu.TryLock() {
+			return true
+		}
+	}
+	return p.applyMu.TryLock()
+}
+
 // TryBegin берёт замки перед Run: сначала applyMu («одно применение за раз»), затем
 // замок жизненного цикла ядра. Порядок всегда applyMu → lifecycleMu; обратный
 // запрещён: обработчики HTTP, держащие lifecycleMu, applyMu не берут
 // (восстановление снимка — 144-10). Второе применение по кнопке во время идущего получает
-// ErrApplyBusy. user=true (запуск по кнопке) при занятом замке ядра сразу получает
-// ErrKernelBusy; user=false (фоновый запуск) ждёт оба замка (и applyMu) с паузой
+// ErrApplyBusy; пришедшее в хвост уже завершённого запуска (итог опубликован, замок
+// ещё не снят) ждёт замок (waitTail). user=true (запуск по кнопке) при занятом замке
+// ядра сразу получает ErrKernelBusy; user=false (фоновый запуск) ждёт оба замка (и applyMu) с паузой
 // LifecyclePollInterval и отменяется контекстом (тогда возвращается ctx.Err()).
 // release снимает замок ядра, затем applyMu; повторный вызов безопасен.
 //
@@ -719,14 +744,19 @@ var LifecyclePollInterval = 250 * time.Millisecond
 func (p *Pipeline) TryBegin(ctx context.Context, user bool) (release func(), err error) {
 	if !p.applyMu.TryLock() {
 		if user {
-			return nil, ErrApplyBusy
-		}
-		// Фоновый запуск (установка ядра, включение слоя) не должен теряться из-за
-		// идущего применения: ждёт его конца с тем же опросом, что и замок ядра.
-		if err := waitFor(ctx, p.applyMu.TryLock); err != nil {
-			return nil, err
+			if !p.waitTail(ctx) {
+				return nil, ErrApplyBusy
+			}
+		} else {
+			// Фоновый запуск (установка ядра, включение слоя) не должен теряться из-за
+			// идущего применения: ждёт его конца с тем же опросом, что и замок ядра.
+			if err := waitFor(ctx, p.applyMu.TryLock); err != nil {
+				return nil, err
+			}
 		}
 	}
+	// Замок взят: хвост прошлого запуска, если он был, кончился.
+	p.tail.Store(false)
 	lifecycle := p.d.Lifecycle
 	if lifecycle != nil {
 		switch {

@@ -404,3 +404,46 @@ func TestRouterKernelInstalledAutoTake(t *testing.T) {
 		t.Errorf("State.Routing.Xray изменено установкой Mihomo:\n%s\n%s", xrayState, after)
 	}
 }
+
+// waitApplyDone ждёт итога применения из подписки.
+func waitApplyDone(t *testing.T, events <-chan Event) ApplyView {
+	t.Helper()
+	deadline := time.After(120 * time.Second)
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				t.Fatal("подписка закрыта до apply_done")
+			}
+			if ev.Type == EventApplyDone {
+				view, ok := ev.Data.(ApplyView)
+				if !ok || view.Result == nil {
+					t.Fatalf("apply_done без итога: %+v", ev.Data)
+				}
+				return view
+			}
+		case <-deadline:
+			t.Fatal("применение не завершилось")
+		}
+	}
+}
+
+// «Применить» по кнопке сразу после apply_done не получает «применение уже идёт»:
+// итог публикуется ещё под замком применения (дальше идёт хвост запуска —
+// уведомления и событие routing), и запуск, пришедший в этот хвост, ждёт замок.
+func TestRouterApplyRightAfterDone(t *testing.T) {
+	e := rtNewTakeoverEnv(t)
+	events, cancel, err := e.layer.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	for i := 1; i <= 200; i++ {
+		if err := e.layer.StartApply(true); err != nil {
+			t.Fatalf("запуск %d сразу после итога прошлого: %v", i, err)
+		}
+		if view := waitApplyDone(t, events); !view.Result.OK {
+			t.Fatalf("запуск %d: %+v", i, view.Result)
+		}
+	}
+}

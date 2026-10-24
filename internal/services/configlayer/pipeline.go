@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -197,8 +198,11 @@ type Pipeline struct {
 	d PipelineDeps
 	// applyMu — «одно применение за раз»; берётся в TryBegin раньше замка жизненного цикла.
 	applyMu sync.Mutex
-	mu      sync.Mutex
-	view    ApplyView
+	// tail — итог запуска опубликован (finish), а замок применения держится до конца
+	// хвоста запуска; сбрасывает тот, кто взял замок следующим (TryBegin).
+	tail atomic.Bool
+	mu   sync.Mutex
+	view ApplyView
 	// commitLive — хуки фиксации живых данных (PipelineDeps.CommitLive) в порядке
 	// регистрации, под mu: слой добавляет их после создания конвейера.
 	commitLive []LiveCommitFunc
@@ -308,6 +312,7 @@ func (p *Pipeline) finish(res ResultView) ApplyView {
 	p.view.Result = &res
 	out := p.view.clone()
 	p.mu.Unlock()
+	p.tail.Store(true)
 	p.d.Broker.Publish(Event{Type: EventApplyDone, Data: out})
 	return out
 }
