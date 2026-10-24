@@ -919,31 +919,35 @@ func (s *SubscriptionService) GetLocked(id string) *Subscription {
 	return nil
 }
 
-// saveDebugFiles сохраняет кэш-файлы подписки (сырой ответ, заголовки,
-// отчёт парсинга) под именем её провайдера. mu должен быть захвачен вызывающим.
-func (s *SubscriptionService) saveDebugFiles(id string, body []byte, headers http.Header, report *ParseReport) {
+// debugFilesWriterLocked готовит запись кэш-файлов подписки (сырой ответ, заголовки,
+// отчёт парсинга) под именем её провайдера. mu должен быть захвачен вызывающим, а
+// возвращённую функцию записи он зовёт после освобождения mu: fsync на медленной флешке
+// длится секунды, и всё это время адаптер провайдера Mihomo и API подписок ждали бы mu.
+func (s *SubscriptionService) debugFilesWriterLocked(id string, body []byte, headers http.Header, report *ParseReport) func() {
 	safeID := filepath.Base(id)
 	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
 	base := s.cacheBaseLocked(safeID)
 
-	rawPath := s.subPath(base + "_raw.txt")
-	_ = utils.AtomicWriteFile(rawPath, body, 0600)
+	return func() {
+		rawPath := s.subPath(base + "_raw.txt")
+		_ = utils.AtomicWriteFile(rawPath, body, 0600)
 
-	hdrMap := make(map[string][]string)
-	for k, v := range headers {
-		hdrMap[k] = v
-	}
-	hdrData, err := json.MarshalIndent(hdrMap, "", "  ")
-	if err == nil {
-		hdrPath := s.subPath(base + "_headers.json")
-		_ = utils.AtomicWriteFile(hdrPath, hdrData, 0600)
-	}
-
-	if report != nil {
-		repData, err := json.MarshalIndent(report, "", "  ")
+		hdrMap := make(map[string][]string)
+		for k, v := range headers {
+			hdrMap[k] = v
+		}
+		hdrData, err := json.MarshalIndent(hdrMap, "", "  ")
 		if err == nil {
-			repPath := s.subPath(base + "_parse_report.json")
-			_ = utils.AtomicWriteFile(repPath, repData, 0600)
+			hdrPath := s.subPath(base + "_headers.json")
+			_ = utils.AtomicWriteFile(hdrPath, hdrData, 0600)
+		}
+
+		if report != nil {
+			repData, err := json.MarshalIndent(report, "", "  ")
+			if err == nil {
+				repPath := s.subPath(base + "_parse_report.json")
+				_ = utils.AtomicWriteFile(repPath, repData, 0600)
+			}
 		}
 	}
 }
