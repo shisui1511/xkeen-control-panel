@@ -45,14 +45,16 @@ func (e *rtTakeoverEnv) disable(t *testing.T) error {
 }
 
 // enableAndWaitTaken включает флаг и ждёт, пока фоновая сборка снова возьмёт
-// маршрутизацию обоих ядер.
+// маршрутизацию обоих ядер и закончится: состояние фиксируется раньше итога
+// запуска (дальше уборка копий), и действие по кнопке до итога получило бы
+// ErrApplyBusy.
 func (e *rtTakeoverEnv) enableAndWaitTaken(t *testing.T) {
 	t.Helper()
 	e.enabled.Store(true)
 	e.layer.Enable()
 	rtWaitFor(t, "повторное взятие после включения флага", func() bool {
 		st := e.layer.store.Snapshot()
-		return st.Routing.Xray != nil && st.Routing.Mihomo != nil && st.Journal == nil
+		return st.Routing.Xray != nil && st.Routing.Mihomo != nil && st.Journal == nil && !e.layer.pipeline.Current().Running
 	})
 }
 
