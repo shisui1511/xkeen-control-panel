@@ -103,8 +103,8 @@ func sanitizeProviderFileName(name string) string {
 
 // ProviderFetch скачивает подписку с upstream-провайдера под User-Agent
 // Mihomo (по нему провайдеры отдают готовый Clash YAML), приводит ответ к
-// Mihomo-совместимому provider payload — только секция proxies:, — кэширует
-// результат на диск и возвращает payload.
+// Mihomo-совместимому provider payload — только секция proxies: — и возвращает
+// payload. На диск ничего не пишет: кэш записывает commit из ProviderFetchWithFallback.
 func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL string, sub *Subscription) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, providerFetchBudget)
 	defer cancel()
@@ -154,9 +154,6 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 
 	applySubscriptionHeaders(headers, sub)
 
-	if err := s.cacheProviderPayload(sub, payload); err != nil {
-		log.Printf("[Subscriptions] Failed to cache provider payload for %s: %v", utils.SanitizeLogInput(upstreamURL), err)
-	}
 	if format == providerFormatXrayJSON {
 		log.Printf("[Subscriptions] Upstream %s returned xray-json under Mihomo UA; falling back to converter (%d nodes)",
 			utils.SanitizeLogInput(upstreamURL), nodeCount)
@@ -170,49 +167,70 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 // из изолированного кэша {dataDir}/cache/providers/ (с read-only fallback на
 // legacy-каталог {mihomoConfigDir}/proxy_providers/).
 // Если кэша тоже нет — возвращает ошибку (обработчик отдаёт HTTP 502 Bad Gateway).
-func (s *SubscriptionService) ProviderFetchWithFallback(ctx context.Context, upstreamURL string, sub *Subscription) ([]byte, error) {
+//
+// Запись на диск (кэш провайдера, состояние подписки) не входит в ответ: её делает
+// возвращённый commit, который вызывающий зовёт после отправки тела Mihomo. Mihomo ждёт
+// тело не дольше 20 с, а fsync на медленной флешке и ожидание s.mu за чужой записью
+// длятся секунды. commit не nil и при ошибке.
+func (s *SubscriptionService) ProviderFetchWithFallback(ctx context.Context, upstreamURL string, sub *Subscription) ([]byte, func(), error) {
+	var pending []func()
+	commit := func() {
+		for _, step := range pending {
+			step()
+		}
+	}
+	// updateLive меняет сохранённую подписку и пишет состояние на диск — в commit
+	updateLive := func(apply func(live *Subscription)) {
+		pending = append(pending, func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if live := s.GetLocked(sub.ID); live != nil {
+				apply(live)
+				_ = s.save()
+			}
+		})
+	}
+
 	payload, err := s.ProviderFetch(ctx, upstreamURL, sub)
 	if err == nil {
 		s.clearFailure(sub.ID)
-		s.mu.Lock()
-		if live := s.GetLocked(sub.ID); live != nil {
+		fetched := *sub
+		pending = append(pending, func() {
+			if err := s.cacheProviderPayload(&fetched, payload); err != nil {
+				log.Printf("[Subscriptions] Failed to cache provider payload for %s: %v", utils.SanitizeLogInput(upstreamURL), err)
+			}
+		})
+		updateLive(func(live *Subscription) {
 			live.LastError = ""
-			live.LastCount = sub.LastCount
-			live.DetectedFormat = sub.DetectedFormat
-			live.LastUpdate = sub.LastUpdate
+			live.LastCount = fetched.LastCount
+			live.DetectedFormat = fetched.DetectedFormat
+			live.LastUpdate = fetched.LastUpdate
 			live.DeviceRejected = false
 			if !live.EnableXray {
-				live.LastSkipped = sub.LastSkipped
+				live.LastSkipped = fetched.LastSkipped
 			}
-			_ = s.save()
-		}
-		s.mu.Unlock()
-		return payload, nil
+		})
+		return payload, commit, nil
 	}
 
 	if errors.Is(err, ErrProviderRejectedDevice) {
 		// Скачивание удалось, отказ — ответ провайдера, а не сбой запроса:
 		// backoff не трогаем, сырой текст в last_error не пишем. Ниже отдаётся
 		// кэш рабочих узлов, чтобы Mihomo не заменил их заглушками.
-		s.mu.Lock()
-		if live := s.GetLocked(sub.ID); live != nil {
+		updateLive(func(live *Subscription) {
 			live.DeviceRejected = true
 			live.LastError = ""
-			_ = s.save()
-		}
+		})
 		sub.DeviceRejected = true
 		sub.LastError = ""
-		s.mu.Unlock()
 	} else {
 		// Сбой запроса к upstream: фиксируем ошибку в retry и sub.LastError
 		s.recordFailure(sub.ID)
-		s.mu.Lock()
-		if live := s.GetLocked(sub.ID); live != nil {
-			live.LastError = err.Error()
-			_ = s.save()
-		}
-		sub.LastError = err.Error()
-		s.mu.Unlock()
+		msg := err.Error()
+		updateLive(func(live *Subscription) {
+			live.LastError = msg
+		})
+		sub.LastError = msg
 	}
 
 	// 1. Попытка прочитать из изолированного кэша панели
@@ -223,7 +241,7 @@ func (s *SubscriptionService) ProviderFetchWithFallback(ctx context.Context, ups
 	}
 
 	if readErr != nil || len(bytes.TrimSpace(cached)) == 0 {
-		return nil, fmt.Errorf("upstream unavailable and no cached provider file: %w", err)
+		return nil, commit, fmt.Errorf("upstream unavailable and no cached provider file: %w", err)
 	}
 
 	cachedNodes := countProviderNodes(string(cached))
@@ -231,16 +249,13 @@ func (s *SubscriptionService) ProviderFetchWithFallback(ctx context.Context, ups
 		utils.SanitizeLogInput(sub.ID), err, cachedNodes)
 
 	if cachedNodes > 0 {
-		s.mu.Lock()
-		if live := s.GetLocked(sub.ID); live != nil {
+		updateLive(func(live *Subscription) {
 			live.LastCount = cachedNodes
-			_ = s.save()
-		}
+		})
 		sub.LastCount = cachedNodes
-		s.mu.Unlock()
 	}
 
-	return cached, nil
+	return cached, commit, nil
 }
 
 // providerCachePath возвращает путь к файлу кэша провайдера в изолированном каталоге панели {dataDir}/cache/providers/.
