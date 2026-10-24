@@ -41,7 +41,7 @@
       {#if ng.type === 'relay'}
         <option value="relay" disabled>relay ({$t('app.deprecated')})</option>
       {/if}
-      {#each GROUP_TYPES as t}<option value={t}>{t}</option>{/each}
+      {#each GROUP_TYPES as t (t)}<option value={t}>{t}</option>{/each}
     </Select>
     {#if ng.type === 'relay'}
       <div class="alert alert-warning relay-warning">
@@ -62,7 +62,7 @@
     <div class="form-row">
       <label class="form-label" for="group-use-providers">{$t('groups.use_providers')}</label>
       <div class="tag-input-wrap">
-        {#each ng.useProviders || [] as p}
+        {#each ng.useProviders || [] as p, i (i)}
           <span class="tag-pill tag-pill--provider">
             {p}
             <button
@@ -88,7 +88,7 @@
           }}
         >
           <option value="">+ {$t('groups.add_provider')}...</option>
-          {#each mihomoProviders as sub}
+          {#each mihomoProviders as sub, i (i)}
             {@const slug = slugifyProviderName(
               sub.profile_title || '',
               sub.name || '',
@@ -124,7 +124,7 @@
   <div class="form-row">
     <label class="form-label" for="group-proxies">{$t('groups.proxies')}</label>
     <div class="tag-input-wrap">
-      {#each ng.proxies as p}
+      {#each ng.proxies as p, i (i)}
         <span class="tag-pill">
           {p}
           <button
@@ -141,7 +141,7 @@
         onchange={addGroupProxy}
       >
         <option value="">+ {$t('groups.add')}...</option>
-        {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
+        {#each allProxyNames as n, i (i)}<option value={n}>{n}</option>{/each}
       </Select>
     </div>
   </div>

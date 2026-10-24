@@ -31,7 +31,7 @@
       data-testid="rule-outbound-select"
       bind:value={rule.outboundTag}
     >
-      {#each outboundTags as tag}
+      {#each outboundTags as tag, i (i)}
         <option value={tag}>{tag}</option>
       {/each}
       <option value="PROXY_TAG">PROXY_TAG</option>

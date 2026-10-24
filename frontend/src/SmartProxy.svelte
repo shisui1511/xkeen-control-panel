@@ -443,7 +443,7 @@
           </div>
           {#if hasActive}
             <div class="status-active-badges">
-              {#each status.active as p}
+              {#each status.active as p (p.id)}
                 <StatusBadge
                   variant="running"
                   label="{p.name} → {p.current_proxy || p.proxy_name}"
@@ -610,7 +610,7 @@
     </div>
   {:else}
     <div class="profile-grid">
-      {#each profiles as p}
+      {#each profiles as p (p.id)}
         {@const isActive = p.enabled && status?.active?.some((a) => a.id === p.id)}
         <div class="card profile-card" class:active={isActive}>
           <div class="profile-card-header">
@@ -783,7 +783,7 @@
         {#if mihomoGroups.length > 0}
           <Select id="sp-group" class="input" bind:value={formGroupName}>
             <option value="">-- {$t('smartproxy.select_group')} --</option>
-            {#each mihomoGroups as g}
+            {#each mihomoGroups as g, i (i)}
               <option value={g}>{g}</option>
             {/each}
           </Select>
@@ -804,7 +804,7 @@
           <Select id="sp-proxy" class="input" bind:value={formProxyName}>
             <option value="">-- {$t('smartproxy.select_proxy')} --</option>
             <option value="DIRECT">DIRECT</option>
-            {#each mihomoProxies as p}
+            {#each mihomoProxies as p, i (i)}
               <option value={p}>{p}</option>
             {/each}
           </Select>
@@ -849,16 +849,16 @@
           <!-- Top Hour Headers -->
           <div class="grid-row-header">
             <div class="day-label-sticky header-cell"></div>
-            {#each Array(24) as _, h}
+            {#each Array(24) as _, h (h)}
               <div class="hour-header-cell">{h.toString().padStart(2, '0')}</div>
             {/each}
           </div>
 
           <!-- Grid Rows per Day (Mon to Sun) -->
-          {#each displayDayIndices as d}
+          {#each displayDayIndices as d (d)}
             <div class="grid-row-day">
               <div class="day-label-sticky">{dayNames[d]}</div>
-              {#each Array(24) as _, h}
+              {#each Array(24) as _, h (h)}
                 {@const isCellActive = formSchedule[d][h]}
                 <div
                   class="grid-cell"

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { t } from '../../i18n';
   import { configLayerEnabled } from '../../stores';
   import { filesByPath } from '../../lib/configLayer';
@@ -25,8 +26,6 @@
     onCloseTab: (path: string) => void;
   } = $props();
 
-  let stripEl = $state<HTMLElement | null>(null);
-
   // Слой «Конфигурация»: «панель» для файла под управлением, «ручной» для отпущенного
   function layerBadge(path: string): 'managed' | 'manual' | null {
     if (!$configLayerEnabled) return null;
@@ -36,11 +35,10 @@
   }
 
   // Активная вкладка всегда видна в полосе целиком (без scrollIntoView: он двигает и страницу)
-  $effect(() => {
+  const keepActiveTabVisible: Attachment<HTMLElement> = (strip) => {
     const active = activeTabPath;
     const count = tabs.length;
-    if (!stripEl || !active || count === 0) return;
-    const strip = stripEl;
+    if (!active || count === 0) return;
     void tick().then(() => {
       const tabEl = Array.from(strip.querySelectorAll<HTMLElement>('.editor-tab')).find(
         (el) => el.dataset.path === active
@@ -54,7 +52,7 @@
         strip.scrollLeft += tabRect.right - stripRect.right;
       }
     });
-  });
+  };
 
   function handleWheel(e: WheelEvent) {
     if (e.deltaY !== 0) {
@@ -66,7 +64,7 @@
 </script>
 
 {#if tabs.length > 0}
-  <div class="editor-tab-strip" role="tablist" bind:this={stripEl} onwheel={handleWheel}>
+  <div class="editor-tab-strip" role="tablist" onwheel={handleWheel} {@attach keepActiveTabVisible}>
     {#each tabs as tab (tab.path)}
       <div
         class="editor-tab"

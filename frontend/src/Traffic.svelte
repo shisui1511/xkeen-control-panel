@@ -505,20 +505,26 @@
   // опросе — cleanup обнулял бы xrayStatsError и прятал предупреждение WR-06.
   const isXrayStatsActive = $derived($isXray && $capabilities?.xray?.grpc_ready === true);
 
+  function clearXrayStats() {
+    xrayOutbounds = [];
+    xrayInbounds = [];
+    xrayUsers = [];
+  }
+
+  function syncXrayPolling(active: boolean) {
+    if (active) {
+      startXrayStatsPolling();
+    } else {
+      stopXrayStatsPolling();
+      clearXrayStats();
+    }
+  }
+
   $effect(() => {
     const active = isXrayStatsActive;
     // start/stop сами читают $isXray и $capabilities (проверка в fetchXrayStats): вне untrack эти
     // чтения стали бы зависимостями эффекта и вернули перезапуск на каждом опросе
-    untrack(() => {
-      if (active) {
-        startXrayStatsPolling();
-      } else {
-        stopXrayStatsPolling();
-        xrayOutbounds = [];
-        xrayInbounds = [];
-        xrayUsers = [];
-      }
-    });
+    untrack(() => syncXrayPolling(active));
     return () => {
       stopXrayStatsPolling();
     };
@@ -883,7 +889,6 @@
           <span class="y-label">0 B/s</span>
         </div>
         <div class="chart-svg-container">
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
           <svg
             viewBox="0 0 1000 240"
             preserveAspectRatio="none"
@@ -1004,7 +1009,7 @@
     </div>
 
     <div class="chart-x">
-      {#each timeLabels as label}
+      {#each timeLabels as label, i (i)}
         <span>{label}</span>
       {/each}
     </div>
@@ -1099,7 +1104,7 @@
         />
       {:else}
         <div class="clients-list">
-          {#each topClients as client}
+          {#each topClients as client, i (i)}
             {@const sharePercent = Math.min(
               100,
               Math.max(2, Math.round((client.total_bytes / totalClientsTraffic) * 100))

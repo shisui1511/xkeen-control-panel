@@ -112,7 +112,7 @@
                 </tr>
               </thead>
               <tbody>
-                {#each parseReportData.skipped as item}
+                {#each parseReportData.skipped as item, i (i)}
                   <tr>
                     <td class="line-num">{item.line}</td>
                     <td class="reason">{item.reason}</td>
@@ -132,7 +132,7 @@
       <div class="tab-content">
         {#if rawResponseData && rawResponseData.headers}
           <div class="diag-headers-list">
-            {#each Object.entries(rawResponseData.headers) as [key, val]}
+            {#each Object.entries(rawResponseData.headers) as [key, val] (key)}
               <div class="hdr-item">
                 <span class="hdr-key">{key}</span>
                 <span class="hdr-val">{val.join(', ')}</span>

@@ -174,13 +174,13 @@
         {#if loading}
           <div class="loading">{$t('app.loading')}</div>
         {:else}
-          {#each categories as category}
+          {#each categories as category, ci (ci)}
             <div class="cmd-list mb-3">
               <div class="cmd-cat-head">
                 {$t(`console.cat_${category.name}`) || category.name}
               </div>
               <div class="cmd-tile-grid">
-                {#each category.commands as cmd}
+                {#each category.commands as cmd, mi (mi)}
                   <button
                     class="cmd-tile {getCmdClass(cmd)}"
                     onclick={() => handleCommandClick(cmd)}
@@ -294,7 +294,7 @@
             {$t('console.history')}
           </h4>
           <div class="history-list">
-            {#each history as entry}
+            {#each history as entry, i (i)}
               <button
                 class="history-item"
                 class:error={!entry.success}

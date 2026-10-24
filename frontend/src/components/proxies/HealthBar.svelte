@@ -152,7 +152,7 @@
     class="health-tooltip"
     style="top: {tooltipTop}px; left: {tooltipLeft}px;"
   >
-    {#each rows as row}
+    {#each rows as row (row.colorClass)}
       <div class="ht-row">
         <span class="ht-dot {row.colorClass}"></span>
         <span class="ht-label">{row.label}:</span>

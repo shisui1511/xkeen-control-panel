@@ -19,9 +19,9 @@
   let score = $state<PasswordStrengthScore | null>(null);
   let requestId = 0;
 
-  $effect(() => {
-    const currentPassword = password;
-    const currentInputs = userInputs;
+  // Асинхронная оценка (zxcvbn грузится лениво) — внешняя синхронизация: эффект лишь
+  // запускает её при смене пароля, а результат записывает именованная функция.
+  function updateScore(currentPassword: string, currentInputs: (string | number)[]) {
     const myRequestId = ++requestId;
 
     if (!currentPassword) {
@@ -36,6 +36,10 @@
         score = result;
       }
     });
+  }
+
+  $effect(() => {
+    updateScore(password, userInputs);
   });
 
   let presentation = $derived(score === null ? null : strengthPresentation(score));

@@ -203,14 +203,14 @@
           </optgroup>
           {#if ctx.groups.length > 0}
             <optgroup label={$t('mihomo.listener_dest_groups')}>
-              {#each ctx.groups as g}
+              {#each ctx.groups as g (g.id)}
                 <option value={g.name}>{g.name}</option>
               {/each}
             </optgroup>
           {/if}
           {#if ctx.proxies.length > 0}
             <optgroup label={$t('mihomo.listener_dest_nodes')}>
-              {#each ctx.proxies as p}
+              {#each ctx.proxies as p (p.id)}
                 <option value={p.name}>{p.name}</option>
               {/each}
             </optgroup>
@@ -234,7 +234,7 @@
         <div class="form-row">
           <label class="form-label" for="listener-cipher">{$t('mihomo.listener_cipher')}</label>
           <Select id="listener-cipher" class="form-select" bind:value={newListener.cipher}>
-            {#each CIPHERS as c}
+            {#each CIPHERS as c (c)}
               <option value={c}>{c}</option>
             {/each}
           </Select>
@@ -269,7 +269,7 @@
           </div>
           {#if newListener.users && newListener.users.length > 0}
             <div class="form-users-list">
-              {#each newListener.users as user, uIdx}
+              {#each newListener.users as user, uIdx (uIdx)}
                 <div class="form-user-row">
                   <input
                     type="text"

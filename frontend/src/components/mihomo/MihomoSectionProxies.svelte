@@ -364,7 +364,7 @@
     >
       {$t('mihomo.proxy_providers_hint')}
     </div>
-    {#each ctx.mihomoProviders as sub}
+    {#each ctx.mihomoProviders as sub, i (i)}
       <div class="item-row" style="border-left: 3px solid var(--success);">
         <span
           class="item-badge type-mihomo"
@@ -557,7 +557,7 @@
           class="preview-list"
           style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;"
         >
-          {#each importNodes as item, idx}
+          {#each importNodes as item, idx (idx)}
             {#if item.rowError}
               <div
                 class="preview-item-card"

@@ -35,7 +35,8 @@
 
   let query = $state('');
   let filterType: 'all' | 'domain' | 'ip' = $state('all');
-  let selectedFiles: string[] = $state([]);
+  // Выбор пользователя; пока он пуст, а окно открыто, показываются все существующие файлы
+  let chosenFiles: string[] = $state([]);
   let loading = $state(false);
   let error = $state('');
   let hasSearched = $state(false);
@@ -43,12 +44,17 @@
   let copiedRule: string | null = $state(null);
   let showFileSelector = $state(false);
 
-  // Initialize selected files with existing DAT files
-  $effect(() => {
-    if (isOpen && selectedFiles.length === 0 && availableFiles.length > 0) {
-      selectedFiles = availableFiles.filter((f: DATFile) => f.exists).map((f: DATFile) => f.name);
-    }
-  });
+  const existingFileNames = $derived(
+    availableFiles.filter((f: DATFile) => f.exists).map((f: DATFile) => f.name)
+  );
+
+  // Пустой выбор при открытом окне заменяется всеми существующими DAT-файлами
+  // (в том числе сразу после «Снять все»)
+  const selectedFiles = $derived(
+    isOpen && chosenFiles.length === 0 && availableFiles.length > 0
+      ? existingFileNames
+      : chosenFiles
+  );
 
   async function handleSearch() {
     const q = query.trim();
@@ -93,18 +99,18 @@
 
   function toggleFile(name: string) {
     if (selectedFiles.includes(name)) {
-      selectedFiles = selectedFiles.filter((f) => f !== name);
+      chosenFiles = selectedFiles.filter((f: string) => f !== name);
     } else {
-      selectedFiles = [...selectedFiles, name];
+      chosenFiles = [...selectedFiles, name];
     }
   }
 
   function selectAllFiles() {
-    selectedFiles = availableFiles.filter((f: DATFile) => f.exists).map((f: DATFile) => f.name);
+    chosenFiles = [...existingFileNames];
   }
 
   function deselectAllFiles() {
-    selectedFiles = [];
+    chosenFiles = [];
   }
 </script>
 
@@ -225,7 +231,7 @@
           </div>
         </div>
         <div class="geoscan-files-grid">
-          {#each availableFiles as file}
+          {#each availableFiles as file (file.name)}
             <label class="geoscan-file-item" class:disabled={!file.exists}>
               <input
                 type="checkbox"
@@ -275,7 +281,7 @@
           <span>{$t('dat.geoscan_matches', { count: results.length })}</span>
         </div>
         <div class="geoscan-results-list">
-          {#each results as res}
+          {#each results as res, i (i)}
             {@const isCopied = copiedRule === res.rule}
             <div class="geoscan-result-card">
               <div class="geoscan-card-top">
@@ -336,7 +342,7 @@
                 <div class="geoscan-samples">
                   <span class="geoscan-samples-lbl">{$t('dat.geoscan_sample_matches')}</span>
                   <div class="geoscan-samples-tags">
-                    {#each res.sample_matches as sample}
+                    {#each res.sample_matches as sample, i (i)}
                       <span class="sample-tag">{sample}</span>
                     {/each}
                   </div>

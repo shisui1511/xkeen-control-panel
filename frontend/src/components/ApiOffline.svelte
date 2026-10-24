@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { t } from '../i18n';
 
   // Props — pass the endpoint URL and time since last successful response
@@ -19,23 +20,17 @@
     return `${Math.floor(secs / 3600)} ${$t('apioffline.hour_ago')}`;
   }
 
-  // Retry countdown (8 seconds, resets on each prop update)
+  // Retry countdown: 8 seconds from mount, then a single onRetry()
   let countdown = $state(8);
-  let timer: ReturnType<typeof setInterval> | null = null;
+  const timer = setInterval(() => {
+    countdown--;
+    if (countdown <= 0) {
+      clearInterval(timer);
+      onRetry();
+    }
+  }, 1000);
 
-  $effect(() => {
-    countdown = 8;
-    timer = setInterval(() => {
-      countdown--;
-      if (countdown <= 0) {
-        clearInterval(timer!);
-        onRetry();
-      }
-    }, 1000);
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  });
+  onDestroy(() => clearInterval(timer));
 </script>
 
 <div class="api-offline" role="status" aria-live="polite">

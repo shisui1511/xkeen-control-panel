@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { Terminal } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
   import '@xterm/xterm/css/xterm.css';
@@ -19,7 +19,6 @@
   let { mode = 'shell', channel = 'stable', onexit }: Props = $props();
   const isInstaller = $derived(mode === 'xkeen-install');
 
-  let terminalContainer: HTMLDivElement | null = $state(null);
   let status = $state<'connected' | 'connecting' | 'disconnected'>('connecting');
   let isFullscreen = $state(false);
   let sessionLimitHit = $state(false);
@@ -159,7 +158,7 @@
   }
 
   function handleResize() {
-    if (!term || !fitAddon || !terminalContainer) return;
+    if (!term || !fitAddon) return;
     try {
       fitAddon.fit();
       const cols = term.cols;
@@ -216,9 +215,8 @@
     }
   }
 
-  onMount(() => {
-    if (!terminalContainer) return;
-
+  // Монтирование xterm в контейнер: один раз на жизнь компонента, разбор — в возвращаемой функции.
+  const mountTerminal: Attachment<HTMLDivElement> = (container) => {
     term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
@@ -232,7 +230,7 @@
 
     fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-    term.open(terminalContainer);
+    term.open(container);
 
     term.onData((data) => {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -253,7 +251,7 @@
     resizeObserver = new ResizeObserver(() => {
       onDebouncedResize();
     });
-    resizeObserver.observe(terminalContainer);
+    resizeObserver.observe(container);
 
     themeObserver = new MutationObserver(() => {
       updateTheme();
@@ -269,37 +267,37 @@
       handleResize();
       connect();
     }, 60);
-  });
 
-  onDestroy(() => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    if (reconnectTimeout) clearTimeout(reconnectTimeout);
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('keydown', handleKeydown);
-    }
-    if (resizeObserver) {
-      resizeObserver.disconnect();
-      resizeObserver = null;
-    }
-    if (themeObserver) {
-      themeObserver.disconnect();
-      themeObserver = null;
-    }
-    if (ws) {
-      try {
-        ws.close();
-      } catch (_) {}
-      ws = null;
-    }
-    if (fitAddon) {
-      fitAddon.dispose();
-      fitAddon = null;
-    }
-    if (term) {
-      term.dispose();
-      term = null;
-    }
-  });
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('keydown', handleKeydown);
+      }
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+        resizeObserver = null;
+      }
+      if (themeObserver) {
+        themeObserver.disconnect();
+        themeObserver = null;
+      }
+      if (ws) {
+        try {
+          ws.close();
+        } catch (_) {}
+        ws = null;
+      }
+      if (fitAddon) {
+        fitAddon.dispose();
+        fitAddon = null;
+      }
+      if (term) {
+        term.dispose();
+        term = null;
+      }
+    };
+  };
 </script>
 
 <div
@@ -419,7 +417,7 @@
 
   <!-- Terminal Canvas Viewport -->
   <div class="terminal-screen">
-    <div class="xterm-mount" bind:this={terminalContainer}></div>
+    <div class="xterm-mount" {@attach mountTerminal}></div>
   </div>
 
   <!-- Подсказки горячих клавиш и бейдж размера нужны только обычной консоли:

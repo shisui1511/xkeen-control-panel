@@ -1,4 +1,5 @@
 import { getContext, setContext } from 'svelte';
+import { SvelteMap } from 'svelte/reactivity';
 import {
   generateYAML as generateMihomoYAML,
   type Proxy,
@@ -203,7 +204,16 @@ export class MihomoContext {
     this.markDirty();
   }
 
-  selectedMetaRuleSets = $state<Map<string, string>>(new Map());
+  // Выбранные наборы MetaCubeX (ключ `id|type` -> outbound). Реактивная карта меняется на месте.
+  readonly selectedMetaRuleSets = new SvelteMap<string, string>();
+
+  replaceMetaRuleSets(entries?: Iterable<readonly [string, string]> | null): void {
+    this.selectedMetaRuleSets.clear();
+    if (!entries) return;
+    for (const [key, outbound] of entries) {
+      this.selectedMetaRuleSets.set(key, outbound);
+    }
+  }
 
   // Presets
   applyPreset(presetKey: string): void {
@@ -213,9 +223,8 @@ export class MihomoContext {
       this.ruleProviders = [...ZKEEN_RULE_PROVIDERS];
 
       // Добавляем типовые группы zkeen, если их ещё нет
-      const existingNames = new Set(this.groups.map((g) => g.name));
       const groupsToAdd = (ZKEEN_16_GROUPS_TEMPLATE || [])
-        .filter((g) => !existingNames.has(g.name))
+        .filter((g) => !this.groups.some((existing) => existing.name === g.name))
         .map((g) => ({
           ...g,
           id: crypto.randomUUID()
