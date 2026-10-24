@@ -121,11 +121,9 @@
 
   // --- Карточки ---
 
-  const infos = $derived.by(() => {
-    const byId = new Map<string, PresetInfo>();
-    for (const p of view?.presets ?? []) byId.set(p.id, p);
-    return byId;
-  });
+  const infos = $derived(
+    new Map<string, PresetInfo>((view?.presets ?? []).map((p: PresetInfo) => [p.id, p]))
+  );
 
   /** Карточки по порядку сервера; «Начать с пустого» — только при взятии (D-04). */
   const cardIds = $derived.by(() => {

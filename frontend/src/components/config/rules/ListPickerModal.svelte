@@ -114,14 +114,12 @@
   const catalogLists = $derived((catalog?.lists ?? []).filter((l: ListEntry) => l.kind === kind));
 
   /** Ссылки каталога нужного вида: по ним определяется, что из выбранного пропало. */
-  const knownKeys = $derived.by(() => {
-    const keys = new Set<string>();
-    for (const l of catalogLists) keys.add(keyOf(l));
-    for (const sv of catalog?.services ?? []) {
-      for (const r of sv.refs ?? []) if (r.kind === kind) keys.add(keyOf(r));
-    }
-    return keys;
-  });
+  const knownKeys = $derived(
+    new Set<string>([
+      ...catalogLists.map(keyOf),
+      ...(catalog?.services ?? []).flatMap((sv: ServiceView) => refsOf(sv).map(keyOf))
+    ])
+  );
 
   const missing = $derived(ready ? picked.filter((r) => !knownKeys.has(keyOf(r))) : []);
 
