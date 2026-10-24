@@ -192,7 +192,7 @@ func rtKernelsAccept(t *testing.T, e *rtEnv, xf, mf []configlayer.GeneratedFile,
 	}
 }
 
-// rtXrayMKCPRemoved — отказ Xray 26.x от kcpSettings.header/seed (todo
+// rtXrayMKCPRemoved — отказ Xray 26.2.x–26.3.x от kcpSettings.header/seed (todo
 // xray-mkcp-header-seed-finalmask).
 const rtXrayMKCPRemoved = "mkcp header & seed has been removed"
 
@@ -285,7 +285,7 @@ func TestRouterCatalogMatchesFiles(t *testing.T) {
 	}
 
 	// Ядра устройства принимают сгенерированные файлы.
-	rtKernelsAccept(t, e, xf, mf, routertest.Known("*", "xray-mkcp-header-seed-finalmask"))
+	rtKernelsAccept(t, e, xf, mf, routertest.Known("mipsle", "xray-mkcp-header-seed-finalmask"))
 
 	// Установлено одно ядро — список другого пуст.
 	only := configlayer.InstalledKernels{Xray: true}
