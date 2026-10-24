@@ -1030,7 +1030,8 @@
       margin-top: 0;
     }
 
-    .gm-member-actions .btn {
+    .gm-member-actions .btn,
+    .gm-footer :global(.btn) {
       min-height: 44px;
     }
   }

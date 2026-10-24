@@ -380,5 +380,9 @@
     .gd-radio {
       min-height: 44px;
     }
+
+    .gd-footer :global(.btn) {
+      min-height: 44px;
+    }
   }
 </style>

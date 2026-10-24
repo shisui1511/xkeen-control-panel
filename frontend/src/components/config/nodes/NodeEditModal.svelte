@@ -295,6 +295,12 @@
     padding-top: var(--spacing-2);
   }
 
+  @media (pointer: coarse), (max-width: 768px) {
+    .ne-footer :global(.btn) {
+      min-height: 44px;
+    }
+  }
+
   @media (max-width: 480px) {
     .ne-footer :global(.btn) {
       flex: 1 1 auto;

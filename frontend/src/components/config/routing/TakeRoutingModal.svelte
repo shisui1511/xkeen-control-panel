@@ -309,10 +309,15 @@
     gap: var(--spacing-2);
   }
 
+  @media (pointer: coarse), (max-width: 768px) {
+    .tr-footer :global(.btn) {
+      min-height: 44px;
+    }
+  }
+
   @media (max-width: 480px) {
     .tr-footer :global(.btn) {
       flex: 1 1 100%;
-      min-height: 44px;
     }
   }
 </style>

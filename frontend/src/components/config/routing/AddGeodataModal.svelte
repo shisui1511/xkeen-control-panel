@@ -327,6 +327,10 @@
     .ag-radio input {
       margin-top: 0;
     }
+
+    .ag-footer :global(.btn) {
+      min-height: 44px;
+    }
   }
 
   @media (max-width: 480px) {

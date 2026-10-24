@@ -859,6 +859,10 @@
     .pm-check input {
       margin-top: 0;
     }
+
+    .pm-footer :global(.btn) {
+      min-height: 44px;
+    }
   }
 
   @media (max-width: 480px) {

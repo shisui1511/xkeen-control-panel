@@ -861,6 +861,10 @@
       min-width: 44px;
       min-height: 44px;
     }
+
+    .re-footer :global(.btn) {
+      min-height: 44px;
+    }
   }
 
   .re-and {

@@ -632,6 +632,10 @@
     .lp-row input {
       margin-top: 0;
     }
+
+    .lp-footer :global(.btn) {
+      min-height: 44px;
+    }
   }
 
   @media (max-width: 480px) {
