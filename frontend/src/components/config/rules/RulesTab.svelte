@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { t, tp } from '../../../i18n';
   import EmptyState from '../../EmptyState.svelte';
   import Skeleton from '../../Skeleton.svelte';
@@ -80,6 +80,7 @@
       pending = { id, dir, to: to + 1 };
       // Если представление не обновилось, объявление и фокус всё равно не зависают
       pendingTimer = setTimeout(clearPending, 4000);
+      settleMove(rules);
     } catch (err) {
       handleLayerError(err);
     } finally {
@@ -87,10 +88,13 @@
     }
   }
 
-  $effect(() => {
+  // Перестановка завершена, когда правило в представлении стоит на новой позиции. Порядок
+  // ответа и обновления представления не задан: проверка идёт и после ответа, и при
+  // каждом обновлении представления
+  function settleMove(list: RuleView[]) {
     const p = pending;
     if (p === null) return;
-    const rule = rules.find((r) => r.id === p.id);
+    const rule = list.find((r) => r.id === p.id);
     if (!rule || rule.index !== p.to) return;
     clearPending();
     live = $t('cfg.rules.moved_live', { n: rule.index });
@@ -105,7 +109,9 @@
       );
       (same && !same.disabled ? same : other)?.focus();
     });
-  });
+  }
+
+  onDestroy(routingView.subscribe((v) => settleMove(v?.rules ?? [])));
 
   // --- Перетаскивание (нативный HTML5 DnD за ручку) ---
   let dragId = $state<string | null>(null);

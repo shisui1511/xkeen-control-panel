@@ -251,47 +251,54 @@
 
   // --- План ---
 
+  function clearPlan() {
+    planSeq++;
+    plan = null;
+    planLoading = false;
+    planError = '';
+  }
+
+  async function loadPlan(choice: PresetChoice, mine: number) {
+    try {
+      const res = await planPreset(choice);
+      if (mine !== planSeq) return;
+      plan = {
+        ...res,
+        remove: Array.isArray(res.remove) ? res.remove : [],
+        add: Array.isArray(res.add) ? res.add : [],
+        groups: Array.isArray(res.groups) ? res.groups : []
+      };
+    } catch (e) {
+      if (mine !== planSeq) return;
+      plan = null;
+      planError = routingErrorText(
+        $t,
+        (e as { code?: string })?.code,
+        (e as { params?: Record<string, string> })?.params
+      );
+    } finally {
+      if (mine === planSeq) planLoading = false;
+    }
+  }
+
+  /** Ставит расчёт плана после паузы; возвращает отмену таймера для смены выбора. */
+  function schedulePlan(choice: PresetChoice): () => void {
+    const mine = ++planSeq;
+    planLoading = true;
+    planError = '';
+    const timer = setTimeout(() => void loadPlan(choice, mine), PLAN_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }
+
   $effect(() => {
     // Выбор целиком — зависимость эффекта; запись плана в untrack
     const ready = open && view !== null && selectedId !== '';
     const choice = ready ? choiceOf() : null;
     if (choice === null) {
-      untrack(() => {
-        planSeq++;
-        plan = null;
-        planLoading = false;
-        planError = '';
-      });
+      untrack(clearPlan);
       return;
     }
-    const mine = ++planSeq;
-    untrack(() => {
-      planLoading = true;
-      planError = '';
-    });
-    const timer = setTimeout(async () => {
-      try {
-        const res = await planPreset(choice);
-        if (mine !== planSeq) return;
-        plan = {
-          ...res,
-          remove: Array.isArray(res.remove) ? res.remove : [],
-          add: Array.isArray(res.add) ? res.add : [],
-          groups: Array.isArray(res.groups) ? res.groups : []
-        };
-      } catch (e) {
-        if (mine !== planSeq) return;
-        plan = null;
-        planError = routingErrorText(
-          $t,
-          (e as { code?: string })?.code,
-          (e as { params?: Record<string, string> })?.params
-        );
-      } finally {
-        if (mine === planSeq) planLoading = false;
-      }
-    }, PLAN_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    return untrack(() => schedulePlan(choice));
   });
 
   const replacing = $derived(plan !== null && plan.remove.length > 0);

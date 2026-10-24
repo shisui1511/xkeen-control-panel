@@ -46,10 +46,22 @@
   let catalog = $state<CatalogView | null>(null);
   let loading = $state(false);
   let failure = $state('');
-  let seg = $state('services');
-  let query = $state('');
-  let picked = $state<ListRef[]>([]);
-  let limit = $state(PAGE_FIRST);
+  // Выбор, вкладка и поиск начинаются заново при каждом открытии и закрытии: поля —
+  // записываемые $derived, ввод их переопределяет. Выбранное в условии читается без
+  // отслеживания, а выбор заменяется целиком, а не правится на месте
+  const initial = $derived.by(() => {
+    void open;
+    return untrack(() => ({
+      picked: selected.map((r: ListRef) => ({ ...r })),
+      seg: 'services',
+      query: '',
+      limit: PAGE_FIRST
+    }));
+  });
+  let seg = $derived(initial.seg);
+  let query = $derived(initial.query);
+  let picked = $derived<ListRef[]>(initial.picked);
+  let limit = $derived(initial.limit);
   // Наборы последнего успешного чтения каталога: ошибка повторного чтения их не стирает
   let extended = $state<ExtendedSet[]>([]);
   let addTarget = $state<ExtendedSet | null>(null);
@@ -89,17 +101,8 @@
   }
 
   $effect(() => {
-    if (open) {
-      untrack(() => {
-        picked = selected.map((r: ListRef) => ({ ...r }));
-        seg = 'services';
-        query = '';
-        limit = PAGE_FIRST;
-        void load();
-      });
-    } else {
-      untrack(reset);
-    }
+    if (open) void untrack(load);
+    else untrack(reset);
   });
 
   const keyOf = (r: Pick<ListRef, 'file' | 'tag'>) => `${r.file}\u0000${r.tag}`;
@@ -183,7 +186,7 @@
 
   function toggleRef(r: ListRef, on: boolean) {
     if (on) {
-      if (!isPicked(r)) picked.push({ file: r.file, tag: r.tag, kind: r.kind });
+      if (!isPicked(r)) picked = [...picked, { file: r.file, tag: r.tag, kind: r.kind }];
     } else {
       picked = picked.filter((p) => keyOf(p) !== keyOf(r));
     }

@@ -45,34 +45,73 @@
     { id: 'mihomo', name: 'Mihomo' }
   ];
 
-  let name = $state('');
-  let mode = $state<GroupMode>('manual');
-  let allSources = $state(true);
-  let sourceIds = $state<string[]>([]);
-  let includeText = $state('');
-  let excludeText = $state('');
-  let expert = $state(false);
-  let picks = $state<string[]>([]);
-  let members = $state<Member[]>([]);
-  let reserve = $state('');
-  let addValue = $state('');
-  let pickQuery = $state('');
-  let pickLimit = $state(PAGE_FIRST);
+  // --- Открытие и закрытие ---
+  // Исходные значения пересчитываются при каждом открытии и закрытии диалога. Поля ниже —
+  // записываемые $derived: ввод пользователя и ответы сервера переопределяют значение до
+  // следующего пересчёта. Группа читается без отслеживания: её обновление при открытом
+  // диалоге введённое не сбрасывает. Массивы и словари в полях только заменяются целиком
+  const initial = $derived.by(() => {
+    void open;
+    return untrack(() => ({
+      name: group?.name ?? '',
+      mode: (group?.mode ?? 'manual') as GroupMode,
+      allSources: group ? group.sources.all : true,
+      sourceIds: group ? [...group.sources.ids] : [],
+      expert: group?.regex ?? false,
+      includeText: (group?.include ?? []).join('\n'),
+      excludeText: (group?.exclude ?? []).join('\n'),
+      picks: [...(group?.picks ?? [])],
+      members: (group?.members ?? []).map((m: Member) => ({ ...m })),
+      reserve: group?.reserve ?? '',
+      addValue: '',
+      pickQuery: '',
+      pickLimit: PAGE_FIRST,
+      previewData: null as GroupPreview | null,
+      previewError: '',
+      previewBusy: false,
+      previewLimits: { xray: PAGE_FIRST, mihomo: PAGE_FIRST } as Record<KernelName, number>,
+      saving: false,
+      nameServerError: '',
+      reserveServerError: '',
+      cycleError: '',
+      generalError: '',
+      filterErrors: {} as Record<string, string>
+    }));
+  });
+
+  let name = $derived(initial.name);
+  let mode = $derived(initial.mode);
+  let allSources = $derived(initial.allSources);
+  let sourceIds = $derived<string[]>(initial.sourceIds);
+  let includeText = $derived(initial.includeText);
+  let excludeText = $derived(initial.excludeText);
+  let expert = $derived(initial.expert);
+  let picks = $derived<string[]>(initial.picks);
+  let members = $derived<Member[]>(initial.members);
+  let reserve = $derived(initial.reserve);
+  let addValue = $derived(initial.addValue);
+  let pickQuery = $derived(initial.pickQuery);
+  let pickLimit = $derived(initial.pickLimit);
 
   // Предпросмотр
-  let previewData = $state<GroupPreview | null>(null);
-  let previewBusy = $state(false);
-  let previewError = $state('');
+  let previewData = $derived(initial.previewData);
+  let previewBusy = $derived(initial.previewBusy);
+  let previewError = $derived(initial.previewError);
   let retryTick = $state(0);
-  let previewLimits = $state<Record<KernelName, number>>({ xray: PAGE_FIRST, mihomo: PAGE_FIRST });
+  let previewLimits = $derived(initial.previewLimits);
 
   // Запись
-  let saving = $state(false);
-  let nameServerError = $state('');
-  let reserveServerError = $state('');
-  let cycleError = $state('');
-  let generalError = $state('');
-  let filterErrors = $state<Record<string, string>>({});
+  let saving = $derived(initial.saving);
+  let nameServerError = $derived(initial.nameServerError);
+  let reserveServerError = $derived(initial.reserveServerError);
+  let cycleError = $derived(initial.cycleError);
+  let generalError = $derived(initial.generalError);
+  let filterErrors = $derived(initial.filterErrors);
+
+  // Список источников перечитывается при каждом открытии
+  $effect(() => {
+    if (open) void untrack(loadSources);
+  });
 
   // --- Данные источников ---
   const sourceList = $derived(
@@ -247,32 +286,41 @@
   // --- Предпросмотр: через 250 мс после последнего изменения ---
   // Прежний запрос не обрывается: расчёт короткий, а ответ устаревшего ввода или
   // закрытого диалога просто отбрасывается
-  $effect(() => {
-    if (!open) return;
-    const key = payloadKey;
-    void retryTick;
+  async function loadPreview(key: string, isStale: () => boolean) {
+    try {
+      const res = await previewGroup(JSON.parse(key));
+      if (isStale()) return;
+      previewData = res;
+      previewError = '';
+    } catch (err) {
+      if (isStale()) return;
+      const e = err as { code?: string; params?: Record<string, string>; message?: string };
+      previewError = e.code ? routingErrorText($t, e.code, e.params) : (e.message ?? '');
+    }
+    previewBusy = false;
+  }
+
+  /** Ставит расчёт состава `key` после паузы; возвращает отмену для смены ввода и закрытия. */
+  function schedulePreview(key: string): () => void {
     let stale = false;
     previewBusy = true;
-    const timer = setTimeout(() => {
-      previewGroup(JSON.parse(key))
-        .then((res) => {
-          if (stale) return;
-          previewData = res;
-          previewError = '';
-          previewBusy = false;
-        })
-        .catch((err) => {
-          if (stale) return;
-          const e = err as { code?: string; params?: Record<string, string>; message?: string };
-          previewError = e.code ? routingErrorText($t, e.code, e.params) : (e.message ?? '');
-          previewBusy = false;
-        });
-    }, PREVIEW_DELAY_MS);
+    const timer = setTimeout(() => void loadPreview(key, () => stale), PREVIEW_DELAY_MS);
     return () => {
       clearTimeout(timer);
       stale = true;
     };
+  }
+
+  $effect(() => {
+    if (!open) return;
+    const key = payloadKey;
+    void retryTick;
+    return schedulePreview(key);
   });
+
+  function showMorePreview(k: KernelName) {
+    previewLimits = { ...previewLimits, [k]: previewLimits[k] + PAGE_STEP };
+  }
 
   const kernelRows = $derived(
     KERNELS.map((k) => ({ ...k, p: previewData?.[k.id] ?? null })).filter(
@@ -288,38 +336,6 @@
       .map((r) => $tp('cfg.groups.preview_nodes', r.p.count, { kernel: r.name }))
       .join(' · ')
   );
-
-  // --- Открытие и закрытие ---
-  function initialize() {
-    name = group?.name ?? '';
-    mode = group?.mode ?? 'manual';
-    allSources = group ? group.sources.all : true;
-    sourceIds = group ? [...group.sources.ids] : [];
-    expert = group?.regex ?? false;
-    includeText = (group?.include ?? []).join('\n');
-    excludeText = (group?.exclude ?? []).join('\n');
-    picks = [...(group?.picks ?? [])];
-    members = (group?.members ?? []).map((m: Member) => ({ ...m }));
-    reserve = group?.reserve ?? '';
-    addValue = '';
-    pickQuery = '';
-    pickLimit = PAGE_FIRST;
-    previewData = null;
-    previewError = '';
-    previewBusy = false;
-    previewLimits = { xray: PAGE_FIRST, mihomo: PAGE_FIRST };
-    saving = false;
-    nameServerError = '';
-    reserveServerError = '';
-    cycleError = '';
-    generalError = '';
-    filterErrors = {};
-    void loadSources();
-  }
-
-  $effect(() => {
-    if (open) untrack(initialize);
-  });
 
   function close() {
     // Пока идёт запись, диалог не закрывается: ответ определит, остаются ли значения
@@ -671,7 +687,7 @@
                 <button
                   type="button"
                   class="btn btn-secondary btn-sm"
-                  onclick={() => (previewLimits[r.id] += PAGE_STEP)}
+                  onclick={() => showMorePreview(r.id)}
                 >
                   {$t('cfg.groups.preview_more', { n: PAGE_STEP })}
                 </button>

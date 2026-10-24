@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
+  import { derived } from 'svelte/store';
   import { t } from '../../i18n';
   import Button from '../Button.svelte';
   import Icon from '../../lib/components/Icon.svelte';
@@ -29,12 +31,21 @@
   // не открывается ни во время запуска, ни по итогу. Отказ виден в уведомлениях раздела.
   const silent = $derived(apply?.trigger === 'source_refresh');
 
-  $effect(() => {
-    if ((running || $applyStartedHere) && !silent) {
+  // Фаза запуска: starting — запущено здесь, но ход ещё не пошёл; фоновое обновление — idle.
+  // Каждый переход в starting или running открывает ход заново: «Скрыть», нажатое между
+  // «Применить» и началом хода, снимается этим началом
+  const runPhase = derived([layerSnapshot, applyStartedHere], ([s, here]) => {
+    if (s?.apply.trigger === 'source_refresh') return 'idle';
+    if (s?.apply.running) return 'running';
+    return here ? 'starting' : 'idle';
+  });
+  onDestroy(
+    runPhase.subscribe((phase) => {
+      if (phase === 'idle') return;
       seenRunning = true;
       dismissed = false;
-    }
-  });
+    })
+  );
 
   const visible = $derived(!silent && (running || (seenRunning && !dismissed && result !== null)));
 

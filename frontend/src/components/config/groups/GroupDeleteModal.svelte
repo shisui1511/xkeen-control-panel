@@ -33,10 +33,6 @@
   const uid = $props.id();
 
   type Choice = 'redirect' | 'drop';
-  let choice = $state<Choice>('redirect');
-  let redirectTo = $state('direct');
-  let saving = $state(false);
-  let errorText = $state('');
 
   // Цели замены: остальные группы, DIRECT, REJECT
   const targetOptions = $derived([
@@ -84,24 +80,35 @@
   // Группы, из которых каскад убирает DIRECT/REJECT (D-36): список приходит от сервера
   const demotedRefs = $derived(impact?.demoted ?? []);
 
-  function initialize() {
-    errorText = '';
-    saving = false;
-    // «Удалить эти правила» недоступно при «Всё остальное»: замена обязательна
-    choice = 'redirect';
-    // Замена по умолчанию: ручная группа, в состав которой входила удаляемая (в наборе по
-    // умолчанию это «Прокси»); иначе первая из остальных групп, иначе DIRECT
+  // Замена по умолчанию: ручная группа, в состав которой входила удаляемая (в наборе по
+  // умолчанию это «Прокси»); иначе первая из остальных групп, иначе DIRECT
+  function defaultRedirect(): string {
     const holder = groupRefs.find(
       (g: Impact['groups'][number]) => g.role === 'member' && g.id !== group?.id
     );
     const first = groups.find((g: GroupView) => g.id !== group?.id);
     const pick = holder && groups.some((g: GroupView) => g.id === holder.id) ? holder : first;
-    redirectTo = pick ? `group:${pick.id}` : 'direct';
+    return pick ? `group:${pick.id}` : 'direct';
   }
 
-  $effect(() => {
-    if (open) untrack(initialize);
+  // Исходные значения пересчитываются при каждом открытии и закрытии диалога. Поля ниже —
+  // записываемые $derived: ввод пользователя переопределяет значение до следующего пересчёта.
+  // Группа и ссылки читаются без отслеживания: их обновление при открытом диалоге выбор
+  // не сбрасывает
+  const initial = $derived.by(() => {
+    void open;
+    return untrack(() => ({
+      // «Удалить эти правила» недоступно при «Всё остальное»: замена обязательна
+      choice: 'redirect' as Choice,
+      redirectTo: defaultRedirect(),
+      saving: false,
+      errorText: ''
+    }));
   });
+  let choice = $derived(initial.choice);
+  let redirectTo = $derived(initial.redirectTo);
+  let saving = $derived(initial.saving);
+  let errorText = $derived(initial.errorText);
 
   function close() {
     // Пока идёт запись, диалог не закрывается

@@ -194,37 +194,40 @@
     ])
   );
 
+  // Прежний расчёт не обрывается: ответ устаревшего состава отбрасывается
+  async function loadPreview(isStale: () => boolean) {
+    previewState = 'loading';
+    try {
+      const res = await previewGroup({
+        id: group.id,
+        name: group.name,
+        mode: group.mode,
+        sources: group.sources,
+        include: group.include,
+        exclude: group.exclude,
+        regex: group.regex,
+        picks: group.picks,
+        members: group.members,
+        reserve: group.reserve
+      });
+      if (isStale()) return;
+      preview = res;
+      previewState = 'idle';
+    } catch (err) {
+      if (isStale()) return;
+      const e = err as { code?: string; params?: Record<string, string>; message?: string };
+      previewReason = e.code ? routingErrorText($t, e.code, e.params) : (e.message ?? '');
+      previewState = 'error';
+    }
+  }
+
   $effect(() => {
     if (!expanded) return;
     void previewKey;
     void retryTick;
-    const g = untrack(() => ({
-      id: group.id,
-      name: group.name,
-      mode: group.mode,
-      sources: group.sources,
-      include: group.include,
-      exclude: group.exclude,
-      regex: group.regex,
-      picks: group.picks,
-      members: group.members,
-      reserve: group.reserve
-    }));
-    // Прежний расчёт не обрывается: ответ устаревшего состава отбрасывается
     let stale = false;
-    previewState = 'loading';
-    previewGroup(g)
-      .then((res) => {
-        if (stale) return;
-        preview = res;
-        previewState = 'idle';
-      })
-      .catch((err) => {
-        if (stale) return;
-        const e = err as { code?: string; params?: Record<string, string>; message?: string };
-        previewReason = e.code ? routingErrorText($t, e.code, e.params) : (e.message ?? '');
-        previewState = 'error';
-      });
+    // Поля группы читаются без отслеживания: перечитывание задаёт previewKey
+    untrack(() => void loadPreview(() => stale));
     return () => {
       stale = true;
     };
