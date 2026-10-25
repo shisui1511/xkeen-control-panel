@@ -119,8 +119,8 @@ func rtmtProbe(port int, rawURL string, wait, step time.Duration) (attempts, pas
 	return attempts, passed
 }
 
-// rtmtVmRSS — резидентная память процесса в кБ из /proc/<pid>/status; 0 — не прочитана.
-func rtmtVmRSS(pid int) int {
+// rtmtVMRSS — резидентная память процесса в кБ из /proc/<pid>/status; 0 — не прочитана.
+func rtmtVMRSS(pid int) int {
 	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/status")
 	if err != nil {
 		return 0
@@ -319,9 +319,9 @@ func TestRouterMihomoFailClosed(t *testing.T) {
 		if pid == 0 {
 			t.Fatal("процесс Mihomo не работает")
 		}
-		t.Logf("записей в провайдерах: %d; VmRSS процесса до замера: %d кБ", meas.lines, rtmtVmRSS(pid))
+		t.Logf("записей в провайдерах: %d; VmRSS процесса до замера: %d кБ", meas.lines, rtmtVMRSS(pid))
 		for _, p := range []struct{ label, name string }{{"text", meas.textName}, {"yaml", meas.yamlName}} {
-			before := rtmtVmRSS(pid)
+			before := rtmtVMRSS(pid)
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 			start := time.Now()
 			err := core.svc.UpdateProvider(ctx, "rules", p.name)
@@ -332,7 +332,7 @@ func TestRouterMihomoFailClosed(t *testing.T) {
 				t.Errorf("PUT /providers/rules (%s): %v", p.label, err)
 				continue
 			}
-			after := rtmtVmRSS(pid)
+			after := rtmtVMRSS(pid)
 			t.Logf("format %s: PUT %d мс, ruleCount %d (ошибка чтения: %s), VmRSS до %d кБ, после %d кБ",
 				p.label, took.Milliseconds(), count, rtxYesNo(cerr != nil), before, after)
 		}
