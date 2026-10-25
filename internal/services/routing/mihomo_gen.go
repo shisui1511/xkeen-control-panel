@@ -349,18 +349,6 @@ func (b *mihomoBuild) copiesOf(list []sources.CatalogNode) []string {
 	return out
 }
 
-// uniqueNameIn сообщает, что имя узла в Mihomo встречается среди узлов
-// источников ровно один раз: только тогда узел можно исключить фильтром по имени.
-func (b *mihomoBuild) uniqueNameIn(name string, srcs []string) bool {
-	count := 0
-	for _, n := range b.catalog {
-		if n.MihomoName == name && slices.Contains(srcs, n.Source) {
-			count++
-		}
-	}
-	return count == 1
-}
-
 // prepare считает материализацию групп: состав, провайдеры, фильтры и копии узлов.
 func (b *mihomoBuild) prepare() {
 	for _, g := range b.groups {
