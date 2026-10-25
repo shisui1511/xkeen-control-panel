@@ -280,11 +280,40 @@ func (s *Service) Update(rev int64, id string, p Patch) (configlayer.DraftEvent,
 	return s.d.Layer.EditDraftBatch(rev, map[string]json.RawMessage{sectionName(id): section}, liveFn)
 }
 
-// Delete убирает подписку из черновика. Живые данные и файлы источника удаляются
-// при «Применить»; подписка, которой нет в применённом состоянии, теряет живые
-// данные сразу. Источник «Мои узлы» не удаляется: узлы убираются по одному
-// (DeleteNode). Проверка ссылок на узлы удаляемой подписки — фаза 146 (SRC-07).
+// mergeExtra объединяет секции правки источника с секциями, которые передал
+// вызывающий (каскад групп, SRC-07): секции источников в extra запрещены, имена
+// остальных проверяет слой при записи, значение nil удаляет секцию.
+func mergeExtra(base, extra map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	out := make(map[string]json.RawMessage, len(base)+len(extra))
+	for name, v := range extra {
+		if strings.HasPrefix(name, SectionPrefix) {
+			return nil, invalid("секции источников нельзя менять дополнительными секциями")
+		}
+		out[name] = v
+	}
+	for name, v := range base {
+		out[name] = v
+	}
+	return out, nil
+}
+
+// Delete убирает подписку из черновика без правок других секций (DeleteWith).
 func (s *Service) Delete(rev int64, id string) (configlayer.DraftEvent, error) {
+	return s.DeleteWith(rev, id, nil)
+}
+
+// DeleteWith убирает подписку из черновика и одной правкой (одна ревизия) меняет
+// секции extra — ссылки групп на её узлы (SRC-07). Живые данные и файлы источника
+// удаляются при «Применить»; подписка, которой нет в применённом состоянии,
+// теряет живые данные сразу. Источник «Мои узлы» не удаляется: узлы убираются по
+// одному (DeleteNodeWith). Секции src_* в extra недопустимы (ErrInvalidInput),
+// недопустимое имя секции отвергает слой (ErrInvalidSection); при любой ошибке
+// черновик прежний. Значение nil в extra удаляет секцию.
+func (s *Service) DeleteWith(rev int64, id string, extra map[string]json.RawMessage) (configlayer.DraftEvent, error) {
+	sections, err := mergeExtra(map[string]json.RawMessage{sectionName(id): nil}, extra)
+	if err != nil {
+		return configlayer.DraftEvent{}, err
+	}
 	if id == MySourceID {
 		return configlayer.DraftEvent{}, invalid("источник «Мои узлы» не удаляется")
 	}
@@ -313,7 +342,7 @@ func (s *Service) Delete(rev int64, id string) (configlayer.DraftEvent, error) {
 			return writeLive(l, cur)
 		}
 	}
-	return s.d.Layer.EditDraftBatch(rev, map[string]json.RawMessage{sectionName(id): nil}, liveFn)
+	return s.d.Layer.EditDraftBatch(rev, sections, liveFn)
 }
 
 // Reveal возвращает полный URL подписки по явному действию пользователя (D-33):

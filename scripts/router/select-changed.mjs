@@ -96,10 +96,14 @@ const KERNEL_PATHS = [
 ];
 
 // Данные роутерных тестов: их получают Go-тесты через окружение go-suite.sh (XCP_RT_LINKS,
-// XCP_RT_INPUTS, XCP_RT_CONTRACT), а спеки — через lib/nodes-api.ts. Граф импортов и
+// XCP_RT_INPUTS, XCP_RT_CONTRACT, XCP_RT_ROUTING_CONTRACT), а спеки — через lib/nodes-api.ts. Граф импортов и
 // `go list -deps` этих связей не видят, поэтому правка данных даёт полный выбор (D-25).
 // Новый путь данных для тестов добавлять сюда (см. комментарий в go-suite.sh).
-const TEST_DATA_ALL = [/(^|\/)testdata\//, /^frontend\/src\/lib\/sourcesContract\.json$/];
+const TEST_DATA_ALL = [
+  /(^|\/)testdata\//,
+  /^frontend\/src\/lib\/sourcesContract\.json$/,
+  /^frontend\/src\/lib\/routingContract\.json$/
+];
 
 // Ничего не добавляют (смоук идёт всё равно): документация, CI, хуки, служебное.
 const IGNORED = [

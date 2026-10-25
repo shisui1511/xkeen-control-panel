@@ -1888,7 +1888,12 @@
                 <span class="log-ts monospace">{formatTs(entry.timestamp)}</span>
               </div>
               {#if entry.output}
-                <pre class="log-output">{entry.output}</pre>
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+                <pre
+                  class="log-output"
+                  role="region"
+                  tabindex="0"
+                  aria-label={$t('svc.log_output_label')}>{entry.output}</pre>
               {/if}
             </div>
           {/each}
@@ -2239,6 +2244,8 @@
     padding: 0 2px;
     font-size: 12px;
     color: var(--fg-secondary);
+    /* Ошибка проверки обновлений несёт URL без пробелов: без переноса он шире 390 px */
+    overflow-wrap: anywhere;
   }
 
   .update-hint.update-hint-error {

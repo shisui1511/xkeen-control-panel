@@ -24,6 +24,8 @@ const (
 	IssueDuplicateFile         = "duplicate_file"
 	IssueNameTaken             = "name_taken"
 	IssueGeneratorFailed       = "generator_failed"
+	// IssueCheckerFailed — проверка черновика завершилась паникой (Registry.Check).
+	IssueCheckerFailed = "checker_failed"
 )
 
 // BuildIssue — проблема одного файла сборки.
@@ -31,6 +33,9 @@ type BuildIssue struct {
 	Key    string `json:"key"`
 	Code   string `json:"code"`
 	Detail string `json:"detail,omitempty"`
+	// Params — параметры текста проблемы для клиента (имя группы, файл, тег);
+	// секретов в них нет.
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // BuildError — все проблемы сборки разом.
@@ -52,7 +57,8 @@ func (e *BuildError) Error() string {
 // правилу панели и стоп-списку XKeen, имя не занято старым слоем
 // (foreignOwned, может быть nil), для Xray — ключ "transport": (XKeen при нём
 // выводит файл из работы), валидный JSON и объект на верхнем уровне, для
-// провайдеров Mihomo — YAML с обязательным ключом и непустым списком. Файл
+// провайдеров Mihomo — YAML с обязательным ключом и непустым списком (текстовый
+// провайдер правил — непустой текст со строками правил). Файл
 // не переименовывается и другое имя не подбирается.
 func CheckGenerated(files []GeneratedFile, foreignOwned func(kernel, rel string) bool) error {
 	var issues []BuildIssue
@@ -75,7 +81,7 @@ func CheckGenerated(files []GeneratedFile, foreignOwned func(kernel, rel string)
 			for _, is := range checkXrayContent(f.Content) {
 				add(f, is.Code, is.Detail)
 			}
-		case KindMihomoProxyProvider, KindMihomoRuleProvider:
+		case KindMihomoProxyProvider, KindMihomoRuleProvider, KindMihomoRuleProviderText:
 			if code := ProviderContentProblem(f.Kind, f.Content); code != "" {
 				add(f, code, "")
 			}
@@ -135,12 +141,14 @@ type FilePlan struct {
 type Plan struct {
 	Files   []FilePlan
 	Orphans []OrphanFile
+	// Routing — операции взятия и возврата маршрутизации (nil — нет).
+	Routing *RoutingOps
 }
 
-// Empty — в плане нет ни записи, ни удаления, ни сирот (skip_released
-// действием не считается).
+// Empty — в плане нет ни записи, ни удаления, ни сирот, ни операций
+// маршрутизации (skip_released действием не считается).
 func (p Plan) Empty() bool {
-	if len(p.Orphans) > 0 {
+	if len(p.Orphans) > 0 || p.Routing != nil {
 		return false
 	}
 	for _, fp := range p.Files {
@@ -152,8 +160,12 @@ func (p Plan) Empty() bool {
 }
 
 // Changes — у ядра есть действия плана: запись, удаление или сирота
-// (сироты считаются изменением своего ядра). skip_released действием не является.
+// (сироты считаются изменением своего ядра); операции маршрутизации над
+// файлами ядра тоже изменение. skip_released действием не является.
 func (p Plan) Changes(kernel string) bool {
+	if p.Routing.hasDisk(kernel) {
+		return true
+	}
 	for _, fp := range p.Files {
 		if fp.Kernel == kernel && (fp.Action == ActionWrite || fp.Action == ActionDelete) {
 			return true
@@ -171,6 +183,9 @@ func (p Plan) Changes(kernel string) bool {
 // только они способны изменить то, что ядро уже прочитало. Сироты считаются
 // изменением, как в Changes.
 func (p Plan) RuntimeChanges(kernel string) bool {
+	if p.Routing.hasDisk(kernel) {
+		return true
+	}
 	for _, fp := range p.Files {
 		if fp.Kernel == kernel && !fp.Inert && (fp.Action == ActionWrite || fp.Action == ActionDelete) {
 			return true

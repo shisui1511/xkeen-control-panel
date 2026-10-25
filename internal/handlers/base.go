@@ -15,6 +15,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/assets"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
@@ -81,6 +82,9 @@ type API struct {
 	// sources — сервис источников (подписки и «Мои узлы»); nil, пока main.go его
 	// не подключил: маршруты /api/configlayer/sources* отвечают 404.
 	sources *sources.Service
+	// routing — сервис маршрутизации (группы, правила, владение); nil, пока
+	// main.go его не подключил: маршруты /api/configlayer/routing* отвечают 404.
+	routing *routing.Service
 	// configLayerMu сериализует переключения флага слоя целиком (SettingsConfigLayer).
 	configLayerMu sync.Mutex
 }
@@ -291,6 +295,12 @@ func (a *API) SetConfigLayer(l *configlayer.Layer) {
 // останавливается в main.go.
 func (a *API) SetSourcesService(s *sources.Service) {
 	a.sources = s
+}
+
+// SetRoutingService подключает сервис маршрутизации; создаётся, запускается и
+// останавливается в main.go.
+func (a *API) SetRoutingService(s *routing.Service) {
+	a.routing = s
 }
 
 // ConfigLayer — слой «Конфигурация»; nil, если не подключён.

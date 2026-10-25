@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
+  import { derived } from 'svelte/store';
   import { t } from '../../i18n';
   import Button from '../Button.svelte';
   import Icon from '../../lib/components/Icon.svelte';
@@ -15,7 +18,6 @@
   const STEP_ORDER: StepId[] = ['build', 'validate_xray', 'validate_mihomo', 'write', 'restart'];
   const KERNEL_LABELS: Record<string, string> = { xray: 'Xray', mihomo: 'Mihomo' };
 
-  let section = $state<HTMLElement | null>(null);
   // Ход виден, пока идёт применение, и после него — до «Скрыть» или следующего запуска.
   // Свежая загрузка страницы с уже завершённым применением его не показывает.
   let seenRunning = $state(false);
@@ -29,12 +31,21 @@
   // не открывается ни во время запуска, ни по итогу. Отказ виден в уведомлениях раздела.
   const silent = $derived(apply?.trigger === 'source_refresh');
 
-  $effect(() => {
-    if ((running || $applyStartedHere) && !silent) {
+  // Фаза запуска: starting — запущено здесь, но ход ещё не пошёл; фоновое обновление — idle.
+  // Каждый переход в starting или running открывает ход заново: «Скрыть», нажатое между
+  // «Применить» и началом хода, снимается этим началом
+  const runPhase = derived([layerSnapshot, applyStartedHere], ([s, here]) => {
+    if (s?.apply.trigger === 'source_refresh') return 'idle';
+    if (s?.apply.running) return 'running';
+    return here ? 'starting' : 'idle';
+  });
+  onDestroy(
+    runPhase.subscribe((phase) => {
+      if (phase === 'idle') return;
       seenRunning = true;
       dismissed = false;
-    }
-  });
+    })
+  );
 
   const visible = $derived(!silent && (running || (seenRunning && !dismissed && result !== null)));
 
@@ -45,15 +56,12 @@
   );
   const restartRows = $derived<LayerRestart[]>(apply?.restart ?? []);
 
-  // Карточка появилась — прокручиваем к ней, не дёргая страницу при reduced-motion
-  let wasVisible = false;
-  $effect(() => {
-    if (visible && !wasVisible && section) {
-      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      section.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
-    }
-    wasVisible = visible;
-  });
+  // Карточка появилась — прокручиваем к ней, не дёргая страницу при reduced-motion.
+  // Карточка есть в разметке, только пока она видна, поэтому прокрутка — при её монтировании
+  const scrollIntoViewOnShow: Attachment<HTMLElement> = (node) => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    node.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+  };
 
   const kernelLabel = (k: string) => KERNEL_LABELS[k] ?? k;
 
@@ -81,11 +89,12 @@
     return text === key ? '' : text;
   }
 
-  // Подсказка по коду; пустая строка, если для кода нет перевода
-  function hintText(code: string | undefined): string {
+  // Подсказка по коду; пустая строка, если для кода нет перевода. Параметры (group, file,
+  // tag, rule) приходят вместе с проблемой проверки групп и правил и подставляются в текст
+  function hintText(code: string | undefined, params?: Record<string, string>): string {
     if (!code) return '';
     const key = 'cfg.hint.' + code;
-    const text = $t(key);
+    const text = $t(key, params);
     return text === key ? '' : text;
   }
 
@@ -146,7 +155,7 @@
     class="card apply-progress"
     data-testid="config-progress"
     aria-label={$t('cfg.progress_title')}
-    bind:this={section}
+    {@attach scrollIntoViewOnShow}
   >
     <div class="card-title">{$t('cfg.progress_title')}</div>
 
@@ -217,7 +226,7 @@
               {#each failure.issues as issue, i (issue.key + ':' + issue.code + ':' + i)}
                 <li>
                   <code class="issue-key">{issue.key}</code>
-                  <span>{hintText(issue.code) || issue.detail || issue.code}</span>
+                  <span>{hintText(issue.code, issue.params) || issue.detail || issue.code}</span>
                 </li>
               {/each}
             </ul>

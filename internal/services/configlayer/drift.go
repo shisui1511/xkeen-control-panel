@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -73,9 +74,14 @@ func providerKey(kind FileKind) (string, bool) {
 
 // ProviderContentProblem проверяет содержимое провайдера Mihomo: пустой файл,
 // неразбираемый YAML, нет обязательного ключа (proxies или payload) или список
-// пуст. Пустой file-провайдер Mihomo не загружает, поэтому это дрейф. Для
-// остальных видов возвращается "": JSON Xray проверяет сборка (144-04).
+// пуст. Для текстового провайдера правил (KindMihomoRuleProviderText) YAML не
+// разбирается: см. textProviderProblem. Пустой file-провайдер Mihomo не
+// загружает, поэтому это дрейф. Для остальных видов возвращается "": JSON Xray
+// проверяет сборка (144-04).
 func ProviderContentProblem(kind FileKind, content []byte) string {
+	if kind == KindMihomoRuleProviderText {
+		return textProviderProblem(content)
+	}
 	key, ok := providerKey(kind)
 	if !ok {
 		return ""
@@ -102,6 +108,22 @@ func ProviderContentProblem(kind FileKind, content []byte) string {
 	default:
 		return IssueProviderYAMLInvalid
 	}
+}
+
+// textProviderProblem проверяет текст провайдера правил: NUL-байт или не UTF-8
+// (код provider_yaml_invalid: подсказка «содержимое не разбирается» общая),
+// пустой текст или одни комментарии `#` и пустые строки — provider_empty.
+func textProviderProblem(content []byte) string {
+	if bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content) {
+		return IssueProviderYAMLInvalid
+	}
+	for _, line := range bytes.Split(content, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) > 0 && line[0] != '#' {
+			return ""
+		}
+	}
+	return IssueProviderEmpty
 }
 
 // CheckEntry сверяет запись манифеста с диском (D-09, D-10). Порядок проверок:
@@ -219,4 +241,90 @@ func ScanOrphans(roots Roots, m map[string]ManifestEntry, foreignOwned func(kern
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
+}
+
+// Коды дрейфа и отказов маршрутизации (фаза 146, D-06, D-07).
+const (
+	// DriftRoutingProfile — config.yaml Mihomo при взятом Mihomo указывает не на
+	// профиль панели (или стал обычным файлом).
+	DriftRoutingProfile = "routing_profile"
+	// DriftRoutingForeign — в каталоге Xray есть чужой файл с ключом routing,
+	// который появился после взятия или перекрывает файл панели.
+	DriftRoutingForeign = "routing_foreign"
+	// IssueForeignMixed — чужой файл с routing смешанный: «вернуть файл панели»
+	// его не переносит, решается только «Отпустить маршрутизацию».
+	IssueForeignMixed = "foreign_mixed"
+	// IssueNothingToReclaim — у ядра нет дрейфа маршрутизации.
+	IssueNothingToReclaim = "nothing_to_reclaim"
+)
+
+// RoutingDriftItem — одно расхождение маршрутизации: ядро, код и файл
+// (имя в каталоге Xray или "config.yaml").
+type RoutingDriftItem struct {
+	Kernel string
+	Code   string
+	File   string
+}
+
+// mihomoConfigFile — активный профиль Mihomo в корне его каталога.
+const mihomoConfigFile = "config.yaml"
+
+// mihomoPointsToPanel — config.yaml Mihomo — симлинк на профиль панели. Профиль
+// не читается: проверка идёт на каждой сверке дрейфа.
+func mihomoPointsToPanel(root string) bool {
+	cfg := filepath.Join(root, mihomoConfigFile)
+	fi, err := os.Lstat(cfg)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	link, err := os.Readlink(cfg)
+	if err != nil {
+		return false
+	}
+	if !filepath.IsAbs(link) {
+		link = filepath.Join(root, link)
+	}
+	rel, ok := relInsideRoot(root, link)
+	return ok && rel == PanelMihomoProfile
+}
+
+// xrayForeignDrift находит чужие файлы routing, которые нельзя оставить молча:
+// появившиеся после взятия (их нет среди оставленных при взятии, в том числе
+// 05_routing.json, возвращённый XKeen) и любые, сортирующиеся после файла панели
+// (RouterConfig заменяется целиком, поэтому такой файл перекрывает панель). Файлы
+// старого слоя не учитываются: он переписывает их сам.
+func xrayForeignDrift(files []RoutingFile, st *XrayRoutingState) []RoutingDriftItem {
+	left := make(map[string]bool, len(st.Left))
+	for _, n := range st.Left {
+		left[n] = true
+	}
+	var out []RoutingDriftItem
+	for _, f := range files {
+		if !f.HasRouting || f.Legacy {
+			continue
+		}
+		if !left[f.Name] || f.Name > PanelXrayRoutingFile {
+			out = append(out, RoutingDriftItem{Kernel: KernelXray, Code: DriftRoutingForeign, File: f.Name})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+	return out
+}
+
+// routingDrift сверяет фактическое владение маршрутизацией (st) с диском:
+// Mihomo взят, а config.yaml указывает не на профиль панели — routing_profile;
+// Xray взят, а в configs/ есть чужой routing — routing_foreign. Ядро вне
+// области scope или без бинарника не сверяется; нечитаемый каталог дрейфом не
+// считается.
+func routingDrift(roots Roots, st RoutingState, installed InstalledKernels, scope string, foreignOwned func(kernel, rel string) bool) []RoutingDriftItem {
+	var out []RoutingDriftItem
+	if st.Xray != nil && kernelInScope(KernelXray, installed, scope) {
+		if files, _, err := ScanXrayRouting(roots.Xray, foreignOwned); err == nil {
+			out = append(out, xrayForeignDrift(files, st.Xray)...)
+		}
+	}
+	if st.Mihomo != nil && kernelInScope(KernelMihomo, installed, scope) && roots.Mihomo != "" && !mihomoPointsToPanel(roots.Mihomo) {
+		out = append(out, RoutingDriftItem{Kernel: KernelMihomo, Code: DriftRoutingProfile, File: mihomoConfigFile})
+	}
+	return out
 }

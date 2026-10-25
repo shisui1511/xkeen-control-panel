@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { t } from '../../i18n';
+  import { get } from 'svelte/store';
+  import { t, tp } from '../../i18n';
   import { showConfirm } from '../../stores';
   import Button from '../Button.svelte';
   import Icon from '../../lib/components/Icon.svelte';
@@ -8,12 +9,16 @@
     driftCount,
     applyRunning,
     applyStartedHere,
+    layerSnapshot,
     layerStatus,
     layerConnection,
     applyNow,
     resetDraft,
     handleLayerError
   } from '../../lib/configLayer';
+  import { routingView, loadRouting } from '../../lib/configRouting';
+  import TakeRoutingModal from './routing/TakeRoutingModal.svelte';
+  import { ownerState, routingBusy } from './routing/routingOwner';
 
   let resetting = $state(false);
 
@@ -24,10 +29,36 @@
   // Применение идёт из этой вкладки (флаг ставится до ответа сервера) или из другой (D-16)
   const applyingHere = $derived($applyStartedHere);
   const applyingOther = $derived($applyRunning && !$applyStartedHere);
-  const busy = $derived(applyingHere || applyingOther || resetting);
+  const busy = $derived(applyingHere || applyingOther || resetting || $routingBusy);
   const blockedByDrift = $derived(dirty && hasDrift);
+  // Проблемы проверки черновика (пустая группа, нет списка, цикл): «Применить» отказывает,
+  // пока их не исправят (GRP-05, SRC-07)
+  const checkCount = $derived($layerSnapshot?.checks.length ?? 0);
+  const blockedByChecks = $derived(dirty && checkCount > 0);
+  const applyHint = $derived(
+    blockedByChecks
+      ? $t('cfg.routing.apply_blocked_hint')
+      : blockedByDrift
+        ? $t('cfg.apply_blocked_hint')
+        : undefined
+  );
+
+  // «Применить» при группах или правилах в черновике, пока маршрутизацией управляет XKeen:
+  // сначала диалог взятия с тремя исходами (D-01)
+  let interceptOpen = $state(false);
+
+  async function shouldIntercept(): Promise<boolean> {
+    if ($ownerState.kind !== 'xkeen') return false;
+    if (get(routingView) === null) await loadRouting();
+    const view = get(routingView);
+    return (view?.groups.length ?? 0) > 0 || (view?.rules.length ?? 0) > 0;
+  }
 
   async function onApply() {
+    if (await shouldIntercept()) {
+      interceptOpen = true;
+      return;
+    }
     try {
       await applyNow();
     } catch (err) {
@@ -80,6 +111,15 @@
       {#if blockedByDrift}
         <span class="status-sub">{$t('cfg.draft_blocked', { k: $driftCount })}</span>
       {/if}
+      {#if checkCount > 0}
+        <span
+          class="status-sub"
+          title={$t('cfg.routing.apply_blocked_hint')}
+          data-testid="config-apply-blocked"
+        >
+          {$tp('cfg.routing.apply_blocked', checkCount)}
+        </span>
+      {/if}
     {:else if ready}
       <span class="status-line">
         <span class="status-icon status-icon-success"><Icon name="check" size={14} /></span>
@@ -98,13 +138,15 @@
       variant="primary"
       class="draft-bar-btn"
       data-testid="config-apply"
-      disabled={!ready || !dirty || busy || blockedByDrift}
+      disabled={!ready || !dirty || busy || blockedByDrift || blockedByChecks}
       loading={applyingHere}
-      title={blockedByDrift ? $t('cfg.apply_blocked_hint') : undefined}
+      title={applyHint}
       onclick={onApply}>{$t('cfg.apply')}</Button
     >
   </div>
 </section>
+
+<TakeRoutingModal open={interceptOpen} mode="intercept" onclose={() => (interceptOpen = false)} />
 
 <style>
   .draft-bar {
@@ -161,12 +203,18 @@
   .status-sub {
     color: var(--warning);
     font-size: var(--font-size-sm);
+    overflow-wrap: anywhere;
   }
 
   .draft-bar-actions {
     display: flex;
     gap: 8px;
     flex-shrink: 0;
+  }
+
+  .draft-bar-actions :global(.draft-bar-btn) {
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   @media (max-width: 768px) {

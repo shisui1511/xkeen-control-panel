@@ -426,7 +426,8 @@
   }
 
   @media (pointer: coarse), (max-width: 768px) {
-    .ss-advanced summary {
+    .ss-advanced summary,
+    .ss-footer :global(.btn) {
       min-height: 44px;
     }
   }

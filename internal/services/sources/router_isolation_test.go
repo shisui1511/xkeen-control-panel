@@ -229,11 +229,11 @@ func TestRouterIsolationGeneratorPathsTable(t *testing.T) {
 		if sec := sectionName(id); sec != SectionPrefix+id {
 			t.Errorf("имя секции %q", sec)
 		}
-		xf, err := xrayFile(id, list, caps)
+		xf, err := xrayFile(id, kernelList(kernelXray, id, "", list, caps))
 		if err != nil || xf == nil {
 			t.Fatalf("файл Xray для %s: %v", id, err)
 		}
-		mf, err := mihomoFile(id, list, caps)
+		mf, err := mihomoFile(id, kernelList(kernelMihomo, id, "", list, caps), false)
 		if err != nil || mf == nil {
 			t.Fatalf("файл Mihomo для %s: %v", id, err)
 		}

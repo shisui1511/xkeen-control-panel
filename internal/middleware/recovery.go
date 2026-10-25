@@ -11,6 +11,12 @@ func Recovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
+				// http.ErrAbortHandler — штатный обрыв ответа (обратный прокси Mihomo,
+				// клиент ушёл посреди потока): net/http гасит его без трассы и закрывает
+				// соединение, ответ 500 в начатый поток не пишется.
+				if rec == http.ErrAbortHandler {
+					panic(rec)
+				}
 				log.Printf("Panic recovered: %v", rec)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)

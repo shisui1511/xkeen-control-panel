@@ -57,6 +57,9 @@ type Input struct {
 	Sections Sections
 	Live     Sections
 	Mode     SourceKind
+	// Routing — факты о маршрутизации (146-06): api-входящий в configs/, порты
+	// прежнего профиля Mihomo, какие ядра уже взяты. Только для чтения.
+	Routing RoutingFacts
 }
 
 // Generator — единственная точка расширения слоя для фаз 145–147: по входным
@@ -66,10 +69,20 @@ type Generator interface {
 	Generate(in Input, installed InstalledKernels) ([]GeneratedFile, error)
 }
 
-// Registry — упорядоченный набор генераторов.
+// Checker — проверка входных данных до записи: возвращает блокирующие проблемы
+// (пустая группа, висячая ссылка). Непустой итог не даёт применить черновик и
+// отвергает фоновый запуск конвейера. Проверка обязана терпеть любой вход, сама
+// диск не читает и работает быстро: Snapshot считает её по ревизии черновика.
+type Checker interface {
+	ID() string
+	Check(in Input, installed InstalledKernels) []BuildIssue
+}
+
+// Registry — упорядоченный набор генераторов и проверок.
 type Registry struct {
 	mu         sync.RWMutex
 	generators []Generator
+	checkers   []Checker
 }
 
 // NewRegistry создаёт пустой реестр.
@@ -82,6 +95,55 @@ func (r *Registry) Register(g Generator) {
 	r.mu.Lock()
 	r.generators = append(r.generators, g)
 	r.mu.Unlock()
+}
+
+// RegisterChecker добавляет проверку в конец списка.
+func (r *Registry) RegisterChecker(c Checker) {
+	r.mu.Lock()
+	r.checkers = append(r.checkers, c)
+	r.mu.Unlock()
+}
+
+// HasChecker сообщает, зарегистрирована ли проверка с таким ID.
+func (r *Registry) HasChecker(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, c := range r.checkers {
+		if c.ID() == id {
+			return true
+		}
+	}
+	return false
+}
+
+// Check вызывает проверки по порядку регистрации и собирает все проблемы разом.
+// Паника проверки не роняет слой: она становится проблемой checker_failed с ID
+// проверки в Key. Итог отсортирован по (Key, Code) и никогда не nil.
+func (r *Registry) Check(in Input, installed InstalledKernels) []BuildIssue {
+	r.mu.RLock()
+	checkers := append([]Checker(nil), r.checkers...)
+	r.mu.RUnlock()
+	out := []BuildIssue{}
+	for _, c := range checkers {
+		out = append(out, runChecker(c, in, installed)...)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Key != out[j].Key {
+			return out[i].Key < out[j].Key
+		}
+		return out[i].Code < out[j].Code
+	})
+	return out
+}
+
+// runChecker вызывает одну проверку, превращая панику в проблему checker_failed.
+func runChecker(c Checker, in Input, installed InstalledKernels) (issues []BuildIssue) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			issues = []BuildIssue{{Key: c.ID(), Code: IssueCheckerFailed, Detail: fmt.Sprintf("%s: %v", c.ID(), rec)}}
+		}
+	}()
+	return c.Check(in, installed)
 }
 
 // Has сообщает, зарегистрирован ли генератор с таким ID.

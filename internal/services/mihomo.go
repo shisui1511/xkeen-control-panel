@@ -587,6 +587,140 @@ func (s *MihomoService) ReloadConfig(configPath string) error {
 	return nil
 }
 
+// clashErrBodyMax — сколько символов тела ответа Clash API попадает в ошибку
+// методов управления: в теле бывают имена узлов, длинный хвост в журналах не нужен.
+const clashErrBodyMax = 64
+
+// ClashStatusError — Clash API ответил кодом, который метод не считает успехом.
+type ClashStatusError struct {
+	Status int
+	Body   string
+}
+
+func (e *ClashStatusError) Error() string {
+	return fmt.Sprintf("mihomo clash api: status %d: %s", e.Status, e.Body)
+}
+
+// newClashStatusError обрезает тело до clashErrBodyMax символов.
+func newClashStatusError(status int, body []byte) error {
+	text := strings.ToValidUTF8(strings.TrimSpace(string(body)), "")
+	if r := []rune(text); len(r) > clashErrBodyMax {
+		text = string(r[:clashErrBodyMax])
+	}
+	return &ClashStatusError{Status: status, Body: text}
+}
+
+// clashDo выполняет запрос к Clash API (unix-сокет или контроллер из конфига,
+// секрет в заголовке). path уже содержит экранированные сегменты. body (если не
+// nil) — готовый JSON. Возвращает код ответа и тело.
+func (s *MihomoService) clashDo(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
+	info, err := s.ParseControllerConfig()
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to parse controller config: %w", err)
+	}
+	base, err := controllerBaseURL(info)
+	if err != nil {
+		return 0, nil, err
+	}
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, base+path, rd)
+	if err != nil {
+		return 0, nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if info.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+info.Secret)
+	}
+	resp, err := s.GetHTTPClient().Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, providerBodyMax))
+	return resp.StatusCode, data, err
+}
+
+// UpdateProvider обновляет один провайдер точечно: PUT /providers/{тип}/{имя}.
+// providerType — "proxies" или "rules". Ответ 204 — успех (Mihomo перечитал
+// источник), прочие коды — ошибка с кодом ответа. Сверка числа узлов или правил
+// остаётся за вызывающим (ProviderCount): 204 не говорит, что набор не пуст.
+func (s *MihomoService) UpdateProvider(ctx context.Context, providerType, name string) error {
+	if providerType != "proxies" && providerType != "rules" {
+		return fmt.Errorf("mihomo providers: неизвестный тип провайдера %q", providerType)
+	}
+	status, body, err := s.clashDo(ctx, http.MethodPut, "/providers/"+providerType+"/"+url.PathEscape(name), nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusNoContent {
+		return newClashStatusError(status, body)
+	}
+	return nil
+}
+
+// ProxyNow возвращает выбранного участника группы: GET /proxies/{группа}, поле now.
+func (s *MihomoService) ProxyNow(ctx context.Context, group string) (string, error) {
+	status, body, err := s.clashDo(ctx, http.MethodGet, "/proxies/"+url.PathEscape(group), nil)
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", newClashStatusError(status, body)
+	}
+	var doc struct {
+		Now string `json:"now"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return "", fmt.Errorf("mihomo clash api: разбор ответа: %w", err)
+	}
+	return doc.Now, nil
+}
+
+// SelectProxy выбирает участника группы: PUT /proxies/{группа} {"name": ...}.
+// Успех — 204.
+func (s *MihomoService) SelectProxy(ctx context.Context, group, name string) error {
+	payload, err := json.Marshal(map[string]string{"name": name})
+	if err != nil {
+		return fmt.Errorf("mihomo clash api: тело запроса: %w", err)
+	}
+	status, body, err := s.clashDo(ctx, http.MethodPut, "/proxies/"+url.PathEscape(group), payload)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusNoContent {
+		return newClashStatusError(status, body)
+	}
+	return nil
+}
+
+// ProxyDelay измеряет задержку узла или группы: GET /proxies/{имя}/delay с
+// адресом проверки и таймаутом в миллисекундах. Узел не ответил — ошибка с кодом
+// ответа Mihomo.
+func (s *MihomoService) ProxyDelay(ctx context.Context, name, testURL string, timeout time.Duration) (int, error) {
+	q := url.Values{}
+	q.Set("url", testURL)
+	q.Set("timeout", fmt.Sprintf("%d", timeout.Milliseconds()))
+	status, body, err := s.clashDo(ctx, http.MethodGet, "/proxies/"+url.PathEscape(name)+"/delay?"+q.Encode(), nil)
+	if err != nil {
+		return 0, err
+	}
+	if status != http.StatusOK {
+		return 0, newClashStatusError(status, body)
+	}
+	var doc struct {
+		Delay int `json:"delay"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return 0, fmt.Errorf("mihomo clash api: разбор ответа: %w", err)
+	}
+	return doc.Delay, nil
+}
+
 // ErrProviderEmpty — Mihomo ответил 204: набор провайдера пуст.
 var ErrProviderEmpty = errors.New("mihomo: провайдер пуст")
 

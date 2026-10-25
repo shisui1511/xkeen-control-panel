@@ -32,7 +32,11 @@ const (
 	KindXrayJSON            FileKind = "xray_json"
 	KindMihomoProxyProvider FileKind = "mihomo_provider_proxies"
 	KindMihomoRuleProvider  FileKind = "mihomo_provider_rules"
-	KindMihomoProfile       FileKind = "mihomo_profile"
+	// KindMihomoRuleProviderText — file rule-provider в формате text: одно правило
+	// на строку (выгрузка списков dat, D-19). Файл лежит в rule_providers/ с
+	// расширением .txt; формат text принимает Mihomo (RESEARCH, Pitfall 10).
+	KindMihomoRuleProviderText FileKind = "mihomo_provider_rules_text"
+	KindMihomoProfile          FileKind = "mihomo_profile"
 )
 
 // EntryStatus — состояние записи манифеста.
@@ -116,6 +120,9 @@ type Journal struct {
 	Trigger   string        `json:"trigger"`
 	StartedAt time.Time     `json:"started_at"`
 	Files     []JournalFile `json:"files"`
+	// Routing — операции маршрутизации этой записи (перенос файлов routing,
+	// перекладка config.yaml Mihomo): запись остаётся до фиксации состояния.
+	Routing *JournalRouting `json:"routing,omitempty"`
 }
 
 // Notices — уведомления, которые панель показывает до явного закрытия.
@@ -140,6 +147,9 @@ type State struct {
 	Manifest map[string]ManifestEntry `json:"manifest"`
 	Notices  Notices                  `json:"notices"`
 	Journal  *Journal                 `json:"journal,omitempty"`
+	// Routing — фактическое владение маршрутизацией: меняется только применением
+	// (желаемое — секция routing черновика). Поле необязательное, схема прежняя.
+	Routing RoutingState `json:"routing"`
 }
 
 // emptyState — чистое состояние текущей схемы.
@@ -158,6 +168,7 @@ func (st State) clone() State {
 	out.Draft = st.Draft.Clone()
 	out.Applied = st.Applied.Clone()
 	out.Live = st.Live.Clone()
+	out.Routing = st.Routing.clone()
 	out.Manifest = make(map[string]ManifestEntry, len(st.Manifest))
 	for k, v := range st.Manifest {
 		out.Manifest[k] = v
@@ -165,6 +176,7 @@ func (st State) clone() State {
 	if st.Journal != nil {
 		j := *st.Journal
 		j.Files = append([]JournalFile(nil), st.Journal.Files...)
+		j.Routing = st.Journal.Routing.clone()
 		out.Journal = &j
 	}
 	return out

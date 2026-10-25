@@ -73,13 +73,21 @@ func (p *Pipeline) writePlan(plan Plan, trigger Trigger) (writeOutcome, error) {
 		}
 		journal = append(journal, JournalFile{Key: o.Key, Existed: m.Existed})
 	}
+	// Операции маршрутизации: копии переносимых файлов и config.yaml уходят в тот же
+	// набор до журнала; на диске пока ничего не меняется.
+	routingJournal, routingFiles, err := p.prepareRouting(set, plan.Routing)
+	if err != nil {
+		_ = os.RemoveAll(set.Dir)
+		return out, err
+	}
+	journal = append(journal, routingFiles...)
 	if err := set.WriteMeta(); err != nil {
 		_ = os.RemoveAll(set.Dir)
 		return out, err
 	}
 	startedAt := p.d.Now().UTC()
 	err = p.d.Store.Update(func(st *State) error {
-		st.Journal = &Journal{BackupDir: set.Dir, Trigger: string(trigger), StartedAt: startedAt, Files: journal}
+		st.Journal = &Journal{BackupDir: set.Dir, Trigger: string(trigger), StartedAt: startedAt, Files: journal, Routing: routingJournal}
 		return nil
 	})
 	if err != nil {
@@ -92,32 +100,43 @@ func (p *Pipeline) writePlan(plan Plan, trigger Trigger) (writeOutcome, error) {
 		out.RollbackErr = p.rollback(set)
 		return out, err
 	}
+	// Файлы панели пишутся первыми: ни в один момент ядро не остаётся без файла
+	// routing панели и без чужого (T-146-16).
 	for _, fp := range plan.Files {
-		switch fp.Action {
-		case ActionWrite:
-			if !IsPanelFileName(fp.Kernel, fp.RelPath) {
-				return fail(fmt.Errorf("%s: %w", fp.Key, ErrInvalidPanelName))
-			}
-			if err := os.MkdirAll(filepath.Dir(fp.AbsPath), 0o755); err != nil {
+		if fp.Action != ActionWrite {
+			continue
+		}
+		if !IsPanelFileName(fp.Kernel, fp.RelPath) {
+			return fail(fmt.Errorf("%s: %w", fp.Key, ErrInvalidPanelName))
+		}
+		if err := os.MkdirAll(filepath.Dir(fp.AbsPath), 0o755); err != nil {
+			return fail(fmt.Errorf("%s: %w", fp.Key, err))
+		}
+		if err := p.d.WriteFile(fp.AbsPath, fp.Content); err != nil {
+			return fail(fmt.Errorf("%s: %w", fp.Key, err))
+		}
+		out.Written++
+		// Файл, переименованный в .obsolete, заменён свежей записью: метка лишняя.
+		if fp.RemoveObsolete {
+			if err := os.Remove(fp.AbsPath + obsoleteSuffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return fail(fmt.Errorf("%s: %w", fp.Key, err))
 			}
-			if err := p.d.WriteFile(fp.AbsPath, fp.Content); err != nil {
-				return fail(fmt.Errorf("%s: %w", fp.Key, err))
-			}
-			out.Written++
-			// Файл, переименованный в .obsolete, заменён свежей записью: метка лишняя.
-			if fp.RemoveObsolete {
-				if err := os.Remove(fp.AbsPath + obsoleteSuffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
-					return fail(fmt.Errorf("%s: %w", fp.Key, err))
-				}
-			}
-		case ActionDelete:
-			if !IsPanelFileName(fp.Kernel, fp.RelPath) {
-				return fail(fmt.Errorf("%s: %w", fp.Key, ErrInvalidPanelName))
-			}
-			if err := os.Remove(fp.AbsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return fail(fmt.Errorf("%s: %w", fp.Key, err))
-			}
+		}
+	}
+	// Затем перенос чужих файлов routing, возврат и перекладка config.yaml, и только
+	// потом удаления: при возврате чужой routing возвращается раньше, чем уйдёт файл панели.
+	if err := p.applyRoutingOps(plan.Routing); err != nil {
+		return fail(err)
+	}
+	for _, fp := range plan.Files {
+		if fp.Action != ActionDelete {
+			continue
+		}
+		if !IsPanelFileName(fp.Kernel, fp.RelPath) {
+			return fail(fmt.Errorf("%s: %w", fp.Key, ErrInvalidPanelName))
+		}
+		if err := os.Remove(fp.AbsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fail(fmt.Errorf("%s: %w", fp.Key, err))
 		}
 	}
 	for _, o := range plan.Orphans {
@@ -230,6 +249,13 @@ func filesRestored(rollbackErr error) bool {
 // (filesRestored — true).
 func (p *Pipeline) rollback(set *BackupSet) error {
 	var errs []error
+	// config.yaml Mihomo набор копий вернуть не может (симлинк): он возвращается
+	// первым, чтобы запись файла набора не пошла сквозь симлинк в профиль панели.
+	if j := p.d.Store.Snapshot().Journal; j != nil && j.BackupDir == set.Dir {
+		if err := undoRoutingJournal(p.d.Roots, set, j.Routing); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	for i := len(set.Meta.Files) - 1; i >= 0; i-- {
 		if err := set.Restore(p.d.Roots, set.Meta.Files[i]); err != nil {
 			errs = append(errs, err)

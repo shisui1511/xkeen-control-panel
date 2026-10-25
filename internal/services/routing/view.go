@@ -1,0 +1,383 @@
+package routing
+
+import (
+	"strings"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
+)
+
+// KernelCounts — число узлов группы по ядрам. nil — ядро не установлено (или
+// список узлов не удалось собрать: ошибку источника сообщают его собственные
+// проверки).
+type KernelCounts struct {
+	Xray   *int `json:"xray"`
+	Mihomo *int `json:"mihomo"`
+}
+
+// MemberOption — вариант участника для строки «Сейчас» ручной группы.
+type MemberOption struct {
+	// Member — "group:<id>", "direct", "reject" или "node:<ref>".
+	Member string `json:"member"`
+	// Label — имя группы, DIRECT, REJECT или имя узла.
+	Label string `json:"label"`
+}
+
+// GroupView — группа в представлении: поля группы, состав по ядрам, проблемы и
+// предупреждения, варианты участника и текущий выбор для строки «Сейчас» (D-38).
+// MemberOptions — участники ручной группы и узлы её состава по ядрам (Resolve),
+// а не весь каталог.
+type GroupView struct {
+	Group
+	Counts        KernelCounts   `json:"counts"`
+	Issues        []IssueView    `json:"issues"`
+	Warnings      []IssueView    `json:"warnings"`
+	MemberOptions []MemberOption `json:"member_options"`
+	// Current — участник, на которого смотрит ядро: effectiveSelection по
+	// применённому состоянию с выбором из State.Live[selection] ("node:<ref>",
+	// "group:<id>", "direct", "reject"); группы нет в применённом — по черновику.
+	// Пусто у групп «авто»/«резерв» и при отсутствии допустимых участников.
+	Current string `json:"current"`
+	// Applied — ручная группа есть в применённом состоянии при управляемой панелью
+	// маршрутизации: только тогда Select принимает выбор (иначе group_not_applied),
+	// а MemberOptions построены по применённому составу, как проверка Select.
+	// Иначе варианты и Current — по черновику, выбор недоступен.
+	Applied bool `json:"applied"`
+	// CurrentLabel — подпись Current: имя группы, DIRECT, REJECT или имя узла (та
+	// же, что у варианта в member_options).
+	CurrentLabel string `json:"current_label"`
+}
+
+// RuleView — правило в представлении: поля правила, номер с 1, ядро, для
+// которого оно существует, проблемы и предупреждения. В предупреждениях — и
+// проверки качества правил (exact_dup, overlap, below_catchall с номером
+// перекрывающего правила); «Применить» они не блокируют.
+type RuleView struct {
+	Rule
+	Index int `json:"index"`
+	// Only — "" (правило для обоих ядер), "xray" или "mihomo": bittorrent есть
+	// только в Xray, своё правило ядра — только в своём ядре.
+	Only     string      `json:"only"`
+	Issues   []IssueView `json:"issues"`
+	Warnings []IssueView `json:"warnings"`
+}
+
+// FeatureView — доступность функции на установленной версии ядра.
+type FeatureView struct {
+	// Status — available, unavailable или undetermined.
+	Status string `json:"status"`
+	// Min — минимальная версия ядра для функции.
+	Min string `json:"min"`
+}
+
+// RoutingView — представление маршрутизации для API и вкладок «Группы» и
+// «Правила». Секретов узлов в нём нет: только имена и ссылки.
+type RoutingView struct {
+	// Revision — ревизия черновика, на которой построено представление.
+	Revision int64 `json:"revision"`
+	// Installed — какие ядра установлены ("xray", "mihomo").
+	Installed map[string]bool `json:"installed"`
+	// Desired — желаемое routing.managed черновика.
+	Desired bool `json:"desired"`
+	// HasSources — в черновике есть хотя бы один источник.
+	HasSources bool `json:"has_sources"`
+	// DefaultsDone — группы по умолчанию уже создавались.
+	DefaultsDone bool        `json:"defaults_done"`
+	Groups       []GroupView `json:"groups"`
+	Rules        []RuleView  `json:"rules"`
+	// Final — цель «Остального».
+	Final Target `json:"final"`
+	// Probe — параметры проверки узлов; ProbeDefaults — их значения по умолчанию
+	// для архитектуры.
+	Probe         ProbeConfig `json:"probe"`
+	ProbeDefaults ProbeConfig `json:"probe_defaults"`
+	// Issues — проблемы проверки, посчитанные для черновика всегда. При
+	// managed=false клиент показывает их предупреждениями: они не блокируют
+	// «Применить только узлы» (D-01).
+	Issues []IssueView `json:"issues"`
+	// Features — доступность функций групп по версиям установленных ядер.
+	Features map[string]FeatureView `json:"features"`
+}
+
+// ruleOnly определяет, для какого ядра существует правило.
+func ruleOnly(r Rule) string {
+	if r.Raw != nil {
+		switch r.Raw.Kernel {
+		case configlayer.KernelXray, configlayer.KernelMihomo:
+			return r.Raw.Kernel
+		}
+	}
+	for _, c := range r.Conds {
+		if c.Type == CondBittorrent {
+			return configlayer.KernelXray
+		}
+	}
+	return ""
+}
+
+// byKey раскладывает проблемы по ключу места; проблемы без ключа остаются
+// только в общем списке.
+func byKey(list []IssueView) map[string][]IssueView {
+	out := make(map[string][]IssueView, len(list))
+	for _, is := range list {
+		if is.Key != "" {
+			out[is.Key] = append(out[is.Key], is)
+		}
+	}
+	return out
+}
+
+// orEmpty заменяет nil пустым срезом: в JSON нет null.
+func orEmpty(list []IssueView) []IssueView {
+	if list == nil {
+		return []IssueView{}
+	}
+	return list
+}
+
+// optCount возвращает число для установленного ядра и nil для остальных.
+func optCount(on bool, n int) *int {
+	if !on {
+		return nil
+	}
+	return &n
+}
+
+// memberOptions строит варианты участника ручной группы: сначала участники
+// группы по порядку (группы, DIRECT, REJECT), затем узлы состава группы по
+// ядрам (Resolve) без повторов. У «авто» и «резерва» вариантов нет.
+func memberOptions(g Group, members []Member, groups []Group, xray, mihomo []sources.CatalogNode) []MemberOption {
+	out := []MemberOption{}
+	if g.Mode != ModeManual {
+		return out
+	}
+	names := make(map[string]string, len(groups))
+	for _, x := range groups {
+		names[x.ID] = x.Name
+	}
+	for _, m := range members {
+		switch m.Kind {
+		case KindGroup:
+			out = append(out, MemberOption{Member: "group:" + m.ID, Label: names[m.ID]})
+		case KindDirect:
+			out = append(out, MemberOption{Member: KindDirect, Label: "DIRECT"})
+		case KindReject:
+			out = append(out, MemberOption{Member: KindReject, Label: "REJECT"})
+		}
+	}
+	seen := map[string]bool{}
+	for _, list := range [][]sources.CatalogNode{xray, mihomo} {
+		for _, n := range list {
+			if seen[n.Ref] {
+				continue
+			}
+			seen[n.Ref] = true
+			out = append(out, MemberOption{Member: "node:" + n.Ref, Label: n.Display})
+		}
+	}
+	return out
+}
+
+// newModel собирает модель групп и каталога узлов по готовым данным.
+func newModel(cfg GroupsConfig, cat sources.Catalog, installed configlayer.InstalledKernels) appliedModel {
+	m := appliedModel{groups: cfg, cat: cat, union: unionCatalog(cat), installed: installed, byRef: map[string]sources.CatalogNode{}}
+	for _, n := range m.union {
+		m.byRef[n.Ref] = n
+	}
+	return m
+}
+
+// label — подпись участника: имя группы, DIRECT, REJECT или имя узла; пусто —
+// участника в модели нет.
+func (m appliedModel) label(member string) string {
+	switch {
+	case member == memberDirect:
+		return "DIRECT"
+	case member == memberReject:
+		return "REJECT"
+	case strings.HasPrefix(member, memberGroup):
+		g, _ := m.group(strings.TrimPrefix(member, memberGroup))
+		return g.Name
+	case strings.HasPrefix(member, memberNode):
+		return m.byRef[strings.TrimPrefix(member, memberNode)].Display
+	}
+	return ""
+}
+
+// currentOf считает «Сейчас» ручной группы g: действующий участник и модель, по
+// которой он посчитан. Группа есть в применённом состоянии — считается по нему
+// (по группе применённого состояния), иначе по черновику (draft). Нет ни той, ни
+// другой модели — пусто.
+func currentOf(g Group, live map[string]string, applied, draft *appliedModel) (string, *appliedModel) {
+	m, use := draft, g
+	if applied != nil {
+		if ag, ok := applied.group(g.ID); ok {
+			m, use = applied, ag
+		}
+	}
+	if m == nil {
+		return "", nil
+	}
+	nodes := Resolve(use, m.union, m.groups.Items).Nodes
+	return effectiveSelection(use, live[g.ID], m.avail, nodeRefs(nodes)...), m
+}
+
+// featureViews считает доступность функций групп: функции Xray — по версии Xray,
+// Mihomo — по версии Mihomo; неустановленное ядро — undetermined.
+func (s *Service) featureViews(installed configlayer.InstalledKernels) map[string]FeatureView {
+	table := []struct {
+		kernel  string
+		on      bool
+		feature configlayer.Feature
+	}{
+		{configlayer.KernelXray, installed.Xray, configlayer.FeatureXrayAutoGroup},
+		{configlayer.KernelXray, installed.Xray, configlayer.FeatureXrayFallbackGroup},
+		{configlayer.KernelMihomo, installed.Mihomo, configlayer.FeatureMihomoGroups},
+	}
+	out := make(map[string]FeatureView, len(table))
+	for _, f := range table {
+		status := configlayer.Undetermined
+		if f.on {
+			status = configlayer.FeatureAvailable(f.kernel, s.d.KernelVersion(f.kernel), f.feature)
+		}
+		out[string(f.feature)] = FeatureView{Status: string(status), Min: configlayer.FeatureMinVersion(f.feature)}
+	}
+	return out
+}
+
+// View строит представление маршрутизации по черновику. Состав группы считает
+// Resolve, проблемы и предупреждения — analyze, те же, что у проверки до записи.
+// Испорченная секция groups, rules или probe не роняет представление: секция
+// отдаётся пустой или по умолчанию, а проблема section_invalid — в Issues.
+func (s *Service) View() (RoutingView, error) {
+	st, err := s.d.Layer.ReadState()
+	if err != nil {
+		return RoutingView{}, err
+	}
+	in := inputOf(st)
+	installed := s.d.Installed()
+	issues, warnings := analyze(in, installed, s.d.Sources.Catalog, s.d.KernelVersion, s.d.Lists)
+	issuesByKey, warningsByKey := byKey(issues), byKey(warnings)
+
+	groups, gerr := parseGroups(st.Draft[GroupsSection])
+	if gerr != nil {
+		groups = GroupsConfig{V: sectionVersion, Items: []Group{}}
+	}
+	rules, rerr := parseRules(st.Draft[RulesSection])
+	if rerr != nil {
+		rules = RulesConfig{V: sectionVersion, Items: []Rule{}, Final: Target{Kind: KindDirect}}
+	}
+	probe, perr := parseProbe(st.Draft[ProbeSection], s.d.GOARCH)
+	if perr != nil {
+		probe = defaultProbe(s.d.GOARCH)
+	}
+
+	var cat sources.Catalog
+	haveCat := false
+	if installed.Xray || installed.Mihomo {
+		if c, err := s.d.Sources.Catalog(in, installed); err == nil {
+			cat, haveCat = c, true
+		}
+	}
+	var xrayNodes, mihomoNodes []sources.CatalogNode
+	if installed.Xray {
+		xrayNodes = cat.Xray
+	}
+	if installed.Mihomo {
+		mihomoNodes = cat.Mihomo
+	}
+
+	view := RoutingView{
+		Revision:      st.DraftRevision,
+		Installed:     map[string]bool{configlayer.KernelXray: installed.Xray, configlayer.KernelMihomo: installed.Mihomo},
+		Desired:       configlayer.DesiredRouting(st.Draft).Managed,
+		HasSources:    len(draftSourceIDs(st.Draft)) > 0,
+		DefaultsDone:  groups.DefaultsDone,
+		Groups:        make([]GroupView, 0, len(groups.Items)),
+		Rules:         make([]RuleView, 0, len(rules.Items)),
+		Final:         rules.Final,
+		Probe:         probe,
+		ProbeDefaults: defaultProbe(s.d.GOARCH),
+		Issues:        orEmpty(issues),
+		Features:      s.featureViews(installed),
+	}
+
+	// Модели для строки «Сейчас» нужны только при ручных группах: применённая —
+	// если маршрутизацией управляет панель, по черновику — для групп, которых в
+	// применённом состоянии ещё нет.
+	var appliedM, draftM *appliedModel
+	live := liveSelection(st.Live)
+	hasManual := false
+	for _, g := range groups.Items {
+		if g.Mode == ModeManual {
+			hasManual = true
+			break
+		}
+	}
+	if hasManual {
+		if configlayer.DesiredRouting(st.Applied).Managed {
+			if am, err := s.appliedModelOf(st); err == nil {
+				appliedM = &am
+			}
+		}
+		if haveCat {
+			dm := newModel(groups, cat, installed)
+			draftM = &dm
+		}
+	}
+
+	for _, g := range groups.Items {
+		xr := Resolve(g, xrayNodes, groups.Items)
+		mr := Resolve(g, mihomoNodes, groups.Items)
+		var counts KernelCounts
+		if haveCat {
+			counts = KernelCounts{Xray: optCount(installed.Xray, len(xr.Nodes)), Mihomo: optCount(installed.Mihomo, len(mr.Nodes))}
+		}
+		key := "group:" + g.ID
+		options := memberOptions(g, xr.Members, groups.Items, xr.Nodes, mr.Nodes)
+		var current, currentLabel string
+		applied := false
+		if g.Mode == ModeManual {
+			if appliedM != nil {
+				if ag, ok := appliedM.group(g.ID); ok && ag.Mode == ModeManual {
+					applied = true
+					options = appliedOptions(ag, *appliedM)
+				}
+			}
+			var m *appliedModel
+			current, m = currentOf(g, live, appliedM, draftM)
+			for _, o := range options {
+				if o.Member == current {
+					currentLabel = o.Label
+					break
+				}
+			}
+			if currentLabel == "" && current != "" && m != nil {
+				currentLabel = m.label(current)
+			}
+		}
+		view.Groups = append(view.Groups, GroupView{
+			Group:         g,
+			Counts:        counts,
+			Issues:        orEmpty(issuesByKey[key]),
+			Warnings:      orEmpty(warningsByKey[key]),
+			MemberOptions: options,
+			Current:       current,
+			CurrentLabel:  currentLabel,
+			Applied:       applied,
+		})
+	}
+	lint := lintRules(rules.Items)
+	for i, r := range rules.Items {
+		key := "rule:" + r.ID
+		warns := append(append([]IssueView{}, warningsByKey[key]...), lint[r.ID]...)
+		view.Rules = append(view.Rules, RuleView{
+			Rule:     r,
+			Index:    i + 1,
+			Only:     ruleOnly(r),
+			Issues:   orEmpty(issuesByKey[key]),
+			Warnings: warns,
+		})
+	}
+	return view, nil
+}

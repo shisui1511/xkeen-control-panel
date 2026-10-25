@@ -29,7 +29,24 @@ var (
 	// ErrAlreadyStarted — генератор зарегистрирован после Start: набор генераторов
 	// фиксируется до запуска слоя.
 	ErrAlreadyStarted = errors.New("слой уже запущен: генераторы регистрируются до Start")
+	// ErrChecksFailed — проверка черновика нашла проблемы: применение не начато.
+	// Конкретная ошибка — *ChecksError со списком проблем.
+	ErrChecksFailed = errors.New("применение заблокировано проверкой черновика")
 )
+
+// ChecksError — отказ применения по проверкам до записи; Is совпадает с
+// ErrChecksFailed.
+type ChecksError struct {
+	Issues []BuildIssue
+}
+
+// Error называет число проблем.
+func (e *ChecksError) Error() string {
+	return fmt.Sprintf("%s: проблем %d", ErrChecksFailed.Error(), len(e.Issues))
+}
+
+// Is связывает ChecksError с сентинелом ErrChecksFailed.
+func (e *ChecksError) Is(target error) bool { return target == ErrChecksFailed }
 
 // Значения по умолчанию и пределы.
 const (
@@ -112,6 +129,9 @@ type Layer struct {
 	// lastDrift — число файлов с дрейфом по последней сверке; переход >0 → 0 будит
 	// onDriftResolved.
 	lastDrift int
+	// lastRoutingDrift — подпись расхождений маршрутизации по последней сверке:
+	// смена будит событие routing.
+	lastRoutingDrift string
 	// onDriftResolved — колбэк «дрейф решён» (сервис источников), до Start.
 	onDriftResolved func()
 	// failed — уведомления build_failed:<ядро> (только в памяти).
@@ -128,6 +148,24 @@ type Layer struct {
 	verGen      uint64
 	verKernels  []KernelVersionView
 	verFeatures map[Feature]Availability
+	// Мемо проверок черновика (Layer.cachedChecks): ключ последнего расчёта и его
+	// итог; checksEpoch растёт в InvalidateChecks.
+	checksEpoch uint64
+	checksKey   checksKey
+	checksVal   []BuildIssue
+	checksOK    bool
+	// afterApply — хуки после успешного применения (AddAfterApply), до Start.
+	afterApply []func(ctx context.Context, info AfterApplyInfo)
+}
+
+// checksKey — от чего зависит итог проверок черновика: ревизия черновика, хэш
+// живых данных, установленные ядра и эпоха (данные вне черновика: dat, каталог
+// списков).
+type checksKey struct {
+	rev       int64
+	liveHash  string
+	installed InstalledKernels
+	epoch     uint64
 }
 
 // New создаёт слой: открывает файл состояния, шину, реестр и конвейер. Фоновые
@@ -340,6 +378,7 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 		l.mu.Lock()
 		l.lastFiles = nil
 		l.lastDrift = 0
+		l.lastRoutingDrift = ""
 		l.mu.Unlock()
 		return FilesEvent{Files: []FileView{}}
 	}
@@ -353,10 +392,16 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 	l.lastFiles = data
 	resolved := publish && l.lastDrift > 0 && ev.DriftCount == 0
 	l.lastDrift = ev.DriftCount
+	rsig := routingDriftSig(ev.Routing)
+	routingChanged := l.lastRoutingDrift != rsig
+	l.lastRoutingDrift = rsig
 	onResolved := l.onDriftResolved
 	l.mu.Unlock()
 	if publish && changed {
 		l.broker.Publish(Event{Type: EventFiles, Data: ev})
+	}
+	if publish && routingChanged {
+		l.PublishRouting()
 	}
 	// Дрейф решён (Пересобрать, Принять правку, ручное исправление): будим сервис
 	// источников, чтобы отложенная запись состоялась. Горутина слоя, не под checkMu.
@@ -401,7 +446,7 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	// Pending: файл, которого нет в манифесте, или чей хэш у черновика отличается
 	// от записи манифеста при совпадающем диске. Ошибка сборки здесь не важна:
 	// «Применить» покажет её сам.
-	if generated, err := l.registry.Build(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft}, l.installed()); err == nil {
+	if generated, err := l.registry.Build(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft, Routing: routingFacts(l.opts.Roots, st.Routing)}, l.installed()); err == nil {
 		for _, g := range generated {
 			key := g.Key()
 			i, known := index[key]
@@ -419,7 +464,19 @@ func (l *Layer) evaluate(st State) FilesEvent {
 		}
 	}
 	sortFileViews(files)
-	return FilesEvent{Files: files, DriftCount: drift}
+	// Расхождения маршрутизации входят в число дрейфа: «Применить» блокируется тем же
+	// механизмом (кроме запуска с желаемым managed=false, D-06, D-07).
+	rd := routingDrift(l.opts.Roots, st.Routing, l.installed(), "", l.opts.ForeignOwned)
+	return FilesEvent{Files: files, DriftCount: drift + len(rd), Routing: rd}
+}
+
+// routingDriftSig — подпись списка расхождений маршрутизации для сравнения сверок.
+func routingDriftSig(items []RoutingDriftItem) string {
+	var b strings.Builder
+	for _, it := range items {
+		b.WriteString(it.Kernel + "|" + it.Code + "|" + it.File + ";")
+	}
+	return b.String()
 }
 
 // mihomoConfigAlias — путь config.yaml Mihomo и файл, в который он разрешается,
@@ -456,14 +513,56 @@ func (l *Layer) Snapshot() SnapshotView {
 		Features:      map[Feature]Availability{},
 		Apply:         l.pipeline.Current(),
 		Notices:       l.noticeViews(st),
+		Checks:        []BuildIssue{},
 	}
 	if !sv.Enabled {
 		return sv
 	}
+	sv.Checks = l.cachedChecks(st)
 	fe := l.evaluate(st)
 	sv.Files, sv.DriftCount = fe.Files, fe.DriftCount
+	sv.Routing = l.routingSnapshot(st, fe.Routing)
 	sv.Kernels, sv.Features = l.versions()
 	return sv
+}
+
+// routingSnapshot собирает раздел routing снимка: желаемое из секции черновика,
+// по установленным ядрам — взято ли, перенесённые и оставленные файлы, дрейф.
+func (l *Layer) routingSnapshot(st State, drift []RoutingDriftItem) RoutingSnapshot {
+	out := RoutingSnapshot{Desired: DesiredRouting(st.Draft).Managed}
+	installed := l.installed()
+	view := func(kernel string, taken bool, moved, left []string, prev string) *RoutingKernelView {
+		v := &RoutingKernelView{Taken: taken, Moved: []string{}, Left: []string{}, Drift: []string{}}
+		if taken {
+			v.Moved = append(v.Moved, moved...)
+			v.Left = append(v.Left, left...)
+			v.PrevProfile = prev
+		}
+		for _, it := range drift {
+			if it.Kernel == kernel {
+				v.Drift = append(v.Drift, it.File)
+			}
+		}
+		return v
+	}
+	if installed.Xray {
+		var moved, left []string
+		if x := st.Routing.Xray; x != nil {
+			for _, m := range x.Moved {
+				moved = append(moved, m.Name)
+			}
+			left = x.Left
+		}
+		out.Xray = view(KernelXray, st.Routing.Xray != nil, moved, left, "")
+	}
+	if installed.Mihomo {
+		prev := ""
+		if m := st.Routing.Mihomo; m != nil {
+			prev = m.PrevProfile
+		}
+		out.Mihomo = view(KernelMihomo, st.Routing.Mihomo != nil, nil, nil, prev)
+	}
+	return out
 }
 
 // versions возвращает строки версий и карту функций с кэшем на versionsCacheTTL.
@@ -614,9 +713,150 @@ func (l *Layer) PublishSources() {
 	l.broker.Publish(Event{Type: EventSources, Data: SourcesEvent{Revision: l.store.Snapshot().DraftRevision}})
 }
 
+// PublishRouting сообщает клиентам, что владение маршрутизацией или её дрейф
+// изменились (событие routing с текущей ревизией черновика). Выключенный слой
+// молчит.
+func (l *Layer) PublishRouting() {
+	if !l.Enabled() {
+		return
+	}
+	l.broker.Publish(Event{Type: EventRouting, Data: RoutingEvent{Revision: l.store.Snapshot().DraftRevision}})
+}
+
+// Ошибки действий с маршрутизацией.
+var (
+	// ErrNothingToReclaim — у ядра нет дрейфа маршрутизации: возвращать нечего.
+	ErrNothingToReclaim = errors.New(IssueNothingToReclaim)
+	// ErrForeignMixed — смешанный чужой файл с routing: переносится только
+	// «Отпустить маршрутизацию». Конкретная ошибка — *ForeignMixedError с файлом.
+	ErrForeignMixed = errors.New(IssueForeignMixed)
+	// ErrUnknownKernel — ядро не xray и не mihomo.
+	ErrUnknownKernel = errors.New("неизвестное ядро")
+)
+
+// ForeignMixedError — «вернуть файл панели» отказал: файл File содержит не только
+// routing. Диск не тронут; Is совпадает с ErrForeignMixed.
+type ForeignMixedError struct {
+	File string
+}
+
+// Error называет файл.
+func (e *ForeignMixedError) Error() string { return IssueForeignMixed + ": " + e.File }
+
+// Is связывает ForeignMixedError с сентинелом ErrForeignMixed.
+func (e *ForeignMixedError) Is(target error) bool { return target == ErrForeignMixed }
+
+// RoutingPreview — предпросмотр взятия для диалога (E10): какие файлы routing Xray
+// уйдут в копии, какие останутся, предупреждения D-44 и прежний профиль Mihomo с
+// портами по текущему диску. Неустановленное ядро — nil. Диск не меняется.
+func (l *Layer) RoutingPreview() (TakeoverPreview, error) {
+	if !l.Enabled() {
+		return TakeoverPreview{}, ErrDisabled
+	}
+	installed := l.installed()
+	var files []RoutingFile
+	if installed.Xray {
+		var err error
+		if files, _, err = ScanXrayRouting(l.opts.Roots.Xray, l.opts.ForeignOwned); err != nil {
+			return TakeoverPreview{}, err
+		}
+	}
+	prevProfile, ports := "", defaultMihomoPorts()
+	if installed.Mihomo {
+		var err error
+		if _, prevProfile, ports, err = ScanMihomoActive(l.opts.Roots.Mihomo); err != nil {
+			return TakeoverPreview{}, err
+		}
+	}
+	pv := RoutingPreviewOf(files, prevProfile, ports)
+	if !installed.Xray {
+		pv.Xray = nil
+	}
+	if !installed.Mihomo {
+		pv.Mihomo = nil
+	}
+	return pv, nil
+}
+
+// ReclaimRouting решает дрейф маршрутизации ядра, оставляя маршрутизацию у панели
+// (D-06, D-07). Mihomo: config.yaml перекладывается на профиль панели (обычный файл
+// уходит в набор копий), затем Mihomo перечитывает профиль. Xray: каждый «чистый»
+// чужой файл routing переносится в копию и добавляется к перенесённым, затем Xray
+// перезапускается; если среди расхождений есть смешанный файл — ошибка
+// *ForeignMixedError без изменений (его решает только «Отпустить»). Нет дрейфа —
+// ErrNothingToReclaim. Всё под журналом и откатом, как взятие; занятое применение —
+// ErrApplyBusy или ErrKernelBusy.
+func (l *Layer) ReclaimRouting(ctx context.Context, kernel string) error {
+	if !l.Enabled() {
+		return ErrDisabled
+	}
+	if kernel != KernelXray && kernel != KernelMihomo {
+		return fmt.Errorf("%w: %q", ErrUnknownKernel, kernel)
+	}
+	release, err := l.pipeline.TryBegin(ctx, true)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := l.pipeline.recoverPendingJournal(); err != nil {
+		return err
+	}
+	st := l.store.Snapshot()
+	items := routingDrift(l.opts.Roots, st.Routing, l.installed(), kernel, l.opts.ForeignOwned)
+	if len(items) == 0 {
+		return ErrNothingToReclaim
+	}
+	ops := &RoutingOps{Next: st.Routing.clone()}
+	switch kernel {
+	case KernelXray:
+		files, _, err := ScanXrayRouting(l.opts.Roots.Xray, l.opts.ForeignOwned)
+		if err != nil {
+			return err
+		}
+		byName := make(map[string]RoutingFile, len(files))
+		for _, f := range files {
+			byName[f.Name] = f
+		}
+		// Сначала проверяются все файлы: смешанный отказывает без единого изменения.
+		for _, it := range items {
+			if f, ok := byName[it.File]; !ok || !f.Pure || !safeRoutingName(f.Name) {
+				return &ForeignMixedError{File: it.File}
+			}
+		}
+		taking := make(map[string]bool, len(items))
+		for _, it := range items {
+			ops.XrayTake = append(ops.XrayTake, it.File)
+			taking[it.File] = true
+		}
+		// Файл, который раньше был смешанным, а теперь перенесён, оставленным не числится.
+		if x := ops.Next.Xray; x != nil {
+			left := make([]string, 0, len(x.Left))
+			for _, n := range x.Left {
+				if !taking[n] {
+					left = append(left, n)
+				}
+			}
+			x.Left = left
+		}
+	case KernelMihomo:
+		ops.MihomoPoint, ops.keepPrev = true, true
+	}
+	if err := l.commitDiskPlan(ctx, Plan{Routing: ops}, TriggerRoutingReclaim, ReasonRoutingTakeover); err != nil {
+		return err
+	}
+	l.PublishRouting()
+	l.checkNow(true)
+	return nil
+}
+
 // noticeBuildFailedPrefix — префикс идентификатора уведомления о неудачной
 // фоновой сборке файлов ядра.
 const noticeBuildFailedPrefix = "build_failed:"
+
+// noticeRoutingAutoTakenPrefix — префикс идентификатора уведомления «панель
+// автоматически взяла маршрутизацию установленного позже ядра» (D-02):
+// routing_auto_taken:<ядро>.
+const noticeRoutingAutoTakenPrefix = "routing_auto_taken:"
 
 // --- черновик ---
 
@@ -716,16 +956,129 @@ func (l *Layer) RegisterGenerator(g Generator) error {
 	return nil
 }
 
-// SetLiveCommitter задаёт хук фиксации живых данных конвейера (см.
-// PipelineDeps.CommitLive). Допустим только до Start.
-func (l *Layer) SetLiveCommitter(fn func(st *State, req ApplyRequest, used Input) error) error {
+// AddLiveCommitter добавляет хук фиксации живых данных конвейера (см.
+// PipelineDeps.CommitLive) в конец списка: хуки вызываются по порядку
+// регистрации в той же записи состояния, что и манифест. Допустим только до
+// Start; nil отклоняется.
+func (l *Layer) AddLiveCommitter(fn func(st *State, req ApplyRequest, used Input) error) error {
+	if fn == nil {
+		return errors.New("configlayer: хук фиксации живых данных не задан")
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.started {
 		return ErrAlreadyStarted
 	}
-	l.pipeline.setCommitLive(fn)
+	l.pipeline.addCommitLive(fn)
 	return nil
+}
+
+// AfterApplyInfo — итог успешного применения для хуков AddAfterApply: что
+// запустило конвейер, из какого состояния собраны файлы, итог и перезапуски.
+type AfterApplyInfo struct {
+	Trigger Trigger
+	Source  SourceKind
+	Result  ResultView
+	Restart []RestartView
+}
+
+// AddAfterApply добавляет хук, который слой вызывает асинхронно после каждого
+// успешного применения (пользовательского и фонового), уже после снятия замка
+// применения: хук может сам вызвать RunLive. Неуспешное применение хуки не
+// вызывает. Допустим только до Start; nil отклоняется.
+func (l *Layer) AddAfterApply(fn func(ctx context.Context, info AfterApplyInfo)) error {
+	if fn == nil {
+		return errors.New("configlayer: хук после применения не задан")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	l.afterApply = append(l.afterApply, fn)
+	return nil
+}
+
+// fireAfterApply вызывает хуки после успешного применения, каждый в своей
+// горутине слоя. Вызывается после снятия замка применения и afterRun.
+func (l *Layer) fireAfterApply(req ApplyRequest, view ApplyView) {
+	if view.Result == nil || !view.Result.OK {
+		return
+	}
+	l.mu.Lock()
+	hooks := append([]func(context.Context, AfterApplyInfo){}, l.afterApply...)
+	l.mu.Unlock()
+	if len(hooks) == 0 {
+		return
+	}
+	info := AfterApplyInfo{
+		Trigger: req.Trigger,
+		Source:  req.Source,
+		Result:  *view.Result,
+		Restart: append([]RestartView(nil), view.Restart...),
+	}
+	for _, fn := range hooks {
+		l.spawn(func() { fn(l.ctx, info) })
+	}
+}
+
+// RegisterChecker добавляет проверку до записи в реестр. Допустима только до
+// Start; проверка с уже занятым ID отклоняется.
+func (l *Layer) RegisterChecker(c Checker) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	if l.registry.HasChecker(c.ID()) {
+		return fmt.Errorf("configlayer: проверка %q уже зарегистрирована", c.ID())
+	}
+	l.registry.RegisterChecker(c)
+	return nil
+}
+
+// checksFor проверяет черновик состояния: те же входные данные, из которых Run
+// собирает файлы для SourceDraft. Пустой срез — проблем нет. Диск проверка не
+// читает: это обязанность самих проверок.
+func (l *Layer) checksFor(st State) []BuildIssue {
+	return l.registry.Check(Input{Sections: st.Draft, Live: st.Live, Mode: SourceDraft, Routing: routingFacts(l.opts.Roots, st.Routing)}, l.installed())
+}
+
+// cachedChecks — checksFor с мемо по ревизии черновика, хэшу живых данных,
+// установленным ядрам и эпохе проверок: Snapshot и ежеминутная сверка не
+// пересчитывают проверки, пока ничего не изменилось. Возвращает копию.
+func (l *Layer) cachedChecks(st State) []BuildIssue {
+	live, err := json.Marshal(st.Live)
+	if err != nil {
+		return l.checksFor(st)
+	}
+	installed := l.installed()
+	l.mu.Lock()
+	key := checksKey{rev: st.DraftRevision, liveHash: HashContent(live), installed: installed, epoch: l.checksEpoch}
+	if l.checksOK && l.checksKey == key {
+		out := append([]BuildIssue{}, l.checksVal...)
+		l.mu.Unlock()
+		return out
+	}
+	l.mu.Unlock()
+	issues := l.checksFor(st)
+	l.mu.Lock()
+	// Эпоха сменилась, пока считали: итог мог устареть, в мемо он не попадает.
+	if l.checksEpoch == key.epoch {
+		l.checksKey, l.checksVal, l.checksOK = key, append([]BuildIssue{}, issues...), true
+	}
+	l.mu.Unlock()
+	return issues
+}
+
+// InvalidateChecks сбрасывает мемо проверок и просит внеочередную сверку:
+// сервисы зовут его, когда изменились данные вне черновика (dat, каталог
+// списков), от которых зависят проверки.
+func (l *Layer) InvalidateChecks() {
+	l.mu.Lock()
+	l.checksEpoch++
+	l.mu.Unlock()
+	l.RequestCheck()
 }
 
 // OnDriftResolved регистрирует колбэк «дрейф решён»: вызывается, когда число
@@ -738,6 +1091,58 @@ func (l *Layer) OnDriftResolved(fn func()) error {
 		return ErrAlreadyStarted
 	}
 	l.onDriftResolved = fn
+	return nil
+}
+
+// Hooks — всё, чем сервис подключается к слою: генераторы, проверка и хуки.
+// Пустые поля пропускаются.
+type Hooks struct {
+	Generators      []Generator
+	Checker         Checker
+	LiveCommitter   LiveCommitFunc
+	AfterApply      func(ctx context.Context, info AfterApplyInfo)
+	OnDriftResolved func()
+}
+
+// Register подключает сервис целиком или не подключает вовсе: все условия
+// (слой не запущен, ID генераторов и проверки свободны и не повторяются)
+// проверяются под одним замком до первой записи. Ошибка оставляет слой как был:
+// у сервиса, которого не подключили, в слое ничего не остаётся. Допустим только
+// до Start.
+func (l *Layer) Register(h Hooks) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	seen := make(map[string]bool, len(h.Generators))
+	for _, g := range h.Generators {
+		if g == nil {
+			return errors.New("configlayer: генератор не задан")
+		}
+		if seen[g.ID()] || l.registry.Has(g.ID()) {
+			return fmt.Errorf("configlayer: генератор %q уже зарегистрирован", g.ID())
+		}
+		seen[g.ID()] = true
+	}
+	if h.Checker != nil && l.registry.HasChecker(h.Checker.ID()) {
+		return fmt.Errorf("configlayer: проверка %q уже зарегистрирована", h.Checker.ID())
+	}
+	for _, g := range h.Generators {
+		l.registry.Register(g)
+	}
+	if h.Checker != nil {
+		l.registry.RegisterChecker(h.Checker)
+	}
+	if h.LiveCommitter != nil {
+		l.pipeline.addCommitLive(h.LiveCommitter)
+	}
+	if h.AfterApply != nil {
+		l.afterApply = append(l.afterApply, h.AfterApply)
+	}
+	if h.OnDriftResolved != nil {
+		l.onDriftResolved = h.OnDriftResolved
+	}
 	return nil
 }
 
@@ -778,26 +1183,94 @@ func (l *Layer) StartApply(user bool) error {
 	if !l.Enabled() {
 		return ErrDisabled
 	}
+	// Проверки до записи: пустая группа или висячая ссылка не дают начать
+	// применение (GRP-05, SRC-07). Фоновые запуски проверяет сам конвейер.
+	if issues := l.cachedChecks(l.store.Snapshot()); len(issues) > 0 {
+		return &ChecksError{Issues: issues}
+	}
 	release, err := l.pipeline.TryBegin(l.ctx, user)
 	if err != nil {
 		return err
 	}
 	// Свежая сверка под замком применения: пока есть нерешённый дрейф, диск не
 	// трогается (D-11). «Пересобрать» по названным файлам этим не блокируется.
-	if l.checkNow(true).DriftCount > 0 {
+	// Расхождение маршрутизации не блокирует применение с желаемым managed=false:
+	// это и есть решение «Отпустить маршрутизацию» (D-06, D-07).
+	fe := l.checkNow(true)
+	if fe.DriftCount-len(fe.Routing) > 0 || (len(fe.Routing) > 0 && DesiredRouting(l.store.Snapshot().Draft).Managed) {
 		release()
 		return ErrDriftBlocked
 	}
 	if !l.spawn(func() {
 		defer release()
-		l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerUser, Source: SourceDraft})
+		req := ApplyRequest{Trigger: TriggerUser, Source: SourceDraft}
+		view := l.runPipeline(req)
 		release()
 		l.afterRun()
+		l.fireAfterApply(req, view)
 	}) {
 		release()
 		return ErrStopped
 	}
 	return nil
+}
+
+// runPipeline запускает конвейер и следит за владением маршрутизацией: если запуск
+// взял или вернул маршрутизацию, клиенты получают событие routing; ядро, которое
+// установка взяла автоматически (D-02), получает уведомление routing_auto_taken.
+func (l *Layer) runPipeline(req ApplyRequest) ApplyView {
+	before := l.store.Snapshot().Routing
+	view := l.pipeline.Run(l.ctx, req)
+	after := l.store.Snapshot().Routing
+	auto := ""
+	if req.Trigger == TriggerKernelInstalled && view.Result != nil && view.Result.OK && routingKernelTaken(after, req.Kernel) && !routingKernelTaken(before, req.Kernel) {
+		auto = req.Kernel
+	}
+	l.updateAutoTakenNotices(auto, after)
+	if !routingStateEqual(before, after) {
+		l.PublishRouting()
+	}
+	return view
+}
+
+// routingKernelTaken — панель владеет маршрутизацией ядра.
+func routingKernelTaken(r RoutingState, kernel string) bool {
+	switch kernel {
+	case KernelXray:
+		return r.Xray != nil
+	case KernelMihomo:
+		return r.Mihomo != nil
+	}
+	return false
+}
+
+// routingStateEqual сравнивает владение маршрутизацией до и после запуска.
+func routingStateEqual(a, b RoutingState) bool {
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(ja, jb)
+}
+
+// updateAutoTakenNotices обновляет уведомления routing_auto_taken:<ядро>: добавляет
+// auto (если не пусто, закрытое ранее показывается заново) и убирает уведомления
+// ядер, которыми панель больше не владеет.
+func (l *Layer) updateAutoTakenNotices(auto string, now RoutingState) {
+	l.mu.Lock()
+	cur := append([]NoticeView(nil), l.extNotices[noticeRoutingAutoTakenPrefix]...)
+	if auto != "" {
+		delete(l.dismissed, noticeRoutingAutoTakenPrefix+auto)
+	}
+	l.mu.Unlock()
+	list := make([]NoticeView, 0, len(cur)+1)
+	for _, n := range cur {
+		if n.Kernel != auto && routingKernelTaken(now, n.Kernel) {
+			list = append(list, n)
+		}
+	}
+	if auto != "" {
+		list = append(list, NoticeView{ID: noticeRoutingAutoTakenPrefix + auto, Kind: noticeWarning, Kernel: auto})
+	}
+	l.SetNotices(noticeRoutingAutoTakenPrefix, list)
 }
 
 // afterRun — действия после запуска конвейера: число изменений черновика после
@@ -810,16 +1283,33 @@ func (l *Layer) afterRun() {
 	l.checkNow(true)
 }
 
-// RunSourceRefresh — фоновое обновление источника (FND-06, U-04): тот же конвейер
-// (сборка, проверка обоих ядер, запись, перезапуск только запущенного, коммит), но
-// из применённого состояния с оверлеем живых данных. Черновик и его ревизия не
-// меняются; живые данные фиксирует хук SetLiveCommitter в той же записи, что и
-// манифест. Идущее «Применить» ждёт (параллельного применения нет). Нерешённый
-// дрейф — ErrDriftBlocked: файлы и ядро не тронуты. Вызов синхронный: горутину
-// запускает вызывающий сервис со своим wg.
-func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyView, error) {
+// LiveRun — параметры фонового запуска конвейера в обход черновика (RunLive).
+type LiveRun struct {
+	// Trigger — что запустило конвейер (TriggerSourceRefresh, TriggerSelect,
+	// TriggerDatRefresh); попадает в шаги apply_step и в хуки.
+	Trigger Trigger
+	// Overlay — ключи живых данных, которые заменяют одноимённые во входе
+	// генераторов этого запуска (кандидат); сами живые данные фиксируют хуки
+	// AddLiveCommitter.
+	Overlay Sections
+	// Kernel ограничивает запуск одним ядром; пусто — все установленные.
+	Kernel string
+}
+
+// RunLive — запуск конвейера из применённого состояния с оверлеем живых данных
+// (FND-06, U-04): сборка, проверки до записи, проверка обоих ядер, запись,
+// перезапуск только запущенного, коммит. Черновик и его ревизия не меняются; живые
+// данные фиксируют хуки AddLiveCommitter в той же записи, что и манифест. Идущее
+// «Применить» ждёт (параллельного применения нет). Нерешённый дрейф —
+// ErrDriftBlocked: файлы и ядро не тронуты. Вызов синхронный: горутину запускает
+// вызывающий сервис со своим wg. После успешного запуска слой зовёт хуки
+// AddAfterApply уже после снятия замка применения.
+func (l *Layer) RunLive(ctx context.Context, run LiveRun) (ApplyView, error) {
 	if !l.Enabled() {
 		return ApplyView{}, ErrDisabled
+	}
+	if run.Trigger == "" {
+		return ApplyView{}, errors.New("configlayer: не задан триггер запуска")
 	}
 	l.mu.Lock()
 	stopped := l.stopped
@@ -835,13 +1325,21 @@ func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyVi
 		return ApplyView{}, err
 	}
 	defer release()
-	view := l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerSourceRefresh, Source: SourceApplied, LiveOverlay: overlay})
+	req := ApplyRequest{Trigger: run.Trigger, Source: SourceApplied, LiveOverlay: run.Overlay, Kernel: run.Kernel}
+	view := l.runPipeline(req)
 	release()
 	l.afterRun()
+	l.fireAfterApply(req, view)
 	if view.Result != nil && view.Result.Code == ResultDriftBlocked {
 		return view, ErrDriftBlocked
 	}
 	return view, nil
+}
+
+// RunSourceRefresh — фоновое обновление источника: RunLive с триггером
+// TriggerSourceRefresh (его зовёт сервис источников).
+func (l *Layer) RunSourceRefresh(ctx context.Context, overlay Sections) (ApplyView, error) {
+	return l.RunLive(ctx, LiveRun{Trigger: TriggerSourceRefresh, Overlay: overlay})
 }
 
 // Rebuild — «Пересобрать»: полный конвейер, ограниченный названными файлами.
@@ -885,9 +1383,11 @@ func (l *Layer) Rebuild(keys []string, all bool) error {
 	}
 	if !l.spawn(func() {
 		defer release()
-		l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerRebuild, Source: SourceApplied, Only: only})
+		req := ApplyRequest{Trigger: TriggerRebuild, Source: SourceApplied, Only: only}
+		view := l.runPipeline(req)
 		release()
 		l.afterRun()
+		l.fireAfterApply(req, view)
 	}) {
 		release()
 		return ErrStopped
@@ -983,6 +1483,17 @@ func (l *Layer) noteBuildResult(kernel string, view ApplyView) {
 	}
 }
 
+// NoteBuildResult отражает итог фонового запуска RunLive в уведомлении
+// build_failed:<ядро> так же, как это делает сборка после установки ядра:
+// неудача ставит уведомление, успех снимает прежнее. Какие итоги считать
+// неудачей, решает вызывающий сервис. Неизвестное ядро игнорируется.
+func (l *Layer) NoteBuildResult(kernel string, view ApplyView) {
+	if kernel != KernelXray && kernel != KernelMihomo {
+		return
+	}
+	l.noteBuildResult(kernel, view)
+}
+
 // OnKernelInstalled — хук установки ядра (D-18): в фоне собирает для него файлы
 // из применённого состояния. Запуск ограничен этим ядром: файлы, сироты и
 // ручные правки другого ядра не трогаются, а нерешённый дрейф самого ядра
@@ -994,6 +1505,8 @@ func (l *Layer) OnKernelInstalled(kernel string) {
 		return
 	}
 	l.invalidateVersions()
+	// Версия и состав списков ядра меняют итог проверок черновика.
+	l.InvalidateChecks()
 	l.spawn(func() {
 		release, err := l.pipeline.TryBegin(l.ctx, false)
 		if err != nil {
@@ -1001,11 +1514,14 @@ func (l *Layer) OnKernelInstalled(kernel string) {
 			return
 		}
 		defer release()
-		view := l.pipeline.Run(l.ctx, ApplyRequest{Trigger: TriggerKernelInstalled, Source: SourceApplied, Kernel: kernel})
+		req := ApplyRequest{Trigger: TriggerKernelInstalled, Source: SourceApplied, Kernel: kernel}
+		view := l.runPipeline(req)
 		release()
 		l.invalidateVersions()
+		l.InvalidateChecks()
 		l.noteBuildResult(kernel, view)
 		l.afterRun()
+		l.fireAfterApply(req, view)
 	})
 }
 
@@ -1077,6 +1593,10 @@ func (l *Layer) RestoreExternally(fn func() error) error {
 		return err
 	}
 	fnErr, reloadErr := l.store.ReplaceExternally(fn)
+	// Восстановленный файл состояния мог дать ту же ревизию с другим черновиком.
+	l.mu.Lock()
+	l.checksEpoch++
+	l.mu.Unlock()
 	if reloadErr != nil {
 		log.Printf("[configlayer] не удалось перечитать состояние слоя после восстановления: %v", reloadErr)
 	}

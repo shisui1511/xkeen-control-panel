@@ -1,0 +1,79 @@
+{
+  "v": 1,
+  "hidden_services": ["ads", "private", "torrent", "ru_sites", "ru_blocked", "games", "steam"],
+  "order": ["all_proxy", "except_country", "selective", "empty"],
+  "prefix": [
+    {
+      "when": "flag:quic",
+      "kind": "cond",
+      "conds": [
+        { "type": "network", "values": ["udp"] },
+        { "type": "port", "values": ["443"] }
+      ],
+      "target": "reject"
+    },
+    {
+      "when": "always",
+      "kind": "cidr",
+      "values": [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "100.64.0.0/10",
+        "224.0.0.0/4",
+        "fc00::/7",
+        "fe80::/10",
+        "::1/128"
+      ],
+      "target": "direct"
+    },
+    {
+      "when": "flag:torrent",
+      "kind": "cond",
+      "conds": [{ "type": "bittorrent" }],
+      "target": "direct"
+    },
+    { "when": "flag:ads", "kind": "service", "service": "ads", "target": "reject" }
+  ],
+  "presets": {
+    "all_proxy": {
+      "needs_country": false,
+      "needs_services": false,
+      "plain": false,
+      "final": "proxy",
+      "body": []
+    },
+    "except_country": {
+      "needs_country": true,
+      "needs_services": false,
+      "plain": false,
+      "final": "proxy",
+      "body": [
+        { "when": "country_blocked", "kind": "country", "target": "proxy" },
+        { "when": "country_site", "kind": "country", "target": "direct" },
+        { "when": "country_ip", "kind": "country", "target": "direct" },
+        { "when": "country_is:RU", "kind": "service", "service": "games", "target": "direct" },
+        { "when": "country_is:RU", "kind": "service", "service": "steam", "target": "direct" }
+      ]
+    },
+    "selective": {
+      "needs_country": true,
+      "needs_services": true,
+      "plain": false,
+      "final": "direct",
+      "body": [
+        { "when": "services", "kind": "service", "target": "service_group" },
+        { "when": "country_blocked", "kind": "country", "target": "proxy" }
+      ]
+    },
+    "empty": {
+      "needs_country": false,
+      "needs_services": false,
+      "plain": true,
+      "final": "direct",
+      "body": []
+    }
+  }
+}

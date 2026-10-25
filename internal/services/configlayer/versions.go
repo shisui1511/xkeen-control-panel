@@ -26,13 +26,21 @@ const (
 type Feature string
 
 const (
-	FeatureXrayOutboundsTail    Feature = "xray_outbounds_tail"
+	FeatureXrayOutboundsTail Feature = "xray_outbounds_tail"
+	// FeatureXrayAutoGroup — авто-группа Xray (balancer с leastPing/leastLoad).
+	// Порог 1.8.10 (D-42, 146): у каждого balancer панели есть fallbackTag
+	// xcp-block, а fallbackTag появился в 1.8.10; общий минимум MinXrayVersion
+	// не меняется.
 	FeatureXrayAutoGroup        Feature = "xray_auto_group"
 	FeatureXrayFallbackGroup    Feature = "xray_fallback_group"
 	FeatureXrayHotSwapAPI       Feature = "xray_hot_swap_api"
 	FeatureMihomoUnixSocket     Feature = "mihomo_unix_socket"
 	FeatureMihomoInlineProvider Feature = "mihomo_inline_provider"
 	FeatureXKeenManagedInbounds Feature = "xkeen_managed_inbounds"
+	// FeatureMihomoGroups — группы Mihomo, которые строит панель. Порог 1.19.27
+	// (D-45, 146): у каждой группы панели задан empty-fallback: REJECT — пустая
+	// группа не уходит в DIRECT; общий минимум MinMihomoVersion не меняется.
+	FeatureMihomoGroups Feature = "mihomo_groups"
 
 	// Функции узлов (145, D-21). Пороги — по релизам ядер.
 	FeatureXrayXHTTP Feature = "xray_xhttp"
@@ -61,12 +69,13 @@ type featureThreshold struct {
 // что функция недоступна или не определена.
 var featureThresholds = map[Feature]featureThreshold{
 	FeatureXrayOutboundsTail:    {kernelXray, "1.8.6"},
-	FeatureXrayAutoGroup:        {kernelXray, "1.8.8"},
+	FeatureXrayAutoGroup:        {kernelXray, "1.8.10"},
 	FeatureXrayFallbackGroup:    {kernelXray, "1.8.10"},
 	FeatureXrayHotSwapAPI:       {kernelXray, "1.8.13"},
 	FeatureMihomoUnixSocket:     {kernelMihomo, "1.18.4"},
 	FeatureMihomoInlineProvider: {kernelMihomo, "1.19.1"},
 	FeatureXKeenManagedInbounds: {kernelXKeen, "2.0"},
+	FeatureMihomoGroups:         {kernelMihomo, "1.19.27"},
 
 	FeatureXrayXHTTP:           {kernelXray, "24.11.21"},
 	FeatureXraySessionIDFields: {kernelXray, "26.6.22"},

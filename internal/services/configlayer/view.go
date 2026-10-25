@@ -31,13 +31,39 @@ type NoticeView struct {
 
 // FilesEvent — данные события files.
 type FilesEvent struct {
-	Files      []FileView `json:"files"`
-	DriftCount int        `json:"drift_count"`
+	Files []FileView `json:"files"`
+	// DriftCount — файлы манифеста с расхождением плюс расхождения маршрутизации.
+	DriftCount int `json:"drift_count"`
+	// Routing — расхождения маршрутизации (они уже входят в DriftCount); в событие
+	// не попадают, клиент берёт их из блока routing снимка.
+	Routing []RoutingDriftItem `json:"-"`
 }
 
 // NoticesEvent — данные события notices.
 type NoticesEvent struct {
 	Notices []NoticeView `json:"notices"`
+}
+
+// RoutingKernelView — владение маршрутизацией одного ядра в снимке слоя.
+type RoutingKernelView struct {
+	// Taken — панель взяла маршрутизацию ядра.
+	Taken bool `json:"taken"`
+	// Moved — чужие файлы routing Xray, перенесённые в копии при взятии.
+	Moved []string `json:"moved"`
+	// Left — файлы routing Xray, оставленные на месте (смешанные).
+	Left []string `json:"left"`
+	// Drift — расхождения: имена файлов или "config.yaml".
+	Drift []string `json:"drift"`
+	// PrevProfile — прежний активный профиль Mihomo (для Xray пусто).
+	PrevProfile string `json:"prev_profile,omitempty"`
+}
+
+// RoutingSnapshot — раздел routing снимка: желаемое владение (секция routing
+// черновика) и фактическое по установленным ядрам; неустановленное ядро — null.
+type RoutingSnapshot struct {
+	Desired bool               `json:"desired"`
+	Xray    *RoutingKernelView `json:"xray"`
+	Mihomo  *RoutingKernelView `json:"mihomo"`
 }
 
 // SnapshotView — состояние слоя целиком для GET-снимка и первого события SSE.
@@ -52,6 +78,11 @@ type SnapshotView struct {
 	Features      map[Feature]Availability `json:"features"`
 	Apply         ApplyView                `json:"apply"`
 	Notices       []NoticeView             `json:"notices"`
+	// Checks — блокирующие проблемы проверки черновика (пустая группа, висячая
+	// ссылка): пока список не пуст, «Применить» отказывает. Пустой список — [].
+	Checks []BuildIssue `json:"checks"`
+	// Routing — владение маршрутизацией: желаемое, взятое, перенесённое и дрейф.
+	Routing RoutingSnapshot `json:"routing"`
 }
 
 // sortFileViews упорядочивает файлы для UI: drift, pending, ok, released;
