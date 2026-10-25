@@ -1880,7 +1880,12 @@
                 <span class="log-ts monospace">{formatTs(entry.timestamp)}</span>
               </div>
               {#if entry.output}
-                <pre class="log-output">{entry.output}</pre>
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+                <pre
+                  class="log-output"
+                  role="region"
+                  tabindex="0"
+                  aria-label={$t('svc.log_output_label')}>{entry.output}</pre>
               {/if}
             </div>
           {/each}

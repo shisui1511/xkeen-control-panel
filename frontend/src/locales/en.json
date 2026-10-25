@@ -517,6 +517,7 @@
   "svc.section_xkeen": "XKeen — main module",
   "svc.section_kernels": "Proxy Kernels",
   "svc.restart_log_title": "Restart History",
+  "svc.log_output_label": "Command output",
   "svc.entries_count_one": "{count} entry",
   "svc.entries_count_few": "{count} entries",
   "svc.entries_count_many": "{count} entries",

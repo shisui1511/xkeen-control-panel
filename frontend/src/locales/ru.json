@@ -514,6 +514,7 @@
   "svc.section_xkeen": "XKeen — главный модуль",
   "svc.section_kernels": "Ядра прокси",
   "svc.restart_log_title": "История запусков",
+  "svc.log_output_label": "Вывод команды",
   "svc.entries_count_one": "{count} запись",
   "svc.entries_count_few": "{count} записи",
   "svc.entries_count_many": "{count} записей",
