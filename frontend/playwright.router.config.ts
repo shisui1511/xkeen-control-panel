@@ -16,9 +16,10 @@ export default defineConfig({
   testDir: './tests/router',
   testMatch: '**/*.spec.ts',
   tsconfig: './tsconfig.test.json',
-  // Сценарии меняют общее состояние устройства: внутри цели всё строго по очереди. Исключение —
-  // обход страниц (pages.spec.ts), только читающий: pw-suite.sh запускает его отдельно и
-  // отдаёт несколько воркеров через XCP_PW_WORKERS
+  // Сценарии меняют общее состояние устройства: внутри цели всё строго по очереди (один воркер).
+  // Исключение — спеки только чтения (строка `// e2e-kind: read` в шапке, проверяет
+  // scripts/check-router-kinds.js): pw-suite.sh запускает их отдельно и отдаёт несколько воркеров
+  // через XCP_PW_WORKERS
   workers: Number(process.env.XCP_PW_WORKERS) > 0 ? Number(process.env.XCP_PW_WORKERS) : 1,
   fullyParallel: Number(process.env.XCP_PW_WORKERS) > 1,
   // Повторов нет: любое падение — находка (метка известного падения или починка)
