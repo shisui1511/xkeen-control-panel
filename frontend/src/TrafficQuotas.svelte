@@ -464,7 +464,7 @@
         <h2 class="card-title">{$t('trafficquotas.alerts')}</h2>
       </div>
       <div class="alerts-list">
-        {#each alerts as a}
+        {#each alerts as a, i (i)}
           <div
             class="alert"
             class:alert-warning={a.severity === 'warning'}
@@ -571,7 +571,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each quotas as q}
+            {#each quotas as q (q.id)}
               <tr>
                 <td><b>{q.name}</b></td>
                 <td>
@@ -726,7 +726,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each stats.proxies as p}
+            {#each stats.proxies as p, i (i)}
               <tr>
                 <td><b>{p.proxy_name}</b></td>
                 <td class="mono">{formatBytes(p.upload_bytes)}</td>
@@ -797,7 +797,7 @@
       <div class="form-group">
         <label for="form-unit" class="form-label">{$t('trafficquotas.unit')}</label>
         <Select id="form-unit" class="input" bind:value={formLimitUnit}>
-          {#each units as u}
+          {#each units as u (u.value)}
             <option value={u.value}>{u.value}</option>
           {/each}
         </Select>
@@ -807,7 +807,7 @@
     <div class="form-group">
       <label for="form-period" class="form-label">{$t('trafficquotas.period')}</label>
       <Select id="form-period" class="input" bind:value={formPeriod}>
-        {#each periods as p}
+        {#each periods as p (p.value)}
           <option value={p.value}>{p.label}</option>
         {/each}
       </Select>

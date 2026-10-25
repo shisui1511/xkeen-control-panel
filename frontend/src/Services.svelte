@@ -469,11 +469,14 @@
   // Прежнее ядро на время переключения — для подписи ожидания
   let switchingFrom = $state('');
 
-  $effect(() => {
-    if (notStoppedKernel && !$runningKernels.includes(notStoppedKernel as KernelName)) {
+  // Бейдж снимается, как только ядро пропало из списка запущенных, и не возвращается,
+  // если оно потом запустится снова: подписка на стор — внешняя синхронизация, запись
+  // состояния идёт из её колбэка
+  function dropNotStoppedKernel(running: string[]) {
+    if (notStoppedKernel && !running.includes(notStoppedKernel)) {
       notStoppedKernel = null;
     }
-  });
+  }
 
   async function switchKernel(kernel: KernelName) {
     isKernelChecking.set(false);
@@ -489,9 +492,12 @@
         fetchCapabilities(),
         fetchRestartLog()
       ]);
-      // Бейдж ставится после перечитывания capabilities: иначе эффект выше снял бы его
+      // Бейдж ставится после перечитывания capabilities: иначе подписка выше сняла бы его
       // по ещё не обновлённому списку запущенных ядер
-      notStoppedKernel = result.outcome === 'old_still_running' ? result.old : null;
+      notStoppedKernel =
+        result.outcome === 'old_still_running' && $runningKernels.includes(result.old as KernelName)
+          ? result.old
+          : null;
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', actionErrorText(e));
@@ -920,9 +926,11 @@
 
   onMount(() => {
     fetchRestartLog();
+    const unsubscribeRunning = runningKernels.subscribe(dropNotStoppedKernel);
     const kernelPoller = usePoller((signal) => fetchKernels(signal), 5000);
     const statusPoller = usePoller((signal) => fetchStatus(signal), 15000);
     return () => {
+      unsubscribeRunning();
       kernelPoller.stop();
       statusPoller.stop();
       Object.values(statusTimeouts).forEach(clearTimeout);

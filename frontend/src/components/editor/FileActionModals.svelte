@@ -31,8 +31,13 @@
     onCloseRename
   }: Props = $props();
 
-  let newFileName = $state('');
-  let renameTarget = $state('');
+  // Поля сбрасываются при каждой смене createOpen / renameOpen и при смене initialRenameValue;
+  // присваивание (ввод пользователя) действует до следующей такой смены.
+  let newFileName = $derived.by(() => {
+    void createOpen;
+    return '';
+  });
+  let renameTarget = $derived(renameOpen ? initialRenameValue : '');
 
   // XKeen отменяет запуск Xray из-за таких имён только в корне каталога Xray.
   function stoplistWord(dir: string, name: string): string | null {
@@ -45,18 +50,6 @@
 
   let createWord = $derived(stoplistWord(createDir, newFileName));
   let renameWord = $derived(stoplistWord(renameDir, renameTarget));
-
-  $effect(() => {
-    if (createOpen) {
-      newFileName = '';
-    }
-  });
-
-  $effect(() => {
-    if (renameOpen) {
-      renameTarget = initialRenameValue;
-    }
-  });
 
   function handleCreate() {
     if (!newFileName.trim()) return;

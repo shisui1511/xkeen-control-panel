@@ -321,8 +321,9 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 			Skipped:      skipReasons,
 			Timestamp:    sub.LastUpdate,
 		}
-		s.saveDebugFiles(sub.ID, body, headers, report)
+		writeDebug := s.debugFilesWriterLocked(sub.ID, body, headers, report)
 		s.mu.Unlock()
+		writeDebug()
 		return nil
 	}
 
@@ -430,9 +431,10 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 		Skipped:      skipReasons,
 		Timestamp:    sub.LastUpdate,
 	}
-	s.saveDebugFiles(sub.ID, body, headers, report)
+	writeDebug := s.debugFilesWriterLocked(sub.ID, body, headers, report)
 
 	s.mu.Unlock()
+	writeDebug()
 
 	if needRestart {
 		s.restartXkeenIfRunning(sub.ID, "xray fragment update", "xray")

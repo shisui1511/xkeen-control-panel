@@ -142,15 +142,15 @@
       return { chain: [currentTag, 'DIRECT'], hasCycle: false };
     }
     const chain: string[] = [currentTag];
-    const visited = new Set<string>([currentTag]);
     let curr = targetProxy;
 
     while (curr) {
+      // Цепочка уже содержит все пройденные теги, отдельный набор «посещённых» не нужен.
+      const alreadyVisited = chain.includes(curr);
       chain.push(curr);
-      if (visited.has(curr)) {
+      if (alreadyVisited) {
         return { chain, hasCycle: true };
       }
-      visited.add(curr);
       // find next proxy in details
       const found = outboundDetails.find((d) => d.tag === curr);
       curr = (found as any)?.dialerProxy || '';
@@ -503,7 +503,7 @@
       <div class="form-col">
         <label class="form-label" for="outbound-ss-cipher">{$t('xray.cipher')}</label>
         <Select id="outbound-ss-cipher" class="form-select" bind:value={outbound.cipher}>
-          {#each shadowsocksCiphers as c}
+          {#each shadowsocksCiphers as c (c)}
             <option value={c}>{c}</option>
           {/each}
         </Select>
@@ -777,7 +777,7 @@
     </label>
     <Select id="outbound-dialer-proxy" class="form-select" bind:value={outbound.dialerProxy}>
       <option value="">{$t('xray.dialer_none')}</option>
-      {#each outboundDetails.filter((d) => !['direct', 'block', 'dns-out'].includes(d.tag) && d.tag !== (outbound.tag || '').trim()) as o}
+      {#each outboundDetails.filter((d) => !['direct', 'block', 'dns-out'].includes(d.tag) && d.tag !== (outbound.tag || '').trim()) as o, i (i)}
         <option value={o.tag}>{o.tag} ({o.protocol})</option>
       {/each}
     </Select>
@@ -785,7 +785,7 @@
     {#if outbound.dialerProxy}
       <div class="dialer-chain-preview">
         <span class="text-muted">{$t('xray.dialer_chain')}:</span>
-        {#each dialerChainPreview.chain as node, idx}
+        {#each dialerChainPreview.chain as node, idx (idx)}
           <span
             class="badge"
             class:badge-primary={idx === 0}

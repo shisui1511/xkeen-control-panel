@@ -303,7 +303,7 @@
             class="mihomo-groups-checkboxes"
             style="display:flex; flex-direction:column; gap:8px; max-height:150px; overflow-y:auto; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background: rgba(0,0,0,0.15);"
           >
-            {#each availableMihomoGroups as group}
+            {#each availableMihomoGroups as group, i (i)}
               <label
                 style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-primary);"
               >
@@ -321,7 +321,7 @@
                 <span>{group}</span>
               </label>
             {/each}
-            {#each missingGroups as missingGroup}
+            {#each missingGroups as missingGroup, i (i)}
               <label
                 style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-dim);"
               >

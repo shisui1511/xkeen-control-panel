@@ -67,6 +67,12 @@ func (w *noCookieWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
+// Flush пробрасывает сброс ответа вниз по цепочке: адаптер провайдера отдаёт тело
+// Mihomo до того, как пишет состояние подписки на диск.
+func (w *noCookieWriter) Flush() {
+	_ = http.NewResponseController(w.ResponseWriter).Flush()
+}
+
 type Server struct {
 	cfg         *Config
 	version     string

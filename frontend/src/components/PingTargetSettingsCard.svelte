@@ -9,14 +9,11 @@
   } from '../lib/pingTargetStore';
 
   let config = $derived($pingTargetStore);
-  let customUrlInput = $state($pingTargetStore.customUrl);
-  let customUrlTouched = $state(false);
-
-  $effect(() => {
-    if (!customUrlTouched) {
-      customUrlInput = $pingTargetStore.customUrl;
-    }
-  });
+  // Поле повторяет customUrl из стора, пока его не трогали; после ввода или ухода
+  // фокуса значение фиксируется и стор больше не подставляется.
+  let customUrlPinned = $state<string | null>(null);
+  let customUrlInput = $derived(customUrlPinned ?? $pingTargetStore.customUrl);
+  let customUrlTouched = $derived(customUrlPinned !== null);
 
   let isCustom = $derived(config.preset === 'custom');
   let isCustomValid = $derived(isValidUrl(customUrlInput));
@@ -27,9 +24,8 @@
   }
 
   function handleCustomUrlInput(e: Event) {
-    customUrlTouched = true;
     const val = (e.target as HTMLInputElement).value;
-    customUrlInput = val;
+    customUrlPinned = val;
     if (isValidUrl(val)) {
       setPingTargetConfig({ customUrl: val.trim() });
     }
@@ -124,7 +120,7 @@
           placeholder={$t('settings.ping_custom_url_placeholder')}
           value={customUrlInput}
           oninput={handleCustomUrlInput}
-          onblur={() => (customUrlTouched = true)}
+          onblur={() => (customUrlPinned ??= customUrlInput)}
         />
         {#if showCustomError}
           <div class="form-error">

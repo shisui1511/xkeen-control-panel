@@ -32,13 +32,13 @@
     <div class="form-col">
       <label class="form-label" for="rule-type">{$t('rules.rule_type')}</label>
       <Select id="rule-type" class="form-select" bind:value={nr.type}>
-        {#each RULE_TYPES as t}<option value={t}>{t}</option>{/each}
+        {#each RULE_TYPES as t (t)}<option value={t}>{t}</option>{/each}
       </Select>
     </div>
     <div class="form-col">
       <label class="form-label" for="rule-outbound">{$t('rules.outbound')}</label>
       <Select id="rule-outbound" class="form-select" bind:value={nr.outbound}>
-        {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
+        {#each allProxyNames as n, i (i)}<option value={n}>{n}</option>{/each}
       </Select>
     </div>
   </div>

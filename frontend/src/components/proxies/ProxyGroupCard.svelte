@@ -120,9 +120,9 @@
   function getSelectionChain(groupName: string): ChainItem[] {
     const chain: ChainItem[] = [];
     let current = groupName;
-    const visited = new Set<string>();
-    while (current && !visited.has(current)) {
-      visited.add(current);
+    const visited: string[] = [];
+    while (current && !visited.includes(current)) {
+      visited.push(current);
       const grp = groups.find((g) => g.name === current);
       if (!grp) break;
       const selected = grp.now;
@@ -136,17 +136,14 @@
 
   function getGroupProviderName(grp: any): string | null {
     if (!grp || !Array.isArray(grp.all) || grp.all.length === 0) return null;
-    const counts = new Map<string, number>();
-    for (const nodeName of grp.all) {
-      const prov = proxies[nodeName]?.provider;
-      if (prov && typeof prov === 'string' && prov.trim() !== '') {
-        counts.set(prov, (counts.get(prov) || 0) + 1);
-      }
-    }
-    if (counts.size === 0) return null;
+    const providers: string[] = grp.all
+      .map((nodeName: string) => proxies[nodeName]?.provider)
+      .filter((prov: unknown) => prov && typeof prov === 'string' && prov.trim() !== '');
+    if (providers.length === 0) return null;
     let topProv: string | null = null;
     let topCount = 0;
-    for (const [prov, count] of counts.entries()) {
+    for (const prov of new Set(providers)) {
+      const count = providers.filter((p) => p === prov).length;
       if (count > topCount) {
         topCount = count;
         topProv = prov;
@@ -471,7 +468,7 @@
           <span class="gc-arrow">›</span>
           {@render chainPill(displayChain.items[1])}
         {:else if displayChain.items.length > 0}
-          {#each displayChain.items as item, index}
+          {#each displayChain.items as item, index (index)}
             {#if index > 0}
               <span class="gc-arrow">›</span>
             {/if}
@@ -548,7 +545,7 @@
           </div>
 
           <div class="proxy-grid">
-            {#each renderedNodes as proxyName}
+            {#each renderedNodes as proxyName, i (i)}
               {@const proxy = proxies[proxyName]}
               {@const isActive = group.now === proxyName}
               {@const flag = getMissingCountryFlag(proxyName)}

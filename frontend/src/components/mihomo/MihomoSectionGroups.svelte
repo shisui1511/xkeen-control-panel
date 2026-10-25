@@ -143,7 +143,7 @@
               >
                 <option value="DIRECT">DIRECT</option>
                 <option value="REJECT">REJECT</option>
-                {#each allProxyNames.filter((n) => n !== 'DIRECT' && n !== 'REJECT' && n !== g.name) as n}
+                {#each allProxyNames.filter((n) => n !== 'DIRECT' && n !== 'REJECT' && n !== g.name) as n, i (i)}
                   <option value={n}>{n}</option>
                 {/each}
               </Select>

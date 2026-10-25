@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import { t, tp, currentLang } from './i18n';
   import { usePoller } from './lib/poller';
   import {
@@ -116,23 +117,20 @@
   let loading = $state(false);
   let error = $state('');
   let loadTimedOut = $state(false);
-  // Потрековое состояние тестируемых групп (D-16, G-90-7): Set пересоздаётся при
-  // каждом изменении, а не мутируется на месте — под $state обычный Set в Svelte 5
-  // не является глубоко реактивным (тот же паттерн, что и у collapsedGroups ниже).
-  let testingGroupNames = $state(new Set<string>());
+  // Потрековое состояние тестируемых групп (D-16, G-90-7): SvelteSet мутируется на
+  // месте, чтения в шаблоне и в derived остаются реактивными.
+  const testingGroupNames = new SvelteSet<string>();
   let testingProxy = $state('');
 
   function markGroupTesting(name: string) {
-    testingGroupNames = new Set(testingGroupNames).add(name);
+    testingGroupNames.add(name);
   }
 
   function unmarkGroupTesting(name: string) {
-    const next = new Set(testingGroupNames);
-    next.delete(name);
-    testingGroupNames = next;
+    testingGroupNames.delete(name);
   }
   let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
-  let collapsedGroups = $state(new Set<string>());
+  const collapsedGroups = new SvelteSet<string>();
   let filterQuery = $state('');
   let seenGroups = $state(new Set<string>());
   const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
@@ -173,14 +171,14 @@
   let rawResponseData = $state<any>(null);
 
   // View mode state (D-17)
-  let viewMode = $state<ProxiesViewMode>(readProxiesViewMode());
+  const initialViewMode = readProxiesViewMode();
+  let viewMode = $state<ProxiesViewMode>(initialViewMode);
   function setViewMode(mode: ProxiesViewMode) {
     viewMode = mode;
     writeProxiesViewMode(mode);
   }
-  $effect(() => {
-    writeProxiesViewMode(viewMode);
-  });
+  // Первичная запись нормализует сохранённое значение; дальше пишет setViewMode.
+  writeProxiesViewMode(initialViewMode);
 
   // Chunked rendering state (D-20)
   const NODE_RENDER_CHUNK = 50;
@@ -207,9 +205,8 @@
   }
 
   function collapseAll() {
-    const nextCollapsed = new Set<string>();
-    groups.forEach((g) => nextCollapsed.add(g.name));
-    collapsedGroups = nextCollapsed;
+    collapsedGroups.clear();
+    groups.forEach((g) => collapsedGroups.add(g.name));
     nodeRenderLimit = {};
   }
 
@@ -218,14 +215,12 @@
     nodeRenderLimit = {};
     const groupNames = groups.map((g) => g.name);
     const BATCH_SIZE = 4;
-    const nextCollapsed = new Set(collapsedGroups);
 
     for (let i = 0; i < groupNames.length; i += BATCH_SIZE) {
       const batch = groupNames.slice(i, i + BATCH_SIZE);
       const delay = Math.floor(i / BATCH_SIZE) * 16;
       safeTimeout(() => {
-        batch.forEach((name) => nextCollapsed.delete(name));
-        collapsedGroups = new Set(nextCollapsed);
+        batch.forEach((name) => collapsedGroups.delete(name));
       }, delay);
     }
   }
@@ -267,9 +262,9 @@
 
   function getEffectiveProxy(proxyName: string): Proxy | undefined {
     let currentName = proxyName;
-    const visited = new Set<string>();
-    while (currentName && !visited.has(currentName)) {
-      visited.add(currentName);
+    const visited: string[] = [];
+    while (currentName && !visited.includes(currentName)) {
+      visited.push(currentName);
       const p = proxies[currentName];
       if (!p) break;
       if (isProxyGroupType(p.type) && p.now) {
@@ -284,34 +279,30 @@
 
   function updateCollapsed() {
     const current = new Set(groups.map((g) => g.name));
-    const next = new Set(collapsedGroups);
-    for (const name of [...next]) {
-      if (!current.has(name)) next.delete(name);
+    for (const name of [...collapsedGroups]) {
+      if (!current.has(name)) collapsedGroups.delete(name);
     }
     const pinnedNames = new Set(pinnedCoreGroups);
     for (const g of groups) {
       if (!seenGroups.has(g.name)) {
-        next.add(g.name);
+        collapsedGroups.add(g.name);
       }
       seenGroups.add(g.name);
       // Служебные мини-карточки (D-03): свернутое состояние по умолчанию, не
       // только при первом появлении — разворачивать в них нечего.
       if (classifyGroupRole(g, groups, pinnedNames, proxyTypeMap) === 'system') {
-        next.add(g.name);
+        collapsedGroups.add(g.name);
       }
     }
-    collapsedGroups = next;
   }
 
   function toggleCollapse(groupName: string) {
-    const next = new Set(collapsedGroups);
-    if (next.has(groupName)) {
-      next.delete(groupName);
+    if (collapsedGroups.has(groupName)) {
+      collapsedGroups.delete(groupName);
     } else {
-      next.add(groupName);
+      collapsedGroups.add(groupName);
       delete nodeRenderLimit[groupName];
     }
-    collapsedGroups = next;
   }
 
   // .gc-head is a non-button div[role="button"] (Pitfall 1 / D-02, D-13): nested
@@ -364,16 +355,14 @@
   // узлы внутри них и одиночный узел из testProxyLatency(). Дешёвая при простое.
   function getProtectedNodeNames(): Set<string> {
     if (testingGroupNames.size === 0 && !testingProxy) return new Set();
-    const protectedNames = new Set<string>();
+    const names: string[] = [];
     for (const groupName of testingGroupNames) {
-      protectedNames.add(groupName);
+      names.push(groupName);
       const group = groups.find((g) => g.name === groupName);
-      if (group) {
-        for (const node of group.all) protectedNames.add(node);
-      }
+      if (group) names.push(...group.all);
     }
-    if (testingProxy) protectedNames.add(testingProxy);
-    return protectedNames;
+    if (testingProxy) names.push(testingProxy);
+    return new Set(names);
   }
 
   async function fetchProxies(signal?: AbortSignal) {
@@ -676,14 +665,9 @@
         return;
       }
 
-      const nodeSet = new Set<string>();
-      for (const node of group.all) {
-        const p = proxies[node];
-        if (node && !isSystemProxy(node, p?.type)) {
-          nodeSet.add(node);
-        }
-      }
-      const nodes = Array.from(nodeSet);
+      const nodes = Array.from(
+        new Set(group.all.filter((node) => node && !isSystemProxy(node, proxies[node]?.type)))
+      );
       if (nodes.length === 0) return;
 
       await batchTester.run({
@@ -978,7 +962,7 @@
         <MihomoModeSwitch onchanged={() => fetchProxies()} />
         <ProxyFilterBar
           bind:filterQuery
-          bind:viewMode
+          bind:viewMode={() => viewMode, setViewMode}
           {loading}
           onSearchInput={handleSearchInput}
           onExpandAll={expandAll}

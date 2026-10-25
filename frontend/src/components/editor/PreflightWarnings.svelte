@@ -47,18 +47,13 @@
   }
 
   let activeWarnings = $derived.by(() => {
-    const seen = new Set<string>();
-    const result: PreflightWarning[] = [];
-    for (const w of warnings || []) {
-      const text = getWarningText(w).trim();
-      if (!text) continue;
-      const key = (w.code || '') + '::' + text;
-      if (!seen.has(key)) {
-        seen.add(key);
-        result.push(w);
-      }
-    }
-    return result;
+    const entries = (warnings || [])
+      .map((w) => ({ w, text: getWarningText(w).trim() }))
+      .filter((e) => e.text)
+      .map((e) => ({ w: e.w, key: (e.w.code || '') + '::' + e.text }));
+    return entries
+      .filter((e, i) => entries.findIndex((o) => o.key === e.key) === i)
+      .map((e) => e.w);
   });
 </script>
 
@@ -69,7 +64,7 @@
       <ul class="preflight-warnings-list">
         {#each activeWarnings as warning, i (i)}
           <li>
-            {#each formatWarningParts(getWarningText(warning)) as part}
+            {#each formatWarningParts(getWarningText(warning)) as part, pi (pi)}
               {#if part.isCode}
                 <code class="warning-code-token">{part.text}</code>
               {:else}

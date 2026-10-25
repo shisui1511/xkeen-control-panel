@@ -56,7 +56,7 @@ var rtNotExpressibleMihomo = map[string]string{
 // rtLinkMarks — метки известных падений по шагам схем: ключ «схема/шаг».
 // Шаги: parse, xray, mihomo.
 var rtLinkMarks = map[string]routertest.KnownMark{
-	// mKCP header и seed отвергает Xray 26.2.x на mipsle; Xray 26.10.21 на arm64 их снова принимает
+	// mKCP header и seed удалены в стабильном Xray 26.2.x на mipsle; Xray 26.10.x на arm64 их принимает
 	"vless_kcp/xray": routertest.Known("mipsle", "xray-mkcp-header-seed-finalmask"),
 }
 

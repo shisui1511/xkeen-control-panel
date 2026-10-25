@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -487,25 +488,40 @@ func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 
 	// 4. Upstream fetch + конвертация + fallback на кэш на диске (graceful
 	// fallback на кэш при ошибке / заглушке / недоступности upstream).
-	payload, err := a.subscriptionSvc.ProviderFetchWithFallback(r.Context(), urlStr, sub)
+	payload, commit, err := a.subscriptionSvc.ProviderFetchWithFallback(r.Context(), urlStr, sub)
 	if err != nil {
 		log.Printf("[Subscriptions] provider fetch failed for sub=%s: %s", sub.ID, utils.SanitizeLogInput(err.Error()))
 		// Причина ошибки (может содержать сырой url из query-параметра)
 		// уходит только в лог; клиенту — фиксированный текст без
 		// отражения пользовательского ввода (CodeQL reflected-XSS sink).
 		a.errorResponse(w, "Bad Gateway: upstream fetch failed", http.StatusBadGateway)
+		flushProviderResponse(w)
+		commit()
 		return
 	}
 
+	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
+	flushProviderResponse(w)
+
+	// 5. Запись на диск — после ответа: Mihomo ждёт тело не дольше 20 с, а fsync на
+	// медленной флешке и ожидание блокировки подписок за чужой записью длятся секунды.
+	commit()
 	if !isAdhoc {
 		if err := a.subscriptionSvc.PersistHeaderMetadata(sub.ID, sub); err != nil {
 			log.Printf("[Subscriptions] failed to persist header metadata for %s: %v", sub.ID, err)
 		}
 	}
+}
 
-	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(payload)
+// flushProviderResponse отправляет Mihomo весь ответ адаптера, не дожидаясь выхода из
+// обработчика: дальше обработчик пишет состояние на диск.
+func flushProviderResponse(w http.ResponseWriter) {
+	if err := http.NewResponseController(w).Flush(); err != nil {
+		log.Printf("[Subscriptions] provider response flush failed: %v", err)
+	}
 }
 
 // MihomoProviderRedirect редиректит устаревший путь /mihomo/provider.yaml на

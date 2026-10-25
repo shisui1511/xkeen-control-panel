@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onDestroy, untrack } from 'svelte';
+  import type { Attachment } from 'svelte/attachments';
   import { t } from './i18n';
   import { activeKernelName, showToast } from './stores';
   import Skeleton from './components/Skeleton.svelte';
@@ -21,13 +23,15 @@
   let kernel = $state<'xray' | 'mihomo'>('xray');
   let kernelInitialized = $state(false);
 
-  $effect(() => {
-    const active = $activeKernelName;
+  // Первое известное активное ядро выбирается один раз; позже выбор меняет только пользователь
+  function latchActiveKernel(active: 'xray' | 'mihomo' | '' | null | undefined) {
     if (!kernelInitialized && active) {
       kernel = active;
       kernelInitialized = true;
     }
-  });
+  }
+  const unsubscribeActiveKernel = activeKernelName.subscribe(latchActiveKernel);
+  onDestroy(unsubscribeActiveKernel);
 
   // Nested lazy boundary for the kernel-specific constructor (Pitfall 1,
   // RESEARCH.md): XrayRoutingConstructor.svelte (3 473 lines) has no other
@@ -57,8 +61,10 @@
     });
   }
 
-  function reportKernelChunkErrorAction(_node: HTMLElement, err: unknown): void {
-    reportKernelChunkError(err);
+  function reportKernelChunkErrorAttachment(err: unknown): Attachment {
+    return () => {
+      untrack(() => reportKernelChunkError(err));
+    };
   }
 </script>
 
@@ -98,7 +104,7 @@
         {:then { default: XrayRoutingConstructor }}
           <XrayRoutingConstructor {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} />
         {:catch err}
-          <div use:reportKernelChunkErrorAction={err}>
+          <div {@attach reportKernelChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""
@@ -119,7 +125,7 @@
             {invalidateCache}
           />
         {:catch err}
-          <div use:reportKernelChunkErrorAction={err}>
+          <div {@attach reportKernelChunkErrorAttachment(err)}>
             <EmptyState
               title={$t('app.chunk_load_failed')}
               description=""

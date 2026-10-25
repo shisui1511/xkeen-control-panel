@@ -119,7 +119,7 @@
       {#if tabs && tabs.length > 0}
         <!-- Tabbed Header (Xray style) -->
         <div class="preview-tabs-bar">
-          {#each tabs as tab}
+          {#each tabs as tab (tab.id)}
             <button
               type="button"
               class="preview-tab-btn"

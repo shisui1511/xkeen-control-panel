@@ -81,15 +81,22 @@
 
   let dismissZkeenGeodataWarning = $state(false);
   let lastActivePreset = '';
-  $effect(() => {
-    if (ctx.activePreset !== lastActivePreset) {
-      if (lastActivePreset && ctx.activePreset !== lastActivePreset) {
-        localStorage.removeItem('xcp:dismissed_warning:zkeen_geodata');
-      }
-      lastActivePreset = ctx.activePreset;
-      const dismissed = localStorage.getItem('xcp:dismissed_warning:zkeen_geodata');
-      dismissZkeenGeodataWarning = dismissed === ctx.activePreset;
+
+  // Смена пресета сбрасывает сохранённое в localStorage закрытие предупреждения и
+  // перечитывает его для нового пресета (внешнее хранилище): эффект лишь вызывает
+  // функцию, запись состояния — внутри неё.
+  function syncZkeenGeodataDismissal(activePreset: string) {
+    if (activePreset === lastActivePreset) return;
+    if (lastActivePreset) {
+      localStorage.removeItem('xcp:dismissed_warning:zkeen_geodata');
     }
+    lastActivePreset = activePreset;
+    const dismissed = localStorage.getItem('xcp:dismissed_warning:zkeen_geodata');
+    dismissZkeenGeodataWarning = dismissed === activePreset;
+  }
+
+  $effect(() => {
+    syncZkeenGeodataDismissal(ctx.activePreset);
   });
 
   const blockingValidationMsg = $derived(
@@ -160,7 +167,7 @@
       ctx.tun = res.tun || ctx.tun;
       ctx.sniffer = res.sniffer || ctx.sniffer;
       ctx.activeRuleProvider = res.activeRuleProvider as any;
-      ctx.selectedMetaRuleSets = res.selectedMetaRuleSets || new Map();
+      ctx.replaceMetaRuleSets(res.selectedMetaRuleSets);
       ctx.preservedKeys = res.preservedKeys || [];
       ctx.existingTproxyPort = res.existingTproxyPort;
       ctx.existingRedirPort = res.existingRedirPort;
