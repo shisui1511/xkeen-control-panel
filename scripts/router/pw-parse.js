@@ -4,7 +4,11 @@
 // Вывод: «статус<TAB>проверка<TAB>деталь», по строке на тест, где статус — одно из
 // PASS, FAIL, KNOWN, XPASS, SKIP; проверка — название теста (pw-suite.sh добавляет «pw:»).
 //   - тест с аннотацией known-failure, упавший как ожидалось -> KNOWN, деталь — slug todo;
-//   - тест с аннотацией known-failure, который прошёл (test.fail не сработал) -> XPASS;
+//   - тест с аннотацией known-failure, который прошёл (test.fail не сработал: последний результат
+//     passed) -> XPASS;
+//   - тест с аннотацией known-failure, не дошедший до ожидаемого падения (тайм-аут, прерывание:
+//     последний результат не passed) -> FAIL со статусом и текстом ошибки, а не XPASS — это не
+//     повод снимать метку;
 //   - остальные: expected -> PASS, unexpected/flaky -> FAIL, skipped -> SKIP (деталь — описание
 //     аннотации 'skip', то есть причина test.skip(условие, причина); без неё — «пропущен»).
 // Ошибки вне тестов (глобальная настройка: панель не отвечает, вход не удался) -> FAIL global-setup.
@@ -89,11 +93,22 @@ function visit(suite, titles) {
       ) {
         out("KNOWN", name, slug);
       } else if (slug && st === "unexpected") {
-        out(
-          "XPASS",
-          name,
-          `${slug}: тест прошёл, метка известного падения больше не нужна`,
-        );
+        // test.fail() даёт unexpected и при прошедшем тесте, и при тайм-ауте: различает статус
+        // последнего результата
+        const last = (test.results || []).at(-1);
+        if (last && last.status === "passed") {
+          out(
+            "XPASS",
+            name,
+            `${slug}: тест прошёл, метка известного падения больше не нужна`,
+          );
+        } else {
+          out(
+            "FAIL",
+            name,
+            `${slug}: ${last?.status ?? "unexpected"}: ${errorText(test)}`,
+          );
+        }
       } else if (st === "expected") {
         out("PASS", name, "");
       } else {
