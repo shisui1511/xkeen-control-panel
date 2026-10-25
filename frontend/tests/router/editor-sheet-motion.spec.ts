@@ -1,4 +1,5 @@
 // e2e-pages: editor
+// e2e-kind: read
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';

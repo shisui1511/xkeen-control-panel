@@ -12,10 +12,10 @@
 # pw:core-switch:<ядро>.
 #
 # --part read|state (вне --switch): запускается одна часть набора (D-07, D-18). Спеки делятся
-# так же, как раньше: спеки только чтения (пока pages.spec.ts; план 13 заменит признак
-# разметкой `// e2e-kind: read`) — часть read, остальные, меняющие состояние стенда, — часть
-# state.
-#   read   только спеки только чтения, PAGE_WORKERS воркеров, артефакты — <отчёт>/<id>/<ядро>/pw-read/;
+# по разметке: спеки с точной строкой `// e2e-kind: read` в первых пяти строках — часть read,
+# остальные (без строки вида, умолчание — изменяющий) — часть state. Разметку проверяет
+# scripts/check-router-kinds.js: в спеке read нет изменяющих вызовов.
+#   read   только спеки с `// e2e-kind: read`, PAGE_WORKERS воркеров, артефакты — <отчёт>/<id>/<ядро>/pw-read/;
 #          идёт параллельно окну наблюдения смоука (smoke.sh --observe-only)
 #   state  остальные спеки, один воркер, артефакты — <отчёт>/<id>/<ядро>/pw/
 # Пустая часть (в выбранных спеках нет подходящих) — выход 0 без строк результата.
@@ -137,9 +137,9 @@ fi
 
 # --- запуск --------------------------------------------------------------------
 # Пароль идёт только в окружение процесса Playwright; в отчёт и журнал не попадает.
-# Обход страниц только читает и идёт в несколько воркеров (PAGE_WORKERS цели, по умолчанию 3);
-# остальные спеки меняют состояние устройства и идут одним воркером, после обхода. Два запуска
-# Playwright — два JSON-отчёта, разбор общий.
+# Спеки только чтения (`// e2e-kind: read`) идут в несколько воркеров (PAGE_WORKERS цели, по
+# умолчанию 3); остальные меняют состояние устройства и идут одним воркером, после них. Два
+# запуска Playwright — два JSON-отчёта, разбор общий.
 PAGE_WORKERS=$(rt_get "$ID" PAGE_WORKERS)
 [ -n "$PAGE_WORKERS" ] || PAGE_WORKERS=3
 
@@ -177,26 +177,28 @@ run_pw() {
   ) >>"$LOG" 2>&1
 }
 
-PAGES_SPEC=""
+READ_SPECS=""
 REST_SPECS=""
 if [ -n "$SWITCH" ]; then
   REST_SPECS=$SPECS
 else
   [ -n "$SPECS" ] || SPECS=$(cd "$ROOT/frontend/tests/router" && ls ./*.spec.ts | sed 's#^\./##' | tr '\n' ' ')
   for _s in $SPECS; do
-    case "$_s" in
-      *pages.spec.ts) PAGES_SPEC=$_s ;;
-      *) REST_SPECS="$REST_SPECS $_s" ;;
-    esac
+    # вид спека — строка `// e2e-kind: read` в первых пяти строках; без неё спек изменяющий
+    if head -n 5 "$ROOT/frontend/tests/router/$_s" | grep -qx '// e2e-kind: read'; then
+      READ_SPECS="$READ_SPECS $_s"
+    else
+      REST_SPECS="$REST_SPECS $_s"
+    fi
   done
 fi
 
 # --part: остаётся только своя часть набора
 case "$PART" in
   read) REST_SPECS="" ;;
-  state) PAGES_SPEC="" ;;
+  state) READ_SPECS="" ;;
 esac
-if [ -n "$PART" ] && [ -z "$PAGES_SPEC" ] && [ -z "$(echo $REST_SPECS)" ]; then
+if [ -n "$PART" ] && [ -z "$(echo $READ_SPECS)" ] && [ -z "$(echo $REST_SPECS)" ]; then
   # в выбранных спеках нет подходящих этой части: нет ни строк результата, ни FAIL pw:run
   exit 0
 fi
@@ -204,11 +206,11 @@ fi
 : >"$LOG"
 rc=0
 JSONS=""
-if [ -n "$PAGES_SPEC" ]; then
+if [ -n "$(echo $READ_SPECS)" ]; then
   JSONS="$PW_DIR/report-pages.json"
   rm -f "$PW_DIR/report-pages.json"
   # shellcheck disable=SC2086
-  run_pw "$PW_DIR/report-pages.json" "$PAGE_WORKERS" $PAGES_SPEC || rc=$?
+  run_pw "$PW_DIR/report-pages.json" "$PAGE_WORKERS" $READ_SPECS || rc=$?
 fi
 if [ -n "$(echo $REST_SPECS)" ]; then
   JSONS="$JSONS $JSON"
