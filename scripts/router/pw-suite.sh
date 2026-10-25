@@ -184,8 +184,14 @@ if [ -n "$SWITCH" ]; then
 else
   [ -n "$SPECS" ] || SPECS=$(cd "$ROOT/frontend/tests/router" && ls ./*.spec.ts | sed 's#^\./##' | tr '\n' ' ')
   for _s in $SPECS; do
-    # вид спека — строка `// e2e-kind: read` в первых пяти строках; без неё спек изменяющий
-    if head -n 5 "$ROOT/frontend/tests/router/$_s" | grep -qx '// e2e-kind: read'; then
+    # вид спека — строка `// e2e-kind: read` в первых пяти строках; без неё спек изменяющий.
+    # select-changed.mjs и session.mjs передают пути от frontend/ (`tests/router/x.spec.ts`),
+    # полный набор — имена файлов: путь без каталога достраивается.
+    case "$_s" in
+      */*) _f="$ROOT/frontend/$_s" ;;
+      *) _f="$ROOT/frontend/tests/router/$_s" ;;
+    esac
+    if [ -f "$_f" ] && head -n 5 "$_f" | grep -qx '// e2e-kind: read'; then
       READ_SPECS="$READ_SPECS $_s"
     else
       REST_SPECS="$REST_SPECS $_s"
