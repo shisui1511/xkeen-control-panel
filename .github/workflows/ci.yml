@@ -300,3 +300,6 @@ jobs:
 
       - name: Check core marks
         run: node scripts/check-core-marks.js
+
+      - name: Check router spec kinds
+        run: node scripts/check-router-kinds.js
