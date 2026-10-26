@@ -1670,7 +1670,6 @@
   "subscr.expires_in": "Истекает через {days} дн.",
   "subscr.expires_soon": "Истекает скоро",
   "subscr.nodes_preview": "Просмотр узлов",
-  "subscr.nodes_preview_placeholder": "Список с метаданными и ping-тестами будет доступен в v0.15.0 после завершения интеграции бэкенда.",
   "subscr.active_nodes": "Активная нода",
   "subscr.updated_at": "Обновлено: {date}",
   "subscr.infinite_traffic": "Безлимитный",
