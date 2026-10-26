@@ -1,5 +1,6 @@
 # XKeen Control Panel
 
+[![CodeFactor](https://www.codefactor.io/repository/github/shisui1511/xkeen-control-panel/badge)](https://www.codefactor.io/repository/github/shisui1511/xkeen-control-panel)
 [![Build and Release](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/build.yml/badge.svg)](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/build.yml)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/shisui1511/xkeen-control-panel)](https://github.com/shisui1511/xkeen-control-panel/releases)
 [![GitHub license](https://img.shields.io/github/license/shisui1511/xkeen-control-panel)](https://github.com/shisui1511/xkeen-control-panel/blob/main/LICENSE)
