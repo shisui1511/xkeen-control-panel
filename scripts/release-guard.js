@@ -17,7 +17,8 @@
  *                              номером, на метки вех вида номера версии и на закрытие вехи без
  *                              пройденной сверки; штатно всегда код 0 (с deny и без вывода)
  *   close-gate                 гейт закрытия вехи: новейший тег в origin/main покрывает main и имеет
- *                              статус stand/arm64-full = success: 0 — можно, 1 — нельзя, 2 — сверка
+ *                              статус stand/arm64-full = success, ни один последний статус stand/*
+ *                              не failure и не error: 0 — можно, 1 — нельзя, 2 — сверка
  *                              не выполнена (сеть, срок RELEASE_GUARD_DEADLINE_MS, по умолчанию 20000)
  *   range --label <метка> [--planning <д>]
  *                              печатает строку `**Версии:** vA–vB` вехи
@@ -382,12 +383,20 @@ function findTail() {
   return null;
 }
 
-// Последний статус stand/arm64-full на коммите — success.
-function fullRunPassed(sha) {
+// Статусы стенда на коммите: { full, red } — full: последний stand/arm64-full — success;
+// red: контексты stand/*, чей последний статус failure или error (такой хвост автовыпуск в
+// stable не продвинет, как и verdict в auto_release.sh).
+function standState(sha) {
   const out = gh(['api', `repos/{owner}/{repo}/commits/${sha}/statuses?per_page=100`], 5000);
-  const list = JSON.parse(out).filter(s => s && s.context === 'stand/arm64-full');
+  const list = JSON.parse(out).filter(s => s && typeof s.context === 'string' && s.context.startsWith('stand/'));
   list.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-  return list.length > 0 && list[0].state === 'success';
+  const last = new Map();
+  for (const s of list) if (!last.has(s.context)) last.set(s.context, s.state);
+  const red = Array.from(last.entries())
+    .filter(([, st]) => st === 'failure' || st === 'error')
+    .map(([ctx]) => ctx)
+    .sort();
+  return { full: last.get('stand/arm64-full') === 'success', red };
 }
 
 // Результат: { code, lines, reason }; 0 — можно закрывать, 1 — нельзя, 2 — сверка не выполнена.
@@ -413,11 +422,20 @@ function closeGate() {
         ]
       };
     }
-    if (!fullRunPassed(tail.sha)) {
+    const stand = standState(tail.sha);
+    if (!stand.full) {
       return {
         code: 1,
         lines: [
           `close-gate: нет зелёного полного прогона на ${tail.tag}: make router-test SUITE=full RELEASE=${tail.tag}`
+        ]
+      };
+    }
+    if (stand.red.length) {
+      return {
+        code: 1,
+        lines: [
+          `close-gate: на ${tail.tag} красный статус стенда (${stand.red.join(', ')}): автовыпуск хвост в stable не продвинет, сначала разобрать`
         ]
       };
     }
