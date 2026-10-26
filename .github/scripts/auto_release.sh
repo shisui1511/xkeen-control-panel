@@ -15,9 +15,11 @@
 #   auto_release.sh report   только чтение GitHub и git: вердикты по каждому пре-релизу новее
 #                            последнего stable, итог promote и plan, markdown-сводка в stdout;
 #                            ничего не меняет (можно запускать на ПК до слияния)
+#   auto_release.sh finalize тела релизов за 14 суток: блок xcp-release в первой строке и строка о
+#                            регрессии у красного пре-релиза; с DRY_RUN=1 только печатает (ПК)
 #   auto_release.sh run      полный цикл в CI: heal, promote, затем plan для зелёного main;
 #                            ставит тег и запускает build.yml через workflow_dispatch
-#                            (тег, запушенный GITHUB_TOKEN, сам сборку не запускает)
+#                            (тег, запушенный GITHUB_TOKEN, сам сборку не запускает), затем finalize
 #
 # Пре-релиз идёт в stable, только когда выполнено всё сразу: релиз опубликован (не draft); stable
 # его базы ещё нет; стоп выключен; на коммите пре-релиза последний статус stand/arm64-smoke или
@@ -27,6 +29,13 @@
 # только предупреждение. Новая фаза выдержку прежнего пре-релиза не сбрасывает: кандидаты
 # перебираются по базам по возрастанию, сбрасывает только пре-релиз той же базы. Тег stable
 # ставится на коммит самого пре-релиза.
+#
+# Контракт для панелей (читает панель, Phase 145.3): первая строка тела каждого релиза за 14 суток —
+#   <!-- xcp-release: {"urgent":true|false,"hold":true|false} -->
+# JSON без пробелов, ключи в этом порядке. urgent постоянный: у тега в аннотации строка
+# "xcp-urgent: 1". hold динамический: включён стоп выпуска. Сроки автоустановки панель считает от
+# published_at релиза, в блок они не пишутся. У пре-релиза новее последнего stable с красным
+# статусом стенда после блока стоит строка о найденной регрессии (без подробностей стенда).
 #
 # Окружение:
 #   SOAK_HOURS   сколько часов пре-релиз X.Y.0 должен провисеть после публикации (по умолчанию 24)
@@ -58,6 +67,8 @@ WORTHY='^(feat|fix|perf|refactor|revert)(\([^)]*\))?!?:|^[a-z]+(\([^)]*\))?!:|^B
 STABLE_RE='^v[0-9]+\.[0-9]+\.[0-9]+$'
 PRE_RE="^v[0-9]+\\.[0-9]+\\.[0-9]+-${PRE_KIND}\\.[0-9]+\$"
 HEAL_DAYS=7
+HOLD_DAYS=14
+REGRESSION_LINE='> На стенде найдена регрессия, исправление выйдет следующим пре-релизом.'
 STOP_LABEL=release-stop
 ARM_SMOKE=stand/arm64-smoke
 ARM_FULL=stand/arm64-full
@@ -409,6 +420,99 @@ summary_md() {
   echo
   echo "- promote: ${PROMOTE_DECISION:-не принималось}"
   echo "- plan: ${PLAN_DECISION:-не принималось}"
+  echo "- Тела релизов: ${FINALIZE_NOTE:-не обновлялись}"
+}
+
+# Красный ли пре-релиз: база новее последнего stable и последний статус stand/arm64-smoke,
+# stand/arm64-full или stand/mipsle-install на его коммите — failure/error. Печатает 1 или 0;
+# ошибка чтения статусов — 0 с предупреждением в журнал.
+tag_is_red() {
+  local tag="$1" last sha st ctx state
+  [[ "$tag" =~ $PRE_RE ]] || {
+    echo 0
+    return
+  }
+  last=$(last_stable)
+  if [ -n "$last" ] && ! version_gt "$(base_of "$tag")" "$last"; then
+    echo 0
+    return
+  fi
+  if ! sha=$(git rev-list -n1 "$tag" 2>/dev/null); then
+    logerr "::warning::тег $tag не найден локально, статусы стенда не прочитаны"
+    echo 0
+    return
+  fi
+  if ! st=$(stand_state "$sha" 2>/dev/null); then
+    logerr "::warning::не удалось прочитать статусы стенда для $tag"
+    echo 0
+    return
+  fi
+  while read -r ctx state; do
+    case "$ctx" in
+      "$ARM_SMOKE" | "$ARM_FULL" | "$VIVA_INSTALL")
+        case "$state" in
+          failure | error)
+            echo 1
+            return
+            ;;
+        esac
+        ;;
+    esac
+  done <<<"$st"
+  echo 0
+}
+
+# Тела релизов за HOLD_DAYS суток: блок xcp-release (urgent, hold) в первой строке и, у красного
+# пре-релиза, строка о регрессии. Прежние строки блока и регрессии удаляются перед вставкой;
+# gh release edit только при отличии тела (идемпотентно). Ошибка правки одного релиза — предупреждение.
+finalize() {
+  local tag at urgent hold red body cleaned new tmp total=0 changed=0 since mark
+  since=$((NOW - HOLD_DAYS * 24 * 3600))
+  while read -r tag at; do
+    [ -n "$tag" ] || continue
+    [ "$at" -ge "$since" ] || continue
+    total=$((total + 1))
+    if git for-each-ref --format='%(contents)' "refs/tags/$tag" | grep -qxF 'xcp-urgent: 1'; then
+      urgent=true
+    else
+      urgent=false
+    fi
+    if [ -n "${STOP_REASON:-}" ]; then hold=true; else hold=false; fi
+    red=$(tag_is_red "$tag")
+    if ! body=$(gh release view "$tag" --json body --jq .body </dev/null); then
+      echo "::warning::тело $tag не прочитано"
+      continue
+    fi
+    body=$(printf '%s\n' "$body" | tr -d '\r')
+    cleaned=$(printf '%s\n' "$body" |
+      awk -v reg="$REGRESSION_LINE" 'index($0, "<!-- xcp-release:") == 1 || $0 == reg { next } { print }' |
+      sed '/./,$!d')
+    new="<!-- xcp-release: {\"urgent\":${urgent},\"hold\":${hold}} -->"
+    if [ "$red" = 1 ]; then
+      new="${new}"$'\n'"${REGRESSION_LINE}"
+    fi
+    new="${new}"$'\n\n'"${cleaned}"
+    # $(…) отбрасывает хвостовые переводы строк; хвостовые пробелы тоже не считаются отличием
+    new="${new%"${new##*[![:space:]]}"}"
+    body="${body%"${body##*[![:space:]]}"}"
+    [ "$new" != "$body" ] || continue
+    if [ "$red" = 1 ]; then mark=да; else mark=нет; fi
+    if [ "${DRY_RUN:-0}" = 1 ]; then
+      log "DRY_RUN: обновил бы тело $tag: urgent=$urgent hold=$hold регрессия=$mark"
+      changed=$((changed + 1))
+      continue
+    fi
+    tmp=$(mktemp)
+    printf '%s\n' "$new" >"$tmp"
+    if gh release edit "$tag" --notes-file "$tmp" </dev/null >/dev/null; then
+      log "обновлено тело $tag: urgent=$urgent hold=$hold регрессия=$mark"
+      changed=$((changed + 1))
+    else
+      echo "::warning::тело $tag не обновлено"
+    fi
+    rm -f "$tmp"
+  done <<<"${RELEASED_AT:-}"
+  FINALIZE_NOTE="обновлено $changed из $total (за ${HOLD_DAYS} суток)"
 }
 
 # Только чтение: вердикты, promote и plan без публикации (ПК, проверка до слияния)
@@ -593,6 +697,9 @@ run() {
   fi
   log "plan: $PLAN_DECISION"
 
+  # Релиз, опубликованный сборкой позже, получит блок в следующем прогоне
+  finalize
+
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     summary_md >>"$GITHUB_STEP_SUMMARY"
   fi
@@ -613,6 +720,11 @@ case "${1:-}" in
     heal
     ;;
   report) report ;;
+  finalize)
+    check_inputs
+    collect_state
+    finalize
+    ;;
   run)
     check_inputs
     run

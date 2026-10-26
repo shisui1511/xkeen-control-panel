@@ -1,0 +1,38 @@
+name: Регрессия в Предварительном
+description: Сломалось после обновления на пре-релиз (канал beta)
+title: "[Регрессия] "
+labels: ["на разборе"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Стоп выпуска ставит владелец после разбора: до этого пре-релиз продолжает свой путь к стабильному.
+        Данные роутера — без адресов и паролей.
+  - type: input
+    id: version
+    attributes:
+      label: Версия панели
+      placeholder: vX.Y.Z-rc.N
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги
+      description: Что нажать или сделать, чтобы это повторить.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидалось
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Получилось
+  - type: input
+    id: previous
+    attributes:
+      label: Последняя версия без проблемы
