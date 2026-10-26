@@ -15,8 +15,9 @@
 #   auto_release.sh report   только чтение GitHub и git: вердикты по каждому пре-релизу новее
 #                            последнего stable, итог promote и plan, markdown-сводка в stdout;
 #                            ничего не меняет (можно запускать на ПК до слияния)
-#   auto_release.sh finalize тела релизов за 14 суток: блок xcp-release в первой строке и строка о
-#                            регрессии у красного пре-релиза; с DRY_RUN=1 только печатает (ПК)
+#   auto_release.sh finalize тела релизов за 14 суток, последнего stable и новейших пре-релизов
+#                            живых баз: блок xcp-release в первой строке и строка о регрессии у
+#                            красного пре-релиза; с DRY_RUN=1 только печатает (ПК)
 #   auto_release.sh run      полный цикл в CI: heal, promote, затем plan для зелёного main;
 #                            ставит тег и запускает build.yml через workflow_dispatch
 #                            (тег, запушенный GITHUB_TOKEN, сам сборку не запускает), затем finalize
@@ -30,7 +31,8 @@
 # перебираются по базам по возрастанию, сбрасывает только пре-релиз той же базы. Тег stable
 # ставится на коммит самого пре-релиза.
 #
-# Контракт для панелей (читает панель, Phase 145.3): первая строка тела каждого релиза за 14 суток —
+# Контракт для панелей (читает панель, Phase 145.3): первая строка тела каждого релиза за 14 суток,
+# а также последнего stable и новейшего пре-релиза каждой живой базы при любом возрасте —
 #   <!-- xcp-release: {"urgent":true|false,"hold":true|false} -->
 # JSON без пробелов, ключи в этом порядке. urgent постоянный: у тега в аннотации строка
 # "xcp-urgent: 1". hold динамический: включён стоп выпуска. Сроки автоустановки панель считает от
@@ -476,15 +478,21 @@ tag_is_red() {
   echo 0
 }
 
-# Тела релизов за HOLD_DAYS суток: блок xcp-release (urgent, hold) в первой строке и, у красного
-# пре-релиза, строка о регрессии. Прежние строки блока и регрессии удаляются перед вставкой;
-# gh release edit только при отличии тела (идемпотентно). Ошибка правки одного релиза — предупреждение.
+# Тела релизов за HOLD_DAYS суток, а также последнего stable и новейшего пре-релиза каждой живой
+# базы при любом возрасте (стоп должен дойти и до старого stable): блок xcp-release (urgent, hold)
+# в первой строке и, у красного пре-релиза, строка о регрессии. Прежние строки блока и регрессии
+# удаляются перед вставкой; gh release edit только при отличии тела (идемпотентно). Ошибка правки
+# одного релиза — предупреждение.
 finalize() {
-  local tag at urgent hold red body cleaned new tmp total=0 changed=0 since mark
+  local tag at urgent hold red body cleaned new tmp total=0 changed=0 since mark always b
   since=$((NOW - HOLD_DAYS * 24 * 3600))
+  always=$(
+    last_stable
+    for b in $(live_bases); do latest_pre "$b"; done
+  )
   while read -r tag at; do
     [ -n "$tag" ] || continue
-    [ "$at" -ge "$since" ] || continue
+    [ "$at" -ge "$since" ] || grep -qxF -- "$tag" <<<"$always" || continue
     total=$((total + 1))
     if git for-each-ref --format='%(contents)' "refs/tags/$tag" | grep -qxF 'xcp-urgent: 1'; then
       urgent=true
@@ -526,7 +534,7 @@ finalize() {
     fi
     rm -f "$tmp"
   done <<<"${RELEASED_AT:-}"
-  FINALIZE_NOTE="обновлено $changed из $total (за ${HOLD_DAYS} суток)"
+  FINALIZE_NOTE="обновлено $changed из $total (за ${HOLD_DAYS} суток и последние релизы баз)"
 }
 
 # Только чтение: вердикты, promote и plan без публикации (ПК, проверка до слияния)
