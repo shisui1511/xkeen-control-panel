@@ -25,7 +25,8 @@
 # Пре-релиз идёт в stable, только когда выполнено всё сразу: релиз опубликован (не draft); stable
 # его базы ещё нет; стоп выключен; на коммите пре-релиза последний статус stand/arm64-smoke или
 # stand/arm64-full — success; ни один последний статус stand/arm64-smoke, stand/arm64-full,
-# stand/mipsle-install не failure и не error; у базы X.Y.0 истекла выдержка SOAK_HOURS от публикации
+# stand/mipsle-install не failure и не error (красный смоук снимает более поздний success
+# полного прогона, обратное не действует); у базы X.Y.0 истекла выдержка SOAK_HOURS от публикации
 # (promote_base её снимает), у базы X.Y.Z с Z>0 выдержки нет. Нет записи stand/mipsle-install —
 # только предупреждение. Новая фаза выдержку прежнего пре-релиза не сбрасывает: кандидаты
 # перебираются по базам по возрастанию, сбрасывает только пре-релиз той же базы. Тег stable
@@ -327,18 +328,50 @@ collect_state() {
   export RELEASED RELEASED_AT STOP_REASON STOP_UNKNOWN REPO_OWNER
 }
 
-# Последний статус каждого контекста stand/* на коммите: строки "<контекст> <состояние>".
+# Последний статус каждого контекста stand/* на коммите: строки "<контекст> <состояние> <время>".
 # Список статусов идёт от новых к старым, unique_by оставляет первый — последний по времени.
 # Комбинированный /status не используется: его краснит любой чужой контекст.
 stand_state() {
   [[ "$1" =~ ^[0-9a-f]{40}$ ]] || return 1
   gh api "repos/{owner}/{repo}/commits/$1/statuses?per_page=100" \
-    --jq '[.[] | select(.context | startswith("stand/"))] | unique_by(.context) | .[] | "\(.context) \(.state)"'
+    --jq '[.[] | select(.context | startswith("stand/"))] | unique_by(.context) | .[] | "\(.context) \(.state) \(.created_at)"'
+}
+
+# Красные контексты по строкам stand_state (аргумент), через запятую; пусто — красных нет.
+# Красный смоук снимает более поздний success полного прогона на том же коммите: полный прогон
+# включает смоук. Обратное не действует: зелёный смоук красный полный прогон не снимает.
+# Время ISO 8601 в UTC, сравнивается как строка.
+stand_red() {
+  local ctx state ts red="" smoke_state="" smoke_ts="" full_state="" full_ts=""
+  while read -r ctx state ts; do
+    case "$ctx" in
+      "$ARM_SMOKE")
+        smoke_state="$state"
+        smoke_ts="$ts"
+        ;;
+      "$ARM_FULL")
+        full_state="$state"
+        full_ts="$ts"
+        ;;
+      "$VIVA_INSTALL")
+        case "$state" in failure | error) red="${red:+$red, }$ctx" ;; esac
+        ;;
+    esac
+  done <<<"$1"
+  case "$smoke_state" in
+    failure | error)
+      if ! { [ "$full_state" = success ] && [[ "$full_ts" > "$smoke_ts" ]]; }; then
+        red="${red:+$red, }$ARM_SMOKE"
+      fi
+      ;;
+  esac
+  case "$full_state" in failure | error) red="${red:+$red, }$ARM_FULL" ;; esac
+  printf '%s' "$red"
 }
 
 # Вердикт по пре-релизу: "<ok|wait|red|stop|skip> <причина>[; предупреждение: …]"
 verdict() {
-  local tag="$1" base sha at st ctx state red="" smoke=0 viva=0 age need reason
+  local tag="$1" base sha at st ctx state ts red="" smoke=0 viva=0 age need reason
   base=$(base_of "$tag")
   if tag_exists "$base" || grep -qxF -- "$base" <<<"${RELEASED:-}"; then
     echo "skip stable $base уже выпущен"
@@ -358,18 +391,15 @@ verdict() {
     echo "wait не удалось прочитать статусы"
     return
   fi
-  while read -r ctx state; do
+  while read -r ctx state ts; do
     case "$ctx" in
       "$ARM_SMOKE" | "$ARM_FULL")
         [ "$state" != success ] || smoke=1
         ;;
       "$VIVA_INSTALL") viva=1 ;;
-      *) continue ;;
-    esac
-    case "$state" in
-      failure | error) red="${red:+$red, }$ctx" ;;
     esac
   done <<<"$st"
+  red=$(stand_red "$st")
   if [ -n "$red" ]; then
     echo "red на стенде красный: $red"
     return
@@ -462,7 +492,7 @@ summary_md() {
 # stand/arm64-full или stand/mipsle-install на его коммите — failure/error. Печатает 1 или 0;
 # ошибка чтения статусов — 0 с предупреждением в журнал.
 tag_is_red() {
-  local tag="$1" last sha st ctx state
+  local tag="$1" last sha st
   [[ "$tag" =~ $PRE_RE ]] || {
     echo 0
     return
@@ -482,19 +512,11 @@ tag_is_red() {
     echo 0
     return
   fi
-  while read -r ctx state; do
-    case "$ctx" in
-      "$ARM_SMOKE" | "$ARM_FULL" | "$VIVA_INSTALL")
-        case "$state" in
-          failure | error)
-            echo 1
-            return
-            ;;
-        esac
-        ;;
-    esac
-  done <<<"$st"
-  echo 0
+  if [ -n "$(stand_red "$st")" ]; then
+    echo 1
+  else
+    echo 0
+  fi
 }
 
 # Тела релизов за HOLD_DAYS суток, а также последнего stable и новейшего пре-релиза каждой живой

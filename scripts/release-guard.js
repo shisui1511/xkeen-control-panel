@@ -385,15 +385,25 @@ function findTail() {
 
 // Статусы стенда на коммите: { full, red } — full: последний stand/arm64-full — success;
 // red: контексты stand/*, чей последний статус failure или error (такой хвост автовыпуск в
-// stable не продвинет, как и verdict в auto_release.sh).
+// stable не продвинет, как и verdict в auto_release.sh). Красный смоук снимает более поздний
+// success полного прогона, обратное не действует (stand_red в auto_release.sh).
 function standState(sha) {
   const out = gh(['api', `repos/{owner}/{repo}/commits/${sha}/statuses?per_page=100`], 5000);
   const list = JSON.parse(out).filter(s => s && typeof s.context === 'string' && s.context.startsWith('stand/'));
   list.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
   const last = new Map();
-  for (const s of list) if (!last.has(s.context)) last.set(s.context, s.state);
+  const at = new Map();
+  for (const s of list) {
+    if (last.has(s.context)) continue;
+    last.set(s.context, s.state);
+    at.set(s.context, String(s.created_at || ''));
+  }
+  const isRed = st => st === 'failure' || st === 'error';
+  const smoke = 'stand/arm64-smoke';
+  const fullCtx = 'stand/arm64-full';
   const red = Array.from(last.entries())
-    .filter(([, st]) => st === 'failure' || st === 'error')
+    .filter(([ctx, st]) => isRed(st)
+      && !(ctx === smoke && last.get(fullCtx) === 'success' && at.get(fullCtx) > at.get(smoke)))
     .map(([ctx]) => ctx)
     .sort();
   return { full: last.get('stand/arm64-full') === 'success', red };
