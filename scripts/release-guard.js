@@ -888,7 +888,11 @@ async function collectNet() {
   }
   for (const it of issueList) {
     if (it && Number.isInteger(it.number) && !it.pull_request) {
-      lines.push(`Стоп выпуска: issue #${it.number} с меткой release-stop`);
+      // автор метки здесь не проверяется (автовыпуск засчитывает только метку от пользователя с
+      // правом записи), поэтому строка нейтральная
+      lines.push(
+        `Открыт issue #${it.number} с меткой release-stop: стоп, если метку поставил пользователь с правом записи (проверить, кто её поставил)`
+      );
       break;
     }
   }
