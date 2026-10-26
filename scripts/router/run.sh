@@ -1133,9 +1133,11 @@ cat "$RT_REPORT/summary.md"
 
 # Для каждой цели ставит статус stand/<arch>-<smoke|full> на коммите RELEASE и дописывает в
 # summary.md строку «Статус на GitHub: <контекст> <состояние>» (при отказе — «не отправлен
-# (<причина>)»). Статуса нет при незакоммиченных правках, сбое связи ПК↔стенд, отсутствии
-# результатов, а у full — когда коммит тега не предок HEAD. Прерванный прогон досюда не
-# доходит (выход по RT_INTR раньше). Код выхода прогона не меняется.
+# (<причина>)»). Статуса нет при незакоммиченных правках, сбое связи ПК↔стенд (в том числе когда
+# у красного прогона в конце нет связи с целью), отсутствии результатов, деплое, не дошедшем до
+# цели (сбой на ПК), сбое подготовки стенда (deploy.rc=2), а у full — когда коммит тега не
+# предок HEAD. Прерванный прогон досюда не доходит (выход по RT_INTR раньше). Код выхода
+# прогона не меняется.
 publish_release_status() {
   [ -n "${RELEASE:-}" ] || return 0
   case "$SUITE_NAME" in
@@ -1155,6 +1157,11 @@ publish_release_status() {
       _preason="результатов нет"
     elif awk -F'\t' '$1 == "FAIL" && $3 == "reachable" {f = 1} END {exit !f}' "$_pres"; then
       _preason="сбой связи ПК↔стенд"
+    elif [ ! -f "$RT_REPORT/$_pt/deploy.rc" ]; then
+      # deploy.sh вышел до установки на цель: нет ассета, сбой gh или sha256 на ПК
+      _preason="деплой не начат (сбой на ПК)"
+    elif [ "$(cat "$RT_REPORT/$_pt/deploy.rc")" = 2 ]; then
+      _preason="сбой подготовки стенда"
     elif [ "$SUITE_NAME" = full ]; then
       if ! git rev-parse -q --verify "refs/tags/$RELEASE^{commit}" >/dev/null 2>&1; then
         _preason="тег релиза не найден локально"
@@ -1165,6 +1172,12 @@ publish_release_status() {
     if [ -z "$_preason" ]; then
       _pf=$(awk -F'\t' '$1 == "FAIL" {n++} END {print n + 0}' "$_pres")
       _px=$(awk -F'\t' '$1 == "XPASS" {n++} END {print n + 0}' "$_pres")
+      # Красный прогон без связи в конце — вероятный обрыв посреди прогона, а не регрессия
+      if [ "$_pf" -gt 0 ] && ! rt_ssh "$_pt" true >/dev/null 2>&1; then
+        _preason="сбой связи ПК↔стенд"
+      fi
+    fi
+    if [ -z "$_preason" ]; then
       _pcore=-
       [ ! -s "$RT_REPORT/$_pt/core" ] || _pcore=$(head -n 1 "$RT_REPORT/$_pt/core")
       if [ "$SUITE_NAME" = smoke ]; then _pword="смоук"; else _pword="полный прогон"; fi
