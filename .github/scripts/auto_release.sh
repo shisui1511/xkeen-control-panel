@@ -9,8 +9,8 @@
 #                              "stable vX.Y.Z vX.Y.Z-rc.N" / "none <причина>";
 #                            вердикты кандидатов печатаются в stderr
 #   auto_release.sh heal     свежие (7 дней) теги релизов без опубликованного релиза:
-#                              "delete vX.Y.Z-rc.N" — пре-релиз вытеснен (stable базы или пре-релиз
-#                                                     той же базы с большим номером)
+#                              "delete vX.Y.Z-rc.N" — пре-релиз вытеснен (stable базы, более новый
+#                                                     stable или пре-релиз той же базы с большим номером)
 #                              "publish vX.Y.Z[-rc.N]" — актуальный тег, сборку повторить
 #   auto_release.sh report   только чтение GitHub и git: вердикты по каждому пре-релизу новее
 #                            последнего stable, итог promote и plan, markdown-сводка в stdout;
@@ -131,13 +131,18 @@ live_bases() {
     done
 }
 
-# Пре-релиз больше не нужен: есть stable его базы или пре-релиз той же базы с большим номером.
-# Пре-релиз более новой базы старый не вытесняет: старая база ещё может стать stable.
+# Пре-релиз больше не нужен: есть stable его базы, более новый stable или пре-релиз той же базы
+# с большим номером. Пре-релиз более новой базы старый не вытесняет: старая база ещё может стать
+# stable; более новый stable вытесняет — пре-релиз ниже текущего stable не публикуется.
 rc_superseded() {
-  local tag="$1" base n other
+  local tag="$1" base n other newest
   base=$(base_of "$tag")
   n=$(pre_n "$tag")
   tag_exists "$base" && return 0
+  newest=$({ git tag -l 'v*' | grep -E "$STABLE_RE" | sort -V | tail -1; } || true)
+  if [ -n "$newest" ] && ! version_gt "$base" "$newest"; then
+    return 0
+  fi
   for other in $(git tag -l "${base}-${PRE_KIND}.*" | grep -E "$PRE_RE" || true); do
     if [ "$(pre_n "$other")" -gt "$n" ]; then
       return 0
