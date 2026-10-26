@@ -2,9 +2,10 @@
 # Удаляет pre-release вместе с тегами.
 # Использование: prune_dev_releases.sh [VERSION]
 #   без аргумента — удалить все rolling dev-релизы (vX.Y.Z-dev), пре-релизы не трогаются;
-#   с VERSION     — при stable vX.Y.Z удаляются dev-релизы и пре-релизы (vX.Y.Z-rc.N) с
-#                   базой не выше X.Y.Z; пре-релизы более новых баз остаются — они могут
-#                   стать stable позже (выдержанный пре-релиз).
+#   с VERSION     — при stable vX.Y.Z удаляются dev-релизы и пре-релизы (vX.Y.Z-<суффикс>.N,
+#                   любой суффикс из строчных букв: rc, beta…) с базой не выше X.Y.Z;
+#                   пре-релизы более новых баз остаются — они могут стать stable позже
+#                   (выдержанный пре-релиз).
 set -euo pipefail
 
 limit="${1:-}"
@@ -15,7 +16,7 @@ tags=$(
   {
     git ls-remote --tags --refs origin | sed 's#.*refs/tags/##'
     gh release list --limit 100 --json tagName --jq '.[].tagName'
-  } | grep -E -- "^v[0-9]+\\.[0-9]+\\.[0-9]+-(dev${limit:+|rc\\.[0-9]+})\$" | sort -u || true
+  } | grep -E -- "^v[0-9]+\\.[0-9]+\\.[0-9]+-(dev${limit:+|[a-z]+\\.[0-9]+})\$" | sort -u || true
 )
 
 for tag in $tags; do
