@@ -35,7 +35,8 @@
 # а также последнего stable и новейшего пре-релиза каждой живой базы при любом возрасте —
 #   <!-- xcp-release: {"urgent":true|false,"hold":true|false} -->
 # JSON без пробелов, ключи в этом порядке. urgent постоянный: у тега в аннотации строка
-# "xcp-urgent: 1". hold динамический: включён стоп выпуска. Сроки автоустановки панель считает от
+# "xcp-urgent: 1". hold динамический: включён стоп выпуска (если стоп не удалось прочитать, тела
+# в этом прогоне не правятся, hold остаётся прежним). Сроки автоустановки панель считает от
 # published_at релиза, в блок они не пишутся. У пре-релиза новее последнего stable с красным
 # статусом стенда после блока стоит строка о найденной регрессии (без подробностей стенда).
 #
@@ -245,10 +246,12 @@ check_inputs() {
 compute_stop() {
   local val issues n login perm err
   STOP_REASON=""
+  STOP_UNKNOWN=0
 
   if [ -z "${RELEASE_STOP+x}" ]; then
     # Запуск на ПК: переменная окружения не задана, читаем переменную репозитория
     if ! val=$(gh variable list --json name,value --jq '.[] | select(.name == "RELEASE_STOP") | .value'); then
+      STOP_UNKNOWN=1
       STOP_REASON="не удалось прочитать переменную RELEASE_STOP"
       return
     fi
@@ -266,6 +269,7 @@ compute_stop() {
 
   if ! issues=$(gh api "repos/{owner}/{repo}/issues?state=open&labels=${STOP_LABEL}&per_page=20" \
     --jq '.[] | select(.pull_request | not) | .number'); then
+    STOP_UNKNOWN=1
     STOP_REASON="не удалось проверить стоп-метки"
     return
   fi
@@ -273,6 +277,7 @@ compute_stop() {
     [[ "$n" =~ ^[0-9]+$ ]] || continue
     if ! login=$(gh api --paginate "repos/{owner}/{repo}/issues/$n/events?per_page=100" \
       --jq ".[] | select(.event == \"labeled\" and .label.name == \"${STOP_LABEL}\") | .actor.login" | tail -1); then
+      STOP_UNKNOWN=1
       STOP_REASON="не удалось проверить стоп-метки"
       return
     fi
@@ -297,6 +302,7 @@ compute_stop() {
     elif ! grep -q 'HTTP 404' "$err"; then
       rm -f "$err"
       # 404 — не коллаборатор; любая другая ошибка (5xx, лимит, тайм-аут) — стоп (fail closed)
+      STOP_UNKNOWN=1
       STOP_REASON="не удалось проверить права на стоп-метку issue #$n"
       return
     else
@@ -318,7 +324,7 @@ collect_state() {
     REPO_OWNER=$(gh repo view --json owner --jq .owner.login)
   fi
   compute_stop
-  export RELEASED RELEASED_AT STOP_REASON REPO_OWNER
+  export RELEASED RELEASED_AT STOP_REASON STOP_UNKNOWN REPO_OWNER
 }
 
 # Последний статус каждого контекста stand/* на коммите: строки "<контекст> <состояние>".
@@ -498,6 +504,13 @@ tag_is_red() {
 # одного релиза — предупреждение.
 finalize() {
   local tag at urgent hold red body cleaned new tmp total=0 changed=0 since mark always b
+  # Стоп не прочитан (сбой gh): продвижение он держит, но в публичный контракт hold:true по
+  # непроверенному стопу не пишется — тела не трогаются до следующего прогона
+  if [ "${STOP_UNKNOWN:-0}" = 1 ]; then
+    FINALIZE_NOTE="пропущено: стоп не прочитан"
+    log "тела релизов не обновлялись: стоп не прочитан"
+    return
+  fi
   since=$((NOW - HOLD_DAYS * 24 * 3600))
   always=$(
     last_stable
