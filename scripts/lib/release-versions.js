@@ -11,6 +11,7 @@
  *     всех тегов `v*` (stable и пре-релизы, включая `-rc.N`).
  *   - Чужая версия — номер, рядом с которым (в пределах 24 символов на той же строке) стоит слово
  *     xray, mihomo, xkeen, ядр, ядер или kernel: это версия ядра или другой программы, а не панели.
+ *     Имя самой панели (xkeen-control-panel, «XKeen Control Panel») чужим словом не считается.
  *   - Исключение — строка `version-ok: <версия> <причина>` (причина не короче 3 символов; внутри
  *     HTML-комментария тоже засчитывается): снимает только названную версию (по ядру).
  */
@@ -18,6 +19,8 @@ const { execFileSync } = require('child_process');
 
 const TAG_REGEX = /^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
 const FOREIGN_WORDS = /(xray|mihomo|xkeen|ядр|ядер|kernel)/i;
+// Имя самой панели (xkeen-control-panel, XKeen Control Panel) чужим словом не считается
+const PANEL_NAME = /xkeen[\s_-]*control[\s_-]*panel/gi;
 const FOREIGN_WINDOW = 24;
 const EXEMPT_REGEX = /version-ok:[ \t]*v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?[ \t]+([^\n]*)/g;
 
@@ -92,8 +95,11 @@ function findPanelVersions(text, major) {
     const lineStart = text.lastIndexOf('\n', start - 1) + 1;
     let lineEnd = text.indexOf('\n', end);
     if (lineEnd < 0) lineEnd = text.length;
-    const left = text.slice(Math.max(lineStart, start - FOREIGN_WINDOW), start);
-    const right = text.slice(end, Math.min(lineEnd, end + FOREIGN_WINDOW));
+    // имя панели вырезается из всей строки до окна: обрезанное окном имя тоже не «чужое»
+    const lineText = text.slice(lineStart, lineEnd);
+    const masked = lineText.replace(PANEL_NAME, s => ' '.repeat(s.length));
+    const left = masked.slice(Math.max(0, start - lineStart - FOREIGN_WINDOW), start - lineStart);
+    const right = masked.slice(end - lineStart, Math.min(lineEnd, end + FOREIGN_WINDOW) - lineStart);
     if (FOREIGN_WORDS.test(left) || FOREIGN_WORDS.test(right)) continue;
     const parts = /(\d+)\.(\d+)\.(\d+)/.exec(m[0]);
     const core = { major: Number(parts[1]), minor: Number(parts[2]), patch: Number(parts[3]) };
