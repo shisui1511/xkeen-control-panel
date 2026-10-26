@@ -86,10 +86,15 @@ WORTHY = re.compile(
 
 
 def clean_title(title):
-    """Заголовок PR без префикса фазы, префикса Conventional Commits и хвоста «(фаза N)»."""
+    """Заголовок PR без префикса фазы, префикса Conventional Commits и служебных хвостов в скобках:
+    «(фаза N)», «(слой N)», «(слой 3, отложен из 145)» и т.п., сколько бы их ни было подряд."""
     title = re.sub(r"^(Phase|Фаза)\s+[\d.]+:\s*", "", title.strip())
     title = re.sub(r"^[a-z]+(\([^)]+\))?!?:\s*", "", title)
-    title = re.sub(r"\s*\((фаза|phase)\s*[\d.]+\)\s*$", "", title, flags=re.IGNORECASE)
+    tail = re.compile(r"\s*\((?:фаза|phase|слой|layer)\s*[\d.]+[^)]*\)\s*$", re.IGNORECASE)
+    prev = None
+    while prev != title:
+        prev = title
+        title = tail.sub("", title)
     return title.strip()
 
 
