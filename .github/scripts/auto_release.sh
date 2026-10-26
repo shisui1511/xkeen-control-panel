@@ -649,7 +649,10 @@ publish() {
           return
           ;;
         0) ;;
-        *) return ;;
+        *)
+          STABLE_NOT_TAGGED=1
+          return
+          ;;
       esac
     else
       git tag -a "$tag" -m "$tag" "$sha"
@@ -717,7 +720,11 @@ run() {
   log "promote: $PROMOTE_DECISION"
   read -r kind tag rc <<<"$PROMOTE_DECISION"
   if [ "$kind" = stable ]; then
+    STABLE_NOT_TAGGED=0
     publish "$tag" "$(git rev-list -n1 "$rc")"
+    if [ "$STABLE_NOT_TAGGED" = 1 ]; then
+      PROMOTE_DECISION="$PROMOTE_DECISION (тег не поставлен — нужен ручной шаг, см. ::error::)"
+    fi
   fi
 
   # Новый пре-релиз — только для зелёного main; стоп его не держит. Сводка пишется при любом исходе
