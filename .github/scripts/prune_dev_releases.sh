@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Удаляет pre-release вместе с тегами.
 # Использование: prune_dev_releases.sh [VERSION]
-#   без аргумента — удалить все rolling dev-релизы (vX.Y.Z-dev), RC не трогаются;
-#   с VERSION     — dev-релизы и release candidate (vX.Y.Z-rc.N), чья базовая версия
-#                   не выше VERSION (после выхода stable).
+#   без аргумента — удалить все rolling dev-релизы (vX.Y.Z-dev), пре-релизы не трогаются;
+#   с VERSION     — при stable vX.Y.Z удаляются dev-релизы и пре-релизы (vX.Y.Z-rc.N) с
+#                   базой не выше X.Y.Z; пре-релизы более новых баз остаются — они могут
+#                   стать stable позже (выдержанный пре-релиз).
 set -euo pipefail
 
 limit="${1:-}"
