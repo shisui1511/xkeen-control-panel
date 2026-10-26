@@ -817,7 +817,9 @@ function parseJson(r) {
 async function collectNet() {
   const [rel, run, stop, issues] = await Promise.all([
     ghAsync(['release', 'list', '--exclude-drafts', '--limit', '30', '--json', 'tagName,isPrerelease,publishedAt']),
-    ghAsync(['run', 'list', '--workflow', 'auto-release.yml', '--branch', 'main', '--limit', '1', '--json', 'conclusion,url']),
+    // несколько завершённых запусков: большинство запусков от status и issues пропущены if
+    ghAsync(['run', 'list', '--workflow', 'auto-release.yml', '--branch', 'main', '--status', 'completed',
+      '--limit', '20', '--json', 'conclusion,url']),
     ghAsync(['variable', 'get', 'RELEASE_STOP']),
     ghAsync(['api', 'repos/{owner}/{repo}/issues?state=open&labels=release-stop&per_page=5'])
   ]);
@@ -850,8 +852,10 @@ async function collectNet() {
     if (!seen) lines.push(`Пре-релиз ${tags[i]} ждёт смоука: make router-test SUITE=smoke RELEASE=${tags[i]}`);
   }
 
-  if (runs[0] && runs[0].conclusion === 'failure') {
-    lines.push(`Auto Release красный: ${String(runs[0].url || '')}`);
+  // последний запуск со значимым исходом: пропущенные и отменённые красный не перекрывают
+  const lastRun = runs.find(r => r && r.conclusion && r.conclusion !== 'skipped' && r.conclusion !== 'cancelled');
+  if (lastRun && lastRun.conclusion === 'failure') {
+    lines.push(`Auto Release красный: ${String(lastRun.url || '')}`);
   }
   const stopValue = stop.ok ? stop.out.trim() : '';
   if (stopValue && stopValue !== '0' && stopValue.toLowerCase() !== 'false') {
