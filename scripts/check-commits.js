@@ -1,4 +1,6 @@
+const path = require('path');
 const { execFileSync } = require('child_process');
+const { localTags, maxCore, formatCore, findUnreleased } = require('./lib/release-versions.js');
 
 function getCommitMessages(base, head) {
   try {
@@ -43,6 +45,18 @@ const conventionalRegex = /^(feat|fix|docs|style|refactor|perf|test|build|chore|
 const cyrillicRegex = /[а-яА-ЯёЁ]/;
 
 let hasErrors = false;
+
+// Теги читаются один раз; без тегов номера версий не проверяются (не ошибка).
+let tags = [];
+try {
+  tags = localTags(path.resolve(__dirname, '..'));
+} catch (err) {
+  console.error('⚠️ Не удалось прочитать теги:', err.message);
+}
+const lastCore = maxCore(tags);
+if (!lastCore) {
+  console.log('⚠️ Теги не найдены — проверка номеров версий пропущена');
+}
 
 commits.forEach((commitContent, idx) => {
   const lines = commitContent.split('\n');
@@ -93,6 +107,17 @@ commits.forEach((commitContent, idx) => {
         console.error('❌ Ошибка: Тело коммита должно содержать текст на русском языке.');
         hasErrors = true;
       }
+    }
+  }
+
+  // 4. Невышедшие номера версий панели в заголовке и теле (D-20, D-24). Исключение — строка version-ok.
+  if (lastCore) {
+    const text = lines.slice(1).join('\n');
+    for (const f of findUnreleased(text, tags)) {
+      console.error(
+        `❌ Ошибка: в сообщении коммита невышедший номер версии панели ${formatCore(f.core)} (последний тег — ${formatCore(lastCore)}). Уберите номер или добавьте строку version-ok: ${formatCore(f.core)} <причина>.`
+      );
+      hasErrors = true;
     }
   }
 });
