@@ -447,6 +447,9 @@ summary_md() {
   echo "- promote: ${PROMOTE_DECISION:-не принималось}"
   echo "- plan: ${PLAN_DECISION:-не принималось}"
   echo "- Тела релизов: ${FINALIZE_NOTE:-не обновлялись}"
+  if [ -n "${BUILD_GAVE_UP:-}" ]; then
+    echo "- Сборка сдалась после двух падений (нужен ручной разбор): $BUILD_GAVE_UP"
+  fi
 }
 
 # Красный ли пре-релиз: база новее последнего stable и последний статус stand/arm64-smoke,
@@ -624,7 +627,8 @@ push_stable_tag() {
 }
 
 # Ставит тег (если его нет) и запускает сборку. Идемпотентно: при опубликованном релизе
-# ничего не делает, при идущей сборке ждёт, после двух упавших сборок сдаётся.
+# ничего не делает, при идущей сборке ждёт, после двух упавших сборок сдаётся: тег попадает в
+# BUILD_GAVE_UP, а run доводит цикл до конца и выходит с ошибкой.
 publish() {
   local tag="$1" sha="$2" active failed code
   if gh release view "$tag" >/dev/null 2>&1; then
@@ -661,7 +665,8 @@ publish() {
     log "сборка $tag уже идёт"
   elif [ "$failed" -ge 2 ]; then
     echo "::error::сборка $tag упала $failed раза, нужен ручной разбор: gh run list --workflow build.yml --branch $tag"
-    exit 1
+    # Не выход из скрипта: остальные базы, plan и finalize идут дальше, run завершится с ошибкой
+    BUILD_GAVE_UP="${BUILD_GAVE_UP:+$BUILD_GAVE_UP, }$tag"
   else
     if [ "$failed" -ge 1 ]; then
       echo "::warning::сборка $tag упала, повторяю"
@@ -701,6 +706,7 @@ run() {
   fi
 
   local kind tag rc main_sha state=0
+  BUILD_GAVE_UP=""
   collect_state
   heal_tags
   log "стоп выпуска: ${STOP_REASON:-нет}"
@@ -739,6 +745,10 @@ run() {
 
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     summary_md >>"$GITHUB_STEP_SUMMARY"
+  fi
+  if [ -n "${BUILD_GAVE_UP:-}" ]; then
+    echo "::error::сборка сдалась после двух падений: $BUILD_GAVE_UP"
+    exit 1
   fi
 }
 
