@@ -1,32 +1,46 @@
 #!/usr/bin/env bash
-# Автоматический выпуск release candidate и стабильных релизов (workflow auto-release.yml).
+# Автоматический выпуск пре-релизов и стабильных релизов (workflow auto-release.yml).
 #
-#   auto_release.sh plan     что выпустить для HEAD (последний коммит main):
-#                              "stable vX.Y.Z"      — с прошлого релиза только fix/perf/refactor/revert
-#                              "rc vX.Y.Z-rc.N"     — есть feat или ломающие изменения
-#                              "none <причина>"     — выпускать нечего
+#   auto_release.sh plan     какой пре-релиз выпустить для HEAD (последний коммит main):
+#                              "rc vX.Y.Z-rc.N"  — новый пре-релиз (или уже существующий: ответ идемпотентен)
+#                              "none <причина>"  — выпускать нечего
+#                            stable plan не выпускает: патч тоже идёт через пре-релиз
 #   auto_release.sh promote  какой пре-релиз пора сделать стабильным:
 #                              "stable vX.Y.Z vX.Y.Z-rc.N" / "none <причина>";
 #                            вердикты кандидатов печатаются в stderr
 #   auto_release.sh heal     свежие (7 дней) теги релизов без опубликованного релиза:
-#                              "delete vX.Y.Z-rc.N" — RC вытеснен более новым тегом
+#                              "delete vX.Y.Z-rc.N" — пре-релиз вытеснен (stable базы или пре-релиз
+#                                                     той же базы с большим номером)
 #                              "publish vX.Y.Z[-rc.N]" — актуальный тег, сборку повторить
 #   auto_release.sh report   только чтение GitHub и git: вердикты по каждому пре-релизу новее
 #                            последнего stable, итог promote и plan, markdown-сводка в stdout;
-#                            ничего не меняет (можно запускать на ПК)
+#                            ничего не меняет (можно запускать на ПК до слияния)
 #   auto_release.sh run      полный цикл в CI: heal, promote, затем plan для зелёного main;
 #                            ставит тег и запускает build.yml через workflow_dispatch
-#                            (тег, запушенный GITHUB_TOKEN, сам сборку не запускает).
+#                            (тег, запушенный GITHUB_TOKEN, сам сборку не запускает)
+#
+# Пре-релиз идёт в stable, только когда выполнено всё сразу: релиз опубликован (не draft); stable
+# его базы ещё нет; стоп выключен; на коммите пре-релиза последний статус stand/arm64-smoke или
+# stand/arm64-full — success; ни один последний статус stand/arm64-smoke, stand/arm64-full,
+# stand/mipsle-install не failure и не error; у базы X.Y.0 истекла выдержка SOAK_HOURS от публикации
+# (promote_base её снимает), у базы X.Y.Z с Z>0 выдержки нет. Нет записи stand/mipsle-install —
+# только предупреждение. Новая фаза выдержку прежнего пре-релиза не сбрасывает: кандидаты
+# перебираются по базам по возрастанию, сбрасывает только пре-релиз той же базы. Тег stable
+# ставится на коммит самого пре-релиза.
 #
 # Окружение:
-#   SOAK_HOURS  сколько часов пре-релиз X.Y.0 должен провисеть после публикации (по умолчанию 24)
-#   PRE_KIND    суффикс пре-релиза (по умолчанию rc): теги vX.Y.Z-<PRE_KIND>.N
+#   SOAK_HOURS   сколько часов пре-релиз X.Y.0 должен провисеть после публикации (по умолчанию 24)
+#   PRE_KIND     суффикс пре-релиза (по умолчанию rc): теги vX.Y.Z-<PRE_KIND>.N
 #   PROMOTE_BASE версия vX.Y.Z из ручного запуска: снимает выдержку этой базы
+#   URGENT=1     срочное: действует только вместе с PROMOTE_BASE, смоук и красные записи не
+#                обходит; в аннотацию тега stable пишется строка "xcp-urgent: 1"
 #   RELEASE_STOP стоп выпуска: непустое значение, кроме 0 и false (переменная репозитория);
-#               на ПК, если переменная окружения не задана, читается из репозитория
-#   NOW         текущее время, unix
-#   DRY_RUN=1   run только печатает решения
-#   RUN_SHA     коммит, чей CI завершился (workflow_run); пусто — берётся main
+#                на ПК, если переменная окружения не задана, читается из репозитория
+#   RELEASE_TOKEN необязательный токен для тега stable на коммите, где .github/workflows
+#                отличается от main (токен Actions такой тег не поставит)
+#   DRY_RUN=1    run только печатает решения
+#   RUN_SHA      коммит, чей CI завершился (workflow_run); пусто — берётся main
+#   NOW          время решения, unix
 
 set -euo pipefail
 
@@ -105,19 +119,17 @@ live_bases() {
     done
 }
 
-# Пре-релиз больше не нужен: есть stable его базы, пре-релиз той же базы с большим номером
-# или любой тег более новой версии
+# Пре-релиз больше не нужен: есть stable его базы или пре-релиз той же базы с большим номером.
+# Пре-релиз более новой базы старый не вытесняет: старая база ещё может стать stable.
 rc_superseded() {
-  local tag="$1" base n other obase
+  local tag="$1" base n other
   base=$(base_of "$tag")
   n=$(pre_n "$tag")
   tag_exists "$base" && return 0
-  for other in $(git tag -l 'v*' | grep -E "$STABLE_RE|$PRE_RE" || true); do
-    obase=$(base_of "$other")
-    if [ "$obase" = "$base" ] && [ "$other" != "$base" ] && [ "$(pre_n "$other")" -gt "$n" ]; then
+  for other in $(git tag -l "${base}-${PRE_KIND}.*" | grep -E "$PRE_RE" || true); do
+    if [ "$(pre_n "$other")" -gt "$n" ]; then
       return 0
     fi
-    version_gt "${obase#v}" "${base#v}" && return 0
   done
   return 1
 }
@@ -136,8 +148,14 @@ heal() {
   done
 }
 
+# Что выпустить для HEAD. Stable не выпускается никогда: он выходит только из пре-релиза
+# (promote), патчи тоже идут через пре-релиз.
+#   нет пре-релизов новее последнего stable      → первый пре-релиз версии по scripts/version.sh --next
+#   после последнего пре-релиза базы B нет изменений → он же (идемпотентно)
+#   после него feat или ломающее изменение       → новая база: минор B + 1 (major + 1 для ломающего при major ≥ 1)
+#   после него только fix/perf/refactor/revert    → следующий номер пре-релиза базы B
 plan() {
-  local last range next rc n
+  local last range next B tip log n major minor
   last=$(last_stable)
   range="${last:+$last..}HEAD"
   if ! release_worthy "$range"; then
@@ -145,20 +163,33 @@ plan() {
     return
   fi
 
-  next=$(sh "$ROOT/scripts/version.sh" --next)
-  case "$next" in
-    *.0)
-      rc=$(latest_pre "$next")
-      if [ -n "$rc" ] && ! release_worthy "$rc..HEAD"; then
-        echo "rc $rc"
-        return
-      fi
-      n=0
-      [ -z "$rc" ] || n=$(pre_n "$rc")
-      echo "rc $next-${PRE_KIND}.$((n + 1))"
-      ;;
-    *) echo "stable $next" ;;
-  esac
+  B=$(live_bases | tail -1)
+  if [ -z "$B" ]; then
+    next=$(sh "$ROOT/scripts/version.sh" --next)
+    echo "rc $next-${PRE_KIND}.1"
+    return
+  fi
+
+  tip=$(latest_pre "$B")
+  if ! release_worthy "$tip..HEAD"; then
+    echo "rc $tip"
+    return
+  fi
+  log=$(git log --format='%s%n%b' "$tip..HEAD")
+  if grep -qE '^feat(\([^)]*\))?!?:|^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE' <<<"$log"; then
+    major=${B#v}
+    major=${major%%.*}
+    minor=${B#v*.}
+    minor=${minor%%.*}
+    if [ "$major" -ge 1 ] && grep -qE '^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE' <<<"$log"; then
+      echo "rc v$((major + 1)).0.0-${PRE_KIND}.1"
+    else
+      echo "rc v$major.$((minor + 1)).0-${PRE_KIND}.1"
+    fi
+    return
+  fi
+  n=$(pre_n "$tip")
+  echo "rc $B-${PRE_KIND}.$((n + 1))"
 }
 
 # ── Состояние GitHub ──
@@ -189,8 +220,8 @@ check_inputs() {
   export PROMOTE_BASE URGENT URGENT_BASE
 }
 
-# Стоп выпуска (D-14): переменная RELEASE_STOP или открытый issue с меткой release-stop,
-# последнюю установку которой сделал пользователь с правом записи. Пусто в STOP_REASON — стопа нет.
+# Стоп выпуска: переменная RELEASE_STOP или открытый issue с меткой release-stop, последнюю
+# установку которой сделал пользователь с правом записи. Пусто в STOP_REASON — стопа нет.
 # Ошибка чтения — стоп (fail closed).
 compute_stop() {
   local val issues n login perm
@@ -272,7 +303,7 @@ stand_state() {
 
 # Вердикт по пре-релизу: "<ok|wait|red|stop|skip> <причина>[; предупреждение: …]"
 verdict() {
-  local tag="$1" base sha at st line ctx state red="" smoke=0 viva=0 age need reason
+  local tag="$1" base sha at st ctx state red="" smoke=0 viva=0 age need reason
   base=$(base_of "$tag")
   if tag_exists "$base" || grep -qxF -- "$base" <<<"${RELEASED:-}"; then
     echo "skip stable $base уже выпущен"
@@ -415,41 +446,46 @@ ci_state() {
   return 0
 }
 
-# Версии, для которых выдержка RC отменена: закрытая GitHub-веха vX.Y.Z или ручной
-# запуск с promote_base. Отмена действует, только если RC этой версии уже опубликован
-# как релиз (не draft); так закрытая веха не выпустит stable из недособранного RC.
-waived_bases() {
-  local candidates title rc
-  candidates=$(gh api "repos/{owner}/{repo}/milestones?state=closed&per_page=100" --jq '.[].title' 2>/dev/null || true)
-  candidates="$candidates"$'\n'"${PROMOTE_BASE:-}"
-  for title in $(grep -E "$STABLE_RE" <<<"$candidates" | sort -u || true); do
-    rc=$(latest_pre "$title")
-    [ -n "$rc" ] || continue
-    if [ "$(gh release view "$rc" --json isDraft --jq .isDraft 2>/dev/null || true)" = false ]; then
-      echo "$title"
-    fi
-  done
-}
-
-# Коммит для тега stable. Обычно это коммит RC (те же байты, что выдержал RC). GitHub не даёт
-# токену Actions создать тег на коммите, чьи workflow-файлы отличаются от main (нужен scope
-# workflows), поэтому при изменении .github/workflows после RC тег ставится на HEAD: после RC
-# там только chore/docs/test/ci (promote проверил, что feat/fix после него нет), бинарник
-# они не меняют.
-stable_sha() {
-  local sha
-  sha=$(git rev-list -n1 "$1")
-  if git diff --quiet "$sha" HEAD -- .github/workflows; then
-    echo "$sha"
-  else
-    git rev-parse HEAD
+# Ставит тег stable $1 на коммит пре-релиза $2 (никогда на другой коммит).
+# Токен Actions не ставит тег на коммит, чьи .github/workflows отличаются от main (нужен scope
+# workflows). Тогда тег уходит запасным токеном RELEASE_TOKEN; без него — ошибка с готовой
+# командой владельцу. Токен нигде не печатается, трассировка (set -x) не включается.
+# Коды: 0 — запушен токеном Actions; 10 — запушен RELEASE_TOKEN (сборку запустит сам push
+# тега); 1 — поставить нельзя.
+push_stable_tag() {
+  local tag="$1" sha="$2"
+  local -a msgs=(-m "$tag")
+  if [ "${URGENT:-0}" = 1 ] && [ "$tag" = "${PROMOTE_BASE:-}" ]; then
+    msgs+=(-m 'xcp-urgent: 1')
   fi
+  git tag -a "${msgs[@]}" "$tag" "$sha"
+  if git diff --quiet "$sha" HEAD -- .github/workflows; then
+    if git push origin "refs/tags/$tag"; then
+      return 0
+    fi
+    git tag -d "$tag" >/dev/null
+    echo "::error::не удалось запушить тег $tag"
+    return 1
+  fi
+  if [ -n "${RELEASE_TOKEN:-}" ]; then
+    # Заголовок авторизации, оставленный actions/checkout, сбрасывается: иначе уйдёт токен Actions
+    if git -c 'http.https://github.com/.extraheader=' push \
+      "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/$tag"; then
+      return 10
+    fi
+    git tag -d "$tag" >/dev/null
+    echo "::error::не удалось запушить тег $tag запасным токеном"
+    return 1
+  fi
+  git tag -d "$tag" >/dev/null
+  echo "::error::workflows изменились после ${sha:0:8}; токен Actions тег не поставит. Владельцу: git tag -a $tag -m $tag $sha && git push origin $tag"
+  return 1
 }
 
 # Ставит тег (если его нет) и запускает сборку. Идемпотентно: при опубликованном релизе
 # ничего не делает, при идущей сборке ждёт, после двух упавших сборок сдаётся.
 publish() {
-  local tag="$1" sha="$2" active failed
+  local tag="$1" sha="$2" active failed code
   if gh release view "$tag" >/dev/null 2>&1; then
     log "$tag уже опубликован"
     return
@@ -459,8 +495,21 @@ publish() {
     return
   fi
   if ! tag_exists "$tag"; then
-    git tag -a "$tag" -m "$tag" "$sha"
-    git push origin "refs/tags/$tag"
+    if [[ "$tag" =~ $STABLE_RE ]]; then
+      code=0
+      push_stable_tag "$tag" "$sha" || code=$?
+      case "$code" in
+        10)
+          log "тег $tag поставлен на ${sha:0:8} запасным токеном, сборку запустит push тега"
+          return
+          ;;
+        0) ;;
+        *) return ;;
+      esac
+    else
+      git tag -a "$tag" -m "$tag" "$sha"
+      git push origin "refs/tags/$tag"
+    fi
     log "тег $tag поставлен на ${sha:0:8}"
   fi
   active=$(gh run list --workflow build.yml --branch "$tag" --json status \
@@ -481,7 +530,7 @@ publish() {
   fi
 }
 
-# Упавшая сборка не должна теряться: вытесненный RC без релиза удаляется с
+# Упавшая сборка не должна теряться: вытесненный пре-релиз без релиза удаляется с
 # предупреждением в сводке прогона, актуальный тег пересобирается через publish.
 heal_tags() {
   local action tag
@@ -510,47 +559,43 @@ run() {
     git config user.email "github-actions@github.com"
   fi
 
-  local decision kind tag rc main_sha state
+  local kind tag rc main_sha state=0
   collect_state
   heal_tags
+  log "стоп выпуска: ${STOP_REASON:-нет}"
 
-  # «Нечего продвигать» — штатный ответ почти каждого запуска; в журнал он идёт
-  # только вместе с итоговым решением, а не в каждом из промежуточных прогонов
-  SOAK_WAIVED=$(waived_bases | tr '\n' ' ')
-  export SOAK_WAIVED
-  [ -z "${SOAK_WAIVED// /}" ] || log "выдержка RC отменена для: $SOAK_WAIVED"
-  decision=$(promote)
-  read -r kind tag rc <<<"$decision"
+  # Продвижение пре-релиза в stable не зависит от состояния CI main: оно решается статусами
+  # стенда на коммите самого пре-релиза
+  PROMOTE_DECISION=$(promote)
+  log "promote: $PROMOTE_DECISION"
+  read -r kind tag rc <<<"$PROMOTE_DECISION"
   if [ "$kind" = stable ]; then
-    log "promote: $decision"
-    publish "$tag" "$(stable_sha "$rc")"
+    publish "$tag" "$(git rev-list -n1 "$rc")"
   fi
 
+  # Новый пре-релиз — только для зелёного main; стоп его не держит. Сводка пишется при любом исходе
   main_sha=$(git rev-parse HEAD)
   if [ -n "${RUN_SHA:-}" ] && [ "$RUN_SHA" != "$main_sha" ]; then
-    log "CI завершился для ${RUN_SHA:0:8}, но main уже на ${main_sha:0:8} — решит прогон нового коммита"
-    return
+    PLAN_DECISION="не принималось (CI завершился для ${RUN_SHA:0:8}, но main уже на ${main_sha:0:8} — решит прогон нового коммита)"
+  else
+    ci_state "$main_sha" || state=$?
+    case "$state" in
+      1) PLAN_DECISION="не принималось (CI для ${main_sha:0:8} красный)" ;;
+      2) PLAN_DECISION="не принималось (ждём остальные прогоны CI для ${main_sha:0:8}: решение примет последний из них)" ;;
+      *)
+        PLAN_DECISION=$(plan)
+        read -r kind tag _ <<<"$PLAN_DECISION"
+        if [ "$kind" = rc ]; then
+          publish "$tag" "$(git rev-list -n1 "$tag" 2>/dev/null || echo "$main_sha")"
+        fi
+        ;;
+    esac
   fi
-  state=0
-  ci_state "$main_sha" || state=$?
-  case "$state" in
-    1)
-      log "CI для ${main_sha:0:8} красный, релиз не выпускается"
-      return
-      ;;
-    2)
-      log "ждём остальные прогоны CI для ${main_sha:0:8}: решение примет последний из них"
-      return
-      ;;
-  esac
-  [ "$kind" = stable ] || log "promote: ${decision#none }"
+  log "plan: $PLAN_DECISION"
 
-  decision=$(plan)
-  log "plan: $decision"
-  read -r kind tag _ <<<"$decision"
-  case "$kind" in
-    stable | rc) publish "$tag" "$(git rev-list -n1 "$tag" 2>/dev/null || echo "$main_sha")" ;;
-  esac
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    summary_md >>"$GITHUB_STEP_SUMMARY"
+  fi
 }
 
 CAND_FILE=$(mktemp)
@@ -567,14 +612,13 @@ case "${1:-}" in
     [ -n "${RELEASED+x}" ] || collect_state
     heal
     ;;
-  stable-sha) stable_sha "${2:?нужен тег RC}" ;;
   report) report ;;
   run)
     check_inputs
     run
     ;;
   *)
-    sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
+    awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
     exit 2
     ;;
 esac
