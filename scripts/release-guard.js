@@ -439,9 +439,16 @@ function cmdCloseGate() {
 // Вызовы команд GSD (одно определение для pre-hook, post-hook и обёртки плана 08)
 // ---------------------------------------------------------------------------------------------
 
-// Вызов начинается в начале строки или после ; & | ( ; кавычки и heredoc не разбираются.
+// Вызов начинается в начале строки, после ; & | ( { ` ! $( , после ключевого слова оболочки
+// (if then do elif else while until) или после `bash|sh|zsh|dash … -c` с кавычкой; перед именем
+// допускаются time/env/command/exec/nohup/sudo и присваивания VAR=…. Имя — gsd_run, gsd-sdk,
+// …gsd-tools[.cjs] или node с любым скриптом. Кавычки и heredoc иначе не разбираются: ложный
+// отказ гейта дешевле пропуска. Тот же шаблон — в scripts/local/hook-release.sh (is_closing).
 const GSD_CALL_SRC =
-  '(?:^|[;&|(])\\s*(?:gsd_run|gsd-sdk|gsd-tools|node\\s+\\S*(?:gsd-tools|GSD_TOOLS)\\S*)\\s+(?:query\\s+)?(milestone[. ]complete|state[. ]milestone-switch|phases[. ]clear)(?=\\s|$)';
+  '(?:^|[;&|({`!]|\\$\\(|\\b(?:if|then|do|elif|else|while|until)\\s|\\b(?:bash|sh|zsh|dash)\\s+(?:-[A-Za-z]+\\s+)*-[A-Za-z]*c\\s+["\']?)' +
+  '\\s*(?:(?:time|env|command|exec|nohup|sudo)\\s+|[A-Za-z_]\\w*=\\S*\\s+)*' +
+  '(?:gsd_run|gsd-sdk|\\S*gsd-tools(?:\\.cjs)?|node\\s+\\S+)\\s+(?:query\\s+)?' +
+  '(milestone[. ]complete|state[. ]milestone-switch|phases[. ]clear)(?=[\\s\'"`;)&|]|$)';
 
 // Вызовы: { sub: 'milestone.complete'|'state.milestone-switch'|'phases.clear', rest, line };
 // rest — строка от подкоманды. Упоминание слов в тексте (grep/printf/echo, JSON) вызовом не считается.
