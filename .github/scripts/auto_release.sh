@@ -243,7 +243,7 @@ check_inputs() {
 # установку которой сделал пользователь с правом записи. Пусто в STOP_REASON — стопа нет.
 # Ошибка чтения — стоп (fail closed).
 compute_stop() {
-  local val issues n login perm
+  local val issues n login perm err
   STOP_REASON=""
 
   if [ -z "${RELEASE_STOP+x}" ]; then
@@ -280,7 +280,9 @@ compute_stop() {
       log "метка ${STOP_LABEL} на issue #$n: не удалось определить, кто её поставил — не засчитана"
       continue
     fi
-    if perm=$(gh api "repos/{owner}/{repo}/collaborators/$login/permission" --jq .permission 2>/dev/null); then
+    err=$(mktemp)
+    if perm=$(gh api "repos/{owner}/{repo}/collaborators/$login/permission" --jq .permission 2>"$err"); then
+      rm -f "$err"
       case "$perm" in
         admin | maintain | write)
           STOP_REASON="issue #$n (метка от $login)"
@@ -288,9 +290,17 @@ compute_stop() {
           ;;
       esac
     elif [ "$login" = "$REPO_OWNER" ]; then
+      rm -f "$err"
       # Эндпоинт прав недоступен токену: владельцу репозитория верим без проверки
       STOP_REASON="issue #$n (метка от $login)"
       return
+    elif ! grep -q 'HTTP 404' "$err"; then
+      rm -f "$err"
+      # 404 — не коллаборатор; любая другая ошибка (5xx, лимит, тайм-аут) — стоп (fail closed)
+      STOP_REASON="не удалось проверить права на стоп-метку issue #$n"
+      return
+    else
+      rm -f "$err"
     fi
     log "метка ${STOP_LABEL} на issue #$n поставлена пользователем без права записи — не засчитана"
   done
