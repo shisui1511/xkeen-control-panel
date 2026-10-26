@@ -17,6 +17,11 @@
 # получает init-скрипт той же версии и тем же путём, что и установка у пользователя.
 # Бинарник заливается во временный файл и подменяется через mv после остановки
 # процесса — без «Text file busy».
+#
+# Статус: одиночная установка релиза (--release без родительского run.sh) на цели mipsle
+# публикует статус stand/mipsle-install на коммите тега (release-status.sh): success — xcp
+# запущен и «xcp -v» совпал, failure — нет; при сбое связи (код цели 3) статуса нет.
+# Установка из run.sh статус установки не ставит: там статус смоука публикует run.sh.
 
 set -eu
 
@@ -75,6 +80,9 @@ if [ "$TARGET" != all ]; then
 fi
 rt_load_targets
 rt_lock
+# Одиночный запуск (отчёт не задан родителем): статус установки релиза публикует сам deploy.sh.
+STANDALONE=0
+[ -n "${RT_REPORT:-}" ] || STANDALONE=1
 [ -n "${RT_REPORT:-}" ] || rt_report_init
 
 # --- что ставим -------------------------------------------------------------
@@ -293,4 +301,31 @@ for p in $PIDS; do
     OVERALL=1
   fi
 done
+
+# Одиночная установка релиза на mipsle оставляет статус stand/mipsle-install на коммите тега.
+# Сбой связи (код цели 3) статуса не даёт; сбой публикации код выхода не меняет.
+if [ "$STANDALONE" = 1 ] && [ "$RELEASE" = 1 ]; then
+  for t in $RT_TARGETS; do
+    [ "$(rt_get "$t" ARCH)" = mipsle ] || continue
+    drc=1
+    [ ! -f "$RT_REPORT/$t/deploy.rc" ] || drc=$(cat "$RT_REPORT/$t/deploy.rc")
+    case "$drc" in
+      0)
+        st_state=success
+        st_desc="установка mipsle: xcp запущен, версия совпала"
+        ;;
+      1)
+        st_state=failure
+        st_desc="установка mipsle: xcp не запустился или версия не совпала"
+        ;;
+      *)
+        echo "deploy[$t]: статус установки не отправлен: сбой связи"
+        continue
+        ;;
+    esac
+    if ! sh "$SCRIPT_DIR/release-status.sh" "$RELEASE_TAG" stand/mipsle-install "$st_state" "$st_desc"; then
+      echo "deploy[$t]: предупреждение: статус установки не отправлен (ошибка отправки)" >&2
+    fi
+  done
+fi
 exit "$OVERALL"

@@ -15,6 +15,7 @@
 #                ядрами; неразмеченный тест с разным исходом в ветвях даёт строку
 #                FAIL core-mark:<проверка> «нужна метка ядра» и раздел «Нужна метка ядра» в
 #                summary.md (D-05б).
+#   full         то же, что запуск без SUITE: полный прогон (синоним для статуса релиза).
 #   smoke        деплой и смоук (только чтение, без снимка).
 #   changed      быстрый набор для каждой задачи (D-25): select-changed.mjs по diff от
 #                origin/main и незакоммиченным правкам выбирает Go-пакеты и роутерные спеки.
@@ -52,7 +53,15 @@
 #
 # Окружение:
 #   ROUTERS=<id,id>      выбор целей (по умолчанию все из конфига)
-#   RELEASE=<тег>        ставить артефакт GitHub Release вместо сборки ветки
+#   RELEASE=<тег>        ставить артефакт GitHub Release вместо сборки ветки. У наборов smoke и
+#                        full после прогона для каждой цели публикуется статус коммита тега
+#                        stand/<arch>-<smoke|full> (release-status.sh): success при нуле FAIL и
+#                        XPASS цели, иначе failure. Статуса нет при незакоммиченных правках, сбое
+#                        связи ПК↔стенд, прерванном прогоне, а у full — когда коммит тега не
+#                        предок HEAD. Итог — строка «Статус на GitHub» в summary.md; код выхода
+#                        прогона от публикации не зависит. Сбой посреди прогона даёт красный
+#                        статус; повторный прогон перекрывает его (побеждает последний статус
+#                        контекста)
 #   SPEC=<файл>          спека набора session (путь от корня рабочей копии или абсолютный)
 #   RT_HOLD_MINUTES=<N>  после прогона держать блокировку N минут для ручной
 #                        проверки; снять раньше: touch <git-common-dir>/router-test.release
@@ -90,13 +99,15 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 SUITE=${1:-}
 case "$SUITE" in
-  smoke | changed | reboot | session | '') ;;
+  smoke | changed | reboot | session | full | '') ;;
   *)
-    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, reboot, session и полный (без SUITE)" >&2
+    echo "router-test: неизвестный набор '${SUITE}'. Поддерживаются: smoke, changed, reboot, session и full (полный, можно без SUITE)" >&2
     echo "router-test: пример: make router-test SUITE=smoke" >&2
     exit 2
     ;;
 esac
+# full — полный прогон: дальше он идёт как запуск без SUITE, имя набора в отчёте остаётся full.
+[ "$SUITE" != full ] || SUITE=''
 SUITE_NAME=${SUITE:-full}
 
 # Ветви матрицы ядер: только xray и mihomo, без повторов. Явно заданный RT_CORES (даже
@@ -1118,6 +1129,68 @@ done
 echo
 cat "$RT_REPORT/summary.md"
 
+# --- статус стенда на коммите тега релиза (D-10, D-13) --------------------------------
+
+# Для каждой цели ставит статус stand/<arch>-<smoke|full> на коммите RELEASE и дописывает в
+# summary.md строку «Статус на GitHub: <контекст> <состояние>» (при отказе — «не отправлен
+# (<причина>)»). Статуса нет при незакоммиченных правках, сбое связи ПК↔стенд, отсутствии
+# результатов, а у full — когда коммит тега не предок HEAD. Прерванный прогон досюда не
+# доходит (выход по RT_INTR раньше). Код выхода прогона не меняется.
+publish_release_status() {
+  [ -n "${RELEASE:-}" ] || return 0
+  case "$SUITE_NAME" in
+    smoke | full) ;;
+    *) return 0 ;;
+  esac
+  for _pt in $RT_TARGETS; do
+    _parch=$(rt_get "$_pt" ARCH)
+    _pctx="stand/${_parch}-${SUITE_NAME}"
+    _preason=""
+    _pres="$RT_REPORT/$_pt/results.tsv"
+    if [ "$DIRTY" = true ]; then
+      _preason="незакоммиченные правки"
+    elif [ -f "$RT_REPORT/$_pt/deploy.rc" ] && [ "$(cat "$RT_REPORT/$_pt/deploy.rc")" = 3 ]; then
+      _preason="сбой связи ПК↔стенд"
+    elif [ ! -f "$_pres" ]; then
+      _preason="результатов нет"
+    elif awk -F'\t' '$1 == "FAIL" && $3 == "reachable" {f = 1} END {exit !f}' "$_pres"; then
+      _preason="сбой связи ПК↔стенд"
+    elif [ "$SUITE_NAME" = full ]; then
+      if ! git rev-parse -q --verify "refs/tags/$RELEASE^{commit}" >/dev/null 2>&1; then
+        _preason="тег релиза не найден локально"
+      elif ! git merge-base --is-ancestor "$RELEASE" HEAD 2>/dev/null; then
+        _preason="тесты старше релиза"
+      fi
+    fi
+    if [ -z "$_preason" ]; then
+      _pf=$(awk -F'\t' '$1 == "FAIL" {n++} END {print n + 0}' "$_pres")
+      _px=$(awk -F'\t' '$1 == "XPASS" {n++} END {print n + 0}' "$_pres")
+      _pcore=-
+      [ ! -s "$RT_REPORT/$_pt/core" ] || _pcore=$(head -n 1 "$RT_REPORT/$_pt/core")
+      if [ "$SUITE_NAME" = smoke ]; then _pword="смоук"; else _pword="полный прогон"; fi
+      if [ "$_pf" -eq 0 ] && [ "$_px" -eq 0 ]; then
+        _pstate=success
+        _pverdict="зелёный"
+      else
+        _pstate=failure
+        _pverdict="красный"
+      fi
+      _pdesc="$_pword $_parch: $_pverdict, ядро $_pcore, новых падений $((_pf + _px))"
+      _prc=0
+      sh "$SCRIPT_DIR/release-status.sh" "$RELEASE" "$_pctx" "$_pstate" "$_pdesc" || _prc=$?
+      if [ "$_prc" -eq 0 ]; then
+        _pline="- Статус на GitHub: $_pctx $_pstate"
+      else
+        _pline="- Статус на GitHub: не отправлен (ошибка отправки)"
+      fi
+    else
+      _pline="- Статус на GitHub: не отправлен ($_preason)"
+    fi
+    echo "$_pline" >>"$RT_REPORT/summary.md"
+    echo "router-test: ${_pline#- }"
+  done
+}
+
 # --- удержание блокировки для ручной проверки ---------------------------------------
 
 # Прерванный прогон блокировку не удерживает: RT_HOLD_MINUTES — для ручной проверки после
@@ -1126,6 +1199,8 @@ if [ "$RT_INTR" = 1 ]; then
   echo "router-test: прерван (код 130), итог — $RT_REPORT/summary.md" >&2
   exit 130
 fi
+
+publish_release_status
 
 hold_lock
 
