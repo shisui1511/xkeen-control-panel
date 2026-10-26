@@ -1670,7 +1670,6 @@
   "subscr.expires_in": "Expires in {days} d.",
   "subscr.expires_soon": "Expires soon",
   "subscr.nodes_preview": "Nodes Preview",
-  "subscr.nodes_preview_placeholder": "Node list with metadata and health checks will be available in v0.15.0 after backend integration.",
   "subscr.active_nodes": "Active node",
   "subscr.updated_at": "Updated: {date}",
   "subscr.infinite_traffic": "Unlimited",
