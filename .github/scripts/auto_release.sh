@@ -591,7 +591,12 @@ push_stable_tag() {
     return 1
   fi
   git tag -d "$tag" >/dev/null
-  echo "::error::workflows изменились после ${sha:0:8}; токен Actions тег не поставит. Владельцу: git tag -a $tag -m $tag $sha && git push origin $tag"
+  # Подсказка из тех же сообщений, что и у тега выше: пометка «срочное» не теряется
+  local hint="git tag -a -m $tag"
+  if [ "${#msgs[@]}" -gt 2 ]; then
+    hint="$hint -m 'xcp-urgent: 1'"
+  fi
+  echo "::error::workflows изменились после ${sha:0:8}; токен Actions тег не поставит. Владельцу: $hint $tag $sha && git push origin $tag"
   return 1
 }
 
