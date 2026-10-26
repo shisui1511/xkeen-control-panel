@@ -1,21 +1,29 @@
 name: Auto Release
 
 # Выпуск без участия человека (.github/scripts/auto_release.sh):
-#   feat / ломающие изменения → release candidate vX.Y.0-rc.N в канале beta;
-#   RC без замены SOAK_HOURS (vars.RC_SOAK_HOURS, по умолчанию 24) → stable из его коммита;
-#   только fix/perf/refactor/revert → stable patch сразу;
-#   закрытая GitHub-веха vX.Y.Z (её закрывает хук после milestone.complete) или ручной
-#   запуск с promote_base → выдержка RC этой версии отменяется, stable выходит сразу;
+#   feat / ломающие изменения → пре-релиз новой базы vX.Y.0-rc.1; fix/perf/refactor/revert
+#     (в том числе патч) → пре-релиз vX.Y.Z-rc.N: stable сразу не выходит никогда;
+#   пре-релиз → stable только после выдержки (vars.RC_SOAK_HOURS, по умолчанию 24 ч от публикации;
+#     у патча выдержки нет) и зелёного смоука стенда на коммите тега (статусы stand/* публикует
+#     make router-test); красная запись стенда держит пре-релиз; тег stable ставится на коммит
+#     самого пре-релиза, новая фаза выдержку прежнего пре-релиза не сбрасывает;
+#   стоп — переменная репозитория RELEASE_STOP или открытый issue с меткой release-stop от
+#     владельца (пользователя с правом записи): держит любое продвижение в stable, новые
+#     пре-релизы выходят;
+#   promote_base снимает выдержку этой базы; urgent — только вместе с promote_base, смоук и
+#     красные записи не обходит, stable получает пометку «срочное»;
 #   chore/docs/test/ci → ничего.
-# Решение принимается, когда все push-прогоны коммита main зелёные: запускается по
-# завершении каждого из них, последний видит полную картину. Cron добирает выдержку RC.
+# Решение принимается, когда все push-прогоны коммита main зелёные (workflow_run), по статусам
+# стенда (status), по стоп-метке (issues) и по cron. dry_run с ветки исполняет код ветки на
+# состоянии main: код берётся из коммита запуска, теги и коммиты — из main.
 on:
   workflow_run:
     workflows: ["Build and Release", "CodeQL"]
     types: [completed]
     branches: [main]
-  milestone:
-    types: [closed]
+  status:
+  issues:
+    types: [labeled, unlabeled, closed, reopened]
   schedule:
     - cron: "17 */3 * * *"
   workflow_dispatch:
@@ -25,9 +33,13 @@ on:
         type: boolean
         default: true
       promote_base:
-        description: "Версия vX.Y.Z, RC которой продвинуть в stable без выдержки (необязательно)"
+        description: "Версия vX.Y.Z, пре-релиз которой продвинуть в stable без выдержки (необязательно)"
         type: string
         default: ""
+      urgent:
+        description: "Срочное: вместе с promote_base снимает выдержку, смоук обязателен"
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -39,17 +51,31 @@ concurrency:
 permissions:
   contents: write
   actions: write
+  statuses: read
+  issues: read
 
 jobs:
   release:
     name: Decide and release
     runs-on: ubuntu-latest
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'push'
+    if: >-
+      (github.event_name != 'workflow_run' || github.event.workflow_run.event == 'push') &&
+      (github.event_name != 'status' || startsWith(github.event.context, 'stand/')) &&
+      (github.event_name != 'issues' || github.event.label.name == 'release-stop' || contains(github.event.issue.labels.*.name, 'release-stop'))
     steps:
+      # Состояние: теги, коммиты main, push тегов
       - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
+
+      # Код автовыпуска: ветка запуска при workflow_dispatch, иначе последний коммит main
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: _wf
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Release
         env:
@@ -58,4 +84,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run == true && '1' || '0' }}
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           PROMOTE_BASE: ${{ inputs.promote_base }}
-        run: bash .github/scripts/auto_release.sh run
+          URGENT: ${{ inputs.urgent == true && '1' || '0' }}
+          RELEASE_STOP: ${{ vars.RELEASE_STOP }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: bash _wf/.github/scripts/auto_release.sh run
