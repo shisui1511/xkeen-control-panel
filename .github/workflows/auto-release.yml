@@ -15,7 +15,8 @@ name: Auto Release
 #   chore/docs/test/ci → ничего.
 # Решение принимается, когда все push-прогоны коммита main зелёные (workflow_run), по статусам
 # стенда (status), по стоп-метке (issues) и по cron. dry_run с ветки исполняет код ветки на
-# состоянии main: код берётся из коммита запуска, теги и коммиты — из main.
+# состоянии main: код берётся из коммита запуска, теги и коммиты — из main. Ручной запуск не с
+# main всегда идёт как dry_run, даже со снятой галочкой.
 on:
   workflow_run:
     workflows: ["Build and Release", "CodeQL"]
@@ -82,7 +83,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOAK_HOURS: ${{ vars.RC_SOAK_HOURS || '24' }}
-          DRY_RUN: ${{ inputs.dry_run == true && '1' || '0' }}
+          # Ручной запуск не с main — всегда dry_run: код ветки не ставит теги и не правит релизы
+          DRY_RUN: ${{ (inputs.dry_run == true || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')) && '1' || '0' }}
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           PROMOTE_BASE: ${{ inputs.promote_base }}
           URGENT: ${{ inputs.urgent == true && '1' || '0' }}
