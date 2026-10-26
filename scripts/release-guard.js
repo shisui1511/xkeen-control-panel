@@ -23,7 +23,13 @@
  *                              печатает строку `**Версии:** vA–vB` вехи
  *   post-hook [--planning <д>] событие PostToolUse: после закрытия вехи вписывает диапазон версий в
  *                              MILESTONES.md и запускает выпуск хвоста (HOOK_DRY_RUN=1 — без запуска);
- *                              после gh pr create|edit перепроверяет заголовок и тело PR
+ *                              после gh pr create|edit перепроверяет заголовок и тело PR, а после
+ *                              Skill gsd-progress/gsd-next добавляет сводку выпуска
+ *   status --event <SessionStart|UserPromptSubmit|PostToolUse> [--plain] [--planning <д>]
+ *                              сводка выпуска только по делу (пре-релиз ждёт смоука, красный Auto
+ *                              Release, стоп выпуска, невышедший номер в STATE/ROADMAP); нет сети —
+ *                              одна строка «сверка выпуска не выполнена»; общий срок 7 с; UserPromptSubmit
+ *                              отвечает только на /gsd-progress и /gsd-next; --plain — строки без JSON
  *
  * Невышедший номер — ядро строго больше наибольшего среди всех тегов `v*` (см. lib/release-versions.js);
  * при находке по локальным тегам номер перепроверяется по `git ls-remote --tags origin`, чтобы
@@ -33,7 +39,7 @@
  */
 'use strict';
 
-const { execFileSync } = require('child_process');
+const { execFileSync, execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const rv = require('./lib/release-versions.js');
@@ -760,6 +766,171 @@ function prContext(command) {
   );
 }
 
+// ---------------------------------------------------------------------------------------------
+// Сводка выпуска: SessionStart, /gsd-progress, /gsd-next (D-18, D-19, D-35)
+// ---------------------------------------------------------------------------------------------
+
+const STATUS_TOTAL_MS = 7000;
+const STATUS_CALL_MS = 6000;
+const STATUS_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PostToolUse'];
+const PROGRESS_PROMPT_RE = /^\s*\/gsd[-:](progress|next)\b/;
+const PROGRESS_SKILL_RE = /^gsd[-:](progress|next)$/;
+const children = new Set();
+
+// Асинхронный gh с тайм-аутом; ошибка — { ok: false }.
+function ghAsync(args) {
+  return new Promise(resolve => {
+    const child = execFile(
+      'gh',
+      args,
+      { cwd: root(), encoding: 'utf8', timeout: STATUS_CALL_MS, maxBuffer: 8 * 1024 * 1024, env: execOpts(0).env },
+      (err, stdout) => {
+        children.delete(child);
+        resolve(err ? { ok: false, out: '' } : { ok: true, out: stdout });
+      }
+    );
+    children.add(child);
+    if (child.stdin) child.stdin.end();
+  });
+}
+
+function killChildren() {
+  for (const c of children) {
+    try {
+      c.kill();
+    } catch {
+      // уже завершён
+    }
+  }
+  children.clear();
+}
+
+function parseJson(r) {
+  try {
+    return JSON.parse(r.out);
+  } catch {
+    return null;
+  }
+}
+
+// Сетевые строки сводки или null, если GitHub недоступен или ответ не разобран.
+async function collectNet() {
+  const [rel, run, stop, issues] = await Promise.all([
+    ghAsync(['release', 'list', '--exclude-drafts', '--limit', '30', '--json', 'tagName,isPrerelease,publishedAt']),
+    ghAsync(['run', 'list', '--workflow', 'auto-release.yml', '--branch', 'main', '--limit', '1', '--json', 'conclusion,url']),
+    ghAsync(['variable', 'get', 'RELEASE_STOP']),
+    ghAsync(['api', 'repos/{owner}/{repo}/issues?state=open&labels=release-stop&per_page=5'])
+  ]);
+  const releases = rel.ok ? parseJson(rel) : null;
+  const runs = run.ok ? parseJson(run) : null;
+  const issueList = issues.ok ? parseJson(issues) : null;
+  if (!Array.isArray(releases) || !Array.isArray(runs) || !Array.isArray(issueList)) return null;
+
+  const lines = [];
+  const names = releases.map(r => r.tagName).filter(n => TAG_NAME_RE.test(n));
+  const stableNames = releases.filter(r => !r.isPrerelease).map(r => r.tagName).filter(n => TAG_NAME_RE.test(n));
+  const lastStable = latestTag(stableNames);
+  const base = lastStable ? rv.parseTag(lastStable) : null;
+  // Новейший пре-релиз каждой базы, которой ещё нет в stable.
+  const newest = new Map();
+  for (const n of names) {
+    const p = rv.parseTag(n);
+    if (!p.pre || (base && rv.coreCmp(p, base) <= 0)) continue;
+    const key = rv.formatCore(p);
+    if (!newest.has(key) || tagCmp(n, newest.get(key)) > 0) newest.set(key, n);
+  }
+  const tags = Array.from(newest.values()).sort(tagCmp).slice(-3);
+  const statuses = await Promise.all(
+    tags.map(t => ghAsync(['api', `repos/{owner}/{repo}/commits/${t}/statuses?per_page=100`]))
+  );
+  for (let i = 0; i < tags.length; i++) {
+    const list = statuses[i].ok ? parseJson(statuses[i]) : null;
+    if (!Array.isArray(list)) return null;
+    const seen = list.some(s => s && (s.context === 'stand/arm64-smoke' || s.context === 'stand/arm64-full'));
+    if (!seen) lines.push(`Пре-релиз ${tags[i]} ждёт смоука: make router-test SUITE=smoke RELEASE=${tags[i]}`);
+  }
+
+  if (runs[0] && runs[0].conclusion === 'failure') {
+    lines.push(`Auto Release красный: ${String(runs[0].url || '')}`);
+  }
+  const stopValue = stop.ok ? stop.out.trim() : '';
+  if (stopValue && stopValue !== '0' && stopValue.toLowerCase() !== 'false') {
+    lines.push('Стоп выпуска включён: переменная RELEASE_STOP');
+  }
+  for (const it of issueList) {
+    if (it && Number.isInteger(it.number) && !it.pull_request) {
+      lines.push(`Стоп выпуска: issue #${it.number} с меткой release-stop`);
+      break;
+    }
+  }
+  return lines;
+}
+
+// Строки сводки: только по делу. Общий срок STATUS_TOTAL_MS на все вызовы gh и git.
+async function collectStatus(planning) {
+  deadlineAt = T0 + STATUS_TOTAL_MS;
+  const netP = collectNet().catch(() => null);
+  const lines = [];
+  // сверка STATE/ROADMAP идёт, пока gh отвечает, и работает без сети
+  let planLine = '';
+  try {
+    const found = planningFindings(planning, false);
+    if (found.length) planLine = `В STATE/ROADMAP невышедший номер: ${found.join(', ')}`;
+  } catch {
+    // нет git или тегов — строки не будет
+  }
+  let timer;
+  const left = Math.max(0, deadlineAt - Date.now());
+  const net = await Promise.race([
+    netP,
+    new Promise(resolve => {
+      timer = setTimeout(() => resolve(null), left);
+    })
+  ]);
+  clearTimeout(timer);
+  killChildren();
+  if (net === null) lines.push('Сверка выпуска не выполнена (нет сети или GitHub API)');
+  else lines.push(...net);
+  if (planLine) lines.push(planLine);
+  return lines;
+}
+
+function statusText(lines, progress) {
+  return `${progress ? 'Добавьте в итог строкой: ' : ''}Сверка выпуска: ${lines.join('\n')}`;
+}
+
+async function cmdStatus(argv) {
+  const event = flag(argv, '--event');
+  if (!STATUS_EVENTS.includes(event)) {
+    process.stderr.write('status: нужен --event SessionStart|UserPromptSubmit|PostToolUse\n');
+    return 2;
+  }
+  const plain = argv.includes('--plain');
+  try {
+    let progress = event !== 'SessionStart';
+    if (!plain) {
+      let ev = {};
+      const raw = readStdin();
+      if (raw.trim()) {
+        try {
+          ev = JSON.parse(raw) || {};
+        } catch {
+          ev = {};
+        }
+      }
+      if (event === 'UserPromptSubmit' && !PROGRESS_PROMPT_RE.test(String(ev.prompt || ''))) return 0;
+    }
+    if (plain) progress = false;
+    const lines = await collectStatus(flag(argv, '--planning') || defaultPlanning());
+    if (!lines.length) return 0;
+    if (plain) process.stdout.write(`${lines.join('\n')}\n`);
+    else emitContext(event, statusText(lines, progress));
+  } catch {
+    // сводка — подсказка: сбой не мешает работе
+  }
+  return 0;
+}
+
 async function postHook(argv) {
   let ev;
   try {
@@ -784,6 +955,13 @@ async function postHook(argv) {
         if (text) contexts.push(text);
       } catch {
         // PR не прочитан — без вывода
+      }
+    }
+    if (ev.tool_name === 'Skill') {
+      const skill = String((ev.tool_input && ev.tool_input.skill) || '');
+      if (PROGRESS_SKILL_RE.test(skill)) {
+        const lines = await collectStatus(planning);
+        if (lines.length) contexts.push(statusText(lines, true));
       }
     }
   } catch {
@@ -812,9 +990,11 @@ async function main() {
       return cmdRange(argv);
     case 'post-hook':
       return postHook(argv);
+    case 'status':
+      return cmdStatus(argv);
     default:
       process.stderr.write(
-        'Usage: node scripts/release-guard.js <scan|planning-check|pre-hook|close-gate|range|post-hook> [аргументы]\n'
+        'Usage: node scripts/release-guard.js <scan|planning-check|pre-hook|close-gate|range|post-hook|status> [аргументы]\n'
       );
       return 2;
   }
