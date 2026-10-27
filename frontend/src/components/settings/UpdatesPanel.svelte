@@ -139,7 +139,11 @@
   );
 
   function kindBadge(kind: ReleaseKind): string {
-    return kind === 'stable' ? 'badge-success' : kind === 'rc' ? 'badge-primary' : 'badge-warning';
+    return kind === 'stable'
+      ? 'badge-success'
+      : kind === 'beta'
+        ? 'badge-primary'
+        : 'badge-warning';
   }
 
   function formatDate(value: string | number | undefined): string {
@@ -373,13 +377,13 @@
       <span class="field-row-val version-val">
         <span class="mono">{version}</span>
         {#if version && version !== '...'}
-          <span class="badge {kindBadge(currentKind)}"
+          <span class="badge {kindBadge(currentKind)}" data-testid="update-kind-current"
             >{$t(`settings.update_kind_${currentKind}`)}</span
           >
         {/if}
       </span>
     </div>
-    <div class="field-row channel-row">
+    <div class="field-row channel-row" data-testid="update-channel-row">
       <div>
         <span class="field-row-name">{$t('settings.update_channel')}</span>
         <div class="field-row-desc">{$t(`settings.channel_${channel}_desc`)}</div>
