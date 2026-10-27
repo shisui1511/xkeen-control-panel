@@ -12,7 +12,7 @@
     dataTestid = '',
     onclose,
     children
-  } = $props<{
+  }: {
     isOpen: boolean;
     title: string;
     maxWidth?: string;
@@ -23,7 +23,7 @@
     dataTestid?: string;
     onclose: () => void;
     children?: Snippet;
-  }>();
+  } = $props();
 
   const MODAL_SELECTOR = '[role="dialog"][aria-modal="true"]';
 

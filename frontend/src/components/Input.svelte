@@ -9,7 +9,7 @@
     error = '',
     maxlength,
     oninput
-  } = $props<{
+  }: {
     id: string;
     type?: 'text' | 'password' | 'number' | 'email';
     label: string;
@@ -19,7 +19,7 @@
     error?: string;
     maxlength?: number;
     oninput?: (event: Event & { currentTarget: HTMLInputElement }) => void;
-  }>();
+  } = $props();
 </script>
 
 <!-- All styling lives in global.css under .form-group / .form-label / .input -->

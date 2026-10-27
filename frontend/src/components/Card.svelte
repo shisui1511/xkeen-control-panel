@@ -6,12 +6,12 @@
     title = '',
     actions,
     children
-  } = $props<{
+  }: {
     variant?: 'default' | 'flat';
     title?: string;
     actions?: Snippet;
     children?: Snippet;
-  }>();
+  } = $props();
 </script>
 
 <div class="card card-{variant}">

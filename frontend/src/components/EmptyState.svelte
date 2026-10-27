@@ -10,7 +10,7 @@
     ctaLoading = false,
     plain = false,
     oncta = undefined
-  } = $props<{
+  }: {
     title: string;
     description: string;
     icon?: Component<any>;
@@ -18,7 +18,7 @@
     ctaLoading?: boolean;
     plain?: boolean;
     oncta?: () => void;
-  }>();
+  } = $props();
 </script>
 
 <div class="empty-state" class:empty-state--plain={plain} role="status" aria-label={title}>

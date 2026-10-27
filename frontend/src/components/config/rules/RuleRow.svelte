@@ -27,7 +27,7 @@
     onleave,
     ondropon,
     onputdown
-  } = $props<{
+  }: {
     rule: RuleView;
     count: number;
     groups: ReadonlyArray<{ id: string; name: string }>;
@@ -41,7 +41,7 @@
     onleave?: (rule: RuleView) => void;
     ondropon?: (rule: RuleView) => void;
     onputdown?: () => void;
-  }>();
+  } = $props();
 
   // Значений в чипе условия показано до трёх, остальное — чипом «+{n}»
   const VALUES_SHOWN = 3;

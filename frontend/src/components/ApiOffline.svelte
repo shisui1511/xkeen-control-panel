@@ -7,11 +7,11 @@
     endpoint = '127.0.0.1:9090',
     lastSeenSeconds = 0,
     onRetry = () => {}
-  } = $props<{
+  }: {
     endpoint?: string;
     lastSeenSeconds?: number;
     onRetry?: () => void;
-  }>();
+  } = $props();
 
   // Format last-seen into a human-readable string
   function formatLastSeen(secs: number): string {

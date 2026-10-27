@@ -21,14 +21,14 @@
     anchorEl = null,
     onClose,
     onSwitchTab
-  } = $props<{
+  }: {
     isOpen: boolean;
     activeKernel?: string;
     isXkeenRunning?: boolean;
     anchorEl?: HTMLElement | null;
     onClose: () => void;
     onSwitchTab: (tab: string) => void;
-  }>();
+  } = $props();
 
   // Запуск службы недоступен без XKeen и без ядер. Пока capabilities не
   // загружены (null), кнопка не блокируется: это не «нет ядер».

@@ -22,11 +22,15 @@
   const EXCLUDE_MIN_ROWS = 3;
   const EXCLUDE_MAX_ROWS = 8;
 
-  let { open, source, onclose } = $props<{
+  let {
+    open,
+    source,
+    onclose
+  }: {
     open: boolean;
     source: SourceView;
     onclose: () => void;
-  }>();
+  } = $props();
 
   const uid = $props.id();
 

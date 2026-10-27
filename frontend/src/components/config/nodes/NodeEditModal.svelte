@@ -21,11 +21,15 @@
   // (D-34), хранится лишь в состоянии модали и сбрасывается при закрытии.
   const DEBOUNCE_MS = 600;
 
-  let { open, entryId, onclose } = $props<{
+  let {
+    open,
+    entryId,
+    onclose
+  }: {
     open: boolean;
     entryId: string;
     onclose: () => void;
-  }>();
+  } = $props();
 
   const uid = $props.id();
 

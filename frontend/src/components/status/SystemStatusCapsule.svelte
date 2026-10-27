@@ -14,13 +14,13 @@
     activeKernel = '',
     isXkeenRunning = true,
     onSwitchTab
-  } = $props<{
+  }: {
     variant?: 'sidebar' | 'rail' | 'mobile' | 'desktop';
     systemStats?: any;
     activeKernel?: string;
     isXkeenRunning?: boolean;
     onSwitchTab: (tab: string) => void;
-  }>();
+  } = $props();
 
   let isMenuOpen = $state(false);
   let triggerEl = $state<HTMLElement | null>(null);

@@ -1,8 +1,11 @@
 <script lang="ts">
-  let { size = 14, color = 'currentColor' } = $props<{
+  let {
+    size = 14,
+    color = 'currentColor'
+  }: {
     size?: number;
     color?: string;
-  }>();
+  } = $props();
 </script>
 
 <svg

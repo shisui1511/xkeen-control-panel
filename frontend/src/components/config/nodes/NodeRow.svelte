@@ -5,11 +5,15 @@
   import type { NodeItem } from '../../../lib/nodesView';
 
   // onedit и ondelete передаются только строкам «Моих узлов»: у узлов подписки действий нет
-  let { item, onedit, ondelete } = $props<{
+  let {
+    item,
+    onedit,
+    ondelete
+  }: {
     item: NodeItem;
     onedit?: (entryId: string) => void;
     ondelete?: (item: NodeItem) => void;
-  }>();
+  } = $props();
 
   const node = $derived(item.node);
   const reason = $derived(item.reason ? verdictReason(item.reason, $t) : '');

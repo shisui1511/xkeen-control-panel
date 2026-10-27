@@ -41,13 +41,19 @@
   import SourceSettingsModal from './SourceSettingsModal.svelte';
   import SourceDiagnosticsModal from './SourceDiagnosticsModal.svelte';
 
-  let { source, kernel, installed, expanded, ontoggle } = $props<{
+  let {
+    source,
+    kernel,
+    installed,
+    expanded,
+    ontoggle
+  }: {
     source: SourceView;
     kernel: KernelName;
     installed: KernelFlags;
     expanded: boolean;
     ontoggle: () => void;
-  }>();
+  } = $props();
 
   const uid = $props.id();
   const KERNELS: { id: KernelName; name: string }[] = [

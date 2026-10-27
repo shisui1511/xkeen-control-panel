@@ -20,12 +20,12 @@
     loading,
     error,
     mode = 'add'
-  } = $props<{
+  }: {
     preview: PreviewView | null;
     loading: boolean;
     error: SourceErrorPayload | null;
     mode?: 'add' | 'single';
-  }>();
+  } = $props();
 
   const uid = $props.id();
   const MAX_ERROR_ROWS = 20;

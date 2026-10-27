@@ -18,14 +18,21 @@
   // Диагностика ответа провайдера по каждому установленному ядру (D-07). Заголовки, тело и
   // отчёт приходят с сервера уже замаскированными (D-33, D-34): модаль показывает их как есть,
   // а «Скопировать» копирует ровно показанный текст.
-  let { open, name, sourceId, installed, initialKernel, onclose } = $props<{
+  let {
+    open,
+    name,
+    sourceId,
+    installed,
+    initialKernel,
+    onclose
+  }: {
     open: boolean;
     name: string;
     sourceId: string;
     installed: KernelFlags;
     initialKernel: KernelName;
     onclose: () => void;
-  }>();
+  } = $props();
 
   type Tab = 'report' | 'headers' | 'raw';
 

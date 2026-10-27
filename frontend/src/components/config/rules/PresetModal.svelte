@@ -32,12 +32,12 @@
     open,
     mode = 'preset',
     onclose
-  } = $props<{
+  }: {
     open: boolean;
     /** preset — кнопка «Пресет»; take — взятие маршрутизации; intercept — взятие из «Применить». */
     mode?: 'preset' | 'take' | 'intercept';
     onclose: () => void;
-  }>();
+  } = $props();
 
   const uid = $props.id();
 

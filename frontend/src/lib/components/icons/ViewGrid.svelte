@@ -3,11 +3,11 @@
     size = 14,
     color = 'currentColor',
     class: className = ''
-  } = $props<{
+  }: {
     size?: number;
     color?: string;
     class?: string;
-  }>();
+  } = $props();
 </script>
 
 <svg

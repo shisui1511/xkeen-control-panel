@@ -5,10 +5,13 @@
   import { isServiceRestarting } from '../../lib/serviceGrace';
   import Icon from '../../lib/components/Icon.svelte';
 
-  let { activeKernel = '', onRestart } = $props<{
+  let {
+    activeKernel = '',
+    onRestart
+  }: {
     activeKernel?: string;
     onRestart?: () => void;
-  }>();
+  } = $props();
 
   let isRestarting = $state(false);
 

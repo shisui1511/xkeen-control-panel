@@ -27,11 +27,11 @@
     isOpen = false,
     availableFiles = [],
     onclose = () => {}
-  } = $props<{
+  }: {
     isOpen?: boolean;
     availableFiles?: DATFile[];
     onclose?: () => void;
-  }>();
+  } = $props();
 
   let query = $state('');
   let filterType: 'all' | 'domain' | 'ip' = $state('all');

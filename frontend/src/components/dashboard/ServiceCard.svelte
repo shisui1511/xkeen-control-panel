@@ -17,7 +17,7 @@
     onStart,
     onStop,
     onMigrate
-  } = $props<{
+  }: {
     name: string;
     serviceId: string;
     status: string;
@@ -33,7 +33,7 @@
     onStart?: () => Promise<void> | void;
     onStop?: () => Promise<void> | void;
     onMigrate?: () => void;
-  }>();
+  } = $props();
 
   let isRestarting = $state(false);
   let isStarting = $state(false);

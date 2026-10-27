@@ -18,7 +18,7 @@
   // Плашка владельца маршрутизации на вкладках «Группы» и «Правила» (D-01…D-07): пока
   // управляет XKeen — предупреждение с кнопкой взятия; после взятия — строка с «Отпустить
   // маршрутизацию». Ядер нет — плашки нет. Решения принимает сервер: плашка читает снимок слоя.
-  let { tab } = $props<{ tab: 'groups' | 'rules' }>();
+  let { tab }: { tab: 'groups' | 'rules' } = $props();
 
   const kind = $derived($ownerState.kind);
   const blocked = $derived($routingBusy || $applyRunning);

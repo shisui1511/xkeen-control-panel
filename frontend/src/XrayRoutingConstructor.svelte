@@ -68,12 +68,12 @@
     selectedFile = '',
     onInsertIntoEditor = () => {},
     embedded = false
-  } = $props<{
+  }: {
     onSwitchTab?: (tab: string) => void;
     selectedFile?: string;
     onInsertIntoEditor?: (content: string) => void;
     embedded?: boolean;
-  }>();
+  } = $props();
 
   // Runes State (Svelte 5)
   let activeSection = $state<XraySectionName>('routing');

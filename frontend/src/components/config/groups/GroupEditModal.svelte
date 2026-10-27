@@ -30,14 +30,20 @@
   // Корень диалога получает data-testid="group-modal" через проп dataTestid у Modal.
   const PREVIEW_DELAY_MS = 250;
 
-  let { open, group, groups, features, onclose } = $props<{
+  let {
+    open,
+    group,
+    groups,
+    features,
+    onclose
+  }: {
     open: boolean;
     /** Правимая группа; null — новая. */
     group: GroupView | null;
     groups: GroupView[];
     features: Record<string, FeatureView>;
     onclose: () => void;
-  }>();
+  } = $props();
 
   const uid = $props.id();
   const KERNELS: { id: KernelName; name: string }[] = [

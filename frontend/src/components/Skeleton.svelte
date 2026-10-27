@@ -4,12 +4,12 @@
     width,
     height,
     style = ''
-  } = $props<{
+  }: {
     type?: 'text-line' | 'card' | 'circle' | 'rect';
     width?: string;
     height?: string;
     style?: string;
-  }>();
+  } = $props();
 
   let styleString = $derived.by(() => {
     let s: string[] = [];
