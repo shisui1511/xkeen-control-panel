@@ -11,10 +11,11 @@ Reads environment variables set by the GitHub Actions workflow:
   GITHUB_ENV    - path to GitHub Actions env file
 
 Writes /tmp/release-notes.md with structured, professional release notes. For rc and stable the
-first line is "**Что вошло:** ..." (titles of merged PRs of the prev..tag range that contain
-feat/fix/perf/refactor/revert commits; omitted when there are none), then the pre-release banner
-(rc only: X.Y.0 stable after the hold and a green stand smoke, X.Y.Z with Z>0 right after the
-smoke). The architecture table is followed by a note that MIPS is experimental.
+notes open with the pre-release banner (rc only: X.Y.0 stable after the hold and a green stand
+smoke, X.Y.Z with Z>0 right after the smoke), then the panel description and a "## Что вошло"
+list (titles of merged PRs of the prev..tag range that contain feat/fix/perf/refactor/revert
+commits, dependency bumps skipped; omitted when there are none). The architecture table is
+followed by a note that MIPS is experimental.
 Also appends PREV_TAG and SHORT_SHA to $GITHUB_ENV.
 """
 
@@ -98,10 +99,14 @@ def clean_title(title):
     return title.strip()
 
 
-def included_line(range_spec):
-    """Заголовки слитых PR диапазона, где есть достойные коммиты, через «; » (от старых к новым).
+# Обновления зависимостей (заголовки dependabot на английском) пользователю ничего не говорят
+DEPS_TITLE = re.compile(r"^(bump|update|upgrade)\b", re.IGNORECASE)
 
-    Пустая строка, если таких PR нет или история недоступна (неглубокий клон).
+
+def included_list(range_spec):
+    """Заголовки слитых PR диапазона, где есть достойные коммиты (от старых к новым).
+
+    Пустой список, если таких PR нет или история недоступна (неглубокий клон).
     """
     merges = git("log", "--merges", "--first-parent", "--format=%H", range_spec).split("\n")
     titles = []
@@ -114,9 +119,9 @@ def included_line(range_spec):
         if not WORTHY.search(inner):
             continue
         title = clean_title(title)
-        if title and title not in titles:
+        if title and not DEPS_TITLE.match(title) and title not in titles:
             titles.append(title)
-    return "; ".join(titles)
+    return titles
 
 
 def arch_table(version):
@@ -193,14 +198,13 @@ def stable_notes(version, prev_tag, banner=""):
     feats, fixes, others = parse_commits(range_spec)
     changelog = build_changelog(feats, fixes, others)
 
-    included = included_line(range_spec)
-    head = f"**Что вошло:** {included}\n\n" if included else ""
-    if banner:
-        head += banner.rstrip("\n") + "\n\n"
+    included = included_list(range_spec)
+    head = banner.rstrip("\n") + "\n\n" if banner else ""
+    head += "Веб-панель управления XKeen для роутеров Keenetic/Netcraze — единый бинарник без зависимостей.\n\n"
+    if included:
+        head += "## Что вошло\n\n" + "\n".join(f"- {t}" for t in included) + "\n\n"
 
     return head + f"""\
-> Веб-панель управления XKeen для роутеров Keenetic/Netcraze — единый бинарник без зависимостей.
-
 {changelog}
 
 ---
