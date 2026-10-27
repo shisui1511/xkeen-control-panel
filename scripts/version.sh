@@ -5,10 +5,8 @@
 #
 #   scripts/version.sh            версия сборки:
 #                                   HEAD на релизном теге, без правок → v0.25.4
-#                                   иначе → v0.26.0-dev.17+g578b6e8f[.dirty]
+#                                   иначе → v0.26.0-alpha.17+g578b6e8f[.dirty]
 #   scripts/version.sh --next     следующий релиз по conventional commits → v0.26.0
-#   scripts/version.sh --channel  имя rolling dev-релиза (тег и ассеты) → v0.26.0-dev,
-#                                 на релизном теге — сам тег
 #
 # Следующая версия: после последнего стабильного тега vX.Y.Z
 #   feat…!: / BREAKING CHANGE → major (в 0.x — minor, пока API не стабилен)
@@ -23,9 +21,8 @@ MODE="${1:-build}"
 case "$MODE" in
   build | --build) MODE=build ;;
   --next) MODE=next ;;
-  --channel) MODE=channel ;;
   -h | --help)
-    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
     ;;
   *)
@@ -49,7 +46,7 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 1
 fi
 
-# Последний стабильный тег, достижимый из HEAD (pre-release и -dev не считаются).
+# Последний стабильный тег, достижимый из HEAD (пре-релизы -beta и сборки -alpha не считаются).
 LAST_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' 2>/dev/null || true)
 
 DIRTY=""
@@ -103,9 +100,8 @@ esac
 
 case "$MODE" in
   next) echo "v$NEXT" ;;
-  channel) echo "v$NEXT-dev" ;;
   build)
     SHA=$(git rev-parse --short HEAD)
-    echo "v$NEXT-dev.$COUNT+g$SHA$DIRTY"
+    echo "v$NEXT-alpha.$COUNT+g$SHA$DIRTY"
     ;;
 esac
