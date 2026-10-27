@@ -21,6 +21,22 @@ const (
 	updateTickInterval  = 15 * time.Minute
 	updateFirstCheck    = 2 * time.Minute
 	autoUpdateFile      = "update-auto.json"
+
+	// mainChannelDelay — выдержка релиза на Основном канале до автоустановки.
+	// Правило панели, не настройка config.json: срок меняет только срочный релиз
+	// (D-26).
+	mainChannelDelay = 7 * 24 * time.Hour
+)
+
+// Коды auto_state в GET /api/update/state.
+const (
+	autoStateNone          = "none"
+	autoStateDelayed       = "delayed"
+	autoStateScheduled     = "scheduled"
+	autoStateUrgent        = "urgent"
+	autoStateHeld          = "held"
+	autoStateDevBuild      = "dev_build"
+	autoStateFailedVersion = "failed_version"
 )
 
 // AutoInstallRecord — попытка автоустановки: From → Version.
@@ -55,6 +71,94 @@ type UpdateCheckState struct {
 	InstallWindow   string             `json:"install_window"`
 	FailedVersion   string             `json:"auto_failed_version,omitempty"`
 	LastAutoInstall *AutoInstallRecord `json:"last_auto_install,omitempty"`
+
+	// Факты последней успешной проверки: срок и блок xcp-release выбранного релиза.
+	LatestPublishedAt string `json:"latest_published_at,omitempty"`
+	LatestUrgent      bool   `json:"latest_urgent"`
+	LatestHold        bool   `json:"latest_hold"`
+	// AutoState и AutoInstallOn считаются в State() при каждом запросе из этих
+	// фактов и настроек; итог не хранится.
+	AutoState     string `json:"auto_state"`
+	AutoInstallOn string `json:"auto_install_on,omitempty"` // YYYY-MM-DD в поясе роутера
+}
+
+// autoDecisionInput — всё, от чего зависит решение об автоустановке.
+type autoDecisionInput struct {
+	Current       string
+	Channel       string
+	AutoInstall   bool
+	Window        string
+	HasUpdate     bool
+	Latest        string
+	FailedVersion string
+	PublishedAt   string
+	Urgent        bool
+	Hold          bool
+	Now           time.Time
+}
+
+// autoDecision — единственное решение об автоустановке: его читают и ответ API
+// (State), и фоновая установка (tick). Приоритет: dev_build > failed_version >
+// held > urgent > scheduled > delayed. Второе значение — дата первого окна
+// установки (YYYY-MM-DD), только для delayed, scheduled и urgent.
+func autoDecision(in autoDecisionInput) (state, installOn string) {
+	if isAlphaBuild(in.Current) {
+		return autoStateDevBuild, ""
+	}
+	if !in.AutoInstall || !in.HasUpdate {
+		return autoStateNone, ""
+	}
+	if in.Latest != "" && in.Latest == in.FailedVersion {
+		return autoStateFailedVersion, ""
+	}
+	if in.Hold {
+		return autoStateHeld, ""
+	}
+	notBefore := in.Now
+	state = autoStateScheduled
+	if in.Channel == "stable" && !in.Urgent {
+		published, err := time.Parse(time.RFC3339, in.PublishedAt)
+		if err != nil {
+			// Срок не определить — на Основном не ставим.
+			return autoStateNone, ""
+		}
+		if due := published.Add(mainChannelDelay); due.After(in.Now) {
+			notBefore = due
+			state = autoStateDelayed
+		}
+	}
+	if in.Urgent {
+		state = autoStateUrgent
+	}
+	if day, ok := nextWindowDay(notBefore.In(time.Local), in.Window); ok {
+		installOn = day.Format("2006-01-02")
+	}
+	return state, installOn
+}
+
+// nextWindowDay — день начала первого окна установки, конец которого позже
+// notBefore: окно уже идёт (оно может начаться вчера) или ещё впереди. Окно
+// через полночь заканчивается на следующие сутки. Дни строятся через
+// time.Date, не прибавлением 24 часов, чтобы переход часов не сдвигал дату.
+func nextWindowDay(notBefore time.Time, window string) (time.Time, bool) {
+	start, end, err := parseInstallWindow(window)
+	if err != nil {
+		return time.Time{}, false
+	}
+	loc := notBefore.Location()
+	y, mo, d := notBefore.Date()
+	for i := -1; i <= 1; i++ {
+		day := time.Date(y, mo, d+i, 0, 0, 0, 0, loc)
+		endDay := d + i
+		if end <= start {
+			endDay++
+		}
+		windowEnd := time.Date(y, mo, endDay, end/60, end%60, 0, 0, loc)
+		if windowEnd.After(notBefore) {
+			return day, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // UpdateScheduler — фоновая проверка обновлений и автоустановка в окно времени.
@@ -213,6 +317,9 @@ func (s *UpdateScheduler) Record(channel, current string, info *UpdateInfo, err 
 	s.state.LatestVersion = info.LatestVersion
 	s.state.HasUpdate = info.HasUpdate
 	s.state.Prerelease = info.Prerelease
+	s.state.LatestPublishedAt = info.PublishedAt
+	s.state.LatestUrgent = info.Urgent
+	s.state.LatestHold = info.Hold
 }
 
 // State — копия состояния с актуальными настройками из конфига.
@@ -246,6 +353,19 @@ func (s *UpdateScheduler) State() UpdateCheckState {
 		last := *s.journal.Last
 		st.LastAutoInstall = &last
 	}
+	st.AutoState, st.AutoInstallOn = autoDecision(autoDecisionInput{
+		Current:       st.CurrentVersion,
+		Channel:       channel,
+		AutoInstall:   autoInstall,
+		Window:        installWindow,
+		HasUpdate:     st.HasUpdate,
+		Latest:        st.LatestVersion,
+		FailedVersion: st.FailedVersion,
+		PublishedAt:   st.LatestPublishedAt,
+		Urgent:        st.LatestUrgent,
+		Hold:          st.LatestHold,
+		Now:           s.now(),
+	})
 	return st
 }
 
@@ -256,7 +376,7 @@ func (s *UpdateScheduler) resolvePending(current string) {
 	if p == nil {
 		return
 	}
-	ok := current != "" && !versionMatches(p.From, current)
+	ok := current != "" && strings.TrimPrefix(p.From, "v") != strings.TrimPrefix(current, "v")
 	s.finishPending(ok, s.now())
 	if ok {
 		log.Printf("Update: auto-install %s → %s succeeded", p.From, current)
@@ -366,6 +486,7 @@ func (a *API) updateCheckState() UpdateCheckState {
 		defer a.cfg.RUnlock()
 		return UpdateCheckState{
 			Channel:       a.cfg.UpdateChannel,
+			AutoState:     autoStateNone,
 			AutoCheck:     a.cfg.UpdateAutoCheck,
 			AutoInstall:   a.cfg.UpdateAutoInstall,
 			InstallWindow: a.cfg.UpdateInstallWindow,
