@@ -265,9 +265,15 @@ function bodyFileTexts(command, cwd) {
     if (!p || p === '-' || /[$`]/.test(p)) continue;
     try {
       const full = path.resolve(cwd || process.cwd(), p);
-      const st = fs.statSync(full);
-      if (!st.isFile() || st.size > MAX_BODY_BYTES) continue;
-      texts.push(fs.readFileSync(full, 'utf8'));
+      // fstat по открытому дескриптору: между проверкой и чтением файл не подменить
+      const fd = fs.openSync(full, 'r');
+      try {
+        const st = fs.fstatSync(fd);
+        if (!st.isFile() || st.size > MAX_BODY_BYTES) continue;
+        texts.push(fs.readFileSync(fd, 'utf8'));
+      } finally {
+        fs.closeSync(fd);
+      }
     } catch {
       // нет файла — тело проверит post-hook
     }

@@ -80,7 +80,7 @@ function exemptions(text) {
   const re = new RegExp(EXEMPT_REGEX.source, 'g');
   let m;
   while ((m = re.exec(text)) !== null) {
-    const reason = m[4].replace(/-->.*$/, '').trim();
+    const reason = m[4].replace(/--!?>.*$/, '').trim();
     if (reason.length >= 3) set.add(`${Number(m[1])}.${Number(m[2])}.${Number(m[3])}`);
   }
   return set;
