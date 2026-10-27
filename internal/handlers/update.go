@@ -156,7 +156,7 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 	info.Channel = channel
 	info.HasUpdate = updateAvailable(info.LatestVersion, currentVersion)
 	a.cfg.RLock()
-	sameChannel := channel == a.cfg.UpdateChannel
+	sameChannel := channel == normalizeChannel(a.cfg.UpdateChannel)
 	a.cfg.RUnlock()
 	if a.updateScheduler != nil && sameChannel {
 		// Ручная проверка обновляет и уведомления
@@ -362,18 +362,16 @@ func (a *API) UpdateChannelHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// UpdateChannelGet возвращает сохранённый канал обновлений (stable/beta/dev).
+// UpdateChannelGet возвращает сохранённый канал обновлений (stable/beta);
+// пустое и устаревшее значение читаются как stable.
 func (a *API) UpdateChannelGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 	a.cfg.RLock()
-	ch := a.cfg.UpdateChannel
+	ch := normalizeChannel(a.cfg.UpdateChannel)
 	a.cfg.RUnlock()
-	if ch == "" {
-		ch = "stable"
-	}
 	JSONSuccess(w, map[string]string{"channel": ch})
 }
 

@@ -256,7 +256,7 @@ func (s *UpdateScheduler) tick() {
 	// shared with UpdateChannelSet/UpdateSettingsHandler writing under
 	// cfg.Lock() from arbitrary HTTP-handler goroutines (134-REVIEW CR-01).
 	cfg.RLock()
-	channel, autoCheck, autoInstall, installWindow := cfg.UpdateChannel, cfg.UpdateAutoCheck, cfg.UpdateAutoInstall, cfg.UpdateInstallWindow
+	channel, autoCheck, autoInstall, installWindow := normalizeChannel(cfg.UpdateChannel), cfg.UpdateAutoCheck, cfg.UpdateAutoInstall, cfg.UpdateInstallWindow
 	cfg.RUnlock()
 
 	s.mu.Lock()
@@ -274,15 +274,45 @@ func (s *UpdateScheduler) tick() {
 		s.Record(channel, current, info, err)
 	}
 
-	if !autoInstall || !inInstallWindow(now, installWindow) {
+	// Сборка разработки не обновляется фоном: проверка для уведомлений остаётся.
+	if isAlphaBuild(current) || !autoInstall || !inInstallWindow(now, installWindow) {
 		return
 	}
-	s.mu.Lock()
-	latest := s.state.LatestVersion
-	ready := s.state.HasUpdate && s.state.Channel == channel &&
-		s.journal.Pending == nil && latest != s.journal.FailedVersion
-	s.mu.Unlock()
+	decide := func() (state, latest string, ready bool) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		state, _ = autoDecision(autoDecisionInput{
+			Current:       current,
+			Channel:       channel,
+			AutoInstall:   autoInstall,
+			Window:        installWindow,
+			HasUpdate:     s.state.HasUpdate,
+			Latest:        s.state.LatestVersion,
+			FailedVersion: s.journal.FailedVersion,
+			PublishedAt:   s.state.LatestPublishedAt,
+			Urgent:        s.state.LatestUrgent,
+			Hold:          s.state.LatestHold,
+			Now:           now,
+		})
+		ready = s.state.Channel == channel && s.journal.Pending == nil &&
+			(state == autoStateScheduled || state == autoStateUrgent)
+		return state, s.state.LatestVersion, ready
+	}
+	if _, _, ready := decide(); !ready {
+		return
+	}
+
+	// Стоп или срочное могли появиться после последней проверки: перед установкой
+	// факты релиза читаются заново, решение принимается по свежему блоку.
+	info, err := s.check(channel, current)
+	s.Record(channel, current, info, err)
+	if err != nil {
+		log.Printf("Update: auto-install postponed: release check failed: %v", err)
+		return
+	}
+	state, latest, ready := decide()
 	if !ready {
+		log.Printf("Update: auto-install of %s skipped: %s", latest, state)
 		return
 	}
 
@@ -329,7 +359,7 @@ func (s *UpdateScheduler) State() UpdateCheckState {
 	// (134-REVIEW CR-01, same class as tick() above).
 	cfg := s.api.cfg
 	cfg.RLock()
-	channel, autoCheck, autoInstall, installWindow := cfg.UpdateChannel, cfg.UpdateAutoCheck, cfg.UpdateAutoInstall, cfg.UpdateInstallWindow
+	channel, autoCheck, autoInstall, installWindow := normalizeChannel(cfg.UpdateChannel), cfg.UpdateAutoCheck, cfg.UpdateAutoInstall, cfg.UpdateInstallWindow
 	cfg.RUnlock()
 
 	s.mu.Lock()
@@ -485,7 +515,7 @@ func (a *API) updateCheckState() UpdateCheckState {
 		a.cfg.RLock()
 		defer a.cfg.RUnlock()
 		return UpdateCheckState{
-			Channel:       a.cfg.UpdateChannel,
+			Channel:       normalizeChannel(a.cfg.UpdateChannel),
 			AutoState:     autoStateNone,
 			AutoCheck:     a.cfg.UpdateAutoCheck,
 			AutoInstall:   a.cfg.UpdateAutoInstall,
