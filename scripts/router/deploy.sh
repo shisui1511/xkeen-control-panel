@@ -17,6 +17,12 @@
 # получает init-скрипт той же версии и тем же путём, что и установка у пользователя.
 # Бинарник заливается во временный файл и подменяется через mv после остановки
 # процесса — без «Text file busy».
+#
+# Статус: одиночная установка релиза (--release без родительского run.sh) на цели mipsle
+# публикует статус stand/mipsle-install на коммите тега (release-status.sh): success — xcp
+# запущен и «xcp -v» совпал, failure — нет; при сбое связи (код цели 3) и сбое подготовки
+# стенда (код цели 2: нет init-скрипта, setup.sh --init-script, scp) статуса нет.
+# Установка из run.sh статус установки не ставит: там статус смоука публикует run.sh.
 
 set -eu
 
@@ -75,6 +81,9 @@ if [ "$TARGET" != all ]; then
 fi
 rt_load_targets
 rt_lock
+# Одиночный запуск (отчёт не задан родителем): статус установки релиза публикует сам deploy.sh.
+STANDALONE=0
+[ -n "${RT_REPORT:-}" ] || STANDALONE=1
 [ -n "${RT_REPORT:-}" ] || rt_report_init
 
 # --- что ставим -------------------------------------------------------------
@@ -178,6 +187,9 @@ init_script_refresh() {
   RT_SSH_STDIN=1 rt_ssh "$1" "sh -s -- --init-script" <"$SETUP_SRC" >/dev/null
 }
 
+# Код цели (пишется в deploy.rc): 0 — готово; 1 — продукт (xcp не запустился, старый не вышел,
+# «xcp -v» не ответил или версия не совпала); 2 — стенд или подготовка (нет init-скрипта,
+# setup.sh --init-script не отработал, бинарник не залит); 3 — нет связи.
 deploy_one() {
   id=$1
   arch=$(rt_get "$id" ARCH)
@@ -192,7 +204,7 @@ deploy_one() {
       ;;
     *)
       echo "deploy[$id]: нет $INIT_SCRIPT — сначала установите панель через scripts/setup.sh"
-      return 1
+      return 2
       ;;
   esac
   if [ "$SETUP_INIT" = 1 ]; then
@@ -203,7 +215,7 @@ deploy_one() {
       return 3
     elif [ "$rc" != 0 ]; then
       echo "deploy[$id]: init-скрипт не пересоздан (setup.sh --init-script, код $rc)"
-      return 1
+      return 2
     fi
   fi
   rc=0
@@ -212,8 +224,8 @@ deploy_one() {
     echo "deploy[$id]: нет связи"
     return 3
   elif [ "$rc" != 0 ]; then
-    echo "deploy[$id]: не удалось залить бинарник"
-    return 1
+    echo "deploy[$id]: не удалось залить бинарник (код scp $rc)"
+    return 2
   fi
   # Остановка с ожиданием полного выхода: пока старый процесс жив (даже после kill -9
   # он может дописывать на флешку), init-скрипт на запуск отвечает «already running»
@@ -293,4 +305,36 @@ for p in $PIDS; do
     OVERALL=1
   fi
 done
+
+# Одиночная установка релиза на mipsle оставляет статус stand/mipsle-install на коммите тега.
+# Сбой связи (код цели 3) и сбой подготовки стенда (код цели 2) статуса не дают: красная запись
+# держит stable и должна означать только дефект продукта. Сбой публикации код выхода не меняет.
+if [ "$STANDALONE" = 1 ] && [ "$RELEASE" = 1 ]; then
+  for t in $RT_TARGETS; do
+    [ "$(rt_get "$t" ARCH)" = mipsle ] || continue
+    drc=1
+    [ ! -f "$RT_REPORT/$t/deploy.rc" ] || drc=$(cat "$RT_REPORT/$t/deploy.rc")
+    case "$drc" in
+      0)
+        st_state=success
+        st_desc="установка mipsle: xcp запущен, версия совпала"
+        ;;
+      1)
+        st_state=failure
+        st_desc="установка mipsle: xcp не запустился или версия не совпала"
+        ;;
+      2)
+        echo "deploy[$t]: предупреждение: статус установки не отправлен: сбой подготовки стенда" >&2
+        continue
+        ;;
+      *)
+        echo "deploy[$t]: статус установки не отправлен: сбой связи"
+        continue
+        ;;
+    esac
+    if ! sh "$SCRIPT_DIR/release-status.sh" "$RELEASE_TAG" stand/mipsle-install "$st_state" "$st_desc"; then
+      echo "deploy[$t]: предупреждение: статус установки не отправлен (ошибка отправки)" >&2
+    fi
+  done
+fi
 exit "$OVERALL"

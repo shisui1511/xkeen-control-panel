@@ -37,7 +37,7 @@
 // Проход-прогон набора (вместо go/specs): прогон набора router-test целиком как этап сессии.
 //   {
 //     "name": "narrow-go",                  [a-z0-9-]
-//     "suite": "changed",                   full или changed
+//     "suite": "changed",                   full, changed или smoke (с release, см. ниже)
 //     "files": ["internal/nodes/router_nodes_test.go"],    только у changed: выбор по списку
 //                                           файлов (RT_FILES) вместо git; пути без «..»
 //     "expect": {
@@ -46,6 +46,18 @@
 //       "same_failures_as": "full-1"        множество строк FAIL, KNOWN и XPASS (статус, ядро,
 //     }                                     проверка) совпадает с более ранним проходом-прогоном
 //   }
+// Смоук установленного релиза — проход-прогон набора smoke с полем release:
+//   {
+//     "name": "release-smoke",
+//     "suite": "smoke",                     набор smoke: деплой артефакта релиза и смоук
+//     "release": "latest",                  тег vX.Y.Z[-<суффикс>.N] или latest — новейший
+//                                           опубликованный (не draft) релиз; обязателен у smoke,
+//                                           у full и changed запрещён
+//     "expect": { "exit": 0, "summary": ["- Статус на GitHub: stand/arm64-smoke success"] }
+//   }
+// Вложенный `run.sh smoke` идёт с RELEASE=<тег>; статус stand/<arch>-smoke на коммите тега
+// публикует сам run.sh. files и interrupt у smoke не допускаются. После прогона на стенде
+// остаётся сборка релиза, поэтому следующий проход и конец сессии снова ставят HEAD.
 // Прерывание прогона посреди этапа (необязательно, проверка исправления обрыва, G-145.1-5):
 //     "interrupt": {
 //       "stage": "go",                      обязателен; поддерживается только go
@@ -121,6 +133,8 @@ const STATUSES = ['PASS', 'FAIL', 'KNOWN', 'XPASS', 'SKIP'];
 const SAFE_PATH = /^[A-Za-z0-9_.][A-Za-z0-9_./-]*$/;
 const SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const SAFE_REF = /^[A-Za-z0-9_.][A-Za-z0-9_./~^-]*$/;
+// Тег релиза: стабильный или пре-релиз с любым буквенным суффиксом (rc, beta).
+const RELEASE_TAG = /^v\d+\.\d+\.\d+(-[a-z]+\.\d+)?$/;
 // Снимок незавершённого прогона на цели (RT_SNAP_DIR из lib.sh): с ним preflight отказывает.
 const SNAP_BASE = '/opt/tmp/xcp-rt-snap/baseline';
 // Служебные строки этапов: всегда расхождение, если их FAIL не ожидался явно.
@@ -187,11 +201,29 @@ function loadInterrupt(i, where) {
   return { stage: 'go', signal, after: i.after, deadline };
 }
 
+// Название прохода-прогона для плана и журнала: «smoke (релиз <тег>)», «changed по файлам …».
+function suiteTitle(p, release) {
+  if (p.suite === 'smoke') return `smoke (релиз ${release})`;
+  return `${p.suite}${p.files.length ? ` по файлам ${p.files.join(' ')}` : ''}`;
+}
+
 // Проход-прогон набора: разбор и проверка полей. earlier — имена прогонов набора выше по спеке.
 function loadSuitePass(p, where, earlier) {
-  if (p.suite !== 'full' && p.suite !== 'changed') die(`${where}.suite: full или changed`);
+  if (p.suite !== 'full' && p.suite !== 'changed' && p.suite !== 'smoke') {
+    die(`${where}.suite: full, changed или smoke`);
+  }
   if (p.go || p.specs !== undefined || p.grep !== undefined || p.product) {
     die(`${where}: проход-прогон не сочетается с go/specs/product`);
+  }
+  let release = null;
+  if (p.suite === 'smoke') {
+    if (typeof p.release !== 'string' || (p.release !== 'latest' && !RELEASE_TAG.test(p.release))) {
+      die(`${where}.release: у smoke обязателен — latest или тег vX.Y.Z[-<суффикс>.N]`);
+    }
+    release = p.release;
+    if (p.interrupt !== undefined) die(`${where}.interrupt: у smoke не поддерживается`);
+  } else if (p.release !== undefined) {
+    die(`${where}.release: только у smoke`);
   }
   let files = [];
   if (p.files !== undefined) {
@@ -227,6 +259,7 @@ function loadSuitePass(p, where, earlier) {
   return {
     name: p.name,
     suite: p.suite,
+    release,
     files,
     interrupt: p.interrupt === undefined ? null : loadInterrupt(p.interrupt, where),
     product: null,
@@ -364,9 +397,10 @@ function dryRun(spec, specFile) {
         ? `; прерывание SIG${p.interrupt.signal} через ${p.interrupt.after} с после старта go, выход до ${p.interrupt.deadline} с`
         : '';
       step(
-        `прогон набора ${p.suite}${p.files.length ? ` по файлам ${p.files.join(' ')}` : ''}: вложенный run.sh, отчёт build/router/<сессия>-NN-${p.name}${irq}`
+        `прогон набора ${suiteTitle(p, p.release)}: вложенный run.sh, отчёт build/router/<сессия>-NN-${p.name}${irq}`
       );
-      deployed = 'HEAD';
+      // смоук релиза оставляет на стенде сборку релиза, а не HEAD
+      deployed = p.suite === 'smoke' ? null : 'HEAD';
       continue;
     }
     const key = productKey(p);
@@ -825,9 +859,51 @@ class Session {
     const base = `${path.basename(this.dir)}-${String(++this.n).padStart(2, '0')}-${p.name}`;
     const dir = path.join(this.root, 'build', 'router', base);
     const rel = path.relative(this.root, dir);
-    this.say(
-      `прогон набора ${p.suite}${p.files.length ? ` по файлам ${p.files.join(' ')}` : ''} → ${rel}`
-    );
+    // смоук релиза: тег — из спеки или новейший опубликованный (не draft) релиз
+    let tag = null;
+    if (p.suite === 'smoke') {
+      tag = p.release;
+      let err = '';
+      if (tag === 'latest') {
+        try {
+          tag = execFileSync(
+            'gh',
+            [
+              'release',
+              'list',
+              '--exclude-drafts',
+              '--limit',
+              '1',
+              '--json',
+              'tagName',
+              '--jq',
+              '.[0].tagName'
+            ],
+            { encoding: 'utf8', timeout: 30000 }
+          ).trim();
+        } catch (e) {
+          err = `gh release list не отработал: ${e.message.split('\n')[0]}`;
+        }
+      }
+      if (!err && !RELEASE_TAG.test(tag)) {
+        err = `новейший релиз не определён или тег «${tag}» не похож на vX.Y.Z`;
+      }
+      if (err) {
+        this.say(`прогон набора smoke не начат: ${err}`);
+        this.verdicts.push({
+          pass: p.name,
+          core: '-',
+          test: 'release: тег',
+          expected: [p.release],
+          actual: 'не определён',
+          detail: err,
+          ok: false,
+          report: '-'
+        });
+        return 0;
+      }
+    }
+    this.say(`прогон набора ${suiteTitle(p, tag)} → ${rel}`);
     const env = {
       RT_REPORT_DIR: dir,
       RT_HOLD_MINUTES: undefined,
@@ -845,14 +921,21 @@ class Session {
       RT_FILES: p.files.length ? p.files.join(',') : undefined,
       SPEC: undefined,
       SUITE: undefined,
-      RELEASE: undefined
+      // установка артефакта релиза и публикация статуса — только у smoke с release
+      RELEASE: tag ?? undefined
     };
     const args = [path.join(SCRIPT_DIR, 'run.sh')];
-    if (p.suite === 'changed') args.push('changed');
+    if (p.suite === 'changed' || p.suite === 'smoke') args.push(p.suite);
     const irq = p.interrupt ? this.interruptWatch(p.interrupt, dir) : null;
     const rc = await this.run('sh', args, env, irq ? irq.opts : {});
     if (irq) irq.state.closedAt = Date.now();
-    this.record({ kind: 'suite', pass: p.name, label: p.suite, dir, rc });
+    this.record({
+      kind: 'suite',
+      pass: p.name,
+      label: tag ? `smoke ${tag}` : p.suite,
+      dir,
+      rc
+    });
     if (this.aborted && !existsSync(dir)) return 0;
 
     const res = path.join(dir, this.t, 'results.tsv');
@@ -869,8 +952,11 @@ class Session {
     // results.tsv нет, а на стенде остаётся сборка прохода product.ref. Нет признака — сборку HEAD
     // вернёт cleanup
     const deployRc = path.join(dir, this.t, 'deploy.rc');
+    // (после смоука релиза на стенде артефакт релиза, а не HEAD — признак тоже сбрасывается)
     this.deployed =
-      existsSync(deployRc) && readFileSync(deployRc, 'utf8').trim() === '0' ? 'HEAD' : null;
+      p.suite !== 'smoke' && existsSync(deployRc) && readFileSync(deployRc, 'utf8').trim() === '0'
+        ? 'HEAD'
+        : null;
     // сбой связи — только проверка reachable и потеря связи при восстановлении; по подстроке
     // «нет связи» в любой строке нельзя: так пишет и смоук, когда не отвечает сама панель
     if (
@@ -916,7 +1002,7 @@ class Session {
     };
     this.suites.push({
       pass: p.name,
-      suite: p.suite,
+      suite: tag ? `smoke ${tag}` : p.suite,
       files: p.files,
       exit: rc,
       total: num(/^- Итого: (\d+) с/m),

@@ -3,14 +3,18 @@
 Release notes generator for xkeen-control-panel.
 
 Reads environment variables set by the GitHub Actions workflow:
-  MODE          - "prerelease" (rolling dev), "rc" (release candidate) or "stable"
-  SOAK_HOURS    - how long a release candidate waits before promotion (rc only)
+  MODE          - "prerelease" (rolling dev), "rc" (pre-release) or "stable"
+  SOAK_HOURS    - hold time of an X.Y.0 pre-release before promotion (rc only, shown in the banner)
   GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_ACTOR
   VERSION       - e.g. "v0.12.0" or "v0.13.0-dev"
   COMMIT_COUNT  - number of commits since last stable (pre-release only)
   GITHUB_ENV    - path to GitHub Actions env file
 
-Writes /tmp/release-notes.md with structured, professional release notes.
+Writes /tmp/release-notes.md with structured, professional release notes. For rc and stable the
+first line is "**Что вошло:** ..." (titles of merged PRs of the prev..tag range that contain
+feat/fix/perf/refactor/revert commits; omitted when there are none), then the pre-release banner
+(rc only: X.Y.0 stable after the hold and a green stand smoke, X.Y.Z with Z>0 right after the
+smoke). The architecture table is followed by a note that MIPS is experimental.
 Also appends PREV_TAG and SHORT_SHA to $GITHUB_ENV.
 """
 
@@ -74,13 +78,45 @@ def build_changelog(feats, fixes, others):
     return "\n\n".join(sections) if sections else "_Список изменений недоступен._"
 
 
-ARCH_TABLE = """\
-| Архитектура | Модели роутеров | Файл |
-|---|---|---|
-| **ARM64** | KN-2710, KN-1811, KN-1012 и др. | `xcp_{version}_{arch}` |
-| **MIPSLE** | KN-1010, KN-1810, KN-1910 | `xcp_{version}_{arch}` |
-| **MIPS** | KN-2510, KN-2410, KN-2010 | `xcp_{version}_{arch}` |\
-"""
+# Коммиты, ради которых выходит релиз (то же выражение, что WORTHY в auto_release.sh)
+WORTHY = re.compile(
+    r"^(feat|fix|perf|refactor|revert)(\([^)]*\))?!?:|^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE",
+    re.MULTILINE,
+)
+
+
+def clean_title(title):
+    """Заголовок PR без префикса фазы, префикса Conventional Commits и служебных хвостов в скобках:
+    «(фаза N)», «(слой N)», «(слой 3, отложен из 145)» и т.п., сколько бы их ни было подряд."""
+    title = re.sub(r"^(Phase|Фаза)\s+[\d.]+:\s*", "", title.strip())
+    title = re.sub(r"^[a-z]+(\([^)]+\))?!?:\s*", "", title)
+    tail = re.compile(r"\s*\((?:фаза|phase|слой|layer)\s*[\d.]+[^)]*\)\s*$", re.IGNORECASE)
+    prev = None
+    while prev != title:
+        prev = title
+        title = tail.sub("", title)
+    return title.strip()
+
+
+def included_line(range_spec):
+    """Заголовки слитых PR диапазона, где есть достойные коммиты, через «; » (от старых к новым).
+
+    Пустая строка, если таких PR нет или история недоступна (неглубокий клон).
+    """
+    merges = git("log", "--merges", "--first-parent", "--format=%H", range_spec).split("\n")
+    titles = []
+    for merge in reversed([m for m in merges if m]):
+        body = git("log", "-1", "--format=%b", merge)
+        title = next((line for line in body.split("\n") if line.strip()), "")
+        if not title:
+            continue
+        inner = git("log", "--format=%s%n%b", f"{merge}^1..{merge}^2")
+        if not WORTHY.search(inner):
+            continue
+        title = clean_title(title)
+        if title and title not in titles:
+            titles.append(title)
+    return "; ".join(titles)
 
 
 def arch_table(version):
@@ -89,7 +125,11 @@ def arch_table(version):
         f"| **MIPSLE** | KN-1010, KN-1810, KN-1910 | `xcp_{version}_mipsle` |",
         f"| **MIPS** | KN-2510, KN-2410, KN-2010 | `xcp_{version}_mips` |",
     ]
-    return "| Архитектура | Модели роутеров | Файл |\n|---|---|---|\n" + "\n".join(rows)
+    return (
+        "| Архитектура | Модели роутеров | Файл |\n|---|---|---|\n"
+        + "\n".join(rows)
+        + "\n\n> **MIPS** — экспериментально, на железе не проверяется."
+    )
 
 
 def prerelease_notes(version, commit_count, pr_number, prev_tag, short_sha, full_sha):
@@ -138,7 +178,7 @@ sha256sum -c xcp_{version}_arm64.sha256
 """
 
 
-def stable_notes(version, prev_tag):
+def stable_notes(version, prev_tag, banner=""):
     repo = os.environ["GITHUB_REPOSITORY"]
     repo_url = f"https://github.com/{repo}"
 
@@ -153,7 +193,12 @@ def stable_notes(version, prev_tag):
     feats, fixes, others = parse_commits(range_spec)
     changelog = build_changelog(feats, fixes, others)
 
-    return f"""\
+    included = included_line(range_spec)
+    head = f"**Что вошло:** {included}\n\n" if included else ""
+    if banner:
+        head += banner.rstrip("\n") + "\n\n"
+
+    return head + f"""\
 > Веб-панель управления XKeen для роутеров Keenetic/Netcraze — единый бинарник без зависимостей.
 
 {changelog}
@@ -191,13 +236,23 @@ def rc_notes(version, prev_tag):
     repo_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}"
     base = version.split("-")[0]
     soak = os.environ.get("SOAK_HOURS", "24")
-    banner = (
-        f"> 🧪 **Release candidate {base}** — доступен в канале обновлений beta.\n"
-        f"> Если за {soak} ч не выйдет новый RC, этот же коммит автоматически станет "
-        f"стабильным релизом **{base}**.\n"
-        f"> Нашли проблему — [создайте issue]({repo_url}/issues/new).\n\n"
+    patch = base.split(".")[-1] != "0"
+    if patch:
+        banner = (
+            f"> 🧪 **Пре-релиз исправлений {base}** — доступен в канале обновлений beta.\n"
+            f"> Станет стабильным релизом **{base}** сразу после зелёного смоука на стенде.\n"
+        )
+    else:
+        banner = (
+            f"> 🧪 **Пре-релиз {base}** — доступен в канале обновлений beta.\n"
+            f"> Станет стабильным релизом **{base}** после выдержки {soak} ч и зелёного смоука "
+            f"на стенде; выдержку сбрасывает только следующий пре-релиз этой же версии.\n"
+        )
+    banner += (
+        f"> Нашли проблему — [сообщите о регрессии]"
+        f"({repo_url}/issues/new?template=regression.yml).\n"
     )
-    return banner + stable_notes(version, prev_tag)
+    return stable_notes(version, prev_tag, banner)
 
 
 def main():
