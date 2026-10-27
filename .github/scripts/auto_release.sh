@@ -2,16 +2,17 @@
 # Автоматический выпуск пре-релизов и стабильных релизов (workflow auto-release.yml).
 #
 #   auto_release.sh plan     какой пре-релиз выпустить для HEAD (последний коммит main):
-#                              "rc vX.Y.Z-rc.N"  — новый пре-релиз (или уже существующий: ответ идемпотентен)
+#                              "rc vX.Y.Z-beta.N" — новый пре-релиз (или уже существующий: ответ идемпотентен)
 #                              "none <причина>"  — выпускать нечего
+#                            слово rc в строке решения — тип решения «пре-релиз», не суффикс тега
 #                            stable plan не выпускает: патч тоже идёт через пре-релиз
 #   auto_release.sh promote  какой пре-релиз пора сделать стабильным:
-#                              "stable vX.Y.Z vX.Y.Z-rc.N" / "none <причина>";
+#                              "stable vX.Y.Z vX.Y.Z-beta.N" / "none <причина>";
 #                            вердикты кандидатов печатаются в stderr
 #   auto_release.sh heal     свежие (7 дней) теги релизов без опубликованного релиза:
-#                              "delete vX.Y.Z-rc.N" — пре-релиз вытеснен (stable базы, более новый
+#                              "delete vX.Y.Z-beta.N" — пре-релиз вытеснен (stable базы, более новый
 #                                                     stable или пре-релиз той же базы с большим номером)
-#                              "publish vX.Y.Z[-rc.N]" — актуальный тег, сборку повторить
+#                              "publish vX.Y.Z[-beta.N]" — актуальный тег, сборку повторить
 #   auto_release.sh report   только чтение GitHub и git: вердикты по каждому пре-релизу новее
 #                            последнего stable, итог promote и plan, markdown-сводка в stdout;
 #                            ничего не меняет (можно запускать на ПК до слияния)
@@ -43,7 +44,7 @@
 #
 # Окружение:
 #   SOAK_HOURS   сколько часов пре-релиз X.Y.0 должен провисеть после публикации (по умолчанию 24)
-#   PRE_KIND     суффикс пре-релиза (по умолчанию rc): теги vX.Y.Z-<PRE_KIND>.N
+#   PRE_KIND     суффикс пре-релиза (по умолчанию beta): теги vX.Y.Z-<PRE_KIND>.N
 #   PROMOTE_BASE версия vX.Y.Z из ручного запуска: снимает выдержку этой базы; готовая база
 #                продвигается раньше младших, неготовая — предупреждение в журнале
 #   URGENT=1     срочное: действует только вместе с PROMOTE_BASE, смоук и красные записи не
@@ -61,7 +62,7 @@ set -euo pipefail
 SOAK_HOURS="${SOAK_HOURS:-24}"
 [[ "$SOAK_HOURS" =~ ^[0-9]+$ ]] || SOAK_HOURS=24
 NOW="${NOW:-$(date +%s)}"
-PRE_KIND="${PRE_KIND:-rc}"
+PRE_KIND="${PRE_KIND:-beta}"
 [[ "$PRE_KIND" =~ ^[a-z]+$ ]] || {
   echo "auto-release: PRE_KIND должен состоять из строчных латинских букв" >&2
   exit 2
@@ -103,12 +104,12 @@ tag_time() {
   git for-each-ref --format='%(if)%(taggerdate)%(then)%(taggerdate:unix)%(else)%(committerdate:unix)%(end)' "refs/tags/$1"
 }
 
-# vX.Y.Z-rc.N -> vX.Y.Z
+# vX.Y.Z-beta.N -> vX.Y.Z
 base_of() {
   echo "${1%-"${PRE_KIND}".*}"
 }
 
-# vX.Y.Z-rc.N -> N
+# vX.Y.Z-beta.N -> N
 pre_n() {
   echo "${1##*-"${PRE_KIND}".}"
 }
@@ -127,7 +128,7 @@ version_gt() {
 live_bases() {
   local last base
   last=$(last_stable)
-  { git tag -l "v*-${PRE_KIND}.*" --merged HEAD | grep -E -- "$PRE_RE" | sed -E "s/-${PRE_KIND}\\.[0-9]+\$//" | sort -uV; } |
+  { git tag -l "v*-${PRE_KIND}.*" --merged HEAD | grep -E -- "$PRE_RE" | sed -E "s/-${PRE_KIND}\\.[0-9]+\$//" | sort -uV || true; } |
     while read -r base; do
       if [ -z "$last" ] || version_gt "$base" "$last"; then
         echo "$base"
