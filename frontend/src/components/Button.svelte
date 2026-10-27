@@ -13,7 +13,7 @@
     'data-testid': testId,
     onclick,
     children
-  } = $props<{
+  }: {
     type?: 'button' | 'submit' | 'reset';
     variant?: 'primary' | 'secondary' | 'danger' | 'warning';
     disabled?: boolean;
@@ -25,7 +25,7 @@
     'data-testid'?: string;
     onclick?: (event: MouseEvent) => void;
     children?: Snippet;
-  }>();
+  } = $props();
 </script>
 
 <button

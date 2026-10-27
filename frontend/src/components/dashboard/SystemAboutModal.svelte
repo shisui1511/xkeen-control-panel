@@ -10,12 +10,12 @@
     onClose,
     systemStats,
     panelVersion
-  } = $props<{
+  }: {
     isOpen: boolean;
     onClose: () => void;
     systemStats: SystemStats | null;
     panelVersion: string;
-  }>();
+  } = $props();
 
   const goRuntime = $derived(systemStats?.go_runtime);
 </script>

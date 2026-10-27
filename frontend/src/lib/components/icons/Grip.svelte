@@ -3,11 +3,11 @@
     size = 16,
     color = 'currentColor',
     class: className = ''
-  } = $props<{
+  }: {
     size?: number;
     color?: string;
     class?: string;
-  }>();
+  } = $props();
 </script>
 
 <!-- Ручка перетаскивания: два столбца по три точки (точка — отрезок нулевой длины с круглым концом) -->

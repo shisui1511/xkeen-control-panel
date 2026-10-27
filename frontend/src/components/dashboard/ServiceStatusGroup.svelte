@@ -27,7 +27,7 @@
     staleTitle = '',
     onRefresh,
     onShowMihomoMigrateModal
-  } = $props<{
+  }: {
     serviceStatus: {
       xkeen: string;
       xray: string;
@@ -45,7 +45,7 @@
     staleTitle?: string;
     onRefresh?: () => Promise<void> | void;
     onShowMihomoMigrateModal?: () => void;
-  }>();
+  } = $props();
 
   let isRefreshing = $state(false);
 

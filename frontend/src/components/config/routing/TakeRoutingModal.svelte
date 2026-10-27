@@ -26,11 +26,11 @@
     open,
     mode = 'take',
     onclose
-  } = $props<{
+  }: {
     open: boolean;
     mode?: 'take' | 'intercept';
     onclose: () => void;
-  }>();
+  } = $props();
 
   // Разделитель, по которому текст со списком файлов режется на часть до и после списка
   const FILES_TOKEN = '\u0001files\u0001';

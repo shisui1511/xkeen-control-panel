@@ -6,9 +6,11 @@
   import Card from '../Card.svelte';
   import { summarizeGroupDelay } from '../../lib/groupDelay';
 
-  let { onSwitchTab } = $props<{
+  let {
+    onSwitchTab
+  }: {
     onSwitchTab?: (tab: string) => void;
-  }>();
+  } = $props();
 
   let isRefreshingSubs = $state(false);
   let isTestingLatency = $state(false);

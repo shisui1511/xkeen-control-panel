@@ -22,13 +22,19 @@
   // data-testid="group-delete-modal" через проп dataTestid у Modal.
   const MAX_DEPS = 5;
 
-  let { open, group, impact, groups, onclose } = $props<{
+  let {
+    open,
+    group,
+    impact,
+    groups,
+    onclose
+  }: {
     open: boolean;
     group: GroupView | null;
     impact: Impact | null;
     groups: GroupView[];
     onclose: () => void;
-  }>();
+  } = $props();
 
   const uid = $props.id();
 

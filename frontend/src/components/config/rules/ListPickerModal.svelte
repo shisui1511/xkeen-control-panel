@@ -24,7 +24,13 @@
   // «Добавить в XKeen» (D-32, D-33): блок доступен и при пустом каталоге, и при ошибке чтения
   // (тогда показываются наборы последнего успешного чтения). Всё, что приходит из dat (файлы,
   // теги, примеры) и из каталога наборов, выводится только интерполяцией.
-  let { open, kind, selected, onpick, onclose } = $props<{
+  let {
+    open,
+    kind,
+    selected,
+    onpick,
+    onclose
+  }: {
     open: boolean;
     /** site — условие geosite, ip — условие geoip. */
     kind: 'site' | 'ip';
@@ -32,7 +38,7 @@
     selected: ListRef[];
     onpick: (refs: ListRef[]) => void;
     onclose: () => void;
-  }>();
+  } = $props();
 
   const uid = $props.id();
 

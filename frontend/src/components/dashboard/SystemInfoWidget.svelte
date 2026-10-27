@@ -14,7 +14,7 @@
     statsLastFetched,
     xkeenState = 'unknown',
     onOpenAbout
-  } = $props<{
+  }: {
     systemStats: SystemStats | null;
     version: string;
     panelVersion: string;
@@ -22,7 +22,7 @@
     /** Состояние XKeen: без установки вместо версии — «не установлен», вместо unknown — «—». */
     xkeenState?: XKeenState;
     onOpenAbout?: () => void;
-  }>();
+  } = $props();
 
   const versionText = $derived.by(() => {
     const label = xkeenVersionLabel(xkeenState, version);

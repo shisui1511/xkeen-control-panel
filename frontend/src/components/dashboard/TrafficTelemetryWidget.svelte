@@ -5,9 +5,11 @@
   import Card from '../Card.svelte';
   import { isMihomo, mihomoApiState, mihomoOfflineReason } from '../../stores';
 
-  let { onSwitchTab } = $props<{
+  let {
+    onSwitchTab
+  }: {
     onSwitchTab?: (tab: string) => void;
-  }>();
+  } = $props();
 
   // trafficStream соответствует контракту стора Svelte (подписчик сразу получает текущее
   // состояние, subscribe возвращает отписку), поэтому подписка идёт через $trafficStream.

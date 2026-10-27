@@ -26,7 +26,16 @@
     targetLabel
   } from '../../../lib/routingView';
 
-  let { group, groups, kernel, installed, expanded, ontoggle, onedit, ondelete } = $props<{
+  let {
+    group,
+    groups,
+    kernel,
+    installed,
+    expanded,
+    ontoggle,
+    onedit,
+    ondelete
+  }: {
     group: GroupView;
     /** Все группы представления: имена вложенных участников. */
     groups: GroupView[];
@@ -36,7 +45,7 @@
     ontoggle: () => void;
     onedit?: (group: GroupView) => void;
     ondelete: (group: GroupView) => void;
-  }>();
+  } = $props();
 
   const uid = $props.id();
 
@@ -103,10 +112,12 @@
   let pick = $derived<string>(group.current);
 
   const options = $derived.by(() => {
-    const list = group.member_options.map((o: { member: string; label: string }) => ({
-      value: o.member,
-      label: o.label
-    }));
+    const list: { value: string; label: string; disabled?: boolean }[] = group.member_options.map(
+      (o: { member: string; label: string }) => ({
+        value: o.member,
+        label: o.label
+      })
+    );
     if (!list.some((o: { value: string }) => o.value === group.current)) {
       list.unshift({
         value: group.current,

@@ -39,11 +39,11 @@
     systemStats,
     loadHistory = [],
     sparklineData = null
-  } = $props<{
+  }: {
     systemStats: SystemStats | null;
     loadHistory?: number[];
     sparklineData?: { line: string; fill: string } | null;
-  }>();
+  } = $props();
 
   function getUsageColor(pct: number): string {
     if (pct >= 90) return 'var(--danger)';

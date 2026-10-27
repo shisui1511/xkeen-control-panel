@@ -47,12 +47,12 @@
     size = 16,
     color = 'currentColor',
     class: className = ''
-  } = $props<{
+  }: {
     name: string;
     size?: number;
     color?: string;
     class?: string;
-  }>();
+  } = $props();
 </script>
 
 {#if name === 'dashboard'}
