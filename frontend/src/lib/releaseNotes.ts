@@ -81,12 +81,16 @@ export function splitInlineCode(text: string): InlineSegment[] {
     .filter((seg) => seg.text !== '');
 }
 
-export type ReleaseKind = 'stable' | 'rc' | 'dev';
+export type ReleaseKind = 'stable' | 'beta' | 'alpha';
 
-/** Тип сборки по версии: 0.29.0 — stable, 0.29.0-rc.2 — rc, 0.29.0-dev.5+g… — dev. */
+/**
+ * Тип версии по суффиксу: X.Y.Z — stable, X.Y.Z-beta.2 — beta, X.Y.Z-alpha.3+g1a2b3c4 — alpha.
+ * Старые теги -rc.N остаются в «Что нового» как beta; прежние сборки разработки и неизвестное — alpha.
+ * Порядок версий здесь не считается: сравнение живёт в Go.
+ */
 export function releaseKind(version: string): ReleaseKind {
   const pre = version.replace(/^v/, '').split('+')[0].split('-')[1] ?? '';
   if (pre === '') return 'stable';
-  if (pre.startsWith('rc')) return 'rc';
-  return 'dev';
+  if (pre.startsWith('beta') || pre.startsWith('rc')) return 'beta';
+  return 'alpha';
 }
