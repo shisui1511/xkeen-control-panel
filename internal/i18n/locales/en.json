@@ -59,7 +59,7 @@
   "update.in_progress": "Update already in progress",
   "update.version_required": "Version is required",
   "update.changelog_failed": "Failed to load release notes",
-  "update.channel_invalid": "Update channel must be stable or beta",
+  "update.channel_invalid": "Update channel must be Main or Preview",
   "update.save_failed": "Failed to save update settings",
   "update.window_invalid": "Invalid install window, use HH:MM-HH:MM",
   "update.complete": "Update complete",

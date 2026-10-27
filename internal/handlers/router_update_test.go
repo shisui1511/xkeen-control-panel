@@ -293,3 +293,183 @@ func rtUpdExpect(st rtUpdState, rel *rtUpdRelease, urgent, hold bool, channel st
 	}
 	return "scheduled", dateFrom(now)
 }
+
+// TestRouterUpdateChannels: панель принимает каналы stable и beta и читает их
+// обратно, любое другое значение отклоняет кодом update_channel_invalid, а
+// сообщение называет каналы подписями интерфейса.
+func TestRouterUpdateChannels(t *testing.T) {
+	p := routertest.NewPanel(t)
+	rtUpdRestore(t, p)
+	readChannel := func() string {
+		return rtUpdGet[map[string]string](t, p, "/api/update/channel")["channel"]
+	}
+
+	for _, ch := range []string{"beta", "stable", "beta"} {
+		rtUpdPost(t, p, "/api/update/channel", map[string]string{"channel": ch})
+		if got := readChannel(); got != ch {
+			t.Fatalf("после записи канала %q панель отдаёт %q", ch, got)
+		}
+	}
+
+	before := readChannel()
+	code, raw, err := p.Call(http.MethodPost, "/api/update/channel", map[string]string{"channel": "prerelease"})
+	if err != nil {
+		t.Fatalf("запись канала prerelease: %v", err)
+	}
+	if code != http.StatusBadRequest {
+		t.Fatalf("запись канала prerelease: статус %d, ожидался 400", code)
+	}
+	var env rtUpdEnv[json.RawMessage]
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("тело отказа не JSON: %v", err)
+	}
+	if env.Code != "update_channel_invalid" {
+		t.Errorf("код отказа %q, ожидался update_channel_invalid", env.Code)
+	}
+	if !strings.Contains(env.Error, "Основной") && !strings.Contains(env.Error, "Main") {
+		t.Errorf("сообщение отказа не называет канал по подписи интерфейса: %q", env.Error)
+	}
+	if got := readChannel(); got != before {
+		t.Errorf("после отказа канал стал %q, был %q", got, before)
+	}
+}
+
+// rtUpdStatus — GET /api/update/status.
+type rtUpdStatus struct {
+	Status      string `json:"status"`
+	MessageCode string `json:"message_code"`
+}
+
+// rtUpdCurrent возвращает версию панели; false — панель не отвечает (перезапуск).
+func rtUpdCurrent(p *routertest.Panel) (string, bool) {
+	var env rtUpdEnv[rtUpdState]
+	code, err := p.GetJSON("/api/update/state", &env)
+	if err != nil || code != http.StatusOK {
+		return "", false
+	}
+	return env.Data.CurrentVersion, true
+}
+
+// rtUpdWaitVersion ждёт, пока панель ответит версией want; ошибки соединения во
+// время перезапуска допустимы.
+func rtUpdWaitVersion(p *routertest.Panel, want string, limit time.Duration) bool {
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		if v, ok := rtUpdCurrent(p); ok && v == want {
+			return true
+		}
+		time.Sleep(3 * time.Second)
+	}
+	return false
+}
+
+// rtUpdWaitDone опрашивает статус обновления до done или failed.
+func rtUpdWaitDone(t *testing.T, p *routertest.Panel, limit time.Duration) rtUpdStatus {
+	t.Helper()
+	var st rtUpdStatus
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		var env rtUpdEnv[rtUpdStatus]
+		if code, err := p.GetJSON("/api/update/status", &env); err == nil && code == http.StatusOK {
+			st = env.Data
+			if st.Status == "done" || st.Status == "failed" {
+				return st
+			}
+		}
+		time.Sleep(time.Second)
+	}
+	t.Fatalf("обновление не завершилось за %s, последний статус %q", limit, st.Status)
+	return st
+}
+
+// rtUpdCheck — GET /api/update/check для канала stable; false — проверка не удалась.
+func rtUpdCheck(p *routertest.Panel) (latest string, hasUpdate, ok bool) {
+	var env rtUpdEnv[struct {
+		LatestVersion string `json:"latest_version"`
+		HasUpdate     bool   `json:"has_update"`
+	}]
+	code, err := p.GetJSON("/api/update/check?channel=stable", &env)
+	if err != nil || code != http.StatusOK {
+		return "", false, false
+	}
+	return env.Data.LatestVersion, env.Data.HasUpdate, true
+}
+
+// TestRouterUpdateManualInstall: ручная установка не блокируется признаком сборки
+// и ставит настоящий новейший stable. На сборке ветки (версия X.Y.Z-alpha.N) новее
+// сборки ничего нет, поэтому установка завершается без скачивания; на сборке
+// вышедшего релиза установка идёт полностью, затем откат возвращает исходную
+// сборку.
+func TestRouterUpdateManualInstall(t *testing.T) {
+	p := routertest.NewPanel(t)
+	orig := rtUpdReadState(t, p).CurrentVersion
+
+	t.Run("dev-build-not-blocked", func(t *testing.T) {
+		if !rtUpdIsAlpha(orig) {
+			t.Skip("сборка не разработки: подтест идёт только на сборке ветки")
+		}
+		_, hasUpdate, ok := rtUpdCheck(p)
+		if !ok {
+			t.Skip("проверка релизов не удалась (GitHub недоступен)")
+		}
+		if hasUpdate {
+			t.Skip("есть более новый stable — на сборке ветки установка не запускается")
+		}
+		rtUpdPost(t, p, "/api/update/install?channel=stable", nil)
+		st := rtUpdWaitDone(t, p, 60*time.Second)
+		if st.Status != "done" || st.MessageCode != "up_to_date" {
+			t.Errorf("установка на сборке разработки: status=%q message_code=%q, ожидалось done и up_to_date", st.Status, st.MessageCode)
+		}
+		if v, ok := rtUpdCurrent(p); !ok || v != orig {
+			t.Errorf("версия панели изменилась: была %q, стала %q (ответ получен: %v)", orig, v, ok)
+		}
+	})
+
+	t.Run("install-and-rollback", func(t *testing.T) {
+		if rtUpdIsAlpha(orig) {
+			t.Skip("сборка разработки: подтест идёт только на сборке выпуска")
+		}
+		latest, hasUpdate, ok := rtUpdCheck(p)
+		if !ok {
+			t.Skip("проверка релизов не удалась (GitHub недоступен)")
+		}
+		if !hasUpdate {
+			t.Skipf("новейший stable %s не новее установленной сборки %s — ставить нечего", latest, orig)
+		}
+
+		// Возвращает исходную сборку, если панель на другой; безопасен для повтора.
+		rollback := func() {
+			// Панель могла быть в перезапуске — дождаться ответа.
+			deadline := time.Now().Add(2 * time.Minute)
+			var cur string
+			var up bool
+			for time.Now().Before(deadline) {
+				if cur, up = rtUpdCurrent(p); up {
+					break
+				}
+				time.Sleep(3 * time.Second)
+			}
+			if up && cur == orig {
+				return
+			}
+			if code, raw, err := p.Call(http.MethodPost, "/api/update/rollback", nil); err != nil || code != http.StatusOK {
+				t.Errorf("откат: статус %d, ошибка %v, тело %s", code, err, string(raw))
+				return
+			}
+			if !rtUpdWaitVersion(p, orig, 3*time.Minute) {
+				t.Errorf("стенд не вернулся на исходную сборку %s", orig)
+			}
+		}
+		t.Cleanup(rollback)
+
+		rtUpdPost(t, p, "/api/update/install?channel=stable", nil)
+		if !rtUpdWaitVersion(p, latest, 5*time.Minute) {
+			t.Fatalf("после установки панель не отдаёт версию %s", latest)
+		}
+		stdout, stderr, code := routertest.Exec(t.Context(), "/opt/sbin/xcp", "-v")
+		if code != 0 || !strings.Contains(stdout, "v"+latest) {
+			t.Errorf("xcp -v: код %d, вывод %q %q, ожидался тег v%s", code, strings.TrimSpace(stdout), strings.TrimSpace(stderr), latest)
+		}
+		rollback()
+	})
+}
