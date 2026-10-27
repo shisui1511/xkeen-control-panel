@@ -854,21 +854,8 @@ function parseJson(r) {
   }
 }
 
-// Сетевые строки сводки или null, если GitHub недоступен или ответ не разобран.
-async function collectNet() {
-  const [rel, run, stop, issues] = await Promise.all([
-    ghAsync(['release', 'list', '--exclude-drafts', '--limit', '30', '--json', 'tagName,isPrerelease,publishedAt']),
-    // несколько завершённых запусков: большинство запусков от status и issues пропущены if
-    ghAsync(['run', 'list', '--workflow', 'auto-release.yml', '--branch', 'main', '--status', 'completed',
-      '--limit', '20', '--json', 'conclusion,url']),
-    ghAsync(['variable', 'get', 'RELEASE_STOP']),
-    ghAsync(['api', 'repos/{owner}/{repo}/issues?state=open&labels=release-stop&per_page=5'])
-  ]);
-  const releases = rel.ok ? parseJson(rel) : null;
-  const runs = run.ok ? parseJson(run) : null;
-  const issueList = issues.ok ? parseJson(issues) : null;
-  if (!Array.isArray(releases) || !Array.isArray(runs) || !Array.isArray(issueList)) return null;
-
+// Пре-релизы новых баз без статуса смоука стенда: строки подсказки или null при сбое ответа.
+async function pendingSmokeLines(releases) {
   const lines = [];
   const names = releases.map(r => r.tagName).filter(n => TAG_NAME_RE.test(n));
   const stableNames = releases.filter(r => !r.isPrerelease).map(r => r.tagName).filter(n => TAG_NAME_RE.test(n));
@@ -892,7 +879,12 @@ async function collectNet() {
     const seen = list.some(s => s && (s.context === 'stand/arm64-smoke' || s.context === 'stand/arm64-full'));
     if (!seen) lines.push(`Пре-релиз ${tags[i]} ждёт смоука: make router-test SUITE=smoke RELEASE=${tags[i]}`);
   }
+  return lines;
+}
 
+// Строки про красный Auto Release, стоп выпуска и issue с меткой release-stop.
+function stopLines(runs, stop, issueList) {
+  const lines = [];
   // последний запуск со значимым исходом: пропущенные и отменённые красный не перекрывают
   const lastRun = runs.find(r => r && r.conclusion && r.conclusion !== 'skipped' && r.conclusion !== 'cancelled');
   if (lastRun && lastRun.conclusion === 'failure') {
@@ -913,6 +905,26 @@ async function collectNet() {
     }
   }
   return lines;
+}
+
+// Сетевые строки сводки или null, если GitHub недоступен или ответ не разобран.
+async function collectNet() {
+  const [rel, run, stop, issues] = await Promise.all([
+    ghAsync(['release', 'list', '--exclude-drafts', '--limit', '30', '--json', 'tagName,isPrerelease,publishedAt']),
+    // несколько завершённых запусков: большинство запусков от status и issues пропущены if
+    ghAsync(['run', 'list', '--workflow', 'auto-release.yml', '--branch', 'main', '--status', 'completed',
+      '--limit', '20', '--json', 'conclusion,url']),
+    ghAsync(['variable', 'get', 'RELEASE_STOP']),
+    ghAsync(['api', 'repos/{owner}/{repo}/issues?state=open&labels=release-stop&per_page=5'])
+  ]);
+  const releases = rel.ok ? parseJson(rel) : null;
+  const runs = run.ok ? parseJson(run) : null;
+  const issueList = issues.ok ? parseJson(issues) : null;
+  if (!Array.isArray(releases) || !Array.isArray(runs) || !Array.isArray(issueList)) return null;
+
+  const smoke = await pendingSmokeLines(releases);
+  if (!smoke) return null;
+  return smoke.concat(stopLines(runs, stop, issueList));
 }
 
 // Строки сводки: только по делу. Общий срок STATUS_TOTAL_MS на все вызовы gh и git.
@@ -980,6 +992,33 @@ async function cmdStatus(argv) {
   return 0;
 }
 
+// Подсказки после Bash-вызова: закрытие вехи и контекст PR.
+function bashContexts(ev, planning) {
+  const contexts = [];
+  const command = String((ev.tool_input && ev.tool_input.command) || '');
+  const failed = ev.tool_response && (ev.tool_response.interrupted === true || ev.tool_response.is_error === true);
+  const closing = failed ? [] : gsdCalls(command).filter(isClosing);
+  if (closing.length) {
+    const text = afterClose(closing[0], planning);
+    if (text) contexts.push(text);
+  }
+  try {
+    const text = prContext(command);
+    if (text) contexts.push(text);
+  } catch {
+    // PR не прочитан — без вывода
+  }
+  return contexts;
+}
+
+// Сводка после скилла прогресса.
+async function skillContexts(ev, planning) {
+  const skill = String((ev.tool_input && ev.tool_input.skill) || '');
+  if (!PROGRESS_SKILL_RE.test(skill)) return [];
+  const lines = await collectStatus(planning);
+  return lines.length ? [statusText(lines, true)] : [];
+}
+
 async function postHook(argv) {
   let ev;
   try {
@@ -989,30 +1028,10 @@ async function postHook(argv) {
   }
   if (!ev) return 0;
   const planning = flag(argv, '--planning') || defaultPlanning();
-  const contexts = [];
+  let contexts = [];
   try {
-    if (ev.tool_name === 'Bash') {
-      const command = String((ev.tool_input && ev.tool_input.command) || '');
-      const failed = ev.tool_response && (ev.tool_response.interrupted === true || ev.tool_response.is_error === true);
-      const closing = failed ? [] : gsdCalls(command).filter(isClosing);
-      if (closing.length) {
-        const text = afterClose(closing[0], planning);
-        if (text) contexts.push(text);
-      }
-      try {
-        const text = prContext(command);
-        if (text) contexts.push(text);
-      } catch {
-        // PR не прочитан — без вывода
-      }
-    }
-    if (ev.tool_name === 'Skill') {
-      const skill = String((ev.tool_input && ev.tool_input.skill) || '');
-      if (PROGRESS_SKILL_RE.test(skill)) {
-        const lines = await collectStatus(planning);
-        if (lines.length) contexts.push(statusText(lines, true));
-      }
-    }
+    if (ev.tool_name === 'Bash') contexts = contexts.concat(bashContexts(ev, planning));
+    if (ev.tool_name === 'Skill') contexts = contexts.concat(await skillContexts(ev, planning));
   } catch {
     return 0;
   }

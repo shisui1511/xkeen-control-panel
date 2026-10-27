@@ -1163,7 +1163,7 @@ publish_release_status() {
       _preason="деплой не начат (сбой на ПК)"
     elif [ "$(cat "$RT_REPORT/$_pt/deploy.rc")" = 2 ]; then
       _preason="сбой подготовки стенда"
-    elif [ "$SUITE_NAME" = smoke ] && { git diff --quiet origin/main...HEAD -- scripts/router >/dev/null 2>&1; [ $? -ne 0 ]; }; then
+    elif [ "$SUITE_NAME" = smoke ] && ! git diff --quiet origin/main...HEAD -- scripts/router >/dev/null 2>&1; then
       # Смоук ветки с изменённым кодом стенда проверяет не то, что идёт в main; не удалось
       # сравнить с origin/main (нет ссылки) — тоже не ставим
       _preason="код стенда ветки отличается от main"
