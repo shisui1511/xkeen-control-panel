@@ -21,6 +21,14 @@
 //           "ref": "0aae0a7c",              (воспроизведение до исправления); тесты — из HEAD
 //           "files": ["frontend/src/Editor.svelte"]
 //         },
+//         "version": "v0.33.0",             необязательно: сборка HEAD
+//                                           под номером вышедшего релиза (тег vX.Y.Z[-<суффикс>.N]
+//                                           из локального git или latest — новейший
+//                                           опубликованный); сеть и данные GitHub
+//                                           настоящие, подменён только номер установленной версии;
+//                                           не сочетается с product и с проходом-прогоном; номер
+//                                           живёт только в деплое прохода: XCP_VERSION снимается
+//                                           со всех этапов, возврат стенда собирает HEAD без номера
 //         "go": { "pkgs": "./internal/x", "run": "^TestRouterX$" },    необязательно
 //         "specs": ["tests/router/editor-mobile.spec.ts"],              необязательно, от frontend/
 //         "grep": "value-missing|backups-switch",                       необязательно, --grep
@@ -685,7 +693,7 @@ class Session {
       RT_REPORT: dir,
       XCP_VERSION: version ?? undefined
     });
-    this.record({ kind: 'deploy', label, dir, rc: drc });
+    this.record({ kind: 'deploy', label, dir, rc: drc, version });
     if (drc !== 0) {
       this.deployed = null;
       if (drc !== 3) this.broken = true;
@@ -696,7 +704,7 @@ class Session {
     const src = await this.run('sh', [path.join(SCRIPT_DIR, 'smoke.sh'), this.t, ver], {
       RT_REPORT: dir
     });
-    this.record({ kind: 'smoke', label, dir, rc: src });
+    this.record({ kind: 'smoke', label, dir, rc: src, version });
     const coreFile = path.join(dir, this.t, 'core');
     const core = existsSync(coreFile) ? readFileSync(coreFile, 'utf8').trim() : '-';
     if (CORES.includes(core)) this.cur = core;
@@ -827,7 +835,7 @@ class Session {
       const env = { RT_REPORT: dir, RT_GO_PKGS: p.go.pkgs };
       if (p.go.run) env.RT_GO_RUN = p.go.run;
       const g = await this.run('sh', [path.join(SCRIPT_DIR, 'go-suite.sh'), this.t, core], env);
-      this.record({ kind: 'go', pass: p.name, core, dir, rc: g });
+      this.record({ kind: 'go', pass: p.name, core, dir, rc: g, version: p.resolved ?? null });
       if (g === 3) return 3;
       if (p.specs.length) {
         // после разрушающих Go-тестов спеки начинают с рабочего стенда (как в run.sh)
@@ -857,7 +865,7 @@ class Session {
       const env = { RT_REPORT: dir, RT_SPECS: p.specs.join(' ') };
       if (p.grep) env.RT_PW_GREP = p.grep;
       rc = await this.run('sh', [path.join(SCRIPT_DIR, 'pw-suite.sh'), this.t, core], env);
-      this.record({ kind: 'pw', pass: p.name, core, dir, rc });
+      this.record({ kind: 'pw', pass: p.name, core, dir, rc, version: p.resolved ?? null });
       if (rc === 3) return 3;
     }
     this.judge(p, core, dir);
@@ -1404,7 +1412,7 @@ class Session {
     L.push('', '## Этапы', '');
     for (const s of this.steps) {
       L.push(
-        `- ${s.kind}${s.pass ? ` ${s.pass}` : ''}${s.core ? ` ${s.core}` : ''}${s.label ? ` ${s.label}` : ''}: код ${s.rc} (${path.relative(this.root, s.dir)})`
+        `- ${s.kind}${s.pass ? ` ${s.pass}` : ''}${s.core ? ` ${s.core}` : ''}${s.label ? ` ${s.label}` : ''}${s.version ? ` под номером ${s.version}` : ''}: код ${s.rc} (${path.relative(this.root, s.dir)})`
       );
     }
     L.push('', '## Стенд в конце', '');
@@ -1431,6 +1439,10 @@ class Session {
           target: this.t,
           core_initial: this.c0,
           verdicts: this.verdicts,
+          // номер сборки каждого прохода go/specs: разрешённый тег вышедшего релиза или null
+          passes: this.spec.passes
+            .filter((p) => !p.suite)
+            .map((p) => ({ name: p.name, version: p.resolved ?? null })),
           suites: this.suites,
           steps: this.steps.map((s) => ({
             ...s,
