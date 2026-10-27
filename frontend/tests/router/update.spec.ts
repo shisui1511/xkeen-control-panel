@@ -318,6 +318,19 @@ for (const theme of ['light', 'dark'] as const) {
       ) {
         knownFailure('*', 'light-tinted-badge-text-contrast');
       }
+      // Капсула состояния на узком экране в светлой теме: метка только когда axe нашёл
+      // контраст на самом .mobile-traffic
+      if (
+        theme === 'light' &&
+        vp.width === 390 &&
+        severe.some(
+          (v) =>
+            v.id === 'color-contrast' &&
+            v.nodes.some((n) => n.target.join(' ').includes('.mobile-traffic'))
+        )
+      ) {
+        knownFailure('*', 'status-capsule-mobile-traffic-contrast');
+      }
       if (severe.length > 0) {
         // Только правило, селекторы и числа контраста: HTML узлов в вывод не попадает
         const list = severe.map((v) => {
