@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -45,6 +46,10 @@ type UpdateInfo struct {
 	PublishedAt    string        `json:"published_at,omitempty"`
 	Changelog      string        `json:"changelog,omitempty"`
 	Releases       []ReleaseNote `json:"releases,omitempty"` // от новой версии к текущей
+	// Urgent и Hold — блок xcp-release первой строки тела релиза: срочный релиз
+	// снимает задержку Основного канала, стоп держит автоустановку.
+	Urgent bool `json:"urgent"`
+	Hold   bool `json:"hold"`
 }
 
 // ReleaseNote — описание одного релиза между текущей и доступной версией.
@@ -151,7 +156,7 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 	info.Channel = channel
 	info.HasUpdate = updateAvailable(info.LatestVersion, currentVersion)
 	a.cfg.RLock()
-	sameChannel := channel == a.cfg.UpdateChannel
+	sameChannel := channel == normalizeChannel(a.cfg.UpdateChannel)
 	a.cfg.RUnlock()
 	if a.updateScheduler != nil && sameChannel {
 		// Ручная проверка обновляет и уведомления
@@ -357,18 +362,16 @@ func (a *API) UpdateChannelHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// UpdateChannelGet возвращает сохранённый канал обновлений (stable/beta/dev).
+// UpdateChannelGet возвращает сохранённый канал обновлений (stable/beta);
+// пустое и устаревшее значение читаются как stable.
 func (a *API) UpdateChannelGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 	a.cfg.RLock()
-	ch := a.cfg.UpdateChannel
+	ch := normalizeChannel(a.cfg.UpdateChannel)
 	a.cfg.RUnlock()
-	if ch == "" {
-		ch = "stable"
-	}
 	JSONSuccess(w, map[string]string{"channel": ch})
 }
 
@@ -571,7 +574,7 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 					PanelVersion string `json:"panel_version"`
 				}
 				_ = json.NewDecoder(resp.Body).Decode(&versionResp)
-				ok = versionMatches(expectedVersion, versionResp.PanelVersion)
+				ok = strings.TrimPrefix(expectedVersion, "v") == strings.TrimPrefix(versionResp.PanelVersion, "v")
 			}
 			resp.Body.Close()
 			if ok {
@@ -790,10 +793,63 @@ func releaseNotesBetween(releases []githubRelease, channel, current, latest stri
 	return notes
 }
 
+// releaseMarkerRe — первая строка тела релиза с блоком xcp-release; формат
+// пишет .github/scripts/auto_release.sh (шапка и запись блока в finalize).
+var releaseMarkerRe = regexp.MustCompile(`^<!-- xcp-release: (\{.*\}) -->$`)
+
+// releaseMarker — разобранный блок xcp-release.
+type releaseMarker struct {
+	Urgent bool
+	Hold   bool
+}
+
+// parseReleaseMarker читает блок xcp-release только из первой строки тела.
+// Нет блока — found=false. Блок есть, но не разобрался (не JSON, значения не
+// булевы, нет ключа) — found=true, bad=true и нулевой результат. Лишние ключи
+// игнорируются.
+func parseReleaseMarker(body string) (m releaseMarker, found, bad bool) {
+	first, _, _ := strings.Cut(body, "\n")
+	first = strings.TrimSuffix(first, "\r")
+	match := releaseMarkerRe.FindStringSubmatch(first)
+	if match == nil {
+		return releaseMarker{}, false, false
+	}
+	var raw struct {
+		Urgent *bool `json:"urgent"`
+		Hold   *bool `json:"hold"`
+	}
+	if err := json.Unmarshal([]byte(match[1]), &raw); err != nil || raw.Urgent == nil || raw.Hold == nil {
+		return releaseMarker{}, true, true
+	}
+	return releaseMarker{Urgent: *raw.Urgent, Hold: *raw.Hold}, true, false
+}
+
+// warnOnce пишет предупреждение один раз на значение: повтор того же значения
+// подряд не заливает журнал.
+type warnOnce struct {
+	mu   sync.Mutex
+	last string
+}
+
+func (w *warnOnce) first(v string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.last == v {
+		return false
+	}
+	w.last = v
+	return true
+}
+
+var (
+	badMarkerWarn     warnOnce
+	unknownChannelLog warnOnce
+)
+
 // pickLatestRelease выбирает самый новый по semver релиз канала: GitHub сортирует
 // релизы по дате публикации, и пересобранный pre-release оказывается выше более
-// нового stable. Канал beta включает stable, иначе после релиза, когда dev-сборки
-// удалены, beta остаётся без версий.
+// нового stable. Канал beta включает stable, иначе после релиза, когда пре-релизы
+// закончились, beta остаётся без версий.
 func pickLatestRelease(releases []githubRelease, channel string) (*UpdateInfo, error) {
 	var best *githubRelease
 	for i := range releases {
@@ -809,51 +865,51 @@ func pickLatestRelease(releases []githubRelease, channel string) (*UpdateInfo, e
 	if best == nil {
 		return nil, fmt.Errorf("no release found for channel %s", channel)
 	}
+	marker, _, bad := parseReleaseMarker(best.Body)
+	if bad && badMarkerWarn.first(best.TagName) {
+		log.Printf("Update: release %s: unreadable xcp-release block, using urgent=false hold=false", best.TagName)
+	}
 	return &UpdateInfo{
 		LatestVersion: strings.TrimPrefix(best.TagName, "v"),
 		Changelog:     best.Body,
 		Prerelease:    best.Prerelease,
 		PublishedAt:   best.PublishedAt,
+		Urgent:        marker.Urgent,
+		Hold:          marker.Hold,
 	}, nil
 }
 
-// updateAvailable решает, предлагать ли обновление. Rolling dev-сборка пересобирается
-// под тем же тегом, поэтому равная версия для неё тоже считается обновлением;
-// версия ниже текущей не предлагается никогда.
+// updateAvailable решает, предлагать ли обновление. Порядок alpha < beta < stable
+// даёт SemVer, понижение версии не предлагается.
 func updateAvailable(latest, current string) bool {
 	if latest == "" {
 		return false
 	}
-	if isDevVersion(current) {
-		return compareSemver(semverCore(latest), semverCore(current)) >= 0
-	}
 	return compareSemver(latest, current) > 0
 }
 
-// isDevVersion reports whether v is a development build: the rolling
-// channel "X.Y.Z-dev" or a build of it "X.Y.Z-dev.N+gSHA" (scripts/version.sh).
-func isDevVersion(v string) bool {
+// isAlphaBuild сообщает, что v — сборка разработки scripts/version.sh вида
+// X.Y.Z-alpha.N+g<sha>[.dirty]: такая сборка автоматически не обновляется.
+func isAlphaBuild(v string) bool {
 	v, _, _ = strings.Cut(v, "+")
 	_, pre, ok := strings.Cut(v, "-")
-	return ok && (pre == "dev" || strings.HasPrefix(pre, "dev."))
+	return ok && (pre == "alpha" || strings.HasPrefix(pre, "alpha."))
 }
 
-// versionMatches reports whether the running binary reports the version of
-// the release that was installed. Dev releases are published under the
-// channel tag "X.Y.Z-dev" while the binary carries "X.Y.Z-dev.N+gSHA".
-func versionMatches(expected, actual string) bool {
-	expected = strings.TrimPrefix(expected, "v")
-	actual = strings.TrimPrefix(actual, "v")
-	if actual == expected {
-		return true
+// normalizeChannel приводит сохранённый канал к допустимому: stable и beta как
+// есть, пустое — stable, любое другое (старое значение конфига) — stable с одной
+// записью в журнал на значение.
+func normalizeChannel(ch string) string {
+	switch ch {
+	case "stable", "beta":
+		return ch
+	case "":
+		return "stable"
 	}
-	build, _, _ := strings.Cut(actual, "+")
-	return build == expected || strings.HasPrefix(build, expected+".")
-}
-
-func semverCore(v string) string {
-	core, _, _ := strings.Cut(v, "-")
-	return core
+	if unknownChannelLog.first(ch) {
+		log.Printf("Update: unknown update channel %q in config, using stable", ch)
+	}
+	return "stable"
 }
 
 func fetchChangelog(version string) (string, error) {

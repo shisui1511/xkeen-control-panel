@@ -25,6 +25,12 @@ export interface UpdateCheckState {
   install_window: string;
   auto_failed_version?: string;
   last_auto_install?: AutoInstallRecord;
+  // Факты релиза и расчёт автоустановки; поля может не быть у старой панели
+  latest_published_at?: string;
+  latest_urgent?: boolean;
+  latest_hold?: boolean;
+  auto_state?: string;
+  auto_install_on?: string;
 }
 
 export const updateState = writable<UpdateCheckState | null>(null);

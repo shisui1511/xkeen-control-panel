@@ -65,7 +65,7 @@ type Config struct {
 	Auth            AuthConfig  `json:"auth"`
 	HTTPS           HTTPSConfig `json:"https"`
 	MihomoSecret    string      `json:"mihomo_secret"`
-	UpdateChannel   string      `json:"update_channel"` // stable, beta, dev
+	UpdateChannel   string      `json:"update_channel"` // stable, beta
 	// Фоновая проверка обновлений (уведомления) и автоустановка в окно времени
 	UpdateAutoCheck     bool   `json:"update_auto_check"`
 	UpdateAutoInstall   bool   `json:"update_auto_install"`
