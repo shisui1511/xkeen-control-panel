@@ -20,6 +20,7 @@
     apiErrorView,
     type UpdateStatusPayload
   } from '../../lib/updateStatusView';
+  import { autoInstallView, autoStateOf } from '../../lib/autoInstallView';
 
   interface ReleaseNote {
     version: string;
@@ -111,6 +112,10 @@
     ).map((w) => ({ value: w, label: w.replace('-', ' – ') }))
   );
   let savingAuto = $state(false);
+
+  // Состояние автоустановки из последней проверки планировщика; текст и дата — из общего помощника
+  const autoView = $derived(autoInstallView($updateState, $currentLang, 'card'));
+  const autoCode = $derived(autoStateOf($updateState));
 
   async function saveAuto(
     patch: Partial<Pick<UpdateCheckState, 'auto_check' | 'auto_install' | 'install_window'>>
@@ -548,6 +553,17 @@
       {/if}
     </div>
 
+    {#if autoView}
+      <div
+        class="update-state state-info auto-status"
+        role="status"
+        data-testid="update-auto-status"
+        data-state={autoCode}
+      >
+        {$t(autoView.key, autoView.params)}
+      </div>
+    {/if}
+
     {#if auto.last_auto_install}
       {@const last = auto.last_auto_install}
       <div class="update-state {last.ok ? 'state-ok' : 'state-error'}">
@@ -766,6 +782,21 @@
     background: color-mix(in srgb, var(--danger) 8%, transparent);
     border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
     word-break: break-word;
+  }
+
+  .state-info {
+    color: var(--fg-secondary);
+    background: var(--surface-tint);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
+
+  .auto-status {
+    margin-top: 16px;
+    padding: 8px 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
   }
 
   .update-available {
