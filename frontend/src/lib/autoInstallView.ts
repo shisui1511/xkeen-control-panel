@@ -1,9 +1,11 @@
 /**
  * autoInstallView.ts — чистая логика подписи состояния автоустановки панели.
  * Бэкенд отдаёт в GET /api/update/state код `auto_state` и дату `auto_install_on` (YYYY-MM-DD в
- * поясе роутера); срок интерфейс не считает. Модуль возвращает ключ i18n и параметры date и
- * window, перевод делает вызывающий код через $t(): карточка, блок «Доступна версия» и баннер
- * берут текст только отсюда, поэтому формулировки не расходятся.
+ * поясе роутера); срок интерфейс не считает. Модуль возвращает ключ i18n и параметры date,
+ * window и version, перевод делает вызывающий код через $t(): карточка, блок «Доступна версия»
+ * и баннер берут текст только отсюда, поэтому формулировки не расходятся. Кандидат
+ * автоустановки (`auto_version`) на Основном канале может быть старше новейшей версии
+ * (`latest_version`): тогда выбирается подпись с номером кандидата.
  */
 import type { I18nRef } from './kernelView';
 import { formatRouterDate } from './format';
@@ -22,6 +24,8 @@ export interface AutoInstallInput {
   auto_install_on?: string;
   install_window?: string;
   auto_install?: boolean;
+  auto_version?: string;
+  latest_version?: string;
   error?: string;
 }
 
@@ -31,6 +35,17 @@ export function autoStateOf(
 ): AutoState | null {
   const code = st?.auto_state ?? '';
   return (AUTO_STATES as readonly string[]).includes(code) ? (code as AutoState) : null;
+}
+
+/**
+ * Кандидат автоустановки — не новейшая версия: подпись должна назвать его номер. Пусто, когда
+ * кандидат совпадает с новейшей версией или панель его не отдала.
+ */
+export function otherAutoVersion(
+  st: Pick<AutoInstallInput, 'auto_version' | 'latest_version'> | null | undefined
+): string {
+  const v = st?.auto_version ?? '';
+  return v && v !== st?.latest_version ? v : '';
 }
 
 /** Ключ i18n по коду и поверхности. */
@@ -69,5 +84,8 @@ export function autoInstallView(
   if (st.error) return null;
   const date = formatRouterDate(st.auto_install_on, lang);
   if (!date) return null;
-  return { key, params: { date, window: st.install_window ?? '' } };
+  const params = { date, window: st.install_window ?? '' };
+  const version = otherAutoVersion(st);
+  if (version) return { key: `${key}_version`, params: { ...params, version } };
+  return { key, params };
 }

@@ -16,6 +16,8 @@ import { api } from './lib/nodes-api';
 // Состояние автоустановки (D-15, D-26, D-27): тесты `update auto-status:` сверяют строки
 // карточки автообновлений, блока «Доступна версия» и баннера на главной с полем auto_state из
 // GET /api/update/state. Сроки и даты спек не считает: берёт код состояния у самой панели.
+// Кандидат автоустановки (auto_version) на Основном может быть старше новейшей версии: тогда
+// строка называет его номер, а «Срочное» у блока новейшей версии не рисуется.
 // Тесты `update axe:` проверяют доступность и горизонтальную прокрутку в двух темах.
 //
 // Спек изменяющий (меняет канал панели, на время теста включает автоустановку), поэтому
@@ -67,6 +69,7 @@ interface UpdateStateApi {
   auto_install?: boolean;
   install_window?: string;
   auto_state?: string;
+  auto_version?: string;
 }
 
 let savedChannel: Channel | null = null;
@@ -166,7 +169,16 @@ function shownCode(st: UpdateStateApi): string | null {
   return code;
 }
 
-/** Строка состояния: непустая, без необработанных подстановок, для срочных — с окном установки. */
+/** Кандидат автоустановки, отличный от новейшей версии; пусто — совпадает или поля нет. */
+function otherVersion(st: UpdateStateApi): string {
+  const v = st.auto_version ?? '';
+  return v && v !== st.latest_version ? v : '';
+}
+
+/**
+ * Строка состояния: непустая, без необработанных подстановок, для срочных — с окном установки,
+ * при кандидате старше новейшей версии — с его номером.
+ */
 async function expectStateText(
   line: ReturnType<Page['locator']>,
   code: string,
@@ -177,6 +189,8 @@ async function expectStateText(
   expect(body, `строка состояния ${code}: остались подстановки`).not.toMatch(/[{}]/);
   if (DATED.includes(code)) {
     expect(body, `строка состояния ${code}: нет окна установки`).toContain(st.install_window ?? '');
+    const other = otherVersion(st);
+    if (other) expect(body, `строка состояния ${code}: нет версии кандидата`).toContain(other);
   }
 }
 
@@ -241,7 +255,7 @@ for (const channel of ['stable', 'beta'] as const) {
       } else {
         await expect(availAuto).toHaveCount(0);
       }
-      if (same && st.auto_state === 'urgent') {
+      if (same && st.auto_state === 'urgent' && !otherVersion(st)) {
         await expect(urgentBadge).toBeVisible({ timeout: T.action });
       } else {
         await expect(urgentBadge).toHaveCount(0);

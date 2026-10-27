@@ -31,6 +31,8 @@ export interface UpdateCheckState {
   latest_hold?: boolean;
   auto_state?: string;
   auto_install_on?: string;
+  // Версия, которую поставит фоновая установка (может быть старше latest_version)
+  auto_version?: string;
 }
 
 export const updateState = writable<UpdateCheckState | null>(null);

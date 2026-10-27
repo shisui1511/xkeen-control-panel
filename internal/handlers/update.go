@@ -50,6 +50,16 @@ type UpdateInfo struct {
 	// снимает задержку Основного канала, стоп держит автоустановку.
 	Urgent bool `json:"urgent"`
 	Hold   bool `json:"hold"`
+	// AutoReleases — релизы канала новее текущей версии: из них планировщик
+	// выбирает кандидата автоустановки (он может быть старше LatestVersion).
+	AutoReleases []autoRelease `json:"-"`
+}
+
+// autoRelease — факты релиза канала, нужные для выбора кандидата автоустановки.
+type autoRelease struct {
+	Version     string
+	PublishedAt string
+	Urgent      bool
 }
 
 // ReleaseNote — описание одного релиза между текущей и доступной версией.
@@ -155,6 +165,7 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 	info.CurrentVersion = currentVersion
 	info.Channel = channel
 	info.HasUpdate = updateAvailable(info.LatestVersion, currentVersion)
+	info.AutoReleases = channelReleasesAbove(releases, channel, currentVersion)
 	a.cfg.RLock()
 	sameChannel := channel == normalizeChannel(a.cfg.UpdateChannel)
 	a.cfg.RUnlock()
@@ -203,7 +214,8 @@ func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
 	if channel == "" {
 		channel = "stable"
 	}
-	if !a.startUpdate(channel) {
+	// Ручная установка ставит новейший релиз канала: целевой версии нет
+	if !a.startUpdate(channel, "") {
 		JSONErrorCode(w, http.StatusConflict, "update_in_progress", a.t(r, "update.in_progress"))
 		return
 	}
@@ -212,8 +224,9 @@ func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
 
 // startUpdate запускает обновление, если другое не идёт: проверка и захват
 // состояния — под одной блокировкой, чтобы кнопка и автоустановка не стартовали
-// обновление дважды.
-func (a *API) startUpdate(channel string) bool {
+// обновление дважды. want — целевая версия фоновой установки (кандидат, по
+// которому принято решение); пусто — новейший релиз канала (ручная установка).
+func (a *API) startUpdate(channel, want string) bool {
 	updateStateMu.Lock()
 	if updateState.Status != "idle" && updateState.Status != "failed" && updateState.Status != "done" {
 		updateStateMu.Unlock()
@@ -222,7 +235,7 @@ func (a *API) startUpdate(channel string) bool {
 	updateState = UpdateStatus{Status: "checking", MessageCode: "checking", Progress: 5, Timestamp: time.Now().Unix()}
 	updateStateMu.Unlock()
 
-	go a.performUpdate(channel)
+	go a.performUpdate(channel, want)
 	return true
 }
 
@@ -407,7 +420,9 @@ func (a *API) UpdateChannelSet(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, map[string]string{"channel": body.Channel})
 }
 
-func (a *API) performUpdate(channel string) {
+// performUpdate ставит want (фоновая установка: ровно ту версию, по которой
+// принято решение) или новейший релиз канала, если want пуст (ручная установка).
+func (a *API) performUpdate(channel, want string) {
 	defer func() {
 		if r := recover(); r != nil {
 			setUpdateStep("failed", 0, "panic", map[string]string{"detail": fmt.Sprint(r)}, fmt.Sprintf("Panic: %v", r))
@@ -417,7 +432,7 @@ func (a *API) performUpdate(channel string) {
 	// Step 1: Check latest release
 	setUpdateStep("checking", 10, "checking", nil, "Checking for updates...")
 
-	info, err := fetchLatestRelease(channel)
+	info, err := fetchUpdateTarget(channel, want)
 	if err != nil {
 		setUpdateStep("failed", 0, "check_failed", map[string]string{"detail": err.Error()}, "Failed to check updates: "+err.Error())
 		return
@@ -708,12 +723,30 @@ type githubRelease struct {
 	} `json:"assets"`
 }
 
-func fetchLatestRelease(channel string) (*UpdateInfo, error) {
+// fetchUpdateTarget — релиз, который ставит performUpdate: want из релизов
+// канала или, при пустом want, новейший релиз канала. Нет want среди релизов
+// канала — ошибка: фоновая установка не подменяет кандидата другой версией.
+func fetchUpdateTarget(channel, want string) (*UpdateInfo, error) {
 	releases, err := releasesFetcher()
 	if err != nil {
 		return nil, err
 	}
-	return pickLatestRelease(releases, channel)
+	if want == "" {
+		return pickLatestRelease(releases, channel)
+	}
+	for _, rel := range releases {
+		if rel.Prerelease && channel != "beta" {
+			continue
+		}
+		if strings.TrimPrefix(rel.TagName, "v") == want {
+			return &UpdateInfo{
+				LatestVersion: want,
+				Prerelease:    rel.Prerelease,
+				PublishedAt:   rel.PublishedAt,
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("release v%s not found for channel %s", want, channel)
 }
 
 // fetchReleases возвращает последние релизы: 30 хватает на описание изменений
@@ -877,6 +910,24 @@ func pickLatestRelease(releases []githubRelease, channel string) (*UpdateInfo, e
 		Urgent:        marker.Urgent,
 		Hold:          marker.Hold,
 	}, nil
+}
+
+// channelReleasesAbove — релизы канала новее current с фактами для выбора
+// кандидата автоустановки (published_at и urgent из блока xcp-release).
+func channelReleasesAbove(releases []githubRelease, channel, current string) []autoRelease {
+	var out []autoRelease
+	for _, rel := range releases {
+		if rel.Prerelease && channel != "beta" {
+			continue
+		}
+		v := strings.TrimPrefix(rel.TagName, "v")
+		if !updateAvailable(v, current) {
+			continue
+		}
+		marker, _, _ := parseReleaseMarker(rel.Body)
+		out = append(out, autoRelease{Version: v, PublishedAt: rel.PublishedAt, Urgent: marker.Urgent})
+	}
+	return out
 }
 
 // updateAvailable решает, предлагать ли обновление. Порядок alpha < beta < stable

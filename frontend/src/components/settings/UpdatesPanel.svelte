@@ -20,7 +20,7 @@
     apiErrorView,
     type UpdateStatusPayload
   } from '../../lib/updateStatusView';
-  import { autoInstallView, autoStateOf } from '../../lib/autoInstallView';
+  import { autoInstallView, autoStateOf, otherAutoVersion } from '../../lib/autoInstallView';
 
   interface ReleaseNote {
     version: string;
@@ -125,6 +125,10 @@
   );
   const availableView = $derived(
     availableMatches && autoCode && autoCode !== 'dev_build' ? autoView : null
+  );
+  // «Срочное» — только когда срочный кандидат и есть показанная версия
+  const availableUrgent = $derived(
+    availableMatches && autoCode === 'urgent' && !otherAutoVersion($updateState)
   );
 
   async function saveAuto(
@@ -474,7 +478,7 @@
             >{$t('settings.update_available_title', { version: info.latest_version })}</span
           >
           <span class="badge {kindBadge(kind)}">{$t(`settings.update_kind_${kind}`)}</span>
-          {#if availableMatches && autoCode === 'urgent'}
+          {#if availableUrgent}
             <span class="badge badge-warning" data-testid="update-urgent-badge"
               >{$t('settings.update_urgent_badge')}</span
             >

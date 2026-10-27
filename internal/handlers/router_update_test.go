@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,7 @@ type rtUpdState struct {
 	LatestHold        bool   `json:"latest_hold"`
 	AutoState         string `json:"auto_state"`
 	AutoInstallOn     string `json:"auto_install_on"`
+	AutoVersion       string `json:"auto_version"`
 }
 
 // rtUpdGet — GET с разбором data ответа; любой статус кроме 200 — провал.
@@ -83,8 +85,84 @@ func rtUpdIsAlpha(version string) bool {
 // rtUpdRelease — релиз GitHub, прочитанный устройством напрямую.
 type rtUpdRelease struct {
 	TagName     string `json:"tag_name"`
+	Prerelease  bool   `json:"prerelease"`
 	PublishedAt string `json:"published_at"`
 	Body        string `json:"body"`
+}
+
+// rtUpdSemver сравнивает номера версий без префикса v по SemVer 2.0 (своя
+// реализация теста): числовое ядро, затем идентификаторы пре-релиза; версия без
+// суффикса старше своих пре-релизов, метаданные сборки после + не учитываются.
+func rtUpdSemver(a, b string) int {
+	split := func(v string) (nums []int, pre []string) {
+		v = strings.SplitN(v, "+", 2)[0]
+		core, suffix, hasPre := strings.Cut(v, "-")
+		for _, part := range strings.Split(core, ".") {
+			n, _ := strconv.Atoi(part)
+			nums = append(nums, n)
+		}
+		if hasPre {
+			pre = strings.Split(suffix, ".")
+		}
+		return nums, pre
+	}
+	an, ap := split(a)
+	bn, bp := split(b)
+	for len(an) < len(bn) {
+		an = append(an, 0)
+	}
+	for len(bn) < len(an) {
+		bn = append(bn, 0)
+	}
+	for i := range an {
+		if an[i] != bn[i] {
+			if an[i] < bn[i] {
+				return -1
+			}
+			return 1
+		}
+	}
+	switch {
+	case len(ap) == 0 && len(bp) == 0:
+		return 0
+	case len(ap) == 0:
+		return 1
+	case len(bp) == 0:
+		return -1
+	}
+	isNum := func(s string) (int, bool) {
+		n, err := strconv.Atoi(s)
+		return n, err == nil
+	}
+	for i := 0; i < len(ap) && i < len(bp); i++ {
+		x, xNum := isNum(ap[i])
+		y, yNum := isNum(bp[i])
+		switch {
+		case xNum && yNum:
+			if x != y {
+				if x < y {
+					return -1
+				}
+				return 1
+			}
+		case xNum:
+			return -1
+		case yNum:
+			return 1
+		case ap[i] != bp[i]:
+			if ap[i] < bp[i] {
+				return -1
+			}
+			return 1
+		}
+	}
+	switch {
+	case len(ap) < len(bp):
+		return -1
+	case len(ap) > len(bp):
+		return 1
+	}
+	return 0
 }
 
 // rtUpdReleases читает список релизов; второе значение — причина недоступности
@@ -166,8 +244,9 @@ func rtUpdRestore(t *testing.T, p *routertest.Panel) {
 	})
 }
 
-// TestRouterUpdateAutoState сверяет auto_state и auto_install_on панели с реальными
-// релизами GitHub и часами устройства для обоих каналов.
+// TestRouterUpdateAutoState сверяет auto_state, auto_install_on и auto_version
+// (кандидат автоустановки) панели с реальными релизами GitHub и часами
+// устройства для обоих каналов.
 func TestRouterUpdateAutoState(t *testing.T) {
 	utils.ApplySystemTimezone()
 	p := routertest.NewPanel(t)
@@ -199,7 +278,7 @@ func rtUpdAutoStateChannel(t *testing.T, p *routertest.Panel, channel string) {
 		}
 
 		alpha := rtUpdIsAlpha(st.CurrentVersion)
-		want, wantDate := "", ""
+		want, wantDate, wantVersion := "", "", ""
 		var rels []rtUpdRelease
 		if checkOK {
 			var reason string
@@ -236,7 +315,7 @@ func rtUpdAutoStateChannel(t *testing.T, p *routertest.Panel, channel string) {
 						st.LatestVersion, st.LatestUrgent, st.LatestHold, urgent, hold)
 				}
 				if !alpha {
-					want, wantDate = rtUpdExpect(st, rel, urgent, hold, channel, now, endMin)
+					want, wantDate, wantVersion = rtUpdExpect(st, rels, hold, channel, now, endMin)
 				}
 			}
 		}
@@ -245,10 +324,10 @@ func rtUpdAutoStateChannel(t *testing.T, p *routertest.Panel, channel string) {
 		}
 
 		t.Run(want, func(t *testing.T) {
-			if st.AutoState != want || st.AutoInstallOn != wantDate {
-				t.Errorf("канал %s: auto_state=%q auto_install_on=%q, ожидалось %q и %q (has_update=%v, latest=%s, published_at=%s, urgent=%v, hold=%v, окно %s)",
-					channel, st.AutoState, st.AutoInstallOn, want, wantDate, st.HasUpdate, st.LatestVersion,
-					st.LatestPublishedAt, st.LatestUrgent, st.LatestHold, window)
+			if st.AutoState != want || st.AutoInstallOn != wantDate || st.AutoVersion != wantVersion {
+				t.Errorf("канал %s: auto_state=%q auto_install_on=%q auto_version=%q, ожидалось %q, %q и %q (has_update=%v, latest=%s, published_at=%s, urgent=%v, hold=%v, окно %s)",
+					channel, st.AutoState, st.AutoInstallOn, st.AutoVersion, want, wantDate, wantVersion,
+					st.HasUpdate, st.LatestVersion, st.LatestPublishedAt, st.LatestUrgent, st.LatestHold, window)
 			}
 		})
 
@@ -267,31 +346,67 @@ func rtUpdAutoStateChannel(t *testing.T, p *routertest.Panel, channel string) {
 	}
 }
 
-// rtUpdExpect — ожидаемое состояние и дата на сборке выпуска (не alpha) по
-// правилам модели: сначала нет обновления, затем неудачная версия, стоп, срочное,
-// Основной канал выдерживает релиз 168 часов, иначе ближайшее окно.
-func rtUpdExpect(st rtUpdState, rel *rtUpdRelease, urgent, hold bool, channel string, now time.Time, endMin int) (state, date string) {
+// rtUpdExpect — ожидаемые состояние, дата и версия кандидата на сборке выпуска
+// (не alpha) по правилам модели. Кандидат ищется среди релизов канала новее
+// установленной версии: на Предварительном — новейший, ближайшее окно; на
+// Основном — новейший stable, которому исполнилось 168 часов от публикации или
+// срочный (свежий stable не блокирует более старый выдержанный). Выдержанного
+// нет — срок от самого раннего невыдержанного. Порядок: нет обновления, кандидат
+// совпал с неудачной версией, стоп (блок новейшего релиза), срочное, ближайшее
+// окно, отложено.
+func rtUpdExpect(st rtUpdState, rels []rtUpdRelease, hold bool, channel string, now time.Time, endMin int) (state, date, version string) {
 	dateFrom := func(from time.Time) string { return rtUpdWindowDate(from, endMin) }
+	if !st.HasUpdate {
+		return "none", "", ""
+	}
+	type cand struct {
+		version string
+		urgent  bool
+		due     time.Time
+		dated   bool
+	}
+	var ready, next *cand
+	for _, r := range rels {
+		if r.Prerelease && channel != "beta" {
+			continue
+		}
+		v := strings.TrimPrefix(r.TagName, "v")
+		if rtUpdSemver(v, st.CurrentVersion) <= 0 {
+			continue
+		}
+		urgent, _ := rtUpdBlock(r.Body)
+		c := &cand{version: v, urgent: urgent}
+		if published, err := time.Parse(time.RFC3339, r.PublishedAt); err == nil {
+			c.due, c.dated = published.Add(168*time.Hour), true
+		}
+		if channel == "beta" || urgent || (c.dated && !c.due.After(now)) {
+			if ready == nil || rtUpdSemver(v, ready.version) > 0 {
+				ready = c
+			}
+			continue
+		}
+		if c.dated && (next == nil || c.due.Before(next.due) ||
+			(c.due.Equal(next.due) && rtUpdSemver(v, next.version) > 0)) {
+			next = c
+		}
+	}
+	target := ready
+	if target == nil {
+		target = next
+	}
 	switch {
-	case !st.HasUpdate:
-		return "none", ""
-	case st.FailedVersion != "" && st.FailedVersion == st.LatestVersion:
-		return "failed_version", ""
+	case target != nil && st.FailedVersion != "" && st.FailedVersion == target.version:
+		return "failed_version", "", ""
 	case hold:
-		return "held", ""
-	case urgent:
-		return "urgent", dateFrom(now)
+		return "held", "", ""
+	case target == nil:
+		return "none", "", ""
+	case ready == nil:
+		return "delayed", dateFrom(target.due.In(time.Local)), target.version
+	case target.urgent:
+		return "urgent", dateFrom(now), target.version
 	}
-	if channel == "stable" {
-		published, err := time.Parse(time.RFC3339, rel.PublishedAt)
-		if err != nil {
-			return "none", ""
-		}
-		if due := published.Add(168 * time.Hour); due.After(now) {
-			return "delayed", dateFrom(due.In(time.Local))
-		}
-	}
-	return "scheduled", dateFrom(now)
+	return "scheduled", dateFrom(now), target.version
 }
 
 // TestRouterUpdateChannels: панель принимает каналы stable и beta и читает их
