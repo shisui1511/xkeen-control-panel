@@ -215,6 +215,7 @@ function loadSuitePass(p, where, earlier) {
   if (p.go || p.specs !== undefined || p.grep !== undefined || p.product) {
     die(`${where}: проход-прогон не сочетается с go/specs/product`);
   }
+  if (p.version !== undefined) die(`${where}.version: только у прохода go/specs`);
   let release = null;
   if (p.suite === 'smoke') {
     if (typeof p.release !== 'string' || (p.release !== 'latest' && !RELEASE_TAG.test(p.release))) {
@@ -262,6 +263,7 @@ function loadSuitePass(p, where, earlier) {
     release,
     files,
     interrupt: p.interrupt === undefined ? null : loadInterrupt(p.interrupt, where),
+    version: null,
     product: null,
     go: null,
     specs: [],
@@ -300,6 +302,19 @@ function loadSpec(file, root) {
       const sp = loadSuitePass(p, where, suites);
       suites.push(sp.name);
       return sp;
+    }
+    let version = null;
+    if (p.version !== undefined) {
+      if (p.product) die(`${where}: version и product не сочетаются`);
+      if (typeof p.version !== 'string' || (p.version !== 'latest' && !RELEASE_TAG.test(p.version))) {
+        die(`${where}.version: latest или тег vX.Y.Z[-<суффикс>.N] вышедшего релиза`);
+      }
+      if (p.version !== 'latest' && !localTagExists(p.version)) {
+        die(
+          `${where}.version: тега ${p.version} нет — нужен номер вышедшего релиза (git fetch --tags)`
+        );
+      }
+      version = p.version;
     }
     let product = null;
     if (p.product) {
@@ -365,7 +380,7 @@ function loadSpec(file, root) {
     if (!expect.def && !expect.tests.size && expect.count === null) {
       die(`${where}.expect: нужен хотя бы один из count, default, tests`);
     }
-    return { name: p.name, product, go, specs, grep, expect };
+    return { name: p.name, version, product, go, specs, grep, expect };
   });
   return { target: spec.target, cores, passes };
 }
@@ -375,7 +390,36 @@ function coreOrder(cores, cur) {
   return cores.includes(cur) ? [cur, ...cores.filter((c) => c !== cur)] : [...cores];
 }
 
+// Тег есть в локальном git (коммит, на который он указывает, достижим).
+function localTagExists(tag) {
+  return (
+    spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{commit}`]).status === 0
+  );
+}
+
+// Новейший опубликованный (не draft) релиз GitHub; при сбое gh бросает.
+function latestReleaseTag() {
+  return execFileSync(
+    'gh',
+    [
+      'release',
+      'list',
+      '--exclude-drafts',
+      '--limit',
+      '1',
+      '--json',
+      'tagName',
+      '--jq',
+      '.[0].tagName'
+    ],
+    { encoding: 'utf8', timeout: 30000 }
+  ).trim();
+}
+
+// Ключ сборки: HEAD@<номер> всегда отличается от HEAD, поэтому смена номера вызывает деплой,
+// а завершающий возврат стенда (deployed !== 'HEAD') ставит HEAD со своей версией.
 function productKey(p) {
+  if (p.version) return `HEAD@${p.resolved ?? p.version}`;
   return p.product ? `${p.product.sha}:${p.product.files.join(',')}` : 'HEAD';
 }
 
@@ -405,9 +449,12 @@ function dryRun(spec, specFile) {
     }
     const key = productKey(p);
     if (key !== deployed) {
-      step(
-        `деплой и смоук: ${p.product ? `${p.product.files.join(' ')} из ${p.product.ref}` : 'HEAD'}`
-      );
+      const target = p.version
+        ? `HEAD под номером ${p.version}`
+        : p.product
+          ? `${p.product.files.join(' ')} из ${p.product.ref}`
+          : 'HEAD';
+      step(`деплой и смоук: ${target}`);
       deployed = key;
     }
     const what = [
@@ -492,7 +539,9 @@ class Session {
       'RT_REPORT',
       'RT_REPORT_DIR',
       'RT_CORE',
-      'XCP_WANT_CORE'
+      'XCP_WANT_CORE',
+      // номер сборки задаёт только проход с version (env его деплоя), не оператор и не прошлый этап
+      'XCP_VERSION'
     ]) {
       delete base[k];
     }
@@ -627,11 +676,14 @@ class Session {
   // Деплой сборки рабочего дерева и смоук в один каталог этапа. Ядро, найденное смоуком,
   // становится текущим. Код: 0 — сборка стоит (смоук мог быть красным: это расхождение),
   // 3 — нет связи, иначе деплой не удался.
-  async deployAndSmoke(key, label) {
+  // version — номер вышедшего релиза: только деплой этого прохода идёт с XCP_VERSION, смоук
+  // сверяет xcp -v с этим номером (файл version этапа).
+  async deployAndSmoke(key, label, version = null) {
     const dir = this.stepDir(`deploy-${label}`);
     this.say(`деплой и смоук: ${label} → ${path.relative(this.root, dir)}`);
     const drc = await this.run('sh', [path.join(SCRIPT_DIR, 'deploy.sh'), '--target', this.t], {
-      RT_REPORT: dir
+      RT_REPORT: dir,
+      XCP_VERSION: version ?? undefined
     });
     this.record({ kind: 'deploy', label, dir, rc: drc });
     if (drc !== 0) {
@@ -661,6 +713,44 @@ class Session {
       });
     }
     return src === 3 ? 3 : 0;
+  }
+
+  // Номер прохода с version: latest разрешается в новейший опубликованный релиз, результат
+  // должен быть тегом релиза и существовать в локальном git. Не вышло — проход не запускается:
+  // вердикт с причиной, сессия сломана (стенд вернёт cleanup). Итог — в p.resolved.
+  resolveVersion(p) {
+    if (p.resolved) return true;
+    let tag = p.version;
+    let err = '';
+    if (tag === 'latest') {
+      try {
+        tag = latestReleaseTag();
+      } catch (e) {
+        err = `gh release list не отработал: ${e.message.split('\n')[0]}`;
+      }
+    }
+    if (!err && !RELEASE_TAG.test(tag)) {
+      err = `новейший релиз не определён или тег «${tag}» не похож на vX.Y.Z`;
+    }
+    if (!err && !localTagExists(tag)) err = `тега ${tag} нет в локальном git (git fetch --tags)`;
+    if (err) {
+      this.say(`проход ${p.name} не начат: ${err}`);
+      this.verdicts.push({
+        pass: p.name,
+        core: '-',
+        test: 'version: тег',
+        expected: [p.version],
+        actual: 'не определён',
+        detail: err,
+        ok: false,
+        report: '-'
+      });
+      this.broken = true;
+      return false;
+    }
+    p.resolved = tag;
+    this.say(`проход ${p.name}: сборка HEAD под номером ${tag}`);
+    return true;
   }
 
   async switchTo(core) {
@@ -866,21 +956,7 @@ class Session {
       let err = '';
       if (tag === 'latest') {
         try {
-          tag = execFileSync(
-            'gh',
-            [
-              'release',
-              'list',
-              '--exclude-drafts',
-              '--limit',
-              '1',
-              '--json',
-              'tagName',
-              '--jq',
-              '.[0].tagName'
-            ],
-            { encoding: 'utf8', timeout: 30000 }
-          ).trim();
+          tag = latestReleaseTag();
         } catch (e) {
           err = `gh release list не отработал: ${e.message.split('\n')[0]}`;
         }
@@ -1416,13 +1492,16 @@ async function main() {
         await s.runSuite(p);
         continue;
       }
+      if (p.version && !s.resolveVersion(p)) break;
       s.applyProduct(p);
       const key = productKey(p);
       if (s.deployed !== key) {
-        const rc = await s.deployAndSmoke(
-          key,
-          p.product ? `${p.name}-${p.product.ref.slice(0, 8)}` : 'head'
-        );
+        const label = p.version
+          ? `${p.name}-${p.resolved}`
+          : p.product
+            ? `${p.name}-${p.product.ref.slice(0, 8)}`
+            : 'head';
+        const rc = await s.deployAndSmoke(key, label, p.resolved ?? null);
         if (rc === 3 || s.broken) break;
         if (!s.c0) {
           if (!s.cur) {
