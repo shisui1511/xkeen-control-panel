@@ -4,7 +4,8 @@ Release notes generator for xkeen-control-panel.
 
 Reads environment variables set by the GitHub Actions workflow:
   MODE          - "beta" (pre-release) or "stable"
-  SOAK_HOURS    - hold time of an X.Y.0 pre-release before promotion (beta only, shown in the banner)
+  SOAK_HOURS    - hold time of an X.Y.0 pre-release before promotion (beta only, shown in the banner);
+                  "milestone" - held until the milestone closes
   GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_ACTOR
   VERSION       - e.g. "v0.12.0" or "v0.13.0-beta.1"
   RELEASE_MARKER - xcp-release block line from `auto_release.sh marker` (urgent, hold)
@@ -200,6 +201,12 @@ def beta_notes(version, prev_tag):
         banner = (
             f"> 🧪 **Пре-релиз исправлений {base}** — доступен в канале обновлений «Предварительный».\n"
             f"> Станет стабильным релизом **{base}** сразу после зелёного смоука на стенде.\n"
+        )
+    elif soak == "milestone":
+        banner = (
+            f"> 🧪 **Пре-релиз {base}** — доступен в канале обновлений «Предварительный».\n"
+            f"> Войдёт в стабильный релиз при закрытии текущей вехи разработки, после полного "
+            f"прогона на стенде.\n"
         )
     else:
         banner = (
