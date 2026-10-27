@@ -1139,8 +1139,8 @@ show_installer_menu() {
   fi
 
   printf "\n  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
-  printf "  ${BOLD}1${NC}  Установить  (Stable, порт %s)\n" "$DEFAULT_PORT"
-  printf "  ${BOLD}2${NC}  Установить  (Pre-release, порт %s)\n" "$DEFAULT_PORT"
+  printf "  ${BOLD}1${NC}  Установить  (Основной, порт %s)\n" "$DEFAULT_PORT"
+  printf "  ${BOLD}2${NC}  Установить  (Предварительный, порт %s)\n" "$DEFAULT_PORT"
   printf "  ${BOLD}0${NC}  Выход\n\n"
   printf "${GREEN}>${NC} "
 }
@@ -1158,9 +1158,9 @@ show_manager_menu() {
 
   cur_version=$(get_version)
   port=$(grep -o '"port":[[:space:]]*[0-9]*' "$INSTALL_DIR/config.json" 2>/dev/null | grep -o '[0-9]*' || echo "$DEFAULT_PORT")
-  channel_label="Stable"
+  channel_label="Основной"
   if [ "$CHANNEL" = "beta" ]; then
-    channel_label="Pre-release (тестовый)"
+    channel_label="Предварительный"
   fi
 
   status_text="остановлен"
@@ -1226,10 +1226,10 @@ manage_service_menu() {
 switch_channel() {
   if [ "$CHANNEL" = "stable" ]; then
     CHANNEL="beta"
-    ok "Канал переключен на Pre-release (тестовые сборки)"
+    ok "Канал переключен на Предварительный (новые версии до выхода в Основной)"
   else
     CHANNEL="stable"
-    ok "Канал переключен на Stable (стабильные сборки)"
+    ok "Канал переключен на Основной (проверенные версии)"
   fi
   mkdir -p "$INSTALL_DIR"
   echo "$CHANNEL" > "$INSTALL_DIR/channel"
@@ -1303,7 +1303,7 @@ parse_args() {
           CHANNEL="$2"
           shift 2
         else
-          error "Параметр --channel требует значение (stable/prerelease)"
+          error "Параметр --channel требует значение (stable/beta)"
           exit 1
         fi
         ;;
@@ -1327,7 +1327,7 @@ parse_args() {
         printf "  -r, --restart      Перезапуск службы панели\n"
         printf "  -s, --status       Проверить статус службы\n"
         printf "      --init-script  Пересоздать init-скрипт службы (без загрузки и перезапуска)\n"
-        printf "  -c, --channel CH   Канал обновления (stable/prerelease)\n"
+        printf "  -c, --channel CH   Канал обновления (stable/beta)\n"
         printf "  -p, --port PORT    Порт для веб-интерфейса панели\n"
         printf "  -h, --help         Показать эту справку\n\n"
         exit 0
