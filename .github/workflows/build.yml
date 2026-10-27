@@ -22,6 +22,8 @@ concurrency:
 
 permissions:
   contents: write
+  # Стоп-метка release-stop на issue: блок xcp-release пишется при создании релиза
+  issues: read
 
 jobs:
   # Push в main: статическая проверка merge-коммита (PR мог отставать от main)
@@ -199,6 +201,7 @@ jobs:
           PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
           MODE: ${{ needs.prepare.outputs.kind }}
           SOAK_HOURS: ${{ vars.RC_SOAK_HOURS || '24' }}
+          RELEASE_STOP: ${{ vars.RELEASE_STOP }}
         run: |
           if [ "$MODE" = beta ]; then
             PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$'
@@ -211,6 +214,15 @@ jobs:
             echo "ERROR: Invalid ${MODE} version format: $VERSION"
             exit 1
           fi
+
+          # Блок xcp-release первой строкой заметок уже при создании релиза: до прогона finalize
+          # в auto-release (до 3 ч) свежий пре-релиз при включённом стопе иначе читался бы
+          # панелями как hold:false. Аннотация тега нужна для urgent. Стоп не прочитан или
+          # команда упала — hold:true (gen_notes.py пишет его и при пустом блоке).
+          git fetch --force origin "refs/tags/${VERSION}:refs/tags/${VERSION}" 2>/dev/null || true
+          RELEASE_MARKER=$(bash .github/scripts/auto_release.sh marker "${VERSION}") || RELEASE_MARKER=""
+          echo "Блок xcp-release: ${RELEASE_MARKER:-нет, будет hold:true}"
+          export RELEASE_MARKER
 
           python3 .github/scripts/gen_notes.py
 

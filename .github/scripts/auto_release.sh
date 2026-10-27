@@ -22,6 +22,10 @@
 #   auto_release.sh run      полный цикл в CI: heal, promote, затем plan для зелёного main;
 #                            ставит тег и запускает build.yml через workflow_dispatch
 #                            (тег, запушенный GITHUB_TOKEN, сам сборку не запускает), затем finalize
+#   auto_release.sh marker vX.Y.Z[-beta.N]
+#                            строка блока xcp-release для заметок создаваемого релиза (build.yml):
+#                            urgent из аннотации тега, hold — стоп выпуска; стоп не прочитан —
+#                            hold:true
 #
 # Пре-релиз идёт в stable, только когда выполнено всё сразу: релиз опубликован (не draft); stable
 # его базы ещё нет; стоп выключен; на коммите пре-релиза последний статус stand/arm64-smoke или
@@ -38,7 +42,9 @@
 #   <!-- xcp-release: {"urgent":true|false,"hold":true|false} -->
 # JSON без пробелов, ключи в этом порядке. urgent постоянный: у тега в аннотации строка
 # "xcp-urgent: 1". hold динамический: включён стоп выпуска (если стоп не удалось прочитать, тела
-# в этом прогоне не правятся, hold остаётся прежним). Сроки автоустановки панель считает от
+# в этом прогоне не правятся, hold остаётся прежним). Новый релиз получает блок уже при создании
+# (build.yml, команда marker): там непрочитанный стоп пишется как hold:true, чтобы релиз не ушёл
+# в автоустановку до первого finalize с прочитанным стопом. Сроки автоустановки панель считает от
 # published_at релиза, в блок они не пишутся. У пре-релиза новее последнего stable с красным
 # статусом стенда после блока стоит строка о найденной регрессии (без подробностей стенда).
 #
@@ -586,6 +592,33 @@ finalize() {
   FINALIZE_NOTE="обновлено $changed из $total (за ${HOLD_DAYS} суток и последние релизы баз)"
 }
 
+# Блок xcp-release для заметок создаваемого релиза $1 (build.yml, до gh release create): urgent —
+# строка "xcp-urgent: 1" в аннотации тега, hold — стоп выпуска. Стоп не прочитан — hold:true (fail
+# closed): иначе до прогона finalize свежий релиз читался бы панелями как hold:false. Журнал — в
+# stderr, stdout занят строкой блока.
+release_marker() {
+  local tag="$1" urgent=false hold=false
+  if ! [[ "$tag" =~ $STABLE_RE || "$tag" =~ $PRE_RE ]]; then
+    logerr "marker: тег не похож на vX.Y.Z или vX.Y.Z-${PRE_KIND}.N"
+    exit 2
+  fi
+  LOG_FD=2
+  if git for-each-ref --format='%(contents)' "refs/tags/$tag" | grep -qxF 'xcp-urgent: 1'; then
+    urgent=true
+  fi
+  if [ -n "${GITHUB_REPOSITORY_OWNER:-}" ]; then
+    REPO_OWNER="$GITHUB_REPOSITORY_OWNER"
+  elif ! REPO_OWNER=$(gh repo view --json owner --jq .owner.login); then
+    REPO_OWNER=""
+  fi
+  compute_stop
+  if [ -n "${STOP_REASON:-}" ]; then
+    hold=true
+    log "marker $tag: стоп — $STOP_REASON"
+  fi
+  printf '<!-- xcp-release: {"urgent":%s,"hold":%s} -->\n' "$urgent" "$hold"
+}
+
 # Только чтение: вердикты, promote и plan без публикации (ПК, проверка до слияния)
 report() {
   LOG_FD=2
@@ -783,7 +816,8 @@ run() {
   fi
   log "plan: $PLAN_DECISION"
 
-  # Релиз, опубликованный сборкой позже, получит блок в следующем прогоне
+  # Релиз, опубликованный сборкой позже, блок получает при создании (marker в build.yml);
+  # finalize обновит его в следующем прогоне
   finalize
 
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -810,6 +844,7 @@ case "${1:-}" in
     heal
     ;;
   report) report ;;
+  marker) release_marker "${2:-}" ;;
   finalize)
     check_inputs
     collect_state

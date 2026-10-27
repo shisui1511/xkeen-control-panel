@@ -7,10 +7,13 @@ Reads environment variables set by the GitHub Actions workflow:
   SOAK_HOURS    - hold time of an X.Y.0 pre-release before promotion (beta only, shown in the banner)
   GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_ACTOR
   VERSION       - e.g. "v0.12.0" or "v0.13.0-beta.1"
+  RELEASE_MARKER - xcp-release block line from `auto_release.sh marker` (urgent, hold)
   GITHUB_ENV    - path to GitHub Actions env file
 
-Writes /tmp/release-notes.md with structured, professional release notes. For beta and stable the
-notes open with the pre-release banner (beta only: X.Y.0 stable after the hold and a green stand
+Writes /tmp/release-notes.md with structured, professional release notes. The first line is the
+xcp-release block the panels read (contract: .github/scripts/auto_release.sh); a missing or
+malformed RELEASE_MARKER is written as {"urgent":false,"hold":true}, so a fresh release never goes
+to auto-install on an unread stop. For beta and stable the notes then open with the pre-release banner (beta only: X.Y.0 stable after the hold and a green stand
 smoke, X.Y.Z with Z>0 right after the smoke), then the panel description and a "## Что вошло"
 list (titles of merged PRs of the prev..tag range that contain feat/fix/perf/refactor/revert
 commits, dependency bumps skipped; omitted when there are none). The architecture table is
@@ -211,6 +214,20 @@ def beta_notes(version, prev_tag):
     return stable_notes(version, prev_tag, banner)
 
 
+# Блок xcp-release первой строки тела: формат пишет auto_release.sh (marker и finalize)
+MARKER_RE = re.compile(r'^<!-- xcp-release: \{"urgent":(true|false),"hold":(true|false)\} -->$')
+MARKER_FALLBACK = '<!-- xcp-release: {"urgent":false,"hold":true} -->'
+
+
+def release_marker():
+    """Строка блока из RELEASE_MARKER; нет или битая — hold:true (стоп не прочитан)."""
+    marker = os.environ.get("RELEASE_MARKER", "").strip()
+    if MARKER_RE.match(marker):
+        return marker
+    print("::warning::блок xcp-release не получен, в заметки записан hold:true")
+    return MARKER_FALLBACK
+
+
 def main():
     mode = os.environ.get("MODE", "stable")
     version = os.environ["VERSION"]
@@ -228,6 +245,8 @@ def main():
         # For stable: prev is the tag before current version
         prev_tag = next((t for t in reversed(stable_tags) if t != version), "")
         notes = stable_notes(version, prev_tag)
+
+    notes = release_marker() + "\n\n" + notes
 
     with open("/tmp/release-notes.md", "w") as f:
         f.write(notes)
