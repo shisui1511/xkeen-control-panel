@@ -339,6 +339,18 @@ func ContractFile(t testing.TB) string {
 	return path
 }
 
+// SetupScript — путь к копии scripts/setup.sh этой сборки, скопированной на
+// устройство. Тесты запускают её только с временными XCP_INSTALL_DIR,
+// XCP_BIN_PATH и XCP_INIT_SCRIPT.
+func SetupScript(t testing.TB) string {
+	t.Helper()
+	path := os.Getenv("XCP_RT_SETUP")
+	if path == "" {
+		t.Fatal("нет XCP_RT_SETUP: тест запущен мимо make router-test")
+	}
+	return path
+}
+
 // RoutingContractFile — путь к файлу контракта ключей ответов API маршрутизации
 // (frontend/src/lib/routingContract.json), скопированному на устройство.
 func RoutingContractFile(t testing.TB) string {
