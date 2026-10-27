@@ -76,16 +76,16 @@ func rtSetupChannelFile(t *testing.T, dir string) string {
 // проверка обновлений недоступна (нет интернета у стенда) — путь --update не проверяется.
 func rtSetupLatest(t *testing.T, p *routertest.Panel, channel string) (current, latest string, ok bool) {
 	t.Helper()
-	var info struct {
+	var env rtUpdEnv[struct {
 		CurrentVersion string `json:"current_version"`
 		LatestVersion  string `json:"latest_version"`
-	}
-	status, err := p.GetJSON("/api/update/check?channel="+channel, &info)
+	}]
+	status, err := p.GetJSON("/api/update/check?channel="+channel, &env)
 	if err != nil || status != http.StatusOK {
 		t.Logf("проверка обновлений канала %s недоступна: статус %d, ошибка %v", channel, status, err)
 		return "", "", false
 	}
-	return info.CurrentVersion, info.LatestVersion, true
+	return strings.TrimPrefix(env.Data.CurrentVersion, "v"), strings.TrimPrefix(env.Data.LatestVersion, "v"), true
 }
 
 func rtSetupCopyFile(t *testing.T, src, dst string) {
