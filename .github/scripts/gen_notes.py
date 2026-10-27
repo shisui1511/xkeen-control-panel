@@ -3,18 +3,22 @@
 Release notes generator for xkeen-control-panel.
 
 Reads environment variables set by the GitHub Actions workflow:
-  MODE          - "prerelease" (rolling dev), "rc" (pre-release) or "stable"
-  SOAK_HOURS    - hold time of an X.Y.0 pre-release before promotion (rc only, shown in the banner)
+  MODE          - "beta" (pre-release) or "stable"
+  SOAK_HOURS    - hold time of an X.Y.0 pre-release before promotion (beta only, shown in the banner);
+                  "milestone" - held until the milestone closes
   GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_ACTOR
-  VERSION       - e.g. "v0.12.0" or "v0.13.0-dev"
-  COMMIT_COUNT  - number of commits since last stable (pre-release only)
+  VERSION       - e.g. "v0.12.0" or "v0.13.0-beta.1"
+  RELEASE_MARKER - xcp-release block line from `auto_release.sh marker` (urgent, hold)
   GITHUB_ENV    - path to GitHub Actions env file
 
-Writes /tmp/release-notes.md with structured, professional release notes. For rc and stable the
-first line is "**Что вошло:** ..." (titles of merged PRs of the prev..tag range that contain
-feat/fix/perf/refactor/revert commits; omitted when there are none), then the pre-release banner
-(rc only: X.Y.0 stable after the hold and a green stand smoke, X.Y.Z with Z>0 right after the
-smoke). The architecture table is followed by a note that MIPS is experimental.
+Writes /tmp/release-notes.md with structured, professional release notes. The first line is the
+xcp-release block the panels read (contract: .github/scripts/auto_release.sh); a missing or
+malformed RELEASE_MARKER is written as {"urgent":false,"hold":true}, so a fresh release never goes
+to auto-install on an unread stop. For beta and stable the notes then open with the pre-release banner (beta only: X.Y.0 stable after the hold and a green stand
+smoke, X.Y.Z with Z>0 right after the smoke), then the panel description and a "## Что вошло"
+list (titles of merged PRs of the prev..tag range that contain feat/fix/perf/refactor/revert
+commits, dependency bumps skipped; omitted when there are none). The architecture table is
+followed by a note that MIPS is experimental.
 Also appends PREV_TAG and SHORT_SHA to $GITHUB_ENV.
 """
 
@@ -22,7 +26,6 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
 
 
 def git(*args):
@@ -98,10 +101,14 @@ def clean_title(title):
     return title.strip()
 
 
-def included_line(range_spec):
-    """Заголовки слитых PR диапазона, где есть достойные коммиты, через «; » (от старых к новым).
+# Обновления зависимостей (заголовки dependabot на английском) пользователю ничего не говорят
+DEPS_TITLE = re.compile(r"^(bump|update|upgrade)\b", re.IGNORECASE)
 
-    Пустая строка, если таких PR нет или история недоступна (неглубокий клон).
+
+def included_list(range_spec):
+    """Заголовки слитых PR диапазона, где есть достойные коммиты (от старых к новым).
+
+    Пустой список, если таких PR нет или история недоступна (неглубокий клон).
     """
     merges = git("log", "--merges", "--first-parent", "--format=%H", range_spec).split("\n")
     titles = []
@@ -114,9 +121,9 @@ def included_line(range_spec):
         if not WORTHY.search(inner):
             continue
         title = clean_title(title)
-        if title and title not in titles:
+        if title and not DEPS_TITLE.match(title) and title not in titles:
             titles.append(title)
-    return "; ".join(titles)
+    return titles
 
 
 def arch_table(version):
@@ -130,52 +137,6 @@ def arch_table(version):
         + "\n".join(rows)
         + "\n\n> **MIPS** — экспериментально, на железе не проверяется."
     )
-
-
-def prerelease_notes(version, commit_count, pr_number, prev_tag, short_sha, full_sha):
-    repo = os.environ["GITHUB_REPOSITORY"]
-    repo_url = f"https://github.com/{repo}"
-    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-    range_spec = f"{prev_tag}..HEAD" if prev_tag else "HEAD~30..HEAD"
-    feats, fixes, others = parse_commits(range_spec)
-    changelog = build_changelog(feats, fixes, others)
-
-    stable_note = ""
-    if prev_tag:
-        stable_note = (
-            f" Последний стабильный релиз: "
-            f"[**{prev_tag}**]({repo_url}/releases/tag/{prev_tag})"
-        )
-
-    if pr_number:
-        build_info = f"**PR:** [#{pr_number}]({repo_url}/pull/{pr_number})"
-    else:
-        build_info = f"**Сборка:** #{commit_count}"
-
-    return f"""\
-> ⚠️ **Нестабильная сборка** — Не рекомендуется для production-использования!
-> {stable_note}
-
-**Коммит:** [`{short_sha}`]({repo_url}/commit/{full_sha}) · {build_info} · **Дата:** {date_str}
-
----
-
-{changelog}
-
----
-
-## 📥 Скачать
-
-> 📦 Рядом с каждым бинарником лежит `.gz` (~7 МБ вместо ~20 МБ) — его скачивают панель и `setup.sh`.
-
-{arch_table(version)}
-
-**Верификация SHA256:**
-```sh
-sha256sum -c xcp_{version}_arm64.sha256
-```
-"""
 
 
 def stable_notes(version, prev_tag, banner=""):
@@ -193,14 +154,13 @@ def stable_notes(version, prev_tag, banner=""):
     feats, fixes, others = parse_commits(range_spec)
     changelog = build_changelog(feats, fixes, others)
 
-    included = included_line(range_spec)
-    head = f"**Что вошло:** {included}\n\n" if included else ""
-    if banner:
-        head += banner.rstrip("\n") + "\n\n"
+    included = included_list(range_spec)
+    head = banner.rstrip("\n") + "\n\n" if banner else ""
+    head += "Веб-панель управления XKeen для роутеров Keenetic/Netcraze — единый бинарник без зависимостей.\n\n"
+    if included:
+        head += "## Что вошло\n\n" + "\n".join(f"- {t}" for t in included) + "\n\n"
 
     return head + f"""\
-> Веб-панель управления XKeen для роутеров Keenetic/Netcraze — единый бинарник без зависимостей.
-
 {changelog}
 
 ---
@@ -232,19 +192,25 @@ sha256sum -c xcp_{version}_arm64.sha256
 """
 
 
-def rc_notes(version, prev_tag):
+def beta_notes(version, prev_tag):
     repo_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}"
     base = version.split("-")[0]
     soak = os.environ.get("SOAK_HOURS", "24")
     patch = base.split(".")[-1] != "0"
     if patch:
         banner = (
-            f"> 🧪 **Пре-релиз исправлений {base}** — доступен в канале обновлений beta.\n"
+            f"> 🧪 **Пре-релиз исправлений {base}** — доступен в канале обновлений «Предварительный».\n"
             f"> Станет стабильным релизом **{base}** сразу после зелёного смоука на стенде.\n"
+        )
+    elif soak == "milestone":
+        banner = (
+            f"> 🧪 **Пре-релиз {base}** — доступен в канале обновлений «Предварительный».\n"
+            f"> Войдёт в стабильный релиз при закрытии текущей вехи разработки, после полного "
+            f"прогона на стенде.\n"
         )
     else:
         banner = (
-            f"> 🧪 **Пре-релиз {base}** — доступен в канале обновлений beta.\n"
+            f"> 🧪 **Пре-релиз {base}** — доступен в канале обновлений «Предварительный».\n"
             f"> Станет стабильным релизом **{base}** после выдержки {soak} ч и зелёного смоука "
             f"на стенде; выдержку сбрасывает только следующий пре-релиз этой же версии.\n"
         )
@@ -255,29 +221,39 @@ def rc_notes(version, prev_tag):
     return stable_notes(version, prev_tag, banner)
 
 
+# Блок xcp-release первой строки тела: формат пишет auto_release.sh (marker и finalize)
+MARKER_RE = re.compile(r'^<!-- xcp-release: \{"urgent":(true|false),"hold":(true|false)\} -->$')
+MARKER_FALLBACK = '<!-- xcp-release: {"urgent":false,"hold":true} -->'
+
+
+def release_marker():
+    """Строка блока из RELEASE_MARKER; нет или битая — hold:true (стоп не прочитан)."""
+    marker = os.environ.get("RELEASE_MARKER", "").strip()
+    if MARKER_RE.match(marker):
+        return marker
+    print("::warning::блок xcp-release не получен, в заметки записан hold:true")
+    return MARKER_FALLBACK
+
+
 def main():
     mode = os.environ.get("MODE", "stable")
     version = os.environ["VERSION"]
     full_sha = os.environ.get("GITHUB_SHA", "")
     short_sha = full_sha[:7]
-    commit_count = os.environ.get("COMMIT_COUNT", "?")
-    pr_number = os.environ.get("PR_NUMBER", "")
     github_env = os.environ.get("GITHUB_ENV", "")
 
     stable_tags = get_stable_tags()
 
-    if mode == "rc":
+    if mode == "beta":
         base_version = version.split("-")[0]
         prev_tag = next((t for t in reversed(stable_tags) if t != base_version), "")
-        notes = rc_notes(version, prev_tag)
-    elif mode == "prerelease":
-        base_version = version.split("-")[0]
-        prev_tag = next((t for t in reversed(stable_tags) if t != version and t != base_version), "")
-        notes = prerelease_notes(version, commit_count, pr_number, prev_tag, short_sha, full_sha)
+        notes = beta_notes(version, prev_tag)
     else:
         # For stable: prev is the tag before current version
         prev_tag = next((t for t in reversed(stable_tags) if t != version), "")
         notes = stable_notes(version, prev_tag)
+
+    notes = release_marker() + "\n\n" + notes
 
     with open("/tmp/release-notes.md", "w") as f:
         f.write(notes)

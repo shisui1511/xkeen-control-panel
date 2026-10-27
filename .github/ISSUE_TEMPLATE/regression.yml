@@ -1,5 +1,5 @@
 name: Регрессия в Предварительном
-description: Сломалось после обновления на пре-релиз (канал beta)
+description: Сломалось после обновления на пре-релиз (канал «Предварительный»)
 title: "[Регрессия] "
 labels: ["на разборе"]
 body:
@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: Версия панели
-      placeholder: vX.Y.Z-rc.N
+      placeholder: vX.Y.Z-beta.N
     validations:
       required: true
   - type: textarea

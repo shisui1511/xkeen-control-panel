@@ -2,16 +2,17 @@
 # Автоматический выпуск пре-релизов и стабильных релизов (workflow auto-release.yml).
 #
 #   auto_release.sh plan     какой пре-релиз выпустить для HEAD (последний коммит main):
-#                              "rc vX.Y.Z-rc.N"  — новый пре-релиз (или уже существующий: ответ идемпотентен)
+#                              "rc vX.Y.Z-beta.N" — новый пре-релиз (или уже существующий: ответ идемпотентен)
 #                              "none <причина>"  — выпускать нечего
+#                            слово rc в строке решения — тип решения «пре-релиз», не суффикс тега
 #                            stable plan не выпускает: патч тоже идёт через пре-релиз
 #   auto_release.sh promote  какой пре-релиз пора сделать стабильным:
-#                              "stable vX.Y.Z vX.Y.Z-rc.N" / "none <причина>";
+#                              "stable vX.Y.Z vX.Y.Z-beta.N" / "none <причина>";
 #                            вердикты кандидатов печатаются в stderr
 #   auto_release.sh heal     свежие (7 дней) теги релизов без опубликованного релиза:
-#                              "delete vX.Y.Z-rc.N" — пре-релиз вытеснен (stable базы, более новый
+#                              "delete vX.Y.Z-beta.N" — пре-релиз вытеснен (stable базы, более новый
 #                                                     stable или пре-релиз той же базы с большим номером)
-#                              "publish vX.Y.Z[-rc.N]" — актуальный тег, сборку повторить
+#                              "publish vX.Y.Z[-beta.N]" — актуальный тег, сборку повторить
 #   auto_release.sh report   только чтение GitHub и git: вердикты по каждому пре-релизу новее
 #                            последнего stable, итог promote и plan, markdown-сводка в stdout;
 #                            ничего не меняет (можно запускать на ПК до слияния)
@@ -21,13 +22,18 @@
 #   auto_release.sh run      полный цикл в CI: heal, promote, затем plan для зелёного main;
 #                            ставит тег и запускает build.yml через workflow_dispatch
 #                            (тег, запушенный GITHUB_TOKEN, сам сборку не запускает), затем finalize
+#   auto_release.sh marker vX.Y.Z[-beta.N]
+#                            строка блока xcp-release для заметок создаваемого релиза (build.yml):
+#                            urgent из аннотации тега, hold — стоп выпуска; стоп не прочитан —
+#                            hold:true
 #
 # Пре-релиз идёт в stable, только когда выполнено всё сразу: релиз опубликован (не draft); stable
 # его базы ещё нет; стоп выключен; на коммите пре-релиза последний статус stand/arm64-smoke или
 # stand/arm64-full — success; ни один последний статус stand/arm64-smoke, stand/arm64-full,
 # stand/mipsle-install не failure и не error (красный смоук снимает более поздний success
 # полного прогона, обратное не действует); у базы X.Y.0 истекла выдержка SOAK_HOURS от публикации
-# (promote_base её снимает), у базы X.Y.Z с Z>0 выдержки нет. Нет записи stand/mipsle-install —
+# (promote_base её снимает; при SOAK_HOURS=milestone выдержка длится до закрытия вехи и снимает её
+# только promote_base), у базы X.Y.Z с Z>0 выдержки нет. Нет записи stand/mipsle-install —
 # только предупреждение. Новая фаза выдержку прежнего пре-релиза не сбрасывает: кандидаты
 # перебираются по базам по возрастанию, сбрасывает только пре-релиз той же базы. Тег stable
 # ставится на коммит самого пре-релиза.
@@ -37,13 +43,16 @@
 #   <!-- xcp-release: {"urgent":true|false,"hold":true|false} -->
 # JSON без пробелов, ключи в этом порядке. urgent постоянный: у тега в аннотации строка
 # "xcp-urgent: 1". hold динамический: включён стоп выпуска (если стоп не удалось прочитать, тела
-# в этом прогоне не правятся, hold остаётся прежним). Сроки автоустановки панель считает от
+# в этом прогоне не правятся, hold остаётся прежним). Новый релиз получает блок уже при создании
+# (build.yml, команда marker): там непрочитанный стоп пишется как hold:true, чтобы релиз не ушёл
+# в автоустановку до первого finalize с прочитанным стопом. Сроки автоустановки панель считает от
 # published_at релиза, в блок они не пишутся. У пре-релиза новее последнего stable с красным
 # статусом стенда после блока стоит строка о найденной регрессии (без подробностей стенда).
 #
 # Окружение:
-#   SOAK_HOURS   сколько часов пре-релиз X.Y.0 должен провисеть после публикации (по умолчанию 24)
-#   PRE_KIND     суффикс пре-релиза (по умолчанию rc): теги vX.Y.Z-<PRE_KIND>.N
+#   SOAK_HOURS   сколько часов пре-релиз X.Y.0 должен провисеть после публикации (по умолчанию 24);
+#                milestone — до закрытия вехи: базу X.Y.0 продвигает только PROMOTE_BASE
+#   PRE_KIND     суффикс пре-релиза (по умолчанию beta): теги vX.Y.Z-<PRE_KIND>.N
 #   PROMOTE_BASE версия vX.Y.Z из ручного запуска: снимает выдержку этой базы; готовая база
 #                продвигается раньше младших, неготовая — предупреждение в журнале
 #   URGENT=1     срочное: действует только вместе с PROMOTE_BASE, смоук и красные записи не
@@ -59,9 +68,9 @@
 set -euo pipefail
 
 SOAK_HOURS="${SOAK_HOURS:-24}"
-[[ "$SOAK_HOURS" =~ ^[0-9]+$ ]] || SOAK_HOURS=24
+[[ "$SOAK_HOURS" =~ ^([0-9]+|milestone)$ ]] || SOAK_HOURS=24
 NOW="${NOW:-$(date +%s)}"
-PRE_KIND="${PRE_KIND:-rc}"
+PRE_KIND="${PRE_KIND:-beta}"
 [[ "$PRE_KIND" =~ ^[a-z]+$ ]] || {
   echo "auto-release: PRE_KIND должен состоять из строчных латинских букв" >&2
   exit 2
@@ -103,12 +112,12 @@ tag_time() {
   git for-each-ref --format='%(if)%(taggerdate)%(then)%(taggerdate:unix)%(else)%(committerdate:unix)%(end)' "refs/tags/$1"
 }
 
-# vX.Y.Z-rc.N -> vX.Y.Z
+# vX.Y.Z-beta.N -> vX.Y.Z
 base_of() {
   echo "${1%-"${PRE_KIND}".*}"
 }
 
-# vX.Y.Z-rc.N -> N
+# vX.Y.Z-beta.N -> N
 pre_n() {
   echo "${1##*-"${PRE_KIND}".}"
 }
@@ -127,7 +136,7 @@ version_gt() {
 live_bases() {
   local last base
   last=$(last_stable)
-  { git tag -l "v*-${PRE_KIND}.*" --merged HEAD | grep -E -- "$PRE_RE" | sed -E "s/-${PRE_KIND}\\.[0-9]+\$//" | sort -uV; } |
+  { git tag -l "v*-${PRE_KIND}.*" --merged HEAD | grep -E -- "$PRE_RE" | sed -E "s/-${PRE_KIND}\\.[0-9]+\$//" | sort -uV || true; } |
     while read -r base; do
       if [ -z "$last" ] || version_gt "$base" "$last"; then
         echo "$base"
@@ -412,6 +421,9 @@ verdict() {
     *.0)
       if [ "$base" = "${PROMOTE_BASE:-}" ]; then
         reason="выдержка отменена promote_base"
+      elif [ "$SOAK_HOURS" = milestone ]; then
+        echo "wait выдержка до закрытия вехи (promote_base)"
+        return
       else
         age=$((NOW - at))
         need=$((SOAK_HOURS * 3600))
@@ -583,6 +595,33 @@ finalize() {
     rm -f "$tmp"
   done <<<"${RELEASED_AT:-}"
   FINALIZE_NOTE="обновлено $changed из $total (за ${HOLD_DAYS} суток и последние релизы баз)"
+}
+
+# Блок xcp-release для заметок создаваемого релиза $1 (build.yml, до gh release create): urgent —
+# строка "xcp-urgent: 1" в аннотации тега, hold — стоп выпуска. Стоп не прочитан — hold:true (fail
+# closed): иначе до прогона finalize свежий релиз читался бы панелями как hold:false. Журнал — в
+# stderr, stdout занят строкой блока.
+release_marker() {
+  local tag="$1" urgent=false hold=false
+  if ! [[ "$tag" =~ $STABLE_RE || "$tag" =~ $PRE_RE ]]; then
+    logerr "marker: тег не похож на vX.Y.Z или vX.Y.Z-${PRE_KIND}.N"
+    exit 2
+  fi
+  LOG_FD=2
+  if git for-each-ref --format='%(contents)' "refs/tags/$tag" | grep -qxF 'xcp-urgent: 1'; then
+    urgent=true
+  fi
+  if [ -n "${GITHUB_REPOSITORY_OWNER:-}" ]; then
+    REPO_OWNER="$GITHUB_REPOSITORY_OWNER"
+  elif ! REPO_OWNER=$(gh repo view --json owner --jq .owner.login); then
+    REPO_OWNER=""
+  fi
+  compute_stop
+  if [ -n "${STOP_REASON:-}" ]; then
+    hold=true
+    log "marker $tag: стоп — $STOP_REASON"
+  fi
+  printf '<!-- xcp-release: {"urgent":%s,"hold":%s} -->\n' "$urgent" "$hold"
 }
 
 # Только чтение: вердикты, promote и plan без публикации (ПК, проверка до слияния)
@@ -782,7 +821,8 @@ run() {
   fi
   log "plan: $PLAN_DECISION"
 
-  # Релиз, опубликованный сборкой позже, получит блок в следующем прогоне
+  # Релиз, опубликованный сборкой позже, блок получает при создании (marker в build.yml);
+  # finalize обновит его в следующем прогоне
   finalize
 
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -809,6 +849,7 @@ case "${1:-}" in
     heal
     ;;
   report) report ;;
+  marker) release_marker "${2:-}" ;;
   finalize)
     check_inputs
     collect_state

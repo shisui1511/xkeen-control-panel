@@ -21,6 +21,14 @@
 //           "ref": "0aae0a7c",              (воспроизведение до исправления); тесты — из HEAD
 //           "files": ["frontend/src/Editor.svelte"]
 //         },
+//         "version": "v0.33.0",             необязательно: сборка HEAD
+//                                           под номером вышедшего релиза (тег vX.Y.Z[-<суффикс>.N]
+//                                           из локального git или latest — новейший
+//                                           опубликованный); сеть и данные GitHub
+//                                           настоящие, подменён только номер установленной версии;
+//                                           не сочетается с product и с проходом-прогоном; номер
+//                                           живёт только в деплое прохода: XCP_VERSION снимается
+//                                           со всех этапов, возврат стенда собирает HEAD без номера
 //         "go": { "pkgs": "./internal/x", "run": "^TestRouterX$" },    необязательно
 //         "specs": ["tests/router/editor-mobile.spec.ts"],              необязательно, от frontend/
 //         "grep": "value-missing|backups-switch",                       необязательно, --grep
@@ -215,6 +223,7 @@ function loadSuitePass(p, where, earlier) {
   if (p.go || p.specs !== undefined || p.grep !== undefined || p.product) {
     die(`${where}: проход-прогон не сочетается с go/specs/product`);
   }
+  if (p.version !== undefined) die(`${where}.version: только у прохода go/specs`);
   let release = null;
   if (p.suite === 'smoke') {
     if (typeof p.release !== 'string' || (p.release !== 'latest' && !RELEASE_TAG.test(p.release))) {
@@ -262,6 +271,7 @@ function loadSuitePass(p, where, earlier) {
     release,
     files,
     interrupt: p.interrupt === undefined ? null : loadInterrupt(p.interrupt, where),
+    version: null,
     product: null,
     go: null,
     specs: [],
@@ -300,6 +310,19 @@ function loadSpec(file, root) {
       const sp = loadSuitePass(p, where, suites);
       suites.push(sp.name);
       return sp;
+    }
+    let version = null;
+    if (p.version !== undefined) {
+      if (p.product) die(`${where}: version и product не сочетаются`);
+      if (typeof p.version !== 'string' || (p.version !== 'latest' && !RELEASE_TAG.test(p.version))) {
+        die(`${where}.version: latest или тег vX.Y.Z[-<суффикс>.N] вышедшего релиза`);
+      }
+      if (p.version !== 'latest' && !localTagExists(p.version)) {
+        die(
+          `${where}.version: тега ${p.version} нет — нужен номер вышедшего релиза (git fetch --tags)`
+        );
+      }
+      version = p.version;
     }
     let product = null;
     if (p.product) {
@@ -365,7 +388,7 @@ function loadSpec(file, root) {
     if (!expect.def && !expect.tests.size && expect.count === null) {
       die(`${where}.expect: нужен хотя бы один из count, default, tests`);
     }
-    return { name: p.name, product, go, specs, grep, expect };
+    return { name: p.name, version, product, go, specs, grep, expect };
   });
   return { target: spec.target, cores, passes };
 }
@@ -375,7 +398,36 @@ function coreOrder(cores, cur) {
   return cores.includes(cur) ? [cur, ...cores.filter((c) => c !== cur)] : [...cores];
 }
 
+// Тег есть в локальном git (коммит, на который он указывает, достижим).
+function localTagExists(tag) {
+  return (
+    spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}^{commit}`]).status === 0
+  );
+}
+
+// Новейший опубликованный (не draft) релиз GitHub; при сбое gh бросает.
+function latestReleaseTag() {
+  return execFileSync(
+    'gh',
+    [
+      'release',
+      'list',
+      '--exclude-drafts',
+      '--limit',
+      '1',
+      '--json',
+      'tagName',
+      '--jq',
+      '.[0].tagName'
+    ],
+    { encoding: 'utf8', timeout: 30000 }
+  ).trim();
+}
+
+// Ключ сборки: HEAD@<номер> всегда отличается от HEAD, поэтому смена номера вызывает деплой,
+// а завершающий возврат стенда (deployed !== 'HEAD') ставит HEAD со своей версией.
 function productKey(p) {
+  if (p.version) return `HEAD@${p.resolved ?? p.version}`;
   return p.product ? `${p.product.sha}:${p.product.files.join(',')}` : 'HEAD';
 }
 
@@ -405,9 +457,12 @@ function dryRun(spec, specFile) {
     }
     const key = productKey(p);
     if (key !== deployed) {
-      step(
-        `деплой и смоук: ${p.product ? `${p.product.files.join(' ')} из ${p.product.ref}` : 'HEAD'}`
-      );
+      const target = p.version
+        ? `HEAD под номером ${p.version}`
+        : p.product
+          ? `${p.product.files.join(' ')} из ${p.product.ref}`
+          : 'HEAD';
+      step(`деплой и смоук: ${target}`);
       deployed = key;
     }
     const what = [
@@ -492,7 +547,9 @@ class Session {
       'RT_REPORT',
       'RT_REPORT_DIR',
       'RT_CORE',
-      'XCP_WANT_CORE'
+      'XCP_WANT_CORE',
+      // номер сборки задаёт только проход с version (env его деплоя), не оператор и не прошлый этап
+      'XCP_VERSION'
     ]) {
       delete base[k];
     }
@@ -627,13 +684,16 @@ class Session {
   // Деплой сборки рабочего дерева и смоук в один каталог этапа. Ядро, найденное смоуком,
   // становится текущим. Код: 0 — сборка стоит (смоук мог быть красным: это расхождение),
   // 3 — нет связи, иначе деплой не удался.
-  async deployAndSmoke(key, label) {
+  // version — номер вышедшего релиза: только деплой этого прохода идёт с XCP_VERSION, смоук
+  // сверяет xcp -v с этим номером (файл version этапа).
+  async deployAndSmoke(key, label, version = null) {
     const dir = this.stepDir(`deploy-${label}`);
     this.say(`деплой и смоук: ${label} → ${path.relative(this.root, dir)}`);
     const drc = await this.run('sh', [path.join(SCRIPT_DIR, 'deploy.sh'), '--target', this.t], {
-      RT_REPORT: dir
+      RT_REPORT: dir,
+      XCP_VERSION: version ?? undefined
     });
-    this.record({ kind: 'deploy', label, dir, rc: drc });
+    this.record({ kind: 'deploy', label, dir, rc: drc, version });
     if (drc !== 0) {
       this.deployed = null;
       if (drc !== 3) this.broken = true;
@@ -644,7 +704,7 @@ class Session {
     const src = await this.run('sh', [path.join(SCRIPT_DIR, 'smoke.sh'), this.t, ver], {
       RT_REPORT: dir
     });
-    this.record({ kind: 'smoke', label, dir, rc: src });
+    this.record({ kind: 'smoke', label, dir, rc: src, version });
     const coreFile = path.join(dir, this.t, 'core');
     const core = existsSync(coreFile) ? readFileSync(coreFile, 'utf8').trim() : '-';
     if (CORES.includes(core)) this.cur = core;
@@ -661,6 +721,44 @@ class Session {
       });
     }
     return src === 3 ? 3 : 0;
+  }
+
+  // Номер прохода с version: latest разрешается в новейший опубликованный релиз, результат
+  // должен быть тегом релиза и существовать в локальном git. Не вышло — проход не запускается:
+  // вердикт с причиной, сессия сломана (стенд вернёт cleanup). Итог — в p.resolved.
+  resolveVersion(p) {
+    if (p.resolved) return true;
+    let tag = p.version;
+    let err = '';
+    if (tag === 'latest') {
+      try {
+        tag = latestReleaseTag();
+      } catch (e) {
+        err = `gh release list не отработал: ${e.message.split('\n')[0]}`;
+      }
+    }
+    if (!err && !RELEASE_TAG.test(tag)) {
+      err = `новейший релиз не определён или тег «${tag}» не похож на vX.Y.Z`;
+    }
+    if (!err && !localTagExists(tag)) err = `тега ${tag} нет в локальном git (git fetch --tags)`;
+    if (err) {
+      this.say(`проход ${p.name} не начат: ${err}`);
+      this.verdicts.push({
+        pass: p.name,
+        core: '-',
+        test: 'version: тег',
+        expected: [p.version],
+        actual: 'не определён',
+        detail: err,
+        ok: false,
+        report: '-'
+      });
+      this.broken = true;
+      return false;
+    }
+    p.resolved = tag;
+    this.say(`проход ${p.name}: сборка HEAD под номером ${tag}`);
+    return true;
   }
 
   async switchTo(core) {
@@ -737,7 +835,7 @@ class Session {
       const env = { RT_REPORT: dir, RT_GO_PKGS: p.go.pkgs };
       if (p.go.run) env.RT_GO_RUN = p.go.run;
       const g = await this.run('sh', [path.join(SCRIPT_DIR, 'go-suite.sh'), this.t, core], env);
-      this.record({ kind: 'go', pass: p.name, core, dir, rc: g });
+      this.record({ kind: 'go', pass: p.name, core, dir, rc: g, version: p.resolved ?? null });
       if (g === 3) return 3;
       if (p.specs.length) {
         // после разрушающих Go-тестов спеки начинают с рабочего стенда (как в run.sh)
@@ -767,7 +865,7 @@ class Session {
       const env = { RT_REPORT: dir, RT_SPECS: p.specs.join(' ') };
       if (p.grep) env.RT_PW_GREP = p.grep;
       rc = await this.run('sh', [path.join(SCRIPT_DIR, 'pw-suite.sh'), this.t, core], env);
-      this.record({ kind: 'pw', pass: p.name, core, dir, rc });
+      this.record({ kind: 'pw', pass: p.name, core, dir, rc, version: p.resolved ?? null });
       if (rc === 3) return 3;
     }
     this.judge(p, core, dir);
@@ -866,21 +964,7 @@ class Session {
       let err = '';
       if (tag === 'latest') {
         try {
-          tag = execFileSync(
-            'gh',
-            [
-              'release',
-              'list',
-              '--exclude-drafts',
-              '--limit',
-              '1',
-              '--json',
-              'tagName',
-              '--jq',
-              '.[0].tagName'
-            ],
-            { encoding: 'utf8', timeout: 30000 }
-          ).trim();
+          tag = latestReleaseTag();
         } catch (e) {
           err = `gh release list не отработал: ${e.message.split('\n')[0]}`;
         }
@@ -1328,7 +1412,7 @@ class Session {
     L.push('', '## Этапы', '');
     for (const s of this.steps) {
       L.push(
-        `- ${s.kind}${s.pass ? ` ${s.pass}` : ''}${s.core ? ` ${s.core}` : ''}${s.label ? ` ${s.label}` : ''}: код ${s.rc} (${path.relative(this.root, s.dir)})`
+        `- ${s.kind}${s.pass ? ` ${s.pass}` : ''}${s.core ? ` ${s.core}` : ''}${s.label ? ` ${s.label}` : ''}${s.version ? ` под номером ${s.version}` : ''}: код ${s.rc} (${path.relative(this.root, s.dir)})`
       );
     }
     L.push('', '## Стенд в конце', '');
@@ -1355,6 +1439,10 @@ class Session {
           target: this.t,
           core_initial: this.c0,
           verdicts: this.verdicts,
+          // номер сборки каждого прохода go/specs: разрешённый тег вышедшего релиза или null
+          passes: this.spec.passes
+            .filter((p) => !p.suite)
+            .map((p) => ({ name: p.name, version: p.resolved ?? null })),
           suites: this.suites,
           steps: this.steps.map((s) => ({
             ...s,
@@ -1416,13 +1504,16 @@ async function main() {
         await s.runSuite(p);
         continue;
       }
+      if (p.version && !s.resolveVersion(p)) break;
       s.applyProduct(p);
       const key = productKey(p);
       if (s.deployed !== key) {
-        const rc = await s.deployAndSmoke(
-          key,
-          p.product ? `${p.name}-${p.product.ref.slice(0, 8)}` : 'head'
-        );
+        const label = p.version
+          ? `${p.name}-${p.resolved}`
+          : p.product
+            ? `${p.name}-${p.product.ref.slice(0, 8)}`
+            : 'head';
+        const rc = await s.deployAndSmoke(key, label, p.resolved ?? null);
         if (rc === 3 || s.broken) break;
         if (!s.c0) {
           if (!s.cur) {

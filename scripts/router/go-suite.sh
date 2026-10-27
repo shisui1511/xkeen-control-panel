@@ -16,7 +16,8 @@
 # XCP_RT_LINKS (данные share-ссылок internal/nodes/testdata/links), XCP_RT_INPUTS
 # (входные тела ответов internal/nodes/testdata/inputs), XCP_RT_CONTRACT (контракт
 # ключей ответов API источников frontend/src/lib/sourcesContract.json),
-# XCP_RT_ROUTING_CONTRACT (то же для маршрутизации, routingContract.json) и, если в
+# XCP_RT_ROUTING_CONTRACT (то же для маршрутизации, routingContract.json), XCP_RT_SETUP
+# (копия scripts/setup.sh этой сборки: тесты запускают её во временном каталоге) и, если в
 # локальном конфиге целей задан XCP_SUBSCRIPTION_URL, XCP_RT_SUBSCRIPTION_URL (адрес
 # настоящей подписки: передаётся файлом с правами 600, в журнал и отчёт не попадает).
 #
@@ -262,6 +263,22 @@ if [ -f "$ROOT/frontend/src/lib/routingContract.json" ]; then
   fi
 fi
 
+# Установщик этой сборки: тесты запускают настоящий setup.sh на устройстве.
+SETUP_ENV=""
+if [ -f "$ROOT/scripts/setup.sh" ]; then
+  rc=0
+  rt_scp "$ID" "$ROOT/scripts/setup.sh" "$RWD/setup.sh" || rc=$?
+  if [ "$rc" = 3 ]; then
+    rt_result "$ID" FAIL reachable "нет связи"
+    exit 3
+  elif [ "$rc" = 0 ]; then
+    SETUP_ENV="XCP_RT_SETUP=$RWD/setup.sh"
+  else
+    rt_result "$ID" FAIL "go:setup-script" "копирование setup.sh не удалось (код $rc)"
+    BAD=$((BAD + 1))
+  fi
+fi
+
 # Адрес настоящей подписки из локального конфига целей: на устройство уходит файлом
 # с правами 600 внутри рабочего каталога (он удаляется при выходе), в окружение теста
 # значение подставляет сам запускающий скрипт на устройстве. Адрес нигде не печатается.
@@ -327,7 +344,7 @@ for pkg in $PKGS; do
   runner="$RT_REPORT/$ID/.go-run.sh"
   cat >"$runner" <<EOF
 cd $RWD
-XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV $INPUTS_ENV $CONTRACT_ENV $ROUTING_CONTRACT_ENV $SUB_ENV ./$name.test -test.v=test2json -test.run '${RT_GO_RUN:-^TestRouter}' -test.timeout 20m &
+XCP_RT_ARCH=$ARCH XCP_RT_CORE=$CORE XCP_RT_WORKDIR=$RWD $SESSION_ENV $LINKS_ENV $INPUTS_ENV $CONTRACT_ENV $ROUTING_CONTRACT_ENV $SETUP_ENV $SUB_ENV ./$name.test -test.v=test2json -test.run '${RT_GO_RUN:-^TestRouter}' -test.timeout 20m &
 T=\$!
 ( while kill -0 \$T 2>/dev/null; do grep VmHWM /proc/\$T/status > $RWD/$name.hwm 2>/dev/null; sleep 1; done ) &
 W=\$!

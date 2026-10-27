@@ -20,6 +20,7 @@
     apiErrorView,
     type UpdateStatusPayload
   } from '../../lib/updateStatusView';
+  import { autoInstallView, autoStateOf, otherAutoVersion } from '../../lib/autoInstallView';
 
   interface ReleaseNote {
     version: string;
@@ -112,6 +113,24 @@
   );
   let savingAuto = $state(false);
 
+  // Состояние автоустановки из последней проверки планировщика; текст и дата — из общего помощника
+  const autoView = $derived(autoInstallView($updateState, $currentLang, 'card'));
+  const autoCode = $derived(autoStateOf($updateState));
+  // Состояние относится к версии и каналу последней проверки планировщика: у другой версии
+  // (смена канала, ручная проверка опередила планировщик) чужие срок и «Срочное» не рисуются
+  const availableMatches = $derived(
+    !!info?.has_update &&
+      $updateState?.latest_version === info.latest_version &&
+      $updateState?.channel === channel
+  );
+  const availableView = $derived(
+    availableMatches && autoCode && autoCode !== 'dev_build' ? autoView : null
+  );
+  // «Срочное» — только когда срочный кандидат и есть показанная версия
+  const availableUrgent = $derived(
+    availableMatches && autoCode === 'urgent' && !otherAutoVersion($updateState)
+  );
+
   async function saveAuto(
     patch: Partial<Pick<UpdateCheckState, 'auto_check' | 'auto_install' | 'install_window'>>
   ) {
@@ -139,7 +158,11 @@
   );
 
   function kindBadge(kind: ReleaseKind): string {
-    return kind === 'stable' ? 'badge-success' : kind === 'rc' ? 'badge-primary' : 'badge-warning';
+    return kind === 'stable'
+      ? 'badge-success'
+      : kind === 'beta'
+        ? 'badge-primary'
+        : 'badge-warning';
   }
 
   function formatDate(value: string | number | undefined): string {
@@ -373,13 +396,13 @@
       <span class="field-row-val version-val">
         <span class="mono">{version}</span>
         {#if version && version !== '...'}
-          <span class="badge {kindBadge(currentKind)}"
+          <span class="badge {kindBadge(currentKind)}" data-testid="update-kind-current"
             >{$t(`settings.update_kind_${currentKind}`)}</span
           >
         {/if}
       </span>
     </div>
-    <div class="field-row channel-row">
+    <div class="field-row channel-row" data-testid="update-channel-row">
       <div>
         <span class="field-row-name">{$t('settings.update_channel')}</span>
         <div class="field-row-desc">{$t(`settings.channel_${channel}_desc`)}</div>
@@ -455,6 +478,11 @@
             >{$t('settings.update_available_title', { version: info.latest_version })}</span
           >
           <span class="badge {kindBadge(kind)}">{$t(`settings.update_kind_${kind}`)}</span>
+          {#if availableUrgent}
+            <span class="badge badge-warning" data-testid="update-urgent-badge"
+              >{$t('settings.update_urgent_badge')}</span
+            >
+          {/if}
         </div>
         <div class="available-meta">
           {#if info.published_at}<span>{formatDate(info.published_at)}</span>{/if}
@@ -467,6 +495,11 @@
               >{$t('settings.update_versions_behind', { count: info.releases.length })}</span
             >{/if}
         </div>
+        {#if availableView}
+          <div class="available-auto" data-testid="update-available-auto" data-state={autoCode}>
+            {$t(availableView.key, availableView.params)}
+          </div>
+        {/if}
         <button class="btn btn-primary" onclick={() => (showConfirmInstall = true)}>
           {$t('settings.install_update')}
         </button>
@@ -543,6 +576,17 @@
         </div>
       {/if}
     </div>
+
+    {#if autoView}
+      <div
+        class="update-state state-info auto-status"
+        role="status"
+        data-testid="update-auto-status"
+        data-state={autoCode}
+      >
+        {$t(autoView.key, autoView.params)}
+      </div>
+    {/if}
 
     {#if auto.last_auto_install}
       {@const last = auto.last_auto_install}
@@ -764,6 +808,21 @@
     word-break: break-word;
   }
 
+  .state-info {
+    color: var(--fg-secondary);
+    background: var(--surface-tint);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
+
+  .auto-status {
+    margin-top: 16px;
+    padding: 8px 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
   .update-available {
     margin-top: 14px;
     padding: 14px;
@@ -795,6 +854,15 @@
     gap: 4px 14px;
     font-size: 12px;
     color: var(--fg-secondary);
+  }
+
+  .available-auto {
+    margin-top: 4px;
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--fg-secondary);
+    overflow-wrap: anywhere;
   }
 
   .update-progress {

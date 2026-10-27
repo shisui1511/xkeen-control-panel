@@ -206,16 +206,16 @@ get_latest_stable_version() {
   fi
 }
 
-# latest_rc_tag — читает теги vX.Y.Z-rc.N со stdin, печатает максимальный по
-# кортежу (major, minor, patch, номер RC) числовым сравнением. Не использует
-# утилиту сортировки: busybox роутера сравнивает ключи строкой (rc.9 > rc.28).
+# latest_beta_tag — читает теги vX.Y.Z-beta.N со stdin, печатает максимальный по
+# кортежу (major, minor, patch, номер beta) числовым сравнением. Не использует
+# утилиту сортировки: busybox роутера сравнивает ключи строкой (beta.9 > beta.28).
 # Пустой вход — пустой вывод.
-latest_rc_tag() {
+latest_beta_tag() {
   awk '
-    /^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$/ {
+    /^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$/ {
       s = $0
       sub(/^v/, "", s)
-      sub(/-rc\./, ".", s)
+      sub(/-beta\./, ".", s)
       if (split(s, p, ".") != 4) next
       newer = 0
       if (!have) {
@@ -236,16 +236,16 @@ latest_rc_tag() {
   '
 }
 
-# Получить latest pre-release версию: последний release candidate, а если после
+# Получить версию канала Предварительный: последний тег -beta.N, а если после
 # него уже вышел stable той же или более новой версии — stable (как канал beta в панели)
-get_latest_prerelease_version() {
-  local json rc stable
+get_latest_beta_version() {
+  local json beta stable
   json=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases?per_page=30" || echo "")
   [ -n "$json" ] || { echo ""; return; }
-  rc=$(echo "$json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' \
-    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' | latest_rc_tag)
+  beta=$(echo "$json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | latest_beta_tag)
   stable=$(get_latest_stable_version)
-  pick_prerelease "$rc" "$stable"
+  pick_beta "$beta" "$stable"
 }
 
 # ver_ge A B — код 0, если версия A (vX.Y.Z или X.Y.Z) не меньше B по
@@ -266,27 +266,27 @@ ver_ge() {
   '
 }
 
-# pick_prerelease RC STABLE — RC, если его базовая версия новее stable, иначе stable
-pick_prerelease() {
-  local rc stable base
-  rc="$1"
+# pick_beta BETA STABLE — тег -beta.N, если его базовая версия новее stable, иначе stable
+pick_beta() {
+  local beta stable base
+  beta="$1"
   stable="$2"
-  if [ -z "$rc" ]; then
+  if [ -z "$beta" ]; then
     echo "$stable"
     return
   fi
-  base="${rc%-rc.*}"
+  base="${beta%-beta.*}"
   if [ -n "$stable" ] && ver_ge "$stable" "$base"; then
     echo "$stable"
   else
-    echo "$rc"
+    echo "$beta"
   fi
 }
 
 # Получить версию в зависимости от канала
 get_release_version() {
-  if [ "$CHANNEL" = "prerelease" ]; then
-    get_latest_prerelease_version
+  if [ "$CHANNEL" = "beta" ]; then
+    get_latest_beta_version
   else
     get_latest_stable_version
   fi
@@ -1139,8 +1139,8 @@ show_installer_menu() {
   fi
 
   printf "\n  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
-  printf "  ${BOLD}1${NC}  Установить  (Stable, порт %s)\n" "$DEFAULT_PORT"
-  printf "  ${BOLD}2${NC}  Установить  (Pre-release, порт %s)\n" "$DEFAULT_PORT"
+  printf "  ${BOLD}1${NC}  Установить  (Основной, порт %s)\n" "$DEFAULT_PORT"
+  printf "  ${BOLD}2${NC}  Установить  (Предварительный, порт %s)\n" "$DEFAULT_PORT"
   printf "  ${BOLD}0${NC}  Выход\n\n"
   printf "${GREEN}>${NC} "
 }
@@ -1158,9 +1158,9 @@ show_manager_menu() {
 
   cur_version=$(get_version)
   port=$(grep -o '"port":[[:space:]]*[0-9]*' "$INSTALL_DIR/config.json" 2>/dev/null | grep -o '[0-9]*' || echo "$DEFAULT_PORT")
-  channel_label="Stable"
-  if [ "$CHANNEL" = "prerelease" ]; then
-    channel_label="Pre-release (тестовый)"
+  channel_label="Основной"
+  if [ "$CHANNEL" = "beta" ]; then
+    channel_label="Предварительный"
   fi
 
   status_text="остановлен"
@@ -1225,11 +1225,11 @@ manage_service_menu() {
 
 switch_channel() {
   if [ "$CHANNEL" = "stable" ]; then
-    CHANNEL="prerelease"
-    ok "Канал переключен на Pre-release (тестовые сборки)"
+    CHANNEL="beta"
+    ok "Канал переключен на Предварительный (новые версии до выхода в Основной)"
   else
     CHANNEL="stable"
-    ok "Канал переключен на Stable (стабильные сборки)"
+    ok "Канал переключен на Основной (проверенные версии)"
   fi
   mkdir -p "$INSTALL_DIR"
   echo "$CHANNEL" > "$INSTALL_DIR/channel"
@@ -1245,6 +1245,19 @@ status_service() {
     warn "Служба $BINARY остановлена"
     return 3
   fi
+}
+
+# check_channel — единственная точка проверки имени канала (файл channel или
+# --channel). Допустимы stable и beta; всё остальное (в том числе имя прежнего
+# канала) — stable с предупреждением, миграции нет. Имя печатается как данные.
+check_channel() {
+  case "$CHANNEL" in
+    stable|beta) ;;
+    *)
+      warn "Неизвестный канал «$CHANNEL» — используется Основной (stable). Выберите канал в меню."
+      CHANNEL="stable"
+      ;;
+  esac
 }
 
 # Обработка CLI-аргументов
@@ -1290,7 +1303,7 @@ parse_args() {
           CHANNEL="$2"
           shift 2
         else
-          error "Параметр --channel требует значение (stable/prerelease)"
+          error "Параметр --channel требует значение (stable/beta)"
           exit 1
         fi
         ;;
@@ -1314,7 +1327,7 @@ parse_args() {
         printf "  -r, --restart      Перезапуск службы панели\n"
         printf "  -s, --status       Проверить статус службы\n"
         printf "      --init-script  Пересоздать init-скрипт службы (без загрузки и перезапуска)\n"
-        printf "  -c, --channel CH   Канал обновления (stable/prerelease)\n"
+        printf "  -c, --channel CH   Канал обновления (stable/beta)\n"
         printf "  -p, --port PORT    Порт для веб-интерфейса панели\n"
         printf "  -h, --help         Показать эту справку\n\n"
         exit 0
@@ -1349,6 +1362,7 @@ fi
 
 # Считываем аргументы
 parse_args "$@"
+check_channel
 
 # Автоопределение архитектуры роутера
 detect_arch
@@ -1469,7 +1483,7 @@ else
         exit $?
         ;;
       2)
-        CHANNEL="prerelease"
+        CHANNEL="beta"
         do_install
         exit $?
         ;;

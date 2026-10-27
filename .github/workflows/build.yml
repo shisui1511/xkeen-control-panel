@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Версия: 0.1.0 — stable, 0.2.0-rc.1 — release candidate"
+        description: "Версия: 0.1.0 — stable, 0.2.0-beta.1 — предварительный выпуск"
         required: true
         type: string
 
@@ -22,10 +22,12 @@ concurrency:
 
 permissions:
   contents: write
+  # Стоп-метка release-stop на issue: блок xcp-release пишется при создании релиза
+  issues: read
 
 jobs:
   # Push в main: статическая проверка merge-коммита (PR мог отставать от main)
-  # и сигнал для auto-release. Сборки на push нет: RC и stable собираются по тегу.
+  # и сигнал для auto-release. Сборки на push нет: beta и stable собираются по тегу.
   # Job нужен, чтобы push давал прогон «Build and Release» для workflow_run.
   vet:
     name: Vet
@@ -50,7 +52,7 @@ jobs:
         run: go vet ./...
 
   # Версия и фронтенд готовятся один раз, матрица архитектур берёт их артефактом.
-  # Сборка — только для RC и stable: по тегу (auto-release или человек) или вручную.
+  # Сборка — только для beta и stable: по тегу (auto-release или человек) или вручную.
   prepare:
     name: Prepare
     runs-on: ubuntu-latest
@@ -68,20 +70,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          # KIND: rc — release candidate, stable — релиз. Собираются одинаково; RC
-          # публикуется как pre-release: в beta тестируется ровно тот бинарник,
-          # который станет стабильным.
+          # KIND: beta — пре-релиз (канал «Предварительный»), stable — релиз. Собираются
+          # одинаково; beta публикуется как pre-release: в «Предварительном» тестируется
+          # ровно тот бинарник, который станет стабильным.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="v${INPUT_VERSION#v}"
           else
             VERSION="${GITHUB_REF#refs/tags/}"
           fi
-          if echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$'; then
-            KIND="rc"
+          if echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$'; then
+            KIND="beta"
           elif echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
             KIND="stable"
           else
-            echo "::error::Версия '${VERSION}' — ни vX.Y.Z, ни vX.Y.Z-rc.N"
+            echo "::error::Версия '${VERSION}' — ни vX.Y.Z, ни vX.Y.Z-beta.N"
             exit 1
           fi
           PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/pulls --jq '.[0].number' 2>/dev/null || echo "")
@@ -199,9 +201,10 @@ jobs:
           PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
           MODE: ${{ needs.prepare.outputs.kind }}
           SOAK_HOURS: ${{ vars.RC_SOAK_HOURS || '24' }}
+          RELEASE_STOP: ${{ vars.RELEASE_STOP }}
         run: |
-          if [ "$MODE" = rc ]; then
-            PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$'
+          if [ "$MODE" = beta ]; then
+            PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$'
             PRERELEASE="--prerelease"
           else
             PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+$'
@@ -212,11 +215,20 @@ jobs:
             exit 1
           fi
 
+          # Блок xcp-release первой строкой заметок уже при создании релиза: до прогона finalize
+          # в auto-release (до 3 ч) свежий пре-релиз при включённом стопе иначе читался бы
+          # панелями как hold:false. Аннотация тега нужна для urgent. Стоп не прочитан или
+          # команда упала — hold:true (gen_notes.py пишет его и при пустом блоке).
+          git fetch --force origin "refs/tags/${VERSION}:refs/tags/${VERSION}" 2>/dev/null || true
+          RELEASE_MARKER=$(bash .github/scripts/auto_release.sh marker "${VERSION}") || RELEASE_MARKER=""
+          echo "Блок xcp-release: ${RELEASE_MARKER:-нет, будет hold:true}"
+          export RELEASE_MARKER
+
           python3 .github/scripts/gen_notes.py
 
           # Тег ставит auto-release (или человек) до сборки — релиз создаётся по нему,
           # без --target. С --target на коммит, чьи workflow-файлы отличаются от main
-          # (RC/stable со старого коммита), GitHub отвечает GITHUB_TOKEN 403
+          # (beta/stable со старого коммита), GitHub отвечает GITHUB_TOKEN 403
           # «Resource not accessible by integration» — так упал v0.29.0-rc.2.
           TARGET="--target ${GITHUB_SHA}"
           if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null; then
@@ -231,7 +243,7 @@ jobs:
             $PRERELEASE \
             artifacts/xcp_*/xcp_"${VERSION}"_*
 
-          # Dev-сборки и RC не новее выпущенной версии устарели, включая осиротевшие теги
+          # Пре-релизы не новее выпущенной версии устарели, включая осиротевшие теги
           if [ "$MODE" = stable ]; then
             bash .github/scripts/prune_dev_releases.sh "${VERSION}"
           fi
