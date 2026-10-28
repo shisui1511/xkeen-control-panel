@@ -180,4 +180,110 @@ func TestRouterGeodataCron(t *testing.T) {
 	if v := rtCronSnap(t, svc); v.Schedule.Suspended {
 		t.Fatalf("повторный adopt не снял приостановку")
 	}
+	if v := rtCronSnap(t, svc); v.Schedule.Next == "" {
+		t.Fatalf("при активном расписании панели нет schedule.next")
+	}
+
+	// «Два расписания»: xkeen -ugc дописал строку при активном расписании панели.
+	rtCronWrite(t, withLine(rtCronRead(t), line))
+	deadline := time.Now().Add(45 * time.Second)
+	for !rtCronSnap(t, svc).Cron.Two {
+		if time.Now().After(deadline) {
+			t.Fatalf("за 45 с тик не заметил вернувшуюся строку cron: cron.two=false")
+		}
+		time.Sleep(time.Second)
+	}
+	foundNotice := false
+	for _, n := range svc.d.Layer.Snapshot().Notices {
+		if n.ID == "geodata_cron_two" {
+			foundNotice = true
+		}
+	}
+	if !foundNotice {
+		t.Errorf("нет уведомления geodata_cron_two")
+	}
+
+	// «Убрать задачу cron»: строки нет, расписание панели осталось включённым.
+	if err := svc.CronAction(CronRemove); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if rtCronHasUG(rtCronRead(t)) {
+		t.Fatalf("после remove в crontab осталась строка -ug")
+	}
+	if v := rtCronSnap(t, svc); v.Cron.Two || !v.Schedule.Enabled {
+		t.Fatalf("после remove: two=%v enabled=%v", v.Cron.Two, v.Schedule.Enabled)
+	}
+
+	// «Отдать расписание XKeen»: расписание панели выключено, строка на месте, возвращать нечего.
+	rtCronWrite(t, withLine(rtCronRead(t), line))
+	if err := svc.CronAction(CronGive); err != nil {
+		t.Fatalf("give: %v", err)
+	}
+	if got := rtCronRead(t); !rtCronHasLine(got, line) {
+		t.Fatalf("после give нет строки %q:\n%s", line, got)
+	}
+	svc.mu.Lock()
+	taken, sch = svc.st.CronTaken, svc.st.Schedule
+	svc.mu.Unlock()
+	if sch.Enabled || taken != nil {
+		t.Fatalf("после give: enabled=%v cron_taken=%+v", sch.Enabled, taken)
+	}
+
+	// Выключение расписания в самой панели означает «без расписания»: crontab не
+	// трогается, строка XKeen не возвращается; выключение флага возвращает снятую
+	// строку дословно и при выключенном расписании панели.
+	if err := svc.CronAction(CronAdopt); err != nil {
+		t.Fatalf("adopt перед выключением расписания: %v", err)
+	}
+	before := rtCronRead(t)
+	off := svc.st.Schedule
+	off.Enabled = false
+	if err := svc.SetSchedule(off); err != nil {
+		t.Fatalf("SetSchedule(enabled=false): %v", err)
+	}
+	if after := rtCronRead(t); after != before || rtCronHasUG(after) {
+		t.Fatalf("SetSchedule(enabled=false) изменил crontab:\n%s\n---\n%s", before, after)
+	}
+	if err := svc.OnFlagOff(); err != nil {
+		t.Fatalf("OnFlagOff при выключенном расписании панели: %v", err)
+	}
+	if got := rtCronRead(t); !rtCronHasLine(got, line) {
+		t.Fatalf("строка cron_taken не вернулась при выключенном расписании панели:\n%s", got)
+	}
+	svc.OnFlagOn()
+
+	// Расписание вне формата XKeen не перенимается.
+	nonstd := "*/30 * * * * /opt/sbin/xkeen -ug"
+	rtCronWrite(t, withLine(withoutUGLines(rtCronRead(t)), nonstd))
+	v = rtCronSnap(t, svc)
+	if !v.Cron.Found || v.Cron.Adoptable {
+		t.Fatalf("нестандартная строка: found=%v adoptable=%v, ожидались true и false", v.Cron.Found, v.Cron.Adoptable)
+	}
+	if err := svc.CronAction(CronAdopt); lists.ErrorCode(err) != "cron_nonstandard" {
+		t.Fatalf("adopt нестандартной строки: %v, ожидался cron_nonstandard", err)
+	}
+	if got := rtCronRead(t); !rtCronHasLine(got, nonstd) {
+		t.Fatalf("отказавший adopt изменил crontab:\n%s", got)
+	}
+
+	// Строки не было, а расписание панели включено: выключение флага ставит строку XKeen.
+	if err := svc.CronAction(CronGive); err != nil {
+		t.Fatalf("give: %v", err)
+	}
+	rtCronWrite(t, withoutUGLines(rtCronRead(t)))
+	daily := Schedule{Enabled: true, Day: -1, Hour: (time.Now().Hour() + 10) % 24, Minute: 15}
+	if err := svc.SetSchedule(daily); err != nil {
+		t.Fatalf("SetSchedule: %v", err)
+	}
+	if err := svc.SetSchedule(Schedule{Enabled: true, Day: 7, Hour: 1, Minute: 1}); lists.ErrorCode(err) != "schedule_invalid" {
+		t.Fatalf("SetSchedule с днём 7: %v, ожидался schedule_invalid", err)
+	}
+	if err := svc.OnFlagOff(); err != nil {
+		t.Fatalf("OnFlagOff без cron_taken: %v", err)
+	}
+	wantLine := fmt.Sprintf("15 %d * * * /opt/sbin/xkeen -ug", daily.Hour)
+	if got := rtCronRead(t); !rtCronHasLine(got, wantLine) {
+		t.Fatalf("после OnFlagOff нет строки %q:\n%s", wantLine, got)
+	}
+	svc.OnFlagOn()
 }
