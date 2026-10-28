@@ -15,7 +15,9 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/assets"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
@@ -85,6 +87,11 @@ type API struct {
 	// routing — сервис маршрутизации (группы, правила, владение); nil, пока
 	// main.go его не подключил: маршруты /api/configlayer/routing* отвечают 404.
 	routing *routing.Service
+	// geodata — менеджер geodata XKeen (источники, обновление баз, расписание); nil,
+	// пока main.go его не подключил: маршруты /api/configlayer/geodata* отвечают 404.
+	geodata *geodata.Service
+	// geodataIndex — индекс dat-файлов каталога XKeen для инспектора тегов и поиска.
+	geodataIndex *lists.Index
 	// configLayerMu сериализует переключения флага слоя целиком (SettingsConfigLayer).
 	configLayerMu sync.Mutex
 }
@@ -301,6 +308,13 @@ func (a *API) SetSourcesService(s *sources.Service) {
 // останавливается в main.go.
 func (a *API) SetRoutingService(s *routing.Service) {
 	a.routing = s
+}
+
+// SetGeodataService подключает менеджер geodata и индекс dat-файлов; создаются,
+// запускаются и останавливаются в main.go.
+func (a *API) SetGeodataService(s *geodata.Service, ix *lists.Index) {
+	a.geodata = s
+	a.geodataIndex = ix
 }
 
 // ConfigLayer — слой «Конфигурация»; nil, если не подключён.

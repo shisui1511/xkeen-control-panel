@@ -27,6 +27,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
@@ -758,16 +759,20 @@ func main() {
 		// слоя. Не создался или не подключился — маршруты
 		// /api/configlayer/routing* отвечают 404, панель работает без них.
 		var routingSvc *routing.Service
+		var geoSvc *geodata.Service
+		// Индекс dat и хранилище записей geodata — одни на сервисы маршрутизации и
+		// менеджера. Хранилище создаётся без собственного запуска `xkeen -ug`: единственный
+		// вход запуска из панели — сервис менеджера под замком применения.
+		datIndex := lists.NewIndex(lists.DefaultDatDir)
+		geoStore := lists.NewGeodataStore(xkeenSettingsSvc, exec.LookPath, nil)
 		if sourcesSvc != nil {
 			var routeErr error
 			routingSvc, routeErr = routing.New(routing.Deps{
-				DataDir: cfg.DataDir,
-				Layer:   configLayer,
-				Sources: sourcesSvc,
-				Lists:   lists.NewIndex(lists.DefaultDatDir),
-				Geodata: lists.NewGeodataStore(xkeenSettingsSvc, exec.LookPath, func(ctx context.Context) error {
-					return runXKeenUpdateGeo(ctx, consoleSvc)
-				}),
+				DataDir:       cfg.DataDir,
+				Layer:         configLayer,
+				Sources:       sourcesSvc,
+				Lists:         datIndex,
+				Geodata:       geoStore,
 				Installed:     installedKernels,
 				KernelVersion: kernelVersion,
 				Running:       kernelRunning,
@@ -791,6 +796,32 @@ func main() {
 			if routeErr == nil {
 				// Хук групп по умолчанию ставится только после полной регистрации.
 				routingSvc.Attach()
+				// Менеджер geodata (фаза 146.1) создаётся только здесь, после сервиса
+				// маршрутизации: его хук AfterApply (удаление источника после «Применить»)
+				// регистрируется до Start слоя. Не создался или не подключился — маршруты
+				// /api/configlayer/geodata* отвечают 404.
+				var geoErr error
+				geoSvc, geoErr = geodata.New(geodata.Deps{
+					DataDir:     cfg.DataDir,
+					Layer:       configLayer,
+					Store:       geoStore,
+					Index:       datIndex,
+					Routing:     routingSvc,
+					XKeenBin:    cfg.XKeenBinary,
+					MihomoDir:   cfg.MihomoConfigDir,
+					XrayConfDir: cfg.XRayConfigDir,
+				})
+				if geoErr == nil {
+					geoErr = configLayer.Register(configlayer.Hooks{AfterApply: geoSvc.AfterApply})
+					if geoErr != nil {
+						// Контекст сервиса не должен остаться живым без владельца.
+						geoSvc.Stop()
+					}
+				}
+				if geoErr != nil {
+					log.Printf("Менеджер geodata не подключён, маршруты /api/configlayer/geodata* отвечают 404: %v", geoErr)
+					geoSvc = nil
+				}
 			} else {
 				log.Printf("Сервис маршрутизации не подключён к слою, маршруты /api/configlayer/routing* отвечают 404: %v", routeErr)
 				if routingSvc != nil {
@@ -828,6 +859,13 @@ func main() {
 			}, 0)
 			selWatch.Start()
 			defer stops.run("routing-selection", selWatch.Stop)
+		}
+		if geoSvc != nil {
+			// Менеджер geodata: стартует после слоя и сервиса маршрутизации; defer идёт
+			// после их defer, поэтому останавливается раньше обоих.
+			geoSvc.Start()
+			api.SetGeodataService(geoSvc, datIndex)
+			defer stops.run("geodata", geoSvc.Stop)
 		}
 	}
 	srv.HandleProtected("/api/configlayer/state", api.ConfigLayerState)
@@ -874,6 +912,7 @@ func main() {
 	srv.HandleProtected("/api/configlayer/routing/presets", api.ConfigRoutingPresets)
 	srv.HandleProtected("/api/configlayer/routing/presets/plan", api.ConfigRoutingPresetsPlan)
 	srv.HandleProtected("/api/configlayer/routing/presets/apply", api.ConfigRoutingPresetsApply)
+	srv.HandleProtected("/api/configlayer/geodata", api.ConfigGeodata)
 
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
 		strings.TrimPrefix(Version, "v"), runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
@@ -915,33 +954,6 @@ func main() {
 		log.Printf("Received signal %s during restart, exiting...", sig)
 	}
 	log.Println("Server stopped.")
-}
-
-// runXKeenUpdateGeo запускает `xkeen -ug` через консольный сервис. Команда идёт
-// в отдельной горутине: сервис ждёт её без контекста, а ожидание вызывающего
-// прерывается отменой ctx (процесс при этом доработает сам).
-func runXKeenUpdateGeo(ctx context.Context, console *services.ConsoleService) error {
-	type result struct {
-		res *services.CommandResult
-		err error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		res, err := console.Execute("-ug")
-		ch <- result{res, err}
-	}()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case out := <-ch:
-		if out.err != nil {
-			return out.err
-		}
-		if out.res == nil || !out.res.Success {
-			return errors.New("xkeen -ug завершился с ошибкой")
-		}
-		return nil
-	}
 }
 
 // pingNodeTLS проверяет доступность сервера узла по TLS (рукопожатие по адресу,
