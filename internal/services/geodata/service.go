@@ -66,6 +66,9 @@ const (
 	outsideQuiet = 60 * time.Second
 	// publishInterval — не чаще одного события geodata за этот срок.
 	publishInterval = 500 * time.Millisecond
+	// jobWaitPoll — как часто фоновый запуск проверяет, не освободилось ли задание менеджера
+	// (установка jq идёт до jqTimeout).
+	jobWaitPoll = 500 * time.Millisecond
 	// rateLimitTimeout — срок запроса остатка лимита GitHub API.
 	rateLimitTimeout = 10 * time.Second
 	// rateLimitURL — единственный адрес, который панель сама запрашивает у GitHub.
@@ -232,15 +235,23 @@ func (s *Service) loadLastOutput() {
 	}
 }
 
-// spawn запускает фоновую горутину сервиса под wg; после Stop не запускает.
-func (s *Service) spawn(fn func()) bool {
+// track учитывает горутину в s.wg: Stop дожидается её конца. false — сервис остановлен,
+// горутину запускать нельзя. Вызывающий обязан вызвать s.wg.Done().
+func (s *Service) track() bool {
 	s.lmu.Lock()
+	defer s.lmu.Unlock()
 	if s.stopped {
-		s.lmu.Unlock()
 		return false
 	}
 	s.wg.Add(1)
-	s.lmu.Unlock()
+	return true
+}
+
+// spawn запускает фоновую горутину сервиса под wg; после Stop не запускает.
+func (s *Service) spawn(fn func()) bool {
+	if !s.track() {
+		return false
+	}
 	go func() {
 		defer s.wg.Done()
 		fn()
@@ -312,10 +323,12 @@ func (s *Service) tick() {
 	}
 }
 
-// RunNow запускает `xkeen -ug`: исключительный замок слоя берётся синхронно (занят —
-// ошибка сразу, ErrGeodataBusy), сам запуск идёт в фоне, вывод — в буфере ug.
+// RunNow запускает `xkeen -ug`: исключительный замок слоя и задание менеджера берутся
+// синхронно (занят — ошибка сразу: ErrGeodataBusy, ErrApplyBusy, ErrKernelBusy или
+// ErrBusy, если идёт другое задание, например установка jq), сам запуск идёт в фоне,
+// вывод — в буфере ug.
 func (s *Service) RunNow(user bool) error {
-	release, err := s.d.Layer.BeginExclusive(s.ctx, user, configlayer.HolderGeodataUpdate)
+	release, err := s.beginExclusiveJob(s.ctx, user, configlayer.HolderGeodataUpdate, jobUG)
 	if err != nil {
 		return err
 	}
@@ -323,7 +336,6 @@ func (s *Service) RunNow(user bool) error {
 	if !user {
 		trigger = "auto"
 	}
-	s.setRun(true, jobUG)
 	if !s.Go(func() {
 		defer release()
 		if err := s.runLocked(s.ctx, trigger); err != nil {
@@ -331,29 +343,104 @@ func (s *Service) RunNow(user bool) error {
 		}
 	}) {
 		release()
-		s.setRun(false, "")
 		return ErrStopped
 	}
 	return nil
 }
 
 // run — блокирующий запуск под исключительным замком. user=false: ждёт конца идущего
-// применения (RunView.waiting_apply на время ожидания), user=true: занятый замок —
-// ошибка сразу. Ошибка — запуск не состоялся или не завершился (сбой процесса,
-// таймаут, отмена); итоги по файлам при этом уже в состоянии.
+// применения (RunView.waiting_apply на время ожидания) и конца другого задания
+// менеджера, user=true: занятый замок или задание — ошибка сразу. Ошибка — запуск не
+// состоялся или не завершился (сбой процесса, таймаут, отмена); итоги по файлам при
+// этом уже в состоянии.
 func (s *Service) run(ctx context.Context, user bool, trigger string) error {
-	if !user {
-		s.setWaiting(true)
-	}
-	release, err := s.d.Layer.BeginExclusive(ctx, user, configlayer.HolderGeodataUpdate)
-	if !user {
-		s.setWaiting(false)
-	}
+	release, err := s.beginExclusiveJob(ctx, user, configlayer.HolderGeodataUpdate, jobUG)
 	if err != nil {
 		return err
 	}
 	defer release()
 	return s.runLocked(ctx, trigger)
+}
+
+// jobRunning — идёт ли задание менеджера (jq, ug или remove).
+func (s *Service) jobRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.running
+}
+
+// beginExclusiveJob берёт исключительный замок слоя и слот задания менеджера: одно
+// задание за раз (jq, ug, remove), поэтому `opkg install jq` не идёт вместе с `xkeen
+// -ug` и шагом удаления. release снимает слот и замок; повторный вызов безопасен.
+//
+// user=true — запуск по кнопке: занятый замок даёт ошибку слоя, идущее задание —
+// ErrBusy (замок слоя при этом сразу отпускается). user=false — фоновый запуск: ждёт
+// конца идущего задания опросом раз в jobWaitPoll, не держа замок слоя («Применить» в
+// это время не блокируется), и конца идущего «Применить»; ожидание прерывается ctx
+// (тогда ошибка — ctx.Err()).
+func (s *Service) beginExclusiveJob(ctx context.Context, user bool, holder, job string) (func(), error) {
+	for {
+		if !user && s.jobRunning() {
+			if err := sleepCtx(ctx, jobWaitPoll); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		unlock, err := s.lockLayer(ctx, user, holder, job)
+		if err != nil {
+			return nil, err
+		}
+		if s.beginJob(job) {
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					s.endJob(job)
+					unlock()
+				})
+			}, nil
+		}
+		// Задание заняли между проверкой и замком: замок слоя отпускается сразу.
+		unlock()
+		if user {
+			return nil, ErrBusy
+		}
+		if err := sleepCtx(ctx, jobWaitPoll); err != nil {
+			return nil, err
+		}
+	}
+}
+
+// lockLayer берёт замок слоя для beginExclusiveJob. Фоновый -ug сначала пробует замок
+// без ожидания и только при занятом замке ставит RunView.waiting_apply на время
+// ожидания: отметка значит «ждёт конца «Применить»» и больше ничего. Свободный замок
+// отметку не трогает.
+func (s *Service) lockLayer(ctx context.Context, user bool, holder, job string) (func(), error) {
+	if user || job != jobUG {
+		return s.d.Layer.BeginExclusive(ctx, user, holder)
+	}
+	release, err := s.d.Layer.BeginExclusive(ctx, true, holder)
+	if err == nil {
+		return release, nil
+	}
+	if !errors.Is(err, configlayer.ErrApplyBusy) && !errors.Is(err, configlayer.ErrGeodataBusy) &&
+		!errors.Is(err, configlayer.ErrKernelBusy) {
+		return nil, err
+	}
+	s.setWaiting(true)
+	defer s.setWaiting(false)
+	return s.d.Layer.BeginExclusive(ctx, false, holder)
+}
+
+// sleepCtx ждёт d или отмены ctx (тогда возвращает ctx.Err()).
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // runResult — итог одного запуска для постшага afterRun.
@@ -367,12 +454,11 @@ type runResult struct {
 	Finished time.Time
 }
 
-// runLocked выполняет запуск под уже взятым замком слоя.
+// runLocked выполняет запуск под уже взятыми замком слоя и заданием менеджера (их держит
+// вызывающий, beginExclusiveJob).
 func (s *Service) runLocked(ctx context.Context, trigger string) error {
-	s.setRun(true, jobUG)
 	res := s.execute(ctx, trigger)
 	s.afterRun(ctx, res)
-	s.setRun(false, "")
 	s.changed()
 	return res.Err
 }
@@ -680,24 +766,6 @@ func (s *Service) Output(job string, from int64) OutputChunk {
 	running := s.running && s.job == job
 	s.mu.Unlock()
 	return OutputChunk{Job: job, From: from, Next: next, Text: text, Running: running, Truncated: truncated}
-}
-
-// setRun отмечает начало и конец задания и публикует событие.
-func (s *Service) setRun(running bool, job string) {
-	s.mu.Lock()
-	if s.running == running && s.job == job {
-		s.mu.Unlock()
-		return
-	}
-	s.running = running
-	s.job = job
-	if running {
-		s.started = s.d.Now()
-	} else {
-		s.started = time.Time{}
-	}
-	s.mu.Unlock()
-	s.touch()
 }
 
 // setWaiting отмечает ожидание конца «Применить» перед фоновым запуском.

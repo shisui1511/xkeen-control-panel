@@ -53,7 +53,9 @@ func (s *Service) endJob(job string) {
 // InstallJQ ставит jq из ленты Entware: `opkg update`, затем `opkg install jq`
 // (фиксированные аргументы, без пользовательского ввода, живой вывод в буфере job jq,
 // таймаут 5 минут). Замок применения не берётся: ядра не затрагиваются. Уже идёт
-// установка или другое задание менеджера — ErrBusy (geodata_busy).
+// установка или другое задание менеджера — ErrBusy (geodata_busy). Обратно: jq не идёт
+// вместе с `-ug` и шагом удаления — их задание берётся через beginExclusiveJob, который
+// отказывает (по кнопке) или ждёт (в фоне), пока слот задания занят установкой.
 func (s *Service) InstallJQ() error {
 	if !s.ops.jqMu.TryLock() {
 		return ErrBusy
