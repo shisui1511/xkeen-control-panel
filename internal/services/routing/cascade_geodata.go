@@ -3,6 +3,8 @@ package routing
 import (
 	"encoding/json"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
@@ -44,11 +46,6 @@ const (
 // ext:<файл>:): каскад его не правит, удаление источника отклоняется (код
 // raw_ref); места перечисляет GeodataImpact.Raw.
 var ErrGeodataRawRef = &lists.CodedError{Code: "raw_ref"}
-
-// issueGeodataRefRemains — правило черновика ссылается на файл с пометкой drop:
-// «Применить» заблокировано, пока ссылка есть (иначе ядро упало бы на
-// отсутствующем списке).
-const issueGeodataRefRemains = "geodata_ref_remains"
 
 // GeodataDrop — пометка источника в секции geodata.
 type GeodataDrop struct {
@@ -491,4 +488,146 @@ func ruleHasAction(r Rule, inFile func(lists.ListRef) bool, action map[string]st
 		}
 	}
 	return false
+}
+
+// GeodataRestore снимает пометку drop с файла (кнопка «Вернуть источник»): секция
+// geodata правится отдельной ревизией, а изменения правил остаются в черновике
+// до «Сбросить». Пометки на файл нет — ErrInvalidInput (file, drop_not_found).
+// Последняя пометка убирает секцию целиком.
+func (s *Service) GeodataRestore(rev int64, file string) (configlayer.DraftEvent, error) {
+	return s.edit(rev, func(st configlayer.StateView) (map[string]json.RawMessage, error) {
+		if !listFileRE.MatchString(file) {
+			return nil, invalid("file", reasonFileInvalid)
+		}
+		draft, err := ParseGeodataDraft(st.Draft[GeodataSection])
+		if err != nil {
+			return nil, err
+		}
+		names := nameSet(datFilesOf(s.d.Lists), file)
+		keep := make([]GeodataDrop, 0, len(draft.Drop))
+		found := false
+		for _, x := range draft.Drop {
+			if names[x.File] {
+				found = true
+				continue
+			}
+			keep = append(keep, x)
+		}
+		if !found {
+			return nil, invalid("file", reasonDropNotFound)
+		}
+		draft.Drop = keep
+		raw, err := encodeGeodataDraft(draft)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]json.RawMessage{GeodataSection: raw}, nil
+	})
+}
+
+// geodataRefProblems находит включённые правила черновика, которые снова ссылаются
+// на файл с пометкой drop: geodata_ref_remains {file, tag, rule}. Список в условии
+// даёт ссылку по ListRef, своё правило ядра — по подстроке ext:<файл>:<тег>. Нет
+// пометок — нет проблем. Номер правила считается с единицы по всему списку.
+func geodataRefProblems(items []Rule, d GeodataDraft, ix *lists.Index) []IssueView {
+	if len(d.Drop) == 0 {
+		return nil
+	}
+	hidden := dropNames(datFilesOf(ix), d)
+	names := make([]string, 0, len(hidden))
+	for n := range hidden {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var out []IssueView
+	issue := func(r Rule, n int, file, tag string) {
+		out = append(out, IssueView{Code: issueGeodataRefRemains, Key: "rule:" + r.ID,
+			Params: map[string]string{"file": file, "tag": tag, "rule": strconv.Itoa(n)}})
+	}
+	for i, r := range items {
+		if !r.Enabled {
+			continue
+		}
+		if r.Raw != nil {
+			for _, n := range names {
+				if tag, ok := rawExtTag(r.Raw.Text, n); ok {
+					issue(r, i+1, n, tag)
+					break
+				}
+			}
+			continue
+		}
+		seen := map[string]bool{}
+		for _, c := range r.Conds {
+			for _, ref := range c.Lists {
+				if !hidden[ref.File] {
+					continue
+				}
+				if k := listKey(ref.File, ref.Tag); !seen[k] {
+					seen[k] = true
+					issue(r, i+1, ref.File, ref.Tag)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// rawExtTag ищет в тексте своего правила ядра ссылку ext:<файл>:<тег> и возвращает
+// тег (пустой, если за двоеточием ничего нет).
+func rawExtTag(text, file string) (string, bool) {
+	_, rest, ok := strings.Cut(text, "ext:"+file+":")
+	if !ok {
+		return "", false
+	}
+	end := strings.IndexAny(rest, "\",) \t\r\n")
+	if end < 0 {
+		end = len(rest)
+	}
+	return rest[:end], true
+}
+
+// hideDropped убирает из каталога списки файлов с пометкой drop (в выборе списка
+// их предлагать нельзя): записи «Все списки», ссылки сервисов, списки стран.
+// Сервис без ссылок остаётся в каталоге, как и при отсутствующих файлах; страна,
+// у которой IP-список в скрытом файле, не показывается (IP-список — основа страны).
+func hideDropped(cat lists.CatalogView, hidden map[string]bool) lists.CatalogView {
+	if len(hidden) == 0 {
+		return cat
+	}
+	keepRefs := func(in []lists.ListRef) []lists.ListRef {
+		out := make([]lists.ListRef, 0, len(in))
+		for _, r := range in {
+			if !hidden[r.File] {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	entries := make([]lists.ListEntry, 0, len(cat.Lists))
+	for _, l := range cat.Lists {
+		if !hidden[l.File] {
+			entries = append(entries, l)
+		}
+	}
+	cat.Lists = entries
+	services := make([]lists.ServiceView, 0, len(cat.Services))
+	for _, sv := range cat.Services {
+		sv.Refs = keepRefs(sv.Refs)
+		services = append(services, sv)
+	}
+	cat.Services = services
+	countries := make([]lists.CountryView, 0, len(cat.Countries))
+	for _, c := range cat.Countries {
+		if c.IP != nil && hidden[c.IP.File] {
+			continue
+		}
+		if c.Site != nil && hidden[c.Site.File] {
+			c.Site = nil
+		}
+		c.Blocked = keepRefs(c.Blocked)
+		countries = append(countries, c)
+	}
+	cat.Countries = countries
+	return cat
 }

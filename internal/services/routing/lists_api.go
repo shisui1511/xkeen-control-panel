@@ -44,6 +44,14 @@ func (s *Service) Catalog() (lists.CatalogView, error) {
 		return lists.CatalogView{}, invalid("catalog", reasonCatalogUnavailable)
 	}
 	cat.Geodata = status
+	// Списки файлов с пометкой drop в черновике скрыты в выборе списка (D-18):
+	// выбрать их в правило нельзя, пока удаление не сброшено. Не читается черновик —
+	// каталог остаётся полным.
+	if st, err := s.d.Layer.ReadState(); err == nil {
+		if gd, err := ParseGeodataDraft(st.Draft[GeodataSection]); err == nil && len(gd.Drop) > 0 {
+			cat = hideDropped(cat, dropNames(datFilesOf(s.d.Lists), gd))
+		}
+	}
 	return cat, nil
 }
 

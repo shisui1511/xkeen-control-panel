@@ -894,6 +894,10 @@ const (
 	issueListNotFound = "list_not_found"
 	// issueListTooLarge — список больше предела размера для Mihomo (D-19).
 	issueListTooLarge = "list_too_large"
+	// issueGeodataRefRemains — включённое правило черновика ссылается на файл с
+	// пометкой drop в секции geodata: после удаления файла ядро упало бы на
+	// отсутствующем списке (geodata_ref_remains {file, tag, rule}).
+	issueGeodataRefRemains = "geodata_ref_remains"
 )
 
 // Коды предупреждений проверки: «Применить» они не блокируют.
@@ -1034,7 +1038,9 @@ func emptyGroups(groups []Group, nodes []sources.CatalogNode) map[string]bool {
 // проверка до записи и представление вызывают его. Сеть не трогается, dat читает
 // только индекс списков (мемоизирован по имени, размеру и времени файла);
 // ошибка каталога (его сообщают генераторы источников) пропускает только
-// проверки, которым нужен состав. Правила со списками, которых нет на роутере
+// проверки, которым нужен состав. Правила, ссылающиеся на файл с пометкой drop
+// в секции geodata, дают geodata_ref_remains (проблема того же рода, что
+// list_not_found). Правила со списками, которых нет на роутере
 // (list_not_found) или которые больше предела Mihomo (list_too_large), при
 // желаемом routing.managed блокируют «Применить», иначе — предупреждения;
 // тяжёлый список (list_heavy) и список с отброшенными записями (list_dropped) —
@@ -1056,6 +1062,12 @@ func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catal
 	}
 	if probe, perr := parseProbe(in.Sections[ProbeSection], ""); perr != nil || validateProbe(probe) != nil {
 		sectionBad(ProbeSection)
+	}
+	// Пометки удаления источников dat (D-18): повреждённая секция сообщается, но
+	// другие проверки не пропускает.
+	gdraft, gderr := ParseGeodataDraft(in.Sections[GeodataSection])
+	if gderr != nil {
+		sectionBad(GeodataSection)
 	}
 
 	if gerr == nil {
@@ -1169,6 +1181,11 @@ func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catal
 			issues = append(issues, IssueView{Code: issueTargetMissing, Params: map[string]string{"rule": "final"}, Key: "final"})
 		}
 		problems, listWarns := listProblems(rules.Items, installed, ix, version)
+		// Правило, снова сославшееся на файл с пометкой drop: ядро упало бы на
+		// отсутствующем списке после удаления файла (geodata_ref_remains).
+		if gderr == nil {
+			problems = append(problems, geodataRefProblems(rules.Items, gdraft, ix)...)
+		}
 		if configlayer.DesiredRouting(in.Sections).Managed {
 			issues = append(issues, problems...)
 		} else {
