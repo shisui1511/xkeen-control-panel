@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Сценарии сервиса менеджера geodata на устройстве: настоящий слой «Конфигурация»
@@ -58,6 +61,21 @@ func rtGeoStore(t *testing.T, xkeenDir string) *lists.GeodataStore {
 	return lists.NewGeodataStore(svc, exec.LookPath)
 }
 
+// rtXKeenNumber — числовая версия в выводе `xkeen -v`: формат первой строки зависит от
+// выпуска XKeen («Версия XKeen 2.0 Beta» или «XKeen 2.1 Stable»), число одно.
+var rtXKeenNumber = regexp.MustCompile(`\d+\.\d+(?:\.\d+)?`)
+
+// rtXKeenVersions отдаёт слою настоящую версию установленного XKeen стенда: без неё порог
+// пользовательских geodata считался бы недоступным и тест пропускался бы как «слишком старый».
+func rtXKeenVersions() []configlayer.KernelVersionInput {
+	out, err := exec.Command(defaultXKeenBin, "-v").CombinedOutput()
+	if err != nil {
+		return []configlayer.KernelVersionInput{{Name: "xkeen"}}
+	}
+	first, _, _ := strings.Cut(utils.StripANSI(string(out)), "\n")
+	return []configlayer.KernelVersionInput{{Name: "xkeen", Installed: true, Version: rtXKeenNumber.FindString(first)}}
+}
+
 // rtGeoLayer создаёт включённый слой во временном каталоге dir и запускает его.
 func rtGeoLayer(t *testing.T, dir string) *configlayer.Layer {
 	t.Helper()
@@ -68,11 +86,12 @@ func rtGeoLayer(t *testing.T, dir string) *configlayer.Layer {
 		}
 	}
 	layer, err := configlayer.New(configlayer.Options{
-		DataDir:       dir,
-		Roots:         roots,
-		Enabled:       func() bool { return true },
-		DriftInterval: time.Hour,
-		DebounceDelay: 20 * time.Millisecond,
+		DataDir:        dir,
+		Roots:          roots,
+		Enabled:        func() bool { return true },
+		DriftInterval:  time.Hour,
+		DebounceDelay:  20 * time.Millisecond,
+		KernelVersions: rtXKeenVersions,
 	})
 	if err != nil {
 		t.Fatalf("configlayer.New: %v", err)

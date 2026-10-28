@@ -193,10 +193,13 @@ func TestRouterGeodataCron(t *testing.T) {
 		}
 		time.Sleep(time.Second)
 	}
+	// Уведомление публикуется сразу после смены состояния, но не в той же секции под замком.
 	foundNotice := false
-	for _, n := range svc.d.Layer.Snapshot().Notices {
-		if n.ID == "geodata_cron_two" {
-			foundNotice = true
+	for noticeDeadline := time.Now().Add(10 * time.Second); !foundNotice && time.Now().Before(noticeDeadline); time.Sleep(100 * time.Millisecond) {
+		for _, n := range svc.d.Layer.Snapshot().Notices {
+			if n.ID == "geodata_cron_two" {
+				foundNotice = true
+			}
 		}
 	}
 	if !foundNotice {

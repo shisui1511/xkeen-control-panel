@@ -103,6 +103,12 @@ func rtRemoveWrite(t *testing.T, path, content string) {
 	}
 }
 
+// rtRemoveHasEntry — есть ли в тексте xkeen.json запись источника с этим файлом.
+// Комментарии владельца остаются при правке, поэтому по имени подстрокой искать нельзя.
+func rtRemoveHasEntry(raw, file string) bool {
+	return strings.Contains(raw, `"file": "`+file+`"`) || strings.Contains(raw, `"file":"`+file+`"`)
+}
+
 // rtRemoveRead читает файл теста.
 func rtRemoveRead(t *testing.T, path string) string {
 	t.Helper()
@@ -441,7 +447,7 @@ func TestRouterGeodataRemoveAfterApply(t *testing.T) {
 
 	rtRemoveRequireNoRef(t, e.xrayDir, "ext:"+rtRemoveFile+":")
 	disk := rtRemoveRead(t, xkeenJSON)
-	if strings.Contains(disk, rtRemoveFile) {
+	if rtRemoveHasEntry(disk, rtRemoveFile) {
 		t.Errorf("запись %s осталась в xkeen.json:\n%s", rtRemoveFile, disk)
 	}
 	if !strings.Contains(disk, "// комментарий владельца") || !strings.Contains(disk, "// про "+rtRemoveKeep) || !strings.Contains(disk, rtRemoveKeep) {
@@ -485,8 +491,8 @@ func TestRouterGeodataRemoveAfterApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PreviewFinishDelete: %v", err)
 	}
-	if !strings.Contains(pv.Before, rtRemoveFile2) || strings.Contains(pv.After, rtRemoveFile2) || pv.Base == "" {
-		t.Errorf("предпросмотр: before с записью=%v, after без записи=%v, base=%q", strings.Contains(pv.Before, rtRemoveFile2), !strings.Contains(pv.After, rtRemoveFile2), pv.Base)
+	if !rtRemoveHasEntry(pv.Before, rtRemoveFile2) || rtRemoveHasEntry(pv.After, rtRemoveFile2) || pv.Base == "" {
+		t.Errorf("предпросмотр: before с записью=%v, after без записи=%v, base=%q", rtRemoveHasEntry(pv.Before, rtRemoveFile2), !rtRemoveHasEntry(pv.After, rtRemoveFile2), pv.Base)
 	}
 	if _, err := e.geo.PreviewFinishDelete(rtRemoveKeep); !errors.Is(err, ErrNotPending) {
 		t.Errorf("PreviewFinishDelete чужого файла: %v, ожидалась not_pending", err)
@@ -494,7 +500,7 @@ func TestRouterGeodataRemoveAfterApply(t *testing.T) {
 	if err := e.geo.FinishDelete(context.Background(), rtRemoveFile2, pv.Base, true); err != nil {
 		t.Fatalf("FinishDelete: %v", err)
 	}
-	if e.exists(rtRemoveFile2) || strings.Contains(rtRemoveRead(t, xkeenJSON), rtRemoveFile2) {
+	if e.exists(rtRemoveFile2) || rtRemoveHasEntry(rtRemoveRead(t, xkeenJSON), rtRemoveFile2) {
 		t.Error("после «Довести удаление» остались файл или запись")
 	}
 	if len(e.pending()) != 0 || e.notice("geodata_delete:"+rtRemoveFile2) {
