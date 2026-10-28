@@ -135,6 +135,11 @@ type Service struct {
 	// sched — рабочее состояние расписания и cron (замок crontab, кэш чтения, догон).
 	sched schedState
 
+	// smu упорядочивает запись файла состояния: на медленной флешке копия, снятая раньше,
+	// не должна лечь в файл после более новой (savedSeq — счётчик последней записанной).
+	smu      sync.Mutex
+	savedSeq uint64
+
 	// pmu защищает ограничение частоты событий.
 	pmu        sync.Mutex
 	lastPub    time.Time
@@ -722,13 +727,24 @@ func (s *Service) touch() {
 func (s *Service) changed() {
 	s.mu.Lock()
 	s.seq++
+	seq := s.seq
 	st := s.st.clone()
 	s.mu.Unlock()
 	s.rebuildNotices()
 	s.publish()
+	// Записи идут по очереди, и в файл попадает самое свежее из снятых состояний: опоздавшая
+	// старая копия пропускается (иначе после перезапуска панели пропали бы, например,
+	// CronTaken и расписание после «Перенять»).
+	s.smu.Lock()
+	defer s.smu.Unlock()
+	if seq <= s.savedSeq {
+		return
+	}
 	if err := saveState(s.state, st); err != nil {
 		log.Printf("[geodata] не удалось сохранить %s: %v", stateFileName, err)
+		return
 	}
+	s.savedSeq = seq
 }
 
 // publish отправляет слою событие geodata не чаще одного за publishInterval: события
