@@ -119,11 +119,18 @@ func (s *Service) ForeignRefs(file string) ([]ForeignRef, error) {
 			return
 		}
 		fi, err := os.Stat(abs)
+		if err != nil && errors.Is(err, fs.ErrNotExist) {
+			return
+		}
 		if err != nil || !fi.Mode().IsRegular() || fi.Size() > foreignMaxSize {
+			seen[real] = true
+			refs = append(refs, foreignUnreadable(rel, abs))
 			return
 		}
 		data, err := os.ReadFile(abs)
 		if err != nil {
+			seen[real] = true
+			refs = append(refs, foreignUnreadable(rel, abs))
 			return
 		}
 		seen[real] = true
