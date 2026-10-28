@@ -576,4 +576,39 @@ func TestRouterGeodataOps(t *testing.T) {
 			t.Errorf("xkeen.json изменился при занятом замке")
 		}
 	})
+
+	t.Run("jq", func(t *testing.T) {
+		if _, err := os.Stat(opkgBin); err != nil {
+			t.Skipf("нет %s", opkgBin)
+		}
+		if err := svc.InstallJQ(); err != nil {
+			t.Fatalf("InstallJQ: %v", err)
+		}
+		rtOpsWantCode(t, svc.InstallJQ(), "geodata_busy")
+		deadline := time.Now().Add(jqTimeout + time.Minute)
+		for {
+			svc.mu.Lock()
+			running := svc.running
+			svc.mu.Unlock()
+			if !running {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("установка jq не завершилась за %v", jqTimeout+time.Minute)
+			}
+			time.Sleep(time.Second)
+		}
+		if chunk := svc.Output("jq", 0); chunk.Text == "" {
+			t.Errorf("вывод opkg пуст")
+		}
+		svc.mu.Lock()
+		jqErr := svc.st.JQError
+		svc.mu.Unlock()
+		if jqErr != "" {
+			t.Errorf("установка jq: итог %q", jqErr)
+		}
+		if st, _ := store.Status(); !st.JQ {
+			t.Errorf("jq не найден после установки")
+		}
+	})
 }
