@@ -156,6 +156,9 @@ type Layer struct {
 	checksOK    bool
 	// afterApply — хуки после успешного применения (AddAfterApply), до Start.
 	afterApply []func(ctx context.Context, info AfterApplyInfo)
+	// holder — кто держит исключительный замок применения вне конвейера
+	// (BeginExclusive: HolderGeodata*); пусто — никто. Под mu.
+	holder string
 }
 
 // checksKey — от чего зависит итог проверок черновика: ревизия черновика, хэш
@@ -514,6 +517,7 @@ func (l *Layer) Snapshot() SnapshotView {
 		Apply:         l.pipeline.Current(),
 		Notices:       l.noticeViews(st),
 		Checks:        []BuildIssue{},
+		BusyHolder:    l.BusyHolder(),
 	}
 	if !sv.Enabled {
 		return sv
@@ -795,7 +799,7 @@ func (l *Layer) ReclaimRouting(ctx context.Context, kernel string) error {
 	}
 	release, err := l.pipeline.TryBegin(ctx, true)
 	if err != nil {
-		return err
+		return l.mapBusy(err)
 	}
 	defer release()
 	if err := l.pipeline.recoverPendingJournal(); err != nil {
@@ -1190,7 +1194,7 @@ func (l *Layer) StartApply(user bool) error {
 	}
 	release, err := l.pipeline.TryBegin(l.ctx, user)
 	if err != nil {
-		return err
+		return l.mapBusy(err)
 	}
 	// Свежая сверка под замком применения: пока есть нерешённый дрейф, диск не
 	// трогается (D-11). «Пересобрать» по названным файлам этим не блокируется.
@@ -1379,7 +1383,7 @@ func (l *Layer) Rebuild(keys []string, all bool) error {
 	}
 	release, err := l.pipeline.TryBegin(l.ctx, true)
 	if err != nil {
-		return err
+		return l.mapBusy(err)
 	}
 	if !l.spawn(func() {
 		defer release()
@@ -1407,7 +1411,7 @@ func (l *Layer) Release(key string) (FilesEvent, error) {
 	}
 	release, err := l.pipeline.TryBegin(l.ctx, true)
 	if err != nil {
-		return FilesEvent{}, err
+		return FilesEvent{}, l.mapBusy(err)
 	}
 	defer release()
 	err = l.store.Update(func(st *State) error {

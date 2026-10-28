@@ -41,6 +41,9 @@ func (a *API) writeLayerError(w http.ResponseWriter, r *http.Request, err error)
 		JSONErrorCode(w, http.StatusConflict, "draft_conflict", a.t(r, "configlayer.draft_conflict"))
 	case errors.Is(err, configlayer.ErrInvalidSection), errors.Is(err, configlayer.ErrUnknownDiagAction):
 		JSONErrorCode(w, http.StatusBadRequest, "invalid_request", a.t(r, "configlayer.invalid_request"))
+	case errors.Is(err, configlayer.ErrGeodataBusy):
+		// Замок применения держит менеджер geodata: свой код и текст, раньше apply_busy.
+		JSONErrorCode(w, http.StatusConflict, "geodata_busy", a.t(r, "configlayer.geodata_busy"))
 	case errors.Is(err, configlayer.ErrApplyBusy):
 		JSONErrorCode(w, http.StatusConflict, "apply_busy", a.t(r, "configlayer.apply_busy"))
 	case errors.Is(err, configlayer.ErrChecksFailed):

@@ -510,6 +510,85 @@ func (s *Store) EditDraftBatch(baseRev int64, sections map[string]json.RawMessag
 	return ev, nil
 }
 
+// SettleSection меняет секцию в применённом состоянии и в черновике одновременно, без
+// проверки ревизии клиента. fn получает текущие Applied[section] и Draft[section]
+// (nil, если секции нет) и возвращает новые значения; nil или JSON null удаляет
+// секцию. Applied меняется всегда, Draft — только если результат отличается от
+// прежнего (SectionEqual); тогда ревизия растёт на 1 и публикуется событие draft.
+// Всё под замком хранилища, запись файла — как у EditDraftBatch. Ошибка fn или
+// недопустимое имя секции — состояние прежнее. Возвращает событие draft и признак
+// «черновик изменился»; без изменений Applied и Draft файл не пишется.
+func (s *Store) SettleSection(section string, fn func(applied, draft json.RawMessage) (json.RawMessage, json.RawMessage, error)) (DraftEvent, bool, error) {
+	if !sectionNameRE.MatchString(section) {
+		return DraftEvent{}, false, fmt.Errorf("%w: %q", ErrInvalidSection, section)
+	}
+
+	s.mu.Lock()
+	if err := s.loadLocked(); err != nil {
+		s.mu.Unlock()
+		return DraftEvent{}, false, err
+	}
+
+	next := s.st.clone()
+	oldApplied, hadApplied := next.Applied[section]
+	oldDraft, hadDraft := next.Draft[section]
+	newApplied, newDraft, err := fn(cloneRaw(oldApplied), cloneRaw(oldDraft))
+	if err != nil {
+		s.mu.Unlock()
+		return DraftEvent{}, false, err
+	}
+	appliedChanged, err := settleValue(next.Applied, section, newApplied, oldApplied, hadApplied)
+	if err != nil {
+		s.mu.Unlock()
+		return DraftEvent{}, false, err
+	}
+	draftChanged, err := settleValue(next.Draft, section, newDraft, oldDraft, hadDraft)
+	if err != nil {
+		s.mu.Unlock()
+		return DraftEvent{}, false, err
+	}
+	if !appliedChanged && !draftChanged {
+		ev := draftEventOf(s.st)
+		s.mu.Unlock()
+		return ev, false, nil
+	}
+	if draftChanged {
+		next.DraftRevision++
+	}
+
+	s.commitLocked(next)
+	s.scheduleFlushLocked()
+	ev := draftEventOf(next)
+	s.mu.Unlock()
+
+	if draftChanged {
+		s.broker.Publish(Event{Type: EventDraft, Data: ev})
+	}
+	return ev, draftChanged, nil
+}
+
+// settleValue записывает значение секции в sections и сообщает, изменилось ли оно:
+// nil или JSON null удаляет секцию; значение, равное прежнему (SectionEqual), и
+// удаление отсутствующей секции изменением не считаются.
+func settleValue(sections Sections, name string, value, old json.RawMessage, had bool) (bool, error) {
+	if len(value) == 0 || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		if !had {
+			return false, nil
+		}
+		delete(sections, name)
+		return true, nil
+	}
+	compact, err := compactRaw(value)
+	if err != nil {
+		return false, fmt.Errorf("configlayer: section %q value is not valid JSON: %w", name, err)
+	}
+	if had && SectionEqual(old, compact) {
+		return false, nil
+	}
+	sections[name] = compact
+	return true, nil
+}
+
 // ResetDraft сбрасывает черновик к применённому состоянию, если baseRev
 // совпадает с текущей ревизией. Ревизия растёт, публикуется событие draft.
 func (s *Store) ResetDraft(baseRev int64) (DraftEvent, error) {

@@ -82,6 +82,7 @@
   "configlayer.disabled": "Слой конфигурации выключен",
   "configlayer.draft_conflict": "Черновик изменён в другой вкладке",
   "configlayer.apply_busy": "Применение уже выполняется",
+  "configlayer.geodata_busy": "Идёт обновление баз. Дождитесь окончания.",
   "configlayer.drift_blocked": "Есть файлы с расхождением: решите их судьбу перед применением",
   "configlayer.unknown_key": "Неизвестный файл слоя конфигурации",
   "configlayer.unknown_notice": "Неизвестное уведомление",

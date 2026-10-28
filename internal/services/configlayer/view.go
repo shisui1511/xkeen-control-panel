@@ -83,6 +83,9 @@ type SnapshotView struct {
 	Checks []BuildIssue `json:"checks"`
 	// Routing — владение маршрутизацией: желаемое, взятое, перенесённое и дрейф.
 	Routing RoutingSnapshot `json:"routing"`
+	// BusyHolder — кто держит исключительный замок применения вне конвейера
+	// (менеджер geodata: geodata_update, geodata_remove); пусто — замок свободен.
+	BusyHolder string `json:"busy_holder,omitempty"`
 }
 
 // sortFileViews упорядочивает файлы для UI: drift, pending, ok, released;
