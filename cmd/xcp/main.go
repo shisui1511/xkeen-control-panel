@@ -815,14 +815,15 @@ func main() {
 				// /api/configlayer/geodata* отвечают 404.
 				var geoErr error
 				geoSvc, geoErr = geodata.New(geodata.Deps{
-					DataDir:     cfg.DataDir,
-					Layer:       configLayer,
-					Store:       geoStore,
-					Index:       datIndex,
-					Routing:     routingSvc,
-					XKeenBin:    resolveBinaryPath(cfg.XKeenBinary),
-					MihomoDir:   cfg.MihomoConfigDir,
-					XrayConfDir: cfg.XRayConfigDir,
+					DataDir:      cfg.DataDir,
+					Layer:        configLayer,
+					Store:        geoStore,
+					Index:        datIndex,
+					Routing:      routingSvc,
+					XKeenBin:     resolveBinaryPath(cfg.XKeenBinary),
+					MihomoDir:    cfg.MihomoConfigDir,
+					XrayConfDir:  cfg.XRayConfigDir,
+					AllowedRoots: cfg.AllowedRoots,
 				})
 				if geoErr == nil {
 					geoErr = configLayer.Register(configlayer.Hooks{AfterApply: geoSvc.AfterApply})

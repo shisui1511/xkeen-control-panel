@@ -147,7 +147,7 @@ func (s *Service) removeOne(file string) {
 		s.setPendingDelete(file, reason, true)
 		return
 	}
-	if err := removeDatFiles(s.d.Index.Dir(), names); err != nil {
+	if err := removeDatFiles(s.d.Index.Dir(), names, s.d.AllowedRoots); err != nil {
 		log.Printf("[geodata] удаление файла %s: %v", file, err)
 		s.setPendingDelete(file, removeReasonFailed, false)
 		return
@@ -315,7 +315,7 @@ func (s *Service) FinishDelete(ctx context.Context, file, base string, acceptCom
 		s.setPendingDelete(p.File, reason, true)
 		return &lists.CodedError{Code: reason}
 	}
-	if err := removeDatFiles(s.d.Index.Dir(), names); err != nil {
+	if err := removeDatFiles(s.d.Index.Dir(), names, s.d.AllowedRoots); err != nil {
 		s.setPendingDelete(p.File, removeReasonFailed, false)
 		return fmt.Errorf("%w: %v", &lists.CodedError{Code: removeReasonFailed}, err)
 	}
@@ -326,10 +326,11 @@ func (s *Service) FinishDelete(ctx context.Context, file, base string, acceptCom
 
 // removeDatFiles удаляет файлы dat по именам; первая ошибка прерывает обход, но
 // остальные имена всё равно пробуются (оба имени пары убираются, если возможно).
-func removeDatFiles(dir string, names []string) error {
+// roots — корни путей панели, внутри которых должен лежать каталог dat.
+func removeDatFiles(dir string, names []string, roots []string) error {
 	var first error
 	for _, n := range names {
-		if err := removeDatFile(dir, n); err != nil && first == nil {
+		if err := removeDatFile(dir, n, roots); err != nil && first == nil {
 			first = err
 		}
 	}
@@ -337,17 +338,27 @@ func removeDatFiles(dir string, names []string) error {
 }
 
 // removeDatFile удаляет один именованный файл dat или симлинк в каталоге dir (D-19,
-// T-146.1-21). Имя проходит `^[A-Za-z0-9._-]+\.dat$`, каталог — utils.PathValidator.
-// Обычный файл или симлинк удаляется одним os.Remove: симлинк удаляется сам, цель за
-// пределами каталога не затрагивается; каталог и прочее — отказ, рекурсивного
-// удаления нет. Нет файла — не ошибка.
-func removeDatFile(dir, name string) error {
+// T-146.1-21, T-146.1-52). Имя проходит `^[A-Za-z0-9._-]+\.dat$`, каталог — проверку
+// utils.PathValidator по корням путей панели (roots, cfg.AllowedRoots).
+//
+// Проверяется именно каталог, а не путь файла: Validate разворачивает симлинки, и по
+// пути симлинка-файла он вернул бы путь его цели, то есть os.Remove удалил бы цель вместо
+// ссылки. Развёрнутый путь каталога — основа пути файла. Обычный файл или симлинк
+// удаляется одним os.Remove: симлинк удаляется сам, цель за пределами каталога не
+// затрагивается; каталог и прочее — отказ, рекурсивного удаления нет. Нет файла — не
+// ошибка.
+//
+// Ограничение: каталог dat, вынесенный симлинком за корни путей панели (например на
+// другой раздел), удаления не даёт — отказ, пометка остаётся в pending_deletes с причиной
+// remove_failed, файл на месте. Выход — добавить целевой каталог в allowed_roots настроек
+// панели.
+func removeDatFile(dir, name string, roots []string) error {
 	if !datNameRe.MatchString(name) {
 		return fmt.Errorf("недопустимое имя файла %q", name)
 	}
-	root, err := utils.NewPathValidator([]string{dir}).Validate(dir)
+	root, err := utils.NewPathValidator(roots).Validate(dir)
 	if err != nil {
-		return fmt.Errorf("каталог dat вне допустимых путей: %w", err)
+		return fmt.Errorf("удаление вне допустимых корней: %w", err)
 	}
 	path := filepath.Join(root, name)
 	if filepath.Dir(path) != root {

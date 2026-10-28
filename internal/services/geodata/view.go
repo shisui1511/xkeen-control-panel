@@ -145,12 +145,16 @@ type View struct {
 
 // OutputChunk — окно вывода задания (ug или jq) для клиента.
 type OutputChunk struct {
-	Job       string `json:"job"`
+	Job string `json:"job"`
+	// From — фактическое смещение начала Text после зажатия запрошенного, а не запрошенное.
 	From      int64  `json:"from"`
 	Next      int64  `json:"next"`
 	Text      string `json:"text"`
 	Running   bool   `json:"running"`
 	Truncated bool   `json:"truncated,omitempty"`
+	// RunID — номер запуска: новый запуск — новый номер; сменился — клиент читает вывод
+	// с начала.
+	RunID uint64 `json:"run_id"`
 }
 
 func rfc3339(t time.Time) string {

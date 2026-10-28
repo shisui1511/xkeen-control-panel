@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -160,6 +161,7 @@ func TestRouterGeodataRunNow(t *testing.T) {
 		}
 	}
 
+	pre := svc.Output("ug", 0)
 	if err := svc.RunNow(true); err != nil {
 		t.Fatalf("RunNow: %v", err)
 	}
@@ -169,6 +171,25 @@ func TestRouterGeodataRunNow(t *testing.T) {
 	}
 	if err := svc.RunNow(true); !errors.Is(err, configlayer.ErrGeodataBusy) {
 		t.Errorf("второй RunNow: %v, ожидалась ErrGeodataBusy", err)
+	}
+
+	// Правки расписания во время запуска: выключенное расписание -ug не запускает, а итог
+	// запуска и правки идут в файл состояния одной упорядоченной записью (CR-01).
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(h int) {
+			defer wg.Done()
+			for j := 0; j < 5; j++ {
+				if err := svc.SetSchedule(Schedule{Enabled: false, Day: -1, Hour: h, Minute: 10 + j}); err != nil {
+					t.Errorf("SetSchedule во время -ug: %v", err)
+				}
+			}
+		}(i + 5)
+	}
+	wg.Wait()
+	if err := svc.SetSchedule(Schedule{Enabled: false, Day: -1, Hour: 3, Minute: 42}); err != nil {
+		t.Fatalf("SetSchedule: %v", err)
 	}
 
 	lr := rtGeoWaitRun(t, svc, 20*time.Minute)
@@ -184,6 +205,22 @@ func TestRouterGeodataRunNow(t *testing.T) {
 	chunk := svc.Output("ug", 0)
 	if chunk.Text == "" {
 		t.Fatalf("вывод ug пуст")
+	}
+	// Номер запуска и фактическое смещение (WR-01): запрос с прежним смещением к новому
+	// запуску не отличим по from, поэтому клиент ориентируется на run_id.
+	post := svc.Output("ug", pre.Next)
+	if post.RunID == 0 || post.RunID == pre.RunID {
+		t.Errorf("новый запуск не отличим по run_id: до %d, после %d", pre.RunID, post.RunID)
+	}
+	minNext := pre.Next
+	if post.Next < minNext {
+		minNext = post.Next
+	}
+	if post.From > post.Next || post.From != minNext {
+		t.Errorf("from — не фактическое смещение: from %d, next %d, запрошено %d", post.From, post.Next, pre.Next)
+	}
+	if full := svc.Output("ug", 0); !full.Truncated && full.From != 0 {
+		t.Errorf("from при чтении с начала: %d, ожидался 0", full.From)
 	}
 	if !lr.Parsed {
 		if lr.Reason == RunErrNetwork {
@@ -210,6 +247,26 @@ func TestRouterGeodataRunNow(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, stateFileName)); err != nil {
 		t.Fatalf("нет файла состояния: %v", err)
 	}
+	// Файл состояния после гонки правок и запуска совпадает с памятью (CR-01).
+	disk := loadState(filepath.Join(dir, stateFileName))
+	svc.mu.Lock()
+	memSched, memLast := svc.st.Schedule, svc.st.LastRun
+	memRes := make(map[string]FileResult, len(svc.st.Results))
+	for name, r := range svc.st.Results {
+		memRes[name] = r
+	}
+	svc.mu.Unlock()
+	if disk.Schedule.Hour != 3 || disk.Schedule.Minute != 42 || memSched.Hour != 3 || memSched.Minute != 42 {
+		t.Errorf("файл состояния отстаёт от памяти: расписание на диске %+v, в памяти %+v, ожидалось 3:42", disk.Schedule, memSched)
+	}
+	if disk.LastRun == nil || memLast == nil || !disk.LastRun.At.Equal(memLast.At) {
+		t.Errorf("файл состояния отстаёт от памяти: итог запуска на диске %+v, в памяти %+v", disk.LastRun, memLast)
+	}
+	for name, r := range memRes {
+		if got, ok := disk.Results[name]; !ok || got.Status != r.Status {
+			t.Errorf("файл состояния отстаёт от памяти: итог %s на диске %+v, в памяти %+v", name, got, r)
+		}
+	}
 	svc2 := rtGeoService(t, layer, store, index, dir)
 	svc.mu.Lock()
 	want := svc.st.Results
@@ -225,6 +282,9 @@ func TestRouterGeodataRunNow(t *testing.T) {
 		t.Fatalf("last-ug.log: %v", err)
 	}
 	again := svc2.Output("ug", 0)
+	if again.RunID == 0 {
+		t.Errorf("run_id после перезапуска сервиса равен нулю")
+	}
 	if again.Text == "" || again.Text != string(saved) {
 		t.Errorf("вывод после перезапуска не совпал с last-ug.log (%d и %d байт)", len(again.Text), len(saved))
 	}
