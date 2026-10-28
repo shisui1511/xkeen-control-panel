@@ -27,22 +27,32 @@ const (
 // AfterApply — шаг «убрать запись geodata и файл» после «Применить» (D-18, D-37).
 // Регистрируется в слое как Hooks.AfterApply. К моменту вызова конфиги обоих ядер уже
 // записаны без ссылок на файл; шаг идёт под исключительным замком слоя (держатель
-// geodata_remove), поэтому `-ug` не успевает вклиниться между его началом и
-// удалением файла. Пометки читаются из применённого состояния внутри замка: за время
-// ожидания замка состояние могло смениться.
+// geodata_remove) и заданием менеджера, поэтому `-ug` не успевает вклиниться между его
+// началом и удалением файла, а установка jq ждётся. Пометки читаются из применённого
+// состояния внутри замка: за время ожидания замка состояние могло смениться.
+//
+// Шаг учитывается в горутинах сервиса (track): Stop дожидается его конца, контекст шага
+// отменяется остановкой сервиса, поэтому после возврата Stop xkeen.json, файлы dat и
+// пометка удаления не меняются.
 func (s *Service) AfterApply(ctx context.Context, _ configlayer.AfterApplyInfo) {
+	if !s.track() {
+		return
+	}
+	defer s.wg.Done()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(s.ctx, cancel)()
 	if !s.hasAppliedDrops() {
 		return
 	}
-	err := s.d.Layer.RunExclusive(ctx, false, configlayer.HolderGeodataRemove, func(ctx context.Context) error {
-		s.setRun(true, jobRemove)
-		defer func() {
-			s.setRun(false, "")
-			s.changed()
-		}()
-		return s.removeApplied(ctx)
-	})
-	if err != nil && !errors.Is(err, configlayer.ErrDisabled) && !errors.Is(err, configlayer.ErrStopped) {
+	release, err := s.beginExclusiveJob(ctx, false, configlayer.HolderGeodataRemove, jobRemove)
+	if err == nil {
+		err = s.removeApplied(ctx)
+		s.changed()
+		release()
+	}
+	if err != nil && !errors.Is(err, configlayer.ErrDisabled) && !errors.Is(err, configlayer.ErrStopped) &&
+		s.ctx.Err() == nil {
 		log.Printf("[geodata] шаг удаления источников после «Применить»: %v", err)
 	}
 }
@@ -279,38 +289,39 @@ func (s *Service) PreviewFinishDelete(file string) (PreviewView, error) {
 // подтверждением потери комментариев; файлы — после записи. Ошибка оставляет
 // удаление в pending_deletes с новой причиной.
 func (s *Service) FinishDelete(ctx context.Context, file, base string, acceptCommentLoss bool) error {
-	return s.d.Layer.RunExclusive(ctx, true, configlayer.HolderGeodataRemove, func(ctx context.Context) error {
-		s.setRun(true, jobRemove)
-		defer func() {
-			s.setRun(false, "")
-			s.changed()
-		}()
-		p, ok := s.pendingDelete(file)
-		if !ok {
-			return ErrNotPending
-		}
-		names := s.removeNames(p.File)
-		refs, _ := s.ForeignRefs(p.File)
-		if len(refs) > 0 {
-			return &ForeignRefError{Refs: refs}
-		}
-		entries, reason := s.entryNames(names)
-		if reason != "" {
-			s.setPendingDelete(p.File, reason, true)
-			return &lists.CodedError{Code: reason}
-		}
-		if reason, ok := s.removeEntries(entries, base, acceptCommentLoss); !ok {
-			s.setPendingDelete(p.File, reason, true)
-			return &lists.CodedError{Code: reason}
-		}
-		if err := removeDatFiles(s.d.Index.Dir(), names); err != nil {
-			s.setPendingDelete(p.File, removeReasonFailed, false)
-			return fmt.Errorf("%w: %v", &lists.CodedError{Code: removeReasonFailed}, err)
-		}
-		s.finishRemoved(p.File, names)
-		s.d.Layer.InvalidateChecks()
-		return nil
-	})
+	release, err := s.beginExclusiveJob(ctx, true, configlayer.HolderGeodataRemove, jobRemove)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		s.changed()
+		release()
+	}()
+	p, ok := s.pendingDelete(file)
+	if !ok {
+		return ErrNotPending
+	}
+	names := s.removeNames(p.File)
+	refs, _ := s.ForeignRefs(p.File)
+	if len(refs) > 0 {
+		return &ForeignRefError{Refs: refs}
+	}
+	entries, reason := s.entryNames(names)
+	if reason != "" {
+		s.setPendingDelete(p.File, reason, true)
+		return &lists.CodedError{Code: reason}
+	}
+	if reason, ok := s.removeEntries(entries, base, acceptCommentLoss); !ok {
+		s.setPendingDelete(p.File, reason, true)
+		return &lists.CodedError{Code: reason}
+	}
+	if err := removeDatFiles(s.d.Index.Dir(), names); err != nil {
+		s.setPendingDelete(p.File, removeReasonFailed, false)
+		return fmt.Errorf("%w: %v", &lists.CodedError{Code: removeReasonFailed}, err)
+	}
+	s.finishRemoved(p.File, names)
+	s.d.Layer.InvalidateChecks()
+	return nil
 }
 
 // removeDatFiles удаляет файлы dat по именам; первая ошибка прерывает обход, но

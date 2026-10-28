@@ -139,6 +139,66 @@ func TestRouterExclusiveGeodata(t *testing.T) {
 	}
 }
 
+// Флаг слоя выключили, пока фоновый вызов ждал замок: он получает ErrDisabled, замок
+// сразу свободен и держателя нет.
+func TestRouterExclusiveFlagRecheck(t *testing.T) {
+	var on atomic.Bool
+	on.Store(true)
+	layer, _ := rtNewCheckLayer(t, func(l *Layer) {
+		l.opts.Enabled = func() bool { return on.Load() }
+	})
+	ctx := context.Background()
+
+	hold, err := layer.BeginExclusive(ctx, false, HolderGeodataUpdate)
+	if err != nil {
+		t.Fatalf("BeginExclusive: %v", err)
+	}
+	released := false
+	defer func() {
+		if !released {
+			hold()
+		}
+	}()
+	errCh := make(chan error, 1)
+	go func() {
+		rel, err := layer.BeginExclusive(ctx, false, HolderGeodataRemove)
+		if err == nil {
+			rel()
+		}
+		errCh <- err
+	}()
+	select {
+	case err := <-errCh:
+		t.Fatalf("фоновый вызов не ждал замок: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	on.Store(false)
+	hold()
+	released = true
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, ErrDisabled) {
+			t.Errorf("BeginExclusive после выключения флага: %v, ожидалась ErrDisabled", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("BeginExclusive после выключения флага не вернулся")
+	}
+	if h := layer.BusyHolder(); h != "" {
+		t.Errorf("BusyHolder() после отказа = %q", h)
+	}
+
+	on.Store(true)
+	rel, err := layer.BeginExclusive(ctx, true, HolderGeodataWrite)
+	if err != nil {
+		t.Fatalf("BeginExclusive по кнопке после отказа: %v (замок не отпущен)", err)
+	}
+	if h := layer.BusyHolder(); h != HolderGeodataWrite {
+		t.Errorf("BusyHolder() = %q, ожидался %q", h, HolderGeodataWrite)
+	}
+	rel()
+}
+
 func TestRouterSettleSection(t *testing.T) {
 	layer, _ := rtNewCheckLayer(t, func(*Layer) {})
 	ctx := context.Background()
