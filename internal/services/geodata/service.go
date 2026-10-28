@@ -132,6 +132,9 @@ type Service struct {
 	// ops — состояние операций записи (кэш проверок, уборка, jq).
 	ops opsState
 
+	// sched — рабочее состояние расписания и cron (замок crontab, кэш чтения, догон).
+	sched schedState
+
 	// pmu защищает ограничение частоты событий.
 	pmu        sync.Mutex
 	lastPub    time.Time
@@ -249,8 +252,11 @@ func (s *Service) Go(fn func()) bool { return s.spawn(fn) }
 func (s *Service) Start() {
 	s.startOnce.Do(func() {
 		s.checkOutside()
+		s.syncCron(true)
 		s.rebuildNotices()
+		s.sched.begin = time.Now()
 		s.spawn(s.loop)
+		s.spawn(s.schedLoop)
 	})
 }
 
@@ -287,13 +293,14 @@ func (s *Service) loop() {
 	}
 }
 
-// tick — один такт цикла: правки файлов вне панели и уборка временных записей
-// стандартных наборов после запусков по cron или SSH. Расписание и догон добавляют
-// следующие планы фазы. С выключенным флагом слоя xkeen.json в фоне не правится
+// tick — один такт цикла: правки файлов вне панели, возврат строки cron XKeen
+// (CronTwo, D-17) и уборка временных записей стандартных наборов после запусков по
+// cron или SSH. Запуски по расписанию ведёт отдельный планировщик (schedLoop). С выключенным флагом слоя xkeen.json в фоне не правится
 // (D-04 из 144): ожидания остаются в состоянии и доводятся первым тиком после
 // включения флага.
 func (s *Service) tick() {
 	s.checkOutside()
+	s.syncCron(false)
 	if s.hasPending() && s.d.Layer.BusyHolder() != configlayer.HolderGeodataUpdate &&
 		s.d.Layer.Enabled() {
 		s.cleanupPending(s.ctx)
@@ -369,8 +376,13 @@ func (s *Service) runLocked(ctx context.Context, trigger string) error {
 // постшагов: сбой постшага не должен терять итог. Затем убираются временные записи
 // наборов, файлы которых только что скачаны (D-01); остальные постшаги добавляют
 // следующие планы фазы.
-func (s *Service) afterRun(ctx context.Context, _ runResult) {
+func (s *Service) afterRun(ctx context.Context, res runResult) {
 	s.mu.Lock()
+	if res.LastRun.Outcome != outcomeFailed {
+		// Базы обновлены (любым запуском): повтор после сбоя сети больше не нужен.
+		s.st.RetryAt = time.Time{}
+		s.st.RetryFailed = false
+	}
 	st := s.st.clone()
 	s.mu.Unlock()
 	if err := saveState(s.state, st); err != nil {
