@@ -36,6 +36,14 @@
  *    из routingErrorCodes.json и каждой причины invalid_input есть текст в ru и en;
  *    ключи $tp вкладок имеют формы _one/_few/_many; тексты D-28.
  *
+ * 9. Менеджер geodata (план 146.1-07): интерфейсы configGeodata.ts совпадают по ключам с
+ *    geodataContract.json; событие geodata слушается в одном SSE-потоке, клиент подписан
+ *    на geodata и draft с дебаунсом 300 мс; configLayer.ts клиент не импортирует (нет
+ *    цикла), а клиент не импортируется вне Config.svelte и components/config/ (при
+ *    выключенном флаге запросов менеджера нет); у каждого кода из geodataErrorCodes.json
+ *    есть текст cfg.geo.err.<код> в ru и en, у ключей _one есть _few и _many; ключи D-35
+ *    и D-36 на месте.
+ *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
 const fs = require("fs");
@@ -1139,6 +1147,147 @@ for (const lang of ["ru", "en"]) {
       Object.keys(dict).some((k) => k.startsWith(prefix)),
       `${lang}.json: нет ключей ${prefix}*`,
     );
+  }
+}
+
+// --- 9. Менеджер geodata: клиент, событие, словари (план 146.1-07) --------
+
+const GEODATA_TS = `${SRC}/lib/configGeodata.ts`;
+const GEODATA_CONTRACT = `${SRC}/lib/geodataContract.json`;
+const GEODATA_CODES = `${SRC}/lib/geodataErrorCodes.json`;
+
+// Типы ответов против geodataContract.json
+const geodataTs = read(GEODATA_TS);
+let geodataContract = {};
+try {
+  geodataContract = JSON.parse(read(GEODATA_CONTRACT));
+} catch (e) {
+  errors.push(`${GEODATA_CONTRACT}: не разбирается как JSON: ${e.message}`);
+}
+for (const [type, spec] of Object.entries(geodataContract)) {
+  const keys = interfaceKeys(geodataTs, type);
+  if (!keys) {
+    errors.push(`${GEODATA_TS}: нет интерфейса ${type} (контракт geodata)`);
+    continue;
+  }
+  for (const k of spec.required) {
+    if (!keys.has(k)) errors.push(`${type}: нет обязательного ключа "${k}"`);
+    else if (keys.get(k))
+      errors.push(
+        `${type}: ключ "${k}" обязателен в контракте, но объявлен как необязательный`,
+      );
+  }
+  for (const k of spec.optional) {
+    if (!keys.has(k)) errors.push(`${type}: нет необязательного ключа "${k}"`);
+    else if (!keys.get(k))
+      errors.push(
+        `${type}: ключ "${k}" необязателен в контракте, но объявлен как обязательный`,
+      );
+  }
+  const allowed = new Set([...spec.required, ...spec.optional]);
+  for (const k of keys.keys()) {
+    if (!allowed.has(k))
+      errors.push(`${type}: лишний ключ "${k}" вне контракта`);
+  }
+  // Вложенные типы контракта (children) объявлены в контракте и в клиенте
+  for (const child of Object.values(spec.children || {})) {
+    const childType = child.replace(/\[\]$/, "");
+    expect(
+      Object.prototype.hasOwnProperty.call(geodataContract, childType),
+      `${GEODATA_CONTRACT}: тип ${childType} (поле типа ${type}) не описан в контракте`,
+    );
+  }
+}
+
+// Событие geodata: один SSE-поток, подписки клиента с дебаунсом, нет обратного импорта
+expect(
+  /EVENT_NAMES\s*=\s*\[[^\]]*'geodata'/.test(layerTs),
+  `${LAYER_TS}: 'geodata' нет в EVENT_NAMES`,
+);
+expect(
+  !/from '\.\/configGeodata'/.test(layerTs),
+  `${LAYER_TS}: импортирует configGeodata (цикл импортов)`,
+);
+expect(
+  /export const geodataHolder\b/.test(layerTs) &&
+    /busy_holder\?:\s*string/.test(layerTs),
+  `${LAYER_TS}: нет стора geodataHolder или поля busy_holder снимка`,
+);
+for (const ev of ["geodata", "draft"]) {
+  expect(
+    new RegExp(`onLayerEvent\\('${ev}'`).test(geodataTs),
+    `${GEODATA_TS}: нет подписки onLayerEvent('${ev}', …)`,
+  );
+}
+expect(
+  /GEODATA_DEBOUNCE_MS\s*=\s*300/.test(geodataTs),
+  `${GEODATA_TS}: дебаунс перечитывания не 300 мс`,
+);
+expect(
+  !/EventSource/.test(geodataTs),
+  `${GEODATA_TS}: открывает собственный поток событий`,
+);
+expect(
+  /export async function loadGeodata\(/.test(geodataTs) &&
+    geodataTs.includes("/api/configlayer/geodata"),
+  `${GEODATA_TS}: нет loadGeodata или адреса /api/configlayer/geodata`,
+);
+// Уведомления менеджера (D-23): без них ConfigNotices их отбросит
+for (const id of [
+  "'geodata_update:'",
+  "'geodata_cleanup:'",
+  "'geodata_include:'",
+  "'geodata_delete:'",
+  "'geodata_cron_two'",
+]) {
+  expect(layerTs.includes(id), `${LAYER_TS}: нет идентификатора уведомления ${id}`);
+}
+
+// Клиент менеджера подключают только Config.svelte и components/config/: иначе при
+// выключенном флаге слоя пошли бы запросы /api/configlayer/geodata
+for (const file of walk(SRC, [])) {
+  if (file === GEODATA_TS) continue;
+  const text = read(file);
+  if (
+    /^\s*import(?!\s+type\b)[^;]*?from '[^']*\/configGeodata'/m.test(text) &&
+    file !== `${SRC}/Config.svelte` &&
+    !file.startsWith(`${SRC}/components/config/`)
+  ) {
+    errors.push(
+      `${file}: импортирует configGeodata вне Config.svelte и components/config/ (запросы менеджера при выключенном флаге)`,
+    );
+  }
+}
+
+// Словари менеджера: тексты кодов ошибок API, формы $tp, ключи D-35 и D-36
+const geodataCodes = JSON.parse(read(GEODATA_CODES));
+expect(
+  Array.isArray(geodataCodes) && geodataCodes.length > 0,
+  `${GEODATA_CODES}: пустой список кодов ошибок`,
+);
+for (const lang of ["ru", "en"]) {
+  const dict = JSON.parse(read(`${SRC}/locales/${lang}.json`));
+  const has = (k) => typeof dict[k] === "string" && dict[k].trim() !== "";
+  for (const code of [...geodataCodes, "unknown"]) {
+    expect(
+      has(`cfg.geo.err.${code}`),
+      `${lang}.json: нет cfg.geo.err.${code}`,
+    );
+  }
+  for (const key of Object.keys(dict)) {
+    if (!key.startsWith("cfg.geo.") || !key.endsWith("_one")) continue;
+    const base = key.slice(0, -"_one".length);
+    for (const suffix of ["_few", "_many"]) {
+      expect(has(base + suffix), `${lang}.json: нет формы ${base}${suffix}`);
+    }
+  }
+  for (const key of [
+    "cfg.tab.lists",
+    "cfg.geo.res_unverified",
+    "cfg.geo.res_unverified_limit",
+    "cfg.geo.cron_suspended",
+  ]) {
+    expect(has(key), `${lang}.json: нет ключа ${key}`);
   }
 }
 
