@@ -247,6 +247,14 @@ func rtGeoData(t *testing.T, r rtSrcResp) map[string]any {
 // rtGeoOutput читает вывод задания со смещения from.
 func (e *rtSrc) rtGeoOutput(job string, from int64) (text string, next int64, running bool) {
 	e.t.Helper()
+	text, next, running, _ = e.rtGeoOutputRun(job, from)
+	return text, next, running
+}
+
+// rtGeoOutputRun — как rtGeoOutput, и номер запуска (run_id): сменился — начался новый
+// запуск, вывод читается с начала, смещения прежнего запуска не сравниваются.
+func (e *rtSrc) rtGeoOutputRun(job string, from int64) (text string, next int64, running bool, runID float64) {
+	e.t.Helper()
 	path := rtGeoBase + "/output?job=" + job + "&from=" + strconv.FormatInt(from, 10)
 	r := e.call(http.MethodGet, path, nil)
 	if r.Status != http.StatusOK {
@@ -256,7 +264,8 @@ func (e *rtSrc) rtGeoOutput(job string, from int64) (text string, next int64, ru
 	text, _ = o["text"].(string)
 	n, _ := o["next"].(float64)
 	running, _ = o["running"].(bool)
-	return text, int64(n), running
+	runID, _ = o["run_id"].(float64)
+	return text, int64(n), running, runID
 }
 
 // rtGeoRoutes — все пятнадцать маршрутов менеджера.
@@ -684,9 +693,10 @@ func TestRouterGeodataAPI(t *testing.T) {
 		deadline := time.Now().Add(20 * time.Minute)
 		var text string
 		var next int64
+		var runID float64
 		for time.Now().Before(deadline) {
 			var running bool
-			text, next, running = e.rtGeoOutput("ug", 0)
+			text, next, running, runID = e.rtGeoOutputRun("ug", 0)
 			if text != "" || !running {
 				break
 			}
@@ -697,7 +707,14 @@ func TestRouterGeodataAPI(t *testing.T) {
 		}
 		var prev int64 = -1
 		for time.Now().Before(deadline) {
-			_, n, running := e.rtGeoOutput("ug", next)
+			_, n, running, id := e.rtGeoOutputRun("ug", next)
+			if id != runID {
+				// Первое чтение застало вывод прежнего запуска: новый запуск начинается
+				// с нуля, смещения прежнего не сравниваются.
+				runID, prev, next = id, -1, 0
+				time.Sleep(time.Second)
+				continue
+			}
 			if n < next {
 				t.Errorf("смещение уменьшилось: %d после %d", n, next)
 			}
