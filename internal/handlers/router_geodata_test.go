@@ -297,6 +297,9 @@ func TestRouterGeodataAPI(t *testing.T) {
 	})
 
 	e.enableLayer()
+	// Запись в xkeen.json и «Обновить сейчас» идут под исключительным замком слоя:
+	// пока фоновая сборка после включения флага не закончилась, они отвечают apply_busy.
+	e.rtRstIdle()
 
 	// Снимок вкладки: ключи ответа совпадают с json-тегами geodata.View.
 	t.Run("snapshot", func(t *testing.T) {

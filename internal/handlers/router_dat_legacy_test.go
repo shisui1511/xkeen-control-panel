@@ -16,6 +16,9 @@ import (
 func TestRouterDatLegacyFlag(t *testing.T) {
 	e := rtNewSrc(t)
 	e.enableLayer()
+	// Тест выключает слой посреди сценария, а очистка enableLayer ходит в API слоя:
+	// флаг возвращается до неё (очистки идут в обратном порядке).
+	t.Cleanup(func() { e.setLayer(true) })
 
 	body := map[string]string{"file": "xcp-rt-absent.dat", "type": "xray"}
 	closed := []struct {
