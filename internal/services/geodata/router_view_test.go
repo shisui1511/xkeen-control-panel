@@ -4,6 +4,7 @@ package geodata
 
 import (
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -207,5 +208,185 @@ func TestRouterGeodataRunNow(t *testing.T) {
 	again := svc2.Output("ug", 0)
 	if again.Text == "" || again.Text != string(saved) {
 		t.Errorf("вывод после перезапуска не совпал с last-ug.log (%d и %d байт)", len(again.Text), len(saved))
+	}
+}
+
+// rtGeoCopy копирует файл потоком.
+func rtGeoCopy(t *testing.T, from, to string) {
+	t.Helper()
+	in, err := os.Open(from)
+	if err != nil {
+		t.Fatalf("открытие %s: %v", from, err)
+	}
+	defer in.Close()
+	out, err := os.Create(to)
+	if err != nil {
+		t.Fatalf("создание %s: %v", to, err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		t.Fatalf("копирование в %s: %v", to, err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// rtGeoRow ищет строку источника по имени файла.
+func rtGeoRow(v View, file string) (SourceView, bool) {
+	for _, r := range v.Sources {
+		if r.File == file {
+			return r, true
+		}
+	}
+	return SourceView{}, false
+}
+
+// TestRouterGeodataView — снимок вкладки на настоящих dat-файлах стенда: шесть
+// стандартных строк, пометки дубля, группа «файл» и отметка «обновлено вне панели».
+// xkeen.json и каталог dat стенда не меняются: запись идёт в копию во временном
+// каталоге, файлы — копии настоящих dat.
+func TestRouterGeodataView(t *testing.T) {
+	tg := routertest.Current(t)
+
+	infos, err := lists.NewIndex(lists.DefaultDatDir).Files()
+	if err != nil {
+		t.Fatalf("Files: %v", err)
+	}
+	var first, second *lists.FileInfo
+	for i := range infos {
+		if infos[i].Name == "geosite_refilter.dat" {
+			first = &infos[i]
+			break
+		}
+		if first == nil && infos[i].Kind == lists.KindSite {
+			first = &infos[i]
+		}
+	}
+	if first == nil {
+		t.Skip("на стенде нет geosite-файла dat")
+	}
+	for i := range infos {
+		if infos[i].Name != first.Name {
+			second = &infos[i]
+			break
+		}
+	}
+	if second == nil {
+		t.Skip("на стенде один dat-файл: для строки «файл» нужен второй")
+	}
+
+	dir := rtGeoTempDir(t, tg.WorkDir)
+	datDir := filepath.Join(dir, "dat")
+	xkDir := filepath.Join(dir, "xkeen")
+	for _, d := range []string{datDir, xkDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Первый файл ложится под стандартным именем, второй — под своим.
+	const stdName, otherName = "geosite_refilter.dat", "xcp-view-file.dat"
+	rtGeoCopy(t, filepath.Join(lists.DefaultDatDir, first.Name), filepath.Join(datDir, stdName))
+	rtGeoCopy(t, filepath.Join(lists.DefaultDatDir, second.Name), filepath.Join(datDir, otherName))
+
+	if _, err := os.Stat(rtRunConfig); err != nil {
+		t.Skipf("нет %s: образца xkeen.json нет", rtRunConfig)
+	}
+	rtGeoCopy(t, rtRunConfig, filepath.Join(xkDir, "xkeen.json"))
+	store := rtGeoStore(t, xkDir)
+	st, err := store.Status()
+	if err != nil {
+		t.Fatalf("Status копии xkeen.json: %v", err)
+	}
+	if !st.JQ {
+		t.Skip("стенд: нет jq")
+	}
+	// Запись с именем стандартного набора и чужим адресом: сперва убрать прежнюю, если она есть.
+	if err := store.Apply(lists.GeodataOp{Kind: lists.OpRemove, File: stdName}, "", true); err != nil && lists.ErrorCode(err) != lists.ErrEntryNotFound.Code {
+		t.Fatalf("Apply(remove) на копии: %v", err)
+	}
+	if !st.GeofileUpdate {
+		if err := store.Apply(lists.GeodataOp{Kind: lists.OpEnableUpdate}, "", true); err != nil {
+			t.Fatalf("Apply(enable_update) на копии: %v", err)
+		}
+	}
+	if err := store.Apply(lists.GeodataOp{Kind: lists.OpAdd, File: stdName, URL: "http://127.0.0.1:9/other.dat"}, "", true); err != nil {
+		t.Fatalf("Apply(add) на копии: %v", err)
+	}
+
+	layer := rtGeoLayer(t, dir)
+	svc := rtGeoService(t, layer, store, lists.NewIndex(datDir), dir)
+	svc.Start()
+
+	v, err := svc.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	// Шесть стандартных строк в порядке StandardSets.
+	var std []SourceView
+	for _, r := range v.Sources {
+		if r.Origin == OriginStandard {
+			std = append(std, r)
+		}
+	}
+	if len(std) != len(StandardSets) {
+		t.Fatalf("стандартных строк %d, ожидалось %d", len(std), len(StandardSets))
+	}
+	for i, set := range StandardSets {
+		if std[i].File != set.File || std[i].SetID != set.ID {
+			t.Errorf("стандартная строка %d: %s/%s, ожидалось %s/%s", i, std[i].File, std[i].SetID, set.File, set.ID)
+		}
+	}
+	row, ok := rtGeoRow(v, stdName)
+	if !ok || row.Origin != OriginStandard {
+		t.Fatalf("нет стандартной строки %s: %+v", stdName, row)
+	}
+	if !row.Present || !row.Entry || !row.Dup || !row.DupURL {
+		t.Errorf("строка %s: present=%v entry=%v dup=%v dup_url=%v, ожидались все true", stdName, row.Present, row.Entry, row.Dup, row.DupURL)
+	}
+	other, ok := rtGeoRow(v, otherName)
+	if !ok || other.Origin != OriginFile || !other.Present || other.Entry {
+		t.Fatalf("строка %s: %+v, ожидалась группа file без записи", otherName, other)
+	}
+	if v.Files != 2 {
+		t.Errorf("files = %d, ожидалось 2", v.Files)
+	}
+	want := int64(0)
+	if got, err := lists.NewIndex(datDir).Files(); err == nil {
+		for _, f := range got {
+			want += f.Size
+		}
+	}
+	if v.TotalSize != want || want == 0 {
+		t.Errorf("total_size = %d, ожидалось %d", v.TotalSize, want)
+	}
+	if mihomo, err := lists.MihomoFiles(lists.DefaultMihomoDir); err != nil || len(mihomo) != len(v.Mihomo) {
+		t.Errorf("файлы Mihomo: снимок %d, каталог %d, ошибка %v", len(v.Mihomo), len(mihomo), err)
+	}
+	if v.Draft == nil || v.Sources == nil || v.Mihomo == nil {
+		t.Errorf("пустые списки снимка должны быть [] (draft=%v sources=%v mihomo=%v)", v.Draft == nil, v.Sources == nil, v.Mihomo == nil)
+	}
+
+	// Правка вне панели: время файла изменилось, `-ug` панель не запускала.
+	moved := time.Now().Add(-3 * time.Hour)
+	if err := os.Chtimes(filepath.Join(datDir, otherName), moved, moved); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	deadline := time.Now().Add(40 * time.Second)
+	for {
+		v, err = svc.Snapshot()
+		if err != nil {
+			t.Fatalf("Snapshot: %v", err)
+		}
+		if r, _ := rtGeoRow(v, otherName); r.Outside != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("отметка «обновлено вне панели» не появилась за 40 с")
+		}
+		time.Sleep(time.Second)
+	}
+	if r, _ := rtGeoRow(v, stdName); r.Outside != "" {
+		t.Errorf("у нетронутого файла %s отметка outside: %s", stdName, r.Outside)
 	}
 }
