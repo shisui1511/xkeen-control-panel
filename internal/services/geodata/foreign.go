@@ -2,6 +2,7 @@ package geodata
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,7 +18,9 @@ import (
 var ErrForeignRef = &lists.CodedError{Code: "foreign_ref"}
 
 // ForeignRef — место ссылки на файл dat в конфиге вне манифеста панели. Editor —
-// абсолютный путь для ссылки «Открыть в Редакторе».
+// абсолютный путь для ссылки «Открыть в Редакторе». Line == 0 — файл или каталог не
+// прочитан (ошибка чтения, не обычный файл, больше foreignMaxSize): ссылка не
+// исключена, удаление блокируется.
 type ForeignRef struct {
 	File   string `json:"file"`
 	Line   int    `json:"line"`
@@ -90,6 +93,12 @@ func (s *Service) removeNames(file string) []string {
 //
 // Файл, достижимый по нескольким путям (симлинк config.yaml на профиль), считается
 // один раз. Нет каталога — нет ссылок.
+//
+// Поиск закрывается при ошибке (WR-05): конфиг или каталог, который не удалось
+// прочитать, даёт место со строкой 0 (foreignUnreadable). Такое место блокирует
+// удаление наравне с найденной ссылкой, потому что ядро упадёт на ext:<файл>:, если
+// ссылка в нечитаемом файле есть. Файл, исчезнувший между чтением каталога и
+// проверкой, ссылкой не считается.
 func (s *Service) ForeignRefs(file string) ([]ForeignRef, error) {
 	names := s.removeNames(file)
 	refs := []ForeignRef{}
@@ -133,7 +142,14 @@ func (s *Service) ForeignRefs(file string) ([]ForeignRef, error) {
 		}
 		return false
 	}
-	for _, name := range foreignList(s.d.XrayConfDir, ".json") {
+	list := func(dir, rel string, exts ...string) []string {
+		names, err := foreignList(dir, exts...)
+		if err != nil {
+			refs = append(refs, foreignUnreadable(rel, ""))
+		}
+		return names
+	}
+	for _, name := range list(s.d.XrayConfDir, filepath.Base(s.d.XrayConfDir)+"/", ".json") {
 		scan(s.d.XrayConfDir, name, xrayMatch)
 	}
 
@@ -145,22 +161,29 @@ func (s *Service) ForeignRefs(file string) ([]ForeignRef, error) {
 		}
 		return false
 	}
-	for _, name := range foreignList(s.d.MihomoDir, ".yaml", ".yml") {
+	for _, name := range list(s.d.MihomoDir, filepath.Base(s.d.MihomoDir)+"/", ".yaml", ".yml") {
 		scan(s.d.MihomoDir, name, mihomoMatch)
 	}
 	profiles := filepath.Join(s.d.MihomoDir, "profiles")
-	for _, name := range foreignList(profiles, ".yaml", ".yml") {
+	for _, name := range list(profiles, "profiles/", ".yaml", ".yml") {
 		scan(s.d.MihomoDir, "profiles/"+name, mihomoMatch)
 	}
 	return refs, nil
 }
 
-// foreignList — имена обычных файлов каталога dir (без подкаталогов) с одним из
-// расширений, по алфавиту. Нет каталога — пусто.
-func foreignList(dir string, exts ...string) []string {
+// foreignUnreadable — место «не прочитан»: строка 0, ссылка не исключена. abs пуст у
+// каталога (открывать в Редакторе нечего).
+func foreignUnreadable(rel, abs string) ForeignRef {
+	return ForeignRef{File: rel, Line: 0, Editor: abs}
+}
+
+// foreignList — имена файлов каталога dir (без подкаталогов) с одним из расширений,
+// по алфавиту. Нет каталога — пусто без ошибки; любая другая ошибка чтения каталога
+// возвращается вместе с тем, что успели прочитать.
+func foreignList(dir string, exts ...string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
+	if err != nil && errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
 	}
 	var out []string
 	for _, e := range entries {
@@ -176,7 +199,7 @@ func foreignList(dir string, exts ...string) []string {
 		}
 	}
 	sort.Strings(out)
-	return out
+	return out, err
 }
 
 // containsDatName — строка содержит имя файла целиком: до и после имени нет знака

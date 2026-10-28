@@ -205,6 +205,31 @@ func TestRouterGeodataProbe(t *testing.T) {
 		}
 	})
 
+	// Знаки оболочки в адресе блокируются одной общей проверкой до сети (WR-06); & в
+	// строке запроса разрешён. gh_proxy проходит ту же проверку.
+	t.Run("shell_meta", func(t *testing.T) {
+		for _, meta := range []string{"$(id)", "`id`", ";", "|", "<", ">", `"`, "'", `\`} {
+			res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/ok.dat" + meta, Mode: ProbeModeAdd})
+			rtProbeWant(t, res, "scheme_bad", ProbeLevelBlock)
+			if !res.Blocked {
+				t.Errorf("адрес со знаком оболочки %q не заблокирован: %+v", meta, res.Checks)
+			}
+			rtProbeNo(t, res, "reach_ok")
+			rtProbeNo(t, res, "reach_fail")
+		}
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/ok.dat?a=1&b=2", Mode: ProbeModeAdd})
+		rtProbeNo(t, res, "scheme_bad")
+		rtProbeWant(t, res, "reach_ok", ProbeLevelOK)
+		for _, bad := range []string{"https://p.example/$x", "https://p.example/a;b"} {
+			if validGhProxy(bad) {
+				t.Errorf("gh_proxy со знаком оболочки принят: %q", bad)
+			}
+		}
+		if !validGhProxy("https://p.example/") {
+			t.Error("годный gh_proxy отклонён")
+		}
+	})
+
 	t.Run("closed_port", func(t *testing.T) {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
