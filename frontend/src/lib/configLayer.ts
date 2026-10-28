@@ -144,6 +144,8 @@ export interface LayerSnapshot {
   checks: BuildIssue[];
   /** Владение маршрутизацией по ядрам. */
   routing: RoutingSnapshot;
+  /** Кто держит общий замок (менеджер geodata); пусто — замок свободен или его держит «Применить». */
+  busy_holder?: string;
 }
 
 export interface LayerDiff {
@@ -161,6 +163,11 @@ export const layerStatus = writable<'idle' | 'loading' | 'ready' | 'error'>('idl
 export const layerConnection = writable<'connecting' | 'open' | 'lost'>('connecting');
 /** Применение запущено из этой вкладки (отличает «эта вкладка» от «другая», D-16). */
 export const applyStartedHere = writable(false);
+/**
+ * Держатель замка менеджера geodata (обновление баз, установка jq, уборка записи): из
+ * снимка слоя (busy_holder) и события geodata. Пусто — менеджер замок не держит.
+ */
+export const geodataHolder = writable('');
 
 export const draftChanges: Readable<number> = derived(layerSnapshot, (s) => s?.draft_changes ?? 0);
 export const driftCount: Readable<number> = derived(layerSnapshot, (s) => s?.drift_count ?? 0);
@@ -176,7 +183,12 @@ export function formatBadgeCount(n: number): string {
 }
 
 /** Известные виды уведомлений слоя: точные идентификаторы и префиксы (id вида `вид:<источник>:<ядро>`). */
-const NOTICE_IDS = ['schema_reset', 'recovered_from_journal', 'journal_recovery_failed'];
+const NOTICE_IDS = [
+  'schema_reset',
+  'recovered_from_journal',
+  'journal_recovery_failed',
+  'geodata_cron_two'
+];
 const NOTICE_PREFIXES = [
   'build_failed',
   'source_rejected:',
@@ -186,7 +198,11 @@ const NOTICE_PREFIXES = [
   'routing_auto_taken:',
   'routing_reconcile:',
   'routing_repick:',
-  'routing_list_missing:'
+  'routing_list_missing:',
+  'geodata_update:',
+  'geodata_cleanup:',
+  'geodata_include:',
+  'geodata_delete:'
 ];
 
 /** Показывается ли уведомление: незнакомые идентификаторы не рисуются и в бейдж не попадают. */
@@ -278,7 +294,10 @@ function normalizeSnapshot(raw: Record<string, unknown>): LayerSnapshot {
     apply: normalizeApply(raw.apply),
     notices: asArray<LayerNotice>(raw.notices),
     checks: asArray<BuildIssue>(raw.checks),
-    routing: normalizeRouting(raw.routing)
+    routing: normalizeRouting(raw.routing),
+    ...(typeof raw.busy_holder === 'string' && raw.busy_holder !== ''
+      ? { busy_holder: raw.busy_holder }
+      : {})
   };
 }
 
@@ -353,22 +372,24 @@ const EVENT_NAMES = [
   'apply_done',
   'notices',
   'sources',
-  'routing'
+  'routing',
+  'geodata'
 ] as const;
 const RETRY_MIN_MS = 3000;
 const RETRY_MAX_MS = 30000;
 
-// Обработчики событий sources, routing и draft: представления перечитывают
-// configSources.ts и configRouting.ts (регистрируются при загрузке их модулей;
-// configLayer их не импортирует — цикла нет). У каждого имени свой набор обработчиков.
-type HandlerEvent = 'sources' | 'routing' | 'draft';
+// Обработчики событий sources, routing, geodata и draft: представления перечитывают клиенты
+// источников, маршрутизации и менеджера geodata (обработчики регистрируются при загрузке
+// модулей клиентов; configLayer их не импортирует — цикла нет). У каждого имени свой набор.
+type HandlerEvent = 'sources' | 'routing' | 'geodata' | 'draft';
 const layerHandlers: Record<HandlerEvent, Set<() => void>> = {
   sources: new Set(),
   routing: new Set(),
+  geodata: new Set(),
   draft: new Set()
 };
 
-/** Подписка на событие SSE `sources`, `routing` или `draft`; возвращает функцию отписки. */
+/** Подписка на событие SSE `sources`, `routing`, `geodata` или `draft`; возвращает функцию отписки. */
 export function onLayerEvent(name: HandlerEvent, fn: () => void): () => void {
   const set = layerHandlers[name];
   if (!set) return () => {};
@@ -427,6 +448,13 @@ function applyEvent(name: string, data: unknown): void {
     notifyHandlers('routing');
     return;
   }
+  if (name === 'geodata') {
+    // Событие несёт только счётчик и держателя замка: состояния слоя оно не меняет, а
+    // снимок менеджера перечитывает клиент менеджера по подписке
+    geodataHolder.set(isObject(data) && typeof data.holder === 'string' ? data.holder : '');
+    notifyHandlers('geodata');
+    return;
+  }
   eventSeq++;
   layerSnapshot.update((s) => reduceLayerEvent(s, name, data));
   if (name === 'draft') {
@@ -436,8 +464,14 @@ function applyEvent(name: string, data: unknown): void {
   if (name === 'snapshot') {
     layerStatus.set('ready');
     syncStartedHere();
+    syncGeodataHolder();
   }
   if (name === 'apply_done') applyStartedHere.set(false);
+}
+
+/** Держатель замка из снимка кладётся в geodataHolder при каждом снимке. */
+function syncGeodataHolder(): void {
+  geodataHolder.set(get(layerSnapshot)?.busy_holder ?? '');
 }
 
 function setSnapshot(raw: unknown): void {
@@ -445,6 +479,7 @@ function setSnapshot(raw: unknown): void {
   layerSnapshot.set(normalizeSnapshot(raw));
   layerStatus.set('ready');
   syncStartedHere();
+  syncGeodataHolder();
 }
 
 /** Читает снимок целиком. Сбой первой загрузки — статус error; позже состояние остаётся прежним. */
@@ -541,6 +576,7 @@ export function stopConfigLayer(): void {
   layerStatus.set('idle');
   layerConnection.set('connecting');
   applyStartedHere.set(false);
+  geodataHolder.set('');
 }
 
 // --- Клиент маршрутов ---

@@ -1,0 +1,195 @@
+{
+  "CronView": {
+    "required": ["found", "adoptable", "two", "kept"],
+    "optional": ["schedule"],
+    "children": {}
+  },
+  "DownloadView": {
+    "required": ["gh_proxy", "jq", "geofile_update"],
+    "optional": ["reason", "invalid", "jq_error"],
+    "children": {
+      "invalid": "GeodataEntry[]"
+    }
+  },
+  "DraftDropView": {
+    "required": ["file", "mode"],
+    "optional": [],
+    "children": {}
+  },
+  "EntriesPage": {
+    "required": ["tag", "total", "offset", "entries", "more"],
+    "optional": [],
+    "children": {}
+  },
+  "FileResultView": {
+    "required": ["status", "at"],
+    "optional": ["reason", "unverified", "limit"],
+    "children": {}
+  },
+  "ForeignRef": {
+    "required": ["file", "line"],
+    "optional": ["editor"],
+    "children": {}
+  },
+  "GeodataEntry": {
+    "required": ["file", "url"],
+    "optional": [],
+    "children": {}
+  },
+  "GeodataListImpact": {
+    "required": ["tag", "kind", "rules", "dies"],
+    "optional": ["suggest"],
+    "children": {
+      "rules": "RuleRef[]",
+      "suggest": "ListRef"
+    }
+  },
+  "ImpactView": {
+    "required": ["file", "lists", "raw", "foreign"],
+    "optional": [],
+    "children": {
+      "lists": "GeodataListImpact[]",
+      "raw": "RawRef[]",
+      "foreign": "ForeignRef[]"
+    }
+  },
+  "LastRunView": {
+    "required": ["at", "outcome", "not_updated", "parsed"],
+    "optional": ["finished", "reason"],
+    "children": {}
+  },
+  "ListRef": {
+    "required": ["file", "tag", "kind"],
+    "optional": [],
+    "children": {}
+  },
+  "LookupMatch": {
+    "required": ["file", "tag", "kind"],
+    "optional": [],
+    "children": {}
+  },
+  "LookupView": {
+    "required": ["query", "matches", "more"],
+    "optional": [],
+    "children": {
+      "matches": "LookupMatch[]"
+    }
+  },
+  "MihomoFile": {
+    "required": ["name", "size", "mtime"],
+    "optional": [],
+    "children": {}
+  },
+  "OutputChunk": {
+    "required": ["job", "from", "next", "text", "running"],
+    "optional": ["truncated"],
+    "children": {}
+  },
+  "PreviewView": {
+    "required": ["before", "after", "comments_kept", "base"],
+    "optional": [],
+    "children": {}
+  },
+  "ProbeCheck": {
+    "required": ["code", "level"],
+    "optional": ["params"],
+    "children": {}
+  },
+  "ProbeResult": {
+    "required": ["checks", "blocked", "route"],
+    "optional": ["size", "kind"],
+    "children": {
+      "checks": "ProbeCheck[]"
+    }
+  },
+  "RawRef": {
+    "required": ["rule", "n"],
+    "optional": [],
+    "children": {}
+  },
+  "RuleRef": {
+    "required": ["id", "n"],
+    "optional": [],
+    "children": {}
+  },
+  "RunView": {
+    "required": ["running", "waiting_apply", "seq"],
+    "optional": ["job", "started"],
+    "children": {}
+  },
+  "ScheduleView": {
+    "required": ["enabled", "day", "hour", "minute", "suspended", "now"],
+    "optional": ["next", "retry_at"],
+    "children": {}
+  },
+  "SourceView": {
+    "required": ["id", "file", "origin", "kind", "present", "entry"],
+    "optional": [
+      "set_id",
+      "provider",
+      "url",
+      "size",
+      "mtime",
+      "tags",
+      "entries",
+      "aliases",
+      "pending",
+      "include_stuck",
+      "dup",
+      "dup_url",
+      "draft",
+      "delete_incomplete",
+      "outside",
+      "result",
+      "invalid",
+      "heavy"
+    ],
+    "children": {
+      "result": "FileResultView"
+    }
+  },
+  "TagInfo": {
+    "required": ["tag", "count", "examples"],
+    "optional": [],
+    "children": {}
+  },
+  "TagsView": {
+    "required": ["file", "kind", "tags"],
+    "optional": [],
+    "children": {
+      "tags": "TagInfo[]"
+    }
+  },
+  "View": {
+    "required": [
+      "xkeen",
+      "download",
+      "schedule",
+      "cron",
+      "run",
+      "sources",
+      "files",
+      "total_size",
+      "draft",
+      "mihomo"
+    ],
+    "optional": ["last_run", "geoipset"],
+    "children": {
+      "xkeen": "XKeenView",
+      "download": "DownloadView",
+      "schedule": "ScheduleView",
+      "cron": "CronView",
+      "run": "RunView",
+      "last_run": "LastRunView",
+      "sources": "SourceView[]",
+      "draft": "DraftDropView[]",
+      "mihomo": "MihomoFile[]",
+      "geoipset": "FileResultView"
+    }
+  },
+  "XKeenView": {
+    "required": ["installed", "user_geodata"],
+    "optional": ["version"],
+    "children": {}
+  }
+}
