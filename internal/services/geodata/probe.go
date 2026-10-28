@@ -41,10 +41,6 @@ const (
 )
 
 const (
-	// MinDatSize — меньше этого размера XKeen файл не устанавливает (минимум
-	// fetch_with_mirrors при загрузке dat).
-	MinDatSize = 24576
-
 	probePrefixBytes    = 8192
 	probeHTMLBytes      = 100
 	probeURLMax         = 2048
