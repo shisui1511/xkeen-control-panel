@@ -269,7 +269,7 @@ test('lists: куда относится', async ({ page }) => {
   expect(await draftChanges(page), 'черновик не изменился').toBe(draftBefore);
 
   // запрос без совпадений: пустое состояние, прежние результаты убраны
-  await card.getByTestId('geo-lookup-input').fill('no-such-name-zzzz.invalid');
+  await card.getByTestId('geo-lookup-input').fill('no-such-name-zzzz.xcp-no-such-zone');
   await card.getByTestId('geo-lookup-go').click();
   await expect(card.getByTestId('geo-lookup-empty')).toBeVisible({ timeout: T.page });
   await expect(results).toHaveCount(0);

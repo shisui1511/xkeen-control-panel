@@ -568,10 +568,13 @@ async function catalogUrl(page: Page): Promise<string> {
   return set?.url ?? '';
 }
 
-/** Адрес самой панели: сервер отдаёт по нему страницу HTML, а не базу dat. */
-function panelUrl(page: Page): string {
-  return new URL(page.url()).origin + '/';
-}
+/**
+ * Адрес с неподдерживаемой схемой: проверка закрывает запись блоком scheme_bad без обращения
+ * в сеть. Блок html (страница вместо базы) проверяет TestRouterGeodataProbe на сервере
+ * loopback роутера: адрес самой панели для этого не годится, она не отдаёт страницу
+ * запросу с роутера (403).
+ */
+const BLOCKED_URL = 'ftp://example.com/xcp-own.dat';
 
 /** Просит подтвердить потерю комментариев в xkeen.json, если запись их стирает. */
 async function acceptCommentLoss(page: Page): Promise<void> {
@@ -633,14 +636,14 @@ test.describe('свой источник', () => {
     await expect(submit).toBeDisabled();
     await file.fill(OWN_FILE);
     await expect(check).toBeDisabled();
-    await url.fill(panelUrl(page));
+    await url.fill(BLOCKED_URL);
     await expect(check).toBeEnabled({ timeout: T.action });
     // без проверки добавить нельзя
     await expect(submit).toBeDisabled();
 
-    // адрес самой панели отдаёт HTML: блок, запись закрыта
+    // неподдерживаемая схема: блок, запись закрыта
     await check.click();
-    const html = results.locator('[data-code="html"]');
+    const html = results.locator('[data-code="scheme_bad"]');
     await expect(html).toBeVisible({ timeout: T.network + T.action });
     await expect(html).toHaveAttribute('data-level', 'block');
     await expect(submit).toBeDisabled();
@@ -748,11 +751,11 @@ test.describe('свой источник', () => {
     const submit = modal.getByTestId('geo-url-submit');
     await expect(submit).toBeDisabled();
 
-    // адрес самой панели отдаёт HTML: блок, сохранить нельзя
-    await url.fill(panelUrl(page));
+    // неподдерживаемая схема: блок, сохранить нельзя
+    await url.fill(BLOCKED_URL);
     await expect(results.locator('li')).toHaveCount(0);
     await check.click();
-    const html = results.locator('[data-code="html"]');
+    const html = results.locator('[data-code="scheme_bad"]');
     await expect(html).toBeVisible({ timeout: T.network + T.action });
     await expect(html).toHaveAttribute('data-level', 'block');
     await expect(submit).toBeDisabled();
