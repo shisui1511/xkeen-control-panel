@@ -9,6 +9,7 @@
   import { applyRunning, geodataHolder } from '../../../lib/configLayer';
   import {
     geodataView,
+    loadGeodata,
     runUpdate,
     saveSchedule,
     geodataErrorText,
@@ -45,6 +46,17 @@
   // Идёт запуск: блок вывода раскрывается сам, после этого его можно свернуть
   $effect(() => {
     if (ugRunning) showOutput = true;
+  });
+
+  // Пока карточка показывает идущее задание, снимок перечитывается сам: события SSE могут
+  // потеряться (обрыв потока в конце запуска, пока XKeen перезапускает ядро), и без опроса
+  // «Идёт обновление баз…» осталось бы до перезагрузки страницы
+  const VIEW_POLL_MS = 5000;
+  const jobActive = $derived(ugRunning || removeRunning || run?.waiting_apply === true);
+  $effect(() => {
+    if (!jobActive) return;
+    const id = setInterval(() => void loadGeodata(), VIEW_POLL_MS);
+    return () => clearInterval(id);
   });
 
   // --- Расписание (формат XKeen: день, час, минута; день -1 — ежедневно) ---
