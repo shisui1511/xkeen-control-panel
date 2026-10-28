@@ -18,6 +18,8 @@
     onopen,
     onadd,
     onedit,
+    ondelete,
+    onrestore,
     ondedup,
     onfinish
   }: {
@@ -34,6 +36,10 @@
     onadd?: () => void;
     /** «Изменить ссылку» у своих записей. */
     onedit?: (source: SourceView) => void;
+    /** «Удалить источник» у своих записей и файлов без записи. */
+    ondelete?: (source: SourceView) => void;
+    /** «Вернуть источник» у источника с пометкой черновика. */
+    onrestore?: (source: SourceView) => void;
     ondedup?: (source: SourceView) => void;
     onfinish?: (source: SourceView) => void;
   } = $props();
@@ -89,14 +95,17 @@
     >
       {#each sources as s (s.id)}
         {#if kind === 'panel'}
-          <SourceRow source={s} {onopen} {ondedup} {onfinish}>
+          <SourceRow source={s} {onopen} {ondedup} {onfinish} {onrestore}>
             {#snippet lead()}
               <label class="toggle-label sg-toggle">
                 <span class="toggle-switch">
                   <input
                     type="checkbox"
                     checked={isOn(s)}
-                    disabled={disabled || (isOn(s) && !onoff) || (!isOn(s) && !onenable)}
+                    disabled={disabled ||
+                      !!s.draft ||
+                      (isOn(s) && !onoff) ||
+                      (!isOn(s) && !onenable)}
                     aria-label={$t('cfg.geo.switch_aria', { provider: s.file, kind: s.kind })}
                     data-testid="geo-set-switch-{s.set_id ?? s.id}"
                     onchange={(e) => toggle(e, s)}
@@ -111,6 +120,8 @@
             source={s}
             {onopen}
             onedit={disabled ? undefined : onedit}
+            ondelete={disabled ? undefined : ondelete}
+            {onrestore}
             {ondedup}
             {onfinish}
           />

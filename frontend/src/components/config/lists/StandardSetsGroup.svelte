@@ -14,7 +14,8 @@
     onoff,
     onopen,
     ondedup,
-    onfinish
+    onfinish,
+    onrestore
   }: {
     /** Строки источников с origin standard. */
     sources: SourceView[];
@@ -27,6 +28,8 @@
     onopen?: (source: SourceView) => void;
     ondedup?: (source: SourceView) => void;
     onfinish?: (source: SourceView) => void;
+    /** «Вернуть источник» у набора с пометкой «выключится после «Применить»». */
+    onrestore?: (source: SourceView) => void;
   } = $props();
 
   const uid = $props.id();
@@ -73,14 +76,14 @@
         <legend class="sg-legend">{p.name}</legend>
         <ul class="sg-list">
           {#each p.rows as s (s.id)}
-            <SourceRow source={s} {onopen} {ondedup} {onfinish}>
+            <SourceRow source={s} {onopen} {ondedup} {onfinish} {onrestore}>
               {#snippet lead()}
                 <label class="toggle-label sg-toggle">
                   <span class="toggle-switch">
                     <input
                       type="checkbox"
                       checked={isOn(s)}
-                      disabled={disabled || (isOn(s) && !onoff)}
+                      disabled={disabled || !!s.draft || (isOn(s) && !onoff)}
                       aria-label={$t('cfg.geo.switch_aria', { provider: p.name, kind: s.kind })}
                       data-testid="geo-set-switch-{s.set_id ?? s.id}"
                       onchange={(e) => toggle(e, s)}

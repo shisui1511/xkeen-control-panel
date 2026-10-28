@@ -31,6 +31,8 @@
     open,
     kind,
     selected,
+    hideFiles = [],
+    single = false,
     onpick,
     onclose
   }: {
@@ -39,6 +41,10 @@
     kind: 'site' | 'ip';
     /** Ссылки, уже выбранные в условии. */
     selected: ListRef[];
+    /** Файлы, списки которых скрыты (замена списка удаляемого файла). */
+    hideFiles?: string[];
+    /** Выбирается один список: без сервисов, новый выбор заменяет прежний. */
+    single?: boolean;
     onpick: (refs: ListRef[]) => void;
     onclose: () => void;
   } = $props();
@@ -62,7 +68,7 @@
     void open;
     return untrack(() => ({
       picked: selected.map((r: ListRef) => ({ ...r })),
-      seg: 'services',
+      seg: single ? 'all' : 'services',
       query: '',
       limit: PAGE_FIRST
     }));
@@ -93,7 +99,7 @@
       void loadGeodata();
       // Нет сервисов нужного вида — сразу полный каталог, а не пустой список сервисов
       const hasServices = catalog.services.some((sv: ServiceView) => refsOf(sv).length > 0);
-      if (!hasServices) seg = 'all';
+      if (!hasServices || single) seg = 'all';
     } catch (e) {
       if (mine === seq) failure = reasonOf(e);
     } finally {
@@ -149,7 +155,9 @@
     addTarget = { id: s.set_id ?? s.id, name: s.file, file: s.file, origin: 'standard' };
   }
 
-  const catalogLists = $derived((catalog?.lists ?? []).filter((l: ListEntry) => l.kind === kind));
+  const catalogLists = $derived(
+    (catalog?.lists ?? []).filter((l: ListEntry) => l.kind === kind && !hideFiles.includes(l.file))
+  );
 
   /** Ссылки каталога нужного вида: по ним определяется, что из выбранного пропало. */
   const knownKeys = $derived(
@@ -162,7 +170,7 @@
   const missing = $derived(ready ? picked.filter((r) => !knownKeys.has(keyOf(r))) : []);
 
   function refsOf(sv: ServiceView): ListRef[] {
-    return (sv.refs ?? []).filter((r) => r.kind === kind);
+    return (sv.refs ?? []).filter((r) => r.kind === kind && !hideFiles.includes(r.file));
   }
 
   function serviceName(sv: ServiceView): string {
@@ -221,7 +229,9 @@
 
   function toggleRef(r: ListRef, on: boolean) {
     if (on) {
-      if (!isPicked(r)) picked = [...picked, { file: r.file, tag: r.tag, kind: r.kind }];
+      const ref = { file: r.file, tag: r.tag, kind: r.kind };
+      if (single) picked = [ref];
+      else if (!isPicked(r)) picked = [...picked, ref];
     } else {
       picked = picked.filter((p) => keyOf(p) !== keyOf(r));
     }
@@ -258,14 +268,16 @@
 >
   <div class="lp-body">
     <div class="lp-controls">
-      <div data-testid="list-picker-seg" class="lp-seg" class:lp-off={!ready}>
-        <SegmentedControl
-          items={segItems}
-          bind:value={seg}
-          ariaLabel={$t('cfg.list.seg_aria')}
-          onchange={() => (limit = PAGE_FIRST)}
-        />
-      </div>
+      {#if !single}
+        <div data-testid="list-picker-seg" class="lp-seg" class:lp-off={!ready}>
+          <SegmentedControl
+            items={segItems}
+            bind:value={seg}
+            ariaLabel={$t('cfg.list.seg_aria')}
+            onchange={() => (limit = PAGE_FIRST)}
+          />
+        </div>
+      {/if}
       <label class="sr-only" for="{uid}-search">{$t('cfg.list.search')}</label>
       <input
         id="{uid}-search"
@@ -394,7 +406,7 @@
       {/if}
     </div>
 
-    {#if !loading}
+    {#if !loading && !single}
       <section class="lp-ext" aria-labelledby="{uid}-ext" data-testid="list-picker-extended">
         <h3 class="lp-ext-title" id="{uid}-ext">{$t('cfg.list.extended_title')}</h3>
         <p class="lp-ext-desc">{$t('cfg.list.extended_desc')}</p>
