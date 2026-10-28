@@ -227,7 +227,13 @@ func (s *Service) Snapshot() (View, error) {
 	if st.RetryAt.After(now) {
 		v.Schedule.RetryAt = rfc3339(st.RetryAt)
 	}
-	v.Cron = CronView{Two: st.CronTwo, Kept: st.CronKept != "", Schedule: st.CronSchedule}
+	v.Cron = CronView{Two: st.CronTwo}
+	if info, err := s.readCron(); err == nil && info.found {
+		v.Cron.Found = true
+		v.Cron.Adoptable = info.standard
+		v.Cron.Kept = st.CronKept != "" && st.CronKept == info.line
+		v.Cron.Schedule = cronText(info.line)
+	}
 	v.Run = run
 	if lr := st.LastRun; lr != nil {
 		v.LastRun = &LastRunView{

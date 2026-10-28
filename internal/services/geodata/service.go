@@ -132,6 +132,9 @@ type Service struct {
 	// ops — состояние операций записи (кэш проверок, уборка, jq).
 	ops opsState
 
+	// sched — рабочее состояние расписания и cron (замок crontab, кэш чтения, догон).
+	sched schedState
+
 	// pmu защищает ограничение частоты событий.
 	pmu        sync.Mutex
 	lastPub    time.Time
