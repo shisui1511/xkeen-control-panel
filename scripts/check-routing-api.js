@@ -197,9 +197,6 @@ const ROUTES = {
   "/api/configlayer/routing/reclaim": "ConfigRoutingReclaim",
   "/api/configlayer/routing/select": "ConfigRoutingSelect",
   "/api/configlayer/routing/lists": "ConfigRoutingLists",
-  "/api/configlayer/routing/lists/geodata/preview":
-    "ConfigRoutingGeodataPreview",
-  "/api/configlayer/routing/lists/geodata/add": "ConfigRoutingGeodataAdd",
   "/api/configlayer/routing/presets": "ConfigRoutingPresets",
   "/api/configlayer/routing/presets/plan": "ConfigRoutingPresetsPlan",
   "/api/configlayer/routing/presets/apply": "ConfigRoutingPresetsApply",

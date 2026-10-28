@@ -958,34 +958,6 @@ func TestRouterRoutingPresetsAndLists(t *testing.T) {
 	if cur, _ := pr.object(t)["current"].(map[string]any); cur == nil || cur["id"] != "all_proxy" {
 		t.Error("presets: current не показывает применённый пресет")
 	}
-
-	// geodata/preview: файл настроек XKeen не меняется, набор из встроенного каталога.
-	gp := e.call(http.MethodPost, rtRoutingBase+"/lists/geodata/preview", map[string]string{"set": "roscomvpn_geosite"})
-	switch gp.Status {
-	case http.StatusOK:
-		preview := gp.object(t)
-		rtAssertContractKeys(t, contract, preview, "GeodataPreview", "geodata/preview")
-		after, _ := preview["after"].(string)
-		before, _ := preview["before"].(string)
-		if !strings.Contains(after, setFile) || before == after {
-			t.Error("geodata/preview: after не содержит запись набора или равен before")
-		}
-	case http.StatusConflict:
-		// Набор уже записан в настройках стенда или файл не разбирается: код из таблицы.
-		if gp.Code != "already_present" && gp.Code != "invalid_json" && gp.Code != "invalid_structure" {
-			t.Errorf("geodata/preview: 409 с кодом %q", gp.Code)
-		}
-	default:
-		t.Errorf("geodata/preview: %d %s", gp.Status, gp.Code)
-	}
-
-	// geodata/add: неизвестный набор и адрес от клиента не принимаются; файл не пишется.
-	for _, set := range []string{"nope", "https://example.invalid/list.dat", ""} {
-		e.rtRtExpect("geodata/add: набор вне каталога", e.call(http.MethodPost, rtRoutingBase+"/lists/geodata/add",
-			map[string]any{"set": set, "accept_comment_loss": true, "update_now": false}), http.StatusBadRequest, "set_unknown")
-		e.rtRtExpect("geodata/preview: набор вне каталога", e.call(http.MethodPost, rtRoutingBase+"/lists/geodata/preview",
-			map[string]string{"set": set}), http.StatusBadRequest, "set_unknown")
-	}
 }
 
 // --- маршруты -----------------------------------------------------------------
@@ -1008,8 +980,6 @@ var rtRoutingRoutes = []struct{ method, path string }{
 	{http.MethodPost, rtRoutingBase + "/reclaim"},
 	{http.MethodPost, rtRoutingBase + "/select"},
 	{http.MethodGet, rtRoutingBase + "/lists"},
-	{http.MethodPost, rtRoutingBase + "/lists/geodata/preview"},
-	{http.MethodPost, rtRoutingBase + "/lists/geodata/add"},
 	{http.MethodGet, rtRoutingBase + "/presets"},
 	{http.MethodPost, rtRoutingBase + "/presets/plan"},
 	{http.MethodPost, rtRoutingBase + "/presets/apply"},

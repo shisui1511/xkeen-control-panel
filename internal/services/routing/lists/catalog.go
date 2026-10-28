@@ -150,16 +150,6 @@ func mustLoadCatalog() *catalogData {
 	return &c
 }
 
-// extendedSet возвращает набор встроенного каталога по id.
-func extendedSet(id string) (ExtendedSet, bool) {
-	for _, e := range catalog.Extended {
-		if e.ID == id {
-			return e, true
-		}
-	}
-	return ExtendedSet{}, false
-}
-
 type loadedFile struct {
 	info  FileInfo
 	tags  []TagInfo

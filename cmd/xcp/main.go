@@ -764,7 +764,7 @@ func main() {
 		// менеджера. Хранилище создаётся без собственного запуска `xkeen -ug`: единственный
 		// вход запуска из панели — сервис менеджера под замком применения.
 		datIndex := lists.NewIndex(lists.DefaultDatDir)
-		geoStore := lists.NewGeodataStore(xkeenSettingsSvc, exec.LookPath, nil)
+		geoStore := lists.NewGeodataStore(xkeenSettingsSvc, exec.LookPath)
 		if sourcesSvc != nil {
 			var routeErr error
 			routingSvc, routeErr = routing.New(routing.Deps{
@@ -907,8 +907,6 @@ func main() {
 	srv.HandleProtected("/api/configlayer/routing/reclaim", api.ConfigRoutingReclaim)
 	srv.HandleProtected("/api/configlayer/routing/select", api.ConfigRoutingSelect)
 	srv.HandleProtected("/api/configlayer/routing/lists", api.ConfigRoutingLists)
-	srv.HandleProtected("/api/configlayer/routing/lists/geodata/preview", api.ConfigRoutingGeodataPreview)
-	srv.HandleProtected("/api/configlayer/routing/lists/geodata/add", api.ConfigRoutingGeodataAdd)
 	srv.HandleProtected("/api/configlayer/routing/presets", api.ConfigRoutingPresets)
 	srv.HandleProtected("/api/configlayer/routing/presets/plan", api.ConfigRoutingPresetsPlan)
 	srv.HandleProtected("/api/configlayer/routing/presets/apply", api.ConfigRoutingPresetsApply)
