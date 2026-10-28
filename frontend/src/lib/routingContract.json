@@ -56,11 +56,6 @@
     "optional": [],
     "children": {}
   },
-  "GeodataPreview": {
-    "required": ["before", "after", "comments_kept", "base"],
-    "optional": [],
-    "children": {}
-  },
   "GeodataStatus": {
     "required": ["jq", "geofile_update", "gh_proxy", "entries"],
     "optional": ["invalid", "reason"],
