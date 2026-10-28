@@ -538,17 +538,19 @@
       <Icon name="console" size={16} />
       <span class="lbl">{$t('nav.console')}</span>
     </a>
-    <a
-      href="#/dat"
-      class="nav-item"
-      aria-current={currentTab === 'dat' ? 'page' : undefined}
-      data-label={$t('nav.dat')}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$isSidebarCollapsed ? undefined : $t('nav.dat')}
-    >
-      <Icon name="dat" size={16} />
-      <span class="lbl">{$t('nav.dat')}</span>
-    </a>
+    {#if !$configLayerEnabled}
+      <a
+        href="#/dat"
+        class="nav-item"
+        aria-current={currentTab === 'dat' ? 'page' : undefined}
+        data-label={$t('nav.dat')}
+        onclick={() => isSidebarOpen.set(false)}
+        title={$isSidebarCollapsed ? undefined : $t('nav.dat')}
+      >
+        <Icon name="dat" size={16} />
+        <span class="lbl">{$t('nav.dat')}</span>
+      </a>
+    {/if}
   </details>
 
   <!-- System group — device state & configuration surface. Mostly set once

@@ -2,13 +2,19 @@
 // адрес приходит аргументом, браузерные глобальные объекты не читаются. Фазы 147–148
 // добавляют вкладки в тот же список.
 
-export type ConfigSubTab = 'nodes' | 'groups' | 'rules' | 'files';
+export type ConfigSubTab = 'nodes' | 'groups' | 'rules' | 'lists' | 'files';
 
 /** Вкладка по умолчанию: открывается для `#/config` без суффикса и для незнакомого суффикса. */
 export const DEFAULT_CONFIG_SUBTAB: ConfigSubTab = 'nodes';
 
 /** Вкладки в порядке показа. */
-export const CONFIG_SUBTABS: readonly ConfigSubTab[] = ['nodes', 'groups', 'rules', 'files'];
+export const CONFIG_SUBTABS: readonly ConfigSubTab[] = [
+  'nodes',
+  'groups',
+  'rules',
+  'lists',
+  'files'
+];
 
 /** Вкладка по хэшу адреса. Запрос после `?` отбрасывается; неизвестный путь — «Узлы». */
 export function configSubTab(hash: string): ConfigSubTab {

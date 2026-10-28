@@ -12,6 +12,7 @@
     layerSnapshot,
     layerStatus,
     layerConnection,
+    geodataHolder,
     applyNow,
     resetDraft,
     handleLayerError
@@ -29,6 +30,13 @@
   // Применение идёт из этой вкладки (флаг ставится до ответа сервера) или из другой (D-16)
   const applyingHere = $derived($applyStartedHere);
   const applyingOther = $derived($applyRunning && !$applyStartedHere);
+  // Менеджер geodata держит общий замок (D-11): -ug, установка jq или уборка записи. Пока
+  // замок занят, «Применить» неактивна и рядом видна причина
+  const ugBusy = $derived($geodataHolder === 'geodata_update');
+  const removeBusy = $derived($geodataHolder === 'geodata_remove');
+  const holderHint = $derived(
+    ugBusy ? $t('cfg.geo.ug_busy') : removeBusy ? $t('cfg.routing.apply_busy_hint') : ''
+  );
   const busy = $derived(applyingHere || applyingOther || resetting || $routingBusy);
   const blockedByDrift = $derived(dirty && hasDrift);
   // Проблемы проверки черновика (пустая группа, нет списка, цикл): «Применить» отказывает,
@@ -36,11 +44,13 @@
   const checkCount = $derived($layerSnapshot?.checks.length ?? 0);
   const blockedByChecks = $derived(dirty && checkCount > 0);
   const applyHint = $derived(
-    blockedByChecks
-      ? $t('cfg.routing.apply_blocked_hint')
-      : blockedByDrift
-        ? $t('cfg.apply_blocked_hint')
-        : undefined
+    holderHint !== ''
+      ? holderHint
+      : blockedByChecks
+        ? $t('cfg.routing.apply_blocked_hint')
+        : blockedByDrift
+          ? $t('cfg.apply_blocked_hint')
+          : undefined
   );
 
   // «Применить» при группах или правилах в черновике, пока маршрутизацией управляет XKeen:
@@ -126,6 +136,11 @@
         {$t('cfg.draft_clean')}
       </span>
     {/if}
+    {#if holderHint !== ''}
+      <span class="status-sub status-holder" title={holderHint} data-testid="config-geo-busy">
+        {holderHint}
+      </span>
+    {/if}
   </div>
   <div class="draft-bar-actions">
     <Button
@@ -138,7 +153,7 @@
       variant="primary"
       class="draft-bar-btn"
       data-testid="config-apply"
-      disabled={!ready || !dirty || busy || blockedByDrift || blockedByChecks}
+      disabled={!ready || !dirty || busy || holderHint !== '' || blockedByDrift || blockedByChecks}
       loading={applyingHere}
       title={applyHint}
       onclick={onApply}>{$t('cfg.apply')}</Button
@@ -204,6 +219,10 @@
     color: var(--warning);
     font-size: var(--font-size-sm);
     overflow-wrap: anywhere;
+  }
+
+  .status-holder {
+    color: var(--fg-secondary);
   }
 
   .draft-bar-actions {
