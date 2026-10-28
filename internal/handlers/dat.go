@@ -44,7 +44,26 @@ func (a *API) DATListTags(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, tags)
 }
 
+// legacyDatClosed закрывает старые маршруты записи DAT при включённом слое
+// «Конфигурация»: у dat тогда один писатель — XKeen через менеджер geodata, а
+// маршруты /api/dat/update и /api/dat/rollback ведут себя как несуществующие
+// (404 с тем же телом, что у неизвестного маршрута API, на любой метод). Флаг
+// читается на каждый запрос: маршруты регистрируются безусловно, флаг меняется
+// на ходу. Авторизация и CSRF проверяются обёрткой HandleProtected раньше
+// обработчика, поэтому без сессии ответ прежний (401). Возвращает true, если
+// ответ уже записан.
+func (a *API) legacyDatClosed(w http.ResponseWriter) bool {
+	if a.configLayer == nil || !a.configLayer.Enabled() {
+		return false
+	}
+	JSONError(w, http.StatusNotFound, "unknown API endpoint")
+	return true
+}
+
 func (a *API) DATUpdate(w http.ResponseWriter, r *http.Request) {
+	if a.legacyDatClosed(w) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
@@ -84,6 +103,9 @@ func (a *API) DATUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) DATRollback(w http.ResponseWriter, r *http.Request) {
+	if a.legacyDatClosed(w) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
