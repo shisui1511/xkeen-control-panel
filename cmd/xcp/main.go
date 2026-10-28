@@ -42,6 +42,19 @@ var (
 	setupCodeFlag     = flag.Bool("setup-code", false, "Print the current first-run setup code (only while no password is set)")
 )
 
+// resolveBinaryPath возвращает путь к исполняемому файлу из настроек: в config.json
+// бывает имя без каталога («xkeen»), для которого os.Stat относительно рабочего каталога
+// файла не находит. Имя без каталога ищется в PATH, остальное возвращается как есть.
+func resolveBinaryPath(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	if found, err := exec.LookPath(path); err == nil {
+		return found
+	}
+	return path
+}
+
 func main() {
 	// Handle version flag before flag.Parse
 	for _, arg := range os.Args[1:] {
@@ -659,7 +672,7 @@ func main() {
 		XrayEnv: func(dir string) []string { return utils.XrayAssetEnv(os.Environ(), dir) },
 		KernelVersions: func() []configlayer.KernelVersionInput {
 			cfg.RLock()
-			xkeenBin := cfg.XKeenBinary
+			xkeenBin := resolveBinaryPath(cfg.XKeenBinary)
 			cfg.RUnlock()
 			_, statErr := os.Stat(xkeenBin)
 			inputs := []configlayer.KernelVersionInput{{
@@ -807,7 +820,7 @@ func main() {
 					Store:       geoStore,
 					Index:       datIndex,
 					Routing:     routingSvc,
-					XKeenBin:    cfg.XKeenBinary,
+					XKeenBin:    resolveBinaryPath(cfg.XKeenBinary),
 					MihomoDir:   cfg.MihomoConfigDir,
 					XrayConfDir: cfg.XRayConfigDir,
 				})
