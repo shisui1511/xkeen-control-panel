@@ -147,6 +147,8 @@ func (a *API) SettingsConfigLayer(w http.ResponseWriter, r *http.Request) {
 				// Файлы уже перенесены, а ключ остался: возвращаем файлы слоя из applied.
 				a.configLayer.Enable()
 				JSONErrorCodeDetail(w, http.StatusInternalServerError, "internal", a.t(r, "error.internal"), utils.StripANSI(err.Error()))
+			case errors.Is(err, configlayer.ErrGeodataBusy):
+				JSONErrorCode(w, http.StatusConflict, "geodata_busy", a.t(r, "configlayer.geodata_busy"))
 			case errors.Is(err, configlayer.ErrApplyBusy):
 				JSONErrorCode(w, http.StatusConflict, "apply_busy", a.t(r, "configlayer.apply_busy"))
 			case errors.Is(err, configlayer.ErrKernelBusy):

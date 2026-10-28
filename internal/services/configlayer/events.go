@@ -18,6 +18,8 @@ const (
 	// EventRouting — владение маршрутизацией или её дрейф изменились: клиент
 	// перечитывает раздел routing снимка.
 	EventRouting = "routing"
+	// EventGeodata — состояние менеджера geodata: счётчик событий и держатель замка.
+	EventGeodata = "geodata"
 )
 
 const (
@@ -56,6 +58,14 @@ type SourcesEvent struct {
 // RoutingEvent — данные события routing: ревизия черновика на момент события.
 type RoutingEvent struct {
 	Revision int64 `json:"revision"`
+}
+
+// GeodataEvent — данные события geodata: счётчик событий менеджера и держатель
+// исключительного замка применения (пусто — замок свободен). Построчный вывод -ug
+// через шину слоя не идёт: клиент по счётчику перечитывает состояние менеджера.
+type GeodataEvent struct {
+	Seq    uint64 `json:"seq"`
+	Holder string `json:"holder,omitempty"`
 }
 
 // Broker — шина событий слоя для SSE-подписчиков.

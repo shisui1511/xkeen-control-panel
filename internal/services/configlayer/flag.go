@@ -26,7 +26,7 @@ import (
 // После выключения каталоги ядер такие же, как до взятия (D-04 из 144).
 //
 // Disable берёт те же замки, что и применение: занятое применение — ErrApplyBusy
-// или ErrKernelBusy, диск не трогается (Pitfall 12). Ключ config_layer в
+// (ErrGeodataBusy, если замок держит менеджер geodata) или ErrKernelBusy, диск не трогается (Pitfall 12). Ключ config_layer в
 // config.json снимает commitFlag (nil — ничего не делать): он вызывается после
 // успешного переноса файлов, но до освобождения замков, поэтому между переносом
 // и снятием флага не успевает ни применение, ни фоновая сборка (D-04). Ошибка
@@ -35,7 +35,7 @@ import (
 func (l *Layer) Disable(ctx context.Context, commitFlag func() error) error {
 	release, err := l.pipeline.TryBegin(ctx, true)
 	if err != nil {
-		return err
+		return l.mapBusy(err)
 	}
 	defer release()
 

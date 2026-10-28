@@ -82,6 +82,7 @@
   "configlayer.disabled": "Configuration layer is disabled",
   "configlayer.draft_conflict": "The draft was changed in another tab",
   "configlayer.apply_busy": "An apply is already running",
+  "configlayer.geodata_busy": "Databases are updating. Wait for it to finish.",
   "configlayer.drift_blocked": "Some files have drifted: resolve them before applying",
   "configlayer.unknown_key": "Unknown configuration layer file",
   "configlayer.unknown_notice": "Unknown notice",
