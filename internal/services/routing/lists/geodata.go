@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -25,11 +24,15 @@ type GeodataEntry struct {
 }
 
 // GeodataStatus — состояние пользовательских geodata XKeen. Reason непуст, когда
-// запись невозможна: no_jq или geofile_update_off.
+// запись невозможна: no_jq или geofile_update_off. GhProxy — xkeen.gh_proxy (пусто,
+// если ключа нет). Invalid — записи geodata с пустым file или url: XKeen на такой
+// записи прекращает обработку следующих; Entries содержит только корректные.
 type GeodataStatus struct {
 	JQ            bool           `json:"jq"`
 	GeofileUpdate bool           `json:"geofile_update"`
+	GhProxy       string         `json:"gh_proxy"`
 	Entries       []GeodataEntry `json:"entries"`
+	Invalid       []GeodataEntry `json:"invalid,omitempty"`
 	Reason        string         `json:"reason,omitempty"`
 }
 
@@ -54,6 +57,12 @@ var (
 	// (или между чтением и записью): запись отменена, предпросмотр нужно построить
 	// заново.
 	ErrGeodataChanged = &CodedError{Code: "geodata_changed"}
+	// ErrEntryNotFound — запись geodata для правки (удаление, замена адреса) не найдена:
+	// нет записи с таким именем или с таким именем и адресом.
+	ErrEntryNotFound = &CodedError{Code: "entry_not_found"}
+	// ErrXKeenJSONInvalid — проверка xkeen.json отвергла результат правки: файл не
+	// пишется (иначе XKeen не запустит прокси).
+	ErrXKeenJSONInvalid = &CodedError{Code: "xkeen_json_invalid"}
 )
 
 // ErrorCode возвращает код ошибки пакета или пустую строку.
@@ -104,12 +113,14 @@ func (g *GeodataStore) Status() (GeodataStatus, error) {
 	if err != nil {
 		return st, err
 	}
-	entries, update, err := parseGeodata(f.Content)
+	parsed, err := parseGeodataFull(f.Content)
 	if err != nil {
 		return st, err
 	}
-	st.Entries = entries
-	st.GeofileUpdate = update
+	st.Entries = parsed.entries
+	st.Invalid = parsed.invalid
+	st.GhProxy = parsed.ghProxy
+	st.GeofileUpdate = parsed.update
 	switch {
 	case !st.JQ:
 		st.Reason = ErrNoJQ.Code
@@ -141,32 +152,48 @@ func decodeJSONC(content string) (map[string]any, error) {
 	return root, nil
 }
 
-// parseGeodata возвращает записи geodata и признак geofile_update (по умолчанию true;
-// XKeen отключает обновление только значением false).
-func parseGeodata(content string) ([]GeodataEntry, bool, error) {
+// geodataParsed — разобранное состояние geodata в xkeen.json.
+type geodataParsed struct {
+	entries []GeodataEntry
+	invalid []GeodataEntry
+	update  bool
+	ghProxy string
+}
+
+// parseGeodataFull разбирает записи geodata, gh_proxy и признак geofile_update (по
+// умолчанию true; XKeen отключает обновление только значением false). Запись с пустым
+// file или url попадает в invalid, а не в entries.
+func parseGeodataFull(content string) (geodataParsed, error) {
 	root, err := decodeJSONC(content)
 	if err != nil {
-		return nil, true, err
+		return geodataParsed{entries: []GeodataEntry{}, update: true}, err
 	}
-	entries := []GeodataEntry{}
+	out := geodataParsed{entries: []GeodataEntry{}}
 	if xk, ok := root["xkeen"].(map[string]any); ok {
-		if xr, ok := xk["xray"].(map[string]any); ok {
-			if arr, ok := xr["geodata"].([]any); ok {
-				for _, el := range arr {
-					m, ok := el.(map[string]any)
-					if !ok {
-						continue
-					}
-					file, _ := m["file"].(string)
-					url, _ := m["url"].(string)
-					if file != "" {
-						entries = append(entries, GeodataEntry{File: file, URL: url})
-					}
-				}
-			}
-		}
+		out.ghProxy, _ = xk["gh_proxy"].(string)
 	}
-	return entries, !hasFalseKey(root, "geofile_update"), nil
+	_, arr, _ := geodataArray(root)
+	for _, el := range arr {
+		m, ok := el.(map[string]any)
+		if !ok {
+			continue
+		}
+		file, _ := m["file"].(string)
+		url, _ := m["url"].(string)
+		if file == "" || url == "" {
+			out.invalid = append(out.invalid, GeodataEntry{File: file, URL: url})
+			continue
+		}
+		out.entries = append(out.entries, GeodataEntry{File: file, URL: url})
+	}
+	out.update = !hasFalseKey(root, "geofile_update")
+	return out, nil
+}
+
+// parseGeodata возвращает корректные записи geodata и признак geofile_update.
+func parseGeodata(content string) ([]GeodataEntry, bool, error) {
+	p, err := parseGeodataFull(content)
+	return p.entries, p.update, err
 }
 
 func hasFalseKey(v any, key string) bool {
@@ -201,59 +228,19 @@ func ContentBase(content string) string {
 }
 
 // PreviewAdd строит новое содержимое xkeen.json с записью набора из встроенного
-// каталога. Вставка текстовая — комментарии и порядок ключей сохраняются; если
-// проверка результата не прошла, файл собирается заново (commentsKept=false при
-// наличии комментариев в исходном тексте).
+// каталога (Preview для OpAdd без проверки окружения). Вставка текстовая —
+// комментарии и порядок ключей сохраняются; если проверка результата не прошла,
+// файл собирается заново (commentsKept=false при наличии комментариев в исходном тексте).
 func (g *GeodataStore) PreviewAdd(setID string) (before, after string, commentsKept bool, err error) {
 	set, ok := extendedSet(setID)
 	if !ok {
 		return "", "", false, ErrSetUnknown
 	}
-	f, err := g.settings.Get(services.XKeenConfigJSON)
+	p, err := g.build(GeodataOp{Kind: OpAdd, File: set.File, URL: set.URL})
 	if err != nil {
-		return "", "", false, err
+		return p.Before, "", false, err
 	}
-	before = f.Content
-	entries, _, err := parseGeodata(before)
-	if err != nil {
-		return before, "", false, err
-	}
-	for _, e := range entries {
-		if e.File == set.File {
-			return before, "", false, ErrAlreadyPresent
-		}
-	}
-	entry := GeodataEntry{File: set.File, URL: set.URL}
-
-	expected, err := decodeJSONC(before)
-	if err != nil {
-		return before, "", false, err
-	}
-	if err := addGeneric(expected, entry); err != nil {
-		return before, "", false, err
-	}
-
-	src := before
-	switch {
-	case strings.TrimSpace(src) == "":
-		src = "{\n}\n"
-	case strings.TrimSpace(services.StripJSONComments(src)) == "":
-		src = strings.TrimRight(src, "\n") + "\n{\n}\n"
-	}
-	if text, ierr := insertGeodata(src, entry); ierr == nil {
-		if got, derr := decodeJSONC(text); derr == nil && reflect.DeepEqual(got, expected) {
-			if !strings.HasSuffix(text, "\n") {
-				text += "\n"
-			}
-			return before, text, true, nil
-		}
-	}
-	raw, merr := json.MarshalIndent(expected, "", "  ")
-	if merr != nil {
-		return before, "", false, merr
-	}
-	hadComments := services.StripJSONComments(before) != before
-	return before, string(raw) + "\n", !hadComments, nil
+	return p.Before, p.After, p.CommentsKept, nil
 }
 
 // Add дописывает набор в xkeen.json через XKeenSettingsService.Save (с резервной
@@ -282,38 +269,17 @@ func (g *GeodataStore) Add(ctx context.Context, setID, base string, acceptCommen
 func (g *GeodataStore) write(setID, base string, acceptCommentLoss, runUpdate bool) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	st, err := g.Status()
-	if err != nil {
+	if err := g.requireConditions(OpAdd); err != nil {
 		return err
-	}
-	if !st.JQ {
-		return ErrNoJQ
-	}
-	if !st.GeofileUpdate {
-		return ErrGeofileUpdateOff
 	}
 	if runUpdate && g.runUpdate == nil {
 		return ErrUpdateUnavail
 	}
-	before, after, kept, err := g.PreviewAdd(setID)
-	if err != nil {
-		return err
+	set, ok := extendedSet(setID)
+	if !ok {
+		return ErrSetUnknown
 	}
-	if base != "" && ContentBase(before) != base {
-		return ErrGeodataChanged
-	}
-	if !kept && !acceptCommentLoss {
-		return ErrCommentsLost
-	}
-	cur, err := g.settings.Get(services.XKeenConfigJSON)
-	if err != nil {
-		return err
-	}
-	if cur.Content != before {
-		return ErrGeodataChanged
-	}
-	_, err = g.settings.Save(services.XKeenConfigJSON, after)
-	return err
+	return g.applyLocked(GeodataOp{Kind: OpAdd, File: set.File, URL: set.URL}, base, acceptCommentLoss)
 }
 
 // addGeneric добавляет запись в разобранный объект (создавая недостающие уровни).
@@ -616,9 +582,16 @@ func memberText(keys []string, e GeodataEntry, indent, unit string, multi bool) 
 	return head + "{" + memberText(keys[1:], e, "", "", false) + "}"
 }
 
+// applyInsertions вставляет тексты с конца к началу. Вставки в одну позицию попадают
+// в результат в порядке списка (например, запятая у прежнего последнего элемента и
+// перевод строки с новым, когда после элемента нет комментария).
 func applyInsertions(src string, ins []insertion) string {
-	sort.SliceStable(ins, func(i, j int) bool { return ins[i].pos > ins[j].pos })
-	for _, in := range ins {
+	sorted := make([]insertion, len(ins))
+	for i, in := range ins {
+		sorted[len(ins)-1-i] = in
+	}
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].pos > sorted[j].pos })
+	for _, in := range sorted {
 		src = src[:in.pos] + in.text + src[in.pos:]
 	}
 	return src

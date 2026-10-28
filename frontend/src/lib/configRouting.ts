@@ -283,7 +283,11 @@ export interface GeodataEntry {
 export interface GeodataStatus {
   jq: boolean;
   geofile_update: boolean;
+  /** xkeen.gh_proxy из xkeen.json, пусто, если ключа нет. */
+  gh_proxy: string;
   entries: GeodataEntry[];
+  /** Записи с пустым file или url: XKeen на них прекращает обработку следующих. */
+  invalid?: GeodataEntry[];
   reason?: string;
 }
 
