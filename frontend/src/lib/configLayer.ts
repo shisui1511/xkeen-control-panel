@@ -529,7 +529,11 @@ function connect(): void {
     retryDelay = RETRY_MIN_MS;
     layerConnection.set('open');
     // Пока связи не было, события могли пройти мимо — читаем состояние целиком (D-06)
-    if (wasLost) void refetchLayerState();
+    if (wasLost) {
+      void refetchLayerState();
+      // События менеджера баз за время обрыва тоже могли пройти мимо
+      notifyHandlers('geodata');
+    }
   };
   es.onerror = () => {
     if (source !== es) return;

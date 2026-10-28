@@ -29,6 +29,7 @@
     if ($applyRunning || $geodataHolder === 'geodata_remove' || run?.job === 'remove') {
       return $t('cfg.routing.apply_busy_hint');
     }
+    if ($geodataHolder === 'geodata_write') return $t('cfg.geo.write_busy');
     if ($geodataHolder !== '' || run?.running === true || run?.waiting_apply === true) {
       return $t('cfg.geo.ug_busy');
     }

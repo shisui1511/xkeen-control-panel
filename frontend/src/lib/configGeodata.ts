@@ -384,6 +384,13 @@ export interface ScheduleInput {
 
 /** Ответ маршрута уже содержит свежий снимок: он заменяет стор, устаревшие чтения отбрасываются. */
 function acceptView(view: View): View {
+  // Ответ со снимком, снятым раньше текущего (запрос ушёл до запуска, а ответ пришёл позже
+  // свежего снимка), стор не затирает: берётся свежее чтение
+  const cur = get(geodataView);
+  if (cur !== null && view.run.seq < cur.run.seq) {
+    void loadGeodata();
+    return view;
+  }
   loadSeq++;
   geodataView.set(normalizeView(view));
   geodataStatus.set('ready');

@@ -23,6 +23,8 @@
   let polling = false;
   // Растёт при остановке: ответ устаревшего опроса не дописывается
   let gen = 0;
+  // Номер запуска последнего принятого ответа: другой номер значит, что начался новый запуск
+  let runId: number | null = null;
 
   async function poll(g: number): Promise<void> {
     const asked = next;
@@ -30,12 +32,21 @@
     try {
       const chunk = await fetchOutput(job, asked);
       if (g !== gen) return;
+      if (runId !== null && chunk.run_id !== runId) {
+        // Начался новый запуск: текст прошлого сбрасывается, вывод читается с нуля
+        text = '';
+        next = 0;
+        runId = chunk.run_id;
+        timer = setTimeout(() => void poll(g), 0);
+        return;
+      }
       if (chunk.truncated || chunk.from !== asked) {
-        // Начало вывода отброшено или начался новый запуск: показывается весь присланный текст
+        // Начало вывода отброшено: показывается весь присланный текст
         text = chunk.text;
       } else if (chunk.text !== '') {
         text += chunk.text;
       }
+      runId = chunk.run_id;
       next = chunk.next;
       running = chunk.running;
     } catch {

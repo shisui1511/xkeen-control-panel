@@ -72,8 +72,20 @@ async function snapshot(page: Page): Promise<Snapshot> {
   return res.data as unknown as Snapshot;
 }
 
+/** Карточка «Обновление баз» после конца запуска не держит «Идёт обновление баз…». */
+async function expectRunStatusGone(page: Page): Promise<void> {
+  await expect(
+    page
+      .getByTestId('geo-run-status')
+      .filter({ hasText: /Идёт обновление баз|Updating databases/ }),
+    'карточка держит «Идёт обновление баз…» после конца запуска'
+  ).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByTestId('geo-run-now')).toBeEnabled({ timeout: 15_000 });
+}
+
 test('lists-actions: обновить сейчас', async ({ page }) => {
-  test.setTimeout(RUN_LIMIT_MS + 5 * 60_000);
+  // два настоящих запуска -ug подряд
+  test.setTimeout(2 * RUN_LIMIT_MS + 5 * 60_000);
   const guard = attachConsoleGuard(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await openLists(page);
@@ -121,6 +133,9 @@ test('lists-actions: обновить сейчас', async ({ page }) => {
     })
     .toBe(false);
 
+  // конец запуска виден на карточке без перезагрузки страницы
+  await expectRunStatusGone(page);
+
   const after = await snapshot(page);
   expect(after.last_run, 'после запуска есть итог последнего запуска').toBeTruthy();
   expect(Date.parse(after.last_run?.at ?? '')).toBeGreaterThanOrEqual(started - 60_000);
@@ -128,6 +143,34 @@ test('lists-actions: обновить сейчас', async ({ page }) => {
     timeout: T.action
   });
   await expect(page.getByTestId('geo-run-now')).toBeEnabled({ timeout: T.action });
+
+  // второй запуск без перезагрузки страницы: журнал показывает вывод только нового запуска
+  await page.getByTestId('geo-run-now').click();
+  const again = page.getByRole('dialog');
+  await expect(again).toBeVisible({ timeout: T.action });
+  await again.getByRole('button', { name: /Обновить базы|Update databases/ }).click();
+  await expect(page.getByTestId('geo-run-status')).toBeVisible({ timeout: T.action });
+  await expect
+    .poll(async () => (await snapshot(page)).run.running, {
+      timeout: RUN_LIMIT_MS,
+      intervals: [3_000]
+    })
+    .toBe(false);
+  await expectRunStatusGone(page);
+  await expect(page.getByTestId('geo-output')).toBeVisible({ timeout: T.action });
+  await expect
+    .poll(
+      async () => {
+        const server = await api(page, 'GET', `${BASE}/output?job=ug&from=0`);
+        const shown = (await page.getByTestId('geo-output').textContent()) ?? '';
+        return shown.trim() === String(server.data?.text ?? '').trim();
+      },
+      {
+        message: 'журнал на странице совпадает с выводом текущего запуска',
+        timeout: T.action
+      }
+    )
+    .toBe(true);
 
   await guard.assertClean();
 });
@@ -329,6 +372,11 @@ test.describe('загрузка', () => {
 // сценария не было, поэтому убирается обычным путём — удалением через черновик и «Применить»
 let enabledFile: string | null = null;
 
+// Лежащий стандартный набор без ссылок, убранный самоподготовкой сценария: возвращается после него
+let restoreSet: { file: string; set: string } | null = null;
+
+const STANDARD_SETS = ['refilter_geoip', 'refilter_geosite', 'v2fly_geosite'];
+
 async function removeSource(page: Page, file: string): Promise<void> {
   const sources = await api(page, 'GET', '/api/configlayer/sources');
   const drop = await api(page, 'POST', `${BASE}/drop`, {
@@ -342,57 +390,163 @@ async function removeSource(page: Page, file: string): Promise<void> {
   expect(apply.status, 'применение черновика').toBe(200);
 }
 
+/** Возвращает убранный подготовкой набор: файл снова лежит, записи в xkeen.json нет. */
+async function restoreStandardSet(page: Page, r: { file: string; set: string }): Promise<void> {
+  // запуск -ug или удаление, начатые сценарием, должны закончиться: замок держит запись
+  await expect
+    .poll(async () => (await snapshot(page)).run.running, {
+      timeout: RUN_LIMIT_MS,
+      intervals: [3_000]
+    })
+    .toBe(false);
+  let snap = await snapshot(page);
+  if ((snap.draft ?? []).length > 0) {
+    await resetDraft(page);
+    snap = await snapshot(page);
+  }
+  const row = snap.sources.find((x) => x.file === r.file);
+  if (row !== undefined && row.present && !row.entry && row.pending !== true) return;
+  if (row === undefined || (!row.present && !row.entry && row.pending !== true)) {
+    // ни файла, ни записи: набор включается обычным путём, XKeen скачивает файл
+    const op = { kind: 'enable_set', set: r.set };
+    const prev = await api(page, 'POST', `${BASE}/preview`, { op });
+    expect(prev.status, 'предпросмотр возврата набора').toBe(200);
+    const write = await api(page, 'POST', `${BASE}/write`, {
+      op,
+      base: String(prev.data?.base ?? ''),
+      accept_comment_loss: true,
+      update_now: true
+    });
+    if (write.status === 502 && write.data?.code === 'update_failed') {
+      // запись сделана, а запуск -ug не начался: запускаем его отдельно
+      const rerun = await api(page, 'POST', `${BASE}/run`);
+      expect(rerun.status, 'запуск -ug после возврата набора').toBe(200);
+    } else {
+      expect(write.status, 'запись при возврате набора').toBe(200);
+    }
+  } else {
+    // файла нет, а запись или ожидание есть: сценарий упал после записи
+    const rerun = await api(page, 'POST', `${BASE}/run`);
+    expect(rerun.status, 'запуск -ug после возврата набора').toBe(200);
+  }
+  await expect
+    .poll(
+      async () => {
+        const now = (await snapshot(page)).sources.find((x) => x.file === r.file);
+        return now !== undefined && now.present && !now.entry && now.pending !== true;
+      },
+      { timeout: RUN_LIMIT_MS, intervals: [3_000] }
+    )
+    .toBe(true);
+}
+
+/** Убирает набор, включённый сценарием: файла на стенде до него не было. */
+async function removeEnabledSet(page: Page, file: string): Promise<void> {
+  // запуск -ug, начатый сценарием, должен закончиться: замок держит удаление
+  await expect
+    .poll(async () => (await snapshot(page)).run.running, {
+      timeout: RUN_LIMIT_MS,
+      intervals: [3_000]
+    })
+    .toBe(false);
+  const now = (await snapshot(page)).sources.find((x) => x.file === file);
+  if (now === undefined || (!now.present && !now.entry)) return;
+  await removeSource(page, file);
+  await expect
+    .poll(
+      async () => {
+        const row = (await snapshot(page)).sources.find((x) => x.file === file);
+        return row !== undefined && (row.present || row.entry);
+      },
+      { timeout: RUN_LIMIT_MS, intervals: [3_000] }
+    )
+    .toBe(false);
+}
+
 test.describe('включение набора', () => {
   test.afterEach(async ({ browser }) => {
     const file = enabledFile;
     enabledFile = null;
-    if (file === null) return;
+    const restore = restoreSet;
+    restoreSet = null;
+    if (file === null && restore === null) return;
     await withPanel(browser, async (page) => {
-      // запуск -ug, начатый сценарием, должен закончиться: замок держит удаление
-      await expect
-        .poll(async () => (await snapshot(page)).run.running, {
-          timeout: RUN_LIMIT_MS,
-          intervals: [3_000]
-        })
-        .toBe(false);
-      const now = (await snapshot(page)).sources.find((x) => x.file === file);
-      if (now === undefined || (!now.present && !now.entry)) return;
-      await removeSource(page, file);
-      await expect
-        .poll(
-          async () => {
-            const row = (await snapshot(page)).sources.find((x) => x.file === file);
-            return row !== undefined && (row.present || row.entry);
-          },
-          { timeout: RUN_LIMIT_MS, intervals: [3_000] }
-        )
-        .toBe(false);
+      if (file !== null) await removeEnabledSet(page, file);
+      if (restore !== null) await restoreStandardSet(page, restore);
     });
   });
 
   test('lists-actions: включить стандартный набор', async ({ page }) => {
-    test.setTimeout(2 * RUN_LIMIT_MS + 10 * 60_000);
+    // подготовка (убрать лежащий набор) и возможный возврат в afterEach — по запуску на каждую
+    test.setTimeout(3 * RUN_LIMIT_MS + 10 * 60_000);
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await openLists(page);
 
-    const before = await snapshot(page);
+    let before = await snapshot(page);
     test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
     test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
     test.skip(!before.download.jq, 'на стенде нет jq: XKeen не читает записи geodata');
     test.skip(!before.download.geofile_update, 'на стенде выключено обновление баз XKeen');
     expect(before.run.running, 'на входе в сценарий запуск не идёт').toBe(false);
-    const target = before.sources.find(
-      (x) =>
-        x.origin === 'standard' &&
-        !x.present &&
-        !x.entry &&
-        ['refilter_geoip', 'refilter_geosite', 'v2fly_geosite'].includes(x.set_id ?? '')
-    );
-    test.skip(target === undefined, 'на стенде лежат все стандартные наборы');
-    if (target === undefined) return;
+    const isFree = (x: SnapSource): boolean =>
+      x.origin === 'standard' && !x.present && !x.entry && STANDARD_SETS.includes(x.set_id ?? '');
+    let found = before.sources.find(isFree);
+
+    if (found === undefined) {
+      // Самоподготовка: все три набора лежат. Убирается лежащий набор без ссылок (ни правил
+      // панели, ни сырых правил, ни чужих конфигов), чтобы ни один конфиг ядра не указывал на
+      // отсутствующий dat; в конце сценария набор снова лежит
+      let spare: SnapSource | undefined;
+      for (const c of before.sources.filter(
+        (x) =>
+          x.origin === 'standard' &&
+          x.present &&
+          !x.entry &&
+          x.pending !== true &&
+          !x.draft &&
+          STANDARD_SETS.includes(x.set_id ?? '')
+      )) {
+        const imp = await api(page, 'GET', `${BASE}/impact?file=${encodeURIComponent(c.file)}`);
+        const refs = (k: string): number => ((imp.data?.[k] as unknown[] | null) ?? []).length;
+        if (
+          imp.status === 200 &&
+          refs('lists') === 0 &&
+          refs('raw') === 0 &&
+          refs('foreign') === 0
+        ) {
+          spare = c;
+          break;
+        }
+      }
+      test.skip(
+        spare === undefined,
+        'на стенде нет стандартного набора без ссылок: самоподготовка невозможна'
+      );
+      if (spare === undefined) return;
+      const spareFile = spare.file;
+      restoreSet = { file: spareFile, set: spare.set_id ?? spare.id };
+      await removeSource(page, spareFile);
+      await expect
+        .poll(
+          async () => {
+            const row = (await snapshot(page)).sources.find((x) => x.file === spareFile);
+            return row !== undefined && (row.present || row.entry);
+          },
+          { timeout: RUN_LIMIT_MS, intervals: [3_000] }
+        )
+        .toBe(false);
+      before = await snapshot(page);
+      await openLists(page);
+      found = before.sources.find((x) => x.file === spareFile);
+      expect(found, 'набор после подготовки не лежит на диске').toBeDefined();
+      if (found === undefined) return;
+    } else {
+      // файла на стенде до сценария не было: сценарий убирает его сам
+      enabledFile = found.file;
+    }
+    const target: SnapSource = found;
     const setId = target.set_id ?? target.id;
-    enabledFile = target.file;
 
     // переключатель выключен; клик открывает диалог с записью geodata в diff
     const row = page.getByTestId(`geo-source-${target.id}`);
@@ -439,6 +593,15 @@ test.describe('включение набора', () => {
         { timeout: RUN_LIMIT_MS, intervals: [3_000] }
       )
       .toBe(true);
+    // запуск закончился: карточка «Обновление баз» снимает «Идёт обновление баз…» сама,
+    // страница не перезагружалась
+    await expect
+      .poll(async () => (await snapshot(page)).run.running, {
+        timeout: RUN_LIMIT_MS,
+        intervals: [3_000]
+      })
+      .toBe(false);
+    await expectRunStatusGone(page);
     await expect(sw).toBeChecked();
     await expect(page.getByTestId(`geo-source-open-${target.id}`)).toBeVisible({
       timeout: T.action
