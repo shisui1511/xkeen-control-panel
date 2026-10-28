@@ -242,7 +242,7 @@ func (s *Service) probedOK(ctx context.Context, file, url, ghProxy, mode string)
 }
 
 // validGhProxy — значение gh_proxy: пусто (прокси не нужен) или адрес http(s) без
-// пробелов, кавычек, обратной косой и управляющих символов, не длиннее 512 байт.
+// знаков, опасных для оболочки (shellUnsafe), не длиннее 512 байт.
 func validGhProxy(v string) bool {
 	if v == "" {
 		return true
@@ -250,10 +250,8 @@ func validGhProxy(v string) bool {
 	if len(v) > ghProxyMax {
 		return false
 	}
-	for _, r := range v {
-		if r <= 0x20 || r == 0x7f || r == '"' || r == '\'' || r == '\\' || r == '`' {
-			return false
-		}
+	if shellUnsafe(v) {
+		return false
 	}
 	u, err := url.Parse(v)
 	if err != nil || u.Host == "" {
@@ -326,8 +324,8 @@ func (s *Service) planEnableSet(op WriteOp) (opPlan, error) {
 	return opPlan{}, lists.ErrSetUnknown
 }
 
-// checkURL — адрес пригоден для записи: схема http или https, без пробелов и
-// управляющих символов.
+// checkURL — адрес пригоден для записи: схема http или https, без знаков, опасных для
+// оболочки (shellUnsafe).
 func checkURL(raw string) error {
 	if c, _ := probeCheckScheme(raw); c.Level == ProbeLevelBlock {
 		return ErrURLInvalid

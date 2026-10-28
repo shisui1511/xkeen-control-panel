@@ -137,15 +137,27 @@ func (p probePath) target(raw string) string {
 	return p.prefix + "/" + raw
 }
 
+// shellUnsafe — в адресе есть знак, опасный для оболочки: пробел, управляющий символ
+// или один из " ' \ ` $ ; | < >. Значение адреса источника и gh_proxy обрабатывают
+// скрипты XKeen от root, поэтому одна проверка на оба. & разрешён: это разделитель
+// параметров запроса, а XKeen передаёт адрес в кавычках.
+func shellUnsafe(s string) bool {
+	for _, r := range s {
+		if r <= 0x20 || r == 0x7f {
+			return true
+		}
+		switch r {
+		case '"', '\'', '\\', '`', '$', ';', '|', '<', '>':
+			return true
+		}
+	}
+	return false
+}
+
 func probeCheckScheme(raw string) (ProbeCheck, *url.URL) {
 	bad := ProbeCheck{Code: "scheme_bad", Level: ProbeLevelBlock}
-	if raw == "" || len(raw) > probeURLMax {
+	if raw == "" || len(raw) > probeURLMax || shellUnsafe(raw) {
 		return bad, nil
-	}
-	for _, r := range raw {
-		if r <= 0x20 || r == 0x7f {
-			return bad, nil
-		}
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
