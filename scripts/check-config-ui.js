@@ -1259,6 +1259,38 @@ for (const file of walk(SRC, [])) {
   }
 }
 
+// Словари менеджера: тексты кодов ошибок API, формы $tp, ключи D-35 и D-36
+const geodataCodes = JSON.parse(read(GEODATA_CODES));
+expect(
+  Array.isArray(geodataCodes) && geodataCodes.length > 0,
+  `${GEODATA_CODES}: пустой список кодов ошибок`,
+);
+for (const lang of ["ru", "en"]) {
+  const dict = JSON.parse(read(`${SRC}/locales/${lang}.json`));
+  const has = (k) => typeof dict[k] === "string" && dict[k].trim() !== "";
+  for (const code of [...geodataCodes, "unknown"]) {
+    expect(
+      has(`cfg.geo.err.${code}`),
+      `${lang}.json: нет cfg.geo.err.${code}`,
+    );
+  }
+  for (const key of Object.keys(dict)) {
+    if (!key.startsWith("cfg.geo.") || !key.endsWith("_one")) continue;
+    const base = key.slice(0, -"_one".length);
+    for (const suffix of ["_few", "_many"]) {
+      expect(has(base + suffix), `${lang}.json: нет формы ${base}${suffix}`);
+    }
+  }
+  for (const key of [
+    "cfg.tab.lists",
+    "cfg.geo.res_unverified",
+    "cfg.geo.res_unverified_limit",
+    "cfg.geo.cron_suspended",
+  ]) {
+    expect(has(key), `${lang}.json: нет ключа ${key}`);
+  }
+}
+
 if (errors.length > 0) {
   console.error("check-config-ui: найдено нарушений: " + errors.length);
   for (const e of errors) console.error("  - " + e);
