@@ -116,7 +116,8 @@ const ISSUE_CODES = new Set([
   'section_invalid',
   'list_not_found',
   'list_too_large',
-  'cond_conflict'
+  'cond_conflict',
+  'geodata_ref_remains'
 ]);
 
 /**

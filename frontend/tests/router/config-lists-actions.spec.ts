@@ -813,6 +813,42 @@ async function addOwnEntry(page: Page, file: string, url: string): Promise<void>
   expect(written.status, 'запись своего источника').toBe(200);
 }
 
+const XRAY_CONF_DIR = '/opt/etc/xray/configs';
+const FOREIGN_FILE = '98_rt_foreign.json';
+
+/** Запрос к API панели из страницы с её сессией; тело уходит строкой, как у Редактора. */
+async function rawRequest(
+  page: Page,
+  method: string,
+  path: string,
+  body?: string
+): Promise<{ status: number; text: string }> {
+  return page.evaluate(
+    async ({ method, path, body }) => {
+      const res = await fetch(path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': localStorage.getItem('csrf_token') ?? ''
+        },
+        body
+      });
+      return { status: res.status, text: await res.text() };
+    },
+    { method, path, body }
+  );
+}
+
+/** Убирает чужой конфиг сценария; нет файла (404) — не ошибка. */
+async function removeForeignConfig(page: Page): Promise<void> {
+  const res = await rawRequest(
+    page,
+    'POST',
+    `/api/config/delete?path=${encodeURIComponent(`${XRAY_CONF_DIR}/${FOREIGN_FILE}`)}`
+  );
+  expect([200, 404], `уборка ${FOREIGN_FILE}: ${res.text.slice(0, 200)}`).toContain(res.status);
+}
+
 test.describe('удаление источника', () => {
   let xkeenJsonBefore: string | null = null;
 
@@ -824,6 +860,7 @@ test.describe('удаление источника', () => {
     const was = xkeenJsonBefore;
     await withPanel(browser, async (page) => {
       await resetDraft(page);
+      await removeForeignConfig(page);
       if (was === null || (await readXkeenJson(page)) === was) return;
       const res = await api(page, 'POST', `${XKEEN_SETTINGS}/save`, {
         kind: XKEEN_JSON_KIND,
@@ -1021,6 +1058,104 @@ test.describe('удаление источника', () => {
     await guard.assertClean();
   });
 
+  test('lists-actions: ссылка на удаляемый файл', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
+
+    // лежащий стандартный набор без ссылок: его выключение ничего не каскадирует
+    let source: SnapSource | null = null;
+    for (const c of before.sources.filter(
+      (x) =>
+        x.present && !x.draft && x.origin === 'standard' && ['geosite', 'geoip'].includes(x.kind)
+    )) {
+      const imp = await api(page, 'GET', `${BASE}/impact?file=${encodeURIComponent(c.file)}`);
+      const noLists = ((imp.data?.lists as unknown[] | undefined) ?? []).length === 0;
+      const noForeign = ((imp.data?.foreign as unknown[] | undefined) ?? []).length === 0;
+      const noRaw = ((imp.data?.raw as unknown[] | undefined) ?? []).length === 0;
+      if (imp.status === 200 && noLists && noForeign && noRaw) {
+        source = c;
+        break;
+      }
+    }
+    test.skip(source === null, 'на стенде нет лежащего стандартного набора без ссылок');
+    const src = source as SnapSource;
+
+    const tagsRes = await api(page, 'GET', `${BASE}/tags?file=${encodeURIComponent(src.file)}`);
+    expect(tagsRes.status, 'GET tags').toBe(200);
+    const tag = ((tagsRes.data?.tags ?? []) as { tag: string }[])[0]?.tag;
+    test.skip(!tag, 'в файле набора нет тегов');
+    const tagName = tag as string;
+
+    // пометка выключения в черновике; правил на файл ещё нет, поэтому действия пусты
+    const sources = await api(page, 'GET', '/api/configlayer/sources');
+    const drop = await api(page, 'POST', `${BASE}/drop`, {
+      rev: Number(sources.data?.draft_revision ?? 0),
+      file: src.file,
+      mode: 'off',
+      actions: []
+    });
+    expect(drop.status, `выключение ${src.file} в черновике`).toBe(200);
+
+    // правило на (файл, тег) выключаемого набора
+    const routing = await api(page, 'GET', '/api/configlayer/routing');
+    expect(routing.status, 'GET routing').toBe(200);
+    const ruleSave = await api(page, 'POST', '/api/configlayer/routing/rules/save', {
+      revision: Number(routing.data?.revision ?? 0),
+      rule: {
+        id: '',
+        enabled: true,
+        origin: '',
+        conds: [
+          {
+            type: src.kind,
+            values: [],
+            lists: [{ file: src.file, tag: tagName, kind: src.kind === 'geoip' ? 'ip' : 'site' }]
+          }
+        ],
+        target: { kind: 'direct' },
+        raw: null
+      }
+    });
+    expect(ruleSave.status, 'rules/save').toBe(200);
+    const ruleId = String((ruleSave.data?.rule as { id?: string } | undefined)?.id ?? '');
+    expect(ruleId, 'идентификатор правила').not.toBe('');
+
+    // маршрутизация под управлением панели: проблема слоя блокирует «Применить»
+    const after = await api(page, 'GET', '/api/configlayer/routing');
+    expect(after.status, 'GET routing после правила').toBe(200);
+    const take = await api(page, 'POST', '/api/configlayer/routing/take', {
+      revision: Number(after.data?.revision ?? 0)
+    });
+    expect(take.status, 'взятие маршрутизации в черновике').toBe(200);
+    await expect
+      .poll(
+        async () => {
+          const st = await api(page, 'GET', '/api/configlayer/state');
+          return ((st.data?.checks ?? []) as { code: string }[]).map((c) => c.code);
+        },
+        { timeout: T.action }
+      )
+      .toContain('geodata_ref_remains');
+
+    await page.goto('/#/config/rules', { timeout: T.page, waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
+    const chip = page
+      .getByTestId(`rule-status-${ruleId}`)
+      .locator('[data-chip="geodata_ref_remains"]');
+    await expect(chip).toBeVisible({ timeout: T.action });
+    await expect(chip, 'чип называет удаляемый файл').toContainText(src.file);
+    await expect(chip, 'чип называет тег списка').toContainText(tagName);
+    await expect(chip).not.toContainText(/Не удалось проверить черновик|could not be checked/);
+    await expect(chip).toHaveClass(/chip-danger/);
+
+    await guard.assertClean();
+  });
+
   test('lists-actions: чужая ссылка блокирует', async ({ page }) => {
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -1030,30 +1165,60 @@ test.describe('удаление источника', () => {
     test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
     test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
 
-    let blocked: SnapSource | null = null;
-    for (const c of before.sources.filter((x) => x.present && !x.draft)) {
+    // лежащий источник без своих ссылок: чужую ссылку на него сценарий кладёт сам
+    let source: SnapSource | null = null;
+    for (const c of before.sources.filter(
+      (x) => x.present && !x.draft && ['geosite', 'geoip'].includes(x.kind)
+    )) {
       const imp = await api(page, 'GET', `${BASE}/impact?file=${encodeURIComponent(c.file)}`);
-      if (((imp.data?.foreign as unknown[] | undefined) ?? []).length > 0) {
-        blocked = c;
+      const foreignNow = ((imp.data?.foreign as unknown[] | undefined) ?? []).length;
+      const rawNow = ((imp.data?.raw as unknown[] | undefined) ?? []).length;
+      if (imp.status === 200 && foreignNow === 0 && rawNow === 0) {
+        source = c;
         break;
       }
     }
-    test.skip(blocked === null, 'на стенде нет чужих ссылок');
-    const src = blocked as SnapSource;
+    test.skip(source === null, 'на стенде нет лежащего источника без ссылок');
+    const src = source as SnapSource;
 
-    await startDrop(page, src);
-    const modal = page.getByTestId('geo-delete-modal');
-    await expect(modal).toBeVisible({ timeout: T.action });
-    const foreign = modal.getByTestId('geo-delete-foreign');
-    await expect(foreign).toBeVisible({ timeout: T.action });
-    await expect(foreign).toHaveAttribute('role', 'alert');
-    await expect(foreign.getByRole('link')).toHaveAttribute('href', '#/editor');
-    await expect(modal.getByTestId('geo-delete-confirm')).toBeDisabled();
-    await modal.getByTestId('geo-delete-cancel').click();
-    await expect(modal).toHaveCount(0, { timeout: T.action });
-    expect((await snapshot(page)).draft ?? []).toHaveLength(0);
+    const tagsRes = await api(page, 'GET', `${BASE}/tags?file=${encodeURIComponent(src.file)}`);
+    expect(tagsRes.status, 'GET tags').toBe(200);
+    const tag = ((tagsRes.data?.tags ?? []) as { tag: string }[])[0]?.tag;
+    test.skip(!tag, 'в файле источника нет тегов');
+    const tagName = tag as string;
 
-    await guard.assertClean();
+    // чужой конфиг Xray: пустой объект и комментарий со ссылкой ext:<файл>:<тег>
+    const foreignPath = `${XRAY_CONF_DIR}/${FOREIGN_FILE}`;
+    const foreignQuery = encodeURIComponent(foreignPath);
+    try {
+      const saved = await rawRequest(
+        page,
+        'POST',
+        `/api/config/save?path=${foreignQuery}`,
+        `{\n  // ext:${src.file}:${tagName}\n}\n`
+      );
+      expect(saved.status, `запись чужого конфига: ${saved.text.slice(0, 200)}`).toBe(200);
+
+      await openLists(page);
+      await startDrop(page, src);
+      const modal = page.getByTestId('geo-delete-modal');
+      await expect(modal).toBeVisible({ timeout: T.action });
+      const foreign = modal.getByTestId('geo-delete-foreign');
+      await expect(foreign).toBeVisible({ timeout: T.action });
+      await expect(foreign).toHaveAttribute('role', 'alert');
+      await expect(foreign.getByRole('link')).toHaveAttribute('href', '#/editor');
+      const text = (await foreign.textContent()) ?? '';
+      expect(text, 'место чужой ссылки с номером строки').toMatch(/98_rt_foreign\.json:\d+\./);
+      expect(text, 'нет пробела перед точкой').not.toMatch(/\s\./);
+      await expect(modal.getByTestId('geo-delete-confirm')).toBeDisabled();
+      await modal.getByTestId('geo-delete-cancel').click();
+      await expect(modal).toHaveCount(0, { timeout: T.action });
+      expect((await snapshot(page)).draft ?? []).toHaveLength(0);
+
+      await guard.assertClean();
+    } finally {
+      await removeForeignConfig(page);
+    }
   });
 });
 
