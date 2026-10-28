@@ -495,7 +495,10 @@ func (s *Service) runLocked(ctx context.Context, trigger string) error {
 }
 
 // afterRun — постшаг запуска под тем же замком слоя. Итог запуска сохраняется до
-// постшагов: сбой постшага не должен терять итог. Затем убираются временные записи
+// постшагов: сбой постшага не должен терять итог. Запись файла состояния идёт только
+// через changed (очередь smu, самый свежий снимок savedSeq): прямая запись копии мимо
+// очереди могла бы лечь поверх более новой правки расписания, а сбой панели между двумя
+// записями оставил бы на диске устаревшее состояние. Затем убираются временные записи
 // наборов, файлы которых только что скачаны (D-01); остальные постшаги добавляют
 // следующие планы фазы.
 func (s *Service) afterRun(ctx context.Context, res runResult) {
@@ -505,11 +508,8 @@ func (s *Service) afterRun(ctx context.Context, res runResult) {
 		s.st.RetryAt = time.Time{}
 		s.st.RetryFailed = false
 	}
-	st := s.st.clone()
 	s.mu.Unlock()
-	if err := saveState(s.state, st); err != nil {
-		log.Printf("[geodata] не удалось сохранить %s: %v", stateFileName, err)
-	}
+	s.changed()
 	s.cleanupPending(ctx)
 }
 
