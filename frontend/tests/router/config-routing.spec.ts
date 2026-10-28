@@ -99,7 +99,7 @@ test('routing: вкладки открываются кликом и по мар
   await expect(page.getByTestId('rules-tab')).toHaveCount(0);
   expect(await kept()).toBe(true);
 
-  // порядок вкладок: Узлы, Группы, Правила, Файлы панели
+  // порядок вкладок: Узлы, Группы, Правила, Списки, Файлы панели
   const order = await page
     .locator('[data-testid="config-tabs"] [role="tab"]')
     .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
@@ -107,6 +107,7 @@ test('routing: вкладки открываются кликом и по мар
     'config-tab-nodes',
     'config-tab-groups',
     'config-tab-rules',
+    'config-tab-lists',
     'config-tab-files'
   ]);
 

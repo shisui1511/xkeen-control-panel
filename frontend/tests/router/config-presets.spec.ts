@@ -139,7 +139,9 @@ async function freeExtendedSets(page: Page): Promise<ExtendedApi[]> {
 
 /** Содержимое xkeen.json стенда в виде «до» из предпросмотра: запись не выполняется. */
 async function xkeenJsonNow(page: Page, set: string): Promise<string> {
-  const res = await api(page, 'POST', '/api/configlayer/routing/lists/geodata/preview', { set });
+  const res = await api(page, 'POST', '/api/configlayer/geodata/preview', {
+    op: { kind: 'enable_set', set }
+  });
   expect(res.status, 'предпросмотр записи geodata').toBe(200);
   return String(res.data?.before ?? '');
 }
