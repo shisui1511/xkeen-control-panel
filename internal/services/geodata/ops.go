@@ -450,6 +450,11 @@ func (s *Service) Preview(op WriteOp) (PreviewView, error) {
 // проверка источника без блоков, запись в xkeen.json с резервной копией и сверкой по
 // base. acceptCommentLoss подтверждает потерю комментариев. updateNow запускает
 // `xkeen -ug` после записи: ошибка запуска при сделанной записи — update_failed.
+//
+// Сама запись идёт под исключительным замком слоя (держатель geodata_write): пока замок
+// держит `-ug`, шаг удаления или «Применить», xkeen.json не меняется — отказ
+// (geodata_busy, apply_busy и другие ошибки слоя). Сетевая проверка источника
+// выполняется до замка и не держит его.
 func (s *Service) Write(ctx context.Context, op WriteOp, base string, acceptCommentLoss, updateNow bool) error {
 	if err := s.writeCheck(); err != nil {
 		return err
@@ -458,24 +463,30 @@ func (s *Service) Write(ctx context.Context, op WriteOp, base string, acceptComm
 	if err != nil {
 		return err
 	}
-	if err := s.d.Store.Apply(plan.gop, base, acceptCommentLoss); err != nil {
-		// Запись для уборки пропала сама: ожидание закрывается без правки файла.
-		if plan.finish == "" || lists.ErrorCode(err) != lists.ErrEntryNotFound.Code {
-			return err
+	err = s.d.Layer.RunExclusive(ctx, true, configlayer.HolderGeodataWrite, func(context.Context) error {
+		if err := s.d.Store.Apply(plan.gop, base, acceptCommentLoss); err != nil {
+			// Запись для уборки пропала сама: ожидание закрывается без правки файла.
+			if plan.finish == "" || lists.ErrorCode(err) != lists.ErrEntryNotFound.Code {
+				return err
+			}
 		}
+		s.mu.Lock()
+		if plan.pending != nil {
+			s.dropPendingLocked(plan.pending.File)
+			s.st.PendingEnables = append(s.st.PendingEnables, *plan.pending)
+			delete(s.st.IncludeStuck, plan.pending.File)
+			delete(s.st.Cleaned, plan.pending.File)
+		}
+		if plan.finish != "" {
+			s.dropPendingLocked(plan.finish)
+			delete(s.st.IncludeStuck, plan.finish)
+		}
+		s.mu.Unlock()
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-	s.mu.Lock()
-	if plan.pending != nil {
-		s.dropPendingLocked(plan.pending.File)
-		s.st.PendingEnables = append(s.st.PendingEnables, *plan.pending)
-		delete(s.st.IncludeStuck, plan.pending.File)
-		delete(s.st.Cleaned, plan.pending.File)
-	}
-	if plan.finish != "" {
-		s.dropPendingLocked(plan.finish)
-		delete(s.st.IncludeStuck, plan.finish)
-	}
-	s.mu.Unlock()
 	// Списки могли появиться или исчезнуть: проверка черновика пересчитывается.
 	s.d.Layer.InvalidateChecks()
 	s.changed()

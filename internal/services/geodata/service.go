@@ -314,13 +314,44 @@ func (s *Service) loop() {
 // cron или SSH. Запуски по расписанию ведёт отдельный планировщик (schedLoop). С выключенным флагом слоя xkeen.json в фоне не правится
 // (D-04 из 144): ожидания остаются в состоянии и доводятся первым тиком после
 // включения флага.
+//
+// Уборка правит xkeen.json, поэтому идёт под исключительным замком слоя (держатель
+// geodata_write; занято — тик пропускается до следующего такта) и только когда убирать
+// есть что: среди ожиданий включения есть готовый файл без отметки include_stuck. Ожидания
+// живут часами, и замок по одному факту «ожидания есть» занимал бы замок слоя и замок
+// ядра каждые 30 секунд, публиковал бы события geodata и давал ложную занятость
+// «Применить» и кнопок.
 func (s *Service) tick() {
 	s.checkOutside()
 	s.syncCron(false)
-	if s.hasPending() && s.d.Layer.BusyHolder() != configlayer.HolderGeodataUpdate &&
-		s.d.Layer.Enabled() {
-		s.cleanupPending(s.ctx)
+	if !s.d.Layer.Enabled() || !s.readyPending() {
+		return
 	}
+	release, err := s.d.Layer.BeginExclusive(s.ctx, true, configlayer.HolderGeodataWrite)
+	if err != nil {
+		return
+	}
+	defer release()
+	s.cleanupPending(s.ctx)
+}
+
+// readyPending — есть ли ожидание включения, готовое к уборке: его файл скачан
+// (datReady), а отметки include_stuck нет. Застрявшие повторно проходит afterRun после
+// каждого -ug и кнопка «Довести включение».
+func (s *Service) readyPending() bool {
+	s.mu.Lock()
+	pending := append([]PendingEnable(nil), s.st.PendingEnables...)
+	stuck := make(map[string]bool, len(s.st.IncludeStuck))
+	for f := range s.st.IncludeStuck {
+		stuck[f] = true
+	}
+	s.mu.Unlock()
+	for _, p := range pending {
+		if !stuck[p.File] && s.datReady(p.File) {
+			return true
+		}
+	}
+	return false
 }
 
 // RunNow запускает `xkeen -ug`: исключительный замок слоя и задание менеджера берутся
