@@ -867,6 +867,15 @@
     }
   });
 
+  // Флаг включён — страницы DAT нет, её заменила вкладка «Списки» раздела «Конфигурация»;
+  // старый адрес ведёт на вкладку (без записи в историю). Пока флаг неизвестен, страница
+  // показывается как раньше
+  $effect(() => {
+    if ($configLayerFlagKnown && $configLayerEnabled && currentTab === 'dat') {
+      window.location.replace('#/config/lists');
+    }
+  });
+
   onMount(() => {
     fetchVersion();
     void fetchSettingsFlags();
@@ -1730,7 +1739,7 @@
             />
           </div>
         {/await}
-      {:else if currentTab === 'dat'}
+      {:else if currentTab === 'dat' && !($configLayerFlagKnown && $configLayerEnabled)}
         {#await import('./DATManager.svelte')}
           <Skeleton type="card" height="60vh" />
         {:then { default: DATManager }}

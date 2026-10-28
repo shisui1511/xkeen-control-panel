@@ -81,6 +81,27 @@ async function datReady(page: Page): Promise<void> {
     });
 }
 
+// Страница dat при включённом флаге config_layer: панель сама ведёт на вкладку «Списки»
+// раздела «Конфигурация» (старой страницы нет). Ждём перенаправления и загрузки вкладки.
+const LISTS_HASH = '#/config/lists';
+
+async function listsReady(page: Page): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(() => window.location.hash), { timeout: T.page })
+    .toBe(LISTS_HASH);
+  const tab = page.getByTestId('lists-tab');
+  await expect(tab).toBeVisible({ timeout: T.page });
+  await expect(tab.locator('.skeleton')).toHaveCount(0, { timeout: T.page });
+}
+
+// Флаг config_layer на устройстве: от него зависит, что открывает маршрут dat (чтение)
+async function layerOn(page: Page): Promise<boolean> {
+  const res = await page.request.get('/api/settings');
+  if (!res.ok()) return false;
+  const body = (await res.json()) as { data?: { config_layer?: boolean } };
+  return body.data?.config_layer === true;
+}
+
 // Прокси: группы Mihomo и значок внешнего IP клиента. Нарушения контраста живут в счётчиках
 // разделов групп и в значке маршрута IP, которых нет, пока виден скелетон или идёт проверка IP.
 async function proxiesReady(page: Page): Promise<void> {
@@ -161,7 +182,9 @@ const READY: Record<string, (page: Page) => Promise<void>> = {
 // проверка axe не отключается: помеченный тест обязан падать, иначе XPASS (метка устарела).
 // Селектор: * | <arch> | <arch>/<ядро> | */<ядро>. Вызовы — со строковыми литералами:
 // их читает scripts/router/check-known.sh.
-function markKnown(route: string, theme: string, width: number): void {
+function markKnown(route: string, theme: string, width: number, lists = false): void {
+  // Находки старой страницы dat относятся только к ней: при флаге её нет, маршрут ведёт на «Списки»
+  const dat = route === 'dat' && !lists;
   const light = theme === 'light';
   const dark = theme === 'dark';
   const wide = width === 1440;
@@ -183,15 +206,15 @@ function markKnown(route: string, theme: string, width: number): void {
   // доступен более новый не-stable выпуск: метка ставится в самом тесте, когда бейдж на странице
 
   // Приглушённый текст мелких меток, счётчиков и подписей
-  if (dark && route === 'dat') knownFailure('*', 'muted-small-label-text-contrast');
-  if (light && wide && route === 'dat') knownFailure('*', 'muted-small-label-text-contrast');
+  if (dark && dat) knownFailure('*', 'muted-small-label-text-contrast');
+  if (light && wide && dat) knownFailure('*', 'muted-small-label-text-contrast');
   if (light && route === 'logs') knownFailure('*', 'muted-small-label-text-contrast');
   if (route === 'proxies') knownFailure('arm64/mihomo', 'muted-small-label-text-contrast');
   if (light && route === 'services') knownFailure('*', 'muted-small-label-text-contrast');
   if (route === 'smartproxy') knownFailure('*', 'muted-small-label-text-contrast');
 
   // Строки DAT-файлов с вложенными интерактивными элементами (при Xray)
-  if (wide && route === 'dat') knownFailure('*/xray', 'dat-rows-nested-interactive');
+  if (wide && dat) knownFailure('*/xray', 'dat-rows-nested-interactive');
 
   // Конструктор Mihomo: подписи полей, прокручиваемая область, контраст вкладок и кнопок
   if (route === 'mihomo-gen') knownFailure('*/mihomo', 'mihomo-constructor-a11y');
@@ -217,7 +240,9 @@ for (const route of routes()) {
           // сборщики консоли и сети подключаются до перехода, чтобы ранние ошибки не терялись
           const guard = attachConsoleGuard(page);
           const problems: string[] = [];
-          markKnown(route, theme, vp.width);
+          // при включённом флаге маршрут dat ведёт на вкладку «Списки»
+          const toLists = route === 'dat' && (await layerOn(page));
+          markKnown(route, theme, vp.width, toLists);
 
           await page.setViewportSize({ width: vp.width, height: vp.height });
           await page.addInitScript((th) => {
@@ -235,7 +260,7 @@ for (const route of routes()) {
           await page.waitForLoadState('networkidle', { timeout: T.network }).catch(() => {});
           // переход между вкладками идёт с затуханием: axe не должен видеть полупрозрачный кадр
           await page.waitForTimeout(500);
-          await READY[route]?.(page);
+          await (toLists ? listsReady(page) : READY[route]?.(page));
 
           const hash = await page.evaluate(() => window.location.hash);
           // Маршрут #/config панель открывает только при включённом флаге config_layer, иначе
@@ -252,7 +277,7 @@ for (const route of routes()) {
             );
           }
           // маршрут не подменён редиректом
-          if (!hash.startsWith(ALIAS[route] ?? `#/${route}`)) {
+          if (!hash.startsWith(toLists ? LISTS_HASH : (ALIAS[route] ?? `#/${route}`))) {
             problems.push(`маршрут: после перехода адрес ${hash}`);
           }
           const applied = await page.evaluate(() =>
