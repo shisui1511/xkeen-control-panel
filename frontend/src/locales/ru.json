@@ -3749,6 +3749,7 @@
   "cfg.geo.insp_no_tags": "Ничего не найдено. Измените запрос.",
   "cfg.geo.insp_loading": "Читаю файл…",
   "cfg.geo.insp_failed": "Не удалось прочитать файл: {reason}.",
+  "cfg.geo.insp_tags_capped": "Показаны первые {shown} из {total} тегов. Уточните поиск.",
   "cfg.geo.lookup_title": "Куда относится",
   "cfg.geo.lookup_label": "Домен или IP",
   "cfg.geo.lookup_placeholder": "youtube.com или 1.1.1.1",
