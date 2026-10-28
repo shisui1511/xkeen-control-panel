@@ -4,12 +4,15 @@ package geodata
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,6 +115,29 @@ func TestRouterGeodataProbe(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		http.ServeContent(w, r, "page.html", time.Time{}, bytes.NewReader(page))
 	})
+	mux.HandleFunc("/small.dat", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "small.dat", time.Time{}, bytes.NewReader(data[:1000]))
+	})
+	noise := make([]byte, 32<<10)
+	if _, err := rand.Read(noise); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	mux.HandleFunc("/notdat.dat", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "notdat.dat", time.Time{}, bytes.NewReader(noise))
+	})
+	mux.HandleFunc("/gzip.dat", func(w http.ResponseWriter, r *http.Request) {
+		// Сжимает на лету только по просьбе клиента: без Accept-Encoding: gzip
+		// отдаёт файл как есть, с Content-Length.
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			zw := gzip.NewWriter(w)
+			_, _ = zw.Write(data)
+			_ = zw.Close()
+			return
+		}
+		http.ServeContent(w, r, "gzip.dat", time.Time{}, bytes.NewReader(data))
+	})
+	mux.HandleFunc("/proxy/", http.NotFound)
 	addr := rtProbeServer(t, mux)
 	base := "http://" + addr
 
@@ -153,4 +179,171 @@ func TestRouterGeodataProbe(t *testing.T) {
 			t.Fatalf("HTML-страница не заблокирована: %+v", res.Checks)
 		}
 	})
+
+	t.Run("small", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/small.dat", Mode: ProbeModeAdd})
+		rtProbeWant(t, res, "size_small", ProbeLevelBlock)
+		if !res.Blocked {
+			t.Fatalf("файл меньше %d байт не заблокирован", MinDatSize)
+		}
+	})
+
+	t.Run("notdat", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/notdat.dat", Mode: ProbeModeAdd})
+		rtProbeWant(t, res, "size_ok", ProbeLevelOK)
+		rtProbeWant(t, res, "not_dat", ProbeLevelBlock)
+		if !res.Blocked {
+			t.Fatalf("не dat не заблокирован: %+v", res.Checks)
+		}
+	})
+
+	t.Run("gzip", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/gzip.dat", Mode: ProbeModeAdd})
+		rtProbeWant(t, res, "size_ok", ProbeLevelOK)
+		if res.Blocked || res.Size != int64(len(data)) {
+			t.Fatalf("размер сервера со сжатием потерян: blocked=%v size=%d, ждали %d", res.Blocked, res.Size, len(data))
+		}
+	})
+
+	t.Run("closed_port", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("Listen: %v", err)
+		}
+		closed := ln.Addr().String()
+		_ = ln.Close()
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: "http://" + closed + "/ok.dat", Mode: ProbeModeAdd})
+		rtProbeWant(t, res, "reach_fail", ProbeLevelWarn)
+		if res.Blocked {
+			t.Fatalf("недоступный адрес не должен блокировать запись: %+v", res.Checks)
+		}
+		if c, _ := rtProbeCheck(res, "reach_fail"); c.Params["reason"] == "" {
+			t.Fatalf("у reach_fail нет причины: %+v", c)
+		}
+	})
+
+	t.Run("gh_proxy", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{
+			File: "own_test.dat", URL: base + "/ok.dat", Mode: ProbeModeAdd,
+			GhProxy: base + "/proxy", Mirrors: []string{base + "/mirror"},
+		})
+		rtProbeWant(t, res, "proxy_all", ProbeLevelWarn)
+		// Сервер отдаёт на /proxy/<адрес> 404: XKeen с таким gh_proxy файл тоже
+		// не скачает, и зеркала при заданном gh_proxy не пробуются.
+		rtProbeWant(t, res, "reach_fail", ProbeLevelWarn)
+		if res.Route != ProbeRouteGhProxy {
+			t.Fatalf("путь %q, ждали %q", res.Route, ProbeRouteGhProxy)
+		}
+		if res.Blocked {
+			t.Fatalf("адрес без ответа не блокирует запись: %+v", res.Checks)
+		}
+	})
+
+	t.Run("mirror", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("Listen: %v", err)
+		}
+		closed := ln.Addr().String()
+		_ = ln.Close()
+		// Прямой путь закрыт, зеркало отдаёт <зеркало>/<адрес> — цепочка доходит до него.
+		mmux := http.NewServeMux()
+		mmux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeContent(w, r, "ok.dat", time.Time{}, bytes.NewReader(data))
+		})
+		maddr := rtProbeServer(t, mmux)
+		res := Probe(context.Background(), ProbeInput{
+			File: "own_test.dat", URL: "http://" + closed + "/ok.dat", Mode: ProbeModeAdd,
+			Mirrors: []string{"http://" + maddr},
+		})
+		rtProbeWant(t, res, "reach_ok", ProbeLevelOK)
+		if res.Route != ProbeRouteMirror || res.Blocked {
+			t.Fatalf("путь %q blocked=%v: %+v", res.Route, res.Blocked, res.Checks)
+		}
+	})
+
+	t.Run("gh_unreachable", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("Listen: %v", err)
+		}
+		closed := ln.Addr().String()
+		_ = ln.Close()
+		res := Probe(context.Background(), ProbeInput{
+			File: "own_test.dat", URL: base + "/ok.dat", Mode: ProbeModeAdd,
+			GitHubURL: "http://" + closed + "/xkeen.tar",
+		})
+		rtProbeWant(t, res, "gh_unreachable", ProbeLevelWarn)
+		if res.Blocked {
+			t.Fatalf("недоступный GitHub не блокирует запись: %+v", res.Checks)
+		}
+		ok := Probe(context.Background(), ProbeInput{
+			File: "own_test.dat", URL: base + "/ok.dat", Mode: ProbeModeAdd,
+			GitHubURL: base + "/ok.dat",
+		})
+		rtProbeNo(t, ok, "gh_unreachable")
+	})
+
+	t.Run("name", func(t *testing.T) {
+		taken := map[string]bool{"geosite_refilter.dat": true, "zkeen.dat": true}
+		for _, name := range []string{"../x.dat", "a/b.dat", `a\b.dat`, "x.txt", "..dat", ""} {
+			res := Probe(context.Background(), ProbeInput{File: name, URL: "ftp://example.invalid/x.dat", Mode: ProbeModeAdd})
+			rtProbeWant(t, res, "name_bad", ProbeLevelBlock)
+		}
+		for _, name := range []string{"geosite_refilter.dat", "zkeen.dat"} {
+			res := Probe(context.Background(), ProbeInput{File: name, URL: "ftp://example.invalid/x.dat", Mode: ProbeModeAdd, Taken: taken})
+			rtProbeWant(t, res, "name_taken", ProbeLevelBlock)
+		}
+		res := Probe(context.Background(), ProbeInput{File: "own-list_1.dat", URL: "ftp://example.invalid/x.dat", Mode: ProbeModeAdd, Taken: taken})
+		rtProbeWant(t, res, "name_ok", ProbeLevelOK)
+	})
+
+	t.Run("scheme", func(t *testing.T) {
+		for _, raw := range []string{"ftp://example.invalid/x.dat", "file:///etc/passwd", "http://exa mple/x.dat", "https://example.invalid/x\n.dat", "", "https://" + strings.Repeat("a", probeURLMax)} {
+			res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: raw, Mode: ProbeModeAdd})
+			rtProbeWant(t, res, "scheme_bad", ProbeLevelBlock)
+			if _, ok := rtProbeCheck(res, "reach_ok"); ok || len(res.Checks) != 2 {
+				t.Fatalf("после scheme_bad проверка должна остановиться: %+v", res.Checks)
+			}
+		}
+	})
+
+	t.Run("edit_mode", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{File: "../x.dat", URL: "ftp://example.invalid/x.dat", Mode: ProbeModeEdit})
+		rtProbeNo(t, res, "name_bad")
+		rtProbeNo(t, res, "name_ok")
+		rtProbeNo(t, res, "name_taken")
+		rtProbeWant(t, res, "scheme_bad", ProbeLevelBlock)
+	})
+
+	t.Run("github", func(t *testing.T) {
+		url := ""
+		for _, e := range rtProbeCatalog() {
+			if e.ID == "roscomvpn_geosite" {
+				url = e.URL
+			}
+		}
+		if url == "" {
+			t.Fatal("в каталоге нет набора roscomvpn_geosite")
+		}
+		res := Probe(context.Background(), ProbeInput{File: "geosite_probe_check.dat", URL: url, Mode: ProbeModeAdd, GeoDir: lists.DefaultDatDir})
+		if c, ok := rtProbeCheck(res, "reach_fail"); ok {
+			t.Skipf("сеть стенда: GitHub не ответил (%s)", c.Params["reason"])
+		}
+		if res.Blocked {
+			t.Fatalf("настоящий набор из каталога заблокирован: %+v", res.Checks)
+		}
+		rtProbeWant(t, res, "scheme_https", ProbeLevelOK)
+		if res.Kind != lists.SniffGeoSite {
+			t.Fatalf("вид %q, ждали %q", res.Kind, lists.SniffGeoSite)
+		}
+	})
+}
+
+func rtProbeCatalog() []lists.ExtendedSet {
+	view, err := lists.Resolve(lists.NewIndex(lists.DefaultDatDir), nil)
+	if err != nil {
+		return nil
+	}
+	return view.Extended
 }
