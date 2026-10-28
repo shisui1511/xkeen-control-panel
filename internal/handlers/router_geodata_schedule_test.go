@@ -379,9 +379,11 @@ func TestRouterGeodataCatchUp(t *testing.T) {
 	slotLocal := base.Add(slot.Sub(sch.now))
 	e.rtGeoSetSchedule(true, -1, slot.Hour(), slot.Minute())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	out, code := rtPanelInitCmd(ctx, "stop")
+	// У каждой команды init-скрипта свой срок: между stop и start тест ждёт слот и ещё 30 с,
+	// общий контекст истёк бы раньше запуска панели.
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer stopCancel()
+	out, code := rtPanelInitCmd(stopCtx, "stop")
 	if code != 0 || strings.Contains(out, "failed") {
 		t.Fatalf("остановка панели init-скриптом: код %d, %q", code, out)
 	}
@@ -390,7 +392,9 @@ func TestRouterGeodataCatchUp(t *testing.T) {
 	}
 	time.Sleep(time.Until(slotLocal.Add(30 * time.Second)))
 
-	out, code = rtPanelInitCmd(ctx, "start")
+	startCtx, startCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer startCancel()
+	out, code = rtPanelInitCmd(startCtx, "start")
 	startedAt := time.Now()
 	if code != 0 || strings.Contains(out, "failed") {
 		t.Fatalf("запуск панели init-скриптом: код %d, %q", code, out)
