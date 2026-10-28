@@ -1021,6 +1021,104 @@ test.describe('удаление источника', () => {
     await guard.assertClean();
   });
 
+  test('lists-actions: ссылка на удаляемый файл', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
+
+    // лежащий стандартный набор без ссылок: его выключение ничего не каскадирует
+    let source: SnapSource | null = null;
+    for (const c of before.sources.filter(
+      (x) =>
+        x.present && !x.draft && x.origin === 'standard' && ['geosite', 'geoip'].includes(x.kind)
+    )) {
+      const imp = await api(page, 'GET', `${BASE}/impact?file=${encodeURIComponent(c.file)}`);
+      const noLists = ((imp.data?.lists as unknown[] | undefined) ?? []).length === 0;
+      const noForeign = ((imp.data?.foreign as unknown[] | undefined) ?? []).length === 0;
+      const noRaw = ((imp.data?.raw as unknown[] | undefined) ?? []).length === 0;
+      if (imp.status === 200 && noLists && noForeign && noRaw) {
+        source = c;
+        break;
+      }
+    }
+    test.skip(source === null, 'на стенде нет лежащего стандартного набора без ссылок');
+    const src = source as SnapSource;
+
+    const tagsRes = await api(page, 'GET', `${BASE}/tags?file=${encodeURIComponent(src.file)}`);
+    expect(tagsRes.status, 'GET tags').toBe(200);
+    const tag = ((tagsRes.data?.tags ?? []) as { tag: string }[])[0]?.tag;
+    test.skip(!tag, 'в файле набора нет тегов');
+    const tagName = tag as string;
+
+    // пометка выключения в черновике; правил на файл ещё нет, поэтому действия пусты
+    const sources = await api(page, 'GET', '/api/configlayer/sources');
+    const drop = await api(page, 'POST', `${BASE}/drop`, {
+      rev: Number(sources.data?.draft_revision ?? 0),
+      file: src.file,
+      mode: 'off',
+      actions: []
+    });
+    expect(drop.status, `выключение ${src.file} в черновике`).toBe(200);
+
+    // правило на (файл, тег) выключаемого набора
+    const routing = await api(page, 'GET', '/api/configlayer/routing');
+    expect(routing.status, 'GET routing').toBe(200);
+    const ruleSave = await api(page, 'POST', '/api/configlayer/routing/rules/save', {
+      revision: Number(routing.data?.revision ?? 0),
+      rule: {
+        id: '',
+        enabled: true,
+        origin: '',
+        conds: [
+          {
+            type: src.kind,
+            values: [],
+            lists: [{ file: src.file, tag: tagName, kind: src.kind === 'geoip' ? 'ip' : 'site' }]
+          }
+        ],
+        target: { kind: 'direct' },
+        raw: null
+      }
+    });
+    expect(ruleSave.status, 'rules/save').toBe(200);
+    const ruleId = String((ruleSave.data?.rule as { id?: string } | undefined)?.id ?? '');
+    expect(ruleId, 'идентификатор правила').not.toBe('');
+
+    // маршрутизация под управлением панели: проблема слоя блокирует «Применить»
+    const after = await api(page, 'GET', '/api/configlayer/routing');
+    expect(after.status, 'GET routing после правила').toBe(200);
+    const take = await api(page, 'POST', '/api/configlayer/routing/take', {
+      revision: Number(after.data?.revision ?? 0)
+    });
+    expect(take.status, 'взятие маршрутизации в черновике').toBe(200);
+    await expect
+      .poll(
+        async () => {
+          const st = await api(page, 'GET', '/api/configlayer/state');
+          return ((st.data?.checks ?? []) as { code: string }[]).map((c) => c.code);
+        },
+        { timeout: T.action }
+      )
+      .toContain('geodata_ref_remains');
+
+    await page.goto('/#/config/rules', { timeout: T.page, waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('config-page')).toBeVisible({ timeout: T.page });
+    const chip = page
+      .getByTestId(`rule-status-${ruleId}`)
+      .locator('[data-chip="geodata_ref_remains"]');
+    await expect(chip).toBeVisible({ timeout: T.action });
+    await expect(chip, 'чип называет удаляемый файл').toContainText(src.file);
+    await expect(chip, 'чип называет тег списка').toContainText(tagName);
+    await expect(chip).not.toContainText(/Не удалось проверить черновик|could not be checked/);
+    await expect(chip).toHaveClass(/chip-danger/);
+
+    await guard.assertClean();
+  });
+
   test('lists-actions: чужая ссылка блокирует', async ({ page }) => {
     const guard = attachConsoleGuard(page);
     await page.setViewportSize({ width: 1440, height: 900 });

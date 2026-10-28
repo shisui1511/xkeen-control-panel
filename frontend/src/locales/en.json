@@ -3506,6 +3506,7 @@
   "cfg.hint.target_missing": "Rule {rule} has no target: the group was deleted. Choose another target.",
   "cfg.hint.section_invalid": "The “{section}” section of the draft is damaged. Reset the draft.",
   "cfg.hint.list_not_found": "List not found: {file} · {tag} (rule {rule}). Choose another list.",
+  "cfg.hint.geodata_ref_remains": "Rule {rule} uses the list {file} · {tag}, but the source of this file is marked for removal or disabling. Replace the list in the rule or restore the source on the “Lists” tab.",
   "cfg.hint.list_too_large": "The list {file} · {tag} is too large for Mihomo. Choose another one.",
   "cfg.hint.cond_conflict": "Rule {rule} has two conditions of the same kind (for example, domains and geosite): Xray cannot express this. Split them into two rules.",
   "cfg.hint.checker_failed": "The draft could not be checked. Try “Apply” again.",
