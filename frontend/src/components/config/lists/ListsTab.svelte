@@ -4,6 +4,7 @@
   import EmptyState from '../../EmptyState.svelte';
   import Skeleton from '../../Skeleton.svelte';
   import { formatBytes } from '../../../lib/format';
+  import UpdateCard from './UpdateCard.svelte';
   import { geodataView, geodataStatus, loadGeodata } from '../../../lib/configGeodata';
 
   // Снимок менеджера читается при открытии вкладки; дальше его перечитывают события SSE
@@ -55,6 +56,7 @@
         <span class="lists-alert-text">{$t('cfg.geo.old_xkeen')}</span>
       </div>
     {/if}
+    <UpdateCard />
     <p class="geo-summary" data-testid="geo-summary">{summary}</p>
   {/if}
 </div>
