@@ -1,8 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"regexp"
+	"slices"
+	"strconv"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
@@ -172,6 +177,433 @@ func (a *API) ConfigGeodata(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.writeGeodataError(w, r, err)
 		return
+	}
+	JSONSuccess(w, view)
+}
+
+// geodataFileRE — допустимое имя dat-файла в параметрах запросов (T-146.1-29):
+// только имя в каталоге dat, без путей. Сервис и индекс проверяют имя ещё раз.
+var geodataFileRE = regexp.MustCompile(`^[A-Za-z0-9._-]+\.dat$`)
+
+const (
+	// geodataProbeTimeout — предел проверки источника (HEAD и пробная загрузка).
+	geodataProbeTimeout = 60 * time.Second
+	// geodataWriteTimeout — предел записи в xkeen.json вместе с проверкой источника.
+	// Запуск -ug по update_now идёт в фоне и в предел не входит.
+	geodataWriteTimeout = 3 * time.Minute
+	// geodataLookupTimeout — предел поиска «куда относится» по всем dat каталога.
+	geodataLookupTimeout = 20 * time.Second
+	// geodataEntriesMaxLimit — наибольшее окно записей тега.
+	geodataEntriesMaxLimit = 100
+	// geodataLookupLimit — сколько совпадений поиска отдаётся.
+	geodataLookupLimit = 50
+	// geodataFinishDelete — вид операции «Довести удаление»: не запись по WriteOp, а шаг
+	// сервиса над файлом с ожидающим удалением.
+	geodataFinishDelete = "finish_delete"
+)
+
+// TagsView — теги dat-файла для инспектора: имя файла как в запросе, вид файла
+// (geosite или geoip) и теги с числом записей и примерами.
+type TagsView struct {
+	File string          `json:"file"`
+	Kind string          `json:"kind"`
+	Tags []lists.TagInfo `json:"tags"`
+}
+
+// writeGeodataInvalid отвечает 400 invalid_input с полем и причиной.
+func (a *API) writeGeodataInvalid(w http.ResponseWriter, r *http.Request, field, reason string) {
+	JSONErrorCodeParams(w, http.StatusBadRequest, "invalid_input", a.t(r, "configlayer.geodata.invalid_input"),
+		map[string]string{"field": field, "reason": reason})
+}
+
+// geodataFileParam проверяет имя файла запроса; неверное — 400 file_invalid.
+func (a *API) geodataFileParam(w http.ResponseWriter, r *http.Request, file string) bool {
+	if !geodataFileRE.MatchString(file) {
+		a.writeGeodataCode(w, r, "file_invalid")
+		return false
+	}
+	return true
+}
+
+// requireGeodataIndex — requireGeodata плюс индекс dat-файлов (инспектор и поиск).
+func (a *API) requireGeodataIndex(w http.ResponseWriter, r *http.Request) bool {
+	if !a.requireGeodata(w, r) {
+		return false
+	}
+	if a.geodataIndex == nil {
+		JSONErrorCode(w, http.StatusNotFound, "config_layer_disabled", a.t(r, "configlayer.disabled"))
+		return false
+	}
+	return true
+}
+
+// geodataSnapshot отдаёт свежий снимок менеджера ответом (после изменяющих запросов).
+func (a *API) geodataSnapshot(w http.ResponseWriter, r *http.Request) {
+	view, err := a.geodata.Snapshot()
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	JSONSuccess(w, view)
+}
+
+// geodataRunView отвечает текущим заданием менеджера из снимка.
+func (a *API) geodataRunView(w http.ResponseWriter, r *http.Request) {
+	view, err := a.geodata.Snapshot()
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	JSONSuccess(w, view.Run)
+}
+
+// geodataQueryInt читает неотрицательное целое из параметра запроса; пусто — def.
+func geodataQueryInt(r *http.Request, name string, def int) (int, bool) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return def, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// ConfigGeodataOutput — GET /api/configlayer/geodata/output?job=ug|jq&from=N: вывод
+// задания начиная со смещения from (опрос живого вывода, D-16).
+func (a *API) ConfigGeodataOutput(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireGeodata(w, r) {
+		return
+	}
+	job := r.URL.Query().Get("job")
+	if job != "ug" && job != "jq" {
+		a.writeGeodataInvalid(w, r, "job", "unknown")
+		return
+	}
+	from, ok := geodataQueryInt(r, "from", 0)
+	if !ok {
+		a.writeGeodataInvalid(w, r, "from", "negative")
+		return
+	}
+	JSONSuccess(w, a.geodata.Output(job, int64(from)))
+}
+
+// ConfigGeodataRun — POST /api/configlayer/geodata/run {}: «Обновить сейчас». Отвечает
+// сразу: замок применения берётся синхронно (занят — 409 geodata_busy, apply_busy или
+// kernel_op_in_progress), `xkeen -ug` идёт в фоне, вывод — GET /output?job=ug.
+func (a *API) ConfigGeodataRun(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireGeodata(w, r) {
+		return
+	}
+	var req struct{}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	if err := a.geodata.RunNow(true); err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	a.geodataRunView(w, r)
+}
+
+// ConfigGeodataJQ — POST /api/configlayer/geodata/jq {}: установка jq через opkg.
+// Отвечает сразу, вывод — GET /output?job=jq.
+func (a *API) ConfigGeodataJQ(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireGeodata(w, r) {
+		return
+	}
+	var req struct{}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	if err := a.geodata.InstallJQ(); err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	a.geodataRunView(w, r)
+}
+
+// ConfigGeodataSchedule — POST /api/configlayer/geodata/schedule {enabled, day, hour,
+// minute}: расписание обновления баз панели; ответ — снимок.
+func (a *API) ConfigGeodataSchedule(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireGeodata(w, r) {
+		return
+	}
+	var req geodata.Schedule
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	if err := a.geodata.SetSchedule(req); err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	a.geodataSnapshot(w, r)
+}
+
+// ConfigGeodataCron — POST /api/configlayer/geodata/cron {action}: задача cron XKeen
+// (adopt, keep, remove, give); ответ — снимок.
+func (a *API) ConfigGeodataCron(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireGeodata(w, r) {
+		return
+	}
+	var req struct {
+		Action string `json:"action"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	if err := a.geodata.CronAction(req.Action); err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	a.geodataSnapshot(w, r)
+}
+
+// ConfigGeodataProbe — POST /api/configlayer/geodata/probe {file, url, mode}: проверка
+// источника без записи (add — новый, edit — смена адреса). Адрес в ответ не
+// возвращается: только коды проверок, размер и вид файла.
+func (a *API) ConfigGeodataProbe(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireGeodata(w, r) {
+		return
+	}
+	var req struct {
+		File string `json:"file"`
+		URL  string `json:"url"`
+		Mode string `json:"mode"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	// Закрытая вкладка проверку не обрывает: результат остаётся в кэше сервиса.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), geodataProbeTimeout)
+	defer cancel()
+	res, err := a.geodata.Probe(ctx, req.File, req.URL, req.Mode)
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	JSONSuccess(w, res)
+}
+
+// ConfigGeodataPreview — POST /api/configlayer/geodata/preview {op}: файл xkeen.json до
+// и после правки и признак сохранения комментариев. Файл не меняется.
+func (a *API) ConfigGeodataPreview(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireGeodata(w, r) {
+		return
+	}
+	var req struct {
+		Op geodata.WriteOp `json:"op"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	var (
+		pv  geodata.PreviewView
+		err error
+	)
+	if req.Op.Kind == geodataFinishDelete {
+		if !a.geodataFileParam(w, r, req.Op.File) {
+			return
+		}
+		pv, err = a.geodata.PreviewFinishDelete(req.Op.File)
+	} else {
+		pv, err = a.geodata.Preview(req.Op)
+	}
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	JSONSuccess(w, pv)
+}
+
+// ConfigGeodataWrite — POST /api/configlayer/geodata/write {op, base, accept_comment_loss,
+// update_now}: запись в xkeen.json сразу (D-18). Блок проверки источника — 409
+// probe_blocked с data.probe; сбой запуска -ug после записи — 502 update_failed с
+// data.written=true; успех — снимок.
+func (a *API) ConfigGeodataWrite(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireGeodata(w, r) {
+		return
+	}
+	var req struct {
+		Op                geodata.WriteOp `json:"op"`
+		Base              string          `json:"base"`
+		AcceptCommentLoss bool            `json:"accept_comment_loss"`
+		UpdateNow         bool            `json:"update_now"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	// Отмена запроса вкладкой запись не прерывает: xkeen.json не остаётся наполовину.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), geodataWriteTimeout)
+	defer cancel()
+	var err error
+	if req.Op.Kind == geodataFinishDelete {
+		if !a.geodataFileParam(w, r, req.Op.File) {
+			return
+		}
+		err = a.geodata.FinishDelete(ctx, req.Op.File, req.Base, req.AcceptCommentLoss)
+	} else {
+		err = a.geodata.Write(ctx, req.Op, req.Base, req.AcceptCommentLoss, req.UpdateNow)
+	}
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	a.geodataSnapshot(w, r)
+}
+
+// ConfigGeodataImpact — GET /api/configlayer/geodata/impact?file=: что затронет
+// удаление или выключение файла (списки с правилами, свои правила ядра, чужие конфиги).
+func (a *API) ConfigGeodataImpact(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireGeodata(w, r) {
+		return
+	}
+	file := r.URL.Query().Get("file")
+	if !a.geodataFileParam(w, r, file) {
+		return
+	}
+	imp, err := a.geodata.Impact(file)
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	JSONSuccess(w, imp)
+}
+
+// ConfigGeodataDrop — POST /api/configlayer/geodata/drop {rev, file, mode, actions}:
+// пометка источника на удаление или выключение с каскадом правил в черновик.
+// Чужие ссылки на файл — 409 foreign_ref с data.refs, свои сырые правила — 409 raw_ref.
+func (a *API) ConfigGeodataDrop(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireGeodata(w, r) {
+		return
+	}
+	var req struct {
+		Rev     int64                   `json:"rev"`
+		File    string                  `json:"file"`
+		Mode    string                  `json:"mode"`
+		Actions []routing.GeodataAction `json:"actions"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	if !a.geodataFileParam(w, r, req.File) {
+		return
+	}
+	ev, err := a.geodata.Drop(req.Rev, req.File, req.Mode, req.Actions)
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigGeodataRestore — POST /api/configlayer/geodata/restore {rev, file}: снимает
+// пометку удаления или выключения («Вернуть источник»).
+func (a *API) ConfigGeodataRestore(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodPost) || !a.requireGeodata(w, r) {
+		return
+	}
+	var req struct {
+		Rev  int64  `json:"rev"`
+		File string `json:"file"`
+	}
+	if !a.decodeLayerBody(w, r, &req) {
+		return
+	}
+	if !a.geodataFileParam(w, r, req.File) {
+		return
+	}
+	ev, err := a.geodata.Restore(req.Rev, req.File)
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	JSONSuccess(w, ev)
+}
+
+// ConfigGeodataTags — GET /api/configlayer/geodata/tags?file=: теги файла с числом
+// записей и примерами (инспектор).
+func (a *API) ConfigGeodataTags(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireGeodataIndex(w, r) {
+		return
+	}
+	file := r.URL.Query().Get("file")
+	if !a.geodataFileParam(w, r, file) {
+		return
+	}
+	files, err := a.geodataIndex.Files()
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	kind, found := "", false
+	for _, f := range files {
+		if f.Name == file || slices.Contains(f.Aliases, file) {
+			kind, found = f.Kind, true
+			break
+		}
+	}
+	if !found {
+		a.writeGeodataCode(w, r, "list_not_found")
+		return
+	}
+	tags, err := a.geodataIndex.Tags(file)
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	JSONSuccess(w, TagsView{File: file, Kind: kind, Tags: tags})
+}
+
+// ConfigGeodataEntries — GET /api/configlayer/geodata/entries?file=&tag=&q=&offset=&limit=:
+// записи тега постранично (limit не больше 100) с поиском по подстроке.
+func (a *API) ConfigGeodataEntries(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireGeodataIndex(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	file := q.Get("file")
+	if !a.geodataFileParam(w, r, file) {
+		return
+	}
+	offset, ok := geodataQueryInt(r, "offset", 0)
+	if !ok {
+		a.writeGeodataInvalid(w, r, "offset", "negative")
+		return
+	}
+	limit, ok := geodataQueryInt(r, "limit", geodataEntriesMaxLimit)
+	if !ok {
+		a.writeGeodataInvalid(w, r, "limit", "negative")
+		return
+	}
+	limit = min(limit, geodataEntriesMaxLimit)
+	page, err := a.geodataIndex.Entries(file, q.Get("tag"), q.Get("q"), offset, limit)
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	if page.Entries == nil {
+		page.Entries = []string{}
+	}
+	JSONSuccess(w, page)
+}
+
+// ConfigGeodataLookup — GET /api/configlayer/geodata/lookup?q=: в какие теги каталога
+// попадает домен или IP. Поиск ограничен 20 с и закрытием вкладки.
+func (a *API) ConfigGeodataLookup(w http.ResponseWriter, r *http.Request) {
+	if !a.requireMethod(w, r, http.MethodGet) || !a.requireGeodataIndex(w, r) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), geodataLookupTimeout)
+	defer cancel()
+	view, err := a.geodataIndex.Lookup(ctx, r.URL.Query().Get("q"), geodataLookupLimit)
+	if err != nil {
+		a.writeGeodataError(w, r, err)
+		return
+	}
+	if view.Matches == nil {
+		view.Matches = []lists.LookupMatch{}
 	}
 	JSONSuccess(w, view)
 }

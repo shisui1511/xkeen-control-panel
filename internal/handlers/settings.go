@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
@@ -121,6 +122,11 @@ func (a *API) SettingsConfigLayer(w http.ResponseWriter, r *http.Request) {
 		// Уже включённый слой повторно не пересобирается.
 		if !current && a.configLayer != nil {
 			a.configLayer.Enable()
+			// Менеджер geodata ничего не запускает: расписание панели остаётся
+			// приостановленным, пока владелец не перенимет его кнопкой (D-36).
+			if a.geodata != nil {
+				a.geodata.OnFlagOn()
+			}
 		}
 		JSONSuccess(w, map[string]bool{"config_layer": true})
 		return
@@ -162,6 +168,13 @@ func (a *API) SettingsConfigLayer(w http.ResponseWriter, r *http.Request) {
 	} else if err := commitFlag(); err != nil {
 		JSONErrorCodeDetail(w, http.StatusInternalServerError, "internal", a.t(r, "error.internal"), utils.StripANSI(err.Error()))
 		return
+	}
+	// Флаг снят: расписание обновления баз возвращается XKeen (D-13). Ошибка возврата
+	// cron — в журнал, ответ и флаг не меняются.
+	if current && a.geodata != nil {
+		if err := a.geodata.OnFlagOff(); err != nil {
+			log.Printf("[geodata] возврат расписания XKeen при выключении слоя: %v", err)
+		}
 	}
 	JSONSuccess(w, map[string]bool{"config_layer": false})
 }
