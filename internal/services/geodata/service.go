@@ -129,6 +129,9 @@ type Service struct {
 	// nmu сериализует сборку уведомлений.
 	nmu sync.Mutex
 
+	// ops — состояние операций записи (кэш проверок, уборка, jq).
+	ops opsState
+
 	// pmu защищает ограничение частоты событий.
 	pmu        sync.Mutex
 	lastPub    time.Time
@@ -284,10 +287,17 @@ func (s *Service) loop() {
 	}
 }
 
-// tick — один такт цикла. Расписание, уборка записей и догон добавляют следующие
-// планы фазы; здесь — правки файлов вне панели.
+// tick — один такт цикла: правки файлов вне панели и уборка временных записей
+// стандартных наборов после запусков по cron или SSH. Расписание и догон добавляют
+// следующие планы фазы. С выключенным флагом слоя xkeen.json в фоне не правится
+// (D-04 из 144): ожидания остаются в состоянии и доводятся первым тиком после
+// включения флага.
 func (s *Service) tick() {
 	s.checkOutside()
+	if s.hasPending() && s.d.Layer.BusyHolder() != configlayer.HolderGeodataUpdate &&
+		s.d.Layer.Enabled() {
+		s.cleanupPending(s.ctx)
+	}
 }
 
 // RunNow запускает `xkeen -ug`: исключительный замок слоя берётся синхронно (занят —
@@ -355,16 +365,18 @@ func (s *Service) runLocked(ctx context.Context, trigger string) error {
 	return res.Err
 }
 
-// afterRun — точка постшага запуска; её дополняют следующие планы фазы (уборка
-// временных записей). Здесь итог запуска сохраняется до постшагов: сбой постшага не
-// должен терять итог.
-func (s *Service) afterRun(_ context.Context, _ runResult) {
+// afterRun — постшаг запуска под тем же замком слоя. Итог запуска сохраняется до
+// постшагов: сбой постшага не должен терять итог. Затем убираются временные записи
+// наборов, файлы которых только что скачаны (D-01); остальные постшаги добавляют
+// следующие планы фазы.
+func (s *Service) afterRun(ctx context.Context, _ runResult) {
 	s.mu.Lock()
 	st := s.st.clone()
 	s.mu.Unlock()
 	if err := saveState(s.state, st); err != nil {
 		log.Printf("[geodata] не удалось сохранить %s: %v", stateFileName, err)
 	}
+	s.cleanupPending(ctx)
 }
 
 // execute запускает `xkeen -ug` и записывает итоги в состояние: хэши файлов
