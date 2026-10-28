@@ -10,6 +10,7 @@
   import StandardSetsGroup from './StandardSetsGroup.svelte';
   import SourceGroup from './SourceGroup.svelte';
   import EnableSetModal, { type EnableTarget } from './EnableSetModal.svelte';
+  import AddSourceModal from './AddSourceModal.svelte';
   import FinishModal, { type FinishMode } from './FinishModal.svelte';
   import {
     geodataView,
@@ -50,6 +51,7 @@
 
   let enableTarget = $state<EnableTarget | null>(null);
   let finish = $state<{ mode: FinishMode; file: string } | null>(null);
+  let addOpen = $state(false);
 
   function enableStandard(s: SourceView) {
     enableTarget = {
@@ -129,6 +131,7 @@
       kind="own"
       sources={own}
       disabled={oldXkeen}
+      onadd={() => (addOpen = true)}
       ondedup={askDedup}
       onfinish={askFinish}
     />
@@ -140,6 +143,12 @@
   target={enableTarget}
   onadded={() => void loadGeodata()}
   onclose={() => (enableTarget = null)}
+/>
+
+<AddSourceModal
+  open={addOpen}
+  onadded={() => void loadGeodata()}
+  onclose={() => (addOpen = false)}
 />
 
 <FinishModal
