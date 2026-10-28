@@ -4,6 +4,8 @@
   import EmptyState from '../../EmptyState.svelte';
   import Skeleton from '../../Skeleton.svelte';
   import { formatBytes } from '../../../lib/format';
+  import { showConfirm, showToast } from '../../../stores';
+  import { dropSetName } from './setName';
   import CronNotice from './CronNotice.svelte';
   import DownloadBlock from './DownloadBlock.svelte';
   import UpdateCard from './UpdateCard.svelte';
@@ -17,6 +19,10 @@
     geodataView,
     geodataStatus,
     loadGeodata,
+    fetchImpact,
+    dropSource,
+    restoreSource,
+    geodataErrorText,
     type SourceView
   } from '../../../lib/configGeodata';
 
@@ -72,6 +78,68 @@
     finish = { mode: 'finish_include', file: s.file };
   }
 
+  function askFinishDelete(s: SourceView) {
+    finish = { mode: 'finish_delete', file: s.file };
+  }
+
+  // «Довести» у строки: удаление, если оно не завершено, иначе включение
+  function onFinish(s: SourceView) {
+    if (s.delete_incomplete !== undefined && s.delete_incomplete !== '') askFinishDelete(s);
+    else askFinish(s);
+  }
+
+  function dropFailure(err: unknown) {
+    const code = (err as { code?: string } | null)?.code;
+    // Черновик изменили в другой вкладке: показывается свежий снимок
+    if (code === 'draft_conflict') void loadGeodata();
+    showToast('error', geodataErrorText(err));
+  }
+
+  let dropBusy = false;
+
+  // Удаление или выключение источника: ссылки ищет сервер; без ссылок — подтверждение и
+  // пометка в черновике, иначе диалог каскада. Файл и запись геоданных уходят только после
+  // «Применить».
+  async function askDrop(s: SourceView, mode: 'delete' | 'off') {
+    if (dropBusy) return;
+    dropBusy = true;
+    try {
+      const impact = await fetchImpact(s.file);
+      const name = dropSetName(s);
+      const clean =
+        impact.lists.length === 0 && impact.raw.length === 0 && impact.foreign.length === 0;
+      if (!clean) return;
+      const link = (s.aliases ?? []).filter((a) => a !== s.file).join(', ');
+      const ok = await showConfirm({
+        variant: 'danger',
+        title:
+          mode === 'delete'
+            ? $t('cfg.geo.del_title', { file: s.file })
+            : $t('cfg.geo.off_title', { name }),
+        message: $t('cfg.geo.del_nolinks'),
+        consequence: $t('cfg.geo.del_effects', {
+          symlink: link === '' ? '' : $t('cfg.geo.del_symlink', { link })
+        }),
+        confirmLabel: $t(mode === 'delete' ? 'cfg.geo.del_submit' : 'cfg.geo.off_submit')
+      });
+      if (!ok) return;
+      await dropSource(s.file, mode, []);
+      showToast('success', $t('cfg.geo.del_toast'));
+    } catch (err) {
+      dropFailure(err);
+    } finally {
+      dropBusy = false;
+    }
+  }
+
+  async function restore(s: SourceView) {
+    try {
+      await restoreSource(s.file);
+    } catch (err) {
+      dropFailure(err);
+    }
+  }
+
   function enablePanel(s: SourceView) {
     enableTarget = { id: s.set_id ?? s.id, name: s.file, file: s.file, origin: 'panel' };
   }
@@ -119,7 +187,8 @@
       disabled={oldXkeen}
       onenable={enableStandard}
       ondedup={askDedup}
-      onfinish={askFinish}
+      onfinish={onFinish}
+      onrestore={(s) => void restore(s)}
     />
     <SourceGroup
       kind="panel"
@@ -127,7 +196,8 @@
       disabled={oldXkeen}
       onenable={enablePanel}
       ondedup={askDedup}
-      onfinish={askFinish}
+      onfinish={onFinish}
+      onrestore={(s) => void restore(s)}
     />
     <SourceGroup
       kind="own"
@@ -135,8 +205,10 @@
       disabled={oldXkeen}
       onadd={() => (addOpen = true)}
       onedit={(s) => (editSource = s)}
+      ondelete={(s) => void askDrop(s, 'delete')}
+      onrestore={(s) => void restore(s)}
       ondedup={askDedup}
-      onfinish={askFinish}
+      onfinish={onFinish}
     />
   {/if}
 </div>

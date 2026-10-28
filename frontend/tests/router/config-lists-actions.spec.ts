@@ -2,7 +2,7 @@
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
-import { api, layerFlag, withPanel } from './lib/nodes-api';
+import { api, layerFlag, resetDraft, withPanel } from './lib/nodes-api';
 
 // Верх вкладки «Списки» (менеджер geodata XKeen, фаза 146.1, план 12): «Обновить сейчас» с
 // настоящим xkeen -ug, живой вывод, расписание, задача cron XKeen, блок «Загрузка» и диалог
@@ -41,6 +41,7 @@ interface Snapshot {
   run: { running: boolean; waiting_apply: boolean; job?: string };
   last_run?: { at: string; outcome: string };
   sources: SnapSource[];
+  draft?: { file: string; mode: string }[];
 }
 
 interface SnapSource {
@@ -783,6 +784,123 @@ test.describe('свой источник', () => {
         timeout: T.action
       })
       .toBe(catalog);
+
+    await guard.assertClean();
+  });
+});
+
+// --- Удаление и выключение источника через черновик (план 146.1-18) ---
+// Применение пометки (запуск -ug, уборка файла) здесь не выполняется: оно стирает файлы
+// стенда, его проверяют Go-сценарии и сессия стенда. Сценарии доходят до черновика и
+// «Сбросить»; xkeen.json возвращается прежним, черновик — пустым.
+
+const DEL_FILE = 'xcp-del-test.dat';
+
+/** Своя запись geodata тем же путём, что диалог: предпросмотр, затем запись без запуска -ug. */
+async function addOwnEntry(page: Page, file: string, url: string): Promise<void> {
+  const op = { kind: 'add', file, url };
+  const prev = await api(page, 'POST', `${BASE}/preview`, { op });
+  expect(prev.status, 'предпросмотр добавления').toBe(200);
+  const written = await api(page, 'POST', `${BASE}/write`, {
+    op,
+    base: prev.data?.base,
+    accept_comment_loss: true,
+    update_now: false
+  });
+  expect(written.status, 'запись своего источника').toBe(200);
+}
+
+test.describe('удаление источника', () => {
+  let xkeenJsonBefore: string | null = null;
+
+  test.beforeAll(async ({ browser }) => {
+    xkeenJsonBefore = await withPanel(browser, readXkeenJson);
+  });
+
+  test.afterEach(async ({ browser }) => {
+    const was = xkeenJsonBefore;
+    await withPanel(browser, async (page) => {
+      await resetDraft(page);
+      if (was === null || (await readXkeenJson(page)) === was) return;
+      const res = await api(page, 'POST', `${XKEEN_SETTINGS}/save`, {
+        kind: XKEEN_JSON_KIND,
+        content: was
+      });
+      expect(res.status, 'возврат xkeen.json').toBe(200);
+    });
+  });
+
+  test('lists-actions: удалить свой источник в черновик', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
+    test.skip(!before.download.jq, 'на стенде нет jq: XKeen не читает записи geodata');
+    expect(
+      before.sources.some((x) => x.file === DEL_FILE),
+      `на стенде нет записи ${DEL_FILE}`
+    ).toBe(false);
+
+    await addOwnEntry(page, DEL_FILE, await catalogUrl(page));
+    await openLists(page);
+
+    const row = page.getByTestId('geo-group-own').getByTestId(`geo-source-${DEL_FILE}`);
+    const del = row.getByTestId(`geo-source-delete-${DEL_FILE}`);
+    const restore = row.getByTestId(`geo-source-restore-${DEL_FILE}`);
+    const chip = row.getByTestId(`geo-source-draft-${DEL_FILE}`);
+    const geoRow = page.getByTestId('config-draft-geodata');
+    await expect(row).toBeVisible({ timeout: T.action });
+    await expect(del).toHaveAttribute('aria-label', /.+/);
+    await expect(restore).toHaveCount(0);
+
+    // ссылок нет: подтверждение, а не диалог каскада; отмена ничего не помечает
+    await del.click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await expect(page.getByTestId('geo-delete-modal')).toHaveCount(0);
+    await expect(dialog).toContainText(/Ссылок на файл нет|Nothing references the file/);
+    await dialog.getByRole('button', { name: /Отмена|Cancel/ }).click();
+    await expect(dialog).toHaveCount(0, { timeout: T.action });
+    await expect(chip).toHaveCount(0);
+
+    // подтверждение: пометка в черновике, чип, «Вернуть источник» вместо правки и удаления
+    await del.click();
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await dialog.locator('.btn-danger').click();
+    await expect(dialog).toHaveCount(0, { timeout: T.action });
+    await expect(chip).toContainText(/удалится после|will be deleted after/, {
+      timeout: T.action
+    });
+    await expect(row.getByTestId(`geo-source-edit-${DEL_FILE}`)).toHaveCount(0);
+    await expect(del).toHaveCount(0);
+    await expect(restore).toBeVisible();
+    await expect(geoRow).toContainText(DEL_FILE, { timeout: T.action });
+    const marked = await snapshot(page);
+    expect(marked.draft?.some((d) => d.file === DEL_FILE && d.mode === 'delete')).toBe(true);
+    // запись и файл на месте: удаление ждёт «Применить»
+    expect(marked.sources.find((x) => x.file === DEL_FILE)?.entry).toBe(true);
+
+    // «Вернуть источник» снимает только пометку
+    await restore.click();
+    await expect(chip).toHaveCount(0, { timeout: T.action });
+    await expect(geoRow).toHaveCount(0, { timeout: T.action });
+    await expect(del).toBeVisible();
+
+    // снова пометить и сбросить черновик из полосы
+    await del.click();
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await dialog.locator('.btn-danger').click();
+    await expect(chip).toBeVisible({ timeout: T.action });
+    await page.getByTestId('config-draftbar').locator('.draft-bar-actions button').first().click();
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await dialog.locator('.confirm-actions button').last().click();
+    await expect(dialog).toHaveCount(0, { timeout: T.action });
+    await expect(chip).toHaveCount(0, { timeout: T.action });
+    await expect(geoRow).toHaveCount(0, { timeout: T.action });
+    expect((await snapshot(page)).draft ?? []).toHaveLength(0);
 
     await guard.assertClean();
   });

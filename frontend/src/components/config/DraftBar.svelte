@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { get } from 'svelte/store';
   import { t, tp } from '../../i18n';
-  import { showConfirm } from '../../stores';
+  import { showConfirm, configLayerEnabled } from '../../stores';
   import Button from '../Button.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import {
@@ -18,6 +19,8 @@
     handleLayerError
   } from '../../lib/configLayer';
   import { routingView, loadRouting } from '../../lib/configRouting';
+  import { geodataView, geodataStatus, loadGeodata } from '../../lib/configGeodata';
+  import { dropSetName } from './lists/setName';
   import TakeRoutingModal from './routing/TakeRoutingModal.svelte';
   import { ownerState, routingBusy } from './routing/routingOwner';
 
@@ -52,6 +55,27 @@
           ? $t('cfg.apply_blocked_hint')
           : undefined
   );
+
+  // Пометки менеджера geodata в черновике (D-27): строка видна на любой вкладке раздела.
+  // Название набора берётся из снимка менеджера так же, как в его группе
+  const geoRows = $derived.by(() => {
+    const view = $geodataView;
+    if (view === null) return [];
+    return view.draft.map((d) => {
+      const src = view.sources.find((x) => x.file === d.file);
+      return d.mode === 'off'
+        ? $t('cfg.geo.draft_row_off', { name: src !== undefined ? dropSetName(src) : d.file })
+        : $t('cfg.geo.draft_row_delete', { file: d.file });
+    });
+  });
+
+  // Страница открыта не на «Списках», а в черновике могут быть пометки: снимок менеджера
+  // читается один раз. Ошибка загрузки строку не показывает и полосу не ломает
+  $effect(() => {
+    if ($configLayerEnabled && dirty && $geodataView === null && $geodataStatus === 'idle') {
+      untrack(() => void loadGeodata());
+    }
+  });
 
   // «Применить» при группах или правилах в черновике, пока маршрутизацией управляет XKeen:
   // сначала диалог взятия с тремя исходами (D-01)
@@ -88,6 +112,8 @@
     resetting = true;
     try {
       await resetDraft();
+      // Пометки менеджера тоже сброшены: строка перечитывается, не дожидаясь события
+      if (get(geodataView) !== null) void loadGeodata();
     } catch (err) {
       handleLayerError(err);
     } finally {
@@ -118,6 +144,11 @@
         <span class="status-icon status-icon-accent"><Icon name="edit" size={14} /></span>
         {$t('cfg.draft_dirty', { n: $draftChanges })}
       </span>
+      {#if geoRows.length > 0}
+        <span class="status-sub status-geo" data-testid="config-draft-geodata">
+          {geoRows.join(' · ')}
+        </span>
+      {/if}
       {#if blockedByDrift}
         <span class="status-sub">{$t('cfg.draft_blocked', { k: $driftCount })}</span>
       {/if}
@@ -219,6 +250,10 @@
     color: var(--warning);
     font-size: var(--font-size-sm);
     overflow-wrap: anywhere;
+  }
+
+  .status-geo {
+    color: var(--fg-secondary);
   }
 
   .status-holder {

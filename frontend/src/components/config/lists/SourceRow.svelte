@@ -14,7 +14,9 @@
     onopen,
     ondedup,
     onfinish,
-    onedit
+    onedit,
+    ondelete,
+    onrestore
   }: {
     source: SourceView;
     /** Переключатель или иной элемент слева от имени. */
@@ -23,11 +25,14 @@
     onopen?: (source: SourceView) => void;
     /** «Убрать дубль». */
     ondedup?: (source: SourceView) => void;
-    /** «Довести включение». */
+    /** «Довести включение» или «Довести удаление»: режим выбирает вызывающий по состоянию строки. */
     onfinish?: (source: SourceView) => void;
     /** «Изменить ссылку»: у своих записей (в том числе вписанных вручную). */
     onedit?: (source: SourceView) => void;
-    // ondelete и onrestore добавляет план удаления источника
+    /** «Удалить источник»: у своих записей и файлов dat без записи. */
+    ondelete?: (source: SourceView) => void;
+    /** «Вернуть источник»: снимает пометку удаления или выключения из черновика. */
+    onrestore?: (source: SourceView) => void;
   } = $props();
 
   const id = $derived(source.id);
@@ -83,6 +88,14 @@
   const canEdit = $derived(
     onedit !== undefined && source.origin === 'own' && source.entry && !source.draft
   );
+  // Удаляется свой источник или файл без записи; у источника с пометкой кнопки нет
+  const canDelete = $derived(
+    ondelete !== undefined && (source.origin === 'own' || source.origin === 'file') && !source.draft
+  );
+  const canRestore = $derived(onrestore !== undefined && !!source.draft);
+  const incomplete = $derived(
+    source.delete_incomplete !== undefined && source.delete_incomplete !== ''
+  );
   const showOrigin = $derived(source.origin === 'panel' || source.origin === 'own');
 </script>
 
@@ -131,14 +144,18 @@
         <span class="chip chip-warning">{$t('cfg.geo.chip_dup_url')}</span>
       {/if}
       {#if source.draft === 'delete'}
-        <span class="chip chip-default">{$t('cfg.geo.chip_draft_delete')}</span>
+        <span class="chip chip-default" data-testid="geo-source-draft-{id}">
+          {$t('cfg.geo.chip_draft_delete')}
+        </span>
       {:else if source.draft === 'off'}
-        <span class="chip chip-default">{$t('cfg.geo.chip_draft_off')}</span>
+        <span class="chip chip-default" data-testid="geo-source-draft-{id}">
+          {$t('cfg.geo.chip_draft_off')}
+        </span>
       {/if}
-      {#if source.delete_incomplete !== undefined && source.delete_incomplete !== ''}
-        <span class="chip chip-danger">
+      {#if incomplete}
+        <span class="chip chip-danger" data-testid="geo-source-incomplete-{id}">
           {$t('cfg.geo.chip_delete_incomplete', {
-            reason: reasonText(source.delete_incomplete)
+            reason: reasonText(source.delete_incomplete ?? '')
           })}
         </span>
       {/if}
@@ -173,7 +190,7 @@
     <div class="sr-meta sr-meta-off">{$t('cfg.geo.no_file')}</div>
   {/if}
 
-  {#if canEdit || (source.dup && ondedup) || (source.include_stuck && onfinish)}
+  {#if canEdit || canDelete || canRestore || (source.dup && ondedup) || ((incomplete || source.include_stuck) && onfinish)}
     <div class="sr-actions">
       {#if canEdit}
         <button
@@ -187,6 +204,28 @@
           <Icon name="edit" size={14} />
         </button>
       {/if}
+      {#if canDelete}
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm sr-icon"
+          data-testid="geo-source-delete-{id}"
+          aria-label={$t('cfg.geo.delete')}
+          title={$t('cfg.geo.delete')}
+          onclick={() => ondelete?.(source)}
+        >
+          <Icon name="trash" size={14} />
+        </button>
+      {/if}
+      {#if canRestore}
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm"
+          data-testid="geo-source-restore-{id}"
+          onclick={() => onrestore?.(source)}
+        >
+          {$t('cfg.geo.restore')}
+        </button>
+      {/if}
       {#if source.dup && ondedup}
         <button
           type="button"
@@ -197,14 +236,14 @@
           {$t('cfg.geo.dup_fix')}
         </button>
       {/if}
-      {#if source.include_stuck && onfinish}
+      {#if (incomplete || source.include_stuck) && onfinish}
         <button
           type="button"
           class="btn btn-secondary btn-sm"
           data-testid="geo-source-finish-{id}"
           onclick={() => onfinish?.(source)}
         >
-          {$t('cfg.geo.finish_include')}
+          {$t(incomplete ? 'cfg.geo.finish_delete' : 'cfg.geo.finish_include')}
         </button>
       {/if}
     </div>
