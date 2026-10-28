@@ -81,7 +81,7 @@
     "children": {}
   },
   "OutputChunk": {
-    "required": ["job", "from", "next", "text", "running"],
+    "required": ["job", "from", "next", "text", "running", "run_id"],
     "optional": ["truncated"],
     "children": {}
   },

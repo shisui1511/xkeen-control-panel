@@ -124,10 +124,16 @@ type Service struct {
 	job          string
 	started      time.Time
 
-	// omu защищает указатели на буферы вывода.
-	omu   sync.Mutex
-	ugOut *Output
-	jqOut *Output
+	// omu защищает указатели на буферы вывода и их номера: у каждого буфера свой
+	// run_id, новый запуск — новый номер (runSeq только растёт; начинается с
+	// UnixMilli()*1000, поэтому после перезапуска панели номера не повторяются и
+	// остаются точными в JS — меньше 2^53).
+	omu    sync.Mutex
+	ugOut  *Output
+	jqOut  *Output
+	ugRun  uint64
+	jqRun  uint64
+	runSeq uint64
 
 	// nmu сериализует сборку уведомлений.
 	nmu sync.Mutex
@@ -206,6 +212,11 @@ func New(d Deps) (*Service, error) {
 		ctx:    ctx,
 		cancel: cancel,
 	}
+	s.runSeq = uint64(time.Now().UnixMilli()) * 1000
+	s.runSeq++
+	s.ugRun = s.runSeq
+	s.runSeq++
+	s.jqRun = s.runSeq
 	s.logRun = filepath.Join(s.dir, "last-ug.log")
 	s.st = loadState(s.state)
 	s.loadLastOutput()
@@ -764,39 +775,46 @@ func (s *Service) githubLimited(ctx context.Context) bool {
 	return body.Resources.Core.Remaining != nil && *body.Resources.Core.Remaining == 0
 }
 
-// setOutput подменяет буфер вывода задания (новый запуск — чистый буфер).
+// setOutput подменяет буфер вывода задания (новый запуск — чистый буфер и новый номер).
 func (s *Service) setOutput(job string, out *Output) {
 	s.omu.Lock()
 	defer s.omu.Unlock()
+	s.runSeq++
 	switch job {
 	case jobJQ:
 		s.jqOut = out
+		s.jqRun = s.runSeq
 	default:
 		s.ugOut = out
+		s.ugRun = s.runSeq
 	}
 }
 
 // Output отдаёт вывод задания (ug или jq) начиная со смещения from. Построчный вывод
 // по шине событий слоя не идёт: клиент опрашивает этот метод, пока running истинно.
+// RunID — номер буфера: сменился — начался новый запуск, и клиент читает его с начала.
+// From в ответе — фактическое смещение начала Text (после зажатия запрошенного),
+// а не запрошенное.
 func (s *Service) Output(job string, from int64) OutputChunk {
 	if from < 0 {
 		from = 0
 	}
 	s.omu.Lock()
 	var out *Output
+	var runID uint64
 	switch job {
 	case jobJQ:
-		out = s.jqOut
+		out, runID = s.jqOut, s.jqRun
 	default:
 		job = jobUG
-		out = s.ugOut
+		out, runID = s.ugOut, s.ugRun
 	}
 	s.omu.Unlock()
 	text, next, truncated := out.Read(from)
 	s.mu.Lock()
 	running := s.running && s.job == job
 	s.mu.Unlock()
-	return OutputChunk{Job: job, From: from, Next: next, Text: text, Running: running, Truncated: truncated}
+	return OutputChunk{Job: job, From: next - int64(len(text)), Next: next, Text: text, Running: running, Truncated: truncated, RunID: runID}
 }
 
 // setWaiting отмечает ожидание конца «Применить» перед фоновым запуском.

@@ -178,6 +178,7 @@ export interface View {
 export interface OutputChunk {
   /** ug или jq. */
   job: string;
+  /** Фактическое смещение начала text после зажатия запрошенного. */
   from: number;
   /** Смещение для следующего запроса. */
   next: number;
@@ -185,6 +186,8 @@ export interface OutputChunk {
   running: boolean;
   /** Начало вывода отброшено: буфер переполнился. */
   truncated?: boolean;
+  /** Номер запуска: сменился — начался новый запуск, вывод читается с начала. */
+  run_id: number;
 }
 
 export interface ProbeCheck {

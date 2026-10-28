@@ -161,6 +161,7 @@ func TestRouterGeodataRunNow(t *testing.T) {
 		}
 	}
 
+	pre := svc.Output("ug", 0)
 	if err := svc.RunNow(true); err != nil {
 		t.Fatalf("RunNow: %v", err)
 	}
@@ -204,6 +205,22 @@ func TestRouterGeodataRunNow(t *testing.T) {
 	chunk := svc.Output("ug", 0)
 	if chunk.Text == "" {
 		t.Fatalf("вывод ug пуст")
+	}
+	// Номер запуска и фактическое смещение (WR-01): запрос с прежним смещением к новому
+	// запуску не отличим по from, поэтому клиент ориентируется на run_id.
+	post := svc.Output("ug", pre.Next)
+	if post.RunID == 0 || post.RunID == pre.RunID {
+		t.Errorf("новый запуск не отличим по run_id: до %d, после %d", pre.RunID, post.RunID)
+	}
+	minNext := pre.Next
+	if post.Next < minNext {
+		minNext = post.Next
+	}
+	if post.From > post.Next || post.From != minNext {
+		t.Errorf("from — не фактическое смещение: from %d, next %d, запрошено %d", post.From, post.Next, pre.Next)
+	}
+	if full := svc.Output("ug", 0); !full.Truncated && full.From != 0 {
+		t.Errorf("from при чтении с начала: %d, ожидался 0", full.From)
 	}
 	if !lr.Parsed {
 		if lr.Reason == RunErrNetwork {
@@ -265,6 +282,9 @@ func TestRouterGeodataRunNow(t *testing.T) {
 		t.Fatalf("last-ug.log: %v", err)
 	}
 	again := svc2.Output("ug", 0)
+	if again.RunID == 0 {
+		t.Errorf("run_id после перезапуска сервиса равен нулю")
+	}
 	if again.Text == "" || again.Text != string(saved) {
 		t.Errorf("вывод после перезапуска не совпал с last-ug.log (%d и %d байт)", len(again.Text), len(saved))
 	}
