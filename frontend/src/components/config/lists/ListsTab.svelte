@@ -15,6 +15,7 @@
   import AddSourceModal from './AddSourceModal.svelte';
   import EditUrlModal from './EditUrlModal.svelte';
   import FinishModal, { type FinishMode } from './FinishModal.svelte';
+  import DeleteSourceModal from './DeleteSourceModal.svelte';
   import {
     geodataView,
     geodataStatus,
@@ -23,6 +24,7 @@
     dropSource,
     restoreSource,
     geodataErrorText,
+    type ImpactView,
     type SourceView
   } from '../../../lib/configGeodata';
 
@@ -60,6 +62,14 @@
   let finish = $state<{ mode: FinishMode; file: string } | null>(null);
   let addOpen = $state(false);
   let editSource = $state<SourceView | null>(null);
+  // Диалог каскада: источник, у которого нашлись ссылки
+  let cascade = $state<{
+    file: string;
+    mode: 'delete' | 'off';
+    name: string;
+    aliases: string[];
+    impact: ImpactView;
+  } | null>(null);
 
   function enableStandard(s: SourceView) {
     enableTarget = {
@@ -108,7 +118,10 @@
       const name = dropSetName(s);
       const clean =
         impact.lists.length === 0 && impact.raw.length === 0 && impact.foreign.length === 0;
-      if (!clean) return;
+      if (!clean) {
+        cascade = { file: s.file, mode, name, aliases: s.aliases ?? [], impact };
+        return;
+      }
       const link = (s.aliases ?? []).filter((a) => a !== s.file).join(', ');
       const ok = await showConfirm({
         variant: 'danger',
@@ -186,6 +199,7 @@
       sources={standard}
       disabled={oldXkeen}
       onenable={enableStandard}
+      onoff={(s) => void askDrop(s, 'off')}
       ondedup={askDedup}
       onfinish={onFinish}
       onrestore={(s) => void restore(s)}
@@ -195,6 +209,7 @@
       sources={panel}
       disabled={oldXkeen}
       onenable={enablePanel}
+      onoff={(s) => void askDrop(s, 'off')}
       ondedup={askDedup}
       onfinish={onFinish}
       onrestore={(s) => void restore(s)}
@@ -231,6 +246,16 @@
   source={editSource}
   onsaved={() => void loadGeodata()}
   onclose={() => (editSource = null)}
+/>
+
+<DeleteSourceModal
+  open={cascade !== null}
+  file={cascade?.file ?? ''}
+  mode={cascade?.mode ?? 'delete'}
+  name={cascade?.name ?? ''}
+  aliases={cascade?.aliases ?? []}
+  impact={cascade?.impact ?? null}
+  onclose={() => (cascade = null)}
 />
 
 <FinishModal

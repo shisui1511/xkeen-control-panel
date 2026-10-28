@@ -904,4 +904,169 @@ test.describe('удаление источника', () => {
 
     await guard.assertClean();
   });
+
+  test('lists-actions: каскад правил', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
+
+    // лежащий источник «Свои» или «Наборы панели» без чужих ссылок и сырых правил
+    const candidates = before.sources.filter(
+      (x) =>
+        x.present &&
+        !x.draft &&
+        ['own', 'file', 'panel'].includes(x.origin) &&
+        ['geosite', 'geoip'].includes(x.kind)
+    );
+    let source: SnapSource | null = null;
+    for (const c of candidates) {
+      const imp = await api(page, 'GET', `${BASE}/impact?file=${encodeURIComponent(c.file)}`);
+      const foreign = (imp.data?.foreign as unknown[] | undefined) ?? [];
+      const raw = (imp.data?.raw as unknown[] | undefined) ?? [];
+      if (imp.status === 200 && foreign.length === 0 && raw.length === 0) {
+        source = c;
+        break;
+      }
+    }
+    test.skip(source === null, 'на стенде нет лежащего источника «Свои» или «Наборы панели»');
+    const src = source as SnapSource;
+
+    const tagsRes = await api(page, 'GET', `${BASE}/tags?file=${encodeURIComponent(src.file)}`);
+    expect(tagsRes.status, 'GET tags').toBe(200);
+    const tag = ((tagsRes.data?.tags ?? []) as { tag: string }[])[0]?.tag;
+    test.skip(!tag, 'в файле источника нет тегов');
+    const tagName = tag as string;
+
+    // правило в черновике на (файл, тег) источника: других условий нет, правило погибнет
+    const routing = await api(page, 'GET', '/api/configlayer/routing');
+    expect(routing.status, 'GET routing').toBe(200);
+    const ruleSave = await api(page, 'POST', '/api/configlayer/routing/rules/save', {
+      revision: Number(routing.data?.revision ?? 0),
+      rule: {
+        id: '',
+        enabled: true,
+        origin: '',
+        conds: [
+          {
+            type: src.kind,
+            values: [],
+            lists: [{ file: src.file, tag: tagName, kind: src.kind === 'geoip' ? 'ip' : 'site' }]
+          }
+        ],
+        target: { kind: 'direct' },
+        raw: null
+      }
+    });
+    expect(ruleSave.status, 'rules/save').toBe(200);
+    const ruleId = String((ruleSave.data?.rule as { id?: string } | undefined)?.id ?? '');
+    expect(ruleId, 'идентификатор правила').not.toBe('');
+
+    await openLists(page);
+    await startDrop(page, src);
+    const modal = page.getByTestId('geo-delete-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
+    await expect(modal.getByTestId(`geo-delete-row-${tagName}`)).toContainText(src.file);
+    await expect(modal.getByTestId('geo-delete-effects')).toBeVisible();
+    const confirm = modal.getByTestId('geo-delete-confirm');
+    // «заменить» без выбранной замены: записать нельзя
+    await expect(confirm).toBeDisabled();
+    await modal.getByTestId(`geo-delete-with-${tagName}`).selectOption('other');
+    const picker = page.getByTestId('list-picker');
+    await expect(picker).toBeVisible({ timeout: T.action });
+    // списки удаляемого файла в выборе замены скрыты
+    await expect(picker.locator(`[data-testid^="list-row-${src.file}:"]`)).toHaveCount(0);
+    await picker.getByTestId('list-picker-cancel').click();
+    await expect(picker).toHaveCount(0, { timeout: T.action });
+    await expect(confirm).toBeDisabled();
+
+    // убрать список из условий: других условий у правила нет, его удаление видно заранее
+    await modal.getByTestId(`geo-delete-action-${tagName}`).selectOption('remove');
+    await expect(modal.getByTestId(`geo-delete-dies-${tagName}`)).toBeVisible({
+      timeout: T.action
+    });
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    await expect(modal).toHaveCount(0, { timeout: T.action });
+
+    const row = page.getByTestId(groupOf(src.origin)).getByTestId(`geo-source-${src.id}`);
+    await expect(row.getByTestId(`geo-source-draft-${src.id}`)).toBeVisible({
+      timeout: T.action
+    });
+    await expect(page.getByTestId('config-draft-geodata')).toContainText(src.file, {
+      timeout: T.action
+    });
+    const marked = await api(page, 'GET', '/api/configlayer/routing');
+    const ruleIds = ((marked.data?.rules ?? []) as { id: string }[]).map((r) => r.id);
+    expect(ruleIds, 'правило без условий убрано каскадом').not.toContain(ruleId);
+
+    // «Сбросить» возвращает черновик к применённому: пометки нет
+    await page.getByTestId('config-draftbar').locator('.draft-bar-actions button').first().click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await dialog.locator('.confirm-actions button').last().click();
+    await expect(dialog).toHaveCount(0, { timeout: T.action });
+    await expect(row.getByTestId(`geo-source-draft-${src.id}`)).toHaveCount(0, {
+      timeout: T.action
+    });
+    await expect(page.getByTestId('config-draft-geodata')).toHaveCount(0);
+    expect((await snapshot(page)).draft ?? []).toHaveLength(0);
+
+    await guard.assertClean();
+  });
+
+  test('lists-actions: чужая ссылка блокирует', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
+
+    let blocked: SnapSource | null = null;
+    for (const c of before.sources.filter((x) => x.present && !x.draft)) {
+      const imp = await api(page, 'GET', `${BASE}/impact?file=${encodeURIComponent(c.file)}`);
+      if (((imp.data?.foreign as unknown[] | undefined) ?? []).length > 0) {
+        blocked = c;
+        break;
+      }
+    }
+    test.skip(blocked === null, 'на стенде нет чужих ссылок');
+    const src = blocked as SnapSource;
+
+    await startDrop(page, src);
+    const modal = page.getByTestId('geo-delete-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
+    const foreign = modal.getByTestId('geo-delete-foreign');
+    await expect(foreign).toBeVisible({ timeout: T.action });
+    await expect(foreign).toHaveAttribute('role', 'alert');
+    await expect(foreign.getByRole('link')).toHaveAttribute('href', '#/editor');
+    await expect(modal.getByTestId('geo-delete-confirm')).toBeDisabled();
+    await modal.getByTestId('geo-delete-cancel').click();
+    await expect(modal).toHaveCount(0, { timeout: T.action });
+    expect((await snapshot(page)).draft ?? []).toHaveLength(0);
+
+    await guard.assertClean();
+  });
 });
+
+function groupOf(origin: string): string {
+  if (origin === 'panel') return 'geo-group-panel';
+  if (origin === 'standard') return 'geo-group-standard';
+  return 'geo-group-own';
+}
+
+/** Начинает удаление источника или выключение набора из его строки. */
+async function startDrop(page: Page, s: SnapSource): Promise<void> {
+  const row = page.getByTestId(groupOf(s.origin)).getByTestId(`geo-source-${s.id}`);
+  await expect(row).toBeVisible({ timeout: T.action });
+  if (s.origin === 'own' || s.origin === 'file') {
+    await row.getByTestId(`geo-source-delete-${s.id}`).click();
+  } else {
+    await row.locator('label.toggle-label').click();
+  }
+}

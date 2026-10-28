@@ -3720,6 +3720,7 @@
   "cfg.geo.act_drop": "Delete the rules entirely",
   "cfg.geo.replace_hint": "The same tag in another file: {file} · {tag}.",
   "cfg.geo.replace_other": "Another list…",
+  "cfg.geo.replace_choose": "Choose a list",
   "cfg.geo.del_rule_dies": "Rule {n} will be deleted: there are no other conditions.",
   "cfg.geo.del_effects": "After Apply the panel first writes configs for both kernels without references to the file, then removes the geodata entry and the file{symlink}. The panel never changes dat contents.",
   "cfg.geo.del_symlink": ", and the paired symlink {link}",
