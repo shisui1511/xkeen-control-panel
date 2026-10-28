@@ -300,11 +300,9 @@
           <Icon name="warning" size={16} class="dm-alert-icon" />
           <div class="dm-alert-text">
             <span>
-              {foreignParts[0]}
-              {#each foreign as f, i (f.file + ':' + f.line + ':' + i)}
-                <code class="dm-mono">{f.file}:{f.line}</code>{i < foreign.length - 1 ? ', ' : ''}
-              {/each}
-              {foreignParts[1] ?? ''}
+              {foreignParts[0]}{#each foreign as f, i (f.file + ':' + f.line + ':' + i)}<code
+                  class="dm-mono">{f.file}:{f.line}</code
+                >{i < foreign.length - 1 ? ', ' : ''}{/each}{foreignParts[1] ?? ''}
             </span>
             <a class="dm-link" href="#/editor" data-testid="geo-delete-editor">
               {$t('cfg.geo.open_editor')}

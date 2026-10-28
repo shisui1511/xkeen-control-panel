@@ -813,6 +813,42 @@ async function addOwnEntry(page: Page, file: string, url: string): Promise<void>
   expect(written.status, 'запись своего источника').toBe(200);
 }
 
+const XRAY_CONF_DIR = '/opt/etc/xray/configs';
+const FOREIGN_FILE = '98_rt_foreign.json';
+
+/** Запрос к API панели из страницы с её сессией; тело уходит строкой, как у Редактора. */
+async function rawRequest(
+  page: Page,
+  method: string,
+  path: string,
+  body?: string
+): Promise<{ status: number; text: string }> {
+  return page.evaluate(
+    async ({ method, path, body }) => {
+      const res = await fetch(path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': localStorage.getItem('csrf_token') ?? ''
+        },
+        body
+      });
+      return { status: res.status, text: await res.text() };
+    },
+    { method, path, body }
+  );
+}
+
+/** Убирает чужой конфиг сценария; нет файла (404) — не ошибка. */
+async function removeForeignConfig(page: Page): Promise<void> {
+  const res = await rawRequest(
+    page,
+    'POST',
+    `/api/config/delete?path=${encodeURIComponent(`${XRAY_CONF_DIR}/${FOREIGN_FILE}`)}`
+  );
+  expect([200, 404], `уборка ${FOREIGN_FILE}: ${res.text.slice(0, 200)}`).toContain(res.status);
+}
+
 test.describe('удаление источника', () => {
   let xkeenJsonBefore: string | null = null;
 
@@ -824,6 +860,7 @@ test.describe('удаление источника', () => {
     const was = xkeenJsonBefore;
     await withPanel(browser, async (page) => {
       await resetDraft(page);
+      await removeForeignConfig(page);
       if (was === null || (await readXkeenJson(page)) === was) return;
       const res = await api(page, 'POST', `${XKEEN_SETTINGS}/save`, {
         kind: XKEEN_JSON_KIND,
@@ -1128,30 +1165,60 @@ test.describe('удаление источника', () => {
     test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
     test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
 
-    let blocked: SnapSource | null = null;
-    for (const c of before.sources.filter((x) => x.present && !x.draft)) {
+    // лежащий источник без своих ссылок: чужую ссылку на него сценарий кладёт сам
+    let source: SnapSource | null = null;
+    for (const c of before.sources.filter(
+      (x) => x.present && !x.draft && ['geosite', 'geoip'].includes(x.kind)
+    )) {
       const imp = await api(page, 'GET', `${BASE}/impact?file=${encodeURIComponent(c.file)}`);
-      if (((imp.data?.foreign as unknown[] | undefined) ?? []).length > 0) {
-        blocked = c;
+      const foreignNow = ((imp.data?.foreign as unknown[] | undefined) ?? []).length;
+      const rawNow = ((imp.data?.raw as unknown[] | undefined) ?? []).length;
+      if (imp.status === 200 && foreignNow === 0 && rawNow === 0) {
+        source = c;
         break;
       }
     }
-    test.skip(blocked === null, 'на стенде нет чужих ссылок');
-    const src = blocked as SnapSource;
+    test.skip(source === null, 'на стенде нет лежащего источника без ссылок');
+    const src = source as SnapSource;
 
-    await startDrop(page, src);
-    const modal = page.getByTestId('geo-delete-modal');
-    await expect(modal).toBeVisible({ timeout: T.action });
-    const foreign = modal.getByTestId('geo-delete-foreign');
-    await expect(foreign).toBeVisible({ timeout: T.action });
-    await expect(foreign).toHaveAttribute('role', 'alert');
-    await expect(foreign.getByRole('link')).toHaveAttribute('href', '#/editor');
-    await expect(modal.getByTestId('geo-delete-confirm')).toBeDisabled();
-    await modal.getByTestId('geo-delete-cancel').click();
-    await expect(modal).toHaveCount(0, { timeout: T.action });
-    expect((await snapshot(page)).draft ?? []).toHaveLength(0);
+    const tagsRes = await api(page, 'GET', `${BASE}/tags?file=${encodeURIComponent(src.file)}`);
+    expect(tagsRes.status, 'GET tags').toBe(200);
+    const tag = ((tagsRes.data?.tags ?? []) as { tag: string }[])[0]?.tag;
+    test.skip(!tag, 'в файле источника нет тегов');
+    const tagName = tag as string;
 
-    await guard.assertClean();
+    // чужой конфиг Xray: пустой объект и комментарий со ссылкой ext:<файл>:<тег>
+    const foreignPath = `${XRAY_CONF_DIR}/${FOREIGN_FILE}`;
+    const foreignQuery = encodeURIComponent(foreignPath);
+    try {
+      const saved = await rawRequest(
+        page,
+        'POST',
+        `/api/config/save?path=${foreignQuery}`,
+        `{\n  // ext:${src.file}:${tagName}\n}\n`
+      );
+      expect(saved.status, `запись чужого конфига: ${saved.text.slice(0, 200)}`).toBe(200);
+
+      await openLists(page);
+      await startDrop(page, src);
+      const modal = page.getByTestId('geo-delete-modal');
+      await expect(modal).toBeVisible({ timeout: T.action });
+      const foreign = modal.getByTestId('geo-delete-foreign');
+      await expect(foreign).toBeVisible({ timeout: T.action });
+      await expect(foreign).toHaveAttribute('role', 'alert');
+      await expect(foreign.getByRole('link')).toHaveAttribute('href', '#/editor');
+      const text = (await foreign.textContent()) ?? '';
+      expect(text, 'место чужой ссылки с номером строки').toMatch(/98_rt_foreign\.json:\d+\./);
+      expect(text, 'нет пробела перед точкой').not.toMatch(/\s\./);
+      await expect(modal.getByTestId('geo-delete-confirm')).toBeDisabled();
+      await modal.getByTestId('geo-delete-cancel').click();
+      await expect(modal).toHaveCount(0, { timeout: T.action });
+      expect((await snapshot(page)).draft ?? []).toHaveLength(0);
+
+      await guard.assertClean();
+    } finally {
+      await removeForeignConfig(page);
+    }
   });
 });
 
