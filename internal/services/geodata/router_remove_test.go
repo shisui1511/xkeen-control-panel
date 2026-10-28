@@ -501,3 +501,104 @@ func TestRouterGeodataRemoveAfterApply(t *testing.T) {
 		t.Errorf("после «Довести удаление» осталось незавершённое удаление: %+v", e.pending())
 	}
 }
+
+// TestRouterGeodataForeignRefs — чужие конфиги со ссылкой на файл блокируют пометку
+// удаления (D-21): ссылка в файле Xray вне манифеста панели находится по подстроке
+// ext:<имя>:, файл манифеста панели с той же подстрокой не считается, пара zkeen
+// находится по второму имени, профили Mihomo вне манифеста — по имени файла. Пометка
+// отклоняется ошибкой с местами ссылок, черновик не меняется; после удаления чужого
+// файла пометка проходит, «Вернуть источник» её снимает.
+func TestRouterGeodataForeignRefs(t *testing.T) {
+	e := rtRemoveNewEnv(t)
+	// Применение без ссылок на dat: файлы панели попадают в манифест.
+	e.apply(t)
+
+	managed := filepath.Join(e.xrayDir, "99_xcp-routing.json")
+	if !e.layer.IsManagedPath(managed) {
+		t.Fatalf("файл %s не в манифесте панели: проверка пропуска файлов панели невозможна", managed)
+	}
+	rtRemoveWrite(t, managed, "{\"x\": \"ext:"+rtRemoveFile+":"+e.tag+"\"}\n")
+
+	foreign := filepath.Join(e.xrayDir, "05_routing.json")
+	rtRemoveWrite(t, foreign, "{\n  \"routing\": {\n    \"rules\": [\n      {\n        \"type\": \"field\",\n        \"outboundTag\": \"direct\",\n"+
+		"        \"domain\": [\"ext:"+rtRemoveFile+":"+e.tag+"\"]\n      }\n    ]\n  }\n}\n")
+
+	refs, err := e.geo.ForeignRefs(rtRemoveFile)
+	if err != nil {
+		t.Fatalf("ForeignRefs: %v", err)
+	}
+	if len(refs) != 1 || refs[0].File != "05_routing.json" || refs[0].Line != 7 || refs[0].Editor != foreign {
+		t.Fatalf("ссылки на %s: %+v, ожидалось одно место {05_routing.json, 7}", rtRemoveFile, refs)
+	}
+	imp, err := e.geo.Impact(rtRemoveFile)
+	if err != nil {
+		t.Fatalf("Impact: %v", err)
+	}
+	if len(imp.Foreign) != 1 || imp.File != rtRemoveFile || imp.Lists == nil {
+		t.Errorf("влияние: файл %q, чужих ссылок %d", imp.File, len(imp.Foreign))
+	}
+
+	// Пометка отклоняется, черновик не меняется.
+	before := e.rev(t)
+	_, err = e.geo.Drop(before, rtRemoveFile, routing.DropDelete, nil)
+	var fe *ForeignRefError
+	if !errors.As(err, &fe) || !errors.Is(err, ErrForeignRef) || lists.ErrorCode(err) != "foreign_ref" {
+		t.Fatalf("Drop при чужой ссылке: %v, ожидалась foreign_ref", err)
+	}
+	if len(fe.Refs) != 1 || fe.Refs[0].Line != 7 {
+		t.Errorf("места в ошибке: %+v", fe.Refs)
+	}
+	if got := e.rev(t); got != before {
+		t.Errorf("ревизия черновика %d, ожидалась прежняя %d", got, before)
+	}
+	e.requireNoGeodataSection(t)
+
+	// Пара zkeen: ссылка на второе имя блокирует удаление первого.
+	rtRemoveWrite(t, filepath.Join(e.xrayDir, "06_other.json"), "{\"domain\": [\"ext:"+rtRemoveAlias+":X\"]}\n")
+	refs, err = e.geo.ForeignRefs(rtRemoveZkeen)
+	if err != nil {
+		t.Fatalf("ForeignRefs пары: %v", err)
+	}
+	if len(refs) != 1 || refs[0].File != "06_other.json" || refs[0].Line != 1 {
+		t.Errorf("ссылки на пару zkeen: %+v, ожидалось одно место {06_other.json, 1}", refs)
+	}
+	if _, err := e.geo.Drop(e.rev(t), rtRemoveZkeen, routing.DropOff, nil); !errors.Is(err, ErrForeignRef) {
+		t.Errorf("Drop пары при ссылке на второе имя: %v", err)
+	}
+	// Имя файла внутри другого имени ссылкой не считается.
+	rtRemoveWrite(t, filepath.Join(e.xrayDir, "07_name.json"), "{\"domain\": [\"ext:my"+rtRemoveFile+":X\"]}\n")
+	if refs, _ = e.geo.ForeignRefs(rtRemoveFile); len(refs) != 1 {
+		t.Errorf("ссылка на другое имя засчитана: %+v", refs)
+	}
+
+	// Профиль Mihomo вне манифеста: вхождение имени файла.
+	rtRemoveWrite(t, filepath.Join(e.mihomoDir, "profiles", "mix.yaml"), "# список из "+rtRemoveKeep+"\nrules: []\n")
+	refs, err = e.geo.ForeignRefs(rtRemoveKeep)
+	if err != nil {
+		t.Fatalf("ForeignRefs профиля: %v", err)
+	}
+	if len(refs) != 1 || refs[0].File != "profiles/mix.yaml" || refs[0].Line != 1 {
+		t.Errorf("ссылки на %s в профилях Mihomo: %+v", rtRemoveKeep, refs)
+	}
+
+	// Чужой файл удалён — пометка проходит; «Вернуть источник» снимает её.
+	for _, n := range []string{"05_routing.json", "07_name.json"} {
+		if err := os.Remove(filepath.Join(e.xrayDir, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if refs, _ = e.geo.ForeignRefs(rtRemoveFile); len(refs) != 0 {
+		t.Fatalf("после удаления чужого файла остались ссылки: %+v", refs)
+	}
+	if _, err := e.geo.Drop(e.rev(t), rtRemoveFile, routing.DropDelete, nil); err != nil {
+		t.Fatalf("Drop после удаления чужого файла: %v", err)
+	}
+	g, err := routing.ParseGeodataDraft(e.state(t).Draft[routing.GeodataSection])
+	if err != nil || len(g.Drop) != 1 || g.Drop[0] != (routing.GeodataDrop{File: rtRemoveFile, Mode: routing.DropDelete}) {
+		t.Errorf("секция geodata после пометки: %+v (%v)", g, err)
+	}
+	if _, err := e.geo.Restore(e.rev(t), rtRemoveFile); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	e.requireNoGeodataSection(t)
+}

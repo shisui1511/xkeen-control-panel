@@ -1,11 +1,14 @@
 package geodata
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 )
 
@@ -29,6 +32,14 @@ func (e *ForeignRefError) Error() string { return ErrForeignRef.Code }
 
 // Unwrap связывает ошибку с кодом foreign_ref.
 func (e *ForeignRefError) Unwrap() error { return ErrForeignRef }
+
+// ImpactView — влияние удаления или выключения файла: списки с правилами черновика
+// и свои правила ядра (routing.GeodataImpact) плюс места ссылок из чужих конфигов
+// (D-21). Непустой Foreign блокирует удаление.
+type ImpactView struct {
+	routing.GeodataImpact
+	Foreign []ForeignRef `json:"foreign"`
+}
 
 // foreignMaxSize — самый большой конфиг, который просматривается на ссылки.
 const foreignMaxSize = 16 << 20
@@ -186,4 +197,61 @@ func containsDatName(line, name string) bool {
 		}
 		from = start + 1
 	}
+}
+
+// errNoRouting — сервис маршрутизации не передан в Deps.
+var errNoRouting = errors.New("geodata: не задан сервис маршрутизации")
+
+// Impact показывает, что затронет удаление или выключение файла: влияние на правила
+// черновика и места ссылок в чужих конфигах. Ничего не меняет.
+func (s *Service) Impact(file string) (ImpactView, error) {
+	if s.d.Routing == nil {
+		return ImpactView{}, errNoRouting
+	}
+	imp, err := s.d.Routing.GeodataImpact(file)
+	if err != nil {
+		return ImpactView{}, err
+	}
+	refs, err := s.ForeignRefs(file)
+	if err != nil {
+		return ImpactView{}, err
+	}
+	return ImpactView{GeodataImpact: imp, Foreign: refs}, nil
+}
+
+// Drop помечает источник на удаление или выключение вместе с каскадом правил
+// (routing.GeodataDrop). Чужие конфиги со ссылкой на файл блокируют пометку: ошибка
+// *ForeignRefError с местами ссылок, черновик не меняется (T-146.1-22). Файл и запись
+// убираются только после «Применить» (AfterApply).
+func (s *Service) Drop(rev int64, file, mode string, actions []routing.GeodataAction) (configlayer.DraftEvent, error) {
+	if s.d.Routing == nil {
+		return configlayer.DraftEvent{}, errNoRouting
+	}
+	refs, err := s.ForeignRefs(file)
+	if err != nil {
+		return configlayer.DraftEvent{}, err
+	}
+	if len(refs) > 0 {
+		return configlayer.DraftEvent{}, &ForeignRefError{Refs: refs}
+	}
+	ev, err := s.d.Routing.GeodataDrop(rev, file, mode, actions)
+	if err != nil {
+		return configlayer.DraftEvent{}, err
+	}
+	s.changed()
+	return ev, nil
+}
+
+// Restore снимает пометку удаления с файла («Вернуть источник»); правки правил
+// остаются в черновике до «Сбросить».
+func (s *Service) Restore(rev int64, file string) (configlayer.DraftEvent, error) {
+	if s.d.Routing == nil {
+		return configlayer.DraftEvent{}, errNoRouting
+	}
+	ev, err := s.d.Routing.GeodataRestore(rev, file)
+	if err != nil {
+		return configlayer.DraftEvent{}, err
+	}
+	s.changed()
+	return ev, nil
 }
