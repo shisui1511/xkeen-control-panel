@@ -288,6 +288,9 @@ jobs:
       - name: Check routing API
         run: node scripts/check-routing-api.js
 
+      - name: Check geodata API
+        run: node scripts/check-geodata-api.js
+
       - name: Check config UI
         run: node scripts/check-config-ui.js
 
