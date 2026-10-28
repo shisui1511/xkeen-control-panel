@@ -3,11 +3,14 @@
   import { t, tp, currentLang } from '../../../i18n';
   import { showConfirm, showToast } from '../../../stores';
   import Button from '../../Button.svelte';
+  import Input from '../../Input.svelte';
+  import Select from '../../Select.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import { applyRunning, geodataHolder } from '../../../lib/configLayer';
   import {
     geodataView,
     runUpdate,
+    saveSchedule,
     geodataErrorText,
     type FileResultView,
     type LastRunView
@@ -43,6 +46,72 @@
   $effect(() => {
     if (ugRunning) showOutput = true;
   });
+
+  // --- Расписание (формат XKeen: день, час, минута; день -1 — ежедневно) ---
+
+  const sched = $derived(view?.schedule);
+  const savedEnabled = $derived(sched?.enabled ?? false);
+  const savedDay = $derived(String(sched?.day ?? -1));
+  const savedHour = $derived(sched?.hour ?? 4);
+  const savedMinute = $derived(sched?.minute ?? 15);
+
+  // Поля — производные от записанного: ввод их переопределяет, новое сохранённое значение сбрасывает к нему
+  let enabled = $derived(savedEnabled);
+  let day = $derived(savedDay);
+  let hour = $derived<string | number>(savedHour);
+  let minute = $derived<string | number>(savedMinute);
+  let saving = $state(false);
+
+  const DAY_ORDER = [-1, 1, 2, 3, 4, 5, 6, 0];
+  const dayOptions = $derived(
+    DAY_ORDER.map((d) => ({
+      value: String(d),
+      label: $t(d === -1 ? 'cfg.geo.day_daily' : `cfg.geo.day_${d}`)
+    }))
+  );
+
+  /** Целое из поля number: пустое или дробное значение — null. */
+  function whole(v: string | number | null | undefined, max: number): number | null {
+    if (v === null || v === undefined || String(v).trim() === '') return null;
+    const n = Number(v);
+    return Number.isInteger(n) && n >= 0 && n <= max ? n : null;
+  }
+
+  const hourNum = $derived(whole(hour, 23));
+  const minuteNum = $derived(whole(minute, 59));
+  const valid = $derived(hourNum !== null && minuteNum !== null);
+  const dirty = $derived(
+    enabled !== savedEnabled ||
+      day !== savedDay ||
+      hourNum !== savedHour ||
+      minuteNum !== savedMinute
+  );
+
+  async function saveSched() {
+    if (saving || !dirty || !valid || hourNum === null || minuteNum === null) return;
+    saving = true;
+    try {
+      await saveSchedule({ enabled, day: Number(day), hour: hourNum, minute: minuteNum });
+      showToast('success', get(t)('cfg.geo.sched_saved'));
+    } catch (e) {
+      showToast('error', get(t)('cfg.geo.sched_save_failed', { reason: geodataErrorText(e) }));
+    } finally {
+      saving = false;
+    }
+  }
+
+  /** Число, месяц и время из RFC3339 как есть: время роутера, без пересчёта в пояс браузера. */
+  function routerWhen(iso: string | undefined): string {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso ?? '');
+    if (m === null) return iso ?? '';
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+    return d.toLocaleString($currentLang, {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
 
   /** Время RFC3339 как «число, время» по часам браузера. */
   function localWhen(iso: string | undefined): string {
@@ -155,6 +224,82 @@
       </div>
     {/if}
 
+    <div class="geo-sched" data-testid="geo-schedule">
+      <label class="toggle-label geo-sched-toggle">
+        <span class="toggle-switch">
+          <input
+            type="checkbox"
+            bind:checked={enabled}
+            disabled={saving}
+            data-testid="geo-sched-enabled"
+          />
+          <span class="toggle-slider"></span>
+        </span>
+        <span>{$t('cfg.geo.sched_enable')}</span>
+      </label>
+
+      <div class="geo-sched-fields">
+        <div class="geo-field geo-field-day">
+          <label class="form-label" for="{uid}-day">{$t('cfg.geo.sched_day')}</label>
+          <Select
+            id="{uid}-day"
+            bind:value={day}
+            options={dayOptions}
+            disabled={!enabled || saving}
+            data-testid="geo-sched-day"
+          />
+        </div>
+        <div class="geo-field geo-field-num" data-testid="geo-sched-hour">
+          <Input
+            id="{uid}-hour"
+            type="number"
+            label={$t('cfg.geo.sched_hour')}
+            bind:value={hour}
+            disabled={!enabled || saving}
+          />
+        </div>
+        <div class="geo-field geo-field-num" data-testid="geo-sched-minute">
+          <Input
+            id="{uid}-minute"
+            type="number"
+            label={$t('cfg.geo.sched_minute')}
+            bind:value={minute}
+            disabled={!enabled || saving}
+          />
+        </div>
+        <div class="geo-sched-save">
+          <Button
+            variant="primary"
+            loading={saving}
+            disabled={!dirty || !valid || busyReason !== ''}
+            title={busyReason !== '' ? busyReason : undefined}
+            data-testid="geo-sched-save"
+            onclick={saveSched}
+          >
+            {$t('cfg.geo.sched_save')}
+          </Button>
+        </div>
+      </div>
+
+      {#if !valid}
+        <p class="geo-hint geo-hint-error" role="alert">{$t('cfg.geo.err.schedule_invalid')}</p>
+      {/if}
+      {#if busyReason !== ''}
+        <p class="geo-hint">{busyReason}</p>
+      {/if}
+      <p class="geo-hint">
+        {$t('cfg.geo.sched_tz_hint', { time: routerClock(view.schedule.now) })}
+      </p>
+      {#if !enabled}
+        <p class="geo-hint" data-testid="geo-sched-off-hint">{$t('cfg.geo.sched_off_hint')}</p>
+      {/if}
+      {#if view.schedule.enabled && view.schedule.next}
+        <p class="geo-next" data-testid="geo-next-run">
+          {$t('cfg.geo.sched_next', { when: routerWhen(view.schedule.next) })}
+        </p>
+      {/if}
+    </div>
+
     <div class="geo-last">
       <p class="geo-last-text" role="status" data-testid="geo-last-run">
         {#if lastRun}
@@ -229,6 +374,9 @@
     line-height: 1.5;
     color: var(--fg-dim);
     overflow-wrap: anywhere;
+  }
+
+  .geo-run .geo-hint {
     text-align: right;
   }
 
@@ -252,6 +400,60 @@
     font-family: var(--font-family-mono);
     font-size: var(--font-size-sm);
     overflow-wrap: anywhere;
+  }
+
+  .geo-sched {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    min-width: 0;
+  }
+
+  .geo-sched-toggle {
+    align-self: flex-start;
+    font-size: var(--font-size-base);
+    color: var(--fg-primary);
+  }
+
+  .geo-sched-fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--spacing-2) var(--spacing-4);
+    min-width: 0;
+  }
+
+  .geo-field {
+    min-width: 0;
+  }
+
+  .geo-field-day {
+    flex: 0 1 160px;
+  }
+
+  .geo-field-num {
+    flex: 0 1 96px;
+  }
+
+  .geo-field :global(.form-group) {
+    margin: 0;
+  }
+
+  .geo-field :global(.input),
+  .geo-field :global(.xcp-select) {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .geo-next {
+    margin: 0;
+    font-size: var(--font-size-base);
+    line-height: 1.5;
+    color: var(--fg-secondary);
+  }
+
+  .geo-hint-error {
+    color: var(--danger);
   }
 
   .geo-last {
@@ -286,7 +488,9 @@
   }
 
   @media (pointer: coarse), (max-width: 768px) {
-    .geo-card :global(.btn) {
+    .geo-card :global(.btn),
+    .geo-card :global(.input),
+    .geo-card :global(.xcp-select select) {
       min-height: 44px;
     }
   }

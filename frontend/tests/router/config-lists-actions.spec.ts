@@ -1,8 +1,8 @@
 // e2e-pages: config/lists
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Browser, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
-import { api, layerFlag } from './lib/nodes-api';
+import { api, layerFlag, withPanel } from './lib/nodes-api';
 
 // Верх вкладки «Списки» (менеджер geodata XKeen, фаза 146.1, план 12): «Обновить сейчас» с
 // настоящим xkeen -ug, живой вывод, расписание, задача cron XKeen, блок «Загрузка» и диалог
@@ -114,4 +114,109 @@ test('lists-actions: обновить сейчас', async ({ page }) => {
   await expect(page.getByTestId('geo-run-now')).toBeEnabled({ timeout: T.action });
 
   await guard.assertClean();
+});
+
+type Schedule = Snapshot['schedule'];
+
+// Расписание, найденное на стенде: возвращается после сценария, который его меняет
+let savedSchedule: Schedule | null = null;
+
+async function restoreSchedule(browser: Browser): Promise<void> {
+  const was = savedSchedule;
+  savedSchedule = null;
+  if (was === null) return;
+  await withPanel(browser, async (page) => {
+    const res = await api(page, 'POST', `${BASE}/schedule`, {
+      enabled: was.enabled,
+      day: was.day,
+      hour: was.hour,
+      minute: was.minute
+    });
+    expect(res.status, 'возврат расписания').toBe(200);
+  });
+}
+
+test.describe('расписание и cron', () => {
+  test.afterEach(async ({ browser }) => {
+    await restoreSchedule(browser);
+  });
+
+  test('lists-actions: расписание', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen: расписание хранить нечем');
+    savedSchedule = before.schedule;
+
+    // час запуска — через шесть часов от часов роутера (5 часов занят другими задачами стенда)
+    const routerHour = Number(/T(\d{2}):/.exec(before.schedule.now)?.[1]);
+    expect(Number.isFinite(routerHour), 'в снимке есть время роутера').toBe(true);
+    let hour = (routerHour + 6) % 24;
+    if (hour === 5) hour = 3;
+    const minute = 10;
+
+    const card = page.getByTestId('geo-update-card');
+    const toggle = card.getByTestId('geo-sched-enabled');
+    if (!(await toggle.isChecked())) {
+      await card.locator('label.toggle-label').click();
+    }
+    await expect(toggle).toBeChecked();
+    await card.getByTestId('geo-sched-day').selectOption('-1');
+    await card.getByTestId('geo-sched-hour').locator('input').fill(String(hour));
+    await card.getByTestId('geo-sched-minute').locator('input').fill(String(minute));
+
+    const save = card.getByTestId('geo-sched-save');
+    await expect(save).toBeEnabled({ timeout: T.action });
+    await save.click();
+    await expect(page.locator('.toast--success').first()).toBeVisible({ timeout: T.action });
+    await expect(card.getByTestId('geo-next-run')).toBeVisible({ timeout: T.action });
+
+    const after = await snapshot(page);
+    expect(after.schedule.enabled).toBe(true);
+    expect(after.schedule.day).toBe(-1);
+    expect(after.schedule.hour).toBe(hour);
+    expect(after.schedule.minute).toBe(minute);
+    // сохранённое значение — не «изменённое»: кнопка снова неактивна
+    await expect(save).toBeDisabled({ timeout: T.action });
+
+    await guard.assertClean();
+  });
+
+  test('lists-actions: задача cron XKeen', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    test.skip(
+      !before.cron.found || !before.cron.adoptable,
+      'на стенде нет задачи cron XKeen со стандартным расписанием'
+    );
+    // «Перенять расписание» показано, если нет двух расписаний, а расписание панели приостановлено
+    // или выключено и владелец не нажимал «Не сейчас»
+    const adoptShown =
+      !before.cron.two &&
+      (before.schedule.suspended || (!before.cron.kept && !before.schedule.enabled));
+    test.skip(!adoptShown, 'на стенде уведомление о перенятии расписания cron XKeen не показано');
+    savedSchedule = before.schedule;
+
+    const notice = page.getByTestId('geo-cron-notice');
+    await expect(notice).toBeVisible({ timeout: T.page });
+
+    await page.getByTestId('geo-cron-adopt').click();
+    await expect(notice).toHaveCount(0, { timeout: T.action });
+    await expect
+      .poll(async () => (await snapshot(page)).cron.found, { timeout: T.action })
+      .toBe(false);
+
+    // вернуть задачу в cron XKeen: расписание отдаётся XKeen
+    const give = await api(page, 'POST', `${BASE}/cron`, { action: 'give' });
+    expect(give.status, 'POST cron give').toBe(200);
+    expect((await snapshot(page)).cron.found).toBe(true);
+
+    await guard.assertClean();
+  });
 });
