@@ -203,7 +203,7 @@ func TestRouterGeodataCron(t *testing.T) {
 		}
 	}
 	if !foundNotice {
-		t.Errorf("нет уведомления geodata_cron_two")
+		t.Errorf("нет уведомления geodata_cron_two: уведомления %+v, cron %+v, enabled слоя %v", svc.d.Layer.Snapshot().Notices, rtCronSnap(t, svc).Cron, svc.d.Layer.Enabled())
 	}
 
 	// «Убрать задачу cron»: строки нет, расписание панели осталось включённым.
