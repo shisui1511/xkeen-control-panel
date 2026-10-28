@@ -17,6 +17,7 @@
     onoff,
     onopen,
     onadd,
+    onedit,
     ondedup,
     onfinish
   }: {
@@ -31,6 +32,8 @@
     onopen?: (source: SourceView) => void;
     /** «Добавить источник»; пока не передан, кнопка не рисуется. */
     onadd?: () => void;
+    /** «Изменить ссылку» у своих записей. */
+    onedit?: (source: SourceView) => void;
     ondedup?: (source: SourceView) => void;
     onfinish?: (source: SourceView) => void;
   } = $props();
@@ -104,7 +107,13 @@
             {/snippet}
           </SourceRow>
         {:else}
-          <SourceRow source={s} {onopen} {ondedup} {onfinish} />
+          <SourceRow
+            source={s}
+            {onopen}
+            onedit={disabled ? undefined : onedit}
+            {ondedup}
+            {onfinish}
+          />
         {/if}
       {/each}
     </ul>

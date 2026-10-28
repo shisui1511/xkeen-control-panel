@@ -51,6 +51,7 @@ interface SnapSource {
   present: boolean;
   entry: boolean;
   set_id?: string;
+  url?: string;
   pending?: boolean;
   dup?: boolean;
   draft?: string;
@@ -538,4 +539,251 @@ test('lists-actions: выбор списка предлагает включит
   await expect(page.getByTestId('lists-tab')).toBeVisible({ timeout: T.page });
 
   await guard.assertClean();
+});
+
+// --- Свой источник: «Добавить источник» и «Изменить ссылку» (план 146.1-16) ---
+
+const XKEEN_SETTINGS = '/api/xkeen/settings';
+const XKEEN_JSON_KIND = 'xkeen_json';
+const OWN_FILE = 'xcp-ui-test.dat';
+
+/** Содержимое xkeen.json стенда; null — файла нет или он не прочитан. */
+async function readXkeenJson(page: Page): Promise<string | null> {
+  const res = await api(page, 'GET', XKEEN_SETTINGS);
+  const list = (Array.isArray(res.data) ? (res.data as unknown) : []) as {
+    kind: string;
+    content?: string;
+  }[];
+  return list.find((f) => f.kind === XKEEN_JSON_KIND)?.content ?? null;
+}
+
+/** Каталог расширенных наборов: адрес настоящего небольшого файла GitHub (около 68 КБ). */
+async function catalogUrl(page: Page): Promise<string> {
+  const res = await api(page, 'GET', '/api/configlayer/routing/lists');
+  expect(res.status, 'GET /api/configlayer/routing/lists').toBe(200);
+  const extended = (res.data?.extended ?? []) as { id: string; url: string }[];
+  const set = extended.find((e) => e.id === 'roscomvpn_geosite');
+  expect(set?.url, 'в каталоге есть roscomvpn_geosite').toBeTruthy();
+  return set?.url ?? '';
+}
+
+/** Адрес самой панели: сервер отдаёт по нему страницу HTML, а не базу dat. */
+function panelUrl(page: Page): string {
+  return new URL(page.url()).origin + '/';
+}
+
+/** Просит подтвердить потерю комментариев в xkeen.json, если запись их стирает. */
+async function acceptCommentLoss(page: Page): Promise<void> {
+  const lost = page.getByRole('button', {
+    name: /Записать без комментариев|Write without comments/
+  });
+  if (await lost.isVisible({ timeout: T.action }).catch(() => false)) await lost.click();
+}
+
+test.describe('свой источник', () => {
+  // xkeen.json стенда запоминается до сценария и возвращается после каждого: запись своего
+  // источника меняет файл, остальные сценарии должны видеть прежний
+  let xkeenJsonBefore: string | null = null;
+
+  test.beforeAll(async ({ browser }) => {
+    xkeenJsonBefore = await withPanel(browser, readXkeenJson);
+  });
+
+  test.afterEach(async ({ browser }) => {
+    const was = xkeenJsonBefore;
+    if (was === null) return;
+    await withPanel(browser, async (page) => {
+      if ((await readXkeenJson(page)) === was) return;
+      const res = await api(page, 'POST', `${XKEEN_SETTINGS}/save`, {
+        kind: XKEEN_JSON_KIND,
+        content: was
+      });
+      expect(res.status, 'возврат xkeen.json').toBe(200);
+    });
+  });
+
+  test('lists-actions: свой источник — проверка и запись', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
+    test.skip(!before.download.jq, 'на стенде нет jq: XKeen не читает записи geodata');
+    test.skip(!before.download.geofile_update, 'на стенде выключено обновление баз XKeen');
+    expect(
+      before.sources.some((x) => x.file === OWN_FILE),
+      `на стенде нет записи ${OWN_FILE}`
+    ).toBe(false);
+
+    await page.getByTestId('geo-add-source').click();
+    const modal = page.getByTestId('geo-add-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
+    const file = modal.getByTestId('geo-add-file').locator('input');
+    const url = modal.getByTestId('geo-add-url').locator('input');
+    const check = modal.getByTestId('geo-add-check');
+    const results = modal.getByTestId('geo-add-results');
+    const submit = modal.getByTestId('geo-add-submit');
+
+    // пока поля пусты, проверка и добавление неактивны; проверка подсказывает, что заполнить
+    await expect(check).toBeDisabled();
+    await expect(check).toHaveAttribute('title', /.+/);
+    await expect(submit).toBeDisabled();
+    await file.fill(OWN_FILE);
+    await expect(check).toBeDisabled();
+    await url.fill(panelUrl(page));
+    await expect(check).toBeEnabled({ timeout: T.action });
+    // без проверки добавить нельзя
+    await expect(submit).toBeDisabled();
+
+    // адрес самой панели отдаёт HTML: блок, запись закрыта
+    await check.click();
+    const html = results.locator('[data-code="html"]');
+    await expect(html).toBeVisible({ timeout: T.network + T.action });
+    await expect(html).toHaveAttribute('data-level', 'block');
+    await expect(submit).toBeDisabled();
+    await expect(modal.getByTestId('geo-add-diff')).toHaveCount(0);
+
+    // закрытый порт на loopback роутера: адрес не ответил — предупреждение, не блок
+    await url.fill('http://127.0.0.1:9/x.dat');
+    // правка поля сбросила результат
+    await expect(results.locator('li')).toHaveCount(0);
+    await expect(submit).toBeDisabled();
+    await check.click();
+    const fail = results.locator('[data-code="reach_fail"]');
+    await expect(fail).toBeVisible({ timeout: T.network + T.action });
+    await expect(fail).toHaveAttribute('data-level', 'warn');
+    await expect(fail).toContainText(/Адрес не ответил|did not respond/);
+    await expect(results.locator('[data-level="block"]')).toHaveCount(0);
+    // блоков нет: запись разрешена, diff показан
+    await expect(modal.getByTestId('geo-add-diff')).toBeVisible({ timeout: T.action });
+    await expect(submit).toBeEnabled({ timeout: T.action });
+    // любая правка полей снова закрывает запись до новой проверки
+    await file.fill(`x-${OWN_FILE}`);
+    await expect(results.locator('li')).toHaveCount(0);
+    await expect(submit).toBeDisabled();
+    await file.fill(OWN_FILE);
+
+    // настоящий небольшой файл GitHub из каталога: без блоков, записывается
+    await url.fill(await catalogUrl(page));
+    await check.click();
+    await expect(results.locator('li').first()).toBeVisible({ timeout: T.network + T.action });
+    test.skip(
+      (await results.locator('[data-code="reach_fail"]').count()) > 0,
+      'сеть стенда недоступна: адрес GitHub не ответил'
+    );
+    await expect(results.locator('[data-code="kind"]')).toContainText(/geosite/, {
+      timeout: T.action
+    });
+    await expect(results.locator('[data-level="block"]')).toHaveCount(0);
+    const diff = modal.getByTestId('geo-add-diff');
+    await expect(diff).toContainText(OWN_FILE, { timeout: T.action });
+    await expect(diff.locator('.diff-line-added').first()).toBeVisible();
+    await modal.getByTestId('geo-add-update-later').check();
+    await expect(submit).toBeEnabled({ timeout: T.action });
+    await submit.click();
+    await acceptCommentLoss(page);
+    await expect(modal).toBeHidden({ timeout: T.action });
+
+    // в группе «Свои» появилась строка; файла ещё нет, его скачает XKeen по расписанию
+    const row = page.getByTestId('geo-group-own').getByTestId(`geo-source-${OWN_FILE}`);
+    await expect(row).toBeVisible({ timeout: T.action });
+    await expect(row.getByTestId(`geo-source-nofile-${OWN_FILE}`)).toBeVisible();
+    const after = await snapshot(page);
+    const added = after.sources.find((x) => x.file === OWN_FILE);
+    expect(added?.entry, 'запись geodata появилась в xkeen.json').toBe(true);
+    expect(added?.origin).toBe('own');
+
+    await guard.assertClean();
+  });
+
+  test('lists-actions: изменить ссылку', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
+    test.skip(!before.download.jq, 'на стенде нет jq: XKeen не читает записи geodata');
+    test.skip(!before.download.geofile_update, 'на стенде выключено обновление баз XKeen');
+    expect(
+      before.sources.some((x) => x.file === OWN_FILE),
+      `на стенде нет записи ${OWN_FILE}`
+    ).toBe(false);
+
+    // собственная запись тем же путём, что диалог: предпросмотр, затем запись по его отпечатку;
+    // адрес — закрытый порт на loopback роутера, проверка его не блокирует
+    const startUrl = 'http://127.0.0.1:9/x.dat';
+    const op = { kind: 'add', file: OWN_FILE, url: startUrl };
+    const prev = await api(page, 'POST', `${BASE}/preview`, { op });
+    expect(prev.status, 'предпросмотр добавления').toBe(200);
+    const written = await api(page, 'POST', `${BASE}/write`, {
+      op,
+      base: prev.data?.base,
+      accept_comment_loss: true,
+      update_now: false
+    });
+    expect(written.status, 'запись своего источника').toBe(200);
+    await openLists(page);
+
+    // у записи в группе «Свои» есть кнопка правки ссылки
+    const row = page.getByTestId('geo-group-own').getByTestId(`geo-source-${OWN_FILE}`);
+    await expect(row).toBeVisible({ timeout: T.action });
+    const edit = row.getByTestId(`geo-source-edit-${OWN_FILE}`);
+    await expect(edit).toHaveAttribute('aria-label', /.+/);
+    await edit.click();
+
+    // имя файла неактивно, ссылка — прежняя
+    const modal = page.getByTestId('geo-url-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
+    await expect(modal.getByTestId('geo-url-file').locator('input')).toBeDisabled();
+    await expect(modal.getByTestId('geo-url-file').locator('input')).toHaveValue(OWN_FILE);
+    const url = modal.getByTestId('geo-url-url').locator('input');
+    await expect(url).toHaveValue(startUrl);
+    const check = modal.getByTestId('geo-url-check');
+    const results = modal.getByTestId('geo-add-results');
+    const submit = modal.getByTestId('geo-url-submit');
+    await expect(submit).toBeDisabled();
+
+    // адрес самой панели отдаёт HTML: блок, сохранить нельзя
+    await url.fill(panelUrl(page));
+    await expect(results.locator('li')).toHaveCount(0);
+    await check.click();
+    const html = results.locator('[data-code="html"]');
+    await expect(html).toBeVisible({ timeout: T.network + T.action });
+    await expect(html).toHaveAttribute('data-level', 'block');
+    await expect(submit).toBeDisabled();
+    await expect(modal.getByTestId('geo-url-diff')).toHaveCount(0);
+
+    // адрес из каталога: проверка без блоков, diff, сохранение
+    const catalog = await catalogUrl(page);
+    await url.fill(catalog);
+    await expect(results.locator('li')).toHaveCount(0);
+    await check.click();
+    await expect(results.locator('li').first()).toBeVisible({ timeout: T.network + T.action });
+    test.skip(
+      (await results.locator('[data-code="reach_fail"]').count()) > 0,
+      'сеть стенда недоступна: адрес GitHub не ответил'
+    );
+    await expect(results.locator('[data-level="block"]')).toHaveCount(0);
+    const diff = modal.getByTestId('geo-url-diff');
+    await expect(diff).toContainText(OWN_FILE, { timeout: T.action });
+    await expect(diff.locator('.diff-line-added').first()).toBeVisible();
+    await modal.getByTestId('geo-url-update-later').check();
+    await expect(submit).toBeEnabled({ timeout: T.action });
+    await submit.click();
+    await acceptCommentLoss(page);
+    await expect(modal).toBeHidden({ timeout: T.action });
+
+    // у записи теперь ссылка каталога
+    await expect
+      .poll(async () => (await snapshot(page)).sources.find((x) => x.file === OWN_FILE)?.url, {
+        timeout: T.action
+      })
+      .toBe(catalog);
+
+    await guard.assertClean();
+  });
 });
