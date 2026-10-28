@@ -3749,6 +3749,7 @@
   "cfg.geo.insp_no_tags": "Nothing found. Change the query.",
   "cfg.geo.insp_loading": "Reading the file…",
   "cfg.geo.insp_failed": "Could not read the file: {reason}.",
+  "cfg.geo.insp_tags_capped": "Showing the first {shown} of {total} tags. Narrow the search.",
   "cfg.geo.lookup_title": "Where does it belong",
   "cfg.geo.lookup_label": "Domain or IP",
   "cfg.geo.lookup_placeholder": "youtube.com or 1.1.1.1",

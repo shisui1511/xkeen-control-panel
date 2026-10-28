@@ -20,11 +20,14 @@
   let {
     open,
     rule,
+    initialList = null,
     onclose
   }: {
     open: boolean;
     /** Правка существующего правила; null — новое. */
     rule: RuleView | null;
+    /** Новое правило начинается с условия-списка «файл · тег» (из инспектора и поиска). */
+    initialList?: ListRef | null;
     onclose: () => void;
   } = $props();
 
@@ -80,6 +83,15 @@
     return { key: nextKey++, type, text: '', tcp: true, udp: false, lists: [], touched: false };
   }
 
+  /** Первое условие нового правила: список из initialList либо пустое условие. */
+  function initialCond(): CondDraft {
+    const ref = initialList;
+    if (ref === null) return newCond();
+    const d = newCond(ref.kind === 'ip' ? 'geoip' : 'geosite');
+    d.lists = [{ ...ref }];
+    return d;
+  }
+
   function targetValue(target: Target): string {
     return target.kind === 'group' ? `group:${target.id ?? ''}` : target.kind;
   }
@@ -109,7 +121,7 @@
     serverCondErrors = {};
     rawError = '';
     if (r === null) {
-      conds = [newCond()];
+      conds = [initialCond()];
       targetSel = 'direct';
       expert = false;
       seg = 'conds';

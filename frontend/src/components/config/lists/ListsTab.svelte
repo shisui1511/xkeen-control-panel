@@ -16,6 +16,9 @@
   import EditUrlModal from './EditUrlModal.svelte';
   import FinishModal, { type FinishMode } from './FinishModal.svelte';
   import DeleteSourceModal from './DeleteSourceModal.svelte';
+  import InspectorModal from './InspectorModal.svelte';
+  import RuleEditModal from '../rules/RuleEditModal.svelte';
+  import { loadRouting } from '../../../lib/configRouting';
   import {
     geodataView,
     geodataStatus,
@@ -25,6 +28,7 @@
     restoreSource,
     geodataErrorText,
     type ImpactView,
+    type ListRef,
     type SourceView
   } from '../../../lib/configGeodata';
 
@@ -34,6 +38,9 @@
   // xkeen.json открываются отсюда.
   onMount(() => {
     void loadGeodata();
+    // Диалог правила («Создать правило» из инспектора и поиска) берёт группы из представления
+    // маршрутизации
+    void loadRouting();
   });
 
   const loading = $derived(
@@ -70,6 +77,17 @@
     aliases: string[];
     impact: ImpactView;
   } | null>(null);
+
+  // Инспектор файла и диалог нового правила с предзаполненным списком «файл · тег»
+  let inspectFile = $state<string | null>(null);
+  let ruleList = $state<ListRef | null>(null);
+  let ruleOpen = $state(false);
+
+  function makeRule(ref: ListRef) {
+    inspectFile = null;
+    ruleList = ref;
+    ruleOpen = true;
+  }
 
   function enableStandard(s: SourceView) {
     enableTarget = {
@@ -203,6 +221,7 @@
       ondedup={askDedup}
       onfinish={onFinish}
       onrestore={(s) => void restore(s)}
+      onopen={(s) => (inspectFile = s.file)}
     />
     <SourceGroup
       kind="panel"
@@ -213,6 +232,7 @@
       ondedup={askDedup}
       onfinish={onFinish}
       onrestore={(s) => void restore(s)}
+      onopen={(s) => (inspectFile = s.file)}
     />
     <SourceGroup
       kind="own"
@@ -224,6 +244,7 @@
       onrestore={(s) => void restore(s)}
       ondedup={askDedup}
       onfinish={onFinish}
+      onopen={(s) => (inspectFile = s.file)}
     />
   {/if}
 </div>
@@ -256,6 +277,20 @@
   aliases={cascade?.aliases ?? []}
   impact={cascade?.impact ?? null}
   onclose={() => (cascade = null)}
+/>
+
+<InspectorModal
+  open={inspectFile !== null}
+  file={inspectFile ?? ''}
+  onclose={() => (inspectFile = null)}
+  onmakerule={makeRule}
+/>
+
+<RuleEditModal
+  open={ruleOpen}
+  rule={null}
+  initialList={ruleList}
+  onclose={() => (ruleOpen = false)}
 />
 
 <FinishModal
