@@ -167,6 +167,191 @@ func TestRouterGeodataEdit(t *testing.T) {
 		}
 	})
 
+	t.Run("add", func(t *testing.T) {
+		g, path := rtEditStore(t, tg.WorkDir, twoEntries, true)
+		op := GeodataOp{Kind: OpAdd, File: "d.dat", URL: "https://example.invalid/d.dat"}
+		p, err := g.Preview(op)
+		if err != nil {
+			t.Fatalf("Preview: %v", err)
+		}
+		if !p.CommentsKept || p.Base != ContentBase(twoEntries) {
+			t.Errorf("Preview: commentsKept=%v base_ok=%v", p.CommentsKept, p.Base == ContentBase(twoEntries))
+		}
+		for _, keep := range []string{"// комментарий сверху", "// обновлять", "/* про b */", "// про c"} {
+			if !strings.Contains(p.After, keep) {
+				t.Errorf("after потерял %q:\n%s", keep, p.After)
+			}
+		}
+		if err := g.Apply(op, p.Base, false); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		got := rtEntries(t, rtReadFile(t, path))
+		if len(got) != 4 || got[3].File != "d.dat" || got[3].URL != op.URL {
+			t.Errorf("записи после add: %v", got)
+		}
+		if err := g.Apply(op, "", false); ErrorCode(err) != "already_present" {
+			t.Errorf("повторный add: %v", err)
+		}
+
+		// Без записи файла и без jq вставка не делается.
+		g2, path2 := rtEditStore(t, tg.WorkDir, "{\n}\n", false)
+		if _, err := g2.Preview(op); ErrorCode(err) != "no_jq" {
+			t.Errorf("Preview add без jq: %v", err)
+		}
+		if err := g2.Apply(op, "", true); ErrorCode(err) != "no_jq" {
+			t.Errorf("Apply add без jq: %v", err)
+		}
+		if rtReadFile(t, path2) != "{\n}\n" {
+			t.Error("файл изменён при отказе no_jq")
+		}
+		// geofile_update: false — вставка не делается.
+		off := "{\n  \"xkeen\": {\"geofile_update\": false}\n}\n"
+		g3, path3 := rtEditStore(t, tg.WorkDir, off, true)
+		if err := g3.Apply(op, "", true); ErrorCode(err) != "geofile_update_off" {
+			t.Errorf("Apply add при geofile_update=false: %v", err)
+		}
+		if rtReadFile(t, path3) != off {
+			t.Error("файл изменён при отказе geofile_update_off")
+		}
+
+		// Последняя запись без концевого комментария: вставка остаётся текстовой.
+		const plain = "{\n  \"xkeen\": {\n    \"xray\": {\n      \"geodata\": [\n        {\"file\": \"a.dat\", \"url\": \"u1\"}\n      ]\n    }\n  }\n}\n"
+		g4, _ := rtEditStore(t, tg.WorkDir, plain, true)
+		p4, err := g4.Preview(op)
+		if err != nil || !p4.CommentsKept || !strings.Contains(p4.After, "{\"file\": \"a.dat\", \"url\": \"u1\"},\n") {
+			t.Errorf("add после записи без комментария: commentsKept=%v %v\n%s", p4.CommentsKept, err, p4.After)
+		}
+	})
+
+	t.Run("set_url", func(t *testing.T) {
+		g, path := rtEditStore(t, tg.WorkDir, twoEntries, true)
+		const nasty = "https://example.invalid/a\"b\\c.dat"
+		op := GeodataOp{Kind: OpSetURL, File: "a.dat", URL: nasty}
+		p, err := g.Preview(op)
+		if err != nil || !p.CommentsKept {
+			t.Fatalf("Preview: commentsKept=%v %v", p.CommentsKept, err)
+		}
+		if err := g.Apply(op, p.Base, false); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		disk := rtReadFile(t, path)
+		got := rtEntries(t, disk)
+		if len(got) != 3 || got[0].URL != nasty || got[1].URL != "https://example.invalid/b.dat" || got[2].URL != "https://example.invalid/c.dat" {
+			t.Errorf("записи после set_url: %v", got)
+		}
+		for _, keep := range []string{"// про a", "/* про b */", "// про c"} {
+			if !strings.Contains(disk, keep) {
+				t.Errorf("потерян комментарий %q:\n%s", keep, disk)
+			}
+		}
+		if err := g.Apply(GeodataOp{Kind: OpSetURL, File: "zzz.dat", URL: "u"}, "", false); ErrorCode(err) != "entry_not_found" {
+			t.Errorf("set_url неизвестного файла: %v", err)
+		}
+		if err := g.Apply(GeodataOp{Kind: OpSetURL, File: "a.dat", MatchURL: "other", URL: "u"}, "", false); ErrorCode(err) != "entry_not_found" {
+			t.Errorf("set_url с чужим MatchURL: %v", err)
+		}
+
+		// Запись без url получает его.
+		const noURL = "{\n  \"xkeen\": {\"xray\": {\"geodata\": [\n    {\"file\": \"a.dat\"}\n  ]}}\n}\n"
+		g2, path2 := rtEditStore(t, tg.WorkDir, noURL, true)
+		if err := g2.Apply(GeodataOp{Kind: OpSetURL, File: "a.dat", URL: "u1"}, "", false); err != nil {
+			t.Fatalf("set_url записи без url: %v", err)
+		}
+		if got := rtEntries(t, rtReadFile(t, path2)); len(got) != 1 || got[0].URL != "u1" {
+			t.Errorf("записи после set_url без url: %v", got)
+		}
+	})
+
+	t.Run("gh_proxy", func(t *testing.T) {
+		ghOf := func(t *testing.T, content string) (string, int) {
+			t.Helper()
+			root, err := decodeJSONC(content)
+			if err != nil {
+				t.Fatalf("разбор: %v", err)
+			}
+			xk, _ := root["xkeen"].(map[string]any)
+			v, _ := xk["gh_proxy"].(string)
+			return v, strings.Count(content, "\"gh_proxy\"")
+		}
+		// Ключа нет, объект xkeen есть, jq не нужен.
+		g, path := rtEditStore(t, tg.WorkDir, twoEntries, false)
+		if err := g.Apply(GeodataOp{Kind: OpGhProxy, Value: "https://example.invalid/p/"}, "", false); err != nil {
+			t.Fatalf("Apply без ключа: %v", err)
+		}
+		disk := rtReadFile(t, path)
+		if v, n := ghOf(t, disk); v != "https://example.invalid/p/" || n != 1 || !strings.Contains(disk, "/* про b */") {
+			t.Errorf("gh_proxy без ключа: значение %q, вхождений %d\n%s", v, n, disk)
+		}
+		// Ключ есть — значение заменяется.
+		if err := g.Apply(GeodataOp{Kind: OpGhProxy, Value: "https://example.invalid/q/"}, "", false); err != nil {
+			t.Fatalf("Apply с ключом: %v", err)
+		}
+		if v, n := ghOf(t, rtReadFile(t, path)); v != "https://example.invalid/q/" || n != 1 {
+			t.Errorf("gh_proxy с ключом: значение %q, вхождений %d", v, n)
+		}
+		// Нет объекта xkeen и нет файла.
+		for _, content := range []string{"{\n}\n", "", "// только комментарий\n"} {
+			g2, path2 := rtEditStore(t, tg.WorkDir, content, false)
+			if err := g2.Apply(GeodataOp{Kind: OpGhProxy, Value: "p"}, "", true); err != nil {
+				t.Fatalf("Apply в %q: %v", content, err)
+			}
+			if v, _ := ghOf(t, rtReadFile(t, path2)); v != "p" {
+				t.Errorf("gh_proxy в %q: значение %q", content, v)
+			}
+		}
+	})
+
+	t.Run("enable_update", func(t *testing.T) {
+		const nested = "// комментарий\n{\n  \"xkeen\": {\n    \"xray\": {\"x\": {\"geofile_update\" : false}},\n    \"geofile_update\":false // выключено\n  }\n}\n"
+		g, path := rtEditStore(t, tg.WorkDir, nested, false)
+		p, err := g.Preview(GeodataOp{Kind: OpEnableUpdate})
+		if err != nil || !p.CommentsKept {
+			t.Fatalf("Preview: commentsKept=%v %v", p.CommentsKept, err)
+		}
+		if !strings.Contains(p.After, "\"geofile_update\": true") || strings.Contains(p.After, "false") || !strings.Contains(p.After, "// выключено") {
+			t.Errorf("after включения обновления:\n%s", p.After)
+		}
+		if err := g.Apply(GeodataOp{Kind: OpEnableUpdate}, p.Base, false); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		if _, update, err := parseGeodata(rtReadFile(t, path)); err != nil || !update {
+			t.Errorf("geofile_update после включения: %v %v", update, err)
+		}
+		// Ключа нет — файл не меняется.
+		g2, path2 := rtEditStore(t, tg.WorkDir, twoEntries, false)
+		p2, err := g2.Preview(GeodataOp{Kind: OpEnableUpdate})
+		if err != nil || p2.After != p2.Before {
+			t.Errorf("включение без false: after совпадает с before=%v %v", p2.After == p2.Before, err)
+		}
+		if err := g2.Apply(GeodataOp{Kind: OpEnableUpdate}, "", false); err != nil || rtReadFile(t, path2) != twoEntries || rtBackups(path2) != 0 {
+			t.Errorf("Apply включения без false: %v", err)
+		}
+	})
+
+	t.Run("status", func(t *testing.T) {
+		const content = "{\n  \"xkeen\": {\n    \"gh_proxy\": \"https://example.invalid/p/\",\n    \"xray\": {\"geodata\": [\n      {\"file\": \"a.dat\", \"url\": \"u1\"},\n      {\"file\": \"b.dat\", \"url\": \"\"},\n      {\"file\": \"\", \"url\": \"u3\"},\n      {\"file\": \"c.dat\"}\n    ]}\n  }\n}\n"
+		g, _ := rtEditStore(t, tg.WorkDir, content, true)
+		st, err := g.Status()
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		if st.GhProxy != "https://example.invalid/p/" || len(st.Entries) != 1 || st.Entries[0].File != "a.dat" || len(st.Invalid) != 3 {
+			t.Errorf("Status: gh_proxy=%q записей=%d некорректных=%d", st.GhProxy, len(st.Entries), len(st.Invalid))
+		}
+	})
+
+	t.Run("xkeen_json_invalid", func(t *testing.T) {
+		// Файл разбирается, но проверка xkeen.json (policy не массив) отвергает запись.
+		const bad = "{\n  \"xkeen\": {\"policy\": \"x\"}\n}\n"
+		g, path := rtEditStore(t, tg.WorkDir, bad, true)
+		if err := g.Apply(GeodataOp{Kind: OpGhProxy, Value: "p"}, "", false); ErrorCode(err) != "xkeen_json_invalid" {
+			t.Errorf("Apply при отказе проверки: %v", err)
+		}
+		if rtReadFile(t, path) != bad {
+			t.Error("файл изменён при отказе xkeen_json_invalid")
+		}
+	})
+
 	t.Run("remove inline", func(t *testing.T) {
 		const inline = "{\"xkeen\": {\"xray\": {\"geodata\": [{\"file\": \"a.dat\", \"url\": \"u1\"}, {\"file\": \"b.dat\", \"url\": \"u2\"}]}}}\n"
 		for _, name := range []string{"a.dat", "b.dat"} {

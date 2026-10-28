@@ -142,6 +142,47 @@ func (g *GeodataStore) build(op GeodataOp) (GeodataPreviewText, error) {
 	var edit func(src string) (string, error)
 	creates := false
 	switch op.Kind {
+	case OpAdd:
+		if op.File == "" || op.URL == "" {
+			return res, errBadOp
+		}
+		if _, arr, ok := geodataArray(expected); ok {
+			for _, el := range arr {
+				if geodataMatches(el, op.File, "") {
+					return res, ErrAlreadyPresent
+				}
+			}
+		}
+		entry := GeodataEntry{File: op.File, URL: op.URL}
+		if err := addGeneric(expected, entry); err != nil {
+			return res, err
+		}
+		creates = true
+		edit = func(src string) (string, error) { return insertGeodata(src, entry) }
+	case OpSetURL:
+		if op.File == "" || op.URL == "" {
+			return res, errBadOp
+		}
+		if !setURLGeneric(expected, op.File, op.MatchURL, op.URL) {
+			return res, ErrEntryNotFound
+		}
+		edit = func(src string) (string, error) { return setGeodataURL(src, op.File, op.MatchURL, op.URL) }
+	case OpGhProxy:
+		xk, ok := expected["xkeen"]
+		if !ok {
+			xk = map[string]any{}
+			expected["xkeen"] = xk
+		}
+		m, ok := xk.(map[string]any)
+		if !ok {
+			return res, ErrBadStructure
+		}
+		m["gh_proxy"] = op.Value
+		creates = true
+		edit = func(src string) (string, error) { return setGhProxy(src, op.Value) }
+	case OpEnableUpdate:
+		setTrueKey(expected, "geofile_update")
+		edit = setGeofileUpdate
 	case OpRemove:
 		if !removeGeneric(expected, op.File, op.MatchURL) {
 			return res, ErrEntryNotFound
@@ -246,20 +287,29 @@ type splice struct {
 	text       string
 }
 
-// geodataNode разбирает src и находит узел массива xkeen.xray.geodata. Пути нет —
-// (nil, ...) без ошибки; на пути не объект или не массив — ErrBadStructure.
-func geodataNode(src string) (arr *jnode, toks []jtok, comments []jspan, err error) {
+// parseRoot разбирает src в дерево токенов; корень обязан быть объектом.
+func parseRoot(src string) (root *jnode, toks []jtok, comments []jspan, err error) {
 	toks, comments, err = tokenizeJSONC(src)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	p := &jparser{src: src, toks: toks}
-	root, err := p.value()
+	root, err = p.value()
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if p.pos != len(toks) || root.kind != '{' {
 		return nil, nil, nil, ErrBadStructure
+	}
+	return root, toks, comments, nil
+}
+
+// geodataNode разбирает src и находит узел массива xkeen.xray.geodata. Пути нет —
+// (nil, ...) без ошибки; на пути не объект или не массив — ErrBadStructure.
+func geodataNode(src string) (arr *jnode, toks []jtok, comments []jspan, err error) {
+	root, toks, comments, err := parseRoot(src)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	node := root
 	for i, key := range []string{"xkeen", "xray", "geodata"} {
@@ -417,9 +467,148 @@ func nextToken(toks []jtok, pos int) (jtok, bool) {
 	return jtok{}, false
 }
 
-// applySplices применяет непересекающиеся замены, начиная с последней.
+// --- замена адреса, gh_proxy, geofile_update ---
+
+// setURLGeneric меняет url у подходящих элементов разобранного объекта; false — таких нет.
+func setURLGeneric(root map[string]any, file, matchURL, url string) bool {
+	_, arr, ok := geodataArray(root)
+	if !ok {
+		return false
+	}
+	found := false
+	for _, el := range arr {
+		if geodataMatches(el, file, matchURL) {
+			el.(map[string]any)["url"] = url
+			found = true
+		}
+	}
+	return found
+}
+
+// setTrueKey заменяет false на true у ключа key на любой глубине разобранного объекта.
+func setTrueKey(v any, key string) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			if b, ok := val.(bool); k == key && ok && !b {
+				t[k] = true
+				continue
+			}
+			setTrueKey(val, key)
+		}
+	case []any:
+		for _, val := range t {
+			setTrueKey(val, key)
+		}
+	}
+}
+
+func insertionSplices(ins []insertion) []splice {
+	out := make([]splice, 0, len(ins))
+	for _, in := range ins {
+		out = append(out, splice{in.pos, in.pos, in.text})
+	}
+	return out
+}
+
+// setGeodataURL заменяет адрес у элементов geodata с именем file (при непустом
+// matchURL — только с этим адресом). Значение экранируется через quote (json.Marshal).
+// Нет подходящих элементов — ErrEntryNotFound.
+func setGeodataURL(src, file, matchURL, url string) (string, error) {
+	arr, _, comments, err := geodataNode(src)
+	if err != nil {
+		return "", err
+	}
+	if arr == nil {
+		return "", ErrEntryNotFound
+	}
+	var sp []splice
+	for _, it := range arr.items {
+		if !itemMatches(src, it, file, matchURL) {
+			continue
+		}
+		if u := it.val.find("url"); u != nil {
+			sp = append(sp, splice{u.val.start, u.val.end, quote(url)})
+			continue
+		}
+		ins, err := it.val.appendItem(src, comments, func(string, string, bool) string {
+			return quote("url") + ": " + quote(url)
+		})
+		if err != nil {
+			return "", err
+		}
+		sp = append(sp, insertionSplices(ins)...)
+	}
+	if len(sp) == 0 {
+		return "", ErrEntryNotFound
+	}
+	return applySplices(src, sp), nil
+}
+
+// setGhProxy записывает xkeen.gh_proxy: ключ есть — заменяет значение, нет — вставляет
+// член в объект xkeen, нет объекта xkeen — создаёт его.
+func setGhProxy(src, value string) (string, error) {
+	root, _, comments, err := parseRoot(src)
+	if err != nil {
+		return "", err
+	}
+	member := quote("gh_proxy") + ": " + quote(value)
+	xk := root.find("xkeen")
+	if xk == nil {
+		ins, err := root.appendItem(src, comments, func(indent, unit string, multi bool) string {
+			if multi {
+				return quote("xkeen") + ": {\n" + indent + unit + member + "\n" + indent + "}"
+			}
+			return quote("xkeen") + ": {" + member + "}"
+		})
+		if err != nil {
+			return "", err
+		}
+		return applySplices(src, insertionSplices(ins)), nil
+	}
+	if xk.val.kind != '{' {
+		return "", ErrBadStructure
+	}
+	if gp := xk.val.find("gh_proxy"); gp != nil {
+		return applySplices(src, []splice{{gp.val.start, gp.val.end, quote(value)}}), nil
+	}
+	ins, err := xk.val.appendItem(src, comments, func(string, string, bool) string { return member })
+	if err != nil {
+		return "", err
+	}
+	return applySplices(src, insertionSplices(ins)), nil
+}
+
+// setGeofileUpdate заменяет все литералы false у ключа geofile_update на любой
+// глубине на `"geofile_update": true` (двоеточие сразу за кавычкой, как ищет sed
+// XKeen). Ключа или false нет — текст не меняется.
+func setGeofileUpdate(src string) (string, error) {
+	root, _, _, err := parseRoot(src)
+	if err != nil {
+		return "", err
+	}
+	var sp []splice
+	collectFalseKey(src, root, "geofile_update", &sp)
+	return applySplices(src, sp), nil
+}
+
+func collectFalseKey(src string, n *jnode, key string, out *[]splice) {
+	for _, it := range n.items {
+		if n.kind == '{' && it.key == key && it.val.kind == 'v' && src[it.val.start:it.val.end] == "false" {
+			*out = append(*out, splice{it.start, it.end, quote(key) + ": true"})
+			continue
+		}
+		collectFalseKey(src, it.val, key, out)
+	}
+}
+
+// applySplices применяет непересекающиеся замены, начиная с последней. Вставки в одну
+// позицию попадают в текст в порядке списка: применяются в обратном порядке.
 func applySplices(src string, sp []splice) string {
-	sorted := append([]splice(nil), sp...)
+	sorted := make([]splice, len(sp))
+	for i, s := range sp {
+		sorted[len(sp)-1-i] = s
+	}
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].start > sorted[j].start })
 	for _, s := range sorted {
 		src = src[:s.start] + s.text + src[s.end:]
