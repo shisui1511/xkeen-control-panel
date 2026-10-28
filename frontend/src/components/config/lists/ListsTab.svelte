@@ -7,11 +7,20 @@
   import CronNotice from './CronNotice.svelte';
   import DownloadBlock from './DownloadBlock.svelte';
   import UpdateCard from './UpdateCard.svelte';
-  import { geodataView, geodataStatus, loadGeodata } from '../../../lib/configGeodata';
+  import StandardSetsGroup from './StandardSetsGroup.svelte';
+  import EnableSetModal, { type EnableTarget } from './EnableSetModal.svelte';
+  import FinishModal, { type FinishMode } from './FinishModal.svelte';
+  import {
+    geodataView,
+    geodataStatus,
+    loadGeodata,
+    type SourceView
+  } from '../../../lib/configGeodata';
 
   // Снимок менеджера читается при открытии вкладки; дальше его перечитывают события SSE
-  // geodata и draft (подписки регистрирует configGeodata.ts). Карточки вкладки добавляют
-  // следующие планы фазы, здесь каркас: загрузка, ошибка, состояние XKeen и сводка.
+  // geodata и draft (подписки регистрирует configGeodata.ts). Здесь каркас: загрузка, ошибка,
+  // состояние XKeen, сводка и группы источников; диалоги включения набора и записи в
+  // xkeen.json открываются отсюда.
   onMount(() => {
     void loadGeodata();
   });
@@ -24,6 +33,22 @@
   const oldXkeen = $derived(
     $geodataView !== null && $geodataView.xkeen.installed && !$geodataView.xkeen.user_geodata
   );
+  const standard = $derived(
+    $geodataView === null ? [] : $geodataView.sources.filter((s) => s.origin === 'standard')
+  );
+
+  let enableTarget = $state<EnableTarget | null>(null);
+  let finish = $state<{ mode: FinishMode; file: string } | null>(null);
+
+  function enableStandard(s: SourceView) {
+    enableTarget = {
+      id: s.set_id ?? s.id,
+      name: s.file,
+      file: s.file,
+      origin: 'standard'
+    };
+  }
+
   const summary = $derived(
     $geodataView === null
       ? ''
@@ -62,8 +87,29 @@
     <UpdateCard />
     <DownloadBlock />
     <p class="geo-summary" data-testid="geo-summary">{summary}</p>
+    <StandardSetsGroup
+      sources={standard}
+      disabled={oldXkeen}
+      onenable={enableStandard}
+      ondedup={(s) => (finish = { mode: 'dedup', file: s.file })}
+      onfinish={(s) => (finish = { mode: 'finish_include', file: s.file })}
+    />
   {/if}
 </div>
+
+<EnableSetModal
+  open={enableTarget !== null}
+  target={enableTarget}
+  onadded={() => void loadGeodata()}
+  onclose={() => (enableTarget = null)}
+/>
+
+<FinishModal
+  open={finish !== null}
+  mode={finish?.mode ?? 'dedup'}
+  file={finish?.file}
+  onclose={() => (finish = null)}
+/>
 
 <style>
   .config-stack {

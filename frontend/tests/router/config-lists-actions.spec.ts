@@ -40,6 +40,20 @@ interface Snapshot {
   cron: { found: boolean; adoptable: boolean; two: boolean; kept: boolean; schedule?: string };
   run: { running: boolean; waiting_apply: boolean; job?: string };
   last_run?: { at: string; outcome: string };
+  sources: SnapSource[];
+}
+
+interface SnapSource {
+  id: string;
+  file: string;
+  origin: string;
+  kind: string;
+  present: boolean;
+  entry: boolean;
+  set_id?: string;
+  pending?: boolean;
+  dup?: boolean;
+  draft?: string;
 }
 
 async function openLists(page: Page): Promise<void> {
@@ -304,6 +318,135 @@ test.describe('загрузка', () => {
         timeout: T.network + T.action
       });
     }
+
+    await guard.assertClean();
+  });
+});
+
+// Стандартный набор, включённый сценарием: возвращается после него. Файла на стенде до
+// сценария не было, поэтому убирается обычным путём — удалением через черновик и «Применить»
+let enabledFile: string | null = null;
+
+async function removeSource(page: Page, file: string): Promise<void> {
+  const sources = await api(page, 'GET', '/api/configlayer/sources');
+  const drop = await api(page, 'POST', `${BASE}/drop`, {
+    rev: Number(sources.data?.draft_revision ?? 0),
+    file,
+    mode: 'delete',
+    actions: []
+  });
+  expect(drop.status, `удаление ${file} в черновике`).toBe(200);
+  const apply = await api(page, 'POST', '/api/configlayer/apply');
+  expect(apply.status, 'применение черновика').toBe(200);
+}
+
+test.describe('включение набора', () => {
+  test.afterEach(async ({ browser }) => {
+    const file = enabledFile;
+    enabledFile = null;
+    if (file === null) return;
+    await withPanel(browser, async (page) => {
+      // запуск -ug, начатый сценарием, должен закончиться: замок держит удаление
+      await expect
+        .poll(async () => (await snapshot(page)).run.running, {
+          timeout: RUN_LIMIT_MS,
+          intervals: [3_000]
+        })
+        .toBe(false);
+      const now = (await snapshot(page)).sources.find((x) => x.file === file);
+      if (now === undefined || (!now.present && !now.entry)) return;
+      await removeSource(page, file);
+      await expect
+        .poll(
+          async () => {
+            const row = (await snapshot(page)).sources.find((x) => x.file === file);
+            return row !== undefined && (row.present || row.entry);
+          },
+          { timeout: RUN_LIMIT_MS, intervals: [3_000] }
+        )
+        .toBe(false);
+    });
+  });
+
+  test('lists-actions: включить стандартный набор', async ({ page }) => {
+    test.setTimeout(2 * RUN_LIMIT_MS + 10 * 60_000);
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
+    test.skip(!before.download.jq, 'на стенде нет jq: XKeen не читает записи geodata');
+    test.skip(!before.download.geofile_update, 'на стенде выключено обновление баз XKeen');
+    expect(before.run.running, 'на входе в сценарий запуск не идёт').toBe(false);
+    const target = before.sources.find(
+      (x) =>
+        x.origin === 'standard' &&
+        !x.present &&
+        !x.entry &&
+        ['refilter_geoip', 'refilter_geosite', 'v2fly_geosite'].includes(x.set_id ?? '')
+    );
+    test.skip(target === undefined, 'на стенде лежат все стандартные наборы');
+    if (target === undefined) return;
+    const setId = target.set_id ?? target.id;
+    enabledFile = target.file;
+
+    // переключатель выключен; клик открывает диалог с записью geodata в diff
+    const row = page.getByTestId(`geo-source-${target.id}`);
+    const sw = page.getByTestId(`geo-set-switch-${setId}`);
+    await expect(sw).not.toBeChecked();
+    await row.locator('label.toggle-label').click();
+    const modal = page.getByTestId('geodata-add-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
+    await expect(modal.getByTestId('geodata-add-loading')).toHaveCount(0, { timeout: T.page });
+    const diff = modal.getByTestId('geodata-add-diff');
+    await expect(diff).toContainText(target.file, { timeout: T.action });
+    await expect(diff.locator('.diff-line-added').first()).toBeVisible();
+    // клик не включил набор сам: до подтверждения переключатель выключен
+    await expect(sw).not.toBeChecked();
+
+    // «Обновить сейчас»: запись и настоящий xkeen -ug
+    await modal.getByTestId('geodata-update-now').check();
+    const confirm = modal.getByTestId('geodata-add-confirm');
+    await expect(confirm).toBeEnabled({ timeout: T.action });
+    await confirm.click();
+    // в xkeen.json есть комментарии: запись просит подтвердить их потерю
+    const lost = page.getByRole('button', {
+      name: /Записать без комментариев|Write without comments/
+    });
+    if (await lost.isVisible({ timeout: T.action }).catch(() => false)) await lost.click();
+    await expect(modal).toBeHidden({ timeout: T.network + T.action });
+
+    // файла ещё нет: на строке «ждёт скачивания», переключатель включён
+    await expect(page.getByTestId(`geo-source-pending-${target.id}`)).toBeVisible({
+      timeout: T.action
+    });
+    await expect(sw).toBeChecked();
+
+    // XKeen скачал файл, панель убрала временную запись: чип пропал без перезагрузки страницы
+    await expect(page.getByTestId(`geo-source-pending-${target.id}`)).toHaveCount(0, {
+      timeout: RUN_LIMIT_MS
+    });
+    await expect
+      .poll(
+        async () => {
+          const row = (await snapshot(page)).sources.find((x) => x.file === target.file);
+          return row !== undefined && row.present && !row.entry && row.pending !== true;
+        },
+        { timeout: RUN_LIMIT_MS, intervals: [3_000] }
+      )
+      .toBe(true);
+    await expect(sw).toBeChecked();
+    await expect(page.getByTestId(`geo-source-open-${target.id}`)).toBeVisible({
+      timeout: T.action
+    });
+
+    // в xkeen.json записи с этим файлом не осталось: XKeen дальше обновляет файл сам
+    expect(
+      (await snapshot(page)).sources.some((x) => x.file === target.file && x.entry),
+      'временная запись убрана'
+    ).toBe(false);
 
     await guard.assertClean();
   });
