@@ -37,8 +37,16 @@
   // замок занят, «Применить» неактивна и рядом видна причина
   const ugBusy = $derived($geodataHolder === 'geodata_update');
   const removeBusy = $derived($geodataHolder === 'geodata_remove');
+  // Запись xkeen.json по кнопке и уборка временной записи тоже идут под замком
+  const writeBusy = $derived($geodataHolder === 'geodata_write');
   const holderHint = $derived(
-    ugBusy ? $t('cfg.geo.ug_busy') : removeBusy ? $t('cfg.routing.apply_busy_hint') : ''
+    ugBusy
+      ? $t('cfg.geo.ug_busy')
+      : removeBusy
+        ? $t('cfg.routing.apply_busy_hint')
+        : writeBusy
+          ? $t('cfg.geo.write_busy')
+          : ''
   );
   const busy = $derived(applyingHere || applyingOther || resetting || $routingBusy);
   const blockedByDrift = $derived(dirty && hasDrift);

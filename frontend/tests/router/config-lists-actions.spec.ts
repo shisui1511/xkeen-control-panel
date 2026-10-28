@@ -84,7 +84,8 @@ async function expectRunStatusGone(page: Page): Promise<void> {
 }
 
 test('lists-actions: обновить сейчас', async ({ page }) => {
-  test.setTimeout(RUN_LIMIT_MS + 5 * 60_000);
+  // два настоящих запуска -ug подряд
+  test.setTimeout(2 * RUN_LIMIT_MS + 5 * 60_000);
   const guard = attachConsoleGuard(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await openLists(page);
@@ -142,6 +143,34 @@ test('lists-actions: обновить сейчас', async ({ page }) => {
     timeout: T.action
   });
   await expect(page.getByTestId('geo-run-now')).toBeEnabled({ timeout: T.action });
+
+  // второй запуск без перезагрузки страницы: журнал показывает вывод только нового запуска
+  await page.getByTestId('geo-run-now').click();
+  const again = page.getByRole('dialog');
+  await expect(again).toBeVisible({ timeout: T.action });
+  await again.getByRole('button', { name: /Обновить базы|Update databases/ }).click();
+  await expect(page.getByTestId('geo-run-status')).toBeVisible({ timeout: T.action });
+  await expect
+    .poll(async () => (await snapshot(page)).run.running, {
+      timeout: RUN_LIMIT_MS,
+      intervals: [3_000]
+    })
+    .toBe(false);
+  await expectRunStatusGone(page);
+  await expect(page.getByTestId('geo-output')).toBeVisible({ timeout: T.action });
+  await expect
+    .poll(
+      async () => {
+        const server = await api(page, 'GET', `${BASE}/output?job=ug&from=0`);
+        const shown = (await page.getByTestId('geo-output').textContent()) ?? '';
+        return shown.trim() === String(server.data?.text ?? '').trim();
+      },
+      {
+        message: 'журнал на странице совпадает с выводом текущего запуска',
+        timeout: T.action
+      }
+    )
+    .toBe(true);
 
   await guard.assertClean();
 });
