@@ -220,3 +220,91 @@ test.describe('расписание и cron', () => {
     await guard.assertClean();
   });
 });
+
+// Прежний gh_proxy, найденный на стенде: возвращается после сценария, который его меняет
+let savedProxy: string | null = null;
+
+/** Записывает gh_proxy тем же путём, что диалог: предпросмотр, затем запись по его отпечатку. */
+async function writeProxy(page: Page, value: string): Promise<void> {
+  const op = { kind: 'gh_proxy', value };
+  const prev = await api(page, 'POST', `${BASE}/preview`, { op });
+  expect(prev.status, 'предпросмотр gh_proxy').toBe(200);
+  const res = await api(page, 'POST', `${BASE}/write`, {
+    op,
+    base: prev.data?.base,
+    accept_comment_loss: true,
+    update_now: false
+  });
+  expect(res.status, 'запись gh_proxy').toBe(200);
+}
+
+test.describe('загрузка', () => {
+  test.afterEach(async ({ browser }) => {
+    const was = savedProxy;
+    savedProxy = null;
+    if (was === null) return;
+    await withPanel(browser, (page) => writeProxy(page, was));
+  });
+
+  test('lists-actions: gh_proxy с diff', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель gh_proxy не меняет');
+    savedProxy = before.download.gh_proxy;
+    const value = 'https://example.org';
+    test.skip(before.download.gh_proxy === value, 'на стенде уже стоит тот же gh_proxy');
+
+    const block = page.getByTestId('geo-download');
+    const save = block.getByTestId('geo-ghproxy-save');
+    await expect(save).toBeDisabled();
+    await block.getByTestId('geo-ghproxy').locator('input').fill(value);
+    await expect(save).toBeEnabled({ timeout: T.action });
+    await save.click();
+
+    const modal = page.getByTestId('geo-finish-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
+    await expect(modal.getByTestId('geo-finish-diff')).toContainText(value, { timeout: T.action });
+    const submit = modal.getByTestId('geo-finish-submit');
+    await expect(submit).toBeEnabled({ timeout: T.action });
+    await submit.click();
+    // в xkeen.json есть комментарии: запись просит подтвердить их потерю
+    const lost = page.getByRole('button', {
+      name: /Записать без комментариев|Write without comments/
+    });
+    if (await lost.isVisible({ timeout: T.action }).catch(() => false)) await lost.click();
+    await expect(modal).toBeHidden({ timeout: T.action });
+
+    await expect
+      .poll(async () => (await snapshot(page)).download.gh_proxy, { timeout: T.action })
+      .toBe(value);
+
+    await guard.assertClean();
+  });
+
+  test('lists-actions: jq', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    const block = page.getByTestId('geo-download');
+
+    if (before.download.jq) {
+      await expect(block).toContainText(/jq установлен|jq is installed/);
+      await expect(block.getByTestId('geo-jq-install')).toHaveCount(0);
+    } else {
+      await block.getByTestId('geo-jq-install').click();
+      await expect(block.getByTestId('geo-jq-output')).toBeVisible({ timeout: T.action });
+      await expect(block.getByTestId('geo-jq-output')).not.toHaveText('', {
+        timeout: T.network + T.action
+      });
+    }
+
+    await guard.assertClean();
+  });
+});

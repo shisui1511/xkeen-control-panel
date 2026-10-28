@@ -5,6 +5,7 @@
   import Skeleton from '../../Skeleton.svelte';
   import { formatBytes } from '../../../lib/format';
   import CronNotice from './CronNotice.svelte';
+  import DownloadBlock from './DownloadBlock.svelte';
   import UpdateCard from './UpdateCard.svelte';
   import { geodataView, geodataStatus, loadGeodata } from '../../../lib/configGeodata';
 
@@ -59,6 +60,7 @@
     {/if}
     <CronNotice />
     <UpdateCard />
+    <DownloadBlock />
     <p class="geo-summary" data-testid="geo-summary">{summary}</p>
   {/if}
 </div>
