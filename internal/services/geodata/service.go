@@ -99,6 +99,10 @@ type Deps struct {
 	CronFile string
 	// MihomoDir — каталог данных Mihomo; XrayConfDir — каталог конфигов Xray.
 	MihomoDir, XrayConfDir string
+	// AllowedRoots — корни путей панели (cfg.AllowedRoots): каталог dat должен лежать
+	// внутри них, иначе удаление файла после «Применить» отказывает. Пусто — каталог XKeen
+	// по умолчанию.
+	AllowedRoots []string
 	// Now — источник времени (nil — time.Now).
 	Now func() time.Time
 	// HTTP — клиент запроса остатка лимита GitHub API (nil — клиент с таймаутом 10 с).
@@ -193,6 +197,9 @@ func New(d Deps) (*Service, error) {
 	}
 	if d.XrayConfDir == "" {
 		d.XrayConfDir = defaultXrayConfDir
+	}
+	if len(d.AllowedRoots) == 0 {
+		d.AllowedRoots = []string{filepath.Dir(lists.DefaultDatDir)}
 	}
 	if d.Now == nil {
 		d.Now = time.Now

@@ -198,7 +198,7 @@ func rtRemoveNewEnv(t *testing.T) *rtRemoveEnv {
 
 	e.geo, err = New(Deps{
 		DataDir: filepath.Join(e.dir, "panel"), Layer: layer, Store: e.store, Index: e.index, Routing: rt,
-		XrayConfDir: e.xrayDir, MihomoDir: e.mihomoDir,
+		XrayConfDir: e.xrayDir, MihomoDir: e.mihomoDir, AllowedRoots: []string{e.dir},
 	})
 	if err != nil {
 		t.Fatalf("geodata.New: %v", err)
@@ -607,4 +607,90 @@ func TestRouterGeodataForeignRefs(t *testing.T) {
 		t.Fatalf("Restore: %v", err)
 	}
 	e.requireNoGeodataSection(t)
+}
+
+// rtRemoveWantExists проверяет, что путь на месте (Lstat: симлинк не разворачивается).
+func rtRemoveWantExists(t *testing.T, path string, want bool) {
+	t.Helper()
+	_, err := os.Lstat(path)
+	if want && err != nil {
+		t.Errorf("%s должен остаться на месте: %v", path, err)
+	}
+	if !want && err == nil {
+		t.Errorf("%s должен быть удалён", path)
+	}
+}
+
+// TestRouterGeodataRemoveRoots — удаление dat-файла проверяет каталог по корням путей
+// панели (WR-07, T-146.1-52) на файловой системе роутера: каталог внутри корня — файл
+// и симлинк удаляются (цель симлинка остаётся), каталог вне корней или симлинк каталога
+// наружу, недопустимое имя и каталог вместо файла — отказ без удаления.
+func TestRouterGeodataRemoveRoots(t *testing.T) {
+	tg := routertest.Current(t)
+	base := rtGeoTempDir(t, tg.WorkDir)
+	root := filepath.Join(base, "root")
+	datDir := filepath.Join(root, "dat")
+	outside := filepath.Join(base, "outside")
+	other := filepath.Join(base, "other")
+	for _, d := range []string{datDir, outside, other} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const wantMsg = "удаление вне допустимых корней"
+
+	// (1) Корень содержит каталог dat: обычный файл удаляется; симлинк удаляется сам,
+	// цель за пределами каталога остаётся.
+	rtRemoveWrite(t, filepath.Join(datDir, "a.dat"), "a")
+	target := filepath.Join(outside, "real.dat")
+	rtRemoveWrite(t, target, "real")
+	if err := os.Symlink(target, filepath.Join(datDir, "link.dat")); err != nil {
+		t.Fatalf("симлинк link.dat: %v", err)
+	}
+	if err := removeDatFile(datDir, "a.dat", []string{root}); err != nil {
+		t.Errorf("удаление a.dat внутри корня: %v", err)
+	}
+	if err := removeDatFile(datDir, "link.dat", []string{root}); err != nil {
+		t.Errorf("удаление симлинка link.dat: %v", err)
+	}
+	rtRemoveWantExists(t, filepath.Join(datDir, "a.dat"), false)
+	rtRemoveWantExists(t, filepath.Join(datDir, "link.dat"), false)
+	rtRemoveWantExists(t, target, true)
+	if err := removeDatFile(datDir, "a.dat", []string{root}); err != nil {
+		t.Errorf("повторное удаление несуществующего файла не ошибка: %v", err)
+	}
+
+	// (2) Корень — другой каталог: отказ, файл на месте.
+	rtRemoveWrite(t, filepath.Join(datDir, "b.dat"), "b")
+	if err := removeDatFile(datDir, "b.dat", []string{other}); err == nil || !strings.Contains(err.Error(), wantMsg) {
+		t.Errorf("каталог вне корней: %v, ожидалось %q", err, wantMsg)
+	}
+	rtRemoveWantExists(t, filepath.Join(datDir, "b.dat"), true)
+
+	// (3) Каталог dat — симлинк на каталог вне корней: отказ, файл цели на месте.
+	rtRemoveWrite(t, filepath.Join(outside, "c.dat"), "c")
+	linkDir := filepath.Join(root, "linkdir")
+	if err := os.Symlink(outside, linkDir); err != nil {
+		t.Fatalf("симлинк каталога: %v", err)
+	}
+	if err := removeDatFile(linkDir, "c.dat", []string{root}); err == nil || !strings.Contains(err.Error(), wantMsg) {
+		t.Errorf("симлинк каталога наружу: %v, ожидалось %q", err, wantMsg)
+	}
+	rtRemoveWantExists(t, filepath.Join(outside, "c.dat"), true)
+
+	// (4) Имя с выходом из каталога: отказ, файл рядом с каталогом на месте.
+	rtRemoveWrite(t, filepath.Join(root, "x.dat"), "x")
+	if err := removeDatFile(datDir, "../x.dat", []string{root}); err == nil {
+		t.Errorf("имя ../x.dat принято")
+	}
+	rtRemoveWantExists(t, filepath.Join(root, "x.dat"), true)
+
+	// (5) Каталог с именем dat-файла: отказ, каталог на месте.
+	if err := os.Mkdir(filepath.Join(datDir, "d.dat"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeDatFile(datDir, "d.dat", []string{root}); err == nil {
+		t.Errorf("каталог d.dat удалён как файл")
+	}
+	rtRemoveWantExists(t, filepath.Join(datDir, "d.dat"), true)
 }
