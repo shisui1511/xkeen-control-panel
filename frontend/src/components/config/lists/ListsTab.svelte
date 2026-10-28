@@ -17,6 +17,8 @@
   import FinishModal, { type FinishMode } from './FinishModal.svelte';
   import DeleteSourceModal from './DeleteSourceModal.svelte';
   import InspectorModal from './InspectorModal.svelte';
+  import LookupCard from './LookupCard.svelte';
+  import MihomoFilesCard from './MihomoFilesCard.svelte';
   import RuleEditModal from '../rules/RuleEditModal.svelte';
   import { loadRouting } from '../../../lib/configRouting';
   import {
@@ -246,6 +248,8 @@
       onfinish={onFinish}
       onopen={(s) => (inspectFile = s.file)}
     />
+    <LookupCard onmakerule={makeRule} />
+    <MihomoFilesCard />
   {/if}
 </div>
 
