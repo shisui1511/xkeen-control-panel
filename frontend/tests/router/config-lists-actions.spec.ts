@@ -451,3 +451,91 @@ test.describe('включение набора', () => {
     await guard.assertClean();
   });
 });
+
+test.describe('группы источников', () => {
+  test('lists-actions: дубль и группы', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+
+    // три группы источников видны: «Стандартные XKeen», «Наборы панели», «Свои»
+    const standard = page.getByTestId('geo-group-standard');
+    await expect(standard).toBeVisible({ timeout: T.action });
+    await expect(page.getByTestId('geo-group-panel')).toBeVisible({ timeout: T.action });
+    await expect(page.getByTestId('geo-group-own')).toBeVisible({ timeout: T.action });
+    // шесть переключателей стандартных наборов, по одному на файл
+    await expect(standard.locator('fieldset')).toHaveCount(3);
+    await expect(standard.locator('input[type="checkbox"]')).toHaveCount(6);
+    // строка источника не интерактивна как целое: у <li> нет role
+    await expect(standard.locator('li[role]')).toHaveCount(0);
+
+    const dup = before.sources.find((x) => x.dup === true);
+    test.skip(dup === undefined, 'на стенде нет записи geodata, дублирующей стандартный набор');
+    if (dup === undefined) return;
+
+    // «Убрать дубль» открывает диалог с diff; «Отмена» ничего не пишет
+    await page.getByTestId(`geo-source-dedup-${dup.id}`).click();
+    const modal = page.getByTestId('geo-finish-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
+    await expect(modal.getByTestId('geo-finish-diff')).toBeVisible({ timeout: T.action });
+    await modal.getByTestId('geo-finish-cancel').click();
+    await expect(modal).toBeHidden({ timeout: T.action });
+    const after = await snapshot(page);
+    expect(after.sources.find((x) => x.id === dup.id)?.dup, 'запись не тронута').toBe(true);
+
+    await guard.assertClean();
+  });
+});
+
+test('lists-actions: выбор списка предлагает включить набор', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openLists(page);
+  const before = await snapshot(page);
+  test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+  const missing = before.sources.filter(
+    (x) => x.origin === 'standard' && x.kind === 'geosite' && !x.present && !x.pending && !x.entry
+  );
+  const catalog = await api(page, 'GET', '/api/configlayer/routing/lists');
+  const extended = (catalog.data?.extended ?? []) as { kind: string; in_xkeen: boolean }[];
+  const free = extended.filter((e) => e.kind === 'site' && !e.in_xkeen);
+
+  // вкладка «Правила» → диалог правила → выбор списка для условия geosite
+  await page.goto('/#/config/rules', { timeout: T.page, waitUntil: 'domcontentloaded' });
+  const rules = page.getByTestId('rules-tab');
+  await expect(rules).toBeVisible({ timeout: T.page });
+  await expect(rules.locator('.skeleton')).toHaveCount(0, { timeout: T.page });
+  await page.getByTestId('rules-add').click();
+  const rule = page.getByTestId('rule-modal');
+  await expect(rule).toBeVisible({ timeout: T.action });
+  await rule.getByTestId('rule-cond-type-0').selectOption('geosite');
+  await rule.getByTestId('rule-cond-pick-0').click();
+  const picker = page.getByTestId('list-picker');
+  await expect(picker).toBeVisible({ timeout: T.action });
+  await expect(picker.getByTestId('list-picker-loading')).toHaveCount(0, { timeout: T.page });
+
+  // блок «Расширенные наборы»: стандартные наборы XKeen, которых нет на роутере, и ссылка
+  const block = picker.getByTestId('list-picker-extended');
+  await expect(block).toBeVisible({ timeout: T.action });
+  for (const m of missing) {
+    await expect(block.getByTestId(`list-std-add-${m.set_id ?? m.id}`)).toBeVisible({
+      timeout: T.action
+    });
+  }
+  if (missing.length === 0 && free.length === 0) {
+    await expect(block.getByTestId('list-picker-all-enabled')).toBeVisible({ timeout: T.action });
+  }
+  const link = block.getByTestId('list-picker-manage');
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute('href', '#/config/lists');
+
+  // ссылка ведёт на вкладку «Списки»
+  await link.click();
+  await expect(page).toHaveURL(/#\/config\/lists/, { timeout: T.action });
+  await expect(page.getByTestId('lists-tab')).toBeVisible({ timeout: T.page });
+
+  await guard.assertClean();
+});

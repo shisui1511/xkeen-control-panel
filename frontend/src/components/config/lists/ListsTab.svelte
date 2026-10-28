@@ -8,6 +8,7 @@
   import DownloadBlock from './DownloadBlock.svelte';
   import UpdateCard from './UpdateCard.svelte';
   import StandardSetsGroup from './StandardSetsGroup.svelte';
+  import SourceGroup from './SourceGroup.svelte';
   import EnableSetModal, { type EnableTarget } from './EnableSetModal.svelte';
   import FinishModal, { type FinishMode } from './FinishModal.svelte';
   import {
@@ -37,6 +38,16 @@
     $geodataView === null ? [] : $geodataView.sources.filter((s) => s.origin === 'standard')
   );
 
+  const panel = $derived(
+    $geodataView === null ? [] : $geodataView.sources.filter((s) => s.origin === 'panel')
+  );
+  // Свои: все остальные записи geodata (в том числе вписанные вручную) и dat без записи
+  const own = $derived(
+    $geodataView === null
+      ? []
+      : $geodataView.sources.filter((s) => s.origin === 'own' || s.origin === 'file')
+  );
+
   let enableTarget = $state<EnableTarget | null>(null);
   let finish = $state<{ mode: FinishMode; file: string } | null>(null);
 
@@ -47,6 +58,18 @@
       file: s.file,
       origin: 'standard'
     };
+  }
+
+  function askDedup(s: SourceView) {
+    finish = { mode: 'dedup', file: s.file };
+  }
+
+  function askFinish(s: SourceView) {
+    finish = { mode: 'finish_include', file: s.file };
+  }
+
+  function enablePanel(s: SourceView) {
+    enableTarget = { id: s.set_id ?? s.id, name: s.file, file: s.file, origin: 'panel' };
   }
 
   const summary = $derived(
@@ -91,8 +114,23 @@
       sources={standard}
       disabled={oldXkeen}
       onenable={enableStandard}
-      ondedup={(s) => (finish = { mode: 'dedup', file: s.file })}
-      onfinish={(s) => (finish = { mode: 'finish_include', file: s.file })}
+      ondedup={askDedup}
+      onfinish={askFinish}
+    />
+    <SourceGroup
+      kind="panel"
+      sources={panel}
+      disabled={oldXkeen}
+      onenable={enablePanel}
+      ondedup={askDedup}
+      onfinish={askFinish}
+    />
+    <SourceGroup
+      kind="own"
+      sources={own}
+      disabled={oldXkeen}
+      ondedup={askDedup}
+      onfinish={askFinish}
     />
   {/if}
 </div>
