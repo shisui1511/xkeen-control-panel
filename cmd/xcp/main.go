@@ -764,7 +764,7 @@ func main() {
 		// менеджера. Хранилище создаётся без собственного запуска `xkeen -ug`: единственный
 		// вход запуска из панели — сервис менеджера под замком применения.
 		datIndex := lists.NewIndex(lists.DefaultDatDir)
-		geoStore := lists.NewGeodataStore(xkeenSettingsSvc, exec.LookPath, nil)
+		geoStore := lists.NewGeodataStore(xkeenSettingsSvc, exec.LookPath)
 		if sourcesSvc != nil {
 			var routeErr error
 			routingSvc, routeErr = routing.New(routing.Deps{

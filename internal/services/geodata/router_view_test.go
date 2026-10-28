@@ -55,7 +55,7 @@ func rtGeoStore(t *testing.T, xkeenDir string) *lists.GeodataStore {
 	tg := routertest.Current(t)
 	backups := rtGeoTempDir(t, tg.WorkDir)
 	svc := services.NewXKeenSettingsService(xkeenDir, backups, []string{xkeenDir})
-	return lists.NewGeodataStore(svc, exec.LookPath, nil)
+	return lists.NewGeodataStore(svc, exec.LookPath)
 }
 
 // rtGeoLayer создаёт включённый слой во временном каталоге dir и запускает его.

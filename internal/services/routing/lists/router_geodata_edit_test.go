@@ -36,7 +36,7 @@ func rtEditStore(t *testing.T, workDir, content string, jq bool) (*GeodataStore,
 	if jq {
 		look = func(string) (string, error) { return "jq", nil }
 	}
-	return NewGeodataStore(svc, look, nil), path
+	return NewGeodataStore(svc, look), path
 }
 
 func rtReadFile(t *testing.T, path string) string {
