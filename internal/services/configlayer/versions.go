@@ -37,6 +37,9 @@ const (
 	FeatureMihomoUnixSocket     Feature = "mihomo_unix_socket"
 	FeatureMihomoInlineProvider Feature = "mihomo_inline_provider"
 	FeatureXKeenManagedInbounds Feature = "xkeen_managed_inbounds"
+	// FeatureXKeenUserGeodata — пользовательские geodata (`xkeen -ug` с файлами
+	// пользователя): порог XKeen 2.0.1.
+	FeatureXKeenUserGeodata Feature = "xkeen_user_geodata"
 	// FeatureMihomoGroups — группы Mihomo, которые строит панель. Порог 1.19.27
 	// (D-45, 146): у каждой группы панели задан empty-fallback: REJECT — пустая
 	// группа не уходит в DIRECT; общий минимум MinMihomoVersion не меняется.
@@ -75,6 +78,7 @@ var featureThresholds = map[Feature]featureThreshold{
 	FeatureMihomoUnixSocket:     {kernelMihomo, "1.18.4"},
 	FeatureMihomoInlineProvider: {kernelMihomo, "1.19.1"},
 	FeatureXKeenManagedInbounds: {kernelXKeen, "2.0"},
+	FeatureXKeenUserGeodata:     {kernelXKeen, "2.0.1"},
 	FeatureMihomoGroups:         {kernelMihomo, "1.19.27"},
 
 	FeatureXrayXHTTP:           {kernelXray, "24.11.21"},

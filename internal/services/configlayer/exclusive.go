@@ -2,6 +2,7 @@ package configlayer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 )
@@ -104,4 +105,34 @@ func (l *Layer) PublishGeodata(seq uint64) {
 		return
 	}
 	l.broker.Publish(Event{Type: EventGeodata, Data: GeodataEvent{Seq: seq, Holder: l.BusyHolder()}})
+}
+
+// FeatureAvailability — доступность функции по кэшированной карте версий ядер;
+// функции, которой нет в карте, — Undetermined. Номера версий в UI не сравниваются.
+func (l *Layer) FeatureAvailability(f Feature) Availability {
+	_, features := l.versions()
+	if a, ok := features[f]; ok {
+		return a
+	}
+	return Undetermined
+}
+
+// SettleSection меняет секцию одновременно в применённом состоянии и в черновике, без
+// проверки ревизии клиента: так снимается пометка удаления после шага «убрать запись и
+// файл». fn получает текущие Applied[section] и Draft[section] (nil, если секции нет) и
+// возвращает новые значения; nil или JSON null удаляет секцию. Черновик изменился —
+// ревизия +1, событие draft и внеочередная проверка: клиент со старой ревизией получит
+// draft_conflict и перечитает состояние.
+func (l *Layer) SettleSection(section string, fn func(applied, draft json.RawMessage) (json.RawMessage, json.RawMessage, error)) error {
+	if !l.Enabled() {
+		return ErrDisabled
+	}
+	_, changed, err := l.store.SettleSection(section, fn)
+	if err != nil {
+		return err
+	}
+	if changed {
+		l.RequestCheck()
+	}
+	return nil
 }
