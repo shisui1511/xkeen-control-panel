@@ -54,6 +54,12 @@ var (
 	// (или между чтением и записью): запись отменена, предпросмотр нужно построить
 	// заново.
 	ErrGeodataChanged = &CodedError{Code: "geodata_changed"}
+	// ErrEntryNotFound — запись geodata для правки (удаление, замена адреса) не найдена:
+	// нет записи с таким именем или с таким именем и адресом.
+	ErrEntryNotFound = &CodedError{Code: "entry_not_found"}
+	// ErrXKeenJSONInvalid — проверка xkeen.json отвергла результат правки: файл не
+	// пишется (иначе XKeen не запустит прокси).
+	ErrXKeenJSONInvalid = &CodedError{Code: "xkeen_json_invalid"}
 )
 
 // ErrorCode возвращает код ошибки пакета или пустую строку.
