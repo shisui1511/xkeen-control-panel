@@ -14,16 +14,19 @@
     ServiceView
   } from '../../../lib/configRouting';
   import { reasonOf } from '../routing/routingOwner';
-  import AddGeodataModal from '../routing/AddGeodataModal.svelte';
+  import EnableSetModal, { type EnableTarget } from '../lists/EnableSetModal.svelte';
+  import { geodataView, loadGeodata, type SourceView } from '../../../lib/configGeodata';
 
   // Выбор списка для условия geosite или geoip (D-19…D-21): каталог читается с роутера, а не
   // вводится вручную. «Сервисы» — человеческие имена каталога, за каждым «файл · тег»;
   // «Все списки» — каждый тег установленных dat с числом записей и примерами. Диалог лежит
   // поверх диалога правила и возвращает полный набор ссылок условия: убранное здесь
-  // убирается и из условия. Под списком — расширенные наборы встроенного каталога с
-  // «Добавить в XKeen» (D-32, D-33): блок доступен и при пустом каталоге, и при ошибке чтения
-  // (тогда показываются наборы последнего успешного чтения). Всё, что приходит из dat (файлы,
-  // теги, примеры) и из каталога наборов, выводится только интерполяцией.
+  // убирается и из условия. Под списком — расширенные наборы встроенного каталога и
+  // стандартные наборы XKeen, которых нет на роутере (D-26): включаются общим диалогом
+  // EnableSetModal; ниже ссылка на вкладку «Списки». Блок доступен и при пустом каталоге, и
+  // при ошибке чтения (тогда показываются наборы последнего успешного чтения). Всё, что
+  // приходит из dat (файлы, теги, примеры) и из каталога наборов, выводится только
+  // интерполяцией.
   let {
     open,
     kind,
@@ -70,7 +73,7 @@
   let limit = $derived(initial.limit);
   // Наборы последнего успешного чтения каталога: ошибка повторного чтения их не стирает
   let extended = $state<ExtendedSet[]>([]);
-  let addTarget = $state<ExtendedSet | null>(null);
+  let addTarget = $state<EnableTarget | null>(null);
   // Растёт с каждым чтением: устаревший ответ не затирает более свежий
   let seq = 0;
 
@@ -87,6 +90,7 @@
         lists: Array.isArray(data.lists) ? data.lists : []
       };
       extended = Array.isArray(data.extended) ? data.extended : [];
+      void loadGeodata();
       // Нет сервисов нужного вида — сразу полный каталог, а не пустой список сервисов
       const hasServices = catalog.services.some((sv: ServiceView) => refsOf(sv).length > 0);
       if (!hasServices) seg = 'all';
@@ -119,6 +123,31 @@
 
   /** Наборы нужного вида; список диалога и без того ограничен этим видом. */
   const extendedSets = $derived(extended.filter((e: ExtendedSet) => e.kind === kind));
+
+  /** Стандартные наборы XKeen нужного вида, которых нет на роутере (D-26). */
+  const standardMissing = $derived(
+    ($geodataView?.sources ?? []).filter(
+      (s: SourceView) =>
+        s.origin === 'standard' &&
+        s.kind === (kind === 'site' ? 'geosite' : 'geoip') &&
+        !s.present &&
+        !s.pending &&
+        !s.entry
+    )
+  );
+
+  /** Все наборы блока уже включены: предлагать больше нечего. */
+  const allEnabled = $derived(
+    standardMissing.length === 0 && extendedSets.every((e: ExtendedSet) => e.in_xkeen)
+  );
+
+  function addPanel(set: ExtendedSet) {
+    addTarget = { id: set.id, name: set.name, file: set.file, origin: 'panel' };
+  }
+
+  function addStandard(s: SourceView) {
+    addTarget = { id: s.set_id ?? s.id, name: s.file, file: s.file, origin: 'standard' };
+  }
 
   const catalogLists = $derived((catalog?.lists ?? []).filter((l: ListEntry) => l.kind === kind));
 
@@ -369,7 +398,7 @@
       <section class="lp-ext" aria-labelledby="{uid}-ext" data-testid="list-picker-extended">
         <h3 class="lp-ext-title" id="{uid}-ext">{$t('cfg.list.extended_title')}</h3>
         <p class="lp-ext-desc">{$t('cfg.list.extended_desc')}</p>
-        {#if extendedSets.length > 0}
+        {#if extendedSets.length > 0 || standardMissing.length > 0}
           <ul class="lp-ext-list">
             {#each extendedSets as set (set.id)}
               <li class="lp-ext-card" data-testid="list-ext-{set.id}">
@@ -394,15 +423,40 @@
                     type="button"
                     class="btn btn-secondary btn-sm lp-ext-add"
                     data-testid="list-ext-add-{set.id}"
-                    onclick={() => (addTarget = set)}
+                    onclick={() => addPanel(set)}
                   >
                     {$t('cfg.list.add_xkeen')}
                   </button>
                 {/if}
               </li>
             {/each}
+            {#each standardMissing as s (s.id)}
+              <li class="lp-ext-card" data-testid="list-std-{s.set_id ?? s.id}">
+                <span class="lp-main">
+                  <span class="lp-line">
+                    <span class="lp-mono">{s.file}</span>
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm lp-ext-add"
+                  data-testid="list-std-add-{s.set_id ?? s.id}"
+                  onclick={() => addStandard(s)}
+                >
+                  {$t('cfg.list.add_xkeen')}
+                </button>
+              </li>
+            {/each}
           </ul>
         {/if}
+        {#if allEnabled}
+          <p class="lp-ext-desc" data-testid="list-picker-all-enabled">
+            {$t('cfg.geo.picker_all_enabled')}
+          </p>
+        {/if}
+        <a class="lp-ext-link" href="#/config/lists" data-testid="list-picker-manage">
+          {$t('cfg.geo.picker_link')}
+        </a>
       </section>
     {/if}
 
@@ -422,10 +476,9 @@
   </div>
 </Modal>
 
-<AddGeodataModal
+<EnableSetModal
   open={addTarget !== null}
-  set={addTarget}
-  geodata={catalog?.geodata ?? null}
+  target={addTarget}
   onadded={() => void load()}
   onclose={() => (addTarget = null)}
 />
@@ -620,6 +673,13 @@
 
   .lp-ext-add {
     flex-shrink: 0;
+  }
+
+  .lp-ext-link {
+    align-self: flex-start;
+    font-size: var(--font-size-sm);
+    color: var(--accent-text, var(--accent));
+    text-decoration: underline;
   }
 
   .lp-footer {
