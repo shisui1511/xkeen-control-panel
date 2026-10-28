@@ -51,6 +51,7 @@ interface SnapSource {
   present: boolean;
   entry: boolean;
   set_id?: string;
+  url?: string;
   pending?: boolean;
   dup?: boolean;
   draft?: string;
@@ -693,6 +694,95 @@ test.describe('свой источник', () => {
     const added = after.sources.find((x) => x.file === OWN_FILE);
     expect(added?.entry, 'запись geodata появилась в xkeen.json').toBe(true);
     expect(added?.origin).toBe('own');
+
+    await guard.assertClean();
+  });
+
+  test('lists-actions: изменить ссылку', async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openLists(page);
+
+    const before = await snapshot(page);
+    test.skip(!before.xkeen.installed, 'на стенде нет XKeen');
+    test.skip(!before.xkeen.user_geodata, 'XKeen старее 2.0.1: панель записи не делает');
+    test.skip(!before.download.jq, 'на стенде нет jq: XKeen не читает записи geodata');
+    test.skip(!before.download.geofile_update, 'на стенде выключено обновление баз XKeen');
+    expect(
+      before.sources.some((x) => x.file === OWN_FILE),
+      `на стенде нет записи ${OWN_FILE}`
+    ).toBe(false);
+
+    // собственная запись тем же путём, что диалог: предпросмотр, затем запись по его отпечатку;
+    // адрес — закрытый порт на loopback роутера, проверка его не блокирует
+    const startUrl = 'http://127.0.0.1:9/x.dat';
+    const op = { kind: 'add', file: OWN_FILE, url: startUrl };
+    const prev = await api(page, 'POST', `${BASE}/preview`, { op });
+    expect(prev.status, 'предпросмотр добавления').toBe(200);
+    const written = await api(page, 'POST', `${BASE}/write`, {
+      op,
+      base: prev.data?.base,
+      accept_comment_loss: true,
+      update_now: false
+    });
+    expect(written.status, 'запись своего источника').toBe(200);
+    await openLists(page);
+
+    // у записи в группе «Свои» есть кнопка правки ссылки
+    const row = page.getByTestId('geo-group-own').getByTestId(`geo-source-${OWN_FILE}`);
+    await expect(row).toBeVisible({ timeout: T.action });
+    const edit = row.getByTestId(`geo-source-edit-${OWN_FILE}`);
+    await expect(edit).toHaveAttribute('aria-label', /.+/);
+    await edit.click();
+
+    // имя файла неактивно, ссылка — прежняя
+    const modal = page.getByTestId('geo-url-modal');
+    await expect(modal).toBeVisible({ timeout: T.action });
+    await expect(modal.getByTestId('geo-url-file').locator('input')).toBeDisabled();
+    await expect(modal.getByTestId('geo-url-file').locator('input')).toHaveValue(OWN_FILE);
+    const url = modal.getByTestId('geo-url-url').locator('input');
+    await expect(url).toHaveValue(startUrl);
+    const check = modal.getByTestId('geo-url-check');
+    const results = modal.getByTestId('geo-add-results');
+    const submit = modal.getByTestId('geo-url-submit');
+    await expect(submit).toBeDisabled();
+
+    // адрес самой панели отдаёт HTML: блок, сохранить нельзя
+    await url.fill(panelUrl(page));
+    await expect(results.locator('li')).toHaveCount(0);
+    await check.click();
+    const html = results.locator('[data-code="html"]');
+    await expect(html).toBeVisible({ timeout: T.network + T.action });
+    await expect(html).toHaveAttribute('data-level', 'block');
+    await expect(submit).toBeDisabled();
+    await expect(modal.getByTestId('geo-url-diff')).toHaveCount(0);
+
+    // адрес из каталога: проверка без блоков, diff, сохранение
+    const catalog = await catalogUrl(page);
+    await url.fill(catalog);
+    await expect(results.locator('li')).toHaveCount(0);
+    await check.click();
+    await expect(results.locator('li').first()).toBeVisible({ timeout: T.network + T.action });
+    test.skip(
+      (await results.locator('[data-code="reach_fail"]').count()) > 0,
+      'сеть стенда недоступна: адрес GitHub не ответил'
+    );
+    await expect(results.locator('[data-level="block"]')).toHaveCount(0);
+    const diff = modal.getByTestId('geo-url-diff');
+    await expect(diff).toContainText(OWN_FILE, { timeout: T.action });
+    await expect(diff.locator('.diff-line-added').first()).toBeVisible();
+    await modal.getByTestId('geo-url-update-later').check();
+    await expect(submit).toBeEnabled({ timeout: T.action });
+    await submit.click();
+    await acceptCommentLoss(page);
+    await expect(modal).toBeHidden({ timeout: T.action });
+
+    // у записи теперь ссылка каталога
+    await expect
+      .poll(async () => (await snapshot(page)).sources.find((x) => x.file === OWN_FILE)?.url, {
+        timeout: T.action
+      })
+      .toBe(catalog);
 
     await guard.assertClean();
   });

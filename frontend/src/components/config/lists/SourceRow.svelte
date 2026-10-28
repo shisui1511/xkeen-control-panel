@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import { t, currentLang } from '../../../i18n';
   import { formatBytes } from '../../../lib/format';
+  import Icon from '../../../lib/components/Icon.svelte';
   import type { SourceView, FileResultView } from '../../../lib/configGeodata';
 
   // Строка источника вкладки «Списки». Строка в целом не интерактивна: <li> без role и без
@@ -12,7 +13,8 @@
     lead,
     onopen,
     ondedup,
-    onfinish
+    onfinish,
+    onedit
   }: {
     source: SourceView;
     /** Переключатель или иной элемент слева от имени. */
@@ -23,7 +25,9 @@
     ondedup?: (source: SourceView) => void;
     /** «Довести включение». */
     onfinish?: (source: SourceView) => void;
-    // onedit, ondelete и onrestore добавляют планы правки ссылки и удаления источника
+    /** «Изменить ссылку»: у своих записей (в том числе вписанных вручную). */
+    onedit?: (source: SourceView) => void;
+    // ondelete и onrestore добавляет план удаления источника
   } = $props();
 
   const id = $derived(source.id);
@@ -75,6 +79,10 @@
   );
   // Файла нет, запись есть и скачивание не ждёт: запись «висит» без файла
   const noFileYet = $derived(source.entry && !source.present && source.pending !== true);
+  // Ссылка правится у записи geodata своего источника; у источника с пометкой черновика кнопки нет
+  const canEdit = $derived(
+    onedit !== undefined && source.origin === 'own' && source.entry && !source.draft
+  );
   const showOrigin = $derived(source.origin === 'panel' || source.origin === 'own');
 </script>
 
@@ -165,8 +173,20 @@
     <div class="sr-meta sr-meta-off">{$t('cfg.geo.no_file')}</div>
   {/if}
 
-  {#if (source.dup && ondedup) || (source.include_stuck && onfinish)}
+  {#if canEdit || (source.dup && ondedup) || (source.include_stuck && onfinish)}
     <div class="sr-actions">
+      {#if canEdit}
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm sr-icon"
+          data-testid="geo-source-edit-{id}"
+          aria-label={$t('cfg.geo.edit_url')}
+          title={$t('cfg.geo.edit_url')}
+          onclick={() => onedit?.(source)}
+        >
+          <Icon name="edit" size={14} />
+        </button>
+      {/if}
       {#if source.dup && ondedup}
         <button
           type="button"
@@ -296,6 +316,12 @@
     margin-left: auto;
   }
 
+  .sr-actions :global(.sr-icon) {
+    min-width: var(--btn-h, 32px);
+    padding: 0;
+    justify-content: center;
+  }
+
   @media (max-width: 768px) {
     /* Мета переносится под имя, действия идут отдельной строкой справа */
     .sr-meta {
@@ -316,6 +342,10 @@
 
     .sr-actions :global(.btn) {
       min-height: 44px;
+    }
+
+    .sr-actions :global(.sr-icon) {
+      min-width: 44px;
     }
   }
 </style>
