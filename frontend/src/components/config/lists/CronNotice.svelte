@@ -4,12 +4,18 @@
   import { showToast } from '../../../stores';
   import Button from '../../Button.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
-  import { geodataView, cronAction, geodataErrorText } from '../../../lib/configGeodata';
+  import {
+    geodataView,
+    cronAction,
+    saveSchedule,
+    geodataErrorText
+  } from '../../../lib/configGeodata';
 
   // Задача cron XKeen и расписание панели: перенять, оставить, убрать или отдать XKeen
   // (D-12, D-17, D-36). Кнопка называет последствие, диалога нет. Нажатая кнопка в loading,
-  // вторая неактивна; при ошибке предупреждение остаётся.
-  type Action = 'adopt' | 'keep' | 'remove' | 'give';
+  // вторая неактивна; при ошибке предупреждение остаётся. Приостановленное расписание без
+  // строки, которую можно перенять, возобновляется сохранением того же расписания.
+  type Action = 'adopt' | 'keep' | 'remove' | 'give' | 'resume';
 
   // Разделитель, по которому текст режется на часть до и после расписания (mono)
   const SCHEDULE_TOKEN = '\u0001schedule\u0001';
@@ -18,9 +24,11 @@
   const cron = $derived(view?.cron);
   const schedule = $derived(view?.schedule);
 
-  type Kind = 'suspended' | 'two' | 'nonstandard' | 'found' | '';
+  type Kind = 'resume' | 'suspended' | 'two' | 'nonstandard' | 'found' | '';
   const kind = $derived.by((): Kind => {
-    if (!cron || !schedule || !cron.found) return '';
+    if (!cron || !schedule) return '';
+    if (schedule.suspended && schedule.enabled && (!cron.found || !cron.adoptable)) return 'resume';
+    if (!cron.found) return '';
     if (cron.two) return 'two';
     if (schedule.suspended && cron.adoptable) return 'suspended';
     if (!cron.adoptable) return 'nonstandard';
@@ -39,7 +47,7 @@
   );
 
   const parts = $derived.by((): [string, string] => {
-    if (kind === '') return ['', ''];
+    if (kind === '' || kind === 'resume') return ['', ''];
     const [before, after = ''] = $t(textKey, { schedule: SCHEDULE_TOKEN }).split(SCHEDULE_TOKEN);
     return [before, after];
   });
@@ -50,11 +58,19 @@
     if (pending !== '') return;
     pending = action;
     try {
+      if (action === 'resume') {
+        if (!schedule) return;
+        const { day, hour, minute } = schedule;
+        await saveSchedule({ enabled: true, day, hour, minute });
+        showToast('success', get(t)('cfg.geo.cron_resumed'));
+        return;
+      }
       await cronAction(action);
       if (action === 'adopt') showToast('success', get(t)('cfg.geo.cron_adopted'));
       if (action === 'give') showToast('success', get(t)('cfg.geo.cron_given'));
     } catch (e) {
-      showToast('error', get(t)('cfg.geo.cron_failed', { reason: geodataErrorText(e) }));
+      const key = action === 'resume' ? 'cfg.geo.sched_save_failed' : 'cfg.geo.cron_failed';
+      showToast('error', get(t)(key, { reason: geodataErrorText(e) }));
     } finally {
       pending = '';
     }
@@ -69,10 +85,26 @@
     >
       <Icon name="warning" size={16} class="geo-cron-icon" />
       <div class="geo-cron-body">
-        <p class="geo-cron-text">
-          {parts[0]}<span class="geo-cron-mono">{cron.schedule ?? ''}</span>{parts[1]}
-        </p>
-        {#if kind === 'two'}
+        {#if kind === 'resume'}
+          <p class="geo-cron-text">{$t('cfg.geo.cron_resume_text')}</p>
+        {:else}
+          <p class="geo-cron-text">
+            {parts[0]}<span class="geo-cron-mono">{cron.schedule ?? ''}</span>{parts[1]}
+          </p>
+        {/if}
+        {#if kind === 'resume'}
+          <div class="geo-cron-actions">
+            <Button
+              variant="primary"
+              loading={pending === 'resume'}
+              disabled={pending !== ''}
+              data-testid="geo-sched-resume"
+              onclick={() => act('resume')}
+            >
+              {$t('cfg.geo.cron_resume')}
+            </Button>
+          </div>
+        {:else if kind === 'two'}
           <div class="geo-cron-actions">
             <Button
               variant="primary"

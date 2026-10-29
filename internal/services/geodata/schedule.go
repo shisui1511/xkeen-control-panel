@@ -121,13 +121,26 @@ func validSchedule(sch Schedule) bool {
 
 // SetSchedule сохраняет расписание панели. crontab не трогается: выключение
 // расписания означает «без расписания», cron XKeen при этом не возвращается (D-13).
+// Сохранение включённого расписания снимает приостановку (D-36), если перенимать
+// нечего: строки cron XKeen нет или её расписание нестандартное. Стандартную строку
+// перенимает только кнопка «Перенять расписание» — до неё приостановка остаётся.
 // Код отказа — schedule_invalid.
 func (s *Service) SetSchedule(sch Schedule) error {
 	if !validSchedule(sch) {
 		return ErrScheduleInvalid
 	}
+	s.sched.cronMu.Lock()
+	defer s.sched.cronMu.Unlock()
+	resume := false
+	if sch.Enabled {
+		info, err := s.readCron()
+		resume = err == nil && (!info.found || !info.standard)
+	}
 	s.mu.Lock()
 	s.st.Schedule = sch
+	if resume {
+		s.st.Suspended = false
+	}
 	if !sch.Enabled {
 		s.st.RetryAt = time.Time{}
 		s.st.RetryFailed = false

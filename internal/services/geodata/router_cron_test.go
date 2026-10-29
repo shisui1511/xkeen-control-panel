@@ -290,3 +290,63 @@ func TestRouterGeodataCron(t *testing.T) {
 	}
 	svc.OnFlagOn()
 }
+
+// TestRouterGeodataScheduleResume — приостановленное расписание панели возобновляется
+// сохранением, когда перенимать нечего: строки cron XKeen нет или она нестандартная
+// (D-36). Стандартную строку перенимает только «Перенять расписание».
+func TestRouterGeodataScheduleResume(t *testing.T) {
+	svc, line := rtCronSetup(t)
+	cur := func() Schedule {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return svc.st.Schedule
+	}
+	suspend := func() {
+		t.Helper()
+		if err := svc.OnFlagOff(); err != nil {
+			t.Fatalf("OnFlagOff: %v", err)
+		}
+		svc.OnFlagOn()
+		if v := rtCronSnap(t, svc); !v.Schedule.Suspended || !v.Schedule.Enabled {
+			t.Fatalf("после выключения и включения флага: suspended=%v enabled=%v", v.Schedule.Suspended, v.Schedule.Enabled)
+		}
+	}
+
+	if err := svc.CronAction(CronAdopt); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	suspend()
+
+	// Стандартная строка на месте: сохранение приостановку не снимает.
+	if err := svc.SetSchedule(cur()); err != nil {
+		t.Fatalf("SetSchedule при стандартной строке: %v", err)
+	}
+	if v := rtCronSnap(t, svc); !v.Schedule.Suspended {
+		t.Fatalf("сохранение при стандартной строке cron %q сняло приостановку", line)
+	}
+
+	// Строку убрали вне панели: сохранение возобновляет расписание.
+	rtCronWrite(t, withoutUGLines(rtCronRead(t)))
+	if err := svc.SetSchedule(cur()); err != nil {
+		t.Fatalf("SetSchedule без строки cron: %v", err)
+	}
+	if v := rtCronSnap(t, svc); v.Schedule.Suspended || v.Schedule.Next == "" {
+		t.Fatalf("без строки cron: suspended=%v next=%q, ожидались false и время запуска", v.Schedule.Suspended, v.Schedule.Next)
+	}
+
+	// Строка стала нестандартной: сохранение возобновляет расписание, панель сообщает о двух расписаниях.
+	rtCronWrite(t, withLine(rtCronRead(t), line))
+	if err := svc.CronAction(CronAdopt); err != nil {
+		t.Fatalf("adopt перед нестандартной строкой: %v", err)
+	}
+	suspend()
+	nonstd := "*/30 * * * * /opt/sbin/xkeen -ug"
+	rtCronWrite(t, withLine(withoutUGLines(rtCronRead(t)), nonstd))
+	if err := svc.SetSchedule(cur()); err != nil {
+		t.Fatalf("SetSchedule при нестандартной строке: %v", err)
+	}
+	v := rtCronSnap(t, svc)
+	if v.Schedule.Suspended || v.Schedule.Next == "" || !v.Cron.Two {
+		t.Fatalf("при нестандартной строке: suspended=%v next=%q two=%v, ожидались false, время и true", v.Schedule.Suspended, v.Schedule.Next, v.Cron.Two)
+	}
+}
