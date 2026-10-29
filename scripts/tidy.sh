@@ -129,7 +129,8 @@ cd "$ROOT"
 PLAN=$(mktemp)
 WT_LIST=$(mktemp)
 WT_TMP=$(mktemp)
-trap 'rm -f "$PLAN" "$WT_LIST" "$WT_TMP"' EXIT
+WT_IGN=$(mktemp)
+trap 'rm -f "$PLAN" "$WT_LIST" "$WT_TMP" "$WT_IGN"' EXIT
 
 # категории показа через "|" (в названиях есть пробелы), порядок = порядок показа
 CATEGORIES="worktree|локальные ветки|"
@@ -335,6 +336,99 @@ wt_changes() { # <worktree>
   rm -f "$_wc_raw"
 }
 
+# Дети каталога worktree на один уровень (по файловой системе, ссылки не разыменовываются) в
+# виде записей wt_ignored: каталог с файлами — «путь/», прочее — «путь»; пустые каталоги не
+# считаются. Код 1 — каталог не прочитан.
+wt_ign_children() { # <worktree> <каталог от корня worktree, без слеша на конце>
+  _wk_f=$(mktemp)
+  if ! (cd "$1" && find "$2" -mindepth 1 -maxdepth 1 >"$_wk_f" 2>/dev/null); then
+    rm -f "$_wk_f"
+    return 1
+  fi
+  while IFS= read -r _wk_c; do
+    [ -n "$_wk_c" ] || continue
+    if [ -d "$1/$_wk_c" ] && [ ! -L "$1/$_wk_c" ]; then
+      if _wk_r=$(cd "$1/$_wk_c" && find . -mindepth 1 ! -type d -print -quit 2>/dev/null); then
+        [ -n "$_wk_r" ] || continue
+      fi
+      printf '%s/\n' "$_wk_c"
+    else
+      printf '%s\n' "$_wk_c"
+    fi
+  done <"$_wk_f"
+  rm -f "$_wk_f"
+}
+
+# Игнорируемое содержимое worktree, которое git worktree remove уничтожил бы вместе с каталогом
+# (rescue-коммит его не берёт: .planning, отчёты build/router/<отчёт>, *.test, журналы…), за
+# вычетом воспроизводимого → $WT_IGN (по записи на строку, пути от корня worktree; каталог —
+# со слешем на конце). Воспроизводимое (закрытый список): frontend/node_modules, frontend/dist/,
+# .go/, .go-cache/, build/xcp*, build/router/bin/, build/router/release/ и любая символическая
+# ссылка (remove снимает саму ссылку, не идя по ней). Каталог build/ и build/router/ git отдаёт
+# одной записью — раскрывается на один уровень по файловой системе. Код 1 — перечень не получен
+# (вызывающий считает это отказом). Перевод строки в имени даёт лишнюю запись: N только растёт.
+wt_ignored() { # <worktree>
+  : >"$WT_IGN"
+  _wi_raw=$(mktemp)
+  _wi_lines=$(mktemp)
+  _wi_cand=$(mktemp)
+  _wi_kids=$(mktemp)
+  _wi_rc=0
+  if git -C "$1" ls-files --others --ignored --exclude-standard --directory --no-empty-directory -z >"$_wi_raw" 2>/dev/null; then
+    tr '\0' '\n' <"$_wi_raw" >"$_wi_lines"
+    while IFS= read -r _wi_e; do
+      [ -n "$_wi_e" ] || continue
+      case "$_wi_e" in
+        build/ | build/router/)
+          wt_ign_children "$1" "${_wi_e%/}" >"$_wi_kids" || {
+            _wi_rc=1
+            break
+          }
+          while IFS= read -r _wi_k; do
+            if [ "$_wi_k" = "build/router/" ]; then
+              wt_ign_children "$1" build/router >>"$_wi_cand" || {
+                _wi_rc=1
+                break
+              }
+            else
+              printf '%s\n' "$_wi_k" >>"$_wi_cand"
+            fi
+          done <"$_wi_kids"
+          [ "$_wi_rc" = 0 ] || break
+          ;;
+        *) printf '%s\n' "$_wi_e" >>"$_wi_cand" ;;
+      esac
+    done <"$_wi_lines"
+  else
+    _wi_rc=1
+  fi
+  if [ "$_wi_rc" = 0 ]; then
+    while IFS= read -r _wi_e; do
+      [ -n "$_wi_e" ] || continue
+      case "$_wi_e" in
+        frontend/node_modules | frontend/node_modules/* | frontend/dist/* | .go/* | .go-cache/* | build/xcp* | build/router/bin/* | build/router/release/*) continue ;;
+      esac
+      if [ -L "$1/${_wi_e%/}" ]; then continue; fi
+      printf '%s\n' "$_wi_e" >>"$WT_IGN"
+    done <"$_wi_cand"
+  else
+    : >"$WT_IGN"
+  fi
+  rm -f "$_wi_raw" "$_wi_lines" "$_wi_cand" "$_wi_kids"
+  return "$_wi_rc"
+}
+
+# Примечание плана об игнорируемом из $WT_IGN: «игнорируемые файлы: N (п1, …, п5, … и ещё K)».
+# Из путей убираются управляющие символы (TAB — разделитель полей записи плана).
+wt_ign_note() {
+  _wn_n=$(wc -l <"$WT_IGN" | tr -d ' ')
+  _wn_l=$(head -n 5 "$WT_IGN" | tr -d '\000-\011\013-\037\177' | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $0 }')
+  if [ "$_wn_n" -gt 5 ]; then
+    _wn_l="$_wn_l, … и ещё $((_wn_n - 5))"
+  fi
+  printf 'игнорируемые файлы: %s (%s)' "$_wn_n" "$_wn_l"
+}
+
 # Возраст правок: наибольший mtime существующих путей из $WT_TMP; пусто, если путей нет.
 wt_age_mtime() { # <worktree>
   (cd "$1" && xargs -d '\n' stat -c %Y -- 2>/dev/null) <"$WT_TMP" | sort -n | tail -n 1
@@ -418,6 +512,17 @@ plan_wt_one() { # <путь> <HEAD> <ветка|-> <detached> <locked> <prunable
       pl_skip "$_po_c" "$_po_p" "правки моложе $WT_HOURS ч"
       return 0
     fi
+  fi
+  # игнорируемое вне воспроизводимого пропало бы при снятии (D-19): пропуск, ошибка — в безопасную сторону
+  if ! wt_ignored "$_po_p"; then
+    pl_skip "$_po_c" "$_po_p" "игнорируемые файлы не прочитаны"
+    return 0
+  fi
+  if [ -s "$WT_IGN" ]; then
+    _po_note=$(wt_ign_note)
+    if [ -n "$_po_one" ]; then _po_note="$_po_one; $_po_note"; fi
+    pl_skip "$_po_c" "$_po_p" "$_po_note"
+    return 0
   fi
   _po_kb=0
   if [ "${TIDY_SIZES:-0}" = 1 ]; then
@@ -612,10 +717,15 @@ git_wt_remove() { # <путь worktree>
   [ ! -s "$WT_TMP" ] || return 1
   _gm_br=$_wl_b
   _gm_det=$_wl_d
+  _gm_name=$(basename "$_gm_wt")
+  wt_ignored "$_gm_wt" || { echo "tidy: worktree $_gm_name не снят: игнорируемые файлы не прочитаны" >&2; return 1; }
+  [ ! -s "$WT_IGN" ] || { echo "tidy: worktree $_gm_name не снят: игнорируемые файлы: $(wc -l <"$WT_IGN" | tr -d ' ')" >&2; return 1; }
   if ! git worktree remove "$_gm_wt" 2>/dev/null; then
     # отказ допустим только из-за неотслеживаемой ссылки frontend/node_modules (старый .gitignore)
     wt_changes "$_gm_wt" || return 1
     [ ! -s "$WT_TMP" ] || return 1
+    wt_ignored "$_gm_wt" || { echo "tidy: worktree $_gm_name не снят: игнорируемые файлы не прочитаны" >&2; return 1; }
+    [ ! -s "$WT_IGN" ] || { echo "tidy: worktree $_gm_name не снят: игнорируемые файлы: $(wc -l <"$WT_IGN" | tr -d ' ')" >&2; return 1; }
     git worktree remove --force "$_gm_wt" || return 1
   fi
   wt_drop_branch "$_gm_br" "$_gm_det"
