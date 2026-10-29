@@ -1,14 +1,25 @@
 #!/bin/sh
-# scripts/tidy.sh — уборка за агентами на ПК: сборки, отчёты стенда, кэш релизов.
+# scripts/tidy.sh — уборка за агентами на ПК: worktree и ветки git, сборки, отчёты стенда, кэш релизов.
 #
 #   scripts/tidy.sh                  показ: что будет удалено и сколько места, ничего не меняется
 #   scripts/tidy.sh --apply          выполнить ровно показанный план (make tidy APPLY=1)
+#   scripts/tidy.sh --remote         добавить ветки origin, слитые в origin/main (сперва git fetch --prune);
+#                                    --remote --apply удаляет их по одной — только после «да» владельца
+#                                    на показанный список (make tidy REMOTE=1)
+#   scripts/tidy.sh --remote-branch <имя>  сузить ветки origin до названных (повторяемый; нужен --remote)
+#   scripts/tidy.sh --rescue <worktree>    разово: спасти названный worktree (путь или имя каталога)
+#                                    в rescue/<имя>; слитость и возраст не проверяются (повторяемый)
+#   scripts/tidy.sh --force-branch <ветка> разово: удалить названную неслитую локальную ветку (повторяемый)
+#   scripts/tidy.sh --drop-stash <stash@{N}>  разово: удалить названную запись stash (повторяемый)
 #   scripts/tidy.sh --drop-legacy    вместо ротации убрать весь старый формат build/router одним пунктом
 #   scripts/tidy.sh --rotate-builds  только ротация сборок build/xcp_v*_<арх> (вызывает Makefile)
-#   scripts/tidy.sh --rescue <worktree>  разово: спасти названный worktree (путь или имя каталога) в rescue/<имя>
 #   scripts/tidy.sh -h | --help      эта справка
 #
-# Пороги — переменные XCP_TIDY_* (умолчания и смысл — в шапке scripts/tidy-lib.sh).
+# Разовые флаги (--rescue, --force-branch, --drop-stash) действуют только на названные объекты
+# и в обычный --apply не входят: stash обычный запуск лишь показывает, неслитые ветки не трогает.
+#
+# Пороги — переменные XCP_TIDY_* (сборки, отчёты, кэш релизов — в шапке scripts/tidy-lib.sh);
+# здесь XCP_TIDY_WORKTREE_HOURS — сколько часов правки worktree считаются свежими (24).
 # Показ и исполнение строятся по одному плану: по категориям, с действием, путём,
 # размером и пропущенным с причиной. Пути — от корня репозитория.
 # Отчёты, кэш релизов и старый формат build/router трогаются, только пока общая
@@ -24,6 +35,16 @@
 # Прочие worktree — пропуск с причиной: «заблокирован», «не слита», «правки моложе 24 ч»,
 # «возраст не определён», «вне репозитория», «текущий», «блокировка занята прогоном».
 #
+# Локальные ветки: слитые (вершина достижима из origin/main или из текущей ветки основной копии)
+# удаляются, кроме main, текущих, rescue/* (одна итоговая строка) и занятых worktree («занята
+# worktree»); неслитые — «не слита». Ветки origin: без --remote категории нет и origin не
+# трогается; слитость — только по origin/main; main и rescue/* не удаляются никогда; причины
+# пропуска «не слита», «нет на origin», «нет связи с origin». stash — пропуск «stash».
+# В git: prune записей о пропавших worktree (git worktree prune) и обычный git gc последним
+# действием (без --prune=now: удалённое остаётся в reflog до срока).
+#
+# Порядок --apply: worktree, prune, локальные ветки, ветки origin, stash, файловые категории, gc.
+#
 # Коды выхода: 0 — готово; 1 — часть операций не удалась; 2 — неверные аргументы.
 set -eu
 
@@ -36,14 +57,19 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 APPLY=0
 ROTATE_BUILDS=0
 DROP_LEGACY=0
+REMOTE=0
 RESCUE_LIST=""
+FORCE_BRANCHES=""
+DROP_STASHES=""
+REMOTE_BRANCHES=""
 while [ $# -gt 0 ]; do
   _a=$1
   case "$_a" in
     --apply) APPLY=1 ;;
     --rotate-builds) ROTATE_BUILDS=1 ;;
     --drop-legacy) DROP_LEGACY=1 ;;
-    --rescue)
+    --remote) REMOTE=1 ;;
+    --rescue | --force-branch | --drop-stash | --remote-branch)
       if [ $# -lt 2 ]; then
         echo "tidy: $_a требует значение" >&2
         exit 2
@@ -54,8 +80,22 @@ while [ $# -gt 0 ]; do
           exit 2
           ;;
       esac
-      RESCUE_LIST="$RESCUE_LIST$2
+      case "$_a" in
+        --rescue) RESCUE_LIST="$RESCUE_LIST$2
+" ;;
+        --force-branch) FORCE_BRANCHES="$FORCE_BRANCHES$2
+" ;;
+        --remote-branch) REMOTE_BRANCHES="$REMOTE_BRANCHES$2
+" ;;
+        --drop-stash)
+          if ! printf '%s\n' "$2" | grep -Eq '^stash@\{[0-9]+\}$'; then
+            echo "tidy: --drop-stash ожидает stash@{N}: $2" >&2
+            exit 2
+          fi
+          DROP_STASHES="$DROP_STASHES$2
 "
+          ;;
+      esac
       shift
       ;;
     -h | --help)
@@ -69,6 +109,11 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+if [ -n "$REMOTE_BRANCHES" ] && [ "$REMOTE" != 1 ]; then
+  echo "tidy: --remote-branch требует --remote" >&2
+  exit 2
+fi
 
 # Ротация сборок для Makefile: сборка не должна падать из-за уборки.
 if [ "$ROTATE_BUILDS" = 1 ]; then
@@ -87,7 +132,11 @@ WT_TMP=$(mktemp)
 trap 'rm -f "$PLAN" "$WT_LIST" "$WT_TMP"' EXIT
 
 # категории показа через "|" (в названиях есть пробелы), порядок = порядок показа
-CATEGORIES="worktree|сборки|отчёты|кэш релизов|старый формат build/router|обрывки frontend/build/router|корневые хвосты"
+CATEGORIES="worktree|локальные ветки|"
+if [ "$REMOTE" = 1 ]; then
+  CATEGORIES="${CATEGORIES}ветки origin|"
+fi
+CATEGORIES="${CATEGORIES}stash|git|сборки|отчёты|кэш релизов|старый формат build/router|обрывки frontend/build/router|корневые хвосты"
 
 # Общая блокировка стенда (Pitfall: в потомке run.sh fd 9 уже держит родитель, пробовать
 # заново нельзя). Занята чужим прогоном — отчёты, кэш релизов и старый формат пропускаются.
@@ -572,6 +621,217 @@ git_wt_remove() { # <путь worktree>
   wt_drop_branch "$_gm_br" "$_gm_det"
 }
 
+# --- git: prune, ветки, origin, stash, gc -----------------------------------------------
+
+# Записи о worktree с пропавшим каталогом: предпросмотр git worktree prune.
+plan_prune() {
+  git worktree prune --dry-run -v 2>&1 </dev/null |
+    awk 'NF { printf "prune\tgit\t%s\t0\t\n", $0 }' >>"$PLAN"
+}
+
+# Локальные ветки (D-18, D-21, D-29). Разовый --force-branch снимает проверку слитости с названных.
+plan_branches() {
+  _pb_c="локальные ветки"
+  wt_collect
+  _pb_occ=$(awk -F '\t' '$3 != "-" { print $3 }' "$WT_LIST")
+  if [ -n "$FORCE_BRANCHES" ]; then
+    while IFS= read -r _pb_n; do
+      [ -n "$_pb_n" ] || continue
+      if ! git check-ref-format --branch "$_pb_n" >/dev/null 2>&1; then
+        echo "tidy: --force-branch: недопустимое имя ветки: $_pb_n" >&2
+        exit 2
+      fi
+      if ! git show-ref --verify --quiet "refs/heads/$_pb_n"; then
+        echo "tidy: --force-branch: ветки нет: $_pb_n" >&2
+        exit 2
+      fi
+      case "$_pb_n" in
+        main | rescue/*)
+          echo "tidy: --force-branch: ветку не удаляем: $_pb_n" >&2
+          exit 2
+          ;;
+      esac
+      if [ "$_pb_n" = "$MAIN_BRANCH" ] || tidy_in_list "$_pb_n" "$_pb_occ"; then
+        echo "tidy: --force-branch: ветка текущая или занята worktree: $_pb_n" >&2
+        exit 2
+      fi
+    done <<EOF
+$FORCE_BRANCHES
+EOF
+  fi
+  _pb_list=$(mktemp)
+  git for-each-ref refs/heads --format='%(refname:short)' >"$_pb_list"
+  _pb_rescue=0
+  while IFS= read -r _pb_b; do
+    case "$_pb_b" in
+      main) continue ;;
+      rescue/*)
+        _pb_rescue=$((_pb_rescue + 1))
+        continue
+        ;;
+    esac
+    if [ "$_pb_b" = "$MAIN_BRANCH" ] || tidy_in_list "$_pb_b" "$_pb_occ"; then
+      pl_skip "$_pb_c" "$_pb_b" "занята worktree"
+      continue
+    fi
+    _pb_sha=$(git rev-parse "refs/heads/$_pb_b")
+    if tidy_in_list "$_pb_b" "$FORCE_BRANCHES"; then
+      if wt_is_merged "$_pb_sha" 0; then
+        _pb_note="разовое: слита"
+      else
+        _pb_cnt=$(git rev-list --count "origin/main..$_pb_b" 2>/dev/null || echo "?")
+        _pb_note="разовое: не слита, коммитов вне origin/main: $_pb_cnt"
+      fi
+      printf 'br-delete\t%s\t%s\t0\t%s\n' "$_pb_c" "$_pb_b" "$_pb_note" >>"$PLAN"
+    elif wt_is_merged "$_pb_sha" 0; then
+      printf 'br-delete\t%s\t%s\t0\t%s\n' "$_pb_c" "$_pb_b" "" >>"$PLAN"
+    else
+      pl_skip "$_pb_c" "$_pb_b" "не слита"
+    fi
+  done <"$_pb_list"
+  rm -f "$_pb_list"
+  if [ "$_pb_rescue" -gt 0 ]; then
+    pl_skip "$_pb_c" "rescue/*: $_pb_rescue" "удаляет только владелец"
+  fi
+}
+
+# Одна ветка origin: слитость — только по origin/main (строже D-18, ошибка в безопасную сторону).
+plan_origin_one() { # <имя без origin/>
+  _po1_c="ветки origin"
+  case "$1" in
+    main)
+      pl_skip "$_po1_c" "$1" "main не удаляется"
+      return 0
+      ;;
+    rescue/*)
+      pl_skip "$_po1_c" "$1" "rescue/*"
+      return 0
+      ;;
+  esac
+  if git merge-base --is-ancestor "refs/remotes/origin/$1" origin/main 2>/dev/null; then
+    printf 'origin-delete\t%s\t%s\t0\t%s\n' "$_po1_c" "$1" "" >>"$PLAN"
+  else
+    pl_skip "$_po1_c" "$1" "не слита"
+  fi
+}
+
+# Ветки origin — только с --remote: сначала git fetch --prune. Без связи — один пропуск.
+plan_origin() {
+  _po_c="ветки origin"
+  if ! git fetch --prune origin </dev/null >/dev/null 2>&1; then
+    pl_skip "$_po_c" "origin" "нет связи с origin"
+    return 0
+  fi
+  _po_all=$(git for-each-ref refs/remotes/origin --format='%(refname:short)' | grep -vxE 'origin|origin/HEAD|origin/main' | sed 's|^origin/||' || true)
+  if [ -n "$REMOTE_BRANCHES" ]; then
+    while IFS= read -r _po_n; do
+      [ -n "$_po_n" ] || continue
+      if [ "$_po_n" = main ] || tidy_in_list "$_po_n" "$_po_all"; then
+        plan_origin_one "$_po_n"
+      else
+        pl_skip "$_po_c" "$_po_n" "нет на origin"
+      fi
+    done <<EOF
+$REMOTE_BRANCHES
+EOF
+  else
+    while IFS= read -r _po_n; do
+      [ -n "$_po_n" ] || continue
+      plan_origin_one "$_po_n"
+    done <<EOF
+$_po_all
+EOF
+  fi
+}
+
+# stash только показывается (пропуск «stash»); названные --drop-stash — удаление, по убыванию номера.
+plan_stash() {
+  _ps2_c="stash"
+  if [ -n "$DROP_STASHES" ]; then
+    while IFS= read -r _ps2_n; do
+      [ -n "$_ps2_n" ] || continue
+      if ! git rev-parse --verify --quiet "$_ps2_n" >/dev/null 2>&1; then
+        echo "tidy: stash не найден: $_ps2_n" >&2
+        exit 2
+      fi
+    done <<EOF
+$DROP_STASHES
+EOF
+  fi
+  _ps2_list=$(mktemp)
+  _ps2_drop=$(mktemp)
+  git stash list --format='%gd%x09%gs' >"$_ps2_list"
+  while IFS="$_TL_TAB" read -r _ps2_r _ps2_s; do
+    [ -n "$_ps2_r" ] || continue
+    if tidy_in_list "$_ps2_r" "$DROP_STASHES"; then
+      printf '%s\t%s\t%s\n' "$(printf '%s' "$_ps2_r" | tr -dc '0-9')" "$_ps2_r" "$_ps2_s" >>"$_ps2_drop"
+    else
+      pl_skip "$_ps2_c" "$_ps2_r: $_ps2_s" "stash"
+    fi
+  done <"$_ps2_list"
+  sort -rn "$_ps2_drop" | while IFS="$_TL_TAB" read -r _ps2_i _ps2_r _ps2_s; do
+    printf 'stash-drop\t%s\t%s\t0\tразовое: %s\n' "$_ps2_c" "$_ps2_r" "$_ps2_s"
+  done >>"$PLAN"
+  rm -f "$_ps2_list" "$_ps2_drop"
+}
+
+# gc — последним действием плана: обычный, без --prune=now (паки — история).
+plan_gc() {
+  _pg_info=$(git count-objects -v 2>/dev/null | awk -F ': ' '$1 == "size-pack" { sp = $2 } $1 == "count" { c = $2 } END { printf "size-pack %s КиБ, рыхлых объектов %s", sp, c }')
+  printf 'gc\tgit\tgit gc\t0\t%s\n' "$_pg_info" >>"$PLAN"
+}
+
+# Строка-пояснение под заголовком категории показа.
+category_info() { # <категория>
+  case "$1" in
+    "локальные ветки")
+      _ci_age=$(git log -1 --format=%cr origin/main 2>/dev/null || true)
+      if [ -n "$_ci_age" ]; then
+        printf 'origin/main обновлён %s; свежий список веток origin — make tidy REMOTE=1\n' "$_ci_age"
+      else
+        printf 'origin/main не найден; все ветки считаются неслитыми\n'
+      fi
+      ;;
+  esac
+}
+
+# Исполнение git-действий (слитость и принадлежность повторно проверяются перед удалением).
+git_br_delete() { # <ветка> <примечание>
+  git show-ref --verify --quiet "refs/heads/$1" || return 1
+  case "$1" in
+    main | rescue/*) return 1 ;;
+  esac
+  [ "$1" != "$MAIN_BRANCH" ] || return 1
+  wt_collect
+  if awk -F '\t' -v b="$1" '$3 == b { f = 1 } END { exit !f }' "$WT_LIST"; then
+    echo "tidy: ветка занята worktree, пропуск: $1" >&2
+    return 1
+  fi
+  case "$2" in
+    "разовое"*) ;;
+    *) wt_is_merged "$(git rev-parse "refs/heads/$1")" 0 || return 1 ;;
+  esac
+  git branch -D "$1" >/dev/null
+}
+
+git_origin_delete() { # <ветка без origin/>
+  case "$1" in
+    '' | main | rescue/*) return 1 ;;
+  esac
+  git check-ref-format --branch "$1" >/dev/null 2>&1 || return 1
+  git merge-base --is-ancestor "refs/remotes/origin/$1" origin/main 2>/dev/null || return 1
+  git push origin --delete "$1"
+}
+
+git_stash_drop() { # <stash@{N}> <разовое: тема>
+  _gs_cur=$(git stash list --format='%gd%x09%gs' | awk -F '\t' -v r="$1" '$1 == r { sub(/^[^\t]*\t/, ""); print; exit }')
+  if [ "$_gs_cur" != "${2#разовое: }" ]; then
+    echo "tidy: stash $1 изменился с момента показа, пропуск" >&2
+    return 1
+  fi
+  git stash drop "$1" >/dev/null
+}
+
 # Перенос обрывка в отчёт (действие mv плана): tidy_exec отдаёт его сюда.
 tidy_exec_hook() { # <действие> <категория> <путь> <КиБ> <примечание>
   case "$1" in
@@ -591,6 +851,17 @@ tidy_exec_hook() { # <действие> <категория> <путь> <КиБ>
       ;;
     wt-rescue) git_wt_rescue "$3" </dev/null ;;
     wt-remove) git_wt_remove "$3" </dev/null ;;
+    prune)
+      # записей может быть несколько, команда одна: выполняется при первой
+      if [ "${_TIDY_PRUNED:-0}" != 1 ]; then
+        _TIDY_PRUNED=1
+        git worktree prune -v </dev/null
+      fi
+      ;;
+    br-delete) git_br_delete "$3" "$5" </dev/null ;;
+    origin-delete) git_origin_delete "$3" </dev/null ;;
+    stash-drop) git_stash_drop "$3" "$5" </dev/null ;;
+    gc) git gc --quiet </dev/null ;;
     *) return 1 ;;
   esac
 }
@@ -598,7 +869,7 @@ tidy_exec_hook() { # <действие> <категория> <путь> <КиБ>
 # --- показ ---------------------------------------------------------------------------
 
 show_category() {
-  awk -F '\t' -v cat="$1" -v root="$ROOT/" -v root2="$MAIN/" '
+  awk -F '\t' -v cat="$1" -v root="$ROOT/" -v root2="$MAIN/" -v info="$(category_info "$1")" '
     function human(kb) {
       if (kb >= 1024) return sprintf("%.1f МБ", kb / 1024)
       return sprintf("%d КиБ", kb)
@@ -606,7 +877,9 @@ show_category() {
     BEGIN {
       word["rm"] = "удалить"; word["thin"] = "утончить"; word["mv"] = "перенести"; word["sweep"] = "убрать пустые"
       word["wt-remove"] = "снять worktree"; word["wt-rescue"] = "спасти"
+      word["br-delete"] = "удалить ветку"; word["origin-delete"] = "удалить на origin"; word["stash-drop"] = "удалить stash"
       print "== " cat " =="
+      if (info != "") print info
     }
     $2 == cat {
       p = $3
@@ -636,13 +909,21 @@ show_plan() {
 TIDY_SIZES=1
 export TIDY_SIZES
 
+# порядок записей = порядок исполнения: worktree, prune, ветки, origin, stash, файлы, gc
 plan_worktrees
+plan_prune
+plan_branches
+if [ "$REMOTE" = 1 ]; then
+  plan_origin
+fi
+plan_stash
 plan_builds
 plan_reports
 plan_releases
 plan_legacy
 plan_stubs
 plan_tails
+plan_gc
 
 show_plan
 
