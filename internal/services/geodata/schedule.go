@@ -94,14 +94,6 @@ func prevSlot(now time.Time, sch Schedule) time.Time {
 	return slotAt(now.AddDate(0, 0, -7), sch)
 }
 
-// slotPeriod — период расписания: сутки или неделя.
-func slotPeriod(sch Schedule) time.Duration {
-	if sch.Day >= 0 {
-		return 7 * 24 * time.Hour
-	}
-	return 24 * time.Hour
-}
-
 // markSlotLocked считает прошедший слот отработанным: расписание только что создано,
 // перенято или изменено, слоты до этого момента запускать нельзя. Часы не
 // синхронизированы — ничего не делает. Вызывается под Service.mu.
@@ -195,11 +187,13 @@ func (s *Service) schedStep() time.Duration {
 	active := s.scheduleActive(sch, suspended)
 
 	// Догон при старте: слот между прошлым запуском и стартом панели пропущен.
+	// Догоняется только последний слот (prevSlot не дальше одного периода от now),
+	// сколько бы слотов ни прошло.
 	if !s.sched.initDone {
 		s.sched.initDone = true
 		if active && !lastDone.IsZero() {
 			prev := prevSlot(now, sch)
-			if prev.After(lastDone) && now.Sub(prev) < slotPeriod(sch) {
+			if prev.After(lastDone) {
 				delay := catchUpDelay - time.Since(s.sched.begin)
 				if delay < 0 {
 					delay = 0
