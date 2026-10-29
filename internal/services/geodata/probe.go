@@ -215,6 +215,20 @@ func probeDo(ctx context.Context, cl *http.Client, method, target, rng string) (
 	if err := utils.ValidateURL(ctx, target, probeAllowPrivate); err != nil {
 		return nil, utils.ErrPrivateNetwork
 	}
+	// Повторная проверка адреса в месте запроса: анализ CodeQL не видит защиту
+	// в DialContext клиента. Настоящий запрет от TOCTOU даёт SafeHTTPClient.
+	if u, err := url.Parse(target); err != nil {
+		return nil, err
+	} else if !probeAllowPrivate {
+		ips, lerr := net.DefaultResolver.LookupIP(ctx, "ip", u.Hostname())
+		if lerr == nil {
+			for _, ip := range ips {
+				if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+					return nil, utils.ErrPrivateNetwork
+				}
+			}
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, method, target, nil)
 	if err != nil {
 		return nil, err
