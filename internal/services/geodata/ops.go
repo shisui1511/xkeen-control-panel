@@ -396,7 +396,9 @@ func (s *Service) pendingFor(file string) (PendingEnable, bool) {
 }
 
 // planDedup — «Убрать дубль» (D-08): запись со стандартным именем (или вторым именем)
-// при лежащем файле; запись из ожидающих включений не трогается.
+// при лежащем файле; запись из ожидающих включений не трогается. Строка набора всегда
+// приходит со стандартным именем, а запись может стоять и под вторым (zkeen.dat):
+// убирается та, что есть в xkeen.json.
 func (s *Service) planDedup(op WriteOp) (opPlan, error) {
 	set, ok := standardByName(op.File)
 	if !ok || s.datPath(set.File) == "" {
@@ -406,13 +408,20 @@ func (s *Service) planDedup(op WriteOp) (opPlan, error) {
 	if err != nil {
 		return opPlan{}, err
 	}
-	if !anyEntryNamed(st, op.File) {
+	target := ""
+	for _, n := range []string{op.File, set.File, set.Alias} {
+		if n != "" && anyEntryNamed(st, n) {
+			target = n
+			break
+		}
+	}
+	if target == "" {
 		return opPlan{}, ErrNotPending
 	}
-	if _, pend := s.pendingFor(op.File); pend {
+	if _, pend := s.pendingFor(set.File); pend {
 		return opPlan{}, ErrNotPending
 	}
-	return opPlan{gop: lists.GeodataOp{Kind: lists.OpRemove, File: op.File}}, nil
+	return opPlan{gop: lists.GeodataOp{Kind: lists.OpRemove, File: target}}, nil
 }
 
 // planFinishInclude — «Довести включение» (Pitfall 9): у файла есть застрявшая уборка;

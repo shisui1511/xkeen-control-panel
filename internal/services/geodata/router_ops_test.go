@@ -533,6 +533,38 @@ func TestRouterGeodataOps(t *testing.T) {
 		rtOpsWantCode(t, svc.Write(ctx, WriteOp{Kind: WriteDedup, File: std}, "", false, false), "not_pending")
 	})
 
+	t.Run("dedup_alias", func(t *testing.T) {
+		// Запись под вторым именем пары (zkeen.dat), а строка набора шлёт стандартное имя.
+		needJQ(t)
+		set := StandardSets[0]
+		for _, s := range StandardSets {
+			if s.Alias != "" {
+				set = s
+				break
+			}
+		}
+		if set.Alias == "" {
+			t.Fatal("в StandardSets нет набора со вторым именем")
+		}
+		stdPath := filepath.Join(datDir, set.File)
+		if err := os.WriteFile(stdPath, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Remove(stdPath) })
+		if err := store.Apply(lists.GeodataOp{Kind: lists.OpAdd, File: set.Alias, URL: urlB}, "", false); err != nil {
+			t.Fatalf("подготовка записи %s: %v", set.Alias, err)
+		}
+		if err := svc.Write(ctx, WriteOp{Kind: WriteDedup, File: set.File}, "", false, false); err != nil {
+			t.Fatalf("Write(dedup %s): %v", set.File, err)
+		}
+		if rtOpsEntry(t, store, set.Alias, "") {
+			t.Errorf("запись %s не убрана", set.Alias)
+		}
+		if fi, err := os.Stat(stdPath); err != nil || fi.Size() != int64(len(data)) {
+			t.Errorf("файл %s не остался на месте: %v", set.File, err)
+		}
+	})
+
 	t.Run("enable_catalog", func(t *testing.T) {
 		needJQ(t)
 		var set lists.ExtendedSet
