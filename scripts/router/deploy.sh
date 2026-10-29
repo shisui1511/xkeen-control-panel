@@ -144,7 +144,7 @@ if [ "$RELEASE" = 1 ]; then
   git show "$RELEASE_TAG:scripts/setup.sh" >"$SETUP_SRC" 2>/dev/null || : >"$SETUP_SRC"
 else
   # version.sh не считает версию от пре-релизных тегов, поэтому номер пре-релиза на HEAD
-  # берётся из тега vX.Y.Z-beta.N; XCP_VERSION подхватят и make, и сборка фронта. Явная
+  # берётся из тега vX.Y.Z-beta.N; XCP_VERSION подхватит make. Явная
   # XCP_VERSION (проход план-сессии под номером вышедшего релиза) важнее тега на HEAD.
   BETA_TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | sort -V | tail -1 || true)
   if [ -z "${XCP_VERSION:-}" ] && [ -n "$BETA_TAG" ] && [ -z "$(git status --porcelain --untracked-files=no)" ]; then
