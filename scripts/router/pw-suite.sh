@@ -26,7 +26,9 @@
 #   XPASS (помеченный тест прошёл: метка больше не нужна, прогон красный).
 # При FAIL и XPASS хвост xcp.log с устройства (200 строк, после rt_redact) кладётся в
 # <отчёт>/<id>/<ядро>/xcp-tail.log. Трассы и снимки остаются только в build/router/
-# (на них могут быть имена узлов): в PR и todo их не прикладывают.
+# (на них могут быть имена узлов): в PR и todo их не прикладывают. Временные каталоги
+# воркеров `.playwright-artifacts-*` удаляются после каждого запуска Playwright и при выходе
+# этапа; артефакты упавших тестов (<артефакты>/<тест>/trace.zip, снимки) остаются.
 #
 # Окружение:
 #   RT_SPECS   спеки через пробел (по умолчанию все tests/router/**/*.spec.ts);
@@ -130,7 +132,7 @@ OUT="$PW_DIR/artifacts"
 rm -f "$STATE" "$STATE.restore.json" "$JSON" "$PW_DIR/report-pages.json"
 
 # Файл сессии содержит cookie и CSRF: после этапа его на диске быть не должно.
-trap 'rm -f "$STATE" "$STATE.restore.json"' EXIT
+trap 'rm -f "$STATE" "$STATE.restore.json"; rm -rf "$OUT"/.playwright-artifacts-*' EXIT
 # Прерывание сигналом тоже запускает EXIT-trap (иначе storageState с cookie остался бы на ПК).
 trap 'exit 130' INT TERM HUP
 
@@ -156,6 +158,7 @@ run_pw() {
   _json=$1
   _workers=$2
   shift 2
+  _pwrc=0
   (
     cd "$ROOT/frontend"
     # core-switch.spec.ts регистрирует тест только при XCP_WANT_CORE: в обычном наборе
@@ -182,7 +185,10 @@ run_pw() {
       XCP_PW_JSON=$_json \
       XCP_PW_WORKERS=$_workers \
       "$PWBIN" test -c playwright.router.config.ts "$@"
-  ) >>"$LOG" 2>&1
+  ) >>"$LOG" 2>&1 || _pwrc=$?
+  # временные каталоги воркеров Playwright — только сироты после выхода процесса
+  rm -rf "$OUT"/.playwright-artifacts-*
+  return "$_pwrc"
 }
 
 READ_SPECS=""
