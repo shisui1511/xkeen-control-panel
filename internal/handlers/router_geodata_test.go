@@ -5,13 +5,11 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -130,54 +128,15 @@ func rtGeoAssertKeys(t *testing.T, typ reflect.Type, value any, path string) {
 	}
 }
 
-// rtGeoAPIDat возвращает копию самого маленького настоящего dat стенда размером не
-// меньше geodata.MinDatSize; без такого файла вызывающий тест пропускается.
-func rtGeoAPIDat(t *testing.T) []byte {
-	t.Helper()
-	files, err := lists.NewIndex(lists.DefaultDatDir).Files()
-	if err != nil {
-		t.Fatalf("Files: %v", err)
-	}
-	var cand []lists.FileInfo
-	for _, f := range files {
-		if f.Size >= geodata.MinDatSize {
-			cand = append(cand, f)
-		}
-	}
-	if len(cand) == 0 {
-		t.Skipf("в %s нет dat-файла не меньше %d байт", lists.DefaultDatDir, geodata.MinDatSize)
-	}
-	sort.Slice(cand, func(i, j int) bool { return cand[i].Size < cand[j].Size })
-	data, err := os.ReadFile(filepath.Join(lists.DefaultDatDir, cand[0].Name))
-	if err != nil {
-		t.Fatalf("чтение %s: %v", cand[0].Name, err)
-	}
-	return data
-}
-
-// rtGeoAPIServer поднимает настоящий HTTP-сервер на loopback роутера (панель ходит к
-// нему по 127.0.0.1) и возвращает его базовый адрес: /ok.dat — годный dat с размером,
-// /page.html — HTML-страница вместо файла.
-func rtGeoAPIServer(t *testing.T, data []byte) string {
-	t.Helper()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ok.dat", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeContent(w, r, "ok.dat", time.Time{}, bytes.NewReader(data))
-	})
-	page := append([]byte("<!DOCTYPE html>\n<html><head><title>404 Not Found</title></head><body>"), bytes.Repeat([]byte("<!-- -->"), 4096)...)
-	mux.HandleFunc("/page.html", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		http.ServeContent(w, r, "page.html", time.Time{}, bytes.NewReader(page))
-	})
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Listen: %v", err)
-	}
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	go func() { _ = srv.Serve(ln) }()
-	t.Cleanup(func() { _ = srv.Close() })
-	return "http://" + ln.Addr().String()
-}
+// Адреса проверки источника — настоящие публичные: панель не ходит по адресам частных
+// сетей и loopback (защита от SSRF), поэтому сервер на самом роутере для проверки не годится.
+const (
+	// rtGeoOKURL — годный dat с размером (тот же файл скачивает стандартный набор XKeen).
+	rtGeoOKURL = "https://github.com/jameszeroX/zkeen-domains/releases/latest/download/zkeen.dat"
+	// rtGeoPageURL — HTML-страница вместо файла: без Content-Length, запись блокирует size_none
+	// (проверка html на loopback покрыта тестами пакета geodata).
+	rtGeoPageURL = "https://github.com/jameszeroX/zkeen-domains"
+)
 
 const (
 	// rtGeoAPIConfig — настоящий xkeen.json стенда.
@@ -478,13 +437,11 @@ func TestRouterGeodataAPI(t *testing.T) {
 	}
 	hasJQ := rtGeoFlag(snap, "download", "jq")
 
-	data := rtGeoAPIDat(t)
-	base := rtGeoAPIServer(t, data)
 	rtGeoAPIKeepConfig(t)
 
-	// Проверка источника на настоящем сервере: HTML заблокирован, dat с размером — нет.
+	// Проверка источника на настоящих публичных адресах: HTML заблокирован, dat с размером — нет.
 	t.Run("probe", func(t *testing.T) {
-		r := e.call(http.MethodPost, rtGeoBase+"/probe", map[string]string{"file": rtGeoOwn, "url": base + "/page.html", "mode": "add"})
+		r := e.call(http.MethodPost, rtGeoBase+"/probe", map[string]string{"file": rtGeoOwn, "url": rtGeoPageURL, "mode": "add"})
 		if r.Status != http.StatusOK {
 			t.Fatalf("probe page.html: %d %s", r.Status, r.Code)
 		}
@@ -492,10 +449,11 @@ func TestRouterGeodataAPI(t *testing.T) {
 		if blocked, _ := res["blocked"].(bool); !blocked {
 			t.Errorf("probe HTML-страницы: blocked=false")
 		}
-		if !rtGeoHasCheck(res, "html") {
-			t.Errorf("probe HTML-страницы: нет проверки html")
+		if !rtGeoHasCheck(res, "size_none") {
+			t.Errorf("probe HTML-страницы: нет проверки size_none")
 		}
-		r = e.call(http.MethodPost, rtGeoBase+"/probe", map[string]string{"file": rtGeoOwn, "url": base + "/ok.dat", "mode": "add"})
+
+		r = e.call(http.MethodPost, rtGeoBase+"/probe", map[string]string{"file": rtGeoOwn, "url": rtGeoOKURL, "mode": "add"})
 		if r.Status != http.StatusOK {
 			t.Fatalf("probe ok.dat: %d %s", r.Status, r.Code)
 		}
@@ -503,11 +461,11 @@ func TestRouterGeodataAPI(t *testing.T) {
 		if blocked, _ := res["blocked"].(bool); blocked {
 			t.Errorf("probe годного dat: blocked=true: %v", res["checks"])
 		}
-		if size, _ := res["size"].(float64); int(size) != len(data) {
-			t.Errorf("probe годного dat: размер %v, ожидалось %d", res["size"], len(data))
+		if size, _ := res["size"].(float64); size <= 0 {
+			t.Errorf("probe годного dat: размер %v, ожидался положительный", res["size"])
 		}
 		// Недопустимое имя — блок проверки имени, а не отказ маршрута.
-		r = e.call(http.MethodPost, rtGeoBase+"/probe", map[string]string{"file": "../x.dat", "url": base + "/ok.dat", "mode": "add"})
+		r = e.call(http.MethodPost, rtGeoBase+"/probe", map[string]string{"file": "../x.dat", "url": rtGeoOKURL, "mode": "add"})
 		if r.Status != http.StatusOK || !rtGeoHasCheck(r.object(t), "name_bad") {
 			t.Errorf("probe с недопустимым именем: статус %d, ожидалась проверка name_bad", r.Status)
 		}
@@ -525,7 +483,7 @@ func TestRouterGeodataAPI(t *testing.T) {
 			t.Fatalf("чтение xkeen.json: %v", err)
 		}
 		r := e.call(http.MethodPost, rtGeoBase+"/write", map[string]any{
-			"op": map[string]string{"kind": "add", "file": rtGeoOwn, "url": base + "/page.html"}, "accept_comment_loss": true,
+			"op": map[string]string{"kind": "add", "file": rtGeoOwn, "url": rtGeoPageURL}, "accept_comment_loss": true,
 		})
 		if r.Status != http.StatusConflict || r.Code != "probe_blocked" {
 			t.Fatalf("write add с HTML-адресом: статус %d, код %q; ожидалось 409 probe_blocked", r.Status, r.Code)
@@ -542,7 +500,7 @@ func TestRouterGeodataAPI(t *testing.T) {
 
 	// Запись своего источника: в снимке строка own с записью, файла ещё нет.
 	t.Run("write_add", func(t *testing.T) {
-		op := map[string]string{"kind": "add", "file": rtGeoOwn, "url": base + "/ok.dat"}
+		op := map[string]string{"kind": "add", "file": rtGeoOwn, "url": rtGeoOKURL}
 		pv := e.call(http.MethodPost, rtGeoBase+"/preview", map[string]any{"op": op})
 		if pv.Status != http.StatusOK {
 			t.Fatalf("preview add: %d %s", pv.Status, pv.Code)

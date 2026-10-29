@@ -91,8 +91,17 @@ func rtProbeNo(t *testing.T, res ProbeResult, code string) {
 
 // TestRouterGeodataProbe — проверка своего источника на настоящем HTTP-сервере
 // самого роутера (loopback): классификация без полной загрузки файла.
+// rtAllowPrivate разрешает проверке ходить на loopback: сервер-образец теста поднят на
+// самом роутере. На выходе из теста запрет частных адресов возвращается.
+func rtAllowPrivate(t *testing.T) {
+	t.Helper()
+	probeAllowPrivate = true
+	t.Cleanup(func() { probeAllowPrivate = false })
+}
+
 func TestRouterGeodataProbe(t *testing.T) {
 	routertest.Current(t)
+	rtAllowPrivate(t)
 	data, datKind := rtProbeDat(t)
 
 	mux := http.NewServeMux()
@@ -339,6 +348,20 @@ func TestRouterGeodataProbe(t *testing.T) {
 		rtProbeNo(t, res, "name_ok")
 		rtProbeNo(t, res, "name_taken")
 		rtProbeWant(t, res, "scheme_bad", ProbeLevelBlock)
+	})
+
+	// Адрес на loopback без разрешения тестов: проверка не ходит в частную сеть (SSRF).
+	t.Run("private_blocked", func(t *testing.T) {
+		probeAllowPrivate = false
+		defer func() { probeAllowPrivate = true }()
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/ok.dat", Mode: ProbeModeAdd})
+		c, ok := rtProbeCheck(res, "reach_fail")
+		if !ok || c.Params["reason"] != "private" {
+			t.Fatalf("адрес на loopback: ждали reach_fail с причиной private, получили %+v", res.Checks)
+		}
+		if res.Blocked {
+			t.Fatalf("запрет частного адреса не должен блокировать запись: %+v", res.Checks)
+		}
 	})
 
 	t.Run("github", func(t *testing.T) {

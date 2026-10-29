@@ -815,7 +815,7 @@ test.describe('свой источник', () => {
     await expect(submit).toBeDisabled();
     await expect(modal.getByTestId('geo-add-diff')).toHaveCount(0);
 
-    // закрытый порт на loopback роутера: адрес не ответил — предупреждение, не блок
+    // адрес на loopback роутера: проверка в частную сеть не ходит, адрес не ответил — предупреждение, не блок
     await url.fill('http://127.0.0.1:9/x.dat');
     // правка поля сбросила результат
     await expect(results.locator('li')).toHaveCount(0);

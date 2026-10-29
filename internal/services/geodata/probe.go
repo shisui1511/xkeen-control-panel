@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Уровни результата проверки.
@@ -181,15 +182,19 @@ func probeIsGitHubHost(host string) bool {
 }
 
 // probeClient — клиент без сжатия: сервер с gzip не должен прятать Content-Length.
+// Соединения идут через utils.SafeHTTPClient: адрес, введённый пользователем, не может
+// вести в частную сеть, на петлю и link-local, в том числе после редиректа.
 func probeClient() (*http.Client, func()) {
-	tr := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: probeConnectTimeout}).DialContext,
-		TLSHandshakeTimeout:   probeConnectTimeout,
-		ResponseHeaderTimeout: probeAttemptTimeout,
-		DisableCompression:    true,
-		DisableKeepAlives:     true,
+	tr := &http.Transport{DialContext: (&net.Dialer{Timeout: probeConnectTimeout}).DialContext}
+	if !probeAllowPrivate {
+		if safe, ok := utils.SafeHTTPClient(probeAttemptTimeout).Transport.(*http.Transport); ok {
+			tr = safe
+		}
 	}
+	tr.TLSHandshakeTimeout = probeConnectTimeout
+	tr.ResponseHeaderTimeout = probeAttemptTimeout
+	tr.DisableCompression = true
+	tr.DisableKeepAlives = true
 	cl := &http.Client{
 		Transport: tr,
 		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
@@ -202,7 +207,14 @@ func probeClient() (*http.Client, func()) {
 	return cl, tr.CloseIdleConnections
 }
 
+// probeAllowPrivate снимает запрет на частные адреса и loopback. Выставляют только
+// роутерные тесты пакета: сервер-образец у них поднят на loopback самого роутера.
+var probeAllowPrivate bool
+
 func probeDo(ctx context.Context, cl *http.Client, method, target, rng string) (*http.Response, error) {
+	if err := utils.ValidateURL(ctx, target, probeAllowPrivate); err != nil {
+		return nil, utils.ErrPrivateNetwork
+	}
 	req, err := http.NewRequestWithContext(ctx, method, target, nil)
 	if err != nil {
 		return nil, err
@@ -222,6 +234,8 @@ func probeReason(err error) string {
 	var invErr x509.CertificateInvalidError
 	var recErr tls.RecordHeaderError
 	switch {
+	case errors.Is(err, utils.ErrPrivateNetwork):
+		return "private"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
 	case errors.Is(err, syscall.ECONNREFUSED):

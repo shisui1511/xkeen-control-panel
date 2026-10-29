@@ -280,6 +280,7 @@ const rtOpsComment = "комментарий владельца должен п�
 // «довести включение», отказы и установка jq. `-ug` не запускается.
 func TestRouterGeodataOps(t *testing.T) {
 	tg := routertest.Current(t)
+	rtAllowPrivate(t)
 	if _, err := os.Stat(rtRunXKeenBin); err != nil {
 		t.Skipf("нет %s: XKeen не установлен", rtRunXKeenBin)
 	}
