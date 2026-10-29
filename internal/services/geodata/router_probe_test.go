@@ -1,0 +1,397 @@
+//go:build router
+
+package geodata
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"crypto/rand"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
+)
+
+// rtProbeDat возвращает копию самого маленького настоящего dat стенда размером не
+// меньше MinDatSize и его вид (geosite или geoip); без такого файла тест пропускается.
+func rtProbeDat(t *testing.T) ([]byte, string) {
+	t.Helper()
+	files, err := lists.NewIndex(lists.DefaultDatDir).Files()
+	if err != nil {
+		t.Fatalf("Files: %v", err)
+	}
+	var cand []lists.FileInfo
+	for _, f := range files {
+		if f.Size >= MinDatSize {
+			cand = append(cand, f)
+		}
+	}
+	if len(cand) == 0 {
+		t.Skipf("в %s нет dat-файла не меньше %d байт", lists.DefaultDatDir, MinDatSize)
+	}
+	sort.Slice(cand, func(i, j int) bool { return cand[i].Size < cand[j].Size })
+	data, err := os.ReadFile(filepath.Join(lists.DefaultDatDir, cand[0].Name))
+	if err != nil {
+		t.Fatalf("чтение %s: %v", cand[0].Name, err)
+	}
+	kind := lists.SniffGeoSite
+	if cand[0].Kind == lists.KindIP {
+		kind = lists.SniffGeoIP
+	}
+	return data, kind
+}
+
+// rtProbeServer поднимает настоящий HTTP-сервер на loopback роутера и возвращает его адрес.
+func rtProbeServer(t *testing.T, mux http.Handler) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	return ln.Addr().String()
+}
+
+func rtProbeCheck(res ProbeResult, code string) (ProbeCheck, bool) {
+	for _, c := range res.Checks {
+		if c.Code == code {
+			return c, true
+		}
+	}
+	return ProbeCheck{}, false
+}
+
+func rtProbeWant(t *testing.T, res ProbeResult, code, level string) {
+	t.Helper()
+	c, ok := rtProbeCheck(res, code)
+	if !ok {
+		t.Fatalf("нет проверки %s: %+v", code, res.Checks)
+	}
+	if c.Level != level {
+		t.Fatalf("проверка %s: уровень %s, ждали %s", code, c.Level, level)
+	}
+}
+
+func rtProbeNo(t *testing.T, res ProbeResult, code string) {
+	t.Helper()
+	if _, ok := rtProbeCheck(res, code); ok {
+		t.Fatalf("лишняя проверка %s: %+v", code, res.Checks)
+	}
+}
+
+// TestRouterGeodataProbe — проверка своего источника на настоящем HTTP-сервере
+// самого роутера (loopback): классификация без полной загрузки файла.
+// rtAllowPrivate разрешает проверке ходить на loopback: сервер-образец теста поднят на
+// самом роутере. На выходе из теста запрет частных адресов возвращается.
+func rtAllowPrivate(t *testing.T) {
+	t.Helper()
+	probeAllowPrivate = true
+	t.Cleanup(func() { probeAllowPrivate = false })
+}
+
+func TestRouterGeodataProbe(t *testing.T) {
+	routertest.Current(t)
+	rtAllowPrivate(t)
+	data, datKind := rtProbeDat(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ok.dat", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "ok.dat", time.Time{}, bytes.NewReader(data))
+	})
+	mux.HandleFunc("/nosize.dat", func(w http.ResponseWriter, r *http.Request) {
+		// Ответ частями со сбросом буфера: сервер уходит в chunked, без Content-Length.
+		w.Header().Set("Content-Type", "application/octet-stream")
+		for off := 0; off < len(data); off += 4096 {
+			end := min(off+4096, len(data))
+			if _, err := w.Write(data[off:end]); err != nil {
+				return
+			}
+			w.(http.Flusher).Flush()
+		}
+	})
+	page := append([]byte("<!DOCTYPE html>\n<html><head><title>404 Not Found</title></head><body>"), bytes.Repeat([]byte("<!-- -->"), 4096)...)
+	mux.HandleFunc("/page.html", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		http.ServeContent(w, r, "page.html", time.Time{}, bytes.NewReader(page))
+	})
+	mux.HandleFunc("/small.dat", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "small.dat", time.Time{}, bytes.NewReader(data[:1000]))
+	})
+	noise := make([]byte, 32<<10)
+	if _, err := rand.Read(noise); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	mux.HandleFunc("/notdat.dat", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "notdat.dat", time.Time{}, bytes.NewReader(noise))
+	})
+	mux.HandleFunc("/gzip.dat", func(w http.ResponseWriter, r *http.Request) {
+		// Сжимает на лету только по просьбе клиента: без Accept-Encoding: gzip
+		// отдаёт файл как есть, с Content-Length.
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			zw := gzip.NewWriter(w)
+			_, _ = zw.Write(data)
+			_ = zw.Close()
+			return
+		}
+		http.ServeContent(w, r, "gzip.dat", time.Time{}, bytes.NewReader(data))
+	})
+	mux.HandleFunc("/proxy/", http.NotFound)
+	addr := rtProbeServer(t, mux)
+	base := "http://" + addr
+
+	t.Run("ok", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/ok.dat", Mode: ProbeModeAdd, GeoDir: lists.DefaultDatDir})
+		if res.Blocked {
+			t.Fatalf("годный dat заблокирован: %+v", res.Checks)
+		}
+		rtProbeWant(t, res, "name_ok", ProbeLevelOK)
+		rtProbeWant(t, res, "scheme_http", ProbeLevelWarn)
+		rtProbeWant(t, res, "reach_ok", ProbeLevelOK)
+		rtProbeWant(t, res, "size_ok", ProbeLevelOK)
+		rtProbeWant(t, res, "kind", ProbeLevelOK)
+		if res.Route != ProbeRouteDirect {
+			t.Fatalf("путь %q, ждали %q", res.Route, ProbeRouteDirect)
+		}
+		if res.Size != int64(len(data)) {
+			t.Fatalf("размер %d, ждали %d", res.Size, len(data))
+		}
+		if res.Kind != datKind {
+			t.Fatalf("вид %q, у файла в индексе %q", res.Kind, datKind)
+		}
+		rtProbeNo(t, res, "space")
+		rtProbeNo(t, res, "heavy")
+	})
+
+	t.Run("nosize", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/nosize.dat", Mode: ProbeModeAdd})
+		rtProbeWant(t, res, "size_none", ProbeLevelBlock)
+		if !res.Blocked {
+			t.Fatalf("ответ без размера не заблокирован: %+v", res.Checks)
+		}
+	})
+
+	t.Run("html", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/page.html", Mode: ProbeModeAdd})
+		rtProbeWant(t, res, "html", ProbeLevelBlock)
+		if !res.Blocked {
+			t.Fatalf("HTML-страница не заблокирована: %+v", res.Checks)
+		}
+	})
+
+	t.Run("small", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/small.dat", Mode: ProbeModeAdd})
+		rtProbeWant(t, res, "size_small", ProbeLevelBlock)
+		if !res.Blocked {
+			t.Fatalf("файл меньше %d байт не заблокирован", MinDatSize)
+		}
+	})
+
+	t.Run("notdat", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/notdat.dat", Mode: ProbeModeAdd})
+		rtProbeWant(t, res, "size_ok", ProbeLevelOK)
+		rtProbeWant(t, res, "not_dat", ProbeLevelBlock)
+		if !res.Blocked {
+			t.Fatalf("не dat не заблокирован: %+v", res.Checks)
+		}
+	})
+
+	t.Run("gzip", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/gzip.dat", Mode: ProbeModeAdd})
+		rtProbeWant(t, res, "size_ok", ProbeLevelOK)
+		if res.Blocked || res.Size != int64(len(data)) {
+			t.Fatalf("размер сервера со сжатием потерян: blocked=%v size=%d, ждали %d", res.Blocked, res.Size, len(data))
+		}
+	})
+
+	// Знаки оболочки в адресе блокируются одной общей проверкой до сети (WR-06); & в
+	// строке запроса разрешён. gh_proxy проходит ту же проверку.
+	t.Run("shell_meta", func(t *testing.T) {
+		for _, meta := range []string{"$(id)", "`id`", ";", "|", "<", ">", `"`, "'", `\`} {
+			res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/ok.dat" + meta, Mode: ProbeModeAdd})
+			rtProbeWant(t, res, "scheme_bad", ProbeLevelBlock)
+			if !res.Blocked {
+				t.Errorf("адрес со знаком оболочки %q не заблокирован: %+v", meta, res.Checks)
+			}
+			rtProbeNo(t, res, "reach_ok")
+			rtProbeNo(t, res, "reach_fail")
+		}
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/ok.dat?a=1&b=2", Mode: ProbeModeAdd})
+		rtProbeNo(t, res, "scheme_bad")
+		rtProbeWant(t, res, "reach_ok", ProbeLevelOK)
+		for _, bad := range []string{"https://p.example/$x", "https://p.example/a;b"} {
+			if validGhProxy(bad) {
+				t.Errorf("gh_proxy со знаком оболочки принят: %q", bad)
+			}
+		}
+		if !validGhProxy("https://p.example/") {
+			t.Error("годный gh_proxy отклонён")
+		}
+	})
+
+	t.Run("closed_port", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("Listen: %v", err)
+		}
+		closed := ln.Addr().String()
+		_ = ln.Close()
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: "http://" + closed + "/ok.dat", Mode: ProbeModeAdd})
+		rtProbeWant(t, res, "reach_fail", ProbeLevelWarn)
+		if res.Blocked {
+			t.Fatalf("недоступный адрес не должен блокировать запись: %+v", res.Checks)
+		}
+		if c, _ := rtProbeCheck(res, "reach_fail"); c.Params["reason"] == "" {
+			t.Fatalf("у reach_fail нет причины: %+v", c)
+		}
+	})
+
+	t.Run("gh_proxy", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{
+			File: "own_test.dat", URL: base + "/ok.dat", Mode: ProbeModeAdd,
+			GhProxy: base + "/proxy", Mirrors: []string{base + "/mirror"},
+		})
+		rtProbeWant(t, res, "proxy_all", ProbeLevelWarn)
+		// Сервер отдаёт на /proxy/<адрес> 404: XKeen с таким gh_proxy файл тоже
+		// не скачает, и зеркала при заданном gh_proxy не пробуются.
+		rtProbeWant(t, res, "reach_fail", ProbeLevelWarn)
+		if res.Route != ProbeRouteGhProxy {
+			t.Fatalf("путь %q, ждали %q", res.Route, ProbeRouteGhProxy)
+		}
+		if res.Blocked {
+			t.Fatalf("адрес без ответа не блокирует запись: %+v", res.Checks)
+		}
+	})
+
+	t.Run("mirror", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("Listen: %v", err)
+		}
+		closed := ln.Addr().String()
+		_ = ln.Close()
+		// Прямой путь закрыт, зеркало отдаёт <зеркало>/<адрес> — цепочка доходит до него.
+		mmux := http.NewServeMux()
+		mmux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeContent(w, r, "ok.dat", time.Time{}, bytes.NewReader(data))
+		})
+		maddr := rtProbeServer(t, mmux)
+		res := Probe(context.Background(), ProbeInput{
+			File: "own_test.dat", URL: "http://" + closed + "/ok.dat", Mode: ProbeModeAdd,
+			Mirrors: []string{"http://" + maddr},
+		})
+		rtProbeWant(t, res, "reach_ok", ProbeLevelOK)
+		if res.Route != ProbeRouteMirror || res.Blocked {
+			t.Fatalf("путь %q blocked=%v: %+v", res.Route, res.Blocked, res.Checks)
+		}
+	})
+
+	t.Run("gh_unreachable", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("Listen: %v", err)
+		}
+		closed := ln.Addr().String()
+		_ = ln.Close()
+		res := Probe(context.Background(), ProbeInput{
+			File: "own_test.dat", URL: base + "/ok.dat", Mode: ProbeModeAdd,
+			GitHubURL: "http://" + closed + "/xkeen.tar",
+		})
+		rtProbeWant(t, res, "gh_unreachable", ProbeLevelWarn)
+		if res.Blocked {
+			t.Fatalf("недоступный GitHub не блокирует запись: %+v", res.Checks)
+		}
+		ok := Probe(context.Background(), ProbeInput{
+			File: "own_test.dat", URL: base + "/ok.dat", Mode: ProbeModeAdd,
+			GitHubURL: base + "/ok.dat",
+		})
+		rtProbeNo(t, ok, "gh_unreachable")
+	})
+
+	t.Run("name", func(t *testing.T) {
+		taken := map[string]bool{"geosite_refilter.dat": true, "zkeen.dat": true}
+		for _, name := range []string{"../x.dat", "a/b.dat", `a\b.dat`, "x.txt", "..dat", ""} {
+			res := Probe(context.Background(), ProbeInput{File: name, URL: "ftp://example.invalid/x.dat", Mode: ProbeModeAdd})
+			rtProbeWant(t, res, "name_bad", ProbeLevelBlock)
+		}
+		for _, name := range []string{"geosite_refilter.dat", "zkeen.dat"} {
+			res := Probe(context.Background(), ProbeInput{File: name, URL: "ftp://example.invalid/x.dat", Mode: ProbeModeAdd, Taken: taken})
+			rtProbeWant(t, res, "name_taken", ProbeLevelBlock)
+		}
+		res := Probe(context.Background(), ProbeInput{File: "own-list_1.dat", URL: "ftp://example.invalid/x.dat", Mode: ProbeModeAdd, Taken: taken})
+		rtProbeWant(t, res, "name_ok", ProbeLevelOK)
+	})
+
+	t.Run("scheme", func(t *testing.T) {
+		for _, raw := range []string{"ftp://example.invalid/x.dat", "file:///etc/passwd", "http://exa mple/x.dat", "https://example.invalid/x\n.dat", "", "https://" + strings.Repeat("a", probeURLMax)} {
+			res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: raw, Mode: ProbeModeAdd})
+			rtProbeWant(t, res, "scheme_bad", ProbeLevelBlock)
+			if _, ok := rtProbeCheck(res, "reach_ok"); ok || len(res.Checks) != 2 {
+				t.Fatalf("после scheme_bad проверка должна остановиться: %+v", res.Checks)
+			}
+		}
+	})
+
+	t.Run("edit_mode", func(t *testing.T) {
+		res := Probe(context.Background(), ProbeInput{File: "../x.dat", URL: "ftp://example.invalid/x.dat", Mode: ProbeModeEdit})
+		rtProbeNo(t, res, "name_bad")
+		rtProbeNo(t, res, "name_ok")
+		rtProbeNo(t, res, "name_taken")
+		rtProbeWant(t, res, "scheme_bad", ProbeLevelBlock)
+	})
+
+	// Адрес на loopback без разрешения тестов: проверка не ходит в частную сеть (SSRF).
+	t.Run("private_blocked", func(t *testing.T) {
+		probeAllowPrivate = false
+		defer func() { probeAllowPrivate = true }()
+		res := Probe(context.Background(), ProbeInput{File: "own_test.dat", URL: base + "/ok.dat", Mode: ProbeModeAdd})
+		c, ok := rtProbeCheck(res, "reach_fail")
+		if !ok || c.Params["reason"] != "private" {
+			t.Fatalf("адрес на loopback: ждали reach_fail с причиной private, получили %+v", res.Checks)
+		}
+		if res.Blocked {
+			t.Fatalf("запрет частного адреса не должен блокировать запись: %+v", res.Checks)
+		}
+	})
+
+	t.Run("github", func(t *testing.T) {
+		url := ""
+		for _, e := range rtProbeCatalog() {
+			if e.ID == "roscomvpn_geosite" {
+				url = e.URL
+			}
+		}
+		if url == "" {
+			t.Fatal("в каталоге нет набора roscomvpn_geosite")
+		}
+		res := Probe(context.Background(), ProbeInput{File: "geosite_probe_check.dat", URL: url, Mode: ProbeModeAdd, GeoDir: lists.DefaultDatDir})
+		if c, ok := rtProbeCheck(res, "reach_fail"); ok {
+			t.Skipf("сеть стенда: GitHub не ответил (%s)", c.Params["reason"])
+		}
+		if res.Blocked {
+			t.Fatalf("настоящий набор из каталога заблокирован: %+v", res.Checks)
+		}
+		rtProbeWant(t, res, "scheme_https", ProbeLevelOK)
+		if res.Kind != lists.SniffGeoSite {
+			t.Fatalf("вид %q, ждали %q", res.Kind, lists.SniffGeoSite)
+		}
+	})
+}
+
+func rtProbeCatalog() []lists.ExtendedSet {
+	view, err := lists.Resolve(lists.NewIndex(lists.DefaultDatDir), nil)
+	if err != nil {
+		return nil
+	}
+	return view.Extended
+}

@@ -149,6 +149,9 @@ func (e *rtSrc) enableLayer() {
 	e.setLayer(true)
 	e.resetDraft()
 	e.t.Cleanup(func() { e.resetDraft() })
+	// Включение слоя запускает фоновую сборку, она перезапускает ядро уже после теста:
+	// без ожидания следующий тест или проверка конца сессии застают ядро остановленным.
+	e.t.Cleanup(func() { e.rtRstIdle() })
 }
 
 func rtLinkText(t *testing.T, name string) string {

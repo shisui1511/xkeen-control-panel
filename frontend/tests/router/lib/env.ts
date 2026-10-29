@@ -20,6 +20,9 @@ export const T = {
   page: 30_000 * RT.slow,
   /** отдельное действие в интерфейсе */
   action: 10_000 * RT.slow,
+  /** запись xkeen.json менеджером geodata: fsync под замком слоя после записи dat на USB-диск
+   *  стенда идёт 15–26 с (todo gate-geodata-write-fsync-stall-after-dat-writes) */
+  write: 60_000 * RT.slow,
   /** сохранение конфига ядра: запись, проверка и перезапуск службы на роутере */
   save: 60_000 * RT.slow,
   /** ожидание затишья сети после загрузки */

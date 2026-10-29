@@ -27,6 +27,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
@@ -40,6 +41,19 @@ var (
 	passwordStdinFlag = flag.Bool("password-stdin", false, "Read the new password from the first line of stdin (for scripts), requires --reset-password")
 	setupCodeFlag     = flag.Bool("setup-code", false, "Print the current first-run setup code (only while no password is set)")
 )
+
+// resolveBinaryPath возвращает путь к исполняемому файлу из настроек: в config.json
+// бывает имя без каталога («xkeen»), для которого os.Stat относительно рабочего каталога
+// файла не находит. Имя без каталога ищется в PATH, остальное возвращается как есть.
+func resolveBinaryPath(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	if found, err := exec.LookPath(path); err == nil {
+		return found
+	}
+	return path
+}
 
 func main() {
 	// Handle version flag before flag.Parse
@@ -658,7 +672,7 @@ func main() {
 		XrayEnv: func(dir string) []string { return utils.XrayAssetEnv(os.Environ(), dir) },
 		KernelVersions: func() []configlayer.KernelVersionInput {
 			cfg.RLock()
-			xkeenBin := cfg.XKeenBinary
+			xkeenBin := resolveBinaryPath(cfg.XKeenBinary)
 			cfg.RUnlock()
 			_, statErr := os.Stat(xkeenBin)
 			inputs := []configlayer.KernelVersionInput{{
@@ -758,16 +772,20 @@ func main() {
 		// слоя. Не создался или не подключился — маршруты
 		// /api/configlayer/routing* отвечают 404, панель работает без них.
 		var routingSvc *routing.Service
+		var geoSvc *geodata.Service
+		// Индекс dat и хранилище записей geodata — одни на сервисы маршрутизации и
+		// менеджера. Хранилище создаётся без собственного запуска `xkeen -ug`: единственный
+		// вход запуска из панели — сервис менеджера под замком применения.
+		datIndex := lists.NewIndex(lists.DefaultDatDir)
+		geoStore := lists.NewGeodataStore(xkeenSettingsSvc, exec.LookPath)
 		if sourcesSvc != nil {
 			var routeErr error
 			routingSvc, routeErr = routing.New(routing.Deps{
-				DataDir: cfg.DataDir,
-				Layer:   configLayer,
-				Sources: sourcesSvc,
-				Lists:   lists.NewIndex(lists.DefaultDatDir),
-				Geodata: lists.NewGeodataStore(xkeenSettingsSvc, exec.LookPath, func(ctx context.Context) error {
-					return runXKeenUpdateGeo(ctx, consoleSvc)
-				}),
+				DataDir:       cfg.DataDir,
+				Layer:         configLayer,
+				Sources:       sourcesSvc,
+				Lists:         datIndex,
+				Geodata:       geoStore,
 				Installed:     installedKernels,
 				KernelVersion: kernelVersion,
 				Running:       kernelRunning,
@@ -791,6 +809,33 @@ func main() {
 			if routeErr == nil {
 				// Хук групп по умолчанию ставится только после полной регистрации.
 				routingSvc.Attach()
+				// Менеджер geodata (фаза 146.1) создаётся только здесь, после сервиса
+				// маршрутизации: его хук AfterApply (удаление источника после «Применить»)
+				// регистрируется до Start слоя. Не создался или не подключился — маршруты
+				// /api/configlayer/geodata* отвечают 404.
+				var geoErr error
+				geoSvc, geoErr = geodata.New(geodata.Deps{
+					DataDir:      cfg.DataDir,
+					Layer:        configLayer,
+					Store:        geoStore,
+					Index:        datIndex,
+					Routing:      routingSvc,
+					XKeenBin:     resolveBinaryPath(cfg.XKeenBinary),
+					MihomoDir:    cfg.MihomoConfigDir,
+					XrayConfDir:  cfg.XRayConfigDir,
+					AllowedRoots: cfg.AllowedRoots,
+				})
+				if geoErr == nil {
+					geoErr = configLayer.Register(configlayer.Hooks{AfterApply: geoSvc.AfterApply})
+					if geoErr != nil {
+						// Контекст сервиса не должен остаться живым без владельца.
+						geoSvc.Stop()
+					}
+				}
+				if geoErr != nil {
+					log.Printf("Менеджер geodata не подключён, маршруты /api/configlayer/geodata* отвечают 404: %v", geoErr)
+					geoSvc = nil
+				}
 			} else {
 				log.Printf("Сервис маршрутизации не подключён к слою, маршруты /api/configlayer/routing* отвечают 404: %v", routeErr)
 				if routingSvc != nil {
@@ -828,6 +873,13 @@ func main() {
 			}, 0)
 			selWatch.Start()
 			defer stops.run("routing-selection", selWatch.Stop)
+		}
+		if geoSvc != nil {
+			// Менеджер geodata: стартует после слоя и сервиса маршрутизации; defer идёт
+			// после их defer, поэтому останавливается раньше обоих.
+			geoSvc.Start()
+			api.SetGeodataService(geoSvc, datIndex)
+			defer stops.run("geodata", geoSvc.Stop)
 		}
 	}
 	srv.HandleProtected("/api/configlayer/state", api.ConfigLayerState)
@@ -869,11 +921,24 @@ func main() {
 	srv.HandleProtected("/api/configlayer/routing/reclaim", api.ConfigRoutingReclaim)
 	srv.HandleProtected("/api/configlayer/routing/select", api.ConfigRoutingSelect)
 	srv.HandleProtected("/api/configlayer/routing/lists", api.ConfigRoutingLists)
-	srv.HandleProtected("/api/configlayer/routing/lists/geodata/preview", api.ConfigRoutingGeodataPreview)
-	srv.HandleProtected("/api/configlayer/routing/lists/geodata/add", api.ConfigRoutingGeodataAdd)
 	srv.HandleProtected("/api/configlayer/routing/presets", api.ConfigRoutingPresets)
 	srv.HandleProtected("/api/configlayer/routing/presets/plan", api.ConfigRoutingPresetsPlan)
 	srv.HandleProtected("/api/configlayer/routing/presets/apply", api.ConfigRoutingPresetsApply)
+	srv.HandleProtected("/api/configlayer/geodata", api.ConfigGeodata)
+	srv.HandleProtected("/api/configlayer/geodata/output", api.ConfigGeodataOutput)
+	srv.HandleProtected("/api/configlayer/geodata/run", api.ConfigGeodataRun)
+	srv.HandleProtected("/api/configlayer/geodata/jq", api.ConfigGeodataJQ)
+	srv.HandleProtected("/api/configlayer/geodata/schedule", api.ConfigGeodataSchedule)
+	srv.HandleProtected("/api/configlayer/geodata/cron", api.ConfigGeodataCron)
+	srv.HandleProtected("/api/configlayer/geodata/probe", api.ConfigGeodataProbe)
+	srv.HandleProtected("/api/configlayer/geodata/preview", api.ConfigGeodataPreview)
+	srv.HandleProtected("/api/configlayer/geodata/write", api.ConfigGeodataWrite)
+	srv.HandleProtected("/api/configlayer/geodata/impact", api.ConfigGeodataImpact)
+	srv.HandleProtected("/api/configlayer/geodata/drop", api.ConfigGeodataDrop)
+	srv.HandleProtected("/api/configlayer/geodata/restore", api.ConfigGeodataRestore)
+	srv.HandleProtected("/api/configlayer/geodata/tags", api.ConfigGeodataTags)
+	srv.HandleProtected("/api/configlayer/geodata/entries", api.ConfigGeodataEntries)
+	srv.HandleProtected("/api/configlayer/geodata/lookup", api.ConfigGeodataLookup)
 
 	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
 		strings.TrimPrefix(Version, "v"), runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
@@ -915,33 +980,6 @@ func main() {
 		log.Printf("Received signal %s during restart, exiting...", sig)
 	}
 	log.Println("Server stopped.")
-}
-
-// runXKeenUpdateGeo запускает `xkeen -ug` через консольный сервис. Команда идёт
-// в отдельной горутине: сервис ждёт её без контекста, а ожидание вызывающего
-// прерывается отменой ctx (процесс при этом доработает сам).
-func runXKeenUpdateGeo(ctx context.Context, console *services.ConsoleService) error {
-	type result struct {
-		res *services.CommandResult
-		err error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		res, err := console.Execute("-ug")
-		ch <- result{res, err}
-	}()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case out := <-ch:
-		if out.err != nil {
-			return out.err
-		}
-		if out.res == nil || !out.res.Success {
-			return errors.New("xkeen -ug завершился с ошибкой")
-		}
-		return nil
-	}
 }
 
 // pingNodeTLS проверяет доступность сервера узла по TLS (рукопожатие по адресу,

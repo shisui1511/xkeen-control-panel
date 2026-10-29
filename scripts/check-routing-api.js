@@ -23,6 +23,10 @@
  *    два условия одного поля, cond_conflict) совпадает с COND_XRAY_FIELD
  *    (frontend/src/lib/routingView.ts, редактор не даёт второй тип того же поля)
  *    и покрывает все типы условий модели (Cond* в model.go).
+ * 5. Коды проблем проверки: каждая константа issue* в validate.go есть в ISSUE_CODES
+ *    (frontend/src/lib/routingView.ts) и имеет текст cfg.hint.<код> в обоих словарях
+ *    фронтенда; код ISSUE_CODES, которого нет среди констант, — устаревший. Новый код
+ *    без текста больше не доходит до людей как «Не удалось проверить черновик».
  *
  * Usage: node scripts/check-routing-api.js [--root <каталог>]
  */
@@ -197,9 +201,6 @@ const ROUTES = {
   "/api/configlayer/routing/reclaim": "ConfigRoutingReclaim",
   "/api/configlayer/routing/select": "ConfigRoutingSelect",
   "/api/configlayer/routing/lists": "ConfigRoutingLists",
-  "/api/configlayer/routing/lists/geodata/preview":
-    "ConfigRoutingGeodataPreview",
-  "/api/configlayer/routing/lists/geodata/add": "ConfigRoutingGeodataAdd",
   "/api/configlayer/routing/presets": "ConfigRoutingPresets",
   "/api/configlayer/routing/presets/plan": "ConfigRoutingPresetsPlan",
   "/api/configlayer/routing/presets/apply": "ConfigRoutingPresetsApply",
@@ -464,10 +465,65 @@ for (const type of frontFields.keys()) {
     );
 }
 
+// --- 5. Коды проблем проверки ↔ ISSUE_CODES ↔ cfg.hint.<код> ----------------
+
+const FRONT_RU = "frontend/src/locales/ru.json";
+const FRONT_EN = "frontend/src/locales/en.json";
+
+// Коды проблем бэкенда: константы вида issueИмя = "код" в validate.go.
+const issueCodes = [];
+for (const m of read(VALIDATE_GO).matchAll(
+  /^\s*issue[A-Za-z]+\s*=\s*"([a-z_]+)"/gm,
+)) {
+  issueCodes.push(m[1]);
+}
+if (issueCodes.length === 0)
+  errors.push(
+    `${VALIDATE_GO}: не найдены константы кодов проблем issue* (разбор стража не сработал)`,
+  );
+
+// Коды фронтенда: строки внутри литерала ISSUE_CODES = new Set([ … ]).
+let frontIssueCodes = null;
+{
+  const body = read(VIEW_TS).match(
+    /const ISSUE_CODES = new Set\(\[([\s\S]*?)\]\)/,
+  );
+  if (!body) {
+    errors.push(`${VIEW_TS}: не найден литерал ISSUE_CODES`);
+  } else {
+    frontIssueCodes = [...body[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+    if (frontIssueCodes.length === 0)
+      errors.push(`${VIEW_TS}: в литерале ISSUE_CODES нет кодов`);
+  }
+}
+
+const feDicts = [
+  [FRONT_RU, JSON.parse(read(FRONT_RU))],
+  [FRONT_EN, JSON.parse(read(FRONT_EN))],
+];
+for (const code of issueCodes) {
+  if (frontIssueCodes !== null && !frontIssueCodes.includes(code))
+    errors.push(
+      `${VIEW_TS}: кода проблемы ${code} (${VALIDATE_GO}) нет в ISSUE_CODES — чип правила покажет общий текст сбоя проверки`,
+    );
+  for (const [file, dict] of feDicts) {
+    if (!(`cfg.hint.${code}` in dict))
+      errors.push(`${file}: нет текста cfg.hint.${code} для кода проблемы ${code}`);
+  }
+}
+if (frontIssueCodes !== null && issueCodes.length > 0) {
+  for (const code of frontIssueCodes) {
+    if (!issueCodes.includes(code))
+      errors.push(
+        `${VIEW_TS}: код ${code} из ISSUE_CODES устарел — константы issue* с таким значением нет в ${VALIDATE_GO}`,
+      );
+  }
+}
+
 if (errors.length > 0) {
   for (const e of errors) console.error("❌ " + e);
   process.exit(1);
 }
 console.log(
-  `✅ API маршрутизации согласован: типов контракта ${contract ? Object.keys(contract).length : 0}, маршрутов ${Object.keys(ROUTES).length}, кодов ${codes.length}, типов условий ${condTypes.length}`,
+  `✅ API маршрутизации согласован: типов контракта ${contract ? Object.keys(contract).length : 0}, маршрутов ${Object.keys(ROUTES).length}, кодов ${codes.length}, типов условий ${condTypes.length}, кодов проблем ${issueCodes.length}`,
 );

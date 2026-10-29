@@ -283,16 +283,12 @@ export interface GeodataEntry {
 export interface GeodataStatus {
   jq: boolean;
   geofile_update: boolean;
+  /** xkeen.gh_proxy из xkeen.json, пусто, если ключа нет. */
+  gh_proxy: string;
   entries: GeodataEntry[];
+  /** Записи с пустым file или url: XKeen на них прекращает обработку следующих. */
+  invalid?: GeodataEntry[];
   reason?: string;
-}
-
-export interface GeodataPreview {
-  before: string;
-  after: string;
-  comments_kept: boolean;
-  /** Отпечаток `before`: возвращается в addGeodata, чтобы запись шла по показанному файлу. */
-  base: string;
 }
 
 export interface CatalogView {
@@ -544,25 +540,6 @@ export async function reclaimRouting(kernel: 'xray' | 'mihomo'): Promise<void> {
 
 export function fetchLists(): Promise<CatalogView> {
   return apiFetchJSON<CatalogView>(`${BASE}/lists`);
-}
-
-export function previewGeodata(set: string): Promise<GeodataPreview> {
-  return post<GeodataPreview>(`${BASE}/lists/geodata/preview`, { set });
-}
-
-/** «Добавить в XKeen»: запись геоданных в xkeen.json, при updateNow — обновление баз. */
-export function addGeodata(
-  set: string,
-  base: string,
-  acceptCommentLoss: boolean,
-  updateNow: boolean
-): Promise<GeodataStatus> {
-  return post<GeodataStatus>(`${BASE}/lists/geodata/add`, {
-    set,
-    base,
-    accept_comment_loss: acceptCommentLoss,
-    update_now: updateNow
-  });
 }
 
 export function fetchPresets(): Promise<PresetsView> {

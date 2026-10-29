@@ -1,0 +1,1087 @@
+package geodata
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sync"
+	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
+)
+
+// Значения путей по умолчанию (Entware на роутере).
+const (
+	defaultXKeenBin    = "/opt/sbin/xkeen"
+	defaultCronFile    = "/opt/var/spool/cron/crontabs/root"
+	defaultXrayConfDir = "/opt/etc/xray/configs"
+)
+
+// Задания менеджера (RunView.job и OutputChunk.job).
+const (
+	jobUG     = "ug"
+	jobJQ     = "jq"
+	jobRemove = "remove"
+)
+
+// Итог запуска (LastRun.Outcome).
+const (
+	outcomeOK      = "ok"
+	outcomePartial = "partial"
+	outcomeFailed  = "failed"
+	outcomeUnknown = "unknown"
+)
+
+// Итог по файлу, который панель выводит сама (XKeen всегда качает файл заново).
+const (
+	// ResultUpdated — файл обновлён: хэш SHA-256 до и после различается.
+	ResultUpdated = "updated"
+	// ResultUnchanged — файл скачан заново, содержимое прежнее.
+	ResultUnchanged = "unchanged"
+)
+
+// Причины сбоя всего запуска, которые ставит панель (разбор вывода даёт run_network
+// и no_sources).
+const (
+	runReasonTimeout = "timeout"
+	runReasonExit    = "exit"
+)
+
+const (
+	// tickInterval — период проверки изменений файлов вне панели.
+	tickInterval = 30 * time.Second
+	// outsideQuiet — сколько после конца запуска панели правки файлов ещё считаются её
+	// собственными.
+	outsideQuiet = 60 * time.Second
+	// publishInterval — не чаще одного события geodata за этот срок.
+	publishInterval = 500 * time.Millisecond
+	// jobWaitPoll — как часто фоновый запуск проверяет, не освободилось ли задание менеджера
+	// (установка jq идёт до jqTimeout).
+	jobWaitPoll = 500 * time.Millisecond
+	// rateLimitTimeout — срок запроса остатка лимита GitHub API.
+	rateLimitTimeout = 10 * time.Second
+	// rateLimitURL — единственный адрес, который панель сама запрашивает у GitHub.
+	rateLimitURL = "https://api.github.com/rate_limit"
+)
+
+// datNameRe — допустимое имя dat-файла (как в индексе списков).
+var datNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+\.dat$`)
+
+// ErrStopped — сервис остановлен (Stop).
+var ErrStopped = errors.New("geodata: сервис остановлен")
+
+// Deps — зависимости сервиса. Пустые пути получают значения по умолчанию.
+type Deps struct {
+	// DataDir — каталог данных панели (geodata_state.json, geodata/last-ug.log).
+	DataDir string
+	// Layer — слой «Конфигурация»: исключительный замок, уведомления, черновик.
+	Layer *configlayer.Layer
+	// Store — запись в xkeen.json.
+	Store *lists.GeodataStore
+	// Index — индекс dat-файлов каталога XKeen.
+	Index *lists.Index
+	// Routing — сервис маршрутизации (ссылки на файлы в правилах, каскад).
+	Routing *routing.Service
+	// XKeenBin, XKeenDir — исполняемый файл XKeen и каталог его скриптов.
+	XKeenBin, XKeenDir string
+	// CronFile — crontab пользователя root.
+	CronFile string
+	// MihomoDir — каталог данных Mihomo; XrayConfDir — каталог конфигов Xray.
+	MihomoDir, XrayConfDir string
+	// AllowedRoots — корни путей панели (cfg.AllowedRoots): каталог dat должен лежать
+	// внутри них, иначе удаление файла после «Применить» отказывает. Пусто — каталог XKeen
+	// по умолчанию.
+	AllowedRoots []string
+	// Now — источник времени (nil — time.Now).
+	Now func() time.Time
+	// NTPStatus — вывод `ndmc -c "show ntp status"` (nil — запуск ndmc). Признак
+	// синхронизации часов для планировщика.
+	NTPStatus func(ctx context.Context) ([]byte, error)
+	// HTTP — клиент запроса остатка лимита GitHub API (nil — клиент с таймаутом 10 с).
+	HTTP *http.Client
+}
+
+// Service — менеджер geodata. Создаётся один раз в cmd/xcp/main.go; Stop вызывается
+// через defer в main().
+type Service struct {
+	d      Deps
+	dir    string // DataDir/geodata
+	logRun string // DataDir/geodata/last-ug.log
+	state  string // DataDir/geodata_state.json
+	vars   XKeenVars
+	runner Runner
+
+	// mu защищает st, seq и поля текущего задания.
+	mu           sync.Mutex
+	st           State
+	seq          uint64
+	running      bool
+	waitingApply bool
+	job          string
+	started      time.Time
+
+	// omu защищает указатели на буферы вывода и их номера: у каждого буфера свой
+	// run_id, новый запуск — новый номер (runSeq только растёт; начинается с
+	// UnixMilli()*1000, поэтому после перезапуска панели номера не повторяются и
+	// остаются точными в JS — меньше 2^53).
+	omu    sync.Mutex
+	ugOut  *Output
+	jqOut  *Output
+	ugRun  uint64
+	jqRun  uint64
+	runSeq uint64
+
+	// nmu сериализует сборку уведомлений.
+	nmu sync.Mutex
+
+	// ops — состояние операций записи (кэш проверок, уборка, jq).
+	ops opsState
+
+	// sched — рабочее состояние расписания и cron (замок crontab, кэш чтения, догон).
+	sched schedState
+
+	// smu упорядочивает запись файла состояния: на медленной флешке копия, снятая раньше,
+	// не должна лечь в файл после более новой (savedSeq — счётчик последней записанной).
+	smu      sync.Mutex
+	savedSeq uint64
+
+	// pmu защищает ограничение частоты событий.
+	pmu        sync.Mutex
+	lastPub    time.Time
+	pubTimer   *time.Timer
+	pubStopped bool
+
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	lmu       sync.Mutex
+	stopped   bool
+	startOnce sync.Once
+	stopOnce  sync.Once
+}
+
+// New создаёт сервис. Слой, хранилище записей и индекс обязательны. Конструктор
+// читает файл состояния и журнал последнего запуска, остального на диске не трогает.
+func New(d Deps) (*Service, error) {
+	if d.Layer == nil {
+		return nil, errors.New("geodata: не задан слой конфигурации")
+	}
+	if d.Store == nil {
+		return nil, errors.New("geodata: не задано хранилище записей xkeen.json")
+	}
+	if d.Index == nil {
+		return nil, errors.New("geodata: не задан индекс dat-файлов")
+	}
+	if d.DataDir == "" {
+		return nil, errors.New("geodata: не задан каталог данных")
+	}
+	if d.XKeenBin == "" {
+		d.XKeenBin = defaultXKeenBin
+	}
+	if d.XKeenDir == "" {
+		d.XKeenDir = DefaultXKeenDir
+	}
+	if d.CronFile == "" {
+		d.CronFile = defaultCronFile
+	}
+	if d.MihomoDir == "" {
+		d.MihomoDir = lists.DefaultMihomoDir
+	}
+	if d.XrayConfDir == "" {
+		d.XrayConfDir = defaultXrayConfDir
+	}
+	if len(d.AllowedRoots) == 0 {
+		d.AllowedRoots = []string{filepath.Dir(lists.DefaultDatDir)}
+	}
+	if d.Now == nil {
+		d.Now = time.Now
+	}
+	if d.NTPStatus == nil {
+		d.NTPStatus = ndmcNTPStatus
+	}
+	if d.HTTP == nil {
+		d.HTTP = &http.Client{Timeout: rateLimitTimeout}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Service{
+		d:      d,
+		dir:    filepath.Join(d.DataDir, "geodata"),
+		state:  filepath.Join(d.DataDir, stateFileName),
+		vars:   LoadXKeenVars(d.XKeenDir),
+		runner: Runner{Bin: d.XKeenBin},
+		ugOut:  NewOutput(0),
+		jqOut:  NewOutput(0),
+		ctx:    ctx,
+		cancel: cancel,
+	}
+	s.runSeq = uint64(time.Now().UnixMilli()) * 1000
+	s.runSeq++
+	s.ugRun = s.runSeq
+	s.runSeq++
+	s.jqRun = s.runSeq
+	s.logRun = filepath.Join(s.dir, "last-ug.log")
+	s.st = loadState(s.state)
+	s.loadLastOutput()
+	return s, nil
+}
+
+// loadLastOutput кладёт журнал последнего запуска в буфер ug: полный вывод
+// открывается по кнопке и после перезапуска панели (D-15).
+func (s *Service) loadLastOutput() {
+	data, err := os.ReadFile(s.logRun)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("[geodata] не удалось прочитать last-ug.log: %v", err)
+		}
+		return
+	}
+	text := string(data)
+	start := 0
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\n' {
+			s.ugOut.Append(text[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(text) {
+		s.ugOut.Append(text[start:])
+	}
+}
+
+// track учитывает горутину в s.wg: Stop дожидается её конца. false — сервис остановлен,
+// горутину запускать нельзя. Вызывающий обязан вызвать s.wg.Done().
+func (s *Service) track() bool {
+	s.lmu.Lock()
+	defer s.lmu.Unlock()
+	if s.stopped {
+		return false
+	}
+	s.wg.Add(1)
+	return true
+}
+
+// spawn запускает фоновую горутину сервиса под wg; после Stop не запускает.
+func (s *Service) spawn(fn func()) bool {
+	if !s.track() {
+		return false
+	}
+	go func() {
+		defer s.wg.Done()
+		fn()
+	}()
+	return true
+}
+
+// Go запускает fn в фоне под учётом Stop. false — сервис остановлен, fn не запущена.
+func (s *Service) Go(fn func()) bool { return s.spawn(fn) }
+
+// Start запускает фоновый цикл: проверка правок файлов вне панели каждые 30 секунд.
+// Первая проверка выполняется до возврата: она сверяет файлы с сигнатурами из
+// состояния (правки, сделанные, пока панель не работала). Повторный вызов безопасен.
+func (s *Service) Start() {
+	s.startOnce.Do(func() {
+		s.checkOutside()
+		s.syncCron(true)
+		s.rebuildNotices()
+		s.sched.begin = time.Now()
+		s.spawn(s.loop)
+		s.spawn(s.schedLoop)
+	})
+}
+
+// Stop останавливает сервис: отменяет контекст (идущий запуск получает SIGTERM),
+// дожидается фоновых горутин. Безопасен при повторном вызове.
+func (s *Service) Stop() {
+	s.stopOnce.Do(func() {
+		s.lmu.Lock()
+		s.stopped = true
+		s.lmu.Unlock()
+		s.cancel()
+		s.pmu.Lock()
+		s.pubStopped = true
+		if s.pubTimer != nil {
+			s.pubTimer.Stop()
+			s.pubTimer = nil
+		}
+		s.pmu.Unlock()
+	})
+	s.wg.Wait()
+}
+
+// loop — цикл тиков.
+func (s *Service) loop() {
+	ticker := time.NewTicker(tickInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.tick()
+		}
+	}
+}
+
+// tick — один такт цикла: правки файлов вне панели, возврат строки cron XKeen
+// (CronTwo, D-17) и уборка временных записей стандартных наборов после запусков по
+// cron или SSH. Запуски по расписанию ведёт отдельный планировщик (schedLoop). С выключенным флагом слоя xkeen.json в фоне не правится
+// (D-04 из 144): ожидания остаются в состоянии и доводятся первым тиком после
+// включения флага.
+//
+// Уборка правит xkeen.json, поэтому идёт под исключительным замком слоя (держатель
+// geodata_write; занято — тик пропускается до следующего такта) и только когда убирать
+// есть что: среди ожиданий включения есть готовый файл без отметки include_stuck. Ожидания
+// живут часами, и замок по одному факту «ожидания есть» занимал бы замок слоя и замок
+// ядра каждые 30 секунд, публиковал бы события geodata и давал ложную занятость
+// «Применить» и кнопок.
+func (s *Service) tick() {
+	s.checkOutside()
+	s.syncCron(false)
+	if s.pruneCleaned() {
+		s.changed()
+	}
+	if !s.d.Layer.Enabled() || !s.readyPending() {
+		return
+	}
+	release, err := s.d.Layer.BeginExclusive(s.ctx, true, configlayer.HolderGeodataWrite)
+	if err != nil {
+		return
+	}
+	defer release()
+	s.cleanupPending(s.ctx)
+}
+
+// pruneCleaned убирает отметки «запись убрана» старше cleanedNoticeTTL: уведомление
+// geodata_cleanup снимается по сроку и без других правок состояния. true — отметки
+// убраны, состояние нужно записать и пересобрать уведомления.
+func (s *Service) pruneCleaned() bool {
+	now := s.d.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pruned := false
+	for file, at := range s.st.Cleaned {
+		if now.Sub(at) >= cleanedNoticeTTL {
+			delete(s.st.Cleaned, file)
+			pruned = true
+		}
+	}
+	return pruned
+}
+
+// readyPending — есть ли ожидание включения, готовое к уборке: его файл скачан
+// (datReady), а отметки include_stuck нет. Застрявшие повторно проходит afterRun после
+// каждого -ug и кнопка «Довести включение».
+func (s *Service) readyPending() bool {
+	s.mu.Lock()
+	pending := append([]PendingEnable(nil), s.st.PendingEnables...)
+	stuck := make(map[string]bool, len(s.st.IncludeStuck))
+	for f := range s.st.IncludeStuck {
+		stuck[f] = true
+	}
+	s.mu.Unlock()
+	for _, p := range pending {
+		if !stuck[p.File] && s.datReady(p.File) {
+			return true
+		}
+	}
+	return false
+}
+
+// RunNow запускает `xkeen -ug`: исключительный замок слоя и задание менеджера берутся
+// синхронно (занят — ошибка сразу: ErrGeodataBusy, ErrApplyBusy, ErrKernelBusy или
+// ErrBusy, если идёт другое задание, например установка jq), сам запуск идёт в фоне,
+// вывод — в буфере ug.
+func (s *Service) RunNow(user bool) error {
+	release, err := s.beginExclusiveJob(s.ctx, user, configlayer.HolderGeodataUpdate, jobUG)
+	if err != nil {
+		return err
+	}
+	trigger := "button"
+	if !user {
+		trigger = "auto"
+	}
+	if !s.Go(func() {
+		defer release()
+		if err := s.runLocked(s.ctx, trigger); err != nil {
+			log.Printf("[geodata] запуск xkeen -ug: %v", err)
+		}
+	}) {
+		release()
+		return ErrStopped
+	}
+	return nil
+}
+
+// run — блокирующий запуск под исключительным замком. user=false: ждёт конца идущего
+// применения (RunView.waiting_apply на время ожидания) и конца другого задания
+// менеджера, user=true: занятый замок или задание — ошибка сразу. Ошибка — запуск не
+// состоялся или не завершился (сбой процесса, таймаут, отмена); итоги по файлам при
+// этом уже в состоянии.
+func (s *Service) run(ctx context.Context, user bool, trigger string) error {
+	release, err := s.beginExclusiveJob(ctx, user, configlayer.HolderGeodataUpdate, jobUG)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return s.runLocked(ctx, trigger)
+}
+
+// jobRunning — идёт ли задание менеджера (jq, ug или remove).
+func (s *Service) jobRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.running
+}
+
+// beginExclusiveJob берёт исключительный замок слоя и слот задания менеджера: одно
+// задание за раз (jq, ug, remove), поэтому `opkg install jq` не идёт вместе с `xkeen
+// -ug` и шагом удаления. release снимает слот и замок; повторный вызов безопасен.
+//
+// user=true — запуск по кнопке: занятый замок даёт ошибку слоя, идущее задание —
+// ErrBusy (замок слоя при этом сразу отпускается). user=false — фоновый запуск: ждёт
+// конца идущего задания опросом раз в jobWaitPoll, не держа замок слоя («Применить» в
+// это время не блокируется), и конца идущего «Применить»; ожидание прерывается ctx
+// (тогда ошибка — ctx.Err()).
+func (s *Service) beginExclusiveJob(ctx context.Context, user bool, holder, job string) (func(), error) {
+	for {
+		if !user && s.jobRunning() {
+			if err := sleepCtx(ctx, jobWaitPoll); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		unlock, err := s.lockLayer(ctx, user, holder, job)
+		if err != nil {
+			return nil, err
+		}
+		if s.beginJob(job) {
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					s.endJob(job)
+					unlock()
+				})
+			}, nil
+		}
+		// Задание заняли между проверкой и замком: замок слоя отпускается сразу.
+		unlock()
+		if user {
+			return nil, ErrBusy
+		}
+		if err := sleepCtx(ctx, jobWaitPoll); err != nil {
+			return nil, err
+		}
+	}
+}
+
+// lockLayer берёт замок слоя для beginExclusiveJob. Фоновый -ug сначала пробует замок
+// без ожидания и только при занятом замке ставит RunView.waiting_apply на время
+// ожидания: отметка значит «ждёт конца «Применить»» и больше ничего. Свободный замок
+// отметку не трогает.
+func (s *Service) lockLayer(ctx context.Context, user bool, holder, job string) (func(), error) {
+	if user || job != jobUG {
+		return s.d.Layer.BeginExclusive(ctx, user, holder)
+	}
+	release, err := s.d.Layer.BeginExclusive(ctx, true, holder)
+	if err == nil {
+		return release, nil
+	}
+	if !errors.Is(err, configlayer.ErrApplyBusy) && !errors.Is(err, configlayer.ErrGeodataBusy) &&
+		!errors.Is(err, configlayer.ErrKernelBusy) {
+		return nil, err
+	}
+	s.setWaiting(true)
+	defer s.setWaiting(false)
+	return s.d.Layer.BeginExclusive(ctx, false, holder)
+}
+
+// sleepCtx ждёт d или отмены ctx (тогда возвращает ctx.Err()).
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// runResult — итог одного запуска для постшага afterRun.
+type runResult struct {
+	Trigger  string
+	Code     int
+	Err      error
+	Parse    RunParse
+	Results  map[string]FileResult
+	LastRun  LastRun
+	Finished time.Time
+}
+
+// runLocked выполняет запуск под уже взятыми замком слоя и заданием менеджера (их держит
+// вызывающий, beginExclusiveJob).
+func (s *Service) runLocked(ctx context.Context, trigger string) error {
+	res := s.execute(ctx, trigger)
+	s.afterRun(ctx, res)
+	s.changed()
+	return res.Err
+}
+
+// afterRun — постшаг запуска под тем же замком слоя. Итог запуска сохраняется до
+// постшагов: сбой постшага не должен терять итог. Запись файла состояния идёт только
+// через changed (очередь smu, самый свежий снимок savedSeq): прямая запись копии мимо
+// очереди могла бы лечь поверх более новой правки расписания, а сбой панели между двумя
+// записями оставил бы на диске устаревшее состояние. Затем убираются временные записи
+// наборов, файлы которых только что скачаны (D-01); остальные постшаги добавляют
+// следующие планы фазы.
+func (s *Service) afterRun(ctx context.Context, res runResult) {
+	s.mu.Lock()
+	if res.LastRun.Outcome != outcomeFailed {
+		// Базы обновлены (любым запуском): повтор после сбоя сети больше не нужен.
+		s.st.RetryAt = time.Time{}
+		s.st.RetryFailed = false
+	}
+	s.mu.Unlock()
+	s.changed()
+	s.cleanupPending(ctx)
+}
+
+// execute запускает `xkeen -ug` и записывает итоги в состояние: хэши файлов
+// источников до и после, разбор вывода по файлам, итог всего запуска.
+func (s *Service) execute(ctx context.Context, trigger string) runResult {
+	started := s.d.Now()
+	names := s.sourceNames()
+	before := s.hashAll(names)
+
+	out := NewOutput(0)
+	s.setOutput(jobUG, out)
+	code, runErr := s.runner.Run(ctx, []string{"-ug"}, out)
+	parsed := ParseUGOutput(out.Lines(), s.displays())
+	finished := s.d.Now()
+
+	after := s.hashAll(unionNames(names, parsed.Files))
+
+	results := map[string]FileResult{}
+	notUpdated := 0
+	anyUnverified := false
+	for name, fo := range parsed.Files {
+		r := FileResult{Status: fo.Status, Reason: fo.Reason, At: finished}
+		switch fo.Status {
+		case StatusUpdated, StatusInstalled:
+			r.Status = ResultUpdated
+			r.Reason = ""
+			if before[name] != "" && before[name] == after[name] {
+				r.Status = ResultUnchanged
+			} else if fo.Unverified {
+				r.Unverified = true
+				anyUnverified = true
+			}
+		case StatusKept, StatusFailed:
+			notUpdated++
+		}
+		results[name] = r
+	}
+	var geoipset *FileResult
+	if fo := parsed.GeoIPSet; fo != nil {
+		r := FileResult{Status: fo.Status, Reason: fo.Reason, At: finished}
+		switch fo.Status {
+		case StatusUpdated, StatusInstalled:
+			r.Status = ResultUpdated
+			r.Reason = ""
+			if fo.Unverified {
+				r.Unverified = true
+				anyUnverified = true
+			}
+		case StatusKept, StatusFailed:
+			notUpdated++
+		}
+		geoipset = &r
+	}
+	if anyUnverified && s.githubLimited(ctx) {
+		for name, r := range results {
+			if r.Unverified {
+				r.Limit = true
+				results[name] = r
+			}
+		}
+		if geoipset != nil && geoipset.Unverified {
+			geoipset.Limit = true
+		}
+	}
+
+	last := LastRun{At: started, Finished: finished, Parsed: parsed.Parsed, ExitCode: code, Trigger: trigger}
+	switch {
+	case errors.Is(runErr, ErrRunTimeout):
+		last.Outcome, last.Reason = outcomeFailed, runReasonTimeout
+	case runErr != nil:
+		last.Outcome, last.Reason = outcomeFailed, runReasonExit
+	case parsed.RunError != "":
+		last.Outcome, last.Reason = outcomeFailed, parsed.RunError
+	case !parsed.Parsed && code != 0:
+		last.Outcome, last.Reason = outcomeFailed, runReasonExit
+	case !parsed.Parsed:
+		last.Outcome = outcomeUnknown
+	case notUpdated > 0:
+		last.Outcome = outcomePartial
+	default:
+		last.Outcome = outcomeOK
+	}
+	last.NotUpdated = notUpdated
+
+	sigs, _ := s.sigsNow()
+	s.mu.Lock()
+	for name, r := range results {
+		s.st.Results[name] = r
+		if r.Status == ResultUpdated || r.Status == ResultUnchanged {
+			delete(s.st.Outside, name)
+		}
+	}
+	if geoipset != nil {
+		s.st.GeoIPSet = geoipset
+	}
+	for name, h := range after {
+		if h != "" {
+			s.st.Hashes[name] = h
+		}
+	}
+	for name, sg := range sigs {
+		s.st.Sigs[name] = sg.sig
+	}
+	lr := last
+	s.st.LastRun = &lr
+	s.mu.Unlock()
+
+	if err := out.Save(s.logRun); err != nil {
+		log.Printf("[geodata] не удалось сохранить last-ug.log: %v", err)
+	}
+	return runResult{Trigger: trigger, Code: code, Err: runErr, Parse: parsed, Results: results, LastRun: last, Finished: finished}
+}
+
+// unionNames — имена файлов запуска: заранее известные источники и всё, что
+// назвал XKeen в выводе.
+func unionNames(names []string, parsed map[string]FileOutcome) []string {
+	seen := make(map[string]bool, len(names)+len(parsed))
+	out := make([]string, 0, len(names)+len(parsed))
+	for _, n := range names {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	for n := range parsed {
+		if !seen[n] && datNameRe.MatchString(n) {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// displays — название блока в выводе `xkeen -ug` → имя файла: стандартные наборы и
+// записи geodata (имя файла → имя файла).
+func (s *Service) displays() map[string]string {
+	m := make(map[string]string, len(StandardSets)+4)
+	for _, set := range StandardSets {
+		m[set.Display] = set.File
+	}
+	if st, err := s.d.Store.Status(); err == nil {
+		for _, e := range st.Entries {
+			if datNameRe.MatchString(e.File) {
+				m[e.File] = e.File
+			}
+		}
+	}
+	return m
+}
+
+// sourceNames — файлы источников для хэшей до и после запуска: стандартные наборы,
+// лежащие на диске, и файлы записей geodata.
+func (s *Service) sourceNames() []string {
+	var names []string
+	seen := map[string]bool{}
+	add := func(n string) {
+		if datNameRe.MatchString(n) && !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	for _, set := range StandardSets {
+		if s.datPath(set.File) != "" {
+			add(set.File)
+		}
+	}
+	if st, err := s.d.Store.Status(); err == nil {
+		for _, e := range st.Entries {
+			add(e.File)
+		}
+	}
+	return names
+}
+
+// datPath — путь существующего файла (или симлинка) каталога dat: само имя или, для
+// стандартного набора, его второе имя. Нет файла или имя недопустимо — пусто.
+func (s *Service) datPath(name string) string {
+	if !datNameRe.MatchString(name) {
+		return ""
+	}
+	cands := []string{name}
+	for _, set := range StandardSets {
+		if set.File == name && set.Alias != "" {
+			cands = append(cands, set.Alias)
+		}
+	}
+	for _, c := range cands {
+		p := filepath.Join(s.d.Index.Dir(), c)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// hashAll считает SHA-256 файлов потоком; нет файла или ошибка чтения — пустая строка.
+func (s *Service) hashAll(names []string) map[string]string {
+	out := make(map[string]string, len(names))
+	for _, n := range names {
+		out[n] = hashFile(s.datPath(n))
+	}
+	return out
+}
+
+// hashFile — SHA-256 файла (читается потоком); пустой путь или ошибка — "".
+func hashFile(path string) string {
+	if path == "" {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// githubLimited — исчерпан ли лимит запросов GitHub API (resources.core.remaining == 0).
+// Запрос не удался или ответ не разобран — false: причина «не сверена» остаётся «API
+// недоступен».
+func (s *Service) githubLimited(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, rateLimitTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rateLimitURL, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := s.d.HTTP.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var body struct {
+		Resources struct {
+			Core struct {
+				Remaining *int `json:"remaining"`
+			} `json:"core"`
+		} `json:"resources"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&body); err != nil {
+		return false
+	}
+	return body.Resources.Core.Remaining != nil && *body.Resources.Core.Remaining == 0
+}
+
+// setOutput подменяет буфер вывода задания (новый запуск — чистый буфер и новый номер).
+func (s *Service) setOutput(job string, out *Output) {
+	s.omu.Lock()
+	defer s.omu.Unlock()
+	s.runSeq++
+	switch job {
+	case jobJQ:
+		s.jqOut = out
+		s.jqRun = s.runSeq
+	default:
+		s.ugOut = out
+		s.ugRun = s.runSeq
+	}
+}
+
+// Output отдаёт вывод задания (ug или jq) начиная со смещения from. Построчный вывод
+// по шине событий слоя не идёт: клиент опрашивает этот метод, пока running истинно.
+// RunID — номер буфера: сменился — начался новый запуск, и клиент читает его с начала.
+// From в ответе — фактическое смещение начала Text (после зажатия запрошенного),
+// а не запрошенное.
+func (s *Service) Output(job string, from int64) OutputChunk {
+	if from < 0 {
+		from = 0
+	}
+	s.omu.Lock()
+	var out *Output
+	var runID uint64
+	switch job {
+	case jobJQ:
+		out, runID = s.jqOut, s.jqRun
+	default:
+		job = jobUG
+		out, runID = s.ugOut, s.ugRun
+	}
+	s.omu.Unlock()
+	text, next, truncated := out.Read(from)
+	s.mu.Lock()
+	running := s.running && s.job == job
+	s.mu.Unlock()
+	return OutputChunk{Job: job, From: next - int64(len(text)), Next: next, Text: text, Running: running, Truncated: truncated, RunID: runID}
+}
+
+// setWaiting отмечает ожидание конца «Применить» перед фоновым запуском.
+func (s *Service) setWaiting(v bool) {
+	s.mu.Lock()
+	if s.waitingApply == v {
+		s.mu.Unlock()
+		return
+	}
+	s.waitingApply = v
+	s.mu.Unlock()
+	s.touch()
+}
+
+// touch увеличивает счётчик состояния и публикует событие geodata.
+func (s *Service) touch() {
+	s.mu.Lock()
+	s.seq++
+	s.mu.Unlock()
+	s.publish()
+}
+
+// changed вызывается после каждой правки состояния: пересобирает уведомления раздела,
+// публикует событие со счётчиком и сохраняет файл состояния. Клиенты читают состояние из
+// памяти, поэтому запись на флешку (на роутере она бывает медленной, до десятков секунд)
+// идёт последней и не задерживает ни уведомления, ни событие.
+func (s *Service) changed() {
+	s.mu.Lock()
+	s.seq++
+	seq := s.seq
+	st := s.st.clone()
+	s.mu.Unlock()
+	s.rebuildNotices()
+	s.publish()
+	// Записи идут по очереди, и в файл попадает самое свежее из снятых состояний: опоздавшая
+	// старая копия пропускается (иначе после перезапуска панели пропали бы, например,
+	// CronTaken и расписание после «Перенять»).
+	s.smu.Lock()
+	defer s.smu.Unlock()
+	if seq <= s.savedSeq {
+		return
+	}
+	if err := saveState(s.state, st); err != nil {
+		log.Printf("[geodata] не удалось сохранить %s: %v", stateFileName, err)
+		return
+	}
+	s.savedSeq = seq
+}
+
+// publish отправляет слою событие geodata не чаще одного за publishInterval: события
+// внутри окна сливаются в одно отложенное, которое несёт последний счётчик.
+func (s *Service) publish() {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	if s.pubStopped || s.pubTimer != nil {
+		return
+	}
+	if wait := publishInterval - time.Since(s.lastPub); wait > 0 {
+		s.pubTimer = time.AfterFunc(wait, s.flushPublish)
+		return
+	}
+	s.lastPub = time.Now()
+	s.d.Layer.PublishGeodata(s.currentSeq())
+}
+
+// flushPublish — отложенная публикация последнего счётчика.
+func (s *Service) flushPublish() {
+	s.pmu.Lock()
+	if s.pubStopped {
+		s.pmu.Unlock()
+		return
+	}
+	s.pubTimer = nil
+	s.lastPub = time.Now()
+	s.pmu.Unlock()
+	s.d.Layer.PublishGeodata(s.currentSeq())
+}
+
+func (s *Service) currentSeq() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seq
+}
+
+// fileSig — сигнатура dat-файла и время его изменения.
+type fileSig struct {
+	sig   string
+	mtime time.Time
+}
+
+// sigsNow — сигнатуры (размер:mtime) всех dat-файлов каталога по реальным именам.
+// false — каталог не прочитан.
+func (s *Service) sigsNow() (map[string]fileSig, bool) {
+	files, err := s.d.Index.Files()
+	if err != nil {
+		return nil, false
+	}
+	out := make(map[string]fileSig, len(files))
+	for _, f := range files {
+		out[f.Name] = fileSig{sig: fmt.Sprintf("%d:%d", f.Size, f.ModTime.UnixNano()), mtime: f.ModTime}
+	}
+	return out, true
+}
+
+// checkOutside сверяет файлы с сигнатурами из состояния. Файл изменился, а панель
+// `-ug` не запускает (замок не у менеджера, прошлый запуск закончился больше минуты
+// назад) — отметка «обновлено вне панели» с временем изменения файла (D-17). Новый
+// файл только запоминается, без отметки. Пересборку провайдеров Mihomo делает
+// наблюдатель dat слоя маршрутизации.
+func (s *Service) checkOutside() {
+	cur, ok := s.sigsNow()
+	if !ok {
+		return
+	}
+	holder := s.d.Layer.BusyHolder()
+	now := s.d.Now()
+	s.mu.Lock()
+	quiet := holder != configlayer.HolderGeodataUpdate && !s.running
+	if lr := s.st.LastRun; lr != nil && now.Sub(lr.Finished) <= outsideQuiet {
+		quiet = false
+	}
+	dirty := false
+	for name, cs := range cur {
+		old, known := s.st.Sigs[name]
+		if known && old == cs.sig {
+			continue
+		}
+		if known && !quiet {
+			// Идёт запуск панели или он только что закончился: итог запишет сам запуск.
+			continue
+		}
+		if known {
+			s.st.Outside[name] = cs.mtime
+		}
+		s.st.Sigs[name] = cs.sig
+		dirty = true
+	}
+	var stale []string
+	if quiet {
+		for name := range s.st.Sigs {
+			if _, ok := cur[name]; !ok {
+				delete(s.st.Sigs, name)
+				delete(s.st.Outside, name)
+				dirty = true
+			}
+		}
+		stale = staleResults(s.st, cur)
+	}
+	s.mu.Unlock()
+	if len(stale) > 0 && s.dropStaleResults(stale) {
+		dirty = true
+	}
+	if dirty {
+		s.changed()
+	}
+}
+
+// staleResults — имена из Results и Hashes, файла которых нет в каталоге dat (ни под
+// этим именем, ни под вторым именем стандартного набора). Вызывается под Service.mu.
+func staleResults(st State, cur map[string]fileSig) []string {
+	present := func(name string) bool {
+		if _, ok := cur[name]; ok {
+			return true
+		}
+		for _, set := range StandardSets {
+			if set.Alias == "" {
+				continue
+			}
+			if set.File == name {
+				if _, ok := cur[set.Alias]; ok {
+					return true
+				}
+			}
+			if set.Alias == name {
+				if _, ok := cur[set.File]; ok {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	seen := map[string]bool{}
+	var out []string
+	add := func(name string) {
+		if !seen[name] && !present(name) {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	for name := range st.Results {
+		add(name)
+	}
+	for name := range st.Hashes {
+		add(name)
+	}
+	return out
+}
+
+// dropStaleResults убирает итог и хеш файлов, которые пропали из каталога вне панели,
+// если и записи geodata с таким именем нет: запись без файла — законное «ждёт
+// загрузки», её итог (например failed_new) остаётся. Имя сверяется ещё раз с каталогом
+// вместе с именами-симлинками пар. Каталог или xkeen.json не прочитаны — ничего не
+// трогает. true — состояние изменилось.
+func (s *Service) dropStaleResults(names []string) bool {
+	files, err := s.d.Index.Files()
+	if err != nil {
+		return false
+	}
+	onDisk := map[string]bool{}
+	for _, f := range files {
+		onDisk[f.Name] = true
+		for _, a := range f.Aliases {
+			onDisk[a] = true
+		}
+	}
+	st, err := s.d.Store.Status()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for _, name := range names {
+		if onDisk[name] || anyEntryNamed(st, name) {
+			continue
+		}
+		if _, ok := s.st.Results[name]; ok {
+			delete(s.st.Results, name)
+			changed = true
+		}
+		if _, ok := s.st.Hashes[name]; ok {
+			delete(s.st.Hashes, name)
+			changed = true
+		}
+	}
+	return changed
+}

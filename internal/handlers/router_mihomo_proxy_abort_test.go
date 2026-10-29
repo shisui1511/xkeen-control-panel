@@ -28,6 +28,8 @@ func TestRouterMihomoProxyClientAbort(t *testing.T) {
 	if tg.Core != "mihomo" {
 		t.Skip("ядро ветви не Mihomo: поток Clash API через панель не открывается")
 	}
+	p := routertest.NewPanel(t)
+	rtMprWaitReady(t, p)
 	logPath := config.Default().XCPLogPath
 	if logPath == "" {
 		logPath = "/opt/var/log/xcp.log"
@@ -36,7 +38,6 @@ func TestRouterMihomoProxyClientAbort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("журнал панели %s: %v", logPath, err)
 	}
-	p := routertest.NewPanel(t)
 
 	for i := 1; i <= rtAbortStreams; i++ {
 		ctx, cancel := context.WithCancel(context.Background())

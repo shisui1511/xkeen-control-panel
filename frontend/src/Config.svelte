@@ -13,6 +13,7 @@
   import NodesTab from './components/config/nodes/NodesTab.svelte';
   import GroupsTab from './components/config/groups/GroupsTab.svelte';
   import RulesTab from './components/config/rules/RulesTab.svelte';
+  import ListsTab from './components/config/lists/ListsTab.svelte';
   import RoutingOwnerNotice from './components/config/routing/RoutingOwnerNotice.svelte';
   import { watchOwnerToasts } from './components/config/routing/routingOwner';
   import { layerStatus, refetchLayerState } from './lib/configLayer';
@@ -37,6 +38,7 @@
     { value: 'nodes', label: $t('cfg.tab.nodes'), testId: 'config-tab-nodes' },
     { value: 'groups', label: $t('cfg.tab.groups'), testId: 'config-tab-groups' },
     { value: 'rules', label: $t('cfg.tab.rules'), testId: 'config-tab-rules' },
+    { value: 'lists', label: $t('cfg.tab.lists'), testId: 'config-tab-lists' },
     { value: 'files', label: $t('cfg.tab.files'), testId: 'config-tab-files' }
   ]);
 
@@ -54,7 +56,7 @@
 <!--
   Каркас раздела «Конфигурация» (D-02, D-15): уведомления (config-notices), DraftBar
   (config-draftbar) и ход применения (config-progress) общие и стоят над вкладками;
-  вкладки «Узлы» (nodes-tab), «Группы» (groups-tab), «Правила» (rules-tab) и «Файлы панели» — нынешний стек: расхождения
+  вкладки «Узлы» (nodes-tab), «Группы» (groups-tab), «Правила» (rules-tab), «Списки» (lists-tab, менеджер geodata XKeen) и «Файлы панели» — нынешний стек: расхождения
   (config-drift) и файлы (config-files) внутри ManagedFiles, ядра (config-kernels),
   диагностика (config-diag). Фазы 146–148 добавляют вкладки в тот же Tabs.
 -->
@@ -97,6 +99,8 @@
     {:else if subTab === 'rules'}
       <RoutingOwnerNotice tab="rules" />
       <RulesTab />
+    {:else if subTab === 'lists'}
+      <ListsTab />
     {:else if subTab === 'files'}
       <ManagedFiles />
       <KernelVersions />

@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { get } from 'svelte/store';
   import { t, tp } from '../../i18n';
-  import { showConfirm } from '../../stores';
+  import { showConfirm, configLayerEnabled } from '../../stores';
   import Button from '../Button.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import {
@@ -12,11 +13,14 @@
     layerSnapshot,
     layerStatus,
     layerConnection,
+    geodataHolder,
     applyNow,
     resetDraft,
     handleLayerError
   } from '../../lib/configLayer';
   import { routingView, loadRouting } from '../../lib/configRouting';
+  import { geodataView, geodataStatus, loadGeodata } from '../../lib/configGeodata';
+  import { dropSetName } from './lists/setName';
   import TakeRoutingModal from './routing/TakeRoutingModal.svelte';
   import { ownerState, routingBusy } from './routing/routingOwner';
 
@@ -29,6 +33,21 @@
   // Применение идёт из этой вкладки (флаг ставится до ответа сервера) или из другой (D-16)
   const applyingHere = $derived($applyStartedHere);
   const applyingOther = $derived($applyRunning && !$applyStartedHere);
+  // Менеджер geodata держит общий замок (D-11): -ug, установка jq или уборка записи. Пока
+  // замок занят, «Применить» неактивна и рядом видна причина
+  const ugBusy = $derived($geodataHolder === 'geodata_update');
+  const removeBusy = $derived($geodataHolder === 'geodata_remove');
+  // Запись xkeen.json по кнопке и уборка временной записи тоже идут под замком
+  const writeBusy = $derived($geodataHolder === 'geodata_write');
+  const holderHint = $derived(
+    ugBusy
+      ? $t('cfg.geo.ug_busy')
+      : removeBusy
+        ? $t('cfg.routing.apply_busy_hint')
+        : writeBusy
+          ? $t('cfg.geo.write_busy')
+          : ''
+  );
   const busy = $derived(applyingHere || applyingOther || resetting || $routingBusy);
   const blockedByDrift = $derived(dirty && hasDrift);
   // Проблемы проверки черновика (пустая группа, нет списка, цикл): «Применить» отказывает,
@@ -36,12 +55,35 @@
   const checkCount = $derived($layerSnapshot?.checks.length ?? 0);
   const blockedByChecks = $derived(dirty && checkCount > 0);
   const applyHint = $derived(
-    blockedByChecks
-      ? $t('cfg.routing.apply_blocked_hint')
-      : blockedByDrift
-        ? $t('cfg.apply_blocked_hint')
-        : undefined
+    holderHint !== ''
+      ? holderHint
+      : blockedByChecks
+        ? $t('cfg.routing.apply_blocked_hint')
+        : blockedByDrift
+          ? $t('cfg.apply_blocked_hint')
+          : undefined
   );
+
+  // Пометки менеджера geodata в черновике (D-27): строка видна на любой вкладке раздела.
+  // Название набора берётся из снимка менеджера так же, как в его группе
+  const geoRows = $derived.by(() => {
+    const view = $geodataView;
+    if (view === null) return [];
+    return view.draft.map((d) => {
+      const src = view.sources.find((x) => x.file === d.file);
+      return d.mode === 'off'
+        ? $t('cfg.geo.draft_row_off', { name: src !== undefined ? dropSetName(src) : d.file })
+        : $t('cfg.geo.draft_row_delete', { file: d.file });
+    });
+  });
+
+  // Страница открыта не на «Списках», а в черновике могут быть пометки: снимок менеджера
+  // читается один раз. Ошибка загрузки строку не показывает и полосу не ломает
+  $effect(() => {
+    if ($configLayerEnabled && dirty && $geodataView === null && $geodataStatus === 'idle') {
+      untrack(() => void loadGeodata());
+    }
+  });
 
   // «Применить» при группах или правилах в черновике, пока маршрутизацией управляет XKeen:
   // сначала диалог взятия с тремя исходами (D-01)
@@ -78,6 +120,8 @@
     resetting = true;
     try {
       await resetDraft();
+      // Пометки менеджера тоже сброшены: строка перечитывается, не дожидаясь события
+      if (get(geodataView) !== null) void loadGeodata();
     } catch (err) {
       handleLayerError(err);
     } finally {
@@ -108,6 +152,11 @@
         <span class="status-icon status-icon-accent"><Icon name="edit" size={14} /></span>
         {$t('cfg.draft_dirty', { n: $draftChanges })}
       </span>
+      {#if geoRows.length > 0}
+        <span class="status-sub status-geo" data-testid="config-draft-geodata">
+          {geoRows.join(' · ')}
+        </span>
+      {/if}
       {#if blockedByDrift}
         <span class="status-sub">{$t('cfg.draft_blocked', { k: $driftCount })}</span>
       {/if}
@@ -126,6 +175,11 @@
         {$t('cfg.draft_clean')}
       </span>
     {/if}
+    {#if holderHint !== ''}
+      <span class="status-sub status-holder" title={holderHint} data-testid="config-geo-busy">
+        {holderHint}
+      </span>
+    {/if}
   </div>
   <div class="draft-bar-actions">
     <Button
@@ -138,7 +192,7 @@
       variant="primary"
       class="draft-bar-btn"
       data-testid="config-apply"
-      disabled={!ready || !dirty || busy || blockedByDrift || blockedByChecks}
+      disabled={!ready || !dirty || busy || holderHint !== '' || blockedByDrift || blockedByChecks}
       loading={applyingHere}
       title={applyHint}
       onclick={onApply}>{$t('cfg.apply')}</Button
@@ -204,6 +258,14 @@
     color: var(--warning);
     font-size: var(--font-size-sm);
     overflow-wrap: anywhere;
+  }
+
+  .status-geo {
+    color: var(--fg-secondary);
+  }
+
+  .status-holder {
+    color: var(--fg-secondary);
   }
 
   .draft-bar-actions {

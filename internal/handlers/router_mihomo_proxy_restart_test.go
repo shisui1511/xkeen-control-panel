@@ -87,6 +87,26 @@ func rtMprAPIAddr(t *testing.T) (network, addr string) {
 	return "", ""
 }
 
+// rtMprWaitReady ждёт, пока ядро Mihomo после прошлого теста (переключение ядра, перезапуск
+// XKeen) примет соединения и панель начнёт отвечать 200 на опрос его API. Тест, который
+// стартует сразу за таким сценарием, иначе падает на ещё поднимающемся ядре.
+func rtMprWaitReady(t *testing.T, p *routertest.Panel) {
+	t.Helper()
+	network, addr := rtMprAPIAddr(t)
+	deadline := time.Now().Add(rtMprRestartWait)
+	for {
+		if rtMprDial(network, addr) {
+			if status, _, err := p.Call(http.MethodGet, rtMprPaths[0], nil); err == nil && status == http.StatusOK {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("API Mihomo (%s) не стал доступен за %v после прошлого теста", network, rtMprRestartWait)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 // rtMprDial — принимает ли API ядра соединение прямо сейчас.
 func rtMprDial(network, addr string) bool {
 	c, err := net.DialTimeout(network, addr, time.Second)
@@ -102,9 +122,10 @@ func TestRouterMihomoProxyDuringRestart(t *testing.T) {
 	if tg.Core != "mihomo" {
 		t.Skip("ядро ветви не Mihomo: Clash API через панель не опрашивается")
 	}
+	p := routertest.NewPanel(t)
+	rtMprWaitReady(t, p)
 	network, addr := rtMprAPIAddr(t)
 	pid := rtRstKernelPID(t, "mihomo")
-	p := routertest.NewPanel(t)
 
 	// Ядро, оставшееся лежать после провала, поднимается: следующие проверки
 	// работают с тем же стендом.

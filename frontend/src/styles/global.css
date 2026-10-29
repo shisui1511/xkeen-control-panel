@@ -690,6 +690,15 @@ input[type='number'] {
   font-size: 13px;
 }
 
+/* Иконка рядом с переносимым текстом в строке flex-start: высота — одна
+   строка текста, глиф центрируется по первой строке без подгоночных отступов
+   (svg — через viewBox, flex-обёртка — через align-items). */
+.icon-first-line {
+  align-items: center;
+  flex-shrink: 0;
+  height: 1lh;
+}
+
 .alert-success {
   background: color-mix(in srgb, var(--success) 8%, transparent);
   border-color: color-mix(in srgb, var(--success) 35%, transparent);

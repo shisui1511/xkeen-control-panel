@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
-	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
 )
 
 // Маршруты маршрутизации (/api/configlayer/routing*) работают только при
@@ -21,21 +19,6 @@ import (
 // reasonFinalRequiresRedirect — причина отказа удаления группы, на которую
 // ссылается «Остальное»: у него цель обязательна (код совпадает с routing).
 const reasonFinalRequiresRedirect = "final_requires_redirect"
-
-// geodataErrorStatus — коды ошибок записи geodata (пакет lists) и их HTTP-статусы.
-// Код попадает в ответ как есть, текст берётся по ключу configlayer.routing.<код>.
-var geodataErrorStatus = map[string]int{
-	"set_unknown":        http.StatusBadRequest,
-	"already_present":    http.StatusConflict,
-	"no_jq":              http.StatusConflict,
-	"geofile_update_off": http.StatusConflict,
-	"comments_lost":      http.StatusConflict,
-	"invalid_json":       http.StatusConflict,
-	"invalid_structure":  http.StatusConflict,
-	"update_unavailable": http.StatusServiceUnavailable,
-	"update_failed":      http.StatusBadGateway,
-	"geodata_changed":    http.StatusConflict,
-}
 
 // invalidReasonStatus — причины InvalidInputError, у которых свой код ответа
 // (код совпадает с причиной).
@@ -65,7 +48,6 @@ func (a *API) requireRouting(w http.ResponseWriter, r *http.Request) bool {
 func (a *API) writeRoutingError(w http.ResponseWriter, r *http.Request, err error) {
 	var (
 		invalid *routing.InvalidInputError
-		coded   *lists.CodedError
 		cycle   *routing.GroupCycleError
 		refd    *routing.ReferencedError
 		mixed   *configlayer.ForeignMixedError
@@ -81,8 +63,6 @@ func (a *API) writeRoutingError(w http.ResponseWriter, r *http.Request, err erro
 		}
 		JSONErrorCodeParams(w, status, code, a.t(r, key),
 			map[string]string{"field": invalid.Field, "reason": invalid.Reason})
-	case errors.As(err, &coded) && geodataErrorStatus[coded.Code] != 0:
-		JSONErrorCode(w, geodataErrorStatus[coded.Code], coded.Code, a.t(r, "configlayer.routing."+coded.Code))
 	case errors.Is(err, routing.ErrGroupNotFound):
 		JSONErrorCode(w, http.StatusNotFound, "group_not_found", a.t(r, "configlayer.routing.group_not_found"))
 	case errors.Is(err, routing.ErrRuleNotFound):
@@ -460,68 +440,6 @@ func (a *API) ConfigRoutingLists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSONSuccess(w, cat)
-}
-
-// ConfigRoutingGeodataPreview — POST /api/configlayer/routing/lists/geodata/preview
-// {set}: файл настроек XKeen до и после записи набора и признак сохранения
-// комментариев. set — только идентификатор набора встроенного каталога: адрес от
-// клиента не принимается. Файл не меняется.
-func (a *API) ConfigRoutingGeodataPreview(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
-		return
-	}
-	var req struct {
-		Set string `json:"set"`
-	}
-	if !a.decodeLayerBody(w, r, &req) {
-		return
-	}
-	pv, err := a.routing.GeodataPreview(req.Set)
-	if err != nil {
-		a.writeRoutingError(w, r, err)
-		return
-	}
-	JSONSuccess(w, pv)
-}
-
-// geodataUpdateTimeout — предел ожидания xkeen -ug после записи набора.
-const geodataUpdateTimeout = 10 * time.Minute
-
-// ConfigRoutingGeodataAdd — POST /api/configlayer/routing/lists/geodata/add
-// {set, base, accept_comment_loss, update_now}: «Добавить в XKeen». Набор только из
-// встроенного каталога, запись в xkeen.json с резервной копией; base — отпечаток
-// файла из ответа предпросмотра (пусто — без привязки); причины отказа —
-// no_jq, geofile_update_off, already_present, comments_lost, geodata_changed (xkeen.json
-// изменился после показанного предпросмотра или во время записи, предпросмотр
-// строится заново). update_now запускает
-// xkeen -ug; сбой запуска — 502 update_failed, запись при этом уже сделана
-// (data.written=true). Отмена запроса вкладкой запись и обновление не прерывает.
-func (a *API) ConfigRoutingGeodataAdd(w http.ResponseWriter, r *http.Request) {
-	if !a.requireMethod(w, r, http.MethodPost) || !a.requireRouting(w, r) {
-		return
-	}
-	var req struct {
-		Set               string `json:"set"`
-		Base              string `json:"base"`
-		AcceptCommentLoss bool   `json:"accept_comment_loss"`
-		UpdateNow         bool   `json:"update_now"`
-	}
-	if !a.decodeLayerBody(w, r, &req) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), geodataUpdateTimeout)
-	defer cancel()
-	st, err := a.routing.GeodataAdd(ctx, req.Set, req.Base, req.AcceptCommentLoss, req.UpdateNow)
-	if err != nil {
-		if errors.Is(err, lists.ErrUpdateFailed) {
-			JSONErrorCodeParamsData(w, http.StatusBadGateway, "update_failed", a.t(r, "configlayer.routing.update_failed"),
-				nil, map[string]any{"written": true, "geodata": st})
-			return
-		}
-		a.writeRoutingError(w, r, err)
-		return
-	}
-	JSONSuccess(w, st)
 }
 
 // ConfigRoutingPresets — GET /api/configlayer/routing/presets: данные диалога

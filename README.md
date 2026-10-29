@@ -1,9 +1,12 @@
 # XKeen Control Panel
 
 [![CodeFactor](https://www.codefactor.io/repository/github/shisui1511/xkeen-control-panel/badge)](https://www.codefactor.io/repository/github/shisui1511/xkeen-control-panel)
-[![Build and Release](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/build.yml/badge.svg)](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/build.yml)
+[![CI](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/ci.yml/badge.svg)](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/codeql.yml/badge.svg)](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/codeql.yml)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/shisui1511/xkeen-control-panel)](https://github.com/shisui1511/xkeen-control-panel/releases)
+[![Pre-release](https://img.shields.io/github/v/release/shisui1511/xkeen-control-panel?include_prereleases&label=pre-release)](https://github.com/shisui1511/xkeen-control-panel/releases)
 [![GitHub license](https://img.shields.io/github/license/shisui1511/xkeen-control-panel)](https://github.com/shisui1511/xkeen-control-panel/blob/main/LICENSE)
+![Platforms](https://img.shields.io/badge/arch-ARM64%20%7C%20MIPSLE-blue)
 
 Веб-панель для управления XKeen на роутерах Keenetic/Netcraze.
 

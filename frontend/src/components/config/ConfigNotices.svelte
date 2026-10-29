@@ -12,7 +12,7 @@
 
   type Shown = {
     notice: LayerNotice;
-    tone: 'warning' | 'error';
+    tone: 'warning' | 'error' | 'info';
     text: string;
     // Ссылка личного кабинета провайдера (только http/https), чтобы освободить слот устройства
     cabinet?: string;
@@ -147,6 +147,64 @@
     return null;
   }
 
+  // Причина сбоя менеджера geodata: перевод по коду, иначе сам код (текст сервера не доверенный:
+  // он попадает в разметку только текстом)
+  function geoReason(code: string | undefined): string {
+    if (!code) return '';
+    const key = 'cfg.geo.reason_' + code;
+    const text = $t(key);
+    return text === key ? code : text;
+  }
+
+  // Менеджер geodata XKeen (фаза 146.1): сбой файла, сбой запуска, повтор, уборка записи,
+  // недоведённое удаление, два расписания. Текст собирается только интерполяцией
+  function describeGeodata(n: LayerNotice): Described | null {
+    const p = n.params ?? {};
+    const file = p.file ?? '';
+    if (n.id === 'geodata_update:run') {
+      return {
+        notice: n,
+        tone: 'error',
+        text: $t('cfg.geo.notice_run_failed', { reason: geoReason(p.reason) })
+      };
+    }
+    if (n.id === 'geodata_update:retry') {
+      return {
+        notice: n,
+        tone: 'warning',
+        text: $t('cfg.geo.notice_retry_failed', { reason: geoReason(p.reason) })
+      };
+    }
+    if (n.id.startsWith('geodata_update:')) {
+      return {
+        notice: n,
+        tone: 'error',
+        text: $t('cfg.geo.notice_file_kept', { file, reason: geoReason(p.reason) })
+      };
+    }
+    if (n.id.startsWith('geodata_cleanup:')) {
+      return { notice: n, tone: 'info', text: $t('cfg.geo.cleanup_done', { file }) };
+    }
+    if (n.id.startsWith('geodata_include:')) {
+      return { notice: n, tone: 'warning', text: $t('cfg.geo.cleanup_stuck', { file }) };
+    }
+    if (n.id.startsWith('geodata_delete:')) {
+      return {
+        notice: n,
+        tone: 'error',
+        text: $t('cfg.geo.del_incomplete', { file, reason: geoReason(p.reason) })
+      };
+    }
+    if (n.id === 'geodata_cron_two') {
+      return {
+        notice: n,
+        tone: 'warning',
+        text: $t('cfg.geo.cron_two', { schedule: p.schedule ?? '' })
+      };
+    }
+    return null;
+  }
+
   // Уведомления известных видов; неизвестные идентификаторы не показываем
   function describe(n: LayerNotice): Described | null {
     if (n.id === 'schema_reset') {
@@ -169,7 +227,7 @@
         })
       };
     }
-    return describeSource(n) ?? describeRouting(n);
+    return describeSource(n) ?? describeRouting(n) ?? describeGeodata(n);
   }
 
   // Уведомления о связи и об отказе провайдера сервер ведёт по одному на ядро, а в тексте
@@ -213,7 +271,7 @@
 <section class="config-notices" data-testid="config-notices">
   {#each shown as { notice, tone, text, cabinet, ids } (notice.id)}
     <div class="alert alert-{tone} alert-dismissible" role="alert" data-notice={notice.id}>
-      <Icon name="warning" size={16} />
+      <Icon name={tone === 'info' ? 'info' : 'warning'} size={16} />
       <span class="notice-text"
         >{text}
         {#if cabinet}
@@ -259,6 +317,13 @@
   .config-notices .alert :global(svg) {
     flex: none;
     margin-top: 2px;
+  }
+
+  /* Нейтральное уведомление: accent для уведомлений закрыт, цвет — вторичный текст */
+  .config-notices .alert-info {
+    background: var(--bg-elevated);
+    border-color: var(--border-strong);
+    color: var(--fg-secondary);
   }
 
   .notice-text {
