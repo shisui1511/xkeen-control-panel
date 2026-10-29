@@ -241,7 +241,7 @@
 
     {#if checkFailure !== ''}
       <div class="alert alert-error am-alert" role="alert" data-testid="geo-add-check-error">
-        <Icon name="warning" size={16} class="am-alert-icon" />
+        <Icon name="warning" size={16} class="icon-first-line" />
         <span>{checkFailure}</span>
       </div>
     {/if}
@@ -255,7 +255,7 @@
       </div>
     {:else if previewFailure !== ''}
       <div class="alert alert-error am-alert" role="alert" data-testid="geo-add-preview-error">
-        <Icon name="warning" size={16} class="am-alert-icon" />
+        <Icon name="warning" size={16} class="icon-first-line" />
         <span>{previewFailure}</span>
       </div>
     {:else if preview && fresh !== null && !blocked}
@@ -298,7 +298,7 @@
 
     {#if writeFailure !== ''}
       <div class="alert alert-error am-alert" role="alert" data-testid="geo-add-error">
-        <Icon name="warning" size={16} class="am-alert-icon" />
+        <Icon name="warning" size={16} class="icon-first-line" />
         <span>{writeFailure}</span>
       </div>
     {/if}
@@ -374,11 +374,6 @@
     overflow-wrap: anywhere;
   }
 
-  .am-alert :global(.am-alert-icon) {
-    flex-shrink: 0;
-    margin-top: 3px;
-  }
-
   .am-radios {
     display: flex;
     flex-direction: column;
@@ -403,7 +398,7 @@
 
   .am-radio input {
     flex-shrink: 0;
-    margin-top: 3px;
+    margin-top: var(--spacing-1);
     accent-color: var(--accent);
   }
 

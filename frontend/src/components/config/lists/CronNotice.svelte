@@ -83,7 +83,7 @@
       class="alert alert-warning geo-cron-alert"
       data-testid={kind === 'two' ? 'geo-two-schedules' : undefined}
     >
-      <Icon name="warning" size={16} class="geo-cron-icon" />
+      <Icon name="warning" size={16} class="icon-first-line" />
       <div class="geo-cron-body">
         {#if kind === 'resume'}
           <p class="geo-cron-text">{$t('cfg.geo.cron_resume_text')}</p>
@@ -162,11 +162,6 @@
     min-width: 0;
     font-size: var(--font-size-base);
     line-height: 1.5;
-  }
-
-  .geo-cron-alert :global(.geo-cron-icon) {
-    flex-shrink: 0;
-    margin-top: 3px;
   }
 
   .geo-cron-body {

@@ -171,7 +171,7 @@
       </div>
     {:else if previewFailure !== ''}
       <div class="alert alert-error es-alert" role="alert" data-testid="geodata-add-preview-error">
-        <Icon name="warning" size={16} class="es-alert-icon" />
+        <Icon name="warning" size={16} class="icon-first-line" />
         <span>{previewFailure}</span>
       </div>
     {:else if preview}
@@ -214,7 +214,7 @@
 
     {#if writeFailure !== ''}
       <div class="alert alert-error es-alert" role="alert" data-testid="geodata-add-error">
-        <Icon name="warning" size={16} class="es-alert-icon" />
+        <Icon name="warning" size={16} class="icon-first-line" />
         <span>{writeFailure}</span>
       </div>
     {/if}
@@ -277,11 +277,6 @@
     overflow-wrap: anywhere;
   }
 
-  .es-alert :global(.es-alert-icon) {
-    flex-shrink: 0;
-    margin-top: 3px;
-  }
-
   .es-radios {
     display: flex;
     flex-direction: column;
@@ -306,7 +301,7 @@
 
   .es-radio input {
     flex-shrink: 0;
-    margin-top: 3px;
+    margin-top: var(--spacing-1);
     accent-color: var(--accent);
   }
 

@@ -165,7 +165,7 @@
       </div>
     {:else if previewFailure !== ''}
       <div class="alert alert-error gf-alert" role="alert" data-testid="geo-finish-preview-error">
-        <Icon name="warning" size={16} class="gf-alert-icon" />
+        <Icon name="warning" size={16} class="icon-first-line" />
         <span>{previewFailure}</span>
       </div>
     {:else if preview}
@@ -181,7 +181,7 @@
 
     {#if writeFailure !== ''}
       <div class="alert alert-error gf-alert" role="alert" data-testid="geo-finish-error">
-        <Icon name="warning" size={16} class="gf-alert-icon" />
+        <Icon name="warning" size={16} class="icon-first-line" />
         <span>{writeFailure}</span>
       </div>
     {/if}
@@ -235,11 +235,6 @@
     margin: 0;
     min-width: 0;
     overflow-wrap: anywhere;
-  }
-
-  .gf-alert :global(.gf-alert-icon) {
-    flex-shrink: 0;
-    margin-top: 3px;
   }
 
   .gf-footer {

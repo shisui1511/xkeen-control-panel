@@ -55,7 +55,9 @@
     <ul class="pr-list">
       {#each checks as c, i (i)}
         <li class="pr-item pr-{c.level}" data-code={c.code} data-level={c.level}>
-          <span class="pr-icon"><Icon name={ICONS[c.level] ?? 'check'} size={16} /></span>
+          <span class="pr-icon icon-first-line"
+            ><Icon name={ICONS[c.level] ?? 'check'} size={16} /></span
+          >
           <span class="pr-text">{text(c)}</span>
         </li>
       {/each}
@@ -100,8 +102,6 @@
 
   .pr-icon {
     display: inline-flex;
-    flex-shrink: 0;
-    margin-top: 2px;
   }
 
   .pr-text {

@@ -277,7 +277,7 @@
               {#if row.action === 'remove'}
                 {#each dieNumbers(l) as n (n)}
                   <p class="dm-warn" data-testid="geo-delete-dies-{l.tag}">
-                    <Icon name="warning" size={14} class="dm-warn-icon" />
+                    <Icon name="warning" size={14} class="icon-first-line" />
                     <span>{$t('cfg.geo.del_rule_dies', { n })}</span>
                   </p>
                 {/each}
@@ -302,7 +302,7 @@
 
       {#if foreign.length > 0}
         <div class="alert alert-error dm-alert" role="alert" data-testid="geo-delete-foreign">
-          <Icon name="warning" size={16} class="dm-alert-icon" />
+          <Icon name="warning" size={16} class="icon-first-line" />
           <div class="dm-alert-text">
             <span>
               {foreignParts[0]}{#each foreign as f, i (f.file + ':' + f.line + ':' + i)}{#if f.line > 0}<code
@@ -327,7 +327,7 @@
 
       {#if raw.length > 0}
         <div class="alert alert-error dm-alert" role="alert" data-testid="geo-delete-raw">
-          <Icon name="warning" size={16} class="dm-alert-icon" />
+          <Icon name="warning" size={16} class="icon-first-line" />
           <div class="dm-alert-text">
             <span>{$t('cfg.geo.err.raw_ref')}</span>
             <span class="dm-mono">№ {raw.map((r) => r.n).join(', ')}</span>
@@ -336,13 +336,13 @@
       {/if}
 
       <div class="alert alert-warning dm-alert" data-testid="geo-delete-effects">
-        <Icon name="warning" size={16} class="dm-alert-icon" />
+        <Icon name="warning" size={16} class="icon-first-line" />
         <span class="dm-alert-text">{effects}</span>
       </div>
 
       {#if errorText !== ''}
         <div class="alert alert-error dm-alert" role="alert" data-testid="geo-delete-error">
-          <Icon name="warning" size={16} class="dm-alert-icon" />
+          <Icon name="warning" size={16} class="icon-first-line" />
           <span class="dm-alert-text">{errorText}</span>
         </div>
       {/if}
@@ -464,20 +464,10 @@
     overflow-wrap: anywhere;
   }
 
-  .dm-warn :global(.dm-warn-icon) {
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-
   .dm-alert {
     margin: 0;
     min-width: 0;
     overflow-wrap: anywhere;
-  }
-
-  .dm-alert :global(.dm-alert-icon) {
-    flex-shrink: 0;
-    margin-top: 3px;
   }
 
   .dm-alert-text {

@@ -104,7 +104,7 @@
         </p>
       {:else}
         <div class="alert alert-warning geo-dl-alert">
-          <Icon name="warning" size={16} class="geo-alert-icon" />
+          <Icon name="warning" size={16} class="icon-first-line" />
           <div class="geo-dl-alert-body">
             <p class="geo-dl-alert-text">{$t('cfg.geo.nojq')}</p>
             <div>
@@ -148,7 +148,7 @@
         </p>
       {:else}
         <div class="alert alert-warning geo-dl-alert">
-          <Icon name="warning" size={16} class="geo-alert-icon" />
+          <Icon name="warning" size={16} class="icon-first-line" />
           <div class="geo-dl-alert-body">
             <p class="geo-dl-alert-text">{$t('cfg.geo.update_off')}</p>
             <div>
@@ -251,11 +251,6 @@
     min-width: 0;
     font-size: var(--font-size-base);
     line-height: 1.5;
-  }
-
-  .geo-dl-alert :global(.geo-alert-icon) {
-    flex-shrink: 0;
-    margin-top: 3px;
   }
 
   .geo-dl-alert-body {
