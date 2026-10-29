@@ -51,6 +51,13 @@
   const jqBusy = $derived(jqStarting || jqRunning);
   const jqShown = $derived(jqBusy || jqRan);
 
+  /** Текст причины: известный код словаря либо сам код. */
+  function reasonText(code: string): string {
+    const key = `cfg.geo.reason_${code}`;
+    const text = $t(key);
+    return text === key ? code : text;
+  }
+
   async function installJq() {
     if (jqBusy || busyReason !== '') return;
     jqStarting = true;
@@ -124,7 +131,7 @@
             {:else if dl.jq}
               {$t('cfg.geo.jq_done')}
             {:else}
-              {$t('cfg.geo.jq_failed', { reason: dl.jq_error ?? '?' })}
+              {$t('cfg.geo.jq_failed', { reason: dl.jq_error ? reasonText(dl.jq_error) : '?' })}
             {/if}
           </p>
           <OutputLog job="jq" active={jqBusy} />

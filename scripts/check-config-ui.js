@@ -42,7 +42,9 @@
  *    цикла), а клиент не импортируется вне Config.svelte и components/config/ (при
  *    выключенном флаге запросов менеджера нет); у каждого кода из geodataErrorCodes.json
  *    есть текст cfg.geo.err.<код> в ru и en, у ключей _one есть _few и _many; ключи D-35
- *    и D-36 на месте.
+ *    и D-36 на месте; у каждой причины сбоя (константы runReason*, removeReason*,
+ *    jqReason*, Reason* пакета geodata и коды незавершённого удаления) есть текст
+ *    cfg.geo.reason_<код> в ru и en.
  *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
@@ -1265,9 +1267,38 @@ expect(
   Array.isArray(geodataCodes) && geodataCodes.length > 0,
   `${GEODATA_CODES}: пустой список кодов ошибок`,
 );
+// Причины сбоев, которые клиент показывает через cfg.geo.reason_<код>: константы причин
+// пакета geodata (запуск, jq, удаление, разбор вывода) и коды правки xkeen.json, с
+// которыми остаётся незавершённое удаление (PendingDelete.Reason)
+const GEODATA_PKG = "internal/services/geodata";
+const geodataReasons = new Set([
+  "foreign_ref",
+  "xkeen_json_invalid",
+  "geodata_changed",
+  "comments_lost",
+]);
+for (const name of fs.readdirSync(path.join(root, GEODATA_PKG))) {
+  if (!name.endsWith(".go") || name.endsWith("_test.go")) continue;
+  const text = read(`${GEODATA_PKG}/${name}`);
+  for (const m of text.matchAll(
+    /^\s*(?:runReason|removeReason|jqReason|Reason)\w*\s*=\s*"([a-z0-9_]+)"/gm,
+  )) {
+    geodataReasons.add(m[1]);
+  }
+}
+expect(
+  geodataReasons.size > 4,
+  `${GEODATA_PKG}: не найдены константы причин (runReason*, removeReason*, jqReason*, Reason*)`,
+);
 for (const lang of ["ru", "en"]) {
   const dict = JSON.parse(read(`${SRC}/locales/${lang}.json`));
   const has = (k) => typeof dict[k] === "string" && dict[k].trim() !== "";
+  for (const code of geodataReasons) {
+    expect(
+      has(`cfg.geo.reason_${code}`),
+      `${lang}.json: нет текста причины cfg.geo.reason_${code}`,
+    );
+  }
   for (const code of [...geodataCodes, "unknown"]) {
     expect(
       has(`cfg.geo.err.${code}`),
