@@ -342,11 +342,12 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 			continue
 		}
 		// Запуск стартовал после слота и после конца применения: его время не раньше
-		// последнего наблюдения идущего применения (время в запуске — с точностью до секунды).
+		// последнего наблюдения идущего применения. Время в запуске — с точностью до секунды,
+		// а состояние «Применить» гаснет чуть позже отпускания замка, поэтому допуск — секунда.
 		if lastAt.Before(slot.Truncate(time.Second)) {
 			t.Errorf("last_run.at %s раньше слота %s", lastAt.Format(time.RFC3339), slot.Format(time.RFC3339))
 		}
-		if !lastApplyRunning.IsZero() && lastAt.Before(lastApplyRunning.Truncate(time.Second)) {
+		if !lastApplyRunning.IsZero() && lastAt.Add(time.Second).Before(lastApplyRunning.Truncate(time.Second)) {
 			t.Errorf("запуск -ug начался (%s) раньше, чем закончилось «Применить» (последнее наблюдение идущего применения %s)",
 				lastAt.Format(time.RFC3339), lastApplyRunning.Format(time.RFC3339))
 		}
