@@ -340,12 +340,16 @@
   }
 
   .eu-hint {
-    flex: 1 1 240px;
     margin: 0;
     font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--fg-dim);
     overflow-wrap: anywhere;
+  }
+
+  /* basis 240px — ширина в строке с кнопкой; в колонке .eu-field он растянул бы подсказку по высоте */
+  .eu-check .eu-hint {
+    flex: 1 1 240px;
   }
 
   /* Высота области не прыгает между чтением, ошибкой и diff */
