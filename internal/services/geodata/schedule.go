@@ -3,6 +3,7 @@ package geodata
 import (
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -47,15 +48,10 @@ type schedState struct {
 	initDone     bool
 	catchPending bool
 	catchAt      time.Time
-}
+	ntpAt        time.Time // когда последний раз спрашивали ndmc (часы процесса, не d.Now)
 
-// clockValid — часы роутера выглядят синхронизированными: пока год меньше 2025 (нет
-// NTP), слоты не вычисляются и догон не планируется.
-func clockValid(now time.Time) bool {
-	if now.Year() < 2025 {
-		return false
-	}
-	return true
+	// ntp — последний известный ntpState; читают все, пишет refreshNTP.
+	ntp atomic.Int32
 }
 
 // slotAt — время слота расписания в день d по часам роутера.
@@ -99,7 +95,7 @@ func prevSlot(now time.Time, sch Schedule) time.Time {
 // синхронизированы — ничего не делает. Вызывается под Service.mu.
 func (s *Service) markSlotLocked() {
 	now := s.d.Now()
-	if !clockValid(now) {
+	if !s.clockValid(now) {
 		return
 	}
 	s.st.LastSlotDone = prevSlot(now, s.st.Schedule).Format(time.RFC3339)
@@ -174,10 +170,12 @@ func (s *Service) schedLoop() {
 }
 
 // schedStep — одна проверка планировщика; возвращает, сколько ждать до следующей.
-// Пока год часов меньше 2025 (нет NTP), слоты не вычисляются и догон не планируется.
+// Пока часы не синхронизированы (clockValid), слоты не вычисляются и догон не
+// планируется.
 func (s *Service) schedStep() time.Duration {
+	s.refreshNTP()
 	now := s.d.Now()
-	if !clockValid(now) {
+	if !s.clockValid(now) {
 		return schedMaxWait
 	}
 	s.mu.Lock()

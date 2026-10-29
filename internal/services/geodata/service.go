@@ -105,6 +105,9 @@ type Deps struct {
 	AllowedRoots []string
 	// Now — источник времени (nil — time.Now).
 	Now func() time.Time
+	// NTPStatus — вывод `ndmc -c "show ntp status"` (nil — запуск ndmc). Признак
+	// синхронизации часов для планировщика.
+	NTPStatus func(ctx context.Context) ([]byte, error)
 	// HTTP — клиент запроса остатка лимита GitHub API (nil — клиент с таймаутом 10 с).
 	HTTP *http.Client
 }
@@ -203,6 +206,9 @@ func New(d Deps) (*Service, error) {
 	}
 	if d.Now == nil {
 		d.Now = time.Now
+	}
+	if d.NTPStatus == nil {
+		d.NTPStatus = ndmcNTPStatus
 	}
 	if d.HTTP == nil {
 		d.HTTP = &http.Client{Timeout: rateLimitTimeout}
