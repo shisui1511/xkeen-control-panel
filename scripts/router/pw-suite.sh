@@ -37,7 +37,8 @@
 #              а вместе с RT_PW_GREP — (?=.*@core) и затем RT_PW_GREP; --pass-with-no-tests;
 #              часть без таких тестов завершается кодом 0 без строк результата; при --switch
 #              не используется
-#   RT_REPORT  каталог отчёта (если не задан, создаётся новый)
+#   RT_REPORT  каталог отчёта (если не задан, создаётся новый); относительный — от корня
+#              рабочей копии, вне build/router — код 2
 #   XCP_T_<id>_SLOW  множитель таймаутов цели (в локальном конфиге; по умолчанию 1,
 #                    для mipsle и mips — 2)
 #   XCP_T_<id>_PAGE_WORKERS  воркеров обхода страниц (по умолчанию 3)
@@ -88,7 +89,7 @@ cd "$(rt_repo_root)"
 ROUTERS=$ID
 export ROUTERS
 rt_load_targets
-[ -n "${RT_REPORT:-}" ] || rt_report_init
+rt_report_use
 RT_CORE=$CORE
 export RT_CORE
 
@@ -114,6 +115,13 @@ if [ -n "$SWITCH" ]; then
 fi
 [ "$PART" != read ] || PW_NAME=pw-read
 PW_DIR="$RT_REPORT/$ID/$CORE_DIR/$PW_NAME"
+case "$PW_DIR" in
+  "$ROOT"/build/router/*) ;;
+  *)
+    echo "pw-suite: путь вывода вне build/router: $PW_DIR" >&2
+    exit 2
+    ;;
+esac
 mkdir -p "$PW_DIR"
 STATE="$PW_DIR/state.json"
 LOG="$PW_DIR/run.log"
