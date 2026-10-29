@@ -61,8 +61,9 @@ lint:
 fmt:
 	go fmt ./...
 
+# Только сборки; отчёты стенда и кэш релизов снимает make tidy
 clean:
-	rm -rf build/
+	rm -rf build/xcp build/xcp_v* build/xcp_test_* build/router/bin
 
 # Уборка за агентами: без флагов только показ, APPLY=1 — удаление (scripts/tidy.sh)
 tidy:
