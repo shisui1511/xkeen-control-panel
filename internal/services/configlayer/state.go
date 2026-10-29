@@ -514,7 +514,9 @@ func (s *Store) EditDraftBatch(baseRev int64, sections map[string]json.RawMessag
 // проверки ревизии клиента. fn получает текущие Applied[section] и Draft[section]
 // (nil, если секции нет) и возвращает новые значения; nil или JSON null удаляет
 // секцию. Applied меняется всегда, Draft — только если результат отличается от
-// прежнего (SectionEqual); тогда ревизия растёт на 1 и публикуется событие draft.
+// прежнего (SectionEqual); тогда ревизия растёт на 1. Событие draft публикуется при
+// любом изменении: число изменений черновика считается от Applied и меняется и тогда,
+// когда изменился только Applied (ревизия при этом прежняя).
 // Всё под замком хранилища, запись файла — как у EditDraftBatch. Ошибка fn или
 // недопустимое имя секции — состояние прежнее. Возвращает событие draft и признак
 // «черновик изменился»; без изменений Applied и Draft файл не пишется.
@@ -561,9 +563,7 @@ func (s *Store) SettleSection(section string, fn func(applied, draft json.RawMes
 	ev := draftEventOf(next)
 	s.mu.Unlock()
 
-	if draftChanged {
-		s.broker.Publish(Event{Type: EventDraft, Data: ev})
-	}
+	s.broker.Publish(Event{Type: EventDraft, Data: ev})
 	return ev, draftChanged, nil
 }
 

@@ -301,6 +301,48 @@ func TestRouterSettleSection(t *testing.T) {
 		t.Errorf("недопустимое имя секции: %v", err)
 	}
 
+	// Изменился только Applied: ревизия прежняя, но событие draft с новым числом
+	// изменений черновика публикуется.
+	probe := rtRaw(`{"v":3}`)
+	if _, err := layer.EditDraft(again.DraftRevision, "geodata_settle", probe); err != nil {
+		t.Fatalf("EditDraft пробной секции: %v", err)
+	}
+	pre, err := layer.ReadState()
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+	wantChanges := draftChanges(State{Draft: pre.Draft, Applied: pre.Applied}) - 1
+	if err := layer.SettleSection("geodata_settle", func(applied, draft json.RawMessage) (json.RawMessage, json.RawMessage, error) {
+		return draft, draft, nil
+	}); err != nil {
+		t.Fatalf("SettleSection только Applied: %v", err)
+	}
+	post, err := layer.ReadState()
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+	if post.DraftRevision != pre.DraftRevision {
+		t.Errorf("изменение только Applied сдвинуло ревизию: %d -> %d", pre.DraftRevision, post.DraftRevision)
+	}
+	gotApplied := false
+	for deadline := time.Now().Add(5 * time.Second); !gotApplied && time.Now().Before(deadline); {
+		dev, ok := rtNextEvent(events, EventDraft, time.Until(deadline))
+		if !ok {
+			break
+		}
+		if de, ok := dev.Data.(DraftEvent); ok && de.DraftRevision == post.DraftRevision && de.DraftChanges == wantChanges {
+			gotApplied = true
+		}
+	}
+	if !gotApplied {
+		t.Errorf("нет события draft с ревизией %d и числом изменений %d после изменения только Applied", post.DraftRevision, wantChanges)
+	}
+	if err := layer.SettleSection("geodata_settle", func(json.RawMessage, json.RawMessage) (json.RawMessage, json.RawMessage, error) {
+		return nil, nil, nil
+	}); err != nil {
+		t.Errorf("уборка пробной секции: %v", err)
+	}
+
 	// Порог пользовательских geodata читается через слой без сравнения номеров в UI.
 	switch a := layer.FeatureAvailability(FeatureXKeenUserGeodata); a {
 	case Available, Unavailable, Undetermined:
