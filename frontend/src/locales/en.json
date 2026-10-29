@@ -3538,6 +3538,7 @@
   "cfg.geo.summary_few": "Files: {count} · {size}",
   "cfg.geo.summary_many": "Files: {count} · {size}",
   "cfg.geo.ug_busy": "Databases are updating. Wait for it to finish.",
+  "cfg.geo.jq_busy": "jq is being installed. Wait for it to finish.",
   "cfg.geo.write_busy": "xkeen.json is being written. Wait for it to finish.",
   "cfg.geo.old_xkeen": "This XKeen version cannot update custom databases (2.0.1 or newer is required). The panel shows entries but does not change them. Update XKeen with xkeen -uk.",
   "cfg.geo.no_xkeen_title": "XKeen is not installed",

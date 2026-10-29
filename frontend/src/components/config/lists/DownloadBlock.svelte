@@ -30,6 +30,7 @@
       return $t('cfg.routing.apply_busy_hint');
     }
     if ($geodataHolder === 'geodata_write') return $t('cfg.geo.write_busy');
+    if (run?.running === true && run.job === 'jq') return $t('cfg.geo.jq_busy');
     if ($geodataHolder !== '' || run?.running === true || run?.waiting_apply === true) {
       return $t('cfg.geo.ug_busy');
     }

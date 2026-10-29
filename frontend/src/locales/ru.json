@@ -3538,6 +3538,7 @@
   "cfg.geo.summary_few": "Файлов: {count} · {size}",
   "cfg.geo.summary_many": "Файлов: {count} · {size}",
   "cfg.geo.ug_busy": "Идёт обновление баз. Дождитесь окончания.",
+  "cfg.geo.jq_busy": "Идёт установка jq. Дождитесь окончания.",
   "cfg.geo.write_busy": "Идёт запись xkeen.json. Дождитесь окончания.",
   "cfg.geo.old_xkeen": "Эта версия XKeen не умеет обновлять пользовательские базы (нужна 2.0.1 или новее). Панель показывает записи, но не меняет их. Обновите XKeen командой xkeen -uk.",
   "cfg.geo.no_xkeen_title": "XKeen не установлен",
