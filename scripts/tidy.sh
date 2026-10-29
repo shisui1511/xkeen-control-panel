@@ -32,8 +32,16 @@
 # (без frontend/node_modules; индекс и файлы worktree не меняются), todo rescue-<имя>.md в
 # .planning/todos/pending основной копии, затем git worktree remove и удаление ветки worktree.
 # Ветки rescue/* только локальные: команда их не удаляет и не отправляет.
+# Игнорируемые файлы (свой .planning, отчёты build/router/<отчёт>, *.test, журналы…): слитый
+# worktree, а также названный --rescue, с ними вне воспроизводимого пропускается с причиной
+# «игнорируемые файлы: N» — git worktree remove удалил бы их вместе с каталогом, а rescue-коммит
+# их не берёт. Воспроизводимое снятию не мешает: frontend/node_modules, frontend/dist/, .go/,
+# .go-cache/, build/xcp*, build/router/bin/, build/router/release/ и символические ссылки.
+# Для --rescue полный список путей печатается в stderr, решение за владельцем: перенести нужное
+# или удалить вручную и повторить. Игнорируемое никуда не копируется и новым флагом не снимается.
 # Прочие worktree — пропуск с причиной: «заблокирован», «не слита», «правки моложе 24 ч»,
-# «возраст не определён», «вне репозитория», «текущий», «блокировка занята прогоном».
+# «возраст не определён», «вне репозитория», «текущий», «блокировка занята прогоном»,
+# «игнорируемые файлы: N», «игнорируемые файлы не прочитаны».
 #
 # Локальные ветки: слитые (вершина достижима из origin/main или из текущей ветки основной копии)
 # удаляются, кроме main, текущих, rescue/* (одна итоговая строка) и занятых worktree («занята
@@ -522,6 +530,14 @@ plan_wt_one() { # <путь> <HEAD> <ветка|-> <detached> <locked> <prunable
     _po_note=$(wt_ign_note)
     if [ -n "$_po_one" ]; then _po_note="$_po_one; $_po_note"; fi
     pl_skip "$_po_c" "$_po_p" "$_po_note"
+    if [ "$_po_f" = 1 ]; then
+      # разовое --rescue: владелец решает сам, поэтому полный список (D-23)
+      _po_nm=$(basename "$_po_p")
+      tr -d '\000-\011\013-\037\177' <"$WT_IGN" | while IFS= read -r _po_i; do
+        echo "tidy: --rescue $_po_nm: игнорируемое: $_po_i" >&2
+      done
+      echo "tidy: --rescue $_po_nm: игнорируемые файлы не входят в rescue и пропали бы при снятии worktree — он пропущен; решение владельца: перенести нужное или удалить вручную и повторить" >&2
+    fi
     return 0
   fi
   _po_kb=0
@@ -645,10 +661,13 @@ git_wt_rescue() { # <путь worktree>
     echo "tidy: отказ спасать: $(basename "$_gr_wt") — текущий, заблокирован или каталога нет" >&2
     return 1
   fi
+  _gr_name=$(basename "$_gr_wt")
+  # игнорируемое rescue-коммит не берёт, а remove его удалил бы: отказ до ветки и todo (D-12, D-19)
+  wt_ignored "$_gr_wt" || { echo "tidy: отказ спасать $_gr_name: игнорируемые файлы не прочитаны" >&2; return 1; }
+  [ ! -s "$WT_IGN" ] || { echo "tidy: отказ спасать $_gr_name: игнорируемые файлы: $(wc -l <"$WT_IGN" | tr -d ' ')" >&2; return 1; }
   _gr_head=$_wl_h
   _gr_br=$_wl_b
   _gr_det=$_wl_d
-  _gr_name=$(basename "$_gr_wt")
   _gr_rb=$_gr_name
   _gr_i=2
   while git show-ref --verify --quiet "refs/heads/rescue/$_gr_rb"; do
@@ -697,6 +716,8 @@ git_wt_rescue() { # <путь worktree>
   wt_todo "$_gr_rb" "$_gr_name" "$_gr_br" "$_gr_det" "$_gr_head" "$_gr_commit" "$_gr_files" || true
   rm -f "$_gr_files"
   echo "tidy: rescue/$_gr_rb -> $(git rev-parse --short "$_gr_commit") (worktree $_gr_name)" >&2
+  wt_ignored "$_gr_wt" || { echo "tidy: worktree $_gr_name не снят: игнорируемые файлы не прочитаны; rescue/$_gr_rb и todo сохранены" >&2; return 1; }
+  [ ! -s "$WT_IGN" ] || { echo "tidy: worktree $_gr_name не снят: появились игнорируемые файлы: $(wc -l <"$WT_IGN" | tr -d ' '); rescue/$_gr_rb и todo сохранены" >&2; return 1; }
   git worktree remove --force "$_gr_wt" || return 1
   wt_drop_branch "$_gr_br" "$_gr_det"
 }
