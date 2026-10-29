@@ -244,14 +244,7 @@ func rtGeoData(t *testing.T, r rtSrcResp) map[string]any {
 	return m
 }
 
-// rtGeoOutput читает вывод задания со смещения from.
-func (e *rtSrc) rtGeoOutput(job string, from int64) (text string, next int64, running bool) {
-	e.t.Helper()
-	text, next, running, _ = e.rtGeoOutputRun(job, from)
-	return text, next, running
-}
-
-// rtGeoOutputRun — как rtGeoOutput, и номер запуска (run_id): сменился — начался новый
+// rtGeoOutputRun читает вывод задания со смещения from и номер запуска (run_id): сменился — начался новый
 // запуск, вывод читается с начала, смещения прежнего запуска не сравниваются.
 func (e *rtSrc) rtGeoOutputRun(job string, from int64) (text string, next int64, running bool, runID float64) {
 	e.t.Helper()
