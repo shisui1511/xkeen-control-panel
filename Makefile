@@ -65,9 +65,10 @@ fmt:
 clean:
 	rm -rf build/xcp build/xcp_v* build/xcp_test_* build/router/bin
 
-# Уборка за агентами: без флагов только показ, APPLY=1 — удаление (scripts/tidy.sh)
+# Уборка за агентами: без флагов только показ, APPLY=1 — удаление (scripts/tidy.sh).
+# REMOTE=1 — ветки origin; удалять их (REMOTE=1 APPLY=1) только после «да» владельца на показанный список
 tidy:
-	sh scripts/tidy.sh $(if $(APPLY),--apply)
+	sh scripts/tidy.sh $(if $(APPLY),--apply) $(if $(REMOTE),--remote)
 
 # Необязательная генерация protobuf/gRPC кода (локально, не в CI)
 proto:
