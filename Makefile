@@ -1,4 +1,4 @@
-.PHONY: build run clean lint fmt deps hooks router-arm64 router-mipsle router-mips router-test proto
+.PHONY: build run clean lint fmt deps hooks router-arm64 router-mipsle router-mips router-test proto tidy
 
 BINARY_NAME=xcp
 # Single source of truth for the version: scripts/version.sh (git tags +
@@ -29,14 +29,17 @@ build: update-version
 # Сборка для роутеров Keenetic/Netcraze ARM64 (KN-1812/NC-1812, KN-1012/NC-1012, KN-3811/NC-3811 и др.)
 router-arm64: update-version
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -ldflags "-s -w -X main.Version=$(VERSION)" -o build/$(BINARY_NAME)_$(VERSION)_arm64 ./cmd/xcp
+	@sh scripts/tidy.sh --rotate-builds || true
 
 # Сборка для роутеров Keenetic/Netcraze MIPSLE (KN-1010, KN-1810, KN-1913/NC-1913 и др.)
 router-mipsle: update-version
 	CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -buildvcs=false -ldflags "-s -w -X main.Version=$(VERSION)" -o build/$(BINARY_NAME)_$(VERSION)_mipsle ./cmd/xcp
+	@sh scripts/tidy.sh --rotate-builds || true
 
 # Сборка для роутеров Keenetic MIPS big-endian (KN-2410, KN-2510, KN-3610 и др.)
 router-mips: update-version
 	CGO_ENABLED=0 GOOS=linux GOARCH=mips GOMIPS=softfloat go build -buildvcs=false -ldflags "-s -w -X main.Version=$(VERSION)" -o build/$(BINARY_NAME)_$(VERSION)_mips ./cmd/xcp
+	@sh scripts/tidy.sh --rotate-builds || true
 
 # Проверка на роутерах: деплой, смоук, отчёт в build/router/last.
 # Цели берутся из локального scripts/router/targets.local.env (образец — targets.example.env).
@@ -60,6 +63,10 @@ fmt:
 
 clean:
 	rm -rf build/
+
+# Уборка за агентами: без флагов только показ, APPLY=1 — удаление (scripts/tidy.sh)
+tidy:
+	sh scripts/tidy.sh $(if $(APPLY),--apply)
 
 # Необязательная генерация protobuf/gRPC кода (локально, не в CI)
 proto:
