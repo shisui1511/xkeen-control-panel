@@ -279,24 +279,35 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 	var applyDur time.Duration
 	for attempt := 1; attempt <= 2; attempt++ {
 		e.rtGeoWaitIdle(rtGeoRunLimit)
-		// schedule.now в снимке — время роутера внутри запроса: соответствие часов ПК берётся
-		// по середине запроса. Конец запроса давал сдвиг на всю его длительность, а после
-		// «-ug» снимок строится десятки секунд, и «Применить» стартовало уже после слота.
+		// Тест идёт на самом роутере, часы процесса и панели одни: слот считается по часам
+		// процесса, без привязки к schedule.now. Привязка по запросу снимка давала погрешность
+		// длительности запроса: после «-ug» снимок строится десятки секунд, schedule.now
+		// несёт время построения с точностью до секунды, и «Применить» стартовало уже после
+		// слота (409 geodata_busy). Совпадение часов проверяется по самому запросу.
 		reqStart := time.Now()
 		snap := e.rtGeoSnapshot()
-		base := reqStart.Add(time.Since(reqStart) / 2)
+		reqEnd := time.Now()
 		sch := rtGeoSchedOf(t, snap)
+		if sch.now.Before(reqStart.Add(-time.Second)) || sch.now.After(reqEnd) {
+			t.Fatalf("schedule.now %s вне запроса снимка %s…%s: часы теста и панели расходятся",
+				sch.now.Format(time.RFC3339), reqStart.Format(time.RFC3339), reqEnd.Format(time.RFC3339))
+		}
 		rtGeoSkipWindowAt(t, sch.now, 15*time.Minute)
 		lastAt0 := rtGeoLastAt(t, snap)
 
-		slot := rtGeoCeilMinute(sch.now.Add(90 * time.Second))
-		slotLocal := base.Add(slot.Sub(sch.now))
+		// слот по часам процесса, час и минута — в поясе панели
+		slotLocal := rtGeoCeilMinute(time.Now().Add(90 * time.Second))
+		slot := slotLocal.In(sch.now.Location())
 		e.rtGeoSetSchedule(true, -1, slot.Hour(), slot.Minute())
 		e.rtGeoToggleNode(link)
 
-		if wait := time.Until(slotLocal.Add(-lead)); wait > 0 {
-			time.Sleep(wait)
+		// запись расписания и узла после «-ug» может занять десятки секунд: если запас
+		// слота ушёл, «Применить» всё равно пришло бы после слота
+		if time.Until(slotLocal.Add(-lead)) < 0 {
+			t.Fatalf("попытка %d: подготовка слота %02d:%02d заняла дольше запаса, до слота осталось %v",
+				attempt, slot.Hour(), slot.Minute(), time.Until(slotLocal).Round(time.Second))
 		}
+		time.Sleep(time.Until(slotLocal.Add(-lead)))
 		applyStart := time.Now()
 		e.rtRstStartApply()
 
@@ -311,9 +322,11 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 			if time.Now().After(deadline) {
 				t.Fatalf("попытка %d: запуск по расписанию не закончился за %v после слота (waiting_apply=%v, running=%v)", attempt, rtGeoRunLimit, sawWaiting, sawRunning)
 			}
-			snap = e.rtGeoSnapshot()
+			// состояние «Применить» снимается раньше снимка менеджера и сразу: его время —
+			// точка наблюдения; запрос снимка во время применения может занять секунды
 			applyRunning, _ := e.rtRstApplyView()["running"].(bool)
 			now := time.Now()
+			snap = e.rtGeoSnapshot()
 			if applyRunning {
 				lastApplyRunning = now
 			} else if applyEnd.IsZero() && !lastApplyRunning.IsZero() {
@@ -330,7 +343,13 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 			if lastAt.After(lastAt0) && !running && !rtGeoRun(snap, "waiting_apply") {
 				break
 			}
-			time.Sleep(500 * time.Millisecond)
+			// waiting_apply живёт, пока идёт применение (на Mihomo около секунды): пока оно не
+			// закончилось, опрос частый, иначе флаг не успевает попасть в выборку
+			if applyEnd.IsZero() {
+				time.Sleep(50 * time.Millisecond)
+			} else {
+				time.Sleep(500 * time.Millisecond)
+			}
 		}
 		if !lastApplyRunning.IsZero() && !applyEnd.IsZero() {
 			applyDur = applyEnd.Sub(applyStart)
