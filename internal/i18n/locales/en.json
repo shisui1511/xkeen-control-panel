@@ -112,6 +112,8 @@
   "configlayer.geodata.xkeen_too_old": "This XKeen version cannot update custom databases: update XKeen",
   "configlayer.geodata.xkeen_missing": "XKeen is not installed",
   "configlayer.geodata.cron_failed": "Could not change the XKeen cron job",
+  "configlayer.geodata.remove_failed": "Could not remove the list file",
+  "configlayer.geodata.write_failed": "Could not write xkeen.json",
   "configlayer.geodata.update_failed": "The entry was written, but updating the databases (xkeen -ug) failed",
   "configlayer.geodata.update_unavailable": "Database updates are unavailable right now",
   "configlayer.drift_blocked": "Some files have drifted: resolve them before applying",

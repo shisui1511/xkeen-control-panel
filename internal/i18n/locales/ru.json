@@ -112,6 +112,8 @@
   "configlayer.geodata.xkeen_too_old": "Эта версия XKeen не умеет обновлять пользовательские базы: обновите XKeen",
   "configlayer.geodata.xkeen_missing": "XKeen не установлен",
   "configlayer.geodata.cron_failed": "Не удалось изменить задачу cron XKeen",
+  "configlayer.geodata.remove_failed": "Не удалось удалить файл списка",
+  "configlayer.geodata.write_failed": "Не удалось записать xkeen.json",
   "configlayer.geodata.update_failed": "Запись сделана, но обновить базы (xkeen -ug) не удалось",
   "configlayer.geodata.update_unavailable": "Обновление баз сейчас недоступно",
   "configlayer.drift_blocked": "Есть файлы с расхождением: решите их судьбу перед применением",

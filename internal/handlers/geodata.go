@@ -60,6 +60,8 @@ var geodataManagerStatus = map[string]int{
 	// Прочее.
 	"xkeen_missing":      http.StatusPreconditionFailed,
 	"cron_failed":        http.StatusInternalServerError,
+	"remove_failed":      http.StatusInternalServerError,
+	"write_failed":       http.StatusInternalServerError,
 	"update_failed":      http.StatusBadGateway,
 	"update_unavailable": http.StatusBadGateway,
 }

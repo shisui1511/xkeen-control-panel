@@ -20,7 +20,9 @@
  *    internal/handlers/geodata.go или internal/handlers/configlayer.go и имеет текст
  *    cfg.geo.err.<код> в обоих словарях фронтенда; каждый код таблицы
  *    geodataManagerStatus (handlers/geodata.go) — configlayer.geodata.<код> в обоих
- *    бэкенд-словарях.
+ *    бэкенд-словарях; каждый код, который возвращает пакет geodata (литералы
+ *    CodedError{Code: …} и константы removeReason*), есть в таблице или разобран в
+ *    writeGeodataError отдельно (иначе ответ — 500 internal).
  *
  * Usage: node scripts/check-geodata-api.js [--root <каталог>]
  */
@@ -367,6 +369,27 @@ for (const code of tableCodes) {
     errors.push(`internal/i18n/locales/ru.json: нет ключа ${key}`);
   if (!(key in beEn))
     errors.push(`internal/i18n/locales/en.json: нет ключа ${key}`);
+}
+
+// Коды, которые возвращает сам сервис: литералы CodedError{Code: …} и причины
+// удаления removeReason* (FinishDelete отдаёт их как CodedError).
+const GEODATA_PKG = "internal/services/geodata";
+const SWITCH_CODES = new Set(["geodata_busy", "apply_busy", "bad_op"]);
+const serviceCodes = new Set();
+for (const file of goFiles(GEODATA_PKG)) {
+  const text = read(file);
+  for (const m of text.matchAll(/CodedError\{Code: "([a-z0-9_]+)"\}/g))
+    serviceCodes.add(m[1]);
+  for (const m of text.matchAll(/^\s*removeReason\w*\s*=\s*"([a-z0-9_]+)"/gm))
+    serviceCodes.add(m[1]);
+}
+if (serviceCodes.size === 0)
+  errors.push(`${GEODATA_PKG}: не найдены коды ошибок сервиса`);
+for (const code of serviceCodes) {
+  if (!tableCodes.includes(code) && !SWITCH_CODES.has(code))
+    errors.push(
+      `${HANDLERS}: код ${code} пакета geodata не в geodataManagerStatus (ответ 500 internal)`,
+    );
 }
 
 if (errors.length > 0) {

@@ -3786,6 +3786,8 @@
   "cfg.geo.err.apply_busy": "Apply is running. Wait for it to finish.",
   "cfg.geo.err.comments_lost": "xkeen.json contains comments and writing would remove them. Confirm the loss of comments.",
   "cfg.geo.err.cron_failed": "Could not change the XKeen cron job.",
+  "cfg.geo.err.remove_failed": "Could not remove the list file. The source stays in Lists; press \"Finish\" again.",
+  "cfg.geo.err.write_failed": "Could not write xkeen.json. The source stays in Lists; press \"Finish\" again.",
   "cfg.geo.err.cron_missing": "The XKeen cron job was not found; it may have been removed already.",
   "cfg.geo.err.cron_nonstandard": "The XKeen cron schedule is non-standard: the panel does not adopt it. Remove the job by hand.",
   "cfg.geo.err.draft_conflict": "The draft was changed in another tab. The fresh version is shown — repeat the action.",

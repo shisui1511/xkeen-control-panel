@@ -26,11 +26,13 @@
   "not_pending",
   "probe_blocked",
   "raw_ref",
+  "remove_failed",
   "schedule_invalid",
   "set_unknown",
   "update_failed",
   "update_unavailable",
   "url_invalid",
+  "write_failed",
   "xkeen_json_invalid",
   "xkeen_missing",
   "xkeen_too_old"
