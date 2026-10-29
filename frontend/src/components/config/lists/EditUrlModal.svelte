@@ -387,7 +387,7 @@
   }
 
   .eu-radio:hover {
-    background: var(--bg-hover);
+    background: var(--hover);
   }
 
   .eu-radio input {

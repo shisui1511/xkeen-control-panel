@@ -393,7 +393,7 @@
   }
 
   .am-radio:hover {
-    background: var(--bg-hover);
+    background: var(--hover);
   }
 
   .am-radio input {

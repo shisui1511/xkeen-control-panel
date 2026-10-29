@@ -296,7 +296,7 @@
   }
 
   .es-radio:hover {
-    background: var(--bg-hover);
+    background: var(--hover);
   }
 
   .es-radio input {
