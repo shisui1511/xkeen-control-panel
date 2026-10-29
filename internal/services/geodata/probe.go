@@ -217,11 +217,12 @@ func probeDo(ctx context.Context, cl *http.Client, method, target, rng string) (
 	}
 	// Повторная проверка адреса в месте запроса: анализ CodeQL не видит защиту
 	// в DialContext клиента. Настоящий запрет от TOCTOU даёт SafeHTTPClient.
-	if u, err := url.Parse(target); err != nil {
+	u, err := url.Parse(target)
+	if err != nil {
 		return nil, err
-	} else if !probeAllowPrivate {
-		ips, lerr := net.DefaultResolver.LookupIP(ctx, "ip", u.Hostname())
-		if lerr == nil {
+	}
+	if !probeAllowPrivate {
+		if ips, lerr := net.LookupIP(u.Hostname()); lerr == nil {
 			for _, ip := range ips {
 				if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
 					return nil, utils.ErrPrivateNetwork
@@ -229,7 +230,8 @@ func probeDo(ctx context.Context, cl *http.Client, method, target, rng string) (
 			}
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, method, target, nil)
+	checked := (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath, RawQuery: u.RawQuery}).String()
+	req, err := http.NewRequestWithContext(ctx, method, checked, nil)
 	if err != nil {
 		return nil, err
 	}
