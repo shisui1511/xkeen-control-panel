@@ -259,8 +259,9 @@ func (s *Service) finishRemoved(file string, names []string) {
 }
 
 // PreviewFinishDelete — предпросмотр правки xkeen.json для «Довести удаление»: у
-// источника нет незавершённого удаления — not_pending. Записи уже нет (или она не
-// нужна) — пустая правка, до и после совпадают.
+// источника нет незавершённого удаления — not_pending. Убираются записи всех имён
+// пары, как в FinishDelete. Записи уже нет (или она не нужна) — пустая правка, до и
+// после совпадают.
 func (s *Service) PreviewFinishDelete(file string) (PreviewView, error) {
 	p, ok := s.pendingDelete(file)
 	if !ok {
@@ -268,11 +269,10 @@ func (s *Service) PreviewFinishDelete(file string) (PreviewView, error) {
 	}
 	names := s.removeNames(p.File)
 	entries, _ := s.entryNames(names)
-	target := p.File
-	if len(entries) > 0 {
-		target = entries[0]
+	if len(entries) == 0 {
+		entries = []string{p.File}
 	}
-	prev, err := s.d.Store.Preview(lists.GeodataOp{Kind: lists.OpRemove, File: target})
+	prev, err := s.d.Store.PreviewRemoveAll(entries)
 	if err != nil {
 		// Записи уже нет: правки нет, показывается файл как есть.
 		if lists.ErrorCode(err) == lists.ErrEntryNotFound.Code && prev.Before != "" {

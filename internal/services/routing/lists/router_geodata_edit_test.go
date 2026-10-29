@@ -381,6 +381,29 @@ func TestRouterGeodataEdit(t *testing.T) {
 		}
 	})
 
+	t.Run("preview remove all", func(t *testing.T) {
+		// Предпросмотр «Довести удаление» показывает удаление обеих записей пары, как
+		// их убирает сама правка; имя без записи пропускается.
+		g, path := rtEditStore(t, tg.WorkDir, twoEntries, true)
+		p, err := g.PreviewRemoveAll([]string{"a.dat", "missing.dat", "c.dat"})
+		if err != nil {
+			t.Fatalf("PreviewRemoveAll: %v", err)
+		}
+		if p.Before != twoEntries || p.Base != ContentBase(twoEntries) || !p.CommentsKept {
+			t.Fatalf("PreviewRemoveAll: before_same=%v base_ok=%v commentsKept=%v", p.Before == twoEntries, p.Base == ContentBase(twoEntries), p.CommentsKept)
+		}
+		if got := rtEntries(t, p.After); len(got) != 1 || got[0].File != "b.dat" {
+			t.Errorf("записи в предпросмотре: %v, ожидалась только b.dat:\n%s", got, p.After)
+		}
+		if rtReadFile(t, path) != twoEntries {
+			t.Fatal("PreviewRemoveAll изменил файл")
+		}
+		p, err = g.PreviewRemoveAll([]string{"missing.dat"})
+		if ErrorCode(err) != "entry_not_found" || p.Before != twoEntries {
+			t.Errorf("PreviewRemoveAll без записей: %v, before_same=%v", err, p.Before == twoEntries)
+		}
+	})
+
 	t.Run("remove without geodata", func(t *testing.T) {
 		g, path := rtEditStore(t, tg.WorkDir, "{\n}\n", true)
 		if err := g.Apply(GeodataOp{Kind: OpRemove, File: "a.dat"}, "", false); ErrorCode(err) != "entry_not_found" {

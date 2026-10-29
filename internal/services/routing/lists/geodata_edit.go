@@ -126,13 +126,46 @@ func (g *GeodataStore) requireConditions(kind string) error {
 	return nil
 }
 
+// PreviewRemoveAll — предпросмотр удаления записей geodata с каждым из имён подряд,
+// как их убирает «Довести удаление» (по одной правке на имя). Имя без записи
+// пропускается; ни одной записи — ErrEntryNotFound с Before и Base файла как есть.
+// CommentsKept — все правки сохранили комментарии.
+func (g *GeodataStore) PreviewRemoveAll(names []string) (GeodataPreviewText, error) {
+	f, err := g.settings.Get(services.XKeenConfigJSON)
+	if err != nil {
+		return GeodataPreviewText{}, err
+	}
+	out := GeodataPreviewText{Before: f.Content, After: f.Content, CommentsKept: true, Base: ContentBase(f.Content)}
+	removed := 0
+	for _, n := range names {
+		p, err := buildText(out.After, GeodataOp{Kind: OpRemove, File: n})
+		if err != nil {
+			if ErrorCode(err) == ErrEntryNotFound.Code {
+				continue
+			}
+			return GeodataPreviewText{}, err
+		}
+		out.After = p.After
+		out.CommentsKept = out.CommentsKept && p.CommentsKept
+		removed++
+	}
+	if removed == 0 {
+		return out, ErrEntryNotFound
+	}
+	return out, nil
+}
+
 // build читает xkeen.json и строит результат правки без проверки окружения.
 func (g *GeodataStore) build(op GeodataOp) (GeodataPreviewText, error) {
 	f, err := g.settings.Get(services.XKeenConfigJSON)
 	if err != nil {
 		return GeodataPreviewText{}, err
 	}
-	before := f.Content
+	return buildText(f.Content, op)
+}
+
+// buildText строит результат правки текста xkeen.json before.
+func buildText(before string, op GeodataOp) (GeodataPreviewText, error) {
 	res := GeodataPreviewText{Before: before, Base: ContentBase(before)}
 	expected, err := decodeJSONC(before)
 	if err != nil {
