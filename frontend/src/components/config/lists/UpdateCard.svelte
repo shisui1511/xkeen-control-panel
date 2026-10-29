@@ -412,7 +412,7 @@
 
   .geo-mono-wrap {
     font-family: var(--font-family-mono);
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-xs);
     overflow-wrap: anywhere;
   }
 

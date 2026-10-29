@@ -213,7 +213,6 @@
     width: 100%;
     min-width: 0;
     font-family: var(--font-family-mono);
-    font-size: var(--font-size-sm);
     overflow-wrap: anywhere;
   }
 

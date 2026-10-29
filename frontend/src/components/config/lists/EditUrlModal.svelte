@@ -329,7 +329,6 @@
   /* Имя файла и ссылка — моноширинным шрифтом, поле на всю ширину */
   .eu-mono :global(.input) {
     font-family: var(--font-family-mono);
-    font-size: var(--font-size-sm);
   }
 
   .eu-check {

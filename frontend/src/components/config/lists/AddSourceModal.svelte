@@ -335,7 +335,6 @@
   /* Ссылка — на всю ширину, моноширинным шрифтом */
   .am-mono :global(.input) {
     font-family: var(--font-family-mono);
-    font-size: var(--font-size-sm);
   }
 
   .am-check {

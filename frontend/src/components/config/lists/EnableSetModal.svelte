@@ -252,7 +252,7 @@
 
   .es-mono {
     font-family: var(--font-family-mono);
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-xs);
     color: var(--fg-primary);
     overflow-wrap: anywhere;
   }
