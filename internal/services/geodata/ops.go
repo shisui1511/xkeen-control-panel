@@ -151,6 +151,13 @@ func hasEntryNamed(entries []lists.GeodataEntry, file string) bool {
 	return false
 }
 
+// anyEntryNamed — в xkeen.json есть запись geodata с таким именем файла, корректная
+// или с пустым адресом (Invalid). Правка адреса и удаление находят запись по имени и
+// чинят или убирают и некорректную.
+func anyEntryNamed(st lists.GeodataStatus, file string) bool {
+	return hasEntryNamed(st.Entries, file) || hasEntryNamed(st.Invalid, file)
+}
+
 // staticCheck — условия, без которых запись невозможна: XKeen установлен и достаточно
 // новый.
 func (s *Service) staticCheck() error {
@@ -362,7 +369,7 @@ func (s *Service) planSetURL(ctx context.Context, op WriteOp, probe bool) (opPla
 	if err != nil {
 		return opPlan{}, err
 	}
-	if !hasEntryNamed(st.Entries, op.File) {
+	if !anyEntryNamed(st, op.File) {
 		return opPlan{}, lists.ErrEntryNotFound
 	}
 	if err := checkURL(op.URL); err != nil {
@@ -399,7 +406,7 @@ func (s *Service) planDedup(op WriteOp) (opPlan, error) {
 	if err != nil {
 		return opPlan{}, err
 	}
-	if !hasEntryNamed(st.Entries, op.File) {
+	if !anyEntryNamed(st, op.File) {
 		return opPlan{}, ErrNotPending
 	}
 	if _, pend := s.pendingFor(op.File); pend {

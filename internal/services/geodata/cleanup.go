@@ -66,7 +66,7 @@ func (s *Service) cleanupPending(ctx context.Context) {
 			// Записи с этой парой нет. Нет и записи с этим именем — убирать нечего
 			// (её убрали вручную), ожидание закрывается без уведомления; есть запись с
 			// другим адресом — файл не трогается.
-			if st, serr := s.d.Store.Status(); serr == nil && !hasEntryNamed(st.Entries, p.File) {
+			if st, serr := s.d.Store.Status(); serr == nil && !anyEntryNamed(st, p.File) {
 				s.mu.Lock()
 				s.dropPendingLocked(p.File)
 				delete(s.st.IncludeStuck, p.File)

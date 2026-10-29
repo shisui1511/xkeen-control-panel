@@ -462,6 +462,40 @@ func TestRouterGeodataOps(t *testing.T) {
 		}
 	})
 
+	t.Run("set_url_invalid", func(t *testing.T) {
+		// Запись с пустым адресом (Invalid) чинится сменой адреса: строка источника
+		// предлагает «Изменить адрес» и для неё.
+		needJQ(t)
+		const bad = "xcp-ops-invalid.dat"
+		raw := read()
+		withBad := strings.Replace(raw, `"geodata": [`, `"geodata": [`+"\n        { \"file\": \""+bad+"\", \"url\": \"\" },", 1)
+		if withBad == raw {
+			t.Fatalf("в xkeen.json теста нет массива geodata:\n%s", raw)
+		}
+		if err := os.WriteFile(cfgPath, []byte(withBad), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		st, err := store.Status()
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		if !hasEntryNamed(st.Invalid, bad) {
+			t.Fatalf("запись %s не попала в Invalid: %+v", bad, st.Invalid)
+		}
+		if err := svc.Write(ctx, WriteOp{Kind: WriteSetURL, File: bad, URL: urlB}, "", false, false); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		if !rtOpsEntry(t, store, bad, urlB) {
+			t.Fatalf("запись %s не стала корректной с адресом %s:\n%s", bad, urlB, read())
+		}
+		if st, _ := store.Status(); hasEntryNamed(st.Invalid, bad) {
+			t.Errorf("запись %s осталась в Invalid", bad)
+		}
+		if err := store.Apply(lists.GeodataOp{Kind: lists.OpRemove, File: bad}, "", false); err != nil {
+			t.Errorf("уборка записи %s: %v", bad, err)
+		}
+	})
+
 	t.Run("gh_proxy", func(t *testing.T) {
 		if err := svc.Write(ctx, WriteOp{Kind: WriteGhProxy, Value: "https://example.org"}, "", false, false); err != nil {
 			t.Fatalf("Write(proxy): %v", err)

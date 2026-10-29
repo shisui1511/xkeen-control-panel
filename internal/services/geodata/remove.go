@@ -170,7 +170,7 @@ func (s *Service) entryNames(names []string) ([]string, string) {
 	}
 	var out []string
 	for _, n := range names {
-		if hasEntryNamed(st.Entries, n) {
+		if anyEntryNamed(st, n) {
 			out = append(out, n)
 		}
 	}
