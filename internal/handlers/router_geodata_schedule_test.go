@@ -279,8 +279,12 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 	var applyDur time.Duration
 	for attempt := 1; attempt <= 2; attempt++ {
 		e.rtGeoWaitIdle(rtGeoRunLimit)
+		// schedule.now в снимке — время роутера внутри запроса: соответствие часов ПК берётся
+		// по середине запроса. Конец запроса давал сдвиг на всю его длительность, а после
+		// «-ug» снимок строится десятки секунд, и «Применить» стартовало уже после слота.
+		reqStart := time.Now()
 		snap := e.rtGeoSnapshot()
-		base := time.Now()
+		base := reqStart.Add(time.Since(reqStart) / 2)
 		sch := rtGeoSchedOf(t, snap)
 		rtGeoSkipWindowAt(t, sch.now, 15*time.Minute)
 		lastAt0 := rtGeoLastAt(t, snap)
