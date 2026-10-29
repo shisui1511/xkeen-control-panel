@@ -959,6 +959,7 @@ func (s *Service) checkOutside() {
 		s.st.Sigs[name] = cs.sig
 		dirty = true
 	}
+	var stale []string
 	if quiet {
 		for name := range s.st.Sigs {
 			if _, ok := cur[name]; !ok {
@@ -967,9 +968,94 @@ func (s *Service) checkOutside() {
 				dirty = true
 			}
 		}
+		stale = staleResults(s.st, cur)
 	}
 	s.mu.Unlock()
+	if len(stale) > 0 && s.dropStaleResults(stale) {
+		dirty = true
+	}
 	if dirty {
 		s.changed()
 	}
+}
+
+// staleResults — имена из Results и Hashes, файла которых нет в каталоге dat (ни под
+// этим именем, ни под вторым именем стандартного набора). Вызывается под Service.mu.
+func staleResults(st State, cur map[string]fileSig) []string {
+	present := func(name string) bool {
+		if _, ok := cur[name]; ok {
+			return true
+		}
+		for _, set := range StandardSets {
+			if set.Alias == "" {
+				continue
+			}
+			if set.File == name {
+				if _, ok := cur[set.Alias]; ok {
+					return true
+				}
+			}
+			if set.Alias == name {
+				if _, ok := cur[set.File]; ok {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	seen := map[string]bool{}
+	var out []string
+	add := func(name string) {
+		if !seen[name] && !present(name) {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	for name := range st.Results {
+		add(name)
+	}
+	for name := range st.Hashes {
+		add(name)
+	}
+	return out
+}
+
+// dropStaleResults убирает итог и хеш файлов, которые пропали из каталога вне панели,
+// если и записи geodata с таким именем нет: запись без файла — законное «ждёт
+// загрузки», её итог (например failed_new) остаётся. Имя сверяется ещё раз с каталогом
+// вместе с именами-симлинками пар. Каталог или xkeen.json не прочитаны — ничего не
+// трогает. true — состояние изменилось.
+func (s *Service) dropStaleResults(names []string) bool {
+	files, err := s.d.Index.Files()
+	if err != nil {
+		return false
+	}
+	onDisk := map[string]bool{}
+	for _, f := range files {
+		onDisk[f.Name] = true
+		for _, a := range f.Aliases {
+			onDisk[a] = true
+		}
+	}
+	st, err := s.d.Store.Status()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for _, name := range names {
+		if onDisk[name] || anyEntryNamed(st, name) {
+			continue
+		}
+		if _, ok := s.st.Results[name]; ok {
+			delete(s.st.Results, name)
+			changed = true
+		}
+		if _, ok := s.st.Hashes[name]; ok {
+			delete(s.st.Hashes, name)
+			changed = true
+		}
+	}
+	return changed
 }

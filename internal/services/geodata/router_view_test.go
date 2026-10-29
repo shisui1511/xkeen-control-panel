@@ -469,3 +469,90 @@ func TestRouterGeodataView(t *testing.T) {
 		t.Errorf("у нетронутого файла %s отметка outside: %s", stdName, r.Outside)
 	}
 }
+
+// TestRouterGeodataOutsideGone — файл убрали из каталога dat вне панели: итог и хеш
+// файла без записи geodata уходят вместе с уведомлением geodata_update:<файл>, итог
+// записи, файл которой ещё не скачан, остаётся.
+func TestRouterGeodataOutsideGone(t *testing.T) {
+	tg := routertest.Current(t)
+	dir := rtGeoTempDir(t, tg.WorkDir)
+	datDir := filepath.Join(dir, "dat")
+	xkDir := filepath.Join(dir, "xkeen")
+	for _, d := range []string{datDir, xkDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const gone, waiting = "xcp-outside-gone.dat", "xcp-outside-waiting.dat"
+	cfg := `{
+  "xkeen": {
+    "xray": {
+      "geodata": [
+        { "file": "` + waiting + `", "url": "http://127.0.0.1:9/waiting.dat" }
+      ]
+    }
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(xkDir, "xkeen.json"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gonePath := filepath.Join(datDir, gone)
+	if err := os.WriteFile(gonePath, []byte("xcp router test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	layer := rtGeoLayer(t, dir)
+	svc := rtGeoService(t, layer, rtGeoStore(t, xkDir), lists.NewIndex(datDir), dir)
+	svc.Start()
+
+	svc.mu.Lock()
+	svc.st.Results[gone] = FileResult{Status: StatusFailed, Reason: ReasonNetwork, At: time.Now()}
+	svc.st.Hashes[gone] = "0000"
+	svc.st.Results[waiting] = FileResult{Status: StatusFailed, Reason: "failed_new", At: time.Now()}
+	svc.mu.Unlock()
+	svc.changed()
+
+	hasNotice := func(id string) bool {
+		for _, n := range layer.Snapshot().Notices {
+			if n.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for !hasNotice("geodata_update:" + gone) {
+		if time.Now().After(deadline) {
+			t.Fatalf("нет уведомления geodata_update:%s до удаления файла", gone)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if err := os.Remove(gonePath); err != nil {
+		t.Fatal(err)
+	}
+	svc.checkOutside()
+
+	svc.mu.Lock()
+	_, resGone := svc.st.Results[gone]
+	_, hashGone := svc.st.Hashes[gone]
+	_, resWaiting := svc.st.Results[waiting]
+	svc.mu.Unlock()
+	if resGone || hashGone {
+		t.Fatalf("итог или хеш пропавшего файла %s остались: result=%v hash=%v", gone, resGone, hashGone)
+	}
+	if !resWaiting {
+		t.Fatalf("итог записи %s без файла убран", waiting)
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for hasNotice("geodata_update:" + gone) {
+		if time.Now().After(deadline) {
+			t.Fatalf("уведомление geodata_update:%s осталось после пропажи файла", gone)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !hasNotice("geodata_update:" + waiting) {
+		t.Errorf("пропало уведомление geodata_update:%s записи без файла", waiting)
+	}
+}
