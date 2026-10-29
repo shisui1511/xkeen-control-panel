@@ -23,12 +23,17 @@
 # запущен и «xcp -v» совпал, failure — нет; при сбое связи (код цели 3) и сбое подготовки
 # стенда (код цели 2: нет init-скрипта, setup.sh --init-script, scp) статуса нет.
 # Установка из run.sh статус установки не ставит: там статус смоука публикует run.sh.
+#
+# Уборка build/ (scripts/tidy-lib.sh): --release оставляет в кэше релизов 3 новейших тега и
+# разворачиваемый, одиночный запуск ротирует отчёты; сборки ветки ротирует make router-<арх>.
 
 set -eu
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib.sh"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/../tidy-lib.sh"
 
 BIN_PATH=/opt/sbin/xcp
 INIT_SCRIPT=/opt/etc/init.d/S99xcp
@@ -137,6 +142,8 @@ if [ "$RELEASE" = 1 ]; then
       exit 1
     fi
   done
+  # Разворачиваемый тег уже в кэше и защищён; сбой ротации установку не прерывает.
+  ( tidy_rotate_releases "$(rt_repo_root)" "$RELEASE_TAG" ) || echo "deploy: предупреждение: ротация кэша релизов не удалась" >&2
   bin_for() {
     printf '%s\n' "$REL_DIR/xcp_${RELEASE_TAG}_$1"
   }
@@ -337,5 +344,10 @@ if [ "$STANDALONE" = 1 ] && [ "$RELEASE" = 1 ]; then
       echo "deploy[$t]: предупреждение: статус установки не отправлен (ошибка отправки)" >&2
     fi
   done
+fi
+# Одиночный запуск создал свой отчёт и держит блокировку rt_lock; при родительском run.sh
+# отчёты ротирует он. Сбой ротации код выхода не меняет.
+if [ "$STANDALONE" = 1 ]; then
+  ( tidy_rotate_reports "$(rt_repo_root)" ) || echo "deploy: предупреждение: ротация отчётов не удалась" >&2
 fi
 exit "$OVERALL"

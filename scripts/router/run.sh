@@ -43,7 +43,8 @@
 #                все цели снова отвечают (reboot-reachable-end). Матрица ядер не применяется.
 #
 # Порядок: check-known.sh (метки известных падений) -> цели из локального конфига ->
-# блокировка на весь прогон -> отчёт -> проверка связи -> deploy.sh -> по целям
+# блокировка на весь прогон -> отчёт -> ротация build/router (tidy-lib.sh; сборки ротирует
+# make router-<арх>) -> проверка связи -> deploy.sh -> по целям
 # параллельно [preflight -> снимок -> ветви ядер (переключение, смоук, Go-тесты, Playwright)
 # -> восстановление + сверка] -> report.md и summary.md в build/router/<время>-<sha>/ (ссылка build/router/last).
 # Восстановление стоит в trap подпроцесса цели сразу после снимка: оно выполняется
@@ -96,6 +97,8 @@ set -eu
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib.sh"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/../tidy-lib.sh"
 
 SUITE=${1:-}
 case "$SUITE" in
@@ -170,6 +173,12 @@ rt_load_targets
 rt_lock
 rt_report_init
 echo "router-test: отчёт $RT_REPORT"
+
+# Ротация отчётов build/router стоит здесь, а не в конце: у run.sh много выходов (130, 1, код
+# сессии, _finish в reboot), а hold_lock перекрывает EXIT-trap. Блокировка уже взята, текущий
+# отчёт (и корень сессии при RT_REPORT_DIR) защищён; возраст считается по времени, поэтому
+# результат тот же. Подоболочка и || не дают сбою ротации изменить ход и код прогона.
+( tidy_rotate_reports "$(rt_repo_root)" ) || echo "router-test: предупреждение: ротация отчётов не удалась (прогон продолжается)" >&2
 
 # Удержание блокировки после прогона для ручной проверки (RT_HOLD_MINUTES).
 hold_lock() {
