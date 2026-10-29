@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { t, tp } from '../../../i18n';
-  import { showToast } from '../../../stores';
+  import { showToast, editorOpenRequest } from '../../../stores';
   import Modal from '../../Modal.svelte';
   import Button from '../../Button.svelte';
   import Select from '../../Select.svelte';
@@ -90,6 +90,11 @@
 
   const lists = $derived(impact?.lists ?? []);
   const foreign = $derived(impact?.foreign ?? []);
+  // Файл для «Открыть в Редакторе»: первая найденная строка ссылки, иначе первый
+  // непрочитанный файл. Редактор забирает запрос при открытии страницы
+  const editorTarget = $derived(
+    foreign.find((f) => f.line > 0 && f.editor)?.editor ?? foreign.find((f) => f.editor)?.editor
+  );
   const raw = $derived(impact?.raw ?? []);
   const blocked = $derived(foreign.length > 0 || raw.length > 0);
   const loading = $derived(impact === null);
@@ -306,7 +311,14 @@
                     $t('cfg.geo.del_foreign_unreadable') +
                     ')'}{/if}{i < foreign.length - 1 ? ', ' : ''}{/each}{foreignParts[1] ?? ''}
             </span>
-            <a class="dm-link" href="#/editor" data-testid="geo-delete-editor">
+            <a
+              class="dm-link"
+              href="#/editor"
+              data-testid="geo-delete-editor"
+              onclick={() => {
+                if (editorTarget) editorOpenRequest.set(editorTarget);
+              }}
+            >
               {$t('cfg.geo.open_editor')}
             </a>
           </div>
