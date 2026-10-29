@@ -272,6 +272,10 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 	e.rtGeoNodeCleanup()
 	link := rtLinkText(t, "vless_ws")
 
+	// Опережение слота началом «Применить». На Mihomo применение (горячая подмена) длится
+	// около 2 с и при опережении 3 с кончается до слота; повтор берёт половину
+	// измеренной длительности, чтобы слот пришёлся на середину применения.
+	lead := 3 * time.Second
 	var applyDur time.Duration
 	for attempt := 1; attempt <= 2; attempt++ {
 		e.rtGeoWaitIdle(rtGeoRunLimit)
@@ -286,7 +290,7 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 		e.rtGeoSetSchedule(true, -1, slot.Hour(), slot.Minute())
 		e.rtGeoToggleNode(link)
 
-		if wait := time.Until(slotLocal.Add(-3 * time.Second)); wait > 0 {
+		if wait := time.Until(slotLocal.Add(-lead)); wait > 0 {
 			time.Sleep(wait)
 		}
 		applyStart := time.Now()
@@ -338,7 +342,13 @@ func TestRouterGeodataScheduleWaitsApply(t *testing.T) {
 			if attempt == 2 {
 				t.Fatalf("waiting_apply не наблюдался за две попытки: применение заканчивалось раньше слота (длительность последнего около %.1f с, запуск -ug по слоту ушёл без ожидания)", applyDur.Seconds())
 			}
-			t.Logf("применение закончилось раньше слота: повтор со сдвигом слота")
+			if applyDur > 0 {
+				lead = applyDur / 2
+				if lead < 500*time.Millisecond {
+					lead = 500 * time.Millisecond
+				}
+			}
+			t.Logf("применение закончилось раньше слота: повтор со сдвигом слота, опережение %.1f с", lead.Seconds())
 			continue
 		}
 		// Запуск стартовал после слота и после конца применения: его время не раньше
