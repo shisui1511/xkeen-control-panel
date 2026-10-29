@@ -27,9 +27,8 @@ GEMINI.md
 .gemini
 graphify-out
 # Node.js files (frontend build)
-node_modules/
+node_modules
 frontend/dist/
-frontend/node_modules/
 coverage.out
 bin/golangci-lint
 
