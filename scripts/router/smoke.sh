@@ -135,7 +135,7 @@ cd "$(rt_repo_root)"
 ROUTERS=$ID
 export ROUTERS
 rt_load_targets
-[ -n "${RT_REPORT:-}" ] || rt_report_init
+rt_report_use
 mkdir -p "$RT_REPORT/$ID"
 
 ARCH=$(rt_get "$ID" ARCH)

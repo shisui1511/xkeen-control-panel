@@ -13,7 +13,8 @@
 #   XCP_TARGETS_FILE  другой файл целей (иначе локальный файл основной копии)
 #   RT_LOCK_WAIT      сколько секунд ждать очередь на роутеры (по умолчанию 3600)
 #   RT_LOCK_HELD      1 — блокировка уже взята родительским скриптом
-#   RT_REPORT         каталог отчёта текущего прогона (создаёт rt_report_init)
+#   RT_REPORT         каталог отчёта текущего прогона (создаёт rt_report_init; этапы принимают его
+#                     через rt_report_use: относительный — от корня рабочей копии, вне build/router — код 2)
 #   RT_REPORT_DIR     абсолютный путь внутри <корень>/build/router/: отчёт создаётся в нём,
 #                     ссылка build/router/last не переставляется (вложенные прогоны сессии);
 #                     путь вне build/router — ошибка и код 2
@@ -174,6 +175,37 @@ rt_report_init() {
     echo "dirty=$_dirty_flag"
     echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } >"$RT_REPORT/meta"
+  export RT_REPORT
+}
+
+# Каталог отчёта этапа: принимает RT_REPORT родителя или агента, иначе создаёт новый.
+# Относительный путь считается от корня рабочей копии (а не от текущего каталога этапа,
+# например frontend/); путь вне build/router или с компонентами «..» и «.» — код 2.
+rt_report_use() {
+  if [ -z "${RT_REPORT:-}" ]; then
+    rt_report_init
+    return $?
+  fi
+  _root=$(rt_repo_root)
+  RT_REPORT=${RT_REPORT%/}
+  case "$RT_REPORT" in
+    /*) ;;
+    *) RT_REPORT="$_root/$RT_REPORT" ;;
+  esac
+  case "$RT_REPORT" in
+    "$_root"/build/router/?*) ;;
+    *)
+      echo "RT_REPORT вне build/router: $RT_REPORT" >&2
+      return 2
+      ;;
+  esac
+  case "/${RT_REPORT#"$_root"/build/router/}/" in
+    */../* | */./*)
+      echo "RT_REPORT вне build/router: $RT_REPORT" >&2
+      return 2
+      ;;
+  esac
+  mkdir -p "$RT_REPORT"
   export RT_REPORT
 }
 
