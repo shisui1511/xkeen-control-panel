@@ -342,6 +342,9 @@ func (s *Service) loop() {
 func (s *Service) tick() {
 	s.checkOutside()
 	s.syncCron(false)
+	if s.pruneCleaned() {
+		s.changed()
+	}
 	if !s.d.Layer.Enabled() || !s.readyPending() {
 		return
 	}
@@ -351,6 +354,23 @@ func (s *Service) tick() {
 	}
 	defer release()
 	s.cleanupPending(s.ctx)
+}
+
+// pruneCleaned убирает отметки «запись убрана» старше cleanedNoticeTTL: уведомление
+// geodata_cleanup снимается по сроку и без других правок состояния. true — отметки
+// убраны, состояние нужно записать и пересобрать уведомления.
+func (s *Service) pruneCleaned() bool {
+	now := s.d.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pruned := false
+	for file, at := range s.st.Cleaned {
+		if now.Sub(at) >= cleanedNoticeTTL {
+			delete(s.st.Cleaned, file)
+			pruned = true
+		}
+	}
+	return pruned
 }
 
 // readyPending — есть ли ожидание включения, готовое к уборке: его файл скачан
