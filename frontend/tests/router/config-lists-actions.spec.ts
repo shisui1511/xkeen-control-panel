@@ -1,5 +1,5 @@
 // e2e-pages: config/lists
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { RT, T } from './lib/env';
 import { api, layerFlag, resetDraft, withPanel } from './lib/nodes-api';
@@ -331,11 +331,7 @@ test.describe('загрузка', () => {
     await expect(submit).toBeEnabled({ timeout: T.action });
     await submit.click();
     // в xkeen.json есть комментарии: запись просит подтвердить их потерю
-    const lost = page.getByRole('button', {
-      name: /Записать без комментариев|Write without comments/
-    });
-    if (await lost.isVisible({ timeout: T.action }).catch(() => false)) await lost.click();
-    await expect(modal).toBeHidden({ timeout: T.action });
+    await settleWrite(page, modal);
 
     await expect
       .poll(async () => (await snapshot(page)).download.gh_proxy, { timeout: T.action })
@@ -568,11 +564,7 @@ test.describe('включение набора', () => {
     await expect(confirm).toBeEnabled({ timeout: T.action });
     await confirm.click();
     // в xkeen.json есть комментарии: запись просит подтвердить их потерю
-    const lost = page.getByRole('button', {
-      name: /Записать без комментариев|Write without comments/
-    });
-    if (await lost.isVisible({ timeout: T.action }).catch(() => false)) await lost.click();
-    await expect(modal).toBeHidden({ timeout: T.network + T.action });
+    await settleWrite(page, modal);
 
     // файла ещё нет: на строке «ждёт скачивания», переключатель включён
     await expect(page.getByTestId(`geo-source-pending-${target.id}`)).toBeVisible({
@@ -740,11 +732,22 @@ async function catalogUrl(page: Page): Promise<string> {
 const BLOCKED_URL = 'ftp://example.com/xcp-own.dat';
 
 /** Просит подтвердить потерю комментариев в xkeen.json, если запись их стирает. */
-async function acceptCommentLoss(page: Page): Promise<void> {
+async function settleWrite(page: Page, modal: Locator): Promise<void> {
+  // запись xkeen.json может идти десятки секунд (fsync на USB-диске после записи dat):
+  // просьба подтвердить потерю комментариев приходит только после ответа записи
   const lost = page.getByRole('button', {
     name: /Записать без комментариев|Write without comments/
   });
-  if (await lost.isVisible({ timeout: T.action }).catch(() => false)) await lost.click();
+  const deadline = Date.now() + T.write;
+  while (Date.now() < deadline) {
+    if (await lost.isVisible().catch(() => false)) {
+      await lost.click();
+      break;
+    }
+    if (!(await modal.isVisible().catch(() => false))) return;
+    await page.waitForTimeout(250);
+  }
+  await expect(modal).toBeHidden({ timeout: T.write });
 }
 
 test.describe('свой источник', () => {
@@ -850,8 +853,7 @@ test.describe('свой источник', () => {
     await modal.getByTestId('geo-add-update-later').check();
     await expect(submit).toBeEnabled({ timeout: T.action });
     await submit.click();
-    await acceptCommentLoss(page);
-    await expect(modal).toBeHidden({ timeout: T.action });
+    await settleWrite(page, modal);
 
     // в группе «Свои» появилась строка; файла ещё нет, его скачает XKeen по расписанию
     const row = page.getByTestId('geo-group-own').getByTestId(`geo-source-${OWN_FILE}`);
@@ -941,8 +943,7 @@ test.describe('свой источник', () => {
     await modal.getByTestId('geo-url-update-later').check();
     await expect(submit).toBeEnabled({ timeout: T.action });
     await submit.click();
-    await acceptCommentLoss(page);
-    await expect(modal).toBeHidden({ timeout: T.action });
+    await settleWrite(page, modal);
 
     // у записи теперь ссылка каталога
     await expect
