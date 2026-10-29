@@ -111,10 +111,31 @@ tidy_safe_rm() {
       esac
       ;;
   esac
+  # обрывки отчётов вне build/router и корневые хвосты (точный список имён)
+  case "$_tls_rel" in
+    frontend/build | frontend/build/?*) _tls_ok=1 ;;
+    frontend/playwright-report | frontend/test-results | frontend/test-results-router | \
+      frontend/test-results-router.json)
+      _tls_ok=1
+      ;;
+    xcp | *.test | *.out | node_modules | commands.md | .go)
+      case "$_tls_rel" in */*) ;; *) _tls_ok=1 ;; esac
+      ;;
+  esac
   if [ "$_tls_ok" != 1 ]; then
     _tl_refuse "$_tls_rel" "не относится к уборке"
     return 1
   fi
+  # вне build/ отслеживаемое git не удаляется никогда
+  case "$_tls_rel" in
+    build/*) ;;
+    *)
+      if [ -n "$(git -C "$_tls_root" ls-files -- "$_tls_rel" 2>/dev/null)" ]; then
+        _tl_refuse "$_tls_rel" "отслеживается git"
+        return 1
+      fi
+      ;;
+  esac
   # родитель должен лежать внутри корня и после разыменования (ссылка на чужой каталог)
   _tls_pc=0
   _tl_check_parent "$_tls_root" "$_tls_p" || _tls_pc=$?
@@ -128,6 +149,10 @@ tidy_safe_rm() {
   esac
   if [ ! -e "$_tls_p" ] && [ ! -L "$_tls_p" ]; then
     return 0
+  fi
+  if [ "$_tls_rel" = .go ]; then
+    # кэш модулей Go хранит каталоги только для чтения: без chmod rm -rf падает
+    chmod -R u+w -- "$_tls_p" 2>/dev/null || true
   fi
   rm -rf -- "$_tls_p"
 }
