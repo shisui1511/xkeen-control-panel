@@ -116,13 +116,11 @@ tidy_safe_rm() {
     return 1
   fi
   # родитель должен лежать внутри корня и после разыменования (ссылка на чужой каталог)
-  _tls_rr=$(cd "$_tls_root" 2>/dev/null && pwd -P) || {
-    _tl_refuse "$_tls_rel" "корень недоступен"
-    return 1
-  }
-  _tls_par=$(cd "$(dirname "$_tls_p")" 2>/dev/null && pwd -P) || return 0
-  case "$_tls_par" in
-    "$_tls_rr" | "$_tls_rr"/*) ;;
+  _tls_pc=0
+  _tl_check_parent "$_tls_root" "$_tls_p" || _tls_pc=$?
+  case "$_tls_pc" in
+    0) ;;
+    2) return 0 ;;
     *)
       _tl_refuse "$_tls_rel" "каталог выходит за корень через ссылку"
       return 1
@@ -132,6 +130,17 @@ tidy_safe_rm() {
     return 0
   fi
   rm -rf -- "$_tls_p"
+}
+
+# Родитель пути после разыменования лежит внутри корня: _tl_check_parent <корень> <путь>.
+# Код 0 — да; 1 — нет; 2 — родителя не существует (удалять нечего).
+_tl_check_parent() {
+  _tlc_rr=$(cd "$1" 2>/dev/null && pwd -P) || return 1
+  _tlc_par=$(cd "$(dirname "$2")" 2>/dev/null && pwd -P) || return 2
+  case "$_tlc_par" in
+    "$_tlc_rr" | "$_tlc_rr"/*) return 0 ;;
+  esac
+  return 1
 }
 
 # Записи rm для сборок build/xcp_v*_<арх>: кроме XCP_TIDY_BUILDS новейших на архитектуру.
@@ -200,15 +209,367 @@ tidy_exec() {
   return "$_tlx_rc"
 }
 
-# Одна операция rm/thin: _tl_apply <действие> <корень> <категория> <путь>
+# Одна операция rm/thin над путём. Для корня группы отчёта (имя = ключ) операция
+# применяется и ко всем вложенным <ключ>-NN-*: _tl_apply <действие> <корень> <категория> <путь>
 _tl_apply() {
+  _tla_rc=0
+  _tla_name=$(basename "$4")
+  if [ "$3" = "отчёты" ] && [ "$(tidy_report_key "$_tla_name")" = "$_tla_name" ]; then
+    _tla_list=$(mktemp)
+    _tl_members "$(dirname "$4")" "$_tla_name" >"$_tla_list"
+    while IFS= read -r _tla_m; do
+      _tl_apply1 "$1" "$2" "$_tla_m" || _tla_rc=1
+    done <"$_tla_list"
+    rm -f "$_tla_list"
+  else
+    _tl_apply1 "$1" "$2" "$4" || _tla_rc=1
+  fi
+  return "$_tla_rc"
+}
+
+_tl_apply1() { # <действие> <корень> <путь>
   case "$1" in
-    rm) tidy_safe_rm "$2" "$4" ;;
+    rm) tidy_safe_rm "$2" "$3" ;;
+    thin) tidy_thin "$2" "$3" ;;
     *) return 1 ;;
   esac
 }
 
-# Ротация сборок: план и исполнение для скриптов стенда (без du).
+# --- отчёты ---------------------------------------------------------------------------
+
+_TL_KEY_RE='[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}(-dirty)?'
+
+# Ключ группы отчёта: <ts>-<sha>[-dirty] из имени каталога (корня или вложенного
+# <ключ>-NN-<проход>); не отчёт — ничего.
+tidy_report_key() {
+  printf '%s\n' "$1" | sed -nE 's/^([0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}(-dirty)?)(-[0-9]{2}-.+)?$/\1/p'
+}
+
+# Существующие члены группы: корень <ключ> и вложенные <ключ>-NN-*: _tl_members <каталог> <ключ>
+_tl_members() {
+  for _tlm_m in "$1/$2" "$1/$2"-[0-9][0-9]-*; do
+    if [ -e "$_tlm_m" ] || [ -L "$_tlm_m" ]; then
+      printf '%s\n' "$_tlm_m"
+    fi
+  done
+}
+
+# find по «тяжёлым» файлам каталога: всё, кроме сводок; сводка крупнее
+# XCP_TIDY_LIGHT_MAX_KB тоже тяжёлая. Файлы с cookie и CSRF (state.json*, .go-cookies,
+# .go-session.env, .cookies) вне списка сводок, значит тяжёлые.
+# _tl_find_heavy <каталог> <действие find…>
+_tl_find_heavy() {
+  _tlh_d=$1
+  shift
+  find "$_tlh_d" -type f \( ! \( -name meta -o -name report.md -o -name summary.md \
+    -o -name select.txt -o -name plan.txt -o -name version -o -name session.json \
+    -o -name spec.json -o -name session.log -o -name reboot-order -o -name RECOVERED.txt \
+    -o -name core -o -name core.detected -o -name xcp_version -o -name branch.md \
+    -o -name stand-evidence.txt -o -name '*.tsv' -o -name '*.rc' \) \
+    -o -size +"${XCP_TIDY_LIGHT_MAX_KB:-512}"k \) "$@"
+}
+
+# Снимает с каталога отчёта (верхнего уровня build/router, имя отчёта или старого формата)
+# всё тяжёлое и пустые каталоги. tidy_thin <корень> <каталог>
+tidy_thin() {
+  _tlt_root=$1
+  _tlt_d=${2%/}
+  case "$_tlt_d" in
+    "$_tlt_root"/build/router/?*) ;;
+    *)
+      _tl_refuse "$_tlt_d" "утончать можно только отчёты в build/router"
+      return 1
+      ;;
+  esac
+  _tlt_n=${_tlt_d#"$_tlt_root"/build/router/}
+  case "$_tlt_n" in
+    */* | bin | release | last | session-last | . | ..)
+      _tl_refuse "build/router/$_tlt_n" "не отчёт"
+      return 1
+      ;;
+  esac
+  if [ ! -d "$_tlt_d" ] || [ -L "$_tlt_d" ]; then
+    _tl_refuse "build/router/$_tlt_n" "не каталог"
+    return 1
+  fi
+  _tlt_pc=0
+  _tl_check_parent "$_tlt_root" "$_tlt_d" || _tlt_pc=$?
+  if [ "$_tlt_pc" != 0 ]; then
+    _tl_refuse "build/router/$_tlt_n" "каталог выходит за корень через ссылку"
+    return 1
+  fi
+  _tl_find_heavy "$_tlt_d" -exec rm -f {} +
+  find "$_tlt_d" -depth -mindepth 1 -type d -empty -delete
+}
+
+# Запись плана для одного пути: _tl_emit1 <действие> <категория> <путь> <примечание> [<КиБ>]
+_tl_emit1() {
+  _tl1_k=${5:-}
+  if [ -z "$_tl1_k" ]; then
+    _tl1_k=0
+    if [ "${TIDY_SIZES:-0}" = 1 ]; then
+      _tl1_k=$(du -sk -- "$3" 2>/dev/null | awk '{ print $1 }')
+    fi
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "${_tl1_k:-0}" "$4"
+}
+
+# Размер группы (КиБ): _tl_group_kb <каталог> <ключ> [heavy]; heavy — только тяжёлое.
+_tl_group_kb() {
+  if [ "${TIDY_SIZES:-0}" != 1 ]; then
+    echo 0
+    return 0
+  fi
+  _tlg_list=$(mktemp)
+  _tl_members "$1" "$2" >"$_tlg_list"
+  if [ "${3:-}" = heavy ]; then
+    while IFS= read -r _tlg_m; do
+      if [ -d "$_tlg_m" ] && [ ! -L "$_tlg_m" ]; then
+        _tl_find_heavy "$_tlg_m" -exec du -k {} +
+      fi
+    done <"$_tlg_list" | awk '{ s += $1 } END { print s + 0 }'
+  elif [ -s "$_tlg_list" ]; then
+    xargs -d '\n' du -sk -- <"$_tlg_list" 2>/dev/null | awk '{ s += $1 } END { print s + 0 }'
+  else
+    echo 0
+  fi
+  rm -f "$_tlg_list"
+}
+
+# В группе есть тяжёлые файлы (код 0) или нет (1): _tl_group_has_heavy <каталог> <ключ>
+_tl_group_has_heavy() {
+  _tlq_list=$(mktemp)
+  _tlq_r=1
+  _tl_members "$1" "$2" >"$_tlq_list"
+  while IFS= read -r _tlq_m; do
+    if [ -d "$_tlq_m" ] && [ ! -L "$_tlq_m" ] && [ -n "$(_tl_find_heavy "$_tlq_m" -print -quit)" ]; then
+      _tlq_r=0
+      break
+    fi
+  done <"$_tlq_list"
+  rm -f "$_tlq_list"
+  return "$_tlq_r"
+}
+
+# Защищённые ключи групп отчётов: строки <ключ><TAB><причина>.
+# Цели ссылок last и session-last, текущий прогон (RT_REPORT, RT_REPORT_DIR),
+# ссылки из pending todo основной копии, XCP_TIDY_REPORTS_KEEP новейших групп.
+tidy_protected_keys() {
+  _tlp_root=$1
+  _tlp_rd=$_tlp_root/build/router
+  for _tlp_l in last session-last; do
+    if [ -L "$_tlp_rd/$_tlp_l" ]; then
+      _tlp_k=$(tidy_report_key "$(basename "$(readlink "$_tlp_rd/$_tlp_l")")")
+      if [ -n "$_tlp_k" ]; then
+        printf '%s\tцель %s\n' "$_tlp_k" "$_tlp_l"
+      fi
+    fi
+  done
+  if [ -d "$_tlp_rd" ]; then
+    _tlp_rr=$(cd "$_tlp_rd" && pwd -P)
+    for _tlp_v in "${RT_REPORT:-}" "${RT_REPORT_DIR:-}"; do
+      [ -n "$_tlp_v" ] || continue
+      case "$_tlp_v" in
+        /*) ;;
+        *) _tlp_v=$_tlp_root/$_tlp_v ;;
+      esac
+      _tlp_d=$(cd "$_tlp_v" 2>/dev/null && pwd -P) || continue
+      case "$_tlp_d" in
+        "$_tlp_rr"/?*)
+          _tlp_rel=${_tlp_d#"$_tlp_rr"/}
+          _tlp_k=$(tidy_report_key "${_tlp_rel%%/*}")
+          if [ -n "$_tlp_k" ]; then
+            printf '%s\tтекущий прогон\n' "$_tlp_k"
+          fi
+          ;;
+      esac
+    done
+  fi
+  _tlp_td=$(rt_main_root)/.planning/todos/pending
+  if [ -d "$_tlp_td" ]; then
+    grep -rHEo --include='*.md' "$_TL_KEY_RE" "$_tlp_td" 2>/dev/null |
+      sed -E "s#^.*/([^/:]*)\\.md:(.*)\$#\\2${_TL_TAB}ссылка из todo \\1#" || true
+  fi
+  if [ -d "$_tlp_rd" ]; then
+    LC_ALL=C ls -1A "$_tlp_rd" 2>/dev/null |
+      sed -nE "s/^(${_TL_KEY_RE})(-[0-9]{2}-.+)?\$/\\1/p" |
+      LC_ALL=C sort -u | tail -n "${XCP_TIDY_REPORTS_KEEP:-10}" |
+      awk -v n="${XCP_TIDY_REPORTS_KEEP:-10}" '{ print $0 "\t" n " новейших" }'
+  fi
+}
+
+# Записи плана для отчётов (категория «отчёты») по группам <ключ> + <ключ>-NN-*.
+# Защищённая группа старше тяжёлой отсечки — одна запись skip с причиной; незащищённая
+# старше XCP_TIDY_REPORT_LIGHT_DAYS — rm целиком; старше XCP_TIDY_REPORT_HEAVY_DAYS и
+# с тяжёлыми файлами — thin. Защита любого члена защищает группу.
+tidy_plan_reports() {
+  _tlr_root=$1
+  _tlr_rd=$_tlr_root/build/router
+  [ -d "$_tlr_rd" ] || return 0
+  _tlr_prot=$(mktemp)
+  _tlr_list=$(mktemp)
+  _tlr_cls=$(mktemp)
+  tidy_protected_keys "$_tlr_root" >"$_tlr_prot"
+  LC_ALL=C ls -1A "$_tlr_rd" | sed -nE "s/^(${_TL_KEY_RE})(-[0-9]{2}-.+)?\$/\\1${_TL_TAB}&/p" >"$_tlr_list"
+  _tlr_cl=$(date -u -d "${XCP_TIDY_REPORT_LIGHT_DAYS:-30} days ago" +%Y%m%d-%H%M%S)
+  _tlr_ch=$(date -u -d "${XCP_TIDY_REPORT_HEAVY_DAYS:-3} days ago" +%Y%m%d-%H%M%S)
+  awk -v cl="$_tlr_cl" -v ch="$_tlr_ch" '
+    BEGIN { FS = "\t" }
+    FILENAME == ARGV[1] { if (!($1 in reason)) reason[$1] = $2; next }
+    { key = $1
+      if (!(key in seen)) { seen[key] = 1; order[++n] = key }
+      if ($2 != key) nested[key]++ }
+    END {
+      for (i = 1; i <= n; i++) {
+        k = order[i]; ts = substr(k, 1, 15)
+        if (k in reason) { if (ts < ch) print "skip\t" k "\t" reason[k] "\t" nested[k] + 0 }
+        else if (ts < cl) print "rm\t" k "\t-\t" nested[k] + 0
+        else if (ts < ch) print "thinchk\t" k "\t-\t" nested[k] + 0
+      }
+    }' "$_tlr_prot" "$_tlr_list" >"$_tlr_cls"
+  while IFS="$_TL_TAB" read -r _tlr_c _tlr_k _tlr_why _tlr_nest; do
+    _tlr_note=""
+    if [ "${_tlr_nest:-0}" -gt 0 ]; then
+      _tlr_note="+$_tlr_nest вложенных"
+    fi
+    case "$_tlr_c" in
+      skip)
+        _tl_emit1 skip отчёты "$_tlr_rd/$_tlr_k" "$_tlr_why" 0
+        ;;
+      rm)
+        _tl_emit1 rm отчёты "$_tlr_rd/$_tlr_k" "$_tlr_note" "$(_tl_group_kb "$_tlr_rd" "$_tlr_k")"
+        ;;
+      thinchk)
+        if _tl_group_has_heavy "$_tlr_rd" "$_tlr_k"; then
+          _tl_emit1 thin отчёты "$_tlr_rd/$_tlr_k" "${_tlr_note:-тяжёлое старше ${XCP_TIDY_REPORT_HEAVY_DAYS:-3} дн.}" "$(_tl_group_kb "$_tlr_rd" "$_tlr_k" heavy)"
+        fi
+        ;;
+    esac
+  done <"$_tlr_cls"
+  rm -f "$_tlr_prot" "$_tlr_list" "$_tlr_cls"
+}
+
+# --- старый формат build/router ---------------------------------------------------------
+
+# Имена верхнего уровня build/router, не относящиеся ни к служебным (bin, release, last,
+# session-last), ни к отчётам нового формата: dbg*, session-2026…, скрытые .session-*.
+_tl_legacy_names() {
+  LC_ALL=C ls -1A "$1" 2>/dev/null |
+    sed -E "/^${_TL_KEY_RE}(-[0-9]{2}-.+)?\$/d" |
+    grep -vxE 'bin|release|last|session-last' || true
+}
+
+# Записи плана старого формата (категория «старый формат build/router») по mtime тем же
+# двухуровневым правилом: старше лёгкой отсечки — rm, старше тяжёлой и с тяжёлыми
+# файлами — thin. Цели ссылок last и session-last — skip. Висячие last и session-last — rm.
+tidy_plan_legacy() {
+  _tll_root=$1
+  _tll_rd=$_tll_root/build/router
+  [ -d "$_tll_rd" ] || return 0
+  _tll_cat="старый формат build/router"
+  _tll_tsl=""
+  _tll_tl=""
+  if [ -L "$_tll_rd/session-last" ]; then
+    _tll_tsl=$(basename "$(readlink "$_tll_rd/session-last")")
+  fi
+  if [ -L "$_tll_rd/last" ]; then
+    _tll_tl=$(basename "$(readlink "$_tll_rd/last")")
+  fi
+  _tll_o30=$(mktemp)
+  _tll_o3=$(mktemp)
+  _tll_names=$(mktemp)
+  find "$_tll_rd" -mindepth 1 -maxdepth 1 -mtime +"${XCP_TIDY_REPORT_LIGHT_DAYS:-30}" >"$_tll_o30"
+  find "$_tll_rd" -mindepth 1 -maxdepth 1 -mtime +"${XCP_TIDY_REPORT_HEAVY_DAYS:-3}" >"$_tll_o3"
+  _tl_legacy_names "$_tll_rd" >"$_tll_names"
+  while IFS= read -r _tll_n; do
+    _tll_p=$_tll_rd/$_tll_n
+    if [ "$_tll_n" = "$_tll_tsl" ]; then
+      _tl_emit1 skip "$_tll_cat" "$_tll_p" "цель session-last" 0
+    elif [ "$_tll_n" = "$_tll_tl" ]; then
+      _tl_emit1 skip "$_tll_cat" "$_tll_p" "цель last" 0
+    elif grep -qxF -- "$_tll_p" "$_tll_o30"; then
+      _tl_emit1 rm "$_tll_cat" "$_tll_p" "старше ${XCP_TIDY_REPORT_LIGHT_DAYS:-30} дн."
+    elif grep -qxF -- "$_tll_p" "$_tll_o3" && [ -d "$_tll_p" ] && [ ! -L "$_tll_p" ] &&
+      [ -n "$(_tl_find_heavy "$_tll_p" -print -quit)" ]; then
+      _tl_emit1 thin "$_tll_cat" "$_tll_p" "тяжёлое старше ${XCP_TIDY_REPORT_HEAVY_DAYS:-3} дн." \
+        "$(_tl_heavy_kb "$_tll_p")"
+    fi
+  done <"$_tll_names"
+  for _tll_l in last session-last; do
+    if [ -L "$_tll_rd/$_tll_l" ] && [ ! -e "$_tll_rd/$_tll_l" ]; then
+      _tl_emit1 rm "$_tll_cat" "$_tll_rd/$_tll_l" "висячая ссылка" 0
+    fi
+  done
+  rm -f "$_tll_o30" "$_tll_o3" "$_tll_names"
+}
+
+# Размер тяжёлого в каталоге (КиБ): _tl_heavy_kb <каталог>
+_tl_heavy_kb() {
+  if [ "${TIDY_SIZES:-0}" = 1 ]; then
+    _tl_find_heavy "$1" -exec du -k {} + | awk '{ s += $1 } END { print s + 0 }'
+  else
+    echo 0
+  fi
+}
+
+# Для --drop-legacy: rm на каждую запись старого формата, включая цель session-last и
+# саму ссылку session-last, если она указывает на старый формат или висит. Служебные bin,
+# release, last и группы отчётов не затрагиваются.
+tidy_plan_legacy_all() {
+  _tld_root=$1
+  _tld_rd=$_tld_root/build/router
+  [ -d "$_tld_rd" ] || return 0
+  _tld_cat="старый формат build/router"
+  _tld_names=$(mktemp)
+  _tl_legacy_names "$_tld_rd" >"$_tld_names"
+  while IFS= read -r _tld_n; do
+    _tl_emit1 rm "$_tld_cat" "$_tld_rd/$_tld_n" "разовое: --drop-legacy"
+  done <"$_tld_names"
+  if [ -L "$_tld_rd/session-last" ]; then
+    _tld_t=$(basename "$(readlink "$_tld_rd/session-last")")
+    if [ ! -e "$_tld_rd/session-last" ] || grep -qxF -- "$_tld_t" "$_tld_names"; then
+      _tl_emit1 rm "$_tld_cat" "$_tld_rd/session-last" "разовое: --drop-legacy" 0
+    fi
+  fi
+  if [ -L "$_tld_rd/last" ] && [ ! -e "$_tld_rd/last" ]; then
+    _tl_emit1 rm "$_tld_cat" "$_tld_rd/last" "висячая ссылка" 0
+  fi
+  rm -f "$_tld_names"
+}
+
+# --- кэш релизов -----------------------------------------------------------------------
+
+# Записи rm для build/router/release/<тег>: кроме XCP_TIDY_RELEASES новейших тегов по
+# версии (пре-релиз раньше финального) и защищённого тега.
+# tidy_plan_releases <корень> [<защищённый тег>]
+tidy_plan_releases() {
+  _tlv_root=$1
+  _tlv_prot=${2:-}
+  _tlv_d=$_tlv_root/build/router/release
+  [ -d "$_tlv_d" ] || return 0
+  _tlv_keep=${XCP_TIDY_RELEASES:-3}
+  ls -1 "$_tlv_d" 2>/dev/null | grep -E '^v[0-9]' | sed 's/-/~/' | sort -V | sed 's/~/-/' |
+    awk -v k="$_tlv_keep" -v d="$_tlv_d" '{ a[NR] = $0 } END { for (i = 1; i <= NR - k; i++) print d "/" a[i] }' |
+    grep -vxF -- "$_tlv_d/$_tlv_prot" |
+    _tl_emit_paths rm "кэш релизов" "старше $_tlv_keep новейших тегов"
+}
+
+# --- ротация для скриптов стенда (без du) ----------------------------------------------
+
+# Ротация сборок: план и исполнение.
 tidy_rotate_builds() {
   tidy_plan_builds "$1" | tidy_exec "$1"
+}
+
+# Ротация отчётов и старого формата build/router (без --drop-legacy).
+tidy_rotate_reports() {
+  {
+    tidy_plan_reports "$1"
+    tidy_plan_legacy "$1"
+  } | tidy_exec "$1"
+}
+
+# Ротация кэша релизов: tidy_rotate_releases <корень> <защищённый тег>
+tidy_rotate_releases() {
+  tidy_plan_releases "$1" "${2:-}" | tidy_exec "$1"
 }

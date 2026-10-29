@@ -3,12 +3,16 @@
 #
 #   scripts/tidy.sh                  показ: что будет удалено и сколько места, ничего не меняется
 #   scripts/tidy.sh --apply          выполнить ровно показанный план (make tidy APPLY=1)
+#   scripts/tidy.sh --drop-legacy    вместо ротации убрать весь старый формат build/router одним пунктом
 #   scripts/tidy.sh --rotate-builds  только ротация сборок build/xcp_v*_<арх> (вызывает Makefile)
 #   scripts/tidy.sh -h | --help      эта справка
 #
 # Пороги — переменные XCP_TIDY_* (умолчания и смысл — в шапке scripts/tidy-lib.sh).
 # Показ и исполнение строятся по одному плану: по категориям, с действием, путём,
 # размером и пропущенным с причиной. Пути — от корня репозитория.
+# Отчёты, кэш релизов и старый формат build/router трогаются, только пока общая
+# блокировка стенда свободна (RT_LOCK_HELD=1 — её держит родительский прогон);
+# иначе эти категории пропускаются с причиной «блокировка занята прогоном».
 #
 # Коды выхода: 0 — готово; 1 — часть операций не удалась; 2 — неверные аргументы.
 set -eu
@@ -21,10 +25,12 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 APPLY=0
 ROTATE_BUILDS=0
+DROP_LEGACY=0
 for _a in "$@"; do
   case "$_a" in
     --apply) APPLY=1 ;;
     --rotate-builds) ROTATE_BUILDS=1 ;;
+    --drop-legacy) DROP_LEGACY=1 ;;
     -h | --help)
       awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
       exit 0
@@ -51,12 +57,52 @@ PLAN=$(mktemp)
 trap 'rm -f "$PLAN"' EXIT
 
 # категории показа через "|" (в названиях есть пробелы), порядок = порядок показа
-CATEGORIES="сборки"
+CATEGORIES="сборки|отчёты|кэш релизов|старый формат build/router"
+
+# Общая блокировка стенда (Pitfall: в потомке run.sh fd 9 уже держит родитель, пробовать
+# заново нельзя). Занята чужим прогоном — отчёты, кэш релизов и старый формат пропускаются.
+LOCK_BUSY=0
+if [ "${RT_LOCK_HELD:-0}" != 1 ]; then
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$(rt_common_dir)/router-test.lock"
+    if ! flock -n 9; then
+      LOCK_BUSY=1
+    fi
+  else
+    LOCK_BUSY=1
+  fi
+fi
 
 # --- построение плана: одна функция на категорию, записи добавляются в $PLAN -----------
 
 plan_builds() {
   tidy_plan_builds "$ROOT" >>"$PLAN"
+}
+
+plan_locked() { # <категория> <функция плана…>
+  _pl_cat=$1
+  shift
+  if [ "$LOCK_BUSY" = 1 ]; then
+    printf 'skip\t%s\t%s\t0\t%s\n' "$_pl_cat" "$ROOT/build/router" "блокировка занята прогоном" >>"$PLAN"
+  else
+    "$@" >>"$PLAN"
+  fi
+}
+
+plan_reports() {
+  plan_locked "отчёты" tidy_plan_reports "$ROOT"
+}
+
+plan_releases() {
+  plan_locked "кэш релизов" tidy_plan_releases "$ROOT"
+}
+
+plan_legacy() {
+  if [ "$DROP_LEGACY" = 1 ]; then
+    plan_locked "старый формат build/router" tidy_plan_legacy_all "$ROOT"
+  else
+    plan_locked "старый формат build/router" tidy_plan_legacy "$ROOT"
+  fi
 }
 
 # --- показ ---------------------------------------------------------------------------
@@ -96,6 +142,9 @@ TIDY_SIZES=1
 export TIDY_SIZES
 
 plan_builds
+plan_reports
+plan_releases
+plan_legacy
 
 show_plan
 
