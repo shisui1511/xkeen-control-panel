@@ -41,7 +41,7 @@
 # или удалить вручную и повторить. Игнорируемое никуда не копируется и новым флагом не снимается.
 # Прочие worktree — пропуск с причиной: «заблокирован», «не слита», «правки моложе 24 ч»,
 # «возраст не определён», «вне репозитория», «текущий», «блокировка занята прогоном»,
-# «игнорируемые файлы: N», «игнорируемые файлы не прочитаны».
+# «игнорируемые файлы: N», «игнорируемые файлы не прочитаны», «вложенный git-репозиторий».
 #
 # Локальные ветки: слитые (вершина достижима из origin/main или из текущей ветки основной копии)
 # удаляются, кроме main, текущих, rescue/* (одна итоговая строка) и занятых worktree («занята
@@ -344,6 +344,18 @@ wt_changes() { # <worktree>
   rm -f "$_wc_raw"
 }
 
+# Среди изменений $WT_TMP есть неотслеживаемый вложенный git-репозиторий (запись «каталог/» с
+# собственным .git): git add -A сохранил бы в rescue-коммит лишь gitlink, а remove удалил бы
+# содержимое. Код 0 — есть.
+wt_nested_repo() { # <worktree>
+  while IFS= read -r _wn_p; do
+    case "$_wn_p" in
+      */) [ ! -e "$1/${_wn_p}.git" ] || return 0 ;;
+    esac
+  done <"$WT_TMP"
+  return 1
+}
+
 # Дети каталога worktree на один уровень (по файловой системе, ссылки не разыменовываются) в
 # виде записей wt_ignored: каталог с файлами — «путь/», прочее — «путь»; пустые каталоги не
 # считаются. Код 1 — каталог не прочитан.
@@ -507,6 +519,10 @@ plan_wt_one() { # <путь> <HEAD> <ветка|-> <detached> <locked> <prunable
   fi
   if ! wt_changes "$_po_p"; then
     pl_skip "$_po_c" "$_po_p" "статус worktree не прочитан"
+    return 0
+  fi
+  if wt_nested_repo "$_po_p"; then
+    pl_skip "$_po_c" "$_po_p" "вложенный git-репозиторий"
     return 0
   fi
   _po_n=$(wc -l <"$WT_TMP" | tr -d ' ')
@@ -706,6 +722,12 @@ git_wt_rescue() { # <путь worktree>
     }
   fi
   GIT_INDEX_FILE=$_gr_idx git -C "$_gr_wt" rm -r --cached -q --ignore-unmatch -- frontend/node_modules 2>/dev/null || true
+  # вложенный git-репозиторий add превращает в gitlink без файлов, а remove удалил бы его содержимое
+  if GIT_INDEX_FILE=$_gr_idx git -C "$_gr_wt" diff --cached --raw --no-renames "$_gr_head" | awk '$2 == "160000" { f = 1 } END { exit !f }'; then
+    rm -f "$_gr_idx"
+    echo "tidy: отказ спасать $_gr_name: вложенный git-репозиторий (gitlink) не сохраняется" >&2
+    return 1
+  fi
   _gr_tree=$(GIT_INDEX_FILE=$_gr_idx git -C "$_gr_wt" write-tree) || {
     rm -f "$_gr_idx"
     return 1
