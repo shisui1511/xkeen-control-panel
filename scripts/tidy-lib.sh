@@ -2,7 +2,9 @@
 #
 # Подключается через `. "$SCRIPT_DIR/tidy-lib.sh"` после scripts/router/lib.sh
 # (нужны rt_repo_root, rt_common_dir, rt_main_root) из scripts/tidy.sh и скриптов стенда.
-# POSIX sh; сам ничего не запускает и `set` не меняет. Функции — tidy_*, внутренние
+# POSIX sh плюс GNU coreutils/findutils (xargs -d, sort -V, date -d, stat -c, find -empty -delete):
+# на ПК с WSL/Linux они есть, на BSD и macOS без GNU-пакетов уборка не рассчитана.
+# Сам ничего не запускает и `set` не меняет. Функции — tidy_*, внутренние
 # переменные — с префиксом _tl.
 #
 # Пороги (переменные окружения, в скобках умолчания; проверяются — целое число, для сборок, кэша
@@ -480,6 +482,10 @@ tidy_plan_reports() {
   _tl_num XCP_TIDY_REPORT_HEAVY_DAYS "${XCP_TIDY_REPORT_HEAVY_DAYS:-3}" 1 || return 2
   _tl_num XCP_TIDY_REPORTS_KEEP "${XCP_TIDY_REPORTS_KEEP:-10}" 1 || return 2
   _tl_num XCP_TIDY_LIGHT_MAX_KB "${XCP_TIDY_LIGHT_MAX_KB:-512}" 0 || return 2
+  if ! date -u -d '1 day ago' +%Y%m%d >/dev/null 2>&1; then
+    echo "tidy: нужен GNU date (date -d '… ago'): ротация отчётов не выполняется" >&2
+    return 2
+  fi
   _tlr_prot=$(mktemp)
   _tlr_list=$(mktemp)
   _tlr_cls=$(mktemp)
