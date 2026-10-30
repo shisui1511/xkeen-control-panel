@@ -22,7 +22,7 @@
 # Разовые флаги (--rescue, --force-branch, --drop-stash) действуют только на названные объекты
 # и в обычный --apply не входят: stash обычный запуск лишь показывает, неслитые ветки не трогает.
 #
-# Пороги — переменные XCP_TIDY_* (сборки, отчёты, кэш релизов — в шапке scripts/tidy-lib.sh);
+# Пороги — переменные XCP_TIDY_* (сборки, отчёты, кэш релизов — в шапке scripts/router/tidy-lib.sh);
 # здесь XCP_TIDY_WORKTREE_HOURS — сколько часов правки worktree считаются свежими (24).
 # Показ и исполнение строятся по одному плану: по категориям, с действием, путём,
 # размером и пропущенным с причиной. Пути — от корня репозитория.
@@ -69,7 +69,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/router/lib.sh"
 # shellcheck disable=SC1091
-. "$SCRIPT_DIR/tidy-lib.sh"
+. "$SCRIPT_DIR/router/tidy-lib.sh"
 
 APPLY=0
 ROTATE_BUILDS=0

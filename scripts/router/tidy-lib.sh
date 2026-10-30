@@ -1,6 +1,6 @@
-# scripts/tidy-lib.sh — функции уборки build/ на ПК: план и исполнение ротации.
+# scripts/router/tidy-lib.sh — функции уборки build/ на ПК: план и исполнение ротации.
 #
-# Подключается через `. "$SCRIPT_DIR/tidy-lib.sh"` после scripts/router/lib.sh
+# Подключается через `. "$SCRIPT_DIR/tidy-lib.sh"` из scripts/router/ после lib.sh
 # (нужны rt_repo_root, rt_common_dir, rt_main_root) из scripts/tidy.sh и скриптов стенда.
 # POSIX sh плюс GNU coreutils/findutils (xargs -d, sort -V, date -d, stat -c, find -empty -delete):
 # на ПК с WSL/Linux они есть, на BSD и macOS без GNU-пакетов уборка не рассчитана.

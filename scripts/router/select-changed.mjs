@@ -117,7 +117,7 @@ const IGNORED = [
   /^\.gitignore$/,
   /^\.golangci\.ya?ml$/,
   // уборка ПК и статическая проверка CI на роутер не влияют (D-25)
-  /^scripts\/(tidy|tidy-lib)\.sh$/,
+  /^scripts\/tidy\.sh$/,
   /^scripts\/check-report-paths\.js$/,
   // Playwright-спеки с подменой сети и юнит-тесты фронтенда на роутерах не запускаются
   /^frontend\/tests\/(?!router\/)/,

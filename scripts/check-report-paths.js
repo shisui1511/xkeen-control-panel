@@ -7,7 +7,7 @@
 // которая приводит путь к абсолютному под <корень>/build/router. Скрипт читает исходники
 // (git ls-files, без запуска).
 //
-// Правила:
+// Правила (библиотека уборки scripts/router/tidy-lib.sh — не этап и под них не подпадает):
 //   R1. В scripts/router/*.sh, кроме lib.sh, вне комментариев нет конструкции «проверка непустоты
 //       ${RT_REPORT:-}, затем || rt_report_init» (приём чужого RT_REPORT мимо rt_report_use).
 //   R2. Каждый scripts/router/*.sh, кроме lib.sh, где вне комментариев есть RT_REPORT, содержит строку
@@ -131,6 +131,9 @@ try {
   for (const f of files) {
     scripts++;
     const text = read(f);
+    // tidy-lib.sh — библиотека уборки, не этап: build/router в ней обходится как дерево для ротации
+    // и не принимает RT_REPORT от вызывающего; правила этапов (R1, R2, R5) к ней неприменимы
+    if (f === 'scripts/router/tidy-lib.sh') continue;
     if (f === 'scripts/router/lib.sh') {
       const lines = text.split('\n');
       const start = lines.findIndex((l) => l.startsWith('rt_report_use() {'));

@@ -98,7 +98,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib.sh"
 # shellcheck disable=SC1091
-. "$SCRIPT_DIR/../tidy-lib.sh"
+. "$SCRIPT_DIR/tidy-lib.sh"
 
 SUITE=${1:-}
 case "$SUITE" in

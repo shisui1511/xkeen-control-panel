@@ -24,7 +24,7 @@
 # стенда (код цели 2: нет init-скрипта, setup.sh --init-script, scp) статуса нет.
 # Установка из run.sh статус установки не ставит: там статус смоука публикует run.sh.
 #
-# Уборка build/ (scripts/tidy-lib.sh): --release оставляет в кэше релизов 3 новейших тега и
+# Уборка build/ (scripts/router/tidy-lib.sh): --release оставляет в кэше релизов 3 новейших тега и
 # разворачиваемый, одиночный запуск ротирует отчёты; сборки ветки ротирует make router-<арх>.
 
 set -eu
@@ -33,7 +33,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib.sh"
 # shellcheck disable=SC1091
-. "$SCRIPT_DIR/../tidy-lib.sh"
+. "$SCRIPT_DIR/tidy-lib.sh"
 
 BIN_PATH=/opt/sbin/xcp
 INIT_SCRIPT=/opt/etc/init.d/S99xcp
