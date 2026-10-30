@@ -205,6 +205,14 @@ rt_report_use() {
       return 2
       ;;
   esac
+  # служебные имена верхнего уровня — не отчёты (кэш релизов, бинарники тестов, ссылки)
+  _rn=${RT_REPORT#"$_root"/build/router/}
+  case "${_rn%%/*}" in
+    bin | release | last | session-last)
+      echo "RT_REPORT указывает на служебное имя build/router: $RT_REPORT" >&2
+      return 2
+      ;;
+  esac
   mkdir -p "$RT_REPORT"
   export RT_REPORT
 }
