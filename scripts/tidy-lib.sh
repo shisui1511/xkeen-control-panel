@@ -539,8 +539,15 @@ _tl_legacy_names() {
     grep -vxE 'bin|release|last|session-last' || true
 }
 
-# Записи плана старого формата (категория «старый формат build/router») по mtime тем же
-# двухуровневым правилом: старше лёгкой отсечки — rm, старше тяжёлой и с тяжёлыми
+# Нет ли во всём дереве пути (включая сам путь) ничего с mtime моложе N дней: тот же счёт
+# в целых сутках, что у find -mtime +N, но по самому свежему файлу, а не по mtime верхнего
+# каталога (его меняет только создание и удаление прямых вложений). _tl_older <путь> <дней>
+_tl_older() {
+  [ -z "$(find "$1" ! -mtime +"$2" -print -quit 2>/dev/null)" ]
+}
+
+# Записи плана старого формата (категория «старый формат build/router») по возрасту самого
+# свежего файла в дереве тем же двухуровневым правилом: старше лёгкой отсечки — rm, старше тяжёлой и с тяжёлыми
 # файлами — thin. Цели ссылок last и session-last — skip. Висячие last и session-last — rm.
 tidy_plan_legacy() {
   _tll_root=$1
@@ -558,11 +565,7 @@ tidy_plan_legacy() {
   if [ -L "$_tll_rd/last" ]; then
     _tll_tl=$(basename "$(readlink "$_tll_rd/last")")
   fi
-  _tll_o30=$(mktemp)
-  _tll_o3=$(mktemp)
   _tll_names=$(mktemp)
-  find "$_tll_rd" -mindepth 1 -maxdepth 1 -mtime +"${XCP_TIDY_REPORT_LIGHT_DAYS:-30}" >"$_tll_o30"
-  find "$_tll_rd" -mindepth 1 -maxdepth 1 -mtime +"${XCP_TIDY_REPORT_HEAVY_DAYS:-3}" >"$_tll_o3"
   _tl_legacy_names "$_tll_rd" >"$_tll_names"
   while IFS= read -r _tll_n; do
     _tll_p=$_tll_rd/$_tll_n
@@ -570,9 +573,9 @@ tidy_plan_legacy() {
       _tl_emit1 skip "$_tll_cat" "$_tll_p" "цель session-last" 0
     elif [ "$_tll_n" = "$_tll_tl" ]; then
       _tl_emit1 skip "$_tll_cat" "$_tll_p" "цель last" 0
-    elif grep -qxF -- "$_tll_p" "$_tll_o30"; then
+    elif _tl_older "$_tll_p" "${XCP_TIDY_REPORT_LIGHT_DAYS:-30}"; then
       _tl_emit1 rm "$_tll_cat" "$_tll_p" "старше ${XCP_TIDY_REPORT_LIGHT_DAYS:-30} дн."
-    elif grep -qxF -- "$_tll_p" "$_tll_o3" && [ -d "$_tll_p" ] && [ ! -L "$_tll_p" ] &&
+    elif _tl_older "$_tll_p" "${XCP_TIDY_REPORT_HEAVY_DAYS:-3}" && [ -d "$_tll_p" ] && [ ! -L "$_tll_p" ] &&
       [ -n "$(_tl_find_heavy "$_tll_p" -print -quit)" ]; then
       _tl_emit1 thin "$_tll_cat" "$_tll_p" "тяжёлое старше ${XCP_TIDY_REPORT_HEAVY_DAYS:-3} дн." \
         "$(_tl_heavy_kb "$_tll_p")"
@@ -583,7 +586,7 @@ tidy_plan_legacy() {
       _tl_emit1 rm "$_tll_cat" "$_tll_rd/$_tll_l" "висячая ссылка" 0
     fi
   done
-  rm -f "$_tll_o30" "$_tll_o3" "$_tll_names"
+  rm -f "$_tll_names"
 }
 
 # Размер тяжёлого в каталоге (КиБ): _tl_heavy_kb <каталог>
