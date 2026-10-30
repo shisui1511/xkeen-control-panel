@@ -696,6 +696,12 @@ wt_todo() { # <имя rescue> <имя worktree> <ветка|-> <detached> <HEAD>
 
 # Спасение: WIP-коммит поверх HEAD worktree во временном индексе (индекс и файлы worktree не
 # меняются, frontend/node_modules исключён) → ветка rescue/<имя> → todo → remove → ветка worktree.
+# убрать временный индекс спасения и его каталог
+_gr_clean() {
+  rm -f "$_gr_idx"
+  rmdir "$_gr_dir" 2>/dev/null || true
+}
+
 git_wt_rescue() { # <путь worktree>
   _gr_wt=$1
   if ! wt_lookup "$_gr_wt"; then
@@ -727,9 +733,11 @@ git_wt_rescue() { # <путь worktree>
     echo "tidy: недопустимое имя ветки rescue/$_gr_rb" >&2
     return 1
   fi
-  _gr_idx=$(mktemp -u "${TMPDIR:-/tmp}/tidy-idx.XXXXXX")
+  # временный индекс в собственном каталоге: mktemp -u оставил бы окно подмены имени в общем /tmp
+  _gr_dir=$(mktemp -d) || return 1
+  _gr_idx=$_gr_dir/index
   if ! GIT_INDEX_FILE=$_gr_idx git -C "$_gr_wt" read-tree "$_gr_head"; then
-    rm -f "$_gr_idx"
+    _gr_clean
     return 1
   fi
   # Ссылка frontend/node_modules (путь ПК) в rescue не попадает. Под актуальным .gitignore она
@@ -737,27 +745,27 @@ git_wt_rescue() { # <путь worktree>
   # ошибкой и выходит с кодом 1, хотя всё остальное добавляет); под старым .gitignore исключаем явно.
   if git -C "$_gr_wt" check-ignore -q frontend/node_modules 2>/dev/null; then
     GIT_INDEX_FILE=$_gr_idx git -C "$_gr_wt" add -A -- . || {
-      rm -f "$_gr_idx"
+      _gr_clean
       return 1
     }
   else
     GIT_INDEX_FILE=$_gr_idx git -C "$_gr_wt" add -A -- . ':(exclude)frontend/node_modules' || {
-      rm -f "$_gr_idx"
+      _gr_clean
       return 1
     }
   fi
   GIT_INDEX_FILE=$_gr_idx git -C "$_gr_wt" rm -r --cached -q --ignore-unmatch -- frontend/node_modules 2>/dev/null || true
   # вложенный git-репозиторий add превращает в gitlink без файлов, а remove удалил бы его содержимое
   if GIT_INDEX_FILE=$_gr_idx git -C "$_gr_wt" diff --cached --raw --no-renames "$_gr_head" | awk '$2 == "160000" { f = 1 } END { exit !f }'; then
-    rm -f "$_gr_idx"
+    _gr_clean
     echo "tidy: отказ спасать $_gr_name: вложенный git-репозиторий (gitlink) не сохраняется" >&2
     return 1
   fi
   _gr_tree=$(GIT_INDEX_FILE=$_gr_idx git -C "$_gr_wt" write-tree) || {
-    rm -f "$_gr_idx"
+    _gr_clean
     return 1
   }
-  rm -f "$_gr_idx"
+  _gr_clean
   if [ "$_gr_tree" = "$(git rev-parse "$_gr_head^{tree}")" ]; then
     _gr_commit=$_gr_head
   else
@@ -908,7 +916,8 @@ plan_origin_one() { # <имя без origin/>
 # Ветки origin — только с --remote: сначала git fetch --prune. Без связи — один пропуск.
 plan_origin() {
   _po_c="ветки origin"
-  if ! git fetch --prune origin </dev/null >/dev/null 2>&1; then
+  # fd 9 (блокировка стенда) потомкам не отдаётся: фоновое git maintenance после fetch удержало бы её
+  if ! git fetch --prune origin </dev/null >/dev/null 2>&1 9>&-; then
     pl_skip "$_po_c" "origin" "нет связи с origin"
     return 0
   fi
@@ -1091,7 +1100,7 @@ tidy_exec_hook() { # <действие> <категория> <путь> <КиБ>
     br-delete) git_br_delete "$3" "$5" </dev/null ;;
     origin-delete) git_origin_delete "$3" </dev/null ;;
     stash-drop) git_stash_drop "$3" "$5" </dev/null ;;
-    gc) git gc --quiet </dev/null ;;
+    gc) git gc --quiet </dev/null 9>&- ;;
     *) return 1 ;;
   esac
 }
