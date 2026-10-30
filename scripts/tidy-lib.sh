@@ -581,8 +581,12 @@ tidy_plan_legacy_all() {
       _tl_emit1 rm "$_tld_cat" "$_tld_rd/session-last" "разовое: --drop-legacy" 0
     fi
   fi
-  if [ -L "$_tld_rd/last" ] && [ ! -e "$_tld_rd/last" ]; then
-    _tl_emit1 rm "$_tld_cat" "$_tld_rd/last" "висячая ссылка" 0
+  if [ -L "$_tld_rd/last" ]; then
+    # как у session-last: ссылка на уходящий старый формат удаляется вместе с целью, иначе повиснет
+    _tld_t=$(basename "$(readlink "$_tld_rd/last")")
+    if [ ! -e "$_tld_rd/last" ] || grep -qxF -- "$_tld_t" "$_tld_names"; then
+      _tl_emit1 rm "$_tld_cat" "$_tld_rd/last" "разовое: --drop-legacy" 0
+    fi
   fi
   rm -f "$_tld_names"
 }
