@@ -224,7 +224,7 @@ plan_stubs() {
         _tl_emit_paths rm "$_ps_cat" "сессия панели закрыта: cookie и CSRF не переносятся" >>"$PLAN"
       (cd "$_ps_stub" && find . -type f ! -name state.json ! -name state.json.restore.json | LC_ALL=C sort) >"$_ps_a"
       (cd "$_ps_rep" && find . -type f | LC_ALL=C sort) >"$_ps_b"
-      if [ -n "$(comm -12 "$_ps_a" "$_ps_b")" ]; then
+      if [ -n "$(LC_ALL=C comm -12 "$_ps_a" "$_ps_b")" ]; then
         _ps_skipped=1
         printf 'skip\t%s\t%s\t0\t%s\n' "$_ps_cat" "$_ps_stub" "файлы пересекаются" >>"$PLAN"
       else
@@ -1030,6 +1030,17 @@ tidy_exec_hook() { # <действие> <категория> <путь> <КиБ>
         *) return 1 ;;
       esac
       [ -d "$5" ] || return 1
+      # перед копированием файл отчёта не должен существовать (cp без -n затёр бы его)
+      _mv_clash=$(cd "$3" && find . -type f | while IFS= read -r _mv_f; do
+        if [ -e "$5/$_mv_f" ] || [ -L "$5/$_mv_f" ]; then
+          printf '%s\n' "$_mv_f"
+          break
+        fi
+      done)
+      if [ -n "$_mv_clash" ]; then
+        echo "tidy: перенос обрывка отменён, файл уже есть в отчёте: $_mv_clash" >&2
+        return 1
+      fi
       cp -Rp "$3/." "$5/" || return 1
       tidy_safe_rm "$ROOT" "$3"
       ;;
