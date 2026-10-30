@@ -13,7 +13,8 @@
 #   scripts/tidy.sh --rescue <worktree>    разово: спасти названный worktree (путь или имя каталога)
 #                                    в rescue/<имя>; слитость и возраст не проверяются (повторяемый)
 #   scripts/tidy.sh --force-branch <ветка> разово: удалить названную неслитую локальную ветку (повторяемый)
-#   scripts/tidy.sh --drop-stash <stash@{N}>  разово: удалить названную запись stash (повторяемый)
+#   scripts/tidy.sh --drop-stash <stash@{N}=sha>  разово: удалить запись stash, только если её коммит
+#                                    начинается с sha (7–40 символов из показа; номера сдвигаются) (повторяемый)
 #   scripts/tidy.sh --drop-legacy    вместо ротации убрать весь старый формат build/router одним пунктом
 #   scripts/tidy.sh --rotate-builds  только ротация сборок build/xcp_v*_<арх> (вызывает Makefile)
 #   scripts/tidy.sh -h | --help      эта справка
@@ -54,7 +55,10 @@
 # тоже; причины пропуска «не слита», «нет на origin», «нет связи с origin», «защищена».
 # stash — пропуск «stash».
 # В git: prune записей о пропавших worktree (git worktree prune) и обычный git gc последним
-# действием (без --prune=now: удалённое остаётся в reflog до срока).
+# действием (без --prune=now). Удалённые --force-branch ветка и --drop-stash запись в reflog не
+# остаются: их коммиты держатся только как недостижимые объекты, а gc убирает те, что старше
+# gc.pruneExpire. Поэтому с --force-branch и --drop-stash gc не выполняется, а полный sha
+# удалённого печатается (вернуть: git branch <имя> <sha>; git stash store -m <тема> <sha>).
 #
 # Порядок --apply: worktree, prune, локальные ветки, ветки origin, stash, файловые категории, gc.
 #
@@ -101,8 +105,8 @@ while [ $# -gt 0 ]; do
         --remote-branch) REMOTE_BRANCHES="$REMOTE_BRANCHES$2
 " ;;
         --drop-stash)
-          if ! printf '%s\n' "$2" | grep -Eq '^stash@\{[0-9]+\}$'; then
-            echo "tidy: --drop-stash ожидает stash@{N}: $2" >&2
+          if ! printf '%s\n' "$2" | grep -Eq '^stash@\{[0-9]+\}=[0-9a-f]{7,40}$'; then
+            echo "tidy: --drop-stash ожидает stash@{N}=<sha коммита из показа, 7–40 символов>: $2" >&2
             exit 2
           fi
           DROP_STASHES="$DROP_STASHES$2
@@ -859,10 +863,10 @@ EOF
     _pb_sha=$(git rev-parse "refs/heads/$_pb_b")
     if tidy_in_list "$_pb_b" "$FORCE_BRANCHES"; then
       if wt_is_merged "$_pb_sha" 0; then
-        _pb_note="разовое: слита"
+        _pb_note="разовое: слита, вершина $_pb_sha"
       else
         _pb_cnt=$(git rev-list --count "origin/main..$_pb_b" 2>/dev/null || echo "?")
-        _pb_note="разовое: не слита, коммитов вне origin/main: $_pb_cnt"
+        _pb_note="разовое: не слита, коммитов вне origin/main: $_pb_cnt, вершина $_pb_sha"
       fi
       printf 'br-delete\t%s\t%s\t0\t%s\n' "$_pb_c" "$_pb_b" "$_pb_note" >>"$PLAN"
     elif wt_is_merged "$_pb_sha" 0; then
@@ -930,39 +934,59 @@ EOF
   fi
 }
 
-# stash только показывается (пропуск «stash»); названные --drop-stash — удаление, по убыванию номера.
+# stash только показывается (пропуск «stash», в пути — начало sha коммита); названные
+# --drop-stash stash@{N}=sha — удаление, по убыванию номера, только если коммит записи начинается с sha.
 plan_stash() {
   _ps2_c="stash"
+  _ps2_refs=""
   if [ -n "$DROP_STASHES" ]; then
     while IFS= read -r _ps2_n; do
       [ -n "$_ps2_n" ] || continue
-      if ! git rev-parse --verify --quiet "$_ps2_n" >/dev/null 2>&1; then
-        echo "tidy: stash не найден: $_ps2_n" >&2
+      _ps2_ref=${_ps2_n%%=*}
+      _ps2_want=${_ps2_n#*=}
+      _ps2_cur=$(git rev-parse --verify --quiet "$_ps2_ref" 2>/dev/null || true)
+      if [ -z "$_ps2_cur" ]; then
+        echo "tidy: stash не найден: $_ps2_ref" >&2
         exit 2
       fi
+      case "$_ps2_cur" in
+        "$_ps2_want"*) ;;
+        *)
+          echo "tidy: stash $_ps2_ref теперь другой (коммит $_ps2_cur, ожидалось $_ps2_want): номера сдвигаются, сверьтесь с показом" >&2
+          exit 2
+          ;;
+      esac
+      _ps2_refs="$_ps2_refs$_ps2_ref
+"
     done <<EOF
 $DROP_STASHES
 EOF
   fi
   _ps2_list=$(mktemp)
   _ps2_drop=$(mktemp)
-  git stash list --format='%gd%x09%gs' >"$_ps2_list"
-  while IFS="$_TL_TAB" read -r _ps2_r _ps2_s; do
+  git stash list --format='%gd%x09%H%x09%gs' >"$_ps2_list"
+  while IFS="$_TL_TAB" read -r _ps2_r _ps2_h _ps2_s; do
     [ -n "$_ps2_r" ] || continue
-    if tidy_in_list "$_ps2_r" "$DROP_STASHES"; then
-      printf '%s\t%s\t%s\n' "$(printf '%s' "$_ps2_r" | tr -dc '0-9')" "$_ps2_r" "$_ps2_s" >>"$_ps2_drop"
+    if tidy_in_list "$_ps2_r" "$_ps2_refs"; then
+      printf '%s\t%s\t%s\t%s\n' "$(printf '%s' "$_ps2_r" | tr -dc '0-9')" "$_ps2_r" "$_ps2_h" "$_ps2_s" >>"$_ps2_drop"
     else
-      pl_skip "$_ps2_c" "$_ps2_r: $_ps2_s" "stash"
+      pl_skip "$_ps2_c" "$_ps2_r ($(printf '%.7s' "$_ps2_h")): $_ps2_s" "stash"
     fi
   done <"$_ps2_list"
-  sort -rn "$_ps2_drop" | while IFS="$_TL_TAB" read -r _ps2_i _ps2_r _ps2_s; do
-    printf 'stash-drop\t%s\t%s\t0\tразовое: %s\n' "$_ps2_c" "$_ps2_r" "$_ps2_s"
+  sort -rn "$_ps2_drop" | while IFS="$_TL_TAB" read -r _ps2_i _ps2_r _ps2_h _ps2_s; do
+    printf 'stash-drop\t%s\t%s\t0\tразовое: %s: %s\n' "$_ps2_c" "$_ps2_r" "$_ps2_h" "$_ps2_s"
   done >>"$PLAN"
   rm -f "$_ps2_list" "$_ps2_drop"
 }
 
-# gc — последним действием плана: обычный, без --prune=now (паки — история).
+# gc — последним действием плана: обычный, без --prune=now (паки — история). С разовыми
+# удалениями (--force-branch, --drop-stash) не выполняется: удалённое держится только недостижимыми
+# объектами, которые gc убрал бы, если они старше gc.pruneExpire.
 plan_gc() {
+  if [ -n "$FORCE_BRANCHES" ] || [ -n "$DROP_STASHES" ]; then
+    pl_skip "git" "git gc" "не выполняется вместе с --force-branch и --drop-stash"
+    return 0
+  fi
   _pg_info=$(git count-objects -v 2>/dev/null | awk -F ': ' '$1 == "size-pack" { sp = $2 } $1 == "count" { c = $2 } END { printf "size-pack %s КиБ, рыхлых объектов %s", sp, c }')
   printf 'gc\tgit\tgit gc\t0\t%s\n' "$_pg_info" >>"$PLAN"
 }
@@ -997,6 +1021,9 @@ git_br_delete() { # <ветка> <примечание>
     "разовое"*) ;;
     *) wt_is_merged "$(git rev-parse "refs/heads/$1")" 0 || return 1 ;;
   esac
+  case "$2" in
+    "разовое"*) echo "tidy: удаляется ветка $1, вершина $(git rev-parse "refs/heads/$1") (вернуть: git branch $1 <sha>)" >&2 ;;
+  esac
   git branch -D "$1" >/dev/null
 }
 
@@ -1012,12 +1039,15 @@ git_origin_delete() { # <ветка без origin/>
   git push --force-with-lease="refs/heads/$1:$_go_sha" origin ":refs/heads/$1"
 }
 
-git_stash_drop() { # <stash@{N}> <разовое: тема>
-  _gs_cur=$(git stash list --format='%gd%x09%gs' | awk -F '\t' -v r="$1" '$1 == r { sub(/^[^\t]*\t/, ""); print; exit }')
-  if [ "$_gs_cur" != "${2#разовое: }" ]; then
-    echo "tidy: stash $1 изменился с момента показа, пропуск" >&2
+git_stash_drop() { # <stash@{N}> <разовое: sha: тема>
+  _gs_want=${2#разовое: }
+  _gs_want=${_gs_want%%:*}
+  _gs_cur=$(git rev-parse --verify --quiet "$1" 2>/dev/null || true)
+  if [ -z "$_gs_cur" ] || [ "$_gs_cur" != "$_gs_want" ]; then
+    echo "tidy: stash $1 изменился с момента построения плана, пропуск" >&2
     return 1
   fi
+  echo "tidy: удаляется stash $1, коммит $_gs_cur (вернуть: git stash store -m <тема> $_gs_cur)" >&2
   git stash drop "$1" >/dev/null
 }
 
