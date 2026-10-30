@@ -2,10 +2,13 @@
 # scripts/tidy.sh — уборка за агентами на ПК: worktree и ветки git, сборки, отчёты стенда, кэш релизов.
 #
 #   scripts/tidy.sh                  показ: что будет удалено и сколько места, ничего не меняется
-#   scripts/tidy.sh --apply          выполнить ровно показанный план (make tidy APPLY=1)
+#   scripts/tidy.sh --apply          выполнить план, построенный в этом же запуске (make tidy APPLY=1);
+#                                    отдельный запуск показа план не фиксирует — состав мог измениться
 #   scripts/tidy.sh --remote         добавить ветки origin, слитые в origin/main (сперва git fetch --prune);
-#                                    --remote --apply удаляет их по одной — только после «да» владельца
-#                                    на показанный список (make tidy REMOTE=1)
+#                                    --remote --apply удаляет их по одной (с проверкой вершины через
+#                                    --force-with-lease) — только после «да» владельца на показанный
+#                                    список (make tidy REMOTE=1); чтобы удалить ровно показанное,
+#                                    повторить с --remote-branch <имя> на каждую ветку списка
 #   scripts/tidy.sh --remote-branch <имя>  сузить ветки origin до названных (повторяемый; нужен --remote)
 #   scripts/tidy.sh --rescue <worktree>    разово: спасти названный worktree (путь или имя каталога)
 #                                    в rescue/<имя>; слитость и возраст не проверяются (повторяемый)
@@ -46,8 +49,10 @@
 # Локальные ветки: слитые (вершина достижима из origin/main или из текущей ветки основной копии)
 # удаляются, кроме main, текущих, rescue/* (одна итоговая строка) и занятых worktree («занята
 # worktree»); неслитые — «не слита». Ветки origin: без --remote категории нет и origin не
-# трогается; слитость — только по origin/main; main и rescue/* не удаляются никогда; причины
-# пропуска «не слита», «нет на origin», «нет связи с origin». stash — пропуск «stash».
+# трогается; слитость — только по origin/main; main и rescue/* не удаляются никогда, ветки по
+# маскам XCP_TIDY_PROTECT_REMOTE (через запятую или пробел, шаблоны sh, например «release/*») —
+# тоже; причины пропуска «не слита», «нет на origin», «нет связи с origin», «защищена».
+# stash — пропуск «stash».
 # В git: prune записей о пропавших worktree (git worktree prune) и обычный git gc последним
 # действием (без --prune=now: удалённое остаётся в reflog до срока).
 #
@@ -292,6 +297,22 @@ case "$WT_HOURS" in
     exit 2
     ;;
 esac
+
+# Ветка origin защищена маской XCP_TIDY_PROTECT_REMOTE: tidy_protected_remote <имя без origin/>
+tidy_protected_remote() {
+  [ -n "${XCP_TIDY_PROTECT_REMOTE:-}" ] || return 1
+  set -f
+  for _pr_pat in $(printf '%s' "$XCP_TIDY_PROTECT_REMOTE" | tr ',' ' '); do
+    # shellcheck disable=SC2254
+    case "$1" in $_pr_pat)
+      set +f
+      return 0
+      ;;
+    esac
+  done
+  set +f
+  return 1
+}
 
 # Строка списка (по одной на строку) входит в список: tidy_in_list <строка> <список>
 tidy_in_list() {
@@ -869,6 +890,10 @@ plan_origin_one() { # <имя без origin/>
       return 0
       ;;
   esac
+  if tidy_protected_remote "$1"; then
+    pl_skip "$_po1_c" "$1" "защищена (XCP_TIDY_PROTECT_REMOTE)"
+    return 0
+  fi
   if git merge-base --is-ancestor "refs/remotes/origin/$1" origin/main 2>/dev/null; then
     printf 'origin-delete\t%s\t%s\t0\t%s\n' "$_po1_c" "$1" "" >>"$PLAN"
   else
@@ -980,8 +1005,11 @@ git_origin_delete() { # <ветка без origin/>
     '' | main | rescue/*) return 1 ;;
   esac
   git check-ref-format --branch "$1" >/dev/null 2>&1 || return 1
-  git merge-base --is-ancestor "refs/remotes/origin/$1" origin/main 2>/dev/null || return 1
-  git push origin --delete "$1"
+  ! tidy_protected_remote "$1" || return 1
+  _go_sha=$(git rev-parse --verify --quiet "refs/remotes/origin/$1") || return 1
+  git merge-base --is-ancestor "$_go_sha" origin/main 2>/dev/null || return 1
+  # удаление только если вершина на origin всё ещё та, что проверена на слитость
+  git push --force-with-lease="refs/heads/$1:$_go_sha" origin ":refs/heads/$1"
 }
 
 git_stash_drop() { # <stash@{N}> <разовое: тема>
