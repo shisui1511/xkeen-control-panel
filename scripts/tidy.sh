@@ -382,8 +382,10 @@ wt_ignored() { # <worktree>
   _wi_cand=$(mktemp)
   _wi_kids=$(mktemp)
   _wi_rc=0
-  if git -C "$1" ls-files --others --ignored --exclude-standard --directory --no-empty-directory -z >"$_wi_raw" 2>/dev/null; then
-    tr '\0' '\n' <"$_wi_raw" >"$_wi_lines"
+  # Без --no-empty-directory: с ним git не показывает игнорируемые файлы внутри неотслеживаемого
+  # неигнорируемого каталога (новый пакет с .env рядом с кодом). Пустые каталоги отсеиваются ниже.
+  if git -C "$1" ls-files --others --ignored --exclude-standard --directory -z >"$_wi_raw" 2>/dev/null; then
+    tr '\0' '\n' <"$_wi_raw" | LC_ALL=C sort -u >"$_wi_lines"
     while IFS= read -r _wi_e; do
       [ -n "$_wi_e" ] || continue
       case "$_wi_e" in
@@ -403,6 +405,12 @@ wt_ignored() { # <worktree>
             fi
           done <"$_wi_kids"
           [ "$_wi_rc" = 0 ] || break
+          ;;
+        */)
+          # пустой игнорируемый каталог при снятии ничего не теряет; ошибка чтения — считаем непустым
+          _wi_f=$(find "$1/${_wi_e%/}" -mindepth 1 ! -type d -print -quit 2>/dev/null) || _wi_f=x
+          [ -n "$_wi_f" ] || continue
+          printf '%s\n' "$_wi_e" >>"$_wi_cand"
           ;;
         *) printf '%s\n' "$_wi_e" >>"$_wi_cand" ;;
       esac
