@@ -566,6 +566,7 @@ tidy_plan_legacy() {
     _tll_tl=$(basename "$(readlink "$_tll_rd/last")")
   fi
   _tll_names=$(mktemp)
+  _tll_todos=$(rt_main_root)/.planning/todos/pending
   _tl_legacy_names "$_tll_rd" >"$_tll_names"
   while IFS= read -r _tll_n; do
     _tll_p=$_tll_rd/$_tll_n
@@ -573,6 +574,8 @@ tidy_plan_legacy() {
       _tl_emit1 skip "$_tll_cat" "$_tll_p" "цель session-last" 0
     elif [ "$_tll_n" = "$_tll_tl" ]; then
       _tl_emit1 skip "$_tll_cat" "$_tll_p" "цель last" 0
+    elif [ -d "$_tll_todos" ] && grep -rqF --include='*.md' -- "build/router/$_tll_n" "$_tll_todos" 2>/dev/null; then
+      _tl_emit1 skip "$_tll_cat" "$_tll_p" "ссылка из todo в pending" 0
     elif _tl_older "$_tll_p" "${XCP_TIDY_REPORT_LIGHT_DAYS:-30}"; then
       _tl_emit1 rm "$_tll_cat" "$_tll_p" "старше ${XCP_TIDY_REPORT_LIGHT_DAYS:-30} дн."
     elif _tl_older "$_tll_p" "${XCP_TIDY_REPORT_HEAVY_DAYS:-3}" && [ -d "$_tll_p" ] && [ ! -L "$_tll_p" ] &&
