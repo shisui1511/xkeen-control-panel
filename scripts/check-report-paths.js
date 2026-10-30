@@ -11,15 +11,17 @@
 //   R1. В scripts/router/*.sh, кроме lib.sh, вне комментариев нет конструкции «проверка непустоты
 //       ${RT_REPORT:-}, затем || rt_report_init» (приём чужого RT_REPORT мимо rt_report_use).
 //   R2. Каждый scripts/router/*.sh, кроме lib.sh, где вне комментариев есть RT_REPORT, содержит строку
-//       rt_report_use или строку, состоящую только из rt_report_init (как в run.sh).
+//       rt_report_use; строка, состоящая только из rt_report_init, засчитывается лишь в run.sh (там
+//       отчёт создаётся), остальные этапы принимают чужой RT_REPORT только через rt_report_use.
 //   R3. lib.sh определяет rt_report_use() {, и в теле функции есть "$_root/$RT_REPORT",
 //       "$_root"/build/router/?*) и */../*.
-//   R4. pw-suite.sh содержит PW_DIR="$RT_REPORT/, XCP_PW_STATE=$STATE, XCP_PW_OUT=$OUT, XCP_PW_JSON=$_json,
-//       утверждение "$ROOT"/build/router/*) и не меньше двух некомментарных строк с .playwright-artifacts-.
-//   R5. В scripts/router/*.sh каждое некомментарное вхождение build/router/ непосредственно предварено
-//       одним из: $_root/, "$_root"/, $ROOT/, "$ROOT"/, $(rt_repo_root)/.
+//   R4. В некомментарных строках pw-suite.sh есть PW_DIR="$RT_REPORT/, XCP_PW_STATE=$STATE, XCP_PW_OUT=$OUT,
+//       XCP_PW_JSON=$_json, утверждение "$ROOT"/build/router/*) и не меньше двух строк с .playwright-artifacts-.
+//   R5. В scripts/router/*.sh каждое некомментарное вхождение пути build/router (за ним «/», кавычка или
+//       конец строки) непосредственно предварено одним из: $_root/, "$_root"/, ${_root}/, $ROOT/, "$ROOT"/,
+//       ${ROOT}/, "${ROOT}"/, $(rt_repo_root)/.
 //   R6. В session.mjs есть path.join(this.root, 'build', 'router', и нигде RT_REPORT или RT_REPORT_DIR
-//       не получает строковый или шаблонный литерал.
+//       не получает строковый или шаблонный литерал (ни «КЛЮЧ: 'x'», ни «КЛЮЧ = 'x'», ни «['КЛЮЧ'] = 'x'»).
 // Самопроверка разбора на образцах идёт при каждом запуске: расхождение — код 1.
 //
 // Usage: node scripts/check-report-paths.js
@@ -41,9 +43,9 @@ function shCode(text) {
 }
 
 const R1_RE = /\[\s+-n\s+["']?\$\{RT_REPORT:-\}["']?\s+\]\s*\|\|\s*rt_report_init/;
-const R5_RE = /build\/router\//g;
-const R5_OK = ['$_root/', '"$_root"/', '$ROOT/', '"$ROOT"/', '$(rt_repo_root)/'];
-const R6_RE = /RT_REPORT(_DIR)?\s*:\s*['"`]/;
+const R5_RE = /build\/router(?=\/|["']|$)/g;
+const R5_OK = ['$_root/', '"$_root"/', '${_root}/', '$ROOT/', '"$ROOT"/', '${ROOT}/', '"${ROOT}"/', '$(rt_repo_root)/'];
+const R6_RES = [/RT_REPORT(_DIR)?\s*[:=]\s*['"`]/, /['"`]RT_REPORT(_DIR)?['"`]\s*(:|\]\s*=)\s*['"`]/];
 
 // Правила R1, R2, R5 для текста одного sh-скрипта (не lib.sh). Возвращает список причин.
 function shIssues(text) {
@@ -64,11 +66,13 @@ function shIssues(text) {
   return issues;
 }
 
-// Правило R2: скрипт, использующий RT_REPORT вне комментариев, вызывает rt_report_use (или rt_report_init одной строкой).
-function useIssues(text) {
+// Правило R2: скрипт, использующий RT_REPORT вне комментариев, вызывает rt_report_use (rt_report_init
+// одной строкой засчитывается только в run.sh — имя файла передаётся вторым аргументом).
+function useIssues(text, file = '') {
   const code = shCode(text);
   if (!code.some(([, line]) => line.includes('RT_REPORT'))) return [];
-  const ok = code.some(([, line]) => /^\s*rt_report_use\b/.test(line) || /^\s*rt_report_init\s*$/.test(line));
+  const initOk = path.basename(file) === 'run.sh';
+  const ok = code.some(([, line]) => /^\s*rt_report_use\b/.test(line) || (initOk && /^\s*rt_report_init\s*$/.test(line)));
   return ok ? [] : [' использует RT_REPORT, но не вызывает rt_report_use'];
 }
 
@@ -80,14 +84,14 @@ function mjsIssues(text) {
   }
   text.split('\n').forEach((line, idx) => {
     if (isJsComment(line)) return;
-    if (R6_RE.test(line)) issues.push(`${idx + 1}: RT_REPORT/RT_REPORT_DIR получает строковый литерал`);
+    if (R6_RES.some((re) => re.test(line))) issues.push(`${idx + 1}: RT_REPORT/RT_REPORT_DIR получает строковый литерал`);
   });
   return issues;
 }
 
 const problems = [];
 
-// Самопроверка: если разбор сломан, страж молчал бы. [функция, текст, ожидаемое число нарушений]
+// Самопроверка: если разбор сломан, страж молчал бы. [функция, текст, ожидаемое число нарушений, имя файла]
 const samples = [
   [shIssues, '[ -n "${RT_REPORT:-}" ] || rt_report_init\n', 1],
   [shIssues, 'rt_report_use\n', 0],
@@ -96,10 +100,18 @@ const samples = [
   [shIssues, '# [ -n "${RT_REPORT:-}" ] || rt_report_init\n', 0],
   [shIssues, 'mkdir -p "build/router/x"\n', 1],
   [shIssues, 'mkdir -p "$ROOT/build/router/x"\n', 0],
-  [mjsIssues, "path.join(this.root, 'build', 'router', base)\nconst env = { RT_REPORT: 'build/router/x' };\n", 1]
+  [shIssues, 'mkdir -p "build/router"\n', 1],
+  [shIssues, 'mkdir -p "${ROOT}/build/router/x"\n', 0],
+  [shIssues, 'echo "вне build/router: $PW_DIR"\n', 0],
+  [useIssues, 'if [ -z "${RT_REPORT:-}" ]; then\n  rt_report_init\nfi\n', 1, 'pw-suite.sh'],
+  [useIssues, 'if [ -z "${RT_REPORT:-}" ]; then\n  rt_report_init\nfi\n', 0, 'run.sh'],
+  [mjsIssues, "path.join(this.root, 'build', 'router', base)\nconst env = { RT_REPORT: 'build/router/x' };\n", 1],
+  [mjsIssues, "path.join(this.root, 'build', 'router', base)\nenv.RT_REPORT = 'build/router/x';\n", 1],
+  [mjsIssues, "path.join(this.root, 'build', 'router', base)\nenv['RT_REPORT'] = 'build/router/x';\n", 1],
+  [mjsIssues, "path.join(this.root, 'build', 'router', base)\nenv.RT_REPORT = dir;\n", 0]
 ];
-for (const [fn, text, want] of samples) {
-  const got = fn(text).length;
+for (const [fn, text, want, file] of samples) {
+  const got = fn(text, file).length;
   if (got !== want) {
     problems.push(`самопроверка разбора: образец ${JSON.stringify(text)} дал нарушений ${got}; ожидалось ${want}`);
   }
@@ -139,8 +151,12 @@ try {
       continue;
     }
     for (const reason of shIssues(text)) violations.push(`${f}:${reason}`);
-    for (const reason of useIssues(text)) violations.push(`${f}:${reason}`);
+    for (const reason of useIssues(text, f)) violations.push(`${f}:${reason}`);
     if (f === 'scripts/router/pw-suite.sh') {
+      // в комментарии строка не засчитывается: поиск только по некомментарным строкам
+      const codeText = shCode(text)
+        .map(([, line]) => line)
+        .join('\n');
       for (const need of [
         'PW_DIR="$RT_REPORT/',
         'XCP_PW_STATE=$STATE',
@@ -148,7 +164,7 @@ try {
         'XCP_PW_JSON=$_json',
         '"$ROOT"/build/router/*)'
       ]) {
-        if (!text.includes(need)) violations.push(`${f}: нет ${need}`);
+        if (!codeText.includes(need)) violations.push(`${f}: нет ${need}`);
       }
       const cleanups = shCode(text).filter(([, line]) => line.includes('.playwright-artifacts-')).length;
       if (cleanups < 2) violations.push(`${f}: уборка .playwright-artifacts-* нужна и после запуска, и в EXIT-trap (найдено ${cleanups})`);
