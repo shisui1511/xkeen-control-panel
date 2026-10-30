@@ -5,7 +5,8 @@
 # POSIX sh; сам ничего не запускает и `set` не меняет. Функции — tidy_*, внутренние
 # переменные — с префиксом _tl.
 #
-# Пороги (переменные окружения, в скобках умолчания):
+# Пороги (переменные окружения, в скобках умолчания; проверяются — целое число, для сборок, кэша
+# релизов, дней и числа групп не меньше 1; при неверном значении план не строится, код 2):
 #   XCP_TIDY_BUILDS            сколько новейших build/xcp_v*_<арх> оставлять на архитектуру (5)
 #   XCP_TIDY_RELEASES          сколько новейших тегов кэша релизов оставлять (3)
 #   XCP_TIDY_REPORTS_KEEP      сколько новейших групп отчётов всегда остаются целиком (10)
@@ -25,6 +26,22 @@ _TL_TAB=$(printf '\t')
 _tl_refuse() {
   echo "tidy: отказ удалять: ${1} — ${2}" >&2
   return 1
+}
+
+# Проверка порога: _tl_num <имя переменной> <значение> [<минимум>]. Целое не меньше минимума
+# (по умолчанию 0); иначе сообщение в stderr и код 2 — план не строится, ничего не удаляется.
+_tl_num() {
+  case "$2" in
+    '' | *[!0-9]*)
+      echo "tidy: $1 должна быть целым числом: $2" >&2
+      return 2
+      ;;
+  esac
+  # 10 цифр и больше не сравниваются как число: заведомо вне разумных порогов
+  if [ "${#2}" -gt 9 ] || [ "$2" -lt "${3:-0}" ]; then
+    echo "tidy: $1 должна быть от ${3:-0} до 999999999: $2" >&2
+    return 2
+  fi
 }
 
 # Записи плана для путей со stdin (по одному в строке):
@@ -173,6 +190,7 @@ _tl_check_parent() {
 tidy_plan_builds() {
   _tlb_root=$1
   _tlb_keep=${XCP_TIDY_BUILDS:-5}
+  _tl_num XCP_TIDY_BUILDS "$_tlb_keep" 1 || return 2
   for _tlb_a in arm64 mipsle mips; do
     ls -t -- "$_tlb_root"/build/xcp_v*_"$_tlb_a" 2>/dev/null |
       while IFS= read -r _tlb_f; do
@@ -180,7 +198,7 @@ tidy_plan_builds() {
           printf '%s\n' "$_tlb_f"
         fi
       done |
-      sed -n "$((_tlb_keep + 1)),\$p" |
+      awk -v k="$_tlb_keep" 'NR > k' |
       _tl_emit_paths rm сборки "старше $_tlb_keep новейших ($_tlb_a)"
   done
 }
@@ -431,6 +449,10 @@ tidy_plan_reports() {
   _tlr_root=$1
   _tlr_rd=$_tlr_root/build/router
   [ -d "$_tlr_rd" ] || return 0
+  _tl_num XCP_TIDY_REPORT_LIGHT_DAYS "${XCP_TIDY_REPORT_LIGHT_DAYS:-30}" 1 || return 2
+  _tl_num XCP_TIDY_REPORT_HEAVY_DAYS "${XCP_TIDY_REPORT_HEAVY_DAYS:-3}" 1 || return 2
+  _tl_num XCP_TIDY_REPORTS_KEEP "${XCP_TIDY_REPORTS_KEEP:-10}" 1 || return 2
+  _tl_num XCP_TIDY_LIGHT_MAX_KB "${XCP_TIDY_LIGHT_MAX_KB:-512}" 0 || return 2
   _tlr_prot=$(mktemp)
   _tlr_list=$(mktemp)
   _tlr_cls=$(mktemp)
@@ -491,6 +513,9 @@ tidy_plan_legacy() {
   _tll_root=$1
   _tll_rd=$_tll_root/build/router
   [ -d "$_tll_rd" ] || return 0
+  _tl_num XCP_TIDY_REPORT_LIGHT_DAYS "${XCP_TIDY_REPORT_LIGHT_DAYS:-30}" 1 || return 2
+  _tl_num XCP_TIDY_REPORT_HEAVY_DAYS "${XCP_TIDY_REPORT_HEAVY_DAYS:-3}" 1 || return 2
+  _tl_num XCP_TIDY_LIGHT_MAX_KB "${XCP_TIDY_LIGHT_MAX_KB:-512}" 0 || return 2
   _tll_cat="старый формат build/router"
   _tll_tsl=""
   _tll_tl=""
@@ -573,6 +598,7 @@ tidy_plan_releases() {
   _tlv_d=$_tlv_root/build/router/release
   [ -d "$_tlv_d" ] || return 0
   _tlv_keep=${XCP_TIDY_RELEASES:-3}
+  _tl_num XCP_TIDY_RELEASES "$_tlv_keep" 1 || return 2
   ls -1 "$_tlv_d" 2>/dev/null | grep -E '^v[0-9]' | sed 's/-/~/' | sort -V | sed 's/~/-/' |
     awk -v k="$_tlv_keep" -v d="$_tlv_d" '{ a[NR] = $0 } END { for (i = 1; i <= NR - k; i++) print d "/" a[i] }' |
     grep -vxF -- "$_tlv_d/$_tlv_prot" |
