@@ -153,6 +153,33 @@ tidy_safe_rm() {
       fi
       ;;
   esac
+  # отчёт идущего прогона (RT_REPORT, RT_REPORT_DIR) не удаляется, даже если категория построена
+  # без tidy_protected_keys: отказ, если путь совпадает с ним или содержит его
+  for _tls_v in "${RT_REPORT:-}" "${RT_REPORT_DIR:-}"; do
+    [ -n "$_tls_v" ] || continue
+    case "$_tls_v" in
+      /*) ;;
+      *) _tls_v=$_tls_root/$_tls_v ;;
+    esac
+    _tls_v=${_tls_v%/}
+    _tls_vr=$(cd "$_tls_v" 2>/dev/null && pwd -P) || _tls_vr=$_tls_v
+    _tls_pr=$_tls_p
+    if [ -d "$_tls_p" ] && [ ! -L "$_tls_p" ]; then
+      _tls_pr=$(cd "$_tls_p" 2>/dev/null && pwd -P) || _tls_pr=$_tls_p
+    fi
+    case "$_tls_vr/" in
+      "$_tls_pr"/*)
+        _tl_refuse "$_tls_rel" "отчёт текущего прогона"
+        return 1
+        ;;
+    esac
+    case "$_tls_v/" in
+      "$_tls_p"/*)
+        _tl_refuse "$_tls_rel" "отчёт текущего прогона"
+        return 1
+        ;;
+    esac
+  done
   # родитель должен лежать внутри корня и после разыменования (ссылка на чужой каталог)
   _tls_pc=0
   _tl_check_parent "$_tls_root" "$_tls_p" || _tls_pc=$?
