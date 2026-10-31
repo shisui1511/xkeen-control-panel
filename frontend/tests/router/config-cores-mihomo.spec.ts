@@ -1,4 +1,5 @@
 // e2e-pages: config/cores
+import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
@@ -261,3 +262,198 @@ test('cores: Mihomo — секции чужого профиля только д
 
   await guard.assertClean();
 });
+
+interface ListenerRow {
+  name?: string;
+  type?: string;
+  port?: number;
+}
+
+/** Listeners и tun секции «Входящие/TUN» по виду настоящего API. */
+function inboundsOf(view: MihomoView): { listeners: ListenerRow[]; stack: string } {
+  const value = (sectionOf(view, 'inbounds').value ?? {}) as {
+    listeners?: ListenerRow[];
+    tun?: { stack?: string };
+  };
+  return { listeners: value.listeners ?? [], stack: value.tun?.stack ?? '' };
+}
+
+test('cores: Mihomo — listener force-proxy переживает правку формы', async ({ page }) => {
+  test.setTimeout(T.save * 4);
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  const before = await mihomoView(page);
+  test.skip(!before.installed, 'Mihomo не установлен');
+  await resetDraft(page);
+
+  try {
+    await ensureProfileInDraft(page);
+    await openSection(page, 'inbounds');
+
+    // listener force-proxy: если профиль его ещё не знает, он добавляется в «Дополнительно»
+    // (тег создаёт сам тест, поэтому блок группы виден на любом стенде)
+    let name = inboundsOf(await mihomoView(page)).listeners.find((l) =>
+      (l.name ?? '').startsWith('force-proxy')
+    )?.name;
+    let port = 0;
+    if (name === undefined) {
+      name = 'force-proxy';
+      port = randomPort();
+      const area = await openAdvanced(page, 'inbounds');
+      const current = await area.inputValue();
+      const entry = `  ${name}:\n    type: redir\n    port: ${port}`;
+      const next = /^listeners:[^\S\n]*$/m.test(current)
+        ? current.replace(/^listeners:[^\S\n]*$/m, `listeners:\n${entry}`)
+        : `${current.trimEnd()}\nlisteners:\n${entry}\n`.trimStart();
+      await area.fill(next);
+      await area.blur();
+      await expect(page.getByTestId('section-raw-error-mihomo-inbounds')).toHaveCount(0);
+    }
+    const names = page.locator('[data-testid^="section-listener-name-mihomo-"]');
+    const nameValues = async (): Promise<string[]> =>
+      names.evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+    await expect.poll(nameValues, { timeout: T.action }).toContain(name);
+    if (port === 0) {
+      port = Number(
+        inboundsOf(await mihomoView(page)).listeners.find((l) => l.name === name)?.port ?? 0
+      );
+    }
+
+    // группа для входящих force-proxy: блок один, виден пояснение про xkeen -sb
+    const block = page.getByTestId('section-force-proxy-mihomo');
+    await expect(block).toHaveCount(1, { timeout: T.action });
+    await expect(block).toBeVisible();
+    await expect(block).toContainText(/speed balancer/);
+
+    // правка TUN: строка force-proxy сохраняет имя и порт
+    const stackSelect = page.getByTestId('section-field-mihomo-inbounds-tun-stack');
+    await expect(stackSelect).toBeVisible({ timeout: T.action });
+    const stacks = ['system', 'gvisor', 'mixed'];
+    const current = await stackSelect.inputValue();
+    const wanted = stacks.find((s) => s !== current) ?? 'gvisor';
+    await stackSelect.selectOption(wanted);
+    await expect
+      .poll(async () => inboundsOf(await mihomoView(page)).stack, { timeout: T.action })
+      .toBe(wanted);
+
+    const after = inboundsOf(await mihomoView(page));
+    const kept = after.listeners.filter((l) => l.name === name);
+    expect(kept, 'listener force-proxy после правки tun').toHaveLength(1);
+    expect(kept[0].port, 'порт listener не изменился').toBe(port);
+    await expect.poll(nameValues, { timeout: T.action }).toContain(name);
+
+    // профиль уже у панели: смена tun объявляет полный перезапуск (D-16)
+    if (before.profileOwner === 'panel') {
+      await expect(page.getByTestId('section-restart-note-mihomo-inbounds')).toBeVisible({
+        timeout: T.action
+      });
+      await expect(
+        page.locator('[data-testid="draft-restart-note"][data-kernel="mihomo"]')
+      ).toHaveAttribute('data-reason', 'tun', { timeout: T.action });
+    }
+
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});
+
+/**
+ * Критичные и серьёзные нарушения axe (WCAG 2.0/2.1 A и AA, в том числе color-contrast)
+ * внутри заданных областей. Вывод — правило, селекторы и числа контраста.
+ */
+async function axeSevere(page: Page, scopes: string[]): Promise<string[]> {
+  // раскрытие карточки идёт с затуханием: axe не должен видеть полупрозрачный кадр
+  await page.waitForTimeout(500);
+  let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']);
+  for (const scope of scopes) builder = builder.include(scope);
+  const scan = await builder.analyze();
+  return scan.violations
+    .filter((v) => v.impact === 'critical' || v.impact === 'serious')
+    .map((v) => {
+      const nodes = v.nodes.slice(0, 3).map((n) => {
+        const msg = (n.any[0]?.message ?? '')
+          .replace(/^Element has insufficient color contrast of /, 'контраст ')
+          .replace(/, font size:.*?\)/, ')')
+          .replace(/\. Expected contrast ratio of /, ', нужно ');
+        return `${n.target.join(' ')} [${msg}]`;
+      });
+      return `${v.id} (${v.impact}, узлов ${v.nodes.length}): ${nodes.join(' | ')}`;
+    });
+}
+
+const FORM_SECTIONS = ['main', 'dns', 'inbounds', 'sniffer'];
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`sections axe: формы Mihomo, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await startPage(page);
+    test.skip(!(await mihomoView(page)).installed, 'Mihomo не установлен');
+
+    await openCores(page);
+    for (const id of FORM_SECTIONS) await expandSection(page, id);
+    for (const id of FORM_SECTIONS) {
+      await expect(page.getByTestId(`section-form-mihomo-${id}`)).toBeVisible({
+        timeout: T.action
+      });
+    }
+
+    const problems: string[] = [];
+    const applied = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+    if (applied !== theme) problems.push(`тема применена ${applied}, ожидалась ${theme}`);
+    const scopes = FORM_SECTIONS.map((id) => `[data-testid="section-card-mihomo-${id}"]`);
+    for (const v of await axeSevere(page, scopes)) problems.push(`axe ${v}`);
+    expect(problems, problems.join('\n')).toEqual([]);
+
+    await guard.assertClean();
+  });
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`cores: 390 px формы Mihomo, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await startPage(page);
+    test.skip(!(await mihomoView(page)).installed, 'Mihomo не установлен');
+
+    await openCores(page);
+    for (const id of FORM_SECTIONS) await expandSection(page, id);
+    for (const id of FORM_SECTIONS) {
+      await expect(page.getByTestId(`section-form-mihomo-${id}`)).toBeVisible({
+        timeout: T.action
+      });
+    }
+
+    const pageScroll = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(pageScroll, 'горизонтальная прокрутка страницы').toBeLessThanOrEqual(0);
+
+    // поля и кнопки умещаются в экран, кнопки строк не ниже 44 px
+    const boxes = await page
+      .locator('[data-testid^="section-form-mihomo-"] :is(input, select, textarea, button)')
+      .evaluateAll((els) =>
+        els
+          .filter((e) => (e as HTMLElement).offsetParent !== null)
+          .map((e) => {
+            const r = e.getBoundingClientRect();
+            return {
+              id: e.getAttribute('data-testid') ?? e.tagName,
+              right: r.right,
+              height: r.height,
+              button: e.tagName === 'BUTTON' && e.getAttribute('type') === 'button'
+            };
+          })
+      );
+    for (const b of boxes) {
+      expect(b.right, `${b.id} в пределах экрана`).toBeLessThanOrEqual(390);
+      if (b.button) expect(b.height, `${b.id}: высота кнопки`).toBeGreaterThanOrEqual(44);
+    }
+
+    await guard.assertClean();
+  });
+}
