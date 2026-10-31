@@ -368,6 +368,11 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		if !blocked && DesiredRouting(src).Managed {
 			blocked = len(routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel, p.d.ForeignOwned)) > 0
 		}
+		// Чужой файл с ключом взятой секции блокирует запуск, который эту секцию
+		// держит (managed); запуск с managed=false — «Отпустить» — не блокируется.
+		if !blocked {
+			blocked = sectionDriftBlocks(src, sectionsDrift(p.d.Roots, snap.Cores, installed, req.Kernel, p.d.ForeignOwned))
+		}
 		if blocked {
 			p.setStep(StepBuild, StepFailed, "", ErrDriftBlocked.Error())
 			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})

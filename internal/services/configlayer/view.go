@@ -37,6 +37,9 @@ type FilesEvent struct {
 	// Routing — расхождения маршрутизации (они уже входят в DriftCount); в событие
 	// не попадают, клиент берёт их из блока routing снимка.
 	Routing []RoutingDriftItem `json:"-"`
+	// Sections — расхождения взятых секций Xray (section_foreign, уже входят в
+	// DriftCount); в событие не попадают, клиент берёт их из блока cores снимка.
+	Sections []RoutingDriftItem `json:"-"`
 }
 
 // NoticesEvent — данные события notices.
