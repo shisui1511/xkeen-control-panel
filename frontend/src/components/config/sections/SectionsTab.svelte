@@ -105,6 +105,19 @@
     return r.desired === true || r[k]?.taken === true;
   }
 
+  // Блок api Xray не пишется ниже минимальной версии ядра: доступность функции решает
+  // сервер (features снимка слоя), интерфейс номера версий не сравнивает. Строка с причиной
+  // нужна, когда Xray установлен и маршрутизация Xray у панели или желаема в черновике;
+  // «Применить» она не блокирует
+  const apiUnavailable = $derived(
+    views.xray?.installed === true &&
+      $layerSnapshot?.features?.xray_hot_swap_api === 'unavailable' &&
+      routingTaken('xray')
+  );
+  const apiMinVersion = $derived(
+    ($layerSnapshot?.kernels ?? []).find((kn) => kn.name === 'xray')?.min_version ?? ''
+  );
+
   // Диалог взятия: одна секция или все секции ядра
   let takeOpen = $state(false);
   let takeKernel = $state<CoreKernel>('xray');
@@ -187,6 +200,16 @@
           plain
         />
       {:else}
+        {#if k === 'xray' && apiUnavailable}
+          <div
+            class="alert alert-warning cores-api"
+            role="status"
+            data-testid="xray-api-unavailable"
+          >
+            <Icon name="warning" size={16} class="cores-api-icon" />
+            <span>{$t('cfg.sec.api_unavailable', { min: apiMinVersion })}</span>
+          </div>
+        {/if}
         {#if k === 'mihomo' && view.profile}
           <MihomoProfileNotice profile={view.profile} />
         {/if}
@@ -277,6 +300,18 @@
     .cores-bar :global(.btn) {
       flex: 1 1 100%;
     }
+  }
+
+  .cores-api {
+    margin: 0;
+    min-width: 0;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .cores-api :global(.cores-api-icon) {
+    flex-shrink: 0;
+    margin-top: 2px;
   }
 
   .cores-panel[hidden] {
