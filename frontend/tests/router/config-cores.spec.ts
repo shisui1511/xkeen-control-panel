@@ -466,3 +466,115 @@ test('cores: взять все секции Xray — диалог по секц�
 
   await guard.assertClean();
 });
+
+// --- 390 px и доступность карточек и диалога взятия (фаза 147, план 15) ---------------------
+
+/**
+ * Открывает диалог «Взять все секции ядра». Ничего не записывает. Возвращает false, если
+ * Xray не установлен или все его секции уже у панели (кнопки нет).
+ */
+async function openTakeDialog(page: Page): Promise<boolean> {
+  if (!(await installedOf(page, 'xray'))) return false;
+  await openConfig(page, '#/config/cores');
+  await tabReady(page, 'cores-tab');
+  await page.getByTestId('kernel-switch-xray').click();
+  const all = page.getByTestId('cores-take-all');
+  if (!(await all.isVisible())) return false;
+  await all.click();
+  const modal = page.getByTestId('take-section-modal');
+  await expect(modal).toBeVisible({ timeout: T.action });
+  await expect(modal.getByTestId('take-section-loading')).toHaveCount(0, { timeout: T.action });
+  await expect(modal.getByTestId('take-section-consequence')).toBeVisible({ timeout: T.action });
+  return true;
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`cores: 390 px карточки и диалог, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await startPage(page);
+    const kernel: Kernel = (await installedOf(page, 'xray')) ? 'xray' : 'mihomo';
+    test.skip(kernel === 'mihomo' && !(await installedOf(page, 'mihomo')), 'нет ядер');
+
+    await openConfig(page, '#/config/cores');
+    await tabReady(page, 'cores-tab');
+    await page.getByTestId(`kernel-switch-${kernel}`).click();
+    const panel = page.getByTestId(`cores-panel-${kernel}`);
+
+    // пять карточек, раскрываем первую
+    const toggles = panel.locator('[data-testid^="section-toggle-"]');
+    await expect(toggles).toHaveCount(5, { timeout: T.page });
+    const first = toggles.first();
+    const box = await first.boundingBox();
+    expect(box, 'заголовок карточки виден').not.toBeNull();
+    expect(box!.height, 'высота заголовка карточки').toBeGreaterThanOrEqual(44);
+    await first.click();
+    await expect(first).toHaveAttribute('aria-expanded', 'true');
+
+    const pageScroll = () =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+      );
+    expect(
+      await pageScroll(),
+      'горизонтальная прокрутка страницы с карточками'
+    ).toBeLessThanOrEqual(0);
+
+    // кнопки строки владельца раскрытой карточки не ниже 44 px
+    const actions = panel.locator('.so-actions .btn');
+    for (let i = 0; i < (await actions.count()); i++) {
+      const b = await actions.nth(i).boundingBox();
+      expect(b, 'кнопка владельца видна').not.toBeNull();
+      expect(b!.height, 'высота кнопки владельца').toBeGreaterThanOrEqual(44);
+      expect(b!.x + b!.width, 'кнопка владельца в пределах экрана').toBeLessThanOrEqual(390);
+    }
+
+    // диалог взятия: без горизонтальной прокрутки, кнопки не ниже 44 px
+    if (await openTakeDialog(page)) {
+      const modal = page.getByTestId('take-section-modal');
+      expect(
+        await pageScroll(),
+        'горизонтальная прокрутка страницы с диалогом'
+      ).toBeLessThanOrEqual(0);
+      const overflow = await modal
+        .getByTestId('take-section-content')
+        .evaluate((el) => el.scrollWidth - el.clientWidth);
+      expect(overflow, 'горизонтальная прокрутка тела диалога').toBeLessThanOrEqual(0);
+      for (const id of ['take-section-confirm', 'take-section-cancel']) {
+        const b = await modal.getByTestId(id).boundingBox();
+        expect(b, `${id} виден`).not.toBeNull();
+        expect(b!.height, `высота ${id}`).toBeGreaterThanOrEqual(44);
+        expect(b!.x + b!.width, `${id} в пределах экрана`).toBeLessThanOrEqual(390);
+      }
+      await modal.getByTestId('take-section-cancel').click();
+      await expect(modal).toHaveCount(0, { timeout: T.action });
+    }
+
+    await guard.assertClean();
+  });
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`sections axe: диалог взятия, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await startPage(page);
+
+    const opened = await openTakeDialog(page);
+    test.skip(!opened, 'на стенде нечего брать: диалог не открывается');
+
+    const problems: string[] = [];
+    const applied = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+    if (applied !== theme) problems.push(`тема применена ${applied}, ожидалась ${theme}`);
+    for (const v of await axeSevere(page, ['[data-testid="take-section-modal"]'])) {
+      problems.push(`axe ${v}`);
+    }
+    expect(problems, problems.join('\n')).toEqual([]);
+
+    await page.getByTestId('take-section-cancel').click();
+    await expect(page.getByTestId('take-section-modal')).toHaveCount(0, { timeout: T.action });
+    await guard.assertClean();
+  });
+}
