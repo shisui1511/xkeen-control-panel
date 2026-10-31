@@ -93,20 +93,49 @@ func rtCoresSameJSON(t *testing.T, raw json.RawMessage, want any) bool {
 	return reflect.DeepEqual(rtCoresDecode(t, raw), want)
 }
 
-// rtCoresKernelSection — значение секции id в слитом конфиге, который напечатало
-// ядро (rtCoresDump): для «Прочих ключей» — объект из ключей секции other.
-func rtCoresKernelSection(kernel map[string]any, id string) (any, bool) {
-	if id != xraySectionOther {
-		v, ok := kernel[id]
-		return v, ok
+// rtCoresCheckAgainstKernel — арбитр правила слияния панели (D-28). Каталог dir
+// сливается ядром (дамп), а значение секции id из скана (Effective, слияние сырых
+// значений файлов в панели) кладётся единственным файлом во второй каталог —
+// `{ключ: Effective}`, для «Прочих ключей» сам объект — и тоже сливается ядром.
+// Дампы по каждому ключу секции должны совпасть: тогда Effective и слияние ядра
+// дали одно и то же, а дамп, нормализованный ядром, с файлом не сравнивается.
+// Расхождение — ошибка с ключом, обоими дампами и слитым значением панели: правило
+// mergeXrayValue описывает слияние ядра неверно. scanned — результат
+// ScanXrayKeyFiles(dir).
+func rtCoresCheckAgainstKernel(t *testing.T, dir, id string, scanned []XrayKeyFile) {
+	t.Helper()
+	sec := ScanXraySections(scanned)[id]
+	if sec.EffectiveUnknown || len(sec.Effective) == 0 {
+		t.Errorf("%s: Effective=%s EffectiveUnknown=%v, значение должно быть известно", id, sec.Effective, sec.EffectiveUnknown)
+		return
 	}
-	other := map[string]any{}
-	for k, v := range kernel {
-		if XraySectionOfKey(k) == xraySectionOther {
-			other[k] = v
+	var body []byte
+	if id == xraySectionOther {
+		body = sec.Effective
+	} else {
+		var err error
+		if body, err = json.Marshal(map[string]json.RawMessage{id: sec.Effective}); err != nil {
+			t.Fatalf("%s: %v", id, err)
 		}
 	}
-	return other, len(other) > 0
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(body, &keys); err != nil {
+		t.Fatalf("%s: Effective не объект ключей: %v: %s", id, err, body)
+	}
+	mirror := dir + "-effective"
+	rtCoresWriteDir(t, mirror, map[string]string{
+		rtCoresOutboundName: rtCoresOutboundBody,
+		"01_effective.json": string(body) + "\n",
+	})
+	fromFiles, fromEffective := rtCoresScanDump(t, dir), rtCoresScanDump(t, mirror)
+	for k := range keys {
+		a, aok := fromFiles[k]
+		b, bok := fromEffective[k]
+		if !aok || !bok || !reflect.DeepEqual(rtCoresDecode(t, a), rtCoresDecode(t, b)) {
+			t.Errorf("слияние %s (%s), ключ %s: ядро из файлов каталога (%v) %s != ядро из Effective панели (%v) %s; Effective=%s",
+				id, filepath.Base(dir), k, aok, a, bok, b, sec.Effective)
+		}
+	}
 }
 
 const (
@@ -171,9 +200,9 @@ func TestRouterCoresScanXray(t *testing.T) {
 		t.Errorf("%s: Broken=%v Comments=%v Hash=%q", rtCoresDNSName, dns.Broken, dns.Comments, dns.Hash)
 	}
 
-	// Без дампа значение секции с файлами неизвестно (D-28): объект последнего
-	// файла не подставляется, неразобранный файл тем более.
-	sec := ScanXraySections(scanned, nil)["dns"]
+	// Неразобранный файл с ключом секции делает значение неизвестным (D-28): его
+	// содержимое панель не знает, объект другого файла вместо него не подставляется.
+	sec := ScanXraySections(scanned)["dns"]
 	if !slices.Equal(sec.Pure, []string{rtCoresDNSName}) {
 		t.Errorf("dns Pure=%v, ожидался [%s]", sec.Pure, rtCoresDNSName)
 	}
@@ -184,10 +213,9 @@ func TestRouterCoresScanXray(t *testing.T) {
 		t.Errorf("dns Mixed=%v без %s", sec.Mixed, rtCoresBadName)
 	}
 	if sec.Effective != nil || !sec.EffectiveUnknown {
-		t.Errorf("dns без дампа: Effective=%s EffectiveUnknown=%v, ожидались nil и true", sec.Effective, sec.EffectiveUnknown)
+		t.Errorf("dns с неразобранным файлом: Effective=%s EffectiveUnknown=%v, ожидались nil и true", sec.Effective, sec.EffectiveUnknown)
 	}
-	// Что ядро делает с неразобранным файлом, только наблюдение: значение секции в
-	// этом случае всё равно известно лишь из дампа.
+	// Что ядро делает с неразобранным файлом, только наблюдение.
 	if _, err := XrayDump(context.Background(), rtCoresXrayBin(t), all, nil); err != nil {
 		t.Logf("дамп каталога с неразобранным файлом: %v", err)
 	}
@@ -201,13 +229,13 @@ func TestRouterCoresScanXray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanXrayKeyFiles(valid): %v", err)
 	}
-	// С дампом ядра значение секции известно и равно объекту файла.
-	got := ScanXraySections(clean, rtCoresScanDump(t, valid))["dns"]
+	// Файл dns один: слияние сырых значений даёт объект файла как есть.
+	got := ScanXraySections(clean)["dns"]
 	if got.Owner != OwnerXKeen {
 		t.Errorf("dns Owner=%s, ожидался %s", got.Owner, OwnerXKeen)
 	}
 	if got.EffectiveUnknown || !rtCoresSameJSON(t, got.Effective, rtCoresDecode(t, []byte(rtCoresDNSValue))) {
-		t.Errorf("dns с дампом: Effective=%s EffectiveUnknown=%v, ожидалось %s", got.Effective, got.EffectiveUnknown, rtCoresDNSValue)
+		t.Errorf("dns: Effective=%s EffectiveUnknown=%v, ожидалось %s", got.Effective, got.EffectiveUnknown, rtCoresDNSValue)
 	}
 	// Фикстуры валидны для ядра стенда.
 	rtCoresXrayTest(t, valid)
@@ -222,9 +250,12 @@ const (
 	rtCoresAPIName    = "00_api.json"
 	rtCoresExtraName  = "05_extra.json"
 	rtCoresShadowName = "99_zz.json"
-	rtCoresLogBody    = `{"log": {"loglevel": "warning"}}` + "\n"
-	rtCoresPolicyBody = `{"policy": {"levels": {"0": {"connIdle": 300}}, "system": {"statsInboundUplink": true}}}` + "\n"
-	rtCoresShadowBody = `{"dns": {"servers": ["127.0.0.3"]}}` + "\n"
+	// Значения log и policy из файлов-фикстур (объект ключа).
+	rtCoresLogValue    = `{"loglevel": "warning"}`
+	rtCoresPolicyValue = `{"levels": {"0": {"connIdle": 300}}, "system": {"statsInboundUplink": true}}`
+	rtCoresLogBody     = `{"log": {"loglevel": "warning"}}` + "\n"
+	rtCoresPolicyBody  = `{"policy": {"levels": {"0": {"connIdle": 300}}, "system": {"statsInboundUplink": true}}}` + "\n"
+	rtCoresShadowBody  = `{"dns": {"servers": ["127.0.0.3"]}}` + "\n"
 	// Прозрачные входящие: redirect, tproxy и входящий XKeen force-proxy-redirect.
 	rtCoresInbBody = `{"inbounds": [
   {"tag": "redirect", "listen": "127.0.0.1", "port": 61219, "protocol": "dokodemo-door",
@@ -295,22 +326,25 @@ func rtCoresScanAllSections(t *testing.T, dir string, base map[string]string) {
 	if err != nil {
 		t.Fatalf("ScanXrayKeyFiles: %v", err)
 	}
-	// Значения log, dns, policy и «Прочих ключей» — из дампа ядра (D-28); сверка с
-	// отдельным разбором того же дампа: тест не повторяет модель слияния.
-	sections := ScanXraySections(scanned, rtCoresScanDump(t, dir))
-	kernel := rtCoresDump(t, dir)
+	// Значения log, dns, policy и «Прочих ключей» — слияние сырых значений файлов
+	// (D-28); ядро арбитр: слитое из файлов совпадает со слитым из Effective.
+	sections := ScanXraySections(scanned)
 	for _, id := range []string{xraySectionLog, xraySectionDNS, xraySectionPolicy, xraySectionOther} {
-		want, ok := rtCoresKernelSection(kernel, id)
-		got := sections[id]
-		if !ok || got.EffectiveUnknown || !rtCoresSameJSON(t, got.Effective, want) {
-			t.Errorf("%s: Effective=%s EffectiveUnknown=%v расходится со слитым конфигом ядра (в нём есть значение: %v)", id, got.Effective, got.EffectiveUnknown, ok)
+		rtCoresCheckAgainstKernel(t, dir, id, scanned)
+	}
+	// В каталоге нет неразобранных файлов: значение известно у всех секций.
+	for id, sc := range sections {
+		if sc.EffectiveUnknown {
+			t.Errorf("%s: EffectiveUnknown=true без неразобранных файлов", id)
 		}
 	}
-	// Без дампа те же секции с файлами неизвестны; «Входящие» от дампа не зависят.
-	for id, sc := range ScanXraySections(scanned, nil) {
-		if wantUnknown := id != xraySectionInbounds; sc.EffectiveUnknown != wantUnknown || (wantUnknown && sc.Effective != nil) {
-			t.Errorf("%s без дампа: EffectiveUnknown=%v Effective=%s", id, sc.EffectiveUnknown, sc.Effective)
-		}
+	// policy лежит в одном файле, log — в двух с одним и тем же объектом: слияние
+	// сырых значений даёт объект файла как есть.
+	if got := sections["policy"]; !rtCoresSameJSON(t, got.Effective, rtCoresDecode(t, []byte(rtCoresPolicyValue))) {
+		t.Errorf("policy: Effective=%s, ожидалось %s", got.Effective, rtCoresPolicyValue)
+	}
+	if got := sections["log"]; !rtCoresSameJSON(t, got.Effective, rtCoresDecode(t, []byte(rtCoresLogValue))) {
+		t.Errorf("log: Effective=%s, ожидалось %s", got.Effective, rtCoresLogValue)
 	}
 
 	if got := sections["log"]; !slices.Equal(got.Pure, []string{rtCoresLogName}) || !slices.Equal(got.Mixed, []string{rtCoresMixedName}) {
@@ -518,71 +552,65 @@ func rtCoresDecode(t *testing.T, raw []byte) any {
 }
 
 // TestRouterCoresMergeSemantics проверяет решение D-28: действующее значение
-// log, dns, policy и «Прочих ключей» панель берёт из дампа ядра, а не из объекта
-// последнего файла (Xray сливает эти объекты вглубь). Сценарий сверяет
-// ScanXraySections(…, дамп).Effective с отдельным разбором слитого конфига ядра
-// и проверяет, что без дампа значение неизвестно. «Входящие» объединяются по tag.
+// log, dns, policy и «Прочих ключей» панель считает сама — глубокое слияние
+// сырых значений файлов по порядку имён (mergeXrayValue), а ядро (дамп
+// `xray run -dump -confdir`) служит арбитром. Для каждой пары файлов каталог
+// сливается ядром, Effective скана кладётся единственным файлом во второй каталог
+// и сливается ядром тоже; дампы по ключу секции должны совпасть. Расхождение —
+// правило слияния панели неверно (в сообщении ключ и оба дампа). Пары покрывают
+// вложенные объекты, массивы (гипотеза: ранний + поздний) и замену скаляров.
+// «Входящие» объединяются по tag.
 func TestRouterCoresMergeSemantics(t *testing.T) {
 	rtCoresXrayBin(t)
 	base := rtLiveDir(t)
 
-	// Ключ K: ранний 01_a.json задаёт поле, которого нет в позднем 02_b.json.
 	type mergeCase struct {
-		key, early, late string
-		// observe — поля раннего файла, судьбу которых в слитом конфиге ядра
-		// сценарий только записывает в журнал.
-		observe [][]string
+		name, key, early, late string
 	}
 	cases := []mergeCase{
 		{
-			key:     "log",
-			early:   `{"log": {"loglevel": "debug", "dnsLog": true}}`,
-			late:    `{"log": {"loglevel": "warning"}}`,
-			observe: [][]string{{"log", "dnsLog"}},
+			name: "log-scalar", key: "log",
+			early: `{"log": {"loglevel": "debug", "dnsLog": true}}`,
+			late:  `{"log": {"loglevel": "warning"}}`,
 		},
 		{
-			key:     "dns",
-			early:   `{"dns": {"queryStrategy": "UseIPv4", "servers": ["127.0.0.1"]}}`,
-			late:    `{"dns": {"servers": ["127.0.0.2"]}}`,
-			observe: [][]string{{"dns", "queryStrategy"}},
+			name: "dns-array", key: "dns",
+			early: `{"dns": {"queryStrategy": "UseIPv4", "servers": ["127.0.0.1"]}}`,
+			late:  `{"dns": {"servers": ["127.0.0.2"]}}`,
 		},
 		{
-			key:     "policy",
-			early:   `{"policy": {"levels": {"0": {"connIdle": 111}}, "system": {"statsInboundUplink": true}}}`,
-			late:    `{"policy": {"levels": {"0": {"handshake": 7}}}}`,
-			observe: [][]string{{"policy", "levels", "0", "connIdle"}, {"policy", "system"}},
+			name: "dns-nested", key: "dns",
+			early: `{"dns": {"hosts": {"a.test": "127.0.0.1", "b.test": ["127.0.0.2"]}, "servers": [{"address": "127.0.0.1", "port": 53}]}}`,
+			late:  `{"dns": {"hosts": {"b.test": ["127.0.0.3"], "c.test": "127.0.0.4"}, "servers": ["127.0.0.2"], "tag": "dns-in"}}`,
 		},
 		{
-			key:   xraySectionOther,
+			name: "policy-nested", key: "policy",
+			early: `{"policy": {"levels": {"0": {"connIdle": 111}}, "system": {"statsInboundUplink": true}}}`,
+			late:  `{"policy": {"levels": {"0": {"handshake": 7}}}}`,
+		},
+		{
+			name: "policy-replace", key: "policy",
+			early: `{"policy": {"levels": {"0": {"connIdle": 111, "handshake": 3}}}}`,
+			late:  `{"policy": {"levels": {"0": {"connIdle": 222}, "1": {"connIdle": 5}}}}`,
+		},
+		{
+			name: "other", key: xraySectionOther,
 			early: `{"stats": {}}`,
 			late:  `{"stats": {}}`,
 		},
 	}
 	for _, c := range cases {
-		dir := filepath.Join(base, "merge-"+c.key)
-		rtCoresWriteDir(t, dir, map[string]string{"01_a.json": c.early + "\n", "02_b.json": c.late + "\n"})
-		kernel := rtCoresDump(t, dir)
-		want, ok := rtCoresKernelSection(kernel, c.key)
-		if !ok {
-			t.Errorf("%s: в слитом конфиге ядра нет значения", c.key)
-			continue
-		}
-		for _, path := range c.observe {
-			_, kept := rtCoresDig(kernel, path...)
-			t.Logf("слияние %s: поле раннего файла %v сохранено ядром: %v", c.key, path, kept)
-		}
+		dir := filepath.Join(base, "merge-"+c.name)
+		rtCoresWriteDir(t, dir, map[string]string{
+			rtCoresOutboundName: rtCoresOutboundBody,
+			"01_a.json":         c.early + "\n",
+			"02_b.json":         c.late + "\n",
+		})
 		scanned, err := ScanXrayKeyFiles(dir, nil)
 		if err != nil {
-			t.Fatalf("ScanXrayKeyFiles(%s): %v", c.key, err)
+			t.Fatalf("ScanXrayKeyFiles(%s): %v", c.name, err)
 		}
-		withDump := ScanXraySections(scanned, rtCoresScanDump(t, dir))[c.key]
-		if withDump.EffectiveUnknown || !rtCoresSameJSON(t, withDump.Effective, want) {
-			t.Errorf("%s: Effective=%s EffectiveUnknown=%v расходится со слитым значением ядра", c.key, withDump.Effective, withDump.EffectiveUnknown)
-		}
-		noDump := ScanXraySections(scanned, nil)[c.key]
-		if noDump.Effective != nil || !noDump.EffectiveUnknown {
-			t.Errorf("%s без дампа: Effective=%s EffectiveUnknown=%v, ожидались nil и true", c.key, noDump.Effective, noDump.EffectiveUnknown)
-		}
+		rtCoresCheckAgainstKernel(t, dir, c.key, scanned)
 	}
 
 	rtCoresMergeInbounds(t, filepath.Join(base, "merge-inbounds"))
@@ -638,7 +666,7 @@ func rtCoresMergeInbounds(t *testing.T, dir string) {
 		t.Fatalf("ScanXrayKeyFiles: %v", err)
 	}
 	var effective any
-	if err := json.Unmarshal(ScanXraySections(scanned, nil)["inbounds"].Effective, &effective); err != nil {
+	if err := json.Unmarshal(ScanXraySections(scanned)["inbounds"].Effective, &effective); err != nil {
 		t.Fatalf("inbounds Effective: %v", err)
 	}
 	panel := read("скан", effective)

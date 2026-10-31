@@ -3,27 +3,22 @@ package configlayer
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
-// Дамп конфигурации Xray (D-28). Xray сливает log, dns, policy и «прочие» объекты
-// из нескольких файлов каталога вглубь, поэтому действующее значение этих секций
-// знает только само ядро: `xray run -dump -confdir <каталог>` печатает слитый
-// конфиг. Панель не воспроизводит правила слияния ядра, а берёт значения из
-// дампа. Дамп только читает каталог и ничего не запускает: сервер не стартует.
+// Дамп конфигурации Xray (D-28). `xray run -dump -confdir <каталог>` печатает
+// конфиг, слитый ядром. Дамп НОРМАЛИЗОВАН ядром (добавлены значения по умолчанию,
+// сервера dns превращены в объекты и т. п.), поэтому значением секции для показа,
+// переноса в файл панели и сверки с файлом он не служит: действующее значение
+// панель считает сама (mergeXrayValue). Дамп — арбитр правил слияния в роутерных
+// сценариях и диагностика (Layer.XrayDump). Дамп только читает каталог и ничего
+// не запускает: сервер не стартует.
 
 var (
 	// ErrXrayDumpUnavailable — дамп получить нельзя: бинарника Xray нет или ядро
@@ -85,68 +80,4 @@ func XrayDump(ctx context.Context, bin, dir string, env func(dir string) []strin
 		return nil, fmt.Errorf("%w: вывод не разобрался как JSON", ErrXrayDumpFailed)
 	}
 	return merged, nil
-}
-
-// XrayDumper — XrayDump с кэшем на подпись каталога: дамп на слабом железе
-// занимает секунды, а скан секций просят и конвейер, и страницы. Подпись —
-// бинарник и {имя, md5} всех *.json верхнего уровня каталога (включая файлы
-// панели): изменился любой файл — дамп считается заново. Кэшируются удачный
-// дамп и «дамп недоступен»; отказ ядра и таймаут не кэшируются. Безопасен для
-// параллельных вызовов.
-type XrayDumper struct {
-	mu   sync.Mutex
-	sig  string
-	dump map[string]json.RawMessage
-	err  error
-}
-
-// Dump возвращает дамп каталога dir; вызывающий результат не изменяет.
-func (d *XrayDumper) Dump(ctx context.Context, bin, dir string, env func(dir string) []string) (map[string]json.RawMessage, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	sig := xrayDirSignature(bin, dir)
-	if sig != "" && sig == d.sig {
-		return d.dump, d.err
-	}
-	dump, err := XrayDump(ctx, bin, dir, env)
-	d.sig, d.dump, d.err = "", nil, nil
-	if sig != "" && (err == nil || errors.Is(err, ErrXrayDumpUnavailable)) {
-		d.sig, d.dump, d.err = sig, dump, err
-	}
-	return dump, err
-}
-
-// xrayDirSignature считает подпись каталога для кэша дампа; пустая строка —
-// подпись не посчитана (каталог или файл не читается), кэш не используется.
-func xrayDirSignature(bin, dir string) string {
-	if bin == "" || dir == "" {
-		return ""
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
-	h := md5.New()
-	h.Write([]byte(bin))
-	var names []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
-			names = append(names, e.Name())
-		}
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		data, err := readLimited(filepath.Join(dir, name), maxXrayKeyFileBytes)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue // оборванный симлинк
-		}
-		if err != nil {
-			return ""
-		}
-		h.Write([]byte{0})
-		h.Write([]byte(name))
-		h.Write([]byte{0})
-		h.Write([]byte(HashContent(data)))
-	}
-	return hex.EncodeToString(h.Sum(nil))
 }
