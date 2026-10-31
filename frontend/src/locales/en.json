@@ -3964,6 +3964,8 @@
   "cfg.groups.probe_mihomo_note": "Mihomo uses only the address, interval and timeout (url-test).",
   "cfg.groups.probe_err_sampling": "The number of samples is an integer from 1 to 100.",
   "cfg.groups.probe_err_connectivity": "The address is a full URL starting with http:// or https://.",
+  "cfg.groups.probe_default_empty": "empty",
+  "cfg.groups.probe_raw_not_object": "a JSON object is expected",
   "cfg.sec.err.apply_busy": "Applying is in progress. Try again when it finishes.",
   "cfg.sec.err.comments_not_acknowledged": "The section files contain comments. Confirm losing them in the takeover dialog and try again.",
   "cfg.sec.err.controller_no_secret": "A TCP external-controller address exposes the core API to the network. Set a non-empty secret or remove the key.",
