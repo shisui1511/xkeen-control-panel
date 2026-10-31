@@ -46,6 +46,12 @@
  *    jqReason*, Reason* пакета geodata и коды незавершённого удаления) есть текст
  *    cfg.geo.reason_<код> в ru и en.
  *
+ * 10. Секции ядер (план 147-04): интерфейсы configCores.ts совпадают по ключам с
+ *    coresContract.json; клиент подписан на draft и routing слоя (files и apply
+ *    приходят в снимок) с дебаунсом 300 мс; configLayer.ts клиент не импортирует (нет
+ *    цикла), а клиент не импортируется вне Config.svelte и components/config/ (при
+ *    выключенном флаге запросов секций нет).
+ *
  * Usage: node scripts/check-config-ui.js [--root <каталог>]
  */
 const fs = require("fs");
@@ -1320,6 +1326,165 @@ for (const lang of ["ru", "en"]) {
   ]) {
     expect(has(key), `${lang}.json: нет ключа ${key}`);
   }
+}
+
+// --- 10. Секции ядер: клиент, контракт, словари (план 147-04) ----------------
+
+const CORES_TS = `${SRC}/lib/configCores.ts`;
+const CORES_CONTRACT = `${SRC}/lib/coresContract.json`;
+
+// Типы ответов против coresContract.json
+const coresTs = read(CORES_TS);
+let coresContract = {};
+try {
+  coresContract = JSON.parse(read(CORES_CONTRACT));
+} catch (e) {
+  errors.push(`${CORES_CONTRACT}: не разбирается как JSON: ${e.message}`);
+}
+for (const [type, spec] of Object.entries(coresContract)) {
+  const keys = interfaceKeys(coresTs, type);
+  if (!keys) {
+    errors.push(`${CORES_TS}: нет интерфейса ${type} (контракт секций ядер)`);
+    continue;
+  }
+  for (const k of spec.required) {
+    if (!keys.has(k)) errors.push(`${type}: нет обязательного ключа "${k}"`);
+    else if (keys.get(k))
+      errors.push(
+        `${type}: ключ "${k}" обязателен в контракте, но объявлен как необязательный`,
+      );
+  }
+  for (const k of spec.optional) {
+    if (!keys.has(k)) errors.push(`${type}: нет необязательного ключа "${k}"`);
+    else if (!keys.get(k))
+      errors.push(
+        `${type}: ключ "${k}" необязателен в контракте, но объявлен как обязательный`,
+      );
+  }
+  const allowed = new Set([...spec.required, ...spec.optional]);
+  for (const k of keys.keys()) {
+    if (!allowed.has(k))
+      errors.push(`${type}: лишний ключ "${k}" вне контракта`);
+  }
+  // Вложенные типы контракта (children) описаны в контракте; суффикс [] — список, {} — карта
+  for (const child of Object.values(spec.children || {})) {
+    const childType = child.replace(/(\[\]|\{\})$/, "");
+    expect(
+      Object.prototype.hasOwnProperty.call(coresContract, childType),
+      `${CORES_CONTRACT}: тип ${childType} (поле типа ${type}) не описан в контракте`,
+    );
+  }
+}
+
+// События слоя и граница флага: клиент подписан на draft и routing (files и apply
+// приходят в снимок слоя) с дебаунсом 300 мс, собственного потока нет; обратного импорта
+// нет, клиент подключают только Config.svelte и components/config/
+for (const ev of ["draft", "routing"]) {
+  expect(
+    new RegExp(`onLayerEvent\\('${ev}'`).test(coresTs),
+    `${CORES_TS}: нет подписки onLayerEvent('${ev}', …)`,
+  );
+}
+expect(
+  /CORES_DEBOUNCE_MS\s*=\s*300/.test(coresTs),
+  `${CORES_TS}: дебаунс перечитывания не 300 мс`,
+);
+expect(
+  /layerSnapshot\.subscribe\(/.test(coresTs),
+  `${CORES_TS}: нет слежения за снимком слоя (события files и apply)`,
+);
+expect(!/EventSource/.test(coresTs), `${CORES_TS}: открывает собственный поток событий`);
+expect(
+  /export async function fetchCores\(/.test(coresTs) &&
+    coresTs.includes("/api/configlayer/cores"),
+  `${CORES_TS}: нет fetchCores или адреса /api/configlayer/cores`,
+);
+expect(
+  !/from '\.\/configCores'/.test(layerTs),
+  `${LAYER_TS}: импортирует configCores (цикл импортов)`,
+);
+for (const file of walk(SRC, [])) {
+  if (file === CORES_TS) continue;
+  const text = read(file);
+  if (
+    /^\s*import(?!\s+type\b)[^;]*?from '[^']*\/configCores'/m.test(text) &&
+    file !== `${SRC}/Config.svelte` &&
+    !file.startsWith(`${SRC}/components/config/`)
+  ) {
+    errors.push(
+      `${file}: импортирует configCores вне Config.svelte и components/config/ (запросы секций при выключенном флаге)`,
+    );
+  }
+}
+
+// Коды ошибок и проблем секций, таблица полей форм
+const CORES_CODES = `${SRC}/lib/coresErrorCodes.json`;
+let coresCodes = { codes: [], issues: [] };
+try {
+  coresCodes = JSON.parse(read(CORES_CODES));
+} catch (e) {
+  errors.push(`${CORES_CODES}: не разбирается как JSON: ${e.message}`);
+}
+expect(
+  Array.isArray(coresCodes.codes) &&
+    coresCodes.codes.length > 0 &&
+    Array.isArray(coresCodes.issues) &&
+    coresCodes.issues.length > 0,
+  `${CORES_CODES}: нужны непустые списки codes и issues`,
+);
+// Проблемы значения секции приходят и кодом ответа Save (147-18): они в обоих списках
+for (const code of ["core_section_invalid", "inbound_duplicate", "inbound_port_invalid"]) {
+  expect(
+    coresCodes.codes.includes(code) && coresCodes.issues.includes(code),
+    `${CORES_CODES}: код ${code} должен входить и в codes, и в issues`,
+  );
+}
+for (const id of [
+  "xray.log",
+  "xray.dns",
+  "xray.inbounds",
+  "xray.policy",
+  "xray.other",
+  "mihomo.main",
+  "mihomo.dns",
+  "mihomo.inbounds",
+  "mihomo.sniffer",
+  "mihomo.other",
+]) {
+  expect(
+    new RegExp(`'${id.replace(".", "\\.")}':\\s*\\[`).test(coresTs),
+    `${CORES_TS}: в FORM_KEYS нет секции ${id}`,
+  );
+}
+
+// Словари: тексты кодов ошибок API (cfg.sec.err.<код>) и проблем проверки
+// (cfg.sec.issue.<код>), общий cfg.sec.err.unknown, одинаковый набор cfg.sec.* в ru и en
+const coresDicts = {};
+for (const lang of ["ru", "en"]) {
+  const dict = JSON.parse(read(`${SRC}/locales/${lang}.json`));
+  coresDicts[lang] = dict;
+  const has = (k) => typeof dict[k] === "string" && dict[k].trim() !== "";
+  for (const code of [...coresCodes.codes, "unknown"]) {
+    expect(has(`cfg.sec.err.${code}`), `${lang}.json: нет cfg.sec.err.${code}`);
+  }
+  for (const code of coresCodes.issues) {
+    expect(has(`cfg.sec.issue.${code}`), `${lang}.json: нет cfg.sec.issue.${code}`);
+  }
+  for (const key of ["cfg.tab.cores", "cfg.hint.force_proxy_group_missing"]) {
+    expect(has(key), `${lang}.json: нет ключа ${key}`);
+  }
+}
+{
+  const secKeys = (lang) =>
+    Object.keys(coresDicts[lang])
+      .filter((k) => k.startsWith("cfg.sec."))
+      .sort();
+  const ru = secKeys("ru");
+  const en = secKeys("en");
+  expect(
+    ru.length === en.length && ru.every((k, i) => k === en[i]),
+    "ru.json и en.json: наборы ключей cfg.sec.* различаются",
+  );
 }
 
 if (errors.length > 0) {
