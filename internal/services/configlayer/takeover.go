@@ -157,6 +157,13 @@ type RoutingFacts struct {
 	// XrayAPIInbound — в configs/ есть входящий с тегом api (D-43): правило api
 	// файл панели пишет первым.
 	XrayAPIInbound bool
+	// XrayForeignAPI — в чужих файлах configs/ есть ключ api (в том числе в файле
+	// старого слоя): блок api панель не пишет.
+	XrayForeignAPI bool
+	// XrayObservatory — в чужих файлах есть observatory или burstObservatory.
+	XrayObservatory bool
+	// XrayForceProxyTags — теги входящих force-proxy* в чужих файлах (D-12).
+	XrayForceProxyTags []string
 	// Mihomo — порты и доступ из LAN: взятого профиля или, пока не взято,
 	// текущего активного.
 	Mihomo      MihomoPorts
@@ -714,13 +721,15 @@ func (p *Pipeline) planRouting(src Sections, actual RoutingState, installed Inst
 // идёт раз в минуту и по событиям, каждый раз разбирать все файлы незачем.
 var scanMemo struct {
 	mu     sync.Mutex
-	xray   map[string]memoBool
+	xray   map[string]memoXray
 	mihomo map[string]memoPorts
 }
 
-type memoBool struct {
-	sig string
-	val bool
+// memoXray — факты скана каталога Xray по подписи каталога.
+type memoXray struct {
+	sig   string
+	api   bool
+	facts XrayScanFacts
 }
 
 type memoPorts struct {
@@ -757,29 +766,39 @@ func xrayDirSig(root string) string {
 	return b.String()
 }
 
-// xrayAPIInbound сообщает, есть ли в каталоге входящий с тегом api (с мемо).
-func xrayAPIInbound(root string) bool {
+// xrayRootFacts сообщает, есть ли в каталоге входящий с тегом api (D-43), и
+// возвращает факты чужих файлов для генераторов. Один скан каталога на подпись
+// (с мемо).
+func xrayRootFacts(root string) (apiInbound bool, facts XrayScanFacts) {
 	if root == "" {
-		return false
+		return false, XrayScanFacts{}
 	}
 	sig := xrayDirSig(root)
 	scanMemo.mu.Lock()
 	if m, ok := scanMemo.xray[root]; ok && m.sig == sig {
 		scanMemo.mu.Unlock()
-		return m.val
+		return m.api, cloneXrayFacts(m.facts)
 	}
 	scanMemo.mu.Unlock()
-	_, api, err := ScanXrayRouting(root, nil)
+	files, err := ScanXrayKeyFiles(root, nil)
 	if err != nil {
-		return false
+		return false, XrayScanFacts{}
 	}
+	api, facts := hasAPIInbound(files), XrayFacts(files)
 	scanMemo.mu.Lock()
 	if scanMemo.xray == nil {
-		scanMemo.xray = map[string]memoBool{}
+		scanMemo.xray = map[string]memoXray{}
 	}
-	scanMemo.xray[root] = memoBool{sig: sig, val: api}
+	scanMemo.xray[root] = memoXray{sig: sig, api: api, facts: facts}
 	scanMemo.mu.Unlock()
-	return api
+	return api, cloneXrayFacts(facts)
+}
+
+// cloneXrayFacts копирует срезы фактов: мемо не отдаёт свои.
+func cloneXrayFacts(f XrayScanFacts) XrayScanFacts {
+	f.ForceProxyTags = append([]string(nil), f.ForceProxyTags...)
+	f.BurstObservatory = append(json.RawMessage(nil), f.BurstObservatory...)
+	return f
 }
 
 // mihomoActivePorts возвращает порты текущего активного профиля (с мемо).
@@ -821,10 +840,14 @@ func clonePorts(p MihomoPorts) MihomoPorts {
 // построении Input. Порты берутся у взятого профиля, пока не взято — у текущего
 // активного.
 func routingFacts(roots Roots, r RoutingState) RoutingFacts {
+	api, xf := xrayRootFacts(roots.Xray)
 	f := RoutingFacts{
-		XrayAPIInbound: xrayAPIInbound(roots.Xray),
-		XrayTaken:      r.Xray != nil,
-		MihomoTaken:    r.Mihomo != nil,
+		XrayAPIInbound:     api,
+		XrayForeignAPI:     xf.ForeignAPI,
+		XrayObservatory:    xf.Observatory,
+		XrayForceProxyTags: xf.ForceProxyTags,
+		XrayTaken:          r.Xray != nil,
+		MihomoTaken:        r.Mihomo != nil,
 	}
 	if r.Mihomo != nil {
 		f.Mihomo = clonePorts(r.Mihomo.Ports)
