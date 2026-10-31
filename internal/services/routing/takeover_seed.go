@@ -3,6 +3,8 @@ package routing
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
@@ -10,7 +12,8 @@ import (
 
 // Перенос настроек прежней конфигурации при явном «Управлять в панели»
 // (Service.Take): ключи активного профиля Mihomo уходят в секции mihomo_*
-// (D-06, MIHO-01). Всё пишется в черновик той же правкой, что и желание взять
+// (D-06, MIHO-01), поля чужого burstObservatory — в настройки проб (D-27,
+// XCFG-03). Всё пишется в черновик той же правкой, что и желание взять
 // маршрутизацию. Автовзятие конвейера (установка ядра, включение слоя) идёт мимо
 // сервиса и ничего не переносит: профиль без секций собирается из пресетов.
 
@@ -87,4 +90,142 @@ func releaseMihomoSections(draft configlayer.Sections) (map[string]json.RawMessa
 		out[name] = raw
 	}
 	return out, nil
+}
+
+// seedProbeFromForeign заполняет настройки проб из чужого burstObservatory
+// (D-27, XCFG-03). Только если Xray установлен, его маршрутизация ещё не взята и
+// секция probe в черновике не задана или равна значению по умолчанию: правки
+// пользователя не перезаписываются. Чужого burstObservatory нет — ничего.
+func (s *Service) seedProbeFromForeign(st configlayer.StateView) (map[string]json.RawMessage, error) {
+	if !s.d.Installed().Xray {
+		return nil, nil
+	}
+	if x := s.d.Layer.Snapshot().Routing.Xray; x != nil && x.Taken {
+		return nil, nil
+	}
+	def := defaultProbe(s.d.GOARCH)
+	cur, err := parseProbe(st.Draft[ProbeSection], s.d.GOARCH)
+	if err != nil || !reflect.DeepEqual(cur, def) {
+		return nil, nil
+	}
+	_, files, err := s.d.Layer.ScanXraySections()
+	if err != nil {
+		// Сбой скана сообщит «Применить»; перенос проб из-за него не блокируется.
+		return nil, nil
+	}
+	burst := configlayer.XrayFacts(files).BurstObservatory
+	if burst == nil {
+		return nil, nil
+	}
+	probe, ok := probeFromBurst(burst, def)
+	if !ok || reflect.DeepEqual(probe, def) {
+		return nil, nil
+	}
+	raw, err := encodeProbe(probe)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]json.RawMessage{ProbeSection: raw}, nil
+}
+
+// secondsCeil переводит длительность в целые секунды, округляя вверх.
+func secondsCeil(d time.Duration) int {
+	return int((d + time.Second - 1) / time.Second)
+}
+
+// durationSeconds читает длительность Xray ("30s", "1m") в секундах вверх;
+// ok=false — значения нет, оно не строка или не длительность.
+func durationSeconds(raw json.RawMessage, present bool) (int, bool) {
+	if !present {
+		return 0, false
+	}
+	var text string
+	if json.Unmarshal(raw, &text) != nil {
+		return 0, false
+	}
+	d, err := time.ParseDuration(text)
+	if err != nil || d <= 0 {
+		return 0, false
+	}
+	return secondsCeil(d), true
+}
+
+// probeFromBurst переносит значение burstObservatory в настройки проб:
+// pingConfig.destination → URL; interval и timeout → секунды вверх (интервал не
+// меньше minProbeInterval; timeout вне [1, interval) и другие недопустимые
+// значения — из def); connectivity; sampling (целое 1–100); остальные ключи
+// pingConfig → Extra в исходном порядке. subjectSelector в пробы не входит: его
+// строит генератор из групп. false — pingConfig в значении нет.
+func probeFromBurst(raw json.RawMessage, def ProbeConfig) (ProbeConfig, bool) {
+	obs, err := configlayer.ParseOrderedObject(raw)
+	if err != nil {
+		return def, false
+	}
+	pingRaw, has := obs.Get("pingConfig")
+	if !has {
+		return def, false
+	}
+	ping, err := configlayer.ParseOrderedObject(pingRaw)
+	if err != nil {
+		return def, false
+	}
+	out := def
+
+	if v, ok := ping.Get("destination"); ok {
+		var u string
+		if json.Unmarshal(v, &u) == nil && validProbeURL(u) {
+			out.URL = u
+		}
+	}
+	rawInterval, hasInterval := ping.Get("interval")
+	if sec, ok := durationSeconds(rawInterval, hasInterval); ok {
+		if sec < minProbeInterval {
+			sec = minProbeInterval
+		}
+		if sec <= maxProbeInterval {
+			out.IntervalS = sec
+		}
+	}
+	rawTimeout, hasTimeout := ping.Get("timeout")
+	if sec, ok := durationSeconds(rawTimeout, hasTimeout); ok && sec >= 1 && sec < out.IntervalS {
+		out.TimeoutS = sec
+	}
+	if out.TimeoutS < 1 || out.TimeoutS >= out.IntervalS {
+		out.TimeoutS = def.TimeoutS
+	}
+	if v, ok := ping.Get("connectivity"); ok {
+		var u string
+		if json.Unmarshal(v, &u) == nil && validProbeURL(u) {
+			out.Connectivity = u
+		}
+	}
+	if v, ok := ping.Get("sampling"); ok {
+		var n float64
+		if json.Unmarshal(v, &n) == nil && n == float64(int(n)) && int(n) >= 1 && int(n) <= maxProbeSampling {
+			out.Sampling = int(n)
+		}
+	}
+
+	reserved := map[string]bool{}
+	for _, k := range probeReservedKeys {
+		reserved[k] = true
+	}
+	extra := configlayer.NewOrderedObject()
+	for _, k := range ping.Keys() {
+		if reserved[k] {
+			continue
+		}
+		v, _ := ping.Get(k)
+		extra.Set(k, v)
+	}
+	if extra.Len() > 0 {
+		if b, err := extra.MarshalJSON(); err == nil && len(b) <= maxProbeExtraBytes {
+			out.Extra = b
+		}
+	}
+	out.V = sectionVersion
+	if validateProbe(out) != nil {
+		return def, false
+	}
+	return out, true
 }

@@ -392,3 +392,97 @@ func firstMap(list []any) (map[string]any, bool) {
 	m, ok := list[0].(map[string]any)
 	return m, ok
 }
+
+// rtmsForeignRouting — чужой файл с правилом routing: «чистый», при взятии
+// уходит в резервный набор.
+const rtmsForeignRouting = `{
+  "routing": {"rules": [{"type": "field", "domain": ["domain:extra.example.test"], "outboundTag": "` + TagDirect + `"}]}
+}
+`
+
+// rtmsForeignBurst — чужой файл наблюдения: pingConfig с адресами проб,
+// интервалом, таймаутом, sampling и ключом, для которого в форме поля нет.
+const rtmsForeignBurst = `{
+  "burstObservatory": {
+    "subjectSelector": ["x"],
+    "pingConfig": {
+      "destination": "http://127.0.0.1:1/generate_204",
+      "connectivity": "http://127.0.0.1:2/generate_204",
+      "interval": "30s",
+      "timeout": "4s",
+      "sampling": 5,
+      "httpMethod": "GET"
+    }
+  }
+}
+`
+
+// rtmsForeignEnv создаёт окружение Xray с чужими 05_routing.json и 07_obs.json
+// и узлами «Моих узлов».
+func rtmsForeignEnv(t *testing.T) *rtEnv {
+	t.Helper()
+	e := rtNewEnv(t, rtWithKernels(rtXrayOnly))
+	for name, body := range map[string]string{"05_routing.json": rtmsForeignRouting, "07_obs.json": rtmsForeignBurst} {
+		if err := os.WriteFile(filepath.Join(e.xrayDir(), name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.addMyLinks(t, "vless_ws", "trojan_grpc", "ss_plain")
+	return e
+}
+
+// При взятии маршрутизации Xray настройки проб заполняются из чужого
+// burstObservatory (адрес, интервал и таймаут в секундах, connectivity,
+// sampling, остальные ключи pingConfig); пробы, которые пользователь уже менял,
+// не перезаписываются.
+func TestRouterXrayProbeSeedFromForeign(t *testing.T) {
+	t.Run("seeded_from_foreign", func(t *testing.T) {
+		e := rmsSeedEnv(t)
+		wantSel := rtxXrayTags(e, t)
+
+		got, err := e.svc.Probe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.URL != "http://127.0.0.1:1/generate_204" || got.IntervalS != 30 || got.TimeoutS != 4 ||
+			got.Connectivity != "http://127.0.0.1:2/generate_204" || got.Sampling != 5 || string(got.Extra) != `{"httpMethod":"GET"}` {
+			t.Fatalf("пробы после Take: %+v", got)
+		}
+
+		e.applyOK(t)
+		ping, sub := rtpbPing(t, e)
+		if ping["destination"] != got.URL || ping["connectivity"] != got.Connectivity ||
+			ping["interval"] != "30s" || ping["timeout"] != "4s" || ping["sampling"] != float64(5) || ping["httpMethod"] != "GET" {
+			t.Errorf("pingConfig файла панели: %v", ping)
+		}
+		if !rtxEqualStrings(sub, wantSel) {
+			t.Errorf("subjectSelector %v, ожидались теги группы %v", sub, wantSel)
+		}
+	})
+
+	t.Run("user_probe_kept", func(t *testing.T) {
+		e := rtmsForeignEnv(t)
+		saved := ProbeConfig{URL: rtxDefaultProbeURL, IntervalS: 60, TimeoutS: 5}
+		if _, err := e.svc.SaveProbe(e.rev(t), saved); err != nil {
+			t.Fatalf("SaveProbe: %v", err)
+		}
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("Take: %v", err)
+		}
+		want := saved
+		want.V = sectionVersion
+		if got, err := e.svc.Probe(); err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("пробы пользователя после Take: %+v, %v, ожидались прежние %+v", got, err, want)
+		}
+	})
+}
+
+// rmsSeedEnv — окружение с чужими файлами и уже выполненным Take.
+func rmsSeedEnv(t *testing.T) *rtEnv {
+	t.Helper()
+	e := rtmsForeignEnv(t)
+	if _, err := e.svc.Take(e.rev(t)); err != nil {
+		t.Fatalf("Take: %v", err)
+	}
+	return e
+}
