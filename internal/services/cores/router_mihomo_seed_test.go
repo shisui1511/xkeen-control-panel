@@ -305,4 +305,80 @@ func TestRouterCoresMihomoSeedRoundTrip(t *testing.T) {
 		}
 		rtMihomoSeedKernelCheck(t, profile)
 	})
+	t.Run("проверка", func(t *testing.T) {
+		seeded, err := SeedMihomo([]byte(rtMihomoSeedFull), configlayer.MihomoPorts{Redir: 7100, TProxy: 7101})
+		if err != nil {
+			t.Fatalf("SeedMihomo: %v", err)
+		}
+		// issues возвращает коды проблем значения секции id.
+		issues := func(id string, value json.RawMessage) []string {
+			var out []string
+			for _, is := range MihomoValueIssues(id, value) {
+				out = append(out, is.Code+":"+is.Key)
+			}
+			return out
+		}
+		for _, id := range rtMihomoSeedAll {
+			if got := issues(id, seeded[id]); len(got) != 0 {
+				t.Fatalf("секция %s из переноса даёт проблемы: %v", id, got)
+			}
+		}
+		// with возвращает значение секции с заменой одного ключа.
+		with := func(id, key, val string) json.RawMessage {
+			o := rtMihomoSeedObject(t, seeded[id])
+			o.Set(key, json.RawMessage(val))
+			b, err := o.MarshalJSON()
+			if err != nil {
+				t.Fatal(err)
+			}
+			return b
+		}
+		wantIssue := func(what string, got []string, want string) {
+			t.Helper()
+			for _, g := range got {
+				if g == want {
+					return
+				}
+			}
+			t.Fatalf("%s: ждали %s, получили %v", what, want, got)
+		}
+
+		// API по TCP без secret закрыт, с secret — нет, профиль проходит mihomo -t.
+		open := with("other", "external-controller", `"0.0.0.0:9090"`)
+		wantIssue("external-controller без secret", issues("other", open), "controller_no_secret:external-controller")
+		secured := with("other", "secret", `"s"`)
+		o := rtMihomoSeedObject(t, secured)
+		o.Set("external-controller", json.RawMessage(`"0.0.0.0:9090"`))
+		securedRaw, err := o.MarshalJSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := issues("other", securedRaw); len(got) != 0 {
+			t.Fatalf("external-controller с secret даёт проблемы: %v", got)
+		}
+
+		// CheckMihomo ссылается на секцию черновика и ключ, значения secret нет.
+		in := configlayer.Input{Sections: rtMihomoSeedSections(t, map[string]json.RawMessage{"other": open}, "other")}
+		bi := CheckMihomo(in, configlayer.InstalledKernels{Mihomo: true})
+		if len(bi) != 1 || bi[0].Key != configlayer.SectionMihomoOther || bi[0].Code != configlayer.IssueControllerNoSecret ||
+			bi[0].Params["key"] != "external-controller" {
+			t.Fatalf("CheckMihomo: %+v", bi)
+		}
+		if got := CheckMihomo(in, configlayer.InstalledKernels{Xray: true}); len(got) != 0 {
+			t.Fatalf("CheckMihomo без Mihomo: %+v", got)
+		}
+
+		wantIssue("rules в «Прочих ключах»", issues("other", with("other", "rules", `["MATCH,DIRECT"]`)), "raw_reserved:rules")
+		wantIssue("routing-mark в «Основном»", issues("main", with("main", "routing-mark", "9")), "raw_pinned:routing-mark")
+		wantIssue("порт вне диапазона", issues("main", with("main", "mixed-port", "70000")), "inbound_port_invalid:mixed-port")
+		wantIssue("store-selected false", issues("main", with("main", "profile", `{"store-selected":false}`)), "raw_pinned:profile.store-selected")
+		wantIssue("повтор имени listener", issues("inbounds",
+			with("inbounds", "listeners", `[{"name":"in-redir","type":"redir","port":7100},{"name":"in-redir","type":"redir","port":7101}]`)),
+			"inbound_duplicate:listeners[].name")
+
+		// Профиль с защищённым API проходит ядро; проверка ядра — последней, она
+		// пропускает сценарий, если Mihomo на устройстве нет.
+		seeded["other"] = securedRaw
+		rtMihomoSeedKernelCheck(t, rtMihomoSeedProfile(t, rtMihomoSeedSections(t, seeded, rtMihomoSeedAll...), configlayer.MihomoPorts{}))
+	})
 }
