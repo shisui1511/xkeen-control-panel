@@ -76,7 +76,7 @@ test('cores: вкладка и переключатель ядра', async ({ pa
   // переключатель: два сегмента, ровно один выбран, строка состояния не пуста
   const sw = page.getByTestId('kernel-switch');
   await expect(sw).toBeVisible();
-  await expect(sw.getByRole('group', { name: /Ядро|Kernel/ })).toBeVisible();
+  await expect(sw.getByRole('group', { name: /Ядро|Core/ })).toBeVisible();
   await expect(page.getByTestId('kernel-switch-xray')).toBeVisible();
   await expect(page.getByTestId('kernel-switch-mihomo')).toBeVisible();
   await expect(sw.locator('[aria-pressed="true"]')).toHaveCount(1);

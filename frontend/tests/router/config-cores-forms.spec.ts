@@ -142,6 +142,30 @@ test('cores: «Прочие ключи» Xray — правка в «Дополн
       )
       .toBe(true);
 
+    // перечитывание вида с тем же текстом секции посреди ввода не подменяет набранное:
+    // запись прежнего текста поднимает ревизию черновика, панель перечитывает оба вида
+    const settled = (await otherOf(page, 'xray')).advanced;
+    const typing = '{ "stats": {}, "typed": 1 }';
+    await area.fill(typing);
+    const same = await api(page, 'POST', '/api/configlayer/cores/save', {
+      revision: await draftRevision(page),
+      kernel: 'xray',
+      section: 'other',
+      form: {},
+      advanced: settled
+    });
+    expect(same.status, 'повторная запись прежнего текста секции').toBe(200);
+    // перечитывание идёт не раньше чем через 300 мс после события черновика; не пришло
+    // (запись ничего не изменила) — проверка просто не имеет предмета
+    await page
+      .waitForResponse(
+        (r) => r.url().includes('/api/configlayer/cores?kernel=xray') && r.status() === 200,
+        { timeout: T.action }
+      )
+      .catch(() => null);
+    await page.waitForTimeout(500);
+    await expect(area).toHaveValue(typing);
+
     // панельный ключ отклоняется: ошибка у блока, черновик не меняется
     const accepted = await draftRevision(page);
     await area.fill('{ "routing": {} }');
