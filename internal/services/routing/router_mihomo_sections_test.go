@@ -3,6 +3,7 @@
 package routing
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -253,6 +254,113 @@ func TestRouterMihomoSectionsKeepUserKeys(t *testing.T) {
 		// Прежний профиль на месте и не изменился.
 		if data, err := os.ReadFile(user); err != nil || string(data) != rtmsFixture {
 			t.Errorf("прежний профиль изменён: %v", err)
+		}
+	})
+
+	t.Run("release_restores_profile_and_drops_sections", func(t *testing.T) {
+		e := rtNewEnv(t, rtWithKernels(rtMihomoOnly))
+		user := rtmsWriteProfile(t, e, rtmsFixture)
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("Take: %v", err)
+		}
+		e.applyOK(t)
+
+		if _, err := e.svc.Release(e.rev(t)); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+		for _, id := range configlayer.MihomoSectionIDs {
+			if cs := rtmsSection(t, e.state(t).Draft, id); cs.Managed || len(cs.Value) != 0 || len(cs.From) != 0 {
+				t.Errorf("секция mihomo_%s в черновике после Release: %+v, ожидалась {managed: false}", id, cs)
+			}
+		}
+		e.applyOK(t)
+
+		if link, err := os.Readlink(e.mihomoPath("config.yaml")); err != nil || link != user {
+			t.Errorf("config.yaml после возврата: %q, %v (ожидался симлинк на прежний профиль)", link, err)
+		}
+		if data, err := os.ReadFile(user); err != nil || string(data) != rtmsFixture {
+			t.Errorf("прежний профиль после возврата изменён побайтно: %v", err)
+		}
+		if _, err := os.Stat(e.mihomoPath(configlayer.PanelMihomoProfile)); err == nil {
+			t.Error("после возврата профиль панели остался на диске")
+		}
+		st := e.state(t)
+		for _, id := range configlayer.MihomoSectionIDs {
+			if cs := rtmsSection(t, st.Applied, id); cs.Managed {
+				t.Errorf("секция mihomo_%s в применённом состоянии остаётся под управлением", id)
+			}
+		}
+	})
+
+	t.Run("no_sections_use_presets", func(t *testing.T) {
+		e := rtNewEnv(t, rtWithKernels(rtMihomoOnly))
+		e.writeUserProfile(t) // порты прежнего профиля 7000 и 7001
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("Take: %v", err)
+		}
+		e.applyOK(t)
+
+		// Состояние после 146: маршрутизация взята, секций Mihomo нет.
+		rtmsRemoveSections(t, e)
+		e.applyOK(t)
+
+		var doc map[string]any
+		if err := rtmsDecode(e, &doc); err != nil {
+			t.Fatal(err)
+		}
+		rtmsPanelBase(t, doc)
+		if doc["redir-port"] != 7000 || doc["tproxy-port"] != 7001 {
+			t.Errorf("порты профиля %v/%v, ожидались 7000/7001 прежнего профиля", doc["redir-port"], doc["tproxy-port"])
+		}
+		if sn, _ := doc["sniffer"].(map[string]any); sn["enable"] != true || sn["override-destination"] != false {
+			t.Errorf("sniffer пресета: %v", doc["sniffer"])
+		}
+		if dns, _ := doc["dns"].(map[string]any); dns["enable"] != true || dns["ipv6"] != false {
+			t.Errorf("dns пресета: %v", doc["dns"])
+		}
+
+		// Два вызова генератора дают одинаковые байты.
+		in := inputOf(e.state(t))
+		first, err := mihomoGen{s: e.svc}.Generate(in, e.installed)
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		second, err := mihomoGen{s: e.svc}.Generate(in, e.installed)
+		if err != nil {
+			t.Fatalf("Generate (повторно): %v", err)
+		}
+		if len(first) == 0 || len(first) != len(second) {
+			t.Fatalf("файлов генератора %d и %d", len(first), len(second))
+		}
+		for i := range first {
+			if first[i].RelPath != second[i].RelPath || !bytes.Equal(first[i].Content, second[i].Content) {
+				t.Errorf("файл %s различается между вызовами генератора", first[i].RelPath)
+			}
+		}
+	})
+
+	t.Run("no_previous_profile_uses_presets", func(t *testing.T) {
+		e := rtNewEnv(t, rtWithKernels(rtMihomoOnly))
+		// Корень Mihomo без config.yaml: прежнего профиля нет.
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("Take: %v", err)
+		}
+		st := e.state(t)
+		for _, id := range configlayer.MihomoSectionIDs {
+			cs := rtmsSection(t, st.Draft, id)
+			if !cs.Managed || !cs.Preset || len(cs.From) != 0 || len(cs.Value) == 0 {
+				t.Errorf("секция mihomo_%s без прежнего профиля: %+v, ожидались managed, preset, без from, со значением", id, cs)
+			}
+		}
+		e.applyOK(t)
+
+		var doc map[string]any
+		if err := rtmsDecode(e, &doc); err != nil {
+			t.Fatal(err)
+		}
+		rtmsPanelBase(t, doc)
+		if doc["redir-port"] != 5000 || doc["tproxy-port"] != 5001 {
+			t.Errorf("порты профиля %v/%v, ожидались 5000/5001 базы", doc["redir-port"], doc["tproxy-port"])
 		}
 	})
 }
