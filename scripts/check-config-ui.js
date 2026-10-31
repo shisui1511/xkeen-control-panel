@@ -1457,6 +1457,36 @@ for (const id of [
   );
 }
 
+// Словари: тексты кодов ошибок API (cfg.sec.err.<код>) и проблем проверки
+// (cfg.sec.issue.<код>), общий cfg.sec.err.unknown, одинаковый набор cfg.sec.* в ru и en
+const coresDicts = {};
+for (const lang of ["ru", "en"]) {
+  const dict = JSON.parse(read(`${SRC}/locales/${lang}.json`));
+  coresDicts[lang] = dict;
+  const has = (k) => typeof dict[k] === "string" && dict[k].trim() !== "";
+  for (const code of [...coresCodes.codes, "unknown"]) {
+    expect(has(`cfg.sec.err.${code}`), `${lang}.json: нет cfg.sec.err.${code}`);
+  }
+  for (const code of coresCodes.issues) {
+    expect(has(`cfg.sec.issue.${code}`), `${lang}.json: нет cfg.sec.issue.${code}`);
+  }
+  for (const key of ["cfg.tab.cores", "cfg.hint.force_proxy_group_missing"]) {
+    expect(has(key), `${lang}.json: нет ключа ${key}`);
+  }
+}
+{
+  const secKeys = (lang) =>
+    Object.keys(coresDicts[lang])
+      .filter((k) => k.startsWith("cfg.sec."))
+      .sort();
+  const ru = secKeys("ru");
+  const en = secKeys("en");
+  expect(
+    ru.length === en.length && ru.every((k, i) => k === en[i]),
+    "ru.json и en.json: наборы ключей cfg.sec.* различаются",
+  );
+}
+
 if (errors.length > 0) {
   console.error("check-config-ui: найдено нарушений: " + errors.length);
   for (const e of errors) console.error("  - " + e);
