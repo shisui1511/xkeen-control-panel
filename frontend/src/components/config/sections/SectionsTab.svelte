@@ -16,6 +16,7 @@
   } from '../../../lib/configCores';
   import KernelSwitch from './KernelSwitch.svelte';
   import SectionCard from './SectionCard.svelte';
+  import MihomoProfileNotice from './MihomoProfileNotice.svelte';
   import TakeSectionModal from './TakeSectionModal.svelte';
   import { coresBusy } from './coresOwner';
 
@@ -186,6 +187,9 @@
           plain
         />
       {:else}
+        {#if k === 'mihomo' && view.profile}
+          <MihomoProfileNotice profile={view.profile} />
+        {/if}
         <div class="cores-sections" data-testid="cores-sections-{k}">
           {#each ordered(view) as sec (sec.id)}
             <SectionCard
@@ -277,6 +281,13 @@
 
   .cores-panel[hidden] {
     display: none;
+  }
+
+  .cores-panel:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--grid-gap, 16px);
+    min-width: 0;
   }
 
   .cores-skeleton,

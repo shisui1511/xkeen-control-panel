@@ -200,6 +200,12 @@
             <p class="tr-text" data-testid="take-routing-mihomo">
               {$t('cfg.routing.take_mihomo', { name: mihomo.prev_profile || 'config.yaml' })}
             </p>
+            {#if mode === 'take'}
+              <div class="alert alert-warning tr-alert" data-testid="take-routing-sections">
+                <Icon name="warning" size={16} class="tr-alert-icon" />
+                <span>{$t('cfg.sec.take_routing_sections')}</span>
+              </div>
+            {/if}
           </section>
         {/if}
         <div class="alert alert-warning tr-alert" data-testid="take-routing-consequence">
