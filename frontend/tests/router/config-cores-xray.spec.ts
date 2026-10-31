@@ -1,8 +1,9 @@
 // e2e-pages: config/cores
+import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { api, layerFlag, resetDraft } from './lib/nodes-api';
+import { api, layerFlag, randomPort, resetDraft } from './lib/nodes-api';
 
 // Формы секций Xray на настоящей панели (фаза 147, план 22): DNS, «Лог», «Политики» и
 // «Входящие» правятся полями без потери ключей, которых формы не знают; входящие, которые
@@ -189,16 +190,26 @@ async function releaseViaApi(page: Page, id: string): Promise<void> {
   await applyAndWait(page);
 }
 
-/** Открывает вкладку ядер, выбирает Xray и раскрывает карточку секции. */
-async function openSection(page: Page, id: string): Promise<void> {
+/** Открывает вкладку ядер и выбирает Xray. */
+async function openCores(page: Page): Promise<void> {
   await openConfig(page, '#/config/cores');
   await tabReady(page, 'cores-tab');
   await page.getByTestId('kernel-switch-xray').click();
   await expect(page.getByTestId('cores-panel-xray')).toBeVisible({ timeout: T.page });
+}
+
+/** Раскрывает карточку секции Xray на открытой вкладке ядер. */
+async function expandSection(page: Page, id: string): Promise<void> {
   const toggle = page.getByTestId(`section-toggle-xray-${id}`);
   await expect(toggle).toBeVisible({ timeout: T.page });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+}
+
+/** Открывает вкладку ядер, выбирает Xray и раскрывает карточку секции. */
+async function openSection(page: Page, id: string): Promise<void> {
+  await openCores(page);
+  await expandSection(page, id);
 }
 
 /** Берёт секцию в черновик через диалог; секция уже у панели — ничего не делает. */
@@ -421,3 +432,243 @@ test('cores: Xray лог и политики — поля вне формы и �
     await resetDraft(page);
   }
 });
+
+// --- «Входящие» -----------------------------------------------------------------------------
+
+const INBOUND_ROWS = '[data-testid^="section-inbound-row-"]';
+
+test('cores: Xray входящие — закреплённые строки и объявление перезапуска', async ({ page }) => {
+  test.setTimeout(T.save * 4);
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  const before = await xrayView(page);
+  test.skip(!before.installed, 'Xray не установлен');
+  const inbounds = before.sections.find((s) => s.id === 'inbounds');
+  test.skip(inbounds === undefined, 'в виде нет секции «Входящие»');
+  await resetDraft(page);
+
+  try {
+    await openSection(page, 'inbounds');
+
+    // входящие лежат в файле с другими ключами или XKeen старый: секция не берётся
+    if (inbounds?.blocked) {
+      await expect(page.getByTestId('section-blocked-xray-inbounds')).toBeVisible({
+        timeout: T.action
+      });
+      await expect(page.getByTestId('section-take-xray-inbounds')).toBeDisabled();
+      await guard.assertClean();
+      return;
+    }
+
+    await takeViaDialog(page, 'inbounds');
+    await expect(page.getByTestId('section-form-xray-inbounds')).toBeVisible({
+      timeout: T.action
+    });
+    const pinnedRows = page.locator(`${INBOUND_ROWS}[data-pinned="true"]`);
+    test.skip((await pinnedRows.count()) === 0, 'на стенде нет прозрачных входящих XKeen');
+
+    // закреплённая строка: бейдж, нет поля тега, правится только порт
+    const row = pinnedRows.first();
+    await expect(row.locator('[data-testid^="section-inbound-pinned-"]')).toBeVisible();
+    await expect(row.locator('[data-testid^="section-field-xray-inbounds-tag-"]')).toHaveCount(0);
+    await expect(row.locator('[data-testid^="section-field-xray-inbounds-remove-"]')).toHaveCount(
+      0
+    );
+    const port = row.locator('[data-testid^="section-field-xray-inbounds-port-"]');
+    const note = page.getByTestId('section-restart-note-xray-inbounds');
+    await expect(note).toHaveCount(0);
+
+    // смена порта объявляется под полем и в полосе черновика
+    const oldPort = await port.inputValue();
+    let newPort = String(randomPort());
+    if (newPort === oldPort) newPort = String(Number(newPort) + 1);
+    await port.fill(newPort);
+    await port.blur();
+    await expect(note).toBeVisible({ timeout: T.action });
+    await expect(
+      page.locator('[data-testid="draft-restart-note"][data-reason="port"]')
+    ).toBeVisible({ timeout: T.action });
+
+    // вернули записанное значение: объявление под полем исчезло
+    await port.fill(oldPort);
+    await port.blur();
+    await expect(note).toHaveCount(0, { timeout: T.action });
+
+    // новая строка без тега: ошибка, в черновик ничего не уходит
+    const revision = (await layerProbe(page)).revision;
+    await page.getByTestId('section-field-xray-inbounds-add').click();
+    const error = page
+      .locator('.error-text')
+      .filter({ hasText: /Задайте тег|Set a tag/ })
+      .first();
+    await expect(error).toBeVisible({ timeout: T.action });
+    await page.waitForTimeout(1000);
+    expect((await layerProbe(page)).revision, 'пустой тег не меняет черновик').toBe(revision);
+
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});
+
+test('cores: Xray входящие — группа force-proxy', async ({ page }) => {
+  test.setTimeout(T.save * 4);
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  const before = await xrayView(page);
+  test.skip(!before.installed, 'Xray не установлен');
+  const inbounds = before.sections.find((s) => s.id === 'inbounds');
+  test.skip(inbounds === undefined, 'в виде нет секции «Входящие»');
+  const hasTag = (before.forceProxy?.tags.length ?? 0) > 0;
+  test.skip(!hasTag && !!inbounds?.blocked, `секция «Входящие» не берётся: ${inbounds?.blocked}`);
+  await resetDraft(page);
+
+  try {
+    await openSection(page, 'inbounds');
+
+    if (!hasTag) {
+      // тега force-proxy на стенде нет: создаём его в черновике сами, чтобы проводка
+      // «вид → карточка → форма» проверялась всегда
+      await takeViaDialog(page, 'inbounds');
+      const rows = page.locator(INBOUND_ROWS);
+      const count = await rows.count();
+      await page.getByTestId('section-field-xray-inbounds-add').click();
+      await expect(rows).toHaveCount(count + 1);
+      const tag = page.getByTestId(`section-field-xray-inbounds-tag-${count}`);
+      await tag.fill('force-proxy-e2e');
+      await tag.blur();
+      await page.getByTestId(`section-field-xray-inbounds-listen-${count}`).fill('127.0.0.1');
+      await page.getByTestId(`section-field-xray-inbounds-listen-${count}`).blur();
+      const port = page.getByTestId(`section-field-xray-inbounds-port-${count}`);
+      await port.fill(String(randomPort()));
+      await port.blur();
+      await expect
+        .poll(async () => (await xrayView(page)).forceProxy?.tags ?? [], { timeout: T.action })
+        .toContain('force-proxy-e2e');
+    }
+
+    // блок группы есть ровно один и объясняет режим speed balancer
+    const block = page.getByTestId('section-force-proxy-xray');
+    await expect(block).toHaveCount(1, { timeout: T.action });
+    await expect(block).toBeVisible();
+    await expect(block).toContainText('xkeen -sb');
+
+    const view = await xrayView(page);
+    const select = page.getByTestId('section-force-proxy-select-xray');
+    if (view.forceProxy?.editable === false) {
+      // маршрутизацией управляет не панель: выбор недоступен, причина названа
+      await expect(select).toBeDisabled();
+      await expect(page.getByTestId('section-force-proxy-locked-xray')).toBeVisible();
+    } else {
+      await expect(select).toBeEnabled({ timeout: T.action });
+      const options = await select
+        .locator('option')
+        .evaluateAll((els) => els.map((e) => (e as HTMLOptionElement).value));
+      const current = await select.inputValue();
+      const other = options.find((v) => v !== '' && v !== current);
+      if (other !== undefined) {
+        await select.selectOption(other);
+        await expect
+          .poll(async () => (await xrayView(page)).forceProxy?.group, { timeout: T.action })
+          .toBe(other);
+      }
+    }
+
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});
+
+/**
+ * Критичные и серьёзные нарушения axe (WCAG 2.0/2.1 A и AA, в том числе color-contrast)
+ * внутри заданных областей. Вывод — правило, селекторы и числа контраста.
+ */
+async function axeSevere(page: Page, scopes: string[]): Promise<string[]> {
+  // раскрытие карточки идёт с затуханием: axe не должен видеть полупрозрачный кадр
+  await page.waitForTimeout(500);
+  let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']);
+  for (const scope of scopes) builder = builder.include(scope);
+  const scan = await builder.analyze();
+  return scan.violations
+    .filter((v) => v.impact === 'critical' || v.impact === 'serious')
+    .map((v) => {
+      const nodes = v.nodes.slice(0, 3).map((n) => {
+        const msg = (n.any[0]?.message ?? '')
+          .replace(/^Element has insufficient color contrast of /, 'контраст ')
+          .replace(/, font size:.*?\)/, ')')
+          .replace(/\. Expected contrast ratio of /, ', нужно ');
+        return `${n.target.join(' ')} [${msg}]`;
+      });
+      return `${v.id} (${v.impact}, узлов ${v.nodes.length}): ${nodes.join(' | ')}`;
+    });
+}
+
+const FORM_SECTIONS = ['dns', 'inbounds', 'policy'] as const;
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`sections axe: формы Xray, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await startPage(page);
+    test.skip(!(await xrayView(page)).installed, 'Xray не установлен');
+
+    await openCores(page);
+    for (const id of FORM_SECTIONS) await expandSection(page, id);
+    for (const id of FORM_SECTIONS) {
+      await expect(page.getByTestId(`section-form-xray-${id}`)).toBeVisible({ timeout: T.action });
+    }
+
+    const problems: string[] = [];
+    const applied = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+    if (applied !== theme) problems.push(`тема применена ${applied}, ожидалась ${theme}`);
+    const scopes = FORM_SECTIONS.map((id) => `[data-testid="section-card-xray-${id}"]`);
+    for (const v of await axeSevere(page, scopes)) problems.push(`axe ${v}`);
+    expect(problems, problems.join('\n')).toEqual([]);
+
+    await guard.assertClean();
+  });
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`cores: 390 px формы Xray, тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await startPage(page);
+    test.skip(!(await xrayView(page)).installed, 'Xray не установлен');
+
+    await openCores(page);
+    for (const id of FORM_SECTIONS) await expandSection(page, id);
+    await expect(page.getByTestId('section-form-xray-inbounds')).toBeVisible({
+      timeout: T.action
+    });
+    await page.waitForTimeout(500);
+
+    const pageScroll = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(pageScroll, 'горизонтальная прокрутка страницы с формами').toBeLessThanOrEqual(0);
+
+    // кнопки строк и полей не ниже 44 px и в пределах экрана
+    const buttons = page.locator(
+      [
+        '[data-testid^="section-field-xray-inbounds-remove-"]',
+        '[data-testid="section-field-xray-inbounds-add"]',
+        '[data-testid^="section-field-xray-dns-servers-remove-"]',
+        '[data-testid="section-field-xray-dns-servers-add"]'
+      ].join(', ')
+    );
+    for (let i = 0; i < (await buttons.count()); i++) {
+      const box = await buttons.nth(i).boundingBox();
+      expect(box, 'кнопка формы видна').not.toBeNull();
+      expect(box!.height, 'высота кнопки формы').toBeGreaterThanOrEqual(44);
+      expect(box!.x + box!.width, 'кнопка формы в пределах экрана').toBeLessThanOrEqual(390);
+    }
+
+    await guard.assertClean();
+  });
+}
