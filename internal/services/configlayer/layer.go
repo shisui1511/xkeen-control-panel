@@ -395,7 +395,7 @@ func (l *Layer) checkNow(publish bool) FilesEvent {
 	l.lastFiles = data
 	resolved := publish && l.lastDrift > 0 && ev.DriftCount == 0
 	l.lastDrift = ev.DriftCount
-	rsig := routingDriftSig(ev.Routing)
+	rsig := routingDriftSig(ev.Routing) + "#" + routingDriftSig(ev.Sections)
 	routingChanged := l.lastRoutingDrift != rsig
 	l.lastRoutingDrift = rsig
 	onResolved := l.onDriftResolved
@@ -470,14 +470,16 @@ func (l *Layer) evaluate(st State) FilesEvent {
 	// Расхождения маршрутизации входят в число дрейфа: «Применить» блокируется тем же
 	// механизмом (кроме запуска с желаемым managed=false, D-06, D-07).
 	rd := routingDrift(l.opts.Roots, st.Routing, l.installed(), "", l.opts.ForeignOwned)
-	return FilesEvent{Files: files, DriftCount: drift + len(rd), Routing: rd}
+	// То же для взятых секций Xray: чужой файл с их ключом входит в число дрейфа.
+	sd := sectionsDrift(l.opts.Roots, st.Cores, l.installed(), "", l.opts.ForeignOwned)
+	return FilesEvent{Files: files, DriftCount: drift + len(rd) + len(sd), Routing: rd, Sections: sd}
 }
 
 // routingDriftSig — подпись списка расхождений маршрутизации для сравнения сверок.
 func routingDriftSig(items []RoutingDriftItem) string {
 	var b strings.Builder
 	for _, it := range items {
-		b.WriteString(it.Kernel + "|" + it.Code + "|" + it.File + ";")
+		b.WriteString(it.Kernel + "|" + it.Code + "|" + it.File + "|" + it.Section + ";")
 	}
 	return b.String()
 }
@@ -517,6 +519,7 @@ func (l *Layer) Snapshot() SnapshotView {
 		Apply:         l.pipeline.Current(),
 		Notices:       l.noticeViews(st),
 		Checks:        []BuildIssue{},
+		Cores:         CoresSnapshot{Xray: map[string]CoreSectionSnap{}, Restart: []RestartNote{}},
 		BusyHolder:    l.BusyHolder(),
 	}
 	if !sv.Enabled {
@@ -526,6 +529,7 @@ func (l *Layer) Snapshot() SnapshotView {
 	fe := l.evaluate(st)
 	sv.Files, sv.DriftCount = fe.Files, fe.DriftCount
 	sv.Routing = l.routingSnapshot(st, fe.Routing)
+	sv.Cores = l.coresSnapshot(st, fe.Sections)
 	sv.Kernels, sv.Features = l.versions()
 	return sv
 }
@@ -1201,7 +1205,10 @@ func (l *Layer) StartApply(user bool) error {
 	// Расхождение маршрутизации не блокирует применение с желаемым managed=false:
 	// это и есть решение «Отпустить маршрутизацию» (D-06, D-07).
 	fe := l.checkNow(true)
-	if fe.DriftCount-len(fe.Routing) > 0 || (len(fe.Routing) > 0 && DesiredRouting(l.store.Snapshot().Draft).Managed) {
+	// Расхождение взятой секции блокирует применение, пока секция желаема (managed):
+	// «Отпустить» (managed=false) её не блокирует (FND-03, D-07 из 146).
+	draft := l.store.Snapshot().Draft
+	if fe.DriftCount-len(fe.Routing)-len(fe.Sections) > 0 || (len(fe.Routing) > 0 && DesiredRouting(draft).Managed) || sectionDriftBlocks(draft, fe.Sections) {
 		release()
 		return ErrDriftBlocked
 	}

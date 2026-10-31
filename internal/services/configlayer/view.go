@@ -37,6 +37,9 @@ type FilesEvent struct {
 	// Routing — расхождения маршрутизации (они уже входят в DriftCount); в событие
 	// не попадают, клиент берёт их из блока routing снимка.
 	Routing []RoutingDriftItem `json:"-"`
+	// Sections — расхождения взятых секций Xray (section_foreign, уже входят в
+	// DriftCount); в событие не попадают, клиент берёт их из блока cores снимка.
+	Sections []RoutingDriftItem `json:"-"`
 }
 
 // NoticesEvent — данные события notices.
@@ -66,6 +69,37 @@ type RoutingSnapshot struct {
 	Mihomo  *RoutingKernelView `json:"mihomo"`
 }
 
+// CoreSectionSnap — владение одной секцией Xray в снимке слоя.
+type CoreSectionSnap struct {
+	// Desired — секция черновика «Управлять в панели» (managed).
+	Desired bool `json:"desired"`
+	// Taken — панель фактически ведёт секцию (запись в State.Cores).
+	Taken bool `json:"taken"`
+	// File — файл панели секции.
+	File string `json:"file"`
+	// Moved — чужие файлы секции, перенесённые в копии при взятии.
+	Moved []string `json:"moved"`
+	// Left — файлы с ключом секции, оставленные на месте (смешанные).
+	Left []string `json:"left"`
+	// Drift — чужие файлы с ключом секции, появившиеся после взятия или
+	// идущие после файла панели.
+	Drift []string `json:"drift"`
+}
+
+// RestartNote — объявление о перезапуске ядра, нужном для вступления секций в
+// силу (заполняет план 147-16).
+type RestartNote struct {
+	Kernel string `json:"kernel"`
+	Reason string `json:"reason"`
+}
+
+// CoresSnapshot — раздел cores снимка: владение секциями Xray по идентификатору
+// секции и объявления перезапуска.
+type CoresSnapshot struct {
+	Xray    map[string]CoreSectionSnap `json:"xray"`
+	Restart []RestartNote              `json:"restart"`
+}
+
 // SnapshotView — состояние слоя целиком для GET-снимка и первого события SSE.
 type SnapshotView struct {
 	Enabled       bool                     `json:"enabled"`
@@ -83,6 +117,8 @@ type SnapshotView struct {
 	Checks []BuildIssue `json:"checks"`
 	// Routing — владение маршрутизацией: желаемое, взятое, перенесённое и дрейф.
 	Routing RoutingSnapshot `json:"routing"`
+	// Cores — владение секциями Xray: желаемое, взятое, перенесённое и дрейф.
+	Cores CoresSnapshot `json:"cores"`
 	// BusyHolder — кто держит исключительный замок применения вне конвейера
 	// (менеджер geodata: geodata_update, geodata_remove); пусто — замок свободен.
 	BusyHolder string `json:"busy_holder,omitempty"`

@@ -258,12 +258,14 @@ const (
 	IssueNothingToReclaim = "nothing_to_reclaim"
 )
 
-// RoutingDriftItem — одно расхождение маршрутизации: ядро, код и файл
-// (имя в каталоге Xray или "config.yaml").
+// RoutingDriftItem — одно расхождение маршрутизации или взятой секции Xray:
+// ядро, код и файл (имя в каталоге Xray или "config.yaml").
 type RoutingDriftItem struct {
 	Kernel string
 	Code   string
 	File   string
+	// Section — идентификатор секции Xray у расхождения section_foreign.
+	Section string `json:"section,omitempty"`
 }
 
 // mihomoConfigFile — активный профиль Mihomo в корне его каталога.
