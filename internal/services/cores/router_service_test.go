@@ -300,4 +300,149 @@ func TestRouterCoresServiceFlow(t *testing.T) {
 			t.Errorf("файл панели потерял поля dns: %v", file.DNS)
 		}
 	})
+
+	t.Run("правка формой и Дополнительно", func(t *testing.T) {
+		dns := e.section(t, "xray", "dns")
+		if !strings.Contains(dns.Advanced, `"tag"`) || strings.Contains(dns.Advanced, "servers") {
+			t.Fatalf("Дополнительно dns: %q", dns.Advanced)
+		}
+		form := json.RawMessage(`{"servers":["127.0.0.3"],"queryStrategy":"UseIPv4"}`)
+		if _, err := e.svc.Save(e.rev(t), "xray", "dns", form, dns.Advanced); err != nil {
+			t.Fatalf("Save dns: %v", err)
+		}
+		dns = e.section(t, "xray", "dns")
+		obj := rtCoresSvcObject(t, dns.Value)
+		if obj["tag"] != "dns-in" || obj["queryStrategy"] != "UseIPv4" || !slices.Equal(rtCoresSvcStrings(obj["servers"]), []string{"127.0.0.3"}) || !dns.Dirty {
+			t.Errorf("значение dns после Save: %v dirty=%v", obj, dns.Dirty)
+		}
+
+		// Очистка поля формы снимает ключ, остаток остаётся.
+		if _, err := e.svc.Save(e.rev(t), "xray", "dns", json.RawMessage(`{"servers":["127.0.0.3"]}`), dns.Advanced); err != nil {
+			t.Fatalf("Save dns без queryStrategy: %v", err)
+		}
+		obj = rtCoresSvcObject(t, e.section(t, "xray", "dns").Value)
+		if _, has := obj["queryStrategy"]; has || obj["tag"] != "dns-in" {
+			t.Errorf("очистка поля формы: %v", obj)
+		}
+
+		// Ключ «Дополнительно», совпадающий с полем формы, и синтаксис.
+		_, err := e.svc.Save(e.rev(t), "xray", "dns", form, `{"servers":["127.0.0.9"]}`)
+		if ce := rtCoresSvcCode(t, err); ce.Code != "raw_dup_key" || ce.Params["key"] != "servers" {
+			t.Errorf("повтор ключа формы: %+v", ce)
+		}
+		_, err = e.svc.Save(e.rev(t), "xray", "dns", form, "{\n \"a\": }")
+		if ce := rtCoresSvcCode(t, err); ce.Code != "raw_syntax" || ce.Params["line"] != "2" {
+			t.Errorf("синтаксис Дополнительно: %+v", ce)
+		}
+
+		// Взятие dns не захватило «Прочие ключи» (D-03): править их рано.
+		_, err = e.svc.Save(e.rev(t), "xray", "other", nil, `{"stats":{}}`)
+		if ce := rtCoresSvcCode(t, err); ce.Code != "section_not_managed" {
+			t.Errorf("правка не взятой секции: %+v", ce)
+		}
+		if _, err := e.svc.Take(e.rev(t), "xray", []string{"other", "policy"}, false); err != nil {
+			t.Fatalf("Take other, policy: %v", err)
+		}
+		if sec := e.section(t, "xray", "dns"); sec.Owner != "panel" {
+			t.Errorf("взятие других секций изменило dns: %q", sec.Owner)
+		}
+
+		_, err = e.svc.Save(e.rev(t), "xray", "other", nil, `{"routing": {}}`)
+		if ce := rtCoresSvcCode(t, err); ce.Code != "raw_reserved" || ce.Params["key"] != "routing" {
+			t.Errorf("ключ панели в «Прочих ключах»: %+v", ce)
+		}
+		_, err = e.svc.Save(e.rev(t), "xray", "policy", nil, `{"system":{"statsOutboundUplink":false}}`)
+		if ce := rtCoresSvcCode(t, err); ce.Code != "raw_pinned" {
+			t.Errorf("закреплённый счётчик policy: %+v", ce)
+		}
+		if _, err := e.svc.Save(e.rev(t), "xray", "other", nil, `{"stats":{}}`); err != nil {
+			t.Fatalf("Save other: %v", err)
+		}
+		if got := string(e.section(t, "xray", "other").Value); got != `{"stats":{}}` {
+			t.Errorf("значение other: %s", got)
+		}
+
+		// Пресет заменяет значение секции в черновике.
+		if _, err := e.svc.Preset(e.rev(t), "xray", "dns"); err != nil {
+			t.Fatalf("Preset dns: %v", err)
+		}
+		if got := string(e.section(t, "xray", "dns").Value); got != `{"servers":["localhost"]}` {
+			t.Errorf("значение dns после пресета: %s", got)
+		}
+	})
+
+	t.Run("отпускание одной секции", func(t *testing.T) {
+		if _, err := e.svc.Release(e.rev(t), "xray", "dns"); err != nil {
+			t.Fatalf("Release dns: %v", err)
+		}
+		for _, id := range []string{"other", "policy"} {
+			if sec := e.section(t, "xray", id); sec.Owner != "pending" {
+				t.Errorf("отпускание dns изменило секцию %s: %q", id, sec.Owner)
+			}
+		}
+		if _, err := e.svc.Release(e.rev(t), "mihomo", "main"); err == nil || rtCoresSvcCode(t, err).Code != "mihomo_with_profile" {
+			t.Errorf("Release mihomo: %v", err)
+		}
+
+		// Файл возвращается побайтно, с комментарием, правки панели снимаются.
+		e.mustApply(t, "отпускание dns, взятие other и policy")
+		if body, err := e.readFile(rtCoresSvcDNSFile); err != nil || body != rtCoresSvcDNSBody {
+			t.Errorf("02_dns.json не вернулся побайтно: %v", err)
+		}
+		if _, err := e.readFile(configlayer.PanelXrayDNSFile); !os.IsNotExist(err) {
+			t.Errorf("файл панели dns остался: %v", err)
+		}
+		if sec := e.section(t, "xray", "dns"); sec.Owner != "xkeen" {
+			t.Errorf("dns после отпускания: %q", sec.Owner)
+		}
+		for _, id := range []string{"other", "policy"} {
+			if sec := e.section(t, "xray", id); sec.Owner != "panel" {
+				t.Errorf("секция %s после «Применить»: %q", id, sec.Owner)
+			}
+		}
+		if len(e.section(t, "xray", "policy").Pinned) != 4 {
+			t.Errorf("закреплённые счётчики policy: %v", e.section(t, "xray", "policy").Pinned)
+		}
+
+		// Остальные секции отпускаются своим Release.
+		for _, id := range []string{"other", "policy"} {
+			if _, err := e.svc.Release(e.rev(t), "xray", id); err != nil {
+				t.Fatalf("Release %s: %v", id, err)
+			}
+		}
+		e.mustApply(t, "отпускание other и policy")
+		for _, name := range []string{configlayer.PanelXrayOtherFile, configlayer.PanelXrayPolicyFile} {
+			if _, err := e.readFile(name); !os.IsNotExist(err) {
+				t.Errorf("файл панели %s остался: %v", name, err)
+			}
+		}
+		if body, err := e.readFile(rtCoresSvcDNSFile); err != nil || body != rtCoresSvcDNSBody {
+			t.Errorf("02_dns.json изменился: %v", err)
+		}
+	})
+
+	t.Run("группа force-proxy", func(t *testing.T) {
+		if _, err := e.layer.EditDraft(e.rev(t), "groups", json.RawMessage(`{"items":[{"id":"g1"}]}`)); err != nil {
+			t.Fatalf("EditDraft groups: %v", err)
+		}
+		// Секция «Входящие» за XKeen — группа всё равно сохраняется (D-12).
+		_, err := e.svc.SetForceProxyGroup(e.rev(t), "xray", "nope")
+		if ce := rtCoresSvcCode(t, err); ce.Code != "group_not_found" {
+			t.Errorf("неизвестная группа: %+v", ce)
+		}
+		if _, err := e.svc.SetForceProxyGroup(e.rev(t), "xray", "g1"); err != nil {
+			t.Fatalf("SetForceProxyGroup: %v", err)
+		}
+		st, err := e.layer.ReadState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cs, err := configlayer.ParseCoreSection(st.Draft[configlayer.SectionXrayInbounds])
+		if err != nil || cs.ForceProxyGroup != "g1" || cs.Managed {
+			t.Errorf("секция «Входящие»: %+v, %v", cs, err)
+		}
+		if _, err := e.svc.SetForceProxyGroup(e.rev(t), "xray", ""); err != nil {
+			t.Fatalf("сброс группы: %v", err)
+		}
+	})
 }
