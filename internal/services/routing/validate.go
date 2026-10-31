@@ -102,6 +102,7 @@ const (
 	maxMihomoRawLine = 1024
 	maxDomainLen     = 253
 	maxProbeURLLen   = 512
+	maxProbeSampling = 100
 	minProbeInterval = 10
 	maxProbeInterval = 3600
 )
@@ -874,6 +875,50 @@ func validateProbe(p ProbeConfig) error {
 	}
 	if p.TimeoutS < 1 || p.TimeoutS >= p.IntervalS {
 		return invalid("timeout_s", reasonProbeInvalid)
+	}
+	if p.Sampling != 0 && (p.Sampling < 1 || p.Sampling > maxProbeSampling) {
+		return invalid("sampling", reasonProbeInvalid)
+	}
+	if p.Connectivity != "" && !validProbeURL(p.Connectivity) {
+		return invalid("connectivity", reasonProbeInvalid)
+	}
+	return validateProbeExtra(p.Extra)
+}
+
+// validProbeURL — адрес http или https с хостом, без userinfo, пробелов и
+// управляющих символов, не длиннее maxProbeURLLen.
+func validProbeURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" ||
+		u.User != nil || len(raw) > maxProbeURLLen {
+		return false
+	}
+	for _, r := range raw {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// validateProbeExtra проверяет Extra проб: пусто или JSON-объект не больше
+// maxProbeExtraBytes без ключей, которыми управляют форма и группы (T-147-04,
+// T-147-05).
+func validateProbeExtra(raw json.RawMessage) error {
+	if isEmptyRaw(raw) {
+		return nil
+	}
+	if len(raw) > maxProbeExtraBytes {
+		return invalid("extra", reasonProbeInvalid)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+		return invalid("extra", reasonProbeInvalid)
+	}
+	for _, k := range probeReservedKeys {
+		if _, has := obj[k]; has {
+			return invalid("extra", reasonProbeInvalid)
+		}
 	}
 	return nil
 }
