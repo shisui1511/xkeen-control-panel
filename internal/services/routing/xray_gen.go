@@ -427,15 +427,13 @@ func (b *xrayBuild) build() ([]configlayer.GeneratedFile, error) {
 	}
 	if len(balancers) > 0 {
 		sort.Strings(subjects)
+		ping, err := b.pingConfig()
+		if err != nil {
+			return nil, err
+		}
 		obsJSON, err := xrayJSON(map[string]any{"burstObservatory": map[string]any{
 			"subjectSelector": subjects,
-			"pingConfig": map[string]any{
-				"destination":  b.probe.URL,
-				"connectivity": "",
-				"interval":     strconv.Itoa(b.probe.IntervalS) + "s",
-				"timeout":      strconv.Itoa(b.probe.TimeoutS) + "s",
-				"sampling":     ProbeSampling,
-			},
+			"pingConfig":      ping,
 		}})
 		if err != nil {
 			return nil, err
@@ -445,6 +443,35 @@ func (b *xrayBuild) build() ([]configlayer.GeneratedFile, error) {
 		})
 	}
 	return files, nil
+}
+
+// pingConfig собирает pingConfig из настроек проб: поля формы, затем остальные
+// ключи Extra (D-13). Ключи, которыми управляют форма и группы, из Extra не
+// берутся: их отсекает проверка до записи, здесь защита от черновика в обход неё.
+func (b *xrayBuild) pingConfig() (map[string]any, error) {
+	sampling := b.probe.Sampling
+	if sampling == 0 {
+		sampling = ProbeSampling
+	}
+	ping := map[string]any{}
+	if !isEmptyRaw(b.probe.Extra) {
+		var extra map[string]json.RawMessage
+		if err := json.Unmarshal(b.probe.Extra, &extra); err != nil {
+			return nil, invalid(ProbeSection, reasonSectionInvalid)
+		}
+		for k, v := range extra {
+			ping[k] = v
+		}
+	}
+	for _, k := range probeReservedKeys {
+		delete(ping, k)
+	}
+	ping["destination"] = b.probe.URL
+	ping["connectivity"] = b.probe.Connectivity
+	ping["interval"] = strconv.Itoa(b.probe.IntervalS) + "s"
+	ping["timeout"] = strconv.Itoa(b.probe.TimeoutS) + "s"
+	ping["sampling"] = sampling
+	return ping, nil
 }
 
 // checkSelectors проверяет, что тег узла в selector не является началом другого

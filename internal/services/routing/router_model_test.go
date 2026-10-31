@@ -5,6 +5,7 @@ package routing
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -763,7 +764,7 @@ func TestRouterRulesModel(t *testing.T) {
 	if _, err := e.svc.SaveProbe(e.rev(t), ProbeConfig{URL: want.URL, IntervalS: want.IntervalS, TimeoutS: want.TimeoutS}); err != nil {
 		t.Fatalf("SaveProbe допустимых значений: %v", err)
 	}
-	if got, err := e.svc.Probe(); err != nil || got != want {
+	if got, err := e.svc.Probe(); err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("параметры проверки после сохранения: %+v, %v", got, err)
 	}
 }
