@@ -1,6 +1,8 @@
 package configlayer
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -81,10 +83,17 @@ type mihomoActiveReader func() (name, hash string, err error)
 // записи в actual) и только там, где есть скан. Для Xray: (1) from — набор
 // {имя, md5} должен совпасть с текущими Sources скана секции; (2) в переносимых
 // «чистых» файлах есть комментарии JSONC, а comments_ack не выставлен (D-02);
-// (3) «Входящие» при смешанном файле с inbounds (D-25); (4) чужой файл секции
-// сортируется после файла панели. Для Mihomo при перекладке config.yaml на
+// (3) «Входящие» при смешанном файле с inbounds (D-25); (4) секция перекрыта
+// (sectionShadowFile, D-28). Для Mihomo при перекладке config.yaml на
 // профиль панели (mihomo != nil): md5 текущего активного профиля должен совпасть
 // с from секции.
+//
+// Правило (4) для log, dns, policy и «Прочих ключей» (D-28): Xray сливает эти
+// объекты из файлов вглубь, поэтому секция не берётся (код IssueSectionShadowed),
+// если у её ключа есть смешанный файл (его остаток продолжил бы сливаться со
+// значением панели), файл после файла панели или значение секции неизвестно
+// (дамп ядра не получен). Для «Входящих» правило прежнее — по файлу после файла
+// панели; смешанный файл блокирует их отдельно (IssueInboundsMixed, D-25).
 func coreTakeIssues(desired map[string]CoreSection, actual CoresState, scans map[string]XraySectionScan, mihomo mihomoActiveReader) []BuildIssue {
 	var out []BuildIssue
 	for _, id := range XraySectionIDs {
@@ -111,8 +120,8 @@ func coreTakeIssues(desired map[string]CoreSection, actual CoresState, scans map
 		if id == xraySectionInbounds && scan.InboundsMixed && len(scan.Mixed) > 0 {
 			out = append(out, issue(IssueInboundsMixed, scan.Mixed[0]))
 		}
-		if len(scan.Shadowing) > 0 {
-			out = append(out, issue(IssueSectionShadowed, scan.Shadowing[0]))
+		if file := sectionShadowFile(id, scan); file != "" {
+			out = append(out, issue(IssueSectionShadowed, file))
 		}
 	}
 	if mihomo == nil {
@@ -148,6 +157,26 @@ func coreTakeIssues(desired map[string]CoreSection, actual CoresState, scans map
 		}
 	}
 	return out
+}
+
+// sectionShadowFile возвращает файл, из-за которого секцию Xray нельзя взять по
+// правилу D-28 (см. coreTakeIssues); пустая строка — препятствий нет.
+func sectionShadowFile(id string, scan XraySectionScan) string {
+	if id == xraySectionInbounds {
+		if len(scan.Shadowing) > 0 {
+			return scan.Shadowing[0]
+		}
+		return ""
+	}
+	switch {
+	case len(scan.Mixed) > 0:
+		return scan.Mixed[0]
+	case len(scan.Shadowing) > 0:
+		return scan.Shadowing[0]
+	case scan.EffectiveUnknown && len(scan.Files) > 0:
+		return scan.Files[0]
+	}
+	return ""
 }
 
 // firstSourceMismatch сравнивает from секции с текущими источниками скана:
@@ -196,7 +225,7 @@ func firstCommon(a, b []string) string {
 // BuildError до записи. Если секции не меняются, возвращается routing как есть
 // (в том числе nil); иначе операции сливаются в routing, а при nil создаётся
 // новый RoutingOps с прежним владением маршрутизацией.
-func (p *Pipeline) planCores(src Sections, actual CoresState, routing *RoutingOps, installed InstalledKernels, req ApplyRequest) (*RoutingOps, error) {
+func (p *Pipeline) planCores(ctx context.Context, src Sections, actual CoresState, routing *RoutingOps, installed InstalledKernels, req ApplyRequest) (*RoutingOps, error) {
 	if len(req.Only) > 0 {
 		return routing, nil
 	}
@@ -231,7 +260,14 @@ func (p *Pipeline) planCores(src Sections, actual CoresState, routing *RoutingOp
 			if err != nil {
 				return nil, &BuildError{Issues: []BuildIssue{{Key: RoutingSection, Code: IssueRoutingScanFailed, Detail: err.Error()}}}
 			}
-			scans = ScanXraySections(files)
+			// Значение log, dns, policy и «Прочих ключей» — из дампа ядра (D-28);
+			// дамп не нужен, пока берутся одни «Входящие». Не получен — значение
+			// неизвестно, такие секции не берутся.
+			var dump map[string]json.RawMessage
+			if takesDumpSection(desired, actual) {
+				dump, _ = p.dumper.Dump(ctx, p.binaries().Xray, p.d.Roots.Xray, p.d.XrayEnv)
+			}
+			scans = ScanXraySections(files, dump)
 		}
 		var xrayIssues []BuildIssue
 		take, release, next, xrayIssues = computeCoreOps(desired, actual, scans, p.d.Now())
@@ -264,6 +300,20 @@ func (p *Pipeline) planCores(src Sections, actual CoresState, routing *RoutingOp
 		}
 	}
 	return ops, nil
+}
+
+// takesDumpSection — среди берущихся секций есть та, чьё значение даёт дамп ядра
+// (log, dns, policy, «Прочие ключи»).
+func takesDumpSection(desired map[string]CoreSection, actual CoresState) bool {
+	for _, id := range XraySectionIDs {
+		if id == xraySectionInbounds {
+			continue
+		}
+		if desired[CoreSectionName(KernelXray, id)].Managed && actual.Xray[id] == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // sectionOwner — ключ верхнего уровня принадлежит секции id.

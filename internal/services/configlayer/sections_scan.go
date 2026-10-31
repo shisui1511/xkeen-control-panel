@@ -2,6 +2,7 @@ package configlayer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -212,10 +213,16 @@ type XraySectionScan struct {
 	// Shadowing — файлы с ключом секции, которые сортируются после файла панели
 	// секции и перекрыли бы его (не считается для inbounds: они объединяются).
 	Shadowing []string
-	// Effective — действующее значение секции так, как сливает Xray (допущение
-	// A1, проверяется сценарием TestRouterCoresMergeSemantics); nil — значения
-	// нет. Значение неразобранных файлов в нём не учтено.
+	// Effective — действующее значение секции. log, dns, policy и «Прочие ключи» —
+	// из дампа ядра (`xray run -dump -confdir`, D-28): Xray сливает эти объекты из
+	// нескольких файлов вглубь, и панель правил слияния не воспроизводит. «Входящие»
+	// — слияние по tag, поздний входящий заменяет ранний целиком. nil — значения нет
+	// или оно неизвестно (см. EffectiveUnknown).
 	Effective json.RawMessage
+	// EffectiveUnknown — у секции есть файлы (log, dns, policy, other), а значение
+	// из дампа получить не удалось (дамп недоступен или ядро не приняло каталог):
+	// секция не берётся (D-28). Для «Входящих» всегда false.
+	EffectiveUnknown bool
 	// Owner — none, xkeen или user.
 	Owner string
 	// Sources — {имя, md5} всех файлов из Files.
@@ -228,13 +235,16 @@ type XraySectionScan struct {
 }
 
 // ScanXraySections строит скан всех пяти секций Xray по результату
-// ScanXrayKeyFiles; ключ карты — идентификатор секции.
-func ScanXraySections(files []XrayKeyFile) map[string]XraySectionScan {
+// ScanXrayKeyFiles и дампу ядра; ключ карты — идентификатор секции. dump —
+// ключи верхнего уровня слитого конфига (XrayDump, D-28); nil — дамп получить не
+// удалось: значение log, dns, policy и «Прочих ключей» неизвестно
+// (EffectiveUnknown у секций с файлами). Дамп не изменяется.
+func ScanXraySections(files []XrayKeyFile, dump map[string]json.RawMessage) map[string]XraySectionScan {
 	sorted := append([]XrayKeyFile(nil), files...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 	out := make(map[string]XraySectionScan, len(XraySectionIDs))
 	for _, id := range XraySectionIDs {
-		out[id] = scanXraySection(id, sorted)
+		out[id] = scanXraySection(id, sorted, dump)
 	}
 	return out
 }
@@ -250,7 +260,7 @@ func sectionKeyCount(f XrayKeyFile, id string) int {
 	return n
 }
 
-func scanXraySection(id string, files []XrayKeyFile) XraySectionScan {
+func scanXraySection(id string, files []XrayKeyFile, dump map[string]json.RawMessage) XraySectionScan {
 	s := XraySectionScan{
 		ID:        id,
 		Files:     []string{},
@@ -302,15 +312,62 @@ func scanXraySection(id string, files []XrayKeyFile) XraySectionScan {
 		s.Effective = mergeInbounds(members)
 		s.ForceProxyTags = collectForceProxyTags(members)
 	case xraySectionOther:
-		s.Effective = mergeOtherKeys(members)
+		s.Effective = dumpOtherKeys(dump, files)
 	default:
-		s.Effective = lastKeyValue(members, id)
+		s.Effective = dump[id]
+	}
+	if id != xraySectionInbounds && s.Effective == nil && len(s.Files) > 0 {
+		s.EffectiveUnknown = true
 	}
 	return s
 }
 
-// lastKeyValue — значение ключа из последнего по имени разобранного файла:
-// объекты log, dns, policy заменяются целиком (допущение A1).
+// dumpOtherKeys собирает значение «Прочих ключей» из дампа: объект из ключей
+// дампа, принадлежащих секции other. Порядок ключей — по первому появлению в
+// порядке файлов, остальные ключи дампа (их нет в разобранных файлах) — по алфавиту.
+// nil — дампа нет или в нём нет таких ключей.
+func dumpOtherKeys(dump map[string]json.RawMessage, files []XrayKeyFile) json.RawMessage {
+	if dump == nil {
+		return nil
+	}
+	obj := NewOrderedObject()
+	for _, f := range files {
+		for _, k := range f.Keys {
+			if XraySectionOfKey(k) != xraySectionOther {
+				continue
+			}
+			if v, ok := dump[k]; ok && !hasKey(obj, k) {
+				obj.Set(k, v)
+			}
+		}
+	}
+	var rest []string
+	for k := range dump {
+		if XraySectionOfKey(k) == xraySectionOther && !hasKey(obj, k) {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	for _, k := range rest {
+		obj.Set(k, dump[k])
+	}
+	if obj.Len() == 0 {
+		return nil
+	}
+	b, err := obj.MarshalJSON()
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func hasKey(o *OrderedObject, k string) bool {
+	_, ok := o.Get(k)
+	return ok
+}
+
+// lastKeyValue — значение ключа из последнего по имени разобранного файла.
+// Нужен только для burstObservatory (основа проб, D-27): это не секция панели.
 func lastKeyValue(files []XrayKeyFile, key string) json.RawMessage {
 	for i := len(files) - 1; i >= 0; i-- {
 		if files[i].Broken {
@@ -321,31 +378,6 @@ func lastKeyValue(files []XrayKeyFile, key string) json.RawMessage {
 		}
 	}
 	return nil
-}
-
-// mergeOtherKeys собирает «Прочие ключи»: для каждого ключа — значение из
-// последнего файла, порядок ключей — по первому появлению в порядке файлов.
-func mergeOtherKeys(files []XrayKeyFile) json.RawMessage {
-	obj := NewOrderedObject()
-	for _, f := range files {
-		if f.Broken {
-			continue
-		}
-		for _, k := range f.Keys {
-			if XraySectionOfKey(k) != xraySectionOther {
-				continue
-			}
-			obj.Set(k, f.Values[k])
-		}
-	}
-	if obj.Len() == 0 {
-		return nil
-	}
-	b, err := obj.MarshalJSON()
-	if err != nil {
-		return nil
-	}
-	return b
 }
 
 // mergeInbounds объединяет входящие по порядку файлов так, как это делает Xray:
@@ -560,8 +592,19 @@ func ReadMihomoActive(root string) (name string, data []byte, err error) {
 	return name, data, nil
 }
 
+// XrayDump возвращает дамп каталога Xray слоя (D-28): ключи верхнего уровня
+// слитого ядром конфига. Ядро не установлено или без флага -dump —
+// ErrXrayDumpUnavailable, отказ ядра — ErrXrayDumpFailed. Результат кэшируется на
+// подпись каталога; вызывающий его не изменяет. Корень Xray не задан — тот же
+// ErrXrayDumpUnavailable.
+func (l *Layer) XrayDump(ctx context.Context) (map[string]json.RawMessage, error) {
+	return l.pipeline.dumper.Dump(ctx, l.binaries().Xray, l.opts.Roots.Xray, l.opts.XrayEnv)
+}
+
 // ScanXraySections сканирует каталог Xray слоя: карта секций по идентификатору
-// и файлы скана. Корень Xray не задан — пустая карта без ошибки.
+// и файлы скана. Значения log, dns, policy и «Прочих ключей» берутся из дампа
+// ядра (XrayDump); дамп не получен — они неизвестны (EffectiveUnknown), ошибки
+// это не вызывает. Корень Xray не задан — пустая карта без ошибки.
 func (l *Layer) ScanXraySections() (map[string]XraySectionScan, []XrayKeyFile, error) {
 	if l.opts.Roots.Xray == "" {
 		return map[string]XraySectionScan{}, nil, nil
@@ -570,7 +613,11 @@ func (l *Layer) ScanXraySections() (map[string]XraySectionScan, []XrayKeyFile, e
 	if err != nil {
 		return nil, nil, err
 	}
-	return ScanXraySections(files), files, nil
+	var dump map[string]json.RawMessage
+	if len(files) > 0 {
+		dump, _ = l.XrayDump(l.ctx)
+	}
+	return ScanXraySections(files, dump), files, nil
 }
 
 // MihomoActiveProfile возвращает активный профиль Mihomo слоя: имя, байты и md5.
