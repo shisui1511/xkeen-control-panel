@@ -186,7 +186,8 @@ func (l *Layer) moveManagedToBackup(ctx context.Context, plan Plan) error {
 // «вернуть» маршрутизацию): копии файлов плана и операций маршрутизации идут в один
 // набор и один журнал; сначала операции маршрутизации (возврат чужих файлов и
 // config.yaml раньше удаления файлов панели), затем удаления; затем перезапуск
-// затронутых ядер и фиксация манифеста и State.Routing одной записью состояния.
+// затронутых ядер и фиксация манифеста, State.Routing и State.Cores (если план
+// несёт NextCores) одной записью состояния.
 // Неудача любого шага возвращает всё из набора. Вызывается под замками применения.
 func (l *Layer) commitDiskPlan(ctx context.Context, plan Plan, trigger Trigger, reason string) error {
 	set, err := NewBackupSet(l.opts.DataDir, l.opts.Now(), string(trigger))
@@ -262,6 +263,11 @@ func (l *Layer) commitDiskPlan(ctx context.Context, plan Plan, trigger Trigger, 
 		}
 		if plan.Routing != nil {
 			st.Routing = plan.Routing.Next.clone()
+			// Владение секциями (147-14): выключение флага снимает его целиком,
+			// «Вернуть файл панели» записывает новую копию в Moved — как commitState.
+			if plan.Routing.NextCores != nil {
+				st.Cores = plan.Routing.NextCores.clone()
+			}
 		}
 		st.Journal = nil
 		return nil
