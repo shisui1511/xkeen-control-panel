@@ -24,6 +24,16 @@ import (
 // генератора; рабочее ядро стенда не трогается (Applier не задан), ядро тест не
 // читает и не переключает — метка ядра не нужна.
 
+// rtxaOldAPIFile — 00_api.json старого слоя: api без listen, входящий
+// dokodemo-door tag api и правило api в routing.
+const rtxaOldAPIFile = `{
+  "stats": {},
+  "api": {"tag": "api", "services": ["StatsService", "RoutingService", "LoggerService"]},
+  "inbounds": [{"tag": "api", "listen": "127.0.0.1", "port": 10085, "protocol": "dokodemo-door", "settings": {"address": "127.0.0.1"}}],
+  "routing": {"rules": [{"type": "field", "inboundTag": ["api"], "outboundTag": "api"}]}
+}
+`
+
 // rtxaForeignRules — чужой файл с правилами routing (случай P4: правила лежат
 // не там, где api).
 const rtxaForeignRules = `{
@@ -120,5 +130,48 @@ func TestRouterXrayAPIBlock(t *testing.T) {
 		if !info.APIPresent || filepath.Base(info.Path) != configlayer.PanelXrayAPIFile {
 			t.Errorf("FindXrayAPIFragment: present=%v файл=%s, ожидался %s", info.APIPresent, filepath.Base(info.Path), configlayer.PanelXrayAPIFile)
 		}
+	})
+
+	t.Run("foreign_api_keeps_old_rule", func(t *testing.T) {
+		e := newEnv(t)
+		if err := os.WriteFile(filepath.Join(e.xrayDir(), "00_api.json"), []byte(rtxaOldAPIFile), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		e.takeAndApply(t)
+
+		if e.xrayFileExists(configlayer.PanelXrayAPIFile) {
+			t.Errorf("при чужом api панель записала %s: у ключа api должен быть один владелец", configlayer.PanelXrayAPIFile)
+		}
+		rules := rtxRules(t, rtxRouting(t, e.xrayDoc(t, xrayRoutingFile)))
+		if len(rules) == 0 || !rtxEqualStrings(rtxStrings(rules[0]["inboundTag"]), []string{"api"}) || rules[0]["outboundTag"] != "api" {
+			t.Errorf("первое правило routing панели %v, ожидалось inboundTag [api] → outboundTag api", rules)
+		}
+		rtxaRun(t, "run", "-test", "-confdir", rtxaCopyDir(t, e.xrayDir()))
+		info := services.FindXrayAPIFragment(e.xrayDir())
+		if !info.APIPresent || filepath.Base(info.Path) != "00_api.json" {
+			t.Errorf("FindXrayAPIFragment: present=%v файл=%s, ожидался 00_api.json", info.APIPresent, filepath.Base(info.Path))
+		}
+	})
+
+	t.Run("no_observatory_service_without_observation", func(t *testing.T) {
+		e := newEnv(t)
+		// Все группы — ручные: balancer-ов и файла наблюдения нет.
+		e.replaceGroups(t, func(cfg *GroupsConfig) {
+			for i := range cfg.Items {
+				cfg.Items[i].Mode = ModeManual
+				cfg.Items[i].Members = []Member{{Kind: KindDirect}}
+			}
+		})
+		e.takeAndApply(t)
+
+		if e.xrayFileExists(xrayObservatoryFile) {
+			t.Errorf("файл наблюдения %s записан без групп «авто» и «резерв»", xrayObservatoryFile)
+		}
+		_, svcs := rtxaServices(t, e)
+		want := []string{"HandlerService", "LoggerService", "RoutingService", "StatsService"}
+		if !rtxEqualStrings(svcs, want) {
+			t.Errorf("services %v, ожидались %v (без наблюдения ObservatoryService не нужен)", svcs, want)
+		}
+		rtxaRun(t, "run", "-test", "-confdir", rtxaCopyDir(t, e.xrayDir()))
 	})
 }
