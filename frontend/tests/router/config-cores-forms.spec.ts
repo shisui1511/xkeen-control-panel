@@ -165,3 +165,122 @@ test('cores: «Прочие ключи» Xray — правка в «Дополн
     await resetDraft(page);
   }
 });
+
+test('cores: чужие «Прочие ключи» — только для чтения', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  await resetDraft(page);
+
+  let checked = 0;
+  for (const kernel of KERNELS) {
+    const other = await otherOf(page, kernel);
+    if (!other.installed) continue;
+    if (other.owner === '' || other.owner === 'panel' || other.owner === 'pending') continue;
+    checked++;
+
+    await openOther(page, kernel);
+    const area = page.getByTestId(`section-advanced-${kernel}-other`);
+    await expect(area).toBeVisible({ timeout: T.action });
+    await expect(area).toHaveAttribute('readonly', /.*/);
+    await expect(area).toHaveAttribute('aria-readonly', 'true');
+
+    // текст показывает действующие ключи секции
+    const keys =
+      other.value !== null && typeof other.value === 'object' && !Array.isArray(other.value)
+        ? Object.keys(other.value as Record<string, unknown>).slice(0, 5)
+        : [];
+    for (const key of keys) await expect(area).toHaveValue(new RegExp(`\\b${key}\\b`));
+
+    // ввод с клавиатуры ничего не меняет и ничего не пишет в черновик
+    const revision = await draftRevision(page);
+    const text = await area.inputValue();
+    await area.click();
+    await page.keyboard.type('zzz');
+    await page.keyboard.press('Tab');
+    await expect(area).toHaveValue(text);
+    await expect(page.getByTestId(`section-raw-error-${kernel}-other`)).toHaveCount(0);
+    expect(await draftRevision(page), 'чужая секция не пишет в черновик').toBe(revision);
+  }
+  test.skip(checked === 0, 'на стенде нет чужой секции «Прочие ключи»');
+
+  await guard.assertClean();
+});
+
+/**
+ * Критичные и серьёзные нарушения axe (WCAG 2.0/2.1 A и AA, в том числе color-contrast)
+ * внутри заданных областей. Вывод — правило, селекторы и числа контраста.
+ */
+async function axeSevere(page: Page, scopes: string[]): Promise<string[]> {
+  // раскрытие карточки идёт с затуханием: axe не должен видеть полупрозрачный кадр
+  await page.waitForTimeout(500);
+  let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']);
+  for (const scope of scopes) builder = builder.include(scope);
+  const scan = await builder.analyze();
+  return scan.violations
+    .filter((v) => v.impact === 'critical' || v.impact === 'serious')
+    .map((v) => {
+      const nodes = v.nodes.slice(0, 3).map((n) => {
+        const msg = (n.any[0]?.message ?? '')
+          .replace(/^Element has insufficient color contrast of /, 'контраст ')
+          .replace(/, font size:.*?\)/, ')')
+          .replace(/\. Expected contrast ratio of /, ', нужно ');
+        return `${n.target.join(' ')} [${msg}]`;
+      });
+      return `${v.id} (${v.impact}, узлов ${v.nodes.length}): ${nodes.join(' | ')}`;
+    });
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`sections axe: «Дополнительно», тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await startPage(page);
+    test.skip(!(await otherOf(page, 'xray')).installed, 'Xray не установлен');
+
+    await openOther(page, 'xray');
+    await expect(page.getByTestId('section-advanced-xray-other')).toBeVisible({
+      timeout: T.action
+    });
+
+    const problems: string[] = [];
+    const applied = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+    if (applied !== theme) problems.push(`тема применена ${applied}, ожидалась ${theme}`);
+    for (const v of await axeSevere(page, ['[data-testid="section-card-xray-other"]'])) {
+      problems.push(`axe ${v}`);
+    }
+    expect(problems, problems.join('\n')).toEqual([]);
+
+    await guard.assertClean();
+  });
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`cores: 390 px «Дополнительно», тема ${theme}`, async ({ page }) => {
+    const guard = attachConsoleGuard(page);
+    await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await startPage(page);
+    test.skip(!(await otherOf(page, 'xray')).installed, 'Xray не установлен');
+
+    await openOther(page, 'xray');
+    const area = page.getByTestId('section-advanced-xray-other');
+    await expect(area).toBeVisible({ timeout: T.action });
+
+    const pageScroll = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(pageScroll, 'горизонтальная прокрутка страницы').toBeLessThanOrEqual(0);
+
+    const head = await page.getByTestId('section-toggle-xray-other').boundingBox();
+    expect(head, 'заголовок карточки виден').not.toBeNull();
+    expect(head!.height, 'высота заголовка карточки').toBeGreaterThanOrEqual(44);
+
+    const box = await area.boundingBox();
+    expect(box, 'поле «Дополнительно» видно').not.toBeNull();
+    expect(box!.x + box!.width, 'поле в пределах экрана').toBeLessThanOrEqual(390);
+
+    await guard.assertClean();
+  });
+}
