@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -341,7 +342,7 @@ func TestRouterRoutingViewRules(t *testing.T) {
 				t.Errorf("испорченная секция rules отдала правила: %+v", jv.Rules)
 			}
 		case ProbeSection:
-			if jv.Probe != jv.ProbeDefaults {
+			if !reflect.DeepEqual(jv.Probe, jv.ProbeDefaults) {
 				t.Errorf("испорченная секция probe: %+v, по умолчанию %+v", jv.Probe, jv.ProbeDefaults)
 			}
 		}
