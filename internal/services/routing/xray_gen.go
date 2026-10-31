@@ -14,6 +14,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
 
@@ -56,6 +57,10 @@ const (
 	genErrCondConflict = "xray_cond_conflict"
 	genErrRawInvalid   = "xray_raw_invalid"
 )
+
+// forceProxyPrefix — префикс тегов и имён входящих force-proxy*, которые читает
+// XKeen (D-12, 143 Q7).
+const forceProxyPrefix = "force-proxy"
 
 // maxGenMemo — предел мемоизации результатов генераторов маршрутизации.
 const maxGenMemo = 32
@@ -171,6 +176,10 @@ type xrayBuild struct {
 	// autoOK и fallbackOK — режимы «авто» и «резерв» доступны на версии Xray.
 	autoOK, fallbackOK bool
 	apiInbound         bool
+	// forceTags — теги входящих force-proxy* (D-12); forceGroup — группа, в которую
+	// их ведёт правило первым. Пусто или nil — правила нет.
+	forceTags  []string
+	forceGroup *Group
 	// foreignAPI — ключ api уже есть в чужих файлах configs/ (у ключа один
 	// владелец, файл api панель не пишет); foreignObservatory — в чужих файлах
 	// есть observatory или burstObservatory (ObservatoryService без наблюдения
@@ -381,6 +390,13 @@ func (b *xrayBuild) build() ([]configlayer.GeneratedFile, error) {
 	if b.apiInbound {
 		// D-43: правило api первым, входящий api остаётся в чужом файле.
 		rules = append(rules, map[string]any{"inboundTag": []string{"api"}, "outboundTag": "api"})
+	}
+	if len(b.forceTags) > 0 && b.forceGroup != nil {
+		// D-12: входящие force-proxy* XKeen идут в выбранную группу раньше правил
+		// пользователя. Нет группы — правила нет, «Применить» блокирует проверка
+		// force_proxy_group_missing.
+		field, tag := b.xrayTarget(Target{Kind: KindGroup, ID: b.forceGroup.ID})
+		rules = append(rules, map[string]any{"inboundTag": b.forceTags, field: tag})
 	}
 	rules = append(rules, b.loopRules...)
 	for i, r := range b.rules.Items {
@@ -653,6 +669,11 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 	fallbackOK := s.xrayModeAvailable(configlayer.FeatureXrayFallbackGroup)
 	apiOK := s.xrayModeAvailable(configlayer.FeatureXrayHotSwapAPI)
 	apiPort := s.xrayAPIPort()
+	forceTags := xrayForceProxyTags(in)
+	var forceGroup *Group
+	if g, ok := forceProxyTarget(in, groups.Items, configlayer.KernelXray); ok && len(forceTags) > 0 {
+		forceGroup = &g
+	}
 
 	parts := []string{
 		xrayGenID, string(in.Mode), s.d.GOARCH,
@@ -662,6 +683,7 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 		strconv.FormatBool(apiOK), strconv.Itoa(apiPort),
 		string(in.Sections[GroupsSection]), string(in.Sections[RulesSection]), string(in.Sections[ProbeSection]),
 		string(in.Live[LiveKeySelection]),
+		strings.Join(forceTags, ","), forceGroupID(forceGroup),
 	}
 	for _, n := range cat.Xray {
 		parts = append(parts, n.Ref, n.XrayTag, n.Node.Name, n.Node.Text)
@@ -675,6 +697,7 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 		groups: groups.Items, rules: rules, probe: probe, catalog: cat.Xray,
 		live: liveSelection(in.Live), autoOK: autoOK, fallbackOK: fallbackOK,
 		apiInbound: in.Routing.XrayAPIInbound,
+		forceTags:  forceTags, forceGroup: forceGroup,
 		foreignAPI: in.Routing.XrayForeignAPI, foreignObservatory: in.Routing.XrayObservatory,
 		apiOK: apiOK, apiPort: apiPort,
 	})
@@ -684,4 +707,69 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 	}
 	s.genPut(key, files)
 	return slices.Clone(files), nil
+}
+
+// forceProxyTarget возвращает группу, в которую идут входящие force-proxy*:
+// force_proxy_group секции «Входящие» ядра, а если не задана — группа «Прокси».
+// false — выбранной группы нет (удалена или не создана).
+func forceProxyTarget(in configlayer.Input, groups []Group, kernel string) (Group, bool) {
+	section := configlayer.SectionXrayInbounds
+	if kernel == configlayer.KernelMihomo {
+		section = configlayer.SectionMihomoInbounds
+	}
+	if id := configlayer.DesiredCores(in.Sections)[section].ForceProxyGroup; id != "" {
+		for _, g := range groups {
+			if g.ID == id {
+				return g, true
+			}
+		}
+		return Group{}, false
+	}
+	if g := findGroupByName(groups, defaultProxyGroupName); g != nil {
+		return *g, true
+	}
+	return Group{}, false
+}
+
+// forceGroupID — ID выбранной группы для ключа кэша; пусто, если правила нет.
+func forceGroupID(g *Group) string {
+	if g == nil {
+		return ""
+	}
+	return g.ID
+}
+
+// xrayForceProxyTags возвращает теги входящих force-proxy* Xray: из чужих файлов
+// configs/ (факты слоя) и из взятой секции «Входящие»; без повторов, по алфавиту.
+// Только теги с префиксом force-proxy: чужие файлы не подменяют другие правила
+// (T-147-41).
+func xrayForceProxyTags(in configlayer.Input) []string {
+	var out []string
+	add := func(tag string) {
+		if strings.HasPrefix(tag, forceProxyPrefix) && !slices.Contains(out, tag) {
+			out = append(out, tag)
+		}
+	}
+	for _, tag := range in.Routing.XrayForceProxyTags {
+		add(tag)
+	}
+	if cs := configlayer.DesiredCores(in.Sections)[configlayer.SectionXrayInbounds]; cs.Managed {
+		for _, tag := range cores.XrayKeepTags(cs.Value) {
+			add(tag)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// mihomoForceProxyNames возвращает имена listeners force-proxy* взятой секции
+// «Входящие» Mihomo в порядке значения.
+func mihomoForceProxyNames(s configlayer.Sections) []string {
+	var out []string
+	for _, name := range cores.MihomoListenerNames(s) {
+		if strings.HasPrefix(name, forceProxyPrefix) && !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
