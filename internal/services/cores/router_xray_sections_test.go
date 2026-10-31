@@ -134,6 +134,51 @@ func rtXraySecValue(t *testing.T, content []byte, key string) string {
 const rtXraySecDNSValue = `{"servers":["127.0.0.1",{"address":"127.0.0.2","domains":["domain:example.test"],"port":5353}],` +
 	`"queryStrategy":"UseIPv4","disableCache":true,"tag":"dns-in"}`
 
+// Значения остальных секций: поля вне формы (log.access и log.error, policy
+// statsUserUplink, sniffing и streamSettings входящих) и «Прочие ключи».
+const (
+	rtXraySecLogValue = `{"loglevel":"warning","access":"/opt/var/log/xray/access.log","error":"/opt/var/log/xray/error.log","dnsLog":false}`
+	// statsInboundUplink выключен в значении: панель закрепляет его включённым.
+	rtXraySecPolicyValue = `{"levels":{"0":{"handshake":4,"connIdle":300,"uplinkOnly":2,"downlinkOnly":5,"statsUserUplink":true}},` +
+		`"system":{"statsInboundUplink":false,"statsInboundDownlink":true}}`
+	rtXraySecPolicyWant = `{"levels":{"0":{"handshake":4,"connIdle":300,"uplinkOnly":2,"downlinkOnly":5,"statsUserUplink":true}},` +
+		`"system":{"statsInboundUplink":true,"statsInboundDownlink":true,"statsOutboundUplink":true,"statsOutboundDownlink":true}}`
+	rtXraySecInboundsValue = `[` +
+		`{"tag":"redirect","port":1181,"protocol":"dokodemo-door","settings":{"network":"tcp","followRedirect":true},"sniffing":{"enabled":true,"destOverride":["http","tls"]}},` +
+		`{"tag":"tproxy","port":1181,"protocol":"dokodemo-door","settings":{"network":"udp","followRedirect":true},"streamSettings":{"sockopt":{"tproxy":"tproxy"}},"sniffing":{"enabled":true,"destOverride":["http","tls"]}},` +
+		`{"tag":"socks-in","listen":"127.0.0.1","port":10808,"protocol":"socks","settings":{"auth":"noauth","udp":true},"sniffing":{"enabled":true,"destOverride":["http","tls"]}}` +
+		`]`
+	rtXraySecOtherValue = `{"stats":{},"fakedns":{"ipPool":"198.18.0.0/15","poolSize":65535}}`
+)
+
+// rtXraySecAll — все пять секций managed со значениями.
+func rtXraySecAll(t *testing.T) configlayer.Sections {
+	t.Helper()
+	return configlayer.Sections{
+		configlayer.SectionXrayLog:      rtXraySecSection(t, rtXraySecLogValue),
+		configlayer.SectionXrayDNS:      rtXraySecSection(t, rtXraySecDNSValue),
+		configlayer.SectionXrayInbounds: rtXraySecSection(t, rtXraySecInboundsValue),
+		configlayer.SectionXrayPolicy:   rtXraySecSection(t, rtXraySecPolicyValue),
+		configlayer.SectionXrayOther:    rtXraySecSection(t, rtXraySecOtherValue),
+	}
+}
+
+// rtXraySecWant сверяет значение ключа файла панели с ожидаемым.
+func rtXraySecWant(t *testing.T, files map[string][]byte, name, key, want string) {
+	t.Helper()
+	content, ok := files[name]
+	if !ok {
+		t.Fatalf("файла панели %s нет", name)
+	}
+	got := rtXraySecValue(t, content, key)
+	if w := rtXraySecCompact(t, []byte(want)); got != w {
+		t.Errorf("%s: значение %q изменилось:\n got: %s\nwant: %s", name, key, got, w)
+	}
+	if bytes.Contains(content, []byte(`"managed"`)) || bytes.Contains(content, []byte(`"keep"`)) {
+		t.Errorf("%s: в файле ядра служебные поля панели", name)
+	}
+}
+
 func TestRouterCoresXraySectionsGenerate(t *testing.T) {
 	rtXraySecBin(t)
 
@@ -147,9 +192,72 @@ func TestRouterCoresXraySectionsGenerate(t *testing.T) {
 		}
 		byName := rtXraySecWrite(t, dir, files)
 		rtXraySecTest(t, dir)
-		got := rtXraySecValue(t, byName[configlayer.PanelXrayDNSFile], "dns")
-		if want := rtXraySecCompact(t, []byte(rtXraySecDNSValue)); got != want {
-			t.Errorf("значение dns в файле изменилось:\n got: %s\nwant: %s", got, want)
+		rtXraySecWant(t, byName, configlayer.PanelXrayDNSFile, "dns", rtXraySecDNSValue)
+	})
+
+	t.Run("все секции", func(t *testing.T) {
+		dir := rtXraySecDir(t)
+		sections := rtXraySecAll(t)
+		files := rtXraySecGenerate(t, sections)
+		if len(files) != 5 {
+			t.Fatalf("ожидалось пять файлов панели, получено %d", len(files))
+		}
+		again := rtXraySecGenerate(t, sections)
+		for i := range files {
+			if files[i].RelPath != again[i].RelPath || !bytes.Equal(files[i].Content, again[i].Content) {
+				t.Errorf("вывод генератора недетерминирован: %s", files[i].RelPath)
+			}
+		}
+		byName := rtXraySecWrite(t, dir, files)
+		rtXraySecTest(t, dir)
+		rtXraySecWant(t, byName, configlayer.PanelXrayLogFile, "log", rtXraySecLogValue)
+		rtXraySecWant(t, byName, configlayer.PanelXrayDNSFile, "dns", rtXraySecDNSValue)
+		rtXraySecWant(t, byName, configlayer.PanelXrayInboundsFile, "inbounds", rtXraySecInboundsValue)
+		rtXraySecWant(t, byName, configlayer.PanelXrayPolicyFile, "policy", rtXraySecPolicyWant)
+		other := byName[configlayer.PanelXrayOtherFile]
+		if got, want := rtXraySecCompact(t, other), rtXraySecCompact(t, []byte(rtXraySecOtherValue)); got != want {
+			t.Errorf("99_xcp-other.json:\n got: %s\nwant: %s", got, want)
 		}
 	})
+
+	t.Run("пустые прочие ключи", func(t *testing.T) {
+		files := rtXraySecGenerate(t, configlayer.Sections{
+			configlayer.SectionXrayOther: rtXraySecSection(t, `{}`),
+		})
+		if len(files) != 0 {
+			t.Fatalf("пустые «Прочие ключи» не должны давать файл, получено %d", len(files))
+		}
+	})
+
+	t.Run("не управляется и не установлен", func(t *testing.T) {
+		raw, err := configlayer.EncodeCoreSection(configlayer.CoreSection{Managed: false, Value: json.RawMessage(rtXraySecDNSValue)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if files := rtXraySecGenerate(t, configlayer.Sections{configlayer.SectionXrayDNS: raw}); len(files) != 0 {
+			t.Fatalf("секция без managed дала %d файлов", len(files))
+		}
+		files, err := XrayGenerator().Generate(configlayer.Input{Sections: rtXraySecAll(t), Mode: configlayer.SourceDraft}, configlayer.InstalledKernels{})
+		if err != nil || len(files) != 0 {
+			t.Fatalf("Xray не установлен: файлов %d, ошибка %v", len(files), err)
+		}
+	})
+
+	t.Run("пресеты", func(t *testing.T) {
+		dir := rtXraySecDir(t)
+		sections := configlayer.Sections{}
+		for _, spec := range XraySpecs {
+			sections[spec.Section] = rtXraySecSection(t, "")
+		}
+		files := rtXraySecGenerate(t, sections)
+		if len(files) != 4 {
+			t.Fatalf("пресеты дают четыре файла (без «Прочих ключей»), получено %d", len(files))
+		}
+		byName := rtXraySecWrite(t, dir, files)
+		rtXraySecTest(t, dir)
+		rtXraySecWant(t, byName, configlayer.PanelXrayLogFile, "log", string(XrayPreset("log")))
+		rtXraySecWant(t, byName, configlayer.PanelXrayDNSFile, "dns", string(XrayPreset("dns")))
+		rtXraySecWant(t, byName, configlayer.PanelXrayInboundsFile, "inbounds", string(XrayPreset("inbounds")))
+	})
+
 }

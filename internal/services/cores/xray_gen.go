@@ -8,20 +8,11 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
+// Идентификатор генератора секций Xray в реестре слоя.
+const xrayGenID = "cores_xray"
+
 // xrayIndent — отступ файлов панели (как у остальных генераторов Xray).
 const xrayIndent = "  "
-
-// xrayDNSPreset — значение секции DNS без значения в черновике: как у Xray без
-// секции DNS.
-const xrayDNSPreset = `{"servers":["localhost"]}`
-
-// xrayDefaultValue возвращает значение секции, когда в черновике его нет.
-func xrayDefaultValue(id string) json.RawMessage {
-	if id == "dns" {
-		return json.RawMessage(xrayDNSPreset)
-	}
-	return nil
-}
 
 // isEmptyValue — значения нет: пусто или null.
 func isEmptyValue(v json.RawMessage) bool {
@@ -47,21 +38,65 @@ func indentXray(o *configlayer.OrderedObject) ([]byte, error) {
 	return append(b, '\n'), nil
 }
 
+// policyWithCounters дописывает в policy.system четыре закреплённых счётчика
+// (D-10): остальные ключи system и levels, а также порядок ключей сохраняются.
+func policyWithCounters(value json.RawMessage) (json.RawMessage, error) {
+	policy, err := configlayer.ParseOrderedObject(value)
+	if err != nil {
+		return nil, fmt.Errorf("policy: %w", err)
+	}
+	system := configlayer.NewOrderedObject()
+	if raw, ok := policy.Get("system"); ok && !isEmptyValue(raw) {
+		if system, err = configlayer.ParseOrderedObject(raw); err != nil {
+			return nil, fmt.Errorf("policy.system: %w", err)
+		}
+	}
+	for _, c := range xrayStatsCounters {
+		system.Set(c, json.RawMessage("true"))
+	}
+	sys, err := system.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	policy.Set("system", sys)
+	return policy.MarshalJSON()
+}
+
 // XraySectionFile возвращает содержимое файла панели секции id из её значения.
-// Пустое значение заменяется пресетом секции. ok=false — файла нет.
+// Пустое значение заменяется пресетом секции. Для log, dns, policy файл —
+// {"<ключ>": значение}, для inbounds — {"inbounds": [...]}, для «Прочих
+// ключей» — сам объект значения; ok=false — файла нет (пустые «Прочие ключи»).
+// В policy дописываются закреплённые счётчики статистики. Поля, которых форма не
+// знает, и порядок ключей переносятся как есть.
 func XraySectionFile(id string, value json.RawMessage) (content []byte, ok bool, err error) {
 	spec, known := xraySpecByID(id)
 	if !known {
 		return nil, false, fmt.Errorf("секция Xray %q неизвестна", id)
 	}
 	if isEmptyValue(value) {
-		value = xrayDefaultValue(id)
+		value = XrayPreset(id)
 	}
 	switch id {
-	case "dns":
+	case "log", "dns":
 		content, err = wrapXrayKey(spec.Key, value)
-	default:
-		return nil, false, fmt.Errorf("секция Xray %q: файл не поддержан", id)
+	case "policy":
+		if value, err = policyWithCounters(value); err == nil {
+			content, err = wrapXrayKey(spec.Key, value)
+		}
+	case "inbounds":
+		if _, isList := xrayInbounds(value); !isList {
+			return nil, false, fmt.Errorf("секция Xray %q: ожидался массив объектов", id)
+		}
+		content, err = wrapXrayKey(spec.Key, value)
+	case "other":
+		var obj *configlayer.OrderedObject
+		if obj, err = configlayer.ParseOrderedObject(value); err != nil {
+			return nil, false, fmt.Errorf("секция Xray %q: %w", id, err)
+		}
+		if obj.Len() == 0 {
+			return nil, false, nil
+		}
+		content, err = indentXray(obj)
 	}
 	if err != nil {
 		return nil, false, fmt.Errorf("секция Xray %q: %w", id, err)
@@ -80,7 +115,8 @@ func (xrayGenerator) ID() string { return xrayGenID }
 
 // Generate выдаёт файл панели для каждой секции Xray с managed=true. Xray не
 // установлен — файлов нет. Служебные поля секции черновика (managed, from, keep,
-// …) в файл не попадают: берётся только Value.
+// …) в файл не попадают: берётся только Value. Protocol, network, followRedirect
+// и теги входящих генератор не меняет — только переносит значение.
 func (xrayGenerator) Generate(in configlayer.Input, installed configlayer.InstalledKernels) ([]configlayer.GeneratedFile, error) {
 	if !installed.Xray {
 		return nil, nil
