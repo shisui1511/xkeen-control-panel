@@ -143,6 +143,12 @@ type Plan struct {
 	Orphans []OrphanFile
 	// Routing — операции взятия и возврата маршрутизации (nil — нет).
 	Routing *RoutingOps
+	// FullRestart — ядро → причина (RestartReasonTun, RestartReasonPort), по
+	// которой применение из черновика требует полного перезапуска: смена tun или
+	// порта прозрачного входящего меняет правила iptables, их пересобирает только
+	// xkeen -restart. Для Mihomo горячая перезагрузка (PUT /configs) тогда не
+	// пробуется. nil — признака нет (D-16).
+	FullRestart map[string]string
 }
 
 // Empty — в плане нет ни записи, ни удаления, ни сирот, ни операций
