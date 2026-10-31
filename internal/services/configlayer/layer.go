@@ -530,8 +530,23 @@ func (l *Layer) Snapshot() SnapshotView {
 	sv.Files, sv.DriftCount = fe.Files, fe.DriftCount
 	sv.Routing = l.routingSnapshot(st, fe.Routing)
 	sv.Cores = l.coresSnapshot(st, fe.Sections)
+	sv.Cores.Restart = l.restartNotes(st)
 	sv.Kernels, sv.Features = l.versions()
 	return sv
+}
+
+// restartNotes — объявления перезапуска по черновику для полосы черновика (D-16):
+// тот же расчёт, что и у признака полного перезапуска плана. Ядра без бинарника
+// не объявляются; результат не nil.
+func (l *Layer) restartNotes(st State) []RestartNote {
+	installed := l.installed()
+	out := []RestartNote{}
+	for _, n := range RestartReasons(st.Applied, st.Draft) {
+		if (n.Kernel == KernelXray && installed.Xray) || (n.Kernel == KernelMihomo && installed.Mihomo) {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // routingSnapshot собирает раздел routing снимка: желаемое из секции черновика,
