@@ -66,6 +66,7 @@ export interface LayerRestart {
     | 'failed_kernel_down'
     | 'interrupted'
     | 'no_runtime_effect';
+  /** Способ перезапуска Mihomo: full_restart_tun | full_restart_port — полный перезапуск вместо горячей перезагрузки. */
   note_code?: string;
 }
 
@@ -129,6 +130,32 @@ export interface RoutingSnapshot {
   mihomo: RoutingKernelView | null;
 }
 
+/** Состояние секции Xray в снимке слоя (поле cores.xray). Ключи — как CoreSectionSnap контракта секций. */
+export interface LayerCoreSectionSnap {
+  desired: boolean;
+  taken: boolean;
+  file: string;
+  moved: string[];
+  left: string[];
+  drift: string[];
+}
+
+/** Объявление о способе перезапуска: ядро и причина. Ключи — как RestartNote контракта секций. */
+export interface LayerRestartNote {
+  kernel: string;
+  reason: 'port' | 'tun';
+}
+
+/**
+ * Секции ядер в снимке слоя. Ключи совпадают с CoresSnapshot контракта секций (сверяет
+ * scripts/check-config-ui.js); клиент секций (configCores.ts) слой не импортирует в обратную
+ * сторону, поэтому типы объявлены здесь.
+ */
+export interface LayerCoresSnapshot {
+  xray: Record<string, LayerCoreSectionSnap>;
+  restart: LayerRestartNote[];
+}
+
 export interface LayerSnapshot {
   enabled: boolean;
   dev_mode: boolean;
@@ -144,6 +171,8 @@ export interface LayerSnapshot {
   checks: BuildIssue[];
   /** Владение маршрутизацией по ядрам. */
   routing: RoutingSnapshot;
+  /** Секции ядер: состояние секций Xray и объявления о перезапусках. */
+  cores: LayerCoresSnapshot;
   /** Кто держит общий замок (менеджер geodata); пусто — замок свободен или его держит «Применить». */
   busy_holder?: string;
 }
@@ -280,6 +309,29 @@ function normalizeRouting(raw: unknown): RoutingSnapshot {
   };
 }
 
+function normalizeCores(raw: unknown): LayerCoresSnapshot {
+  const c = isObject(raw) ? raw : {};
+  const xray: Record<string, LayerCoreSectionSnap> = {};
+  if (isObject(c.xray)) {
+    for (const [id, v] of Object.entries(c.xray)) {
+      if (!isObject(v)) continue;
+      xray[id] = {
+        desired: v.desired === true,
+        taken: v.taken === true,
+        file: typeof v.file === 'string' ? v.file : '',
+        moved: asArray<string>(v.moved),
+        left: asArray<string>(v.left),
+        drift: asArray<string>(v.drift)
+      };
+    }
+  }
+  const restart = asArray<unknown>(c.restart).filter(
+    (n): n is LayerRestartNote =>
+      isObject(n) && typeof n.kernel === 'string' && (n.reason === 'port' || n.reason === 'tun')
+  );
+  return { xray, restart };
+}
+
 /** Приводит данные snapshot к полной форме: null и пропущенные поля становятся пустыми. */
 function normalizeSnapshot(raw: Record<string, unknown>): LayerSnapshot {
   return {
@@ -295,6 +347,7 @@ function normalizeSnapshot(raw: Record<string, unknown>): LayerSnapshot {
     notices: asArray<LayerNotice>(raw.notices),
     checks: asArray<BuildIssue>(raw.checks),
     routing: normalizeRouting(raw.routing),
+    cores: normalizeCores(raw.cores),
     ...(typeof raw.busy_holder === 'string' && raw.busy_holder !== ''
       ? { busy_holder: raw.busy_holder }
       : {})
