@@ -421,6 +421,78 @@ func TestRouterCoresServiceFlow(t *testing.T) {
 		}
 	})
 
+	t.Run("Mihomo: вид и сырой блок", func(t *testing.T) {
+		const profile = "hosts:\n  a.example.test: 127.0.0.1\nntp:\n  enable: true\ndns:\n  enable: true\n  nameserver:\n    - system\n"
+		if err := os.WriteFile(filepath.Join(e.mihomo, "profiles", "user.yaml"), []byte(profile), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("profiles/user.yaml", filepath.Join(e.mihomo, "config.yaml")); err != nil {
+			t.Fatal(err)
+		}
+
+		// Профиль пользователя: значения только для чтения (D-03).
+		v := e.view(t, "mihomo")
+		if v.Profile == nil || v.Profile.Owner != "user" || v.Profile.Name != "profiles/user.yaml" || v.TakeAll {
+			t.Fatalf("профиль Mihomo: %+v take_all=%v", v.Profile, v.TakeAll)
+		}
+		if len(v.Sections) != 5 {
+			t.Fatalf("секций Mihomo: %d", len(v.Sections))
+		}
+		other := e.section(t, "mihomo", "other")
+		if other.Owner != "user" || !strings.Contains(string(other.Value), `"hosts"`) || !strings.Contains(string(other.Value), `"ntp"`) || len(other.Pinned) != 0 {
+			t.Errorf("секция other: владелец %q значение %s", other.Owner, other.Value)
+		}
+		if !strings.Contains(other.Advanced, "a.example.test") {
+			t.Errorf("Дополнительно other: %q", other.Advanced)
+		}
+		dns := e.section(t, "mihomo", "dns")
+		if !strings.Contains(string(dns.Form), `"nameserver"`) || !strings.Contains(string(dns.Form), `"enable"`) {
+			t.Errorf("форма dns Mihomo: %s", dns.Form)
+		}
+
+		_, err := e.svc.Save(e.rev(t), "mihomo", "other", nil, "hosts: {}")
+		if ce := rtCoresSvcCode(t, err); ce.Code != "section_not_managed" {
+			t.Errorf("правка секции чужого профиля: %+v", ce)
+		}
+		if _, err := e.svc.Take(e.rev(t), "mihomo", []string{"dns"}, true); err == nil || rtCoresSvcCode(t, err).Code != "mihomo_with_profile" {
+			t.Errorf("Take mihomo: %v", err)
+		}
+		if err := e.svc.Reclaim(t.Context(), "mihomo", "dns"); err == nil || rtCoresSvcCode(t, err).Code != "mihomo_with_profile" {
+			t.Errorf("Reclaim mihomo: %v", err)
+		}
+		if err := e.svc.Reclaim(t.Context(), "xray", "dns"); err == nil || rtCoresSvcCode(t, err).Code != "nothing_to_reclaim" {
+			t.Errorf("Reclaim без дрейфа: %v", err)
+		}
+
+		// Разбор сырого блока: синтаксис YAML с номером строки (запись не идёт).
+		rev := e.rev(t)
+		res, err := e.svc.ParseRaw("mihomo", "other", "hosts:\n  a.example.test: 127.0.0.1\n bad")
+		if err != nil || res.Error == nil || res.Error.Line < 2 || res.Error.Line > 3 || res.Error.Detail == "" {
+			t.Errorf("синтаксис YAML: %+v, %v", res, err)
+		}
+		res, err = e.svc.ParseRaw("xray", "other", `{"api":{}}`)
+		if err != nil || res.Error != nil || len(res.Rejected) != 1 || res.Rejected[0] != (configlayer.KeyIssue{Key: "api", Code: "raw_reserved"}) {
+			t.Errorf("ключ api в «Прочих ключах»: %+v, %v", res, err)
+		}
+		res, err = e.svc.ParseRaw("mihomo", "other", "external-controller: 0.0.0.0:9090")
+		if err != nil || len(res.Rejected) != 1 || res.Rejected[0].Code != "controller_no_secret" {
+			t.Errorf("external-controller без secret: %+v, %v", res, err)
+		}
+		res, err = e.svc.ParseRaw("mihomo", "other", "external-controller: 0.0.0.0:9090\nsecret: abc\n")
+		if err != nil || len(res.Rejected) != 0 {
+			t.Errorf("external-controller с secret: %+v, %v", res, err)
+		}
+		if _, err := e.svc.ParseRaw("mihomo", "other", strings.Repeat("a", 256<<10+1)); err == nil || rtCoresSvcCode(t, err).Code != "raw_too_large" {
+			t.Errorf("текст больше 256 КиБ: %v", err)
+		}
+		if _, err := e.svc.ParseRaw("xray", "nope", "{}"); err == nil || rtCoresSvcCode(t, err).Code != "section_unknown" {
+			t.Errorf("неизвестная секция: %v", err)
+		}
+		if got := e.rev(t); got != rev {
+			t.Errorf("ParseRaw изменил черновик: ревизия %d, была %d", got, rev)
+		}
+	})
+
 	t.Run("группа force-proxy", func(t *testing.T) {
 		if _, err := e.layer.EditDraft(e.rev(t), "groups", json.RawMessage(`{"items":[{"id":"g1"}]}`)); err != nil {
 			t.Fatalf("EditDraft groups: %v", err)
