@@ -18,19 +18,30 @@
     label,
     hint = '',
     error = '',
+    group = false,
     children
   }: {
     id: string;
     label: string;
     hint?: string;
     error?: string;
+    /** Поле-список из нескольких элементов: подпись названия группы, а не одного input. */
+    group?: boolean;
     children: Snippet;
   } = $props();
 </script>
 
 <div class="mf">
-  <label class="mf-label" for={id}>{label}</label>
-  <div class="mf-ctrl">
+  {#if group}
+    <span class="mf-label" id="{id}-label">{label}</span>
+  {:else}
+    <label class="mf-label" for={id}>{label}</label>
+  {/if}
+  <div
+    class="mf-ctrl"
+    role={group ? 'group' : undefined}
+    aria-labelledby={group ? `${id}-label` : undefined}
+  >
     {@render children()}
     {#if error !== ''}
       <span class="error-text mf-msg" id="{id}-error">{error}</span>

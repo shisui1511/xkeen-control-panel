@@ -99,16 +99,26 @@ async function ensureProfileInDraft(page: Page): Promise<MihomoView> {
   return view;
 }
 
-/** Открывает вкладку ядер, выбирает Mihomo и раскрывает карточку секции. */
-async function openSection(page: Page, id: string): Promise<void> {
+/** Открывает вкладку ядер и выбирает Mihomo. */
+async function openCores(page: Page): Promise<void> {
   await openConfig(page, '#/config/cores');
   await tabReady(page, 'cores-tab');
   await page.getByTestId('kernel-switch-mihomo').click();
   await expect(page.getByTestId('cores-panel-mihomo')).toBeVisible({ timeout: T.page });
+}
+
+/** Раскрывает карточку секции Mihomo на открытой вкладке ядер. */
+async function expandSection(page: Page, id: string): Promise<void> {
   const toggle = page.getByTestId(`section-toggle-mihomo-${id}`);
   await expect(toggle).toBeVisible({ timeout: T.page });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+}
+
+/** Открывает вкладку ядер, выбирает Mihomo и раскрывает карточку секции. */
+async function openSection(page: Page, id: string): Promise<void> {
+  await openCores(page);
+  await expandSection(page, id);
 }
 
 /** Раскрывает «Дополнительно» секции и возвращает его поле. */
@@ -184,4 +194,70 @@ test('cores: Mihomo — правка формы сохраняет ключи в
   } finally {
     await resetDraft(page);
   }
+});
+
+test('cores: Mihomo — секции чужого профиля только для чтения', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  const view = await mihomoView(page);
+  test.skip(!view.installed, 'Mihomo не установлен');
+  await resetDraft(page);
+
+  const foreign = view.profileOwner === 'xkeen' || view.profileOwner === 'user';
+  const dns = sectionOf(view, 'dns').value as Record<string, unknown> | null;
+
+  await openCores(page);
+  for (const id of ['main', 'dns', 'sniffer']) await expandSection(page, id);
+  const revision = await draftRevision(page);
+
+  if (foreign) {
+    // строка владельца: секция принадлежит профилю, кнопки взятия у секции нет (D-03)
+    for (const id of ['main', 'dns', 'sniffer']) {
+      await expect(page.getByTestId(`section-profile-note-mihomo-${id}`)).toContainText(
+        /Секция принадлежит профилю|section belongs to the profile/
+      );
+      await expect(page.getByTestId(`section-take-mihomo-${id}`)).toHaveCount(0);
+    }
+
+    // поля только для чтения, значения — действующие значения профиля
+    const port = page.getByTestId('section-field-mihomo-main-mixed-port');
+    await expect(port).toHaveAttribute('aria-readonly', 'true');
+    await expect(port).toHaveAttribute('readonly', /.*/);
+    await expect(page.getByTestId('section-field-mihomo-main-mode')).toHaveAttribute(
+      'aria-readonly',
+      'true'
+    );
+
+    const enable = page.getByTestId('section-field-mihomo-dns-enable');
+    await expect(enable).toHaveAttribute('aria-readonly', 'true');
+    await expect(enable).toHaveValue(
+      dns?.enable === true ? /^(Включено|On)$/ : /^(Выключено|Off)$/
+    );
+    const enhanced = page.getByTestId('section-field-mihomo-dns-enhanced-mode');
+    await expect(enhanced).toHaveAttribute('aria-readonly', 'true');
+    await expect(enhanced).toHaveValue(String(dns?.['enhanced-mode'] ?? ''));
+    await expect(page.getByTestId('section-field-mihomo-sniffer-enable')).toHaveAttribute(
+      'aria-readonly',
+      'true'
+    );
+
+    // ввод с клавиатуры ничего не меняет
+    const text = await port.inputValue();
+    await port.click();
+    await page.keyboard.type('77');
+    await page.keyboard.press('Tab');
+    await expect(port).toHaveValue(text);
+  } else if (view.profileOwner === 'panel' || view.profileOwner === 'pending') {
+    // профиль у панели или ждёт «Применить»: те же поля доступны для правки
+    await expect(page.getByTestId('section-field-mihomo-main-mixed-port')).not.toHaveAttribute(
+      'readonly',
+      /.*/
+    );
+    await expect(page.getByTestId('section-field-mihomo-dns-enable')).toBeEnabled();
+    await expect(page.getByTestId('section-field-mihomo-sniffer-enable')).toBeEnabled();
+  }
+  expect(await draftRevision(page), 'просмотр секций не пишет в черновик').toBe(revision);
+
+  await guard.assertClean();
 });
