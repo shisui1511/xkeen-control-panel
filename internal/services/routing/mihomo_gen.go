@@ -84,6 +84,10 @@ type mihomoBuild struct {
 	// sections — секции черновика или применённого состояния: из них профиль
 	// берёт ключи секций Mihomo (основное, sniffer, dns, входящие, прочие ключи).
 	sections configlayer.Sections
+	// forceNames — имена listeners force-proxy* (D-12); forceGroup — группа, в
+	// которую их ведут строки IN-NAME первыми. Пусто или nil — строк нет.
+	forceNames []string
+	forceGroup *Group
 
 	byID      map[string]*Group
 	nodeByRef map[string]sources.CatalogNode
@@ -675,6 +679,14 @@ func rulesSection(lines []string) *yaml.Node {
 // прежнем порядке, закреплённые значения дописаны в основное.
 func (b *mihomoBuild) profile() ([]byte, error) {
 	lines := []string{}
+	if len(b.forceNames) > 0 && b.forceGroup != nil {
+		// D-12: XKeen читает входящие force-proxy* и в Mihomo — строки идут раньше
+		// правил пользователя. Группа не выпущена — цель REJECT (fail-closed).
+		target := b.mihomoTarget(Target{Kind: KindGroup, ID: b.forceGroup.ID})
+		for _, name := range b.forceNames {
+			lines = append(lines, "IN-NAME,"+name+","+target)
+		}
+	}
 	for i, r := range b.rules.Items {
 		ls, err := b.mihomoLines(r)
 		if err != nil {
@@ -749,10 +761,16 @@ func (s *Service) generateMihomo(in configlayer.Input, installed configlayer.Ins
 	if err != nil {
 		return nil, err
 	}
+	forceNames := mihomoForceProxyNames(in.Sections)
+	var forceGroup *Group
+	if g, ok := forceProxyTarget(in, groups.Items, configlayer.KernelMihomo); ok && len(forceNames) > 0 {
+		forceGroup = &g
+	}
 	b := newMihomoBuild(mihomoBuild{
 		groups: groups.Items, rules: rules, probe: probe, catalog: cat.Mihomo,
 		ports: in.Routing.Mihomo, groupsOK: s.mihomoGroupsAvailable(),
-		sections: in.Sections,
+		sections:   in.Sections,
+		forceNames: forceNames, forceGroup: forceGroup,
 	})
 	if err := b.collectLists(s.d.Lists); err != nil {
 		return nil, err
