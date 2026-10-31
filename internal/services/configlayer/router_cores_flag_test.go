@@ -110,10 +110,32 @@ func (e *rtCoresEnv) assertPanelFile(t *testing.T, name string) {
 // файл панели» (чистый файл) или «Отпустить» (смешанный остаётся на месте).
 func TestRouterCoresSectionDrift(t *testing.T) {
 	e := rtNewCoresEnv(t, map[string]string{rtCoDNSFile: rtCoDNSBody})
+
+	// Пустой раздел cores: карта {} и срез [], не null.
+	raw, err := json.Marshal(e.layer.Snapshot().Cores)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"xray":{},"restart":[]}` {
+		t.Errorf("пустой раздел cores: %s", raw)
+	}
+
+	// Секция только в черновике (до «Применить»): желаемое есть, взятия нет.
 	e.editSections(t, map[string]json.RawMessage{SectionXrayDNS: e.takeDraft(t, xraySectionDNS, true)})
+	if got := e.layer.Snapshot().Cores.Xray[xraySectionDNS]; !got.Desired || got.Taken || len(got.Moved) != 0 {
+		t.Errorf("секция в черновике до применения: %+v", got)
+	}
+
 	res := e.apply(t)
 	if !res.OK || res.Code != ResultApplied {
 		t.Fatalf("взятие: %+v", res)
+	}
+	snap := e.layer.Snapshot().Cores.Xray[xraySectionDNS]
+	if !snap.Desired || !snap.Taken || snap.File != PanelXrayDNSFile {
+		t.Errorf("секция после взятия: %+v", snap)
+	}
+	if len(snap.Moved) != 1 || snap.Moved[0] != rtCoDNSFile || len(snap.Left) != 0 || len(snap.Drift) != 0 {
+		t.Errorf("перенесённые, оставленные и дрейф после взятия: %+v", snap)
 	}
 	if n := e.layer.Snapshot().DriftCount; n != 0 {
 		t.Fatalf("дрейф сразу после взятия: %d", n)
@@ -128,8 +150,12 @@ func TestRouterCoresSectionDrift(t *testing.T) {
 		fe.Sections[0].Section != xraySectionDNS || fe.Sections[0].File != rtCoDNSFile {
 		t.Fatalf("дрейф секций: %+v", fe.Sections)
 	}
-	if n := e.layer.Snapshot().DriftCount; n < 1 {
-		t.Errorf("DriftCount не учёл дрейф секции: %d", n)
+	sv := e.layer.Snapshot()
+	if sv.DriftCount < 1 {
+		t.Errorf("DriftCount не учёл дрейф секции: %d", sv.DriftCount)
+	}
+	if d := sv.Cores.Xray[xraySectionDNS].Drift; len(d) != 1 || d[0] != rtCoDNSFile {
+		t.Errorf("cores.xray.dns.drift: %v", d)
 	}
 	if err := e.layer.StartApply(true); !errors.Is(err, ErrDriftBlocked) {
 		t.Fatalf("«Применить» при дрейфе секции: %v, ожидалась ErrDriftBlocked", err)

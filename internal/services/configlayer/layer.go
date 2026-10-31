@@ -519,6 +519,7 @@ func (l *Layer) Snapshot() SnapshotView {
 		Apply:         l.pipeline.Current(),
 		Notices:       l.noticeViews(st),
 		Checks:        []BuildIssue{},
+		Cores:         CoresSnapshot{Xray: map[string]CoreSectionSnap{}, Restart: []RestartNote{}},
 		BusyHolder:    l.BusyHolder(),
 	}
 	if !sv.Enabled {
@@ -528,6 +529,7 @@ func (l *Layer) Snapshot() SnapshotView {
 	fe := l.evaluate(st)
 	sv.Files, sv.DriftCount = fe.Files, fe.DriftCount
 	sv.Routing = l.routingSnapshot(st, fe.Routing)
+	sv.Cores = l.coresSnapshot(st, fe.Sections)
 	sv.Kernels, sv.Features = l.versions()
 	return sv
 }

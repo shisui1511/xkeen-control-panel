@@ -159,3 +159,43 @@ func knownXraySection(id string) bool {
 	}
 	return false
 }
+
+// coresSnapshot собирает раздел cores снимка: по каждой секции Xray, которая
+// есть в черновике (managed) или у которой есть запись владения, — желаемое,
+// взятое, файл панели, перенесённые и оставленные файлы и дрейф. Xray не
+// установлен — пустая карта; все срезы не nil.
+func (l *Layer) coresSnapshot(st State, drift []RoutingDriftItem) CoresSnapshot {
+	out := CoresSnapshot{Xray: map[string]CoreSectionSnap{}, Restart: []RestartNote{}}
+	if !l.installed().Xray {
+		return out
+	}
+	desired := DesiredCores(st.Draft)
+	for _, id := range XraySectionIDs {
+		want := desired[CoreSectionName(KernelXray, id)].Managed
+		sec := st.Cores.Xray[id]
+		if !want && sec == nil {
+			continue
+		}
+		v := CoreSectionSnap{
+			Desired: want,
+			Taken:   sec != nil,
+			File:    PanelXraySectionFile(id),
+			Moved:   []string{},
+			Left:    []string{},
+			Drift:   []string{},
+		}
+		if sec != nil {
+			for _, m := range sec.Moved {
+				v.Moved = append(v.Moved, m.Name)
+			}
+			v.Left = append(v.Left, sec.Left...)
+		}
+		for _, it := range drift {
+			if it.Section == id {
+				v.Drift = append(v.Drift, it.File)
+			}
+		}
+		out.Xray[id] = v
+	}
+	return out
+}
