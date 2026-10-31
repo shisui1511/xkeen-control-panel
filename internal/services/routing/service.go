@@ -61,6 +61,9 @@ type Deps struct {
 	KernelVersion func(kernel string) string
 	// Running сообщает, запущено ли ядро.
 	Running func(kernel string) bool
+	// XrayAPIPort — порт API Xray из настроек панели: блок api панели слушает
+	// 127.0.0.1:<порт>. nil или значение не больше нуля — 10085.
+	XrayAPIPort func() int
 	// Mihomo — Clash API Mihomo.
 	Mihomo MihomoAPI
 	// Ping проверяет доступность узла (TLS-проверка, пока нет пинга через туннель).
