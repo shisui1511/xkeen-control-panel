@@ -298,6 +298,49 @@ func rtCoresLiveFreePort(t *testing.T) int {
 	return 0
 }
 
+// rtCoresLiveRestartNotes читает cores.restart из GET /api/configlayer/state.
+func (e *rtSrc) rtCoresLiveRestartNotes() []map[string]any {
+	e.t.Helper()
+	r := e.call(http.MethodGet, "/api/configlayer/state", nil)
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("GET /api/configlayer/state: %d %s", r.Status, r.Code)
+	}
+	cores, _ := r.object(e.t)["cores"].(map[string]any)
+	list, _ := cores["restart"].([]any)
+	out := make([]map[string]any, 0, len(list))
+	for _, it := range list {
+		if m, ok := it.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// rtCoresLiveHasNote сообщает, что среди объявлений есть {kernel, reason}.
+func rtCoresLiveHasNote(notes []map[string]any, kernel, reason string) bool {
+	for _, n := range notes {
+		if n["kernel"] == kernel && n["reason"] == reason {
+			return true
+		}
+	}
+	return false
+}
+
+// rtCoresLiveRestartRow возвращает исход и пояснение перезапуска ядра из итога
+// «Применить».
+func rtCoresLiveRestartRow(a map[string]any, kernel string) (outcome, note string, found bool) {
+	list, _ := a["restart"].([]any)
+	for _, it := range list {
+		m, _ := it.(map[string]any)
+		if m["kernel"] == kernel {
+			outcome, _ = m["outcome"].(string)
+			note, _ = m["note_code"].(string)
+			return outcome, note, true
+		}
+	}
+	return "", "", false
+}
+
 // --- ветка Xray -----------------------------------------------------------------
 
 // rtCoresLiveXray — взятие «Входящих» Xray: что было до и что надо вернуть.
@@ -647,6 +690,187 @@ func TestRouterCoresXKeenInbounds(t *testing.T) {
 		rtCoresLiveXrayInbounds(t, e)
 	case "mihomo":
 		rtCoresLiveMihomoProfile(t, e, tg)
+	default:
+		t.Fatalf("неизвестное ядро цели %q", tg.Core)
+	}
+}
+
+// --- перезапуск: объявленный и фактический способ --------------------------------
+
+// rtCoresLiveSave сохраняет секцию inbounds ядра с формой form и «Дополнительно»
+// из вида; ответ не 200 — провал.
+func (e *rtSrc) rtCoresLiveSave(kernel string, form any, advanced string) {
+	e.t.Helper()
+	r := e.rtCoresPost("/save", map[string]any{"kernel": kernel, "section": "inbounds", "form": form, "advanced": advanced})
+	if r.Status != http.StatusOK {
+		e.t.Fatalf("save inbounds (%s): %d %s", kernel, r.Status, r.Code)
+	}
+}
+
+// rtCoresLiveApplyRestart запускает «Применить», ждёт итог и возвращает исход и
+// пояснение перезапуска ядра kernel; запись о перезапуске обязана быть.
+func (e *rtSrc) rtCoresLiveApplyRestart(kernel string) (outcome, note string, apply map[string]any) {
+	e.t.Helper()
+	before := e.rtRstStartApply()
+	a := e.rtRstWaitApply(before)
+	rtRstExpectApplied(e.t, a)
+	outcome, note, found := rtCoresLiveRestartRow(a, kernel)
+	if !found {
+		e.t.Fatalf("в итоге «Применить» нет записи о перезапуске %s; %s", kernel, rtRstDescribe(a))
+	}
+	return outcome, note, a
+}
+
+// rtCoresLiveXrayRestart — ветка Xray TestRouterCoresRestartKind: смена порта
+// прозрачного входящего.
+func rtCoresLiveXrayRestart(t *testing.T, e *rtSrc) {
+	t.Helper()
+	rtRstKernelPID(t, "xray")
+	x := rtCoresLiveXrayTake(t, e)
+	rtCoresLiveWaitStatus(t)
+
+	// Входящее, чей порт читает XKeen: redirect, иначе tproxy.
+	ins := rtCoresLiveTransparent(x.items)
+	pick, ok := rtCoresLivePick(ins, "redirect")
+	if !ok {
+		if pick, ok = rtCoresLivePick(ins, "tproxy"); !ok {
+			t.Fatal("нет прозрачного входящего без тега force-proxy: смену порта проверить нельзя")
+		}
+	}
+	oldPort := pick.port
+	newPort := rtCoresLiveFreePort(t)
+	if newPort == oldPort {
+		t.Fatalf("свободный порт фикстуры совпал с портом входящего (%d)", oldPort)
+	}
+
+	// Форма и «Дополнительно» из вида, меняется только порт выбранной строки.
+	sec := rtCoresSection(e.rtCoresView("xray"), "inbounds")
+	rows, _ := sec["form"].([]any)
+	advanced, _ := sec["advanced"].(string)
+	changed := false
+	for _, it := range rows {
+		row, _ := it.(map[string]any)
+		if tag, _ := row["tag"].(string); tag == pick.tag {
+			row["port"] = float64(newPort)
+			changed = true
+		}
+	}
+	if !changed {
+		t.Fatalf("в форме «Входящих» нет строки с тегом %q", pick.tag)
+	}
+	e.rtCoresLiveSave("xray", rows, advanced)
+
+	// Способ перезапуска объявлен до «Применить».
+	if notes := e.rtCoresLiveRestartNotes(); !rtCoresLiveHasNote(notes, "xray", "port") {
+		t.Fatalf("cores.restart до «Применить» без {xray, port}: %v", notes)
+	}
+
+	pidBefore := rtRstKernelPID(t, "xray")
+	outcome, note, a := e.rtCoresLiveApplyRestart("xray")
+	if outcome != "restarted" || note != "full_restart_port" {
+		t.Fatalf("перезапуск xray: исход %q, пояснение %q, ожидалось restarted / full_restart_port; %s", outcome, note, rtRstDescribe(a))
+	}
+	pidAfter := rtRstKernelPID(t, "xray")
+	if pidAfter == pidBefore {
+		t.Fatalf("PID xray не сменился после смены порта (%d); %s", pidBefore, rtRstDescribe(a))
+	}
+	rtRstHoldPID(t, "xray", pidAfter)
+
+	// Правила XKeen — на новом порту, старого порта в них нет.
+	switch pick.mode {
+	case "redirect":
+		rtCoresLiveWaitRules(t, newPort, 0, oldPort, 0)
+	default:
+		rtCoresLiveWaitRules(t, 0, newPort, 0, oldPort)
+	}
+	rtCoresLiveWaitStatus(t)
+	for _, in := range rtCoresLiveTransparent(rtCoresLivePanelInbounds(t)) {
+		if in.tag == pick.tag && in.port != newPort {
+			t.Errorf("в файле панели порт входящего %q равен %d, ожидался %d", pick.tag, in.port, newPort)
+		}
+	}
+
+	// Возврат: файлы побайтно, правила на прежнем порту.
+	if x.rtCoresLiveRelease(t) {
+		x.rtCoresLiveCheckRestored(t)
+		switch pick.mode {
+		case "redirect":
+			rtCoresLiveWaitRules(t, oldPort, 0, newPort, 0)
+		default:
+			rtCoresLiveWaitRules(t, 0, oldPort, 0, newPort)
+		}
+		rtCoresLiveWaitStatus(t)
+	}
+}
+
+// rtCoresLiveMihomoRestart — ветка Mihomo TestRouterCoresRestartKind: смена tun.
+func rtCoresLiveMihomoRestart(t *testing.T, e *rtSrc, tg routertest.Target) {
+	t.Helper()
+	rtRstKernelPID(t, "mihomo")
+	m := rtCoresLiveMihomoTake(t, e, tg)
+	redir, tproxy := m.rtCoresLivePorted(t)
+	rtCoresLiveWaitStatus(t)
+
+	// stack tun меняется на другое значение; enable не трогаем (нет tun — enable false).
+	sec := rtCoresSection(e.rtCoresView("mihomo"), "inbounds")
+	form, _ := sec["form"].(map[string]any)
+	if form == nil {
+		form = map[string]any{}
+	}
+	advanced, _ := sec["advanced"].(string)
+	tun, _ := form["tun"].(map[string]any)
+	if tun == nil {
+		tun = map[string]any{"enable": false}
+		form["tun"] = tun
+	}
+	next := "gvisor"
+	if cur, _ := tun["stack"].(string); strings.EqualFold(cur, next) {
+		next = "system"
+	}
+	tun["stack"] = next
+	e.rtCoresLiveSave("mihomo", form, advanced)
+
+	// Способ перезапуска объявлен до «Применить».
+	if notes := e.rtCoresLiveRestartNotes(); !rtCoresLiveHasNote(notes, "mihomo", "tun") {
+		t.Fatalf("cores.restart до «Применить» без {mihomo, tun}: %v", notes)
+	}
+
+	pidBefore := rtRstKernelPID(t, "mihomo")
+	outcome, note, a := e.rtCoresLiveApplyRestart("mihomo")
+	if outcome == "hot_reloaded" {
+		t.Fatalf("смена tun применена горячей перезагрузкой (hot_reloaded), ожидался полный перезапуск; %s", rtRstDescribe(a))
+	}
+	if outcome != "restarted" || note != "full_restart_tun" {
+		t.Fatalf("перезапуск mihomo: исход %q, пояснение %q, ожидалось restarted / full_restart_tun; %s", outcome, note, rtRstDescribe(a))
+	}
+	pidAfter := rtRstKernelPID(t, "mihomo")
+	if pidAfter == pidBefore {
+		t.Fatalf("PID mihomo не сменился после смены tun (%d); %s", pidBefore, rtRstDescribe(a))
+	}
+	rtRstHoldPID(t, "mihomo", pidAfter)
+
+	// Полный перезапуск не сдвинул порты: правила XKeen прежние.
+	rtCoresLiveWaitRules(t, redir, tproxy, 0, 0)
+	rtCoresLiveWaitStatus(t)
+	m.rtCoresLiveRelease(t)
+}
+
+// Трасса: «Входящие» Xray взяты и применены → смена порта прозрачного входящего
+// сохранением → cores.restart {xray, port} до «Применить» → итог: restarted с
+// full_restart_port, новый PID, правила XKeen на новом порту без старого. Ветка
+// Mihomo: маршрутизация взята и применена → смена stack у tun → cores.restart
+// {mihomo, tun} → итог: restarted с full_restart_tun (не hot_reloaded), новый PID.
+// Метка ядра: ветка выбирается по активному ядру цели.
+func TestRouterCoresRestartKind(t *testing.T) {
+	tg := routertest.CoreSpecific(t)
+	e := rtNewSrc(t)
+	e.enableLayer()
+	e.rtRstIdle()
+	switch tg.Core {
+	case "xray":
+		rtCoresLiveXrayRestart(t, e)
+	case "mihomo":
+		rtCoresLiveMihomoRestart(t, e, tg)
 	default:
 		t.Fatalf("неизвестное ядро цели %q", tg.Core)
 	}
