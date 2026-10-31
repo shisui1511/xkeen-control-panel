@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +69,16 @@ func rtXraySecSection(t *testing.T, value string) json.RawMessage {
 		cs.Value = json.RawMessage(value)
 	}
 	raw, err := configlayer.EncodeCoreSection(cs)
+	if err != nil {
+		t.Fatalf("EncodeCoreSection: %v", err)
+	}
+	return raw
+}
+
+// rtXraySecSectionKeep кодирует секцию черновика с тегами keep.
+func rtXraySecSectionKeep(t *testing.T, value string, keep []string) json.RawMessage {
+	t.Helper()
+	raw, err := configlayer.EncodeCoreSection(configlayer.CoreSection{Managed: true, Value: json.RawMessage(value), Keep: keep})
 	if err != nil {
 		t.Fatalf("EncodeCoreSection: %v", err)
 	}
@@ -179,6 +190,16 @@ func rtXraySecWant(t *testing.T, files map[string][]byte, name, key, want string
 	}
 }
 
+// rtXraySecGood — значения, которые проверка принимает: счётчики policy
+// включены, у входящих заданы теги keep.
+func rtXraySecGood(t *testing.T, keep []string) configlayer.Sections {
+	t.Helper()
+	sections := rtXraySecAll(t)
+	sections[configlayer.SectionXrayInbounds] = rtXraySecSectionKeep(t, rtXraySecInboundsValue, keep)
+	sections[configlayer.SectionXrayPolicy] = rtXraySecSectionKeep(t, rtXraySecPolicyWant, nil)
+	return sections
+}
+
 func TestRouterCoresXraySectionsGenerate(t *testing.T) {
 	rtXraySecBin(t)
 
@@ -260,4 +281,58 @@ func TestRouterCoresXraySectionsGenerate(t *testing.T) {
 		rtXraySecWant(t, byName, configlayer.PanelXrayInboundsFile, "inbounds", string(XrayPreset("inbounds")))
 	})
 
+	t.Run("проверка", func(t *testing.T) {
+		installed := configlayer.InstalledKernels{Xray: true}
+		keep := []string{"redirect", "tproxy"}
+
+		// Корректные значения — те же, что принимает xray run -test.
+		good := rtXraySecGood(t, keep)
+		dir := rtXraySecDir(t)
+		rtXraySecWrite(t, dir, rtXraySecGenerate(t, good))
+		rtXraySecTest(t, dir)
+		if issues := CheckXray(configlayer.Input{Sections: good, Mode: configlayer.SourceDraft}, installed); len(issues) != 0 {
+			t.Fatalf("корректные значения отклонены: %+v", issues)
+		}
+		if issues := CheckXray(configlayer.Input{Sections: good, Mode: configlayer.SourceDraft}, configlayer.InstalledKernels{}); len(issues) != 0 {
+			t.Fatalf("Xray не установлен, а проверка нашла проблемы: %+v", issues)
+		}
+
+		const socks = `{"tag":"socks-in","listen":"127.0.0.1","port":10808,"protocol":"socks","settings":{"auth":"noauth","udp":true}}`
+		const redirectTproxy = `{"tag":"redirect","port":1181,"protocol":"dokodemo-door","settings":{"network":"tcp","followRedirect":true}},` +
+			`{"tag":"tproxy","port":1181,"protocol":"dokodemo-door","settings":{"network":"udp","followRedirect":true},"streamSettings":{"sockopt":{"tproxy":"tproxy"}}}`
+		cases := []struct {
+			name, section, value, code, key string
+		}{
+			{"зарезервированный ключ", configlayer.SectionXrayOther, `{"routing":{}}`, configlayer.IssueRawReserved, "routing"},
+			{"ключ собственной секции", configlayer.SectionXrayOther, `{"dns":{}}`, configlayer.IssueRawReserved, "dns"},
+			{"выключен счётчик", configlayer.SectionXrayPolicy, `{"system":{"statsOutboundUplink":false}}`, configlayer.IssueRawPinned, "system.statsOutboundUplink"},
+			{"нет прозрачного входящего", configlayer.SectionXrayInbounds, `[` + socks + `]`, configlayer.IssueRawPinned, "redirect"},
+			{"новый прозрачный входящий", configlayer.SectionXrayInbounds,
+				`[` + redirectTproxy + `,{"tag":"extra","port":1182,"protocol":"dokodemo-door","settings":{"network":"tcp","followRedirect":true}}]`,
+				configlayer.IssueRawPinned, "extra"},
+			{"повтор тега", configlayer.SectionXrayInbounds,
+				`[` + redirectTproxy + `,` + socks + `,` + strings.Replace(socks, "10808", "10809", 1) + `]`,
+				configlayer.IssueInboundDuplicate, "socks-in.tag"},
+			{"повтор адреса и порта", configlayer.SectionXrayInbounds,
+				`[` + redirectTproxy + `,` + socks + `,` + strings.Replace(socks, "socks-in", "socks-2", 1) + `]`,
+				configlayer.IssueInboundDuplicate, "socks-2.port"},
+			{"порт вне диапазона", configlayer.SectionXrayInbounds,
+				`[` + redirectTproxy + `,` + strings.Replace(socks, "10808", "70000", 1) + `]`,
+				configlayer.IssueInboundPort, "socks-in.port"},
+			{"значение не того типа", configlayer.SectionXrayPolicy, `[1]`, configlayer.IssueCoreSectionInvalid, ""},
+		}
+		for _, c := range cases {
+			sections := rtXraySecGood(t, keep)
+			sections[c.section] = rtXraySecSectionKeep(t, c.value, keep)
+			found := false
+			for _, is := range CheckXray(configlayer.Input{Sections: sections, Mode: configlayer.SourceDraft}, installed) {
+				if is.Key == c.section && is.Code == c.code && is.Params["key"] == c.key {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s: нет проблемы %s по ключу %q в секции %s", c.name, c.code, c.key, c.section)
+			}
+		}
+	})
 }
