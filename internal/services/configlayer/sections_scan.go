@@ -2,7 +2,6 @@ package configlayer
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -213,17 +212,10 @@ type XraySectionScan struct {
 	// Shadowing — файлы с ключом секции, которые сортируются после файла панели
 	// секции и перекрыли бы его (не считается для inbounds: они объединяются).
 	Shadowing []string
-	// Effective — действующее значение секции (D-28): log, dns, policy и «Прочие
-	// ключи» — глубокое слияние сырых значений ключа из файлов секции по порядку
-	// имён по правилам Xray (mergeXrayValue); с дампом ядра оно сверяется в
-	// роутерных сценариях, но не берётся из него (дамп нормализован ядром).
-	// «Входящие» — слияние по tag, поздний входящий заменяет ранний целиком. nil —
-	// значения нет или оно неизвестно (см. EffectiveUnknown).
+	// Effective — действующее значение секции так, как сливает Xray (допущение
+	// A1, проверяется сценарием TestRouterCoresMergeSemantics); nil — значения
+	// нет. Значение неразобранных файлов в нём не учтено.
 	Effective json.RawMessage
-	// EffectiveUnknown — среди файлов с ключом секции есть неразобранный (Broken):
-	// его значения достоверно не знаем, Effective пуст, секция не берётся (D-28).
-	// Для «Входящих» всегда false.
-	EffectiveUnknown bool
 	// Owner — none, xkeen или user.
 	Owner string
 	// Sources — {имя, md5} всех файлов из Files.
@@ -309,111 +301,16 @@ func scanXraySection(id string, files []XrayKeyFile) XraySectionScan {
 	case xraySectionInbounds:
 		s.Effective = mergeInbounds(members)
 		s.ForceProxyTags = collectForceProxyTags(members)
+	case xraySectionOther:
+		s.Effective = mergeOtherKeys(members)
 	default:
-		for _, f := range members {
-			if f.Broken {
-				s.EffectiveUnknown = true
-			}
-		}
-		if !s.EffectiveUnknown {
-			s.Effective = mergeSectionKeys(id, members)
-		}
+		s.Effective = lastKeyValue(members, id)
 	}
 	return s
 }
 
-// mergeSectionKeys сливает значения ключей секции id (log, dns, policy, other) из
-// разобранных файлов по порядку имён (D-28). Для log, dns и policy результат —
-// слитое значение одноимённого ключа, для other — объект из слитых значений
-// ключей секции в порядке первого появления. nil — значений нет.
-func mergeSectionKeys(id string, files []XrayKeyFile) json.RawMessage {
-	merged := NewOrderedObject()
-	for _, f := range files {
-		for _, k := range f.Keys {
-			if XraySectionOfKey(k) != id {
-				continue
-			}
-			v, ok := f.Values[k]
-			if !ok {
-				continue
-			}
-			if prev, seen := merged.Get(k); seen {
-				v = mergeXrayValue(prev, v)
-			}
-			merged.Set(k, v)
-		}
-	}
-	if merged.Len() == 0 {
-		return nil
-	}
-	if id != xraySectionOther {
-		v, _ := merged.Get(id)
-		return compactOrSame(v)
-	}
-	b, err := merged.MarshalJSON()
-	if err != nil {
-		return nil
-	}
-	return b
-}
-
-// mergeXrayValue — правило слияния двух значений одного ключа из файлов каталога
-// Xray (dst — ранний файл, src — поздний), как его применяет ядро при
-// `-confdir` (infra/conf/merge): объекты сливаются рекурсивно, порядок ключей —
-// по первому появлению; массивы дополняются (ГИПОТЕЗА D-28: ранний массив +
-// поздний, без дедупликации); любые другие значения заменяются поздним. Правило
-// проверяет роутерный сценарий TestRouterCoresMergeSemantics, сверяя слитое
-// значение с дампом ядра: расхождение значит, что правило надо поправить здесь.
-func mergeXrayValue(dst, src json.RawMessage) json.RawMessage {
-	switch {
-	case isJSONKind(dst, '{') && isJSONKind(src, '{'):
-		d, derr := ParseOrderedObject(dst)
-		s, serr := ParseOrderedObject(src)
-		if derr != nil || serr != nil {
-			return compactOrSame(src)
-		}
-		for _, k := range s.Keys() {
-			sv, _ := s.Get(k)
-			if dv, ok := d.Get(k); ok {
-				sv = mergeXrayValue(dv, sv)
-			}
-			d.Set(k, sv)
-		}
-		b, err := d.MarshalJSON()
-		if err != nil {
-			return compactOrSame(src)
-		}
-		return b
-	case isJSONKind(dst, '[') && isJSONKind(src, '['):
-		var da, sa []json.RawMessage
-		if json.Unmarshal(dst, &da) != nil || json.Unmarshal(src, &sa) != nil {
-			return compactOrSame(src)
-		}
-		b, err := json.Marshal(append(da, sa...))
-		if err != nil {
-			return compactOrSame(src)
-		}
-		return b
-	}
-	return compactOrSame(src)
-}
-
-// isJSONKind — значение начинается с символа first ('{' или '[').
-func isJSONKind(raw json.RawMessage, first byte) bool {
-	t := bytes.TrimSpace(raw)
-	return len(t) > 0 && t[0] == first
-}
-
-// compactOrSame убирает пробелы между токенами значения; при ошибке отдаёт как есть.
-func compactOrSame(raw json.RawMessage) json.RawMessage {
-	if c, err := compactRaw(raw); err == nil {
-		return c
-	}
-	return raw
-}
-
-// lastKeyValue — значение ключа из последнего по имени разобранного файла.
-// Нужен только для burstObservatory (основа проб, D-27): это не секция панели.
+// lastKeyValue — значение ключа из последнего по имени разобранного файла:
+// объекты log, dns, policy заменяются целиком (допущение A1).
 func lastKeyValue(files []XrayKeyFile, key string) json.RawMessage {
 	for i := len(files) - 1; i >= 0; i-- {
 		if files[i].Broken {
@@ -424,6 +321,31 @@ func lastKeyValue(files []XrayKeyFile, key string) json.RawMessage {
 		}
 	}
 	return nil
+}
+
+// mergeOtherKeys собирает «Прочие ключи»: для каждого ключа — значение из
+// последнего файла, порядок ключей — по первому появлению в порядке файлов.
+func mergeOtherKeys(files []XrayKeyFile) json.RawMessage {
+	obj := NewOrderedObject()
+	for _, f := range files {
+		if f.Broken {
+			continue
+		}
+		for _, k := range f.Keys {
+			if XraySectionOfKey(k) != xraySectionOther {
+				continue
+			}
+			obj.Set(k, f.Values[k])
+		}
+	}
+	if obj.Len() == 0 {
+		return nil
+	}
+	b, err := obj.MarshalJSON()
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // mergeInbounds объединяет входящие по порядку файлов так, как это делает Xray:
@@ -638,18 +560,8 @@ func ReadMihomoActive(root string) (name string, data []byte, err error) {
 	return name, data, nil
 }
 
-// XrayDump возвращает дамп каталога Xray слоя: ключи верхнего уровня слитого
-// ядром конфига. Дамп нормализован ядром (добавлены значения по умолчанию), поэтому
-// это диагностика и арбитр сверки, а не значение секции (D-28). Ядро не установлено
-// или без флага -dump, корень Xray не задан — ErrXrayDumpUnavailable, отказ ядра —
-// ErrXrayDumpFailed. Каждый вызов запускает ядро.
-func (l *Layer) XrayDump(ctx context.Context) (map[string]json.RawMessage, error) {
-	return XrayDump(ctx, l.binaries().Xray, l.opts.Roots.Xray, l.opts.XrayEnv)
-}
-
 // ScanXraySections сканирует каталог Xray слоя: карта секций по идентификатору
-// и файлы скана. Значения секций — слияние сырых значений файлов (D-28), ядро не
-// запускается. Корень Xray не задан — пустая карта без ошибки.
+// и файлы скана. Корень Xray не задан — пустая карта без ошибки.
 func (l *Layer) ScanXraySections() (map[string]XraySectionScan, []XrayKeyFile, error) {
 	if l.opts.Roots.Xray == "" {
 		return map[string]XraySectionScan{}, nil, nil

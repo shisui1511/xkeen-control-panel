@@ -500,25 +500,6 @@ func TestRouterCoresTakeoverGuards(t *testing.T) {
 		e.assertKept(t, before)
 	})
 
-	// Смешанный файл с ключом секции (D-28): остаток файла продолжил бы сливаться
-	// со значением панели, секция не берётся ни для одной из секций дампа.
-	t.Run("mixed_dns", func(t *testing.T) {
-		const mixedDNS = "05_mixed.json"
-		e := rtNewCoresEnv(t, map[string]string{
-			mixedDNS:         `{"dns": {"servers": ["127.0.0.1"]}, "stats": {}}` + "\n",
-			rtCoOutboundFile: rtCoOutboundBody,
-		})
-		e.editSections(t, map[string]json.RawMessage{SectionXrayDNS: e.takeDraft(t, xraySectionDNS, true)})
-		before := rtDirSnapshot(t, e.xray)
-		res := e.apply(t)
-		if res.OK || res.Code != ResultBuildFailed || !rtHasIssue(res, IssueSectionShadowed, SectionXrayDNS, mixedDNS) {
-			t.Fatalf("секция dns в смешанном файле: %+v", res)
-		}
-		// Чужой файл не тронут.
-		e.assertFileIs(t, mixedDNS)
-		e.assertKept(t, before)
-	})
-
 	t.Run("validation", func(t *testing.T) {
 		e := rtNewCoresEnv(t, map[string]string{rtCoDNSFile: rtCoDNSBody, rtCoOutboundFile: rtCoOutboundBody})
 		scans, _, err := e.layer.ScanXraySections()
