@@ -104,6 +104,12 @@ const (
 	// (PUT /providers/...), профиль не перечитывался. Код несёт RestartView у
 	// исхода hot_reloaded; перезагрузка профиля целиком (PUT /configs) кода не имеет.
 	NoteProvidersUpdated = "providers_updated"
+	// NoteFullRestartTun — Mihomo перезапущен целиком: изменился tun, горячая
+	// перезагрузка не применяет его без пересборки правил XKeen.
+	NoteFullRestartTun = "full_restart_tun"
+	// NoteFullRestartPort — ядро перезапущено целиком (Xray — xkeen -restart): изменился
+	// порт прозрачного входящего, правила iptables пересобирает XKeen.
+	NoteFullRestartPort = "full_restart_port"
 )
 
 // errInterrupted — запуск прерван отменой контекста (остановка панели). Откат и
@@ -261,8 +267,11 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 	}
 
 	outcome := RestartOutcomeRestarted
+	// Признак плана читается после Preview: остановленное ядро не запускается
+	// (FND-05), как и без признака.
+	fullNote := fullRestartNote(plan.FullRestart[kernel])
 	var hotErr error
-	if kernel == KernelMihomo && p.d.Mihomo != nil && p.d.Mihomo.HasController() {
+	if kernel == KernelMihomo && fullNote == "" && p.d.Mihomo != nil && p.d.Mihomo.HasController() {
 		var targeted bool
 		if targeted, hotErr = p.hotReloadMihomo(ctx, plan, set); hotErr == nil {
 			view := RestartView{Kernel: kernel, Outcome: RestartOutcomeHotReloaded}
@@ -301,7 +310,19 @@ func (p *Pipeline) restartKernel(ctx context.Context, kernel string, plan Plan, 
 		}
 		return p.rollbackAndRestart(ctx, kernel, set, err)
 	}
-	return RestartView{Kernel: kernel, Outcome: outcome}, nil
+	return RestartView{Kernel: kernel, Outcome: outcome, NoteCode: fullNote}, nil
+}
+
+// fullRestartNote переводит причину полного перезапуска в код пояснения; пустая
+// или неизвестная причина — пустая строка.
+func fullRestartNote(reason string) string {
+	switch reason {
+	case RestartReasonTun:
+		return NoteFullRestartTun
+	case RestartReasonPort:
+		return NoteFullRestartPort
+	}
+	return ""
 }
 
 // hotReloadMihomo применяет изменения Mihomo без смены PID, сверяет провайдеры с

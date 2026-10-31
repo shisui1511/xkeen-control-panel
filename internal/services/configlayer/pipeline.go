@@ -414,6 +414,11 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		// Секции Xray (взятие и возврат файлов, D-01) идут теми же операциями.
 		plan.Routing, err = p.planCores(src, snap.Cores, plan.Routing, installed, req)
 	}
+	if err == nil && req.Source == SourceDraft && len(req.Only) == 0 {
+		// Смена порта прозрачного входящего или tun — полный перезапуск вместо
+		// горячей перезагрузки Mihomo (D-16): правила XKeen пересобираются только им.
+		plan.FullRestart = fullRestartOf(RestartReasons(snap.Applied, src))
+	}
 	if err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
 		res := ResultView{Code: ResultBuildFailed, Message: err.Error()}
