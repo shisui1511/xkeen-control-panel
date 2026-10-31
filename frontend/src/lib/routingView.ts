@@ -6,6 +6,7 @@
 import { writable } from 'svelte/store';
 import type { GroupView, IssueView, KernelCounts, Member, Target } from './configRouting';
 import type { TFn } from './sourceErrors';
+import coresErrorCodes from './coresErrorCodes.json';
 
 // Состояние вкладок живёт на уровне модуля, а не компонента: вкладки раздела
 // «Конфигурация» размонтируются при смене, а раскрытые карточки должны её пережить.
@@ -121,17 +122,27 @@ const ISSUE_CODES = new Set([
 ]);
 
 /**
- * Ключ текста проблемы блокирующей проверки по коду: cfg.hint.<код>
- * (тот же словарь, что у хода применения); незнакомый код — общий текст сбоя проверки.
+ * Коды проблем проверки секций ядер (coresErrorCodes.json, поле issues). Отдельный набор:
+ * ISSUE_CODES сверяется со списком кодов проверки маршрутизации на бэкенде, коды секций
+ * в него не входят. Тексты — cfg.sec.issue.<код>.
+ */
+const SECTION_ISSUE_CODES = new Set<string>(coresErrorCodes.issues);
+
+/**
+ * Ключ текста проблемы блокирующей проверки по коду: cfg.hint.<код> (тот же словарь, что у
+ * хода применения), для кодов секций ядер — cfg.sec.issue.<код>; незнакомый код — общий
+ * текст сбоя проверки.
  */
 export function issueTextKey(code: string): string {
-  return ISSUE_CODES.has(code) ? `cfg.hint.${code}` : 'cfg.hint.checker_failed';
+  if (ISSUE_CODES.has(code)) return `cfg.hint.${code}`;
+  if (SECTION_ISSUE_CODES.has(code)) return `cfg.sec.issue.${code}`;
+  return 'cfg.hint.checker_failed';
 }
 
 /** Вид чипа проблемы: красный блокирует «Применить», жёлтый — предупреждение. */
 export type ChipKind = 'danger' | 'warning';
 
-const DANGER_CODES = new Set([...ISSUE_CODES]);
+const DANGER_CODES = new Set([...ISSUE_CODES, ...SECTION_ISSUE_CODES]);
 
 /** Вид чипа по проблеме (issues — красный) или предупреждению (warnings — жёлтый). */
 export function chipKind(issue: Pick<IssueView, 'code'>, fromIssues = true): ChipKind {

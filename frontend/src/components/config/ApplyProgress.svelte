@@ -65,6 +65,40 @@
 
   const kernelLabel = (k: string) => KERNEL_LABELS[k] ?? k;
 
+  // Способ перезапуска по факту (D-16): xkeen -restart у Xray, полный перезапуск или горячая
+  // перезагрузка у Mihomo, «не нужен» — когда ядро не тронуто. Отказы и прерывание способа
+  // не называют: там важен исход, а не способ
+  type RestartMethod = 'xkeen' | 'mihomo_full' | 'mihomo_hot' | 'none' | '';
+  const FULL_RESTART_PREFIX = 'full_restart_';
+
+  /** Причина полного перезапуска Mihomo из note_code (full_restart_tun | full_restart_port): tun | port. */
+  function fullRestartReason(row: LayerRestart): string | undefined {
+    const code = row.note_code ?? '';
+    return code.startsWith(FULL_RESTART_PREFIX)
+      ? code.slice(FULL_RESTART_PREFIX.length)
+      : undefined;
+  }
+
+  function restartMethod(row: LayerRestart): RestartMethod {
+    switch (row.outcome) {
+      case 'untouched_inactive':
+      case 'untouched_conflict':
+      case 'deferred':
+      case 'no_runtime_effect':
+        return 'none';
+      case 'hot_reloaded':
+        return 'mihomo_hot';
+      case 'restarted':
+      case 'restarted_after_reload_failed':
+        if (row.kernel === 'xray') return 'xkeen';
+        // Mihomo перезапускается целиком: по причине (tun, порт) или после неудачной горячей
+        // перезагрузки
+        return 'mihomo_full';
+      default:
+        return '';
+    }
+  }
+
   function markerLabel(state: StepState): string {
     return $t('cfg.step_state.' + state);
   }
@@ -95,7 +129,11 @@
     if (!code) return '';
     const key = 'cfg.hint.' + code;
     const text = $t(key, params);
-    return text === key ? '' : text;
+    if (text !== key) return text;
+    // Проблемы проверки секций ядер живут в своём словаре
+    const secKey = 'cfg.sec.issue.' + code;
+    const secText = $t(secKey, params);
+    return secText === secKey ? '' : secText;
   }
 
   const otherTab = $derived(running && !$applyStartedHere);
@@ -190,8 +228,20 @@
             {#if step.id === 'restart' && restartRows.length > 0}
               <ul class="restart-rows">
                 {#each restartRows as row (row.kernel)}
-                  <li class="restart-row" data-kernel={row.kernel} data-outcome={row.outcome}>
-                    {$t('cfg.restart.' + row.outcome, { kernel: kernelLabel(row.kernel) })}
+                  {@const method = restartMethod(row)}
+                  <li
+                    class="restart-row"
+                    data-kernel={row.kernel}
+                    data-outcome={row.outcome}
+                    data-method={method || undefined}
+                    data-reason={fullRestartReason(row)}
+                  >
+                    {#if method !== ''}
+                      <span class="restart-method">{$t('cfg.sec.restart_step.' + method)}</span>
+                    {/if}
+                    <span
+                      >{$t('cfg.restart.' + row.outcome, { kernel: kernelLabel(row.kernel) })}</span
+                    >
                   </li>
                 {/each}
               </ul>
@@ -358,9 +408,19 @@
   }
 
   .restart-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    min-width: 0;
+    overflow-wrap: anywhere;
     font-size: var(--font-size-sm);
     line-height: 1.5;
     color: var(--fg-secondary);
+  }
+
+  .restart-method {
+    font-weight: 600;
+    color: var(--fg-primary);
   }
 
   .result {
