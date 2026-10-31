@@ -19,6 +19,10 @@
   const MAX_URL = 512;
   const MIN_INTERVAL = 10;
   const MAX_INTERVAL = 3600;
+  const MIN_SAMPLING = 1;
+  const MAX_SAMPLING = 100;
+  // Значение sampling, которое панель пишет в файл наблюдения, когда ключ не задан
+  const DEFAULT_SAMPLING = 2;
 
   let open = $state(false);
 
@@ -29,12 +33,25 @@
   const savedUrl = $derived(saved?.url ?? '');
   const savedInterval = $derived(String(saved?.interval_s ?? ''));
   const savedTimeout = $derived(String(saved?.timeout_s ?? ''));
+  const savedConnectivity = $derived(saved?.connectivity ?? '');
+  const savedSampling = $derived(saved?.sampling ? String(saved.sampling) : '');
+  // Расширенные параметры Xray видны, только если ядро установлено
+  const xrayInstalled = $derived($routingView?.installed?.xray === true);
 
   // Поля — производные от записанного: ввод их переопределяет, новая запись сбрасывает к ней
   let url = $derived(savedUrl);
   let interval = $derived(savedInterval);
   let timeout = $derived(savedTimeout);
-  let touched = $state({ url: false, interval: false, timeout: false });
+  let connectivity = $derived(savedConnectivity);
+  // Поле type=number отдаёт число, а пустое — null
+  let sampling = $derived<string | number>(savedSampling);
+  let touched = $state({
+    url: false,
+    interval: false,
+    timeout: false,
+    connectivity: false,
+    sampling: false
+  });
   let saving = $state(false);
   let again = false;
 
@@ -69,6 +86,15 @@
     intervalValid && intervalNum !== null ? intervalNum : (saved?.interval_s ?? MAX_INTERVAL)
   );
   const urlValid = $derived(isHttpUrl(url));
+  // Пустой адрес связности и пустое число замеров — ключ не задан, это допустимо
+  const connectivityText = $derived(connectivity.trim());
+  const connectivityValid = $derived(connectivityText === '' || isHttpUrl(connectivityText));
+  const samplingText = $derived(sampling == null ? '' : String(sampling).trim());
+  const samplingNum = $derived(wholeSeconds(samplingText));
+  const samplingValid = $derived(
+    samplingText === '' ||
+      (samplingNum !== null && samplingNum >= MIN_SAMPLING && samplingNum <= MAX_SAMPLING)
+  );
   const timeoutValid = $derived(
     timeoutNum !== null && timeoutNum >= 1 && timeoutNum < effectiveInterval
   );
@@ -79,6 +105,12 @@
   );
   const timeoutError = $derived(
     touched.timeout && !timeoutValid ? $t('cfg.groups.probe_err_timeout') : ''
+  );
+  const connectivityError = $derived(
+    touched.connectivity && !connectivityValid ? $t('cfg.groups.probe_err_connectivity') : ''
+  );
+  const samplingError = $derived(
+    touched.sampling && !samplingValid ? $t('cfg.groups.probe_err_sampling') : ''
   );
 
   // В черновик уходят допустимые поля; недопустимое остаётся записанным, остальные пишутся (E4 partial)
@@ -95,12 +127,25 @@
       interval_s: intervalValid && intervalNum !== null ? intervalNum : s.interval_s,
       timeout_s: timeoutValid && timeoutNum !== null ? timeoutNum : s.timeout_s
     };
+    // Пустое поле — ключ не задан; недопустимое остаётся записанным. Остальные ключи
+    // pingConfig (extra) уходят как записаны: правка полей их не стирает.
+    const nextConnectivity = connectivityValid ? connectivityText : (s.connectivity ?? '');
+    const nextSampling = samplingValid ? (samplingNum ?? 0) : (s.sampling ?? 0);
+    if (nextConnectivity !== '') next.connectivity = nextConnectivity;
+    if (nextSampling !== 0) next.sampling = nextSampling;
+    if (s.extra !== undefined) next.extra = s.extra;
     // Новый интервал не согласуется с таймаутом: пара остаётся прежней, пока таймаут не исправят
     if (next.timeout_s >= next.interval_s) {
       next.interval_s = s.interval_s;
       next.timeout_s = s.timeout_s;
     }
-    if (next.url === s.url && next.interval_s === s.interval_s && next.timeout_s === s.timeout_s) {
+    if (
+      next.url === s.url &&
+      next.interval_s === s.interval_s &&
+      next.timeout_s === s.timeout_s &&
+      nextConnectivity === (s.connectivity ?? '') &&
+      nextSampling === (s.sampling ?? 0)
+    ) {
       return;
     }
     saving = true;
@@ -122,7 +167,7 @@
     }
   }
 
-  function onField(field: 'url' | 'interval' | 'timeout') {
+  function onField(field: 'url' | 'interval' | 'timeout' | 'connectivity' | 'sampling') {
     touched[field] = true;
     // Изменение интервала может сделать записанный таймаут недопустимым
     if (field === 'interval') touched.timeout = true;
@@ -177,6 +222,53 @@
           />
         </div>
       </div>
+
+      {#if xrayInstalled}
+        <details class="probe-advanced" data-testid="probe-advanced">
+          <summary>{$t('cfg.groups.probe_advanced')}</summary>
+          <div class="probe-advanced-body">
+            <div class="probe-fields probe-fields-adv">
+              <div
+                class="probe-field probe-mono"
+                data-testid="probe-connectivity"
+                onchange={() => onField('connectivity')}
+              >
+                <Input
+                  id="{uid}-connectivity"
+                  label={$t('cfg.groups.probe_connectivity')}
+                  bind:value={connectivity}
+                  maxlength={MAX_URL}
+                  error={connectivityError}
+                />
+                {#if connectivityText === '' && !connectivityError}
+                  <p class="probe-hint">
+                    {$t('cfg.sec.default_hint', { value: $t('cfg.groups.probe_default_empty') })}
+                  </p>
+                {/if}
+              </div>
+              <div
+                class="probe-field probe-mono"
+                data-testid="probe-sampling"
+                onchange={() => onField('sampling')}
+              >
+                <Input
+                  id="{uid}-sampling"
+                  type="number"
+                  label={$t('cfg.groups.probe_sampling')}
+                  bind:value={sampling}
+                  error={samplingError}
+                />
+                {#if samplingText === '' && !samplingError}
+                  <p class="probe-hint">
+                    {$t('cfg.sec.default_hint', { value: String(DEFAULT_SAMPLING) })}
+                  </p>
+                {/if}
+              </div>
+            </div>
+            <p class="probe-hint probe-note">{$t('cfg.groups.probe_mihomo_note')}</p>
+          </div>
+        </details>
+      {/if}
     </div>
   {/if}
 </section>
@@ -250,13 +342,58 @@
     text-overflow: ellipsis;
   }
 
+  .probe-fields-adv {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 160px);
+  }
+
+  .probe-mono :global(.input) {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+    overflow-wrap: anywhere;
+  }
+
+  .probe-advanced {
+    min-width: 0;
+  }
+
+  .probe-advanced summary {
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--fg-secondary);
+    cursor: pointer;
+  }
+
+  .probe-advanced-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+    padding-top: var(--spacing-2);
+    min-width: 0;
+  }
+
+  .probe-hint {
+    margin: var(--spacing-1) 0 0;
+    font-size: var(--font-size-xs);
+    color: var(--fg-secondary);
+    overflow-wrap: anywhere;
+  }
+
+  .probe-note {
+    margin: 0;
+  }
+
   @media (max-width: 768px) {
-    .probe-fields {
+    .probe-fields,
+    .probe-fields-adv {
       grid-template-columns: minmax(0, 1fr);
     }
   }
 
   @media (pointer: coarse), (max-width: 768px) {
+    .probe-advanced summary,
     .probe-expand {
       min-height: 44px;
     }

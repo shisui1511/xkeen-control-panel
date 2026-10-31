@@ -126,6 +126,12 @@ export interface ProbeConfig {
   url: string;
   interval_s: number;
   timeout_s: number;
+  /** pingConfig.connectivity (Xray): пусто — ключ не задан. */
+  connectivity?: string;
+  /** pingConfig.sampling (Xray), от 1 до 100. Нет — действует значение панели. */
+  sampling?: number;
+  /** Остальные ключи pingConfig (Xray) объектом. */
+  extra?: Record<string, unknown>;
 }
 
 export interface FeatureView {
