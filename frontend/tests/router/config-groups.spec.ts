@@ -637,6 +637,105 @@ test('groups: проверка доступности — недопустимо
   }
 });
 
+// --- Расширенные параметры проб Xray (фаза 147, план 10) ---
+
+interface ProbeAdvanced {
+  revision: number;
+  connectivity: string;
+  sampling: number;
+  extra: Record<string, unknown> | null;
+}
+
+async function probeAdvanced(page: Page): Promise<ProbeAdvanced> {
+  const view = await api(page, 'GET', '/api/configlayer/routing');
+  expect(view.status, 'GET /api/configlayer/routing').toBe(200);
+  const probe = (view.data?.probe ?? {}) as {
+    connectivity?: string;
+    sampling?: number;
+    extra?: Record<string, unknown>;
+  };
+  return {
+    revision: Number(view.data?.revision ?? 0),
+    connectivity: String(probe.connectivity ?? ''),
+    sampling: Number(probe.sampling ?? 0),
+    extra: probe.extra ?? null
+  };
+}
+
+test('groups: пробы — расширенные параметры Xray', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await startPage(page);
+  await resetDraft(page);
+  const inst = await installedKernels(page);
+  test.skip(!inst.xray, 'Xray не установлен: расширенных параметров проб в интерфейсе нет');
+  const port = randomPort();
+  try {
+    await addToDraft(page, nodeLink('vless_ws.txt', port, 'PrbAdvNode'));
+    await saveGroupApi(page, { name: `RT Проба расш ${port}`, mode: 'auto' });
+    await openGroups(page);
+    await openProbe(page);
+
+    // раскрытие свёрнуто, подпись про Mihomo видна под блоком
+    const advanced = page.getByTestId('probe-advanced');
+    await expect(advanced).toBeVisible({ timeout: T.action });
+    await expect(advanced).not.toHaveAttribute('open', '');
+    await advanced.locator('summary').click();
+    const sampling = page.getByTestId('probe-sampling').locator('input');
+    const connectivity = page.getByTestId('probe-connectivity').locator('input');
+    const raw = page.getByTestId('probe-raw');
+    await expect(sampling).toBeVisible({ timeout: T.action });
+    await expect(advanced).toContainText(/Mihomo/);
+
+    // допустимые значения уходят в черновик по уходу фокуса
+    const start = await probeAdvanced(page);
+    await sampling.fill('5');
+    await sampling.press('Tab');
+    await expect
+      .poll(async () => (await probeAdvanced(page)).sampling, { timeout: T.action })
+      .toBe(5);
+    await connectivity.fill('http://127.0.0.1:1/generate_204');
+    await connectivity.press('Tab');
+    await expect
+      .poll(async () => (await probeAdvanced(page)).connectivity, { timeout: T.action })
+      .toBe('http://127.0.0.1:1/generate_204');
+    await raw.fill('{"httpMethod":"GET"}');
+    await raw.press('Tab');
+    await expect
+      .poll(async () => (await probeAdvanced(page)).extra?.httpMethod, { timeout: T.action })
+      .toBe('GET');
+    const written = await probeAdvanced(page);
+    expect(written.revision, 'запись создала ревизию').toBeGreaterThan(start.revision);
+    expect(written.sampling, 'правка extra не стёрла число замеров').toBe(5);
+
+    // зарезервированный ключ отклоняет сервер: текст под блоком, черновик прежний
+    await raw.fill('{"interval":"5s"}');
+    await raw.press('Tab');
+    const rawError = page.getByTestId('probe-raw-error');
+    await expect(rawError).toBeVisible({ timeout: T.action });
+    await expect(raw).toHaveAttribute('aria-describedby', /-raw-error$/);
+    const afterReserved = await probeAdvanced(page);
+    expect(afterReserved.revision, 'ревизия черновика не изменилась').toBe(written.revision);
+    expect(afterReserved.extra?.httpMethod, 'extra в черновике прежний').toBe('GET');
+
+    // синтаксическая ошибка JSON показывается без записи
+    await raw.fill('{"httpMethod":');
+    await expect(rawError).toBeVisible({ timeout: T.action });
+    await raw.press('Tab');
+    expect((await probeAdvanced(page)).revision, 'ревизия не изменилась').toBe(written.revision);
+
+    // число замеров вне 1-100: ошибка под полем, в черновике прежнее
+    await sampling.fill('0');
+    await sampling.press('Tab');
+    await expect(page.getByTestId('probe-sampling').locator('.error-text')).toBeVisible({
+      timeout: T.action
+    });
+    expect((await probeAdvanced(page)).sampling, 'число замеров прежнее').toBe(5);
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});
+
 // --- Узкие экраны, темы и axe (фаза 146, план 28) ---
 
 const LONG_NAME = 'GroupLongNameGroupLongNameGroupLongNameGroupLongName';

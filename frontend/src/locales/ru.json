@@ -3965,6 +3965,7 @@
   "cfg.groups.probe_err_sampling": "Число замеров — целое число от 1 до 100.",
   "cfg.groups.probe_err_connectivity": "Адрес — полный URL с http:// или https://.",
   "cfg.groups.probe_default_empty": "пусто",
+  "cfg.groups.probe_raw_not_object": "ожидается JSON-объект",
   "cfg.sec.err.apply_busy": "Идёт применение. Повторите после окончания.",
   "cfg.sec.err.comments_not_acknowledged": "В файлах секции есть комментарии. Подтвердите их потерю в диалоге взятия и повторите.",
   "cfg.sec.err.controller_no_secret": "TCP-адрес external-controller открывает API ядра в сеть. Задайте непустой secret или уберите ключ.",

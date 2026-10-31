@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from '../../../i18n';
   import { showToast } from '../../../stores';
+  import { onDestroy } from 'svelte';
   import Input from '../../Input.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import { handleLayerError } from '../../../lib/configLayer';
@@ -19,6 +20,7 @@
   const MAX_URL = 512;
   const MIN_INTERVAL = 10;
   const MAX_INTERVAL = 3600;
+  const RAW_DEBOUNCE_MS = 400;
   const MIN_SAMPLING = 1;
   const MAX_SAMPLING = 100;
   // Значение sampling, которое панель пишет в файл наблюдения, когда ключ не задан
@@ -35,6 +37,9 @@
   const savedTimeout = $derived(String(saved?.timeout_s ?? ''));
   const savedConnectivity = $derived(saved?.connectivity ?? '');
   const savedSampling = $derived(saved?.sampling ? String(saved.sampling) : '');
+  const savedRaw = $derived(
+    saved?.extra && Object.keys(saved.extra).length > 0 ? JSON.stringify(saved.extra, null, 2) : ''
+  );
   // Расширенные параметры Xray видны, только если ядро установлено
   const xrayInstalled = $derived($routingView?.installed?.xray === true);
 
@@ -45,6 +50,7 @@
   let connectivity = $derived(savedConnectivity);
   // Поле type=number отдаёт число, а пустое — null
   let sampling = $derived<string | number>(savedSampling);
+  let raw = $derived(savedRaw);
   let touched = $state({
     url: false,
     interval: false,
@@ -52,6 +58,11 @@
     connectivity: false,
     sampling: false
   });
+  // Синтаксис JSON показывается через 400 мс после ввода или сразу при уходе фокуса
+  let rawChecked = $state(false);
+  // Отказ сервера по ключу extra (зарезервированный ключ, размер) — текст под блоком
+  let rawServerError = $state('');
+  let rawTimer: ReturnType<typeof setTimeout> | undefined;
   let saving = $state(false);
   let again = false;
 
@@ -85,6 +96,36 @@
   const effectiveInterval = $derived(
     intervalValid && intervalNum !== null ? intervalNum : (saved?.interval_s ?? MAX_INTERVAL)
   );
+  type ExtraParse =
+    | { ok: true; value: Record<string, unknown> | undefined }
+    | { ok: false; line: string; detail: string };
+
+  // Номер строки: парсеры отдают либо строку, либо смещение (тогда считаем строки сами)
+  function errorLine(text: string, message: string): string {
+    const byLine = /line (\d+)/.exec(message);
+    if (byLine) return byLine[1];
+    const byPos = /position (\d+)/.exec(message);
+    if (byPos) return String(text.slice(0, Number(byPos[1])).split('\n').length);
+    return '1';
+  }
+
+  // Пустой текст и пустой объект — extra не задаётся; не объект — ошибка
+  function parseExtra(text: string): ExtraParse {
+    if (text.trim() === '') return { ok: true, value: undefined };
+    let v: unknown;
+    try {
+      v = JSON.parse(text);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, line: errorLine(text, message), detail: message };
+    }
+    if (v === null || typeof v !== 'object' || Array.isArray(v)) {
+      return { ok: false, line: '1', detail: $t('cfg.groups.probe_raw_not_object') };
+    }
+    const obj = v as Record<string, unknown>;
+    return { ok: true, value: Object.keys(obj).length > 0 ? obj : undefined };
+  }
+
   const urlValid = $derived(isHttpUrl(url));
   // Пустой адрес связности и пустое число замеров — ключ не задан, это допустимо
   const connectivityText = $derived(connectivity.trim());
@@ -106,6 +147,13 @@
   const timeoutError = $derived(
     touched.timeout && !timeoutValid ? $t('cfg.groups.probe_err_timeout') : ''
   );
+  const rawParsed = $derived(parseExtra(raw));
+  const rawSyntaxError = $derived(
+    rawChecked && !rawParsed.ok
+      ? $t('cfg.sec.raw_syntax', { line: rawParsed.line, detail: rawParsed.detail })
+      : ''
+  );
+  const rawError = $derived(rawSyntaxError || rawServerError);
   const connectivityError = $derived(
     touched.connectivity && !connectivityValid ? $t('cfg.groups.probe_err_connectivity') : ''
   );
@@ -133,7 +181,9 @@
     const nextSampling = samplingValid ? (samplingNum ?? 0) : (s.sampling ?? 0);
     if (nextConnectivity !== '') next.connectivity = nextConnectivity;
     if (nextSampling !== 0) next.sampling = nextSampling;
-    if (s.extra !== undefined) next.extra = s.extra;
+    // Верный JSON-блок записывается, неверный не пишется: остаётся записанный
+    const nextExtra = rawParsed.ok ? rawParsed.value : s.extra;
+    if (nextExtra !== undefined) next.extra = nextExtra;
     // Новый интервал не согласуется с таймаутом: пара остаётся прежней, пока таймаут не исправят
     if (next.timeout_s >= next.interval_s) {
       next.interval_s = s.interval_s;
@@ -144,7 +194,8 @@
       next.interval_s === s.interval_s &&
       next.timeout_s === s.timeout_s &&
       nextConnectivity === (s.connectivity ?? '') &&
-      nextSampling === (s.sampling ?? 0)
+      nextSampling === (s.sampling ?? 0) &&
+      JSON.stringify(nextExtra ?? null) === JSON.stringify(s.extra ?? null)
     ) {
       return;
     }
@@ -155,6 +206,8 @@
       const e = err as { code?: string; params?: Record<string, string> };
       if (e.code === 'draft_conflict' || e.code === 'apply_busy') {
         handleLayerError(err);
+      } else if (e.code === 'invalid_input' && e.params?.field === 'extra') {
+        rawServerError = routingErrorText($t, e.code, e.params);
       } else {
         showToast('error', routingErrorText($t, e.code, e.params));
       }
@@ -166,6 +219,21 @@
       }
     }
   }
+
+  function onRawInput() {
+    rawServerError = '';
+    rawChecked = false;
+    clearTimeout(rawTimer);
+    rawTimer = setTimeout(() => (rawChecked = true), RAW_DEBOUNCE_MS);
+  }
+
+  function onRawChange() {
+    clearTimeout(rawTimer);
+    rawChecked = true;
+    void commit();
+  }
+
+  onDestroy(() => clearTimeout(rawTimer));
 
   function onField(field: 'url' | 'interval' | 'timeout' | 'connectivity' | 'sampling') {
     touched[field] = true;
@@ -265,6 +333,28 @@
                 {/if}
               </div>
             </div>
+            <div class="probe-field probe-mono">
+              <label class="form-label" for="{uid}-raw">{$t('cfg.groups.probe_raw')}</label>
+              <textarea
+                id="{uid}-raw"
+                class="input probe-raw"
+                class:input-error={!!rawError}
+                rows="6"
+                spellcheck="false"
+                autocomplete="off"
+                autocapitalize="off"
+                data-testid="probe-raw"
+                aria-invalid={rawError ? 'true' : 'false'}
+                aria-describedby={rawError ? `${uid}-raw-error` : undefined}
+                bind:value={raw}
+                oninput={onRawInput}
+                onchange={onRawChange}></textarea>
+              {#if rawError}
+                <span class="error-text" id="{uid}-raw-error" data-testid="probe-raw-error">
+                  {rawError}
+                </span>
+              {/if}
+            </div>
             <p class="probe-hint probe-note">{$t('cfg.groups.probe_mihomo_note')}</p>
           </div>
         </details>
@@ -350,6 +440,17 @@
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
     overflow-wrap: anywhere;
+  }
+
+  .probe-raw {
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 0;
+    padding: var(--spacing-2) var(--spacing-3);
+    resize: vertical;
+    overflow-y: auto;
+    scrollbar-width: thin;
   }
 
   .probe-advanced {
