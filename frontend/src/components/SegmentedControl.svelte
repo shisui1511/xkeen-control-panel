@@ -6,6 +6,8 @@
     label: string;
     icon?: Component<{ size?: number }>;
     class?: string;
+    /** data-testid кнопки сегмента. */
+    testId?: string;
   }
 
   /**
@@ -53,6 +55,7 @@
       class:active={item.value === value}
       class:partial={item.value !== value && partial.includes(item.value)}
       data-value={item.value}
+      data-testid={item.testId}
       aria-pressed={pressedState(item)}
       onclick={() => handleClick(item)}
     >

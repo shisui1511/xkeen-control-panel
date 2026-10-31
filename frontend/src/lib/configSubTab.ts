@@ -2,7 +2,7 @@
 // адрес приходит аргументом, браузерные глобальные объекты не читаются. Фазы 147–148
 // добавляют вкладки в тот же список.
 
-export type ConfigSubTab = 'nodes' | 'groups' | 'rules' | 'lists' | 'files';
+export type ConfigSubTab = 'nodes' | 'groups' | 'rules' | 'lists' | 'cores' | 'files';
 
 /** Вкладка по умолчанию: открывается для `#/config` без суффикса и для незнакомого суффикса. */
 export const DEFAULT_CONFIG_SUBTAB: ConfigSubTab = 'nodes';
@@ -13,6 +13,7 @@ export const CONFIG_SUBTABS: readonly ConfigSubTab[] = [
   'groups',
   'rules',
   'lists',
+  'cores',
   'files'
 ];
 
