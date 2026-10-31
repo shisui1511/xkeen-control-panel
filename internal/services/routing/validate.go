@@ -943,6 +943,10 @@ const (
 	// пометкой drop в секции geodata: после удаления файла ядро упало бы на
 	// отсутствующем списке (geodata_ref_remains {file, tag, rule}).
 	issueGeodataRefRemains = "geodata_ref_remains"
+	// issueForceProxyGroupMissing — есть входящие force-proxy*, а выбранной группы
+	// для них нет (удалена): трафик этих входящих пошёл бы мимо неё (D-12, T-147-40).
+	// Key — секция «Входящие» ядра, Params {group}.
+	issueForceProxyGroupMissing = "force_proxy_group_missing"
 )
 
 // Коды предупреждений проверки: «Применить» они не блокируют.
@@ -1238,7 +1242,32 @@ func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catal
 		}
 		warnings = append(warnings, listWarns...)
 	}
+	if gerr == nil && configlayer.DesiredRouting(in.Sections).Managed {
+		issues = append(issues, forceProxyProblems(in, installed, groups.Items)...)
+	}
 	return issues, warnings
+}
+
+// forceProxyProblems — force_proxy_group_missing для каждого установленного ядра,
+// у которого есть входящие force-proxy*, а группа для них не найдена.
+func forceProxyProblems(in configlayer.Input, installed configlayer.InstalledKernels, groups []Group) []IssueView {
+	var out []IssueView
+	check := func(kernel, section string, has bool) {
+		if !has {
+			return
+		}
+		if _, ok := forceProxyTarget(in, groups, kernel); ok {
+			return
+		}
+		group := configlayer.DesiredCores(in.Sections)[section].ForceProxyGroup
+		if group == "" {
+			group = defaultProxyGroupName
+		}
+		out = append(out, IssueView{Code: issueForceProxyGroupMissing, Key: section, Params: map[string]string{"group": group}})
+	}
+	check(configlayer.KernelXray, configlayer.SectionXrayInbounds, installed.Xray && len(xrayForceProxyTags(in)) > 0)
+	check(configlayer.KernelMihomo, configlayer.SectionMihomoInbounds, installed.Mihomo && len(mihomoForceProxyNames(in.Sections)) > 0)
+	return out
 }
 
 // listProblems проверяет списки dat, на которые ссылаются включённые правила

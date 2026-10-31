@@ -118,7 +118,8 @@ const ISSUE_CODES = new Set([
   'list_not_found',
   'list_too_large',
   'cond_conflict',
-  'geodata_ref_remains'
+  'geodata_ref_remains',
+  'force_proxy_group_missing'
 ]);
 
 /**
