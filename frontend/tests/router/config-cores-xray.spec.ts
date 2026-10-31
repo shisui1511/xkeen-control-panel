@@ -461,6 +461,11 @@ test('cores: Xray входящие — закреплённые строки и 
       return;
     }
 
+    // объявление в полосе черновика считается по применённому состоянию и черновику: секция
+    // должна быть у панели уже сейчас. Взятие вместе с правкой порта в одном черновике его
+    // не даёт (Xray и так перезапускается xkeen -restart при любом «Применить»)
+    const appliedBefore =
+      (await page.getByTestId('section-card-xray-inbounds').getAttribute('data-owner')) === 'panel';
     await takeViaDialog(page, 'inbounds');
     await expect(page.getByTestId('section-form-xray-inbounds')).toBeVisible({
       timeout: T.action
@@ -486,9 +491,11 @@ test('cores: Xray входящие — закреплённые строки и 
     await port.fill(newPort);
     await port.blur();
     await expect(note).toBeVisible({ timeout: T.action });
-    await expect(
-      page.locator('[data-testid="draft-restart-note"][data-reason="port"]')
-    ).toBeVisible({ timeout: T.action });
+    if (appliedBefore) {
+      await expect(
+        page.locator('[data-testid="draft-restart-note"][data-kernel="xray"][data-reason="port"]')
+      ).toBeVisible({ timeout: T.action });
+    }
 
     // вернули записанное значение: объявление под полем исчезло
     await port.fill(oldPort);
