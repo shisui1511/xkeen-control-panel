@@ -46,7 +46,8 @@
  *    jqReason*, Reason* пакета geodata и коды незавершённого удаления) есть текст
  *    cfg.geo.reason_<код> в ru и en.
  *
- * 10. Секции ядер (план 147-04): интерфейсы configCores.ts совпадают по ключам с
+ * 10. Секции ядер (план 147-04): интерфейсы configCores.ts и Layer*-интерфейсы поля cores
+ *    в configLayer.ts (план 147-11) совпадают по ключам с
  *    coresContract.json; клиент подписан на draft и routing слоя (files и apply
  *    приходят в снимок) с дебаунсом 300 мс; configLayer.ts клиент не импортирует (нет
  *    цикла), а клиент не импортируется вне Config.svelte и components/config/ (при
@@ -1375,6 +1376,48 @@ for (const [type, spec] of Object.entries(coresContract)) {
     );
   }
 }
+
+// Снимок слоя (configLayer.ts) не импортирует configCores.ts, поэтому свои интерфейсы
+// поля cores сверяются с тем же контрактом напрямую (план 147-11): Layer* ↔ тип контракта
+const LAYER_CORES_TYPES = {
+  LayerCoresSnapshot: "CoresSnapshot",
+  LayerCoreSectionSnap: "CoreSectionSnap",
+  LayerRestartNote: "RestartNote",
+};
+for (const [layerType, contractType] of Object.entries(LAYER_CORES_TYPES)) {
+  const spec = coresContract[contractType];
+  const keys = interfaceKeys(layerTs, layerType);
+  if (!keys) {
+    errors.push(`${LAYER_TS}: нет интерфейса ${layerType} (снимок cores слоя)`);
+    continue;
+  }
+  if (!spec) {
+    errors.push(`${CORES_CONTRACT}: нет типа ${contractType} для ${layerType}`);
+    continue;
+  }
+  for (const k of spec.required) {
+    if (!keys.has(k)) errors.push(`${layerType}: нет обязательного ключа "${k}"`);
+    else if (keys.get(k))
+      errors.push(
+        `${layerType}: ключ "${k}" обязателен в контракте, но объявлен как необязательный`,
+      );
+  }
+  for (const k of spec.optional) {
+    if (!keys.has(k)) errors.push(`${layerType}: нет необязательного ключа "${k}"`);
+    else if (!keys.get(k))
+      errors.push(
+        `${layerType}: ключ "${k}" необязателен в контракте, но объявлен как обязательный`,
+      );
+  }
+  const allowed = new Set([...spec.required, ...spec.optional]);
+  for (const k of keys.keys()) {
+    if (!allowed.has(k)) errors.push(`${layerType}: лишний ключ "${k}" вне контракта`);
+  }
+}
+expect(
+  /cores:\s*LayerCoresSnapshot/.test(layerTs),
+  `${LAYER_TS}: LayerSnapshot не содержит поле cores: LayerCoresSnapshot`,
+);
 
 // События слоя и граница флага: клиент подписан на draft и routing (files и apply
 // приходят в снимок слоя) с дебаунсом 300 мс, собственного потока нет; обратного импорта
