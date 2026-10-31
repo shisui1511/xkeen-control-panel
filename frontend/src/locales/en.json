@@ -3831,6 +3831,7 @@
   "cfg.sec.owner_xkeen": "XKeen",
   "cfg.sec.owner_user": "User",
   "cfg.sec.owner_none": "No file",
+  "cfg.sec.owner_drift": "Mismatch",
   "cfg.sec.owner_pending": "Will be taken on “Apply”",
   "cfg.sec.dirty": "Changed",
   "cfg.sec.pinned": "Pinned",
