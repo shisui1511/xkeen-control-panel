@@ -23,6 +23,8 @@ import (
 // Возврат делается для всех ядер из State.Routing, а не только установленных:
 // файлы должны вернуться и без бинарника. Файл, имя которого пользователь уже
 // занял (release_conflict), не перезаписывается — остальное продолжается.
+// Так же возвращаются взятые секции Xray (State.Cores, 147-14): их исходные файлы
+// кладутся обратно из копий побайтно, владение снимается.
 // После выключения каталоги ядер такие же, как до взятия (D-04 из 144).
 //
 // Disable берёт те же замки, что и применение: занятое применение — ErrApplyBusy
@@ -72,9 +74,26 @@ func (l *Layer) Disable(ctx context.Context, commitFlag func() error) error {
 	// тот же план: операции возврата выполняются раньше удаления файлов панели.
 	if !st.Routing.isEmpty() {
 		ops := computeRoutingOps(RoutingDesired{V: routingSectionVersion}, st.Routing, InstalledKernels{Xray: true, Mihomo: true}, "", routingScans{}, l.opts.Now())
-		l.dropReleaseConflicts(ops)
 		plan.Routing = ops
 	}
+	// Взятые секции Xray (147-14, D-05) возвращаются в том же плане: исходные файлы
+	// из копий побайтно, владение секциями снимается целиком.
+	if !st.Cores.isEmpty() {
+		if plan.Routing == nil {
+			plan.Routing = &RoutingOps{Next: st.Routing.clone()}
+		}
+		release := map[string][]MovedFile{}
+		for _, id := range XraySectionIDs {
+			if cur := st.Cores.Xray[id]; cur != nil && len(cur.Moved) > 0 {
+				release[id] = append([]MovedFile(nil), cur.Moved...)
+			}
+		}
+		if len(release) > 0 {
+			plan.Routing.CoreRelease = release
+		}
+		plan.Routing.NextCores = &CoresState{}
+	}
+	l.dropReleaseConflicts(plan.Routing)
 
 	switch {
 	case len(plan.Files) > 0 || plan.Routing.hasXrayDisk() || plan.Routing.hasMihomoDisk():
@@ -86,6 +105,9 @@ func (l *Layer) Disable(ctx context.Context, commitFlag func() error) error {
 		// переносить было нечего): возвращать нечего, достаточно снять владение.
 		err := l.store.Update(func(st *State) error {
 			st.Routing = plan.Routing.Next.clone()
+			if plan.Routing.NextCores != nil {
+				st.Cores = plan.Routing.NextCores.clone()
+			}
 			return nil
 		})
 		if err != nil {
@@ -114,21 +136,42 @@ func (l *Layer) Disable(ctx context.Context, commitFlag func() error) error {
 // Xray уже занято (пользователь вернул файл сам, T-146-19): перезаписи нет, имя
 // попадает в лог без содержимого, остальное возвращается.
 func (l *Layer) dropReleaseConflicts(ops *RoutingOps) {
-	if ops == nil || len(ops.XrayRelease) == 0 {
+	if ops == nil {
 		return
 	}
-	keep := ops.XrayRelease[:0:0]
-	for _, mf := range ops.XrayRelease {
+	occupied := func(mf MovedFile) bool {
 		abs, err := l.opts.Roots.Abs(KernelXray, mf.Name)
-		if err == nil {
-			if _, statErr := os.Lstat(abs); statErr == nil {
-				log.Printf("[configlayer] выключение слоя: файл %s уже лежит в каталоге Xray, не перезаписывается", utils.SanitizeLogInput(mf.Name))
-				continue
+		if err != nil {
+			return false
+		}
+		if _, statErr := os.Lstat(abs); statErr == nil {
+			log.Printf("[configlayer] выключение слоя: файл %s уже лежит в каталоге Xray, не перезаписывается", utils.SanitizeLogInput(mf.Name))
+			return true
+		}
+		return false
+	}
+	if len(ops.XrayRelease) > 0 {
+		keep := ops.XrayRelease[:0:0]
+		for _, mf := range ops.XrayRelease {
+			if !occupied(mf) {
+				keep = append(keep, mf)
 			}
 		}
-		keep = append(keep, mf)
+		ops.XrayRelease = keep
 	}
-	ops.XrayRelease = keep
+	for id, files := range ops.CoreRelease {
+		keep := files[:0:0]
+		for _, mf := range files {
+			if !occupied(mf) {
+				keep = append(keep, mf)
+			}
+		}
+		if len(keep) == 0 {
+			delete(ops.CoreRelease, id)
+			continue
+		}
+		ops.CoreRelease[id] = keep
+	}
 }
 
 // moveManagedToBackup копирует файлы плана в набор с триггером "flag_off", удаляет их из
@@ -227,8 +270,14 @@ func (l *Layer) commitDiskPlan(ctx context.Context, plan Plan, trigger Trigger, 
 		rbErr := l.pipeline.rollback(set)
 		return errors.Join(err, rbErr)
 	}
-	_ = PruneBackups(l.opts.DataDir, BackupRetention, l.store.Snapshot().Routing.backupDirs()...)
+	_ = PruneBackups(l.opts.DataDir, BackupRetention, protectedBackupDirs(l.store.Snapshot())...)
 	return nil
+}
+
+// protectedBackupDirs — наборы копий, которые ротация не удаляет: на них
+// ссылаются владение маршрутизацией и секциями.
+func protectedBackupDirs(st State) []string {
+	return append(st.Routing.backupDirs(), st.Cores.backupDirs()...)
 }
 
 // Enable запускает сборку файлов после включения слоя (D-04): в фоне, из
