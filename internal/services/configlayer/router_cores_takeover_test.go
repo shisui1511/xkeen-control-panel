@@ -4,6 +4,7 @@ package configlayer
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -253,6 +254,138 @@ func TestRouterCoresTakeoverApplyAndRelease(t *testing.T) {
 	if st.Journal != nil {
 		t.Errorf("журнал не снят после возврата: %+v", st.Journal)
 	}
+
+	t.Run("все секции", func(t *testing.T) {
+		e := rtNewCoresEnv(t, rtCoAllFiles())
+		e.editSections(t, rtCoAllManaged(t, e))
+		res := e.apply(t)
+		if !res.OK || res.Code != ResultApplied {
+			t.Fatalf("взятие пяти секций: %+v", res)
+		}
+		// Проверка ядром (xray run -test на итоговом каталоге) прошла внутри
+		// конвейера; routing и исходящие панель не трогает.
+		e.assertFileIs(t, rtCoRoutingFile)
+		e.assertFileIs(t, rtCoOutboundFile)
+		for _, id := range XraySectionIDs {
+			e.assertAbsent(t, rtCoSourceOf[id])
+			if _, err := os.Stat(e.path(PanelXraySectionFile(id))); err != nil {
+				t.Errorf("файл панели секции %s не записан: %v", id, err)
+			}
+		}
+		st := e.layer.store.Snapshot()
+		dirs := map[string]bool{}
+		for _, id := range XraySectionIDs {
+			sec := st.Cores.Xray[id]
+			if sec == nil || len(sec.Moved) != 1 || sec.Moved[0].Name != rtCoSourceOf[id] {
+				t.Fatalf("State.Cores.Xray[%s]: %+v", id, sec)
+			}
+			if got := hashOf(movedCopyPath(sec.Moved[0])); got != e.hashes[rtCoSourceOf[id]] {
+				t.Errorf("копия %s в наборе не совпадает: %q", rtCoSourceOf[id], got)
+			}
+			dirs[sec.Moved[0].BackupDir] = true
+		}
+		if len(dirs) != 1 {
+			t.Errorf("файлы пяти секций лежат в %d наборах копий, ожидался один", len(dirs))
+		}
+
+		// Возврат одной секции (policy) не трогает остальные.
+		e.editSections(t, map[string]json.RawMessage{SectionXrayPolicy: rtCoreSection(t, CoreSection{Managed: false})})
+		res = e.apply(t)
+		if !res.OK || res.Code != ResultApplied {
+			t.Fatalf("возврат секции policy: %+v", res)
+		}
+		e.assertFileIs(t, rtCoSourceOf[xraySectionPolicy])
+		e.assertAbsent(t, PanelXrayPolicyFile)
+		for _, id := range []string{xraySectionLog, xraySectionDNS, xraySectionInbounds, xraySectionOther} {
+			e.assertAbsent(t, rtCoSourceOf[id])
+			if _, err := os.Stat(e.path(PanelXraySectionFile(id))); err != nil {
+				t.Errorf("файл панели секции %s пропал при возврате policy: %v", id, err)
+			}
+		}
+		if got := e.layer.store.Snapshot().Cores; len(got.Xray) != 4 || got.Xray[xraySectionPolicy] != nil {
+			t.Errorf("State.Cores после возврата policy: %+v", got.Xray)
+		}
+	})
+
+	t.Run("сбой записи", func(t *testing.T) {
+		e := rtNewCoresEnv(t, rtCoAllFiles())
+		before := rtDirSnapshot(t, e.xray)
+		e.editSections(t, rtCoAllManaged(t, e))
+
+		// Отказ записи одного из файлов панели: часть файлов панели уже записана,
+		// откат убирает их и возвращает перенесённые файлы.
+		real := e.layer.pipeline.d.WriteFile
+		e.layer.pipeline.d.WriteFile = func(path string, data []byte) error {
+			if filepath.Base(path) == PanelXrayPolicyFile {
+				return errors.New("отказ записи файла панели")
+			}
+			return real(path, data)
+		}
+		res := e.apply(t)
+		if res.OK || res.Code != ResultWriteFailed || !res.RolledBack {
+			t.Fatalf("итог при сбое записи: %+v", res)
+		}
+		e.assertKept(t, before)
+
+		// После отката состояние пригодно: без отказа то же применение проходит.
+		e.layer.pipeline.d.WriteFile = real
+		res = e.apply(t)
+		if !res.OK || res.Code != ResultApplied {
+			t.Fatalf("взятие после отката: %+v", res)
+		}
+		for _, id := range XraySectionIDs {
+			e.assertAbsent(t, rtCoSourceOf[id])
+		}
+		if got := len(e.layer.store.Snapshot().Cores.Xray); got != len(XraySectionIDs) {
+			t.Errorf("взято секций %d, ожидалось %d", got, len(XraySectionIDs))
+		}
+	})
+}
+
+const (
+	rtCoLogFile      = "01_log.json"
+	rtCoInboundsFile = "03_inbounds.json"
+	rtCoRoutingFile  = "05_routing.json"
+	rtCoPolicyFile   = "06_policy.json"
+	rtCoStatsFile    = "07_stats.json"
+)
+
+// rtCoSourceOf — чужой «чистый» файл каждой секции в раскладке rtCoAllFiles.
+var rtCoSourceOf = map[string]string{
+	xraySectionLog:      rtCoLogFile,
+	xraySectionDNS:      rtCoDNSFile,
+	xraySectionInbounds: rtCoInboundsFile,
+	xraySectionPolicy:   rtCoPolicyFile,
+	xraySectionOther:    rtCoStatsFile,
+}
+
+// rtCoAllFiles — каталог Xray с чистым файлом на каждую из пяти секций и файлами
+// routing и исходящих, которые панель не трогает.
+func rtCoAllFiles() map[string]string {
+	return map[string]string{
+		rtCoLogFile: `{"log": {"loglevel": "warning"}}` + "\n",
+		rtCoDNSFile: rtCoDNSBody,
+		rtCoInboundsFile: `{"inbounds": [` +
+			`{"tag": "redirect", "port": 61219, "protocol": "dokodemo-door", ` +
+			`"settings": {"network": "tcp", "followRedirect": true}, "sniffing": {"enabled": true, "destOverride": ["http", "tls"]}}, ` +
+			`{"tag": "tproxy", "port": 61220, "protocol": "dokodemo-door", ` +
+			`"settings": {"network": "tcp,udp", "followRedirect": true}, "streamSettings": {"sockopt": {"tproxy": "tproxy"}}, ` +
+			`"sniffing": {"enabled": true, "destOverride": ["http", "tls"]}}]}` + "\n",
+		rtCoRoutingFile:  `{"routing": {"rules": [{"type": "field", "network": "tcp,udp", "outboundTag": "direct"}]}}` + "\n",
+		rtCoPolicyFile:   `{"policy": {"levels": {"0": {"handshake": 4}}}}` + "\n",
+		rtCoStatsFile:    `{"stats": {}}` + "\n",
+		rtCoOutboundFile: rtCoOutboundBody,
+	}
+}
+
+// rtCoAllManaged — правка черновика «Управлять в панели» для всех пяти секций.
+func rtCoAllManaged(t *testing.T, e *rtCoresEnv) map[string]json.RawMessage {
+	t.Helper()
+	out := map[string]json.RawMessage{}
+	for _, id := range XraySectionIDs {
+		out[CoreSectionName(KernelXray, id)] = e.takeDraft(t, id, true)
+	}
+	return out
 }
 
 // rtHasIssue — в итоге есть проблема с кодом code по секции key и файлом file.
