@@ -150,6 +150,10 @@ type State struct {
 	// Routing — фактическое владение маршрутизацией: меняется только применением
 	// (желаемое — секция routing черновика). Поле необязательное, схема прежняя.
 	Routing RoutingState `json:"routing"`
+	// Cores — фактическое владение секциями ядер (Xray): меняется только
+	// применением (желаемое — секции xray_* черновика). Поле необязательное,
+	// схема прежняя (U-07: миграций нет).
+	Cores CoresState `json:"cores"`
 }
 
 // emptyState — чистое состояние текущей схемы.
@@ -169,6 +173,7 @@ func (st State) clone() State {
 	out.Applied = st.Applied.Clone()
 	out.Live = st.Live.Clone()
 	out.Routing = st.Routing.clone()
+	out.Cores = st.Cores.clone()
 	out.Manifest = make(map[string]ManifestEntry, len(st.Manifest))
 	for k, v := range st.Manifest {
 		out.Manifest[k] = v

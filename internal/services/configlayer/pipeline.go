@@ -405,6 +405,10 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		// идёт на итоговой раскладке, запись и откат общие.
 		plan.Routing, err = p.planRouting(src, snap.Routing, installed, req)
 	}
+	if err == nil {
+		// Секции Xray (взятие и возврат файлов, D-01) идут теми же операциями.
+		plan.Routing, err = p.planCores(src, snap.Cores, plan.Routing, installed, req)
+	}
 	if err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
 		res := ResultView{Code: ResultBuildFailed, Message: err.Error()}
@@ -474,7 +478,8 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		return p.finish(p.rollbackAfterCommitFailure(ctx, out.Set, views, err))
 	}
 	// Ротация копий — после успешного применения; сбой уборки применение не отменяет.
-	_ = PruneBackups(p.d.DataDir, BackupRetention, p.d.Store.Snapshot().Routing.backupDirs()...)
+	kept := p.d.Store.Snapshot()
+	_ = PruneBackups(p.d.DataDir, BackupRetention, append(kept.Routing.backupDirs(), kept.Cores.backupDirs()...)...)
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
 }
 
@@ -658,6 +663,9 @@ func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest, used I
 		}
 		if plan.Routing != nil {
 			st.Routing = plan.Routing.Next.clone()
+			if plan.Routing.NextCores != nil {
+				st.Cores = plan.Routing.NextCores.clone()
+			}
 		}
 		// Живые данные фиксируются в той же записи, что и манифест (RESEARCH
 		// Pitfall 3): отказ хука отменяет и манифест.
