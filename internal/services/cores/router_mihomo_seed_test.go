@@ -140,6 +140,59 @@ func rtMihomoSeedOrdered(t *testing.T, what, text string, items ...string) {
 	}
 }
 
+// rtMihomoSeedFull — прежний профиль со всеми видами ключей: якорь и ключ
+// слияния, hosts, ntp, sub-rules, experimental, dns с nameserver-policy,
+// listeners redir, tun, подключи profile, закреплённые routing-mark и сокет.
+const rtMihomoSeedFull = "x-common: &c\n" +
+	"  udp: true\n" +
+	"mixed-port: 7890\n" +
+	"allow-lan: false\n" +
+	"mode: rule\n" +
+	"log-level: info\n" +
+	"routing-mark: 9\n" +
+	"external-controller-unix: /tmp/x.sock\n" +
+	"profile:\n" +
+	"  store-selected: false\n" +
+	"  store-fake-ip: true\n" +
+	"hosts:\n" +
+	"  zz.example.test: 127.0.0.1\n" +
+	"  aa.example.test: 127.0.0.2\n" +
+	"  mm.example.test: 127.0.0.3\n" +
+	"ntp:\n" +
+	"  enable: true\n" +
+	"  server: time.example.test\n" +
+	"sub-rules:\n" +
+	"  SUB:\n" +
+	"    - MATCH,DIRECT\n" +
+	"experimental:\n" +
+	"  quic-go-disable-ecn: true\n" +
+	"dns:\n" +
+	"  enable: true\n" +
+	"  nameserver:\n" +
+	"    - 127.0.0.1\n" +
+	"  nameserver-policy:\n" +
+	"    \"+.zz.example.test\": 127.0.0.1\n" +
+	"    \"+.aa.example.test\": 127.0.0.2\n" +
+	"    \"+.mm.example.test\": 127.0.0.3\n" +
+	"listeners:\n" +
+	"  - <<: *c\n" +
+	"    name: in-redir\n" +
+	"    type: redir\n" +
+	"    port: 7100\n" +
+	"  - name: force-proxy\n" +
+	"    type: redir\n" +
+	"    port: 7101\n" +
+	"tun:\n" +
+	"  enable: false\n" +
+	"  stack: gvisor\n" +
+	"proxies: []\n" +
+	"proxy-groups: []\n" +
+	"rules:\n" +
+	"  - MATCH,DIRECT\n"
+
+// rtMihomoSeedAll — все пять секций Mihomo под управлением.
+var rtMihomoSeedAll = []string{"main", "dns", "inbounds", "sniffer", "other"}
+
 func TestRouterCoresMihomoSeedRoundTrip(t *testing.T) {
 	t.Run("hosts в Прочих ключах в прежнем порядке", func(t *testing.T) {
 		seeded, err := SeedMihomo([]byte(rtMihomoSeedBasic), configlayer.MihomoPorts{})
@@ -158,6 +211,98 @@ func TestRouterCoresMihomoSeedRoundTrip(t *testing.T) {
 		profile := rtMihomoSeedProfile(t, rtMihomoSeedSections(t, seeded, "other"), configlayer.MihomoPorts{})
 		rtMihomoSeedOrdered(t, "hosts в профиле панели", profile,
 			"zz.example.test", "aa.example.test", "mm.example.test")
+		rtMihomoSeedKernelCheck(t, profile)
+	})
+	t.Run("все ключи по секциям, закреплённое поверх", func(t *testing.T) {
+		seeded, err := SeedMihomo([]byte(rtMihomoSeedFull), configlayer.MihomoPorts{Redir: 7100, TProxy: 7101})
+		if err != nil {
+			t.Fatalf("SeedMihomo: %v", err)
+		}
+		mainObj := rtMihomoSeedObject(t, seeded["main"])
+		for _, k := range []string{"redir-port", "tproxy-port", "routing-mark", "external-controller-unix"} {
+			if _, ok := mainObj.Get(k); ok {
+				t.Fatalf("в «Основном» не должно быть %s (listeners redir есть, закреплённое ведёт панель)", k)
+			}
+		}
+		if v, _ := mainObj.Get("mixed-port"); string(v) != "7890" {
+			t.Fatalf("mixed-port потерян: %s", seeded["main"])
+		}
+		prof, ok := mainObj.Get("profile")
+		if !ok {
+			t.Fatalf("подключи profile не перенесены в «Основное»: %s", seeded["main"])
+		}
+		po := rtMihomoSeedObject(t, prof)
+		if _, ok := po.Get("store-selected"); ok {
+			t.Fatalf("store-selected перенесён в «Основное»: %s", prof)
+		}
+		if v, _ := po.Get("store-fake-ip"); string(v) != "true" {
+			t.Fatalf("store-fake-ip потерян: %s", prof)
+		}
+
+		other := rtMihomoSeedObject(t, seeded["other"])
+		if got := strings.Join(other.Keys(), ","); got != "x-common,hosts,ntp,sub-rules,experimental" {
+			t.Fatalf("«Прочие ключи»: %s, ждали x-common,hosts,ntp,sub-rules,experimental в порядке профиля", got)
+		}
+
+		sections := rtMihomoSeedSections(t, seeded, rtMihomoSeedAll...)
+		profile := rtMihomoSeedProfile(t, sections, configlayer.MihomoPorts{Redir: 7100, TProxy: 7101})
+		for _, want := range []string{"routing-mark: 255", "external-controller-unix: /opt/var/run/mihomo.sock", "store-selected: true", "store-fake-ip: true"} {
+			if !strings.Contains(profile, want) {
+				t.Fatalf("в профиле панели нет %q:\n%s", want, profile)
+			}
+		}
+		for _, bad := range []string{"routing-mark: 9", "/tmp/x.sock", "store-selected: false"} {
+			if strings.Contains(profile, bad) {
+				t.Fatalf("в профиле панели осталось прежнее закреплённое %q:\n%s", bad, profile)
+			}
+		}
+		rtMihomoSeedOrdered(t, "nameserver-policy", profile, "+.zz.example.test", "+.aa.example.test", "+.mm.example.test")
+		rtMihomoSeedOrdered(t, "hosts", profile, "\n  zz.example.test: 127.0.0.1", "\n  aa.example.test: 127.0.0.2", "\n  mm.example.test: 127.0.0.3")
+
+		// Ключ слияния раскрыт: listener in-redir получил udp из якоря.
+		value, _, err := ParseYAMLText(profile)
+		if err != nil {
+			t.Fatalf("профиль панели не разбирается: %v", err)
+		}
+		top := rtMihomoSeedObject(t, value)
+		lraw, _ := top.Get("listeners")
+		var listeners []map[string]any
+		if err := json.Unmarshal(lraw, &listeners); err != nil || len(listeners) != 2 {
+			t.Fatalf("listeners профиля панели: %v: %s", err, lraw)
+		}
+		if listeners[0]["name"] != "in-redir" || listeners[0]["udp"] != true {
+			t.Fatalf("listener in-redir не получил udp из якоря: %v", listeners[0])
+		}
+		if names := MihomoListenerNames(sections); strings.Join(names, ",") != "in-redir,force-proxy" {
+			t.Fatalf("MihomoListenerNames: %v", names)
+		}
+		rtMihomoSeedKernelCheck(t, profile)
+	})
+
+	t.Run("нет прежнего профиля: все секции из пресетов", func(t *testing.T) {
+		ports := configlayer.MihomoPorts{Redir: 7000, TProxy: 7001}
+		seeded, err := SeedMihomo(nil, ports)
+		if err != nil {
+			t.Fatalf("SeedMihomo(nil): %v", err)
+		}
+		for _, id := range rtMihomoSeedAll {
+			if string(seeded[id]) != string(MihomoPreset(id, ports)) {
+				t.Fatalf("секция %s не равна пресету: %s", id, seeded[id])
+			}
+		}
+		if v, _ := rtMihomoSeedObject(t, seeded["main"]).Get("redir-port"); string(v) != "7000" {
+			t.Fatalf("redir-port пресета: %s", seeded["main"])
+		}
+		rtMihomoSeedKernelCheck(t, rtMihomoSeedProfile(t, rtMihomoSeedSections(t, seeded, rtMihomoSeedAll...), ports))
+	})
+
+	t.Run("состояние без секций: пять частей из пресетов", func(t *testing.T) {
+		profile := rtMihomoSeedProfile(t, configlayer.Sections{}, configlayer.MihomoPorts{})
+		for _, want := range []string{"redir-port: 5000", "tproxy-port: 5001", "routing-mark: 255", "store-selected: true", "sniffer:", "dns:"} {
+			if !strings.Contains(profile, want) {
+				t.Fatalf("в профиле из пресетов нет %q:\n%s", want, profile)
+			}
+		}
 		rtMihomoSeedKernelCheck(t, profile)
 	})
 }
