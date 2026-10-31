@@ -23,12 +23,17 @@
 # запущен и «xcp -v» совпал, failure — нет; при сбое связи (код цели 3) и сбое подготовки
 # стенда (код цели 2: нет init-скрипта, setup.sh --init-script, scp) статуса нет.
 # Установка из run.sh статус установки не ставит: там статус смоука публикует run.sh.
+#
+# Уборка build/ (scripts/router/tidy-lib.sh): --release оставляет в кэше релизов 3 новейших тега и
+# разворачиваемый, одиночный запуск ротирует отчёты; сборки ветки ротирует make router-<арх>.
 
 set -eu
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib.sh"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/tidy-lib.sh"
 
 BIN_PATH=/opt/sbin/xcp
 INIT_SCRIPT=/opt/etc/init.d/S99xcp
@@ -84,7 +89,7 @@ rt_lock
 # Одиночный запуск (отчёт не задан родителем): статус установки релиза публикует сам deploy.sh.
 STANDALONE=0
 [ -n "${RT_REPORT:-}" ] || STANDALONE=1
-[ -n "${RT_REPORT:-}" ] || rt_report_init
+rt_report_use
 
 # --- что ставим -------------------------------------------------------------
 
@@ -137,6 +142,8 @@ if [ "$RELEASE" = 1 ]; then
       exit 1
     fi
   done
+  # Разворачиваемый тег уже в кэше и защищён; сбой ротации установку не прерывает.
+  ( tidy_rotate_releases "$(rt_repo_root)" "$RELEASE_TAG" ) || echo "deploy: предупреждение: ротация кэша релизов не удалась" >&2
   bin_for() {
     printf '%s\n' "$REL_DIR/xcp_${RELEASE_TAG}_$1"
   }
@@ -144,7 +151,7 @@ if [ "$RELEASE" = 1 ]; then
   git show "$RELEASE_TAG:scripts/setup.sh" >"$SETUP_SRC" 2>/dev/null || : >"$SETUP_SRC"
 else
   # version.sh не считает версию от пре-релизных тегов, поэтому номер пре-релиза на HEAD
-  # берётся из тега vX.Y.Z-beta.N; XCP_VERSION подхватят и make, и сборка фронта. Явная
+  # берётся из тега vX.Y.Z-beta.N; XCP_VERSION подхватит make. Явная
   # XCP_VERSION (проход план-сессии под номером вышедшего релиза) важнее тега на HEAD.
   BETA_TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' | sort -V | tail -1 || true)
   if [ -z "${XCP_VERSION:-}" ] && [ -n "$BETA_TAG" ] && [ -z "$(git status --porcelain --untracked-files=no)" ]; then
@@ -337,5 +344,10 @@ if [ "$STANDALONE" = 1 ] && [ "$RELEASE" = 1 ]; then
       echo "deploy[$t]: предупреждение: статус установки не отправлен (ошибка отправки)" >&2
     fi
   done
+fi
+# Одиночный запуск создал свой отчёт и держит блокировку rt_lock; при родительском run.sh
+# отчёты ротирует он. Сбой ротации код выхода не меняет.
+if [ "$STANDALONE" = 1 ]; then
+  ( tidy_rotate_reports "$(rt_repo_root)" ) || echo "deploy: предупреждение: ротация отчётов не удалась" >&2
 fi
 exit "$OVERALL"

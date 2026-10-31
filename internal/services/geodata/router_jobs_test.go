@@ -293,6 +293,7 @@ func TestRouterGeodataLockedWrite(t *testing.T) {
 	defer cancel()
 
 	// Сервер: проверка источника (HEAD) стоит на воротах, пока тест не возьмёт замок.
+	rtAllowPrivate(t)
 	data, datKind := rtProbeDat(t)
 	started := make(chan struct{}, 1)
 	gate := make(chan struct{})

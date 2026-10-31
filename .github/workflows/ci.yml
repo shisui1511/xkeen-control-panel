@@ -309,5 +309,8 @@ jobs:
       - name: Check router spec kinds
         run: node scripts/check-router-kinds.js
 
+      - name: Check report paths
+        run: node scripts/check-report-paths.js
+
       - name: Check release versions in texts
         run: node scripts/check-release-versions.js

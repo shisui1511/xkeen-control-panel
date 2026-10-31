@@ -26,7 +26,8 @@
 #   RT_GO_RUN     регэксп -test.run (по умолчанию ^TestRouter): отладка одного теста и вторая
 #                 ветвь набора changed (только тесты с меткой ядра, RT_GO_CORE_RUN выбора);
 #                 одинарная кавычка и перевод строки недопустимы (строка FAIL go:setup)
-#   RT_REPORT     каталог отчёта (если не задан, создаётся новый)
+#   RT_REPORT     каталог отчёта (если не задан, создаётся новый); относительный — от корня
+#                 рабочей копии, вне build/router — код 2
 #   ROUTERS       игнорируется: цель задана первым аргументом
 #
 # Артефакты этапа (go-<пакет>.jsonl, .build.log, .stderr, .parsed, .hwm) лежат в
@@ -52,7 +53,7 @@ cd "$(rt_repo_root)"
 ROUTERS=$ID
 export ROUTERS
 rt_load_targets
-[ -n "${RT_REPORT:-}" ] || rt_report_init
+rt_report_use
 mkdir -p "$RT_REPORT/$ID"
 ART="$RT_REPORT/$ID/${CORE:-unknown}"
 mkdir -p "$ART"
