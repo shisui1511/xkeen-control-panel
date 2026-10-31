@@ -573,16 +573,12 @@ func (s *Service) setManaged(rev int64, managed bool) (configlayer.DraftEvent, e
 			}
 			sections[RulesSection] = rules
 		}
-		for _, seed := range []func(configlayer.StateView) (map[string]json.RawMessage, error){
-			s.seedMihomoSections, s.seedProbeFromForeign,
-		} {
-			seeded, err := seed(st)
-			if err != nil {
-				return nil, err
-			}
-			for name, v := range seeded {
-				sections[name] = v
-			}
+		seeded, err := s.takeSeeds(st)
+		if err != nil {
+			return nil, err
+		}
+		for name, v := range seeded {
+			sections[name] = v
 		}
 		return sections, nil
 	})

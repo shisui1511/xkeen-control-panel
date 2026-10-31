@@ -17,6 +17,25 @@ import (
 // маршрутизацию. Автовзятие конвейера (установка ядра, включение слоя) идёт мимо
 // сервиса и ничего не переносит: профиль без секций собирается из пресетов.
 
+// takeSeeds собирает секции, которые взятие маршрутизации переносит из прежней
+// конфигурации: секции Mihomo и пробы. Его зовут оба пути взятия: Take и
+// TakeWithPreset.
+func (s *Service) takeSeeds(st configlayer.StateView) (map[string]json.RawMessage, error) {
+	out := map[string]json.RawMessage{}
+	for _, seed := range []func(configlayer.StateView) (map[string]json.RawMessage, error){
+		s.seedMihomoSections, s.seedProbeFromForeign,
+	} {
+		seeded, err := seed(st)
+		if err != nil {
+			return nil, err
+		}
+		for name, v := range seeded {
+			out[name] = v
+		}
+	}
+	return out, nil
+}
+
 // mihomoDraftManaged сообщает, что в черновике есть хотя бы одна секция Mihomo
 // под управлением.
 func mihomoDraftManaged(draft configlayer.Sections) bool {
