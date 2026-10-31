@@ -311,3 +311,113 @@ test('cores: Xray DNS — серверы списком, сложный серв
     else await writeConfig(page, DNS_FILE, original);
   }
 });
+
+// --- «Лог» и «Политики» ---------------------------------------------------------------------
+
+/** Открывает раскрытый блок «Дополнительно» секции и возвращает его поле. */
+async function openAdvanced(page: Page, id: string) {
+  const block = page.getByTestId(`section-advanced-block-xray-${id}`);
+  await expect(block).toBeVisible({ timeout: T.action });
+  if ((await block.getAttribute('open')) === null) await block.locator('summary').click();
+  const area = page.getByTestId(`section-advanced-xray-${id}`);
+  await expect(area).toBeVisible({ timeout: T.action });
+  return area;
+}
+
+test('cores: Xray лог и политики — поля вне формы и закреплённые значения', async ({ page }) => {
+  test.setTimeout(T.save * 4);
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  const before = await xrayView(page);
+  test.skip(!before.installed, 'Xray не установлен');
+  for (const id of ['log', 'policy']) {
+    const s = before.sections.find((x) => x.id === id);
+    test.skip(s === undefined || s.blocked !== '', `секция ${id} не берётся`);
+  }
+  await resetDraft(page);
+
+  try {
+    // «Лог»: ключ вне формы переживает правку поля формы
+    await openSection(page, 'log');
+    await takeViaDialog(page, 'log');
+    await expect(page.getByTestId('section-form-xray-log')).toBeVisible({ timeout: T.action });
+    const advanced = await openAdvanced(page, 'log');
+    await advanced.fill('{\n  "maskAddress": "quarter"\n}');
+    await advanced.blur();
+    await expect
+      .poll(async () => inner((await sectionOf(page, 'log'))?.value, 'log').maskAddress, {
+        timeout: T.action
+      })
+      .toBe('quarter');
+
+    const access = '/opt/var/log/xray/access.log';
+    const field = page.getByTestId('section-field-xray-log-access');
+    await field.fill(access);
+    await field.blur();
+    await expect
+      .poll(
+        async () => {
+          const log = inner((await sectionOf(page, 'log'))?.value, 'log');
+          return log.access === access && log.maskAddress === 'quarter';
+        },
+        { timeout: T.action }
+      )
+      .toBe(true);
+    // поле формы не дублируется в «Дополнительно»
+    expect(await advanced.inputValue()).not.toContain('"access"');
+
+    // «Политики»: закреплённые счётчики видны, но не правятся
+    await openSection(page, 'policy');
+    await takeViaDialog(page, 'policy');
+    const pinned = page.getByTestId('section-pinned-xray-policy');
+    await expect(pinned).toBeVisible({ timeout: T.action });
+    const summary = pinned.locator('summary');
+    if ((await summary.count()) > 0) await summary.click();
+    await expect(pinned.locator('.pv-row')).toHaveCount(4);
+    await expect(pinned.locator('.pv-badge')).toHaveCount(4);
+    for (const key of [
+      'statsInboundUplink',
+      'statsInboundDownlink',
+      'statsOutboundUplink',
+      'statsOutboundDownlink'
+    ]) {
+      await expect(pinned).toContainText(`system.${key}`);
+    }
+    const counters = inner((await sectionOf(page, 'policy'))?.value, 'policy').system;
+
+    const handshake = page.getByTestId('section-field-xray-policy-levels-0-handshake');
+    await handshake.fill('5');
+    await handshake.blur();
+    await expect
+      .poll(
+        async () => {
+          const levels = inner((await sectionOf(page, 'policy'))?.value, 'policy').levels as
+            Record<string, { handshake?: number }> | undefined;
+          return levels?.['0']?.handshake;
+        },
+        { timeout: T.action }
+      )
+      .toBe(5);
+    // правка поля формы закреплённые счётчики не трогает
+    expect(inner((await sectionOf(page, 'policy'))?.value, 'policy').system).toEqual(counters);
+
+    // неверное значение: ошибка под полем, в черновик ничего не уходит
+    const revision = (await layerProbe(page)).revision;
+    await handshake.fill('-1');
+    await handshake.blur();
+    await expect(handshake).toHaveAttribute('aria-invalid', 'true');
+    await expect(handshake).toHaveClass(/input-error/);
+    const describedBy = await handshake.getAttribute('aria-describedby');
+    expect(describedBy, 'ошибка связана с полем').toBeTruthy();
+    await expect(page.locator(`[id="${describedBy}"]`)).toBeVisible();
+    await page.waitForTimeout(1000);
+    expect((await layerProbe(page)).revision, 'неверное значение не меняет черновик').toBe(
+      revision
+    );
+
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});
