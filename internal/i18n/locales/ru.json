@@ -48,6 +48,7 @@
   "mihomo.not_running": "Mihomo не запущен",
   "mihomo.api_error": "Ошибка API Mihomo",
   "mihomo.api_not_configured": "Mihomo API не настроен",
+  "xray.api_managed": "Блок API Xray ведёт панель: мониторинг включается и выключается вместе с маршрутизацией в разделе «Конфигурация».",
 
   "update.check_failed": "Ошибка проверки обновлений",
   "update.download_failed": "Ошибка загрузки",

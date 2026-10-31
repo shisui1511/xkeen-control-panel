@@ -251,7 +251,7 @@ func TLSPing(dest string, serverName string, alpn []string, insecure bool) (*TLS
 type XrayAPIFragmentInfo struct {
 	// Path is the full path to the file containing the API inbound, or the recommended path if none exists.
 	Path string
-	// APIPresent indicates whether an inbound with tag "api" was found.
+	// APIPresent indicates whether a top-level "api" object was found.
 	APIPresent bool
 	// FileExists indicates whether the file at Path exists on disk.
 	FileExists bool
@@ -262,8 +262,10 @@ type XrayAPIFragmentInfo struct {
 }
 
 // FindXrayAPIFragment scans the given Xray config directory to find which JSON fragment
-// contains the "api" inbound. If not found, it returns 00_api.json for modular deployments
-// or config.json for monolithic deployments.
+// holds the top-level "api" object. Xray merges fragments in name order and the later
+// file wins as a whole, so among several files with "api" the last one by name is
+// returned. Comments (JSONC) are stripped before parsing. If no file has the key, it
+// returns 00_api.json for modular deployments or config.json for monolithic ones.
 func FindXrayAPIFragment(configDir string) XrayAPIFragmentInfo {
 	if configDir == "" {
 		return XrayAPIFragmentInfo{Path: "config.json"}
@@ -308,7 +310,8 @@ func FindXrayAPIFragment(configDir string) XrayAPIFragmentInfo {
 
 	isModular := len(jsonFiles) > 1 || (len(jsonFiles) == 1 && !hasConfigJSON)
 
-	// Scan all JSON files to see if any already contains inbound with tag "api"
+	// Scan all JSON files for the top-level "api" object; the last one by name wins.
+	apiPath := ""
 	for _, name := range jsonFiles {
 		filePath := filepath.Join(configDir, name)
 		data, readErr := os.ReadFile(filePath)
@@ -316,23 +319,20 @@ func FindXrayAPIFragment(configDir string) XrayAPIFragmentInfo {
 			continue
 		}
 		var root map[string]interface{}
-		if json.Unmarshal(data, &root) != nil || root == nil {
+		if json.Unmarshal([]byte(StripJSONComments(string(data))), &root) != nil || root == nil {
 			continue
 		}
-		if inbs, ok := root["inbounds"].([]interface{}); ok {
-			for _, inb := range inbs {
-				if m, ok := inb.(map[string]interface{}); ok {
-					if tag, _ := m["tag"].(string); tag == "api" {
-						return XrayAPIFragmentInfo{
-							Path:       filePath,
-							APIPresent: true,
-							FileExists: true,
-							IsModular:  isModular,
-							HasAnyJSON: true,
-						}
-					}
-				}
-			}
+		if _, ok := root["api"].(map[string]interface{}); ok {
+			apiPath = filePath
+		}
+	}
+	if apiPath != "" {
+		return XrayAPIFragmentInfo{
+			Path:       apiPath,
+			APIPresent: true,
+			FileExists: true,
+			IsModular:  isModular,
+			HasAnyJSON: true,
 		}
 	}
 
