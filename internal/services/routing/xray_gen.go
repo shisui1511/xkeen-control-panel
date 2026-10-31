@@ -28,6 +28,8 @@ const (
 	xrayRoutingFile = "99_xcp-routing.json"
 	// xrayObservatoryFile — burstObservatory; файл есть только при balancer.
 	xrayObservatoryFile = "99_xcp-observatory.json"
+	// defaultXrayAPIPort — порт API Xray, когда настройка панели не задана.
+	defaultXrayAPIPort = 10085
 )
 
 // Теги исходящих панели в Xray.
@@ -169,6 +171,13 @@ type xrayBuild struct {
 	// autoOK и fallbackOK — режимы «авто» и «резерв» доступны на версии Xray.
 	autoOK, fallbackOK bool
 	apiInbound         bool
+	// foreignAPI — ключ api уже есть в чужих файлах configs/ (у ключа один
+	// владелец, файл api панель не пишет); foreignObservatory — в чужих файлах
+	// есть observatory или burstObservatory (ObservatoryService без наблюдения
+	// Xray не стартует); apiOK — версия Xray умеет api.listen
+	// (FeatureXrayHotSwapAPI); apiPort — порт API из настроек панели.
+	foreignAPI, foreignObservatory, apiOK bool
+	apiPort                               int
 
 	byID      map[string]*Group
 	nodeByRef map[string]sources.CatalogNode
@@ -442,7 +451,41 @@ func (b *xrayBuild) build() ([]configlayer.GeneratedFile, error) {
 			Kernel: configlayer.KernelXray, RelPath: xrayObservatoryFile, Kind: configlayer.KindXrayJSON, Content: obsJSON,
 		})
 	}
+	if !b.foreignAPI && b.apiOK {
+		apiJSON, err := b.apiFile(len(balancers) > 0)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, configlayer.GeneratedFile{
+			Kernel: configlayer.KernelXray, RelPath: configlayer.PanelXrayAPIFile, Kind: configlayer.KindXrayJSON, Content: apiJSON,
+		})
+	}
 	return files, nil
+}
+
+// apiFile — блок api панели (143 Q5): api.listen на loopback и нужные services,
+// stats {} для счётчиков. Без входящего dokodemo-door, правила api, policy и
+// routing: замена объекта целиком стёрла бы ключи чужих файлов. ObservatoryService
+// входит, только если наблюдение есть в итоговой раскладке: панель пишет файл
+// наблюдения или он лежит в чужих файлах.
+func (b *xrayBuild) apiFile(ownObservatory bool) ([]byte, error) {
+	services := []string{"HandlerService", "LoggerService", "RoutingService", "StatsService"}
+	if ownObservatory || b.foreignObservatory {
+		services = append(services, "ObservatoryService")
+	}
+	sort.Strings(services)
+	port := b.apiPort
+	if port <= 0 {
+		port = defaultXrayAPIPort
+	}
+	return xrayJSON(map[string]any{
+		"api": map[string]any{
+			"tag":      "api",
+			"listen":   "127.0.0.1:" + strconv.Itoa(port),
+			"services": services,
+		},
+		"stats": map[string]any{},
+	})
 }
 
 // pingConfig собирает pingConfig из настроек проб: поля формы, затем остальные
@@ -528,6 +571,16 @@ func (s *Service) xrayModeAvailable(f configlayer.Feature) bool {
 	return configlayer.FeatureAvailable(configlayer.KernelXray, s.d.KernelVersion(configlayer.KernelXray), f) != configlayer.Unavailable
 }
 
+// xrayAPIPort — порт API Xray из настроек панели.
+func (s *Service) xrayAPIPort() int {
+	if s.d.XrayAPIPort != nil {
+		if p := s.d.XrayAPIPort(); p > 0 {
+			return p
+		}
+	}
+	return defaultXrayAPIPort
+}
+
 // liveSelection читает Live[selection]: ID группы → участник. Порча живых данных
 // выбор не отменяет, группы просто выбирают по умолчанию.
 func liveSelection(live configlayer.Sections) map[string]string {
@@ -598,11 +651,15 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 
 	autoOK := s.xrayModeAvailable(configlayer.FeatureXrayAutoGroup)
 	fallbackOK := s.xrayModeAvailable(configlayer.FeatureXrayFallbackGroup)
+	apiOK := s.xrayModeAvailable(configlayer.FeatureXrayHotSwapAPI)
+	apiPort := s.xrayAPIPort()
 
 	parts := []string{
 		xrayGenID, string(in.Mode), s.d.GOARCH,
 		strconv.FormatBool(autoOK), strconv.FormatBool(fallbackOK),
 		strconv.FormatBool(in.Routing.XrayAPIInbound),
+		strconv.FormatBool(in.Routing.XrayForeignAPI), strconv.FormatBool(in.Routing.XrayObservatory),
+		strconv.FormatBool(apiOK), strconv.Itoa(apiPort),
 		string(in.Sections[GroupsSection]), string(in.Sections[RulesSection]), string(in.Sections[ProbeSection]),
 		string(in.Live[LiveKeySelection]),
 	}
@@ -618,6 +675,8 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 		groups: groups.Items, rules: rules, probe: probe, catalog: cat.Xray,
 		live: liveSelection(in.Live), autoOK: autoOK, fallbackOK: fallbackOK,
 		apiInbound: in.Routing.XrayAPIInbound,
+		foreignAPI: in.Routing.XrayForeignAPI, foreignObservatory: in.Routing.XrayObservatory,
+		apiOK: apiOK, apiPort: apiPort,
 	})
 	files, err := b.build()
 	if err != nil {

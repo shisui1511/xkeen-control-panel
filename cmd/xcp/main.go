@@ -789,6 +789,7 @@ func main() {
 				Installed:     installedKernels,
 				KernelVersion: kernelVersion,
 				Running:       kernelRunning,
+				XrayAPIPort:   func() int { return cfg.XRayAPIPort },
 				Mihomo:        api.MihomoService(),
 				Ping:          pingNodeTLS,
 				GOARCH:        runtime.GOARCH,
