@@ -1,0 +1,81 @@
+{
+  "CoreSectionSnap": {
+    "required": ["desired", "taken", "file", "moved", "left", "drift"],
+    "optional": [],
+    "children": {}
+  },
+  "CoresSnapshot": {
+    "required": ["xray", "restart"],
+    "optional": [],
+    "children": {
+      "xray": "CoreSectionSnap{}",
+      "restart": "RestartNote[]"
+    }
+  },
+  "ForceProxyView": {
+    "required": ["tags", "group", "editable"],
+    "optional": [],
+    "children": {}
+  },
+  "KernelView": {
+    "required": ["kernel", "installed", "running", "sections", "take_all"],
+    "optional": ["profile", "force_proxy"],
+    "children": {
+      "sections": "SectionView[]",
+      "profile": "ProfileView",
+      "force_proxy": "ForceProxyView"
+    }
+  },
+  "KeyIssue": {
+    "required": ["key", "code"],
+    "optional": [],
+    "children": {}
+  },
+  "PinnedValue": {
+    "required": ["key", "value"],
+    "optional": [],
+    "children": {}
+  },
+  "ProfileView": {
+    "required": ["owner", "name"],
+    "optional": [],
+    "children": {}
+  },
+  "RawError": {
+    "required": ["line", "detail"],
+    "optional": [],
+    "children": {}
+  },
+  "RawResult": {
+    "required": ["rejected"],
+    "optional": ["value", "form", "error"],
+    "children": {
+      "rejected": "KeyIssue[]",
+      "error": "RawError"
+    }
+  },
+  "RestartNote": {
+    "required": ["kernel", "reason"],
+    "optional": [],
+    "children": {}
+  },
+  "SectionPreview": {
+    "required": ["id", "move", "left", "comments", "preset"],
+    "optional": ["blocked", "blocked_file"],
+    "children": {}
+  },
+  "SectionView": {
+    "required": ["id", "owner", "files", "value", "form", "advanced", "pinned", "dirty"],
+    "optional": ["panel_file", "blocked", "blocked_file", "comments", "left", "drift"],
+    "children": {
+      "pinned": "PinnedValue[]"
+    }
+  },
+  "TakePreview": {
+    "required": ["kernel", "sections"],
+    "optional": ["force_proxy_tags"],
+    "children": {
+      "sections": "SectionPreview[]"
+    }
+  }
+}
