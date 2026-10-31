@@ -254,3 +254,138 @@ func TestRouterCoresTakeoverApplyAndRelease(t *testing.T) {
 		t.Errorf("журнал не снят после возврата: %+v", st.Journal)
 	}
 }
+
+// rtHasIssue — в итоге есть проблема с кодом code по секции key и файлом file.
+func rtHasIssue(res *ResultView, code, key, file string) bool {
+	for _, is := range res.Issues {
+		if is.Code == code && is.Key == key && is.Params["file"] == file {
+			return true
+		}
+	}
+	return false
+}
+
+// assertKept — после отказанного применения каталог Xray побайтно как до него,
+// файлов панели нет, State.Cores пуст, журнал снят.
+func (e *rtCoresEnv) assertKept(t *testing.T, before map[string]string) {
+	t.Helper()
+	after := rtDirSnapshot(t, e.xray)
+	if len(after) != len(before) {
+		t.Errorf("состав каталога Xray изменился: было %d, стало %d", len(before), len(after))
+	}
+	for k, v := range before {
+		if after[k] != v {
+			t.Errorf("%s изменён при отказе", k)
+		}
+	}
+	st := e.layer.store.Snapshot()
+	if !st.Cores.isEmpty() {
+		t.Errorf("State.Cores изменён при отказе: %+v", st.Cores)
+	}
+	if st.Journal != nil {
+		t.Errorf("журнал остался после отказа: %+v", st.Journal)
+	}
+}
+
+func TestRouterCoresTakeoverGuards(t *testing.T) {
+	const (
+		mixedInbounds = "05_mixed.json"
+		shadowFile    = "99_zz.json"
+	)
+
+	t.Run("comments", func(t *testing.T) {
+		e := rtNewCoresEnv(t, map[string]string{rtCoDNSFile: rtCoDNSBody, rtCoOutboundFile: rtCoOutboundBody})
+		// Согласия на потерю комментариев нет: сервер не доверяет клиенту (D-02).
+		e.editSections(t, map[string]json.RawMessage{SectionXrayDNS: e.takeDraft(t, xraySectionDNS, false)})
+		before := rtDirSnapshot(t, e.xray)
+		res := e.apply(t)
+		if res.OK || res.Code != ResultBuildFailed || !rtHasIssue(res, IssueCommentsNotAck, SectionXrayDNS, rtCoDNSFile) {
+			t.Fatalf("перенос файла с комментариями без согласия: %+v", res)
+		}
+		e.assertKept(t, before)
+	})
+
+	t.Run("from", func(t *testing.T) {
+		e := rtNewCoresEnv(t, map[string]string{rtCoDNSFile: rtCoDNSBody, rtCoOutboundFile: rtCoOutboundBody})
+		e.editSections(t, map[string]json.RawMessage{SectionXrayDNS: e.takeDraft(t, xraySectionDNS, true)})
+		// Файл изменился между нажатием «Управлять в панели» и записью.
+		if err := os.WriteFile(e.path(rtCoDNSFile), []byte(rtCoDNSBody+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		before := rtDirSnapshot(t, e.xray)
+		res := e.apply(t)
+		if res.OK || res.Code != ResultBuildFailed || !rtHasIssue(res, IssueSectionTakeoverFailed, SectionXrayDNS, rtCoDNSFile) {
+			t.Fatalf("изменённый файл секции: %+v", res)
+		}
+		e.assertKept(t, before)
+
+		// Новый файл с ключом секции появился после проверки: from не совпадает.
+		if err := os.WriteFile(e.path(rtCoDNSFile), []byte(rtCoDNSBody), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		e.editSections(t, map[string]json.RawMessage{SectionXrayDNS: e.takeDraft(t, xraySectionDNS, true)})
+		if err := os.WriteFile(e.path(shadowFile), []byte(`{"dns": {"servers": ["8.8.8.8"]}}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		before = rtDirSnapshot(t, e.xray)
+		res = e.apply(t)
+		if res.OK || res.Code != ResultBuildFailed || !rtHasIssue(res, IssueSectionTakeoverFailed, SectionXrayDNS, shadowFile) {
+			t.Fatalf("новый файл секции: %+v", res)
+		}
+		e.assertKept(t, before)
+	})
+
+	t.Run("inbounds_mixed", func(t *testing.T) {
+		e := rtNewCoresEnv(t, map[string]string{
+			mixedInbounds: `{"inbounds": [{"tag": "redirect", "port": 61219, "protocol": "dokodemo-door", ` +
+				`"settings": {"network": "tcp", "followRedirect": true}}], "stats": {}}` + "\n",
+			rtCoOutboundFile: rtCoOutboundBody,
+		})
+		e.editSections(t, map[string]json.RawMessage{SectionXrayInbounds: e.takeDraft(t, xraySectionInbounds, true)})
+		before := rtDirSnapshot(t, e.xray)
+		res := e.apply(t)
+		if res.OK || res.Code != ResultBuildFailed || !rtHasIssue(res, IssueInboundsMixed, SectionXrayInbounds, mixedInbounds) {
+			t.Fatalf("входящие в смешанном файле: %+v", res)
+		}
+		// Чужой файл не тронут.
+		e.assertFileIs(t, mixedInbounds)
+		e.assertKept(t, before)
+	})
+
+	t.Run("shadowed", func(t *testing.T) {
+		e := rtNewCoresEnv(t, map[string]string{
+			rtCoDNSFile:      rtCoDNSBody,
+			shadowFile:       `{"dns": {"servers": ["8.8.8.8"]}}` + "\n",
+			rtCoOutboundFile: rtCoOutboundBody,
+		})
+		e.editSections(t, map[string]json.RawMessage{SectionXrayDNS: e.takeDraft(t, xraySectionDNS, true)})
+		before := rtDirSnapshot(t, e.xray)
+		res := e.apply(t)
+		if res.OK || res.Code != ResultBuildFailed || !rtHasIssue(res, IssueSectionShadowed, SectionXrayDNS, shadowFile) {
+			t.Fatalf("перекрывающий файл секции: %+v", res)
+		}
+		e.assertKept(t, before)
+	})
+
+	t.Run("validation", func(t *testing.T) {
+		e := rtNewCoresEnv(t, map[string]string{rtCoDNSFile: rtCoDNSBody, rtCoOutboundFile: rtCoOutboundBody})
+		scans, _, err := e.layer.ScanXraySections()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Тестовый генератор пишет в файл панели dns с неверным типом поля: ядро
+		// отвергает итоговую раскладку, чужой файл остаётся на месте.
+		bad := rtCoreSection(t, CoreSection{
+			Managed: true, Value: json.RawMessage(`{"servers": 5}`),
+			From: scans[xraySectionDNS].Sources, CommentsAck: true,
+		})
+		e.editSections(t, map[string]json.RawMessage{SectionXrayDNS: bad})
+		before := rtDirSnapshot(t, e.xray)
+		res := e.apply(t)
+		if res.OK || res.Code != CodeValidationFailed || res.Kernel != KernelXray {
+			t.Fatalf("итог при невалидном dns: %+v", res)
+		}
+		e.assertFileIs(t, rtCoDNSFile)
+		e.assertKept(t, before)
+	})
+}
