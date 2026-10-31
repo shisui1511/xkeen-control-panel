@@ -42,17 +42,13 @@ func (s *Service) seedMihomoSections(st configlayer.StateView) (map[string]json.
 	if mihomoDraftManaged(st.Draft) {
 		return nil, nil
 	}
-	var (
-		from    []configlayer.SourceFile
-		profile []byte
-	)
-	preset := false
-	name, data, hash, err := s.d.Layer.MihomoActiveProfile()
-	if err != nil {
-		preset = true
-	} else {
+	// Основа секций: с прежним профилем — from с его именем и md5; без него —
+	// значения встроенной базы с пометкой preset и без from.
+	base := configlayer.CoreSection{V: 1, Managed: true, Preset: true}
+	var profile []byte
+	if name, data, hash, err := s.d.Layer.MihomoActiveProfile(); err == nil {
 		profile = data
-		from = []configlayer.SourceFile{{Name: name, Hash: hash}}
+		base = configlayer.CoreSection{V: 1, Managed: true, From: []configlayer.SourceFile{{Name: name, Hash: hash}}}
 	}
 	values, err := cores.SeedMihomo(profile, configlayer.MihomoPorts{})
 	if err != nil {
@@ -61,9 +57,9 @@ func (s *Service) seedMihomoSections(st configlayer.StateView) (map[string]json.
 	}
 	out := make(map[string]json.RawMessage, len(configlayer.MihomoSectionIDs))
 	for _, id := range configlayer.MihomoSectionIDs {
-		raw, err := configlayer.EncodeCoreSection(configlayer.CoreSection{
-			V: 1, Managed: true, Value: values[id], From: from, Preset: preset,
-		})
+		cs := base
+		cs.Value = values[id]
+		raw, err := configlayer.EncodeCoreSection(cs)
 		if err != nil {
 			return nil, err
 		}
