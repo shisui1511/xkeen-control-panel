@@ -1,8 +1,6 @@
 package configlayer
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -92,7 +90,7 @@ type mihomoActiveReader func() (name, hash string, err error)
 // объекты из файлов вглубь, поэтому секция не берётся (код IssueSectionShadowed),
 // если у её ключа есть смешанный файл (его остаток продолжил бы сливаться со
 // значением панели), файл после файла панели или значение секции неизвестно
-// (дамп ядра не получен). Для «Входящих» правило прежнее — по файлу после файла
+// (среди файлов ключа есть неразобранный). Для «Входящих» правило прежнее — по файлу после файла
 // панели; смешанный файл блокирует их отдельно (IssueInboundsMixed, D-25).
 func coreTakeIssues(desired map[string]CoreSection, actual CoresState, scans map[string]XraySectionScan, mihomo mihomoActiveReader) []BuildIssue {
 	var out []BuildIssue
@@ -225,7 +223,7 @@ func firstCommon(a, b []string) string {
 // BuildError до записи. Если секции не меняются, возвращается routing как есть
 // (в том числе nil); иначе операции сливаются в routing, а при nil создаётся
 // новый RoutingOps с прежним владением маршрутизацией.
-func (p *Pipeline) planCores(ctx context.Context, src Sections, actual CoresState, routing *RoutingOps, installed InstalledKernels, req ApplyRequest) (*RoutingOps, error) {
+func (p *Pipeline) planCores(src Sections, actual CoresState, routing *RoutingOps, installed InstalledKernels, req ApplyRequest) (*RoutingOps, error) {
 	if len(req.Only) > 0 {
 		return routing, nil
 	}
@@ -260,14 +258,7 @@ func (p *Pipeline) planCores(ctx context.Context, src Sections, actual CoresStat
 			if err != nil {
 				return nil, &BuildError{Issues: []BuildIssue{{Key: RoutingSection, Code: IssueRoutingScanFailed, Detail: err.Error()}}}
 			}
-			// Значение log, dns, policy и «Прочих ключей» — из дампа ядра (D-28);
-			// дамп не нужен, пока берутся одни «Входящие». Не получен — значение
-			// неизвестно, такие секции не берутся.
-			var dump map[string]json.RawMessage
-			if takesDumpSection(desired, actual) {
-				dump, _ = p.dumper.Dump(ctx, p.binaries().Xray, p.d.Roots.Xray, p.d.XrayEnv)
-			}
-			scans = ScanXraySections(files, dump)
+			scans = ScanXraySections(files)
 		}
 		var xrayIssues []BuildIssue
 		take, release, next, xrayIssues = computeCoreOps(desired, actual, scans, p.d.Now())
@@ -300,20 +291,6 @@ func (p *Pipeline) planCores(ctx context.Context, src Sections, actual CoresStat
 		}
 	}
 	return ops, nil
-}
-
-// takesDumpSection — среди берущихся секций есть та, чьё значение даёт дамп ядра
-// (log, dns, policy, «Прочие ключи»).
-func takesDumpSection(desired map[string]CoreSection, actual CoresState) bool {
-	for _, id := range XraySectionIDs {
-		if id == xraySectionInbounds {
-			continue
-		}
-		if desired[CoreSectionName(KernelXray, id)].Managed && actual.Xray[id] == nil {
-			return true
-		}
-	}
-	return false
 }
 
 // sectionOwner — ключ верхнего уровня принадлежит секции id.

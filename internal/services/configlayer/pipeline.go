@@ -206,9 +206,6 @@ type Pipeline struct {
 	// commitLive — хуки фиксации живых данных (PipelineDeps.CommitLive) в порядке
 	// регистрации, под mu: слой добавляет их после создания конвейера.
 	commitLive []LiveCommitFunc
-	// dumper — дамп Xray с кэшем на подпись каталога (D-28): общий для конвейера
-	// и сканов слоя.
-	dumper *XrayDumper
 }
 
 // NewPipeline создаёт конвейер; WriteFile и Now имеют значения по умолчанию
@@ -220,7 +217,7 @@ func NewPipeline(d PipelineDeps) *Pipeline {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
-	return &Pipeline{d: d, commitLive: append([]LiveCommitFunc(nil), d.CommitLive...), dumper: &XrayDumper{}}
+	return &Pipeline{d: d, commitLive: append([]LiveCommitFunc(nil), d.CommitLive...)}
 }
 
 // addCommitLive добавляет хук фиксации живых данных в конец списка (до Start слоя).
@@ -410,7 +407,7 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	}
 	if err == nil {
 		// Секции Xray (взятие и возврат файлов, D-01) идут теми же операциями.
-		plan.Routing, err = p.planCores(ctx, src, snap.Cores, plan.Routing, installed, req)
+		plan.Routing, err = p.planCores(src, snap.Cores, plan.Routing, installed, req)
 	}
 	if err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
