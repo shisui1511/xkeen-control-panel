@@ -3831,6 +3831,7 @@
   "cfg.sec.owner_xkeen": "XKeen",
   "cfg.sec.owner_user": "Пользователь",
   "cfg.sec.owner_none": "Нет файла",
+  "cfg.sec.owner_drift": "Расхождение",
   "cfg.sec.owner_pending": "Будет взята при «Применить»",
   "cfg.sec.dirty": "Изменено",
   "cfg.sec.pinned": "Закреплено",

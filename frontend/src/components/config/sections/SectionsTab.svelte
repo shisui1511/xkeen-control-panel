@@ -2,21 +2,39 @@
   import { onMount } from 'svelte';
   import { t } from '../../../i18n';
   import { activeKernelName } from '../../../stores';
+  import Button from '../../Button.svelte';
   import EmptyState from '../../EmptyState.svelte';
   import Skeleton from '../../Skeleton.svelte';
+  import Icon from '../../../lib/components/Icon.svelte';
+  import { applyRunning, layerSnapshot } from '../../../lib/configLayer';
   import {
     fetchCores,
     onCoresChanged,
     type CoreKernel,
-    type KernelView
+    type KernelView,
+    type SectionView
   } from '../../../lib/configCores';
   import KernelSwitch from './KernelSwitch.svelte';
+  import SectionCard from './SectionCard.svelte';
+  import TakeSectionModal from './TakeSectionModal.svelte';
+  import { coresBusy } from './coresOwner';
 
-  // Вкладка «Xray │ Mihomo»: каркас — переключатель ядра, строка состояния, загрузка и
-  // пустое состояние. Оба вида ядер загружаются при открытии и остаются смонтированными
-  // (U-03): переключение не перезагружает данные и не сбрасывает правки. Вкладка ничего
-  // не запускает и не меняет, только читает. Карточки секций добавляют следующие планы.
+  // Вкладка «Xray │ Mihomo»: переключатель ядра, строка состояния, загрузка, пустое
+  // состояние и карточки секций (SEC-01). Оба вида ядер загружаются при открытии и остаются
+  // смонтированными (U-03): переключение не перезагружает данные и не сбрасывает правки.
+  // Вид только читается; владение секциями меняют карточки и диалог взятия — в черновик.
   const KERNELS: readonly CoreKernel[] = ['xray', 'mihomo'];
+
+  // Постоянный порядок карточек (UI-SPEC)
+  const ORDER: Record<CoreKernel, readonly string[]> = {
+    xray: ['log', 'dns', 'inbounds', 'policy', 'other'],
+    mihomo: ['main', 'dns', 'inbounds', 'sniffer', 'other']
+  };
+
+  // Раскрытие карточек: ключ «ядро.секция». Состояние между сессиями не сохраняется
+  const open = $state<Record<string, boolean>>(
+    Object.fromEntries(KERNELS.flatMap((k) => ORDER[k].map((id) => [`${k}.${id}`, false])))
+  );
 
   let views = $state<Record<CoreKernel, KernelView | null>>({ xray: null, mihomo: null });
   let failed = $state<Record<CoreKernel, boolean>>({ xray: false, mihomo: false });
@@ -68,6 +86,51 @@
   function kernelTitle(k: CoreKernel): string {
     return k === 'xray' ? 'Xray' : 'Mihomo';
   }
+
+  /** Секции вида в постоянном порядке карточек; неизвестные серверу секции — в конце. */
+  function ordered(view: KernelView): SectionView[] {
+    const rank = (id: string): number => {
+      const i = ORDER[view.kernel].indexOf(id);
+      return i === -1 ? ORDER[view.kernel].length : i;
+    };
+    return [...view.sections].sort((a, b) => rank(a.id) - rank(b.id));
+  }
+
+  // Маршрутизация у панели или желаема в черновике: от этого зависит блок группы
+  // force-proxy в формах «Входящие» (D-12)
+  function routingTaken(k: CoreKernel): boolean {
+    const r = $layerSnapshot?.routing;
+    if (!r) return false;
+    return r.desired === true || r[k]?.taken === true;
+  }
+
+  // Диалог взятия: одна секция или все секции ядра
+  let takeOpen = $state(false);
+  let takeKernel = $state<CoreKernel>('xray');
+  let takeMode = $state<'one' | 'all'>('one');
+  let takeSection = $state('');
+
+  function openTake(k: CoreKernel, mode: 'one' | 'all', id = ''): void {
+    takeKernel = k;
+    takeMode = mode;
+    takeSection = id;
+    takeOpen = true;
+  }
+
+  // Только что взятые секции раскрываются: owner-бейдж «Будет взята при «Применить»»
+  function taken(ids: string[]): void {
+    for (const id of ids) open[`${takeKernel}.${id}`] = true;
+  }
+
+  const takeView = $derived(views[takeKernel]);
+  const takeAllIds = $derived(
+    takeView
+      ? ordered(takeView)
+          .filter((s) => s.owner !== 'panel' && s.owner !== 'pending')
+          .map((s) => s.id)
+      : []
+  );
+  const takeBlocked = $derived($coresBusy || $applyRunning);
 </script>
 
 <div class="cores-tab" data-testid="cores-tab">
@@ -79,6 +142,24 @@
         <p class="cores-state-line" data-testid="kernel-stopped">{$t('cfg.sec.kernel_stopped')}</p>
       {/if}
     </div>
+    {#if kernel === 'xray' && current !== null && current.installed}
+      {#if current.take_all}
+        <Button
+          variant="primary"
+          disabled={takeBlocked}
+          title={$applyRunning ? $t('cfg.routing.apply_busy_hint') : undefined}
+          data-testid="cores-take-all"
+          onclick={() => openTake('xray', 'all')}
+        >
+          {$t('cfg.sec.take_all_btn')}
+        </Button>
+      {:else}
+        <p class="cores-all-panel" data-testid="cores-all-panel">
+          <span class="cores-ok"><Icon name="check" size={16} /></span>
+          {$t('cfg.sec.all_panel')}
+        </p>
+      {/if}
+    {/if}
   </div>
 
   {#each KERNELS as k (k)}
@@ -105,11 +186,35 @@
           plain
         />
       {:else}
-        <div class="cores-sections" data-testid="cores-sections-{k}"></div>
+        <div class="cores-sections" data-testid="cores-sections-{k}">
+          {#each ordered(view) as sec (sec.id)}
+            <SectionCard
+              kernel={k}
+              section={sec}
+              snap={k === 'xray' ? $layerSnapshot?.cores.xray[sec.id] : undefined}
+              issues={($layerSnapshot?.checks ?? []).filter((c) => c.key === `${k}_${sec.id}`)}
+              forceProxy={view.force_proxy}
+              routingTaken={routingTaken(k)}
+              profileName={view.profile?.name ?? ''}
+              bind:expanded={open[`${k}.${sec.id}`]}
+              ontake={() => openTake(k, 'one', sec.id)}
+            />
+          {/each}
+        </div>
       {/if}
     </div>
   {/each}
 </div>
+
+<TakeSectionModal
+  bind:open={takeOpen}
+  kernel={takeKernel}
+  mode={takeMode}
+  section={takeSection}
+  ids={takeAllIds}
+  forceGroup={takeView?.force_proxy?.group ?? ''}
+  ontaken={taken}
+/>
 
 <style>
   .cores-tab {
@@ -140,6 +245,34 @@
     font-size: var(--font-size-base);
     color: var(--fg-secondary);
     overflow-wrap: anywhere;
+  }
+
+  .cores-all-panel {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    margin: 0;
+    font-size: var(--font-size-base);
+    color: var(--fg-secondary);
+  }
+
+  .cores-ok {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: var(--success);
+  }
+
+  @media (pointer: coarse), (max-width: 768px) {
+    .cores-bar :global(.btn) {
+      flex: 1 1 auto;
+      min-height: 44px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .cores-bar :global(.btn) {
+      flex: 1 1 100%;
+    }
   }
 
   .cores-panel[hidden] {
