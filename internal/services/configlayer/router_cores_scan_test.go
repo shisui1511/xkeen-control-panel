@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -395,4 +396,204 @@ func TestRouterCoresScanMihomoActive(t *testing.T) {
 	if out, err := exec.CommandContext(ctx, rtMhBin, "-t", "-d", root, "-f", cfg).CombinedOutput(); err != nil {
 		t.Fatalf("mihomo -t: %v\n%s", err, out)
 	}
+}
+
+// rtCoresDump сливает каталог ядром: `xray run -dump -confdir`, возвращает
+// слитый конфиг. Xray без флага -dump пропускает сценарий.
+func rtCoresDump(t *testing.T, dir string) map[string]any {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, rtCoresXrayBin(t), "run", "-dump", "-confdir", dir)
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		if bytes.Contains(stderr.Bytes(), []byte("flag provided but not defined")) {
+			t.Skipf("Xray стенда без флага -dump: %s", bytes.TrimSpace(stderr.Bytes()))
+		}
+		t.Fatalf("xray run -dump -confdir (%s): %v\n%s", filepath.Base(dir), err, stderr.Bytes())
+	}
+	out := stdout.Bytes()
+	start := bytes.IndexByte(out, '{')
+	if start < 0 {
+		t.Fatalf("xray run -dump: в выводе нет конфига (%d байт)", len(out))
+	}
+	var merged map[string]any
+	if err := json.NewDecoder(bytes.NewReader(out[start:])).Decode(&merged); err != nil {
+		t.Fatalf("xray run -dump: вывод не JSON: %v", err)
+	}
+	return merged
+}
+
+// rtCoresDig достаёт значение по пути ключей объектов слитого конфига.
+func rtCoresDig(root map[string]any, path ...string) (any, bool) {
+	var cur any = root
+	for _, k := range path {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		if cur, ok = m[k]; !ok {
+			return nil, false
+		}
+	}
+	return cur, true
+}
+
+// rtCoresDecode разбирает JSON в общий вид для сравнения по значению.
+func rtCoresDecode(t *testing.T, raw []byte) any {
+	t.Helper()
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("JSON: %v: %s", err, raw)
+	}
+	return v
+}
+
+// TestRouterCoresMergeSemantics проверяет допущение A1: как Xray сливает log,
+// dns, policy и inbounds из нескольких файлов каталога и совпадает ли это со
+// сканом панели (действующее значение). Расхождение — находка для владельца:
+// модель «поздний файл заменяет ключ целиком» тогда неверна.
+func TestRouterCoresMergeSemantics(t *testing.T) {
+	rtCoresXrayBin(t)
+	base := rtLiveDir(t)
+
+	// Ключ K: ранний 01_a.json задаёт поле, которого нет в позднем 02_b.json.
+	type mergeCase struct {
+		key, early, late, lateValue string
+		earlyOnly                   [][]string
+	}
+	cases := []mergeCase{
+		{
+			key:       "log",
+			early:     `{"log": {"loglevel": "debug", "dnsLog": true}}`,
+			late:      `{"log": {"loglevel": "warning"}}`,
+			lateValue: `{"loglevel":"warning"}`,
+			earlyOnly: [][]string{{"log", "dnsLog"}},
+		},
+		{
+			key:       "dns",
+			early:     `{"dns": {"queryStrategy": "UseIPv4", "servers": ["127.0.0.1"]}}`,
+			late:      `{"dns": {"servers": ["127.0.0.2"]}}`,
+			lateValue: `{"servers":["127.0.0.2"]}`,
+			earlyOnly: [][]string{{"dns", "queryStrategy"}},
+		},
+		{
+			key:       "policy",
+			early:     `{"policy": {"levels": {"0": {"connIdle": 111}}, "system": {"statsInboundUplink": true}}}`,
+			late:      `{"policy": {"levels": {"0": {"handshake": 7}}}}`,
+			lateValue: `{"levels":{"0":{"handshake":7}}}`,
+			earlyOnly: [][]string{{"policy", "levels", "0", "connIdle"}, {"policy", "system"}},
+		},
+	}
+	for _, c := range cases {
+		dir := filepath.Join(base, "merge-"+c.key)
+		rtCoresWriteDir(t, dir, map[string]string{"01_a.json": c.early + "\n", "02_b.json": c.late + "\n"})
+		merged := rtCoresDump(t, dir)
+		for _, path := range c.earlyOnly {
+			if _, kept := rtCoresDig(merged, path...); kept {
+				t.Errorf("слияние %s вглубь: поле раннего файла сохранилось (%v)", c.key, path)
+			}
+		}
+		scanned, err := ScanXrayKeyFiles(dir, nil)
+		if err != nil {
+			t.Fatalf("ScanXrayKeyFiles(%s): %v", c.key, err)
+		}
+		eff := ScanXraySections(scanned)[c.key].Effective
+		if got := rtCoresCompact(t, eff); got != c.lateValue {
+			t.Errorf("%s: Effective=%s, ожидался объект позднего файла %s", c.key, got, c.lateValue)
+		}
+		if got, ok := rtCoresDig(merged, c.key); !ok {
+			t.Errorf("%s: в слитом конфиге ядра нет ключа", c.key)
+		} else if want := rtCoresDecode(t, eff); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: слитое значение ядра расходится со сканом панели", c.key)
+		}
+	}
+
+	rtCoresMergeInbounds(t, filepath.Join(base, "merge-inbounds"))
+	rtCoresMergeAPIStats(t, filepath.Join(base, "merge-api"))
+}
+
+// rtCoresMergeInbounds — входящие объединяются по tag: поздний заменяет ранний
+// на его месте, новые дописываются в конец.
+func rtCoresMergeInbounds(t *testing.T, dir string) {
+	t.Helper()
+	const (
+		early = `{"inbounds": [
+  {"tag": "x", "listen": "127.0.0.1", "port": 20001, "protocol": "dokodemo-door", "settings": {"address": "127.0.0.1"}, "sniffing": {"enabled": true}},
+  {"tag": "y", "listen": "127.0.0.1", "port": 20002, "protocol": "dokodemo-door", "settings": {"address": "127.0.0.1"}}
+]}`
+		late = `{"inbounds": [
+  {"tag": "x", "listen": "127.0.0.1", "port": 20003, "protocol": "dokodemo-door", "settings": {"address": "127.0.0.1"}}
+]}`
+	)
+	rtCoresWriteDir(t, dir, map[string]string{"01_a.json": early + "\n", "02_b.json": late + "\n"})
+	type inbound struct {
+		Tag      string          `json:"tag"`
+		Port     int             `json:"port"`
+		Sniffing json.RawMessage `json:"sniffing"`
+	}
+	read := func(label string, v any) []inbound {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		var list []inbound
+		if err := json.Unmarshal(raw, &list); err != nil {
+			t.Fatalf("%s: inbounds не массив входящих: %v", label, err)
+		}
+		return list
+	}
+	merged := rtCoresDump(t, dir)
+	raw, ok := merged["inbounds"]
+	if !ok {
+		t.Fatalf("inbounds: в слитом конфиге ядра нет ключа")
+	}
+	kernel := read("ядро", raw)
+	if len(kernel) != 2 || kernel[0].Tag != "x" || kernel[0].Port != 20003 || kernel[1].Tag != "y" || kernel[1].Port != 20002 {
+		t.Errorf("inbounds в слитом конфиге ядра: %+v, ожидались x:20003 и y:20002 по порядку", kernel)
+	}
+	// Что делает ядро с полями раннего входящего с тем же tag: заменяет целиком
+	// или сливает вглубь — только наблюдение, вердикт модели по портам и тегам.
+	if len(kernel) > 0 {
+		t.Logf("входящий x: поле sniffing раннего файла сохранено ядром: %v", len(kernel[0].Sniffing) > 0)
+	}
+	scanned, err := ScanXrayKeyFiles(dir, nil)
+	if err != nil {
+		t.Fatalf("ScanXrayKeyFiles: %v", err)
+	}
+	var effective any
+	if err := json.Unmarshal(ScanXraySections(scanned)["inbounds"].Effective, &effective); err != nil {
+		t.Fatalf("inbounds Effective: %v", err)
+	}
+	panel := read("скан", effective)
+	if len(panel) != len(kernel) {
+		t.Errorf("inbounds: скан даёт %d входящих, ядро %d", len(panel), len(kernel))
+		return
+	}
+	for i := range panel {
+		if panel[i].Tag != kernel[i].Tag || panel[i].Port != kernel[i].Port {
+			t.Errorf("inbounds[%d]: скан %s:%d, ядро %s:%d", i, panel[i].Tag, panel[i].Port, kernel[i].Tag, kernel[i].Port)
+		}
+	}
+}
+
+// rtCoresMergeAPIStats — файл api без policy не стирает policy.levels другого
+// файла (143 Q5), а stats в двух файлах не мешает запуску.
+func rtCoresMergeAPIStats(t *testing.T, dir string) {
+	t.Helper()
+	rtCoresWriteDir(t, dir, map[string]string{
+		"00_out.json": rtCoresOutboundBody,
+		"01_a.json":   `{"policy": {"levels": {"0": {"connIdle": 111}}}}` + "\n",
+		"99_c.json": `{"api": {"tag": "api", "listen": "127.0.0.1:10085", "services": ["HandlerService", "StatsService"]}, "stats": {}}` +
+			"\n",
+	})
+	merged := rtCoresDump(t, dir)
+	if v, ok := rtCoresDig(merged, "policy", "levels", "0", "connIdle"); !ok || v != float64(111) {
+		t.Errorf("файл api стёр policy.levels другого файла: connIdle=%v найден=%v", v, ok)
+	}
+	rtCoresXrayTest(t, dir)
+	// stats в двух файлах: в файле api и в «Прочих ключах».
+	rtCoresWriteDir(t, dir, map[string]string{"50_s.json": `{"stats": {}}` + "\n"})
+	rtCoresXrayTest(t, dir)
 }
