@@ -6,7 +6,15 @@
 
 import { get } from 'svelte/store';
 import { apiFetchJSON } from './api';
-import { onLayerEvent, layerSnapshot } from './configLayer';
+import {
+  onLayerEvent,
+  post,
+  currentRevision,
+  applyDraftAck,
+  layerSnapshot,
+  type DraftAck
+} from './configLayer';
+import coresErrorCodes from './coresErrorCodes.json';
 
 // --- Типы контракта ---
 
@@ -129,6 +137,50 @@ export interface CoresSnapshot {
   restart: RestartNote[];
 }
 
+// --- Поля форм секций ---
+
+/**
+ * Пути полей формы по секциям («[]» — элемент списка). Всё остальное значение секции
+ * относится к «Дополнительно». Бэкенд держит такую же таблицу: совпадение проверяет
+ * scripts/check-cores-api.js.
+ */
+export const FORM_KEYS: Record<string, readonly string[]> = {
+  'xray.log': ['loglevel', 'access', 'error', 'dnsLog'],
+  'xray.dns': ['servers', 'queryStrategy', 'disableCache'],
+  'xray.inbounds': ['[].tag', '[].protocol', '[].listen', '[].port'],
+  'xray.policy': [
+    'levels.0.handshake',
+    'levels.0.connIdle',
+    'levels.0.uplinkOnly',
+    'levels.0.downlinkOnly'
+  ],
+  'xray.other': [],
+  'mihomo.main': [
+    'mixed-port',
+    'port',
+    'socks-port',
+    'redir-port',
+    'tproxy-port',
+    'allow-lan',
+    'bind-address',
+    'mode',
+    'log-level',
+    'ipv6'
+  ],
+  'mihomo.dns': ['enable', 'enhanced-mode', 'ipv6', 'nameserver', 'default-nameserver'],
+  'mihomo.inbounds': [
+    'listeners[].name',
+    'listeners[].type',
+    'listeners[].listen',
+    'listeners[].port',
+    'tun.enable',
+    'tun.stack',
+    'tun.auto-route'
+  ],
+  'mihomo.sniffer': ['enable', 'force-dns-mapping', 'parse-pure-ip', 'override-destination'],
+  'mihomo.other': []
+};
+
 // --- Запросы ---
 
 const BASE = '/api/configlayer/cores';
@@ -136,6 +188,78 @@ const BASE = '/api/configlayer/cores';
 /** Вид секций ядра. */
 export async function fetchCores(kernel: CoreKernel): Promise<KernelView> {
   return apiFetchJSON<KernelView>(`${BASE}?kernel=${encodeURIComponent(kernel)}`);
+}
+
+/** Предпросмотр взятия секций для диалога; диск и черновик не меняются. */
+export async function fetchTakePreview(
+  kernel: CoreKernel,
+  sections: string[]
+): Promise<TakePreview> {
+  const qs = `kernel=${encodeURIComponent(kernel)}&sections=${encodeURIComponent(sections.join(','))}`;
+  return apiFetchJSON<TakePreview>(`${BASE}/takeover?${qs}`);
+}
+
+/** Ответ правки: подтверждение либо объект, у которого оно лежит в поле event. */
+type EditResult = DraftAck | { event: DraftAck };
+
+function ackOf(res: EditResult): DraftAck {
+  return 'event' in res ? res.event : res;
+}
+
+/**
+ * Правка черновика через маршрут секций: ревизия берётся из снимка слоя, по ответу
+ * обновляются ревизия и счётчик изменений. Ошибки (в т. ч. draft_conflict с code)
+ * пробрасываются: разбирает handleLayerError.
+ */
+async function editCores(path: string, body: Record<string, unknown>): Promise<DraftAck> {
+  const res = await post<EditResult>(`${BASE}/${path}`, { revision: currentRevision(), ...body });
+  const ack = ackOf(res);
+  applyDraftAck(ack);
+  return ack;
+}
+
+/** Желание «секции ведёт панель»; файлы меняются при «Применить». */
+export function takeSections(
+  kernel: CoreKernel,
+  sections: string[],
+  ackComments: boolean
+): Promise<DraftAck> {
+  return editCores('take', { kernel, sections, ack_comments: ackComments });
+}
+
+/** Сохраняет значения формы и «Дополнительно» взятой секции в черновик. */
+export function saveSection(
+  kernel: CoreKernel,
+  section: string,
+  form: unknown,
+  advanced: string
+): Promise<DraftAck> {
+  return editCores('save', { kernel, section, form, advanced });
+}
+
+/** Заменяет значения секции в черновике значениями пресета. */
+export function presetSection(kernel: CoreKernel, section: string): Promise<DraftAck> {
+  return editCores('preset', { kernel, section });
+}
+
+/** Желание вернуть секцию прежнему владельцу; файлы возвращаются при «Применить». */
+export function releaseSection(kernel: CoreKernel, section: string): Promise<DraftAck> {
+  return editCores('release', { kernel, section });
+}
+
+/** Группа, в которую панель направляет входящие force-proxy. */
+export function setForceProxyGroup(kernel: CoreKernel, group: string): Promise<DraftAck> {
+  return editCores('force-proxy', { kernel, group });
+}
+
+/** Разбор сырого блока «Дополнительно»; черновик не меняется, ревизия не нужна. */
+export function parseRaw(kernel: CoreKernel, section: string, text: string): Promise<RawResult> {
+  return post<RawResult>(`${BASE}/raw/parse`, { kernel, section, text });
+}
+
+/** Решает дрейф секции в пользу панели: файл панели возвращается на диск сразу. */
+export async function reclaimSection(kernel: CoreKernel, section: string): Promise<void> {
+  await post<{ reclaimed: boolean }>(`${BASE}/reclaim`, { kernel, section });
 }
 
 // --- Перечитывание вида ---
@@ -182,4 +306,42 @@ export function onCoresChanged(cb: () => void): () => void {
     if (timer !== null) clearTimeout(timer);
     timer = null;
   };
+}
+
+// --- Тексты ошибок ---
+
+/** Функция перевода из стора $t. */
+export type TFn = (key: string, params?: Record<string, string | number>) => string;
+
+/** Коды ошибок API секций. */
+export const CORES_ERROR_CODES: string[] = coresErrorCodes.codes;
+/** Коды проблем проверки секций (текст — cfg.sec.issue.<код>). */
+export const CORES_ISSUE_CODES: string[] = coresErrorCodes.issues;
+
+const KNOWN_CODES = new Set(CORES_ERROR_CODES);
+const KNOWN_ISSUES = new Set(CORES_ISSUE_CODES);
+
+// Параметры, которые подставляются в тексты ошибок: не пришедший параметр заменяется
+// на «?», а не остаётся голым «{file}» в интерфейсе.
+const ERROR_PARAMS = ['file', 'files', 'kernel', 'name', 'key', 'section', 'group', 'min', 'value'];
+
+/** Текст ошибки по коду: cfg.sec.err.<код>, неизвестный код — cfg.sec.err.unknown. */
+export function coresErrorText(
+  t: TFn,
+  code: string | undefined,
+  params?: Record<string, string>
+): string {
+  const key =
+    code !== undefined && KNOWN_CODES.has(code) ? `cfg.sec.err.${code}` : 'cfg.sec.err.unknown';
+  const p: Record<string, string> = {};
+  for (const name of ERROR_PARAMS) p[name] = '?';
+  for (const [k, v] of Object.entries(params ?? {})) {
+    if (typeof v === 'string' && v !== '') p[k] = v;
+  }
+  return t(key, p);
+}
+
+/** Ключ текста проблемы проверки секции: cfg.sec.issue.<код>; код не из списка — null. */
+export function coresIssueKey(code: string | undefined): string | null {
+  return code !== undefined && KNOWN_ISSUES.has(code) ? `cfg.sec.issue.${code}` : null;
 }

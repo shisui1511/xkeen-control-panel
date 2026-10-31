@@ -1417,6 +1417,46 @@ for (const file of walk(SRC, [])) {
   }
 }
 
+// Коды ошибок и проблем секций, таблица полей форм
+const CORES_CODES = `${SRC}/lib/coresErrorCodes.json`;
+let coresCodes = { codes: [], issues: [] };
+try {
+  coresCodes = JSON.parse(read(CORES_CODES));
+} catch (e) {
+  errors.push(`${CORES_CODES}: не разбирается как JSON: ${e.message}`);
+}
+expect(
+  Array.isArray(coresCodes.codes) &&
+    coresCodes.codes.length > 0 &&
+    Array.isArray(coresCodes.issues) &&
+    coresCodes.issues.length > 0,
+  `${CORES_CODES}: нужны непустые списки codes и issues`,
+);
+// Проблемы значения секции приходят и кодом ответа Save (147-18): они в обоих списках
+for (const code of ["core_section_invalid", "inbound_duplicate", "inbound_port_invalid"]) {
+  expect(
+    coresCodes.codes.includes(code) && coresCodes.issues.includes(code),
+    `${CORES_CODES}: код ${code} должен входить и в codes, и в issues`,
+  );
+}
+for (const id of [
+  "xray.log",
+  "xray.dns",
+  "xray.inbounds",
+  "xray.policy",
+  "xray.other",
+  "mihomo.main",
+  "mihomo.dns",
+  "mihomo.inbounds",
+  "mihomo.sniffer",
+  "mihomo.other",
+]) {
+  expect(
+    new RegExp(`'${id.replace(".", "\\.")}':\\s*\\[`).test(coresTs),
+    `${CORES_TS}: в FORM_KEYS нет секции ${id}`,
+  );
+}
+
 if (errors.length > 0) {
   console.error("check-config-ui: найдено нарушений: " + errors.length);
   for (const e of errors) console.error("  - " + e);

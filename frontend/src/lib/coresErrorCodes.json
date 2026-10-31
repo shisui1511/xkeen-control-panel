@@ -1,0 +1,39 @@
+{
+  "codes": [
+    "apply_busy",
+    "comments_not_acknowledged",
+    "controller_no_secret",
+    "core_section_invalid",
+    "draft_conflict",
+    "foreign_mixed",
+    "group_not_found",
+    "inbound_duplicate",
+    "inbound_port_invalid",
+    "inbounds_mixed",
+    "invalid_input",
+    "kernel_not_installed",
+    "mihomo_with_profile",
+    "nothing_to_reclaim",
+    "raw_dup_key",
+    "raw_pinned",
+    "raw_reserved",
+    "raw_syntax",
+    "raw_too_large",
+    "section_not_managed",
+    "section_shadowed",
+    "section_unknown",
+    "xkeen_too_old"
+  ],
+  "issues": [
+    "comments_not_acknowledged",
+    "controller_no_secret",
+    "core_section_invalid",
+    "inbound_duplicate",
+    "inbound_port_invalid",
+    "inbounds_mixed",
+    "raw_pinned",
+    "raw_reserved",
+    "section_shadowed",
+    "section_takeover_failed"
+  ]
+}
