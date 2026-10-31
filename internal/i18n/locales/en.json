@@ -48,6 +48,7 @@
   "mihomo.not_running": "Mihomo is not running",
   "mihomo.api_error": "Mihomo API error",
   "mihomo.api_not_configured": "Mihomo API is not configured",
+  "xray.api_managed": "The Xray API block is managed by the panel: monitoring follows routing ownership in the Configuration section.",
 
   "update.check_failed": "Failed to check for updates",
   "update.download_failed": "Download failed",
