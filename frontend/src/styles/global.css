@@ -517,6 +517,90 @@ h2.card-title {
   height: 14px;
 }
 
+/* ------------ Section stack / list card -------------
+   Редизайн «без карточек в карточках»: страница — стопка секций
+   (components/Section.svelte), заголовок секции стоит над поверхностью.
+   .card-rows — карточка-список: без внутренних отступов, строки
+   (.field-row / .list-row) идут на всю ширину и делятся тонкой линией,
+   кнопки формы — в подвале .card-footer. */
+.page-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-8);
+  min-width: 0;
+}
+
+.page-sections-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: var(--spacing-8) var(--spacing-6);
+  align-items: start;
+}
+
+.card.card-rows {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Группа в карточке-списке — просто контейнер строк: отступы у самих строк. */
+.card.card-rows .field-group {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.card.card-rows .field-row,
+.card.card-rows .list-row {
+  padding: 14px var(--card-pad);
+  border-bottom: 1px solid var(--border);
+}
+
+.card.card-rows .field-row:last-child,
+.card.card-rows .list-row:last-child {
+  border-bottom: 0;
+}
+
+.card.card-rows .card-note {
+  margin: 0;
+  padding: 12px var(--card-pad);
+  font-size: var(--font-size-sm);
+  color: var(--fg-secondary);
+}
+
+/* Смежные блоки карточки-списка делятся той же линией, что и строки. */
+.card.card-rows
+  > :is(.field-group, .card-note, .card-empty, .card-block)
+  + :is(.field-group, .card-note, .card-empty, .card-block) {
+  border-top: 1px solid var(--border);
+}
+
+.card.card-rows .card-block {
+  padding: 16px var(--card-pad);
+}
+
+.card.card-rows .card-empty {
+  padding: 28px var(--card-pad);
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--fg-secondary);
+}
+
+.card.card-rows .card-footer,
+.card .card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px var(--card-pad);
+  border-top: 1px solid var(--border);
+  background: var(--surface-tint);
+}
+
+[data-density='compact'] .card.card-rows .field-row,
+[data-density='compact'] .card.card-rows .list-row {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
 /* ------------ Button ------------- */
 .btn {
   display: inline-flex;

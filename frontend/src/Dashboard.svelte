@@ -43,7 +43,7 @@
   import EmptyState from './components/EmptyState.svelte';
   import PageHeader from './PageHeader.svelte';
   import ServiceStatusGroup from './components/dashboard/ServiceStatusGroup.svelte';
-  import DashSection from './components/dashboard/DashSection.svelte';
+  import Section from './components/Section.svelte';
   import SystemResourcesWidget from './components/dashboard/SystemResourcesWidget.svelte';
   import TrafficTelemetryWidget from './components/dashboard/TrafficTelemetryWidget.svelte';
   import QuickActionsWidget from './components/dashboard/QuickActionsWidget.svelte';
@@ -1517,7 +1517,7 @@
               <div class="dash-col-left">
                 <!-- Service Status Group (DASH-03) -->
                 <div class="dash-section">
-                  <DashSection title={$t('dash.service_status')}>
+                  <Section title={$t('dash.service_status')}>
                     {#snippet meta()}
                       {#if watchdogBadge}
                         <div class="dash-watchdog-badge-row" title={$t(watchdogBadge.hintKey)}>
@@ -1539,7 +1539,7 @@
                       onRefresh={fetchLiveStatus}
                       onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
                     />
-                  </DashSection>
+                  </Section>
                 </div>
 
                 <!-- System Resources (DASH-01, DASH-04) -->

@@ -4,7 +4,7 @@
   import { showToast, showConfirm, mihomoApiReady, mihomoOfflineReason } from '../../stores';
   import Icon from '../../lib/components/Icon.svelte';
   import Card from '../Card.svelte';
-  import DashSection from './DashSection.svelte';
+  import Section from '../Section.svelte';
   import { summarizeGroupDelay } from '../../lib/groupDelay';
 
   let {
@@ -153,7 +153,7 @@
 </script>
 
 <div class="quick-actions-widget">
-  <DashSection title={$t('dash.quick_actions')}>
+  <Section title={$t('dash.quick_actions')}>
     <Card flush>
       <div class="qa-grid">
         <!-- 1. Refresh Subscriptions -->
@@ -245,7 +245,7 @@
         </button>
       </div>
     </Card>
-  </DashSection>
+  </Section>
 </div>
 
 <style>

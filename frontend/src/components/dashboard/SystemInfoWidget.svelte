@@ -2,7 +2,7 @@
   import { t, currentLang, pluralize } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import Card from '../Card.svelte';
-  import DashSection from './DashSection.svelte';
+  import Section from '../Section.svelte';
   import Skeleton from '../Skeleton.svelte';
   import type { SystemStats } from './SystemResourcesWidget.svelte';
   import { xkeenVersionLabel, type XKeenState } from '../../lib/xkeenState';
@@ -31,7 +31,7 @@
 </script>
 
 <div class="system-info-widget">
-  <DashSection title={$t('dash.system_info')}>
+  <Section title={$t('dash.system_info')}>
     {#snippet meta()}
       {#if onOpenAbout}
         <button
@@ -116,7 +116,7 @@
         </div>
       </div>
     </Card>
-  </DashSection>
+  </Section>
 </div>
 
 <style>

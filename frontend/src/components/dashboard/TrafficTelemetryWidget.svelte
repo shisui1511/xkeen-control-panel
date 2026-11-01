@@ -3,7 +3,7 @@
   import { trafficStream, formatTrafficSpeed, type TrafficState } from '../../lib/trafficStream';
   import Icon from '../../lib/components/Icon.svelte';
   import Card from '../Card.svelte';
-  import DashSection from './DashSection.svelte';
+  import Section from '../Section.svelte';
   import { isMihomo, mihomoApiState, mihomoOfflineReason } from '../../stores';
 
   let {
@@ -36,7 +36,7 @@
 </script>
 
 <div class="traffic-telemetry-widget">
-  <DashSection title={$t('nav.traffic')}>
+  <Section title={$t('nav.traffic')}>
     {#snippet meta()}
       <div class="telemetry-status">
         <span class="live-dot" class:live-dot-active={traffic.connected} aria-hidden="true"></span>
@@ -113,7 +113,7 @@
         </button>
       </div>
     </Card>
-  </DashSection>
+  </Section>
 </div>
 
 <style>

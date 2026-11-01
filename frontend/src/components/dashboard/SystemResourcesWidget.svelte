@@ -2,7 +2,7 @@
   import { t } from '../../i18n';
   import { formatBytes } from '../../lib/format';
   import Card from '../Card.svelte';
-  import DashSection from './DashSection.svelte';
+  import Section from '../Section.svelte';
   import Skeleton from '../Skeleton.svelte';
 
   export interface SystemStats {
@@ -92,7 +92,7 @@
 </script>
 
 <div class="system-resources-card">
-  <DashSection title={$t('dash.system_stats')}>
+  <Section title={$t('dash.system_stats')}>
     <Card flush>
       {#if !systemStats}
         <div class="res-grid">
@@ -235,7 +235,7 @@
         </div>
       {/if}
     </Card>
-  </DashSection>
+  </Section>
 </div>
 
 <style>

@@ -12,6 +12,7 @@
   } from '../../lib/releaseNotes';
   import SegmentedControl, { type SegmentItem } from '../SegmentedControl.svelte';
   import Modal from '../Modal.svelte';
+  import Section from '../Section.svelte';
   import Select from '../Select.svelte';
   import { updateState, refreshUpdateState, type UpdateCheckState } from '../../lib/updateNotify';
   import {
@@ -388,305 +389,320 @@
   });
 </script>
 
-<div class="card mb-2">
-  <div class="card-label">{$t('settings.update')}</div>
-  <div class="field-group">
-    <div class="field-row">
-      <span class="field-row-name">{$t('settings.current_version')}</span>
-      <span class="field-row-val version-val">
-        <span class="mono">{version}</span>
-        {#if version && version !== '...'}
-          <span class="badge {kindBadge(currentKind)}" data-testid="update-kind-current"
-            >{$t(`settings.update_kind_${currentKind}`)}</span
-          >
-        {/if}
-      </span>
-    </div>
-    <div class="field-row channel-row" data-testid="update-channel-row">
-      <div>
-        <span class="field-row-name">{$t('settings.update_channel')}</span>
-        <div class="field-row-desc">{$t(`settings.channel_${channel}_desc`)}</div>
-      </div>
-      <div class="field-row-val">
-        <SegmentedControl
-          items={channelItems}
-          value={channel}
-          ariaLabel={$t('settings.update_channel')}
-          onchange={saveChannel}
-        />
-      </div>
-    </div>
-  </div>
-
-  {#if status && status.status !== 'idle' && (busy || status.status === 'failed')}
-    <div class="update-progress" class:failed={status.status === 'failed'} aria-live="polite">
-      <div class="progress-head">
-        <span class="progress-stage">{stageLabel(status.status)}</span>
-        {#if status.status === 'downloading' && status.total}
-          <span class="progress-bytes mono"
-            >{$t('settings.update_downloaded', {
-              done: formatBytes(status.downloaded || 0),
-              total: formatBytes(status.total)
-            })}</span
-          >
-        {/if}
-      </div>
-      {#if status.status !== 'failed'}
-        <div class="progress-bar">
-          <div
-            class="progress-fill"
-            class:progress-pulse={reconnecting}
-            style:width="{reconnecting ? 100 : status.progress}%"
-          ></div>
-        </div>
-      {/if}
-      {#if failure}
-        <span class="progress-text">{$t(failure.reason.key, failure.reason.params)}</span>
-        {#if failure.detail}
-          <span class="progress-detail">{failure.detail}</span>
-        {/if}
-      {:else if stepRef}
-        <span class="progress-text">{$t(stepRef.key, stepRef.params)}</span>
-      {:else if status.message}
-        <span class="progress-text">{status.message}</span>
-      {/if}
-    </div>
-  {/if}
-
-  {#if reconnecting}
-    <div class="reconnect-overlay">
-      <div class="spinner reconnect-spinner"></div>
-      <div class="reconnect-text">
-        <span>{$t('settings.update_reconnecting')}</span>
-        <span class="reconnect-dots"></span>
-      </div>
-      <div class="reconnect-sub">{$t('settings.update_reconnecting_sub')}</div>
-    </div>
-  {:else if !busy}
-    {#if checkError}
-      <div class="update-state state-error">
-        {checkError}
-        {#if checkErrorDetail}
-          <span class="progress-detail">{checkErrorDetail}</span>
-        {/if}
-      </div>
-    {:else if info?.has_update}
-      {@const kind = releaseKind(info.latest_version)}
-      <div class="update-available">
-        <div class="available-head">
-          <span class="available-title"
-            >{$t('settings.update_available_title', { version: info.latest_version })}</span
-          >
-          <span class="badge {kindBadge(kind)}">{$t(`settings.update_kind_${kind}`)}</span>
-          {#if availableUrgent}
-            <span class="badge badge-warning" data-testid="update-urgent-badge"
-              >{$t('settings.update_urgent_badge')}</span
-            >
-          {/if}
-        </div>
-        <div class="available-meta">
-          {#if info.published_at}<span>{formatDate(info.published_at)}</span>{/if}
-          {#if info.download_size}<span
-              >{$t('settings.update_download_size', {
-                size: formatBytes(info.download_size)
-              })}</span
-            >{/if}
-          {#if info.releases && info.releases.length > 1}<span
-              >{$t('settings.update_versions_behind', { count: info.releases.length })}</span
-            >{/if}
-        </div>
-        {#if availableView}
-          <div class="available-auto" data-testid="update-available-auto" data-state={autoCode}>
-            {$t(availableView.key, availableView.params)}
-          </div>
-        {/if}
-        <button class="btn btn-primary" onclick={() => (showConfirmInstall = true)}>
-          {$t('settings.install_update')}
-        </button>
-      </div>
-    {:else if info}
-      <div class="update-state state-ok">
-        {$t('settings.update_up_to_date')}
-      </div>
-    {/if}
-  {/if}
-
-  <div class="card-actions">
-    <button class="btn btn-secondary" onclick={checkUpdate} disabled={checking || busy}>
-      {checking ? $t('settings.checking') : $t('settings.check_update')}
-    </button>
-    {#if checkedAt && !checking}
-      <span class="checked-at"
-        >{$t('settings.update_checked_at', { time: formatTime(checkedAt) })}</span
-      >
-    {/if}
-  </div>
-</div>
-
-{#if $updateState}
-  {@const auto = $updateState}
-  <div class="card mb-2">
-    <div class="card-label">{$t('settings.update_auto_title')}</div>
-    <div class="field-group">
-      <div class="field-row">
-        <div>
-          <span class="field-row-name">{$t('settings.update_auto_check')}</span>
-          <div class="field-row-desc">{$t('settings.update_auto_check_desc')}</div>
-        </div>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            aria-label={$t('settings.update_auto_check')}
-            checked={auto.auto_check}
-            disabled={savingAuto}
-            onchange={(e) => saveAuto({ auto_check: e.currentTarget.checked })}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="field-row">
-        <div>
-          <span class="field-row-name">{$t('settings.update_auto_install')}</span>
-          <div class="field-row-desc">{$t('settings.update_auto_install_desc')}</div>
-        </div>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            aria-label={$t('settings.update_auto_install')}
-            checked={auto.auto_install}
-            disabled={savingAuto}
-            onchange={(e) => saveAuto({ auto_install: e.currentTarget.checked })}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      {#if auto.auto_install}
+<div class="page-sections">
+  <Section title={$t('settings.update')}>
+    <div class="card card-rows">
+      <div class="field-group">
         <div class="field-row">
-          <div>
-            <span class="field-row-name">{$t('settings.update_window')}</span>
-            <div class="field-row-desc">{$t('settings.update_window_desc')}</div>
-          </div>
-          <Select
-            value={auto.install_window}
-            options={windowOptions}
-            ariaLabel={$t('settings.update_window')}
-            disabled={savingAuto}
-            onchange={(e) => saveAuto({ install_window: e.currentTarget.value })}
-          />
-        </div>
-      {/if}
-    </div>
-
-    {#if autoView}
-      <div
-        class="update-state state-info auto-status"
-        role="status"
-        data-testid="update-auto-status"
-        data-state={autoCode}
-      >
-        {$t(autoView.key, autoView.params)}
-      </div>
-    {/if}
-
-    {#if auto.last_auto_install}
-      {@const last = auto.last_auto_install}
-      <div class="update-state {last.ok ? 'state-ok' : 'state-error'}">
-        {last.ok
-          ? $t('settings.update_auto_last_ok', {
-              from: last.from,
-              version: last.version,
-              date: formatDate(last.done_at || last.started_at)
-            })
-          : $t('settings.update_auto_last_failed', { version: last.version, from: last.from })}
-      </div>
-    {/if}
-    {#if auto.checked_at}
-      <div class="checked-at auto-checked">
-        {$t('settings.update_auto_checked', { date: formatDate(auto.checked_at) })}
-        {#if auto.error}·
-          <span class="auto-error">{$t('settings.update_err_update_check_failed')}</span>
-          <span class="progress-detail">{auto.error}</span>{/if}
-      </div>
-    {/if}
-  </div>
-{/if}
-
-{#if notes.length > 0 && !busy}
-  <div class="card mb-2">
-    <div class="card-label">{$t('settings.update_whats_new')}</div>
-    <div class="release-list">
-      {#each notes as note (note.version)}
-        {@const kind = releaseKind(note.version)}
-        <section class="release">
-          <header class="release-head">
-            <span class="release-version mono">v{note.version}</span>
-            {#if kind !== 'stable'}
-              <span class="badge {kindBadge(kind)}">{$t(`settings.update_kind_${kind}`)}</span>
-            {/if}
-            {#if note.published_at}<span class="release-date">{formatDate(note.published_at)}</span
-              >{/if}
-            {#if note.url}
-              <a class="release-link" href={note.url} target="_blank" rel="noopener noreferrer"
-                >{$t('settings.update_release_page')}</a
+          <span class="field-row-name">{$t('settings.current_version')}</span>
+          <span class="field-row-val version-val">
+            <span class="mono">{version}</span>
+            {#if version && version !== '...'}
+              <span class="badge {kindBadge(currentKind)}" data-testid="update-kind-current"
+                >{$t(`settings.update_kind_${currentKind}`)}</span
               >
             {/if}
-          </header>
-          {#if note.sections.length === 0}
-            <p class="release-empty">{$t('settings.update_no_notes')}</p>
-          {:else}
-            {#each note.sections as section, i (i)}
-              <div class="release-section kind-{section.kind}">
-                <div class="section-title">{section.title}</div>
-                <ul>
-                  {#each section.items as item, j (j)}
-                    <li>
-                      {#each splitInlineCode(item.text) as seg, k (k)}
-                        {#if seg.code}<code>{seg.text}</code>{:else}{seg.text}{/if}
-                      {/each}
-                      {#if item.commit}
-                        <a
-                          class="commit-link mono"
-                          href={item.commit.url}
-                          target="_blank"
-                          rel="noopener noreferrer">{item.commit.sha}</a
-                        >
-                      {/if}
-                    </li>
-                  {/each}
-                </ul>
-              </div>
-            {/each}
-          {/if}
-        </section>
-      {/each}
-    </div>
-  </div>
-{/if}
-
-<div class="card mb-2">
-  <div class="card-label">{$t('settings.update_backups_title')}</div>
-  <div class="field-row-desc backups-hint">{$t('settings.update_backups_hint')}</div>
-  {#if backups.length === 0}
-    <div class="backups-empty">{$t('settings.update_backups_empty')}</div>
-  {:else}
-    <div class="field-group">
-      {#each backups as backup (backup.name)}
-        <div class="field-row">
-          <div>
-            <span class="field-row-name mono"
-              >{backup.version ? `v${backup.version}` : $t('settings.backup_unknown_version')}</span
-            >
-            <div class="field-row-desc">
-              {formatDate(backup.created_at)} · {formatBytes(backup.size)}
-            </div>
-          </div>
-          <button class="btn btn-secondary btn-sm" onclick={() => rollback(backup)} disabled={busy}>
-            {$t('settings.rollback')}
-          </button>
+          </span>
         </div>
-      {/each}
+        <div class="field-row channel-row" data-testid="update-channel-row">
+          <div>
+            <span class="field-row-name">{$t('settings.update_channel')}</span>
+            <div class="field-row-desc">{$t(`settings.channel_${channel}_desc`)}</div>
+          </div>
+          <div class="field-row-val">
+            <SegmentedControl
+              items={channelItems}
+              value={channel}
+              ariaLabel={$t('settings.update_channel')}
+              onchange={saveChannel}
+            />
+          </div>
+        </div>
+      </div>
+
+      {#if status && status.status !== 'idle' && (busy || status.status === 'failed')}
+        <div class="update-progress" class:failed={status.status === 'failed'} aria-live="polite">
+          <div class="progress-head">
+            <span class="progress-stage">{stageLabel(status.status)}</span>
+            {#if status.status === 'downloading' && status.total}
+              <span class="progress-bytes mono"
+                >{$t('settings.update_downloaded', {
+                  done: formatBytes(status.downloaded || 0),
+                  total: formatBytes(status.total)
+                })}</span
+              >
+            {/if}
+          </div>
+          {#if status.status !== 'failed'}
+            <div class="progress-bar">
+              <div
+                class="progress-fill"
+                class:progress-pulse={reconnecting}
+                style:width="{reconnecting ? 100 : status.progress}%"
+              ></div>
+            </div>
+          {/if}
+          {#if failure}
+            <span class="progress-text">{$t(failure.reason.key, failure.reason.params)}</span>
+            {#if failure.detail}
+              <span class="progress-detail">{failure.detail}</span>
+            {/if}
+          {:else if stepRef}
+            <span class="progress-text">{$t(stepRef.key, stepRef.params)}</span>
+          {:else if status.message}
+            <span class="progress-text">{status.message}</span>
+          {/if}
+        </div>
+      {/if}
+
+      {#if reconnecting}
+        <div class="reconnect-overlay">
+          <div class="spinner reconnect-spinner"></div>
+          <div class="reconnect-text">
+            <span>{$t('settings.update_reconnecting')}</span>
+            <span class="reconnect-dots"></span>
+          </div>
+          <div class="reconnect-sub">{$t('settings.update_reconnecting_sub')}</div>
+        </div>
+      {:else if !busy}
+        {#if checkError}
+          <div class="update-state state-error">
+            {checkError}
+            {#if checkErrorDetail}
+              <span class="progress-detail">{checkErrorDetail}</span>
+            {/if}
+          </div>
+        {:else if info?.has_update}
+          {@const kind = releaseKind(info.latest_version)}
+          <div class="update-available">
+            <div class="available-head">
+              <span class="available-title"
+                >{$t('settings.update_available_title', { version: info.latest_version })}</span
+              >
+              <span class="badge {kindBadge(kind)}">{$t(`settings.update_kind_${kind}`)}</span>
+              {#if availableUrgent}
+                <span class="badge badge-warning" data-testid="update-urgent-badge"
+                  >{$t('settings.update_urgent_badge')}</span
+                >
+              {/if}
+            </div>
+            <div class="available-meta">
+              {#if info.published_at}<span>{formatDate(info.published_at)}</span>{/if}
+              {#if info.download_size}<span
+                  >{$t('settings.update_download_size', {
+                    size: formatBytes(info.download_size)
+                  })}</span
+                >{/if}
+              {#if info.releases && info.releases.length > 1}<span
+                  >{$t('settings.update_versions_behind', { count: info.releases.length })}</span
+                >{/if}
+            </div>
+            {#if availableView}
+              <div class="available-auto" data-testid="update-available-auto" data-state={autoCode}>
+                {$t(availableView.key, availableView.params)}
+              </div>
+            {/if}
+            <button class="btn btn-primary" onclick={() => (showConfirmInstall = true)}>
+              {$t('settings.install_update')}
+            </button>
+          </div>
+        {:else if info}
+          <div class="update-state state-ok">
+            {$t('settings.update_up_to_date')}
+          </div>
+        {/if}
+      {/if}
+
+      <div class="card-footer">
+        <button class="btn btn-secondary" onclick={checkUpdate} disabled={checking || busy}>
+          {checking ? $t('settings.checking') : $t('settings.check_update')}
+        </button>
+        {#if checkedAt && !checking}
+          <span class="checked-at"
+            >{$t('settings.update_checked_at', { time: formatTime(checkedAt) })}</span
+          >
+        {/if}
+      </div>
     </div>
+  </Section>
+
+  {#if $updateState}
+    {@const auto = $updateState}
+    <Section title={$t('settings.update_auto_title')}>
+      <div class="card card-rows">
+        <div class="field-group">
+          <div class="field-row">
+            <div>
+              <span class="field-row-name">{$t('settings.update_auto_check')}</span>
+              <div class="field-row-desc">{$t('settings.update_auto_check_desc')}</div>
+            </div>
+            <label class="toggle-switch">
+              <input
+                type="checkbox"
+                aria-label={$t('settings.update_auto_check')}
+                checked={auto.auto_check}
+                disabled={savingAuto}
+                onchange={(e) => saveAuto({ auto_check: e.currentTarget.checked })}
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="field-row">
+            <div>
+              <span class="field-row-name">{$t('settings.update_auto_install')}</span>
+              <div class="field-row-desc">{$t('settings.update_auto_install_desc')}</div>
+            </div>
+            <label class="toggle-switch">
+              <input
+                type="checkbox"
+                aria-label={$t('settings.update_auto_install')}
+                checked={auto.auto_install}
+                disabled={savingAuto}
+                onchange={(e) => saveAuto({ auto_install: e.currentTarget.checked })}
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          {#if auto.auto_install}
+            <div class="field-row">
+              <div>
+                <span class="field-row-name">{$t('settings.update_window')}</span>
+                <div class="field-row-desc">{$t('settings.update_window_desc')}</div>
+              </div>
+              <Select
+                value={auto.install_window}
+                options={windowOptions}
+                ariaLabel={$t('settings.update_window')}
+                disabled={savingAuto}
+                onchange={(e) => saveAuto({ install_window: e.currentTarget.value })}
+              />
+            </div>
+          {/if}
+        </div>
+
+        {#if autoView}
+          <div
+            class="update-state state-info auto-status"
+            role="status"
+            data-testid="update-auto-status"
+            data-state={autoCode}
+          >
+            {$t(autoView.key, autoView.params)}
+          </div>
+        {/if}
+
+        {#if auto.last_auto_install}
+          {@const last = auto.last_auto_install}
+          <div class="update-state {last.ok ? 'state-ok' : 'state-error'}">
+            {last.ok
+              ? $t('settings.update_auto_last_ok', {
+                  from: last.from,
+                  version: last.version,
+                  date: formatDate(last.done_at || last.started_at)
+                })
+              : $t('settings.update_auto_last_failed', { version: last.version, from: last.from })}
+          </div>
+        {/if}
+        {#if auto.checked_at}
+          <div class="checked-at auto-checked">
+            {$t('settings.update_auto_checked', { date: formatDate(auto.checked_at) })}
+            {#if auto.error}·
+              <span class="auto-error">{$t('settings.update_err_update_check_failed')}</span>
+              <span class="progress-detail">{auto.error}</span>{/if}
+          </div>
+        {/if}
+      </div>
+    </Section>
   {/if}
+
+  {#if notes.length > 0 && !busy}
+    <Section title={$t('settings.update_whats_new')}>
+      <div class="card card-rows">
+        <div class="release-list">
+          {#each notes as note (note.version)}
+            {@const kind = releaseKind(note.version)}
+            <section class="release">
+              <header class="release-head">
+                <span class="release-version mono">v{note.version}</span>
+                {#if kind !== 'stable'}
+                  <span class="badge {kindBadge(kind)}">{$t(`settings.update_kind_${kind}`)}</span>
+                {/if}
+                {#if note.published_at}<span class="release-date"
+                    >{formatDate(note.published_at)}</span
+                  >{/if}
+                {#if note.url}
+                  <a class="release-link" href={note.url} target="_blank" rel="noopener noreferrer"
+                    >{$t('settings.update_release_page')}</a
+                  >
+                {/if}
+              </header>
+              {#if note.sections.length === 0}
+                <p class="release-empty">{$t('settings.update_no_notes')}</p>
+              {:else}
+                {#each note.sections as section, i (i)}
+                  <div class="release-section kind-{section.kind}">
+                    <div class="section-title">{section.title}</div>
+                    <ul>
+                      {#each section.items as item, j (j)}
+                        <li>
+                          {#each splitInlineCode(item.text) as seg, k (k)}
+                            {#if seg.code}<code>{seg.text}</code>{:else}{seg.text}{/if}
+                          {/each}
+                          {#if item.commit}
+                            <a
+                              class="commit-link mono"
+                              href={item.commit.url}
+                              target="_blank"
+                              rel="noopener noreferrer">{item.commit.sha}</a
+                            >
+                          {/if}
+                        </li>
+                      {/each}
+                    </ul>
+                  </div>
+                {/each}
+              {/if}
+            </section>
+          {/each}
+        </div>
+      </div>
+    </Section>
+  {/if}
+
+  <Section
+    title={$t('settings.update_backups_title')}
+    description={$t('settings.update_backups_hint')}
+  >
+    <div class="card card-rows">
+      {#if backups.length === 0}
+        <div class="card-empty">{$t('settings.update_backups_empty')}</div>
+      {:else}
+        <div class="field-group">
+          {#each backups as backup (backup.name)}
+            <div class="field-row">
+              <div>
+                <span class="field-row-name mono"
+                  >{backup.version
+                    ? `v${backup.version}`
+                    : $t('settings.backup_unknown_version')}</span
+                >
+                <div class="field-row-desc">
+                  {formatDate(backup.created_at)} · {formatBytes(backup.size)}
+                </div>
+              </div>
+              <button
+                class="btn btn-secondary btn-sm"
+                onclick={() => rollback(backup)}
+                disabled={busy}
+              >
+                {$t('settings.rollback')}
+              </button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  </Section>
 </div>
 
 <Modal
@@ -711,18 +727,6 @@
 </Modal>
 
 <style>
-  .card-label {
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    color: var(--fg-dim);
-    margin-bottom: 14px;
-  }
-
-  .mb-2 {
-    margin-bottom: 12px;
-  }
-
   .mono {
     font-family: var(--font-mono, monospace);
     font-size: 12px;
@@ -737,18 +741,21 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 0;
-    border-bottom: 1px solid var(--border);
     gap: 16px;
   }
 
-  .field-row:first-child {
-    padding-top: 0;
-  }
-
-  .field-row:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
+  /* Сообщения и прогресс внутри карточки-списка — полосы на всю ширину
+     между строками, без собственной рамки (не карточка в карточке). */
+  .card-rows > .update-state,
+  .card-rows > .update-available,
+  .card-rows > .update-progress,
+  .card-rows > .reconnect-overlay,
+  .card-rows > .auto-checked {
+    margin: 0;
+    border: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    padding: 14px var(--card-pad);
   }
 
   .field-row-name {
@@ -773,14 +780,6 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-  }
-
-  .card-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 14px;
-    flex-wrap: wrap;
   }
 
   .checked-at {
@@ -1000,6 +999,7 @@
   .release-list {
     display: flex;
     flex-direction: column;
+    padding: 16px var(--card-pad);
     gap: 16px;
     max-height: 480px;
     overflow-y: auto;
@@ -1102,15 +1102,6 @@
   .auto-error {
     color: var(--danger);
     word-break: break-word;
-  }
-
-  .backups-hint {
-    margin: -8px 0 10px;
-  }
-
-  .backups-empty {
-    font-size: 13px;
-    color: var(--fg-dim);
   }
 
   .confirm-text {
