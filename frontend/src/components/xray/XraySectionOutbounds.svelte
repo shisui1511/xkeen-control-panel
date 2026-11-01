@@ -251,7 +251,9 @@
       >
         <div>
           <span class="badge badge-tag">{item.tag}</span>
-          <span style="font-size: 0.75rem; color: var(--fg-secondary); margin-left: 8px;">
+          <span
+            style="font-size: var(--font-size-xs); color: var(--fg-secondary); margin-left: 8px;"
+          >
             ({item.protocol} &bull; {getNodeEndpoint(item)})
           </span>
         </div>
@@ -285,12 +287,14 @@
         <div>
           <span class="badge badge-tag" style="background: var(--bg-card);">{item.tag}</span>
           {#if item.server}
-            <span style="font-size: 0.75rem; color: var(--fg-secondary); margin-left: 8px;">
+            <span
+              style="font-size: var(--font-size-xs); color: var(--fg-secondary); margin-left: 8px;"
+            >
               ({item.protocol} &bull; {item.server})
             </span>
           {/if}
         </div>
-        <span class="tag-desc" style="font-size: 0.8125rem; color: var(--fg-secondary);">
+        <span class="tag-desc" style="font-size: var(--font-size-sm); color: var(--fg-secondary);">
           {item.tag === 'direct' ? $t('xray.direct_freedom') : ''}
           {item.tag === 'block' ? $t('xray.block_blackhole') : ''}
           {item.tag === 'dns-out' ? $t('xray.dns_requests') : ''}
@@ -336,7 +340,7 @@
           class="error-msg"
           id="xray-import-error"
           role="alert"
-          style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
+          style="color: var(--danger); margin-bottom: 12px; font-size: var(--font-size-sm);"
         >
           {importErrorMsg}
         </div>
@@ -387,7 +391,7 @@
               bind:value={importLink}
               placeholder={$t('subscr.import_link_placeholder')}
               rows="4"
-              style="resize: none; font-family: var(--font-family-mono); font-size: 12px; width: 100%; box-sizing: border-box;"
+              style="resize: none; font-family: var(--font-family-mono); font-size: var(--font-size-xs); width: 100%; box-sizing: border-box;"
             ></textarea>
           </div>
         {:else if importSource === 'file'}
@@ -410,8 +414,8 @@
               if (f) handleConfigFile(f);
             }}
           >
-            <div style="font-size: 24px;">📄</div>
-            <div style="font-size: 13px; color: var(--fg-secondary);">
+            <div style="font-size: var(--font-size-3xl);">📄</div>
+            <div style="font-size: var(--font-size-sm); color: var(--fg-secondary);">
               {#if loadedFileName}
                 <span style="color: var(--accent); font-weight: 600;">{loadedFileName}</span>
                 <span> ({$t('subscr.import_file_loaded')})</span>
@@ -433,7 +437,9 @@
           <div
             style="padding: 24px; text-align: center; background: var(--bg-card); border: 1px dashed var(--border); border-radius: var(--radius);"
           >
-            <p style="font-size: 13px; color: var(--fg-secondary); margin-bottom: 12px;">
+            <p
+              style="font-size: var(--font-size-sm); color: var(--fg-secondary); margin-bottom: 12px;"
+            >
               {$t('subscr.import_clipboard_desc')}
             </p>
             <button
@@ -459,7 +465,7 @@
         {/if}
       {:else if importStep === 2 && importNodes.length > 0}
         <div class="preview-section">
-          <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
+          <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: var(--font-size-base);">
             {$t('subscr.import_preview_title')}
           </h3>
           <div
@@ -478,12 +484,14 @@
                     style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; display: flex; align-items: center;"
                     aria-label={$t('app.remove')}><Icon name="close" size={12} /></button
                   >
-                  <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
+                  <div
+                    style="font-size: var(--font-size-xs); color: var(--danger); padding-right: 20px;"
+                  >
                     <strong>{$t('app.error')}:</strong>
                     {item.rowError}
                   </div>
                   <div
-                    style="font-size: 0.6875rem; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
+                    style="font-size: var(--font-size-2xs); color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
                     title={item.link}
                   >
                     {item.link}
@@ -501,7 +509,7 @@
                     aria-label={$t('app.remove')}><Icon name="close" size={12} /></button
                   >
                   <div
-                    style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
+                    style="display: flex; justify-content: space-between; font-size: var(--font-size-xs); color: var(--fg-secondary); padding-right: 20px;"
                   >
                     <span>
                       <strong style="color: var(--fg-primary);">{item.outbound?.protocol}</strong> · {getNodeServer(
@@ -512,7 +520,7 @@
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <label
                       class="form-label"
-                      style="margin: 0; font-size: 12px; flex-shrink: 0;"
+                      style="margin: 0; font-size: var(--font-size-xs); flex-shrink: 0;"
                       for="import-tag-{idx}"
                     >
                       {$t('subscr.import_tag_custom')}:
@@ -526,7 +534,7 @@
                       aria-describedby={importTagErrors[idx]
                         ? `import-tag-error-${idx}`
                         : undefined}
-                      style="flex-grow: 1; font-size: 12px; padding: 4px 8px;"
+                      style="flex-grow: 1; font-size: var(--font-size-xs); padding: 4px 8px;"
                     />
                   </div>
                   {#if importTagErrors[idx]}
@@ -534,7 +542,7 @@
                       class="import-tag-error"
                       id="import-tag-error-{idx}"
                       role="alert"
-                      style="font-size: 12px; color: var(--danger);"
+                      style="font-size: var(--font-size-xs); color: var(--danger);"
                     >
                       {importTagErrors[idx]}
                     </div>
@@ -592,7 +600,7 @@
   }
 
   .section-title {
-    font-size: 0.9375rem;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -610,7 +618,7 @@
   }
 
   .badge-tag {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     padding: 2px 6px;
     border-radius: var(--radius-xs);
     display: inline-flex;
@@ -626,7 +634,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-xs);
     padding: 4px 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     color: var(--fg-secondary);
     transition: all 0.15s ease;
@@ -645,7 +653,7 @@
   }
 
   .form-label {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
   }
@@ -655,7 +663,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
@@ -670,7 +678,7 @@
     border-radius: var(--radius);
     padding: 10px 16px;
     color: var(--fg-secondary);
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
     text-align: center;

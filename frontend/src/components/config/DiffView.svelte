@@ -87,7 +87,7 @@
     border: 1px solid var(--border-light);
     border-radius: var(--radius-md);
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     scrollbar-width: thin;
   }

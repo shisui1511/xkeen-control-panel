@@ -475,7 +475,7 @@
     display: flex !important;
     flex-direction: column !important;
     height: 100% !important;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     background: var(--cm-bg) !important;
     color: var(--fg-primary) !important;
   }
@@ -603,7 +603,7 @@
   }
   :global(.cm-schema-badge-type) {
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 1px 7px;
     border-radius: var(--radius-full, 9999px);
@@ -612,7 +612,7 @@
     border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   }
   :global(.cm-schema-badge-required) {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 1px 6px;
     border-radius: var(--radius-full, 9999px);
@@ -624,7 +624,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     padding: 1px 7px;
     border-radius: var(--radius-full, 9999px);
     background: var(--bg-surface-elevated);
@@ -707,7 +707,7 @@
   :global(.cm-schema-tooltip-description li strong) {
     color: var(--accent);
     font-family: var(--font-family-mono);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     background: color-mix(in srgb, var(--accent) 10%, transparent);
     padding: 1px 5px;
     border-radius: var(--radius-xs);
@@ -745,7 +745,7 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-2);
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -765,7 +765,7 @@
     align-items: center;
     gap: 4px;
     font-family: var(--font-family-mono);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     padding: 2px 8px;
     border-radius: var(--radius-sm);
     background: var(--bg-card);
@@ -782,7 +782,7 @@
     background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
   }
   :global(.cm-schema-enum-default-tag) {
-    font-size: 9px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -847,7 +847,7 @@
 
   @media (max-width: 768px) {
     :global(.cm-editor) {
-      font-size: 16px;
+      font-size: var(--font-size-lg);
     }
     :global(.cm-gutters) {
       display: none !important;
@@ -863,7 +863,7 @@
     :global(.cm-panel.cm-search input[name='replace']) {
       width: 100% !important;
       max-width: 100% !important;
-      font-size: 14px;
+      font-size: var(--font-size-base);
       height: 32px;
     }
     :global(.cm-panel.cm-search button[name='close']) {

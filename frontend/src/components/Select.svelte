@@ -111,7 +111,7 @@
 
   @media (max-width: 768px) {
     .xcp-select select {
-      font-size: 16px;
+      font-size: var(--font-size-lg);
     }
   }
 </style>

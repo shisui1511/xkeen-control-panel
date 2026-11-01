@@ -3,6 +3,7 @@
   import { trafficStream, formatTrafficSpeed, type TrafficState } from '../../lib/trafficStream';
   import Icon from '../../lib/components/Icon.svelte';
   import Card from '../Card.svelte';
+  import Section from '../Section.svelte';
   import { isMihomo, mihomoApiState, mihomoOfflineReason } from '../../stores';
 
   let {
@@ -35,104 +36,97 @@
 </script>
 
 <div class="traffic-telemetry-widget">
-  <Card title={$t('nav.traffic')}>
-    {#snippet actions()}
+  <Section title={$t('nav.traffic')}>
+    {#snippet meta()}
       <div class="telemetry-status">
         <span class="live-dot" class:live-dot-active={traffic.connected} aria-hidden="true"></span>
         <span class="status-lbl">{traffic.connected ? 'Live' : 'Offline'}</span>
       </div>
     {/snippet}
 
-    <div class="telemetry-grid">
-      <!-- Download Speed -->
-      <button
-        type="button"
-        class="telemetry-box"
-        onclick={handleTrafficClick}
-        title={$t('traffic.goto_charts')}
-      >
-        <div class="box-head">
-          <span class="ico-badge down-badge">
-            <Icon name="arrow-down" size={14} color="var(--accent, #29c2f0)" />
+    <Card flush>
+      <div class="telemetry-grid">
+        <!-- Download Speed -->
+        <button
+          type="button"
+          class="telemetry-box"
+          onclick={handleTrafficClick}
+          title={$t('traffic.goto_charts')}
+        >
+          <span class="box-head">
+            <Icon name="arrow-down" size={14} color="var(--accent)" />
+            <span class="box-label">{$t('traffic.download')}</span>
           </span>
-          <span class="box-label">{$t('traffic.download')}</span>
-        </div>
-        <div class="box-value tabular-nums">
-          {formattedDown}
-        </div>
-        <div class="box-sub">
-          {traffic.connected ? $t('traffic.inbound_flow') : $t('traffic.waiting_flow')}
-        </div>
-      </button>
+          <span class="box-value tabular-nums">{formattedDown}</span>
+          <span class="box-sub">
+            {traffic.connected ? $t('traffic.inbound_flow') : $t('traffic.waiting_flow')}
+          </span>
+        </button>
 
-      <!-- Upload Speed -->
-      <button
-        type="button"
-        class="telemetry-box"
-        onclick={handleTrafficClick}
-        title={$t('traffic.goto_charts')}
-      >
-        <div class="box-head">
-          <span class="ico-badge up-badge">
-            <Icon name="upload" size={14} color="var(--success, #46d18a)" />
+        <!-- Upload Speed -->
+        <button
+          type="button"
+          class="telemetry-box"
+          onclick={handleTrafficClick}
+          title={$t('traffic.goto_charts')}
+        >
+          <span class="box-head">
+            <Icon name="upload" size={14} color="var(--success)" />
+            <span class="box-label">{$t('traffic.upload')}</span>
           </span>
-          <span class="box-label">{$t('traffic.upload')}</span>
-        </div>
-        <div class="box-value tabular-nums">
-          {formattedUp}
-        </div>
-        <div class="box-sub">
-          {traffic.connected ? $t('traffic.outbound_flow') : $t('traffic.waiting_flow')}
-        </div>
-      </button>
+          <span class="box-value tabular-nums">{formattedUp}</span>
+          <span class="box-sub">
+            {traffic.connected ? $t('traffic.outbound_flow') : $t('traffic.waiting_flow')}
+          </span>
+        </button>
 
-      <!-- Active Connections -->
-      <button
-        type="button"
-        class="telemetry-box"
-        onclick={handleConnectionsClick}
-        title={$t('traffic.goto_sessions')}
-      >
-        <div class="box-head">
-          <span class="ico-badge conn-badge">
-            <Icon name="connections" size={14} color="var(--warning, #f0b450)" />
+        <!-- Active Connections -->
+        <button
+          type="button"
+          class="telemetry-box"
+          onclick={handleConnectionsClick}
+          title={$t('traffic.goto_sessions')}
+        >
+          <span class="box-head">
+            <Icon name="connections" size={14} color="var(--warning)" />
+            <span class="box-label">{$t('dash.connections')}</span>
           </span>
-          <span class="box-label">{$t('dash.connections')}</span>
-        </div>
-        <div class="box-value tabular-nums" data-testid="dash-connections-value">
-          {connectionsLive ? traffic.connections : '—'}
-        </div>
-        {#if connectionsLive}
-          <div
-            class="box-sub tabular-nums"
-            title="TCP {traffic.tcp_connections} · UDP {traffic.udp_connections}"
-          >
-            TCP {traffic.tcp_connections} · UDP {traffic.udp_connections}
-          </div>
-        {:else}
-          <div
-            class="box-sub"
-            data-testid={offlineReasonKey ? 'dash-connections-offline' : undefined}
-            title={offlineReasonKey ? $t(offlineReasonKey) : undefined}
-          >
-            {offlineReasonKey ? $t(offlineReasonKey) : '\u00a0'}
-          </div>
-        {/if}
-      </button>
-    </div>
-  </Card>
+          <span class="box-value tabular-nums" data-testid="dash-connections-value">
+            {connectionsLive ? traffic.connections : '—'}
+          </span>
+          {#if connectionsLive}
+            <span
+              class="box-sub tabular-nums"
+              title="TCP {traffic.tcp_connections} · UDP {traffic.udp_connections}"
+            >
+              TCP {traffic.tcp_connections} · UDP {traffic.udp_connections}
+            </span>
+          {:else}
+            <span
+              class="box-sub"
+              data-testid={offlineReasonKey ? 'dash-connections-offline' : undefined}
+              title={offlineReasonKey ? $t(offlineReasonKey) : undefined}
+            >
+              {offlineReasonKey ? $t(offlineReasonKey) : '\u00a0'}
+            </span>
+          {/if}
+        </button>
+      </div>
+    </Card>
+  </Section>
 </div>
 
 <style>
   .traffic-telemetry-widget {
     width: 100%;
+    container: telemetry / inline-size;
   }
 
   .telemetry-status {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
   }
@@ -149,7 +143,7 @@
 
   .live-dot-active {
     background-color: var(--success);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--success) 60%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
     animation: livePulse 2s infinite;
   }
 
@@ -163,81 +157,73 @@
     }
   }
 
-  .status-lbl {
-    font-family: var(--font-family-mono, monospace);
-  }
-
+  /* Три метрики одной полосой; линии между ячейками — как у «Системных ресурсов». */
   .telemetry-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  /* Телефон: три колонки остаются, ячейки плотнее */
+  @container telemetry (max-width: 480px) {
+    .telemetry-box {
+      min-height: 0;
+      padding: var(--spacing-3);
+    }
+
+    .box-value {
+      font-size: var(--font-size-xl);
+    }
   }
 
   .telemetry-box {
-    background: var(--surface-tint-faint);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md, 10px);
-    padding: 14px;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
-    min-height: 104px;
-    gap: 6px;
+    gap: var(--spacing-1);
+    min-width: 0;
+    min-height: 108px;
+    padding: var(--spacing-4) var(--card-pad);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow:
+      1px 0 0 var(--border),
+      0 1px 0 var(--border);
+    color: inherit;
+    font-family: inherit;
     text-align: left;
     cursor: pointer;
-    transition:
-      background 0.15s ease,
-      border-color 0.15s ease,
-      transform 0.15s ease;
-    width: 100%;
+    transition: background-color var(--transition-fast);
   }
 
   .telemetry-box:hover {
-    background: var(--surface-tint);
-    border-color: rgba(var(--accent-rgb), 0.3);
-    transform: translateY(-1px);
+    background: var(--surface-tint-faint);
+  }
+
+  .telemetry-box:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .box-head {
     display: flex;
     align-items: center;
-    gap: 8px;
-  }
-
-  .ico-badge {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border-radius: var(--radius-sm, 6px);
-  }
-
-  .down-badge {
-    background: rgba(var(--accent-rgb), 0.12);
-  }
-
-  .up-badge {
-    background: color-mix(in srgb, var(--success) 12%, transparent);
-  }
-
-  .conn-badge {
-    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    gap: var(--spacing-2);
+    margin-bottom: var(--spacing-1);
   }
 
   .box-label {
-    font-size: 13px;
-    font-weight: 600;
-    text-transform: none;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
     color: var(--fg-secondary);
   }
 
   .box-value {
-    font-size: 22px;
+    font-size: var(--font-size-2xl);
     font-weight: 600;
-    color: var(--fg-primary);
     line-height: 1.2;
-    font-family: var(--font-family-mono, monospace);
+    letter-spacing: -0.02em;
+    color: var(--fg-primary);
+    white-space: nowrap;
   }
 
   .tabular-nums {
@@ -245,8 +231,8 @@
   }
 
   .box-sub {
-    font-size: 12px;
-    color: var(--fg-secondary);
+    font-size: var(--font-size-xs);
+    color: var(--fg-dim);
     line-height: 1.4;
     white-space: nowrap;
     overflow: hidden;

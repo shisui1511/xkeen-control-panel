@@ -212,7 +212,7 @@
     background: transparent;
     border: none;
     color: var(--fg-secondary);
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     line-height: 1;
     cursor: pointer;
     padding: 0 4px;
@@ -297,7 +297,7 @@
 
   .history-badge {
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 2px 6px;
     border-radius: var(--radius-sm);

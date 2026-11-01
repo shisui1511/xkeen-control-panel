@@ -632,7 +632,7 @@
     line-height: 1.5;
   }
 
-  @media (max-width: 860px) {
+  @media (max-width: 1024px) {
     .flow-container {
       grid-template-columns: 1fr;
       gap: 12px;
@@ -644,7 +644,7 @@
     }
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 768px) {
     .diagnostic-form {
       flex-direction: column;
       align-items: stretch;

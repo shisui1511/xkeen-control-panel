@@ -734,7 +734,7 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     width: 100%;
     margin-top: 2px;
@@ -742,7 +742,7 @@
   .group-card .gc-head .name {
     font-weight: 800;
     color: var(--fg-primary);
-    font-size: 15px;
+    font-size: var(--font-size-lg);
     letter-spacing: -0.01em;
   }
   .gc-head-actions {
@@ -887,7 +887,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 8%, transparent);
     padding: 1px 6px;
@@ -1063,7 +1063,7 @@
   .proxy-card .p-name {
     font-weight: 600;
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     word-break: break-all;
   }
   .flag-icon {
@@ -1173,7 +1173,7 @@
     cursor: not-allowed;
   }
   .selector-dot {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     color: var(--fg-dim);
     font-weight: 700;
   }
@@ -1200,7 +1200,7 @@
   }
   .lat {
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 4px;
@@ -1211,7 +1211,7 @@
     cursor: pointer;
     font: inherit;
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     line-height: 1.2;
     display: inline-flex;
@@ -1270,7 +1270,7 @@
     border-radius: var(--radius-sm);
     color: var(--accent);
     padding: 6px 12px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: all 0.15s;
   }
@@ -1316,7 +1316,7 @@
     display: none;
   }
   :global(.group-list) .gc-head .name {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     max-width: 220px;
     overflow: hidden;
     text-overflow: ellipsis;

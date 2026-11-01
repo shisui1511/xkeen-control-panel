@@ -53,16 +53,16 @@
 
   {#if accessPath || errorPath}
     <div class="logs-paths card" style="margin-top: 12px; padding: 12px;">
-      <h4 style="margin: 0 0 8px 0; font-size: 0.875rem;">
+      <h4 style="margin: 0 0 8px 0; font-size: var(--font-size-base);">
         {$t('xray.logs_paths')}
       </h4>
       {#if accessPath}
-        <div style="font-size: 0.8125rem;">
+        <div style="font-size: var(--font-size-sm);">
           <strong>Access:</strong> <code>{accessPath}</code>
         </div>
       {/if}
       {#if errorPath}
-        <div style="font-size: 0.8125rem; margin-top: 4px;">
+        <div style="font-size: var(--font-size-sm); margin-top: 4px;">
           <strong>Error:</strong> <code>{errorPath}</code>
         </div>
       {/if}
@@ -78,7 +78,7 @@
   }
 
   .section-title {
-    font-size: 0.9375rem;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -90,7 +90,7 @@
   }
 
   .form-label {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
   }
@@ -100,7 +100,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
@@ -108,7 +108,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     cursor: pointer;
     position: relative;
@@ -152,7 +152,7 @@
 
   .logs-paths code {
     font-family: var(--font-family-mono);
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     color: var(--code-fg, var(--fg-primary));
     background: var(--code-bg, var(--bg-surface-active));
     padding: 2px 4px;

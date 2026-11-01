@@ -2,7 +2,7 @@
   import { t, currentLang, pluralize } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import Card from '../Card.svelte';
-  import Button from '../Button.svelte';
+  import Section from '../Section.svelte';
   import Skeleton from '../Skeleton.svelte';
   import type { SystemStats } from './SystemResourcesWidget.svelte';
   import { xkeenVersionLabel, type XKeenState } from '../../lib/xkeenState';
@@ -31,85 +31,92 @@
 </script>
 
 <div class="system-info-widget">
-  <Card title={$t('dash.system_info')}>
-    {#snippet actions()}
+  <Section title={$t('dash.system_info')}>
+    {#snippet meta()}
       {#if onOpenAbout}
-        <Button variant="secondary" onclick={onOpenAbout} title={$t('dash.system_about_title')}>
-          <Icon name="info" size={13} color="var(--accent, #29c2f0)" />
-          <span class="btn-about-text">{$t('dash.system_about_btn')}</span>
-        </Button>
+        <button
+          type="button"
+          class="about-link"
+          onclick={onOpenAbout}
+          title={$t('dash.system_about_title')}
+        >
+          <Icon name="info" size={14} />
+          <span>{$t('dash.system_about_btn')}</span>
+        </button>
       {/if}
     {/snippet}
 
-    <div class="info-rows">
-      <div class="info-row">
-        <div class="lbl">{$t('dash.info_version')}</div>
-        <div class="val mono" title={versionText}>{versionText}</div>
-      </div>
-
-      <div class="info-row">
-        <div class="lbl">{$t('dash.info_version_panel')}</div>
-        <div class="val mono" title={panelVersion}>{panelVersion}</div>
-      </div>
-
-      <div class="info-row">
-        <div class="lbl">{$t('dash.info_platform')}</div>
-        <div class="val" title={systemStats?.platform || '—'}>{systemStats?.platform || '—'}</div>
-      </div>
-
-      <div class="info-row">
-        <div class="lbl">{$t('dash.info_kernel')}</div>
-        <div class="val mono" title={systemStats?.kernel_version || '—'}>
-          {systemStats?.kernel_version || '—'}
+    <Card>
+      <div class="info-rows">
+        <div class="info-row">
+          <div class="lbl">{$t('dash.info_version')}</div>
+          <div class="val mono" title={versionText}>{versionText}</div>
         </div>
-      </div>
 
-      <div class="info-row">
-        <div class="lbl">{$t('dash.info_host')}</div>
-        <div class="val" title={systemStats?.hostname || '—'}>{systemStats?.hostname || '—'}</div>
-      </div>
-
-      <div class="info-row">
-        <div class="lbl">{$t('dash.info_ip')}</div>
-        <div class="val mono" title={systemStats?.ip_interface || '—'}>
-          {systemStats?.ip_interface || '—'}
+        <div class="info-row">
+          <div class="lbl">{$t('dash.info_version_panel')}</div>
+          <div class="val mono" title={panelVersion}>{panelVersion}</div>
         </div>
-      </div>
 
-      <div class="info-row">
-        <div class="lbl">{$t('dash.info_timezone')}</div>
-        <div class="val" title={systemStats?.timezone || '—'}>{systemStats?.timezone || '—'}</div>
-      </div>
+        <div class="info-row">
+          <div class="lbl">{$t('dash.info_platform')}</div>
+          <div class="val" title={systemStats?.platform || '—'}>{systemStats?.platform || '—'}</div>
+        </div>
 
-      <div class="info-row">
-        <div class="lbl">{$t('dash.info_config')}</div>
-        <div class="val config-val">
-          <span class="config-path mono" title={systemStats?.config_path || '/opt/etc/xkeen/'}>
-            {systemStats?.config_path || '/opt/etc/xkeen/'}
-          </span>
-          {#if systemStats?.config_lines}
-            <!-- D-08: Soft muted line count badge instead of aggressive orange -->
-            <span class="info-badge info-badge-muted" title="{systemStats.config_lines} lines">
-              {pluralize(
-                systemStats.config_lines,
-                $t('dash.info_lines_one', { count: String(systemStats.config_lines) }),
-                $t('dash.info_lines_few', { count: String(systemStats.config_lines) }),
-                $t('dash.info_lines_many', { count: String(systemStats.config_lines) }),
-                $currentLang
-              )}
+        <div class="info-row">
+          <div class="lbl">{$t('dash.info_kernel')}</div>
+          <div class="val mono" title={systemStats?.kernel_version || '—'}>
+            {systemStats?.kernel_version || '—'}
+          </div>
+        </div>
+
+        <div class="info-row">
+          <div class="lbl">{$t('dash.info_host')}</div>
+          <div class="val" title={systemStats?.hostname || '—'}>{systemStats?.hostname || '—'}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="lbl">{$t('dash.info_ip')}</div>
+          <div class="val mono" title={systemStats?.ip_interface || '—'}>
+            {systemStats?.ip_interface || '—'}
+          </div>
+        </div>
+
+        <div class="info-row">
+          <div class="lbl">{$t('dash.info_timezone')}</div>
+          <div class="val" title={systemStats?.timezone || '—'}>{systemStats?.timezone || '—'}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="lbl">{$t('dash.info_config')}</div>
+          <div class="val config-val">
+            <span class="config-path mono" title={systemStats?.config_path || '/opt/etc/xkeen/'}>
+              {systemStats?.config_path || '/opt/etc/xkeen/'}
             </span>
-          {/if}
+            {#if systemStats?.config_lines}
+              <!-- D-08: Soft muted line count badge instead of aggressive orange -->
+              <span class="info-badge info-badge-muted" title="{systemStats.config_lines} lines">
+                {pluralize(
+                  systemStats.config_lines,
+                  $t('dash.info_lines_one', { count: String(systemStats.config_lines) }),
+                  $t('dash.info_lines_few', { count: String(systemStats.config_lines) }),
+                  $t('dash.info_lines_many', { count: String(systemStats.config_lines) }),
+                  $currentLang
+                )}
+              </span>
+            {/if}
+          </div>
         </div>
-      </div>
 
-      <div class="info-row">
-        <div class="lbl">{$t('dash.info_updated')}</div>
-        <div class="val text-muted" title={statsLastFetched || '—'}>
-          {statsLastFetched || '—'}
+        <div class="info-row">
+          <div class="lbl">{$t('dash.info_updated')}</div>
+          <div class="val text-muted" title={statsLastFetched || '—'}>
+            {statsLastFetched || '—'}
+          </div>
         </div>
       </div>
-    </div>
-  </Card>
+    </Card>
+  </Section>
 </div>
 
 <style>
@@ -117,8 +124,30 @@
     width: 100%;
   }
 
-  .btn-about-text {
-    font-size: 12px;
+  /* Тихое действие в шапке секции: текст акцентного цвета без рамки */
+  .about-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px var(--spacing-2);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--accent-text);
+    font-family: inherit;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color var(--transition-fast);
+  }
+
+  .about-link:hover {
+    background: var(--hover);
+  }
+
+  .about-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
 
   .info-rows {
@@ -134,7 +163,7 @@
     padding: 10px 0;
     border-bottom: 1px solid var(--border-light);
     border-right: 0;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .info-row:last-child {
@@ -148,7 +177,7 @@
 
   .lbl {
     color: var(--fg-secondary);
-    font-weight: 500;
+    font-weight: 400;
     flex-shrink: 0;
   }
 
@@ -167,7 +196,7 @@
 
   .text-muted {
     color: var(--fg-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .config-val {
@@ -183,7 +212,7 @@
   /* D-08: Soft muted pill badge */
   .info-badge {
     display: inline-block;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 2px 7px;
     border-radius: var(--radius-sm, 6px);

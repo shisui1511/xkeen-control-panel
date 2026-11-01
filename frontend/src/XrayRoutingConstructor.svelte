@@ -1182,13 +1182,13 @@
             class="validation-error-block"
             role="alert"
             aria-live="assertive"
-            style="margin-top: 12px; padding: 12px; background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
+            style="margin-top: 12px; padding: 12px; background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: var(--font-size-sm);"
           >
             <div style="font-weight: bold; margin-bottom: 6px;">
               {$t('editor.validation_failed')}
             </div>
             <div
-              style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;"
+              style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: var(--font-size-sm); margin-bottom: 8px;"
             >
               {parseValidationError(validationError, $currentLang)}
             </div>
@@ -1294,7 +1294,7 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    font-size: 13.5px;
+    font-size: var(--font-size-base);
     color: var(--fg-secondary);
   }
 

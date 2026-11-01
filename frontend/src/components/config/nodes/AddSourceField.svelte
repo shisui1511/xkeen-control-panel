@@ -485,7 +485,7 @@
   @media (max-width: 768px) {
     .add-input {
       --add-line: 24px;
-      font-size: 16px;
+      font-size: var(--font-size-lg);
     }
 
     .add-actions :global(.btn),

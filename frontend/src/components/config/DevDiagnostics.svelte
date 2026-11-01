@@ -2,6 +2,7 @@
   import { t } from '../../i18n';
   import { configLayerEnabled } from '../../stores';
   import Button from '../Button.svelte';
+  import Section from '../Section.svelte';
   import { layerSnapshot, applyRunning, diagAction, handleLayerError } from '../../lib/configLayer';
 
   type DiagAction = Parameters<typeof diagAction>[0];
@@ -32,10 +33,8 @@
 </script>
 
 {#if shown}
-  <section class="card" data-testid="config-diag" aria-label={$t('cfg.diag.title')}>
-    <div class="card-title">{$t('cfg.diag.title')}</div>
-    <p class="diag-desc">{$t('cfg.diag.desc')}</p>
-    <div class="diag-actions">
+  <Section title={$t('cfg.diag.title')} description={$t('cfg.diag.desc')} testid="config-diag">
+    <div class="card diag-actions">
       {#each ACTIONS as { action, key } (action)}
         <Button
           variant="secondary"
@@ -47,17 +46,10 @@
         >
       {/each}
     </div>
-  </section>
+  </Section>
 {/if}
 
 <style>
-  .diag-desc {
-    margin: 0 0 12px;
-    font-size: var(--font-size-base);
-    line-height: 1.5;
-    color: var(--fg-secondary);
-  }
-
   .diag-actions {
     display: flex;
     flex-wrap: wrap;

@@ -1366,7 +1366,7 @@
     border: none;
     color: var(--fg-dim);
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     line-height: 1;
     padding: 0 4px;
   }
@@ -1396,7 +1396,7 @@
   }
 
   .group-lbl {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 
@@ -1478,7 +1478,7 @@
   }
 
   .grp-chevron {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     color: var(--accent);
     transition: transform 0.2s ease;
   }
@@ -1589,13 +1589,13 @@
   }
 
   .src-name {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
   }
 
   .src-main-ip {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-primary);
   }
 
@@ -1729,7 +1729,7 @@
     border-radius: 4px;
     background: transparent;
     color: var(--danger);
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     cursor: pointer;
     transition: background 0.15s ease;
   }
@@ -1782,7 +1782,7 @@
 
   .drawer-title {
     margin: 0;
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     font-weight: 700;
     color: var(--fg-primary);
   }
@@ -1796,7 +1796,7 @@
     background: transparent;
     border: none;
     color: var(--fg-dim);
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     cursor: pointer;
     padding: 4px;
   }
@@ -1842,7 +1842,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .m-key {

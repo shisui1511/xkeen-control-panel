@@ -753,7 +753,7 @@
     color: var(--fg-primary);
     padding: 6px 10px;
     border-radius: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     line-height: 1.2;
     white-space: nowrap;

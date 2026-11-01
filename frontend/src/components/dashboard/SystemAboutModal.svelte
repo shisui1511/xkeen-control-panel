@@ -170,14 +170,14 @@
   }
 
   .section-title {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
     margin: 0;
   }
 
   .section-desc {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     margin: -6px 0 4px;
     line-height: 1.4;
@@ -189,7 +189,7 @@
     gap: 10px;
   }
 
-  @media (max-width: 540px) {
+  @media (max-width: 480px) {
     .diag-grid {
       grid-template-columns: 1fr;
     }
@@ -210,13 +210,13 @@
   }
 
   .diag-label {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     font-weight: 500;
   }
 
   .diag-val {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
     word-break: break-all;
@@ -230,7 +230,7 @@
     display: inline-block;
     padding: 1px 6px;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     background: var(--surface-tint-strong);
     color: var(--fg-secondary);

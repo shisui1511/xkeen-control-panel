@@ -3,6 +3,7 @@
   import { showToast } from '../../../stores';
   import Input from '../../Input.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
+  import Section from '../../Section.svelte';
   import { handleLayerError } from '../../../lib/configLayer';
   import {
     routingView,
@@ -130,24 +131,28 @@
   }
 </script>
 
-<section class="card probe-card" aria-labelledby="{uid}-title" data-testid="probe-card">
-  <h3 class="probe-head">
+<Section
+  title={$t('cfg.groups.probe_title')}
+  description={$t('cfg.groups.probe_desc')}
+  testid="probe-card"
+>
+  {#snippet meta()}
     <button
       type="button"
-      class="probe-expand"
+      class="btn btn-secondary btn-sm probe-toggle"
       aria-expanded={open}
       aria-controls="{uid}-body"
       data-testid="probe-toggle"
       onclick={() => (open = !open)}
     >
-      <Icon name={open ? 'chevron-down' : 'chevron-right'} size={16} />
-      <span id="{uid}-title">{$t('cfg.groups.probe_title')}</span>
+      <Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} />
+      {open ? $t('cfg.section_hide') : $t('cfg.section_show')}
+      <span class="sr-only">{$t('cfg.groups.probe_title')}</span>
     </button>
-  </h3>
+  {/snippet}
 
   {#if open}
-    <div class="probe-body" id="{uid}-body" data-testid="probe-body">
-      <p class="probe-desc">{$t('cfg.groups.probe_desc')}</p>
+    <div class="card probe-body" id="{uid}-body" data-testid="probe-body">
       <div class="probe-fields">
         <div class="probe-field" data-testid="probe-url" onchange={() => onField('url')}>
           <Input
@@ -179,58 +184,9 @@
       </div>
     </div>
   {/if}
-</section>
+</Section>
 
 <style>
-  .probe-card {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-3);
-    min-width: 0;
-  }
-
-  .probe-head {
-    margin: 0;
-    font: inherit;
-  }
-
-  .probe-expand {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing-2);
-    max-width: 100%;
-    min-height: 32px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--fg-primary);
-    font: inherit;
-    font-size: var(--font-size-lg);
-    font-weight: 600;
-    line-height: 1.2;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .probe-expand :global(svg) {
-    flex-shrink: 0;
-  }
-
-  .probe-body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-3);
-    min-width: 0;
-  }
-
-  .probe-desc {
-    margin: 0;
-    font-size: var(--font-size-base);
-    line-height: 1.5;
-    color: var(--fg-secondary);
-    overflow-wrap: anywhere;
-  }
-
   .probe-fields {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 160px) minmax(0, 160px);
@@ -241,6 +197,10 @@
 
   .probe-field {
     min-width: 0;
+  }
+
+  .probe-field :global(.form-group) {
+    margin-bottom: 0;
   }
 
   /* Длинный адрес прокручивается внутри поля: ширина карточки не меняется */
@@ -257,7 +217,7 @@
   }
 
   @media (pointer: coarse), (max-width: 768px) {
-    .probe-expand {
+    .probe-toggle {
       min-height: 44px;
     }
   }

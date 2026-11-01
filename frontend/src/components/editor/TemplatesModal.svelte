@@ -146,7 +146,7 @@
         <pre class="template-preview-code">{templatePreview}</pre>
       {:else}
         <div class="templates-preview-placeholder">
-          <p style="color: var(--fg-dim); font-size: 14px; text-align: center;">
+          <p style="color: var(--fg-dim); font-size: var(--font-size-base); text-align: center;">
             {selectedTemplate ? '' : $t('editor.select_template_preview')}
           </p>
         </div>
@@ -192,7 +192,7 @@
   .templates-modal-subtitle {
     margin: 0;
     color: var(--fg-dim);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .templates-body-grid {
@@ -275,17 +275,17 @@
 
   .template-name {
     font-weight: 600;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     color: var(--fg-primary);
   }
 
   .template-desc {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
   .template-type {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     background: var(--bg-card);
     padding: 2px 6px;
@@ -307,7 +307,7 @@
     margin: 0;
     padding: 16px;
     font-family: var(--font-family-mono);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     line-height: 1.5;
     color: var(--code-fg);
     overflow-y: auto;
@@ -343,14 +343,14 @@
   }
 
   .templates-empty-title {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-secondary);
     margin: 0 0 6px;
   }
 
   .templates-empty-hint {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin: 0;
   }
@@ -363,7 +363,7 @@
     flex-shrink: 0;
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 768px) {
     .templates-body-grid {
       grid-template-columns: 1fr;
       grid-template-rows: auto;

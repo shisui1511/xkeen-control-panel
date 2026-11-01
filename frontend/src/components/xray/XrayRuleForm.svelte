@@ -135,7 +135,7 @@
 
   .form-label {
     display: block;
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
     margin-bottom: 4px;
@@ -149,7 +149,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     outline: none;
     transition:
       border-color var(--transition-fast),
@@ -168,7 +168,7 @@
     margin-top: 16px;
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 768px) {
     .form-row2 {
       flex-direction: column;
       gap: 8px;

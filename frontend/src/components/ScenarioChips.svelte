@@ -55,7 +55,7 @@
   }
 
   .scenario-label {
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     font-weight: 500;
   }
@@ -66,7 +66,7 @@
     border: 1px solid var(--border);
     border-radius: 12px;
     color: var(--fg-primary);
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     display: inline-flex;
     align-items: center;

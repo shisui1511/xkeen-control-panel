@@ -3,6 +3,7 @@
   import { t } from '../../i18n';
   import StatusBadge from '../StatusBadge.svelte';
   import Skeleton from '../Skeleton.svelte';
+  import Section from '../Section.svelte';
   import { layerSnapshot, type LayerKernel } from '../../lib/configLayer';
   import { routingView, loadRouting } from '../../lib/configRouting';
 
@@ -65,14 +66,10 @@
   }
 </script>
 
-<section class="kernels-section" data-testid="config-kernels">
-  <div class="card kernels-card">
-    <h2 class="card-title">
-      <span>{$t('cfg.kernels_title')}</span>
-    </h2>
-
+<Section title={$t('cfg.kernels_title')} testid="config-kernels">
+  <div class="card card-rows kernels-card">
     {#if !loaded}
-      <div class="kernels-skeleton" data-testid="config-kernels-loading">
+      <div class="card-block kernels-skeleton" data-testid="config-kernels-loading">
         <Skeleton type="rect" height="36px" />
         <Skeleton type="rect" height="36px" />
         <Skeleton type="rect" height="36px" />
@@ -107,15 +104,10 @@
       </ul>
     {/if}
   </div>
-</section>
+</Section>
 
 <style>
-  .kernels-section {
-    min-width: 0;
-  }
-
   .kernels-card {
-    overflow: hidden;
     min-width: 0;
   }
 
@@ -127,7 +119,7 @@
 
   .kernel-list {
     list-style: none;
-    margin: 0 calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad));
+    margin: 0;
     padding: 0;
   }
 
@@ -137,8 +129,8 @@
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 8px 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border-light);
+    padding: 14px var(--card-pad);
+    border-bottom: 1px solid var(--border);
     font-size: var(--font-size-sm);
     line-height: 1.5;
   }

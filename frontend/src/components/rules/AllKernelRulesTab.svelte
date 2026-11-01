@@ -610,9 +610,9 @@
     min-width: 0;
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 768px) {
     .search-input {
-      font-size: 16px;
+      font-size: var(--font-size-lg);
     }
 
     .toolbar-row {

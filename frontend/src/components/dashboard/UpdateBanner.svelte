@@ -65,14 +65,14 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 6px 10px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     min-width: 0;
   }
 
   .update-banner-text strong {
     color: var(--fg-primary);
-    font-size: 14px;
+    font-size: var(--font-size-base);
   }
 
   .update-banner-actions {

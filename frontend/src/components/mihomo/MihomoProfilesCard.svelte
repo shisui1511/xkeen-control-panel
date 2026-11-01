@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Section from '../Section.svelte';
   import { onMount } from 'svelte';
   import { t } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
@@ -188,136 +189,134 @@
   onMount(load);
 </script>
 
-<div class="card profiles-card">
-  <div class="pc-head">
-    <h2 class="pc-title">{$t('profiles.title')}</h2>
-    <p class="pc-subtitle">{$t('profiles.subtitle')}</p>
-  </div>
-
-  {#if loading && !profilesState}
-    <Skeleton type="text-line" width="60%" />
-  {:else if loadError}
-    <div class="pc-error" role="alert">
-      <span>{$t('profiles.load_error')}: {loadError}</span>
-      <Button variant="secondary" class="btn-sm" onclick={load}>{$t('xkeen_settings.retry')}</Button
-      >
-    </div>
-  {:else if profilesState && !profilesState.managed}
-    <div class="pc-unmanaged">
-      <p>{$t('profiles.unmanaged')}</p>
-      <Button variant="primary" loading={busy === 'adopt'} disabled={!!busy} onclick={adopt}>
-        {$t('profiles.adopt')}
-      </Button>
-    </div>
-  {:else if profilesState}
-    <ul class="pc-list">
-      {#each profilesState.profiles as p (p.name)}
-        <li class="pc-row" class:is-active={p.active}>
-          <div class="pc-info">
-            {#if renaming === p.name}
-              <label class="visually-hidden" for="profile-rename-{p.name}">
-                {$t('profiles.rename')}
-              </label>
-              <input
-                id="profile-rename-{p.name}"
-                class="input font-mono pc-rename"
-                bind:value={renameTo}
-                onkeydown={(e) => {
-                  if (e.key === 'Enter') confirmRename();
-                  if (e.key === 'Escape') renaming = null;
-                }}
-              />
-            {:else}
-              <span class="pc-name font-mono">{p.name}</span>
-            {/if}
-            {#if p.active}
-              <span class="badge pc-badge">{$t('profiles.active')}</span>
-            {/if}
-            <span class="pc-meta">{formatDate(p.mtime)} · {(p.size / 1024).toFixed(1)} KB</span>
-          </div>
-          <div class="pc-actions">
-            {#if renaming === p.name}
-              <Button variant="primary" class="btn-sm" onclick={confirmRename}>
-                {$t('profiles.save')}
-              </Button>
-              <Button variant="secondary" class="btn-sm" onclick={() => (renaming = null)}>
-                {$t('app.cancel')}
-              </Button>
-            {:else}
-              {#if !p.active}
-                <Button
-                  variant="primary"
-                  class="btn-sm"
-                  loading={busy === `activate:${p.name}`}
-                  disabled={!!busy || $isConflict}
-                  title={$isConflict ? $t('kernel.conflict_blocked') : undefined}
-                  onclick={() => activate(p.name)}
-                >
-                  {$t('profiles.activate')}
-                </Button>
+<Section title={$t('profiles.title')} description={$t('profiles.subtitle')}>
+  <div class="card profiles-card">
+    {#if loading && !profilesState}
+      <Skeleton type="text-line" width="60%" />
+    {:else if loadError}
+      <div class="pc-error" role="alert">
+        <span>{$t('profiles.load_error')}: {loadError}</span>
+        <Button variant="secondary" class="btn-sm" onclick={load}
+          >{$t('xkeen_settings.retry')}</Button
+        >
+      </div>
+    {:else if profilesState && !profilesState.managed}
+      <div class="pc-unmanaged">
+        <p>{$t('profiles.unmanaged')}</p>
+        <Button variant="primary" loading={busy === 'adopt'} disabled={!!busy} onclick={adopt}>
+          {$t('profiles.adopt')}
+        </Button>
+      </div>
+    {:else if profilesState}
+      <ul class="pc-list">
+        {#each profilesState.profiles as p (p.name)}
+          <li class="pc-row" class:is-active={p.active}>
+            <div class="pc-info">
+              {#if renaming === p.name}
+                <label class="visually-hidden" for="profile-rename-{p.name}">
+                  {$t('profiles.rename')}
+                </label>
+                <input
+                  id="profile-rename-{p.name}"
+                  class="input font-mono pc-rename"
+                  bind:value={renameTo}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') confirmRename();
+                    if (e.key === 'Escape') renaming = null;
+                  }}
+                />
+              {:else}
+                <span class="pc-name font-mono">{p.name}</span>
               {/if}
-              <Button variant="secondary" class="btn-sm" onclick={() => edit(p.name)}>
-                {$t('profiles.edit')}
-              </Button>
-              <Button
-                variant="secondary"
-                class="btn-sm"
-                disabled={!!busy}
-                onclick={() => startRename(p.name)}
-              >
-                {$t('profiles.rename')}
-              </Button>
-              {#if !p.active}
+              {#if p.active}
+                <span class="badge pc-badge">{$t('profiles.active')}</span>
+              {/if}
+              <span class="pc-meta">{formatDate(p.mtime)} · {(p.size / 1024).toFixed(1)} KB</span>
+            </div>
+            <div class="pc-actions">
+              {#if renaming === p.name}
+                <Button variant="primary" class="btn-sm" onclick={confirmRename}>
+                  {$t('profiles.save')}
+                </Button>
+                <Button variant="secondary" class="btn-sm" onclick={() => (renaming = null)}>
+                  {$t('app.cancel')}
+                </Button>
+              {:else}
+                {#if !p.active}
+                  <Button
+                    variant="primary"
+                    class="btn-sm"
+                    loading={busy === `activate:${p.name}`}
+                    disabled={!!busy || $isConflict}
+                    title={$isConflict ? $t('kernel.conflict_blocked') : undefined}
+                    onclick={() => activate(p.name)}
+                  >
+                    {$t('profiles.activate')}
+                  </Button>
+                {/if}
+                <Button variant="secondary" class="btn-sm" onclick={() => edit(p.name)}>
+                  {$t('profiles.edit')}
+                </Button>
                 <Button
-                  variant="danger"
+                  variant="secondary"
                   class="btn-sm"
-                  loading={busy === `delete:${p.name}`}
                   disabled={!!busy}
-                  onclick={() => remove(p.name)}
+                  onclick={() => startRename(p.name)}
                 >
-                  {$t('profiles.delete')}
+                  {$t('profiles.rename')}
                 </Button>
+                {#if !p.active}
+                  <Button
+                    variant="danger"
+                    class="btn-sm"
+                    loading={busy === `delete:${p.name}`}
+                    disabled={!!busy}
+                    onclick={() => remove(p.name)}
+                  >
+                    {$t('profiles.delete')}
+                  </Button>
+                {/if}
               {/if}
-            {/if}
-          </div>
-        </li>
-      {/each}
-    </ul>
+            </div>
+          </li>
+        {/each}
+      </ul>
 
-    <form
-      class="pc-create"
-      onsubmit={(e) => {
-        e.preventDefault();
-        create();
-      }}
-    >
-      <label class="visually-hidden" for="profile-new-name">{$t('profiles.new_name')}</label>
-      <input
-        id="profile-new-name"
-        class="input font-mono"
-        placeholder={$t('profiles.new_name')}
-        bind:value={newName}
-        autocomplete="off"
-        spellcheck="false"
-      />
-      <label class="pc-check">
-        <input type="checkbox" bind:checked={newFromEmpty} />
-        <span>{$t('profiles.from_empty')}</span>
-      </label>
-      <Button
-        type="submit"
-        variant="secondary"
-        loading={busy === 'create'}
-        disabled={!!busy || !newNameValid}
+      <form
+        class="pc-create"
+        onsubmit={(e) => {
+          e.preventDefault();
+          create();
+        }}
       >
-        {newFromEmpty ? $t('profiles.create_empty') : $t('profiles.create_copy')}
-      </Button>
-    </form>
-    {#if newName && !newNameValid}
-      <p class="pc-hint">{$t('profiles.name_rules')}</p>
+        <label class="visually-hidden" for="profile-new-name">{$t('profiles.new_name')}</label>
+        <input
+          id="profile-new-name"
+          class="input font-mono"
+          placeholder={$t('profiles.new_name')}
+          bind:value={newName}
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <label class="pc-check">
+          <input type="checkbox" bind:checked={newFromEmpty} />
+          <span>{$t('profiles.from_empty')}</span>
+        </label>
+        <Button
+          type="submit"
+          variant="secondary"
+          loading={busy === 'create'}
+          disabled={!!busy || !newNameValid}
+        >
+          {newFromEmpty ? $t('profiles.create_empty') : $t('profiles.create_copy')}
+        </Button>
+      </form>
+      {#if newName && !newNameValid}
+        <p class="pc-hint">{$t('profiles.name_rules')}</p>
+      {/if}
     {/if}
-  {/if}
-</div>
+  </div>
+</Section>
 
 <style>
   .profiles-card {
@@ -326,14 +325,6 @@
     gap: var(--spacing-3);
   }
 
-  .pc-title {
-    margin: 0;
-    font-size: var(--font-size-lg);
-    font-weight: 700;
-    color: var(--fg-primary);
-  }
-
-  .pc-subtitle,
   .pc-hint,
   .pc-unmanaged p {
     margin: 2px 0 0;

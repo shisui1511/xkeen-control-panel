@@ -275,7 +275,7 @@
     border: none;
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     text-align: left;
     cursor: pointer;
     transition: background 0.15s;
@@ -292,7 +292,7 @@
 
   .btn-compact {
     padding: 4px 10px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     height: 30px;
     display: inline-flex;
     align-items: center;

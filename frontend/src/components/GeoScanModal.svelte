@@ -417,7 +417,7 @@
     border: none;
     color: var(--fg-dim);
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     padding: 4px;
     border-radius: 50%;
     display: flex;
@@ -566,7 +566,7 @@
   }
 
   .file-type-badge {
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     color: var(--fg-dim);
     text-transform: uppercase;
   }
@@ -647,7 +647,7 @@
 
   .geoscan-arrow {
     color: var(--fg-dim);
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
   }
 
   .geoscan-tag-name {
@@ -657,7 +657,7 @@
   .geoscan-match-pill {
     background: rgba(var(--accent-rgb), 0.15);
     color: var(--accent);
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     padding: 1px 5px;
     border-radius: 10px;
     font-weight: 600;

@@ -355,7 +355,7 @@
     border: none;
     border-bottom: 2px solid transparent;
     color: var(--fg-secondary);
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     font-family: var(--font-mono);
     cursor: pointer;
     white-space: nowrap;

@@ -195,7 +195,7 @@
   .item-name {
     flex: 1;
     min-width: 50px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--fg-primary);
     overflow: hidden;
@@ -205,7 +205,7 @@
 
   .rule-value {
     font-family: var(--font-mono, monospace);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .item-meta {
@@ -225,7 +225,7 @@
     border: none;
     color: var(--fg-faint);
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     padding: 4px 6px;
     border-radius: var(--radius-sm);
     transition: all var(--transition-fast);
@@ -287,7 +287,7 @@
   }
 
   .add-btn {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     padding: 6px 12px;
     border-radius: var(--radius-sm);
     cursor: pointer;

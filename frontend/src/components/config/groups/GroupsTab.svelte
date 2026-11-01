@@ -254,6 +254,11 @@
     color: var(--fg-secondary);
   }
 
+  /* «Проверка доступности» — отдельная секция: отступ как между секциями страницы */
+  .groups-tab > :global(.page-section) {
+    margin-top: var(--spacing-4);
+  }
+
   .groups-list {
     display: flex;
     flex-direction: column;

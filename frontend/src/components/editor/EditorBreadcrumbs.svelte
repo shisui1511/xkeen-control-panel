@@ -32,7 +32,7 @@
     padding: 8px 14px;
     background: var(--surface-tint);
     border-bottom: 1px solid var(--border);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     overflow-x: auto;
     scrollbar-width: thin;

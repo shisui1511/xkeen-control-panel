@@ -220,7 +220,7 @@
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
   }
   .modal-title {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     letter-spacing: 0.02em;
     margin: 0;
@@ -251,7 +251,7 @@
     padding: 20px;
     overflow-y: auto;
     color: var(--fg-primary);
-    font-size: 14px;
+    font-size: var(--font-size-base);
   }
 
   @media (max-width: 480px) {

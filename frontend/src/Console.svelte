@@ -255,7 +255,8 @@
       <div>
         <div class="toolbar mb-2">
           <div class="toolbar-left">
-            <span style="font-family:var(--font-family-mono);font-size:13px;color:var(--accent);"
+            <span
+              style="font-family:var(--font-family-mono);font-size:var(--font-size-sm);color:var(--accent);"
               >root@xkeen ~ #</span
             >
           </div>
@@ -289,7 +290,7 @@
         {#if history.length > 0}
           <h4
             class="mt-3"
-            style="font-size: 12px; font-weight: 600; color: var(--fg-dim); letter-spacing: 0.04em; padding: 0 4px;"
+            style="font-size: var(--font-size-xs); font-weight: 600; color: var(--fg-dim); letter-spacing: 0.04em; padding: 0 4px;"
           >
             {$t('console.history')}
           </h4>
@@ -351,7 +352,7 @@
   .cmd-cat-head {
     padding: 11px 14px;
     background: rgba(0, 0, 0, 0.18);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     letter-spacing: 0.04em;
     color: var(--fg-dim);
     font-weight: 600;
@@ -410,7 +411,7 @@
   }
 
   .cmd-tile .tile-name {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-primary);
     display: flex;
@@ -434,7 +435,7 @@
     border-radius: var(--radius-md);
     padding: 14px 18px;
     font-family: var(--font-family-mono);
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     line-height: 1.6;
     color: var(--fg-terminal);
     min-height: 440px;
@@ -465,7 +466,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-secondary);
     width: 100%;
@@ -486,7 +487,7 @@
   .history-status {
     font-weight: 700;
     color: var(--success);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .history-status.error-text {

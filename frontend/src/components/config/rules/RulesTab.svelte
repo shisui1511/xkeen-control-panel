@@ -257,7 +257,7 @@
         oncta={() => (presetOpen = true)}
       />
     {:else if showList}
-      <div class="card rules-card">
+      <div class="card card-rows rules-card">
         <ol class="rules-list" aria-label={$t('cfg.rules.list_aria')}>
           {#each rules as rule (rule.id)}
             <RuleRow
@@ -283,7 +283,7 @@
       </div>
     {/if}
     {#if empty && showFallback}
-      <div class="card rules-card">
+      <div class="card card-rows rules-card">
         {@render fallback()}
       </div>
     {/if}
@@ -295,7 +295,7 @@
 <PresetModal open={presetOpen} mode="preset" onclose={() => (presetOpen = false)} />
 
 {#snippet fallback()}
-  <div class="rules-fallback" data-testid="rules-fallback">
+  <div class="card-footer rules-fallback" data-testid="rules-fallback">
     <label class="rules-fallback-label" for="{uid}-final">
       <span>{$t('cfg.rules.fallback_label')}</span>
       <Icon name="arrow-right" size={14} />
@@ -346,8 +346,6 @@
 
   .rules-card {
     min-width: 0;
-    padding: 0;
-    overflow: hidden;
   }
 
   .rules-list {
@@ -356,16 +354,16 @@
     list-style: none;
   }
 
+  /* Финальное правило — подвал карточки-списка: тот же фон и разделитель, что у кнопок форм */
   .rules-fallback {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
     gap: var(--spacing-2) var(--spacing-4);
     min-width: 0;
-    padding: var(--spacing-2) var(--spacing-4);
-    background: var(--bg-elevated);
-    border-top: 1px solid var(--border-strong);
     font-size: var(--font-size-base);
+  }
+
+  /* Карточка без правил: подвал — единственная строка, линия сверху не нужна */
+  .rules-fallback:first-child {
+    border-top: 0;
   }
 
   .rules-fallback-label {

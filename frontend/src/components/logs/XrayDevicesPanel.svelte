@@ -304,7 +304,7 @@
     align-items: start;
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 1024px) {
     .xdev-grid {
       grid-template-columns: 1fr;
     }

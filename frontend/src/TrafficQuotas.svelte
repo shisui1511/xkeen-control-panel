@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Modal from './components/Modal.svelte';
+  import Section from './components/Section.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import { t, currentLang } from './i18n';
   import { showConfirm, showToast } from './stores';
@@ -457,290 +458,292 @@
     </div>
   {/if}
 
-  <!-- Alerts -->
-  {#if alerts.length > 0}
-    <div class="card mb-3">
-      <div class="flex-between mb-2">
-        <h2 class="card-title">{$t('trafficquotas.alerts')}</h2>
-      </div>
-      <div class="alerts-list">
-        {#each alerts as a, i (i)}
-          <div
-            class="alert"
-            class:alert-warning={a.severity === 'warning'}
-            class:alert-error={a.severity === 'critical'}
-          >
-            {alertText(a)}
-          </div>
-        {/each}
-      </div>
-    </div>
-  {/if}
-
-  <!-- Stats Summaries -->
-  {#if stats}
-    <div class="card mb-3">
-      <h2 class="card-title">{$t('trafficquotas.summary')}</h2>
-      <div class="tq-stats-grid">
-        <div class="stat-box">
-          <div class="stat-label">{$t('trafficquotas.total_download')}</div>
-          <div class="stat-value">{formatBytes(stats.total_download)}</div>
-          <div class="stat-sub">{$t('trafficquotas.received')}</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">{$t('trafficquotas.total_upload')}</div>
-          <div class="stat-value">{formatBytes(stats.total_upload)}</div>
-          <div class="stat-sub">{$t('trafficquotas.sent')}</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">{$t('trafficquotas.total')}</div>
-          <div class="stat-value">{formatBytes(stats.total)}</div>
-          {#if sumQuotaLimit > 0}
+  <div class="page-sections">
+    <!-- Alerts -->
+    {#if alerts.length > 0}
+      <Section title={$t('trafficquotas.alerts')}>
+        <div class="alerts-list">
+          {#each alerts as a, i (i)}
             <div
-              class="stat-bar"
-              style="margin-top: 8px;"
-              role="progressbar"
-              aria-valuenow={Math.round(totalPct)}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label="{$t('trafficquotas.of_limit')}: {totalPct.toFixed(1)}%"
+              class="alert"
+              class:alert-warning={a.severity === 'warning'}
+              class:alert-error={a.severity === 'critical'}
             >
-              <div
-                class="stat-bar-fill"
-                class:warning={totalPct >= 80 && totalPct < 100}
-                class:error={totalPct >= 100}
-                style="width: {totalPct}%"
-              ></div>
+              {alertText(a)}
             </div>
-            <div class="stat-sub">
-              {totalPct.toFixed(1)}% {$t('trafficquotas.of_limit')}
-            </div>
-          {/if}
+          {/each}
         </div>
-        <div class="stat-box">
-          <div class="stat-label">{$t('trafficquotas.forecast_label')}</div>
-          <div class="stat-value">
-            {#if showForecastCalculating}
-              <span class="forecast-calculating">{$t('trafficquotas.forecast_calculating')}</span>
-            {:else if forecastValue !== null}
-              {formatBytes(forecastValue)}
-            {:else}
-              —
+      </Section>
+    {/if}
+
+    <!-- Stats Summaries -->
+    {#if stats}
+      <Section title={$t('trafficquotas.summary')}>
+        <div class="card card-tight tq-stats-grid">
+          <div class="stat-box">
+            <div class="stat-label">{$t('trafficquotas.total_download')}</div>
+            <div class="stat-value">{formatBytes(stats.total_download)}</div>
+            <div class="stat-sub">{$t('trafficquotas.received')}</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">{$t('trafficquotas.total_upload')}</div>
+            <div class="stat-value">{formatBytes(stats.total_upload)}</div>
+            <div class="stat-sub">{$t('trafficquotas.sent')}</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">{$t('trafficquotas.total')}</div>
+            <div class="stat-value">{formatBytes(stats.total)}</div>
+            {#if sumQuotaLimit > 0}
+              <div
+                class="stat-bar"
+                style="margin-top: 8px;"
+                role="progressbar"
+                aria-valuenow={Math.round(totalPct)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="{$t('trafficquotas.of_limit')}: {totalPct.toFixed(1)}%"
+              >
+                <div
+                  class="stat-bar-fill"
+                  class:warning={totalPct >= 80 && totalPct < 100}
+                  class:error={totalPct >= 100}
+                  style="width: {totalPct}%"
+                ></div>
+              </div>
+              <div class="stat-sub">
+                {totalPct.toFixed(1)}% {$t('trafficquotas.of_limit')}
+              </div>
             {/if}
           </div>
-          <div class="stat-sub">{$t('trafficquotas.forecast_subtext')}</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">{$t('trafficquotas.quotas_caps')}</div>
-          <div class="stat-value">
-            {activeQuotas.length}<span class="stat-value-unit"> / {quotas.length}</span>
+          <div class="stat-box">
+            <div class="stat-label">{$t('trafficquotas.forecast_label')}</div>
+            <div class="stat-value">
+              {#if showForecastCalculating}
+                <span class="forecast-calculating">{$t('trafficquotas.forecast_calculating')}</span>
+              {:else if forecastValue !== null}
+                {formatBytes(forecastValue)}
+              {:else}
+                —
+              {/if}
+            </div>
+            <div class="stat-sub">{$t('trafficquotas.forecast_subtext')}</div>
           </div>
-          <div class="stat-sub">{$t('trafficquotas.active_count')}</div>
+          <div class="stat-box">
+            <div class="stat-label">{$t('trafficquotas.quotas_caps')}</div>
+            <div class="stat-value">
+              {activeQuotas.length}<span class="stat-value-unit"> / {quotas.length}</span>
+            </div>
+            <div class="stat-sub">{$t('trafficquotas.active_count')}</div>
+          </div>
         </div>
-      </div>
-    </div>
-  {/if}
+      </Section>
+    {/if}
 
-  <!-- Quotas Table -->
-  <div class="card card-tight mb-3">
-    <h2 class="card-title" style="padding: 20px 24px 8px 24px;">{$t('trafficquotas.quotas')}</h2>
-
-    {#if quotas.length === 0}
-      <div style="padding: 16px 24px 24px;">
-        <EmptyState
-          title={$t('trafficquotas.empty_title')}
-          description={$t('trafficquotas.empty_desc')}
-          ctaText={$t('trafficquotas.empty_cta')}
-          oncta={startCreate}
-        />
-      </div>
-    {:else}
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>{$t('trafficquotas.name')}</th>
-              <th>{$t('trafficquotas.target_type')}</th>
-              <th>{$t('trafficquotas.period')}</th>
-              <th>{$t('trafficquotas.col_used')}</th>
-              <th>{$t('trafficquotas.limit')}</th>
-              <th>{$t('trafficquotas.action')}</th>
-              <th>{$t('trafficquotas.col_state')}</th>
-              <th>{$t('trafficquotas.col_status')}</th>
-              <th style="width: 50px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each quotas as q (q.id)}
-              <tr>
-                <td><b>{q.name}</b></td>
-                <td>
-                  <span
-                    class="status-badge"
-                    style="background: var(--surface-tint); color: var(--fg-secondary);"
-                  >
-                    {q.target_type === 'global' ? $t('trafficquotas.target_global') : q.target_id}
-                  </span>
-                </td>
-                <td class="mono">
-                  {q.period === 'daily'
-                    ? $t('trafficquotas.period_daily')
-                    : q.period === 'weekly'
-                      ? $t('trafficquotas.period_weekly')
-                      : q.period === 'monthly'
-                        ? $t('trafficquotas.period_monthly')
-                        : q.period}
-                </td>
-                <td class="mono">
-                  {formatBytes(q.current_bytes)}
-                  <div
-                    class="stat-bar"
-                    style="width: 100px; margin-top: 4px;"
-                    role="progressbar"
-                    aria-valuenow={Math.round(percent(q))}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-label="{q.name || q.target_id}: {Math.round(percent(q))}%"
-                  >
-                    <div
-                      class="stat-bar-fill"
-                      class:warning={percent(q) >= q.alert_threshold && percent(q) < 100}
-                      class:error={percent(q) >= 100}
-                      style="width: {percent(q)}%"
-                    ></div>
-                  </div>
-                </td>
-                <td class="mono">{formatBytes(q.limit_bytes)}</td>
-                <td>
-                  <span class={getActionBadgeClass(q.action)}>
-                    {getActionLabel(q.action)}
-                  </span>
-                </td>
-                <td>
-                  {#if q.enabled}
-                    <span class="status-badge active">
-                      <span class="status-dot success" style="margin: 0 4px 0 0;"></span>
-                      {$t('trafficquotas.status_active')}
-                    </span>
-                  {:else}
-                    <span class="status-badge stopped">
-                      <span class="status-dot error" style="margin: 0 4px 0 0;"></span>
-                      {$t('trafficquotas.status_disabled')}
-                    </span>
-                  {/if}
-                </td>
-                <td>
-                  {#if percent(q) >= 100}
-                    {#if q.action === 'block'}
-                      <span class="badge badge-error"
-                        >{$t('trafficquotas.badge_status_blocked')}</span
+    <!-- Quotas Table -->
+    <Section title={$t('trafficquotas.quotas')}>
+      <div class="card card-tight">
+        {#if quotas.length === 0}
+          <div class="tq-empty">
+            <EmptyState
+              title={$t('trafficquotas.empty_title')}
+              description={$t('trafficquotas.empty_desc')}
+              ctaText={$t('trafficquotas.empty_cta')}
+              oncta={startCreate}
+            />
+          </div>
+        {:else}
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>{$t('trafficquotas.name')}</th>
+                  <th>{$t('trafficquotas.target_type')}</th>
+                  <th>{$t('trafficquotas.period')}</th>
+                  <th>{$t('trafficquotas.col_used')}</th>
+                  <th>{$t('trafficquotas.limit')}</th>
+                  <th>{$t('trafficquotas.action')}</th>
+                  <th>{$t('trafficquotas.col_state')}</th>
+                  <th>{$t('trafficquotas.col_status')}</th>
+                  <th style="width: 50px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each quotas as q (q.id)}
+                  <tr>
+                    <td><b>{q.name}</b></td>
+                    <td>
+                      <span
+                        class="status-badge"
+                        style="background: var(--surface-tint); color: var(--fg-secondary);"
                       >
-                    {:else if q.action === 'redirect_direct'}
-                      <span class="badge badge-redirected"
-                        >{$t('trafficquotas.badge_status_redirected')}</span
+                        {q.target_type === 'global'
+                          ? $t('trafficquotas.target_global')
+                          : q.target_id}
+                      </span>
+                    </td>
+                    <td class="mono">
+                      {q.period === 'daily'
+                        ? $t('trafficquotas.period_daily')
+                        : q.period === 'weekly'
+                          ? $t('trafficquotas.period_weekly')
+                          : q.period === 'monthly'
+                            ? $t('trafficquotas.period_monthly')
+                            : q.period}
+                    </td>
+                    <td class="mono">
+                      {formatBytes(q.current_bytes)}
+                      <div
+                        class="stat-bar"
+                        style="width: 100px; margin-top: 4px;"
+                        role="progressbar"
+                        aria-valuenow={Math.round(percent(q))}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label="{q.name || q.target_id}: {Math.round(percent(q))}%"
                       >
-                    {:else}
-                      <span class="badge badge-error">{$t('trafficquotas.status_exceeded')}</span>
-                    {/if}
-                  {:else if percent(q) >= q.alert_threshold}
-                    <span class="badge badge-warning">{$t('trafficquotas.status_warning')}</span>
-                  {:else}
-                    <span class="badge badge-success">OK</span>
-                  {/if}
-                </td>
-                <td>
-                  <div class="actions-wrapper">
-                    <label
-                      class="toggle-switch"
-                      class:loading={togglingQuotas[q.id]}
-                      style="margin-right: 12px;"
-                      title={$t('trafficquotas.toggle_limit')}
-                    >
-                      <input
-                        type="checkbox"
-                        aria-label={$t('trafficquotas.toggle_limit')}
-                        checked={q.enabled}
-                        disabled={togglingQuotas[q.id]}
-                        onchange={() => toggleEnabled(q)}
-                      />
-                      <span class="toggle-slider"></span>
-                    </label>
-
-                    <div class="dropdown-container">
-                      <button
-                        class="btn btn-secondary action-btn-dots"
-                        aria-label={$t('app.actions') || 'Actions'}
-                        aria-haspopup="menu"
-                        aria-expanded={activeDropdownId === q.id}
-                        onclick={(e) => toggleDropdown(q.id, e)}>⋯</button
-                      >
-                      {#if activeDropdownId === q.id}
-                        <div class="dropdown-menu">
-                          <button
-                            onclick={() => {
-                              resetQuota(q.id);
-                              activeDropdownId = null;
-                            }}
-                          >
-                            {$t('trafficquotas.reset')}
-                          </button>
-                          <button onclick={() => startEdit(q)}>
-                            {$t('app.edit')}
-                          </button>
-                          <button
-                            onclick={() => {
-                              deleteQuota(q.id);
-                              activeDropdownId = null;
-                            }}
-                            class="delete-action"
-                          >
-                            {$t('app.delete')}
-                          </button>
-                        </div>
+                        <div
+                          class="stat-bar-fill"
+                          class:warning={percent(q) >= q.alert_threshold && percent(q) < 100}
+                          class:error={percent(q) >= 100}
+                          style="width: {percent(q)}%"
+                        ></div>
+                      </div>
+                    </td>
+                    <td class="mono">{formatBytes(q.limit_bytes)}</td>
+                    <td>
+                      <span class={getActionBadgeClass(q.action)}>
+                        {getActionLabel(q.action)}
+                      </span>
+                    </td>
+                    <td>
+                      {#if q.enabled}
+                        <span class="status-badge active">
+                          <span class="status-dot success" style="margin: 0 4px 0 0;"></span>
+                          {$t('trafficquotas.status_active')}
+                        </span>
+                      {:else}
+                        <span class="status-badge stopped">
+                          <span class="status-dot error" style="margin: 0 4px 0 0;"></span>
+                          {$t('trafficquotas.status_disabled')}
+                        </span>
                       {/if}
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+                    </td>
+                    <td>
+                      {#if percent(q) >= 100}
+                        {#if q.action === 'block'}
+                          <span class="badge badge-error"
+                            >{$t('trafficquotas.badge_status_blocked')}</span
+                          >
+                        {:else if q.action === 'redirect_direct'}
+                          <span class="badge badge-redirected"
+                            >{$t('trafficquotas.badge_status_redirected')}</span
+                          >
+                        {:else}
+                          <span class="badge badge-error"
+                            >{$t('trafficquotas.status_exceeded')}</span
+                          >
+                        {/if}
+                      {:else if percent(q) >= q.alert_threshold}
+                        <span class="badge badge-warning">{$t('trafficquotas.status_warning')}</span
+                        >
+                      {:else}
+                        <span class="badge badge-success">OK</span>
+                      {/if}
+                    </td>
+                    <td>
+                      <div class="actions-wrapper">
+                        <label
+                          class="toggle-switch"
+                          class:loading={togglingQuotas[q.id]}
+                          style="margin-right: 12px;"
+                          title={$t('trafficquotas.toggle_limit')}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label={$t('trafficquotas.toggle_limit')}
+                            checked={q.enabled}
+                            disabled={togglingQuotas[q.id]}
+                            onchange={() => toggleEnabled(q)}
+                          />
+                          <span class="toggle-slider"></span>
+                        </label>
+
+                        <div class="dropdown-container">
+                          <button
+                            class="btn btn-secondary action-btn-dots"
+                            aria-label={$t('app.actions') || 'Actions'}
+                            aria-haspopup="menu"
+                            aria-expanded={activeDropdownId === q.id}
+                            onclick={(e) => toggleDropdown(q.id, e)}>⋯</button
+                          >
+                          {#if activeDropdownId === q.id}
+                            <div class="dropdown-menu">
+                              <button
+                                onclick={() => {
+                                  resetQuota(q.id);
+                                  activeDropdownId = null;
+                                }}
+                              >
+                                {$t('trafficquotas.reset')}
+                              </button>
+                              <button onclick={() => startEdit(q)}>
+                                {$t('app.edit')}
+                              </button>
+                              <button
+                                onclick={() => {
+                                  deleteQuota(q.id);
+                                  activeDropdownId = null;
+                                }}
+                                class="delete-action"
+                              >
+                                {$t('app.delete')}
+                              </button>
+                            </div>
+                          {/if}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
       </div>
+    </Section>
+
+    <!-- Proxy Stats (Optional/Additional Info in Hopper Style) -->
+    {#if stats && stats.proxies && stats.proxies.length > 0}
+      <Section title={$t('trafficquotas.per_proxy')}>
+        <div class="card card-tight">
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>{$t('trafficquotas.proxy_name')}</th>
+                  <th>{$t('traffic.upload')}</th>
+                  <th>{$t('traffic.download')}</th>
+                  <th>{$t('trafficquotas.total')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each stats.proxies as p, i (i)}
+                  <tr>
+                    <td><b>{p.proxy_name}</b></td>
+                    <td class="mono">{formatBytes(p.upload_bytes)}</td>
+                    <td class="mono">{formatBytes(p.download_bytes)}</td>
+                    <td class="mono" style="color: var(--fg-primary); font-weight: 600;"
+                      >{formatBytes(p.total_bytes)}</td
+                    >
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Section>
     {/if}
   </div>
-
-  <!-- Proxy Stats (Optional/Additional Info in Hopper Style) -->
-  {#if stats && stats.proxies && stats.proxies.length > 0}
-    <div class="card card-tight mb-3">
-      <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
-        {$t('trafficquotas.per_proxy')}
-      </h2>
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>{$t('trafficquotas.proxy_name')}</th>
-              <th>{$t('traffic.upload')}</th>
-              <th>{$t('traffic.download')}</th>
-              <th>{$t('trafficquotas.total')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each stats.proxies as p, i (i)}
-              <tr>
-                <td><b>{p.proxy_name}</b></td>
-                <td class="mono">{formatBytes(p.upload_bytes)}</td>
-                <td class="mono">{formatBytes(p.download_bytes)}</td>
-                <td class="mono" style="color: var(--fg-primary); font-weight: 600;"
-                  >{formatBytes(p.total_bytes)}</td
-                >
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  {/if}
 </div>
 
 <!-- Modal Form -->
@@ -874,22 +877,29 @@
     gap: 8px;
   }
 
+  .alerts-list > :global(.alert) {
+    margin: 0;
+  }
+
+  /* Сводка — одна полоса метрик с тонкими разделителями вместо пяти
+     плиток с рамкой внутри карточки. */
   .tq-stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px;
-    margin-top: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
 
   .stat-box {
-    padding: 16px;
-    background: var(--surface-tint-faint);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    padding: 16px var(--card-pad);
+    border-left: 1px solid var(--border);
+    margin-left: -1px;
+  }
+
+  .tq-empty {
+    padding: 8px var(--card-pad) 16px;
   }
 
   .stat-label {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
     margin-bottom: 6px;
@@ -897,18 +907,18 @@
 
   .stat-value {
     font-weight: 600;
-    font-size: 22px;
+    font-size: var(--font-size-2xl);
     color: var(--fg-primary);
   }
 
   .stat-value-unit {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 400;
     color: var(--fg-secondary);
   }
 
   .stat-sub {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-top: 4px;
   }
@@ -931,7 +941,7 @@
     font-weight: 600;
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     letter-spacing: 0.05em;
   }
 
@@ -985,7 +995,7 @@
 
   .action-btn-dots {
     padding: 4px 8px;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     line-height: 1;
     height: auto;
   }
@@ -1024,7 +1034,7 @@
     color: var(--fg-secondary);
     padding: 8px 12px;
     text-align: left;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     border-radius: 4px;
     width: 100%;
@@ -1061,7 +1071,7 @@
   }
 
   .checkbox-label {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     cursor: pointer;
     user-select: none;
@@ -1121,13 +1131,13 @@
   }
   .info-banner-title {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
   }
   .info-banner-description {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     /* На тонированной подложке --fg-secondary в светлой теме даёт 4.35:1 —
        ниже WCAG AA; подмешиваем основной цвет текста */
     color: color-mix(in srgb, var(--fg-secondary) 80%, var(--fg-primary));
@@ -1140,7 +1150,7 @@
     background: none;
     border: none;
     color: var(--fg-dim);
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     cursor: pointer;
     line-height: 1;
     padding: 4px 8px;
@@ -1150,7 +1160,7 @@
     color: var(--fg-primary);
   }
   .forecast-calculating {
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     color: var(--fg-secondary);
   }
   .toggle-switch.loading {

@@ -118,12 +118,14 @@
     'Manrope', 'TwemojiMozilla', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-family-mono:
     'JetBrains Mono', 'TwemojiMozilla', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-size-2xs: 0.6875rem;
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.8125rem;
   --font-size-base: 0.875rem;
   --font-size-lg: 1rem;
   --font-size-xl: 1.125rem;
   --font-size-2xl: 1.375rem;
+  --font-size-3xl: 1.5rem;
 
   /* Spacing */
   --spacing-1: 0.25rem;
@@ -410,7 +412,7 @@
 
 body {
   font-family: var(--font-family-sans);
-  font-size: 14px;
+  font-size: var(--font-size-base);
   line-height: 1.5;
   color: var(--fg-primary);
   background: var(--bg-page);
@@ -420,7 +422,7 @@ body {
 
 /* ------------ Typography ------------- */
 h1 {
-  font-size: 22px;
+  font-size: var(--font-size-2xl);
   font-weight: 700;
   letter-spacing: -0.01em;
   margin-bottom: 0.25rem;
@@ -428,14 +430,14 @@ h1 {
 }
 
 h2 {
-  font-size: 18px;
+  font-size: var(--font-size-xl);
   font-weight: 600;
   margin-bottom: 0.75rem;
   color: var(--fg-primary);
 }
 
 h3 {
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 700;
   margin-bottom: 0.5rem;
   color: var(--fg-primary);
@@ -488,7 +490,7 @@ h2.card-title {
   text-transform: none;
   letter-spacing: 0;
   font-weight: 500;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .card .card-title .ct-actions > button,
@@ -517,6 +519,90 @@ h2.card-title {
   height: 14px;
 }
 
+/* ------------ Section stack / list card -------------
+   Редизайн «без карточек в карточках»: страница — стопка секций
+   (components/Section.svelte), заголовок секции стоит над поверхностью.
+   .card-rows — карточка-список: без внутренних отступов, строки
+   (.field-row / .list-row) идут на всю ширину и делятся тонкой линией,
+   кнопки формы — в подвале .card-footer. */
+.page-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-8);
+  min-width: 0;
+}
+
+.page-sections-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: var(--spacing-8) var(--spacing-6);
+  align-items: start;
+}
+
+.card.card-rows {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Группа в карточке-списке — просто контейнер строк: отступы у самих строк. */
+.card.card-rows .field-group {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.card.card-rows .field-row,
+.card.card-rows .list-row {
+  padding: 14px var(--card-pad);
+  border-bottom: 1px solid var(--border);
+}
+
+.card.card-rows .field-row:last-child,
+.card.card-rows .list-row:last-child {
+  border-bottom: 0;
+}
+
+.card.card-rows .card-note {
+  margin: 0;
+  padding: 12px var(--card-pad);
+  font-size: var(--font-size-sm);
+  color: var(--fg-secondary);
+}
+
+/* Смежные блоки карточки-списка делятся той же линией, что и строки. */
+.card.card-rows
+  > :is(.field-group, .card-note, .card-empty, .card-block)
+  + :is(.field-group, .card-note, .card-empty, .card-block) {
+  border-top: 1px solid var(--border);
+}
+
+.card.card-rows .card-block {
+  padding: 16px var(--card-pad);
+}
+
+.card.card-rows .card-empty {
+  padding: 28px var(--card-pad);
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--fg-secondary);
+}
+
+.card.card-rows .card-footer,
+.card .card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px var(--card-pad);
+  border-top: 1px solid var(--border);
+  background: var(--surface-tint);
+}
+
+[data-density='compact'] .card.card-rows .field-row,
+[data-density='compact'] .card.card-rows .list-row {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
 /* ------------ Button ------------- */
 .btn {
   display: inline-flex;
@@ -528,7 +614,7 @@ h2.card-title {
   padding: 0 14px;
   border-radius: var(--radius-md);
   font-family: var(--font-family-sans);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
   box-sizing: border-box;
@@ -616,7 +702,7 @@ h2.card-title {
   padding: 0 12px;
   border: 1px solid var(--border-control);
   border-radius: var(--radius-md);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--fg-primary);
   background: var(--bg-elevated);
   box-sizing: border-box;
@@ -666,14 +752,14 @@ input[type='number'] {
 .error-text {
   display: block;
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--danger);
 }
 
 .warning-text {
   display: block;
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--warning);
 }
 
@@ -681,7 +767,7 @@ input[type='number'] {
   display: block;
   margin-bottom: 0.4rem;
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   letter-spacing: 0.04em;
   color: var(--fg-secondary);
   text-transform: uppercase;
@@ -697,7 +783,7 @@ input[type='number'] {
   margin-bottom: 1rem;
   border: 1px solid;
   border-left: 3px solid;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 /* Иконка рядом с переносимым текстом в строке flex-start: высота — одна
@@ -763,7 +849,7 @@ input[type='number'] {
   align-items: center;
   justify-content: center;
   border-radius: 4px;
-  font-size: 16px;
+  font-size: var(--font-size-lg);
   line-height: 1;
   transition:
     opacity var(--transition-fast),
@@ -865,7 +951,7 @@ input[type='number'] {
 }
 
 .sidebar-logo .brand-text .b1 {
-  font-size: 17px;
+  font-size: var(--font-size-xl);
   font-weight: 700;
   letter-spacing: -0.005em;
   color: var(--fg-primary);
@@ -880,7 +966,7 @@ input[type='number'] {
 /* The subtitle — muted gray, uppercase tracking, mimics how Netcraze pairs
    the brand wordmark with a lighter model identifier (“HOPPER 4G+”). */
 .sidebar-logo .brand-text .b2 {
-  font-size: 10px;
+  font-size: var(--font-size-2xs);
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--fg-dim);
@@ -898,7 +984,7 @@ input[type='number'] {
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px 8px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -934,7 +1020,7 @@ input[type='number'] {
 
 .nav-group-arrow {
   transition: transform 0.2s ease;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--fg-faint);
   opacity: 0.6;
 }
@@ -959,7 +1045,7 @@ input[type='number'] {
   background: transparent;
   border: 0;
   font-family: inherit;
-  font-size: 13.5px;
+  font-size: var(--font-size-base);
   font-weight: 500;
   text-align: left;
   gap: 11px;
@@ -1324,7 +1410,7 @@ body.drawer-locked {
   padding: 14px 20px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .status-badge-item:last-child {
@@ -1357,7 +1443,7 @@ body.drawer-locked {
 }
 
 .version-badge {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   background: var(--surface-tint);
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -1410,7 +1496,7 @@ body.drawer-locked {
 }
 
 .stat-value {
-  font-size: 22px;
+  font-size: var(--font-size-2xl);
   font-weight: 600;
   font-family: var(--font-family-mono);
   color: var(--fg-primary);
@@ -1420,7 +1506,7 @@ body.drawer-locked {
 
 .res-sub {
   color: var(--fg-dim);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   margin-top: 8px;
   font-family: var(--font-family-mono);
 }
@@ -1506,7 +1592,7 @@ body.drawer-locked {
   flex-wrap: wrap;
   gap: 0.25rem 0.5rem;
   margin-bottom: 0.75rem;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   letter-spacing: 0.06em;
   color: var(--fg-dim);
   font-weight: 600;
@@ -1569,7 +1655,7 @@ body.drawer-locked {
 
 .toolbar h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-size-base);
 }
 
 /* ----- Filters strip ----- */
@@ -1592,7 +1678,7 @@ select.input {
   border-radius: var(--radius-md);
   color: var(--fg-primary);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   min-width: 140px;
   outline: none;
   transition:
@@ -1627,7 +1713,7 @@ select.input:focus {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--fg-secondary);
   font-family: var(--font-family-mono);
   letter-spacing: 0.02em;
@@ -1660,7 +1746,7 @@ table.data-table thead th {
   background: var(--surface-tint, rgba(0, 0, 0, 0.05));
   text-align: left;
   padding: 11px 14px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   letter-spacing: 0.18em;
   text-transform: uppercase;
   font-weight: 700;
@@ -1697,7 +1783,7 @@ table.data-table tbody tr:hover {
 td.mono,
 .mono {
   font-family: var(--font-family-mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 /* ----- Badges / pills ----- */
@@ -1707,7 +1793,7 @@ td.mono,
   gap: 4px;
   padding: 2px 8px;
   border-radius: 3px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1755,7 +1841,7 @@ td.mono,
   gap: 6px;
   padding: 4px 10px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
@@ -1809,7 +1895,7 @@ td.mono,
 
 /* version chip */
 .version-tag {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   background: var(--surface-tint);
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -1827,7 +1913,7 @@ td.mono,
   gap: 6px;
   padding: 4px 10px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   border: 1px solid var(--border);
   color: var(--fg-secondary);
@@ -1867,7 +1953,7 @@ td.mono,
   border: 0;
   padding: 11px 16px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--fg-secondary);
   cursor: pointer;
@@ -1950,7 +2036,7 @@ td.mono,
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--fg-secondary);
   cursor: pointer;
   min-height: 44px;
@@ -1964,7 +2050,7 @@ pre.code-output {
   background: var(--bg-terminal);
   color: var(--fg-terminal);
   font-family: var(--font-family-mono);
-  font-size: 12.5px;
+  font-size: var(--font-size-sm);
   line-height: 1.55;
   padding: 16px 18px;
   border: 1px solid var(--border);
@@ -2006,7 +2092,7 @@ pre.code-output {
 }
 
 .stat-session {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--fg-dim);
   margin-top: 6px;
   font-family: var(--font-family-mono);
@@ -2034,7 +2120,7 @@ pre.code-output {
     background var(--transition-fast),
     color var(--transition-fast);
   color: var(--fg-secondary);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .file-row:last-child {
@@ -2056,12 +2142,12 @@ pre.code-output {
 .file-row .fr-name {
   flex: 1;
   font-family: var(--font-family-mono);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .file-row .fr-meta {
   color: var(--fg-dim);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-family: var(--font-family-mono);
 }
 
@@ -2099,12 +2185,12 @@ pre.code-output {
 .field-row .lbl {
   color: var(--fg-primary);
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .field-row .desc {
   color: var(--fg-dim);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   margin-top: 4px;
 }
 
@@ -2153,7 +2239,7 @@ pre.code-output {
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   border-radius: var(--radius-md);
   position: relative;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--fg-primary);
   /* Ширина — по обёртке страницы: отрицательные поля выпускали плашку за окно на 20 px */
   margin: 0;
@@ -2236,19 +2322,19 @@ pre.code-output {
   align-items: center;
   gap: 8px;
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   letter-spacing: 0.04em;
   color: var(--danger);
 }
 
 .api-offline-desc {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--fg-secondary);
 }
 
 .api-endpoint {
   font-family: var(--font-family-mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--fg-primary);
   background: rgba(239, 91, 107, 0.1);
   border: 1px solid rgba(239, 91, 107, 0.3);
@@ -2267,7 +2353,7 @@ pre.code-output {
 
 .api-offline-tag {
   font-family: var(--font-family-mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   letter-spacing: 0.04em;
   color: var(--fg-dim);
   padding: 3px 8px;
@@ -2291,16 +2377,28 @@ pre.code-output {
 .api-offline-action {
   flex-shrink: 0;
   padding: 7px 12px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
-@media (max-width: 880px) {
+@media (max-width: 1024px) {
   .api-offline {
     flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  /* Индикатор и текст — в одной строке, кнопки — под текстом */
+  .api-offline-led {
+    margin-top: 4px;
+  }
+
+  .api-offline-body {
+    flex: 1 1 0;
   }
 
   .api-offline-meta {
+    flex-basis: 100%;
     margin-left: 0;
+    padding-left: 26px;
   }
 }
 
@@ -2310,7 +2408,7 @@ pre.code-output {
 :root {
   --chip-padding: 3px 8px;
   --chip-radius: 6px;
-  --chip-font: 11.5px;
+  --chip-font: var(--font-size-xs);
 }
 
 .chip {
@@ -2481,7 +2579,7 @@ a.chip:hover {
   select.input,
   input,
   textarea {
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     min-width: 0;
   }
 
@@ -2513,7 +2611,7 @@ a.chip:hover {
   }
 
   .card-label {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     letter-spacing: 0.05em;
   }
 
@@ -2692,7 +2790,7 @@ a.chip:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   transition: all 0.15s ease;
 }
 
@@ -2804,7 +2902,7 @@ a.chip:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.25rem;
+  font-size: var(--font-size-2xl);
   flex-shrink: 0;
 }
 
