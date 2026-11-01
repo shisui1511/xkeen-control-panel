@@ -298,6 +298,9 @@ const (
 	IssueRawReserved = "raw_reserved"
 	// IssueRawPinned — ключ в «сыром» блоке закреплён и не редактируется.
 	IssueRawPinned = "raw_pinned"
+	// IssueRootKeyDuplicate — ключ корня профиля Mihomo уже задан в соседней
+	// управляемой секции (main, inbounds, other): корень получил бы его дважды.
+	IssueRootKeyDuplicate = "root_key_duplicate"
 	// IssueControllerNoSecret — у внешнего контроллера Mihomo нет секрета.
 	IssueControllerNoSecret = "controller_no_secret"
 	// IssueInboundPort — порт входящего вне диапазона 1–65535.

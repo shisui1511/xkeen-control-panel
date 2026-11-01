@@ -81,7 +81,7 @@ func parseRaw(kernel, id, text string, siblings []*configlayer.OrderedObject) (R
 		for _, k := range obj.Keys() {
 			v, _ := obj.Get(k)
 			switch {
-			case mihomoRoutingKeys[k] || mihomoPinnedTop[k]:
+			case mihomoRoutingKeys[k] || mihomoPinnedTop[k] || mihomoInboundsForeignKey(k):
 				iss.add(k, configlayer.IssueRawReserved)
 			case (k == "listeners" || k == "tun") && !isObject(v) && !isEmptyValue(v):
 				iss.add(k, configlayer.IssueCoreSectionInvalid)

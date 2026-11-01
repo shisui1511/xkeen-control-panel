@@ -38,6 +38,7 @@ var coresErrorStatus = map[string]int{
 	"raw_syntax":           http.StatusBadRequest,
 	"raw_too_large":        http.StatusBadRequest,
 	"controller_no_secret": http.StatusBadRequest,
+	"root_key_duplicate":   http.StatusBadRequest,
 	"section_unknown":      http.StatusBadRequest,
 	// Нет такого объекта.
 	"group_not_found":      http.StatusNotFound,

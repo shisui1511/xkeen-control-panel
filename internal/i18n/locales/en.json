@@ -161,6 +161,7 @@
   "configlayer.cores.apply_busy": "An apply is already in progress: try again when it finishes",
   "configlayer.cores.comments_not_acknowledged": "The files being moved contain comments that will be lost: confirm the loss of comments",
   "configlayer.cores.controller_no_secret": "The Mihomo external controller is open without a secret: set a secret or remove the controller from the Advanced block",
+  "configlayer.cores.root_key_duplicate": "A Mihomo profile root key is already set in another section: keep it in one section only",
   "configlayer.cores.core_section_invalid": "The section value cannot be parsed: check the form fields and the Advanced block",
   "configlayer.cores.draft_conflict": "The draft was changed in another tab: reload the page and try again",
   "configlayer.cores.foreign_mixed": "The file contains more than this section: only Release can resolve it",

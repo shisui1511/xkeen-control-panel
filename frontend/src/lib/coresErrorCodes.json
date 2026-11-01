@@ -19,6 +19,7 @@
     "raw_reserved",
     "raw_syntax",
     "raw_too_large",
+    "root_key_duplicate",
     "section_not_managed",
     "section_shadowed",
     "section_unknown",
@@ -33,6 +34,7 @@
     "inbounds_mixed",
     "raw_pinned",
     "raw_reserved",
+    "root_key_duplicate",
     "section_shadowed",
     "section_takeover_failed"
   ]

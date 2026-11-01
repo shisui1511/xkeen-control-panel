@@ -145,6 +145,7 @@ const FIELD_ISSUE_CODES = new Set([
   'raw_dup_key',
   'raw_syntax',
   'controller_no_secret',
+  'root_key_duplicate',
   'inbound_port_invalid',
   'inbound_duplicate'
 ]);

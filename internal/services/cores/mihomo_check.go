@@ -55,11 +55,12 @@ func mihomoControllerSet(raw json.RawMessage) bool {
 	return !mihomoIsNull(raw)
 }
 
-// mihomoSecretOK сообщает, что в собранном корне профиля secret есть и каждое его
-// вхождение непусто: строка непуста после TrimSpace, не строка — не null. Пустое
-// вхождение даёт false: корень получил бы пустой или задвоенный secret.
+// mihomoSecretOK сообщает, что в собранном корне профиля secret задан ровно
+// один раз и непуст: строка непуста после TrimSpace, не строка — не null.
+// Повтор secret в разных секциях корень не принимает (root_key_duplicate), поэтому
+// «задан дважды» считается так же, как «не задан».
 func mihomoSecretOK(tops []*configlayer.OrderedObject) bool {
-	found := false
+	count, filled := 0, false
 	for _, o := range tops {
 		if o == nil {
 			continue
@@ -68,19 +69,15 @@ func mihomoSecretOK(tops []*configlayer.OrderedObject) bool {
 		if !ok {
 			continue
 		}
-		found = true
+		count++
 		var s string
 		if json.Unmarshal(raw, &s) == nil {
-			if strings.TrimSpace(s) == "" {
-				return false
-			}
-			continue
-		}
-		if mihomoIsNull(raw) {
-			return false
+			filled = strings.TrimSpace(s) != ""
+		} else {
+			filled = !mihomoIsNull(raw)
 		}
 	}
-	return found
+	return count == 1 && filled
 }
 
 // mihomoSiblingTops возвращает значения секций mihomoTopIDs, кроме except, как их
@@ -105,7 +102,9 @@ func mihomoSiblingTops(s configlayer.Sections, except string) []*configlayer.Ord
 }
 
 // mihomoControllerIssues отклоняет TCP-контроллер без непустого secret в собранном
-// корне профиля (объект секции плюс соседние секции). В проблемах только имя
+// корне профиля (объект секции плюс соседние секции) и ключ корня, который уже
+// есть в соседней управляемой секции (root_key_duplicate): секции ложатся в один
+// корень, а Mihomo отвергает документ с повторным ключом. В проблемах только имя
 // ключа, значения не выводятся.
 //
 // Ключ «<<» в значении секции отклоняется как зарезервированный: глубокая
@@ -131,7 +130,30 @@ func mihomoControllerIssues(obj *configlayer.OrderedObject, siblings []*configla
 			out = append(out, configlayer.KeyIssue{Key: k, Code: configlayer.IssueControllerNoSecret})
 		}
 	}
+	// Повтор ключа корня идёт после контроллера: проблема контроллера важнее.
+	for _, k := range obj.Keys() {
+		if k == yamlMergeKey {
+			continue
+		}
+		for _, sib := range siblings {
+			if sib == nil {
+				continue
+			}
+			if _, dup := sib.Get(k); dup {
+				out = append(out, configlayer.KeyIssue{Key: k, Code: configlayer.IssueRootKeyDuplicate})
+				break
+			}
+		}
+	}
 	return out
+}
+
+// mihomoInboundsForeignKey сообщает, что ключ «Входящим» не принадлежит, но
+// принадлежит другой секции (порты и поля «Основного», profile, dns, sniffer).
+// Такой ключ в «Дополнительно» «Входящих» отклоняется, как в «Прочих ключах»:
+// порты задаются только в «Основном», иначе расчёт перезапуска их пропустит.
+func mihomoInboundsForeignKey(k string) bool {
+	return mihomoOwnKeys[k] && k != "listeners" && k != "tun"
 }
 
 // MihomoValueIssues проверяет значение секции Mihomo до записи и возвращает
@@ -182,7 +204,7 @@ func mihomoValueIssues(id string, value json.RawMessage, siblings []*configlayer
 		}
 	case mihomoInbounds:
 		for _, k := range obj.Keys() {
-			if mihomoRoutingKeys[k] || mihomoPinnedTop[k] {
+			if mihomoRoutingKeys[k] || mihomoPinnedTop[k] || mihomoInboundsForeignKey(k) {
 				add(k, configlayer.IssueRawReserved)
 			}
 		}

@@ -161,6 +161,7 @@
   "configlayer.cores.apply_busy": "Применение уже выполняется: повторите после его окончания",
   "configlayer.cores.comments_not_acknowledged": "В переносимых файлах есть комментарии, они пропадут: подтвердите потерю комментариев",
   "configlayer.cores.controller_no_secret": "Внешний контроллер Mihomo открыт без secret: задайте secret или уберите контроллер из блока «Дополнительно»",
+  "configlayer.cores.root_key_duplicate": "Ключ корня профиля Mihomo уже задан в другой секции: оставьте его только в одной",
   "configlayer.cores.core_section_invalid": "Значение секции не разбирается: проверьте поля формы и блок «Дополнительно»",
   "configlayer.cores.draft_conflict": "Черновик изменён в другой вкладке: обновите страницу и повторите",
   "configlayer.cores.foreign_mixed": "Файл содержит не только эту секцию: его решает только «Отпустить»",
