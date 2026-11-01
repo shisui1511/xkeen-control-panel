@@ -577,7 +577,7 @@
                 <td>
                   <span
                     class="status-badge"
-                    style="background: rgba(255,255,255,0.05); color: var(--fg-secondary);"
+                    style="background: var(--surface-tint); color: var(--fg-secondary);"
                   >
                     {q.target_type === 'global' ? $t('trafficquotas.target_global') : q.target_id}
                   </span>
@@ -883,7 +883,7 @@
 
   .stat-box {
     padding: 16px;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius);
   }
@@ -951,7 +951,7 @@
 
   .stat-bar {
     height: 6px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     border-radius: 3px;
     overflow: hidden;
   }
@@ -1034,7 +1034,7 @@
   }
 
   .dropdown-menu button:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     color: var(--fg-primary);
   }
 
@@ -1043,7 +1043,7 @@
   }
 
   .dropdown-menu button.delete-action:hover {
-    background: rgba(239, 68, 68, 0.1);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
 
   /* Form row layout */
@@ -1068,34 +1068,34 @@
   }
 
   :global(.tq-action-notify) {
-    background: rgba(240, 180, 80, 0.15);
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
     color: var(--warning);
-    border: 1px solid rgba(240, 180, 80, 0.3);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
   }
   :global(.tq-action-throttle) {
-    background: rgba(201, 162, 58, 0.15);
+    background: color-mix(in srgb, var(--idle) 15%, transparent);
     color: var(--idle);
-    border: 1px solid rgba(201, 162, 58, 0.3);
+    border: 1px solid color-mix(in srgb, var(--idle) 30%, transparent);
   }
   :global(.tq-action-log) {
-    background: rgba(148, 163, 184, 0.12);
+    background: color-mix(in srgb, var(--fg-secondary) 12%, transparent);
     color: var(--fg-secondary);
-    border: 1px solid rgba(148, 163, 184, 0.2);
+    border: 1px solid color-mix(in srgb, var(--fg-secondary) 20%, transparent);
   }
   :global(.tq-action-block) {
-    background: rgba(239, 91, 107, 0.15);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
     color: var(--danger);
-    border: 1px solid rgba(239, 91, 107, 0.3);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   }
   :global(.tq-action-redirect) {
-    background: rgba(70, 209, 138, 0.15);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
     color: var(--success);
-    border: 1px solid rgba(70, 209, 138, 0.3);
+    border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
   }
   .badge-redirected {
-    background: rgba(70, 209, 138, 0.2);
+    background: color-mix(in srgb, var(--success) 20%, transparent);
     color: var(--success);
-    border: 1px solid rgba(70, 209, 138, 0.4);
+    border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
   }
   .alert-info-banner {
     background: var(--hover);

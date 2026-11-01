@@ -40,7 +40,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 10px 14px;
-    background: rgba(255, 255, 255, 0.01);
+    background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
   }

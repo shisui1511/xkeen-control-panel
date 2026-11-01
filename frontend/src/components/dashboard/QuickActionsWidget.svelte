@@ -265,8 +265,8 @@
     display: flex;
     align-items: flex-start;
     gap: 12px;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+    background: var(--surface-tint-faint);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md, 10px);
     padding: 12px;
     text-align: left;
@@ -283,8 +283,8 @@
   }
 
   .qa-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(41, 194, 240, 0.3);
+    background: var(--surface-tint);
+    border-color: rgba(var(--accent-rgb), 0.3);
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
     transform: translateY(-1px);
   }
@@ -299,9 +299,9 @@
   }
 
   .qa-btn-destructive:hover:not(:disabled) {
-    border-color: rgba(244, 112, 127, 0.4);
-    background: rgba(244, 112, 127, 0.04);
-    box-shadow: 0 2px 10px rgba(244, 112, 127, 0.1);
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+    background: color-mix(in srgb, var(--danger) 4%, transparent);
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--danger) 10%, transparent);
   }
 
   .qa-icon-wrap {
@@ -311,14 +311,14 @@
     width: 34px;
     height: 34px;
     border-radius: var(--radius-sm, 8px);
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--surface-tint);
+    border: 1px solid var(--border-light);
     flex-shrink: 0;
   }
 
   .icon-wrap-danger {
-    background: rgba(244, 112, 127, 0.08);
-    border-color: rgba(244, 112, 127, 0.2);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+    border-color: color-mix(in srgb, var(--danger) 20%, transparent);
   }
 
   .qa-content {

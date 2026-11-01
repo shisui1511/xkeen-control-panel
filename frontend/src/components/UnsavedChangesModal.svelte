@@ -95,8 +95,8 @@
     width: 42px;
     height: 42px;
     border-radius: var(--radius-md);
-    background: rgba(245, 158, 11, 0.12);
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -138,7 +138,7 @@
     font-size: 12px;
     font-weight: 500;
     border-radius: var(--radius-sm);
-    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    background: var(--bg-hover);
     border: 1px solid var(--border);
     color: var(--fg-primary);
   }

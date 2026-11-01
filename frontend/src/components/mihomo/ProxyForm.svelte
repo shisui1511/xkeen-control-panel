@@ -1224,7 +1224,7 @@
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     padding: 2px 6px;
     border-radius: var(--radius-sm);
   }
@@ -1251,7 +1251,7 @@
   }
 
   .dialer-chain-preview {
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
     border: 1px dashed var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
@@ -1402,7 +1402,7 @@
     flex-direction: column;
     gap: 8px;
     padding: 10px;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
   }

@@ -264,7 +264,7 @@
 
   .service-sk-card {
     background: var(--bg-card);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg, 12px);
     padding: 16px;
     display: flex;
@@ -285,7 +285,7 @@
 
   .sk-footer {
     padding-top: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    border-top: 1px solid var(--border-light);
   }
 
   .status-error-card {
@@ -293,8 +293,8 @@
     align-items: center;
     justify-content: space-between;
     padding: 14px 18px;
-    background: rgba(244, 112, 127, 0.08);
-    border: 1px solid rgba(244, 112, 127, 0.25);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
     border-radius: var(--radius-lg, 12px);
     gap: 12px;
   }

@@ -149,7 +149,7 @@
 
   .live-dot-active {
     background-color: var(--success);
-    box-shadow: 0 0 6px rgba(70, 209, 138, 0.6);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--success) 60%, transparent);
     animation: livePulse 2s infinite;
   }
 
@@ -174,8 +174,8 @@
   }
 
   .telemetry-box {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+    background: var(--surface-tint-faint);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md, 10px);
     padding: 14px;
     display: flex;
@@ -193,8 +193,8 @@
   }
 
   .telemetry-box:hover {
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(41, 194, 240, 0.3);
+    background: var(--surface-tint);
+    border-color: rgba(var(--accent-rgb), 0.3);
     transform: translateY(-1px);
   }
 
@@ -214,15 +214,15 @@
   }
 
   .down-badge {
-    background: rgba(41, 194, 240, 0.12);
+    background: rgba(var(--accent-rgb), 0.12);
   }
 
   .up-badge {
-    background: rgba(70, 209, 138, 0.12);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
   }
 
   .conn-badge {
-    background: rgba(240, 180, 80, 0.12);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
   }
 
   .box-label {

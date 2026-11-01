@@ -1386,7 +1386,7 @@
     flex-wrap: wrap;
     font-size: 13px;
     color: var(--fg-secondary);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     padding: 10px 16px;
     border-radius: var(--radius);
@@ -1594,8 +1594,8 @@
   .qs-chip-rule {
     font-family: var(--font-mono, monospace);
     font-size: 11px;
-    background: rgba(41, 194, 240, 0.08);
-    border: 1px solid rgba(41, 194, 240, 0.25);
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
     border-radius: var(--radius-sm);
     padding: 3px 8px;
     color: var(--accent);
@@ -1678,7 +1678,7 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    background: rgba(255, 255, 255, 0.01);
+    background: var(--surface-tint-faint);
   }
 
   .master-filters {
@@ -1769,7 +1769,7 @@
   }
 
   .db-card-item:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-tint-faint);
   }
 
   .db-card-item.selected {
@@ -1794,15 +1794,15 @@
     align-items: center;
     justify-content: center;
     color: var(--accent);
-    background: rgba(59, 130, 246, 0.08);
+    background: rgba(var(--accent-rgb), 0.08);
     flex-shrink: 0;
     margin-top: 2px;
   }
 
   .db-icon.warning {
     color: var(--danger);
-    background: rgba(239, 68, 68, 0.08);
-    border-color: rgba(239, 68, 68, 0.2);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+    border-color: color-mix(in srgb, var(--danger) 20%, transparent);
   }
 
   .db-info {
@@ -1834,7 +1834,7 @@
     font-weight: 600;
     padding: 1px 5px;
     border-radius: 4px;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--surface-tint);
     color: var(--fg-secondary);
     border: 1px solid var(--border);
   }
@@ -1853,7 +1853,7 @@
   }
 
   .db-sep {
-    color: var(--border-strong, rgba(255, 255, 255, 0.1));
+    color: var(--border-strong);
   }
 
   .stat-bar-wrapper {
@@ -1866,7 +1866,7 @@
   .stat-bar {
     height: 4px;
     width: 60px;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--surface-tint);
     border-radius: 2px;
     overflow: hidden;
     flex-shrink: 0;
@@ -1913,7 +1913,7 @@
     border-bottom: 1px solid var(--border);
     gap: 12px;
     flex-wrap: wrap;
-    background: rgba(255, 255, 255, 0.015);
+    background: var(--surface-tint-faint);
   }
 
   .ih-left {
@@ -1987,7 +1987,7 @@
     align-items: center;
     gap: 8px;
     padding: 8px 18px;
-    background: rgba(41, 194, 240, 0.03);
+    background: rgba(var(--accent-rgb), 0.03);
     border-bottom: 1px solid var(--border);
     font-size: 12px;
     color: var(--fg-secondary);
@@ -1997,9 +1997,9 @@
   .banner-format {
     font-family: var(--font-mono, monospace);
     font-size: 11px;
-    background: rgba(41, 194, 240, 0.1);
+    background: rgba(var(--accent-rgb), 0.1);
     color: var(--accent);
-    border: 1px solid rgba(41, 194, 240, 0.2);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
     border-radius: var(--radius-sm);
     padding: 2px 6px;
   }
@@ -2035,7 +2035,7 @@
   .tag-counter {
     font-size: 11px;
     color: var(--fg-dim);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 1px 7px;
@@ -2084,12 +2084,12 @@
 
   .tag-card-row:hover {
     border-color: var(--border-hover, var(--fg-dim));
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-tint-faint);
   }
 
   .tag-card-row.copied {
     border-color: var(--success);
-    background: rgba(70, 209, 138, 0.08);
+    background: color-mix(in srgb, var(--success) 8%, transparent);
   }
 
   .tag-main-btn {
@@ -2119,7 +2119,7 @@
   .tag-count {
     font-size: 11px;
     color: var(--fg-dim);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     border-radius: 8px;
     padding: 1px 6px;
     white-space: nowrap;
@@ -2153,7 +2153,7 @@
 
   .tag-copy-btn:hover {
     color: var(--accent);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
   }
 
   .tag-card-row.copied .tag-copy-btn {
@@ -2166,7 +2166,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 10px 18px;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
     border-bottom: 1px solid var(--border);
     gap: 10px;
     flex-wrap: wrap;
@@ -2208,7 +2208,7 @@
   }
 
   .badge-count {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     border: 1px solid var(--border);
     color: var(--fg-secondary);
     font-size: 11px;
@@ -2219,9 +2219,9 @@
   .dd-rule-hint code {
     font-family: var(--font-mono, monospace);
     font-size: 11px;
-    background: rgba(41, 194, 240, 0.1);
+    background: rgba(var(--accent-rgb), 0.1);
     color: var(--accent);
-    border: 1px solid rgba(41, 194, 240, 0.2);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
     border-radius: var(--radius-sm);
     padding: 2px 6px;
   }
@@ -2243,11 +2243,11 @@
   }
 
   .entry-row:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-tint-faint);
   }
 
   .entry-row.copied {
-    background: rgba(70, 209, 138, 0.08);
+    background: color-mix(in srgb, var(--success) 8%, transparent);
   }
 
   .entry-text {

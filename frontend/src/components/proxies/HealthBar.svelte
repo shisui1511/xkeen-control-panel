@@ -171,7 +171,7 @@
     border-radius: var(--radius-sm, 4px);
     height: 4px;
     overflow: hidden;
-    background: var(--bg-elevated, rgba(255, 255, 255, 0.05));
+    background: var(--bg-elevated);
     cursor: pointer;
     transition: height 0.15s ease;
     border: none;

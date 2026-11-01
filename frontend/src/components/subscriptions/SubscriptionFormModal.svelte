@@ -104,7 +104,7 @@
       {#if !formEnableXray && !formEnableMihomo}
         <div
           class="alert alert-danger"
-          style="margin-top: 8px; margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm); border: 1px solid var(--danger); background: rgba(220, 38, 38, 0.1); color: var(--danger);"
+          style="margin-top: 8px; margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm); border: 1px solid var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger);"
         >
           <strong>{$t('subscr.modal.attention')}</strong>
           <span>{$t('subscr.no_kernel_warning')}</span>

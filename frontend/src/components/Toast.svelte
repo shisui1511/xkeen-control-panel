@@ -81,19 +81,19 @@
     border-left-color: var(--success);
     box-shadow:
       0 20px 36px -16px rgba(0, 0, 0, 0.6),
-      0 0 24px -4px rgba(70, 209, 138, 0.25);
+      0 0 24px -4px color-mix(in srgb, var(--success) 25%, transparent);
   }
   .toast--error {
     border-left-color: var(--danger);
     box-shadow:
       0 20px 36px -16px rgba(0, 0, 0, 0.6),
-      0 0 24px -4px rgba(239, 91, 107, 0.25);
+      0 0 24px -4px color-mix(in srgb, var(--danger) 25%, transparent);
   }
   .toast--warning {
     border-left-color: var(--warning);
     box-shadow:
       0 20px 36px -16px rgba(0, 0, 0, 0.6),
-      0 0 24px -4px rgba(240, 180, 80, 0.25);
+      0 0 24px -4px color-mix(in srgb, var(--warning) 25%, transparent);
   }
   .toast--info {
     border-left-color: var(--accent);

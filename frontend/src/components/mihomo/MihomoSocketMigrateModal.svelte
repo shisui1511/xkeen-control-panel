@@ -281,7 +281,7 @@
 
   .diff-header {
     padding: 6px 12px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-tint-faint);
     border-bottom: 1px solid var(--border);
     color: var(--fg-dim);
     font-size: var(--font-size-xs);
@@ -321,7 +321,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: 12px 14px;

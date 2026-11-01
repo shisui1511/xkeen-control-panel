@@ -1994,7 +1994,7 @@
     width: 44px;
     height: 44px;
     border-radius: var(--radius-md);
-    background: rgba(41, 194, 240, 0.12);
+    background: rgba(var(--accent-rgb), 0.12);
     color: var(--accent);
     display: grid;
     place-items: center;
@@ -2042,8 +2042,8 @@
 
   .core-radio-card.active {
     border-color: var(--accent);
-    background: rgba(41, 194, 240, 0.08);
-    box-shadow: 0 0 0 1px rgba(41, 194, 240, 0.25);
+    background: rgba(var(--accent-rgb), 0.08);
+    box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.25);
   }
 
   .core-radio-card.switching {
@@ -2132,8 +2132,8 @@
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 10px;
     padding: 12px 16px;
-    background: var(--bg-surface-elevated, rgba(20, 51, 79, 0.4));
-    border: 1px solid var(--border-light, rgba(255, 255, 255, 0.06));
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-md);
   }
 
@@ -2169,19 +2169,19 @@
   }
 
   .btn-danger-soft {
-    background: rgba(244, 112, 127, 0.08);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
     color: var(--danger);
-    border: 1px solid rgba(244, 112, 127, 0.3);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   }
 
   .btn-danger-soft:hover {
-    background: rgba(244, 112, 127, 0.25);
+    background: color-mix(in srgb, var(--danger) 25%, transparent);
   }
 
   .btn-warning-soft {
-    background: rgba(245, 166, 35, 0.15);
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
     color: var(--warning);
-    border: 1px solid rgba(245, 166, 35, 0.3);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
   }
 
   /* Updates Card */

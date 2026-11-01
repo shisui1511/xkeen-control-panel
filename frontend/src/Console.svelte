@@ -479,8 +479,8 @@
   }
 
   .history-item.error {
-    border-color: rgba(239, 91, 107, 0.4);
-    background: rgba(239, 91, 107, 0.04);
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+    background: color-mix(in srgb, var(--danger) 4%, transparent);
   }
 
   .history-status {

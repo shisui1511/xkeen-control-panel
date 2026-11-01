@@ -851,7 +851,7 @@
   }
   .collapse-toggle:hover {
     color: var(--accent);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--surface-tint);
   }
   .collapse-toggle svg {
     transition: transform var(--transition-fast);
@@ -972,8 +972,8 @@
 
   /* Синий чип количества нод */
   .nodes-count-badge {
-    background: rgba(41, 194, 240, 0.1);
-    border: 1px solid rgba(41, 194, 240, 0.25);
+    background: rgba(var(--accent-rgb), 0.1);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
     color: var(--accent);
     padding: 2px 10px;
     border-radius: 12px;
@@ -1196,8 +1196,8 @@
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    background: rgba(239, 68, 68, 0.05);
-    border: 1px solid rgba(239, 68, 68, 0.15);
+    background: color-mix(in srgb, var(--danger) 5%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger) 15%, transparent);
     border-radius: var(--radius-sm, 4px);
     padding: 8px 12px;
     margin-bottom: 12px;
@@ -1319,7 +1319,7 @@
   }
 
   .dropdown-menu button.delete-action:hover {
-    background: rgba(235, 94, 85, 0.1);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
 
   @media (max-width: 768px) {

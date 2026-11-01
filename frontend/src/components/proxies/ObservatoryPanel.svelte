@@ -108,11 +108,7 @@
     display: flex;
     align-items: center;
     padding: 6px 14px;
-    background: linear-gradient(
-      135deg,
-      var(--bg-group-head-from, rgba(20, 51, 79, 0.6)),
-      var(--bg-group-head-to, rgba(16, 42, 68, 0.7))
-    );
+    background: linear-gradient(135deg, var(--bg-group-head-from), var(--bg-group-head-to));
     border-bottom: 1px solid var(--border-strong, var(--border));
   }
 

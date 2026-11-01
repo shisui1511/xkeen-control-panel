@@ -170,7 +170,7 @@
     border-radius: var(--radius-lg);
     box-shadow:
       0 12px 32px -4px rgba(0, 0, 0, 0.6),
-      0 0 0 1px rgba(255, 255, 255, 0.05);
+      0 0 0 1px var(--surface-tint);
     padding: 14px;
     color: var(--fg-primary);
     font-family: var(--font-family-sans);
@@ -304,17 +304,17 @@
   }
 
   .history-badge.ok {
-    background: rgba(70, 209, 138, 0.15);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
     color: var(--success);
   }
 
   .history-badge.mid {
-    background: rgba(240, 180, 80, 0.15);
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
     color: var(--warning);
   }
 
   .history-badge.bad {
-    background: rgba(244, 112, 127, 0.15);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
     color: var(--danger);
   }
 </style>
