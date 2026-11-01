@@ -688,7 +688,7 @@ test('cores: Xray входящие — группа force-proxy', async ({ page 
       await page.getByTestId('section-field-xray-inbounds-add').click();
       await expect(rows).toHaveCount(count + 1);
       const tag = page.getByTestId(`section-field-xray-inbounds-tag-${count}`);
-      await tag.fill('force-proxy-e2e');
+      await tag.fill('force-proxy');
       await tag.blur();
       await page.getByTestId(`section-field-xray-inbounds-listen-${count}`).fill('127.0.0.1');
       await page.getByTestId(`section-field-xray-inbounds-listen-${count}`).blur();
@@ -697,7 +697,7 @@ test('cores: Xray входящие — группа force-proxy', async ({ page 
       await port.blur();
       await expect
         .poll(async () => (await xrayView(page)).forceProxy?.tags ?? [], { timeout: T.action })
-        .toContain('force-proxy-e2e');
+        .toContain('force-proxy');
     }
 
     // блок группы есть ровно один и объясняет режим speed balancer
