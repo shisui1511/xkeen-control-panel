@@ -40,6 +40,16 @@ const rtMihomoSeedBasic = "mode: rule\n" +
 	"rules:\n" +
 	"  - MATCH,DIRECT\n"
 
+// rtMihomoSeedMergeKey — прежний профиль с ключом слияния в кавычках. Текст
+// собран строкой: кодировщик yaml.v3 пишет «<<» простым скаляром, то есть
+// слиянием, и обход T-147-19 не воспроизводится. Ключа secret нет.
+const rtMihomoSeedMergeKey = "mode: rule\n" +
+	"\"<<\":\n" +
+	"  external-controller: 0.0.0.0:9090\n" +
+	"proxies: []\n" +
+	"rules:\n" +
+	"  - MATCH,DIRECT\n"
+
 // rtMihomoSeedSections превращает результат переноса в секции черновика: под
 // управлением только перечисленные идентификаторы.
 func rtMihomoSeedSections(t *testing.T, seeded map[string]json.RawMessage, managed ...string) configlayer.Sections {
@@ -465,5 +475,48 @@ func TestRouterCoresMihomoSeedRoundTrip(t *testing.T) {
 				t.Errorf("CheckMihomo, %s: лишний controller_no_secret %s — secret другой секции не учтён", c.name, g)
 			}
 		}
+	})
+	// Ключ слияния в кавычках (T-147-19): перенос оставляет его буквальным ключом
+	// «Прочих ключей», проверка его отклоняет, а профиль пишет его в кавычках,
+	// поэтому вложенный external-controller в корень не попадает.
+	t.Run("ключ слияния в кавычках", func(t *testing.T) {
+		seeded, err := SeedMihomo([]byte(rtMihomoSeedMergeKey), configlayer.MihomoPorts{Redir: 7100, TProxy: 7101})
+		if err != nil {
+			t.Fatalf("SeedMihomo: %v", err)
+		}
+		other := rtMihomoSeedObject(t, seeded["other"])
+		if _, ok := other.Get("<<"); !ok {
+			t.Fatal("после переноса в «Прочих ключах» нет ключа «<<»")
+		}
+		if _, ok := other.Get("external-controller"); ok {
+			t.Fatal("после переноса external-controller попал в корень «Прочих ключей» через слияние")
+		}
+
+		in := configlayer.Input{Sections: rtMihomoSeedSections(t, seeded, rtMihomoSeedAll...)}
+		issues := CheckMihomo(in, configlayer.InstalledKernels{Mihomo: true})
+		found := false
+		var listed []string
+		for _, bi := range issues {
+			listed = append(listed, bi.Key+":"+bi.Code+":"+bi.Params["key"])
+			if bi.Key == configlayer.SectionMihomoOther && bi.Code == configlayer.IssueRawReserved && bi.Params["key"] == "<<" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("CheckMihomo не отклонил ключ «<<» в «Прочих ключах»: %v", listed)
+		}
+
+		prof := rtMihomoSeedProfile(t, in.Sections, configlayer.MihomoPorts{})
+		var top map[string]any
+		if err := yaml.Unmarshal([]byte(prof), &top); err != nil {
+			t.Fatalf("профиль панели не YAML: %v", err)
+		}
+		if _, ok := top["<<"]; !ok {
+			t.Error("в профиле нет ключа «<<» в кавычках")
+		}
+		if _, ok := top["external-controller"]; ok {
+			t.Error("в профиле external-controller попал в корень через «<<» без кавычек")
+		}
+		rtMihomoSeedKernelCheck(t, prof)
 	})
 }

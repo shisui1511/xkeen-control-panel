@@ -22,7 +22,10 @@ import (
 // Вердикт — ответы панели (save, raw/parse, checks снимка, 409 apply_blocked) и
 // профиль на диске после настоящего «Применить» с mihomo -t. Стенд возвращается в
 // t.Cleanup. В сообщения попадают только коды, ключи и имена секций; значение
-// secret не печатается. Метка ядра: при активном Mihomo профиль с контроллером
+// secret не печатается. Буквальный ключ «<<» в кавычках (T-147-19) панель
+// отклоняет в корне секции (raw_reserved) и пишет в профиль в кавычках во
+// вложенном отображении: без кавычек Mihomo прочёл бы его слиянием и подмешал
+// бы вложенный external-controller в корень без secret. Метка ядра: при активном Mihomo профиль с контроллером
 // идёт перезагрузкой ядра, при Xray пишутся только файлы, а помощник взятия
 // сверяет возврат по ядру цели.
 
@@ -79,6 +82,19 @@ func rtCoresCtlAdvanced(t *testing.T, advanced string, set map[string]any, drop 
 		return ""
 	}
 	return string(out)
+}
+
+// rtCoresCtlAppend приписывает к нормализованному тексту «Дополнительно» готовый
+// фрагмент YAML. Фрагмент собирается строкой, а не через yaml.Marshal: кодировщик
+// yaml.v3 пишет ключ «<<» простым скаляром, то есть настоящим слиянием, и обход
+// T-147-19 не воспроизводится.
+func rtCoresCtlAppend(t *testing.T, advanced, fragment string) string {
+	t.Helper()
+	base := rtCoresCtlAdvanced(t, advanced, nil)
+	if base != "" && !strings.HasSuffix(base, "\n") {
+		base += "\n"
+	}
+	return base + fragment
 }
 
 // rtCoresCtlHasAnyKey сообщает, что в «Дополнительно» есть хотя бы один из ключей.
@@ -148,19 +164,25 @@ func (b *rtCoresCtlBase) rtCoresCtlRestore(t *testing.T) {
 	}
 }
 
-// rtCoresCtlExpectKey требует отказ save с controller_no_secret для ключа; иначе
-// сообщает о принятом ключе и возвращает false при ответе 200.
-func rtCoresCtlExpectKey(t *testing.T, r rtSrcResp, section, key, stage string) (accepted bool) {
+// rtCoresCtlExpectIssue требует отказ save с кодом code для ключа key; иначе
+// сообщает о принятом ключе и возвращает true при ответе 200.
+func rtCoresCtlExpectIssue(t *testing.T, r rtSrcResp, section, key, code, stage string) (accepted bool) {
 	t.Helper()
 	switch {
 	case r.Status == http.StatusOK:
 		rtCoresCtlAccepted(t, rtCoresCtlTitle(section), key, stage)
 		return true
-	case r.Status != http.StatusBadRequest || r.Code != configlayer.IssueControllerNoSecret || r.Params["key"] != key:
-		t.Errorf("%s: %s (%s): %d %q params.key=%q, ожидалось 400 controller_no_secret с этим ключом",
-			rtCoresCtlTitle(section), key, stage, r.Status, r.Code, r.Params["key"])
+	case r.Status != http.StatusBadRequest || r.Code != code || r.Params["key"] != key:
+		t.Errorf("%s: %s (%s): %d %q params.key=%q, ожидалось 400 %s с этим ключом",
+			rtCoresCtlTitle(section), key, stage, r.Status, r.Code, r.Params["key"], code)
 	}
 	return false
+}
+
+// rtCoresCtlExpectKey требует отказ save с controller_no_secret для ключа.
+func rtCoresCtlExpectKey(t *testing.T, r rtSrcResp, section, key, stage string) (accepted bool) {
+	t.Helper()
+	return rtCoresCtlExpectIssue(t, r, section, key, configlayer.IssueControllerNoSecret, stage)
 }
 
 // rtCoresCtlParse вызывает raw/parse и возвращает rejected как список «ключ:код».
@@ -271,7 +293,10 @@ func rtCoresCtlUnmanage(t *testing.T, e *rtSrc, section string) {
 // секции применяется → secret_in_other_section: secret в «Прочих ключах»
 // засчитывается, «Применить» проходит mihomo -t; после снятия secret «Применить»
 // заблокирован, xcp-main.yaml не переписан → secret_edge_cases:
-// external-controller-tls, пустой secret, secret секции вне управления.
+// external-controller-tls, пустой secret, secret секции вне управления →
+// merge_key_literal: буквальный ключ «<<» в кавычках с вложенным
+// external-controller отклонён в корне каждой секции (raw/parse, save), а во
+// вложенном отображении «Прочих ключей» применяется и лежит в профиле в кавычках.
 func TestRouterCoresMihomoControllerSecret(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
@@ -430,6 +455,56 @@ func TestRouterCoresMihomoControllerSecret(t *testing.T) {
 		rtCoresCtlExpectBlocked(t, s, configlayer.SectionMihomoMain, "external-controller")
 		if got := rtRtScanDisk(t).mihomoSum; got != sum {
 			t.Error("xcp-main.yaml переписан при заблокированном «Применить»")
+		}
+	})
+
+	t.Run("merge_key_literal", func(t *testing.T) {
+		t.Cleanup(func() { base.rtCoresCtlRestore(t) })
+		s := e.with(t)
+
+		// 1. Ключ «<<» в кавычках в корне секции: в профиле без кавычек он стал бы
+		// слиянием и внёс бы external-controller в корень мимо controller_no_secret.
+		fragment := "\"<<\":\n  external-controller: " + addr + "\n"
+		for _, section := range rtCoresCtlSections {
+			p := base.parts[section]
+			text := rtCoresCtlAppend(t, p.advanced, fragment)
+			if !slices.Contains(rtCoresCtlParse(t, s, section, text), "<<:"+configlayer.IssueRawReserved) {
+				rtCoresCtlAccepted(t, rtCoresCtlTitle(section), "\"<<\"", "raw/parse")
+			}
+			r := rtCoresCtlSave(t, s, section, p.form, text)
+			if rtCoresCtlExpectIssue(t, r, section, "<<", configlayer.IssueRawReserved, "save") {
+				base.rtCoresCtlRestore(t)
+			}
+		}
+
+		// 2. Вложенный буквальный «<<» допустим, но обязан остаться ключом в
+		// кавычках: вид секции и профиль на диске не должны его слить.
+		otherP := base.parts["other"]
+		nested := rtCoresCtlAppend(t, otherP.advanced,
+			"xcp-merge-fixture:\n  \"<<\":\n    external-controller: "+addr+"\n")
+		if r := rtCoresCtlSave(t, s, "other", otherP.form, nested); r.Status != http.StatusOK {
+			t.Fatalf("Прочие ключи: вложенный «<<» в кавычках: %d %s", r.Status, r.Code)
+		}
+		view := map[string]any{}
+		if err := yaml.Unmarshal([]byte(rtCoresCtlRead(t, s, "other").advanced), &view); err != nil {
+			t.Fatalf("«Дополнительно» после save не YAML: %v", err)
+		}
+		fixture, _ := view["xcp-merge-fixture"].(map[string]any)
+		_, hasMerge := fixture["<<"]
+		_, hasCtl := fixture["external-controller"]
+		if !hasMerge || hasCtl {
+			t.Errorf("Прочие ключи: в виде секции «<<»=%v, external-controller=%v (ожидались true и false): ключ выведен без кавычек", hasMerge, hasCtl)
+		}
+		s.rtRtApplyOK("ключ «<<» в кавычках во вложенном отображении")
+		top := rtCoresRetakeProfileTop(t)
+		if got, _ := top["external-controller"].(string); got == addr {
+			t.Error("в xcp-main.yaml external-controller попал в корень через вложенный «<<»")
+		}
+		fixture, _ = top["xcp-merge-fixture"].(map[string]any)
+		_, hasMerge = fixture["<<"]
+		_, hasCtl = fixture["external-controller"]
+		if !hasMerge || hasCtl {
+			t.Errorf("в xcp-main.yaml xcp-merge-fixture: «<<»=%v, external-controller=%v (ожидались true и false)", hasMerge, hasCtl)
 		}
 	})
 }

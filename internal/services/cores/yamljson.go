@@ -275,7 +275,8 @@ func yamlJSONString(s string) ([]byte, error) {
 
 // OrderedJSONToYAML строит узел YAML из JSON с сохранением порядка ключей.
 // Строки получают тег !!str (кодировщик сам берёт кавычки там, где строка
-// читалась бы как число или bool), числа остаются числами.
+// читалась бы как число или bool), числа остаются числами. Исключение —
+// строка «<<»: она всегда в двойных кавычках (yamlStrNode).
 func OrderedJSONToYAML(raw json.RawMessage) (*yaml.Node, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -362,8 +363,20 @@ func yamlNodeFromJSON(dec *json.Decoder, depth int) (*yaml.Node, error) {
 	return nil, errors.New("неожиданный токен JSON")
 }
 
+// yamlMergeKey — ключ слияния YAML 1.1. Без кавычек yaml.v3 и Mihomo читают
+// его как слияние, а не как обычный ключ.
+const yamlMergeKey = "<<"
+
 func yamlStrNode(s string) *yaml.Node {
-	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s}
+	n := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s}
+	// Простым скаляром «<<» стал бы ключом слияния и подмешал вложенное
+	// отображение в корень профиля мимо controller_no_secret (T-147-19);
+	// кодировщик кавычки сам не ставит, поэтому стиль задан явно. Правило
+	// действует и для значений-строк «<<».
+	if s == yamlMergeKey {
+		n.Style = yaml.DoubleQuotedStyle
+	}
+	return n
 }
 
 // yamlErrLine ищет номер строки в тексте ошибки разбора yaml.v3
