@@ -442,16 +442,6 @@ func rtCoresDig(root map[string]any, path ...string) (any, bool) {
 	return cur, true
 }
 
-// rtCoresDecode разбирает JSON в общий вид для сравнения по значению.
-func rtCoresDecode(t *testing.T, raw []byte) any {
-	t.Helper()
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		t.Fatalf("JSON: %v: %s", err, raw)
-	}
-	return v
-}
-
 // TestRouterCoresMergeSemantics проверяет допущение A1: как Xray сливает log,
 // dns, policy и inbounds из нескольких файлов каталога и совпадает ли это со
 // сканом панели (действующее значение). Расхождение — находка для владельца:

@@ -217,22 +217,6 @@ func ooGetPath(o *configlayer.OrderedObject, parts []string) (json.RawMessage, b
 	return ooGetPath(sub, parts[1:])
 }
 
-// ooSetPath записывает значение по пути, создавая недостающие объекты.
-func ooSetPath(o *configlayer.OrderedObject, parts []string, val json.RawMessage) {
-	if len(parts) == 1 {
-		o.Set(parts[0], val)
-		return
-	}
-	sub := newOO()
-	if v, ok := o.Get(parts[0]); ok {
-		if s, err := configlayer.ParseOrderedObject(v); err == nil {
-			sub = s
-		}
-	}
-	ooSetPath(sub, parts[1:], val)
-	o.Set(parts[0], mihomoObjectRaw(sub))
-}
-
 // ooDelPath удаляет значение по пути вместе с родителями, ставшими пустыми.
 func ooDelPath(o *configlayer.OrderedObject, parts []string) {
 	if _, ok := ooGetPath(o, parts); !ok {
