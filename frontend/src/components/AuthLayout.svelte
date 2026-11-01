@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import type { Snippet } from 'svelte';
   import { apiFetch } from '../lib/api';
+  import BrandMark from './BrandMark.svelte';
 
   // Общий каркас экранов входа и первичной настройки: фон, карточка,
   // фирменный блок и подвал с версией панели.
@@ -24,29 +25,7 @@
   <div class="login-card">
     <!-- Brand block — same visual DNA as sidebar -->
     <div class="login-brand">
-      <span class="brand-mark" aria-hidden="true">
-        <!-- Cross-routing X logo: 4 endpoint nodes + crossed paths + central hub -->
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="4" cy="4" r="1.8" fill="currentColor" />
-          <circle cx="20" cy="4" r="1.8" fill="currentColor" />
-          <circle cx="4" cy="20" r="1.8" fill="currentColor" />
-          <circle cx="20" cy="20" r="1.8" fill="currentColor" />
-          <path
-            d="M5.4 5.4 L18.6 18.6"
-            stroke="currentColor"
-            stroke-width="2.4"
-            stroke-linecap="round"
-          />
-          <path
-            d="M18.6 5.4 L5.4 18.6"
-            stroke="currentColor"
-            stroke-width="2.4"
-            stroke-linecap="round"
-          />
-          <circle cx="12" cy="12" r="2.8" fill="currentColor" />
-          <circle cx="12" cy="12" r="1.1" fill="var(--bg-deep, #07182a)" />
-        </svg>
-      </span>
+      <span class="brand-mark" aria-hidden="true"><BrandMark size={32} /></span>
       <div class="brand-names">
         <div class="b1"><span class="x">X</span>Keen</div>
         <div class="b2">Control&nbsp;Panel</div>
@@ -90,6 +69,13 @@
       0 48px 80px -32px rgba(0, 0, 0, 0.75),
       0 0 0 1px rgba(255, 255, 255, 0.025) inset,
       0 0 40px -20px rgba(var(--accent-rgb), 0.15);
+  }
+
+  /* Тень для тёмного фона на светлой теме ложилась грязным серым пятном */
+  :global([data-theme='light']) .login-card {
+    box-shadow:
+      0 24px 48px -28px rgba(12, 34, 55, 0.28),
+      0 0 0 1px rgba(255, 255, 255, 0.6) inset;
   }
 
   /* Brand block */
