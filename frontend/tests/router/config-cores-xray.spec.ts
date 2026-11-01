@@ -684,17 +684,22 @@ test('cores: Xray входящие — группа force-proxy', async ({ page 
       // «вид → карточка → форма» проверялась всегда
       await takeViaDialog(page, 'inbounds');
       const rows = page.locator(INBOUND_ROWS);
-      const count = await rows.count();
-      await page.getByTestId('section-field-xray-inbounds-add').click();
-      await expect(rows).toHaveCount(count + 1);
-      const tag = page.getByTestId(`section-field-xray-inbounds-tag-${count}`);
-      await tag.fill('force-proxy');
-      await tag.blur();
-      await page.getByTestId(`section-field-xray-inbounds-listen-${count}`).fill('127.0.0.1');
-      await page.getByTestId(`section-field-xray-inbounds-listen-${count}`).blur();
-      const port = page.getByTestId(`section-field-xray-inbounds-port-${count}`);
-      await port.fill(String(randomPort()));
-      await port.blur();
+      // Вид секции после взятия приходит отдельным обновлением и сбрасывает строки формы,
+      // ещё не ушедшие в черновик: строку добавляем заново, пока она не удержится
+      await expect(async () => {
+        const count = await rows.count();
+        await page.getByTestId('section-field-xray-inbounds-add').click();
+        await expect(rows).toHaveCount(count + 1, { timeout: 3000 });
+        const tag = page.getByTestId(`section-field-xray-inbounds-tag-${count}`);
+        await tag.fill('force-proxy', { timeout: 3000 });
+        await tag.blur();
+        const listen = page.getByTestId(`section-field-xray-inbounds-listen-${count}`);
+        await listen.fill('127.0.0.1', { timeout: 3000 });
+        await listen.blur();
+        const port = page.getByTestId(`section-field-xray-inbounds-port-${count}`);
+        await port.fill(String(randomPort()), { timeout: 3000 });
+        await port.blur();
+      }).toPass({ timeout: T.action });
       await expect
         .poll(async () => (await xrayView(page)).forceProxy?.tags ?? [], { timeout: T.action })
         .toContain('force-proxy');
