@@ -684,7 +684,7 @@
   .group-card:hover {
     box-shadow:
       0 4px 20px rgba(0, 0, 0, 0.35),
-      0 0 0 1px color-mix(in srgb, var(--primary) 15%, transparent);
+      0 0 0 1px color-mix(in srgb, var(--accent) 15%, transparent);
   }
   .group-card .gc-head {
     background: linear-gradient(135deg, var(--bg-group-head-from), var(--bg-group-head-to));
@@ -707,7 +707,7 @@
     bottom: 0;
     background: radial-gradient(
       ellipse at top left,
-      color-mix(in srgb, var(--primary) 5%, transparent),
+      color-mix(in srgb, var(--accent) 5%, transparent),
       transparent 60%
     );
     pointer-events: none;
@@ -889,7 +889,7 @@
     gap: 3px;
     font-size: 11px;
     color: var(--accent);
-    background: color-mix(in srgb, var(--primary) 8%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
     padding: 1px 6px;
     border-radius: 4px;
   }
@@ -923,8 +923,8 @@
     font-family: inherit;
   }
   .gc-now-pill.is-leaf {
-    background: color-mix(in srgb, var(--primary) 8%, transparent);
-    border-color: color-mix(in srgb, var(--primary) 20%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 20%, transparent);
     color: var(--accent);
   }
   .gc-now-dot {
@@ -1028,7 +1028,7 @@
     border-radius: var(--radius-md);
     background: linear-gradient(
       135deg,
-      color-mix(in srgb, var(--primary) 3%, transparent),
+      color-mix(in srgb, var(--accent) 3%, transparent),
       transparent
     );
     opacity: 0;
@@ -1046,13 +1046,13 @@
   .proxy-card.now {
     background: linear-gradient(
       135deg,
-      color-mix(in srgb, var(--primary) 12%, transparent),
-      color-mix(in srgb, var(--primary) 4%, transparent)
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      color-mix(in srgb, var(--accent) 4%, transparent)
     );
-    border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
     box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--primary) 8%, transparent),
-      0 2px 8px color-mix(in srgb, var(--primary) 8%, transparent);
+      inset 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent),
+      0 2px 8px color-mix(in srgb, var(--accent) 8%, transparent);
   }
   .proxy-card .p-header {
     display: flex;
@@ -1146,7 +1146,7 @@
     color: var(--fg-primary);
   }
   .filter-chip.active {
-    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
     border-color: var(--accent);
     color: var(--accent);
     font-weight: 600;
@@ -1161,10 +1161,10 @@
   .group-test-btn {
     margin-left: auto;
     color: var(--accent);
-    border-color: color-mix(in srgb, var(--primary) 30%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
   }
   .group-test-btn:hover {
-    background: color-mix(in srgb, var(--primary) 15%, transparent);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
     border-color: var(--accent);
     color: var(--accent);
   }
@@ -1265,7 +1265,7 @@
     border-top: 1px solid var(--border);
   }
   .proxy-grid-more {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--accent);

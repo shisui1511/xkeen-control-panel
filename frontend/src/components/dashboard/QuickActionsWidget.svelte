@@ -208,7 +208,7 @@
           {#if isResettingSessions}
             <span class="spinner" aria-hidden="true"></span>
           {:else}
-            <Icon name="stop" size={18} color="var(--error, #f4707f)" />
+            <Icon name="stop" size={18} color="var(--danger, #f4707f)" />
           {/if}
         </div>
         <div class="qa-content">

@@ -404,7 +404,7 @@
 
   .pc-meta {
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .pc-rename {

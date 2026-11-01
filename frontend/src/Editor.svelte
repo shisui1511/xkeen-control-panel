@@ -1885,7 +1885,7 @@
     margin-top: 32px;
     padding-top: 18px;
     border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     font-size: 12px;
   }
 

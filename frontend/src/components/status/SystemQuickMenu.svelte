@@ -360,7 +360,7 @@
     font-size: var(--font-size-xs);
     font-weight: 600;
     letter-spacing: 0.02em;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .badge-kernel {
@@ -425,7 +425,7 @@
     justify-content: center;
     width: 18px;
     height: 18px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .menu-item:hover:not(:disabled) .item-icon {

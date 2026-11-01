@@ -62,7 +62,7 @@
 
   .scenario-chip {
     padding: 4px 10px;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 12px;
     color: var(--fg-primary);
@@ -75,13 +75,13 @@
 
   .scenario-chip:hover {
     background: var(--hover);
-    border-color: var(--primary);
+    border-color: var(--accent);
   }
 
   .scenario-chip.active {
-    background: color-mix(in srgb, var(--primary) 15%, transparent);
-    border-color: var(--primary);
-    color: var(--primary);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    border-color: var(--accent);
+    color: var(--accent);
     font-weight: 600;
   }
 

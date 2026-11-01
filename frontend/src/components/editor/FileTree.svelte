@@ -439,7 +439,7 @@
     padding: 5px 24px 5px 8px;
     font-size: 12px;
     height: 28px;
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);

@@ -545,7 +545,7 @@
     border-top-color: var(--bg-surface-elevated) !important;
   }
   :global(.cm-tooltip.cm-tooltip-below > .cm-tooltip-arrow:after) {
-    border-bottom-color: var(--bg-surface) !important;
+    border-bottom-color: var(--bg-card) !important;
   }
   :global(.cm-tooltip.cm-tooltip-above > .cm-tooltip-arrow:before) {
     border-top-color: var(--border-strong) !important;
@@ -566,7 +566,7 @@
   /* 1. Header */
   :global(.cm-schema-tooltip-header) {
     padding: var(--spacing-3) var(--spacing-4);
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -667,7 +667,7 @@
     font-weight: 600;
   }
   :global(.cm-schema-tooltip-description code) {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     color: var(--accent);
     border: 1px solid var(--border);
     font-family: var(--font-family-mono);
@@ -688,7 +688,7 @@
   :global(.cm-schema-tooltip-description li) {
     position: relative;
     padding: var(--spacing-2) var(--spacing-3);
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-size: var(--font-size-xs, 12px);
@@ -719,7 +719,7 @@
   :global(.cm-schema-tooltip-description blockquote) {
     margin: var(--spacing-3) 0 var(--spacing-1) 0;
     padding: var(--spacing-3) var(--spacing-3);
-    background: color-mix(in srgb, var(--warning) 12%, var(--bg-surface));
+    background: color-mix(in srgb, var(--warning) 12%, var(--bg-card));
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     border-left: 3px solid var(--warning);
     border-radius: var(--radius-sm);
@@ -734,7 +734,7 @@
   /* 3. Enum Pills Section */
   :global(.cm-schema-tooltip-enums) {
     padding: var(--spacing-3) var(--spacing-4);
-    background: color-mix(in srgb, var(--bg-surface) 60%, transparent);
+    background: color-mix(in srgb, var(--bg-card) 60%, transparent);
     border-top: 1px solid var(--border);
     display: flex;
     flex-direction: column;
@@ -768,7 +768,7 @@
     font-size: 11.5px;
     padding: 2px 8px;
     border-radius: var(--radius-sm);
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     color: var(--fg-primary);
     transition: all var(--transition-fast, 150ms ease);
@@ -779,7 +779,7 @@
   }
   :global(.cm-schema-enum-pill.is-default) {
     border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-    background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
   }
   :global(.cm-schema-enum-default-tag) {
     font-size: 9px;
@@ -795,7 +795,7 @@
   /* 4. Footer Constraints */
   :global(.cm-schema-tooltip-footer) {
     padding: var(--spacing-2) var(--spacing-4);
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
@@ -831,7 +831,7 @@
   :global(.cm6-json-schema-hover--code-wrapper) {
     border-top: 1px solid var(--border);
     padding: var(--spacing-2) var(--spacing-4);
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border-radius: 0 0 var(--radius-md) var(--radius-md);
   }
   :global(.cm6-json-schema-hover--code) {

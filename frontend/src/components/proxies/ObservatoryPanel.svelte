@@ -188,7 +188,7 @@
     margin-top: 0;
     line-height: 1.2;
     white-space: nowrap;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .obs-stat-btn {

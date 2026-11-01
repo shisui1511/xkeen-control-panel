@@ -301,7 +301,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 8px 12px;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -336,7 +336,7 @@
   .preview-tabs-bar {
     display: flex;
     align-items: center;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
     scrollbar-width: none;
@@ -387,7 +387,7 @@
 
   .preview-meta-size {
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     font-family: var(--font-mono);
   }
 

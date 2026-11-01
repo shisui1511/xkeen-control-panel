@@ -89,7 +89,7 @@
                 >
                 <span
                   class="ruleset-type-badge"
-                  style="font-size:var(--font-size-xs); background:var(--bg-surface); padding:2px 4px; border-radius:4px; opacity:0.7;"
+                  style="font-size:var(--font-size-xs); background:var(--bg-card); padding:2px 4px; border-radius:4px; opacity:0.7;"
                   >{item.type}</span
                 >
               </label>
@@ -128,12 +128,12 @@
   }
 
   .badge-primary {
-    background: var(--primary);
-    color: var(--primary-fg);
+    background: var(--accent);
+    color: var(--btn-primary-text);
   }
 
   .badge-secondary {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     color: var(--fg-secondary);
     border: 1px solid var(--border);
   }

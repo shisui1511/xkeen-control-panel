@@ -293,7 +293,7 @@
 
   .xdev-meta {
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     word-break: break-all;
   }
 
@@ -356,7 +356,7 @@
   .xdev-counts,
   .xdev-top {
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .xdev-top {

@@ -141,7 +141,7 @@
   .content-loading {
     margin: 0;
     font-size: var(--font-size-sm);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .content-error {

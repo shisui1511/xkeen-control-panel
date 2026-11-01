@@ -387,7 +387,7 @@
   .geoscan-search-icon {
     position: absolute;
     left: 12px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     pointer-events: none;
   }
 
@@ -395,7 +395,7 @@
     width: 100%;
     padding: 9px 36px 9px 36px;
     font-size: var(--font-size-sm, 13px);
-    background: var(--bg-surface);
+    background: var(--bg-card);
     color: var(--fg-primary);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -406,8 +406,8 @@
   }
 
   .geoscan-input:focus {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 2px rgba(var(--primary-rgb, 59, 130, 246), 0.15);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.15);
   }
 
   .geoscan-clear-btn {
@@ -415,7 +415,7 @@
     right: 10px;
     background: transparent;
     border: none;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     cursor: pointer;
     font-size: 14px;
     padding: 4px;
@@ -440,7 +440,7 @@
 
   .geoscan-type-toggles {
     display: inline-flex;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm, 6px);
     padding: 2px;
@@ -466,7 +466,7 @@
   }
 
   .geoscan-toggle-btn.active {
-    background: var(--primary);
+    background: var(--accent);
     color: var(--btn-primary-text);
   }
 
@@ -485,7 +485,7 @@
   }
 
   .geoscan-file-filter-btn:hover {
-    border-color: var(--border-hover, var(--fg-muted));
+    border-color: var(--border-hover, var(--fg-dim));
     color: var(--fg-primary);
   }
 
@@ -508,7 +508,7 @@
 
   .geoscan-files-title {
     font-weight: 600;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .geoscan-files-actions {
@@ -520,7 +520,7 @@
   .btn-link {
     background: none;
     border: none;
-    color: var(--primary);
+    color: var(--accent);
     font-size: var(--font-size-xs, 12px);
     cursor: pointer;
     padding: 0;
@@ -531,7 +531,7 @@
   }
 
   .sep {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .geoscan-files-grid {
@@ -567,7 +567,7 @@
 
   .file-type-badge {
     font-size: 10px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     text-transform: uppercase;
   }
 
@@ -589,12 +589,12 @@
     justify-content: center;
     gap: 10px;
     padding: 32px 16px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     font-size: var(--font-size-sm, 13px);
   }
 
   .geoscan-state-box.geoscan-empty svg {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .geoscan-results-header {
@@ -610,7 +610,7 @@
   }
 
   .geoscan-result-card {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 10px 12px;
@@ -621,7 +621,7 @@
   }
 
   .geoscan-result-card:hover {
-    border-color: var(--border-hover, var(--fg-muted));
+    border-color: var(--border-hover, var(--fg-dim));
   }
 
   .geoscan-card-top {
@@ -646,7 +646,7 @@
   }
 
   .geoscan-arrow {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     font-size: 11px;
   }
 
@@ -655,8 +655,8 @@
   }
 
   .geoscan-match-pill {
-    background: rgba(var(--primary-rgb, 59, 130, 246), 0.15);
-    color: var(--primary);
+    background: rgba(var(--accent-rgb), 0.15);
+    color: var(--accent);
     font-size: 10px;
     padding: 1px 5px;
     border-radius: 10px;
@@ -676,7 +676,7 @@
     padding: 3px 8px;
     font-size: var(--font-size-xs, 12px);
     font-family: var(--font-mono);
-    color: var(--primary);
+    color: var(--accent);
   }
 
   .copy-btn {
@@ -694,7 +694,7 @@
   }
 
   .geoscan-samples-lbl {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     white-space: nowrap;
   }
 

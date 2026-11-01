@@ -167,7 +167,7 @@
   {:else if statusError}
     <div class="status-error-card">
       <div class="error-msg">
-        <Icon name="warning" size={16} color="var(--error, #f4707f)" />
+        <Icon name="warning" size={16} color="var(--danger, #f4707f)" />
         <span>{$t('dash.status_error')}</span>
       </div>
       <Button

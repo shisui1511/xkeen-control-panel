@@ -504,7 +504,7 @@
           <div style="font-size: 24px;">📄</div>
           <div style="font-size: 13px; color: var(--fg-secondary);">
             {#if loadedFileName}
-              <span style="color: var(--primary); font-weight: 600;">{loadedFileName}</span>
+              <span style="color: var(--accent); font-weight: 600;">{loadedFileName}</span>
               <span> ({$t('subscr.import_file_loaded')})</span>
             {:else}
               {$t('subscr.import_drop_or_select')}
@@ -679,8 +679,8 @@
   }
 
   .btn-action-primary {
-    background: var(--primary);
-    color: var(--primary-fg);
+    background: var(--accent);
+    color: var(--btn-primary-text);
   }
 
   .btn-action-primary:hover {
@@ -737,8 +737,8 @@
   }
 
   .type-vless {
-    background: color-mix(in srgb, var(--primary) 15%, transparent);
-    color: var(--primary);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: var(--accent);
   }
   .type-hysteria2 {
     background: color-mix(in srgb, var(--success) 15%, transparent);
@@ -891,8 +891,8 @@
   }
 
   .conf-dropzone.dragging {
-    border-color: var(--primary);
-    background: color-mix(in srgb, var(--primary) 8%, transparent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
 
   .file-picker-input::file-selector-button {

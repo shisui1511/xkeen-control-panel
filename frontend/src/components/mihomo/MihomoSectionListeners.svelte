@@ -504,8 +504,8 @@
   }
 
   .type-mixed {
-    background: color-mix(in srgb, var(--primary) 15%, transparent);
-    color: var(--primary);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: var(--accent);
   }
   .type-socks {
     background: color-mix(in srgb, var(--success) 15%, transparent);
@@ -582,7 +582,7 @@
   }
 
   .item-edit:hover {
-    color: var(--primary);
+    color: var(--accent);
   }
 
   .item-del:hover {
@@ -620,7 +620,7 @@
   }
 
   .directive-tag {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     padding: 2px 6px;
     border-radius: 4px;
     font-size: var(--font-size-xs);

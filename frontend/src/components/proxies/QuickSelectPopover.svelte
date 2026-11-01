@@ -386,7 +386,7 @@
     align-items: center;
     cursor: grab;
     touch-action: none;
-    background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
+    background: var(--bg-elevated, rgba(255, 255, 255, 0.02));
   }
 
   .qs-drag-bar {
@@ -399,7 +399,7 @@
   .qs-header {
     padding: 8px 10px;
     border-bottom: 1px solid var(--border);
-    background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
+    background: var(--bg-elevated, rgba(255, 255, 255, 0.02));
   }
 
   .qs-search {

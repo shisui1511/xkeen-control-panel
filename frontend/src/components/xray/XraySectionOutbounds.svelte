@@ -283,7 +283,7 @@
         style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; opacity: 0.75; background: var(--bg-surface-active);"
       >
         <div>
-          <span class="badge badge-tag" style="background: var(--bg-surface);">{item.tag}</span>
+          <span class="badge badge-tag" style="background: var(--bg-card);">{item.tag}</span>
           {#if item.server}
             <span style="font-size: 0.75rem; color: var(--fg-secondary); margin-left: 8px;">
               ({item.protocol} &bull; {item.server})
@@ -345,7 +345,7 @@
       {#if importStep === 1}
         <div
           class="import-source-tabs"
-          style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;"
+          style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;"
         >
           <button
             type="button"
@@ -413,7 +413,7 @@
             <div style="font-size: 24px;">📄</div>
             <div style="font-size: 13px; color: var(--fg-secondary);">
               {#if loadedFileName}
-                <span style="color: var(--color-primary); font-weight: 600;">{loadedFileName}</span>
+                <span style="color: var(--accent); font-weight: 600;">{loadedFileName}</span>
                 <span> ({$t('subscr.import_file_loaded')})</span>
               {:else}
                 {$t('subscr.import_drop_or_select')}
@@ -431,7 +431,7 @@
           </div>
         {:else if importSource === 'clipboard'}
           <div
-            style="padding: 24px; text-align: center; background: var(--bg-surface); border: 1px dashed var(--border-color); border-radius: var(--radius);"
+            style="padding: 24px; text-align: center; background: var(--bg-card); border: 1px dashed var(--border); border-radius: var(--radius);"
           >
             <p style="font-size: 13px; color: var(--fg-secondary); margin-bottom: 12px;">
               {$t('subscr.import_clipboard_desc')}
@@ -470,7 +470,7 @@
               {#if item.rowError}
                 <div
                   class="preview-item-card"
-                  style="background: var(--bg-surface); border: 1px solid var(--danger); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                  style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
                 >
                   <button
                     type="button"
@@ -492,7 +492,7 @@
               {:else}
                 <div
                   class="preview-item-card"
-                  style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                  style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
                 >
                   <button
                     type="button"
@@ -617,13 +617,13 @@
     align-items: center;
     gap: 4px;
     font-weight: 500;
-    background: var(--color-primary-subtle, rgba(59, 130, 246, 0.15));
-    color: var(--color-primary);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
 
   .btn-icon {
     background: none;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
     border-radius: var(--radius-xs);
     padding: 4px 8px;
     font-size: 12px;
@@ -651,8 +651,8 @@
   }
 
   .form-input {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
     font-size: 0.8125rem;
@@ -661,12 +661,12 @@
 
   .form-input:focus {
     outline: none;
-    border-color: var(--color-primary);
+    border-color: var(--accent);
   }
 
   .add-btn {
-    background: var(--bg-surface);
-    border: 1px dashed var(--border-color);
+    background: var(--bg-card);
+    border: 1px dashed var(--border);
     border-radius: var(--radius);
     padding: 10px 16px;
     color: var(--fg-secondary);
@@ -678,38 +678,38 @@
   }
 
   .add-btn:hover {
-    border-color: var(--primary);
-    color: var(--primary);
+    border-color: var(--accent);
+    color: var(--accent);
     background: var(--hover);
   }
 
   .btn-action-primary {
-    background: var(--color-primary-subtle, rgba(59, 130, 246, 0.1));
-    border: 1px solid var(--color-primary);
-    color: var(--color-primary);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    color: var(--accent);
   }
 
   .btn-action-primary:hover {
-    background: var(--color-primary);
-    color: var(--color-on-primary);
+    background: var(--accent);
+    color: var(--btn-primary-text);
   }
 
   .conf-dropzone {
-    border: 2px dashed var(--border-color);
+    border: 2px dashed var(--border);
     border-radius: var(--radius);
     padding: 32px 16px;
     text-align: center;
     cursor: pointer;
     position: relative;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     transition:
       border-color 0.2s,
       background-color 0.2s;
   }
 
   .conf-dropzone.dragging {
-    border-color: var(--color-primary);
-    background: var(--color-primary-subtle, rgba(59, 130, 246, 0.05));
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
 
   .file-picker-input {

@@ -1426,7 +1426,7 @@
   }
 
   .qs-icon {
-    color: var(--primary);
+    color: var(--accent);
   }
 
   .qs-title {
@@ -1437,12 +1437,12 @@
 
   .qs-subtitle {
     font-size: 12px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .qs-type-toggles {
     display: inline-flex;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm, 6px);
     padding: 2px;
@@ -1466,7 +1466,7 @@
   }
 
   .qs-type-btn.active {
-    background: var(--primary);
+    background: var(--accent);
     color: var(--btn-primary-text);
   }
 
@@ -1487,7 +1487,7 @@
     width: 100%;
     padding: 8px 32px 8px 12px;
     font-size: 13px;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     color: var(--fg-primary);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -1498,8 +1498,8 @@
   }
 
   .qs-input:focus {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 2px rgba(var(--primary-rgb, 59, 130, 246), 0.15);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.15);
   }
 
   .qs-clear-btn {
@@ -1507,7 +1507,7 @@
     right: 8px;
     background: transparent;
     border: none;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     cursor: pointer;
     font-size: 13px;
     padding: 2px 4px;
@@ -1549,7 +1549,7 @@
     justify-content: space-between;
     align-items: center;
     gap: 10px;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 6px 12px;
@@ -1569,7 +1569,7 @@
   }
 
   .qs-chip-arrow {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .qs-chip-tag {
@@ -1577,8 +1577,8 @@
   }
 
   .qs-chip-count {
-    background: rgba(var(--primary-rgb, 59, 130, 246), 0.15);
-    color: var(--primary);
+    background: rgba(var(--accent-rgb), 0.15);
+    color: var(--accent);
     font-size: 10px;
     padding: 1px 5px;
     border-radius: 10px;
@@ -1598,7 +1598,7 @@
     border: 1px solid rgba(41, 194, 240, 0.25);
     border-radius: var(--radius-sm);
     padding: 3px 8px;
-    color: var(--primary);
+    color: var(--accent);
     letter-spacing: 0.2px;
   }
 
@@ -1635,14 +1635,14 @@
     justify-content: center;
     gap: 8px;
     padding: 16px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     font-size: 13px;
   }
 
   .btn-link {
     background: none;
     border: none;
-    color: var(--primary);
+    color: var(--accent);
     font-size: 12px;
     cursor: pointer;
     padding: 0;
@@ -1689,7 +1689,7 @@
 
   .segmented-pills {
     display: flex;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm, 6px);
     padding: 2px;
@@ -1716,7 +1716,7 @@
   }
 
   .pill-btn.active {
-    background: var(--primary);
+    background: var(--accent);
     color: var(--btn-primary-text);
   }
 
@@ -1730,7 +1730,7 @@
     width: 100%;
     padding: 6px 28px 6px 10px;
     font-size: 12px;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
@@ -1738,7 +1738,7 @@
   }
 
   .master-search-input:focus {
-    border-color: var(--primary);
+    border-color: var(--accent);
   }
 
   .master-list {
@@ -1773,8 +1773,8 @@
   }
 
   .db-card-item.selected {
-    background: rgba(var(--primary-rgb, 59, 130, 246), 0.08);
-    border-left-color: var(--primary);
+    background: rgba(var(--accent-rgb), 0.08);
+    border-left-color: var(--accent);
   }
 
   .db-card-left {
@@ -1793,14 +1793,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--primary);
+    color: var(--accent);
     background: rgba(59, 130, 246, 0.08);
     flex-shrink: 0;
     margin-top: 2px;
   }
 
   .db-icon.warning {
-    color: var(--error);
+    color: var(--danger);
     background: rgba(239, 68, 68, 0.08);
     border-color: rgba(239, 68, 68, 0.2);
   }
@@ -1840,7 +1840,7 @@
   }
 
   .badge-geoip {
-    color: var(--primary);
+    color: var(--accent);
   }
 
   .db-sub-row {
@@ -1848,7 +1848,7 @@
     align-items: center;
     gap: 4px;
     font-size: 11px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     flex-wrap: wrap;
   }
 
@@ -1949,7 +1949,7 @@
     align-items: center;
     gap: 6px;
     font-size: 12px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     flex-wrap: wrap;
   }
 
@@ -1965,7 +1965,7 @@
   .btn-copy-path {
     background: none;
     border: none;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     cursor: pointer;
     padding: 2px 4px;
     border-radius: var(--radius-sm);
@@ -1998,7 +1998,7 @@
     font-family: var(--font-mono, monospace);
     font-size: 11px;
     background: rgba(41, 194, 240, 0.1);
-    color: var(--primary);
+    color: var(--accent);
     border: 1px solid rgba(41, 194, 240, 0.2);
     border-radius: var(--radius-sm);
     padding: 2px 6px;
@@ -2015,7 +2015,7 @@
   }
 
   .search-bar-ico {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     flex-shrink: 0;
   }
 
@@ -2029,12 +2029,12 @@
   }
 
   .inspector-search-input::placeholder {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .tag-counter {
     font-size: 11px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -2045,7 +2045,7 @@
   .td-clear {
     background: none;
     border: none;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     cursor: pointer;
     font-size: 12px;
     padding: 2px 4px;
@@ -2073,7 +2073,7 @@
   .tag-card-row {
     display: flex;
     align-items: center;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
@@ -2083,7 +2083,7 @@
   }
 
   .tag-card-row:hover {
-    border-color: var(--border-hover, var(--fg-muted));
+    border-color: var(--border-hover, var(--fg-dim));
     background: rgba(255, 255, 255, 0.03);
   }
 
@@ -2118,7 +2118,7 @@
 
   .tag-count {
     font-size: 11px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     background: rgba(255, 255, 255, 0.05);
     border-radius: 8px;
     padding: 1px 6px;
@@ -2126,21 +2126,21 @@
   }
 
   .tag-arrow {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     font-size: 12px;
     transition: transform 0.15s ease;
   }
 
   .tag-main-btn:hover .tag-arrow {
     transform: translateX(2px);
-    color: var(--primary);
+    color: var(--accent);
   }
 
   .tag-copy-btn {
     background: none;
     border: none;
     border-left: 1px solid var(--border);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     cursor: pointer;
     padding: 8px 10px;
     display: flex;
@@ -2152,7 +2152,7 @@
   }
 
   .tag-copy-btn:hover {
-    color: var(--primary);
+    color: var(--accent);
     background: rgba(255, 255, 255, 0.05);
   }
 
@@ -2184,7 +2184,7 @@
     gap: 4px;
     background: none;
     border: none;
-    color: var(--primary);
+    color: var(--accent);
     font-size: 12px;
     font-weight: 500;
     cursor: pointer;
@@ -2197,7 +2197,7 @@
   }
 
   .dd-nav-sep {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .dd-tag-name {
@@ -2220,7 +2220,7 @@
     font-family: var(--font-mono, monospace);
     font-size: 11px;
     background: rgba(41, 194, 240, 0.1);
-    color: var(--primary);
+    color: var(--accent);
     border: 1px solid rgba(41, 194, 240, 0.2);
     border-radius: var(--radius-sm);
     padding: 2px 6px;
@@ -2260,7 +2260,7 @@
   .entry-copy-btn {
     background: none;
     border: none;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     cursor: pointer;
     padding: 4px;
     border-radius: var(--radius-sm);
@@ -2290,19 +2290,19 @@
     justify-content: center;
     gap: 10px;
     padding: 40px 20px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     font-size: 13px;
   }
 
   .td-state-error {
-    color: var(--error);
+    color: var(--danger);
   }
 
   .spinner-circle {
     width: 16px;
     height: 16px;
     border: 2px solid var(--border-strong);
-    border-top-color: var(--primary);
+    border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     display: inline-block;

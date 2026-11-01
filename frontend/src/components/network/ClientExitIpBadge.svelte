@@ -337,7 +337,7 @@
     height: 30px;
     padding: 0 4px 0 0;
     background: var(--bg-card);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
     border-radius: var(--radius-full, 9999px);
     font-size: 12px;
     color: var(--fg-primary);
@@ -360,17 +360,17 @@
   }
 
   .client-ip-pill:hover {
-    border-color: var(--primary);
+    border-color: var(--accent);
     background: var(--bg-card-hover, var(--bg-hover));
   }
 
   .client-ip-pill.is-open {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 20%, transparent);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
   }
 
   .icon-globe {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     flex-shrink: 0;
   }
 
@@ -409,8 +409,8 @@
   }
 
   .badge-direct {
-    background: color-mix(in srgb, var(--primary) 14%, transparent);
-    color: var(--primary);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    color: var(--accent);
   }
 
   .badge-other,
@@ -438,7 +438,7 @@
     height: 18px;
     border: none;
     background: transparent;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     border-radius: 50%;
     cursor: pointer;
     padding: 0;
@@ -472,7 +472,7 @@
     right: 0;
     width: 290px;
     background: var(--bg-card);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg, 12px);
     box-shadow:
       0 10px 25px -5px rgba(0, 0, 0, 0.25),
@@ -495,7 +495,7 @@
 
   .popover-header {
     padding: 12px 14px 10px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg-card) 95%, var(--bg-hover));
   }
 
@@ -514,7 +514,7 @@
 
   .popover-subtitle {
     font-size: 11px;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     margin: 2px 0 0;
     line-height: 1.35;
   }
@@ -533,9 +533,9 @@
   }
 
   .chip-direct {
-    background: color-mix(in srgb, var(--primary) 15%, transparent);
-    color: var(--primary);
-    border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   }
 
   .popover-body {
@@ -563,7 +563,7 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
     font-weight: 600;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .detail-val-copy {
@@ -598,7 +598,7 @@
     padding: 0;
     background: transparent;
     border: none;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     border-radius: 4px;
     cursor: pointer;
     transition:
@@ -633,13 +633,13 @@
   }
 
   .routing-explainer.is-direct {
-    background: color-mix(in srgb, var(--primary) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
     color: var(--fg-primary);
   }
 
   .routing-explainer.is-direct .explainer-icon {
-    color: var(--primary);
+    color: var(--accent);
   }
 
   .explainer-icon {
@@ -656,7 +656,7 @@
     display: flex;
     justify-content: flex-end;
     padding: 8px 14px;
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg-card) 98%, var(--bg-hover));
   }
 

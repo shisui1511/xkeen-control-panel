@@ -111,7 +111,7 @@
   }
 
   .form-input:focus {
-    border-color: var(--primary);
+    border-color: var(--accent);
   }
 
   .form-actions {

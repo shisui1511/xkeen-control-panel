@@ -958,7 +958,7 @@
 
   .stat-bar-fill {
     height: 100%;
-    background: var(--primary);
+    background: var(--accent);
     border-radius: 3px;
     transition: width 0.3s ease;
   }
@@ -1039,7 +1039,7 @@
   }
 
   .dropdown-menu button.delete-action {
-    color: var(--error);
+    color: var(--danger);
   }
 
   .dropdown-menu button.delete-action:hover {

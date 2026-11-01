@@ -357,7 +357,7 @@
         >
         <div
           class="form-hint"
-          style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px;"
+          style="font-size: 12px; color: var(--fg-dim); margin-bottom: 12px;"
         >
           {$t('subscr.sockopt.hint')}
         </div>
