@@ -259,6 +259,10 @@ type XrayAPIFragmentInfo struct {
 	IsModular bool
 	// HasAnyJSON indicates whether any JSON files exist in the configuration directory.
 	HasAnyJSON bool
+	// Addr is the address the Xray gRPC API actually listens on: api.listen of the
+	// file with the api object, or the listen address and port of an inbound tagged
+	// "api" in any file. Empty when the api object exists but nothing listens.
+	Addr string
 }
 
 // FindXrayAPIFragment scans the given Xray config directory to find which JSON fragment
@@ -267,6 +271,48 @@ type XrayAPIFragmentInfo struct {
 // returned. Comments (JSONC) are stripped before parsing. If no file has the key, it
 // returns 00_api.json for modular deployments or config.json for monolithic ones.
 func FindXrayAPIFragment(configDir string) XrayAPIFragmentInfo {
+	return findXrayAPIFragment(configDir, true)
+}
+
+// FindXrayAPIFragmentLegacy is FindXrayAPIFragment for the legacy gRPC monitoring
+// toggle: files that are not plain JSON (with comments) are skipped, as before the
+// config layer, so the toggle never rewrites a JSONC file and loses its comments.
+func FindXrayAPIFragmentLegacy(configDir string) XrayAPIFragmentInfo {
+	return findXrayAPIFragment(configDir, false)
+}
+
+// xrayAPIInboundAddr returns the listen address and port of the inbound tagged
+// "api" in the parsed fragment; empty when there is none.
+func xrayAPIInboundAddr(root map[string]interface{}) string {
+	inbs, _ := root["inbounds"].([]interface{})
+	for _, inb := range inbs {
+		m, ok := inb.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if tag, _ := m["tag"].(string); tag != "api" {
+			continue
+		}
+		var port int
+		switch p := m["port"].(type) {
+		case float64:
+			port = int(p)
+		case string:
+			port, _ = strconv.Atoi(strings.TrimSpace(p))
+		}
+		if port <= 0 || port > 65535 {
+			continue
+		}
+		host, _ := m["listen"].(string)
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		return net.JoinHostPort(host, strconv.Itoa(port))
+	}
+	return ""
+}
+
+func findXrayAPIFragment(configDir string, allowComments bool) XrayAPIFragmentInfo {
 	if configDir == "" {
 		return XrayAPIFragmentInfo{Path: "config.json"}
 	}
@@ -312,27 +358,43 @@ func FindXrayAPIFragment(configDir string) XrayAPIFragmentInfo {
 
 	// Scan all JSON files for the top-level "api" object; the last one by name wins.
 	apiPath := ""
+	apiListen := ""
+	inboundAddr := ""
 	for _, name := range jsonFiles {
 		filePath := filepath.Join(configDir, name)
 		data, readErr := os.ReadFile(filePath)
 		if readErr != nil {
 			continue
 		}
+		text := string(data)
+		if allowComments {
+			text = StripJSONComments(text)
+		}
 		var root map[string]interface{}
-		if json.Unmarshal([]byte(StripJSONComments(string(data))), &root) != nil || root == nil {
+		if json.Unmarshal([]byte(text), &root) != nil || root == nil {
 			continue
 		}
-		if _, ok := root["api"].(map[string]interface{}); ok {
+		if api, ok := root["api"].(map[string]interface{}); ok {
 			apiPath = filePath
+			apiListen, _ = api["listen"].(string)
+			apiListen = strings.TrimSpace(apiListen)
+		}
+		if addr := xrayAPIInboundAddr(root); addr != "" {
+			inboundAddr = addr
 		}
 	}
 	if apiPath != "" {
+		addr := apiListen
+		if addr == "" {
+			addr = inboundAddr
+		}
 		return XrayAPIFragmentInfo{
 			Path:       apiPath,
 			APIPresent: true,
 			FileExists: true,
 			IsModular:  isModular,
 			HasAnyJSON: true,
+			Addr:       addr,
 		}
 	}
 

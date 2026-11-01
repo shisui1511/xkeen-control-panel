@@ -126,7 +126,7 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 	defer a.lifecycleMu.Unlock()
 
-	info := services.FindXrayAPIFragment(a.cfg.XRayConfigDir)
+	info := services.FindXrayAPIFragmentLegacy(a.cfg.XRayConfigDir)
 
 	// У блока api один владелец: при включённом слое блок, который ведёт панель
 	// (файл панели или маршрутизация Xray, взятая панелью), старый переключатель
