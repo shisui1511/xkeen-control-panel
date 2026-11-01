@@ -4,14 +4,18 @@
 # Версия вычисляется только из git-истории, frontend/package.json не читается.
 #
 #   scripts/version.sh            версия сборки:
-#                                   HEAD на релизном теге, без правок → v0.25.4
+#                                   HEAD на теге vX.Y.Z или vX.Y.Z-beta.N, без правок → этот тег
 #                                   иначе → v0.26.0-alpha.17+g578b6e8f[.dirty]
-#   scripts/version.sh --next     следующий релиз по conventional commits → v0.26.0
+#   scripts/version.sh --next     база следующего релиза → v0.26.0
 #
 # Следующая версия: после последнего стабильного тега vX.Y.Z
 #   feat…!: / BREAKING CHANGE → major (в 0.x — minor, пока API не стабилен)
 #   feat:                      → minor
 #   любые другие коммиты       → patch
+# Если из HEAD достижим пре-релиз vB-beta.N новее последнего stable и B выше посчитанной версии,
+# база — B: следующий выпуск будет пре-релизом этой базы (auto_release.sh plan), и сборка ветки
+# не должна называть себя версией ниже уже вышедших пре-релизов. alpha.N — число коммитов после
+# последнего stable.
 #
 # XCP_VERSION в окружении переопределяет версию сборки (ручной релиз из CI).
 
@@ -76,6 +80,38 @@ if [ -n "$LAST_TAG" ] && [ "$COUNT" = 0 ] && [ -z "$DIRTY" ] && [ "$MODE" != nex
   exit 0
 fi
 
+# max_pre — наибольший тег vX.Y.Z-beta.N со stdin числовым сравнением кортежа
+# (major, minor, patch, N): sort -V есть не везде, а строкой beta.9 > beta.10.
+max_pre() {
+  awk '
+    /^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$/ {
+      s = substr($0, 2)
+      sub(/-beta\./, ".", s)
+      split(s, p, ".")
+      k = sprintf("%09d%09d%09d%09d", p[1], p[2], p[3], p[4])
+      if (k > best) { best = k; tag = $0 }
+    }
+    END { if (tag != "") print tag }
+  '
+}
+
+# Пре-релиз на самом HEAD без правок — это и есть версия сборки
+if [ "$MODE" = build ] && [ -z "$DIRTY" ]; then
+  HEAD_PRE=$(git tag --points-at HEAD 2>/dev/null | max_pre)
+  if [ -n "$HEAD_PRE" ]; then
+    echo "$HEAD_PRE"
+    exit 0
+  fi
+fi
+
+# Новейший пре-релиз, достижимый из HEAD; его база — кандидат в базу версии
+PRE_TAG=$(git tag -l 'v*-beta.*' --merged HEAD 2>/dev/null | max_pre)
+PRE_BASE=""
+if [ -n "$PRE_TAG" ]; then
+  PRE_BASE="${PRE_TAG#v}"
+  PRE_BASE="${PRE_BASE%-beta.*}"
+fi
+
 MAJOR=$(echo "$BASE" | cut -d. -f1)
 MINOR=$(echo "$BASE" | cut -d. -f2)
 PATCH=$(echo "$BASE" | cut -d. -f3)
@@ -97,6 +133,22 @@ case "$BUMP" in
   minor) NEXT="$MAJOR.$((MINOR + 1)).0" ;;
   patch) NEXT="$MAJOR.$MINOR.$((PATCH + 1))" ;;
 esac
+
+# ver_gt A B — A строго выше B (X.Y.Z, числовое сравнение)
+ver_gt() {
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    split(a, x, "."); split(b, y, ".")
+    for (i = 1; i <= 3; i++) {
+      if (x[i] + 0 > y[i] + 0) exit 0
+      if (x[i] + 0 < y[i] + 0) exit 1
+    }
+    exit 1
+  }'
+}
+
+if [ -n "$PRE_BASE" ] && ver_gt "$PRE_BASE" "$NEXT"; then
+  NEXT="$PRE_BASE"
+fi
 
 case "$MODE" in
   next) echo "v$NEXT" ;;

@@ -51,7 +51,8 @@
 #
 # Окружение:
 #   SOAK_HOURS   сколько часов пре-релиз X.Y.0 должен провисеть после публикации (по умолчанию 24);
-#                milestone — до закрытия вехи: базу X.Y.0 продвигает только PROMOTE_BASE
+#                milestone — до закрытия вехи: базу X.Y.0 продвигает только PROMOTE_BASE, а feat
+#                не открывает новую базу, пока живая не вышла в stable (см. plan)
 #   PRE_KIND     суффикс пре-релиза (по умолчанию beta): теги vX.Y.Z-<PRE_KIND>.N
 #   PROMOTE_BASE версия vX.Y.Z из ручного запуска: снимает выдержку этой базы; готовая база
 #                продвигается раньше младших, неготовая — предупреждение в журнале
@@ -184,8 +185,13 @@ heal() {
 #   после последнего пре-релиза базы B нет изменений → он же (идемпотентно)
 #   после него feat или ломающее изменение       → новая база: минор B + 1 (major + 1 для ломающего при major ≥ 1)
 #   после него только fix/perf/refactor/revert    → следующий номер пре-релиза базы B
+# При SOAK_HOURS=milestone базы X.Y.0 до закрытия вехи в stable не выходят, и новая база на
+# каждый feat давала бы номера, которые никогда не станут stable (0.35…0.38 за одну веху). Там
+# feat копится в живой базе B следующим номером пре-релиза; новая база — только для ломающего
+# изменения, которое поднимает major относительно последнего stable (major ≥ 1). Номер версии
+# растёт относительно последнего stable, а не на каждый feat.
 plan() {
-  local last range next B tip log n major minor
+  local last range next B tip log n major minor last_major
   last=$(last_stable)
   range="${last:+$last..}HEAD"
   if ! release_worthy "$range"; then
@@ -212,11 +218,16 @@ plan() {
     minor=${B#v*.}
     minor=${minor%%.*}
     if [ "$major" -ge 1 ] && grep -qE '^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE' <<<"$log"; then
-      echo "rc v$((major + 1)).0.0-${PRE_KIND}.1"
-    else
+      last_major=${last#v}
+      last_major=${last_major%%.*}
+      if [ "$SOAK_HOURS" != milestone ] || [ "$major" = "${last_major:-0}" ]; then
+        echo "rc v$((major + 1)).0.0-${PRE_KIND}.1"
+        return
+      fi
+    elif [ "$SOAK_HOURS" != milestone ]; then
       echo "rc v$major.$((minor + 1)).0-${PRE_KIND}.1"
+      return
     fi
-    return
   fi
   n=$(pre_n "$tip")
   echo "rc $B-${PRE_KIND}.$((n + 1))"
