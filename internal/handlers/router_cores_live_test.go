@@ -630,6 +630,57 @@ func (m *rtCoresLiveMihomo) rtCoresLiveRelease(t *testing.T) bool {
 	return true
 }
 
+// rtCoresLiveReleaseChecked отпускает маршрутизацию Mihomo и проверяет способ
+// перезапуска (G-147-3, D-16): до «Применить» в снимке есть {mihomo, reason}
+// (reason пуст — записи mihomo нет), итог «Применить» совпадает с объявленным —
+// полный перезапуск с новым PID при непустой причине, горячая перезагрузка при
+// пустой. Затем конфигурация устройства сверяется с исходной.
+func (m *rtCoresLiveMihomo) rtCoresLiveReleaseChecked(t *testing.T, reason string) {
+	t.Helper()
+	c := m.e.with(t)
+	r := c.call(http.MethodPost, rtRoutingBase+"/release", map[string]int64{"revision": c.rtRtRevision()})
+	if r.Status != http.StatusOK {
+		t.Fatalf("routing/release: %d %s", r.Status, r.Code)
+	}
+	notes := c.rtCoresLiveRestartNotes()
+	if reason != "" && !rtCoresLiveHasNote(notes, "mihomo", reason) {
+		t.Fatalf("отпускание: cores.restart без {mihomo, %s}: %v", reason, notes)
+	}
+	if reason == "" {
+		for _, n := range notes {
+			if n["kernel"] == "mihomo" {
+				t.Fatalf("отпускание: лишнее объявление {mihomo, %v}: %v", n["reason"], notes)
+			}
+		}
+	}
+
+	pidBefore := rtRstKernelPID(t, "mihomo")
+	outcome, note, a := c.rtCoresLiveApplyRestart("mihomo")
+	if reason == "" {
+		if outcome != "hot_reloaded" {
+			t.Fatalf("отпускание без смены порта и tun: исход %q, ожидалась горячая перезагрузка (hot_reloaded); %s", outcome, rtRstDescribe(a))
+		}
+	} else {
+		if outcome == "hot_reloaded" {
+			t.Fatalf("отпускание: применено горячей перезагрузкой, ожидался полный перезапуск full_restart_%s; %s", reason, rtRstDescribe(a))
+		}
+		if outcome != "restarted" || note != "full_restart_"+reason {
+			t.Fatalf("отпускание: исход %q, пояснение %q, ожидалось restarted / full_restart_%s; %s", outcome, note, reason, rtRstDescribe(a))
+		}
+		pidAfter := rtRstKernelPID(t, "mihomo")
+		if pidAfter == pidBefore {
+			t.Fatalf("отпускание: PID mihomo не сменился (%d); %s", pidBefore, rtRstDescribe(a))
+		}
+		rtRstHoldPID(t, "mihomo", pidAfter)
+	}
+	m.taken = false
+	c.rtRtExpectReleased(m.tg, m.before)
+	if m.redir != 0 || m.tproxy != 0 {
+		rtCoresLiveWaitRules(t, m.redir, m.tproxy, 0, 0)
+	}
+	rtCoresLiveWaitStatus(t)
+}
+
 // rtCoresLiveCleanup возвращает стенд при любом исходе: отпускает маршрутизацию,
 // если она взята, и убирает следы узлов и секций.
 func (m *rtCoresLiveMihomo) rtCoresLiveCleanup(t *testing.T) {
@@ -852,7 +903,10 @@ func rtCoresLiveMihomoRestart(t *testing.T, e *rtSrc, tg routertest.Target) {
 	// Полный перезапуск не сдвинул порты: правила XKeen прежние.
 	rtCoresLiveWaitRules(t, redir, tproxy, 0, 0)
 	rtCoresLiveWaitStatus(t)
-	m.rtCoresLiveRelease(t)
+
+	// Отпускание возвращает config.yaml к прежнему профилю с прежним tun: способ
+	// перезапуска объявлен до «Применить» и совпадает с фактическим (G-147-3).
+	m.rtCoresLiveReleaseChecked(t, "tun")
 }
 
 // Трасса: «Входящие» Xray взяты и применены → смена порта прозрачного входящего

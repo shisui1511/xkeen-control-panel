@@ -541,7 +541,8 @@ func (l *Layer) Snapshot() SnapshotView {
 func (l *Layer) restartNotes(st State) []RestartNote {
 	installed := l.installed()
 	out := []RestartNote{}
-	for _, n := range RestartReasons(st.Applied, st.Draft) {
+	base := restartBase(l.opts.Roots, st, st.Draft, installed, l.opts.ForeignOwned)
+	for _, n := range RestartReasons(st.Applied, st.Draft, base) {
 		if (n.Kernel == KernelXray && installed.Xray) || (n.Kernel == KernelMihomo && installed.Mihomo) {
 			out = append(out, n)
 		}

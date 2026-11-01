@@ -3,6 +3,9 @@ package configlayer
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Объявление способа перезапуска по изменениям секций ядер (D-16, SEC-02).
@@ -15,23 +18,223 @@ const (
 	RestartReasonTun  = "tun"
 )
 
+// RestartBase — сторона перехода владения, которую RestartReasons по двум
+// наборам секций увидеть не может: при отпускании это то, что вернётся на диск
+// (прежний профиль Mihomo), при взятии — то, что действует сейчас. Пустое
+// значение — перехода нет, сравниваются только секции. Строится один раз на
+// снимок и на план (restartBase), чтобы объявление и признак полного перезапуска
+// считались одним расчётом.
+type RestartBase struct {
+	mihomo *mihomoTransition
+}
+
+// mihomoTransition — переход владения маршрутизацией Mihomo: факты профиля до и
+// после него. unread — одну из сторон прочитать не удалось.
+type mihomoTransition struct {
+	before, after mihomoRestartFacts
+	unread        bool
+}
+
 // RestartReasons возвращает объявления перезапуска по разнице между
-// применённым состоянием и черновиком. Сравниваются только секции, которые
-// управляются панелью и там, и там: взятие, отпускание или правка секции без
-// смены порта прозрачного входящего и tun ничего не объявляют. Порядок — xray,
-// затем mihomo, не больше одной записи на ядро; у Mihomo tun важнее port. Пустой
-// результат — пустой срез (не nil).
-func RestartReasons(applied, draft Sections) []RestartNote {
+// применённым состоянием и черновиком. Секции, которые управляются панелью и
+// там, и там, сравниваются между собой: правка секции без смены порта
+// прозрачного входящего и tun ничего не объявляет. На переходе владения
+// (base) сравнивается значение по ту сторону перехода: если порт или tun
+// действительно меняются, объявляется перезапуск; сторона не прочиталась —
+// port. Порядок — xray, затем mihomo, не больше одной записи на ядро; у Mihomo
+// tun важнее port. Пустой результат — пустой срез (не nil).
+func RestartReasons(applied, draft Sections, base RestartBase) []RestartNote {
 	out := []RestartNote{}
 	appliedCores, draftCores := DesiredCores(applied), DesiredCores(draft)
 
 	if xrayInboundsPortChanged(appliedCores[SectionXrayInbounds], draftCores[SectionXrayInbounds]) {
 		out = append(out, RestartNote{Kernel: KernelXray, Reason: RestartReasonPort})
 	}
-	if reason := mihomoRestartReason(appliedCores, draftCores); reason != "" {
+	reason := ""
+	switch tr := base.mihomo; {
+	case tr == nil:
+		reason = mihomoRestartReason(appliedCores, draftCores)
+	case tr.unread:
+		reason = RestartReasonPort
+	default:
+		reason = mihomoFactsReason(tr.before, tr.after)
+	}
+	if reason != "" {
 		out = append(out, RestartNote{Kernel: KernelMihomo, Reason: reason})
 	}
 	return out
+}
+
+// restartBase строит сторону перехода владения для снимка слоя и плана запуска.
+// st — состояние слоя (фактическое владение), draft — желаемое. Диск читается
+// только при переходе; любая ошибка чтения даёт «не прочиталось», а не отказ.
+func restartBase(roots Roots, st State, draft Sections, installed InstalledKernels, foreignOwned func(kernel, rel string) bool) RestartBase {
+	var base RestartBase
+	if installed.Mihomo {
+		base.mihomo = mihomoRoutingTransition(roots, st, draft)
+	}
+	return base
+}
+
+// mihomoRoutingTransition считает переход владения маршрутизацией Mihomo.
+// Отпускание: до — действующий профиль панели, после — прежний профиль, к
+// которому вернётся config.yaml. nil — перехода для расчёта нет.
+func mihomoRoutingTransition(roots Roots, st State, draft Sections) *mihomoTransition {
+	prev := st.Routing.Mihomo
+	if prev == nil || DesiredRouting(draft).Managed {
+		return nil
+	}
+	var data []byte
+	var err error
+	switch prev.PrevKind {
+	case configKindSymlink:
+		link := prev.PrevLink
+		if link == "" {
+			link = filepath.Join(roots.Mihomo, filepath.FromSlash(prev.PrevProfile))
+		}
+		_, data, err = readMihomoLink(roots.Mihomo, link)
+	case configKindFile:
+		data, err = readLimited(filepath.Join(prev.PrevBackup, KernelMihomo, "config.yaml"), maxXrayKeyFileBytes)
+	default:
+		return nil
+	}
+	tr := &mihomoTransition{}
+	if err != nil {
+		tr.unread = true
+		return tr
+	}
+	after, ok := mihomoFactsFromYAML(data)
+	if !ok {
+		tr.unread = true
+		return tr
+	}
+	_, current, err := ReadMihomoActive(roots.Mihomo)
+	if err != nil {
+		tr.unread = true
+		return tr
+	}
+	before, ok := mihomoFactsFromYAML(current)
+	if !ok {
+		tr.unread = true
+		return tr
+	}
+	tr.before, tr.after = before, after
+	return tr
+}
+
+// mihomoRestartFacts — то, от чего зависит способ перезапуска Mihomo, в
+// каноническом виде: значение, разобранное в any и записанное json.Marshal (ключи
+// отображений сортируются). Так YAML профиля и JSON секций сравниваются без учёта
+// порядка ключей и вида числа.
+type mihomoRestartFacts struct {
+	tun       string            // значение ключа tun; ключа нет — "null"
+	redir     string            // redir-port
+	tproxy    string            // tproxy-port
+	listeners map[string]string // listeners типа redir и tproxy: имя → порт
+}
+
+// mihomoFactsFromYAML достаёт факты из профиля Mihomo. Ошибка разбора, корень не
+// отображение или значение, которое не записывается в JSON, — false.
+func mihomoFactsFromYAML(data []byte) (mihomoRestartFacts, bool) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil || doc == nil {
+		return mihomoRestartFacts{}, false
+	}
+	return mihomoFactsFromMap(doc)
+}
+
+// mihomoFactsFromMap достаёт факты из корня профиля, разобранного в отображение.
+func mihomoFactsFromMap(doc map[string]any) (mihomoRestartFacts, bool) {
+	f := mihomoRestartFacts{listeners: map[string]string{}}
+	var ok bool
+	if f.tun, ok = canonicalJSON(doc["tun"]); !ok {
+		return mihomoRestartFacts{}, false
+	}
+	if f.redir, ok = canonicalJSON(doc["redir-port"]); !ok {
+		return mihomoRestartFacts{}, false
+	}
+	if f.tproxy, ok = canonicalJSON(doc["tproxy-port"]); !ok {
+		return mihomoRestartFacts{}, false
+	}
+	items, _ := doc["listeners"].([]any)
+	for _, it := range items {
+		l, _ := it.(map[string]any)
+		name, _ := l["name"].(string)
+		kind, _ := l["type"].(string)
+		if name == "" || (kind != "redir" && kind != "tproxy") {
+			continue
+		}
+		if f.listeners[name], ok = canonicalJSON(l["port"]); !ok {
+			return mihomoRestartFacts{}, false
+		}
+	}
+	return f, true
+}
+
+// mihomoFactsFromSections достаёт факты из секций Mihomo черновика: redir-port и
+// tproxy-port — из «Основного», tun и listeners — из «Входящих/TUN». false — одна
+// из секций не управляется панелью, пуста (будет пресет) или не разбирается.
+func mihomoFactsFromSections(cores map[string]CoreSection) (mihomoRestartFacts, bool) {
+	main, inb := cores[SectionMihomoMain], cores[SectionMihomoInbounds]
+	if !main.Managed || !inb.Managed {
+		return mihomoRestartFacts{}, false
+	}
+	mainDoc, inbDoc := sectionDoc(main.Value), sectionDoc(inb.Value)
+	if mainDoc == nil || inbDoc == nil {
+		return mihomoRestartFacts{}, false
+	}
+	doc := map[string]any{}
+	for _, key := range []string{"redir-port", "tproxy-port"} {
+		if v, has := mainDoc[key]; has {
+			doc[key] = v
+		}
+	}
+	for _, key := range []string{"tun", "listeners"} {
+		if v, has := inbDoc[key]; has {
+			doc[key] = v
+		}
+	}
+	return mihomoFactsFromMap(doc)
+}
+
+// sectionDoc разбирает значение секции Mihomo в отображение; пустое значение и
+// не объект — nil.
+func sectionDoc(value json.RawMessage) map[string]any {
+	trimmed := bytes.TrimSpace(value)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	var doc map[string]any
+	if json.Unmarshal(trimmed, &doc) != nil {
+		return nil
+	}
+	return doc
+}
+
+// canonicalJSON — каноническая запись значения; nil (ключа нет) — "null".
+func canonicalJSON(v any) (string, bool) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "", false
+	}
+	return string(raw), true
+}
+
+// mihomoFactsReason сравнивает факты до и после: tun важнее port; пустая
+// строка — причины нет.
+func mihomoFactsReason(before, after mihomoRestartFacts) string {
+	if before.tun != after.tun {
+		return RestartReasonTun
+	}
+	if before.redir != after.redir || before.tproxy != after.tproxy || len(before.listeners) != len(after.listeners) {
+		return RestartReasonPort
+	}
+	for name, port := range before.listeners {
+		if p, ok := after.listeners[name]; !ok || p != port {
+			return RestartReasonPort
+		}
+	}
+	return ""
 }
 
 // fullRestartOf переводит объявления в карту «ядро → причина», которую несёт

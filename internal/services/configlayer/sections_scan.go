@@ -103,34 +103,38 @@ func ScanXrayKeyFiles(root string, foreignOwned func(kernel, rel string) bool) (
 		if errors.Is(readErr, fs.ErrNotExist) {
 			continue // оборванный симлинк
 		}
-		f := XrayKeyFile{
-			Name:    name,
-			Symlink: e.Type()&fs.ModeSymlink != 0,
-			Legacy:  foreignOwned != nil && foreignOwned(KernelXray, name),
-		}
+		var f XrayKeyFile
 		if readErr != nil {
-			f.Broken = true
-			files = append(files, f)
-			continue
-		}
-		f.Hash = HashContent(data)
-		text := string(data)
-		stripped := services.StripJSONComments(text)
-		f.Comments = stripped != text
-		if obj, perr := ParseOrderedObject([]byte(stripped)); perr == nil {
-			f.Keys = obj.Keys()
-			f.Values = make(map[string]json.RawMessage, len(f.Keys))
-			for _, k := range f.Keys {
-				f.Values[k], _ = obj.Get(k)
-			}
+			f = XrayKeyFile{Name: name, Broken: true}
 		} else {
-			f.Broken = true
-			f.Keys = looseTopLevelKeys(stripped)
+			f = parseXrayKeyFile(name, data)
 		}
+		f.Symlink = e.Type()&fs.ModeSymlink != 0
+		f.Legacy = foreignOwned != nil && foreignOwned(KernelXray, name)
 		files = append(files, f)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 	return files, nil
+}
+
+// parseXrayKeyFile разбирает содержимое одного файла configs/ по ключам верхнего
+// уровня: Hash, Comments, Keys, Values и Broken. Legacy и Symlink ставит вызывающий.
+func parseXrayKeyFile(name string, data []byte) XrayKeyFile {
+	f := XrayKeyFile{Name: name, Hash: HashContent(data)}
+	text := string(data)
+	stripped := services.StripJSONComments(text)
+	f.Comments = stripped != text
+	if obj, perr := ParseOrderedObject([]byte(stripped)); perr == nil {
+		f.Keys = obj.Keys()
+		f.Values = make(map[string]json.RawMessage, len(f.Keys))
+		for _, k := range f.Keys {
+			f.Values[k], _ = obj.Get(k)
+		}
+	} else {
+		f.Broken = true
+		f.Keys = looseTopLevelKeys(stripped)
+	}
+	return f
 }
 
 // readLimited читает файл целиком, но не больше limit байт: больший файл —
@@ -543,29 +547,41 @@ func ReadMihomoActive(root string) (name string, data []byte, err error) {
 		if err != nil {
 			return "", nil, fmt.Errorf("config.yaml: %w", err)
 		}
-		target := link
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(root, target)
-		}
-		rel, ok := relInsideRoot(root, target)
-		if !ok {
-			return "", nil, fmt.Errorf("config.yaml: %w", ErrSymlinkOutsideRoot)
-		}
-		// Цепочка симлинков внутри корня не должна выводить за его пределы.
-		resolved, err := filepath.EvalSymlinks(target)
-		if err != nil {
-			return "", nil, fmt.Errorf("config.yaml: %w", err)
-		}
-		if _, ok := relInsideRoot(root, resolved); !ok {
-			return "", nil, fmt.Errorf("config.yaml: %w", ErrSymlinkOutsideRoot)
-		}
-		path, name = target, rel
+		return readMihomoLink(root, link)
 	}
 	data, err = os.ReadFile(path)
 	if err != nil {
 		return "", nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return name, data, nil
+}
+
+// readMihomoLink читает профиль Mihomo по тексту симлинка config.yaml: относительная
+// цель считается от корня. Цель и её развёрнутая цепочка симлинков обязаны лежать
+// внутри корня, иначе ErrSymlinkOutsideRoot. Возвращает путь профиля относительно
+// корня и его байты. Файл только читается.
+func readMihomoLink(root, link string) (rel string, data []byte, err error) {
+	target := link
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(root, target)
+	}
+	rel, ok := relInsideRoot(root, target)
+	if !ok {
+		return "", nil, fmt.Errorf("config.yaml: %w", ErrSymlinkOutsideRoot)
+	}
+	// Цепочка симлинков внутри корня не должна выводить за его пределы.
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return "", nil, fmt.Errorf("config.yaml: %w", err)
+	}
+	if _, ok := relInsideRoot(root, resolved); !ok {
+		return "", nil, fmt.Errorf("config.yaml: %w", ErrSymlinkOutsideRoot)
+	}
+	data, err = os.ReadFile(target)
+	if err != nil {
+		return "", nil, fmt.Errorf("%s: %w", rel, err)
+	}
+	return rel, data, nil
 }
 
 // ScanXraySections сканирует каталог Xray слоя: карта секций по идентификатору
