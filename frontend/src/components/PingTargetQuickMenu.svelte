@@ -168,7 +168,7 @@
     border-radius: var(--radius-md);
     box-shadow:
       0 10px 24px -4px rgba(0, 0, 0, 0.55),
-      0 0 0 1px rgba(255, 255, 255, 0.05);
+      0 0 0 1px var(--surface-tint);
     padding: 8px 0;
     animation: menuSlide 0.14s ease-out forwards;
   }

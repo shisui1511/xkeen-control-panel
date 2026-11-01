@@ -685,7 +685,7 @@
                 {$t('smartproxy.active_hours_weekly', { count: countActiveSlots(p.schedule) })}
               </div>
             </div>
-            <div class="ctrl mono" style="font-size:12px; color:var(--fg-primary);">
+            <div class="ctrl mono" style="font-size:var(--font-size-xs); color:var(--fg-primary);">
               {countActiveSlots(p.schedule)} / 168 {$t('smartproxy.hours_short')}
             </div>
           </div>
@@ -697,7 +697,10 @@
                   {$t('smartproxy.execution_stats')}
                 </div>
               </div>
-              <div class="ctrl mono" style="font-size:12px; color:var(--fg-secondary);">
+              <div
+                class="ctrl mono"
+                style="font-size:var(--font-size-xs); color:var(--fg-secondary);"
+              >
                 {$t('smartproxy.applied_count', { count: p.apply_count })}
               </div>
             </div>
@@ -923,7 +926,7 @@
 
   .profile-card.active {
     border-color: var(--success);
-    box-shadow: 0 4px 12px rgba(70, 209, 138, 0.05);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--success) 5%, transparent);
   }
 
   .profile-card-header {
@@ -937,7 +940,7 @@
   .profile-card-name {
     font-weight: 700;
     color: var(--fg-primary);
-    font-size: 14px;
+    font-size: var(--font-size-base);
   }
 
   .hint {
@@ -954,7 +957,7 @@
 
   .action-btn-dots {
     padding: 6px 10px;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     line-height: 1;
   }
 
@@ -979,7 +982,7 @@
     border: none;
     padding: 10px 14px;
     text-align: left;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     cursor: pointer;
     width: 100%;
@@ -995,7 +998,7 @@
   }
 
   .dropdown-menu button.delete-action:hover {
-    background: rgba(235, 94, 85, 0.1);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
 
   /* Wizard Step indicators styling */
@@ -1034,7 +1037,7 @@
   }
 
   .wizard-step-indicator .step-lbl {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     color: var(--fg-primary);
   }
@@ -1109,7 +1112,7 @@
     text-align: center;
     color: var(--fg-faint);
     border-bottom: 1px solid var(--border);
-    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    border-right: 1px solid var(--border-light);
   }
 
   .grid-cell {
@@ -1118,12 +1121,12 @@
     border-bottom: 1px solid var(--border);
     cursor: crosshair;
     touch-action: none;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
     transition: background var(--transition-fast);
   }
 
   .grid-cell:hover {
-    background: rgba(41, 194, 240, 0.15);
+    background: rgba(var(--accent-rgb), 0.15);
   }
 
   .grid-cell.active {
@@ -1168,12 +1171,12 @@
 
   .status-label {
     font-weight: 700;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     color: var(--fg-primary);
   }
 
   .status-no-active-text {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-dim);
   }
 
@@ -1187,7 +1190,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-dim);
     margin-left: auto;
@@ -1200,7 +1203,7 @@
 
   :global(.status-dot.active) {
     background-color: var(--success);
-    box-shadow: 0 0 8px rgba(70, 209, 138, 0.4);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--success) 40%, transparent);
   }
 
   /* Empty state template cards design & Onboarding Hero */
@@ -1219,14 +1222,14 @@
   }
 
   .empty-state-head h2 {
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     font-weight: 700;
     color: var(--fg-primary);
     margin-bottom: 8px;
   }
 
   .empty-state-head p {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-dim);
     line-height: 1.5;
   }
@@ -1239,7 +1242,7 @@
     max-width: 900px;
   }
 
-  @media (max-width: 820px) {
+  @media (max-width: 1024px) {
     .template-cards-grid {
       grid-template-columns: 1fr;
     }
@@ -1265,7 +1268,7 @@
   .template-card:hover {
     border-color: var(--accent);
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(41, 194, 240, 0.08);
+    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.08);
   }
 
   .template-card:focus-visible {
@@ -1287,28 +1290,28 @@
     width: 38px;
     height: 38px;
     border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--surface-tint);
   }
 
   .template-badge {
     font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     padding: 3px 8px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
   }
 
   .template-card h3 {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 700;
     color: var(--fg-primary);
     margin: 0;
   }
 
   .template-card p {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-dim);
     line-height: 1.45;
     margin: 0;
@@ -1328,7 +1331,7 @@
     position: relative;
     width: 100%;
     height: 6px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-tint-strong);
     border-radius: 3px;
     overflow: hidden;
   }
@@ -1364,7 +1367,7 @@
     background: none;
     border: none;
     color: var(--fg-dim);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     text-decoration: underline;
     text-underline-offset: 4px;

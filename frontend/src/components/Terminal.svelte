@@ -509,7 +509,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
     font-family: var(--font-family-mono);
@@ -518,7 +518,7 @@
   .shell-badge {
     display: inline-block;
     padding: 1px 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--accent);
     background: var(--accent-soft);
@@ -532,7 +532,7 @@
     gap: 6px;
     padding: 2px 8px;
     border-radius: 12px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
   }
 
@@ -546,32 +546,32 @@
   }
 
   .status-pill.connected {
-    background: rgba(70, 209, 138, 0.12);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
     color: var(--success);
-    border: 1px solid rgba(70, 209, 138, 0.25);
+    border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
   }
 
   .status-pill.connected .dot {
     background: var(--success);
-    box-shadow: 0 0 6px rgba(70, 209, 138, 0.7);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--success) 70%, transparent);
   }
 
   .status-pill.connecting {
-    background: rgba(240, 180, 80, 0.12);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
     color: var(--warning);
-    border: 1px solid rgba(240, 180, 80, 0.25);
+    border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
   }
 
   .status-pill.connecting .dot {
     background: var(--warning);
-    box-shadow: 0 0 6px rgba(240, 180, 80, 0.7);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 70%, transparent);
     animation: blink 1.2s infinite;
   }
 
   .status-pill.disconnected {
-    background: rgba(244, 112, 127, 0.12);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
     color: var(--danger);
-    border: 1px solid rgba(244, 112, 127, 0.25);
+    border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   }
 
   .status-pill.disconnected .dot {
@@ -598,7 +598,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .terminal-screen {
@@ -654,7 +654,7 @@
     padding: 6px 16px;
     background: var(--bg-elevated);
     border-top: 1px solid var(--border);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     gap: 12px;
   }
@@ -679,18 +679,18 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-primary);
     box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
   }
 
   .hint-text {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .geo-badge {
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     background: var(--bg-card);
     padding: 2px 7px;

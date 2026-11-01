@@ -86,7 +86,7 @@
     width: 100%;
     height: var(--input-h);
     border-radius: var(--radius-md);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-control);
     background: var(--bg-elevated);
     color: var(--fg-primary);
     padding: 0 32px 0 12px;
@@ -111,7 +111,7 @@
 
   @media (max-width: 768px) {
     .xcp-select select {
-      font-size: 16px;
+      font-size: var(--font-size-lg);
     }
   }
 </style>

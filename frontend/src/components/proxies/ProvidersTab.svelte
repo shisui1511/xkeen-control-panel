@@ -138,7 +138,7 @@
     border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     line-height: 1.5;
   }
   .confdir-warning svg {

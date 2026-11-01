@@ -74,26 +74,26 @@
     pointer-events: all;
     animation: toast-in 180ms ease;
     font-family: var(--font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     border-left-width: 3px;
   }
   .toast--success {
     border-left-color: var(--success);
     box-shadow:
       0 20px 36px -16px rgba(0, 0, 0, 0.6),
-      0 0 24px -4px rgba(70, 209, 138, 0.25);
+      0 0 24px -4px color-mix(in srgb, var(--success) 25%, transparent);
   }
   .toast--error {
     border-left-color: var(--danger);
     box-shadow:
       0 20px 36px -16px rgba(0, 0, 0, 0.6),
-      0 0 24px -4px rgba(239, 91, 107, 0.25);
+      0 0 24px -4px color-mix(in srgb, var(--danger) 25%, transparent);
   }
   .toast--warning {
     border-left-color: var(--warning);
     box-shadow:
       0 20px 36px -16px rgba(0, 0, 0, 0.6),
-      0 0 24px -4px rgba(240, 180, 80, 0.25);
+      0 0 24px -4px color-mix(in srgb, var(--warning) 25%, transparent);
   }
   .toast--info {
     border-left-color: var(--accent);
@@ -128,7 +128,7 @@
   .toast__action {
     flex-shrink: 0;
     padding: 4px 10px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
   .toast__close {
     flex-shrink: 0;
@@ -136,7 +136,7 @@
     border: 0;
     cursor: pointer;
     color: var(--fg-dim);
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     line-height: 1;
     padding: 0 0 0 6px;
     transition: color var(--transition-fast);

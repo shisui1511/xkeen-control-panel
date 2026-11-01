@@ -252,7 +252,7 @@
     gap: var(--spacing-3);
   }
 
-  @media (max-width: 560px) {
+  @media (max-width: 480px) {
     .re-grid {
       grid-template-columns: 1fr;
     }

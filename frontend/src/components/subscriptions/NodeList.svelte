@@ -652,14 +652,14 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md, 6px);
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-family: inherit;
     transition: all var(--transition-fast);
   }
 
   .node-search-input:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(41, 194, 240, 0.2);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
   }
 
   .node-search-clear {
@@ -673,7 +673,7 @@
     background: none;
     border: none;
     color: var(--fg-dim);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     border-radius: 50%;
   }
@@ -690,11 +690,11 @@
 
   .node-search-clear:hover {
     color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-tint-strong);
   }
 
   .node-search-count {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     white-space: nowrap;
   }
@@ -714,7 +714,7 @@
     border-radius: var(--radius-full, 9999px);
     font-size: var(--font-size-xs);
     font-weight: 500;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--surface-tint);
     border: 1px solid var(--border);
     color: var(--fg-secondary);
     cursor: pointer;
@@ -722,12 +722,12 @@
   }
 
   .node-filter-chip:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-tint-strong);
     color: var(--fg-primary);
   }
 
   .node-filter-chip.active {
-    background: rgba(41, 194, 240, 0.12);
+    background: rgba(var(--accent-rgb), 0.12);
     border-color: var(--accent);
     color: var(--accent);
     font-weight: 600;
@@ -751,13 +751,13 @@
   }
 
   .nodes-empty-search .empty-title {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
   }
 
   .nodes-empty-search .empty-desc {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     max-width: 400px;
     margin-bottom: 4px;
@@ -801,11 +801,11 @@
   }
 
   .sub-node-row:hover {
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
   }
 
   .sub-node-row.active {
-    background: rgba(25, 118, 210, 0.05);
+    background: rgba(var(--accent-rgb), 0.05);
   }
 
   .sub-node-active-bar {
@@ -822,13 +822,13 @@
     height: 32px;
     border-radius: 8px;
     background: rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-light);
     display: flex;
     align-items: center;
     justify-content: center;
     margin-right: 12px;
     flex-shrink: 0;
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     transition: all var(--transition-fast);
     color: var(--fg-secondary);
   }
@@ -841,7 +841,7 @@
 
   .sub-node-flag {
     font-family: 'TwemojiMozilla', var(--font-family-sans);
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     line-height: 1;
     display: inline-flex;
     align-items: center;
@@ -877,7 +877,7 @@
   }
 
   .sub-node-name {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
     white-space: nowrap;
@@ -908,14 +908,14 @@
     text-overflow: ellipsis;
   }
   .sub-node-row.active .sub-node-chip-blue {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.25);
+    background: var(--surface-tint-strong);
+    border-color: var(--border-strong);
     color: var(--fg-terminal);
   }
 
   .sub-node-chip-dialect {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: var(--surface-tint);
+    border: 1px solid var(--border);
     color: var(--fg-secondary);
     padding: 2px 8px;
     border-radius: 12px;
@@ -927,8 +927,8 @@
     font-variant-numeric: tabular-nums;
   }
   .sub-node-chip-dialect.awg {
-    background: var(--purple-bg, rgba(168, 85, 247, 0.12));
-    border-color: var(--purple-border, rgba(168, 85, 247, 0.3));
+    background: var(--purple-bg);
+    border-color: var(--purple-border);
     color: var(--purple);
   }
 
@@ -1109,7 +1109,7 @@
     padding: 2px 6px;
     border-radius: var(--radius-sm, 4px);
     background: var(--bg-card-subtle);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     border: 1px solid var(--border-subtle);
     cursor: default;
     white-space: nowrap;

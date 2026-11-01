@@ -293,7 +293,7 @@
 
   .xdev-meta {
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     word-break: break-all;
   }
 
@@ -304,7 +304,7 @@
     align-items: start;
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 1024px) {
     .xdev-grid {
       grid-template-columns: 1fr;
     }
@@ -356,7 +356,7 @@
   .xdev-counts,
   .xdev-top {
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .xdev-top {

@@ -4,6 +4,7 @@
   import { formatBytes } from '../format';
   import { usePoller } from '../poller';
   import { apiFetch } from '../api';
+  import Section from '../../components/Section.svelte';
 
   let diskStats = $state<{ total: number; used: number; free: number } | null>(null);
 
@@ -42,9 +43,8 @@
         ? 'var(--warning)'
         : 'var(--success)'}
 
-  <div class="card mb-2">
-    <div class="storage-label">{$t('settings.section_storage')}</div>
-    <div class="storage-body">
+  <Section title={$t('settings.section_storage')}>
+    <div class="card storage-body">
       <div class="storage-head">
         <span class="storage-free">
           {$t('settings.storage_free_of')
@@ -67,18 +67,10 @@
         {$t('settings.storage_used').replace('{used}', formatBytes(diskStats.used))}
       </div>
     </div>
-  </div>
+  </Section>
 {/if}
 
 <style>
-  .storage-label {
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    color: var(--fg-dim);
-    margin-bottom: 14px;
-  }
-
   .storage-body {
     display: flex;
     flex-direction: column;
@@ -89,7 +81,7 @@
     display: flex;
     justify-content: space-between;
     gap: 12px;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 500;
     color: var(--fg-primary);
   }
@@ -114,7 +106,7 @@
   }
 
   .storage-used {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 </style>

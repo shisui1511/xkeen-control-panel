@@ -207,14 +207,14 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     padding: 6px 10px;
     width: 100%;
     transition: border-color var(--transition-fast);
   }
 
   .form-input:focus {
-    border-color: var(--primary);
+    border-color: var(--accent);
   }
 
   .tag-input-wrap :global(.xcp-select) {
@@ -251,9 +251,9 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background: color-mix(in srgb, var(--primary) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
-    color: var(--primary);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    color: var(--accent);
     font-size: var(--font-size-xs);
     border-radius: 10px;
     padding: 2px 8px;

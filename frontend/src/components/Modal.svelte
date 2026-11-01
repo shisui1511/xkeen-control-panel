@@ -220,7 +220,7 @@
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
   }
   .modal-title {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     letter-spacing: 0.02em;
     margin: 0;
@@ -244,14 +244,14 @@
       color var(--transition-fast);
   }
   .modal-close-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     color: var(--fg-primary);
   }
   .modal-content {
     padding: 20px;
     overflow-y: auto;
     color: var(--fg-primary);
-    font-size: 14px;
+    font-size: var(--font-size-base);
   }
 
   @media (max-width: 480px) {

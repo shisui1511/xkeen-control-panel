@@ -483,7 +483,10 @@
     </div>
   {:else if schemaError}
     <div class="error-state-block" style="padding: 48px; text-align: center;">
-      <div class="error-icon" style="color: var(--danger); font-size: 24px; margin-bottom: 12px;">
+      <div
+        class="error-icon"
+        style="color: var(--danger); font-size: var(--font-size-3xl); margin-bottom: 12px;"
+      >
         ⚠
       </div>
       <p style="color: var(--danger); margin-bottom: 16px;">
@@ -668,7 +671,7 @@
         {#if ctx.activePreset === 'zkeen-selective' && !ctx.hasZkeenGeodata && !dismissZkeenGeodataWarning}
           <div
             class="alert alert-warning alert-dismissible"
-            style="margin-bottom: 16px; padding: 8px 12px; font-size: 13px; display: flex; align-items: center; gap: 8px; border-radius: var(--radius-sm);"
+            style="margin-bottom: 16px; padding: 8px 12px; font-size: var(--font-size-sm); display: flex; align-items: center; gap: 8px; border-radius: var(--radius-sm);"
           >
             <svg
               width="16"
@@ -803,22 +806,23 @@
               class="validation-error-block"
               role="alert"
               aria-live="assertive"
-              style="margin: 12px; padding: 12px; background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
+              style="margin: 12px; padding: 12px; background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: var(--font-size-sm);"
             >
               <div style="font-weight: bold; margin-bottom: 6px;">
                 {$t('editor.validation_failed')}
               </div>
               <div
-                style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;"
+                style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: var(--font-size-sm); margin-bottom: 8px;"
               >
                 {parseValidationError(validationError, $currentLang)}
               </div>
               <details>
-                <summary style="cursor: pointer; font-size: 12px; opacity: 0.8; user-select: none;"
+                <summary
+                  style="cursor: pointer; font-size: var(--font-size-xs); opacity: 0.8; user-select: none;"
                   >{$t('editor.validation_details')}</summary
                 >
                 <pre
-                  style="margin: 6px 0 0 0; white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 12px; opacity: 0.9; max-height: 200px; overflow-y: auto;">{validationError}</pre>
+                  style="margin: 6px 0 0 0; white-space: pre-wrap; font-family: var(--font-family-mono); font-size: var(--font-size-xs); opacity: 0.9; max-height: 200px; overflow-y: auto;">{validationError}</pre>
               </details>
             </div>
           {/if}
@@ -828,7 +832,7 @@
               class="constructor-validation-bar"
               role="status"
               aria-live="polite"
-              style="margin: 0 12px 10px 12px; padding: 8px 12px; background: color-mix(in srgb, var(--danger) 12%, transparent); border: 1px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-size: 12px; display: flex; align-items: center; gap: 8px;"
+              style="margin: 0 12px 10px 12px; padding: 8px 12px; background: color-mix(in srgb, var(--danger) 12%, transparent); border: 1px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-size: var(--font-size-xs); display: flex; align-items: center; gap: 8px;"
             >
               <span style="flex-shrink: 0;">⚠️</span>
               <span>{blockingValidationMsg}</span>
@@ -899,7 +903,7 @@
   <p>{willRestart ? $t('editor.apply_confirm_body') : $t('apply.confirm_body_no_restart')}</p>
   <div class="changed-files-list" style="margin-top: 12px;">
     <strong>{$t('mihomo.sections_to_update')}</strong>
-    <div style="margin: 8px 0; font-family: monospace; font-size: 13px;">
+    <div style="margin: 8px 0; font-family: monospace; font-size: var(--font-size-sm);">
       <code>{selectedFile || '/opt/etc/mihomo/config.yaml'}</code>
     </div>
     <ul style="margin: 8px 0 0 0; padding-left: 20px;">
@@ -907,7 +911,7 @@
       <li><code>rule-providers</code></li>
       <li><code>rules</code></li>
     </ul>
-    <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
+    <p style="margin-top: 12px; font-size: var(--font-size-sm); color: var(--fg-secondary);">
       {$t('mihomo.backup_notice')}
     </p>
   </div>
@@ -949,7 +953,7 @@
 
   .constructor-sub {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
   }
 
@@ -992,7 +996,7 @@
   }
 
   .safe-merge-title {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -1012,7 +1016,7 @@
   }
 
   .directive-tag {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     padding: 2px 6px;
     border-radius: 4px;
     font-size: var(--font-size-xs);
@@ -1021,7 +1025,7 @@
   .btn-tag-expand {
     background: none;
     border: none;
-    color: var(--primary);
+    color: var(--accent);
     font-size: var(--font-size-xs);
     cursor: pointer;
     padding: 2px 4px;
@@ -1065,7 +1069,7 @@
     max-width: 100%;
     min-width: 0;
     gap: 2px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 4px;
@@ -1085,7 +1089,7 @@
     background: none;
     border: none;
     color: var(--fg-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     padding: 6px 10px;
     border-radius: var(--radius-sm);
@@ -1108,7 +1112,7 @@
   }
 
   .sec-count {
-    background: var(--primary);
+    background: var(--accent);
     color: var(--bg-page);
     font-weight: 700;
     font-size: var(--font-size-xs);
@@ -1154,7 +1158,7 @@
     right: 8px;
     background: none;
     border: none;
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     color: inherit;
     cursor: pointer;
     line-height: 1;

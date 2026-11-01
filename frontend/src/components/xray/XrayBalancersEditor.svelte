@@ -187,7 +187,7 @@
   .bal-hint {
     margin: 0;
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .bal-card {
@@ -209,7 +209,7 @@
     gap: var(--spacing-3);
   }
 
-  @media (max-width: 560px) {
+  @media (max-width: 480px) {
     .bal-grid {
       grid-template-columns: 1fr;
     }
@@ -228,7 +228,7 @@
 
   .bal-matched {
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     word-break: break-word;
   }
 

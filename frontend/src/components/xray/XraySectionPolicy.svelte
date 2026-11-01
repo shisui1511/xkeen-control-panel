@@ -105,7 +105,7 @@
   }
 
   .section-title {
-    font-size: 0.9375rem;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -116,7 +116,7 @@
     gap: 12px;
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 768px) {
     .form-row2 {
       grid-template-columns: 1fr;
     }
@@ -135,30 +135,30 @@
   }
 
   .form-label {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
   }
 
   .form-input {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
   .form-input:focus {
     outline: none;
-    border-color: var(--color-primary);
+    border-color: var(--accent);
   }
 
   .checkbox-container {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     cursor: pointer;
     position: relative;
@@ -176,16 +176,16 @@
   .checkmark {
     height: 16px;
     width: 16px;
-    background-color: var(--bg-surface);
-    border: 1px solid var(--border-color);
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-xs);
     display: inline-block;
     position: relative;
   }
 
   .checkbox-container input:checked ~ .checkmark {
-    background-color: var(--color-primary);
-    border-color: var(--color-primary);
+    background-color: var(--accent);
+    border-color: var(--accent);
   }
 
   .checkbox-container input:checked ~ .checkmark:after {
@@ -195,7 +195,7 @@
     top: 2px;
     width: 4px;
     height: 8px;
-    border: solid var(--color-on-primary);
+    border: solid var(--btn-primary-text);
     border-width: 0 2px 2px 0;
     transform: rotate(45deg);
   }

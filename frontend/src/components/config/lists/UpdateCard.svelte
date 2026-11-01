@@ -3,6 +3,7 @@
   import { t, tp, currentLang } from '../../../i18n';
   import { showConfirm, showToast } from '../../../stores';
   import Button from '../../Button.svelte';
+  import Section from '../../Section.svelte';
   import Input from '../../Input.svelte';
   import Select from '../../Select.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
@@ -191,195 +192,167 @@
 </script>
 
 {#if view}
-  <section class="card geo-card" aria-labelledby="{uid}-title" data-testid="geo-update-card">
-    <div class="geo-head">
-      <h3 class="geo-title" id="{uid}-title">{$t('cfg.geo.upd_title')}</h3>
-      <div class="geo-run">
-        <Button
-          variant="secondary"
-          loading={starting || ugRunning}
-          disabled={busyReason !== ''}
-          title={busyReason !== '' ? busyReason : undefined}
-          data-testid="geo-run-now"
-          onclick={runNow}
-        >
-          <Icon name="refresh" size={14} />
-          {$t('cfg.geo.run_now')}
-        </Button>
-        {#if busyReason !== ''}
-          <span class="geo-hint" data-testid="geo-run-busy">{busyReason}</span>
-        {/if}
-      </div>
-    </div>
+  <Section title={$t('cfg.geo.upd_title')} testid="geo-update-card">
+    {#snippet meta()}
+      <Button
+        variant="secondary"
+        class="btn-sm"
+        loading={starting || ugRunning}
+        disabled={busyReason !== ''}
+        title={busyReason !== '' ? busyReason : undefined}
+        data-testid="geo-run-now"
+        onclick={runNow}
+      >
+        <Icon name="refresh" size={14} />
+        {$t('cfg.geo.run_now')}
+      </Button>
+    {/snippet}
 
-    {#if ugRunning || removeRunning || run?.waiting_apply || view.schedule.retry_at}
-      <div class="geo-status" role="status" data-testid="geo-run-status">
-        {#if ugRunning}
-          <span class="geo-status-line">
-            <span class="spinner" aria-hidden="true"></span>
-            {$t('cfg.geo.run_running')}
-          </span>
-        {:else if removeRunning}
-          {#each view.draft as d (d.file)}
+    <div class="card card-rows geo-card">
+      {#if ugRunning || removeRunning || run?.waiting_apply || view.schedule.retry_at}
+        <div class="card-block geo-status" role="status" data-testid="geo-run-status">
+          {#if ugRunning}
             <span class="geo-status-line">
               <span class="spinner" aria-hidden="true"></span>
-              <span class="geo-mono-wrap">{$t('cfg.geo.step_remove', { file: d.file })}</span>
+              {$t('cfg.geo.run_running')}
             </span>
-          {/each}
-        {/if}
-        {#if run?.waiting_apply}
-          <span class="geo-status-line">{$t('cfg.geo.waiting_apply')}</span>
-        {/if}
-        {#if view.schedule.retry_at}
-          <span class="geo-status-line">
-            {$t('cfg.geo.retry_planned', { time: routerClock(view.schedule.retry_at) })}
+          {:else if removeRunning}
+            {#each view.draft as d (d.file)}
+              <span class="geo-status-line">
+                <span class="spinner" aria-hidden="true"></span>
+                <span class="geo-mono-wrap">{$t('cfg.geo.step_remove', { file: d.file })}</span>
+              </span>
+            {/each}
+          {/if}
+          {#if run?.waiting_apply}
+            <span class="geo-status-line">{$t('cfg.geo.waiting_apply')}</span>
+          {/if}
+          {#if view.schedule.retry_at}
+            <span class="geo-status-line">
+              {$t('cfg.geo.retry_planned', { time: routerClock(view.schedule.retry_at) })}
+            </span>
+          {/if}
+        </div>
+      {/if}
+
+      <div class="card-block geo-sched" data-testid="geo-schedule">
+        <label class="toggle-label geo-sched-toggle">
+          <span class="toggle-switch">
+            <input
+              type="checkbox"
+              bind:checked={enabled}
+              disabled={saving}
+              data-testid="geo-sched-enabled"
+            />
+            <span class="toggle-slider"></span>
           </span>
+          <span>{$t('cfg.geo.sched_enable')}</span>
+        </label>
+
+        <div class="geo-sched-fields">
+          <div class="geo-field geo-field-day">
+            <label class="form-label" for="{uid}-day">{$t('cfg.geo.sched_day')}</label>
+            <Select
+              id="{uid}-day"
+              bind:value={day}
+              options={dayOptions}
+              disabled={!enabled || saving}
+              data-testid="geo-sched-day"
+            />
+          </div>
+          <div class="geo-field geo-field-num" data-testid="geo-sched-hour">
+            <Input
+              id="{uid}-hour"
+              type="number"
+              label={$t('cfg.geo.sched_hour')}
+              bind:value={hour}
+              disabled={!enabled || saving}
+            />
+          </div>
+          <div class="geo-field geo-field-num" data-testid="geo-sched-minute">
+            <Input
+              id="{uid}-minute"
+              type="number"
+              label={$t('cfg.geo.sched_minute')}
+              bind:value={minute}
+              disabled={!enabled || saving}
+            />
+          </div>
+          <div class="geo-sched-save">
+            <Button
+              variant="primary"
+              loading={saving}
+              disabled={!dirty || !valid || busyReason !== ''}
+              title={busyReason !== '' ? busyReason : undefined}
+              data-testid="geo-sched-save"
+              onclick={saveSched}
+            >
+              {$t('cfg.geo.sched_save')}
+            </Button>
+          </div>
+        </div>
+
+        {#if !valid}
+          <p class="geo-hint geo-hint-error" role="alert">{$t('cfg.geo.err.schedule_invalid')}</p>
+        {/if}
+        {#if busyReason !== ''}
+          <p class="geo-hint">{busyReason}</p>
+        {/if}
+        <p class="geo-hint">
+          {$t('cfg.geo.sched_tz_hint', { time: routerClock(view.schedule.now) })}
+        </p>
+        {#if !enabled}
+          <p class="geo-hint" data-testid="geo-sched-off-hint">{$t('cfg.geo.sched_off_hint')}</p>
+        {/if}
+        {#if view.schedule.enabled && view.schedule.next}
+          <p class="geo-next" data-testid="geo-next-run">
+            {$t('cfg.geo.sched_next', { when: routerWhen(view.schedule.next) })}
+          </p>
         {/if}
       </div>
-    {/if}
 
-    <div class="geo-sched" data-testid="geo-schedule">
-      <label class="toggle-label geo-sched-toggle">
-        <span class="toggle-switch">
-          <input
-            type="checkbox"
-            bind:checked={enabled}
-            disabled={saving}
-            data-testid="geo-sched-enabled"
-          />
-          <span class="toggle-slider"></span>
-        </span>
-        <span>{$t('cfg.geo.sched_enable')}</span>
-      </label>
-
-      <div class="geo-sched-fields">
-        <div class="geo-field geo-field-day">
-          <label class="form-label" for="{uid}-day">{$t('cfg.geo.sched_day')}</label>
-          <Select
-            id="{uid}-day"
-            bind:value={day}
-            options={dayOptions}
-            disabled={!enabled || saving}
-            data-testid="geo-sched-day"
-          />
-        </div>
-        <div class="geo-field geo-field-num" data-testid="geo-sched-hour">
-          <Input
-            id="{uid}-hour"
-            type="number"
-            label={$t('cfg.geo.sched_hour')}
-            bind:value={hour}
-            disabled={!enabled || saving}
-          />
-        </div>
-        <div class="geo-field geo-field-num" data-testid="geo-sched-minute">
-          <Input
-            id="{uid}-minute"
-            type="number"
-            label={$t('cfg.geo.sched_minute')}
-            bind:value={minute}
-            disabled={!enabled || saving}
-          />
-        </div>
-        <div class="geo-sched-save">
-          <Button
-            variant="primary"
-            loading={saving}
-            disabled={!dirty || !valid || busyReason !== ''}
-            title={busyReason !== '' ? busyReason : undefined}
-            data-testid="geo-sched-save"
-            onclick={saveSched}
-          >
-            {$t('cfg.geo.sched_save')}
-          </Button>
-        </div>
+      <div class="card-block geo-last">
+        <p class="geo-last-text" role="status" data-testid="geo-last-run">
+          {#if lastRun}
+            {$t('cfg.geo.last_run', {
+              when: localWhen(lastRun.at),
+              result: lastRunResult(lastRun)
+            })}
+          {:else}
+            {$t('cfg.geo.last_run_none')}
+          {/if}
+        </p>
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm"
+          disabled={!lastRun && !ugRunning}
+          aria-expanded={outputOpen}
+          aria-controls="{uid}-output"
+          data-testid="geo-output-toggle"
+          onclick={() => (showOutput = !showOutput)}
+        >
+          <Icon name={outputOpen ? 'chevron-up' : 'chevron-down'} size={14} />
+          {outputOpen ? $t('cfg.geo.output_hide') : $t('cfg.geo.output_show')}
+        </button>
       </div>
 
-      {#if !valid}
-        <p class="geo-hint geo-hint-error" role="alert">{$t('cfg.geo.err.schedule_invalid')}</p>
+      {#if outputOpen}
+        <div id="{uid}-output" class="card-block geo-output-wrap">
+          <OutputLog job="ug" active={ugRunning || starting} />
+        </div>
       {/if}
-      {#if busyReason !== ''}
-        <p class="geo-hint">{busyReason}</p>
-      {/if}
-      <p class="geo-hint">
-        {$t('cfg.geo.sched_tz_hint', { time: routerClock(view.schedule.now) })}
-      </p>
-      {#if !enabled}
-        <p class="geo-hint" data-testid="geo-sched-off-hint">{$t('cfg.geo.sched_off_hint')}</p>
-      {/if}
-      {#if view.schedule.enabled && view.schedule.next}
-        <p class="geo-next" data-testid="geo-next-run">
-          {$t('cfg.geo.sched_next', { when: routerWhen(view.schedule.next) })}
+
+      {#if view.geoipset}
+        <p class="card-note geo-gips" data-testid="geo-gips">
+          {$t('cfg.geo.gips_status', { status: resultText(view.geoipset) })}
         </p>
       {/if}
     </div>
-
-    <div class="geo-last">
-      <p class="geo-last-text" role="status" data-testid="geo-last-run">
-        {#if lastRun}
-          {$t('cfg.geo.last_run', { when: localWhen(lastRun.at), result: lastRunResult(lastRun) })}
-        {:else}
-          {$t('cfg.geo.last_run_none')}
-        {/if}
-      </p>
-      <button
-        type="button"
-        class="btn btn-secondary btn-sm"
-        disabled={!lastRun && !ugRunning}
-        aria-expanded={outputOpen}
-        aria-controls="{uid}-output"
-        data-testid="geo-output-toggle"
-        onclick={() => (showOutput = !showOutput)}
-      >
-        <Icon name={outputOpen ? 'chevron-up' : 'chevron-down'} size={14} />
-        {outputOpen ? $t('cfg.geo.output_hide') : $t('cfg.geo.output_show')}
-      </button>
-    </div>
-
-    {#if outputOpen}
-      <div id="{uid}-output" class="geo-output-wrap">
-        <OutputLog job="ug" active={ugRunning || starting} />
-      </div>
-    {/if}
-
-    {#if view.geoipset}
-      <p class="geo-gips" data-testid="geo-gips">
-        {$t('cfg.geo.gips_status', { status: resultText(view.geoipset) })}
-      </p>
-    {/if}
-  </section>
+  </Section>
 {/if}
 
 <style>
   .geo-card {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-4);
-    min-width: 0;
-  }
-
-  .geo-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--spacing-2) var(--spacing-4);
-    min-width: 0;
-  }
-
-  .geo-title {
-    margin: 0;
-    font-size: var(--font-size-lg);
-    font-weight: 600;
-    line-height: 1.2;
-    color: var(--fg-primary);
-  }
-
-  .geo-run {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: var(--spacing-1);
     min-width: 0;
   }
 
@@ -390,11 +363,9 @@
     overflow-wrap: anywhere;
   }
 
-  .geo-run .geo-hint {
-    text-align: right;
-  }
-
+  /* Ход запуска — полоса между строками карточки, а не рамка внутри неё */
   .geo-status {
+    background: var(--surface-tint);
     display: flex;
     flex-direction: column;
     gap: var(--spacing-1);
@@ -494,15 +465,11 @@
   }
 
   .geo-gips {
-    margin: 0;
-    font-size: var(--font-size-base);
-    line-height: 1.5;
-    color: var(--fg-secondary);
     overflow-wrap: anywhere;
   }
 
   @media (pointer: coarse), (max-width: 768px) {
-    .geo-card :global(.btn),
+    :global([data-testid='geo-update-card'] .btn),
     .geo-card :global(.input),
     .geo-card :global(.xcp-select select) {
       min-height: 44px;

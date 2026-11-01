@@ -103,7 +103,7 @@
       <div style="font-weight: 600; margin-bottom: 4px;">
         {$t('mihomo.listener_readonly_title')}
       </div>
-      <div style="font-size: 13px; margin-bottom: 8px;">
+      <div style="font-size: var(--font-size-sm); margin-bottom: 8px;">
         {$t('mihomo.listener_readonly_body')}
       </div>
       <div class="safe-merge-tags">
@@ -419,7 +419,7 @@
     border-radius: var(--radius-sm);
     padding: 8px;
     color: var(--fg-primary);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .form-validation-msg {
@@ -434,7 +434,7 @@
 
   .form-hint-spaced {
     margin-bottom: 12px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-dim);
   }
 
@@ -478,7 +478,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     user-select: none;
   }
@@ -504,8 +504,8 @@
   }
 
   .type-mixed {
-    background: color-mix(in srgb, var(--primary) 15%, transparent);
-    color: var(--primary);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: var(--accent);
   }
   .type-socks {
     background: color-mix(in srgb, var(--success) 15%, transparent);
@@ -531,7 +531,7 @@
   .item-name {
     flex: 1;
     min-width: 50px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--fg-primary);
     overflow: hidden;
@@ -582,7 +582,7 @@
   }
 
   .item-edit:hover {
-    color: var(--primary);
+    color: var(--accent);
   }
 
   .item-del:hover {
@@ -590,7 +590,7 @@
   }
 
   .add-btn {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     padding: 6px 12px;
     border-radius: var(--radius-sm);
     cursor: pointer;
@@ -620,7 +620,7 @@
   }
 
   .directive-tag {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     padding: 2px 6px;
     border-radius: 4px;
     font-size: var(--font-size-xs);

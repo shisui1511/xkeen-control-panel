@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from '../../../i18n';
   import type { SourceView } from '../../../lib/configGeodata';
+  import Section from '../../Section.svelte';
   import SourceRow from './SourceRow.svelte';
 
   // Группа «Стандартные XKeen»: три подгруппы поставщиков (refilter, v2fly, zkeen), в каждой
@@ -32,7 +33,6 @@
     onrestore?: (source: SourceView) => void;
   } = $props();
 
-  const uid = $props.id();
   const KINDS = ['geosite', 'geoip'];
 
   // Поставщики — в порядке появления в снимке, внутри — geosite, затем geoip
@@ -64,13 +64,12 @@
   }
 </script>
 
-<section class="card sg-card" aria-labelledby="{uid}-title" data-testid="geo-group-standard">
-  <div class="sg-head">
-    <h3 class="sg-title" id="{uid}-title">{$t('cfg.geo.group_standard')}</h3>
-    <p class="sg-desc">{$t('cfg.geo.group_standard_desc')}</p>
-  </div>
-
-  <div class="sg-providers">
+<Section
+  title={$t('cfg.geo.group_standard')}
+  description={$t('cfg.geo.group_standard_desc')}
+  testid="geo-group-standard"
+>
+  <div class="card card-rows sg-providers">
     {#each providers as p (p.name)}
       <fieldset class="sg-provider" data-testid="geo-provider-{p.name}">
         <legend class="sg-legend">{p.name}</legend>
@@ -99,54 +98,31 @@
       </fieldset>
     {/each}
   </div>
-</section>
+</Section>
 
 <style>
-  .sg-card {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-4);
-    min-width: 0;
-  }
-
-  .sg-head {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-1);
-    min-width: 0;
-  }
-
-  .sg-title {
-    margin: 0;
-    font-size: var(--font-size-lg);
-    font-weight: 600;
-    line-height: 1.2;
-    color: var(--fg-primary);
-  }
-
-  .sg-desc {
-    margin: 0;
-    font-size: var(--font-size-base);
-    line-height: 1.5;
-    color: var(--fg-secondary);
-  }
-
-  /* До 1024 px подгруппы идут колонкой, с 1024 px — три колонки */
+  /* До 1024 px поставщики идут друг под другом, с 1024 px — три колонки с разделителями */
   .sg-providers {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-4);
     min-width: 0;
   }
 
   .sg-provider {
     min-width: 0;
     margin: 0;
-    padding: 0;
+    padding: 14px var(--card-pad) 6px;
     border: none;
   }
 
+  .sg-provider + .sg-provider {
+    border-top: 1px solid var(--border);
+  }
+
   .sg-legend {
+    float: left;
+    width: 100%;
+    margin-bottom: var(--spacing-1);
     padding: 0;
     font-size: var(--font-size-base);
     font-weight: 600;
@@ -155,11 +131,16 @@
   }
 
   .sg-list {
+    clear: both;
     display: flex;
     flex-direction: column;
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+
+  .sg-list :global(.sr-row:first-child) {
+    border-top: 0;
   }
 
   .sg-toggle {
@@ -178,7 +159,11 @@
     .sg-providers {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: var(--spacing-8);
+    }
+
+    .sg-provider + .sg-provider {
+      border-top: 0;
+      border-left: 1px solid var(--border);
     }
   }
 

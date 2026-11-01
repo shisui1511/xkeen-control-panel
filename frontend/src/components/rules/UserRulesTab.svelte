@@ -412,7 +412,7 @@
 
   .quick-add-card {
     padding: 16px 20px;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
   }
@@ -492,7 +492,7 @@
   .table-card {
     padding: 0;
     overflow: hidden;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
   }
@@ -554,7 +554,7 @@
 
   .drag-handle {
     cursor: grab;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     font-size: var(--font-size-base);
     user-select: none;
     padding: 2px 4px;
@@ -649,7 +649,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     font-size: var(--font-size-xs);
   }
 
@@ -666,10 +666,10 @@
     justify-content: center;
     gap: 12px;
     padding: 48px;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .spinner {
@@ -689,7 +689,7 @@
 
   @media (max-width: 768px) {
     .input {
-      font-size: 16px;
+      font-size: var(--font-size-lg);
     }
 
     .value-field,

@@ -559,7 +559,7 @@
         {@const errorColor = nodeCount > 0 ? 'var(--warning, #f0b450)' : 'var(--danger)'}
         <div
           class="sub-error-details"
-          style="font-size: 12.5px; color: {errorColor}; margin: -4px 0 8px 34px; line-height: 1.4; font-family: var(--font-family-sans); word-break: break-word;"
+          style="font-size: var(--font-size-sm); color: {errorColor}; margin: -4px 0 8px 34px; line-height: 1.4; font-family: var(--font-family-sans); word-break: break-word;"
         >
           {#if sub.last_error.includes('HTML landing page')}
             {$t('subscr.error_html_stub')}
@@ -761,7 +761,7 @@
           {:else if subNodesError[sub.id]}
             <div
               class="sub-error-details"
-              style="font-size: 12.5px; color: var(--danger); margin: 8px 0; display: flex; align-items: center; gap: 8px; font-family: var(--font-family-sans);"
+              style="font-size: var(--font-size-sm); color: var(--danger); margin: 8px 0; display: flex; align-items: center; gap: 8px; font-family: var(--font-family-sans);"
             >
               <span>{$t('subscr.nodes_load_error_mihomo')}</span>
               <button
@@ -851,7 +851,7 @@
   }
   .collapse-toggle:hover {
     color: var(--accent);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--surface-tint);
   }
   .collapse-toggle svg {
     transition: transform var(--transition-fast);
@@ -894,7 +894,7 @@
   /* Имя */
   .sub-name {
     margin: 0;
-    font-size: 15px;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--fg-primary);
     cursor: pointer;
@@ -936,7 +936,7 @@
 
   .sub-warning-details {
     margin: -4px 0 8px 34px;
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     line-height: 1.4;
     color: var(--warning);
     font-family: var(--font-family-sans);
@@ -966,14 +966,14 @@
   }
 
   .sub-update-time {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
   /* Синий чип количества нод */
   .nodes-count-badge {
-    background: rgba(41, 194, 240, 0.1);
-    border: 1px solid rgba(41, 194, 240, 0.25);
+    background: rgba(var(--accent-rgb), 0.1);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
     color: var(--accent);
     padding: 2px 10px;
     border-radius: 12px;
@@ -1020,7 +1020,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     padding-bottom: 2px;
   }
@@ -1099,7 +1099,7 @@
     color: var(--purple);
     padding: 6px 14px;
     border-radius: 20px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     text-decoration: none;
     display: inline-flex;
@@ -1126,7 +1126,7 @@
     color: var(--warning);
     padding: 6px 14px;
     border-radius: 20px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     display: inline-flex;
     align-items: center;
@@ -1180,7 +1180,7 @@
   }
 
   .announcement-line {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     color: var(--fg-primary);
   }
@@ -1196,8 +1196,8 @@
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    background: rgba(239, 68, 68, 0.05);
-    border: 1px solid rgba(239, 68, 68, 0.15);
+    background: color-mix(in srgb, var(--danger) 5%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger) 15%, transparent);
     border-radius: var(--radius-sm, 4px);
     padding: 8px 12px;
     margin-bottom: 12px;
@@ -1207,7 +1207,7 @@
   .inline-warn-icon {
     color: var(--danger);
     font-weight: bold;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     line-height: 1;
     margin-top: 1px;
   }
@@ -1274,7 +1274,7 @@
     background: transparent !important;
     border: none !important;
     color: var(--fg-secondary) !important;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     cursor: pointer;
   }
   .action-btn-dots:hover {
@@ -1303,7 +1303,7 @@
     border: none;
     padding: 10px 14px;
     text-align: left;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     cursor: pointer;
     width: 100%;
@@ -1319,7 +1319,7 @@
   }
 
   .dropdown-menu button.delete-action:hover {
-    background: rgba(235, 94, 85, 0.1);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
 
   @media (max-width: 768px) {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Section from '../Section.svelte';
   import { onMount } from 'svelte';
   import { t, currentLang } from '../../i18n';
   import { apiFetch, apiFetchJSON } from '../../lib/api';
@@ -205,95 +206,90 @@
   });
 </script>
 
-<div class="card xkeen-settings-card">
-  <div class="xs-head">
-    <div>
-      <h2 class="card-title">{$t('xkeen_settings.title')}</h2>
-      <p class="xs-subtitle">{$t('xkeen_settings.subtitle')}</p>
-    </div>
-  </div>
+<Section title={$t('xkeen_settings.title')} description={$t('xkeen_settings.subtitle')}>
+  <div class="card xkeen-settings-card">
+    {#if loading}
+      <div class="xs-skeleton">
+        <Skeleton type="text-line" width="70%" />
+        <Skeleton type="text-line" width="50%" />
+      </div>
+    {:else if notInstalled}
+      <p class="xs-hint">{$t('xkeen_settings.not_installed')}</p>
+    {:else if loadError}
+      <div class="xs-load-error" role="alert">
+        <span>{$t('xkeen_settings.load_error')}: {loadError}</span>
+        <Button variant="secondary" onclick={load}>{$t('xkeen_settings.retry')}</Button>
+      </div>
+    {:else if current}
+      <SegmentedControl
+        items={segments}
+        bind:value={activeKind}
+        ariaLabel={$t('xkeen_settings.title')}
+      />
 
-  {#if loading}
-    <div class="xs-skeleton">
-      <Skeleton type="text-line" width="70%" />
-      <Skeleton type="text-line" width="50%" />
-    </div>
-  {:else if notInstalled}
-    <p class="xs-hint">{$t('xkeen_settings.not_installed')}</p>
-  {:else if loadError}
-    <div class="xs-load-error" role="alert">
-      <span>{$t('xkeen_settings.load_error')}: {loadError}</span>
-      <Button variant="secondary" onclick={load}>{$t('xkeen_settings.retry')}</Button>
-    </div>
-  {:else if current}
-    <SegmentedControl
-      items={segments}
-      bind:value={activeKind}
-      ariaLabel={$t('xkeen_settings.title')}
-    />
+      <p class="xs-hint">{$t(`xkeen_settings.hint.${activeKind}`)}</p>
 
-    <p class="xs-hint">{$t(`xkeen_settings.hint.${activeKind}`)}</p>
+      <div class="xs-meta">
+        <code class="xs-path">{current.path}</code>
+        {#if !current.exists}
+          <span class="xs-badge">{$t('xkeen_settings.not_exists')}</span>
+        {/if}
+        <span class="xs-count">{$t('xkeen_settings.entries', { n: String(entries) })}</span>
+      </div>
 
-    <div class="xs-meta">
-      <code class="xs-path">{current.path}</code>
-      {#if !current.exists}
-        <span class="xs-badge">{$t('xkeen_settings.not_exists')}</span>
+      <label class="visually-hidden" for="xkeen-settings-editor">
+        {$t(`xkeen_settings.kind.${activeKind}`)}
+      </label>
+      <textarea
+        id="xkeen-settings-editor"
+        class="xs-editor"
+        class:has-errors={errorCount > 0}
+        spellcheck="false"
+        autocomplete="off"
+        rows="12"
+        value={draft}
+        oninput={handleInput}></textarea>
+
+      {#if issues.length > 0}
+        <ul class="xs-issues" aria-live="polite">
+          {#each issues as issue, i (i)}
+            <li class="xs-issue" class:is-error={issue.severity === 'error'}>
+              {#if issue.line}
+                <span class="xs-line">{$t('xkeen_settings.line', { n: String(issue.line) })}</span>
+              {/if}
+              <span>{issueText(issue)}</span>
+            </li>
+          {/each}
+        </ul>
       {/if}
-      <span class="xs-count">{$t('xkeen_settings.entries', { n: String(entries) })}</span>
-    </div>
 
-    <label class="visually-hidden" for="xkeen-settings-editor">
-      {$t(`xkeen_settings.kind.${activeKind}`)}
-    </label>
-    <textarea
-      id="xkeen-settings-editor"
-      class="xs-editor"
-      class:has-errors={errorCount > 0}
-      spellcheck="false"
-      autocomplete="off"
-      rows="12"
-      value={draft}
-      oninput={handleInput}></textarea>
-
-    {#if issues.length > 0}
-      <ul class="xs-issues" aria-live="polite">
-        {#each issues as issue, i (i)}
-          <li class="xs-issue" class:is-error={issue.severity === 'error'}>
-            {#if issue.line}
-              <span class="xs-line">{$t('xkeen_settings.line', { n: String(issue.line) })}</span>
-            {/if}
-            <span>{issueText(issue)}</span>
-          </li>
-        {/each}
-      </ul>
+      <div class="xs-actions">
+        <Button variant="secondary" disabled={!dirty || saving} onclick={revert}>
+          {$t('xkeen_settings.revert')}
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={!dirty || saving || errorCount > 0}
+          loading={saving}
+          onclick={() => save(false)}
+        >
+          {$t('xkeen_settings.save')}
+        </Button>
+        <Button
+          variant="primary"
+          disabled={!dirty || saving || errorCount > 0 || $isConflict}
+          loading={saving}
+          title={$isConflict
+            ? $t('kernel.conflict_blocked')
+            : $t('xkeen_settings.save_restart_title')}
+          onclick={() => save(true)}
+        >
+          {$t('xkeen_settings.save_restart')}
+        </Button>
+      </div>
     {/if}
-
-    <div class="xs-actions">
-      <Button variant="secondary" disabled={!dirty || saving} onclick={revert}>
-        {$t('xkeen_settings.revert')}
-      </Button>
-      <Button
-        variant="secondary"
-        disabled={!dirty || saving || errorCount > 0}
-        loading={saving}
-        onclick={() => save(false)}
-      >
-        {$t('xkeen_settings.save')}
-      </Button>
-      <Button
-        variant="primary"
-        disabled={!dirty || saving || errorCount > 0 || $isConflict}
-        loading={saving}
-        title={$isConflict
-          ? $t('kernel.conflict_blocked')
-          : $t('xkeen_settings.save_restart_title')}
-        onclick={() => save(true)}
-      >
-        {$t('xkeen_settings.save_restart')}
-      </Button>
-    </div>
-  {/if}
-</div>
+  </div>
+</Section>
 
 <style>
   .xkeen-settings-card {
@@ -302,33 +298,9 @@
     gap: var(--spacing-3);
   }
 
-  .xs-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: var(--spacing-3);
-  }
-
-  /* Same header as the neighbouring cards on the services page instead of
-     the global compact .card-title strip. */
-  .xs-head .card-title {
-    display: block;
-    margin: 0;
-    padding: 0;
-    font-size: var(--font-size-lg);
-    font-weight: 700;
-    color: var(--fg-primary);
-  }
-
-  .xs-subtitle {
-    margin: 2px 0 0;
-    font-size: var(--font-size-xs);
-    color: var(--fg-dim);
-  }
-
   .xs-hint {
     margin: 0;
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     font-size: var(--font-size-sm);
   }
 
@@ -360,7 +332,7 @@
     align-items: center;
     gap: var(--spacing-2);
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .xs-path {
@@ -434,7 +406,7 @@
   .xs-line {
     flex-shrink: 0;
     font-family: var(--font-family-mono);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .xs-actions {

@@ -267,221 +267,176 @@
   }
 </script>
 
-<article class="card source-card" class:off data-testid="nodes-source-{source.id}">
-  <div class="sc-head">
-    <button
-      type="button"
-      class="sc-expand"
-      aria-expanded={expanded}
-      aria-controls="{uid}-list"
-      data-testid="nodes-source-toggle-{source.id}"
-      onclick={ontoggle}
-    >
-      <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} />
-      <span class="sc-name">{displayName}</span>
-    </button>
-    <span class="chip chip-default">
-      {isMy ? $t('cfg.nodes.kind_my') : $t('cfg.nodes.kind_subscription')}
-    </span>
-    {#if off}
-      <span class="chip chip-default" data-testid="nodes-source-off-{source.id}">
-        {$t('cfg.nodes.disabled')}
+<article class="card card-rows source-card" class:off data-testid="nodes-source-{source.id}">
+  <div class="sc-top">
+    <div class="sc-head">
+      <button
+        type="button"
+        class="sc-expand"
+        aria-expanded={expanded}
+        aria-controls="{uid}-list"
+        data-testid="nodes-source-toggle-{source.id}"
+        onclick={ontoggle}
+      >
+        <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} />
+        <span class="sc-name">{displayName}</span>
+      </button>
+      <span class="chip chip-default">
+        {isMy ? $t('cfg.nodes.kind_my') : $t('cfg.nodes.kind_subscription')}
       </span>
-    {/if}
-    {#if expired}
-      <span class="chip chip-danger" data-testid="nodes-source-expired-{source.id}">
-        {$t('cfg.nodes.expired')}
-      </span>
-    {/if}
-    <label class="toggle-switch sc-switch">
-      <input
-        type="checkbox"
-        checked={source.enabled}
-        disabled={toggling || $applyRunning}
-        aria-label={$t('cfg.nodes.source_enabled')}
-        data-testid="nodes-enabled-{source.id}"
-        onchange={toggleEnabled}
-      />
-      <span class="toggle-slider"></span>
-    </label>
-  </div>
-
-  <p class="sc-summary" data-testid="nodes-source-counts-{source.id}">{summary}</p>
-
-  {#if !isMy && meta}
-    <div class="sc-meta">
-      {#if hasTraffic}
-        <div class="sc-traffic" data-testid="nodes-traffic-{source.id}">
-          <span class="sc-meta-text">
-            {$t('cfg.nodes.traffic_used', { used: formatBytes(used), total: formatBytes(total) })}
-          </span>
-          <div
-            class="sc-bar"
-            role="progressbar"
-            aria-label={$t('cfg.nodes.traffic_aria')}
-            aria-valuemin={0}
-            aria-valuemax={total}
-            aria-valuenow={Math.min(used, total)}
-            data-level={level}
-          >
-            <div class="sc-bar-fill level-{level}" style:width="{percent}%"></div>
-          </div>
-        </div>
-      {/if}
-      {#if expireAt}
-        <span
-          class="sc-meta-text"
-          class:sc-expired={expired}
-          data-testid="nodes-expire-{source.id}"
-        >
-          {$t('cfg.nodes.expires_on', { date: formatDate(expireAt) })}
+      {#if off}
+        <span class="chip chip-default" data-testid="nodes-source-off-{source.id}">
+          {$t('cfg.nodes.disabled')}
         </span>
       {/if}
-      {#if announce}
-        <div class="alert sc-announce" data-testid="nodes-announce-{source.id}">
-          <Icon name="info" size={16} class="sc-announce-icon" />
-          <div class="sc-announce-body">
-            <p class="sc-announce-text" class:clamped={announceLong && !announceOpen}>
-              {announce}
-            </p>
-            {#if announceLong}
-              <button
-                type="button"
-                class="sc-link-btn"
-                onclick={() => (announceOpen = !announceOpen)}
+      {#if expired}
+        <span class="chip chip-danger" data-testid="nodes-source-expired-{source.id}">
+          {$t('cfg.nodes.expired')}
+        </span>
+      {/if}
+      <label class="toggle-switch sc-switch">
+        <input
+          type="checkbox"
+          checked={source.enabled}
+          disabled={toggling || $applyRunning}
+          aria-label={$t('cfg.nodes.source_enabled')}
+          data-testid="nodes-enabled-{source.id}"
+          onchange={toggleEnabled}
+        />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <p class="sc-summary" data-testid="nodes-source-counts-{source.id}">{summary}</p>
+
+    {#if !isMy && meta}
+      <div class="sc-meta">
+        {#if hasTraffic}
+          <div class="sc-traffic" data-testid="nodes-traffic-{source.id}">
+            <span class="sc-meta-text">
+              {$t('cfg.nodes.traffic_used', { used: formatBytes(used), total: formatBytes(total) })}
+            </span>
+            <div
+              class="sc-bar"
+              role="progressbar"
+              aria-label={$t('cfg.nodes.traffic_aria')}
+              aria-valuemin={0}
+              aria-valuemax={total}
+              aria-valuenow={Math.min(used, total)}
+              data-level={level}
+            >
+              <div class="sc-bar-fill level-{level}" style:width="{percent}%"></div>
+            </div>
+          </div>
+        {/if}
+        {#if expireAt}
+          <span
+            class="sc-meta-text"
+            class:sc-expired={expired}
+            data-testid="nodes-expire-{source.id}"
+          >
+            {$t('cfg.nodes.expires_on', { date: formatDate(expireAt) })}
+          </span>
+        {/if}
+        {#if supportUrl || webUrl}
+          <div class="sc-links">
+            {#if supportUrl}
+              <a
+                class="sc-link"
+                href={supportUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="nodes-support-{source.id}"
               >
-                {announceOpen ? $t('cfg.nodes.show_less') : $t('cfg.nodes.show_full')}
-              </button>
+                {$t('cfg.nodes.support')}
+              </a>
+            {/if}
+            {#if webUrl}
+              <a
+                class="sc-link"
+                href={webUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="nodes-cabinet-{source.id}"
+              >
+                {$t('cfg.nodes.cabinet')}
+              </a>
             {/if}
           </div>
-        </div>
-      {/if}
-      {#if supportUrl || webUrl}
-        <div class="sc-links">
-          {#if supportUrl}
-            <a
-              class="sc-link"
-              href={supportUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              data-testid="nodes-support-{source.id}"
-            >
-              {$t('cfg.nodes.support')}
-            </a>
-          {/if}
-          {#if webUrl}
-            <a
-              class="sc-link"
-              href={webUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              data-testid="nodes-cabinet-{source.id}"
-            >
-              {$t('cfg.nodes.cabinet')}
-            </a>
-          {/if}
-        </div>
-      {/if}
-    </div>
-  {/if}
-
-  {#if !isMy && source.url_masked}
-    <div class="sc-url-row">
-      <code class="sc-url" data-testid="nodes-url-{source.id}">
-        {revealedUrl ?? source.url_masked}
-      </code>
-      <div class="sc-url-actions">
-        <button
-          type="button"
-          class="btn btn-secondary btn-sm"
-          disabled={urlBusy}
-          aria-pressed={revealedUrl !== null}
-          data-testid="nodes-url-reveal-{source.id}"
-          onclick={toggleReveal}
-        >
-          <Icon name={revealedUrl !== null ? 'eye-off' : 'eye'} size={14} />
-          {revealedUrl !== null ? $t('cfg.nodes.hide') : $t('cfg.nodes.reveal')}
-        </button>
-        <button
-          type="button"
-          class="btn btn-secondary btn-sm"
-          disabled={urlBusy}
-          data-testid="nodes-url-copy-{source.id}"
-          onclick={copyUrl}
-        >
-          <Icon name="copy" size={14} />
-          {$t('cfg.nodes.copy')}
-        </button>
+        {/if}
       </div>
-    </div>
-  {/if}
+    {/if}
 
-  {#if statusRows.length > 0}
-    <ul class="sc-kernels" aria-label={$t('cfg.nodes.status_aria')}>
-      {#each statusRows as row (row.id)}
-        <li class="sc-kernel" data-testid="nodes-status-{source.id}-{row.id}">
-          <span class="sc-kernel-name">{row.name}</span>
-          <StatusBadge variant={row.view.variant} label={row.label} />
-          <span class="sc-kernel-count" class:sc-dim={off}>
-            · {$tp('cfg.nodes.nodes_count', row.count)}
-          </span>
-          {#if row.cabinet}
-            <a
-              class="sc-link"
-              href={row.cabinet}
-              target="_blank"
-              rel="noopener noreferrer"
-              data-testid="source-status-cabinet"
-            >
-              {$t('cfg.nodes.cabinet')}
-            </a>
-          {/if}
-        </li>
-      {/each}
-    </ul>
-  {/if}
+    {#if !isMy && source.url_masked}
+      <div class="sc-url-row">
+        <code class="sc-url" data-testid="nodes-url-{source.id}">
+          {revealedUrl ?? source.url_masked}
+        </code>
+        <div class="sc-url-actions">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            disabled={urlBusy}
+            aria-pressed={revealedUrl !== null}
+            data-testid="nodes-url-reveal-{source.id}"
+            onclick={toggleReveal}
+          >
+            <Icon name={revealedUrl !== null ? 'eye-off' : 'eye'} size={14} />
+            {revealedUrl !== null ? $t('cfg.nodes.hide') : $t('cfg.nodes.reveal')}
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            disabled={urlBusy}
+            data-testid="nodes-url-copy-{source.id}"
+            onclick={copyUrl}
+          >
+            <Icon name="copy" size={14} />
+            {$t('cfg.nodes.copy')}
+          </button>
+        </div>
+      </div>
+    {/if}
 
-  {#if !isMy}
-    <div class="sc-actions">
-      {#if source.enabled}
-        <Button
-          variant="secondary"
-          class="btn-sm"
-          loading={refreshing}
-          data-testid="nodes-refresh-{source.id}"
-          onclick={refresh}
-        >
-          <Icon name="refresh" size={14} />
-          {$t('cfg.nodes.btn_refresh')}
-        </Button>
-      {/if}
-      <Button
-        variant="secondary"
-        class="btn-sm"
-        data-testid="nodes-settings-{source.id}"
-        onclick={() => (settingsOpen = true)}
-      >
-        <Icon name="edit" size={14} />
-        {$t('cfg.nodes.btn_settings')}
-      </Button>
-      <Button
-        variant="secondary"
-        class="btn-sm"
-        data-testid="nodes-diag-{source.id}"
-        onclick={() => (diagOpen = true)}
-      >
-        <Icon name="info" size={14} />
-        {$t('cfg.nodes.btn_diag')}
-      </Button>
-      <Button
-        variant="danger"
-        class="btn-sm"
-        data-testid="nodes-delete-{source.id}"
-        onclick={removeSource}
-      >
-        <Icon name="delete" size={14} />
-        {$t('cfg.nodes.btn_delete_source')}
-      </Button>
+    {#if statusRows.length > 0}
+      <ul class="sc-kernels" aria-label={$t('cfg.nodes.status_aria')}>
+        {#each statusRows as row (row.id)}
+          <li class="sc-kernel" data-testid="nodes-status-{source.id}-{row.id}">
+            <span class="sc-kernel-name">{row.name}</span>
+            <StatusBadge variant={row.view.variant} label={row.label} />
+            <span class="sc-kernel-count" class:sc-dim={off}>
+              · {$tp('cfg.nodes.nodes_count', row.count)}
+            </span>
+            {#if row.cabinet}
+              <a
+                class="sc-link"
+                href={row.cabinet}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="source-status-cabinet"
+              >
+                {$t('cfg.nodes.cabinet')}
+              </a>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
+
+  {#if !isMy && announce}
+    <div class="sc-announce" data-testid="nodes-announce-{source.id}">
+      <Icon name="info" size={16} class="sc-announce-icon" />
+      <div class="sc-announce-body">
+        <p class="sc-announce-text" class:clamped={announceLong && !announceOpen}>
+          {announce}
+        </p>
+        {#if announceLong}
+          <button type="button" class="sc-link-btn" onclick={() => (announceOpen = !announceOpen)}>
+            {announceOpen ? $t('cfg.nodes.show_less') : $t('cfg.nodes.show_full')}
+          </button>
+        {/if}
+      </div>
     </div>
   {/if}
 
@@ -540,6 +495,50 @@
       {/if}
     </div>
   {/if}
+
+  {#if !isMy}
+    <div class="card-footer sc-actions">
+      {#if source.enabled}
+        <Button
+          variant="secondary"
+          class="btn-sm"
+          loading={refreshing}
+          data-testid="nodes-refresh-{source.id}"
+          onclick={refresh}
+        >
+          <Icon name="refresh" size={14} />
+          {$t('cfg.nodes.btn_refresh')}
+        </Button>
+      {/if}
+      <Button
+        variant="secondary"
+        class="btn-sm"
+        data-testid="nodes-settings-{source.id}"
+        onclick={() => (settingsOpen = true)}
+      >
+        <Icon name="edit" size={14} />
+        {$t('cfg.nodes.btn_settings')}
+      </Button>
+      <Button
+        variant="secondary"
+        class="btn-sm"
+        data-testid="nodes-diag-{source.id}"
+        onclick={() => (diagOpen = true)}
+      >
+        <Icon name="info" size={14} />
+        {$t('cfg.nodes.btn_diag')}
+      </Button>
+      <Button
+        variant="danger"
+        class="btn-sm"
+        data-testid="nodes-delete-{source.id}"
+        onclick={removeSource}
+      >
+        <Icon name="delete" size={14} />
+        {$t('cfg.nodes.btn_delete_source')}
+      </Button>
+    </div>
+  {/if}
 </article>
 
 {#if isMy}
@@ -558,10 +557,15 @@
 
 <style>
   .source-card {
+    min-width: 0;
+  }
+
+  .sc-top {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-3);
     min-width: 0;
+    padding: 16px var(--card-pad);
   }
 
   .sc-head {
@@ -669,11 +673,14 @@
     background: var(--danger);
   }
 
+  /* Объявление провайдера — полоса между шапкой и списком, а не рамка внутри карточки */
   .sc-announce {
-    margin: 0;
+    display: flex;
+    gap: var(--spacing-2);
     min-width: 0;
-    background: var(--bg-elevated);
-    border-color: var(--border-strong);
+    padding: 12px var(--card-pad);
+    border-top: 1px solid var(--border);
+    background: var(--surface-tint);
     color: var(--fg-secondary);
   }
 
@@ -751,8 +758,7 @@
     word-break: break-word;
   }
 
-  .sc-url-actions,
-  .sc-actions {
+  .sc-url-actions {
     display: flex;
     flex-wrap: wrap;
     gap: var(--spacing-2);
@@ -784,18 +790,22 @@
     min-width: 56px;
   }
 
+  /* Узлы — строки на всю ширину карточки, отделены от шапки линией */
   .sc-list {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-2);
     min-width: 0;
-    padding-top: var(--spacing-3);
     border-top: 1px solid var(--border);
   }
 
   .sc-search {
-    width: 100%;
+    width: calc(100% - 2 * var(--card-pad));
     max-width: 360px;
+    margin: 12px var(--card-pad) 4px;
+  }
+
+  .sc-nodes :global(.node-row) {
+    padding: 10px var(--card-pad);
   }
 
   .sc-nodes {
@@ -808,13 +818,19 @@
   .sc-empty,
   .sc-stubs {
     margin: 0;
+    padding: 12px var(--card-pad);
     font-size: var(--font-size-base);
     color: var(--fg-dim);
     overflow-wrap: anywhere;
   }
 
+  .sc-stubs {
+    border-top: 1px solid var(--border);
+  }
+
   .sc-more {
     display: flex;
+    padding: 4px var(--card-pad) 12px;
   }
 
   @media (pointer: coarse), (max-width: 768px) {

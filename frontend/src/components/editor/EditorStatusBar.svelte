@@ -104,7 +104,7 @@
     align-items: center;
     justify-content: space-between;
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     min-height: 26px;
     height: 28px;
@@ -135,7 +135,7 @@
     border: 1px solid var(--border);
     border-radius: 3px;
     padding: 1px 4px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-secondary);
   }
@@ -144,7 +144,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     font-family: var(--font-family-mono);
     padding: 2px 7px;
@@ -210,7 +210,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     padding: 0 10px;
     border-left: 1px solid var(--border);
@@ -224,7 +224,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--fg-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     padding: 3px 8px;
     cursor: pointer;
     font-family: var(--font-family-mono);

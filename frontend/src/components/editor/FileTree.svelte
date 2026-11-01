@@ -437,9 +437,9 @@
   .file-search-input {
     width: 100%;
     padding: 5px 24px 5px 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     height: 28px;
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
@@ -454,7 +454,7 @@
     border: none;
     color: var(--fg-dim);
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     padding: 0;
     line-height: 1;
   }
@@ -495,7 +495,7 @@
     justify-content: space-between;
     cursor: pointer;
     user-select: none;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     /* .nav-group brings the sidebar's uppercase tracking; directory paths are
        case-sensitive and must render as-is. */
     text-transform: none;
@@ -520,7 +520,7 @@
   }
 
   .group-count {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
@@ -528,7 +528,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
@@ -556,7 +556,7 @@
     border: none;
     background: transparent;
     color: var(--fg-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     text-align: left;
     transition: all 0.12s ease;
@@ -610,7 +610,7 @@
   }
 
   .fr-meta {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
     margin-left: 6px;
@@ -618,7 +618,7 @@
   }
 
   .fmt-badge {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 800;
     padding: 1px 4px;
     border-radius: 3px;
@@ -676,7 +676,7 @@
 
   .sb-empty {
     padding: 6px 12px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-faint);
   }
 
@@ -696,7 +696,7 @@
   }
 
   .ctx-header {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     padding: 4px 8px;
     border-bottom: 1px solid var(--border);
@@ -710,7 +710,7 @@
     align-items: center;
     gap: 8px;
     padding: 6px 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-primary);
     background: transparent;
     border: none;
@@ -743,7 +743,7 @@
       min-height: 40px;
       padding: 10px 12px;
       gap: 8px;
-      font-size: 13px;
+      font-size: var(--font-size-sm);
     }
 
     .fr-name {
@@ -777,7 +777,7 @@
 
     .file-search-input {
       height: 36px;
-      font-size: 13px;
+      font-size: var(--font-size-sm);
     }
 
     .btn-new-file {

@@ -314,7 +314,7 @@
   .search-input {
     width: 100%;
     padding: 8px 28px 8px 12px;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
@@ -367,7 +367,7 @@
   }
 
   .stats-total {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
     margin-left: 4px;
   }
 
@@ -610,9 +610,9 @@
     min-width: 0;
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 768px) {
     .search-input {
-      font-size: 16px;
+      font-size: var(--font-size-lg);
     }
 
     .toolbar-row {

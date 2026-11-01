@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Section from '../Section.svelte';
   import { t } from '../../i18n';
   import { lockNav, showConfirm, showToast } from '../../stores';
   import Button from '../Button.svelte';
@@ -90,35 +91,37 @@
   }
 </script>
 
-<div class="card install-card" data-testid="xkeen-install-card">
-  <div class="install-head">
-    <h2 class="card-title">{$t('xkinst.title')}</h2>
-    <p class="card-subtitle">{$t(incomplete ? 'xkinst.desc_incomplete' : 'xkinst.desc')}</p>
-  </div>
-
-  {#if available}
-    <div class="install-row">
-      <span class="install-lbl">{$t('xkinst.channel')}</span>
-      <SegmentedControl
-        ariaLabel={$t('xkinst.channel')}
-        value={channel}
-        items={[
-          { value: 'stable', label: $t('xkinst.channel_stable') },
-          { value: 'beta', label: $t('xkinst.channel_beta') }
-        ]}
-        onchange={(v) => (channel = v === 'beta' ? 'beta' : 'stable')}
-      />
-      <Button variant="primary" onclick={start} data-testid="xkeen-install-start">
-        {$t('xkinst.start')}
-      </Button>
+<div class="install-section">
+  <Section
+    title={$t('xkinst.title')}
+    description={$t(incomplete ? 'xkinst.desc_incomplete' : 'xkinst.desc')}
+  >
+    <div class="card install-card" data-testid="xkeen-install-card">
+      {#if available}
+        <div class="install-row">
+          <span class="install-lbl">{$t('xkinst.channel')}</span>
+          <SegmentedControl
+            ariaLabel={$t('xkinst.channel')}
+            value={channel}
+            items={[
+              { value: 'stable', label: $t('xkinst.channel_stable') },
+              { value: 'beta', label: $t('xkinst.channel_beta') }
+            ]}
+            onchange={(v) => (channel = v === 'beta' ? 'beta' : 'stable')}
+          />
+          <Button variant="primary" onclick={start} data-testid="xkeen-install-start">
+            {$t('xkinst.start')}
+          </Button>
+        </div>
+        <p class="install-hint">{$t('xkinst.hint')}</p>
+        {#if stableHint}
+          <p class="install-hint" data-testid="xkeen-install-stable-hint">{stableHint}</p>
+        {/if}
+      {:else}
+        <p class="install-hint warn">{$t('xkinst.no_entware')}</p>
+      {/if}
     </div>
-    <p class="install-hint">{$t('xkinst.hint')}</p>
-    {#if stableHint}
-      <p class="install-hint" data-testid="xkeen-install-stable-hint">{stableHint}</p>
-    {/if}
-  {:else}
-    <p class="install-hint warn">{$t('xkinst.no_entware')}</p>
-  {/if}
+  </Section>
 </div>
 
 <Modal
@@ -153,6 +156,10 @@
 </Modal>
 
 <style>
+  .install-section {
+    margin-bottom: var(--spacing-8);
+  }
+
   .install-card {
     display: flex;
     flex-direction: column;

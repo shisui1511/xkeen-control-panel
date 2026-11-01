@@ -74,7 +74,7 @@
 
   .tabs-pill {
     border-bottom: none;
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: 3px;

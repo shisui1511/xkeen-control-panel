@@ -684,7 +684,7 @@
   .group-card:hover {
     box-shadow:
       0 4px 20px rgba(0, 0, 0, 0.35),
-      0 0 0 1px color-mix(in srgb, var(--primary) 15%, transparent);
+      0 0 0 1px color-mix(in srgb, var(--accent) 15%, transparent);
   }
   .group-card .gc-head {
     background: linear-gradient(135deg, var(--bg-group-head-from), var(--bg-group-head-to));
@@ -707,7 +707,7 @@
     bottom: 0;
     background: radial-gradient(
       ellipse at top left,
-      color-mix(in srgb, var(--primary) 5%, transparent),
+      color-mix(in srgb, var(--accent) 5%, transparent),
       transparent 60%
     );
     pointer-events: none;
@@ -734,7 +734,7 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     width: 100%;
     margin-top: 2px;
@@ -742,7 +742,7 @@
   .group-card .gc-head .name {
     font-weight: 800;
     color: var(--fg-primary);
-    font-size: 15px;
+    font-size: var(--font-size-lg);
     letter-spacing: -0.01em;
   }
   .gc-head-actions {
@@ -887,9 +887,9 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     color: var(--accent);
-    background: color-mix(in srgb, var(--primary) 8%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
     padding: 1px 6px;
     border-radius: 4px;
   }
@@ -923,8 +923,8 @@
     font-family: inherit;
   }
   .gc-now-pill.is-leaf {
-    background: color-mix(in srgb, var(--primary) 8%, transparent);
-    border-color: color-mix(in srgb, var(--primary) 20%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 20%, transparent);
     color: var(--accent);
   }
   .gc-now-dot {
@@ -1028,7 +1028,7 @@
     border-radius: var(--radius-md);
     background: linear-gradient(
       135deg,
-      color-mix(in srgb, var(--primary) 3%, transparent),
+      color-mix(in srgb, var(--accent) 3%, transparent),
       transparent
     );
     opacity: 0;
@@ -1046,13 +1046,13 @@
   .proxy-card.now {
     background: linear-gradient(
       135deg,
-      color-mix(in srgb, var(--primary) 12%, transparent),
-      color-mix(in srgb, var(--primary) 4%, transparent)
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      color-mix(in srgb, var(--accent) 4%, transparent)
     );
-    border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
     box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--primary) 8%, transparent),
-      0 2px 8px color-mix(in srgb, var(--primary) 8%, transparent);
+      inset 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent),
+      0 2px 8px color-mix(in srgb, var(--accent) 8%, transparent);
   }
   .proxy-card .p-header {
     display: flex;
@@ -1063,7 +1063,7 @@
   .proxy-card .p-name {
     font-weight: 600;
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     word-break: break-all;
   }
   .flag-icon {
@@ -1146,7 +1146,7 @@
     color: var(--fg-primary);
   }
   .filter-chip.active {
-    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
     border-color: var(--accent);
     color: var(--accent);
     font-weight: 600;
@@ -1161,10 +1161,10 @@
   .group-test-btn {
     margin-left: auto;
     color: var(--accent);
-    border-color: color-mix(in srgb, var(--primary) 30%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
   }
   .group-test-btn:hover {
-    background: color-mix(in srgb, var(--primary) 15%, transparent);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
     border-color: var(--accent);
     color: var(--accent);
   }
@@ -1173,7 +1173,7 @@
     cursor: not-allowed;
   }
   .selector-dot {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     color: var(--fg-dim);
     font-weight: 700;
   }
@@ -1200,7 +1200,7 @@
   }
   .lat {
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 4px;
@@ -1211,7 +1211,7 @@
     cursor: pointer;
     font: inherit;
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     line-height: 1.2;
     display: inline-flex;
@@ -1265,12 +1265,12 @@
     border-top: 1px solid var(--border);
   }
   .proxy-grid-more {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--accent);
     padding: 6px 12px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     transition: all 0.15s;
   }
@@ -1316,7 +1316,7 @@
     display: none;
   }
   :global(.group-list) .gc-head .name {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     max-width: 220px;
     overflow: hidden;
     text-overflow: ellipsis;

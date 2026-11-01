@@ -104,14 +104,14 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     padding: 6px 10px;
     width: 100%;
     transition: border-color var(--transition-fast);
   }
 
   .form-input:focus {
-    border-color: var(--primary);
+    border-color: var(--accent);
   }
 
   .form-actions {

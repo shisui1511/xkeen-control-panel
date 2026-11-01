@@ -4,17 +4,20 @@
   let {
     variant = 'default',
     title = '',
+    flush = false,
     actions,
     children
   }: {
     variant?: 'default' | 'flat';
     title?: string;
+    /** Без внутренних отступов: содержимое само раскладывает ячейки (строки, полосы метрик). */
+    flush?: boolean;
     actions?: Snippet;
     children?: Snippet;
   } = $props();
 </script>
 
-<div class="card card-{variant}">
+<div class="card card-{variant}" class:card-flush={flush}>
   {#if title}
     <h2 class="card-title">
       <span>{title}</span>
@@ -43,6 +46,10 @@
   }
   .card-flat {
     box-shadow: none;
+  }
+  .card-flush {
+    padding: 0;
+    overflow: hidden;
   }
   .card-title {
     display: flex;

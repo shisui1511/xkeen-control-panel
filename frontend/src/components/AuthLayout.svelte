@@ -83,13 +83,13 @@
     width: 100%;
     max-width: 420px;
     background: linear-gradient(180deg, var(--surface-overlay-from), var(--surface-overlay-to));
-    border: 1px solid rgba(41, 194, 240, 0.14);
+    border: 1px solid rgba(var(--accent-rgb), 0.14);
     border-radius: var(--radius-lg);
     padding: 38px 36px 32px;
     box-shadow:
       0 48px 80px -32px rgba(0, 0, 0, 0.75),
       0 0 0 1px rgba(255, 255, 255, 0.025) inset,
-      0 0 40px -20px rgba(41, 194, 240, 0.15);
+      0 0 40px -20px rgba(var(--accent-rgb), 0.15);
   }
 
   /* Brand block */
@@ -128,7 +128,7 @@
 
   /* "XKeen" — mirrors sidebar .b1 */
   .login-brand .b1 {
-    font-size: 22px;
+    font-size: var(--font-size-2xl);
     font-weight: 700;
     letter-spacing: -0.01em;
     color: var(--fg-primary);

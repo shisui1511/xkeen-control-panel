@@ -95,8 +95,8 @@
     width: 42px;
     height: 42px;
     border-radius: var(--radius-md);
-    background: rgba(245, 158, 11, 0.12);
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -109,7 +109,7 @@
 
   .main-msg {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     line-height: 1.5;
     color: var(--fg-primary);
   }
@@ -122,7 +122,7 @@
   }
 
   .sources-label {
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
   }
 
@@ -135,10 +135,10 @@
   .source-badge {
     display: inline-block;
     padding: 3px 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     border-radius: var(--radius-sm);
-    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    background: var(--bg-hover);
     border: 1px solid var(--border);
     color: var(--fg-primary);
   }
@@ -153,7 +153,7 @@
     border-top: 1px solid var(--border);
   }
 
-  @media (max-width: 540px) {
+  @media (max-width: 480px) {
     .modal-actions-3way {
       flex-direction: column;
     }

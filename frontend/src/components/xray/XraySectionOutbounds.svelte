@@ -251,7 +251,9 @@
       >
         <div>
           <span class="badge badge-tag">{item.tag}</span>
-          <span style="font-size: 0.75rem; color: var(--fg-secondary); margin-left: 8px;">
+          <span
+            style="font-size: var(--font-size-xs); color: var(--fg-secondary); margin-left: 8px;"
+          >
             ({item.protocol} &bull; {getNodeEndpoint(item)})
           </span>
         </div>
@@ -283,14 +285,16 @@
         style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; opacity: 0.75; background: var(--bg-surface-active);"
       >
         <div>
-          <span class="badge badge-tag" style="background: var(--bg-surface);">{item.tag}</span>
+          <span class="badge badge-tag" style="background: var(--bg-card);">{item.tag}</span>
           {#if item.server}
-            <span style="font-size: 0.75rem; color: var(--fg-secondary); margin-left: 8px;">
+            <span
+              style="font-size: var(--font-size-xs); color: var(--fg-secondary); margin-left: 8px;"
+            >
               ({item.protocol} &bull; {item.server})
             </span>
           {/if}
         </div>
-        <span class="tag-desc" style="font-size: 0.8125rem; color: var(--fg-secondary);">
+        <span class="tag-desc" style="font-size: var(--font-size-sm); color: var(--fg-secondary);">
           {item.tag === 'direct' ? $t('xray.direct_freedom') : ''}
           {item.tag === 'block' ? $t('xray.block_blackhole') : ''}
           {item.tag === 'dns-out' ? $t('xray.dns_requests') : ''}
@@ -336,7 +340,7 @@
           class="error-msg"
           id="xray-import-error"
           role="alert"
-          style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
+          style="color: var(--danger); margin-bottom: 12px; font-size: var(--font-size-sm);"
         >
           {importErrorMsg}
         </div>
@@ -345,7 +349,7 @@
       {#if importStep === 1}
         <div
           class="import-source-tabs"
-          style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;"
+          style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;"
         >
           <button
             type="button"
@@ -387,7 +391,7 @@
               bind:value={importLink}
               placeholder={$t('subscr.import_link_placeholder')}
               rows="4"
-              style="resize: none; font-family: var(--font-family-mono); font-size: 12px; width: 100%; box-sizing: border-box;"
+              style="resize: none; font-family: var(--font-family-mono); font-size: var(--font-size-xs); width: 100%; box-sizing: border-box;"
             ></textarea>
           </div>
         {:else if importSource === 'file'}
@@ -410,10 +414,10 @@
               if (f) handleConfigFile(f);
             }}
           >
-            <div style="font-size: 24px;">📄</div>
-            <div style="font-size: 13px; color: var(--fg-secondary);">
+            <div style="font-size: var(--font-size-3xl);">📄</div>
+            <div style="font-size: var(--font-size-sm); color: var(--fg-secondary);">
               {#if loadedFileName}
-                <span style="color: var(--color-primary); font-weight: 600;">{loadedFileName}</span>
+                <span style="color: var(--accent); font-weight: 600;">{loadedFileName}</span>
                 <span> ({$t('subscr.import_file_loaded')})</span>
               {:else}
                 {$t('subscr.import_drop_or_select')}
@@ -431,9 +435,11 @@
           </div>
         {:else if importSource === 'clipboard'}
           <div
-            style="padding: 24px; text-align: center; background: var(--bg-surface); border: 1px dashed var(--border-color); border-radius: var(--radius);"
+            style="padding: 24px; text-align: center; background: var(--bg-card); border: 1px dashed var(--border); border-radius: var(--radius);"
           >
-            <p style="font-size: 13px; color: var(--fg-secondary); margin-bottom: 12px;">
+            <p
+              style="font-size: var(--font-size-sm); color: var(--fg-secondary); margin-bottom: 12px;"
+            >
               {$t('subscr.import_clipboard_desc')}
             </p>
             <button
@@ -459,7 +465,7 @@
         {/if}
       {:else if importStep === 2 && importNodes.length > 0}
         <div class="preview-section">
-          <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
+          <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: var(--font-size-base);">
             {$t('subscr.import_preview_title')}
           </h3>
           <div
@@ -470,7 +476,7 @@
               {#if item.rowError}
                 <div
                   class="preview-item-card"
-                  style="background: var(--bg-surface); border: 1px solid var(--danger); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                  style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
                 >
                   <button
                     type="button"
@@ -478,12 +484,14 @@
                     style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; display: flex; align-items: center;"
                     aria-label={$t('app.remove')}><Icon name="close" size={12} /></button
                   >
-                  <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
+                  <div
+                    style="font-size: var(--font-size-xs); color: var(--danger); padding-right: 20px;"
+                  >
                     <strong>{$t('app.error')}:</strong>
                     {item.rowError}
                   </div>
                   <div
-                    style="font-size: 0.6875rem; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
+                    style="font-size: var(--font-size-2xs); color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
                     title={item.link}
                   >
                     {item.link}
@@ -492,7 +500,7 @@
               {:else}
                 <div
                   class="preview-item-card"
-                  style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                  style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
                 >
                   <button
                     type="button"
@@ -501,7 +509,7 @@
                     aria-label={$t('app.remove')}><Icon name="close" size={12} /></button
                   >
                   <div
-                    style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
+                    style="display: flex; justify-content: space-between; font-size: var(--font-size-xs); color: var(--fg-secondary); padding-right: 20px;"
                   >
                     <span>
                       <strong style="color: var(--fg-primary);">{item.outbound?.protocol}</strong> · {getNodeServer(
@@ -512,7 +520,7 @@
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <label
                       class="form-label"
-                      style="margin: 0; font-size: 12px; flex-shrink: 0;"
+                      style="margin: 0; font-size: var(--font-size-xs); flex-shrink: 0;"
                       for="import-tag-{idx}"
                     >
                       {$t('subscr.import_tag_custom')}:
@@ -526,7 +534,7 @@
                       aria-describedby={importTagErrors[idx]
                         ? `import-tag-error-${idx}`
                         : undefined}
-                      style="flex-grow: 1; font-size: 12px; padding: 4px 8px;"
+                      style="flex-grow: 1; font-size: var(--font-size-xs); padding: 4px 8px;"
                     />
                   </div>
                   {#if importTagErrors[idx]}
@@ -534,7 +542,7 @@
                       class="import-tag-error"
                       id="import-tag-error-{idx}"
                       role="alert"
-                      style="font-size: 12px; color: var(--danger);"
+                      style="font-size: var(--font-size-xs); color: var(--danger);"
                     >
                       {importTagErrors[idx]}
                     </div>
@@ -592,7 +600,7 @@
   }
 
   .section-title {
-    font-size: 0.9375rem;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -610,23 +618,23 @@
   }
 
   .badge-tag {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     padding: 2px 6px;
     border-radius: var(--radius-xs);
     display: inline-flex;
     align-items: center;
     gap: 4px;
     font-weight: 500;
-    background: var(--color-primary-subtle, rgba(59, 130, 246, 0.15));
-    color: var(--color-primary);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
 
   .btn-icon {
     background: none;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
     border-radius: var(--radius-xs);
     padding: 4px 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     color: var(--fg-secondary);
     transition: all 0.15s ease;
@@ -645,32 +653,32 @@
   }
 
   .form-label {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
   }
 
   .form-input {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
   .form-input:focus {
     outline: none;
-    border-color: var(--color-primary);
+    border-color: var(--accent);
   }
 
   .add-btn {
-    background: var(--bg-surface);
-    border: 1px dashed var(--border-color);
+    background: var(--bg-card);
+    border: 1px dashed var(--border);
     border-radius: var(--radius);
     padding: 10px 16px;
     color: var(--fg-secondary);
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
     text-align: center;
@@ -678,38 +686,38 @@
   }
 
   .add-btn:hover {
-    border-color: var(--primary);
-    color: var(--primary);
+    border-color: var(--accent);
+    color: var(--accent);
     background: var(--hover);
   }
 
   .btn-action-primary {
-    background: var(--color-primary-subtle, rgba(59, 130, 246, 0.1));
-    border: 1px solid var(--color-primary);
-    color: var(--color-primary);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    color: var(--accent);
   }
 
   .btn-action-primary:hover {
-    background: var(--color-primary);
-    color: var(--color-on-primary);
+    background: var(--accent);
+    color: var(--btn-primary-text);
   }
 
   .conf-dropzone {
-    border: 2px dashed var(--border-color);
+    border: 2px dashed var(--border);
     border-radius: var(--radius);
     padding: 32px 16px;
     text-align: center;
     cursor: pointer;
     position: relative;
-    background: var(--bg-surface);
+    background: var(--bg-card);
     transition:
       border-color 0.2s,
       background-color 0.2s;
   }
 
   .conf-dropzone.dragging {
-    border-color: var(--color-primary);
-    background: var(--color-primary-subtle, rgba(59, 130, 246, 0.05));
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
 
   .file-picker-input {

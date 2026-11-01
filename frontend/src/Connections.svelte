@@ -1339,7 +1339,7 @@
     font-size: var(--font-size-sm);
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     color: var(--fg-primary);
     width: 220px;
     transition: all 0.15s ease;
@@ -1347,7 +1347,7 @@
 
   .search-input:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(41, 194, 240, 0.2);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
     width: 260px;
   }
 
@@ -1366,7 +1366,7 @@
     border: none;
     color: var(--fg-dim);
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     line-height: 1;
     padding: 0 4px;
   }
@@ -1380,7 +1380,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     overflow: hidden;
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     padding: 1px;
   }
 
@@ -1396,7 +1396,7 @@
   }
 
   .group-lbl {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 
@@ -1407,8 +1407,8 @@
     gap: 6px;
     font-size: var(--font-size-xs);
     padding: 4px 10px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-light, rgba(255, 255, 255, 0.06));
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-sm);
     font-family: var(--font-family-mono);
   }
@@ -1459,7 +1459,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 12px 16px;
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     border: none;
     border-bottom: 1px solid var(--border);
     cursor: pointer;
@@ -1478,7 +1478,7 @@
   }
 
   .grp-chevron {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     color: var(--accent);
     transition: transform 0.2s ease;
   }
@@ -1546,23 +1546,23 @@
   }
 
   .conn-row {
-    border-bottom: 1px solid var(--border-light, rgba(255, 255, 255, 0.04));
+    border-bottom: 1px solid var(--border-light);
     cursor: pointer;
     transition: background 0.1s ease;
   }
 
   .conn-row:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-tint-faint);
   }
 
   .conn-row:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
-    background: rgba(41, 194, 240, 0.08);
+    background: rgba(var(--accent-rgb), 0.08);
   }
 
   .conn-row.selected {
-    background: rgba(41, 194, 240, 0.08);
+    background: rgba(var(--accent-rgb), 0.08);
   }
 
   .conn-row td {
@@ -1589,13 +1589,13 @@
   }
 
   .src-name {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
   }
 
   .src-main-ip {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-primary);
   }
 
@@ -1629,7 +1629,7 @@
 
   /* Badges & Route (CONN-03) */
   .badge-rule {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--surface-tint);
     color: var(--fg-secondary);
     font-size: var(--font-size-xs);
     font-weight: 600;
@@ -1646,7 +1646,7 @@
   }
 
   .badge-direct {
-    background: rgba(70, 209, 138, 0.15);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
     color: var(--success);
     font-size: var(--font-size-xs);
     font-weight: 700;
@@ -1729,7 +1729,7 @@
     border-radius: 4px;
     background: transparent;
     color: var(--danger);
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     cursor: pointer;
     transition: background 0.15s ease;
   }
@@ -1782,7 +1782,7 @@
 
   .drawer-title {
     margin: 0;
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     font-weight: 700;
     color: var(--fg-primary);
   }
@@ -1796,7 +1796,7 @@
     background: transparent;
     border: none;
     color: var(--fg-dim);
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     cursor: pointer;
     padding: 4px;
   }
@@ -1834,7 +1834,7 @@
     background: var(--bg-card);
     padding: 12px 14px;
     border-radius: var(--radius-sm);
-    border: 1px solid var(--border-light, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--border-light);
   }
 
   .m-row {
@@ -1842,7 +1842,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .m-key {

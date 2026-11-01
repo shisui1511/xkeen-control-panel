@@ -64,7 +64,7 @@
         <button
           type="button"
           class="btn btn-secondary btn-sm"
-          style="font-size: 12px; padding: 4px 8px; display: flex; align-items: center; gap: 4px;"
+          style="font-size: var(--font-size-xs); padding: 4px 8px; display: flex; align-items: center; gap: 4px;"
           onclick={enableDNSRedirect}
           disabled={dnsRedirectLoading}
         >
@@ -174,7 +174,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     user-select: none;
     font-weight: 500;
@@ -203,7 +203,7 @@
     padding: 8px;
     color: var(--fg-primary);
     font-family: var(--font-mono, monospace);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .form-textarea {
@@ -224,6 +224,6 @@
   .form-hint {
     margin: 4px 0 0;
     font-size: var(--font-size-xs);
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 </style>

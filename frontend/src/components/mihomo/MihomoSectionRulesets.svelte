@@ -15,7 +15,10 @@
 </script>
 
 <div class="sec-body" data-testid="mihomo-section-rulesets">
-  <div class="rulesets-hint" style="font-size:12px; color:var(--fg-dim); margin-bottom:12px;">
+  <div
+    class="rulesets-hint"
+    style="font-size:var(--font-size-xs); color:var(--fg-dim); margin-bottom:12px;"
+  >
     {$t('mihomo.rule_sets_hint')}
   </div>
 
@@ -34,7 +37,7 @@
       >
         <div
           class="ruleset-cat-title"
-          style="font-size:13px; font-weight:600; color:var(--fg-primary); margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;"
+          style="font-size:var(--font-size-sm); font-weight:600; color:var(--fg-primary); margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;"
         >
           <div style="display:flex; align-items:center; gap:6px;">
             <span>{catName}</span>
@@ -84,12 +87,12 @@
                 />
                 <span
                   class="ruleset-item-label"
-                  style="font-size:13px; font-weight:500; color:var(--fg-primary);"
+                  style="font-size:var(--font-size-sm); font-weight:500; color:var(--fg-primary);"
                   >{item.label}</span
                 >
                 <span
                   class="ruleset-type-badge"
-                  style="font-size:var(--font-size-xs); background:var(--bg-surface); padding:2px 4px; border-radius:4px; opacity:0.7;"
+                  style="font-size:var(--font-size-xs); background:var(--bg-card); padding:2px 4px; border-radius:4px; opacity:0.7;"
                   >{item.type}</span
                 >
               </label>
@@ -128,12 +131,12 @@
   }
 
   .badge-primary {
-    background: var(--primary);
-    color: var(--primary-fg);
+    background: var(--accent);
+    color: var(--btn-primary-text);
   }
 
   .badge-secondary {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     color: var(--fg-secondary);
     border: 1px solid var(--border);
   }

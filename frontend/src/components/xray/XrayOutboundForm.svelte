@@ -845,7 +845,7 @@
 
   .form-label {
     display: block;
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
     margin-bottom: 4px;
@@ -859,7 +859,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     outline: none;
     transition:
       border-color var(--transition-fast),
@@ -910,7 +910,7 @@
   }
 
   .tls-ping-title {
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -919,12 +919,12 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
     gap: 8px;
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
   }
 
   .tls-ping-dns {
     margin-top: 8px;
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
   }
 
   .dns-value {
@@ -942,7 +942,7 @@
   .sockopt-summary {
     padding: 10px var(--spacing-3);
     cursor: pointer;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--fg-primary);
     display: flex;
@@ -970,7 +970,7 @@
     align-items: center;
     gap: 6px;
     cursor: pointer;
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     user-select: none;
   }
@@ -985,11 +985,11 @@
     gap: 6px;
     flex-wrap: wrap;
     margin-top: 8px;
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
   }
 
   .dialer-chain-sep {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
 
   .form-actions {
@@ -1008,7 +1008,7 @@
     z-index: 5;
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 768px) {
     .form-row2,
     .form-row3 {
       flex-direction: column;

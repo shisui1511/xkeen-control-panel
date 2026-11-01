@@ -360,7 +360,7 @@
   {#if ctx.mihomoProviders && ctx.mihomoProviders.length > 0}
     <div
       class="sec-subtitle"
-      style="margin-top: 16px; margin-bottom: 8px; border-top: 1px solid var(--border); padding-top: 12px; font-weight: 600; font-size: 13px; color: var(--fg-secondary);"
+      style="margin-top: 16px; margin-bottom: 8px; border-top: 1px solid var(--border); padding-top: 12px; font-weight: 600; font-size: var(--font-size-sm); color: var(--fg-secondary);"
     >
       {$t('mihomo.proxy_providers_hint')}
     </div>
@@ -426,7 +426,7 @@
         class="error-msg"
         id="mihomo-import-error"
         role="alert"
-        style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
+        style="color: var(--danger); margin-bottom: 12px; font-size: var(--font-size-sm);"
       >
         {importErrorMsg}
       </div>
@@ -478,7 +478,7 @@
             bind:value={importLink}
             placeholder={$t('subscr.import_link_placeholder')}
             rows="4"
-            style="resize: none; font-family: var(--font-mono); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; color: var(--fg-primary);"
+            style="resize: none; font-family: var(--font-mono); font-size: var(--font-size-xs); width: 100%; box-sizing: border-box; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; color: var(--fg-primary);"
           ></textarea>
         </div>
       {:else if importSource === 'file'}
@@ -501,10 +501,10 @@
             if (f) handleConfigFile(f);
           }}
         >
-          <div style="font-size: 24px;">📄</div>
-          <div style="font-size: 13px; color: var(--fg-secondary);">
+          <div style="font-size: var(--font-size-3xl);">📄</div>
+          <div style="font-size: var(--font-size-sm); color: var(--fg-secondary);">
             {#if loadedFileName}
-              <span style="color: var(--primary); font-weight: 600;">{loadedFileName}</span>
+              <span style="color: var(--accent); font-weight: 600;">{loadedFileName}</span>
               <span> ({$t('subscr.import_file_loaded')})</span>
             {:else}
               {$t('subscr.import_drop_or_select')}
@@ -524,7 +524,9 @@
         <div
           style="padding: 24px; text-align: center; background: var(--bg-elevated); border: 1px dashed var(--border); border-radius: var(--radius);"
         >
-          <p style="font-size: 13px; color: var(--fg-secondary); margin-bottom: 12px;">
+          <p
+            style="font-size: var(--font-size-sm); color: var(--fg-secondary); margin-bottom: 12px;"
+          >
             {$t('subscr.import_clipboard_desc')}
           </p>
           <button
@@ -569,7 +571,9 @@
                   style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; display: flex; align-items: center;"
                   aria-label={$t('app.remove')}><Icon name="close" size={12} /></button
                 >
-                <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
+                <div
+                  style="font-size: var(--font-size-xs); color: var(--danger); padding-right: 20px;"
+                >
                   <strong>{$t('app.error')}:</strong>
                   {item.rowError}
                 </div>
@@ -592,7 +596,7 @@
                   aria-label={$t('app.remove')}><Icon name="close" size={12} /></button
                 >
                 <div
-                  style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
+                  style="display: flex; justify-content: space-between; font-size: var(--font-size-xs); color: var(--fg-secondary); padding-right: 20px;"
                 >
                   <span
                     ><strong style="color: var(--fg-primary);">{item.outbound?.protocol}</strong> · {getNodeServer(
@@ -603,7 +607,7 @@
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <label
                     class="form-label"
-                    style="margin: 0; font-size: 12px; flex-shrink: 0;"
+                    style="margin: 0; font-size: var(--font-size-xs); flex-shrink: 0;"
                     for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label
                   >
                   <input
@@ -611,7 +615,7 @@
                     type="text"
                     class="input"
                     bind:value={item.tag}
-                    style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; color: var(--fg-primary); width: auto;"
+                    style="flex-grow: 1; font-size: var(--font-size-xs); box-sizing: border-box; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; color: var(--fg-primary); width: auto;"
                   />
                 </div>
                 {#if item.outbound?.protocol === 'wireguard' || item.outbound?.settings?.amneziaWgOption || item.outbound?.amneziaWgOption}
@@ -668,7 +672,7 @@
   }
 
   .add-btn {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     padding: 6px 12px;
     border-radius: var(--radius-sm);
     cursor: pointer;
@@ -679,8 +683,8 @@
   }
 
   .btn-action-primary {
-    background: var(--primary);
-    color: var(--primary-fg);
+    background: var(--accent);
+    color: var(--btn-primary-text);
   }
 
   .btn-action-primary:hover {
@@ -737,8 +741,8 @@
   }
 
   .type-vless {
-    background: color-mix(in srgb, var(--primary) 15%, transparent);
-    color: var(--primary);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: var(--accent);
   }
   .type-hysteria2 {
     background: color-mix(in srgb, var(--success) 15%, transparent);
@@ -768,7 +772,7 @@
   .item-name {
     flex: 1;
     min-width: 50px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--fg-primary);
     overflow: hidden;
@@ -800,7 +804,7 @@
     border: none;
     color: var(--fg-faint);
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     padding: 4px 6px;
     border-radius: var(--radius-sm);
     transition: all var(--transition-fast);
@@ -891,8 +895,8 @@
   }
 
   .conf-dropzone.dragging {
-    border-color: var(--primary);
-    background: color-mix(in srgb, var(--primary) 8%, transparent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
 
   .file-picker-input::file-selector-button {
@@ -901,7 +905,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 12px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     margin-right: 8px;
   }

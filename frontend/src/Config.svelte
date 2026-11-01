@@ -106,9 +106,11 @@
     {:else if subTab === 'cores'}
       <SectionsTab />
     {:else if subTab === 'files'}
-      <ManagedFiles />
-      <KernelVersions />
-      <DevDiagnostics />
+      <div class="page-sections config-files-tab">
+        <ManagedFiles />
+        <KernelVersions />
+        <DevDiagnostics />
+      </div>
     {/if}
   </div>
 </div>

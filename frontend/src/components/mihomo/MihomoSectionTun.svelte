@@ -77,7 +77,7 @@
     >
       <label
         class="checkbox-container"
-        style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;"
+        style="display: flex; align-items: center; gap: 8px; font-size: var(--font-size-sm); cursor: pointer; user-select: none;"
       >
         <input
           type="checkbox"
@@ -89,7 +89,7 @@
       </label>
       <label
         class="checkbox-container"
-        style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;"
+        style="display: flex; align-items: center; gap: 8px; font-size: var(--font-size-sm); cursor: pointer; user-select: none;"
       >
         <input
           type="checkbox"
@@ -101,7 +101,7 @@
       </label>
       <label
         class="checkbox-container"
-        style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;"
+        style="display: flex; align-items: center; gap: 8px; font-size: var(--font-size-sm); cursor: pointer; user-select: none;"
       >
         <input
           type="checkbox"
@@ -146,7 +146,7 @@
     {#if ctx.externalControllerTarget.startsWith('0.0.0.0:') || ctx.externalControllerTarget.startsWith(':') || ctx.externalControllerTarget === '0.0.0.0'}
       <div
         class="inline-warning"
-        style="margin-top: 6px; font-size: 12px; color: var(--warning); display: flex; align-items: center; gap: 6px;"
+        style="margin-top: 6px; font-size: var(--font-size-xs); color: var(--warning); display: flex; align-items: center; gap: 6px;"
       >
         <svg
           width="14"
@@ -181,7 +181,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     user-select: none;
     font-weight: 500;
@@ -208,6 +208,6 @@
     border-radius: var(--radius-sm);
     padding: 8px;
     color: var(--fg-primary);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 </style>

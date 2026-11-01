@@ -53,7 +53,7 @@ jobs:
           cache: false
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.38.2
+        uses: github/codeql-action/init@v4.39.1
         with:
           languages: ${{ matrix.language }}
           config-file: .github/codeql/codeql-config.yml
@@ -80,6 +80,6 @@ jobs:
           npm ci
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4.38.2
+        uses: github/codeql-action/analyze@v4.39.1
         with:
           category: "/language:${{ matrix.language }}"

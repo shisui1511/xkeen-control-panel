@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check:contrast": "node scripts/check-contrast.cjs && node scripts/check-hardcoded-colors.cjs",
+    "check:contrast": "node scripts/check-contrast.cjs && node scripts/check-hardcoded-colors.cjs && node scripts/check-css-tokens.cjs && node scripts/check-font-sizes.cjs && node scripts/check-breakpoints.cjs",
     "check:bundle-size": "node scripts/check-bundle-size.cjs",
     "check:i18n": "node scripts/check-i18n.cjs",
     "lint": "svelte-check --tsconfig ./tsconfig.json && eslint .",

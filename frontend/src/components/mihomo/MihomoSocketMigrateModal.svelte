@@ -255,7 +255,7 @@
 
   .info-desc {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     line-height: 1.5;
     color: var(--fg-secondary);
   }
@@ -267,7 +267,7 @@
     gap: 10px;
     padding: 30px 0;
     color: var(--fg-dim);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .diff-container {
@@ -276,12 +276,12 @@
     border-radius: var(--radius-md);
     overflow: hidden;
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .diff-header {
     padding: 6px 12px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-tint-faint);
     border-bottom: 1px solid var(--border);
     color: var(--fg-dim);
     font-size: var(--font-size-xs);
@@ -321,7 +321,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: 12px 14px;
@@ -339,7 +339,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 
@@ -352,7 +352,7 @@
     border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
     border-radius: var(--radius-md);
     color: var(--danger);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .success-banner {
@@ -364,14 +364,14 @@
     border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
     border-radius: var(--radius-md);
     color: var(--success);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .step-progress {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     padding: 4px 0;
   }

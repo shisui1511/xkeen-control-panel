@@ -475,7 +475,7 @@
     display: flex !important;
     flex-direction: column !important;
     height: 100% !important;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     background: var(--cm-bg) !important;
     color: var(--fg-primary) !important;
   }
@@ -545,7 +545,7 @@
     border-top-color: var(--bg-surface-elevated) !important;
   }
   :global(.cm-tooltip.cm-tooltip-below > .cm-tooltip-arrow:after) {
-    border-bottom-color: var(--bg-surface) !important;
+    border-bottom-color: var(--bg-card) !important;
   }
   :global(.cm-tooltip.cm-tooltip-above > .cm-tooltip-arrow:before) {
     border-top-color: var(--border-strong) !important;
@@ -566,7 +566,7 @@
   /* 1. Header */
   :global(.cm-schema-tooltip-header) {
     padding: var(--spacing-3) var(--spacing-4);
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -603,7 +603,7 @@
   }
   :global(.cm-schema-badge-type) {
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 1px 7px;
     border-radius: var(--radius-full, 9999px);
@@ -612,7 +612,7 @@
     border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   }
   :global(.cm-schema-badge-required) {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     padding: 1px 6px;
     border-radius: var(--radius-full, 9999px);
@@ -624,7 +624,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     padding: 1px 7px;
     border-radius: var(--radius-full, 9999px);
     background: var(--bg-surface-elevated);
@@ -667,7 +667,7 @@
     font-weight: 600;
   }
   :global(.cm-schema-tooltip-description code) {
-    background: var(--bg-surface);
+    background: var(--bg-card);
     color: var(--accent);
     border: 1px solid var(--border);
     font-family: var(--font-family-mono);
@@ -688,7 +688,7 @@
   :global(.cm-schema-tooltip-description li) {
     position: relative;
     padding: var(--spacing-2) var(--spacing-3);
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-size: var(--font-size-xs, 12px);
@@ -707,7 +707,7 @@
   :global(.cm-schema-tooltip-description li strong) {
     color: var(--accent);
     font-family: var(--font-family-mono);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     background: color-mix(in srgb, var(--accent) 10%, transparent);
     padding: 1px 5px;
     border-radius: var(--radius-xs);
@@ -719,7 +719,7 @@
   :global(.cm-schema-tooltip-description blockquote) {
     margin: var(--spacing-3) 0 var(--spacing-1) 0;
     padding: var(--spacing-3) var(--spacing-3);
-    background: color-mix(in srgb, var(--warning) 12%, var(--bg-surface));
+    background: color-mix(in srgb, var(--warning) 12%, var(--bg-card));
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     border-left: 3px solid var(--warning);
     border-radius: var(--radius-sm);
@@ -734,7 +734,7 @@
   /* 3. Enum Pills Section */
   :global(.cm-schema-tooltip-enums) {
     padding: var(--spacing-3) var(--spacing-4);
-    background: color-mix(in srgb, var(--bg-surface) 60%, transparent);
+    background: color-mix(in srgb, var(--bg-card) 60%, transparent);
     border-top: 1px solid var(--border);
     display: flex;
     flex-direction: column;
@@ -745,7 +745,7 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-2);
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -765,10 +765,10 @@
     align-items: center;
     gap: 4px;
     font-family: var(--font-family-mono);
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     padding: 2px 8px;
     border-radius: var(--radius-sm);
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     color: var(--fg-primary);
     transition: all var(--transition-fast, 150ms ease);
@@ -779,10 +779,10 @@
   }
   :global(.cm-schema-enum-pill.is-default) {
     border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-    background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
   }
   :global(.cm-schema-enum-default-tag) {
-    font-size: 9px;
+    font-size: var(--font-size-2xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -795,7 +795,7 @@
   /* 4. Footer Constraints */
   :global(.cm-schema-tooltip-footer) {
     padding: var(--spacing-2) var(--spacing-4);
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
@@ -831,7 +831,7 @@
   :global(.cm6-json-schema-hover--code-wrapper) {
     border-top: 1px solid var(--border);
     padding: var(--spacing-2) var(--spacing-4);
-    background: var(--bg-surface);
+    background: var(--bg-card);
     border-radius: 0 0 var(--radius-md) var(--radius-md);
   }
   :global(.cm6-json-schema-hover--code) {
@@ -847,7 +847,7 @@
 
   @media (max-width: 768px) {
     :global(.cm-editor) {
-      font-size: 16px;
+      font-size: var(--font-size-lg);
     }
     :global(.cm-gutters) {
       display: none !important;
@@ -863,7 +863,7 @@
     :global(.cm-panel.cm-search input[name='replace']) {
       width: 100% !important;
       max-width: 100% !important;
-      font-size: 14px;
+      font-size: var(--font-size-base);
       height: 32px;
     }
     :global(.cm-panel.cm-search button[name='close']) {

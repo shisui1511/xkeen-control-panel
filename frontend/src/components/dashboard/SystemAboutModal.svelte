@@ -154,8 +154,8 @@
   }
 
   .diag-section {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    background: var(--surface-tint-faint);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md, 10px);
     padding: 16px;
     display: flex;
@@ -170,14 +170,14 @@
   }
 
   .section-title {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
     margin: 0;
   }
 
   .section-desc {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     margin: -6px 0 4px;
     line-height: 1.4;
@@ -189,7 +189,7 @@
     gap: 10px;
   }
 
-  @media (max-width: 540px) {
+  @media (max-width: 480px) {
     .diag-grid {
       grid-template-columns: 1fr;
     }
@@ -197,7 +197,7 @@
 
   .diag-item {
     background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-sm, 6px);
     padding: 8px 12px;
     display: flex;
@@ -210,13 +210,13 @@
   }
 
   .diag-label {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     font-weight: 500;
   }
 
   .diag-val {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
     word-break: break-all;
@@ -230,14 +230,14 @@
     display: inline-block;
     padding: 1px 6px;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-tint-strong);
     color: var(--fg-secondary);
   }
 
   .status-pill-ok {
-    background: rgba(70, 209, 138, 0.15);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
     color: var(--success);
   }
 

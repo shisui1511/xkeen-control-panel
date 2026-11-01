@@ -178,7 +178,7 @@
     border-bottom: 2px solid transparent;
     padding: 12px;
     color: var(--fg-dim);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     cursor: pointer;
     transition: all var(--transition-fast);
@@ -186,13 +186,13 @@
 
   .diag-tab-btn:hover {
     color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--surface-tint-faint);
   }
 
   .diag-tab-btn.active {
     color: var(--accent);
     border-bottom-color: var(--accent);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--surface-tint);
   }
 
   .diag-body {
@@ -235,7 +235,7 @@
   }
 
   .diag-sum-card .val {
-    font-size: 20px;
+    font-size: var(--font-size-2xl);
     font-weight: 700;
     margin-top: 4px;
     font-family: var(--font-family-mono);
@@ -250,7 +250,7 @@
   .diag-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .diag-table th,
@@ -304,13 +304,13 @@
 
   .hdr-key {
     font-weight: 700;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     font-family: var(--font-family-mono);
   }
 
   .hdr-val {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     margin-top: 4px;
     word-break: break-all;
@@ -326,7 +326,7 @@
     overflow: auto;
     max-height: 45vh;
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-all;

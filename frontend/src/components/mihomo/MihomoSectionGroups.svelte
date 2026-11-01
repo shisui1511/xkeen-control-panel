@@ -284,7 +284,7 @@
   }
 
   .zkeen-group-name {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -353,7 +353,7 @@
   .item-name {
     flex: 1;
     min-width: 50px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--fg-primary);
     overflow: hidden;
@@ -390,7 +390,7 @@
   }
 
   .item-edit:hover {
-    color: var(--primary);
+    color: var(--accent);
   }
 
   .item-del:hover {
@@ -398,7 +398,7 @@
   }
 
   .add-btn {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     padding: 6px 12px;
     border-radius: var(--radius-sm);
     cursor: pointer;

@@ -106,7 +106,7 @@
     background: var(--bg-input);
     color: var(--fg-primary);
     border-radius: var(--radius-sm);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     width: 200px;
     transition: border-color 0.2s;
   }
