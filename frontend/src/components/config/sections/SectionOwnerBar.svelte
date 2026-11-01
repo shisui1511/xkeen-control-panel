@@ -13,7 +13,13 @@
   } from '../../../lib/configLayer';
   import { configSubTabHash } from '../../../lib/configSubTab';
   import type { CoreKernel, CoreSectionSnap, SectionView } from '../../../lib/configCores';
-  import { confirmPresetSection, confirmReleaseSection, coresBusy, reclaim } from './coresOwner';
+  import {
+    cancelRelease,
+    confirmPresetSection,
+    confirmReleaseSection,
+    coresBusy,
+    reclaim
+  } from './coresOwner';
 
   // Строка владельца секции (D-01…D-05, D-15, D-25): кто ведёт секцию и какие действия
   // доступны. Решения принимает сервер — строка отражает вид секции и снимок слоя. Все
@@ -58,10 +64,10 @@
   const driftFileText = $derived(panelFile?.path ?? section.panel_file ?? snap?.file ?? filesText);
 
   // Какое действие идёт: его кнопка показывает загрузку, остальные неактивны
-  let action = $state<'' | 'release' | 'preset' | 'reclaim' | 'rebuild' | 'accept'>('');
+  let action = $state<'' | 'release' | 'preset' | 'reclaim' | 'rebuild' | 'accept' | 'manage'>('');
 
   async function run(
-    kind: 'release' | 'preset' | 'reclaim',
+    kind: 'release' | 'preset' | 'reclaim' | 'manage',
     fn: () => Promise<boolean>
   ): Promise<void> {
     action = kind;
@@ -200,6 +206,25 @@
     <p class="so-line" data-testid="section-pending-{kernel}-{id}">
       <span class="so-text">{$t('cfg.sec.owner_pending_note')}</span>
     </p>
+  {:else if section.owner === 'releasing'}
+    <!-- Отпускание ждёт «Применить»: значения прежние, правка закрыта, «Управлять» отменяет -->
+    <p class="so-line" data-testid="section-releasing-{kernel}-{id}">
+      <span class="so-text">{$t('cfg.sec.owner_releasing_note')}</span>
+    </p>
+    {#if isXray}
+      <div class="so-actions">
+        <Button
+          variant="primary"
+          disabled={blocked}
+          loading={action === 'manage'}
+          title={busyHint}
+          data-testid="section-manage-{kernel}-{id}"
+          onclick={() => void run('manage', () => cancelRelease(kernel, id))}
+        >
+          {$t('cfg.sec.take_btn')}
+        </Button>
+      </div>
+    {/if}
   {:else}
     {#if section.owner === 'none'}
       <p class="so-line"><span class="so-text">{$t('cfg.sec.no_file_note')}</span></p>

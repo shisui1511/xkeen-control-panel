@@ -21,8 +21,11 @@ import coresErrorCodes from './coresErrorCodes.json';
 export type CoreKernel = 'xray' | 'mihomo';
 export type XraySectionId = 'log' | 'dns' | 'inbounds' | 'policy' | 'other';
 export type MihomoSectionId = 'main' | 'dns' | 'inbounds' | 'sniffer' | 'other';
-/** Кто ведёт секцию: панель, ждёт «Применить», XKeen, пользователь, файла нет, дрейф. */
-export type SectionOwner = 'panel' | 'pending' | 'xkeen' | 'user' | 'none' | 'drift';
+/**
+ * Кто ведёт секцию: панель, ждёт «Применить» (взятие), отпускание ждёт «Применить» (секция ещё у
+ * панели), XKeen, пользователь, файла нет, дрейф.
+ */
+export type SectionOwner = 'panel' | 'pending' | 'releasing' | 'xkeen' | 'user' | 'none' | 'drift';
 
 /** Значение, которое панель дописывает в секцию сама и которое менять нельзя. */
 export interface PinnedValue {

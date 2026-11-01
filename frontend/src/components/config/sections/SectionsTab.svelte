@@ -140,7 +140,7 @@
   const takeAllIds = $derived(
     takeView
       ? ordered(takeView)
-          .filter((s) => s.owner !== 'panel' && s.owner !== 'pending')
+          .filter((s) => s.owner !== 'panel' && s.owner !== 'pending' && s.owner !== 'releasing')
           .map((s) => s.id)
       : []
   );

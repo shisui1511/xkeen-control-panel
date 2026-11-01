@@ -45,7 +45,7 @@ const (
 var rtCoresXraySections = []string{"log", "dns", "inbounds", "policy", "other"}
 
 // rtCoresOwners — допустимые владельцы секции в виде.
-var rtCoresOwners = []string{"panel", "pending", "xkeen", "user", "none", "drift"}
+var rtCoresOwners = []string{"panel", "pending", "releasing", "xkeen", "user", "none", "drift"}
 
 // rtCoresAPIKey находит в тексте файла ключ api верхнего уровня; файлы с
 // комментариями не разбираются как JSON, для них — поиск по тексту.
@@ -365,6 +365,29 @@ func TestRouterCoresAPIFlow(t *testing.T) {
 		// Критерий 2: файл панели правится только через панель.
 		save := c.call(http.MethodPost, "/api/config/save?path="+url.QueryEscape(filepath.Join(rtRtXrayDir, rtCoresDNSPanelFile)), map[string]any{})
 		c.rtRtExpect("Редактор: запись файла панели", save, http.StatusConflict, "file_managed")
+
+		// Отпускание ждёт «Применить»: секция ещё у панели, но правки закрыты, значение —
+		// прежнее; «Управлять» (take) отменяет отпускание без изменения файлов.
+		appliedDNS := rtCoresFileSum(rtCoresDNSPanelFile)
+		rel := c.rtCoresPost("/release", map[string]any{"kernel": "xray", "section": "dns"})
+		if rel.Status != http.StatusOK {
+			t.Fatalf("release dns: %d %s", rel.Status, rel.Code)
+		}
+		if owner := rtCoresSection(c.rtCoresView("xray"), "dns")["owner"]; owner != "releasing" {
+			t.Errorf("dns после release до «Применить»: владелец %v, ожидался releasing", owner)
+		}
+		sv := c.rtCoresPost("/save", map[string]any{"kernel": "xray", "section": "dns", "form": map[string]any{}, "advanced": ""})
+		c.rtRtExpect("save секции dns в состоянии releasing", sv, http.StatusConflict, "section_not_managed")
+		back := c.rtCoresPost("/take", map[string]any{"kernel": "xray", "sections": []string{"dns"}})
+		if back.Status != http.StatusOK {
+			t.Fatalf("take dns при отпускании: %d %s", back.Status, back.Code)
+		}
+		if owner := rtCoresSection(c.rtCoresView("xray"), "dns")["owner"]; owner != "panel" {
+			t.Errorf("dns после отмены отпускания: владелец %v, ожидался panel", owner)
+		}
+		if got := rtCoresFileSum(rtCoresDNSPanelFile); got != appliedDNS {
+			t.Error("отмена отпускания изменила файл панели dns")
+		}
 
 		// Возврат: исходные файлы побайтно, файла панели нет.
 		c.rtCoresRelease("dns")

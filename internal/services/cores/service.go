@@ -199,6 +199,9 @@ const (
 	ownerPanel   = "panel"
 	ownerPending = "pending"
 	ownerDrift   = "drift"
+	// ownerReleasing — отпускание ждёт «Применить»: секция ещё у панели, в черновике
+	// её уже нет.
+	ownerReleasing = "releasing"
 )
 
 // strs возвращает срез без nil (JSON-массив, а не null).
@@ -450,7 +453,7 @@ func (s *Service) viewXray(v *KernelView, st configlayer.StateView) error {
 		case cs.Managed:
 			sv.Owner = ownerPending
 		case taken:
-			sv.Owner = ownerPanel
+			sv.Owner = ownerReleasing
 		case sc.Owner == "":
 			sv.Owner = configlayer.OwnerNone
 		default:
@@ -531,7 +534,11 @@ func (s *Service) viewMihomo(v *KernelView, st configlayer.StateView) error {
 	prof := &ProfileView{Name: name}
 	switch {
 	case taken:
+		// Отпускание маршрутизации ещё не применено: профиль пока у панели.
 		prof.Owner = ownerPanel
+		if !routingManaged {
+			prof.Owner = ownerReleasing
+		}
 		if perr != nil {
 			prof.Name = panelMihomoProfile
 		}
@@ -546,9 +553,11 @@ func (s *Service) viewMihomo(v *KernelView, st configlayer.StateView) error {
 	}
 	v.Profile = prof
 	panelish := prof.Owner == ownerPanel || prof.Owner == ownerPending
+	releasing := prof.Owner == ownerReleasing
+	applied := configlayer.DesiredCores(st.Applied)
 
 	var seeds map[string]json.RawMessage
-	if !panelish && perr == nil {
+	if !panelish && !releasing && perr == nil {
 		// Значения чужого профиля — только для чтения; профиль не разбирается —
 		// секции пустые.
 		seeds, _ = SeedMihomo(data, configlayer.MihomoPorts{})
@@ -566,14 +575,25 @@ func (s *Service) viewMihomo(v *KernelView, st configlayer.StateView) error {
 		if (name != "" && perr == nil) || taken {
 			sv.Files = []string{prof.Name}
 		}
-		if panelish {
+		switch {
+		case releasing:
+			// Отпускание не применено: на диске действует профиль панели с прежними
+			// значениями секций, их и показываем, только для чтения.
+			ac := applied[spec.Section]
+			sv.Value = ac.Value
+			if !ac.Managed || isEmptyValue(sv.Value) {
+				sv.Value = MihomoPreset(spec.ID, configlayer.MihomoPorts{})
+			}
+			sv.PanelFile = panelMihomoProfile
+			sv.Pinned = append(sv.Pinned, MihomoPinned(spec.ID)...)
+		case panelish:
 			sv.Value = cs.Value
 			if !cs.Managed || isEmptyValue(sv.Value) {
 				sv.Value = MihomoPreset(spec.ID, configlayer.MihomoPorts{})
 			}
 			sv.PanelFile = panelMihomoProfile
 			sv.Pinned = append(sv.Pinned, MihomoPinned(spec.ID)...)
-		} else {
+		default:
 			sv.Value = seeds[spec.ID]
 			if isEmptyValue(sv.Value) {
 				sv.Value = json.RawMessage("{}")

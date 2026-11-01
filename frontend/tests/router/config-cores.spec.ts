@@ -394,6 +394,21 @@ test('cores: взять секцию DNS Xray с комментариями — 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: T.action });
     await dialog.getByRole('button', { name: /^(Отпустить секцию|Release section)$/ }).click();
+
+    // отпускание ждёт «Применить»: секция показана только для чтения со значениями панели,
+    // правки закрыты, а «Управлять» отменяет отпускание
+    await expect(owner).toHaveAttribute('data-owner', 'releasing', { timeout: T.action });
+    await expect(page.getByTestId('section-releasing-xray-dns')).toBeVisible();
+    await expect(page.getByTestId('section-advanced-xray-dns')).toHaveAttribute('readonly', /.*/);
+    await expect(page.getByTestId('section-preset-xray-dns')).toHaveCount(0);
+    await page.getByTestId('section-manage-xray-dns').click();
+    await expect(owner).toHaveAttribute('data-owner', 'panel', { timeout: T.action });
+    expect((await layerProbe(page)).dnsTaken, 'отмена отпускания файлов не трогает').toBe(true);
+
+    await page.getByTestId('section-release-xray-dns').click();
+    await expect(dialog).toBeVisible({ timeout: T.action });
+    await dialog.getByRole('button', { name: /^(Отпустить секцию|Release section)$/ }).click();
+    await expect(owner).toHaveAttribute('data-owner', 'releasing', { timeout: T.action });
     await expect(page.getByTestId('config-apply')).toBeEnabled({ timeout: T.action });
     await page.getByTestId('config-apply').click();
     await expect(owner).toHaveAttribute('data-owner', /^(xkeen|user)$/, { timeout: T.save * 3 });

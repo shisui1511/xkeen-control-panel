@@ -100,6 +100,8 @@
         return $t('cfg.sec.owner_panel');
       case 'pending':
         return $t('cfg.sec.owner_pending');
+      case 'releasing':
+        return $t('cfg.sec.owner_releasing');
       case 'xkeen':
         return $t('cfg.sec.owner_xkeen');
       case 'user':
@@ -113,7 +115,7 @@
   const ownerClass = $derived(
     ownerKind === 'panel'
       ? 'badge-primary'
-      : ownerKind === 'pending'
+      : ownerKind === 'pending' || ownerKind === 'releasing'
         ? 'badge-warning'
         : ownerKind === 'user'
           ? 'badge-type'
@@ -126,7 +128,10 @@
   const source = $derived.by(() => {
     if (kernel === 'mihomo') return profileName;
     const files =
-      section.owner === 'panel' || section.owner === 'pending' || section.owner === 'drift'
+      section.owner === 'panel' ||
+      section.owner === 'pending' ||
+      section.owner === 'releasing' ||
+      section.owner === 'drift'
         ? section.panel_file
           ? [section.panel_file]
           : section.files

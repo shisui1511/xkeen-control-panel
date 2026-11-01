@@ -12,6 +12,7 @@ import {
   presetSection,
   reclaimSection,
   releaseSection,
+  takeSections,
   type CoreKernel
 } from '../../../lib/configCores';
 
@@ -88,6 +89,14 @@ export async function confirmPresetSection(
   });
   if (!ok) return false;
   return guarded(() => presetSection(kernel, id));
+}
+
+/**
+ * «Управлять» у секции, отпускание которой ещё не применено: желание «вернуть» снимается,
+ * секция остаётся у панели с прежним значением (сервер возвращает его из применённого).
+ */
+export function cancelRelease(kernel: CoreKernel, id: string): Promise<boolean> {
+  return guarded(() => takeSections(kernel, [id], false));
 }
 
 /** Решает дрейф секции в пользу панели: файл панели возвращается на диск сразу. */

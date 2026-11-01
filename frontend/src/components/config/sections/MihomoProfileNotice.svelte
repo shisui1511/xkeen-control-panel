@@ -76,6 +76,21 @@
     <span class="badge badge-warning" data-testid="mihomo-profile-pending">
       {$t('cfg.sec.owner_pending')}
     </span>
+  {:else if owner === 'releasing'}
+    <div class="mpn-row" data-testid="mihomo-profile-releasing">
+      <span class="badge badge-warning">{$t('cfg.sec.owner_releasing')}</span>
+      <span class="mpn-row-text">{$t('cfg.sec.profile_releasing')}</span>
+      <Button
+        variant="secondary"
+        class="mpn-btn"
+        disabled={blocked}
+        title={busyHint}
+        data-testid="mihomo-profile-take"
+        onclick={() => (takeOpen = true)}
+      >
+        {$t('cfg.sec.take_btn')}
+      </Button>
+    </div>
   {:else}
     <div class="mpn-row">
       <span class="mpn-row-text">{$t('cfg.sec.no_file_note')}</span>
