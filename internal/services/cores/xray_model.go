@@ -73,9 +73,6 @@ var xrayStatsCounters = []string{
 	"statsOutboundDownlink",
 }
 
-// forceProxyPrefix — префикс тегов входящих force-proxy (D-12).
-const forceProxyPrefix = "force-proxy"
-
 // xrayReservedOther — ключи верхнего уровня, которые в «Прочие ключи» не входят:
 // их ведут другие части панели, а ключ transport запрещён в корне каталога.
 // Ключи собственных секций (log, dns, inbounds, policy) определяет
@@ -122,7 +119,7 @@ func XrayKeepTags(value json.RawMessage) []string {
 		if tag == "" || slices.Contains(out, tag) {
 			continue
 		}
-		if _, transparent := configlayer.IsTransparentInbound(it); transparent || strings.HasPrefix(tag, forceProxyPrefix) {
+		if _, transparent := configlayer.IsTransparentInbound(it); transparent || configlayer.IsForceProxyTag(tag) {
 			out = append(out, tag)
 		}
 	}

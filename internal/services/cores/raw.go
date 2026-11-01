@@ -24,7 +24,7 @@ type RawResult struct {
 // redirect и tproxy и force-proxy*. Без прежнего значения других защищённых
 // входящих разбор не знает.
 func xkeenInboundTag(tag string) bool {
-	return tag == "redirect" || tag == "tproxy" || strings.HasPrefix(tag, forceProxyPrefix)
+	return tag == "redirect" || tag == "tproxy" || configlayer.IsForceProxyTag(tag)
 }
 
 // ParseRaw проверяет текст «Дополнительно» секции id ядра kernel, ничего не

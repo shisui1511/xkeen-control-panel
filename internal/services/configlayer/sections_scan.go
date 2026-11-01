@@ -50,6 +50,12 @@ var forceProxyTags = map[string]bool{
 	"force-proxy-tproxy":   true,
 }
 
+// IsForceProxyTag сообщает, что тег (имя listener Mihomo) — один из точных
+// тегов входящих force-proxy XKeen (D-12). Единственное место, где решается,
+// какой тег считается force-proxy: префикс не годится, вход пользователя вроде
+// force-proxy-test не читает XKeen.
+func IsForceProxyTag(tag string) bool { return forceProxyTags[tag] }
+
 // XrayKeyFile — результат скана одного файла configs/*.json по ключам верхнего
 // уровня.
 type XrayKeyFile struct {
@@ -429,7 +435,7 @@ func collectForceProxyTags(files []XrayKeyFile) []string {
 	seen := map[string]bool{}
 	for _, f := range files {
 		for _, tag := range inboundTags(f) {
-			if forceProxyTags[tag] && !seen[tag] {
+			if IsForceProxyTag(tag) && !seen[tag] {
 				seen[tag] = true
 				tags = append(tags, tag)
 			}

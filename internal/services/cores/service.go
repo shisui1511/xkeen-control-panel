@@ -7,7 +7,6 @@ import (
 	"errors"
 	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
@@ -349,7 +348,7 @@ func (s *Service) xkeenTooOld() bool {
 func forceProxyNames(names []string) []string {
 	var out []string
 	for _, n := range names {
-		if strings.HasPrefix(n, forceProxyPrefix) && !slices.Contains(out, n) {
+		if configlayer.IsForceProxyTag(n) && !slices.Contains(out, n) {
 			out = append(out, n)
 		}
 	}

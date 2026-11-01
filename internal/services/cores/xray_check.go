@@ -171,7 +171,7 @@ func keepIssues(items []xrayInbound, keep []string) []configlayer.KeyIssue {
 			out = append(out, configlayer.KeyIssue{Key: tag, Code: configlayer.IssueRawPinned})
 			continue
 		}
-		if strings.HasPrefix(tag, forceProxyPrefix) {
+		if configlayer.IsForceProxyTag(tag) {
 			continue
 		}
 		mode, transparent := configlayer.IsTransparentInbound(in.raw)

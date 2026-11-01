@@ -58,10 +58,6 @@ const (
 	genErrRawInvalid   = "xray_raw_invalid"
 )
 
-// forceProxyPrefix — префикс тегов и имён входящих force-proxy*, которые читает
-// XKeen (D-12, 143 Q7).
-const forceProxyPrefix = "force-proxy"
-
 // maxGenMemo — предел мемоизации результатов генераторов маршрутизации.
 const maxGenMemo = 32
 
@@ -741,12 +737,12 @@ func forceGroupID(g *Group) string {
 
 // xrayForceProxyTags возвращает теги входящих force-proxy* Xray: из чужих файлов
 // configs/ (факты слоя) и из взятой секции «Входящие»; без повторов, по алфавиту.
-// Только теги с префиксом force-proxy: чужие файлы не подменяют другие правила
+// Только точные теги force-proxy (configlayer.IsForceProxyTag): чужие файлы не подменяют другие правила
 // (T-147-41).
 func xrayForceProxyTags(in configlayer.Input) []string {
 	var out []string
 	add := func(tag string) {
-		if strings.HasPrefix(tag, forceProxyPrefix) && !slices.Contains(out, tag) {
+		if configlayer.IsForceProxyTag(tag) && !slices.Contains(out, tag) {
 			out = append(out, tag)
 		}
 	}
@@ -767,7 +763,7 @@ func xrayForceProxyTags(in configlayer.Input) []string {
 func mihomoForceProxyNames(s configlayer.Sections) []string {
 	var out []string
 	for _, name := range cores.MihomoListenerNames(s) {
-		if strings.HasPrefix(name, forceProxyPrefix) && !slices.Contains(out, name) {
+		if configlayer.IsForceProxyTag(name) && !slices.Contains(out, name) {
 			out = append(out, name)
 		}
 	}
