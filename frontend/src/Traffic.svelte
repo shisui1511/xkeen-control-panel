@@ -1343,7 +1343,7 @@
 
   .badge-live-indicator.is-offline {
     background: color-mix(in srgb, var(--fg-dim) 12%, transparent);
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     border-color: color-mix(in srgb, var(--fg-dim) 20%, transparent);
   }
 
