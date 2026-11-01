@@ -132,7 +132,11 @@
       let portErr = '';
       if (!unchanged && !(/^\d{1,5}$/.test(port) && Number(port) >= 1 && Number(port) <= 65535)) {
         portErr = $t('cfg.sec.err_port');
-      } else if (before.some((o) => listenOf(o) === listenOf(r) && o.port.trim() === port)) {
+      } else if (
+        before.some(
+          (o) => listenOf(o) === listenOf(r) && o.port.trim() === port && sharesNetwork(o, r)
+        )
+      ) {
         portErr = $t('cfg.sec.err_duplicate', {
           what: $t('cfg.sec.f.listen_port'),
           value: `${listenOf(r)}:${port}`
@@ -141,6 +145,45 @@
       return { tag: tagErr, port: portErr };
     })
   );
+
+  // Остаток «Дополнительно» как объект «тег → поля»; не разобрался — пустой
+  const advancedObj = $derived.by<Obj>(() => {
+    try {
+      const obj: unknown = JSON.parse(advanced);
+      return obj !== null && typeof obj === 'object' && !Array.isArray(obj) ? (obj as Obj) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Транспорт входящего (tcp, udp), как его читает сервер: settings.network через запятую, без
+  // значения — tcp. У закреплённых строк значение приходит в закреплённых, у остальных — из
+  // остатка, у добавленных в этой сессии — tcp.
+  function networksOf(row: Row): string[] {
+    let raw: unknown;
+    if (row.orig !== null) {
+      const tag = str(row.orig.tag);
+      raw = section.pinned.find((p) => p.key === `${tag}.settings.network`)?.value;
+      if (raw === undefined) {
+        const entry = advancedObj[tag !== '' ? tag : `#${row.key}`];
+        const settings =
+          entry !== null && typeof entry === 'object' ? (entry as Obj).settings : null;
+        if (settings !== null && typeof settings === 'object') raw = (settings as Obj).network;
+      }
+    }
+    const list = str(raw)
+      .split(',')
+      .map((n) => n.trim().toLowerCase())
+      .filter((n) => n !== '');
+    return list.length > 0 ? list : ['tcp'];
+  }
+
+  // Повтор адреса и порта — только при общем транспорте: redirect (tcp) и tproxy (udp) XKeen
+  // стоят на одном порту, и это верная раскладка
+  function sharesNetwork(a: Row, b: Row): boolean {
+    const other = networksOf(b);
+    return networksOf(a).some((n) => other.includes(n));
+  }
 
   // Адрес прослушивания для сравнения повтора: пустой равен 0.0.0.0, как на сервере
   function listenOf(row: Row): string {
