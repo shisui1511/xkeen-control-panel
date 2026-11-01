@@ -599,10 +599,6 @@ func rtCoresMergeAPIStats(t *testing.T, dir string) {
 	rtCoresXrayTest(t, dir)
 }
 
-// rtCoresMihomoLimit — предел размера профиля Mihomo, который читает расчёт
-// объявлений перезапуска (8 МиБ, как при переносе ключей).
-const rtCoresMihomoLimit = 8 << 20
-
 // Снимок слоя на переходе владения читает активный профиль Mihomo (WR-02):
 // профиль больше предела размера не читается и не разбирается, сторона
 // считается непрочитанной (объявление port), а профиль в пределах читается и
@@ -634,7 +630,7 @@ func TestRouterCoresRestartProfileLimit(t *testing.T) {
 	big.WriteString(small)
 	big.WriteString("proxies:\n")
 	line := "  - {name: xcp-fixture, type: direct}\n"
-	for big.Len() <= rtCoresMihomoLimit+len(line) {
+	for big.Len() <= MaxMihomoProfileBytes+len(line) {
 		big.WriteString(line)
 	}
 	if err := os.WriteFile(cfg, big.Bytes(), 0o644); err != nil {
@@ -643,7 +639,7 @@ func TestRouterCoresRestartProfileLimit(t *testing.T) {
 	start := time.Now()
 	tr = mihomoTakeTransition(roots, draft)
 	if tr == nil || !tr.unread {
-		t.Errorf("профиль больше %d байт: переход %+v, ожидалась непрочитанная сторона", rtCoresMihomoLimit, tr)
+		t.Errorf("профиль больше %d байт: переход %+v, ожидалась непрочитанная сторона", MaxMihomoProfileBytes, tr)
 	}
 	if d := time.Since(start); d > 5*time.Second {
 		t.Errorf("переход по профилю больше предела занял %s", d)

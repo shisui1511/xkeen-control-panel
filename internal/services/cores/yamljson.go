@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
 // Преобразование YAML ↔ упорядоченный JSON (Mihomo). Значения секций Mihomo
@@ -23,9 +25,10 @@ const (
 	// maxRawBytes — предел размера текста профиля или «сырого» блока (A7).
 	maxRawBytes = 256 << 10
 	// maxProfileBytes — предел размера активного профиля Mihomo при переносе
-	// ключей в секции: профиль со встроенными узлами подписки и списками правил
-	// заметно больше текста «Дополнительно».
-	maxProfileBytes = 8 << 20
+	// ключей в секции (общий с расчётом объявлений перезапуска в configlayer):
+	// профиль со встроенными узлами подписки и списками правил заметно больше
+	// текста «Дополнительно».
+	maxProfileBytes = configlayer.MaxMihomoProfileBytes
 	// maxYAMLNodes — предел числа посещённых узлов при раскрытии якорей и
 	// ключей слияния: защита от «billion laughs» (T-147-18).
 	maxYAMLNodes = 200000

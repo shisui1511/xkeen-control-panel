@@ -25,6 +25,13 @@ import (
 // каталог недоверенный, а разбор целиком держит файл в памяти.
 const maxXrayKeyFileBytes = 8 << 20
 
+// MaxMihomoProfileBytes — предел размера профиля Mihomo, который читается
+// на горячем пути (расчёт объявлений перезапуска в снимке слоя) и при переносе
+// ключей в секции (T-147-18): профиль со встроенными узлами подписки и списками
+// правил заметно больше текста «Дополнительно», но не бесконечен. Больший файл
+// считается непрочитанным.
+const MaxMihomoProfileBytes = 8 << 20
+
 // xkeenTemplateFiles — файлы из шаблонов XKeen: секция, где все файлы из этого
 // набора, принадлежит «XKeen» (допущение A3 исследования).
 var xkeenTemplateFiles = map[string]bool{
@@ -533,6 +540,12 @@ func hasAPIInbound(files []XrayKeyFile) bool {
 // корня), обычный файл — "config.yaml". Возвращает имя и байты профиля. Файл
 // только читается.
 func ReadMihomoActive(root string) (name string, data []byte, err error) {
+	return readMihomoActive(root, 0)
+}
+
+// readMihomoActive — ReadMihomoActive с пределом размера: limit > 0 — файл
+// больше limit байт ошибка, limit == 0 — без предела.
+func readMihomoActive(root string, limit int64) (name string, data []byte, err error) {
 	if root == "" {
 		return "", nil, errors.New("каталог Mihomo не задан")
 	}
@@ -547,20 +560,28 @@ func ReadMihomoActive(root string) (name string, data []byte, err error) {
 		if err != nil {
 			return "", nil, fmt.Errorf("config.yaml: %w", err)
 		}
-		return readMihomoLink(root, link)
+		return readMihomoLink(root, link, limit)
 	}
-	data, err = os.ReadFile(path)
+	data, err = readMihomoFile(path, limit)
 	if err != nil {
 		return "", nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return name, data, nil
 }
 
+// readMihomoFile читает файл профиля: limit > 0 — не больше limit байт.
+func readMihomoFile(path string, limit int64) ([]byte, error) {
+	if limit > 0 {
+		return readLimited(path, limit)
+	}
+	return os.ReadFile(path)
+}
+
 // readMihomoLink читает профиль Mihomo по тексту симлинка config.yaml: относительная
 // цель считается от корня. Цель и её развёрнутая цепочка симлинков обязаны лежать
 // внутри корня, иначе ErrSymlinkOutsideRoot. Возвращает путь профиля относительно
-// корня и его байты. Файл только читается.
-func readMihomoLink(root, link string) (rel string, data []byte, err error) {
+// корня и его байты. Файл только читается; limit — как у readMihomoActive.
+func readMihomoLink(root, link string, limit int64) (rel string, data []byte, err error) {
 	target := link
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(root, target)
@@ -577,7 +598,7 @@ func readMihomoLink(root, link string) (rel string, data []byte, err error) {
 	if _, ok := relInsideRoot(root, resolved); !ok {
 		return "", nil, fmt.Errorf("config.yaml: %w", ErrSymlinkOutsideRoot)
 	}
-	data, err = os.ReadFile(target)
+	data, err = readMihomoFile(target, limit)
 	if err != nil {
 		return "", nil, fmt.Errorf("%s: %w", rel, err)
 	}

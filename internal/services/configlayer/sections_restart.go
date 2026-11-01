@@ -227,7 +227,7 @@ func mihomoTakeTransition(roots Roots, draft Sections) *mihomoTransition {
 	if !ok {
 		return nil
 	}
-	_, data, err := ReadMihomoActive(roots.Mihomo)
+	_, data, err := readMihomoActive(roots.Mihomo, MaxMihomoProfileBytes)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -256,9 +256,9 @@ func mihomoReleaseTransition(roots Roots, prev *MihomoRoutingState) *mihomoTrans
 		if link == "" {
 			link = filepath.Join(roots.Mihomo, filepath.FromSlash(prev.PrevProfile))
 		}
-		_, data, err = readMihomoLink(roots.Mihomo, link)
+		_, data, err = readMihomoLink(roots.Mihomo, link, MaxMihomoProfileBytes)
 	case configKindFile:
-		data, err = readLimited(filepath.Join(prev.PrevBackup, KernelMihomo, "config.yaml"), maxXrayKeyFileBytes)
+		data, err = readLimited(filepath.Join(prev.PrevBackup, KernelMihomo, "config.yaml"), MaxMihomoProfileBytes)
 	default:
 		return nil
 	}
@@ -272,7 +272,7 @@ func mihomoReleaseTransition(roots Roots, prev *MihomoRoutingState) *mihomoTrans
 		tr.unread = true
 		return tr
 	}
-	_, current, err := ReadMihomoActive(roots.Mihomo)
+	_, current, err := readMihomoActive(roots.Mihomo, MaxMihomoProfileBytes)
 	if err != nil {
 		tr.unread = true
 		return tr
@@ -297,14 +297,30 @@ type mihomoRestartFacts struct {
 	listeners map[string]string // listeners типа redir и tproxy: имя → порт
 }
 
+// mihomoProfileFacts — ключи корня профиля, от которых зависит способ
+// перезапуска. Остальное дерево профиля (узлы подписки, правила) в обобщённое
+// отображение не разбирается.
+type mihomoProfileFacts struct {
+	Tun       any `yaml:"tun"`
+	Redir     any `yaml:"redir-port"`
+	TProxy    any `yaml:"tproxy-port"`
+	Listeners any `yaml:"listeners"`
+}
+
 // mihomoFactsFromYAML достаёт факты из профиля Mihomo. Ошибка разбора, корень не
-// отображение или значение, которое не записывается в JSON, — false.
+// отображение, пустой документ или значение, которое не записывается в JSON, —
+// false. Профиль больше MaxMihomoProfileBytes сюда не доходит: его не читают.
 func mihomoFactsFromYAML(data []byte) (mihomoRestartFacts, bool) {
-	var doc map[string]any
+	var doc *mihomoProfileFacts
 	if err := yaml.Unmarshal(data, &doc); err != nil || doc == nil {
 		return mihomoRestartFacts{}, false
 	}
-	return mihomoFactsFromMap(doc)
+	return mihomoFactsFromMap(map[string]any{
+		"tun":         doc.Tun,
+		"redir-port":  doc.Redir,
+		"tproxy-port": doc.TProxy,
+		"listeners":   doc.Listeners,
+	})
 }
 
 // mihomoFactsFromMap достаёт факты из корня профиля, разобранного в отображение.
