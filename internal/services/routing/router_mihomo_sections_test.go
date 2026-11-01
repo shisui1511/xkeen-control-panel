@@ -315,7 +315,7 @@ func TestRouterMihomoSectionsKeepUserKeys(t *testing.T) {
 				t.Errorf("секция mihomo_%s после повторного Take: managed=%v preset=%v, ожидалась возвращённая из применённого состояния", id, cs.Managed, cs.Preset)
 			}
 		}
-		e.applyOK(t)
+		e.applyPasses(t)
 
 		keys := rtmsKeys(rtmsNode(t, e))
 		for _, k := range []string{"hosts", "ntp", "sub-rules", "experimental"} {
