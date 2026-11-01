@@ -21,9 +21,9 @@ const (
 	mihomoOther    = "other"
 )
 
-// Значения встроенной базы. Дублируют константы routing/mihomo_gen.go
-// (defaultMihomoRedirPort, defaultMihomoTProxyPort, mihomoRoutingMark): пакет
-// cores не импортирует routing, при смене значений менять в обоих местах.
+// Значения встроенной базы Mihomo: порты redir и tproxy и метка сокетов панели.
+// Порты повторяют неэкспортируемые константы configlayer (takeover.go): при смене
+// значений менять в обоих местах.
 const (
 	mihomoDefaultRedirPort  = 5000
 	mihomoDefaultTProxyPort = 5001
