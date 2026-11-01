@@ -51,15 +51,18 @@ func mihomoDraftManaged(draft configlayer.Sections) bool {
 // seedMihomoSections раскладывает активный профиль Mihomo по секциям mihomo_*:
 // значения как в профиле, from — имя и md5 прежнего профиля. Нет профиля
 // (config.yaml не читается) — секции из встроенной базы с preset и без from.
-// Нечего делать, если Mihomo не установлен, маршрутизация Mihomo уже взята или
-// в черновике уже есть секция Mihomo под управлением. Результат: имя секции
-// черновика → её значение.
+// Если маршрутизация Mihomo уже взята, ничего не переносится: секции, снятые
+// только в черновике, возвращаются из применённого состояния. Нечего делать и
+// когда Mihomo не установлен или в черновике уже есть секция Mihomo под
+// управлением. Результат: имя секции черновика → её значение.
 func (s *Service) seedMihomoSections(st configlayer.StateView) (map[string]json.RawMessage, error) {
 	if !s.d.Installed().Mihomo {
 		return nil, nil
 	}
 	if m := s.d.Layer.Snapshot().Routing.Mihomo; m != nil && m.Taken {
-		return nil, nil
+		// Отпускание не применено: «Управлять» отменяет его и возвращает прежние
+		// значения панели из применённого состояния, а не встроенную базу.
+		return restoreAppliedMihomoSections(st)
 	}
 	if mihomoDraftManaged(st.Draft) {
 		return nil, nil
@@ -86,6 +89,30 @@ func (s *Service) seedMihomoSections(st configlayer.StateView) (map[string]json.
 			return nil, err
 		}
 		out[configlayer.CoreSectionName(configlayer.KernelMihomo, id)] = raw
+	}
+	return out, nil
+}
+
+// restoreAppliedMihomoSections возвращает в черновик секции Mihomo, которые в
+// применённом состоянии под управлением, а в черновике сняты (отпускание ещё не
+// применено). Без этого повторное взятие оставило бы секции неуправляемыми, и
+// профиль панели после «Применить» собрался бы из встроенной базы, потеряв
+// hosts, ntp, sub-rules и прочие ключи секций.
+func restoreAppliedMihomoSections(st configlayer.StateView) (map[string]json.RawMessage, error) {
+	applied := configlayer.DesiredCores(st.Applied)
+	draft := configlayer.DesiredCores(st.Draft)
+	out := map[string]json.RawMessage{}
+	for _, id := range configlayer.MihomoSectionIDs {
+		name := configlayer.CoreSectionName(configlayer.KernelMihomo, id)
+		ac := applied[name]
+		if !ac.Managed || draft[name].Managed {
+			continue
+		}
+		raw, err := configlayer.EncodeCoreSection(ac)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = raw
 	}
 	return out, nil
 }

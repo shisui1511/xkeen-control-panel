@@ -292,6 +292,35 @@ func TestRouterMihomoSectionsKeepUserKeys(t *testing.T) {
 		}
 	})
 
+	// Отпустить и снова взять до «Применить»: секции возвращаются из применённого
+	// состояния, ключи профиля панели (hosts, ntp, sub-rules) не теряются.
+	t.Run("release_then_retake_before_apply_keeps_keys", func(t *testing.T) {
+		e := rtNewEnv(t, rtWithKernels(rtMihomoOnly))
+		rtmsWriteProfile(t, e, rtmsFixture)
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("Take: %v", err)
+		}
+		e.applyOK(t)
+
+		if _, err := e.svc.Release(e.rev(t)); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("повторный Take: %v", err)
+		}
+		for _, id := range configlayer.MihomoSectionIDs {
+			if cs := rtmsSection(t, e.state(t).Draft, id); !cs.Managed || cs.Preset {
+				t.Errorf("секция mihomo_%s после повторного Take: managed=%v preset=%v, ожидалась возвращённая из применённого состояния", id, cs.Managed, cs.Preset)
+			}
+		}
+		e.applyOK(t)
+
+		keys := rtmsKeys(rtmsNode(t, e))
+		for _, k := range []string{"hosts", "ntp", "sub-rules", "experimental"} {
+			rtmsIndex(t, keys, k)
+		}
+	})
+
 	t.Run("no_sections_use_presets", func(t *testing.T) {
 		e := rtNewEnv(t, rtWithKernels(rtMihomoOnly))
 		e.writeUserProfile(t) // порты прежнего профиля 7000 и 7001
