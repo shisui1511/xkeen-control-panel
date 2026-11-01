@@ -14,7 +14,7 @@
   import AdvancedBlock from '../AdvancedBlock.svelte';
   import PinnedValues from '../PinnedValues.svelte';
   import { guarded } from '../coresOwner';
-  import { FORCE_PROXY_DEFAULT_GROUP } from '../forceProxyDefaultGroup';
+  import { isForceProxyDefaultGroup } from '../forceProxyDefaultGroup';
   import { commitSection, fieldTestId } from '../sectionForm';
 
   // Форма «Входящие» Xray (SEC-02, D-10, D-12, D-16): строки Тег, Протокол, Адрес прослушивания,
@@ -252,7 +252,7 @@
   const groups = $derived($routingView?.groups ?? []);
   // Группа не выбрана — берётся группа «Прокси»
   const fpValue = $derived(
-    forceProxy?.group || groups.find((g) => g.name === FORCE_PROXY_DEFAULT_GROUP)?.id || ''
+    forceProxy?.group || groups.find((g) => isForceProxyDefaultGroup(g.name))?.id || ''
   );
 
   $effect(() => {
