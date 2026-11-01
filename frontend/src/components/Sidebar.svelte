@@ -14,6 +14,7 @@
   import { navBadgeCount, badgeTotal } from '../lib/configLayer';
   import { showMihomoNavFor } from '../lib/navCaps';
   import Skeleton from './Skeleton.svelte';
+  import BrandMark from './BrandMark.svelte';
   import { capsuleConfigStore } from '../lib/capsuleSettings';
   import Icon from '../lib/components/Icon.svelte';
   import SystemStatusCapsule from './status/SystemStatusCapsule.svelte';
@@ -214,30 +215,7 @@
 
 <!-- Brand block -->
 <div class="sidebar-logo">
-  <span class="brand-mark" aria-hidden="true">
-    <!-- XKeen logo: cross-routing — 4 endpoints, crossed paths, central hub.
-         Reads as both "X" (the X in XKeen) and a proxy-switch diagram. -->
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="4" cy="4" r="1.8" fill="currentColor" />
-      <circle cx="20" cy="4" r="1.8" fill="currentColor" />
-      <circle cx="4" cy="20" r="1.8" fill="currentColor" />
-      <circle cx="20" cy="20" r="1.8" fill="currentColor" />
-      <path
-        d="M5.4 5.4 L18.6 18.6"
-        stroke="currentColor"
-        stroke-width="2.4"
-        stroke-linecap="round"
-      />
-      <path
-        d="M18.6 5.4 L5.4 18.6"
-        stroke="currentColor"
-        stroke-width="2.4"
-        stroke-linecap="round"
-      />
-      <circle cx="12" cy="12" r="2.8" fill="currentColor" />
-      <circle cx="12" cy="12" r="1.1" fill="#0c2237" />
-    </svg>
-  </span>
+  <span class="brand-mark" aria-hidden="true"><BrandMark size={24} /></span>
   <span class="brand-text">
     <span class="b1"><span class="x">X</span>Keen</span>
     <span class="b2">Control&nbsp;Panel</span>

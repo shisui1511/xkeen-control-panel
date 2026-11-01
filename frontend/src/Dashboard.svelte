@@ -37,6 +37,7 @@
   import Button from './components/Button.svelte';
   import Icon from './lib/components/Icon.svelte';
   import Warning from './lib/components/icons/Warning.svelte';
+  import BrandMark from './components/BrandMark.svelte';
   import Skeleton from './components/Skeleton.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
   import KernelConflictBanner from './components/KernelConflictBanner.svelte';
@@ -953,9 +954,10 @@
         <rect y="16.5" width="22" height="2.5" rx="1.25" fill="currentColor" />
       </svg>
     </button>
-    <span id="mobile-header-title" style="font-weight: 600; font-size: var(--font-size-lg);"
-      >XKeen CP</span
-    >
+    <span class="mobile-brand">
+      <span class="brand-mark" aria-hidden="true"><BrandMark size={18} /></span>
+      <span id="mobile-header-title">XKeen</span>
+    </span>
     {#if $capsuleConfigStore.visible}
       <SystemStatusCapsule
         variant="mobile"
