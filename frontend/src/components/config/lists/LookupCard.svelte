@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t, tp } from '../../../i18n';
   import Button from '../../Button.svelte';
+  import Section from '../../Section.svelte';
   import { lookupList, type ListRef, type LookupView } from '../../../lib/configGeodata';
   import { listKind, reasonOf } from './reason';
 
@@ -54,82 +55,72 @@
   }
 </script>
 
-<section class="card lc" aria-labelledby="{uid}-title" data-testid="geo-lookup">
-  <h3 class="lc-title" id="{uid}-title">{$t('cfg.geo.lookup_title')}</h3>
+<Section title={$t('cfg.geo.lookup_title')} testid="geo-lookup">
+  <div class="card card-rows lc">
+    <form class="card-block lc-form" {onsubmit}>
+      <div class="form-group lc-field">
+        <label class="form-label" for="{uid}-q">{$t('cfg.geo.lookup_label')}</label>
+        <input
+          id="{uid}-q"
+          type="text"
+          class="input lc-input"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder={$t('cfg.geo.lookup_placeholder')}
+          data-testid="geo-lookup-input"
+          bind:value={query}
+        />
+      </div>
+      <Button
+        type="submit"
+        variant="secondary"
+        disabled={q === ''}
+        {loading}
+        data-testid="geo-lookup-go"
+      >
+        {$t('cfg.geo.lookup_go')}
+      </Button>
+    </form>
 
-  <form class="lc-form" {onsubmit}>
-    <div class="form-group lc-field">
-      <label class="form-label" for="{uid}-q">{$t('cfg.geo.lookup_label')}</label>
-      <input
-        id="{uid}-q"
-        type="text"
-        class="input lc-input"
-        autocomplete="off"
-        autocapitalize="off"
-        spellcheck="false"
-        placeholder={$t('cfg.geo.lookup_placeholder')}
-        data-testid="geo-lookup-input"
-        bind:value={query}
-      />
-    </div>
-    <Button
-      type="submit"
-      variant="secondary"
-      disabled={q === ''}
-      {loading}
-      data-testid="geo-lookup-go"
-    >
-      {$t('cfg.geo.lookup_go')}
-    </Button>
-  </form>
-
-  <div class="lc-area" aria-live="polite">
-    {#if failure !== ''}
-      <p class="lc-failed" data-testid="geo-lookup-failed">
-        {$t('cfg.geo.lookup_failed', { reason: failure })}
-      </p>
-    {:else if result !== null}
-      {#if matches.length === 0}
-        <p class="lc-empty" data-testid="geo-lookup-empty">{$t('cfg.geo.lookup_empty')}</p>
-      {:else}
-        <ul class="lc-list" aria-label={$t('cfg.geo.lookup_title')}>
-          {#each shown as m (m.file + ':' + m.tag)}
-            <li class="lc-row" data-testid="geo-lookup-result">
-              <span class="lc-mono">{$t('cfg.geo.lookup_row', { file: m.file, tag: m.tag })}</span>
-              <Button
-                variant="secondary"
-                class="btn-sm"
-                data-testid="geo-lookup-make-rule"
-                onclick={() => onmakerule({ file: m.file, tag: m.tag, kind: listKind(m.kind) })}
-              >
-                {$t('cfg.geo.lookup_make_rule')}
-                <span class="sr-only">{m.file} · {m.tag}</span>
-              </Button>
-            </li>
-          {/each}
-        </ul>
-        {#if rest > 0}
-          <p class="lc-more" data-testid="geo-lookup-more">{$tp('cfg.geo.lookup_more', rest)}</p>
+    <div class="lc-area" aria-live="polite">
+      {#if failure !== ''}
+        <p class="lc-failed" data-testid="geo-lookup-failed">
+          {$t('cfg.geo.lookup_failed', { reason: failure })}
+        </p>
+      {:else if result !== null}
+        {#if matches.length === 0}
+          <p class="lc-empty" data-testid="geo-lookup-empty">{$t('cfg.geo.lookup_empty')}</p>
+        {:else}
+          <ul class="lc-list" aria-label={$t('cfg.geo.lookup_title')}>
+            {#each shown as m (m.file + ':' + m.tag)}
+              <li class="lc-row" data-testid="geo-lookup-result">
+                <span class="lc-mono">{$t('cfg.geo.lookup_row', { file: m.file, tag: m.tag })}</span
+                >
+                <Button
+                  variant="secondary"
+                  class="btn-sm"
+                  data-testid="geo-lookup-make-rule"
+                  onclick={() => onmakerule({ file: m.file, tag: m.tag, kind: listKind(m.kind) })}
+                >
+                  {$t('cfg.geo.lookup_make_rule')}
+                  <span class="sr-only">{m.file} · {m.tag}</span>
+                </Button>
+              </li>
+            {/each}
+          </ul>
+          {#if rest > 0}
+            <p class="lc-more" data-testid="geo-lookup-more">{$tp('cfg.geo.lookup_more', rest)}</p>
+          {/if}
         {/if}
       {/if}
-    {/if}
+    </div>
   </div>
-</section>
+</Section>
 
 <style>
   .lc {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-2);
     min-width: 0;
-  }
-
-  .lc-title {
-    margin: 0 0 var(--spacing-2);
-    font-size: var(--font-size-lg);
-    font-weight: 600;
-    line-height: 1.2;
-    color: var(--fg-primary);
   }
 
   .lc-form {
@@ -158,8 +149,18 @@
   .lc-area {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-2);
     min-width: 0;
+  }
+
+  /* Результат отделён от формы той же линией, что и строки карточки */
+  .lc-area > :first-child {
+    border-top: 1px solid var(--border);
+  }
+
+  .lc-failed,
+  .lc-empty,
+  .lc-more {
+    padding: 12px var(--card-pad);
   }
 
   .lc-failed {
@@ -189,13 +190,13 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--spacing-2);
-    padding: var(--spacing-2) 0;
+    padding: 10px var(--card-pad);
     border-top: 1px solid var(--border);
     min-width: 0;
   }
 
   .lc-row:first-child {
-    border-top: none;
+    border-top: 0;
   }
 
   .lc-mono {
@@ -208,7 +209,7 @@
   }
 
   @media (pointer: coarse), (max-width: 768px) {
-    .lc :global(.btn) {
+    :global([data-testid='geo-lookup'] .btn) {
       min-height: 44px;
     }
   }

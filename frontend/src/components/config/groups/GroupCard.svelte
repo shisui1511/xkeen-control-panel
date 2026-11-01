@@ -260,100 +260,80 @@
   }
 </script>
 
-<article class="card group-card" aria-labelledby="{uid}-title" data-testid="group-card-{group.id}">
-  <div class="gc-head" data-testid="group-row-{group.id}">
-    <button
-      type="button"
-      class="gc-expand"
-      aria-expanded={expanded}
-      aria-controls="{uid}-list"
-      aria-label={$t('cfg.groups.expand_aria', { name: group.name })}
-      data-testid="group-toggle-{group.id}"
-      onclick={ontoggle}
-    >
-      <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} />
-      <span class="gc-name" id="{uid}-title">{group.name}</span>
-    </button>
-    <span class="chip chip-default" data-testid="group-mode-{group.id}">
-      {$t(`cfg.groups.mode_${group.mode}`)}
-    </span>
-    {#each chips as chip (chip.code + chip.text)}
-      <span class="chip chip-{chip.kind} gc-chip" data-testid="group-chip-{group.id}-{chip.code}">
-        {chip.text}
+<article
+  class="card card-rows group-card"
+  aria-labelledby="{uid}-title"
+  data-testid="group-card-{group.id}"
+>
+  <div class="gc-top">
+    <div class="gc-head" data-testid="group-row-{group.id}">
+      <button
+        type="button"
+        class="gc-expand"
+        aria-expanded={expanded}
+        aria-controls="{uid}-list"
+        aria-label={$t('cfg.groups.expand_aria', { name: group.name })}
+        data-testid="group-toggle-{group.id}"
+        onclick={ontoggle}
+      >
+        <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} />
+        <span class="gc-name" id="{uid}-title">{group.name}</span>
+      </button>
+      <span class="chip chip-default" data-testid="group-mode-{group.id}">
+        {$t(`cfg.groups.mode_${group.mode}`)}
       </span>
-    {/each}
-  </div>
+      {#each chips as chip (chip.code + chip.text)}
+        <span class="chip chip-{chip.kind} gc-chip" data-testid="group-chip-{group.id}-{chip.code}">
+          {chip.text}
+        </span>
+      {/each}
+    </div>
 
-  <p class="gc-summary" data-testid="group-summary-{group.id}">{summary}</p>
+    <p class="gc-summary" data-testid="group-summary-{group.id}">{summary}</p>
 
-  {#if emptyAll}
-    <p class="gc-hint" data-testid="group-empty-hint-{group.id}">
-      {$t('cfg.groups.nodes_none_hint')}
-      <a class="gc-link" href={configSubTabHash('nodes')}>{$t('cfg.groups.nodes_none_link')}</a>.
-    </p>
-  {/if}
+    {#if emptyAll}
+      <p class="gc-hint" data-testid="group-empty-hint-{group.id}">
+        {$t('cfg.groups.nodes_none_hint')}
+        <a class="gc-link" href={configSubTabHash('nodes')}>{$t('cfg.groups.nodes_none_link')}</a>.
+      </p>
+    {/if}
 
-  {#if manual}
-    <div class="gc-current">
-      <label class="gc-current-label" for="{uid}-current">{$t('cfg.groups.current')}</label>
-      <div class="gc-current-row">
-        <Select
-          id="{uid}-current"
-          bind:value={pick}
-          {options}
-          disabled={selectDisabled}
-          title={selectTitle}
-          ariaLabel={$t('cfg.groups.current')}
-          wrapperClass="gc-select"
-          data-testid="group-current-{group.id}"
-          onchange={onPick}
-        />
-        {#if selecting}
-          <span class="spinner" aria-hidden="true" data-testid="group-selecting-{group.id}"></span>
+    {#if manual}
+      <div class="gc-current">
+        <label class="gc-current-label" for="{uid}-current">{$t('cfg.groups.current')}</label>
+        <div class="gc-current-row">
+          <Select
+            id="{uid}-current"
+            bind:value={pick}
+            {options}
+            disabled={selectDisabled}
+            title={selectTitle}
+            ariaLabel={$t('cfg.groups.current')}
+            wrapperClass="gc-select"
+            data-testid="group-current-{group.id}"
+            onchange={onPick}
+          />
+          {#if selecting}
+            <span class="spinner" aria-hidden="true" data-testid="group-selecting-{group.id}"
+            ></span>
+          {/if}
+        </div>
+        {#if hintXray}
+          <p class="gc-hint" data-testid="group-hint-xray-{group.id}">
+            {$t('cfg.groups.current_hint_xray')}
+          </p>
+        {/if}
+        {#if hintStopped}
+          <p class="gc-hint" data-testid="group-hint-stopped-{group.id}">
+            {$t('cfg.groups.current_hint_stopped')}
+          </p>
         {/if}
       </div>
-      {#if hintXray}
-        <p class="gc-hint" data-testid="group-hint-xray-{group.id}">
-          {$t('cfg.groups.current_hint_xray')}
-        </p>
-      {/if}
-      {#if hintStopped}
-        <p class="gc-hint" data-testid="group-hint-stopped-{group.id}">
-          {$t('cfg.groups.current_hint_stopped')}
-        </p>
-      {/if}
-    </div>
-  {:else if group.mode === 'fallback' && reserveName}
-    <p class="gc-hint" data-testid="group-reserve-{group.id}">
-      {$t('cfg.groups.reserve_line', { name: reserveName })}
-    </p>
-  {/if}
-
-  <div class="gc-actions">
-    {#if onedit}
-      <Button
-        variant="secondary"
-        class="btn-sm"
-        ariaLabel={$t('cfg.groups.edit_aria', { name: group.name })}
-        data-testid="group-edit-{group.id}"
-        onclick={() => onedit(group)}
-      >
-        <Icon name="edit" size={14} />
-        {$t('cfg.groups.edit')}
-      </Button>
+    {:else if group.mode === 'fallback' && reserveName}
+      <p class="gc-hint" data-testid="group-reserve-{group.id}">
+        {$t('cfg.groups.reserve_line', { name: reserveName })}
+      </p>
     {/if}
-    <Button
-      variant="danger"
-      class="btn-sm"
-      disabled={$applyRunning}
-      title={$applyRunning ? $t('cfg.routing.apply_busy_hint') : undefined}
-      ariaLabel={$t('cfg.groups.delete_aria', { name: group.name })}
-      data-testid="group-delete-{group.id}"
-      onclick={() => ondelete(group)}
-    >
-      <Icon name="delete" size={14} />
-      {$t('cfg.groups.delete')}
-    </Button>
   </div>
 
   {#if expanded}
@@ -422,14 +402,46 @@
       {/if}
     </div>
   {/if}
+
+  <div class="card-footer gc-actions">
+    {#if onedit}
+      <Button
+        variant="secondary"
+        class="btn-sm"
+        ariaLabel={$t('cfg.groups.edit_aria', { name: group.name })}
+        data-testid="group-edit-{group.id}"
+        onclick={() => onedit(group)}
+      >
+        <Icon name="edit" size={14} />
+        {$t('cfg.groups.edit')}
+      </Button>
+    {/if}
+    <Button
+      variant="danger"
+      class="btn-sm"
+      disabled={$applyRunning}
+      title={$applyRunning ? $t('cfg.routing.apply_busy_hint') : undefined}
+      ariaLabel={$t('cfg.groups.delete_aria', { name: group.name })}
+      data-testid="group-delete-{group.id}"
+      onclick={() => ondelete(group)}
+    >
+      <Icon name="delete" size={14} />
+      {$t('cfg.groups.delete')}
+    </Button>
+  </div>
 </article>
 
 <style>
   .group-card {
+    min-width: 0;
+  }
+
+  .gc-top {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-3);
     min-width: 0;
+    padding: 16px var(--card-pad);
   }
 
   .gc-head {
@@ -526,24 +538,18 @@
     min-width: 0;
   }
 
-  .gc-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacing-2);
-  }
-
+  /* Состав группы — строки на всю ширину карточки, отделены от шапки линией */
   .gc-list {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-2);
     min-width: 0;
-    padding-top: var(--spacing-3);
     border-top: 1px solid var(--border);
   }
 
   .gc-search {
-    width: 100%;
+    width: calc(100% - 2 * var(--card-pad));
     max-width: 360px;
+    margin: 12px var(--card-pad) 4px;
   }
 
   .gc-rows {
@@ -559,7 +565,7 @@
     align-items: center;
     gap: var(--spacing-1) var(--spacing-2);
     min-width: 0;
-    padding: var(--spacing-2) 0;
+    padding: 10px var(--card-pad);
     border-top: 1px solid var(--border);
     font-size: var(--font-size-base);
     line-height: 1.4;
@@ -568,6 +574,11 @@
 
   .gc-row:first-child {
     border-top: 0;
+  }
+
+  .gc-list > .gc-hint {
+    padding: 10px var(--card-pad);
+    border-top: 1px solid var(--border);
   }
 
   .gc-row-member .gc-row-name {
@@ -584,6 +595,7 @@
     align-items: center;
     gap: var(--spacing-2);
     margin: 0;
+    padding: 14px var(--card-pad);
     font-size: var(--font-size-base);
     color: var(--fg-dim);
     overflow-wrap: anywhere;
@@ -591,6 +603,7 @@
 
   .gc-more {
     display: flex;
+    padding: 4px var(--card-pad) 12px;
   }
 
   @media (pointer: coarse), (max-width: 768px) {

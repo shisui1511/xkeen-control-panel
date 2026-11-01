@@ -2961,6 +2961,8 @@
   "cfg.applying": "Applying…",
   "cfg.applying_other_tab": "Apply was started in another tab",
   "cfg.sse_lost": "No connection to the panel. Reconnecting…",
+  "cfg.section_show": "Show",
+  "cfg.section_hide": "Hide",
   "cfg.files_title": "Panel files",
   "cfg.kernels_title": "Kernels and versions",
   "cfg.progress_title": "Apply progress",

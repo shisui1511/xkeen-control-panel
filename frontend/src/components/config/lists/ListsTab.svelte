@@ -184,7 +184,7 @@
   );
 </script>
 
-<div class="config-stack" data-testid="lists-tab">
+<div class="lists-tab" data-testid="lists-tab">
   {#if loading}
     <div class="lists-skeleton">
       <Skeleton type="card" height="120px" />
@@ -212,44 +212,47 @@
       </div>
     {/if}
     <CronNotice />
-    <UpdateCard />
-    <DownloadBlock />
     <p class="geo-summary" data-testid="geo-summary">{summary}</p>
-    <StandardSetsGroup
-      sources={standard}
-      disabled={oldXkeen}
-      onenable={enableStandard}
-      onoff={(s) => void askDrop(s, 'off')}
-      ondedup={askDedup}
-      onfinish={onFinish}
-      onrestore={(s) => void restore(s)}
-      onopen={(s) => (inspectFile = s.file)}
-    />
-    <SourceGroup
-      kind="panel"
-      sources={panel}
-      disabled={oldXkeen}
-      onenable={enablePanel}
-      onoff={(s) => void askDrop(s, 'off')}
-      ondedup={askDedup}
-      onfinish={onFinish}
-      onrestore={(s) => void restore(s)}
-      onopen={(s) => (inspectFile = s.file)}
-    />
-    <SourceGroup
-      kind="own"
-      sources={own}
-      disabled={oldXkeen}
-      onadd={() => (addOpen = true)}
-      onedit={(s) => (editSource = s)}
-      ondelete={(s) => void askDrop(s, 'delete')}
-      onrestore={(s) => void restore(s)}
-      ondedup={askDedup}
-      onfinish={onFinish}
-      onopen={(s) => (inspectFile = s.file)}
-    />
-    <LookupCard onmakerule={makeRule} />
-    <MihomoFilesCard />
+    <!-- Секции вкладки: заголовок над поверхностью, внутри — одна карточка-список -->
+    <div class="page-sections">
+      <UpdateCard />
+      <DownloadBlock />
+      <StandardSetsGroup
+        sources={standard}
+        disabled={oldXkeen}
+        onenable={enableStandard}
+        onoff={(s) => void askDrop(s, 'off')}
+        ondedup={askDedup}
+        onfinish={onFinish}
+        onrestore={(s) => void restore(s)}
+        onopen={(s) => (inspectFile = s.file)}
+      />
+      <SourceGroup
+        kind="panel"
+        sources={panel}
+        disabled={oldXkeen}
+        onenable={enablePanel}
+        onoff={(s) => void askDrop(s, 'off')}
+        ondedup={askDedup}
+        onfinish={onFinish}
+        onrestore={(s) => void restore(s)}
+        onopen={(s) => (inspectFile = s.file)}
+      />
+      <SourceGroup
+        kind="own"
+        sources={own}
+        disabled={oldXkeen}
+        onadd={() => (addOpen = true)}
+        onedit={(s) => (editSource = s)}
+        ondelete={(s) => void askDrop(s, 'delete')}
+        onrestore={(s) => void restore(s)}
+        ondedup={askDedup}
+        onfinish={onFinish}
+        onopen={(s) => (inspectFile = s.file)}
+      />
+      <LookupCard onmakerule={makeRule} />
+      <MihomoFilesCard />
+    </div>
   {/if}
 </div>
 
@@ -305,7 +308,7 @@
 />
 
 <style>
-  .config-stack {
+  .lists-tab {
     display: flex;
     flex-direction: column;
     gap: var(--grid-gap, 16px);

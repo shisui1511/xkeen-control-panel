@@ -2961,6 +2961,8 @@
   "cfg.applying": "Применяется…",
   "cfg.applying_other_tab": "Применение запущено в другой вкладке",
   "cfg.sse_lost": "Нет связи с панелью. Переподключаемся…",
+  "cfg.section_show": "Показать",
+  "cfg.section_hide": "Скрыть",
   "cfg.files_title": "Файлы панели",
   "cfg.kernels_title": "Ядра и версии",
   "cfg.progress_title": "Ход применения",

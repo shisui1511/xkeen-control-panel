@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from '../../../i18n';
   import Button from '../../Button.svelte';
+  import Section from '../../Section.svelte';
   import EmptyState from '../../EmptyState.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import type { SourceView } from '../../../lib/configGeodata';
@@ -44,8 +45,6 @@
     onfinish?: (source: SourceView) => void;
   } = $props();
 
-  const uid = $props.id();
-
   const isOn = (s: SourceView) => s.entry || s.present;
 
   function toggle(e: Event & { currentTarget: HTMLInputElement }, s: SourceView) {
@@ -56,126 +55,88 @@
   }
 </script>
 
-<section class="card sg-card" aria-labelledby="{uid}-title" data-testid="geo-group-{kind}">
-  <div class="sg-head">
-    <div class="sg-head-text">
-      <h3 class="sg-title" id="{uid}-title">
-        {$t(kind === 'panel' ? 'cfg.geo.group_panel' : 'cfg.geo.group_own')}
-      </h3>
-      <p class="sg-desc">
-        {$t(kind === 'panel' ? 'cfg.geo.group_panel_desc' : 'cfg.geo.group_own_desc')}
-      </p>
-    </div>
+<Section
+  title={$t(kind === 'panel' ? 'cfg.geo.group_panel' : 'cfg.geo.group_own')}
+  description={$t(kind === 'panel' ? 'cfg.geo.group_panel_desc' : 'cfg.geo.group_own_desc')}
+  testid="geo-group-{kind}"
+>
+  {#snippet meta()}
     {#if kind === 'own' && onadd}
-      <Button variant="primary" {disabled} data-testid="geo-add-source" onclick={onadd}>
+      <Button
+        variant="secondary"
+        class="btn-sm"
+        {disabled}
+        data-testid="geo-add-source"
+        onclick={onadd}
+      >
         <Icon name="add" size={14} />
         {$t('cfg.geo.add_source')}
       </Button>
     {/if}
-  </div>
+  {/snippet}
 
-  {#if sources.length === 0}
-    {#if kind === 'panel'}
-      <p class="sg-empty" data-testid="geo-panel-empty">{$t('cfg.geo.panel_empty')}</p>
-    {:else}
-      <div data-testid="geo-own-empty">
-        <EmptyState
-          title={$t('cfg.geo.own_empty_title')}
-          description={$t('cfg.geo.own_empty_body')}
-          ctaText={onadd ? $t('cfg.geo.add_source') : ''}
-          oncta={onadd}
-          plain
-        />
-      </div>
-    {/if}
-  {:else}
-    <ul
-      class="sg-list"
-      aria-label={$t(kind === 'panel' ? 'cfg.geo.group_panel' : 'cfg.geo.group_own')}
-    >
-      {#each sources as s (s.id)}
-        {#if kind === 'panel'}
-          <SourceRow source={s} {onopen} {ondedup} {onfinish} {onrestore}>
-            {#snippet lead()}
-              <label class="toggle-label sg-toggle">
-                <span class="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={isOn(s)}
-                    disabled={disabled ||
-                      !!s.draft ||
-                      (isOn(s) && !onoff) ||
-                      (!isOn(s) && !onenable)}
-                    aria-label={$t('cfg.geo.switch_aria', { provider: s.file, kind: s.kind })}
-                    data-testid="geo-set-switch-{s.set_id ?? s.id}"
-                    onchange={(e) => toggle(e, s)}
-                  />
-                  <span class="toggle-slider"></span>
-                </span>
-              </label>
-            {/snippet}
-          </SourceRow>
-        {:else}
-          <SourceRow
-            source={s}
-            {onopen}
-            onedit={disabled ? undefined : onedit}
-            ondelete={disabled ? undefined : ondelete}
-            {onrestore}
-            {ondedup}
-            {onfinish}
+  <div class="card card-rows sg-card">
+    {#if sources.length === 0}
+      {#if kind === 'panel'}
+        <p class="card-empty" data-testid="geo-panel-empty">{$t('cfg.geo.panel_empty')}</p>
+      {:else}
+        <div class="card-block" data-testid="geo-own-empty">
+          <EmptyState
+            title={$t('cfg.geo.own_empty_title')}
+            description={$t('cfg.geo.own_empty_body')}
+            ctaText={onadd ? $t('cfg.geo.add_source') : ''}
+            oncta={onadd}
+            plain
           />
-        {/if}
-      {/each}
-    </ul>
-  {/if}
-</section>
+        </div>
+      {/if}
+    {:else}
+      <ul
+        class="sg-list"
+        aria-label={$t(kind === 'panel' ? 'cfg.geo.group_panel' : 'cfg.geo.group_own')}
+      >
+        {#each sources as s (s.id)}
+          {#if kind === 'panel'}
+            <SourceRow source={s} {onopen} {ondedup} {onfinish} {onrestore}>
+              {#snippet lead()}
+                <label class="toggle-label sg-toggle">
+                  <span class="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={isOn(s)}
+                      disabled={disabled ||
+                        !!s.draft ||
+                        (isOn(s) && !onoff) ||
+                        (!isOn(s) && !onenable)}
+                      aria-label={$t('cfg.geo.switch_aria', { provider: s.file, kind: s.kind })}
+                      data-testid="geo-set-switch-{s.set_id ?? s.id}"
+                      onchange={(e) => toggle(e, s)}
+                    />
+                    <span class="toggle-slider"></span>
+                  </span>
+                </label>
+              {/snippet}
+            </SourceRow>
+          {:else}
+            <SourceRow
+              source={s}
+              {onopen}
+              onedit={disabled ? undefined : onedit}
+              ondelete={disabled ? undefined : ondelete}
+              {onrestore}
+              {ondedup}
+              {onfinish}
+            />
+          {/if}
+        {/each}
+      </ul>
+    {/if}
+  </div>
+</Section>
 
 <style>
   .sg-card {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-4);
     min-width: 0;
-  }
-
-  .sg-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--spacing-2) var(--spacing-4);
-    min-width: 0;
-  }
-
-  .sg-head-text {
-    display: flex;
-    flex: 1 1 240px;
-    flex-direction: column;
-    gap: var(--spacing-1);
-    min-width: 0;
-  }
-
-  .sg-title {
-    margin: 0;
-    font-size: var(--font-size-lg);
-    font-weight: 600;
-    line-height: 1.2;
-    color: var(--fg-primary);
-  }
-
-  .sg-desc {
-    margin: 0;
-    font-size: var(--font-size-base);
-    line-height: 1.5;
-    color: var(--fg-secondary);
-  }
-
-  .sg-empty {
-    margin: 0;
-    font-size: var(--font-size-base);
-    line-height: 1.5;
-    color: var(--fg-dim);
   }
 
   .sg-list {
@@ -186,12 +147,21 @@
     list-style: none;
   }
 
+  /* Строки набора — на всю ширину карточки, отступ от края как у строк настроек */
+  .sg-list :global(.sr-row) {
+    padding: 12px var(--card-pad);
+  }
+
+  .sg-list :global(.sr-row:first-child) {
+    border-top: 0;
+  }
+
   .sg-toggle {
     min-height: var(--btn-h, 32px);
   }
 
   @media (pointer: coarse), (max-width: 768px) {
-    .sg-card :global(.btn) {
+    :global([data-testid^='geo-group-'] .btn) {
       min-height: 44px;
     }
 

@@ -3,6 +3,7 @@
   import { t } from '../../../i18n';
   import { showToast } from '../../../stores';
   import Button from '../../Button.svelte';
+  import Section from '../../Section.svelte';
   import Input from '../../Input.svelte';
   import Icon from '../../../lib/components/Icon.svelte';
   import { applyRunning, geodataHolder } from '../../../lib/configLayer';
@@ -74,99 +75,105 @@
 </script>
 
 {#if view && dl}
-  <section class="card geo-dl" aria-labelledby="{uid}-title" data-testid="geo-download">
-    <h3 class="geo-dl-title" id="{uid}-title">{$t('cfg.geo.dl_title')}</h3>
-
-    <div class="geo-dl-proxy">
-      <div class="geo-dl-input" data-testid="geo-ghproxy">
-        <Input id="{uid}-proxy" label={$t('cfg.geo.ghproxy_label')} bind:value={proxy} />
+  <Section title={$t('cfg.geo.dl_title')} testid="geo-download">
+    <div class="card card-rows geo-dl">
+      <div class="card-block geo-dl-proxy-block">
+        <div class="geo-dl-proxy">
+          <div class="geo-dl-input" data-testid="geo-ghproxy">
+            <Input id="{uid}-proxy" label={$t('cfg.geo.ghproxy_label')} bind:value={proxy} />
+          </div>
+          <Button
+            variant="secondary"
+            disabled={!proxyDirty || writeReason !== ''}
+            title={writeReason !== '' ? writeReason : undefined}
+            data-testid="geo-ghproxy-save"
+            onclick={() => (finish = { mode: 'gh_proxy', value: proxy.trim() })}
+          >
+            {$t('cfg.geo.ghproxy_save')}
+          </Button>
+        </div>
+        <p class="geo-hint">{$t('cfg.geo.ghproxy_hint')}</p>
+        {#if writeReason !== ''}
+          <p class="geo-hint" data-testid="geo-dl-reason">{writeReason}</p>
+        {/if}
       </div>
-      <Button
-        variant="secondary"
-        disabled={!proxyDirty || writeReason !== ''}
-        title={writeReason !== '' ? writeReason : undefined}
-        data-testid="geo-ghproxy-save"
-        onclick={() => (finish = { mode: 'gh_proxy', value: proxy.trim() })}
-      >
-        {$t('cfg.geo.ghproxy_save')}
-      </Button>
-    </div>
-    <p class="geo-hint">{$t('cfg.geo.ghproxy_hint')}</p>
-    {#if writeReason !== ''}
-      <p class="geo-hint" data-testid="geo-dl-reason">{writeReason}</p>
-    {/if}
 
-    <div class="geo-dl-row" data-testid="geo-jq-row">
-      {#if dl.jq}
-        <p class="geo-ready">
-          <Icon name="check" size={16} class="geo-ready-icon" />
-          <span>{$t('cfg.geo.ready_jq')}</span>
-        </p>
-      {:else}
-        <div class="alert alert-warning geo-dl-alert">
-          <Icon name="warning" size={16} class="icon-first-line" />
-          <div class="geo-dl-alert-body">
-            <p class="geo-dl-alert-text">{$t('cfg.geo.nojq')}</p>
-            <div>
-              <Button
-                variant="primary"
-                loading={jqBusy}
-                disabled={busyReason !== ''}
-                title={busyReason !== '' ? busyReason : undefined}
-                data-testid="geo-jq-install"
-                onclick={installJq}
-              >
-                {$t('cfg.geo.jq_install')}
-              </Button>
-            </div>
-          </div>
-        </div>
-      {/if}
-
-      {#if jqShown}
-        <div class="geo-jq-run">
-          <p class="geo-jq-status" role="status" data-testid="geo-jq-status">
-            {#if jqBusy}
-              <span class="spinner" aria-hidden="true"></span>
-              {$t('cfg.geo.jq_running')}
-            {:else if dl.jq}
-              {$t('cfg.geo.jq_done')}
-            {:else}
-              {$t('cfg.geo.jq_failed', { reason: dl.jq_error ? reasonText(dl.jq_error) : '?' })}
-            {/if}
+      <div class="card-block geo-dl-row" class:geo-dl-warn={!dl.jq} data-testid="geo-jq-row">
+        {#if dl.jq}
+          <p class="geo-ready">
+            <Icon name="check" size={16} class="geo-ready-icon" />
+            <span>{$t('cfg.geo.ready_jq')}</span>
           </p>
-          <OutputLog job="jq" active={jqBusy} />
-        </div>
-      {/if}
-    </div>
-
-    <div class="geo-dl-row" data-testid="geo-update-row">
-      {#if dl.geofile_update}
-        <p class="geo-ready">
-          <Icon name="check" size={16} class="geo-ready-icon" />
-          <span>{$t('cfg.geo.ready_update')}</span>
-        </p>
-      {:else}
-        <div class="alert alert-warning geo-dl-alert">
-          <Icon name="warning" size={16} class="icon-first-line" />
-          <div class="geo-dl-alert-body">
-            <p class="geo-dl-alert-text">{$t('cfg.geo.update_off')}</p>
-            <div>
-              <Button
-                variant="primary"
-                disabled={writeReason !== ''}
-                title={writeReason !== '' ? writeReason : undefined}
-                data-testid="geo-update-enable"
-                onclick={() => (finish = { mode: 'enable_update' })}
-              >
-                {$t('cfg.geo.update_enable')}
-              </Button>
+        {:else}
+          <div class="geo-dl-alert">
+            <Icon name="warning" size={16} class="icon-first-line geo-dl-alert-icon" />
+            <div class="geo-dl-alert-body">
+              <p class="geo-dl-alert-text">{$t('cfg.geo.nojq')}</p>
+              <div>
+                <Button
+                  variant="primary"
+                  loading={jqBusy}
+                  disabled={busyReason !== ''}
+                  title={busyReason !== '' ? busyReason : undefined}
+                  data-testid="geo-jq-install"
+                  onclick={installJq}
+                >
+                  {$t('cfg.geo.jq_install')}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      {/if}
+        {/if}
+
+        {#if jqShown}
+          <div class="geo-jq-run">
+            <p class="geo-jq-status" role="status" data-testid="geo-jq-status">
+              {#if jqBusy}
+                <span class="spinner" aria-hidden="true"></span>
+                {$t('cfg.geo.jq_running')}
+              {:else if dl.jq}
+                {$t('cfg.geo.jq_done')}
+              {:else}
+                {$t('cfg.geo.jq_failed', { reason: dl.jq_error ? reasonText(dl.jq_error) : '?' })}
+              {/if}
+            </p>
+            <OutputLog job="jq" active={jqBusy} />
+          </div>
+        {/if}
+      </div>
+
+      <div
+        class="card-block geo-dl-row"
+        class:geo-dl-warn={!dl.geofile_update}
+        data-testid="geo-update-row"
+      >
+        {#if dl.geofile_update}
+          <p class="geo-ready">
+            <Icon name="check" size={16} class="geo-ready-icon" />
+            <span>{$t('cfg.geo.ready_update')}</span>
+          </p>
+        {:else}
+          <div class="geo-dl-alert">
+            <Icon name="warning" size={16} class="icon-first-line geo-dl-alert-icon" />
+            <div class="geo-dl-alert-body">
+              <p class="geo-dl-alert-text">{$t('cfg.geo.update_off')}</p>
+              <div>
+                <Button
+                  variant="primary"
+                  disabled={writeReason !== ''}
+                  title={writeReason !== '' ? writeReason : undefined}
+                  data-testid="geo-update-enable"
+                  onclick={() => (finish = { mode: 'enable_update' })}
+                >
+                  {$t('cfg.geo.update_enable')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        {/if}
+      </div>
     </div>
-  </section>
+  </Section>
 
   <FinishModal
     open={finish !== null}
@@ -178,18 +185,14 @@
 
 <style>
   .geo-dl {
+    min-width: 0;
+  }
+
+  .geo-dl-proxy-block {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-2);
     min-width: 0;
-  }
-
-  .geo-dl-title {
-    margin: 0 0 var(--spacing-2);
-    font-size: var(--font-size-lg);
-    font-weight: 600;
-    line-height: 1.2;
-    color: var(--fg-primary);
   }
 
   .geo-dl-proxy {
@@ -246,11 +249,25 @@
     color: var(--success);
   }
 
+  /* Чего не хватает — полоса с акцентом слева во всю ширину карточки, а не рамка в рамке */
+  .geo-dl-warn {
+    background: color-mix(in srgb, var(--warning) 6%, transparent);
+    box-shadow: inset 3px 0 0 var(--warning);
+  }
+
   .geo-dl-alert {
-    margin: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-2);
     min-width: 0;
     font-size: var(--font-size-base);
     line-height: 1.5;
+    color: var(--fg-primary);
+  }
+
+  .geo-dl-alert :global(.geo-dl-alert-icon) {
+    flex-shrink: 0;
+    color: var(--warning);
   }
 
   .geo-dl-alert-body {

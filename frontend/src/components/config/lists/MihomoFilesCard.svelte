@@ -1,10 +1,11 @@
 <script lang="ts">
   import { t, currentLang } from '../../../i18n';
   import Icon from '../../../lib/components/Icon.svelte';
+  import Section from '../../Section.svelte';
   import { formatBytes } from '../../../lib/format';
   import { geodataView } from '../../../lib/configGeodata';
 
-  // Файлы Mihomo (D-25): сворачиваемая карточка только для чтения. Файлы *.mmdb, GeoSite и
+  // Файлы Mihomo (D-25): сворачиваемая секция только для чтения. Файлы *.mmdb, GeoSite и
   // GeoIP лежат отдельно от баз XKeen; панель их не читает и не меняет, поэтому у каждой
   // строки чип «не используется панелью», а действий нет.
   const uid = $props.id();
@@ -22,26 +23,30 @@
   }
 </script>
 
-<section class="card mc" data-testid="geo-mihomo-files">
-  <h3 class="mc-title">
+<Section
+  title={$t('cfg.geo.mihomo_title')}
+  description={$t('cfg.geo.mihomo_desc')}
+  testid="geo-mihomo-files"
+>
+  {#snippet meta()}
     <button
       type="button"
-      class="mc-toggle"
+      class="btn btn-secondary btn-sm mc-toggle"
       aria-expanded={expanded}
       aria-controls="{uid}-body"
       data-testid="geo-mihomo-toggle"
       onclick={() => (expanded = !expanded)}
     >
-      <span>{$t('cfg.geo.mihomo_title')}</span>
-      <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={16} />
+      <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={14} />
+      {expanded ? $t('cfg.section_hide') : $t('cfg.section_show')}
+      <span class="sr-only">{$t('cfg.geo.mihomo_title')}</span>
     </button>
-  </h3>
+  {/snippet}
 
   {#if expanded}
-    <div id="{uid}-body" class="mc-body" data-testid="geo-mihomo-body">
-      <p class="mc-desc">{$t('cfg.geo.mihomo_desc')}</p>
+    <div id="{uid}-body" class="card card-rows mc" data-testid="geo-mihomo-body">
       {#if files.length === 0}
-        <p class="mc-empty" data-testid="geo-mihomo-empty">{$t('cfg.geo.mihomo_empty')}</p>
+        <p class="card-empty" data-testid="geo-mihomo-empty">{$t('cfg.geo.mihomo_empty')}</p>
       {:else}
         <ul class="mc-list" aria-label={$t('cfg.geo.mihomo_title')}>
           {#each files as f (f.name)}
@@ -55,54 +60,11 @@
       {/if}
     </div>
   {/if}
-</section>
+</Section>
 
 <style>
   .mc {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-2);
     min-width: 0;
-  }
-
-  .mc-title {
-    margin: 0;
-    font-size: var(--font-size-lg);
-    font-weight: 600;
-    line-height: 1.2;
-    color: var(--fg-primary);
-  }
-
-  .mc-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--spacing-2);
-    width: 100%;
-    min-height: var(--btn-h, 32px);
-    padding: 0;
-    border: none;
-    background: none;
-    font: inherit;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-    border-radius: var(--radius-sm, 4px);
-  }
-
-  .mc-body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-2);
-    min-width: 0;
-  }
-
-  .mc-desc,
-  .mc-empty {
-    margin: 0;
-    font-size: var(--font-size-base);
-    line-height: 1.5;
-    color: var(--fg-secondary);
   }
 
   .mc-list {
@@ -117,7 +79,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--spacing-1) var(--spacing-2);
-    padding: var(--spacing-2) 0;
+    padding: 10px var(--card-pad);
     border-top: 1px solid var(--border);
     min-width: 0;
   }
@@ -137,5 +99,11 @@
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
     color: var(--fg-secondary);
+  }
+
+  @media (pointer: coarse), (max-width: 768px) {
+    .mc-toggle {
+      min-height: 44px;
+    }
   }
 </style>

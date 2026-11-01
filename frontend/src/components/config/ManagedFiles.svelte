@@ -5,6 +5,7 @@
   import EmptyState from '../EmptyState.svelte';
   import Skeleton from '../Skeleton.svelte';
   import Icon from '../../lib/components/Icon.svelte';
+  import Section from '../Section.svelte';
   import DiffView from './DiffView.svelte';
   import {
     layerSnapshot,
@@ -135,7 +136,20 @@
   }
 </script>
 
-<section class="files-section" data-testid="config-files">
+<Section title={$t('cfg.files_title')} testid="config-files">
+  {#snippet meta()}
+    {#if $driftCount > 0}
+      <button
+        type="button"
+        class="btn btn-secondary btn-sm"
+        disabled={locked}
+        onclick={() => void onRebuildAll()}
+      >
+        {$t('cfg.action.rebuild_all')}
+      </button>
+    {/if}
+  {/snippet}
+
   {#if $driftCount > 0}
     <div class="alert alert-warning drift-alert" role="alert" data-testid="config-drift">
       <Icon name="warning" size={16} />
@@ -146,38 +160,21 @@
     </div>
   {/if}
 
-  <div class="card files-card">
-    <h2 class="card-title">
-      <span>{$t('cfg.files_title')}</span>
-      {#if $driftCount > 0}
-        <!-- Обёртка нужна: глобальные стили .ct-actions > button делают из кнопки значок -->
-        <span class="ct-actions">
-          <span>
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm"
-              disabled={locked}
-              onclick={() => void onRebuildAll()}
-            >
-              {$t('cfg.action.rebuild_all')}
-            </button>
-          </span>
-        </span>
-      {/if}
-    </h2>
-
+  <div class="card card-rows files-card">
     {#if !loaded}
-      <div class="files-skeleton" data-testid="config-files-loading">
+      <div class="card-block files-skeleton" data-testid="config-files-loading">
         <Skeleton type="rect" height="44px" />
         <Skeleton type="rect" height="44px" />
         <Skeleton type="rect" height="44px" />
       </div>
     {:else if files.length === 0}
-      <EmptyState
-        plain
-        title={$t('cfg.files_empty_title')}
-        description={$t('cfg.files_empty_body')}
-      />
+      <div class="card-block">
+        <EmptyState
+          plain
+          title={$t('cfg.files_empty_title')}
+          description={$t('cfg.files_empty_body')}
+        />
+      </div>
     {:else}
       <ul class="file-list" role="list">
         {#each files as f (f.key)}
@@ -257,16 +254,9 @@
       </ul>
     {/if}
   </div>
-</section>
+</Section>
 
 <style>
-  .files-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--grid-gap, 16px);
-    min-width: 0;
-  }
-
   .drift-alert {
     margin: 0;
     align-items: flex-start;
@@ -291,14 +281,13 @@
   }
 
   .files-card {
-    overflow: hidden;
     min-width: 0;
   }
 
   /* Строки идут от края до края карточки: сетка общая для всех строк (subgrid) */
   .file-list {
     list-style: none;
-    margin: 0 calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad));
+    margin: 0;
     padding: 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
@@ -311,8 +300,8 @@
     align-items: center;
     column-gap: 12px;
     row-gap: 8px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border-light);
+    padding: 14px var(--card-pad);
+    border-bottom: 1px solid var(--border);
     font-size: var(--font-size-sm);
     line-height: 1.5;
     min-width: 0;
@@ -322,10 +311,10 @@
     border-bottom: 0;
   }
 
+  /* Расхождение — акцентная полоса слева, как у выбранного ядра на «Сервисах» */
   .file-row-drift {
-    border-left: 3px solid var(--warning);
+    box-shadow: inset 3px 0 0 var(--warning);
     background: color-mix(in srgb, var(--warning) 6%, transparent);
-    padding-left: 13px;
   }
 
   .file-name {
