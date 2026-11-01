@@ -378,6 +378,26 @@ test('cores: Xray лог и политики — поля вне формы и �
     // поле формы не дублируется в «Дополнительно»
     expect(await advanced.inputValue()).not.toContain('"access"');
 
+    // две правки подряд, пока первая ещё пишется: вторая не теряется и ждёт очереди
+    const access2 = '/opt/var/log/xray/access2.log';
+    const errorLog = '/opt/var/log/xray/error2.log';
+    const errorField = page.getByTestId('section-field-xray-log-error');
+    await field.fill(access2);
+    await field.blur();
+    await errorField.fill(errorLog);
+    await errorField.blur();
+    await expect
+      .poll(
+        async () => {
+          const log = inner((await sectionOf(page, 'log'))?.value, 'log');
+          return log.access === access2 && log.error === errorLog && log.maskAddress === 'quarter';
+        },
+        { timeout: T.action }
+      )
+      .toBe(true);
+    await expect(field).toHaveValue(access2);
+    await expect(errorField).toHaveValue(errorLog);
+
     // «Политики»: закреплённые счётчики видны, но не правятся
     await openSection(page, 'policy');
     await takeViaDialog(page, 'policy');

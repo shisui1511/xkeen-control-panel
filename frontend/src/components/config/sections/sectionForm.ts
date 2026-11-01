@@ -7,7 +7,8 @@
 import { get } from 'svelte/store';
 import { t } from '../../../i18n';
 import { saveSection, type CoreKernel, type KeyIssue } from '../../../lib/configCores';
-import { guarded } from './coresOwner';
+import { applyRunning } from '../../../lib/configLayer';
+import { coresBusy, guarded } from './coresOwner';
 
 // --- Умолчания ядер ---
 
@@ -167,30 +168,88 @@ function issueOfError(err: unknown): KeyIssue | null {
   return { key, code: e.code };
 }
 
-/**
- * Записывает значения формы и текст «Дополнительно» секции в черновик. Выполняется под
- * признаком «идёт запрос» (guarded). Отказ по ключу (панельный, закреплённый, повтор,
- * secret контроллера, порт и дубль входящих) возвращается списком проблем, остальные
- * ошибки разбирает guarded (тост, перечитывание слоя). Пустой список — записано либо
- * запрос не выполнялся (идёт другой).
- */
-export async function commitSection(
-  kernel: CoreKernel,
-  id: string,
-  form: unknown,
-  advanced: string
-): Promise<KeyIssue[]> {
+interface QueuedWrite {
+  kernel: CoreKernel;
+  id: string;
+  form: unknown;
+  advanced: string;
+  resolve: (issues: KeyIssue[]) => void;
+}
+
+/** Записи секций, ждущие своей очереди: по одной, последней, на секцию. */
+const queued = new Map<string, QueuedWrite>();
+let draining = false;
+
+/** Одна запись секции под признаком «идёт запрос»; attempted — запрос действительно ушёл. */
+async function writeSection(job: QueuedWrite): Promise<{ attempted: boolean; issues: KeyIssue[] }> {
   const issues: KeyIssue[] = [];
+  let attempted = false;
   await guarded(async () => {
+    attempted = true;
     try {
-      await saveSection(kernel, id, form, advanced);
+      await saveSection(job.kernel, job.id, job.form, job.advanced);
     } catch (err) {
       const issue = issueOfError(err);
       if (issue === null) throw err;
       issues.push(issue);
     }
   });
-  return issues;
+  return { attempted, issues };
+}
+
+/** Выполняет ожидающие записи по одной, когда не идёт другой запрос и «Применить». */
+async function drain(): Promise<void> {
+  if (draining) return;
+  draining = true;
+  try {
+    while (!get(coresBusy) && !get(applyRunning)) {
+      const first = queued.entries().next();
+      if (first.done) return;
+      const [key, job] = first.value;
+      queued.delete(key);
+      const { attempted, issues } = await writeSection(job);
+      if (!attempted) {
+        // запрос перехватил другой: запись возвращается в очередь, если нет более новой
+        if (queued.has(key)) job.resolve([]);
+        else queued.set(key, job);
+        return;
+      }
+      job.resolve(issues);
+    }
+  } finally {
+    draining = false;
+  }
+}
+
+// Очередь разбирается, как только занятость снята
+coresBusy.subscribe((busy) => {
+  if (!busy) void drain();
+});
+applyRunning.subscribe((running) => {
+  if (!running) void drain();
+});
+
+/**
+ * Записывает значения формы и текст «Дополнительно» секции в черновик. Выполняется под
+ * признаком «идёт запрос» (guarded). Если в этот момент идёт другая запись или «Применить»,
+ * запись не теряется, а ждёт очереди: на секцию остаётся последняя, прежняя ожидающая
+ * считается заменённой (пустой список). Отказ по ключу (панельный, закреплённый, повтор,
+ * secret контроллера, порт и дубль входящих) возвращается списком проблем, остальные
+ * ошибки разбирает guarded (тост, перечитывание слоя). Пустой список — записано.
+ */
+export function commitSection(
+  kernel: CoreKernel,
+  id: string,
+  form: unknown,
+  advanced: string
+): Promise<KeyIssue[]> {
+  const key = `${kernel}.${id}`;
+  return new Promise((resolve) => {
+    queued.get(key)?.resolve([]);
+    queued.delete(key);
+    queued.set(key, { kernel, id, form, advanced, resolve });
+    void drain();
+  });
 }
 
 // --- Проверка чисел ---
