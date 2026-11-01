@@ -3,6 +3,7 @@ package cores
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -35,12 +36,18 @@ func mihomoPortInvalid(raw json.RawMessage, lo, hi int) bool {
 	return err != nil || n < lo || n > hi
 }
 
-// mihomoSecretSet сообщает, задан ли непустой secret.
-func mihomoSecretSet(o *configlayer.OrderedObject) bool {
-	raw, ok := o.Get("secret")
-	if !ok {
-		return false
-	}
+// mihomoControllerKeys — ключи, открывающие API ядра по TCP (D-11).
+var mihomoControllerKeys = []string{"external-controller", "external-controller-tls"}
+
+// mihomoTopIDs — секции, ключи которых ложатся в корень профиля
+// (MihomoProfileParts). dns и sniffer — значение одного ключа, верхнеуровневых
+// ключей не несут.
+var mihomoTopIDs = []string{mihomoMain, mihomoInbounds, mihomoOther}
+
+// mihomoControllerSet сообщает, задан ли адрес контроллера: значение не null;
+// строка — непуста после TrimSpace. Любое другое значение JSON считается
+// заданным, так строже.
+func mihomoControllerSet(raw json.RawMessage) bool {
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
 		return strings.TrimSpace(s) != ""
@@ -48,9 +55,84 @@ func mihomoSecretSet(o *configlayer.OrderedObject) bool {
 	return !mihomoIsNull(raw)
 }
 
+// mihomoSecretOK сообщает, что в собранном корне профиля secret есть и каждое его
+// вхождение непусто: строка непуста после TrimSpace, не строка — не null. Пустое
+// вхождение даёт false: корень получил бы пустой или задвоенный secret.
+func mihomoSecretOK(tops []*configlayer.OrderedObject) bool {
+	found := false
+	for _, o := range tops {
+		if o == nil {
+			continue
+		}
+		raw, ok := o.Get("secret")
+		if !ok {
+			continue
+		}
+		found = true
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			if strings.TrimSpace(s) == "" {
+				return false
+			}
+			continue
+		}
+		if mihomoIsNull(raw) {
+			return false
+		}
+	}
+	return found
+}
+
+// mihomoSiblingTops возвращает значения секций mihomoTopIDs, кроме except, как их
+// увидит профиль: только управляемые и непустые. Неуправляемая секция уходит в
+// профиль пресетом, а в пресете secret нет. Ошибку разбора пропускает: её отдаёт
+// проверка самой секции.
+func mihomoSiblingTops(s configlayer.Sections, except string) []*configlayer.OrderedObject {
+	var out []*configlayer.OrderedObject
+	for _, id := range mihomoTopIDs {
+		if id == except {
+			continue
+		}
+		cs, err := configlayer.ParseCoreSection(s[configlayer.CoreSectionName(configlayer.KernelMihomo, id)])
+		if err != nil || !cs.Managed || len(bytes.TrimSpace(cs.Value)) == 0 {
+			continue
+		}
+		if o, perr := configlayer.ParseOrderedObject(cs.Value); perr == nil {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// mihomoControllerIssues отклоняет TCP-контроллер без непустого secret в собранном
+// корне профиля (объект секции плюс соседние секции). В проблемах только имя
+// ключа, значения не выводятся.
+func mihomoControllerIssues(obj *configlayer.OrderedObject, siblings []*configlayer.OrderedObject) []configlayer.KeyIssue {
+	var out []configlayer.KeyIssue
+	tops := append([]*configlayer.OrderedObject{obj}, siblings...)
+	for _, k := range mihomoControllerKeys {
+		raw, ok := obj.Get(k)
+		if !ok || !mihomoControllerSet(raw) {
+			continue
+		}
+		if !mihomoSecretOK(tops) {
+			out = append(out, configlayer.KeyIssue{Key: k, Code: configlayer.IssueControllerNoSecret})
+		}
+	}
+	return out
+}
+
 // MihomoValueIssues проверяет значение секции Mihomo до записи и возвращает
 // проблемы по ключам. Значение, не являющееся объектом, — core_section_invalid.
+// secret контроллера ищется только в самой секции; по всем секциям профиля
+// проверяют CheckMihomo, Service.Save и Service.ParseRaw.
 func MihomoValueIssues(id string, value json.RawMessage) []configlayer.KeyIssue {
+	return mihomoValueIssues(id, value, nil)
+}
+
+// mihomoValueIssues — MihomoValueIssues с соседними секциями, из которых берётся
+// secret контроллера.
+func mihomoValueIssues(id string, value json.RawMessage, siblings []*configlayer.OrderedObject) []configlayer.KeyIssue {
 	obj, err := configlayer.ParseOrderedObject(value)
 	if err != nil {
 		return []configlayer.KeyIssue{{Code: configlayer.IssueCoreSectionInvalid}}
@@ -63,14 +145,6 @@ func MihomoValueIssues(id string, value json.RawMessage) []configlayer.KeyIssue 
 		for _, k := range obj.Keys() {
 			if mihomoRoutingKeys[k] || mihomoPinnedTop[k] || mihomoOwnKeys[k] {
 				add(k, configlayer.IssueRawReserved)
-			}
-		}
-		// API Mihomo по TCP открыт в LAN: без непустого secret «Применить»
-		// блокируется (D-11). Панель сама ходит через unix-сокет.
-		if raw, ok := obj.Get("external-controller"); ok {
-			var addr string
-			if json.Unmarshal(raw, &addr) == nil && strings.TrimSpace(addr) != "" && !mihomoSecretSet(obj) {
-				add("external-controller", configlayer.IssueControllerNoSecret)
 			}
 		}
 	case mihomoMain:
@@ -127,11 +201,20 @@ func MihomoValueIssues(id string, value json.RawMessage) []configlayer.KeyIssue 
 			add("tun", configlayer.IssueCoreSectionInvalid)
 		}
 	}
+	// API Mihomo по TCP открыт в LAN: без непустого secret в собранном корне
+	// профиля «Применить» блокируется (D-11). Панель сама ходит через
+	// unix-сокет. Проверка после switch: break в ветке «Входящих» не должен её
+	// пропускать.
+	if slices.Contains(mihomoTopIDs, id) {
+		out = append(out, mihomoControllerIssues(obj, siblings)...)
+	}
 	return out
 }
 
 // CheckMihomo проверяет секции Mihomo черновика до записи. Mihomo не
-// установлен — проблем нет. Диск не читается.
+// установлен — проблем нет. Диск не читается. Проверка идёт до записи при любом
+// триггере и источнике, поэтому профиль с открытым контроллером не пишется;
+// secret контроллера разрешается по всем управляемым секциям main, inbounds, other.
 func CheckMihomo(in configlayer.Input, installed configlayer.InstalledKernels) []configlayer.BuildIssue {
 	if !installed.Mihomo {
 		return nil
@@ -147,7 +230,7 @@ func CheckMihomo(in configlayer.Input, installed configlayer.InstalledKernels) [
 		if !cs.Managed || len(bytes.TrimSpace(cs.Value)) == 0 {
 			continue
 		}
-		for _, is := range MihomoValueIssues(id, cs.Value) {
+		for _, is := range mihomoValueIssues(id, cs.Value, mihomoSiblingTops(in.Sections, id)) {
 			bi := configlayer.BuildIssue{Key: name, Code: is.Code}
 			if is.Key != "" {
 				bi.Params = map[string]string{"key": is.Key}
