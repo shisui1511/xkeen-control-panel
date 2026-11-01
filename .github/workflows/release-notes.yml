@@ -1,0 +1,91 @@
+name: Release Notes
+
+# Перегенерация описаний уже опубликованных релизов текущим .github/scripts/gen_notes.py:
+# после правки генератора старые тела переписываются тем же форматом, что у новых.
+# Шапка тела — блок xcp-release (его читают панели) и строка о регрессии красного пре-релиза,
+# обе пишет auto_release.sh finalize — остаётся как есть; тело без блока остаётся без блока.
+# Запуск только вручную; очередь общая с автовыпуском, чтобы не затереть блок, который finalize пишет в это же время.
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Теги через пробел; пусто — 30 последних релизов (столько читает панель)'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Только показать новые тела, ничего не менять'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Regenerate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAGS: ${{ inputs.tags }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          SOAK_HOURS: ${{ vars.RC_SOAK_HOURS || '24' }}
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          if [ -z "$TAGS" ]; then
+            TAGS=$(gh release list --limit 30 --exclude-drafts --json tagName --jq '.[].tagName')
+          fi
+          marker_re='^<!-- xcp-release: \{"urgent":(true|false),"hold":(true|false)\} -->$'
+          regression=$(sed -n "s/^REGRESSION_LINE='\(.*\)'$/\1/p" .github/scripts/auto_release.sh)
+          changed=0
+          for tag in $TAGS; do
+            if ! [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc)\.[0-9]+)?$ ]]; then
+              echo "::warning::$tag — не тег релиза, пропущен"
+              continue
+            fi
+            if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "::warning::$tag — тега нет в репозитории, пропущен"
+              continue
+            fi
+            mode=stable
+            [ "$(gh release view "$tag" --json isPrerelease --jq .isPrerelease)" = true ] && mode=beta
+            old=$(gh release view "$tag" --json body --jq .body | tr -d '\r')
+            # Без конвейеров с head/grep -q: при pipefail ранний выход читателя роняет шаг (SIGPIPE)
+            first=${old%%$'\n'*}
+            rest=${old#*$'\n'}
+            second=${rest%%$'\n'*}
+            new=$(python3 .github/scripts/gen_notes.py "$tag" "$mode")
+            if [[ $first =~ $marker_re ]]; then
+              top="$first"
+              if [ -n "$regression" ] && [ "$second" = "$regression" ]; then
+                top="$top"$'\n'"$regression"
+              fi
+              new=$(printf '%s\n\n%s' "$top" "$new")
+            fi
+            if [ "$new" = "$old" ]; then
+              echo "= $tag ($mode): без изменений"
+              continue
+            fi
+            echo "~ $tag ($mode): ${#old} → ${#new} символов"
+            changed=$((changed + 1))
+            if [ "$DRY_RUN" = true ]; then
+              echo "::group::$tag — новое тело"
+              printf '%s\n' "$new"
+              echo "::endgroup::"
+              continue
+            fi
+            tmp=$(mktemp)
+            printf '%s\n' "$new" > "$tmp"
+            gh release edit "$tag" --notes-file "$tmp" >/dev/null
+            rm -f "$tmp"
+          done
+          echo "Изменено тел: $changed (dry_run=$DRY_RUN)"

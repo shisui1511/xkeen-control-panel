@@ -16,10 +16,25 @@ xcp-release block the panels read (contract: .github/scripts/auto_release.sh); a
 malformed RELEASE_MARKER is written as {"urgent":false,"hold":true}, so a fresh release never goes
 to auto-install on an unread stop. For beta and stable the notes then open with the pre-release banner (beta only: X.Y.0 stable after the hold and a green stand
 smoke, X.Y.Z with Z>0 right after the smoke), then the panel description and a "## Что вошло"
-list (titles of merged PRs of the prev..tag range that contain feat/fix/perf/refactor/revert
-commits, dependency bumps skipped; omitted when there are none). The architecture table is
+list (titles of merged PRs of the prev..tag range that contain user-facing feat/fix/perf/refactor/
+revert commits, dependency bumps skipped; omitted when there are none). The architecture table is
 followed by a note that MIPS is experimental.
-Also appends PREV_TAG and SHORT_SHA to $GITHUB_ENV.
+
+The range: a stable release lists everything since the previous stable (the "Основной" channel
+never sees pre-releases); a pre-release lists only what is new since the previous published
+release of any kind (the panel shows every release between the installed and the new version in
+a row, so cumulative notes would repeat), and the footer links both that diff and the full one
+since the last stable.
+
+Only what the user of the panel can notice gets into the lists: test/ci/chore/docs/build commits,
+merge and "wave" commits, commits of the developer tooling scopes (DEV_SCOPES) and dependency
+bumps are skipped, review codes like "WR-01" or "G-147-3" are cut from the text, repeats are
+dropped, a section longer than MAX_SECTION_ITEMS is cut with a pointer to the full diff.
+
+`gen_notes.py VERSION MODE` (arguments instead of env, GITHUB_REPOSITORY still from env) prints
+the notes for an existing tag to stdout without the xcp-release block and without touching
+$GITHUB_ENV: the release-notes workflow regenerates published releases with it.
+Otherwise appends PREV_TAG and SHORT_SHA to $GITHUB_ENV.
 """
 
 import os
@@ -33,9 +48,83 @@ def git(*args):
     return result.stdout.strip()
 
 
+RELEASE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(?:-(beta|rc)\.(\d+))?$")
+
+
+def version_key(tag):
+    """Ключ сортировки тега релиза: стабильная версия старше своих beta/rc; не релиз — None."""
+    m = RELEASE_TAG.match(tag)
+    if not m:
+        return None
+    major, minor, patch, kind, num = m.groups()
+    pre = (1, 0) if kind is None else (0, int(num))
+    return (int(major), int(minor), int(patch)) + pre
+
+
+def release_tags():
+    """Теги опубликованных видов релизов (stable, -beta.N, старые -rc.N) от старых к новым.
+    Сборки -alpha.N релизами не публикуются и в расчёт не идут."""
+    raw = git("tag", "-l")
+    tags = [t for t in raw.split("\n") if t and version_key(t)]
+    return sorted(tags, key=version_key)
+
+
 def get_stable_tags():
-    raw = git("tag", "-l", "--sort=version:refname")
-    return [t for t in raw.split("\n") if t and re.match(r"^v\d+\.\d+\.\d+$", t)]
+    return [t for t in release_tags() if re.match(r"^v\d+\.\d+\.\d+$", t)]
+
+
+def previous_release(version):
+    """Ближайший более старый тег stable/beta/rc: база списка изменений пре-релиза."""
+    key = version_key(version)
+    older = [t for t in release_tags() if key is None or version_key(t) < key]
+    return older[-1] if older else ""
+
+
+# Области инструментов разработки: стенд, уборка, e2e, CI, хуки. В панели и установщике их не видно
+DEV_SCOPES = {
+    "router", "router-test", "rt", "tidy", "e2e", "test", "tests", "ci", "hooks", "build", "make",
+    "deploy", "deps", "deps-dev", "dev", "lint", "gsd", "planning",
+}
+# Типы, которые пользователю показываются, и раздел для каждого
+SECTION_OF = {
+    "feat": "feat", "fix": "fix", "security": "fix",
+    "perf": "other", "refactor": "other", "revert": "other", "style": "other",
+}
+CONVENTIONAL = re.compile(r"^([a-z]+)(?:\(([^)]*)\))?!?:\s*")
+# Служебные коммиты слияний и волн агентов: «chore: merge executor worktree (…)», «слияние main …»
+SERVICE_SUBJECT = re.compile(
+    r"^(merge\b|слияние\b|волна\s+\d)|worktree-agent-", re.IGNORECASE
+)
+# Коды замечаний ревью в начале текста: «WR-01», «IN-05», «CR-02», «G-147-3», «T-147-19»,
+# «WR-01/WR-02», «D-12»
+REVIEW_CODES = re.compile(r"^(?:(?:WR|IN|CR|G|T|D)-\d+(?:[-.]\d+)*[/,]?\s*)+")
+# Строк в одном разделе не больше: тело релиза GitHub ограничено 125 000 символами,
+# а панель скачивает тела 30 последних релизов
+MAX_SECTION_ITEMS = 120
+
+
+def entry_text(subject):
+    """Текст строки списка: без префикса Conventional Commits и кодов ревью, с заглавной буквы.
+    Пустая строка — коммит в заметки не идёт."""
+    m = CONVENTIONAL.match(subject)
+    ctype, scope = (m.group(1), (m.group(2) or "").strip().lower()) if m else ("", "")
+    if m and (ctype not in SECTION_OF or scope in DEV_SCOPES):
+        return "", ""
+    text = subject[m.end():] if m else subject
+    if SERVICE_SUBJECT.search(text) or DEPS_TITLE.match(text):
+        return "", ""
+    text = REVIEW_CODES.sub("", text).strip()
+    if not text:
+        return "", ""
+    return SECTION_OF.get(ctype, "other"), capitalize(text)
+
+
+def capitalize(text):
+    """Первая буква заглавная, если первое слово — обычное слово, а не имя вроде jq или xkeen."""
+    word = text.split(" ", 1)[0]
+    if word.isalpha() and word.islower() and re.match(r"[а-яё]", word):
+        return text[0].upper() + text[1:]
+    return text
 
 
 def parse_commits(range_spec):
@@ -46,7 +135,8 @@ def parse_commits(range_spec):
     except Exception:
         return [], [], []
 
-    feats, fixes, others = [], [], []
+    groups = {"feat": [], "fix": [], "other": []}
+    seen = set()
     for line in raw.split("\n"):
         if not line or "\x1f" not in line:
             continue
@@ -56,28 +146,34 @@ def parse_commits(range_spec):
         subject, short_h, full_h = parts
         if subject.startswith("Merge "):
             continue
+        section, clean = entry_text(subject)
+        if not clean or clean.lower() in seen:
+            continue
+        seen.add(clean.lower())
         link = f"[`{short_h}`]({repo_url}/commit/{full_h})"
-        # Strip conventional commit prefix: feat(scope): text → text
-        clean = re.sub(r"^[a-z]+(\([^)]+\))?!?:\s*", "", subject)
-        entry = f"- {clean} {link}"
-        if re.match(r"^feat", subject):
-            feats.append(entry)
-        elif re.match(r"^fix|^security", subject):
-            fixes.append(entry)
-        else:
-            others.append(entry)
+        groups[section].append(f"- {clean} {link}")
 
-    return feats, fixes, others
+    return groups["feat"], groups["fix"], groups["other"]
 
 
-def build_changelog(feats, fixes, others):
+def capped(entries, more_url):
+    """Раздел не длиннее MAX_SECTION_ITEMS строк, остаток — ссылкой на полный список."""
+    if len(entries) <= MAX_SECTION_ITEMS:
+        return entries
+    rest = len(entries) - MAX_SECTION_ITEMS
+    # Простым текстом: панель (frontend/src/lib/releaseNotes.ts) разметку ссылок в строках не разбирает
+    tail = f"- …и ещё {rest} — полный список по ссылке внизу" if more_url else f"- …и ещё {rest}"
+    return entries[:MAX_SECTION_ITEMS] + [tail]
+
+
+def build_changelog(feats, fixes, others, more_url=""):
     sections = []
     if feats:
-        sections.append("### 🚀 Новые возможности\n\n" + "\n".join(feats))
+        sections.append("### 🚀 Новые возможности\n\n" + "\n".join(capped(feats, more_url)))
     if fixes:
-        sections.append("### 🐛 Исправления\n\n" + "\n".join(fixes))
+        sections.append("### 🐛 Исправления\n\n" + "\n".join(capped(fixes, more_url)))
     if others:
-        sections.append("### ⚙️ Прочее\n\n" + "\n".join(others))
+        sections.append("### ⚙️ Прочее\n\n" + "\n".join(capped(others, more_url)))
     return "\n\n".join(sections) if sections else "_Список изменений недоступен._"
 
 
@@ -117,11 +213,12 @@ def included_list(range_spec):
         title = next((line for line in body.split("\n") if line.strip()), "")
         if not title:
             continue
-        inner = git("log", "--format=%s%n%b", f"{merge}^1..{merge}^2")
-        if not WORTHY.search(inner):
+        inner = git("log", "--no-merges", "--format=%s", f"{merge}^1..{merge}^2").split("\n")
+        if not any(WORTHY.search(s) and entry_text(s)[1] for s in inner if s):
             continue
-        title = clean_title(title)
-        if title and not DEPS_TITLE.match(title) and title not in titles:
+        title = capitalize(REVIEW_CODES.sub("", clean_title(title)).strip())
+        if title and not DEPS_TITLE.match(title) and not SERVICE_SUBJECT.search(title) \
+                and title not in titles:
             titles.append(title)
     return titles
 
@@ -139,20 +236,30 @@ def arch_table(version):
     )
 
 
-def stable_notes(version, prev_tag, banner=""):
+def stable_notes(version, prev_tag, banner="", stable_tag=""):
+    """prev_tag — база списка изменений; stable_tag (только у пре-релиза) — последний stable
+    для второй ссылки «все изменения», если база списка — другой пре-релиз."""
     repo = os.environ["GITHUB_REPOSITORY"]
     repo_url = f"https://github.com/{repo}"
 
+    compare_url = ""
     if prev_tag and prev_tag != version:
         range_spec = f"{prev_tag}..{version}"
         compare_url = f"{repo_url}/compare/{prev_tag}...{version}"
-        compare_line = f"**[Все изменения: {prev_tag} → {version}]({compare_url})**"
+        if stable_tag and stable_tag != prev_tag:
+            compare_line = (
+                f"**[Изменения с прошлого пре-релиза: {prev_tag} → {version}]({compare_url})**"
+                f" · [все с последнего стабильного: {stable_tag} → {version}]"
+                f"({repo_url}/compare/{stable_tag}...{version})"
+            )
+        else:
+            compare_line = f"**[Все изменения: {prev_tag} → {version}]({compare_url})**"
     else:
         range_spec = "HEAD~30..HEAD"
         compare_line = f"**[История релизов]({repo_url}/releases)**"
 
     feats, fixes, others = parse_commits(range_spec)
-    changelog = build_changelog(feats, fixes, others)
+    changelog = build_changelog(feats, fixes, others, compare_url)
 
     included = included_list(range_spec)
     head = banner.rstrip("\n") + "\n\n" if banner else ""
@@ -174,16 +281,14 @@ def stable_notes(version, prev_tag, banner=""):
 curl -Ls https://raw.githubusercontent.com/{repo}/main/scripts/setup.sh | sh
 ```
 
-**Ручная установка (пример для ARM64):**
+**Ручная установка с проверкой SHA256 (пример для ARM64):**
 ```sh
-curl -fL -o /opt/sbin/xcp \\
-  "https://github.com/{repo}/releases/download/{version}/xcp_{version}_arm64"
-chmod +x /opt/sbin/xcp
-```
-
-**Верификация SHA256:**
-```sh
-sha256sum -c xcp_{version}_arm64.sha256
+cd /tmp
+curl -fLO "https://github.com/{repo}/releases/download/{version}/xcp_{version}_arm64"
+curl -fLO "https://github.com/{repo}/releases/download/{version}/xcp_{version}_arm64.sha256"
+sha256sum -c xcp_{version}_arm64.sha256 && \\
+  mv xcp_{version}_arm64 /opt/sbin/xcp && chmod +x /opt/sbin/xcp && \\
+  /opt/etc/init.d/S99xcp restart
 ```
 
 ---
@@ -192,7 +297,7 @@ sha256sum -c xcp_{version}_arm64.sha256
 """
 
 
-def beta_notes(version, prev_tag):
+def beta_notes(version, prev_tag, stable_tag=""):
     repo_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}"
     base = version.split("-")[0]
     soak = os.environ.get("SOAK_HOURS", "24")
@@ -218,7 +323,7 @@ def beta_notes(version, prev_tag):
         f"> Нашли проблему — [сообщите о регрессии]"
         f"({repo_url}/issues/new?template=regression.yml).\n"
     )
-    return stable_notes(version, prev_tag, banner)
+    return stable_notes(version, prev_tag, banner, stable_tag)
 
 
 # Блок xcp-release первой строки тела: формат пишет auto_release.sh (marker и finalize)
@@ -235,24 +340,32 @@ def release_marker():
     return MARKER_FALLBACK
 
 
+def notes_for(version, mode):
+    """(заметки без блока xcp-release, база списка изменений)."""
+    stable_tags = get_stable_tags()
+    base_version = version.split("-")[0]
+    last_stable = next((t for t in reversed(stable_tags)
+                        if t != base_version and version_key(t) < version_key(version)), "")
+    if mode == "beta":
+        prev_tag = previous_release(version) or last_stable
+        return beta_notes(version, prev_tag, last_stable), prev_tag
+    # For stable: prev is the stable tag before current version
+    return stable_notes(version, last_stable), last_stable
+
+
 def main():
+    if len(sys.argv) == 3:
+        notes, _ = notes_for(sys.argv[1], sys.argv[2])
+        sys.stdout.write(notes)
+        return
+
     mode = os.environ.get("MODE", "stable")
     version = os.environ["VERSION"]
     full_sha = os.environ.get("GITHUB_SHA", "")
     short_sha = full_sha[:7]
     github_env = os.environ.get("GITHUB_ENV", "")
 
-    stable_tags = get_stable_tags()
-
-    if mode == "beta":
-        base_version = version.split("-")[0]
-        prev_tag = next((t for t in reversed(stable_tags) if t != base_version), "")
-        notes = beta_notes(version, prev_tag)
-    else:
-        # For stable: prev is the tag before current version
-        prev_tag = next((t for t in reversed(stable_tags) if t != version), "")
-        notes = stable_notes(version, prev_tag)
-
+    notes, prev_tag = notes_for(version, mode)
     notes = release_marker() + "\n\n" + notes
 
     with open("/tmp/release-notes.md", "w") as f:
