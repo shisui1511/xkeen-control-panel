@@ -368,6 +368,11 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		if !blocked && DesiredRouting(src).Managed {
 			blocked = len(routingDrift(p.d.Roots, snap.Routing, installed, req.Kernel, p.d.ForeignOwned)) > 0
 		}
+		// Чужой файл с ключом взятой секции блокирует запуск, который эту секцию
+		// держит (managed); запуск с managed=false — «Отпустить» — не блокируется.
+		if !blocked {
+			blocked = sectionDriftBlocks(src, sectionsDrift(p.d.Roots, snap.Cores, installed, req.Kernel, p.d.ForeignOwned))
+		}
 		if blocked {
 			p.setStep(StepBuild, StepFailed, "", ErrDriftBlocked.Error())
 			return p.finish(ResultView{Code: ResultDriftBlocked, Message: ErrDriftBlocked.Error()})
@@ -404,6 +409,18 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		// Взятие и возврат маршрутизации — часть этого же плана: проверка ядрами
 		// идёт на итоговой раскладке, запись и откат общие.
 		plan.Routing, err = p.planRouting(src, snap.Routing, installed, req)
+	}
+	if err == nil {
+		// Секции Xray (взятие и возврат файлов, D-01) идут теми же операциями.
+		plan.Routing, err = p.planCores(src, snap.Cores, plan.Routing, installed, req)
+	}
+	if err == nil && req.Source == SourceDraft && len(req.Only) == 0 {
+		// Смена порта прозрачного входящего или tun — полный перезапуск вместо
+		// горячей перезагрузки Mihomo (D-16): правила XKeen пересобираются только им.
+		// Тот же расчёт, что и у объявления в снимке; на переходе владения
+		// сравнивается значение по ту сторону перехода (G-147-3).
+		base := restartBase(p.d.Roots, snap, src, installed, p.d.ForeignOwned)
+		plan.FullRestart = fullRestartOf(RestartReasons(snap.Applied, src, base))
 	}
 	if err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
@@ -474,7 +491,8 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 		return p.finish(p.rollbackAfterCommitFailure(ctx, out.Set, views, err))
 	}
 	// Ротация копий — после успешного применения; сбой уборки применение не отменяет.
-	_ = PruneBackups(p.d.DataDir, BackupRetention, p.d.Store.Snapshot().Routing.backupDirs()...)
+	kept := p.d.Store.Snapshot()
+	_ = PruneBackups(p.d.DataDir, BackupRetention, append(kept.Routing.backupDirs(), kept.Cores.backupDirs()...)...)
 	return p.finish(ResultView{OK: true, Code: ResultApplied, Written: out.Written, OrphansRemoved: out.OrphansRemoved})
 }
 
@@ -658,6 +676,9 @@ func (p *Pipeline) commitState(plan Plan, src Sections, req ApplyRequest, used I
 		}
 		if plan.Routing != nil {
 			st.Routing = plan.Routing.Next.clone()
+			if plan.Routing.NextCores != nil {
+				st.Cores = plan.Routing.NextCores.clone()
+			}
 		}
 		// Живые данные фиксируются в той же записи, что и манифест (RESEARCH
 		// Pitfall 3): отказ хука отменяет и манифест.

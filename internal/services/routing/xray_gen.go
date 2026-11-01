@@ -14,6 +14,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
 
@@ -28,6 +29,8 @@ const (
 	xrayRoutingFile = "99_xcp-routing.json"
 	// xrayObservatoryFile — burstObservatory; файл есть только при balancer.
 	xrayObservatoryFile = "99_xcp-observatory.json"
+	// defaultXrayAPIPort — порт API Xray, когда настройка панели не задана.
+	defaultXrayAPIPort = 10085
 )
 
 // Теги исходящих панели в Xray.
@@ -169,6 +172,17 @@ type xrayBuild struct {
 	// autoOK и fallbackOK — режимы «авто» и «резерв» доступны на версии Xray.
 	autoOK, fallbackOK bool
 	apiInbound         bool
+	// forceTags — теги входящих force-proxy* (D-12); forceGroup — группа, в которую
+	// их ведёт правило первым. Пусто или nil — правила нет.
+	forceTags  []string
+	forceGroup *Group
+	// foreignAPI — ключ api уже есть в чужих файлах configs/ (у ключа один
+	// владелец, файл api панель не пишет); foreignObservatory — в чужих файлах
+	// есть observatory или burstObservatory (ObservatoryService без наблюдения
+	// Xray не стартует); apiOK — версия Xray умеет api.listen
+	// (FeatureXrayHotSwapAPI); apiPort — порт API из настроек панели.
+	foreignAPI, foreignObservatory, apiOK bool
+	apiPort                               int
 
 	byID      map[string]*Group
 	nodeByRef map[string]sources.CatalogNode
@@ -373,6 +387,13 @@ func (b *xrayBuild) build() ([]configlayer.GeneratedFile, error) {
 		// D-43: правило api первым, входящий api остаётся в чужом файле.
 		rules = append(rules, map[string]any{"inboundTag": []string{"api"}, "outboundTag": "api"})
 	}
+	if len(b.forceTags) > 0 && b.forceGroup != nil {
+		// D-12: входящие force-proxy* XKeen идут в выбранную группу раньше правил
+		// пользователя. Нет группы — правила нет, «Применить» блокирует проверка
+		// force_proxy_group_missing.
+		field, tag := b.xrayTarget(Target{Kind: KindGroup, ID: b.forceGroup.ID})
+		rules = append(rules, map[string]any{"inboundTag": b.forceTags, field: tag})
+	}
 	rules = append(rules, b.loopRules...)
 	for i, r := range b.rules.Items {
 		rule, ok, err := b.xrayRule(r)
@@ -427,15 +448,13 @@ func (b *xrayBuild) build() ([]configlayer.GeneratedFile, error) {
 	}
 	if len(balancers) > 0 {
 		sort.Strings(subjects)
+		ping, err := b.pingConfig()
+		if err != nil {
+			return nil, err
+		}
 		obsJSON, err := xrayJSON(map[string]any{"burstObservatory": map[string]any{
 			"subjectSelector": subjects,
-			"pingConfig": map[string]any{
-				"destination":  b.probe.URL,
-				"connectivity": "",
-				"interval":     strconv.Itoa(b.probe.IntervalS) + "s",
-				"timeout":      strconv.Itoa(b.probe.TimeoutS) + "s",
-				"sampling":     ProbeSampling,
-			},
+			"pingConfig":      ping,
 		}})
 		if err != nil {
 			return nil, err
@@ -444,7 +463,70 @@ func (b *xrayBuild) build() ([]configlayer.GeneratedFile, error) {
 			Kernel: configlayer.KernelXray, RelPath: xrayObservatoryFile, Kind: configlayer.KindXrayJSON, Content: obsJSON,
 		})
 	}
+	if !b.foreignAPI && b.apiOK {
+		apiJSON, err := b.apiFile(len(balancers) > 0)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, configlayer.GeneratedFile{
+			Kernel: configlayer.KernelXray, RelPath: configlayer.PanelXrayAPIFile, Kind: configlayer.KindXrayJSON, Content: apiJSON,
+		})
+	}
 	return files, nil
+}
+
+// apiFile — блок api панели (143 Q5): api.listen на loopback и нужные services,
+// stats {} для счётчиков. Без входящего dokodemo-door, правила api, policy и
+// routing: замена объекта целиком стёрла бы ключи чужих файлов. ObservatoryService
+// входит, только если наблюдение есть в итоговой раскладке: панель пишет файл
+// наблюдения или он лежит в чужих файлах.
+func (b *xrayBuild) apiFile(ownObservatory bool) ([]byte, error) {
+	services := []string{"HandlerService", "LoggerService", "RoutingService", "StatsService"}
+	if ownObservatory || b.foreignObservatory {
+		services = append(services, "ObservatoryService")
+	}
+	sort.Strings(services)
+	port := b.apiPort
+	if port <= 0 {
+		port = defaultXrayAPIPort
+	}
+	return xrayJSON(map[string]any{
+		"api": map[string]any{
+			"tag":      "api",
+			"listen":   "127.0.0.1:" + strconv.Itoa(port),
+			"services": services,
+		},
+		"stats": map[string]any{},
+	})
+}
+
+// pingConfig собирает pingConfig из настроек проб: поля формы, затем остальные
+// ключи Extra (D-13). Ключи, которыми управляют форма и группы, из Extra не
+// берутся: их отсекает проверка до записи, здесь защита от черновика в обход неё.
+func (b *xrayBuild) pingConfig() (map[string]any, error) {
+	sampling := b.probe.Sampling
+	if sampling == 0 {
+		sampling = ProbeSampling
+	}
+	ping := map[string]any{}
+	if !isEmptyRaw(b.probe.Extra) {
+		var extra map[string]json.RawMessage
+		if err := json.Unmarshal(b.probe.Extra, &extra); err != nil {
+			return nil, invalid(ProbeSection, reasonSectionInvalid)
+		}
+		for k, v := range extra {
+			ping[k] = v
+		}
+	}
+	for _, k := range probeReservedKeys {
+		delete(ping, k)
+	}
+	ping["destination"] = b.probe.URL
+	ping["connectivity"] = b.probe.Connectivity
+	ping["interval"] = strconv.Itoa(b.probe.IntervalS) + "s"
+	ping["timeout"] = strconv.Itoa(b.probe.TimeoutS) + "s"
+	ping["sampling"] = sampling
+	return ping, nil
 }
 
 // checkSelectors проверяет, что тег узла в selector не является началом другого
@@ -499,6 +581,16 @@ func xrayJSON(v any) ([]byte, error) {
 // неопределённая версия функции не выключает (T-144-05).
 func (s *Service) xrayModeAvailable(f configlayer.Feature) bool {
 	return configlayer.FeatureAvailable(configlayer.KernelXray, s.d.KernelVersion(configlayer.KernelXray), f) != configlayer.Unavailable
+}
+
+// xrayAPIPort — порт API Xray из настроек панели.
+func (s *Service) xrayAPIPort() int {
+	if s.d.XrayAPIPort != nil {
+		if p := s.d.XrayAPIPort(); p > 0 {
+			return p
+		}
+	}
+	return defaultXrayAPIPort
 }
 
 // liveSelection читает Live[selection]: ID группы → участник. Порча живых данных
@@ -571,13 +663,23 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 
 	autoOK := s.xrayModeAvailable(configlayer.FeatureXrayAutoGroup)
 	fallbackOK := s.xrayModeAvailable(configlayer.FeatureXrayFallbackGroup)
+	apiOK := s.xrayModeAvailable(configlayer.FeatureXrayHotSwapAPI)
+	apiPort := s.xrayAPIPort()
+	forceTags := xrayForceProxyTags(in)
+	var forceGroup *Group
+	if g, ok := forceProxyTarget(in, groups.Items, configlayer.KernelXray); ok && len(forceTags) > 0 {
+		forceGroup = &g
+	}
 
 	parts := []string{
 		xrayGenID, string(in.Mode), s.d.GOARCH,
 		strconv.FormatBool(autoOK), strconv.FormatBool(fallbackOK),
 		strconv.FormatBool(in.Routing.XrayAPIInbound),
+		strconv.FormatBool(in.Routing.XrayForeignAPI), strconv.FormatBool(in.Routing.XrayObservatory),
+		strconv.FormatBool(apiOK), strconv.Itoa(apiPort),
 		string(in.Sections[GroupsSection]), string(in.Sections[RulesSection]), string(in.Sections[ProbeSection]),
 		string(in.Live[LiveKeySelection]),
+		strings.Join(forceTags, ","), forceGroupID(forceGroup),
 	}
 	for _, n := range cat.Xray {
 		parts = append(parts, n.Ref, n.XrayTag, n.Node.Name, n.Node.Text)
@@ -591,6 +693,9 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 		groups: groups.Items, rules: rules, probe: probe, catalog: cat.Xray,
 		live: liveSelection(in.Live), autoOK: autoOK, fallbackOK: fallbackOK,
 		apiInbound: in.Routing.XrayAPIInbound,
+		forceTags:  forceTags, forceGroup: forceGroup,
+		foreignAPI: in.Routing.XrayForeignAPI, foreignObservatory: in.Routing.XrayObservatory,
+		apiOK: apiOK, apiPort: apiPort,
 	})
 	files, err := b.build()
 	if err != nil {
@@ -598,4 +703,69 @@ func (s *Service) generateXray(in configlayer.Input, installed configlayer.Insta
 	}
 	s.genPut(key, files)
 	return slices.Clone(files), nil
+}
+
+// forceProxyTarget возвращает группу, в которую идут входящие force-proxy*:
+// force_proxy_group секции «Входящие» ядра, а если не задана — группа «Прокси».
+// false — выбранной группы нет (удалена или не создана).
+func forceProxyTarget(in configlayer.Input, groups []Group, kernel string) (Group, bool) {
+	section := configlayer.SectionXrayInbounds
+	if kernel == configlayer.KernelMihomo {
+		section = configlayer.SectionMihomoInbounds
+	}
+	if id := configlayer.DesiredCores(in.Sections)[section].ForceProxyGroup; id != "" {
+		for _, g := range groups {
+			if g.ID == id {
+				return g, true
+			}
+		}
+		return Group{}, false
+	}
+	if g := findGroupByName(groups, defaultProxyGroupName); g != nil {
+		return *g, true
+	}
+	return Group{}, false
+}
+
+// forceGroupID — ID выбранной группы для ключа кэша; пусто, если правила нет.
+func forceGroupID(g *Group) string {
+	if g == nil {
+		return ""
+	}
+	return g.ID
+}
+
+// xrayForceProxyTags возвращает теги входящих force-proxy* Xray: из чужих файлов
+// configs/ (факты слоя) и из взятой секции «Входящие»; без повторов, по алфавиту.
+// Только точные теги force-proxy (configlayer.IsForceProxyTag): чужие файлы не подменяют другие правила
+// (T-147-41).
+func xrayForceProxyTags(in configlayer.Input) []string {
+	var out []string
+	add := func(tag string) {
+		if configlayer.IsForceProxyTag(tag) && !slices.Contains(out, tag) {
+			out = append(out, tag)
+		}
+	}
+	for _, tag := range in.Routing.XrayForceProxyTags {
+		add(tag)
+	}
+	if cs := configlayer.DesiredCores(in.Sections)[configlayer.SectionXrayInbounds]; cs.Managed {
+		for _, tag := range cores.XrayKeepTags(cs.Value) {
+			add(tag)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// mihomoForceProxyNames возвращает имена listeners force-proxy* взятой секции
+// «Входящие» Mihomo в порядке значения.
+func mihomoForceProxyNames(s configlayer.Sections) []string {
+	var out []string
+	for _, name := range cores.MihomoListenerNames(s) {
+		if configlayer.IsForceProxyTag(name) && !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }

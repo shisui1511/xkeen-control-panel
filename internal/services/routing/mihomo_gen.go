@@ -13,23 +13,18 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/nodes"
-	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/sources"
 )
 
 // mihomoGenID — идентификатор генератора Mihomo в реестре слоя.
 const mihomoGenID = "routing_mihomo"
 
-// Значения базы профиля панели (D-05).
+// Значения групп профиля панели. Основное, sniffer, dns, входящие и «Прочие
+// ключи» профиля берутся из секций Mihomo (cores.MihomoProfileParts), здесь
+// остаются только значения групп.
 const (
-	// defaultMihomoRedirPort и defaultMihomoTProxyPort — порты, если в прежнем
-	// профиле их нет (как у старого конструктора профиля).
-	defaultMihomoRedirPort  = 5000
-	defaultMihomoTProxyPort = 5001
-	// mihomoRoutingMark — метка сокетов Mihomo: цепочка _out XKeen пропускает её
-	// мимо прозрачного перенаправления.
-	mihomoRoutingMark = 255
 	// mihomoTolerance — допуск url-test в миллисекундах: группа не перескакивает
 	// на узел, выигрывающий меньше.
 	mihomoTolerance = 50
@@ -43,7 +38,7 @@ const (
 // hiddenGroupSuffix — суффикс скрытой группы основных узлов «резерва».
 const hiddenGroupSuffix = "-main"
 
-// mihomoGen — генератор профиля Mihomo: база, провайдеры, группы и правила.
+// mihomoGen — генератор профиля Mihomo: секции ядра, провайдеры, группы и правила.
 type mihomoGen struct{ s *Service }
 
 // ID — идентификатор генератора в реестре.
@@ -86,6 +81,13 @@ type mihomoBuild struct {
 	catalog  []sources.CatalogNode
 	ports    configlayer.MihomoPorts
 	groupsOK bool
+	// sections — секции черновика или применённого состояния: из них профиль
+	// берёт ключи секций Mihomo (основное, sniffer, dns, входящие, прочие ключи).
+	sections configlayer.Sections
+	// forceNames — имена listeners force-proxy* (D-12); forceGroup — группа, в
+	// которую их ведут строки IN-NAME первыми. Пусто или nil — строк нет.
+	forceNames []string
+	forceGroup *Group
 
 	byID      map[string]*Group
 	nodeByRef map[string]sources.CatalogNode
@@ -546,64 +548,6 @@ func yMap(pairs ...any) *yaml.Node {
 	return n
 }
 
-// baseSection — база профиля (D-05): порты прозрачного прокси и доступ из LAN
-// прежнего активного профиля, метка сокетов, режим правил, сокет контроллера и
-// сохранение выбора групп. Ключей автозагрузки geodata в профиле нет: данные
-// списков панель выгружает сама.
-func baseSection(p configlayer.MihomoPorts) *yaml.Node {
-	redir, tproxy := p.Redir, p.TProxy
-	if redir <= 0 {
-		redir = defaultMihomoRedirPort
-	}
-	if tproxy <= 0 {
-		tproxy = defaultMihomoTProxyPort
-	}
-	allowLAN := true
-	if p.AllowLAN != nil {
-		allowLAN = *p.AllowLAN
-	}
-	bind := p.BindAddress
-	if bind == "" {
-		bind = "*"
-	}
-	return yMap(
-		"redir-port", yInt(redir),
-		"tproxy-port", yInt(tproxy),
-		"allow-lan", yBool(allowLAN),
-		"bind-address", yStr(bind),
-		"mode", yStr("rule"),
-		"routing-mark", yInt(mihomoRoutingMark),
-		"external-controller-unix", yStr(services.DefaultMihomoSocketPath),
-		"profile", yMap("store-selected", yBool(true)),
-	)
-}
-
-// snifferSection — определение домена по трафику: destination не подменяется
-// (override-destination false), IP остаётся для правил по IP (D-23).
-func snifferSection() *yaml.Node {
-	return yMap("sniffer", yMap(
-		"enable", yBool(true),
-		"force-dns-mapping", yBool(true),
-		"parse-pure-ip", yBool(true),
-		"override-destination", yBool(false),
-		"sniff", yMap(
-			"HTTP", yMap("ports", ySeq([]string{"80", "8080-8880"}, true)),
-			"TLS", yMap("ports", ySeq([]string{"443", "8443"}, true)),
-			"QUIC", yMap("ports", ySeq([]string{"443", "8443"}, true)),
-		),
-	))
-}
-
-// dnsSection — DNS Mihomo: включён, без IPv6, запросы идут системному
-// распознавателю (A6: значение проверяет mihomo -t в роутерном сценарии).
-func dnsSection() *yaml.Node {
-	return yMap("dns", yMap(
-		"enable", yBool(true),
-		"ipv6", yBool(false),
-		"nameserver", ySeq([]string{"system"}, true),
-	))
-}
-
 // providersSection — провайдеры узлов источников: файлы proxy_providers/xcp-<id>.yaml
 // панели. nil — источников с узлами Mihomo нет.
 func providersSection(srcs []string) *yaml.Node {
@@ -728,10 +672,21 @@ func rulesSection(lines []string) *yaml.Node {
 	return yMap("rules", ySeq(lines, false))
 }
 
-// profile собирает профиль панели секциями по порядку. Каждая секция — свой
-// *yaml.Node: Phase 147 заменит отдельные секции, не переписывая остальные.
+// profile собирает профиль панели: пять частей секций Mihomo (основное, sniffer,
+// dns, входящие, прочие ключи; части без секции берутся из пресетов с портами
+// прежнего профиля), затем маршрутизация панели: провайдеры, копии узлов,
+// группы и правила. Ключи пользователя (hosts, ntp, sub-rules и др.) остаются в
+// прежнем порядке, закреплённые значения дописаны в основное.
 func (b *mihomoBuild) profile() ([]byte, error) {
 	lines := []string{}
+	if len(b.forceNames) > 0 && b.forceGroup != nil {
+		// D-12: XKeen читает входящие force-proxy* и в Mihomo — строки идут раньше
+		// правил пользователя. Группа не выпущена — цель REJECT (fail-closed).
+		target := b.mihomoTarget(Target{Kind: KindGroup, ID: b.forceGroup.ID})
+		for _, name := range b.forceNames {
+			lines = append(lines, "IN-NAME,"+name+","+target)
+		}
+	}
 	for i, r := range b.rules.Items {
 		ls, err := b.mihomoLines(r)
 		if err != nil {
@@ -745,11 +700,15 @@ func (b *mihomoBuild) profile() ([]byte, error) {
 	}
 	lines = append(lines, b.mihomoFinalLine())
 
+	parts, err := cores.MihomoProfileParts(b.sections, b.ports)
+	if err != nil {
+		return nil, err
+	}
 	root := &yaml.Node{Kind: yaml.MappingNode}
+	for _, part := range parts {
+		root.Content = append(root.Content, part.Content...)
+	}
 	for _, sec := range []*yaml.Node{
-		baseSection(b.ports),
-		snifferSection(),
-		dnsSection(),
 		providersSection(sourcesOf(b.catalog)),
 		ruleProvidersSection(b.providers),
 		proxiesSection(b),
@@ -802,9 +761,16 @@ func (s *Service) generateMihomo(in configlayer.Input, installed configlayer.Ins
 	if err != nil {
 		return nil, err
 	}
+	forceNames := mihomoForceProxyNames(in.Sections)
+	var forceGroup *Group
+	if g, ok := forceProxyTarget(in, groups.Items, configlayer.KernelMihomo); ok && len(forceNames) > 0 {
+		forceGroup = &g
+	}
 	b := newMihomoBuild(mihomoBuild{
 		groups: groups.Items, rules: rules, probe: probe, catalog: cat.Mihomo,
 		ports: in.Routing.Mihomo, groupsOK: s.mihomoGroupsAvailable(),
+		sections:   in.Sections,
+		forceNames: forceNames, forceGroup: forceGroup,
 	})
 	if err := b.collectLists(s.d.Lists); err != nil {
 		return nil, err

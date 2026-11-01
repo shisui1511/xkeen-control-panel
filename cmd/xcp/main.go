@@ -27,6 +27,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
@@ -789,6 +790,7 @@ func main() {
 				Installed:     installedKernels,
 				KernelVersion: kernelVersion,
 				Running:       kernelRunning,
+				XrayAPIPort:   func() int { return cfg.XRayAPIPort },
 				Mihomo:        api.MihomoService(),
 				Ping:          pingNodeTLS,
 				GOARCH:        runtime.GOARCH,
@@ -845,6 +847,30 @@ func main() {
 				routingSvc = nil
 			}
 		}
+		// Сервис секций ядер (фаза 147) создаётся только здесь, после сервиса
+		// маршрутизации и независимо от него: генератор cores_xray и проверка
+		// cores_check регистрируются до Start слоя (после него слой их не
+		// принимает), иначе «Применить» не пишет файлы секций и не блокирует
+		// панельные ключи и открытый API Mihomo. Не создался или не подключился —
+		// маршруты /api/configlayer/cores* отвечают 404, панель работает без них.
+		coresSvc, coresErr := cores.New(cores.Deps{
+			Layer:     configLayer,
+			Installed: installedKernels,
+			Running:   kernelRunning,
+		})
+		if coresErr == nil {
+			coresErr = configLayer.Register(configlayer.Hooks{
+				Generators: coresSvc.Generators(),
+				Checker:    coresSvc.Checker(),
+			})
+		}
+		if coresErr != nil {
+			log.Printf("Сервис секций ядер не подключён к слою, маршруты /api/configlayer/cores* отвечают 404: %v", coresErr)
+			if coresSvc != nil {
+				coresSvc.Stop()
+			}
+			coresSvc = nil
+		}
 		configLayer.Start()
 		api.SetConfigLayer(configLayer)
 		defer stops.run("config-layer", configLayer.Stop)
@@ -873,6 +899,12 @@ func main() {
 			}, 0)
 			selWatch.Start()
 			defer stops.run("routing-selection", selWatch.Stop)
+		}
+		if coresSvc != nil {
+			// Как и остальные сервисы: стартует после слоя, останавливается раньше него.
+			coresSvc.Start()
+			api.SetCoresService(coresSvc)
+			defer stops.run("cores", coresSvc.Stop)
 		}
 		if geoSvc != nil {
 			// Менеджер geodata: стартует после слоя и сервиса маршрутизации; defer идёт
@@ -924,6 +956,15 @@ func main() {
 	srv.HandleProtected("/api/configlayer/routing/presets", api.ConfigRoutingPresets)
 	srv.HandleProtected("/api/configlayer/routing/presets/plan", api.ConfigRoutingPresetsPlan)
 	srv.HandleProtected("/api/configlayer/routing/presets/apply", api.ConfigRoutingPresetsApply)
+	srv.HandleProtected("/api/configlayer/cores", api.ConfigCores)
+	srv.HandleProtected("/api/configlayer/cores/takeover", api.ConfigCoresTakeover)
+	srv.HandleProtected("/api/configlayer/cores/take", api.ConfigCoresTake)
+	srv.HandleProtected("/api/configlayer/cores/save", api.ConfigCoresSave)
+	srv.HandleProtected("/api/configlayer/cores/preset", api.ConfigCoresPreset)
+	srv.HandleProtected("/api/configlayer/cores/release", api.ConfigCoresRelease)
+	srv.HandleProtected("/api/configlayer/cores/force-proxy", api.ConfigCoresForceProxy)
+	srv.HandleProtected("/api/configlayer/cores/raw/parse", api.ConfigCoresRawParse)
+	srv.HandleProtected("/api/configlayer/cores/reclaim", api.ConfigCoresReclaim)
 	srv.HandleProtected("/api/configlayer/geodata", api.ConfigGeodata)
 	srv.HandleProtected("/api/configlayer/geodata/output", api.ConfigGeodataOutput)
 	srv.HandleProtected("/api/configlayer/geodata/run", api.ConfigGeodataRun)

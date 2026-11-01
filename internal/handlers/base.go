@@ -15,6 +15,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/assets"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/cores"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/geodata"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/routing/lists"
@@ -87,6 +88,9 @@ type API struct {
 	// routing — сервис маршрутизации (группы, правила, владение); nil, пока
 	// main.go его не подключил: маршруты /api/configlayer/routing* отвечают 404.
 	routing *routing.Service
+	// cores — сервис секций ядер (владение, форма и «Дополнительно», пресеты); nil,
+	// пока main.go его не подключил: маршруты /api/configlayer/cores* отвечают 404.
+	cores *cores.Service
 	// geodata — менеджер geodata XKeen (источники, обновление баз, расписание); nil,
 	// пока main.go его не подключил: маршруты /api/configlayer/geodata* отвечают 404.
 	geodata *geodata.Service
@@ -308,6 +312,12 @@ func (a *API) SetSourcesService(s *sources.Service) {
 // останавливается в main.go.
 func (a *API) SetRoutingService(s *routing.Service) {
 	a.routing = s
+}
+
+// SetCoresService подключает сервис секций ядер; создаётся, запускается и
+// останавливается в main.go.
+func (a *API) SetCoresService(s *cores.Service) {
+	a.cores = s
 }
 
 // SetGeodataService подключает менеджер geodata и индекс dat-файлов; создаются,

@@ -227,7 +227,7 @@
   },
   "ProbeConfig": {
     "required": ["v", "url", "interval_s", "timeout_s"],
-    "optional": [],
+    "optional": ["connectivity", "sampling", "extra"],
     "children": {}
   },
   "RawRule": {

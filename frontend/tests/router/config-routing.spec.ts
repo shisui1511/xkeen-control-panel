@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { CORE_TAG, knownFailure } from './lib/known';
+import { CORE_TAG } from './lib/known';
 import { addToDraft, api, layerFlag, nodeLink, randomPort, resetDraft } from './lib/nodes-api';
 
 // Вкладки «Группы» и «Правила» раздела «Конфигурация» на настоящей панели (фаза 146,
@@ -99,7 +99,7 @@ test('routing: вкладки открываются кликом и по мар
   await expect(page.getByTestId('rules-tab')).toHaveCount(0);
   expect(await kept()).toBe(true);
 
-  // порядок вкладок: Узлы, Группы, Правила, Списки, Файлы панели
+  // порядок вкладок: Узлы, Группы, Правила, Списки, Xray │ Mihomo, Файлы панели
   const order = await page
     .locator('[data-testid="config-tabs"] [role="tab"]')
     .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
@@ -108,6 +108,7 @@ test('routing: вкладки открываются кликом и по мар
     'config-tab-groups',
     'config-tab-rules',
     'config-tab-lists',
+    'config-tab-cores',
     'config-tab-files'
   ]);
 
@@ -236,8 +237,6 @@ async function axeSevere(page: Page, scopes: string[]): Promise<string[]> {
 
 for (const theme of ['dark', 'light'] as const) {
   test(`routing axe: вкладки, тема ${theme}`, async ({ page }) => {
-    // Белый текст на --danger в тёмной теме не дотягивает до 4.5:1 — общий токен кнопки
-    if (theme === 'dark') knownFailure('*', 'btn-danger-dark-contrast');
     const guard = attachConsoleGuard(page);
     await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
     await page.setViewportSize({ width: 1280, height: 900 });

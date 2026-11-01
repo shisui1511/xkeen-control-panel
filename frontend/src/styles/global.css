@@ -2968,7 +2968,7 @@ a.chip:hover {
 
 .floating-progress-bar .btn-cancel:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-danger);
   border-color: var(--danger);
 }
 

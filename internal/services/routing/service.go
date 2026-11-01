@@ -61,6 +61,9 @@ type Deps struct {
 	KernelVersion func(kernel string) string
 	// Running сообщает, запущено ли ядро.
 	Running func(kernel string) bool
+	// XrayAPIPort — порт API Xray из настроек панели: блок api панели слушает
+	// 127.0.0.1:<порт>. nil или значение не больше нуля — 10085.
+	XrayAPIPort func() int
 	// Mihomo — Clash API Mihomo.
 	Mihomo MihomoAPI
 	// Ping проверяет доступность узла (TLS-проверка, пока нет пинга через туннель).
@@ -541,7 +544,10 @@ func (s *Service) Probe() (ProbeConfig, error) {
 }
 
 // setManaged записывает секцию routing черновика: желаемое состояние «маршрутизацией
-// управляет панель». Фактическое взятие делает «Применить» (146-06).
+// управляет панель». Фактическое взятие делает «Применить» (146-06). Взятие той же
+// правкой переносит в черновик ключи прежнего активного профиля Mihomo (секции
+// mihomo_*) и поля чужого burstObservatory Xray (секция probe); возврат снимает
+// секции Mihomo.
 func (s *Service) setManaged(rev int64, managed bool) (configlayer.DraftEvent, error) {
 	return s.edit(rev, func(st configlayer.StateView) (map[string]json.RawMessage, error) {
 		raw, err := json.Marshal(configlayer.RoutingDesired{V: sectionVersion, Managed: managed})
@@ -549,7 +555,17 @@ func (s *Service) setManaged(rev int64, managed bool) (configlayer.DraftEvent, e
 			return nil, err
 		}
 		sections := map[string]json.RawMessage{configlayer.RoutingSection: raw}
-		if managed && isEmptyRaw(st.Draft[RulesSection]) {
+		if !managed {
+			released, err := releaseMihomoSections(st.Draft)
+			if err != nil {
+				return nil, err
+			}
+			for name, v := range released {
+				sections[name] = v
+			}
+			return sections, nil
+		}
+		if isEmptyRaw(st.Draft[RulesSection]) {
 			// «Начать с пустого» (D-04): «Остальное → DIRECT» явное.
 			rules, err := encodeRules(RulesConfig{Final: Target{Kind: KindDirect}})
 			if err != nil {
@@ -557,16 +573,26 @@ func (s *Service) setManaged(rev int64, managed bool) (configlayer.DraftEvent, e
 			}
 			sections[RulesSection] = rules
 		}
+		seeded, err := s.takeSeeds(st)
+		if err != nil {
+			return nil, err
+		}
+		for name, v := range seeded {
+			sections[name] = v
+		}
 		return sections, nil
 	})
 }
 
-// Take записывает в черновик желание управлять маршрутизацией. Если секции
-// правил нет, она создаётся с «Остальное → DIRECT».
+// Take записывает в черновик желание управлять маршрутизацией и переносит
+// настройки прежней конфигурации: ключи профиля Mihomo в секции, поля чужого
+// burstObservatory в пробы. Если секции правил нет, она создаётся с «Остальное →
+// DIRECT».
 func (s *Service) Take(rev int64) (configlayer.DraftEvent, error) { return s.setManaged(rev, true) }
 
-// Release записывает в черновик отказ от управления маршрутизацией: проверка
-// перестаёт блокировать «Применить только узлы».
+// Release записывает в черновик отказ от управления маршрутизацией и снимает
+// секции Mihomo: проверка перестаёт блокировать «Применить только узлы», а
+// config.yaml после «Применить» возвращается к прежнему профилю.
 func (s *Service) Release(rev int64) (configlayer.DraftEvent, error) {
 	return s.setManaged(rev, false)
 }

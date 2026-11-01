@@ -102,6 +102,7 @@ const (
 	maxMihomoRawLine = 1024
 	maxDomainLen     = 253
 	maxProbeURLLen   = 512
+	maxProbeSampling = 100
 	minProbeInterval = 10
 	maxProbeInterval = 3600
 )
@@ -875,6 +876,50 @@ func validateProbe(p ProbeConfig) error {
 	if p.TimeoutS < 1 || p.TimeoutS >= p.IntervalS {
 		return invalid("timeout_s", reasonProbeInvalid)
 	}
+	if p.Sampling != 0 && (p.Sampling < 1 || p.Sampling > maxProbeSampling) {
+		return invalid("sampling", reasonProbeInvalid)
+	}
+	if p.Connectivity != "" && !validProbeURL(p.Connectivity) {
+		return invalid("connectivity", reasonProbeInvalid)
+	}
+	return validateProbeExtra(p.Extra)
+}
+
+// validProbeURL — адрес http или https с хостом, без userinfo, пробелов и
+// управляющих символов, не длиннее maxProbeURLLen.
+func validProbeURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" ||
+		u.User != nil || len(raw) > maxProbeURLLen {
+		return false
+	}
+	for _, r := range raw {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// validateProbeExtra проверяет Extra проб: пусто или JSON-объект не больше
+// maxProbeExtraBytes без ключей, которыми управляют форма и группы (T-147-04,
+// T-147-05).
+func validateProbeExtra(raw json.RawMessage) error {
+	if isEmptyRaw(raw) {
+		return nil
+	}
+	if len(raw) > maxProbeExtraBytes {
+		return invalid("extra", reasonProbeInvalid)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+		return invalid("extra", reasonProbeInvalid)
+	}
+	for _, k := range probeReservedKeys {
+		if _, has := obj[k]; has {
+			return invalid("extra", reasonProbeInvalid)
+		}
+	}
 	return nil
 }
 
@@ -898,6 +943,10 @@ const (
 	// пометкой drop в секции geodata: после удаления файла ядро упало бы на
 	// отсутствующем списке (geodata_ref_remains {file, tag, rule}).
 	issueGeodataRefRemains = "geodata_ref_remains"
+	// issueForceProxyGroupMissing — есть входящие force-proxy*, а выбранной группы
+	// для них нет (удалена): трафик этих входящих пошёл бы мимо неё (D-12, T-147-40).
+	// Key — секция «Входящие» ядра, Params {group}.
+	issueForceProxyGroupMissing = "force_proxy_group_missing"
 )
 
 // Коды предупреждений проверки: «Применить» они не блокируют.
@@ -1193,7 +1242,32 @@ func analyze(in configlayer.Input, installed configlayer.InstalledKernels, catal
 		}
 		warnings = append(warnings, listWarns...)
 	}
+	if gerr == nil && configlayer.DesiredRouting(in.Sections).Managed {
+		issues = append(issues, forceProxyProblems(in, installed, groups.Items)...)
+	}
 	return issues, warnings
+}
+
+// forceProxyProblems — force_proxy_group_missing для каждого установленного ядра,
+// у которого есть входящие force-proxy*, а группа для них не найдена.
+func forceProxyProblems(in configlayer.Input, installed configlayer.InstalledKernels, groups []Group) []IssueView {
+	var out []IssueView
+	check := func(kernel, section string, has bool) {
+		if !has {
+			return
+		}
+		if _, ok := forceProxyTarget(in, groups, kernel); ok {
+			return
+		}
+		group := configlayer.DesiredCores(in.Sections)[section].ForceProxyGroup
+		if group == "" {
+			group = defaultProxyGroupName
+		}
+		out = append(out, IssueView{Code: issueForceProxyGroupMissing, Key: section, Params: map[string]string{"group": group}})
+	}
+	check(configlayer.KernelXray, configlayer.SectionXrayInbounds, installed.Xray && len(xrayForceProxyTags(in)) > 0)
+	check(configlayer.KernelMihomo, configlayer.SectionMihomoInbounds, installed.Mihomo && len(mihomoForceProxyNames(in.Sections)) > 0)
+	return out
 }
 
 // listProblems проверяет списки dat, на которые ссылаются включённые правила

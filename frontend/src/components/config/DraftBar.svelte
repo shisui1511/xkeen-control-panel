@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import { get } from 'svelte/store';
   import { t, tp } from '../../i18n';
-  import { showConfirm, configLayerEnabled } from '../../stores';
+  import { showConfirm, configLayerEnabled, runningKernels } from '../../stores';
   import Button from '../Button.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import {
@@ -63,6 +63,23 @@
           ? $t('cfg.apply_blocked_hint')
           : undefined
   );
+
+  // Объявления перезапуска (D-16): снимок слоя перечисляет, какие правки черновика потребуют
+  // xkeen -restart или полного перезапуска Mihomo. Остановленное ядро перезапуска не ждёт:
+  // правки вступят в силу при запуске
+  const restartNotes = $derived.by(() => {
+    if (!ready || !dirty) return [];
+    const running: string[] = $runningKernels;
+    return ($layerSnapshot?.cores.restart ?? []).map((n) => ({
+      kernel: n.kernel,
+      reason: n.reason,
+      text: !running.includes(n.kernel)
+        ? $t('cfg.sec.kernel_stopped')
+        : n.reason === 'port'
+          ? $t('cfg.sec.restart_xkeen')
+          : $t('cfg.sec.restart_tun')
+    }));
+  });
 
   // Пометки менеджера geodata в черновике (D-27): строка видна на любой вкладке раздела.
   // Название набора берётся из снимка менеджера так же, как в его группе
@@ -160,6 +177,19 @@
       {#if blockedByDrift}
         <span class="status-sub">{$t('cfg.draft_blocked', { k: $driftCount })}</span>
       {/if}
+      {#each restartNotes as note (note.kernel + ':' + note.reason)}
+        <div
+          class="alert alert-warning restart-note"
+          role="status"
+          aria-live="polite"
+          data-testid="draft-restart-note"
+          data-reason={note.reason}
+          data-kernel={note.kernel}
+        >
+          <span class="icon-first-line"><Icon name="info" size={14} /></span>
+          <span class="restart-note-text">{note.text}</span>
+        </div>
+      {/each}
       {#if checkCount > 0}
         <span
           class="status-sub"
@@ -257,6 +287,18 @@
   .status-sub {
     color: var(--warning);
     font-size: var(--font-size-sm);
+    overflow-wrap: anywhere;
+  }
+
+  .restart-note {
+    margin-bottom: 0;
+    padding: 8px 12px;
+    font-size: var(--font-size-sm);
+    min-width: 0;
+  }
+
+  .restart-note-text {
+    min-width: 0;
     overflow-wrap: anywhere;
   }
 

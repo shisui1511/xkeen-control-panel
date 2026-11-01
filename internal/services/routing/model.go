@@ -201,13 +201,30 @@ type RulesConfig struct {
 }
 
 // ProbeConfig — секция probe: параметры проверки узлов для «авто» и «резерва»,
-// одни на панель и оба ядра (D-12).
+// одни на панель и оба ядра (D-12). Поля Connectivity, Sampling и Extra хранят
+// остальное содержимое burstObservatory Xray целиком (D-13): subjectSelector не
+// хранится, он строится из групп. Mihomo берёт из проб только URL, IntervalS и
+// TimeoutS.
 type ProbeConfig struct {
 	V         int    `json:"v"`
 	URL       string `json:"url"`
 	IntervalS int    `json:"interval_s"`
 	TimeoutS  int    `json:"timeout_s"`
+	// Connectivity — pingConfig.connectivity: адрес проверки связи самого роутера;
+	// пусто — ключ пишется пустым (как прежде).
+	Connectivity string `json:"connectivity,omitempty"`
+	// Sampling — pingConfig.sampling; 0 — значение панели ProbeSampling.
+	Sampling int `json:"sampling,omitempty"`
+	// Extra — объект остальных ключей pingConfig (например httpMethod).
+	Extra json.RawMessage `json:"extra,omitempty"`
 }
+
+// maxProbeExtraBytes — предел размера Extra (T-147-05).
+const maxProbeExtraBytes = 16 << 10
+
+// probeReservedKeys — ключи burstObservatory, которыми управляют форма и группы:
+// в Extra им не место (T-147-04).
+var probeReservedKeys = []string{"destination", "connectivity", "interval", "timeout", "sampling", "subjectSelector"}
 
 // isEmptyRaw — секции нет или она равна null.
 func isEmptyRaw(raw json.RawMessage) bool {
@@ -375,11 +392,17 @@ func parseProbe(raw json.RawMessage, goarch string) (ProbeConfig, error) {
 	if cfg.V != sectionVersion {
 		return ProbeConfig{}, invalid(ProbeSection, reasonSectionInvalid)
 	}
+	if isEmptyRaw(cfg.Extra) {
+		cfg.Extra = nil
+	}
 	return cfg, nil
 }
 
 // encodeProbe сериализует секцию probe.
 func encodeProbe(cfg ProbeConfig) (json.RawMessage, error) {
 	cfg.V = sectionVersion
+	if isEmptyRaw(cfg.Extra) {
+		cfg.Extra = nil
+	}
 	return json.Marshal(cfg)
 }

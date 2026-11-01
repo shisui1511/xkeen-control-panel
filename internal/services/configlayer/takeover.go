@@ -157,6 +157,13 @@ type RoutingFacts struct {
 	// XrayAPIInbound — в configs/ есть входящий с тегом api (D-43): правило api
 	// файл панели пишет первым.
 	XrayAPIInbound bool
+	// XrayForeignAPI — в чужих файлах configs/ есть ключ api (в том числе в файле
+	// старого слоя): блок api панель не пишет.
+	XrayForeignAPI bool
+	// XrayObservatory — в чужих файлах есть observatory или burstObservatory.
+	XrayObservatory bool
+	// XrayForceProxyTags — теги входящих force-proxy* в чужих файлах (D-12).
+	XrayForceProxyTags []string
 	// Mihomo — порты и доступ из LAN: взятого профиля или, пока не взято,
 	// текущего активного.
 	Mihomo      MihomoPorts
@@ -202,11 +209,65 @@ type RoutingOps struct {
 	// (повторное «вернуть профиль панели»): возврат при выключении ведёт к
 	// профилю, который был до первого взятия.
 	keepPrev bool
+	// CoreTake — «чистые» файлы секций Xray для переноса в резервный набор: id
+	// секции → имена файлов (147-05, D-01).
+	CoreTake map[string][]string
+	// CoreRelease — файлы секций Xray, возвращаемые в configs/ из резервных
+	// наборов: id секции → перенесённые ранее файлы.
+	CoreRelease map[string][]MovedFile
+	// NextCores — фактическое владение секциями после применения (Moved
+	// заполняется при записи); nil — владение секциями не меняется.
+	NextCores *CoresState
+	// coreHashes — md5 переносимых файлов секций из from черновика (имя → md5):
+	// повторная сверка с копией при записи.
+	coreHashes map[string]string
+}
+
+// coreTakeNames — имена файлов секций, переносимых в резервный набор, по
+// порядку секций.
+func (o *RoutingOps) coreTakeNames() []string {
+	if o == nil {
+		return nil
+	}
+	var out []string
+	for _, id := range XraySectionIDs {
+		out = append(out, o.CoreTake[id]...)
+	}
+	return out
+}
+
+// coreReleaseFiles — файлы секций, возвращаемые в configs/, по порядку секций.
+func (o *RoutingOps) coreReleaseFiles() []MovedFile {
+	if o == nil {
+		return nil
+	}
+	var out []MovedFile
+	for _, id := range XraySectionIDs {
+		out = append(out, o.CoreRelease[id]...)
+	}
+	return out
+}
+
+// allTake — все имена, уходящие из configs/: маршрутизация и секции.
+func (o *RoutingOps) allTake() []string {
+	if o == nil {
+		return nil
+	}
+	return append(append([]string(nil), o.XrayTake...), o.coreTakeNames()...)
+}
+
+// allRelease — все файлы, возвращаемые в configs/: маршрутизация и секции.
+func (o *RoutingOps) allRelease() []MovedFile {
+	if o == nil {
+		return nil
+	}
+	return append(append([]MovedFile(nil), o.XrayRelease...), o.coreReleaseFiles()...)
 }
 
 // hasXrayDisk — у Xray есть операции на диске.
 func (o *RoutingOps) hasXrayDisk() bool {
-	return o != nil && (len(o.XrayTake) > 0 || len(o.XrayRelease) > 0)
+	return o != nil && (len(o.XrayTake) > 0 || len(o.XrayRelease) > 0 ||
+		len(o.coreTakeNames()) > 0 || len(o.coreReleaseFiles()) > 0)
 }
 
 // hasMihomoDisk — у Mihomo есть операции на диске.
@@ -669,7 +730,7 @@ func releaseConflicts(roots Roots, ops *RoutingOps) []BuildIssue {
 		return nil
 	}
 	var out []BuildIssue
-	for _, mf := range ops.XrayRelease {
+	for _, mf := range ops.allRelease() {
 		abs, err := roots.Abs(KernelXray, mf.Name)
 		if err != nil {
 			continue
@@ -714,13 +775,15 @@ func (p *Pipeline) planRouting(src Sections, actual RoutingState, installed Inst
 // идёт раз в минуту и по событиям, каждый раз разбирать все файлы незачем.
 var scanMemo struct {
 	mu     sync.Mutex
-	xray   map[string]memoBool
+	xray   map[string]memoXray
 	mihomo map[string]memoPorts
 }
 
-type memoBool struct {
-	sig string
-	val bool
+// memoXray — факты скана каталога Xray по подписи каталога.
+type memoXray struct {
+	sig   string
+	api   bool
+	facts XrayScanFacts
 }
 
 type memoPorts struct {
@@ -757,29 +820,39 @@ func xrayDirSig(root string) string {
 	return b.String()
 }
 
-// xrayAPIInbound сообщает, есть ли в каталоге входящий с тегом api (с мемо).
-func xrayAPIInbound(root string) bool {
+// xrayRootFacts сообщает, есть ли в каталоге входящий с тегом api (D-43), и
+// возвращает факты чужих файлов для генераторов. Один скан каталога на подпись
+// (с мемо).
+func xrayRootFacts(root string) (apiInbound bool, facts XrayScanFacts) {
 	if root == "" {
-		return false
+		return false, XrayScanFacts{}
 	}
 	sig := xrayDirSig(root)
 	scanMemo.mu.Lock()
 	if m, ok := scanMemo.xray[root]; ok && m.sig == sig {
 		scanMemo.mu.Unlock()
-		return m.val
+		return m.api, cloneXrayFacts(m.facts)
 	}
 	scanMemo.mu.Unlock()
-	_, api, err := ScanXrayRouting(root, nil)
+	files, err := ScanXrayKeyFiles(root, nil)
 	if err != nil {
-		return false
+		return false, XrayScanFacts{}
 	}
+	api, facts := hasAPIInbound(files), XrayFacts(files)
 	scanMemo.mu.Lock()
 	if scanMemo.xray == nil {
-		scanMemo.xray = map[string]memoBool{}
+		scanMemo.xray = map[string]memoXray{}
 	}
-	scanMemo.xray[root] = memoBool{sig: sig, val: api}
+	scanMemo.xray[root] = memoXray{sig: sig, api: api, facts: facts}
 	scanMemo.mu.Unlock()
-	return api
+	return api, cloneXrayFacts(facts)
+}
+
+// cloneXrayFacts копирует срезы фактов: мемо не отдаёт свои.
+func cloneXrayFacts(f XrayScanFacts) XrayScanFacts {
+	f.ForceProxyTags = append([]string(nil), f.ForceProxyTags...)
+	f.BurstObservatory = append(json.RawMessage(nil), f.BurstObservatory...)
+	return f
 }
 
 // mihomoActivePorts возвращает порты текущего активного профиля (с мемо).
@@ -821,10 +894,14 @@ func clonePorts(p MihomoPorts) MihomoPorts {
 // построении Input. Порты берутся у взятого профиля, пока не взято — у текущего
 // активного.
 func routingFacts(roots Roots, r RoutingState) RoutingFacts {
+	api, xf := xrayRootFacts(roots.Xray)
 	f := RoutingFacts{
-		XrayAPIInbound: xrayAPIInbound(roots.Xray),
-		XrayTaken:      r.Xray != nil,
-		MihomoTaken:    r.Mihomo != nil,
+		XrayAPIInbound:     api,
+		XrayForeignAPI:     xf.ForeignAPI,
+		XrayObservatory:    xf.Observatory,
+		XrayForceProxyTags: xf.ForceProxyTags,
+		XrayTaken:          r.Xray != nil,
+		MihomoTaken:        r.Mihomo != nil,
 	}
 	if r.Mihomo != nil {
 		f.Mihomo = clonePorts(r.Mihomo.Ports)
@@ -1018,7 +1095,9 @@ func hashOf(path string) string {
 
 // verifyPureFile повторно проверяет перед переносом, что файл всё ещё «чистый»
 // (T-146-17): между сканом и записью пользователь мог добавить в него ключи.
-func verifyPureFile(abs string) error {
+// owns сообщает, что ключ верхнего уровня принадлежит переносимой части панели
+// (routing или секция Xray); файл без ключей «чистым» не считается.
+func verifyPureFile(abs string, owns func(key string) bool) error {
 	fi, err := os.Lstat(abs)
 	if err != nil {
 		return err
@@ -1034,11 +1113,19 @@ func verifyPureFile(abs string) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := top["routing"]; !ok || len(top) != 1 {
-		return errors.New("в файле появились другие ключи")
+	if len(top) == 0 {
+		return errors.New("в файле нет ключей")
+	}
+	for k := range top {
+		if !owns(k) {
+			return errors.New("в файле появились другие ключи")
+		}
 	}
 	return nil
 }
+
+// ownsRouting — ключ верхнего уровня принадлежит маршрутизации.
+func ownsRouting(key string) bool { return key == "routing" }
 
 // prepareRouting готовит операции маршрутизации до записи журнала: копии
 // переносимых файлов и config.yaml уходят в набор, перечень — в журнал. На диске
@@ -1058,7 +1145,7 @@ func (p *Pipeline) prepareRouting(set *BackupSet, ops *RoutingOps) (*JournalRout
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := verifyPureFile(abs); err != nil {
+		if err := verifyPureFile(abs, ownsRouting); err != nil {
 			return nil, nil, fmt.Errorf("%s: %s: %w", IssueRoutingTakeoverFailed, name, err)
 		}
 		key := ManifestKey(KernelXray, name)
@@ -1090,7 +1177,12 @@ func (p *Pipeline) prepareRouting(set *BackupSet, ops *RoutingOps) (*JournalRout
 		}
 		ops.Next.Xray.Moved = append(merged, moved...)
 	}
-	for _, mf := range ops.XrayRelease {
+	coreFiles, err := p.prepareCoreTake(set, ops, jr)
+	if err != nil {
+		return nil, nil, err
+	}
+	files = append(files, coreFiles...)
+	for _, mf := range ops.allRelease() {
 		if !safeRoutingName(mf.Name) {
 			return nil, nil, fmt.Errorf("%s: %w", mf.Name, ErrInvalidPanelPath)
 		}
@@ -1148,7 +1240,7 @@ func (p *Pipeline) applyRoutingOps(ops *RoutingOps) error {
 	if ops == nil {
 		return nil
 	}
-	for _, name := range ops.XrayTake {
+	for _, name := range ops.allTake() {
 		abs, err := p.d.Roots.Abs(KernelXray, name)
 		if err != nil {
 			return err
@@ -1157,7 +1249,7 @@ func (p *Pipeline) applyRoutingOps(ops *RoutingOps) error {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
-	for _, mf := range ops.XrayRelease {
+	for _, mf := range ops.allRelease() {
 		abs, err := p.d.Roots.Abs(KernelXray, mf.Name)
 		if err != nil {
 			return err
@@ -1216,7 +1308,7 @@ func overlayXrayRouting(tmp string, ops *RoutingOps) error {
 	if ops == nil {
 		return nil
 	}
-	for _, name := range ops.XrayTake {
+	for _, name := range ops.allTake() {
 		if !safeRoutingName(name) {
 			return fmt.Errorf("%s: %w", name, ErrInvalidPanelPath)
 		}
@@ -1224,7 +1316,7 @@ func overlayXrayRouting(tmp string, ops *RoutingOps) error {
 			return err
 		}
 	}
-	for _, mf := range ops.XrayRelease {
+	for _, mf := range ops.allRelease() {
 		if !safeRoutingName(mf.Name) {
 			return fmt.Errorf("%s: %w", mf.Name, ErrInvalidPanelPath)
 		}

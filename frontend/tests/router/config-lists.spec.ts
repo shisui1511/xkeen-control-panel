@@ -53,7 +53,7 @@ test('lists: вкладка открывается кликом', async ({ page 
   await tabReady(page, 'lists-tab');
   await expect(page.getByTestId('nodes-tab')).toHaveCount(0);
 
-  // вкладка стоит между «Правила» и «Файлы панели»
+  // вкладка стоит между «Правила» и «Xray │ Mihomo»
   const order = await page
     .getByTestId('config-tabs')
     .locator('[data-testid^="config-tab-"]')
@@ -63,6 +63,7 @@ test('lists: вкладка открывается кликом', async ({ page 
     'config-tab-groups',
     'config-tab-rules',
     'config-tab-lists',
+    'config-tab-cores',
     'config-tab-files'
   ]);
 

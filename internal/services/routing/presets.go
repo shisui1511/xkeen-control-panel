@@ -806,13 +806,26 @@ func (s *Service) ApplyPreset(rev int64, c PresetChoice) (configlayer.DraftEvent
 }
 
 // TakeWithPreset берёт маршрутизацию под панель и применяет пресет той же
-// правкой черновика (D-04, D-25): routing.managed, группы и правила.
+// правкой черновика (D-04, D-25): routing.managed, группы и правила, а также
+// секции Mihomo и пробы из прежней конфигурации (как Take).
 func (s *Service) TakeWithPreset(rev int64, c PresetChoice) (configlayer.DraftEvent, error) {
 	return s.edit(rev, func(st configlayer.StateView) (map[string]json.RawMessage, error) {
 		res, err := s.buildPreset(st, c)
 		if err != nil {
 			return nil, err
 		}
-		return presetSections(res, true)
+		sections, err := presetSections(res, true)
+		if err != nil {
+			return nil, err
+		}
+		// Взятие с пресетом переносит настройки прежней конфигурации так же, как Take.
+		seeded, err := s.takeSeeds(st)
+		if err != nil {
+			return nil, err
+		}
+		for name, v := range seeded {
+			sections[name] = v
+		}
+		return sections, nil
 	})
 }

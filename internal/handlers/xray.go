@@ -18,6 +18,7 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 	"github.com/shisui1511/xkeen-control-panel/internal/xrayapi"
 )
@@ -125,7 +126,23 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 	defer a.lifecycleMu.Unlock()
 
-	info := services.FindXrayAPIFragment(a.cfg.XRayConfigDir)
+	info := services.FindXrayAPIFragmentLegacy(a.cfg.XRayConfigDir)
+
+	// У блока api один владелец: при включённом слое блок, который ведёт панель
+	// (файл панели или маршрутизация Xray, взятая панелью), старый переключатель
+	// не трогает. Проверка идёт до любой записи.
+	if a.configLayer != nil && a.configLayer.Enabled() {
+		panelFile := info.APIPresent && configlayer.IsPanelFileName(configlayer.KernelXray, filepath.Base(info.Path))
+		xrayTaken := false
+		if x := a.configLayer.Snapshot().Routing.Xray; x != nil && x.Taken {
+			xrayTaken = true
+		}
+		if panelFile || xrayTaken {
+			JSONErrorCode(w, http.StatusConflict, "xray_api_managed", a.t(r, "xray.api_managed"))
+			return
+		}
+	}
+
 	if !info.FileExists && !info.HasAnyJSON {
 		a.errorResponse(w, "Xray configuration file not found or not readable", http.StatusServiceUnavailable)
 		return
