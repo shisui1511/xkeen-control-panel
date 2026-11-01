@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -80,6 +81,16 @@ func FormKeys(kernel, id string) []string {
 type RawError struct {
 	Line   int    `json:"line"`
 	Detail string `json:"detail"`
+}
+
+// rawQuoted — цитаты в тексте ошибки разбора: yaml.v3 и encoding/json приводят
+// куски введённого текста («cannot unmarshal !!str `...`», «invalid character 'x'»).
+var rawQuoted = regexp.MustCompile("`[^`]*`|'[^']*'|\"[^\"]*\"")
+
+// rawDetail возвращает пояснение ошибки разбора без цитат из введённого текста:
+// там может оказаться значение секции (secret), а ответы API значений не несут.
+func rawDetail(err error) string {
+	return rawQuoted.ReplaceAllString(err.Error(), "…")
 }
 
 // Error описывает ошибку; *RawError возвращает MergeForm при ошибке разбора.
@@ -519,7 +530,7 @@ func parseAdvanced(kernel, text string) (*configlayer.OrderedObject, error) {
 			if line <= 0 {
 				line = 1
 			}
-			return nil, &RawError{Line: line, Detail: err.Error()}
+			return nil, &RawError{Line: line, Detail: rawDetail(err)}
 		}
 		return objOf(raw), nil
 	}
@@ -530,9 +541,9 @@ func parseAdvanced(kernel, text string) (*configlayer.OrderedObject, error) {
 	if err := json.Unmarshal([]byte(text), &probe); err != nil {
 		var se *json.SyntaxError
 		if errors.As(err, &se) {
-			return nil, &RawError{Line: jsonSyntaxLine(text, se.Offset), Detail: err.Error()}
+			return nil, &RawError{Line: jsonSyntaxLine(text, se.Offset), Detail: rawDetail(err)}
 		}
-		return nil, &RawError{Line: 1, Detail: err.Error()}
+		return nil, &RawError{Line: 1, Detail: rawDetail(err)}
 	}
 	o, err := configlayer.ParseOrderedObject([]byte(text))
 	if err != nil {
