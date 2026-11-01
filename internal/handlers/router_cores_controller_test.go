@@ -32,6 +32,11 @@ import (
 // rtCoresCtlSecret — непустая строка-фикстура secret.
 const rtCoresCtlSecret = "xcp-ctl-fixture"
 
+// rtCoresCtlDupCode — код проблемы: ключ корня профиля уже есть в соседней
+// управляемой секции (main, inbounds, other). Корень получил бы его дважды, а
+// Mihomo отвергает такой документ.
+const rtCoresCtlDupCode = "root_key_duplicate"
+
 // rtCoresCtlKeys — ключи, открывающие API ядра по TCP.
 var rtCoresCtlKeys = []string{"external-controller", "external-controller-tls"}
 
@@ -222,10 +227,15 @@ func rtCoresCtlChecked(t *testing.T, e *rtSrc, section, key string) bool {
 
 // rtCoresCtlHasIssue ищет в списке проблем {key: секция, code: controller_no_secret, params.key: ключ}.
 func rtCoresCtlHasIssue(list []any, section, key string) bool {
+	return rtCoresCtlHasCode(list, section, key, configlayer.IssueControllerNoSecret)
+}
+
+// rtCoresCtlHasCode ищет в списке проблем {key: секция, code: code, params.key: ключ}.
+func rtCoresCtlHasCode(list []any, section, key, code string) bool {
 	for _, it := range list {
 		m, _ := it.(map[string]any)
 		params, _ := m["params"].(map[string]any)
-		if m["key"] == section && m["code"] == configlayer.IssueControllerNoSecret && params["key"] == key {
+		if m["key"] == section && m["code"] == code && params["key"] == key {
 			return true
 		}
 	}
@@ -236,6 +246,13 @@ func rtCoresCtlHasIssue(list []any, section, key string) bool {
 // controller_no_secret секции section по ключу key.
 func rtCoresCtlExpectBlocked(t *testing.T, e *rtSrc, section, key string) {
 	t.Helper()
+	rtCoresCtlExpectBlockedCode(t, e, section, key, configlayer.IssueControllerNoSecret)
+}
+
+// rtCoresCtlExpectBlockedCode требует, чтобы «Применить» было заблокировано
+// проблемой code секции section по ключу key.
+func rtCoresCtlExpectBlockedCode(t *testing.T, e *rtSrc, section, key, code string) {
+	t.Helper()
 	title := rtCoresCtlTitle(strings.TrimPrefix(section, "mihomo_"))
 	before := e.rtRstApplyView()
 	r := e.call(http.MethodPost, "/api/configlayer/apply", nil)
@@ -245,12 +262,12 @@ func rtCoresCtlExpectBlocked(t *testing.T, e *rtSrc, section, key string) {
 			Issues []any `json:"issues"`
 		}
 		_ = json.Unmarshal(r.Data, &data)
-		if !rtCoresCtlHasIssue(data.Issues, section, key) {
+		if !rtCoresCtlHasCode(data.Issues, section, key, code) {
 			n := len(r.Data)
 			if n > 300 {
 				n = 300
 			}
-			t.Errorf("%s: apply_blocked без controller_no_secret для %s: %s", title, key, r.Data[:n])
+			t.Errorf("%s: apply_blocked без %s для %s: %s", title, code, key, r.Data[:n])
 		}
 	case r.Status == http.StatusOK:
 		e.rtRstWaitApply(before)
@@ -296,7 +313,10 @@ func rtCoresCtlUnmanage(t *testing.T, e *rtSrc, section string) {
 // external-controller-tls, пустой secret, secret секции вне управления →
 // merge_key_literal: буквальный ключ «<<» в кавычках с вложенным
 // external-controller отклонён в корне каждой секции (raw/parse, save), а во
-// вложенном отображении «Прочих ключей» применяется и лежит в профиле в кавычках.
+// вложенном отображении «Прочих ключей» применяется и лежит в профиле в кавычках →
+// root_key_duplicate: secret или external-controller, уже заданный в соседней
+// секции, отклонён в raw/parse и save кодом root_key_duplicate; дубль, записанный
+// мимо save, блокирует «Применить» этим же кодом в checks снимка.
 func TestRouterCoresMihomoControllerSecret(t *testing.T) {
 	tg := routertest.CoreSpecific(t)
 	e := rtNewSrc(t)
@@ -453,6 +473,80 @@ func TestRouterCoresMihomoControllerSecret(t *testing.T) {
 			rtCoresCtlAccepted(t, "Основное", "external-controller", "secret неуправляемой секции, нет в checks снимка")
 		}
 		rtCoresCtlExpectBlocked(t, s, configlayer.SectionMihomoMain, "external-controller")
+		if got := rtRtScanDisk(t).mihomoSum; got != sum {
+			t.Error("xcp-main.yaml переписан при заблокированном «Применить»")
+		}
+	})
+
+	t.Run("root_key_duplicate", func(t *testing.T) {
+		t.Cleanup(func() { base.rtCoresCtlRestore(t) })
+		s := e.with(t)
+		mainP, inbP, otherP := base.parts["main"], base.parts["inbounds"], base.parts["other"]
+
+		// 1. secret в «Прочих ключах» и в «Основном»: корень получил бы два secret.
+		withSecret := rtCoresCtlAdvanced(t, otherP.advanced, map[string]any{"secret": rtCoresCtlSecret})
+		if r := rtCoresCtlSave(t, s, "other", otherP.form, withSecret); r.Status != http.StatusOK {
+			t.Fatalf("Прочие ключи: secret: %d %s", r.Status, r.Code)
+		}
+		mainSecret := rtCoresCtlAdvanced(t, mainP.advanced, map[string]any{"secret": rtCoresCtlSecret})
+		if !slices.Contains(rtCoresCtlParse(t, s, "main", mainSecret), "secret:"+rtCoresCtlDupCode) {
+			rtCoresCtlAccepted(t, "Основное", "secret", "raw/parse, secret уже в «Прочих ключах»")
+		}
+		r := rtCoresCtlSave(t, s, "main", mainP.form, mainSecret)
+		if rtCoresCtlExpectIssue(t, r, "main", "secret", rtCoresCtlDupCode, "save") {
+			base.rtCoresCtlRestore(t)
+			if back := rtCoresCtlSave(t, s, "other", otherP.form, withSecret); back.Status != http.StatusOK {
+				t.Fatalf("Прочие ключи: secret: %d %s", back.Status, back.Code)
+			}
+		}
+		inbSecret := rtCoresCtlAdvanced(t, inbP.advanced, map[string]any{"secret": rtCoresCtlSecret})
+		r = rtCoresCtlSave(t, s, "inbounds", inbP.form, inbSecret)
+		if rtCoresCtlExpectIssue(t, r, "inbounds", "secret", rtCoresCtlDupCode, "save") {
+			base.rtCoresCtlRestore(t)
+			if back := rtCoresCtlSave(t, s, "other", otherP.form, withSecret); back.Status != http.StatusOK {
+				t.Fatalf("Прочие ключи: secret: %d %s", back.Status, back.Code)
+			}
+		}
+
+		// 2. external-controller в двух секциях при одном secret: оба ключа в корне.
+		ctl := rtCoresCtlAdvanced(t, otherP.advanced, map[string]any{"external-controller": addr, "secret": rtCoresCtlSecret})
+		if r := rtCoresCtlSave(t, s, "other", otherP.form, ctl); r.Status != http.StatusOK {
+			t.Fatalf("Прочие ключи: external-controller с secret: %d %s", r.Status, r.Code)
+		}
+		mainCtl := rtCoresCtlAdvanced(t, mainP.advanced, map[string]any{"external-controller": addr})
+		if !slices.Contains(rtCoresCtlParse(t, s, "main", mainCtl), "external-controller:"+rtCoresCtlDupCode) {
+			rtCoresCtlAccepted(t, "Основное", "external-controller", "raw/parse, контроллер уже в «Прочих ключах»")
+		}
+		r = rtCoresCtlSave(t, s, "main", mainP.form, mainCtl)
+		if rtCoresCtlExpectIssue(t, r, "main", "external-controller", rtCoresCtlDupCode, "save") {
+			base.rtCoresCtlRestore(t)
+		}
+
+		// 3. Дубль, записанный мимо save (общий черновик): проверка черновика
+		// называет секцию и ключ, «Применить» заблокировано, профиль не переписан.
+		if r := rtCoresCtlSave(t, s, "other", otherP.form, withSecret); r.Status != http.StatusOK {
+			t.Fatalf("Прочие ключи: secret: %d %s", r.Status, r.Code)
+		}
+		sec := rtCoresSection(s.rtCoresView("mihomo"), "main")
+		if sec == nil {
+			t.Fatal("в виде Mihomo нет секции main")
+		}
+		val := map[string]any{}
+		if cur, ok := sec["value"].(map[string]any); ok {
+			for k, v := range cur {
+				val[k] = v
+			}
+		}
+		val["secret"] = rtCoresCtlSecret
+		sum := rtRtScanDisk(t).mihomoSum
+		if r := s.call(http.MethodPost, "/api/configlayer/draft", map[string]any{
+			"revision": s.revision(),
+			"section":  configlayer.SectionMihomoMain,
+			"value":    map[string]any{"v": 1, "managed": true, "value": val},
+		}); r.Status != http.StatusOK {
+			t.Fatalf("черновик «Основного» с дублем secret: %d %s", r.Status, r.Code)
+		}
+		rtCoresCtlExpectBlockedCode(t, s, configlayer.SectionMihomoMain, "secret", rtCoresCtlDupCode)
 		if got := rtRtScanDisk(t).mihomoSum; got != sum {
 			t.Error("xcp-main.yaml переписан при заблокированном «Применить»")
 		}

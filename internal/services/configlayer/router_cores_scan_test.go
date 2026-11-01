@@ -598,3 +598,54 @@ func rtCoresMergeAPIStats(t *testing.T, dir string) {
 	rtCoresWriteDir(t, dir, map[string]string{"50_s.json": `{"stats": {}}` + "\n"})
 	rtCoresXrayTest(t, dir)
 }
+
+// rtCoresMihomoLimit — предел размера профиля Mihomo, который читает расчёт
+// объявлений перезапуска (8 МиБ, как при переносе ключей).
+const rtCoresMihomoLimit = 8 << 20
+
+// Снимок слоя на переходе владения читает активный профиль Mihomo (WR-02):
+// профиль больше предела размера не читается и не разбирается, сторона
+// считается непрочитанной (объявление port), а профиль в пределах читается и
+// даёт факты. Настоящие файлы во временном каталоге теста; ядро стенда не
+// трогается, метка ядра не нужна.
+func TestRouterCoresRestartProfileLimit(t *testing.T) {
+	root := filepath.Join(rtLiveDir(t), "mihomo")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(root, "config.yaml")
+	draft := Sections{
+		SectionMihomoMain:     rtRaw(`{"v":1,"managed":true,"value":{"redir-port":7892,"tproxy-port":7893}}`),
+		SectionMihomoInbounds: rtRaw(`{"v":1,"managed":true,"value":{"tun":{"enable":false}}}`),
+	}
+	roots := Roots{Mihomo: root}
+
+	small := "redir-port: 7892\ntproxy-port: 7893\ntun:\n  enable: false\n"
+	if err := os.WriteFile(cfg, []byte(small), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr := mihomoTakeTransition(roots, draft)
+	if tr == nil || tr.unread {
+		t.Fatalf("профиль в пределах размера: переход %+v, ожидалось прочитанное", tr)
+	}
+
+	// Корректный YAML больше предела: не читается и не разбирается целиком.
+	var big bytes.Buffer
+	big.WriteString(small)
+	big.WriteString("proxies:\n")
+	line := "  - {name: xcp-fixture, type: direct}\n"
+	for big.Len() <= rtCoresMihomoLimit+len(line) {
+		big.WriteString(line)
+	}
+	if err := os.WriteFile(cfg, big.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	tr = mihomoTakeTransition(roots, draft)
+	if tr == nil || !tr.unread {
+		t.Errorf("профиль больше %d байт: переход %+v, ожидалась непрочитанная сторона", rtCoresMihomoLimit, tr)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("переход по профилю больше предела занял %s", d)
+	}
+}

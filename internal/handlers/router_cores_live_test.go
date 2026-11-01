@@ -20,6 +20,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/routertest"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/configlayer"
 )
 
 // Живые сценарии секций ядер на настоящей панели устройства (SEC-02, D-10, D-16):
@@ -1007,7 +1008,7 @@ func rtCoresLiveMihomoExpectTunRestart(t *testing.T, e *rtSrc, m *rtCoresLiveMih
 // rtCoresLiveMihomoRestart — ветка Mihomo TestRouterCoresRestartKind: смена tun.
 // Последовательность A: маршрутизация взята и применена, смена tun, «Применить»,
 // отпускание. Последовательность B: взятие и смена tun в одном черновике, затем
-// отпускание.
+// отпускание. В A после «Применить» проверяются ключи «Основного» во «Входящих».
 func rtCoresLiveMihomoRestart(t *testing.T, e *rtSrc, tg routertest.Target) {
 	t.Helper()
 	rtRstKernelPID(t, "mihomo")
@@ -1022,6 +1023,10 @@ func rtCoresLiveMihomoRestart(t *testing.T, e *rtSrc, tg routertest.Target) {
 	}
 	rtCoresLiveMihomoExpectTunRestart(t, e, m)
 
+	// Ключи «Основного» во «Входящих» не принимаются: порт, заданный там, обошёл
+	// бы объявление перезапуска (WR-01).
+	rtCoresLiveMihomoInboundsMainKeys(t, e)
+
 	// Отпускание возвращает config.yaml к прежнему профилю с прежним tun: способ
 	// перезапуска объявлен до «Применить» и совпадает с фактическим (G-147-3).
 	m.rtCoresLiveReleaseChecked(t, "tun")
@@ -1035,6 +1040,35 @@ func rtCoresLiveMihomoRestart(t *testing.T, e *rtSrc, tg routertest.Target) {
 	}
 	rtCoresLiveMihomoExpectTunRestart(t, e, m)
 	m.rtCoresLiveReleaseChecked(t, "tun")
+}
+
+// rtCoresLiveMihomoInboundsMainKeys требует, чтобы «Входящие» Mihomo отклоняли
+// в «Дополнительно» ключи «Основного» (redir-port, tproxy-port, mode) кодом
+// raw_reserved в raw/parse и save: расчёт перезапуска берёт порты только из
+// «Основного», а второй redir-port в корне профиля Mihomo не примет. Принятый
+// ключ возвращается прежним значением секции; после отказов черновик пуст.
+func rtCoresLiveMihomoInboundsMainKeys(t *testing.T, e *rtSrc) {
+	t.Helper()
+	s := e.with(t)
+	p := rtCoresCtlRead(t, s, "inbounds")
+	for key, val := range map[string]any{"redir-port": 7893, "tproxy-port": 7894, "mode": "global"} {
+		text := rtCoresCtlAdvanced(t, p.advanced, map[string]any{key: val})
+		if !slices.Contains(rtCoresCtlParse(t, s, "inbounds", text), key+":"+configlayer.IssueRawReserved) {
+			rtCoresCtlAccepted(t, "Входящие", key, "raw/parse")
+		}
+		r := rtCoresCtlSave(t, s, "inbounds", p.form, text)
+		if rtCoresCtlExpectIssue(t, r, "inbounds", key, configlayer.IssueRawReserved, "save") {
+			if back := rtCoresCtlSave(t, s, "inbounds", p.form, p.advanced); back.Status != http.StatusOK {
+				t.Fatalf("Входящие: возврат секции: %d %s", back.Status, back.Code)
+			}
+		}
+	}
+	if n := s.rtRtDraftChanges(); n != 0 {
+		t.Errorf("после отказов в черновике %d изменений, ожидалось 0", n)
+	}
+	if notes := s.rtCoresLiveRestartNotes(); rtCoresLiveHasNote(notes, "mihomo", "port") {
+		t.Errorf("cores.restart после отказов содержит {mihomo, port}: %v", notes)
+	}
 }
 
 // Трасса: «Входящие» Xray взяты и применены → смена порта прозрачного входящего
