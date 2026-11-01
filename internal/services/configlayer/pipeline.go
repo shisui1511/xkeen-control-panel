@@ -417,7 +417,10 @@ func (p *Pipeline) Run(ctx context.Context, req ApplyRequest) ApplyView {
 	if err == nil && req.Source == SourceDraft && len(req.Only) == 0 {
 		// Смена порта прозрачного входящего или tun — полный перезапуск вместо
 		// горячей перезагрузки Mihomo (D-16): правила XKeen пересобираются только им.
-		plan.FullRestart = fullRestartOf(RestartReasons(snap.Applied, src))
+		// Тот же расчёт, что и у объявления в снимке; на переходе владения
+		// сравнивается значение по ту сторону перехода (G-147-3).
+		base := restartBase(p.d.Roots, snap, src, installed, p.d.ForeignOwned)
+		plan.FullRestart = fullRestartOf(RestartReasons(snap.Applied, src, base))
 	}
 	if err != nil {
 		p.setStep(StepBuild, StepFailed, "", err.Error())
