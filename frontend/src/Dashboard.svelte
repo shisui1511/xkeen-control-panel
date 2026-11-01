@@ -43,6 +43,7 @@
   import EmptyState from './components/EmptyState.svelte';
   import PageHeader from './PageHeader.svelte';
   import ServiceStatusGroup from './components/dashboard/ServiceStatusGroup.svelte';
+  import DashSection from './components/dashboard/DashSection.svelte';
   import SystemResourcesWidget from './components/dashboard/SystemResourcesWidget.svelte';
   import TrafficTelemetryWidget from './components/dashboard/TrafficTelemetryWidget.svelte';
   import QuickActionsWidget from './components/dashboard/QuickActionsWidget.svelte';
@@ -1241,278 +1242,271 @@
 
           <!-- Problems Panel (conditional) -->
           {#if (systemStats && systemStats.invalid_config) || currentNextStep !== null || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring || isWatchdogIncident}
-            <div style="margin-bottom: 18px;">
-              <Card title={$t('dash.problems_panel')}>
-                <div class="problems-list">
-                  {#if isWatchdogIncident && watchdogStatus}
-                    <div
-                      class="problem-item {watchdogStatus.state === 'degraded'
-                        ? 'alert-error'
-                        : 'alert-warning'}"
-                    >
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <strong class="problem-title">
-                            {$t(
-                              watchdogStatus.state === 'degraded'
-                                ? 'watchdog.banner_degraded_title'
-                                : 'watchdog.banner_disarmed_title'
-                            )}
-                          </strong>
-                          <div class="problem-desc">
-                            {$t(
-                              watchdogStatus.state === 'degraded'
-                                ? 'watchdog.banner_degraded_desc'
-                                : 'watchdog.banner_disarmed_desc'
-                            )}
-                            {#if statusError}
-                              <span class="watchdog-stale-desc">({$t('watchdog.stale_note')})</span>
-                            {/if}
-                          </div>
-                          {#if watchdogStatus.last_disarm_error}
-                            <div class="watchdog-error-detail">
-                              {watchdogStatus.last_disarm_error}
-                            </div>
+            <section class="dash-alerts" aria-label={$t('dash.problems_panel')}>
+              <div class="problems-list">
+                {#if isWatchdogIncident && watchdogStatus}
+                  <div
+                    class="problem-item {watchdogStatus.state === 'degraded'
+                      ? 'alert-error'
+                      : 'alert-warning'}"
+                  >
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <strong class="problem-title">
+                          {$t(
+                            watchdogStatus.state === 'degraded'
+                              ? 'watchdog.banner_degraded_title'
+                              : 'watchdog.banner_disarmed_title'
+                          )}
+                        </strong>
+                        <div class="problem-desc">
+                          {$t(
+                            watchdogStatus.state === 'degraded'
+                              ? 'watchdog.banner_degraded_desc'
+                              : 'watchdog.banner_disarmed_desc'
+                          )}
+                          {#if statusError}
+                            <span class="watchdog-stale-desc">({$t('watchdog.stale_note')})</span>
                           {/if}
                         </div>
-                      </div>
-                      <Button
-                        variant="secondary"
-                        loading={isResettingWatchdog}
-                        onclick={handleResetWatchdog}
-                      >
-                        {$t(
-                          watchdogStatus.state === 'degraded'
-                            ? 'watchdog.cta_retry'
-                            : 'watchdog.cta_reset'
-                        )}
-                      </Button>
-                    </div>
-                  {/if}
-                  {#if isKernelCrashed}
-                    <div class="problem-item alert-error">
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <strong class="problem-title"
-                            >{$t('dash.problems.kernel_crash_title')}</strong
-                          >
-                          <div class="problem-desc">
-                            {$t('dash.problems.kernel_crash_desc', {
-                              kernel: kernelLabel($activeKernelName)
-                            })}
+                        {#if watchdogStatus.last_disarm_error}
+                          <div class="watchdog-error-detail">
+                            {watchdogStatus.last_disarm_error}
                           </div>
+                        {/if}
+                      </div>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      loading={isResettingWatchdog}
+                      onclick={handleResetWatchdog}
+                    >
+                      {$t(
+                        watchdogStatus.state === 'degraded'
+                          ? 'watchdog.cta_retry'
+                          : 'watchdog.cta_reset'
+                      )}
+                    </Button>
+                  </div>
+                {/if}
+                {#if isKernelCrashed}
+                  <div class="problem-item alert-error">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <strong class="problem-title"
+                          >{$t('dash.problems.kernel_crash_title')}</strong
+                        >
+                        <div class="problem-desc">
+                          {$t('dash.problems.kernel_crash_desc', {
+                            kernel: kernelLabel($activeKernelName)
+                          })}
                         </div>
                       </div>
-                      <Button variant="secondary" onclick={restartXkeen}>
-                        {$t('dash.problems.kernel_crash_cta')}
-                      </Button>
                     </div>
-                  {/if}
+                    <Button variant="secondary" onclick={restartXkeen}>
+                      {$t('dash.problems.kernel_crash_cta')}
+                    </Button>
+                  </div>
+                {/if}
 
-                  {#if isDiskLow && systemStats && systemStats.disk}
-                    <div class="problem-item alert-error">
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <strong class="problem-title">{$t('dash.problems.disk_low_title')}</strong
-                          >
-                          <div class="problem-desc">
-                            {$t('dash.problems.disk_low_desc', {
-                              free: formatBytes(systemStats.disk.free)
-                            })}
-                          </div>
+                {#if isDiskLow && systemStats && systemStats.disk}
+                  <div class="problem-item alert-error">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <strong class="problem-title">{$t('dash.problems.disk_low_title')}</strong>
+                        <div class="problem-desc">
+                          {$t('dash.problems.disk_low_desc', {
+                            free: formatBytes(systemStats.disk.free)
+                          })}
                         </div>
                       </div>
-                      <Button variant="secondary" onclick={() => switchTab('settings')}>
-                        {$t('dash.problems.disk_low_cta')}
-                      </Button>
                     </div>
-                  {/if}
+                    <Button variant="secondary" onclick={() => switchTab('settings')}>
+                      {$t('dash.problems.disk_low_cta')}
+                    </Button>
+                  </div>
+                {/if}
 
-                  {#if isSSLExpiring && systemStats}
-                    <div class="problem-item alert-warning">
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <strong class="problem-title"
-                            >{$t('dash.problems.ssl_expire_title')}</strong
-                          >
-                          <div class="problem-desc">
-                            {$t('dash.problems.ssl_expire_desc', {
-                              days: systemStats.ssl_cert_days
-                            })}
-                          </div>
+                {#if isSSLExpiring && systemStats}
+                  <div class="problem-item alert-warning">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <strong class="problem-title">{$t('dash.problems.ssl_expire_title')}</strong
+                        >
+                        <div class="problem-desc">
+                          {$t('dash.problems.ssl_expire_desc', {
+                            days: systemStats.ssl_cert_days
+                          })}
                         </div>
                       </div>
                     </div>
-                  {/if}
+                  </div>
+                {/if}
 
-                  {#if systemStats && systemStats.invalid_config}
-                    <div class="problem-item alert-error">
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <strong class="problem-title"
-                            >{$t('dash.problems.invalid_config_title')}</strong
-                          >
-                          <div class="problem-desc">{$t('dash.problems.invalid_config_desc')}</div>
-                        </div>
+                {#if systemStats && systemStats.invalid_config}
+                  <div class="problem-item alert-error">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <strong class="problem-title"
+                          >{$t('dash.problems.invalid_config_title')}</strong
+                        >
+                        <div class="problem-desc">{$t('dash.problems.invalid_config_desc')}</div>
                       </div>
-                      <Button variant="secondary" onclick={() => switchTab('editor')}>
-                        {$t('dash.problems.invalid_config_cta')}
-                      </Button>
                     </div>
-                  {/if}
-                  {#if $capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running}
-                    <div class="problem-item alert-warning">
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <strong class="problem-title"
-                            >{$t('dash.problems.mihomo_api_title')}</strong
-                          >
-                          <div class="problem-desc">{$t('dash.problems.mihomo_api_desc')}</div>
-                        </div>
+                    <Button variant="secondary" onclick={() => switchTab('editor')}>
+                      {$t('dash.problems.invalid_config_cta')}
+                    </Button>
+                  </div>
+                {/if}
+                {#if $capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running}
+                  <div class="problem-item alert-warning">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <strong class="problem-title">{$t('dash.problems.mihomo_api_title')}</strong
+                        >
+                        <div class="problem-desc">{$t('dash.problems.mihomo_api_desc')}</div>
                       </div>
-                      <Button
-                        variant="secondary"
-                        onclick={() => {
-                          window.location.hash = '#/constructor';
-                        }}
-                      >
-                        {$t('dash.problems.mihomo_api_cta')}
-                      </Button>
                     </div>
-                  {/if}
-                  {#if currentNextStep === 'install_xkeen'}
-                    <div
-                      class="problem-item alert-error"
-                      data-testid="problem-xkeen-missing"
-                      data-step="install_xkeen"
+                    <Button
+                      variant="secondary"
+                      onclick={() => {
+                        window.location.hash = '#/constructor';
+                      }}
                     >
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <span class="problem-step-label">{$t('dash.next_step_label')}</span>
-                          <strong class="problem-title"
-                            >{$t('dash.problems.xkeen_missing_title')}</strong
-                          >
-                          <div class="problem-desc">{$t('dash.problems.xkeen_missing_desc')}</div>
+                      {$t('dash.problems.mihomo_api_cta')}
+                    </Button>
+                  </div>
+                {/if}
+                {#if currentNextStep === 'install_xkeen'}
+                  <div
+                    class="problem-item alert-error"
+                    data-testid="problem-xkeen-missing"
+                    data-step="install_xkeen"
+                  >
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <span class="problem-step-label">{$t('dash.next_step_label')}</span>
+                        <strong class="problem-title"
+                          >{$t('dash.problems.xkeen_missing_title')}</strong
+                        >
+                        <div class="problem-desc">{$t('dash.problems.xkeen_missing_desc')}</div>
+                      </div>
+                    </div>
+                    <Button variant="primary" onclick={() => switchTab('services')}>
+                      {$t('dash.problems.xkeen_missing_cta')}
+                    </Button>
+                  </div>
+                {:else if currentNextStep === 'finish_xkeen_setup'}
+                  <div
+                    class="problem-item alert-warning"
+                    data-testid="problem-next-step"
+                    data-step="finish_xkeen_setup"
+                  >
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <span class="problem-step-label">{$t('dash.next_step_label')}</span>
+                        <strong class="problem-title"
+                          >{$t('dash.problems.xkeen_incomplete_title')}</strong
+                        >
+                        <div class="problem-desc">
+                          {$t('dash.problems.xkeen_incomplete_desc')}
                         </div>
                       </div>
-                      <Button variant="secondary" onclick={() => switchTab('services')}>
-                        {$t('dash.problems.xkeen_missing_cta')}
-                      </Button>
                     </div>
-                  {:else if currentNextStep === 'finish_xkeen_setup'}
-                    <div
-                      class="problem-item alert-warning"
-                      data-testid="problem-next-step"
-                      data-step="finish_xkeen_setup"
+                    <Button variant="primary" onclick={() => switchTab('services')}>
+                      {$t('dash.problems.xkeen_incomplete_cta')}
+                    </Button>
+                  </div>
+                {:else if currentNextStep === 'install_kernel'}
+                  <div
+                    class="problem-item alert-error"
+                    data-testid="problem-next-step"
+                    data-step="install_kernel"
+                  >
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <span class="problem-step-label">{$t('dash.next_step_label')}</span>
+                        <strong class="problem-title"
+                          >{$t('dash.problems.kernel_missing_title')}</strong
+                        >
+                        <div class="problem-desc">{$t('dash.problems.kernel_missing_desc')}</div>
+                      </div>
+                    </div>
+                    <Button variant="primary" onclick={() => switchTab('services')}>
+                      {$t('dash.problems.kernel_missing_cta')}
+                    </Button>
+                  </div>
+                {:else if currentNextStep === 'configure'}
+                  <div
+                    class="problem-item alert-warning"
+                    data-testid="problem-next-step"
+                    data-step="configure"
+                  >
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <span class="problem-step-label">{$t('dash.next_step_label')}</span>
+                        <strong class="problem-title">{$t('dash.problems.configure_title')}</strong>
+                        <div class="problem-desc">
+                          {$t('dash.problems.configure_desc', { kernel: nextStepKernelName })}
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      variant="primary"
+                      onclick={() => {
+                        window.location.hash = '#/constructor';
+                      }}
                     >
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <span class="problem-step-label">{$t('dash.next_step_label')}</span>
-                          <strong class="problem-title"
-                            >{$t('dash.problems.xkeen_incomplete_title')}</strong
-                          >
-                          <div class="problem-desc">
-                            {$t('dash.problems.xkeen_incomplete_desc')}
-                          </div>
-                        </div>
+                      {$t('dash.problems.configure_cta')}
+                    </Button>
+                  </div>
+                {:else if currentNextStep === 'start'}
+                  <div
+                    class="problem-item alert-warning"
+                    data-testid="problem-next-step"
+                    data-step="start"
+                  >
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <span class="problem-step-label">{$t('dash.next_step_label')}</span>
+                        <strong class="problem-title">{$t('dash.problems.start_title')}</strong>
+                        <div class="problem-desc">{$t('dash.problems.start_desc')}</div>
                       </div>
-                      <Button variant="secondary" onclick={() => switchTab('services')}>
-                        {$t('dash.problems.xkeen_incomplete_cta')}
-                      </Button>
                     </div>
-                  {:else if currentNextStep === 'install_kernel'}
-                    <div
-                      class="problem-item alert-error"
-                      data-testid="problem-next-step"
-                      data-step="install_kernel"
-                    >
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <span class="problem-step-label">{$t('dash.next_step_label')}</span>
-                          <strong class="problem-title"
-                            >{$t('dash.problems.kernel_missing_title')}</strong
-                          >
-                          <div class="problem-desc">{$t('dash.problems.kernel_missing_desc')}</div>
-                        </div>
+                    <Button variant="primary" onclick={() => switchTab('services')}>
+                      {$t('dash.problems.start_cta')}
+                    </Button>
+                  </div>
+                {/if}
+                {#if $capabilities !== null && $capabilities?.mihomo?.is_insecure_lan}
+                  <div class="problem-item alert-warning">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <strong class="problem-title"
+                          >{$t('dash.problems.mihomo_insecure_title')}</strong
+                        >
+                        <div class="problem-desc">{$t('dash.problems.mihomo_insecure_desc')}</div>
                       </div>
-                      <Button variant="secondary" onclick={() => switchTab('services')}>
-                        {$t('dash.problems.kernel_missing_cta')}
-                      </Button>
                     </div>
-                  {:else if currentNextStep === 'configure'}
-                    <div
-                      class="problem-item alert-warning"
-                      data-testid="problem-next-step"
-                      data-step="configure"
-                    >
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <span class="problem-step-label">{$t('dash.next_step_label')}</span>
-                          <strong class="problem-title"
-                            >{$t('dash.problems.configure_title')}</strong
-                          >
-                          <div class="problem-desc">
-                            {$t('dash.problems.configure_desc', { kernel: nextStepKernelName })}
-                          </div>
-                        </div>
-                      </div>
-                      <Button
-                        variant="secondary"
-                        onclick={() => {
-                          window.location.hash = '#/constructor';
-                        }}
-                      >
-                        {$t('dash.problems.configure_cta')}
-                      </Button>
-                    </div>
-                  {:else if currentNextStep === 'start'}
-                    <div
-                      class="problem-item alert-warning"
-                      data-testid="problem-next-step"
-                      data-step="start"
-                    >
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <span class="problem-step-label">{$t('dash.next_step_label')}</span>
-                          <strong class="problem-title">{$t('dash.problems.start_title')}</strong>
-                          <div class="problem-desc">{$t('dash.problems.start_desc')}</div>
-                        </div>
-                      </div>
-                      <Button variant="secondary" onclick={() => switchTab('services')}>
-                        {$t('dash.problems.start_cta')}
-                      </Button>
-                    </div>
-                  {/if}
-                  {#if $capabilities !== null && $capabilities?.mihomo?.is_insecure_lan}
-                    <div class="problem-item alert-warning">
-                      <div class="problem-content">
-                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
-                        <div>
-                          <strong class="problem-title"
-                            >{$t('dash.problems.mihomo_insecure_title')}</strong
-                          >
-                          <div class="problem-desc">{$t('dash.problems.mihomo_insecure_desc')}</div>
-                        </div>
-                      </div>
-                      <Button variant="secondary" onclick={() => (showMihomoMigrateModal = true)}>
-                        {$t('mihomo.migrate_btn')}
-                      </Button>
-                    </div>
-                  {/if}
-                </div>
-              </Card>
-            </div>
+                    <Button variant="secondary" onclick={() => (showMihomoMigrateModal = true)}>
+                      {$t('mihomo.migrate_btn')}
+                    </Button>
+                  </div>
+                {/if}
+              </div>
+            </section>
           {/if}
 
           <!-- Live Service Status cards (DASH-03) -->
@@ -1523,8 +1517,8 @@
               <div class="dash-col-left">
                 <!-- Service Status Group (DASH-03) -->
                 <div class="dash-section">
-                  <Card title={$t('dash.service_status')}>
-                    {#snippet actions()}
+                  <DashSection title={$t('dash.service_status')}>
+                    {#snippet meta()}
                       {#if watchdogBadge}
                         <div class="dash-watchdog-badge-row" title={$t(watchdogBadge.hintKey)}>
                           <span class="dash-watchdog-label">{$t('watchdog.section_title')}</span>
@@ -1545,7 +1539,7 @@
                       onRefresh={fetchLiveStatus}
                       onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
                     />
-                  </Card>
+                  </DashSection>
                 </div>
 
                 <!-- System Resources (DASH-01, DASH-04) -->
@@ -1874,14 +1868,14 @@
   .dashboard-layout-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-    gap: var(--space-lg, 24px);
+    gap: var(--spacing-8) var(--spacing-6);
     align-items: start;
   }
 
   @container dashgrid (max-width: 940px) {
     .dashboard-layout-grid {
       grid-template-columns: 1fr;
-      gap: 18px;
+      gap: var(--spacing-8);
     }
   }
 
@@ -1890,7 +1884,7 @@
   @media (max-width: 1024px) {
     .dashboard-layout-grid {
       grid-template-columns: 1fr;
-      gap: 18px;
+      gap: var(--spacing-8);
     }
   }
 
@@ -1907,12 +1901,17 @@
     }
   }
 
+  /* Секции отделяются воздухом и заголовком, а не рамкой — отступ между ними больше. */
   .dash-col-left,
   .dash-col-right {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: var(--spacing-8);
     min-width: 0;
+  }
+
+  .dash-alerts {
+    margin-bottom: var(--spacing-6);
   }
 
   .dash-section {

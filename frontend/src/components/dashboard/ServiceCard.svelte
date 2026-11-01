@@ -117,152 +117,139 @@
 </script>
 
 <div
-  class="service-card"
-  class:service-card-active={isActiveKernel}
-  class:service-card-disabled={isNotInstalled}
+  class="service-row"
+  class:service-row-active={isActiveKernel}
+  class:service-row-disabled={isNotInstalled}
 >
-  <div class="card-header">
-    <div class="header-left">
-      <div class="name-row">
-        <span class="status-dot {dotColorClass}" aria-hidden="true"></span>
-        <span class="service-name">{name}</span>
-        {#if isActiveKernel}
-          <span class="badge badge-active" title={$t('svc.active_kernel_label')}>
-            {$t('svc.active_kernel_badge')}
-          </span>
-        {/if}
-      </div>
-      {#if subLabel}
-        <span class="sub-label" title={subLabel}>{subLabel}</span>
+  <div class="svc-ident">
+    <div class="name-row">
+      <span class="service-name">{name}</span>
+      {#if isActiveKernel}
+        <span class="badge-active" title={$t('svc.active_kernel_label')}>
+          {$t('svc.active_kernel_badge')}
+        </span>
       {/if}
-    </div>
-
-    <div class="header-right">
-      <span class="status-text status-text-{status}">
-        {statusText}
-      </span>
       {#if formattedVersion}
-        <span class="version-badge" title={formattedVersion}>{formattedVersion}</span>
-      {:else if isInsecureLan && onMigrate}
-        <button
-          type="button"
-          class="badge badge-warning migrate-badge"
-          onclick={onMigrate}
-          title={$t('mihomo.migrate_banner_body')}
-        >
-          {$t('mihomo.controller_mode_insecure')}
-        </button>
+        <span class="version-text" title={formattedVersion}>{formattedVersion}</span>
       {/if}
     </div>
+    {#if subLabel}
+      <span class="sub-label" title={subLabel}>{subLabel}</span>
+    {/if}
   </div>
 
-  <div class="card-actions">
+  <div class="svc-state">
+    <span class="status-pill status-pill-{dotColorClass}">
+      <span class="pill-dot" aria-hidden="true"></span>
+      {statusText}
+    </span>
+    {#if !formattedVersion && isInsecureLan && onMigrate}
+      <button
+        type="button"
+        class="badge badge-warning migrate-badge"
+        onclick={onMigrate}
+        title={$t('mihomo.migrate_banner_body')}
+      >
+        {$t('mihomo.controller_mode_insecure')}
+      </button>
+    {/if}
+  </div>
+
+  <div class="svc-actions">
     {#if isNotInstalled}
-      <a href="#/services" class="btn btn-secondary btn-sm install-link">
+      <a href="#/services" class="install-link">
         {serviceId === 'xkeen'
           ? $t('dash.problems.xkeen_missing_cta')
           : $t('dash.problems.kernel_missing_cta')}
+        <Icon name="chevron-right" size={14} />
       </a>
     {:else}
-      <div class="btn-group">
-        {#if onRestart}
-          <Button
-            variant="secondary"
-            onclick={handleRestart}
-            disabled={isBusy || !!mutationBlockedReason}
-            loading={isRestarting}
-            title={mutationBlockedReason || $t('app.restart')}
-            ariaLabel={mutationBlockedReason
-              ? `${$t('app.restart')}: ${mutationBlockedReason}`
-              : undefined}
-          >
-            <Icon name="refresh" size={13} />
-            <span>{$t('app.restart')}</span>
-          </Button>
-        {/if}
+      {#if onRestart}
+        <Button
+          variant="secondary"
+          onclick={handleRestart}
+          disabled={isBusy || !!mutationBlockedReason}
+          loading={isRestarting}
+          title={mutationBlockedReason || $t('app.restart')}
+          ariaLabel={mutationBlockedReason
+            ? `${$t('app.restart')}: ${mutationBlockedReason}`
+            : undefined}
+        >
+          <Icon name="refresh" size={13} />
+          <span>{$t('app.restart')}</span>
+        </Button>
+      {/if}
 
-        {#if isRunning && onStop}
-          <Button
-            variant="secondary"
-            onclick={handleStop}
-            disabled={isBusy}
-            loading={isStopping}
-            title={$t('app.stop')}
-          >
-            <Icon name="stop" size={13} color="var(--danger, #f4707f)" />
-            <span>{$t('app.stop')}</span>
-          </Button>
-        {:else if !isRunning && onStart}
-          <Button
-            variant="secondary"
-            onclick={handleStart}
-            disabled={isBusy || !!startBlocked}
-            loading={isStarting}
-            title={startBlocked || $t('app.start')}
-            ariaLabel={startBlocked ? `${$t('app.start')}: ${startBlocked}` : undefined}
-          >
-            <Icon name="play" size={13} color="var(--success, #46d18a)" />
-            <span>{$t('app.start')}</span>
-          </Button>
-        {/if}
-      </div>
+      {#if isRunning && onStop}
+        <Button
+          variant="secondary"
+          onclick={handleStop}
+          disabled={isBusy}
+          loading={isStopping}
+          title={$t('app.stop')}
+        >
+          <Icon name="stop" size={13} color="var(--danger)" />
+          <span>{$t('app.stop')}</span>
+        </Button>
+      {:else if !isRunning && onStart}
+        <Button
+          variant="secondary"
+          onclick={handleStart}
+          disabled={isBusy || !!startBlocked}
+          loading={isStarting}
+          title={startBlocked || $t('app.start')}
+          ariaLabel={startBlocked ? `${$t('app.start')}: ${startBlocked}` : undefined}
+        >
+          <Icon name="play" size={13} color="var(--success)" />
+          <span>{$t('app.start')}</span>
+        </Button>
+      {/if}
     {/if}
   </div>
 </div>
 
 <style>
-  .service-card {
+  /* Строка списка сервисов: имя слева, статус и действия справа.
+     Строки лежат в одной карточке и делятся тонкой линией (см. ServiceStatusGroup). */
+  .service-row {
+    container: svcrow / inline-size;
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: var(--spacing-3) var(--spacing-4);
+    padding: var(--spacing-3) var(--card-pad);
+    min-height: 64px;
+    transition: background-color var(--transition-fast);
+  }
+
+  .service-row:hover {
+    background: var(--surface-tint-faint);
+  }
+
+  /* Активное ядро: акцентная полоса у левого края вместо обводки всей плитки */
+  .service-row-active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: var(--spacing-3);
+    bottom: var(--spacing-3);
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--accent);
+  }
+
+  .svc-ident {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    gap: 2px;
     min-width: 0;
-    min-height: 124px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 70%), var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 12px);
-    padding: 14px 16px;
-    gap: 12px;
-    box-shadow: var(--shadow);
-    transition:
-      border-color 0.2s ease,
-      transform 0.15s ease,
-      box-shadow 0.2s ease;
-  }
-
-  .service-card:hover {
-    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-  }
-
-  .service-card-active {
-    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-    box-shadow:
-      0 0 16px color-mix(in srgb, var(--accent) 8%, transparent),
-      var(--shadow);
-  }
-
-  .service-card-disabled {
-    opacity: 0.75;
-  }
-
-  .card-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .header-left {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-    flex: 1;
   }
 
   .name-row {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    align-items: baseline;
+    gap: var(--spacing-2);
     min-width: 0;
   }
 
@@ -271,86 +258,99 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
     letter-spacing: -0.01em;
-    line-height: 1.2;
+    line-height: 1.3;
+  }
+
+  .service-row-disabled .service-name {
+    color: var(--fg-secondary);
+  }
+
+  .version-text {
+    flex-shrink: 0;
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+    color: var(--fg-dim);
   }
 
   .sub-label {
     font-size: var(--font-size-xs);
-    font-weight: 400;
-    color: var(--fg-secondary);
+    color: var(--fg-dim);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.3;
-    padding-left: 16px;
   }
 
-  .header-right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    justify-content: flex-start;
-    gap: 4px;
+  .badge-active {
     flex-shrink: 0;
-  }
-
-  .status-text {
-    font-size: 12px;
+    align-self: center;
+    padding: 1px 7px;
+    border-radius: var(--radius-full);
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    font-size: var(--font-size-xs);
     font-weight: 600;
-    line-height: 1.2;
+    line-height: 1.5;
   }
 
-  .status-text-running {
-    color: var(--success);
+  .svc-state {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    justify-self: end;
   }
 
-  .status-text-stopped,
-  .status-text-error {
-    color: var(--danger);
+  .status-pill {
+    --tone: var(--fg-dim);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px 2px 8px;
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--tone) 12%, transparent);
+    color: var(--tone);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
   }
 
-  .status-text-loading {
-    color: var(--warning);
+  .status-pill-dot-running {
+    --tone: var(--success);
   }
 
-  .status-text-not_installed {
-    color: var(--fg-dim);
+  .status-pill-dot-stopped {
+    --tone: var(--danger);
   }
 
-  .status-dot {
-    width: 8px;
-    height: 8px;
+  .status-pill-dot-loading {
+    --tone: var(--warning);
+  }
+
+  .status-pill-dot-uninstalled,
+  .status-pill-dot-unknown {
+    --tone: var(--fg-dim);
+    background: var(--surface-tint);
+  }
+
+  .pill-dot {
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
+    background: currentColor;
     flex-shrink: 0;
-    transition:
-      background-color 0.25s ease,
-      box-shadow 0.25s ease;
   }
 
-  .dot-running {
-    background-color: var(--success);
-    box-shadow: 0 0 8px color-mix(in srgb, var(--success) 50%, transparent);
+  .status-pill-dot-running .pill-dot {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
   }
 
-  .dot-stopped,
-  .dot-error {
-    background-color: var(--danger);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--danger) 40%, transparent);
-  }
-
-  .dot-loading {
-    background-color: var(--warning);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 40%, transparent);
+  .status-pill-dot-loading .pill-dot {
     animation: pulse 1.5s infinite;
-  }
-
-  .dot-uninstalled,
-  .dot-unknown {
-    background-color: var(--fg-dim);
   }
 
   @keyframes pulse {
@@ -363,94 +363,69 @@
     }
   }
 
-  .badge-active {
-    flex-shrink: 0;
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--accent);
-    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    padding: 1px 6px;
-    border-radius: var(--radius-sm, 4px);
-  }
-
-  .version-badge {
-    background: var(--surface-tint);
-    color: var(--fg-secondary);
-    border: 1px solid var(--border);
-    font-size: var(--font-size-xs);
-    font-family: var(--font-family-mono, monospace);
-    font-weight: 500;
-    padding: 1px 6px;
-    border-radius: var(--radius-sm, 4px);
-    letter-spacing: -0.01em;
-  }
-
   .migrate-badge {
     cursor: pointer;
     border: none;
     font-size: var(--font-size-xs);
     padding: 1px 6px;
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
   }
 
-  .card-actions {
+  .svc-actions {
     display: flex;
     align-items: center;
-    padding-top: 10px;
-    border-top: 1px solid var(--border-light);
-    margin-top: auto;
-  }
-
-  .btn-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    width: 100%;
+    justify-content: flex-end;
+    gap: var(--spacing-2);
     min-width: 0;
   }
 
-  .btn-group :global(.btn) {
-    flex: 1 1 130px;
-    min-width: 0;
-    padding: 7px 8px;
-    font-size: 12.5px;
+  .service-row .svc-actions :global(.btn) {
+    height: 32px;
+    min-height: 32px;
+    padding: 0 var(--spacing-3);
+    font-size: var(--font-size-sm);
     white-space: nowrap;
-    justify-content: center;
   }
 
-  .btn-group :global(.btn span) {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
-
+  /* Не установлено — тихая ссылка вместо третьей большой кнопки: главный призыв
+     к установке стоит в баннере «Следующий шаг» над секциями. */
   .install-link {
-    width: 100%;
-    justify-content: center;
-    text-align: center;
     display: inline-flex;
     align-items: center;
-    padding: 7px 12px;
-    font-size: 12.5px;
-    height: 33px;
+    gap: 2px;
+    padding: 6px var(--spacing-2);
     border-radius: var(--radius-md);
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--fg-primary);
-    text-decoration: none;
+    color: var(--accent-text);
+    font-size: var(--font-size-sm);
     font-weight: 600;
-    transition:
-      background-color var(--transition-fast),
-      border-color var(--transition-fast),
-      color var(--transition-fast);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background-color var(--transition-fast);
   }
 
   .install-link:hover {
-    border-color: var(--accent-line);
-    color: var(--accent);
     background: var(--hover);
+  }
+
+  /* Узкая строка (мобильный, узкая колонка): действия уходят под имя на всю ширину */
+  @container svcrow (max-width: 520px) {
+    .service-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .svc-actions {
+      grid-column: 1 / -1;
+      justify-content: flex-start;
+    }
+
+    .service-row .svc-actions :global(.btn) {
+      flex: 1 1 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .status-pill-dot-loading .pill-dot {
+      animation: none;
+    }
   }
 </style>

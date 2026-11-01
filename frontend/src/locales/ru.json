@@ -195,7 +195,6 @@
   "dash.info_lines_few": "{count} строки",
   "dash.info_lines_many": "{count} строк",
   "dash.uptime_since": "с {time}",
-  "dash.uptime_stable": "стабильно",
   "dash.info_boot_time": "Время запуска",
   "dash.router_info": "Информация о роутере",
   "dash.router_model": "Модель роутера",

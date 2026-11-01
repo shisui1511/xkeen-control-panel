@@ -2,6 +2,7 @@
   import { t } from '../../i18n';
   import { formatBytes } from '../../lib/format';
   import Card from '../Card.svelte';
+  import DashSection from './DashSection.svelte';
   import Skeleton from '../Skeleton.svelte';
 
   export interface SystemStats {
@@ -45,10 +46,16 @@
     sparklineData?: { line: string; fill: string } | null;
   } = $props();
 
+  // Цвет несёт смысл только у порогов: в норме полоса акцентная, а процент нейтральный.
   function getUsageColor(pct: number): string {
     if (pct >= 90) return 'var(--danger)';
     if (pct >= 75) return 'var(--warning)';
-    return 'var(--success)';
+    return 'var(--accent)';
+  }
+
+  function getPctColor(pct: number): string {
+    if (pct >= 75) return getUsageColor(pct);
+    return 'var(--fg-secondary)';
   }
 
   const diskUsedPct = $derived.by(() => {
@@ -85,107 +92,88 @@
 </script>
 
 <div class="system-resources-card">
-  <Card title={$t('dash.system_stats')}>
-    {#if !systemStats}
-      <div class="stats-grid">
-        {#each [1, 2, 3, 4] as _, i (i)}
-          <div class="stat-box">
-            <Skeleton type="rect" width="80px" height="16px" />
-            <Skeleton type="rect" width="120px" height="28px" />
-            <Skeleton type="rect" width="100%" height="8px" />
-          </div>
-        {/each}
-      </div>
-    {:else}
-      <div class="stats-grid">
-        <!-- Storage (Disk) -->
-        {#if systemStats.disk}
-          <div class="stat-box">
-            <div class="stat-content-top">
-              <div class="stat-head">
-                <span class="stat-label">{$t('dash.disk')}</span>
-                <span class="stat-pct" style="color: {diskBarColor};"
+  <DashSection title={$t('dash.system_stats')}>
+    <Card flush>
+      {#if !systemStats}
+        <div class="res-grid">
+          {#each [1, 2, 3, 4] as _, i (i)}
+            <div class="res-cell">
+              <Skeleton type="rect" width="80px" height="14px" />
+              <Skeleton type="rect" width="120px" height="28px" />
+              <Skeleton type="rect" width="100%" height="6px" />
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <div class="res-grid">
+          <!-- Storage (Disk) -->
+          {#if systemStats.disk}
+            <div class="res-cell">
+              <div class="res-head">
+                <span class="res-label">{$t('dash.disk')}</span>
+                <span class="res-pct" style="color: {getPctColor(diskUsedPct)};"
                   >{diskUsedPct.toFixed(1)}%</span
                 >
               </div>
-              <div class="stat-value">
+              <div class="res-value">
                 {formatBytes(systemStats.disk.free)}
-                <span class="stat-unit">{$t('dash.free_suffix')}</span>
+                <span class="res-unit">{$t('dash.free_suffix')}</span>
               </div>
               <div
-                class="res-sub"
-                title={$t('dash.disk_of_total', {
-                  total: formatBytes(systemStats.disk.total)
-                })}
+                class="res-note"
+                title={$t('dash.disk_of_total', { total: formatBytes(systemStats.disk.total) })}
               >
-                {$t('dash.disk_of_total', {
-                  total: formatBytes(systemStats.disk.total)
-                })}
+                {$t('dash.disk_of_total', { total: formatBytes(systemStats.disk.total) })}
               </div>
-            </div>
-            <div class="stat-bottom">
-              <div class="stat-bar">
+              <div class="res-bar">
                 <div
-                  class="stat-bar-fill"
+                  class="res-bar-fill"
                   style="width: {Math.min(diskUsedPct, 100).toFixed(
                     1
-                  )}%; background: {diskBarColor}; box-shadow: 0 0 6px -1px {diskBarColor};"
+                  )}%; background: {diskBarColor};"
                 ></div>
               </div>
             </div>
-          </div>
-        {/if}
+          {/if}
 
-        <!-- RAM -->
-        <div class="stat-box">
-          <div class="stat-content-top">
-            <div class="stat-head">
-              <span class="stat-label">{$t('dash.ram')}</span>
-              <span class="stat-pct" style="color: {ramBarColor};">{ramUsedPct.toFixed(1)}%</span>
+          <!-- RAM -->
+          <div class="res-cell">
+            <div class="res-head">
+              <span class="res-label">{$t('dash.ram')}</span>
+              <span class="res-pct" style="color: {getPctColor(ramUsedPct)};"
+                >{ramUsedPct.toFixed(1)}%</span
+              >
             </div>
-            <div class="stat-value">
+            <div class="res-value">
               {ramUsedMb}
-              <span class="stat-unit">{$t('dash.unit_mb')}</span>
+              <span class="res-unit">{$t('dash.unit_mb')}</span>
             </div>
-            <div
-              class="res-sub"
-              title={$t('dash.ram_of_total', {
-                total: ramTotalMb
-              })}
-            >
-              {$t('dash.ram_of_total', {
-                total: ramTotalMb
-              })}
+            <div class="res-note" title={$t('dash.ram_of_total', { total: ramTotalMb })}>
+              {$t('dash.ram_of_total', { total: ramTotalMb })}
             </div>
-          </div>
-          <div class="stat-bottom">
-            <div class="stat-bar">
+            <div class="res-bar">
               <div
-                class="stat-bar-fill"
-                style="width: {Math.min(ramUsedPct, 100).toFixed(
-                  1
-                )}%; background: {ramBarColor}; box-shadow: 0 0 6px -1px {ramBarColor};"
+                class="res-bar-fill"
+                style="width: {Math.min(ramUsedPct, 100).toFixed(1)}%; background: {ramBarColor};"
               ></div>
             </div>
           </div>
-        </div>
 
-        <!-- Load Average -->
-        <div class="stat-box">
-          <div class="stat-content-top">
-            <div class="stat-head">
-              <span class="stat-label">{$t('dash.load')}</span>
+          <!-- Load Average -->
+          <div class="res-cell">
+            <div class="res-head">
+              <span class="res-label">{$t('dash.load')}</span>
               {#if loadPerCorePct !== null}
-                <span class="stat-pct" style="color: {getUsageColor(loadPerCorePct)};"
+                <span class="res-pct" style="color: {getPctColor(loadPerCorePct)};"
                   >{loadPerCorePct.toFixed(0)}%</span
                 >
               {/if}
             </div>
-            <div class="stat-value">
+            <div class="res-value">
               {systemStats.load[0].toFixed(2)}
             </div>
             <div
-              class="res-sub res-sub-load"
+              class="res-note res-note-mono"
               title={$t('dash.load_avg_line', {
                 v1: systemStats.load[0].toFixed(2),
                 v2: systemStats.load[1].toFixed(2),
@@ -198,8 +186,6 @@
                 v3: systemStats.load[2].toFixed(2)
               })}
             </div>
-          </div>
-          <div class="stat-bottom">
             {#if sparklineData}
               <div class="sparkline-container">
                 <svg
@@ -214,7 +200,6 @@
                       <stop class="sparkline-grad-to" offset="100%" />
                     </linearGradient>
                   </defs>
-                  <line class="sparkline-baseline" x1="0" y1="41" x2="200" y2="41" />
                   <path d={sparklineData.fill} fill="url(#loadGrad)" />
                   <path
                     class="sparkline-line"
@@ -225,15 +210,13 @@
               </div>
             {/if}
           </div>
-        </div>
 
-        <!-- Uptime -->
-        <div class="stat-box">
-          <div class="stat-content-top">
-            <div class="stat-head">
-              <span class="stat-label">{$t('dash.uptime')}</span>
+          <!-- Uptime -->
+          <div class="res-cell">
+            <div class="res-head">
+              <span class="res-label">{$t('dash.uptime')}</span>
             </div>
-            <div class="stat-value">
+            <div class="res-value">
               {$t('dash.uptime_dhm', {
                 days: systemStats.uptime.days,
                 hours: systemStats.uptime.hours,
@@ -241,21 +224,18 @@
               })}
             </div>
             {#if systemStats.boot_time}
-              <div class="res-sub" title={$t('dash.uptime_since', { time: systemStats.boot_time })}>
+              <div
+                class="res-note"
+                title={$t('dash.uptime_since', { time: systemStats.boot_time })}
+              >
                 {$t('dash.uptime_since', { time: systemStats.boot_time })}
               </div>
             {/if}
           </div>
-          <div class="stat-bottom uptime-badge-row">
-            <span class="uptime-badge">
-              <span class="uptime-dot"></span>
-              {$t('dash.uptime_stable')}
-            </span>
-          </div>
         </div>
-      </div>
-    {/if}
-  </Card>
+      {/if}
+    </Card>
+  </DashSection>
 </div>
 
 <style>
@@ -264,126 +244,127 @@
     container: sysres / inline-size;
   }
 
-  /* Four metrics — always an even grid so the last card never orphans
-     onto a row of its own. Two up by default, four up once there is room. */
-  .stats-grid {
+  /* Четыре метрики — одна полоса в общей карточке, ячейки разделены тонкими
+     линиями. Узко — сетка 2×2, совсем узко — столбик. Каждая ячейка рисует
+     линию справа и снизу тенью; у внешних краёв её срезает overflow карточки,
+     поэтому линии не двоятся и не зависят от числа колонок. */
+  .res-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
   }
 
-  @container sysres (max-width: 400px) {
-    .stats-grid {
+  @container sysres (max-width: 280px) {
+    .res-grid {
       grid-template-columns: minmax(0, 1fr);
     }
   }
 
+  /* Телефон: сетка 2×2 остаётся, ячейки плотнее */
+  @container sysres (max-width: 440px) {
+    .res-cell {
+      min-height: 0;
+      padding: var(--spacing-3) var(--spacing-4);
+    }
+
+    .res-value {
+      font-size: var(--font-size-xl);
+    }
+  }
+
   @container sysres (min-width: 820px) {
-    .stats-grid {
+    .res-grid {
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
   }
 
-  .stat-box {
-    background: var(--surface-tint);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 14px;
+  .res-cell {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
-    min-height: 126px;
-    gap: 8px;
-    position: relative;
+    gap: var(--spacing-1);
+    min-width: 0;
+    min-height: 128px;
+    padding: var(--spacing-4) var(--card-pad);
+    box-shadow:
+      1px 0 0 var(--border),
+      0 1px 0 var(--border);
   }
 
-  .stat-content-top {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .stat-bottom {
-    margin-top: auto;
-    width: 100%;
-  }
-
-  .stat-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .stat-label {
-    font-size: 13px;
-    font-weight: 600;
-    text-transform: none; /* D-07: natural case, no uppercase fatigue */
-    color: var(--fg-secondary);
-    letter-spacing: -0.01em;
-  }
-
-  .stat-pct {
-    font-size: 12px;
-    font-weight: 600;
-    font-family: var(--font-family-mono, monospace);
-  }
-
-  .stat-value {
-    font-size: 22px;
-    font-weight: 600;
-    color: var(--fg-primary);
-    line-height: 1.2;
+  .res-head {
     display: flex;
     align-items: baseline;
-    gap: 4px;
-    font-variant-numeric: tabular-nums;
+    justify-content: space-between;
+    gap: var(--spacing-2);
+    margin-bottom: var(--spacing-1);
   }
 
-  .stat-unit {
-    font-size: 13px;
+  .res-label {
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--fg-secondary);
   }
 
-  .res-sub {
-    font-size: 12px;
-    color: var(--fg-secondary);
+  .res-pct {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .res-value {
+    display: flex;
+    align-items: baseline;
+    gap: var(--spacing-1);
+    font-size: var(--font-size-2xl);
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    color: var(--fg-primary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .res-unit {
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--fg-dim);
+  }
+
+  .res-note {
+    font-size: var(--font-size-xs);
+    color: var(--fg-dim);
     line-height: 1.4;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .res-sub-load {
-    font-size: 12px;
-    font-family: var(--font-family-mono, monospace);
-    letter-spacing: -0.02em;
+  .res-note-mono {
+    font-family: var(--font-family-mono);
     font-variant-numeric: tabular-nums;
   }
 
-  .stat-bar {
+  .res-bar {
     width: 100%;
-    height: 6px;
-    background: var(--border);
-    border-radius: 999px;
+    height: 4px;
+    margin-top: auto;
+    border-radius: var(--radius-full);
+    background: var(--surface-tint-strong);
     overflow: hidden;
-    margin-top: 4px;
   }
 
-  .stat-bar-fill {
+  .res-bar-fill {
     height: 100%;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     transition:
       width 0.4s cubic-bezier(0.4, 0, 0.2, 1),
       background-color 0.3s ease;
   }
 
   .sparkline-container {
-    margin-top: 2px;
-    height: 36px;
+    margin-top: auto;
+    height: 32px;
     position: relative;
     overflow: hidden;
-    border-radius: var(--radius-sm);
   }
 
   .sparkline {
@@ -394,7 +375,7 @@
 
   .sparkline-grad-from {
     stop-color: var(--accent);
-    stop-opacity: 0.28;
+    stop-opacity: 0.22;
   }
 
   .sparkline-grad-to {
@@ -402,48 +383,17 @@
     stop-opacity: 0;
   }
 
-  .sparkline-baseline {
-    stroke: var(--border);
-    stroke-width: 1;
-  }
-
   .sparkline-line {
     fill: none;
     stroke: var(--accent);
-    stroke-width: 1.75;
+    stroke-width: 1.5;
     stroke-linecap: round;
     stroke-linejoin: round;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .stat-bar-fill {
+    .res-bar-fill {
       transition: none;
     }
-  }
-
-  .uptime-badge-row {
-    margin-top: 2px;
-    display: flex;
-    align-items: center;
-  }
-
-  .uptime-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--success);
-    background: color-mix(in srgb, var(--success) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--success) 28%, transparent);
-    padding: 2px 7px;
-    border-radius: var(--radius-sm);
-  }
-
-  .uptime-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--success);
   }
 </style>

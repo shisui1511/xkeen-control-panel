@@ -198,7 +198,6 @@
   "dash.info_lines_few": "{count} lines",
   "dash.info_lines_many": "{count} lines",
   "dash.uptime_since": "since {time}",
-  "dash.uptime_stable": "stable",
   "dash.info_boot_time": "Boot Time",
   "dash.router_info": "Router Information",
   "dash.router_model": "Router Model",

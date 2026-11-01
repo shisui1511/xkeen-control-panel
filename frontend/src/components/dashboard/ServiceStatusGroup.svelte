@@ -13,6 +13,7 @@
   import Icon from '../../lib/components/Icon.svelte';
   import Button from '../Button.svelte';
   import Skeleton from '../Skeleton.svelte';
+  import Card from '../Card.svelte';
   import StatusBadge from '../StatusBadge.svelte';
   import ServiceCard from './ServiceCard.svelte';
   import { anyKernelInstalled } from '../../lib/navCaps';
@@ -148,26 +149,24 @@
 
 <div class="service-status-container">
   {#if statusLoading}
-    <div class="services-grid">
-      {#each [1, 2, 3] as n (n)}
-        <div class="service-sk-card">
-          <div class="sk-head">
-            <Skeleton type="circle" width="10px" height="10px" />
-            <Skeleton type="rect" width="100px" height="18px" />
+    <Card flush>
+      <div class="services-list">
+        {#each [1, 2, 3] as n (n)}
+          <div class="service-sk-row">
+            <div class="sk-ident">
+              <Skeleton type="rect" width="96px" height="16px" />
+              <Skeleton type="rect" width="72px" height="12px" />
+            </div>
+            <Skeleton type="rect" width="72px" height="20px" />
+            <Skeleton type="rect" width="180px" height="32px" />
           </div>
-          <div class="sk-body">
-            <Skeleton type="rect" width="60px" height="14px" />
-          </div>
-          <div class="sk-footer">
-            <Skeleton type="rect" width="100%" height="28px" />
-          </div>
-        </div>
-      {/each}
-    </div>
+        {/each}
+      </div>
+    </Card>
   {:else if statusError}
     <div class="status-error-card">
       <div class="error-msg">
-        <Icon name="warning" size={16} color="var(--danger, #f4707f)" />
+        <Icon name="warning" size={16} color="var(--danger)" />
         <span>{$t('dash.status_error')}</span>
       </div>
       <Button
@@ -188,54 +187,56 @@
         </span>
       </div>
     {/if}
-    <div class="services-grid">
-      <!-- XKeen Daemon -->
-      <ServiceCard
-        name="XKeen"
-        serviceId="xkeen"
-        status={serviceStatus.xkeen}
-        version={xkeenVersion}
-        isActiveKernel={false}
-        isInstalled={capabilities?.xkeen_installed !== false}
-        startDisabledReason={anyKernelInstalled(capabilities) === false
-          ? $t('svc.start_disabled_no_kernel')
-          : undefined}
-        {mutationBlockedReason}
-        onRestart={restartXkeen}
-        onStart={startXkeen}
-        onStop={stopXkeen}
-      />
+    <Card flush>
+      <div class="services-list">
+        <!-- XKeen Daemon -->
+        <ServiceCard
+          name="XKeen"
+          serviceId="xkeen"
+          status={serviceStatus.xkeen}
+          version={xkeenVersion}
+          isActiveKernel={false}
+          isInstalled={capabilities?.xkeen_installed !== false}
+          startDisabledReason={anyKernelInstalled(capabilities) === false
+            ? $t('svc.start_disabled_no_kernel')
+            : undefined}
+          {mutationBlockedReason}
+          onRestart={restartXkeen}
+          onStart={startXkeen}
+          onStop={stopXkeen}
+        />
 
-      <!-- Mihomo Core -->
-      <ServiceCard
-        name="Mihomo"
-        serviceId="mihomo"
-        status={serviceStatus.mihomo}
-        version={serviceStatus.mihomoVersion}
-        isActiveKernel={$activeKernelName === 'mihomo'}
-        isInstalled={isMihomoInstalled}
-        isInsecureLan={Boolean(capabilities?.mihomo?.is_insecure_lan)}
-        {mutationBlockedReason}
-        onRestart={() => restartKernel('mihomo')}
-        onStart={() => startKernel('mihomo')}
-        onStop={() => stopKernel('mihomo')}
-        onMigrate={onShowMihomoMigrateModal}
-      />
+        <!-- Mihomo Core -->
+        <ServiceCard
+          name="Mihomo"
+          serviceId="mihomo"
+          status={serviceStatus.mihomo}
+          version={serviceStatus.mihomoVersion}
+          isActiveKernel={$activeKernelName === 'mihomo'}
+          isInstalled={isMihomoInstalled}
+          isInsecureLan={Boolean(capabilities?.mihomo?.is_insecure_lan)}
+          {mutationBlockedReason}
+          onRestart={() => restartKernel('mihomo')}
+          onStart={() => startKernel('mihomo')}
+          onStop={() => stopKernel('mihomo')}
+          onMigrate={onShowMihomoMigrateModal}
+        />
 
-      <!-- Xray Core -->
-      <ServiceCard
-        name="Xray"
-        serviceId="xray"
-        status={serviceStatus.xray}
-        version={serviceStatus.xrayVersion}
-        isActiveKernel={$activeKernelName === 'xray'}
-        isInstalled={isXrayInstalled}
-        {mutationBlockedReason}
-        onRestart={() => restartKernel('xray')}
-        onStart={() => startKernel('xray')}
-        onStop={() => stopKernel('xray')}
-      />
-    </div>
+        <!-- Xray Core -->
+        <ServiceCard
+          name="Xray"
+          serviceId="xray"
+          status={serviceStatus.xray}
+          version={serviceStatus.xrayVersion}
+          isActiveKernel={$activeKernelName === 'xray'}
+          isInstalled={isXrayInstalled}
+          {mutationBlockedReason}
+          onRestart={() => restartKernel('xray')}
+          onStart={() => startKernel('xray')}
+          onStop={() => stopKernel('xray')}
+        />
+      </div>
+    </Card>
   {/if}
 </div>
 
@@ -247,45 +248,32 @@
   .stale-row {
     display: flex;
     justify-content: flex-end;
-    margin-bottom: 8px;
+    margin-bottom: var(--spacing-2);
   }
 
-  .services-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-    gap: 12px;
-  }
-
-  @media (max-width: 640px) {
-    .services-grid {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  .service-sk-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 12px);
-    padding: 16px;
+  /* Сервисы — строки одного списка, между ними тонкая линия */
+  .services-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
   }
 
-  .sk-head {
-    display: flex;
+  .services-list > :global(* + *) {
+    border-top: 1px solid var(--border);
+  }
+
+  .service-sk-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
-    gap: 10px;
+    gap: var(--spacing-4);
+    padding: var(--spacing-3) var(--card-pad);
+    min-height: 64px;
   }
 
-  .sk-body {
+  .sk-ident {
     display: flex;
-    justify-content: flex-end;
-  }
-
-  .sk-footer {
-    padding-top: 10px;
-    border-top: 1px solid var(--border-light);
+    flex-direction: column;
+    gap: 6px;
   }
 
   .status-error-card {
@@ -295,7 +283,7 @@
     padding: 14px 18px;
     background: color-mix(in srgb, var(--danger) 8%, transparent);
     border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
-    border-radius: var(--radius-lg, 12px);
+    border-radius: var(--radius-lg);
     gap: 12px;
   }
 
