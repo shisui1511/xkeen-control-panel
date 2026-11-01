@@ -2,7 +2,9 @@ package routing
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"reflect"
 	"time"
 
@@ -71,9 +73,17 @@ func (s *Service) seedMihomoSections(st configlayer.StateView) (map[string]json.
 	// значения встроенной базы с пометкой preset и без from.
 	base := configlayer.CoreSection{V: 1, Managed: true, Preset: true}
 	var profile []byte
-	if name, data, hash, err := s.d.Layer.MihomoActiveProfile(); err == nil {
+	name, data, hash, err := s.d.Layer.MihomoActiveProfile()
+	switch {
+	case err == nil:
 		profile = data
 		base = configlayer.CoreSection{V: 1, Managed: true, From: []configlayer.SourceFile{{Name: name, Hash: hash}}}
+	case errors.Is(err, fs.ErrNotExist):
+		// Профиля нет (config.yaml не существует) — секции из встроенной базы.
+	default:
+		// Профиль есть, но не читается (симлинк вне корня, нет прав): молча взять
+		// базу нельзя, «Применить» заменил бы профиль пользователя без сверки md5.
+		return nil, fmt.Errorf("routing: чтение профиля Mihomo: %w", err)
 	}
 	values, err := cores.SeedMihomo(profile, configlayer.MihomoPorts{})
 	if err != nil {
