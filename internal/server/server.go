@@ -147,6 +147,10 @@ func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 			}
 		} else if len(path) >= 8 && path[:8] == "/assets/" {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else if path == "/manifest.json" || path == "/favicon.svg" || strings.HasPrefix(path, "/icons/") {
+			// Манифест и иконки лежат по постоянным адресам: без явного
+			// no-cache браузер держал старый знак во вкладке и в ярлыке приложения.
+			w.Header().Set("Cache-Control", "no-cache")
 		}
 		fileServer.ServeHTTP(w, r)
 	})
