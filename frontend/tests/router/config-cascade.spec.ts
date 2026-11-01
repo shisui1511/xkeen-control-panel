@@ -3,7 +3,6 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './lib/console';
 import { T } from './lib/env';
-import { knownFailure } from './lib/known';
 import {
   addToDraft,
   api,
@@ -278,8 +277,6 @@ async function axeSevere(page: Page, scopes: string[]): Promise<string[]> {
 for (const theme of ['dark', 'light'] as const) {
   test(`cascade axe: диалог удаления, тема ${theme}`, async ({ page }) => {
     test.setTimeout(T.save * 4);
-    // Белый текст на --danger в тёмной теме не дотягивает до 4.5:1 — общий токен кнопки
-    if (theme === 'dark') knownFailure('*', 'btn-danger-dark-contrast');
     const guard = attachConsoleGuard(page);
     await page.addInitScript((th) => localStorage.setItem('theme', th), theme);
     await page.setViewportSize({ width: 1280, height: 900 });

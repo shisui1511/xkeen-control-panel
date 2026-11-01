@@ -57,6 +57,7 @@
   --scrollbar-thumb-hover: #1a426b;
   --surface-tint: rgba(255, 255, 255, 0.04);
   --btn-primary-text: #03182a;
+  --on-danger: #03182a;
   --bg-group-head-from: rgba(20, 51, 79, 0.9);
   --bg-group-head-to: rgba(16, 42, 68, 0.95);
 
@@ -249,6 +250,7 @@
   --surface-overlay-from: #ffffff;
   --surface-overlay-to: #f3f6fa;
   --btn-primary-text: #ffffff;
+  --on-danger: #ffffff;
   --bg-group-head-from: rgba(240, 244, 248, 0.95);
   --bg-group-head-to: rgba(228, 235, 244, 0.95);
 
@@ -565,13 +567,13 @@ h2.card-title {
 
 .btn-danger {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-danger);
   border-color: transparent;
 }
 
 .btn-danger:hover:not(:disabled) {
   opacity: 0.92;
-  color: #fff;
+  color: var(--on-danger);
 }
 
 .btn-sm {
