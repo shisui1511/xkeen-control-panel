@@ -894,7 +894,8 @@ input[type='number'] {
   left: 0;
   top: 0;
   background: var(--bg-card);
-  border-right: 1px solid #03101e;
+  /* Цвет границы из темы: жёсткий #03101e давал чёрную черту на светлой теме */
+  border-right: 1px solid var(--border);
   padding: 0;
   /* CR-01: `overflow-x: visible` next to `overflow-y: auto` is a no-op —
      per the CSS Overflow spec, when one axis is `auto`/`scroll` and the
@@ -914,7 +915,7 @@ input[type='number'] {
 }
 
 .sidebar::-webkit-scrollbar-thumb {
-  background: #102a44;
+  background: var(--scrollbar-thumb);
   border-radius: 8px;
 }
 
@@ -996,10 +997,11 @@ input[type='number'] {
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px 8px;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
+  /* Без капса и разрядки: «Прокси и подписки» / «Proxies & Subscriptions»
+     помещаются в ширину меню целиком, а не обрезаются многоточием. */
+  letter-spacing: 0.01em;
   color: var(--fg-secondary);
   cursor: pointer;
   list-style: none;
@@ -1034,11 +1036,14 @@ input[type='number'] {
 
 .nav-group-arrow {
   flex: 0 0 auto;
+  display: inline-flex;
   margin-left: 8px;
   transition: transform 0.2s ease;
-  font-size: var(--font-size-xs);
-  color: var(--fg-faint);
-  opacity: 0.6;
+  color: var(--fg-dim);
+}
+
+.nav-group summary:hover .nav-group-arrow {
+  color: var(--fg-secondary);
 }
 
 .nav-group[open] .nav-group-arrow {
@@ -1071,13 +1076,15 @@ input[type='number'] {
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.025);
+  /* От цвета текста темы: белая подложка не видна на светлой теме */
+  background: color-mix(in srgb, var(--fg-primary) 5%, transparent);
   color: var(--fg-primary);
 }
 
 .nav-item[aria-current='page'] {
   color: var(--fg-primary);
-  background: rgba(255, 255, 255, 0.04);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .nav-item[aria-current='page']::after {
@@ -1090,7 +1097,7 @@ input[type='number'] {
   background: var(--accent);
   box-shadow:
     -2px 0 12px var(--accent),
-    -6px 0 18px rgba(41, 194, 240, 0.35);
+    -6px 0 18px color-mix(in srgb, var(--accent) 35%, transparent);
   border-radius: 3px 0 0 3px;
 }
 

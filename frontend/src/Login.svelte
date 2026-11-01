@@ -68,11 +68,18 @@
     }
   }
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
-      handleLogin();
-    }
+  // Настоящая форма: Enter, кнопка «Перейти» на мобильной клавиатуре и
+  // менеджеры паролей работают через submit без ручного перехвата клавиш.
+  function handleSubmit(e: SubmitEvent) {
+    e.preventDefault();
+    if (!loading) handleLogin();
   }
+
+  // Старая ошибка уходит, как только пользователь исправляет пароль.
+  $effect(() => {
+    void password;
+    error = '';
+  });
 
   async function copyResetCommand() {
     try {
@@ -85,29 +92,32 @@
 </script>
 
 <AuthLayout>
-  <div class="form-group">
-    <label class="form-label" for="password">{$t('auth.password')}</label>
-    <PasswordField
-      id="password"
-      bind:value={password}
-      onkeydown={handleKeydown}
-      placeholder={$t('auth.enter_password')}
-      disabled={loading}
-      autocomplete="current-password"
-      autofocus
-    />
-    <label class="remember-me">
-      <input type="checkbox" bind:checked={rememberMe} />
-      {$t('auth.remember_me')}
-    </label>
-    {#if error}
-      <div class="alert alert-error">{error}</div>
-    {/if}
-  </div>
+  <form class="login-form" onsubmit={handleSubmit} novalidate>
+    <div class="form-group">
+      <label class="form-label" for="password">{$t('auth.password')}</label>
+      <PasswordField
+        id="password"
+        bind:value={password}
+        invalid={!!error}
+        ariaDescribedby={error ? 'login-error' : undefined}
+        placeholder={$t('auth.enter_password')}
+        disabled={loading}
+        autocomplete="current-password"
+        autofocus
+      />
+      <label class="remember-me">
+        <input type="checkbox" bind:checked={rememberMe} />
+        {$t('auth.remember_me')}
+      </label>
+      {#if error}
+        <div id="login-error" class="alert alert-error" role="alert">{error}</div>
+      {/if}
+    </div>
 
-  <Button variant="primary" class="login-btn" onclick={handleLogin} {loading} disabled={!password}>
-    {loading ? $t('auth.logging_in') : $t('auth.login_btn')}
-  </Button>
+    <Button type="submit" variant="primary" class="login-btn" {loading} disabled={!password}>
+      {loading ? $t('auth.logging_in') : $t('auth.login_btn')}
+    </Button>
+  </form>
 
   <details class="forgot-password">
     <summary>

@@ -54,6 +54,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Поля по краям: на телефоне карточка не прилипает к краям экрана */
+    padding: 24px 16px;
     background: var(--bg-page);
   }
 
@@ -69,6 +71,12 @@
       0 48px 80px -32px rgba(0, 0, 0, 0.75),
       0 0 0 1px rgba(255, 255, 255, 0.025) inset,
       0 0 40px -20px rgba(var(--accent-rgb), 0.15);
+  }
+
+  @media (max-width: 480px) {
+    .login-card {
+      padding: 28px 20px 24px;
+    }
   }
 
   /* Тень для тёмного фона на светлой теме ложилась грязным серым пятном */
