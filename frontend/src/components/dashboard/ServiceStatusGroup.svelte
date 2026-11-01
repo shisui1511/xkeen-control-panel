@@ -291,7 +291,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--danger);
     font-weight: 500;
   }

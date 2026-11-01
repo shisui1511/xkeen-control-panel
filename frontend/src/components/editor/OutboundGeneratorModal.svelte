@@ -78,7 +78,7 @@
   <div class="form-group" style="margin-bottom: 12px;">
     <label
       for="gen-protocol"
-      style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+      style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
       >{$t('editor.protocol')}</label
     >
     <Select id="gen-protocol" class="input" bind:value={genProtocol}>
@@ -91,7 +91,7 @@
     <div class="form-group">
       <label
         for="gen-address"
-        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+        style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
         >{$t('editor.address')}</label
       >
       <input
@@ -105,7 +105,7 @@
     <div class="form-group">
       <label
         for="gen-port"
-        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+        style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
         >{$t('editor.port')}</label
       >
       <input id="gen-port" type="number" bind:value={genPort} class="input" />
@@ -115,7 +115,7 @@
   <div class="form-group" style="margin-bottom: 12px;">
     <label
       for="gen-uuid"
-      style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+      style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
       >{genProtocol === 'vless' ? 'UUID' : 'Password'}</label
     >
     <div class="input-group" style="display: flex; gap: 8px;">
@@ -135,7 +135,7 @@
     <div class="form-group" style="margin-bottom: 12px;">
       <label
         for="gen-sni"
-        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+        style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
         >SNI</label
       >
       <input
@@ -151,7 +151,7 @@
       <div class="form-group">
         <label
           for="gen-security"
-          style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+          style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
           >Security</label
         >
         <Select id="gen-security" class="input" bind:value={genSecurity}>
@@ -164,7 +164,7 @@
         <div class="form-group">
           <label
             for="gen-shortid"
-            style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+            style="display: block; font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 4px;"
             >Short ID</label
           >
           <input

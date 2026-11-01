@@ -212,7 +212,7 @@
     border: 0;
     color: inherit;
     font: inherit;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     text-align: left;
     cursor: pointer;
     padding: 4px 4px;
@@ -236,7 +236,7 @@
 
   .restore-inline-btn {
     padding: 2px 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     opacity: 0;
     transition: opacity 0.15s ease;
   }
@@ -267,7 +267,7 @@
     padding: 8px 14px;
     background: var(--surface-tint);
     border-bottom: 1px solid var(--border);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
@@ -277,7 +277,7 @@
     padding: 10px 14px;
     background: var(--bg-page);
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
     scrollbar-width: thin;
   }
@@ -334,7 +334,7 @@
     place-items: center;
     height: 100%;
     color: var(--fg-faint);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   /* Узкий экран: лист закрывает всю карточку редактора; два экрана — список копий, затем сравнение */
@@ -375,7 +375,7 @@
       min-height: 44px;
       min-width: 44px;
       padding: 6px 14px;
-      font-size: 13px;
+      font-size: var(--font-size-sm);
       background: var(--surface-tint);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -412,7 +412,7 @@
 
     .backup-select-btn {
       min-height: 44px;
-      font-size: 14px;
+      font-size: var(--font-size-base);
     }
 
     .drawer-main {

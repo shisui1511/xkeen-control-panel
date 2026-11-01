@@ -71,7 +71,7 @@
   }
 
   .diff-preview-title {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-dim);
     margin-bottom: 6px;
@@ -86,7 +86,7 @@
     border-radius: 6px;
     padding: 10px;
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     line-height: 1.5;
   }
 

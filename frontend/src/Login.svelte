@@ -175,7 +175,7 @@
 
   .forgot-password-cmd code {
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     padding: 0 4px;
     border-radius: var(--radius-xs);
     background: var(--surface-tint);

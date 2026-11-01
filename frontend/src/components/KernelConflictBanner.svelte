@@ -102,7 +102,7 @@
     align-items: center;
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 768px) {
     .kernel-conflict {
       flex-direction: column;
     }

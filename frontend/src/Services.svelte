@@ -1065,7 +1065,9 @@
                 <div class="radio-name">
                   <span>Mihomo</span>
                   {#if kernelVersion(mihomo?.current_version)}
-                    <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
+                    <span
+                      class="k-ver text-secondary"
+                      style="font-size:var(--font-size-xs); font-weight:normal;"
                       >{kernelVersion(mihomo?.current_version)}</span
                     >
                   {/if}
@@ -1142,7 +1144,9 @@
                 <div class="radio-name">
                   <span>Xray</span>
                   {#if kernelVersion(xray?.current_version)}
-                    <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
+                    <span
+                      class="k-ver text-secondary"
+                      style="font-size:var(--font-size-xs); font-weight:normal;"
                       >{kernelVersion(xray?.current_version)}</span
                     >
                   {/if}
@@ -2016,7 +2020,7 @@
   /* Подпись ожидания переключения: элемент с aria-live есть всегда, пустой он не занимает места */
   .switch-wait-note {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 
@@ -2068,13 +2072,13 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
   }
 
   .active-pill {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 1px 8px;
     border-radius: var(--radius-full);
@@ -2083,7 +2087,7 @@
   }
 
   .radio-desc {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     margin-top: 2px;
     font-family: var(--font-family-mono);
@@ -2111,13 +2115,13 @@
   }
 
   .meta-lbl {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
   }
 
   .meta-val {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     font-weight: 600;
     overflow-wrap: anywhere;
@@ -2155,7 +2159,7 @@
 
   .card-subtitle {
     margin: 2px 0 0;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
@@ -2173,7 +2177,7 @@
   }
 
   .channel-lbl {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     color: var(--fg-primary);
   }
@@ -2181,14 +2185,14 @@
   .channel-mismatch-hint {
     margin: -4px 0 0;
     padding: 0 var(--card-pad) 12px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--warning);
   }
 
   .update-hint {
     margin: 2px 0 0;
     padding: 0;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     /* Ошибка проверки обновлений несёт URL без пробелов: без переноса он шире 390 px */
     overflow-wrap: anywhere;
@@ -2206,7 +2210,7 @@
     padding: 10px var(--card-pad);
     background: var(--accent-soft);
     border-top: 1px solid var(--border);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .banner-content {
@@ -2237,13 +2241,13 @@
   }
 
   .update-name {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
   }
 
   .update-version {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     margin-top: 2px;
     display: flex;
@@ -2268,7 +2272,7 @@
     justify-content: center;
     color: var(--fg-dim);
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .restart-log {
@@ -2299,19 +2303,19 @@
 
   .log-action {
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
   .log-ts {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-left: auto;
   }
 
   .log-output {
     margin: 6px 0 0;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     white-space: pre-wrap;
     word-break: break-all;
@@ -2345,13 +2349,13 @@
 
   .entware-name {
     overflow-wrap: anywhere;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
   }
 
   .entware-desc {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     margin-top: 2px;
   }
@@ -2406,7 +2410,7 @@
     margin-top: var(--spacing-3, 12px);
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 1024px) {
     .services-top-grid,
     .services-bottom-grid {
       grid-template-columns: 1fr;

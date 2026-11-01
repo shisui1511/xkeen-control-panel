@@ -108,7 +108,10 @@
     <div class="subhead-meta-container">
       {#if hasDraft}
         <div class="editor-draft-bar" style="display: inline-flex; align-items: center; gap: 4px;">
-          <span class="badge badge-warning" style="font-size: 12px; padding: 2px 6px;">
+          <span
+            class="badge badge-warning"
+            style="font-size: var(--font-size-xs); padding: 2px 6px;"
+          >
             {$t('editor.has_draft')}
           </span>
           <button class="btn btn-xs btn-primary" onclick={() => onRestoreDraft?.()}>
@@ -261,7 +264,7 @@
   }
 
   .subhead-file-meta {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-secondary);
     background: var(--surface-tint);
@@ -318,7 +321,7 @@
     border: none;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-primary);
     text-align: left;
     transition: background 0.15s;

@@ -899,7 +899,7 @@
   }
 
   .stat-label {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
     margin-bottom: 6px;
@@ -907,18 +907,18 @@
 
   .stat-value {
     font-weight: 600;
-    font-size: 22px;
+    font-size: var(--font-size-2xl);
     color: var(--fg-primary);
   }
 
   .stat-value-unit {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 400;
     color: var(--fg-secondary);
   }
 
   .stat-sub {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-top: 4px;
   }
@@ -941,7 +941,7 @@
     font-weight: 600;
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     letter-spacing: 0.05em;
   }
 
@@ -995,7 +995,7 @@
 
   .action-btn-dots {
     padding: 4px 8px;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     line-height: 1;
     height: auto;
   }
@@ -1034,7 +1034,7 @@
     color: var(--fg-secondary);
     padding: 8px 12px;
     text-align: left;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     border-radius: 4px;
     width: 100%;
@@ -1071,7 +1071,7 @@
   }
 
   .checkbox-label {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     cursor: pointer;
     user-select: none;
@@ -1131,13 +1131,13 @@
   }
   .info-banner-title {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
   }
   .info-banner-description {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     /* На тонированной подложке --fg-secondary в светлой теме даёт 4.35:1 —
        ниже WCAG AA; подмешиваем основной цвет текста */
     color: color-mix(in srgb, var(--fg-secondary) 80%, var(--fg-primary));
@@ -1150,7 +1150,7 @@
     background: none;
     border: none;
     color: var(--fg-dim);
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     cursor: pointer;
     line-height: 1;
     padding: 4px 8px;
@@ -1160,7 +1160,7 @@
     color: var(--fg-primary);
   }
   .forecast-calculating {
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     color: var(--fg-secondary);
   }
   .toggle-switch.loading {

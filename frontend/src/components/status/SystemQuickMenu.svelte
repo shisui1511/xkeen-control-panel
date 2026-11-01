@@ -395,7 +395,7 @@
     border: none;
     border-radius: var(--radius-sm, 6px);
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     text-align: left;
     cursor: pointer;

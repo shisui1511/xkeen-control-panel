@@ -81,7 +81,7 @@
     display: flex;
     justify-content: space-between;
     gap: 12px;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 500;
     color: var(--fg-primary);
   }
@@ -106,7 +106,7 @@
   }
 
   .storage-used {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 </style>

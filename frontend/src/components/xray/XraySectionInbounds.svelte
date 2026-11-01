@@ -162,7 +162,7 @@
   }
 
   .section-title {
-    font-size: 0.9375rem;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -182,7 +182,7 @@
     border: none;
     cursor: pointer;
     color: var(--fg-secondary);
-    font-size: 0.875rem;
+    font-size: var(--font-size-base);
     padding: 4px 6px;
     border-radius: var(--radius-xs);
     transition:
@@ -210,7 +210,7 @@
     gap: 12px;
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 768px) {
     .form-row2 {
       grid-template-columns: 1fr;
     }
@@ -229,7 +229,7 @@
   }
 
   .form-label {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
   }
@@ -239,7 +239,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
@@ -253,7 +253,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
@@ -261,7 +261,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     cursor: pointer;
     position: relative;
@@ -316,7 +316,7 @@
     border-radius: var(--radius);
     padding: 10px 16px;
     color: var(--fg-secondary);
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
     text-align: center;

@@ -74,7 +74,7 @@
     pointer-events: all;
     animation: toast-in 180ms ease;
     font-family: var(--font-family-sans);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     border-left-width: 3px;
   }
   .toast--success {
@@ -128,7 +128,7 @@
   .toast__action {
     flex-shrink: 0;
     padding: 4px 10px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
   .toast__close {
     flex-shrink: 0;
@@ -136,7 +136,7 @@
     border: 0;
     cursor: pointer;
     color: var(--fg-dim);
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     line-height: 1;
     padding: 0 0 0 6px;
     transition: color var(--transition-fast);

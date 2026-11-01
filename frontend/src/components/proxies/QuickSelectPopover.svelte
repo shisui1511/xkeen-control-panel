@@ -405,7 +405,7 @@
   .qs-search {
     width: 100%;
     padding: 6px 10px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     border-radius: var(--radius-md, 6px);
     border: 1px solid var(--border);
     background: var(--bg-input, rgba(0, 0, 0, 0.2));
@@ -420,7 +420,7 @@
 
   .qs-auto-note {
     padding: 6px 10px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--warning);
     background: color-mix(in srgb, var(--warning) 8%, transparent);
     border-bottom: 1px solid var(--border);
@@ -451,7 +451,7 @@
     padding: 6px 10px;
     min-height: 32px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     transition: background 0.15s ease;
     user-select: none;
     background: none;
@@ -492,7 +492,7 @@
     align-items: center;
     justify-content: center;
     font-family: 'TwemojiMozilla', var(--font-family-sans);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     line-height: 1;
     flex-shrink: 0;
   }
@@ -507,7 +507,7 @@
   .qs-check {
     color: var(--success);
     font-weight: bold;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     margin-left: 4px;
     flex-shrink: 0;
   }
@@ -515,13 +515,13 @@
   .qs-empty {
     padding: 16px 12px;
     text-align: center;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
   .lat {
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     padding: 2px 4px;
     border-radius: 3px;
     flex-shrink: 0;

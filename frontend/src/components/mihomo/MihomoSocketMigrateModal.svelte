@@ -255,7 +255,7 @@
 
   .info-desc {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     line-height: 1.5;
     color: var(--fg-secondary);
   }
@@ -267,7 +267,7 @@
     gap: 10px;
     padding: 30px 0;
     color: var(--fg-dim);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .diff-container {
@@ -276,7 +276,7 @@
     border-radius: var(--radius-md);
     overflow: hidden;
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .diff-header {
@@ -339,7 +339,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 
@@ -352,7 +352,7 @@
     border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
     border-radius: var(--radius-md);
     color: var(--danger);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .success-banner {
@@ -364,14 +364,14 @@
     border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
     border-radius: var(--radius-md);
     color: var(--success);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .step-progress {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     padding: 4px 0;
   }

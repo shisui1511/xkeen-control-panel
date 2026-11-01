@@ -1752,14 +1752,14 @@
   }
 
   .field-row-name {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 500;
     color: var(--fg-primary);
     flex-shrink: 0;
   }
 
   .field-row-val {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     text-align: right;
   }
@@ -1812,16 +1812,16 @@
 
   .field-row-val.mono {
     font-family: var(--font-mono, monospace);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .mono {
     font-family: var(--font-mono, monospace);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .field-value-badge {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     padding: 5px 10px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -1837,7 +1837,7 @@
     align-items: center;
     gap: 8px;
     padding: 10px var(--card-pad);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
   }
@@ -1871,7 +1871,7 @@
 
   .field-error {
     margin-top: 8px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--danger);
     padding: 6px 10px;
     background: color-mix(in srgb, var(--danger) 8%, transparent);
@@ -1881,7 +1881,7 @@
 
   .field-success {
     margin-top: 8px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--success);
     padding: 6px 10px;
     background: color-mix(in srgb, var(--success) 8%, transparent);
@@ -1890,7 +1890,7 @@
   }
 
   .field-row-desc {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-top: 2px;
     overflow-wrap: anywhere;
@@ -2086,6 +2086,22 @@
     min-width: 0;
   }
 
+  /* На телефоне узкий элемент (переключатель, цвета) остаётся справа от подписи,
+     широкий (выбор темы, поле) переносится под неё, а не обрезается краем карточки */
+  @media (max-width: 480px) {
+    .field-row {
+      flex-wrap: wrap;
+    }
+
+    .field-row > :first-child {
+      flex: 1 1 12rem;
+    }
+
+    .field-row > :last-child:not(:first-child) {
+      max-width: 100%;
+    }
+  }
+
   /* На узком экране подпись над полем: иначе ширина поля зависит от длины подписи */
   @media (max-width: 480px) {
     .password-row {
@@ -2119,7 +2135,7 @@
   /* Единицы разной длины («ч» / «дн.») не должны сдвигать поля */
   .ttl-unit {
     min-width: 24px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 

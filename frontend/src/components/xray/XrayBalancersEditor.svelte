@@ -209,7 +209,7 @@
     gap: var(--spacing-3);
   }
 
-  @media (max-width: 560px) {
+  @media (max-width: 480px) {
     .bal-grid {
       grid-template-columns: 1fr;
     }

@@ -685,7 +685,7 @@
                 {$t('smartproxy.active_hours_weekly', { count: countActiveSlots(p.schedule) })}
               </div>
             </div>
-            <div class="ctrl mono" style="font-size:12px; color:var(--fg-primary);">
+            <div class="ctrl mono" style="font-size:var(--font-size-xs); color:var(--fg-primary);">
               {countActiveSlots(p.schedule)} / 168 {$t('smartproxy.hours_short')}
             </div>
           </div>
@@ -697,7 +697,10 @@
                   {$t('smartproxy.execution_stats')}
                 </div>
               </div>
-              <div class="ctrl mono" style="font-size:12px; color:var(--fg-secondary);">
+              <div
+                class="ctrl mono"
+                style="font-size:var(--font-size-xs); color:var(--fg-secondary);"
+              >
                 {$t('smartproxy.applied_count', { count: p.apply_count })}
               </div>
             </div>
@@ -937,7 +940,7 @@
   .profile-card-name {
     font-weight: 700;
     color: var(--fg-primary);
-    font-size: 14px;
+    font-size: var(--font-size-base);
   }
 
   .hint {
@@ -954,7 +957,7 @@
 
   .action-btn-dots {
     padding: 6px 10px;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     line-height: 1;
   }
 
@@ -979,7 +982,7 @@
     border: none;
     padding: 10px 14px;
     text-align: left;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     cursor: pointer;
     width: 100%;
@@ -1034,7 +1037,7 @@
   }
 
   .wizard-step-indicator .step-lbl {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     color: var(--fg-primary);
   }
@@ -1168,12 +1171,12 @@
 
   .status-label {
     font-weight: 700;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     color: var(--fg-primary);
   }
 
   .status-no-active-text {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-dim);
   }
 
@@ -1187,7 +1190,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-dim);
     margin-left: auto;
@@ -1219,14 +1222,14 @@
   }
 
   .empty-state-head h2 {
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     font-weight: 700;
     color: var(--fg-primary);
     margin-bottom: 8px;
   }
 
   .empty-state-head p {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-dim);
     line-height: 1.5;
   }
@@ -1239,7 +1242,7 @@
     max-width: 900px;
   }
 
-  @media (max-width: 820px) {
+  @media (max-width: 1024px) {
     .template-cards-grid {
       grid-template-columns: 1fr;
     }
@@ -1301,14 +1304,14 @@
   }
 
   .template-card h3 {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 700;
     color: var(--fg-primary);
     margin: 0;
   }
 
   .template-card p {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-dim);
     line-height: 1.45;
     margin: 0;
@@ -1364,7 +1367,7 @@
     background: none;
     border: none;
     color: var(--fg-dim);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     cursor: pointer;
     text-decoration: underline;
     text-underline-offset: 4px;

@@ -689,7 +689,7 @@
 
   @media (max-width: 768px) {
     .input {
-      font-size: 16px;
+      font-size: var(--font-size-lg);
     }
 
     .value-field,

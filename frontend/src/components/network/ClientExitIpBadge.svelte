@@ -339,7 +339,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-full, 9999px);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-primary);
     transition: all 0.18s ease;
     user-select: none;
@@ -377,17 +377,17 @@
   .pill-ip {
     font-family: var(--font-family-mono, monospace);
     font-weight: 500;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     letter-spacing: -0.2px;
   }
 
   .pill-label {
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 
   .flag-icon {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     line-height: 1;
     display: inline-flex;
     align-items: center;
@@ -399,7 +399,7 @@
     gap: 4px;
     padding: 1.5px 6px;
     border-radius: 9999px;
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
   }
 
@@ -507,13 +507,13 @@
   }
 
   .popover-title {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
   }
 
   .popover-subtitle {
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     color: var(--fg-dim);
     margin: 2px 0 0;
     line-height: 1.35;
@@ -522,7 +522,7 @@
   .popover-status-chip {
     padding: 2px 7px;
     border-radius: 9999px;
-    font-size: 10px;
+    font-size: var(--font-size-2xs);
     font-weight: 600;
   }
 
@@ -559,7 +559,7 @@
   }
 
   .detail-label {
-    font-size: 10.5px;
+    font-size: var(--font-size-2xs);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     font-weight: 600;
@@ -573,7 +573,7 @@
   }
 
   .detail-value {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-primary);
     display: inline-flex;
@@ -617,7 +617,7 @@
     gap: 8px;
     padding: 8px 10px;
     border-radius: var(--radius-md, 8px);
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     line-height: 1.4;
     margin-top: 4px;
   }
@@ -648,7 +648,7 @@
   }
 
   .error-msg {
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     color: var(--danger);
   }
 
@@ -662,14 +662,14 @@
 
   .btn-sm {
     padding: 4px 10px;
-    font-size: 11.5px;
+    font-size: var(--font-size-xs);
     height: 26px;
     display: inline-flex;
     align-items: center;
     gap: 5px;
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 768px) {
     .badge-text {
       display: none;
     }

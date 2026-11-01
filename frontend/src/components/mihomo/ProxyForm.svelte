@@ -701,7 +701,7 @@
           placeholder="1280"
         />
         {#if np.awgEnabled}
-          <div class="form-hint" style="margin-top: 4px; font-size: 12px;">
+          <div class="form-hint" style="margin-top: 4px; font-size: var(--font-size-xs);">
             {$t('proxies.awg_mtu_hint')}
           </div>
         {/if}
@@ -1040,7 +1040,7 @@
             placeholder="1280"
           />
           {#if np.awgEnabled}
-            <div class="form-hint" style="margin-top: 4px; font-size: 12px;">
+            <div class="form-hint" style="margin-top: 4px; font-size: var(--font-size-xs);">
               {$t('proxies.awg_mtu_hint')}
             </div>
           {/if}
@@ -1151,7 +1151,7 @@
       {#if np.dialerProxy}
         <div
           class="dialer-chain-preview"
-          style="margin-top: 6px; font-size: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;"
+          style="margin-top: 6px; font-size: var(--font-size-xs); display: flex; align-items: center; gap: 6px; flex-wrap: wrap;"
         >
           <span style="color: var(--fg-secondary);">{$t('proxies.dialer_chain')}:</span>
           {#each dialerChain.chain as node, idx (idx)}
@@ -1215,7 +1215,7 @@
 
   .mono-endpoint {
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-primary);
   }
@@ -1291,7 +1291,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     padding: 6px 10px;
     width: 100%;
     transition: border-color var(--transition-fast);
@@ -1318,7 +1318,7 @@
     border-radius: var(--radius-sm);
     padding: 6px 10px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     transition: background var(--transition-fast);
     flex-shrink: 0;
     display: inline-flex;
@@ -1335,7 +1335,7 @@
     align-items: center;
     gap: 8px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
@@ -1387,7 +1387,7 @@
   }
 
   .form-hint {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     line-height: 1.4;
     margin: 0;
@@ -1413,7 +1413,7 @@
     gap: 6px;
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 768px) {
     .awg-tokens-grid {
       grid-template-columns: repeat(3, 1fr);
     }
@@ -1424,7 +1424,7 @@
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     background: color-mix(in srgb, var(--warning) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
     border-radius: var(--radius-sm);

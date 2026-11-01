@@ -1236,7 +1236,7 @@
     margin-bottom: 8px;
   }
   .proxy-section-title {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 700;
     color: var(--fg-secondary);
     margin: 0 0 10px;
@@ -1245,13 +1245,13 @@
     margin-left: 8px;
     font-weight: 500;
     color: var(--fg-faint);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
   .search-empty-state {
     padding: 32px 16px;
     text-align: center;
     color: var(--fg-dim);
-    font-size: 14px;
+    font-size: var(--font-size-base);
     background: var(--bg-card);
     border: 1px dashed var(--border);
     border-radius: var(--radius-md);
@@ -1309,13 +1309,13 @@
     margin-top: auto;
   }
 
-  @media (max-width: 767px) {
+  @media (max-width: 768px) {
     .core-grid {
       grid-template-columns: 1fr;
     }
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 768px) {
     :global(.page-header-actions) {
       flex-wrap: wrap;
       width: 100%;

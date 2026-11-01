@@ -1873,7 +1873,7 @@
     align-items: center;
     gap: 8px;
     padding: 8px 18px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
   }
 
@@ -1886,7 +1886,7 @@
     padding-top: 18px;
     border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
     color: var(--fg-dim);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .editor-empty-shortcuts .shortcut-item {
@@ -1900,7 +1900,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm, 4px);
     padding: 2px 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-secondary);
     line-height: 1.3;

@@ -1384,7 +1384,7 @@
     border-left: 1px solid var(--border);
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 1024px) {
     .traffic-stats-grid {
       grid-template-columns: 1fr;
     }
@@ -1422,7 +1422,7 @@
   }
 
   .stat-value {
-    font-size: 24px;
+    font-size: var(--font-size-3xl);
     font-weight: 600;
     font-family: var(--font-family-sans);
     font-variant-numeric: tabular-nums;
@@ -1432,7 +1432,7 @@
   }
 
   .stat-session {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-top: 4px;
   }
@@ -1502,7 +1502,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-primary);
     background: transparent;
@@ -1569,7 +1569,7 @@
   }
 
   .chart-empty-sub {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-dim);
     margin: 0;
   }
@@ -1625,7 +1625,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     gap: 8px;
     margin-top: 3px;
   }
@@ -1669,7 +1669,7 @@
     grid-column: 1 / -1;
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 1024px) {
     .traffic-analytics-grid {
       grid-template-columns: 1fr;
     }
@@ -1686,7 +1686,7 @@
     height: 100%;
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 768px) {
     .peak-cards-grid {
       grid-template-columns: 1fr;
     }
@@ -1713,7 +1713,7 @@
   .peak-metric-row {
     display: flex;
     flex-direction: column;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .peak-flow {
@@ -1725,7 +1725,7 @@
   }
 
   .peak-val {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 800;
     color: var(--fg-primary);
     margin-top: 1px;
@@ -1774,7 +1774,7 @@
 
   .client-ip {
     font-weight: 700;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
@@ -1788,7 +1788,7 @@
   }
 
   .client-bytes {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     color: var(--fg-primary);
   }

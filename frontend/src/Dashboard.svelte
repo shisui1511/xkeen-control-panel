@@ -953,7 +953,9 @@
         <rect y="16.5" width="22" height="2.5" rx="1.25" fill="currentColor" />
       </svg>
     </button>
-    <span id="mobile-header-title" style="font-weight: 600; font-size: 16px;">XKeen CP</span>
+    <span id="mobile-header-title" style="font-weight: 600; font-size: var(--font-size-lg);"
+      >XKeen CP</span
+    >
     {#if $capsuleConfigStore.visible}
       <SystemStatusCapsule
         variant="mobile"
@@ -1016,7 +1018,7 @@
       {#if $isServiceRestarting}
         <div
           class="service-restarting-banner"
-          style="margin: 12px 16px 0; padding: 12px 18px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md); display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--fg-primary);"
+          style="margin: 12px 16px 0; padding: 12px 18px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md); display: flex; align-items: center; gap: 12px; font-size: var(--font-size-base); color: var(--fg-primary);"
         >
           <span class="spinner"></span>
           <span>{$t('service.restarting_wait')}</span>
@@ -1100,7 +1102,7 @@
               <Card title={$t('dash.quickstart.title')}>
                 {#snippet actions()}
                   <span
-                    style="font-size: 12px; font-weight: 400; color: var(--fg-dim); font-family: var(--font-family-mono);"
+                    style="font-size: var(--font-size-xs); font-weight: 400; color: var(--fg-dim); font-family: var(--font-family-mono);"
                   >
                     {$t('dash.quickstart.progress', {
                       done: String(quickstartDoneCount),
@@ -1943,14 +1945,14 @@
   }
 
   .qs-text {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     flex: 1;
   }
 
   .qs-reason {
     display: block;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 
@@ -1959,7 +1961,7 @@
   }
 
   .qs-cta {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     padding: 4px 8px;
     margin-left: auto;
     flex-shrink: 0;
@@ -2067,7 +2069,7 @@
     flex-shrink: 0;
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 768px) {
     .problem-item {
       padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
     }
@@ -2100,7 +2102,7 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 12px;
-    font-size: 13.5px;
+    font-size: var(--font-size-base);
     color: var(--fg-primary);
   }
 

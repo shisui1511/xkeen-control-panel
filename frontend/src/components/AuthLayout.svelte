@@ -128,7 +128,7 @@
 
   /* "XKeen" — mirrors sidebar .b1 */
   .login-brand .b1 {
-    font-size: 22px;
+    font-size: var(--font-size-2xl);
     font-weight: 700;
     letter-spacing: -0.01em;
     color: var(--fg-primary);

@@ -377,7 +377,7 @@
   }
 
   /* 769–1023: действия уходят второй строкой под имя */
-  @media (max-width: 1023px) {
+  @media (max-width: 1024px) {
     .file-list {
       grid-template-columns: minmax(0, 1fr) auto;
     }

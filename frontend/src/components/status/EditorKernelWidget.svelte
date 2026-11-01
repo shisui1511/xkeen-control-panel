@@ -95,7 +95,7 @@
   }
 
   .widget-name {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-primary);
   }

@@ -729,7 +729,7 @@
 <style>
   .mono {
     font-family: var(--font-mono, monospace);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .field-group {
@@ -759,19 +759,19 @@
   }
 
   .field-row-name {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 500;
     color: var(--fg-primary);
   }
 
   .field-row-val {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
     text-align: right;
   }
 
   .field-row-desc {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     margin-top: 2px;
   }
@@ -783,7 +783,7 @@
   }
 
   .checked-at {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
@@ -791,7 +791,7 @@
     margin-top: 14px;
     padding: 10px 12px;
     border-radius: var(--radius-md);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .state-ok {
@@ -817,7 +817,7 @@
   .auto-status {
     margin-top: 16px;
     padding: 8px 16px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     line-height: 1.5;
     overflow-wrap: anywhere;
   }
@@ -842,7 +842,7 @@
   }
 
   .available-title {
-    font-size: 15px;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -851,7 +851,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px 14px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 
@@ -859,7 +859,7 @@
     margin-top: 4px;
     display: flex;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     overflow-wrap: anywhere;
   }
@@ -877,7 +877,7 @@
   }
 
   .progress-stage {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -926,7 +926,7 @@
   }
 
   .progress-text {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     word-break: break-word;
   }
@@ -935,7 +935,7 @@
   .progress-detail {
     display: block;
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     color: var(--fg-secondary);
     overflow-wrap: anywhere;
   }
@@ -962,7 +962,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
   }
@@ -991,7 +991,7 @@
   }
 
   .reconnect-sub {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
     text-align: center;
   }
@@ -1021,25 +1021,25 @@
   }
 
   .release-version {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
   }
 
   .release-date {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
   }
 
   .release-link {
     margin-left: auto;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
   }
 
   .release-empty {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-dim);
   }
 
@@ -1048,7 +1048,7 @@
   }
 
   .section-title {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     margin-bottom: 4px;
     color: var(--fg-secondary);
@@ -1071,14 +1071,14 @@
   }
 
   .release-section li {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     line-height: 1.45;
   }
 
   .release-section code {
     font-family: var(--font-mono, monospace);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     padding: 0 4px;
     border-radius: var(--radius-xs);
     background: var(--surface-tint);
@@ -1086,7 +1086,7 @@
 
   .commit-link {
     margin-left: 6px;
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     color: var(--fg-dim);
   }
 
@@ -1106,7 +1106,7 @@
 
   .confirm-text {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     color: var(--fg-secondary);
     line-height: 1.5;
   }
@@ -1118,7 +1118,7 @@
     margin-top: 16px;
   }
 
-  @media (max-width: 560px) {
+  @media (max-width: 480px) {
     .channel-row {
       flex-direction: column;
       align-items: flex-start;

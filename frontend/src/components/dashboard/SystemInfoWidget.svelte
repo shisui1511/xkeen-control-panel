@@ -163,7 +163,7 @@
     padding: 10px 0;
     border-bottom: 1px solid var(--border-light);
     border-right: 0;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
   }
 
   .info-row:last-child {
@@ -196,7 +196,7 @@
 
   .text-muted {
     color: var(--fg-secondary);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .config-val {
@@ -212,7 +212,7 @@
   /* D-08: Soft muted pill badge */
   .info-badge {
     display: inline-block;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 2px 7px;
     border-radius: var(--radius-sm, 6px);

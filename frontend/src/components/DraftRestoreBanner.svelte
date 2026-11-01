@@ -86,7 +86,7 @@
     align-items: center;
     gap: 12px;
     color: var(--fg-primary);
-    font-size: 13.5px;
+    font-size: var(--font-size-base);
     font-weight: 500;
   }
 
@@ -106,7 +106,7 @@
     flex-shrink: 0;
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 768px) {
     .draft-restore-banner {
       flex-direction: column;
       align-items: flex-start;

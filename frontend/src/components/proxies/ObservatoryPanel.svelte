@@ -113,7 +113,7 @@
   }
 
   .obs-head .card-title.obs-title {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     letter-spacing: 0.14em;
     text-transform: none;
@@ -148,7 +148,7 @@
   }
 
   .obs-stat-box .stat-label {
-    font-size: 9.5px;
+    font-size: var(--font-size-2xs);
     letter-spacing: 0.12em;
     margin-bottom: 2px;
     line-height: 1.2;
@@ -162,7 +162,7 @@
   }
 
   .obs-stat-box .stat-value {
-    font-size: 17px;
+    font-size: var(--font-size-xl);
     font-weight: 700;
     line-height: 1.15;
   }
@@ -180,7 +180,7 @@
   }
 
   .obs-stat-box .res-sub {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     margin-top: 0;
     line-height: 1.2;
     white-space: nowrap;
@@ -233,10 +233,10 @@
       padding: 6px 10px 8px;
     }
     .obs-stat-box .stat-value {
-      font-size: 14px;
+      font-size: var(--font-size-base);
     }
     .obs-stat-box .res-sub {
-      font-size: 12px;
+      font-size: var(--font-size-xs);
     }
   }
 </style>

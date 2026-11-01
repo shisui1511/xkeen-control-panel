@@ -652,7 +652,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md, 6px);
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-family: inherit;
     transition: all var(--transition-fast);
   }
@@ -673,7 +673,7 @@
     background: none;
     border: none;
     color: var(--fg-dim);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     cursor: pointer;
     border-radius: 50%;
   }
@@ -694,7 +694,7 @@
   }
 
   .node-search-count {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     white-space: nowrap;
   }
@@ -751,13 +751,13 @@
   }
 
   .nodes-empty-search .empty-title {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-primary);
   }
 
   .nodes-empty-search .empty-desc {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-dim);
     max-width: 400px;
     margin-bottom: 4px;
@@ -828,7 +828,7 @@
     justify-content: center;
     margin-right: 12px;
     flex-shrink: 0;
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     transition: all var(--transition-fast);
     color: var(--fg-secondary);
   }
@@ -841,7 +841,7 @@
 
   .sub-node-flag {
     font-family: 'TwemojiMozilla', var(--font-family-sans);
-    font-size: 18px;
+    font-size: var(--font-size-xl);
     line-height: 1;
     display: inline-flex;
     align-items: center;
@@ -877,7 +877,7 @@
   }
 
   .sub-node-name {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     color: var(--fg-primary);
     white-space: nowrap;

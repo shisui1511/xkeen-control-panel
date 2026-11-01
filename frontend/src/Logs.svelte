@@ -1045,7 +1045,7 @@
     border-radius: var(--radius-sm);
     background: var(--bg-card);
     border: 1px solid var(--border);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     color: var(--fg-secondary);
   }
@@ -1072,7 +1072,7 @@
   .flash-alert-tag {
     background: var(--danger);
     color: var(--btn-primary-text);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     padding: 1px 5px;
     border-radius: 4px;
@@ -1086,7 +1086,7 @@
     border: 1px solid var(--danger);
     border-radius: var(--radius-md);
     padding: 8px 14px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--danger);
     font-weight: 600;
   }
@@ -1147,7 +1147,7 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .ctrl-label {
@@ -1172,7 +1172,7 @@
   .search-input {
     height: 30px;
     padding: 0 54px 0 28px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     background: var(--bg-elevated);
@@ -1190,7 +1190,7 @@
   .match-badge {
     position: absolute;
     right: 22px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--accent);
     font-weight: 700;
     font-family: var(--font-family-mono);
@@ -1203,7 +1203,7 @@
     border: none;
     color: var(--fg-dim);
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     padding: 0 4px;
     line-height: 1;
   }
@@ -1239,7 +1239,7 @@
     flex-shrink: 0;
     white-space: nowrap;
     padding: 3px 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     color: var(--fg-secondary);
     background: transparent;
@@ -1278,7 +1278,7 @@
     overflow-y: auto;
     overflow-x: hidden;
     font-family: var(--font-family-mono);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     line-height: 28px;
     color: var(--fg-terminal);
     scrollbar-width: thin;
@@ -1349,7 +1349,7 @@
     flex-shrink: 0;
     width: 70px;
     color: var(--fg-dim);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .col-src {
@@ -1361,7 +1361,7 @@
   .src-tag {
     display: inline-block;
     padding: 1px 5px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 600;
     border-radius: 3px;
     background: var(--surface-tint);
@@ -1385,7 +1385,7 @@
     line-height: 18px;
     vertical-align: middle;
     padding: 1px 4px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 800;
     border-radius: 3px;
     letter-spacing: 0.5px;
@@ -1414,7 +1414,7 @@
   .col-subsystem {
     flex-shrink: 0;
     color: var(--accent);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 700;
     margin-right: 8px;
   }
@@ -1474,13 +1474,13 @@
   }
 
   .empty-title {
-    font-size: 14px;
+    font-size: var(--font-size-base);
     font-weight: 600;
     color: var(--fg-terminal);
   }
 
   .empty-desc {
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-terminal);
     opacity: 0.75;
   }
@@ -1499,7 +1499,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-terminal);
     z-index: 10;
     animation: fadeIn 0.2s ease;
@@ -1523,7 +1523,7 @@
     justify-content: flex-end;
     gap: 16px;
     padding: 2px 4px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 

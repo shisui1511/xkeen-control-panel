@@ -109,7 +109,7 @@
 
   .main-msg {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--font-size-base);
     line-height: 1.5;
     color: var(--fg-primary);
   }
@@ -122,7 +122,7 @@
   }
 
   .sources-label {
-    font-size: 12.5px;
+    font-size: var(--font-size-sm);
     color: var(--fg-secondary);
   }
 
@@ -135,7 +135,7 @@
   .source-badge {
     display: inline-block;
     padding: 3px 8px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     border-radius: var(--radius-sm);
     background: var(--bg-hover);
@@ -153,7 +153,7 @@
     border-top: 1px solid var(--border);
   }
 
-  @media (max-width: 540px) {
+  @media (max-width: 480px) {
     .modal-actions-3way {
       flex-direction: column;
     }

@@ -637,10 +637,10 @@
           style="padding: 12px; display: flex; justify-content: space-between; align-items: center;"
         >
           <div>
-            <div style="font-weight: 600; font-size: 0.875rem;">
+            <div style="font-weight: 600; font-size: var(--font-size-base);">
               {$t(preset.nameKey) || preset.id}
             </div>
-            <div style="font-size: 0.75rem; color: var(--fg-secondary);">
+            <div style="font-size: var(--font-size-xs); color: var(--fg-secondary);">
               {$t(preset.descKey) || ''} ({preset.rules.length}
               {$t('xray.rules_count')})
             </div>
@@ -666,13 +666,13 @@
   }
 
   .section-title {
-    font-size: 0.9375rem;
+    font-size: var(--font-size-lg);
     font-weight: 600;
     color: var(--fg-primary);
   }
 
   .form-hint {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 
@@ -721,7 +721,7 @@
   .drag-handle {
     cursor: grab;
     color: var(--fg-secondary);
-    font-size: 1rem;
+    font-size: var(--font-size-lg);
     line-height: 1;
     user-select: none;
   }
@@ -765,7 +765,7 @@
   }
 
   .badge-tag {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     padding: 2px 6px;
     border-radius: var(--radius-xs);
     display: inline-flex;
@@ -828,7 +828,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     color: var(--fg-secondary);
   }
 
@@ -848,7 +848,7 @@
   .chip {
     padding: 1px 6px;
     border-radius: var(--radius-xs);
-    font-size: 0.6875rem;
+    font-size: var(--font-size-2xs);
     font-family: var(--font-family-mono);
   }
 
@@ -868,7 +868,7 @@
     gap: 12px;
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 768px) {
     .form-row2 {
       grid-template-columns: 1fr;
     }
@@ -888,7 +888,7 @@
   }
 
   .form-label {
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     color: var(--fg-secondary);
   }
@@ -898,7 +898,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
@@ -912,7 +912,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
   }
 
@@ -922,7 +922,7 @@
     border-radius: var(--radius);
     padding: 10px 16px;
     color: var(--fg-secondary);
-    font-size: 0.8125rem;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
     text-align: center;
@@ -937,7 +937,7 @@
 
   code {
     font-family: var(--font-family-mono);
-    font-size: 0.75rem;
+    font-size: var(--font-size-xs);
     color: var(--code-fg, var(--fg-primary));
     background: var(--code-bg, var(--bg-surface-active));
     padding: 2px 4px;

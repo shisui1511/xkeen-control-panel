@@ -368,7 +368,7 @@
   }
 
   .kernel-name {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 700;
     letter-spacing: -0.01em;
     color: var(--fg-primary);
@@ -667,7 +667,7 @@
     border: none;
     border-radius: 9999px;
     color: var(--fg-primary);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
@@ -697,7 +697,7 @@
 
   .traffic-arrow {
     font-weight: 700;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .traffic-item.down .traffic-arrow {

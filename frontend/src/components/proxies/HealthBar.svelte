@@ -228,7 +228,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-lg, 8px);
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     color: var(--fg-primary);
     box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.3));
     pointer-events: none;
@@ -283,6 +283,6 @@
 
   .ht-pct {
     color: var(--fg-dim);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 </style>

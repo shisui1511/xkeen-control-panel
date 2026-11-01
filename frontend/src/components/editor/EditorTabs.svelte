@@ -164,7 +164,7 @@
     border: 0;
     color: inherit;
     font: inherit;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     font-weight: 500;
     cursor: pointer;
   }
@@ -210,7 +210,7 @@
 
   .tab-dirty-dot {
     color: var(--warning);
-    font-size: 12px;
+    font-size: var(--font-size-xs);
     margin-left: 2px;
     line-height: 1;
   }

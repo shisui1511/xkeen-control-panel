@@ -89,13 +89,13 @@
       >
       <div style="display: flex; gap: 20px; margin-bottom: 12px;">
         <label
-          style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; color: var(--fg-primary);"
+          style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--font-size-base); color: var(--fg-primary);"
         >
           <input type="checkbox" bind:checked={formEnableXray} />
           <span>XRay (JSON / Base64)</span>
         </label>
         <label
-          style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; color: var(--fg-primary);"
+          style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--font-size-base); color: var(--fg-primary);"
         >
           <input type="checkbox" bind:checked={formEnableMihomo} />
           <span>Mihomo (Clash YAML)</span>
@@ -104,7 +104,7 @@
       {#if !formEnableXray && !formEnableMihomo}
         <div
           class="alert alert-danger"
-          style="margin-top: 8px; margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm); border: 1px solid var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger);"
+          style="margin-top: 8px; margin-bottom: 12px; font-size: var(--font-size-sm); border-radius: var(--radius-sm); border: 1px solid var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger);"
         >
           <strong>{$t('subscr.modal.attention')}</strong>
           <span>{$t('subscr.no_kernel_warning')}</span>
@@ -254,7 +254,7 @@
         {#if $isXray}
           <div
             class="alert alert-warning"
-            style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);"
+            style="margin-bottom: 12px; font-size: var(--font-size-sm); border-radius: var(--radius-sm);"
           >
             <strong>{$t('subscr.modal.attention')}</strong>
             <span>
@@ -266,7 +266,7 @@
         {#if availableMihomoGroups.length === 0 && missingGroups.length === 0}
           <div
             class="alert alert-warning"
-            style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);"
+            style="margin-bottom: 12px; font-size: var(--font-size-sm); border-radius: var(--radius-sm);"
           >
             <span>
               {$t('subscr.modal.no_mihomo_groups_prefix')}
@@ -305,7 +305,7 @@
           >
             {#each availableMihomoGroups as group, i (i)}
               <label
-                style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-primary);"
+                style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:var(--font-size-sm); color:var(--fg-primary);"
               >
                 <input
                   type="checkbox"
@@ -323,7 +323,7 @@
             {/each}
             {#each missingGroups as missingGroup, i (i)}
               <label
-                style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-dim);"
+                style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:var(--font-size-sm); color:var(--fg-dim);"
               >
                 <input
                   type="checkbox"
@@ -355,7 +355,10 @@
         <span class="form-label" style="display: block; margin-bottom: 4px;"
           >{$t('subscr.sockopt.title')}</span
         >
-        <div class="form-hint" style="font-size: 12px; color: var(--fg-dim); margin-bottom: 12px;">
+        <div
+          class="form-hint"
+          style="font-size: var(--font-size-xs); color: var(--fg-dim); margin-bottom: 12px;"
+        >
           {$t('subscr.sockopt.hint')}
         </div>
 
@@ -464,7 +467,7 @@
   }
 
   .checkbox-label {
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     color: var(--fg-primary);
     cursor: pointer;
     user-select: none;
@@ -476,7 +479,7 @@
     border: none;
     color: var(--accent);
     cursor: pointer;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 600;
     display: inline-flex;
     align-items: center;
