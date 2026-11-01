@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -212,6 +213,27 @@ func TestRouterCoresMihomoSeedRoundTrip(t *testing.T) {
 		rtMihomoSeedOrdered(t, "hosts в профиле панели", profile,
 			"zz.example.test", "aa.example.test", "mm.example.test")
 		rtMihomoSeedKernelCheck(t, profile)
+	})
+	t.Run("большой профиль: ключи маршрутизации не лимитируют перенос", func(t *testing.T) {
+		// Правила и узлы подписки выводят текст за 256 КиБ и за 200 000 узлов,
+		// но в секции не переносятся и бюджет ключей секций не тратят.
+		var b strings.Builder
+		b.WriteString(rtMihomoSeedBasic)
+		b.WriteString("rule-providers:\n")
+		for i := 0; b.Len() < 600<<10; i++ {
+			fmt.Fprintf(&b, "  p%d: {type: http, behavior: domain, url: \"https://example.test/%d.yaml\"}\n", i, i)
+		}
+		seeded, err := SeedMihomo([]byte(b.String()), configlayer.MihomoPorts{})
+		if err != nil {
+			t.Fatalf("SeedMihomo большого профиля: %v", err)
+		}
+		other := rtMihomoSeedObject(t, seeded["other"])
+		if _, ok := other.Get("hosts"); !ok {
+			t.Fatalf("hosts не перенесён из большого профиля: %s", seeded["other"])
+		}
+		if _, ok := other.Get("rule-providers"); ok {
+			t.Fatal("rule-providers попал в «Прочие ключи»")
+		}
 	})
 	t.Run("все ключи по секциям, закреплённое поверх", func(t *testing.T) {
 		seeded, err := SeedMihomo([]byte(rtMihomoSeedFull), configlayer.MihomoPorts{Redir: 7100, TProxy: 7101})

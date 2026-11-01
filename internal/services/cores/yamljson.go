@@ -22,6 +22,10 @@ import (
 const (
 	// maxRawBytes — предел размера текста профиля или «сырого» блока (A7).
 	maxRawBytes = 256 << 10
+	// maxProfileBytes — предел размера активного профиля Mihomo при переносе
+	// ключей в секции: профиль со встроенными узлами подписки и списками правил
+	// заметно больше текста «Дополнительно».
+	maxProfileBytes = 8 << 20
 	// maxYAMLNodes — предел числа посещённых узлов при раскрытии якорей и
 	// ключей слияния: защита от «billion laughs» (T-147-18).
 	maxYAMLNodes = 200000
@@ -370,8 +374,13 @@ var yamlErrLine = regexp.MustCompile(`line (\d+)`)
 // из одних комментариев или явный null) — nil без ошибки. Возвращает номер
 // строки ошибки (0 — неизвестен).
 func parseYAMLRoot(text []byte) (*yaml.Node, int, error) {
-	if len(text) > maxRawBytes {
-		return nil, 0, fmt.Errorf("текст больше %d КиБ", maxRawBytes>>10)
+	return parseYAMLRootLimit(text, maxRawBytes)
+}
+
+// parseYAMLRootLimit — parseYAMLRoot с явным пределом размера текста.
+func parseYAMLRootLimit(text []byte, limit int) (*yaml.Node, int, error) {
+	if len(text) > limit {
+		return nil, 0, fmt.Errorf("текст больше %d КиБ", limit>>10)
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(text, &doc); err != nil {

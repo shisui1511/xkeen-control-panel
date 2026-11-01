@@ -49,6 +49,23 @@ func mihomoHasTransparentListener(listeners json.RawMessage) bool {
 	return false
 }
 
+// withoutNonSeedKeys возвращает копию корня профиля без ключей, которые не
+// переносятся в секции (маршрутизация и закреплённое): они не переводятся в JSON
+// и не тратят бюджет узлов maxYAMLNodes. Якоря на пропущенные узлы остаются
+// рабочими: алиас держит ссылку на узел, а не на ключ.
+func withoutNonSeedKeys(root *yaml.Node) *yaml.Node {
+	kept := make([]*yaml.Node, 0, len(root.Content))
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if k := root.Content[i]; k.Kind == yaml.ScalarNode && mihomoSectionOfKey(k.Value) == "" {
+			continue
+		}
+		kept = append(kept, root.Content[i], root.Content[i+1])
+	}
+	out := *root
+	out.Content = kept
+	return &out
+}
+
 // SeedMihomo раскладывает ключи верхнего уровня профиля по секциям панели.
 // Маршрутизация (proxies, proxy-groups, rules, providers) и закреплённые ключи
 // (routing-mark, external-controller-unix, profile.store-selected) не
@@ -59,7 +76,7 @@ func mihomoHasTransparentListener(listeners json.RawMessage) bool {
 // Результат: id секции → значение; секций всегда пять.
 func SeedMihomo(profile []byte, ports configlayer.MihomoPorts) (map[string]json.RawMessage, error) {
 	top := configlayer.NewOrderedObject()
-	root, _, err := parseYAMLRoot(profile)
+	root, _, err := parseYAMLRootLimit(profile, maxProfileBytes)
 	if err != nil {
 		return nil, fmt.Errorf("профиль Mihomo: %w", err)
 	}
@@ -67,6 +84,7 @@ func SeedMihomo(profile []byte, ports configlayer.MihomoPorts) (map[string]json.
 		if root.Kind != yaml.MappingNode {
 			return nil, errors.New("профиль Mihomo: корень документа должен быть отображением")
 		}
+		root = withoutNonSeedKeys(root)
 		raw, err := YAMLToOrderedJSON(root)
 		if err != nil {
 			return nil, fmt.Errorf("профиль Mihomo: %w", err)
