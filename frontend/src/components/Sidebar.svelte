@@ -245,7 +245,8 @@
         >
         <span class="lbl" title={$t('nav.group_overview')}>{$t('nav.group_overview')}</span>
       </span>
-      <span class="nav-group-arrow">▶</span>
+      <span class="nav-group-arrow" aria-hidden="true"><Icon name="chevron-right" size={14} /></span
+      >
     </summary>
     <a
       href="#/dashboard"
@@ -312,7 +313,9 @@
           </svg>
           <span class="lbl" title={$t('nav.group_proxy_subs')}>{$t('nav.group_proxy_subs')}</span>
         </span>
-        <span class="nav-group-arrow">▶</span>
+        <span class="nav-group-arrow" aria-hidden="true"
+          ><Icon name="chevron-right" size={14} /></span
+        >
       </summary>
       <a
         href="#/proxies"
@@ -367,7 +370,9 @@
           </svg>
           <span class="lbl" title={$t('nav.group_routing')}>{$t('nav.group_routing')}</span>
         </span>
-        <span class="nav-group-arrow">▶</span>
+        <span class="nav-group-arrow" aria-hidden="true"
+          ><Icon name="chevron-right" size={14} /></span
+        >
       </summary>
       <a
         href="#/rules"
@@ -410,7 +415,8 @@
           >{$t('nav.group_observability')}</span
         >
       </span>
-      <span class="nav-group-arrow">▶</span>
+      <span class="nav-group-arrow" aria-hidden="true"><Icon name="chevron-right" size={14} /></span
+      >
     </summary>
     {#if showMihomoNav === true}
       <a
@@ -491,7 +497,8 @@
         >
         <span class="lbl" title={$t('nav.group_tools')}>{$t('nav.group_tools')}</span>
       </span>
-      <span class="nav-group-arrow">▶</span>
+      <span class="nav-group-arrow" aria-hidden="true"><Icon name="chevron-right" size={14} /></span
+      >
     </summary>
     <!-- Editor first: confirmed as the most-opened item in this group. -->
     <a
@@ -553,7 +560,8 @@
         </svg>
         <span class="lbl" title={$t('nav.group_system')}>{$t('nav.group_system')}</span>
       </span>
-      <span class="nav-group-arrow">▶</span>
+      <span class="nav-group-arrow" aria-hidden="true"><Icon name="chevron-right" size={14} /></span
+      >
     </summary>
     <a
       href="#/services"

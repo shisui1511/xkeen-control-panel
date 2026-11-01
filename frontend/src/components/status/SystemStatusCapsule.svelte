@@ -104,6 +104,14 @@
     return activeKernel.charAt(0).toUpperCase() + activeKernel.slice(1);
   });
 
+  // Подпись состояния под именем ядра: одна красная точка рядом с «Mihomo»
+  // не объясняла, что именно не так (служба XKeen остановлена).
+  let stateLabel = $derived.by(() => {
+    if ($isServiceRestarting || $isConflict) return '';
+    if (!activeKernel || activeKernel === 'none') return '';
+    return isXkeenRunning ? $t('kernel.status.running') : $t('kernel.status.stopped');
+  });
+
   function toggleMenu(e: MouseEvent) {
     e.stopPropagation();
     isMenuOpen = !isMenuOpen;
@@ -170,33 +178,31 @@
   </div>
 {:else if variant === 'sidebar'}
   <div class="sidebar-status-card" role="region" aria-label={$t('capsule.kernel_status')}>
-    <!-- Top Row: Kernel Status & Quick Actions Trigger -->
+    <!-- Вся строка — кнопка меню быстрых действий; шеврон показывает, что она раскрывается -->
     <button
       type="button"
       class="sidebar-kernel-row"
       onclick={toggleMenu}
       bind:this={triggerEl}
       aria-expanded={isMenuOpen}
+      aria-haspopup="menu"
+      title={$t('capsule.quick_actions')}
     >
-      <div class="kernel-left">
-        <span class="led-dot {ledClass}"></span>
+      <span class="led-dot {ledClass}" aria-hidden="true"></span>
+      <span class="kernel-text">
         <span class="kernel-name">{kernelDisplayName}</span>
-      </div>
-      <div class="kernel-right">
-        <span class="quick-ctrl-badge">
-          <Icon name="zap" size={11} />
-          <span>{$t('capsule.quick_actions')}</span>
-          <span class="chevron-icon" class:open={isMenuOpen}>
-            <Icon name="chevronDown" size={10} />
-          </span>
-        </span>
-      </div>
+        {#if stateLabel}
+          <span class="kernel-state" class:is-down={!isXkeenRunning}>{stateLabel}</span>
+        {/if}
+      </span>
+      <span class="sr-only">{$t('capsule.quick_actions')}</span>
+      <span class="chevron-icon" class:open={isMenuOpen} aria-hidden="true">
+        <Icon name="chevron-down" size={14} />
+      </span>
     </button>
 
-    <!-- Metrics container -->
     {#if $capsuleConfigStore.showResources || $capsuleConfigStore.showTraffic}
       <div class="sidebar-metrics-block">
-        <!-- CPU & RAM Row -->
         {#if $capsuleConfigStore.showResources}
           <button
             type="button"
@@ -207,33 +213,32 @@
               : $t('capsule.cpu')}
           >
             <span class="res-item">
-              <span class="res-label">CPU</span>
+              <span class="res-label">{$t('capsule.cpu')}</span>
               <span class="res-val">{cpuLoad ? `${cpuLoad.percent}%` : '—'}</span>
             </span>
-            <span class="res-divider">·</span>
             <span class="res-item">
-              <span class="res-label">RAM</span>
-              <span class="res-val">{ramStats ? `${ramStats.usedMB}M` : '—'}</span>
+              <span class="res-label">{$t('capsule.ram')}</span>
+              <span class="res-val">{ramStats ? `${ramStats.usedMB} MB` : '—'}</span>
             </span>
           </button>
         {/if}
 
-        <!-- Traffic Row -->
         {#if $capsuleConfigStore.showTraffic}
           <button
             type="button"
-            class="sidebar-traffic-row"
+            class="sidebar-metric-row"
             onclick={() => onSwitchTab('traffic')}
             title={`${$t('capsule.traffic_down')}: ${downSpeedFormatted}\n${$t('capsule.traffic_up')}: ${upSpeedFormatted}`}
           >
-            <span class="traffic-speed down">
-              <span class="arr">↓</span>
-              <span class="val">{downSpeedFormatted}</span>
+            <span class="res-item traffic-speed down">
+              <span class="arr" aria-hidden="true">↓</span>
+              <span class="sr-only">{$t('capsule.traffic_down')}</span>
+              <span class="res-val">{downSpeedFormatted}</span>
             </span>
-            <span class="traffic-divider">·</span>
-            <span class="traffic-speed up">
-              <span class="arr">↑</span>
-              <span class="val">{upSpeedFormatted}</span>
+            <span class="res-item traffic-speed up">
+              <span class="arr" aria-hidden="true">↑</span>
+              <span class="sr-only">{$t('capsule.traffic_up')}</span>
+              <span class="res-val">{upSpeedFormatted}</span>
             </span>
           </button>
         {/if}
@@ -264,7 +269,7 @@
         <span class="led-dot {ledClass}"></span>
         <span class="segment-text kernel-name">{kernelDisplayName}</span>
         <span class="chevron-icon" class:open={isMenuOpen}>
-          <Icon name="chevronDown" size={12} />
+          <Icon name="chevron-down" size={12} />
         </span>
       </button>
 
@@ -330,41 +335,37 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md, 8px);
     margin: 6px 12px 8px;
-    padding: 8px 10px;
+    padding: 4px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    transition:
-      border-color var(--transition-fast),
-      background var(--transition-fast);
-  }
-
-  .sidebar-status-card:hover {
-    border-color: var(--accent-line);
   }
 
   .sidebar-kernel-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 10px;
     width: 100%;
     background: transparent;
     border: none;
-    padding: 2px 2px;
+    padding: 6px 8px;
     cursor: pointer;
     color: var(--fg-primary);
-    border-radius: 4px;
-    transition: opacity 0.15s ease;
+    text-align: left;
+    border-radius: var(--radius-sm, 6px);
+    transition: background var(--transition-fast);
   }
 
-  .sidebar-kernel-row:hover {
-    opacity: 0.95;
+  .sidebar-kernel-row:hover,
+  .sidebar-kernel-row[aria-expanded='true'] {
+    background: color-mix(in srgb, var(--fg-primary) 6%, transparent);
   }
 
-  .kernel-left {
+  .kernel-text {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    line-height: 1.25;
   }
 
   .kernel-name {
@@ -372,110 +373,93 @@
     font-weight: 700;
     letter-spacing: -0.01em;
     color: var(--fg-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .kernel-right {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .quick-ctrl-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 7px;
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    color: var(--accent-text, var(--accent));
+  .kernel-state {
     font-size: var(--font-size-xs);
-    font-weight: 700;
-    transition: all var(--transition-fast);
+    color: var(--fg-dim);
   }
 
-  .sidebar-kernel-row:hover .quick-ctrl-badge {
-    background: color-mix(in srgb, var(--accent) 20%, transparent);
-    border-color: var(--accent);
+  .kernel-state.is-down {
+    color: var(--danger);
+  }
+
+  .sidebar-kernel-row .chevron-icon {
+    color: var(--fg-dim);
+  }
+
+  .sidebar-kernel-row:hover .chevron-icon {
+    color: var(--fg-primary);
   }
 
   .sidebar-metrics-block {
     display: flex;
     flex-direction: column;
-    gap: 4px;
     border-top: 1px solid var(--border-light);
-    padding-top: 5px;
+    margin-top: 4px;
+    padding-top: 4px;
   }
 
-  .sidebar-metric-row,
-  .sidebar-traffic-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+  /* Две колонки одинаковой ширины: значения обеих строк стоят друг под другом */
+  .sidebar-metric-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
     width: 100%;
-    background: var(--surface-tint);
-    border: 1px solid var(--border-light);
-    border-radius: 5px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm, 6px);
     padding: 4px 8px;
     color: var(--fg-secondary);
     font-size: var(--font-size-xs);
+    text-align: left;
     cursor: pointer;
     transition:
-      background 0.15s ease,
-      color 0.15s ease,
-      border-color 0.15s ease;
+      background var(--transition-fast),
+      color var(--transition-fast);
   }
 
-  .sidebar-metric-row:hover,
-  .sidebar-traffic-row:hover {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 20%, transparent);
+  .sidebar-metric-row:hover {
+    background: color-mix(in srgb, var(--fg-primary) 6%, transparent);
     color: var(--fg-primary);
   }
 
-  .sidebar-traffic-row {
-    font-family: var(--font-family-mono, monospace);
-    font-size: var(--font-size-xs);
-    color: var(--fg-primary);
-  }
-
-  .traffic-speed {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
+  .traffic-speed .arr {
+    font-weight: 700;
   }
 
   .traffic-speed.down .arr {
     color: var(--accent);
-    font-weight: 700;
   }
 
   .traffic-speed.up .arr {
     color: var(--purple);
-    font-weight: 700;
-  }
-
-  .traffic-divider {
-    color: var(--fg-faint);
   }
 
   .res-item {
     display: inline-flex;
-    align-items: center;
-    gap: 4px;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
   }
 
   .res-label {
     font-size: var(--font-size-xs);
-    font-weight: 700;
-    color: var(--fg-primary);
+    font-weight: 600;
+    color: var(--fg-dim);
   }
 
   .res-val {
-    font-family: var(--font-family-mono, monospace);
     font-size: var(--font-size-xs);
     font-weight: 600;
+    font-variant-numeric: tabular-nums;
     color: var(--fg-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .res-divider {

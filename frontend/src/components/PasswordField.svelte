@@ -14,6 +14,7 @@
     autofocus?: boolean;
     onkeydown?: (e: KeyboardEvent) => void;
     ariaDescribedby?: string;
+    invalid?: boolean;
   }
 
   let {
@@ -25,7 +26,8 @@
     inputClass = 'input',
     autofocus = false,
     onkeydown,
-    ariaDescribedby
+    ariaDescribedby,
+    invalid = false
   }: Props = $props();
 
   let visible = $state(false);
@@ -46,6 +48,7 @@
     {disabled}
     {onkeydown}
     aria-describedby={ariaDescribedby}
+    aria-invalid={invalid || undefined}
     {@attach (node) => {
       if (autofocus) node.focus();
     }}
