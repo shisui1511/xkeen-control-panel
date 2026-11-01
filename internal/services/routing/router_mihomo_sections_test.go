@@ -5,10 +5,12 @@ package routing
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -318,6 +320,68 @@ func TestRouterMihomoSectionsKeepUserKeys(t *testing.T) {
 		keys := rtmsKeys(rtmsNode(t, e))
 		for _, k := range []string{"hosts", "ntp", "sub-rules", "experimental"} {
 			rtmsIndex(t, keys, k)
+		}
+	})
+
+	// Профиль больше 600 КиБ (объём в proxies и rules) берётся целиком: ключи
+	// пользователя переносятся, маршрутизация прежнего профиля — нет (D-06). Прежний
+	// предел разбора был 256 КиБ.
+	t.Run("large_profile_take_keeps_keys", func(t *testing.T) {
+		head, _, ok := strings.Cut(rtmsFixture, "proxies:")
+		if !ok {
+			t.Fatal("в rtmsFixture нет строки proxies:")
+		}
+		const minSize = 600 << 10
+		var proxies, rules strings.Builder
+		proxies.WriteString("proxies:\n")
+		rules.WriteString("proxy-groups: []\nrules:\n")
+		const tail = "  - MATCH,DIRECT\n"
+		for i := 1; len(head)+proxies.Len()+rules.Len()+len(tail) < minSize; i++ {
+			fmt.Fprintf(&proxies, "  - name: p%d\n    type: ss\n    server: p%d.example.test\n    port: %d\n    cipher: aes-128-gcm\n    password: stub\n",
+				i, i, 20000+i%10000)
+			fmt.Fprintf(&rules, "  - DOMAIN-SUFFIX,r%d.example.test,DIRECT\n", i)
+		}
+		profile := head + proxies.String() + rules.String() + tail
+		if len(profile) < minSize {
+			t.Fatalf("фикстура %d байт, нужно не меньше %d: разрыв не проверяется", len(profile), minSize)
+		}
+
+		e := rtNewEnv(t, rtWithKernels(rtMihomoOnly))
+		rtmsWriteProfile(t, e, profile)
+		if _, err := e.svc.Take(e.rev(t)); err != nil {
+			t.Fatalf("Take большого профиля (%d КиБ): %v", len(profile)>>10, err)
+		}
+
+		st := e.state(t)
+		for _, id := range configlayer.MihomoSectionIDs {
+			cs := rtmsSection(t, st.Draft, id)
+			if !cs.Managed || len(cs.From) == 0 || cs.From[0].Name != "profiles/user.yaml" {
+				t.Errorf("секция mihomo_%s после Take большого профиля: managed=%v from=%v, ожидались managed и имя прежнего профиля", id, cs.Managed, cs.From)
+			}
+		}
+		var other map[string]json.RawMessage
+		if err := json.Unmarshal(rtmsSection(t, st.Draft, "other").Value, &other); err != nil {
+			t.Fatalf("значение секции other не объект: %v", err)
+		}
+		for _, k := range []string{"proxies", "proxy-groups", "rules", "rule-providers"} {
+			if _, found := other[k]; found {
+				t.Errorf("в «Прочих ключах» ключ маршрутизации %q: маршрутизация прежнего профиля не переносится", k)
+			}
+		}
+
+		e.applyOK(t)
+		keys := rtmsKeys(rtmsNode(t, e))
+		for _, k := range []string{"hosts", "ntp", "sub-rules", "experimental"} {
+			rtmsIndex(t, keys, k)
+		}
+		text, err := os.ReadFile(e.mihomoPath(configlayer.PanelMihomoProfile))
+		if err != nil {
+			t.Fatalf("профиль панели: %v", err)
+		}
+		for _, leak := range []string{"p1.example.test", "r1.example.test"} {
+			if bytes.Contains(text, []byte(leak)) {
+				t.Errorf("в профиле панели остался элемент маршрутизации прежнего профиля (%s)", leak)
+			}
 		}
 	})
 
