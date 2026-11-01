@@ -519,6 +519,135 @@ test('cores: Xray входящие — закреплённые строки и 
   }
 });
 
+test('cores: Xray входящие — redirect и tproxy на одном порту, остаток входящего без тега', async ({
+  page
+}) => {
+  test.setTimeout(T.save * 6);
+  const guard = attachConsoleGuard(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await startPage(page);
+  const before = await xrayView(page);
+  test.skip(!before.installed, 'Xray не установлен');
+  const inbounds = before.sections.find((s) => s.id === 'inbounds');
+  test.skip(inbounds === undefined, 'в виде нет секции «Входящие»');
+  test.skip(!!inbounds?.blocked, `секция «Входящие» не берётся: ${inbounds?.blocked}`);
+  await resetDraft(page);
+
+  const ADD_TAG = 'xcp-review-tagged';
+  const NEW_TAG = 'xcp-review-named';
+  type Inbound = Record<string, unknown>;
+
+  /** Строки формы и остаток «Дополнительно» секции «Входящие» по настоящему API. */
+  const current = async (): Promise<{ form: Inbound[]; adv: Record<string, unknown> }> => {
+    const s = await sectionOf(page, 'inbounds');
+    const form = Array.isArray(s?.form) ? (s.form as Inbound[]) : [];
+    const adv = JSON.parse(s?.advanced?.trim() ? s.advanced : '{}') as Record<string, unknown>;
+    return { form, adv };
+  };
+
+  try {
+    await openSection(page, 'inbounds');
+    await takeViaDialog(page, 'inbounds');
+    await expect(page.getByTestId('section-form-xray-inbounds')).toBeVisible({
+      timeout: T.action
+    });
+
+    // 1. Пара прозрачных входящих XKeen на одном порту (redirect — tcp, tproxy — udp) не повтор:
+    // у закреплённых строк нет ошибки, а один новый порт обоим записывается
+    const pinnedRows = page.locator(`${INBOUND_ROWS}[data-pinned="true"]`);
+    const portOf = (i: number) =>
+      pinnedRows.nth(i).locator('[data-testid^="section-field-xray-inbounds-port-"]');
+    if ((await pinnedRows.count()) >= 2) {
+      const first = await portOf(0).inputValue();
+      if (first === (await portOf(1).inputValue())) {
+        await expect(pinnedRows.locator('.error-text')).toHaveCount(0);
+        const tags = [
+          (
+            await pinnedRows.nth(0).locator('[data-testid^="section-inbound-tag-"]').innerText()
+          ).trim(),
+          (
+            await pinnedRows.nth(1).locator('[data-testid^="section-inbound-tag-"]').innerText()
+          ).trim()
+        ];
+        let shared = String(randomPort());
+        if (shared === first) shared = String(Number(shared) + 1);
+        for (const i of [0, 1]) {
+          await portOf(i).fill(shared);
+          await portOf(i).blur();
+          await expect(pinnedRows.locator('.error-text')).toHaveCount(0);
+        }
+        await expect
+          .poll(
+            async () => {
+              const { form } = await current();
+              return tags.map((tag) => String(form.find((r) => r.tag === tag)?.port ?? ''));
+            },
+            { timeout: T.action }
+          )
+          .toEqual([shared, shared]);
+      }
+    }
+
+    // 2. Входящий без тега: удаление строки выше переносит его остаток под новый номер
+    const base = await current();
+    const idx = base.form.length;
+    const udpSettings = { auth: 'noauth', udp: true };
+    const seeded = await api(page, 'POST', '/api/configlayer/cores/save', {
+      revision: (await layerProbe(page)).revision,
+      kernel: 'xray',
+      section: 'inbounds',
+      form: [
+        ...base.form,
+        { tag: ADD_TAG, protocol: 'socks', listen: '127.0.0.1', port: randomPort() },
+        { protocol: 'socks', listen: '127.0.0.1', port: randomPort() }
+      ],
+      advanced: JSON.stringify({ ...base.adv, [`#${idx + 1}`]: { settings: udpSettings } })
+    });
+    expect(seeded.status, 'запись входящих с входящим без тега').toBe(200);
+    await openSection(page, 'inbounds');
+    await expect(page.getByTestId(`section-field-xray-inbounds-remove-${idx}`)).toBeVisible({
+      timeout: T.action
+    });
+    await page.getByTestId(`section-field-xray-inbounds-remove-${idx}`).click();
+    await expect
+      .poll(
+        async () => {
+          const { form, adv } = await current();
+          const moved = adv[`#${idx}`] as { settings?: { udp?: boolean } } | undefined;
+          return (
+            form.length === idx + 1 && moved?.settings?.udp === true && !(`#${idx + 1}` in adv)
+          );
+        },
+        { timeout: T.action }
+      )
+      .toBe(true);
+
+    // 3. Тег входящему без тега: остаток переезжает под тег и не теряется
+    const tagInput = page.getByTestId(`section-field-xray-inbounds-tag-${idx}`);
+    await expect(tagInput).toBeVisible({ timeout: T.action });
+    await tagInput.fill(NEW_TAG);
+    await tagInput.blur();
+    await expect
+      .poll(
+        async () => {
+          const { form, adv } = await current();
+          const named = adv[NEW_TAG] as { settings?: { udp?: boolean } } | undefined;
+          return (
+            form.some((r) => r.tag === NEW_TAG) &&
+            named?.settings?.udp === true &&
+            !(`#${idx}` in adv)
+          );
+        },
+        { timeout: T.action }
+      )
+      .toBe(true);
+
+    await guard.assertClean();
+  } finally {
+    await resetDraft(page);
+  }
+});
+
 test('cores: Xray входящие — группа force-proxy', async ({ page }) => {
   test.setTimeout(T.save * 4);
   const guard = attachConsoleGuard(page);

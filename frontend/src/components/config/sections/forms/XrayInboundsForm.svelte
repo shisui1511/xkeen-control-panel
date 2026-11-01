@@ -207,11 +207,14 @@
   );
 
   /**
-   * Текст «Дополнительно» с учётом правок строк: у удалённого входящего запись остатка
-   * убирается, у переименованного — переезжает под новый тег. Иначе сервер вернул бы такое
-   * входящее из остатка. Не разобрался как объект — текст остаётся как есть.
+   * Текст «Дополнительно» с учётом правок строк. Запись остатка входящего с тегом ключ несёт
+   * тегом, без тега — «#<номер в списке>». У удалённого входящего запись убирается, у
+   * переименованного или получившего тег — переезжает под новый ключ, у входящего без тега
+   * после удаления строки выше — под новый номер. Иначе сервер не нашёл бы остаток и потерял
+   * settings, streamSettings, sniffing. outIndex — номер строки в уходящем списке (null — строка
+   * не уходит). Не разобрался как объект — текст остаётся как есть.
    */
-  function advancedFor(valid: boolean[]): string {
+  function advancedFor(valid: boolean[], outIndex: (number | null)[]): string {
     let obj: unknown;
     try {
       obj = JSON.parse(advanced);
@@ -220,27 +223,35 @@
     }
     if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return advanced;
     const rest = obj as Obj;
-    const kept = rows.flatMap((r) => (r.orig !== null ? [str(r.orig.tag)] : []));
+    const keyOf = (r: Row): string => {
+      const tag = str(r.orig?.tag);
+      return tag !== '' ? tag : `#${r.key}`;
+    };
+    // Ключи строк вида секции до правок: все снимаются, уцелевшие возвращаются под новым ключом
+    const taken = new Map<string, unknown>();
     let changed = false;
     for (const origRow of rowsOf(section.form)) {
-      const tag = str(origRow.orig?.tag);
-      if (tag !== '' && !kept.includes(tag) && tag in rest) {
-        delete rest[tag];
-        changed = true;
+      const key = keyOf(origRow);
+      if (key in rest) {
+        taken.set(key, rest[key]);
+        delete rest[key];
       }
     }
-    const moved: [string, unknown][] = [];
+    const placed: [string, string][] = [];
     rows.forEach((r, i) => {
-      if (r.orig === null || !valid[i]) return;
-      const from = str(r.orig.tag);
-      const to = r.tag.trim();
-      if (from !== '' && to !== from && from in rest) {
-        moved.push([to, rest[from]]);
-        delete rest[from];
-        changed = true;
-      }
+      const index = outIndex[i];
+      if (r.orig === null || index === null || index === undefined) return;
+      const from = keyOf(r);
+      const tag = valid[i] ? r.tag.trim() : str(r.orig.tag);
+      placed.push([from, tag !== '' ? tag : `#${index}`]);
     });
-    for (const [to, value] of moved) rest[to] = value;
+    for (const [from, to] of placed) {
+      if (!taken.has(from)) continue;
+      rest[to] = taken.get(from);
+      taken.delete(from);
+      if (to !== from) changed = true;
+    }
+    if (taken.size > 0) changed = true;
     return changed ? JSON.stringify(rest, null, 2) : advanced;
   }
 
@@ -248,9 +259,15 @@
     if (readonly) return;
     const valid = errors.map((e) => e.tag === '' && e.port === '');
     const out: Obj[] = [];
+    const outIndex: (number | null)[] = [];
     rows.forEach((r, i) => {
       if (!valid[i]) {
-        if (r.orig !== null) out.push(r.orig);
+        if (r.orig !== null) {
+          outIndex.push(out.length);
+          out.push(r.orig);
+        } else {
+          outIndex.push(null);
+        }
         return;
       }
       const item: Obj = { tag: r.orig !== null && pinned(r) ? r.orig.tag : r.tag.trim() };
@@ -258,9 +275,10 @@
       if (r.listen.trim() !== '') item.listen = r.listen.trim();
       const port = r.port.trim();
       item.port = r.orig !== null && port === str(r.orig.port) ? r.orig.port : Number(port);
+      outIndex.push(out.length);
       out.push(item);
     });
-    issues = await commitSection(kernel, ID, out, advancedFor(valid));
+    issues = await commitSection(kernel, ID, out, advancedFor(valid, outIndex));
   }
 
   function patch(key: number, change: Partial<Row>): void {
