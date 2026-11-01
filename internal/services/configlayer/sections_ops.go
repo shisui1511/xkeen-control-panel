@@ -140,11 +140,14 @@ func coreTakeIssues(desired map[string]CoreSection, actual CoresState, scans map
 				Key: name, Code: IssueSectionTakeoverFailed, Detail: readErr.Error(),
 				Params: map[string]string{"file": "config.yaml"},
 			})
+			// Профиль один на все секции Mihomo: одной проблемы достаточно.
+			return out
 		case hash != cs.From[0].Hash:
 			out = append(out, BuildIssue{
 				Key: name, Code: IssueSectionTakeoverFailed,
 				Params: map[string]string{"file": profile},
 			})
+			return out
 		}
 	}
 	return out
