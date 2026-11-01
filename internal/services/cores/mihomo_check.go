@@ -107,8 +107,20 @@ func mihomoSiblingTops(s configlayer.Sections, except string) []*configlayer.Ord
 // mihomoControllerIssues отклоняет TCP-контроллер без непустого secret в собранном
 // корне профиля (объект секции плюс соседние секции). В проблемах только имя
 // ключа, значения не выводятся.
+//
+// Ключ «<<» в значении секции отклоняется как зарезервированный: глубокая
+// защита (T-147-19). Настоящие слияния YAML уже раскрыты при разборе, поэтому
+// «<<» здесь бывает только буквальным ключом в кавычках, а в профиле он без
+// кавычек стал бы слиянием и подмешал бы вложенный external-controller в корень
+// без secret. Проверка здесь, потому что функцию зовут все пути корневых ключей
+// main, inbounds и other: mihomoValueIssues (save через mergeForm, raw/parse
+// main и other через addValueIssues, CheckMihomo после переноса) и raw.go
+// (raw/parse «Входящих» мимо mihomoValueIssues).
 func mihomoControllerIssues(obj *configlayer.OrderedObject, siblings []*configlayer.OrderedObject) []configlayer.KeyIssue {
 	var out []configlayer.KeyIssue
+	if _, ok := obj.Get(yamlMergeKey); ok {
+		out = append(out, configlayer.KeyIssue{Key: yamlMergeKey, Code: configlayer.IssueRawReserved})
+	}
 	tops := append([]*configlayer.OrderedObject{obj}, siblings...)
 	for _, k := range mihomoControllerKeys {
 		raw, ok := obj.Get(k)
